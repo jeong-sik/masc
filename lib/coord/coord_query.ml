@@ -3,7 +3,7 @@
     Read-only operations on room state: raw list retrieval, orphan auditing,
     message collection, agent-joined checks, and formatted listing. *)
 
-open Types
+open Masc_domain
 include Coord_utils
 include Coord_state
 
@@ -90,7 +90,7 @@ let load_agents_from_dir config dir ~include_inactive =
          let path = Filename.concat dir name in
          let json = read_json config path in
          match agent_of_yojson json with
-         | Ok agent when include_inactive || agent.status <> Types.Inactive ->
+         | Ok agent when include_inactive || agent.status <> Masc_domain.Inactive ->
              Some agent
          | Ok _ | Error _ -> None)
 
@@ -122,14 +122,14 @@ let get_all_agents config =
 (** Audit tasks: find claimed/in_progress tasks whose assignees are not active agents.
     Matches assignees by exact name or agent-type prefix (e.g. "claude" matches "claude-xxx").
     Agents with Inactive status are excluded from the active set. *)
-let audit_orphan_tasks config : (Types.task * string) list =
+let audit_orphan_tasks config : (Masc_domain.task * string) list =
   if not (is_initialized config) then []
   else
     (* Read agent files from the same path that cleanup_zombies and join use *)
     let agents_path = agents_dir config in
     let active_names =
       load_agents_from_dir config agents_path ~include_inactive:false
-      |> List.map (fun (agent : Types.agent) -> agent.name)
+      |> List.map (fun (agent : Masc_domain.agent) -> agent.name)
     in
     let is_active_agent assignee =
       List.mem assignee active_names
@@ -140,14 +140,14 @@ let audit_orphan_tasks config : (Types.task * string) list =
          ) active_names
     in
     let backlog = read_backlog config in
-    List.filter_map (fun (task : Types.task) ->
+    List.filter_map (fun (task : Masc_domain.task) ->
       match task.task_status with
-      | Types.Claimed { assignee; _ }
-      | Types.InProgress { assignee; _ }
-      | Types.AwaitingVerification { assignee; _ } ->
+      | Masc_domain.Claimed { assignee; _ }
+      | Masc_domain.InProgress { assignee; _ }
+      | Masc_domain.AwaitingVerification { assignee; _ } ->
           if is_active_agent assignee then None
           else Some (task, assignee)
-      | Types.Todo | Types.Done _ | Types.Cancelled _ -> None
+      | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
     ) backlog.tasks
 
 let is_agent_active_at_path config path =
@@ -303,11 +303,11 @@ let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status conf
     | None ->
         List.filter (fun (task : task) ->
           let status = task.task_status in
-          let is_done = Types.task_status_is_done status in
+          let is_done = Masc_domain.task_status_is_done status in
           let is_cancelled = match status with
-            | Types.Cancelled _ -> true
-            | Types.Todo | Types.Claimed _ | Types.InProgress _
-            | Types.AwaitingVerification _ | Types.Done _ -> false
+            | Masc_domain.Cancelled _ -> true
+            | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
+            | Masc_domain.AwaitingVerification _ | Masc_domain.Done _ -> false
           in
           (include_done || not is_done) &&
           (include_cancelled || not is_cancelled)
@@ -325,9 +325,9 @@ let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status conf
 
     let sorted = List.sort (fun a b -> compare a.priority b.priority) tasks in
     List.iter (fun task ->
-      let status_icon = Types.task_status_icon task.task_status in
-      let assignee = Types.task_display_assignee task.task_status in
-      let status_str = Types.string_of_task_status task.task_status in
+      let status_icon = Masc_domain.task_status_icon task.task_status in
+      let assignee = Masc_domain.task_display_assignee task.task_status in
+      let status_str = Masc_domain.string_of_task_status task.task_status in
       Printf.bprintf buf "%s [%d] %s: %s\n" status_icon task.priority task.id task.title;
       Printf.bprintf buf "   └─ %s | %s\n" status_str assignee
     ) sorted;

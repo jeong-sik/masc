@@ -12,10 +12,10 @@
     @since 2.170.0 — #4574 *)
 
 val filter :
-  tools:Types.tool_schema list ->
+  tools:Masc_domain.tool_schema list ->
   query:string ->
   k:int ->
-  Types.tool_schema list
+  Masc_domain.tool_schema list
 (** Return top-[k] tools from [tools] most relevant to [query].
     Returns [[]] on zero overlap. *)
 
@@ -24,10 +24,10 @@ val synonym_keys : string list
     Test helper: verify every key maps to a known [Tool_name.t]. *)
 
 val filter_with_scores :
-  tools:Types.tool_schema list ->
+  tools:Masc_domain.tool_schema list ->
   query:string ->
   k:int ->
-  (Types.tool_schema * float) list
+  (Masc_domain.tool_schema * float) list
 (** Return top-[k] tools with their cosine similarity scores.
     Returns [[]] on zero overlap. Useful for logging/debugging. *)
 

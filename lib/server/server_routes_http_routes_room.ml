@@ -1,5 +1,5 @@
 
-open Types
+open Masc_domain
 open Server_utils
 open Server_auth
 open Server_routes_http_common
@@ -42,13 +42,13 @@ module Keeper_stream = Server_routes_http_keeper_stream
            filtered
            |> List.filteri (fun idx _ -> idx >= offset && idx < offset + limit)
          in
-         let tasks_json = List.map (fun (t : Types.task) ->
+         let tasks_json = List.map (fun (t : Masc_domain.task) ->
            let base_fields =
              [
                ("id", `String t.id);
                ("title", `String t.title);
                ("description", `String t.description);
-               ("status", `String (Types.string_of_task_status t.task_status));
+               ("status", `String (Masc_domain.string_of_task_status t.task_status));
                ("priority", `Int t.priority);
                ( "assignee",
                  Json_util.string_opt_to_json
@@ -85,11 +85,11 @@ module Keeper_stream = Server_routes_http_keeper_stream
            agents
            |> List.filteri (fun idx _ -> idx >= offset && idx < offset + limit)
          in
-         let agents_json = List.map (fun (a : Types.agent) ->
+         let agents_json = List.map (fun (a : Masc_domain.agent) ->
            let profile = Dashboard_execution_helpers.get_agent_profile a.name in
            `Assoc [
              ("name", `String a.name);
-             ("status", `String (Types.string_of_agent_status a.status));
+             ("status", `String (Masc_domain.string_of_agent_status a.status));
              ("current_task", Json_util.string_opt_to_json a.current_task);
              ("emoji", `String profile.emoji);
              ("koreanName", `String profile.korean_name);
@@ -117,7 +117,7 @@ module Keeper_stream = Server_routes_http_keeper_stream
          in
          let total = List.length filtered in
          let page = filtered |> List.filteri (fun idx _ -> idx < limit) in
-         let msgs_json = List.map (fun (m : Types.message) ->
+         let msgs_json = List.map (fun (m : Masc_domain.message) ->
            `Assoc [
              ("from", `String m.from_agent);
              ("content", `String m.content);

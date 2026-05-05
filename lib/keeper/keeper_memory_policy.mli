@@ -35,14 +35,14 @@ type keeper_policy_observation = {
   last_turn_ago_s : float;
 }
 (** Structured view of a single room message used by the alerting
-    scorer.  Populated from a [Types.message] plus keeper meta context. *)
+    scorer.  Populated from a [Masc_domain.message] plus keeper meta context. *)
 
 val observation_has_question : string -> bool
 (** Heuristic: does [text] contain a question that warrants attention? *)
 
 val keeper_policy_observation_of_room_message :
   meta:Keeper_types.keeper_meta ->
-  room_id:string -> Types.message -> keeper_policy_observation
+  room_id:string -> Masc_domain.message -> keeper_policy_observation
 (** Build a [keeper_policy_observation] from a room message in [meta]'s
     context. *)
 

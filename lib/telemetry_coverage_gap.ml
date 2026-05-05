@@ -27,7 +27,7 @@ let record ~masc_root ~source ~producer ~durable_store ~dashboard_surface
       [
         ("schema", `String "masc.telemetry_coverage_gap.v1");
         ("ts", `Float now);
-        ("ts_iso", `String (Types.iso8601_of_unix_seconds now));
+        ("ts_iso", `String (Masc_domain.iso8601_of_unix_seconds now));
         ("source", `String source);
         ("producer", `String producer);
         ("durable_store", `String durable_store);

@@ -258,7 +258,7 @@ let resolve_group_source = function
   | Shard_ref shard_name ->
     match Tool_shard.get_shard shard_name with
     | Some shard ->
-      shard.tools |> List.map (fun (t : Types.tool_schema) -> t.name)
+      shard.tools |> List.map (fun (t : Masc_domain.tool_schema) -> t.name)
     | None ->
       Log.Keeper.warn "tool_policy_config: shard '%s' not found, returning empty" shard_name;
       []

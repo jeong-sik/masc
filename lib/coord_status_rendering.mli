@@ -18,7 +18,7 @@
     bool-flag) stay private — the rendered string is the
     operator contract; intermediate atoms are not. *)
 
-val active_task_assignee : Types.task_status -> string option
+val active_task_assignee : Masc_domain.task_status -> string option
 (** [active_task_assignee status] returns the assignee for the
     active states ([Claimed] / [InProgress] /
     [AwaitingVerification]), and [None] for the terminal /
@@ -32,7 +32,7 @@ val active_task_assignee : Types.task_status -> string option
 
 val assigned_task_ids :
   matches_you:(string -> bool) ->
-  Types.task list ->
+  Masc_domain.task list ->
   string list
 (** [assigned_task_ids ~matches_you tasks] filters [tasks] to
     those whose {!active_task_assignee} satisfies [matches_you],
@@ -74,8 +74,8 @@ val status_summary_string :
   current_task:string option ->
   worktree_active:bool ->
   effective_cluster_name:string ->
-  agents_with_state:(Types.agent * bool) list ->
-  active_tasks:Types.task list ->
+  agents_with_state:(Masc_domain.agent * bool) list ->
+  active_tasks:Masc_domain.task list ->
   todo_count:int ->
   claimed_count:int ->
   in_progress_count:int ->
@@ -86,8 +86,8 @@ val status_summary_string :
   planning_state:Coord_types.planning_context_state ->
   suggested_next:string list ->
   attention_items:string list ->
-  state:Types.room_state ->
-  backlog:Types.backlog ->
+  state:Masc_domain.room_state ->
+  backlog:Masc_domain.backlog ->
   string
 (** [status_summary_string] renders the full [masc_status]
     operator-visible string.  All 21 named arguments are

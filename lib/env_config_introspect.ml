@@ -24,8 +24,8 @@ let server_meta () =
 
 let to_json () =
   Env_config_snapshot.to_json ~server_meta:(server_meta ())
-    ~generated_at:(Types.now_iso ()) ()
+    ~generated_at:(Masc_domain.now_iso ()) ()
 
 let to_json_filtered ?cat () =
   Env_config_snapshot.to_json ?cat ~server_meta:(server_meta ())
-    ~generated_at:(Types.now_iso ()) ()
+    ~generated_at:(Masc_domain.now_iso ()) ()

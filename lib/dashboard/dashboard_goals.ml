@@ -6,7 +6,7 @@ open Yojson.Safe.Util
 type tree_node = {
   goal : Goal_store.goal;
   children : tree_node list;
-  tasks : (Types.task * string) list;
+  tasks : (Masc_domain.task * string) list;
   convergence : float;  (** 0.0 .. 1.0 completion ratio *)
   health : string;
   badges : string list;
@@ -33,42 +33,42 @@ type goal_detail_keeper = {
   runtime_trust : Yojson.Safe.t;
 }
 
-let task_is_linked_to_goal (task : Types.task) goal_id =
+let task_is_linked_to_goal (task : Masc_domain.task) goal_id =
   Convergence.task_matches_goal ~goal_id task
 
-let task_linkage_source_opt (task : Types.task) goal_id =
+let task_linkage_source_opt (task : Masc_domain.task) goal_id =
   match task.goal_id with
   | Some task_goal_id when String.equal task_goal_id goal_id -> Some "explicit"
   | Some _ -> None
   | None ->
       if task_is_linked_to_goal task goal_id then Some "title_tag" else None
 
-let task_assignee (task : Types.task) : string option =
-  Types.task_assignee_of_status task.task_status
+let task_assignee (task : Masc_domain.task) : string option =
+  Masc_domain.task_assignee_of_status task.task_status
 
-let task_status_label (task : Types.task) : string =
+let task_status_label (task : Masc_domain.task) : string =
   match task.task_status with
-  | Types.Todo -> "pending"
-  | Types.Claimed _ -> "claimed"
-  | Types.InProgress _ -> "in_progress"
-  | Types.AwaitingVerification _ -> "awaiting_verification"
-  | Types.Done _ -> "completed"
-  | Types.Cancelled _ -> "cancelled"
+  | Masc_domain.Todo -> "pending"
+  | Masc_domain.Claimed _ -> "claimed"
+  | Masc_domain.InProgress _ -> "in_progress"
+  | Masc_domain.AwaitingVerification _ -> "awaiting_verification"
+  | Masc_domain.Done _ -> "completed"
+  | Masc_domain.Cancelled _ -> "cancelled"
 
-let task_is_terminal (task : Types.task) : bool =
-  Types.task_status_is_terminal task.task_status
+let task_is_terminal (task : Masc_domain.task) : bool =
+  Masc_domain.task_status_is_terminal task.task_status
 
-let task_is_done (task : Types.task) : bool =
-  Types.task_status_is_done task.task_status
+let task_is_done (task : Masc_domain.task) : bool =
+  Masc_domain.task_status_is_done task.task_status
 
-let task_updated_at (task : Types.task) : string =
+let task_updated_at (task : Masc_domain.task) : string =
   match task.task_status with
-  | Types.Done { completed_at; _ } -> completed_at
-  | Types.Cancelled { cancelled_at; _ } -> cancelled_at
-  | Types.InProgress { started_at; _ } -> started_at
-  | Types.AwaitingVerification { submitted_at; _ } -> submitted_at
-  | Types.Claimed { claimed_at; _ } -> claimed_at
-  | Types.Todo -> task.created_at
+  | Masc_domain.Done { completed_at; _ } -> completed_at
+  | Masc_domain.Cancelled { cancelled_at; _ } -> cancelled_at
+  | Masc_domain.InProgress { started_at; _ } -> started_at
+  | Masc_domain.AwaitingVerification { submitted_at; _ } -> submitted_at
+  | Masc_domain.Claimed { claimed_at; _ } -> claimed_at
+  | Masc_domain.Todo -> task.created_at
 
 let dedupe_sort values =
   values |> List.sort_uniq String.compare
@@ -225,7 +225,7 @@ let compute_convergence (goal : Goal_store.goal) linked_tasks children =
   let done_count =
     List.length
       (List.filter
-         (fun ((task, _) : Types.task * string) -> task_is_done task)
+         (fun ((task, _) : Masc_domain.task * string) -> task_is_done task)
          linked_tasks)
   in
   let task_ratio =
@@ -396,7 +396,7 @@ let goal_fsm_to_json ~effective_policy (goal : Goal_store.goal)
 
 type build_context = {
   now_ts : float;
-  all_tasks : Types.task list;
+  all_tasks : Masc_domain.task list;
   pending_approvals : Yojson.Safe.t list;
   keeper_metas : Keeper_types.keeper_meta list;
   latest_receipts : (string * Yojson.Safe.t) list;
@@ -482,7 +482,7 @@ let runtime_blocker_event_from_meta ~config ~(meta : Keeper_types.keeper_meta) =
   | None -> None
   | Some summary ->
       let now_ts = Time_compat.now () in
-      let now_iso = Types.now_iso () in
+      let now_iso = Masc_domain.now_iso () in
       Some
         (`Assoc
           [
@@ -608,7 +608,7 @@ let rec build_tree context goals goal =
   in
   let direct_task_keeper_names =
     linked_tasks
-    |> List.filter_map (fun ((task, _) : Types.task * string) ->
+    |> List.filter_map (fun ((task, _) : Masc_domain.task * string) ->
            match task_assignee task with
            | Some assignee ->
                keeper_name_of_assignee context.keeper_metas assignee
@@ -651,7 +651,7 @@ let rec build_tree context goals goal =
   in
   let task_activity_values =
     linked_tasks
-    |> List.map (fun ((task, _) : Types.task * string) -> task_updated_at task)
+    |> List.map (fun ((task, _) : Masc_domain.task * string) -> task_updated_at task)
   in
   let approval_activity_values =
     direct_pending_approvals
@@ -691,7 +691,7 @@ let rec build_tree context goals goal =
     int_of_float
       (max 0.0
          (context.now_ts
-          -. Types.parse_iso8601 ~default_time:context.now_ts last_activity_at))
+          -. Masc_domain.parse_iso8601 ~default_time:context.now_ts last_activity_at))
   in
   let direct_sandbox_risk =
     List.exists receipt_has_sandbox_risk direct_receipts
@@ -723,23 +723,23 @@ let rec build_tree context goals goal =
   in
   let direct_fsm_risk =
     List.exists
-      (fun ((task, _) : Types.task * string) ->
+      (fun ((task, _) : Masc_domain.task * string) ->
         match task.task_status with
-        | Types.AwaitingVerification _ -> true
-        | Types.Todo | Types.Claimed _ | Types.InProgress _ | Types.Done _
-        | Types.Cancelled _ ->
+        | Masc_domain.AwaitingVerification _ -> true
+        | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.Done _
+        | Masc_domain.Cancelled _ ->
             false)
       linked_tasks
   in
   let open_linked_task_count =
     linked_tasks
-    |> List.filter (fun ((task, _) : Types.task * string) ->
+    |> List.filter (fun ((task, _) : Masc_domain.task * string) ->
            not (task_is_terminal task))
     |> List.length
   in
   let done_linked_task_count =
     linked_tasks
-    |> List.filter (fun ((task, _) : Types.task * string) -> task_is_done task)
+    |> List.filter (fun ((task, _) : Masc_domain.task * string) -> task_is_done task)
     |> List.length
   in
   let linkage_warning_reason =
@@ -1030,7 +1030,7 @@ let task_status_color status_label =
   | "cancelled" -> "#ef4444"
   | _ -> "#888888"
 
-let task_to_tree_json ((task, linkage_source) : Types.task * string) =
+let task_to_tree_json ((task, linkage_source) : Masc_domain.task * string) =
   let status = task_status_label task in
   `Assoc
     [
@@ -1178,7 +1178,7 @@ let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
        `Int
          (List.length
             (List.filter
-               (fun ((task, _) : Types.task * string) -> task_is_done task)
+               (fun ((task, _) : Masc_domain.task * string) -> task_is_done task)
                node.tasks)));
       ( "verification_summary",
         `Assoc
@@ -1408,7 +1408,7 @@ let goal_event_timeline_json event =
 let build_goal_timeline node linked_keepers approvals goal_events =
   let task_events =
     node.tasks
-    |> List.map (fun ((task, linkage_source) : Types.task * string) ->
+    |> List.map (fun ((task, linkage_source) : Masc_domain.task * string) ->
            let status = task_status_label task in
            timeline_event_json ~ts:(task_updated_at task) ~kind:"task"
              ~lane:("task:" ^ task.id)
@@ -1464,7 +1464,7 @@ let build_goal_timeline node linked_keepers approvals goal_events =
                in
                let ts =
                  event |> member "ts" |> to_string_option
-                 |> Option.value ~default:(Types.now_iso ())
+                 |> Option.value ~default:(Masc_domain.now_iso ())
                in
                Some
                  (timeline_event_json ~ts ~kind:"keeper_runtime"
@@ -1566,7 +1566,7 @@ let goal_detail_json ~(config : Coord.config) ~goal_id :
       Ok
         (`Assoc
           [
-            ("generated_at", `String (Types.now_iso ()));
+            ("generated_at", `String (Masc_domain.now_iso ()));
             ( "goal",
               tree_node_to_json ~effective_policy_for_goal ~open_request_for_goal
                 ~latest_request_for_goal ~events_for_goal node );
@@ -1602,7 +1602,7 @@ let dashboard_goals_tree_json ~(config : Coord.config) : Yojson.Safe.t =
         acc
         + List.length
             (List.filter
-               (fun ((task, _) : Types.task * string) -> task_is_done task)
+               (fun ((task, _) : Masc_domain.task * string) -> task_is_done task)
                node.tasks))
       0 all_nodes
   in
@@ -1632,7 +1632,7 @@ let dashboard_goals_tree_json ~(config : Coord.config) : Yojson.Safe.t =
   in
   `Assoc
     [
-      ("generated_at", `String (Types.now_iso ()));
+      ("generated_at", `String (Masc_domain.now_iso ()));
       ( "tree",
         `List
           (List.map

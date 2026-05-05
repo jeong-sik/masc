@@ -1,5 +1,5 @@
 
-open Types
+open Masc_domain
 open Server_auth
 open Server_dashboard_http
 open Server_routes_http

@@ -191,7 +191,7 @@ let add_routes router =
            | Ok keeper_id -> handle_get_mapping state keeper_id req reqd)
          request reqd)
   |> Http.Router.prefix_post mapping_prefix (fun request reqd ->
-       with_token_permission_auth ~permission:Types.CanAdmin
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state _agent_name req reqd ->
            match extract_keeper_id (Http.Request.path req) with
            | Error msg ->

@@ -160,7 +160,7 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
     let compact_agents = take 5 agents_json in
     let messages_json =
       Coord.get_messages_raw config ~since_seq:0 ~limit:4
-      |> List.map (fun (message : Types.message) ->
+      |> List.map (fun (message : Masc_domain.message) ->
              `Assoc
                [
                  ("from", `String message.from_agent);
@@ -192,7 +192,7 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
       Briefing_sections.build_briefing_sections ~mission_summary_json ~sessions:compact_sessions
         ~agents:compact_agents ~recent_messages:messages_json ~metadata_gaps
     in
-    let now_iso = Types.now_iso () in
+    let now_iso = Masc_domain.now_iso () in
     Ok
       (`Assoc
         [
@@ -275,7 +275,7 @@ let actor_name = function
 
 let json ?actor ?(force = false) ~config ~sw ~clock ~proc_mgr () =
   let now_ts = Unix.gettimeofday () in
-  let now_iso = Types.now_iso () in
+  let now_iso = Masc_domain.now_iso () in
   let actor_name = actor_name actor in
   let cached_json, is_fresh, refresh_in_flight, last_error =
     with_cache_lock (fun () ->

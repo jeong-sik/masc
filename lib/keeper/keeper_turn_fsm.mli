@@ -149,7 +149,7 @@ val assert_transition_allowed :
   unit ->
   (transition_action, transition_violation) result
 
-val require_active_state : _ turn_state -> (unit, Types.masc_error) result
+val require_active_state : _ turn_state -> (unit, Masc_domain.masc_error) result
 (** Identity on [s]; runtime-asserts that [s] is not a terminal state
     ([Done], [Failed _], [Cancelled _]).
 

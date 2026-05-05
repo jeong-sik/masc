@@ -106,7 +106,7 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_run_list" -> Some (handle_run_list ctx args)
   | _ -> None
 
-let schemas : Types.tool_schema list = [
+let schemas : Masc_domain.tool_schema list = [
   (* masc_run_init *)
   {
     name = "masc_run_init";
@@ -227,7 +227,7 @@ let read_only_tools = [ "masc_run_get"; "masc_run_list" ]
 
 let () =
   List.iter
-    (fun (s : Types.tool_schema) ->
+    (fun (s : Masc_domain.tool_schema) ->
       let is_ro = List.mem s.name read_only_tools in
       Tool_spec.register
         (Tool_spec.create

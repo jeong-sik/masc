@@ -26,7 +26,7 @@ module Float = Stdlib.Float
     - Tool_local_runtime_status : runtime pool status reporting
     - Tool_local_runtime_probe  : native Ollama timing/KV inference probe *)
 
-open Types
+open Masc_domain
 
 (* Re-export core types and helpers for backward compatibility *)
 include Tool_local_runtime_core
@@ -283,7 +283,7 @@ let schemas : tool_schema list =
 
 let tool_required_permission = function
   | "masc_runtime_verify" | "masc_runtime_ollama_probe" ->
-      Some Types.CanReadState
+      Some Masc_domain.CanReadState
   | _ -> None
 
 let () =

@@ -23,7 +23,7 @@ module StringSet = Set.Make (String)
 
 (* ── Shared helpers ─────────────────────────────────── *)
 
-let now_iso () = Types.now_iso ()
+let now_iso () = Masc_domain.now_iso ()
 
 let candidate_to_json (c : CC.candidate_info) : Yojson.Safe.t =
   `Assoc [

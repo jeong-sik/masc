@@ -307,7 +307,7 @@ let recent_actions_json config =
 
 let recent_messages_json config =
   Coord.get_messages_raw config ~since_seq:0 ~limit:20
-  |> List.map Types.message_to_yojson
+  |> List.map Masc_domain.message_to_yojson
   |> fun rows -> `List rows
 
 let merge_tool_name_lists primary secondary =

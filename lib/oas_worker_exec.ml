@@ -586,7 +586,7 @@ let run_with_masc_tools
     ~(sw : Eio.Switch.t)
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : config)
-    ~(masc_tools : Types.tool_schema list)
+    ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ?contract
     ?on_event
@@ -596,7 +596,7 @@ let run_with_masc_tools
   : (run_result, Agent_sdk.Error.sdk_error) result =
   match
     public_mcp_runtime_policy_of_tool_names
-      (List.map (fun (td : Types.tool_schema) -> td.name) masc_tools)
+      (List.map (fun (td : Masc_domain.tool_schema) -> td.name) masc_tools)
   with
   | Some runtime_mcp_policy
     when Provider_tool_support.provider_supports_runtime_mcp_policy
@@ -608,7 +608,7 @@ let run_with_masc_tools
   | _ when provider_supports_inline_tools config.provider_cfg ->
       let oas_tools =
         List.map
-          (fun (td : Types.tool_schema) ->
+          (fun (td : Masc_domain.tool_schema) ->
             Tool_bridge.oas_tool_of_masc
               ~name:td.name
               ~description:td.description

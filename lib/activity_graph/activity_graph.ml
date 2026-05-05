@@ -152,7 +152,7 @@ let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
           {
             seq;
             ts_ms = now_ts_ms ();
-            ts_iso = Types.now_iso ();
+            ts_iso = Masc_domain.now_iso ();
             room_id = "default";  (* retained for JSONL backward compat *)
             kind;
             actor;
@@ -374,7 +374,7 @@ let graph_json config ?(kinds = []) ?(limit = 500)
   in
   `Assoc
     [
-      ("generated_at", `String (Types.now_iso ()));
+      ("generated_at", `String (Masc_domain.now_iso ()));
       ( "window",
         window_meta ~limit
           ~events_shown:(List.length events)

@@ -57,7 +57,7 @@ val build_internal_signals :
     one internal-signal list, sorted by descending
     pressure rank. *)
 
-val build_operation_contexts : tasks:Types.task list -> operation_context list
+val build_operation_contexts : tasks:Masc_domain.task list -> operation_context list
 (** Projects non-terminal tasks into operation contexts for mission
     badges.  Task contract links provide operation/session ids when
     available; otherwise the task id remains visible as the operation id. *)

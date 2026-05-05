@@ -46,10 +46,10 @@ let register ~tool_name ~(handler : handler) =
     This is the primary registration path — it extracts names from the
     module's published schemas, ensuring the registry is always in sync
     with the advertised tool list. *)
-let register_module ~(schemas : Types.tool_schema list) ~(handler : handler) =
+let register_module ~(schemas : Masc_domain.tool_schema list) ~(handler : handler) =
   with_dispatch_rw (fun () ->
     List.iter
-      (fun (schema : Types.tool_schema) ->
+      (fun (schema : Masc_domain.tool_schema) ->
         Hashtbl.replace registry schema.name handler)
       schemas)
 
@@ -323,9 +323,9 @@ let tag_registry_initialized = Atomic.make false
     before dispatch (C-4 precondition validation). *)
 let schema_registry : (string, Yojson.Safe.t) Hashtbl.t = Hashtbl.create 512
 
-let register_module_tag ~(schemas : Types.tool_schema list) ~tag =
+let register_module_tag ~(schemas : Masc_domain.tool_schema list) ~tag =
   with_dispatch_rw (fun () ->
-    List.iter (fun (s : Types.tool_schema) ->
+    List.iter (fun (s : Masc_domain.tool_schema) ->
       Hashtbl.replace tag_registry s.name tag;
       Hashtbl.replace schema_registry s.name s.input_schema) schemas)
 

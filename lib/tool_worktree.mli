@@ -16,4 +16,4 @@ val handle_worktree_list : context -> Yojson.Safe.t -> tool_result
 
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> tool_result option
 
-val schemas : Types.tool_schema list
+val schemas : Masc_domain.tool_schema list

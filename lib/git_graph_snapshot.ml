@@ -497,10 +497,10 @@ let capture_outputs ~config ~limit =
 let dashboard_http_json ~config ~limit =
   match capture_outputs ~config ~limit with
   | Ok outputs ->
-      snapshot_of_outputs ~generated_at:(Types.now_iso ()) outputs
+      snapshot_of_outputs ~generated_at:(Masc_domain.now_iso ()) outputs
       |> snapshot_to_yojson
   | Error warning ->
-      { generated_at = Types.now_iso ()
+      { generated_at = Masc_domain.now_iso ()
       ; repos = []
       ; agents = []
       ; nodes = []

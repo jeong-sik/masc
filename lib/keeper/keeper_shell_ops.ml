@@ -985,7 +985,7 @@ let handle_keeper_shell
                        ; "status",
                          Keeper_alerting_path.process_status_to_json
                            (Unix.WEXITED 1)
-                       ; "output", `String (Types.masc_error_to_string err)
+                       ; "output", `String (Masc_domain.masc_error_to_string err)
                        ]
                       @ route_fields))
             | Ok repair_note ->

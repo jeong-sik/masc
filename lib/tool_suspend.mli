@@ -58,7 +58,7 @@ val remove_from_blacklist : agent_id:string -> unit
 
 (** {1 Tool dispatch} *)
 
-val schemas : Types.tool_schema list
+val schemas : Masc_domain.tool_schema list
 (** Currently the empty list — [masc_suspend] has been retired from
     the public surface but the module remains live for the
     blacklist + circuit-breaker behaviours used by the join guard. *)

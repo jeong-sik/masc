@@ -80,12 +80,12 @@ val project_root : Coord_utils.config -> String.t
 (** Canonical absolute path of the project root for [config]. *)
 
 val require_repository_root_with_git :
-  Coord_utils.config -> (String.t, Types.masc_error) result
+  Coord_utils.config -> (String.t, Masc_domain.masc_error) result
 (** Resolve a usable repository root or fail with a structured
-    [Types.masc_error] explaining why the path is not a git repo. *)
+    [Masc_domain.masc_error] explaining why the path is not a git repo. *)
 
 val ensure_worktree_path :
-  string -> string -> (string * string, Types.masc_error) result
+  string -> string -> (string * string, Masc_domain.masc_error) result
 (** [ensure_worktree_path root worktree_name] returns [(absolute, relative)]
     paths under [<root>/.worktrees/<worktree_name>], creating the
     [.worktrees/] parent if necessary. *)
@@ -152,13 +152,13 @@ val inspect_sandbox_clone : String.t -> sandbox_clone_state
 (** Determine the [sandbox_clone_state] of a candidate path. *)
 
 val restore_sandbox_clone_checkout :
-  String.t -> (string option, Types.masc_error) result
+  String.t -> (string option, Masc_domain.masc_error) result
 (** Attempt [git checkout -f HEAD -- .] on a clone whose tracked files
     drifted.  [Ok (Some msg)] on success with an audit message; [Error _]
     if recovery still failed. *)
 
 val ensure_sandbox_clone_ready :
-  String.t -> (string option, Types.masc_error) result
+  String.t -> (string option, Masc_domain.masc_error) result
 (** [Ok None] if the clone is already [Ready]; otherwise tries
     [restore_sandbox_clone_checkout] and returns its result. *)
 
@@ -201,23 +201,23 @@ val rm_rf : string -> unit
 
 val missing_sandbox_clone_error :
   agent_name:string ->
-  repos_dir:string -> repo_name:string option -> Types.masc_error
+  repos_dir:string -> repo_name:string option -> Masc_domain.masc_error
 (** Sandbox clone is required but [repos_dir] has no matching clone. *)
 
 val workspace_repo_not_found_error :
   agent_name:string ->
   repos_dir:string ->
-  repo_name:string -> search_root:string -> Types.masc_error
+  repo_name:string -> search_root:string -> Masc_domain.masc_error
 (** Auto-provisioning fallback failed: no workspace repo named [repo_name]
     exists under [search_root]. *)
 
 val workspace_repo_ambiguous_error :
   repo_name:string ->
-  search_root:string -> matches:string list -> Types.masc_error
+  search_root:string -> matches:string list -> Masc_domain.masc_error
 (** Auto-provisioning fallback failed: more than one workspace repo
     matches [repo_name]. *)
 
-val partial_clone_error : clone_path:string -> msg:string -> Types.masc_error
+val partial_clone_error : clone_path:string -> msg:string -> Masc_domain.masc_error
 (** Sandbox clone exists but is in an unusable state. *)
 
 (** {1 Workspace repo discovery} *)
@@ -234,7 +234,7 @@ val auto_provision_sandbox_clone :
   config:Coord_utils.config ->
   agent_name:string ->
   repos_dir:string ->
-  repo_name:string -> (string * string option, Types.masc_error) result
+  repo_name:string -> (string * string option, Masc_domain.masc_error) result
 (** Provision a sandbox clone under [repos_dir] from a discoverable
     workspace repo, gated by {!validate_clone_origin_url}.  Returns
     [(clone_path, audit_msg)] on success. *)
@@ -244,7 +244,7 @@ val auto_provision_sandbox_clone :
 val link_worktree_to_task :
   Coord_utils_backend_setup.config ->
   task_id:string ->
-  worktree_info:Types.worktree_info -> (unit, Types.masc_error) result
+  worktree_info:Masc_domain.worktree_info -> (unit, Masc_domain.masc_error) result
 (** Persist the worktree↔task association so [tool_worktree_status] and
     the dashboard can resolve a worktree from a task id. *)
 
@@ -253,7 +253,7 @@ val worktree_create_r :
   ?repo_name:string ->
   Coord_utils.config ->
   agent_name:string ->
-  task_id:string -> base_branch:string -> string Types.masc_result
+  task_id:string -> base_branch:string -> string Masc_domain.masc_result
 (** Create [<root>/.worktrees/<task_id>] tracking [base_branch] for
     [agent_name].  Auto-provisions the sandbox clone when missing and
     [docker_sandbox = true]. If [repo_name] is omitted, selects the repo
@@ -263,7 +263,7 @@ val worktree_create_r :
 
 val worktree_remove_r :
   Coord_utils.config ->
-  agent_name:string -> task_id:string -> string Types.masc_result
+  agent_name:string -> task_id:string -> string Masc_domain.masc_result
 (** Remove the worktree previously created for [(agent_name, task_id)]
     and unlink the task association.  Idempotent. *)
 

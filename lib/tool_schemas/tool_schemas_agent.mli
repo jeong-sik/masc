@@ -19,4 +19,4 @@
 (** Tool schemas: [masc_agents], [masc_agent_update],
     [masc_agent_fitness], [masc_register_capabilities],
     [masc_get_metrics]. *)
-val schemas : Types.tool_schema list
+val schemas : Masc_domain.tool_schema list

@@ -39,9 +39,9 @@ let handle_read_resource_eio state id params =
               if !count < limit then begin
                 let path = Filename.concat msgs_path name in
                 let json = Coord.read_json config path in
-                match Types.message_of_yojson json with
-                | Ok msg when msg.Types.seq > since_seq ->
-                    msgs := (Types.message_to_yojson msg) :: !msgs;
+                match Masc_domain.message_of_yojson json with
+                | Ok msg when msg.Masc_domain.seq > since_seq ->
+                    msgs := (Masc_domain.message_to_yojson msg) :: !msgs;
                     incr count
                 | Ok _ | Error _ -> ()
               end
@@ -96,8 +96,8 @@ let handle_read_resource_eio state id params =
               ("text/markdown", text_opt)
           | "status" -> ("text/markdown", Some (Coord.status config))
           | "status.json" ->
-              let state_json = Types.room_state_to_yojson (Coord.read_state config) in
-              let backlog_json = Types.backlog_to_yojson (Coord.read_backlog config) in
+              let state_json = Masc_domain.room_state_to_yojson (Coord.read_state config) in
+              let backlog_json = Masc_domain.backlog_to_yojson (Coord.read_backlog config) in
               let connected_agents = Session.get_agent_statuses registry in
               let json = `Assoc [
                 ("base_path", `String config.base_path);
@@ -108,7 +108,7 @@ let handle_read_resource_eio state id params =
               ("application/json", Some (Yojson.Safe.pretty_to_string json))
           | "tasks" -> ("text/markdown", Some (Coord.list_tasks config))
           | "tasks.json" ->
-              let backlog_json = Types.backlog_to_yojson (Coord.read_backlog config) in
+              let backlog_json = Masc_domain.backlog_to_yojson (Coord.read_backlog config) in
               ("application/json", Some (Yojson.Safe.pretty_to_string backlog_json))
           | "who" -> ("text/markdown", Some (Session.status_string registry))
           | "who.json" ->

@@ -637,7 +637,7 @@ let build_projection ?actor ~config ~sw ~clock
   let keeper_briefs = Dashboard_mission_assembly.build_keeper_briefs config keeper_items in
   let internal_signals = Dashboard_mission_assembly.build_internal_signals incidents recommended_actions in
   {
-    generated_at = Types.now_iso ();
+    generated_at = Masc_domain.now_iso ();
     snapshot_json;
     digest_json;
     namespace_json;

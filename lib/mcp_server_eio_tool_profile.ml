@@ -39,10 +39,10 @@ let managed_agent_passthrough_tool_names =
 module StringSet = Set.Make (String)
 module StringMap = Map.Make (String)
 
-let dedupe_tool_schemas_by_name (schemas : Types.tool_schema list) =
+let dedupe_tool_schemas_by_name (schemas : Masc_domain.tool_schema list) =
   let _, result =
     List.fold_left
-      (fun (seen, acc) (schema : Types.tool_schema) ->
+      (fun (seen, acc) (schema : Masc_domain.tool_schema) ->
         if StringSet.mem schema.name seen then (seen, acc)
         else (StringSet.add schema.name seen, schema :: acc))
       (StringSet.empty, []) schemas
@@ -71,7 +71,7 @@ let tool_schemas_for_profile ?(include_hidden = false)
           if not include_keeper_internal then []
           else
             Tool_shard.keeper_model_tools
-            |> List.filter (fun (schema : Types.tool_schema) ->
+            |> List.filter (fun (schema : Masc_domain.tool_schema) ->
                    Tool_catalog.is_on_surface Tool_catalog.Keeper_internal
                      schema.name
                    && Tool_catalog.is_visible ~include_hidden:true
@@ -86,7 +86,7 @@ let tool_schemas_for_profile ?(include_hidden = false)
         in
         let full_profile_tools =
           List.filter
-            (fun (schema : Types.tool_schema) ->
+            (fun (schema : Masc_domain.tool_schema) ->
               let is_keeper_internal =
                 Tool_catalog.is_on_surface Tool_catalog.Keeper_internal schema.name
               in
@@ -99,7 +99,7 @@ let tool_schemas_for_profile ?(include_hidden = false)
     | Managed_agent ->
         let passthrough =
           Config.visible_tool_schemas ~include_hidden:true ~include_deprecated:false ()
-          |> List.filter (fun (schema : Types.tool_schema) ->
+          |> List.filter (fun (schema : Masc_domain.tool_schema) ->
                  List.mem schema.name managed_agent_passthrough_tool_names
                  && Tool_catalog.is_visible ~include_hidden:true schema.name)
         in
@@ -118,13 +118,13 @@ let tool_allowed_in_profile ?(internal_keeper_runtime = false) state profile
       else
         let allowed_schema_names =
           Config.visible_tool_schemas ~include_hidden:true ~include_deprecated:true ()
-          |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+          |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
         in
         List.mem tool_name allowed_schema_names
   | Managed_agent ->
       Option.is_some (Sdk_tool_contract.sdk_binding_by_name tool_name)
       || (tool_schemas_for_profile state Managed_agent
-          |> List.exists (fun (schema : Types.tool_schema) ->
+          |> List.exists (fun (schema : Masc_domain.tool_schema) ->
                  String.equal schema.name tool_name))
   | Operator_remote -> List.mem tool_name Tool_operator.remote_tool_names
 
@@ -302,7 +302,7 @@ let tool_output_schema_field _ =
      the call path can produce typed payloads from the handler itself. *)
   None
 
-let tool_json_for_profile ?usage_summary profile (schema : Types.tool_schema) =
+let tool_json_for_profile ?usage_summary profile (schema : Masc_domain.tool_schema) =
   let base =
     [
       ("name", `String schema.name);

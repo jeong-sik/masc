@@ -134,14 +134,14 @@ val dashboard_mission_briefing_http_json :
 (** {1 Shell and Data Helpers} *)
 
 val dashboard_shell_status_json : Coord.config -> Yojson.Safe.t
-val dashboard_task_json : Coord.config -> Types.task -> Yojson.Safe.t
-val dashboard_agent_json : Types.agent -> Yojson.Safe.t
-val dashboard_message_json : Types.message -> Yojson.Safe.t
+val dashboard_task_json : Coord.config -> Masc_domain.task -> Yojson.Safe.t
+val dashboard_agent_json : Masc_domain.agent -> Yojson.Safe.t
+val dashboard_message_json : Masc_domain.message -> Yojson.Safe.t
 (* dashboard_current_room_id removed — namespace retired (#unify-namespace). *)
-val dashboard_tasks_safe : Coord.config -> Types.task list
-val dashboard_agents_safe : Coord.config -> Types.agent list
+val dashboard_tasks_safe : Coord.config -> Masc_domain.task list
+val dashboard_agents_safe : Coord.config -> Masc_domain.agent list
 val dashboard_messages_safe :
-  Coord.config -> since_seq:int -> limit:int -> Types.message list
+  Coord.config -> since_seq:int -> limit:int -> Masc_domain.message list
 val provider_capacity_json : unit -> Yojson.Safe.t
 val dashboard_shell_http_json :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->

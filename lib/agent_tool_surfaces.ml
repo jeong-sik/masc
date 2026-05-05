@@ -23,16 +23,16 @@ module Random = Stdlib.Random
     capability registry.
 *)
 
-open Types
+open Masc_domain
 
 module SS = Set.Make (String)
 
 let unique_preserve_order = Json_util.dedupe_keep_order
 
-let dedupe_schemas (schemas : Types.tool_schema list) =
+let dedupe_schemas (schemas : Masc_domain.tool_schema list) =
   let unique, _ =
     List.fold_left
-      (fun (acc, seen) (schema : Types.tool_schema) ->
+      (fun (acc, seen) (schema : Masc_domain.tool_schema) ->
         if SS.mem schema.name seen then (acc, seen)
         else (schema :: acc, SS.add schema.name seen))
       ([], SS.empty)
@@ -52,7 +52,7 @@ let lookup_schemas_by_name_exn ~label all_schemas values =
   in
   let by_name = Hashtbl.create (List.length all_schemas) in
   List.iter
-    (fun (schema : Types.tool_schema) ->
+    (fun (schema : Masc_domain.tool_schema) ->
       if not (Hashtbl.mem by_name schema.name) then
         Hashtbl.add by_name schema.name schema)
     all_schemas;
@@ -76,7 +76,7 @@ let spawned_agent_prefixed_tools : string list =
 let local_worker_public_tool_names : string list =
   Tool_catalog.tools_for_surface Tool_catalog.Local_worker
 
-let local_worker_contract_schemas : Types.tool_schema list =
+let local_worker_contract_schemas : Masc_domain.tool_schema list =
   Sdk_tool_contract.sdk_tool_schemas
 
 let local_worker_compat_passthrough_tool_names =
@@ -89,7 +89,7 @@ let local_worker_compat_passthrough_tool_names =
     "masc_broadcast";
   ]
 
-let local_worker_compat_passthrough_schemas : Types.tool_schema list =
+let local_worker_compat_passthrough_schemas : Masc_domain.tool_schema list =
   lookup_schemas_by_name_exn
     ~label:"agent_tool_surfaces.local_worker_compat_passthrough_schemas"
     (Tool_schemas_coord_core.schemas
@@ -97,23 +97,23 @@ let local_worker_compat_passthrough_schemas : Types.tool_schema list =
      @ Tool_schemas_inline_coord.schemas)
     local_worker_compat_passthrough_tool_names
 
-let local_worker_internal_schemas : Types.tool_schema list =
+let local_worker_internal_schemas : Masc_domain.tool_schema list =
   List.filter
-    (fun (schema : Types.tool_schema) -> String.equal schema.name "masc_heartbeat")
+    (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name "masc_heartbeat")
     Tool_schemas_coord_core.schemas
 
-let local_worker_code_schemas : Types.tool_schema list =
+let local_worker_code_schemas : Masc_domain.tool_schema list =
   Tool_schemas_code.schemas
 
-let local_worker_worktree_schemas : Types.tool_schema list =
+let local_worker_worktree_schemas : Masc_domain.tool_schema list =
   Tool_schemas_worktree.schemas
 
-let local_worker_run_schemas : Types.tool_schema list =
+let local_worker_run_schemas : Masc_domain.tool_schema list =
   Tool_schemas_run.schemas
 
-let local_worker_spawn_schemas : Types.tool_schema list =
+let local_worker_spawn_schemas : Masc_domain.tool_schema list =
   List.filter
-    (fun (schema : Types.tool_schema) -> String.equal schema.name "masc_spawn")
+    (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name "masc_spawn")
     Tool_schemas_inline_infra.schemas
 
 let select_public_local_worker_schemas () =
@@ -126,11 +126,11 @@ let select_public_local_worker_schemas () =
     @ local_worker_worktree_schemas
     @ local_worker_run_schemas
     @ local_worker_spawn_schemas)
-  |> List.filter (fun (schema : Types.tool_schema) ->
+  |> List.filter (fun (schema : Masc_domain.tool_schema) ->
          List.mem schema.name wanted)
 
 let resolve_named_schemas all_schemas values :
-    (Types.tool_schema list, string) Result.t =
+    (Masc_domain.tool_schema list, string) Result.t =
   let requested =
     values
     |> List.map String.trim
@@ -139,7 +139,7 @@ let resolve_named_schemas all_schemas values :
   in
   let schemas =
     all_schemas
-    |> List.filter (fun (schema : Types.tool_schema) ->
+    |> List.filter (fun (schema : Masc_domain.tool_schema) ->
            List.mem schema.name requested)
   in
   let missing =
@@ -147,7 +147,7 @@ let resolve_named_schemas all_schemas values :
     |> List.filter (fun tool_name ->
            not
              (List.exists
-                (fun (schema : Types.tool_schema) ->
+                (fun (schema : Masc_domain.tool_schema) ->
                   String.equal schema.name tool_name)
                 schemas))
   in
@@ -159,7 +159,7 @@ let resolve_named_schemas all_schemas values :
          (String.concat ", " missing))
 
 let local_worker_tool_schemas ?names () :
-    (Types.tool_schema list, string) Result.t =
+    (Masc_domain.tool_schema list, string) Result.t =
   let all_schemas =
     dedupe_schemas
       ( local_worker_internal_schemas
@@ -227,7 +227,7 @@ let build_tool_catalog ~(role : string) () : string list =
 let local_worker_resolvable_tool_names () : string list =
   match local_worker_tool_schemas () with
   | Ok schemas ->
-      List.map (fun (s : Types.tool_schema) -> s.name) schemas
+      List.map (fun (s : Masc_domain.tool_schema) -> s.name) schemas
   | Error msg ->
       Log.Misc.warn "[AgentToolSurfaces] local_worker_tool_schemas failed: %s" msg;
       []

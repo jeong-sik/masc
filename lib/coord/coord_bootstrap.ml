@@ -3,7 +3,7 @@
     Extracted from room_state.ml to isolate the "init or not"
     responsibility from runtime state I/O. *)
 
-open Types
+open Masc_domain
 open Coord_utils
 
 let default_room_state config = {

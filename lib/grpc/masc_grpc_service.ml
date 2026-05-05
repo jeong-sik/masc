@@ -51,15 +51,15 @@ let safe_filename name =
     else '_') name
 
 let task_assignee_of_status status =
-  match Types.task_assignee_of_status status with
+  match Masc_domain.task_assignee_of_status status with
   | Some a -> a
   | None -> ""
 
-let task_info_of_task (task : Types.task) : T.task_info =
+let task_info_of_task (task : Masc_domain.task) : T.task_info =
   {
     T.id = task.id;
     title = task.title;
-    status = Types.string_of_task_status task.task_status;
+    status = Masc_domain.string_of_task_status task.task_status;
     assigned_to = task_assignee_of_status task.task_status;
     priority = task.priority;
   }
@@ -94,8 +94,8 @@ let handle_join (room_config : Coord_utils_backend_setup.config) (bytes : string
             let path = Filename.concat agents_dir f in
             try
               let json = Yojson.Safe.from_string (read_file_safe path) in
-              match Types.agent_of_yojson json with
-              | Ok agent when agent.Types.status = Types.Active ->
+              match Masc_domain.agent_of_yojson json with
+              | Ok agent when agent.Masc_domain.status = Masc_domain.Active ->
                 Some ({
                   T.name = agent.name;
                   status = "active";
@@ -182,9 +182,9 @@ let handle_get_status (room_config : Coord_utils_backend_setup.config) (_bytes :
         let path = Filename.concat agents_dir f in
         try
           let json = Yojson.Safe.from_string (read_file_safe path) in
-          match Types.agent_of_yojson json with
+          match Masc_domain.agent_of_yojson json with
           | Ok agent ->
-            let status_str = Types.agent_status_to_string agent.Types.status in
+            let status_str = Masc_domain.agent_status_to_string agent.Masc_domain.status in
             Some ({
               T.name = agent.name;
               status = status_str;
@@ -273,11 +273,11 @@ let compute_directives
   (if Coord.root_is_initialized room_config then
     let unclaimed =
       Coord.get_tasks_safe room_config
-      |> List.filter_map (fun (task : Types.task) ->
+      |> List.filter_map (fun (task : Masc_domain.task) ->
            match task.task_status with
-           | Types.Todo -> Some task.id
-           | Types.Claimed _ | Types.InProgress _ | Types.AwaitingVerification _
-           | Types.Done _ | Types.Cancelled _ -> None)
+           | Masc_domain.Todo -> Some task.id
+           | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
+           | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None)
     in
     match unclaimed with
     | task_id :: _ -> directives := ("claim:" ^ task_id) :: !directives
@@ -328,7 +328,7 @@ let handle_heartbeat
             in
             if Sys.file_exists agent_file then begin
               let json = Yojson.Safe.from_string (read_file_safe agent_file) in
-              match Types.agent_of_yojson json with
+              match Masc_domain.agent_of_yojson json with
               | Ok agent ->
                 let now = Unix.gettimeofday () in
                 let iso_now =
@@ -337,9 +337,9 @@ let handle_heartbeat
                     (1900 + tm.tm_year) (1 + tm.tm_mon) tm.tm_mday
                     tm.tm_hour tm.tm_min tm.tm_sec
                 in
-                let updated = { agent with Types.last_seen = iso_now } in
+                let updated = { agent with Masc_domain.last_seen = iso_now } in
                 let content =
-                  Yojson.Safe.to_string (Types.agent_to_yojson updated)
+                  Yojson.Safe.to_string (Masc_domain.agent_to_yojson updated)
                 in
                 let tmp_path = agent_file ^ ".tmp" in
                 Fs_compat.save_file tmp_path content;

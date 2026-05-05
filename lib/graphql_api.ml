@@ -2,8 +2,8 @@ module Schema = Graphql.Schema
 module Arg = Schema.Arg
 module Coord = Coord
 module Coord_utils = Coord_utils
-module Types = Types
-open Types
+module Types = Masc_domain
+open Masc_domain
 
 type ctx = {
   room_config: Coord_utils.config;
@@ -82,10 +82,10 @@ let drop_after_id id_of items after_id =
       in
       loop items
 
-let task_status_info_of_task (task : Types.task) =
-  let status = Types.task_status_to_string task.task_status in
+let task_status_info_of_task (task : Masc_domain.task) =
+  let status = Masc_domain.task_status_to_string task.task_status in
   match task.task_status with
-  | Types.Todo ->
+  | Masc_domain.Todo ->
       {
         status;
         assignee = None;
@@ -97,7 +97,7 @@ let task_status_info_of_task (task : Types.task) =
         cancelled_at = None;
         reason = None;
       }
-  | Types.Claimed { assignee; claimed_at } ->
+  | Masc_domain.Claimed { assignee; claimed_at } ->
       {
         status;
         assignee = Some assignee;
@@ -109,7 +109,7 @@ let task_status_info_of_task (task : Types.task) =
         cancelled_at = None;
         reason = None;
       }
-  | Types.InProgress { assignee; started_at } ->
+  | Masc_domain.InProgress { assignee; started_at } ->
       {
         status;
         assignee = Some assignee;
@@ -121,7 +121,7 @@ let task_status_info_of_task (task : Types.task) =
         cancelled_at = None;
         reason = None;
       }
-  | Types.Done { assignee; completed_at; notes } ->
+  | Masc_domain.Done { assignee; completed_at; notes } ->
       {
         status;
         assignee = Some assignee;
@@ -133,7 +133,7 @@ let task_status_info_of_task (task : Types.task) =
         cancelled_at = None;
         reason = None;
       }
-  | Types.Cancelled { cancelled_by; cancelled_at; reason } ->
+  | Masc_domain.Cancelled { cancelled_by; cancelled_at; reason } ->
       {
         status;
         assignee = None;
@@ -145,7 +145,7 @@ let task_status_info_of_task (task : Types.task) =
         cancelled_at = Some cancelled_at;
         reason;
       }
-  | Types.AwaitingVerification { assignee; submitted_at; _ } ->
+  | Masc_domain.AwaitingVerification { assignee; submitted_at; _ } ->
       {
         status;
         assignee = Some assignee;
@@ -177,19 +177,19 @@ let worktree_info_typ =
       Schema.field "branch"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (wt : Types.worktree_info) -> wt.branch);
+        ~resolve:(fun _ (wt : Masc_domain.worktree_info) -> wt.branch);
       Schema.field "path"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (wt : Types.worktree_info) -> wt.path);
+        ~resolve:(fun _ (wt : Masc_domain.worktree_info) -> wt.path);
       Schema.field "gitRoot"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (wt : Types.worktree_info) -> wt.git_root);
+        ~resolve:(fun _ (wt : Masc_domain.worktree_info) -> wt.git_root);
       Schema.field "repoName"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (wt : Types.worktree_info) -> wt.repo_name);
+        ~resolve:(fun _ (wt : Masc_domain.worktree_info) -> wt.repo_name);
     ]
 
 let task_status_typ =
@@ -239,35 +239,35 @@ let task_typ =
       Schema.field "id"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (task : Types.task) -> encode_cursor ~kind:"task" task.id);
+        ~resolve:(fun _ (task : Masc_domain.task) -> encode_cursor ~kind:"task" task.id);
       Schema.field "title"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (task : Types.task) -> task.title);
+        ~resolve:(fun _ (task : Masc_domain.task) -> task.title);
       Schema.field "description"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (task : Types.task) -> task.description);
+        ~resolve:(fun _ (task : Masc_domain.task) -> task.description);
       Schema.field "priority"
         ~typ:(Schema.non_null Schema.int)
         ~args:Arg.[]
-        ~resolve:(fun _ (task : Types.task) -> task.priority);
+        ~resolve:(fun _ (task : Masc_domain.task) -> task.priority);
       Schema.field "files"
         ~typ:(Schema.non_null (Schema.list (Schema.non_null Schema.string)))
         ~args:Arg.[]
-        ~resolve:(fun _ (task : Types.task) -> task.files);
+        ~resolve:(fun _ (task : Masc_domain.task) -> task.files);
       Schema.field "createdAt"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (task : Types.task) -> task.created_at);
+        ~resolve:(fun _ (task : Masc_domain.task) -> task.created_at);
       Schema.field "status"
         ~typ:(Schema.non_null task_status_typ)
         ~args:Arg.[]
-        ~resolve:(fun _ (task : Types.task) -> task_status_info_of_task task);
+        ~resolve:(fun _ (task : Masc_domain.task) -> task_status_info_of_task task);
       Schema.field "worktree"
         ~typ:worktree_info_typ
         ~args:Arg.[]
-        ~resolve:(fun _ (task : Types.task) -> task.worktree);
+        ~resolve:(fun _ (task : Masc_domain.task) -> task.worktree);
     ]
 
 let agent_meta_typ =
@@ -276,31 +276,31 @@ let agent_meta_typ =
       Schema.field "sessionId"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (meta : Types.agent_meta) -> meta.session_id);
+        ~resolve:(fun _ (meta : Masc_domain.agent_meta) -> meta.session_id);
       Schema.field "agentType"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (meta : Types.agent_meta) -> meta.agent_type);
+        ~resolve:(fun _ (meta : Masc_domain.agent_meta) -> meta.agent_type);
       Schema.field "pid"
         ~typ:Schema.int
         ~args:Arg.[]
-        ~resolve:(fun _ (meta : Types.agent_meta) -> meta.pid);
+        ~resolve:(fun _ (meta : Masc_domain.agent_meta) -> meta.pid);
       Schema.field "hostname"
         ~typ:Schema.string
         ~args:Arg.[]
-        ~resolve:(fun _ (meta : Types.agent_meta) -> meta.hostname);
+        ~resolve:(fun _ (meta : Masc_domain.agent_meta) -> meta.hostname);
       Schema.field "tty"
         ~typ:Schema.string
         ~args:Arg.[]
-        ~resolve:(fun _ (meta : Types.agent_meta) -> meta.tty);
+        ~resolve:(fun _ (meta : Masc_domain.agent_meta) -> meta.tty);
       Schema.field "worktree"
         ~typ:Schema.string
         ~args:Arg.[]
-        ~resolve:(fun _ (meta : Types.agent_meta) -> meta.worktree);
+        ~resolve:(fun _ (meta : Masc_domain.agent_meta) -> meta.worktree);
       Schema.field "parentTask"
         ~typ:Schema.string
         ~args:Arg.[]
-        ~resolve:(fun _ (meta : Types.agent_meta) -> meta.parent_task);
+        ~resolve:(fun _ (meta : Masc_domain.agent_meta) -> meta.parent_task);
     ]
 
 let agent_typ =
@@ -309,39 +309,39 @@ let agent_typ =
       Schema.field "id"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (agent : Types.agent) -> encode_cursor ~kind:"agent" agent.name);
+        ~resolve:(fun _ (agent : Masc_domain.agent) -> encode_cursor ~kind:"agent" agent.name);
       Schema.field "name"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (agent : Types.agent) -> agent.name);
+        ~resolve:(fun _ (agent : Masc_domain.agent) -> agent.name);
       Schema.field "agentType"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (agent : Types.agent) -> agent.agent_type);
+        ~resolve:(fun _ (agent : Masc_domain.agent) -> agent.agent_type);
       Schema.field "status"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (agent : Types.agent) -> Types.agent_status_to_string agent.status);
+        ~resolve:(fun _ (agent : Masc_domain.agent) -> Masc_domain.agent_status_to_string agent.status);
       Schema.field "capabilities"
         ~typ:(Schema.non_null (Schema.list (Schema.non_null Schema.string)))
         ~args:Arg.[]
-        ~resolve:(fun _ (agent : Types.agent) -> agent.capabilities);
+        ~resolve:(fun _ (agent : Masc_domain.agent) -> agent.capabilities);
       Schema.field "currentTask"
         ~typ:Schema.string
         ~args:Arg.[]
-        ~resolve:(fun _ (agent : Types.agent) -> agent.current_task);
+        ~resolve:(fun _ (agent : Masc_domain.agent) -> agent.current_task);
       Schema.field "joinedAt"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (agent : Types.agent) -> agent.joined_at);
+        ~resolve:(fun _ (agent : Masc_domain.agent) -> agent.joined_at);
       Schema.field "lastSeen"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (agent : Types.agent) -> agent.last_seen);
+        ~resolve:(fun _ (agent : Masc_domain.agent) -> agent.last_seen);
       Schema.field "meta"
         ~typ:agent_meta_typ
         ~args:Arg.[]
-        ~resolve:(fun _ (agent : Types.agent) -> agent.meta);
+        ~resolve:(fun _ (agent : Masc_domain.agent) -> agent.meta);
     ]
 
 let message_typ =
@@ -350,31 +350,31 @@ let message_typ =
       Schema.field "id"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (message : Types.message) -> encode_cursor ~kind:"message" (string_of_int message.seq));
+        ~resolve:(fun _ (message : Masc_domain.message) -> encode_cursor ~kind:"message" (string_of_int message.seq));
       Schema.field "seq"
         ~typ:(Schema.non_null Schema.int)
         ~args:Arg.[]
-        ~resolve:(fun _ (message : Types.message) -> message.seq);
+        ~resolve:(fun _ (message : Masc_domain.message) -> message.seq);
       Schema.field "from"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (message : Types.message) -> message.from_agent);
+        ~resolve:(fun _ (message : Masc_domain.message) -> message.from_agent);
       Schema.field "messageType"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (message : Types.message) -> message.msg_type);
+        ~resolve:(fun _ (message : Masc_domain.message) -> message.msg_type);
       Schema.field "content"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (message : Types.message) -> message.content);
+        ~resolve:(fun _ (message : Masc_domain.message) -> message.content);
       Schema.field "mention"
         ~typ:Schema.string
         ~args:Arg.[]
-        ~resolve:(fun _ (message : Types.message) -> message.mention);
+        ~resolve:(fun _ (message : Masc_domain.message) -> message.mention);
       Schema.field "timestamp"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (message : Types.message) -> message.timestamp);
+        ~resolve:(fun _ (message : Masc_domain.message) -> message.timestamp);
     ]
 
 let room_state_typ =
@@ -383,39 +383,39 @@ let room_state_typ =
       Schema.field "protocolVersion"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (state : Types.room_state) -> state.protocol_version);
+        ~resolve:(fun _ (state : Masc_domain.room_state) -> state.protocol_version);
       Schema.field "project"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (state : Types.room_state) -> state.project);
+        ~resolve:(fun _ (state : Masc_domain.room_state) -> state.project);
       Schema.field "startedAt"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (state : Types.room_state) -> state.started_at);
+        ~resolve:(fun _ (state : Masc_domain.room_state) -> state.started_at);
       Schema.field "messageSeq"
         ~typ:(Schema.non_null Schema.int)
         ~args:Arg.[]
-        ~resolve:(fun _ (state : Types.room_state) -> state.message_seq);
+        ~resolve:(fun _ (state : Masc_domain.room_state) -> state.message_seq);
       Schema.field "activeAgents"
         ~typ:(Schema.non_null (Schema.list (Schema.non_null Schema.string)))
         ~args:Arg.[]
-        ~resolve:(fun _ (state : Types.room_state) -> state.active_agents);
+        ~resolve:(fun _ (state : Masc_domain.room_state) -> state.active_agents);
       Schema.field "paused"
         ~typ:(Schema.non_null Schema.bool)
         ~args:Arg.[]
-        ~resolve:(fun _ (state : Types.room_state) -> state.paused);
+        ~resolve:(fun _ (state : Masc_domain.room_state) -> state.paused);
       Schema.field "pauseReason"
         ~typ:Schema.string
         ~args:Arg.[]
-        ~resolve:(fun _ (state : Types.room_state) -> state.pause_reason);
+        ~resolve:(fun _ (state : Masc_domain.room_state) -> state.pause_reason);
       Schema.field "pausedBy"
         ~typ:Schema.string
         ~args:Arg.[]
-        ~resolve:(fun _ (state : Types.room_state) -> state.paused_by);
+        ~resolve:(fun _ (state : Masc_domain.room_state) -> state.paused_by);
       Schema.field "pausedAt"
         ~typ:Schema.string
         ~args:Arg.[]
-        ~resolve:(fun _ (state : Types.room_state) -> state.paused_at);
+        ~resolve:(fun _ (state : Masc_domain.room_state) -> state.paused_at);
     ]
 
 let task_edge_typ =
@@ -544,21 +544,21 @@ let variables_of_yojson = function
       List.map (fun (k, v) -> (k, const_value_of_yojson v)) fields
   | Some _ -> []
 
-let get_agents config : Types.agent list =
+let get_agents config : Masc_domain.agent list =
   let dir = Coord_utils.agents_dir config in
   Coord_utils.list_dir config dir
   |> List.filter (fun name -> Filename.check_suffix name ".json")
   |> List.filter_map (fun name ->
       let path = Filename.concat dir name in
       let json = Coord_utils.read_json config path in
-      match Types.agent_of_yojson json with
+      match Masc_domain.agent_of_yojson json with
       | Ok agent -> Some agent
       | Error e ->
           Log.Coord.debug "get_agents: skipping invalid agent file %s: %s" name e;
           None)
-  |> List.sort (fun (a : Types.agent) (b : Types.agent) -> String.compare a.name b.name)
+  |> List.sort (fun (a : Masc_domain.agent) (b : Masc_domain.agent) -> String.compare a.name b.name)
 
-let get_messages config : Types.message list =
+let get_messages config : Masc_domain.message list =
   let dir = Coord_utils.messages_dir config in
   Coord_utils.list_dir config dir
   |> List.filter Coord.is_valid_filename
@@ -566,23 +566,23 @@ let get_messages config : Types.message list =
   |> List.filter_map (fun name ->
       let path = Filename.concat dir name in
       let json = Coord_utils.read_json config path in
-      match Types.message_of_yojson json with
+      match Masc_domain.message_of_yojson json with
       | Ok msg -> Some msg
       | Error e ->
           Log.Coord.debug "get_messages: skipping invalid message file %s: %s" name e;
           None)
-  |> List.sort (fun (a : Types.message) (b : Types.message) -> compare a.seq b.seq)
+  |> List.sort (fun (a : Masc_domain.message) (b : Masc_domain.message) -> compare a.seq b.seq)
 
 let tasks_connection config first after =
-  let tasks : Types.task list =
+  let tasks : Masc_domain.task list =
     if Coord_utils.is_initialized config then
       Coord.get_tasks_raw config
     else
       []
   in
   let after_id = Option.bind after (decode_cursor ~kind:"task") in
-  let cursor_of (task : Types.task) = encode_cursor ~kind:"task" task.id in
-  let items_after = drop_after_id (fun (t : Types.task) -> t.id) tasks after_id in
+  let cursor_of (task : Masc_domain.task) = encode_cursor ~kind:"task" task.id in
+  let items_after = drop_after_id (fun (t : Masc_domain.task) -> t.id) tasks after_id in
   let first = clamp_first first in
   let page_items = take first items_after in
   let edges = List.map (fun node -> { node; cursor = cursor_of node }) page_items in
@@ -595,15 +595,15 @@ let tasks_connection config first after =
   { edges; page_info = { has_next_page; end_cursor }; total_count = List.length tasks }
 
 let agents_connection config first after =
-  let agents : Types.agent list =
+  let agents : Masc_domain.agent list =
     if Coord_utils.is_initialized config then
       get_agents config
     else
       []
   in
   let after_id = Option.bind after (decode_cursor ~kind:"agent") in
-  let cursor_of (agent : Types.agent) = encode_cursor ~kind:"agent" agent.name in
-  let items_after = drop_after_id (fun (a : Types.agent) -> a.name) agents after_id in
+  let cursor_of (agent : Masc_domain.agent) = encode_cursor ~kind:"agent" agent.name in
+  let items_after = drop_after_id (fun (a : Masc_domain.agent) -> a.name) agents after_id in
   let first = clamp_first first in
   let page_items = take first items_after in
   let edges = List.map (fun node -> { node; cursor = cursor_of node }) page_items in
@@ -616,7 +616,7 @@ let agents_connection config first after =
   { edges; page_info = { has_next_page; end_cursor }; total_count = List.length agents }
 
 let messages_connection config first after =
-  let messages : Types.message list =
+  let messages : Masc_domain.message list =
     if Coord_utils.is_initialized config then
       get_messages config
     else

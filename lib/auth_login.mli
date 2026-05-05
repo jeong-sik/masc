@@ -36,7 +36,7 @@ type t = {
   auth_config_path : string;
   auth_change : auth_change;
   agent_name : string;
-  role : Types.agent_role;
+  role : Masc_domain.agent_role;
   bearer_token : string;
   raw_token_file : string;
   dashboard_url : string;
@@ -75,7 +75,7 @@ val mint :
   host:string ->
   port:int ->
   agent_name:string ->
-  role:Types.agent_role ->
+  role:Masc_domain.agent_role ->
   unit ->
   (t, Masc_error.t) result
 (** [mint ~base_path ~host ~port ~agent_name ~role ()] runs the full

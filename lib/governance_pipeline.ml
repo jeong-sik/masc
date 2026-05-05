@@ -282,7 +282,7 @@ let to_oas_approval_callback
     let active_tool_names =
       Tool_shard.get_agent_shards keeper_name
       |> Tool_shard.tools_of_shards
-      |> List.map (fun (s : Types.tool_schema) -> s.name)
+      |> List.map (fun (s : Masc_domain.tool_schema) -> s.name)
     in
     let (trifecta_count, _, _, _) = assess_trifecta ~active_tool_names in
     let trifecta_active = trifecta_count >= 3 in

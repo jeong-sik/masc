@@ -339,7 +339,7 @@ let provider_inventory_json () =
   in
   `Assoc
     [
-      ("updated_at", `String (Types.now_iso ()));
+      ("updated_at", `String (Masc_domain.now_iso ()));
       ( "summary",
         `Assoc
           [
@@ -472,7 +472,7 @@ let start_run ~sw ~net ~provider ~model_opt ~prompt =
           provider;
           model;
           prompt = String.trim prompt;
-          created_at = Types.now_iso ();
+          created_at = Masc_domain.now_iso ();
           created_at_unix;
           status = Queued;
           started_at = None;
@@ -493,7 +493,7 @@ let start_run ~sw ~net ~provider ~model_opt ~prompt =
               run.run_id run.provider run.model message;
             update_run_record run.run_id (fun current ->
                 current.status <- Failed;
-                current.finished_at <- Some (Types.now_iso ());
+                current.finished_at <- Some (Masc_domain.now_iso ());
                 current.finished_at_unix <- Some (Unix.gettimeofday ());
                 current.output <- None;
                 current.error <- Some message)
@@ -501,7 +501,7 @@ let start_run ~sw ~net ~provider ~model_opt ~prompt =
           try
             update_run_record run.run_id (fun current ->
                 current.status <- Running;
-                current.started_at <- Some (Types.now_iso ()));
+                current.started_at <- Some (Masc_domain.now_iso ()));
             match
               execute_single_agent_run ~sw ~net ~run_id:run.run_id
                 ~provider:run.provider
@@ -514,7 +514,7 @@ let start_run ~sw ~net ~provider ~model_opt ~prompt =
                   run.run_id run.provider run.model;
                 update_run_record run.run_id (fun current ->
                     current.status <- Completed;
-                    current.finished_at <- Some (Types.now_iso ());
+                    current.finished_at <- Some (Masc_domain.now_iso ());
                     current.finished_at_unix <- Some (Unix.gettimeofday ());
                     current.output <- Some output;
                     current.error <- None)

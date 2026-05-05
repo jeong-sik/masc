@@ -1,6 +1,6 @@
 (** Keeper tool schemas — MCP tool definitions for keeper agents. *)
 
-open Types
+open Masc_domain
 module Persona_contract = Keeper_persona_authoring_contract
 
 (** Issue #8430: canonical [tool_preset] strings. Mirrors

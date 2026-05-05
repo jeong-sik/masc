@@ -67,7 +67,7 @@ val add_task :
 val get_task :
   Coord.config ->
   task_id:string ->
-  (Types.task option, Masc_error.t) result
+  (Masc_domain.task option, Masc_error.t) result
 (** [get_task config ~task_id] reads the JSONL backlog and returns
     [Ok (Some task)] when a task with the given id exists,
     [Ok None] otherwise.  Linear scan over the backlog —
@@ -79,7 +79,7 @@ val list_tasks :
   ?include_done:bool ->
   ?include_cancelled:bool ->
   unit ->
-  (Types.task list, Masc_error.t) result
+  (Masc_domain.task list, Masc_error.t) result
 (** [list_tasks config ?include_done ?include_cancelled ()] returns
     every task in the backlog, filtering out terminal states by
     default.  Both flags default to [false] so the dashboard sees
@@ -89,8 +89,8 @@ val list_tasks :
     [AwaitingVerification]) always pass through. *)
 
 val validate_transition :
-  current:Types.task_status ->
-  next:Types.task_status ->
+  current:Masc_domain.task_status ->
+  next:Masc_domain.task_status ->
   task_id:string ->
   (unit, Masc_error.t) result
 (** [validate_transition ~current ~next ~task_id] enforces the
@@ -103,7 +103,7 @@ val validate_transition :
 val update_status :
   Coord.config ->
   task_id:string ->
-  status:Types.task_status ->
+  status:Masc_domain.task_status ->
   (unit, Masc_error.t) result
 (** [update_status config ~task_id ~status] reads the backlog,
     runs {!validate_transition}, and on success rewrites the task

@@ -10,9 +10,9 @@
 type room_snapshot = {
   room_id: string;
   is_current: bool;
-  agents: Types.agent list;
-  tasks: Types.task list;
-  messages: Types.message list;
+  agents: Masc_domain.agent list;
+  tasks: Masc_domain.task list;
+  messages: Masc_domain.message list;
   locks: int;
 }
 
@@ -154,7 +154,7 @@ let format_elapsed now timestamp fallback =
 (* ===== Agent Status Translation ===== *)
 
 (** Translate agent status + elapsed time into operator-readable description. *)
-let translate_agent_status ~(now : float) (status : Types.agent_status)
+let translate_agent_status ~(now : float) (status : Masc_domain.agent_status)
     (last_seen_iso : string) : string =
   let quiet_threshold_sec =
     Runtime_params.get Governance_registry.dashboard_agent_quiet_threshold_sec
@@ -167,24 +167,24 @@ let translate_agent_status ~(now : float) (status : Types.agent_status)
     match elapsed_opt with Some ts -> now -. ts | None -> 0.0
   in
   match status with
-  | Types.Active when elapsed_sec > stuck_threshold_sec ->
+  | Masc_domain.Active when elapsed_sec > stuck_threshold_sec ->
       Printf.sprintf "STUCK (%.0fm, needs check)" (elapsed_sec /. 60.0)
-  | Types.Busy when elapsed_sec > stuck_threshold_sec ->
+  | Masc_domain.Busy when elapsed_sec > stuck_threshold_sec ->
       Printf.sprintf "STUCK (%.0fm, marked busy but no progress)"
         (elapsed_sec /. 60.0)
-  | Types.Active when elapsed_sec > quiet_threshold_sec ->
+  | Masc_domain.Active when elapsed_sec > quiet_threshold_sec ->
       Printf.sprintf "quiet (%.0fm)" (elapsed_sec /. 60.0)
-  | Types.Active -> "working"
-  | Types.Busy -> "working (busy)"
-  | Types.Listening -> "idle"
-  | Types.Inactive -> "offline"
+  | Masc_domain.Active -> "working"
+  | Masc_domain.Busy -> "working (busy)"
+  | Masc_domain.Listening -> "idle"
+  | Masc_domain.Inactive -> "offline"
 
 (** Classify an agent for grouping: Working, Stuck, Idle, or Offline.
     Offline agents (Inactive) are separated from Idle (Listening) so that
     downstream capacity logic does not treat offline agents as available. *)
 type agent_group = Working | Stuck | Idle | Offline [@@deriving eq]
 
-let classify_agent ~(now : float) (agent : Types.agent) : agent_group =
+let classify_agent ~(now : float) (agent : Masc_domain.agent) : agent_group =
   let stuck_threshold_sec =
     Runtime_params.get Governance_registry.dashboard_agent_stuck_threshold_sec
   in
@@ -193,8 +193,8 @@ let classify_agent ~(now : float) (agent : Types.agent) : agent_group =
     match elapsed_opt with Some ts -> now -. ts | None -> 0.0
   in
   match agent.status with
-  | Types.Active | Types.Busy when elapsed_sec > stuck_threshold_sec -> Stuck
-  | Types.Active | Types.Busy -> Working
-  | Types.Listening -> Idle
-  | Types.Inactive -> Offline
+  | Masc_domain.Active | Masc_domain.Busy when elapsed_sec > stuck_threshold_sec -> Stuck
+  | Masc_domain.Active | Masc_domain.Busy -> Working
+  | Masc_domain.Listening -> Idle
+  | Masc_domain.Inactive -> Offline
 

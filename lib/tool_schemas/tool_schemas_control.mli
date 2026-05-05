@@ -4,4 +4,4 @@
     Carries the [masc_pause] / [masc_resume] schema definitions used
     by the control surface. *)
 
-val schemas : Types.tool_schema list
+val schemas : Masc_domain.tool_schema list

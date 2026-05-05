@@ -12,7 +12,7 @@ type 'a context = 'a Keeper_types.context = {
 
 type tool_result = Keeper_types.tool_result
 
-val schemas : Types.tool_schema list
+val schemas : Masc_domain.tool_schema list
 
 val dispatch :
   _ context -> name:string -> args:Yojson.Safe.t -> tool_result option

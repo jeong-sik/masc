@@ -90,7 +90,7 @@ module Rest : sig
   val generate_openapi_document :
     ?host:string -> ?port:int -> unit -> Yojson.Safe.t
   val operation_catalog_entry :
-    string -> Types.tool_schema -> Yojson.Safe.t
+    string -> Masc_domain.tool_schema -> Yojson.Safe.t
 end
 
 (** {1 Bindings} *)

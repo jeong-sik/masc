@@ -418,7 +418,7 @@ let timeout_error_json ?(waiting = false) key timeout_sec =
     [
       ("error", `String "computation_timeout");
       ("message", `String message);
-      ("generated_at", `String (Types.now_iso ()));
+      ("generated_at", `String (Masc_domain.now_iso ()));
       ("timeout_kind", `String (if waiting then "waiter" else "owner"));
       ("timeout_sec", `Float timeout_sec);
       ("key", `String key);

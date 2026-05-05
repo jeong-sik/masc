@@ -59,7 +59,7 @@ let save_governance (config : Coord.config) (g : governance_config) =
   ensure_masc_dir config;
   let json = match governance_config_to_yojson g with
     | `Assoc fields ->
-        `Assoc (fields @ [("updated_at", `String (Types.now_iso ()))])
+        `Assoc (fields @ [("updated_at", `String (Masc_domain.now_iso ()))])
     | other -> other
   in
   Coord_utils.write_json config (governance_path config) json

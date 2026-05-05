@@ -52,8 +52,8 @@ val config_category_enum_strings : string list
 
 (** {1 Tool schema list} *)
 
-val schemas : Types.tool_schema list
-(** [schemas] is the [Types.tool_schema list] for the
+val schemas : Masc_domain.tool_schema list
+(** [schemas] is the [Masc_domain.tool_schema list] for the
     [masc_config], [masc_dashboard], and [masc_misc_admin]
     tools.  Consumed by {!Config.visible_tool_schemas} via
     {!Tools.schemas}.  The schema [enum] fields derive from

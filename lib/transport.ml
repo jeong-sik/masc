@@ -299,7 +299,7 @@ module Rest = struct
 
   let find_schema name =
     List.find_opt
-      (fun (schema : Types.tool_schema) -> String.equal schema.name name)
+      (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
       Config.raw_all_tool_schemas
 
   let help_entry name =
@@ -384,7 +384,7 @@ module Rest = struct
                ("schema", property_schema);
              ])
 
-  let operation_catalog_entry name (schema : Types.tool_schema) =
+  let operation_catalog_entry name (schema : Masc_domain.tool_schema) =
     let entry = help_entry name in
     let aliases =
       Sdk_tool_contract.sdk_aliases_for_operation name
@@ -467,7 +467,7 @@ module Rest = struct
         ("description", `String "JSON-RPC success or error envelope.");
       ]
 
-  let rest_operation_json name method_ (schema : Types.tool_schema) =
+  let rest_operation_json name method_ (schema : Masc_domain.tool_schema) =
     let entry = help_entry name in
     let auth_mode = auth_mode_of_operation name in
     let base_fields =
@@ -545,7 +545,7 @@ module Rest = struct
     in
     let components_schemas =
       operation_entries
-      |> List.map (fun (name, (schema : Types.tool_schema)) ->
+      |> List.map (fun (name, (schema : Masc_domain.tool_schema)) ->
              (name ^ "Input", schema.input_schema))
     in
     let path_table : (string, (string * Yojson.Safe.t) list) Hashtbl.t =

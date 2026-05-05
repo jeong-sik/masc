@@ -26,7 +26,7 @@ module Float = Stdlib.Float
     - Path traversal prevention: deny access outside root
 *)
 
-open Types
+open Masc_domain
 open Tool_args
 
 (* Context required by code tools *)
@@ -350,7 +350,7 @@ let handle_code_search ctx args =
       validate_read_path ~agent_name:ctx.agent_name ctx.config path
     in
     match search_path_result with
-    | Error e -> (false, Types.masc_error_to_string e)
+    | Error e -> (false, Masc_domain.masc_error_to_string e)
     | Ok search_path ->
 
     let rg_args =
@@ -454,7 +454,7 @@ let handle_code_symbols ctx args =
     (false, "Path required: 'path' parameter")
   else begin
     match validate_read_path ~agent_name:ctx.agent_name ctx.config path with
-    | Error e -> (false, Types.masc_error_to_string e)
+    | Error e -> (false, Masc_domain.masc_error_to_string e)
     | Ok validated_path ->
         if not (Sys.file_exists validated_path) then
           (false, Printf.sprintf "File not found: %s" path)
@@ -533,7 +533,7 @@ let handle_code_read ctx args =
     (false, "Path required: 'path' parameter")
   else begin
     match validate_read_path ~agent_name:ctx.agent_name ctx.config path with
-    | Error e -> (false, Types.masc_error_to_string e)
+    | Error e -> (false, Masc_domain.masc_error_to_string e)
     | Ok validated_path ->
         if not (Sys.file_exists validated_path) then
           (false, Printf.sprintf "File not found: %s" path)
@@ -586,7 +586,7 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_code_read" -> Some (handle_code_read ctx args)
   | _ -> None
 
-let schemas : Types.tool_schema list = [
+let schemas : Masc_domain.tool_schema list = [
   (* masc_code_search *)
   {
     name = "masc_code_search";

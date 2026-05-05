@@ -61,7 +61,7 @@ let assoc_json_opt key fields =
   | Some value -> Some value
 
 let iso_of_unix_seconds ts =
-  Types.iso8601_of_unix_seconds ts
+  Masc_domain.iso8601_of_unix_seconds ts
 
 let take limit values =
   values |> List.filteri (fun idx _ -> idx < limit)
@@ -288,7 +288,7 @@ let terminal_reason_timeline_event ~latest_decision ~latest_receipt =
             let ts_unix_opt =
               match json_string_opt_member "ended_at" receipt with
               | Some ended_at ->
-                  let ts = Types.parse_iso8601 ~default_time:0.0 ended_at in
+                  let ts = Masc_domain.parse_iso8601 ~default_time:0.0 ended_at in
                   if ts > 0.0 then Some ts else None
               | None -> None
             in
@@ -380,7 +380,7 @@ let receipt_timeline_event receipt =
   | None -> None
   | Some ended_at ->
       let ts_unix =
-        Types.parse_iso8601 ~default_time:0.0 ended_at
+        Masc_domain.parse_iso8601 ~default_time:0.0 ended_at
       in
       if ts_unix <= 0.0 then None
       else

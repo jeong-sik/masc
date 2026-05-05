@@ -52,7 +52,7 @@ type context = Tool_autoresearch_context.t
 
 (** {1 Tool schemas} *)
 
-val schemas : Types.tool_schema list
+val schemas : Masc_domain.tool_schema list
 (** Re-export of {!Tool_autoresearch_schemas.schemas}.  The
     list of tool schemas advertised to the MCP transport for
     the [masc_autoresearch_*] family. *)

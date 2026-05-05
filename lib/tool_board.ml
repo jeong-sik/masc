@@ -758,7 +758,7 @@ let handle_hearth_list _args =
 
 (** {1 Tool Definitions} *)
 
-let tool_post_create : Types.tool_schema = {
+let tool_post_create : Masc_domain.tool_schema = {
   name = "masc_board_post";
   description = "Create a post on the MASC internal board. Pass either `body` or `content` (both accepted — `body` wins if both present). `author` is auto-filled from the caller's agent identity when omitted; keepers never need to pass it.";
   input_schema = `Assoc [
@@ -783,7 +783,7 @@ let tool_post_create : Types.tool_schema = {
   ];
 }
 
-let tool_post_list : Types.tool_schema = {
+let tool_post_list : Masc_domain.tool_schema = {
   name = "masc_board_list";
   description = "List posts on the MASC internal board with sorting options";
   input_schema = `Assoc [
@@ -819,7 +819,7 @@ let tool_post_list : Types.tool_schema = {
   ];
 }
 
-let tool_post_get : Types.tool_schema = {
+let tool_post_get : Masc_domain.tool_schema = {
   name = "masc_board_get";
   description = "Get a specific post with its full comment thread. Use when you want to read discussion context before replying, or when you received a post_id from board_list/search.";
   input_schema = `Assoc [
@@ -831,7 +831,7 @@ let tool_post_get : Types.tool_schema = {
   ];
 }
 
-let tool_comment_add : Types.tool_schema = {
+let tool_comment_add : Masc_domain.tool_schema = {
   name = "masc_board_comment";
   description = "Add a comment to an existing board post. Use after reading a post with board_get to contribute your perspective, ask a question, or provide feedback.";
   input_schema = `Assoc [
@@ -847,7 +847,7 @@ let tool_comment_add : Types.tool_schema = {
   ];
 }
 
-let tool_vote : Types.tool_schema = {
+let tool_vote : Masc_domain.tool_schema = {
   name = "masc_board_vote";
   description = "Vote on a board post (up or down) to signal agreement or quality. Use when you find a post valuable or want to deprioritize noise.";
   input_schema = `Assoc [
@@ -861,7 +861,7 @@ let tool_vote : Types.tool_schema = {
   ];
 }
 
-let tool_stats : Types.tool_schema = {
+let tool_stats : Masc_domain.tool_schema = {
   name = "masc_board_stats";
   description = "Get board activity statistics: total posts, comments, votes, active hearths. Use to understand overall board health and engagement levels.";
   input_schema = `Assoc [
@@ -870,7 +870,7 @@ let tool_stats : Types.tool_schema = {
   ];
 }
 
-let tool_search : Types.tool_schema = {
+let tool_search : Masc_domain.tool_schema = {
   name = "masc_board_search";
   description = "Search board posts by keyword across titles and content. Use when looking for specific topics, past discussions, or related prior work.";
   input_schema = `Assoc [
@@ -884,7 +884,7 @@ let tool_search : Types.tool_schema = {
   ];
 }
 
-let tool_comment_vote : Types.tool_schema = {
+let tool_comment_vote : Masc_domain.tool_schema = {
   name = "masc_board_comment_vote";
   description = "Vote on a comment (up or down) to signal agreement or quality. Use after reading a comment thread to highlight valuable contributions.";
   input_schema = `Assoc [
@@ -898,7 +898,7 @@ let tool_comment_vote : Types.tool_schema = {
   ];
 }
 
-let tool_profile : Types.tool_schema = {
+let tool_profile : Masc_domain.tool_schema = {
   name = "masc_board_profile";
   description = "Get an agent's board profile: post count, comment count, vote activity, and engagement stats. Use to understand an agent's contribution patterns.";
   input_schema = `Assoc [
@@ -910,7 +910,7 @@ let tool_profile : Types.tool_schema = {
   ];
 }
 
-let tool_hearth_list : Types.tool_schema = {
+let tool_hearth_list : Masc_domain.tool_schema = {
   name = "masc_board_hearths";
   description = "List active hearths (topic categories) with post counts";
   input_schema = `Assoc [
@@ -994,7 +994,7 @@ let handle_board_cleanup args =
        !deleted !failed (List.length all_posts) max_age_hours)
   end
 
-let tool_delete : Types.tool_schema = {
+let tool_delete : Masc_domain.tool_schema = {
   name = "masc_board_delete";
   description = "Delete a board post and its associated comments and votes. Use for cleanup of stale, test, or expired posts.";
   input_schema = `Assoc [
@@ -1006,7 +1006,7 @@ let tool_delete : Types.tool_schema = {
   ];
 }
 
-let tool_board_cleanup : Types.tool_schema = {
+let tool_board_cleanup : Masc_domain.tool_schema = {
   name = "masc_board_cleanup";
   description = "Scan board posts matching filter criteria and delete or report them. \
 Defaults to dry_run=true (report only). Set dry_run=false to delete. \
@@ -1114,15 +1114,15 @@ let register () =
   let tool_required_permission = function
     | "masc_board_list" | "masc_board_get" | "masc_board_stats"
     | "masc_board_search" | "masc_board_profile" | "masc_board_hearths" ->
-        Some Types.CanReadState
+        Some Masc_domain.CanReadState
     | "masc_board_post" | "masc_board_comment" | "masc_board_vote"
     | "masc_board_comment_vote" ->
-        Some Types.CanBroadcast
+        Some Masc_domain.CanBroadcast
     | "masc_board_delete" | "masc_board_cleanup" ->
-        Some Types.CanAdmin
+        Some Masc_domain.CanAdmin
     | _ -> None
   in
-  let make_spec (s : Types.tool_schema) =
+  let make_spec (s : Masc_domain.tool_schema) =
     let ro = List.mem s.name tool_spec_read_only in
     Tool_spec.create
       ~name:s.name ~description:s.description

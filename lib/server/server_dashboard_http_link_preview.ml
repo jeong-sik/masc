@@ -382,7 +382,7 @@ let build_preview_json ~url ~kind ?canonical_url ?title ?description ?site_name
       ("image_url", Json_util.string_opt_to_json image_url);
       ("favicon_url", Json_util.string_opt_to_json favicon_url);
       ("content_type", Json_util.string_opt_to_json content_type);
-      ("fetched_at", `String (Types.now_iso ()));
+      ("fetched_at", `String (Masc_domain.now_iso ()));
       ("cache_state", `String cache_state);
     ]
   in

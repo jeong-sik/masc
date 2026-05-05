@@ -338,7 +338,7 @@ let prepare_agent_setup
                let input_schema =
                  match
                    List.find_opt
-                     (fun (s : Types.tool_schema) -> s.name = name)
+                     (fun (s : Masc_domain.tool_schema) -> s.name = name)
                      masc_schemas
                  with
                  | Some s -> s.input_schema
@@ -468,10 +468,10 @@ let prepare_agent_setup
           []
       in
       match
-        List.find_opt (fun (task : Types.task) -> String.equal task.id task_id)
+        List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id task_id)
           tasks
       with
-      | Some (task : Types.task) -> (
+      | Some (task : Masc_domain.task) -> (
         match task.contract with
         | Some contract -> Keeper_types.dedupe_keep_order contract.required_tools
         | None -> [])
@@ -915,8 +915,8 @@ let prepare_agent_setup
                     let backlog = Coord.read_backlog config in
                     let unclaimed =
                       List.filter
-                        (fun (t : Types.task) ->
-                          t.task_status = Types.Todo)
+                        (fun (t : Masc_domain.task) ->
+                          t.task_status = Masc_domain.Todo)
                         backlog.tasks
                     in
                     match unclaimed with
@@ -925,7 +925,7 @@ let prepare_agent_setup
                       let n = min 5 (List.length tasks) in
                       let preview =
                         List.filteri (fun i _ -> i < n) tasks
-                        |> List.map (fun (t : Types.task) ->
+                        |> List.map (fun (t : Masc_domain.task) ->
                              Printf.sprintf "  - %s (p%d): %s"
                                t.id t.priority
                                (String_util.utf8_safe

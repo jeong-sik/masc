@@ -124,7 +124,7 @@ let parse_verdict (text : string) : (verdict, string) result =
 (* Structured Verdict: Tool Schema + JSON Parsing (ADR D3)          *)
 (* ================================================================ *)
 
-let report_verdict_schema : Types.tool_schema =
+let report_verdict_schema : Masc_domain.tool_schema =
   { name = "report_verdict";
     description =
       "Report your verification verdict. You MUST call this tool \

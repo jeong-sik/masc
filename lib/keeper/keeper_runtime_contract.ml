@@ -65,7 +65,7 @@ let active_goal_ids_have_eligible_claim_task
             task)
 
 let resolve_claim_goal_scope ?agent_tool_names ~(config : Coord.config)
-    ~(meta : keeper_meta) =
+    ~(meta : keeper_meta) () =
   match meta.active_goal_ids with
   | [] ->
       {

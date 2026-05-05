@@ -1156,7 +1156,8 @@ let handle_keeper_sandbox_status ctx args : tool_result =
       in
       let render_item (meta : keeper_meta) =
         let preflight_override =
-          if meta.sandbox_profile = Docker then cached_preflight else None
+          if meta.sandbox_profile = Docker then Some cached_preflight
+          else None
         in
         Keeper_sandbox_control.live_status_json
           ~include_preflight ?preflight_override

@@ -183,6 +183,21 @@ let blocker_class_of_string (reason : string) : blocker_class option =
   else if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
   then
     Some Turn_timeout
+  else if
+    (* 2026-05-05: Completion contract violations (e.g. require_tool_use)
+       were text-stamped to runtime.last_blocker but left
+       runtime.last_blocker_class null because [blocker_class_of_sdk_error]
+       returned None on the [Agent_sdk.Error.Agent
+       (CompletionContractViolation _)] path and the fallthrough to
+       [blocker_class_of_string] had no matching substring.  Variant
+       [Completion_contract_violation] was already defined in
+       [Keeper_types.blocker_class] — only the mapping was missing.
+       Affected 4/14 keepers in production (glm-coding-plan, janitor,
+       velvet-hammer, verifier) where dashboard "차단된 키퍼" card and
+       Prometheus blocker-class series were silent on this failure mode. *)
+    String_util.contains_substring_ci trimmed "completion contract"
+  then
+    Some Completion_contract_violation
   else
     None
 
@@ -211,6 +226,12 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
   | None -> (
       match err with
       | Agent_sdk.Error.Internal msg -> blocker_class_of_string msg
+      | Agent_sdk.Error.Agent
+          (Agent_sdk.Error.CompletionContractViolation _) ->
+          (* See note on [blocker_class_of_string] above; same gap, same
+             enum target.  Direct typed match preferred over text-substring
+             fallback when the SDK gave us a structured error. *)
+          Some Completion_contract_violation
       | _ -> None)
 
 (* ── Runtime blocker surface ───────────────────────────────── *)

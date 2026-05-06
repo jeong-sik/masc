@@ -159,6 +159,36 @@ let test_attr_key_registry_full_coverage () =
   List.iter check_legacy K.legacy
 ;;
 
+let sorted_unique values =
+  let rec loop acc = function
+    | [] -> List.rev acc
+    | x :: y :: rest when String.equal x y -> loop acc (y :: rest)
+    | x :: rest -> loop (x :: acc) rest
+  in
+  values |> List.sort String.compare |> loop []
+;;
+
+let duplicate_keys values =
+  let sorted = List.sort String.compare values in
+  let rec loop acc = function
+    | x :: y :: rest when String.equal x y -> loop (x :: acc) (y :: rest)
+    | _ :: rest -> loop acc rest
+    | [] -> List.rev acc
+  in
+  loop [] sorted |> sorted_unique
+;;
+
+let test_attr_key_registry_has_no_orphans () =
+  let module K = Lib.Otel_genai.Attr_key in
+  let classified = K.official_gen_ai @ K.masc_extensions @ K.legacy in
+  check
+    (list string)
+    "classified keys match all known keys"
+    (sorted_unique K.all_known)
+    (sorted_unique classified);
+  check (list string) "no duplicate key classifications" [] (duplicate_keys classified)
+;;
+
 let test_tool_execution_attrs () =
   let attrs = Lib.Otel_genai.tool_execution_attrs ~tool_name:"keeper_shell" in
   check
@@ -187,6 +217,7 @@ let test_dispatch_hook_emits_tool_span_payload () =
           let result : Lib.Tool_result.t =
             { success = true
             ; data = `String "ok"
+            ; legacy_message = "ok"
             ; tool_name = "keeper_shell"
             ; duration_ms = 123.4
             }
@@ -242,6 +273,8 @@ let () =
             test_attr_key_registry_boundaries
         ; test_case "attr key registry full coverage" `Quick
             test_attr_key_registry_full_coverage
+        ; test_case "attr key registry has no orphans" `Quick
+            test_attr_key_registry_has_no_orphans
         ; test_case "tool execution attrs" `Quick test_tool_execution_attrs
         ; test_case "dispatch hook emits tool span payload" `Quick
             test_dispatch_hook_emits_tool_span_payload

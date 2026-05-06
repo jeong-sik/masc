@@ -25,6 +25,13 @@ module Attr_key : sig
   val tool_name : string
   val tool_success : string
   val tool_duration_ms : string
+
+  (** Every Attr_key constant exported by this module.
+
+      Keep this list in sync with the classification lists below. Tests assert
+      that each known key appears in exactly one registry boundary. *)
+  val all_known : string list
+
   val official_gen_ai : string list
   val masc_extensions : string list
   val legacy : string list

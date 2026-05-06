@@ -60,6 +60,8 @@ module Attr_key = struct
     ]
   ;;
 
+  let all_known = official_gen_ai @ masc_extensions @ legacy
+
   let is_official_gen_ai key = List.mem key official_gen_ai
   let is_masc_extension key = List.mem key masc_extensions
 end

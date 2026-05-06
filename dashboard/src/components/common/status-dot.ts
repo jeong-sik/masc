@@ -21,7 +21,16 @@
 
 import { html } from 'htm/preact'
 
-type StatusDotSize = 'xs' | 'sm' | 'md' | 'lg'
+export type StatusDotSize = 'xs' | 'sm' | 'md' | 'lg'
+export type StatusDotMode = 'decorative' | 'semantic'
+
+export interface StatusDotSummary {
+  readonly size: StatusDotSize
+  readonly mode: StatusDotMode
+  readonly hasCustomClass: boolean
+  readonly hasAriaLabel: boolean
+  readonly classNameLength: number
+}
 
 /** Pure: Tailwind size tokens for each named variant. Exposed so
     a caller that wraps its own <span> (legacy code in a hot render
@@ -50,7 +59,26 @@ export function statusDotClasses(
   return parts.join(' ')
 }
 
-interface StatusDotProps {
+export function summarizeStatusDot({
+  size = 'sm',
+  className,
+  ariaLabel,
+}: {
+  size?: StatusDotSize
+  className?: string
+  ariaLabel?: string
+}): StatusDotSummary {
+  const hasAriaLabel = ariaLabel !== undefined && ariaLabel !== ''
+  return {
+    size,
+    mode: ariaLabel !== undefined ? 'semantic' : 'decorative',
+    hasCustomClass: className !== undefined && className !== '',
+    hasAriaLabel,
+    classNameLength: className?.length ?? 0,
+  }
+}
+
+export interface StatusDotProps {
   size?: StatusDotSize
   /** Additional Tailwind classes for tone, margin, etc. Caller-owned
       because per-file helpers (`statusDot(status)`, `verdictTone(v)`,
@@ -70,15 +98,20 @@ export function StatusDot({
   ariaLabel,
   testId,
 }: StatusDotProps) {
+  const summary = summarizeStatusDot({ size, className: cx, ariaLabel })
   const cls = statusDotClasses(size, cx)
-  const semantic = ariaLabel !== undefined
+  const semantic = summary.mode === 'semantic'
   return html`<span
     class=${cls}
     role=${semantic ? 'img' : undefined}
     aria-label=${ariaLabel}
     aria-hidden=${semantic ? undefined : 'true'}
     data-status-dot
-    data-status-dot-size=${size}
+    data-status-dot-size=${summary.size}
+    data-status-dot-mode=${summary.mode}
+    data-status-dot-has-custom-class=${summary.hasCustomClass}
+    data-status-dot-has-aria-label=${summary.hasAriaLabel}
+    data-status-dot-class-length=${summary.classNameLength}
     data-testid=${testId}
   ></span>`
 }

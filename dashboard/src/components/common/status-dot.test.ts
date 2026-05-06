@@ -4,6 +4,7 @@ import { render } from 'preact'
 import { html } from 'htm/preact'
 import {
   StatusDot,
+  summarizeStatusDot,
   statusDotClasses,
   statusDotSizeClass,
 } from './status-dot'
@@ -48,6 +49,29 @@ describe('statusDotClasses (pure)', () => {
   })
 })
 
+describe('summarizeStatusDot (pure)', () => {
+  it('summarizes the decorative default without reading the DOM', () => {
+    expect(summarizeStatusDot({})).toEqual({
+      size: 'sm',
+      mode: 'decorative',
+      hasCustomClass: false,
+      hasAriaLabel: false,
+      classNameLength: 0,
+    })
+  })
+
+  it('summarizes semantic dots with tone metadata', () => {
+    const tone = 'bg-[var(--ok-10)] ring-1'
+    expect(summarizeStatusDot({ size: 'md', className: tone, ariaLabel: 'healthy' })).toEqual({
+      size: 'md',
+      mode: 'semantic',
+      hasCustomClass: true,
+      hasAriaLabel: true,
+      classNameLength: tone.length,
+    })
+  })
+})
+
 describe('StatusDot component', () => {
   let container: HTMLElement
   beforeEach(() => {
@@ -64,11 +88,19 @@ describe('StatusDot component', () => {
     const el = container.querySelector('[data-status-dot]') as HTMLElement
     expect(el.tagName).toBe('SPAN')
     expect(el.getAttribute('data-status-dot-size')).toBe('sm')
+    expect(el.getAttribute('data-status-dot-mode')).toBe('decorative')
+    expect(el.getAttribute('data-status-dot-has-custom-class')).toBe('false')
+    expect(el.getAttribute('data-status-dot-has-aria-label')).toBe('false')
+    expect(el.getAttribute('data-status-dot-class-length')).toBe('0')
   })
 
   it('tone class (passed via `class`) ends up on the span', () => {
-    render(html`<${StatusDot} class="bg-[var(--ok-10)]" />`, container)
-    expect(container.querySelector('[data-status-dot]')!.className).toContain('bg-[var(--ok-10)]')
+    const tone = 'bg-[var(--ok-10)]'
+    render(html`<${StatusDot} class=${tone} />`, container)
+    const el = container.querySelector('[data-status-dot]')!
+    expect(el.className).toContain(tone)
+    expect(el.getAttribute('data-status-dot-has-custom-class')).toBe('true')
+    expect(el.getAttribute('data-status-dot-class-length')).toBe(String(tone.length))
   })
 
   it('default (no ariaLabel) is decorative — aria-hidden=true, no role', () => {
@@ -90,6 +122,8 @@ describe('StatusDot component', () => {
     expect(el.getAttribute('role')).toBe('img')
     expect(el.getAttribute('aria-label')).toBe('running')
     expect(el.getAttribute('aria-hidden')).toBeNull()
+    expect(el.getAttribute('data-status-dot-mode')).toBe('semantic')
+    expect(el.getAttribute('data-status-dot-has-aria-label')).toBe('true')
   })
 
   it('each size variant renders distinct Tailwind tokens', () => {

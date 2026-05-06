@@ -108,16 +108,24 @@ export function IdeEditor({
           display: 'flex',
           alignItems: 'center',
           gap: 'var(--sp-3)',
+          flexWrap: 'wrap',
+          minWidth: 0,
           padding: 'var(--sp-2) var(--sp-3)',
           borderBottom: '1px solid var(--color-border-divider)',
           color: 'var(--color-fg-muted)',
           font: 'var(--type-eyebrow)',
         }}
       >
-        <span>${document.file_path}</span>
-        <span style=${{ color: 'var(--color-fg-disabled)' }}>${document.language}</span>
-        <span style=${{ color: 'var(--color-accent-fg)' }}>${VIEW_LABEL[activeView]}</span>
-        <span style=${{ marginLeft: 'auto' }}>
+        <span style=${{
+          minWidth: 0,
+          flex: '1 1 12rem',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}>${document.file_path}</span>
+        <span style=${{ color: 'var(--color-fg-disabled)', flexShrink: 0 }}>${document.language}</span>
+        <span style=${{ color: 'var(--color-accent-fg)', flexShrink: 0 }}>${VIEW_LABEL[activeView]}</span>
+        <span style=${{ marginLeft: 'auto', flexShrink: 0, whiteSpace: 'nowrap' }}>
           ${lines.length} lines · ownership · ${keepers.length} keepers · ${activeLayerKinds.length} layers
         </span>
         ${onFindOpen || onFindClose ? html`

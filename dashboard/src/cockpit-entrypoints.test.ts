@@ -9,6 +9,9 @@ import {
 import { sectionItemsForTab } from './config/navigation'
 
 describe('cockpit entrypoint registry', () => {
+  const coverageForAlias = (alias: string) =>
+    COCKPIT_ENTRYPOINTS.find(entrypoint => entrypoint.aliases.includes(alias))?.coverage
+
   it('keeps every prototype plane mode mapped to a production route', () => {
     expect(Object.keys(COCKPIT_MODE_TARGETS)).toEqual([
       'dashboard',
@@ -40,6 +43,14 @@ describe('cockpit entrypoint registry', () => {
   })
 
   it('resolves prototype subtabs to explicit live route homes', () => {
+    expect(cockpitTargetForParams({ mode: 'IDE', tab: 'edit' })).toEqual({
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source' },
+    })
+    expect(cockpitTargetForParams({ mode: 'IDE', tab: 'split-diff' })).toEqual({
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'split-diff' },
+    })
     expect(cockpitTargetForParams({ mode: 'Cognition', tab: 'dc-str' })).toEqual({
       tab: 'monitoring',
       params: { section: 'cognition', view: 'decisions' },
@@ -189,7 +200,6 @@ describe('cockpit entrypoint registry', () => {
       params: { section: 'runtime', view: 'inspector', focus: 'compare' },
     })
   })
-
   it('marks audit actor and summary entrypoints as covered runtime routes', () => {
     const byAlias = new Map(COCKPIT_ENTRYPOINTS.flatMap(entrypoint =>
       entrypoint.aliases.map(alias => [alias, entrypoint] as const),
@@ -203,5 +213,11 @@ describe('cockpit entrypoint registry', () => {
       coverage: 'covered',
       target: { tab: 'monitoring', params: { section: 'runtime', view: 'audit', focus: 'summary' } },
     })
+  })
+
+  it('marks existing IDE source, split, and graph surfaces covered', () => {
+    expect(coverageForAlias('edit')).toBe('covered')
+    expect(coverageForAlias('split-diff')).toBe('covered')
+    expect(coverageForAlias('git-graph')).toBe('covered')
   })
 })

@@ -289,7 +289,7 @@
 
 .ide-toolbar {
   display: grid;
-  grid-template-columns: max-content minmax(1rem, 1fr) max-content;
+  grid-template-columns: auto minmax(180px, 320px) 1fr auto;
   align-items: center;
   gap: var(--sp-3);
   padding: var(--sp-2) var(--sp-3);

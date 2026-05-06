@@ -98,6 +98,10 @@ BoardActivity, IdleTimeout, MetricsAnomaly, StrategicReview.
 | 테스트 실행 | `masc_code_shell` (worktree `cwd` required) |
 | GitHub PR / 이슈 작업 | `keeper_preflight_check`, `keeper_pr_list`, `keeper_pr_status`, `keeper_pr_create` (draft-only), plus `keeper_shell op=gh` when repo context is bound |
 
+The goal lifecycle surface is configured as the `masc.goal` policy group and is
+routed to `dispatch`, `coding`, `research`, and `delivery` presets. Social and
+messaging keepers keep board/task coordination without goal mutation access.
+
 ## Research Profile Additions
 
 When the `autoresearch` shard is allocated, these tools are added (any policy mode):

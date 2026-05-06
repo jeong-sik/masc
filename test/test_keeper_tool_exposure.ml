@@ -323,9 +323,11 @@ let test_coding_preset_has_coordination_tools () =
     (has_tool "masc_task_history" tools);
   check bool "does not grant masc_plan_get_task" false
     (has_tool "masc_plan_get_task" tools);
-  check bool "does not grant masc_goal_upsert" false
+  check bool "has masc_goal_upsert" true
     (has_tool "masc_goal_upsert" tools);
-  check bool "does not grant masc_goal_verify" false
+  check bool "has masc_goal_transition" true
+    (has_tool "masc_goal_transition" tools);
+  check bool "has masc_goal_verify" true
     (has_tool "masc_goal_verify" tools);
   check bool "has keeper_broadcast" true
     (has_tool "keeper_broadcast" tools)

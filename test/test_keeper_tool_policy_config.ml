@@ -127,6 +127,29 @@ let test_delivery_satisfies_coding () =
   check bool "delivery satisfies coding" true
     (KTPC.preset_can_satisfy cfg ~agent_preset:"delivery" ~required_preset:"coding")
 
+let test_goal_lifecycle_group_routes_to_goal_capable_presets () =
+  let cfg = load_config () in
+  let required =
+    [
+      "masc_goal_list";
+      "masc_goal_upsert";
+      "masc_goal_transition";
+      "masc_goal_verify";
+      "masc_coordination_fsm_snapshot";
+    ]
+  in
+  List.iter
+    (fun preset ->
+      match KTPC.resolve_preset cfg preset () with
+      | Some (KTPC.Subset tools) ->
+          List.iter
+            (fun tool ->
+              check bool (preset ^ " includes " ^ tool) true (List.mem tool tools))
+            required
+      | Some KTPC.All_candidates -> ()
+      | None -> fail ("missing preset " ^ preset))
+    [ "dispatch"; "coding"; "research"; "delivery" ]
+
 let test_full_satisfies_anything () =
   let cfg = load_config () in
   check bool "full satisfies delivery" true
@@ -165,6 +188,8 @@ let () =
           test_case "same preset satisfies" `Quick test_same_preset_satisfies;
           test_case "social cannot satisfy delivery" `Quick test_social_cannot_satisfy_delivery;
           test_case "delivery satisfies coding" `Quick test_delivery_satisfies_coding;
+          test_case "goal lifecycle routes to goal-capable presets" `Quick
+            test_goal_lifecycle_group_routes_to_goal_capable_presets;
           test_case "full satisfies anything" `Quick test_full_satisfies_anything;
           test_case "minimal cannot satisfy social" `Quick test_minimal_cannot_satisfy_social;
           test_case "unknown preset returns false" `Quick test_unknown_preset_returns_false;

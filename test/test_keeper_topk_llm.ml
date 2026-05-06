@@ -83,9 +83,24 @@ let test_search_index () =
     ~config:{ Agent_sdk.Tool_index.default_config with top_k = 10 }
     tool_entries
 
+let test_search_index_with_production_aliases tools =
+  let tool_entries =
+    List.map Keeper_agent_tool_surface.tool_index_entry_of_tool tools
+  in
+  Agent_sdk.Tool_index.build
+    ~config:{ Agent_sdk.Tool_index.default_config with top_k = 10 }
+    tool_entries
+
 let deterministic_prefilter_for ~query_text ~selection_limit =
   Keeper_tool_disclosure.deterministic_prefilter_names
     ~search_index:(test_search_index ())
+    ~query_text
+    ~selection_limit
+    ~core:(Keeper_exec_tools.effective_core_tools ())
+
+let deterministic_prefilter_for_tools ~tools ~query_text ~selection_limit =
+  Keeper_tool_disclosure.deterministic_prefilter_names
+    ~search_index:(test_search_index_with_production_aliases tools)
     ~query_text
     ~selection_limit
     ~core:(Keeper_exec_tools.effective_core_tools ())
@@ -374,6 +389,83 @@ let test_deterministic_prefilter_hides_code_read_for_generic_file_read () =
   Alcotest.(check bool) "code read stays hidden for generic file read"
     false (List.mem "masc_code_read" selected)
 
+let test_deterministic_prefilter_surfaces_pr_review_for_explicit_request () =
+  let pr_review_tools =
+    test_tools
+    @ [
+        make_tool "keeper_pr_review_read"
+          "Read PR metadata, diff, reviews, and comments";
+        make_tool "keeper_pr_review_comment"
+          "Submit a PR review with optional inline comments";
+        make_tool "keeper_pr_review_reply"
+          "Reply to an inline PR review comment";
+      ]
+  in
+  let selected =
+    deterministic_prefilter_for_tools
+      ~tools:pr_review_tools
+      ~query_text:
+        "Use ONLY keeper_pr_review_read and keeper_pr_review_comment for PR #13526. Do not use gh."
+      ~selection_limit:10
+  in
+  let visible =
+    Keeper_tool_disclosure.merge_tool_selection_boundary
+      ~core:(Keeper_exec_tools.effective_core_tools ())
+      ~deterministic_prefilter:selected
+      ~llm_selected:[]
+      ~discovered:[]
+  in
+  Alcotest.(check bool) "pr review read appears in final visible surface"
+    true (List.mem "keeper_pr_review_read" visible);
+  Alcotest.(check bool) "pr review comment appears in final visible surface"
+    true (List.mem "keeper_pr_review_comment" visible)
+
+let test_tool_search_partition_returns_allowed_core_hits () =
+  let partition =
+    Keeper_run_tools.partition_tool_search_hits
+      ~core:
+        [ "keeper_tool_search";
+          "keeper_pr_review_read";
+          "keeper_pr_review_comment";
+        ]
+      ~core_always:["keeper_tool_search"]
+      ~allowed:["keeper_pr_review_read"; "keeper_pr_review_comment"]
+      ~retrieved:
+        [ "keeper_pr_review_read", 1.0;
+          "keeper_pr_review_comment", 0.9;
+        ]
+      ~max_results:10
+  in
+  Alcotest.(check (list string))
+    "allowed core hits are visible search results"
+    [ "keeper_pr_review_read"; "keeper_pr_review_comment" ]
+    (List.map fst partition.visible_core_hits);
+  Alcotest.(check (list string))
+    "core hits are not rediscovered"
+    [] (List.map fst partition.discoverable_hits);
+  Alcotest.(check int) "no policy filtering" 0 partition.filtered_by_policy
+
+let test_tool_search_partition_filters_policy_denied_core_hits () =
+  let partition =
+    Keeper_run_tools.partition_tool_search_hits
+      ~core:["keeper_pr_review_read"]
+      ~core_always:["keeper_tool_search"]
+      ~allowed:["keeper_board_post"]
+      ~retrieved:
+        [ "keeper_pr_review_read", 1.0;
+          "keeper_board_post", 0.8;
+        ]
+      ~max_results:10
+  in
+  Alcotest.(check (list string))
+    "policy-denied core hit is not exposed"
+    [] (List.map fst partition.visible_core_hits);
+  Alcotest.(check (list string))
+    "allowed non-core hit remains discoverable"
+    [ "keeper_board_post" ]
+    (List.map fst partition.discoverable_hits);
+  Alcotest.(check int) "one policy-filtered hit" 1 partition.filtered_by_policy
+
 let test_keeper_config_defaults () =
   (* Default: LLM rerank disabled *)
   Alcotest.(check bool) "llm_rerank disabled by default"
@@ -420,6 +512,12 @@ let () =
         test_deterministic_prefilter_hides_code_navigation_without_code_intent;
       Alcotest.test_case "deterministic prefilter hides code read for generic file read" `Quick
         test_deterministic_prefilter_hides_code_read_for_generic_file_read;
+      Alcotest.test_case "deterministic prefilter surfaces pr review tools" `Quick
+        test_deterministic_prefilter_surfaces_pr_review_for_explicit_request;
+      Alcotest.test_case "tool_search returns allowed core hits" `Quick
+        test_tool_search_partition_returns_allowed_core_hits;
+      Alcotest.test_case "tool_search filters denied core hits" `Quick
+        test_tool_search_partition_filters_policy_denied_core_hits;
     ];
     "keeper_config", [
       Alcotest.test_case "config defaults" `Quick

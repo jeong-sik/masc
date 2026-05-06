@@ -34,7 +34,6 @@ let shell_words_with_boundaries cmd =
         Buffer.contents buf
         |> String.trim
         |> String.lowercase_ascii
-        |> Filename.basename
       in
       Buffer.clear buf;
       at_command_start := false;
@@ -96,10 +95,13 @@ let shell_words_with_boundaries cmd =
 
 let shell_interpreter_names = [ "bash"; "sh"; "zsh" ]
 
+let command_name text = Filename.basename text
+
 let shell_c_payload words =
   match words with
   | shell :: rest when
-    shell.starts_command && List.mem shell.text shell_interpreter_names ->
+    shell.starts_command
+    && List.mem (command_name shell.text) shell_interpreter_names ->
     let rec loop = function
       | [] -> None
       | flag :: payload :: _ when
@@ -114,14 +116,45 @@ let shell_c_payload words =
     loop rest
   | _ -> None
 
+let is_env_assignment text =
+  match String.index_opt text '=' with
+  | Some i when i > 0 ->
+    let lhs = String.sub text 0 i in
+    not (String.contains lhs '/')
+  | _ -> false
+
+let rec strip_command_wrappers = function
+  | [] -> []
+  | word :: rest when is_env_assignment word.text ->
+    strip_command_wrappers rest
+  | word :: rest when
+    let name = command_name word.text in
+    String.equal name "command" || String.equal name "exec" ->
+    strip_command_wrappers rest
+  | word :: rest when String.equal (command_name word.text) "env" ->
+    strip_env_args rest
+  | words -> words
+
+and strip_env_args = function
+  | word :: rest when String.starts_with ~prefix:"-" word.text ->
+    strip_env_args rest
+  | word :: rest when is_env_assignment word.text ->
+    strip_env_args rest
+  | words -> strip_command_wrappers words
+
+let gh_pr_create_sequence = function
+  | gh :: pr :: create :: _ ->
+    String.equal (command_name gh.text) "gh"
+    && String.equal pr.text "pr"
+    && String.equal create.text "create"
+  | _ -> false
+
 let rec cmd_contains_gh_pr_create cmd =
   let words = shell_words_with_boundaries cmd in
   let rec loop = function
-    | gh :: pr :: create :: _ when
-      gh.starts_command
-      && String.equal gh.text "gh"
-      && String.equal pr.text "pr"
-      && String.equal create.text "create" ->
+    | word :: rest when
+      word.starts_command
+      && gh_pr_create_sequence (strip_command_wrappers (word :: rest)) ->
       true
     | _ :: rest -> loop rest
     | [] -> false
@@ -185,6 +218,8 @@ let handle_keeper_bash
   then
     error_json
       "MASC_KEEPER_SANDBOX_HARD_MODE requires sandbox_profile=docker"
+  else if cmd_contains_gh_pr_create cmd
+  then gh_pr_create_block ()
 
   else begin
     (* Tick 22: dark-launch shadow logger.  Runs

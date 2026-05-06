@@ -772,16 +772,18 @@ let rec add_routes ~sw ~clock router =
            match Server_utils.query_param req "window_hours" with
            | Some s ->
              (match float_of_string_opt s with
-              | Some value -> Some (max 0.1 (min 168.0 value))
-              | None -> None)
+              | Some value when Float.is_finite value ->
+                Some (max 0.1 (min 168.0 value))
+              | Some _ | None -> None)
            | None -> None
          in
          let success_threshold_pct =
            match Server_utils.query_param req "success_threshold_pct" with
            | Some s ->
              (match float_of_string_opt s with
-              | Some value -> Some (max 0.0 (min 100.0 value))
-              | None -> None)
+              | Some value when Float.is_finite value ->
+                Some (max 0.0 (min 100.0 value))
+              | Some _ | None -> None)
            | None -> None
          in
          let config = state.Mcp_server.room_config in

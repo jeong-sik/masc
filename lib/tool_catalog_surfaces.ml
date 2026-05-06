@@ -289,6 +289,9 @@ let system_internal_surface_tools =
     (* Library tools *)
     "masc_library_add"; "masc_library_list"; "masc_library_promote";
     "masc_library_read"; "masc_library_search";
+    (* Keeper board maintenance schemas remain callable for backward
+       compatibility, but are hidden from keeper/public discovery. *)
+    "keeper_board_delete"; "keeper_board_cleanup";
     (* Keeper GitHub workflow tools are schema-registered for keeper model
        routing, but must stay hidden from public tools/list. *)
     "keeper_preflight_check";

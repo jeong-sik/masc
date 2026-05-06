@@ -265,6 +265,32 @@ let by_tool ?window_hours ?keeper_names ~n () =
         add_failure table tool category (compact_sample output));
   table
 
+let keeper_stats_and_failures_by_tool ?window_hours ~n ~keeper_names () =
+  let known_keepers = known_keeper_table keeper_names in
+  let stats_table = Hashtbl.create 64 in
+  let failure_table = Hashtbl.create 64 in
+  read_records ?window_hours ~n ()
+  |> List.iter (fun record ->
+    match Safe_ops.json_string_opt "keeper" record with
+    | Some keeper when Hashtbl.mem known_keepers keeper ->
+      add_tool_stat stats_table record;
+      if not (tool_success_of_record record) then (
+        match Safe_ops.json_string_opt "tool" record with
+        | None -> ()
+        | Some tool ->
+          let output = output_text record in
+          let category =
+            Dashboard_http_tool_quality.classify_failure_output output
+          in
+          add_failure failure_table tool category (compact_sample output))
+    | _ -> ());
+  let tool_stats = Hashtbl.create (Hashtbl.length stats_table) in
+  Hashtbl.iter
+    (fun name stat ->
+       Hashtbl.replace tool_stats name (materialize_tool_stat name stat))
+    stats_table;
+  tool_stats, failure_table
+
 let classes_for table tool =
   match Hashtbl.find_opt table tool with
   | None -> []

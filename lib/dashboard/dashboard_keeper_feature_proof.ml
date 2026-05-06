@@ -529,13 +529,11 @@ let json
   let success_threshold_pct =
     clamp_float ~low:0.0 ~high:100.0 success_threshold_pct
   in
-  let tool_summary = Dashboard_http_tool_quality.aggregate ~n ?window_hours () in
   let snapshots = load_keeper_snapshots config in
   let keeper_names = snapshot_keeper_names snapshots in
-  let tool_stats =
-    Failure.keeper_stats_by_tool ~n ?window_hours ~keeper_names ()
+  let tool_stats, failure_table =
+    Failure.keeper_stats_and_failures_by_tool ~n ?window_hours ~keeper_names ()
   in
-  let failure_table = Failure.by_tool ~n ?window_hours ~keeper_names () in
   let features =
     [
       runtime_liveness_feature snapshots;
@@ -582,11 +580,18 @@ let json
        ("sample_total", `Int tool_sample_total);
        ("success_rate", `Float tool_sample_success_rate);
        ("sampling_mode",
-        Yojson.Safe.Util.member "sampling_mode" tool_summary);
+        `String
+          (match window_hours with
+           | Some _ -> "window_hours"
+           | None -> "recent_n"));
        ("sample_limit",
-        Yojson.Safe.Util.member "sample_limit" tool_summary);
+        (match window_hours with
+         | Some _ -> `Null
+         | None -> `Int n));
        ("window_hours",
-        Yojson.Safe.Util.member "window_hours" tool_summary);
+        (match window_hours with
+         | Some hours -> `Float hours
+         | None -> `Null));
      ]);
     ("features", `List features);
     ("evidence_refs",

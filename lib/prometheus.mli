@@ -700,11 +700,13 @@ val metric_fsm_guard_violation : string
     row through [Keeper_callback_failure.record]. Labels: [callback]
     plus optional [keeper] at per-keeper OAS hook sites.
 
-    Lifecycle-only labels:
+    Callback-only labels:
     - [on_compaction_started] — fired from
       [Keeper_post_turn.apply_post_turn_lifecycle]
     - [on_handoff_started] — fired from
       [Keeper_rollover.maybe_rollover_oas_handoff]
+    - [work_discovery_nudge] — fired from
+      [Keeper_run_tools.prepare_agent_setup] before-turn work discovery
 
     Per-keeper hook labels:
     - [gate_tool_call_log]

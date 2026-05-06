@@ -76,9 +76,11 @@ let make_websocket_handler ~sw ~clock ~on_message _client_addr
     let rec loop () =
       Eio.Time.sleep clock heartbeat_interval_s;
       if not session.closed && not (Ws.Wsd.is_closed session.wsd) then begin
+        let send_failed = ref false in
         (try Ws.Wsd.send_ping wsd with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn -> (
+             send_failed := true;
              match
                Http_server_eio.Late_response.classify_write_failure exn
              with
@@ -90,7 +92,19 @@ let make_websocket_handler ~sw ~clock ~on_message _client_addr
                  Log.Server.warn
                    "[ws-standalone] heartbeat send_ping failed: %s"
                    (Printexc.to_string exn)));
-        loop ()
+        if !send_failed then begin
+          (* If send_ping failed while [session.closed]/[Wsd.is_closed]
+             still read false, the loop would otherwise spin emitting
+             warnings until the WSD finally observed the broken socket.
+             Mark the session closed and run [cleanup_session] now so
+             the rest of the pipeline (sessions table, heartbeat budget,
+             aggregate metrics) drops the half-open session immediately
+             instead of leaking a fiber per failure. *)
+          session.closed <- true;
+          (try Ws.Wsd.close session.wsd with _ -> ());
+          Server_mcp_transport_ws.cleanup_session session_id
+        end else
+          loop ()
       end
     in
     loop ());

@@ -74,6 +74,7 @@ val metric_keeper_output_tokens : string
 val metric_keeper_cache_creation_tokens : string
 val metric_keeper_cache_read_tokens : string
 val metric_keeper_usage_anomalies : string
+val metric_keeper_total_cost_usd : string
 
 (** #10530: keeper required-tool-contract violations.
     Labels: keeper_name, kind \in \{passive,text_only\}. *)

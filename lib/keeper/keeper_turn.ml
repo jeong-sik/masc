@@ -90,7 +90,7 @@ let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
   let trusted_total_tokens =
     if usage_trusted then Keeper_exec_context.total_tokens result.usage else 0
   in
-  {
+  let updated_meta = {
     meta with
     updated_at = now_iso ();
     runtime =
@@ -114,7 +114,11 @@ let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
             last_latency_ms = latency_ms;
           };
       };
-  }
+  } in
+  Keeper_unified_metrics.record_keeper_total_cost_usd
+    ~keeper_name:updated_meta.name
+    ~total_cost_usd:updated_meta.runtime.usage.total_cost_usd;
+  updated_meta
 
 let direct_turn_observation (meta : keeper_meta) :
     Keeper_world_observation.world_observation =

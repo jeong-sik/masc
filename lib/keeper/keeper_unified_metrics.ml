@@ -252,6 +252,9 @@ let usage_trust_json_fields = Keeper_usage_trust.json_fields
 let usage_trust_outcome_metric = Prometheus.metric_keeper_usage_trust
 let usage_anomaly_reason_metric = Prometheus.metric_keeper_usage_anomaly_reason
 
+let keeper_total_cost_usd_help =
+  "Accumulated trusted USD cost per keeper (labels: keeper_name)"
+
 let record_usage_trust ~keeper_name ~(trust : usage_trust) =
   let outcome = usage_trust_to_string trust in
   Prometheus.inc_counter usage_trust_outcome_metric
@@ -269,6 +272,18 @@ let record_usage_trust ~keeper_name ~(trust : usage_trust) =
        to 0.0 for this turn by [usage_trust_is_trusted] gate."
       keeper_name (String.concat "," reasons)
   | Usage_missing | Usage_trusted -> ()
+
+let record_keeper_total_cost_usd ~keeper_name ~total_cost_usd =
+  let labels = [ ("keeper_name", keeper_name) ] in
+  Prometheus.register_gauge
+    ~name:Prometheus.metric_keeper_total_cost_usd
+    ~help:keeper_total_cost_usd_help
+    ~labels
+    ();
+  Prometheus.set_gauge
+    Prometheus.metric_keeper_total_cost_usd
+    ~labels
+    total_cost_usd
 
 let turn_mode_to_string = function
   | Tool_use -> "tool_use"
@@ -1121,7 +1136,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
       ~labels:[ ("keeper", meta.name); ("outcome", outcome) ]
       ()
   end;
-  {
+  let updated_meta = {
     meta with
     updated_at = now_iso ();
     runtime = { rt with
@@ -1266,7 +1281,11 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
       last_blocker_class = None;
       last_need = Option.value ~default:"" social_state.need;
     };
-  }
+  } in
+  record_keeper_total_cost_usd
+    ~keeper_name:updated_meta.name
+    ~total_cost_usd:updated_meta.runtime.usage.total_cost_usd;
+  updated_meta
 
 let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)

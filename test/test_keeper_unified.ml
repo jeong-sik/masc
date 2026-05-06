@@ -3487,6 +3487,15 @@ let test_estimate_trusted_usage_cost_uses_cache_usage () =
        ~model:"claude-sonnet-4-6"
        result.usage)
 
+let test_record_keeper_total_cost_metric () =
+  let keeper_name = "cost-metric-keeper" in
+  UM.record_keeper_total_cost_usd ~keeper_name ~total_cost_usd:0.042;
+  check (option (float 0.0001)) "keeper total cost gauge" (Some 0.042)
+    (Masc_mcp.Prometheus.get_metric_value
+       Masc_mcp.Prometheus.metric_keeper_total_cost_usd
+       ~labels:[ ("keeper_name", keeper_name) ]
+       ())
+
 let test_append_metrics_snapshot_marks_untrusted_usage () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -8041,6 +8050,8 @@ let () =
             test_append_metrics_snapshot_persists_cache_usage;
           test_case "trusted usage cost uses cache token pricing" `Quick
             test_estimate_trusted_usage_cost_uses_cache_usage;
+          test_case "total cost gauge records accumulated keeper cost" `Quick
+            test_record_keeper_total_cost_metric;
           test_case "snapshot marks untrusted usage" `Quick
             test_append_metrics_snapshot_marks_untrusted_usage;
           test_case "decision record persists tool call details" `Quick

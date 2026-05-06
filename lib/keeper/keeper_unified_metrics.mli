@@ -80,6 +80,13 @@ val record_usage_trust :
   trust:usage_trust ->
   unit
 
+val record_keeper_total_cost_usd :
+  keeper_name:string ->
+  total_cost_usd:float ->
+  unit
+(** Set [masc_keeper_total_cost_usd{keeper_name}] to the keeper runtime's
+    accumulated trusted USD cost. *)
+
 val context_max_bucket : int -> string
 (** #9953: bucket a raw [context_max] integer into a bounded
     label vocabulary [zero | 64k | 128k | 200k | 256k | 1m |

@@ -231,6 +231,8 @@ let metric_keeper_cache_read_tokens =
   "masc_keeper_cache_read_tokens_total"
 let metric_keeper_usage_anomalies =
   "masc_keeper_usage_anomalies_total"
+let metric_keeper_total_cost_usd =
+  "masc_keeper_total_cost_usd"
 
 (** #10530: keeper required-tool-contract violations (passive-only or
     text-only turns rejected by the keeper agent loop).
@@ -2105,6 +2107,9 @@ let init () =
   add metric_keeper_usage_anomalies
     "Keeper turns whose reported usage was marked untrusted (labels: keeper_name, model, reason)"
     Counter;
+  add metric_keeper_total_cost_usd
+    "Accumulated trusted USD cost per keeper (labels: keeper_name)"
+    Gauge;
   add metric_keeper_contract_violations
     "Keeper turns rejected for required-tool-contract violations (labels: keeper_name, kind={passive|text_only}). #10530."
     Counter;

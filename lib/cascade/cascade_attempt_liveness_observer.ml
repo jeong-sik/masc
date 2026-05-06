@@ -185,12 +185,17 @@ let tick_interval_seconds (b : L.budget) : float =
   let smaller = Float.min b.ttft_max b.inter_chunk_max in
   Float.max 0.5 (smaller /. 4.0)
 
+let register_attempt_switch (t : t) ~(sw : Eio.Switch.t) : unit =
+  match t.mode with
+  | Cfg.Off -> ()
+  | Cfg.Observe | Cfg.Enforce -> t.sw_ref := Some sw
+
 let start_tick_fiber (t : t) ~(sw : Eio.Switch.t)
     ~(clock : _ Eio.Time.clock) : unit =
   match t.mode with
   | Cfg.Off -> ()
   | Cfg.Observe | Cfg.Enforce ->
-      t.sw_ref := Some sw;
+      register_attempt_switch t ~sw;
       let interval = tick_interval_seconds t.budget in
       Eio.Fiber.fork ~sw (fun () ->
           let rec loop () =

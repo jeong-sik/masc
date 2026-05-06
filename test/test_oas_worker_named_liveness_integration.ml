@@ -12,9 +12,10 @@
 
     2. The observer module is reachable through the
        [Cascade_attempt_liveness_observer.{create, wrap_on_event,
-       finalize}] surface that try_provider depends on, with the
-       expected mode contract (Off pass-through; Observe wraps; Enforce
-       wraps + raises). Same surface, exercised end-to-end.
+       register_attempt_switch, finalize}] surface that try_provider
+       depends on, with the expected mode contract (Off pass-through;
+       Observe wraps; Enforce wraps + scopes cancellation to the provider
+       attempt switch even when no clock is available).
 
     3. End-to-end finalize emits the observed_total counter with the
        outcome label that try_provider's `finalize_liveness ()` call
@@ -25,33 +26,6 @@ module Cfg = Cascade_attempt_liveness_config
 module Obs = Cascade_attempt_liveness_observer
 
 let env_var = "MASC_CASCADE_ATTEMPT_LIVENESS"
-
-let source_root () =
-  match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root -> root
-  | None -> Sys.getcwd ()
-
-let source_path file_rel = Filename.concat (source_root ()) file_rel
-
-let string_contains haystack needle =
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
-  if needle_len = 0 then true
-  else
-    let rec loop idx =
-      idx + needle_len <= haystack_len
-      && (String.sub haystack idx needle_len = needle || loop (idx + 1))
-    in
-    loop 0
-
-let file_contains_pattern file_rel pattern =
-  let path = source_path file_rel in
-  if not (Sys.file_exists path) then false
-  else
-    let ic = open_in path in
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr ic)
-      (fun () -> string_contains (In_channel.input_all ic) pattern)
 
 let with_env value f =
   let prior = Sys.getenv_opt env_var in
@@ -143,27 +117,35 @@ let test_e2e_off_no_observed_total () =
       Alcotest.(check (float 1e-6))
         "Off finalize emits no observed counter" before after)
 
-let test_enforce_uses_provider_attempt_switch_contract () =
-  let file = "lib/oas_worker_named.ml" in
-  Alcotest.(check bool)
-    "liveness tick fiber runs under attempt switch"
-    true
-    (file_contains_pattern file
-       "Cascade_attempt_liveness_observer.start_tick_fiber obs\n                       ~sw:attempt_sw ~clock");
-  Alcotest.(check bool)
-    "OAS run uses attempt switch"
-    true
-    (file_contains_pattern file "Oas_worker_exec.run ~sw:attempt_sw");
-  Alcotest.(check bool)
-    "liveness kill is converted to provider error"
-    true
-    (file_contains_pattern file
-       "Cascade_attempt_liveness_observer.Liveness_kill failure");
-  Alcotest.(check bool)
-    "converted liveness kill is timeout-like"
-    true
-    (file_contains_pattern file
-       "Cascade attempt liveness guard killed provider %s/%s: %s")
+let test_enforce_registered_switch_kills_attempt_without_tick_clock () =
+  let cascade = "integ_enforce_cascade" in
+  let provider = "integ_enforce_provider" in
+  let raised = ref None in
+  with_env (Some "enforce") (fun () ->
+      Eio_main.run (fun _env ->
+          try
+            Eio.Switch.run (fun attempt_sw ->
+                let mode = Cfg.current_mode () in
+                let budget = Cfg.budget_for_label provider in
+                let obs =
+                  Obs.create ~mode ~budget ~cascade_label:cascade
+                    ~provider_label:provider ~started_at:0.0
+                in
+                Obs.register_attempt_switch obs ~sw:attempt_sw;
+                let wrapped = Obs.wrap_on_event obs None in
+                (match wrapped with
+                 | Some f -> f (Agent_sdk.Types.SSEError "wire boom")
+                 | None -> Alcotest.fail "Enforce should wrap");
+                Eio.Fiber.yield ())
+          with
+          | Obs.Liveness_kill failure ->
+              raised := Some (Cascade_attempt_liveness.failure_kind_label failure)
+          | exn ->
+              Alcotest.failf "unexpected exception: %s" (Printexc.to_string exn)));
+  Alcotest.(check (option string))
+    "registered attempt switch receives enforce kill without tick fiber"
+    (Some "provider_error")
+    !raised
 
 let () =
   Alcotest.run "oas_worker_named_liveness_integration"
@@ -185,7 +167,7 @@ let () =
       ( "source contract",
         [
           Alcotest.test_case
-            "enforce kill is scoped to provider-attempt switch" `Quick
-            test_enforce_uses_provider_attempt_switch_contract;
+            "enforce kill is scoped without clock tick fiber" `Quick
+            test_enforce_registered_switch_kills_attempt_without_tick_clock;
         ] );
     ]

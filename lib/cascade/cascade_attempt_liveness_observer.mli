@@ -71,6 +71,16 @@ val wrap_on_event :
     - [Enforce]: same as [Observe] plus may [Eio.Switch.fail] on
       [Outcome]. *)
 
+val register_attempt_switch :
+  t ->
+  sw:Eio.Switch.t ->
+  unit
+(** Register the provider-attempt switch used by enforce mode.
+
+    This is separate from {!start_tick_fiber} so callers without an
+    available Eio clock can still scope [Liveness_kill] cancellation to the
+    current provider attempt. *)
+
 val start_tick_fiber :
   t ->
   sw:Eio.Switch.t ->

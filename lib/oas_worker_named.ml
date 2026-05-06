@@ -476,6 +476,11 @@ let run_named
         let run_attempt () =
           try
             Eio.Switch.run (fun attempt_sw ->
+                (match liveness_observer_opt with
+                 | Some obs ->
+                     Cascade_attempt_liveness_observer.register_attempt_switch
+                       obs ~sw:attempt_sw
+                 | None -> ());
                 (match liveness_observer_opt, Eio_context.get_clock_opt () with
                  | Some obs, Some clock ->
                      Cascade_attempt_liveness_observer.start_tick_fiber obs

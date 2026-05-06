@@ -170,6 +170,12 @@ let contains_substring haystack needle =
 let degraded_reason_of_error message =
   let lower = String.lowercase_ascii message in
   if
+    contains_substring lower "unparseable"
+    || contains_substring lower "structurally invalid"
+    || contains_substring lower "guardrail_state"
+  then
+    "judge_output_invalid"
+  else if
     contains_substring lower "timeout"
     || contains_substring lower "timed out"
     || contains_substring lower "deadline"
@@ -488,18 +494,66 @@ let parse_recommended_action json =
           ])
   | _ -> None
 
+type governance_response_parse_failure =
+  | Lenient_fallback of string
+  | Structural_error of string
+
+let parse_lenient_governance_json raw_text =
+  let parsed = Llm_provider.Lenient_json.parse raw_text in
+  match parsed with
+  | `Assoc [("raw", `String raw)] -> (
+      match Judge_json_recovery.extract_balanced_object raw with
+      | Some block -> (
+          try Ok (Llm_provider.Lenient_json.parse block)
+          with
+          | Yojson.Json_error _ -> Error (Lenient_fallback raw)
+          | Failure _ -> Error (Lenient_fallback raw))
+      | None -> Error (Lenient_fallback raw))
+  | _ -> Ok parsed
+
+let parse_required_guardrail_state json =
+  match json |> member "guardrail_state" with
+  | `Assoc fields ->
+      let required_field name =
+        match List.assoc_opt name fields with
+        | Some value -> Ok value
+        | None -> Error (Printf.sprintf "missing guardrail_state.%s" name)
+      in
+      let requires_human_gate = required_field "requires_human_gate" in
+      let pending_confirm_token = required_field "pending_confirm_token" in
+      let ready_to_execute = required_field "ready_to_execute" in
+      (match requires_human_gate, pending_confirm_token, ready_to_execute with
+       | Ok (`Bool _ as requires_human_gate),
+         Ok ((`String _ | `Null) as pending_confirm_token),
+         Ok (`Bool _ as ready_to_execute) ->
+           Ok
+             (`Assoc
+               [
+                 ("requires_human_gate", requires_human_gate);
+                 ("pending_confirm_token", pending_confirm_token);
+                 ("ready_to_execute", ready_to_execute);
+               ])
+       | Error reason, _, _ | _, Error reason, _ | _, _, Error reason ->
+           Error reason
+       | _ ->
+           Error
+             "invalid guardrail_state: expected requires_human_gate bool, \
+              pending_confirm_token string|null, ready_to_execute bool")
+  | `Null -> Error "missing guardrail_state"
+  | _ -> Error "invalid guardrail_state: expected object"
+
 let parse_item_judgment ~generated_at ~expires_at ~model_used json =
   let target_kind =
     json |> member "kind" |> to_string_option |> Option.value ~default:""
     |> String.lowercase_ascii
   in
   let target_id = json |> member "id" |> to_string_option |> Option.value ~default:"" in
-  if target_kind = "" || target_id = "" then None
+  if target_kind = "" || target_id = "" then Ok None
   else
     let summary =
       normalize_text (json |> member "summary" |> to_string_option |> Option.value ~default:"")
     in
-    if summary = "" then None
+    if summary = "" then Ok None
     else
       let confidence =
         match json |> member "confidence" with
@@ -509,35 +563,65 @@ let parse_item_judgment ~generated_at ~expires_at ~model_used json =
       in
       let evidence_refs = parse_string_list json "evidence_refs" in
       let recommended_action = parse_recommended_action json in
-      let guardrail_state =
-        match json |> member "guardrail_state" with
-        | `Assoc _ as state_json ->
-            Some
-              (`Assoc
-                [
-                  ("requires_human_gate", state_json |> member "requires_human_gate");
-                  ("pending_confirm_token", state_json |> member "pending_confirm_token");
-                  ("ready_to_execute", state_json |> member "ready_to_execute");
-                ])
-        | _ -> None
-      in
-      Some
-        (`Assoc
-          [
-            ("judgment_id", `String (Uuidm.to_string (Uuidm.v4_gen (Random.State.make_self_init ()) ())));
-            ("target_kind", `String target_kind);
-            ("target_id", `String target_id);
-            ("status", `String "active");
-            ("summary", `String summary);
-            ("confidence", `Float confidence);
-            ("generated_at", `String generated_at);
-            ("expires_at", `String expires_at);
-            ("model_used", `String model_used);
-            ("keeper_name", `String keeper_name);
-            ("evidence_refs", `List (List.map (fun item -> `String item) evidence_refs));
-            ("recommended_action", option_to_yojson (fun value -> value) recommended_action);
-            ("guardrail_state", option_to_yojson (fun value -> value) guardrail_state);
-          ])
+      match parse_required_guardrail_state json with
+      | Error reason ->
+          Error
+            (Printf.sprintf "item %s:%s %s" target_kind target_id reason)
+      | Ok guardrail_state ->
+          Ok
+            (Some
+               (`Assoc
+                 [
+                   ( "judgment_id",
+                     `String
+                       (Uuidm.to_string
+                          (Uuidm.v4_gen (Random.State.make_self_init ()) ())) );
+                   ("target_kind", `String target_kind);
+                   ("target_id", `String target_id);
+                   ("status", `String "active");
+                   ("summary", `String summary);
+                   ("confidence", `Float confidence);
+                   ("generated_at", `String generated_at);
+                   ("expires_at", `String expires_at);
+                   ("model_used", `String model_used);
+                   ("keeper_name", `String keeper_name);
+                   ( "evidence_refs",
+                     `List (List.map (fun item -> `String item) evidence_refs) );
+                   ( "recommended_action",
+                     option_to_yojson (fun value -> value) recommended_action );
+                   ("guardrail_state", guardrail_state);
+                 ]))
+
+let parse_governance_response ~raw_text ~generated_at ~expires_at ~model_used =
+  match parse_lenient_governance_json raw_text with
+  | Error _ as error -> error
+  | Ok parsed -> (
+      match parsed with
+      | `Assoc _ -> (
+          match parsed |> member "items" with
+          | `List rows ->
+              let rec loop acc = function
+                | [] -> Ok (List.rev acc)
+                | row :: rest -> (
+                    match
+                      parse_item_judgment ~generated_at ~expires_at ~model_used row
+                    with
+                    | Error reason -> Error (Structural_error reason)
+                    | Ok None -> loop acc rest
+                    | Ok (Some judgment) -> loop (judgment :: acc) rest)
+              in
+              loop [] rows
+          | _ ->
+              Error
+                (Structural_error
+                   "expected top-level items array in judge response"))
+      | _ ->
+          Error
+            (Structural_error
+               "expected top-level JSON object in judge response"))
+
+let parse_governance_response_for_testing =
+  parse_governance_response
 
 let prompt_for_facts facts_json =
   match
@@ -576,91 +660,65 @@ let compute_judgments
   | Ok result -> (
       let response = result.Oas_worker.response in
       try
-        (* LLMs frequently wrap JSON in ```json … ``` markdown fences despite
-           explicit prompt instructions. Lenient_json strips fences, repairs
-           trailing commas, unwraps double-stringified JSON, and falls back
-           to {raw: string} only after all recovery transforms fail. *)
         let raw_text = Oas_response.text_of_response response in
-        let parsed = Llm_provider.Lenient_json.parse raw_text in
-        let parsed =
-          (* #9851: when the model prefixes prose before the JSON object
-             ("Here is the judgment: {...}"), Lenient_json's fence/comma
-             recovery does not strip the prose and falls through to the
-             {raw: <text>} sentinel. Try one more recovery: locate the
-             first balanced {...} block in the raw text and re-parse. *)
-          match parsed with
-          | `Assoc [("raw", `String raw)] -> (
-              match Judge_json_recovery.extract_balanced_object raw with
-              | Some block -> (
-                  try Llm_provider.Lenient_json.parse block
-                  with
-                  | Yojson.Json_error _ -> parsed
-                  | Failure _ -> parsed)
-              | None -> parsed)
-          | _ -> parsed
+        let generated_at = now_iso () in
+        let expires_at = iso_of_unix (Unix.gettimeofday () +. cache_ttl_sec ()) in
+        (* #9880 facet 4: 17% of yesterday's judgment records had
+           [model_used = ""] because OAS transports occasionally
+           return [response.model = ""] (Kimi/Codex CLI silent
+           failure path; CompletionContractViolation
+           retry-exhausted synthetic responses).  An empty
+           [model_used] field destroys attribution downstream
+           (cost rollups, per-model latency p50/p99, daily
+           judgments-by-model breakdown).
+
+           Same shape as keeper-side fix #10083: layered
+           fallback (raw → telemetry canonical_model_id → named
+           sentinel) plus a counter so the operator can see WHICH
+           transport leaked.  Sentinel matches the keeper-side
+           string [unknown_provider] so dashboards can
+           union-aggregate empty-model events across both callers. *)
+        let canonical_model_id =
+          match response.telemetry with
+          | Some { canonical_model_id = Some id; _ } -> Some id
+          | _ -> None
         in
-        match parsed with
-        | `Assoc [("raw", `String raw)] ->
-            (* #9774: surface a preview of the raw text so the next
-               diagnostic pass can see what shape the LLM is producing
-               without having to enable raw provider logging. *)
+        let resolved_model, model_source =
+          resolve_governance_model_used ~raw_model:response.model
+            ~canonical_model_id
+        in
+        begin
+          match model_source with
+          | Response_model -> ()
+          | Telemetry_resolved | Unknown_sentinel ->
+              let source = governance_model_source_to_string model_source in
+              Prometheus.inc_counter
+                governance_response_model_empty_metric
+                ~labels:[ ("source", source) ]
+                ();
+              Log.Governance.warn
+                "compute_judgments: response.model empty → fallback=%s resolved=%s (#9880)"
+                source resolved_model;
+        end;
+        match
+          parse_governance_response ~raw_text ~generated_at ~expires_at
+            ~model_used:resolved_model
+        with
+        | Ok judgments -> Ok (resolved_model, generated_at, expires_at, judgments)
+        | Error (Lenient_fallback raw) ->
             let msg =
-              Judge_diagnostics.record_lenient_fallback ~judge_label:"Governance" raw
+              Judge_diagnostics.record_lenient_fallback
+                ~judge_label:"Governance" raw
             in
             Log.Governance.warn "%s" msg;
             Error msg
-        | _ ->
-            let generated_at = now_iso () in
-            let expires_at = iso_of_unix (Unix.gettimeofday () +. cache_ttl_sec ()) in
-            let items =
-              match parsed |> member "items" with
-              | `List rows -> rows
-              | _ -> []
+        | Error (Structural_error reason) ->
+            let msg =
+              Judge_diagnostics.record_unparseable_response
+                ~judge_label:"Governance" ~reason raw_text
             in
-            (* #9880 facet 4: 17% of yesterday's judgment records had
-               [model_used = ""] because OAS transports occasionally
-               return [response.model = ""] (Kimi/Codex CLI silent
-               failure path; CompletionContractViolation
-               retry-exhausted synthetic responses).  An empty
-               [model_used] field destroys attribution downstream
-               (cost rollups, per-model latency p50/p99, daily
-               judgments-by-model breakdown).
-
-               Same shape as keeper-side fix #10083: layered
-               fallback (raw → telemetry canonical_model_id → named
-               sentinel) plus a counter so the operator can see
-               WHICH transport leaked.  Sentinel matches the
-               keeper-side string [unknown_provider] so dashboards
-               can union-aggregate empty-model events across both
-               callers. *)
-            let canonical_model_id =
-              match response.telemetry with
-              | Some { canonical_model_id = Some id; _ } -> Some id
-              | _ -> None
-            in
-            let resolved_model, model_source =
-              resolve_governance_model_used ~raw_model:response.model ~canonical_model_id
-            in
-            begin
-              match model_source with
-              | Response_model -> ()
-              | Telemetry_resolved | Unknown_sentinel ->
-                let source = governance_model_source_to_string model_source in
-                Prometheus.inc_counter
-                  governance_response_model_empty_metric
-                  ~labels:[ ("source", source) ]
-                  ();
-                Log.Governance.warn
-                  "compute_judgments: response.model empty → fallback=%s resolved=%s (#9880)"
-                  source resolved_model;
-            end;
-            let judgments =
-              items
-              |> List.filter_map
-                   (parse_item_judgment ~generated_at ~expires_at
-                      ~model_used:resolved_model)
-            in
-            Ok (resolved_model, generated_at, expires_at, judgments)
+            Log.Governance.warn "%s" msg;
+            Error msg
       with
       | Yojson.Json_error msg ->
           Error (Printf.sprintf "Governance judge returned invalid JSON: %s" msg)

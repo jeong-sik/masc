@@ -23,6 +23,14 @@ let format_lenient_fallback ~judge_label raw =
     (String.length raw)
     (truncate_with_marker raw)
 
+let format_unparseable_response ~judge_label ~reason raw =
+  Printf.sprintf
+    "%s judge returned structurally invalid response (%s; %d chars; preview: %s)"
+    judge_label
+    reason
+    (String.length raw)
+    (truncate_with_marker raw)
+
 let record_lenient_fallback ~judge_label raw =
   let labels = [("judge", String.lowercase_ascii judge_label)] in
   Prometheus.inc_counter
@@ -34,6 +42,14 @@ let record_lenient_fallback ~judge_label raw =
     ~labels
     ();
   format_lenient_fallback ~judge_label raw
+
+let record_unparseable_response ~judge_label ~reason raw =
+  let labels = [("judge", String.lowercase_ascii judge_label)] in
+  Prometheus.inc_counter
+    Prometheus.metric_governance_judge_unparseable
+    ~labels
+    ();
+  format_unparseable_response ~judge_label ~reason raw
 
 let int_metric_value metric_name ~labels =
   int_of_float (Prometheus.metric_value_or_zero metric_name ~labels ())

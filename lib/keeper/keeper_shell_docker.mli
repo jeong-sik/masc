@@ -114,6 +114,9 @@ val optional_ro_mount :
 val repair_container_worktree_gitdirs :
   host_root:string -> container_root:string -> int
 
+val prepare_container_worktree_gitdirs :
+  host_root:string -> container_root:string -> int
+
 (** Result envelope returned by [run_docker_shell_command_with_status]. *)
 type docker_shell_result =
   { status : Unix.process_status

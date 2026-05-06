@@ -506,6 +506,19 @@ module Tools = struct
     let v = get_int ~default:512 "MASC_LIST_PAGE_SIZE" in
     max 10 (min 1024 v)
 
+  (** Default outer MCP tool-call timeout, clamped to [5, 300] seconds.
+      Board writes have a separate timeout below so operators can tune
+      persistence stalls without raising every tool. *)
+  let timeout_default_sec () =
+    let v = get_int ~default:60 "MASC_TOOL_TIMEOUT_DEFAULT_SEC" in
+    float_of_int (max 5 (min 300 v))
+
+  (** Board write outer MCP tool-call timeout, clamped to [5, 300] seconds.
+      Default: 90 seconds (#10569). *)
+  let board_write_timeout_sec () =
+    let v = get_int ~default:90 "MASC_TOOL_TIMEOUT_BOARD_SEC" in
+    float_of_int (max 5 (min 300 v))
+
   (** Tool description budget (max chars). None = unlimited. *)
   let description_budget_opt () =
     match Sys.getenv_opt "MASC_TOOL_DESCRIPTION_BUDGET" |> trim_opt with

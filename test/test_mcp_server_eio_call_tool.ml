@@ -23,6 +23,16 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some v -> Unix.putenv name v
+      | None -> Unix.putenv name "")
+    f
+
 let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = [])
     ?tool_access name =
   let agent_name =
@@ -155,6 +165,28 @@ let test_regular_tool_uses_default_timeout () =
   with
   | Some timeout_sec -> check bool "default timeout remains enabled" true (timeout_sec >= 5.)
   | None -> fail "expected masc_status to keep fixed timeout"
+
+let test_board_write_tool_uses_board_timeout_default () =
+  with_env "MASC_TOOL_TIMEOUT_BOARD_SEC" "" (fun () ->
+    match
+      Masc_mcp.Mcp_server_eio_call_tool.tool_timeout_sec_opt
+        ~tool_name:"keeper_board_post"
+        ~_arguments:(`Assoc [])
+    with
+    | Some timeout_sec ->
+        check (float 0.001) "board write default timeout" 90.0 timeout_sec
+    | None -> fail "expected keeper_board_post to keep fixed timeout")
+
+let test_board_write_tool_timeout_override () =
+  with_env "MASC_TOOL_TIMEOUT_BOARD_SEC" "123" (fun () ->
+    match
+      Masc_mcp.Mcp_server_eio_call_tool.tool_timeout_sec_opt
+        ~tool_name:"masc_board_vote"
+        ~_arguments:(`Assoc [])
+    with
+    | Some timeout_sec ->
+        check (float 0.001) "board write timeout override" 123.0 timeout_sec
+    | None -> fail "expected masc_board_vote to keep fixed timeout")
 
 let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
   let base_path = temp_dir () in
@@ -435,6 +467,10 @@ let () =
           test_case "persona generate timeout exceeds OAS budget" `Quick
             test_persona_generate_timeout_exceeds_oas_budget;
           test_case "regular tool keeps default timeout" `Quick test_regular_tool_uses_default_timeout;
+          test_case "board write keeps board timeout default" `Quick
+            test_board_write_tool_uses_board_timeout_default;
+          test_case "board write timeout override" `Quick
+            test_board_write_tool_timeout_override;
           test_case "runtime MCP log context uses keeper trace/current turn" `Quick
             test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn;
           test_case "runtime MCP log context loads current task contract" `Quick

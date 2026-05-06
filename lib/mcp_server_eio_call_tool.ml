@@ -18,16 +18,6 @@ let log_mcp_exn ~label exn =
   in
   Log.Mcp.info "%s%s: %s" tag label (Printexc.to_string exn)
 
-(** Parse bounded int from environment variable. *)
-let int_of_env_default name ~default ~min_v ~max_v =
-  match Sys.getenv_opt name with
-  | None -> default
-  | Some raw ->
-      let parsed =
-        Option.value ~default:default (int_of_string_opt (String.trim raw))
-      in
-      max min_v (min max_v parsed)
-
 (* Substring containment, ASCII case-insensitive.  Delegates to
    [String_util.contains_substring_ci] (which scans byte-wise without
    allocating) and preserves the local "empty needle matches all"
@@ -543,6 +533,32 @@ let coerce_tool_timeout_sec (raw_timeout_sec : float option) : float option =
       let raw_sec = int_of_float (Float.ceil raw) in
       Some (float_of_int (max 5 (min 300 raw_sec)))
 
+let tool_timeout_default_env = "MASC_TOOL_TIMEOUT_DEFAULT_SEC"
+let tool_timeout_board_env = "MASC_TOOL_TIMEOUT_BOARD_SEC"
+
+let default_tool_timeout_sec () =
+  Env_config_runtime.Tools.timeout_default_sec ()
+
+let board_write_tool_timeout_sec () =
+  Env_config_runtime.Tools.board_write_timeout_sec ()
+
+let is_board_write_tool_name = function
+  | "keeper_board_post"
+  | "keeper_board_comment"
+  | "keeper_board_vote"
+  | "keeper_board_comment_vote"
+  | "masc_board_post"
+  | "masc_board_comment"
+  | "masc_board_vote"
+  | "masc_board_comment_vote" -> true
+  | _ -> false
+
+let tool_timeout_source ~(tool_name : string) =
+  match tool_name with
+  | "masc_persona_generate" -> "internal:masc_persona_generate_outer_budget"
+  | _ when is_board_write_tool_name tool_name -> tool_timeout_board_env
+  | _ -> tool_timeout_default_env
+
 (** Optional per-tool timeout to prevent long calls from starving the request loop. *)
 let tool_timeout_sec_opt ~(tool_name : string) ~(_arguments : Yojson.Safe.t) : float option =
   match tool_name with
@@ -562,16 +578,15 @@ let tool_timeout_sec_opt ~(tool_name : string) ~(_arguments : Yojson.Safe.t) : f
          the outer MCP tools/call timeout above that budget so callers see the
          generation result or the OAS error instead of a premature MCP timeout. *)
       Some 150.0
+  | _ when is_board_write_tool_name tool_name ->
+      (* #10569: board writes have a dedicated outer budget. They now expose
+         persist lock acquire/held histograms, but a transient disk stall can
+         still exceed the generic 60s MCP default before the board path's own
+         diagnostics are useful. Keep this separate from the global default so
+         operators can tune board writes without raising every tool. *)
+      Some (board_write_tool_timeout_sec ())
   | _ ->
-      let global_default_sec =
-        float_of_int
-          (int_of_env_default
-             "MASC_TOOL_TIMEOUT_DEFAULT_SEC"
-             ~default:60
-             ~min_v:5
-             ~max_v:300)
-      in
-      Some global_default_sec
+      Some (default_tool_timeout_sec ())
 
 (** Resolve managed agent tool call to canonical operation *)
 let resolve_managed_agent_call ?mcp_session_id params =
@@ -638,9 +653,10 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
                Log.Mcp.error "tools/call timeout: %s after %.0fs" name timeout_sec;
                (false,
                 Printf.sprintf
-                  "Tool timed out after %.0fs: %s (env: MASC_TOOL_TIMEOUT_DEFAULT_SEC)"
+                  "Tool timed out after %.0fs: %s (env: %s)"
                   timeout_sec
-                  name))
+                  name
+                  (tool_timeout_source ~tool_name:name)))
      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
        (* Never let a tool exception crash the MCP server. *)
        let err = Printexc.to_string exn in

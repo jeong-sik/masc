@@ -1100,6 +1100,31 @@ let test_keeper_required_tool_contracts () =
     (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
        "`keeper_shell`, `keeper_bash`, `masc_code_git`, `keeper_pr_create`, and")
 
+let test_keeper_msg_timeout_contracts () =
+  check bool "keeper msg schema exposes timeout_sec" true
+    (file_contains_pattern "lib/keeper/keeper_schema.ml"
+       "Optional: overall cascade timeout (sec) for this keeper message call");
+  check bool "keeper msg parses timeout_sec override" true
+    (file_contains_pattern "lib/keeper/keeper_turn.ml"
+       "get_float_opt args \"timeout_sec\"");
+  check bool "keeper msg rejects non-positive timeout override" true
+    (file_contains_pattern "lib/keeper/keeper_turn.ml"
+       "timeout_sec must be a positive finite number");
+  check bool "keeper msg forwards timeout_sec into Agent.run" true
+    (file_contains_pattern "lib/keeper/keeper_turn.ml"
+       "?oas_timeout_s:keeper_msg_oas_timeout_s");
+  check bool "docker PR lifecycle harness decouples HTTP and keeper turn timeout" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       {|KEEPER_TURN_TIMEOUT_SEC="${KEEPER_TURN_TIMEOUT_SEC:-900}"|});
+  check bool "docker PR lifecycle harness sends keeper turn timeout" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       {|--argjson timeout "$KEEPER_TURN_TIMEOUT_SEC"|});
+  check bool "runbook documents keeper turn timeout" true
+    (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+       "`masc_keeper_msg.timeout_sec` through `KEEPER_TURN_TIMEOUT_SEC`")
+
 let test_board_flusher_start_retry_contracts () =
   check bool "board flusher start has bounded CAS retry count" true
     (file_contains_pattern "lib/board_dispatch.ml"
@@ -1924,6 +1949,8 @@ let () =
              test_keeper_docker_multikeeper_isolation_contracts;
            test_case "keeper required tool contracts" `Quick
              test_keeper_required_tool_contracts;
+           test_case "keeper msg timeout contracts" `Quick
+             test_keeper_msg_timeout_contracts;
            test_case "board flusher start retry contracts" `Quick
              test_board_flusher_start_retry_contracts;
            test_case "docker config storage contracts" `Quick

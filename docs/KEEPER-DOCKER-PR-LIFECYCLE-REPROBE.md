@@ -40,6 +40,11 @@ those tools are not visible and `missing_required_tool_use` if the keeper
 replies without exercising them.
 Override the CSV with `REQUIRED_TOOLS=...` for a narrower or broader proof
 lane.
+`MSG_TIMEOUT_SEC` only bounds the harness HTTP request to the MCP server.
+The keeper's actual Agent.run budget is sent separately as
+`masc_keeper_msg.timeout_sec` through `KEEPER_TURN_TIMEOUT_SEC`, which defaults
+to 900 seconds so Docker git/PR proof turns are not capped by the short MCP
+request timeout.
 
 ```bash
 ./scripts/harness_keeper_docker_pr_lifecycle_reprobe.sh

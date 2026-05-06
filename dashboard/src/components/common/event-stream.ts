@@ -16,6 +16,8 @@ export interface StreamEvent {
 
 export type EventStreamStatus = 'empty' | 'ok' | 'warning' | 'error'
 export type EventStreamAttractionBand = 'high' | 'medium' | 'low'
+export type EventStreamSemanticFocus = string | readonly string[]
+export type IntentProjectionTargetKind = 'source' | 'level'
 
 export interface EventStreamSummary {
   totalCount: number
@@ -30,6 +32,11 @@ export interface EventStreamSummary {
   maxTemporalSyncGroupSize: number
   highAttractionCount: number
   maxAttractionScore: number
+  semanticGravityTermCount: number
+  semanticGravityMatchCount: number
+  maxSemanticGravityScore: number
+  intentProjectionCount: number
+  topIntentProjectionProbability: number
   status: EventStreamStatus
 }
 
@@ -40,10 +47,34 @@ export interface TemporalSyncStreamRow {
   syncAnchorTimestamp: number | null
 }
 
+export interface SemanticGravityStreamRow extends TemporalSyncStreamRow {
+  originalVisibleIndex: number
+  semanticGravityScore: number
+  semanticGravityRank: number
+}
+
+export interface IntentProjectionRow {
+  key: string
+  label: string
+  targetKind: IntentProjectionTargetKind
+  probability: number
+  evidenceCount: number
+}
+
+interface EventStreamModel {
+  visible: StreamEvent[]
+  syncRows: TemporalSyncStreamRow[]
+  semanticRows: SemanticGravityStreamRow[]
+  intentProjections: IntentProjectionRow[]
+  summary: EventStreamSummary
+}
+
 interface EventStreamProps {
   events: StreamEvent[]
   maxItems?: number
   temporalSyncWindowMs?: number
+  semanticFocus?: EventStreamSemanticFocus
+  maxIntentProjections?: number
   testId?: string
 }
 
@@ -104,6 +135,162 @@ function levelAttraction(level: StreamEvent['level']): number {
     case 'info':
       return 0.45
   }
+}
+
+function normalizedSemanticTerms(focus: EventStreamSemanticFocus | undefined): string[] {
+  const values = typeof focus === 'string' ? [focus] : focus ?? []
+  const terms: string[] = []
+
+  for (const value of values) {
+    const normalized = value.trim().toLowerCase()
+    if (!normalized) continue
+    // Tokenize on non-word chars and feed only the parts into [terms].
+    // Previously we also pushed the full [normalized] string, but
+    // streamEventSemanticGravityScore averages over [terms.length], so
+    // multi-word focus strings (e.g. "agent-a started") were paying an
+    // extra averaging slot for a literal-string term that almost never
+    // matches event fields — systematically lowering the score even when
+    // every meaningful token did match. Set dedupe still collapses
+    // single-token focuses (where token === normalized) to one entry.
+    const parts = normalized.split(/[^a-z0-9_.:/-]+/)
+    let tokenized = false
+    for (const part of parts) {
+      if (part.length >= 2) {
+        terms.push(part)
+        tokenized = true
+      }
+    }
+    // Fall back to the full normalized string only when tokenization
+    // produced nothing usable (e.g. a single character like "a"); we
+    // still want a non-empty terms list for the score path.
+    if (!tokenized) terms.push(normalized)
+  }
+
+  return Array.from(new Set(terms)).slice(0, 16)
+}
+
+function intentTermsForEvent(event: StreamEvent): string[] {
+  return normalizedSemanticTerms([
+    event.source ?? '',
+    event.message,
+    event.id,
+    event.level,
+  ])
+}
+
+function fieldIncludes(value: string | undefined, term: string): boolean {
+  return value?.toLowerCase().includes(term) ?? false
+}
+
+function eventMatchesTerms(event: StreamEvent, terms: readonly string[]): boolean {
+  return terms.some(term =>
+    fieldIncludes(event.source, term)
+    || fieldIncludes(event.message, term)
+    || fieldIncludes(event.id, term)
+    || event.level === term,
+  )
+}
+
+function scoreEventForTerms(event: StreamEvent, terms: readonly string[]): number {
+  if (terms.length === 0) return 0
+  const total = terms.reduce((sum, term) => {
+    const termScore = Math.max(
+      fieldIncludes(event.source, term) ? 0.9 : 0,
+      fieldIncludes(event.message, term) ? 0.8 : 0,
+      fieldIncludes(event.id, term) ? 0.6 : 0,
+    )
+    return sum + termScore
+  }, 0)
+  return roundedScore(clamp01(total / terms.length))
+}
+
+export function streamEventSemanticGravityScore(
+  event: StreamEvent,
+  semanticFocus?: EventStreamSemanticFocus,
+): number {
+  return scoreEventForTerms(event, normalizedSemanticTerms(semanticFocus))
+}
+
+export function buildSemanticGravityRows(
+  rows: TemporalSyncStreamRow[],
+  semanticFocus?: EventStreamSemanticFocus,
+): SemanticGravityStreamRow[] {
+  // Normalize once per build instead of once per row. Repeated
+  // [normalizedSemanticTerms(semanticFocus)] calls inside the hot loop
+  // produced the same terms for every row, turning the build into
+  // O(rows × terms) when rows × terms ≪ rows alone could cover.
+  const terms = normalizedSemanticTerms(semanticFocus)
+  const hasFocus = terms.length > 0
+  const scored = rows.map((row, originalIndex) => ({
+    row,
+    originalIndex,
+    score: scoreEventForTerms(row.event, terms),
+  }))
+
+  const ordered = hasFocus
+    ? [...scored].sort((a, b) => (b.score - a.score) || (a.originalIndex - b.originalIndex))
+    : scored
+
+  return ordered.map((item, index) => ({
+    ...item.row,
+    originalVisibleIndex: item.originalIndex,
+    semanticGravityScore: item.score,
+    semanticGravityRank: index + 1,
+  }))
+}
+
+function projectionTargetForEvent(event: StreamEvent): Pick<IntentProjectionRow, 'key' | 'label' | 'targetKind'> {
+  if (event.source?.trim()) {
+    const source = event.source.trim()
+    return { key: `source:${source}`, label: source, targetKind: 'source' }
+  }
+  return { key: `level:${event.level}`, label: levelLabel(event.level), targetKind: 'level' }
+}
+
+export function buildIntentProjectionRows(
+  events: StreamEvent[],
+  semanticFocus?: EventStreamSemanticFocus,
+  maxIntentProjections = 3,
+): IntentProjectionRow[] {
+  const limit = Number.isFinite(maxIntentProjections)
+    ? Math.max(0, Math.floor(maxIntentProjections))
+    : 0
+  if (limit === 0 || events.length < 2) return []
+
+  const explicitTerms = normalizedSemanticTerms(semanticFocus)
+  const latestEvent = events[events.length - 1]
+  const terms = explicitTerms.length > 0 || latestEvent == null
+    ? explicitTerms
+    : intentTermsForEvent(latestEvent)
+  if (terms.length === 0) return []
+
+  const counts = new Map<string, IntentProjectionRow>()
+  let evidenceTotal = 0
+
+  for (let index = 0; index < events.length - 1; index += 1) {
+    const event = events[index]!
+    const next = events[index + 1]!
+    if (!eventMatchesTerms(event, terms)) continue
+
+    const target = projectionTargetForEvent(next)
+    const current = counts.get(target.key)
+    counts.set(target.key, {
+      ...target,
+      probability: 0,
+      evidenceCount: (current?.evidenceCount ?? 0) + 1,
+    })
+    evidenceTotal += 1
+  }
+
+  if (evidenceTotal === 0) return []
+
+  return Array.from(counts.values())
+    .map(row => ({
+      ...row,
+      probability: roundedScore(row.evidenceCount / evidenceTotal),
+    }))
+    .sort((a, b) => (b.probability - a.probability) || (b.evidenceCount - a.evidenceCount) || a.label.localeCompare(b.label))
+    .slice(0, limit)
 }
 
 export function streamEventAttractionScore(
@@ -175,13 +362,14 @@ export function buildTemporalSyncRows(
   return rows
 }
 
-export function summarizeEventStream(
-  events: StreamEvent[],
-  maxItems: number,
-  temporalSyncWindowMs = DEFAULT_TEMPORAL_SYNC_WINDOW_MS,
+function summarizeEventRows(
+  totalCount: number,
+  visible: StreamEvent[],
+  syncRows: TemporalSyncStreamRow[],
+  semanticRows: SemanticGravityStreamRow[],
+  intentProjections: IntentProjectionRow[],
+  semanticFocus?: EventStreamSemanticFocus,
 ): EventStreamSummary {
-  const visible = getVisibleStreamEvents(events, maxItems)
-  const syncRows = buildTemporalSyncRows(visible, temporalSyncWindowMs)
   const latestTimestamp = visible.length > 0 ? finiteTimestamp(visible[0]!.timestamp) : null
   const oldestVisibleTimestamp = visible.length > 0
     ? finiteTimestamp(visible[visible.length - 1]!.timestamp)
@@ -194,10 +382,12 @@ export function summarizeEventStream(
       .filter(row => row.syncGroupSize > 1)
       .map(row => row.syncGroupId),
   )
-  const attractionScores = syncRows.map((row, index) =>
-    streamEventAttractionScore(row, index, syncRows.length),
+  const attractionScores = semanticRows.map(row =>
+    streamEventAttractionScore(row, row.originalVisibleIndex, semanticRows.length),
   )
   const highAttractionCount = attractionScores.filter(score => streamEventAttractionBand(score) === 'high').length
+  const semanticScores = semanticRows.map(row => row.semanticGravityScore)
+  const semanticMatchCount = semanticScores.filter(score => score > 0).length
   const status: EventStreamStatus =
     visible.length === 0
       ? 'empty'
@@ -208,9 +398,9 @@ export function summarizeEventStream(
           : 'ok'
 
   return {
-    totalCount: events.length,
+    totalCount,
     visibleCount: visible.length,
-    hiddenCount: Math.max(0, events.length - visible.length),
+    hiddenCount: Math.max(0, totalCount - visible.length),
     infoCount,
     warnCount,
     errorCount,
@@ -220,8 +410,59 @@ export function summarizeEventStream(
     maxTemporalSyncGroupSize: syncRows.reduce((max, row) => Math.max(max, row.syncGroupSize), 0),
     highAttractionCount,
     maxAttractionScore: attractionScores.reduce((max, score) => Math.max(max, score), 0),
+    semanticGravityTermCount: normalizedSemanticTerms(semanticFocus).length,
+    semanticGravityMatchCount: semanticMatchCount,
+    maxSemanticGravityScore: semanticScores.reduce((max, score) => Math.max(max, score), 0),
+    intentProjectionCount: intentProjections.length,
+    topIntentProjectionProbability: intentProjections[0]?.probability ?? 0,
     status,
   }
+}
+
+function buildEventStreamModel(
+  events: StreamEvent[],
+  maxItems: number,
+  temporalSyncWindowMs = DEFAULT_TEMPORAL_SYNC_WINDOW_MS,
+  semanticFocus?: EventStreamSemanticFocus,
+  maxIntentProjections = 3,
+): EventStreamModel {
+  const visible = getVisibleStreamEvents(events, maxItems)
+  const syncRows = buildTemporalSyncRows(visible, temporalSyncWindowMs)
+  const semanticRows = buildSemanticGravityRows(syncRows, semanticFocus)
+  // Bound projection work to the visible window, but preserve the
+  // chronological order expected by buildIntentProjectionRows.
+  const projectionWindow = [...visible].reverse()
+  const intentProjections = buildIntentProjectionRows(projectionWindow, semanticFocus, maxIntentProjections)
+  return {
+    visible,
+    syncRows,
+    semanticRows,
+    intentProjections,
+    summary: summarizeEventRows(
+      events.length,
+      visible,
+      syncRows,
+      semanticRows,
+      intentProjections,
+      semanticFocus,
+    ),
+  }
+}
+
+export function summarizeEventStream(
+  events: StreamEvent[],
+  maxItems: number,
+  temporalSyncWindowMs = DEFAULT_TEMPORAL_SYNC_WINDOW_MS,
+  semanticFocus?: EventStreamSemanticFocus,
+  maxIntentProjections = 3,
+): EventStreamSummary {
+  return buildEventStreamModel(
+    events,
+    maxItems,
+    temporalSyncWindowMs,
+    semanticFocus,
+    maxIntentProjections,
+  ).summary
 }
 
 function attractionRowClass(band: EventStreamAttractionBand, isSynced: boolean): string {
@@ -234,21 +475,25 @@ function attractionRowClass(band: EventStreamAttractionBand, isSynced: boolean):
   return 'border-transparent opacity-80'
 }
 
+function semanticGravityRowClass(score: number): string {
+  if (score >= 0.75) return 'ring-1 ring-[var(--color-accent)]'
+  if (score > 0) return 'ring-1 ring-[var(--color-border-strong)]'
+  return ''
+}
+
 export function EventStream({
   events,
   maxItems = 100,
   temporalSyncWindowMs = DEFAULT_TEMPORAL_SYNC_WINDOW_MS,
+  semanticFocus,
+  maxIntentProjections = 3,
   testId,
 }: EventStreamProps) {
-  const visible = useMemo(() => getVisibleStreamEvents(events, maxItems), [events, maxItems])
-  const syncRows = useMemo(
-    () => buildTemporalSyncRows(visible, temporalSyncWindowMs),
-    [visible, temporalSyncWindowMs],
+  const model = useMemo(
+    () => buildEventStreamModel(events, maxItems, temporalSyncWindowMs, semanticFocus, maxIntentProjections),
+    [events, maxItems, temporalSyncWindowMs, semanticFocus, maxIntentProjections],
   )
-  const summary = useMemo(
-    () => summarizeEventStream(events, maxItems, temporalSyncWindowMs),
-    [events, maxItems, temporalSyncWindowMs],
-  )
+  const { visible, semanticRows, intentProjections, summary } = model
 
   return html`
     <div
@@ -268,6 +513,11 @@ export function EventStream({
       data-event-stream-max-temporal-sync-group-size=${summary.maxTemporalSyncGroupSize}
       data-event-stream-high-attraction-count=${summary.highAttractionCount}
       data-event-stream-max-attraction-score=${summary.maxAttractionScore.toFixed(2)}
+      data-event-stream-semantic-gravity-term-count=${summary.semanticGravityTermCount}
+      data-event-stream-semantic-gravity-match-count=${summary.semanticGravityMatchCount}
+      data-event-stream-max-semantic-gravity-score=${summary.maxSemanticGravityScore.toFixed(2)}
+      data-event-stream-intent-projection-count=${summary.intentProjectionCount}
+      data-event-stream-top-intent-projection-probability=${summary.topIntentProjectionProbability.toFixed(2)}
       data-testid=${testId}
     >
       <div
@@ -289,6 +539,29 @@ export function EventStream({
           <div class="font-mono text-sm text-[var(--color-status-err)]">${summary.errorCount}</div>
         </div>
       </div>
+      ${intentProjections.length > 0
+        ? html`
+          <div
+            class="flex min-w-0 flex-wrap gap-1"
+            aria-label="의도 예측"
+            data-event-stream-intent-projections
+          >
+            ${intentProjections.map(projection => html`
+              <div
+                key=${projection.key}
+                class="inline-flex min-w-0 items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-secondary)]"
+                data-intent-projection-key=${projection.key}
+                data-intent-projection-target-kind=${projection.targetKind}
+                data-intent-projection-probability=${projection.probability.toFixed(2)}
+                data-intent-projection-evidence-count=${projection.evidenceCount}
+              >
+                <span class="max-w-28 truncate" title=${projection.label}>${projection.label}</span>
+                <span class="font-mono text-[var(--color-fg-muted)]">${Math.round(projection.probability * 100)}%</span>
+              </div>
+            `)}
+          </div>
+        `
+        : null}
       <div
         role="log"
         aria-label="이벤트 스트림, 이벤트 ${summary.visibleCount}개, 에러 ${summary.errorCount}개"
@@ -299,28 +572,30 @@ export function EventStream({
           ? html`<div class="text-3xs text-[var(--color-fg-muted)]">이벤트 없음</div>`
           : html`
             <div class="space-y-1" role="list">
-              ${syncRows.map(
-                (row, index) => {
+              ${semanticRows.map(
+                row => {
                   const e = row.event
                   const isSynced = row.syncGroupSize > 1
                   const eventTimestamp = finiteTimestamp(e.timestamp)
-                  const attractionScore = streamEventAttractionScore(row, index, syncRows.length)
+                  const attractionScore = streamEventAttractionScore(row, row.originalVisibleIndex, semanticRows.length)
                   const attractionBand = streamEventAttractionBand(attractionScore)
                   return html`
                   <div
                     key=${e.id}
-                    class=${`flex min-w-0 items-start gap-2 rounded-[var(--r-1)] border-l-2 px-2 py-1 hover:bg-[var(--color-bg-hover)] ${attractionRowClass(attractionBand, isSynced)}`}
+                    class=${`flex min-w-0 items-start gap-2 rounded-[var(--r-1)] border-l-2 px-2 py-1 hover:bg-[var(--color-bg-hover)] ${attractionRowClass(attractionBand, isSynced)} ${semanticGravityRowClass(row.semanticGravityScore)}`}
                     role="listitem"
                     data-stream-event-id=${e.id}
                     data-stream-event-level=${e.level}
                     data-stream-event-source=${e.source ?? ''}
                     data-stream-event-timestamp=${eventTimestamp ?? ''}
-                    data-stream-event-visible-index=${index}
+                    data-stream-event-visible-index=${row.originalVisibleIndex}
                     data-stream-event-sync-group=${row.syncGroupId}
                     data-stream-event-sync-size=${row.syncGroupSize}
                     data-stream-event-sync-anchor=${row.syncAnchorTimestamp ?? ''}
                     data-stream-event-attraction-score=${attractionScore.toFixed(2)}
                     data-stream-event-attraction-band=${attractionBand}
+                    data-stream-event-semantic-gravity-score=${row.semanticGravityScore.toFixed(2)}
+                    data-stream-event-semantic-gravity-rank=${row.semanticGravityRank}
                   >
                     <span
                       class="mt-0.5 inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full"

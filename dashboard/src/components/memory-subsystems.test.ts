@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { MemorySubsystemsSynapse } from '../api/dashboard'
-import { ARCHITECTURE_FLOW, filterSynapses } from './memory-subsystems'
+import type { MemorySubsystemsMemoryEntry, MemorySubsystemsSynapse } from '../api/dashboard'
+import { ARCHITECTURE_FLOW, filterMemoryEntries, filterSynapses } from './memory-subsystems'
 
 function makeSynapse(
   overrides: Partial<MemorySubsystemsSynapse> = {},
@@ -81,6 +81,28 @@ describe('filterSynapses', () => {
     expect(result).toHaveLength(2)
     expect(result.map(r => r.from_agent)).toContain('router-delta')
     expect(result.map(r => r.to_agent)).toContain('router-delta')
+  })
+})
+
+describe('filterMemoryEntries', () => {
+  const entries: MemorySubsystemsMemoryEntry[] = [
+    { keeper: 'sangsu', kind: 'verified', text: 'PR verified', priority: 90, ts_unix: 1 },
+    { keeper: 'issue_king', kind: 'learned', text: 'task duplicate', priority: 70, ts_unix: 2 },
+    { keeper: 'qa-king', kind: 'verified', text: 'release target checked', priority: 85, ts_unix: 3 },
+  ]
+
+  it('returns the input reference for all entries', () => {
+    expect(filterMemoryEntries(entries, 'all')).toBe(entries)
+    expect(filterMemoryEntries(entries, '')).toBe(entries)
+  })
+
+  it('keeps entries with the selected memory kind', () => {
+    const result = filterMemoryEntries(entries, 'verified')
+    expect(result.map(entry => entry.keeper)).toEqual(['sangsu', 'qa-king'])
+  })
+
+  it('returns empty when the kind is absent', () => {
+    expect(filterMemoryEntries(entries, 'plan')).toEqual([])
   })
 })
 

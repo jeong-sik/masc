@@ -501,11 +501,23 @@ let rec add_routes ~sw ~clock router =
              handle_dashboard_link_previews state req reqd body_str))
          request reqd)
   |> Http.Router.get "/api/v1/dashboard/memory-subsystems" (fun request reqd ->
-       with_public_read (fun state req reqd ->
+       let include_memory_entries =
+         dashboard_memory_subsystems_include_entries request
+       in
+       let handler state req reqd =
          let config = state.Mcp_server.room_config in
-         let json = dashboard_memory_subsystems_http_json ~config req in
-         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
-       ) request reqd)
+         let json =
+           dashboard_memory_subsystems_http_json ~config
+             ~include_memory_entries req
+         in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       in
+       if include_memory_entries then
+         with_token_permission_auth ~permission:Masc_domain.CanReadState
+           (fun state _agent_name req reqd -> handler state req reqd)
+           request reqd
+       else with_public_read handler request reqd)
   |> Http.Router.get "/api/v1/dashboard/doctor" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let self_bin = Sys.argv.(0) in

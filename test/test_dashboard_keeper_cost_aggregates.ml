@@ -129,19 +129,34 @@ let test_heartbeat_snapshots_do_not_count_as_cost_samples () =
       ("total_tokens", `Int 15);
       ("model_used", `String "test-model");
     ];
+  append_metric config keeper_name
+    [
+      ("ts_unix", `Float ts);
+      ("channel", `String "turn");
+      ("cost_usd", `Float 0.25);
+      ("latency_ms", `Int 100);
+      ("usage",
+       `Assoc
+         [
+           ("input_tokens", `Int 7);
+           ("output_tokens", `Int 3);
+           ("total_tokens", `Int 10);
+         ]);
+      ("model_used", `String "test-model");
+    ];
   let aggregate =
     Dashboard_http_keeper.keeper_cost_aggregates_json
       ~config ~keepers:[ meta ] ~window_minutes:60
     |> keeper_item
   in
-  check int "only real call counted" 1 (int_field "sample_count" aggregate);
-  check (float 0.0001) "total cost excludes snapshots" 0.25
+  check int "only real calls counted" 2 (int_field "sample_count" aggregate);
+  check (float 0.0001) "total cost excludes snapshots" 0.5
     (float_field "total_cost_usd" aggregate);
-  check int "input tokens exclude snapshots" 10
+  check int "input tokens include nested current schema" 17
     (int_field "total_input_tokens" aggregate);
-  check int "output tokens exclude snapshots" 5
+  check int "output tokens include nested current schema" 8
     (int_field "total_output_tokens" aggregate);
-  check int "total tokens exclude snapshots" 15
+  check int "total tokens include nested current schema" 25
     (int_field "total_tokens" aggregate);
   check (float 0.0001) "p50 latency excludes snapshots" 100.0
     (float_field "p50_latency_ms" aggregate);
@@ -151,7 +166,7 @@ let test_heartbeat_snapshots_do_not_count_as_cost_samples () =
   | [ item ] ->
       check string "model breakdown model" "test-model"
         Yojson.Safe.Util.(item |> member "model" |> to_string);
-      check (float 0.0001) "model breakdown cost" 0.25
+      check (float 0.0001) "model breakdown cost" 0.5
         (float_field "cost_usd" item)
   | other ->
       fail

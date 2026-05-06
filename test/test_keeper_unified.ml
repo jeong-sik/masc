@@ -5525,6 +5525,41 @@ let test_bounded_oas_timeout_reserves_degraded_retry_budget () =
         budget.source
   | None -> fail "expected bounded timeout"
 
+let test_attempt_watchdog_preserves_degraded_retry_reserve () =
+  match
+    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+      ~is_retry:false ~reserve_degraded_retry_budget:true
+      ~estimated_input_tokens:2_000 ~max_turns:4
+      ~remaining_turn_budget_s:500.0
+  with
+  | Some budget ->
+      check (float 0.01)
+        "attempt watchdog includes OAS timeout plus finalization guard"
+        257.5
+        (UT.attempt_watchdog_timeout_sec
+           ~remaining_turn_budget_s:500.0
+           budget)
+  | None -> fail "expected bounded timeout"
+
+let test_attempt_watchdog_fires_before_outer_turn_timeout () =
+  let budget =
+    {
+      UT.effective_timeout_sec = 293.0;
+      adaptive_timeout_sec = 600.0;
+      keeper_turn_timeout_sec = 600.0;
+      remaining_turn_budget_sec = 293.0;
+      estimated_input_tokens = 2_000;
+      max_turns = 4;
+      source = "adaptive_per_attempt_retry";
+    }
+  in
+  check (float 0.01)
+    "retry watchdog is capped just before the enclosing turn timeout"
+    292.0
+    (UT.attempt_watchdog_timeout_sec
+       ~remaining_turn_budget_s:293.0
+       budget)
+
 let test_bounded_oas_timeout_refuses_too_little_budget () =
   check (option (float 0.01)) "insufficient budget returns none" None
     (UT.bounded_oas_timeout_for_turn_budget
@@ -7723,6 +7758,10 @@ let () =
             test_bounded_oas_timeout_uses_channel_turn_budget_override;
           test_case "bounded OAS timeout reserves degraded retry budget" `Quick
             test_bounded_oas_timeout_reserves_degraded_retry_budget;
+          test_case "attempt watchdog preserves degraded retry reserve" `Quick
+            test_attempt_watchdog_preserves_degraded_retry_reserve;
+          test_case "attempt watchdog fires before outer turn timeout" `Quick
+            test_attempt_watchdog_fires_before_outer_turn_timeout;
           test_case "bounded OAS timeout refuses too little remaining budget" `Quick
             test_bounded_oas_timeout_refuses_too_little_budget;
           test_case "OAS timeout classification uses current attempt budget" `Quick

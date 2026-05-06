@@ -57,6 +57,12 @@ val resolve_bounded_oas_timeout_budget_with_turn_budget :
   remaining_turn_budget_s:float ->
   oas_timeout_budget_resolution option
 
+(** Per-attempt watchdog used around the OAS call. It fires before the
+    enclosing keeper-turn wall-clock timeout so recoverable provider stalls can
+    still rotate through the degraded cascade path. *)
+val attempt_watchdog_timeout_sec :
+  remaining_turn_budget_s:float -> oas_timeout_budget_resolution -> float
+
 val oas_retry_budget_available_for_turn :
   is_retry:bool ->
   estimated_input_tokens:int ->

@@ -5263,13 +5263,52 @@ let test_sanitize_messages_utf8_cleans_history_path () =
       metadata = [];
       }
   in
+  let assistant_msg =
+    Agent_sdk.Types.
+      {
+        role = Assistant;
+        content =
+          [
+            ToolUse
+              {
+                id = "call\001id";
+                name = "keeper\127shell";
+                input =
+                  `Assoc
+                    [
+                      ("pattern\000", `String "bad\127bytes");
+                      ("nested", `List [`String "x\001y"]);
+                    ];
+              };
+          ];
+        name = None;
+        tool_call_id = None;
+        metadata = [];
+      }
+  in
   let sanitized =
-    Masc_mcp.Inference_utils.sanitize_messages_utf8 [ user_msg; tool_msg ]
+    Masc_mcp.Inference_utils.sanitize_messages_utf8
+      [ user_msg; assistant_msg; tool_msg ]
   in
   match sanitized with
-  | [ user_msg; tool_msg ] ->
+  | [ user_msg; assistant_msg; tool_msg ] ->
       check string "user history content sanitized" "hist ory entry"
         (Agent_sdk.Types.text_of_message user_msg);
+      (match assistant_msg.Agent_sdk.Types.content with
+       | [ Agent_sdk.Types.ToolUse { id; name; input } ] ->
+           check string "tool use id sanitized" "call id" id;
+           check string "tool use name sanitized" "keeper shell" name;
+           (match input with
+            | `Assoc
+                [
+                  (key, `String value);
+                  ("nested", `List [`String nested_value]);
+                ] ->
+                check string "tool use json key sanitized" "pattern " key;
+                check string "tool use json value sanitized" "bad bytes" value;
+                check string "tool use nested json sanitized" "x y" nested_value
+            | _ -> fail "expected sanitized tool use json")
+       | _ -> fail "expected sanitized tool use");
       (match tool_msg.Agent_sdk.Types.content with
        | [ Agent_sdk.Types.ToolResult { tool_use_id; content; _ } ] ->
            check string "tool id sanitized" "tool id" tool_use_id;
@@ -5280,7 +5319,7 @@ let test_sanitize_messages_utf8_cleans_history_path () =
                 check string "tool json value sanitized" "value " value
             | _ -> fail "expected sanitized tool result json")
        | _ -> fail "expected sanitized tool result")
-  | _ -> fail "expected two sanitized messages"
+  | _ -> fail "expected three sanitized messages"
 
 let test_sanitize_messages_utf8_reuses_clean_history_list () =
   let msgs =

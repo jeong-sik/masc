@@ -160,7 +160,7 @@ let self_identity_tokens (meta : keeper_meta) =
   |> List.flatten
   |> List.sort_uniq String.compare
 
-let keeper_authored_message author =
+let is_keeper_authored_message author =
   Option.is_some (Keeper_identity.canonical_keeper_name_from_agent_name author)
 
 let collect_message_scope ~(config : Coord.config) ~(meta : keeper_meta) :
@@ -193,7 +193,7 @@ let collect_message_scope ~(config : Coord.config) ~(meta : keeper_meta) :
         else if broad_scope then
           (* Broad room scope is for operator/human context; direct mentions
              above still allow explicit keeper-to-keeper handoff. *)
-          if keeper_authored_message author then
+          if is_keeper_authored_message author then
             consume_room_messages remaining msg.seq mentions scope_messages rest
           else if remaining <= 0 then
             (`Saturated, remaining, last_processed, List.rev mentions, List.rev scope_messages)

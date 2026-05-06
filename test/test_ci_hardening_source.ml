@@ -1167,6 +1167,27 @@ let test_keeper_required_tool_contracts () =
      && file_contains_pattern
           "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
           "`keeper-<keeper>-agent/<run_id>`");
+  check bool "docker PR lifecycle rejects stale proof branches before mutate" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       "assert_no_proof_branch_collisions_for_mutate"
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          "branch_collision_preflight"
+     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+          "`branch_collision_preflight`");
+  check bool "docker PR lifecycle gates review on create success evidence" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       "all_create_results_ready_for_review"
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          "create_success_markers_missing"
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          "skipping review phase because create phase did not produce complete success evidence"
+     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+          "`create-readiness-failures.jsonl`");
   check bool "keeper msg schema documents required_tool_names alias" true
     (file_contains_pattern "lib/keeper/keeper_schema.ml"
        "required_tool_names")

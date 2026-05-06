@@ -45,8 +45,17 @@ but lacked `build.commit`, also treated as transient). Only the first
 status records pending requests as lost; the other two log a transient
 notice and the next poll iteration retries.
 When mutation is enabled, the harness sends two sequential phases. The create phase
-requires `keeper_bash` and `keeper_pr_create`. After all create requests
-reach terminal status, the review phase requires `keeper_pr_review_comment`.
+requires `keeper_bash` and `keeper_pr_create`. Before it sends any mutation
+prompt, the harness checks the run-scoped proof branches and fails closed with
+`branch_collision_preflight` if a local branch, remote-tracking branch, remote
+head, or local worktree already exists for the selected `--run-id`. After the
+create phase, the review phase only starts when every keeper produced create
+success markers for the same run id: `docker_pr_create=true`,
+`docker_git_push=true`, `blocker=null`, the exact branch, and a PR URL. If a
+keeper returns an error or blocker, the harness writes
+`create-readiness-failures.jsonl` and skips review prompts instead of approving
+stale or partially-created PRs. The review phase requires
+`keeper_pr_review_comment`.
 This avoids the old single-turn shape where one keeper could wait on another
 keeper's missing PR until the Agent.run timeout. The review prompt reserves
 `keeper_shell` for read-only GitHub inspection, but does not put it in

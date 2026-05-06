@@ -404,6 +404,17 @@ let run_named
                                Env_config_keeper.KeeperKeepalive
                                .stream_idle_timeout_sec
                              stream_idle_timeout_s));
+                 max_execution_time_s =
+                   (* Bound a single OAS call (one [Agent.run]/[run_stream])
+                      so a hung provider falls into [Retry.Timeout] instead
+                      of blocking until the whole-keeper [turn_timeout].
+                      Scale = per-OAS-call (default 300 s, env override via
+                      [MASC_KEEPER_OAS_TIMEOUT_SEC]); the input-token arg
+                      is currently ignored by the resolver (#10008 fm2). *)
+                   Some
+                     (Keeper_runtime_resolved
+                      .oas_timeout_for_estimated_input_tokens
+                        ~estimated_input_tokens:0);
                  temperature;
                  max_idle_turns;
                  guardrails;

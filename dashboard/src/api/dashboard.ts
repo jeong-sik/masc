@@ -1976,6 +1976,11 @@ function normalizeRuntimeBlockerClass(value: unknown): KeeperConfig['runtime']['
     case 'turn_timeout':
     case 'completion_contract_violation':
     case 'cascade_exhausted':
+    case 'no_tool_capable_provider':
+    case 'provider_runtime_error':
+    case 'tool_required_unsatisfied':
+    case 'fiber_unresolved':
+    case 'stale_turn_timeout':
       return blockerClass
     default:
       return null

@@ -12,6 +12,7 @@ import {
   fetchTlcResults,
   fetchToolQuality,
 } from './dashboard'
+import { keeperRuntimeBlockerLabel } from '../lib/keeper-runtime-display'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -964,6 +965,40 @@ describe('fetchKeeperConfig', () => {
     expect(result.coordination.active_goal_ids).toEqual(['goal-runtime'])
     expect(result.coordination.active_goals[0]?.title).toBe('Ship runtime clarity')
     expect(result.runtime_trust?.disposition).toBe('Pass')
+  })
+
+  it('preserves terminal runtime blocker classes through config fetch and display labeling', async () => {
+    const cases = [
+      ['no_tool_capable_provider', '도구 실행 Provider 없음'],
+      ['provider_runtime_error', 'Provider 런타임 오류'],
+      ['tool_required_unsatisfied', '필수 도구 미충족'],
+      ['fiber_unresolved', 'Fiber 미해결'],
+      ['stale_turn_timeout', '오래된 턴 만료'],
+    ] as const
+
+    for (const [blockerClass, label] of cases) {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            name: 'keeper-sangsu',
+            runtime: {
+              runtime_blocker_class: blockerClass,
+              runtime_blocker_summary: blockerClass,
+            },
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      )
+      vi.stubGlobal('fetch', fetchMock)
+
+      const result = await fetchKeeperConfig('keeper-sangsu')
+
+      expect(result.runtime.runtime_blocker_class).toBe(blockerClass)
+      expect(keeperRuntimeBlockerLabel(result.runtime.runtime_blocker_class)).toBe(label)
+    }
   })
 })
 

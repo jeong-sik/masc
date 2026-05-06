@@ -327,6 +327,22 @@ export interface KeeperMetricPoint {
   fallback_reason: string | null
 }
 
+export type KeeperRuntimeBlockerClass =
+  | 'ambiguous_post_commit_timeout'
+  | 'ambiguous_post_commit_failure'
+  | 'autonomous_slot_wait_timeout'
+  | 'admission_queue_wait_timeout'
+  | 'turn_timeout_after_queue_wait'
+  | 'oas_timeout_budget'
+  | 'turn_timeout'
+  | 'completion_contract_violation'
+  | 'cascade_exhausted'
+  | 'no_tool_capable_provider'
+  | 'provider_runtime_error'
+  | 'tool_required_unsatisfied'
+  | 'fiber_unresolved'
+  | 'stale_turn_timeout'
+
 export interface KeeperTrustLatestEvent {
   kind: string
   ts: string
@@ -777,20 +793,7 @@ export interface Keeper {
   proactive_enabled?: boolean
   proactive_idle_sec?: number
   proactive_cooldown_sec?: number
-  runtime_blocker_class?:
-    | 'ambiguous_post_commit_timeout'
-    | 'ambiguous_post_commit_failure'
-    | 'autonomous_slot_wait_timeout'
-    | 'admission_queue_wait_timeout'
-    | 'turn_timeout_after_queue_wait'
-    | 'oas_timeout_budget'
-    | 'turn_timeout'
-    | 'completion_contract_violation'
-    | 'cascade_exhausted'
-    | 'no_tool_capable_provider'
-    | 'fiber_unresolved'
-    | 'stale_turn_timeout'
-    | null
+  runtime_blocker_class?: KeeperRuntimeBlockerClass | null
   runtime_blocker_summary?: string | null
   runtime_blocker_continue_gate?: boolean | null
   needs_attention?: boolean | null
@@ -1116,17 +1119,7 @@ interface KeeperConfigRuntime {
   fiber_health: string
   presence_keepalive: boolean
   presence_keepalive_sec: number
-  runtime_blocker_class?:
-    | 'ambiguous_post_commit_timeout'
-    | 'ambiguous_post_commit_failure'
-    | 'autonomous_slot_wait_timeout'
-    | 'admission_queue_wait_timeout'
-    | 'turn_timeout_after_queue_wait'
-    | 'oas_timeout_budget'
-    | 'turn_timeout'
-    | 'completion_contract_violation'
-    | 'cascade_exhausted'
-    | null
+  runtime_blocker_class?: KeeperRuntimeBlockerClass | null
   active_model_label?: string | null
   last_model_used_label?: string | null
   runtime_blocker_summary?: string | null

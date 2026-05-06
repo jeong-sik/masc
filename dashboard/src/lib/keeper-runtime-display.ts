@@ -1,4 +1,4 @@
-import type { Keeper } from '../types'
+import type { Keeper, KeeperRuntimeBlockerClass } from '../types'
 import { relativeTime } from './format-time'
 
 /** Max seconds since last heartbeat to consider the keeper process alive. */
@@ -238,9 +238,11 @@ const runtimeBlockerLabels = {
   completion_contract_violation: '완료 계약 위반',
   cascade_exhausted: '캐스케이드 소진',
   no_tool_capable_provider: '도구 실행 Provider 없음',
+  provider_runtime_error: 'Provider 런타임 오류',
+  tool_required_unsatisfied: '필수 도구 미충족',
   fiber_unresolved: 'Fiber 미해결',
   stale_turn_timeout: '오래된 턴 만료',
-} satisfies Record<NonNullable<Keeper['runtime_blocker_class']>, string>
+} satisfies Record<KeeperRuntimeBlockerClass, string>
 
 export function keeperRuntimeBlockerLabel(
   blockerClass: Keeper['runtime_blocker_class'] | null | undefined,
@@ -284,6 +286,12 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
   }
   if (blockerClass === 'no_tool_capable_provider') {
     return '요구 도구를 실행할 수 있는 provider가 없어 라우팅 또는 tool surface 확인이 필요합니다.'
+  }
+  if (blockerClass === 'provider_runtime_error') {
+    return 'Provider, adapter, or cascade가 keeper 진행 전에 실패했습니다.'
+  }
+  if (blockerClass === 'tool_required_unsatisfied') {
+    return '액션 가능한 신호에 필요한 keeper 도구 호출이 충족되지 않았습니다.'
   }
   if (blockerClass === 'fiber_unresolved') {
     return 'Keeper fiber가 종료 상태를 확정하지 못해 supervisor 확인이 필요합니다.'

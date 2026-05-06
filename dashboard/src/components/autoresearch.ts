@@ -9,10 +9,11 @@ import { ActionButton } from './common/button'
 import { SurfaceCard } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { Eyebrow } from './common/eyebrow'
+import { FilterChips } from './common/filter-chips'
 import { InfoCard } from './common/info-card'
 import { formatElapsedCompact, formatTimestampKo, formatDelta } from '../lib/format-time'
 import { statusLabel } from '../lib/status-label'
-import { navigate } from '../router'
+import { navigate, route } from '../router'
 import type {
   AutoresearchLoopSummary,
   AutoresearchCycleRecord,
@@ -57,6 +58,46 @@ export function resetAutoresearchState(): void {
 }
 
 // --- Helpers ---
+
+type AutoresearchFocus = 'overview' | 'finding' | 'flow'
+
+const FOCUS_CHIPS: Array<{ key: AutoresearchFocus; label: string; title: string }> = [
+  { key: 'overview', label: 'Overview', title: 'Loop list and harness boundary' },
+  { key: 'finding', label: 'Finding Card', title: 'Current hypothesis, note, and insight snapshot' },
+  { key: 'flow', label: 'Flow Snapshot', title: 'Keep/discard flow and latest cycle state' },
+]
+
+export function autoresearchFocusFromParam(value: string | null | undefined): AutoresearchFocus {
+  return value === 'finding' || value === 'flow' ? value : 'overview'
+}
+
+function navigateFocus(focus: AutoresearchFocus): void {
+  const next: Record<string, string> = {
+    ...route.value.params,
+    section: 'cognition',
+    view: 'autoresearch',
+  }
+  if (focus === 'overview') {
+    delete next.focus
+  } else {
+    next.focus = focus
+  }
+  navigate('monitoring', next)
+}
+
+function AutoresearchFocusRail({ focus }: { focus: AutoresearchFocus }) {
+  return html`
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <${FilterChips}
+        chips=${FOCUS_CHIPS}
+        value=${focus}
+        onChange=${navigateFocus}
+        size="sm"
+        tone="accent"
+      />
+    </div>
+  `
+}
 
 function MonoBody({ children }: { children: unknown }) {
   return html`<div class="text-[var(--color-fg-secondary)] text-sm font-mono">${children}</div>`
@@ -439,6 +480,147 @@ function OutcomeVsHarnessCallout({ loopCount }: { loopCount: number }) {
   `
 }
 
+function selectedCycles(
+  loop: AutoresearchLoopSummary | null,
+  detail: { history?: AutoresearchCycleRecord[] } | null,
+): AutoresearchCycleRecord[] {
+  return detail?.history ?? loop?.recent_cycles ?? []
+}
+
+function FindingFocusPanel() {
+  const loop = selectedLoop.value
+  const detail = loopDetail.value
+  const insights = detail?.insights ?? loop?.insights ?? []
+  const warnings = loop?.warnings ?? []
+
+  if (!loop) {
+    return html`
+      <${SurfaceCard} variant="compact">
+        <${EmptyState} message="Finding Card를 보려면 루프를 선택하세요." compact />
+      <//>
+    `
+  }
+
+  return html`
+    <${SurfaceCard} variant="compact">
+      <div class="grid grid-cols-1 gap-3 md:grid-cols-[1.15fr_0.85fr]">
+        <${InfoCard}>
+          <${Eyebrow}>Finding Card</${Eyebrow}>
+          <div class="mt-1 text-sm font-medium text-[var(--color-fg-primary)]">${loop.goal}</div>
+          <div class="mt-2 grid gap-2 text-xs text-[var(--color-fg-secondary)]">
+            <div>
+              <span class="text-[var(--color-fg-muted)]">current hypothesis</span>
+              <div class="mt-0.5 leading-relaxed">${loop.queued_hypothesis ?? '대기 가설 없음'}</div>
+            </div>
+            <div>
+              <span class="text-[var(--color-fg-muted)]">program note</span>
+              <div class="mt-0.5 leading-relaxed">${loop.program_note ?? 'program note 없음'}</div>
+            </div>
+          </div>
+        </${InfoCard}>
+
+        <${InfoCard}>
+          <${Eyebrow}>Evidence</${Eyebrow}>
+          <dl class="mt-2 grid grid-cols-[88px_1fr] gap-x-3 gap-y-1.5 text-xs">
+            <dt class="text-[var(--color-fg-muted)]">metric</dt>
+            <dd class="font-mono text-[var(--color-fg-secondary)]">${loop.metric_fn}</dd>
+            <dt class="text-[var(--color-fg-muted)]">target</dt>
+            <dd class="font-mono text-[var(--color-fg-secondary)]">${loop.target_file}</dd>
+            <dt class="text-[var(--color-fg-muted)]">best</dt>
+            <dd class="font-mono text-[var(--color-status-ok)]">${loop.best_score.toFixed(4)}</dd>
+            <dt class="text-[var(--color-fg-muted)]">status</dt>
+            <dd class="${statusColor(loop.status)}">${statusLabel(loop.status)}</dd>
+          </dl>
+        </${InfoCard}>
+      </div>
+
+      <div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+        <${InfoCard}>
+          <${Eyebrow}>Insights</${Eyebrow}>
+          <div class="mt-2">
+            <${InsightsList} insights=${insights.slice(0, 3)} />
+          </div>
+        </${InfoCard}>
+        <${InfoCard}>
+          <${Eyebrow}>Warnings</${Eyebrow}>
+          <div class="mt-2">
+            ${warnings.length > 0
+              ? html`<${WarningsList} warnings=${warnings.slice(0, 3)} />`
+              : html`<${EmptyState} message="경고 없음" compact />`}
+          </div>
+        </${InfoCard}>
+      </div>
+    <//>
+  `
+}
+
+function FlowFocusPanel() {
+  const loop = selectedLoop.value
+  const cycles = selectedCycles(loop, loopDetail.value)
+  const latest = cycles[cycles.length - 1]
+
+  if (!loop) {
+    return html`
+      <${SurfaceCard} variant="compact">
+        <${EmptyState} message="Flow Snapshot을 보려면 루프를 선택하세요." compact />
+      <//>
+    `
+  }
+
+  const totalCycles = loop.total_keeps + loop.total_discards
+  const keepPct = totalCycles > 0 ? (loop.total_keeps / totalCycles) * 100 : 0
+
+  return html`
+    <${SurfaceCard} variant="compact">
+      <div class="grid grid-cols-1 gap-3 lg:grid-cols-[0.9fr_1.1fr]">
+        <${InfoCard}>
+          <${Eyebrow}>Flow Snapshot</${Eyebrow}>
+          <div class="mt-2 grid grid-cols-2 gap-3 text-xs">
+            <div>
+              <div class="text-[var(--color-fg-muted)]">kept</div>
+              <div class="mt-0.5 font-mono text-sm font-semibold text-[var(--color-status-ok)]">${loop.total_keeps}</div>
+            </div>
+            <div>
+              <div class="text-[var(--color-fg-muted)]">discarded</div>
+              <div class="mt-0.5 font-mono text-sm font-semibold text-[var(--color-status-err)]">${loop.total_discards}</div>
+            </div>
+            <div>
+              <div class="text-[var(--color-fg-muted)]">cycle</div>
+              <div class="mt-0.5 font-mono text-sm text-[var(--color-fg-primary)]">${loop.current_cycle} / ${loop.max_cycles}</div>
+            </div>
+            <div>
+              <div class="text-[var(--color-fg-muted)]">keep rate</div>
+              <div class="mt-0.5 font-mono text-sm text-[var(--color-fg-primary)]">${keepPct.toFixed(1)}%</div>
+            </div>
+          </div>
+          <div class="mt-3 h-2 overflow-hidden rounded-[var(--r-0)] bg-[var(--color-bg-hover)]">
+            <div
+              class="h-full bg-[var(--ok-48)] transition-[width] duration-[var(--t-slow)]"
+              style=${{ width: `${keepPct}%` }}
+            />
+          </div>
+        </${InfoCard}>
+
+        <${InfoCard}>
+          <${Eyebrow}>Latest Cycle</${Eyebrow}>
+          ${latest ? html`
+            <dl class="mt-2 grid grid-cols-[84px_1fr] gap-x-3 gap-y-1.5 text-xs">
+              <dt class="text-[var(--color-fg-muted)]">cycle</dt>
+              <dd class="font-mono text-[var(--color-fg-secondary)]">#${latest.cycle}</dd>
+              <dt class="text-[var(--color-fg-muted)]">hypothesis</dt>
+              <dd class="text-[var(--color-fg-secondary)]">${latest.hypothesis}</dd>
+              <dt class="text-[var(--color-fg-muted)]">delta</dt>
+              <dd class="font-mono ${latest.delta >= 0 ? 'text-[var(--color-status-ok)]' : 'text-[var(--color-status-err)]'}">${formatDelta(latest.delta)}</dd>
+              <dt class="text-[var(--color-fg-muted)]">decision</dt>
+              <dd class="text-[var(--color-fg-secondary)]">${decisionLabel(latest.decision)}</dd>
+            </dl>
+          ` : html`<${EmptyState} message="아직 cycle 기록이 없습니다." compact />`}
+        </${InfoCard}>
+      </div>
+    <//>
+  `
+}
+
 // --- Detail view ---
 
 function LoopDetailView() {
@@ -560,15 +742,24 @@ export function Autoresearch() {
   }
 
   const loops = isLoaded(state) ? state.data.loops : []
+  const focus = autoresearchFocusFromParam(route.value.params.focus)
 
   if (loops.length === 0) {
     return html`
       <div class="flex flex-col gap-4">
-        <${EmptyState}
-          message="실행된 오토리서치 루프가 없습니다."
-          icon="🔬"
-          action=${html`<${StartFormButton} />`}
-        />
+        <${AutoresearchFocusRail} focus=${focus} />
+        ${focus === 'finding'
+          ? html`<${FindingFocusPanel} />`
+          : focus === 'flow'
+            ? html`<${FlowFocusPanel} />`
+            : html`
+              <${EmptyState}
+                message="실행된 오토리서치 루프가 없습니다."
+                icon="🔬"
+                action=${html`<${StartFormButton} />`}
+              />
+            `}
+        ${focus !== 'overview' ? html`<div class="self-start"><${StartFormButton} /></div>` : null}
         ${showStartForm.value ? html`<${StartAutoresearchForm} />` : null}
       </div>
     `
@@ -576,7 +767,13 @@ export function Autoresearch() {
 
   return html`
     <div class="flex flex-col gap-5">
-      <${OutcomeVsHarnessCallout} loopCount=${loops.length} />
+      <${AutoresearchFocusRail} focus=${focus} />
+
+      ${focus === 'finding'
+        ? html`<${FindingFocusPanel} />`
+        : focus === 'flow'
+          ? html`<${FlowFocusPanel} />`
+          : html`<${OutcomeVsHarnessCallout} loopCount=${loops.length} />`}
 
       <div class="flex items-center justify-between">
         <${Eyebrow} class="font-medium">

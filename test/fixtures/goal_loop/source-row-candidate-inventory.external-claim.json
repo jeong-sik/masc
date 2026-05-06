@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "inventory_id": "goal-loop-explicit-source-row-candidates-v1",
+  "source_catalog_id": "goal-loop-206-audit-external-claim-2026-05-05",
+  "status": "INCOMPLETE",
+  "result": "EXPLICIT_SOURCE_ROWS_INSUFFICIENT",
+  "extraction_policy": "Conservative explicit rows only: exact finding IDs, exact S/F anti-pattern IDs, markdown table ID rows, and numbered audit section headings in the two audit reports. Ranges and roadmap phase bullets are not expanded into invented rows.",
+  "expected_findings_total": 206,
+  "unique_candidate_rows": 132,
+  "missing_candidate_rows": 74,
+  "prompt_sources_checked": [
+    "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+    "prompt_corpus/GOAL_LOOP/INTEGRATED_IMPROVEMENT_DESIGN.md",
+    "prompt_corpus/GOAL_LOOP/RUTHLESS_JUDGMENT.md",
+    "prompt_corpus/GOAL_LOOP/artifact_synthesis.md",
+    "prompt_corpus/GOAL_LOOP/audit_derived_state.md",
+    "prompt_corpus/GOAL_LOOP/deep_audit_dashboard_heuristic.md",
+    "prompt_corpus/GOAL_LOOP/fundamental_roadmap.md",
+    "prompt_corpus/GOAL_LOOP/issues_analysis_done_vs_todo.md",
+    "prompt_corpus/GOAL_LOOP/live_incident_analysis.md",
+    "prompt_corpus/GOAL_LOOP/llm_compatibility.agent.final.md",
+    "prompt_corpus/GOAL_LOOP/masc_final_diagnosis.md",
+    "prompt_corpus/GOAL_LOOP/progress-evaluation.md"
+  ],
+  "source_errors_total": 0,
+  "source_errors": [],
+  "candidates_by_file": [
+    {
+      "path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+      "unique_candidate_rows": 19
+    },
+    {
+      "path": "prompt_corpus/GOAL_LOOP/artifact_synthesis.md",
+      "unique_candidate_rows": 47
+    },
+    {
+      "path": "prompt_corpus/GOAL_LOOP/audit_derived_state.md",
+      "unique_candidate_rows": 29
+    },
+    {
+      "path": "prompt_corpus/GOAL_LOOP/deep_audit_dashboard_heuristic.md",
+      "unique_candidate_rows": 23
+    },
+    {
+      "path": "prompt_corpus/GOAL_LOOP/llm_compatibility.agent.final.md",
+      "unique_candidate_rows": 14
+    }
+  ],
+  "candidates_by_rule": [
+    {
+      "rule": "audit_derived_numbered_heading",
+      "unique_candidate_rows": 29
+    },
+    {
+      "rule": "colon_finding_id_line",
+      "unique_candidate_rows": 8
+    },
+    {
+      "rule": "deep_audit_decimal_heading",
+      "unique_candidate_rows": 23
+    },
+    {
+      "rule": "generic_explicit_id_mention",
+      "unique_candidate_rows": 28
+    },
+    {
+      "rule": "markdown_table_id_row",
+      "unique_candidate_rows": 38
+    },
+    {
+      "rule": "ocaml_switch_finding_id",
+      "unique_candidate_rows": 6
+    }
+  ]
+}

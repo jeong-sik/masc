@@ -188,7 +188,8 @@
         "test/fixtures/goal_loop/row-corpus-discovery.external-claim.json",
         "test/fixtures/goal_loop/strict-row-corpus-contract.json",
         "scripts/discover_goal_loop_strict_row_corpus.py",
-        "scripts/extract_goal_loop_source_row_candidates.py"
+        "scripts/extract_goal_loop_source_row_candidates.py",
+        "test/fixtures/goal_loop/source-row-candidate-inventory.external-claim.json"
       ],
       "status": "BLOCKED",
       "criterion_id": "strict_row_level_catalog_complete",

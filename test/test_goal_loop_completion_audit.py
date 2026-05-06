@@ -33,6 +33,13 @@ PROMPT_CHECKLIST_FIXTURE = (
     / "goal_loop"
     / "prompt-closeout-checklist.external-claim.json"
 )
+SOURCE_ROW_CANDIDATE_INVENTORY_FIXTURE = (
+    REPO_ROOT
+    / "test"
+    / "fixtures"
+    / "goal_loop"
+    / "source-row-candidate-inventory.external-claim.json"
+)
 STRICT_ROW_CORPUS_CONTRACT_FIXTURE = (
     REPO_ROOT / "test" / "fixtures" / "goal_loop" / "strict-row-corpus-contract.json"
 )
@@ -507,6 +514,84 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertEqual(discovery_evidence["discovery_status"], "MISSING")
         self.assertFalse(discovery_evidence["recorded"])
 
+    def test_completion_audit_attaches_source_row_candidate_inventory(
+        self,
+    ) -> None:
+        inventory = json.loads(
+            SOURCE_ROW_CANDIDATE_INVENTORY_FIXTURE.read_text(encoding="utf-8")
+        )
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            source_row_candidate_inventory=inventory,
+        )
+
+        self.assertEqual(audit.status, "BLOCKED")
+        self.assertEqual(audit.blockers, ["strict_row_level_catalog_complete"])
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        inventory_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "source_row_candidate_inventory"
+        ]
+        self.assertTrue(inventory_evidence["recorded"])
+        self.assertEqual(inventory_evidence["unique_candidate_rows"], 132)
+        self.assertEqual(inventory_evidence["missing_candidate_rows"], 74)
+        self.assertTrue(inventory_evidence["expected_matches"])
+        self.assertTrue(inventory_evidence["missing_candidate_rows_matches"])
+        self.assertTrue(inventory_evidence["incomplete_against_expected"])
+        self.assertTrue(inventory_evidence["candidates_by_file_total_matches"])
+        self.assertTrue(inventory_evidence["candidates_by_rule_total_matches"])
+        self.assertEqual(inventory_evidence["prompt_sources_checked"], 12)
+        self.assertFalse(inventory_evidence["local_path_leaks"])
+
+    def test_completion_audit_rejects_inconsistent_source_row_candidate_inventory(
+        self,
+    ) -> None:
+        inventory = json.loads(
+            SOURCE_ROW_CANDIDATE_INVENTORY_FIXTURE.read_text(encoding="utf-8")
+        )
+        by_file = inventory["candidates_by_file"]
+        assert isinstance(by_file, list)
+        first = by_file[0]
+        assert isinstance(first, dict)
+        first["unique_candidate_rows"] = 1
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            source_row_candidate_inventory=inventory,
+        )
+
+        self.assertEqual(audit.status, "BLOCKED")
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        inventory_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "source_row_candidate_inventory"
+        ]
+        self.assertFalse(inventory_evidence["recorded"])
+        self.assertFalse(inventory_evidence["candidates_by_file_total_matches"])
+        self.assertTrue(inventory_evidence["candidates_by_rule_total_matches"])
+
+    def test_completion_audit_rejects_wrong_catalog_source_row_candidate_inventory(
+        self,
+    ) -> None:
+        inventory = json.loads(
+            SOURCE_ROW_CANDIDATE_INVENTORY_FIXTURE.read_text(encoding="utf-8")
+        )
+        inventory["source_catalog_id"] = "wrong-catalog"
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            source_row_candidate_inventory=inventory,
+        )
+
+        self.assertEqual(audit.status, "BLOCKED")
+        self.assertEqual(audit.blockers, ["strict_row_level_catalog_complete"])
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        inventory_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "source_row_candidate_inventory"
+        ]
+        self.assertFalse(inventory_evidence["recorded"])
+        self.assertFalse(inventory_evidence["source_catalog_id_matches"])
+        self.assertEqual(
+            inventory_evidence["inventory_source_catalog_id"],
+            "wrong-catalog",
+        )
+
     def test_completion_audit_attaches_prompt_closeout_checklist(self) -> None:
         checklist = json.loads(PROMPT_CHECKLIST_FIXTURE.read_text(encoding="utf-8"))
         audit = goal_loop_completion_audit.build_completion_audit(
@@ -574,6 +659,8 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
                     str(corpus_path),
                     "--prompt-closeout-checklist",
                     str(PROMPT_CHECKLIST_FIXTURE),
+                    "--source-row-candidate-inventory",
+                    str(SOURCE_ROW_CANDIDATE_INVENTORY_FIXTURE),
                     "--require-complete",
                 ],
                 text=True,
@@ -592,6 +679,11 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
             "row_corpus_discovery"
         ]
         self.assertTrue(row_discovery["recorded"])
+        source_inventory = by_id["strict_row_level_catalog_complete"]["evidence"][
+            "source_row_candidate_inventory"
+        ]
+        self.assertTrue(source_inventory["recorded"])
+        self.assertEqual(source_inventory["unique_candidate_rows"], 132)
         strict_row_corpus = by_id["strict_row_level_catalog_complete"]["evidence"][
             "strict_row_corpus"
         ]

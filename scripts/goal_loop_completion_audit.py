@@ -302,6 +302,108 @@ def row_corpus_discovery_evidence(
     }
 
 
+def sum_unique_candidate_rows(value: Any) -> int | None:
+    if not isinstance(value, list):
+        return None
+    total = 0
+    for item in value:
+        if not isinstance(item, dict):
+            return None
+        rows = item.get("unique_candidate_rows")
+        if not isinstance(rows, int):
+            return None
+        total += rows
+    return total
+
+
+def source_row_candidate_inventory_evidence(
+    row_catalog_evidence: dict[str, Any],
+    source_row_candidate_inventory: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if row_catalog_evidence["status"] == "COMPLETE":
+        return {"inventory_status": "NOT_REQUIRED", "recorded": False}
+    if source_row_candidate_inventory is None:
+        return {"inventory_status": "MISSING", "recorded": False}
+
+    sources_raw = source_row_candidate_inventory.get("prompt_sources_checked", [])
+    sources = sources_raw if isinstance(sources_raw, list) else []
+    source_errors_raw = source_row_candidate_inventory.get("source_errors", [])
+    source_errors = source_errors_raw if isinstance(source_errors_raw, list) else []
+    expected_total = source_row_candidate_inventory.get("expected_findings_total")
+    candidate_rows = source_row_candidate_inventory.get("unique_candidate_rows")
+    missing_candidate_rows = source_row_candidate_inventory.get(
+        "missing_candidate_rows"
+    )
+    expected_matches = expected_total == row_catalog_evidence["expected_findings_total"]
+    missing_candidate_rows_matches = (
+        isinstance(expected_total, int)
+        and isinstance(candidate_rows, int)
+        and missing_candidate_rows == max(expected_total - candidate_rows, 0)
+    )
+    inventory_catalog_id = source_row_candidate_inventory.get("source_catalog_id")
+    row_catalog_id = row_catalog_evidence.get("catalog_id")
+    source_catalog_id_matches = (
+        isinstance(row_catalog_id, str)
+        and isinstance(inventory_catalog_id, str)
+        and inventory_catalog_id == row_catalog_id
+    )
+    incomplete_against_expected = (
+        isinstance(candidate_rows, int)
+        and isinstance(expected_total, int)
+        and candidate_rows < expected_total
+    )
+    candidates_by_file_total = sum_unique_candidate_rows(
+        source_row_candidate_inventory.get("candidates_by_file")
+    )
+    candidates_by_rule_total = sum_unique_candidate_rows(
+        source_row_candidate_inventory.get("candidates_by_rule")
+    )
+    candidates_by_file_total_matches = candidates_by_file_total == candidate_rows
+    candidates_by_rule_total_matches = candidates_by_rule_total == candidate_rows
+    local_path_leaks = contains_user_local_path(source_row_candidate_inventory)
+    recorded = (
+        source_row_candidate_inventory.get("schema_version") == 1
+        and source_row_candidate_inventory.get("status") == "INCOMPLETE"
+        and source_row_candidate_inventory.get("result")
+        == "EXPLICIT_SOURCE_ROWS_INSUFFICIENT"
+        and source_catalog_id_matches
+        and expected_matches
+        and missing_candidate_rows_matches
+        and incomplete_against_expected
+        and candidates_by_file_total_matches
+        and candidates_by_rule_total_matches
+        and len(sources) >= 12
+        and source_row_candidate_inventory.get("source_errors_total") == 0
+        and len(source_errors) == 0
+        and not local_path_leaks
+    )
+    return {
+        "inventory_status": source_row_candidate_inventory.get("status"),
+        "inventory_id": source_row_candidate_inventory.get("inventory_id"),
+        "result": source_row_candidate_inventory.get("result"),
+        "recorded": recorded,
+        "source_catalog_id": row_catalog_id,
+        "inventory_source_catalog_id": inventory_catalog_id,
+        "source_catalog_id_matches": source_catalog_id_matches,
+        "expected_findings_total": expected_total,
+        "expected_matches": expected_matches,
+        "unique_candidate_rows": candidate_rows,
+        "missing_candidate_rows": missing_candidate_rows,
+        "missing_candidate_rows_matches": missing_candidate_rows_matches,
+        "incomplete_against_expected": incomplete_against_expected,
+        "candidates_by_file_total": candidates_by_file_total,
+        "candidates_by_file_total_matches": candidates_by_file_total_matches,
+        "candidates_by_rule_total": candidates_by_rule_total,
+        "candidates_by_rule_total_matches": candidates_by_rule_total_matches,
+        "prompt_sources_checked": len(sources),
+        "source_errors_total": source_row_candidate_inventory.get(
+            "source_errors_total"
+        ),
+        "source_errors_count": len(source_errors),
+        "local_path_leaks": local_path_leaks,
+    }
+
+
 def strict_row_corpus_evidence(
     row_catalog_evidence: dict[str, Any],
     strict_row_corpus: dict[str, Any] | None,
@@ -420,6 +522,7 @@ def build_completion_audit(
     row_corpus_discovery: dict[str, Any] | None = None,
     strict_row_corpus: dict[str, Any] | None = None,
     prompt_closeout_checklist: dict[str, Any] | None = None,
+    source_row_candidate_inventory: dict[str, Any] | None = None,
 ) -> CompletionAudit:
     audit_catalog = nested_dict(status, "phases", "orient", "summary", "audit_catalog")
     verify_summary = nested_dict(status, "phases", "verify", "summary")
@@ -528,6 +631,12 @@ def build_completion_audit(
     row_catalog_evidence["row_corpus_discovery"] = row_corpus_discovery_evidence(
         row_catalog_evidence,
         row_corpus_discovery,
+    )
+    row_catalog_evidence["source_row_candidate_inventory"] = (
+        source_row_candidate_inventory_evidence(
+            row_catalog_evidence,
+            source_row_candidate_inventory,
+        )
     )
     row_catalog_evidence["strict_row_corpus"] = strict_row_corpus_evidence(
         row_catalog_evidence,
@@ -753,6 +862,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Optional prompt-to-artifact closeout checklist manifest.",
     )
     parser.add_argument(
+        "--source-row-candidate-inventory",
+        help="Optional explicit source-row candidate inventory manifest.",
+    )
+    parser.add_argument(
         "--require-complete",
         action="store_true",
         help="Exit non-zero unless every completion criterion passes.",
@@ -769,6 +882,9 @@ def main(argv: list[str] | None = None) -> int:
         strict_row_corpus=load_optional_json_file(args.strict_row_corpus),
         prompt_closeout_checklist=load_optional_json_file(
             args.prompt_closeout_checklist
+        ),
+        source_row_candidate_inventory=load_optional_json_file(
+            args.source_row_candidate_inventory
         ),
     )
     if args.format == "json":

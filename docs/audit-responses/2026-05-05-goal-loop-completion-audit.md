@@ -189,8 +189,9 @@
   extractor records only explicit IDs, explicit S/F anti-pattern rows,
   markdown table ID rows, and numbered audit sections; it does not expand
   ranges or roadmap phase bullets into invented rows. The result is recorded
-  in `test/fixtures/goal_loop/row-corpus-discovery.external-claim.json` as
-  `prompt_source_docs_explicit_row_candidate_inventory`.
+  in `test/fixtures/goal_loop/source-row-candidate-inventory.external-claim.json`
+  and mirrored in `test/fixtures/goal_loop/row-corpus-discovery.external-claim.json`
+  as `prompt_source_docs_explicit_row_candidate_inventory`.
 - [근거] `gh pr view 13577 --repo jeong-sik/masc-mcp --json
   number,state,isDraft,mergeable,mergeStateStatus,headRefOid,labels,url`,
   `gh issue view 13265 --repo jeong-sik/masc-mcp --json number,state,url`, and
@@ -220,12 +221,15 @@
   test/fixtures/goal_loop/row-corpus-discovery.external-claim.json
   --prompt-closeout-checklist
   test/fixtures/goal_loop/prompt-closeout-checklist.external-claim.json
-  --require-complete --format text` checked at 2026-05-06T14:00:29+09:00,
+  --source-row-candidate-inventory
+  test/fixtures/goal_loop/source-row-candidate-inventory.external-claim.json
+  --require-complete --format text` checked at 2026-05-06T14:21:58+09:00,
   confidence High: exits non-zero with only
   `strict_row_level_catalog_complete`, while the new
-  `prompt_to_artifact_checklist_recorded` criterion passes. The checklist
-  maps 15 prompt requirements to concrete artifacts and blockers across all 12
-  prompt source documents: 2 `PASS`, 11 `PARTIAL`, and 2 `BLOCKED`
+  `prompt_to_artifact_checklist_recorded` criterion passes, and the strict row
+  evidence directly records the source-row candidate inventory as 132/206. The
+  checklist maps 15 prompt requirements to concrete artifacts and blockers
+  across all 12 prompt source documents: 2 `PASS`, 11 `PARTIAL`, and 2 `BLOCKED`
   requirements, with the strict 206-row corpus explicitly bound to
   `strict_row_level_catalog_complete`.
 - [근거] `python3 test/test_goal_loop_completion_audit.py` checked at

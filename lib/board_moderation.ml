@@ -91,8 +91,10 @@ type audit_entry = {
 (** {1 In-memory store} *)
 
 type store = {
-  queue  : (string, queue_entry) Hashtbl.t;  (* entry_id → entry *)
-  audit  : audit_entry list ref;
+  queue : (string, queue_entry) Hashtbl.t;  (* entry_id -> entry *)
+  audit : audit_entry list ref;
+  unresolved_by_target : (target_kind * string, string) Hashtbl.t;
+  last_flag_by_reporter : (string, float) Hashtbl.t;
 }
 
 let max_note_length = 500
@@ -111,7 +113,32 @@ let flag_rate_limit_sec () =
   |> sanitize_flag_rate_limit_sec
 
 let make_store () : store =
-  { queue = Hashtbl.create 64; audit = ref [] }
+  {
+    queue = Hashtbl.create 64;
+    audit = ref [];
+    unresolved_by_target = Hashtbl.create 64;
+    last_flag_by_reporter = Hashtbl.create 64;
+  }
+
+let target_key target_kind target_id = (target_kind, target_id)
+
+let retry_after_for_reporter s ~reporter ~now ~window_sec =
+  if Float.compare window_sec 0.0 <= 0 then None
+  else
+    match Hashtbl.find_opt s.last_flag_by_reporter reporter with
+    | None -> None
+    | Some flagged_at ->
+        let flagged_at =
+          if Float.compare now flagged_at < 0 then (
+            Hashtbl.replace s.last_flag_by_reporter reporter now;
+            now)
+          else
+            flagged_at
+        in
+        let elapsed = Float.max 0.0 (now -. flagged_at) in
+        let remaining = window_sec -. elapsed in
+        if Float.compare remaining 0.0 <= 0 then None
+        else Some remaining
 
 let store () : store =
   match !global_store with
@@ -134,30 +161,12 @@ let reset_for_test () : unit =
 let flag ~target_kind ~target_id ~reporter ~reason =
   let s = store () in
   let now = Time_compat.now () in
-  (* Reject duplicate unresolved flags for the same target *)
-  let duplicate =
-    Hashtbl.fold
-      (fun _k (e : queue_entry) acc ->
-         acc ||
-         (e.target_id = target_id && e.target_kind = target_kind && not e.resolved))
-      s.queue false
-  in
-  if duplicate then
+  let target_key = target_key target_kind target_id in
+  if Hashtbl.mem s.unresolved_by_target target_key then
     Error (Printf.sprintf "target %s is already flagged and pending review" target_id)
   else
     let window_sec = flag_rate_limit_sec () in
-    let retry_after =
-      if Float.compare window_sec 0.0 <= 0 then None
-      else
-        Hashtbl.fold
-          (fun _k (e : queue_entry) acc ->
-             if not (String.equal e.reporter reporter) then acc
-             else
-               let remaining = window_sec -. (now -. e.flagged_at) in
-               if Float.compare remaining 0.0 <= 0 then acc
-               else Some (Float.max remaining (Option.value acc ~default:0.0)))
-          s.queue None
-    in
+    let retry_after = retry_after_for_reporter s ~reporter ~now ~window_sec in
     match retry_after with
     | Some remaining ->
         Error
@@ -176,6 +185,8 @@ let flag ~target_kind ~target_id ~reporter ~reason =
           resolved   = false;
         } in
         Hashtbl.replace s.queue entry_id entry;
+        Hashtbl.replace s.unresolved_by_target target_key entry_id;
+        Hashtbl.replace s.last_flag_by_reporter reporter now;
         Ok entry
 
 let get_queue ?resolved () =
@@ -195,6 +206,8 @@ let resolve_entry ~entry_id =
   match Hashtbl.find_opt s.queue entry_id with
   | None -> Error (Printf.sprintf "moderation queue entry not found: %s" entry_id)
   | Some e ->
+      if not e.resolved then
+        Hashtbl.remove s.unresolved_by_target (target_key e.target_kind e.target_id);
       Hashtbl.replace s.queue entry_id { e with resolved = true };
       Ok ()
 
@@ -222,12 +235,15 @@ let record_action ~target_kind ~target_id ~actor ~action ?reason ?note () =
     note = note_trimmed;
     acted_at = Time_compat.now ();
   } in
-  (* Resolve any open queue entry for this target *)
-  Hashtbl.iter
-    (fun _k (qe : queue_entry) ->
-       if qe.target_id = target_id && qe.target_kind = target_kind && not qe.resolved then
-         Hashtbl.replace s.queue qe.entry_id { qe with resolved = true })
-    s.queue;
+  let target_key = target_key target_kind target_id in
+  (match Hashtbl.find_opt s.unresolved_by_target target_key with
+   | None -> ()
+   | Some entry_id ->
+       Hashtbl.remove s.unresolved_by_target target_key;
+       (match Hashtbl.find_opt s.queue entry_id with
+        | Some qe when not qe.resolved ->
+            Hashtbl.replace s.queue entry_id { qe with resolved = true }
+        | _ -> ()));
   s.audit := entry :: !(s.audit);
   Ok entry
 

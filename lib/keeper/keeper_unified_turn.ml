@@ -1710,7 +1710,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           let social_state, social_transition_reason =
             Social.derive_failure_state ~meta ~observation
               ~previous_state:previous_social_state
-              ~is_auto_recoverable ~reason:e_str
+              ~is_auto_recoverable ~sdk_error:(Some err) ~reason:e_str
           in
           let failure_meta_base =
             match !paused_meta_override with

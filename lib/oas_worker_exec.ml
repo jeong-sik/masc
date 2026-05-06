@@ -300,8 +300,8 @@ let close_agent_for_cleanup ~config agent =
         "oas_worker %s: agent close cancelled during cleanup"
         config.name
   | close_exn ->
-      Log.Misc.warn "agent close failed during cleanup: %s"
-        (Printexc.to_string close_exn)
+      Log.Misc.warn "oas_worker %s: agent close failed during cleanup: %s"
+        config.name (Printexc.to_string close_exn)
 
 (* ================================================================ *)
 (* Resume from checkpoint                                            *)

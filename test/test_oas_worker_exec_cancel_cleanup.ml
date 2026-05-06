@@ -29,6 +29,30 @@ let assert_contains ~label haystack needle =
          "[%s] expected Oas_worker_exec source to contain %S"
          label needle)
 
+let find_substring_from haystack needle start =
+  let n = String.length needle in
+  let h = String.length haystack in
+  let rec scan i =
+    if i + n > h then None
+    else if String.sub haystack i n = needle then Some i
+    else scan (i + 1)
+  in
+  scan start
+
+let assert_ordered_contains ~label haystack needles =
+  let rec loop start = function
+    | [] -> ()
+    | needle :: rest -> (
+        match find_substring_from haystack needle start with
+        | Some idx -> loop (idx + String.length needle) rest
+        | None ->
+            failwith
+              (Printf.sprintf
+                 "[%s] expected Oas_worker_exec source to contain %S after offset %d"
+                 label needle start))
+  in
+  loop 0 needles
+
 let () =
   let parent p = Filename.dirname p in
   let exe = Sys.executable_name in
@@ -59,11 +83,23 @@ let () =
     src
     "agent close cancelled during cleanup";
   assert_contains
+    ~label:"ordinary cleanup log includes worker name"
+    src
+    "oas_worker %s: agent close failed during cleanup: %s";
+  assert_ordered_contains
     ~label:"run cancellation closes agent before re-raise"
     src
-    "Eio.Cancel.Cancelled _ as exn ->\n    close_agent_for_cleanup ~config agent;\n    raise exn";
-  assert_contains
+    [
+      "Eio.Cancel.Cancelled _ as exn";
+      "close_agent_for_cleanup ~config agent";
+      "raise exn";
+    ];
+  assert_ordered_contains
     ~label:"ordinary exception uses same cleanup helper"
     src
-    "let bt = Printexc.get_backtrace () in\n    close_agent_for_cleanup ~config agent";
+    [
+      "let bt = Printexc.get_backtrace ()";
+      "close_agent_for_cleanup ~config agent";
+      "let detail =";
+    ];
   print_endline "test_oas_worker_exec_cancel_cleanup: OK"

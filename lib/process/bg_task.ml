@@ -85,6 +85,28 @@ let bg_dir_of ~base_path ~keeper =
 let pid_file_of ~base_path ~keeper ~task_id =
   Filename.concat (bg_dir_of ~base_path ~keeper) (task_id ^ ".pid")
 
+let sidecar_failure_observer :
+    ((site:string -> exn -> unit) option) Atomic.t =
+  Atomic.make None
+
+let set_sidecar_failure_observer f =
+  Atomic.set sidecar_failure_observer (Some f)
+
+let observe_sidecar_failure ~site exn =
+  match exn with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Log.Misc.warn "bg_task PID sidecar %s failed: %s"
+        site (Printexc.to_string exn);
+      (match Atomic.get sidecar_failure_observer with
+       | None -> ()
+       | Some observe ->
+           (try observe ~site exn with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | observer_exn ->
+                Log.Misc.warn "bg_task PID sidecar observer failed: %s"
+                  (Printexc.to_string observer_exn)))
+
 let rec ensure_dir path =
   if Sys.file_exists path then ()
   else begin
@@ -95,15 +117,29 @@ let rec ensure_dir path =
   end
 
 let try_write_pid_file path ~pid ~pgid ~started_at =
-  Safe_ops.protect ~default:() (fun () ->
+  try
     ensure_dir (Filename.dirname path);
     let oc = open_out_gen [ Open_wronly; Open_creat; Open_trunc ] 0o644 path in
-    Printf.fprintf oc "%d\n%d\n%f\n" pid pgid started_at;
-    close_out_noerr oc)
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr oc)
+      (fun () ->
+        Printf.fprintf oc "%d\n%d\n%f\n" pid pgid started_at;
+        flush oc)
+  with exn -> observe_sidecar_failure ~site:"write" exn
+
+let delete_pid_file path =
+  try
+    Unix.unlink path;
+    true
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> false
+  | exn ->
+      observe_sidecar_failure ~site:"unlink" exn;
+      false
 
 let try_delete_pid_file = function
   | None -> ()
-  | Some path -> Safe_ops.protect ~default:() (fun () -> Unix.unlink path)
+  | Some path -> ignore (delete_pid_file path : bool)
 
 let registry : (string, state) Hashtbl.t = Hashtbl.create 16
 let registry_mu = Mutex.create ()
@@ -342,19 +378,47 @@ let list_with_started_at ~keeper =
 (* Directory walk helpers — avoid Filename.Infix / extra deps. *)
 
 let safe_readdir dir =
-  Safe_ops.protect ~default:[] (fun () -> Array.to_list (Sys.readdir dir))
+  try Array.to_list (Sys.readdir dir) with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      if Sys.file_exists dir then
+        observe_sidecar_failure ~site:"readdir" exn;
+      []
 
-let is_dir p = Safe_ops.protect ~default:false (fun () -> Sys.is_directory p)
+let is_dir p =
+  try (Unix.stat p).Unix.st_kind = Unix.S_DIR with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> false
+  | exn ->
+      observe_sidecar_failure ~site:"is_dir" exn;
+      false
 
 let read_pid_file path =
-  Safe_ops.protect ~default:None (fun () ->
+  try
     let ic = open_in path in
     Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-      match int_of_string_opt (String.trim (input_line ic)),
-            int_of_string_opt (String.trim (input_line ic))
-      with
+      let input_line_opt ic =
+        try Some (input_line ic) with End_of_file -> None
+      in
+      let pid_line = input_line_opt ic in
+      let pgid_line = input_line_opt ic in
+      let parse_int line =
+        line |> Option.map String.trim |> Option.bind int_of_string_opt
+      in
+      match parse_int pid_line, parse_int pgid_line with
       | Some pid, Some pgid -> Some (pid, pgid)
-      | _ -> None))
+      | _ ->
+          observe_sidecar_failure ~site:"read_parse"
+            (Failure (Printf.sprintf "invalid PID sidecar: %s" path));
+          None)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      if Sys.file_exists path then
+        observe_sidecar_failure ~site:"read"
+          (Failure
+             (Printf.sprintf "read PID sidecar %s: %s" path
+                (Printexc.to_string exn)));
+      None
 
 let pid_is_live pid =
   try Unix.kill pid 0; true
@@ -401,8 +465,8 @@ let reap_orphans ~base_path =
                      Process_eio.tree_kill ~pgid
                        ~signal:Sys.sigterm ~grace_sec:1.0
                  | None | Some (_, _) -> ());
-                Safe_ops.protect ~default:() (fun () -> Unix.unlink path);
-                incr reaped
+                if delete_pid_file path then
+                  incr reaped
               end
             end)
             (safe_readdir bg_dir))

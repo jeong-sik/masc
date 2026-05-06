@@ -122,6 +122,12 @@ val list_with_started_at : keeper:string -> (task_id * float) list
     wall-clock elapsed time without consulting the child process or
     reading the PID file. *)
 
+val set_sidecar_failure_observer : (site:string -> exn -> unit) -> unit
+(** Install the process-local observer for PID sidecar persistence
+    failures.  The top-level Prometheus module wires this to
+    [masc_bg_task_sidecar_failures_total]; [bg_task] keeps the hook here
+    to avoid a lower-library dependency cycle. *)
+
 val reap_orphans : base_path:string -> int
 (** Startup hook: read PID files under \`.masc/keeper/*/bg/*.pid\`,
     SIGKILL any pgroup whose leader is no longer in the live task

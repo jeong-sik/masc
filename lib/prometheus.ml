@@ -1053,6 +1053,8 @@ let metric_oas_bus_publish = "masc_oas_bus_publish_total"
 let metric_runtime_ollama_probe_generate_skips =
   "masc_runtime_ollama_probe_generate_skips_total"
 let metric_process_timeout = "masc_process_timeout_total"
+let metric_bg_task_sidecar_failures =
+  "masc_bg_task_sidecar_failures_total"
 let metric_distributed_lock_acquire_failed =
   "masc_distributed_lock_acquire_failed_total"
 
@@ -2052,6 +2054,14 @@ let init () =
     "Total subprocess executions that exceeded their configured timeout. \
      Labeled by program and timeout_sec."
     Counter;
+  add metric_bg_task_sidecar_failures
+    "Total background-task PID sidecar persistence failures. \
+     Labeled by site=write|read|read_parse|readdir|is_dir|unlink."
+    Counter;
+  Bg_task.set_sidecar_failure_observer (fun ~site _exn ->
+      inc_counter metric_bg_task_sidecar_failures
+        ~labels:[("site", site)]
+        ());
   add metric_distributed_lock_acquire_failed
     "Total distributed lock acquire exhaustions. Labeled by key and attempts. \
      A non-zero rate indicates lock contention exhausted the retry budget."

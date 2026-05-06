@@ -696,6 +696,11 @@ val metric_runtime_ollama_probe_generate_skips : string
 val metric_process_timeout : string
 (** #9632: subprocess executions that exceeded their configured
     timeout. Labels: [program, timeout_sec]. *)
+
+val metric_bg_task_sidecar_failures : string
+(** Background-task PID sidecar persistence failures. Labels:
+    [site] = [write | read | read_parse | readdir | is_dir | unlink]. *)
+
 val metric_distributed_lock_acquire_failed : string
 (** #9645: distributed lock acquire retry-budget exhaustions.
     Labels: [key, attempts]. *)

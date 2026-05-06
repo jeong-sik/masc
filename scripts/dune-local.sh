@@ -153,15 +153,27 @@ _needs_opam_lock() {
 
 if _needs_opam_lock; then
   printf '[dune-local] waiting for opam switch lock %s\n' "$opam_lock_path" >&2
+  # Apply the bounded-wait deadlock guard whenever this invocation is
+  # already holding the Dune lock AND the operator opted in by setting
+  # MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT=<positive integer>. Default is
+  # unset, which preserves the historical "wait indefinitely" semantics
+  # so existing operators are not surprised by builds that suddenly
+  # fail under long-lived opam lock holders.
+  opam_bounded_wait=0
+  opam_lock_timeout=""
+  if [[ "${MASC_DUNE_LOCK_HELD:-0}" = "1" \
+        && -n "${MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT:-}" \
+        && "${MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT}" != "0" ]]; then
+    opam_lock_timeout="${MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT}"
+    if ! [[ "$opam_lock_timeout" =~ ^[0-9]+$ ]]; then
+      printf '[dune-local] invalid MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT=%q; expected non-negative integer seconds\n' \
+        "$opam_lock_timeout" >&2
+      exit 2
+    fi
+    opam_bounded_wait=1
+  fi
   if command -v lockf >/dev/null 2>&1; then
-    if [[ "${MASC_DUNE_LOCK_HELD:-0}" = "1" \
-          && "${MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT:-60}" != "0" ]]; then
-      opam_lock_timeout="${MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT:-60}"
-      if ! [[ "$opam_lock_timeout" =~ ^[0-9]+$ ]]; then
-        printf '[dune-local] invalid MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT=%q; expected non-negative integer seconds\n' \
-          "$opam_lock_timeout" >&2
-        exit 2
-      fi
+    if [[ "$opam_bounded_wait" = "1" ]]; then
       set +e
       lockf -k -t "$opam_lock_timeout" "$opam_lock_path" \
         env MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
@@ -173,18 +185,43 @@ if _needs_opam_lock; then
       if [[ "$status" -eq 75 ]]; then
         printf '[dune-local] opam switch lock stayed busy for %ss after acquiring Dune lock; releasing Dune lock to avoid mixed lock-order deadlock\n' \
           "$opam_lock_timeout" >&2
-        printf '[dune-local] retry after older dune-local invocations drain, or set MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT=0 to wait indefinitely\n' >&2
+        printf '[dune-local] retry after older dune-local invocations drain, or unset MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT (or set =0) to wait indefinitely\n' >&2
       fi
       exit "$status"
     fi
     exec lockf -k "$opam_lock_path" env MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
   elif command -v flock >/dev/null 2>&1; then
+    if [[ "$opam_bounded_wait" = "1" ]]; then
+      # flock(1) honors -w/--timeout to bound the wait; without it the
+      # mixed-lock-order deadlock the lockf branch above already handles
+      # would resurface on flock-only hosts (Linux without lockf).
+      set +e
+      flock -w "$opam_lock_timeout" "$opam_lock_path" \
+        env MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
+      status=$?
+      set -e
+      if [[ "$status" -eq 0 ]]; then
+        exit 0
+      fi
+      # flock returns 1 when the lock cannot be acquired within the
+      # timeout (vs >1 for command failures). Match the lockf message
+      # so operators see consistent diagnostics across hosts.
+      if [[ "$status" -eq 1 ]]; then
+        printf '[dune-local] opam switch lock stayed busy for %ss after acquiring Dune lock; releasing Dune lock to avoid mixed lock-order deadlock\n' \
+          "$opam_lock_timeout" >&2
+        printf '[dune-local] retry after older dune-local invocations drain, or unset MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT (or set =0) to wait indefinitely\n' >&2
+      fi
+      exit "$status"
+    fi
     exec flock "$opam_lock_path" env MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
-  elif [[ "${MASC_DUNE_LOCK_HELD:-0}" != "1" ]]; then
-    # Skip the warning when the Dune-lock branch above already emitted
+  elif [[ "$dune_lock_warning_emitted" != "1" ]]; then
+    # Skip the warning when the Dune-lock branch above already printed
     # an equivalent "neither lockf nor flock found" message in this
-    # process. Without the guard, both paths print and operators see
-    # two warnings even though there is only one underlying problem.
+    # process. The Dune-lock branch tracks that via the local
+    # [dune_lock_warning_emitted] flag (not MASC_DUNE_LOCK_HELD, which
+    # is only set when the Dune lock was actually acquired); using the
+    # flag avoids the case where opam is available but neither lock
+    # tool is, where the env-var check would let both warnings print.
     printf '[dune-local] warning: neither lockf nor flock found; opam switch checks are unlocked\n' >&2
   fi
 fi

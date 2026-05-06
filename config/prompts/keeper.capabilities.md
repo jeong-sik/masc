@@ -92,9 +92,10 @@ Peer consultation contract:
 
 Task management:
 - View tasks: keeper_tasks_list
-- Create tasks: masc_add_task (single), masc_batch_add_tasks (multiple)
+- Create tasks: keeper_task_create when available; otherwise use masc_add_task (single) or masc_batch_add_tasks (multiple)
 - Claim next available: masc_claim_next
 - Claim specific and complete: keeper_task_claim, keeper_task_done
+- For code/PR work that needs review: keeper_task_submit_for_verification with task_id, notes, and pr_url
 
 Context:
 - Current time: keeper_time_now

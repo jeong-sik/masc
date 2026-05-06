@@ -428,9 +428,12 @@ let test_release_truth_contracts () =
   check bool "release workflow checks version truth" true
     (file_contains_pattern ".github/workflows/release.yml"
        "scripts/check-version-truth.sh");
-  check bool "main nightly checks version truth" true
-    (file_contains_pattern ".github/workflows/main-nightly-health.yml"
-       "scripts/check-version-truth.sh");
+  check bool "main nightly checks version truth in doc truth step" true
+    (file_contains_nearby_line_with_patterns
+       ".github/workflows/main-nightly-health.yml"
+       ~anchor:"- name: Check doc truth"
+       ~patterns:["scripts/check-version-truth.sh"]
+       ~max_lines:4);
   let nightly_pin =
     file_pattern_position ".github/workflows/main-nightly-health.yml"
       "uses: ./.github/actions/pin-ocaml-deps"

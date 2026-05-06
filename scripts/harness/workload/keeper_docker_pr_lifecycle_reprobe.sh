@@ -38,6 +38,10 @@ REQUIRED_TOOLS="${REQUIRED_TOOLS:-keeper_shell,keeper_bash,masc_code_git,keeper_
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 MCP_TOKEN="${MASC_MCP_TOKEN:-}"
 MCP_CLIENT_NAME="${MCP_CLIENT_NAME:-keeper-docker-pr-lifecycle-reprobe}"
+EXPECTED_SERVER_COMMIT="${EXPECTED_SERVER_COMMIT:-}"
+SERVER_HEALTH_URL="${SERVER_HEALTH_URL:-}"
+SERVER_COMMIT_ACTUAL=""
+SERVER_HEALTH_CHECK_FILE=""
 
 usage() {
   cat <<'EOF'
@@ -58,6 +62,9 @@ Options:
   --repo OWNER/REPO        Target repository slug in the keeper prompt.
   --base-path PATH         MASC base path for audit (default: $HOME/me).
   --mcp-url URL            MCP endpoint (default: http://127.0.0.1:8935/mcp).
+  --expected-server-commit COMMIT
+                           Fail unless /health build.commit matches this commit.
+  --server-health-url URL  Health endpoint for commit verification.
   --board-post-id ID       Post a final board comment to this thread.
   --run-id ID              Stable run id for prompts and artifacts.
   --run-dir PATH           Artifact directory.
@@ -71,6 +78,7 @@ Environment:
   KEEPER_TURN_TIMEOUT_SEC  Per-keeper Agent.run timeout_sec sent to masc_keeper_msg.
   REQUIRED_TOOLS           CSV required_tools sent to masc_keeper_msg when mutating.
   RUN_AUDIT=0              Skip final audit.
+  EXPECTED_SERVER_COMMIT   Optional expected /health build.commit prefix.
 EOF
 }
 
@@ -106,6 +114,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --mcp-url)
       MCP_URL="$2"
+      shift 2
+      ;;
+    --expected-server-commit)
+      EXPECTED_SERVER_COMMIT="$2"
+      shift 2
+      ;;
+    --server-health-url)
+      SERVER_HEALTH_URL="$2"
       shift 2
       ;;
     --board-post-id)
@@ -168,6 +184,48 @@ require_cmd() {
     echo "required command not found: $1" >&2
     exit 127
   fi
+}
+
+server_health_url() {
+  if [[ -n "$SERVER_HEALTH_URL" ]]; then
+    printf '%s\n' "$SERVER_HEALTH_URL"
+    return 0
+  fi
+  local base="$MCP_URL"
+  base="${base%/mcp}"
+  if [[ "$base" == "$MCP_URL" ]]; then
+    base="${MCP_URL%/}"
+  fi
+  printf '%s/health\n' "$base"
+}
+
+assert_expected_server_commit() {
+  if [[ -z "$EXPECTED_SERVER_COMMIT" ]]; then
+    return 0
+  fi
+
+  local health_url health_file actual
+  health_url="$(server_health_url)"
+  health_file="$RAW_DIR/server-health.json"
+  if ! curl -fsS --max-time 5 "$health_url" >"$health_file"; then
+    echo "failed to fetch server health for commit check: $health_url" >&2
+    exit 1
+  fi
+
+  actual="$(jq -r '.build.commit // .build_commit // .commit // empty' "$health_file")"
+  SERVER_COMMIT_ACTUAL="$actual"
+  SERVER_HEALTH_CHECK_FILE="$health_file"
+  if [[ -z "$actual" ]]; then
+    echo "server health did not expose build.commit: $health_url" >&2
+    exit 1
+  fi
+  if [[ "$actual" != "$EXPECTED_SERVER_COMMIT" \
+      && "$actual" != "$EXPECTED_SERVER_COMMIT"* \
+      && "$EXPECTED_SERVER_COMMIT" != "$actual"* ]]; then
+    echo "server commit mismatch: expected=$EXPECTED_SERVER_COMMIT actual=$actual url=$health_url" >&2
+    exit 1
+  fi
+  log "server commit verified: expected=$EXPECTED_SERVER_COMMIT actual=$actual"
 }
 
 load_mcp_token() {
@@ -594,6 +652,9 @@ write_summary() {
     --arg run_dir "$RUN_DIR" \
     --arg repo "$REPO_SLUG" \
     --arg base_path "$BASE_PATH" \
+    --arg expected_server_commit "$EXPECTED_SERVER_COMMIT" \
+    --arg server_commit "$SERVER_COMMIT_ACTUAL" \
+    --arg server_health_file "$SERVER_HEALTH_CHECK_FILE" \
     --argjson mutate "$MUTATE" \
     --argjson keeper_count "$keeper_count" \
     --argjson request_count "$request_count" \
@@ -607,6 +668,9 @@ write_summary() {
       run_dir:$run_dir,
       repo:$repo,
       base_path:$base_path,
+      expected_server_commit:$expected_server_commit,
+      server_commit:$server_commit,
+      server_health_file:$server_health_file,
       mutate:$mutate,
       keeper_count:$keeper_count,
       request_count:$request_count,
@@ -644,6 +708,7 @@ require_cmd jq
 require_cmd python3
 require_cmd curl
 
+assert_expected_server_commit
 ensure_mcp_session_if_needed
 discover_keepers
 render_prompts

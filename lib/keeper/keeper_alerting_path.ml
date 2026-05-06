@@ -30,6 +30,9 @@ let normalize_path_for_check (path : string) : string =
     let (resolved_base, suffix_parts) = collect_suffix path [] in
     List.fold_left Filename.concat resolved_base suffix_parts
 
+let normalize_path_for_check_stripped path =
+  normalize_path_for_check path |> strip_trailing_slashes
+
 let normalize_allowed_path_for_check ~(root : string) (path : string) : string option =
   let raw = String.trim path in
   if raw = "" then None

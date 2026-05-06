@@ -123,6 +123,16 @@ let test_raw_looks_repos_typo_rejected () =
     false
     (KAP.raw_looks_like_playground_subdir "repository/foo")
 
+(* ── normalize_path_for_check_stripped ──────────────────────── *)
+
+let test_normalize_path_for_check_stripped_removes_trailing_slash () =
+  let cwd = Sys.getcwd () in
+  let raw = cwd ^ "/" in
+  check_bool "fixture cwd is not root" true (cwd <> "/");
+  Alcotest.(check string) "normalized and stripped"
+    (KAP.normalize_path_for_check cwd)
+    (KAP.normalize_path_for_check_stripped raw)
+
 (* ── format_path_rejection: redaction guarantees ─────────────── *)
 
 let test_format_rejection_includes_raw () =
@@ -241,6 +251,11 @@ let () =
             test_raw_looks_empty_rejected;
           Alcotest.test_case "'repository/foo' sibling typo rejected"
             `Quick test_raw_looks_repos_typo_rejected;
+        ] );
+      ( "normalize_path_for_check_stripped",
+        [
+          Alcotest.test_case "removes trailing slash" `Quick
+            test_normalize_path_for_check_stripped_removes_trailing_slash;
         ] );
       ( "format_path_rejection",
         [

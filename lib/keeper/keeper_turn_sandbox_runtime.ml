@@ -16,16 +16,8 @@ type t =
     mutable state : state;
   }
 
-let strip_trailing_slashes path =
-  let rec loop i =
-    if i > 0 && path.[i - 1] = '/' then loop (i - 1) else i
-  in
-  let len = loop (String.length path) in
-  if len = String.length path then path else String.sub path 0 len
-
 let normalize_path path =
-  Keeper_alerting_path.normalize_path_for_check path
-  |> strip_trailing_slashes
+  Keeper_alerting_path.normalize_path_for_check_stripped path
 
 let create ~(config : Coord.config) ~(meta : keeper_meta)
     ?(network_mode = Network_none) () =
@@ -39,7 +31,9 @@ let create ~(config : Coord.config) ~(meta : keeper_meta)
     config;
     meta;
     host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta |> normalize_path;
-    container_root = Keeper_sandbox.container_root meta.name |> strip_trailing_slashes;
+    container_root =
+      Keeper_sandbox.container_root meta.name
+      |> Keeper_alerting_path.strip_trailing_slashes;
     uid = Unix.getuid ();
     gid = Unix.getgid ();
     network_mode;

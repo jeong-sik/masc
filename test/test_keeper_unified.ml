@@ -5964,7 +5964,7 @@ let test_degraded_retry_slot_phase_allows_oas_timeout_local_recovery () =
       fail "expected retry budget to remain"
   | UT.No_degraded_retry -> fail "expected recoverable retry candidate"
 
-let test_degraded_retry_slot_phase_blocks_contract_rotation () =
+let test_degraded_retry_slot_phase_allows_first_contract_rotation () =
   match
     UT.next_fail_open_cascade_for_turn_with_budget
       ~base_cascade:KC.default_cascade_name
@@ -5977,15 +5977,15 @@ let test_degraded_retry_slot_phase_blocks_contract_rotation () =
       ~remaining_turn_budget_s:1200.0
       (required_tool_contract_violation_error ())
   with
-  | UT.Degraded_retry_slot_phase_exhausted retry ->
+  | UT.Degraded_retry_allowed retry ->
       check string "retry cascade candidate" KC.default_cascade_name
         retry.next_cascade;
       check string "fallback reason" "required_tool_contract_violation"
         retry.fallback_reason
-  | UT.Degraded_retry_allowed _ ->
-      fail "expected contract rotation blocked after productive slot phase"
+  | UT.Degraded_retry_slot_phase_exhausted _ ->
+      fail "expected first contract rotation to bypass productive slot phase"
   | UT.Degraded_retry_budget_exhausted _ ->
-      fail "expected slot phase exhaustion before retry budget exhaustion"
+      fail "expected retry budget to remain"
   | UT.No_degraded_retry -> fail "expected recoverable retry candidate"
 
 (* Regression: GitHub #12675 / RFC #12887 — per-attempt retry budget cap.
@@ -8329,8 +8329,9 @@ let () =
             test_degraded_retry_budget_gate_blocks_exhausted_budget;
           test_case "OAS timeout budget can still rotate to local recovery after slot phase" `Quick
             test_degraded_retry_slot_phase_allows_oas_timeout_local_recovery;
-          test_case "contract retry is blocked after productive slot phase (#12888)" `Quick
-            test_degraded_retry_slot_phase_blocks_contract_rotation;
+          test_case "contract retry gets first rotation after slot phase (#12888)"
+            `Quick
+            test_degraded_retry_slot_phase_allows_first_contract_rotation;
           test_case "per-attempt retry budget with near-zero remaining (#12675)" `Quick
             test_per_attempt_retry_budget_with_near_zero_remaining;
           test_case "per-attempt retry budget capped by healthy remaining" `Quick

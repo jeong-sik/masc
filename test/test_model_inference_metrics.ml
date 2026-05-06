@@ -674,6 +674,39 @@ let test_cost_latency_json_composes_axes_and_percentiles () =
     check int "1s-4s bucket count" 1
       (List.nth buckets 1 |> member "n" |> to_int))
 
+let test_cost_latency_json_preserves_missing_latency_as_null () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "cost_latency_missing" in
+    let ts = now_unix () in
+    write_decisions path [
+      `Assoc [
+        ("ts_unix", `Float (ts -. 10.0));
+        ("tool_call_count", `Int 0);
+        ("tools_used", `List []);
+        ("telemetry", `Assoc [
+          ("model_used", `String "unlatenced-model");
+          ("provider", `String "local");
+          ("input_tokens", `Int 100);
+          ("output_tokens", `Int 50);
+          ("cost_usd", `Float 0.01);
+        ]);
+      ];
+    ];
+    let json = M.compute_cost_latency_json ~base_path:base ~window_minutes:60 in
+    let open Yojson.Safe.Util in
+    let per_agent = json |> member "perAgent" |> to_list in
+    check int "perAgent row count" 1 (List.length per_agent);
+    let row = List.hd per_agent in
+    check bool "per-agent p50 missing is null" true
+      (match row |> member "p50_ms" with `Null -> true | _ -> false);
+    check bool "per-agent p95 missing is null" true
+      (match row |> member "p95_ms" with `Null -> true | _ -> false);
+    check bool "global p50 missing is null" true
+      (match json |> member "p50" with `Null -> true | _ -> false);
+    check bool "global p95 missing is null" true
+      (match json |> member "p95" with `Null -> true | _ -> false))
+
 (* ── thinking_fraction tests ─────────────────────── *)
 
 let success_entry_with_thinking ~model ~ts ~thinking_enabled () =
@@ -1038,6 +1071,7 @@ let () =
       test_case "costs.jsonl backfills wall tok/sec" `Quick test_costs_jsonl_backfills_wall_tok_per_sec;
       test_case "costs.jsonl dedupes matching decision sample" `Quick test_costs_jsonl_dedupes_matching_decision_sample;
       test_case "cost latency json composes axes and percentiles" `Quick test_cost_latency_json_composes_axes_and_percentiles;
+      test_case "cost latency json preserves missing latency nulls" `Quick test_cost_latency_json_preserves_missing_latency_as_null;
       test_case "json roundtrip" `Quick test_json_roundtrip;
     ];
     "thinking_fraction", [

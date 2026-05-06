@@ -235,8 +235,8 @@ val compute_cost_latency_json :
         "perAgent":      [ { "agent", "in_tok", "out_tok", "cost", "p50_ms", "p95_ms" } ],
         "matrix":        { "providers": [...], "models": [...], "grid": [[...]] },
         "latencyBuckets": [ { "lo", "hi", "n" } ],
-        "p50":           number,
-        "p95":           number,
+        "p50":           number | null,
+        "p95":           number | null,
         "total_cost_usd": number,
         "window_minutes": number,
         "generated_at":  unix_seconds
@@ -246,8 +246,10 @@ val compute_cost_latency_json :
     [perAgent] rows are sorted by cost descending and omit models with
     no cost/token signal.  [p50]/[p95] are exact global percentiles
     computed from all raw latency samples in the window (not an average
-    of per-model estimates).  [matrix.grid] is a [providers × models]
-    2-D array of cost values in the same order as the [providers] /
-    [models] index arrays.
+    of per-model estimates), or [null] when no latency sample
+    contributed. Per-agent [p50_ms]/[p95_ms] follow the same null
+    semantics. [matrix.grid] is a [providers × models] 2-D array of
+    cost values in the same order as the [providers] / [models] index
+    arrays.
 
     @since 2.300.0 *)

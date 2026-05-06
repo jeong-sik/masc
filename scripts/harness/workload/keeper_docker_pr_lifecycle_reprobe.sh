@@ -970,8 +970,16 @@ result_is_terminal() {
 
 poll_results() {
   local phase="$1"
+  # Honor MUTATE_POLL_DEADLINE_TS when the caller has already opened the
+  # phase loop with a shared overall budget (split keeper lifecycle PR
+  # #13842). Falling back to the per-call POLL_TIMEOUT_SEC keeps
+  # backwards compatibility for direct invocations of this function.
   local deadline
-  deadline=$(( $(date +%s) + POLL_TIMEOUT_SEC ))
+  if [[ -n "${MUTATE_POLL_DEADLINE_TS:-}" ]]; then
+    deadline="$MUTATE_POLL_DEADLINE_TS"
+  else
+    deadline=$(( $(date +%s) + POLL_TIMEOUT_SEC ))
+  fi
   local pending_file="$RUN_DIR/pending-$phase.txt"
   jq -r --arg phase "$phase" \
     'select(.phase == $phase) | .request_id + "\t" + .keeper' \
@@ -1168,10 +1176,16 @@ build_review_targets
 render_prompts
 
 if [[ "$MUTATE" == "1" ]]; then
+  # Share one POLL_TIMEOUT_SEC budget across both phases so the overall
+  # mutate window remains the single configured value rather than
+  # silently doubling when create + review each compute their own
+  # deadline (PR #13842 review).
+  export MUTATE_POLL_DEADLINE_TS=$(( $(date +%s) + POLL_TIMEOUT_SEC ))
   send_phase_prompts "create" "$CREATE_REQUIRED_TOOLS"
   poll_results "create"
   send_phase_prompts "review" "$REVIEW_REQUIRED_TOOLS"
   poll_results "review"
+  unset MUTATE_POLL_DEADLINE_TS
 else
   log "dry-run mode: prompts rendered under $PROMPT_DIR; no keeper messages sent"
 fi

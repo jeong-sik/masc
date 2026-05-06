@@ -64,6 +64,8 @@ let make_meta ?(name = "alpha") () =
   | Error err -> fail ("meta_of_json failed: " ^ err)
 
 let persist_keeper_with_proactive
+      ?proactive_last_ts
+      ?proactive_last_outcome
       config
       ~proactive_enabled
       ~name
@@ -93,11 +95,17 @@ let persist_keeper_with_proactive
             {
               base.runtime.proactive_rt with
               count_total = proactive_count_total;
-              last_ts = (if proactive_count_total > 0 then now else 0.0);
+              last_ts =
+                (match proactive_last_ts with
+                 | Some ts -> ts
+                 | None -> if proactive_count_total > 0 then now else 0.0);
               last_outcome =
-                (if proactive_count_total > 0
-                 then KT.Proactive_tool_use
-                 else KT.Proactive_never_started);
+                (match proactive_last_outcome with
+                 | Some outcome -> outcome
+                 | None ->
+                   if proactive_count_total > 0
+                   then KT.Proactive_tool_use
+                   else KT.Proactive_never_started);
             };
           autonomous_action_count;
           autonomous_turn_count = autonomous_action_count;
@@ -181,15 +189,19 @@ let write_decision_lines config keeper_name rows =
   Fs_compat.save_file path
     (String.concat "\n" (List.map Yojson.Safe.to_string rows) ^ "\n")
 
-let write_scheduled_decision config keeper_name =
+let write_scheduled_decision config keeper_name ~ts =
   write_decision_lines config keeper_name
     [
       `Assoc [
-        ("ts", `String "2026-05-06T01:00:00Z");
+        ("ts_unix", `Float ts);
+        ("ts", `String (Masc_domain.iso8601_of_unix_seconds ts));
         ("channel", `String "scheduled_autonomous");
         ("outcome", `String "success");
       ];
     ]
+
+let write_scheduled_decision_at config keeper_name ~ts =
+  write_scheduled_decision config keeper_name ~ts
 
 let write_24h_turn_span config keeper_name ~now =
   write_decision_lines config keeper_name
@@ -568,12 +580,13 @@ let test_decision_log_counts_as_scheduled_proof () =
         ("outcome", `String "failure");
       ];
     ];
-  write_scheduled_decision config "beta";
+  write_scheduled_decision config "beta" ~ts:latest_success_ts;
   let json =
     Dashboard_keeper_feature_proof.json
       ~config
       ~n:100
       ~success_threshold_pct:80.0
+      ~now:(newer_failure_ts +. 60.0)
       ()
   in
   let scheduled = feature "scheduled_proactive_autonomy" json in
@@ -625,6 +638,134 @@ let test_scheduled_proactive_evidence_uses_enabled_population () =
   check (list string) "enabled keeper is observed"
     ["alpha"]
     (json_string_values "observed_keepers" evidence)
+
+let test_scheduled_proactive_window_requires_recent_evidence () =
+  with_store @@ fun config ->
+  (* Fixed [now] makes the regression deterministic across machines; the
+     other recency tests in this file (e.g. line 734) follow the same
+     1_777_000_000.0 epoch convention. *)
+  let now = 1_777_000_000.0 in
+  ignore
+    (persist_keeper_with_proactive
+       ~proactive_last_ts:(now -. (49.0 *. 3600.0))
+       config ~proactive_enabled:true
+       ~name:"alpha" ~total_turns:3 ~autonomous_action_count:2
+       ~autonomous_tool_turn_count:2 ~board_reactive_turn_count:1
+       ~proactive_count_total:1);
+  ignore
+    (persist_keeper config ~name:"beta" ~total_turns:2
+       ~autonomous_action_count:1 ~autonomous_tool_turn_count:1
+       ~board_reactive_turn_count:1 ~proactive_count_total:0);
+  write_scheduled_decision_at config "beta" ~ts:(now -. 60.0);
+  let json =
+    Dashboard_keeper_feature_proof.json
+      ~config
+      ~n:100
+      ~window_hours:24.0
+      ~success_threshold_pct:80.0
+      ~now
+      ()
+  in
+  let scheduled = feature "scheduled_proactive_autonomy" json in
+  let evidence = keeper_evidence "scheduled_proactive_autonomy" json in
+  check string "stale meta evidence does not satisfy window" "warn"
+    (Safe_ops.json_string ~default:"missing" "status" scheduled);
+  check (list string) "recent decision log proves beta"
+    ["beta"]
+    (json_string_values "observed_keepers" evidence);
+  check (list string) "stale meta-only alpha stays missing"
+    ["alpha"]
+    (json_string_values "missing_keepers" evidence)
+
+let test_scheduled_proactive_window_all_stale_is_fail () =
+  (* Regression for the [observed = []] -> Fail branch: when every
+     proactive-enabled keeper has only stale meta evidence and no recent
+     decision-log evidence, the feature must fail, not warn. *)
+  with_store @@ fun config ->
+  let now = 1_777_000_000.0 in
+  ignore
+    (persist_keeper_with_proactive
+       ~proactive_last_ts:(now -. (49.0 *. 3600.0))
+       config ~proactive_enabled:true
+       ~name:"alpha" ~total_turns:3 ~autonomous_action_count:2
+       ~autonomous_tool_turn_count:2 ~board_reactive_turn_count:1
+       ~proactive_count_total:1);
+  ignore
+    (persist_keeper_with_proactive
+       ~proactive_last_ts:(now -. (72.0 *. 3600.0))
+       config ~proactive_enabled:true
+       ~name:"gamma" ~total_turns:2 ~autonomous_action_count:1
+       ~autonomous_tool_turn_count:1 ~board_reactive_turn_count:0
+       ~proactive_count_total:1);
+  let json =
+    Dashboard_keeper_feature_proof.json
+      ~config
+      ~n:100
+      ~window_hours:24.0
+      ~success_threshold_pct:80.0
+      ~now
+      ()
+  in
+  let scheduled = feature "scheduled_proactive_autonomy" json in
+  let evidence = keeper_evidence "scheduled_proactive_autonomy" json in
+  check string "all-stale fleet hits Fail branch" "fail"
+    (Safe_ops.json_string ~default:"missing" "status" scheduled);
+  check (list string) "no observed keepers when all stale"
+    []
+    (json_string_values "observed_keepers" evidence);
+  check (list string) "all enabled keepers report missing"
+    ["alpha"; "gamma"]
+    (List.sort String.compare
+       (json_string_values "missing_keepers" evidence))
+
+let test_scheduled_proactive_meta_error_does_not_prove_success () =
+  with_store @@ fun config ->
+  let now = 1_777_000_000.0 in
+  ignore
+    (persist_keeper_with_proactive
+       ~proactive_last_ts:(now -. 60.0)
+       ~proactive_last_outcome:KT.Proactive_error
+       config ~proactive_enabled:true
+       ~name:"alpha" ~total_turns:3 ~autonomous_action_count:2
+       ~autonomous_tool_turn_count:2 ~board_reactive_turn_count:1
+       ~proactive_count_total:1);
+  ignore
+    (persist_keeper config ~name:"beta" ~total_turns:2
+       ~autonomous_action_count:1 ~autonomous_tool_turn_count:1
+       ~board_reactive_turn_count:1 ~proactive_count_total:0);
+  write_scheduled_decision_at config "beta" ~ts:(now -. 60.0);
+  let json =
+    Dashboard_keeper_feature_proof.json
+      ~config
+      ~n:100
+      ~window_hours:24.0
+      ~success_threshold_pct:80.0
+      ~now
+      ()
+  in
+  let scheduled = feature "scheduled_proactive_autonomy" json in
+  let evidence = keeper_evidence "scheduled_proactive_autonomy" json in
+  check string "recent failed meta evidence does not satisfy proof" "warn"
+    (Safe_ops.json_string ~default:"missing" "status" scheduled);
+  check (list string) "successful decision log proves beta only"
+    ["beta"]
+    (json_string_values "observed_keepers" evidence);
+  check (list string) "recent meta error alpha stays missing"
+    ["alpha"]
+    (json_string_values "missing_keepers" evidence);
+  let alpha_rows =
+    Yojson.Safe.Util.(
+      evidence |> member "per_keeper" |> to_list)
+    |> List.filter (fun row ->
+      Safe_ops.json_string ~default:"" "keeper" row = "alpha")
+  in
+  match alpha_rows with
+  | [ alpha ] ->
+    check string "meta outcome is reported" "error"
+      (Safe_ops.json_string ~default:"missing" "meta_last_proactive_outcome" alpha);
+    check bool "error outcome is not proof" false
+      (Safe_ops.json_bool ~default:true "meta_evidence_within_window" alpha)
+  | _ -> fail "expected one alpha per-keeper row"
 
 let test_persistent_24h_turn_exchange_counts_decision_span () =
   with_store @@ fun config ->
@@ -691,6 +832,12 @@ let () =
             test_decision_log_counts_as_scheduled_proof;
           test_case "scheduled proof uses enabled population" `Quick
             test_scheduled_proactive_evidence_uses_enabled_population;
+          test_case "scheduled proof window requires recent evidence" `Quick
+            test_scheduled_proactive_window_requires_recent_evidence;
+          test_case "scheduled proof fails when fleet is fully stale" `Quick
+            test_scheduled_proactive_window_all_stale_is_fail;
+          test_case "scheduled proof ignores recent meta error" `Quick
+            test_scheduled_proactive_meta_error_does_not_prove_success;
           test_case "decision log counts as 24h turn exchange proof" `Quick
             test_persistent_24h_turn_exchange_counts_decision_span;
         ] );

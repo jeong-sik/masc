@@ -319,7 +319,25 @@ let board_reactive_feature snapshots =
     ~next_action:
       "Post board events and confirm every active keeper records board-reactive turns."
 
-let scheduled_proactive_feature ~config snapshots =
+let timestamp_within_window ?window_hours ~now ts =
+  (* Reject zero/negative timestamps (sentinel/unset) and future timestamps
+     (clock skew or corrupted logs). Without the [ts <= now] guard, any
+     future timestamp would satisfy the recency check because [now -. ts]
+     would be negative and trivially [<= hours *. 3600.0]. *)
+  ts > 0.0
+  && ts <= now
+  &&
+  match window_hours with
+  | None -> true
+  | Some hours when hours <= 0.0 ->
+    (* Non-positive window is treated as "no recency check": flipping it
+       to a hard reject would silently disqualify all past evidence. The
+       top-level [json] helper clamps callers' inputs to a sane domain;
+       this keeps internal logic robust if a caller bypasses the boundary. *)
+    true
+  | Some hours -> now -. ts <= hours *. 3600.0
+
+let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
   let decision_stats =
     snapshots
     |> List.map (fun snapshot ->
@@ -338,9 +356,21 @@ let scheduled_proactive_feature ~config snapshots =
       | None -> false)
   in
   let total = keeper_count enabled in
-  let has_scheduled_evidence snapshot meta =
+  let has_recent_meta_evidence meta =
     meta.Keeper_types.runtime.proactive_rt.count_total > 0
-    || (decision_stat_for snapshot.keeper_name).decision_count > 0
+    && timestamp_within_window ?window_hours ~now
+         meta.Keeper_types.runtime.proactive_rt.last_ts
+    && not
+         (meta.Keeper_types.runtime.proactive_rt.last_outcome
+          = Keeper_types.Proactive_error)
+  in
+  let has_recent_decision_evidence snapshot =
+    match (decision_stat_for snapshot.keeper_name).latest_ts_unix with
+    | Some ts -> timestamp_within_window ?window_hours ~now ts
+    | None -> false
+  in
+  let has_scheduled_evidence snapshot meta =
+    has_recent_meta_evidence meta || has_recent_decision_evidence snapshot
   in
   let observed =
     enabled
@@ -373,9 +403,34 @@ let scheduled_proactive_feature ~config snapshots =
         | Some meta -> meta.Keeper_types.runtime.proactive_rt.count_total
         | None -> 0
       in
+      let meta_last_ts =
+        match snapshot.meta with
+        | Some meta -> meta.Keeper_types.runtime.proactive_rt.last_ts
+        | None -> 0.0
+      in
+      let meta_recent =
+        match snapshot.meta with
+        | Some meta -> has_recent_meta_evidence meta
+        | None -> false
+      in
+      let meta_outcome =
+        match snapshot.meta with
+        | Some meta ->
+          Some
+            (Keeper_types.proactive_cycle_outcome_to_string
+               meta.Keeper_types.runtime.proactive_rt.last_outcome)
+        | None -> None
+      in
       `Assoc [
         ("keeper", `String snapshot.keeper_name);
         ("meta_proactive_count_total", `Int meta_count);
+        ( "meta_last_proactive_ts",
+          if meta_last_ts > 0.0 then `Float meta_last_ts else `Null );
+        ( "meta_last_proactive_outcome",
+          match meta_outcome with
+          | Some outcome -> `String outcome
+          | None -> `Null );
+        ("meta_evidence_within_window", `Bool meta_recent);
         ("decision_log", Decision.scheduled_evidence_json stat);
       ])
   in
@@ -386,8 +441,11 @@ let scheduled_proactive_feature ~config snapshots =
     ("summary",
      `String
        (Printf.sprintf
-          "%d/%d proactive-enabled keepers have scheduled proactive evidence"
-          (List.length observed) total));
+          "%d/%d proactive-enabled keepers have scheduled proactive evidence%s"
+          (List.length observed) total
+          (match window_hours with
+           | Some hours -> Printf.sprintf " in the last %.1fh" hours
+           | None -> "")));
     ("required_tools", `List []);
     ("passing_tools", `List []);
     ("weak_tools", `List []);
@@ -524,6 +582,16 @@ let json
   let success_threshold_pct =
     clamp_float ~low:0.0 ~high:100.0 success_threshold_pct
   in
+  (* Normalize at the public boundary so feature helpers never see a
+     non-positive window. Callers passing [Some h] with [h <= 0.0] from
+     CLI/config are treated the same as [None] (no recency check)
+     instead of producing surprising "negative window rejects all"
+     semantics. *)
+  let window_hours =
+    match window_hours with
+    | Some h when h > 0.0 -> Some h
+    | Some _ | None -> None
+  in
   let snapshots = load_keeper_snapshots config in
   let keeper_names = snapshot_keeper_names snapshots in
   let tool_stats, failure_table =
@@ -535,7 +603,7 @@ let json
       persistent_turn_exchange_feature ~config ~now snapshots;
       autonomous_tool_feature snapshots;
       board_reactive_feature snapshots;
-      scheduled_proactive_feature ~config snapshots;
+      scheduled_proactive_feature ~config ?window_hours ~now snapshots;
       Git_pr.json ~n ?window_hours ~keeper_names ();
     ]
     @ List.map

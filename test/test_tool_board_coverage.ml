@@ -178,6 +178,11 @@ let json_member_list json key =
   | `List values -> values
   | _ -> Alcotest.failf "expected list field %s" key
 
+let json_has_member json key =
+  match Yojson.Safe.Util.member key json with
+  | `Null -> false
+  | _ -> true
+
 let test_board_actor_identity_canonicalizes_keeper_alias () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -307,10 +312,24 @@ let test_board_dashboard_json_embeds_moderation_projection () =
    with
    | Ok _ -> ()
    | Error e -> Alcotest.fail e);
-  let post_json =
+  let public_post_json =
     Server_utils.board_post_dashboard_json ~author_karma:0 post
   in
-  let comment_json = Server_utils.board_comment_dashboard_json comment in
+  let public_comment_json = Server_utils.board_comment_dashboard_json comment in
+  Alcotest.(check bool) "public post omits report count" false
+    (json_has_member public_post_json "report_count");
+  Alcotest.(check bool) "public post omits moderation status" false
+    (json_has_member public_post_json "moderation_status");
+  Alcotest.(check bool) "public comment omits report count" false
+    (json_has_member public_comment_json "report_count");
+  Alcotest.(check bool) "public comment omits moderation status" false
+    (json_has_member public_comment_json "moderation_status");
+  let post_json =
+    Server_utils.board_post_dashboard_json ~include_moderation:true ~author_karma:0 post
+  in
+  let comment_json =
+    Server_utils.board_comment_dashboard_json ~include_moderation:true comment
+  in
   Alcotest.(check int) "post report count" 1
     (json_member_int post_json "report_count");
   Alcotest.(check string) "post moderation status" "flagged"

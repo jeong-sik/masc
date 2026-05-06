@@ -170,7 +170,9 @@ val target_summary :
   target_summary
 (** Return the board/dashboard moderation projection for a post or comment.
     An unresolved queue entry wins over older audit decisions, so a re-flagged
-    target reports ["flagged"] until an operator action resolves it. *)
+    target reports ["flagged"] until an operator action resolves it.  The
+    projection is served from per-target aggregates maintained on mutation, so
+    board response rendering does not scan the full queue or audit log per row. *)
 
 (** {1 JSON serialisation — dashboard API projection} *)
 

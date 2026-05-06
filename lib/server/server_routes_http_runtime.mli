@@ -161,6 +161,7 @@ val readiness_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** {1 Board} *)
 
 val board_post_detail_json :
+  include_moderation:bool ->
   voter:string option ->
   response_format:string ->
   post_id:string ->
@@ -168,7 +169,8 @@ val board_post_detail_json :
 (** [board_post_detail_json ~voter ~response_format ~post_id] returns
     [(status, json_string)] for [GET /api/v1/board/<post_id>].
     When [voter] is supplied, post/comment rows include vote state for
-    that voter.
+    that voter.  When [include_moderation] is [true], rows also include
+    operator-only moderation projection fields.
 
     {2 response_format values (case-insensitive, trimmed)}
 

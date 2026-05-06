@@ -12,6 +12,19 @@ module Pages = Server_routes_http_pages
 module Runtime = Server_routes_http_runtime
 module Keeper_stream = Server_routes_http_keeper_stream
 
+let include_moderation_projection ~base_path request =
+  match auth_token_from_request request with
+  | None -> false
+  | Some _ -> (
+      match
+        authorize_token_bound_permission_request
+          ~base_path
+          ~permission:Masc_domain.CanReadState
+          request
+      with
+      | Ok _ -> true
+      | Error _ -> false)
+
 let activity_http_deps ~sw ~clock : Server_activity_http.deps =
   {
     query_param;
@@ -197,7 +210,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.get "/api/v1/board" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
+       with_public_read (fun state req reqd ->
          let hearth = query_param req "hearth" in
          let sort_by = board_sort_order_of_request req in
          let exclude_system = bool_query_param req "exclude_system" ~default:false in
@@ -214,6 +227,11 @@ let add_routes ~sw ~clock router =
          let offset = int_query_param req "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
          let base_fetch = board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset in
          let voter = board_voter_query req in
+         let include_moderation =
+           include_moderation_projection
+             ~base_path:state.Mcp_server.room_config.base_path
+             req
+         in
          let posts =
            Board_dispatch.list_posts ?hearth ~sort_by ~exclude_system
              ~exclude_automation ?author_filter ~limit:base_fetch ()
@@ -240,7 +258,7 @@ let add_routes ~sw ~clock router =
                let post_id = Board.Post_id.to_string p.id in
                let current_vote = board_current_vote_for_post ~voter ~post_id in
                let reactions = reactions_for (Board.Reaction_post, post_id) in
-               board_post_dashboard_json ?current_vote
+               board_post_dashboard_json ~include_moderation ?current_vote
                  ~reactions
                  ~author_karma:(get_karma author) p)
              paged
@@ -343,7 +361,7 @@ let add_routes ~sw ~clock router =
                    reqd)))
 
   |> Http.Router.prefix_get "/api/v1/board/" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
+       with_public_read (fun state req reqd ->
          let path = Http.Request.path request in
          (match extract_path_param ~prefix:"/api/v1/board/" path with
           | None ->
@@ -355,8 +373,14 @@ let add_routes ~sw ~clock router =
                 query_param req "format" |> Option.value ~default:"nested"
               in
               let voter = board_voter_query req in
+              let include_moderation =
+                include_moderation_projection
+                  ~base_path:state.Mcp_server.room_config.base_path
+                  req
+              in
               let (status, body) =
-                board_post_detail_json ~voter ~response_format:format ~post_id
+                board_post_detail_json ~include_moderation ~voter
+                  ~response_format:format ~post_id
               in
               respond_json_with_cors ~status request reqd body)
        ) request reqd)

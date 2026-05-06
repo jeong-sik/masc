@@ -106,7 +106,8 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path
       let format = Option.value ~default:"nested" (query_param httpun_request "format") in
       let voter = board_voter_query httpun_request in
       let (status, body) =
-        board_post_detail_json ~voter ~response_format:format ~post_id
+        board_post_detail_json ~include_moderation:false ~voter
+          ~response_format:format ~post_id
       in
       h2_respond_json h2_reqd body ~status ~extra_headers:cors;
       true

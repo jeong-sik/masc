@@ -6,7 +6,6 @@
 
 import { html } from 'htm/preact'
 import { StatusDot } from './status-dot'
-import { relativeTime } from '../../lib/format-time'
 
 export type PersistenceState = 'saved' | 'syncing' | 'conflict' | 'offline'
 export type PersistenceFreshness = 'fresh' | 'recent' | 'stale' | 'unknown'
@@ -28,6 +27,8 @@ const CONFIG: Record<PersistenceState, PersistenceStateConfig> = {
 
 const FRESH_MS = 5 * 60 * 1000
 const RECENT_MS = 60 * 60 * 1000
+const UNIX_MS_THRESHOLD = 1_000_000_000_000
+const relativeFormatter = new Intl.RelativeTimeFormat('ko', { numeric: 'auto' })
 
 const FRESHNESS_LABEL: Record<PersistenceFreshness, string> = {
   fresh: '최신',
@@ -70,14 +71,27 @@ function timestampMs(value?: string | null): number | null {
   return Number.isNaN(parsed) ? null : parsed
 }
 
+function normalizeUnixMs(value: number): number {
+  if (!Number.isFinite(value)) return Date.now()
+  return value < UNIX_MS_THRESHOLD ? value * 1000 : value
+}
+
 function nowMs(value: string | number | Date | undefined): number {
   if (value instanceof Date) return value.getTime()
-  if (typeof value === 'number') return value
+  if (typeof value === 'number') return normalizeUnixMs(value)
   if (typeof value === 'string') {
     const parsed = Date.parse(value)
     return Number.isNaN(parsed) ? Date.now() : parsed
   }
   return Date.now()
+}
+
+function relativeTimeFromAgeMs(ageMs: number): string {
+  const deltaSec = Math.max(0, Math.round(ageMs / 1000))
+  if (deltaSec < 60) return relativeFormatter.format(-deltaSec, 'second')
+  if (deltaSec < 3600) return relativeFormatter.format(-Math.round(deltaSec / 60), 'minute')
+  if (deltaSec < 86400) return relativeFormatter.format(-Math.round(deltaSec / 3600), 'hour')
+  return relativeFormatter.format(-Math.round(deltaSec / 86400), 'day')
 }
 
 export function classifyPersistenceFreshness(
@@ -126,7 +140,9 @@ export function PersistenceStatus({
 }: PersistenceStatusProps) {
   const cfg = getPersistenceStatusConfig(status)
   const summary = summarizePersistenceStatus(status, lastSaved, now)
-  const timeText = lastSaved ? relativeTime(lastSaved) : null
+  const timeText = summary.lastSavedIso && summary.ageMs !== null
+    ? relativeTimeFromAgeMs(summary.ageMs)
+    : null
   const freshnessLabel = FRESHNESS_LABEL[summary.freshness]
 
   return html`

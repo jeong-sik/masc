@@ -140,7 +140,8 @@ describe('FailureHistory a11y', () => {
 
   it('renders empty state gracefully', async () => {
     render(html`<${FailureHistory} failures=${[]} />`, container)
-    expect(container.querySelectorAll('[role="listitem"]').length).toBe(0)
+    expect(container.querySelectorAll('[role="listitem"]').length).toBe(1)
+    expect(container.querySelector('[data-failure-history-empty]')).not.toBeNull()
     expect(await axe(container)).toHaveNoViolations()
   })
 })

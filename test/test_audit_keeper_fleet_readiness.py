@@ -46,7 +46,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             "event": "tool_exec",
             "tool": {"name": "keeper_shell"},
             "ok": True,
-            "route_markers": ["pr_create:keeper_shell:gh_pr_create"],
+            "result_markers": ["gh pr create"],
         }
 
         evidence, docker_evidence = audit.pr_lifecycle_evidence_from_decision(row)
@@ -72,7 +72,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             "event": "tool_exec",
             "tool": "keeper_shell",
             "ok": True,
-            "route_markers": ["pr_create:keeper_shell:gh_pr_create", "via=docker"],
+            "result_markers": ["gh pr create", "via=brokered"],
         }
 
         evidence, docker_evidence = audit.pr_lifecycle_evidence_from_decision(row)
@@ -98,7 +98,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             "event": "tool_exec",
             "tool": "keeper_pr_create",
             "ok": True,
-            "route_markers": ["docker"],
+            "result_markers": ["docker"],
         }
 
         evidence, docker_evidence = audit.pr_lifecycle_evidence_from_decision(row)
@@ -168,7 +168,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                 "event": "tool_exec",
                 "tool": "keeper_pr_review_comment",
                 "ok": True,
-                "route_markers": ["pr_approve:keeper_pr_review_comment"],
+                "result_markers": ["event=APPROVE"],
             }
             (keepers_dir / "alpha.decisions.jsonl").write_text(
                 json.dumps(base_row) + "\n",
@@ -206,7 +206,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                     "pr_work_action": "PR_CREATE",
                     "pr_work_action_source": "keeper_shell",
                     "pr_work_action_success": True,
-                    "route_markers": ["via=docker"],
+                    "route_via": "brokered",
                 },
                 {
                     "ts_unix": 30.0,

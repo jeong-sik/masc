@@ -249,6 +249,7 @@ MARKER_LIST_FIELDS = (
     "audit_markers",
     "evidence_markers",
     "lifecycle_markers",
+    "result_markers",
     "route_markers",
 )
 MARKER_OBJECT_FIELDS = (
@@ -334,7 +335,7 @@ def marker_matches(markers: set[str], *needles: str) -> bool:
 
 def has_gh_pr_create_marker(row: dict[str, Any]) -> bool:
     markers = structured_markers(row)
-    return marker_matches(markers, "pr_create", "gh_pr_create")
+    return marker_matches(markers, "pr_create", "gh_pr_create", "gh pr create")
 
 
 def has_pr_approve_marker(row: dict[str, Any]) -> bool:
@@ -344,6 +345,7 @@ def has_pr_approve_marker(row: dict[str, Any]) -> bool:
         "pr_approve",
         "approve",
         "action=approve",
+        "event=approve",
         "review_event=approve",
     )
 

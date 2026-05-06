@@ -513,6 +513,7 @@ let test_code_git_status_marks_docker_keeper_route () =
     "[keeper]\nsandbox_profile = \"docker\"\n";
   let cwd = Filename.concat base_path ".masc/playground/sangsu/repos" in
   mkdir_p cwd;
+  ignore (Sys.command (Printf.sprintf "git -C %s init -q" (Filename.quote cwd)));
   let ctx =
     { Tool_code_write.config;
       agent_name = "keeper-sangsu-agent";

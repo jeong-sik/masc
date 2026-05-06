@@ -789,14 +789,19 @@ def source_row_candidate_inventory_evidence(
         if not isinstance(path, str):
             invalid_no_candidate_details.append("missing_path")
             continue
-        marker_values = [
+        marker_values_raw = [
             item.get("markdown_headings"),
             item.get("markdown_table_rows"),
             item.get("numbered_items"),
             item.get("bullet_items"),
         ]
-        if not all(isinstance(value, int) and value >= 0 for value in marker_values):
-            invalid_no_candidate_details.append(path)
+        marker_values: list[int] = []
+        for value in marker_values_raw:
+            if not isinstance(value, int) or value < 0:
+                invalid_no_candidate_details.append(path)
+                break
+            marker_values.append(value)
+        if len(marker_values) != len(marker_values_raw):
             continue
         expected_marker_total = sum(marker_values)
         marker_total = item.get("unstructured_marker_total")
@@ -1285,11 +1290,13 @@ def verify_pipeline_evidence(
 
     raw_gates = raw_pipeline.get("gates", [])
     gates = raw_gates if isinstance(raw_gates, list) else []
-    gate_ids = [
-        gate.get("gate_id")
-        for gate in gates
-        if isinstance(gate, dict) and isinstance(gate.get("gate_id"), str)
-    ]
+    gate_ids: list[str] = []
+    for gate in gates:
+        if not isinstance(gate, dict):
+            continue
+        gate_id = gate.get("gate_id")
+        if isinstance(gate_id, str):
+            gate_ids.append(gate_id)
     gate_id_set = set(gate_ids)
     missing_gate_ids = sorted(REQUIRED_VERIFY_GATE_IDS - gate_id_set)
     unexpected_gate_ids = sorted(gate_id_set - REQUIRED_VERIFY_GATE_IDS)

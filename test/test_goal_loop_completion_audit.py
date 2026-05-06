@@ -298,6 +298,37 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertEqual(audit.status, "BLOCKED")
         self.assertIn("aggregate_consistency_resolved", audit.blockers)
 
+    def test_completion_audit_binds_strict_row_corpus_to_catalog_sources(
+        self,
+    ) -> None:
+        status = complete_status()
+        audit_catalog = status["phases"]["orient"]["summary"]["audit_catalog"]
+        audit_catalog["external_sources"] = [
+            {
+                "path": "prompt_corpus/GOAL_LOOP/artifact_synthesis.md",
+                "line_count": 500,
+            }
+        ]
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            status,
+            strict_row_corpus=synthetic_strict_row_corpus(),
+        )
+
+        self.assertEqual(audit.status, "BLOCKED")
+        self.assertIn("strict_row_level_catalog_complete", audit.blockers)
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        corpus_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "strict_row_corpus"
+        ]
+        self.assertFalse(corpus_evidence["validated"])
+        self.assertTrue(corpus_evidence["catalog_source_binding_required"])
+        self.assertFalse(corpus_evidence["catalog_source_binding_valid"])
+        self.assertIn(
+            "source_paths_must_match_catalog_external_sources",
+            corpus_evidence["errors"],
+        )
+
     def test_completion_audit_rejects_generic_verify_pass_without_post_act_metadata(
         self,
     ) -> None:
@@ -470,6 +501,57 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertTrue(corpus_evidence["validated"])
         self.assertEqual(corpus_evidence["row_count"], 206)
         self.assertFalse(corpus_evidence["orient_itemized_matches_corpus"])
+
+    def test_completion_audit_binds_strict_row_corpus_to_orient_sources(
+        self,
+    ) -> None:
+        status = strict_catalog_only_blocked_status()
+        audit_catalog = status["phases"]["orient"]["summary"]["audit_catalog"]
+        fixture_catalog = json.loads(
+            (
+                REPO_ROOT
+                / "test"
+                / "fixtures"
+                / "goal_loop"
+                / "audit-corpus.external-claim.json"
+            ).read_text(encoding="utf-8")
+        )
+        audit_catalog["external_sources"] = fixture_catalog["external_sources"]
+        corpus = synthetic_strict_row_corpus()
+        findings = corpus["findings"]
+        assert isinstance(findings, list)
+        first = findings[0]
+        second = findings[1]
+        assert isinstance(first, dict)
+        assert isinstance(second, dict)
+        first["source"] = {
+            "path": "prompt_corpus/GOAL_LOOP/not-in-manifest.md",
+            "line_refs": [1],
+        }
+        second["source"] = {
+            "path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+            "line_refs": [607],
+        }
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            status,
+            strict_row_corpus=corpus,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        corpus_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "strict_row_corpus"
+        ]
+        self.assertFalse(corpus_evidence["validated"])
+        self.assertIn(
+            "source_paths_must_match_catalog_external_sources",
+            corpus_evidence["errors"],
+        )
+        self.assertIn(
+            "source_line_refs_must_be_within_catalog_line_count",
+            corpus_evidence["errors"],
+        )
+        self.assertFalse(corpus_evidence["catalog_source_binding_valid"])
 
     def test_completion_audit_rejects_invalid_supplied_strict_row_corpus(
         self,

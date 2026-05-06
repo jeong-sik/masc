@@ -680,11 +680,15 @@ def strict_row_corpus_evidence(
     catalog_id = row_catalog_evidence.get("catalog_id")
     if isinstance(catalog_id, str) and catalog_id:
         catalog["catalog_id"] = catalog_id
+    external_sources = row_catalog_evidence.get("external_sources")
+    require_catalog_sources = isinstance(external_sources, list)
+    if require_catalog_sources:
+        catalog["external_sources"] = external_sources
 
     report = validate_strict_row_corpus(
         strict_row_corpus,
         catalog=catalog,
-        require_catalog_sources=False,
+        require_catalog_sources=require_catalog_sources,
     )
     report["expected_matches_catalog"] = (
         report.get("expected_findings_total")
@@ -1026,6 +1030,9 @@ def build_completion_audit(
         "missing_itemized_findings": audit_catalog.get("missing_itemized_findings"),
         "extra_itemized_findings": audit_catalog.get("extra_itemized_findings"),
     }
+    external_sources = audit_catalog.get("external_sources")
+    if isinstance(external_sources, list):
+        row_catalog_evidence["external_sources"] = external_sources
     row_catalog_evidence["row_corpus_discovery"] = row_corpus_discovery_evidence(
         row_catalog_evidence,
         row_corpus_discovery,

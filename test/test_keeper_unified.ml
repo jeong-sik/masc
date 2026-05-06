@@ -796,6 +796,43 @@ let test_observe_collects_scope_messages_for_room_signal_keepers () =
       check bool "scope messages collected" true
         (List.length obs.pending_scope_messages >= 1))
 
+let test_observe_damps_keeper_scope_chatter_but_keeps_direct_mentions () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Unix.putenv "MASC_BASE_PATH" base_dir;
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      ignore
+        (Masc_mcp.Coord.broadcast config
+           ~from_agent:"keeper-ramarama-agent"
+           ~content:"general keeper room update");
+      ignore
+        (Masc_mcp.Coord.broadcast config
+           ~from_agent:"keeper-ramarama-agent"
+           ~content:"@test-keeper please inspect this");
+      ignore
+        (Masc_mcp.Coord.broadcast config ~from_agent:"operator"
+           ~content:"general operator room update");
+      let meta = { room_signal_meta with joined_room_ids = [ "default" ] } in
+      let obs =
+        WO.observe ~allowed_tool_names:None
+          ~pending_board_events:(Some [])
+          ~config ~meta
+      in
+      check int "keeper direct mention collected" 1
+        (List.length obs.pending_mentions);
+      check int "only operator scope collected" 1
+        (List.length obs.pending_scope_messages);
+      match obs.pending_scope_messages with
+      | [ (author, content) ] ->
+          check string "scope author" "operator" author;
+          check string "scope content" "general operator room update" content
+      | _ -> fail "expected one operator scope message")
+
 let test_scheduled_turn_uses_cooldown_only () =
   let meta =
     { minimal_meta with
@@ -7488,6 +7525,8 @@ let () =
             test_observe_ignores_scope_messages_without_room_signal_opt_in;
           test_case "room-signal keepers collect scope messages" `Quick
             test_observe_collects_scope_messages_for_room_signal_keepers;
+          test_case "room-signal keepers damp keeper scope chatter" `Quick
+            test_observe_damps_keeper_scope_chatter_but_keeps_direct_mentions;
           test_case "scheduled turn uses cooldown only when work exists" `Quick
             test_scheduled_turn_uses_cooldown_only;
           test_case "scheduled turn skips without structured work signal" `Quick

@@ -516,3 +516,22 @@ let is_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Oas_worker_named.Turn_timeout _)
   | Some (Oas_worker_named.Ambiguous_post_commit _) -> false
   | None -> false
+
+(** [true] when the rotation-cap fast-fail should fire for a
+    [required_tool_contract_violation] error.  The cap prevents runaway
+    rotation chains where the LLM calls no keeper tools: we allow at most one
+    rotation (so [attempted_cascades] must have at least 2 entries before the
+    cap fires), unless a fresh fallback cascade is still available
+    ([fallback_not_yet_tried = true]).
+
+    The list is seeded with the initial cascade name before the first turn
+    attempt, so:
+    - length = 1  ⇒ no rotation has been attempted yet → do not cap
+    - length ≥ 2  ⇒ at least one rotation was tried → cap (unless fallback available) *)
+let should_cap_rotation_for_contract_violation
+    ~(attempted_cascades : string list)
+    ~(fallback_not_yet_tried : bool)
+    (err : Agent_sdk.Error.sdk_error) : bool =
+  is_required_tool_contract_violation err
+  && List.length attempted_cascades >= 2
+  && not fallback_not_yet_tried

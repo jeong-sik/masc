@@ -55,9 +55,20 @@ val sanitize_text_utf8 : string -> string
     control characters with spaces (except LF/CR/TAB), without recording a
     read-path persistence repair. *)
 
+type sanitized_json_utf8 =
+  { raw : Yojson.Safe.t
+  ; sanitized : Yojson.Safe.t
+  ; changed : bool
+  }
+(** Raw and sanitized views of the same JSON payload. *)
+
 val sanitize_json_utf8 : Yojson.Safe.t -> Yojson.Safe.t
 (** Recursively scrub every JSON string node through {!sanitize_text_utf8}.
     Intended for writer-side sanitization before persistence or broadcast. *)
+
+val sanitize_json_utf8_with_raw : Yojson.Safe.t -> sanitized_json_utf8
+(** Preserve the original JSON payload while also returning the sanitized
+    writer-side view. *)
 
 val parse_json_safe : context:string -> string -> (Yojson.Safe.t, string) result
 (** Parse JSON with detailed error reporting. *)

@@ -110,6 +110,32 @@ let test_sanitize_json_utf8_covers_safe_constructors () =
         (Yojson.Safe.Util.to_string value)
   | _ -> fail "unexpected sanitized JSON shape"
 
+let test_sanitize_json_utf8_with_raw_preserves_original () =
+  let open Safe_ops in
+  let raw = `Assoc [ ("bad\xffkey", `String "bad\xffvalue") ] in
+  let replacement = "\xEF\xBF\xBD" in
+  let result = sanitize_json_utf8_with_raw raw in
+  check bool "changed when utf8 repair needed" true result.changed;
+  check bool "raw points at original payload" true (result.raw == raw);
+  (match result.raw with
+   | `Assoc [ (key, `String value) ] ->
+       check string "raw key unchanged" "bad\xffkey" key;
+       check string "raw value unchanged" "bad\xffvalue" value
+   | _ -> fail "unexpected raw JSON shape");
+  match result.sanitized with
+  | `Assoc [ (key, `String value) ] ->
+      check string "sanitized key repaired" ("bad" ^ replacement ^ "key") key;
+      check string "sanitized value repaired" ("bad" ^ replacement ^ "value") value
+  | _ -> fail "unexpected sanitized JSON shape"
+
+let test_sanitize_json_utf8_with_raw_marks_clean_payload_unchanged () =
+  let open Safe_ops in
+  let raw = `Assoc [ ("ok", `String "value") ] in
+  let result = sanitize_json_utf8_with_raw raw in
+  check bool "clean payload not changed" false result.changed;
+  check bool "raw points at original payload" true (result.raw == raw);
+  check bool "sanitized reuses original payload" true (result.sanitized == raw)
+
 let test_utf8_repair_log_rate_limit_table_is_bounded () =
   let open Safe_ops in
   reset_persistence_utf8_repair_stats_for_tests ();
@@ -474,6 +500,10 @@ let () =
         test_parse_json_safe_rate_limits_repeated_utf8_repair_logs;
       test_case "sanitizes safe constructors" `Quick
         test_sanitize_json_utf8_covers_safe_constructors;
+      test_case "sanitizes with raw preserved" `Quick
+        test_sanitize_json_utf8_with_raw_preserves_original;
+      test_case "sanitizes with raw unchanged marker" `Quick
+        test_sanitize_json_utf8_with_raw_marks_clean_payload_unchanged;
       test_case "bounds utf8 repair log rate-limit table" `Quick
         test_utf8_repair_log_rate_limit_table_is_bounded;
       test_case "long invalid" `Quick test_parse_json_safe_long_invalid;

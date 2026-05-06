@@ -4,6 +4,7 @@ import tseslint from 'typescript-eslint'
 
 const TARGET_FILES = [
   'src/api/gate.ts',
+  'src/api/goal-loop.ts',
   'src/api/transport-health.ts',
   'src/components/common/async-container.ts',
   'src/components/common/empty-state.ts',
@@ -11,6 +12,7 @@ const TARGET_FILES = [
   'src/components/common/markdown.ts',
   'src/components/connector-status.ts',
   'src/components/fleet-fsm-matrix.ts',
+  'src/components/goal-loop-panel.ts',
   'src/components/harness-health-state.ts',
   'src/components/harness-health.ts',
   'src/components/keeper-tool-call-inspector.ts',
@@ -19,6 +21,7 @@ const TARGET_FILES = [
   'src/components/mission.ts',
   'src/components/runtime-monitor.ts',
   'src/components/transport-health.ts',
+  'src/goal-loop-status.ts',
   'src/lib/async-state.ts',
   'src/components/common/normalize.ts',
 ]
@@ -27,8 +30,10 @@ const TEST_FILES = [
   'src/components/common/markdown.test.ts',
   'src/components/connector-status.test.ts',
   'src/components/fleet-fsm-matrix.test.ts',
+  'src/components/goal-loop-panel.test.ts',
   'src/components/keeper-tool-call-inspector.test.ts',
   'src/components/transport-health.test.ts',
+  'src/goal-loop-status.test.ts',
   'src/lib/async-state.test.ts',
 ]
 

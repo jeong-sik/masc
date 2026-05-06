@@ -18,6 +18,7 @@ type SurfaceSectionId =
   | 'agents'
   | 'cognition'
   | 'runtime'
+  | 'goal-loop'
   | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + monitoring governance
   | 'memory-subsystems'
   // command
@@ -192,6 +193,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Cascade',
       description: 'Provider health, capacity, routing, cost, latency, and inspector views.',
       params: { section: 'runtime' },
+    },
+    {
+      id: 'goal-loop',
+      label: 'GOAL LOOP',
+      description: 'Observe, Orient, Decide, Act, and Verify runtime status.',
+      params: { section: 'goal-loop' },
     },
     {
       id: 'fleet-health',

@@ -93,7 +93,9 @@ let write_agent ctx agent =
     (Types.agent_to_yojson agent)
 
 let seed_stale_current_task ctx =
-  let old_last_seen = Masc_domain.now_iso () in
+  let old_last_seen =
+    Masc_domain.iso8601_of_unix_seconds (Time_compat.now () -. 10.0)
+  in
   let agent = read_agent ctx in
   write_agent ctx
     { agent with status = Busy; current_task = Some "task-missing"; last_seen = old_last_seen };
@@ -145,10 +147,11 @@ let () = test "dispatch_status_hides_stale_current_task_without_writing" (fun ()
   let ctx = make_test_ctx () in
   let _ = Coord.init ctx.config ~agent_name:(Some ctx.agent_name) in
   let old_last_seen = seed_stale_current_task ctx in
+  let actual_name = Coord.resolve_agent_name ctx.config ctx.agent_name in
   match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
   | Some { success; message } ->
       assert success;
-      assert (str_contains message "test-agent (you) -> active");
+      assert_contains message (Printf.sprintf "%s (you) -> active" actual_name);
       let agent = read_agent ctx in
       assert (agent.current_task = Some "task-missing");
       assert (agent.last_seen = old_last_seen)
@@ -159,8 +162,9 @@ let () = test "coord_status_hides_stale_current_task_without_writing" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Coord.init ctx.config ~agent_name:(Some ctx.agent_name) in
   let old_last_seen = seed_stale_current_task ctx in
+  let actual_name = Coord.resolve_agent_name ctx.config ctx.agent_name in
   let output = Coord.status ctx.config in
-  assert (str_contains output "test-agent → idle");
+  assert_contains output (Printf.sprintf "%s → idle" actual_name);
   let agent = read_agent ctx in
   assert (agent.current_task = Some "task-missing");
   assert (agent.last_seen = old_last_seen)

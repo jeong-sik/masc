@@ -716,7 +716,9 @@ let prepare_agent_setup
 
     in
     let required_tool_names =
-      current_task_required_tools () @ required_tool_names
+      required_tool_names_for_turn
+        ~current_task_required_tool_names:(current_task_required_tools ())
+        ~per_call_required_tool_names:required_tool_names
       |> Keeper_types.dedupe_keep_order
     in
     let visible_required_tool_names =
@@ -1291,7 +1293,11 @@ let prepare_agent_setup
                let tool_choice =
                  if computed_surface.required_tool_names <> []
                     && all_allowed <> []
-                 then Some Agent_sdk.Types.Any
+                 then
+                   Some
+                     (preferred_tool_choice_for_required_tool_names
+                        ~required_tool_names:computed_surface.required_tool_names
+                        ~allowed_tool_names:all_allowed)
                  else if computed_surface.is_last_turn
                  then current_params.tool_choice
                  else if computed_surface.tool_gate_requested && all_allowed <> []

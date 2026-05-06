@@ -7351,6 +7351,7 @@ let test_tools_for_gated_affordance_covers_each_variant () =
        [ "board_post_or_comment" ])
 
 let test_preferred_tool_choice_for_required_turn_claims_first () =
+  let module Surface = Masc_mcp.Keeper_agent_tool_surface in
   let choose ?(has_current_task = false) ?(turn_affordances = [ "task_claim" ])
       ?(allowed_tool_names =
         [ "keeper_task_claim"; "keeper_tasks_list"; "keeper_board_post" ])
@@ -7470,6 +7471,43 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
            "expected Auto when claim is unavailable and keeper is \
             idle (#10008), got %s"
            (Agent_sdk.Types.show_tool_choice other)));
+  check (list string)
+    "per-call required tools override active task required tools"
+    [ "keeper_board_post" ]
+    (Surface.required_tool_names_for_turn
+       ~current_task_required_tool_names:[ "keeper_board_curation_submit" ]
+       ~per_call_required_tool_names:[ "keeper_board_post" ]);
+  check (list string)
+    "active task required tools remain when no per-call requirement exists"
+    [ "keeper_board_curation_submit" ]
+    (Surface.required_tool_names_for_turn
+       ~current_task_required_tool_names:[ "keeper_board_curation_submit" ]
+       ~per_call_required_tool_names:[]);
+  (match
+     Surface.preferred_tool_choice_for_required_tool_names
+       ~required_tool_names:[ "keeper_board_post" ]
+       ~allowed_tool_names:
+         [ "keeper_board_curation_submit"; "keeper_board_post" ]
+   with
+   | Agent_sdk.Types.Tool name ->
+       check string "single per-call required tool is forced"
+         "keeper_board_post" name
+   | other ->
+       fail
+         (Printf.sprintf "expected Tool keeper_board_post, got %s"
+            (Agent_sdk.Types.show_tool_choice other)));
+  (match
+     Surface.preferred_tool_choice_for_required_tool_names
+       ~required_tool_names:
+         [ "keeper_shell"; "keeper_bash"; "keeper_board_post" ]
+       ~allowed_tool_names:
+         [ "keeper_shell"; "keeper_bash"; "keeper_board_post" ]
+   with
+   | Agent_sdk.Types.Any -> ()
+   | other ->
+       fail
+         (Printf.sprintf "expected Any for multiple required tools, got %s"
+            (Agent_sdk.Types.show_tool_choice other)));
   (* Active task keeper retains the strict gate even without a
      specific applicable tool — the caller is expected to make
      progress via board_post, task_update, etc. *)

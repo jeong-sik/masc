@@ -309,6 +309,24 @@ let test_execute_with_outcome_bad_query_is_failure () =
       check string "bad query payload shape" "structured_error"
         (payload_kind result.payload_shape))
 
+let test_preflight_structured_block_is_execution_success () =
+  with_exec_fixture "keeper_exec_tools_preflight_block"
+    (fun ~config ~meta ~ctx_work ->
+      let result =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config ~meta ~ctx_work ~exec_cache:None
+          ~name:"keeper_preflight_check"
+          ~input:(`Assoc [])
+          ()
+      in
+      check string "preflight outcome" "success"
+        (match result.outcome with `Success -> "success" | `Failure -> "failure");
+      check string "raw diagnostic shape still blocks" "structured_error"
+        (payload_kind result.payload_shape);
+      let json = Yojson.Safe.from_string result.raw_output in
+      check bool "preflight raw ok=false preserved" false
+        Yojson.Safe.Util.(member "ok" json |> to_bool))
+
 let registered_dispatch_probe_tool = "test_keeper_registered_dispatch_probe"
 
 let register_registered_dispatch_probe () =
@@ -466,6 +484,8 @@ let () =
         test_execute_with_outcome_missing_file_is_failure;
       test_case "bad query is failure" `Quick
         test_execute_with_outcome_bad_query_is_failure;
+      test_case "preflight block is execution success" `Quick
+        test_preflight_structured_block_is_execution_success;
       test_case "registered dispatch does not require masc_ prefix" `Quick
         test_registered_tool_dispatch_without_masc_prefix;
     ]);

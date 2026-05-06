@@ -454,6 +454,15 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertEqual(len(runtime_sweeps), 1)
         self.assertEqual(runtime_sweeps[0]["observed_files_indexed"], 118911)
         self.assertEqual(runtime_sweeps[0]["observed_marker_hits"], 0)
+        temp_sweeps = [
+            artifact
+            for artifact in discovery["candidate_artifacts_checked"]
+            if artifact["artifact_name"] == "top_level_temp_strict_corpus_marker_sweep"
+        ]
+        self.assertEqual(len(temp_sweeps), 1)
+        self.assertEqual(temp_sweeps[0]["observed_marker_files"], 37)
+        self.assertEqual(temp_sweeps[0]["observed_candidate_json_corpora"], 0)
+        self.assertEqual(temp_sweeps[0]["observed_max_json_findings"], 19)
         workspace_sweeps = [
             artifact
             for artifact in discovery["candidate_artifacts_checked"]

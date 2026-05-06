@@ -263,6 +263,33 @@
         "goal-loop-206-audit-external-claim-2026-05-05"
       ],
       "note": "Active local MASC runtime state was searched for exact strict-corpus markers. Corpus-named paths were ordinary repo script copies such as exec_corpus_report, not GOAL LOOP strict row corpus artifacts."
+    },
+    {
+      "artifact_name": "top_level_temp_strict_corpus_marker_sweep",
+      "artifact_kind": "temp_marker_search_report",
+      "result": "NOT_ROW_CORPUS",
+      "observed_files_checked": 2880,
+      "observed_marker_files": 37,
+      "observed_near_miss_files": 38,
+      "observed_marker_json_files": 16,
+      "observed_marker_markdown_files": 20,
+      "observed_marker_python_files": 1,
+      "observed_candidate_json_corpora": 0,
+      "observed_max_json_findings": 19,
+      "observed_read_errors": 0,
+      "locations_checked": [
+        "/tmp",
+        "/private/tmp"
+      ],
+      "markers_checked": [
+        "source_catalog_id",
+        "corpus_id",
+        "expected_findings_total",
+        "strict_row",
+        "strict-row",
+        "goal-loop-206-audit-external-claim-2026-05-05"
+      ],
+      "note": "Top-level temp files were searched for exact strict-corpus markers. Marker hits were PR/issue notes, helper scripts, and Orient/status/audit snapshots; no JSON file had a 206-row findings corpus, and the largest JSON finding set observed was 19."
     }
   ],
   "broader_structured_id_triage": {

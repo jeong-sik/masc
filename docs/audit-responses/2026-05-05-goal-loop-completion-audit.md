@@ -167,6 +167,10 @@
   Kimi/audit/goal/keeper/masc. A local MASC runtime sweep indexed 118,911
   files and found 0 strict-corpus marker hits; the 20 corpus-named runtime
   paths were ordinary repo script copies, not GOAL LOOP strict row artifacts.
+  A top-level temp sweep checked 2,880 files in `/tmp` and `/private/tmp`; it
+  found 37 marker files, all PR/issue notes, helper scripts, or
+  Orient/status/audit snapshots, with 0 candidate 206-row JSON corpora and a
+  maximum observed JSON finding count of 19.
 - [근거] `python3 test/test_goal_loop_completion_audit.py` checked at
   2026-05-06T09:59:29+09:00, confidence High: the completion audit now accepts
   an optional `--strict-row-corpus` artifact and validates it against the

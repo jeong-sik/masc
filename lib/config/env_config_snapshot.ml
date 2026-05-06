@@ -736,7 +736,7 @@ let keeper_keepalive_entries =
     entry ~default:"1800.0" "MASC_KEEPER_TURN_LIVELOCK_STUCK_AFTER_SEC"
       "Max seconds a keeper turn id may stay active before livelock guard blocks";
     entry ~default:"600.0" "MASC_KEEPER_TURN_TIMEOUT_SEC"
-      "Wall-clock timeout for a single unified turn (clamped 60-600 seconds)";
+      "Wall-clock timeout for a single unified turn (clamped 60-900 seconds)";
     entry ~default:"(none)" "MASC_KEEPER_WORK_AS_HEARTBEAT"
       "Successful room heartbeat after turn counts as presence proof (feature flag)";
   ]

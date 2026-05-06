@@ -18,6 +18,8 @@ describe('Cockpit command map', () => {
 
   afterEach(() => {
     cleanup()
+    window.location.hash = ''
+    route.value = { tab: 'overview', params: {}, postId: null }
   })
 
   it('renders one route section per cockpit plane', () => {

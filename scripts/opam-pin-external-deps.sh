@@ -145,8 +145,14 @@ installed_agent_sdk_version() {
     return 0
   fi
 
+  # Anchor the missing-package patterns on the package name. Generic
+  # "not found" / "not installed" output (file errors, network errors,
+  # corrupt switch state) must NOT silently classify as fresh-switch and
+  # bypass the downgrade floor; only an explicit "...agent_sdk..." form
+  # qualifies. This mirrors PR #13787 which closed the same family of
+  # bypass on the sibling installed_agent_sdk_version() implementation.
   if [[ "${show_status}" -ne 0 ]] \
-    && grep -Eiq 'no package|not found|unknown package|not installed' <<<"${show_output}"; then
+    && grep -Eiq 'No package named (agent_sdk|"agent_sdk")|no packages matching .*agent_sdk|unknown package .*agent_sdk' <<<"${show_output}"; then
     return 1
   fi
 
@@ -156,10 +162,13 @@ installed_agent_sdk_version() {
     return 2
   fi
 
-  # Clean CI switches have no installed agent_sdk yet and may not have
-  # package metadata before this script pins it.  Treat that as "not
-  # installed" so the initial pin can proceed.
-  return 1
+  # opam show exited 0 with empty output: this is an unexpected
+  # inspection result (a successful command should produce a version
+  # field). Fail closed with rc=2 so the downgrade guard surfaces the
+  # ambiguity to the operator instead of silently treating it as a
+  # fresh switch and allowing the pin.
+  echo "[opam-pin] ERROR: opam show agent_sdk returned exit 0 but empty output; refusing to bypass downgrade guard" >&2
+  return 2
 }
 
 guard_agent_sdk_downgrade() {

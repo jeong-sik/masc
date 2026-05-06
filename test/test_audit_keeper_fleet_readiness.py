@@ -593,6 +593,5 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             report["fleet_failures"],
         )
 
-
 if __name__ == "__main__":
     unittest.main()

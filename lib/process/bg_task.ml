@@ -402,7 +402,7 @@ let read_pid_file path =
       let pid_line = input_line_opt ic in
       let pgid_line = input_line_opt ic in
       let parse_int line =
-        line |> Option.map String.trim |> Option.bind int_of_string_opt
+        Option.bind (Option.map String.trim line) Stdlib.int_of_string_opt
       in
       match parse_int pid_line, parse_int pgid_line with
       | Some pid, Some pgid -> Some (pid, pgid)

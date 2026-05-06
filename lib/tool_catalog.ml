@@ -213,6 +213,8 @@ let explicit_metadata : (string * metadata) list =
     ("masc_board_get", readonly_tool);
     ( "masc_board_curation_read",
       { readonly_tool with required_permission = Some Masc_domain.CanReadState } );
+    ( "masc_board_curation_submit",
+      { actor_bound_masc_coordination_tool with required_permission = Some Masc_domain.CanBroadcast } );
     ("masc_tool_help", readonly_tool);
     ("masc_keeper_list", readonly_tool);
     ("masc_keeper_status", readonly_tool);
@@ -449,6 +451,7 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Keeper TK.Board_cleanup
   | TN.Keeper TK.Board_comment
   | TN.Keeper TK.Board_comment_vote
+  | TN.Keeper TK.Board_curation_submit
   | TN.Keeper TK.Board_delete
   | TN.Keeper TK.Board_post
   | TN.Keeper TK.Board_vote
@@ -537,6 +540,7 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Board_cleanup
   | TN.Masc TM.Board_comment
   | TN.Masc TM.Board_comment_vote
+  | TN.Masc TM.Board_curation_submit
   | TN.Masc TM.Board_delete
   | TN.Masc TM.Board_post
   | TN.Masc TM.Board_reaction
@@ -602,6 +606,7 @@ let tool_group_of_typed_tool_name = function
       | TK.Board_comment
       | TK.Board_comment_vote
       | TK.Board_curation_read
+      | TK.Board_curation_submit
       | TK.Board_delete
       | TK.Board_get
       | TK.Board_list
@@ -654,6 +659,7 @@ let tool_group_of_typed_tool_name = function
       | TM.Board_comment
       | TM.Board_comment_vote
       | TM.Board_curation_read
+      | TM.Board_curation_submit
       | TM.Board_delete
       | TM.Board_get
       | TM.Board_hearths

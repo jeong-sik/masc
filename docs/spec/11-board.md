@@ -347,6 +347,8 @@ never modified by the replay path.
 | `masc_board_search` | 전문 검색 |
 | `masc_board_stats` | 통계 (post/comment count, backend) |
 | `masc_board_hearths` | 활성 hearth 목록 |
+| `masc_board_curation_read` | 최신 AI curation snapshot 조회 |
+| `masc_board_curation_submit` | AI curation snapshot 제출: summary/order/highlights/tag suggestions/answer matches/health/provenance 기록. 게시글/댓글/투표는 수정하지 않음 |
 | `masc_board_delete` | 게시물 삭제 (연관 댓글/투표 포함) |
 
 ### 10.2 Vote 도구 (Tool_vote)
@@ -434,6 +436,32 @@ slug 중복 생성 시 `Already_exists` 에러.
 - `SubBoard` / `SubBoardAccess` 타입: `dashboard/src/types/core.ts`
 - API 함수: `fetchSubBoards()`, `fetchSubBoard(id)`, `createSubBoard(slug, name, description, access?, members?)` in `dashboard/src/api/board.ts`
 - 네비게이션: workspace 섹션에 `sub-boards` 항목 추가 (`dashboard/src/config/navigation.ts`)
+
+---
+
+## 11a. AI Curation Snapshot
+
+AI curation은 board post/comment/vote mutation과 분리된 projection 계약이다. Keeper/agent는 최신 board window를 읽고 다음 projection snapshot을 제출할 수 있으며, board post/comment/vote state는 변경하지 않는다.
+
+### 11a.1 Snapshot Fields
+
+| Field | 의미 |
+|-------|------|
+| `summary` | 현재 board window의 TL;DR |
+| `ordering` | 추천 읽기 순서의 post id 목록 |
+| `highlights` | 특히 중요하게 표시할 post id 목록 |
+| `tag_suggestions` | post별 추천 태그와 근거 |
+| `answer_matches` | 질문 post와 후보 답변 post의 매칭, score, 근거 |
+| `health_score` | 0.0-1.0 정규화 커뮤니티 건강도 점수 |
+| `health_components` | 건강도 하위 지표별 score/weight/rationale |
+| `provenance` | model, prompt/run id, source window 등 감사 가능한 메타데이터 |
+
+### 11a.2 Invariants
+
+1. Curation read path는 board content mutation을 수행하지 않는다.
+2. Empty snapshot은 JSON `null`로 반환한다.
+3. Snapshot은 operator-auditable provenance를 포함할 수 있어야 한다.
+4. Summary/tag/match/health fields는 missing 시 empty/null로 안전하게 normalize한다.
 
 ---
 

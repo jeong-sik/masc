@@ -869,6 +869,134 @@ let handle_board_curation_read _args =
     let json = Board_curation.snapshot_to_yojson snap in
     (true, Yojson.Safe.to_string json)
 
+let assoc_field fields key = List.assoc_opt key fields
+
+let string_field fields key default =
+  match assoc_field fields key with
+  | Some (`String value) -> String.trim value
+  | _ -> default
+
+let float_field fields key default =
+  match assoc_field fields key with
+  | Some (`Float value) when Float.is_finite value -> value
+  | Some (`Int value) -> float_of_int value
+  | Some (`String value) ->
+    (match Float.of_string_opt (String.trim value) with
+     | Some parsed when Float.is_finite parsed -> parsed
+     | _ -> default)
+  | _ -> default
+
+let string_list_field fields key =
+  match assoc_field fields key with
+  | Some (`List values) ->
+    values
+    |> List.filter_map (function
+      | `String value ->
+        let trimmed = String.trim value in
+        if String.equal trimmed "" then None else Some trimmed
+      | _ -> None)
+  | _ -> []
+
+let trim_nonempty_string value =
+  let trimmed = String.trim value in
+  if String.equal trimmed "" then None else Some trimmed
+
+let string_opt_arg args key =
+  Option.bind (get_string_opt args key) trim_nonempty_string
+
+let string_list_arg args key =
+  get_string_list args key |> List.filter_map trim_nonempty_string
+
+let object_list_arg args key =
+  match args with
+  | `Assoc fields ->
+    (match assoc_field fields key with
+     | Some (`List values) ->
+       values
+       |> List.filter_map (function
+         | `Assoc fields -> Some fields
+         | _ -> None)
+     | _ -> [])
+  | _ -> []
+
+let provenance_arg args =
+  match args with
+  | `Assoc fields ->
+    (match assoc_field fields "provenance" with
+     | Some ((`Assoc _) as json) -> Ok json
+     | Some _ -> Error "provenance must be an object"
+     | _ -> Ok (`Assoc []))
+  | _ -> Ok (`Assoc [])
+
+let curation_tag_suggestions_arg args =
+  object_list_arg args "tag_suggestions"
+  |> List.filter_map (fun fields ->
+    let post_id = string_field fields "post_id" "" in
+    if String.equal post_id "" then None
+    else
+      Some {
+        Board_curation.post_id = post_id;
+        tags = string_list_field fields "tags";
+        rationale = string_field fields "rationale" "";
+      })
+
+let curation_answer_matches_arg args =
+  object_list_arg args "answer_matches"
+  |> List.filter_map (fun fields ->
+    let question_post_id = string_field fields "question_post_id" "" in
+    let answer_post_id = string_field fields "answer_post_id" "" in
+    if String.equal question_post_id "" || String.equal answer_post_id "" then None
+    else
+      Some {
+        Board_curation.question_post_id = question_post_id;
+        answer_post_id;
+        score = float_field fields "score" 0.0;
+        rationale = string_field fields "rationale" "";
+      })
+
+let curation_health_components_arg args =
+  object_list_arg args "health_components"
+  |> List.filter_map (fun fields ->
+    let name = string_field fields "name" "" in
+    if String.equal name "" then None
+    else
+      Some {
+        Board_curation.name = name;
+        score = float_field fields "score" 0.0;
+        weight = float_field fields "weight" 0.0;
+        rationale = string_field fields "rationale" "";
+      })
+
+let handle_board_curation_submit args =
+  let submitted_by = get_string args "submitted_by" "" |> String.trim in
+  let rationale = get_string args "rationale" "" |> String.trim in
+  if String.equal submitted_by "" then
+    (false, "submitted_by required")
+  else if String.equal rationale "" then
+    (false, "rationale required")
+  else
+    let model = string_opt_arg args "model" in
+    let summary = string_opt_arg args "summary" in
+    let ordering = string_list_arg args "ordering" in
+    let highlights = string_list_arg args "highlights" in
+    let tag_suggestions = curation_tag_suggestions_arg args in
+    let answer_matches = curation_answer_matches_arg args in
+    let health_score = get_float_opt args "health_score" in
+    let health_components = curation_health_components_arg args in
+    match provenance_arg args with
+    | Error msg -> (false, msg)
+    | Ok provenance ->
+      try
+        let snap =
+          Board_dispatch.submit_curation_snapshot
+            ~submitted_by ?model ?summary ~ordering ~highlights
+            ~tag_suggestions ~answer_matches ?health_score ~health_components
+            ~rationale ~provenance ()
+        in
+        (true, Yojson.Safe.to_string (Board_curation.snapshot_to_yojson snap))
+      with
+      | Invalid_argument msg -> (false, msg)
+
 (** {1 Tool Definitions} *)
 
 let tool_post_create : Masc_domain.tool_schema = {
@@ -1197,10 +1325,32 @@ Safety: never deletes posts with comments or votes unless filters are overridden
 (** All board tools *)
 let tool_board_curation_read : Masc_domain.tool_schema = {
   name = "masc_board_curation_read";
-  description = "Read the latest AI curation snapshot for the board: AI-produced post ordering, highlights, rationale, and operator-auditable provenance. Returns null when no snapshot has been submitted yet.";
+  description = "Read the latest AI curation snapshot for the board: TL;DR summary, post ordering, highlights, tag suggestions, answer matches, health score, rationale, and operator-auditable provenance. Returns null when no snapshot has been submitted yet.";
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc []);
+  ];
+}
+
+let tool_board_curation_submit : Masc_domain.tool_schema = {
+  name = "masc_board_curation_submit";
+  description = "Submit an AI curation snapshot for the board. This records summary, recommended ordering, highlights, tag suggestions, answer matches, health score, rationale, and provenance without mutating board posts/comments/votes. Keeper wrappers auto-fill submitted_by.";
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("submitted_by", `Assoc [("type", `String "string"); ("description", `String "Submitting agent; keeper wrapper auto-fills this")]);
+      ("model", `Assoc [("type", `String "string"); ("description", `String "Model or provider label used for the curation")]);
+      ("summary", `Assoc [("type", `String "string"); ("description", `String "Short TL;DR summary of the current board window")]);
+      ("ordering", `Assoc [("type", `String "array"); ("items", `Assoc [("type", `String "string")]); ("description", `String "Recommended post id reading order")]);
+      ("highlights", `Assoc [("type", `String "array"); ("items", `Assoc [("type", `String "string")]); ("description", `String "Important post ids to highlight")]);
+      ("tag_suggestions", `Assoc [("type", `String "array"); ("description", `String "Objects with post_id, tags[], rationale")]);
+      ("answer_matches", `Assoc [("type", `String "array"); ("description", `String "Objects with question_post_id, answer_post_id, score, rationale")]);
+      ("health_score", `Assoc [("type", `String "number"); ("minimum", `Float 0.0); ("maximum", `Float 1.0); ("description", `String "Optional normalized health score in [0.0, 1.0]")]);
+      ("health_components", `Assoc [("type", `String "array"); ("description", `String "Objects with name, score, weight, rationale")]);
+      ("rationale", `Assoc [("type", `String "string"); ("description", `String "Required explanation for the curation decision")]);
+      ("provenance", `Assoc [("type", `String "object"); ("description", `String "Audit metadata such as source window, prompt/run id, and model params")]);
+    ]);
+    ("required", `List [`String "submitted_by"; `String "rationale"]);
   ];
 }
 
@@ -1217,6 +1367,7 @@ let tools = [
   tool_profile;
   tool_hearth_list;
   tool_board_curation_read;
+  tool_board_curation_submit;
   tool_delete;
 ]
 
@@ -1254,6 +1405,7 @@ let handle_tool name args =
     | "masc_board_profile" -> handle_profile args
     | "masc_board_hearths" -> handle_hearth_list args
     | "masc_board_curation_read" -> handle_board_curation_read args
+    | "masc_board_curation_submit" -> handle_board_curation_submit args
     | "masc_board_delete" ->
       let result = handle_delete args in
       invalidate_board_list_cache ();
@@ -1289,7 +1441,8 @@ let register () =
     | "masc_board_curation_read" ->
         Some Masc_domain.CanReadState
     | "masc_board_post" | "masc_board_comment" | "masc_board_vote"
-    | "masc_board_comment_vote" | "masc_board_reaction" ->
+    | "masc_board_comment_vote" | "masc_board_reaction"
+    | "masc_board_curation_submit" ->
         Some Masc_domain.CanBroadcast
     | "masc_board_delete" | "masc_board_cleanup" ->
         Some Masc_domain.CanAdmin

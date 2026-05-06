@@ -268,6 +268,7 @@ let keeper_supported_masc_schemas (schemas : Masc_domain.tool_schema list) =
   let has_keeper_board_wrapper name =
     let eq v = String.equal name (Tool_name.Masc.to_string v) in
     eq Tool_name.Masc.Board_comment
+    || eq Tool_name.Masc.Board_curation_submit
     || eq Tool_name.Masc.Board_post
     || eq Tool_name.Masc.Board_vote
     || eq Tool_name.Masc.Board_delete

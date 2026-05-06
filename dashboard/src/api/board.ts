@@ -462,17 +462,85 @@ function normalizeBoardHearth(raw: unknown): BoardHearth | null {
   }
 }
 
+function asStrictStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map(item => item.trim())
+    .filter(Boolean)
+}
+
 function normalizeBoardCurationSnapshot(raw: unknown): BoardCurationSnapshot | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id, '').trim()
   const generated_at = asNullableIsoTimestamp(raw.generated_at)
   const submitted_by = asString(raw.submitted_by, '').trim()
   if (!id || !generated_at || !submitted_by) return null
-  const ordering = Array.isArray(raw.ordering) ? raw.ordering.map(v => String(v)) : []
-  const highlights = Array.isArray(raw.highlights) ? raw.highlights.map(v => String(v)) : []
+  const ordering = asStrictStringArray(raw.ordering)
+  const highlights = asStrictStringArray(raw.highlights)
   const rationale = asString(raw.rationale, '')
   const model = asNullableString(raw.model)
-  return { id, generated_at, submitted_by, model, ordering, highlights, rationale, provenance: raw.provenance }
+  const healthScore = asNumber(raw.health_score)
+  return {
+    id,
+    generated_at,
+    submitted_by,
+    model,
+    summary: asNullableString(raw.summary),
+    ordering,
+    highlights,
+    tag_suggestions: normalizeBoardCurationTagSuggestions(raw.tag_suggestions),
+    answer_matches: normalizeBoardCurationAnswerMatches(raw.answer_matches),
+    health_score: healthScore ?? null,
+    health_components: normalizeBoardCurationHealthComponents(raw.health_components),
+    rationale,
+    provenance: raw.provenance,
+  }
+}
+
+function normalizeBoardCurationTagSuggestions(raw: unknown): BoardCurationSnapshot['tag_suggestions'] {
+  if (!Array.isArray(raw)) return []
+  return raw.flatMap((item) => {
+    if (!isRecord(item)) return []
+    const post_id = asString(item.post_id, '').trim()
+    if (!post_id) return []
+    return [{
+      post_id,
+      tags: asStrictStringArray(item.tags),
+      rationale: asString(item.rationale, ''),
+    }]
+  })
+}
+
+function normalizeBoardCurationAnswerMatches(raw: unknown): BoardCurationSnapshot['answer_matches'] {
+  if (!Array.isArray(raw)) return []
+  return raw.flatMap((item) => {
+    if (!isRecord(item)) return []
+    const question_post_id = asString(item.question_post_id, '').trim()
+    const answer_post_id = asString(item.answer_post_id, '').trim()
+    if (!question_post_id || !answer_post_id) return []
+    return [{
+      question_post_id,
+      answer_post_id,
+      score: asNumber(item.score, 0),
+      rationale: asString(item.rationale, ''),
+    }]
+  })
+}
+
+function normalizeBoardCurationHealthComponents(raw: unknown): BoardCurationSnapshot['health_components'] {
+  if (!Array.isArray(raw)) return []
+  return raw.flatMap((item) => {
+    if (!isRecord(item)) return []
+    const name = asString(item.name, '').trim()
+    if (!name) return []
+    return [{
+      name,
+      score: asNumber(item.score, 0),
+      weight: asNumber(item.weight, 0),
+      rationale: asString(item.rationale, ''),
+    }]
+  })
 }
 
 function normalizeBoardReactionSummary(raw: unknown): BoardReactionSummary | null {

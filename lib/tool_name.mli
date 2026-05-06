@@ -13,6 +13,7 @@ module Keeper : sig
     | Board_comment
     | Board_comment_vote
     | Board_curation_read
+    | Board_curation_submit
     | Board_delete
     | Board_get
     | Board_list
@@ -84,6 +85,7 @@ module Masc : sig
     | Board_comment
     | Board_comment_vote
     | Board_curation_read
+    | Board_curation_submit
     | Board_delete
     | Board_get
     | Board_hearths

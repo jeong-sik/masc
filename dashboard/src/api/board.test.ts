@@ -4,6 +4,7 @@ import {
   createSubBoard,
   createPost,
   fetchBoard,
+  fetchBoardCuration,
   fetchBoardHearths,
   fetchBoardPost,
   fetchBoardReactions,
@@ -540,6 +541,87 @@ describe('fetchBoardHearths', () => {
       { name: 'research', count: 0 },
     ])
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/board/hearths', expect.any(Object))
+  })
+})
+
+describe('fetchBoardCuration', () => {
+  it('normalizes summary, tags, answer matches, and health score from the curation snapshot', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        snapshot: {
+          id: 'cu-1',
+          generated_at: 1_748_779_200,
+          submitted_by: 'keeper-curator',
+          model: 'gpt-5',
+          summary: 'Two active incidents need review.',
+          ordering: ['post-a', { id: 'not-coerced' }, 'post-b', 7, ' '],
+          highlights: ['post-a', { name: 'not-coerced' }, null],
+          tag_suggestions: [
+            { post_id: 'post-a', tags: ['incident', { name: 'not-coerced' }, ' ops ', ' '], rationale: 'Incident thread' },
+            { post_id: ' ', tags: ['ignored'], rationale: 'missing post id' },
+          ],
+          answer_matches: [
+            {
+              question_post_id: 'post-question',
+              answer_post_id: 'post-answer',
+              score: 0.86,
+              rationale: 'Same stack trace',
+            },
+          ],
+          health_score: 0.74,
+          health_components: [
+            { name: 'answer_rate', score: 0.8, weight: 0.25, rationale: 'Most questions have replies' },
+          ],
+          rationale: 'Prioritize incidents before planning threads.',
+          provenance: { run_id: 'curation-run-1' },
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchBoardCuration()
+
+    expect(result).toMatchObject({
+      id: 'cu-1',
+      submitted_by: 'keeper-curator',
+      model: 'gpt-5',
+      summary: 'Two active incidents need review.',
+      ordering: ['post-a', 'post-b'],
+      highlights: ['post-a'],
+      tag_suggestions: [
+        { post_id: 'post-a', tags: ['incident', 'ops'], rationale: 'Incident thread' },
+      ],
+      answer_matches: [
+        {
+          question_post_id: 'post-question',
+          answer_post_id: 'post-answer',
+          score: 0.86,
+          rationale: 'Same stack trace',
+        },
+      ],
+      health_score: 0.74,
+      health_components: [
+        { name: 'answer_rate', score: 0.8, weight: 0.25, rationale: 'Most questions have replies' },
+      ],
+      rationale: 'Prioritize incidents before planning threads.',
+      provenance: { run_id: 'curation-run-1' },
+    })
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/board/curation', expect.any(Object))
+  })
+
+  it('returns null when no curation snapshot exists', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ snapshot: null }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchBoardCuration()).resolves.toBeNull()
   })
 })
 

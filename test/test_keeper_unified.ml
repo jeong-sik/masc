@@ -4992,6 +4992,28 @@ let test_prompt_includes_board_activity_section () =
        with Not_found -> false
      in found)
 
+let test_prompt_marks_board_curation_due_for_multi_event_window () =
+  let second_board_event =
+    {
+      sample_board_event with
+      post_id = "board-post-2";
+      title = "Answer candidate";
+      preview = "This may answer the earlier thread.";
+    }
+  in
+  let obs =
+    { base_observation with
+      pending_board_events = [ sample_board_event; second_board_event ]
+    }
+  in
+  let _sys, user =
+    UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs ()
+  in
+  check bool "marks curation due" true
+    (contains_substring user "Curation due");
+  check bool "names curation submit tool" true
+    (contains_substring user "keeper_board_curation_submit")
+
 let test_prompt_prefers_silence_guidance () =
   let sys, _user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:base_observation () in
   check bool "mentions speech act header" true
@@ -6922,6 +6944,9 @@ let test_should_require_tools_for_initial_turn_matches_first_turn_gate () =
   check bool "two-turn board action can require initial tools" true
     (KAR.should_require_tools_for_initial_turn ~max_turns:2
        ~turn_affordances:[ "board_post_or_comment" ]);
+  check bool "two-turn board curation can require initial tools" true
+    (KAR.should_require_tools_for_initial_turn ~max_turns:2
+       ~turn_affordances:[ "board_curation" ]);
   check bool "three-turn call can require initial tools" true
     (KAR.should_require_tools_for_initial_turn ~max_turns:3 ~turn_affordances:affordances);
   check bool "pending verification requires an action tool" true
@@ -6943,6 +6968,8 @@ let test_should_require_tools_for_initial_turn_covers_actionable_affordances () 
   in
   check bool "reply requires tool gate" true (require "reply_in_room");
   check bool "verification requires tool gate" true (require "task_verify");
+  check bool "board curation requires tool gate" true
+    (require "board_curation");
   check bool "worktree inspection requires tool gate" true
     (require "inspect_worktree_delta")
 
@@ -6969,6 +6996,13 @@ let test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool () =
     "board_post_or_comment without any post tool -> gate suppressed" false
     (gate ~tools:[ "keeper_task_claim"; "keeper_tasks_list" ]
        [ "board_post_or_comment" ]);
+  check bool
+    "board_curation with submit tool -> gate fires" true
+    (gate ~tools:[ "keeper_board_curation_submit" ] [ "board_curation" ]);
+  check bool
+    "board_curation without submit tool -> gate suppressed" false
+    (gate ~tools:[ "keeper_board_post"; "keeper_board_comment" ]
+       [ "board_curation" ]);
   check bool
     "any matching affordance is enough" true
     (gate
@@ -7006,6 +7040,7 @@ let test_tools_for_gated_affordance_covers_each_variant () =
       (Printf.sprintf "tools_for_gated_affordance known tools for %s" label)
       [] (List.filter (fun name -> not (known_tool_name name)) tools)
   in
+  nonempty "Board_curation" Surface.Board_curation;
   nonempty "Board_post_or_comment" Surface.Board_post_or_comment;
   nonempty "Message_sweep" Surface.Message_sweep;
   nonempty "Reply_in_room" Surface.Reply_in_room;
@@ -7013,7 +7048,17 @@ let test_tools_for_gated_affordance_covers_each_variant () =
   nonempty "Task_audit" Surface.Task_audit;
   nonempty "Task_verify" Surface.Task_verify;
   nonempty "Work_discovery" Surface.Work_discovery;
-  nonempty "Inspect_worktree_delta" Surface.Inspect_worktree_delta
+  nonempty "Inspect_worktree_delta" Surface.Inspect_worktree_delta;
+  check (list string)
+    "board_curation force-includes submit tool"
+    [ "keeper_board_curation_submit" ]
+    (Surface.preferred_tool_names_for_turn_affordances
+       [ "board_curation"; "task_claim"; "board_curation" ]);
+  check (list string)
+    "generic board affordance has no forced specific tool"
+    []
+    (Surface.preferred_tool_names_for_turn_affordances
+       [ "board_post_or_comment" ])
 
 let test_preferred_tool_choice_for_required_turn_claims_first () =
   let choose ?(has_current_task = false) ?(turn_affordances = [ "task_claim" ])
@@ -7036,6 +7081,40 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
        fail
          (Printf.sprintf
             "expected Any when already owning work, got %s"
+            (Agent_sdk.Types.show_tool_choice other)));
+  (* Board curation is the most specific action for a due curation
+     window, so prefer the submit tool over generic board/task tools. *)
+  (match
+     choose
+       ~turn_affordances:[ "board_curation"; "task_claim" ]
+       ~allowed_tool_names:
+         [
+           "keeper_board_curation_submit";
+           "keeper_task_claim";
+           "keeper_board_post";
+         ]
+       ()
+   with
+   | Agent_sdk.Types.Tool name ->
+       check string "board curation prefers submit tool"
+         "keeper_board_curation_submit" name
+   | other ->
+       fail
+         (Printf.sprintf
+            "expected Tool keeper_board_curation_submit, got %s"
+            (Agent_sdk.Types.show_tool_choice other)));
+  (match
+     choose
+       ~turn_affordances:[ "board_curation" ]
+       ~allowed_tool_names:[ "keeper_board_post" ]
+       ()
+   with
+   | Agent_sdk.Types.Auto -> ()
+   | other ->
+       fail
+         (Printf.sprintf
+            "expected Auto when curation submit is unavailable and keeper is idle, \
+             got %s"
             (Agent_sdk.Types.show_tool_choice other)));
   (* #10008: when no specific tool is applicable for the current
      affordance, fall back to [Auto] so the model can respond with
@@ -7399,6 +7478,8 @@ let () =
           test_case "includes mentions" `Quick test_prompt_includes_mentions_section;
           test_case "includes board activity" `Quick
             test_prompt_includes_board_activity_section;
+          test_case "marks board curation due" `Quick
+            test_prompt_marks_board_curation_due_for_multi_event_window;
           test_case "includes goals" `Quick test_prompt_includes_goals_section;
           test_case "includes context ratio" `Quick test_prompt_includes_context_ratio;
           test_case "includes idle" `Quick test_prompt_includes_idle;
@@ -8014,6 +8095,42 @@ let () =
               in
               check bool "work_discovery present" true
                 (List.mem "work_discovery" affordances));
+          test_case "affordance: board curation requires multi-event window"
+            `Quick
+            (fun () ->
+              let second_board_event =
+                {
+                  sample_board_event with
+                  post_id = "board-post-2";
+                  title = "Follow-up";
+                  preview = "Another board item needs routing.";
+                }
+              in
+              let obs =
+                {
+                  base_observation with
+                  pending_board_events =
+                    [ sample_board_event; second_board_event ];
+                }
+              in
+              let affordances =
+                UM.observed_affordances_of_observation obs
+              in
+              check bool "board_curation present" true
+                (List.mem "board_curation" affordances));
+          test_case "affordance: single board event skips curation gate" `Quick
+            (fun () ->
+              let obs =
+                {
+                  base_observation with
+                  pending_board_events = [ sample_board_event ];
+                }
+              in
+              let affordances =
+                UM.observed_affordances_of_observation obs
+              in
+              check bool "board_curation absent" false
+                (List.mem "board_curation" affordances));
           test_case "affordance: task claim requires matched backlog" `Quick
             (fun () ->
               let obs =

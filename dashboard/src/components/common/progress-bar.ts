@@ -14,17 +14,42 @@
 
 import { html } from 'htm/preact'
 
-type ProgressBarSize = 'xs' | 'sm' | 'md'
-type ProgressBarTone =
+export type ProgressBarSize = 'xs' | 'sm' | 'md'
+export type ProgressBarTone =
   | 'accent' | 'ok' | 'warn' | 'bad'
   | 'emerald' | 'amber' | 'rose' | 'sky'
+export type ProgressBarFillSource = 'tone' | 'custom-class'
+
+export interface ProgressBarSummary {
+  readonly inputPct: number
+  readonly clampedPct: number
+  readonly roundedPct: number
+  readonly widthStyle: string
+  readonly size: ProgressBarSize
+  readonly tone: ProgressBarTone
+  readonly trackTone: ProgressBarTrackTone
+  readonly isSemantic: boolean
+  readonly fillSource: ProgressBarFillSource
+  readonly hasCustomFillClass: boolean
+  readonly fillClassLength: number
+  readonly hasTrackClass: boolean
+  readonly trackClassLength: number
+  readonly hasTitle: boolean
+  readonly titleLength: number
+  readonly hasTestId: boolean
+  readonly testIdLength: number
+}
+
+function clampProgressPct(pct: number): number {
+  return Math.max(0, Math.min(100, pct))
+}
 
 /** Pure: clamp a percentage into [0, 100] and produce the inline width
     style string. Exposed so callers that need to render the bar inline
     (inside a flex row with other progress bars) can use the same
     semantics without mounting the component. */
 export function progressBarWidthStyle(pct: number): string {
-  const clamped = Math.max(0, Math.min(100, pct))
+  const clamped = clampProgressPct(pct)
   return `width: ${clamped.toFixed(2)}%`
 }
 
@@ -53,7 +78,7 @@ export function progressBarToneClass(tone: ProgressBarTone): string {
   }
 }
 
-type ProgressBarTrackTone = 'default' | 'dim' | 'muted'
+export type ProgressBarTrackTone = 'default' | 'dim' | 'muted'
 
 /** Pure: track (muted background) bg class for a given track tone.
     Default = --white-5 (most rows); dim = --white-6 (keeper detail);
@@ -67,7 +92,7 @@ export function progressBarTrackToneClass(tone: ProgressBarTrackTone = 'default'
   }
 }
 
-interface ProgressBarProps {
+export interface ProgressBarProps {
   /** Percentage 0–100; values outside are clamped (no throw). */
   pct: number
   size?: ProgressBarSize
@@ -94,6 +119,41 @@ interface ProgressBarProps {
 const TRACK_BASE = 'w-full overflow-hidden rounded-[var(--r-0)]'
 const FILL_BASE = 'h-full rounded-[var(--r-0)] transition-[width] duration-[var(--t-slow)] ease-[var(--ease-inout)]'
 
+export function summarizeProgressBar({
+  pct,
+  size = 'sm',
+  tone = 'accent',
+  class: cx,
+  trackTone = 'default',
+  trackClass,
+  title,
+  ariaLabel,
+  testId,
+}: ProgressBarProps): ProgressBarSummary {
+  const clampedPct = clampProgressPct(pct)
+  const fillSource = cx !== undefined && cx !== '' ? 'custom-class' : 'tone'
+
+  return {
+    inputPct: pct,
+    clampedPct,
+    roundedPct: Number(clampedPct.toFixed(0)),
+    widthStyle: progressBarWidthStyle(pct),
+    size,
+    tone,
+    trackTone,
+    isSemantic: ariaLabel !== undefined,
+    fillSource,
+    hasCustomFillClass: fillSource === 'custom-class',
+    fillClassLength: cx?.length ?? 0,
+    hasTrackClass: trackClass !== undefined && trackClass !== '',
+    trackClassLength: trackClass?.length ?? 0,
+    hasTitle: title !== undefined && title !== '',
+    titleLength: title?.length ?? 0,
+    hasTestId: testId !== undefined && testId !== '',
+    testIdLength: testId?.length ?? 0,
+  }
+}
+
 export function ProgressBar({
   pct,
   size = 'sm',
@@ -105,26 +165,48 @@ export function ProgressBar({
   ariaLabel,
   testId,
 }: ProgressBarProps) {
+  const summary = summarizeProgressBar({
+    pct,
+    size,
+    tone,
+    class: cx,
+    trackTone,
+    trackClass,
+    title,
+    ariaLabel,
+    testId,
+  })
   const height = progressBarHeightClass(size)
   const fillClass = cx ?? progressBarToneClass(tone)
   const trackBg = progressBarTrackToneClass(trackTone)
-  const widthStyle = progressBarWidthStyle(pct)
-  const clamped = Math.max(0, Math.min(100, pct))
-  const semantic = ariaLabel !== undefined
   return html`<div
     class=${`${TRACK_BASE} ${height} ${trackBg} ${trackClass ?? ''}`}
     title=${title}
-    role=${semantic ? 'progressbar' : undefined}
+    role=${summary.isSemantic ? 'progressbar' : undefined}
     aria-label=${ariaLabel}
-    aria-valuenow=${semantic ? clamped.toFixed(0) : undefined}
-    aria-valuemin=${semantic ? '0' : undefined}
-    aria-valuemax=${semantic ? '100' : undefined}
-    aria-hidden=${semantic ? undefined : 'true'}
+    aria-valuenow=${summary.isSemantic ? summary.roundedPct.toFixed(0) : undefined}
+    aria-valuemin=${summary.isSemantic ? '0' : undefined}
+    aria-valuemax=${summary.isSemantic ? '100' : undefined}
+    aria-hidden=${summary.isSemantic ? undefined : 'true'}
     data-progress-bar
-    data-progress-bar-size=${size}
-    data-progress-bar-pct=${clamped.toFixed(0)}
+    data-progress-bar-size=${summary.size}
+    data-progress-bar-tone=${summary.tone}
+    data-progress-bar-track-tone=${summary.trackTone}
+    data-progress-bar-pct=${summary.roundedPct.toFixed(0)}
+    data-progress-bar-input-pct=${summary.inputPct}
+    data-progress-bar-clamped-pct=${summary.clampedPct.toFixed(2)}
+    data-progress-bar-is-semantic=${summary.isSemantic}
+    data-progress-bar-fill-source=${summary.fillSource}
+    data-progress-bar-has-custom-fill-class=${summary.hasCustomFillClass}
+    data-progress-bar-fill-class-length=${summary.fillClassLength}
+    data-progress-bar-has-track-class=${summary.hasTrackClass}
+    data-progress-bar-track-class-length=${summary.trackClassLength}
+    data-progress-bar-has-title=${summary.hasTitle}
+    data-progress-bar-title-length=${summary.titleLength}
+    data-progress-bar-has-test-id=${summary.hasTestId}
+    data-progress-bar-test-id-length=${summary.testIdLength}
     data-testid=${testId}
   >
-    <div class=${`${FILL_BASE} ${fillClass}`} style=${widthStyle}></div>
+    <div class=${`${FILL_BASE} ${fillClass}`} style=${summary.widthStyle}></div>
   </div>`
 }

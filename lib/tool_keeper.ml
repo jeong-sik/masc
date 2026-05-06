@@ -720,18 +720,21 @@ let handle_keeper_list ctx args : tool_result =
   let body =
     cached_text_by_key _keeper_list_cache ~key:cache_key
       ~ttl_s:(keeper_list_cache_ttl_s ()) (fun () ->
-        let entries =
+        let registry_names =
           Keeper_registry.all ~base_path:ctx.config.base_path ()
-          |> List.sort (fun (a : Keeper_registry.registry_entry)
-                            (b : Keeper_registry.registry_entry) ->
-               String.compare a.name b.name)
+          |> List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name)
+        in
+        let names =
+          registry_names @ keeper_names ctx.config
+          |> List.map String.trim
+          |> List.filter (fun name -> not (String.equal name ""))
+          |> List.sort_uniq String.compare
           |> take limit
         in
-        let names = List.map (fun (e : Keeper_registry.registry_entry) -> e.name) entries in
         let rows =
-          entries
-          |> List.filter_map (fun (e : Keeper_registry.registry_entry) ->
-               keeper_list_row_json ~runtime_class:"keeper" ctx.config e.name)
+          names
+          |> List.filter_map (fun name ->
+               keeper_list_row_json ~runtime_class:"keeper" ctx.config name)
         in
         let json =
           if not detailed then

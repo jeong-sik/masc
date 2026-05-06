@@ -223,7 +223,26 @@ let test_keeper_listing_ignores_sidecar_json_files () =
       check (list string) "status handler filters sidecars"
         [ "dot.name"; "sangsu" ] listed;
       check int "status handler count filters sidecars" 2
-        Yojson.Safe.Util.(json |> member "count" |> to_int))
+        Yojson.Safe.Util.(json |> member "count" |> to_int);
+      let ok, body =
+        match
+          Tool_keeper.dispatch ctx ~name:"masc_keeper_list"
+            ~args:(`Assoc [ ("limit", `Int 10) ])
+        with
+        | Some result -> result
+        | None -> fail "expected masc_keeper_list dispatch"
+      in
+      check bool "tool keeper list ok without registry entries" true ok;
+      let json = parse_json_exn body in
+      let listed =
+        Yojson.Safe.Util.(json |> member "keepers" |> to_list |> filter_string)
+      in
+      check (list string) "tool keeper list includes persisted keepers"
+        [ "dot.name"; "sangsu" ] listed;
+      check int "tool keeper list count includes persisted keepers" 2
+        Yojson.Safe.Util.(json |> member "count" |> to_int);
+      check int "tool keeper list rows include persisted keepers" 2
+        Yojson.Safe.Util.(json |> member "items" |> to_list |> List.length))
 
 let test_bootable_keeper_names_skip_autoboot_disabled_meta () =
   Eio_main.run @@ fun env ->

@@ -649,6 +649,8 @@ let metric_keeper_cycle_exceptions =
   "masc_keeper_cycle_exceptions_total"
 let metric_keeper_snapshot_write_failures =
   "masc_keeper_snapshot_write_failures_total"
+let metric_keeper_progress_updated_line_failures =
+  "masc_keeper_progress_updated_line_failures_total"
 let metric_keeper_sse_broadcast_failures =
   "masc_keeper_sse_broadcast_failures_total"
 let metric_keeper_room_heartbeat_failures =
@@ -1828,6 +1830,12 @@ let init () =
   add metric_keeper_snapshot_write_failures
     "Total heartbeat snapshot persistence failures causing metric \
      data loss. Labeled by keeper."
+    Counter;
+  add metric_keeper_progress_updated_line_failures
+    "Total failures refreshing the Updated line in keeper progress.md. \
+     Missing progress files are no-ops; non-zero rates mean progress \
+     metadata refresh is failing after a successful meta write. Labeled \
+     by keeper."
     Counter;
   add metric_keeper_sse_broadcast_failures
     "Total in-turn heartbeat SSE broadcast failures. Labeled by keeper."

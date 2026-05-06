@@ -468,14 +468,16 @@ let emit_provider_error_metric ~cascade_name ~provider error =
 (* #13923 / #13933: when the agent_sdk [with_optional_timeout] wrapper
    fires it produces a [Retry.Timeout] whose message starts with
    "Agent execution exceeded max_execution_time_s". Distinguish that
-   from a transport-level provider timeout by substring so dashboards
-   can tell whether our per-OAS-call ceiling actually engaged versus
-   the upstream socket deadline. *)
+   from a transport-level provider timeout by prefix so dashboards can
+   tell whether our per-OAS-call ceiling actually engaged versus the
+   upstream socket deadline. *)
 let timeout_source_label (err : Agent_sdk.Error.sdk_error) : string =
   let is_max_execution_time =
     match err with
     | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout { message }) ->
-        String_util.contains_substring_ci message "max_execution_time_s"
+        String.starts_with
+          ~prefix:"agent execution exceeded max_execution_time_s"
+          (String.trim (String.lowercase_ascii message))
     | _ -> false
   in
   if is_max_execution_time then "max_execution_time" else "provider"

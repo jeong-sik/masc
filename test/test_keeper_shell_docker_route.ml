@@ -92,18 +92,29 @@ let clear_checkout_but_keep_git_dir root =
   |> Array.iter (fun name ->
     if name <> ".git" then cleanup_dir (Filename.concat root name))
 
-let make_meta ~name ~sandbox =
+let make_meta ?preset ~name ~sandbox =
+  let tool_access_fields =
+    match preset with
+    | None -> []
+    | Some preset ->
+        [
+          ( "tool_access",
+            Keeper_types.tool_access_to_json
+              (Keeper_types.Preset { preset; also_allow = [] }) );
+        ]
+  in
   let json =
     `Assoc
-      [
-        ("name", `String name);
-        ("agent_name", `String ("agent-" ^ name));
-        ("trace_id", `String ("trace-" ^ name));
-        ("goal", `String "shell docker route test");
-        ("allowed_paths", `List [ `String "*" ]);
-        ( "sandbox_profile",
-          `String (Keeper_types.sandbox_profile_to_string sandbox) );
-      ]
+      ([
+         ("name", `String name);
+         ("agent_name", `String ("agent-" ^ name));
+         ("trace_id", `String ("trace-" ^ name));
+         ("goal", `String "shell docker route test");
+         ("allowed_paths", `List [ `String "*" ]);
+         ( "sandbox_profile",
+           `String (Keeper_types.sandbox_profile_to_string sandbox) );
+       ]
+      @ tool_access_fields)
   in
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta
@@ -122,6 +133,18 @@ let setup ~sandbox f =
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Keeper_registry.clear ();
   let meta = make_meta ~name:"minjae" ~sandbox in
+  let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  ensure_dir playground;
+  f ~config ~meta ~playground
+
+let setup_with_preset ~sandbox ~preset f =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir () in
+  ensure_dir (Filename.concat base Common.masc_dirname);
+  let config = Coord.default_config base in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_meta ~name:"minjae" ~sandbox ~preset in
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir playground;
   f ~config ~meta ~playground
@@ -560,6 +583,71 @@ let test_bash_git_creds_uses_oneshot_with_turn_runtime () =
     Masc_mcp.Keeper_gh_env.root_gh_config_dir config
   in
   Alcotest.(check bool) "one-shot run mounted GH identity bundle" true
+    (contains_substring log (root_gh_dir ^ ":/tmp/keeper-creds/.config/gh:ro"))
+
+let test_bash_git_push_requires_write_preset_before_docker () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  ensure_github_identity_bundle ~config Masc_mcp.Keeper_gh_env.root_github_identity;
+  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  ensure_dir repo;
+  run_ok ~cwd:repo "git init -q";
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+      ~args:
+        (`Assoc
+          [ ("cmd", `String "git push origin feature/proof")
+          ; ("cwd", `String repo)
+          ])
+      ()
+  in
+  Alcotest.(check (option bool)) "push blocked" (Some false)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option string)) "write gate before docker"
+    (Some "write_operation_gated")
+    (parse_string_field raw "error");
+  Alcotest.(check bool) "docker was not invoked" false
+    (Sys.file_exists log_path)
+
+let test_bash_git_push_routes_through_git_creds_docker () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Coding
+  @@ fun ~config ~meta ~playground ->
+  ensure_github_identity_bundle ~config Masc_mcp.Keeper_gh_env.root_github_identity;
+  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  ensure_dir repo;
+  run_ok ~cwd:repo "git init -q";
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+      ~args:
+        (`Assoc
+          [ ("cmd", `String "git push origin feature/proof")
+          ; ("cwd", `String repo)
+          ])
+      ()
+  in
+  Alcotest.(check (option bool)) "push succeeds via fake docker" (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option string)) "push via docker" (Some "docker")
+    (parse_string_field raw "via");
+  let log = read_file log_path in
+  Alcotest.(check bool) "git push used docker run" true
+    (contains_substring log "run --rm");
+  Alcotest.(check bool) "git push command preserved" true
+    (contains_substring log "git push origin feature/proof");
+  let root_gh_dir =
+    Masc_mcp.Keeper_gh_env.root_gh_config_dir config
+  in
+  Alcotest.(check bool) "push mounted GH identity bundle" true
     (contains_substring log (root_gh_dir ^ ":/tmp/keeper-creds/.config/gh:ro"))
 
 let test_repair_container_worktree_gitdirs () =
@@ -1043,9 +1131,15 @@ let () =
 	          Alcotest.test_case
 	            "docker keeper bash git cmd routes through git-creds docker"
 	            `Quick test_bash_git_creds_routes_through_docker;
-	          Alcotest.test_case
-	            "docker keeper bash git creds bypass warm turn runtime"
-	            `Quick test_bash_git_creds_uses_oneshot_with_turn_runtime;
+          Alcotest.test_case
+            "docker keeper bash git creds bypass warm turn runtime"
+            `Quick test_bash_git_creds_uses_oneshot_with_turn_runtime;
+          Alcotest.test_case
+            "docker keeper git push requires write preset"
+            `Quick test_bash_git_push_requires_write_preset_before_docker;
+          Alcotest.test_case
+            "docker keeper git push routes through git-creds docker"
+            `Quick test_bash_git_push_routes_through_git_creds_docker;
 	          Alcotest.test_case
 	            "hard mode blocks raw gh keeper_bash"
 	            `Quick test_hard_mode_blocks_raw_gh_bash;

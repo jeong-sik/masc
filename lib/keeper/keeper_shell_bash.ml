@@ -123,6 +123,7 @@ let handle_keeper_bash
       then (Docker, Network_inherit, true)
       else (base_profile, base_network_mode, false)
     in
+    let sandbox_root = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
     (* Destructive guard: always active regardless of Docker or preset *)
     if Worker_dev_tools.is_destructive_bash_operation cmd
     then (
@@ -179,6 +180,112 @@ let handle_keeper_bash
                "Use keeper_shell op=gh cmd=\"...\"; hard mode runs validated gh commands through the host broker with keeper-scoped GH_CONFIG_DIR."
            ; "cmd", `String cmd_for_log
            ]))
+    else if Worker_dev_tools.is_git_branch_switch cmd
+            && not (write_enabled && in_playground)
+    then (
+      Log.Keeper.info
+        "keeper_bash branch-switch blocked: %s (keeper=%s, write_enabled=%b, playground=%b)"
+        cmd_for_log meta.name write_enabled in_playground;
+      Yojson.Safe.to_string
+        (Exec_core.blocked_result_json
+           ~cmd
+           ~error:"branch_switch_blocked"
+           ~reason:
+             "git checkout/switch/branch mutations require a write-enabled preset \
+              (Coding/Delivery/Full) and a keeper-owned sandbox repo or \
+              worktree. Clone into your sandbox first \
+              (keeper_shell op=git_clone), then create or enter a worktree \
+              under repos/<repo>/.worktrees/<task>."
+           ~hint:(Printf.sprintf
+                    "Use cwd=%srepos/REPO/.worktrees/TASK"
+                    sandbox_root)
+           ~alternatives:
+             [ Printf.sprintf
+                 "Clone the repo first: keeper_shell op=git_clone, then use cwd=%srepos/REPO/.worktrees/TASK."
+                 sandbox_root
+             ; "Use keeper_shell op=git op_cmd='branch -a' to list available branches."
+             ]
+           ~retryability:Exec_core.Operator_required
+           ~diag:
+             (Some { Exec_core.rule_id = "branch_switch_blocked"
+                    ; explanation =
+                        "git checkout/switch/branch mutations need a write-enabled preset and a sandbox clone."
+                    ; rewrite =
+                        Some (Printf.sprintf
+                          "First: keeper_shell op=git_clone. Then: set cwd=%srepos/REPO/.worktrees/TASK"
+                          sandbox_root)
+                    ; tool_suggestion = None })
+           ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
+           ()))
+    else if (not write_enabled) && Worker_dev_tools.is_write_operation cmd
+    then (
+      Log.Keeper.info "keeper_bash write-gate: %s (keeper=%s, playground=%b)"
+        cmd_for_log meta.name in_playground;
+      Yojson.Safe.to_string
+        (Exec_core.blocked_result_json
+           ~cmd
+           ~error:"write_operation_gated"
+           ~reason:
+             "This command modifies state (git push/commit, make deploy, etc.). \
+              A write-enabled preset (Coding/Delivery/Full) is required."
+           ~alternatives:
+             [ "Read-only alternatives: use keeper_bash for git log, git diff, git status."
+             ; "If you need write access, ask the operator to assign a Coding/Delivery/Full preset."
+             ]
+           ~retryability:Exec_core.Operator_required
+           ~diag:
+             (Some { Exec_core.rule_id = "write_operation_gated"
+                    ; explanation =
+                        "This command modifies state but the current preset is read-only. Write operations require Coding, Delivery, or Full preset."
+                    ; rewrite = None
+                    ; tool_suggestion =
+                        Some "Ask the operator for a write-enabled preset" })
+           ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
+           ~env_snapshot:env_snap
+           ()))
+    else if write_enabled
+            && Worker_dev_tools.is_write_operation cmd
+            && not in_playground
+    then (
+      Log.Keeper.info
+        "keeper_bash write-containment blocked: %s (keeper=%s, cwd=%s, playground=%b)"
+        cmd_for_log meta.name cwd in_playground;
+      Yojson.Safe.to_string
+        (Exec_core.blocked_result_json
+           ~cmd
+           ~error:"write_outside_playground_blocked"
+           ~reason:
+             (Printf.sprintf
+                "Write operations (git push/commit, make deploy, etc.) \
+                 must run with cwd inside your keeper-owned sandbox clone \
+                 or one of its worktrees under %srepos/<repo>/.worktrees/. \
+                 Open a sandbox clone first with keeper_shell op=git_clone \
+                 if needed, then use masc_worktree_create and set cwd to \
+                 the returned worktree path."
+                sandbox_root)
+           ~hint:(Printf.sprintf
+                    "cwd must start with %s and usually looks like %srepos/REPO/.worktrees/TASK"
+                    sandbox_root
+                    sandbox_root)
+           ~alternatives:
+             [ Printf.sprintf
+                 "Clone into your sandbox: keeper_shell op=git_clone, then cd to %srepos/REPO/."
+                 sandbox_root
+             ; "Create a worktree inside your sandbox with masc_worktree_create."
+             ; "Use keeper_bash with a cwd pointing to your sandbox worktree."
+             ]
+           ~retryability:Exec_core.Operator_required
+           ~diag:
+             (Some { Exec_core.rule_id = "write_outside_playground_blocked"
+                    ; explanation =
+                        "Write operations must run inside the keeper sandbox. The current cwd is outside the sandbox root."
+                    ; rewrite =
+                        Some (Printf.sprintf
+                          "Clone into sandbox: keeper_shell op=git_clone, then set cwd=%srepos/REPO/.worktrees/TASK"
+                          sandbox_root)
+                    ; tool_suggestion = None })
+           ~extra:[ "cmd", `String cmd_for_log; "cwd", `String cwd; "execution_time_ms", `Int 0 ]
+           ()))
     else if sandbox_profile = Docker && git_creds_enabled then (
       let detected_tool = if Keeper_shell_shared.cmd_targets_gh cmd then "gh" else "git" in
       Log.Keeper.info
@@ -287,124 +394,7 @@ let handle_keeper_bash
              ~env_snapshot:env_snap
              ())
       | Ok () ->
-        (* Branch-switch guard *)
-        let sandbox_root = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
-        if Worker_dev_tools.is_git_branch_switch cmd
-                && not (write_enabled && in_playground)
-        then (
-          Log.Keeper.info
-            "keeper_bash branch-switch blocked: %s (keeper=%s, write_enabled=%b, playground=%b)"
-            cmd_for_log meta.name write_enabled in_playground;
-          Yojson.Safe.to_string
-            (Exec_core.blocked_result_json
-               ~cmd
-               ~error:"branch_switch_blocked"
-               ~reason:
-                 "git checkout/switch/branch mutations require a write-enabled preset \
-                  (Coding/Delivery/Full) and a keeper-owned sandbox repo or \
-                  worktree. Clone into your sandbox first \
-                  (keeper_shell op=git_clone), then create or enter a worktree \
-                  under repos/<repo>/.worktrees/<task>."
-               ~hint:(Printf.sprintf
-                        "Use cwd=%srepos/REPO/.worktrees/TASK"
-                        sandbox_root)
-               ~alternatives:
-                 [ Printf.sprintf
-                     "Clone the repo first: keeper_shell op=git_clone, then use cwd=%srepos/REPO/.worktrees/TASK."
-                     sandbox_root
-                 ; "Use keeper_shell op=git op_cmd='branch -a' to list available branches."
-                 ]
-               ~retryability:Exec_core.Operator_required
-               ~diag:
-                 (Some { Exec_core.rule_id = "branch_switch_blocked"
-                        ; explanation =
-                            "git checkout/switch/branch mutations need a                              write-enabled preset and a sandbox clone."
-                        ; rewrite =
-                            Some (Printf.sprintf
-                              "First: keeper_shell op=git_clone.                                Then: set cwd=%srepos/REPO/.worktrees/TASK"
-                              sandbox_root)
-                        ; tool_suggestion = None })
-               ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
-               ()))
-        (* Write gate — preset layer *)
-        else if (not write_enabled) && Worker_dev_tools.is_write_operation cmd
-        then (
-          Log.Keeper.info "keeper_bash write-gate: %s (keeper=%s, playground=%b)"
-            cmd_for_log meta.name in_playground;
-          Yojson.Safe.to_string
-            (Exec_core.blocked_result_json
-               ~cmd
-               ~error:"write_operation_gated"
-               ~reason:
-                 "This command modifies state (git push/commit, make deploy, etc.). \
-                  A write-enabled preset (Coding/Delivery/Full) is required."
-               ~alternatives:
-                 [ "Read-only alternatives: use keeper_bash for git log, git diff, git status."
-                 ; "If you need write access, ask the operator to assign a Coding/Delivery/Full preset."
-                 ]
-               ~retryability:Exec_core.Operator_required
-               ~diag:
-                 (Some { Exec_core.rule_id = "write_operation_gated"
-                        ; explanation =
-                            "This command modifies state but the current preset                              is read-only. Write operations require Coding,                              Delivery, or Full preset."
-                        ; rewrite = None
-                        ; tool_suggestion =
-                            Some "Ask the operator for a write-enabled preset" })
-               ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
-               ~env_snapshot:env_snap
-               ()))
-        (* Write gate — playground containment layer (#6527 iter 3).
-           A write-enabled keeper still must not mutate anything outside
-           its own playground bundle. branch-switch already requires
-           in_playground; match the same invariant for the general
-           write operations (git push/commit, make deploy, etc.) so
-           a coding-preset keeper cannot push from, e.g., a
-           workspace-default `.worktrees/` path or `lib/` on the server
-           repo. *)
-        else if write_enabled
-                && Worker_dev_tools.is_write_operation cmd
-                && not in_playground
-        then (
-          Log.Keeper.info
-            "keeper_bash write-containment blocked: %s (keeper=%s, cwd=%s, playground=%b)"
-            cmd_for_log meta.name cwd in_playground;
-          Yojson.Safe.to_string
-            (Exec_core.blocked_result_json
-               ~cmd
-               ~error:"write_outside_playground_blocked"
-               ~reason:
-                 (Printf.sprintf
-                    "Write operations (git push/commit, make deploy, etc.) \
-                     must run with cwd inside your keeper-owned sandbox clone \
-                     or one of its worktrees under %srepos/<repo>/.worktrees/. \
-                     Open a sandbox clone first with keeper_shell op=git_clone \
-                     if needed, then use masc_worktree_create and set cwd to \
-                     the returned worktree path."
-                    sandbox_root)
-               ~hint:(Printf.sprintf
-                        "cwd must start with %s and usually looks like %srepos/REPO/.worktrees/TASK"
-                        sandbox_root
-                        sandbox_root)
-               ~alternatives:
-                 [ Printf.sprintf
-                     "Clone into your sandbox: keeper_shell op=git_clone, then cd to %srepos/REPO/."
-                     sandbox_root
-                 ; "Create a worktree inside your sandbox with masc_worktree_create."
-                 ; "Use keeper_bash with a cwd pointing to your sandbox worktree."
-                 ]
-               ~retryability:Exec_core.Operator_required
-               ~diag:
-                 (Some { Exec_core.rule_id = "write_outside_playground_blocked"
-                        ; explanation =
-                            "Write operations must run inside the keeper sandbox.                              The current cwd is outside the sandbox root."
-                        ; rewrite =
-                            Some (Printf.sprintf
-                              "Clone into sandbox: keeper_shell op=git_clone,                                then set cwd=%srepos/REPO/.worktrees/TASK"
-                              sandbox_root)
-                        ; tool_suggestion = None })
-               ~extra:[ "cmd", `String cmd_for_log; "cwd", `String cwd; "execution_time_ms", `Int 0 ]
-               ()))
-        else (
+        (
             (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with
              | Error e -> error_json e
              | Ok () ->

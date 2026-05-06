@@ -962,7 +962,7 @@ let test_agent_purge_route_removes_plain_agent_artifacts () =
   ignore
     (Masc_mcp.Auth.create_token config.base_path ~agent_name ~role:Masc_domain.Admin);
   ignore
-    (Masc_mcp.Heartbeat.start ~agent_name ~interval:30 ~message:"route-test");
+    (Heartbeat.start ~agent_name ~interval:30 ~message:"route-test");
   let metrics_dir = Masc_mcp.Metrics_store_eio.agent_metrics_dir config agent_name in
   Fs_compat.mkdir_p metrics_dir;
   write_file (Filename.concat metrics_dir "2026-04.jsonl") "{}\n";
@@ -994,7 +994,7 @@ let test_agent_purge_route_removes_plain_agent_artifacts () =
   check string "agent purge reports coord leave" (agent_name ^ " left the namespace")
     (cleanup_row |> member "coord_leave_result" |> to_string);
   check int "agent purge leaves no duplicate heartbeat stop work" 0
-    (Masc_mcp.Heartbeat.stop_by_agent ~agent_name);
+    (Heartbeat.stop_by_agent ~agent_name);
   check bool "agent file removed" false
     (Sys.file_exists
        (Filename.concat (Masc_mcp.Coord.agents_dir config)

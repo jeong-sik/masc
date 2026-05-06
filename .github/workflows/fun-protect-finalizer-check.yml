@@ -1,0 +1,22 @@
+name: Fun.protect Finalizer Check
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  fun-protect-finalizer:
+    name: Fun.protect finalizer guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run guard
+        run: |
+          python3 scripts/ci/check-fun-protect-finally-guard.py \
+            --base "${{ github.event.pull_request.base.sha }}" \
+            --head HEAD

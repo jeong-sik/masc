@@ -169,6 +169,27 @@ let pr_create_failure_may_have_created_pr output =
       "i/o timeout";
     ]
 
+(* gh CLI verbatim prefix when a PR for the same head already exists:
+   "a pull request for branch \"<owner:branch>\" into branch \"<base>\"
+    already exists:\n<url>\n"
+   Match the leading clause case-insensitively so future gh versions with
+   minor wording shifts still classify correctly. *)
+let pr_create_failure_already_exists output =
+  let output = String.lowercase_ascii output in
+  contains_substring output "a pull request for branch"
+  && contains_substring output "already exists"
+
+(* Recovery reason classifier — returned alongside the recovery result so
+   observers can distinguish a transient retry-style recovery (504/timeout)
+   from a deterministic idempotency hit (PR already exists). *)
+let classify_pr_create_recovery output =
+  if pr_create_failure_already_exists output then
+    Some "pr_already_exists"
+  else if pr_create_failure_may_have_created_pr output then
+    Some "pr_create_transient_failure"
+  else
+    None
+
 type gh_exec_result =
   { status : Unix.process_status
   ; output : string
@@ -263,24 +284,25 @@ let run_gh ?recover_pr_create ~tool ~operation ~config ~meta ~args ~write argv =
           let result_ok = status_ok result.status in
           let recovered =
             match recover_pr_create with
-            | Some (repo, head)
-              when (not result_ok)
-                   && pr_create_failure_may_have_created_pr result.output ->
-                let recovery =
-                  run_gh_argv ~config ~meta ~env ~cwd ~timeout_sec
-                    (build_pr_view_recovery_argv ~repo ~head)
-                in
-                if status_ok recovery.status then Some recovery else None
+            | Some (repo, head) when not result_ok -> (
+                match classify_pr_create_recovery result.output with
+                | None -> None
+                | Some reason ->
+                    let recovery =
+                      run_gh_argv ~config ~meta ~env ~cwd ~timeout_sec
+                        (build_pr_view_recovery_argv ~repo ~head)
+                    in
+                    if status_ok recovery.status then Some (recovery, reason)
+                    else None)
             | _ -> None
           in
           (match recovered with
-           | Some recovery ->
+           | Some (recovery, reason) ->
                output_json ~ok:true ~tool ~operation ~meta ~binding ~state
                  ~cwd ~via:recovery.via ~output:recovery.output
                  ~extra_fields:
                    [
-                     ( "recovered_from_error",
-                       `String "pr_create_transient_failure" );
+                     "recovered_from_error", `String reason;
                      "original_ok", `Bool false;
                      "original_output", `String result.output;
                      "recovery_tool", `String "gh pr view";
@@ -344,6 +366,8 @@ module For_testing = struct
   let draft_request_allowed = draft_request_allowed
   let pr_create_failure_may_have_created_pr =
     pr_create_failure_may_have_created_pr
+  let pr_create_failure_already_exists = pr_create_failure_already_exists
+  let classify_pr_create_recovery = classify_pr_create_recovery
 
   let quote_argv = quote_argv
   let mutation_preset_ok = mutation_preset_ok

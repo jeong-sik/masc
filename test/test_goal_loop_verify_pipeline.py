@@ -40,14 +40,17 @@ def passing_metrics() -> dict[str, object]:
 
 class GoalLoopVerifyPipelineTest(unittest.TestCase):
     def test_missing_evidence_blocks_every_prompt_level_gate(self) -> None:
-        report = goal_loop_verify_pipeline.build_pipeline_report(
-            repo_root=REPO_ROOT,
-            metrics_json=None,
-            tla_results=None,
-            log_paths=[],
-            unit_tests_passed=False,
-            unit_tests_failed=False,
-        )
+        with tempfile.TemporaryDirectory() as raw_dir:
+            repo_root = Path(raw_dir)
+            repo_root.joinpath("specs").mkdir()
+            report = goal_loop_verify_pipeline.build_pipeline_report(
+                repo_root=repo_root,
+                metrics_json=None,
+                tla_results=None,
+                log_paths=[],
+                unit_tests_passed=False,
+                unit_tests_failed=False,
+            )
 
         self.assertEqual(report.status, "BLOCKED")
         by_id = {item.gate_id: item for item in report.gates}
@@ -71,6 +74,35 @@ class GoalLoopVerifyPipelineTest(unittest.TestCase):
         self.assertEqual(by_id["post_act_log_contract"].reason, "missing_post_act_logs")
 
     def test_metric_snapshot_covers_required_production_gates(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            repo_root = Path(raw_dir)
+            repo_root.joinpath("specs").mkdir()
+            report = goal_loop_verify_pipeline.build_pipeline_report(
+                repo_root=repo_root,
+                metrics_json=passing_metrics(),
+                tla_results=None,
+                log_paths=[],
+                unit_tests_passed=True,
+                unit_tests_failed=False,
+            )
+
+        by_id = {item.gate_id: item for item in report.gates}
+        for gate_id in (
+            "keeper_turn_success_rate_healthy",
+            "no_semaphore_skip",
+            "no_pricing_miss",
+            "no_utf8_repair",
+            "recovery_executed",
+            "admission_backpressure_observed",
+            "dashboard_snapshot_latency_p99",
+            "orient_recheck_no_still_present",
+            "orient_recheck_no_new_finding",
+        ):
+            self.assertEqual(by_id[gate_id].status, "PASS", gate_id)
+        self.assertEqual(report.status, "BLOCKED")
+        self.assertEqual(by_id["tla_prompt_spec_tierrouting"].status, "BLOCKED")
+
+    def test_metric_gate_commands_reference_snapshot_metric_keys(self) -> None:
         report = goal_loop_verify_pipeline.build_pipeline_report(
             repo_root=REPO_ROOT,
             metrics_json=passing_metrics(),
@@ -83,17 +115,29 @@ class GoalLoopVerifyPipelineTest(unittest.TestCase):
         by_id = {item.gate_id: item for item in report.gates}
         for gate_id in (
             "keeper_turn_success_rate_healthy",
+            "no_semaphore_skip",
             "no_pricing_miss",
             "no_utf8_repair",
             "recovery_executed",
-            "admission_backpressure_observed",
             "dashboard_snapshot_latency_p99",
-            "orient_recheck_no_still_present",
-            "orient_recheck_no_new_finding",
         ):
-            self.assertEqual(by_id[gate_id].status, "PASS", gate_id)
-        self.assertEqual(report.status, "BLOCKED")
-        self.assertEqual(by_id["tla_prompt_spec_tierrouting"].status, "BLOCKED")
+            metric_name = by_id[gate_id].evidence["metric_name"]
+            command = " ".join(by_id[gate_id].command or [])
+            self.assertIn(metric_name, command)
+            self.assertNotIn("prometheus query", command)
+            self.assertEqual(
+                by_id[gate_id].evidence["metric_source"],
+                "GOAL_LOOP_METRICS_JSON (--metrics-json)",
+            )
+
+    def test_tla_results_accept_top_level_spec_keys(self) -> None:
+        self.assertEqual(
+            goal_loop_verify_pipeline.tla_result_for(
+                {"TierRouting.tla": "PASS"},
+                "TierRouting.tla",
+            ),
+            "PASS",
+        )
 
     def test_log_contract_fails_on_forbidden_pattern(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:

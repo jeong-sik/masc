@@ -22,6 +22,29 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution path
 
 
 PROMPT_TLA_SPECS = ("TierRouting.tla", "Validation.tla", "Liveness.tla")
+REQUIRED_VERIFY_GATE_IDS = (
+    "unit_tests",
+    "keeper_turn_success_rate_healthy",
+    "no_semaphore_skip",
+    "no_pricing_miss",
+    "no_utf8_repair",
+    "recovery_executed",
+    "admission_backpressure_observed",
+    "dashboard_snapshot_latency_p99",
+    "orient_recheck_no_still_present",
+    "orient_recheck_no_new_finding",
+    "tla_prompt_spec_tierrouting",
+    "tla_prompt_spec_validation",
+    "tla_prompt_spec_liveness",
+    "post_act_log_contract",
+)
+PROMETHEUS_METRIC_SOURCES = {
+    "keeper_turn_success_rate": ["masc_keeper_turns_total"],
+    "keeper_skipping_turn_rate_5m": ["masc_keeper_semaphore_wait_timeout_total"],
+    "pricing_catalog_miss_total": ["masc_pricing_catalog_miss_total"],
+    "admission_queue_depth": ["masc_inference_queue_depth"],
+    "admission_queue_wait_ms": ["masc_inference_queue_wait_seconds"],
+}
 
 DEFAULT_MUST_CONTAIN = (
     "recovery_strategy_executed",
@@ -124,6 +147,9 @@ def metric_gate(
     value = metric_value(metrics, metric_name)
     evidence = {
         "metric_name": metric_name,
+        "metric_snapshot_key": metric_name,
+        "metric_source": "GOAL_LOOP_METRICS_JSON (--metrics-json)",
+        "prometheus_sources": PROMETHEUS_METRIC_SOURCES.get(metric_name, []),
         "value": value,
         "predicate": predicate,
     }
@@ -165,18 +191,39 @@ def metric_gate(
     )
 
 
+def metric_snapshot_command(metric_name: str) -> list[str]:
+    return [
+        "sh",
+        "-c",
+        (
+            f"jq '(.metrics // .).{metric_name}' "
+            '"${GOAL_LOOP_METRICS_JSON:?set GOAL_LOOP_METRICS_JSON to production metric snapshot JSON}"'
+        ),
+    ]
+
+
 def admission_backpressure_gate(metrics: dict[str, Any] | None) -> VerifyGate:
     queue_depth = metric_value(metrics, "admission_queue_depth")
     wait_ms = metric_value(metrics, "admission_queue_wait_ms")
     evidence = {
         "admission_queue_depth": queue_depth,
         "admission_queue_wait_ms": wait_ms,
+        "metric_source": "GOAL_LOOP_METRICS_JSON (--metrics-json)",
+        "prometheus_sources": {
+            "admission_queue_depth": PROMETHEUS_METRIC_SOURCES["admission_queue_depth"],
+            "admission_queue_wait_ms": PROMETHEUS_METRIC_SOURCES[
+                "admission_queue_wait_ms"
+            ],
+        },
         "predicate": "admission_queue_depth > 0 || admission_queue_wait_ms > 0",
     }
     command = [
-        "prometheus",
-        "query",
-        "admission_queue_depth || admission_queue_wait_ms",
+        "sh",
+        "-c",
+        (
+            "jq '(.metrics // .) | {admission_queue_depth, admission_queue_wait_ms}' "
+            '"${GOAL_LOOP_METRICS_JSON:?set GOAL_LOOP_METRICS_JSON to production metric snapshot JSON}"'
+        ),
     ]
     if metrics is None:
         return gate(
@@ -219,7 +266,7 @@ def build_metric_gates(metrics_json: dict[str, Any] | None) -> list[VerifyGate]:
             metric_name="keeper_turn_success_rate",
             category="metric_verification",
             predicate="> 0.95",
-            command=["prometheus", "query", "keeper_turn_success_rate"],
+            command=metric_snapshot_command("keeper_turn_success_rate"),
         ),
         metric_gate(
             metrics,
@@ -227,7 +274,7 @@ def build_metric_gates(metrics_json: dict[str, Any] | None) -> list[VerifyGate]:
             metric_name="keeper_skipping_turn_rate_5m",
             category="regression_metric",
             predicate="== 0",
-            command=["prometheus", "query", "keeper_skipping_turn_rate[5m]"],
+            command=metric_snapshot_command("keeper_skipping_turn_rate_5m"),
         ),
         metric_gate(
             metrics,
@@ -235,7 +282,7 @@ def build_metric_gates(metrics_json: dict[str, Any] | None) -> list[VerifyGate]:
             metric_name="pricing_catalog_miss_total",
             category="regression_metric",
             predicate="== 0",
-            command=["prometheus", "query", "pricing_catalog_miss_total"],
+            command=metric_snapshot_command("pricing_catalog_miss_total"),
         ),
         metric_gate(
             metrics,
@@ -243,7 +290,7 @@ def build_metric_gates(metrics_json: dict[str, Any] | None) -> list[VerifyGate]:
             metric_name="persistence_utf8_repair_total",
             category="regression_metric",
             predicate="== 0",
-            command=["prometheus", "query", "persistence_utf8_repair_total"],
+            command=metric_snapshot_command("persistence_utf8_repair_total"),
         ),
         metric_gate(
             metrics,
@@ -251,7 +298,7 @@ def build_metric_gates(metrics_json: dict[str, Any] | None) -> list[VerifyGate]:
             metric_name="recovery_strategy_executed_total_1h",
             category="regression_metric",
             predicate="> 0",
-            command=["prometheus", "query", "recovery_strategy_executed_total[1h]"],
+            command=metric_snapshot_command("recovery_strategy_executed_total_1h"),
         ),
         admission_backpressure_gate(metrics),
         metric_gate(
@@ -260,7 +307,7 @@ def build_metric_gates(metrics_json: dict[str, Any] | None) -> list[VerifyGate]:
             metric_name="dashboard_snapshot_latency_p99",
             category="metric_verification",
             predicate="< 5.0",
-            command=["prometheus", "query", "dashboard_snapshot_latency_p99"],
+            command=metric_snapshot_command("dashboard_snapshot_latency_p99"),
         ),
         metric_gate(
             metrics,
@@ -290,6 +337,11 @@ def find_tla_spec(repo_root: Path, spec_name: str) -> str | None:
 def tla_result_for(tla_results: dict[str, Any] | None, spec_name: str) -> str | None:
     if tla_results is None:
         return None
+    raw = tla_results.get(spec_name)
+    if isinstance(raw, dict):
+        raw = raw.get("status")
+    if isinstance(raw, str):
+        return raw
     specs = tla_results.get("specs")
     if isinstance(specs, dict):
         raw = specs.get(spec_name)
@@ -506,11 +558,17 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--metrics-json",
-        help="Production metric snapshot JSON. Accepts top-level metrics or {'metrics': {...}}.",
+        help=(
+            "Production metric snapshot JSON using the gate metric_name fields. "
+            "Accepts top-level metrics or {'metrics': {...}}."
+        ),
     )
     parser.add_argument(
         "--tla-results-json",
-        help="Optional TLC result JSON keyed by prompt spec name.",
+        help=(
+            "Optional TLC result JSON. Accepts top-level spec keys "
+            "or {'specs': {...}} / {'specs': [{'spec'|'name', 'status'}]}."
+        ),
     )
     parser.add_argument(
         "--log",

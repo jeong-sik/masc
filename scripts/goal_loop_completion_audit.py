@@ -42,6 +42,24 @@ PROMPT_CHECKLIST_PR_REF_RE = re.compile(
 )
 PROMPT_SOURCE_PATH_PREFIX = "prompt_corpus/GOAL_LOOP/"
 REPO_ROOT = Path(__file__).resolve().parents[1]
+REQUIRED_VERIFY_GATE_IDS = frozenset(
+    {
+        "unit_tests",
+        "keeper_turn_success_rate_healthy",
+        "no_semaphore_skip",
+        "no_pricing_miss",
+        "no_utf8_repair",
+        "recovery_executed",
+        "admission_backpressure_observed",
+        "dashboard_snapshot_latency_p99",
+        "orient_recheck_no_still_present",
+        "orient_recheck_no_new_finding",
+        "tla_prompt_spec_tierrouting",
+        "tla_prompt_spec_validation",
+        "tla_prompt_spec_liveness",
+        "post_act_log_contract",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -1076,6 +1094,17 @@ def verify_pipeline_evidence(
 
     raw_gates = raw_pipeline.get("gates", [])
     gates = raw_gates if isinstance(raw_gates, list) else []
+    gate_ids = [
+        gate.get("gate_id")
+        for gate in gates
+        if isinstance(gate, dict) and isinstance(gate.get("gate_id"), str)
+    ]
+    gate_id_set = set(gate_ids)
+    missing_gate_ids = sorted(REQUIRED_VERIFY_GATE_IDS - gate_id_set)
+    unexpected_gate_ids = sorted(gate_id_set - REQUIRED_VERIFY_GATE_IDS)
+    duplicate_gate_ids = sorted(
+        {gate_id for gate_id in gate_ids if gate_ids.count(gate_id) > 1}
+    )
     non_pass_gate_ids = [
         gate.get("gate_id")
         for gate in gates
@@ -1084,16 +1113,48 @@ def verify_pipeline_evidence(
     non_pass_gate_ids = [
         gate_id for gate_id in non_pass_gate_ids if isinstance(gate_id, str)
     ]
+    status_counts = {
+        status: sum(
+            1
+            for gate in gates
+            if isinstance(gate, dict) and gate.get("status") == status
+        )
+        for status in ("PASS", "FAIL", "BLOCKED", "SKIPPED")
+    }
+    reported_total = as_int(raw_pipeline.get("gates_total"))
+    counts_match = (
+        reported_total == len(gates)
+        and as_int(raw_pipeline.get("gates_passed")) == status_counts["PASS"]
+        and as_int(raw_pipeline.get("gates_failed")) == status_counts["FAIL"]
+        and as_int(raw_pipeline.get("gates_blocked")) == status_counts["BLOCKED"]
+        and as_int(raw_pipeline.get("gates_skipped")) == status_counts["SKIPPED"]
+    )
+    schema_version = as_int(raw_pipeline.get("schema_version"))
     status = raw_pipeline.get("status")
-    passed = status == "PASS" and bool(gates) and not non_pass_gate_ids
+    passed = (
+        schema_version == 1
+        and status == "PASS"
+        and bool(gates)
+        and counts_match
+        and not missing_gate_ids
+        and not unexpected_gate_ids
+        and not duplicate_gate_ids
+        and len(gate_ids) == len(REQUIRED_VERIFY_GATE_IDS)
+        and not non_pass_gate_ids
+    )
     return passed, {
+        "schema_version": schema_version,
         "pipeline_status": status,
         "provided": True,
-        "gates_total": as_int(raw_pipeline.get("gates_total")),
+        "gates_total": reported_total,
         "gates_passed": as_int(raw_pipeline.get("gates_passed")),
         "gates_failed": as_int(raw_pipeline.get("gates_failed")),
         "gates_blocked": as_int(raw_pipeline.get("gates_blocked")),
         "gates_skipped": as_int(raw_pipeline.get("gates_skipped")),
+        "counts_match": counts_match,
+        "missing_gate_ids": missing_gate_ids,
+        "unexpected_gate_ids": unexpected_gate_ids,
+        "duplicate_gate_ids": duplicate_gate_ids,
         "non_pass_gate_ids": non_pass_gate_ids,
     }
 

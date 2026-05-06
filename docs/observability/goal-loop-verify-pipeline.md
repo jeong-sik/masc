@@ -11,6 +11,12 @@ entry per required check. `PASS` is only emitted when every gate passes.
 Missing production evidence is represented as `BLOCKED`; mapped but unrun
 commands are represented as `SKIPPED`.
 
+Metric gates read snapshot keys from the JSON passed via `--metrics-json`; the
+gate evidence records those snapshot keys separately from any underlying
+`masc_*` Prometheus series used to derive them. The rendered command examples
+therefore query `GOAL_LOOP_METRICS_JSON` with `jq` instead of naming a
+non-repo `prometheus` CLI.
+
 Covered gate groups:
 
 - `unit_tests`: `dune runtest test/`
@@ -32,3 +38,6 @@ TLA assets.
 the pipeline result. A partial pipeline adds the `verify_pipeline_complete`
 blocker, so a generic Verify `PASS` cannot close the GOAL LOOP while metric,
 TLA, log, or Orient gates are blocked.
+For schema version 1, completion also validates the reported gate counts and the
+full required gate-id set, so a minimal all-PASS fixture cannot stand in for the
+repo-owned Verify contract.

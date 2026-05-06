@@ -254,8 +254,8 @@ def blocked_verify_pipeline() -> dict[str, object]:
         "gates_total": 3,
         "gates_passed": 1,
         "gates_failed": 0,
-        "gates_blocked": 1,
-        "gates_skipped": 1,
+        "gates_blocked": 2,
+        "gates_skipped": 0,
         "gates": [
             {
                 "gate_id": "unit_tests",
@@ -271,7 +271,7 @@ def blocked_verify_pipeline() -> dict[str, object]:
             {
                 "gate_id": "post_act_log_contract",
                 "category": "log_verification",
-                "status": "SKIPPED",
+                "status": "BLOCKED",
                 "reason": "missing_post_act_logs",
             },
         ],
@@ -279,26 +279,23 @@ def blocked_verify_pipeline() -> dict[str, object]:
 
 
 def passing_verify_pipeline() -> dict[str, object]:
+    gates = [
+        {
+            "gate_id": gate_id,
+            "category": "verify_pipeline",
+            "status": "PASS",
+        }
+        for gate_id in sorted(goal_loop_completion_audit.REQUIRED_VERIFY_GATE_IDS)
+    ]
     return {
         "schema_version": 1,
         "status": "PASS",
-        "gates_total": 2,
-        "gates_passed": 2,
+        "gates_total": len(gates),
+        "gates_passed": len(gates),
         "gates_failed": 0,
         "gates_blocked": 0,
         "gates_skipped": 0,
-        "gates": [
-            {
-                "gate_id": "unit_tests",
-                "category": "unit_tests",
-                "status": "PASS",
-            },
-            {
-                "gate_id": "keeper_turn_success_rate_healthy",
-                "category": "metric_verification",
-                "status": "PASS",
-            },
-        ],
+        "gates": gates,
     }
 
 
@@ -466,6 +463,33 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertNotIn("verify_pipeline_complete", audit.blockers)
         by_id = {item.criterion_id: item for item in audit.criteria}
         self.assertEqual(by_id["verify_pipeline_complete"].status, "PASS")
+
+    def test_completion_audit_rejects_partial_passing_verify_pipeline(self) -> None:
+        partial = {
+            "schema_version": 1,
+            "status": "PASS",
+            "gates_total": 1,
+            "gates_passed": 1,
+            "gates_failed": 0,
+            "gates_blocked": 0,
+            "gates_skipped": 0,
+            "gates": [
+                {
+                    "gate_id": "unit_tests",
+                    "category": "unit_tests",
+                    "status": "PASS",
+                }
+            ],
+        }
+        audit = goal_loop_completion_audit.build_completion_audit(
+            complete_status(),
+            verify_pipeline=partial,
+        )
+
+        self.assertEqual(audit.status, "BLOCKED")
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        evidence = by_id["verify_pipeline_complete"].evidence
+        self.assertIn("post_act_log_contract", evidence["missing_gate_ids"])
 
     def test_completion_audit_consumes_embedded_verify_pipeline(self) -> None:
         status = complete_status()

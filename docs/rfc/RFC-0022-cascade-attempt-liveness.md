@@ -429,7 +429,22 @@ Phase C (default `enforce` everywhere):
 
 ## 10. Out of scope
 
-- Lowering `MASC_KEEPER_TURN_TIMEOUT_SEC` below 3600. RFC-0012 §Out-of-scope already explains why turn-cap reduction is rejected (legitimate 27B 900s+ turns).
+- Flat global lowering of `MASC_KEEPER_TURN_TIMEOUT_SEC` to a single
+  value below the per-cascade design floor. RFC-0012 §Out of scope
+  explains why a global reduction is rejected (legitimate 27 B
+  `900 s+` turns). Note that the env clamp in
+  `keeper_runtime_resolved.ml:73-79` currently caps the env value at
+  600 s — that is a code regression versus the original 3 600 s
+  design and is resolved separately by per-cascade override (Step 2
+  of goal `oas-bridge-stabilization`).
+- **Permitted (per-cascade override, added 2026-05-06)**: a cascade
+  profile in `config/cascade.toml` may set its own
+  `turn_timeout_sec`. Remote tiers run at 600 s; local tiers run at
+  900 s. Promotion to 1 800 s requires a follow-up RFC backed by
+  one week of `masc_keeper_turns_total{terminated_by="turn_timeout"}`
+  + p95 turn-duration data. The budget invariant
+  `turn_timeout - oas_guard >= admission_wait + min_useful_run`
+  remains a hard regression test (root cause of #10388).
 - Provider-side cost metrics (covered by RFC-0009 Phase 3).
 - Wholesale replacement of OAS HTTP single-bulk-read with chunked. That is `feedback_oas_execution_uncancellable_mid_turn` ("masc-mcp 단독 fix 영역 zero").
 - Per-keeper liveness override (deferred — start with per-profile).

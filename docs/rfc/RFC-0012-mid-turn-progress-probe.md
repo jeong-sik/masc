@@ -49,9 +49,24 @@ progress" from "hung turn that will never complete".
 
 ## Out of scope
 
-- Lowering `turn_timeout_sec`. It was deliberately raised to 3600 s
-  because local 27 B models legitimately take 900 s+ per turn
-  (`keeper_stale_watchdog.ml:194-207`).
+- Flat global lowering of `turn_timeout_sec` to a single value
+  below the per-cascade design floor. Note the historical drift:
+  this RFC was authored assuming `turn_timeout_sec () = 3600 s`,
+  but `keeper_runtime_resolved.ml:73-79` currently clamps the
+  env-driven value to `[60, 600]`. The desync is a code regression
+  resolved separately by per-cascade override (Step 2 of goal
+  `oas-bridge-stabilization`). What remains rejected is **flat
+  global reduction** that ignores the legitimate 27 B `900 s+`
+  floor (`keeper_stale_watchdog.ml:194-207`).
+- **Permitted (per-cascade override, added 2026-05-06)**: a cascade
+  profile in `config/cascade.toml` may declare its own
+  `turn_timeout_sec`. Remote tiers (`big_three`, `tier_small`,
+  `tier_medium`, `tier_fast`) run at 600 s; local tiers
+  (`local_recovery`, the local-leaning sub-profiles of
+  `keeper_diverse`) run at 900 s. The 1 800 s tier is gated behind a
+  follow-up RFC after one week of Prometheus data demonstrates a
+  900 s ceiling hit. Implementation: see
+  `feature/cascade-tiered-turn-timeout`.
 - Changing OAS execution to use chunked reads. That is an OAS-level
   change; the user explicitly noted in
   `feedback_oas_execution_uncancellable_mid_turn` that

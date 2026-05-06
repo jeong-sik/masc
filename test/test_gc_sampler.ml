@@ -1,7 +1,8 @@
 (** Gc_sampler smoke tests (PR-0.2.D).
 
-    Verifies that {!Masc_mcp.Gc_sampler.sample_once} writes the six
-    [masc_gc_*] gauges so [Prometheus.metric_value_or_zero] returns
+    Verifies that {!Masc_mcp.Gc_sampler.sample_once} writes the GC
+    gauges, including [masc_memory_usage_bytes], so
+    [Prometheus.metric_value_or_zero] returns
     non-zero values for the cumulative word counters after a single
     sample.  We do not exercise the Eio fiber loop here — that path is
     covered transitively by every server boot.  Coverage of [run]
@@ -21,6 +22,7 @@ let metrics_to_check =
     Prometheus.metric_gc_live_words;
     Prometheus.metric_gc_compactions;
     Prometheus.metric_gc_promoted_words;
+    Prometheus.metric_memory_usage_bytes;
   ]
 
 let test_sample_once_writes_all_gauges () =
@@ -50,14 +52,28 @@ let test_minor_words_advances_after_allocation () =
   in
   check bool "minor_words gauge advances after allocation" true (after >= before)
 
+let test_memory_usage_derives_from_live_words () =
+  Gc_sampler.sample_once ();
+  let live_words =
+    Prometheus.metric_value_or_zero Prometheus.metric_gc_live_words ()
+  in
+  let memory_usage =
+    Prometheus.metric_value_or_zero Prometheus.metric_memory_usage_bytes ()
+  in
+  let expected = live_words *. float_of_int (Sys.word_size / 8) in
+  check (float 0.001) "memory usage bytes derives from live words" expected
+    memory_usage
+
 let () =
   run "Gc_sampler"
     [
       ( "sample_once",
         [
-          test_case "writes all six gauges" `Quick
+          test_case "writes all runtime heap gauges" `Quick
             test_sample_once_writes_all_gauges;
           test_case "minor_words gauge advances after allocation" `Quick
             test_minor_words_advances_after_allocation;
+          test_case "memory_usage derives from live_words" `Quick
+            test_memory_usage_derives_from_live_words;
         ] );
     ]

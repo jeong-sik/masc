@@ -1,9 +1,14 @@
 (** OCaml GC stats sampler for Prometheus export.
 
-    Polls [Gc.quick_stat] once per [interval] seconds and writes the six
+    Polls [Gc.quick_stat] once per [interval] seconds and writes the seven
     {!Prometheus} GC gauge metrics ([masc_gc_minor_words],
     [masc_gc_major_words], [masc_gc_heap_words], [masc_gc_live_words],
-    [masc_gc_compactions], [masc_gc_promoted_words]).
+    [masc_gc_compactions], [masc_gc_promoted_words],
+    [masc_memory_usage_bytes]).
+
+    [masc_memory_usage_bytes] is the Phase 0.5 [memory_usage] signal for
+    runtime heap pressure. It is derived from [live_words] and [Sys.word_size],
+    so it tracks live OCaml heap bytes rather than process RSS.
 
     [Gc.quick_stat] does not walk the heap, so the call cost is bounded
     and safe to run on a 30s loop alongside the request path.
@@ -11,7 +16,7 @@
     @since PR-0.2.D (RFC pack: knowledge/research/2026-04-masc-ide-strategy/) *)
 
 val sample_once : unit -> unit
-(** [sample_once ()] reads [Gc.quick_stat] once and updates the six
+(** [sample_once ()] reads [Gc.quick_stat] once and updates the seven
     Prometheus GC gauges. Exposed for unit tests so the sampler can be
     exercised without spawning an Eio fiber. *)
 

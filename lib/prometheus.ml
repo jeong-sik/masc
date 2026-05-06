@@ -1077,6 +1077,18 @@ let metric_keeper_supervisor_cleanup_failures =
    incomplete and worth investigating. *)
 let metric_keeper_slot_force_released =
   "masc_keeper_slot_force_released_total"
+(* P0-2 (2026-05-07): observability for orphan turn loops.
+   [_dropped] increments every time [Keeper_registry.update_entry] is
+   called against a missing key (caller raced with deregistration).
+   [_orphan_threshold_breached] increments once per breach event when
+   the per-keeper drop count crosses [orphan_drop_threshold] inside
+   [orphan_drop_window_sec]. Together they let operators tell a
+   harmless single-update race from a stuck orphan fiber emitting 30+
+   drops per turn. See masc-mcp 2026-05-07 verifier-loop incident. *)
+let metric_keeper_registry_update_dropped =
+  "masc_keeper_registry_update_dropped_total"
+let metric_keeper_registry_orphan_threshold_breached =
+  "masc_keeper_registry_orphan_threshold_breached_total"
 let metric_keeper_stale_watchdog_tick_failures =
   "masc_keeper_stale_watchdog_tick_failures_total"
 let metric_keeper_dead_total = "masc_keeper_dead_total"
@@ -1811,6 +1823,17 @@ let init () =
     "Total turn-slot semaphores force-released because the holding fiber \
      did not return after the supervisor declared the keeper crashed. \
      Labels: keeper, label (turn|autonomous|reactive)."
+    Counter;
+  add metric_keeper_registry_update_dropped
+    "Total Keeper_registry.update_entry drops (caller raced a \
+     deregistration, no entry found). Labeled by name. Sustained \
+     per-keeper rate => orphan turn fiber. Pairs with \
+     masc_keeper_registry_orphan_threshold_breached_total."
+    Counter;
+  add metric_keeper_registry_orphan_threshold_breached
+    "Total per-keeper threshold breach events: drop count crossed the \
+     orphan_drop_threshold inside orphan_drop_window_sec. \
+     Edge-triggered (one increment per breach window). Labeled by name."
     Counter;
   add metric_keeper_stale_watchdog_tick_failures
     "Total stale watchdog tick failures suppressed during poll. Labeled by keeper."

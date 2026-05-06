@@ -747,6 +747,19 @@ val metric_fsm_guard_violation : string
 val metric_keeper_lifecycle_callback_failures : string
 val metric_keeper_supervisor_cleanup_failures : string
 val metric_keeper_slot_force_released : string
+val metric_keeper_registry_update_dropped : string
+(** Counter incremented every time [Keeper_registry.update_entry] races
+    a deregistration and the update is dropped. Labeled by [name]. A
+    sustained per-keeper rate signals an orphan turn fiber dispatching
+    against a missing registry entry. See masc-mcp 2026-05-07
+    verifier-loop incident. *)
+
+val metric_keeper_registry_orphan_threshold_breached : string
+(** Counter incremented once per breach event when [update_entry] drops
+    cross [orphan_drop_threshold] inside [orphan_drop_window_sec] for a
+    given [name]. Edge-triggered: subsequent drops in the same window
+    bump only [metric_keeper_registry_update_dropped]. Labeled by [name]. *)
+
 val metric_keeper_stale_watchdog_tick_failures : string
 
 (** PR-J: number of times the per-turn OAS event-bus drain helper ran,

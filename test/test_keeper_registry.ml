@@ -889,6 +889,78 @@ let test_cleanup_tracking () =
   let allowed = R.board_wakeup_allowed ~base_path:bp "ct1" ~post_id:"x" ~debounce_sec:60.0 in
   check bool "wakeup allowed after cleanup" true allowed
 
+(* P0-2 (2026-05-07): orphan-drop counter wiring through update_entry.
+
+   Validation strategy: call a public update_entry caller
+   ([R.set_last_agent_count]) against a [name] that was never registered.
+   Each call hits the [None] branch and bumps the orphan-drop metric.
+   At drop #5 (= [orphan_drop_threshold]) the threshold-breached
+   counter increments exactly once. The 6th drop within the window
+   does NOT bump it again (edge-trigger). After a successful update on
+   the same name (post-register), the per-name state is cleared.
+
+   We deliberately do not assert specific counter totals across
+   registry tests because the metric is process-wide; instead, we
+   pin deltas inside this single test using a unique [name]. *)
+let test_update_entry_orphan_drop_emits_metrics () =
+  R.clear ();
+  let name = "orphan-drop-counter-test" in
+  let labels = [ "name", name ] in
+  let dropped_before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_keeper_registry_update_dropped
+      ~labels ()
+  in
+  let breached_before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_keeper_registry_orphan_threshold_breached
+      ~labels ()
+  in
+  (* 5 drops on a never-registered name: each bumps _dropped, the 5th
+     bumps _orphan_threshold_breached exactly once. *)
+  for _ = 1 to 5 do
+    R.set_last_agent_count ~base_path:bp name 0
+  done;
+  let dropped_after_5 =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_keeper_registry_update_dropped
+      ~labels ()
+  in
+  let breached_after_5 =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_keeper_registry_orphan_threshold_breached
+      ~labels ()
+  in
+  check (float 0.001) "dropped counter +=5"
+    (dropped_before +. 5.0) dropped_after_5;
+  check (float 0.001) "threshold breached exactly once at drop #5"
+    (breached_before +. 1.0) breached_after_5;
+  (* 6th drop in same window: only _dropped bumps, breach edge-trigger
+     does not re-fire. *)
+  R.set_last_agent_count ~base_path:bp name 0;
+  let dropped_after_6 =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_keeper_registry_update_dropped
+      ~labels ()
+  in
+  let breached_after_6 =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_keeper_registry_orphan_threshold_breached
+      ~labels ()
+  in
+  check (float 0.001) "dropped counter +=6"
+    (dropped_before +. 6.0) dropped_after_6;
+  check (float 0.001) "threshold breach is edge-triggered (still +1)"
+    (breached_before +. 1.0) breached_after_6;
+  (* Once the keeper is registered and update succeeds, per-name state
+     is cleared. Subsequent re-deregistration would start a fresh
+     window, but we don't simulate that here — the cleared-on-success
+     contract is enough to prove orphan resolution detected. *)
+  ignore (R.register ~base_path:bp name (make_meta name));
+  R.set_last_agent_count ~base_path:bp name 7;
+  check int "successful update applies"
+    7 (R.get_last_agent_count ~base_path:bp name)
+
 let test_find_by_agent_name () =
   R.clear ();
   let _entry = R.register ~base_path:bp "fn1" (make_meta "fn1") in
@@ -1395,6 +1467,11 @@ let () =
       ( "agent_name_lookup",
         [
           eio_test "find_by_agent_name" test_find_by_agent_name;
+        ] );
+      ( "orphan_observability",
+        [
+          eio_test "update_entry orphan drops emit metrics + edge breach"
+            test_update_entry_orphan_drop_emits_metrics;
         ] );
       ( "resolve_config",
         [

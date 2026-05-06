@@ -1138,13 +1138,23 @@ let test_keeper_required_tool_contracts () =
   check bool "final-turn required tool prompt does not allow one-tool partial success" true
     (file_not_contains_pattern "lib/keeper/keeper_run_tools.ml"
        "call at least one");
-  check bool "docker PR lifecycle harness default matches runbook" true
+  check bool "docker PR lifecycle harness default splits create/review tools" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       {|REQUIRED_TOOLS="${REQUIRED_TOOLS:-keeper_shell,keeper_bash,keeper_pr_create,keeper_pr_review_comment}"|});
-  check bool "runbook documents docker PR lifecycle required tool default" true
+       {|REQUIRED_TOOLS_LEGACY="${REQUIRED_TOOLS:-}"|}
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          {|CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_bash,keeper_pr_create}}"|}
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          {|REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_shell,keeper_pr_review_comment}}"|});
+  check bool "runbook documents docker PR lifecycle split phases" true
     (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-       "`keeper_shell`, `keeper_bash`, `keeper_pr_create`, and");
+       "The create phase"
+     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+          "requires `keeper_bash` and `keeper_pr_create`"
+     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+          "the review phase requires `keeper_shell` and");
   check bool "docker PR lifecycle prompt accepts brokered route proof" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
@@ -1202,7 +1212,7 @@ let test_keeper_msg_timeout_contracts () =
   check bool "docker PR lifecycle prompt names keeper_bash for push" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       "Commit and git push that branch with keeper_bash");
+       "Commit and git push exactly branch");
   check bool "docker PR lifecycle prompt uses docker bash for proof edit" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"

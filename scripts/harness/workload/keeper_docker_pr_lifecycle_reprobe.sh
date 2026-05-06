@@ -41,6 +41,7 @@ MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 MCP_TOKEN="${MASC_MCP_TOKEN:-}"
 MCP_CLIENT_NAME="${MCP_CLIENT_NAME:-keeper-docker-pr-lifecycle-reprobe}"
 EXPECTED_SERVER_COMMIT="${EXPECTED_SERVER_COMMIT:-}"
+FORBID_GITHUB_IDENTITIES="${FORBID_GITHUB_IDENTITIES:-}"
 SERVER_HEALTH_URL="${SERVER_HEALTH_URL:-}"
 SERVER_COMMIT_ACTUAL=""
 SERVER_HEALTH_CHECK_FILE=""
@@ -66,6 +67,9 @@ Options:
   --mcp-url URL            MCP endpoint (default: http://127.0.0.1:8935/mcp).
   --expected-server-commit COMMIT
                            Fail unless /health build.commit matches this commit.
+  --forbid-github-identity NAME
+                           Fail --mutate preflight when a target keeper uses
+                           this GitHub identity. Repeat or pass comma-separated.
   --server-health-url URL  Health endpoint for commit verification.
   --board-post-id ID       Post a final board comment to this thread.
   --run-id ID              Stable run id for prompts and artifacts.
@@ -81,6 +85,7 @@ Environment:
   REQUIRED_TOOLS           CSV required_tools sent to masc_keeper_msg when mutating.
   RUN_AUDIT=0              Skip final audit.
   EXPECTED_SERVER_COMMIT   Optional expected /health build.commit prefix.
+  FORBID_GITHUB_IDENTITIES Optional CSV of forbidden keeper GitHub identities.
 EOF
 }
 
@@ -120,6 +125,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --expected-server-commit)
       EXPECTED_SERVER_COMMIT="$2"
+      shift 2
+      ;;
+    --forbid-github-identity)
+      if [[ -n "$FORBID_GITHUB_IDENTITIES" ]]; then
+        FORBID_GITHUB_IDENTITIES="$FORBID_GITHUB_IDENTITIES,$2"
+      else
+        FORBID_GITHUB_IDENTITIES="$2"
+      fi
       shift 2
       ;;
     --server-health-url)
@@ -541,7 +554,7 @@ PY
 }
 
 build_github_identity_counts() {
-  python3 - "$BASE_PATH" "$RUN_DIR/keepers.txt" "$GITHUB_IDENTITY_COUNTS_FILE" <<'PY'
+  python3 - "$BASE_PATH" "$RUN_DIR/keepers.txt" "$GITHUB_IDENTITY_COUNTS_FILE" "$FORBID_GITHUB_IDENTITIES" <<'PY'
 import json
 import pathlib
 import sys
@@ -556,6 +569,11 @@ except ModuleNotFoundError:
 base_path = pathlib.Path(sys.argv[1]).expanduser().resolve()
 keepers_file = pathlib.Path(sys.argv[2])
 out_file = pathlib.Path(sys.argv[3])
+forbidden = {
+    item.strip()
+    for item in sys.argv[4].split(",")
+    if item.strip()
+}
 config_dir = base_path / ".masc" / "config" / "keepers"
 runtime_dir = base_path / ".masc" / "keepers"
 
@@ -597,6 +615,7 @@ def string_field(data, key):
 keepers = [line.strip() for line in keepers_file.read_text().splitlines() if line.strip()]
 identities = {}
 missing = []
+forbidden_keepers = []
 for keeper in keepers:
     config = load_keeper_config(config_dir / f"{keeper}.toml")
     runtime = {}
@@ -613,6 +632,8 @@ for keeper in keepers:
     )
     if identity:
         identities[keeper] = identity
+        if identity in forbidden:
+            forbidden_keepers.append({"keeper": keeper, "github_identity": identity})
     else:
         missing.append(keeper)
 
@@ -626,6 +647,8 @@ out_file.write_text(
             "counts": dict(sorted(counts.items())),
             "keepers": identities,
             "missing": missing,
+            "forbidden_identities": sorted(forbidden),
+            "forbidden_keepers": forbidden_keepers,
         },
         sort_keys=True,
         indent=2,
@@ -642,6 +665,12 @@ assert_github_identity_pool_for_mutate() {
   if [[ "$MUTATE" == "1" && "$unique_count" -lt 2 ]]; then
     echo "at least two unique github_identity values are required for cross-keeper approval proof" >&2
     jq -c '{unique_count, counts, missing}' "$GITHUB_IDENTITY_COUNTS_FILE" >&2 || true
+    exit 1
+  fi
+  if [[ "$MUTATE" == "1" ]] \
+    && jq -e '(.forbidden_keepers // []) | length > 0' "$GITHUB_IDENTITY_COUNTS_FILE" >/dev/null; then
+    echo "target keeper set includes forbidden github_identity values" >&2
+    jq -c '{forbidden_identities, forbidden_keepers}' "$GITHUB_IDENTITY_COUNTS_FILE" >&2 || true
     exit 1
   fi
 }
@@ -846,12 +875,26 @@ run_audit() {
     return 0
   fi
   log "running Docker PR lifecycle audit"
+  local audit_args=(
+    "$REPO_ROOT/scripts/audit-keeper-fleet-readiness.py"
+    --base-path "$BASE_PATH"
+    --expected-keepers "$EXPECTED_KEEPERS"
+    --require-docker-pr-lifecycle-evidence
+    --json
+  )
+  if [[ -n "$FORBID_GITHUB_IDENTITIES" ]]; then
+    IFS=',' read -r -a forbidden_items <<<"$FORBID_GITHUB_IDENTITIES"
+    local forbidden_item
+    for forbidden_item in "${forbidden_items[@]}"; do
+      forbidden_item="${forbidden_item#"${forbidden_item%%[![:space:]]*}"}"
+      forbidden_item="${forbidden_item%"${forbidden_item##*[![:space:]]}"}"
+      if [[ -n "$forbidden_item" ]]; then
+        audit_args+=(--forbid-github-identity "$forbidden_item")
+      fi
+    done
+  fi
   set +e
-  python3 "$REPO_ROOT/scripts/audit-keeper-fleet-readiness.py" \
-    --base-path "$BASE_PATH" \
-    --expected-keepers "$EXPECTED_KEEPERS" \
-    --require-docker-pr-lifecycle-evidence \
-    --json >"$AUDIT_FILE"
+  python3 "${audit_args[@]}" >"$AUDIT_FILE"
   local audit_status=$?
   set -e
   AUDIT_STATUS_RESULT="$audit_status"
@@ -872,6 +915,7 @@ write_summary() {
     --arg repo "$REPO_SLUG" \
     --arg base_path "$BASE_PATH" \
     --arg expected_server_commit "$EXPECTED_SERVER_COMMIT" \
+    --arg forbid_github_identities "$FORBID_GITHUB_IDENTITIES" \
     --arg server_commit "$SERVER_COMMIT_ACTUAL" \
     --arg server_health_file "$SERVER_HEALTH_CHECK_FILE" \
     --arg review_targets_file "$REVIEW_TARGETS_FILE" \
@@ -890,6 +934,7 @@ write_summary() {
       repo:$repo,
       base_path:$base_path,
       expected_server_commit:$expected_server_commit,
+      forbid_github_identities:$forbid_github_identities,
       server_commit:$server_commit,
       server_health_file:$server_health_file,
       review_targets_file:$review_targets_file,

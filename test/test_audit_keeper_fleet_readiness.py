@@ -34,6 +34,8 @@ def audit_args(base_path: Path, expected_keepers: int):
         expected_keepers=expected_keepers,
         max_silence_hours=2400.0,
         require_board_evidence=True,
+        require_product_evidence=False,
+        require_design_evidence=False,
         require_pr_surface_evidence=False,
         require_pr_review_evidence=False,
         require_pr_create_evidence=False,
@@ -44,6 +46,7 @@ def audit_args(base_path: Path, expected_keepers: int):
         require_docker_git_push_evidence=False,
         require_docker_pr_approve_evidence=False,
         require_docker_pr_lifecycle_evidence=False,
+        forbid_github_identity=[],
     )
 
 
@@ -95,6 +98,34 @@ def write_ready_keeper(
         + "\n",
         encoding="utf-8",
     )
+
+
+def write_board_post(
+    root: Path,
+    author: str,
+    post_id: str,
+    *,
+    hearth: str | None = None,
+    meta: dict | None = None,
+    body: str = "body",
+    ts: float | None = None,
+) -> None:
+    row = {
+        "id": post_id,
+        "author": author,
+        "body": body,
+        "content": body,
+        "created_at": time.time() if ts is None else ts,
+        "updated_at": time.time() if ts is None else ts,
+    }
+    if hearth is not None:
+        row["hearth"] = hearth
+    if meta is not None:
+        row["meta"] = meta
+    board_path = root / ".masc" / "board_posts.jsonl"
+    board_path.parent.mkdir(parents=True, exist_ok=True)
+    with board_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row) + "\n")
 
 
 class AuditKeeperFleetReadinessTest(unittest.TestCase):
@@ -432,6 +463,59 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(evidence, {"pr_create:keeper_shell"})
         self.assertEqual(docker_evidence, set())
 
+    def test_product_and_design_evidence_use_explicit_board_domains(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ready_keeper(root, "alpha")
+            write_board_post(root, "alpha", "p-product", hearth="product")
+            write_board_post(
+                root,
+                "alpha",
+                "p-design",
+                meta={"tags": ["design"], "source": "keeper_board_post"},
+            )
+            args = audit_args(root, expected_keepers=1)
+            args.require_product_evidence = True
+            args.require_design_evidence = True
+
+            report = audit.build_report(args)
+
+        self.assertTrue(report["ok"])
+        keeper = report["keepers"][0]
+        self.assertTrue(keeper["product_action"])
+        self.assertTrue(keeper["design_action"])
+        self.assertEqual(
+            keeper["product_evidence"],
+            ["product:board_post:p-product:hearth=product"],
+        )
+        self.assertEqual(
+            keeper["design_evidence"],
+            ["design:board_post:p-design:meta.tags_0_=design"],
+        )
+
+    def test_product_and_design_evidence_ignore_freeform_body_mentions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ready_keeper(root, "alpha")
+            write_board_post(
+                root,
+                "alpha",
+                "p-freeform",
+                body="This mentions product and design, but has no domain marker.",
+            )
+            args = audit_args(root, expected_keepers=1)
+            args.require_product_evidence = True
+            args.require_design_evidence = True
+
+            report = audit.build_report(args)
+
+        self.assertFalse(report["ok"])
+        keeper = report["keepers"][0]
+        self.assertFalse(keeper["product_action"])
+        self.assertFalse(keeper["design_action"])
+        self.assertIn("product_action_evidence_missing", keeper["failures"])
+        self.assertIn("design_action_evidence_missing", keeper["failures"])
+
     def test_expected_keepers_is_minimum_not_exact_count(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -454,6 +538,21 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertFalse(report["ok"])
         self.assertEqual(
             report["fleet_failures"], ["minimum_2_configured_keepers_got_1"]
+        )
+
+    def test_forbid_github_identity_fails_matching_keeper(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ready_keeper(root, "alpha", github_identity="operator")
+            args = audit_args(root, expected_keepers=1)
+            args.forbid_github_identity = ["operator"]
+
+            report = audit.build_report(args)
+
+        self.assertFalse(report["ok"])
+        self.assertEqual(
+            report["keepers"][0]["failures"],
+            ["github_identity_forbidden_operator"],
         )
 
     def test_docker_pr_approve_requirement_fails_with_single_identity_pool(self):

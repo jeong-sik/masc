@@ -77,6 +77,10 @@ let test_parse_commit_unix_ts_output () =
     (Some 1_712_000_000.0)
     (Build_identity.parse_commit_unix_ts_output " 1712000000\n");
   Alcotest.(check (option (float 0.001)))
+    "valid timestamp above 32-bit int max"
+    (Some 4_102_444_800.0)
+    (Build_identity.parse_commit_unix_ts_output "4102444800\n");
+  Alcotest.(check (option (float 0.001)))
     "invalid timestamp"
     None
     (Build_identity.parse_commit_unix_ts_output "not-a-timestamp\n");
@@ -105,6 +109,25 @@ let test_probe_failure_observer_increments_metric () =
     (before +. 1.0)
     after
 
+let test_commit_ts_git_status_failure_is_observed () =
+  match Build_identity.repo_root () with
+  | None -> ()
+  | Some _ ->
+      let before = build_identity_probe_failure_count "commit_ts_git_status" in
+      let result =
+        Build_identity.For_testing.probe_commit_unix_ts
+          (Some "definitely-not-a-real-commit")
+      in
+      let after = build_identity_probe_failure_count "commit_ts_git_status" in
+      Alcotest.(check (option (float 0.001)))
+        "invalid commit has no timestamp"
+        None
+        result;
+      Alcotest.(check bool)
+        "non-zero git status counted"
+        true
+        (after >= before +. 1.0)
+
 let () =
   Alcotest.run "build_identity"
     [
@@ -129,5 +152,7 @@ let () =
             test_parse_commit_unix_ts_output;
           Alcotest.test_case "probe failure observer increments metric" `Quick
             test_probe_failure_observer_increments_metric;
+          Alcotest.test_case "git status failure increments metric" `Quick
+            test_commit_ts_git_status_failure_is_observed;
         ] );
     ]

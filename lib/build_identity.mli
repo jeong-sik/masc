@@ -55,4 +55,5 @@ val parse_commit_unix_ts_output : string -> float option
 
 module For_testing : sig
   val observe_probe_failure : site:string -> exn -> unit
+  val probe_commit_unix_ts : string option -> float option
 end

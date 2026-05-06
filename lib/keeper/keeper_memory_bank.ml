@@ -622,13 +622,7 @@ let compact_memory_bank_if_needed
       (match Fs_compat.file_size path with Some s -> s | None -> 0)
     in
     let trigger_bytes = memory_compaction_trigger_bytes ~target_notes in
-    if size_bytes < trigger_bytes then
-      { no_memory_bank_compaction with
-        target_notes;
-        reason = Some "under_trigger_bytes";
-      }
-    else
-      match Safe_ops.read_file_safe path with
+    match Safe_ops.read_file_safe path with
       | Error _ ->
           { no_memory_bank_compaction with
             target_notes;
@@ -650,7 +644,18 @@ let compact_memory_bank_if_needed
           in
           let parsed = List.rev parsed_rev in
           let before_notes = List.length parsed in
-          if before_notes <= target_notes && invalid = 0 then
+          if
+            size_bytes < trigger_bytes
+            && before_notes <= target_notes
+            && invalid = 0
+          then
+            { no_memory_bank_compaction with
+              target_notes;
+              before_notes;
+              after_notes = before_notes;
+              reason = Some "under_trigger_bytes";
+            }
+          else if before_notes <= target_notes && invalid = 0 then
             { no_memory_bank_compaction with
               target_notes;
               before_notes;

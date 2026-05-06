@@ -1391,6 +1391,43 @@ let test_compaction_records_consolidation_metrics () =
          ~source:"cross_trace_recurrence"
          ~outcome:"persisted"))
 
+let test_compaction_runs_on_note_pressure_under_byte_trigger () =
+  with_env "MASC_KEEPER_MEMORY_MAX_NOTES" "40" @@ fun () ->
+  with_env "MASC_KEEPER_MEMORY_COMPACT_TRIGGER_BYTES" "60000" @@ fun () ->
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir_recursive dir) (fun () ->
+    let keeper = "note-pressure-memory-keeper" in
+    let config = make_test_room_config dir in
+    let meta = keeper_meta ~name:keeper ~mention_targets:[ keeper ] () in
+    let bank_path = Keeper_types.keeper_memory_bank_path config keeper in
+    Keeper_types.mkdir_p (Filename.dirname bank_path);
+    let target_notes = Keeper_memory_bank.memory_compaction_target_notes () in
+    let rows =
+      List.init (target_notes + 1) (fun i ->
+        memory_bank_test_row
+          ~kind:"goal"
+          ~trace_id:(Printf.sprintf "trace-short-%d" i)
+          ~text:(Printf.sprintf "short note pressure %03d" i)
+          ~priority:10
+          ~idx:i)
+    in
+    let content = String.concat "\n" rows ^ "\n" in
+    check bool "fixture is under byte trigger" true
+      (String.length content
+       < Keeper_memory_bank.memory_compaction_trigger_bytes ~target_notes);
+    (match Fs_compat.save_file_atomic bank_path content with
+     | Ok () -> ()
+     | Error err -> fail ("failed to seed memory bank: " ^ err));
+    let compaction =
+      Keeper_memory_bank.compact_memory_bank_if_needed config meta
+    in
+    check bool "compaction ran from note pressure" true compaction.performed;
+    check (option string) "compaction reason" (Some "compacted")
+      compaction.reason;
+    check int "before notes" (target_notes + 1) compaction.before_notes;
+    check int "after notes capped to target" target_notes compaction.after_notes;
+    check int "one note dropped" 1 compaction.dropped_notes)
+
 let () =
   run "Keeper_memory"
     [
@@ -1531,5 +1568,7 @@ let () =
           test_case "total cap reports dropped_by_total_cap" `Quick test_cap_dropped_by_total;
           test_case "compaction records consolidation metrics" `Quick
             test_compaction_records_consolidation_metrics;
+          test_case "note pressure triggers compaction under byte trigger" `Quick
+            test_compaction_runs_on_note_pressure_under_byte_trigger;
         ] );
     ]

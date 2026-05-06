@@ -281,7 +281,7 @@ spawn 시 인자로 직접 설정하는 필드.
 | `network_mode` | string | `inherit` 또는 `none` | 샌드박스 네트워크 정책. `docker`는 기본 `none` (기본 모드의 git/gh dispatch만 `inherit`으로 승격). hard mode에서는 `none`만 허용된다. | `masc_keeper_up`의 `network_mode` 인자 |
 | `github_identity` | string | 없음 | keeper에 바인딩된 GitHub CLI identity 이름. `.masc/github-identities/<identity>/gh` bundle을 사용한다. | `keeper.toml` 선언 |
 | `git_identity_mode` | string | `keeper_alias` | git author를 keeper alias로 유지할지, GitHub identity 기반 author로 결합할지 결정 | `keeper.toml` 선언 |
-| `active_goal_ids` | string[] | 없음 | 설정 시 `keeper_task_claim`이 goal-linked task를 우선 claim. scoped pool에 현재 capability로 claim 가능한 task가 없으면 전체 claimable task로 fallback | `keeper.toml` 선언 |
+| `active_goal_ids` | string[] | 없음 | 설정 시 `keeper_task_claim`이 goal-linked task만 claim. scoped pool에 현재 capability로 claim 가능한 task가 없으면 claim을 멈춘다. auto-repair keeper-purpose goal만 전체 claimable task fallback 허용 | `keeper.toml` 선언 |
 
 ### 3.1.1 Sandbox Core V1 사용법
 

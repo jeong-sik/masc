@@ -155,44 +155,48 @@ let probe_commit_unix_ts commit_hash_opt =
   match commit_hash_opt with
   | None -> None
   | Some commit_hash ->
-    let candidates =
+    let repo_roots =
       pick_repo_candidates
         ~exe_dir:(executable_dir ())
         ~cwd:(Sys.getcwd ())
+      |> List.filter_map find_git_root
+      |> List.fold_left
+           (fun roots repo_root ->
+              if List.exists (String.equal repo_root) roots then roots
+              else repo_root :: roots)
+           []
+      |> List.rev
     in
-    let probe_one dir =
-      match find_git_root dir with
+    let probe_one repo_root =
+      let raw_opt =
+        try
+          match
+            git_capture_output_result ~repo_root
+              [ "log"; "-1"; "--format=%ct"; commit_hash ]
+          with
+          | Ok raw -> Some raw
+          | Error status ->
+              observe_probe_failure ~site:"commit_ts_git_status"
+                (Failure
+                   (Printf.sprintf "git log failed with %s"
+                      (string_of_process_status status)));
+              None
+        with exn ->
+          observe_probe_failure ~site:"commit_ts_git_capture" exn;
+          None
+      in
+      match raw_opt with
       | None -> None
-      | Some repo_root ->
-        let raw_opt =
-          try
-            match
-              git_capture_output_result ~repo_root
-                [ "log"; "-1"; "--format=%ct"; commit_hash ]
-            with
-            | Ok raw -> Some raw
-            | Error status ->
-                observe_probe_failure ~site:"commit_ts_git_status"
-                  (Failure
-                     (Printf.sprintf "git log failed with %s"
-                        (string_of_process_status status)));
-                None
-          with exn ->
-            observe_probe_failure ~site:"commit_ts_git_capture" exn;
-            None
-        in
-        (match raw_opt with
-         | None -> None
-         | Some raw ->
-           (match parse_commit_unix_ts_output raw with
-            | Some ts -> Some ts
-            | None ->
-                observe_probe_failure ~site:"commit_ts_parse"
-                  (Failure
-                     (Printf.sprintf "invalid commit timestamp output %S" raw));
-                None))
+      | Some raw ->
+        (match parse_commit_unix_ts_output raw with
+         | Some ts -> Some ts
+         | None ->
+             observe_probe_failure ~site:"commit_ts_parse"
+               (Failure
+                  (Printf.sprintf "invalid commit timestamp output %S" raw));
+             None)
     in
-    List.find_map probe_one candidates
+    List.find_map probe_one repo_roots
 
 let resolve_commit ~env_value ~probe =
   match env_value with

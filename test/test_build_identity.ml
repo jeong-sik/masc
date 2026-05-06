@@ -123,10 +123,10 @@ let test_commit_ts_git_status_failure_is_observed () =
         "invalid commit has no timestamp"
         None
         result;
-      Alcotest.(check bool)
-        "non-zero git status counted"
-        true
-        (after >= before +. 1.0)
+      Alcotest.(check (float 0.0001))
+        "non-zero git status counted once"
+        (before +. 1.0)
+        after
 
 let () =
   Alcotest.run "build_identity"

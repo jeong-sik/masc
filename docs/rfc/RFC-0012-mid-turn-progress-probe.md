@@ -57,18 +57,17 @@ progress" from "hung turn that will never complete".
   resolved separately by per-cascade override (Step 2 of goal
   `oas-bridge-stabilization`). What remains rejected is **flat
   global reduction** that ignores the legitimate 27 B `900 s+`
-  floor (`keeper_stale_watchdog.ml:405-418`).
+  floor (`lib/keeper/keeper_stale_watchdog.ml:405-418`).
 - **Permitted (per-cascade override, added 2026-05-06)**: a cascade
   profile in `config/cascade.toml` may declare its own
   `turn_timeout_sec`. Checked-in remote/CLI profiles (`big_three`,
   `keeper_diverse`, `tier_fast`, `tier_medium`) run at 600 s.
-  Explicit local-model profiles run at 900 s when operators configure
-  them (for example, an operator-populated `tier_small` or a
-  runtime-local recovery profile). This is not modeled as
-  sub-profiles of `keeper_diverse`; `keeper_diverse` is a single
-  checked-in profile. The 1 800 s tier is gated behind a follow-up
-  RFC after one week of Prometheus data demonstrates a 900 s ceiling
-  hit. Implementation: see
+  Operator-populated local-model profiles run at 900 s when they
+  declare local providers (for example, `tier_small` with its Ollama
+  entries enabled). `keeper_diverse` remains a single checked-in
+  profile, not a family of implicit local variants. The 1 800 s tier
+  is gated behind a follow-up RFC after one week of Prometheus data
+  demonstrates a 900 s ceiling hit. Implementation: see
   `feature/cascade-tiered-turn-timeout`.
 - Changing OAS execution to use chunked reads. That is an OAS-level
   change; the user explicitly noted in

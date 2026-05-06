@@ -441,10 +441,10 @@ Phase C (default `enforce` everywhere):
   profile in `config/cascade.toml` may set its own
   `turn_timeout_sec`. Checked-in remote/CLI profiles (`big_three`,
   `keeper_diverse`, `tier_fast`, `tier_medium`) run at 600 s.
-  Explicit local-model profiles run at 900 s when operators configure
-  them (for example, an operator-populated `tier_small` or a
-  runtime-local recovery profile). Promotion to 1 800 s requires a
-  follow-up RFC backed by one week of
+  Operator-populated local-model profiles run at 900 s when they
+  declare local providers (for example, `tier_small` with its Ollama
+  entries enabled). Promotion to 1 800 s requires a follow-up RFC
+  backed by one week of
   `masc_cascade_attempt_liveness_kill_total{mode="observe",kind="wall_exceeded"}`
   + p95 turn-duration data. The budget invariant
   `turn_timeout - oas_guard >= admission_wait + min_useful_run`

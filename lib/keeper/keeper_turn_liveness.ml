@@ -134,19 +134,8 @@ let resolve_ollama_only_base_url
     active request.  [None] (no cache entry / probe never ran) and
     failed probes are deliberately treated as "not saturated" so a
     flaky probe never starves the keeper.  Mirrors the conservative
-    fail-open policy in [Cascade_ollama_probe.try_probe].
-
-    After [max_consecutive_saturation_skips] consecutive saturated
-    checks for the same keeper, returns [false] to force a turn and
-    break the noop_failure_loop → watchdog kill death spiral. *)
-let max_consecutive_saturation_skips =
-  Env_config_core.get_int_nonneg ~default:6
-    "MASC_KEEPER_MAX_SATURATION_SKIPS"
-
-let saturation_skip_count : (string, int) Hashtbl.t = Hashtbl.create 16
-
+    fail-open policy in [Cascade_ollama_probe.try_probe]. *)
 let is_ollama_saturated
-    ?(keeper_name = "")
     ?capacity_lookup
     (base_url : string) : bool =
   let capacity_lookup =
@@ -157,28 +146,8 @@ let is_ollama_saturated
   match capacity_lookup base_url with
   | None -> false
   | Some (info : Cascade_throttle.capacity_info) ->
-      let saturated =
-        info.process_available <= 0
-        && (info.process_active > 0 || info.process_queue_length > 0)
-      in
-      if not saturated then begin
-        Hashtbl.remove saturation_skip_count keeper_name;
-        false
-      end else begin
-        let count = Hashtbl.find_opt saturation_skip_count keeper_name
-                    |> Option.value ~default:0
-        in
-        if count >= max_consecutive_saturation_skips then begin
-          Log.Keeper.info
-            "%s: ollama saturation skip count %d >= max %d, forcing turn"
-            keeper_name count max_consecutive_saturation_skips;
-          Hashtbl.remove saturation_skip_count keeper_name;
-          false
-        end else begin
-          Hashtbl.replace saturation_skip_count keeper_name (count + 1);
-          true
-        end
-      end
+      info.process_available <= 0
+      && (info.process_active > 0 || info.process_queue_length > 0)
 
 (** Backoff sleep applied after a saturation skip so the keeper does
     not hot-spin against a busy ollama instance. Short by design:

@@ -844,12 +844,7 @@ let recover_latest_checkpoint_for_overflow_retry
     | _ -> None
   in
   match selected with
-  | None ->
-      Log.Keeper.warn
-        "keeper:%s overflow-retry: all checkpoint recovery paths failed, \
-         starting fresh turn"
-        meta.name;
-      None
+  | None -> None
   | Some (ctx, turn_generation) ->
       let now_ts = Time_compat.now () in
       let ctx =

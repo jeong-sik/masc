@@ -333,7 +333,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         match resolve_ollama_only_base_url labels with
         | None -> None
         | Some base_url ->
-            if not (is_ollama_saturated ~keeper_name:meta.name base_url) then None
+            if not (is_ollama_saturated base_url) then None
             else
               let info = Cascade_ollama_probe.cached_capacity base_url in
               let queue_len =

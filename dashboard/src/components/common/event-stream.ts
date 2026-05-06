@@ -109,10 +109,6 @@ export function EventStream({ events, maxItems = 100, testId }: EventStreamProps
       data-event-stream-latest-timestamp=${summary.latestTimestamp ?? ''}
       data-event-stream-oldest-visible-timestamp=${summary.oldestVisibleTimestamp ?? ''}
       data-testid=${testId}
-      role="log"
-      aria-label="이벤트 스트림, 이벤트 ${summary.visibleCount}개, 에러 ${summary.errorCount}개"
-      aria-live="polite"
-      aria-atomic="false"
     >
       <div
         class="grid grid-cols-3 gap-2 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] p-2"
@@ -133,9 +129,15 @@ export function EventStream({ events, maxItems = 100, testId }: EventStreamProps
           <div class="font-mono text-sm text-[var(--color-status-err)]">${summary.errorCount}</div>
         </div>
       </div>
-      ${visible.length === 0
-        ? html`<div class="text-3xs text-[var(--color-fg-muted)]">이벤트 없음</div>`
-        : html`
+      <div
+        role="log"
+        aria-label="이벤트 스트림, 이벤트 ${summary.visibleCount}개, 에러 ${summary.errorCount}개"
+        aria-live="polite"
+        aria-atomic="false"
+      >
+        ${visible.length === 0
+          ? html`<div class="text-3xs text-[var(--color-fg-muted)]">이벤트 없음</div>`
+          : html`
             <div class="space-y-1" role="list">
               ${visible.map(
                 (e, index) => html`
@@ -175,6 +177,7 @@ export function EventStream({ events, maxItems = 100, testId }: EventStreamProps
               )}
             </div>
           `}
+      </div>
     </div>
   `
 }

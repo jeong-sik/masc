@@ -43,8 +43,10 @@ describe('EventStream a11y', () => {
     expect(log).not.toBeNull()
     expect(log?.getAttribute('aria-live')).toBe('polite')
     expect(log?.getAttribute('aria-label')).toContain('이벤트 스트림')
-    expect(log.dataset.eventStreamStatus).toBe('error')
-    expect(log.dataset.eventStreamVisibleCount).toBe('3')
+    const root = container.querySelector('[data-event-stream]') as HTMLElement
+    expect(root.dataset.eventStreamStatus).toBe('error')
+    expect(root.dataset.eventStreamVisibleCount).toBe('3')
+    expect(log.querySelector('[aria-label="이벤트 스트림 요약"]')).toBeNull()
   })
 
   it('renders event messages', () => {

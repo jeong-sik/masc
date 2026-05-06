@@ -1,0 +1,279 @@
+# Prometheus alerting rules for GOAL LOOP Observe.
+#
+# Companion contract:
+#   - infrastructure/monitoring/goal-loop-observe-metrics.contract.json
+# Companion dashboard:
+#   - infrastructure/monitoring/grafana-goal-loop-observe-dashboard.json
+# Companion doc:
+#   - docs/observability/goal-loop-observe-metrics.md
+#
+# These rules intentionally encode the prompt's Observe phase as a
+# machine-readable exporter contract. A deployment can expose the
+# listed metrics directly or bridge them from logs, but missing or
+# zero-only instrumentation must be visible to operators.
+
+groups:
+  - name: masc_goal_loop_observe_keeper
+    interval: 30s
+    rules:
+      - alert: GoalLoopKeeperTurnSuccessRateCritical
+        expr: |
+          (
+            sum by (keeper_name) (rate(masc_keeper_turn_completed_total[5m]))
+            /
+            clamp_min(
+              sum by (keeper_name) (rate(masc_keeper_turn_scheduled_total[5m])),
+              0.001
+            )
+          ) < 0.5
+        for: 5m
+        labels:
+          severity: critical
+          component: goal_loop
+          subsystem: observe
+        annotations:
+          summary: "Keeper {{ $labels.keeper_name }} turn success rate < 50%"
+          description: |
+            Keeper scheduled turns are not becoming completed turns. This
+            catches semaphore starvation, keepalive-only loops, and stuck
+            bootstrap paths before the Orient phase classifies the finding.
+
+      - alert: GoalLoopKeeperSemaphoreWaitP99Critical
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum by (le, keeper_name, cascade_profile) (
+              rate(masc_keeper_semaphore_wait_seconds_bucket[5m])
+            )
+          ) > 180
+        for: 5m
+        labels:
+          severity: critical
+          component: goal_loop
+          subsystem: observe
+        annotations:
+          summary: "Keeper {{ $labels.keeper_name }} semaphore wait p99 > 180s"
+          description: |
+            Bounded semaphore acquisition is no longer bounded in practice.
+            Check turn slot holder state and fallback ladder activation.
+
+      - alert: GoalLoopKeeperAliveButStuckCritical
+        expr: |
+          (
+            masc_keeper_alive_but_stuck_seconds
+            /
+            clamp_min(masc_keeper_alive_but_stuck_threshold_seconds, 1)
+          ) > 2
+        for: 5m
+        labels:
+          severity: critical
+          component: goal_loop
+          subsystem: observe
+        annotations:
+          summary: "Keeper {{ $labels.keeper_name }} stuck for > 2x threshold"
+          description: |
+            Supervisor-visible liveness has exceeded the configured
+            stuck threshold by more than 2x and must enter recovery.
+
+      - alert: GoalLoopKeeperZombieLoopCritical
+        expr: |
+          sum by (keeper_name) (
+            increase(masc_keeper_zombie_loop_detected_total[5m])
+          ) > 0
+        for: 0m
+        labels:
+          severity: critical
+          component: goal_loop
+          subsystem: observe
+        annotations:
+          summary: "Keeper {{ $labels.keeper_name }} zombie loop detected"
+          description: |
+            A loop made progress-signalling noise without real task progress.
+            This is a direct Observe-phase re-entry trigger.
+
+  - name: masc_goal_loop_observe_provider
+    interval: 30s
+    rules:
+      - alert: GoalLoopProviderHealthProbeSkippedWarning
+        expr: |
+          sum by (provider_name, profile_name) (
+            increase(masc_provider_health_probe_skipped_total[5m])
+          ) > 0
+        for: 0m
+        labels:
+          severity: warning
+          component: goal_loop
+          subsystem: observe
+        annotations:
+          summary: "Provider health probe skipped for {{ $labels.provider_name }}"
+          description: |
+            Bootstrap skipped a live probe and treated provider health as
+            advisory. The provider must not be counted healthy until a
+            completed probe writes actual health status.
+
+      - alert: GoalLoopProviderActualHealthUnhealthyCritical
+        expr: |
+          masc_provider_actual_health_status >= 3
+        for: 5m
+        labels:
+          severity: critical
+          component: goal_loop
+          subsystem: observe
+        annotations:
+          summary: "Provider {{ $labels.provider_name }} is unhealthy"
+          description: |
+            Provider actual health status is unhealthy. Values are:
+            0 unknown, 1 healthy, 2 degraded, 3 unhealthy.
+
+      - alert: GoalLoopPricingCatalogMissCritical
+        expr: |
+          sum by (model_id) (
+            increase(masc_pricing_catalog_miss_total[5m])
+          ) > 0
+        for: 0m
+        labels:
+          severity: critical
+          component: goal_loop
+          subsystem: observe
+        annotations:
+          summary: "Pricing catalog miss for {{ $labels.model_id }}"
+          description: |
+            A cost path missed the pricing catalog. Treating cost as 0.0
+            is not a true zero and must fail Verify until reconciled.
+
+  - name: masc_goal_loop_observe_dashboard
+    interval: 30s
+    rules:
+      - alert: GoalLoopDashboardMetricAllZerosWarning
+        expr: |
+          masc_dashboard_metric_all_zeros == 1
+        for: 5m
+        labels:
+          severity: warning
+          component: goal_loop
+          subsystem: observe
+        annotations:
+          summary: "Dashboard sub-operation metrics are all zero"
+          description: |
+            Dashboard rows show ka/audit/profile/phase/activity as 0ms.
+            This usually means the metric bridge is a no-op or sampling is
+            not connected to the runtime path.
+
+      - alert: GoalLoopDashboardSnapshotLatencyP99Warning
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum by (le) (
+              rate(masc_dashboard_snapshot_latency_seconds_bucket[5m])
+            )
+          ) > 5
+        for: 10m
+        labels:
+          severity: warning
+          component: goal_loop
+          subsystem: observe
+        annotations:
+          summary: "Dashboard snapshot latency p99 > 5s"
+          description: |
+            Observe dashboards are stale enough that Orient decisions may
+            run against delayed state.
+
+  - name: masc_goal_loop_observe_config
+    interval: 30s
+    rules:
+      - alert: GoalLoopConfigUnknownKeysIgnoredWarning
+        expr: |
+          sum by (file_path) (
+            increase(masc_config_unknown_keys_ignored_total[5m])
+          ) > 0
+        for: 0m
+        labels:
+          severity: warning
+          component: goal_loop
+          subsystem: observe
+        annotations:
+          summary: "Unknown config keys ignored in {{ $labels.file_path }}"
+          description: |
+            Config parsing accepted unknown keys. Runtime config drift must
+            be visible instead of silently ignored.
+
+      - alert: GoalLoopCredentialArchivedStarvationCritical
+        expr: |
+          sum by (keeper_name) (
+            increase(masc_config_credential_archived_starvation_total[5m])
+          ) > 0
+        for: 0m
+        labels:
+          severity: critical
+          component: goal_loop
+          subsystem: observe
+        annotations:
+          summary: "Keeper {{ $labels.keeper_name }} credential archived by starvation"
+          description: |
+            A keeper credential was archived because the starvation path
+            invalidated it. Recovery must either refresh credentials or
+            release the blocking slot.
+
+  - name: masc_goal_loop_observe_governance
+    interval: 30s
+    rules:
+      - alert: GoalLoopGovernanceJudgeUnparseableWarning
+        expr: |
+          increase(masc_governance_judge_unparseable_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          component: goal_loop
+          subsystem: observe
+        annotations:
+          summary: "Governance judge returned an unparseable response"
+          description: |
+            Governance status cannot be trusted until the raw judge output
+            is repaired or rejected as invalid.
+
+      - alert: GoalLoopGovernanceLenientJsonFallbackWarning
+        expr: |
+          increase(masc_governance_lenient_json_fallback_hit_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          component: goal_loop
+          subsystem: observe
+        annotations:
+          summary: "Governance lenient JSON fallback hit"
+          description: |
+            Lenient parsing may distort guardrail state. Treat this as a
+            warning and preserve raw output for audit.
+
+  - name: masc_goal_loop_observe_integrity
+    interval: 30s
+    rules:
+      - alert: GoalLoopPersistenceUtf8RepairCritical
+        expr: |
+          increase(masc_persistence_utf8_repair_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          component: goal_loop
+          subsystem: observe
+        annotations:
+          summary: "Persistence UTF-8 repair occurred"
+          description: |
+            Runtime storage repaired invalid UTF-8. This is data
+            corruption, not a normal cleanup path.
+
+      - alert: GoalLoopWriteMetaCasRetryWarning
+        expr: |
+          sum by (keeper_name) (
+            increase(masc_write_meta_cas_retry_total[5m])
+          ) > 0
+        for: 0m
+        labels:
+          severity: warning
+          component: goal_loop
+          subsystem: observe
+        annotations:
+          summary: "Keeper {{ $labels.keeper_name }} write_meta CAS retry"
+          description: |
+            Metadata writes are contending. A small retry count is
+            tolerable, but retries must be visible for liveness analysis.

@@ -433,9 +433,11 @@ let run_named
          Mode is captured once per attempt. Off short-circuits before
          observer construction so the wrapper is bit-identical to the
          baseline. Observe and Enforce wrap on_event, start a tick fiber
-         under [~sw], and finalize the per-attempt outcome counter when
-         the run returns. Enforce additionally calls [Eio.Switch.fail]
-         on the first Outcome to tear down [Oas_worker_exec.run]. *)
+         under the provider-attempt switch, and finalize the per-attempt
+         outcome counter when the run returns. Enforce additionally calls
+         [Eio.Switch.fail] on the first Outcome to tear down only the current
+         [Oas_worker_exec.run] attempt; the outer keeper/cascade switch must
+         stay alive so the FSM can fall through to the next provider. *)
       let liveness_mode = Cascade_attempt_liveness_config.current_mode () in
       let liveness_observer_opt =
         match liveness_mode with
@@ -452,77 +454,111 @@ let run_named
                 ~provider_label:provider_cfg.model_id
                 ~started_at:(Time_compat.now ())
             in
-            (match Eio_context.get_clock_opt () with
-             | Some clock ->
-                 Cascade_attempt_liveness_observer.start_tick_fiber obs
-                   ~sw ~clock
-             | None ->
-                 (* No clock available — wrapper still emits counters
-                    via on_event but TTFT/wall checks won't fire. *)
-                 ());
             Some obs
-      in
-      let liveness_on_event =
-        match liveness_observer_opt with
-        | None -> on_event
-        | Some obs ->
-            Cascade_attempt_liveness_observer.wrap_on_event obs on_event
       in
       let finalize_liveness () =
         match liveness_observer_opt with
         | None -> ()
         | Some obs -> Cascade_attempt_liveness_observer.finalize obs
       in
+      let liveness_timeout_error failure =
+        let kind = Cascade_attempt_liveness.failure_kind_label failure in
+        Agent_sdk.Error.Api
+          (Timeout
+             {
+               message =
+                 Printf.sprintf
+                   "Cascade attempt liveness guard killed provider %s/%s: %s"
+                   cascade_name provider_cfg.model_id kind;
+             })
+      in
+      let with_liveness_attempt f =
+        let run_attempt () =
+          try
+            Eio.Switch.run (fun attempt_sw ->
+                (match liveness_observer_opt, Eio_context.get_clock_opt () with
+                 | Some obs, Some clock ->
+                     Cascade_attempt_liveness_observer.start_tick_fiber obs
+                       ~sw:attempt_sw ~clock
+                 | Some _, None ->
+                     (* No clock available — wrapper still emits counters
+                        via on_event but TTFT/wall checks won't fire. *)
+                     ()
+                 | None, _ -> ());
+                let liveness_on_event =
+                  match liveness_observer_opt with
+                  | None -> on_event
+                  | Some obs ->
+                      Cascade_attempt_liveness_observer.wrap_on_event obs
+                        on_event
+                in
+                f ~attempt_sw ~liveness_on_event)
+          with
+          | Cascade_attempt_liveness_observer.Liveness_kill failure ->
+              Error (liveness_timeout_error failure)
+          | Eio.Cancel.Cancelled _ as e -> raise e
+        in
+        match run_attempt () with
+        | result ->
+            finalize_liveness ();
+            result
+        | exception exn ->
+            let bt = Printexc.get_raw_backtrace () in
+            finalize_liveness ();
+            Printexc.raise_with_backtrace exn bt
+      in
       match
         with_codex_cli_preflight
           ~scope:(Printf.sprintf "cascade:%s/%s" cascade_name provider_cfg.model_id)
           ~config ~goal
           (fun () ->
-            let effective_checkpoint = match resume_checkpoint with
-              | Some _ -> resume_checkpoint
-              | None -> oas_checkpoint
-            in
-            let run_fn () =
-              Oas_worker_exec.run ~sw ~net ~config
-                ?oas_checkpoint:effective_checkpoint
-                ?on_event:liveness_on_event
-                ?on_yield ?on_resume ~agent_ref:local_agent_ref ?proof_ref
-                ?contract goal
-            in
-            (* RFC-0022 §1 (in-attempt liveness layer): see
-               [Cascade_attempt_liveness_config.outer_wall_for_attempt]
-               for the rule. The legacy [per_provider_timeout_s] is
-               clipped to the profile's wall budget so slow-but-honest
-               streams (local Ollama 27B / 70B+) are not pre-empted
-               before the observer would consider them stalled. *)
-            let outer_wall_for_provider =
-              Cascade_attempt_liveness_config.outer_wall_for_attempt
-                ~mode:liveness_mode
-                ~observer_attached:(Option.is_some liveness_observer_opt)
-                ~per_provider_timeout_s
-                ~provider_label:provider_cfg.model_id
-            in
             let result =
-              match outer_wall_for_provider with
-              | None -> run_fn ()
-              | Some t ->
-                  let clock_opt =
-                    match Masc_eio_env.get_opt () with
-                    | Some env -> (
-                        match env.clock with
-                        | Some _ as clock_opt -> clock_opt
-                        | None -> Eio_context.get_clock_opt ())
-                    | None -> Eio_context.get_clock_opt ()
-                  in
-                  (match clock_opt with
-                   | Some clock ->
-                       (try Eio.Time.with_timeout_exn clock t run_fn
-                        with Eio.Time.Timeout ->
-                          Log.Misc.info
-                            "[cascade-fallback] cascade %s: provider %s per-provider timeout after %.1fs, falling back"
-                            cascade_name provider_cfg.model_id t;
-                          Error (Agent_sdk.Error.Api (Timeout { message = Printf.sprintf "Per-provider timeout after %.1fs" t })))
-                   | None -> run_fn ())
+              with_liveness_attempt
+                (fun ~attempt_sw ~liveness_on_event ->
+                   let effective_checkpoint = match resume_checkpoint with
+                     | Some _ -> resume_checkpoint
+                     | None -> oas_checkpoint
+                   in
+                   let run_fn () =
+                     Oas_worker_exec.run ~sw:attempt_sw ~net ~config
+                       ?oas_checkpoint:effective_checkpoint
+                       ?on_event:liveness_on_event
+                       ?on_yield ?on_resume ~agent_ref:local_agent_ref ?proof_ref
+                       ?contract goal
+                   in
+                   (* RFC-0022 §1 (in-attempt liveness layer): see
+                      [Cascade_attempt_liveness_config.outer_wall_for_attempt]
+                      for the rule. The legacy [per_provider_timeout_s] is
+                      clipped to the profile's wall budget so slow-but-honest
+                      streams (local Ollama 27B / 70B+) are not pre-empted
+                      before the observer would consider them stalled. *)
+                   let outer_wall_for_provider =
+                     Cascade_attempt_liveness_config.outer_wall_for_attempt
+                       ~mode:liveness_mode
+                       ~observer_attached:(Option.is_some liveness_observer_opt)
+                       ~per_provider_timeout_s
+                       ~provider_label:provider_cfg.model_id
+                   in
+                   match outer_wall_for_provider with
+                   | None -> run_fn ()
+                   | Some t ->
+                       let clock_opt =
+                         match Masc_eio_env.get_opt () with
+                         | Some env -> (
+                             match env.clock with
+                             | Some _ as clock_opt -> clock_opt
+                             | None -> Eio_context.get_clock_opt ())
+                         | None -> Eio_context.get_clock_opt ()
+                       in
+                       (match clock_opt with
+                        | Some clock ->
+                            (try Eio.Time.with_timeout_exn clock t run_fn
+                             with Eio.Time.Timeout ->
+                               Log.Misc.info
+                                 "[cascade-fallback] cascade %s: provider %s per-provider timeout after %.1fs, falling back"
+                                 cascade_name provider_cfg.model_id t;
+                               Error (Agent_sdk.Error.Api (Timeout { message = Printf.sprintf "Per-provider timeout after %.1fs" t })))
+                        | None -> run_fn ()))
             in
             Ok result)
     with

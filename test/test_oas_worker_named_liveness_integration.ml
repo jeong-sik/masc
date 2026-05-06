@@ -26,6 +26,33 @@ module Obs = Cascade_attempt_liveness_observer
 
 let env_var = "MASC_CASCADE_ATTEMPT_LIVENESS"
 
+let source_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root -> root
+  | None -> Sys.getcwd ()
+
+let source_path file_rel = Filename.concat (source_root ()) file_rel
+
+let string_contains haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0 then true
+  else
+    let rec loop idx =
+      idx + needle_len <= haystack_len
+      && (String.sub haystack idx needle_len = needle || loop (idx + 1))
+    in
+    loop 0
+
+let file_contains_pattern file_rel pattern =
+  let path = source_path file_rel in
+  if not (Sys.file_exists path) then false
+  else
+    let ic = open_in path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () -> string_contains (In_channel.input_all ic) pattern)
+
 let with_env value f =
   let prior = Sys.getenv_opt env_var in
   (match value with
@@ -116,6 +143,28 @@ let test_e2e_off_no_observed_total () =
       Alcotest.(check (float 1e-6))
         "Off finalize emits no observed counter" before after)
 
+let test_enforce_uses_provider_attempt_switch_contract () =
+  let file = "lib/oas_worker_named.ml" in
+  Alcotest.(check bool)
+    "liveness tick fiber runs under attempt switch"
+    true
+    (file_contains_pattern file
+       "Cascade_attempt_liveness_observer.start_tick_fiber obs\n                       ~sw:attempt_sw ~clock");
+  Alcotest.(check bool)
+    "OAS run uses attempt switch"
+    true
+    (file_contains_pattern file "Oas_worker_exec.run ~sw:attempt_sw");
+  Alcotest.(check bool)
+    "liveness kill is converted to provider error"
+    true
+    (file_contains_pattern file
+       "Cascade_attempt_liveness_observer.Liveness_kill failure");
+  Alcotest.(check bool)
+    "converted liveness kill is timeout-like"
+    true
+    (file_contains_pattern file
+       "Cascade attempt liveness guard killed provider %s/%s: %s")
+
 let () =
   Alcotest.run "oas_worker_named_liveness_integration"
     [
@@ -132,5 +181,11 @@ let () =
             `Quick test_e2e_observe_finalize_emits_observed_total;
           Alcotest.test_case "Off e2e emits nothing" `Quick
             test_e2e_off_no_observed_total;
+        ] );
+      ( "source contract",
+        [
+          Alcotest.test_case
+            "enforce kill is scoped to provider-attempt switch" `Quick
+            test_enforce_uses_provider_attempt_switch_contract;
         ] );
     ]

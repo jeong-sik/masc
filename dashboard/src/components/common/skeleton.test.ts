@@ -6,8 +6,12 @@ import {
   Skeleton,
   SkeletonText,
   SkeletonCircle,
+  normalizeSkeletonAriaLabel,
   skeletonClasses,
   skeletonTextWidths,
+  summarizeSkeleton,
+  summarizeSkeletonCircle,
+  summarizeSkeletonText,
 } from './skeleton'
 
 describe('skeletonClasses (pure)', () => {
@@ -86,19 +90,38 @@ describe('Skeleton component', () => {
     const el = container.querySelector('[data-skeleton-block]')!
     expect(el.getAttribute('aria-hidden')).toBe('true')
     expect(el.hasAttribute('role')).toBe(false)
+    expect(el.getAttribute('data-skeleton-has-semantic-label')).toBe('false')
+    expect(el.getAttribute('data-skeleton-has-custom-class')).toBe('false')
+    expect(el.getAttribute('data-skeleton-has-test-id')).toBe('false')
   })
 
   it('ariaLabel opts in to role="status" so AT announces it (inline loader use)', () => {
-    render(html`<${Skeleton} ariaLabel="Loading connector metadata" />`, container)
+    render(html`<${Skeleton} ariaLabel="  Loading connector metadata  " />`, container)
     const el = container.querySelector('[data-skeleton-block]')!
     expect(el.getAttribute('aria-label')).toBe('Loading connector metadata')
     expect(el.getAttribute('role')).toBe('status')
     expect(el.hasAttribute('aria-hidden')).toBe(false)
+    expect(el.getAttribute('data-skeleton-has-semantic-label')).toBe('true')
+    expect(el.getAttribute('data-skeleton-aria-label-length')).toBe('26')
+  })
+
+  it('blank ariaLabel stays decorative', () => {
+    render(html`<${Skeleton} ariaLabel="   " />`, container)
+    const el = container.querySelector('[data-skeleton-block]')!
+    expect(el.getAttribute('aria-hidden')).toBe('true')
+    expect(el.getAttribute('role')).toBeNull()
+    expect(el.getAttribute('aria-label')).toBeNull()
+    expect(el.getAttribute('data-skeleton-has-semantic-label')).toBe('false')
   })
 
   it('testId renders as data-testid', () => {
-    render(html`<${Skeleton} testId="connector-tile-loading" />`, container)
-    expect(container.querySelector('[data-testid="connector-tile-loading"]')).toBeTruthy()
+    render(html`<${Skeleton} class="mt-2" testId="connector-tile-loading" />`, container)
+    const el = container.querySelector('[data-testid="connector-tile-loading"]')!
+    expect(el).toBeTruthy()
+    expect(el.getAttribute('data-skeleton-has-custom-class')).toBe('true')
+    expect(el.getAttribute('data-skeleton-has-test-id')).toBe('true')
+    expect(el.getAttribute('data-skeleton-class-length')).toBe('4')
+    expect(el.getAttribute('data-skeleton-test-id-length')).toBe('22')
   })
 
   it('width + height props override the defaults', () => {
@@ -107,6 +130,27 @@ describe('Skeleton component', () => {
     expect(el.className).toContain('w-24')
     expect(el.className).toContain('h-6')
     expect(el.className).not.toContain('w-full')
+    expect(el.getAttribute('data-skeleton-block-width')).toBe('w-24')
+    expect(el.getAttribute('data-skeleton-block-height')).toBe('h-6')
+  })
+
+  it('summarizes skeleton block state', () => {
+    expect(summarizeSkeleton({
+      width: 'w-24',
+      height: 'h-6',
+      className: 'mt-2',
+      ariaLabel: ' Loading ',
+      testId: 'block-loader',
+    })).toEqual({
+      width: 'w-24',
+      height: 'h-6',
+      hasSemanticLabel: true,
+      hasCustomClass: true,
+      hasTestId: true,
+      ariaLabelLength: 7,
+      classNameLength: 4,
+      testIdLength: 12,
+    })
   })
 })
 
@@ -125,6 +169,7 @@ describe('SkeletonText component', () => {
     render(html`<${SkeletonText} />`, container)
     const wrapper = container.querySelector('[data-skeleton-text]') as HTMLElement
     expect(wrapper.getAttribute('data-skeleton-text-lines')).toBe('3')
+    expect(wrapper.getAttribute('data-skeleton-text-rendered-lines')).toBe('3')
     expect(wrapper.children.length).toBe(3)
   })
 
@@ -146,13 +191,42 @@ describe('SkeletonText component', () => {
     render(html`<${SkeletonText} />`, container)
     const wrapper = container.querySelector('[data-skeleton-text]')!
     expect(wrapper.getAttribute('aria-hidden')).toBe('true')
+    expect(wrapper.getAttribute('data-skeleton-text-has-semantic-label')).toBe('false')
   })
 
   it('ariaLabel promotes the wrapper to role="status"', () => {
-    render(html`<${SkeletonText} ariaLabel="Loading log lines" />`, container)
+    render(html`<${SkeletonText} ariaLabel="  Loading log lines  " />`, container)
     const wrapper = container.querySelector('[data-skeleton-text]')!
     expect(wrapper.getAttribute('role')).toBe('status')
     expect(wrapper.getAttribute('aria-label')).toBe('Loading log lines')
+    expect(wrapper.getAttribute('data-skeleton-text-has-semantic-label')).toBe('true')
+    expect(wrapper.getAttribute('data-skeleton-text-aria-label-length')).toBe('17')
+  })
+
+  it('blank ariaLabel stays decorative on text skeletons', () => {
+    render(html`<${SkeletonText} ariaLabel="" />`, container)
+    const wrapper = container.querySelector('[data-skeleton-text]')!
+    expect(wrapper.getAttribute('aria-hidden')).toBe('true')
+    expect(wrapper.getAttribute('role')).toBeNull()
+    expect(wrapper.getAttribute('aria-label')).toBeNull()
+  })
+
+  it('summarizes text skeleton state', () => {
+    expect(summarizeSkeletonText({
+      lines: 4,
+      className: 'gap-3',
+      ariaLabel: ' Loading ',
+      testId: 'text-loader',
+    })).toEqual({
+      lines: 4,
+      renderedLines: 4,
+      hasSemanticLabel: true,
+      hasCustomClass: true,
+      hasTestId: true,
+      ariaLabelLength: 7,
+      classNameLength: 5,
+      testIdLength: 11,
+    })
   })
 })
 
@@ -181,10 +255,54 @@ describe('SkeletonCircle component', () => {
     expect(el.className).toContain('h-12')
     expect(el.className).toContain('w-12')
     expect(el.className).not.toContain('h-8')
+    expect(el.getAttribute('data-skeleton-circle-size')).toBe('h-12 w-12')
   })
 
   it('aria-hidden by default (decorative)', () => {
     render(html`<${SkeletonCircle} />`, container)
     expect(container.querySelector('[data-skeleton-circle]')!.getAttribute('aria-hidden')).toBe('true')
+  })
+
+  it('ariaLabel promotes circle to role="status"', () => {
+    render(html`<${SkeletonCircle} ariaLabel=" Loading avatar " />`, container)
+    const el = container.querySelector('[data-skeleton-circle]')!
+    expect(el.getAttribute('role')).toBe('status')
+    expect(el.getAttribute('aria-label')).toBe('Loading avatar')
+    expect(el.getAttribute('data-skeleton-circle-has-semantic-label')).toBe('true')
+    expect(el.getAttribute('data-skeleton-circle-aria-label-length')).toBe('14')
+  })
+
+  it('blank ariaLabel stays decorative on circle skeletons', () => {
+    render(html`<${SkeletonCircle} ariaLabel=" " />`, container)
+    const el = container.querySelector('[data-skeleton-circle]')!
+    expect(el.getAttribute('aria-hidden')).toBe('true')
+    expect(el.getAttribute('role')).toBeNull()
+    expect(el.getAttribute('aria-label')).toBeNull()
+  })
+
+  it('summarizes circle skeleton state', () => {
+    expect(summarizeSkeletonCircle({
+      size: 'h-12 w-12',
+      className: 'mr-2',
+      ariaLabel: ' Loading ',
+      testId: 'avatar-loader',
+    })).toEqual({
+      size: 'h-12 w-12',
+      hasSemanticLabel: true,
+      hasCustomClass: true,
+      hasTestId: true,
+      ariaLabelLength: 7,
+      classNameLength: 4,
+      testIdLength: 13,
+    })
+  })
+})
+
+describe('normalizeSkeletonAriaLabel', () => {
+  it('normalizes labels and drops blank values', () => {
+    expect(normalizeSkeletonAriaLabel()).toBeUndefined()
+    expect(normalizeSkeletonAriaLabel('')).toBeUndefined()
+    expect(normalizeSkeletonAriaLabel('   ')).toBeUndefined()
+    expect(normalizeSkeletonAriaLabel(' Loading ')).toBe('Loading')
   })
 })

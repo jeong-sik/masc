@@ -31,6 +31,11 @@ describe('Skeleton a11y', () => {
     expect(await axe(container)).toHaveNoViolations()
   })
 
+  it('blank ariaLabel Skeleton stays decorative and passes axe', async () => {
+    render(html`<${Skeleton} ariaLabel="   " />`, container)
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
   it('SkeletonText 3-line passes axe', async () => {
     render(html`<${SkeletonText} lines=${3} />`, container)
     expect(await axe(container)).toHaveNoViolations()
@@ -46,6 +51,11 @@ describe('Skeleton a11y', () => {
 
   it('SkeletonCircle (avatar placeholder) passes axe', async () => {
     render(html`<${SkeletonCircle} />`, container)
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it('announced SkeletonCircle passes axe', async () => {
+    render(html`<${SkeletonCircle} ariaLabel="Loading avatar" />`, container)
     expect(await axe(container)).toHaveNoViolations()
   })
 })

@@ -7,6 +7,7 @@
     - resolve_entry: happy path and not-found error
     - record_action: happy path, note capping, auto-resolve of queue entry
     - get_audit_trail: actor/target filters and limit cap
+    - target_summary: report count and moderation status projection
     - JSON projection shapes for queue_entry_to_json and audit_entry_to_json
 *)
 
@@ -347,6 +348,65 @@ let test_audit_trail_limit () =
   let limited = BM.get_audit_trail ~limit:3 () in
   check int "limit=3 returns 3" 3 (List.length limited)
 
+(* ── target_summary ─────────────────────────────────────────────── *)
+
+let test_target_summary_none () =
+  reset ();
+  let summary =
+    BM.target_summary ~target_kind:BM.Target_post ~target_id:"summary-none"
+  in
+  check int "no reports" 0 summary.BM.report_count;
+  check string "status none" "none" summary.BM.moderation_status
+
+let test_target_summary_flagged () =
+  reset ();
+  (match BM.flag ~target_kind:BM.Target_comment ~target_id:"summary-flagged"
+           ~reporter:"reporter" ~reason:BM.Harassment with
+   | Ok _ -> ()
+   | Error m -> fail m);
+  let summary =
+    BM.target_summary ~target_kind:BM.Target_comment ~target_id:"summary-flagged"
+  in
+  check int "one report" 1 summary.BM.report_count;
+  check string "status flagged" "flagged" summary.BM.moderation_status
+
+let test_target_summary_action_status () =
+  reset ();
+  (match BM.flag ~target_kind:BM.Target_post ~target_id:"summary-hidden"
+           ~reporter:"reporter" ~reason:BM.Spam with
+   | Ok _ -> ()
+   | Error m -> fail m);
+  (match BM.record_action ~target_kind:BM.Target_post ~target_id:"summary-hidden"
+           ~actor:"operator" ~action:BM.Hide () with
+   | Ok _ -> ()
+   | Error m -> fail m);
+  let summary =
+    BM.target_summary ~target_kind:BM.Target_post ~target_id:"summary-hidden"
+  in
+  check int "report retained after action" 1 summary.BM.report_count;
+  check string "status hidden" "hidden" summary.BM.moderation_status
+
+let test_target_summary_reflagged_wins_over_audit () =
+  reset ();
+  with_flag_rate_limit "0" (fun () ->
+    (match BM.flag ~target_kind:BM.Target_post ~target_id:"summary-reflag"
+             ~reporter:"reporter-a" ~reason:BM.Spam with
+     | Ok _ -> ()
+     | Error m -> fail m);
+    (match BM.record_action ~target_kind:BM.Target_post ~target_id:"summary-reflag"
+             ~actor:"operator" ~action:BM.Approve () with
+     | Ok _ -> ()
+     | Error m -> fail m);
+    (match BM.flag ~target_kind:BM.Target_post ~target_id:"summary-reflag"
+             ~reporter:"reporter-b" ~reason:BM.Harassment with
+     | Ok _ -> ()
+     | Error m -> fail m);
+    let summary =
+      BM.target_summary ~target_kind:BM.Target_post ~target_id:"summary-reflag"
+    in
+    check int "two reports" 2 summary.BM.report_count;
+    check string "unresolved reflag wins" "flagged" summary.BM.moderation_status)
+
 (* ── JSON projections ────────────────────────────────────────────── *)
 
 let test_queue_entry_to_json () =
@@ -452,6 +512,12 @@ let () =
         [ test_case "actor filter"           `Quick test_audit_trail_actor_filter;
           test_case "target filter"          `Quick test_audit_trail_target_filter;
           test_case "limit cap"              `Quick test_audit_trail_limit ] );
+      ( "target_summary",
+        [ test_case "none"                   `Quick test_target_summary_none;
+          test_case "flagged"                `Quick test_target_summary_flagged;
+          test_case "action status"          `Quick test_target_summary_action_status;
+          test_case "reflag wins over audit" `Quick
+            test_target_summary_reflagged_wins_over_audit ] );
       ( "json_projection",
         [ test_case "queue_entry shape"      `Quick test_queue_entry_to_json;
           test_case "audit_entry shape"      `Quick test_audit_entry_to_json;

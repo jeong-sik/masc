@@ -237,6 +237,23 @@ describe('BoardSurface Component', () => {
     expect(screen.getByRole('button', { name: '🔥 리액션 2개' })).toHaveAttribute('aria-pressed', 'true')
   })
 
+  it('renders post moderation projection badges', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'post-flagged',
+        title: 'Needs moderation',
+        body: 'content',
+        author: 'ani1999',
+        report_count: 2,
+        moderation_status: 'flagged',
+      }),
+    ]
+
+    render(h(BoardSurface, null))
+
+    expect(screen.getByLabelText('게시글 moderation 신고됨 2건')).toHaveTextContent('신고됨 2')
+  })
+
   it('routes the mention inbox focus to the message surface', () => {
     route.value = { params: { focus: 'mention-inbox' } } as any
     messages.value = [{ id: 'm-1', from: 'sojin', content: '@dashboard needs review' }]

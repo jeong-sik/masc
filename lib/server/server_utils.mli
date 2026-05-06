@@ -179,8 +179,8 @@ val board_comment_dashboard_json :
   Board.comment ->
   Yojson.Safe.t
 (** [board_comment_dashboard_json c] renders a comment with the
-    [author_identity] field appended via
-    {!board_actor_identity_json}. *)
+    [author_identity], [report_count], and [moderation_status] fields
+    appended for dashboard inspection. *)
 
 val board_post_dashboard_json :
   ?current_vote:Board.vote_direction option ->
@@ -199,6 +199,7 @@ val board_post_dashboard_json :
     - [hearth_count] = 0 or 1 (boolean-as-int for the dashboard's
       column that aggregates across multiple hearths).
     - [author_identity] from {!board_actor_identity_json}.
+    - [report_count] / [moderation_status] from {!Board_moderation}.
 
     The base fields [title] / [votes] / [comment_count] /
     [created_at_iso] / [updated_at_iso] / [hearth_count] are

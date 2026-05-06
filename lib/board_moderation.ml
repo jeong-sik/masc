@@ -88,6 +88,11 @@ type audit_entry = {
   acted_at    : float;
 }
 
+type target_summary = {
+  report_count : int;
+  moderation_status : string;
+}
+
 (** {1 In-memory store} *)
 
 type store = {
@@ -271,6 +276,49 @@ let get_audit_trail ?target_id ?actor ?(limit = 100) () =
       | x :: xs -> take (x :: acc) (i + 1) xs
     in
     take [] 0 sorted
+
+(** {1 Target projection} *)
+
+let moderation_status_of_action = function
+  | Approve -> "approved"
+  | Remove  -> "removed"
+  | Hide    -> "hidden"
+  | Warn    -> "warned"
+
+let target_summary ~target_kind ~target_id =
+  let s = store () in
+  let matches_target target_kind' target_id' =
+    target_kind = target_kind' && String.equal target_id target_id'
+  in
+  let report_count =
+    Hashtbl.fold
+      (fun _ (entry : queue_entry) acc ->
+         if matches_target entry.target_kind entry.target_id then acc + 1 else acc)
+      s.queue 0
+  in
+  let has_unresolved =
+    match Hashtbl.find_opt s.unresolved_by_target (target_key target_kind target_id) with
+    | None -> false
+    | Some entry_id -> (
+        match Hashtbl.find_opt s.queue entry_id with
+        | Some entry when not entry.resolved -> true
+        | _ -> false)
+  in
+  let moderation_status =
+    if has_unresolved then
+      "flagged"
+    else
+      match
+        !(s.audit)
+        |> List.filter
+             (fun (entry : audit_entry) ->
+                matches_target entry.target_kind entry.target_id)
+        |> List.sort (fun a b -> Float.compare b.acted_at a.acted_at)
+      with
+      | [] -> "none"
+      | entry :: _ -> moderation_status_of_action entry.action
+  in
+  { report_count; moderation_status }
 
 (** {1 JSON projection} *)
 

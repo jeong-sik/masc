@@ -21,6 +21,7 @@ import { MessageRoomTimeline } from './message-room-timeline'
 import { BoardCurationPanel } from './board-curation-panel'
 import { BoardKarmaPanel } from './board-karma-panel'
 import { MentionInbox } from './mention-inbox'
+import { ModerationBadge } from './moderation-badge'
 import { PostDetail } from './post-detail'
 import { ReactionBar } from './reaction-bar'
 import { StateBlockMessages } from './state-block-messages'
@@ -697,6 +698,7 @@ function PostCard({ post }: { post: BoardPost }) {
           <span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${categoryBadgeColor(cat)}">${categoryLabel(cat)}</span>
           ${post.hearth ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
           ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
+          <${ModerationBadge} status=${post.moderation_status} reportCount=${post.report_count} targetLabel="게시글" />
 
           <!-- Delete button — reveal on row hover via opacity utilities -->
           <${ActionButton}

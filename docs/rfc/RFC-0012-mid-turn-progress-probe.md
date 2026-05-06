@@ -23,8 +23,11 @@ The keeper stale-watchdog has three stale-detection paths
    when a turn is running.
 3. `failure_loop` — `consecutive_noop_count >= noop_threshold`.
 
-`active_turn_timeout_sec` is `max(turn_timeout_sec, threshold)` and
-defaults to `Keeper_runtime_resolved.turn_timeout_sec () = 3600 s`.
+`active_turn_timeout_sec` is `max(turn_timeout_sec, threshold)`.
+Historically, this RFC assumed the design default was
+`Keeper_runtime_resolved.turn_timeout_sec () = 3600 s`; the current
+runtime default is 600 s because `keeper_runtime_resolved.ml:73-79`
+clamps the env-driven value to `[60, 600]`.
 `consecutive_noop_count` is updated only at turn end.
 
 Consequence: a turn that hangs in the middle — for example, an

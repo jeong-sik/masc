@@ -441,14 +441,22 @@ Phase C (default `enforce` everywhere):
   profile in `config/cascade.toml` may set its own
   `turn_timeout_sec`. Checked-in remote/CLI profiles (`big_three`,
   `keeper_diverse`, `tier_fast`, `tier_medium`) run at 600 s.
-  Operator-populated local-model profiles run at 900 s when they
-  declare local providers (for example, `tier_small` with its Ollama
-  entries enabled). Promotion to 1 800 s requires a follow-up RFC
+  Operator-populated local-model profiles (not the checked-in
+  `[local_recovery]` fallback profile) run at 900 s when they declare
+  local providers (for example, `tier_small` with its Ollama entries
+  enabled). Promotion to 1 800 s requires a follow-up RFC
   backed by one week of
   `masc_cascade_attempt_liveness_kill_total{mode="observe",kind="wall_exceeded"}`
   + p95 turn-duration data. The budget invariant
   `turn_timeout - oas_guard >= admission_wait + min_useful_run`
-  remains a hard regression test (root cause of #10388).
+  remains a hard regression test (root cause of #10388), with terms
+  mapped as follows: `turn_timeout` is the resolved cascade
+  `turn_timeout_sec` (or `MASC_KEEPER_TURN_TIMEOUT_SEC` fallback);
+  `oas_guard` is `Keeper_turn_cascade_budget.oas_timeout_guard_sec`;
+  `admission_wait` is
+  `Keeper_runtime_resolved.admission_wait_timeout_sec`
+  / `MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC`; `min_useful_run` is the
+  RFC/test minimum useful post-admission provider run window.
 - Provider-side cost metrics (covered by RFC-0009 Phase 3).
 - Wholesale replacement of OAS HTTP single-bulk-read with chunked. That is `feedback_oas_execution_uncancellable_mid_turn` ("masc-mcp 단독 fix 영역 zero").
 - Per-keeper liveness override (deferred — start with per-profile).

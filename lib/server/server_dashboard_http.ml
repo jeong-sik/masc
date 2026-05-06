@@ -1054,3 +1054,84 @@ let operator_confirm_http_json ~state ~sw ~clock request ~args =
 
 let operator_error_json message =
   `Assoc [ ("status", `String "error"); ("message", `String message) ]
+
+(* Cold-start bootstrap aggregator.
+
+   Bundles the snapshot of multiple dashboard slices into a single JSON
+   payload so the frontend does not fan out into N parallel HTTP calls
+   under Executor_pool contention.  Each slice is computed sequentially
+   because every SSOT helper already chooses inline-shared vs
+   offloaded-readonly internally; parallel fan-out via [Eio.Fiber.all]
+   is a milestone-2 follow-up only if measurement shows latency
+   dominates.
+
+   Per-slice exceptions are captured here rather than 500-ing the whole
+   bootstrap.  The client payload deliberately uses the stable shape
+   {"error":"slice_unavailable","slice":"<name>"} so a public-read
+   client never sees raw [Printexc.to_string] output (path leakage,
+   stack-derived strings).  The full exception text still goes to the
+   server warn log for ops debugging.
+
+   Both the HTTP/1.1 router (server_routes_http_routes_dashboard) and
+   the HTTP/2 gateway (server_h2_gateway) call this single SSOT so the
+   payload shape, slice list, and error contract cannot drift between
+   transports. *)
+let dashboard_bootstrap_http_json
+    ~(state : Mcp_server.server_state)
+    ~sw
+    ~(clock : _ Eio.Time.clock_ty Eio.Resource.t)
+    (request : Httpun.Request.t) : Yojson.Safe.t =
+  let slice name f =
+    try (name, f ())
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+        Log.Server.warn
+          "[dashboard-bootstrap] slice %s failed: %s"
+          name (Printexc.to_string exn);
+        ( name
+        , `Assoc
+            [ ("error", `String "slice_unavailable")
+            ; ("slice", `String name)
+            ] )
+  in
+  let shell =
+    slice "shell" (fun () ->
+      dashboard_shell_http_json
+        ?clock:state.Mcp_server.clock
+        ~request ~light:true
+        state.Mcp_server.room_config)
+  in
+  let execution =
+    slice "execution" (fun () ->
+      dashboard_execution_http_json ~state ~sw ~clock request)
+  in
+  let planning =
+    slice "planning" (fun () ->
+      dashboard_planning_http_json
+        ~config:state.Mcp_server.room_config)
+  in
+  let namespace_truth =
+    slice "namespace_truth" (fun () ->
+      dashboard_namespace_truth_http_json ~state ~sw ~clock request)
+  in
+  let goals =
+    slice "goals" (fun () ->
+      dashboard_goals_tree_http_json
+        ~config:state.Mcp_server.room_config)
+  in
+  let goal_loop_status =
+    slice "goal_loop_status" (fun () ->
+      Dashboard_goal_loop.status_json
+        ~base_path:state.Mcp_server.room_config.base_path ())
+  in
+  `Assoc
+    [ ("served_at", `String (Masc_domain.now_iso ()))
+    ; ("milestone", `Int 1)
+    ; shell
+    ; execution
+    ; planning
+    ; namespace_truth
+    ; goals
+    ; goal_loop_status
+    ]

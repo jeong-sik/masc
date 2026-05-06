@@ -680,81 +680,14 @@ let rec add_routes ~sw ~clock router =
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/bootstrap" (fun request reqd ->
-       (* Cold-start bootstrap: returns the initial snapshot of multiple
-          dashboard slices in one round trip so the frontend does not fan
-          out into N parallel HTTP calls under Executor_pool contention.
-
-          Milestone 1 — shell + execution + planning only.  Slices are
-          computed sequentially since each SSOT helper chooses
-          inline-shared vs offloaded-readonly internally; parallel fanout
-          via [Eio.Fiber.all] is a milestone-2 follow-up if cold-start
-          wall time still dominates.  Per-slice exceptions are captured
-          and returned as [{"error": "..."}] under the slice key so a
-          single slow/broken slice does not 500 the whole call. *)
+       (* Cold-start bootstrap: routes to the shared SSOT
+          [dashboard_bootstrap_http_json] in [Server_dashboard_http] so
+          the HTTP/1.1 router and HTTP/2 gateway return identical
+          payloads.  Slice list, error contract, and per-slice
+          exception capture all live in the SSOT; this handler is
+          just the auth + transport wrapper. *)
        with_public_read (fun state req reqd ->
-         (* The bootstrap endpoint is reachable on the public dashboard
-            read surface, so per-slice error payloads must not leak
-            internal details (filesystem paths, dependency stack traces,
-            config hints carried in [Printexc.to_string]). Server-side
-            logs keep the full exception for ops debugging; the client
-            sees a stable [{error:"slice_unavailable", slice:<name>}]
-            shape it can render without parsing free text. *)
-         let slice name f =
-           try (name, f ())
-           with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn ->
-             Log.Server.warn
-               "[dashboard-bootstrap] slice %s failed: %s"
-               name (Printexc.to_string exn);
-             ( name
-             , `Assoc
-                 [ ("error", `String "slice_unavailable")
-                 ; ("slice", `String name)
-                 ] )
-         in
-         let shell =
-           slice "shell" (fun () ->
-             dashboard_shell_http_json
-               ?clock:state.Mcp_server.clock
-               ~request:req ~light:true
-               state.Mcp_server.room_config)
-         in
-         let execution =
-           slice "execution" (fun () ->
-             dashboard_execution_http_json ~state ~sw ~clock req)
-         in
-         let planning =
-           slice "planning" (fun () ->
-             dashboard_planning_http_json
-               ~config:state.Mcp_server.room_config)
-         in
-         let namespace_truth =
-           slice "namespace_truth" (fun () ->
-             dashboard_namespace_truth_http_json ~state ~sw ~clock req)
-         in
-         let goals =
-           slice "goals" (fun () ->
-             dashboard_goals_tree_http_json
-               ~config:state.Mcp_server.room_config)
-         in
-         let goal_loop_status =
-           slice "goal_loop_status" (fun () ->
-             Dashboard_goal_loop.status_json
-               ~base_path:state.Mcp_server.room_config.base_path ())
-         in
-         let json =
-           `Assoc
-             [ ("served_at", `String (Masc_domain.now_iso ()))
-             ; ("milestone", `Int 1)
-             ; shell
-             ; execution
-             ; planning
-             ; namespace_truth
-             ; goals
-             ; goal_loop_status
-             ]
-         in
+         let json = dashboard_bootstrap_http_json ~state ~sw ~clock req in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)

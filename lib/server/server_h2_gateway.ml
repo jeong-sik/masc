@@ -637,6 +637,16 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             in
             h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
 
+      | `GET, "/api/v1/dashboard/bootstrap" ->
+          (* Same SSOT as the HTTP/1.1 router so the HTTP/2 client sees
+             the identical payload shape, slice list, and error
+             contract.  See [Server_dashboard_http.dashboard_bootstrap_http_json]. *)
+          with_server_state h2_reqd (fun state ->
+            let json =
+              dashboard_bootstrap_http_json ~state ~sw ~clock httpun_request
+            in
+            h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
+
       | `GET, "/api/v1/dashboard/goals" ->
           with_server_state h2_reqd (fun state ->
             let json =

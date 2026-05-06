@@ -9,6 +9,8 @@ module KR = Masc_mcp.Keeper_registry
 module KHS = Masc_mcp.Keeper_keepalive_signal
 module KST = Masc_mcp.Keeper_state_machine
 module KCB = Masc_mcp.Keeper_turn_cascade_budget
+module P = Masc_mcp.Prometheus
+module TCG = Masc_mcp.Telemetry_coverage_gap
 
 let ctx_messages = KEC.messages_of_context
 let ctx_system_prompt = KEC.system_prompt_of_context
@@ -326,6 +328,85 @@ let test_apply_post_turn_lifecycle_compacts_and_updates_continuity () =
           check bool "compacted checkpoint persisted" true
             (List.length (ctx_messages loaded) < _original_message_count)
       | None -> fail "expected compacted checkpoint to be persisted")
+
+let test_compaction_callback_failure_records_coverage_gap () =
+  let base_dir = temp_dir "keeper_lifecycle_callback_gap" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let meta =
+        let base =
+          make_keeper_meta ~name:"callback-gap-keeper"
+            ~trace_id:"trace-callback-gap" ()
+        in
+        {
+          base with
+          auto_handoff = false;
+          compaction =
+            {
+              base.compaction with
+              ratio_gate = 0.0;
+              message_gate = 2;
+              token_gate = 1;
+              cooldown_sec = 0;
+            };
+        }
+      in
+      let checkpoint =
+        save_checkpoint ~base_dir ~meta
+          ~ctx:
+            (build_dense_context ~turns:24 ~max_tokens:320
+               ~state_reply:"ready")
+      in
+      let labels = [ ("callback", "on_compaction_started") ] in
+      let before =
+        P.metric_value_or_zero
+          P.metric_keeper_lifecycle_callback_failures
+          ~labels
+          ()
+      in
+      let lifecycle =
+        KEC.apply_post_turn_lifecycle
+          ~on_handoff_started:(fun () -> ())
+          ~base_dir ~meta
+          ~on_compaction_started:(fun () ->
+            failwith "synthetic callback failure")
+          ~model:"llama:auto"
+          ~primary_model_max_tokens:320
+          ~current_turn_overflow_blocker:None
+          ~checkpoint:(Some checkpoint)
+      in
+      check bool "compaction still applied" true
+        lifecycle.compaction.applied;
+      check (option string) "compaction no failure" None
+        lifecycle.compaction.failure_reason;
+      check (float 0.0001) "callback failure metric increments"
+        (before +. 1.0)
+        (P.metric_value_or_zero
+           P.metric_keeper_lifecycle_callback_failures
+           ~labels
+           ());
+      match TCG.read_recent ~masc_root:base_dir ~n:1 with
+      | [ row ] ->
+        let open Yojson.Safe.Util in
+        check string "gap source" "keeper_lifecycle_callback"
+          (row |> member "source" |> to_string);
+        check string "gap producer" "on_compaction_started"
+          (row |> member "producer" |> to_string);
+        check string "gap reason" "callback_exception"
+          (row |> member "stale_reason" |> to_string);
+        check string "gap keeper" "callback-gap-keeper"
+          (row |> member "keeper_name" |> to_string);
+        check string "gap trace" "trace-callback-gap"
+          (row |> member "trace_id" |> to_string);
+        check bool "gap error recorded" true
+          (contains_substring
+             (row |> member "error" |> to_string)
+             "synthetic callback failure")
+      | _ -> fail "expected one telemetry coverage gap row")
 
 let test_apply_post_turn_lifecycle_keeps_checkpoint_when_compaction_skips () =
   let base_dir = temp_dir "keeper_lifecycle_skip_compaction" in
@@ -2408,6 +2489,8 @@ let () =
             test_load_context_prefers_live_primary_max_tokens_over_checkpoint_limit;
           test_case "compaction persists checkpoint and continuity" `Quick
             test_apply_post_turn_lifecycle_compacts_and_updates_continuity;
+          test_case "compaction callback failure records coverage gap" `Quick
+            test_compaction_callback_failure_records_coverage_gap;
           test_case "skip compaction keeps checkpoint" `Quick
             test_apply_post_turn_lifecycle_keeps_checkpoint_when_compaction_skips;
           test_case "handoff runs after compaction" `Quick

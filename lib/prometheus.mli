@@ -630,8 +630,10 @@ val metric_keeper_lifecycle_transitions : string
 val metric_fsm_guard_violation : string
 
 (** Keeper callback failures that would otherwise look like missing
-    lifecycle, SSE, tool-call-log, or action-metric rows. Labels:
-    [callback] plus optional [keeper] at per-keeper OAS hook sites.
+    lifecycle, SSE, tool-call-log, or action-metric rows. Lifecycle
+    callback failures also write a durable [telemetry_coverage_gap]
+    row through [Keeper_callback_failure.record]. Labels: [callback]
+    plus optional [keeper] at per-keeper OAS hook sites.
 
     Lifecycle-only labels:
     - [on_compaction_started] — fired from

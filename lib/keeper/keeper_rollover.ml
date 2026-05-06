@@ -225,18 +225,13 @@ let maybe_rollover_oas_handoff
            keep-going-on-callback-failure. The handoff path mirrors
            the compaction path so the operator counter aggregates a
            single fleet-wide invariant: any lifecycle callback that
-           can't reach the registry must surface as a counter+warn,
-           never silently abort the rollover. *)
+           can't reach the registry must surface as a counter+warn and
+           durable telemetry gap, never silently abort the rollover. *)
         (try on_started ()
          with
-         | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
-             Prometheus.inc_counter
-               Prometheus.metric_keeper_lifecycle_callback_failures
-               ~labels:[("callback", "on_handoff_started")] ();
-             Log.Keeper.warn
-               "keeper:%s rollover on_started raised: %s"
-               base_meta.name (Printexc.to_string exn));
+             Keeper_callback_failure.record ~base_dir ~meta:base_meta
+               ~callback:"on_handoff_started" exn);
         (try
           let new_session =
             create_session ~session_id:new_trace_id ~base_dir

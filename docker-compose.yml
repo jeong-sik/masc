@@ -11,8 +11,10 @@
 #   - restart: unless-stopped — re-launch on crash, but never on a
 #     `docker compose stop`. Aligns with infrastructure/launchd plist
 #     `KeepAlive.SuccessfulExit=false`.
-#   - stop_grace_period: 60s — matches MASC_SHUTDOWN_FORCE_TIMEOUT so
-#     phases NOTIFY/HOOKS/BOARD/CANCEL run before docker escalates to SIGKILL.
+#   - stop_grace_period: 75s — sits 15s above MASC_SHUTDOWN_FORCE_TIMEOUT
+#     (60s) so the in-process force-exit watchdog can flush final logs
+#     before docker escalates to SIGKILL. Setting them equal raced both
+#     timers at ~60s and lost the last log line on shutdown.
 #   - logging: json-file with max-size=10m × max-file=3 → ~30MB upper
 #     bound per container. Container logs cap is independent of the
 #     in-tree `lib/masc_log/log.ml` 7-day rotation.

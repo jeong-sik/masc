@@ -110,14 +110,18 @@ let run_all () =
           done);
       ignore count_after_budget
   in
-  (* Treat empty/whitespace-only [MASC_BASE_PATH] as unset. The repo
-     convention sets env vars to "" via [Unix.putenv name ""] when
-     "unset" is the intended semantic (see test_board_vote_quarantine
-     comment), and a non-trimmed empty string here would resolve
-     [tmp_dir] to ".masc/tmp" relative to the cwd and start unlinking
-     unrelated files. *)
+  (* Treat empty/whitespace-only or relative [MASC_BASE_PATH] as unset.
+     The repo convention sets env vars to "" via [Unix.putenv name ""]
+     when "unset" is the intended semantic. A non-absolute base path
+     ("." / "tmp" / "./logs") would resolve [tmp_dir] against the
+     daemon's cwd and unlink unrelated files in whichever directory
+     the binary was launched from — refuse to traverse it. *)
   (match Sys.getenv_opt "MASC_BASE_PATH" |> Option.map String.trim with
    | None | Some "" -> ()
+   | Some base_path when Filename.is_relative base_path ->
+     Log.Server.debug
+       "[Shutdown] tmp cleanup skipped: MASC_BASE_PATH=%s is not absolute"
+       base_path
    | Some base_path ->
      let tmp_dir = Filename.concat base_path ".masc/tmp" in
      (match Unix.lstat tmp_dir with

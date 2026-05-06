@@ -3,9 +3,14 @@
     Foundation for the lifecycle_cleanup_hook plumbing described in
     [docs/rfc/RFC-0036-multi-keeper-docker-orchestration.md].
 
-    Purely additive — this module has no consumers in [Keeper_supervisor]
-    yet. Phase A.2/A.3 wires call sites; Phase B/C uses the same
-    registration API to attach the [Docker_runtime] bridge.
+    This PR wires the first call site:
+    [Keeper_supervisor.sweep_and_recover] fires [Tombstone_reaped] after
+    a dead-keeper unregister succeeds (see [Keeper_lifecycle_hooks.run]
+    invocation in keeper_supervisor.ml). [Phase_transition] is
+    declared but not yet emitted from any call site — Phase A.2
+    follow-up wires it; until that PR lands no hook will receive a
+    Phase_transition event. Phase B/C uses the same registration API
+    to attach the [Docker_runtime] bridge.
 
     Contract:
     - Hooks are best-effort, synchronous, and exception-safe. The runner
@@ -26,9 +31,13 @@ type event =
       from_phase : Keeper_state_machine.phase;
       to_phase   : Keeper_state_machine.phase;
     }
-      (** Fired by [Keeper_supervisor.transition_to] before the
-          registry write commits. Hooks observe the intent of the
-          transition; they cannot veto. *)
+      (** Reserved for the Phase A.2 follow-up: a future supervisor
+          phase-transition call site will fire this before the
+          registry write commits. No call site emits it in this PR;
+          [Keeper_lifecycle_hooks.run] is currently invoked only with
+          [Tombstone_reaped] (from [Keeper_supervisor.sweep_and_recover]).
+          Hooks will observe the intent of the transition; they cannot
+          veto. *)
   | Tombstone_reaped
       (** Fired by [Keeper_supervisor.cleanup_dead_tombstone] after the
           registry unregister completes. The keeper is fully gone from

@@ -310,7 +310,9 @@ def structured_markers(row: dict[str, Any]) -> set[str]:
 
 def marker_matches(markers: set[str], *needles: str) -> bool:
     for marker in markers:
-        if any(marker == needle or marker.startswith(f"{needle}:") for needle in needles):
+        if any(
+            marker == needle or marker.startswith(f"{needle}:") for needle in needles
+        ):
             return True
     return False
 
@@ -373,7 +375,9 @@ def pr_lifecycle_evidence_from_decision(
         and has_git_push_marker(row)
     ):
         add(f"git_push:{row['tool']}:git_push")
-    if tool_succeeded_in_row(row, "keeper_pr_review_comment") and has_pr_approve_marker(row):
+    if tool_succeeded_in_row(row, "keeper_pr_review_comment") and has_pr_approve_marker(
+        row
+    ):
         add("pr_approve:keeper_pr_review_comment")
     return evidence, docker_evidence
 
@@ -385,7 +389,7 @@ def decision_log_paths(base_path: Path, name: str) -> list[Path]:
         return []
     paths: list[tuple[int, Path]] = []
     for path in log_dir.glob(f"{base_name}*"):
-        suffix = path.name[len(base_name):]
+        suffix = path.name[len(base_name) :]
         if suffix == "":
             paths.append((0, path))
         elif suffix.startswith(".") and suffix[1:].isdigit():

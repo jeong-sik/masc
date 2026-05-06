@@ -99,6 +99,17 @@ let turn_affordance_of_string = function
   | "inspect_worktree_delta" -> Some Inspect_worktree_delta
   | _ -> None
 
+let turn_affordance_to_string = function
+  | Board_curation -> "board_curation"
+  | Board_post_or_comment -> "board_post_or_comment"
+  | Message_sweep -> "message_sweep"
+  | Reply_in_room -> "reply_in_room"
+  | Task_claim -> "task_claim"
+  | Task_audit -> "task_audit"
+  | Task_verify -> "task_verify"
+  | Work_discovery -> "work_discovery"
+  | Inspect_worktree_delta -> "inspect_worktree_delta"
+
 let should_tool_gate_affordance = function
   | Board_curation
   | Board_post_or_comment
@@ -168,6 +179,7 @@ let preferred_tool_names_for_turn_affordances turn_affordances =
    them whenever the board lists unclaimed tasks, leading to repeated
    [Failure_run_error] turns the keeper cannot resolve. *)
 let turn_affordances_require_tool_gate_with_allowed
+    ?(record_suppression_metric = false)
     ~(allowed_tool_names : string list) turn_affordances : bool =
   let has_matching_tool affordance =
     List.exists
@@ -176,13 +188,22 @@ let turn_affordances_require_tool_gate_with_allowed
          && Keeper_tool_disclosure.tool_name_can_satisfy_required_contract tool)
       (tools_for_gated_affordance affordance)
   in
-  List.exists
-    (function
-      | Some affordance ->
-        should_tool_gate_affordance affordance
-        && has_matching_tool affordance
-      | None -> false)
-    (List.map turn_affordance_of_string turn_affordances)
+  let gated_affordances =
+    turn_affordances
+    |> List.filter_map turn_affordance_of_string
+    |> List.filter should_tool_gate_affordance
+  in
+  let gate_requested = List.exists has_matching_tool gated_affordances in
+  if record_suppression_metric && not gate_requested then
+    List.iter
+      (fun affordance ->
+         if not (has_matching_tool affordance) then
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_required_tool_gate_suppressed_total
+             ~labels:[ ("affordance", turn_affordance_to_string affordance) ]
+             ())
+      gated_affordances;
+  gate_requested
 
 let should_require_tools_for_initial_turn ~(max_turns : int)
     ~(turn_affordances : string list) =

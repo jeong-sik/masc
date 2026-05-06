@@ -1042,6 +1042,8 @@ let metric_keeper_passive_loop_detected_total =
   "masc_keeper_passive_loop_detected_total"
 let metric_keeper_required_tool_loop_detected_total =
   "masc_keeper_required_tool_loop_detected_total"
+let metric_keeper_required_tool_gate_suppressed_total =
+  "masc_keeper_required_tool_gate_suppressed_total"
 
 (* Task-138: Minimum proactive cadence — observability gauges that pair
    with the [keeper_passive_loop_detector] streak counter so operators
@@ -1725,6 +1727,11 @@ let init () =
     "#13362 Total required-tool contract loops: keeper hit N consecutive \
      actionable required-tool failures before making execution/completion \
      progress. Labeled by keeper and kind."
+    Counter;
+  add metric_keeper_required_tool_gate_suppressed_total
+    "#13653 Total Require_tool_use gate suppressions caused by actionable \
+     affordances whose visible keeper tool surface contains no \
+     contract-satisfying tool. Labeled by affordance."
     Counter;
   add metric_keeper_consecutive_idle
     "Task-138 Current consecutive-idle streak (passive-only turns) per \

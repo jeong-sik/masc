@@ -99,7 +99,10 @@ val preferred_tool_names_for_turn_affordances : string list -> string list
     Passive read/status tools may still be visible, but they cannot be
     the sole reason to force [Require_tool_use]. *)
 val turn_affordances_require_tool_gate_with_allowed :
-  allowed_tool_names:string list -> string list -> bool
+     ?record_suppression_metric:bool
+  -> allowed_tool_names:string list
+  -> string list
+  -> bool
 
 (** Whether the very first turn of a multi-turn slot should require
     a tool call. *)

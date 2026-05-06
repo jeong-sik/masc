@@ -7179,6 +7179,34 @@ let test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool () =
     "unknown affordance string is ignored" false
     (gate ~tools:[ "keeper_task_claim" ] [ "totally_unknown_affordance" ])
 
+let test_turn_affordance_gate_suppression_metric () =
+  let metric affordance =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_keeper_required_tool_gate_suppressed_total
+      ~labels:[ ("affordance", affordance) ]
+      ()
+  in
+  let gate ~tools affordances =
+    KAR.turn_affordances_require_tool_gate_with_allowed
+      ~record_suppression_metric:true ~allowed_tool_names:tools affordances
+  in
+  let verify_before = metric "task_verify" in
+  let unknown_before = metric "totally_unknown_affordance" in
+  check bool "passive task_verify list tool suppresses gate" false
+    (gate ~tools:[ "keeper_tasks_list" ] [ "task_verify" ]);
+  check (float 0.0) "task_verify suppression increments metric"
+    (verify_before +. 1.0)
+    (metric "task_verify");
+  check (float 0.0) "unknown affordance does not create metric label"
+    unknown_before
+    (metric "totally_unknown_affordance");
+  let claim_before = metric "task_claim" in
+  check bool "claim tool present keeps gate active" true
+    (gate ~tools:[ "keeper_task_claim" ] [ "task_claim" ]);
+  check (float 0.0) "successful gate does not increment suppression metric"
+    claim_before
+    (metric "task_claim")
+
 let test_tools_for_gated_affordance_covers_each_variant () =
   (* Compile-time exhaustiveness already ensures every variant is
      handled; this asserts the runtime mapping is non-empty so a
@@ -8232,6 +8260,8 @@ let () =
           test_case "affordance gate filters by allowed_tool_names"
             `Quick
             test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool;
+          test_case "affordance gate suppression emits metric" `Quick
+            test_turn_affordance_gate_suppression_metric;
           test_case "tools_for_gated_affordance non-empty for every variant"
             `Quick test_tools_for_gated_affordance_covers_each_variant;
         ] );

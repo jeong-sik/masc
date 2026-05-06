@@ -560,7 +560,7 @@ let prepare_agent_setup
     && not is_last_turn
     && (caller_requires_tools
         || turn_affordances_require_tool_gate_with_allowed
-             ~allowed_tool_names turn_affordances)
+             ~record_suppression_metric:true ~allowed_tool_names turn_affordances)
   in
   let compute_tool_surface ~turn ~messages ~current_tool_choice ~decay_discovered
       : computed_tool_surface =

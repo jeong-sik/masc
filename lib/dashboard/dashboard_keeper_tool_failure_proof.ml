@@ -4,6 +4,9 @@ type failure_class = {
   sample : string option;
 }
 
+type failure_table =
+  (string, (string, int ref * string option ref) Hashtbl.t) Hashtbl.t
+
 type tool_keeper_stat = {
   name : string;
   calls : int;

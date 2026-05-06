@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 
 
@@ -116,6 +117,7 @@ class ExtractGoalLoopSourceRowCandidatesTest(unittest.TestCase):
                 "no_candidate_sources_with_tracking_issue_refs": 1,
             },
         )
+        self.assertFalse(report["source_currentness"]["evaluated"])
         self.assertEqual(
             report["sources_without_candidate_details"],
             [
@@ -138,6 +140,63 @@ class ExtractGoalLoopSourceRowCandidatesTest(unittest.TestCase):
                 "NO_ROWS: prompt_corpus/GOAL_LOOP/fundamental_roadmap.md "
                 "rows=0 unstructured_markers=5"
             ),
+            text_report,
+        )
+
+    def test_inventory_reports_future_dated_source_claims(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            path = Path(raw_dir) / "progress-evaluation.md"
+            path.write_text(
+                "\n".join(
+                    [
+                        "# Progress (2026-04-28 -> 2026-07-09)",
+                        "Past claim: 2026-05-05",
+                        "Future forecast: 2026-10-09",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            report = extract_goal_loop_source_row_candidates.inventory_sources(
+                [path],
+                expected_total=1,
+                checked_at=date(2026, 5, 6),
+            )
+
+        currentness = report["source_currentness"]
+        self.assertTrue(currentness["evaluated"])
+        self.assertEqual(currentness["checked_at"], "2026-05-06")
+        self.assertFalse(currentness["current"])
+        self.assertEqual(currentness["future_date_claims_total"], 2)
+        self.assertEqual(currentness["blocking_future_date_claims_total"], 1)
+        self.assertEqual(
+            currentness["sources_with_future_date_claims"],
+            ["prompt_corpus/GOAL_LOOP/progress-evaluation.md"],
+        )
+        self.assertEqual(
+            currentness["sources_with_blocking_future_date_claims"],
+            ["prompt_corpus/GOAL_LOOP/progress-evaluation.md"],
+        )
+        self.assertEqual(
+            [claim["date"] for claim in currentness["future_date_claims"]],
+            ["2026-07-09", "2026-10-09"],
+        )
+        self.assertEqual(
+            [
+                claim["currentness_blocking"]
+                for claim in currentness["future_date_claims"]
+            ],
+            [True, False],
+        )
+        text_report = extract_goal_loop_source_row_candidates.report_to_text(report)
+        self.assertIn(
+            "CURRENTNESS: checked_at=2026-05-06 current=False "
+            "future_date_claims=2 blocking_future_date_claims=1",
+            text_report,
+        )
+        self.assertIn(
+            "FUTURE_DATE: prompt_corpus/GOAL_LOOP/progress-evaluation.md:1 "
+            "date=2026-07-09 kind=future_date blocking=True",
             text_report,
         )
 

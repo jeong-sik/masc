@@ -663,6 +663,20 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertTrue(
             inventory_evidence["no_candidate_tracking_source_count_matches"]
         )
+        self.assertTrue(inventory_evidence["source_currentness_evaluated"])
+        self.assertEqual(
+            inventory_evidence["source_currentness_checked_at"],
+            "2026-05-06",
+        )
+        self.assertFalse(inventory_evidence["source_currentness_current"])
+        self.assertTrue(inventory_evidence["source_currentness_consistent"])
+        self.assertEqual(inventory_evidence["future_date_claims_total"], 7)
+        self.assertEqual(inventory_evidence["future_date_claims_count"], 7)
+        self.assertTrue(inventory_evidence["future_date_claims_total_matches"])
+        self.assertEqual(inventory_evidence["sources_with_future_date_claims_total"], 4)
+        self.assertTrue(inventory_evidence["future_date_sources_count_matches"])
+        self.assertTrue(inventory_evidence["future_date_sources_match"])
+        self.assertEqual(inventory_evidence["invalid_future_date_claims"], [])
         self.assertTrue(inventory_evidence["no_candidate_source_overlap"])
         self.assertFalse(inventory_evidence["local_path_leaks"])
 
@@ -842,6 +856,29 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertTrue(
             inventory_evidence["no_candidate_tracking_source_count_matches"]
         )
+
+    def test_completion_audit_rejects_inconsistent_source_currentness(
+        self,
+    ) -> None:
+        inventory = json.loads(
+            SOURCE_ROW_CANDIDATE_INVENTORY_FIXTURE.read_text(encoding="utf-8")
+        )
+        currentness = inventory["source_currentness"]
+        assert isinstance(currentness, dict)
+        currentness["future_date_claims_total"] = 0
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            source_row_candidate_inventory=inventory,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        inventory_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "source_row_candidate_inventory"
+        ]
+        self.assertFalse(inventory_evidence["recorded"])
+        self.assertFalse(inventory_evidence["source_currentness_consistent"])
+        self.assertFalse(inventory_evidence["future_date_claims_total_matches"])
 
     def test_completion_audit_rejects_wrong_catalog_source_row_candidate_inventory(
         self,
@@ -1289,6 +1326,13 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         ]
         self.assertTrue(source_inventory["recorded"])
         self.assertEqual(source_inventory["unique_candidate_rows"], 132)
+        self.assertTrue(source_inventory["source_currentness_evaluated"])
+        self.assertFalse(source_inventory["source_currentness_current"])
+        self.assertTrue(source_inventory["source_currentness_consistent"])
+        self.assertEqual(source_inventory["future_date_claims_total"], 7)
+        self.assertEqual(source_inventory["blocking_future_date_claims_total"], 3)
+        self.assertTrue(source_inventory["future_date_claims_total_matches"])
+        self.assertTrue(source_inventory["blocking_future_date_claims_total_matches"])
         strict_row_corpus = by_id["strict_row_level_catalog_complete"]["evidence"][
             "strict_row_corpus"
         ]

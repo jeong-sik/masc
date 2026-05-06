@@ -8,6 +8,7 @@ import json
 import re
 import sys
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,7 @@ DEEP_AUDIT_HEADING_RE = re.compile(r"^#{2,6}\s+(?P<num>\d+(?:\.\d+)+)\s+(?P<titl
 MARKDOWN_HEADING_RE = re.compile(r"^#{1,6}\s+\S")
 NUMBERED_ITEM_RE = re.compile(r"^\s*\d+[.)]\s+\S")
 BULLET_ITEM_RE = re.compile(r"^\s*[-*]\s+\S")
+DATE_CLAIM_RE = re.compile(r"\b(?P<date>20\d{2}-\d{2}-\d{2})\b")
 
 
 @dataclass(frozen=True)
@@ -114,6 +116,58 @@ def unstructured_marker_counts(lines: list[str]) -> dict[str, int]:
 
 def issue_refs(value: list[str]) -> list[str]:
     return [item for item in value if ISSUE_REF_RE.fullmatch(item)]
+
+
+def classify_future_date_claim(line: str) -> tuple[str, bool]:
+    lowered = line.lower()
+    if "due =" in lowered or "deadline" in lowered:
+        return "scheduled_due_date", False
+    if (
+        "forecast" in lowered
+        or "prediction" in lowered
+        or "예측" in line
+        or "전망" in line
+    ):
+        return "forecast_date", False
+    if (
+        "generated" in lowered
+        or "작성일" in line
+        or "보고서 작성일" in line
+        or "분석 일자" in line
+        or "분석 시각" in line
+        or "리포트" in line
+        or "평가" in line
+    ):
+        return "source_snapshot_date", True
+    return "future_date", True
+
+
+def future_date_claims(
+    lines: list[str],
+    *,
+    source_path: str,
+    checked_at: date,
+) -> list[dict[str, Any]]:
+    claims: list[dict[str, Any]] = []
+    for line_ref, line in enumerate(lines, start=1):
+        for match in DATE_CLAIM_RE.finditer(line):
+            try:
+                claim_date = date.fromisoformat(match.group("date"))
+            except ValueError:
+                continue
+            if claim_date > checked_at:
+                claim_kind, currentness_blocking = classify_future_date_claim(line)
+                claims.append(
+                    {
+                        "path": source_path,
+                        "line_ref": line_ref,
+                        "date": claim_date.isoformat(),
+                        "claim_kind": claim_kind,
+                        "currentness_blocking": currentness_blocking,
+                        "snippet": line.strip(),
+                    }
+                )
+    return claims
 
 
 def candidate_from_table_row(
@@ -283,12 +337,14 @@ def inventory_sources(
     expected_total: int = DEFAULT_EXPECTED_TOTAL,
     source_prefix: str = DEFAULT_SOURCE_PREFIX,
     no_row_tracking_issue_refs: list[str] | None = None,
+    checked_at: date | None = None,
     include_candidates: bool = True,
 ) -> dict[str, Any]:
     candidates_by_id: dict[str, Candidate] = {}
     source_errors: list[dict[str, str]] = []
     sources_checked: list[str] = []
     marker_counts_by_source: dict[str, dict[str, int]] = {}
+    future_claims: list[dict[str, Any]] = []
     tracking_issue_refs = issue_refs(no_row_tracking_issue_refs or [])
 
     for path in paths:
@@ -302,6 +358,14 @@ def inventory_sources(
             )
             continue
         marker_counts_by_source[source_path] = unstructured_marker_counts(lines)
+        if checked_at is not None:
+            future_claims.extend(
+                future_date_claims(
+                    lines,
+                    source_path=source_path,
+                    checked_at=checked_at,
+                )
+            )
 
         for line_ref, line in enumerate(lines, start=1):
             line_candidates = [
@@ -374,6 +438,35 @@ def inventory_sources(
         if item.get("unstructured_marker_total", 0) > 0
         and len(item.get("tracking_issue_refs", [])) > 0
     )
+    blocking_future_claims = [
+        claim for claim in future_claims if claim.get("currentness_blocking") is True
+    ]
+    sources_with_future_claims = sorted(
+        {claim["path"] for claim in future_claims if isinstance(claim.get("path"), str)}
+    )
+    sources_with_blocking_future_claims = sorted(
+        {
+            claim["path"]
+            for claim in blocking_future_claims
+            if isinstance(claim.get("path"), str)
+        }
+    )
+    source_currentness = {
+        "evaluated": checked_at is not None,
+        "checked_at": checked_at.isoformat() if checked_at is not None else None,
+        "future_date_claims_total": len(future_claims),
+        "sources_with_future_date_claims": sources_with_future_claims,
+        "sources_with_future_date_claims_total": len(sources_with_future_claims),
+        "blocking_future_date_claims_total": len(blocking_future_claims),
+        "sources_with_blocking_future_date_claims": (
+            sources_with_blocking_future_claims
+        ),
+        "sources_with_blocking_future_date_claims_total": (
+            len(sources_with_blocking_future_claims)
+        ),
+        "current": checked_at is None or not blocking_future_claims,
+        "future_date_claims": future_claims,
+    }
 
     row_count = len(candidates)
     status = (
@@ -402,6 +495,7 @@ def inventory_sources(
         "unique_candidate_rows": row_count,
         "missing_candidate_rows": max(expected_total - row_count, 0),
         "prompt_sources_checked": sorted(sources_checked),
+        "source_currentness": source_currentness,
         "source_candidate_coverage": {
             "sources_checked": len(sources_checked),
             "sources_with_candidates": len(sources_with_candidates),
@@ -462,6 +556,29 @@ def report_to_text(report: dict[str, Any]) -> str:
         lines.append(
             f"NO_ROWS: {source_path} rows=0 unstructured_markers={marker_total}"
         )
+    source_currentness = report.get("source_currentness")
+    if isinstance(source_currentness, dict) and source_currentness.get("evaluated"):
+        lines.append(
+            "CURRENTNESS: "
+            f"checked_at={source_currentness.get('checked_at')} "
+            f"current={source_currentness.get('current')} "
+            f"future_date_claims="
+            f"{source_currentness.get('future_date_claims_total')} "
+            f"blocking_future_date_claims="
+            f"{source_currentness.get('blocking_future_date_claims_total')}"
+        )
+        future_claims = source_currentness.get("future_date_claims", [])
+        if isinstance(future_claims, list):
+            for claim in future_claims:
+                if not isinstance(claim, dict):
+                    continue
+                lines.append(
+                    "FUTURE_DATE: "
+                    f"{claim.get('path')}:{claim.get('line_ref')} "
+                    f"date={claim.get('date')} "
+                    f"kind={claim.get('claim_kind')} "
+                    f"blocking={claim.get('currentness_blocking')}"
+                )
     for error in report["source_errors"]:
         lines.append(f"ERROR: {error['path']} {error['error']}")
     return "\n".join(lines)
@@ -475,6 +592,13 @@ def positive_int(value: str) -> int:
     if parsed <= 0:
         raise argparse.ArgumentTypeError("must be > 0")
     return parsed
+
+
+def iso_date(value: str) -> date:
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be YYYY-MM-DD") from exc
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -516,6 +640,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Omit candidate_rows from JSON output.",
     )
     parser.add_argument(
+        "--checked-at",
+        type=iso_date,
+        help=(
+            "Check source-doc date claims against this YYYY-MM-DD date and "
+            "report future-dated claims."
+        ),
+    )
+    parser.add_argument(
         "--format",
         choices=("json", "text"),
         default="text",
@@ -537,6 +669,7 @@ def main(argv: list[str] | None = None) -> int:
         expected_total=args.expected_total,
         source_prefix=args.source_prefix,
         no_row_tracking_issue_refs=args.no_row_tracking_issue_ref,
+        checked_at=args.checked_at,
         include_candidates=not args.summary_only,
     )
     if args.format == "json":

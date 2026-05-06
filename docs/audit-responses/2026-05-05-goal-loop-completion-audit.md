@@ -185,9 +185,10 @@
   discovery evidence.
 - [근거] `python3 scripts/extract_goal_loop_source_row_candidates.py
   <12 prompt source files> --summary-only --require-complete --format text
+  --checked-at 2026-05-06
   --no-row-tracking-issue-ref https://github.com/jeong-sik/masc-mcp/issues/13265
   --no-row-tracking-issue-ref https://github.com/jeong-sik/masc-mcp/issues/13636`
-  checked at 2026-05-06T16:03:11+09:00, confidence High: exits non-zero with
+  checked at 2026-05-06T17:12:00+09:00, confidence High: exits non-zero with
   `rows=132 expected=206 missing=74 sources=12 errors=0`. This conservative
   extractor records only explicit IDs, explicit S/F anti-pattern rows,
   markdown table ID rows, and numbered audit sections; it does not expand
@@ -200,7 +201,12 @@
   Those 7 files are not empty: the inventory separately records 897
   unstructured headings, table rows, numbered items, and bullet items that are
   not stable strict-corpus rows and therefore cannot satisfy the 206-row gate.
-  All 7 no-row marker buckets carry tracking refs to #13265 and #13636.
+  All 7 no-row marker buckets carry tracking refs to #13265 and #13636. The
+  inventory also evaluates source currentness at `checked_at=2026-05-06`: it
+  records 7 future-dated claims, classifies future due dates and forecast dates
+  separately, and blocks currentness on 3 future-dated source snapshot/report
+  claims in `artifact_synthesis.md`, `audit_derived_state.md`, and
+  `progress-evaluation.md`.
 - [근거] `gh pr view 13577 --repo jeong-sik/masc-mcp --json
   number,state,isDraft,mergeable,mergeStateStatus,labels,url`,
   `gh issue view 13265 --repo jeong-sik/masc-mcp --json number,state,url`, and
@@ -241,6 +247,10 @@
   are tracked as non-corpus evidence and do not satisfy the strict row gate.
   Completion-audit evidence validates all 7 no-row marker buckets have tracking
   refs and reports 2 unique tracking issue refs (#13265 and #13636). The
+  source-row inventory currentness block is structurally validated too:
+  `future_date_claims_total=7`,
+  `blocking_future_date_claims_total=3`, and
+  `source_currentness_current=false`. The
   checklist maps all 21 prompt requirements to concrete artifacts and blockers
   across all 12 prompt source documents: 2 `PASS`, 17 `PARTIAL`, and 2
   `BLOCKED` requirements, with all 19 non-PASS rows carrying valid GitHub issue

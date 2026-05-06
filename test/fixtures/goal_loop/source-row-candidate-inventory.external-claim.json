@@ -1,132 +1,4 @@
 {
-  "schema_version": 1,
-  "inventory_id": "goal-loop-explicit-source-row-candidates-v1",
-  "source_catalog_id": "goal-loop-206-audit-external-claim-2026-05-05",
-  "status": "INCOMPLETE",
-  "result": "EXPLICIT_SOURCE_ROWS_INSUFFICIENT",
-  "extraction_policy": "Conservative explicit rows only: exact finding IDs, exact S/F anti-pattern IDs, markdown table ID rows, and numbered audit section headings in the two audit reports. Ranges and roadmap phase bullets are not expanded into invented rows.",
-  "expected_findings_total": 206,
-  "unique_candidate_rows": 132,
-  "missing_candidate_rows": 74,
-  "prompt_sources_checked": [
-    "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
-    "prompt_corpus/GOAL_LOOP/INTEGRATED_IMPROVEMENT_DESIGN.md",
-    "prompt_corpus/GOAL_LOOP/RUTHLESS_JUDGMENT.md",
-    "prompt_corpus/GOAL_LOOP/artifact_synthesis.md",
-    "prompt_corpus/GOAL_LOOP/audit_derived_state.md",
-    "prompt_corpus/GOAL_LOOP/deep_audit_dashboard_heuristic.md",
-    "prompt_corpus/GOAL_LOOP/fundamental_roadmap.md",
-    "prompt_corpus/GOAL_LOOP/issues_analysis_done_vs_todo.md",
-    "prompt_corpus/GOAL_LOOP/live_incident_analysis.md",
-    "prompt_corpus/GOAL_LOOP/llm_compatibility.agent.final.md",
-    "prompt_corpus/GOAL_LOOP/masc_final_diagnosis.md",
-    "prompt_corpus/GOAL_LOOP/progress-evaluation.md"
-  ],
-  "source_candidate_coverage": {
-    "sources_checked": 12,
-    "sources_with_candidates": 5,
-    "sources_without_candidates": 7,
-    "unstructured_sources_without_candidates": 7,
-    "unstructured_markers_without_candidates": 897,
-    "no_candidate_sources_with_tracking_issue_refs": 7
-  },
-  "sources_without_candidates": [
-    "prompt_corpus/GOAL_LOOP/INTEGRATED_IMPROVEMENT_DESIGN.md",
-    "prompt_corpus/GOAL_LOOP/RUTHLESS_JUDGMENT.md",
-    "prompt_corpus/GOAL_LOOP/fundamental_roadmap.md",
-    "prompt_corpus/GOAL_LOOP/issues_analysis_done_vs_todo.md",
-    "prompt_corpus/GOAL_LOOP/live_incident_analysis.md",
-    "prompt_corpus/GOAL_LOOP/masc_final_diagnosis.md",
-    "prompt_corpus/GOAL_LOOP/progress-evaluation.md"
-  ],
-  "sources_without_candidate_details": [
-    {
-      "path": "prompt_corpus/GOAL_LOOP/INTEGRATED_IMPROVEMENT_DESIGN.md",
-      "markdown_headings": 53,
-      "markdown_table_rows": 51,
-      "numbered_items": 18,
-      "bullet_items": 6,
-      "unstructured_marker_total": 128,
-      "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13265",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
-      ]
-    },
-    {
-      "path": "prompt_corpus/GOAL_LOOP/RUTHLESS_JUDGMENT.md",
-      "markdown_headings": 16,
-      "markdown_table_rows": 27,
-      "numbered_items": 0,
-      "bullet_items": 0,
-      "unstructured_marker_total": 43,
-      "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13265",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
-      ]
-    },
-    {
-      "path": "prompt_corpus/GOAL_LOOP/fundamental_roadmap.md",
-      "markdown_headings": 111,
-      "markdown_table_rows": 67,
-      "numbered_items": 11,
-      "bullet_items": 51,
-      "unstructured_marker_total": 240,
-      "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13265",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
-      ]
-    },
-    {
-      "path": "prompt_corpus/GOAL_LOOP/issues_analysis_done_vs_todo.md",
-      "markdown_headings": 33,
-      "markdown_table_rows": 126,
-      "numbered_items": 40,
-      "bullet_items": 10,
-      "unstructured_marker_total": 209,
-      "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13265",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
-      ]
-    },
-    {
-      "path": "prompt_corpus/GOAL_LOOP/live_incident_analysis.md",
-      "markdown_headings": 23,
-      "markdown_table_rows": 8,
-      "numbered_items": 13,
-      "bullet_items": 28,
-      "unstructured_marker_total": 72,
-      "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13265",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
-      ]
-    },
-    {
-      "path": "prompt_corpus/GOAL_LOOP/masc_final_diagnosis.md",
-      "markdown_headings": 34,
-      "markdown_table_rows": 21,
-      "numbered_items": 0,
-      "bullet_items": 0,
-      "unstructured_marker_total": 55,
-      "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13265",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
-      ]
-    },
-    {
-      "path": "prompt_corpus/GOAL_LOOP/progress-evaluation.md",
-      "markdown_headings": 34,
-      "markdown_table_rows": 45,
-      "numbered_items": 0,
-      "bullet_items": 71,
-      "unstructured_marker_total": 150,
-      "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13265",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
-      ]
-    }
-  ],
-  "source_errors_total": 0,
-  "source_errors": [],
   "candidates_by_file": [
     {
       "path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
@@ -174,5 +46,211 @@
       "rule": "ocaml_switch_finding_id",
       "unique_candidate_rows": 6
     }
-  ]
+  ],
+  "expected_findings_total": 206,
+  "extraction_policy": "Conservative explicit rows only: exact finding IDs, exact S/F anti-pattern IDs, markdown table ID rows, and numbered audit section headings in the two audit reports. Ranges and roadmap phase bullets are not expanded into invented rows.",
+  "inventory_id": "goal-loop-explicit-source-row-candidates-v1",
+  "missing_candidate_rows": 74,
+  "prompt_sources_checked": [
+    "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+    "prompt_corpus/GOAL_LOOP/INTEGRATED_IMPROVEMENT_DESIGN.md",
+    "prompt_corpus/GOAL_LOOP/RUTHLESS_JUDGMENT.md",
+    "prompt_corpus/GOAL_LOOP/artifact_synthesis.md",
+    "prompt_corpus/GOAL_LOOP/audit_derived_state.md",
+    "prompt_corpus/GOAL_LOOP/deep_audit_dashboard_heuristic.md",
+    "prompt_corpus/GOAL_LOOP/fundamental_roadmap.md",
+    "prompt_corpus/GOAL_LOOP/issues_analysis_done_vs_todo.md",
+    "prompt_corpus/GOAL_LOOP/live_incident_analysis.md",
+    "prompt_corpus/GOAL_LOOP/llm_compatibility.agent.final.md",
+    "prompt_corpus/GOAL_LOOP/masc_final_diagnosis.md",
+    "prompt_corpus/GOAL_LOOP/progress-evaluation.md"
+  ],
+  "result": "EXPLICIT_SOURCE_ROWS_INSUFFICIENT",
+  "schema_version": 1,
+  "source_candidate_coverage": {
+    "no_candidate_sources_with_tracking_issue_refs": 7,
+    "sources_checked": 12,
+    "sources_with_candidates": 5,
+    "sources_without_candidates": 7,
+    "unstructured_markers_without_candidates": 897,
+    "unstructured_sources_without_candidates": 7
+  },
+  "source_catalog_id": "goal-loop-206-audit-external-claim-2026-05-05",
+  "source_currentness": {
+    "blocking_future_date_claims_total": 3,
+    "checked_at": "2026-05-06",
+    "current": false,
+    "evaluated": true,
+    "future_date_claims": [
+      {
+        "claim_kind": "scheduled_due_date",
+        "currentness_blocking": false,
+        "date": "2026-05-07",
+        "line_ref": 395,
+        "path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+        "snippet": "owner = \"Provider\ud300\"; due = \"2026-05-07\"; estimated_hours = 24 };"
+      },
+      {
+        "claim_kind": "scheduled_due_date",
+        "currentness_blocking": false,
+        "date": "2026-05-12",
+        "line_ref": 399,
+        "path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+        "snippet": "owner = \"Config\ud300\"; due = \"2026-05-12\"; estimated_hours = 40 };"
+      },
+      {
+        "claim_kind": "scheduled_due_date",
+        "currentness_blocking": false,
+        "date": "2026-05-12",
+        "line_ref": 403,
+        "path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+        "snippet": "owner = \"Keeper\ud300\"; due = \"2026-05-12\"; estimated_hours = 32 };"
+      },
+      {
+        "claim_kind": "source_snapshot_date",
+        "currentness_blocking": true,
+        "date": "2026-05-19",
+        "line_ref": 764,
+        "path": "prompt_corpus/GOAL_LOOP/audit_derived_state.md",
+        "snippet": "*\ubcf4\uace0\uc11c \uc791\uc131\uc77c: 2026-05-19*"
+      },
+      {
+        "claim_kind": "source_snapshot_date",
+        "currentness_blocking": true,
+        "date": "2026-07-09",
+        "line_ref": 1,
+        "path": "prompt_corpus/GOAL_LOOP/progress-evaluation.md",
+        "snippet": "# \uac1c\uc120 \uc9c4\ucc99\ub3c4 \ud3c9\uac00 \ub9ac\ud3ec\ud2b8 (2026-04-28 \u2192 2026-07-09)"
+      },
+      {
+        "claim_kind": "forecast_date",
+        "currentness_blocking": false,
+        "date": "2026-10-09",
+        "line_ref": 205,
+        "path": "prompt_corpus/GOAL_LOOP/progress-evaluation.md",
+        "snippet": "## 6. 3\uac1c\uc6d4 \ud6c4 \uc804\ub9dd (2026-10-09 \uae30\uc900 \uc608\uce21)"
+      },
+      {
+        "claim_kind": "source_snapshot_date",
+        "currentness_blocking": true,
+        "date": "2026-05-12",
+        "line_ref": 3,
+        "path": "prompt_corpus/GOAL_LOOP/artifact_synthesis.md",
+        "snippet": "> **Generated**: 2026-05-12"
+      }
+    ],
+    "future_date_claims_total": 7,
+    "sources_with_blocking_future_date_claims": [
+      "prompt_corpus/GOAL_LOOP/artifact_synthesis.md",
+      "prompt_corpus/GOAL_LOOP/audit_derived_state.md",
+      "prompt_corpus/GOAL_LOOP/progress-evaluation.md"
+    ],
+    "sources_with_blocking_future_date_claims_total": 3,
+    "sources_with_future_date_claims": [
+      "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+      "prompt_corpus/GOAL_LOOP/artifact_synthesis.md",
+      "prompt_corpus/GOAL_LOOP/audit_derived_state.md",
+      "prompt_corpus/GOAL_LOOP/progress-evaluation.md"
+    ],
+    "sources_with_future_date_claims_total": 4
+  },
+  "source_errors": [],
+  "source_errors_total": 0,
+  "sources_without_candidate_details": [
+    {
+      "bullet_items": 6,
+      "markdown_headings": 53,
+      "markdown_table_rows": 51,
+      "numbered_items": 18,
+      "path": "prompt_corpus/GOAL_LOOP/INTEGRATED_IMPROVEMENT_DESIGN.md",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13265",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ],
+      "unstructured_marker_total": 128
+    },
+    {
+      "bullet_items": 0,
+      "markdown_headings": 16,
+      "markdown_table_rows": 27,
+      "numbered_items": 0,
+      "path": "prompt_corpus/GOAL_LOOP/RUTHLESS_JUDGMENT.md",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13265",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ],
+      "unstructured_marker_total": 43
+    },
+    {
+      "bullet_items": 51,
+      "markdown_headings": 111,
+      "markdown_table_rows": 67,
+      "numbered_items": 11,
+      "path": "prompt_corpus/GOAL_LOOP/fundamental_roadmap.md",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13265",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ],
+      "unstructured_marker_total": 240
+    },
+    {
+      "bullet_items": 10,
+      "markdown_headings": 33,
+      "markdown_table_rows": 126,
+      "numbered_items": 40,
+      "path": "prompt_corpus/GOAL_LOOP/issues_analysis_done_vs_todo.md",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13265",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ],
+      "unstructured_marker_total": 209
+    },
+    {
+      "bullet_items": 28,
+      "markdown_headings": 23,
+      "markdown_table_rows": 8,
+      "numbered_items": 13,
+      "path": "prompt_corpus/GOAL_LOOP/live_incident_analysis.md",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13265",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ],
+      "unstructured_marker_total": 72
+    },
+    {
+      "bullet_items": 0,
+      "markdown_headings": 34,
+      "markdown_table_rows": 21,
+      "numbered_items": 0,
+      "path": "prompt_corpus/GOAL_LOOP/masc_final_diagnosis.md",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13265",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ],
+      "unstructured_marker_total": 55
+    },
+    {
+      "bullet_items": 71,
+      "markdown_headings": 34,
+      "markdown_table_rows": 45,
+      "numbered_items": 0,
+      "path": "prompt_corpus/GOAL_LOOP/progress-evaluation.md",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13265",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ],
+      "unstructured_marker_total": 150
+    }
+  ],
+  "sources_without_candidates": [
+    "prompt_corpus/GOAL_LOOP/INTEGRATED_IMPROVEMENT_DESIGN.md",
+    "prompt_corpus/GOAL_LOOP/RUTHLESS_JUDGMENT.md",
+    "prompt_corpus/GOAL_LOOP/fundamental_roadmap.md",
+    "prompt_corpus/GOAL_LOOP/issues_analysis_done_vs_todo.md",
+    "prompt_corpus/GOAL_LOOP/live_incident_analysis.md",
+    "prompt_corpus/GOAL_LOOP/masc_final_diagnosis.md",
+    "prompt_corpus/GOAL_LOOP/progress-evaluation.md"
+  ],
+  "status": "INCOMPLETE",
+  "unique_candidate_rows": 132
 }

@@ -481,6 +481,109 @@ def source_row_candidate_inventory_evidence(
     no_candidate_details = (
         no_candidate_details_raw if isinstance(no_candidate_details_raw, list) else []
     )
+    source_currentness_raw = source_row_candidate_inventory.get("source_currentness")
+    source_currentness = (
+        source_currentness_raw if isinstance(source_currentness_raw, dict) else {}
+    )
+    future_date_claims_raw = source_currentness.get("future_date_claims", [])
+    future_date_claims = (
+        future_date_claims_raw if isinstance(future_date_claims_raw, list) else []
+    )
+    invalid_future_date_claims = []
+    future_date_claim_paths = set()
+    blocking_future_date_claim_paths = set()
+    for item in future_date_claims:
+        if not isinstance(item, dict):
+            invalid_future_date_claims.append("not_object")
+            continue
+        path = item.get("path")
+        line_ref = item.get("line_ref")
+        date_claim = item.get("date")
+        if not isinstance(path, str):
+            invalid_future_date_claims.append("missing_path")
+            continue
+        future_date_claim_paths.add(path)
+        if not isinstance(line_ref, int) or line_ref <= 0:
+            invalid_future_date_claims.append(path)
+        if not isinstance(date_claim, str) or not date_claim:
+            invalid_future_date_claims.append(path)
+        if not isinstance(item.get("claim_kind"), str) or not item.get("claim_kind"):
+            invalid_future_date_claims.append(path)
+        currentness_blocking = item.get("currentness_blocking")
+        if not isinstance(currentness_blocking, bool):
+            invalid_future_date_claims.append(path)
+        elif currentness_blocking:
+            blocking_future_date_claim_paths.add(path)
+    source_currentness_evaluated = source_currentness.get("evaluated") is True
+    future_date_claims_total_matches = source_currentness.get(
+        "future_date_claims_total"
+    ) == len(future_date_claims)
+    sources_with_future_date_claims_raw = source_currentness.get(
+        "sources_with_future_date_claims"
+    )
+    sources_with_future_date_claims = (
+        sources_with_future_date_claims_raw
+        if isinstance(sources_with_future_date_claims_raw, list)
+        else []
+    )
+    future_date_sources_match = (
+        set(item for item in sources_with_future_date_claims if isinstance(item, str))
+        == future_date_claim_paths
+    )
+    future_date_sources_count_matches = source_currentness.get(
+        "sources_with_future_date_claims_total"
+    ) == len(future_date_claim_paths)
+    blocking_future_date_claims_total = sum(
+        1
+        for item in future_date_claims
+        if isinstance(item, dict) and item.get("currentness_blocking") is True
+    )
+    blocking_future_date_claims_total_matches = (
+        source_currentness.get("blocking_future_date_claims_total")
+        == blocking_future_date_claims_total
+    )
+    sources_with_blocking_future_date_claims_raw = source_currentness.get(
+        "sources_with_blocking_future_date_claims"
+    )
+    sources_with_blocking_future_date_claims = (
+        sources_with_blocking_future_date_claims_raw
+        if isinstance(sources_with_blocking_future_date_claims_raw, list)
+        else []
+    )
+    blocking_future_date_sources_match = (
+        set(
+            item
+            for item in sources_with_blocking_future_date_claims
+            if isinstance(item, str)
+        )
+        == blocking_future_date_claim_paths
+    )
+    blocking_future_date_sources_count_matches = source_currentness.get(
+        "sources_with_blocking_future_date_claims_total"
+    ) == len(blocking_future_date_claim_paths)
+    source_currentness_consistent = (
+        source_currentness.get("evaluated") is False
+        and source_currentness.get("checked_at") is None
+        and source_currentness.get("future_date_claims_total") == 0
+        and source_currentness.get("sources_with_future_date_claims_total") == 0
+        and source_currentness.get("blocking_future_date_claims_total") == 0
+        and source_currentness.get("sources_with_blocking_future_date_claims_total")
+        == 0
+        and source_currentness.get("current") is True
+        and len(future_date_claims) == 0
+    ) or (
+        source_currentness_evaluated
+        and isinstance(source_currentness.get("checked_at"), str)
+        and future_date_claims_total_matches
+        and future_date_sources_match
+        and future_date_sources_count_matches
+        and blocking_future_date_claims_total_matches
+        and blocking_future_date_sources_match
+        and blocking_future_date_sources_count_matches
+        and source_currentness.get("current")
+        == (blocking_future_date_claims_total == 0)
+        and not invalid_future_date_claims
+    )
     no_candidate_detail_paths = {
         item.get("path")
         for item in no_candidate_details
@@ -598,6 +701,7 @@ def source_row_candidate_inventory_evidence(
         and unstructured_source_count_matches
         and unstructured_marker_count_matches
         and no_candidate_tracking_source_count_matches
+        and source_currentness_consistent
         and no_candidate_source_overlap
         and len(sources) >= 12
         and source_row_candidate_inventory.get("source_errors_total") == 0
@@ -654,6 +758,33 @@ def source_row_candidate_inventory_evidence(
         "no_candidate_tracking_source_count_matches": (
             no_candidate_tracking_source_count_matches
         ),
+        "source_currentness_evaluated": source_currentness_evaluated,
+        "source_currentness_checked_at": source_currentness.get("checked_at"),
+        "source_currentness_current": source_currentness.get("current"),
+        "source_currentness_consistent": source_currentness_consistent,
+        "future_date_claims_total": source_currentness.get("future_date_claims_total"),
+        "future_date_claims_count": len(future_date_claims),
+        "future_date_claims_total_matches": future_date_claims_total_matches,
+        "sources_with_future_date_claims_total": source_currentness.get(
+            "sources_with_future_date_claims_total"
+        ),
+        "future_date_sources_count_matches": future_date_sources_count_matches,
+        "future_date_sources_match": future_date_sources_match,
+        "blocking_future_date_claims_total": source_currentness.get(
+            "blocking_future_date_claims_total"
+        ),
+        "blocking_future_date_claims_count": blocking_future_date_claims_total,
+        "blocking_future_date_claims_total_matches": (
+            blocking_future_date_claims_total_matches
+        ),
+        "sources_with_blocking_future_date_claims_total": source_currentness.get(
+            "sources_with_blocking_future_date_claims_total"
+        ),
+        "blocking_future_date_sources_count_matches": (
+            blocking_future_date_sources_count_matches
+        ),
+        "blocking_future_date_sources_match": blocking_future_date_sources_match,
+        "invalid_future_date_claims": invalid_future_date_claims,
         "no_candidate_source_overlap": no_candidate_source_overlap,
         "source_errors_total": source_row_candidate_inventory.get(
             "source_errors_total"

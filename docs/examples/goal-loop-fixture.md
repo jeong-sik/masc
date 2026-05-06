@@ -168,7 +168,13 @@ still contain unstructured requirement markers; those markers remain intake
 evidence only and must not be promoted to strict rows without stable row IDs,
 source refs, severity/actionability, and replay expectations. No-row marker
 buckets with nonzero marker counts must carry tracking issue refs so the
-remaining source-level prompt work is owned instead of silently parked.
+remaining source-level prompt work is owned instead of silently parked. When
+the source inventory is regenerated from external prompt docs, pass
+`--checked-at <YYYY-MM-DD>` so future-dated report/generated snapshot claims
+are recorded separately from non-blocking future due dates or forecast dates.
+That currentness evidence is still not a strict corpus; it is a guardrail that
+prevents stale or impossible source snapshots from being treated as current
+Goal evidence.
 
 ```bash
 python3 scripts/orient_goal_loop_logs.py \

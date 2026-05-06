@@ -163,12 +163,12 @@
   so closeout evidence can distinguish source-document itemized IDs from a
   complete row-corpus artifact.
 - [근거] `python3 scripts/observe_goal_loop_logs.py
-  /Users/dancer/me/.masc/events/2026-05/06.jsonl
-  /Users/dancer/me/.masc/transition-audit/2026-05/06.jsonl` plus
+  <MASC_BASE_PATH>/.masc/events/2026-05/06.jsonl
+  <MASC_BASE_PATH>/.masc/transition-audit/2026-05/06.jsonl` plus
   `python3 scripts/verify_goal_loop_logs.py
   /tmp/goal-loop-orient-live-post-act.json --post-act-verify
   --evidence-kind live_runtime_logs --evidence-source
-  /Users/dancer/me/.masc/events/2026-05/06.jsonl,/Users/dancer/me/.masc/transition-audit/2026-05/06.jsonl
+  <MASC_BASE_PATH>/.masc/events/2026-05/06.jsonl,<MASC_BASE_PATH>/.masc/transition-audit/2026-05/06.jsonl
   --evidence-window-start 2026-05-06T00:04:11Z --evidence-window-end
   2026-05-06T00:21:24Z --checked-at 2026-05-06T00:21:24Z` checked at
   2026-05-06T09:21:24+09:00, confidence High: scans 21 live post-ACT
@@ -176,8 +176,8 @@
   Verify `PASS` with explicit evidence-window metadata.
 - [근거] `curl -sS http://127.0.0.1:8935/health` checked at
   2026-05-06T09:21:24+09:00, confidence High: local runtime is live on
-  port 8935 with `effective_base_path=/Users/dancer/me`,
-  `effective_masc_root=/Users/dancer/me/.masc`, `started_at` after the ACT PR
+  port 8935 with `effective_base_path=<MASC_BASE_PATH>`,
+  `effective_masc_root=<MASC_BASE_PATH>/.masc`, `started_at` after the ACT PR
   merge window, and startup phase `ready`.
 - [근거] `ruff check scripts/verify_goal_loop_logs.py
   scripts/goal_loop_status.py scripts/goal_loop_completion_audit.py

@@ -405,7 +405,7 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         corpus["source_catalog_id"] = "wrong-catalog"
         source = third["source"]
         assert isinstance(source, dict)
-        source["path"] = "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md"
+        source["path"] = "/home/example/Downloads/GOAL_LOOP_INTEGRATION.md"
 
         audit = goal_loop_completion_audit.build_completion_audit(
             complete_status(),

@@ -540,7 +540,7 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         second["finding_id"] = first["finding_id"]
         source = third["source"]
         assert isinstance(source, dict)
-        source["path"] = "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md"
+        source["path"] = "/home/example/Downloads/GOAL_LOOP_INTEGRATION.md"
 
         report = orient_goal_loop_logs.orient_scan(
             scan,
@@ -556,6 +556,21 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertFalse(strict_summary["validated"])
         self.assertIn("finding_ids_must_be_unique", strict_summary["errors"])
         self.assertIn("contains_user_local_path", strict_summary["errors"])
+
+    def test_strict_row_corpus_requires_integer_expected_total(self) -> None:
+        missing = synthetic_strict_row_corpus()
+        missing.pop("expected_findings_total")
+        missing_report = orient_goal_loop_logs.validate_strict_row_corpus(missing)
+
+        self.assertFalse(missing_report["validated"])
+        self.assertIn("expected_findings_total_must_be_int", missing_report["errors"])
+
+        string_total = synthetic_strict_row_corpus()
+        string_total["expected_findings_total"] = "206"
+        string_report = orient_goal_loop_logs.validate_strict_row_corpus(string_total)
+
+        self.assertFalse(string_report["validated"])
+        self.assertIn("expected_findings_total_must_be_int", string_report["errors"])
 
     def test_orient_catalog_validates_source_identity_hash_and_line_count(self) -> None:
         content = "206건 감사 결과\nR-FATAL-1\n"
@@ -1058,7 +1073,7 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         first = findings[0]
         assert isinstance(first, dict)
         first["source"] = {
-            "path": "/Users/dancer/Downloads/source.md",
+            "path": "C:\\Users\\example\\source.md",
             "line_refs": [1],
         }
 

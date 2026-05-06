@@ -23,6 +23,9 @@ SOURCE_STRUCTURED_ITEM_ID_RE = re.compile(
     r"\b(?:R-FATAL|CC|CD|CE|CF|NF|NEW|P-[A-Z]+)-[0-9]+\b|\b[SF][0-9]{2}\b"
 )
 SHA256_RE = re.compile(r"\A[0-9a-f]{64}\Z")
+USER_LOCAL_PATH_RE = re.compile(
+    r"(?i)(?:^|[\s\"'=(:,])(?:/(?:Users|home)/[^/\s,]+|[A-Z]:[\\/]+Users[\\/]+[^\\/,\s]+|[\\/]+Users[\\/]+[^\\/,\s]+)"
+)
 STRICT_ROW_CORPUS_SOURCE_PREFIX = "prompt_corpus/GOAL_LOOP/"
 STRICT_ROW_CORPUS_SEVERITIES = {"critical", "warning", "info"}
 STRICT_ROW_CORPUS_ERROR_LIMIT = 20
@@ -271,6 +274,8 @@ def validate_strict_row_corpus(
         errors.append("status_must_be_COMPLETE")
     if catalog is not None and expected_total != catalog.get("expected_findings_total"):
         errors.append("expected_findings_total_mismatch")
+    if not isinstance(expected_total, int):
+        errors.append("expected_findings_total_must_be_int")
     if not isinstance(findings_raw, list):
         errors.append("findings_must_be_list")
     if isinstance(expected_total, int) and len(findings) != expected_total:
@@ -393,7 +398,7 @@ def validate_strict_row_corpus(
 
 def contains_user_local_path(value: Any) -> bool:
     if isinstance(value, str):
-        return "/Users/" in value
+        return USER_LOCAL_PATH_RE.search(value) is not None
     if isinstance(value, list):
         return any(contains_user_local_path(item) for item in value)
     if isinstance(value, dict):

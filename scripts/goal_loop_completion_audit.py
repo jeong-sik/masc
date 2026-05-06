@@ -16,9 +16,15 @@ from pathlib import Path
 from typing import Any, TextIO
 
 try:
-    from scripts.orient_goal_loop_logs import validate_strict_row_corpus
+    from scripts.orient_goal_loop_logs import (
+        contains_user_local_path,
+        validate_strict_row_corpus,
+    )
 except ModuleNotFoundError:  # pragma: no cover - direct script execution path
-    from orient_goal_loop_logs import validate_strict_row_corpus
+    from orient_goal_loop_logs import (
+        contains_user_local_path,
+        validate_strict_row_corpus,
+    )
 
 
 POST_ACT_EVIDENCE_KINDS = {
@@ -83,16 +89,6 @@ def as_nonempty_str(value: Any) -> str | None:
         return None
     stripped = value.strip()
     return stripped if stripped else None
-
-
-def contains_user_local_path(value: Any) -> bool:
-    if isinstance(value, str):
-        return "/Users/" in value
-    if isinstance(value, list):
-        return any(contains_user_local_path(item) for item in value)
-    if isinstance(value, dict):
-        return any(contains_user_local_path(item) for item in value.values())
-    return False
 
 
 def criterion(

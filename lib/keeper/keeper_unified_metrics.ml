@@ -370,22 +370,20 @@ let error_category_of_no_result_outcome ~outcome ~error =
             string_contains_substring ~needle e_lower
           in
           (* starts_with checks first (more specific), then contains *)
-          if starts_with "invalid request" then "invalid_request"
-          else if starts_with "network error" then "network_error"
-          else if starts_with "internal error" then "internal_error"
-          else if starts_with "input to" then "input_budget_exceeded"
+          if starts_with "invalid request" then Some "invalid_request"
+          else if starts_with "network error" then Some "network_error"
+          else if starts_with "internal error" then Some "internal_error"
+          else if starts_with "input to" then Some "input_budget_exceeded"
           (* contains checks second (broader, order matters) *)
-          else if contains "turn outcome ambiguous" then "ambiguous_side_effect"
+          else if contains "turn outcome ambiguous" then Some "ambiguous_side_effect"
           else if contains "connection_failure"
-                  || contains "connection refused" then "network_error"
-          else if contains "timeout" || contains "timed out" then "timeout"
+                  || contains "connection refused" then Some "network_error"
+          else if contains "timeout" || contains "timed out" then Some "timeout"
           else if contains "context length"
-                  || contains "token budget" then "input_budget_exceeded"
-          else "other"
-      | _ -> "unknown")
-  | "skipped" -> "skipped"
-  | "cancelled" -> "cancelled"
-  | _ -> "not_applicable"
+                  || contains "token budget" then Some "input_budget_exceeded"
+          else Some "other"
+      | _ -> Some "unknown")
+  | _ -> None
 
 let has_visible_tool_signal (result : Keeper_agent_run.run_result) : bool =
   has_substantive_tool_calls result.tools_used
@@ -1009,7 +1007,10 @@ let append_decision_record
               `Assoc [
                 ("cascade_name", `String meta.cascade_name);
                 ("candidate_models", `List (List.map (fun s -> `String s) cascade_models));
-                ("error_category", `String error_category);
+                ( "error_category",
+                  match error_category with
+                  | Some category -> `String category
+                  | None -> `Null );
                 ("outcome", `String outcome);
                 ("usage_reported", `Bool false);
                 ("telemetry_reported", `Bool false);

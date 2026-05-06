@@ -368,7 +368,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               Keeper_turn_fsm.emit_transition
                 ~keeper_name:meta.name ~turn_id:keeper_turn_id
                 ~prev:Keeper_turn_fsm.Cascade_routing
-                Keeper_turn_fsm.Done;
+                (Keeper_turn_fsm.Failed
+                   (Keeper_turn_fsm.Failure_cascade_unavailable
+                      { base = effective_cascade_name;
+                        resolved = Some "ollama_saturated" }));
               Prometheus.inc_counter
                 Prometheus.metric_keeper_ollama_saturation_skip
                 ~labels:[ ("keeper", meta.name);

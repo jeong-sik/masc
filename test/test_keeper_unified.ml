@@ -3667,8 +3667,8 @@ let test_append_decision_record_preserves_no_result_skipped_outcome () =
         (json |> member "outcome" |> to_string);
       check string "telemetry skipped outcome persisted" "skipped"
         (telemetry |> member "outcome" |> to_string);
-      check string "skipped telemetry category" "skipped"
-        (telemetry |> member "error_category" |> to_string);
+      check bool "skipped telemetry category is null" true
+        Yojson.Safe.Util.(telemetry |> member "error_category" = `Null);
       check string "skipped telemetry coverage stage" "pre_dispatch"
         (telemetry |> member "coverage_stage" |> to_string);
       check string "skipped telemetry coverage reason" "skipped_turn"
@@ -3911,7 +3911,11 @@ let test_run_keeper_cycle_records_trajectory_source_contract () =
        "~terminal_reason_code:\"ollama_saturated\"");
   check bool "saturation skip is not recorded as error" true
     (source_file_contains "lib/keeper/keeper_unified_turn.ml"
-       "~activity_kind:\"keeper.turn_skipped\"");
+       "~terminal_reason_code:\"ollama_saturated\"\n\
+       \                ~activity_kind:\"keeper.turn_skipped\"");
+  check bool "saturation skip uses fsm-allowed cascade unavailable transition" true
+    (source_file_contains "lib/keeper/keeper_unified_turn.ml"
+       "Keeper_turn_fsm.Failure_cascade_unavailable");
   check bool "livelock block has durable terminal reason" true
     (source_file_contains "lib/keeper/keeper_unified_turn.ml"
        "Printf.sprintf \"turn_livelock:%s\"")

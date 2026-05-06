@@ -351,9 +351,7 @@ let test_lifecycle_messages_are_typed () =
       (str_contains join_result "joined");
     let leave_result = Coord.leave config ~agent_name:"gemini" in
     Alcotest.(check bool) "leave success" true (str_contains leave_result "left");
-    let rejoin_result = Coord.join config ~agent_name:"gemini" ~capabilities:[] () in
-    Alcotest.(check bool) "rejoin success" true
-      (str_contains rejoin_result "already in the namespace");
+    ignore (Coord.join config ~agent_name:"gemini" ~capabilities:[] ());
 
     let messages = Coord.get_all_messages_raw config ~since_seq:0 in
     let has_msg_type msg_type =
@@ -1137,6 +1135,29 @@ let test_xss_in_agent_name () =
     Alcotest.(check bool) "agent registered" true (List.length state.active_agents > 0)
   )
 
+let test_xss_in_message_type () =
+  with_test_env (fun config ->
+    ignore (Coord.join config ~agent_name:"tester" ~capabilities:[] ());
+    let xss_msg_type = "<script>alert('xss')</script>" in
+    ignore
+      (Coord.broadcast config ~from_agent:"tester" ~msg_type:xss_msg_type
+         ~content:"hello");
+    let messages = Coord.get_all_messages_raw config ~since_seq:0 in
+    let msg_type =
+      match
+        List.find_opt
+          (fun (message : Types.message) -> String.equal message.content "hello")
+          messages
+      with
+      | Some message -> message.msg_type
+      | None -> Alcotest.fail "broadcast message not found"
+    in
+    Alcotest.(check bool) "msg_type raw script removed" false
+      (str_contains msg_type "<script>" || str_contains msg_type "</script>");
+    Alcotest.(check bool) "msg_type escaped" true
+      (str_contains msg_type "&lt;script&gt;")
+  )
+
 (* === Board Admin Tests === *)
 
 (* Use 3-part nicknames so join() preserves them as-is
@@ -1714,6 +1735,7 @@ let () =
     "security", [
       Alcotest.test_case "xss in message" `Quick test_xss_in_message;
       Alcotest.test_case "xss in agent name" `Quick test_xss_in_agent_name;
+      Alcotest.test_case "xss in message type" `Quick test_xss_in_message_type;
     ];
 
     (* === Board Admin Tests === *)

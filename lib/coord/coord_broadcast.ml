@@ -70,7 +70,7 @@ let broadcast ?trace_context ?(msg_type = "broadcast") config ~from_agent ~conte
   let safe_msg_type =
     match String.trim msg_type with
     | "" -> "broadcast"
-    | value -> value
+    | value -> sanitize_message value
   in
   let msg = {
     seq;

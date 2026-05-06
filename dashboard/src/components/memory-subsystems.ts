@@ -573,6 +573,7 @@ function MemoryEntriesPanel({
 
 export function MemorySubsystems({ focus = 'overview' }: { readonly focus?: MemorySubsystemsFocus }) {
   const resource = useManagedAsyncResource<MemorySubsystemsResponse>(null)
+  const includeMemoryEntries = focus === 'entries'
 
   const keeperFilter = useSignal<string>('')
   const outcomeFilter = useSignal<string>('')
@@ -591,6 +592,7 @@ export function MemorySubsystems({ focus = 'overview' }: { readonly focus?: Memo
           keeper: keeperFilter.value || undefined,
           outcome: outcomeFilter.value || undefined,
           q: searchQuery.value || undefined,
+          includeMemoryEntries,
           signal,
         }),
       )
@@ -601,7 +603,7 @@ export function MemorySubsystems({ focus = 'overview' }: { readonly focus?: Memo
       resource.cancel()
       cleanup()
     }
-  }, [keeperFilter.value, outcomeFilter.value, searchQuery.value, resource])
+  }, [keeperFilter.value, outcomeFilter.value, searchQuery.value, includeMemoryEntries, resource])
 
   const { loading, error, data } = resource.state.value
   if (loading && !data) return html`<${LoadingState} label="기억 서브시스템 로드 중..." />`
@@ -661,6 +663,7 @@ export function MemorySubsystems({ focus = 'overview' }: { readonly focus?: Memo
 
   const showArch = useSignal(false)
   const focusEntries = focus === 'entries'
+  const showMemoryEntries = focusEntries || memoryEntries.length > 0
 
   return html`
     <div class="space-y-6">
@@ -670,16 +673,18 @@ export function MemorySubsystems({ focus = 'overview' }: { readonly focus?: Memo
         keeper checkpoint/history/memory bank는 Keeper Detail에서 확인합니다.
       </div>
 
-      <${MemoryEntriesPanel}
-        entries=${memoryEntries}
-        visibleEntries=${visibleMemoryEntries}
-        total=${memoryEntryTotal}
-        filtered=${memoryEntryFiltered}
-        knownKinds=${knownMemoryKinds}
-        activeKind=${memoryKindFilter.value}
-        onKindChange=${(kind: string) => { memoryKindFilter.value = kind }}
-        focused=${focusEntries}
-      />
+      ${showMemoryEntries ? html`
+        <${MemoryEntriesPanel}
+          entries=${memoryEntries}
+          visibleEntries=${visibleMemoryEntries}
+          total=${memoryEntryTotal}
+          filtered=${memoryEntryFiltered}
+          knownKinds=${knownMemoryKinds}
+          activeKind=${memoryKindFilter.value}
+          onKindChange=${(kind: string) => { memoryKindFilter.value = kind }}
+          focused=${focusEntries}
+        />
+      ` : null}
 
       ${focusEntries ? null : html`
 

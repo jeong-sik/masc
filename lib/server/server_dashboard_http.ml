@@ -103,8 +103,61 @@ let dashboard_memory_http_json request : Yojson.Safe.t =
   dashboard_board_json ?hearth ?author_filter ~sort_by ~exclude_system
     ~exclude_automation ~limit ~offset ()
 
-let dashboard_memory_subsystems_http_json ~(config : Coord_utils.config) request
+let memory_subsystems_entry_cache_ttl_sec = 30.0
+
+let memory_subsystems_entry_cache :
+    (string * float * (string * Keeper_memory_policy.keeper_memory_line) list)
+    option ref =
+  ref None
+
+let dashboard_memory_subsystems_include_entries request =
+  bool_query_param request "include_memory_entries" ~default:false
+  ||
+  match query_param request "focus" |> Option.map String.trim with
+  | Some "entries" -> true
+  | _ -> false
+
+let load_memory_subsystems_entries ~(config : Coord_utils.config) =
+  let now = Unix.gettimeofday () in
+  match !memory_subsystems_entry_cache with
+  | Some (base_path, cached_at, rows)
+    when String.equal base_path config.base_path
+         && now -. cached_at < memory_subsystems_entry_cache_ttl_sec ->
+      rows
+  | _ ->
+      let rows =
+        try
+          Keeper_types.keeper_names config
+          |> List.concat_map (fun keeper ->
+                 try
+                   let summary =
+                     Keeper_memory_recall.read_keeper_memory_summary config
+                       ~name:keeper ~max_bytes:120000 ~max_lines:180
+                       ~recent_limit:30
+                   in
+                   List.map
+                     (fun
+                       (row : Keeper_memory_policy.keeper_memory_line) ->
+                       (keeper, row))
+                     summary.recent_notes
+                 with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | _ -> [])
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | _ -> []
+      in
+      memory_subsystems_entry_cache :=
+        Some (config.base_path, now, rows);
+      rows
+
+let dashboard_memory_subsystems_http_json ~(config : Coord_utils.config)
+    ?include_memory_entries request
     : Yojson.Safe.t =
+  let include_memory_entries =
+    Option.value include_memory_entries
+      ~default:(dashboard_memory_subsystems_include_entries request)
+  in
   let limit =
     int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:500
   in
@@ -157,25 +210,8 @@ let dashboard_memory_subsystems_http_json ~(config : Coord_utils.config) request
       ]
   in
   let all_memory_entries =
-    try
-      Keeper_types.keeper_names config
-      |> List.concat_map (fun keeper ->
-             try
-               let summary =
-                 Keeper_memory_recall.read_keeper_memory_summary config
-                   ~name:keeper ~max_bytes:120000 ~max_lines:180
-                   ~recent_limit:30
-               in
-               List.map
-                 (fun (row : Keeper_memory_policy.keeper_memory_line) ->
-                   (keeper, row))
-                 summary.recent_notes
-             with
-             | Eio.Cancel.Cancelled _ as e -> raise e
-             | _ -> [])
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | _ -> []
+    if include_memory_entries then load_memory_subsystems_entries ~config
+    else []
   in
   let memory_total = List.length all_memory_entries in
   let memory_filtered =

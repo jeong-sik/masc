@@ -2781,6 +2781,7 @@ interface MemorySubsystemsQuery {
   keeper?: string
   outcome?: string
   q?: string
+  includeMemoryEntries?: boolean
   signal?: AbortSignal
 }
 
@@ -2792,6 +2793,7 @@ export function fetchMemorySubsystems(
   if (opts?.keeper) params.set('keeper', opts.keeper)
   if (opts?.outcome) params.set('outcome', opts.outcome)
   if (opts?.q) params.set('q', opts.q)
+  if (opts?.includeMemoryEntries) params.set('include_memory_entries', 'true')
   const qs = params.toString()
   return get<MemorySubsystemsResponse>(
     `/api/v1/dashboard/memory-subsystems${qs ? `?${qs}` : ''}`,

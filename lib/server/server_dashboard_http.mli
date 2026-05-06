@@ -60,8 +60,14 @@ val dashboard_board_json :
 val dashboard_memory_http_json :
   Httpun.Request.t -> Yojson.Safe.t
 
+val dashboard_memory_subsystems_include_entries :
+  Httpun.Request.t -> bool
+
 val dashboard_memory_subsystems_http_json :
-  config:Coord_utils.config -> Httpun.Request.t -> Yojson.Safe.t
+  config:Coord_utils.config ->
+  ?include_memory_entries:bool ->
+  Httpun.Request.t ->
+  Yojson.Safe.t
 
 val dashboard_governance_http_json :
   Httpun.Request.t -> base_path:string -> Yojson.Safe.t

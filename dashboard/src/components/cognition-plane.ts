@@ -38,6 +38,7 @@ function currentView(): CognitionView {
 }
 
 function updateViewParam(view: CognitionView): void {
+  if (view === currentView()) return
   const next: Record<string, string> = { ...route.value.params, section: 'cognition' }
   delete next.focus
   if (view === 'overview') {

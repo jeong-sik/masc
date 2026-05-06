@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 void vi
 
 const route = { value: { tab: 'monitoring' as string, params: {} as Record<string, string> } }
+const navigateMock = vi.fn()
 
 async function flushUi(): Promise<void> {
   await Promise.resolve()
@@ -14,7 +15,7 @@ async function flushUi(): Promise<void> {
 
 async function loadPlane() {
   vi.resetModules()
-  vi.doMock('../router', () => ({ route, navigate: vi.fn() }))
+  vi.doMock('../router', () => ({ route, navigate: navigateMock }))
   vi.doMock('./agents-unified', () => ({
     AgentsUnified: () => html`<div data-testid="agents-unified">AgentsUnified</div>`,
   }))
@@ -44,6 +45,7 @@ describe('CognitionPlane', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     route.value = { tab: 'monitoring', params: { section: 'cognition' } }
+    navigateMock.mockClear()
   })
 
   afterEach(() => {
@@ -91,6 +93,23 @@ describe('CognitionPlane', () => {
     await flushUi()
 
     expect(container.querySelector('[data-testid="memory-subsystems"]')?.getAttribute('data-focus')).toBe('entries')
+  })
+
+  it('keeps entries focus when re-clicking the active memory view chip', async () => {
+    route.value.params = { section: 'cognition', view: 'memory', focus: 'entries' }
+    const { CognitionPlane } = await loadPlane()
+
+    render(html`<${CognitionPlane} />`, container)
+    await flushUi()
+
+    const memoryChip = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.trim() === 'Memory')
+    expect(memoryChip).not.toBeUndefined()
+
+    memoryChip?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    expect(navigateMock).not.toHaveBeenCalled()
+    expect(route.value.params.focus).toBe('entries')
   })
 
   it('uses the episodes focus for the episodes view', async () => {

@@ -185,8 +185,6 @@ let handle_keeper_bash
   then
     error_json
       "MASC_KEEPER_SANDBOX_HARD_MODE requires sandbox_profile=docker"
-  else if cmd_contains_gh_pr_create cmd
-  then gh_pr_create_block ()
 
   else begin
     (* Tick 22: dark-launch shadow logger.  Runs

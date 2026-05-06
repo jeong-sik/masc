@@ -442,6 +442,27 @@ let gh_mutates_entity (cmd : string) : entity_kind option =
     Some Issue
   | _ -> None
 
+let dedicated_pr_tool_required (cmd : string) :
+    (string * string * string) option =
+  let parts =
+    cmd
+    |> normalize_gh_command
+    |> gh_words
+    |> skip_gh_leading_global_options
+  in
+  match parts with
+  | "pr" :: "create" :: _ ->
+    Some
+      ( "gh_pr_create_requires_keeper_pr_create"
+      , "keeper_pr_create"
+      , "Use keeper_pr_create with draft=true so governance approval and PR lifecycle markers are enforced." )
+  | "pr" :: "review" :: _ ->
+    Some
+      ( "gh_pr_review_requires_keeper_pr_review_comment"
+      , "keeper_pr_review_comment"
+      , "Use keeper_pr_review_comment for PR review COMMENT/APPROVE/REQUEST_CHANGES mutations." )
+  | _ -> None
+
 (** Deterministic blocklist for obviously destructive or credential-sensitive
     gh commands. Unlike prefix matching on the raw string, this ignores
     leading global options before inspecting the command group/action pair. *)

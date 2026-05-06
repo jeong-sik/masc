@@ -774,6 +774,52 @@ let test_hard_mode_blocks_raw_gh_bash () =
   Alcotest.(check bool) "hint mentions structured op=gh" true
     (response_mentions raw "hint" "keeper_shell op=gh")
 
+let test_keeper_shell_gh_pr_create_requires_dedicated_tool () =
+  with_tool_policy_config @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_shell
+      ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
+      ~args:
+        (`Assoc
+           [ ("op", `String "gh")
+           ; ("cmd", `String "pr create --draft --title proof")
+           ; ("cwd", `String playground)
+           ])
+  in
+  Alcotest.(check (option bool)) "blocked" (Some false)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option string)) "error"
+    (Some "gh_pr_create_requires_keeper_pr_create")
+    (parse_string_field raw "error");
+  Alcotest.(check (option string)) "required tool"
+    (Some "keeper_pr_create")
+    (parse_string_field raw "required_tool")
+
+let test_keeper_shell_gh_pr_review_requires_dedicated_tool () =
+  with_tool_policy_config @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_shell
+      ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
+      ~args:
+        (`Assoc
+           [ ("op", `String "gh")
+           ; ("cmd", `String "pr review 123 --approve --body ok")
+           ; ("cwd", `String playground)
+           ])
+  in
+  Alcotest.(check (option bool)) "blocked" (Some false)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option string)) "error"
+    (Some "gh_pr_review_requires_keeper_pr_review_comment")
+    (parse_string_field raw "error");
+  Alcotest.(check (option string)) "required tool"
+    (Some "keeper_pr_review_comment")
+    (parse_string_field raw "required_tool")
+
 let docker_run_line log_path =
   read_file log_path
   |> String.split_on_char '\n'
@@ -1175,9 +1221,15 @@ let () =
           Alcotest.test_case
             "docker keeper git push routes through git-creds docker"
             `Quick test_bash_git_push_routes_through_git_creds_docker;
-	          Alcotest.test_case
-	            "hard mode blocks raw gh keeper_bash"
-	            `Quick test_hard_mode_blocks_raw_gh_bash;
+          Alcotest.test_case
+            "hard mode blocks raw gh keeper_bash"
+            `Quick test_hard_mode_blocks_raw_gh_bash;
+          Alcotest.test_case
+            "keeper_shell gh pr create requires keeper_pr_create"
+            `Quick test_keeper_shell_gh_pr_create_requires_dedicated_tool;
+          Alcotest.test_case
+            "keeper_shell gh pr review requires keeper_pr_review_comment"
+            `Quick test_keeper_shell_gh_pr_review_requires_dedicated_tool;
           Alcotest.test_case
             "docker keeper bash executes through fake docker"
             `Quick test_bash_fake_docker_executes;

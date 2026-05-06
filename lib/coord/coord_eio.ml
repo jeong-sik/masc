@@ -82,6 +82,17 @@ let create_config ~fs ?clock base_path =
     pubsub_max_messages = Backend.pubsub_max_messages;
   } in
   let backend = Backend.FileSystem.create ~fs ?clock backend_config in
+  Backend.FileSystem.set_mutex_observers
+    ~acquire:(fun ~op ~seconds ->
+      Prometheus.observe_histogram
+        Prometheus.metric_backend_mutex_acquire_sec
+        ~labels:[("op", op)]
+        seconds)
+    ~held:(fun ~op ~seconds ->
+      Prometheus.observe_histogram
+        Prometheus.metric_backend_mutex_held_sec
+        ~labels:[("op", op)]
+        seconds);
   {
     base_path;
     lock_expiry_minutes = 30;

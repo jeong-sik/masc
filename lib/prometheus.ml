@@ -367,6 +367,18 @@ let metric_board_persist_lock_acquire_sec =
 let metric_board_persist_lock_held_sec =
   "masc_board_persist_lock_held_sec"
 
+(* Backend filesystem mutex contention diagnostic.  Recorded by
+   [Backend.FileSystem.with_observed_mutex] via
+   [Backend.FileSystem.set_mutex_observers] (installed once from the
+   main library at startup).  Scoped to writer paths
+   (set / delete / set_if_not_exists). Read paths are not measured by
+   these histograms. Labels: [op]. *)
+let metric_backend_mutex_acquire_sec =
+  "masc_backend_mutex_acquire_sec"
+
+let metric_backend_mutex_held_sec =
+  "masc_backend_mutex_held_sec"
+
 (* P-DASH-02: turn queue depth gauge.  Semaphore waiters are
    observable via [autonomous_waiter_snapshot_for_test] but were
    only emitted as a debug log line.  Surfacing as a gauge lets
@@ -1461,6 +1473,18 @@ let init () =
   register_histogram ~name:metric_board_persist_lock_held_sec
     ~help:"Seconds the board persist mutex is held by one fiber, \
            covering the disk I/O performed inside the lock." ();
+  (* Backend filesystem mutex diagnostic histograms.  acquire =
+     wait-for-write-lock, held = time spent in the write critical
+     section. Together they let operators decide whether keeper storage
+     I/O latency is queueing (acquire high) or filesystem work while
+     holding the mutex (held high), without inferring from external symptoms.
+     Labels: op in {set, delete, set_if_not_exists}. *)
+  register_histogram ~name:metric_backend_mutex_acquire_sec
+    ~help:"Seconds spent waiting to acquire the backend filesystem \
+           write mutex.  Labels: op." ();
+  register_histogram ~name:metric_backend_mutex_held_sec
+    ~help:"Seconds the backend filesystem mutex is held by one fiber, \
+           covering the write critical section. Labels: op." ();
   add metric_keeper_slot_yield_total
     "Total autonomous turn slot yields (successfully yielded and reacquired). \
      Labels: keeper."

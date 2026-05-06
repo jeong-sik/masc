@@ -13,6 +13,25 @@ include module type of struct include Backend_types end
 module FileSystem : sig
   type t
 
+  (** Install observers for write-mutex contention.
+
+      Called once at startup from the main library to wire mutex
+      acquire/hold timings into Prometheus histograms.  The default
+      observers are no-ops, so [masc_backend] does not depend on
+      [Prometheus] at link time.
+
+      [acquire] receives the seconds a fiber waited before entering
+      the lock; [held] receives the seconds spent in the write critical
+      section. Both run *outside* the mutex critical section to avoid
+      nested locking.
+
+      [op] is one of [set | delete | set_if_not_exists]. Read paths
+      are not measured by these histograms. *)
+  val set_mutex_observers :
+    acquire:(op:string -> seconds:float -> unit) ->
+    held:(op:string -> seconds:float -> unit) ->
+    unit
+
   val create :
     fs:Eio.Fs.dir_ty Eio.Path.t ->
     ?clock:float Eio.Time.clock_ty Eio.Resource.t ->

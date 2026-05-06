@@ -46,6 +46,16 @@ PR_REVIEW_MUTATION_TOOLS = {
     "keeper_pr_review_comment",
     "keeper_pr_review_reply",
 }
+PR_CREATE_TOOLS = {
+    "keeper_pr_create",
+}
+GIT_PUSH_TOOLS = {
+    "masc_code_git",
+}
+SHELL_TOOLS = {
+    "keeper_bash",
+    "keeper_shell",
+}
 
 
 @dataclass
@@ -66,7 +76,12 @@ class KeeperAudit:
     board_action: bool
     pr_surface_action: bool
     pr_review_mutation: bool
+    pr_create_action: bool
+    git_push_action: bool
+    pr_approve_mutation: bool
+    pr_lifecycle_action: bool
     evidence_tools: list[str]
+    pr_lifecycle_evidence: list[str]
     failures: list[str]
     warnings: list[str]
 
@@ -202,16 +217,113 @@ def tools_from_decision(row: dict[str, Any]) -> list[str]:
     return tools
 
 
-def scan_keeper_evidence(base_path: Path, name: str) -> tuple[float | None, set[str]]:
+def row_success(row: dict[str, Any]) -> bool:
+    ok = row.get("ok")
+    if isinstance(ok, bool):
+        return ok
+    outcome = row.get("outcome")
+    return outcome == "success"
+
+
+def tool_succeeded_in_row(row: dict[str, Any], tool_name: str) -> bool:
+    if row.get("tool") == tool_name:
+        return row.get("ok") is True
+    calls = row.get("tool_calls")
+    if isinstance(calls, list):
+        for call in calls:
+            if not isinstance(call, dict):
+                continue
+            if call.get("tool_name") == tool_name and call.get("outcome") == "ok":
+                return True
+    return False
+
+
+def serialized_row(row: dict[str, Any]) -> str:
+    return json.dumps(row, ensure_ascii=False, sort_keys=True).lower()
+
+
+def has_git_push_marker(text: str) -> bool:
+    return any(
+        marker in text
+        for marker in (
+            '"action": "push"',
+            '\\"action\\": \\"push\\"',
+            "'action': 'push'",
+            "git push",
+        )
+    )
+
+
+def has_gh_pr_create_marker(text: str) -> bool:
+    if "pr create" not in text:
+        return False
+    return any(
+        marker in text
+        for marker in (
+            '"op": "gh"',
+            '\\"op\\": \\"gh\\"',
+            "op=gh",
+            "gh pr create",
+        )
+    )
+
+
+def has_pr_approve_marker(text: str) -> bool:
+    return any(
+        marker in text
+        for marker in (
+            '"event": "approve"',
+            '\\"event\\": \\"approve\\"',
+            "'event': 'approve'",
+            "event=approve",
+        )
+    )
+
+
+def pr_lifecycle_evidence_from_decision(row: dict[str, Any]) -> set[str]:
+    evidence: set[str] = set()
+    text = serialized_row(row)
+    if any(tool_succeeded_in_row(row, tool) for tool in PR_CREATE_TOOLS):
+        evidence.add("pr_create:keeper_pr_create")
+    if any(
+        tool_succeeded_in_row(row, tool) for tool in GIT_PUSH_TOOLS
+    ) and has_git_push_marker(text):
+        evidence.add("git_push:masc_code_git")
+    if (
+        row.get("event") == "tool_exec"
+        and row.get("tool") in SHELL_TOOLS
+        and row_success(row)
+        and has_gh_pr_create_marker(text)
+    ):
+        evidence.add(f"pr_create:{row['tool']}:gh_pr_create")
+    if (
+        row.get("event") == "tool_exec"
+        and row.get("tool") in SHELL_TOOLS
+        and row_success(row)
+        and has_git_push_marker(text)
+    ):
+        evidence.add(f"git_push:{row['tool']}:git_push")
+    if tool_succeeded_in_row(row, "keeper_pr_review_comment") and has_pr_approve_marker(
+        text
+    ):
+        evidence.add("pr_approve:keeper_pr_review_comment")
+    return evidence
+
+
+def scan_keeper_evidence(
+    base_path: Path, name: str
+) -> tuple[float | None, set[str], set[str]]:
     decisions = base_path / ".masc" / "keepers" / f"{name}.decisions.jsonl"
     latest_ts: float | None = None
     tools: set[str] = set()
+    pr_lifecycle_evidence: set[str] = set()
     for row in iter_jsonl(decisions):
         ts = numeric_field(row, "ts_unix")
         if ts is not None:
             latest_ts = ts if latest_ts is None else max(latest_ts, ts)
         tools.update(tools_from_decision(row))
-    return latest_ts, tools
+        pr_lifecycle_evidence.update(pr_lifecycle_evidence_from_decision(row))
+    return latest_ts, tools, pr_lifecycle_evidence
 
 
 def audit_keeper(
@@ -222,6 +334,9 @@ def audit_keeper(
     require_board_evidence: bool,
     require_pr_surface_evidence: bool,
     require_pr_review_evidence: bool,
+    require_pr_create_evidence: bool,
+    require_git_push_evidence: bool,
+    require_pr_approve_evidence: bool,
 ) -> KeeperAudit:
     name = config_path.stem
     config = load_keeper_config(config_path)
@@ -269,7 +384,7 @@ def audit_keeper(
         if not credential_dir_exists:
             failures.append("github_credential_dir_missing")
 
-    evidence_ts, tools = scan_keeper_evidence(base_path, name)
+    evidence_ts, tools, pr_lifecycle_evidence = scan_keeper_evidence(base_path, name)
     runtime_turn_ts = numeric_field(runtime, "last_turn_ts")
     updated_ts = iso_to_unix(string_field(runtime, "updated_at"))
     last_turn_ts = max(
@@ -289,6 +404,16 @@ def audit_keeper(
     board_action = bool(tools & BOARD_TOOLS)
     pr_surface_action = bool(tools & PR_SURFACE_TOOLS)
     pr_review_mutation = bool(tools & PR_REVIEW_MUTATION_TOOLS)
+    pr_create_action = any(
+        item.startswith("pr_create:") for item in pr_lifecycle_evidence
+    )
+    git_push_action = any(
+        item.startswith("git_push:") for item in pr_lifecycle_evidence
+    )
+    pr_approve_mutation = any(
+        item.startswith("pr_approve:") for item in pr_lifecycle_evidence
+    )
+    pr_lifecycle_action = pr_create_action and git_push_action and pr_approve_mutation
     if require_board_evidence and not board_action:
         failures.append("board_action_evidence_missing")
     if require_pr_surface_evidence and not pr_surface_action:
@@ -299,6 +424,12 @@ def audit_keeper(
         failures.append("pr_review_mutation_evidence_missing")
     elif not pr_review_mutation:
         warnings.append("pr_review_mutation_evidence_missing")
+    if require_pr_create_evidence and not pr_create_action:
+        failures.append("pr_create_evidence_missing")
+    if require_git_push_evidence and not git_push_action:
+        failures.append("git_push_evidence_missing")
+    if require_pr_approve_evidence and not pr_approve_mutation:
+        failures.append("pr_approve_evidence_missing")
 
     return KeeperAudit(
         name=name,
@@ -317,7 +448,12 @@ def audit_keeper(
         board_action=board_action,
         pr_surface_action=pr_surface_action,
         pr_review_mutation=pr_review_mutation,
+        pr_create_action=pr_create_action,
+        git_push_action=git_push_action,
+        pr_approve_mutation=pr_approve_mutation,
+        pr_lifecycle_action=pr_lifecycle_action,
         evidence_tools=sorted(tools),
+        pr_lifecycle_evidence=sorted(pr_lifecycle_evidence),
         failures=failures,
         warnings=warnings,
     )
@@ -340,6 +476,15 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             require_board_evidence=args.require_board_evidence,
             require_pr_surface_evidence=args.require_pr_surface_evidence,
             require_pr_review_evidence=args.require_pr_review_evidence,
+            require_pr_create_evidence=(
+                args.require_pr_create_evidence or args.require_pr_lifecycle_evidence
+            ),
+            require_git_push_evidence=(
+                args.require_git_push_evidence or args.require_pr_lifecycle_evidence
+            ),
+            require_pr_approve_evidence=(
+                args.require_pr_approve_evidence or args.require_pr_lifecycle_evidence
+            ),
         )
         for path in config_paths
     ]
@@ -362,6 +507,10 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             "require_board_evidence": args.require_board_evidence,
             "require_pr_surface_evidence": args.require_pr_surface_evidence,
             "require_pr_review_evidence": args.require_pr_review_evidence,
+            "require_pr_create_evidence": args.require_pr_create_evidence,
+            "require_git_push_evidence": args.require_git_push_evidence,
+            "require_pr_approve_evidence": args.require_pr_approve_evidence,
+            "require_pr_lifecycle_evidence": args.require_pr_lifecycle_evidence,
         },
         "fleet_failures": fleet_failures,
         "failed_keepers": [keeper.name for keeper in failed_keepers],
@@ -391,7 +540,9 @@ def print_text(report: dict[str, Any]) -> None:
         print(
             "- {name}: {marker} preset={preset} sandbox={sandbox}/{network} "
             "gh={github} recent={recent} age={age} board={board} "
-            "pr_surface={pr_surface} pr_review={pr_review}".format(
+            "pr_surface={pr_surface} pr_review={pr_review} "
+            "pr_create={pr_create} git_push={git_push} "
+            "pr_approve={pr_approve}".format(
                 name=keeper["name"],
                 marker=marker,
                 preset=keeper["tool_preset"],
@@ -403,6 +554,9 @@ def print_text(report: dict[str, Any]) -> None:
                 board=str(keeper["board_action"]).lower(),
                 pr_surface=str(keeper["pr_surface_action"]).lower(),
                 pr_review=str(keeper["pr_review_mutation"]).lower(),
+                pr_create=str(keeper["pr_create_action"]).lower(),
+                git_push=str(keeper["git_push_action"]).lower(),
+                pr_approve=str(keeper["pr_approve_mutation"]).lower(),
             )
         )
         for failure in failures:
@@ -435,6 +589,29 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--require-pr-review-evidence",
         action="store_true",
         help="Fail unless each keeper has used PR review/comment/reply mutation tools.",
+    )
+    parser.add_argument(
+        "--require-pr-create-evidence",
+        action="store_true",
+        help="Fail unless each keeper has direct PR creation evidence.",
+    )
+    parser.add_argument(
+        "--require-git-push-evidence",
+        action="store_true",
+        help="Fail unless each keeper has direct git push evidence.",
+    )
+    parser.add_argument(
+        "--require-pr-approve-evidence",
+        action="store_true",
+        help="Fail unless each keeper has direct APPROVE review evidence.",
+    )
+    parser.add_argument(
+        "--require-pr-lifecycle-evidence",
+        action="store_true",
+        help=(
+            "Fail unless each keeper has direct PR create, git push, and "
+            "PR APPROVE evidence."
+        ),
     )
     parser.add_argument("--json", action="store_true", help="Emit JSON report.")
     return parser.parse_args(argv)

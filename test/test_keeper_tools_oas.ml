@@ -115,6 +115,59 @@ let string_contains ~sub text =
   in
   sub_len = 0 || loop 0
 
+let test_tool_side_effect_failures_are_observed () =
+  let meta = make_test_meta ~name:"test-keeper-side-effects" () in
+  let ctx_snapshot = make_test_ctx () in
+  let dir =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "test_keeper_tools_side_effects_%d" (Random.int 100000))
+  in
+  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fun.protect
+    ~finally:(fun () ->
+      (try Sys.readdir dir |> Array.iter (fun f ->
+        Sys.remove (Filename.concat dir f));
+        Unix.rmdir dir with _ -> ()))
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Coord.default_config dir in
+      let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
+      let tool = find_tool "keeper_fs_read" tools in
+      let keeper_labels = [("keeper", meta.name)] in
+      let sse_before =
+        Prometheus.metric_value_or_zero
+          Prometheus.metric_keeper_sse_broadcast_failures
+          ~labels:keeper_labels ()
+      in
+      let decision_before =
+        Prometheus.metric_value_or_zero
+          Prometheus.metric_keeper_decision_audit_flush_failures
+          ~labels:keeper_labels ()
+      in
+      let original_hook = Atomic.get Sse.buffer_commit_test_hook in
+      Fun.protect
+        ~finally:(fun () ->
+          Atomic.set Sse.buffer_commit_test_hook original_hook)
+        (fun () ->
+          Atomic.set Sse.buffer_commit_test_hook
+            (Some (fun () -> failwith "forced keeper tool SSE failure"));
+          match Tool.execute tool
+                  (`Assoc [("path", `String "missing-side-effect-file.txt")])
+          with
+          | Error _ -> ()
+          | Ok _ -> fail "missing file should be surfaced as tool error");
+      check (float 0.001) "SSE failure metric incremented"
+        (sse_before +. 1.0)
+        (Prometheus.metric_value_or_zero
+           Prometheus.metric_keeper_sse_broadcast_failures
+           ~labels:keeper_labels ());
+      check (float 0.001) "decision-log failure metric incremented"
+        (decision_before +. 1.0)
+        (Prometheus.metric_value_or_zero
+           Prometheus.metric_keeper_decision_audit_flush_failures
+           ~labels:keeper_labels ()))
+
 let is_guardrail_message message =
   string_contains
     ~sub:"failed 3 times in a row with the same arguments"
@@ -701,6 +754,8 @@ let () =
       test_case "repeated errors are blocked" `Quick test_repeated_error_results_are_blocked;
       test_case "failure count resets after success" `Quick test_failure_count_resets_after_success;
       test_case "failure tracking is independent per args" `Quick test_failure_tracking_is_independent_per_args;
+      test_case "tool side-effect failures are observed" `Quick
+        test_tool_side_effect_failures_are_observed;
     ];
     "normalize_tool_result", [
       test_case "success JSON wraps under result" `Quick test_normalize_success_json;

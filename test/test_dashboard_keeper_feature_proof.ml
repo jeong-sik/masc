@@ -288,6 +288,15 @@ let test_json_reports_feature_gaps () =
   check (list string) "approval proof follows current public surface"
     [ "masc_approval_pending" ]
     (required_tools "approval_tools" json);
+  check (list string) "goal proof follows Goal FSM surface"
+    [
+      "masc_goal_list";
+      "masc_goal_upsert";
+      "masc_goal_transition";
+      "masc_goal_verify";
+      "masc_coordination_fsm_snapshot";
+    ]
+    (required_tools "goal_tools" json);
   let worktree_failure_classes =
     match weak_tool "masc_worktree_create" "coding_tools" json with
     | Some row ->

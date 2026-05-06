@@ -100,13 +100,12 @@ let tool_features =
       required_tools = [
         "masc_goal_list";
         "masc_goal_upsert";
-        "masc_goal_review";
         "masc_goal_transition";
         "masc_goal_verify";
         "masc_coordination_fsm_snapshot";
       ];
       next_action =
-        "Run a goal lifecycle and prove list/upsert/review/transition/verify paths.";
+        "Run a goal lifecycle and prove list/upsert/transition/verify paths.";
     };
     {
       id = "coding_tools";

@@ -93,6 +93,7 @@ BoardActivity, IdleTimeout, MetricsAnomaly, StrategicReview.
 | 최신 정보 / 외부 자료 확인 | `masc_web_search` (also exposed to model clients as `WebSearch`) |
 | 찬성 / 반대 신호 | `keeper_board_vote` |
 | 거버넌스 의견 제출 | retired as keeper tools; use board discussion/vote paths and governance dashboard read models |
+| 목표 / 계획 lifecycle | `masc_goal_list`, `masc_goal_upsert`, `masc_goal_transition`, `masc_goal_verify`, `masc_coordination_fsm_snapshot`; `masc_goal_review` is legacy compatibility, not feature-proof evidence |
 | 코드 작성 / 수정 | `masc_worktree_create` -> `masc_code_write` / `masc_code_edit` / `masc_code_git` |
 | 테스트 실행 | `masc_code_shell` (worktree `cwd` required) |
 | GitHub PR / 이슈 작업 | `keeper_preflight_check`, `keeper_pr_list`, `keeper_pr_status`, `keeper_pr_create` (draft-only), plus `keeper_shell op=gh` when repo context is bound |

@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
-import { TextInput, TextArea } from './input'
+import { TextInput, TextArea, summarizeTextInput, summarizeTextArea } from './input'
 
 const flushUi = async () => {
   for (let i = 0; i < 4; i++) await Promise.resolve()
@@ -127,6 +127,85 @@ describe('TextInput', () => {
     const input = container.querySelector('input') as HTMLInputElement
     expect(ref.current).toBe(input)
   })
+
+  it('stamps design-system metadata on the input element', () => {
+    render(
+      html`<${TextInput}
+        id="my-input"
+        value="hello"
+        placeholder="type here"
+        disabled=${true}
+        required=${true}
+        class="extra-hook"
+        type="search"
+        name="query"
+        ariaLabel="Search query"
+        autoComplete="off"
+        testId="search-filter"
+        autoFocus=${true}
+      />`,
+      container,
+    )
+    const input = container.querySelector('[data-text-input]')!
+
+    expect(input.getAttribute('data-text-input-kind')).toBe('text-input')
+    expect(input.getAttribute('data-text-input-type')).toBe('search')
+    expect(input.getAttribute('data-text-input-has-value')).toBe('true')
+    expect(input.getAttribute('data-text-input-value-length')).toBe('5')
+    expect(input.getAttribute('data-text-input-has-placeholder')).toBe('true')
+    expect(input.getAttribute('data-text-input-placeholder-length')).toBe('9')
+    expect(input.getAttribute('data-text-input-disabled')).toBe('true')
+    expect(input.getAttribute('data-text-input-required')).toBe('true')
+    expect(input.getAttribute('data-text-input-has-custom-class')).toBe('true')
+    expect(input.getAttribute('data-text-input-class-length')).toBe('10')
+    expect(input.getAttribute('data-text-input-has-id')).toBe('true')
+    expect(input.getAttribute('data-text-input-has-name')).toBe('true')
+    expect(input.getAttribute('data-text-input-has-aria-label')).toBe('true')
+    expect(input.getAttribute('data-text-input-has-autocomplete')).toBe('true')
+    expect(input.getAttribute('data-text-input-has-test-id')).toBe('true')
+    expect(input.getAttribute('data-text-input-autofocus')).toBe('true')
+  })
+
+  it('summarizes default text input state', () => {
+    expect(summarizeTextInput({})).toMatchObject({
+      kind: 'text-input',
+      type: 'text',
+      hasValue: false,
+      valueLength: 0,
+      hasPlaceholder: false,
+      disabled: false,
+      required: false,
+      hasCustomClass: false,
+      hasId: false,
+      hasName: false,
+      hasAriaLabel: false,
+      hasAutoComplete: false,
+      hasTestId: false,
+      autoFocus: false,
+      ariaExpandedState: 'unset',
+      autocompleteState: 'none',
+    })
+  })
+
+  it('summarizes populated text input state without exposing the value text', () => {
+    expect(summarizeTextInput({
+      value: 'token',
+      placeholder: 'secret',
+      class: 'extra-hook',
+      type: 'password',
+      testId: 'token-input',
+    })).toMatchObject({
+      kind: 'text-input',
+      type: 'password',
+      hasValue: true,
+      valueLength: 5,
+      hasPlaceholder: true,
+      placeholderLength: 6,
+      hasCustomClass: true,
+      classNameLength: 10,
+      hasTestId: true,
+    })
+  })
 })
 
 describe('TextArea', () => {
@@ -182,5 +261,63 @@ describe('TextArea', () => {
     render(html`<${TextArea} inputRef=${ref} />`, container)
     const ta = container.querySelector('textarea') as HTMLTextAreaElement
     expect(ref.current).toBe(ta)
+  })
+
+  it('stamps design-system metadata on the textarea element', () => {
+    const ref: { current: HTMLTextAreaElement | null } = { current: null }
+    render(
+      html`<${TextArea}
+        id="prompt"
+        value=${'multi\nline'}
+        placeholder="Write"
+        rows=${4}
+        class="grow"
+        name="prompt"
+        ariaLabel="Prompt"
+        ariaAutocomplete="list"
+        ariaControls="prompt-list"
+        ariaExpanded="true"
+        ariaActiveDescendant="prompt-option-1"
+        role="combobox"
+        required=${true}
+        inputRef=${ref}
+        onInput=${vi.fn()}
+        onKeyDown=${vi.fn()}
+      />`,
+      container,
+    )
+    const textarea = container.querySelector('[data-textarea]')!
+
+    expect(textarea.getAttribute('data-textarea-kind')).toBe('textarea')
+    expect(textarea.getAttribute('data-textarea-rows')).toBe('4')
+    expect(textarea.getAttribute('data-textarea-has-rows')).toBe('true')
+    expect(textarea.getAttribute('data-textarea-has-value')).toBe('true')
+    expect(textarea.getAttribute('data-textarea-value-length')).toBe('10')
+    expect(textarea.getAttribute('data-textarea-has-placeholder')).toBe('true')
+    expect(textarea.getAttribute('data-textarea-placeholder-length')).toBe('5')
+    expect(textarea.getAttribute('data-textarea-required')).toBe('true')
+    expect(textarea.getAttribute('data-textarea-has-custom-class')).toBe('true')
+    expect(textarea.getAttribute('data-textarea-class-length')).toBe('4')
+    expect(textarea.getAttribute('data-textarea-has-id')).toBe('true')
+    expect(textarea.getAttribute('data-textarea-has-name')).toBe('true')
+    expect(textarea.getAttribute('data-textarea-has-aria-label')).toBe('true')
+    expect(textarea.getAttribute('data-textarea-aria-expanded-state')).toBe('true')
+    expect(textarea.getAttribute('data-textarea-autocomplete-state')).toBe('complete')
+  })
+
+  it('summarizes textarea autocomplete state', () => {
+    expect(summarizeTextArea({
+      rows: 3,
+      ariaExpanded: 'mixed',
+      ariaControls: 'listbox',
+      role: 'combobox',
+      onKeyDown: vi.fn(),
+    })).toMatchObject({
+      kind: 'textarea',
+      rows: 3,
+      hasRows: true,
+      ariaExpandedState: 'other',
+      autocompleteState: 'partial',
+    })
   })
 })

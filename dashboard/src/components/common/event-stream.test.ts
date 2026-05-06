@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
 import {
+  buildSemanticGravityRows,
   buildTemporalSyncRows,
   DEFAULT_TEMPORAL_SYNC_WINDOW_MS,
   EventStream,
@@ -9,6 +10,7 @@ import {
   summarizeEventStream,
   streamEventAttractionBand,
   streamEventAttractionScore,
+  streamEventSemanticGravityScore,
 } from './event-stream'
 
 const baseEvents = [
@@ -251,6 +253,45 @@ describe('EventStream', () => {
     expect(latest.dataset.streamEventAttractionBand).toBe('high')
     expect(middle.dataset.streamEventAttractionBand).toBe('medium')
     expect(older.dataset.streamEventAttractionBand).toBe('low')
+  })
+
+  it('scores semantic gravity from the current focus', () => {
+    const score = streamEventSemanticGravityScore(baseEvents[0]!, ['agent-a', 'started'])
+    const unrelated = streamEventSemanticGravityScore(baseEvents[2]!, ['agent-a', 'started'])
+
+    expect(score).toBe(0.85)
+    expect(unrelated).toBe(0)
+  })
+
+  it('orders semantically related events before unrelated visible rows', () => {
+    const rows = buildSemanticGravityRows(
+      buildTemporalSyncRows(getVisibleStreamEvents(baseEvents, 100), 5000),
+      ['agent-a', 'started'],
+    )
+
+    expect(rows.map(row => row.event.id)).toEqual(['e1', 'e3', 'e2'])
+    expect(rows[0]?.semanticGravityScore).toBe(0.85)
+    expect(rows[0]?.semanticGravityRank).toBe(1)
+    expect(summarizeEventStream(baseEvents, 100, 5000, ['agent-a', 'started'])).toMatchObject({
+      semanticGravityTermCount: 2,
+      semanticGravityMatchCount: 1,
+      maxSemanticGravityScore: 0.85,
+    })
+  })
+
+  it('renders semantic gravity metadata on event rows', () => {
+    const container = document.createElement('div')
+    render(h(EventStream, { events: baseEvents, semanticFocus: ['agent-a', 'started'] }), container)
+    const root = container.querySelector('[data-event-stream]') as HTMLElement
+    const items = container.querySelectorAll('[role="listitem"]')
+    const focused = container.querySelector('[data-stream-event-id="e1"]') as HTMLElement
+
+    expect(root.dataset.eventStreamSemanticGravityTermCount).toBe('2')
+    expect(root.dataset.eventStreamSemanticGravityMatchCount).toBe('1')
+    expect(root.dataset.eventStreamMaxSemanticGravityScore).toBe('0.85')
+    expect(items[0]?.getAttribute('data-stream-event-id')).toBe('e1')
+    expect(focused.dataset.streamEventSemanticGravityScore).toBe('0.85')
+    expect(focused.dataset.streamEventSemanticGravityRank).toBe('1')
   })
 
   it('treats maxItems zero as an empty visible window', () => {

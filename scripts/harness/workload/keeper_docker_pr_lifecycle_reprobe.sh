@@ -15,6 +15,7 @@ RAW_DIR="$RUN_DIR/raw"
 PROMPT_DIR="$RUN_DIR/prompts"
 REQUESTS_FILE="$RUN_DIR/requests.jsonl"
 RESULTS_FILE="$RUN_DIR/results.jsonl"
+POLL_ERRORS_FILE="$RUN_DIR/poll_errors.jsonl"
 SUMMARY_FILE="$RUN_DIR/summary.json"
 AUDIT_FILE="$RUN_DIR/audit-docker-pr-lifecycle.json"
 AUDIT_STATUS_RESULT=0
@@ -29,6 +30,7 @@ MUTATE="${MUTATE:-0}"
 RUN_AUDIT="${RUN_AUDIT:-1}"
 EXIT_ON_AUDIT_FAIL="${EXIT_ON_AUDIT_FAIL:-}"
 MSG_TIMEOUT_SEC="${MSG_TIMEOUT_SEC:-120}"
+INIT_TIMEOUT_SEC="${INIT_TIMEOUT_SEC:-60}"
 POLL_TIMEOUT_SEC="${POLL_TIMEOUT_SEC:-1200}"
 POLL_INTERVAL_SEC="${POLL_INTERVAL_SEC:-10}"
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
@@ -113,6 +115,7 @@ while [[ $# -gt 0 ]]; do
         PROMPT_DIR="$RUN_DIR/prompts"
         REQUESTS_FILE="$RUN_DIR/requests.jsonl"
         RESULTS_FILE="$RUN_DIR/results.jsonl"
+        POLL_ERRORS_FILE="$RUN_DIR/poll_errors.jsonl"
         SUMMARY_FILE="$RUN_DIR/summary.json"
         AUDIT_FILE="$RUN_DIR/audit-docker-pr-lifecycle.json"
       fi
@@ -125,6 +128,7 @@ while [[ $# -gt 0 ]]; do
       PROMPT_DIR="$RUN_DIR/prompts"
       REQUESTS_FILE="$RUN_DIR/requests.jsonl"
       RESULTS_FILE="$RUN_DIR/results.jsonl"
+      POLL_ERRORS_FILE="$RUN_DIR/poll_errors.jsonl"
       SUMMARY_FILE="$RUN_DIR/summary.json"
       AUDIT_FILE="$RUN_DIR/audit-docker-pr-lifecycle.json"
       shift 2
@@ -148,6 +152,7 @@ fi
 mkdir -p "$RUN_DIR" "$RAW_DIR" "$PROMPT_DIR"
 : >"$REQUESTS_FILE"
 : >"$RESULTS_FILE"
+: >"$POLL_ERRORS_FILE"
 
 log() {
   printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2
@@ -175,7 +180,7 @@ init_mcp_session() {
     return 0
   fi
 
-  local headers_file body_file init_body session_id protocol_version
+  local headers_file body_file init_body session_id protocol_version deadline
   headers_file="$(mcp_mktemp_file "keeper-docker-reprobe-init" ".headers")"
   body_file="$(mcp_mktemp_file "keeper-docker-reprobe-init" ".body")"
   init_body="$(
@@ -193,47 +198,61 @@ init_mcp_session() {
       }'
   )"
 
-  local -a cmd=(
-    curl -sS --max-time "$MSG_TIMEOUT_SEC"
-    -D "$headers_file"
-    -o "$body_file"
-    -X POST "$MCP_URL"
-    -H "Content-Type: application/json"
-    -H "Accept: application/json, text/event-stream"
-  )
-  if [[ -n "$MCP_TOKEN" ]]; then
-    cmd+=( -H "Authorization: Bearer $MCP_TOKEN" )
-  fi
-  cmd+=( --data-binary "$init_body" )
+  deadline=$(( $(date +%s) + INIT_TIMEOUT_SEC ))
+  while :; do
+    : >"$headers_file"
+    : >"$body_file"
+    session_id=""
+    protocol_version=""
 
-  if ! "${cmd[@]}" >/dev/null; then
-    echo "failed to initialize MCP session at $MCP_URL" >&2
-    cat "$body_file" >&2 || true
-    rm -f "$headers_file" "$body_file"
-    exit 1
-  fi
+    local -a cmd=(
+      curl -sS --max-time "$MSG_TIMEOUT_SEC"
+      -D "$headers_file"
+      -o "$body_file"
+      -X POST "$MCP_URL"
+      -H "Content-Type: application/json"
+      -H "Accept: application/json, text/event-stream"
+    )
+    if [[ -n "$MCP_TOKEN" ]]; then
+      cmd+=( -H "Authorization: Bearer $MCP_TOKEN" )
+    fi
+    cmd+=( --data-binary "$init_body" )
 
-  session_id="$(
-    awk '
-      tolower($0) ~ /^mcp-session-id:/ {
-        sub(/^[^:]+:[[:space:]]*/, "", $0)
-        sub(/\r$/, "", $0)
-        print $0
-        exit
-      }' "$headers_file"
-  )"
-  protocol_version="$(
-    awk '
-      tolower($0) ~ /^mcp-protocol-version:/ {
-        sub(/^[^:]+:[[:space:]]*/, "", $0)
-        sub(/\r$/, "", $0)
-        print $0
-        exit
-      }' "$headers_file"
-  )"
+    if "${cmd[@]}" >/dev/null; then
+      session_id="$(
+        awk '
+          tolower($0) ~ /^mcp-session-id:/ {
+            sub(/^[^:]+:[[:space:]]*/, "", $0)
+            sub(/\r$/, "", $0)
+            print $0
+            exit
+          }' "$headers_file"
+      )"
+      protocol_version="$(
+        awk '
+          tolower($0) ~ /^mcp-protocol-version:/ {
+            sub(/^[^:]+:[[:space:]]*/, "", $0)
+            sub(/\r$/, "", $0)
+            print $0
+            exit
+          }' "$headers_file"
+      )"
+      if [[ -n "$session_id" ]]; then
+        break
+      fi
+      if ! jq -e '.error.code == -32002' "$body_file" >/dev/null 2>&1; then
+        break
+      fi
+    fi
+
+    if [[ "$(date +%s)" -ge "$deadline" ]]; then
+      break
+    fi
+    sleep 2
+  done
 
   if [[ -z "$session_id" ]]; then
-    echo "MCP initialize did not return Mcp-Session-Id" >&2
+    echo "MCP initialize did not return Mcp-Session-Id before ${INIT_TIMEOUT_SEC}s deadline" >&2
     cat "$body_file" >&2 || true
     rm -f "$headers_file" "$body_file"
     exit 1
@@ -480,8 +499,11 @@ poll_results() {
       printf '%s' "$payload" >"$RAW_DIR/result-$keeper-$request_id.jsonrpc.json"
       if ! mcp_require_tool_ok "$payload" "masc_keeper_msg_result:$keeper" >/dev/null 2>&1; then
         jq -nc --arg keeper "$keeper" --arg request_id "$request_id" \
-          --arg status "tool_error" '{keeper:$keeper, request_id:$request_id, status:$status}' \
-          >>"$RESULTS_FILE"
+          --arg status "poll_error" \
+          --arg raw_file "$RAW_DIR/result-$keeper-$request_id.jsonrpc.json" \
+          '{keeper:$keeper, request_id:$request_id, status:$status, raw_file:$raw_file}' \
+          >>"$POLL_ERRORS_FILE"
+        printf '%s\t%s\n' "$request_id" "$keeper" >>"$next_pending"
         continue
       fi
       text="$(tool_text_or_empty "$payload")"
@@ -530,11 +552,12 @@ run_audit() {
 
 write_summary() {
   local audit_status="$1"
-  local keeper_count request_count result_count timeout_count
+  local keeper_count request_count result_count timeout_count poll_error_count
   keeper_count="$(awk 'NF { c++ } END { print c + 0 }' "$RUN_DIR/keepers.txt")"
   request_count="$(awk 'NF { c++ } END { print c + 0 }' "$REQUESTS_FILE")"
   result_count="$(awk 'NF { c++ } END { print c + 0 }' "$RESULTS_FILE")"
   timeout_count="$(jq -s '[.[] | select(.status == "poll_timeout")] | length' "$RESULTS_FILE" 2>/dev/null || echo 0)"
+  poll_error_count="$(awk 'NF { c++ } END { print c + 0 }' "$POLL_ERRORS_FILE")"
   jq -n \
     --arg run_id "$RUN_ID" \
     --arg run_dir "$RUN_DIR" \
@@ -545,6 +568,7 @@ write_summary() {
     --argjson request_count "$request_count" \
     --argjson result_count "$result_count" \
     --argjson timeout_count "$timeout_count" \
+    --argjson poll_error_count "$poll_error_count" \
     --argjson audit_status "$audit_status" \
     --arg audit_file "$AUDIT_FILE" \
     '{
@@ -557,6 +581,7 @@ write_summary() {
       request_count:$request_count,
       result_count:$result_count,
       timeout_count:$timeout_count,
+      poll_error_count:$poll_error_count,
       audit_status:$audit_status,
       audit_file:$audit_file
     }' >"$SUMMARY_FILE"
@@ -573,6 +598,7 @@ post_board_summary() {
       + "\n- requests: " + (.request_count | tostring)
       + "\n- results: " + (.result_count | tostring)
       + "\n- timeouts: " + (.timeout_count | tostring)
+      + "\n- poll_errors: " + (.poll_error_count | tostring)
       + "\n- audit_status: " + (.audit_status | tostring)
       + "\n- artifacts: " + .run_dir
     ' "$SUMMARY_FILE"

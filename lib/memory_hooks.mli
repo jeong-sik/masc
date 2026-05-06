@@ -15,6 +15,8 @@
     @param memory OAS Memory.t instance (for AfterTurn flush)
     @param episode_limit Max episodes to inject (default 30)
     @param procedure_limit Max procedures to inject (default 10)
+    @param flush_incremental Dependency-injection hook for tests; it returns
+           persisted episode/procedure counts.
 
     Returns a [Hooks.hooks] record with:
     - [before_turn_params]: injects memory text via [extra_system_context]
@@ -37,5 +39,16 @@ val make :
   ?world_backend:Agent_sdk.Memory.long_term_backend ->
   ?episode_limit:int ->
   ?procedure_limit:int ->
+  ?flush_incremental:
+    (memory:Agent_sdk.Memory.t -> agent_name:string -> int * int) ->
   unit ->
   Agent_sdk.Hooks.hooks
+
+val compose_with_inner :
+  memory_hooks:Agent_sdk.Hooks.hooks ->
+  inner:Agent_sdk.Hooks.hooks ->
+  Agent_sdk.Hooks.hooks
+(** Compose memory hooks with existing keeper hooks while preserving the
+    keeper [before_turn_params] slot.  When memory injects adjusted turn
+    params, the inner hook is invoked with those params instead of being
+    bypassed by generic OAS hook composition. *)

@@ -1429,7 +1429,7 @@ let prepare_agent_setup
         ~episode_limit:30
         ~procedure_limit:10 ()
     in
-    Agent_sdk.Hooks.compose ~outer:mem_hooks ~inner:hooks
+    Memory_hooks.compose_with_inner ~memory_hooks:mem_hooks ~inner:hooks
   in
   (* Tier K4b/K4c: install the tool-emission PostToolUse hook so
      tagged tool results flow into this keeper's own accumulator

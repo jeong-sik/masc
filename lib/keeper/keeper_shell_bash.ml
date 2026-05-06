@@ -13,45 +13,124 @@ module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
 end
 
-let shell_tokenize_simple cmd =
-  let len = String.length cmd in
-  let rec loop i current acc =
-    if i >= len then
-      let acc =
-        if Buffer.length current = 0 then acc
-        else Buffer.contents current :: acc
-      in
-      List.rev acc
-    else
-      match cmd.[i] with
-      | ' ' | '\t' | '\n' | '\r' | ';' | '&' | '|' ->
-          let acc =
-            if Buffer.length current = 0 then acc
-            else Buffer.contents current :: acc
-          in
-          Buffer.clear current;
-          loop (i + 1) current acc
-      | ch ->
-          Buffer.add_char current ch;
-          loop (i + 1) current acc
-  in
-  loop 0 (Buffer.create 32) []
+type shell_quote_state = No_quote | Single_quote | Double_quote
 
-let cmd_contains_gh_pr_create cmd =
-  let tokens =
-    shell_tokenize_simple cmd
-    |> List.map (fun token ->
-           token
-           |> String.trim
-           |> String.lowercase_ascii
-           |> Filename.basename)
+type shell_word = {
+  text : string;
+  starts_command : bool;
+}
+
+let shell_words_with_boundaries cmd =
+  let len = String.length cmd in
+  let buf = Buffer.create len in
+  let quote_state = ref No_quote in
+  let escaped = ref false in
+  let at_command_start = ref true in
+  let word_started_at_command_start = ref true in
+  let push_word acc =
+    if Buffer.length buf = 0 then acc
+    else
+      let text =
+        Buffer.contents buf
+        |> String.trim
+        |> String.lowercase_ascii
+        |> Filename.basename
+      in
+      Buffer.clear buf;
+      at_command_start := false;
+      { text; starts_command = !word_started_at_command_start } :: acc
   in
+  let start_word_if_needed () =
+    if Buffer.length buf = 0 then
+      word_started_at_command_start := !at_command_start
+  in
+  let rec loop i acc =
+    if i >= len then List.rev (push_word acc)
+    else if !escaped then (
+      start_word_if_needed ();
+      Buffer.add_char buf cmd.[i];
+      escaped := false;
+      loop (i + 1) acc)
+    else
+      match !quote_state, cmd.[i] with
+      | Single_quote, '\'' ->
+        quote_state := No_quote;
+        loop (i + 1) acc
+      | Single_quote, ch ->
+        start_word_if_needed ();
+        Buffer.add_char buf ch;
+        loop (i + 1) acc
+      | Double_quote, '"' ->
+        quote_state := No_quote;
+        loop (i + 1) acc
+      | Double_quote, '\\' ->
+        escaped := true;
+        loop (i + 1) acc
+      | Double_quote, ch ->
+        start_word_if_needed ();
+        Buffer.add_char buf ch;
+        loop (i + 1) acc
+      | No_quote, '\\' ->
+        escaped := true;
+        loop (i + 1) acc
+      | No_quote, '\'' ->
+        start_word_if_needed ();
+        quote_state := Single_quote;
+        loop (i + 1) acc
+      | No_quote, '"' ->
+        start_word_if_needed ();
+        quote_state := Double_quote;
+        loop (i + 1) acc
+      | No_quote, (' ' | '\t' | '\n' | '\r') ->
+        loop (i + 1) (push_word acc)
+      | No_quote, (';' | '&' | '|') ->
+        let acc = push_word acc in
+        at_command_start := true;
+        loop (i + 1) acc
+      | No_quote, ch ->
+        start_word_if_needed ();
+        Buffer.add_char buf ch;
+        loop (i + 1) acc
+  in
+  loop 0 []
+
+let shell_interpreter_names = [ "bash"; "sh"; "zsh" ]
+
+let shell_c_payload words =
+  match words with
+  | shell :: rest when
+    shell.starts_command && List.mem shell.text shell_interpreter_names ->
+    let rec loop = function
+      | [] -> None
+      | flag :: payload :: _ when
+        String.length flag.text > 1
+        && flag.text.[0] = '-'
+        && String.contains flag.text 'c' ->
+        Some payload.text
+      | flag :: rest when String.length flag.text > 0 && flag.text.[0] = '-' ->
+        loop rest
+      | _ -> None
+    in
+    loop rest
+  | _ -> None
+
+let rec cmd_contains_gh_pr_create cmd =
+  let words = shell_words_with_boundaries cmd in
   let rec loop = function
-    | "gh" :: "pr" :: "create" :: _ -> true
+    | gh :: pr :: create :: _ when
+      gh.starts_command
+      && String.equal gh.text "gh"
+      && String.equal pr.text "pr"
+      && String.equal create.text "create" ->
+      true
     | _ :: rest -> loop rest
     | [] -> false
   in
-  loop tokens
+  loop words
+  ||
+  match shell_c_payload words with
+  | Some payload -> cmd_contains_gh_pr_create payload
+  | None -> false
 
 let handle_keeper_bash
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)

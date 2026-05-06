@@ -171,7 +171,7 @@ let with_fake_docker script f =
   let fake_gh_auth_status_ok =
     "#!/bin/sh\n\
      if [ \"$1\" = \"auth\" ] && [ \"$2\" = \"status\" ]; then\n\
-     \  exit 0\n\
+       exit 0\n\
      fi\n\
      printf 'gh:%s\\n' \"$*\"\n\
      exit 0\n";

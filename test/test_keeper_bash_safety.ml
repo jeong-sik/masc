@@ -11,6 +11,7 @@ module Config_boot_overrides = Config_boot_overrides
 module Keeper_exec_shell = Masc_mcp.Keeper_exec_shell
 module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
+module Keeper_shell_docker = Masc_mcp.Keeper_shell_docker
 module Keeper_types = Masc_mcp.Keeper_types
 module Json = Yojson.Safe.Util
 
@@ -354,6 +355,63 @@ let test_docker_blocks_docker_socket_reference () =
   | None ->
       Alcotest.fail ("expected error json, got: " ^ raw)
 
+let test_nested_runtime_detector_ignores_git_commit_message () =
+  Alcotest.(check bool)
+    "quoted docker in git commit message is not a nested runtime"
+    false
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "git commit -m 'docs: Docker sandbox proof'");
+  Alcotest.(check bool)
+    "unquoted docker argument is not a nested runtime unless command-position"
+    false
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "git commit -m Docker-sandbox-proof");
+  Alcotest.(check bool)
+    "docker after command separator is still blocked"
+    true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "git status && docker run --rm alpine true");
+  Alcotest.(check bool)
+    "quoted docker command word is still blocked"
+    true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "\"docker\" run --rm alpine true");
+  Alcotest.(check bool)
+    "partially quoted docker command word is still blocked"
+    true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "do\"cker\" run --rm alpine true");
+  Alcotest.(check bool)
+    "env option wrapper still exposes docker command"
+    true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "env -i docker run --rm alpine true");
+  Alcotest.(check bool)
+    "env terminator still exposes docker command"
+    true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "env -- docker run --rm alpine true");
+  Alcotest.(check bool)
+    "env value option does not treat its argument as command"
+    false
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "env -u docker git commit -m Docker-sandbox-proof");
+  Alcotest.(check bool)
+    "env split-string wrapper still exposes docker command"
+    true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "env -S 'docker run --rm alpine true'");
+  Alcotest.(check bool)
+    "env inline split-string wrapper still exposes docker command"
+    true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "env --split-string='docker run --rm alpine true'");
+  Alcotest.(check bool)
+    "env split-string assignment without runtime remains allowed"
+    false
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "env -S 'FOO=docker git commit -m Docker-sandbox-proof'")
+
 let test_docker_missing_seccomp_profile_fails_closed () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
@@ -670,6 +728,8 @@ let () =
         test_docker_blocks_nested_docker_command;
       Alcotest.test_case "docker blocks docker socket reference" `Quick
         test_docker_blocks_docker_socket_reference;
+      Alcotest.test_case "nested runtime detector ignores commit messages" `Quick
+        test_nested_runtime_detector_ignores_git_commit_message;
       Alcotest.test_case "docker missing seccomp fails closed" `Quick
         test_docker_missing_seccomp_profile_fails_closed;
     ]);

@@ -71,9 +71,22 @@ export function summarizeRetryBudget(
   retryCount: number | undefined,
   maxRetries: number | undefined,
 ): AgentFailureRetryBudget {
-  const visible = retryCount !== undefined && maxRetries !== undefined && maxRetries > 0
-  const current = visible && Number.isFinite(retryCount) ? Math.max(0, Math.floor(retryCount)) : 0
-  const max = visible && Number.isFinite(maxRetries) ? Math.max(1, Math.floor(maxRetries)) : 0
+  const finiteRetryCount =
+    typeof retryCount === 'number' && Number.isFinite(retryCount) ? retryCount : undefined
+  const finiteMaxRetries =
+    typeof maxRetries === 'number' && Number.isFinite(maxRetries) ? maxRetries : undefined
+  if (finiteRetryCount === undefined || finiteMaxRetries === undefined || finiteMaxRetries <= 0) {
+    return {
+      current: 0,
+      max: 0,
+      remaining: 0,
+      percent: 0,
+      exhausted: false,
+      visible: false,
+    }
+  }
+  const current = Math.max(0, Math.floor(finiteRetryCount))
+  const max = Math.max(1, Math.floor(finiteMaxRetries))
   const clampedCurrent = max > 0 ? Math.min(current, max) : 0
   return {
     current,
@@ -81,7 +94,7 @@ export function summarizeRetryBudget(
     remaining: Math.max(0, max - clampedCurrent),
     percent: max > 0 ? Math.round((clampedCurrent / max) * 100) : 0,
     exhausted: max > 0 && current >= max,
-    visible,
+    visible: true,
   }
 }
 

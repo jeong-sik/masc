@@ -50,6 +50,15 @@ describe('summarizeRetryBudget', () => {
   it('hides invalid or empty retry budgets', () => {
     expect(summarizeRetryBudget(undefined, 3).visible).toBe(false)
     expect(summarizeRetryBudget(1, 0).visible).toBe(false)
+    expect(summarizeRetryBudget(1, Infinity)).toEqual({
+      current: 0,
+      max: 0,
+      remaining: 0,
+      percent: 0,
+      exhausted: false,
+      visible: false,
+    })
+    expect(summarizeRetryBudget(NaN, 3).visible).toBe(false)
   })
 
   it('detects exhausted retry budget', () => {

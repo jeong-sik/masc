@@ -67,6 +67,10 @@ val handle_keeper_bash :
   unit ->
   string
 
+module For_testing : sig
+  val elapsed_duration_ms : start_time:float -> end_time:float -> int
+end
+
 val handle_keeper_bash_output :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->

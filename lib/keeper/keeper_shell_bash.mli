@@ -12,3 +12,7 @@ val handle_keeper_bash :
   args:Yojson.Safe.t ->
   unit ->
   string
+
+module For_testing : sig
+  val elapsed_duration_ms : start_time:float -> end_time:float -> int
+end

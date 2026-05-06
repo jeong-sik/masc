@@ -1,6 +1,18 @@
 open Keeper_types
 open Keeper_exec_shared
 
+let elapsed_duration_ms ~start_time ~end_time =
+  let elapsed_ms = (end_time -. start_time) *. 1000. in
+  match classify_float elapsed_ms with
+  | FP_nan | FP_infinite -> 0
+  | _ when elapsed_ms <= 0. -> 0
+  | _ when elapsed_ms < 1. -> 1
+  | _ -> int_of_float elapsed_ms
+
+module For_testing = struct
+  let elapsed_duration_ms = elapsed_duration_ms
+end
+
 let handle_keeper_bash
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(turn_sandbox_factory_git : Keeper_sandbox_factory.t option)
@@ -524,7 +536,8 @@ let handle_keeper_bash
                              ~cwd ~timeout_sec argv_merged
                          in
                          let elapsed_ms =
-                           int_of_float ((Unix.gettimeofday () -. t0) *. 1000.)
+                           elapsed_duration_ms
+                             ~start_time:t0 ~end_time:(Unix.gettimeofday ())
                          in
                          if not (Keeper_shell_shared.process_status_is_timeout st) then begin
                            let exit_code = match st with
@@ -571,7 +584,8 @@ let handle_keeper_bash
                        ~cwd ~timeout_sec argv_merged
                    in
                    let elapsed_ms =
-                     int_of_float ((Unix.gettimeofday () -. t0) *. 1000.)
+                     elapsed_duration_ms
+                       ~start_time:t0 ~end_time:(Unix.gettimeofday ())
                    in
                    (if auto_bg_observe_enabled then begin
                       let budget_ms =
@@ -620,7 +634,8 @@ let handle_keeper_bash
                    (match outcome with
                     | Masc_exec.Exec_run.Completed r ->
                       let elapsed_ms =
-                        int_of_float ((Unix.gettimeofday () -. t0_bg) *. 1000.)
+                        elapsed_duration_ms
+                          ~start_time:t0_bg ~end_time:(Unix.gettimeofday ())
                       in
                       (* P21: store in exec cache if not a timeout *)
                       if not (Keeper_shell_shared.process_status_is_timeout r.status) then
@@ -649,7 +664,8 @@ let handle_keeper_bash
                            ())
                     | Masc_exec.Exec_run.Promoted p ->
                       let elapsed_ms =
-                        int_of_float ((Unix.gettimeofday () -. t0_bg) *. 1000.)
+                        elapsed_duration_ms
+                          ~start_time:t0_bg ~end_time:(Unix.gettimeofday ())
                       in
                       Log.Keeper.info
                         "BG_PROMOTE: keeper=%s task_id=%s budget_ms=%d cmd=%s"

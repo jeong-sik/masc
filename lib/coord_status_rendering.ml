@@ -57,13 +57,45 @@ let active_task_assignee = function
       Some assignee
   | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
 
-let assigned_task_ids ~matches_you tasks =
-  List.filter_map
+let add_unique table key value =
+  let values = Option.value (Hashtbl.find_opt table key) ~default:[] in
+  if List.exists (String.equal value) values then ()
+  else Hashtbl.replace table key (value :: values)
+
+let active_assigned_task_ids_lookup
+    ~(actual_name : string)
+    ~(ctx_agent_name : string)
+    ~(agents_with_state : (Masc_domain.agent * bool) list)
+    ~(active_tasks : Masc_domain.task list) =
+  let assignee_to_agents = Hashtbl.create (List.length agents_with_state * 2) in
+  List.iter
+    (fun ((agent : Masc_domain.agent), _) ->
+      add_unique assignee_to_agents agent.name agent.name;
+      if String.equal agent.name actual_name then
+        add_unique assignee_to_agents ctx_agent_name agent.name)
+    agents_with_state;
+  let task_ids_by_agent = Hashtbl.create (List.length agents_with_state) in
+  List.iter
     (fun (task : Masc_domain.task) ->
       match active_task_assignee task.task_status with
-      | Some assignee when matches_you assignee -> Some task.id
-      | Some _ | None -> None)
-    tasks
+      | None -> ()
+      | Some assignee ->
+          let agents =
+            Option.value (Hashtbl.find_opt assignee_to_agents assignee)
+              ~default:[]
+          in
+          List.iter
+            (fun agent_name ->
+              let task_ids =
+                Option.value (Hashtbl.find_opt task_ids_by_agent agent_name)
+                  ~default:[]
+              in
+              Hashtbl.replace task_ids_by_agent agent_name (task.id :: task_ids))
+            agents)
+    active_tasks;
+  fun agent_name ->
+    Option.value (Hashtbl.find_opt task_ids_by_agent agent_name) ~default:[]
+    |> List.rev
 
 let agent_status_icon ~is_zombie = function
   | _ when is_zombie -> "💀"
@@ -205,17 +237,19 @@ let status_summary_string
   | [] ->
       Buffer.add_string buf "  (no agents)\n"
   | _ ->
+      let active_assigned_task_ids_for_agent =
+        active_assigned_task_ids_lookup
+          ~actual_name
+          ~ctx_agent_name:ctx.agent_name
+          ~agents_with_state:shown_agents
+          ~active_tasks
+      in
       List.iter
         (fun ((agent : Masc_domain.agent), is_zombie) ->
           Coord_query.safe_yield ();
           let icon = agent_status_icon ~is_zombie agent.status in
-          let matches_agent assignee =
-            String.equal assignee agent.name
-            || (String.equal agent.name actual_name
-               && String.equal assignee ctx.agent_name)
-          in
           let active_assigned_task_ids =
-            assigned_task_ids ~matches_you:matches_agent active_tasks
+            active_assigned_task_ids_for_agent agent.name
           in
           let you_marker =
             if String.equal agent.name actual_name then " (you)" else ""

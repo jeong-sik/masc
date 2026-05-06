@@ -12,6 +12,7 @@ import { RichContent } from '../common/rich-content'
 import { TextInput } from '../common/input'
 import { stripStateBlocks } from '../../keeper-message'
 import { navigate } from '../../router'
+import { ModerationBadge } from './moderation-badge'
 import { ReactionBar } from './reaction-bar'
 import {
   boardActorAvatarKey,
@@ -238,6 +239,7 @@ function CommentItem({
           <span class="text-xs">${authorAvatar(authorAvatarKey)}</span>
           <${ActionButton} variant="subtle" size="sm" class="text-xs font-medium text-[var(--color-fg-primary)] hover:text-[var(--color-accent-fg)] bg-transparent border-none p-0" title=${authorTitle} ariaLabel=${`작성자 ${authorLabel} 프로필로 이동`} onClick=${() => navigateToAuthor(comment.author, undefined, comment.author_identity)}>${authorLabel}<//>
           <span class="text-2xs text-[var(--color-fg-muted)] opacity-60"><${TimeAgo} timestamp=${comment.created_at} /></span>
+          <${ModerationBadge} status=${comment.moderation_status} reportCount=${comment.report_count} targetLabel="댓글" />
           <div class="ml-auto flex items-center gap-1">
             <button
               type="button"
@@ -470,7 +472,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
           </div>
 
           <!-- Badges -->
-          ${(post.hearth || post.visibility || post.expires_at || post.classification_reason)
+          ${(post.hearth || post.visibility || post.expires_at || post.classification_reason || (post.moderation_status && post.moderation_status !== 'none') || (post.report_count ?? 0) > 0)
             ? html`
                 <div class="flex flex-col gap-2">
                   <div class="flex gap-1.5 flex-wrap">
@@ -478,6 +480,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
                     ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
                     <span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${kindBadgeColor(boardPostKind(post))}">${kindLabel(boardPostKind(post))}</span>
                     ${expiryChip(post)}
+                    <${ModerationBadge} status=${post.moderation_status} reportCount=${post.report_count} targetLabel="게시글" />
                   </div>
                   ${post.classification_reason
                     ? html`<div class="text-2xs text-[var(--color-fg-muted)]">분류 근거: ${post.classification_reason}</div>`

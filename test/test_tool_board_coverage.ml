@@ -31,6 +31,7 @@ let cleanup () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Board_curation.reset_for_test ();
+  Board_moderation.reset_for_test ();
   remove_path (Filename.concat _test_base_path Common.masc_dirname);
   Board_dispatch.init_jsonl ()
 
@@ -270,6 +271,54 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
     (json_member_string comment_summary "emoji");
   Alcotest.(check bool) "comment reaction selected" true
     (json_member_bool comment_summary "has_reacted")
+
+let test_board_dashboard_json_embeds_moderation_projection () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post =
+    match
+      Board_dispatch.create_post ~author:"moderated-author"
+        ~content:"moderation projection post" ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let comment =
+    match
+      Board_dispatch.add_comment ~post_id ~author:"moderated-commenter"
+        ~content:"moderation projection comment" ()
+    with
+    | Ok comment -> comment
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let comment_id = Board.Comment_id.to_string comment.id in
+  (match
+     Board_moderation.flag ~target_kind:Board_moderation.Target_post
+       ~target_id:post_id ~reporter:"reporter-a" ~reason:Board_moderation.Spam
+   with
+   | Ok _ -> ()
+   | Error e -> Alcotest.fail e);
+  (match
+     Board_moderation.flag ~target_kind:Board_moderation.Target_comment
+       ~target_id:comment_id ~reporter:"reporter-b"
+       ~reason:Board_moderation.Harassment
+   with
+   | Ok _ -> ()
+   | Error e -> Alcotest.fail e);
+  let post_json =
+    Server_utils.board_post_dashboard_json ~author_karma:0 post
+  in
+  let comment_json = Server_utils.board_comment_dashboard_json comment in
+  Alcotest.(check int) "post report count" 1
+    (json_member_int post_json "report_count");
+  Alcotest.(check string) "post moderation status" "flagged"
+    (json_member_string post_json "moderation_status");
+  Alcotest.(check int) "comment report count" 1
+    (json_member_int comment_json "report_count");
+  Alcotest.(check string) "comment moderation status" "flagged"
+    (json_member_string comment_json "moderation_status")
 
 let test_inline_board_post_author_rewrites_caller_claim () =
   let args =
@@ -1346,6 +1395,8 @@ let () =
             `Quick test_board_actor_identity_keeps_non_keeper_agent;
           Alcotest.test_case "board dashboard json embeds reaction summaries"
             `Quick test_board_dashboard_json_embeds_reaction_summaries;
+          Alcotest.test_case "board dashboard json embeds moderation projection"
+            `Quick test_board_dashboard_json_embeds_moderation_projection;
           Alcotest.test_case "inline board post author rewrites caller claim"
             `Quick test_inline_board_post_author_rewrites_caller_claim;
           Alcotest.test_case "inline board post author accepts matching alias"

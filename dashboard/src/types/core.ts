@@ -118,6 +118,7 @@ type BoardPostMeta = Record<string, unknown> & {
 }
 
 export type BoardVoteDirection = 'up' | 'down'
+export type BoardModerationStatus = 'none' | 'flagged' | 'approved' | 'removed' | 'hidden' | 'warned'
 
 export interface BoardActorIdentity {
   kind: 'keeper' | 'agent'
@@ -152,6 +153,8 @@ export interface BoardPost {
   visibility?: string
   expires_at?: string | null
   hearth_count?: number
+  report_count?: number
+  moderation_status?: BoardModerationStatus
   reactions?: BoardReactionSummary[]
 }
 
@@ -169,6 +172,8 @@ export interface BoardComment {
   votes_down?: number
   current_vote?: BoardVoteDirection | null
   has_voted?: boolean
+  report_count?: number
+  moderation_status?: BoardModerationStatus
   reactions?: BoardReactionSummary[]
 }
 

@@ -4,7 +4,7 @@ import { timeBoardRequest } from '../board-metrics'
 import type {
   BoardActorIdentity, BoardPost, BoardComment, BoardReactionSummary,
   BoardReactionTargetType, BoardReactionToggleResult, BoardSortMode,
-  BoardVoteDirection,
+  BoardVoteDirection, BoardModerationStatus,
   BoardCurationSnapshot, BoardKarmaLedger, BoardKarmaLedgerEvent, BoardKarmaTotal,
   GovernanceContextRef,
   GovernanceDecisionItem, GovernanceExecutedRoute,
@@ -339,6 +339,20 @@ function normalizeBoardVoteDirection(raw: unknown): BoardVoteDirection | null {
   return direction === 'up' || direction === 'down' ? direction : null
 }
 
+function normalizeBoardModerationStatus(raw: unknown): BoardModerationStatus {
+  const status = asString(raw, '').trim().toLowerCase()
+  switch (status) {
+    case 'flagged':
+    case 'approved':
+    case 'removed':
+    case 'hidden':
+    case 'warned':
+      return status
+    default:
+      return 'none'
+  }
+}
+
 function normalizeBoardPost(raw: unknown): BoardPost | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id, '').trim()
@@ -413,6 +427,8 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
         : '')
       || null,
     hearth_count: asNumber(raw.hearth_count, 0),
+    report_count: Math.max(0, Math.trunc(asNumber(raw.report_count, 0))),
+    moderation_status: normalizeBoardModerationStatus(raw.moderation_status),
     ...(reactions !== undefined ? { reactions } : {}),
   }
 }
@@ -449,6 +465,8 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
     votes_down: votesDown,
     current_vote: currentVote,
     has_voted: hasVoted,
+    report_count: Math.max(0, Math.trunc(asNumber(raw.report_count, 0))),
+    moderation_status: normalizeBoardModerationStatus(raw.moderation_status),
     ...(reactions !== undefined ? { reactions } : {}),
   }
 }

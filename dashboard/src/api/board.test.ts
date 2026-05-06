@@ -453,6 +453,8 @@ describe('fetchBoard', () => {
           updated_at: 1_713_000_000,
           current_vote: 'up',
           has_voted: true,
+          report_count: 2,
+          moderation_status: 'flagged',
           reactions: [
             {
               emoji: '🔥',
@@ -486,6 +488,8 @@ describe('fetchBoard', () => {
     expect(result.posts[0]).toMatchObject({
       current_vote: 'up',
       has_voted: true,
+      report_count: 2,
+      moderation_status: 'flagged',
       reactions: [
         {
           emoji: '🔥',
@@ -663,6 +667,8 @@ describe('fetchBoardPost', () => {
           score: 3,
           current_vote: 'up',
           has_voted: true,
+          report_count: 1,
+          moderation_status: 'hidden',
           reactions: [
             {
               emoji: '🚀',
@@ -692,6 +698,8 @@ describe('fetchBoardPost', () => {
       votes_down: 2,
       current_vote: 'up',
       has_voted: true,
+      report_count: 1,
+      moderation_status: 'hidden',
       reactions: [
         {
           emoji: '🚀',

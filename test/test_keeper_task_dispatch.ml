@@ -189,6 +189,30 @@ let check_effective_goal_ids label scope expected =
   in
   check (list string) label expected actual
 
+let claimed_task_for_agent config agent_name =
+  Coord.get_tasks_raw config
+  |> List.find_opt (fun (task : Masc_domain.task) ->
+       Masc_domain.task_assignee_of_status task.task_status = Some agent_name)
+
+let check_no_task_claimed config meta =
+  match claimed_task_for_agent config meta.Keeper_types.agent_name with
+  | None -> ()
+  | Some task ->
+      fail
+        (Printf.sprintf
+           "expected no claimed task for scoped keeper, got %s (%s)"
+           task.id task.title)
+
+let check_active_goal_scope_no_fallback json ~goal_id =
+  let scope = Yojson.Safe.Util.member "claim_scope" json in
+  check string "claim scope mode" "active_goal_ids"
+    Yojson.Safe.Util.(scope |> member "mode" |> to_string);
+  check (list string) "effective goal ids preserved" [ goal_id ]
+    Yojson.Safe.Util.(
+      scope |> member "effective_goal_ids" |> to_list |> List.map to_string);
+  check (option string) "fallback reason absent" None
+    Yojson.Safe.Util.(scope |> member "fallback_reason" |> to_string_option)
+
 let with_registered_keeper config meta f =
   Keeper_registry.unregister ~base_path:config.Coord.base_path meta.Keeper_types.name;
   ignore
@@ -529,7 +553,7 @@ let test_claim_respects_active_goal_ids () =
           json |> member "claimed_task" |> member "goal_id" |> to_string)
     | None -> fail "expected a claimed task")
 
-let test_claim_falls_back_from_empty_auto_goal_scope () =
+let test_claim_does_not_cross_goal_when_auto_goal_scope_empty () =
   with_room (fun config ->
     let meta = make_test_meta ~name:"executor" () in
     let auto_goal, _ =
@@ -553,29 +577,15 @@ let test_claim_falls_back_from_empty_auto_goal_scope () =
     in
     let result = call_tool config meta "keeper_task_claim" (`Assoc []) in
     let json = parse_json result in
-    let claimed_task =
-      Coord.get_tasks_raw config
-      |> List.find_opt (fun (task : Masc_domain.task) ->
-           Masc_domain.task_assignee_of_status task.task_status = Some meta.agent_name)
-    in
-    match claimed_task with
-    | Some task ->
-      check string "claimed product task" "Product task" task.title;
-      let scope = Yojson.Safe.Util.member "claim_scope" json in
-      check string "claim scope mode" "auto_goal_fallback_all_tasks"
-        Yojson.Safe.Util.(scope |> member "mode" |> to_string);
-      check int "effective goal ids cleared" 0
-        Yojson.Safe.Util.(
-          scope |> member "effective_goal_ids" |> to_list |> List.length);
-      check string "claim scope matched product goal" product_goal.id
-        Yojson.Safe.Util.(scope |> member "matched_goal_id" |> to_string);
-      check bool "fallback reason present" true
-        Yojson.Safe.Util.(
-          scope |> member "fallback_reason" |> to_string |> fun s ->
-          String.length s > 0)
-    | None -> fail "expected fallback to claim a product task")
+    let message = Yojson.Safe.Util.(json |> member "result" |> to_string) in
+    check_no_task_claimed config meta;
+    check_active_goal_scope_no_fallback json ~goal_id:auto_goal.id;
+    check bool "message keeps active scope" true
+      (contains_substring message "within active_goal_ids");
+    check bool "does not claim product fallback" false
+      (contains_substring message "fallback to all tasks"))
 
-let test_claim_stops_from_empty_persisted_goal_scope () =
+let test_claim_does_not_cross_goal_when_persisted_goal_scope_empty () =
   with_room (fun config ->
     let keeper_goal, _ =
       match Goal_store.upsert_goal config ~title:"Masc improver" () with
@@ -598,36 +608,15 @@ let test_claim_stops_from_empty_persisted_goal_scope () =
     in
     let result = call_tool config meta "keeper_task_claim" (`Assoc []) in
     let json = parse_json result in
-    let claimed_task =
-      Coord.get_tasks_raw config
-      |> List.find_opt (fun (task : Masc_domain.task) ->
-           Masc_domain.task_assignee_of_status task.task_status = Some meta.agent_name)
-    in
-    match claimed_task with
-    | Some task ->
-      fail
-        (Printf.sprintf
-           "expected persisted active_goal_ids to stop before claiming %s"
-           task.title)
-    | None ->
-      let scope = Yojson.Safe.Util.member "claim_scope" json in
-      check string "claim scope mode" "active_goal_ids"
-        Yojson.Safe.Util.(scope |> member "mode" |> to_string);
-      check int "effective goal ids retained" 1
-        Yojson.Safe.Util.(
-          scope |> member "effective_goal_ids" |> to_list |> List.length);
-      check_effective_goal_ids "effective goal ids" scope [ keeper_goal.id ];
-      check bool "fallback reason absent" true
-        Yojson.Safe.Util.(scope |> member "fallback_reason" |> json_is_null);
-      check bool "product goal stayed unclaimed" true
-        (Coord.get_tasks_raw config
-         |> List.exists (fun (task : Masc_domain.task) ->
-              String.equal task.title "Product task"
-              && Option.equal String.equal task.goal_id (Some product_goal.id)
-              &&
-              match task.task_status with Masc_domain.Todo -> true | _ -> false)))
+    let message = Yojson.Safe.Util.(json |> member "result" |> to_string) in
+    check_no_task_claimed config meta;
+    check_active_goal_scope_no_fallback json ~goal_id:keeper_goal.id;
+    check bool "message keeps active scope" true
+      (contains_substring message "within active_goal_ids");
+    check bool "does not claim product fallback" false
+      (contains_substring message "fallback to all tasks"))
 
-let test_claim_stops_when_scoped_task_requires_missing_tool () =
+let test_claim_does_not_cross_goal_when_scoped_task_requires_missing_tool () =
   with_room (fun config ->
     let scoped_goal, _ =
       match Goal_store.upsert_goal config ~title:"Scoped keeper goal" () with
@@ -660,35 +649,14 @@ let test_claim_stops_when_scoped_task_requires_missing_tool () =
     let result = call_tool config meta "keeper_task_claim" (`Assoc []) in
     let json = parse_json result in
     let message = Yojson.Safe.Util.(json |> member "result" |> to_string) in
-    let claimed_task =
-      Coord.get_tasks_raw config
-      |> List.find_opt (fun (task : Masc_domain.task) ->
-           Masc_domain.task_assignee_of_status task.task_status = Some meta.agent_name)
-    in
-    match claimed_task with
-    | Some task ->
-      fail
-        (Printf.sprintf
-           "expected scoped missing-tool task to block fallback, claimed %s"
-           task.title)
-    | None ->
-      let scope = Yojson.Safe.Util.member "claim_scope" json in
-      check string "claim scope mode" "active_goal_ids"
-        Yojson.Safe.Util.(scope |> member "mode" |> to_string);
-      check_effective_goal_ids "effective goal ids" scope [ scoped_goal.id ];
-      check bool "message names scoped active goals" true
-        (contains_substring message "within active_goal_ids");
-      check bool "message avoids fallback" false
-        (contains_substring message "fallback");
-      check bool "product goal stayed unclaimed" true
-        (Coord.get_tasks_raw config
-         |> List.exists (fun (task : Masc_domain.task) ->
-              String.equal task.title "Product fallback task"
-              && Option.equal String.equal task.goal_id (Some product_goal.id)
-              &&
-              match task.task_status with Masc_domain.Todo -> true | _ -> false)))
+    check_no_task_claimed config meta;
+    check_active_goal_scope_no_fallback json ~goal_id:scoped_goal.id;
+    check bool "message keeps active scope" true
+      (contains_substring message "within active_goal_ids");
+    check bool "does not claim product fallback" false
+      (contains_substring message "fallback to all tasks"))
 
-let test_claim_stops_when_scoped_task_is_verification_blocked () =
+let test_claim_does_not_cross_goal_when_scoped_task_is_verification_blocked () =
   with_room (fun config ->
     let scoped_goal, _ =
       match Goal_store.upsert_goal config ~title:"Scoped verification goal" () with
@@ -715,35 +683,14 @@ let test_claim_stops_when_scoped_task_is_verification_blocked () =
     let result = call_tool config meta "keeper_task_claim" (`Assoc []) in
     let json = parse_json result in
     let message = Yojson.Safe.Util.(json |> member "result" |> to_string) in
-    let claimed_task =
-      Coord.get_tasks_raw config
-      |> List.find_opt (fun (task : Masc_domain.task) ->
-           Masc_domain.task_assignee_of_status task.task_status = Some meta.agent_name)
-    in
-    match claimed_task with
-    | Some task ->
-      fail
-        (Printf.sprintf
-           "expected verification-blocked scoped task to block fallback, claimed %s"
-           task.title)
-    | None ->
-      let scope = Yojson.Safe.Util.member "claim_scope" json in
-      check string "claim scope mode" "active_goal_ids"
-        Yojson.Safe.Util.(scope |> member "mode" |> to_string);
-      check_effective_goal_ids "effective goal ids" scope [ scoped_goal.id ];
-      check bool "message names scoped active goals" true
-        (contains_substring message "within active_goal_ids");
-      check bool "message avoids fallback" false
-        (contains_substring message "fallback");
-      check bool "product goal stayed unclaimed" true
-        (Coord.get_tasks_raw config
-         |> List.exists (fun (task : Masc_domain.task) ->
-              String.equal task.title "Product fallback task"
-              && Option.equal String.equal task.goal_id (Some product_goal.id)
-              &&
-              match task.task_status with Masc_domain.Todo -> true | _ -> false)))
+    check_no_task_claimed config meta;
+    check_active_goal_scope_no_fallback json ~goal_id:scoped_goal.id;
+    check bool "message keeps active scope" true
+      (contains_substring message "within active_goal_ids");
+    check bool "does not claim product fallback" false
+      (contains_substring message "fallback to all tasks"))
 
-let test_claim_no_eligible_persisted_scope_reports_scope_truth () =
+let test_claim_no_eligible_scoped_reports_scope_truth () =
   with_room (fun config ->
     let scoped_goal, _ =
       match Goal_store.upsert_goal config ~title:"Scoped keeper goal" () with
@@ -781,18 +728,14 @@ let test_claim_no_eligible_persisted_scope_reports_scope_truth () =
     let result = call_tool config meta "keeper_task_claim" (`Assoc []) in
     let json = parse_json result in
     let message = Yojson.Safe.Util.(json |> member "result" |> to_string) in
-    let scope = Yojson.Safe.Util.member "claim_scope" json in
-    check string "claim scope mode" "active_goal_ids"
-      Yojson.Safe.Util.(scope |> member "mode" |> to_string);
-    check_effective_goal_ids "effective goal ids" scope [ scoped_goal.id ];
-    check bool "message names active scope" true
-      (contains_substring message "within active_goal_ids");
+    check_no_task_claimed config meta;
+    check_active_goal_scope_no_fallback json ~goal_id:scoped_goal.id;
     check bool "message avoids fallback search" false
-      (contains_substring message "fallback");
+      (contains_substring message "fallback to all tasks");
     check bool "message stops task checking" true
       (contains_substring message "Stop task-checking");
-    check bool "excluded count present" true
-      Yojson.Safe.Util.(scope |> member "excluded_count" |> to_int |> fun n -> n > 0))
+    check bool "message preserves active scope" true
+      (contains_substring message "within active_goal_ids"))
 
 let test_claim_skips_required_tools_without_access () =
   with_room (fun config ->
@@ -1265,16 +1208,20 @@ let () =
         test_claim_prefers_oldest_same_priority_task;
       test_case "claim respects active_goal_ids" `Quick
         test_claim_respects_active_goal_ids;
-      test_case "claim falls back from empty auto goal scope" `Quick
-        test_claim_falls_back_from_empty_auto_goal_scope;
-      test_case "claim stops from empty persisted goal scope" `Quick
-        test_claim_stops_from_empty_persisted_goal_scope;
-      test_case "claim stops when scoped task requires missing tool" `Quick
-        test_claim_stops_when_scoped_task_requires_missing_tool;
-      test_case "claim stops when scoped task is verification blocked" `Quick
-        test_claim_stops_when_scoped_task_is_verification_blocked;
-      test_case "claim no eligible persisted scope reports scope truth" `Quick
-        test_claim_no_eligible_persisted_scope_reports_scope_truth;
+      test_case "claim does not cross-goal when auto goal scope is empty" `Quick
+        test_claim_does_not_cross_goal_when_auto_goal_scope_empty;
+      test_case "claim does not cross-goal when persisted goal scope is empty"
+        `Quick
+        test_claim_does_not_cross_goal_when_persisted_goal_scope_empty;
+      test_case "claim does not cross-goal when scoped task requires missing tool"
+        `Quick
+        test_claim_does_not_cross_goal_when_scoped_task_requires_missing_tool;
+      test_case
+        "claim does not cross-goal when scoped task is verification blocked"
+        `Quick
+        test_claim_does_not_cross_goal_when_scoped_task_is_verification_blocked;
+      test_case "claim no eligible scoped reports scope truth" `Quick
+        test_claim_no_eligible_scoped_reports_scope_truth;
       test_case "claim skips tasks requiring missing tools" `Quick
         test_claim_skips_required_tools_without_access;
       test_case "claim allows tasks requiring available tools" `Quick

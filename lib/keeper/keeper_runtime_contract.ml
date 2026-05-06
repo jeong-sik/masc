@@ -87,7 +87,7 @@ let resolve_claim_goal_scope ?agent_tool_names
         let is_auto_goal =
           active_goal_ids_are_auto_keeper_goals config ~meta goal_ids
         in
-        if is_auto_goal || allow_empty_goal_scope_fallback then
+        if allow_empty_goal_scope_fallback then
           {
             task_filter = (fun (_task : Masc_domain.task) -> true);
             mode =

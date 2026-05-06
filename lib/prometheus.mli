@@ -459,6 +459,15 @@ val metric_workspace_route_failures : string
 val metric_active_agents : string
 val metric_pending_tasks : string
 val metric_uptime_seconds : string
+val metric_goal_attainment_pct : string
+(** Goal attainment percentage by [goal_id]. Companion
+    {!metric_goal_attainment_measured} distinguishes real 0% from
+    unmeasured goals. *)
+
+val metric_goal_attainment_measured : string
+(** Gauge by [goal_id]: [1] when goal attainment percentage is measured,
+    [0] when the dashboard projection is currently unmeasured. *)
+
 val metric_sse_connections_active : string
 val metric_sse_reconnects : string
 val metric_sse_idle_evictions : string

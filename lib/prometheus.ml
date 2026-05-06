@@ -885,6 +885,8 @@ let metric_workspace_route_failures = "masc_workspace_route_failures_total"
 let metric_active_agents = "masc_active_agents"
 let metric_pending_tasks = "masc_pending_tasks"
 let metric_uptime_seconds = "masc_uptime_seconds"
+let metric_goal_attainment_pct = "masc_goal_attainment_pct"
+let metric_goal_attainment_measured = "masc_goal_attainment_measured"
 
 (* PR-0.2.D: OCaml GC quick_stat sampler gauges.  Populated by
    [Gc_sampler.run] from the runtime [Gc.quick_stat ()] once per
@@ -1312,6 +1314,13 @@ let init () =
   add metric_active_agents "Currently active agents" Gauge;
   add metric_pending_tasks "Tasks waiting to be claimed" Gauge;
   add metric_uptime_seconds "Server uptime in seconds" Gauge;
+  add metric_goal_attainment_pct
+    "Goal attainment percentage by goal_id. Use \
+     masc_goal_attainment_measured to distinguish real 0% from unmeasured."
+    Gauge;
+  add metric_goal_attainment_measured
+    "Whether goal attainment percentage is currently measured by goal_id \
+     (1 = measured, 0 = unmeasured)." Gauge;
   (* PR-0.2.D: OCaml runtime GC sampler gauges.  See [Gc_sampler]. *)
   add metric_gc_minor_words
     "Cumulative words allocated in the minor heap since program start \

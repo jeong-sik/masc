@@ -330,6 +330,21 @@ let test_memory_usage_metric_registered () =
     (text_has_literal text
        ("# TYPE " ^ Prometheus.metric_memory_usage_bytes ^ " gauge"))
 
+let test_goal_attainment_metrics_registered () =
+  let text = Prometheus.to_prometheus_text () in
+  check bool "has goal attainment pct HELP" true
+    (text_has_literal text
+       ("# HELP " ^ Prometheus.metric_goal_attainment_pct ^ " "));
+  check bool "has goal attainment pct TYPE" true
+    (text_has_literal text
+       ("# TYPE " ^ Prometheus.metric_goal_attainment_pct ^ " gauge"));
+  check bool "has goal attainment measured HELP" true
+    (text_has_literal text
+       ("# HELP " ^ Prometheus.metric_goal_attainment_measured ^ " "));
+  check bool "has goal attainment measured TYPE" true
+    (text_has_literal text
+       ("# TYPE " ^ Prometheus.metric_goal_attainment_measured ^ " gauge"))
+
 let test_histogram_exported_as_summary () =
   let name = "test_hist_export_fmt" in
   Prometheus.register_histogram ~name ~help:"export format test" ();
@@ -511,6 +526,8 @@ let () =
         test_build_identity_probe_metric_registered;
       test_case "memory usage metric registered" `Quick
         test_memory_usage_metric_registered;
+      test_case "goal attainment metrics registered" `Quick
+        test_goal_attainment_metrics_registered;
       test_case "histogram exported as summary with _sum/_count"
         `Quick test_histogram_exported_as_summary;
     ];

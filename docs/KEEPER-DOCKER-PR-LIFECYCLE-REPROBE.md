@@ -14,7 +14,7 @@ audit gates. The audit script can detect missing evidence; this reprobe runner
 adds the operator action loop:
 
 1. discover Docker keepers,
-2. render a per-keeper proof prompt,
+2. render per-keeper create/review phase prompts,
 3. optionally send the prompt through `masc_keeper_msg`,
 4. poll `masc_keeper_msg_result`,
 5. run `audit-keeper-fleet-readiness.py --require-docker-pr-lifecycle-evidence --evidence-run-id <run_id>`,
@@ -44,13 +44,14 @@ continues), and `server_health_missing_commit` (the response was reachable
 but lacked `build.commit`, also treated as transient). Only the first
 status records pending requests as lost; the other two log a transient
 notice and the next poll iteration retries.
-When mutation is enabled, the harness sends `required_tools` with each
-`masc_keeper_msg` call. By default that one-turn contract requires
-`keeper_shell`, `keeper_bash`, `keeper_pr_create`, and
-`keeper_pr_review_comment`, so the runtime records `tool_surface_mismatch` if
-those tools are not visible and `missing_required_tool_use` if the keeper
-replies without exercising them.
-The prompt reserves `keeper_shell` for read-only GitHub inspection.
+When mutation is enabled, the harness sends two sequential phases. The create phase
+requires `keeper_bash` and `keeper_pr_create`. After all create requests
+reach terminal status, the review phase requires `keeper_shell` and
+`keeper_pr_review_comment`. This avoids the old single-turn shape where one
+keeper could wait on another keeper's missing PR until the Agent.run timeout.
+The review prompt reserves `keeper_shell` for read-only GitHub inspection and
+instructs keepers to report `target_pr_missing` after one failed branch lookup
+instead of polling in a loop.
 Keepers must create/use the exact run-scoped branch
 `keeper/<keeper>-docker-pr-proof-<run_id>` and proof file
 `docs/runtime-proof/keepers/<keeper>-<run_id>.md`; older proof branches or
@@ -61,8 +62,10 @@ keeper must stop and report that blocker instead of falling back to host-local
 credentials.
 PR create/review mutations should use `keeper_pr_create` /
 `keeper_pr_review_comment` rather than `gh pr ...` through shell tools.
-Override the CSV with `REQUIRED_TOOLS=...` for a narrower or broader proof
-lane.
+Override the phase CSVs with `CREATE_REQUIRED_TOOLS=...` and
+`REVIEW_REQUIRED_TOOLS=...` when debugging a narrower or broader proof lane.
+The older `REQUIRED_TOOLS=...` override is still accepted as a legacy shortcut
+and is applied to both phases only when the phase-specific variables are unset.
 `MSG_TIMEOUT_SEC` only bounds the harness HTTP request to the MCP server.
 The keeper's actual Agent.run budget is sent separately as
 `masc_keeper_msg.timeout_sec` through `KEEPER_TURN_TIMEOUT_SEC`, which defaults

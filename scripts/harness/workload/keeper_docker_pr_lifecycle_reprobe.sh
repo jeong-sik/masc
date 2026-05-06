@@ -36,7 +36,10 @@ KEEPER_TURN_TIMEOUT_SEC="${KEEPER_TURN_TIMEOUT_SEC:-900}"
 INIT_TIMEOUT_SEC="${INIT_TIMEOUT_SEC:-60}"
 POLL_TIMEOUT_SEC="${POLL_TIMEOUT_SEC:-1200}"
 POLL_INTERVAL_SEC="${POLL_INTERVAL_SEC:-10}"
-REQUIRED_TOOLS="${REQUIRED_TOOLS:-keeper_shell,keeper_bash,keeper_pr_create,keeper_pr_review_comment}"
+LIFECYCLE_MUTATION_MODE="split"
+REQUIRED_TOOLS_LEGACY="${REQUIRED_TOOLS:-}"
+CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_bash,keeper_pr_create}}"
+REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_shell,keeper_pr_review_comment}}"
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 MCP_TOKEN="${MASC_MCP_TOKEN:-}"
 MCP_CLIENT_NAME="${MCP_CLIENT_NAME:-keeper-docker-pr-lifecycle-reprobe}"
@@ -87,7 +90,10 @@ Environment:
   POLL_INTERVAL_SEC        Poll interval in seconds.
   MSG_TIMEOUT_SEC          HTTP request timeout for MCP tool calls.
   KEEPER_TURN_TIMEOUT_SEC  Per-keeper Agent.run timeout_sec sent to masc_keeper_msg.
-  REQUIRED_TOOLS           CSV required_tools sent to masc_keeper_msg when mutating.
+  REQUIRED_TOOLS           Legacy CSV applied to both split phases when
+                           phase-specific overrides are unset.
+  CREATE_REQUIRED_TOOLS    CSV required_tools for split create phase.
+  REVIEW_REQUIRED_TOOLS    CSV required_tools for split review phase.
   RUN_AUDIT=0              Skip final audit.
   EXPECTED_SERVER_COMMIT   Optional expected /health build.commit prefix.
   FORBID_GITHUB_IDENTITIES Optional CSV of forbidden keeper GitHub identities.
@@ -318,16 +324,18 @@ record_pending_server_incarnation_loss() {
   local pending_file="$1"
   local status="$2"
   local raw_file="$3"
+  local phase="${4:-}"
   while IFS=$'\t' read -r request_id keeper; do
     [[ -n "$request_id" ]] || continue
     jq -nc \
       --arg keeper "$keeper" \
+      --arg phase "$phase" \
       --arg request_id "$request_id" \
       --arg status "$status" \
       --arg expected_incarnation "$SERVER_INCARNATION_ACTUAL" \
       --arg actual_incarnation "$SERVER_INCARNATION_LAST_ACTUAL" \
       --arg raw_file "$raw_file" \
-      '{keeper:$keeper, request_id:$request_id, status:$status, server_expected_incarnation:$expected_incarnation, server_actual_incarnation:$actual_incarnation, raw_file:$raw_file}' \
+      '{keeper:$keeper, phase:$phase, request_id:$request_id, status:$status, server_expected_incarnation:$expected_incarnation, server_actual_incarnation:$actual_incarnation, raw_file:$raw_file}' \
       >>"$RESULTS_FILE"
   done <"$pending_file"
 }
@@ -766,7 +774,63 @@ review_target_for_keeper() {
   ' "$REVIEW_TARGETS_FILE" | head -n 1
 }
 
-prompt_for_keeper() {
+prompt_for_keeper_create() {
+  local keeper="$1"
+  cat <<EOF
+Docker PR lifecycle proof run: $RUN_ID
+Phase: create
+
+Target repo: $REPO_SLUG
+Keeper: $keeper
+
+Goal: create a fresh, auditable Docker-backed proof branch and draft PR. Do
+not review or approve another keeper's PR in this phase.
+
+Tool route rules:
+- Use keeper_bash inside your Docker playground for proof-file creation and git add/commit/push on the proof branch.
+- Do not run gh pr create, gh pr review, or other mutating GitHub commands through keeper_shell or keeper_bash.
+- Do not use approval-requiring host code-write paths such as masc_code_write for this proof file.
+- If keeper_bash rejects mutating git as policy-blocked, stop and report the exact blocker instead of switching to host-local credentials.
+- Use keeper_pr_create for PR creation.
+
+Required create lane:
+1. Confirm your runtime is sandbox_profile=docker before mutating.
+2. Create a unique proof worktree/branch for exactly this run id:
+   - branch: keeper/$keeper-docker-pr-proof-$RUN_ID
+   - preferred tool: masc_worktree_create
+   - use the returned worktree path for every later keeper_bash git/file command.
+   - Do not reuse any branch, worktree, or proof file from another run id.
+   - Do not remove this run's worktree during the proof attempt. If Git says
+     the branch/worktree already exists, stop and report blocker="branch_collision".
+3. Make a minimal, non-product proof edit under docs/runtime-proof/keepers/$keeper-$RUN_ID.md with keeper_bash from inside the Docker playground. The file content must include run_id=$RUN_ID and branch=keeper/$keeper-docker-pr-proof-$RUN_ID.
+4. Commit and git push exactly branch keeper/$keeper-docker-pr-proof-$RUN_ID with keeper_bash. The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
+5. Create a draft PR for that branch with keeper_pr_create. Do not mark ready, do not merge, do not add human-approved-ready.
+6. Reply with one compact JSON object:
+   {
+     "run_id": "$RUN_ID",
+     "phase": "create",
+     "keeper": "$keeper",
+     "branch": "keeper/$keeper-docker-pr-proof-$RUN_ID",
+     "pr_url": "...",
+     "docker_pr_create": true,
+     "docker_git_push": true,
+     "blocker": null
+   }
+
+Safety rules:
+- No protected branches.
+- No force push.
+- No ready/merge.
+- No human-approved-ready label.
+- If a tool is missing or policy-blocked, stop and reply with blocker plus exact structured tool output.
+
+This prompt is sent with create-phase masc_keeper_msg.required_tools so the
+runtime records tool_surface_mismatch or missing_required_tool_use when
+keeper_bash/keeper_pr_create are not visible or not used.
+EOF
+}
+
+prompt_for_keeper_review() {
   local keeper="$1"
   local review_target="${2:-}"
   local review_branch=""
@@ -782,96 +846,82 @@ Cross-keeper approval target:
 - You must review and APPROVE the draft PR whose head branch is: $review_branch
 - This target belongs to keeper: $review_target
 - Do not approve your own PR or your own branch.
-- If the target PR is not visible yet, wait/retry briefly by listing PRs for that head branch before declaring a blocker.
+- First use keeper_shell once to resolve the target PR number:
+  gh pr view $review_branch -R $REPO_SLUG --json number,url,isDraft,headRefName
+- If that command reports no PR or cannot resolve the branch, do not wait in a loop. Reply with blocker="target_pr_missing" and the exact tool output.
 - If GitHub reports the target PR has the same author identity as your current credential and rejects approval as self-approval, stop and report blocker="github_self_approve_policy" with the exact tool output.
+- Once the PR number is known, call keeper_pr_review_comment with event="APPROVE" and a body that includes run_id=$RUN_ID, reviewer=$keeper, and target_branch=$review_branch.
 EOF
 )"
   else
     review_instruction="$(cat <<'EOF'
 Cross-keeper approval target:
-- No distinct review target was available. You can create/push/comment on your own draft PR, but this run cannot satisfy PR APPROVE evidence.
-- Stop before approval and report blocker="insufficient_review_targets".
+- No distinct review target was available. This phase cannot satisfy PR APPROVE evidence.
+- Stop immediately and report blocker="insufficient_review_targets".
 EOF
 )"
   fi
   cat <<EOF
 Docker PR lifecycle proof run: $RUN_ID
+Phase: review
 
 Target repo: $REPO_SLUG
 Keeper: $keeper
 
-Goal: produce direct, auditable Docker-backed evidence for PR create, git push, PR review/comment, and PR APPROVE. Use native keeper tools where available; do not use host-local ambient GitHub credentials.
+Goal: produce direct, auditable Docker-backed PR review and APPROVE evidence
+for another keeper's draft proof PR. Do not create a new branch or PR in this
+phase.
 
 Tool route rules:
 - Use keeper_shell for read-only GitHub inspection.
-- Use keeper_bash inside your Docker playground for proof-file creation and git add/commit/push on the proof branch.
-- Do not run gh pr create, gh pr review, or other mutating GitHub commands through keeper_shell or keeper_bash.
-- Do not use approval-requiring host code-write paths such as masc_code_write for this proof file.
-- If keeper_bash rejects mutating git as policy-blocked, stop and report the exact blocker instead of switching to host-local credentials.
-- Use keeper_pr_create and keeper_pr_review_comment for PR mutation/review actions.
-
-Required proof lane:
-1. Confirm your runtime is sandbox_profile=docker before mutating.
-2. Create a unique proof worktree/branch for exactly this run id:
-   - branch: keeper/$keeper-docker-pr-proof-$RUN_ID
-   - preferred tool: masc_worktree_create
-   - use the returned worktree path for every later keeper_bash git/file command.
-   - Do not reuse any branch, worktree, or proof file from another run id.
-   - Do not remove this run's worktree during the proof attempt. If Git says
-     the branch/worktree already exists, stop and report blocker="branch_collision".
-3. Make a minimal, non-product proof edit under docs/runtime-proof/keepers/$keeper-$RUN_ID.md with keeper_bash from inside the Docker playground. The file content must include run_id=$RUN_ID and branch=keeper/$keeper-docker-pr-proof-$RUN_ID.
-4. Commit and git push exactly branch keeper/$keeper-docker-pr-proof-$RUN_ID with keeper_bash. The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
-5. Create a draft PR for that branch with keeper_pr_create or the native PR-create tool path. Do not mark ready, do not merge, do not add human-approved-ready.
-6. Use keeper_pr_review_read and keeper_pr_review_comment for review evidence. COMMENT is allowed on your own proof PR. APPROVE must target the cross-keeper PR below, not your own PR.
+- Do not run mutating gh review commands through keeper_shell or keeper_bash.
+- Use keeper_pr_review_comment for the APPROVE mutation.
 
 $review_instruction
 
-7. Reply with one compact JSON object:
+Reply with one compact JSON object:
    {
      "run_id": "$RUN_ID",
+     "phase": "review",
      "keeper": "$keeper",
-     "branch": "keeper/$keeper-docker-pr-proof-$RUN_ID",
      "review_target_keeper": $review_target_json,
      "review_target_branch": $review_branch_json,
-     "pr_url": "...",
      "approved_pr_url": "...",
-     "docker_pr_create": true,
-     "docker_git_push": true,
-     "docker_pr_review": true,
      "docker_pr_approve": true,
      "blocker": null
    }
 
 Safety rules:
-- No protected branches.
-- No force push.
 - No ready/merge.
 - No human-approved-ready label.
 - If a tool is missing or policy-blocked, stop and reply with blocker plus exact structured tool output.
 
-This prompt is sent with masc_keeper_msg.required_tools so the runtime records
-tool_surface_mismatch or missing_required_tool_use when the Docker PR lifecycle
-tools are not visible or not used.
+This prompt is sent with review-phase masc_keeper_msg.required_tools so the
+runtime records tool_surface_mismatch or missing_required_tool_use when
+keeper_shell/keeper_pr_review_comment are not visible or not used.
 EOF
 }
 
 render_prompts() {
   while IFS= read -r keeper; do
     [[ -n "$keeper" ]] || continue
-    prompt_for_keeper "$keeper" "$(review_target_for_keeper "$keeper")" >"$PROMPT_DIR/$keeper.txt"
+    prompt_for_keeper_create "$keeper" >"$PROMPT_DIR/$keeper-create.txt"
+    prompt_for_keeper_review "$keeper" "$(review_target_for_keeper "$keeper")" >"$PROMPT_DIR/$keeper-review.txt"
   done <"$RUN_DIR/keepers.txt"
 }
 
-send_prompts() {
+send_phase_prompts() {
+  local phase="$1"
+  local required_tools_csv="$2"
   while IFS= read -r keeper; do
     [[ -n "$keeper" ]] || continue
     local prompt args payload text request_id
-    prompt="$(cat "$PROMPT_DIR/$keeper.txt")"
+    prompt="$(cat "$PROMPT_DIR/$keeper-$phase.txt")"
     args="$(
       jq -cn \
         --arg name "$keeper" \
         --arg message "$prompt" \
-        --arg required_tools_csv "$REQUIRED_TOOLS" \
+        --arg required_tools_csv "$required_tools_csv" \
         --argjson timeout "$KEEPER_TURN_TIMEOUT_SEC" \
         '{
           name:$name,
@@ -885,12 +935,12 @@ send_prompts() {
           )
         }'
     )"
-    log "sending proof prompt to $keeper"
-    payload="$(tool_call "keeper-msg-$keeper-$RUN_ID" "masc_keeper_msg" "$args" "$MSG_TIMEOUT_SEC")"
-    printf '%s' "$payload" >"$RAW_DIR/msg-$keeper.jsonrpc.json"
+    log "sending $phase proof prompt to $keeper"
+    payload="$(tool_call "keeper-msg-$phase-$keeper-$RUN_ID" "masc_keeper_msg" "$args" "$MSG_TIMEOUT_SEC")"
+    printf '%s' "$payload" >"$RAW_DIR/msg-$phase-$keeper.jsonrpc.json"
     mcp_require_tool_ok "$payload" "masc_keeper_msg:$keeper"
     text="$(tool_text_or_empty "$payload")"
-    printf '%s' "$text" >"$RAW_DIR/msg-$keeper.text"
+    printf '%s' "$text" >"$RAW_DIR/msg-$phase-$keeper.text"
     request_id="$(printf '%s' "$text" | jq -r '.request_id // .id // empty' 2>/dev/null || true)"
     if [[ -z "$request_id" ]]; then
       echo "masc_keeper_msg did not return request_id for $keeper" >&2
@@ -899,10 +949,11 @@ send_prompts() {
     fi
     jq -nc \
       --arg keeper "$keeper" \
+      --arg phase "$phase" \
       --arg request_id "$request_id" \
-      --arg prompt_file "$PROMPT_DIR/$keeper.txt" \
+      --arg prompt_file "$PROMPT_DIR/$keeper-$phase.txt" \
       --arg review_target "$(review_target_for_keeper "$keeper")" \
-      '{keeper:$keeper, request_id:$request_id, prompt_file:$prompt_file, review_target:$review_target, status:"pending"}' \
+      '{keeper:$keeper, phase:$phase, request_id:$request_id, prompt_file:$prompt_file, review_target:$review_target, status:"pending"}' \
       >>"$REQUESTS_FILE"
   done <"$RUN_DIR/keepers.txt"
 }
@@ -918,10 +969,21 @@ result_is_terminal() {
 }
 
 poll_results() {
+  local phase="$1"
+  # Honor MUTATE_POLL_DEADLINE_TS when the caller has already opened the
+  # phase loop with a shared overall budget (split keeper lifecycle PR
+  # #13842). Falling back to the per-call POLL_TIMEOUT_SEC keeps
+  # backwards compatibility for direct invocations of this function.
   local deadline
-  deadline=$(( $(date +%s) + POLL_TIMEOUT_SEC ))
-  local pending_file="$RUN_DIR/pending.txt"
-  jq -r '.request_id + "\t" + .keeper' "$REQUESTS_FILE" >"$pending_file"
+  if [[ -n "${MUTATE_POLL_DEADLINE_TS:-}" ]]; then
+    deadline="$MUTATE_POLL_DEADLINE_TS"
+  else
+    deadline=$(( $(date +%s) + POLL_TIMEOUT_SEC ))
+  fi
+  local pending_file="$RUN_DIR/pending-$phase.txt"
+  jq -r --arg phase "$phase" \
+    'select(.phase == $phase) | .request_id + "\t" + .keeper' \
+    "$REQUESTS_FILE" >"$pending_file"
 
   while [[ -s "$pending_file" && "$(date +%s)" -lt "$deadline" ]]; do
     if ! assert_server_incarnation_unchanged; then
@@ -934,7 +996,8 @@ poll_results() {
         log "server incarnation changed while polling keeper results: expected=$SERVER_INCARNATION_ACTUAL actual=${SERVER_INCARNATION_LAST_ACTUAL:-unknown}"
         record_pending_server_incarnation_loss "$pending_file" \
           "$SERVER_INCARNATION_LAST_REASON" \
-          "$SERVER_INCARNATION_LAST_FILE"
+          "$SERVER_INCARNATION_LAST_FILE" \
+          "$phase"
         : >"$pending_file"
         break
       fi
@@ -949,23 +1012,23 @@ poll_results() {
       local args payload text status
       args="$(jq -cn --arg request_id "$request_id" '{request_id:$request_id}')"
       payload="$(tool_call "keeper-msg-result-$request_id" "masc_keeper_msg_result" "$args" 30)"
-      printf '%s' "$payload" >"$RAW_DIR/result-$keeper-$request_id.jsonrpc.json"
+      printf '%s' "$payload" >"$RAW_DIR/result-$phase-$keeper-$request_id.jsonrpc.json"
       if ! mcp_require_tool_ok "$payload" "masc_keeper_msg_result:$keeper" >/dev/null 2>&1; then
-        jq -nc --arg keeper "$keeper" --arg request_id "$request_id" \
+        jq -nc --arg keeper "$keeper" --arg phase "$phase" --arg request_id "$request_id" \
           --arg status "poll_error" \
-          --arg raw_file "$RAW_DIR/result-$keeper-$request_id.jsonrpc.json" \
-          '{keeper:$keeper, request_id:$request_id, status:$status, raw_file:$raw_file}' \
+          --arg raw_file "$RAW_DIR/result-$phase-$keeper-$request_id.jsonrpc.json" \
+          '{keeper:$keeper, phase:$phase, request_id:$request_id, status:$status, raw_file:$raw_file}' \
           >>"$POLL_ERRORS_FILE"
         printf '%s\t%s\n' "$request_id" "$keeper" >>"$next_pending"
         continue
       fi
       text="$(tool_text_or_empty "$payload")"
-      printf '%s' "$text" >"$RAW_DIR/result-$keeper-$request_id.text"
+      printf '%s' "$text" >"$RAW_DIR/result-$phase-$keeper-$request_id.text"
       if result_is_terminal "$text"; then
         status="$(printf '%s' "$text" | jq -r '.status // (if .reply then "completed" else "unknown" end)' 2>/dev/null || echo completed)"
-        jq -nc --arg keeper "$keeper" --arg request_id "$request_id" --arg status "$status" \
-          --arg text_file "$RAW_DIR/result-$keeper-$request_id.text" \
-          '{keeper:$keeper, request_id:$request_id, status:$status, text_file:$text_file}' \
+        jq -nc --arg keeper "$keeper" --arg phase "$phase" --arg request_id "$request_id" --arg status "$status" \
+          --arg text_file "$RAW_DIR/result-$phase-$keeper-$request_id.text" \
+          '{keeper:$keeper, phase:$phase, request_id:$request_id, status:$status, text_file:$text_file}' \
           >>"$RESULTS_FILE"
       else
         printf '%s\t%s\n' "$request_id" "$keeper" >>"$next_pending"
@@ -978,8 +1041,8 @@ poll_results() {
 
   if [[ -s "$pending_file" ]]; then
     while IFS=$'\t' read -r request_id keeper; do
-      jq -nc --arg keeper "$keeper" --arg request_id "$request_id" \
-        '{keeper:$keeper, request_id:$request_id, status:"poll_timeout"}' \
+      jq -nc --arg keeper "$keeper" --arg phase "$phase" --arg request_id "$request_id" \
+        '{keeper:$keeper, phase:$phase, request_id:$request_id, status:"poll_timeout"}' \
         >>"$RESULTS_FILE"
     done <"$pending_file"
   fi
@@ -1031,6 +1094,9 @@ write_summary() {
     --arg run_dir "$RUN_DIR" \
     --arg repo "$REPO_SLUG" \
     --arg base_path "$BASE_PATH" \
+    --arg lifecycle_mutation_mode "$LIFECYCLE_MUTATION_MODE" \
+    --arg create_required_tools "$CREATE_REQUIRED_TOOLS" \
+    --arg review_required_tools "$REVIEW_REQUIRED_TOOLS" \
     --arg expected_server_commit "$EXPECTED_SERVER_COMMIT" \
     --arg forbid_github_identities "$FORBID_GITHUB_IDENTITIES" \
     --arg server_commit "$SERVER_COMMIT_ACTUAL" \
@@ -1052,6 +1118,9 @@ write_summary() {
       run_dir:$run_dir,
       repo:$repo,
       base_path:$base_path,
+      lifecycle_mutation_mode:$lifecycle_mutation_mode,
+      create_required_tools:$create_required_tools,
+      review_required_tools:$review_required_tools,
       expected_server_commit:$expected_server_commit,
       forbid_github_identities:$forbid_github_identities,
       server_commit:$server_commit,
@@ -1107,8 +1176,16 @@ build_review_targets
 render_prompts
 
 if [[ "$MUTATE" == "1" ]]; then
-  send_prompts
-  poll_results
+  # Share one POLL_TIMEOUT_SEC budget across both phases so the overall
+  # mutate window remains the single configured value rather than
+  # silently doubling when create + review each compute their own
+  # deadline (PR #13842 review).
+  export MUTATE_POLL_DEADLINE_TS=$(( $(date +%s) + POLL_TIMEOUT_SEC ))
+  send_phase_prompts "create" "$CREATE_REQUIRED_TOOLS"
+  poll_results "create"
+  send_phase_prompts "review" "$REVIEW_REQUIRED_TOOLS"
+  poll_results "review"
+  unset MUTATE_POLL_DEADLINE_TS
 else
   log "dry-run mode: prompts rendered under $PROMPT_DIR; no keeper messages sent"
 fi

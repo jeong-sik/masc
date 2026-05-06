@@ -170,6 +170,12 @@ let rng = Random.State.make_self_init ()
 let rng_mu = Eio.Mutex.create ()
 let with_rng f = Eio.Mutex.use_ro rng_mu (fun () -> f rng)
 
+let observe_failure ~site ~error =
+  Prometheus.inc_counter Prometheus.metric_tool_assignment_telemetry_failures
+    ~labels:[ ("site", site) ] ();
+  Log.Telemetry.warn "tool_assignment_telemetry failure: site=%s error=%s"
+    site error
+
 (* ── Store lifecycle ──────────────────────────────────── *)
 
 let get_or_create_store () : Dated_jsonl.t =
@@ -290,14 +296,21 @@ let read_recent ~n : (tool_event list, string) Result.t =
     let events =
       List.filter_map
         (fun json ->
-          match event_of_json json with Ok ev -> Some ev | Error _ -> None)
+          match event_of_json json with
+          | Ok ev -> Some ev
+          | Error msg ->
+              observe_failure ~site:"read_recent_decode" ~error:msg;
+              None)
         jsons
     in
     (* Dated_jsonl returns oldest-first; API promises newest-first. *)
     Ok (List.rev events)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> Error (Stdlib.Printexc.to_string exn)
+  | exn ->
+      let error = Stdlib.Printexc.to_string exn in
+      observe_failure ~site:"read_recent_exception" ~error;
+      Error error
 
 let warm_up () : unit =
   try
@@ -310,11 +323,16 @@ let warm_up () : unit =
           match event_of_json json with
           | Ok (Assigned { assignment_id; agent_id; _ }) ->
               Hashtbl.replace agent_index agent_id assignment_id
+          | Error msg ->
+              observe_failure ~site:"warm_up_decode" ~error:msg
           | _ -> ())
         jsons)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> Log.Telemetry.warn "warm_up failed: %s" (Stdlib.Printexc.to_string exn)
+  | exn ->
+      let error = Stdlib.Printexc.to_string exn in
+      observe_failure ~site:"warm_up_exception" ~error;
+      Log.Telemetry.warn "warm_up failed: %s" error
 
 let reset_for_testing () : unit =
   store_ref := None;

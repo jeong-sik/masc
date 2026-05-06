@@ -726,6 +726,9 @@ let metric_telemetry_coverage_gap =
 let metric_telemetry_unified_source_read_failures =
   "masc_telemetry_unified_source_read_failures_total"
 
+let metric_tool_assignment_telemetry_failures =
+  "masc_tool_assignment_telemetry_failures_total"
+
 (* #10358 (c1): observability for the silent [Effect.Unhandled] catch-all
    in [lib/coord.ml] [observe_agent_lifecycle] / [observe_task_transition_event] /
    [Keeper_accountability.record_task_transition].  Those three try/with
@@ -2129,6 +2132,12 @@ let init () =
      tool_usage|oas_event|execution_receipt|goal_event|tool_metric and \
      site=<bounded read/discovery call-site>. Any positive rate means the \
      dashboard fan-in returned partial data instead of a true empty source."
+    Counter;
+  add metric_tool_assignment_telemetry_failures
+    "Total tool assignment telemetry decode/read failures. Labels: \
+     site=read_recent_decode|read_recent_exception|warm_up_decode|\
+     warm_up_exception. Any positive rate means tool assignment lifecycle \
+     rows were dropped from the reconstructed read model."
     Counter;
   add metric_coord_telemetry_drop
     "Total times a Coord lifecycle/transition hook dropped its Audit_log \

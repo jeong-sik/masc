@@ -39,6 +39,18 @@ let with_eio_temp_base_path f =
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       f ())
 
+let failure_metric site =
+  Prometheus.metric_value_or_zero
+    Prometheus.metric_tool_assignment_telemetry_failures
+    ~labels:[ ("site", site) ]
+    ()
+
+let append_raw_tool_event json =
+  let dir = Filename.concat (Env_config.base_path ()) "data/tool-events" in
+  Fs_compat.mkdir_p dir;
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  Dated_jsonl.append store json
+
 (* --- Test 1: Assigned snapshot has all fields --- *)
 
 let test_assigned_snapshot_has_all_fields () =
@@ -213,6 +225,29 @@ let test_read_recent_newest_first () =
             check bool "older event present" true has_id1
         | _ -> fail "expected Assigned event at head"))
 
+let test_read_recent_decode_failure_is_observed () =
+  with_eio_temp_base_path (fun () ->
+    Tool_assignment_telemetry.reset_for_testing ();
+    append_raw_tool_event
+      (`Assoc [ ("event_type", `String "Bogus"); ("timestamp", `Float 1.0) ]);
+    let before = failure_metric "read_recent_decode" in
+    match Tool_assignment_telemetry.read_recent ~n:10 with
+    | Error msg -> fail ("read_recent failed: " ^ msg)
+    | Ok events ->
+        check int "malformed row dropped" 0 (List.length events);
+        check (float 0.001) "decode failure counted" (before +. 1.0)
+          (failure_metric "read_recent_decode"))
+
+let test_warm_up_decode_failure_is_observed () =
+  with_eio_temp_base_path (fun () ->
+    Tool_assignment_telemetry.reset_for_testing ();
+    append_raw_tool_event
+      (`Assoc [ ("event_type", `String "Bogus"); ("timestamp", `Float 1.0) ]);
+    let before = failure_metric "warm_up_decode" in
+    Tool_assignment_telemetry.warm_up ();
+    check (float 0.001) "warm-up decode failure counted" (before +. 1.0)
+      (failure_metric "warm_up_decode"))
+
 let () =
   run "Tool_assignment_telemetry"
     [
@@ -229,5 +264,9 @@ let () =
           test_case "config hash format" `Quick test_config_hash_format;
           test_case "read_recent newest first" `Quick
             test_read_recent_newest_first;
+          test_case "read_recent decode failure is observed" `Quick
+            test_read_recent_decode_failure_is_observed;
+          test_case "warm_up decode failure is observed" `Quick
+            test_warm_up_decode_failure_is_observed;
         ] );
     ]

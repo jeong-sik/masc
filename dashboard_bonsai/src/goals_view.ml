@@ -214,6 +214,12 @@ let truncate ~max_len s =
   else String.sub s ~pos:0 ~len:(max_len - 1) ^ "…"
 ;;
 
+let short_reason reason =
+  if String.length reason <= 96
+  then reason
+  else String.sub reason ~pos:0 ~len:96 ^ "..."
+;;
+
 let blocker_label source =
   match String.lowercase source with
   | "goal_phase" -> "goal phase"
@@ -384,16 +390,20 @@ let rec view_node ~(depth : int) (n : Goals_types.node) : Node.t =
 
 let view_meta_strip (r : Goals_types.response) =
   let s = r.summary in
-  let fetch_color =
+  let feed_color =
     match r.fetch_status with
-    | Goals_types.Fetch_pending -> `Brass
+    | Goals_types.Fetch_pending -> `Default
     | Goals_types.Fetch_fresh -> `Ok
-    | Goals_types.Fetch_stale _ -> `Blood
+    | Goals_types.Fetch_stale { consecutive_failures; _ } ->
+      if consecutive_failures >= 3 then `Blood else `Brass
   in
   Meta.strip
     ~label:"Goals summary"
-    [ Meta.cell ~color:fetch_color ~k:"feed"
-        ~v:(Goals_types.fetch_status_label r.fetch_status) ()
+    [ Meta.cell
+        ~color:feed_color
+        ~k:"feed"
+        ~v:(Goals_types.fetch_status_label r.fetch_status)
+        ()
     ; Meta.cell ~k:"goals" ~v:(Printf.sprintf "%d" s.total_goals) ()
     ; Meta.cell ~color:`Ok ~k:"active"
         ~v:(Printf.sprintf "%d" s.active_goals) ()
@@ -404,7 +414,34 @@ let view_meta_strip (r : Goals_types.response) =
     ]
 ;;
 
+let view_fetch_notice (r : Goals_types.response) =
+  match r.fetch_status with
+  | Goals_types.Fetch_pending | Goals_types.Fetch_fresh -> Node.none
+  | Goals_types.Fetch_stale { reason; consecutive_failures } ->
+    let reason_text = short_reason reason in
+    let label =
+      Printf.sprintf "goals feed stale x%d: %s" consecutive_failures reason_text
+    in
+    Node.div
+      ~attrs:[ Style.blocker; Attr.role "status"; Attr.create "aria-label" label ]
+      [ Node.div
+          ~attrs:[ Style.blocker_k ]
+          [ Node.text (Printf.sprintf "goals feed stale x%d" consecutive_failures) ]
+      ; Node.div ~attrs:[ Style.blocker_v ] [ Node.text reason_text ]
+      ]
+;;
+
 let render ~(shell : Overview_types.response) (r : Goals_types.response) : Node.t =
+  let quiet_text =
+    match r.fetch_status with
+    | Goals_types.Fetch_pending -> "goal tree fetch is pending."
+    | Goals_types.Fetch_fresh -> "goal tree is empty."
+    | Goals_types.Fetch_stale { reason; consecutive_failures } ->
+      Printf.sprintf
+        "goal tree feed is stale (%dx) — %s"
+        consecutive_failures
+        (short_reason reason)
+  in
   Shell_view.view
     ~shell
     ~active:Goals
@@ -419,11 +456,12 @@ let render ~(shell : Overview_types.response) (r : Goals_types.response) : Node.
         ~sub_lang:"ko"
         ()
     ; view_meta_strip r
+    ; view_fetch_notice r
     ; (match r.tree with
        | [] ->
          Node.div
-           ~attrs:[ Style.quiet; Attr.role "status"; Attr.create "aria-label" "No goals" ]
-           [ Node.text "goal tree is empty." ]
+           ~attrs:[ Style.quiet; Attr.role "status"; Attr.create "aria-label" quiet_text ]
+           [ Node.text quiet_text ]
        | nodes ->
          Node.div
            ~attrs:[ Style.tree; Attr.role "list"; Attr.create "aria-label" "Goal tree" ]

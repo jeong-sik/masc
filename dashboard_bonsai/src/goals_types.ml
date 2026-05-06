@@ -2,7 +2,8 @@
 
     Mirrors [lib/dashboard/dashboard_goals.ml:dashboard_goals_tree_json].
     Recursive tree of goal nodes; each node carries its immediate task
-    list. *)
+    list. [fetch_status] is client-local polling state and is not emitted by
+    the server. *)
 
 open! Core
 
@@ -166,6 +167,12 @@ let summary_of_yojson json : summary =
   }
 ;;
 
+let is_response_envelope json =
+  match Yojson.Safe.Util.member "tree" json, Yojson.Safe.Util.member "summary" json with
+  | `List _, `Assoc _ -> true
+  | _ -> false
+;;
+
 let response_of_yojson json : response =
   let tree =
     match Yojson.Safe.Util.member "tree" json with
@@ -182,7 +189,13 @@ let response_of_yojson json : response =
 
 let fetch_status_label = function
   | Fetch_pending -> "fetch pending"
-  | Fetch_fresh -> "fetch ok"
+  | Fetch_fresh -> "fetch fresh"
   | Fetch_stale { consecutive_failures; _ } ->
-    Printf.sprintf "stale %dx" consecutive_failures
+    Printf.sprintf "fetch stale x%d" consecutive_failures
+;;
+
+let fetch_status_reason = function
+  | Fetch_pending -> "waiting for first goals response"
+  | Fetch_fresh -> "latest goals response parsed"
+  | Fetch_stale { reason; _ } -> reason
 ;;

@@ -256,6 +256,38 @@
 | Full 206-finding Orient engine | **NOT PROVEN** | Orient can now replay the external claim catalog, but the checked artifacts itemize only 19 of the claimed 206 findings. |
 | Full Verify pipeline | **PARTIAL** | `verify.fail.json` intentionally keeps the startup replay red; a separate live post-ACT event/transition replay now passes for the 19 strict itemized IDs. |
 
+## Prompt-to-Artifact Checklist
+
+This checklist is the closeout map from the prompt requirements to concrete
+repo or runtime evidence. A `PASS` here means the requirement has direct
+evidence; `PARTIAL` means a concrete artifact exists but does not cover the
+full prompt requirement; `BLOCKED` means the next required input is outside the
+current repo evidence.
+
+| Prompt requirement | Concrete artifact or command | Status |
+|--------------------|------------------------------|--------|
+| 0-1 provider health skipped across providers/models | `observe.startup.json`, `orient.startup.json`, `NF-1` in `audit-corpus.external-claim.json` | PARTIAL: startup signature is replayed; full 55-model row corpus is absent. |
+| 0-2 keeper credential starvation/archival | `observe.startup.json`, `orient.startup.json`, `NF-2`, linked ACT map entries | PARTIAL: signature and ACT links exist; full keeper recovery SLO is not proven. |
+| 0-3 alive-but-stuck supervisor recovery failure | `NF-3`, #13123/#13126 references, post-ACT Verify metadata | PARTIAL: failure is modeled; runtime recovery success across all keepers is not proven. |
+| 0-4 governance unparseable/lenient fallback | `NF-4`, #13143 references | PARTIAL: visibility exists; strict judge-output failure policy is incomplete. |
+| 0-5 keeper TOML unknown keys | `NF-6`, #13138 references | PARTIAL: health visibility exists; strict schema rejection is not enforced. |
+| 0-6 dashboard metric all-zero | startup fixture and audit catalog examples | PARTIAL: prompt evidence is represented only in the 19-row catalog, not the full corpus. |
+| 0-7 linear autoboot warmup | `NF-5` source reference in catalog boundary | PARTIAL: source claim is tracked; no full row-level replay. |
+| 1 GOAL LOOP Observe -> Orient -> Decide -> Act -> Verify | `scripts/observe_goal_loop_logs.py`, `scripts/orient_goal_loop_logs.py`, `scripts/decide_goal_loop_findings.py`, `scripts/verify_goal_loop_logs.py`, `scripts/goal_loop_status.py` | PARTIAL: deterministic chain exists; long-running scheduler cadence is not implemented. |
+| 2-1 `observe.yml` Prometheus/Grafana metrics | `observe_goal_loop_logs.py`, fixture metrics, audit response | PARTIAL: deterministic log/metric replay exists; no Prometheus/Grafana config shipped. |
+| 2-2 `observe_logs.py` pattern parser | `scripts/observe_goal_loop_logs.py`, `test/test_observe_goal_loop_logs.py` | PASS for deterministic parser coverage. |
+| 3-1 `orient.ml` audit comparison engine | `scripts/orient_goal_loop_logs.py`, `audit-corpus.external-claim.json`, `structured-id-triage.external-claim.json` | PARTIAL: engine and triage exist; only 19/206 strict rows are itemized. |
+| 3-2 Orient dashboard counts | `scripts/goal_loop_status.py`, `docs/examples/goal-loop-fixture.md` | PARTIAL: CLI JSON/text exists; operator dashboard panel is not wired. |
+| 4-1 priority decision algorithm | `scripts/decide_goal_loop_findings.py`, `test/test_decide_goal_loop_findings.py` | PASS for fixture-based decision ranking. |
+| 4-2 weekly ACT priority queue | `act-map.startup.json`, `known-prs.startup.json`, `validate_goal_loop_act_map.py` | PARTIAL: reference integrity exists; SLA ownership workflow is not automatic. |
+| 5 ACT checklist/PR proof | linked PR references in `act-map.startup.json` plus ACT validation | PARTIAL: known ACTs are mapped; not every still-present row has a row-level ACT because 187 rows are missing. |
+| 6-1 `verify.yml` unit/regression/TLA/log/metric/orient gates | `scripts/verify_goal_loop_logs.py`, `goal_loop_completion_audit.py`, focused tests | PARTIAL: closeout verifier exists; TLA and production metric gates are not fully implemented. |
+| 6-2 Verify PASS/FAIL branch | `verify.fail.json`, post-ACT live Verify snapshot, completion audit criteria | PARTIAL: branch semantics exist; complete corpus Verify is blocked. |
+| 7 GOAL LOOP dashboard | `goal_loop_status.py` aggregate output | PARTIAL: CLI status exists; UI dashboard integration remains open. |
+| 8 anti-stagnation rules | ACT reference guard and completion audit blocker | PARTIAL: reference integrity exists; SLA timers/escalation are not implemented. |
+| 9 expected convergence after week/month | completion audit and #13265 | BLOCKED: no measured convergence claim is valid without the strict corpus and live SLO proof. |
+| Full 206-row strict corpus | `row-corpus-discovery.external-claim.json`, `strict-row-corpus-contract.json`, `--strict-row-corpus` path | BLOCKED: 22 searches checked; `FULL_ROW_CORPUS_NOT_FOUND`, 19/206 rows, 187 missing. |
+
 ## Section-by-Section Audit
 
 ### 0. Live Startup Log Reproduction

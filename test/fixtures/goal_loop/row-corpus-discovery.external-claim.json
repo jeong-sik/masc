@@ -409,6 +409,34 @@
         "goal-loop-206-audit-external-claim-2026-05-05"
       ],
       "note": "Local Codex session and TUI log history containing exact strict-corpus markers was reviewed by category. Hits were self-referential transcripts from #13266/#13577 tooling, generated fixtures, status snapshots, synthetic contract tests, review comments, and negative searches; no independent strict 206-row corpus artifact was present."
+    },
+    {
+      "artifact_name": "other_local_agent_history_exact_corpus_marker_sweep",
+      "artifact_kind": "local_history_marker_search_report",
+      "result": "NOT_ROW_CORPUS",
+      "observed_roots_checked": [
+        "claude_history",
+        "gemini_history",
+        "me_memory"
+      ],
+      "observed_exact_marker_files": 0,
+      "observed_independent_corpus_files": 0,
+      "excluded_path_classes": [
+        "session_env",
+        "paste_cache",
+        "cache",
+        "shell_snapshots",
+        "telemetry",
+        "todos",
+        "tasks"
+      ],
+      "markers_checked": [
+        "strict-row-corpus",
+        "strict row corpus",
+        "206-row strict",
+        "goal-loop-206-audit-external-claim-2026-05-05"
+      ],
+      "note": "Claude project history, Gemini history, and local me memory were searched for exact GOAL LOOP strict-corpus markers with high-noise cache directories excluded. No exact corpus marker file was found."
     }
   ],
   "broader_structured_id_triage": {

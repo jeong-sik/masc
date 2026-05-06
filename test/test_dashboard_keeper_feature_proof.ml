@@ -189,17 +189,7 @@ let write_decision_lines config keeper_name rows =
   Fs_compat.save_file path
     (String.concat "\n" (List.map Yojson.Safe.to_string rows) ^ "\n")
 
-let write_scheduled_decision config keeper_name =
-  write_decision_lines config keeper_name
-    [
-      `Assoc [
-        ("ts", `String "2026-05-06T01:00:00Z");
-        ("channel", `String "scheduled_autonomous");
-        ("outcome", `String "success");
-      ];
-    ]
-
-let write_scheduled_decision_at config keeper_name ~ts =
+let write_scheduled_decision config keeper_name ~ts =
   write_decision_lines config keeper_name
     [
       `Assoc [
@@ -209,6 +199,9 @@ let write_scheduled_decision_at config keeper_name ~ts =
         ("outcome", `String "success");
       ];
     ]
+
+let write_scheduled_decision_at config keeper_name ~ts =
+  write_scheduled_decision config keeper_name ~ts
 
 let write_24h_turn_span config keeper_name ~now =
   write_decision_lines config keeper_name
@@ -587,12 +580,13 @@ let test_decision_log_counts_as_scheduled_proof () =
         ("outcome", `String "failure");
       ];
     ];
-  write_scheduled_decision config "beta";
+  write_scheduled_decision config "beta" ~ts:latest_success_ts;
   let json =
     Dashboard_keeper_feature_proof.json
       ~config
       ~n:100
       ~success_threshold_pct:80.0
+      ~now:(newer_failure_ts +. 60.0)
       ()
   in
   let scheduled = feature "scheduled_proactive_autonomy" json in

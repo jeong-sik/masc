@@ -112,6 +112,19 @@ val emit_sdk_provider_error_metric :
 (** Convert and emit an SDK provider error. Returns the converted variant
     so callers/tests can assert the same decision without reparsing metrics. *)
 
+val timeout_source_label : Agent_sdk.Error.sdk_error -> string
+(** Classifier for [masc_keeper_oas_run_timeout_total]'s [source] label.
+
+    - ["max_execution_time"] when the error is [Retry.Timeout] and the
+      message contains the literal substring ["max_execution_time_s"]
+      (the wrapper text agent_sdk emits at agent.ml:255).
+    - ["provider"] for every other case (transport-level deadlines,
+      non-Timeout errors that callers nevertheless pass in).
+
+    Exposed for regression tests against the substring classification —
+    if agent_sdk changes the wrapper message, the test fails loudly
+    before the metric silently misclassifies. *)
+
 val sdk_error_soft_rate_limited :
   Agent_sdk.Error.sdk_error -> float option option
 (** [Some (Some retry_after)] for non-quota 429 responses with a parsed

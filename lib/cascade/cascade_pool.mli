@@ -9,9 +9,9 @@
 (** {1 Pool Identity} *)
 
 type pool_id =
-  | Tier1        (** High-trust cloud providers: GLM, Kimi, Claude, Gemini, etc. *)
-  | Tier2        (** Local / lower-trust: Ollama, local models *)
-  | Emergency    (** Static fallback: no LLM call, deterministic response *)
+  | Tier1 (** High-trust cloud providers: GLM, Kimi, Claude, Gemini, etc. *)
+  | Tier2 (** Local / lower-trust: Ollama, local models *)
+  | Emergency (** Static fallback: no LLM call, deterministic response *)
 
 val pool_id_to_string : pool_id -> string
 val pool_id_of_string : string -> pool_id option
@@ -26,8 +26,7 @@ type t
     Each pool owns a dedicated {!Cascade_health_tracker.t} so health
     state is isolated from other pools.
 
-    @raise Invalid_argument when [provider_keys] is empty and
-    [pool_id] is not [Emergency]. *)
+    @raise Invalid_argument when [provider_keys] is empty. *)
 val create : pool_id -> provider_keys:string list -> t
 
 (** The pool's identifier. *)

@@ -22,11 +22,21 @@ val resolve_pool : t -> keeper_name:string -> Cascade_pool.pool_id
     If the primary pool's providers are all in cooldown, falls through
     to the next tier.  Returns [Error `All_pools_exhausted] only when
     all pools including Emergency have been exhausted. *)
-val execute_with_fallback :
-  t ->
-  keeper_name:string ->
-  (provider_key:string -> ('a, 'e) result) ->
-  ('a, [> `All_pools_exhausted of string list ]) result
+val execute_with_fallback
+  :  t
+  -> keeper_name:string
+  -> (provider_key:string -> ('a, 'e) result)
+  -> ('a, [> `All_pools_exhausted of string list ]) result
 
 (** All registered pools. *)
 val pools : t -> Cascade_pool.t list
+
+module For_testing : sig
+  val parse_provider_list_value : default:string list -> string option -> string list
+
+  val create_from_provider_keys
+    :  tier1_keys:string list
+    -> tier2_keys:string list
+    -> emergency_keys:string list
+    -> t
+end

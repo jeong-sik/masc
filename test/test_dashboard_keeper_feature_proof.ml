@@ -158,6 +158,23 @@ let log_docker_bash ?(keeper_name = "alpha") ?(success = true) command =
     ~network_mode:"inherit"
     ()
 
+let log_keeper_pr_create_with_identity ?(keeper_name = "alpha") () =
+  Keeper_tool_call_log.log_call
+    ~keeper_name
+    ~tool_name:"keeper_pr_create"
+    ~input:
+      (`Assoc [
+        ("title", `String "proof: Docker credential PR lifecycle");
+        ("draft", `Bool true);
+      ])
+    ~output_text:
+      {|{"ok":true,"tool":"keeper_pr_create","operation":"pr_create","sandbox_profile":"docker","via":"docker","credential":{"credential_scope":"keeper_identity","git_identity_mode":"github_identity","credential_state":{"state":"materialized"}},"url":"https://github.com/jeong-sik/masc-mcp/pull/1"}|}
+    ~success:true
+    ~duration_ms:1.0
+    ~sandbox_profile:"docker"
+    ~network_mode:"inherit"
+    ()
+
 let write_decision_lines config keeper_name rows =
   let path = KT.keeper_decision_log_path config keeper_name in
   Fs_compat.mkdir_p (Filename.dirname path);
@@ -488,6 +505,35 @@ let test_docker_git_pr_workflow_reports_partial_chain () =
     (json_string_values "observed_keepers"
        (keeper_evidence "docker_git_pr_workflow" json))
 
+let test_keeper_pr_create_identity_output_counts_as_pr_stage () =
+  with_store @@ fun config ->
+  ignore
+    (persist_keeper config ~name:"alpha" ~total_turns:3
+       ~autonomous_action_count:2 ~autonomous_tool_turn_count:2
+       ~board_reactive_turn_count:1 ~proactive_count_total:1);
+  log_docker_bash
+    "git clone https://github.com/jeong-sik/masc-mcp.git /workspace/masc-mcp";
+  log_docker_bash "git checkout -b fix/keeper-proof";
+  log_docker_bash "git commit -m 'proof: keeper lifecycle'";
+  log_docker_bash "git push origin fix/keeper-proof";
+  log_keeper_pr_create_with_identity ();
+  let json =
+    Dashboard_keeper_feature_proof.json
+      ~config
+      ~n:100
+      ~success_threshold_pct:80.0
+      ()
+  in
+  check string "complete Docker git PR workflow passes" "pass"
+    (feature_status "docker_git_pr_workflow" json);
+  let stage_passed id =
+    match keeper_evidence_stage id json with
+    | Some row -> Safe_ops.json_bool ~default:false "passed" row
+    | None -> false
+  in
+  check bool "PR creation stage passes from keeper identity credential output" true
+    (stage_passed "pr_create")
+
 let test_decision_log_counts_as_scheduled_proof () =
   with_store @@ fun config ->
   let latest_success_ts = 1_777_001_500.0 in
@@ -639,6 +685,8 @@ let () =
             test_approval_latest_success_proves_recovery;
           test_case "Docker git PR workflow reports partial chain" `Quick
             test_docker_git_pr_workflow_reports_partial_chain;
+          test_case "keeper PR identity output counts as PR stage" `Quick
+            test_keeper_pr_create_identity_output_counts_as_pr_stage;
           test_case "decision log counts as scheduled proof" `Quick
             test_decision_log_counts_as_scheduled_proof;
           test_case "scheduled proof uses enabled population" `Quick

@@ -174,32 +174,54 @@ let fork_stale_watchdog = Keeper_stale_watchdog.fork_stale_watchdog
 
 (* ── Supervised fiber launch ─────────────────────────────── *)
 
-let restart_launch_noop_for_test = Atomic.make false
-let restart_launch_noop_scope_mu = Stdlib.Mutex.create ()
-let restart_launch_noop_scope_depth = ref 0
-let restart_launch_noop_scope_previous = ref false
+type restart_launch_noop_state = {
+  enabled : bool;
+  scope_depth : int;
+  scope_previous : bool;
+}
+
+let restart_launch_noop_for_test =
+  Atomic.make { enabled = false; scope_depth = 0; scope_previous = false }
+
+let update_restart_launch_noop_state f =
+  let rec loop () =
+    let current = Atomic.get restart_launch_noop_for_test in
+    let next = f current in
+    if not (Atomic.compare_and_set restart_launch_noop_for_test current next) then
+      loop ()
+  in
+  loop ()
 
 let set_restart_launch_noop_for_test enabled =
-  Atomic.set restart_launch_noop_for_test enabled
+  update_restart_launch_noop_state (fun state -> { state with enabled })
 
 let restart_launch_noop_enabled_for_test () =
-  Atomic.get restart_launch_noop_for_test
+  (Atomic.get restart_launch_noop_for_test).enabled
 
 let with_restart_launch_noop_for_test f =
-  Stdlib.Mutex.lock restart_launch_noop_scope_mu;
-  if !restart_launch_noop_scope_depth = 0 then begin
-    restart_launch_noop_scope_previous := restart_launch_noop_enabled_for_test ();
-    set_restart_launch_noop_for_test true
-  end;
-  incr restart_launch_noop_scope_depth;
-  Stdlib.Mutex.unlock restart_launch_noop_scope_mu;
+  let enter () =
+    update_restart_launch_noop_state (fun state ->
+        if state.scope_depth = 0 then
+          {
+            enabled = true;
+            scope_depth = 1;
+            scope_previous = state.enabled;
+          }
+        else { state with enabled = true; scope_depth = state.scope_depth + 1 })
+  in
+  let leave () =
+    update_restart_launch_noop_state (fun state ->
+        if state.scope_depth <= 1 then
+          {
+            enabled = state.scope_previous;
+            scope_depth = 0;
+            scope_previous = false;
+          }
+        else { state with scope_depth = state.scope_depth - 1 })
+  in
+  enter ();
   Fun.protect
-    ~finally:(fun () ->
-      Stdlib.Mutex.lock restart_launch_noop_scope_mu;
-      decr restart_launch_noop_scope_depth;
-      if !restart_launch_noop_scope_depth = 0 then
-        set_restart_launch_noop_for_test !restart_launch_noop_scope_previous;
-      Stdlib.Mutex.unlock restart_launch_noop_scope_mu)
+    ~finally:leave
     f
 
 let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
@@ -218,7 +240,7 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
          Prometheus.metric_keeper_supervisor_cleanup_failures
          ~labels:[("keeper", meta.name); ("site", "fiber_start_rejected")]
          ());
-  if Atomic.get restart_launch_noop_for_test then ()
+  if restart_launch_noop_enabled_for_test () then ()
   else begin
   fork_stale_watchdog ctx meta reg;
   (* Task 137: Inject bootstrap signal to ensure at least one warm-up turn runs

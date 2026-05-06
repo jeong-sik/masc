@@ -277,19 +277,27 @@ let test_fresh_supervision_cohort_keepers_rereads_registry () =
   | _ -> fail "expected one fresh entry"
 
 let test_restart_launch_noop_scope_restores_nested_state () =
-  Sup.set_restart_launch_noop_for_test false;
-  Sup.with_restart_launch_noop_for_test (fun () ->
-      check bool "outer enables noop" true (Sup.restart_launch_noop_enabled_for_test ());
+  let previous = Sup.restart_launch_noop_enabled_for_test () in
+  Fun.protect
+    ~finally:(fun () -> Sup.set_restart_launch_noop_for_test previous)
+    (fun () ->
+      Sup.set_restart_launch_noop_for_test false;
       Sup.with_restart_launch_noop_for_test (fun () ->
-          check bool "inner keeps noop" true (Sup.restart_launch_noop_enabled_for_test ()));
-      check bool "outer remains enabled" true (Sup.restart_launch_noop_enabled_for_test ()));
-  check bool "restored false" false (Sup.restart_launch_noop_enabled_for_test ());
-  Sup.set_restart_launch_noop_for_test true;
-  Sup.with_restart_launch_noop_for_test (fun () ->
-      check bool "preserves prior true in scope" true
-        (Sup.restart_launch_noop_enabled_for_test ()));
-  check bool "restored prior true" true (Sup.restart_launch_noop_enabled_for_test ());
-  Sup.set_restart_launch_noop_for_test false
+          check bool "outer enables noop" true
+            (Sup.restart_launch_noop_enabled_for_test ());
+          Sup.with_restart_launch_noop_for_test (fun () ->
+              check bool "inner keeps noop" true
+                (Sup.restart_launch_noop_enabled_for_test ()));
+          check bool "outer remains enabled" true
+            (Sup.restart_launch_noop_enabled_for_test ()));
+      check bool "restored false" false
+        (Sup.restart_launch_noop_enabled_for_test ());
+      Sup.set_restart_launch_noop_for_test true;
+      Sup.with_restart_launch_noop_for_test (fun () ->
+          check bool "preserves prior true in scope" true
+            (Sup.restart_launch_noop_enabled_for_test ()));
+      check bool "restored prior true" true
+        (Sup.restart_launch_noop_enabled_for_test ()))
 
 let test_active_supervision_keeper_count_uses_current_entries () =
   let entries = registered_entries [ "alpha"; "bravo" ] in

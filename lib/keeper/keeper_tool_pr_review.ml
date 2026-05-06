@@ -154,11 +154,11 @@ let handle_keeper_pr_review_read
     match effective_repo_slug ~config ~repo with
     | Error msg -> error_json msg
     | Ok repo_slug ->
-    let repo_flag = repo_flag repo_slug in
+    let repo_flag_arg = repo_flag repo_slug in
     (* Get PR metadata *)
     let meta_cmd = Printf.sprintf
       "gh pr view %d%s --json title,body,state,files,reviews,comments,additions,deletions 2>&1"
-      pr_number repo_flag in
+      pr_number repo_flag_arg in
     let meta_result =
       run_pr_review_shell ~config ~meta
         ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Pr_review ())
@@ -166,7 +166,7 @@ let handle_keeper_pr_review_read
     (* Get PR diff (truncated) *)
     let diff_cmd = Printf.sprintf
       "gh pr diff %d%s 2>&1 | head -c %d"
-      pr_number repo_flag Common.max_tool_output_bytes in
+      pr_number repo_flag_arg Common.max_tool_output_bytes in
     let diff_result =
       run_pr_review_shell ~config ~meta
         ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Pr_review ())
@@ -233,11 +233,11 @@ let handle_keeper_pr_review_comment
       match effective_repo_slug ~config ~repo with
       | Error msg -> error_json msg
       | Ok repo_slug ->
-      let repo_flag = repo_flag repo_slug in
+      let repo_flag_arg = repo_flag repo_slug in
       (* Use gh pr review to create a review *)
       let cmd = Printf.sprintf
         "gh pr review %d%s --body %s %s 2>&1"
-        pr_number repo_flag
+        pr_number repo_flag_arg
         (Filename.quote body)
         (pr_review_event_to_gh_flag event) in
       let result =

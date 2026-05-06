@@ -297,6 +297,34 @@ let test_comment_and_approve_route_through_docker () =
     (contains_substring log "-R"
      && contains_substring log "jeong-sik/masc-mcp")
 
+let test_reply_routes_through_docker_and_infers_repo () =
+  with_fake_docker @@ fun () ->
+  setup_docker_review @@ fun ~config ~meta ->
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  let raw =
+    KTPR.handle_keeper_pr_review_reply ~config ~meta
+      ~args:
+        (`Assoc
+          [ ("pr_number", `Int 13510)
+          ; ("comment_id", `Int 3192459689)
+          ; ("body", `String "docker reply evidence")
+          ])
+  in
+  check (option string) "reply via docker" (Some "docker")
+    (parse_string_field raw "via");
+  check (option string) "repo inferred for reply"
+    (Some "jeong-sik/masc-mcp")
+    (parse_string_field raw "repo");
+  let log = read_file log_path in
+  check bool "reply used docker run" true
+    (contains_substring log "run --rm");
+  check bool "reply used gh api endpoint with inferred repo" true
+    (contains_substring log
+       "gh api repos/jeong-sik/masc-mcp/pulls/comments/3192459689/replies");
+  check bool "reply body passed to gh api" true
+    (contains_substring log "docker reply evidence")
+
 let () =
   Alcotest.run "Keeper PR review error UX" [
     "preset_gate", [
@@ -319,5 +347,7 @@ let () =
         test_read_routes_docker_and_injects_repo_flag;
       test_case "comment and approve route through docker" `Quick
         test_comment_and_approve_route_through_docker;
+      test_case "reply routes through docker and infers repo" `Quick
+        test_reply_routes_through_docker_and_infers_repo;
     ]
   ]

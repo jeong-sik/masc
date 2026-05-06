@@ -840,6 +840,7 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         inventory["unique_candidate_rows"] = 206
         inventory["missing_candidate_rows"] = 0
         inventory.pop("candidate_rows", None)
+        inventory.pop("candidate_text_redacted", None)
         by_file = inventory["candidates_by_file"]
         by_rule = inventory["candidates_by_rule"]
         assert isinstance(by_file, list)

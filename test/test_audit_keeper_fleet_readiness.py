@@ -39,6 +39,8 @@ def audit_args(base_path: Path, expected_keepers: int):
         require_pr_surface_evidence=False,
         require_pr_review_evidence=False,
         require_pr_create_evidence=False,
+        require_pr_created_evidence=False,
+        require_pr_url_evidence=False,
         require_git_push_evidence=False,
         require_pr_approve_evidence=False,
         require_pr_lifecycle_evidence=False,
@@ -146,6 +148,84 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             with self.assertRaises(StopIteration):
                 next(rows)
             self.assertEqual(list(audit.iter_jsonl(root / "missing.jsonl")), [])
+
+    def test_pr_creation_evidence_ignores_free_text_claims(self):
+        refs, sources = audit.pr_evidence_from_row(
+            {
+                "_source_path": "events.jsonl",
+                "message": "created PR #123",
+                "response_preview": "https://github.com/acme/repo/pull/123",
+            }
+        )
+
+        self.assertEqual(refs, set())
+        self.assertEqual(sources, set())
+
+    def test_pr_creation_evidence_counts_successful_keeper_pr_create_output(self):
+        refs, sources = audit.pr_evidence_from_row(
+            {
+                "_source_path": "events.jsonl",
+                "tool": "keeper_pr_create",
+                "ok": True,
+                "output": {
+                    "pr_url": "https://github.com/acme/repo/pull/123",
+                    "number": 123,
+                },
+            }
+        )
+
+        self.assertEqual(
+            refs,
+            {
+                "keeper_pr_create",
+                "https://github.com/acme/repo/pull/123",
+                "PR#123",
+            },
+        )
+        self.assertEqual(sources, {"events.jsonl"})
+
+    def test_pr_creation_evidence_rejects_failed_keeper_pr_create_output(self):
+        refs, sources = audit.pr_evidence_from_row(
+            {
+                "_source_path": "events.jsonl",
+                "tool": "keeper_pr_create",
+                "ok": False,
+                "output": {"pr_url": "https://github.com/acme/repo/pull/123"},
+            }
+        )
+
+        self.assertEqual(refs, set())
+        self.assertEqual(sources, set())
+
+    def test_pr_creation_evidence_uses_structured_shell_command_and_output(self):
+        refs, sources = audit.pr_evidence_from_row(
+            {
+                "_source_path": "events.jsonl",
+                "tool": "keeper_shell",
+                "ok": True,
+                "args": {"command": "gh pr create --draft --title t --body b"},
+                "output": {"url": "https://github.com/acme/repo/pull/124"},
+            }
+        )
+
+        self.assertEqual(
+            refs,
+            {"gh pr create", "https://github.com/acme/repo/pull/124"},
+        )
+        self.assertEqual(sources, {"events.jsonl"})
+
+    def test_pr_creation_evidence_ignores_freeform_shell_mentions(self):
+        refs, sources = audit.pr_evidence_from_row(
+            {
+                "_source_path": "events.jsonl",
+                "tool": "keeper_shell",
+                "ok": True,
+                "message": "gh pr create returned https://github.com/acme/repo/pull/124",
+            }
+        )
+
+        self.assertEqual(refs, set())
+        self.assertEqual(sources, set())
 
     def test_pr_action_metric_paths_returns_newest_date_split_first(self):
         with tempfile.TemporaryDirectory() as tmp:

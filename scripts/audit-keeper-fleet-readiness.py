@@ -73,6 +73,15 @@ DESIGN_DOMAIN_MARKERS = {
     "ui",
     "ux",
 }
+PR_URL_RE = re.compile(
+    r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]+"
+)
+PR_CREATED_NUMBER_RE = re.compile(
+    r"\b(?:created|opened|published)\s+(?:a\s+)?(?:github\s+)?"
+    r"(?:draft\s+)?PR\s*#([0-9]+)\b",
+    re.IGNORECASE,
+)
+GH_PR_CREATE_RE = re.compile(r"\bgh\s+pr\s+create\b", re.IGNORECASE)
 
 
 @dataclass
@@ -103,14 +112,32 @@ class KeeperAudit:
     docker_git_push_action: bool
     docker_pr_approve_mutation: bool
     docker_pr_lifecycle_action: bool
+    pr_created_evidence: bool
+    pr_url_evidence: bool
     evidence_tools: list[str]
     board_post_evidence: list[str]
     product_evidence: list[str]
     design_evidence: list[str]
     pr_lifecycle_evidence: list[str]
     docker_pr_lifecycle_evidence: list[str]
+    pr_evidence_refs: list[str]
+    pr_evidence_sources: list[str]
     failures: list[str]
     warnings: list[str]
+
+
+@dataclass
+class PrCreationEvidence:
+    refs: set[str]
+    sources: set[str]
+
+    @property
+    def created(self) -> bool:
+        return bool(self.refs)
+
+    @property
+    def url_present(self) -> bool:
+        return any(ref.startswith("https://github.com/") for ref in self.refs)
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -124,7 +151,7 @@ def load_json(path: Path) -> dict[str, Any]:
 def iter_jsonl(path: Path) -> Iterator[dict[str, Any]]:
     if not path.exists():
         return
-    with path.open("r", encoding="utf-8") as handle:
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
         for line_no, line in enumerate(handle, start=1):
             line = line.strip()
             if not line:
@@ -248,6 +275,131 @@ def row_success(row: dict[str, Any]) -> bool:
         return ok
     outcome = row.get("outcome")
     return outcome == "success"
+
+
+def text_field(data: dict[str, Any], key: str) -> str:
+    value = data.get(key)
+    return value if isinstance(value, str) else ""
+
+
+def row_succeeded(row: dict[str, Any]) -> bool:
+    for key in ("ok", "success", "pr_work_action_success", "pr_review_action_success"):
+        value = row.get(key)
+        if value is False:
+            return False
+    error = row.get("error")
+    if isinstance(error, str) and error.strip():
+        return False
+    if error not in (None, False, ""):
+        return False
+    outcome = row.get("outcome")
+    if isinstance(outcome, str) and outcome.lower() in {"error", "failed", "failure"}:
+        return False
+    output = row.get("output")
+    if isinstance(output, dict) and output.get("ok") is False:
+        return False
+    return True
+
+
+def dict_field(data: dict[str, Any], key: str) -> dict[str, Any] | None:
+    value = data.get(key)
+    return value if isinstance(value, dict) else None
+
+
+def pr_ref_texts_from_structured_output(row: dict[str, Any]) -> list[str]:
+    texts: list[str] = []
+    output = row.get("output")
+    if isinstance(output, str):
+        texts.append(output)
+    elif isinstance(output, dict):
+        for key in ("output", "pr_url", "pull_request_url", "url", "html_url"):
+            texts.append(text_field(output, key))
+        result = output.get("result")
+        if isinstance(result, dict):
+            for key in ("pr_url", "pull_request_url", "url", "html_url"):
+                texts.append(text_field(result, key))
+            for key in ("pr_number", "number"):
+                value = result.get(key)
+                if isinstance(value, int) and value > 0:
+                    texts.append(f"PR#{value}")
+                elif isinstance(value, str) and value.strip().isdigit():
+                    texts.append(f"PR#{value.strip()}")
+        for key in ("pr_number", "number"):
+            value = output.get(key)
+            if isinstance(value, int) and value > 0:
+                texts.append(f"PR#{value}")
+            elif isinstance(value, str) and value.strip().isdigit():
+                texts.append(f"PR#{value.strip()}")
+    for key in ("pr_url", "pull_request_url", "url", "html_url"):
+        texts.append(text_field(row, key))
+    for key in ("pr_number", "number"):
+        value = row.get(key)
+        if isinstance(value, int) and value > 0:
+            texts.append(f"PR#{value}")
+        elif isinstance(value, str) and value.strip().isdigit():
+            texts.append(f"PR#{value.strip()}")
+    return [text for text in texts if text]
+
+
+def command_texts_from_structured_input(row: dict[str, Any]) -> list[str]:
+    texts: list[str] = []
+    for container in (dict_field(row, "args"), dict_field(row, "input")):
+        if container is None:
+            continue
+        for key in ("cmd", "command"):
+            texts.append(text_field(container, key))
+        argv = container.get("argv")
+        if isinstance(argv, list) and all(isinstance(item, str) for item in argv):
+            texts.append(" ".join(argv))
+    return [text for text in texts if text]
+
+
+def add_pr_refs_from_structured_output(
+    *,
+    refs: set[str],
+    sources: set[str],
+    source: str,
+    row: dict[str, Any],
+) -> None:
+    for text in pr_ref_texts_from_structured_output(row):
+        for url in PR_URL_RE.findall(text):
+            refs.add(url)
+            sources.add(source)
+        for match in PR_CREATED_NUMBER_RE.findall(text):
+            refs.add(f"PR#{match}")
+            sources.add(source)
+        if text.startswith("PR#") and text[3:].isdigit():
+            refs.add(text)
+            sources.add(source)
+
+
+def pr_evidence_from_row(row: dict[str, Any]) -> tuple[set[str], set[str]]:
+    refs: set[str] = set()
+    sources: set[str] = set()
+    source = text_field(row, "_source_path")
+    tools = set(tools_from_decision(row))
+    tool_name = text_field(row, "tool_name")
+    if tool_name:
+        tools.add(tool_name)
+
+    success = row_succeeded(row)
+    if tools & PR_CREATE_TOOLS and success:
+        refs.add("keeper_pr_create")
+        sources.add(source)
+        add_pr_refs_from_structured_output(
+            refs=refs, sources=sources, source=source, row=row
+        )
+
+    if success and tools & SHELL_TOOLS:
+        args_text = "\n".join(command_texts_from_structured_input(row))
+        if GH_PR_CREATE_RE.search(args_text):
+            refs.add("gh pr create")
+            sources.add(source)
+            add_pr_refs_from_structured_output(
+                refs=refs, sources=sources, source=source, row=row
+            )
+
+    return refs, sources
 
 
 def bool_field(row: dict[str, Any], key: str) -> bool:
@@ -654,6 +806,39 @@ def pr_action_metric_paths(
     return [path for _, _, path in sorted(candidates, reverse=True)]
 
 
+def tool_call_paths(base_path: Path, name: str) -> list[Path]:
+    root = base_path / ".masc"
+    paths = decision_log_paths(base_path, name)
+    history = root / "keepers" / name / ".playground_pr_history.jsonl"
+    if history.exists():
+        paths.append(history)
+    for subdir in ("metrics", "pr-action-metrics", "execution-receipts"):
+        base = root / "keepers" / name / subdir
+        if base.is_dir():
+            paths.extend(
+                sorted(path for path in base.rglob("*.jsonl") if path.is_file())
+            )
+    trajectories = root / "trajectories" / name
+    if trajectories.is_dir():
+        paths.extend(
+            sorted(path for path in trajectories.glob("*.jsonl") if path.is_file())
+        )
+    return paths
+
+
+def scan_pr_creation_evidence(base_path: Path, name: str) -> PrCreationEvidence:
+    refs: set[str] = set()
+    sources: set[str] = set()
+    for path in tool_call_paths(base_path, name):
+        for row in iter_jsonl(path):
+            row = dict(row)
+            row["_source_path"] = str(path)
+            row_refs, row_sources = pr_evidence_from_row(row)
+            refs.update(row_refs)
+            sources.update(row_sources)
+    return PrCreationEvidence(refs=refs, sources=sources)
+
+
 def complete_lifecycle_evidence(evidence: set[str]) -> bool:
     return (
         any(item.startswith("pr_create:") for item in evidence)
@@ -872,6 +1057,8 @@ def audit_keeper(
     require_pr_create_evidence: bool,
     require_git_push_evidence: bool,
     require_pr_approve_evidence: bool,
+    require_pr_created_evidence: bool,
+    require_pr_url_evidence: bool,
     require_docker_pr_create_evidence: bool,
     require_docker_git_push_evidence: bool,
     require_docker_pr_approve_evidence: bool,
@@ -931,14 +1118,13 @@ def audit_keeper(
         pr_lifecycle_evidence,
         docker_pr_lifecycle_evidence,
     ) = scan_keeper_evidence(base_path, name, max_silence_hours=max_silence_hours)
+    pr_creation_evidence = scan_pr_creation_evidence(base_path, name)
     (
         board_post_ts,
         board_post_evidence,
         product_evidence,
         design_evidence,
-    ) = scan_keeper_board_posts(
-        base_path, name, max_silence_hours=max_silence_hours
-    )
+    ) = scan_keeper_board_posts(base_path, name, max_silence_hours=max_silence_hours)
     runtime_turn_ts = numeric_field(runtime, "last_turn_ts")
     updated_ts = iso_to_unix(string_field(runtime, "updated_at"))
     last_turn_ts = max(
@@ -988,6 +1174,8 @@ def audit_keeper(
         and docker_git_push_action
         and docker_pr_approve_mutation
     )
+    pr_created_evidence = pr_creation_evidence.created
+    pr_url_evidence = pr_creation_evidence.url_present
     if require_board_evidence and not board_action:
         failures.append("board_action_evidence_missing")
     if require_product_evidence and not product_action:
@@ -1004,6 +1192,14 @@ def audit_keeper(
         warnings.append("pr_review_mutation_evidence_missing")
     if require_pr_create_evidence and not pr_create_action:
         failures.append("pr_create_evidence_missing")
+    if require_pr_created_evidence and not pr_created_evidence:
+        failures.append("pr_created_evidence_missing")
+    elif not pr_created_evidence:
+        warnings.append("pr_created_evidence_missing")
+    if require_pr_url_evidence and not pr_url_evidence:
+        failures.append("pr_url_evidence_missing")
+    elif pr_created_evidence and not pr_url_evidence:
+        warnings.append("pr_url_evidence_missing")
     if require_git_push_evidence and not git_push_action:
         failures.append("git_push_evidence_missing")
     if require_pr_approve_evidence and not pr_approve_mutation:
@@ -1042,12 +1238,16 @@ def audit_keeper(
         docker_git_push_action=docker_git_push_action,
         docker_pr_approve_mutation=docker_pr_approve_mutation,
         docker_pr_lifecycle_action=docker_pr_lifecycle_action,
+        pr_created_evidence=pr_created_evidence,
+        pr_url_evidence=pr_url_evidence,
         evidence_tools=sorted(tools),
         board_post_evidence=sorted(board_post_evidence),
         product_evidence=sorted(product_evidence),
         design_evidence=sorted(design_evidence),
         pr_lifecycle_evidence=sorted(pr_lifecycle_evidence),
         docker_pr_lifecycle_evidence=sorted(docker_pr_lifecycle_evidence),
+        pr_evidence_refs=sorted(pr_creation_evidence.refs),
+        pr_evidence_sources=sorted(pr_creation_evidence.sources),
         failures=failures,
         warnings=warnings,
     )
@@ -1081,6 +1281,8 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             require_pr_approve_evidence=(
                 args.require_pr_approve_evidence or args.require_pr_lifecycle_evidence
             ),
+            require_pr_created_evidence=args.require_pr_created_evidence,
+            require_pr_url_evidence=args.require_pr_url_evidence,
             require_docker_pr_create_evidence=(
                 args.require_docker_pr_create_evidence
                 or args.require_docker_pr_lifecycle_evidence
@@ -1133,6 +1335,8 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             "require_pr_surface_evidence": args.require_pr_surface_evidence,
             "require_pr_review_evidence": args.require_pr_review_evidence,
             "require_pr_create_evidence": args.require_pr_create_evidence,
+            "require_pr_created_evidence": args.require_pr_created_evidence,
+            "require_pr_url_evidence": args.require_pr_url_evidence,
             "require_git_push_evidence": args.require_git_push_evidence,
             "require_pr_approve_evidence": args.require_pr_approve_evidence,
             "require_pr_lifecycle_evidence": args.require_pr_lifecycle_evidence,
@@ -1178,7 +1382,8 @@ def print_text(report: dict[str, Any]) -> None:
             "product={product} design={design} "
             "pr_surface={pr_surface} pr_review={pr_review} "
             "pr_create={pr_create} git_push={git_push} "
-            "pr_approve={pr_approve} docker_pr_create={docker_pr_create} "
+            "pr_approve={pr_approve} pr_created={pr_created} pr_url={pr_url} "
+            "docker_pr_create={docker_pr_create} "
             "docker_git_push={docker_git_push} "
             "docker_pr_approve={docker_pr_approve}".format(
                 name=keeper["name"],
@@ -1197,11 +1402,15 @@ def print_text(report: dict[str, Any]) -> None:
                 pr_create=str(keeper["pr_create_action"]).lower(),
                 git_push=str(keeper["git_push_action"]).lower(),
                 pr_approve=str(keeper["pr_approve_mutation"]).lower(),
+                pr_created=str(keeper["pr_created_evidence"]).lower(),
+                pr_url=str(keeper["pr_url_evidence"]).lower(),
                 docker_pr_create=str(keeper["docker_pr_create_action"]).lower(),
                 docker_git_push=str(keeper["docker_git_push_action"]).lower(),
                 docker_pr_approve=str(keeper["docker_pr_approve_mutation"]).lower(),
             )
         )
+        for ref in keeper["pr_evidence_refs"][:5]:
+            print(f"    pr_evidence: {ref}")
         for failure in failures:
             print(f"    fail: {failure}")
         for warning in warnings:
@@ -1268,6 +1477,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--require-pr-create-evidence",
         action="store_true",
         help="Fail unless each keeper has direct PR creation evidence.",
+    )
+    parser.add_argument(
+        "--require-pr-created-evidence",
+        action="store_true",
+        help="Fail unless each keeper has structured successful PR creation evidence.",
+    )
+    parser.add_argument(
+        "--require-pr-url-evidence",
+        action="store_true",
+        help="Fail unless each keeper has a structured GitHub pull request URL.",
     )
     parser.add_argument(
         "--require-git-push-evidence",

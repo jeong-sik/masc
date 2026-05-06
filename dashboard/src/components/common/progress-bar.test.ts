@@ -8,6 +8,7 @@ import {
   progressBarHeightClass,
   progressBarToneClass,
   progressBarTrackToneClass,
+  summarizeProgressBar,
 } from './progress-bar'
 
 describe('progressBarWidthStyle (pure)', () => {
@@ -68,6 +69,62 @@ describe('progressBarToneClass (pure)', () => {
   })
 })
 
+describe('summarizeProgressBar (pure)', () => {
+  it('summarizes default progress bar state', () => {
+    expect(summarizeProgressBar({ pct: 42.5 })).toEqual({
+      inputPct: 42.5,
+      clampedPct: 42.5,
+      roundedPct: 43,
+      widthStyle: 'width: 42.50%',
+      size: 'sm',
+      tone: 'accent',
+      trackTone: 'default',
+      isSemantic: false,
+      fillSource: 'tone',
+      hasCustomFillClass: false,
+      fillClassLength: 0,
+      hasTrackClass: false,
+      trackClassLength: 0,
+      hasTitle: false,
+      titleLength: 0,
+      hasTestId: false,
+      testIdLength: 0,
+    })
+  })
+
+  it('summarizes custom fill, semantic, and clamped state', () => {
+    expect(summarizeProgressBar({
+      pct: -9,
+      size: 'md',
+      tone: 'bad',
+      class: 'bg-[var(--bad-10)]',
+      trackTone: 'dim',
+      trackClass: 'flex-1',
+      title: '0% complete',
+      ariaLabel: 'Build progress',
+      testId: 'build-progress',
+    })).toEqual({
+      inputPct: -9,
+      clampedPct: 0,
+      roundedPct: 0,
+      widthStyle: 'width: 0.00%',
+      size: 'md',
+      tone: 'bad',
+      trackTone: 'dim',
+      isSemantic: true,
+      fillSource: 'custom-class',
+      hasCustomFillClass: true,
+      fillClassLength: 18,
+      hasTrackClass: true,
+      trackClassLength: 6,
+      hasTitle: true,
+      titleLength: 11,
+      hasTestId: true,
+      testIdLength: 14,
+    })
+  })
+})
+
 describe('ProgressBar component', () => {
   let container: HTMLElement
   beforeEach(() => {
@@ -83,6 +140,12 @@ describe('ProgressBar component', () => {
     render(html`<${ProgressBar} pct=${42.5} />`, container)
     const track = container.querySelector('[data-progress-bar]') as HTMLElement
     expect(track).toBeTruthy()
+    expect(track.getAttribute('data-progress-bar-tone')).toBe('accent')
+    expect(track.getAttribute('data-progress-bar-track-tone')).toBe('default')
+    expect(track.getAttribute('data-progress-bar-input-pct')).toBe('42.5')
+    expect(track.getAttribute('data-progress-bar-clamped-pct')).toBe('42.50')
+    expect(track.getAttribute('data-progress-bar-is-semantic')).toBe('false')
+    expect(track.getAttribute('data-progress-bar-fill-source')).toBe('tone')
     const fill = track.querySelector('div') as HTMLElement
     expect(fill.getAttribute('style')).toContain('width: 42.50%')
   })
@@ -113,6 +176,7 @@ describe('ProgressBar component', () => {
     expect(track.getAttribute('aria-valuemin')).toBe('0')
     expect(track.getAttribute('aria-valuemax')).toBe('100')
     expect(track.getAttribute('aria-hidden')).toBeNull()
+    expect(track.getAttribute('data-progress-bar-is-semantic')).toBe('true')
   })
 
   it('tone prop maps to the fill bg class', () => {
@@ -130,6 +194,10 @@ describe('ProgressBar component', () => {
     expect(fill.className).toContain('bg-[var(--sky-400)]')
     // Tone fallback must NOT also be present when class is given.
     expect(fill.className).not.toContain('bg-[var(--color-accent-fg)]')
+    const track = container.querySelector('[data-progress-bar]')!
+    expect(track.getAttribute('data-progress-bar-fill-source')).toBe('custom-class')
+    expect(track.getAttribute('data-progress-bar-has-custom-fill-class')).toBe('true')
+    expect(track.getAttribute('data-progress-bar-fill-class-length')).toBe('19')
   })
 
   it('title attribute propagates to the track', () => {
@@ -137,7 +205,10 @@ describe('ProgressBar component', () => {
       html`<${ProgressBar} pct=${50} title="67% complete" />`,
       container,
     )
-    expect(container.querySelector('[data-progress-bar]')!.getAttribute('title')).toBe('67% complete')
+    const track = container.querySelector('[data-progress-bar]')!
+    expect(track.getAttribute('title')).toBe('67% complete')
+    expect(track.getAttribute('data-progress-bar-has-title')).toBe('true')
+    expect(track.getAttribute('data-progress-bar-title-length')).toBe('12')
   })
 
   it('size variant reflected in data attribute + height class', () => {
@@ -152,6 +223,9 @@ describe('ProgressBar component', () => {
       html`<${ProgressBar} pct=${50} testId="build-progress" />`,
       container,
     )
-    expect(container.querySelector('[data-testid="build-progress"]')).toBeTruthy()
+    const track = container.querySelector('[data-testid="build-progress"]')!
+    expect(track).toBeTruthy()
+    expect(track.getAttribute('data-progress-bar-has-test-id')).toBe('true')
+    expect(track.getAttribute('data-progress-bar-test-id-length')).toBe('14')
   })
 })

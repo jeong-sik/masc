@@ -133,10 +133,9 @@ export function AgentPresence({
       data-presence-raw-status=${summary.rawStatus}
       data-presence-state=${summary.state}
       data-presence-label=${summary.label}
-      data-presence-pulse=${summary.pulse}
+      data-presence-pulse=${summary.pulse ? 'true' : undefined}
       data-presence-size=${summary.size}
-      data-presence-detail-present=${summary.detailPresent}
-      data-presence-detail=${summary.detail}
+      data-presence-detail-present=${summary.detailPresent ? 'true' : undefined}
       data-testid=${testId}
     >
       <span class="relative inline-flex ${dotSize}">

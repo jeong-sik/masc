@@ -98,16 +98,17 @@ describe('AgentPresence', () => {
     expect(el.dataset.presencePulse).toBe('true')
     expect(el.dataset.presenceSize).toBe('md')
     expect(el.dataset.presenceDetailPresent).toBe('true')
-    expect(el.dataset.presenceDetail).toBe('task-123')
+    expect(el.hasAttribute('data-presence-detail')).toBe(false)
   })
 
-  it('exposes empty detail metadata', () => {
+  it('omits false boolean and detail-copy metadata', () => {
     const container = document.createElement('div')
     render(h(AgentPresence, { status: null }), container)
     const el = container.querySelector('[data-agent-presence]') as HTMLElement
     expect(el.dataset.presenceRawStatus).toBe('')
-    expect(el.dataset.presenceDetailPresent).toBe('false')
-    expect(el.dataset.presenceDetail).toBe('')
+    expect(el.hasAttribute('data-presence-pulse')).toBe(false)
+    expect(el.hasAttribute('data-presence-detail-present')).toBe(false)
+    expect(el.hasAttribute('data-presence-detail')).toBe(false)
   })
 
   it('renders label text', () => {

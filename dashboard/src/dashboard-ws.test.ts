@@ -15,6 +15,7 @@ import {
   parseWebSocketSseFrames,
   subscribeDashboardRoute,
 } from './dashboard-ws'
+import { DASHBOARD_WS_RPC_TIMEOUT_MS } from './config/constants'
 import {
   dashboardWsConnected,
   dashboardWsLastError,
@@ -149,6 +150,8 @@ beforeEach(() => {
     return 0
   })
   vi.stubGlobal('cancelAnimationFrame', vi.fn())
+  // Deterministic reconnect-jitter so timer-advance assertions are stable.
+  vi.spyOn(Math, 'random').mockReturnValue(0)
 })
 
 afterEach(() => {
@@ -322,7 +325,7 @@ describe('dashboard websocket route subscriptions', () => {
     expect(hello.method).toBe('dashboard/hello')
     expect(dashboardWsConnected.value).toBe(true)
 
-    await vi.advanceTimersByTimeAsync(15_000)
+    await vi.advanceTimersByTimeAsync(DASHBOARD_WS_RPC_TIMEOUT_MS)
     await flushPromises()
 
     expect(firstSocket.readyState).toBe(MockWebSocket.CLOSED)
@@ -352,7 +355,7 @@ describe('dashboard websocket route subscriptions', () => {
     expect(subscribe.method).toBe('dashboard/subscribe')
     expect(dashboardWsReady.value).toBe(true)
 
-    await vi.advanceTimersByTimeAsync(15_000)
+    await vi.advanceTimersByTimeAsync(DASHBOARD_WS_RPC_TIMEOUT_MS)
     await flushPromises()
 
     expect(firstSocket.readyState).toBe(MockWebSocket.CLOSED)
@@ -583,7 +586,7 @@ describe('dashboard websocket route subscriptions', () => {
     const rejection = expect(subscribePromise).rejects.toThrow(
       'dashboard websocket rpc timed out: dashboard/subscribe',
     )
-    await vi.advanceTimersByTimeAsync(15_000)
+    await vi.advanceTimersByTimeAsync(DASHBOARD_WS_RPC_TIMEOUT_MS)
     await rejection
 
     socket.receive({

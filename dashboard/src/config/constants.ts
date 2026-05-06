@@ -13,10 +13,18 @@ export const ACTIVITY_TIMEOUT_MS = 10_000
 export const MCP_INITIALIZE_TIMEOUT_MS = 10_000
 export const MCP_INITIALIZED_NOTIFY_TIMEOUT_MS = 5_000
 export const MCP_INIT_COOLDOWN_MS = 2_000
+// Dashboard WS JSON-RPC timeout. Matches the backend dashboard handler budget
+// so a slow first response under Executor_pool contention is not turned into
+// a reconnect by the client side.
+export const DASHBOARD_WS_RPC_TIMEOUT_MS = 30_000
 
-// --- SSE reconnection ---
+// --- Reconnect backoff (shared by SSE and dashboard WS) ---
+// Cap at 60s with plus/minus 1s jitter to break reconnect storms when the server is
+// degraded; fleets of dashboards retrying every 15s synchronously was
+// observed to amplify Executor_pool starvation on cold start.
 export const RECONNECT_BASE_MS = 1_000
-export const RECONNECT_MAX_MS = 15_000
+export const RECONNECT_MAX_MS = 60_000
+export const RECONNECT_JITTER_MS = 1_000
 
 // --- Refresh & debounce (milliseconds) ---
 export const SHELL_TTL_MS = 5_000

@@ -19,6 +19,7 @@ import { RingBuffer } from './lib/ring-buffer'
 
 import {
   RECONNECT_BASE_MS,
+  RECONNECT_JITTER_MS,
   RECONNECT_MAX_MS,
   MAX_JOURNAL_ENTRIES,
 } from './config/constants'
@@ -227,11 +228,22 @@ function clearReconnectTimer(): void {
   }
 }
 
+// Smallest exponent at which RECONNECT_BASE_MS * 2^exp meets or exceeds the
+// configured RECONNECT_MAX_MS cap. Clamping the attempt counter to this value
+// (rather than the previous hard-coded 5) keeps the backoff growth-bounded
+// while still letting Math.min reach the documented 60s cap.
+const RECONNECT_MAX_EXP = Math.max(
+  1,
+  Math.ceil(Math.log2(RECONNECT_MAX_MS / RECONNECT_BASE_MS)),
+)
+
 function scheduleReconnect(): void {
   if (reconnectTimer) return
   reconnectAttempts++
-  const exp = Math.min(reconnectAttempts, 5)
-  const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * Math.pow(2, exp))
+  const exp = Math.min(reconnectAttempts, RECONNECT_MAX_EXP)
+  const backoff = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * Math.pow(2, exp))
+  const jitter = Math.random() * RECONNECT_JITTER_MS
+  const delay = backoff + jitter
   console.debug(`[SSE] reconnect #${reconnectAttempts} in ${delay}ms`)
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null

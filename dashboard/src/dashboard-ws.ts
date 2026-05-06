@@ -3,6 +3,11 @@ import { parseSSEMessage } from './schemas/sse'
 import { hydrateDashboardSlice, routeServerPushEvent } from './sse-store'
 import { batch } from '@preact/signals'
 import { parseWebSocketSseFrames as parseWebSocketSseFramesImpl } from './dashboard-ws-parse'
+import {
+  DASHBOARD_WS_RPC_TIMEOUT_MS,
+  RECONNECT_JITTER_MS,
+  RECONNECT_MAX_MS,
+} from './config/constants'
 
 // Re-export for test consumers that assert on frame parsing.
 export const parseWebSocketSseFrames = parseWebSocketSseFramesImpl
@@ -37,7 +42,6 @@ interface DashboardWsDiscoveryResult {
   retry: boolean
 }
 
-const DASHBOARD_WS_RPC_TIMEOUT_MS = 15_000
 const DASHBOARD_WS_PARSE_TIMEOUT_MS = 5_000
 
 let socket: WebSocket | null = null
@@ -241,11 +245,24 @@ function formatCloseEventError(event: CloseEvent): string {
   return `dashboard websocket closed (${parts.join(', ')})`
 }
 
+// WebSocket reconnect uses an explicit 500ms base (half of the SSE
+// RECONNECT_BASE_MS) so transient socket churn recovers faster. Derive the
+// exp clamp from the configured cap so a future operator bump of
+// RECONNECT_MAX_MS actually grows the achievable backoff.
+const WS_RECONNECT_BASE_MS = 500
+const WS_RECONNECT_MAX_EXP = Math.max(
+  1,
+  Math.ceil(Math.log2(RECONNECT_MAX_MS / WS_RECONNECT_BASE_MS)),
+)
+
 function scheduleReconnect(): void {
   if (!shouldReconnect) return
   if (reconnectTimer) return
   reconnectAttempts += 1
-  const delay = Math.min(15_000, 500 * Math.pow(2, Math.min(reconnectAttempts, 5)))
+  const exp = Math.min(reconnectAttempts, WS_RECONNECT_MAX_EXP)
+  const backoff = Math.min(RECONNECT_MAX_MS, WS_RECONNECT_BASE_MS * Math.pow(2, exp))
+  const jitter = Math.random() * RECONNECT_JITTER_MS
+  const delay = backoff + jitter
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null
     void connectDashboardWS()

@@ -1000,6 +1000,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           let rec retry_loop ~run_meta ~(execution : cascade_execution)
               ~run_generation
               ~attempt ~is_retry
+              ~allow_degraded_wall_clock_retry_budget
               ~overflow_retry_used
               ~attempted_cascades =
             let execution_cascade_name =
@@ -1070,10 +1071,16 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                     not (String.equal fallback_cascade execution_cascade_name)
                 | None -> false
               in
+              let allow_wall_clock_retry_budget =
+                allow_wall_clock_retry_budget_for_attempt
+                  ~is_retry
+                  ~degraded_rotation_first_attempt:allow_degraded_wall_clock_retry_budget
+                  ~attempt
+                  ~attempted_cascades
+              in
               match
                 resolve_bounded_oas_timeout_budget_with_turn_budget
-                  ~allow_wall_clock_retry_budget:
-                    (is_retry && List.length attempted_cascades > 1)
+                  ~allow_wall_clock_retry_budget
                   ~is_retry
                   ~reserve_degraded_retry_budget
                   ~max_turns
@@ -1348,6 +1355,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                               ~run_generation
                               ~attempt:1
                               ~is_retry:true
+                              ~allow_degraded_wall_clock_retry_budget:true
                               ~overflow_retry_used
                               ~attempted_cascades:
                                 (next_execution_cascade_name :: attempted_cascades)
@@ -1464,7 +1472,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                       Eio.Time.sleep clock delay;
                       retry_loop ~run_meta ~execution ~run_generation
                         ~attempt:(attempt + 1)
-                        ~is_retry:true ~overflow_retry_used
+                        ~is_retry:true
+                        ~allow_degraded_wall_clock_retry_budget:false
+                        ~overflow_retry_used
                         ~attempted_cascades
                   | No_degraded_retry when EC.is_context_overflow err ->
                   let current_turn_event_bus =
@@ -1531,6 +1541,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                           ~run_generation:retry_plan.retry_generation
                           ~attempt:1
                           ~is_retry:true
+                          ~allow_degraded_wall_clock_retry_budget:false
                           ~overflow_retry_used:true
                           ~attempted_cascades
                     | None ->
@@ -1562,7 +1573,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               (fun () ->
                 retry_loop ~run_meta:meta ~execution:initial_execution
                   ~run_generation:generation ~attempt:1
-                  ~is_retry:false ~overflow_retry_used:false
+                  ~is_retry:false
+                  ~allow_degraded_wall_clock_retry_budget:false
+                  ~overflow_retry_used:false
                   ~attempted_cascades:
                     [ KCP.runtime_name_to_string initial_execution.cascade_name ])
           with Eio.Time.Timeout ->

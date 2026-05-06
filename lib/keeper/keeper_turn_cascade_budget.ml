@@ -266,6 +266,16 @@ let bounded_oas_timeout_for_turn_budget_with_turn_budget
        ~is_retry:false ~reserve_degraded_retry_budget:false
        ~estimated_input_tokens ~max_turns ~remaining_turn_budget_s)
 
+let allow_wall_clock_retry_budget_for_attempt
+    ~(is_retry : bool)
+    ~(degraded_rotation_first_attempt : bool)
+    ~(attempt : int)
+    ~(attempted_cascades : string list) : bool =
+  is_retry
+  && degraded_rotation_first_attempt
+  && attempt = 1
+  && List.length attempted_cascades > 1
+
 let bounded_oas_timeout_for_turn_budget ~(estimated_input_tokens : int)
     ~(remaining_turn_budget_s : float) : float option =
   bounded_oas_timeout_for_turn_budget_with_turn_budget ~estimated_input_tokens

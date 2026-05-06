@@ -5638,6 +5638,7 @@ let test_bounded_oas_timeout_reserves_degraded_retry_budget () =
 let test_attempt_watchdog_preserves_degraded_retry_reserve () =
   match
     UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+      ~allow_wall_clock_retry_budget:false
       ~is_retry:false ~reserve_degraded_retry_budget:true
       ~estimated_input_tokens:2_000 ~max_turns:4
       ~remaining_turn_budget_s:500.0
@@ -5888,6 +5889,28 @@ let test_degraded_retry_wall_clock_budget_allows_remaining_turn_time () =
         "adaptive_wall_clock_retry" budget.source;
       check (float 0.01) "wall-clock retry leaves finalization guard"
         285.0 budget.effective_timeout_sec
+
+let test_degraded_retry_wall_clock_budget_gate_is_one_shot () =
+  let allowed ~degraded_rotation_first_attempt ~attempt ~attempted_cascades =
+    UT.allow_wall_clock_retry_budget_for_attempt
+      ~is_retry:true
+      ~degraded_rotation_first_attempt
+      ~attempt
+      ~attempted_cascades
+  in
+  let rotated_cascades = [ "local_recovery"; "underdog" ] in
+  check bool "first degraded rotation attempt may use wall clock" true
+    (allowed ~degraded_rotation_first_attempt:true ~attempt:1
+       ~attempted_cascades:rotated_cascades);
+  check bool "same-cascade retry after rotation uses per-attempt budget" false
+    (allowed ~degraded_rotation_first_attempt:false ~attempt:2
+       ~attempted_cascades:rotated_cascades);
+  check bool "attempt counter still blocks later retries" false
+    (allowed ~degraded_rotation_first_attempt:true ~attempt:2
+       ~attempted_cascades:rotated_cascades);
+  check bool "non-rotated retry cannot use wall clock" false
+    (allowed ~degraded_rotation_first_attempt:true ~attempt:1
+       ~attempted_cascades:[ "underdog" ])
 
 let test_non_retry_still_refuses_tiny_budget () =
   match
@@ -8018,6 +8041,8 @@ let () =
             test_per_attempt_retry_blocks_after_adaptive_budget_spent;
           test_case "degraded retry can use remaining wall-clock budget" `Quick
             test_degraded_retry_wall_clock_budget_allows_remaining_turn_time;
+          test_case "degraded retry wall-clock budget is one-shot" `Quick
+            test_degraded_retry_wall_clock_budget_gate_is_one_shot;
           test_case "non-retry still refuses tiny budget" `Quick
             test_non_retry_still_refuses_tiny_budget;
           test_case "per-attempt retry refuses zero remaining (#12675)" `Quick

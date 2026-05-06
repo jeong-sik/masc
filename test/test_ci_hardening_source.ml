@@ -1319,6 +1319,11 @@ let test_keeper_pr_audit_contracts () =
        "route_evidence"
      && file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
           "route_evidence.via=docker");
+  check bool "keeper fleet audit can scope lifecycle evidence by run id" true
+    (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
+       "--evidence-run-id"
+     && file_contains_pattern "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          "--evidence-run-id \"$RUN_ID\"");
   check bool "keeper fleet audit survives live invalid utf8 rows" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        {|errors="replace"|})

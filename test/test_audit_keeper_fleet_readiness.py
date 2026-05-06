@@ -48,6 +48,7 @@ def audit_args(base_path: Path, expected_keepers: int):
         require_docker_git_push_evidence=False,
         require_docker_pr_approve_evidence=False,
         require_docker_pr_lifecycle_evidence=False,
+        evidence_run_id=None,
         forbid_github_identity=[],
     )
 
@@ -800,6 +801,48 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             evidence,
             {"git_push:keeper_bash", "pr_approve:keeper_shell"},
         )
+        self.assertEqual(docker_evidence, evidence)
+
+    def test_scan_keeper_evidence_filters_pr_lifecycle_by_run_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            calls_dir = root / ".masc" / "tool_calls" / "2026-05"
+            calls_dir.mkdir(parents=True)
+            rows = [
+                {
+                    "ts": 50.0,
+                    "keeper": "alpha",
+                    "tool": "keeper_bash",
+                    "input": {"cmd": "git push -u origin keeper/old-run"},
+                    "output": json.dumps({"ok": True, "via": "docker"}),
+                    "success": True,
+                },
+                {
+                    "ts": 60.0,
+                    "keeper": "alpha",
+                    "tool": "keeper_bash",
+                    "input": {
+                        "cmd": (
+                            "git push -u origin "
+                            "keeper/alpha-docker-pr-proof-current-run"
+                        )
+                    },
+                    "output": json.dumps({"ok": True, "via": "docker"}),
+                    "success": True,
+                },
+            ]
+            (calls_dir / "06.jsonl").write_text(
+                "".join(json.dumps(row) + "\n" for row in rows),
+                encoding="utf-8",
+            )
+
+            latest_ts, tools, evidence, docker_evidence = audit.scan_keeper_evidence(
+                root, "alpha", evidence_run_id="current-run"
+            )
+
+        self.assertEqual(latest_ts, 60.0)
+        self.assertEqual(tools, {"keeper_bash"})
+        self.assertEqual(evidence, {"git_push:keeper_bash"})
         self.assertEqual(docker_evidence, evidence)
 
     def test_scan_keeper_evidence_reads_newest_tool_calls_first(self):

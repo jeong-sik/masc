@@ -17,7 +17,7 @@ adds the operator action loop:
 2. render a per-keeper proof prompt,
 3. optionally send the prompt through `masc_keeper_msg`,
 4. poll `masc_keeper_msg_result`,
-5. run `audit-keeper-fleet-readiness.py --require-docker-pr-lifecycle-evidence`,
+5. run `audit-keeper-fleet-readiness.py --require-docker-pr-lifecycle-evidence --evidence-run-id <run_id>`,
 6. save artifacts under `logs/keeper_docker_pr_lifecycle/<run_id>/`.
 
 Default mode is dry-run. It writes prompts and runs the read-only audit, but it
@@ -51,10 +51,14 @@ When mutation is enabled, the harness sends `required_tools` with each
 those tools are not visible and `missing_required_tool_use` if the keeper
 replies without exercising them.
 The prompt reserves `keeper_shell` for read-only GitHub inspection.
-Proof-file creation and git add/commit/push should use `keeper_bash` from
-inside the Docker playground so the route evidence is tied to the keeper
-container path. If the shell guard rejects the git mutation, the keeper must
-stop and report that blocker instead of falling back to host-local credentials.
+Keepers must create/use the exact run-scoped branch
+`keeper/<keeper>-docker-pr-proof-<run_id>` and proof file
+`docs/runtime-proof/keepers/<keeper>-<run_id>.md`; older proof branches or
+worktrees do not count. Proof-file creation and git add/commit/push should use
+`keeper_bash` from inside the Docker playground so the route evidence is tied to
+the keeper container path. If the shell guard rejects the git mutation, the
+keeper must stop and report that blocker instead of falling back to host-local
+credentials.
 PR create/review mutations should use `keeper_pr_create` /
 `keeper_pr_review_comment` rather than `gh pr ...` through shell tools.
 Override the CSV with `REQUIRED_TOOLS=...` for a narrower or broader proof
@@ -104,4 +108,6 @@ The prompt requires keepers to stay on draft proof PRs:
 
 The final audit remains the truth source. A successful keeper reply is useful
 operator evidence, but it is not completion unless the Docker lifecycle audit
-also passes for the expected fleet.
+also passes for the expected fleet. The reprobe audit is run-id scoped, so stale
+PR lifecycle evidence from earlier keeper proof runs cannot satisfy a fresh
+run.

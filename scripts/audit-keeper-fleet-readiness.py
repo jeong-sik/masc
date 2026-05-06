@@ -354,6 +354,18 @@ def command_texts_from_structured_input(row: dict[str, Any]) -> list[str]:
     return [text for text in texts if text]
 
 
+def row_mentions_evidence_run_id(
+    row: dict[str, Any], evidence_run_id: str | None
+) -> bool:
+    if not evidence_run_id:
+        return True
+    try:
+        haystack = json.dumps(row, ensure_ascii=False, sort_keys=True)
+    except (TypeError, ValueError):
+        haystack = str(row)
+    return evidence_run_id.lower() in haystack.lower()
+
+
 def add_pr_refs_from_structured_output(
     *,
     refs: set[str],
@@ -990,6 +1002,7 @@ def scan_keeper_evidence(
     name: str,
     *,
     max_silence_hours: float | None = None,
+    evidence_run_id: str | None = None,
     now: float | None = None,
 ) -> tuple[float | None, set[str], set[str], set[str]]:
     latest_ts: float | None = None
@@ -1009,9 +1022,12 @@ def scan_keeper_evidence(
             if ts is not None:
                 latest_ts = ts if latest_ts is None else max(latest_ts, ts)
             tools.update(tools_from_decision(row))
-            row_evidence, row_docker_evidence = pr_lifecycle_evidence_from_decision(row)
-            pr_lifecycle_evidence.update(row_evidence)
-            docker_pr_lifecycle_evidence.update(row_docker_evidence)
+            if row_mentions_evidence_run_id(row, evidence_run_id):
+                row_evidence, row_docker_evidence = (
+                    pr_lifecycle_evidence_from_decision(row)
+                )
+                pr_lifecycle_evidence.update(row_evidence)
+                docker_pr_lifecycle_evidence.update(row_docker_evidence)
     for metrics in pr_action_metric_paths(
         base_path, name, min_day_key=min_metric_day_key
     ):
@@ -1022,11 +1038,12 @@ def scan_keeper_evidence(
             if ts is not None:
                 latest_ts = ts if latest_ts is None else max(latest_ts, ts)
             tools.update(tools_from_action_metric(row))
-            row_evidence, row_docker_evidence = (
-                pr_lifecycle_evidence_from_action_metric(row)
-            )
-            pr_lifecycle_evidence.update(row_evidence)
-            docker_pr_lifecycle_evidence.update(row_docker_evidence)
+            if row_mentions_evidence_run_id(row, evidence_run_id):
+                row_evidence, row_docker_evidence = (
+                    pr_lifecycle_evidence_from_action_metric(row)
+                )
+                pr_lifecycle_evidence.update(row_evidence)
+                docker_pr_lifecycle_evidence.update(row_docker_evidence)
         if complete_lifecycle_evidence(
             pr_lifecycle_evidence
         ) and complete_lifecycle_evidence(docker_pr_lifecycle_evidence):
@@ -1047,11 +1064,12 @@ def scan_keeper_evidence(
                 tool = row.get("tool")
                 if isinstance(tool, str):
                     tools.add(tool)
-                row_evidence, row_docker_evidence = (
-                    pr_lifecycle_evidence_from_tool_call(row)
-                )
-                pr_lifecycle_evidence.update(row_evidence)
-                docker_pr_lifecycle_evidence.update(row_docker_evidence)
+                if row_mentions_evidence_run_id(row, evidence_run_id):
+                    row_evidence, row_docker_evidence = (
+                        pr_lifecycle_evidence_from_tool_call(row)
+                    )
+                    pr_lifecycle_evidence.update(row_evidence)
+                    docker_pr_lifecycle_evidence.update(row_docker_evidence)
             if complete_lifecycle_evidence(
                 pr_lifecycle_evidence
             ) and complete_lifecycle_evidence(docker_pr_lifecycle_evidence):
@@ -1077,6 +1095,7 @@ def audit_keeper(
     require_docker_pr_create_evidence: bool,
     require_docker_git_push_evidence: bool,
     require_docker_pr_approve_evidence: bool,
+    evidence_run_id: str | None,
     forbidden_github_identities: set[str] | None = None,
 ) -> KeeperAudit:
     name = config_path.stem
@@ -1132,7 +1151,12 @@ def audit_keeper(
         tools,
         pr_lifecycle_evidence,
         docker_pr_lifecycle_evidence,
-    ) = scan_keeper_evidence(base_path, name, max_silence_hours=max_silence_hours)
+    ) = scan_keeper_evidence(
+        base_path,
+        name,
+        max_silence_hours=max_silence_hours,
+        evidence_run_id=evidence_run_id,
+    )
     pr_creation_evidence = scan_pr_creation_evidence(base_path, name)
     (
         board_post_ts,
@@ -1310,6 +1334,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
                 args.require_docker_pr_approve_evidence
                 or args.require_docker_pr_lifecycle_evidence
             ),
+            evidence_run_id=args.evidence_run_id,
             forbidden_github_identities=set(args.forbid_github_identity or []),
         )
         for path in config_paths
@@ -1365,6 +1390,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             "require_docker_pr_lifecycle_evidence": (
                 args.require_docker_pr_lifecycle_evidence
             ),
+            "evidence_run_id": args.evidence_run_id,
         },
         "fleet_failures": fleet_failures,
         "failed_keepers": [keeper.name for keeper in failed_keepers],
@@ -1551,6 +1577,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help=(
             "Fail unless each keeper has direct PR create, git push, and "
             "PR APPROVE evidence with explicit Docker execution markers."
+        ),
+    )
+    parser.add_argument(
+        "--evidence-run-id",
+        default=None,
+        help=(
+            "When set, count PR lifecycle evidence only from rows that mention "
+            "this run id. This prevents older proof runs from satisfying a "
+            "fresh lifecycle reprobe."
         ),
     )
     parser.add_argument("--json", action="store_true", help="Emit JSON report.")

@@ -27,9 +27,22 @@ describe('Cockpit command map', () => {
 
     expect(screen.getByTestId('cockpit-command-map')).toBeInTheDocument()
     expect(screen.getByTestId('world-visualizer')).toBeInTheDocument()
+    expect(screen.getByTestId('cockpit-disclosure')).toBeInTheDocument()
     expect(document.querySelectorAll('[data-cockpit-plane]')).toHaveLength(5)
     expect(document.querySelector('[data-cockpit-plane="work"]')).toHaveTextContent('1 blocked')
     expect(document.querySelector('[data-cockpit-plane="ide"]')).toHaveTextContent('Source')
+  })
+
+  it('renders progressive disclosure levels over the route map', () => {
+    render(h(Cockpit, null))
+
+    const disclosure = screen.getByTestId('cockpit-disclosure')
+    expect(disclosure).toHaveAttribute('data-cognitive-complete', 'true')
+    expect(disclosure.querySelectorAll('[data-cognitive-level]')).toHaveLength(3)
+    expect(disclosure.querySelector('[data-cognitive-level="perceive"]')).toHaveTextContent('Route coverage')
+    expect(disclosure.querySelector('[data-cognitive-level="comprehend"]')).toHaveTextContent('Plane grouping')
+    expect(disclosure.querySelector('[data-cognitive-level="project"]')).toHaveTextContent('Route gaps')
+    expect(disclosure).toHaveTextContent('backend-blocked')
   })
 
   it('links cockpit entries to their canonical production routes', () => {

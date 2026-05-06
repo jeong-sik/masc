@@ -8,6 +8,19 @@
 
 (* Direct binary runs bypass test/dune's env block. Pin runtime env before
    [Masc_mcp] is referenced so module init cannot load operator state. *)
+let env_truthy name =
+  match Sys.getenv_opt name with
+  | Some raw -> (
+      match String.lowercase_ascii (String.trim raw) with
+      | "1" | "true" | "yes" | "on" -> true
+      | _ -> false)
+  | None -> false
+
+let env_has_value name =
+  match Sys.getenv_opt name with
+  | Some raw -> String.trim raw <> ""
+  | None -> false
+
 let pin_direct_run_masc_env () =
   let base =
     Filename.concat (Filename.get_temp_dir_name ())
@@ -15,10 +28,20 @@ let pin_direct_run_masc_env () =
          (Random.bits ()))
   in
   if not (Sys.file_exists base) then Unix.mkdir base 0o755;
-  Unix.putenv "MASC_BASE_PATH" base;
-  Unix.putenv "MASC_BASE_PATH_INPUT" base;
-  Unix.putenv "MASC_CONFIG_DIR" "";
-  Unix.putenv "MASC_PERSONAS_DIR" "";
+  if not
+       (env_truthy "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE"
+        && (env_has_value "MASC_BASE_PATH"
+            || env_has_value "MASC_BASE_PATH_INPUT"))
+  then (
+    Unix.putenv "MASC_BASE_PATH" base;
+    Unix.putenv "MASC_BASE_PATH_INPUT" base);
+  if not
+       (env_truthy "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE"
+        && (env_has_value "MASC_CONFIG_DIR"
+            || env_has_value "MASC_PERSONAS_DIR"))
+  then (
+    Unix.putenv "MASC_CONFIG_DIR" "";
+    Unix.putenv "MASC_PERSONAS_DIR" "");
   Unix.putenv "MASC_KEEPER_AUTONOMOUS_CONCURRENCY" "";
   Unix.putenv "MASC_KEEPER_REACTIVE_CONCURRENCY" ""
 
@@ -146,6 +169,75 @@ let with_env name value f =
       | Some v -> Unix.putenv name v
       | None -> Unix.putenv name "")
     f
+
+let with_env_snapshot names f =
+  let saved = List.map (fun name -> name, Sys.getenv_opt name) names in
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter
+        (fun (name, value) ->
+          match value with
+          | Some prior -> Unix.putenv name prior
+          | None -> Unix.putenv name "")
+        saved)
+    f
+
+let test_pin_direct_run_masc_env_honors_base_path_override () =
+  let base = temp_dir "oas_worker_allowed_base" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+      with_env_snapshot
+        [
+          "MASC_BASE_PATH";
+          "MASC_BASE_PATH_INPUT";
+          "MASC_CONFIG_DIR";
+          "MASC_PERSONAS_DIR";
+          "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE";
+        ]
+      @@ fun () ->
+      with_env "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE" "true" @@ fun () ->
+      with_env "MASC_BASE_PATH" base @@ fun () ->
+      with_env "MASC_BASE_PATH_INPUT" base @@ fun () ->
+      pin_direct_run_masc_env ();
+      Alcotest.(check string)
+        "MASC_BASE_PATH preserved"
+        base
+        (Sys.getenv "MASC_BASE_PATH");
+      Alcotest.(check string)
+        "MASC_BASE_PATH_INPUT preserved"
+        base
+        (Sys.getenv "MASC_BASE_PATH_INPUT"))
+
+let test_pin_direct_run_masc_env_honors_config_path_override () =
+  let config_dir = temp_dir "oas_worker_allowed_config" in
+  let personas_dir = temp_dir "oas_worker_allowed_personas" in
+  Fun.protect
+    ~finally:(fun () ->
+      cleanup_dir config_dir;
+      cleanup_dir personas_dir)
+    (fun () ->
+      with_env_snapshot
+        [
+          "MASC_BASE_PATH";
+          "MASC_BASE_PATH_INPUT";
+          "MASC_CONFIG_DIR";
+          "MASC_PERSONAS_DIR";
+          "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE";
+        ]
+      @@ fun () ->
+      with_env "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE" "true" @@ fun () ->
+      with_env "MASC_CONFIG_DIR" config_dir @@ fun () ->
+      with_env "MASC_PERSONAS_DIR" personas_dir @@ fun () ->
+      pin_direct_run_masc_env ();
+      Alcotest.(check string)
+        "MASC_CONFIG_DIR preserved"
+        config_dir
+        (Sys.getenv "MASC_CONFIG_DIR");
+      Alcotest.(check string)
+        "MASC_PERSONAS_DIR preserved"
+        personas_dir
+        (Sys.getenv "MASC_PERSONAS_DIR"))
 
 let with_cascade_attempt_liveness mode f =
   let env = "MASC_CASCADE_ATTEMPT_LIVENESS" in
@@ -4895,6 +4987,12 @@ let () =
   Masc_mcp.Oas_worker_cascade.start_actor_if_needed ~sw;
   Masc_mcp.Masc_eio_env.reset_for_test ();
   Alcotest.run "OAS Worker" [
+    "direct_run_env", [
+      Alcotest.test_case "honors allowed base path override" `Quick
+        test_pin_direct_run_masc_env_honors_base_path_override;
+      Alcotest.test_case "honors allowed config path override" `Quick
+        test_pin_direct_run_masc_env_honors_config_path_override;
+    ];
     "sse_event_bridge", [
       Alcotest.test_case "text delta extraction" `Quick
         test_text_delta_extraction;

@@ -9,6 +9,7 @@
     requires an Eio fiber context (Eio.Mutex on holder_table). *)
 
 module KK = Masc_mcp.Keeper_keepalive
+module KTS = Masc_mcp.Keeper_turn_slot
 module SW = Masc_mcp.Keeper_stale_watchdog
 
 exception After_flag_injected
@@ -28,6 +29,29 @@ let assert_eq ~msg ~expected ~actual =
 let assert_string_eq ~msg ~expected ~actual =
   if expected <> actual then
     failwith (Printf.sprintf "%s: expected=%S actual=%S" msg expected actual)
+
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some prior -> Unix.putenv name prior
+      | None -> Unix.putenv name "")
+    f
+
+let test_turn_concurrency_env_ignored_under_test_executable () =
+  with_env "MASC_KEEPER_AUTONOMOUS_CONCURRENCY" "1" @@ fun () ->
+  let actual =
+    KTS.turn_concurrency_int_of_env_default_for_test
+      "MASC_KEEPER_AUTONOMOUS_CONCURRENCY"
+      ~default:16
+      ~min_v:1
+      ~max_v:64
+  in
+  assert_eq ~msg:"test executable ignores keeper turn concurrency env"
+    ~expected:16
+    ~actual
 
 let test_turn_slot_holders_empty_when_no_slot_held () =
   let now = Time_compat.now () in
@@ -534,6 +558,8 @@ let () =
         test_format_slot_holders_truncates_and_rounds;
       "slot holders summary reports empty pools",
         test_slot_holders_summary_empty_pools;
+      "keeper turn concurrency env ignored in test executable",
+        test_turn_concurrency_env_ignored_under_test_executable;
       "autonomous slot holders records keeper during acquire",
         test_autonomous_slot_holders_records_during_acquire;
       "holders dropped after with_keeper_turn_slot exits",

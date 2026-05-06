@@ -217,6 +217,9 @@ let turn_concurrency_int_of_env_default name ~default ~min_v ~max_v =
       in
       max min_v (min max_v v)
 
+let turn_concurrency_int_of_env_default_for_test =
+  turn_concurrency_int_of_env_default
+
 let autonomous_turn_limit =
   turn_concurrency_int_of_env_default
     "MASC_KEEPER_AUTONOMOUS_CONCURRENCY" ~default:16 ~min_v:1 ~max_v:max_int

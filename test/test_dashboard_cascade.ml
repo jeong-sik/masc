@@ -754,6 +754,107 @@ let test_slo_top_level_shape () =
   check bool "has status" true (List.mem_assoc "status" fs);
   check bool "has violations" true (List.mem_assoc "violations" fs)
 
+(* ── O1 cascade inspector audit runs ───────────────────────────── *)
+
+let test_audit_runs_json_projects_o1_shape () =
+  with_temp_config_root_setup
+    (fun _dir -> ())
+    (fun base_path ->
+       let audit_dir =
+         Filename.concat
+           (Masc_mcp.Coord_utils.masc_dir_from_base_path ~base_path)
+           "cascade_audit"
+       in
+       let store = Dated_jsonl.create ~base_dir:audit_dir () in
+       Dated_jsonl.append store
+         (`Assoc
+            [
+              ("ts", `Float 123.4);
+              ("keeper_name", `String "sangsu");
+              ("cascade_name", `String "keeper_unified");
+              ("outcome", `String "success");
+              ("top_level_reason", `Null);
+              ( "observation",
+                `Assoc
+                  [
+                    ("cascade_name", `String "keeper_unified");
+                    ("strategy", `String "failover");
+                    ("configured_labels", `List [`String "glm"; `String "kimi"]);
+                    ("candidate_models", `List [`String "glm"; `String "kimi"]);
+                    ("primary_model", `String "glm");
+                    ("selected_model", `String "kimi");
+                    ("selected_model_raw", `String "kimi-model");
+                    ( "attempts",
+                      `List
+                        [
+                          `Assoc
+                            [
+                              ("attempt_index", `Int 0);
+                              ("model_id", `String "glm-model");
+                              ("model_label", `String "glm");
+                              ("latency_ms", `Int 120);
+                              ("error", `String "timeout");
+                            ];
+                          `Assoc
+                            [
+                              ("attempt_index", `Int 1);
+                              ("model_id", `String "kimi-model");
+                              ("model_label", `String "kimi");
+                              ("latency_ms", `Int 80);
+                              ("error", `Null);
+                            ];
+                        ] );
+                    ( "fallback_events",
+                      `List
+                        [
+                          `Assoc
+                            [
+                              ("from_model_id", `String "glm-model");
+                              ("from_model_label", `String "glm");
+                              ("to_model_id", `String "kimi-model");
+                              ("to_model_label", `String "kimi");
+                              ("reason", `String "timeout");
+                            ];
+                        ] );
+                    ("attempt_details_available", `Bool true);
+                    ("attempt_details_source", `String "oas_metrics_callbacks");
+                  ] );
+            ]);
+       let json =
+         Masc_mcp.Dashboard_cascade.audit_runs_json ~base_path ~limit:10 ()
+       in
+       let runs = Yojson.Safe.Util.(json |> member "audit_runs" |> to_list) in
+       check int "one run" 1 (List.length runs);
+       match runs with
+       | [] -> fail "missing audit run"
+       | run :: _ ->
+           check string "cascade" "keeper_unified"
+             Yojson.Safe.Util.(run |> member "cascade" |> to_string);
+           check string "trigger" "sangsu"
+             Yojson.Safe.Util.(run |> member "trigger" |> to_string);
+           check string "selected" "kimi"
+             Yojson.Safe.Util.(run |> member "selected" |> to_string);
+           check int "total_ms" 200
+             Yojson.Safe.Util.(run |> member "total_ms" |> to_int);
+           let hops = Yojson.Safe.Util.(run |> member "hops" |> to_list) in
+           check int "two hops" 2 (List.length hops);
+           (match hops with
+            | first :: second :: _ ->
+                check string "first status" "error"
+                  Yojson.Safe.Util.(first |> member "status" |> to_string);
+                check string "first reason" "timeout"
+                  Yojson.Safe.Util.(first |> member "reason" |> to_string);
+                check string "second status" "success"
+                  Yojson.Safe.Util.(second |> member "status" |> to_string)
+            | _ -> fail "expected two hops");
+           let filtered =
+             Masc_mcp.Dashboard_cascade.audit_runs_json ~base_path ~limit:10
+               ~cascade:"other" ()
+           in
+           check int "cascade filter excludes other" 0
+             Yojson.Safe.Util.(
+               filtered |> member "audit_runs" |> to_list |> List.length))
+
 (* ── keeper_profile_json: raw vs canonical contract ──────────────── *)
 
 (* These tests exercise the pure [keeper_profile_json] projection directly
@@ -1008,6 +1109,10 @@ let () =
       test_case "partial filtered drops ratio" `Quick test_slo_partial_filtered;
       test_case "exhaustion > 10 → violated" `Quick test_slo_exhaustion_breach;
       test_case "burn_rate math" `Quick test_slo_burn_rate_math;
+    ];
+    "audit_runs", [
+      test_case "projects cascade_audit records into O1 run shape" `Quick
+        test_audit_runs_json_projects_o1_shape;
     ];
     "keeper_profile_json", [
       test_case "unknown cascade preserves raw, canonical shows drift"

@@ -114,6 +114,32 @@ let add_routes router =
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/cascade/audit_runs" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let limit =
+           clamp_history_limit (int_query_param req "limit" ~default:100)
+         in
+         let cascade = query_param req "cascade" in
+         let base_path = state.Mcp_server.room_config.base_path in
+         let json =
+           Dashboard_cascade.audit_runs_json ~base_path ~limit ?cascade ()
+         in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/cascade/inspector" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let limit =
+           clamp_history_limit (int_query_param req "limit" ~default:100)
+         in
+         let cascade = query_param req "cascade" in
+         let base_path = state.Mcp_server.room_config.base_path in
+         let json =
+           Dashboard_cascade.audit_runs_json ~base_path ~limit ?cascade ()
+         in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/cascade/slo" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let json = Dashboard_cascade.slo_json () in

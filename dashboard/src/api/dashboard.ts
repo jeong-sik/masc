@@ -62,6 +62,7 @@ import type {
   DashboardRuntimeResolution,
 } from '../types'
 export {
+  fetchCascadeAuditRuns,
   fetchCascadeClientCapacity,
   fetchCascadeClientCapacityHistory,
   fetchCascadeConfig,
@@ -74,6 +75,10 @@ export {
   updateKeeperCascade,
 } from './dashboard-cascade'
 export type {
+  CascadeAuditHop,
+  CascadeAuditHopStatus,
+  CascadeAuditRun,
+  CascadeAuditRunsResponse,
   CascadeCandidate,
   CascadeCapacityEventKind,
   CascadeClientCapacityEntry,

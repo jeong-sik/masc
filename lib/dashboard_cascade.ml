@@ -911,6 +911,237 @@ let strategy_trace_json ?limit ?cascade () =
     ("events", `List (List.map strategy_trace_event_to_json events));
   ]
 
+(* ── Cascade inspector projection (O1) ─────────────────────────────
+
+   The runtime writer already persists per-call observations under
+   [.masc/cascade_audit/YYYY-MM/DD.jsonl].  This projection keeps that
+   durable SSOT and reshapes each record into the O1 inspector contract:
+   one cascade run with configured pool, selected model, aggregate
+   duration, and ordered hop rows. *)
+
+let json_string_member key json =
+  match json_assoc_member key json with
+  | `String value -> Some value
+  | _ -> None
+
+let json_float_member key json =
+  match json_assoc_member key json with
+  | `Float value -> Some value
+  | `Int value -> Some (float_of_int value)
+  | _ -> None
+
+let json_int_member key json =
+  match json_assoc_member key json with
+  | `Int value -> Some value
+  | `Float value -> Some (int_of_float value)
+  | _ -> None
+
+let json_list_member key json =
+  match json_assoc_member key json with
+  | `List values -> values
+  | _ -> []
+
+let nonempty_string value =
+  match value with
+  | Some raw ->
+      let trimmed = String.trim raw in
+      if String.equal trimmed "" then None else Some trimmed
+  | None -> None
+
+let first_nonempty values =
+  List.find_map nonempty_string values
+
+let json_string_opt_member key json =
+  json_string_member key json |> nonempty_string
+
+let audit_store_dir ~base_path =
+  Filename.concat
+    (Common.masc_dir_from_base_path ~base_path)
+    "cascade_audit"
+
+let cascade_audit_store ~base_path =
+  Dated_jsonl.create ~base_dir:(audit_store_dir ~base_path) ()
+
+let stable_audit_run_id json =
+  "cascade-audit-" ^ String.sub (Digest.to_hex (Digest.string (Yojson.Safe.to_string json))) 0 16
+
+let model_display_of_attempt attempt =
+  first_nonempty
+    [
+      json_string_member "model_label" attempt;
+      json_string_member "model_id" attempt;
+    ]
+  |> Option.value ~default:"unknown"
+
+let fallback_reason_for_model ~model_id ~model_label fallback_events =
+  let matches value =
+    match nonempty_string value with
+    | None -> false
+    | Some value ->
+        (match model_id with Some id -> String.equal value id | None -> false)
+        || (match model_label with Some label -> String.equal value label | None -> false)
+  in
+  List.find_map
+    (fun event ->
+      if matches (json_string_member "from_model_id" event)
+         || matches (json_string_member "from_model_label" event)
+      then json_string_opt_member "reason" event
+      else None)
+    fallback_events
+
+let audit_hop_json ~selected_model ~fallback_events attempt =
+  let model_id = json_string_opt_member "model_id" attempt in
+  let model_label = json_string_opt_member "model_label" attempt in
+  let model = model_display_of_attempt attempt in
+  let latency_ms = json_int_member "latency_ms" attempt in
+  let error = json_string_opt_member "error" attempt in
+  let reason =
+    match error with
+    | Some _ as value -> value
+    | None -> fallback_reason_for_model ~model_id ~model_label fallback_events
+  in
+  let selected =
+    match selected_model with
+    | Some selected ->
+        String.equal selected model
+        || (match model_id with Some id -> String.equal selected id | None -> false)
+        || (match model_label with Some label -> String.equal selected label | None -> false)
+    | None -> false
+  in
+  let status =
+    match error, reason, selected with
+    | Some _, _, _ -> "error"
+    | None, _, true -> "success"
+    | None, Some _, false -> "fallback"
+    | None, None, _ -> "attempted"
+  in
+  let base =
+    [
+      ("i", `Int (Option.value ~default:0 (json_int_member "attempt_index" attempt)));
+      ("model", `String model);
+      ("status", `String status);
+      ("ms", `Int (Option.value ~default:0 latency_ms));
+      ("ms_source",
+       `String (if Option.is_some latency_ms then "oas_metrics_callbacks" else "unavailable"));
+    ]
+  in
+  let fields =
+    match reason with
+    | Some value -> base @ [("reason", `String value)]
+    | None -> base
+  in
+  `Assoc fields
+
+let attempt_latency_total attempts =
+  List.fold_left
+    (fun acc attempt ->
+      acc + Option.value ~default:0 (json_int_member "latency_ms" attempt))
+    0 attempts
+
+let last_attempt_error attempts =
+  List.rev attempts |> List.find_map (json_string_opt_member "error")
+
+let audit_run_json_of_record json =
+  let observation = json_assoc_member "observation" json in
+  let configured_labels = json_string_list (json_assoc_member "configured_labels" observation) in
+  let candidate_models = json_string_list (json_assoc_member "candidate_models" observation) in
+  let configured =
+    match configured_labels with
+    | [] -> candidate_models
+    | labels -> labels
+  in
+  let attempts = json_list_member "attempts" observation in
+  let fallback_events = json_list_member "fallback_events" observation in
+  let selected =
+    first_nonempty
+      [
+        json_string_member "selected_model" observation;
+        json_string_member "selected_model_raw" observation;
+      ]
+  in
+  let primary =
+    first_nonempty
+      [
+        json_string_member "primary_model" observation;
+        List.nth_opt configured 0;
+        List.nth_opt candidate_models 0;
+      ]
+  in
+  let cascade =
+    first_nonempty
+      [
+        json_string_member "cascade_name" json;
+        json_string_member "cascade_name" observation;
+      ]
+    |> Option.value ~default:"unknown"
+  in
+  let ts = Option.value ~default:0.0 (json_float_member "ts" json) in
+  let top_level_reason = json_string_opt_member "top_level_reason" json in
+  let error_category =
+    match top_level_reason with
+    | Some _ as value -> value
+    | None -> last_attempt_error attempts
+  in
+  let base =
+    [
+      ("id", `String (stable_audit_run_id json));
+      ("cascade", `String cascade);
+      ( "trigger",
+        `String
+          (json_string_opt_member "keeper_name" json
+           |> Option.value ~default:"unknown") );
+      ("at", `Float ts);
+      ( "outcome",
+        `String
+          (json_string_member "outcome" json |> Option.value ~default:"unknown") );
+      ("configured", `List (List.map (fun value -> `String value) configured));
+      ("primary", Json_util.string_opt_to_json primary);
+      ("selected", Json_util.string_opt_to_json selected);
+      ("total_ms", `Int (attempt_latency_total attempts));
+      ( "total_ms_source",
+        `String
+          (if List.exists (fun attempt -> Option.is_some (json_int_member "latency_ms" attempt)) attempts
+           then "attempt_latency_sum"
+           else "unavailable") );
+      ("hops", `List (List.map (audit_hop_json ~selected_model:selected ~fallback_events) attempts));
+    ]
+  in
+  let fields =
+    match error_category with
+    | Some value -> base @ [("error_category", `String value)]
+    | None -> base
+  in
+  `Assoc fields
+
+let audit_run_cascade_matches cascade_filter run =
+  match cascade_filter with
+  | None -> true
+  | Some expected ->
+      (match json_string_member "cascade" run with
+      | Some actual -> String.equal actual expected
+      | None -> false)
+
+let audit_runs_json ~base_path ?limit ?cascade () =
+  let limit = Option.value ~default:100 limit |> max 1 |> min 1024 in
+  let read_limit = if Option.is_some cascade then min 4096 (limit * 4) else limit in
+  let runs =
+    Dated_jsonl.read_recent (cascade_audit_store ~base_path) read_limit
+    |> List.rev
+    |> List.map audit_run_json_of_record
+    |> List.filter (audit_run_cascade_matches cascade)
+  in
+  let rec take n = function
+    | _ when n <= 0 -> []
+    | [] -> []
+    | x :: xs -> x :: take (n - 1) xs
+  in
+  let runs = take limit runs in
+  `Assoc [
+    ("updated_at", `String (now_iso ()));
+    ("total_runs", `Int (List.length runs));
+    ("audit_runs", `List runs);
+  ]
+
 (* ── SLO projection (LT-11) ─────────────────────────────────
 
    Targets mirror infrastructure/monitoring/cascade-slo.yml.  Computed

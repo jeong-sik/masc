@@ -832,10 +832,10 @@ Use for status updates, announcements, warnings, or coordination.";
     name = "keeper_task_claim";
     description = "Claim the next unclaimed todo task that matches your capabilities. \
 Returns claimed task details (task_id, title, description) or empty if none available. \
-If active_goal_ids are configured, goal-linked tasks are preferred; when that scoped \
-pool has no claimable task for your current capabilities, the claim stops instead of \
-crossing into unrelated goals. Auto-repaired keeper-purpose goals may still fall back \
-to all claimable tasks.";
+If active_goal_ids are configured, only tasks linked to those goals are eligible; \
+when that scoped pool has no claimable task for your current capabilities, the \
+claim stops instead of crossing into unrelated goals. Auto-repaired keeper-purpose \
+goals may still fall back to all claimable tasks.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);

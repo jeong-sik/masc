@@ -182,6 +182,13 @@ let contains_substring s needle =
   in
   if n_len = 0 then true else loop 0
 
+let check_effective_goal_ids label scope expected =
+  let actual =
+    Yojson.Safe.Util.(
+      scope |> member "effective_goal_ids" |> to_list |> List.map to_string)
+  in
+  check (list string) label expected actual
+
 let with_registered_keeper config meta f =
   Keeper_registry.unregister ~base_path:config.Coord.base_path meta.Keeper_types.name;
   ignore
@@ -609,10 +616,7 @@ let test_claim_stops_from_empty_persisted_goal_scope () =
       check int "effective goal ids retained" 1
         Yojson.Safe.Util.(
           scope |> member "effective_goal_ids" |> to_list |> List.length);
-      check string "effective goal id" keeper_goal.id
-        Yojson.Safe.Util.(
-          scope |> member "effective_goal_ids" |> to_list |> List.hd
-          |> to_string);
+      check_effective_goal_ids "effective goal ids" scope [ keeper_goal.id ];
       check bool "fallback reason absent" true
         Yojson.Safe.Util.(scope |> member "fallback_reason" |> json_is_null);
       check bool "product goal stayed unclaimed" true
@@ -671,10 +675,7 @@ let test_claim_stops_when_scoped_task_requires_missing_tool () =
       let scope = Yojson.Safe.Util.member "claim_scope" json in
       check string "claim scope mode" "active_goal_ids"
         Yojson.Safe.Util.(scope |> member "mode" |> to_string);
-      check string "effective goal id" scoped_goal.id
-        Yojson.Safe.Util.(
-          scope |> member "effective_goal_ids" |> to_list |> List.hd
-          |> to_string);
+      check_effective_goal_ids "effective goal ids" scope [ scoped_goal.id ];
       check bool "message names scoped active goals" true
         (contains_substring message "within active_goal_ids");
       check bool "message avoids fallback" false
@@ -729,10 +730,7 @@ let test_claim_stops_when_scoped_task_is_verification_blocked () =
       let scope = Yojson.Safe.Util.member "claim_scope" json in
       check string "claim scope mode" "active_goal_ids"
         Yojson.Safe.Util.(scope |> member "mode" |> to_string);
-      check string "effective goal id" scoped_goal.id
-        Yojson.Safe.Util.(
-          scope |> member "effective_goal_ids" |> to_list |> List.hd
-          |> to_string);
+      check_effective_goal_ids "effective goal ids" scope [ scoped_goal.id ];
       check bool "message names scoped active goals" true
         (contains_substring message "within active_goal_ids");
       check bool "message avoids fallback" false
@@ -786,10 +784,7 @@ let test_claim_no_eligible_persisted_scope_reports_scope_truth () =
     let scope = Yojson.Safe.Util.member "claim_scope" json in
     check string "claim scope mode" "active_goal_ids"
       Yojson.Safe.Util.(scope |> member "mode" |> to_string);
-    check string "effective goal id" scoped_goal.id
-      Yojson.Safe.Util.(
-        scope |> member "effective_goal_ids" |> to_list |> List.hd
-        |> to_string);
+    check_effective_goal_ids "effective goal ids" scope [ scoped_goal.id ];
     check bool "message names active scope" true
       (contains_substring message "within active_goal_ids");
     check bool "message avoids fallback search" false

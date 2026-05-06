@@ -29,6 +29,44 @@ let make_usage ?cost_usd ~input_tokens ~output_tokens ()
     cost_usd;
   }
 
+let make_meta name =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [
+          ("name", `String name);
+          ("agent_name", `String name);
+          ("trace_id", `String ("trace-" ^ name));
+          ("cascade_name", `String Masc_mcp.Keeper_config.default_cascade_name);
+          ("last_model_used", `String "test-model");
+        ])
+  with
+  | Ok meta -> meta
+  | Error err -> fail ("meta_of_json_fixture failed: " ^ err)
+
+let make_test_hooks keeper_name =
+  let config = Masc_mcp.Coord.default_config (temp_dir ()) in
+  let meta_ref = ref (make_meta keeper_name) in
+  Hooks.make_hooks ~config ~meta_ref ~generation:1 ()
+
+let lifecycle_callback_failure_count ~keeper ~callback =
+  Masc_mcp.Prometheus.metric_value_or_zero
+    Masc_mcp.Prometheus.metric_keeper_lifecycle_callback_failures
+    ~labels:[ ("keeper", keeper); ("callback", callback) ]
+    ()
+
+let require_hook label = function
+  | Some hook -> hook
+  | None -> failf "expected active hook: %s" label
+
+let check_continue label = function
+  | Agent_sdk.Hooks.Continue -> ()
+  | _ -> failf "%s: expected Continue" label
+
+let check_nudge label = function
+  | Agent_sdk.Hooks.Nudge _ -> ()
+  | _ -> failf "%s: expected Nudge" label
+
 let test_emit_cost_event_writes_inference_telemetry () =
   let root = temp_dir () in
   let telemetry : Agent_sdk.Types.inference_telemetry = {
@@ -697,6 +735,50 @@ let test_hook_introspection_reports_current_runtime_slots () =
   check bool "on_context_compacted inactive" false
     (slot json "on_context_compacted" |> member "active" |> to_bool)
 
+let test_on_error_hook_records_callback_failure_metric () =
+  let keeper = "callback-on-error-keeper" in
+  let hooks = make_test_hooks keeper in
+  let hook = require_hook "on_error" hooks.on_error in
+  let before =
+    lifecycle_callback_failure_count ~keeper ~callback:"on_error"
+  in
+  check_continue "on_error"
+    (hook
+       (Agent_sdk.Hooks.OnError
+          { detail = "provider failed"; context = "unit-test" }));
+  let after =
+    lifecycle_callback_failure_count ~keeper ~callback:"on_error"
+  in
+  check (float 0.001) "on_error counter increments" 1.0 (after -. before)
+
+let test_on_tool_error_hook_records_callback_failure_metric () =
+  let keeper = "callback-on-tool-error-keeper" in
+  let hooks = make_test_hooks keeper in
+  let hook = require_hook "on_tool_error" hooks.on_tool_error in
+  let before =
+    lifecycle_callback_failure_count ~keeper ~callback:"on_tool_error"
+  in
+  check_continue "on_tool_error"
+    (hook
+       (Agent_sdk.Hooks.OnToolError
+          { tool_name = "keeper_bash"; error = "tool failed" }));
+  let after =
+    lifecycle_callback_failure_count ~keeper ~callback:"on_tool_error"
+  in
+  check (float 0.001) "on_tool_error counter increments" 1.0
+    (after -. before)
+
+let test_on_idle_hook_returns_runtime_nudge () =
+  let hooks = make_test_hooks "callback-on-idle-keeper" in
+  let hook = require_hook "on_idle" hooks.on_idle in
+  check_nudge "on_idle"
+    (hook
+       (Agent_sdk.Hooks.OnIdle
+          {
+            consecutive_idle_turns = 1;
+            tool_names = [ "keeper_bash" ];
+          }))
+
 let pr_review_event ~tool_name ~input ~output_text =
   Hooks.For_testing.pr_review_action_metric_event_of_tool_io
     ~tool_name ~input ~output_text ~transport_success:true
@@ -969,6 +1051,12 @@ let () =
     ; ( "hook_introspection",
         [ test_case "reports current runtime slots" `Quick
             test_hook_introspection_reports_current_runtime_slots
+        ; test_case "on_error records callback metric" `Quick
+            test_on_error_hook_records_callback_failure_metric
+        ; test_case "on_tool_error records callback metric" `Quick
+            test_on_tool_error_hook_records_callback_failure_metric
+        ; test_case "on_idle returns runtime nudge" `Quick
+            test_on_idle_hook_returns_runtime_nudge
         ] )
     ; ( "pr_review_action",
         [ test_case "extracts approve event from structured output" `Quick

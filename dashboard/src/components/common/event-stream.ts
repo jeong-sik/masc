@@ -47,6 +47,8 @@ interface EventStreamProps {
   testId?: string
 }
 
+export const DEFAULT_TEMPORAL_SYNC_WINDOW_MS = 5000
+
 function levelColor(level: string): string {
   return level === 'error'
     ? 'var(--color-status-err)'
@@ -176,10 +178,14 @@ export function buildTemporalSyncRows(
 export function summarizeEventStream(
   events: StreamEvent[],
   maxItems: number,
-  temporalSyncWindowMs = 5000,
+  temporalSyncWindowMs = DEFAULT_TEMPORAL_SYNC_WINDOW_MS,
 ): EventStreamSummary {
   const visible = getVisibleStreamEvents(events, maxItems)
   const syncRows = buildTemporalSyncRows(visible, temporalSyncWindowMs)
+  const latestTimestamp = visible.length > 0 ? finiteTimestamp(visible[0]!.timestamp) : null
+  const oldestVisibleTimestamp = visible.length > 0
+    ? finiteTimestamp(visible[visible.length - 1]!.timestamp)
+    : null
   const infoCount = visible.filter(e => e.level === 'info').length
   const warnCount = visible.filter(e => e.level === 'warn').length
   const errorCount = visible.filter(e => e.level === 'error').length
@@ -208,8 +214,8 @@ export function summarizeEventStream(
     infoCount,
     warnCount,
     errorCount,
-    latestTimestamp: visible[0]?.timestamp ?? null,
-    oldestVisibleTimestamp: visible[visible.length - 1]?.timestamp ?? null,
+    latestTimestamp,
+    oldestVisibleTimestamp,
     temporalSyncGroupCount: syncedGroups.size,
     maxTemporalSyncGroupSize: syncRows.reduce((max, row) => Math.max(max, row.syncGroupSize), 0),
     highAttractionCount,
@@ -231,7 +237,7 @@ function attractionRowClass(band: EventStreamAttractionBand, isSynced: boolean):
 export function EventStream({
   events,
   maxItems = 100,
-  temporalSyncWindowMs = 5000,
+  temporalSyncWindowMs = DEFAULT_TEMPORAL_SYNC_WINDOW_MS,
   testId,
 }: EventStreamProps) {
   const visible = useMemo(() => getVisibleStreamEvents(events, maxItems), [events, maxItems])
@@ -297,6 +303,7 @@ export function EventStream({
                 (row, index) => {
                   const e = row.event
                   const isSynced = row.syncGroupSize > 1
+                  const eventTimestamp = finiteTimestamp(e.timestamp)
                   const attractionScore = streamEventAttractionScore(row, index, syncRows.length)
                   const attractionBand = streamEventAttractionBand(attractionScore)
                   return html`
@@ -307,7 +314,7 @@ export function EventStream({
                     data-stream-event-id=${e.id}
                     data-stream-event-level=${e.level}
                     data-stream-event-source=${e.source ?? ''}
-                    data-stream-event-timestamp=${e.timestamp}
+                    data-stream-event-timestamp=${eventTimestamp ?? ''}
                     data-stream-event-visible-index=${index}
                     data-stream-event-sync-group=${row.syncGroupId}
                     data-stream-event-sync-size=${row.syncGroupSize}
@@ -333,7 +340,10 @@ export function EventStream({
                         >`
                       : null}
                     ${isSynced
-                      ? html`<span class="shrink-0 rounded-[var(--r-0)] border border-[var(--color-border-default)] px-1 font-mono text-3xs text-[var(--color-fg-muted)]">sync ${row.syncGroupSize}</span>`
+                      ? html`<span
+                          class="shrink-0 rounded-[var(--r-0)] border border-[var(--color-border-default)] px-1 font-mono text-3xs text-[var(--color-fg-muted)]"
+                          aria-hidden="true"
+                        >sync ${row.syncGroupSize}</span>`
                       : null}
                     <span class="min-w-0 flex-1 break-words text-xs text-[var(--color-fg-primary)]"
                       >${e.message}</span

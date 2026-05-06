@@ -3,6 +3,7 @@ import { h } from 'preact'
 import { render } from 'preact'
 import {
   buildTemporalSyncRows,
+  DEFAULT_TEMPORAL_SYNC_WINDOW_MS,
   EventStream,
   getVisibleStreamEvents,
   summarizeEventStream,
@@ -125,7 +126,7 @@ describe('EventStream', () => {
     expect(root.dataset.eventStreamWarnCount).toBe('1')
     expect(root.dataset.eventStreamErrorCount).toBe('1')
     expect(root.dataset.eventStreamLatestTimestamp).toBe(String(latest.timestamp))
-    expect(root.dataset.eventStreamTemporalSyncWindowMs).toBe('5000')
+    expect(root.dataset.eventStreamTemporalSyncWindowMs).toBe(String(DEFAULT_TEMPORAL_SYNC_WINDOW_MS))
     expect(root.dataset.eventStreamTemporalSyncGroupCount).toBe('0')
     expect(root.dataset.eventStreamMaxTemporalSyncGroupSize).toBe('1')
     expect(root.dataset.eventStreamHighAttractionCount).toBe('1')
@@ -167,6 +168,25 @@ describe('EventStream', () => {
       hiddenCount: 1,
       status: 'error',
     })
+  })
+
+  it('omits non-finite timestamps from summary and row metadata', () => {
+    const invalidEvents = [
+      { id: 'bad-1', timestamp: Number.NaN, level: 'info' as const, message: 'bad latest' },
+      { id: 'bad-2', timestamp: Number.POSITIVE_INFINITY, level: 'warn' as const, message: 'bad oldest' },
+    ]
+    const container = document.createElement('div')
+    render(h(EventStream, { events: invalidEvents }), container)
+    const root = container.querySelector('[data-event-stream]') as HTMLElement
+    const latest = container.querySelector('[data-stream-event-id="bad-2"]') as HTMLElement
+
+    expect(summarizeEventStream(invalidEvents, 100)).toMatchObject({
+      latestTimestamp: null,
+      oldestVisibleTimestamp: null,
+    })
+    expect(root.dataset.eventStreamLatestTimestamp).toBe('')
+    expect(root.dataset.eventStreamOldestVisibleTimestamp).toBe('')
+    expect(latest.dataset.streamEventTimestamp).toBe('')
   })
 
   it('groups visible events by anchor timestamp inside the temporal synchronization window', () => {
@@ -213,6 +233,9 @@ describe('EventStream', () => {
     expect(neighbor.dataset.streamEventSyncSize).toBe('2')
     expect(older.dataset.streamEventSyncSize).toBe('1')
     expect(container.textContent).toContain('sync 2')
+    const syncBadge = Array.from(container.querySelectorAll('span'))
+      .find(el => el.textContent === 'sync 2') as HTMLElement | undefined
+    expect(syncBadge?.getAttribute('aria-hidden')).toBe('true')
   })
 
   it('renders gradient attraction metadata on event rows', () => {

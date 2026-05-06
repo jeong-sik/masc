@@ -2,7 +2,13 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
-import { StatusChip, statusChipClasses, isSemanticTone, keeperStateTone } from './status-chip'
+import {
+  StatusChip,
+  statusChipClasses,
+  isSemanticTone,
+  keeperStateTone,
+  summarizeStatusChip,
+} from './status-chip'
 
 describe('isSemanticTone (pure)', () => {
   it('accepts the 8 enum members', () => {
@@ -145,26 +151,47 @@ describe('StatusChip component', () => {
     const el = container.querySelector('[data-status-chip]')!
     expect(el.tagName).toBe('SPAN')
     expect(el.textContent).toBe('approved')
+    expect(el.getAttribute('data-status-chip-content-source')).toBe('children')
+    expect(el.getAttribute('data-status-chip-is-semantic-tone')).toBe('true')
   })
 
   it('label prop renders when children absent (legacy API)', () => {
     render(html`<${StatusChip} label="present" />`, container)
-    expect(container.querySelector('[data-status-chip]')!.textContent).toBe('present')
+    const el = container.querySelector('[data-status-chip]')!
+    expect(el.textContent).toBe('present')
+    expect(el.getAttribute('data-status-chip-content-source')).toBe('label')
+    expect(el.getAttribute('data-status-chip-label-length')).toBe('7')
   })
 
   it('children win over label when both are set', () => {
     render(html`<${StatusChip} label="legacy">actual<//>`, container)
-    expect(container.querySelector('[data-status-chip]')!.textContent).toBe('actual')
+    const el = container.querySelector('[data-status-chip]')!
+    expect(el.textContent).toBe('actual')
+    expect(el.getAttribute('data-status-chip-content-source')).toBe('children')
+    expect(el.getAttribute('data-status-chip-label-length')).toBe('6')
   })
 
   it('data-status-chip-tone reflects tone prop', () => {
     render(html`<${StatusChip} tone="warn">heads up<//>`, container)
     expect(container.querySelector('[data-status-chip]')!.getAttribute('data-status-chip-tone')).toBe('warn')
+    expect(container.querySelector('[data-status-chip]')!.getAttribute('data-status-chip-is-semantic-tone')).toBe('true')
+  })
+
+  it('raw tone strings reflect non-semantic metadata', () => {
+    render(html`<${StatusChip} tone="bg-[var(--accent-12)]">custom<//>`, container)
+    const el = container.querySelector('[data-status-chip]')!
+    expect(el.getAttribute('data-status-chip-tone')).toBe('bg-[var(--accent-12)]')
+    expect(el.getAttribute('data-status-chip-is-semantic-tone')).toBe('false')
   })
 
   it('testId renders as data-testid', () => {
-    render(html`<${StatusChip} testId="approve-chip">ok<//>`, container)
-    expect(container.querySelector('[data-testid="approve-chip"]')).toBeTruthy()
+    render(html`<${StatusChip} class="ml-2" testId="approve-chip">ok<//>`, container)
+    const el = container.querySelector('[data-testid="approve-chip"]')!
+    expect(el).toBeTruthy()
+    expect(el.getAttribute('data-status-chip-has-custom-class')).toBe('true')
+    expect(el.getAttribute('data-status-chip-has-test-id')).toBe('true')
+    expect(el.getAttribute('data-status-chip-class-length')).toBe('4')
+    expect(el.getAttribute('data-status-chip-test-id-length')).toBe('12')
   })
 
   it('uppercase prop reflects on data-status-chip-uppercase (default true)', () => {
@@ -174,5 +201,46 @@ describe('StatusChip component', () => {
     render(null, container)
     render(html`<${StatusChip} uppercase=${false} tone="neutral">path.kind<//>`, container)
     expect(container.querySelector('[data-status-chip]')!.getAttribute('data-status-chip-uppercase')).toBe('false')
+  })
+
+  it('summarizes default status chip state', () => {
+    expect(summarizeStatusChip({})).toEqual({
+      tone: '',
+      isSemanticTone: true,
+      contentSource: 'empty',
+      uppercase: true,
+      hasCustomClass: false,
+      hasTestId: false,
+      labelLength: 0,
+      classNameLength: 0,
+      testIdLength: 0,
+    })
+  })
+
+  it('summarizes raw-tone label status chip state', () => {
+    expect(summarizeStatusChip({
+      label: 'custom',
+      tone: 'bg-[var(--accent-12)]',
+      className: 'ml-2',
+      uppercase: false,
+      testId: 'custom-chip',
+    })).toEqual({
+      tone: 'bg-[var(--accent-12)]',
+      isSemanticTone: false,
+      contentSource: 'label',
+      uppercase: false,
+      hasCustomClass: true,
+      hasTestId: true,
+      labelLength: 6,
+      classNameLength: 4,
+      testIdLength: 11,
+    })
+  })
+
+  it('summarizes children content as taking precedence over label', () => {
+    expect(summarizeStatusChip({
+      label: 'legacy',
+      children: 'actual',
+    }).contentSource).toBe('children')
   })
 })

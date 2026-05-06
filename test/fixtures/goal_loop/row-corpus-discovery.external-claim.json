@@ -382,6 +382,33 @@
         "goal-loop-206-audit-external-claim-2026-05-05"
       ],
       "note": "Remote GitHub comments, issue search, fetched refs/tags, narrowly matching non-expired Actions artifacts, release assets, and top-level contents were checked. They produced only the existing open tracking issue, known fixture/test/doc/script markers, one unrelated health snapshot artifact, standard release assets, and an unrelated exec-corpus placeholder."
+    },
+    {
+      "artifact_name": "codex_local_history_strict_corpus_marker_sweep",
+      "artifact_kind": "local_history_marker_search_report",
+      "result": "NOT_ROW_CORPUS",
+      "observed_history_files_checked": 9,
+      "observed_session_files_checked": 8,
+      "observed_log_files_checked": 1,
+      "observed_exact_marker_files": 9,
+      "observed_independent_corpus_files": 0,
+      "observed_high_volume_session_files_reviewed": 2,
+      "observed_marker_contexts": [
+        "generated_fixture_diffs",
+        "completion_audit_status_snapshots",
+        "strict_row_contract_tests",
+        "pr_review_comments",
+        "negative_search_transcripts"
+      ],
+      "markers_checked": [
+        "source_catalog_id",
+        "corpus_id",
+        "expected_findings_total",
+        "strict_row",
+        "strict-row",
+        "goal-loop-206-audit-external-claim-2026-05-05"
+      ],
+      "note": "Local Codex session and TUI log history containing exact strict-corpus markers was reviewed by category. Hits were self-referential transcripts from #13266/#13577 tooling, generated fixtures, status snapshots, synthetic contract tests, review comments, and negative searches; no independent strict 206-row corpus artifact was present."
     }
   ],
   "broader_structured_id_triage": {

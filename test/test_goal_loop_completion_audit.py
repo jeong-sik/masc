@@ -497,6 +497,21 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
             remote_sweeps[0]["repo_contents_search"]["audits_entries_checked"],
             ["audits/local-exec-core-inventory.md"],
         )
+        codex_history_sweeps = [
+            artifact
+            for artifact in discovery["candidate_artifacts_checked"]
+            if artifact["artifact_name"]
+            == "codex_local_history_strict_corpus_marker_sweep"
+        ]
+        self.assertEqual(len(codex_history_sweeps), 1)
+        self.assertEqual(
+            codex_history_sweeps[0]["observed_history_files_checked"],
+            9,
+        )
+        self.assertEqual(
+            codex_history_sweeps[0]["observed_independent_corpus_files"],
+            0,
+        )
         workspace_sweeps = [
             artifact
             for artifact in discovery["candidate_artifacts_checked"]

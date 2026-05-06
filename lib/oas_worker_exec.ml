@@ -41,6 +41,7 @@ type config =
   max_turns : int;
   max_idle_turns : int;
   stream_idle_timeout_s : float option;
+  max_execution_time_s : float option;
   max_tokens : int;
   max_input_tokens : int option;
   max_cost_usd : float option;
@@ -422,9 +423,19 @@ let run
         let cr = Agent_sdk.Contract_runner.run ~sw ~contract:c agent goal in
         (cr.response, Some cr.proof)
       | None ->
+        (* Pass the process-level Eio clock when available so agent_sdk's
+           [with_optional_timeout] can fire on hang when the caller has
+           also set [config.max_execution_time_s]. Both inputs must be
+           [Some] for the timeout to engage; absent either, behaviour is
+           historical (block until provider closes). *)
+        let clock =
+          match Process_eio.get_clock () with
+          | Ok c -> Some c
+          | Error _ -> None
+        in
         let r = match on_event with
-          | Some cb -> Agent_sdk.Agent.run_stream ~sw ?on_yield ?on_resume ~on_event:cb agent goal
-          | None -> Agent_sdk.Agent.run ~sw ?on_yield ?on_resume agent goal
+          | Some cb -> Agent_sdk.Agent.run_stream ~sw ?clock ?on_yield ?on_resume ~on_event:cb agent goal
+          | None -> Agent_sdk.Agent.run ~sw ?clock ?on_yield ?on_resume agent goal
         in
         (r, None)
     in

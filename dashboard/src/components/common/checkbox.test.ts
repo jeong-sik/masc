@@ -59,7 +59,7 @@ describe('summarizeCheckbox', () => {
       idLength: 6,
       hasName: true,
       nameLength: 10,
-      a11yHook: 'aria-label',
+      a11yHook: 'aria-labelledby',
       hasAriaLabel: true,
       ariaLabelLength: 12,
       hasAriaLabelledby: true,
@@ -74,6 +74,9 @@ describe('summarizeCheckbox', () => {
   })
 
   it('falls back to aria-labelledby and id as a11y hooks', () => {
+    expect(
+      summarizeCheckbox({ ariaLabel: 'Label', ariaLabelledby: 'label-id' }).a11yHook,
+    ).toBe('aria-labelledby')
     expect(summarizeCheckbox({ ariaLabelledby: 'label-id' }).a11yHook).toBe('aria-labelledby')
     expect(summarizeCheckbox({ id: 'field-id' }).a11yHook).toBe('id')
   })

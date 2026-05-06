@@ -89,8 +89,8 @@ function a11yHook({
   ariaLabel?: string
   ariaLabelledby?: string
 }): CheckboxA11yHook {
-  if (hasNonEmptyString(ariaLabel)) return 'aria-label'
   if (hasNonEmptyString(ariaLabelledby)) return 'aria-labelledby'
+  if (hasNonEmptyString(ariaLabel)) return 'aria-label'
   if (hasNonEmptyString(id)) return 'id'
   return 'none'
 }
@@ -158,7 +158,9 @@ export function Checkbox({
     onChange,
     onClick,
   })
-  const handleChange = (e: Event) => { onChange?.((e.target as HTMLInputElement).checked) }
+  const handleChange = onChange === undefined
+    ? undefined
+    : (e: Event) => { onChange((e.target as HTMLInputElement).checked) }
   return html`
     <input
       type="checkbox"

@@ -114,6 +114,12 @@ let test_caller_wins_cycle_disk_wins_heartbeat () =
     let cycle_payload =
       { caller_view with goal = "cycle done" }
     in
+    let before_retry_metric =
+      Prometheus.metric_value_or_zero
+        Prometheus.metric_write_meta_cas_retry_total
+        ~labels:[("keeper_name", name)]
+        ()
+    in
     (match
        Keeper_types.write_meta_with_merge
          ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
@@ -121,6 +127,12 @@ let test_caller_wins_cycle_disk_wins_heartbeat () =
      with
      | Ok () -> ()
      | Error e -> fail ("merged retry failed: " ^ e));
+    let after_retry_metric =
+      Prometheus.metric_value_or_zero
+        Prometheus.metric_write_meta_cas_retry_total
+        ~labels:[("keeper_name", name)]
+        ()
+    in
     let final = match Keeper_types.read_meta config name with
       | Ok (Some m) -> m
       | _ -> fail "final read failed"
@@ -130,7 +142,9 @@ let test_caller_wins_cycle_disk_wins_heartbeat () =
       "disk wins: joined_room_ids preserved heartbeat update"
       ["r1"; "r2"] final.joined_room_ids;
     check bool "version moved past heartbeat write" true
-      (final.meta_version > heartbeat_payload.meta_version))
+      (final.meta_version > heartbeat_payload.meta_version);
+    check (float 0.001) "CAS retry metric increments for merge" 1.0
+      (after_retry_metric -. before_retry_metric))
 
 (* Sanity: when no concurrent writer interferes, the merge function
    is never called and behaviour matches plain

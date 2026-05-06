@@ -278,6 +278,7 @@ val metric_keeper_heartbeat_failures : string
 val metric_keeper_cleanup_tracking_failures : string
 val metric_keeper_tool_call_duration : string
 val metric_keeper_write_meta_failures : string
+val metric_write_meta_cas_retry_total : string
 val metric_keeper_meta_read_failures : string
 val metric_keeper_approval_queue_failures : string
 val metric_keeper_guards_failures : string

@@ -548,6 +548,8 @@ let metric_keeper_tool_call_duration =
   "masc_keeper_tool_call_duration_seconds"
 let metric_keeper_write_meta_failures =
   "masc_keeper_write_meta_failures_total"
+let metric_write_meta_cas_retry_total =
+  "masc_write_meta_cas_retry_total"
 let metric_keeper_meta_read_failures =
   "masc_keeper_meta_read_failures_total"
 let metric_keeper_approval_queue_failures =
@@ -1642,6 +1644,9 @@ let init () =
      first observation. *)
   add metric_keeper_write_meta_failures
     "Total keeper meta-file write failures, labeled by keeper and phase"
+    Counter;
+  add metric_write_meta_cas_retry_total
+    "Total keeper meta write CAS retries, labeled by keeper_name"
     Counter;
   add metric_keeper_meta_read_failures
     "Total keeper meta-file read/parse failures, labeled by keeper and site"

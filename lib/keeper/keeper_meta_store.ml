@@ -383,6 +383,10 @@ let write_meta_with_retry ?(max_retries = 3) config (m : keeper_meta)
            Prometheus.metric_keeper_write_meta_failures
            ~labels:[("keeper", m.name); ("phase", "cas_retry")]
            ();
+         Prometheus.inc_counter
+           Prometheus.metric_write_meta_cas_retry_total
+           ~labels:[("keeper_name", m.name)]
+           ();
          Log.Keeper.warn
            "write_meta CAS retry %d/%d for %s (caller had %d, disk %d)"
            (n + 1)
@@ -424,6 +428,10 @@ let write_meta_with_merge
          Prometheus.inc_counter
            Prometheus.metric_keeper_write_meta_failures
            ~labels:[("keeper", caller.name); ("phase", "cas_retry_merge")]
+           ();
+         Prometheus.inc_counter
+           Prometheus.metric_write_meta_cas_retry_total
+           ~labels:[("keeper_name", caller.name)]
            ();
          Log.Keeper.warn
            "write_meta CAS retry %d/%d for %s (caller had %d, disk %d; field-level merge)"

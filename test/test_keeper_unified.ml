@@ -2547,6 +2547,36 @@ let test_metrics_text_response () =
   check int "input tokens" (minimal_meta.runtime.usage.total_input_tokens + 100) updated.runtime.usage.total_input_tokens;
   check int "output tokens" (minimal_meta.runtime.usage.total_output_tokens + 50) updated.runtime.usage.total_output_tokens
 
+let test_metrics_idle_seconds_gauge_records_observation () =
+  let idle_seconds = 19_006 in
+  let result =
+    make_run_result ~text:"I checked the board." ~tools:[]
+      ~model:"test-model" ~input_tok:100 ~output_tok:50 ()
+  in
+  let observation = { base_observation with idle_seconds = idle_seconds } in
+  ignore
+    (UM.update_metrics_from_result minimal_meta ~latency_ms:200
+       ~observation result);
+  check (option (float 0.001)) "success idle seconds gauge"
+    (Some (float_of_int idle_seconds))
+    (Masc_mcp.Prometheus.get_metric_value
+       Masc_mcp.Prometheus.metric_keeper_idle_seconds
+       ~labels:[ ("keeper_name", minimal_meta.name) ]
+       ());
+  let failure_idle_seconds = idle_seconds + 1 in
+  let failure_observation =
+    { base_observation with idle_seconds = failure_idle_seconds }
+  in
+  ignore
+    (UM.update_metrics_from_failure minimal_meta ~latency_ms:100
+       ~observation:failure_observation ~reason:"synthetic failure" ());
+  check (option (float 0.001)) "failure idle seconds gauge"
+    (Some (float_of_int failure_idle_seconds))
+    (Masc_mcp.Prometheus.get_metric_value
+       Masc_mcp.Prometheus.metric_keeper_idle_seconds
+       ~labels:[ ("keeper_name", minimal_meta.name) ]
+       ())
+
 let test_metrics_surface_model_prefers_successful_cascade_label () =
   let selected_label = "llama:qwen3.5-3b-a3b-ud-q8-xl" in
   let result =
@@ -8049,6 +8079,8 @@ let () =
           test_case "prompt metrics fingerprint" `Quick
             test_prompt_metrics_fingerprint_is_deterministic;
           test_case "text response" `Quick test_metrics_text_response;
+          test_case "idle seconds gauge records observation" `Quick
+            test_metrics_idle_seconds_gauge_records_observation;
           test_case "surface model prefers successful cascade label" `Quick
             test_metrics_surface_model_prefers_successful_cascade_label;
           test_case "resolved_model_id prefers last attempt id (#9953)"

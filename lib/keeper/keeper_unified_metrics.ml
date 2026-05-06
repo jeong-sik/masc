@@ -285,6 +285,12 @@ let record_keeper_total_cost_usd ~keeper_name ~total_cost_usd =
     ~labels
     total_cost_usd
 
+let record_keeper_idle_seconds ~keeper_name ~idle_seconds =
+  Prometheus.set_gauge
+    Prometheus.metric_keeper_idle_seconds
+    ~labels:[ ("keeper_name", keeper_name) ]
+    (float_of_int (max 0 idle_seconds))
+
 let turn_mode_to_string = function
   | Tool_use -> "tool_use"
   | Text_response -> "text_response"
@@ -1069,6 +1075,9 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
      turn. Other [classify_usage_trust] call sites serialize the
      trust into JSONL but do not bump the counter. *)
   record_usage_trust ~keeper_name:meta.name ~trust:usage_trust;
+  record_keeper_idle_seconds
+    ~keeper_name:meta.name
+    ~idle_seconds:observation.idle_seconds;
   let usage_trusted = usage_trust_is_trusted usage_trust in
   let trusted_input_tokens =
     if usage_trusted then result.usage.input_tokens else 0
@@ -1590,6 +1599,9 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
   ignore is_transient; (* Param retained for caller compatibility; no longer
                           used internally after zombie-fix #5594. *)
   let now_ts = Time_compat.now () in
+  record_keeper_idle_seconds
+    ~keeper_name:meta.name
+    ~idle_seconds:observation.idle_seconds;
   let is_scheduled_autonomous_cycle =
     is_scheduled_autonomous_cycle_of_observation observation
   in

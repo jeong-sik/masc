@@ -1,6 +1,13 @@
 # Changelog
 
 
+## [0.19.12] - 2026-05-06
+
+### Added
+- `lib/cognitive_gravity.ml(.mli)`: pure OCaml Semantic Gravity ranker covering Master Report Dim01 P0 #5. Combines keyword overlap (Jaccard, case-insensitive), exponential recency decay (τ = 1 day), and a clamped frequency weight into a deterministic ranking. No I/O, no Eio, no dashboard or oas surface change. RFC-0035 PR-1.
+- `docs/rfc/RFC-0035-cognitive-ide-roadmap.md`: integration manifest mapping the 11 cognitive-IDE dimensions in the Master Report to existing modules and in-flight PRs (#13768, #13773, #13779, #13781). Future PRs in those modules must cite this RFC.
+- `test/test_cognitive_gravity.ml`: 7 unit tests covering empty input, single-item, ordering by overlap, zero-weight component pruning, recency decay (including negative-recency clamp), frequency clamp at 1.0, and case-insensitive keyword matching.
+
 ## [0.19.11] - 2026-05-06
 
 ### Added

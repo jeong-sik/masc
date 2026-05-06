@@ -77,9 +77,9 @@ let () =
   assert_contains
     ~label:"cleanup helper exists"
     src
-    "let close_agent_for_cleanup ~config agent =";
+    "let close_agent_for_cleanup ?(propagate_cancel = true) ~config agent =";
   assert_contains
-    ~label:"cleanup helper swallows cleanup cancellation"
+    ~label:"cleanup helper handles cleanup cancellation"
     src
     "agent close cancelled during cleanup";
   assert_contains
@@ -91,7 +91,7 @@ let () =
     src
     [
       "Eio.Cancel.Cancelled _ as exn";
-      "close_agent_for_cleanup ~config agent";
+      "close_agent_for_cleanup ~propagate_cancel:false ~config agent";
       "raise exn";
     ];
   assert_ordered_contains

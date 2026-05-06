@@ -774,8 +774,15 @@ review_target_for_keeper() {
   ' "$REVIEW_TARGETS_FILE" | head -n 1
 }
 
+proof_branch_for_keeper() {
+  local keeper="$1"
+  printf 'keeper-%s-agent/%s' "$keeper" "$RUN_ID"
+}
+
 prompt_for_keeper_create() {
   local keeper="$1"
+  local branch
+  branch="$(proof_branch_for_keeper "$keeper")"
   cat <<EOF
 Docker PR lifecycle proof run: $RUN_ID
 Phase: create
@@ -796,21 +803,22 @@ Tool route rules:
 Required create lane:
 1. Confirm your runtime is sandbox_profile=docker before mutating.
 2. Create a unique proof worktree/branch for exactly this run id:
-   - branch: keeper/$keeper-docker-pr-proof-$RUN_ID
-   - preferred tool: masc_worktree_create
+   - branch: $branch
+   - preferred tool: masc_worktree_create with task_id=$RUN_ID
    - use the returned worktree path for every later keeper_bash git/file command.
+   - the returned branch must be $branch. If it is different, stop and report blocker="branch_mismatch".
    - Do not reuse any branch, worktree, or proof file from another run id.
    - Do not remove this run's worktree during the proof attempt. If Git says
      the branch/worktree already exists, stop and report blocker="branch_collision".
-3. Make a minimal, non-product proof edit under docs/runtime-proof/keepers/$keeper-$RUN_ID.md with keeper_bash from inside the Docker playground. The file content must include run_id=$RUN_ID and branch=keeper/$keeper-docker-pr-proof-$RUN_ID.
-4. Commit and git push exactly branch keeper/$keeper-docker-pr-proof-$RUN_ID with keeper_bash. The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
+3. Make a minimal, non-product proof edit under docs/runtime-proof/keepers/$keeper-$RUN_ID.md with keeper_bash from inside the Docker playground. The file content must include run_id=$RUN_ID and branch=$branch.
+4. Commit and git push exactly branch $branch with keeper_bash. The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
 5. Create a draft PR for that branch with keeper_pr_create. Do not mark ready, do not merge, do not add human-approved-ready.
 6. Reply with one compact JSON object:
    {
      "run_id": "$RUN_ID",
      "phase": "create",
      "keeper": "$keeper",
-     "branch": "keeper/$keeper-docker-pr-proof-$RUN_ID",
+     "branch": "$branch",
      "pr_url": "...",
      "docker_pr_create": true,
      "docker_git_push": true,
@@ -838,7 +846,7 @@ prompt_for_keeper_review() {
   local review_branch_json="null"
   local review_instruction=""
   if [[ -n "$review_target" ]]; then
-    review_branch="keeper/$review_target-docker-pr-proof-$RUN_ID"
+    review_branch="$(proof_branch_for_keeper "$review_target")"
     review_target_json="\"$review_target\""
     review_branch_json="\"$review_branch\""
     review_instruction="$(cat <<EOF

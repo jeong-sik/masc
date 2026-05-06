@@ -53,12 +53,15 @@ keeper's missing PR until the Agent.run timeout. The review prompt reserves
 `required_tools` because passive read-only tools cannot satisfy the runtime
 required-tool predicate. Keepers are instructed to report `target_pr_missing`
 after one failed branch lookup instead of polling in a loop.
-Keepers must create/use the exact run-scoped branch
-`keeper/<keeper>-docker-pr-proof-<run_id>` and proof file
+Keepers must create/use the exact run-scoped branch produced by
+`masc_worktree_create task_id=<run_id>`:
+`keeper-<keeper>-agent/<run_id>`. They must write the proof file
 `docs/runtime-proof/keepers/<keeper>-<run_id>.md`; older proof branches or
-worktrees do not count. Proof-file creation and git add/commit/push should use
-`keeper_bash` from inside the Docker playground so the route evidence is tied to
-the keeper container path. If the shell guard rejects the git mutation, the
+worktrees do not count. This branch convention matches the runtime worktree
+tool contract (`{agent_name}/{task_id}`) while still keeping stale evidence
+out via the run id. Proof-file creation and git add/commit/push should use
+`keeper_bash` from inside the Docker playground so the route evidence is tied
+to the keeper container path. If the shell guard rejects the git mutation, the
 keeper must stop and report that blocker instead of falling back to host-local
 credentials.
 PR create/review mutations should use `keeper_pr_create` /

@@ -679,6 +679,57 @@ let rec add_routes ~sw ~clock router =
          let json = dashboard_planning_http_json ~config:state.Mcp_server.room_config in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/bootstrap" (fun request reqd ->
+       (* Cold-start bootstrap: returns the initial snapshot of multiple
+          dashboard slices in one round trip so the frontend does not fan
+          out into N parallel HTTP calls under Executor_pool contention.
+
+          Milestone 1 — shell + execution + planning only.  Slices are
+          computed sequentially since each SSOT helper chooses
+          inline-shared vs offloaded-readonly internally; parallel fanout
+          via [Eio.Fiber.all] is a milestone-2 follow-up if cold-start
+          wall time still dominates.  Per-slice exceptions are captured
+          and returned as [{"error": "..."}] under the slice key so a
+          single slow/broken slice does not 500 the whole call. *)
+       with_public_read (fun state req reqd ->
+         let slice name f =
+           try (name, f ())
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
+             Log.Server.warn
+               "[dashboard-bootstrap] slice %s failed: %s"
+               name (Printexc.to_string exn);
+             (name, `Assoc [ ("error", `String (Printexc.to_string exn)) ])
+         in
+         let shell =
+           slice "shell" (fun () ->
+             dashboard_shell_http_json
+               ?clock:state.Mcp_server.clock
+               ~request:req ~light:true
+               state.Mcp_server.room_config)
+         in
+         let execution =
+           slice "execution" (fun () ->
+             dashboard_execution_http_json ~state ~sw ~clock req)
+         in
+         let planning =
+           slice "planning" (fun () ->
+             dashboard_planning_http_json
+               ~config:state.Mcp_server.room_config)
+         in
+         let json =
+           `Assoc
+             [ ("served_at", `String (Masc_domain.now_iso ()))
+             ; ("milestone", `Int 1)
+             ; shell
+             ; execution
+             ; planning
+             ]
+         in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/goals" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = dashboard_goals_tree_http_json ~config:state.Mcp_server.room_config in

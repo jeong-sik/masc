@@ -339,6 +339,11 @@ let rec add_routes ~sw ~clock router =
          in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/branches" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = Dashboard_branches.json ~config:state.Mcp_server.room_config in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
   (* Dev-only shared bearer for the dashboard UI. Served exclusively when the
      server binds to loopback and strict-auth env overrides are disabled, so
      that a LAN deployment never hands out a token over the wire. The token is

@@ -7,6 +7,8 @@
 MASC v2는 Git Worktree를 활용한 에이전트 격리와 `gh` CLI 기반 PR 워크플로우를 통해
 다중 AI 에이전트가 동일 코드베이스에서 충돌 없이 협업할 수 있게 합니다.
 
+**Current runtime status (2026-05):** mainline server bootstrap is filesystem-only. `MASC_STORAGE_TYPE` is forced to `filesystem`, and retired PostgreSQL envs are ignored by runtime bootstrap. Redis/PostgreSQL storage modes are not operator targets.
+
 ### Design Principles (MAGI 삼두 합의)
 
 | Principle | Origin | Rationale |
@@ -43,24 +45,17 @@ project-root/
 └── src/                           # Main codebase
 ```
 
-### Cluster & Distributed Mode
+### Storage Mode
 
-MASC supports three coordination modes:
+Current MASC runtime supports one storage mode: local filesystem under `.masc/`.
 
 ```
-┌──────────────────────────────────────────────────────────────────────────────────────┐
-│  FS Mode (Local)          Redis Mode (Distributed)    PostgreSQL Mode (Recommended) │
-├──────────────────────────────────────────────────────────────────────────────────────┤
-│  Machine A:               Machine A + B + C:          Machine A + B + C:             │
-│  ┌───────────────┐        ┌───────────────┐           ┌───────────────┐              │
-│  │ Claude ─┐     │        │ Claude ─────┐ │           │ Claude ─────┐ │              │
-│  │ Gemini ─┼ .masc/       │ Gemini ─────┼─┼→ Redis    │ Gemini ─────┼─┼→ PostgreSQL │
-│  │ Codex ──┘     │        │ Codex ──────┘ │           │ Codex ──────┘ │   (Railway)  │
-│  └───────────────┘        └───────────────┘           └───────────────┘              │
-│                                                                                      │
-│  Same FS = Same Room      Same Redis + Cluster        Same PG + Cluster = Same Room │
-│  (blocking OK)            (Lwt blocking issues)       (Eio native, non-blocking) ✓  │
-└──────────────────────────────────────────────────────────────────────────────────────┘
+Machine A:
+┌───────────────┐
+│ Claude ─┐     │
+│ Gemini ─┼ .masc/
+│ Codex ──┘     │
+└───────────────┘
 ```
 
 **Environment Variables**:
@@ -69,14 +64,11 @@ MASC supports three coordination modes:
 |----------|---------|
 | `MASC_BASE_PATH` | Base path (determines `.masc/` location) |
 | `MASC_CLUSTER_NAME` | Cluster name override |
-| `MASC_STORAGE_TYPE` | `fs`, `redis`, or `postgres` |
-| `MASC_REDIS_URL` | Redis connection URL |
-| `MASC_POSTGRES_URL` | PostgreSQL connection URL (caqti-eio) |
+| `MASC_STORAGE_TYPE` | Active value: `filesystem`; non-filesystem requests fall back to filesystem during bootstrap |
+| `MASC_POSTGRES_URL` | Retired runtime backend env; ignored by current bootstrap |
 
 **Use Cases**:
-- **FS Mode**: Claude Code + terminal Gemini on same Mac
-- **Redis Mode**: MacBook (Claude) + Linux server (Codex) + Cloud (Gemini) - *Lwt blocking issues*
-- **PostgreSQL Mode** ✓ (Recommended): Multi-machine with Eio server, ACID guarantees, SQL queries
+- **Filesystem Mode**: Claude Code + terminal Gemini/Codex on the same machine. This is the only supported runtime storage lane.
 
 ---
 
@@ -91,7 +83,7 @@ MASC에서 가장 혼동하기 쉬운 개념이 **Cluster**와 **Room**입니다
 │                                                                      │
 │  ┌─────────────────────────────────────────────────────────────┐    │
 │  │  Room: "default"                                             │    │
-│  │  (협업 공간 - 같은 .masc/ 또는 Redis/PostgreSQL 키 공간)    │    │
+│  │  (협업 공간 - 같은 .masc/ filesystem state)                │    │
 │  │                                                               │    │
 │  │   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │    │
 │  │   │ claude-rare- │  │ gemini-      │  │ codex-swift- │      │    │
@@ -125,10 +117,7 @@ MASC에서 가장 혼동하기 쉬운 개념이 **Cluster**와 **Room**입니다
 
 1. **같은 Cluster**: 동일한 `MASC_CLUSTER_NAME` 값
 2. **같은 Room**: 동일한 Room ID (현재는 "default" 고정)
-3. **같은 Storage**:
-   - FS 모드: 동일 `.masc/` 폴더 접근
-   - Redis 모드: 동일 Redis 서버 + 동일 Cluster Name
-   - PostgreSQL 모드: 동일 PostgreSQL + 동일 Cluster Name
+3. **같은 Storage**: 동일 `.masc/` 폴더 접근
 
 ### `masc_status` 출력 예시
 

@@ -23,7 +23,7 @@
 | Dashboard | Preact + HTM SPA | Vite 빌드, assets/dashboard/ |
 | Transport | HTTP/1.1 (default), h2c (opt-in), WebSocket, WebRTC (experimental) | Multi-protocol |
 | OAS integration | v0.87.0 delegation | Cascade, Memory, Swarm 일부 |
-| Board backend | PostgreSQL (primary) / JSONL (fallback) | Supabase PgBouncer |
+| Board backend | filesystem/JSONL | PostgreSQL runtime backend is not a target |
 
 ### 시스템 구성 비율 (LOC 기준, ARCHITECTURE-COMPLEXITY-ANALYSIS 발췌)
 

@@ -562,6 +562,76 @@ let test_doc_truth_guard_contracts () =
     (file_contains_pattern "scripts/check-doc-truth.sh"
        "command-plane.ts         -- Command plane types")
 
+let test_storage_truth_guard_contracts () =
+  check bool "bootstrap enforces filesystem-only storage" true
+    (file_contains_pattern "lib/server/server_runtime_bootstrap.ml"
+       "filesystem-only bootstrap");
+  check bool "storage inventory names filesystem as only active backend" true
+    (file_contains_pattern "docs/BOOT-ENV-STATE-INVENTORY.md"
+       "Only `filesystem` is active");
+  check bool "storage inventory marks PG envs retired" true
+    (file_contains_pattern "docs/BOOT-ENV-STATE-INVENTORY.md"
+       "Retired PostgreSQL backend envs");
+  check bool "env contract keeps PG envs ignored" true
+    (file_contains_pattern "docs/ENV-CONTRACT.md"
+       "retired/ignored: `MASC_POSTGRES_URL`, `MASC_PG_POOL_SIZE`");
+  check bool "v2 design forbids distributed storage targets" true
+    (file_contains_pattern "docs/MASC-V2-DESIGN.md"
+       "Redis/PostgreSQL storage modes are not operator targets");
+  check bool "v2 design no longer recommends postgres mode" true
+    (file_not_contains_pattern "docs/MASC-V2-DESIGN.md"
+       "PostgreSQL Mode");
+  check bool "v2 design no longer exposes redis mode as storage option" true
+    (file_not_contains_pattern "docs/MASC-V2-DESIGN.md"
+       "Redis Mode");
+  check bool "board spec no longer advertises dual backend operation" true
+    (file_not_contains_pattern "docs/spec/11-board.md"
+       "JSONL 파일 또는 PostgreSQL 두 가지 백엔드");
+  check bool "board spec no longer documents env-based PG selection" true
+    (file_not_contains_pattern "docs/spec/11-board.md"
+       "MASC_POSTGRES_URL 존재");
+  check bool "board spec no longer depends on Board_pg" true
+    (file_not_contains_pattern "docs/spec/11-board.md" "Board_pg");
+  check bool "board spec forbids JSONL to PostgreSQL migration" true
+    (file_contains_pattern "docs/spec/11-board.md"
+       "JSONL -> PostgreSQL migration path는 지원하지 않는다");
+  check bool "memory spec no longer maps OAS bridge to Memory_pg" true
+    (file_not_contains_pattern "docs/spec/12-memory-systems.md"
+       "Memory_pg");
+  check bool "memory spec no longer says PostgreSQL is primary" true
+    (file_not_contains_pattern "docs/spec/12-memory-systems.md"
+       "PostgreSQL은 primary");
+  check bool "system overview no longer lists postgres for board state" true
+    (file_not_contains_pattern "docs/spec/01-system-overview.md"
+       "Board 게시판, session 상태");
+  check bool "system overview keeps pgvector external-only" true
+    (file_contains_pattern "docs/spec/01-system-overview.md"
+       "Current Board/session runtime state is not stored in PostgreSQL");
+  check bool "performance SLO no longer tells operators to switch to PG" true
+    (file_not_contains_pattern "docs/PERFORMANCE-SLO.md"
+       "PostgreSQL 백엔드로 전환");
+  check bool "spec index lists filesystem board backend" true
+    (file_contains_pattern "docs/spec/SPEC-INDEX.md"
+       "filesystem/JSONL backend");
+  check bool "glossary no longer describes board PG primary" true
+    (file_not_contains_pattern "docs/spec/00-glossary.md"
+       "PostgreSQL(primary)");
+  check bool "room spec no longer documents PG dual-write" true
+    (file_not_contains_pattern "docs/spec/03-room-coordination.md"
+       "dual-write");
+  check bool "server transport no longer bootstraps shared PG pool" true
+    (file_not_contains_pattern "docs/spec/09-server-transport.md"
+       "inject_shared_pg_pool");
+  check bool "dashboard spec no longer documents PostgresNative runtime" true
+    (file_not_contains_pattern "docs/spec/10-dashboard.md"
+       "PostgresNative");
+  check bool "migration targets no longer say board PostgreSQL primary" true
+    (file_not_contains_pattern "docs/spec/B-migration-targets.md"
+       "PostgreSQL (primary)");
+  check bool "implementation status no longer claims JSONL+PG backend" true
+    (file_not_contains_pattern "docs/spec/C-implementation-status.md"
+       "JSONL+PG dual backend")
+
 let test_proof_store_reader_truth_contracts () =
   check bool "proof artifact reader delegates ref resolution to OAS" true
     (file_contains_pattern "lib/proof_artifact_reader.ml"
@@ -1808,6 +1878,8 @@ let () =
            test_case "release truth contracts" `Quick test_release_truth_contracts;
            test_case "oas pin source contracts" `Quick test_oas_pin_source_contracts;
            test_case "doc truth guard contracts" `Quick test_doc_truth_guard_contracts;
+           test_case "storage truth guard contracts" `Quick
+             test_storage_truth_guard_contracts;
            test_case "proof store reader truth contracts" `Quick
              test_proof_store_reader_truth_contracts;
            test_case "keeper agent upgrade source contracts" `Quick

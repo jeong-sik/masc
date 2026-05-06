@@ -63,13 +63,11 @@ graph TB
   subgraph "OAS Bridge"
     MOB[memory_oas_bridge.ml]
     MJ[memory_jsonl.ml]
-    MPG[memory_pg.ml]
   end
   MB --> MOB
   IE --> MOB
   PM --> MOB
   MOB --> MJ
-  MOB --> MPG
   MOB -->|"5-tier"| OAS["OAS Memory.t"]
   CR --> AR
   CC -->|"Context_reducer"| OAS
@@ -404,30 +402,25 @@ type recall_config = {
 |----------|----------|----------|
 | Scratchpad | OAS 내부 관리 | bridge 불필요 |
 | Working | OAS 내부 관리 | bridge 불필요 |
-| Long_term | PostgreSQL (`Memory_pg`) 또는 JSONL (`Memory_jsonl`) | `make_backend` |
+| Long_term | JSONL/filesystem (`Memory_jsonl`) | `make_backend` |
 | Episodic | `Institution_eio` JSONL episodes | `seed_episodes` / `flush_episodes` |
 | Procedural | `Procedural_memory` | `seed_procedures_as_oas` / `flush_procedures` |
 
 ### 9.2 Storage Backends
-
-**PostgreSQL** (`memory_pg.ml`):
-- 테이블: `oas_memory_store (agent_name, key, value_json)`
-- UPSERT on `(agent_name, key)` unique constraint
-- Caqti_eio pool 사용 (Board_pg와 동일 pool)
-- `MASC_POSTGRES_URL` 설정 시 자동 선택
 
 **JSONL** (`memory_jsonl.ml`):
 - 파일: `.masc/memory/<agent_name>/<session_id>.jsonl`
 - Append-only, latest entry wins on read
 - Tombstone: `{"key":"...","value":null,"ts":...}` -- 삭제 표시
 - 50MB 파일 크기 경고, 1MB 단일 값 경고 + 잘라내기
-- PostgreSQL 미사용 시 fallback
+- Current server bootstrap forces `MASC_STORAGE_TYPE=filesystem`; `MASC_POSTGRES_URL` does not select a memory backend.
+- PostgreSQL memory backend is not part of the runtime contract.
 
 ### 9.3 Lifecycle
 
 ```
 create_memory_full
-  1. make_backend (PG 또는 JSONL)
+  1. make_backend (JSONL/filesystem)
   2. seed_episodes (Institution JSONL -> OAS Episodic, 기본 50개)
   3. seed_procedures_as_oas (crystallized procedures -> OAS Procedural, 기본 20개)
   4. seed_institution (institution.json -> OAS Long_term, 선택)
@@ -489,7 +482,7 @@ type synapse = {
 3. **kind가 우선순위를 결정한다**: 동일 kind + text는 항상 동일한 priority를 받는다. `signal_bonus`가 키워드 기반 보정을 추가한다.
 4. **OAS bridge는 비파괴적이다**: flush 시 기존 데이터를 제거하지 않고 append 또는 update-in-place만 한다.
 5. **Context compaction은 LLM을 호출하지 않는다**: SummarizeOld를 포함한 모든 전략이 결정론적이다.
-6. **PostgreSQL은 primary, JSONL은 fallback이다**: `MASC_POSTGRES_URL` 유무로 자동 결정된다.
+6. **OAS bridge storage follows current bootstrap truth**: filesystem/JSONL is the active runtime storage lane; PostgreSQL is not used as the primary or fallback backend.
 7. **Procedural crystallization은 비가역적이다**: 일단 결정화되면 evidence가 줄어도 상태가 변하지 않는다.
 8. **Episode ID dedup이 flush boundary를 보호한다**: 이미 JSONL에 존재하는 ID는 다시 쓰지 않는다.
 

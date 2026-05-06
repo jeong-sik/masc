@@ -54,4 +54,4 @@ MASC_TOKEN=<optional>
 ## 개선 힌트
 - REST 페이지네이션/필터 적극 사용
 - 메시지/태스크 조회는 limit을 낮춘다
-- 필요 시 PostgreSQL 백엔드로 전환
+- JSONL hot path를 줄이고 filesystem runtime contract 안에서 compaction/rotation/replay 비용을 낮춘다.

@@ -3,8 +3,8 @@
     Layer 4 collector for {b I1 Telemetry pipeline} (#11924, Phase 1, Track T1)
     of the [Meta] MASC-MCP × OAS root improvement plan (#11923).
 
-    Twelve signals are recorded per LLM call so the dashboard can derive
-    TTFB distribution, throughput, cost, cache-hit ratio, and the bimodal
+    Per-call signals are recorded so the dashboard can derive TTFB
+    distribution, throughput, cost, cache-hit ratio, and the bimodal
     hang signature (100–200s normal vs 2,000–3,000s zombie tail). The
     collector is intentionally additive — existing metric paths remain
     untouched until I7 (string elimination) and I2 (provider_error variant)
@@ -35,7 +35,7 @@ type status =
   | Cancelled of { reason : string }
   | Timeout
 
-(** Twelve-signal telemetry sample for a single OAS LLM call.
+(** Telemetry sample for a single OAS LLM call.
 
     Naming follows OpenTelemetry GenAI semantic convention [gen_ai.*]. The
     bridge does not commit to that namespace at the OCaml type level — the
@@ -51,14 +51,18 @@ type sample = {
   serialization_ms : float;
       (** Request serialize + response parse overhead in milliseconds.
           Captures the adapter cost the docx flagged as currently invisible. *)
-  input_tokens : int;  (** Prompt tokens consumed. *)
-  output_tokens : int;  (** Completion tokens produced. *)
-  throughput_tokens_per_s : float;
+  usage_reported : bool;
+      (** [true] when OAS supplied provider usage. Missing usage remains
+          distinct from real zero-token usage. *)
+  input_tokens : int option;  (** Prompt tokens consumed, when reported. *)
+  output_tokens : int option;
+      (** Completion tokens produced, when reported. *)
+  throughput_tokens_per_s : float option;
       (** [output_tokens / max(total_duration_ms - ttfb_ms, 1.0) * 1000.0]. *)
-  cost_usd : float;
-      (** Dollar cost; [0.0] when unknown — CLI providers (codex_cli,
-          gemini_cli, kimi_cli) intentionally strip usage metadata. *)
-  cache_hit : bool;
+  cost_usd : float option;
+      (** Dollar cost, when reported — CLI providers (codex_cli, gemini_cli,
+          kimi_cli) intentionally strip usage metadata. *)
+  cache_hit : bool option;
       (** Prefix or implicit cache hit detected by the provider. *)
   status : status;  (** Outcome of the call. *)
   retry_count : int;
@@ -92,8 +96,9 @@ val sample_of_response :
     - [serialization_ms] carries request-serialize + response-parse overhead
       measured at the adapter boundary; defaults to [0.0] when not provided.
 
-    Missing OAS usage or telemetry is represented as zero-valued additive
-    data rather than dropping the sample, so coverage gaps stay visible. *)
+    Missing OAS usage is represented with [usage_reported = false] and
+    nullable usage-derived fields rather than synthetic zeroes. Missing
+    telemetry remains nullable where the signal cannot be derived. *)
 
 val record_response :
   provider_id:string ->

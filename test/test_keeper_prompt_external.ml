@@ -1,11 +1,22 @@
 (** Tier C C-5a: smoke test for the externalized behavior prompt
     loader.  Verifies that the demonstration migration
     ([profile_policy]) loads from
-    [config/prompts/behavior/profile_policy.md] (relative to the
-    repo root, which Config_dir_resolver locates via [_build/]
-    proximity) and yields a non-empty body. *)
+    [config/prompts/behavior/*.md] (relative to the repo root, which
+    Config_dir_resolver locates via [_build/] proximity) and yields
+    non-empty bodies. *)
 
 module Lib = Masc_mcp
+
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0 then true
+  else
+    let rec loop i =
+      i + needle_len <= haystack_len
+      && (String.sub haystack i needle_len = needle || loop (i + 1))
+    in
+    loop 0
 
 let with_repo_root_cwd f =
   let original_cwd = Sys.getcwd () in
@@ -34,19 +45,23 @@ let with_repo_root_cwd f =
       Unix.putenv "MASC_CONFIG_DIR" config_dir;
       Sys.chdir root;
       Lib.Config_dir_resolver.reset ();
+      Prompt_registry.clear ();
+      Prompt_registry.set_markdown_dir (Filename.concat config_dir "prompts");
+      Lib.Prompt_defaults.init ();
       Fun.protect
         ~finally:(fun () ->
           Sys.chdir original_cwd;
           (match prev_config_dir with
            | Some v -> Unix.putenv "MASC_CONFIG_DIR" v
            | None -> Unix.putenv "MASC_CONFIG_DIR" "");
-          Lib.Config_dir_resolver.reset ())
+          Lib.Config_dir_resolver.reset ();
+          Prompt_registry.clear ())
         f
 
-let test_loads_profile_policy () =
+let test_loads_block name expected_substring =
   with_repo_root_cwd (fun () ->
       Lib.Keeper_prompt_external.reset_cache ();
-      match Lib.Keeper_prompt_external.get "profile_policy" with
+      match Lib.Keeper_prompt_external.get name with
       | Some content ->
           Alcotest.(check bool)
             "non-empty body" true
@@ -54,11 +69,42 @@ let test_loads_profile_policy () =
           Alcotest.(check bool)
             "frontmatter stripped" false
             (String.length content >= 3
-             && String.sub content 0 3 = "---")
+             && String.sub content 0 3 = "---");
+          Alcotest.(check bool)
+            "expected body text" true
+            (contains_substring content expected_substring)
       | None ->
           Alcotest.fail
-            "expected profile_policy.md to load from \
-             config/prompts/behavior/")
+            ("expected " ^ name
+             ^ ".md to load from config/prompts/behavior/"))
+
+let test_loads_profile_policy () =
+  test_loads_block "profile_policy" "reasoning"
+
+let test_loads_continuity_contract () =
+  test_loads_block "continuity_contract" "Continuity"
+
+let test_system_prompt_includes_continuity_contract () =
+  with_repo_root_cwd (fun () ->
+      Lib.Keeper_prompt_external.reset_cache ();
+      let prompt =
+        Lib.Keeper_prompt.build_keeper_system_prompt
+          ~goal:"verify prompt behavior externalization"
+          ~short_goal:"keep continuity contract loaded"
+          ~mid_goal:"reduce source literal behavior blocks"
+          ~long_goal:"keep prompt config operator-tunable"
+          ~will:"maintain coherent identity"
+          ~needs:"runtime truth"
+          ~desires:"observable progress"
+          ~instructions:""
+          ()
+      in
+      Alcotest.(check bool)
+        "continuity contract present" true
+        (contains_substring prompt "When <direct_reply_mode> is present");
+      Alcotest.(check bool)
+        "constitution still present" true
+        (contains_substring prompt "PR merge rules"))
 
 let test_missing_returns_none () =
   with_repo_root_cwd (fun () ->
@@ -87,6 +133,10 @@ let () =
         [
           Alcotest.test_case "loads profile_policy" `Quick
             test_loads_profile_policy;
+          Alcotest.test_case "loads continuity_contract" `Quick
+            test_loads_continuity_contract;
+          Alcotest.test_case "system prompt includes continuity_contract"
+            `Quick test_system_prompt_includes_continuity_contract;
           Alcotest.test_case "missing returns None" `Quick
             test_missing_returns_none;
           Alcotest.test_case "second lookup uses cache" `Quick

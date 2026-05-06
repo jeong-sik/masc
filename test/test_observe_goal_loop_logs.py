@@ -396,6 +396,22 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(summary["external_sources_invalid"], 3)
         self.assertEqual(summary["source_documents_status"], "COMPLETE")
 
+    def test_orient_catalog_marks_over_itemized_catalogs(self) -> None:
+        summary = orient_goal_loop_logs.audit_catalog_summary(
+            {
+                "expected_findings_total": 1,
+                "findings": [
+                    {"finding_id": "NF-1"},
+                    {"finding_id": "NF-2"},
+                ],
+            }
+        )
+
+        assert summary is not None
+        self.assertEqual(summary["status"], "OVER_ITEMIZED")
+        self.assertEqual(summary["missing_itemized_findings"], 0)
+        self.assertEqual(summary["extra_itemized_findings"], 1)
+
     def test_orient_catalog_merges_partial_builtin_overrides(self) -> None:
         specs = orient_goal_loop_logs.merged_specs(
             {"findings": [{"finding_id": "NF-1", "severity": "warning"}]}
@@ -611,6 +627,45 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(source_artifacts["source_identity_checks_failed"], 0)
         self.assertEqual(source_artifacts["source_structured_item_ids_total"], 1)
         self.assertEqual(source_artifacts["source_structured_item_ids_uncataloged"], 0)
+
+    def test_source_line_count_uses_splitlines_semantics(self) -> None:
+        self.assertEqual(orient_goal_loop_logs.source_text_line_count("a\nb"), 2)
+        self.assertEqual(orient_goal_loop_logs.source_text_line_count("a\nb\n"), 2)
+
+    def test_source_artifact_decode_error_is_reported_without_crashing(self) -> None:
+        content_bytes = b"R-FATAL-1\n\xff\n"
+        catalog = {
+            "external_sources": [
+                {
+                    "path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+                    "sha256": hashlib.sha256(content_bytes).hexdigest(),
+                    "line_count": 2,
+                    "line_refs": [1, 2],
+                }
+            ],
+            "findings": [{"finding_id": "R-FATAL-1"}],
+        }
+
+        with tempfile.TemporaryDirectory() as raw_dir:
+            source_path = Path(raw_dir) / "GOAL_LOOP_INTEGRATION.md"
+            source_path.write_bytes(content_bytes)
+            source_artifacts = orient_goal_loop_logs.source_artifact_summary(
+                catalog,
+                Path(raw_dir),
+                source_strip_prefix="prompt_corpus/GOAL_LOOP",
+            )
+
+        assert source_artifacts is not None
+        self.assertEqual(source_artifacts["status"], "INCOMPLETE")
+        self.assertEqual(source_artifacts["source_decode_errors"], 1)
+        sample = source_artifacts["source_decode_error_samples"][0]
+        self.assertEqual(
+            sample["path"],
+            "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+        )
+        self.assertEqual(sample["error"], "unicode_decode_error")
+        self.assertEqual(source_artifacts["source_identity_status"], "COMPLETE")
+        self.assertEqual(source_artifacts["source_itemized_id_status"], "COMPLETE")
 
     def test_orient_catalog_validates_aggregate_reconciliation_arithmetic(self) -> None:
         catalog: dict[str, object] = {

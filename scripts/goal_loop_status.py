@@ -150,11 +150,20 @@ def summarize_orient(orient: dict[str, Any] | None) -> PhaseStatus:
     summary = summary_raw if isinstance(summary_raw, dict) else {}
     audit_catalog_raw = orient.get("audit_catalog")
     audit_catalog = audit_catalog_raw if isinstance(audit_catalog_raw, dict) else None
+    audit_catalog_error = None
+    if (
+        "audit_catalog" in orient
+        and audit_catalog_raw is not None
+        and audit_catalog is None
+    ):
+        audit_catalog_error = f"expected_object_got_{type(audit_catalog_raw).__name__}"
     critical_present = as_int(summary.get("critical_present"))
     evidence_present = as_int(summary.get("evidence_present"))
     findings_total = as_int(summary.get("findings_total"))
     audit_catalog_summary: dict[str, Any] | None = None
-    audit_catalog_warning = False
+    audit_catalog_warning = audit_catalog_error is not None
+    if audit_catalog_error is not None:
+        audit_catalog_summary = {"audit_catalog_error": audit_catalog_error}
     if audit_catalog is not None:
         consistency_raw = audit_catalog.get("consistency_findings", [])
         consistency_findings = (
@@ -179,6 +188,7 @@ def summarize_orient(orient: dict[str, Any] | None) -> PhaseStatus:
             "expected_findings_total": audit_catalog.get("expected_findings_total"),
             "itemized_findings_total": audit_catalog.get("itemized_findings_total"),
             "missing_itemized_findings": audit_catalog.get("missing_itemized_findings"),
+            "extra_itemized_findings": audit_catalog.get("extra_itemized_findings"),
             "source_documents_status": audit_catalog.get(
                 "source_documents_status", "unknown"
             ),
@@ -221,6 +231,9 @@ def summarize_orient(orient: dict[str, Any] | None) -> PhaseStatus:
             )
             audit_catalog_summary["source_artifacts_missing"] = source_artifacts.get(
                 "source_artifacts_missing"
+            )
+            audit_catalog_summary["source_decode_errors"] = source_artifacts.get(
+                "source_decode_errors"
             )
             audit_catalog_summary["source_line_ref_errors"] = source_artifacts.get(
                 "line_ref_errors"

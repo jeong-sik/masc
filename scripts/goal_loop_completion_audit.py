@@ -334,12 +334,14 @@ def build_completion_audit(
         "source_artifacts_total": audit_catalog.get("source_artifacts_total"),
         "source_artifacts_resolved": audit_catalog.get("source_artifacts_resolved"),
         "source_artifacts_missing": audit_catalog.get("source_artifacts_missing"),
+        "source_decode_errors": audit_catalog.get("source_decode_errors"),
         "source_line_ref_errors": audit_catalog.get("source_line_ref_errors"),
     }
     source_artifacts_passed = (
         source_artifacts_evidence["source_artifacts_status"] == "COMPLETE"
         and as_int(source_artifacts_evidence["source_artifacts_total"]) >= 12
         and as_int(source_artifacts_evidence["source_artifacts_missing"]) == 0
+        and as_int(source_artifacts_evidence["source_decode_errors"]) == 0
         and as_int(source_artifacts_evidence["source_line_ref_errors"]) == 0
         and source_artifacts_evidence["source_artifacts_resolved"]
         == source_artifacts_evidence["source_artifacts_total"]
@@ -412,6 +414,7 @@ def build_completion_audit(
         "expected_findings_total": audit_catalog.get("expected_findings_total"),
         "itemized_findings_total": audit_catalog.get("itemized_findings_total"),
         "missing_itemized_findings": audit_catalog.get("missing_itemized_findings"),
+        "extra_itemized_findings": audit_catalog.get("extra_itemized_findings"),
     }
     row_catalog_evidence["row_corpus_discovery"] = row_corpus_discovery_evidence(
         row_catalog_evidence,
@@ -432,6 +435,7 @@ def build_completion_audit(
         and row_catalog_evidence["itemized_findings_total"]
         == row_catalog_evidence["expected_findings_total"]
         and as_int(row_catalog_evidence["missing_itemized_findings"]) == 0
+        and as_int(row_catalog_evidence["extra_itemized_findings"]) == 0
         and strict_row_corpus_passed
     )
 

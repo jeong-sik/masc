@@ -31,6 +31,10 @@ STRICT_ROW_CORPUS_SEVERITIES = {"critical", "warning", "info"}
 STRICT_ROW_CORPUS_ERROR_LIMIT = 20
 
 
+def source_text_line_count(content: str) -> int:
+    return len(content.splitlines())
+
+
 def structured_item_id_family(item_id: str) -> str:
     if item_id.startswith("R-FATAL-"):
         return "R-FATAL"
@@ -844,6 +848,7 @@ def source_artifact_summary(
     source_identity_checked_paths: set[str] = set()
     source_identity_checks_total = 0
     source_identity_checks_verified = 0
+    source_decode_errors: list[dict[str, Any]] = []
 
     source_root_resolved = source_root.resolve(strict=False)
 
@@ -876,7 +881,18 @@ def source_artifact_summary(
             continue
         resolved += 1
         content_bytes = candidate.read_bytes()
-        content = content_bytes.decode("utf-8")
+        try:
+            content = content_bytes.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            content = content_bytes.decode("utf-8", errors="replace")
+            source_decode_errors.append(
+                {
+                    "path": path_text,
+                    "error": "unicode_decode_error",
+                    "start": exc.start,
+                    "end": exc.end,
+                }
+            )
         resolved_contents[path_text] = content
         source_finding_ids.update(AUDIT_FINDING_ID_RE.findall(content))
         for line_number, line in enumerate(content.splitlines(), start=1):
@@ -907,7 +923,7 @@ def source_artifact_summary(
                         "actual": actual_sha256,
                     }
             expected_line_count = source_expectation.get("line_count")
-            line_count = len(content.splitlines())
+            line_count = source_text_line_count(content)
             if (
                 isinstance(expected_line_count, int)
                 and line_count != expected_line_count
@@ -922,7 +938,7 @@ def source_artifact_summary(
                 source_identity_errors.append(identity_errors)
         if not line_refs:
             continue
-        line_count = len(content.splitlines())
+        line_count = source_text_line_count(content)
         bad_refs = sorted(
             {
                 line_ref
@@ -993,6 +1009,7 @@ def source_artifact_summary(
         "COMPLETE"
         if not invalid_paths
         and not missing_paths
+        and not source_decode_errors
         and not line_ref_errors
         and source_itemized_id_status == "COMPLETE"
         and source_aggregate_claim_status in {"COMPLETE", "NOT_APPLICABLE"}
@@ -1008,6 +1025,7 @@ def source_artifact_summary(
         "source_artifacts_resolved": resolved,
         "source_artifacts_missing": len(missing_paths),
         "source_artifacts_invalid_paths": len(invalid_paths),
+        "source_decode_errors": len(source_decode_errors),
         "line_ref_errors": len(line_ref_errors),
         "source_itemized_id_status": source_itemized_id_status,
         "source_itemized_id_basis": source_itemized_id_basis,
@@ -1033,6 +1051,7 @@ def source_artifact_summary(
         "source_identity_error_samples": source_identity_errors[:10],
         "invalid_paths": invalid_paths[:10],
         "missing_paths": missing_paths[:10],
+        "source_decode_error_samples": source_decode_errors[:10],
         "line_ref_error_samples": line_ref_errors[:10],
         "source_ids_missing_from_catalog_samples": source_ids_missing_from_catalog[:10],
         "catalog_ids_missing_from_source_samples": catalog_ids_missing_from_source[:10],
@@ -1081,10 +1100,13 @@ def audit_catalog_summary(
         source_status = "INCOMPLETE"
     itemized = len(specs)
     missing = max(expected - itemized, 0) if expected is not None else None
+    extra = max(itemized - expected, 0) if expected is not None else None
     if expected is None:
         status = "UNBOUNDED"
     elif itemized == expected:
         status = "COMPLETE"
+    elif itemized > expected:
+        status = "OVER_ITEMIZED"
     else:
         status = "INCOMPLETE"
     consistency_raw = catalog.get("consistency_findings", [])
@@ -1101,6 +1123,7 @@ def audit_catalog_summary(
         "expected_findings_total": expected,
         "itemized_findings_total": itemized,
         "missing_itemized_findings": missing,
+        "extra_itemized_findings": extra,
         "external_sources_total": source_covered,
         "external_sources_invalid": invalid_external_sources,
         "source_documents_expected": source_expected,

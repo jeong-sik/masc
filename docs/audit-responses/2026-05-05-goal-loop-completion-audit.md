@@ -101,10 +101,11 @@
   `P-EIO:7`, `P-FSM:10`, `P-HARD:5`, `P-MUT:2`, `P-PROAC:1`, `P-PROV:4`,
   `P-STR:3`, `P-TURN:3`, and `S:10`, with 260 uncataloged source occurrences
   sampled by source path and line.
-- [근거] `shasum -a 256 <GOAL_LOOP_SOURCE_ROOT>/*.md` and `wc -l
-  <GOAL_LOOP_SOURCE_ROOT>/*.md` checked at 2026-05-06T06:23:00+09:00,
-  confidence High: the catalog records SHA-256 and line-count identity for all
-  12 prompt source artifacts, totaling 7,553 lines.
+- [근거] `shasum -a 256 <GOAL_LOOP_SOURCE_ROOT>/*.md` and Python
+  `len(Path(...).read_text(encoding="utf-8").splitlines())` checked at
+  2026-05-06T06:23:00+09:00, confidence High: the catalog records SHA-256 and
+  splitlines-based line-count identity for all 12 prompt source artifacts,
+  totaling 7,553 lines.
 - [근거] `python3 scripts/orient_goal_loop_logs.py
   test/fixtures/goal_loop/observe.startup.json --audit-catalog
   test/fixtures/goal_loop/audit-corpus.external-claim.json

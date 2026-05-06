@@ -105,19 +105,22 @@ val update_status :
   task_id:string ->
   status:Masc_domain.task_status ->
   (unit, Masc_error.t) result
-(** [update_status config ~task_id ~status] reads the backlog,
+(** [update_status config ~task_id ~status] takes the Coord [.backlog]
+    file lock, reads the backlog,
     runs {!validate_transition}, and on success rewrites the task
     list with the new status, bumping [version] and refreshing
     [last_updated] (ISO 8601 of the current monotonic time).
     Errors:
     - [TaskNotFound task_id] when the task is absent.
-    - [TaskInvalidState <message>] from {!validate_transition}. *)
+    - [TaskInvalidState <message>] from {!validate_transition}.
+    - [System IoError <message>] when the backlog cannot be read. *)
 
 val delete_task :
   Coord.config ->
   task_id:string ->
   (unit, Masc_error.t) result
-(** [delete_task config ~task_id] filters the task out of the
+(** [delete_task config ~task_id] takes the Coord [.backlog] file lock,
+    filters the task out of the
     backlog and writes it back with [version] bumped.  Idempotent
     — deleting a non-existent task is silently a no-op (always
-    returns [Ok ()]).  Always [Ok _] on the JSONL backend. *)
+    returns [Ok ()] when the backlog is readable). *)

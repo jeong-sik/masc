@@ -259,6 +259,18 @@ let test_chronicle_memory_default_timestamp_uses_epoch_end_date () =
   let episode = CM.episode_of_candidate ~keeper_name:"sangsu" sample_epoch in
   check (float 0.001) "end date midnight UTC" 1777680000.0 episode.timestamp
 
+let test_chronicle_memory_default_timestamp_falls_back_to_start_date () =
+  let epoch = { sample_epoch with end_date = "not-a-date" } in
+  let episode = CM.episode_of_candidate ~keeper_name:"sangsu" epoch in
+  check (float 0.001) "start date midnight UTC" 1777593600.0 episode.timestamp
+
+let test_chronicle_memory_default_timestamp_falls_back_to_zero () =
+  let epoch =
+    { sample_epoch with start_date = "not-a-date"; end_date = "not-a-date" }
+  in
+  let episode = CM.episode_of_candidate ~keeper_name:"sangsu" epoch in
+  check (float 0.001) "missing date fallback" 0.0 episode.timestamp
+
 let test_chronicle_memory_store_recall () =
   let memory = Agent_sdk.Memory.create () in
   let stored =
@@ -326,6 +338,10 @@ let () =
       test_case "episode shape" `Quick test_chronicle_memory_episode_shape;
       test_case "default timestamp uses epoch end date" `Quick
         test_chronicle_memory_default_timestamp_uses_epoch_end_date;
+      test_case "default timestamp falls back to start date" `Quick
+        test_chronicle_memory_default_timestamp_falls_back_to_start_date;
+      test_case "default timestamp falls back to zero" `Quick
+        test_chronicle_memory_default_timestamp_falls_back_to_zero;
       test_case "store recall" `Quick test_chronicle_memory_store_recall;
       test_case "store accepts explicit timestamp" `Quick
         test_chronicle_memory_store_accepts_explicit_timestamp;

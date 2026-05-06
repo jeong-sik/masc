@@ -67,32 +67,7 @@ let salience_of_candidate (epoch : Chronicle_ingest.candidate_epoch) =
 let unix_seconds_of_yyyy_mm_dd raw =
   let raw = String.trim raw in
   if String.length raw < 10 then None
-  else
-    match
-      ( int_of_string_opt (String.sub raw 0 4)
-      , int_of_string_opt (String.sub raw 5 2)
-      , int_of_string_opt (String.sub raw 8 2) )
-    with
-    | Some year, Some month, Some day ->
-        (try
-           let tm =
-             { Unix.tm_sec = 0
-             ; tm_min = 0
-             ; tm_hour = 0
-             ; tm_mday = day
-             ; tm_mon = month - 1
-             ; tm_year = year - 1900
-             ; tm_wday = 0
-             ; tm_yday = 0
-             ; tm_isdst = false
-             }
-           in
-           let local_epoch, _ = Unix.mktime tm in
-           let utc_as_local, _ = Unix.mktime (Unix.gmtime local_epoch) in
-           let tz_offset = local_epoch -. utc_as_local in
-           Some (local_epoch +. tz_offset)
-         with _ -> None)
-    | _ -> None
+  else Masc_domain.parse_iso8601_opt (String.sub raw 0 10 ^ "T00:00:00Z")
 
 let default_timestamp_of_candidate (epoch : Chronicle_ingest.candidate_epoch) =
   match unix_seconds_of_yyyy_mm_dd epoch.end_date with

@@ -269,6 +269,62 @@ let repo_name_of_json = function
       | _ -> None)
   | _ -> None
 
+let upsert_assoc key value fields =
+  (key, value) :: List.remove_assoc key fields
+
+let git_metadata_timeout_sec = 2.0
+
+let git_string_opt repo_path args =
+  try
+    let status, out =
+      Process_eio.run_argv_with_status ~timeout_sec:git_metadata_timeout_sec
+        ("git" :: "-C" :: repo_path :: args)
+    in
+    match status with
+    | Unix.WEXITED 0 ->
+        let trimmed = String.trim out in
+        if String.equal trimmed "" then None else Some trimmed
+    | _ -> None
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | _ -> None
+
+let enrich_playground_repo_from_git
+      ~(source : string) ~(repo_name : string) ~(repo_path : string)
+      (repo_json : Yojson.Safe.t) =
+  let fields =
+    match repo_json with
+    | `Assoc fields -> fields
+    | _ -> [ ("name", `String repo_name) ]
+  in
+  let fields =
+    fields
+    |> upsert_assoc "name" (`String repo_name)
+    |> upsert_assoc "path" (`String (Filename.concat "repos" repo_name))
+    |> upsert_assoc "source" (`String source)
+    |> upsert_assoc "observed_at"
+         (`String (Printf.sprintf "%.0f" (Unix.gettimeofday ())))
+  in
+  let fields =
+    match git_string_opt repo_path [ "rev-parse"; "--abbrev-ref"; "HEAD" ] with
+    | Some branch -> upsert_assoc "branch" (`String branch) fields
+    | None -> fields
+  in
+  let fields =
+    match git_string_opt repo_path [ "log"; "--oneline"; "-1" ] with
+    | Some commit -> upsert_assoc "latest_commit" (`String commit) fields
+    | None -> fields
+  in
+  let fields =
+    match git_string_opt repo_path [ "rev-parse"; "--is-shallow-repository" ] with
+    | Some raw ->
+        upsert_assoc "shallow"
+          (`Bool (String.equal (String.lowercase_ascii raw) "true"))
+          fields
+    | None -> fields
+  in
+  `Assoc fields
+
 let cached_playground_repo_entries playground_abs =
   let cache_path = Filename.concat playground_abs ".playground_state.json" in
   try
@@ -301,18 +357,29 @@ let playground_repos_json ~(config : Coord.config) ~(meta : keeper_meta) =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
     |> normalize_path
   in
-  let cached = cached_playground_repo_entries playground_abs in
+  let repos_dir = Filename.concat playground_abs "repos" in
+  let cached =
+    cached_playground_repo_entries playground_abs
+    |> List.map (fun repo ->
+      match repo_name_of_json repo with
+      | Some name ->
+          let repo_path = Filename.concat repos_dir name in
+          if safe_is_dir repo_path
+             && safe_file_exists (Filename.concat repo_path ".git")
+          then
+            enrich_playground_repo_from_git ~source:"git" ~repo_name:name
+              ~repo_path repo
+          else repo
+      | None -> repo)
+  in
   let cached_names = List.filter_map repo_name_of_json cached in
   let fs_entries =
     filesystem_playground_repo_names playground_abs
     |> List.filter (fun name -> not (List.mem name cached_names))
     |> List.map (fun name ->
-      `Assoc
-        [
-          ("name", `String name);
-          ("path", `String (Filename.concat "repos" name));
-          ("source", `String "filesystem");
-        ])
+      let repo_path = Filename.concat repos_dir name in
+      enrich_playground_repo_from_git ~source:"filesystem" ~repo_name:name
+        ~repo_path (`Assoc []))
   in
   `List (cached @ fs_entries)
 

@@ -193,6 +193,10 @@ let () =
             Test_operator_control_keeper
             .test_keeper_sandbox_status_clarifies_visible_container_gap;
           Alcotest.test_case
+            "keeper sandbox repo status refreshes cached git metadata" `Quick
+            Test_operator_control_keeper
+            .test_playground_repo_status_refreshes_cached_git_metadata;
+          Alcotest.test_case
             "keeper sandbox fleet includes persisted keeper" `Quick
             Test_operator_control_keeper
             .test_keeper_sandbox_status_fleet_includes_persisted_keeper;

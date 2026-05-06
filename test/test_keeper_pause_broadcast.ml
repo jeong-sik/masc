@@ -287,6 +287,59 @@ let test_broadcast_payload_carries_turn_diagnostics () =
   check string "stop reason" "completed"
     (payload |> U.member "stop_reason" |> U.to_string)
 
+let test_stale_broadcast_payload_uses_low_cardinality_stale_reason () =
+  let payload =
+    R.stale_broadcast_payload
+      ~keeper_name:"executor"
+      ~agent_name:"executor-agent"
+      ~cascade_name:(R.cascade_name_of_string "tier_fast")
+      ~trace_id:"trace-stale"
+      ~generation:7
+      ~failure_reason:None
+      ~stale_seconds:629.0
+      ~last_turn_ts:1777990000.0
+  in
+  check string "disposition reason" "stale_turn_timeout"
+    (payload |> U.member "disposition_reason" |> U.to_string);
+  check string "terminal reason" "stale_turn_timeout"
+    (payload |> U.member "terminal_reason_code" |> U.to_string);
+  check string "failure cohort" "stale_turn_timeout"
+    (payload |> U.member "failure_reason_cohort" |> U.to_string);
+  check string "stale bucket" "stale_turn_629s"
+    (payload |> U.member "stale_turn_bucket" |> U.to_string);
+  check bool "failure reason null" true
+    (match payload |> U.member "failure_reason" with
+     | `Null -> true
+     | _ -> false)
+
+let test_stale_broadcast_payload_preserves_provider_failure_reason () =
+  let failure_reason =
+    Masc_mcp.Keeper_registry.Provider_runtime_error
+      { code = "api_error_timeout"; detail = "Timeout after 300.0s" }
+  in
+  let payload =
+    R.stale_broadcast_payload
+      ~keeper_name:"executor"
+      ~agent_name:"executor-agent"
+      ~cascade_name:(R.cascade_name_of_string "tier_fast")
+      ~trace_id:"trace-stale"
+      ~generation:7
+      ~failure_reason:(Some failure_reason)
+      ~stale_seconds:630.0
+      ~last_turn_ts:1777990000.0
+  in
+  check string "disposition reason" "provider_runtime_error"
+    (payload |> U.member "disposition_reason" |> U.to_string);
+  check string "terminal reason" "api_error_timeout"
+    (payload |> U.member "terminal_reason_code" |> U.to_string);
+  check string "failure cohort" "provider_runtime_error"
+    (payload |> U.member "failure_reason_cohort" |> U.to_string);
+  check string "failure reason detail"
+    "provider_runtime_error(api_error_timeout:Timeout after 300.0s)"
+    (payload |> U.member "failure_reason" |> U.to_string);
+  check string "stale bucket" "stale_turn_630s"
+    (payload |> U.member "stale_turn_bucket" |> U.to_string)
+
 let () =
   run "keeper_pause_broadcast"
     [
@@ -325,5 +378,9 @@ let () =
             test_each_broadcast_disp_is_reachable;
           test_case "broadcast payload carries turn diagnostics" `Quick
             test_broadcast_payload_carries_turn_diagnostics;
+          test_case "stale payload uses low-cardinality reason" `Quick
+            test_stale_broadcast_payload_uses_low_cardinality_stale_reason;
+          test_case "stale payload preserves provider failure reason" `Quick
+            test_stale_broadcast_payload_preserves_provider_failure_reason;
         ] );
     ]

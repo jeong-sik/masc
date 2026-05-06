@@ -166,6 +166,20 @@ val operator_broadcast_payload :
     Exposed so tests can pin the diagnostic fields operators need when a
     keeper turn pauses or stalls silently. *)
 
+val stale_broadcast_payload :
+  keeper_name:string ->
+  agent_name:string ->
+  cascade_name:cascade_name ->
+  trace_id:string ->
+  generation:int ->
+  failure_reason:Keeper_registry.failure_reason option ->
+  stale_seconds:float ->
+  last_turn_ts:float ->
+  Yojson.Safe.t
+(** Structured watchdog payload. Keeps the exact [stale_seconds] while
+    exposing low-cardinality failure/cohort fields for dashboards and issue
+    aggregation. *)
+
 val append : Coord.config -> t -> unit
 val latest_json : Coord.config -> string -> Yojson.Safe.t option
 val latest_json_by_keeper :
@@ -183,6 +197,7 @@ val emit_stale_keeper_broadcast :
   cascade_name:cascade_name ->
   trace_id:string ->
   generation:int ->
+  failure_reason:Keeper_registry.failure_reason option ->
   stale_seconds:float ->
   last_turn_ts:float ->
   unit

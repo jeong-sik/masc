@@ -1,6 +1,6 @@
-import type MermaidDefault from 'mermaid'
+import type { Mermaid } from 'mermaid'
 
-export type MermaidApi = typeof MermaidDefault
+export type MermaidApi = Mermaid
 
 let mermaidPromise: Promise<MermaidApi> | null = null
 

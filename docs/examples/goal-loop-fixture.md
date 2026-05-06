@@ -162,7 +162,11 @@ of the catalog `external_sources`, and every row line ref must be within that
 source line count when the manifest records one. The explicit source-row
 candidate inventory is not a strict corpus; if supplied to this command it must
 fail with `source_row_candidate_inventory_is_not_strict_corpus` because it is
-`INCOMPLETE` and does not contain a top-level `findings` array.
+`INCOMPLETE` and does not contain a top-level `findings` array. Its
+`sources_without_candidate_details` section can prove that no-row source files
+still contain unstructured requirement markers; those markers remain intake
+evidence only and must not be promoted to strict rows without stable row IDs,
+source refs, severity/actionability, and replay expectations.
 
 ```bash
 python3 scripts/orient_goal_loop_logs.py \

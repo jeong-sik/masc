@@ -25,7 +25,9 @@
   "source_candidate_coverage": {
     "sources_checked": 12,
     "sources_with_candidates": 5,
-    "sources_without_candidates": 7
+    "sources_without_candidates": 7,
+    "unstructured_sources_without_candidates": 7,
+    "unstructured_markers_without_candidates": 897
   },
   "sources_without_candidates": [
     "prompt_corpus/GOAL_LOOP/INTEGRATED_IMPROVEMENT_DESIGN.md",
@@ -35,6 +37,64 @@
     "prompt_corpus/GOAL_LOOP/live_incident_analysis.md",
     "prompt_corpus/GOAL_LOOP/masc_final_diagnosis.md",
     "prompt_corpus/GOAL_LOOP/progress-evaluation.md"
+  ],
+  "sources_without_candidate_details": [
+    {
+      "path": "prompt_corpus/GOAL_LOOP/INTEGRATED_IMPROVEMENT_DESIGN.md",
+      "markdown_headings": 53,
+      "markdown_table_rows": 51,
+      "numbered_items": 18,
+      "bullet_items": 6,
+      "unstructured_marker_total": 128
+    },
+    {
+      "path": "prompt_corpus/GOAL_LOOP/RUTHLESS_JUDGMENT.md",
+      "markdown_headings": 16,
+      "markdown_table_rows": 27,
+      "numbered_items": 0,
+      "bullet_items": 0,
+      "unstructured_marker_total": 43
+    },
+    {
+      "path": "prompt_corpus/GOAL_LOOP/fundamental_roadmap.md",
+      "markdown_headings": 111,
+      "markdown_table_rows": 67,
+      "numbered_items": 11,
+      "bullet_items": 51,
+      "unstructured_marker_total": 240
+    },
+    {
+      "path": "prompt_corpus/GOAL_LOOP/issues_analysis_done_vs_todo.md",
+      "markdown_headings": 33,
+      "markdown_table_rows": 126,
+      "numbered_items": 40,
+      "bullet_items": 10,
+      "unstructured_marker_total": 209
+    },
+    {
+      "path": "prompt_corpus/GOAL_LOOP/live_incident_analysis.md",
+      "markdown_headings": 23,
+      "markdown_table_rows": 8,
+      "numbered_items": 13,
+      "bullet_items": 28,
+      "unstructured_marker_total": 72
+    },
+    {
+      "path": "prompt_corpus/GOAL_LOOP/masc_final_diagnosis.md",
+      "markdown_headings": 34,
+      "markdown_table_rows": 21,
+      "numbered_items": 0,
+      "bullet_items": 0,
+      "unstructured_marker_total": 55
+    },
+    {
+      "path": "prompt_corpus/GOAL_LOOP/progress-evaluation.md",
+      "markdown_headings": 34,
+      "markdown_table_rows": 45,
+      "numbered_items": 0,
+      "bullet_items": 71,
+      "unstructured_marker_total": 150
+    }
   ],
   "source_errors_total": 0,
   "source_errors": [],

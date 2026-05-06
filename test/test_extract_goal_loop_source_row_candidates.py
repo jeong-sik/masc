@@ -58,7 +58,17 @@ class ExtractGoalLoopSourceRowCandidatesTest(unittest.TestCase):
             )
             no_rows = root / "fundamental_roadmap.md"
             no_rows.write_text(
-                "P-STR-01~03 is a range and must not invent omitted rows.\n",
+                "\n".join(
+                    [
+                        "# Roadmap",
+                        "1. Implement the thing",
+                        "- Verify the thing",
+                        "| Gate | Target |",
+                        "|------|--------|",
+                        "| latency | p99 |",
+                        "P-STR-01~03 is a range and must not invent omitted rows.",
+                    ]
+                ),
                 encoding="utf-8",
             )
 
@@ -98,11 +108,29 @@ class ExtractGoalLoopSourceRowCandidatesTest(unittest.TestCase):
                 "sources_checked": 5,
                 "sources_with_candidates": 4,
                 "sources_without_candidates": 1,
+                "unstructured_sources_without_candidates": 1,
+                "unstructured_markers_without_candidates": 5,
             },
+        )
+        self.assertEqual(
+            report["sources_without_candidate_details"],
+            [
+                {
+                    "path": "prompt_corpus/GOAL_LOOP/fundamental_roadmap.md",
+                    "markdown_headings": 1,
+                    "markdown_table_rows": 2,
+                    "numbered_items": 1,
+                    "bullet_items": 1,
+                    "unstructured_marker_total": 5,
+                }
+            ],
         )
         text_report = extract_goal_loop_source_row_candidates.report_to_text(report)
         self.assertIn(
-            "NO_ROWS: prompt_corpus/GOAL_LOOP/fundamental_roadmap.md rows=0",
+            (
+                "NO_ROWS: prompt_corpus/GOAL_LOOP/fundamental_roadmap.md "
+                "rows=0 unstructured_markers=5"
+            ),
             text_report,
         )
 

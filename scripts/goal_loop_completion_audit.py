@@ -410,8 +410,49 @@ def source_row_candidate_inventory_evidence(
         if isinstance(source_candidate_coverage_raw, dict)
         else {}
     )
+    no_candidate_details_raw = source_row_candidate_inventory.get(
+        "sources_without_candidate_details"
+    )
+    no_candidate_details = (
+        no_candidate_details_raw if isinstance(no_candidate_details_raw, list) else []
+    )
+    no_candidate_detail_paths = {
+        item.get("path")
+        for item in no_candidate_details
+        if isinstance(item, dict) and isinstance(item.get("path"), str)
+    }
+    invalid_no_candidate_details = []
+    unstructured_markers_without_candidates = 0
+    for item in no_candidate_details:
+        if not isinstance(item, dict):
+            invalid_no_candidate_details.append("not_object")
+            continue
+        path = item.get("path")
+        if not isinstance(path, str):
+            invalid_no_candidate_details.append("missing_path")
+            continue
+        marker_values = [
+            item.get("markdown_headings"),
+            item.get("markdown_table_rows"),
+            item.get("numbered_items"),
+            item.get("bullet_items"),
+        ]
+        if not all(isinstance(value, int) and value >= 0 for value in marker_values):
+            invalid_no_candidate_details.append(path)
+            continue
+        expected_marker_total = sum(marker_values)
+        marker_total = item.get("unstructured_marker_total")
+        if marker_total != expected_marker_total:
+            invalid_no_candidate_details.append(path)
+            continue
+        unstructured_markers_without_candidates += expected_marker_total
     sources_accounted = set(sources) == (
         source_paths_with_candidates | source_paths_without_candidates
+    )
+    no_candidate_details_accounted = (
+        no_candidate_detail_paths == source_paths_without_candidates
+        and len(no_candidate_details) == len(source_paths_without_candidates)
+        and not invalid_no_candidate_details
     )
     zero_source_count_matches = source_candidate_coverage.get(
         "sources_without_candidates"
@@ -421,6 +462,17 @@ def source_row_candidate_inventory_evidence(
     ) == len(source_paths_with_candidates)
     source_count_matches = source_candidate_coverage.get("sources_checked") == len(
         sources
+    )
+    unstructured_source_count_matches = source_candidate_coverage.get(
+        "unstructured_sources_without_candidates"
+    ) == sum(
+        1
+        for item in no_candidate_details
+        if isinstance(item, dict) and as_int(item.get("unstructured_marker_total")) > 0
+    )
+    unstructured_marker_count_matches = (
+        source_candidate_coverage.get("unstructured_markers_without_candidates")
+        == unstructured_markers_without_candidates
     )
     no_candidate_source_overlap = (
         len(source_paths_with_candidates & source_paths_without_candidates) == 0
@@ -446,9 +498,12 @@ def source_row_candidate_inventory_evidence(
         and candidates_by_file_total_matches
         and candidates_by_rule_total_matches
         and sources_accounted
+        and no_candidate_details_accounted
         and source_count_matches
         and candidate_source_count_matches
         and zero_source_count_matches
+        and unstructured_source_count_matches
+        and unstructured_marker_count_matches
         and no_candidate_source_overlap
         and len(sources) >= 12
         and source_row_candidate_inventory.get("source_errors_total") == 0
@@ -481,9 +536,17 @@ def source_row_candidate_inventory_evidence(
         "sources_with_candidates": len(source_paths_with_candidates),
         "sources_without_candidates": len(source_paths_without_candidates),
         "sources_accounted": sources_accounted,
+        "sources_without_candidate_details": len(no_candidate_details),
+        "no_candidate_details_accounted": no_candidate_details_accounted,
+        "invalid_no_candidate_details": invalid_no_candidate_details,
+        "unstructured_markers_without_candidates": (
+            unstructured_markers_without_candidates
+        ),
         "source_count_matches": source_count_matches,
         "candidate_source_count_matches": candidate_source_count_matches,
         "zero_source_count_matches": zero_source_count_matches,
+        "unstructured_source_count_matches": unstructured_source_count_matches,
+        "unstructured_marker_count_matches": unstructured_marker_count_matches,
         "no_candidate_source_overlap": no_candidate_source_overlap,
         "source_errors_total": source_row_candidate_inventory.get(
             "source_errors_total"

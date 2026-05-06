@@ -543,9 +543,17 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertEqual(inventory_evidence["sources_with_candidates"], 5)
         self.assertEqual(inventory_evidence["sources_without_candidates"], 7)
         self.assertTrue(inventory_evidence["sources_accounted"])
+        self.assertEqual(inventory_evidence["sources_without_candidate_details"], 7)
+        self.assertTrue(inventory_evidence["no_candidate_details_accounted"])
+        self.assertEqual(
+            inventory_evidence["unstructured_markers_without_candidates"],
+            897,
+        )
         self.assertTrue(inventory_evidence["source_count_matches"])
         self.assertTrue(inventory_evidence["candidate_source_count_matches"])
         self.assertTrue(inventory_evidence["zero_source_count_matches"])
+        self.assertTrue(inventory_evidence["unstructured_source_count_matches"])
+        self.assertTrue(inventory_evidence["unstructured_marker_count_matches"])
         self.assertTrue(inventory_evidence["no_candidate_source_overlap"])
         self.assertFalse(inventory_evidence["local_path_leaks"])
 
@@ -652,6 +660,7 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         ]
         self.assertFalse(inventory_evidence["recorded"])
         self.assertFalse(inventory_evidence["sources_accounted"])
+        self.assertFalse(inventory_evidence["no_candidate_details_accounted"])
         self.assertFalse(inventory_evidence["zero_source_count_matches"])
         self.assertTrue(inventory_evidence["source_count_matches"])
 

@@ -31,6 +31,9 @@ AUDIT_DERIVED_HEADING_RE = re.compile(
     r"^#{2,6}\s+#(?P<num>\d+)\s+\[(?P<severity>[^\]]+)\]\s+(?P<title>.+)"
 )
 DEEP_AUDIT_HEADING_RE = re.compile(r"^#{2,6}\s+(?P<num>\d+(?:\.\d+)+)\s+(?P<title>.+)")
+MARKDOWN_HEADING_RE = re.compile(r"^#{1,6}\s+\S")
+NUMBERED_ITEM_RE = re.compile(r"^\s*\d+[.)]\s+\S")
+BULLET_ITEM_RE = re.compile(r"^\s*[-*]\s+\S")
 
 
 @dataclass(frozen=True)
@@ -81,6 +84,31 @@ def severity_from_cells(cells: list[str]) -> str | None:
         if normalized in {"critical", "high", "medium", "low", "warning", "info"}:
             return normalized
     return None
+
+
+def is_table_separator(cells: list[str]) -> bool:
+    return all(re.fullmatch(r":?-{3,}:?", cell.strip()) for cell in cells)
+
+
+def unstructured_marker_counts(lines: list[str]) -> dict[str, int]:
+    counts = {
+        "markdown_headings": 0,
+        "markdown_table_rows": 0,
+        "numbered_items": 0,
+        "bullet_items": 0,
+    }
+    for line in lines:
+        if MARKDOWN_HEADING_RE.match(line):
+            counts["markdown_headings"] += 1
+        cells = table_cells(line)
+        if cells and not is_table_separator(cells):
+            counts["markdown_table_rows"] += 1
+        if NUMBERED_ITEM_RE.match(line):
+            counts["numbered_items"] += 1
+        if BULLET_ITEM_RE.match(line):
+            counts["bullet_items"] += 1
+    counts["unstructured_marker_total"] = sum(counts.values())
+    return counts
 
 
 def candidate_from_table_row(
@@ -254,6 +282,7 @@ def inventory_sources(
     candidates_by_id: dict[str, Candidate] = {}
     source_errors: list[dict[str, str]] = []
     sources_checked: list[str] = []
+    marker_counts_by_source: dict[str, dict[str, int]] = {}
 
     for path in paths:
         source_path = logical_source_path(path, source_prefix)
@@ -265,6 +294,7 @@ def inventory_sources(
                 {"path": source_path, "error": f"{type(exc).__name__}: {exc}"}
             )
             continue
+        marker_counts_by_source[source_path] = unstructured_marker_counts(lines)
 
         for line_ref, line in enumerate(lines, start=1):
             line_candidates = [
@@ -321,6 +351,14 @@ def inventory_sources(
     sources_without_candidates = sorted(
         source for source in sources_checked if source not in sources_with_candidates
     )
+    sources_without_candidate_details = [
+        {"path": source, **marker_counts_by_source.get(source, {})}
+        for source in sources_without_candidates
+    ]
+    unstructured_markers_without_candidates = sum(
+        item.get("unstructured_marker_total", 0)
+        for item in sources_without_candidate_details
+    )
 
     row_count = len(candidates)
     status = (
@@ -353,8 +391,17 @@ def inventory_sources(
             "sources_checked": len(sources_checked),
             "sources_with_candidates": len(sources_with_candidates),
             "sources_without_candidates": len(sources_without_candidates),
+            "unstructured_sources_without_candidates": sum(
+                1
+                for item in sources_without_candidate_details
+                if item.get("unstructured_marker_total", 0) > 0
+            ),
+            "unstructured_markers_without_candidates": (
+                unstructured_markers_without_candidates
+            ),
         },
         "sources_without_candidates": sources_without_candidates,
+        "sources_without_candidate_details": sources_without_candidate_details,
         "source_errors_total": len(source_errors),
         "source_errors": source_errors,
         "candidates_by_file": [
@@ -386,8 +433,17 @@ def report_to_text(report: dict[str, Any]) -> str:
     ]
     for item in report["candidates_by_file"]:
         lines.append(f"FILE: {item['path']} rows={item['unique_candidate_rows']}")
+    detail_by_source = {
+        item["path"]: item
+        for item in report.get("sources_without_candidate_details", [])
+        if isinstance(item, dict) and isinstance(item.get("path"), str)
+    }
     for source_path in report.get("sources_without_candidates", []):
-        lines.append(f"NO_ROWS: {source_path} rows=0")
+        detail = detail_by_source.get(source_path, {})
+        marker_total = detail.get("unstructured_marker_total", 0)
+        lines.append(
+            f"NO_ROWS: {source_path} rows=0 unstructured_markers={marker_total}"
+        )
     for error in report["source_errors"]:
         lines.append(f"ERROR: {error['path']} {error['error']}")
     return "\n".join(lines)

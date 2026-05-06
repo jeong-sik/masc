@@ -829,6 +829,38 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         )
         self.assertTrue(closeout_evidence["has_strict_corpus_blocker"])
 
+    def test_completion_audit_rejects_invalid_closeout_prompt_sources(
+        self,
+    ) -> None:
+        checklist = json.loads(PROMPT_CHECKLIST_FIXTURE.read_text(encoding="utf-8"))
+        sources = checklist["prompt_sources_checked"]
+        assert isinstance(sources, list)
+        duplicate_source = sources[0]
+        sources[1] = duplicate_source
+        sources[2] = ""
+        sources[3] = "docs/not-a-goal-loop-source.md"
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            prompt_closeout_checklist=checklist,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
+        self.assertFalse(checklist_evidence["recorded"])
+        self.assertEqual(checklist_evidence["invalid_prompt_sources_checked"], 1)
+        self.assertEqual(
+            checklist_evidence["duplicate_prompt_sources_checked"],
+            [duplicate_source],
+        )
+        self.assertEqual(
+            checklist_evidence["invalid_prompt_source_prefixes"],
+            ["docs/not-a-goal-loop-source.md"],
+        )
+        self.assertFalse(checklist_evidence["prompt_sources_unique"])
+        self.assertFalse(checklist_evidence["prompt_sources_have_expected_prefix"])
+        self.assertFalse(checklist_evidence["prompt_sources_valid"])
+
     def test_completion_audit_accepts_prompt_checklist_without_strict_blocker(
         self,
     ) -> None:

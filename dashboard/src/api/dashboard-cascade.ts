@@ -276,6 +276,55 @@ export function fetchCascadeStrategyTrace(opts?: {
   )
 }
 
+export type CascadeAuditHopStatus = 'success' | 'fallback' | 'error' | 'attempted'
+
+export interface CascadeAuditHop {
+  i: number
+  model: string
+  status: CascadeAuditHopStatus
+  ms: number
+  reason?: string
+  ms_source?: string
+}
+
+export interface CascadeAuditRun {
+  id: string
+  cascade: string
+  trigger: string
+  at: number
+  outcome: string
+  error_category?: string
+  configured: string[]
+  primary: string | null
+  selected: string | null
+  total_ms: number
+  total_ms_source?: string
+  hops: CascadeAuditHop[]
+}
+
+export interface CascadeAuditRunsResponse {
+  updated_at: string
+  total_runs: number
+  audit_runs: CascadeAuditRun[]
+}
+
+export function fetchCascadeAuditRuns(opts?: {
+  limit?: number
+  cascade?: string
+  signal?: AbortSignal
+}): Promise<CascadeAuditRunsResponse> {
+  const params = new URLSearchParams()
+  if (typeof opts?.limit === 'number' && opts.limit > 0) {
+    params.set('limit', String(opts.limit))
+  }
+  if (opts?.cascade) params.set('cascade', opts.cascade)
+  const qs = params.toString()
+  return get<CascadeAuditRunsResponse>(
+    `/api/v1/cascade/audit_runs${qs ? `?${qs}` : ''}`,
+    { signal: opts?.signal },
+  )
+}
+
 export type CascadeSloStatus = 'ok' | 'warn' | 'violated'
 
 interface CascadeSloTargets {

@@ -247,6 +247,14 @@ def synthetic_strict_row_corpus(row_count: int = 206) -> dict[str, object]:
 
 
 class GoalLoopCompletionAuditTest(unittest.TestCase):
+    def test_string_list_strips_and_rejects_empty_entries(self) -> None:
+        self.assertEqual(
+            goal_loop_completion_audit.string_list(
+                [" prompt_corpus/GOAL_LOOP/a.md ", "", "   ", 42]
+            ),
+            ["prompt_corpus/GOAL_LOOP/a.md"],
+        )
+
     def test_completion_audit_passes_when_all_criteria_pass(self) -> None:
         audit = goal_loop_completion_audit.build_completion_audit(complete_status())
 
@@ -633,6 +641,42 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertEqual(inventory_evidence["invalid_prompt_sources_checked"], 1)
         self.assertTrue(inventory_evidence["sources_accounted"])
 
+    def test_completion_audit_rejects_invalid_source_inventory_paths(
+        self,
+    ) -> None:
+        inventory = json.loads(
+            SOURCE_ROW_CANDIDATE_INVENTORY_FIXTURE.read_text(encoding="utf-8")
+        )
+        sources = inventory["prompt_sources_checked"]
+        assert isinstance(sources, list)
+        duplicate_source = sources[0]
+        sources[1] = duplicate_source
+        sources[2] = "   "
+        sources[3] = "docs/not-a-goal-loop-source.md"
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            source_row_candidate_inventory=inventory,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        inventory_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "source_row_candidate_inventory"
+        ]
+        self.assertFalse(inventory_evidence["recorded"])
+        self.assertEqual(inventory_evidence["invalid_prompt_sources_checked"], 1)
+        self.assertEqual(
+            inventory_evidence["duplicate_prompt_sources_checked"],
+            [duplicate_source],
+        )
+        self.assertEqual(
+            inventory_evidence["invalid_prompt_source_prefixes"],
+            ["docs/not-a-goal-loop-source.md"],
+        )
+        self.assertFalse(inventory_evidence["prompt_sources_unique"])
+        self.assertFalse(inventory_evidence["prompt_sources_have_expected_prefix"])
+        self.assertFalse(inventory_evidence["prompt_sources_valid"])
+
     def test_completion_audit_rejects_inconsistent_source_row_candidate_inventory(
         self,
     ) -> None:
@@ -879,6 +923,39 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
         self.assertFalse(checklist_evidence["recorded"])
         self.assertFalse(checklist_evidence["source_catalog_id_matches"])
+
+    def test_completion_audit_rejects_invalid_prompt_closeout_sources(
+        self,
+    ) -> None:
+        checklist = json.loads(PROMPT_CHECKLIST_FIXTURE.read_text(encoding="utf-8"))
+        sources = checklist["prompt_sources_checked"]
+        assert isinstance(sources, list)
+        duplicate_source = sources[0]
+        sources[1] = duplicate_source
+        sources[2] = ""
+        sources[3] = "docs/not-a-goal-loop-source.md"
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            prompt_closeout_checklist=checklist,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
+        self.assertFalse(checklist_evidence["recorded"])
+        self.assertFalse(checklist_evidence["source_docs_complete"])
+        self.assertEqual(checklist_evidence["invalid_prompt_sources_checked"], 1)
+        self.assertEqual(
+            checklist_evidence["duplicate_prompt_sources_checked"],
+            [duplicate_source],
+        )
+        self.assertEqual(
+            checklist_evidence["invalid_prompt_source_prefixes"],
+            ["docs/not-a-goal-loop-source.md"],
+        )
+        self.assertFalse(checklist_evidence["prompt_sources_unique"])
+        self.assertFalse(checklist_evidence["prompt_sources_have_expected_prefix"])
+        self.assertFalse(checklist_evidence["prompt_sources_valid"])
 
     def test_strict_row_corpus_contract_fixture_is_json(self) -> None:
         contract = json.loads(STRICT_ROW_CORPUS_CONTRACT_FIXTURE.read_text())

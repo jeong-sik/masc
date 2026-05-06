@@ -37,6 +37,7 @@ PROMPT_CHECKLIST_STATUSES = {"PASS", "PARTIAL", "BLOCKED"}
 PROMPT_CHECKLIST_ISSUE_REF_RE = re.compile(
     r"^https://github\.com/jeong-sik/masc-mcp/issues/\d+$"
 )
+PROMPT_SOURCE_PATH_PREFIX = "prompt_corpus/GOAL_LOOP/"
 
 
 @dataclass(frozen=True)
@@ -99,7 +100,49 @@ def as_nonempty_str(value: Any) -> str | None:
 def string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
-    return [item for item in value if isinstance(item, str)]
+    return [
+        stripped for item in value if (stripped := as_nonempty_str(item)) is not None
+    ]
+
+
+def prompt_source_list(value: Any) -> tuple[list[str], dict[str, Any]]:
+    if not isinstance(value, list):
+        return [], {
+            "invalid_prompt_sources_checked": 0,
+            "duplicate_prompt_sources_checked": [],
+            "invalid_prompt_source_prefixes": [],
+            "prompt_sources_unique": True,
+            "prompt_sources_have_expected_prefix": True,
+            "prompt_sources_valid": True,
+        }
+
+    sources = string_list(value)
+    invalid_count = len(value) - len(sources)
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for source in sources:
+        if source in seen:
+            duplicates.add(source)
+        seen.add(source)
+    invalid_prefixes = sorted(
+        source
+        for source in set(sources)
+        if not source.startswith(PROMPT_SOURCE_PATH_PREFIX)
+    )
+    prompt_sources_unique = not duplicates
+    prompt_sources_have_expected_prefix = not invalid_prefixes
+    return sources, {
+        "invalid_prompt_sources_checked": invalid_count,
+        "duplicate_prompt_sources_checked": sorted(duplicates),
+        "invalid_prompt_source_prefixes": invalid_prefixes,
+        "prompt_sources_unique": prompt_sources_unique,
+        "prompt_sources_have_expected_prefix": prompt_sources_have_expected_prefix,
+        "prompt_sources_valid": (
+            invalid_count == 0
+            and prompt_sources_unique
+            and prompt_sources_have_expected_prefix
+        ),
+    }
 
 
 def criterion(
@@ -339,10 +382,7 @@ def source_row_candidate_inventory_evidence(
         return {"inventory_status": "MISSING", "recorded": False}
 
     sources_raw = source_row_candidate_inventory.get("prompt_sources_checked", [])
-    sources = string_list(sources_raw)
-    invalid_sources_checked = (
-        len(sources_raw) - len(sources) if isinstance(sources_raw, list) else 0
-    )
+    sources, prompt_source_validation = prompt_source_list(sources_raw)
     source_errors_raw = source_row_candidate_inventory.get("source_errors", [])
     source_errors = source_errors_raw if isinstance(source_errors_raw, list) else []
     expected_total = source_row_candidate_inventory.get("expected_findings_total")
@@ -537,7 +577,7 @@ def source_row_candidate_inventory_evidence(
         and len(sources) >= 12
         and source_row_candidate_inventory.get("source_errors_total") == 0
         and len(source_errors) == 0
-        and invalid_sources_checked == 0
+        and prompt_source_validation["prompt_sources_valid"]
         and not local_path_leaks
     )
     return {
@@ -561,7 +601,7 @@ def source_row_candidate_inventory_evidence(
         "candidates_by_rule_total": candidates_by_rule_total,
         "candidates_by_rule_total_matches": candidates_by_rule_total_matches,
         "prompt_sources_checked": len(sources),
-        "invalid_prompt_sources_checked": invalid_sources_checked,
+        **prompt_source_validation,
         "sources_with_candidates": len(source_paths_with_candidates),
         "sources_without_candidates": len(source_paths_without_candidates),
         "sources_accounted": sources_accounted,
@@ -640,12 +680,7 @@ def prompt_closeout_checklist_evidence(
     )
 
     source_docs_raw = prompt_closeout_checklist.get("prompt_sources_checked", [])
-    source_docs = string_list(source_docs_raw)
-    invalid_source_docs = (
-        len(source_docs_raw) - len(source_docs)
-        if isinstance(source_docs_raw, list)
-        else 0
-    )
+    source_docs, prompt_source_validation = prompt_source_list(source_docs_raw)
     requirements_raw = prompt_closeout_checklist.get("requirements", [])
     requirements = requirements_raw if isinstance(requirements_raw, list) else []
 
@@ -718,7 +753,7 @@ def prompt_closeout_checklist_evidence(
     source_docs_complete = (
         expected_source_docs >= 12
         and len(source_docs) == expected_source_docs
-        and invalid_source_docs == 0
+        and prompt_source_validation["prompt_sources_valid"]
     )
     has_strict_corpus_blocker = "strict_row_level_catalog_complete" in blocked_criteria
     local_path_leaks = contains_user_local_path(prompt_closeout_checklist)
@@ -739,7 +774,7 @@ def prompt_closeout_checklist_evidence(
         "checklist_source_catalog_id": checklist_catalog_id,
         "source_catalog_id_matches": source_catalog_id_matches,
         "prompt_sources_checked": len(source_docs),
-        "invalid_prompt_sources_checked": invalid_source_docs,
+        **prompt_source_validation,
         "prompt_sources_expected": expected_source_docs,
         "source_docs_complete": source_docs_complete,
         "requirements_total": len(requirements),

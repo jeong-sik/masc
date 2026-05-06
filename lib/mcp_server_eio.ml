@@ -83,9 +83,13 @@ let requires_join_tools_inline =
   List.map Tool_name.Masc.to_string
     Tool_name.Masc.[ Broadcast; Leave ]
 
+let mcp_context_free_inline_tools =
+  [ "masc_approval_pending" ]
+
 let mcp_context_required_tools_inline =
   Tool_schemas_inline.schemas
   |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+  |> List.filter (fun name -> not (List.mem name mcp_context_free_inline_tools))
 
 let () =
   (* [Keeper_exec_tools.keeper_read_only_tools] is the keeper SSOT.

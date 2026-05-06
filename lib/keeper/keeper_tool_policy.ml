@@ -229,13 +229,18 @@ let is_keeper_denied (name : string) : bool =
 
 (* ── Schema injection filter ──────────────────────────────────── *)
 
+let keeper_safe_inline_tools =
+  [ "masc_approval_pending" ]
+
 let keeper_mcp_context_required_tools =
   Tool_schemas_inline.schemas
   |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+  |> List.filter (fun name -> not (List.mem name keeper_safe_inline_tools))
 
 let is_keeper_mcp_context_required name =
-  List.mem name keeper_mcp_context_required_tools
-  || Tool_dispatch.is_mcp_context_required name
+  not (List.mem name keeper_safe_inline_tools)
+  && (List.mem name keeper_mcp_context_required_tools
+      || Tool_dispatch.is_mcp_context_required name)
 
 let keeper_supported_keeper_masc_tools =
   [ "masc_keeper_list"
@@ -246,7 +251,9 @@ let keeper_supported_keeper_masc_tools =
 
 let keeper_supported_masc_schemas (schemas : Masc_domain.tool_schema list) =
   let supported_in_keeper name =
-    if Tool_dispatch.is_registered name then
+    if List.mem name keeper_safe_inline_tools then
+      true
+    else if Tool_dispatch.is_registered name then
       true
     else if not (Tool_dispatch.is_tag_registry_initialized ()) then
       true

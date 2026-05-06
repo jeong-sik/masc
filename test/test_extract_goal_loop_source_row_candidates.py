@@ -75,6 +75,9 @@ class ExtractGoalLoopSourceRowCandidatesTest(unittest.TestCase):
             report = extract_goal_loop_source_row_candidates.inventory_sources(
                 [goal_loop, derived, deep, llm, no_rows],
                 expected_total=6,
+                no_row_tracking_issue_refs=[
+                    "https://github.com/jeong-sik/masc-mcp/issues/13636"
+                ],
             )
 
         self.assertEqual(report["status"], "COMPLETE")
@@ -110,6 +113,7 @@ class ExtractGoalLoopSourceRowCandidatesTest(unittest.TestCase):
                 "sources_without_candidates": 1,
                 "unstructured_sources_without_candidates": 1,
                 "unstructured_markers_without_candidates": 5,
+                "no_candidate_sources_with_tracking_issue_refs": 1,
             },
         )
         self.assertEqual(
@@ -122,6 +126,9 @@ class ExtractGoalLoopSourceRowCandidatesTest(unittest.TestCase):
                     "numbered_items": 1,
                     "bullet_items": 1,
                     "unstructured_marker_total": 5,
+                    "tracking_issue_refs": [
+                        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+                    ],
                 }
             ],
         )

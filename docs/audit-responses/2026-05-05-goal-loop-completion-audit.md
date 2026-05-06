@@ -184,8 +184,10 @@
   original 12 supplied files are now mapped directly to strict-corpus
   discovery evidence.
 - [근거] `python3 scripts/extract_goal_loop_source_row_candidates.py
-  <12 prompt source files> --summary-only --require-complete --format text`
-  checked at 2026-05-06T15:51:28+09:00, confidence High: exits non-zero with
+  <12 prompt source files> --summary-only --require-complete --format text
+  --no-row-tracking-issue-ref https://github.com/jeong-sik/masc-mcp/issues/13265
+  --no-row-tracking-issue-ref https://github.com/jeong-sik/masc-mcp/issues/13636`
+  checked at 2026-05-06T16:03:11+09:00, confidence High: exits non-zero with
   `rows=132 expected=206 missing=74 sources=12 errors=0`. This conservative
   extractor records only explicit IDs, explicit S/F anti-pattern rows,
   markdown table ID rows, and numbered audit sections; it does not expand
@@ -198,6 +200,7 @@
   Those 7 files are not empty: the inventory separately records 897
   unstructured headings, table rows, numbered items, and bullet items that are
   not stable strict-corpus rows and therefore cannot satisfy the 206-row gate.
+  All 7 no-row marker buckets carry tracking refs to #13265 and #13636.
 - [근거] `gh pr view 13577 --repo jeong-sik/masc-mcp --json
   number,state,isDraft,mergeable,mergeStateStatus,labels,url`,
   `gh issue view 13265 --repo jeong-sik/masc-mcp --json number,state,url`, and
@@ -228,14 +231,16 @@
   test/fixtures/goal_loop/prompt-closeout-checklist.external-claim.json
   --source-row-candidate-inventory
   test/fixtures/goal_loop/source-row-candidate-inventory.external-claim.json
-  --require-complete --format text` checked at 2026-05-06T15:51:28+09:00,
+  --require-complete --format text` checked at 2026-05-06T16:03:11+09:00,
   confidence High: exits non-zero with two closeout blockers:
   `strict_row_level_catalog_complete` and
   `prompt_requirements_closeout_complete`. The strict row evidence directly
   records the source-row candidate inventory as 132/206 and validates the 5/7
   source-file coverage split with no unaccounted prompt source files. The 7
   no-row files carry 897 unstructured requirement markers, but those markers
-  are tracked as non-corpus evidence and do not satisfy the strict row gate. The
+  are tracked as non-corpus evidence and do not satisfy the strict row gate.
+  Completion-audit evidence validates all 7 no-row marker buckets have tracking
+  refs and reports 2 unique tracking issue refs (#13265 and #13636). The
   checklist maps all 21 prompt requirements to concrete artifacts and blockers
   across all 12 prompt source documents: 2 `PASS`, 17 `PARTIAL`, and 2
   `BLOCKED` requirements, with all 19 non-PASS rows carrying valid GitHub issue
@@ -249,7 +254,7 @@
   test/fixtures/goal_loop/prompt-closeout-checklist.external-claim.json
   --source-row-candidate-inventory
   test/fixtures/goal_loop/source-row-candidate-inventory.external-claim.json
-  --require-complete --format text` checked at 2026-05-06T15:51:28+09:00,
+  --require-complete --format text` checked at 2026-05-06T16:03:11+09:00,
   confidence High: exits non-zero with two closeout blockers:
   `strict_row_level_catalog_complete` and
   `prompt_requirements_closeout_complete`. The first blocker proves the real
@@ -266,7 +271,7 @@
   High: all eight prompt-checklist tracking issue refs resolve to open,
   label-free GitHub issues.
 - [근거] `python3 test/test_goal_loop_completion_audit.py` checked at
-  2026-05-06T15:51:28+09:00, confidence High: the completion audit accepts
+  2026-05-06T16:03:11+09:00, confidence High: the completion audit accepts
   optional `--strict-row-corpus` and `--source-row-candidate-inventory`
   artifacts, validates catalog identity and internal totals, and still does not
   use either artifact as a proxy for completion. A synthetic valid 206-row
@@ -274,7 +279,8 @@
   inventory is recorded as 132/206 with the 5 source files that contain
   candidates and 7 checked source files that do not. The same inventory now
   proves that those 7 no-row files contain 897 unstructured requirement markers
-  rather than stable row IDs; the closeout remains `BLOCKED` while Orient still
+  rather than stable row IDs, and requires those marker buckets to carry valid
+  tracking issue refs; the closeout remains `BLOCKED` while Orient still
   reports only 19 itemized rows. Invalid supplied
   corpora or inconsistent source-row inventories block
   `strict_row_level_catalog_complete`. The same test suite now verifies that a

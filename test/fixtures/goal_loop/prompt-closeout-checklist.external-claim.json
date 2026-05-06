@@ -334,7 +334,7 @@
       ],
       "status": "BLOCKED",
       "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "Discovery records FULL_ROW_CORPUS_NOT_FOUND with 19 of 206 strict rows itemized and 187 missing; the source-doc candidate extractor finds only 132 explicit row candidates across 5 source files, with 7 checked prompt files yielding zero explicit candidates. Those 7 files still contain 897 unstructured requirement markers, but they are not stable strict-corpus rows. Candidate corpora must also bind row source paths and line refs to the audit catalog external_sources. This is not the required 206-row strict corpus.",
+      "gap": "Discovery records FULL_ROW_CORPUS_NOT_FOUND with 19 of 206 strict rows itemized and 187 missing; the source-doc candidate extractor finds only 132 explicit row candidates across 5 source files, with 7 checked prompt files yielding zero explicit candidates. Those 7 files still contain 897 unstructured requirement markers tracked by #13265 and #13636, but they are not stable strict-corpus rows. Candidate corpora must also bind row source paths and line refs to the audit catalog external_sources. This is not the required 206-row strict corpus.",
       "tracking_issue_refs": [
         "https://github.com/jeong-sik/masc-mcp/issues/13265",
         "https://github.com/jeong-sik/masc-mcp/issues/13636"

@@ -575,7 +575,7 @@
       ],
       "extraction_policy": "Conservative explicit rows only: exact finding IDs, exact S/F anti-pattern IDs, markdown table ID rows, and numbered audit section headings in the two audit reports. Ranges and roadmap phase bullets are not expanded into invented rows.",
       "command": "python3 scripts/extract_goal_loop_source_row_candidates.py <12 prompt source docs> --summary-only --require-complete --format text",
-      "note": "The repo source-row candidate extractor scanned the 12 prompt-supplied source documents. It found only 132 explicit row candidates across 5 source files, leaving 7 checked prompt files with zero explicit row candidates and at least 74 missing rows versus the required 206. The 7 no-row files still contain 897 unstructured headings, table rows, numbered items, and bullet items, but these are non-corpus markers rather than stable strict finding rows. This is not a strict corpus because it lacks 206 complete replay rows and intentionally does not synthesize rows from ranges or roadmap bullets."
+      "note": "The repo source-row candidate extractor scanned the 12 prompt-supplied source documents. It found only 132 explicit row candidates across 5 source files, leaving 7 checked prompt files with zero explicit row candidates and at least 74 missing rows versus the required 206. The 7 no-row files still contain 897 unstructured headings, table rows, numbered items, and bullet items, with all 7 marker buckets tracked by #13265 and #13636, but these are non-corpus markers rather than stable strict finding rows. This is not a strict corpus because it lacks 206 complete replay rows and intentionally does not synthesize rows from ranges or roadmap bullets."
     }
   ],
   "broader_structured_id_triage": {

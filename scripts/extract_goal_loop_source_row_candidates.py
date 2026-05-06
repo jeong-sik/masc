@@ -15,6 +15,7 @@ from typing import Any
 DEFAULT_CATALOG_ID = "goal-loop-206-audit-external-claim-2026-05-05"
 DEFAULT_SOURCE_PREFIX = "prompt_corpus/GOAL_LOOP/"
 DEFAULT_EXPECTED_TOTAL = 206
+ISSUE_REF_RE = re.compile(r"^https://github\.com/jeong-sik/masc-mcp/issues/\d+$")
 
 EXACT_ID_RE = re.compile(
     r"\b(?P<id>(?:R-FATAL|CD|CC|CE|CF|NF)-\d+|P-[A-Z]+-\d{2}|[SF]\d{2})\b"
@@ -109,6 +110,10 @@ def unstructured_marker_counts(lines: list[str]) -> dict[str, int]:
             counts["bullet_items"] += 1
     counts["unstructured_marker_total"] = sum(counts.values())
     return counts
+
+
+def issue_refs(value: list[str]) -> list[str]:
+    return [item for item in value if ISSUE_REF_RE.fullmatch(item)]
 
 
 def candidate_from_table_row(
@@ -277,12 +282,14 @@ def inventory_sources(
     source_catalog_id: str = DEFAULT_CATALOG_ID,
     expected_total: int = DEFAULT_EXPECTED_TOTAL,
     source_prefix: str = DEFAULT_SOURCE_PREFIX,
+    no_row_tracking_issue_refs: list[str] | None = None,
     include_candidates: bool = True,
 ) -> dict[str, Any]:
     candidates_by_id: dict[str, Candidate] = {}
     source_errors: list[dict[str, str]] = []
     sources_checked: list[str] = []
     marker_counts_by_source: dict[str, dict[str, int]] = {}
+    tracking_issue_refs = issue_refs(no_row_tracking_issue_refs or [])
 
     for path in paths:
         source_path = logical_source_path(path, source_prefix)
@@ -351,13 +358,21 @@ def inventory_sources(
     sources_without_candidates = sorted(
         source for source in sources_checked if source not in sources_with_candidates
     )
-    sources_without_candidate_details = [
-        {"path": source, **marker_counts_by_source.get(source, {})}
-        for source in sources_without_candidates
-    ]
+    sources_without_candidate_details = []
+    for source in sources_without_candidates:
+        detail = {"path": source, **marker_counts_by_source.get(source, {})}
+        if detail.get("unstructured_marker_total", 0) > 0:
+            detail["tracking_issue_refs"] = tracking_issue_refs
+        sources_without_candidate_details.append(detail)
     unstructured_markers_without_candidates = sum(
         item.get("unstructured_marker_total", 0)
         for item in sources_without_candidate_details
+    )
+    no_candidate_sources_with_tracking_issue_refs = sum(
+        1
+        for item in sources_without_candidate_details
+        if item.get("unstructured_marker_total", 0) > 0
+        and len(item.get("tracking_issue_refs", [])) > 0
     )
 
     row_count = len(candidates)
@@ -398,6 +413,9 @@ def inventory_sources(
             ),
             "unstructured_markers_without_candidates": (
                 unstructured_markers_without_candidates
+            ),
+            "no_candidate_sources_with_tracking_issue_refs": (
+                no_candidate_sources_with_tracking_issue_refs
             ),
         },
         "sources_without_candidates": sources_without_candidates,
@@ -484,6 +502,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help=f"Logical source prefix (default: {DEFAULT_SOURCE_PREFIX}).",
     )
     parser.add_argument(
+        "--no-row-tracking-issue-ref",
+        action="append",
+        default=[],
+        help=(
+            "GitHub issue URL to attach to source files with unstructured "
+            "markers but zero strict row candidates. May be repeated."
+        ),
+    )
+    parser.add_argument(
         "--summary-only",
         action="store_true",
         help="Omit candidate_rows from JSON output.",
@@ -509,6 +536,7 @@ def main(argv: list[str] | None = None) -> int:
         source_catalog_id=args.source_catalog_id,
         expected_total=args.expected_total,
         source_prefix=args.source_prefix,
+        no_row_tracking_issue_refs=args.no_row_tracking_issue_ref,
         include_candidates=not args.summary_only,
     )
     if args.format == "json":

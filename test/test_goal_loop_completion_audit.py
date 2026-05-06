@@ -549,11 +549,30 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
             inventory_evidence["unstructured_markers_without_candidates"],
             897,
         )
+        self.assertEqual(
+            inventory_evidence["no_candidate_sources_with_tracking_issue_refs"],
+            7,
+        )
+        self.assertEqual(
+            inventory_evidence["no_candidate_tracking_issue_refs_total"],
+            2,
+        )
+        self.assertEqual(
+            inventory_evidence["missing_no_candidate_tracking_issue_refs"],
+            [],
+        )
+        self.assertEqual(
+            inventory_evidence["invalid_no_candidate_tracking_issue_refs"],
+            [],
+        )
         self.assertTrue(inventory_evidence["source_count_matches"])
         self.assertTrue(inventory_evidence["candidate_source_count_matches"])
         self.assertTrue(inventory_evidence["zero_source_count_matches"])
         self.assertTrue(inventory_evidence["unstructured_source_count_matches"])
         self.assertTrue(inventory_evidence["unstructured_marker_count_matches"])
+        self.assertTrue(
+            inventory_evidence["no_candidate_tracking_source_count_matches"]
+        )
         self.assertTrue(inventory_evidence["no_candidate_source_overlap"])
         self.assertFalse(inventory_evidence["local_path_leaks"])
 
@@ -663,6 +682,40 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertFalse(inventory_evidence["no_candidate_details_accounted"])
         self.assertFalse(inventory_evidence["zero_source_count_matches"])
         self.assertTrue(inventory_evidence["source_count_matches"])
+
+    def test_completion_audit_rejects_untracked_no_candidate_source_markers(
+        self,
+    ) -> None:
+        inventory = json.loads(
+            SOURCE_ROW_CANDIDATE_INVENTORY_FIXTURE.read_text(encoding="utf-8")
+        )
+        details = inventory["sources_without_candidate_details"]
+        assert isinstance(details, list)
+        first = details[0]
+        assert isinstance(first, dict)
+        first.pop("tracking_issue_refs")
+        coverage = inventory["source_candidate_coverage"]
+        assert isinstance(coverage, dict)
+        coverage["no_candidate_sources_with_tracking_issue_refs"] -= 1
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            source_row_candidate_inventory=inventory,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        inventory_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "source_row_candidate_inventory"
+        ]
+        self.assertFalse(inventory_evidence["recorded"])
+        self.assertEqual(
+            inventory_evidence["missing_no_candidate_tracking_issue_refs"],
+            [first["path"]],
+        )
+        self.assertFalse(inventory_evidence["no_candidate_details_accounted"])
+        self.assertTrue(
+            inventory_evidence["no_candidate_tracking_source_count_matches"]
+        )
 
     def test_completion_audit_rejects_wrong_catalog_source_row_candidate_inventory(
         self,

@@ -423,6 +423,10 @@ def source_row_candidate_inventory_evidence(
     }
     invalid_no_candidate_details = []
     unstructured_markers_without_candidates = 0
+    no_candidate_sources_with_tracking_issue_refs = 0
+    no_candidate_tracking_issue_refs: set[str] = set()
+    missing_no_candidate_tracking_issue_refs: list[str] = []
+    invalid_no_candidate_tracking_issue_refs: list[str] = []
     for item in no_candidate_details:
         if not isinstance(item, dict):
             invalid_no_candidate_details.append("not_object")
@@ -446,6 +450,26 @@ def source_row_candidate_inventory_evidence(
             invalid_no_candidate_details.append(path)
             continue
         unstructured_markers_without_candidates += expected_marker_total
+        tracking_refs_raw = item.get("tracking_issue_refs", [])
+        tracking_refs = tracking_refs_raw if isinstance(tracking_refs_raw, list) else []
+        valid_tracking_refs = [
+            ref
+            for ref in tracking_refs
+            if isinstance(ref, str)
+            and PROMPT_CHECKLIST_ISSUE_REF_RE.fullmatch(ref) is not None
+        ]
+        no_candidate_tracking_issue_refs.update(valid_tracking_refs)
+        if expected_marker_total > 0:
+            if valid_tracking_refs:
+                no_candidate_sources_with_tracking_issue_refs += 1
+            else:
+                missing_no_candidate_tracking_issue_refs.append(path)
+                invalid_no_candidate_details.append(path)
+            if not isinstance(tracking_refs_raw, list) or len(
+                valid_tracking_refs
+            ) != len(tracking_refs):
+                invalid_no_candidate_tracking_issue_refs.append(path)
+                invalid_no_candidate_details.append(path)
     sources_accounted = set(sources) == (
         source_paths_with_candidates | source_paths_without_candidates
     )
@@ -473,6 +497,10 @@ def source_row_candidate_inventory_evidence(
     unstructured_marker_count_matches = (
         source_candidate_coverage.get("unstructured_markers_without_candidates")
         == unstructured_markers_without_candidates
+    )
+    no_candidate_tracking_source_count_matches = (
+        source_candidate_coverage.get("no_candidate_sources_with_tracking_issue_refs")
+        == no_candidate_sources_with_tracking_issue_refs
     )
     no_candidate_source_overlap = (
         len(source_paths_with_candidates & source_paths_without_candidates) == 0
@@ -504,6 +532,7 @@ def source_row_candidate_inventory_evidence(
         and zero_source_count_matches
         and unstructured_source_count_matches
         and unstructured_marker_count_matches
+        and no_candidate_tracking_source_count_matches
         and no_candidate_source_overlap
         and len(sources) >= 12
         and source_row_candidate_inventory.get("source_errors_total") == 0
@@ -542,11 +571,24 @@ def source_row_candidate_inventory_evidence(
         "unstructured_markers_without_candidates": (
             unstructured_markers_without_candidates
         ),
+        "no_candidate_sources_with_tracking_issue_refs": (
+            no_candidate_sources_with_tracking_issue_refs
+        ),
+        "no_candidate_tracking_issue_refs_total": len(no_candidate_tracking_issue_refs),
+        "missing_no_candidate_tracking_issue_refs": (
+            missing_no_candidate_tracking_issue_refs
+        ),
+        "invalid_no_candidate_tracking_issue_refs": (
+            invalid_no_candidate_tracking_issue_refs
+        ),
         "source_count_matches": source_count_matches,
         "candidate_source_count_matches": candidate_source_count_matches,
         "zero_source_count_matches": zero_source_count_matches,
         "unstructured_source_count_matches": unstructured_source_count_matches,
         "unstructured_marker_count_matches": unstructured_marker_count_matches,
+        "no_candidate_tracking_source_count_matches": (
+            no_candidate_tracking_source_count_matches
+        ),
         "no_candidate_source_overlap": no_candidate_source_overlap,
         "source_errors_total": source_row_candidate_inventory.get(
             "source_errors_total"

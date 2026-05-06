@@ -1729,7 +1729,7 @@ let init () =
      progress. Labeled by keeper and kind."
     Counter;
   add metric_keeper_required_tool_gate_suppressed_total
-    "#13653 Total Require_tool_use gate suppressions caused by actionable \
+    "#13631 Total Require_tool_use gate suppressions caused by actionable \
      affordances whose visible keeper tool surface contains no \
      contract-satisfying tool. Labeled by affordance."
     Counter;

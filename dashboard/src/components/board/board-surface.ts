@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useCallback, useMemo, useState } from 'preact/hooks'
-import { RefreshCw } from 'lucide-preact'
+import { RefreshCw, Sparkles } from 'lucide-preact'
 import { ActionButton } from '../common/button'
 import { Card } from '../common/card'
 import { TimeAgo } from '../common/time-ago'
@@ -18,6 +18,7 @@ import { navigate, navigateToPost, route } from '../../router'
 import { registerBoardHearthsRefresh } from '../../sse-store'
 import { boardLatencyMetrics, type BoardLatencyMetric } from '../../board-metrics'
 import { MessageRoomTimeline } from './message-room-timeline'
+import { BoardCurationPanel } from './board-curation-panel'
 import { MentionInbox } from './mention-inbox'
 import { PostDetail } from './post-detail'
 import { ReactionBar } from './reaction-bar'
@@ -540,6 +541,18 @@ function BoardSummary() {
       ${lastBoardRefreshAt.value ? html`
         <span class="ml-auto text-2xs">갱신 <${TimeAgo} timestamp=${lastBoardRefreshAt.value} /></span>
       ` : null}
+      <${ActionButton}
+        variant="ghost"
+        size="sm"
+        class="${lastBoardRefreshAt.value ? '' : 'ml-auto'} !px-2"
+        onClick=${() => navigate('workspace', { section: 'board', focus: 'curation' })}
+        ariaLabel="보드 큐레이션 열기"
+      >
+        <span class="inline-flex items-center gap-1">
+          <${Sparkles} size=${12} aria-hidden="true" />
+          큐레이션
+        </span>
+      <//>
     </div>
   `
 }
@@ -776,6 +789,15 @@ export function BoardSurface() {
       <div>
         <${BoardSummary} />
         <${StateBlockMessages} />
+      </div>
+    `
+  }
+
+  if (focus === 'curation') {
+    return html`
+      <div>
+        <${BoardSummary} />
+        <${BoardCurationPanel} />
       </div>
     `
   }

@@ -217,15 +217,16 @@ These keys are **rejected at load time** with an `Error`. They are retained only
 
 Definitive list: `removed_keeper_input_key_names` in [`lib/keeper/keeper_config.ml`](../lib/keeper/keeper_config.ml).
 
-### Unknown-key warning
+### Unknown-key schema health
 
-Keys under `[keeper]` that are neither canonical (above) nor hard-rejected are **silently ignored by the loader, but a warning is emitted**:
+Keys under `[keeper]` that are neither canonical (above) nor hard-rejected are surfaced as blocking schema health:
 
 ```text
-keeper TOML <path> has unknown keys: keeper.legacy_scope, keeper.scope_kind
+keeper_config_schema_status=blocked
+keeper_config_schema_terminal_reason=config_unknown_keys
 ```
 
-Historically, dead config like `legacy_scope` and `scope_kind` accumulated here. Treat these warnings as drift signals and clean up the TOML. The warning does not block boot.
+Historically, dead config like `legacy_scope` and `scope_kind` accumulated here. Treat this as an operator-action-required drift signal and clean up the TOML.
 
 Definitive canonical list: `canonical_keeper_toml_key_names` in [`lib/keeper/keeper_types_profile.ml`](../lib/keeper/keeper_types_profile.ml).
 

@@ -87,15 +87,20 @@
       "prompt_requirement": "Keeper TOML unknown key handling",
       "artifact_refs": [
         "test/fixtures/goal_loop/audit-corpus.external-claim.json#NF-6",
-        "test/fixtures/goal_loop/act-map.startup.json"
+        "test/fixtures/goal_loop/act-map.startup.json",
+        "test/fixtures/goal_loop/known-prs.startup.json",
+        "lib/keeper/keeper_types_profile.ml",
+        "lib/keeper/keeper_status_detail.ml",
+        "test/test_keeper_toml.ml"
       ],
-      "status": "PARTIAL",
-      "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "Health visibility exists, but strict schema rejection is not enforced.",
-      "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13689",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
-      ]
+      "status": "PASS",
+      "criterion_id": "post_act_verify_complete",
+      "gap": null,
+      "implementation_pr_refs": [
+        "https://github.com/jeong-sik/masc-mcp/pull/13138",
+        "https://github.com/jeong-sik/masc-mcp/pull/13719"
+      ],
+      "tracking_issue_refs": []
     },
     {
       "requirement_id": "dashboard-metric-all-zero",
@@ -314,7 +319,6 @@
       ],
       "tracking_issue_refs": [
         "https://github.com/jeong-sik/masc-mcp/issues/13265",
-        "https://github.com/jeong-sik/masc-mcp/issues/13505",
         "https://github.com/jeong-sik/masc-mcp/issues/13610",
         "https://github.com/jeong-sik/masc-mcp/issues/13636"
       ]

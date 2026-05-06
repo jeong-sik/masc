@@ -257,8 +257,8 @@
   `blocking_future_date_claims_total=3`, and
   `source_currentness_current=false`. The
   checklist maps all 21 prompt requirements to concrete artifacts and blockers
-  across all 12 prompt source documents: 7 `PASS`, 12 `PARTIAL`, and 2
-  `BLOCKED` requirements, with all 14 non-PASS rows carrying valid GitHub issue
+  across all 12 prompt source documents: 8 `PASS`, 11 `PARTIAL`, and 2
+  `BLOCKED` requirements, with all 13 non-PASS rows carrying valid GitHub issue
   tracking refs. The prompt checklist also validates that all `artifact_refs`
   resolve to repo-local files after optional `#...` anchors are stripped; user
   local paths, path escapes, and missing artifact files make the checklist
@@ -282,9 +282,9 @@
   fixture/live Verify distinction while the replay still uses
   `verify.fail.json`. The third blocker prevents the prompt
   objective from being marked complete while the recorded checklist still has
-  12 `PARTIAL` and 2 `BLOCKED` prompt requirements. The
+  11 `PARTIAL` and 2 `BLOCKED` prompt requirements. The
   `prompt_to_artifact_checklist_recorded` criterion remains `PASS`, with 21
-  unique requirement IDs, 11 unique issue refs, and no missing or invalid
+  unique requirement IDs, 9 unique issue refs, and no missing or invalid
   tracking refs; recording the map is separate from satisfying every mapped
   prompt requirement.
 - [근거] `python3 scripts/goal_loop_live_replay.py --log
@@ -316,11 +316,20 @@
   `prompt_requirements_closeout_complete`, while
   `post_act_verify_complete` is `PASS` for the live replay input.
 - [근거] `gh issue view <issue> --repo jeong-sik/masc-mcp --json
-  number,state,title,url,labels` for #13265, #13505, #13609, #13610, #13611,
-  #13636, #13684, #13685, #13686, #13688, #13689, and #13690 checked at
-  2026-05-06T17:25:00+09:00, confidence High: all 12 prompt-checklist
-  tracking issue refs resolve to open,
-  label-free GitHub issues.
+  number,state,title,url` for #13265, #13610, #13611, #13636, #13684,
+  #13685, #13686, #13688, and #13690 checked at
+  2026-05-06T20:47:22+09:00, confidence High: all 9 prompt-checklist
+  tracking issue refs resolve to open GitHub issues.
+- [근거] `gh pr view 13719 --repo jeong-sik/masc-mcp --json
+  number,state,isDraft,mergedAt,mergeCommit,headRefOid,title,url` and
+  `gh issue view 13689 --repo jeong-sik/masc-mcp --json
+  number,state,stateReason,closedAt,title,url` checked at
+  2026-05-06T20:47:22+09:00, confidence High: #13719 is merged at
+  2026-05-06T10:29:40Z with merge commit
+  `be848cbda810bf7116dc312602346d259aaa8e0a`, and #13689 is closed as
+  `COMPLETED` at 2026-05-06T10:29:41Z. `git merge-base --is-ancestor
+  be848cbda810bf7116dc312602346d259aaa8e0a HEAD` exits 0, proving the
+  current closeout branch contains the unknown-key schema-health fix.
 - [근거] `python3 test/test_goal_loop_completion_audit.py` checked at
   2026-05-06T19:49:08+09:00, confidence High: the completion audit accepts
   optional `--strict-row-corpus` and `--source-row-candidate-inventory`
@@ -402,7 +411,7 @@
 | Deterministic GOAL LOOP replay | **PARTIAL** | Fixture bundle exists and proves the loop stays critical, but it is not live production ingestion. |
 | Provider health skip ACT | **PARTIAL** | #13124 adds provider probe ACT artifact; the post-ACT event/transition replay has no GOAL LOOP signature matches, but the full 206-row corpus is still absent. |
 | Alive-but-stuck recovery ACT | **PARTIAL** | #13123 adds recovery side effect; #13126 adds timeout phase diagnostics. Runtime recovery success SLO remains unproven. |
-| Keeper TOML unknown-key visibility | **PARTIAL** | #13138 surfaces unknown keys in health; strict schema rejection is not yet enforced. |
+| Keeper TOML unknown-key visibility | **PASS** | #13138 surfaces unknown keys in health, and merged #13719 makes unknown keys blocking schema health with operator action required. |
 | Governance fallback visibility | **PARTIAL** | #13143 exposes fallback counters; strict judge-output failure policy is not complete. |
 | Slot forced reclaim + credential auto-recovery | **PARTIAL** | `D-EMERGENCY-1` now has linked ACT PRs in `act-map.startup.json`; the current post-ACT event/transition window verifies clean for strict GOAL LOOP signatures. |
 | Full 206-finding Orient engine | **NOT PROVEN** | Orient can now replay the external claim catalog, but the checked artifacts itemize only 19 of the claimed 206 findings. |
@@ -428,7 +437,7 @@ GitHub issue tracking ref.
 | 0-2 keeper credential starvation/archival | `observe.startup.json`, `orient.startup.json`, `NF-2`, linked ACT map entries | PARTIAL: signature and ACT links exist; full keeper recovery SLO is not proven. |
 | 0-3 alive-but-stuck supervisor recovery failure | `NF-3`, #13123/#13126 references, post-ACT Verify metadata | PARTIAL: failure is modeled; runtime recovery success across all keepers is not proven. |
 | 0-4 governance unparseable/lenient fallback | `NF-4`, #13143 references | PARTIAL: visibility exists; strict judge-output failure policy is incomplete. |
-| 0-5 keeper TOML unknown keys | `NF-6`, #13138 references | PARTIAL: health visibility exists; strict schema rejection is not enforced. |
+| 0-5 keeper TOML unknown keys | `NF-6`, `act-map.startup.json`, `known-prs.startup.json`, `lib/keeper/keeper_types_profile.ml`, `lib/keeper/keeper_status_detail.ml`, `test/test_keeper_toml.ml` | PASS: #13138 surfaces unknown keys in health, and merged #13719 verifies blocking schema health plus operator action required for unknown keeper TOML keys. |
 | 0-6 dashboard metric all-zero | startup fixture, audit catalog examples, Observe metric contract, alerts, Grafana dashboard, validator and tests | PASS for all-zero Observe metric detection coverage. |
 | 0-7 linear autoboot warmup | `NF-5` source reference in catalog boundary | PARTIAL: source claim is tracked; no full row-level replay. |
 | 1 GOAL LOOP Observe -> Orient -> Decide -> Act -> Verify | `scripts/observe_goal_loop_logs.py`, `scripts/orient_goal_loop_logs.py`, `scripts/decide_goal_loop_findings.py`, `scripts/verify_goal_loop_logs.py`, `scripts/goal_loop_status.py`, `scripts/goal_loop_scheduler.py`, scheduler tests and runtime scheduler docs | PASS for scheduler cadence and Verify-fail Observe re-entry coverage. |

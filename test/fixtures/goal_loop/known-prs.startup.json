@@ -36,6 +36,11 @@
       "title": "fix: surface keeper toml unknown keys in health"
     },
     {
+      "number": 13719,
+      "state": "MERGED",
+      "title": "fix(goal-loop): unblock keeper TOML schema health verification"
+    },
+    {
       "number": 13143,
       "state": "MERGED",
       "title": "fix: surface governance fallback counters"

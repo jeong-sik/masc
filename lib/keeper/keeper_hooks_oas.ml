@@ -1131,6 +1131,7 @@ let output_success ~transport_success = function
   | None -> transport_success
 
 let pr_review_action_metric_event_of_tool_io
+    ~route_via_fallback
     ~(tool_name : string)
     ~(input : Yojson.Safe.t)
     ~(output_text : string)
@@ -1138,7 +1139,10 @@ let pr_review_action_metric_event_of_tool_io
   match tool_name with
   | "keeper_pr_review_comment" ->
       let output_json = output_json_opt ~surface:"pr_review_action" output_text in
-      let route_via = Option.bind output_json route_via_of_json in
+      let route_via =
+        first_some (Option.bind output_json route_via_of_json)
+          route_via_fallback
+      in
       let action =
         match output_json with
         | Some json -> Safe_ops.json_string_opt "event" json
@@ -1171,7 +1175,10 @@ let pr_review_action_metric_event_of_tool_io
         (Option.bind action normalize_pr_review_action)
   | "keeper_pr_review_reply" ->
       let output_json = output_json_opt ~surface:"pr_review_action" output_text in
-      let route_via = Option.bind output_json route_via_of_json in
+      let route_via =
+        first_some (Option.bind output_json route_via_of_json)
+          route_via_fallback
+      in
       let success =
         output_success ~transport_success output_json
       in
@@ -1252,7 +1259,17 @@ let pr_work_actions_of_git_segment segment =
        | Masc_exec.Shell_ir.Lit action :: _ ->
            pr_work_action_of_git_action action |> Option.to_list
        | _ -> [])
-  | _ -> []
+  | _ ->
+      let lower = String.trim segment |> String.lowercase_ascii in
+      let starts_with_word prefix =
+        String.equal lower prefix
+        || (String.length lower > String.length prefix
+            && String.starts_with ~prefix:(prefix ^ " ") lower)
+      in
+      if starts_with_word "git push" then [ "GIT_PUSH" ]
+      else if starts_with_word "git commit" then [ "GIT_COMMIT" ]
+      else if starts_with_word "git add" then [ "GIT_ADD" ]
+      else []
 
 let pr_work_actions_of_gh_segment segment =
   match Keeper_gh_shared.parse_simple_gh_command segment with
@@ -1295,12 +1312,16 @@ let command_input_of_tool ~(tool_name : string) (input : Yojson.Safe.t) =
   | _ -> None
 
 let pr_work_action_metric_events_of_tool_io
+    ~route_via_fallback
     ~(tool_name : string)
     ~(input : Yojson.Safe.t)
     ~(output_text : string)
     ~(transport_success : bool) =
   let output_json = output_json_opt ~surface:"pr_work_action" output_text in
-  let route_via = Option.bind output_json route_via_of_json in
+  let route_via =
+    first_some (Option.bind output_json route_via_of_json)
+      route_via_fallback
+  in
   let success = output_success ~transport_success output_json in
   match tool_name with
   | "masc_code_git" ->
@@ -1361,9 +1382,15 @@ let append_pr_review_action_metric
     ~(transport_success : bool)
     ~(duration_ms : float)
     () =
+  let route_via_fallback =
+    match meta.sandbox_profile, tool_name with
+    | Docker, ("keeper_pr_review_comment" | "keeper_pr_review_reply") ->
+        Some "brokered"
+    | _ -> None
+  in
   match
     pr_review_action_metric_event_of_tool_io
-      ~tool_name ~input ~output_text ~transport_success
+      ~route_via_fallback ~tool_name ~input ~output_text ~transport_success
   with
   | None -> ()
   | Some event ->
@@ -1409,9 +1436,16 @@ let append_pr_work_action_metrics
     ~(transport_success : bool)
     ~(duration_ms : float)
     () =
+  let route_via_fallback =
+    match meta.sandbox_profile, tool_name with
+    | Docker, "keeper_pr_create" ->
+        if Env_config_keeper.KeeperSandbox.hard_mode () then Some "brokered"
+        else Some "docker"
+    | _ -> None
+  in
   let events =
     pr_work_action_metric_events_of_tool_io
-      ~tool_name ~input ~output_text ~transport_success
+      ~route_via_fallback ~tool_name ~input ~output_text ~transport_success
   in
   match events with
   | [] -> ()

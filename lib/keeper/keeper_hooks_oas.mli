@@ -350,6 +350,7 @@ val hook_introspection_json :
 
 module For_testing : sig
   val pr_review_action_metric_event_of_tool_io :
+    route_via_fallback:string option ->
     tool_name:string ->
     input:Yojson.Safe.t ->
     output_text:string ->
@@ -357,6 +358,7 @@ module For_testing : sig
     pr_review_action_metric_event option
 
   val pr_work_action_metric_events_of_tool_io :
+    route_via_fallback:string option ->
     tool_name:string ->
     input:Yojson.Safe.t ->
     output_text:string ->

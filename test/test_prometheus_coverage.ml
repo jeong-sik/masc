@@ -277,7 +277,9 @@ let test_review_blocker_metrics_registered () =
   check_registered Prometheus.metric_telemetry_coverage_gap;
   check_registered Prometheus.metric_telemetry_unified_source_read_failures;
   check_registered Prometheus.metric_coord_telemetry_drop;
-  check_registered Prometheus.metric_coord_claim_post_provision_failures
+  check_registered Prometheus.metric_coord_claim_post_provision_failures;
+  check_registered Prometheus.metric_keeper_lifecycle_callback_failures;
+  check_registered Prometheus.metric_keeper_event_bus_drain
 
 let test_distributed_lock_metric_registered () =
   let text = Prometheus.to_prometheus_text () in

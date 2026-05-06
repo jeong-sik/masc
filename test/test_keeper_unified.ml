@@ -1849,7 +1849,11 @@ let test_prompt_includes_operational_tool_guidance () =
   check bool "mentions worktree inspection guidance" true
     (contains_substring sys "masc_code_read");
   check bool "mentions server-managed heartbeat" true
-    (contains_substring sys "Heartbeat is server-managed")
+    (contains_substring sys "Heartbeat is server-managed");
+  check bool "mentions draft PR broker" true
+    (contains_substring sys "keeper_pr_create draft=true");
+  check bool "raw gh PR creation not documented" false
+    (contains_substring sys "open draft PRs after pushing")
 
 let test_prompt_includes_research_evidence_contract () =
   let sys, _user =
@@ -1877,7 +1881,9 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
     (contains_substring prompt "default coding workspace");
   check bool "git path documented via keeper_bash" true
     (contains_substring prompt "keeper_bash cmd='git status'");
-  check bool "gh pr create path documented" true
+  check bool "draft pr tool documented" true
+    (contains_substring prompt "keeper_pr_create");
+  check bool "gh pr create path not documented" false
     (contains_substring prompt "keeper_shell op=gh cmd='pr create --draft");
   check bool "legacy pr workflow removed from prompt" false
     (contains_substring prompt "keeper_pr_workflow")

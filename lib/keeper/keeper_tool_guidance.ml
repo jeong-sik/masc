@@ -109,20 +109,30 @@ let render_gh_workflow ~allowed_tool_names =
   let has_worktree = has allowed_tool_names "masc_worktree_create" in
   let has_bash = has allowed_tool_names "keeper_bash" in
   let has_verify = has allowed_tool_names "keeper_task_submit_for_verification" in
-  match has_shell, has_worktree, has_bash, has_verify with
-  | true, true, true, true ->
+  let has_pr_create = has allowed_tool_names "keeper_pr_create" in
+  match has_shell, has_worktree, has_bash, has_verify, has_pr_create with
+  | true, true, true, true, true ->
     Some
       "GitHub/code workflow: if you do not already hold a task, call `keeper_task_claim` \
        first; `keeper_shell op=gh` derives repo context from the active task \
        worktree/current_task_id. Then inspect with `keeper_shell op=gh`; if code change \
        is needed, `masc_worktree_create` -> edit -> `keeper_bash` for `git add` / `git \
-       commit` / `git push` -> `keeper_shell op=gh` with `cmd=\"pr create --draft ...\"` \
+       commit` / `git push` -> `keeper_pr_create` with `draft=true` \
        -> `keeper_task_submit_for_verification` with notes and `pr_url`."
-  | true, _, _, _ ->
+  | true, true, true, true, false ->
+    Some
+      "GitHub/code workflow: if you do not already hold a task, call `keeper_task_claim` \
+       first; inspect with `keeper_shell op=gh`; if code change is needed, \
+       `masc_worktree_create` -> edit -> `keeper_bash` for `git add` / `git commit` / \
+       `git push`. Do not create PRs through `keeper_shell op=gh`; submit verification \
+       notes with the pushed branch and request a dedicated draft-PR tool."
+  | true, _, _, _, _ ->
     Some
       "GitHub workflow: use `keeper_shell op=gh` only for commands supported by your \
        active tool policy. `keeper_shell op=gh` derives repo context from the active \
-       task worktree/current_task_id; claim a task first when repo context is required."
+       task worktree/current_task_id; claim a task first when repo context is required. \
+       Do not create PRs through `keeper_shell op=gh`; use the dedicated draft-PR tool \
+       when it is listed."
   | _ -> None
 ;;
 

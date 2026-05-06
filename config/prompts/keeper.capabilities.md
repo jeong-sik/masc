@@ -72,7 +72,7 @@ PR workflow (Coding/Delivery/Full preset required):
 1. `masc_worktree_create task_id=<id>` — opens isolated branch
 2. `masc_code_read` → `masc_code_edit` — read first, then edit
 3. `keeper_bash cmd='git status'` → `git add <paths>` → `git commit -m ...` → `git push -u origin HEAD` — all with cwd inside the worktree
-4. `keeper_shell op=gh cmd='pr create --draft --title ... --body ... --base ...'` — open the draft PR after push
+4. `keeper_pr_create draft=true title=... body=... base=... head=...` — open the draft PR after push. Do not create PRs through `keeper_shell op=gh`.
 
 Knowledge lookup:
 - Past conversations and messages: keeper_memory_search

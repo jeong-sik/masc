@@ -179,6 +179,10 @@ let () =
             Test_operator_control_keeper
             .test_keeper_sandbox_status_exposes_local_summary;
           Alcotest.test_case
+            "keeper sandbox status clarifies visible container gap" `Quick
+            Test_operator_control_keeper
+            .test_keeper_sandbox_status_clarifies_visible_container_gap;
+          Alcotest.test_case
             "keeper sandbox fleet includes persisted keeper" `Quick
             Test_operator_control_keeper
             .test_keeper_sandbox_status_fleet_includes_persisted_keeper;

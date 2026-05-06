@@ -45,23 +45,41 @@ let words s =
   take_word [] 0
 ;;
 
-let strip_target_punct s =
+let is_mention_punct = function
+  | ',' | ';' | ':' | '.' | '!' | '?'
+  | ')' | ']' | '}' | '>'
+  | '(' | '[' | '{' | '<'
+  | '"' | '\'' | '`' -> true
+  | _ -> false
+;;
+
+let strip_mention_punct s =
+  (* Strip both leading and trailing punctuation so common shapes like
+     "(@bob)", "@bob!", '"@bob"' resolve to the same target. The
+     previous helper trimmed only the trailing side and a smaller set
+     of characters, dropping otherwise-valid mentions or polluting
+     extracted targets with punctuation. *)
+  let len = String.length s in
+  let rec left i = if i < len && is_mention_punct s.[i] then left (i + 1) else i in
+  let lo = left 0 in
   let rec right i =
-    if i < 0
-    then ""
-    else (
-      match s.[i] with
-      | ',' | ';' | ':' | '.' | ')' | ']' -> right (i - 1)
-      | _ -> String.sub s 0 (i + 1))
+    if i < lo then lo - 1
+    else if is_mention_punct s.[i] then right (i - 1)
+    else i
   in
-  right (String.length s - 1)
+  let hi = right (len - 1) in
+  if hi < lo then "" else String.sub s lo (hi - lo + 1)
 ;;
 
 let mention_of_word word =
-  if String.length word <= 1 || word.[0] <> '@'
+  let trimmed_word = strip_mention_punct word in
+  if String.length trimmed_word <= 1 || trimmed_word.[0] <> '@'
   then None
   else (
-    let target = String.sub word 1 (String.length word - 1) |> strip_target_punct in
+    let target =
+      String.sub trimmed_word 1 (String.length trimmed_word - 1)
+      |> strip_mention_punct
+    in
     if target = "" then None else Some target)
 ;;
 
@@ -94,23 +112,28 @@ let is_room_message (msg : Masc_domain.message) =
 ;;
 
 let block_kind_of_message (msg : Masc_domain.message) =
+  (* Restrict block_kind to messages whose msg_type explicitly carries
+     a [state_block:<kind>] / [state-block:<kind>] discriminator. The
+     previous fall-through (`else Some lower`) surfaced operational
+     msg_types like "cache_invalidated" as block_kind, which clients
+     interpreted as a structural state-block name and rendered as a
+     fake panel. An empty suffix (e.g. "state_block:") returns None
+     too — a missing discriminator is no signal at all, not a
+     [block_kind: ""] field that downstream consumers cannot decode. *)
   let msg_type = String.trim msg.msg_type in
   let lower = String.lowercase_ascii msg_type in
-  if lower = "" || lower = "broadcast"
-  then None
-  else if String.starts_with ~prefix:"state_block:" lower
-  then
-    Some
-      (String.sub msg_type 12 (String.length msg_type - 12)
-       |> String.trim
-       |> String.lowercase_ascii)
-  else if String.starts_with ~prefix:"state-block:" lower
-  then
-    Some
-      (String.sub msg_type 12 (String.length msg_type - 12)
-       |> String.trim
-       |> String.lowercase_ascii)
-  else Some lower
+  let extract_suffix prefix =
+    let n = String.length prefix in
+    String.sub msg_type n (String.length msg_type - n)
+    |> String.trim
+    |> String.lowercase_ascii
+  in
+  let prefixes = [ "state_block:"; "state-block:" ] in
+  match List.find_opt (fun p -> String.starts_with ~prefix:p lower) prefixes with
+  | None -> None
+  | Some prefix ->
+    let suffix = extract_suffix prefix in
+    if suffix = "" then None else Some suffix
 ;;
 
 let message_json (msg : Masc_domain.message) =
@@ -166,7 +189,11 @@ let active_agent_names config =
   then []
   else (
     try
-      Coord.get_agents_raw config
+      (* Use [get_active_agents] (filtered to currently-active agents)
+         instead of [get_agents_raw] which also returned tombstones /
+         left agents. The function name and the rooms participants
+         contract both expect "active only". *)
+      Coord.get_active_agents config
       |> List.map (fun (agent : Masc_domain.agent) -> agent.name)
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn

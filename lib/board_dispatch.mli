@@ -233,7 +233,36 @@ val list_reactions :
   unit ->
   (Board.reaction_summary list, Board.board_error) Result.t
 
+val list_reactions_batch :
+  targets:(Board.reaction_target_type * string) list ->
+  ?user_id:string ->
+  unit ->
+  ((Board.reaction_target_type * string) * Board.reaction_summary list) list
+
 (** {1 Karma} *)
+
+val karma_score_for_direction : Board.vote_direction -> int
+(** Scoring contract re-export: [Up] → [+1], [Down] → [0].
+    See {!Board.karma_score_for_direction}. *)
+
+val get_karma_ledger :
+  ?agent:string ->
+  ?limit:int ->
+  unit ->
+  Board.karma_event list
+(** Return attributed karma events from the active backend.
+
+    Events are drawn from the in-memory vote log via
+    {!Board.build_karma_ledger} and are sorted ascending by [ts]
+    (oldest first).
+
+    @param agent  When provided, filters to events where
+                  [karma_event.recipient = agent] (case-sensitive).
+    @param limit  Caps the result list (applied after filtering).
+                  Default: unlimited.
+
+    The rebuild contract: summing [delta] over the unfiltered
+    result must equal [get_all_karma ()] for every recipient. *)
 
 val get_all_karma : unit -> (string * int) list
 
@@ -251,3 +280,44 @@ val stats : unit -> Yojson.Safe.t
 
 val flush : unit -> unit
 (** Force-flush dirty posts/comments to disk. *)
+
+(** {1 AI curation} *)
+
+val submit_curation_snapshot :
+  submitted_by:string ->
+  ?model:string ->
+  ordering:string list ->
+  highlights:string list ->
+  rationale:string ->
+  ?provenance:Yojson.Safe.t ->
+  unit ->
+  Board_curation.curation_snapshot
+(** Create a fresh {!Board_curation.curation_snapshot} and make it the
+    current latest snapshot.  Returns the snapshot (including its
+    generated ID and timestamp) so callers can log or forward it. *)
+
+val latest_curation_snapshot :
+  unit -> Board_curation.curation_snapshot option
+(** Return the most recently submitted curation snapshot, or [None] if
+    none has been submitted in this process lifetime. *)
+
+(** {1 SubBoard operations} *)
+
+val create_sub_board :
+  slug:string ->
+  name:string ->
+  description:string ->
+  owner:string ->
+  ?access:Board.sub_board_access ->
+  unit ->
+  (Board.sub_board, Board.board_error) Result.t
+
+val get_sub_board :
+  sub_board_id:string ->
+  (Board.sub_board, Board.board_error) Result.t
+
+val list_sub_boards : unit -> Board.sub_board list
+
+val delete_sub_board :
+  sub_board_id:string ->
+  (unit, Board.board_error) Result.t

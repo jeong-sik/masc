@@ -546,15 +546,18 @@ let make_tool_bundle
   let internal_tools =
     List.filter_map (fun (td : Masc_domain.tool_schema) ->
       if List.mem td.name universe_names then
+        let h = make_keeper_tool_handler ~name:td.name ~config ~meta ~ctx_snapshot
+              ?turn_sandbox_factory
+              ?turn_sandbox_factory_git
+              ~exec_cache
+              ?search_fn ?on_tool_called ~failure_counts () in
         Some (Tool_bridge.oas_tool_of_masc
           ~name:td.name
           ~description:td.description
           ~input_schema:td.input_schema
-          (make_keeper_tool_handler ~name:td.name ~config ~meta ~ctx_snapshot
-             ?turn_sandbox_factory
-             ?turn_sandbox_factory_git
-             ~exec_cache
-             ?search_fn ?on_tool_called ~failure_counts ()))
+          (fun input ->
+            let start_time = Time_compat.now () in
+            Tool_result.wrap ~tool_name:td.name ~start_time (h input)))
       else None
     ) tool_defs
   in
@@ -590,18 +593,23 @@ let make_tool_bundle
                  execution, and sandbox routing."
             | _ -> internal_def.description
           in
-          Some (Tool_bridge.oas_tool_of_masc
-            ~name:public
-            ~description
-            ~input_schema
-            (make_keeper_tool_handler ~name:internal ~config ~meta ~ctx_snapshot
+          let h =
+            make_keeper_tool_handler ~name:internal ~config ~meta ~ctx_snapshot
                ?turn_sandbox_factory
                ?turn_sandbox_factory_git
                ~exec_cache
                ?search_fn ?on_tool_called
                ~translate_input:(fun j ->
                  Keeper_tool_alias.translate_input ~public j)
-               ~failure_counts ()))
+               ~failure_counts ()
+          in
+          Some (Tool_bridge.oas_tool_of_masc
+            ~name:public
+            ~description
+            ~input_schema
+            (fun input ->
+              let start_time = Time_compat.now () in
+              Tool_result.wrap ~tool_name:public ~start_time (h input)))
     ) (Keeper_tool_alias.oas_dual_register_aliases ())
   in
   {

@@ -159,6 +159,18 @@ val board_reactions_for_post :
 val board_reactions_for_comment :
   voter:string option -> comment_id:string -> Board.reaction_summary list
 
+val board_reactions_batch :
+  targets:(Board.reaction_target_type * string) list ->
+  voter:string option ->
+  ((Board.reaction_target_type * string) * Board.reaction_summary list) list
+(** [board_reactions_batch ~targets ~voter] returns dashboard reaction
+    summaries for a request's target set using one board-store scan. *)
+
+val board_reactions_lookup :
+  ((Board.reaction_target_type * string) * Board.reaction_summary list) list ->
+  Board.reaction_target_type * string ->
+  Board.reaction_summary list
+
 (** {1 Dashboard helpers} *)
 
 val board_comment_dashboard_json :

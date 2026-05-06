@@ -91,6 +91,7 @@ let make_fake_gh dir =
 set -eu
 log_file="${FAKE_GH_LOG:?}"
 labels_file="${FAKE_GH_LABELS:?}"
+draft_file="${FAKE_GH_DRAFT_STATE_FILE:-$labels_file.draft}"
 cmd1="${1:-}"
 cmd2="${2:-}"
 printf '%s %s\n' "$cmd1" "$cmd2" >>"$log_file"
@@ -100,12 +101,24 @@ case "${cmd1}:${cmd2}" in
     ;;
   pr:create)
     printf 'https://github.com/example/test/pull/42\n'
+    if [ "${FAKE_GH_CREATE_READY:-}" = "1" ]; then
+      printf 'false\n' >"$draft_file"
+    else
+      printf 'true\n' >"$draft_file"
+    fi
     ;;
   pr:view)
     args="$*"
+    draft_state="$(cat "$draft_file" 2>/dev/null || printf 'true\n')"
     case "$args" in
       *"state,isDraft,mergeStateStatus,headRefOid,url"*)
-        printf 'state=OPEN draft=true mergeState=CLEAN head=abc123\nurl=https://github.com/example/test/pull/42\n'
+        printf 'state=OPEN draft=%s mergeState=CLEAN head=abc123\nurl=https://github.com/example/test/pull/42\n' "$draft_state"
+        ;;
+      *"state,isDraft"*)
+        printf 'OPEN %s\n' "$draft_state"
+        ;;
+      *"isDraft"*)
+        printf '%s\n' "$draft_state"
         ;;
       *)
         if [ "${3:-}" = "https://github.com/example/test/pull/42" ]; then
@@ -115,6 +128,9 @@ case "${cmd1}:${cmd2}" in
         fi
         ;;
     esac
+    ;;
+  pr:ready)
+    printf 'true\n' >"$draft_file"
     ;;
   api:*)
     cat >"$labels_file"
@@ -225,6 +241,48 @@ let test_script_runs_under_system_bash_without_watch () =
         (contains_substring labels "\"docs\"");
       check bool "ensures agent-pr label exists" true
         (contains_substring log "label create"))
+
+let test_script_restores_draft_when_create_returns_ready () =
+  with_temp_dir "pr-open-script-draft-restore" (fun dir ->
+      init_repo_with_remote dir;
+      let fake_gh_dir = make_fake_gh dir in
+      let gh_log = Filename.concat dir "gh.log" in
+      let gh_labels = Filename.concat dir "gh-labels.json" in
+      let body_file = Filename.concat dir "body.md" in
+      write_file body_file
+        "## Summary\nTest body\n\n## Product impact\n- Promise affected: `none/internal`\n- User-visible change: none\n\n## Evidence\n- local script test\n\n## Review evidence\n- not applicable for script test\n\n## Linked issue\n- Refs #13253\n";
+      let path =
+        Printf.sprintf "%s:%s" fake_gh_dir
+          (match Sys.getenv_opt "PATH" with Some p -> p | None -> "")
+      in
+      let env =
+        [
+          ("PATH", path);
+          ("FAKE_GH_LOG", gh_log);
+          ("FAKE_GH_LABELS", gh_labels);
+          ("FAKE_GH_CREATE_READY", "1");
+        ]
+      in
+      let cmd =
+        Printf.sprintf "/bin/bash %s --repo %s --title %s --body-file %s --no-watch"
+          (quote (script_path ()))
+          (quote "example/test")
+          (quote "fix: restore ready pr to draft")
+          (quote body_file)
+      in
+      let code, stdout, stderr = run_shell ~cwd:dir ~env cmd in
+      if code <> 0 then
+        failf "pr-open failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
+      let log = read_file gh_log in
+      check bool "restores draft state" true
+        (contains_substring log "pr ready");
+      check bool "reports restoration" true
+        (contains_substring stderr "restoring draft state");
+      check bool "prints PR url" true
+        (contains_substring stdout "PR: https://github.com/example/test/pull/42");
+      let labels = read_file gh_labels in
+      check bool "still adds agent-pr label" true
+        (contains_substring labels "\"agent-pr\""))
 
 let test_script_prints_final_status_after_watch () =
   with_temp_dir "pr-open-script-watch-status" (fun dir ->
@@ -352,6 +410,8 @@ let () =
             test_source_avoids_mapfile_only_bash4_features;
           test_case "runs under system bash without watch" `Quick
             test_script_runs_under_system_bash_without_watch;
+          test_case "restores draft when create returns ready" `Quick
+            test_script_restores_draft_when_create_returns_ready;
           test_case "prints final status after watch" `Quick
             test_script_prints_final_status_after_watch;
           test_case "rejects body missing required sections" `Quick

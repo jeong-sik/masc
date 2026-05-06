@@ -334,7 +334,8 @@ val compact_memory_bank_if_needed :
   Coord.config ->
   Keeper_types.keeper_meta -> memory_bank_compaction
 (** Run a compaction pass for the keeper if the file has crossed the
-    trigger; returns [no_memory_bank_compaction] when nothing happened. *)
+    byte trigger or note-count target; returns
+    [no_memory_bank_compaction] when nothing happened. *)
 
 (** {1 Append-from-reply} *)
 

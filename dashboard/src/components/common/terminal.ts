@@ -4,15 +4,23 @@
 // Fallback div renderer (no xterm.js) for zero-dependency bundles.
 
 import { html } from 'htm/preact'
+import type { Ref } from 'preact'
+
+export type TerminalTone = 'cmd' | 'err' | 'meta' | 'ok' | 'out' | 'warn'
 
 export interface TerminalLine {
   text: string
+  tone?: TerminalTone
 }
 
 interface TerminalProps {
   lines: TerminalLine[]
+  ariaLabel?: string
+  className?: string
+  emptyText?: string
   prompt?: string
   testId?: string
+  viewportRef?: Ref<HTMLDivElement>
 }
 
 interface Segment {
@@ -93,10 +101,14 @@ function parseAnsi(input: string): Segment[] {
   return segments
 }
 
+const DEFAULT_TERMINAL_CLASS =
+  'h-64 overflow-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2 font-mono'
+
 function renderLine(line: TerminalLine): ReturnType<typeof html> {
   const segments = parseAnsi(line.text)
+  const toneClass = line.tone ? `term-line is-${line.tone}` : 'text-[var(--color-fg-primary)]'
   return html`
-    <div class="min-h-[1.25em] text-xs font-mono leading-relaxed text-[var(--color-fg-primary)]">
+    <div class=${`min-h-[1.25em] text-xs font-mono leading-relaxed ${toneClass}`}>
       ${segments.map(
         (s, idx) => html`
           <span
@@ -113,19 +125,28 @@ function renderLine(line: TerminalLine): ReturnType<typeof html> {
   `
 }
 
-export function Terminal({ lines, prompt = 'agent:$ ', testId }: TerminalProps) {
+export function Terminal({
+  lines,
+  ariaLabel = '에이전트 터미널',
+  className = DEFAULT_TERMINAL_CLASS,
+  emptyText = '출력 없음',
+  prompt = 'agent:$ ',
+  testId,
+  viewportRef,
+}: TerminalProps) {
   return html`
     <div
-      class="h-64 overflow-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2 font-mono"
+      class=${className}
       data-terminal
       data-testid=${testId}
+      ref=${viewportRef}
       role="log"
       aria-live="polite"
       aria-atomic="false"
-      aria-label="에이전트 터미널"
+      aria-label=${ariaLabel}
     >
       ${lines.length === 0
-        ? html`<div class="text-3xs text-[var(--color-fg-muted)]">출력 없음</div>`
+        ? html`<div class="text-3xs text-[var(--color-fg-muted)]">${emptyText}</div>`
         : html`<div class="space-y-0.5">${lines.map((l, i) => html`<div key=${i}>${renderLine(l)}</div>`)}</div>`}
       ${prompt
         ? html`

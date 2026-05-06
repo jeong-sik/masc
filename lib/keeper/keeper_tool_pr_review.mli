@@ -13,6 +13,10 @@ val all_pr_review_events : pr_review_event list
 val valid_pr_review_event_strings : string list
 val pr_review_mutation_preset_ok : Keeper_types.tool_preset option -> bool
 
+(** Both ["pr_number"] and ["number"] are accepted for schema-drift
+    compatibility across keeper PR tools. *)
+val pr_number_of_args : Yojson.Safe.t -> int
+
 (** Detect "PR not found" markers in [gh] CLI output (REST 404 + GraphQL
     "could not resolve"). Exposed for unit testing the parser; keepers
     consume the structured JSON returned by [handle_keeper_pr_review_read]. *)

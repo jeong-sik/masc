@@ -109,6 +109,24 @@ max_tokens = 16384
 keeper_assignable = false
 required_capability_profile = "tool_strict"
 
+[local_recovery]
+# P1-2 fix: profiles may declare fallback_cascade = "local_recovery" (a
+# logical route key that resolves to the Failing-phase cascade).  The runtime
+# cascade loader looks up profile names, not route keys, so a missing
+# [local_recovery] section caused the fallback hint to be silently ignored.
+# This alias entry makes the name resolvable; it delegates to big_three so
+# behaviour matches the phase_recovery route (routes.phase_recovery = "big_three").
+comment = "P1-2 fix: alias entry for the phase_recovery logical route. Profiles that declare fallback_cascade = \"local_recovery\" resolve here instead of silently ignoring the hint. Not keeper-assignable; delegates to big_three."
+models = [
+  "codex_cli:gpt-5.3-codex-spark",
+  "gemini_cli:auto",
+  "claude_code:auto",
+]
+temperature = 0.2
+max_tokens = 16384
+keeper_assignable = false
+fallback_cascade = "big_three"
+
 [tier_fast]
 comment = "Cheap+fast tool-capable cloud models for keeper turns. Bias toward latency and cost over reasoning depth. All entries support tool calling. Falls back to big_three on exhaustion."
 models = [

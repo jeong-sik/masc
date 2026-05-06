@@ -77,23 +77,23 @@ export const COCKPIT_ENTRYPOINTS: CockpitEntrypoint[] = [
   { mode: 'observe', aliases: ['hr-mod', 'heuristic-by-module'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'heuristics', focus: 'module' } }, coverage: 'covered' },
 
   // Cognition Plane: production view tabs show available data and blocked backend gaps.
-  { mode: 'cognition', aliases: ['ki-bdi', 'keeper-bdi'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'keeper' } }, coverage: 'partial' },
-  { mode: 'cognition', aliases: ['ki-acc', 'keeper-tool-access'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'keeper', focus: 'tool-access' } }, coverage: 'partial' },
+  { mode: 'cognition', aliases: ['ki-bdi', 'keeper-bdi'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'keeper', focus: 'bdi' } }, coverage: 'covered' },
+  { mode: 'cognition', aliases: ['ki-acc', 'keeper-tool-access'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'keeper', focus: 'tool-access' } }, coverage: 'covered' },
   { mode: 'cognition', aliases: ['ki-stat', 'keeper-token-stats'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'token-stats' } }, coverage: 'covered' },
   { mode: 'cognition', aliases: ['dc-str', 'decisions-stream'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'decisions' } }, coverage: 'covered' },
   { mode: 'cognition', aliases: ['dc-mem', 'memory-entries'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'memory' } }, coverage: 'partial' },
   { mode: 'cognition', aliases: ['ep-card', 'episodes-cards'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'episodes' } }, coverage: 'covered' },
   { mode: 'cognition', aliases: ['ep-lrn', 'episodes-learnings'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'episodes' } }, coverage: 'covered' },
   { mode: 'cognition', aliases: ['ar-lst', 'ar-loops'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'autoresearch' } }, coverage: 'covered' },
-  { mode: 'cognition', aliases: ['ar-fnd', 'ar-finding-card'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'autoresearch', focus: 'finding' } }, coverage: 'partial' },
-  { mode: 'cognition', aliases: ['ar-flw', 'ar-flow'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'autoresearch', focus: 'flow' } }, coverage: 'partial' },
+  { mode: 'cognition', aliases: ['ar-fnd', 'ar-finding-card'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'autoresearch', focus: 'finding' } }, coverage: 'covered' },
+  { mode: 'cognition', aliases: ['ar-flw', 'ar-flow'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'autoresearch', focus: 'flow' } }, coverage: 'covered' },
 
   // IDE Plane.
   { mode: 'ide', aliases: ['edit', 'source'], target: { tab: 'code', params: { section: 'ide-shell', view: 'source' } }, coverage: 'partial' },
   { mode: 'ide', aliases: ['review', 'pr-thread'], target: { tab: 'code', params: { section: 'ide-shell', view: 'unified', focus: 'review' } }, coverage: 'partial' },
   { mode: 'ide', aliases: ['merge', 'split', 'split-diff'], target: { tab: 'code', params: { section: 'ide-shell', view: 'split-diff' } }, coverage: 'partial' },
   { mode: 'ide', aliases: ['graph', 'git-graph'], target: { tab: 'workspace', params: { section: 'repositories', view: 'graph' } }, coverage: 'partial' },
-  { mode: 'ide', aliases: ['search', 'find'], target: { tab: 'code', params: { section: 'ide-shell', view: 'source', focus: 'search' } }, coverage: 'partial' },
+  { mode: 'ide', aliases: ['search', 'find'], target: { tab: 'code', params: { section: 'ide-shell', view: 'source', find: 'open' } }, coverage: 'covered' },
 ]
 
 const ENTRYPOINT_TARGETS = new Map<string, CockpitRouteTarget>()

@@ -44,6 +44,9 @@ type logical_use = Cascade_routes.logical_use =
   | Openai_compat
   | Persona_generation
   | Provider_benchmark
+  | Simple_task
+  | Moderate_task
+  | Complex_task
   | Tool_rerank_use
 
 let logical_use_key = Cascade_routes.logical_use_key

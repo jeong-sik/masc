@@ -126,11 +126,34 @@ let setup ~sandbox f =
   ensure_dir playground;
   f ~config ~meta ~playground
 
+let setup_two_docker_keepers f =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir () in
+  ensure_dir (Filename.concat base Common.masc_dirname);
+  let config = Coord.default_config base in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta_a = make_meta ~name:"keeper-a" ~sandbox:Keeper_types.Docker in
+  let meta_b = make_meta ~name:"keeper-b" ~sandbox:Keeper_types.Docker in
+  let playground_a = Keeper_sandbox.host_root_abs_of_meta ~config meta_a in
+  let playground_b = Keeper_sandbox.host_root_abs_of_meta ~config meta_b in
+  ensure_dir playground_a;
+  ensure_dir playground_b;
+  f ~config ~meta_a ~playground_a ~meta_b ~playground_b
+
 let with_fake_docker script f =
   let dir = temp_dir () in
   let docker_path = Filename.concat dir "docker" in
+  let gh_path = Filename.concat dir "gh" in
   write_file docker_path script;
+  write_file gh_path
+    "#!/bin/sh\n\
+     if [ \"$1\" = \"auth\" ] && [ \"$2\" = \"status\" ]; then\n\
+       exit 0\n\
+     fi\n\
+     exit 0\n";
   Unix.chmod docker_path 0o755;
+  Unix.chmod gh_path 0o755;
   let path =
     match Sys.getenv_opt "PATH" with
     | Some prior when String.trim prior <> "" -> dir ^ ":" ^ prior
@@ -141,12 +164,24 @@ let with_fake_docker script f =
   with_env "PATH" path f
 
 let with_tool_policy_config f =
-  let config_dir =
-    Filename.concat (Masc_test_deps.find_project_root ()) "config"
-  in
-  Tool_code_write.reset_policy_config_cache ();
+  let project_root = Masc_test_deps.find_project_root () in
+  let config_dir = Filename.concat project_root "config" in
   with_env "MASC_CONFIG_DIR" config_dir @@ fun () ->
-  Fun.protect ~finally:Tool_code_write.reset_policy_config_cache f
+  Masc_mcp.Config_dir_resolver.reset ();
+  Tool_code_write.reset_policy_config_cache ();
+  Masc_mcp.Keeper_tool_policy.reset_policy_config_for_test ();
+  Fun.protect
+    ~finally:(fun () ->
+      Tool_code_write.reset_policy_config_cache ();
+      Masc_mcp.Keeper_tool_policy.reset_policy_config_for_test ();
+      Masc_mcp.Config_dir_resolver.reset ())
+    (fun () ->
+      (match
+         Masc_mcp.Keeper_tool_policy.init_policy_config ~base_path:project_root
+       with
+       | Ok () -> ()
+       | Error e -> Alcotest.failf "init_policy_config failed: %s" e);
+      f ())
 
 let with_config_dir config_dir f =
   let prior = Sys.getenv_opt "MASC_CONFIG_DIR" in
@@ -819,6 +854,85 @@ let test_git_creds_uses_github_identity_mode () =
     (contains_substring line
        "GIT_AUTHOR_EMAIL=anyang-keepers@users.noreply.github.com")
 
+let test_git_creds_mounts_only_selected_keeper_identity () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup_two_docker_keepers
+  @@ fun ~config ~meta_a ~playground_a ~meta_b ~playground_b ->
+  let identity_a = "keeper-a-gh" in
+  let identity_b = "keeper-b-gh" in
+  ensure_github_identity_bundle ~config
+    Masc_mcp.Keeper_gh_env.root_github_identity;
+  ensure_github_identity_bundle ~config identity_a;
+  ensure_github_identity_bundle ~config identity_b;
+  let root_gh_dir = Masc_mcp.Keeper_gh_env.root_gh_config_dir config in
+  let gh_dir id =
+    Masc_mcp.Keeper_gh_env.gh_config_dir_of_bundle
+      (Masc_mcp.Keeper_gh_env.bundle_root config ~github_identity:id)
+  in
+  let run_for ~(meta : Keeper_types.keeper_meta) ~playground ~github_identity
+      ~other_identity ~log_name =
+    with_keeper_identity_toml ~config ~keeper_name:meta.name
+      ~github_identity ~git_identity_mode:"github_identity"
+    @@ fun () ->
+    let log_path = Filename.concat config.Coord.base_path log_name in
+    let line =
+      run_git_creds_docker_shell ~config ~meta ~playground ~log_path
+    in
+    let selected_gh = gh_dir github_identity in
+    let other_gh = gh_dir other_identity in
+    let mounted_playground =
+      Keeper_alerting_path.normalize_path_for_check playground
+      |> Keeper_alerting_path.strip_trailing_slashes
+    in
+    Alcotest.(check bool)
+      (github_identity ^ " selected GH bundle mounted read-only")
+      true
+      (contains_substring line
+         (selected_gh ^ ":/tmp/keeper-creds/.config/gh:ro"));
+    Alcotest.(check bool)
+      (github_identity ^ " root fallback bundle not mounted")
+      false
+      (contains_substring line
+         (root_gh_dir ^ ":/tmp/keeper-creds/.config/gh:ro"));
+    Alcotest.(check bool)
+      (github_identity ^ " sibling keeper bundle not mounted")
+      false
+      (contains_substring line
+         (other_gh ^ ":/tmp/keeper-creds/.config/gh:ro"));
+    Alcotest.(check bool)
+      (github_identity ^ " own playground mounted")
+      true
+      (contains_substring line
+         (mounted_playground ^ ":"
+          ^ Keeper_sandbox.container_root meta.name
+          ^ ":rw"));
+    line
+  in
+  let mounted_playground_a =
+    Keeper_alerting_path.normalize_path_for_check playground_a
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
+  let mounted_playground_b =
+    Keeper_alerting_path.normalize_path_for_check playground_b
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
+  let line_a =
+    run_for ~meta:meta_a ~playground:playground_a
+      ~github_identity:identity_a ~other_identity:identity_b
+      ~log_name:"docker-a.log"
+  in
+  let line_b =
+    run_for ~meta:meta_b ~playground:playground_b
+      ~github_identity:identity_b ~other_identity:identity_a
+      ~log_name:"docker-b.log"
+  in
+  Alcotest.(check bool) "keeper A docker run does not mount keeper B playground"
+    false
+    (contains_substring line_a mounted_playground_b);
+  Alcotest.(check bool) "keeper B docker run does not mount keeper A playground"
+    false
+    (contains_substring line_b mounted_playground_a)
+
 let test_git_clone_repairs_existing_docker_clone_checkout () =
   with_tool_policy_config @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
@@ -970,6 +1084,9 @@ let () =
           Alcotest.test_case
             "git-creds uses GitHub author only in github_identity mode"
             `Quick test_git_creds_uses_github_identity_mode;
+          Alcotest.test_case
+            "git-creds mounts only the selected keeper identity"
+            `Quick test_git_creds_mounts_only_selected_keeper_identity;
           Alcotest.test_case "hard mode git_clone uses brokered route" `Quick
             test_hard_mode_git_clone_uses_brokered_route;
 	          Alcotest.test_case "git_clone repairs existing docker clone checkout"

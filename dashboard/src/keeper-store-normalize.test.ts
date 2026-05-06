@@ -832,3 +832,73 @@ describe('normalizeKeeperTrustTerminalReason — exported helper', () => {
     })
   })
 })
+
+describe('approval_state.pending_first — worktree approval blocker surfacing', () => {
+  it('normalizes pending_first with all fields from approval_state', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'pr-keeper',
+        status: 'active',
+        trust: {
+          needs_attention: true,
+          attention_reason: 'approval_pending',
+          next_human_action: 'resolve_approval',
+          approval: {
+            state: 'pending',
+            pending_count: 1,
+            pending_first: {
+              id: 'appr_2cae9bec14f6',
+              tool_name: 'masc_worktree_create',
+              task_id: 'task-187',
+              blocker_class: 'blocked_before_worktree',
+            },
+          },
+        },
+      },
+    ])
+    expect(keeper?.trust?.approval_state?.pending_first).toEqual({
+      id: 'appr_2cae9bec14f6',
+      tool_name: 'masc_worktree_create',
+      task_id: 'task-187',
+      blocker_class: 'blocked_before_worktree',
+    })
+  })
+
+  it('sets pending_first to null when approval_state has no pending_first', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'pr-keeper',
+        status: 'active',
+        trust: {
+          approval: {
+            state: 'idle',
+            pending_count: 0,
+          },
+        },
+      },
+    ])
+    expect(keeper?.trust?.approval_state?.pending_first).toBeNull()
+  })
+
+  it('sets pending_first to null when individual fields are absent', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'pr-keeper',
+        status: 'active',
+        trust: {
+          approval: {
+            state: 'pending',
+            pending_count: 1,
+            pending_first: {},
+          },
+        },
+      },
+    ])
+    expect(keeper?.trust?.approval_state?.pending_first).toEqual({
+      id: null,
+      tool_name: null,
+      task_id: null,
+      blocker_class: null,
+    })
+  })
+})

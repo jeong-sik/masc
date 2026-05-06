@@ -41,6 +41,18 @@
   checked at 2026-05-05T11:27:03Z, confidence High:
   #13178 merged at 2026-05-05T11:23:39Z, merge
   `23887a0101c812907ed2b7348c5cf80351f4939c`.
+- [근거] `gh pr view 13218 --json number,state,mergedAt,mergeCommit,title,url`
+  checked at 2026-05-05T20:24:18Z, confidence High:
+  #13218 merged at 2026-05-05T12:25:02Z, merge
+  `0dd9de8e0d91808b35b4847d6f36b669679816ac`.
+- [근거] `gh pr view 13231 --json number,state,mergedAt,mergeCommit,title,url`
+  checked at 2026-05-05T20:24:18Z, confidence High:
+  #13231 merged at 2026-05-05T13:03:23Z, merge
+  `23f81803a7d17d5a4cff740c372ee45bc9dc3fe4`.
+- [근거] `gh pr view 13246 --json number,state,mergedAt,mergeCommit,title,url`
+  checked at 2026-05-05T20:24:18Z, confidence High:
+  #13246 merged at 2026-05-05T13:40:04Z, merge
+  `0ab0076a14dc64a30ffb79cd461530790e6e98f6`.
 - [근거] `python3 scripts/validate_goal_loop_act_map.py
   test/fixtures/goal_loop/act-map.startup.json --known-prs-json
   test/fixtures/goal_loop/known-prs.startup.json --require-pr-ref --fail-on any`
@@ -50,21 +62,154 @@
   test/fixtures/goal_loop/orient.startup.json --decide-json
   /tmp/goal-loop-decide-audit.json --verify-json
   test/fixtures/goal_loop/verify.fail.json --loop-iteration '#fixture'
-  --format text` checked at 2026-05-05T11:30:45Z, confidence High:
-  `next_action` is `D-EMERGENCY-1`, the missing ACT item.
+  --format text` checked at 2026-05-05T14:54:50Z, confidence High:
+  the fixture remains critical because Verify is still red, while ACT linkage
+  now reports `act_linked_count=5` and `act_missing_count=0`.
+- [근거] `python3 scripts/orient_goal_loop_logs.py
+  test/fixtures/goal_loop/observe.startup.json --audit-catalog
+  test/fixtures/goal_loop/audit-corpus.external-claim.json --format text`
+  checked at 2026-05-05T14:54:50Z, confidence High: the external 206-audit
+  claim catalog is `INCOMPLETE`, with 19 itemized findings, 187 missing
+  itemized rows, and all 12 prompt-supplied source documents covered by the
+  manifest.
+- [근거] `python3 scripts/orient_goal_loop_logs.py
+  test/fixtures/goal_loop/observe.startup.json --audit-catalog
+  test/fixtures/goal_loop/audit-corpus.external-claim.json
+  --require-complete-catalog` checked at 2026-05-05T14:54:50Z, confidence
+  High: exits non-zero until the full 206-row corpus is attached or checked in.
+- [근거] `python3 scripts/orient_goal_loop_logs.py
+  test/fixtures/goal_loop/observe.startup.json --audit-catalog
+  test/fixtures/goal_loop/audit-corpus.external-claim.json
+  --audit-source-root . --require-source-artifacts` checked at
+  2026-05-06T05:54:00+09:00, confidence High: exits non-zero while the
+  catalog's logical `prompt_corpus/GOAL_LOOP/...` source paths are not backed
+  by checked source files.
+- [근거] `python3 scripts/orient_goal_loop_logs.py
+  test/fixtures/goal_loop/observe.startup.json --audit-catalog
+  test/fixtures/goal_loop/audit-corpus.external-claim.json
+  --audit-source-root <GOAL_LOOP_SOURCE_ROOT> --audit-source-strip-prefix
+  prompt_corpus/GOAL_LOOP --require-source-artifacts
+  --require-consistency-resolved` checked at 2026-05-06T07:14:00+09:00,
+  confidence High: validates the current local
+  external source artifacts without committing those documents to the public
+  repository, with 12 resolved source artifacts, 19 source-itemized audit IDs,
+  19 catalog-itemized audit IDs, zero ID mismatch or line-ref errors, 6/6
+  aggregate claim source checks verified from resolved documents, and one
+  verified aggregate reconciliation (`206 + 8 = 214`). It also surfaces a
+  non-blocking structured-source-ID set of 91 total IDs with 72 not in the
+  strict GOAL LOOP audit catalog, grouped as `F:4`, `NEW:10`, `P-DASH:13`,
+  `P-EIO:7`, `P-FSM:10`, `P-HARD:5`, `P-MUT:2`, `P-PROAC:1`, `P-PROV:4`,
+  `P-STR:3`, `P-TURN:3`, and `S:10`, with 260 uncataloged source occurrences
+  sampled by source path and line.
+- [근거] `shasum -a 256 <GOAL_LOOP_SOURCE_ROOT>/*.md` and Python
+  `len(Path(...).read_text(encoding="utf-8").splitlines())` checked at
+  2026-05-06T06:23:00+09:00, confidence High: the catalog records SHA-256 and
+  splitlines-based line-count identity for all 12 prompt source artifacts,
+  totaling 7,553 lines.
+- [근거] `python3 scripts/orient_goal_loop_logs.py
+  test/fixtures/goal_loop/observe.startup.json --audit-catalog
+  test/fixtures/goal_loop/audit-corpus.external-claim.json
+  --audit-source-root <GOAL_LOOP_SOURCE_ROOT> --audit-source-strip-prefix
+  prompt_corpus/GOAL_LOOP --require-source-artifacts
+  --require-consistency-resolved --format text` checked at
+  2026-05-06T07:14:00+09:00, confidence High: reports
+  `aggregate_claim_sources: COMPLETE verified=6 missing=0`,
+  `aggregate_reconciliations: COMPLETE verified=1 failed=0`, and
+  `source_identity: COMPLETE verified=12 failed=0`, proving the catalog's 206,
+  8-new, 214, and 36-keeper aggregate claims are present in the resolved
+  source artifacts, reconciled arithmetically, and matched to the checked
+  digest manifest.
+- [근거] `python3 scripts/orient_goal_loop_logs.py
+  test/fixtures/goal_loop/observe.startup.json --audit-catalog
+  test/fixtures/goal_loop/audit-corpus.external-claim.json
+  --require-consistency-resolved` checked at 2026-05-06T07:14:00+09:00,
+  confidence High: exits zero and reports `consistency_findings: 1 open=0`
+  after the catalog records `audit_total_214 = audit_total_206 +
+  new_findings_live_8`.
+- [근거] `python3 scripts/goal_loop_completion_audit.py
+  /tmp/goal-loop-status-live-post-act.json --structured-id-triage
+  test/fixtures/goal_loop/structured-id-triage.external-claim.json
+  --row-corpus-discovery
+  test/fixtures/goal_loop/row-corpus-discovery.external-claim.json
+  --require-complete --format text` checked at 2026-05-06T09:38:37+09:00,
+  confidence High: exits non-zero with the single explicit blocker
+  `strict_row_level_catalog_complete`, while preserving PASS evidence for
+  source manifest coverage, source artifact validation, source identity,
+  aggregate claim source verification, aggregate reconciliation, strict
+  source/catalog ID sync, broader structured-ID ownership triage, and
+  post-ACT Verify. The row-corpus discovery manifest is attached as evidence
+  for the strict blocker; it records the 12 prompt documents checked, 19
+  strict itemized IDs, 187 missing rows, 72 broader uncataloged structured IDs,
+  260 broader source occurrences, duplicate checked 47-issue audit artifacts
+  that do not contain the missing 206-row corpus, and an independent cascade
+  completion report that keeps #13265 open because the corpus is not
+  replayable. A design research note with aggregate 206/STILL_PRESENT claims
+  and a single `R-FATAL-1` example was also checked and does not contain the
+  missing row corpus. The closest GOAL-loop export archive was checked as
+  well; it contains the same prompt documents and research notes, with no
+  `source_catalog_id`, strict-row schema, or 206 itemized rows.
+- [근거] `python3 test/test_goal_loop_completion_audit.py` checked at
+  2026-05-06T09:59:29+09:00, confidence High: the completion audit now accepts
+  an optional `--strict-row-corpus` artifact and validates it against the
+  checked contract in `test/fixtures/goal_loop/strict-row-corpus-contract.json`
+  without using that artifact as a proxy for completion. A synthetic valid
+  206-row corpus is recorded as `validated=true`, but the closeout remains
+  `BLOCKED` while Orient still reports only 19 itemized rows; invalid supplied
+  corpora with duplicate IDs or `/Users/...` paths block
+  `strict_row_level_catalog_complete`.
+- [근거] `python3 test/test_observe_goal_loop_logs.py` and
+  `python3 test/test_goal_loop_status.py` checked at 2026-05-06T10:15:47+09:00,
+  confidence High: Orient now accepts the same optional `--strict-row-corpus`
+  artifact and uses it as the strict catalog basis only after validation. A
+  valid synthetic 206-row corpus makes Orient report `audit_catalog=COMPLETE`
+  with 206 itemized rows, `source_itemized_id_basis=strict_row_corpus`, and
+  zero missing rows; invalid corpora keep the existing 19-row catalog
+  incomplete. Aggregate GOAL LOOP status carries the strict-row corpus metadata
+  so closeout evidence can distinguish source-document itemized IDs from a
+  complete row-corpus artifact.
+- [근거] `python3 scripts/observe_goal_loop_logs.py
+  <MASC_BASE_PATH>/.masc/events/2026-05/06.jsonl
+  <MASC_BASE_PATH>/.masc/transition-audit/2026-05/06.jsonl` plus
+  `python3 scripts/verify_goal_loop_logs.py
+  /tmp/goal-loop-orient-live-post-act.json --post-act-verify
+  --evidence-kind live_runtime_logs --evidence-source
+  <MASC_BASE_PATH>/.masc/events/2026-05/06.jsonl,<MASC_BASE_PATH>/.masc/transition-audit/2026-05/06.jsonl
+  --evidence-window-start 2026-05-06T00:04:11Z --evidence-window-end
+  2026-05-06T00:21:24Z --checked-at 2026-05-06T00:21:24Z` checked at
+  2026-05-06T09:21:24+09:00, confidence High: scans 21 live post-ACT
+  event/transition lines, finds 0 GOAL LOOP signature matches, and emits
+  Verify `PASS` with explicit evidence-window metadata.
+- [근거] `curl -sS http://127.0.0.1:8935/health` checked at
+  2026-05-06T09:21:24+09:00, confidence High: local runtime is live on
+  port 8935 with `effective_base_path=<MASC_BASE_PATH>`,
+  `effective_masc_root=<MASC_BASE_PATH>/.masc`, `started_at` after the ACT PR
+  merge window, and startup phase `ready`.
+- [근거] `ruff check scripts/verify_goal_loop_logs.py
+  scripts/goal_loop_status.py scripts/goal_loop_completion_audit.py
+  test/test_observe_goal_loop_logs.py test/test_goal_loop_status.py
+  test/test_goal_loop_completion_audit.py` and the three focused Python test
+  files checked at 2026-05-06T07:26:55+09:00, confidence High: the closeout
+  gate now rejects a generic Verify `PASS` unless the status snapshot carries
+  `post_act_verify=true`, an accepted live-runtime `evidence_kind`, a concrete
+  `evidence_source`, explicit `evidence_window_start` /
+  `evidence_window_end`, and `checked_at` metadata.
+- [근거] `test/fixtures/goal_loop/audit-corpus.external-claim.json` checked at
+  2026-05-06T05:54:00+09:00, confidence Medium: the checked catalog itemizes
+  19 unique audit IDs, but the underlying prompt source artifacts are not yet
+  replayable from the repository because `--require-source-artifacts` fails.
 
 ## Current Completion State
 
 | Area | Status | Reason |
 |------|--------|--------|
 | Deterministic GOAL LOOP replay | **PARTIAL** | Fixture bundle exists and proves the loop stays critical, but it is not live production ingestion. |
-| Provider health skip ACT | **PARTIAL** | #13124 adds provider probe ACT artifact; live zero-skipped proof still requires runtime verification. |
+| Provider health skip ACT | **PARTIAL** | #13124 adds provider probe ACT artifact; the post-ACT event/transition replay has no GOAL LOOP signature matches, but the full 206-row corpus is still absent. |
 | Alive-but-stuck recovery ACT | **PARTIAL** | #13123 adds recovery side effect; #13126 adds timeout phase diagnostics. Runtime recovery success SLO remains unproven. |
 | Keeper TOML unknown-key visibility | **PARTIAL** | #13138 surfaces unknown keys in health; strict schema rejection is not yet enforced. |
 | Governance fallback visibility | **PARTIAL** | #13143 exposes fallback counters; strict judge-output failure policy is not complete. |
-| Slot forced reclaim + credential auto-recovery | **FAIL** | `D-EMERGENCY-1` is still `ACT_MISSING` in `act-map.startup.json`. |
-| Full 206-finding Orient engine | **NOT PROVEN** | Current deterministic fixture covers 10 startup findings, not all 206 audit findings. |
-| Full Verify pipeline | **FAIL BY DESIGN** | `verify.fail.json` intentionally keeps the replay red until missing ACT is linked and runtime checks pass. |
+| Slot forced reclaim + credential auto-recovery | **PARTIAL** | `D-EMERGENCY-1` now has linked ACT PRs in `act-map.startup.json`; the current post-ACT event/transition window verifies clean for strict GOAL LOOP signatures. |
+| Full 206-finding Orient engine | **NOT PROVEN** | Orient can now replay the external claim catalog, but the checked artifacts itemize only 19 of the claimed 206 findings. |
+| Full Verify pipeline | **PARTIAL** | `verify.fail.json` intentionally keeps the startup replay red; a separate live post-ACT event/transition replay now passes for the 19 strict itemized IDs. |
 
 ## Section-by-Section Audit
 
@@ -79,14 +224,22 @@ fallback, unknown TOML keys, all-zero metrics, linear warmup.
 - `test/fixtures/goal_loop/observe.startup.json`
 - `test/fixtures/goal_loop/orient.startup.json`
 - `test/fixtures/goal_loop/verify.fail.json`
+- `test/fixtures/goal_loop/audit-corpus.external-claim.json`
 - `docs/examples/goal-loop-fixture.md`
 
 **Status**: **PARTIAL**.
 
 The fixture pins concrete startup evidence for NF-1, NF-2, NF-3, NF-4, and
-NF-6. It does not yet prove all 206 audit findings from live production state,
+NF-6. The external claim catalog itemizes 19 finding IDs from the supplied
+documents and records all 12 prompt-supplied source paths. It now reconciles
+the aggregate-count mismatch: the 214 integrated total is represented as the
+206 baseline audit corpus plus 8 live-log `NEW_FINDING` items. It does not yet
+prove the full row-level aggregate from live production state; 187 rows remain
+missing from the 206-itemized corpus, the 214 claim has no row-level corpus,
 and several prompt claims remain evidence-absent in the fixture (`NF-5`,
-`NF-7`, `NF-8`, `R-FATAL-1`, `CF-1`).
+`NF-7`, `NF-8`, `R-FATAL-1`, `CF-1`). The required row-corpus shape is now
+machine-checkable via `--strict-row-corpus`, and Orient now has a first-class
+path to ingest that artifact before the strict catalog criterion can pass.
 
 **Verification command**:
 
@@ -99,6 +252,17 @@ python3 scripts/goal_loop_status.py \
   --loop-iteration "#fixture" \
   --format text
 ```
+
+**206-claim catalog guard**:
+
+```bash
+python3 scripts/orient_goal_loop_logs.py \
+  test/fixtures/goal_loop/observe.startup.json \
+  --audit-catalog test/fixtures/goal_loop/audit-corpus.external-claim.json \
+  --require-complete-catalog
+```
+
+This command must fail until the full 206-row corpus is attached or checked in.
 
 ### 1. GOAL LOOP Architecture
 
@@ -147,12 +311,31 @@ current runtime/code state, including 206 findings.
 - `orient_goal_loop_logs.py` classifies startup findings into
   `EVIDENCE_PRESENT` and `EVIDENCE_ABSENT`.
 - `orient.startup.json` produces 10 deterministic finding rows.
+- `audit-corpus.external-claim.json` lets Orient replay the itemized portion of
+  the external 206-finding claim and exposes the missing itemized rows.
 
 **Status**: **PARTIAL**.
 
-The Orient skeleton is testable, but the prompt's full 206-finding audit set is
-not encoded. Current output should be treated as startup-regression coverage,
-not complete audit closure.
+The Orient skeleton is testable, and the prompt's external 206/214 aggregate
+claims are now both machine-visible and reconciled as 206 baseline findings
+plus 8 live-log new findings. The full row-level set is still not encoded:
+current
+catalog replay reports 12/12 source documents named by the manifest, no checked
+source artifacts for the logical `prompt_corpus/GOAL_LOOP/...` paths, local
+external source artifacts resolvable from `<GOAL_LOOP_SOURCE_ROOT>` via
+`--audit-source-strip-prefix`, 19 source-itemized IDs matching the 19
+catalog-itemized findings, 6/6 aggregate claim source checks verified from
+resolved documents, 1/1 aggregate reconciliation verified, 12/12 source
+identity checks verified against checked SHA-256 and line-count metadata, 91
+broader structured source IDs with 72 not in the strict audit catalog across 12
+uncataloged ID families and 260 source occurrences, 187 missing 206-itemized
+rows, row-corpus discovery evidence showing the checked 47-issue audit
+artifacts and duplicates are not the missing 206-row corpus, an independent
+report that confirms the #13265 replay gap remains open, and 9 itemized rows
+that are not evaluable from the startup log patterns.
+`goal_loop_completion_audit.py --require-complete` turns those facts into a
+closeout gate so the objective cannot be marked complete while those blockers
+remain.
 
 ### 4. DECIDE
 
@@ -163,13 +346,16 @@ queue.
 
 - `decide_goal_loop_findings.py` maps evidence-present findings to:
   `D-EMERGENCY-1`, `D-EMERGENCY-2`, `D-P1-1`, `D-P1-2`, `D-P2-1`, `D-P2-2`.
-- `act-map.startup.json` links four decisions to real PR artifacts.
+- `act-map.startup.json` links all five startup evidence-present decisions to
+  real PR artifacts.
 - `validate_goal_loop_act_map.py` verifies PR-shaped ACT artifacts.
 
 **Status**: **PARTIAL**.
 
-The priority queue is deterministic. It intentionally reports
-`D-EMERGENCY-1` as `ACT_MISSING`, so Decide cannot be considered complete.
+The priority queue is deterministic and the startup ACT map is fully linked.
+Decide still cannot be considered complete for the original 206-finding claim
+because several itemized catalog findings have no source decision mapping and
+the full 206-row corpus is absent.
 
 ### 5. ACT
 
@@ -178,15 +364,17 @@ decisions.
 
 | Decision | Finding | ACT status | Evidence |
 |----------|---------|------------|----------|
-| `D-EMERGENCY-1` | `NF-2` credential archived starvation | **MISSING** | No linked ACT artifact. |
+| `D-EMERGENCY-1` | `NF-2` credential archived starvation | **LINKED** | #13218 credential auto-recovery, #13231 slot forced-reclaim regression, #13246 crash-path force release. |
 | `D-EMERGENCY-2` | `NF-1` provider health skipped | **LINKED** | #13124 `fix: probe local providers in cascade catalog`. |
 | `D-P1-1` | `NF-3`, `R-FATAL-1` recovery/fallback | **LINKED** | #13123 recovery side effect, #13126 timeout phase diagnostics. |
 | `D-P1-2` | `CF-1` pricing catalog miss | **NOT QUEUED IN FIXTURE** | `CF-1` is `EVIDENCE_ABSENT` in `orient.startup.json`; needs live-pricing audit if seen again. |
 | `D-P2-1` | `NF-6` unknown keeper TOML keys | **LINKED** | #13138 health visibility. |
 | `D-P2-2` | `NF-4` governance fallback | **LINKED** | #13143 fallback counters. |
 
-**Status**: **FAIL** until `D-EMERGENCY-1` has an ACT PR or the Orient evidence
-is disproven by live replay.
+**Status**: **PARTIAL**. All startup evidence-present decisions are linked to
+ACT PRs, and the current post-ACT event/transition replay has no strict GOAL
+LOOP signature matches. The external 206-finding corpus is still not fully
+mapped to ACT decisions.
 
 ### 6. VERIFY
 
@@ -198,11 +386,19 @@ log verification, metric verification, and Orient re-check.
 - Deterministic fixture replay.
 - Regression tests for Decide/status/ACT-map validation.
 - `verify.fail.json` that keeps the loop red.
+- Verify reports can carry post-ACT evidence metadata, including explicit
+  evidence-window bounds, and
+  `goal_loop_completion_audit.py` requires that metadata before accepting a
+  Verify `PASS` as closeout evidence.
 
-**Status**: **FAIL BY DESIGN**.
+**Status**: **PARTIAL**.
 
-This is correct current behavior. A PASS would be unsafe because the fixture
-still contains `NF-2` and `D-EMERGENCY-1` is missing ACT.
+The startup fixture still contains `NF-2` evidence and remains red by design.
+A separate live post-ACT event/transition replay now passes with
+`post_act_verify=true`, accepted live-runtime `evidence_kind`, concrete
+`evidence_source`, `evidence_window_start`, `evidence_window_end`, and
+`checked_at` metadata. This clears the post-ACT Verify closeout criterion for
+the current strict 19-ID catalog, but not the missing 187 row-level findings.
 
 ### 7. GOAL LOOP Dashboard
 
@@ -212,8 +408,18 @@ system health, next action, and counts.
 **Shipped**:
 
 - `goal_loop_status.py` emits the compact phase status and next action.
-- This audit slice changes `goal_loop_status.py` so `next_action` prefers
-  `ACT_MISSING` / `ACT_UNMAPPED` decisions over already-linked decisions.
+- Current `goal_loop_status.py` prefers `ACT_MISSING` / `ACT_UNMAPPED`
+  decisions over already-linked decisions when choosing `next_action`.
+- Verify status now preserves violation kinds, including
+  `post_act_verify_pending`, so stale fixture replays remain visibly distinct
+  from live post-ACT evidence.
+- Verify status also preserves optional post-ACT evidence metadata so the
+  completion audit can distinguish a real post-ACT replay from a synthetic
+  green status file.
+- When `goal_loop_status.py` receives catalog-enriched Orient JSON, it carries
+  the audit catalog summary into `phases.orient.summary.audit_catalog` and
+  keeps Orient at least `warning` while the catalog is incomplete or has open
+  consistency findings.
 - `docs/examples/goal-loop-fixture.md` documents text and JSON status replay.
 
 **Status**: **PARTIAL**.
@@ -231,7 +437,8 @@ findings escalate.
 
 - #13178 adds an ACT-reference guard so artifact strings cannot silently point
   to nonexistent PR numbers.
-- The fixture explicitly fails when a P0 decision has no ACT artifact.
+- `--require-complete-catalog` explicitly fails while the claimed 206-finding
+  corpus is not fully itemized.
 
 **Status**: **PARTIAL**.
 
@@ -248,27 +455,54 @@ healthy and `STILL_PRESENT < 20`; after one month, `STILL_PRESENT = 0`.
 No convergence claim is valid yet. The only safe current statement is:
 
 - The deterministic fixture still reports overall critical.
-- Four ACT artifacts are linked and merged.
-- One P0 ACT artifact is missing.
+- Five startup ACT decisions are linked and merged.
+- The external 206-finding claim is not fully itemized in repo-local evidence.
 - Live runtime replay is required before any "fixed" or "healthy" claim.
 
 ## Next Concrete ACT
 
-1. Implement or disprove `D-EMERGENCY-1`: slot forced reclaim plus keeper
-   credential auto-recovery for `NF-2`.
-2. Extend Orient input from the 10 startup fixture findings to the full
-   206-finding audit corpus, or attach the corpus source path if it already
-   exists outside this repo.
-3. Wire `goal_loop_status.py` JSON into the operator dashboard only after the
+1. Attach or check in the full row-level audit corpus. The current
+   `audit-corpus.external-claim.json` records all 12 prompt source paths,
+   four aggregate claims, one resolved 206+8=214 aggregate reconciliation, one
+   resolved consistency finding, and 19 itemized findings, but
+   `--require-complete-catalog` still fails with 187 missing rows against the
+   206 claim. The aggregate claims are now source-verified at 6/6 and
+   reconciled at 1/1, so the remaining catalog gap is row-level completeness,
+   not whether the aggregate numbers appear in the supplied documents. The
+   checked row-corpus discovery manifest records that the known 47-issue audit
+   artifacts and duplicates are not the missing corpus, and that the cascade
+   completion report still lists #13265 as open; this is evidence for the
+   blocker, not a substitute for the rows.
+2. Decide whether the source artifacts should be checked in under
+   `prompt_corpus/GOAL_LOOP/...` or kept external. Local external validation
+   passes via `<GOAL_LOOP_SOURCE_ROOT>` plus `--audit-source-strip-prefix`, and
+   the checked digest manifest proves source identity, but public-repo replay
+   still needs a stable non-user-local artifact distribution policy.
+3. Re-run Orient against the complete corpus without changing code and update
+   the replay counts in this audit.
+4. Refresh the post-ACT Verify artifact whenever new ACT PRs merge or the live
+   runtime restarts, using `--post-act-verify`, accepted live-runtime
+   `--evidence-kind`, concrete `--evidence-source`,
+   `--evidence-window-start`, `--evidence-window-end`, and `--checked-at`.
+5. Wire `goal_loop_status.py` JSON into the operator dashboard only after the
    fixture's critical state is preserved in UI tests.
-4. Add SLA state for anti-stagnation after ACT coverage is complete; otherwise
+6. Add SLA state for anti-stagnation after ACT coverage is complete; otherwise
    timers will only escalate known missing work without changing recovery.
 
 ## Do-Not-Close Rule
 
 Do not mark the GOAL LOOP objective complete while any of these are true:
 
-- `D-EMERGENCY-1` remains absent from `act-map.startup.json`.
 - `verify.fail.json` is the latest Verify fixture.
-- The full 206-finding audit corpus is not replayed by Orient.
+- The full 206-finding audit corpus is not replayed by Orient with
+  `--require-complete-catalog` passing.
+- The catalog source paths are not replayed from a stable agreed artifact root
+  with `--require-source-artifacts` passing.
+- The replayed external artifact root does not match the checked SHA-256 and
+  line-count identity manifest.
+- The aggregate reconciliation stops passing with
+  `--require-consistency-resolved`.
 - Live runtime evidence is not re-collected after the ACT PRs are merged.
+- The latest Verify `PASS` for the relevant runtime window lacks
+  `post_act_verify=true`, an accepted live-runtime `evidence_kind`, a concrete
+  `evidence_source`, explicit evidence-window bounds, or `checked_at`.

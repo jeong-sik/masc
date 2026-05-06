@@ -180,7 +180,7 @@ val refresh_once :
   sw:Eio.Switch.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   masc_tools:Masc_domain.tool_schema list ->
-  dispatch:(name:string -> args:Yojson.Safe.t -> bool * string) ->
+  dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.t) ->
   base_path:string ->
   build_facts:(unit -> Yojson.Safe.t) ->
   unit
@@ -195,7 +195,7 @@ val start :
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   base_path:string ->
   masc_tools:Masc_domain.tool_schema list ->
-  dispatch:(name:string -> args:Yojson.Safe.t -> bool * string) ->
+  dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.t) ->
   build_facts:(unit -> Yojson.Safe.t) ->
   unit ->
   unit

@@ -92,14 +92,25 @@ jobs:
               return;
             }
 
-            const prAuthorLogin = (pr.user?.login || "").toLowerCase();
-            const prAuthorType = pr.user?.type;
+            const normalizeLabelName = (label) =>
+              (typeof label === "string" ? label : label?.name || "").trim().toLowerCase();
+            const payloadLabels = (pr.labels || []).map(normalizeLabelName).filter(Boolean);
+            const labels = (currentPr.labels || []).map(normalizeLabelName).filter(Boolean);
+            if (payloadLabels.join(",") !== labels.join(",")) {
+              core.info(
+                `Using live PR labels for guard policy: ${labels.join(", ") || "(none)"}; ` +
+                  `event payload labels were: ${payloadLabels.join(", ") || "(none)"}.`
+              );
+            }
+
+            const prAuthor = currentPr.user || pr.user || {};
+            const prAuthorLogin = (prAuthor.login || "").toLowerCase();
+            const prAuthorType = prAuthor.type;
             const humanAuthored =
               prAuthorType === "User" &&
               prAuthorLogin &&
               humanActors.includes(prAuthorLogin);
 
-            const labels = (pr.labels || []).map((label) => label.name.toLowerCase());
             const ignoredBypassLabels = labels.filter((label) =>
               automationProneBypassLabels.has(label)
             );
@@ -113,8 +124,8 @@ jobs:
             }
 
             const looksAgentAuthored =
-              titlePattern.test(pr.title || "") ||
-              branchPattern.test(pr.head?.ref || "") ||
+              titlePattern.test(currentPr.title || pr.title || "") ||
+              branchPattern.test(currentPr.head?.ref || pr.head?.ref || "") ||
               labels.includes("agent-pr") ||
               labels.includes("codex");
 
@@ -229,11 +240,14 @@ jobs:
             const unsafeDraftBoundaryAction =
               action === "ready_for_review" ||
               action === "auto_merge_enabled";
+            // Keep the required Draft Auto-Merge Guard context red for
+            // agent-like PRs until a verified human approval label exists.
+            // A green draft-only check can be reused by a later ready/merge
+            // race before the boundary event has a chance to fail closed.
             const approvalRequired =
-              (!safeDraftOnlyState &&
-                (looksAgentAuthored ||
-                  unsafeDraftBoundaryAction ||
-                  hasAutoMergeRequest)) ||
+              looksAgentAuthored ||
+              unsafeDraftBoundaryAction ||
+              hasAutoMergeRequest ||
               bypassPolicyFailures.length > 0;
             const missingVerifiedApproval =
               approvalRequired &&

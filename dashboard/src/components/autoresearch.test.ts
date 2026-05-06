@@ -7,7 +7,7 @@ import type {
   AutoresearchLoopSummary,
   AutoresearchLoopsResponse,
 } from '../api/autoresearch'
-import { filterCycles } from './autoresearch'
+import { autoresearchFocusFromParam, filterCycles } from './autoresearch'
 
 void vi
 
@@ -113,6 +113,8 @@ describe('Autoresearch surface refresh', () => {
 
   afterEach(async () => {
     const { resetAutoresearchState } = await import('./autoresearch')
+    const { route } = await import('../router')
+    route.value = { tab: 'overview', params: {}, postId: null }
     resetAutoresearchState()
     render(null, container)
     container.remove()
@@ -161,6 +163,73 @@ describe('Autoresearch surface refresh', () => {
     expect(container.textContent).toContain('2 / 5')
     expect(container.textContent).toContain('사이클 이력 (2건)')
   }, 20000)
+
+  it('renders the finding card focus from the cognition autoresearch route', async () => {
+    const loop = loopSummary('loop-fnd0', {
+      queued_hypothesis: 'try focused route',
+      program_note: 'prefer current metric evidence',
+      insights: ['finding insight one'],
+      warnings: ['finding warning one'],
+    })
+    const fetchLoops = vi.fn<() => Promise<AutoresearchLoopsResponse>>()
+      .mockResolvedValue({ loops: [loop], total: 1, offset: 0, limit: 100 })
+    const fetchDetail = vi.fn<(loopId: string) => Promise<AutoresearchLoopDetail>>()
+      .mockResolvedValue(loopDetail(loop))
+
+    const { Autoresearch, refreshAutoresearchSurface } = await loadComponentWithApi({
+      fetchAutoresearchLoops: fetchLoops,
+      fetchAutoresearchLoopDetail: fetchDetail,
+    })
+    const { route } = await import('../router')
+    route.value = {
+      tab: 'monitoring',
+      params: { section: 'cognition', view: 'autoresearch', focus: 'finding' },
+      postId: null,
+    }
+
+    render(html`<${Autoresearch} />`, container)
+    await refreshAutoresearchSurface()
+    await flushUi()
+
+    expect(container.textContent).toContain('Finding Card')
+    expect(container.textContent).toContain('try focused route')
+    expect(container.textContent).toContain('finding insight one')
+    expect(container.textContent).toContain('finding warning one')
+  })
+
+  it('renders the flow snapshot focus from the cognition autoresearch route', async () => {
+    const loop = loopSummary('loop-flw0', {
+      total_keeps: 3,
+      total_discards: 1,
+      current_cycle: 4,
+      recent_cycles: [cycleRecord(0), cycleRecord(1)],
+    })
+    const fetchLoops = vi.fn<() => Promise<AutoresearchLoopsResponse>>()
+      .mockResolvedValue({ loops: [loop], total: 1, offset: 0, limit: 100 })
+    const fetchDetail = vi.fn<(loopId: string) => Promise<AutoresearchLoopDetail>>()
+      .mockResolvedValue(loopDetail(loop))
+
+    const { Autoresearch, refreshAutoresearchSurface } = await loadComponentWithApi({
+      fetchAutoresearchLoops: fetchLoops,
+      fetchAutoresearchLoopDetail: fetchDetail,
+    })
+    const { route } = await import('../router')
+    route.value = {
+      tab: 'monitoring',
+      params: { section: 'cognition', view: 'autoresearch', focus: 'flow' },
+      postId: null,
+    }
+
+    render(html`<${Autoresearch} />`, container)
+    await refreshAutoresearchSurface()
+    await flushUi()
+
+    expect(container.textContent).toContain('Flow Snapshot')
+    expect(container.textContent).toContain('Latest Cycle')
+    expect(container.textContent).toContain('#1')
+    expect(container.textContent).toContain('hypothesis-1')
+    expect(container.textContent).toContain('75.0%')
+  })
 
   it('preserves the current selection when that loop still exists after refresh', async () => {
     const loopA = loopSummary('loop-a111', { target_file: 'target-a.ml' })
@@ -521,5 +590,14 @@ describe('filterCycles', () => {
     const copy = cycles.slice()
     filterCycles(cycles, 'keep')
     expect(cycles).toEqual(copy)
+  })
+})
+
+describe('autoresearchFocusFromParam', () => {
+  it('accepts explicit focus aliases and defaults everything else to overview', () => {
+    expect(autoresearchFocusFromParam('finding')).toBe('finding')
+    expect(autoresearchFocusFromParam('flow')).toBe('flow')
+    expect(autoresearchFocusFromParam('unknown')).toBe('overview')
+    expect(autoresearchFocusFromParam(null)).toBe('overview')
   })
 })

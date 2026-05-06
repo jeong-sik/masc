@@ -551,6 +551,10 @@ let list_reactions ~target_type ~target_id ?user_id () =
   match backend () with
   | Jsonl store -> Board.list_reactions store ~target_type ~target_id ?user_id ()
 
+let list_reactions_batch ~targets ?user_id () =
+  match backend () with
+  | Jsonl store -> Board.list_reactions_batch store ~targets ?user_id ()
+
 let stats () =
   match backend () with
   | Jsonl store -> Board.stats store
@@ -603,6 +607,21 @@ let get_agent_karma ~agent_name =
   match backend () with
   | Jsonl store -> Board.get_agent_karma store ~agent_name
 
+let karma_score_for_direction = Board.karma_score_for_direction
+
+let get_karma_ledger ?agent ?(limit = max_int) () =
+  let events =
+    match backend () with
+    | Jsonl store -> Board.build_karma_ledger store
+  in
+  let filtered =
+    match agent with
+    | None -> events
+    | Some name ->
+        List.filter (fun (e : Board.karma_event) -> String.equal e.recipient name) events
+  in
+  Board.take limit filtered
+
 let post_to_yojson_with_karma (p : Board.post) ~author_karma =
   Board.post_to_yojson_with_karma p ~author_karma
 
@@ -614,3 +633,41 @@ let backend_name () =
   match Atomic.get backend_state with
   | Active (Jsonl _, _) -> "jsonl"
   | Uninitialized -> "uninitialized"
+
+(* AI curation delegate — thin wrappers around Board_curation *)
+
+let submit_curation_snapshot ~submitted_by ?model ~ordering ~highlights
+    ~rationale ?(provenance = `Assoc []) () =
+  let snap : Board_curation.curation_snapshot = {
+    id = Board_curation.generate_id ();
+    generated_at = Time_compat.now ();
+    submitted_by;
+    model;
+    ordering;
+    highlights;
+    rationale;
+    provenance;
+  } in
+  Board_curation.submit_snapshot snap;
+  snap
+
+let latest_curation_snapshot () =
+  Board_curation.latest_snapshot ()
+
+(** {1 SubBoard operations} *)
+
+let create_sub_board ~slug ~name ~description ~owner ?access () =
+  match backend () with
+  | Jsonl store -> Board.create_sub_board store ~slug ~name ~description ~owner ?access ()
+
+let get_sub_board ~sub_board_id =
+  match backend () with
+  | Jsonl store -> Board.get_sub_board store ~sub_board_id
+
+let list_sub_boards () =
+  match backend () with
+  | Jsonl store -> Board.list_sub_boards store
+
+let delete_sub_board ~sub_board_id =
+  match backend () with
+  | Jsonl store -> Board.delete_sub_board store ~sub_board_id

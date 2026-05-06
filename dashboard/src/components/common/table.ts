@@ -14,7 +14,7 @@ export interface TableColumn<T> {
   render?: (row: T) => ComponentChild
 }
 
-export interface TableProps<T> {
+interface TableProps<T> {
   columns: TableColumn<T>[]
   rows: T[]
   getRowId: (row: T) => string

@@ -33,10 +33,6 @@ function stop() {
   }
 }
 
-export function getFps(): number {
-  return currentFps
-}
-
 /** Subscribe to FPS updates. Returns an unsubscribe function. */
 export function onFpsChange(cb: (fps: number) => void): () => void {
   listeners.add(cb)

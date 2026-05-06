@@ -1654,6 +1654,42 @@ let test_runtime_trust_snapshot_surfaces_terminal_reason () =
              && event |> member "next_human_action" |> to_string = "create_or_link_worktree")
            timeline))
 
+let test_runtime_trust_snapshot_reads_terminal_reason_code_alias () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      with_test_runtime_roots base_dir @@ fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let keeper_name = "runtime-trust-terminal-code-alias" in
+      let meta = { minimal_meta with name = keeper_name } in
+      let decision_path = Keeper_types.keeper_decision_log_path config keeper_name in
+      Keeper_types.mkdir_p (Filename.dirname decision_path);
+      Masc_mcp.Keeper_types_support.append_jsonl_line
+        decision_path
+        (`Assoc
+          [
+            ("ts_unix", `Float 1_712_000_010.0);
+            ("trace_id", `String "trace-terminal-code-alias");
+            ("turn_id", `Int 9);
+            ("terminal_reason_code", `String "provider_error");
+          ]);
+      let snapshot =
+        Masc_mcp.Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
+      in
+      let open Yojson.Safe.Util in
+      check string "latest terminal code alias" "provider_error"
+        (snapshot |> member "latest_terminal_reason" |> member "code" |> to_string);
+      let timeline = snapshot |> member "causal_timeline" |> to_list in
+      check bool "terminal reason alias event present" true
+        (List.exists
+           (fun event ->
+             event |> member "kind" |> to_string = "terminal_reason"
+             && event |> member "summary" |> to_string = "provider or cascade failed")
+           timeline))
+
 let test_prompt_contains_identity () =
   let sys, _user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:base_observation () in
   check bool "contains name" true (String.length sys > 0);
@@ -1700,6 +1736,20 @@ let test_prompt_includes_operational_tool_guidance () =
     (contains_substring sys "masc_code_read");
   check bool "mentions server-managed heartbeat" true
     (contains_substring sys "Heartbeat is server-managed")
+
+let test_prompt_includes_research_evidence_contract () =
+  let sys, _user =
+    UP.build_prompt ~base_path:"/test" ~meta:minimal_meta
+      ~observation:base_observation ()
+  in
+  check bool "mentions research evidence" true
+    (contains_substring sys "Research evidence");
+  check bool "mentions web search" true
+    (contains_substring sys "masc_web_search");
+  check bool "mentions uncited marker" true
+    (contains_substring sys "[uncited]");
+  check bool "mentions board sources metadata" true
+    (contains_substring sys "sources` array")
 
 let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
   let prompt = Prompt_registry.get_prompt "keeper.capabilities" in
@@ -2140,12 +2190,16 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     (contains_substring social_guidance "`keeper_task_claim` {}");
   check bool "social guidance includes board post when allowed" true
     (contains_substring social_guidance "`keeper_board_post` { content:");
+  check bool "social guidance includes web search when allowed" true
+    (contains_substring social_guidance "`masc_web_search` { query:");
   check bool "social guidance omits bash outside preset" false
     (contains_substring social_guidance "`keeper_bash` { cmd:");
   check bool "social guidance omits worktree outside preset" false
     (contains_substring social_guidance "`masc_worktree_create` { task_id:");
   check bool "coding guidance includes bash schema" true
     (contains_substring coding_guidance "`keeper_bash` { cmd:");
+  check bool "coding guidance includes web search schema" true
+    (contains_substring coding_guidance "`masc_web_search` { query:");
   check bool "coding guidance includes worktree schema" true
     (contains_substring coding_guidance "`masc_worktree_create` { task_id:");
   check bool "legacy worktree branch_name schema removed" false
@@ -3453,6 +3507,8 @@ let test_append_decision_record_persists_tool_calls () =
         Yojson.Safe.Util.(json |> member "tool_call_count" |> to_int);
       check int "turn id persisted" 8
         Yojson.Safe.Util.(json |> member "turn_id" |> to_int);
+      check int "duration alias persisted" 42
+        Yojson.Safe.Util.(json |> member "duration_ms" |> to_int);
       check (option string) "task id persisted"
         (Some "task-runtime-trust")
         Yojson.Safe.Util.(json |> member "task_id" |> to_string_option);
@@ -3503,6 +3559,8 @@ let test_append_decision_record_persists_tool_calls () =
 	        Yojson.Safe.Util.(List.nth recorded_tool_calls 1 |> member "latency_ms" |> to_float);
 	      check string "terminal reason success" "success"
 	        Yojson.Safe.Util.(json |> member "terminal_reason" |> member "code" |> to_string);
+	      check string "terminal reason code alias" "success"
+	        Yojson.Safe.Util.(json |> member "terminal_reason_code" |> to_string);
 	      check string "provider context selected model" "codex_cli:gpt-5.4"
 	        Yojson.Safe.Util.(json |> member "provider_context" |> member "selected_model" |> to_string);
 	      check string "tool contract requirement" "optional"
@@ -3586,8 +3644,12 @@ let test_append_decision_record_classifies_legacy_worktree_error () =
         read_jsonl_line (Keeper_types.keeper_decision_log_path config minimal_meta.name)
       in
       let open Yojson.Safe.Util in
+      check int "error duration alias persisted" 19
+        (json |> member "duration_ms" |> to_int);
       check string "terminal code" "gh_repo_context_missing_worktree"
         (json |> member "terminal_reason" |> member "code" |> to_string);
+      check string "terminal code alias" "gh_repo_context_missing_worktree"
+        (json |> member "terminal_reason_code" |> to_string);
       check string "next action" "create_or_link_worktree"
         (json |> member "terminal_reason" |> member "next_action" |> to_string);
       check string "tool contract unknown for error path" "unknown"
@@ -5232,6 +5294,43 @@ let test_required_tool_contract_violation_ignores_legacy_internal_error () =
   check bool "legacy internal contract violation ignored" false
     (EC.is_required_tool_contract_violation err)
 
+(* Rotation-cap threshold: the cap must NOT fire on the very first attempt
+   (attempted_cascades length = 1, meaning no rotation has occurred yet).
+   Regression for the >= 1 / >= 2 threshold bug where the fast-fail fired
+   before any rotation was tried, causing immediate cycle failure instead of
+   offering at least one cascade rotation. *)
+let test_should_cap_rotation_does_not_fire_on_first_attempt () =
+  let err = required_tool_contract_violation_error () in
+  check bool "cap must not fire when no rotation has been attempted" false
+    (EC.should_cap_rotation_for_contract_violation
+       ~attempted_cascades:[ "strict_exec" ]
+       ~fallback_not_yet_tried:false
+       err)
+
+let test_should_cap_rotation_fires_after_one_rotation () =
+  let err = required_tool_contract_violation_error () in
+  check bool "cap fires when one rotation has already been attempted" true
+    (EC.should_cap_rotation_for_contract_violation
+       ~attempted_cascades:[ "strict_exec"; KC.default_cascade_name ]
+       ~fallback_not_yet_tried:false
+       err)
+
+let test_should_cap_rotation_suppressed_while_fallback_available () =
+  let err = required_tool_contract_violation_error () in
+  check bool "cap is suppressed when an untried fallback cascade exists" false
+    (EC.should_cap_rotation_for_contract_violation
+       ~attempted_cascades:[ "strict_exec"; KC.default_cascade_name ]
+       ~fallback_not_yet_tried:true
+       err)
+
+let test_should_cap_rotation_ignores_non_contract_violation_error () =
+  let err = wrapped_claude_limit_error () in
+  check bool "cap does not fire for non-contract-violation errors" false
+    (EC.should_cap_rotation_for_contract_violation
+       ~attempted_cascades:[ "strict_exec"; KC.default_cascade_name ]
+       ~fallback_not_yet_tried:false
+       err)
+
 let test_cascade_exhausted_error_detected_from_structured_internal_error () =
   let err =
     Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
@@ -6004,6 +6103,16 @@ let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
        check bool "reason mentions typed no-work proof" true
          (contains_substring reason "typed no-work proof")
    | None -> fail "expected stay_silent actionable violation");
+  check (option string) "execution plus stay_silent remains accepted" None
+    (KTD.actionable_tool_contract_violation_reason
+       ~claim_context_allowed:true
+       ~actionable_signal_context:true
+       ~tool_names:[ "keeper_board_comment"; "keeper_stay_silent" ]);
+  check (option string) "owned-task progress plus stay_silent remains accepted" None
+    (KTD.actionable_tool_contract_violation_reason
+       ~claim_context_allowed:false
+       ~actionable_signal_context:true
+       ~tool_names:[ "keeper_bash"; "keeper_stay_silent" ]);
   check (option string) "non-actionable stay_silent remains allowed" None
     (KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true
@@ -6645,6 +6754,7 @@ let test_social_model_bdi_failure_state_rewrites_claim_retry_loop () =
   let state, transition_reason =
     KSM.derive_failure_state ~meta:minimal_meta ~observation ~previous_state
       ~is_auto_recoverable:true
+      ~sdk_error:None
       ~reason:
         "Internal error: [masc_oas_error] {\"kind\":\"cascade_exhausted\",\"cascade_name\":\"tool_use_strict\"}"
   in
@@ -6663,6 +6773,32 @@ let test_social_model_bdi_failure_state_rewrites_claim_retry_loop () =
   check bool "blocker keeps failure detail" true
     (match state.blocker with
     | Some blocker -> contains_substring blocker "cascade_exhausted"
+    | None -> false)
+
+let test_social_model_required_tool_failure_requests_help () =
+  let state, transition_reason =
+    KSM.derive_failure_state ~meta:minimal_meta ~observation:base_observation
+      ~previous_state:None ~is_auto_recoverable:false
+      ~sdk_error:(Some (required_tool_contract_violation_error ()))
+      ~reason:
+        "Completion contract [require_tool_use] violated: actionable keeper \
+         signal was present, but the model called no keeper tools"
+  in
+  check string "transition reason" "failure:run_error"
+    (KSM.transition_reason_to_string transition_reason);
+  check string "speech act requests help" "request_help"
+    (KSM.speech_act_to_string state.speech_act);
+  check string "delivery surface is operator-visible board post" "board_post"
+    (KSM.delivery_surface_to_string state.delivery_surface);
+  check (option string) "active desire recovers route"
+    (Some "recover_tool_route") state.active_desire;
+  check (option string) "intention surfaces blocker"
+    (Some "surface_required_tool_blocker") state.current_intention;
+  check (option string) "need names route recovery"
+    (Some "operator_guidance_or_tool_capable_route") state.need;
+  check bool "blocker keeps contract detail" true
+    (match state.blocker with
+    | Some blocker -> contains_substring blocker "require_tool_use"
     | None -> false)
 
 let test_social_model_bdi_failure_state_keeps_existing_carry_without_claim_context
@@ -6684,6 +6820,7 @@ let test_social_model_bdi_failure_state_keeps_existing_carry_without_claim_conte
   let state, _ =
     KSM.derive_failure_state ~meta:minimal_meta ~observation:base_observation
       ~previous_state ~is_auto_recoverable:false
+      ~sdk_error:None
       ~reason:"local config error"
   in
   check (option string) "active desire still carries on ordinary failure"
@@ -7185,6 +7322,8 @@ let () =
 	            test_runtime_trust_snapshot_tolerates_null_telemetry;
 	          test_case "runtime trust snapshot surfaces terminal reason" `Quick
 	            test_runtime_trust_snapshot_surfaces_terminal_reason;
+	          test_case "runtime trust snapshot reads terminal reason code alias" `Quick
+	            test_runtime_trust_snapshot_reads_terminal_reason_code_alias;
 	          test_case "with goals" `Quick test_observation_with_goals;
           test_case "economic modes" `Quick test_observation_economic_modes;
         ] );
@@ -7196,6 +7335,8 @@ let () =
             test_prompt_mentions_extend_turns_guidance;
           test_case "includes operational tool guidance" `Quick
             test_prompt_includes_operational_tool_guidance;
+          test_case "includes research evidence contract" `Quick
+            test_prompt_includes_research_evidence_contract;
           test_case "distinguishes sandbox and worktree" `Quick
             test_capabilities_prompt_distinguishes_sandbox_and_worktree;
           test_case "world prompt distinguishes sandbox and worktree" `Quick
@@ -7437,6 +7578,8 @@ let () =
             test_social_model_previous_state_of_meta_falls_back_for_unknown_model;
           test_case "bdi failure rewrites stale claim retry loop" `Quick
             test_social_model_bdi_failure_state_rewrites_claim_retry_loop;
+          test_case "bdi required-tool failure requests help" `Quick
+            test_social_model_required_tool_failure_requests_help;
           test_case "bdi failure keeps ordinary carry state" `Quick
             test_social_model_bdi_failure_state_keeps_existing_carry_without_claim_context;
           test_case "magentic ledger stalled state carries until delta" `Quick
@@ -7544,6 +7687,14 @@ let () =
             test_required_tool_contract_violation_detected;
           test_case "legacy internal contract violation is ignored" `Quick
             test_required_tool_contract_violation_ignores_legacy_internal_error;
+          test_case "rotation cap does not fire before first rotation" `Quick
+            test_should_cap_rotation_does_not_fire_on_first_attempt;
+          test_case "rotation cap fires after one rotation" `Quick
+            test_should_cap_rotation_fires_after_one_rotation;
+          test_case "rotation cap suppressed while fallback available" `Quick
+            test_should_cap_rotation_suppressed_while_fallback_available;
+          test_case "rotation cap ignores non-contract-violation errors" `Quick
+            test_should_cap_rotation_ignores_non_contract_violation_error;
           test_case "structured cascade exhausted error detected" `Quick
             test_cascade_exhausted_error_detected_from_structured_internal_error;
           test_case "legacy internal cascade exhaustion is ignored" `Quick

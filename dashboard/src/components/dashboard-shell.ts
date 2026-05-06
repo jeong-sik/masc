@@ -2,8 +2,8 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { lazy, Suspense } from 'preact/compat'
 import { useEffect } from 'preact/hooks'
-import type { RouteState } from '../types'
-import { route } from '../router'
+import type { RouteState, TabId } from '../types'
+import { hashForRoute, navigate, route } from '../router'
 import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
 import { dashboardWsOnlyEnabled } from '../dashboard-ws-cutover'
 import { dashboardWsConnected } from '../dashboard-ws-state'
@@ -19,7 +19,6 @@ import {
   currentSectionForRoute,
   visibleSectionItemsForTab,
 } from '../config/navigation'
-import { RouteLink } from './common/route-link'
 import { ObservatoryFilterBar } from './common/observatory-filter-bar'
 import { ChevronRight, ChevronLeft } from 'lucide-preact'
 import { ScrollToTopButton } from './common/scroll-to-top'
@@ -30,6 +29,8 @@ import { ErrorPanel } from './common/error-panel'
 import { Bell } from 'lucide-preact'
 import { ringFocusClasses } from './common/ring'
 import { SurfaceIcon } from './surface-icon'
+import { Breadcrumb, type BreadcrumbItem } from './common/breadcrumb'
+import { RouteLink } from './common/route-link'
 
 const buildIdentityOpen = signal(false)
 
@@ -596,12 +597,12 @@ function currentSectionShareUrl(): string {
     the page title for exactly this reason. */
 interface BreadcrumbCrumb {
   label: string
-  navigableTab: string | null
+  navigableTab: TabId | null
 }
 function deriveBreadcrumbTrail(
   tabLabel: string | null,
   sectionLabel: string | null,
-  tabId: string | null,
+  tabId: TabId | null,
 ): BreadcrumbCrumb[] {
   if (tabLabel === null && sectionLabel === null) return []
   if (sectionLabel === null) {
@@ -617,6 +618,35 @@ function deriveBreadcrumbTrail(
     { label: tabLabel, navigableTab: tabId },
     { label: sectionLabel, navigableTab: null },
   ]
+}
+
+function navigateCrumb(event: MouseEvent, tab: TabId): void {
+  if (
+    event.defaultPrevented
+    || event.button !== 0
+    || event.metaKey
+    || event.ctrlKey
+    || event.shiftKey
+    || event.altKey
+  ) {
+    return
+  }
+  event.preventDefault()
+  navigate(tab)
+}
+
+function breadcrumbItemsForTrail(trail: BreadcrumbCrumb[]): BreadcrumbItem[] {
+  return trail.map((crumb, index) => {
+    const current = index === trail.length - 1
+    if (crumb.navigableTab !== null && !current) {
+      return {
+        label: crumb.label,
+        href: hashForRoute(crumb.navigableTab),
+        onClick: (event: MouseEvent) => navigateCrumb(event, crumb.navigableTab!),
+      }
+    }
+    return { label: crumb.label, current }
+  })
 }
 
 
@@ -664,28 +694,12 @@ function SurfaceLead() {
   return html`
     <div class="mb-3 flex flex-col gap-1.5">
       ${trail.length > 0
-        ? html`<nav
-            class="flex items-center gap-1 font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]"
-            aria-label="Page path"
-            data-surface-breadcrumb
-          >
-            ${trail.map((crumb, i) => {
-              const isLast = i === trail.length - 1
-              const sep = i > 0
-                ? html`<span aria-hidden="true" class="text-[var(--color-fg-disabled)]">›</span>`
-                : null
-              const crumbEl = crumb.navigableTab !== null && !isLast
-                ? html`<${RouteLink}
-                    tab=${crumb.navigableTab}
-                    class="cursor-pointer rounded-[var(--r-1)] px-1 py-0.5 hover:bg-[var(--color-bg-elevated)] hover:text-[var(--color-fg-primary)]"
-                  >${crumb.label}<//>`
-                : html`<span
-                    class="px-1 py-0.5 ${isLast ? 'text-[var(--color-fg-primary)]' : ''}"
-                    aria-current=${isLast ? 'page' : undefined}
-                  >${crumb.label}</span>`
-              return html`${sep}${crumbEl}`
-            })}
-          </nav>`
+        ? html`<${Breadcrumb}
+            items=${breadcrumbItemsForTrail(trail)}
+            ariaLabel="Breadcrumb"
+            testId="surface-breadcrumb"
+            dataSurfaceBreadcrumb=${true}
+          />`
         : null}
       <div class="flex items-center gap-2">
         <h2 class="text-lg font-semibold tracking-normal text-[var(--color-fg-secondary)] leading-tight">

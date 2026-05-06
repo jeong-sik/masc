@@ -16,6 +16,9 @@ type logical_use =
   | Openai_compat
   | Persona_generation
   | Provider_benchmark
+  | Simple_task
+  | Moderate_task
+  | Complex_task
   | Tool_rerank_use
 
 type fallback_policy =
@@ -86,6 +89,13 @@ let route_specs =
     keeper_route Openai_compat "openai_compat" [];
     keeper_route Persona_generation "persona_generation" [];
     keeper_route Provider_benchmark "provider_benchmark" [];
+    system_route Simple_task "simple_task" []
+      ~preferred_profiles:[ "tier_small"; "tier_medium" ]
+      ~last_resort_profile:keeper_default_last_resort_profile;
+    system_route Moderate_task "moderate_task" []
+      ~preferred_profiles:[ "tier_medium" ]
+      ~last_resort_profile:keeper_default_last_resort_profile;
+    keeper_route Complex_task "complex_task" [];
     system_route Tool_rerank_use "llm_rerank" []
       ~preferred_profiles:[ "tool_rerank" ]
       ~last_resort_profile:"tool_rerank";

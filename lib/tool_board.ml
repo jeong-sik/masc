@@ -125,6 +125,7 @@ let board_error_to_string = function
   | Board.Io_error s -> Printf.sprintf "I/O error: %s" s
   | Board.Validation_error s -> Printf.sprintf "Validation error: %s" s
   | Board.Already_voted s -> Printf.sprintf "Already voted: %s" s
+  | Board.Already_exists s -> Printf.sprintf "Already exists: %s" s
 
 let visibility_of_string = Board.visibility_of_string
 
@@ -293,6 +294,74 @@ let normalize_board_post_meta args =
   in
   if Stdlib.List.length base_fields = 0 then None else Some (`Assoc base_fields)
 
+let normalize_source_string s =
+  s
+  |> String.trim
+  |> String.split_on_char '\n'
+  |> List.map String.trim
+  |> List.filter (fun part -> not (String.equal part ""))
+  |> String.concat " "
+
+let source_entries_arg args =
+  let source_entry = function
+    | `Assoc fields -> (
+        match List.assoc_opt "url" fields with
+        | Some (`String raw_url) ->
+            let url = String.trim raw_url in
+            if String.equal url "" then None
+            else
+              let quote =
+                match List.assoc_opt "quote" fields with
+                | Some (`String value) ->
+                    let normalized = normalize_source_string value in
+                    if String.equal normalized "" then None else Some normalized
+                | _ -> None
+              in
+              Some
+                (`Assoc
+                   (("url", `String url)
+                    :: (match quote with
+                        | Some value -> [ ("quote", `String value) ]
+                        | None -> [])))
+        | _ -> None)
+    | _ -> None
+  in
+  match Yojson.Safe.Util.member "sources" args with
+  | `List values -> (
+      match List.filter_map source_entry values with
+      | [] -> None
+      | entries -> Some entries)
+  | _ -> None
+
+let merge_sources_into_meta meta_json sources =
+  let fields =
+    match meta_json with
+    | Some (`Assoc fields) -> fields
+    | _ -> []
+  in
+  let fields = assoc_replace "sources" (`List sources) fields in
+  let fields = assoc_replace "has_external_sources" (`Bool true) fields in
+  Some (`Assoc fields)
+
+let sources_footer sources =
+  let line_of_source = function
+    | `Assoc fields -> (
+        match List.assoc_opt "url" fields with
+        | Some (`String url) ->
+            let quote =
+              match List.assoc_opt "quote" fields with
+              | Some (`String value) when not (String.equal value "") ->
+                  " - \"" ^ value ^ "\""
+              | _ -> ""
+            in
+            Some ("- <" ^ url ^ ">" ^ quote)
+        | _ -> None)
+    | _ -> None
+  in
+  match List.filter_map line_of_source sources with
+  | [] -> ""
+  | lines -> "\n\n---\n## Sources\n" ^ String.concat "\n" lines
+
 (** Detect markdown that was cut mid-write by an LLM max_tokens limit.
 
     The detector walks the string once with a small state machine that is
@@ -408,30 +477,38 @@ let handle_post_create args =
   | Some t when String.equal (String.trim t) "" ->
       (false, "Title must not be empty or whitespace-only")
   | _ ->
-  let body = get_string_opt args "body" |> Option.map strip_state_blocks_text in
-  let raw_content = match body with Some value -> value | None -> get_string args "content" "" in
+  let body_arg = get_string_opt args "body" |> Option.map strip_state_blocks_text in
+  let raw_content = match body_arg with Some value -> value | None -> get_string args "content" "" in
+  let sources = source_entries_arg args in
   let content =
     let stripped = strip_state_blocks_text raw_content in
-    match detect_truncated_markdown_with_reason stripped with
-    | Some reason ->
-      let author_label =
-        match get_string_opt args "author" |> Option.map String.trim with
-        | Some a when not (String.equal a "") -> a
-        | _ -> "unknown"
-      in
-      Prometheus.inc_counter Prometheus.metric_board_truncated_posts
-        ~labels:[("author", author_label)] ();
-      (* #9777: body_len is the LLM's own output length AFTER state-block
-         stripping, not a MASC-imposed limit. The signal name explains
-         which structural pattern triggered the marker. *)
-      Log.BoardLog.warn
-        "board_post: detected truncated markdown (author=%s body_len=%d signal=%s) — appending 잘림 marker"
-        author_label (String.length stripped)
-        (truncation_signal_to_string reason);
-      stripped ^ "\n\n_…[잘림 — LLM 출력이 중간에 끊겼습니다]_"
-    | None ->
-      stripped
+    let content =
+      match detect_truncated_markdown_with_reason stripped with
+      | Some reason ->
+        let author_label =
+          match get_string_opt args "author" |> Option.map String.trim with
+          | Some a when not (String.equal a "") -> a
+          | _ -> "unknown"
+        in
+        Prometheus.inc_counter Prometheus.metric_board_truncated_posts
+          ~labels:[("author", author_label)] ();
+        (* #9777: body_len is the LLM's own output length AFTER state-block
+           stripping, not a MASC-imposed limit. The signal name explains
+           which structural pattern triggered the marker. *)
+        Log.BoardLog.warn
+          "board_post: detected truncated markdown (author=%s body_len=%d signal=%s) — appending 잘림 marker"
+          author_label (String.length stripped)
+          (truncation_signal_to_string reason);
+        stripped ^ "\n\n_…[잘림 — LLM 출력이 중간에 끊겼습니다]_"
+      | None ->
+        stripped
+    in
+    match sources with
+    | Some entries when not (String.equal (String.trim content) "") ->
+        content ^ sources_footer entries
+    | _ -> content
   in
+  let body = Option.map (fun _ -> content) body_arg in
   let author = get_string_opt args "author" |> Option.map String.trim in
   let title_is_empty =
     match title with
@@ -452,7 +529,11 @@ let handle_post_create args =
   let hearth = get_string_opt args "hearth" in
   let thread_id = get_string_opt args "thread_id" in
   let raw_post_kind = get_string_opt args "post_kind" in
-  let meta_json = normalize_board_post_meta args in
+  let meta_json =
+    match sources with
+    | Some entries -> merge_sources_into_meta (normalize_board_post_meta args) entries
+    | None -> normalize_board_post_meta args
+  in
 
   let visibility = match visibility_of_string visibility_str with
     | Some v -> v
@@ -780,6 +861,14 @@ let handle_hearth_list _args =
     ) hearths in
     (true, Printf.sprintf "Active Hearths:\n%s" (String.concat "\n" formatted))
 
+let handle_board_curation_read _args =
+  match Board_dispatch.latest_curation_snapshot () with
+  | None ->
+    (true, Yojson.Safe.to_string `Null)
+  | Some snap ->
+    let json = Board_curation.snapshot_to_yojson snap in
+    (true, Yojson.Safe.to_string json)
+
 (** {1 Tool Definitions} *)
 
 let tool_post_create : Masc_domain.tool_schema = {
@@ -793,6 +882,17 @@ let tool_post_create : Masc_domain.tool_schema = {
       ("content", `Assoc [("type", `String "string"); ("description", `String "Post body text (alternative to `body`, max 4000 chars)")]);
       ("author", `Assoc [("type", `String "string"); ("description", `String "Author name. Auto-filled from caller's agent_name when omitted.")]);
       ("meta", `Assoc [("type", `String "object"); ("description", `String "Optional structured operational metadata")]);
+      ("sources", `Assoc [
+        ("type", `String "array");
+        ("description", `String "Optional external evidence sources appended to the post and persisted in meta.sources");
+        ("items", `Assoc [
+          ("type", `String "object");
+          ("properties", `Assoc [
+            ("url", `Assoc [("type", `String "string"); ("description", `String "Source URL")]);
+            ("quote", `Assoc [("type", `String "string"); ("description", `String "Short relevant quote or snippet")]);
+          ]);
+        ]);
+      ]);
       ("classification_reason", `Assoc [("type", `String "string"); ("description", `String "Optional explicit classification rationale; persisted into meta and surfaced by the dashboard")]);
       ("judgment", `Assoc [("type", `String "object"); ("description", `String "Optional structured LLM judgment metadata. Use summary/reason/confidence keys when you want the board to retain your classification rationale")]);
       ("visibility", `Assoc [("type", `String "string"); ("description", `String "public|unlisted|internal|direct (default: internal)")]);
@@ -1095,6 +1195,15 @@ Safety: never deletes posts with comments or votes unless filters are overridden
 }
 
 (** All board tools *)
+let tool_board_curation_read : Masc_domain.tool_schema = {
+  name = "masc_board_curation_read";
+  description = "Read the latest AI curation snapshot for the board: AI-produced post ordering, highlights, rationale, and operator-auditable provenance. Returns null when no snapshot has been submitted yet.";
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc []);
+  ];
+}
+
 let tools = [
   tool_post_create;
   tool_post_list;
@@ -1107,6 +1216,7 @@ let tools = [
   tool_reaction;
   tool_profile;
   tool_hearth_list;
+  tool_board_curation_read;
   tool_delete;
 ]
 
@@ -1114,42 +1224,47 @@ let tools = [
     Mutation tools (post, comment, vote, delete, cleanup) invalidate
     the board_list TTL cache so the next read sees fresh data. *)
 let handle_tool name args =
-  match name with
-  | "masc_board_post" ->
-    let result = handle_post_create args in
-    invalidate_board_list_cache ();
-    result
-  | "masc_board_list" -> handle_post_list args
-  | "masc_board_get" -> handle_post_get args
-  | "masc_board_comment" ->
-    let result = handle_comment_add args in
-    invalidate_board_list_cache ();
-    result
-  | "masc_board_vote" ->
-    let result = handle_vote args in
-    invalidate_board_list_cache ();
-    result
-  | "masc_board_stats" -> handle_stats args
-  | "masc_board_search" -> handle_search args
-  | "masc_board_comment_vote" ->
-    let result = handle_comment_vote args in
-    invalidate_board_list_cache ();
-    result
-  | "masc_board_reaction" ->
-    let result = handle_reaction args in
-    invalidate_board_list_cache ();
-    result
-  | "masc_board_profile" -> handle_profile args
-  | "masc_board_hearths" -> handle_hearth_list args
-  | "masc_board_delete" ->
-    let result = handle_delete args in
-    invalidate_board_list_cache ();
-    result
-  | "masc_board_cleanup" ->
-    let result = handle_board_cleanup args in
-    invalidate_board_list_cache ();
-    result
-  | _ -> (false, Printf.sprintf "Unknown tool: %s" name)
+  let start_time = Time_compat.now () in
+  let result : bool * string =
+    match name with
+    | "masc_board_post" ->
+      let result = handle_post_create args in
+      invalidate_board_list_cache ();
+      result
+    | "masc_board_list" -> handle_post_list args
+    | "masc_board_get" -> handle_post_get args
+    | "masc_board_comment" ->
+      let result = handle_comment_add args in
+      invalidate_board_list_cache ();
+      result
+    | "masc_board_vote" ->
+      let result = handle_vote args in
+      invalidate_board_list_cache ();
+      result
+    | "masc_board_stats" -> handle_stats args
+    | "masc_board_search" -> handle_search args
+    | "masc_board_comment_vote" ->
+      let result = handle_comment_vote args in
+      invalidate_board_list_cache ();
+      result
+    | "masc_board_reaction" ->
+      let result = handle_reaction args in
+      invalidate_board_list_cache ();
+      result
+    | "masc_board_profile" -> handle_profile args
+    | "masc_board_hearths" -> handle_hearth_list args
+    | "masc_board_curation_read" -> handle_board_curation_read args
+    | "masc_board_delete" ->
+      let result = handle_delete args in
+      invalidate_board_list_cache ();
+      result
+    | "masc_board_cleanup" ->
+      let result = handle_board_cleanup args in
+      invalidate_board_list_cache ();
+      result
+    | _ -> (false, Printf.sprintf "Unknown tool: %s" name)
+  in
+  Tool_result.wrap ~tool_name:name ~start_time result
 
 let tool_spec_read_only =
   [
@@ -1159,13 +1274,19 @@ let tool_spec_read_only =
     "masc_board_search";
     "masc_board_profile";
     "masc_board_hearths";
+    "masc_board_curation_read";
   ]
 
 let register () =
-  let handler = fun ~name ~args -> Some (handle_tool name args) in
+  let handler =
+    fun ~name ~args ->
+      let result = handle_tool name args in
+      Some (result.success, Tool_result.message result)
+  in
   let tool_required_permission = function
     | "masc_board_list" | "masc_board_get" | "masc_board_stats"
-    | "masc_board_search" | "masc_board_profile" | "masc_board_hearths" ->
+    | "masc_board_search" | "masc_board_profile" | "masc_board_hearths"
+    | "masc_board_curation_read" ->
         Some Masc_domain.CanReadState
     | "masc_board_post" | "masc_board_comment" | "masc_board_vote"
     | "masc_board_comment_vote" | "masc_board_reaction" ->

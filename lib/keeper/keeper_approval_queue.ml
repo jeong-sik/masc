@@ -69,6 +69,7 @@ type pending_approval = {
   selected_model : string option;
   disposition : string option;
   disposition_reason : string option;
+  audit_base_path : string option;
   resolver : Agent_sdk.Hooks.approval_decision Eio.Promise.u option;
   on_resolution : (Agent_sdk.Hooks.approval_decision -> unit) option;
 }
@@ -626,7 +627,7 @@ let input_preview_of_json (json : Yojson.Safe.t) =
 
 let create_entry ~id ~keeper_name ~tool_name ~input ~risk_level
     ?turn_id ?task_id ?goal_id ?(goal_ids = []) ?runtime_contract
-    ?selected_model ?disposition ?disposition_reason
+    ?selected_model ?disposition ?disposition_reason ?audit_base_path
     ~resolver ~on_resolution () =
   let action_key = action_key_of_input ~tool_name ~input in
   let input_hash = normalized_input_hash input in
@@ -649,6 +650,7 @@ let create_entry ~id ~keeper_name ~tool_name ~input ~risk_level
     selected_model;
     disposition;
     disposition_reason;
+    audit_base_path;
     resolver;
     on_resolution;
   }
@@ -716,7 +718,8 @@ let record_pending (entry : pending_approval) =
     "HITL_APPROVAL_PENDING: id=%s keeper=%s tool=%s risk=%s"
     entry.id entry.keeper_name entry.tool_name
     (risk_level_to_string entry.risk_level);
-  audit_approval_event ~event_type:"pending" ~id:entry.id
+  audit_approval_event ?base_path:entry.audit_base_path ~event_type:"pending"
+    ~id:entry.id
     ~keeper_name:entry.keeper_name ~tool_name:entry.tool_name
     ~risk_level:entry.risk_level ?turn_id:entry.turn_id ?task_id:entry.task_id
     ?goal_id:entry.goal_id ~goal_ids:entry.goal_ids
@@ -821,7 +824,7 @@ let sort_entries_by_requested_at entries =
     the operator-response distribution — premature shortening turns
     every distracted operator into an [Approval_expired] event. *)
 let submit_and_await ~keeper_name ~tool_name ~input ~risk_level
-    ?turn_id ?task_id ?goal_id ?(goal_ids = []) ?runtime_contract
+    ?base_path ?turn_id ?task_id ?goal_id ?(goal_ids = []) ?runtime_contract
     ?selected_model ?disposition ?disposition_reason
     ?clock ?(timeout_s = 600.0)
     ()
@@ -832,6 +835,7 @@ let submit_and_await ~keeper_name ~tool_name ~input ~risk_level
     create_entry ~id ~keeper_name ~tool_name ~input ~risk_level
       ?turn_id ?task_id ?goal_id ~goal_ids ?runtime_contract
       ?selected_model ?disposition ?disposition_reason
+      ?audit_base_path:base_path
       ~resolver:(Some resolver) ~on_resolution:None ()
   in
   atomic_update pending (fun map -> SMap.add id entry map);
@@ -863,6 +867,7 @@ let submit_and_await ~keeper_name ~tool_name ~input ~risk_level
            Printf.sprintf "approval timeout after %.0fs" timeout_s
          in
          audit_approval_event
+           ?base_path:entry.audit_base_path
            ~event_type:"approval_timeout"
            ~id
            ~keeper_name
@@ -889,7 +894,7 @@ let submit_and_await ~keeper_name ~tool_name ~input ~risk_level
         atomic_update pending (fun map -> SMap.remove id map)))
 
 let submit_pending ~keeper_name ~tool_name ~input ~risk_level
-    ?turn_id ?task_id ?goal_id ?(goal_ids = []) ?runtime_contract
+    ?base_path ?turn_id ?task_id ?goal_id ?(goal_ids = []) ?runtime_contract
     ?selected_model ?disposition ?disposition_reason
     ~on_resolution
     ()
@@ -910,6 +915,7 @@ let submit_pending ~keeper_name ~tool_name ~input ~risk_level
         create_entry ~id ~keeper_name ~tool_name ~input ~risk_level
           ?turn_id ?task_id ?goal_id ~goal_ids ?runtime_contract
           ?selected_model ?disposition ?disposition_reason
+          ?audit_base_path:base_path
           ~resolver:None ~on_resolution:(Some on_resolution) ()
       in
       let updated = SMap.add id entry map in
@@ -1086,7 +1092,8 @@ let expire_stale ~max_wait_s =
       ();
     Log.Keeper.warn "HITL_APPROVAL_EXPIRED: id=%s keeper=%s tool=%s"
       id entry.keeper_name entry.tool_name;
-    audit_approval_event ~event_type:"expired" ~id
+    audit_approval_event ?base_path:entry.audit_base_path ~event_type:"expired"
+      ~id
       ~keeper_name:entry.keeper_name ~tool_name:entry.tool_name
       ~risk_level:entry.risk_level ?turn_id:entry.turn_id
       ?task_id:entry.task_id ?goal_id:entry.goal_id

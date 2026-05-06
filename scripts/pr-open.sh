@@ -90,6 +90,41 @@ ensure_agent_pr_label() {
     >/dev/null 2>&1 || true
 }
 
+ensure_pr_is_draft() {
+  local pr_number="$1"
+  local phase="$2"
+  local live
+  local live_state
+  local live_is_draft
+
+  live="$(
+    gh pr view "$pr_number" --repo "$repo" --json state,isDraft \
+      --jq '.state + " " + (.isDraft | tostring)'
+  )"
+  live_state="${live%% *}"
+  live_is_draft="${live##* }"
+
+  if [[ "$live_state" != "OPEN" ]]; then
+    echo "refusing to continue: PR #$pr_number is $live_state after $phase; expected OPEN draft" >&2
+    exit 1
+  fi
+
+  if [[ "$live_is_draft" == "true" ]]; then
+    return 0
+  fi
+
+  echo "PR #$pr_number is ready after $phase; restoring draft state" >&2
+  gh pr ready "$pr_number" --repo "$repo" --undo >/dev/null
+
+  live_is_draft="$(
+    gh pr view "$pr_number" --repo "$repo" --json isDraft --jq '.isDraft'
+  )"
+  if [[ "$live_is_draft" != "true" ]]; then
+    echo "failed to restore draft state for PR #$pr_number after $phase" >&2
+    exit 1
+  fi
+}
+
 repo=""
 base="main"
 title=""
@@ -160,6 +195,7 @@ else
   pr_number="$(gh pr view "$pr_url" --repo "$repo" --json number --jq .number)"
 fi
 
+ensure_pr_is_draft "$pr_number" "create/reuse"
 ensure_agent_pr_label
 
 load_changed_files "origin/$base...HEAD"
@@ -199,6 +235,7 @@ fi
 if [[ ${#labels[@]} -gt 0 ]]; then
   label_json="$(printf '%s\n' "${labels[@]}" | awk 'NF' | sort -u | jq -R . | jq -s '{labels: .}')"
   gh api "repos/$repo/issues/$pr_number/labels" --method POST --input - <<< "$label_json" >/dev/null
+  ensure_pr_is_draft "$pr_number" "label application"
 fi
 
 pr_url="$(gh pr view "$pr_number" --repo "$repo" --json url --jq .url)"

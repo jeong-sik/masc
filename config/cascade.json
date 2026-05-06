@@ -71,6 +71,14 @@
   "__safe_lane_max_tokens": 16384,
   "__safe_lane_keeper_assignable": false,
   "__safe_lane_required_capability_profile": "tool_strict",
+  "_comment_local_recovery": "Alias for the phase_recovery logical route. Profiles that declare fallback_cascade = \"local_recovery\" resolve here instead of silently ignoring the hint. Not keeper-assignable.",
+  "local_recovery_models": [
+    "codex_cli:gpt-5.3-codex-spark", "gemini_cli:auto", "claude_code:auto"
+  ],
+  "local_recovery_temperature": 0.2,
+  "local_recovery_max_tokens": 16384,
+  "local_recovery_keeper_assignable": false,
+  "local_recovery_fallback_cascade": "big_three",
   "_comment_tier_fast": "Cheap+fast tool-capable cloud models for keeper turns. Bias toward latency and cost over reasoning depth. All entries support tool calling. Falls back to big_three on exhaustion.",
   "tier_fast_models": [
     "claude_code:claude-haiku-4-5-20251001",

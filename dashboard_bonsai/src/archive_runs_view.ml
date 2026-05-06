@@ -296,9 +296,17 @@ let view_meta_strip (r : Archive_runs_types.response) =
       | Failed -> true
       | Running | Stopped | Paused | Completed | Unknown -> false)
   in
+  let fetch_color =
+    match r.fetch_status with
+    | Archive_runs_types.Fetch_pending -> `Brass
+    | Archive_runs_types.Fetch_fresh -> `Ok
+    | Archive_runs_types.Fetch_stale _ -> `Blood
+  in
   Meta.strip
     ~label:"Archive runs summary"
-    [ Meta.cell ~k:"total" ~v:(Printf.sprintf "%d" r.total) ()
+    [ Meta.cell ~color:fetch_color ~k:"feed"
+        ~v:(Archive_runs_types.fetch_status_label r.fetch_status) ()
+    ; Meta.cell ~k:"total" ~v:(Printf.sprintf "%d" r.total) ()
     ; Meta.cell ~color:`Ok ~k:"running" ~v:(Printf.sprintf "%d" running) ()
     ; Meta.cell ~k:"completed" ~v:(Printf.sprintf "%d" completed) ()
     ; Meta.cell ~color:`Blood ~k:"failed" ~v:(Printf.sprintf "%d" failed) ()

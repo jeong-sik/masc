@@ -5,6 +5,7 @@ import {
   type OverlayLayer,
 } from '../../../design-system/headless-core/layered-overlay'
 import { useLayeredOverlay } from '../../../design-system/headless-preact/use-layered-overlay'
+import { CommandBar, type CommandBarAction } from '../common/command-bar'
 
 // Phase 1 PR-3: IDE editor toolbar — view tabs + LAYERS toggle.
 // View tabs (SOURCE / SPLIT DIFF / UNIFIED / BLAME) are local UI state
@@ -29,6 +30,12 @@ export const IDE_LAYERS: ReadonlyArray<OverlayLayer> = [
   { kind: 'approve', label: 'Approve', description: 'APPROVE thread 마커' },
   { kind: 'notes', label: 'Notes', description: 'NOTE/SUGGEST 마커' },
   { kind: 'cascade', label: 'Cascade', description: 'provider/model/cost/latency gutter chip' },
+  {
+    kind: 'keeper-trace',
+    label: 'Trace',
+    description: '4-source stitched gutter chip (anchored-thread / cascade-hop / bdi-snapshot / decision-log)',
+    conflictsWith: ['cascade'],
+  },
   { kind: 'explode', label: 'EXPLODE', description: 'per-keeper ghost copies', mutuallyExclusive: true },
 ]
 
@@ -37,9 +44,18 @@ interface IdeToolbarProps {
   readonly activeLayers: ReadonlySet<string>
   readonly onViewChange: (id: ViewTab) => void
   readonly onLayersChange: (active: ReadonlySet<string>) => void
+  readonly onTerminalOpen?: () => void
+  readonly onFindOpen?: () => void
 }
 
-export function IdeToolbar({ activeView, activeLayers, onViewChange, onLayersChange }: IdeToolbarProps) {
+export function IdeToolbar({
+  activeView,
+  activeLayers,
+  onViewChange,
+  onLayersChange,
+  onTerminalOpen,
+  onFindOpen,
+}: IdeToolbarProps) {
   const controller = useMemo(() => {
     const next = createLayeredOverlay(IDE_LAYERS)
     next.setActive(activeLayers)
@@ -56,6 +72,37 @@ export function IdeToolbar({ activeView, activeLayers, onViewChange, onLayersCha
     onLayersChange(controller.active())
   }
 
+  const commandActions: CommandBarAction[] = [
+    ...VIEW_TABS.map(tab => ({
+      id: `view-${tab.id}`,
+      title: `View: ${tab.label}`,
+      keywords: `${tab.id} ${tab.label} editor mode`,
+      handler: () => onViewChange(tab.id),
+    })),
+    ...IDE_LAYERS.map(layer => ({
+      id: `layer-${layer.kind}`,
+      title: `${isActive(layer.kind) ? 'Hide' : 'Show'} ${layer.label} layer`,
+      keywords: `toggle ${layer.kind} ${layer.description}`,
+      handler: () => handleLayerToggle(layer.kind),
+    })),
+    ...(onTerminalOpen
+      ? [{
+          id: 'terminal-open',
+          title: 'Open Keeper Terminal',
+          keywords: 'terminal shell keeper output',
+          handler: onTerminalOpen,
+        }]
+      : []),
+    ...(onFindOpen
+      ? [{
+          id: 'find-open',
+          title: 'Find in Current File',
+          keywords: 'find search current file editor match',
+          handler: onFindOpen,
+        }]
+      : []),
+  ]
+
   return html`
     <div
       class="ide-toolbar"
@@ -63,6 +110,7 @@ export function IdeToolbar({ activeView, activeLayers, onViewChange, onLayersCha
       aria-label="IDE editor toolbar"
       style=${{
         display: 'grid',
+        gridTemplateColumns: 'auto minmax(180px, 320px) 1fr auto',
         alignItems: 'center',
         gap: 'var(--sp-3)',
         padding: 'var(--sp-2) var(--sp-3)',
@@ -90,6 +138,13 @@ export function IdeToolbar({ activeView, activeLayers, onViewChange, onLayersCha
           >${tab.label}</button>
         `)}
       </div>
+      <${CommandBar}
+        actions=${commandActions}
+        placeholder="Run IDE command..."
+        testId="ide-command-bar"
+        className="min-w-0"
+        inputClassName="h-7 w-full rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 font-mono text-2xs text-[var(--color-fg-primary)] outline-none transition-colors placeholder:text-[var(--color-fg-disabled)] focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)]"
+      />
       <span class="ide-toolbar-spacer" aria-hidden="true" />
       <div
         class="ide-toolbar-layers"

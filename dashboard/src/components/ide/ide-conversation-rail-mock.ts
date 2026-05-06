@@ -1,5 +1,8 @@
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
+import { bridgePostsToTrace } from './anchored-thread-trace-bridge'
+import { bridgeCascadeEventsToTrace } from './cascade-hop-trace-bridge'
+import { bridgeDecisionsToTrace } from './decision-log-trace-bridge'
 import { keeperHueIndex } from '../../../design-system/headless-core/keeper-line-ownership'
 import { KeeperBadge } from '../keeper-badge'
 import {
@@ -129,6 +132,32 @@ export function IdeConversationRailMock() {
   useEffect(() => activeIdeFile.subscribe(file => setActiveFile(file)), [])
   useEffect(() => activeKeeperName.subscribe(name => setKeeperName(name)), [])
 
+  // RFC-0028 PR-δ anchored-thread producer: each fetched post becomes a
+  // keeper-trace event the first time it is observed, deduplicated by id
+  // across renders. The ref carries the cumulative known-id set so a
+  // re-render with the same posts is a no-op.
+  const knownPostIds = useRef<ReadonlySet<string>>(new Set())
+  useEffect(() => {
+    knownPostIds.current = bridgePostsToTrace(posts, knownPostIds.current)
+  }, [posts])
+
+  // RFC-0028 PR-δ-2 cascade-hop producer: each cascade strategy_trace
+  // event becomes a keeper-trace event the first time it is observed.
+  // Dedup key is `cascade:${cascade_name}:${cycle}:${ts}` so a server
+  // restart that resets cycle counters cannot collide with prior runs.
+  const knownCascadeKeys = useRef<ReadonlySet<string>>(new Set())
+  useEffect(() => {
+    knownCascadeKeys.current = bridgeCascadeEventsToTrace(cascadeEvents, knownCascadeKeys.current)
+  }, [cascadeEvents])
+
+  // RFC-0028 PR-δ-3 decision-log producer: each KeeperDecision becomes a
+  // keeper-trace event the first time it is observed. Dedup key is
+  // `decision:${keeper_name}:${ts_unix}:${event_type}` since the
+  // KeeperDecision payload has no native id field.
+  const knownDecisionKeys = useRef<ReadonlySet<string>>(new Set())
+  useEffect(() => {
+    knownDecisionKeys.current = bridgeDecisionsToTrace(decisions, knownDecisionKeys.current)
+  }, [decisions])
   const replayItems = replayRailItems(posts, decisions, cascadeEvents)
   const replayEvents = replayEventsForItems(replayItems)
   const visibleItemIds = new Set(filterReplayEvents(replayEvents, replayUntilMs).map(event => event.id))

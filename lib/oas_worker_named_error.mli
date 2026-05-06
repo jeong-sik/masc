@@ -15,6 +15,12 @@ type cascade_name = Keeper_cascade_profile.runtime_name
 val cascade_name_of_string : string -> cascade_name
 val cascade_name_to_string : cascade_name -> string
 
+type provider_rejection = {
+  provider_label : string;
+  provider_kind : string;
+  reason : string;
+}
+
 type masc_internal_error =
   | Cascade_exhausted of {
       cascade_name : cascade_name;
@@ -28,6 +34,8 @@ type masc_internal_error =
   | No_tool_capable_provider of {
       cascade_name : cascade_name;
       configured_labels : string list;
+      required_tool_names : string list;
+      provider_rejections : provider_rejection list;
     }
   | Accept_rejected of {
       scope : string;
@@ -59,6 +67,10 @@ type masc_internal_error =
     }
 
 val masc_internal_error_to_json : masc_internal_error -> Yojson.Safe.t
+
+val summary_of_masc_internal_error : masc_internal_error -> string option
+(** Operator-facing concise summary for structured errors where the raw JSON
+    payload is too noisy for dashboard cards. *)
 
 val sdk_error_of_masc_internal_error : masc_internal_error -> Agent_sdk.Error.sdk_error
 (** Convert a [masc_internal_error] to an SDK error, bumping the

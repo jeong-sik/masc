@@ -204,18 +204,48 @@ let process_directive ~agent_name directive =
 
 (* ── gRPC heartbeat stream ── *)
 
-let current_task_id_for_agent agent_name =
-  match Keeper_registry.find_by_agent_name agent_name with
-  | Some e -> (match e.meta.current_task_id with Some t -> Keeper_id.Task_id.to_string t | None -> "")
-  | None -> ""
+let reconcile_current_task_id_for_heartbeat ~config ~agent_name =
+  try
+    Keeper_current_task_reconcile.sync_current_task_id_for_agent_name ~config ~agent_name;
+    true
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_reconcile_failures
+      ~labels:[("keeper", agent_name); ("phase", "grpc_heartbeat")]
+      ();
+    Log.Keeper.warn
+      "gRPC heartbeat: failed to reconcile current_task_id for %s: %s"
+      agent_name
+      (Printexc.to_string exn);
+    false
 ;;
 
-let make_grpc_heartbeat_ping ~agent_name ~session_id =
+let registry_current_task_id agent_name =
+  match Keeper_registry.find_by_agent_name agent_name with
+  | Some e -> e.meta.current_task_id
+  | None -> None
+;;
+
+let current_task_id_for_agent ~config agent_name =
+  match registry_current_task_id agent_name with
+  | None -> ""
+  | Some _ ->
+    if reconcile_current_task_id_for_heartbeat ~config ~agent_name then
+      match registry_current_task_id agent_name with
+      | Some task_id -> Keeper_id.Task_id.to_string task_id
+      | None -> ""
+    else
+      ""
+;;
+
+let make_grpc_heartbeat_ping ~config ~agent_name ~session_id =
   Masc_grpc_types.HeartbeatPing.
     { agent_name
     ; session_id
     ; timestamp_ms = Int64.of_float (Time_compat.now () *. 1000.0)
-    ; current_task_id = current_task_id_for_agent agent_name
+    ; current_task_id = current_task_id_for_agent ~config agent_name
     }
 ;;
 
@@ -234,6 +264,7 @@ let run_grpc_heartbeat_stream
       ~close_ref
       ~clock
       ~interval_sec
+      ~config
       ~agent_name
       ~session_id
       send
@@ -244,7 +275,7 @@ let run_grpc_heartbeat_stream
     then ()
     else (
       (try
-         send (make_grpc_heartbeat_ping ~agent_name ~session_id);
+         send (make_grpc_heartbeat_ping ~config ~agent_name ~session_id);
          match recv () with
          | Ok ack -> handle_grpc_heartbeat_ack ~agent_name ack
          | Error err ->
@@ -308,6 +339,7 @@ let run_grpc_heartbeat_fiber
       ~sw
       ~stop
       ~(grpc_client : Masc_grpc_client.t)
+      ~(config : Coord.config)
       ~(agent_name : string)
       ~(session_id : string)
       ~(interval_sec : float)
@@ -347,6 +379,7 @@ let run_grpc_heartbeat_fiber
                ~close_ref
                ~clock
                ~interval_sec
+               ~config
                ~agent_name
                ~session_id
                send
@@ -390,6 +423,7 @@ let start_keeper_grpc_heartbeat
       ~sw:ctx.sw
       ~stop
       ~grpc_client:client
+      ~config:ctx.config
       ~agent_name:m.agent_name
       ~session_id
       ~interval_sec:interval

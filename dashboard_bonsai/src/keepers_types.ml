@@ -11,6 +11,14 @@ type keeper_status =
   | Warn
   | Dead
 
+type fetch_status =
+  | Fetch_pending
+  | Fetch_fresh
+  | Fetch_stale of
+      { reason : string
+      ; consecutive_failures : int
+      }
+
 type lane_frame =
   { kind : string              (* "llm" | "tool" | "think" | "wait" | "err" *)
   ; left : int                 (* left %, 0..100 *)
@@ -42,6 +50,7 @@ type response =
   ; cycle : int
   ; room : string option
   ; generated_at : string        (* ISO-8601 UTC *)
+  ; fetch_status : fetch_status
   }
 
 (* ---------- manual Yojson decoding ---------- *)
@@ -69,14 +78,14 @@ let status_of_string = function
   | "Live" -> Live
   | "Warn" -> Warn
   | "Dead" -> Dead
-  | _ -> Live
+  | _ -> Warn
 ;;
 
 let status_of_yojson json =
   match json with
   | `String s -> status_of_string s
   | `List [ `String s ] -> status_of_string s  (* ppx variant fallback *)
-  | _ -> Live
+  | _ -> Warn
 ;;
 
 let lane_frame_of_yojson json =
@@ -119,7 +128,21 @@ let response_of_yojson json =
   ; cycle = int_field json "cycle"
   ; room = string_opt_field json "room"
   ; generated_at = string_field json "generated_at"
+  ; fetch_status = Fetch_fresh
   }
+;;
+
+let fetch_status_label = function
+  | Fetch_pending -> "fetch · pending"
+  | Fetch_fresh -> "fetch · ok"
+  | Fetch_stale { consecutive_failures; _ } ->
+    Printf.sprintf "stale · %dx" consecutive_failures
+;;
+
+let fetch_status_reason = function
+  | Fetch_pending -> "waiting for first keeper summary"
+  | Fetch_fresh -> "latest keeper summary parsed"
+  | Fetch_stale { reason; _ } -> reason
 ;;
 
 (** Initial placeholder — empty keepers list. Views should degrade gracefully
@@ -130,5 +153,6 @@ let fixture : response =
   ; cycle = 0
   ; room = None
   ; generated_at = ""
+  ; fetch_status = Fetch_pending
   }
 ;;

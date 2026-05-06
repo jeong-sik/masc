@@ -1,6 +1,12 @@
 import { EditorView, GutterMarker, gutter, lineNumbers, type ViewUpdate } from '@codemirror/view'
 import { Annotation, EditorState, Extension, StateField, StateEffect } from '@codemirror/state'
-import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language'
+import {
+  defaultHighlightStyle,
+  StreamLanguage,
+  syntaxHighlighting,
+  type StringStream,
+  type StreamParser,
+} from '@codemirror/language'
 import type { LineOwnership } from './keeper-line-ownership-store'
 import { kSigil } from '../keeper-badge'
 
@@ -235,27 +241,204 @@ export function keeperLineSelectExt(
 
 type LanguageModule = () => Promise<{ extension: Extension }>
 
-const LANGUAGE_MAP: Readonly<Record<string, LanguageModule>> = {
-  '.ts': () => import('@codemirror/lang-javascript').then(m => m.javascript({ typescript: true })),
-  '.tsx': () => import('@codemirror/lang-javascript').then(m => m.javascript({ typescript: true, jsx: true })),
-  '.js': () => import('@codemirror/lang-javascript').then(m => m.javascript()),
-  '.jsx': () => import('@codemirror/lang-javascript').then(m => m.javascript({ jsx: true })),
-  '.py': () => import('@codemirror/lang-python').then(m => m.python()),
-  '.html': () => import('@codemirror/lang-html').then(m => m.html()),
-  '.css': () => import('@codemirror/lang-css').then(m => m.css()),
-  '.json': () => import('@codemirror/lang-json').then(m => m.json()),
-  '.md': () => import('@codemirror/lang-markdown').then(m => m.markdown()),
-  '.ocaml': () => import('@codemirror/lang-javascript').then(m => m.javascript()),
-  '.ml': () => import('@codemirror/lang-javascript').then(m => m.javascript()),
-  '.mli': () => import('@codemirror/lang-javascript').then(m => m.javascript()),
-  '.toml': () => import('@codemirror/lang-json').then(m => m.json()),
-  '.yaml': () => import('@codemirror/lang-json').then(m => m.json()),
-  '.yml': () => import('@codemirror/lang-json').then(m => m.json()),
+interface LanguageEntry {
+  readonly id: string
+  readonly load: LanguageModule
+}
+
+interface OcamlStreamState {
+  commentDepth: number
+  stringQuote: '"' | null
+}
+
+const OCAML_KEYWORDS = new Set([
+  'and',
+  'as',
+  'assert',
+  'begin',
+  'class',
+  'constraint',
+  'do',
+  'done',
+  'downto',
+  'else',
+  'end',
+  'exception',
+  'external',
+  'for',
+  'fun',
+  'function',
+  'functor',
+  'if',
+  'in',
+  'include',
+  'inherit',
+  'initializer',
+  'lazy',
+  'let',
+  'match',
+  'method',
+  'module',
+  'mutable',
+  'new',
+  'nonrec',
+  'object',
+  'of',
+  'open',
+  'private',
+  'rec',
+  'sig',
+  'struct',
+  'then',
+  'to',
+  'try',
+  'type',
+  'val',
+  'virtual',
+  'when',
+  'while',
+  'with',
+])
+
+const OCAML_ATOMS = new Set(['false', 'true', 'None', 'Some', 'Ok', 'Error'])
+
+const OCAML_BUILTINS = new Set([
+  'bool',
+  'char',
+  'exn',
+  'float',
+  'int',
+  'list',
+  'option',
+  'result',
+  'string',
+  'unit',
+])
+
+const ocamlStreamParser: StreamParser<OcamlStreamState> = {
+  name: 'ocaml',
+  startState: () => ({ commentDepth: 0, stringQuote: null }),
+  copyState: state => ({ ...state }),
+  languageData: {
+    name: 'ocaml',
+    commentTokens: { block: { open: '(*', close: '*)' } },
+  },
+  token(stream, state) {
+    if (state.commentDepth > 0) return readOcamlComment(stream, state)
+    if (state.stringQuote !== null) return readOcamlString(stream, state)
+    if (stream.eatSpace()) return null
+
+    if (stream.match('(*')) {
+      state.commentDepth = 1
+      return readOcamlComment(stream, state)
+    }
+
+    const ch = stream.next()
+    if (ch === undefined) return null
+
+    if (ch === '"') {
+      state.stringQuote = '"'
+      return readOcamlString(stream, state)
+    }
+
+    if (ch === '\'') {
+      if (stream.match(/^\\?.'/)) return 'string'
+      stream.eatWhile(/[A-Za-z0-9_']/)
+      return 'typeName'
+    }
+
+    if (/[0-9]/.test(ch)) {
+      stream.eatWhile(/[A-Za-z0-9_'.]/)
+      return 'number'
+    }
+
+    if (/[A-Z]/.test(ch)) {
+      stream.eatWhile(/[A-Za-z0-9_']/)
+      const ident = stream.current()
+      return OCAML_ATOMS.has(ident) ? 'atom' : 'typeName'
+    }
+
+    if (/[a-z_]/.test(ch)) {
+      stream.eatWhile(/[A-Za-z0-9_']/)
+      const ident = stream.current()
+      if (OCAML_KEYWORDS.has(ident)) return 'keyword'
+      if (OCAML_ATOMS.has(ident)) return 'atom'
+      if (OCAML_BUILTINS.has(ident)) return 'standard variableName'
+      return 'variableName'
+    }
+
+    if (/[-+*/=<>@^|&$%!?~:.;,#]/.test(ch)) {
+      stream.eatWhile(/[-+*/=<>@^|&$%!?~:.;,#]/)
+      return 'operator'
+    }
+
+    return null
+  },
+}
+
+const ocamlLanguage = StreamLanguage.define(ocamlStreamParser)
+
+function readOcamlComment(stream: StringStream, state: OcamlStreamState): string {
+  while (!stream.eol()) {
+    if (stream.match('(*')) {
+      state.commentDepth += 1
+      continue
+    }
+    if (stream.match('*)')) {
+      state.commentDepth -= 1
+      if (state.commentDepth <= 0) {
+        state.commentDepth = 0
+        break
+      }
+      continue
+    }
+    stream.next()
+  }
+  return 'comment'
+}
+
+function readOcamlString(stream: StringStream, state: OcamlStreamState): string {
+  let escaped = false
+  while (!stream.eol()) {
+    const ch = stream.next()
+    if (escaped) {
+      escaped = false
+    } else if (ch === '\\') {
+      escaped = true
+    } else if (ch === state.stringQuote) {
+      state.stringQuote = null
+      break
+    }
+  }
+  return 'string'
+}
+
+const LANGUAGE_MAP: Readonly<Record<string, LanguageEntry>> = {
+  '.ts': { id: 'typescript', load: () => import('@codemirror/lang-javascript').then(m => m.javascript({ typescript: true })) },
+  '.tsx': { id: 'typescript', load: () => import('@codemirror/lang-javascript').then(m => m.javascript({ typescript: true, jsx: true })) },
+  '.js': { id: 'javascript', load: () => import('@codemirror/lang-javascript').then(m => m.javascript()) },
+  '.jsx': { id: 'javascript', load: () => import('@codemirror/lang-javascript').then(m => m.javascript({ jsx: true })) },
+  '.py': { id: 'python', load: () => import('@codemirror/lang-python').then(m => m.python()) },
+  '.html': { id: 'html', load: () => import('@codemirror/lang-html').then(m => m.html()) },
+  '.css': { id: 'css', load: () => import('@codemirror/lang-css').then(m => m.css()) },
+  '.json': { id: 'json', load: () => import('@codemirror/lang-json').then(m => m.json()) },
+  '.md': { id: 'markdown', load: () => import('@codemirror/lang-markdown').then(m => m.markdown()) },
+  '.ocaml': { id: 'ocaml', load: () => Promise.resolve(ocamlLanguage) },
+  '.ml': { id: 'ocaml', load: () => Promise.resolve(ocamlLanguage) },
+  '.mli': { id: 'ocaml', load: () => Promise.resolve(ocamlLanguage) },
+  '.toml': { id: 'json', load: () => import('@codemirror/lang-json').then(m => m.json()) },
+  '.yaml': { id: 'json', load: () => import('@codemirror/lang-json').then(m => m.json()) },
+  '.yml': { id: 'json', load: () => import('@codemirror/lang-json').then(m => m.json()) },
+}
+
+export function languageIdForFilePath(filePath: string): string | null {
+  const ext = filePath.slice(filePath.lastIndexOf('.'))
+  return LANGUAGE_MAP[ext]?.id ?? null
 }
 
 export async function languageExt(filePath: string): Promise<Extension> {
   const ext = filePath.slice(filePath.lastIndexOf('.'))
-  const loader = LANGUAGE_MAP[ext]
+  const loader = LANGUAGE_MAP[ext]?.load
   if (!loader) return []
   try {
     return await loader()

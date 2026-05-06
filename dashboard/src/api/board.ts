@@ -4,11 +4,13 @@ import type {
   BoardActorIdentity, BoardPost, BoardComment, BoardReactionSummary,
   BoardReactionTargetType, BoardReactionToggleResult, BoardSortMode,
   BoardVoteDirection,
+  BoardCurationSnapshot,
   GovernanceContextRef,
   GovernanceDecisionItem, GovernanceExecutedRoute,
   GovernanceGuardrailState, GovernanceJudgeSummary, GovernanceJudgment,
   KeeperApprovalQueueItem,
   GovernanceResolvedAction, GovernanceTimelineEvent, PendingConfirmation,
+  SubBoard, SubBoardAccess,
 } from '../types'
 
 export interface BoardHearth {
@@ -460,6 +462,19 @@ function normalizeBoardHearth(raw: unknown): BoardHearth | null {
   }
 }
 
+function normalizeBoardCurationSnapshot(raw: unknown): BoardCurationSnapshot | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id, '').trim()
+  const generated_at = asNullableIsoTimestamp(raw.generated_at)
+  const submitted_by = asString(raw.submitted_by, '').trim()
+  if (!id || !generated_at || !submitted_by) return null
+  const ordering = Array.isArray(raw.ordering) ? raw.ordering.map(v => String(v)) : []
+  const highlights = Array.isArray(raw.highlights) ? raw.highlights.map(v => String(v)) : []
+  const rationale = asString(raw.rationale, '')
+  const model = asNullableString(raw.model)
+  return { id, generated_at, submitted_by, model, ordering, highlights, rationale, provenance: raw.provenance }
+}
+
 function normalizeBoardReactionSummary(raw: unknown): BoardReactionSummary | null {
   if (!isRecord(raw)) return null
   const emoji = asString(raw.emoji, '').trim()
@@ -529,6 +544,13 @@ export async function fetchBoardHearths(): Promise<BoardHearth[]> {
     return Array.isArray(raw.hearths)
       ? raw.hearths.map(normalizeBoardHearth).filter((row): row is BoardHearth => row !== null)
       : []
+  })
+}
+
+export async function fetchBoardCuration(): Promise<BoardCurationSnapshot | null> {
+  return withRetries('fetchBoardCuration', async () => {
+    const raw = await get<{ snapshot?: unknown }>('/api/v1/board/curation')
+    return raw.snapshot != null ? normalizeBoardCurationSnapshot(raw.snapshot) : null
   })
 }
 
@@ -639,4 +661,55 @@ export function commentPost(postId: string, author: string, content: string, par
   const body: Record<string, string> = { post_id: postId, author, content }
   if (parentId) body.parent_id = parentId
   return post(`/api/v1/tools/masc_board_comment`, body)
+}
+
+// --- SubBoard API ---
+
+function normalizeSubBoardAccess(raw: unknown): SubBoardAccess {
+  if (raw === 'members_only' || raw === 'owner_only') return raw
+  return 'open'
+}
+
+export function normalizeSubBoard(raw: unknown): SubBoard | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id, '').trim()
+  const slug = asString(raw.slug, '').trim()
+  const name = asString(raw.name, '').trim()
+  if (!id || !slug) return null
+  return {
+    id,
+    slug,
+    name,
+    description: asString(raw.description, ''),
+    owner: asString(raw.owner, ''),
+    access: normalizeSubBoardAccess(raw.access),
+    created_at: asNullableIsoTimestamp(raw.created_at) ?? new Date(0).toISOString(),
+    post_count: asInt(raw.post_count) ?? 0,
+  }
+}
+
+export async function fetchSubBoards(): Promise<SubBoard[]> {
+  const data = await withRetries('fetchSubBoards', () => get('/api/v1/board/sub-boards'))
+  if (!isRecord(data)) return []
+  const raw = Array.isArray(data.sub_boards) ? data.sub_boards : []
+  return raw.flatMap((r: unknown) => {
+    const sb = normalizeSubBoard(r)
+    return sb ? [sb] : []
+  })
+}
+
+export async function fetchSubBoard(subBoardId: string): Promise<SubBoard | null> {
+  const data = await withRetries('fetchSubBoard', () => get(`/api/v1/board/sub-boards/${encodeURIComponent(subBoardId)}`))
+  return normalizeSubBoard(data)
+}
+
+export function createSubBoard(
+  slug: string,
+  name: string,
+  description: string,
+  access?: SubBoardAccess,
+): Promise<unknown> {
+  const body: Record<string, string> = { slug, name, description }
+  if (access) body.access = access
+  return post('/api/v1/board/sub-boards', body)
 }

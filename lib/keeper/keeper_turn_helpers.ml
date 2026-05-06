@@ -136,15 +136,13 @@ let record_execution_receipt_gap
    honest actions of [specs/keeper-state-machine/KeeperTaskAcquisition.tla].
    Each helper is wrapped at the call site by
    [Keeper_fsm_guard_runtime.wrap_unit] so an [Assert_failure] from a
-   PPX-injected guard becomes a Prometheus counter increment by default
-   (counter mode) and a re-raise when [MASC_FSM_GUARD_ASSERT=1]
-   (assert mode for tests / CI). Bug-action [TaskRejected] is NOT
+   PPX-injected guard increments the Prometheus violation counter and
+   re-raises. Bug-action [TaskRejected] is NOT
    instrumented -- it is the failure mode these guards are designed to
    detect.
 
    This pattern follows PR #11696 (Cycle 43, KeeperHeartbeat closeout)
-   which introduced [Keeper_fsm_guard_runtime] and the counter-default
-   policy. *)
+   which introduced [Keeper_fsm_guard_runtime]. *)
 
 (* AssignTask: the channel decision picks "turn" when at least one of
    [pending_mentions], [pending_board_events], or

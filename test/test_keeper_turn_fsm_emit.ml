@@ -15,6 +15,7 @@
 
 open Masc_mcp
 module F = Keeper_turn_fsm
+module P = Prometheus
 
 (* ── Compile-time signature anchor ─────────────────────────── *)
 
@@ -136,6 +137,35 @@ let test_invalid_transition_rejected () =
     Alcotest.failf
       "Idle -> Done unexpectedly classified as %s"
       (F.transition_action_label action)
+;;
+
+let read_fsm_guard_count ~stage =
+  P.metric_value_or_zero P.metric_fsm_guard_violation
+    ~labels:[ "action", "KeeperTurnFSM.Next"; "stage", stage ]
+    ()
+
+let test_invalid_emit_transition_fails_closed_and_bumps_counter () =
+  let stage = "idle->done" in
+  let before = read_fsm_guard_count ~stage in
+  let raised =
+    try
+      F.emit_transition
+        ~keeper_name:"alice"
+        ~turn_id:13457
+        ~prev:F.Idle
+        F.Done;
+      false
+    with Assert_failure _ -> true
+  in
+  let after = read_fsm_guard_count ~stage in
+  Alcotest.(check bool)
+    "invalid emit_transition re-raises"
+    true
+    raised;
+  Alcotest.(check (float 0.0001))
+    "invalid emit_transition bumps fsm guard counter"
+    (before +. 1.0)
+    after
 ;;
 
 let test_stop_signaled_blocks_forward_transitions () =
@@ -323,6 +353,10 @@ let () =
             "invalid transition rejected"
             `Quick
             test_invalid_transition_rejected
+        ; Alcotest.test_case
+            "invalid emit_transition fails closed and bumps counter"
+            `Quick
+            test_invalid_emit_transition_fails_closed_and_bumps_counter
         ; Alcotest.test_case
             "stop_signaled blocks forward transitions"
             `Quick

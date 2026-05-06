@@ -659,6 +659,8 @@ let metric_keeper_oas_execution_errors =
   "masc_keeper_oas_execution_errors_total"
 let metric_keeper_episode_create_failures =
   "masc_keeper_episode_create_failures_total"
+let metric_keeper_memory_activity_emit_failures =
+  "masc_keeper_memory_activity_emit_failures_total"
 let metric_keeper_supervisor_sweep_failures =
   "masc_keeper_supervisor_sweep_failures_total"
 let metric_keeper_toml_reconcile_sweep_failures =
@@ -1026,6 +1028,8 @@ let metric_provider_actual_health_status =
    calls for N consecutive turns.  Labels: keeper. *)
 let metric_keeper_passive_loop_detected_total =
   "masc_keeper_passive_loop_detected_total"
+let metric_keeper_required_tool_loop_detected_total =
+  "masc_keeper_required_tool_loop_detected_total"
 
 (* Task-138: Minimum proactive cadence — observability gauges that pair
    with the [keeper_passive_loop_detector] streak counter so operators
@@ -1703,6 +1707,11 @@ let init () =
     "#12799 Total passive-loop detections: keeper issued only read-only tool \
      calls for N consecutive turns. Labeled by keeper."
     Counter;
+  add metric_keeper_required_tool_loop_detected_total
+    "#13362 Total required-tool contract loops: keeper hit N consecutive \
+     actionable required-tool failures before making execution/completion \
+     progress. Labeled by keeper and kind."
+    Counter;
   add metric_keeper_consecutive_idle
     "Task-138 Current consecutive-idle streak (passive-only turns) per \
      keeper.  Resets to 0 on the next execution/completion turn.  Labeled \
@@ -1838,6 +1847,10 @@ let init () =
   add metric_keeper_episode_create_failures
     "Total episode creation failures in keeper_agent_memory_episode. \
      Labeled by keeper."
+    Counter;
+  add metric_keeper_memory_activity_emit_failures
+    "Total memory flush activity emit callback failures in \
+     keeper_agent_memory_episode. Labeled by keeper and outcome."
     Counter;
   add metric_keeper_supervisor_sweep_failures
     "Total supervisor sweep failures in keeper_runtime periodic beat. \

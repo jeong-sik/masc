@@ -30,20 +30,27 @@ let cleanup () =
   end;
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
+  Board_curation.reset_for_test ();
   remove_path (Filename.concat _test_base_path Common.masc_dirname);
   Board_dispatch.init_jsonl ()
 
 let dispatch name args =
-  Tool_board.handle_tool name args
+  let result = Tool_board.handle_tool name args in
+  (result.success, Tool_result.message result)
 
 let make_args pairs = `Assoc pairs
 
 let parse_create_response_json body =
-  match String.index_opt body '\n' with
-  | Some idx ->
-      Yojson.Safe.from_string
-        (String.sub body (idx + 1) (String.length body - idx - 1))
-  | None -> Alcotest.fail "expected JSON payload in create response"
+  let trimmed = String.trim body in
+  if String.length trimmed > 0 && Char.equal trimmed.[0] '{' then
+    Yojson.Safe.from_string trimmed
+  else
+    match String.index_opt body '\n' with
+    | Some idx ->
+        Yojson.Safe.from_string
+          (String.sub body (idx + 1) (String.length body - idx - 1))
+    | None ->
+        Alcotest.failf "expected JSON payload in create response: %s" body
 
 let make_keeper_meta ?(name = "judge-keeper") () : Keeper_types.keeper_meta =
   match
@@ -155,6 +162,21 @@ let json_member_string json key =
   | `String value -> value
   | _ -> Alcotest.failf "expected string field %s" key
 
+let json_member_int json key =
+  match Yojson.Safe.Util.member key json with
+  | `Int value -> value
+  | _ -> Alcotest.failf "expected int field %s" key
+
+let json_member_bool json key =
+  match Yojson.Safe.Util.member key json with
+  | `Bool value -> value
+  | _ -> Alcotest.failf "expected bool field %s" key
+
+let json_member_list json key =
+  match Yojson.Safe.Util.member key json with
+  | `List values -> values
+  | _ -> Alcotest.failf "expected list field %s" key
+
 let test_board_actor_identity_canonicalizes_keeper_alias () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -180,6 +202,74 @@ let test_board_actor_identity_keeps_non_keeper_agent () =
   Alcotest.(check string) "key" "agent:codex" (json_member_string json "key");
   Alcotest.(check string) "source" "raw_agent"
     (json_member_string json "source")
+
+let test_board_dashboard_json_embeds_reaction_summaries () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post =
+    match
+      Board_dispatch.create_post ~author:"reaction-author"
+        ~content:"reactable post" ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  (match
+     Board_dispatch.toggle_reaction ~target_type:Board.Reaction_post
+       ~target_id:post_id ~user_id:"reactor" ~emoji:"🚀"
+   with
+   | Ok _ -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  let comment =
+    match
+      Board_dispatch.add_comment ~post_id ~author:"commenter"
+        ~content:"reactable comment" ()
+    with
+    | Ok comment -> comment
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let comment_id = Board.Comment_id.to_string comment.id in
+  (match
+     Board_dispatch.toggle_reaction ~target_type:Board.Reaction_comment
+       ~target_id:comment_id ~user_id:"reactor" ~emoji:"👏"
+   with
+   | Ok _ -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  let post_reactions =
+    Server_utils.board_reactions_for_post ~voter:(Some "reactor") ~post_id
+  in
+  let post_json =
+    Server_utils.board_post_dashboard_json ~reactions:post_reactions
+      ~author_karma:0 post
+  in
+  let post_summary =
+    match json_member_list post_json "reactions" with
+    | summary :: _ -> summary
+    | [] -> Alcotest.fail "expected post reaction summary"
+  in
+  Alcotest.(check string) "post reaction emoji" "🚀"
+    (json_member_string post_summary "emoji");
+  Alcotest.(check int) "post reaction count" 1
+    (json_member_int post_summary "count");
+  Alcotest.(check bool) "post reaction selected" true
+    (json_member_bool post_summary "has_reacted");
+  let comment_reactions =
+    Server_utils.board_reactions_for_comment ~voter:(Some "reactor") ~comment_id
+  in
+  let comment_json =
+    Server_utils.board_comment_dashboard_json ~reactions:comment_reactions comment
+  in
+  let comment_summary =
+    match json_member_list comment_json "reactions" with
+    | summary :: _ -> summary
+    | [] -> Alcotest.fail "expected comment reaction summary"
+  in
+  Alcotest.(check string) "comment reaction emoji" "👏"
+    (json_member_string comment_summary "emoji");
+  Alcotest.(check bool) "comment reaction selected" true
+    (json_member_bool comment_summary "has_reacted")
 
 let test_inline_board_post_author_rewrites_caller_claim () =
   let args =
@@ -293,13 +383,7 @@ let test_post_create_structured_payload () =
        ])
   in
   Alcotest.(check bool) "create ok" true ok;
-  let json =
-    match String.index_opt body '\n' with
-    | Some idx ->
-        Yojson.Safe.from_string
-          (String.sub body (idx + 1) (String.length body - idx - 1))
-    | None -> Alcotest.fail "expected JSON payload in create response"
-  in
+  let json = parse_create_response_json body in
   Alcotest.(check string) "title kept" "Why"
     Yojson.Safe.Util.(json |> member "title" |> to_string);
   Alcotest.(check string) "body stripped" "Visible answer"
@@ -342,6 +426,41 @@ let test_post_create_judgment_roundtrip () =
     Yojson.Safe.Util.(json |> member "classification_reason" |> to_string);
   Alcotest.(check string) "judgment summary kept in meta" summary
     Yojson.Safe.Util.(json |> member "meta" |> member "judgment" |> member "summary" |> to_string)
+
+let test_post_create_sources_footer_and_meta () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let ok, body =
+    dispatch "masc_board_post"
+      (make_args
+         [
+           ("content", `String "External claim: prompt contracts need evidence.");
+           ("author", `String "tester");
+           ( "sources",
+             `List
+               [
+                 `Assoc
+                   [
+                     ("url", `String "https://example.com/docs");
+                     ("quote", `String "evidence beats assertion");
+                   ];
+               ] );
+         ])
+  in
+  Alcotest.(check bool) "create ok" true ok;
+  let json = parse_create_response_json body in
+  let content = Yojson.Safe.Util.(json |> member "content" |> to_string) in
+  Alcotest.(check bool) "sources footer appended" true
+    (contains_substring content "## Sources");
+  Alcotest.(check bool) "source url rendered" true
+    (contains_substring content "<https://example.com/docs>");
+  Alcotest.(check string) "source url persisted" "https://example.com/docs"
+    Yojson.Safe.Util.(
+      json |> member "meta" |> member "sources" |> index 0 |> member "url"
+      |> to_string);
+  Alcotest.(check bool) "external source flag" true
+    Yojson.Safe.Util.(json |> member "meta" |> member "has_external_sources" |> to_bool)
 
 let test_keeper_board_post_preserves_meta_reason () =
   Eio_main.run @@ fun env ->
@@ -399,7 +518,24 @@ let test_keeper_board_dispatch_uses_typed_tool_names () =
   Alcotest.(check bool) "typed comment vote reaches board handler" true
     (contains_substring comment_vote "comment_id required");
   Alcotest.(check bool) "typed comment vote is not unknown" false
-    (contains_substring comment_vote "unknown_board_tool")
+    (contains_substring comment_vote "unknown_board_tool");
+  let curation =
+    Keeper_exec_board.handle_keeper_board_tool
+      ~meta:keeper_meta
+      ~name:"keeper_board_curation_read"
+      ~args:(make_args [])
+  in
+  Alcotest.(check string) "typed curation read reaches board handler" "null" curation;
+  Alcotest.(check bool) "typed curation read is not unknown" false
+    (contains_substring curation "unknown_board_tool")
+
+let test_board_curation_read_empty_returns_json_null () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let ok, body = dispatch "masc_board_curation_read" (make_args []) in
+  Alcotest.(check bool) "curation read ok" true ok;
+  Alcotest.(check string) "empty curation snapshot is JSON null" "null" body
 
 let test_post_create_accepts_automation_rejects_system () =
   Eio_main.run @@ fun env ->
@@ -598,14 +734,9 @@ let test_dispatch_delete_success () =
   let _ok, body = dispatch "masc_board_post"
     (make_args [("content", `String "to be deleted"); ("author", `String "tester")]) in
   let post_id =
-    match String.index_opt body '\n' with
-    | Some idx ->
-      let json_str = String.sub body (idx + 1) (String.length body - idx - 1) in
-      (try
-        let json = Yojson.Safe.from_string json_str in
-        json |> Yojson.Safe.Util.member "id" |> Yojson.Safe.Util.to_string
-      with _ -> Alcotest.fail ("Failed to parse post JSON from: " ^ json_str))
-    | None -> Alcotest.fail ("No newline in create response: " ^ body)
+    parse_create_response_json body
+    |> Yojson.Safe.Util.member "id"
+    |> Yojson.Safe.Util.to_string
   in
   let ok_del, msg_del = dispatch "masc_board_delete"
     (make_args [("post_id", `String post_id)]) in
@@ -640,16 +771,10 @@ let test_post_get_success () =
   let ok, body = dispatch "masc_board_post"
     (make_args [("content", `String "Get me"); ("author", `String "tester")]) in
   Alcotest.(check bool) "create ok" true ok;
-  (* Response is "✅ Post created:\n{json}" — extract JSON after first newline *)
   let post_id =
-    match String.index_opt body '\n' with
-    | Some idx ->
-      let json_str = String.sub body (idx + 1) (String.length body - idx - 1) in
-      (try
-        let json = Yojson.Safe.from_string json_str in
-        json |> Yojson.Safe.Util.member "id" |> Yojson.Safe.Util.to_string
-      with _ -> Alcotest.fail ("Failed to parse post JSON from: " ^ json_str))
-    | None -> Alcotest.fail ("No newline in create response: " ^ body)
+    parse_create_response_json body
+    |> Yojson.Safe.Util.member "id"
+    |> Yojson.Safe.Util.to_string
   in
   Alcotest.(check bool) "post_id not empty" true (String.length post_id > 0);
   let ok2, body2 = dispatch "masc_board_get"
@@ -795,7 +920,7 @@ let test_tools_count () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  Alcotest.(check int) "11 tool schemas" 11 (List.length Tool_board.tools)
+  Alcotest.(check int) "13 tool schemas" 13 (List.length Tool_board.tools)
 
 let test_tools_names_unique () =
   Eio_main.run @@ fun env ->
@@ -830,6 +955,8 @@ let () =
             `Quick test_board_actor_identity_canonicalizes_keeper_alias;
           Alcotest.test_case "board actor identity keeps non-keeper agent"
             `Quick test_board_actor_identity_keeps_non_keeper_agent;
+          Alcotest.test_case "board dashboard json embeds reaction summaries"
+            `Quick test_board_dashboard_json_embeds_reaction_summaries;
           Alcotest.test_case "inline board post author rewrites caller claim"
             `Quick test_inline_board_post_author_rewrites_caller_claim;
           Alcotest.test_case "inline board post author accepts matching alias"
@@ -849,10 +976,14 @@ let () =
             test_post_create_structured_payload;
           Alcotest.test_case "create judgment roundtrip" `Quick
             test_post_create_judgment_roundtrip;
+          Alcotest.test_case "create sources footer and meta" `Quick
+            test_post_create_sources_footer_and_meta;
           Alcotest.test_case "keeper board post preserves meta reason" `Quick
             test_keeper_board_post_preserves_meta_reason;
           Alcotest.test_case "keeper board dispatch uses typed names" `Quick
             test_keeper_board_dispatch_uses_typed_tool_names;
+          Alcotest.test_case "curation read empty returns JSON null" `Quick
+            test_board_curation_read_empty_returns_json_null;
           Alcotest.test_case "accept automation reject system" `Quick
             test_post_create_accepts_automation_rejects_system;
           Alcotest.test_case "create empty content" `Quick test_post_create_empty_content;
@@ -922,8 +1053,9 @@ let () =
               ("author", `String "claude-agent")
             ]) in
             Alcotest.(check bool) "post created" true ok;
-            Alcotest.(check bool) "classified as direct" true
-              (contains_substring msg {|"post_kind": "direct"|}));
+            Alcotest.(check string) "classified as direct" "direct"
+              Yojson.Safe.Util.(
+                parse_create_response_json msg |> member "post_kind" |> to_string));
           Alcotest.test_case "with hook: agent classified as automation" `Quick (fun () ->
             Eio_main.run @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -934,8 +1066,9 @@ let () =
               ("author", `String "claude-agent")
             ]) in
             Alcotest.(check bool) "post created" true ok;
-            Alcotest.(check bool) "classified as automation" true
-              (contains_substring msg {|"post_kind": "automation"|}));
+            Alcotest.(check string) "classified as automation" "automation"
+              Yojson.Safe.Util.(
+                parse_create_response_json msg |> member "post_kind" |> to_string));
           Alcotest.test_case "with hook: non-agent stays direct" `Quick (fun () ->
             Eio_main.run @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -946,8 +1079,9 @@ let () =
               ("author", `String "sangsu")
             ]) in
             Alcotest.(check bool) "post created" true ok;
-            Alcotest.(check bool) "classified as direct" true
-              (contains_substring msg {|"post_kind": "direct"|}));
+            Alcotest.(check string) "classified as direct" "direct"
+              Yojson.Safe.Util.(
+                parse_create_response_json msg |> member "post_kind" |> to_string));
           Alcotest.test_case "legacy human override normalizes to direct" `Quick (fun () ->
             Eio_main.run @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -959,8 +1093,9 @@ let () =
               ("post_kind", `String "human")
             ]) in
             Alcotest.(check bool) "post created" true ok;
-            Alcotest.(check bool) "legacy override normalized to direct" true
-              (contains_substring msg {|"post_kind": "direct"|}));
+            Alcotest.(check string) "legacy override normalized to direct" "direct"
+              Yojson.Safe.Util.(
+                parse_create_response_json msg |> member "post_kind" |> to_string));
         ] );
       ( "board_list_cache",
         [

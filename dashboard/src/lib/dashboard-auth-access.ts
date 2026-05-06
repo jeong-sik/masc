@@ -2,7 +2,7 @@ import type { DashboardShellAuthSummary } from '../types'
 
 export type DashboardAuthRole = 'reader' | 'worker' | 'admin'
 
-export interface DashboardAuthAccess {
+interface DashboardAuthAccess {
   allowed: boolean
   required_role: DashboardAuthRole
   effective_role: DashboardAuthRole | null

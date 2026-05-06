@@ -560,14 +560,52 @@ let read_recent_telemetry config =
     []
 ;;
 
+let tool_post_limit = 200
+let tool_telemetry_limit = 500
+let tool_product_limit = 120
+let tool_violation_limit = 120
+let tool_evidence_per_product_limit = 8
+
+let read_tool_telemetry config =
+  try
+    let since = Time_compat.now () -. Masc_time_constants.day in
+    Telemetry_eio.read_recent_events config ~limit:tool_telemetry_limit
+    |> List.filter (fun (record : Telemetry_eio.event_record) -> record.timestamp >= since)
+  with
+  | exn ->
+    Log.Coord.warn
+      "coordination product bounded telemetry evidence failed: %s"
+      (Printexc.to_string exn);
+    []
+;;
+
 let capture (config : Coord.config) =
+  let economy_enabled = Agent_economy.enabled () in
   { goals = Goal_store.list_goals config ()
   ; tasks = Coord_query.get_tasks_safe config
   ; posts = Board_dispatch.list_posts ~limit:Board.Limits.max_posts ()
-  ; transactions = Agent_economy.list_transactions ~base_path:config.base_path
+  ; transactions =
+      if economy_enabled
+      then Agent_economy.list_transactions ~base_path:config.base_path
+      else []
   ; telemetry_events = read_recent_telemetry config
   ; persist_errors = Board.persist_error_count ()
-  ; economy_enabled = Agent_economy.enabled ()
+  ; economy_enabled
+  }
+;;
+
+let capture_for_tool (config : Coord.config) =
+  let economy_enabled = Agent_economy.enabled () in
+  { goals = Goal_store.list_goals config ()
+  ; tasks = Coord_query.get_tasks_safe config
+  ; posts = Board_dispatch.list_posts ~limit:tool_post_limit ()
+  ; transactions =
+      if economy_enabled
+      then Agent_economy.list_transactions ~base_path:config.base_path
+      else []
+  ; telemetry_events = read_tool_telemetry config
+  ; persist_errors = Board.persist_error_count ()
+  ; economy_enabled
   }
 ;;
 
@@ -613,6 +651,7 @@ let project state =
 ;;
 
 let build config = config |> capture |> project
+let build_for_tool config = config |> capture_for_tool |> project
 
 let severity_counts (snapshot : Coordination_product.snapshot) =
   let count severity =
@@ -638,4 +677,61 @@ let safe_build_yojson config =
     Coordination_product.snapshot_to_yojson
       ~projection_error:message
       (Coordination_product.snapshot [])
+;;
+
+let capped_product (product : Coordination_product.product) =
+  { product with evidence = take tool_evidence_per_product_limit product.evidence }
+;;
+
+let cap_tool_snapshot (snapshot : Coordination_product.snapshot) =
+  let products = take tool_product_limit snapshot.products |> List.map capped_product in
+  let violations = take tool_violation_limit snapshot.violations in
+  ({ Coordination_product.products = products; violations } : Coordination_product.snapshot)
+;;
+
+let assoc_append key value = function
+  | `Assoc fields -> `Assoc (fields @ [ key, value ])
+  | json -> json
+;;
+
+let tool_truncation_json ~(original : Coordination_product.snapshot)
+      ~(capped : Coordination_product.snapshot) =
+  `Assoc
+    [ "products_original", `Int (List.length original.products)
+    ; "products_returned", `Int (List.length capped.products)
+    ; "violations_original", `Int (List.length original.violations)
+    ; "violations_returned", `Int (List.length capped.violations)
+    ; "product_limit", `Int tool_product_limit
+    ; "violation_limit", `Int tool_violation_limit
+    ; "evidence_per_product_limit", `Int tool_evidence_per_product_limit
+    ; "post_read_limit", `Int tool_post_limit
+    ; "telemetry_read_limit", `Int tool_telemetry_limit
+    ]
+;;
+
+let safe_build_tool_yojson config =
+  try
+    let original = build_for_tool config in
+    let capped = cap_tool_snapshot original in
+    Coordination_product.snapshot_to_yojson capped
+    |> assoc_append "truncation" (tool_truncation_json ~original ~capped)
+  with
+  | exn ->
+    let message = Printexc.to_string exn in
+    Log.Coord.warn "coordination product bounded snapshot failed: %s" message;
+    Coordination_product.snapshot_to_yojson
+      ~projection_error:message
+      (Coordination_product.snapshot [])
+    |> assoc_append "truncation"
+         (`Assoc
+            [ "products_original", `Int 0
+            ; "products_returned", `Int 0
+            ; "violations_original", `Int 0
+            ; "violations_returned", `Int 0
+            ; "product_limit", `Int tool_product_limit
+            ; "violation_limit", `Int tool_violation_limit
+            ; "evidence_per_product_limit", `Int tool_evidence_per_product_limit
+            ; "post_read_limit", `Int tool_post_limit
+            ; "telemetry_read_limit", `Int tool_telemetry_limit
+            ])
 ;;

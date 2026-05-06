@@ -1,7 +1,8 @@
-(** Proof_artifact_reader — Dereference proof-store:// artifact refs.
+(** Proof_artifact_reader — Dereference proof-store:// artifact refs via OAS.
 
-    Resolves [proof-store://{run_id}/{subpath}] references to filesystem
-    paths under [{config.root}/proofs/] and reads their JSON content.
+    This module is MASC's narrow adapter over [Agent_sdk.Proof_store].
+    OAS owns the canonical proof-store scheme, layout validation, and JSON
+    readers; MASC callers should avoid reconstructing those details here.
 
     @since CDAL eval content-based redesign *)
 
@@ -26,3 +27,10 @@ val read_json :
   Agent_sdk.Proof_store.config ->
   Agent_sdk.Cdal_proof.artifact_ref ->
   (Yojson.Safe.t, string) result
+
+(** Read and parse a JSONL artifact from the proof store.
+    Returns [Error] if the file does not exist or contains invalid JSONL. *)
+val read_jsonl :
+  Agent_sdk.Proof_store.config ->
+  Agent_sdk.Cdal_proof.artifact_ref ->
+  (Yojson.Safe.t list, string) result

@@ -104,6 +104,23 @@ let test_classify_resource_token () =
       assert (detail = Some "token budget exhausted")
   | _ -> assert false
 
+let test_classify_resource_wins_over_transient_rate_limit () =
+  match R.classify_string "429 rate limit: token budget exhausted" with
+  | R.ResourceExhausted { resource; consumed; limit; detail } ->
+      assert (resource = `Tokens);
+      assert (consumed = None);
+      assert (limit = None);
+      assert (detail = Some "429 rate limit: token budget exhausted")
+  | _ -> assert false
+
+let test_classify_hard_quota_resource_exhausted () =
+  match R.classify_string "rate limit: resource exhausted, top up credits" with
+  | R.ResourceExhausted { resource; consumed; limit; _ } ->
+      assert (resource = `Cost);
+      assert (consumed = None);
+      assert (limit = None)
+  | _ -> assert false
+
 let test_classify_permanent_fallback () =
   match R.classify_string "Some generic error" with
   | R.PermanentError { fallback_strategy = R.HumanHandoff _; _ } -> ()
@@ -332,6 +349,8 @@ let () =
   test_classify_transient_timeout ();
   test_classify_transient_rate_limit ();
   test_classify_resource_token ();
+  test_classify_resource_wins_over_transient_rate_limit ();
+  test_classify_hard_quota_resource_exhausted ();
   test_classify_permanent_fallback ();
   test_strategy_for_transient_is_retry ();
   test_strategy_for_permanent_default_string ();

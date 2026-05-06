@@ -8,6 +8,7 @@ import {
   keeperActivityDisplay,
   keeperDisplayModel,
   keeperDisplayStatus,
+  keeperRuntimeBlockerLabel,
   keeperRuntimeBlockerHint,
 } from '../lib/keeper-runtime-display'
 import { signal } from '@preact/signals'
@@ -215,6 +216,12 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const goalLinkedTasks = keeper.goal_progress?.linked_task_count
   const goalConvergence = keeper.goal_progress?.convergence
   const blocker = keeper.last_blocker?.trim()
+  const pendingFirst = keeper.trust?.approval_state?.pending_first ?? null
+  const pendingApprovalId = pendingFirst?.id?.trim() || null
+  const pendingApprovalTool = pendingFirst?.tool_name?.trim() || null
+  const pendingApprovalTaskId = pendingFirst?.task_id?.trim() || null
+  const pendingApprovalBlockerClass = pendingFirst?.blocker_class?.trim() || null
+  const isBlockedBeforeWorktree = pendingApprovalBlockerClass === 'blocked_before_worktree'
   const trustDisposition = keeper.trust?.disposition?.trim() || null
   const trustSummary =
     keeper.trust?.attention_reason?.trim()
@@ -341,19 +348,7 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const toneClass = keeper.paused || socialFallbackActive || runtimeBlocker || blocker || hbStale
     ? 'border-[var(--warn-24)] bg-[var(--warn-8)]'
     : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'
-  const runtimeBlockerLabel = runtimeBlockerClass
-    ? {
-        ambiguous_post_commit_timeout: '커밋 후 응답 없음',
-        ambiguous_post_commit_failure: '커밋 후 실패',
-        autonomous_slot_wait_timeout: '자율 슬롯 대기 만료',
-        admission_queue_wait_timeout: '대기열 진입 만료',
-        turn_timeout_after_queue_wait: '대기 후 턴 만료',
-        oas_timeout_budget: 'OAS 응답 만료',
-        turn_timeout: '턴 응답 만료',
-        completion_contract_violation: '완료 계약 위반',
-        cascade_exhausted: '캐스케이드 소진',
-      }[runtimeBlockerClass]
-    : null
+  const runtimeBlockerLabel = keeperRuntimeBlockerLabel(runtimeBlockerClass)
   const trustToneClass =
     trustDisposition === 'Alert'
       ? 'bg-[var(--bad-soft)] text-[var(--color-status-err)]'
@@ -438,8 +433,19 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ${keeper.last_need
           ? html`<span><${StrongSecondary}>최근 필요</${StrongSecondary}> · ${keeper.last_need}</span>`
           : null}
-        ${attentionReason
+        ${attentionReason === 'approval_pending' && isBlockedBeforeWorktree
+          ? html`<${RuntimeBadge} tone="warn">워크트리 전 차단</${RuntimeBadge}>`
+          : attentionReason
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">주의 사유</strong> · ${attentionReason}</span>`
+          : null}
+        ${attentionReason === 'approval_pending' && pendingApprovalId
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">승인 ID</strong> · <code class="font-mono">${pendingApprovalId}</code></span>`
+          : null}
+        ${attentionReason === 'approval_pending' && pendingApprovalTool
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">차단 도구</strong> · ${pendingApprovalTool}</span>`
+          : null}
+        ${attentionReason === 'approval_pending' && pendingApprovalTaskId
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">작업</strong> · ${pendingApprovalTaskId}</span>`
           : null}
         ${nextHumanAction
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">다음 액션</strong> · ${nextHumanAction}</span>`

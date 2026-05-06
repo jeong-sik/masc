@@ -10,11 +10,13 @@
     [public_name] is a known alias. Returns [None] otherwise.
 
     Examples: [to_internal "Bash" = Some "keeper_bash"],
+    [to_internal "WebSearch" = Some "masc_web_search"],
     [to_internal "Skill" = None] (no cognate). *)
 val to_internal : string -> string option
 
 (** [to_public internal_name] returns the LLM-facing alias for an
-    internal [keeper_*] tool. Falls back to [internal_name] verbatim
+    internal [keeper_*] or keeper-visible [masc_*] tool. Falls back
+    to [internal_name] verbatim
     when the tool has no Anthropic Code cognate (board/task/etc.) or
     when only part of the internal tool has a public alias, such as
     [Grep] for [keeper_shell op=rg]. *)
@@ -34,7 +36,7 @@ val canonicalize_observed_with_telemetry : string list -> string list
 
 (** [hallucinated_builtins] lists the public names from the Anthropic
     Code surface that have **no** cognate in the keeper surface
-    (e.g. [Skill], [Agent], [WebSearch]). These should be flagged with
+    (e.g. [Skill], [Agent], [WebFetch]). These should be flagged with
     a teaching message rather than nuking the turn. *)
 val hallucinated_builtins : string list
 
@@ -59,7 +61,8 @@ val all_aliases : unit -> (string * string) list
 
     Phase A.2: [Bash], [Read].
     Phase A.4: [Edit] (via new keeper_fs_edit mode=patch), [Write]
-    (via mode=overwrite), [Grep] (synthesized as keeper_shell op=rg). *)
+    (via mode=overwrite), [Grep] (synthesized as keeper_shell op=rg).
+    WebSearch maps directly to [masc_web_search]. *)
 val oas_dual_register_aliases : unit -> (string * string) list
 
 (** [public_input_schema public_name] returns the LLM-facing JSON schema

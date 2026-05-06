@@ -55,7 +55,7 @@ export type PulseState = 'working' | 'idle' | 'stale'
 
 const STALE_THRESHOLD_MS = 120_000
 
-export interface AgentPulse {
+interface AgentPulse {
   name: string
   emoji: string
   koreanName: string | null

@@ -44,6 +44,14 @@ describe('cockpit entrypoint registry', () => {
       tab: 'monitoring',
       params: { section: 'cognition', view: 'decisions' },
     })
+    expect(cockpitTargetForParams({ mode: 'Cognition', tab: 'ki-bdi' })).toEqual({
+      tab: 'monitoring',
+      params: { section: 'cognition', view: 'keeper', focus: 'bdi' },
+    })
+    expect(cockpitTargetForParams({ mode: 'Cognition', tab: 'keeper-tool-access' })).toEqual({
+      tab: 'monitoring',
+      params: { section: 'cognition', view: 'keeper', focus: 'tool-access' },
+    })
     expect(cockpitTargetForParams({ mode: 'Observe', tab: 'sa-dash' })).toEqual({
       tab: 'command',
       params: { section: 'operations', view: 'safety' },
@@ -55,6 +63,28 @@ describe('cockpit entrypoint registry', () => {
     expect(cockpitTargetForParams({ mode: 'Observe', tab: 'heuristic-log' })).toEqual({
       tab: 'monitoring',
       params: { section: 'runtime', view: 'heuristics', focus: 'log' },
+    })
+    expect(cockpitTargetForParams({ mode: 'Cognition', tab: 'ar-fnd' })).toEqual({
+      tab: 'monitoring',
+      params: { section: 'cognition', view: 'autoresearch', focus: 'finding' },
+    })
+    expect(cockpitTargetForParams({ mode: 'Cognition', tab: 'ar-flow' })).toEqual({
+      tab: 'monitoring',
+      params: { section: 'cognition', view: 'autoresearch', focus: 'flow' },
+    })
+  })
+
+  it('routes the covered IDE search entrypoint directly to the find panel', () => {
+    const entrypoint = COCKPIT_ENTRYPOINTS.find(entry => entry.aliases.includes('find'))
+
+    expect(entrypoint?.coverage).toBe('covered')
+    expect(cockpitTargetForParams({ mode: 'IDE', tab: 'search' })).toEqual({
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source', find: 'open' },
+    })
+    expect(cockpitTargetForParams({ mode: 'CODE', tab: 'find' })).toEqual({
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source', find: 'open' },
     })
   })
 })

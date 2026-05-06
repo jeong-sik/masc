@@ -118,3 +118,34 @@ export function reorderPins(fromName: string, toIdx: number): void {
 export const headPinnedKeeper = computed<PinnedKeeperEntry | null>(
   () => pinnedKeepers.value.entries[0] ?? null,
 )
+
+/**
+ * Promote the pinned keeper at 1-based slot `idx` to the head (RFC-0027
+ * PR-γ-2 keyboard `Mod+Shift+1..4`). Position-only change — `pinnedAtMs`
+ * and `line` are preserved so explicit promote does not steal recency
+ * semantics from the next LRU eviction (same convention as `reorderPins`).
+ *
+ *  - `idx` is the user-facing 1-based slot. `1` is already head and is a
+ *    no-op. Out-of-range (≤0 or > entries.length) is a no-op.
+ *  - Whitespace / unknown name lookup is unnecessary — index-only.
+ */
+export function promotePinAt(idx: number): void {
+  const idx0 = idx - 1
+  const prev = pinnedKeepers.value
+  if (idx0 < 0 || idx0 >= prev.entries.length) return
+  if (idx0 === 0) return
+  const target = prev.entries[idx0]
+  if (!target) return
+  reorderPins(target.keeperName, 0)
+}
+
+/**
+ * Drop the head pin (RFC-0027 PR-γ-2 keyboard `Mod+Shift+W`). No-op when
+ * nothing is pinned. Distinct from `clearPins()` which empties the whole
+ * collection.
+ */
+export function unpinHead(): void {
+  const head = pinnedKeepers.value.entries[0]
+  if (!head) return
+  unpinKeeper(head.keeperName)
+}

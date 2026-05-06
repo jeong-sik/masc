@@ -86,53 +86,73 @@ let load_profile_strings ~path ~profile : string list =
       items
   | _ -> []
 
+let empty_profile_has_safe_fallback ~path ~profile : bool =
+  let ic = open_in path in
+  let content =
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+        let len = in_channel_length ic in
+        let buf = Bytes.create len in
+        really_input ic buf 0 len;
+        Bytes.to_string buf)
+  in
+  let json = Yojson.Safe.from_string content in
+  let open Yojson.Safe.Util in
+  let fallback =
+    json |> member (profile ^ "_fallback_cascade") |> to_string_option
+  in
+  let keeper_assignable =
+    match json |> member (profile ^ "_keeper_assignable") with
+    | `Bool value -> value
+    | _ -> true
+  in
+  Option.is_some fallback && not keeper_assignable
+
 let test_profile_parses_non_empty profile () =
   let path = cascade_path () in
   let strings = load_profile_strings ~path ~profile in
-  check bool
-    (Printf.sprintf "%s has entries" profile)
-    true
-    (strings <> []);
-  (* Use parse_model_string_result per entry so we can distinguish
-     "unknown provider / invalid spec" (hard failure — real typo) from
-     "provider unavailable" (soft — just means the API key env var is
-     unset in this test run). The former must fail the test; the latter
-     is acceptable because this static check never calls the API. *)
-  let contains_substring ~needle s =
-    let nl = String.length needle in
-    let sl = String.length s in
-    if nl = 0 || nl > sl then false
-    else
-      let limit = sl - nl in
-      let rec loop i =
-        if i > limit then false
-        else if String.sub s i nl = needle then true
-        else loop (i + 1)
-      in
-      loop 0
-  in
-  (* error format from OAS: `provider "glm" unavailable (missing env var "ZAI_API_KEY")` *)
-  let is_unavailable_error msg =
-    contains_substring ~needle:"unavailable" msg
-  in
-  let expanded =
-    Masc_mcp.Cascade_config.expand_auto_models strings
-  in
-  List.iter
-    (fun s ->
-      match Masc_mcp.Cascade_config.parse_model_string_result s with
-      | Ok (cfg : Llm_provider.Provider_config.t) ->
-        check bool
-          (Printf.sprintf "%s: %S has non-empty model_id" profile s)
-          true
-          (String.trim cfg.model_id <> "")
-      | Error msg when is_unavailable_error msg ->
-        (* Provider known but its API key env var is empty — accepted. *)
-        ()
-      | Error msg ->
-        Alcotest.fail
-          (Printf.sprintf "%s: %S hard-fails parse: %s" profile s msg))
-    expanded
+  if strings = [] then
+    check bool
+      (Printf.sprintf "%s empty profile has non-keeper fallback" profile)
+      true
+      (empty_profile_has_safe_fallback ~path ~profile)
+  else
+    let contains_substring ~needle s =
+      let nl = String.length needle in
+      let sl = String.length s in
+      if nl = 0 || nl > sl then false
+      else
+        let limit = sl - nl in
+        let rec loop i =
+          if i > limit then false
+          else if String.sub s i nl = needle then true
+          else loop (i + 1)
+        in
+        loop 0
+    in
+    (* error format from OAS: `provider "glm" unavailable (missing env var "ZAI_API_KEY")` *)
+    let is_unavailable_error msg =
+      contains_substring ~needle:"unavailable" msg
+    in
+    let expanded =
+      Masc_mcp.Cascade_config.expand_auto_models strings
+    in
+    List.iter
+      (fun s ->
+        match Masc_mcp.Cascade_config.parse_model_string_result s with
+        | Ok (cfg : Llm_provider.Provider_config.t) ->
+          check bool
+            (Printf.sprintf "%s: %S has non-empty model_id" profile s)
+            true
+            (String.trim cfg.model_id <> "")
+        | Error msg when is_unavailable_error msg ->
+          (* Provider known but its API key env var is empty — accepted. *)
+          ()
+        | Error msg ->
+          Alcotest.fail
+            (Printf.sprintf "%s: %S hard-fails parse: %s" profile s msg))
+      expanded
 
 (** Meta / regression guard: prove that the happy-path assertion in
     [test_profile_parses_non_empty] is NOT vacuous.

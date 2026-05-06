@@ -4,6 +4,7 @@ import { AgentsUnified } from './agents-unified'
 import { Autoresearch } from './autoresearch'
 import { FilterChips } from './common/filter-chips'
 import { KeeperDecisionsStream } from './keeper-decisions-stream'
+import { KeeperCognitionInspector } from './keeper-cognition-inspector'
 import { KeeperTokenStats } from './keeper-token-stats'
 import { MemorySubsystems } from './memory-subsystems'
 
@@ -60,7 +61,7 @@ export function CognitionPlane() {
       />
 
       ${view === 'keeper' ? html`
-        <${AgentsUnified} />
+        <${KeeperCognitionInspector} />
       ` : view === 'token-stats' ? html`
         <${KeeperTokenStats} />
       ` : view === 'decisions' ? html`

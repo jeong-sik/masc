@@ -19,6 +19,7 @@ let aliases : (string * string) list =
     "Grep", "keeper_shell";   (* op=rg routed at dispatch layer, Phase A.4 *)
     "Read", "keeper_fs_read";
     "Shell", "keeper_bash";   (* LLM occasionally hallucinates "Shell" for bash *)
+    "WebSearch", "masc_web_search";
     "Write", "keeper_fs_edit"; (* create-vs-update collapsed at dispatch layer *)
   ]
 
@@ -26,13 +27,15 @@ let aliases : (string * string) list =
    (#8963 follow-up) added Edit/Write/Grep once their input adapters
    landed: Edit goes through the new keeper_fs_edit mode=patch path,
    Write maps cleanly to mode=overwrite, Grep synthesizes
-   keeper_shell op=rg. *)
+   keeper_shell op=rg. WebSearch is a read-only alias over the existing
+   masc_web_search schema. *)
 let oas_dual_register : (string * string) list =
   [
     "Bash", "keeper_bash";
     "Edit", "keeper_fs_edit";
     "Grep", "keeper_shell";
     "Read", "keeper_fs_read";
+    "WebSearch", "masc_web_search";
     "Write", "keeper_fs_edit";
   ]
 
@@ -40,7 +43,7 @@ let oas_dual_register : (string * string) list =
    check should not nuke a turn solely because these appeared — instead a
    teaching tool_result tells the LLM what surface to use. RFC-0006 §3.1. *)
 let hallucinated_builtins =
-  [ "Agent"; "Skill"; "WebSearch"; "WebFetch"; "TodoWrite"; "NotebookEdit" ]
+  [ "Agent"; "Skill"; "WebFetch"; "TodoWrite"; "NotebookEdit" ]
 
 let public_to_internal_tbl =
   let t = Hashtbl.create (List.length aliases) in
@@ -256,11 +259,23 @@ let grep_public_schema =
          schema parity.";
     ]
 
+(* Anthropic Code "WebSearch" schema. Maps directly to masc_web_search;
+   the payload already uses query/limit. *)
+let web_search_public_schema =
+  object_schema ~required:[ "query" ]
+    [
+      property "query" "string"
+        "Search query text for current public web information.";
+      property "limit" "integer"
+        "Maximum number of results to return (default 5, max 10).";
+    ]
+
 let public_input_schema = function
   | "Bash" -> Some bash_public_schema
   | "Edit" -> Some edit_public_schema
   | "Grep" -> Some grep_public_schema
   | "Read" -> Some read_public_schema
+  | "WebSearch" -> Some web_search_public_schema
   | "Write" -> Some write_public_schema
   | _ -> None
 
@@ -378,6 +393,7 @@ let translate_input ~public input =
   | "Edit" -> translate_edit_input input
   | "Grep" -> translate_grep_input input
   | "Read" -> translate_read_input input
+  | "WebSearch" -> input
   | "Write" -> translate_write_input input
   | _ -> input
 

@@ -71,6 +71,11 @@ let pending_id_for_keeper ~keeper_name =
       entries
   | _ -> None
 
+let audit_event_names ~base_path ~keeper_name =
+  AQ.read_recent_audit ~base_path ~keeper_name ~n:10 ()
+  |> List.map (fun json ->
+         Yojson.Safe.Util.(json |> member "event" |> to_string))
+
 let execute_approval_get args =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -761,6 +766,7 @@ let test_dashboard_resolve_and_delete_rules_use_room_base_path () =
           ~tool_name:"masc_claim_task"
           ~input:(`Assoc [ ("task_id", `String "task-room") ])
           ~risk_level:AQ.Medium
+          ~base_path:room_base
           ~on_resolution:(fun _ -> ())
           ()
       in
@@ -801,6 +807,46 @@ let test_dashboard_resolve_and_delete_rules_use_room_base_path () =
         (List.length (AQ.list_rules ~base_path:room_base ()));
       Alcotest.(check int) "env fallback still empty" 0
         (List.length (AQ.list_rules ~base_path:env_base ())))
+
+let test_submit_pending_audit_uses_room_base_path () =
+  let env_base = temp_dir () in
+  let room_base = temp_dir () in
+  let old_base = Sys.getenv_opt "MASC_BASE_PATH" in
+  let old_base_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
+  let keeper_name = "approval-room-audit-keeper" in
+  AQ.For_testing.reset_audit_store ();
+  Unix.putenv "MASC_BASE_PATH" env_base;
+  Unix.putenv "MASC_BASE_PATH_INPUT" env_base;
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_audit_store ();
+      (match old_base with
+       | Some value -> Unix.putenv "MASC_BASE_PATH" value
+       | None -> Unix.putenv "MASC_BASE_PATH" "");
+      (match old_base_input with
+       | Some value -> Unix.putenv "MASC_BASE_PATH_INPUT" value
+       | None -> Unix.putenv "MASC_BASE_PATH_INPUT" "");
+      cleanup_dir env_base;
+      cleanup_dir room_base)
+    (fun () ->
+      ignore
+        (AQ.submit_pending
+           ~keeper_name
+           ~tool_name:"masc_claim_task"
+           ~input:(`Assoc [ ("task_id", `String "task-room-audit") ])
+           ~risk_level:AQ.High
+           ~base_path:room_base
+           ~on_resolution:(fun _ -> ())
+           ());
+      AQ.expire_stale ~max_wait_s:(-1.0);
+      let room_events = audit_event_names ~base_path:room_base ~keeper_name in
+      let env_events = audit_event_names ~base_path:env_base ~keeper_name in
+      Alcotest.(check bool) "room audit has pending" true
+        (List.exists (String.equal "pending") room_events);
+      Alcotest.(check bool) "room audit has expired" true
+        (List.exists (String.equal "expired") room_events);
+      Alcotest.(check (list string)) "env fallback has no room audit" []
+        env_events)
 
 let test_approval_get_dispatch_missing_id () =
   let ok, msg = execute_approval_get (`Assoc [("id", `String "")]) in
@@ -906,6 +952,27 @@ let test_callback_production_keeper_shell_gh_read_only_auto_approved () =
   | Agent_sdk.Hooks.Approve -> ()
   | Agent_sdk.Hooks.Reject r ->
     Alcotest.fail ("expected Approve for read-only keeper_shell op=gh, got Reject: " ^ r)
+  | _ -> Alcotest.fail "unexpected decision"
+
+let test_callback_production_worktree_create_auto_approved () =
+  with_test_config @@ fun config ->
+  let pending_before = AQ.pending_count () in
+  let cb =
+    GP.to_oas_approval_callback
+      ~config ~governance_level:"production" ~keeper_name:"test" () in
+  let decision =
+    cb ~tool_name:"masc_worktree_create"
+      ~input:(`Assoc [
+        ("task_id", `String "task-187");
+        ("repo_name", `String "masc-mcp");
+      ])
+  in
+  match decision with
+  | Agent_sdk.Hooks.Approve ->
+      Alcotest.(check int) "no pending approval"
+        pending_before (AQ.pending_count ())
+  | Agent_sdk.Hooks.Reject r ->
+      Alcotest.fail ("expected Approve for worktree create, got Reject: " ^ r)
   | _ -> Alcotest.fail "unexpected decision"
 
 let test_callback_paranoid_medium_risk_uses_remembered_policy () =
@@ -1131,6 +1198,8 @@ let () =
         test_resolve_with_policy_does_not_remember_high_allow;
       Alcotest.test_case "dashboard approve-always rules use room base_path" `Quick
         test_dashboard_resolve_and_delete_rules_use_room_base_path;
+      Alcotest.test_case "submit_pending audit uses room base_path" `Quick
+        test_submit_pending_audit_uses_room_base_path;
       Alcotest.test_case "read_recent_audit scans before keeper filter" `Quick
         test_read_recent_audit_filters_after_wide_scan;
     ]);
@@ -1140,6 +1209,8 @@ let () =
         test_callback_production_keeper_write_requires_approval;
       Alcotest.test_case "production keeper_shell op=gh read-only auto-approved" `Quick
         test_callback_production_keeper_shell_gh_read_only_auto_approved;
+      Alcotest.test_case "production worktree create auto-approved" `Quick
+        test_callback_production_worktree_create_auto_approved;
       Alcotest.test_case "paranoid medium risk uses remembered policy" `Quick
         test_callback_paranoid_medium_risk_uses_remembered_policy;
       Alcotest.test_case "always_approve bypasses threshold" `Quick

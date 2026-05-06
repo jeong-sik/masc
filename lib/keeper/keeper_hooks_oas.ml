@@ -377,6 +377,33 @@ let record_usage_anomaly_metrics ~keeper_name ~model usage_trust =
    path is the only place the miss becomes observable. *)
 let estimate_usage_cost_usd ~(model : string) (usage : Agent_sdk.Types.api_usage)
     : float =
+  (* P1-6: distinguish two distinct "no price" paths so operators get
+     actionable signals instead of misleading "add to pricing.ml" advice.
+
+     1. Unresolved alias (model=auto, model=claude_code:auto, empty, unknown
+        sentinel): the alias was not resolved to a canonical id before this
+        call.  The root fix is ensuring telemetry always provides a
+        canonical_model_id; adding "auto" to pricing.ml is wrong.  Use INFO.
+
+     2. Genuine catalog miss (concrete model id not present in the OAS
+        Pricing catalog): operators/contributors need to add the entry.
+        Keep the existing WARN so the gap is visible. *)
+  let pricing_unresolved_alias () =
+    (* P1-6: use a distinct label value so monitoring dashboards can
+       distinguish unresolved-alias events from genuine catalog misses.
+       "(alias):<model>" in the model label maps to a different time series
+       than "<model>" so operators can filter each case independently. *)
+    Prometheus.inc_counter
+      Prometheus.metric_pricing_catalog_miss
+      ~labels:[("model", "(alias):" ^ model)] ();
+    Log.Keeper.info
+      "pricing_unresolved_alias model=%s input_tokens=%d output_tokens=%d \
+       — model label is an unresolved alias (auto / sentinel / empty); cost \
+       recorded as 0.0. Ensure telemetry provides canonical_model_id so the \
+       alias is resolved before pricing."
+      model usage.input_tokens usage.output_tokens;
+    0.0
+  in
   let pricing_catalog_miss () =
     Prometheus.inc_counter
       Prometheus.metric_pricing_catalog_miss
@@ -389,7 +416,7 @@ let estimate_usage_cost_usd ~(model : string) (usage : Agent_sdk.Types.api_usage
       model usage.input_tokens usage.output_tokens;
     0.0
   in
-  if is_unresolved_pricing_label model then pricing_catalog_miss ()
+  if is_unresolved_pricing_label model then pricing_unresolved_alias ()
   else match Llm_provider.Pricing.pricing_for_model_opt model with
   | Some pricing ->
     Llm_provider.Pricing.estimate_cost ~pricing

@@ -60,20 +60,21 @@ let test_to_json () =
     Alcotest.(check bool) "has duration_ms" true (has "duration_ms")
   | _ -> Alcotest.fail "to_json should return Assoc"
 
-let test_to_legacy_roundtrip () =
+let test_message_roundtrip () =
   let start = Time_compat.now () in
   let original = (true, "hello world") in
   let r = Tool_result.wrap ~tool_name:"test" ~start_time:start original in
-  let (success, message) = Tool_result.to_legacy r in
+  let success = r.success in
+  let message = Tool_result.message r in
   Alcotest.(check bool) "success preserved" true success;
   Alcotest.(check string) "message preserved" "hello world" message
 
-let test_to_legacy_json_roundtrip () =
+let test_message_json_roundtrip () =
   let start = Time_compat.now () in
   let json_str = {|{"key":"value"}|} in
   let original = (true, json_str) in
   let r = Tool_result.wrap ~tool_name:"test" ~start_time:start original in
-  let (_success, message) = Tool_result.to_legacy r in
+  let message = Tool_result.message r in
   (* JSON roundtrip may normalize formatting *)
   let reparsed = Yojson.Safe.from_string message in
   match reparsed with
@@ -110,9 +111,9 @@ let () =
     "to_json", [
       Alcotest.test_case "fields present" `Quick test_to_json;
     ];
-    "to_legacy", [
-      Alcotest.test_case "roundtrip string" `Quick test_to_legacy_roundtrip;
-      Alcotest.test_case "roundtrip json" `Quick test_to_legacy_json_roundtrip;
+    "message", [
+      Alcotest.test_case "roundtrip string" `Quick test_message_roundtrip;
+      Alcotest.test_case "roundtrip json" `Quick test_message_json_roundtrip;
     ];
     "dispatch_structured", [
       Alcotest.test_case "registered tool" `Quick test_dispatch_structured;

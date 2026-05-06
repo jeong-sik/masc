@@ -53,8 +53,8 @@ jobs:
               `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
               `Commit: \`${context.sha}\``,
               '',
-              'Probable cause: ROADMAP latest release does not match CHANGELOG latest release.',
-              'Fix: bring CHANGELOG entries up to ROADMAP version, or roll ROADMAP back.',
+              'Probable cause: release/version truth surfaces disagree.',
+              'Fix: run `scripts/check-version-truth.sh`, then sync the stale surface with `dune-project`, generated opam metadata, ROADMAP, and CHANGELOG.',
               '',
               'This issue is auto-created so a broken main does not stay invisible.',
               'Close manually after merging the fix; the workflow will not reopen unless it fails again.',
@@ -94,12 +94,18 @@ jobs:
         with:
           ref: main
 
-      - uses: ocaml/setup-ocaml@v3
-        with:
-          ocaml-compiler: '5.4'
+      - name: Setup OCaml toolchain
+        uses: ./.github/actions/setup-ocaml-toolchain
 
-      - name: Install deps
-        run: opam install . --deps-only --with-test --yes
+      - name: Pin external OCaml dependencies
+        uses: ./.github/actions/pin-ocaml-deps
+        with:
+          pin-flags: --with-bisect
+
+      - name: Install system and OCaml dependencies
+        uses: ./.github/actions/install-ocaml-deps
+        with:
+          install-flags: --with-test
 
       - name: Build
         run: opam exec -- dune build @install

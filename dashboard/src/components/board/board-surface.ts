@@ -12,6 +12,7 @@ import { TextInput } from '../common/input'
 import { Checkbox } from '../common/checkbox'
 import { RichComposer } from '../common/rich-composer'
 import { RichContent } from '../common/rich-content'
+import { CursorPagination } from '../common/pagination'
 import { stripStateBlocks } from '../../keeper-message'
 import { navigate, navigateToPost, route } from '../../router'
 import { registerBoardHearthsRefresh } from '../../sse-store'
@@ -142,6 +143,15 @@ function expandCategory(
   }
 }
 
+function collapseCategory(
+  category: ContentCategory,
+  limits: Record<string, number>,
+  currentLimit: number,
+) {
+  const nextLimit = Math.max(PAGE_SIZE, currentLimit - PAGE_SIZE)
+  categoryVisibleLimits.value = { ...limits, [category]: nextLimit }
+}
+
 function renderCategorySection(
   category: ContentCategory,
   posts: BoardPost[],
@@ -163,6 +173,10 @@ function renderCategorySection(
   const remainingLabel = hasMoreLocal
     ? `${posts.length - limit}개 남음`
     : '다음 페이지 불러오기'
+  const visibleCount = Math.min(limit, posts.length)
+  const cursorLabel = hasMoreRemote && !hasMoreLocal
+    ? `${visibleCount} / ${total}+`
+    : `${visibleCount} / ${total}`
 
   if (posts.length === 0 && hidden === 0) return null
   if (posts.length === 0 && hidden > 0) {
@@ -183,16 +197,24 @@ function renderCategorySection(
           if (loadingMore) return
           expandCategory(category, limits, limit, posts.length)
         }} />
-        <div class="text-center py-3">
-          <button type="button"
-            class="px-4 py-2 rounded-[var(--r-1)] text-xs font-medium text-[var(--color-fg-muted)] bg-transparent border border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] transition-colors cursor-pointer disabled:opacity-50"
+        <div class="flex justify-center py-3">
+          <${CursorPagination}
+            cursor=${cursorLabel}
+            cursorLabel="표시"
+            hasPrevious=${limit > PAGE_SIZE}
+            hasNext=${hasMore}
+            previousLabel="줄이기"
+            nextLabel=${loadingMore ? '불러오는 중...' : `더 보기 (${remainingLabel})`}
+            ariaLabel=${`${categoryLabel(category)} 게시글 페이지`}
             disabled=${loadingMore}
-            onClick=${() => {
+            testId=${`board-category-pagination-${category}`}
+            onPrevious=${() => {
+              collapseCategory(category, limits, limit)
+            }}
+            onNext=${() => {
               expandCategory(category, limits, limit, posts.length)
             }}
-          >
-            ${loadingMore ? '불러오는 중...' : `더 보기 (${remainingLabel})`}
-          </button>
+          />
         </div>
       ` : null}
     <//>

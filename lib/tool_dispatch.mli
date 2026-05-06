@@ -19,10 +19,11 @@ val register_module : schemas:Masc_domain.tool_schema list -> handler:handler ->
 
 (** {1 Dispatch} *)
 
-val dispatch : token:Tool_token.t -> args:Yojson.Safe.t -> (bool * string) option
-(** O(1) dispatch using a validated token. Returns [Some (success, message)]
+val dispatch : token:Tool_token.t -> args:Yojson.Safe.t -> Tool_result.t option
+(** O(1) dispatch using a validated token. Returns [Some result]
     when a handler is found, [None] when the tool name is unknown.
-    The token guarantees the name was validated at the I/O boundary. *)
+    The token guarantees the name was validated at the I/O boundary.
+    Post-hooks fire before the result is returned. *)
 
 val mint_token : name:string -> (Tool_token.t, string) Result.t
 (** Mint a [Tool_token.t] validated against both tag and handler registries.

@@ -298,6 +298,7 @@ val metric_keeper_room_heartbeat_failures : string
 val metric_keeper_turn_metrics_snapshot_failures : string
 val metric_keeper_oas_execution_errors : string
 val metric_keeper_episode_create_failures : string
+val metric_keeper_memory_activity_emit_failures : string
 val metric_keeper_supervisor_sweep_failures : string
 val metric_keeper_toml_reconcile_sweep_failures : string
 val metric_keeper_tool_usage_flush_failures : string
@@ -338,6 +339,11 @@ val metric_keeper_passive_loop_detected_total : string
     using only passive read-only tools, violating the proactive contract.
     Incremented once per loop episode (streak resets on any execution-progress
     turn). Labels: [keeper]. *)
+
+val metric_keeper_required_tool_loop_detected_total : string
+(** #13362 Total required-tool contract loops: keeper hit N consecutive
+    actionable required-tool failures before making execution/completion
+    progress.  Incremented once per loop episode. Labels: [keeper, kind]. *)
 
 val metric_keeper_consecutive_idle : string
 (** Task-138 Current consecutive-idle streak (passive-only turns) per
@@ -556,10 +562,10 @@ val metric_keeper_lifecycle_transitions : string
 
 (** Cycle 43 (Tier I3 follow-up to fsm_guard smoke at
     [keeper_turn_fsm.ml:118]): runtime [@@fsm_guard] assert violations
-    that the [Keeper_fsm_guard_runtime.wrap_unit] caught and recovered
-    from. Bumped by the wrap helper before swallowing
-    [Assert_failure] in counter mode (default), and also bumped before
-    re-raising in assert mode ([MASC_FSM_GUARD_ASSERT=1]).
+    observed by [Keeper_fsm_guard_runtime.wrap_unit]. Bumped by the
+    wrap helper before re-raising [Assert_failure]. FSM guard
+    violations are fail-closed; [MASC_FSM_GUARD_ASSERT=0] no longer
+    enables counter-only mode.
 
     Labels: [action, stage]. [action] is the spec-action name
     ([WakeupSignal], [HeartbeatTick], [TurnComplete],

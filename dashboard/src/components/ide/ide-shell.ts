@@ -6,12 +6,15 @@ import { IdeExplorer } from './ide-explorer'
 import { IdeEditor, type IdeEditorView } from './ide-editor'
 import { IdeConversationRailMock } from './ide-conversation-rail-mock'
 import { IdeActivityMock } from './ide-activity-mock'
+import { IdeKeeperWorkPanel } from './ide-keeper-work-panel'
 import { IdeInterjectMock } from './ide-interject-mock'
 import { KeeperShellDrawer } from './keeper-shell-drawer'
 import { IdePresenceStrip } from './ide-presence-strip'
 import { IDE_LAYERS, IdeToolbar } from './ide-toolbar'
 import { InspectorKeeperBDI, pinInspectorKeeper } from './inspector-keeper-bdi'
+import { OverlayKeeperTrace } from './overlay-keeper-trace'
 import { IdePersistencePanel } from './ide-persistence-panel'
+import { IdeBranchContextPanel } from './ide-branch-context-panel'
 import { navigate, route } from '../../router'
 import { activeKeeperName } from '../../keeper-state'
 import { keepers } from '../../store'
@@ -73,6 +76,7 @@ export function IdeShell() {
   const terminalOpen =
     route.value.params.terminal === 'open'
     || Boolean(route.value.params.keeper?.trim())
+  const findOpen = route.value.params.find === 'open'
   const terminalKeeper = keeperFromRoute()
 
   useEffect(() => {
@@ -87,6 +91,36 @@ export function IdeShell() {
 
   const handleLayersChange = (nextLayers: ReadonlySet<string>) => {
     navigate('code', paramsWithLayers(route.value.params, activeView, nextLayers))
+  }
+
+  const handleTerminalOpen = () => {
+    const nextParams: Record<string, string> = {
+      ...route.value.params,
+      section: 'ide-shell',
+      view: activeView,
+      terminal: 'open',
+    }
+    if (terminalKeeper) nextParams.keeper = terminalKeeper
+    navigate('code', nextParams)
+  }
+
+  const handleFindOpen = () => {
+    navigate('code', {
+      ...route.value.params,
+      section: 'ide-shell',
+      view: activeView,
+      find: 'open',
+    })
+  }
+
+  const handleFindClose = () => {
+    const nextParams: Record<string, string> = {
+      ...route.value.params,
+      section: 'ide-shell',
+      view: activeView,
+    }
+    delete nextParams.find
+    navigate('code', nextParams)
   }
 
   return html`
@@ -113,6 +147,8 @@ export function IdeShell() {
         activeLayers=${activeLayers}
         onViewChange=${handleViewChange}
         onLayersChange=${handleLayersChange}
+        onTerminalOpen=${handleTerminalOpen}
+        onFindOpen=${handleFindOpen}
       />
       <div
         class="ide-plane-grid"
@@ -139,18 +175,27 @@ export function IdeShell() {
             documentStore=${coordinator.documentStore}
             ownershipStore=${coordinator.ownershipStore}
             diffRows=${coordinator.diffRows}
+            findOpen=${findOpen}
+            onFindOpen=${handleFindOpen}
+            onFindClose=${handleFindClose}
             onKeeperLineSelect=${pinInspectorKeeper}
           />
+          <${OverlayKeeperTrace} active=${activeLayers.has('keeper-trace')} />
         </div>
         <div
           class="ide-plane-conversation"
           style=${{
             display: 'grid',
-            gridTemplateRows: 'auto auto 1fr',
+            gridTemplateRows: 'auto auto auto auto 1fr',
             minHeight: 0,
             overflow: 'auto',
           }}
         >
+          <${IdeBranchContextPanel}
+            activeRepositoryId=${coordinator.activeRepositoryId}
+            subscribeActiveRepositoryId=${coordinator.subscribeActiveRepositoryId}
+          />
+          <${IdeKeeperWorkPanel} keeperName=${terminalKeeper} />
           <${IdePersistencePanel} keeperName=${terminalKeeper} />
           <${InspectorKeeperBDI} />
           <${IdeConversationRailMock} />

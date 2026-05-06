@@ -1,7 +1,8 @@
 import { computed } from '@preact/signals'
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { activeKeeperName } from '../../keeper-state'
+import { bridgeBdiSnapshotsToTrace } from './bdi-snapshot-trace-bridge'
 import { asBoolean, asNumber, asString, isRecord, toIsoTimestamp } from '../common/normalize'
 import { clearPins, headPinnedKeeper, pinKeeper } from './multi-keeper-pin-store'
 
@@ -202,6 +203,17 @@ export function InspectorKeeperBDI({ pollMs = 5000 }: { readonly pollMs?: number
       if (timer !== null) window.clearInterval(timer)
     }
   }, [keeperName, pollMs])
+
+  // RFC-0028 PR-δ-4 bdi-snapshot producer: each fresh poll result becomes
+  // a keeper-trace event. Dedup key is `bdi:${keeper}:${generated_at}` so
+  // a polling tick that returns the same snapshot does not re-emit; a
+  // server publish of a fresh BDI tick advances `generated_at` and emits
+  // a new event.
+  const knownBdiKeys = useRef<ReadonlySet<string>>(new Set())
+  useEffect(() => {
+    if (snapshot === null) return
+    knownBdiKeys.current = bridgeBdiSnapshotsToTrace([snapshot], knownBdiKeys.current)
+  }, [snapshot])
 
   const tokenRows = snapshot?.recent_token_spend ?? []
   const lastTool = snapshot?.last_tool_call ?? null

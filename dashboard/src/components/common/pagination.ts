@@ -26,8 +26,9 @@ interface PaginationProps {
   testId?: string
 }
 
-export interface CursorPaginationProps {
+interface CursorPaginationProps {
   cursor?: string
+  cursorLabel?: string
   hasPrevious?: boolean
   hasNext?: boolean
   onPrevious?: () => void
@@ -238,6 +239,7 @@ export function Pagination({
 
 export function CursorPagination({
   cursor,
+  cursorLabel = 'cursor',
   hasPrevious = true,
   hasNext = true,
   onPrevious,
@@ -276,7 +278,7 @@ export function CursorPagination({
             <span
               class="min-w-0 flex-1 truncate px-2 text-center text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]"
             >
-              cursor · <span class="text-[var(--color-accent-fg)]">${cursor}</span>
+              ${cursorLabel} · <span class="text-[var(--color-accent-fg)]">${cursor}</span>
             </span>
           `
         : null}

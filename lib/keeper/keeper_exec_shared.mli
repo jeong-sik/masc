@@ -11,9 +11,9 @@ val count_context_tokens : Keeper_types.working_context -> int
 val error_json :
   ?fields:(string * Yojson.Safe.t) list -> string -> string
 
-(** [(true, msg)] passes [msg] through; [(false, msg)] wraps it
-    in [error_json]. *)
-val tool_result_or_error : bool * string -> string
+(** [Tool_result.t] passes [msg] through on success; wraps it
+    in [error_json] on failure. *)
+val tool_result_or_error : Tool_result.t -> string
 
 (** Phase B PR-5 precursor: typed dispatch from the path error
     class to a concrete remediation hint. *)

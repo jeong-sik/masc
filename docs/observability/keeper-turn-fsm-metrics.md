@@ -101,8 +101,8 @@ The line text is stable and pinned by the `test_keeper_turn_fsm_emit` sentinel â
 `emit_transition` also classifies every `(prev, next)` pair against the
 runtime image of `KeeperTurnFSM.tla` `Next`. An edge outside the contract
 increments `masc_fsm_guard_violation_total{action="KeeperTurnFSM.Next", ...}`
-and logs `[fsm:transition:violation]`; with `MASC_FSM_GUARD_ASSERT=1` the same
-violation raises during tests/CI.
+and re-raises `Assert_failure`. `MASC_FSM_GUARD_ASSERT=0` no longer enables
+counter-only mode.
 
 ## Pulling a single turn back out
 

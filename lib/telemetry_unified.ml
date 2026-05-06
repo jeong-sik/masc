@@ -199,23 +199,25 @@ let is_jsonl_file source ~site path =
     Sys.file_exists path && (not (Sys.is_directory path))
     && Filename.check_suffix path ".jsonl")
 
+let discover_trajectory_keeper_dirs_in_root trajectories_root =
+  protect_source_read Trajectory_tool_call
+    ~site:"discover_trajectory_keeper_dirs" ~default:[] (fun () ->
+    Sys.readdir trajectories_root
+    |> Array.to_list
+    |> List.filter_map (fun name ->
+         let dir = Filename.concat trajectories_root name in
+         if
+           is_directory Trajectory_tool_call
+             ~site:"discover_trajectory_keeper_dir_stat" dir
+         then Some (name, dir)
+         else None))
+
 let discover_trajectory_keeper_dirs masc_root : (string * string) list =
   let trajectories_root = Filename.concat masc_root "trajectories" in
   match classify_store_dir Trajectory_tool_call
           ~site:"discover_trajectory_root" trajectories_root with
   | Store_missing | Store_invalid -> []
-  | Store_directory ->
-    protect_source_read Trajectory_tool_call
-      ~site:"discover_trajectory_keeper_dirs" ~default:[] (fun () ->
-      Sys.readdir trajectories_root
-      |> Array.to_list
-      |> List.filter_map (fun name ->
-           let dir = Filename.concat trajectories_root name in
-           if
-             is_directory Trajectory_tool_call
-               ~site:"discover_trajectory_keeper_dir_stat" dir
-           then Some (name, dir)
-           else None))
+  | Store_directory -> discover_trajectory_keeper_dirs_in_root trajectories_root
 
 let discover_execution_receipt_dirs masc_root : (string * string) list =
   let keepers_dir = Filename.concat masc_root "keepers" in
@@ -634,8 +636,6 @@ let read_fixed_source dir source ~n ?since_ts ?until_ts () : Yojson.Safe.t list 
     | exception (Eio.Cancel.Cancelled _ as e) -> raise e
     | exception exn ->
       observe_source_read_failure_exn source ~site:"read_fixed_source" exn;
-      Log.Telemetry.warn "read_fixed_source: %s store open failed"
-        (source_to_string source);
       []
 
 (* ── Read keeper metrics (per-keeper directories) ───── *)
@@ -731,22 +731,31 @@ let read_trajectory_file path ?since_ts ?until_ts () =
   else
     protect_source_read Trajectory_tool_call ~site:"read_trajectory_file"
       ~default:[] (fun () ->
-      Fs_compat.load_file path
-      |> String.split_on_char '\n'
-      |> List.filter_map (fun line ->
-           let line = String.trim line in
-           if line = "" then None
-           else
-             try
-               let json = Yojson.Safe.from_string line in
-               if trajectory_tool_call_json json
-                  && within_requested_window ?since_ts ?until_ts json
-               then Some json
-               else None
-             with Yojson.Json_error msg ->
-               observe_source_read_failure Trajectory_tool_call
-                 ~site:"read_trajectory_file_parse" ~error:msg;
-               None))
+      let parse_error_count = ref 0 in
+      let entries =
+        Fs_compat.load_file path
+        |> String.split_on_char '\n'
+        |> List.filter_map (fun line ->
+             let line = String.trim line in
+             if line = "" then None
+             else
+               try
+                 let json = Yojson.Safe.from_string line in
+                 if trajectory_tool_call_json json
+                    && within_requested_window ?since_ts ?until_ts json
+                 then Some json
+                 else None
+               with Yojson.Json_error _ ->
+                 incr parse_error_count;
+                 None)
+      in
+      if !parse_error_count > 0 then
+        observe_source_read_failure Trajectory_tool_call
+          ~site:"read_trajectory_file_parse"
+          ~error:
+            (Printf.sprintf "%s has %d malformed JSONL line(s)" path
+               !parse_error_count);
+      entries)
 
 let read_trajectory_tool_calls ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
     : Yojson.Safe.t list =
@@ -1013,10 +1022,15 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
         keeper_total )
     | Trajectory_tool_call ->
       let trajectories_root = Filename.concat masc_root "trajectories" in
-      let dirs = discover_trajectory_keeper_dirs masc_root in
       let dir_state =
         classify_store_dir Trajectory_tool_call
           ~site:"summary_trajectory_root" trajectories_root
+      in
+      let dirs =
+        match dir_state with
+        | Store_directory ->
+            discover_trajectory_keeper_dirs_in_root trajectories_root
+        | Store_missing | Store_invalid -> []
       in
       let exists = match dir_state with
         | Store_directory | Store_invalid -> true

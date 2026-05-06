@@ -344,6 +344,7 @@ let test_review_blocker_metrics_registered () =
   check_registered Prometheus.metric_coord_claim_post_provision_failures;
   check_registered Prometheus.metric_keeper_lifecycle_callback_failures;
   check_registered Prometheus.metric_keeper_oas_on_stop;
+  check_registered Prometheus.metric_keeper_oas_on_idle_escalated;
   check_registered Prometheus.metric_keeper_event_bus_drain
 
 let test_distributed_lock_metric_registered () =

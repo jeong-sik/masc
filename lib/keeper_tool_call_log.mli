@@ -85,6 +85,16 @@ val action_radius_json_for_call :
 (** [action_radius_json_for_call ...] derives the canonical action radius
     from a keeper tool call and its current sandbox context. *)
 
+val route_evidence_json_of_tool_io :
+  tool_name:string ->
+  input:Yojson.Safe.t ->
+  output_text:string ->
+  Yojson.Safe.t option
+(** [route_evidence_json_of_tool_io] extracts first-class route proof from
+    keeper git/gh tool I/O. The evidence includes redacted command/cwd/path
+    from the input plus route/status fields such as [via], [sandbox_profile],
+    [git_creds_enabled], [network_mode], [status], and PR URL when present. *)
+
 val init : ?cluster_name:string -> base_path:string -> unit -> unit
 (** [init ?cluster_name ~base_path ()] creates the cluster-aware Dated_jsonl
     store. Call once at startup. *)

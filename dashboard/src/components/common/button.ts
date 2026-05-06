@@ -13,9 +13,32 @@ import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 import { ringFocusClasses } from './ring'
 
-type ButtonVariant = 'primary' | 'ghost' | 'danger' | 'subtle' | 'ok' | 'warn'
-type ButtonSize = 'sm' | 'md' | 'lg'
-type ButtonType = 'button' | 'submit' | 'reset'
+export type ButtonVariant = 'primary' | 'ghost' | 'danger' | 'subtle' | 'ok' | 'warn'
+export type ButtonSize = 'sm' | 'md' | 'lg'
+export type ButtonType = 'button' | 'submit' | 'reset'
+export type ButtonPressedState = 'unset' | 'true' | 'false'
+
+export interface ActionButtonSummary {
+  readonly variant: ButtonVariant
+  readonly size: ButtonSize
+  readonly type: ButtonType
+  readonly block: boolean
+  readonly disabled: boolean
+  readonly busy: boolean
+  readonly pressedState: ButtonPressedState
+  readonly hasCustomClass: boolean
+  readonly classNameLength: number
+  readonly hasId: boolean
+  readonly idLength: number
+  readonly hasAriaLabel: boolean
+  readonly ariaLabelLength: number
+  readonly hasTitle: boolean
+  readonly titleLength: number
+  readonly hasTestId: boolean
+  readonly testIdLength: number
+  readonly hasOnClick: boolean
+  readonly hasChildren: boolean
+}
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {
   sm: 'py-1 px-2 text-2xs',
@@ -65,7 +88,7 @@ const PRESSED_CLASSES: Record<ButtonVariant, string> = {
 // motion for accessibility) propagates without callsite edits.
 const BASE = `rounded-[var(--r-1)] cursor-pointer transition-[background-color,border-color,box-shadow,transform,opacity] duration-[var(--t-med)] font-medium ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })} active:scale-[0.97] active:opacity-90`
 
-interface ActionButtonProps {
+export interface ActionButtonProps {
   variant?: ButtonVariant
   size?: ButtonSize
   type?: ButtonType
@@ -95,6 +118,55 @@ interface ActionButtonProps {
   children: ComponentChildren
 }
 
+function hasNonEmptyString(value: string | undefined): boolean {
+  return value !== undefined && value !== ''
+}
+
+function pressedState(pressed: boolean | undefined): ButtonPressedState {
+  if (pressed === true) return 'true'
+  if (pressed === false) return 'false'
+  return 'unset'
+}
+
+export function summarizeActionButton({
+  variant = 'primary',
+  size = 'md',
+  type = 'button',
+  class: cx,
+  id,
+  disabled,
+  block,
+  ariaLabel,
+  ariaBusy,
+  pressed,
+  title,
+  testId,
+  onClick,
+  children,
+}: ActionButtonProps): ActionButtonSummary {
+  return {
+    variant,
+    size,
+    type,
+    block: block === true,
+    disabled: disabled === true,
+    busy: ariaBusy === true,
+    pressedState: pressedState(pressed),
+    hasCustomClass: hasNonEmptyString(cx),
+    classNameLength: cx?.length ?? 0,
+    hasId: hasNonEmptyString(id),
+    idLength: id?.length ?? 0,
+    hasAriaLabel: hasNonEmptyString(ariaLabel),
+    ariaLabelLength: ariaLabel?.length ?? 0,
+    hasTitle: hasNonEmptyString(title),
+    titleLength: title?.length ?? 0,
+    hasTestId: hasNonEmptyString(testId),
+    testIdLength: testId?.length ?? 0,
+    hasOnClick: typeof onClick === 'function',
+    hasChildren: children !== undefined && children !== null,
+  }
+}
+
 export function ActionButton({
   variant = 'primary',
   size = 'md',
@@ -111,6 +183,22 @@ export function ActionButton({
   onClick,
   children,
 }: ActionButtonProps) {
+  const summary = summarizeActionButton({
+    variant,
+    size,
+    type,
+    class: cx,
+    id,
+    disabled,
+    block,
+    ariaLabel,
+    ariaBusy,
+    pressed,
+    title,
+    testId,
+    onClick,
+    children,
+  })
   const cls = [
     BASE,
     SIZE_CLASSES[size],
@@ -133,6 +221,26 @@ export function ActionButton({
       aria-pressed=${pressed === true ? 'true' : pressed === false ? 'false' : undefined}
       title=${title}
       data-testid=${testId}
+      data-action-button
+      data-action-button-variant=${summary.variant}
+      data-action-button-size=${summary.size}
+      data-action-button-type=${summary.type}
+      data-action-button-block=${summary.block}
+      data-action-button-disabled=${summary.disabled}
+      data-action-button-busy=${summary.busy}
+      data-action-button-pressed-state=${summary.pressedState}
+      data-action-button-has-custom-class=${summary.hasCustomClass}
+      data-action-button-class-length=${summary.classNameLength}
+      data-action-button-has-id=${summary.hasId}
+      data-action-button-id-length=${summary.idLength}
+      data-action-button-has-aria-label=${summary.hasAriaLabel}
+      data-action-button-aria-label-length=${summary.ariaLabelLength}
+      data-action-button-has-title=${summary.hasTitle}
+      data-action-button-title-length=${summary.titleLength}
+      data-action-button-has-test-id=${summary.hasTestId}
+      data-action-button-test-id-length=${summary.testIdLength}
+      data-action-button-has-click-handler=${summary.hasOnClick}
+      data-action-button-has-children=${summary.hasChildren}
     >${children}</button>
   `
 }

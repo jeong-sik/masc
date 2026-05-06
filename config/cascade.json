@@ -71,7 +71,7 @@
   "__safe_lane_max_tokens": 16384,
   "__safe_lane_keeper_assignable": false,
   "__safe_lane_required_capability_profile": "tool_strict",
-  "_comment_local_recovery": "Alias for the phase_recovery logical route. Profiles that declare fallback_cascade = \"local_recovery\" resolve here instead of silently ignoring the hint. Not keeper-assignable.",
+  "_comment_local_recovery": "P1-2 fix: recovery profile for fallback_cascade = \"local_recovery\". Uses a curated local/CLI primary list, then falls back to big_three on exhaustion. Not keeper-assignable.",
   "local_recovery_models": [
     "codex_cli:gpt-5.3-codex-spark", "gemini_cli:auto", "claude_code:auto"
   ],

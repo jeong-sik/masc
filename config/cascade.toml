@@ -114,9 +114,10 @@ required_capability_profile = "tool_strict"
 # logical route key that resolves to the Failing-phase cascade).  The runtime
 # cascade loader looks up profile names, not route keys, so a missing
 # [local_recovery] section caused the fallback hint to be silently ignored.
-# This alias entry makes the name resolvable; it delegates to big_three so
-# behaviour matches the phase_recovery route (routes.phase_recovery = "big_three").
-comment = "P1-2 fix: alias entry for the phase_recovery logical route. Profiles that declare fallback_cascade = \"local_recovery\" resolve here instead of silently ignoring the hint. Not keeper-assignable; delegates to big_three."
+# This profile makes the name resolvable with a recovery-focused primary list,
+# then falls through to big_three on exhaustion rather than pretending the route
+# key and profile composition are identical.
+comment = "P1-2 fix: recovery profile for fallback_cascade = \"local_recovery\". Uses a curated local/CLI primary list, then falls back to big_three on exhaustion. Not keeper-assignable."
 models = [
   "codex_cli:gpt-5.3-codex-spark",
   "gemini_cli:auto",

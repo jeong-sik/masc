@@ -455,6 +455,29 @@ let build_attainment_json ~state ~basis ~task_done_count ~task_count
       ("note", `String note);
     ]
 
+let goal_attainment_pct_help =
+  "Goal attainment percentage by goal_id. Use \
+   masc_goal_attainment_measured to distinguish real 0% from unmeasured."
+
+let goal_attainment_measured_help =
+  "Whether goal attainment percentage is currently measured by goal_id \
+   (1 = measured, 0 = unmeasured)."
+
+let observe_goal_attainment_metrics (goal : Goal_store.goal) attainment =
+  let labels = [ ("goal_id", goal.id) ] in
+  let measured, pct =
+    match attainment |> member "attainment_pct" |> to_int_option with
+    | Some pct -> (1.0, float_of_int pct)
+    | None -> (0.0, 0.0)
+  in
+  Prometheus.register_gauge ~name:Prometheus.metric_goal_attainment_pct
+    ~help:goal_attainment_pct_help ~labels ();
+  Prometheus.set_gauge Prometheus.metric_goal_attainment_pct ~labels pct;
+  Prometheus.register_gauge ~name:Prometheus.metric_goal_attainment_measured
+    ~help:goal_attainment_measured_help ~labels ();
+  Prometheus.set_gauge Prometheus.metric_goal_attainment_measured ~labels
+    measured
+
 let goal_attainment_to_json (goal : Goal_store.goal) (node : tree_node) =
   let task_count = List.length node.tasks in
   let task_done_count =
@@ -1479,7 +1502,10 @@ let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
        | None -> `Null);
       ("convergence", `Float node.convergence);
       ("convergence_pct", `Int (int_of_float (node.convergence *. 100.0)));
-      ("attainment", goal_attainment_to_json goal node);
+      ( "attainment",
+        let attainment = goal_attainment_to_json goal node in
+        observe_goal_attainment_metrics goal attainment;
+        attainment );
       ("tasks", `List (List.map task_to_tree_json node.tasks));
       ("task_count", `Int (List.length node.tasks));
       ("task_done_count",

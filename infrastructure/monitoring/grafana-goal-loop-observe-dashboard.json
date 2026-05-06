@@ -14,6 +14,8 @@
       "masc_pricing_catalog_miss_total{model_id}",
       "masc_dashboard_metric_all_zeros{keeper_name}",
       "masc_dashboard_snapshot_latency_seconds_bucket",
+      "masc_goal_attainment_pct{goal_id}",
+      "masc_goal_attainment_measured{goal_id}",
       "masc_config_unknown_keys_ignored_total{file_path}",
       "masc_config_credential_archived_starvation_total{keeper_name}",
       "masc_governance_judge_unparseable_total",
@@ -306,6 +308,53 @@
         }
       ],
       "title": "Governance And Data Integrity",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "unit": "percent"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".* measured"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "id": 7,
+      "targets": [
+        {
+          "expr": "masc_goal_attainment_pct",
+          "legendFormat": "{{goal_id}} attainment",
+          "refId": "A"
+        },
+        {
+          "expr": "masc_goal_attainment_measured",
+          "legendFormat": "{{goal_id}} measured",
+          "refId": "B"
+        }
+      ],
+      "title": "Goal Attainment",
       "type": "timeseries"
     }
   ],

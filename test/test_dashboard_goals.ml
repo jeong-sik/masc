@@ -423,6 +423,31 @@ let test_goal_attainment_projects_percent_target () =
   check int "done task count" 3
     (attainment |> member "task_done_count" |> to_int)
 
+let test_goal_attainment_exports_prometheus_metric () =
+  with_room @@ fun config ->
+  let goal, _kind =
+    match
+      Goal_store.upsert_goal config ~title:"Prometheus attainment goal"
+        ~metric:"completion_pct" ~target_value:"75%" ()
+    with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  create_done_task config ~goal_id:goal.id ~title:"Metric done task 1";
+  create_done_task config ~goal_id:goal.id ~title:"Metric done task 2";
+  create_done_task config ~goal_id:goal.id ~title:"Metric done task 3";
+  ignore
+    (Coord_task.add_task ~goal_id:goal.id config ~title:"Metric open task"
+       ~priority:3 ~description:"remaining work");
+  ignore (Dashboard_goals.dashboard_goals_tree_json ~config);
+  let labels = [ ("goal_id", goal.id) ] in
+  check (option (float 0.001)) "goal attainment pct metric" (Some 100.0)
+    (Prometheus.get_metric_value Prometheus.metric_goal_attainment_pct ~labels
+       ());
+  check (option (float 0.001)) "goal attainment measured metric" (Some 1.0)
+    (Prometheus.get_metric_value Prometheus.metric_goal_attainment_measured
+       ~labels ())
+
 let test_goal_attainment_projects_camel_case_percent_metric () =
   with_room @@ fun config ->
   let goal, _kind =
@@ -1095,6 +1120,8 @@ let () =
             test_title_marker_links_legacy_task;
           test_case "goal attainment projects percent targets" `Quick
             test_goal_attainment_projects_percent_target;
+          test_case "goal attainment exports prometheus metric" `Quick
+            test_goal_attainment_exports_prometheus_metric;
           test_case "goal attainment projects camel-case percent metrics" `Quick
             test_goal_attainment_projects_camel_case_percent_metric;
           test_case "goal attainment does not fake unparseable targets" `Quick

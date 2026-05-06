@@ -1066,6 +1066,8 @@ type pr_review_action_metric_event = {
 type pr_work_action_metric_event = {
   work_action : string;
   work_source : string;
+  work_ref : string option;
+  pr_url : string option;
   command : string option;
   success : bool;
   route_via : string option;
@@ -1141,6 +1143,62 @@ let route_via_of_json json =
     nested "tool_metadata" "via";
     nested "tool_metadata" "execution_via";
     nested "tool_metadata" "route_via";
+  ]
+  |> List.find_map Fun.id
+
+let non_empty_string_opt = function
+  | Some value ->
+      let value = String.trim value in
+      if String.equal value "" then None else Some value
+  | None -> None
+
+let string_field_opt key json = Safe_ops.json_string_opt key json |> non_empty_string_opt
+
+let nested_string_field_opt parent key json =
+  match assoc_field parent json with
+  | Some nested_json -> string_field_opt key nested_json
+  | None -> None
+
+let github_pr_url_from_text raw =
+  let normalized =
+    raw
+    |> String.map (function
+         | '\n' | '\r' | '\t' | '"' | '\'' -> ' '
+         | ch -> ch)
+  in
+  normalized
+  |> String.split_on_char ' '
+  |> List.find_map (fun token ->
+       let token = String.trim token in
+       if
+         String.starts_with ~prefix:"https://github.com/" token
+         && String_util.contains_substring token "/pull/"
+       then Some token
+       else None)
+
+let pr_url_of_json json =
+  [
+    string_field_opt "pr_url" json;
+    string_field_opt "pull_request_url" json;
+    string_field_opt "url" json;
+    string_field_opt "html_url" json;
+    string_field_opt "output" json;
+    nested_string_field_opt "result" "pr_url" json;
+    nested_string_field_opt "result" "pull_request_url" json;
+    nested_string_field_opt "result" "url" json;
+    nested_string_field_opt "result" "html_url" json;
+    nested_string_field_opt "result" "output" json;
+    nested_string_field_opt "route_evidence" "pr_url" json;
+  ]
+  |> List.find_map (function
+       | None -> None
+       | Some value -> github_pr_url_from_text value)
+
+let pr_create_ref_of_input input =
+  [
+    string_field_opt "head" input;
+    string_field_opt "branch" input;
+    string_field_opt "head_ref" input;
   ]
   |> List.find_map Fun.id
 
@@ -1466,16 +1524,22 @@ let pr_work_action_metric_events_of_tool_io
              {
                work_action;
                work_source = "masc_code_git";
+               work_ref = None;
+               pr_url = None;
                command = None;
                success;
                route_via;
              };
            ])
   | "keeper_pr_create" ->
+      let work_ref = pr_create_ref_of_input input in
+      let pr_url = Option.bind output_json pr_url_of_json in
       [
         {
           work_action = "PR_CREATE";
           work_source = "keeper_pr_create";
+          work_ref;
+          pr_url;
           command = None;
           success;
           route_via;
@@ -1490,6 +1554,8 @@ let pr_work_action_metric_events_of_tool_io
                   {
                     work_action;
                     work_source = tool_name;
+                    work_ref = None;
+                    pr_url = None;
                     command = Some command;
                     success;
                     route_via;
@@ -1615,6 +1681,9 @@ let append_pr_work_action_metrics
                   ("pr_work_action", `String event.work_action);
                   ("pr_work_action_source", `String event.work_source);
                   ("pr_work_action_success", `Bool event.success);
+                  ( "pr_work_ref",
+                    Json_util.string_opt_to_json event.work_ref );
+                  ("pr_url", Json_util.string_opt_to_json event.pr_url);
                   ( "pr_work_command",
                     Json_util.string_opt_to_json event.command );
                   ("tool_call_count", `Int 0);

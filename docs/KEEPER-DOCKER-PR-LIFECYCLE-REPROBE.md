@@ -62,8 +62,8 @@ branches before re-running. An empty file means no collisions; rows look like:
 ```json
 {"keeper":"executor","branch":"keeper-executor-agent/<run_id>",
  "kinds":["local","remote_tracking"]}
-``` The review phase requires
-`keeper_pr_review_comment`.
+```
+After collision evidence is clear, the review phase requires `keeper_pr_review_comment`.
 This avoids the old single-turn shape where one keeper could wait on another
 keeper's missing PR until the Agent.run timeout. The review prompt reserves
 `keeper_shell` for read-only GitHub inspection, but does not put it in

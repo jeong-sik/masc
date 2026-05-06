@@ -808,6 +808,10 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             root = Path(tmp)
             calls_dir = root / ".masc" / "tool_calls" / "2026-05"
             calls_dir.mkdir(parents=True)
+            metrics_dir = (
+                root / ".masc" / "keepers" / "alpha" / "pr-action-metrics" / "2026-05"
+            )
+            metrics_dir.mkdir(parents=True)
             rows = [
                 {
                     "ts": 50.0,
@@ -835,14 +839,43 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                 "".join(json.dumps(row) + "\n" for row in rows),
                 encoding="utf-8",
             )
+            metric_rows = [
+                {
+                    "ts_unix": 55.0,
+                    "metric_event": "keeper_pr_work_action",
+                    "tool_name": "keeper_pr_create",
+                    "pr_work_action": "PR_CREATE",
+                    "pr_work_action_source": "keeper_pr_create",
+                    "pr_work_action_success": True,
+                    "pr_work_ref": "keeper/alpha-docker-pr-proof-old-run",
+                    "route_via": "docker",
+                },
+                {
+                    "ts_unix": 65.0,
+                    "metric_event": "keeper_pr_work_action",
+                    "tool_name": "keeper_pr_create",
+                    "pr_work_action": "PR_CREATE",
+                    "pr_work_action_source": "keeper_pr_create",
+                    "pr_work_action_success": True,
+                    "pr_work_ref": "keeper/alpha-docker-pr-proof-current-run",
+                    "pr_url": "https://github.com/acme/repo/pull/42",
+                    "route_via": "docker",
+                },
+            ]
+            (metrics_dir / "06.jsonl").write_text(
+                "".join(json.dumps(row) + "\n" for row in metric_rows),
+                encoding="utf-8",
+            )
 
             latest_ts, tools, evidence, docker_evidence = audit.scan_keeper_evidence(
                 root, "alpha", evidence_run_id="current-run"
             )
 
-        self.assertEqual(latest_ts, 60.0)
-        self.assertEqual(tools, {"keeper_bash"})
-        self.assertEqual(evidence, {"git_push:keeper_bash"})
+        self.assertEqual(latest_ts, 65.0)
+        self.assertEqual(tools, {"keeper_bash", "keeper_pr_create"})
+        self.assertEqual(
+            evidence, {"git_push:keeper_bash", "pr_create:keeper_pr_create"}
+        )
         self.assertEqual(docker_evidence, evidence)
 
     def test_scan_keeper_evidence_reads_newest_tool_calls_first(self):

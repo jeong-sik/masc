@@ -671,6 +671,29 @@ let test_coding_preset_routes_coordination_read_models () =
   check bool "coding does not include goal verify" false
     (List.mem "masc_goal_verify" allowed)
 
+let test_coordination_presets_route_plan_history_reads () =
+  init_keeper_tool_registry ();
+  List.iter
+    (fun (label, preset) ->
+      let base = make_gate_test_meta ~name:("test-" ^ label ^ "-coordination") () in
+      let meta =
+        {
+          base with
+          tool_access = Preset { preset; also_allow = [] };
+          tool_denylist = [];
+        }
+      in
+      let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
+      check bool (label ^ " includes task history") true
+        (List.mem "masc_task_history" allowed);
+      check bool (label ^ " includes plan get") true
+        (List.mem "masc_plan_get" allowed);
+      check bool (label ^ " includes plan get task") true
+        (List.mem "masc_plan_get_task" allowed);
+      check bool (label ^ " does not include goal upsert") false
+        (List.mem "masc_goal_upsert" allowed))
+    [ ("social", Social); ("messaging", Messaging) ]
+
 let test_preset_universe_superset_of_policy () =
   init_keeper_tool_registry ();
   let base = make_gate_test_meta () in
@@ -820,6 +843,8 @@ let () =
             test_dispatch_preset_routes_pm_tools;
           test_case "coding routes coordination read models" `Quick
             test_coding_preset_routes_coordination_read_models;
+          test_case "coordination presets route plan/history reads" `Quick
+            test_coordination_presets_route_plan_history_reads;
         ] );
       ( "inter_diff_composition",
         [

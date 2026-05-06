@@ -2,7 +2,7 @@
   {
     "label": "qwen35-a3b-ud-q8-xl",
     "alias": "qwen3.5-35b-a3b-ud-q8-xl",
-    "model_path": "/Users/dancer/models/Qwen3.5-35B-A3B-UD-Q8_K_XL-20260305.gguf",
+    "model_path": "/absolute/path/to/your-qwen3.5-35b-a3b-ud-q8-xl.gguf",
     "target_shards": 2,
     "worker_count": 16,
     "parallel": 12

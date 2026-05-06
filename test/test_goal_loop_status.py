@@ -114,7 +114,396 @@ class GoalLoopStatusTest(unittest.TestCase):
 
         self.assertEqual(report.overall_status, "ok")
         self.assertEqual(report.phases["act"].status, "ok")
+        self.assertEqual(report.phases["verify"].summary["violation_kinds"], [])
+        self.assertFalse(report.phases["verify"].summary["post_act_verify"])
         self.assertIsNone(report.next_action)
+
+    def test_verify_summary_preserves_post_act_evidence_metadata(self) -> None:
+        report = goal_loop_status.build_status_report(
+            observe={
+                "files": ["server.log"],
+                "total_lines": 5,
+                "matched_lines": 0,
+                "patterns": {},
+            },
+            orient={
+                "summary": {
+                    "evidence_present": 0,
+                    "critical_present": 0,
+                    "findings_total": 0,
+                },
+                "findings": [],
+            },
+            decide={"decisions_total": 0, "p0_count": 0, "decisions": []},
+            verify={
+                "status": "PASS",
+                "failing_findings": [],
+                "post_act_verify": True,
+                "evidence_kind": "live_runtime_http",
+                "evidence_source": "http://127.0.0.1:8931/health",
+                "evidence_window_start": "2026-05-05T17:29:12Z",
+                "evidence_window_end": "2026-05-06T00:00:00Z",
+                "checked_at": "2026-05-06T00:00:00Z",
+            },
+            generated_at="2026-05-05T10:00:00+00:00",
+        )
+
+        summary = report.phases["verify"].summary
+        self.assertTrue(summary["post_act_verify"])
+        self.assertEqual(summary["evidence_kind"], "live_runtime_http")
+        self.assertEqual(
+            summary["evidence_source"],
+            "http://127.0.0.1:8931/health",
+        )
+        self.assertEqual(summary["evidence_window_start"], "2026-05-05T17:29:12Z")
+        self.assertEqual(summary["evidence_window_end"], "2026-05-06T00:00:00Z")
+        self.assertEqual(summary["checked_at"], "2026-05-06T00:00:00Z")
+
+    def test_orient_audit_catalog_gap_keeps_goal_warning(self) -> None:
+        report = goal_loop_status.build_status_report(
+            observe={
+                "files": ["server.log"],
+                "total_lines": 5,
+                "matched_lines": 0,
+                "patterns": {},
+            },
+            orient={
+                "summary": {
+                    "evidence_present": 0,
+                    "critical_present": 0,
+                    "findings_total": 18,
+                },
+                "findings": [],
+                "audit_catalog": {
+                    "status": "INCOMPLETE",
+                    "expected_findings_total": 206,
+                    "itemized_findings_total": 19,
+                    "missing_itemized_findings": 187,
+                    "source_documents_status": "COMPLETE",
+                    "source_documents_covered": 12,
+                    "source_documents_expected": 12,
+                    "aggregate_claims": [{"claim_id": "audit_total_206"}],
+                    "consistency_findings": [{"finding_id": "CONSISTENCY-1"}],
+                    "source_artifacts": {
+                        "status": "INCOMPLETE",
+                        "source_artifacts_total": 12,
+                        "source_artifacts_resolved": 0,
+                        "source_artifacts_missing": 12,
+                        "line_ref_errors": 0,
+                        "source_itemized_id_status": "INCOMPLETE",
+                        "source_itemized_finding_ids_total": 0,
+                        "catalog_itemized_finding_ids_total": 19,
+                        "source_ids_missing_from_catalog": 0,
+                        "catalog_ids_missing_from_source": 19,
+                        "source_structured_item_ids_total": 0,
+                        "source_structured_item_ids_uncataloged": 0,
+                        "source_structured_item_ids_uncataloged_occurrences": 0,
+                        "source_structured_item_id_families": [],
+                        "source_aggregate_claim_status": "INCOMPLETE",
+                        "source_aggregate_claim_sources_verified": 0,
+                        "source_aggregate_claim_sources_missing": 5,
+                        "source_identity_status": "INCOMPLETE",
+                        "source_identity_checks_verified": 0,
+                        "source_identity_checks_failed": 12,
+                    },
+                },
+            },
+            decide={"decisions_total": 0, "p0_count": 0, "decisions": []},
+            verify={"status": "PASS", "failing_findings": []},
+            generated_at="2026-05-05T10:00:00+00:00",
+        )
+
+        self.assertEqual(report.overall_status, "warning")
+        self.assertEqual(report.phases["orient"].status, "warning")
+        audit_catalog = report.phases["orient"].summary["audit_catalog"]
+        self.assertEqual(audit_catalog["source_documents_covered"], 12)
+        self.assertEqual(audit_catalog["missing_itemized_findings"], 187)
+        self.assertEqual(audit_catalog["consistency_findings_total"], 1)
+        self.assertEqual(audit_catalog["consistency_findings_open"], 1)
+        self.assertEqual(audit_catalog["source_artifacts_status"], "INCOMPLETE")
+        self.assertEqual(audit_catalog["source_artifacts_missing"], 12)
+        self.assertEqual(audit_catalog["source_itemized_id_status"], "INCOMPLETE")
+        self.assertEqual(audit_catalog["source_itemized_finding_ids_total"], 0)
+        self.assertEqual(audit_catalog["catalog_itemized_finding_ids_total"], 19)
+        self.assertEqual(audit_catalog["catalog_ids_missing_from_source"], 19)
+        self.assertEqual(audit_catalog["source_structured_item_ids_total"], 0)
+        self.assertEqual(audit_catalog["source_structured_item_ids_uncataloged"], 0)
+        self.assertEqual(
+            audit_catalog["source_structured_item_ids_uncataloged_occurrences"],
+            0,
+        )
+        self.assertEqual(audit_catalog["source_structured_item_id_families"], [])
+        self.assertEqual(audit_catalog["source_aggregate_claim_status"], "INCOMPLETE")
+        self.assertEqual(audit_catalog["source_aggregate_claim_sources_verified"], 0)
+        self.assertEqual(audit_catalog["source_aggregate_claim_sources_missing"], 5)
+        self.assertEqual(audit_catalog["source_identity_status"], "INCOMPLETE")
+        self.assertEqual(audit_catalog["source_identity_checks_verified"], 0)
+        self.assertEqual(audit_catalog["source_identity_checks_failed"], 12)
+
+    def test_closed_catalog_consistency_findings_do_not_warn(self) -> None:
+        report = goal_loop_status.build_status_report(
+            observe={
+                "files": ["server.log"],
+                "total_lines": 5,
+                "matched_lines": 0,
+                "patterns": {},
+            },
+            orient={
+                "summary": {
+                    "evidence_present": 0,
+                    "critical_present": 0,
+                    "findings_total": 18,
+                },
+                "findings": [],
+                "audit_catalog": {
+                    "status": "COMPLETE",
+                    "expected_findings_total": 18,
+                    "itemized_findings_total": 18,
+                    "missing_itemized_findings": 0,
+                    "source_documents_status": "COMPLETE",
+                    "source_documents_covered": 12,
+                    "source_documents_expected": 12,
+                    "aggregate_claims": [],
+                    "consistency_findings": [
+                        {"finding_id": "CONSISTENCY-1", "status": "RESOLVED"}
+                    ],
+                    "source_artifacts": {
+                        "status": "COMPLETE",
+                        "source_artifacts_total": 12,
+                        "source_artifacts_resolved": 12,
+                        "source_artifacts_missing": 0,
+                        "line_ref_errors": 0,
+                        "source_itemized_id_status": "COMPLETE",
+                        "source_itemized_finding_ids_total": 18,
+                        "catalog_itemized_finding_ids_total": 18,
+                        "source_ids_missing_from_catalog": 0,
+                        "catalog_ids_missing_from_source": 0,
+                        "source_structured_item_ids_total": 18,
+                        "source_structured_item_ids_uncataloged": 0,
+                        "source_structured_item_ids_uncataloged_occurrences": 0,
+                        "source_structured_item_id_families": [
+                            {
+                                "family": "NF",
+                                "total": 8,
+                                "uncataloged": 0,
+                                "uncataloged_samples": [],
+                            }
+                        ],
+                        "source_aggregate_claim_status": "COMPLETE",
+                        "source_aggregate_claim_sources_verified": 0,
+                        "source_aggregate_claim_sources_missing": 0,
+                        "source_identity_status": "COMPLETE",
+                        "source_identity_checks_verified": 12,
+                        "source_identity_checks_failed": 0,
+                    },
+                },
+            },
+            decide={"decisions_total": 0, "p0_count": 0, "decisions": []},
+            verify={"status": "PASS", "failing_findings": []},
+            generated_at="2026-05-05T10:00:00+00:00",
+        )
+
+        self.assertEqual(report.overall_status, "ok")
+        audit_catalog = report.phases["orient"].summary["audit_catalog"]
+        self.assertEqual(audit_catalog["consistency_findings_total"], 1)
+        self.assertEqual(audit_catalog["consistency_findings_open"], 0)
+        self.assertEqual(
+            audit_catalog["source_structured_item_id_families"],
+            [
+                {
+                    "family": "NF",
+                    "total": 8,
+                    "uncataloged": 0,
+                    "uncataloged_samples": [],
+                }
+            ],
+        )
+
+    def test_orient_audit_catalog_carries_strict_row_corpus_metadata(self) -> None:
+        report = goal_loop_status.build_status_report(
+            observe={
+                "files": ["server.log"],
+                "total_lines": 5,
+                "matched_lines": 0,
+                "patterns": {},
+            },
+            orient={
+                "summary": {
+                    "evidence_present": 0,
+                    "critical_present": 0,
+                    "findings_total": 206,
+                },
+                "findings": [],
+                "audit_catalog": {
+                    "catalog_id": "goal-loop-206-audit-external-claim-2026-05-05",
+                    "status": "COMPLETE",
+                    "expected_findings_total": 206,
+                    "itemized_findings_total": 206,
+                    "missing_itemized_findings": 0,
+                    "source_documents_status": "COMPLETE",
+                    "source_documents_covered": 12,
+                    "source_documents_expected": 12,
+                    "strict_row_corpus": {
+                        "provided": True,
+                        "validated": True,
+                        "row_count": 206,
+                        "errors_total": 0,
+                    },
+                    "source_artifacts": {
+                        "status": "COMPLETE",
+                        "source_artifacts_total": 12,
+                        "source_artifacts_resolved": 12,
+                        "source_artifacts_missing": 0,
+                        "line_ref_errors": 0,
+                        "source_itemized_id_status": "COMPLETE",
+                        "source_itemized_id_basis": "strict_row_corpus",
+                        "source_itemized_finding_ids_total": 206,
+                        "source_document_itemized_finding_ids_total": 19,
+                        "catalog_itemized_finding_ids_total": 206,
+                        "source_ids_missing_from_catalog": 0,
+                        "catalog_ids_missing_from_source": 0,
+                        "source_structured_item_ids_total": 19,
+                        "source_structured_item_ids_uncataloged": 0,
+                        "source_structured_item_ids_uncataloged_occurrences": 0,
+                        "source_structured_item_id_families": [],
+                        "source_aggregate_claim_status": "COMPLETE",
+                        "source_aggregate_claim_sources_verified": 6,
+                        "source_aggregate_claim_sources_missing": 0,
+                        "source_aggregate_reconciliation_status": "COMPLETE",
+                        "source_aggregate_reconciliations_verified": 1,
+                        "source_aggregate_reconciliations_failed": 0,
+                        "source_identity_status": "COMPLETE",
+                        "source_identity_checks_verified": 12,
+                        "source_identity_checks_failed": 0,
+                    },
+                },
+            },
+            decide={"decisions_total": 0, "p0_count": 0, "decisions": []},
+            verify={"status": "PASS", "failing_findings": []},
+            generated_at="2026-05-05T10:00:00+00:00",
+        )
+
+        self.assertEqual(report.phases["orient"].status, "ok")
+        audit_catalog = report.phases["orient"].summary["audit_catalog"]
+        self.assertEqual(
+            audit_catalog["catalog_id"],
+            "goal-loop-206-audit-external-claim-2026-05-05",
+        )
+        self.assertTrue(audit_catalog["strict_row_corpus_provided"])
+        self.assertTrue(audit_catalog["strict_row_corpus_validated"])
+        self.assertEqual(audit_catalog["strict_row_corpus_row_count"], 206)
+        self.assertEqual(audit_catalog["strict_row_corpus_errors_total"], 0)
+        self.assertEqual(
+            audit_catalog["source_itemized_id_basis"],
+            "strict_row_corpus",
+        )
+        self.assertEqual(
+            audit_catalog["source_document_itemized_finding_ids_total"],
+            19,
+        )
+
+    def test_malformed_catalog_consistency_finding_counts_open(self) -> None:
+        self.assertTrue(goal_loop_status.consistency_finding_is_open("bad"))
+
+    def test_missing_catalog_source_artifacts_keeps_goal_warning(self) -> None:
+        report = goal_loop_status.build_status_report(
+            observe={
+                "files": ["server.log"],
+                "total_lines": 5,
+                "matched_lines": 0,
+                "patterns": {},
+            },
+            orient={
+                "summary": {
+                    "evidence_present": 0,
+                    "critical_present": 0,
+                    "findings_total": 18,
+                },
+                "findings": [],
+                "audit_catalog": {
+                    "status": "COMPLETE",
+                    "expected_findings_total": 18,
+                    "itemized_findings_total": 18,
+                    "missing_itemized_findings": 0,
+                    "source_documents_status": "COMPLETE",
+                    "source_documents_covered": 12,
+                    "source_documents_expected": 12,
+                    "aggregate_claims": [],
+                    "consistency_findings": [],
+                },
+            },
+            decide={"decisions_total": 0, "p0_count": 0, "decisions": []},
+            verify={"status": "PASS", "failing_findings": []},
+            generated_at="2026-05-05T10:00:00+00:00",
+        )
+
+        self.assertEqual(report.overall_status, "warning")
+        self.assertEqual(report.phases["orient"].status, "warning")
+        audit_catalog = report.phases["orient"].summary["audit_catalog"]
+        self.assertEqual(audit_catalog["source_artifacts_status"], "NOT_CHECKED")
+
+    def test_malformed_audit_catalog_surfaces_warning(self) -> None:
+        report = goal_loop_status.build_status_report(
+            observe={
+                "files": ["server.log"],
+                "total_lines": 5,
+                "matched_lines": 0,
+                "patterns": {},
+            },
+            orient={
+                "summary": {
+                    "evidence_present": 0,
+                    "critical_present": 0,
+                    "findings_total": 18,
+                },
+                "findings": [],
+                "audit_catalog": ["malformed"],
+            },
+            decide={"decisions_total": 0, "p0_count": 0, "decisions": []},
+            verify={"status": "PASS", "failing_findings": []},
+            generated_at="2026-05-05T10:00:00+00:00",
+        )
+
+        self.assertEqual(report.overall_status, "warning")
+        self.assertEqual(report.phases["orient"].status, "warning")
+        audit_catalog = report.phases["orient"].summary["audit_catalog"]
+        self.assertEqual(
+            audit_catalog["audit_catalog_error"], "expected_object_got_list"
+        )
+
+    def test_malformed_catalog_consistency_finding_stays_open(self) -> None:
+        report = goal_loop_status.build_status_report(
+            observe={
+                "files": ["server.log"],
+                "total_lines": 5,
+                "matched_lines": 0,
+                "patterns": {},
+            },
+            orient={
+                "summary": {
+                    "evidence_present": 0,
+                    "critical_present": 0,
+                    "findings_total": 18,
+                },
+                "findings": [],
+                "audit_catalog": {
+                    "status": "COMPLETE",
+                    "source_documents_status": "COMPLETE",
+                    "consistency_findings": ["malformed"],
+                    "source_artifacts": {
+                        "status": "COMPLETE",
+                    },
+                },
+            },
+            decide={"decisions_total": 0, "p0_count": 0, "decisions": []},
+            verify={"status": "PASS", "failing_findings": []},
+            generated_at="2026-05-05T10:00:00+00:00",
+        )
+
+        self.assertEqual(report.overall_status, "warning")
+        audit_catalog = report.phases["orient"].summary["audit_catalog"]
+        self.assertEqual(audit_catalog["consistency_findings_total"], 1)
+        self.assertEqual(audit_catalog["consistency_findings_open"], 1)
 
     def test_next_action_prefers_missing_act_over_linked_decision(self) -> None:
         report = goal_loop_status.build_status_report(
@@ -320,6 +709,11 @@ class GoalLoopStatusTest(unittest.TestCase):
         self.assertEqual(payload["loop_iteration"], "#fixture")
         self.assertEqual(payload["phases"]["decide"]["summary"]["act_linked_count"], 5)
         self.assertEqual(payload["phases"]["act"]["summary"]["act_missing_count"], 0)
+        self.assertEqual(
+            payload["phases"]["verify"]["summary"]["violation_kinds"],
+            ["post_act_verify_pending"],
+        )
+        self.assertNotIn("audit_catalog", payload["phases"]["orient"]["summary"])
         self.assertEqual(payload["next_action"]["decision_id"], "D-EMERGENCY-2")
         self.assertEqual(
             payload["system_health_signals"]["keeper_failure_patterns"][

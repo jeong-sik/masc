@@ -82,6 +82,8 @@ def complete_status() -> dict[str, object]:
                     "post_act_verify": True,
                     "evidence_kind": "live_runtime_logs",
                     "evidence_source": "/tmp/goal-loop-post-act.log",
+                    "evidence_window_start": "2026-05-05T17:29:12Z",
+                    "evidence_window_end": "2026-05-06T00:00:00Z",
                     "checked_at": "2026-05-06T00:00:00Z",
                 }
             },
@@ -229,6 +231,8 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
             "post_act_verify",
             "evidence_kind",
             "evidence_source",
+            "evidence_window_start",
+            "evidence_window_end",
             "checked_at",
         ):
             verify_summary.pop(key)
@@ -239,6 +243,22 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertIn("post_act_verify_complete", audit.blockers)
         by_id = {item.criterion_id: item for item in audit.criteria}
         self.assertFalse(by_id["post_act_verify_complete"].evidence["post_act_verify"])
+
+    def test_completion_audit_rejects_verify_pass_without_evidence_window(
+        self,
+    ) -> None:
+        status = complete_status()
+        verify_summary = status["phases"]["verify"]["summary"]
+        verify_summary.pop("evidence_window_start")
+
+        audit = goal_loop_completion_audit.build_completion_audit(status)
+
+        self.assertEqual(audit.status, "BLOCKED")
+        self.assertIn("post_act_verify_complete", audit.blockers)
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        self.assertIsNone(
+            by_id["post_act_verify_complete"].evidence["evidence_window_start"]
+        )
 
     def test_completion_audit_rejects_fixture_verify_as_post_act_evidence(
         self,

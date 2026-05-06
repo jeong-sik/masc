@@ -35,6 +35,8 @@ class VerificationReport:
     post_act_verify: bool = False
     evidence_kind: str | None = None
     evidence_source: str | None = None
+    evidence_window_start: str | None = None
+    evidence_window_end: str | None = None
     checked_at: str | None = None
 
 
@@ -94,6 +96,8 @@ def verify_orient(
     post_act_verify: bool = False,
     evidence_kind: str | None = None,
     evidence_source: str | None = None,
+    evidence_window_start: str | None = None,
+    evidence_window_end: str | None = None,
     checked_at: str | None = None,
 ) -> VerificationReport:
     findings_raw = orient.get("findings", [])
@@ -124,6 +128,8 @@ def verify_orient(
         post_act_verify=post_act_verify,
         evidence_kind=evidence_kind,
         evidence_source=evidence_source,
+        evidence_window_start=evidence_window_start,
+        evidence_window_end=evidence_window_end,
         checked_at=checked_at,
     )
 
@@ -242,6 +248,10 @@ def report_to_text(report: VerificationReport) -> str:
         lines.append(f"evidence_kind: {report.evidence_kind}")
     if report.evidence_source:
         lines.append(f"evidence_source: {report.evidence_source}")
+    if report.evidence_window_start:
+        lines.append(f"evidence_window_start: {report.evidence_window_start}")
+    if report.evidence_window_end:
+        lines.append(f"evidence_window_end: {report.evidence_window_end}")
     if report.checked_at:
         lines.append(f"checked_at: {report.checked_at}")
     for finding in report.failing_findings:
@@ -335,6 +345,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Concrete post-ACT source path, URL, run id, or endpoint.",
     )
     parser.add_argument(
+        "--evidence-window-start",
+        help="Inclusive timestamp for the post-ACT evidence window.",
+    )
+    parser.add_argument(
+        "--evidence-window-end",
+        help="Exclusive timestamp for the post-ACT evidence window.",
+    )
+    parser.add_argument(
         "--checked-at",
         help="Timestamp for when the post-ACT evidence was collected.",
     )
@@ -365,6 +383,8 @@ def main(argv: list[str] | None = None) -> int:
         post_act_verify=args.post_act_verify,
         evidence_kind=args.evidence_kind,
         evidence_source=args.evidence_source,
+        evidence_window_start=args.evidence_window_start,
+        evidence_window_end=args.evidence_window_end,
         checked_at=args.checked_at,
     )
     if args.format == "json":

@@ -352,6 +352,12 @@ def build_completion_audit(
         else False,
         "evidence_kind": as_nonempty_str(verify_summary.get("evidence_kind")),
         "evidence_source": as_nonempty_str(verify_summary.get("evidence_source")),
+        "evidence_window_start": as_nonempty_str(
+            verify_summary.get("evidence_window_start")
+        ),
+        "evidence_window_end": as_nonempty_str(
+            verify_summary.get("evidence_window_end")
+        ),
         "checked_at": as_nonempty_str(verify_summary.get("checked_at")),
         "accepted_evidence_kinds": sorted(POST_ACT_EVIDENCE_KINDS),
     }
@@ -363,6 +369,8 @@ def build_completion_audit(
         and verify_evidence["post_act_verify"] is True
         and evidence_kind_valid
         and verify_evidence["evidence_source"] is not None
+        and verify_evidence["evidence_window_start"] is not None
+        and verify_evidence["evidence_window_end"] is not None
         and verify_evidence["checked_at"] is not None
     )
 

@@ -919,6 +919,10 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
                     "live_runtime_logs",
                     "--evidence-source",
                     "/tmp/goal-loop-post-act.log",
+                    "--evidence-window-start",
+                    "2026-05-05T17:29:12Z",
+                    "--evidence-window-end",
+                    "2026-05-06T00:00:00Z",
                     "--checked-at",
                     "2026-05-06T00:00:00Z",
                 ],
@@ -933,6 +937,8 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertTrue(payload["post_act_verify"])
         self.assertEqual(payload["evidence_kind"], "live_runtime_logs")
         self.assertEqual(payload["evidence_source"], "/tmp/goal-loop-post-act.log")
+        self.assertEqual(payload["evidence_window_start"], "2026-05-05T17:29:12Z")
+        self.assertEqual(payload["evidence_window_end"], "2026-05-06T00:00:00Z")
         self.assertEqual(payload["checked_at"], "2026-05-06T00:00:00Z")
 
     def test_log_contract_fails_on_forbidden_pattern(self) -> None:

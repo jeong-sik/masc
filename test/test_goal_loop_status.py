@@ -141,6 +141,8 @@ class GoalLoopStatusTest(unittest.TestCase):
                 "post_act_verify": True,
                 "evidence_kind": "live_runtime_http",
                 "evidence_source": "http://127.0.0.1:8931/health",
+                "evidence_window_start": "2026-05-05T17:29:12Z",
+                "evidence_window_end": "2026-05-06T00:00:00Z",
                 "checked_at": "2026-05-06T00:00:00Z",
             },
             generated_at="2026-05-05T10:00:00+00:00",
@@ -153,6 +155,8 @@ class GoalLoopStatusTest(unittest.TestCase):
             summary["evidence_source"],
             "http://127.0.0.1:8931/health",
         )
+        self.assertEqual(summary["evidence_window_start"], "2026-05-05T17:29:12Z")
+        self.assertEqual(summary["evidence_window_end"], "2026-05-06T00:00:00Z")
         self.assertEqual(summary["checked_at"], "2026-05-06T00:00:00Z")
 
     def test_orient_audit_catalog_gap_keeps_goal_warning(self) -> None:

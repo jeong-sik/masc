@@ -411,7 +411,13 @@ def summarize_verify(verify: dict[str, Any] | None) -> PhaseStatus:
         if isinstance(post_act_verify, bool)
         else False,
     }
-    for key in ("evidence_kind", "evidence_source", "checked_at"):
+    for key in (
+        "evidence_kind",
+        "evidence_source",
+        "evidence_window_start",
+        "evidence_window_end",
+        "checked_at",
+    ):
         value = as_nonempty_str(verify.get(key))
         if value is not None:
             summary[key] = value

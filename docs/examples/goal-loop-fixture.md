@@ -35,7 +35,9 @@ Expected key facts:
   in aggregate status output.
 - A generic Verify `PASS` is not closeout evidence. Completion requires
   `post_act_verify=true`, an accepted live-runtime `evidence_kind`, a concrete
-  `evidence_source`, and `checked_at` metadata from the post-ACT collection.
+  `evidence_source`, an explicit `evidence_window_start` /
+  `evidence_window_end`, and `checked_at` metadata from the post-ACT
+  collection.
 
 Use the JSON status form when another tool needs to consume the replay:
 
@@ -183,6 +185,8 @@ python3 scripts/verify_goal_loop_logs.py \
   --post-act-verify \
   --evidence-kind live_runtime_logs \
   --evidence-source <POST_ACT_LOG_OR_ENDPOINT> \
+  --evidence-window-start <POST_ACT_WINDOW_START> \
+  --evidence-window-end <POST_ACT_WINDOW_END> \
   --checked-at <ISO8601_TIMESTAMP> \
   > /tmp/goal-loop-verify-post-act.json
 
@@ -208,3 +212,8 @@ pending. The aggregate mismatch is resolved only while
 `aggregate_reconciliations: COMPLETE verified=1 failed=0` remains true. The
 broader structured-ID criterion passes only when the triage manifest covers
 every uncataloged family and expected occurrence count.
+
+When the Verify input is replaced with a live post-ACT artifact that carries
+the required evidence-window metadata, `post_act_verify_complete` can pass.
+The closeout audit must still remain `BLOCKED` until
+`strict_row_level_catalog_complete` passes for the full 206-row corpus.

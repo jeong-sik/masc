@@ -126,15 +126,32 @@
   after the catalog records `audit_total_214 = audit_total_206 +
   new_findings_live_8`.
 - [근거] `python3 scripts/goal_loop_completion_audit.py
-  /tmp/goal-loop-status-audit.json --structured-id-triage
+  /tmp/goal-loop-status-live-post-act.json --structured-id-triage
   test/fixtures/goal_loop/structured-id-triage.external-claim.json
-  --require-complete --format text` checked at 2026-05-06T07:26:55+09:00,
-  confidence High: exits non-zero with explicit blockers
-  `strict_row_level_catalog_complete` and `post_act_verify_complete`, while
-  preserving PASS evidence for source
-  manifest coverage, source artifact validation, source identity, aggregate
-  claim source verification, aggregate reconciliation, strict source/catalog ID
-  sync, and broader structured-ID ownership triage.
+  --require-complete --format text` checked at 2026-05-06T09:21:24+09:00,
+  confidence High: exits non-zero with the single explicit blocker
+  `strict_row_level_catalog_complete`, while preserving PASS evidence for
+  source manifest coverage, source artifact validation, source identity,
+  aggregate claim source verification, aggregate reconciliation, strict
+  source/catalog ID sync, broader structured-ID ownership triage, and
+  post-ACT Verify.
+- [근거] `python3 scripts/observe_goal_loop_logs.py
+  /Users/dancer/me/.masc/events/2026-05/06.jsonl
+  /Users/dancer/me/.masc/transition-audit/2026-05/06.jsonl` plus
+  `python3 scripts/verify_goal_loop_logs.py
+  /tmp/goal-loop-orient-live-post-act.json --post-act-verify
+  --evidence-kind live_runtime_logs --evidence-source
+  /Users/dancer/me/.masc/events/2026-05/06.jsonl,/Users/dancer/me/.masc/transition-audit/2026-05/06.jsonl
+  --evidence-window-start 2026-05-06T00:04:11Z --evidence-window-end
+  2026-05-06T00:21:24Z --checked-at 2026-05-06T00:21:24Z` checked at
+  2026-05-06T09:21:24+09:00, confidence High: scans 21 live post-ACT
+  event/transition lines, finds 0 GOAL LOOP signature matches, and emits
+  Verify `PASS` with explicit evidence-window metadata.
+- [근거] `curl -sS http://127.0.0.1:8935/health` checked at
+  2026-05-06T09:21:24+09:00, confidence High: local runtime is live on
+  port 8935 with `effective_base_path=/Users/dancer/me`,
+  `effective_masc_root=/Users/dancer/me/.masc`, `started_at` after the ACT PR
+  merge window, and startup phase `ready`.
 - [근거] `ruff check scripts/verify_goal_loop_logs.py
   scripts/goal_loop_status.py scripts/goal_loop_completion_audit.py
   test/test_observe_goal_loop_logs.py test/test_goal_loop_status.py
@@ -142,7 +159,8 @@
   files checked at 2026-05-06T07:26:55+09:00, confidence High: the closeout
   gate now rejects a generic Verify `PASS` unless the status snapshot carries
   `post_act_verify=true`, an accepted live-runtime `evidence_kind`, a concrete
-  `evidence_source`, and `checked_at` metadata.
+  `evidence_source`, explicit `evidence_window_start` /
+  `evidence_window_end`, and `checked_at` metadata.
 - [근거] `test/fixtures/goal_loop/audit-corpus.external-claim.json` checked at
   2026-05-06T05:54:00+09:00, confidence Medium: the checked catalog itemizes
   19 unique audit IDs, but the underlying prompt source artifacts are not yet
@@ -153,13 +171,13 @@
 | Area | Status | Reason |
 |------|--------|--------|
 | Deterministic GOAL LOOP replay | **PARTIAL** | Fixture bundle exists and proves the loop stays critical, but it is not live production ingestion. |
-| Provider health skip ACT | **PARTIAL** | #13124 adds provider probe ACT artifact; live zero-skipped proof still requires runtime verification. |
+| Provider health skip ACT | **PARTIAL** | #13124 adds provider probe ACT artifact; the post-ACT event/transition replay has no GOAL LOOP signature matches, but the full 206-row corpus is still absent. |
 | Alive-but-stuck recovery ACT | **PARTIAL** | #13123 adds recovery side effect; #13126 adds timeout phase diagnostics. Runtime recovery success SLO remains unproven. |
 | Keeper TOML unknown-key visibility | **PARTIAL** | #13138 surfaces unknown keys in health; strict schema rejection is not yet enforced. |
 | Governance fallback visibility | **PARTIAL** | #13143 exposes fallback counters; strict judge-output failure policy is not complete. |
-| Slot forced reclaim + credential auto-recovery | **PARTIAL** | `D-EMERGENCY-1` now has linked ACT PRs in `act-map.startup.json`; post-ACT live runtime verification is still pending. |
+| Slot forced reclaim + credential auto-recovery | **PARTIAL** | `D-EMERGENCY-1` now has linked ACT PRs in `act-map.startup.json`; the current post-ACT event/transition window verifies clean for strict GOAL LOOP signatures. |
 | Full 206-finding Orient engine | **NOT PROVEN** | Orient can now replay the external claim catalog, but the checked artifacts itemize only 19 of the claimed 206 findings. |
-| Full Verify pipeline | **FAIL BY DESIGN** | `verify.fail.json` intentionally keeps the replay red until post-ACT live runtime checks pass. |
+| Full Verify pipeline | **PARTIAL** | `verify.fail.json` intentionally keeps the startup replay red; a separate live post-ACT event/transition replay now passes for the 19 strict itemized IDs. |
 
 ## Section-by-Section Audit
 
@@ -317,8 +335,9 @@ decisions.
 | `D-P2-2` | `NF-4` governance fallback | **LINKED** | #13143 fallback counters. |
 
 **Status**: **PARTIAL**. All startup evidence-present decisions are linked to
-ACT PRs, but post-ACT live replay has not disproven the startup evidence and
-the external 206-finding corpus is not fully mapped to ACT decisions.
+ACT PRs, and the current post-ACT event/transition replay has no strict GOAL
+LOOP signature matches. The external 206-finding corpus is still not fully
+mapped to ACT decisions.
 
 ### 6. VERIFY
 
@@ -330,17 +349,19 @@ log verification, metric verification, and Orient re-check.
 - Deterministic fixture replay.
 - Regression tests for Decide/status/ACT-map validation.
 - `verify.fail.json` that keeps the loop red.
-- Verify reports can carry post-ACT evidence metadata, and
+- Verify reports can carry post-ACT evidence metadata, including explicit
+  evidence-window bounds, and
   `goal_loop_completion_audit.py` requires that metadata before accepting a
   Verify `PASS` as closeout evidence.
 
-**Status**: **FAIL BY DESIGN**.
+**Status**: **PARTIAL**.
 
-This is correct current behavior. A PASS would be unsafe because the fixture
-still contains `NF-2` startup evidence and no post-ACT live Verify artifact has
-re-collected runtime logs with `post_act_verify=true`, accepted
-live-runtime `evidence_kind`, concrete `evidence_source`, and `checked_at`
-metadata.
+The startup fixture still contains `NF-2` evidence and remains red by design.
+A separate live post-ACT event/transition replay now passes with
+`post_act_verify=true`, accepted live-runtime `evidence_kind`, concrete
+`evidence_source`, `evidence_window_start`, `evidence_window_end`, and
+`checked_at` metadata. This clears the post-ACT Verify closeout criterion for
+the current strict 19-ID catalog, but not the missing 187 row-level findings.
 
 ### 7. GOAL LOOP Dashboard
 
@@ -353,8 +374,8 @@ system health, next action, and counts.
 - Current `goal_loop_status.py` prefers `ACT_MISSING` / `ACT_UNMAPPED`
   decisions over already-linked decisions when choosing `next_action`.
 - Verify status now preserves violation kinds, including
-  `post_act_verify_pending`, so the missing live post-ACT runtime replay is
-  visible in aggregate status output.
+  `post_act_verify_pending`, so stale fixture replays remain visibly distinct
+  from live post-ACT evidence.
 - Verify status also preserves optional post-ACT evidence metadata so the
   completion audit can distinguish a real post-ACT replay from a synthetic
   green status file.
@@ -418,9 +439,10 @@ No convergence claim is valid yet. The only safe current statement is:
    still needs a stable non-user-local artifact distribution policy.
 3. Re-run Orient against the complete corpus without changing code and update
    the replay counts in this audit.
-4. Re-collect post-ACT Verify evidence from live logs or runtime endpoints and
-   emit it with `--post-act-verify`, accepted live-runtime `--evidence-kind`, concrete
-   `--evidence-source`, and `--checked-at`.
+4. Refresh the post-ACT Verify artifact whenever new ACT PRs merge or the live
+   runtime restarts, using `--post-act-verify`, accepted live-runtime
+   `--evidence-kind`, concrete `--evidence-source`,
+   `--evidence-window-start`, `--evidence-window-end`, and `--checked-at`.
 5. Wire `goal_loop_status.py` JSON into the operator dashboard only after the
    fixture's critical state is preserved in UI tests.
 6. Add SLA state for anti-stagnation after ACT coverage is complete; otherwise
@@ -440,5 +462,6 @@ Do not mark the GOAL LOOP objective complete while any of these are true:
 - The aggregate reconciliation stops passing with
   `--require-consistency-resolved`.
 - Live runtime evidence is not re-collected after the ACT PRs are merged.
-- The latest Verify `PASS` lacks `post_act_verify=true`, an accepted
-  live-runtime `evidence_kind`, a concrete `evidence_source`, or `checked_at`.
+- The latest Verify `PASS` for the relevant runtime window lacks
+  `post_act_verify=true`, an accepted live-runtime `evidence_kind`, a concrete
+  `evidence_source`, explicit evidence-window bounds, or `checked_at`.

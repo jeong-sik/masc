@@ -273,11 +273,11 @@ let get_or_create_completed_turn_ring name =
 (* Optional file sink — best-effort jsonl append                    *)
 (* ================================================================ *)
 
-(** Path of the persistent transition log, configured via the
-    [MASC_KEEPER_TRANSITION_LOG] env var. When unset or empty the sink is disabled
-    and only the in-memory ring is updated. Reading the env on each call
-    keeps the surface tiny — one keeper transition per second is the
-    upper bound, so the cost is negligible. *)
+(** Path of the explicit transition log sink, configured via the
+    [MASC_KEEPER_TRANSITION_LOG] env var. When unset or empty, records still
+    fall back to the default dated-jsonl transition-audit store. Reading the
+    env on each call keeps the surface tiny — one keeper transition per
+    second is the upper bound, so the cost is negligible. *)
 let sink_path () =
   match Sys.getenv_opt "MASC_KEEPER_TRANSITION_LOG" with
   | Some path when String.trim path <> "" -> Some path
@@ -312,7 +312,9 @@ let get_default_store () =
 
 let observe_append_failure ~site exn =
   match exn with
-  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Eio.Cancel.Cancelled _ as e ->
+      let bt = Printexc.get_raw_backtrace () in
+      Printexc.raise_with_backtrace e bt
   | exn ->
       Prometheus.inc_counter
         Prometheus.metric_keeper_transition_audit_failures

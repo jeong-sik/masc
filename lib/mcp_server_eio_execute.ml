@@ -908,20 +908,39 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
                      ~default_network_override:Keeper_types.Network_inherit
                      ~config ~meta ())
             in
-            let cleanup () =
-              Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory;
-              Option.iter
-                Keeper_sandbox_factory.cleanup turn_sandbox_factory_git
+            let cleanup_one ~during_exception label = function
+              | None -> ()
+              | Some factory ->
+                  (try Keeper_sandbox_factory.cleanup factory with
+                   | Eio.Cancel.Cancelled _ as e when not during_exception -> raise e
+                   | exn ->
+                       Log.Mcp.warn
+                         "internal keeper runtime %s cleanup failed%s: %s"
+                         label
+                         (if during_exception
+                          then " while preserving primary exception"
+                          else "")
+                         (Printexc.to_string exn))
+            in
+            let cleanup ~during_exception () =
+              cleanup_one ~during_exception "sandbox" turn_sandbox_factory;
+              cleanup_one ~during_exception "git sandbox" turn_sandbox_factory_git
             in
             let exec_cache = Some (Masc_exec.Exec_cache.create ()) in
             let result =
-              Fun.protect
-                ~finally:cleanup
-                (fun () ->
-                  Keeper_exec_tools.execute_keeper_tool_call_with_outcome
-                    ~config ~meta ~ctx_work ?turn_sandbox_factory
-                    ?turn_sandbox_factory_git ~exec_cache ~name
-                    ~input:coerced_args ())
+              match
+                Keeper_exec_tools.execute_keeper_tool_call_with_outcome
+                  ~config ~meta ~ctx_work ?turn_sandbox_factory
+                  ?turn_sandbox_factory_git ~exec_cache ~name
+                  ~input:coerced_args ()
+              with
+              | result ->
+                  cleanup ~during_exception:false ();
+                  result
+              | exception exn ->
+                  let bt = Printexc.get_raw_backtrace () in
+                  cleanup ~during_exception:true ();
+                  Printexc.raise_with_backtrace exn bt
             in
             let success =
               match result.Keeper_exec_tools.outcome with

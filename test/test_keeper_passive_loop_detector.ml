@@ -59,6 +59,12 @@ let test_required_tool_no_call_fires_metric_at_three () =
       P.metric_keeper_required_tool_loop_detected_total
       ~labels ()
   in
+  let zombie_before =
+    P.metric_value_or_zero
+      P.metric_keeper_zombie_loop_detected_total
+      ~labels:[("keeper_name", "k-required-no-call")]
+      ()
+  in
   PLD.record_turn ~keeper_name:"k-required-no-call"
     ~progress_class:"required_tool_no_call";
   PLD.record_turn ~keeper_name:"k-required-no-call"
@@ -77,7 +83,13 @@ let test_required_tool_no_call_fires_metric_at_three () =
     (before +. 1.0)
     (P.metric_value_or_zero
        P.metric_keeper_required_tool_loop_detected_total
-       ~labels ())
+       ~labels ());
+  check (float 0.001) "Observe zombie-loop metric increments once"
+    (zombie_before +. 1.0)
+    (P.metric_value_or_zero
+       P.metric_keeper_zombie_loop_detected_total
+       ~labels:[("keeper_name", "k-required-no-call")]
+       ())
 
 let test_required_tool_streak_does_not_inherit_passive_streak () =
   Eio_main.run @@ fun _env ->
@@ -132,6 +144,11 @@ let test_detection_fires_metric_at_threshold () =
       P.metric_keeper_passive_loop_detected_total
       ~labels:[("keeper", "k-metric")] ()
   in
+  let zombie_before =
+    P.metric_value_or_zero
+      P.metric_keeper_zombie_loop_detected_total
+      ~labels:[("keeper_name", "k-metric")] ()
+  in
   for _ = 1 to 5 do
     PLD.record_turn ~keeper_name:"k-metric" ~progress_class:"passive_status"
   done;
@@ -140,7 +157,14 @@ let test_detection_fires_metric_at_threshold () =
       P.metric_keeper_passive_loop_detected_total
       ~labels:[("keeper", "k-metric")] ()
   in
-  check bool "metric incremented at threshold" true (after > before)
+  let zombie_after =
+    P.metric_value_or_zero
+      P.metric_keeper_zombie_loop_detected_total
+      ~labels:[("keeper_name", "k-metric")] ()
+  in
+  check bool "metric incremented at threshold" true (after > before);
+  check (float 0.001) "Observe zombie-loop metric increments"
+    (zombie_before +. 1.0) zombie_after
 
 let test_detection_latch_does_not_double_fire () =
   Eio_main.run @@ fun _env ->
@@ -149,6 +173,11 @@ let test_detection_latch_does_not_double_fire () =
     P.metric_value_or_zero
       P.metric_keeper_passive_loop_detected_total
       ~labels:[("keeper", "k-latch")] ()
+  in
+  let zombie_before =
+    P.metric_value_or_zero
+      P.metric_keeper_zombie_loop_detected_total
+      ~labels:[("keeper_name", "k-latch")] ()
   in
   (* Fire well above threshold — latch should prevent repeated increments *)
   for _ = 1 to 20 do
@@ -160,7 +189,13 @@ let test_detection_latch_does_not_double_fire () =
       ~labels:[("keeper", "k-latch")] ()
   in
   check (float 0.001) "latch: counter increments exactly once per episode"
-    (before +. 1.0) after
+    (before +. 1.0) after;
+  check (float 0.001)
+    "latch: Observe zombie-loop counter increments exactly once per episode"
+    (zombie_before +. 1.0)
+    (P.metric_value_or_zero
+       P.metric_keeper_zombie_loop_detected_total
+       ~labels:[("keeper_name", "k-latch")] ())
 
 let test_reset_clears_state () =
   Eio_main.run @@ fun _env ->

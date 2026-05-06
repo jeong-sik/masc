@@ -312,7 +312,8 @@ let test_new_issue_metrics_registered () =
   check_metric_name Prometheus.metric_keeper_liveness_recovery_outcomes;
   check_metric_name Prometheus.metric_cascade_server_error_skip_total;
   check_metric_name Prometheus.metric_keeper_passive_loop_detected_total;
-  check_metric_name Prometheus.metric_write_meta_cas_retry_total
+  check_metric_name Prometheus.metric_write_meta_cas_retry_total;
+  check_metric_name Prometheus.metric_keeper_zombie_loop_detected_total
 
 let test_review_blocker_metrics_registered () =
   let text = Prometheus.to_prometheus_text () in

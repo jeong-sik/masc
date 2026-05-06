@@ -83,9 +83,24 @@ let test_search_index () =
     ~config:{ Agent_sdk.Tool_index.default_config with top_k = 10 }
     tool_entries
 
+let test_search_index_with_production_aliases tools =
+  let tool_entries =
+    List.map Keeper_agent_tool_surface.tool_index_entry_of_tool tools
+  in
+  Agent_sdk.Tool_index.build
+    ~config:{ Agent_sdk.Tool_index.default_config with top_k = 10 }
+    tool_entries
+
 let deterministic_prefilter_for ~query_text ~selection_limit =
   Keeper_tool_disclosure.deterministic_prefilter_names
     ~search_index:(test_search_index ())
+    ~query_text
+    ~selection_limit
+    ~core:(Keeper_exec_tools.effective_core_tools ())
+
+let deterministic_prefilter_for_tools ~tools ~query_text ~selection_limit =
+  Keeper_tool_disclosure.deterministic_prefilter_names
+    ~search_index:(test_search_index_with_production_aliases tools)
     ~query_text
     ~selection_limit
     ~core:(Keeper_exec_tools.effective_core_tools ())
@@ -374,6 +389,30 @@ let test_deterministic_prefilter_hides_code_read_for_generic_file_read () =
   Alcotest.(check bool) "code read stays hidden for generic file read"
     false (List.mem "masc_code_read" selected)
 
+let test_deterministic_prefilter_surfaces_pr_review_for_explicit_request () =
+  let pr_review_tools =
+    test_tools
+    @ [
+        make_tool "keeper_pr_review_read"
+          "Read PR metadata, diff, reviews, and comments";
+        make_tool "keeper_pr_review_comment"
+          "Submit a PR review with optional inline comments";
+        make_tool "keeper_pr_review_reply"
+          "Reply to an inline PR review comment";
+      ]
+  in
+  let selected =
+    deterministic_prefilter_for_tools
+      ~tools:pr_review_tools
+      ~query_text:
+        "Use ONLY keeper_pr_review_read and keeper_pr_review_comment for PR #13526. Do not use gh."
+      ~selection_limit:10
+  in
+  Alcotest.(check bool) "pr review read appears for explicit request"
+    true (List.mem "keeper_pr_review_read" selected);
+  Alcotest.(check bool) "pr review comment appears for explicit request"
+    true (List.mem "keeper_pr_review_comment" selected)
+
 let test_keeper_config_defaults () =
   (* Default: LLM rerank disabled *)
   Alcotest.(check bool) "llm_rerank disabled by default"
@@ -420,6 +459,8 @@ let () =
         test_deterministic_prefilter_hides_code_navigation_without_code_intent;
       Alcotest.test_case "deterministic prefilter hides code read for generic file read" `Quick
         test_deterministic_prefilter_hides_code_read_for_generic_file_read;
+      Alcotest.test_case "deterministic prefilter surfaces pr review tools" `Quick
+        test_deterministic_prefilter_surfaces_pr_review_for_explicit_request;
     ];
     "keeper_config", [
       Alcotest.test_case "config defaults" `Quick

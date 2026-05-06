@@ -26,13 +26,27 @@ let configured_port () = Env_config.Transport.ws_port
 let is_enabled () =
   Transport_metrics.ws_enabled ()
 
+(** Interval between protocol-level heartbeat pings on each WS session.
+
+    30s strikes a balance between keeping NAT/proxy mappings warm
+    (typical idle-mapping eviction is 60-120s) and not spamming the
+    write path on a quiet connection.  The browser handles pong replies
+    invisibly in the WebSocket implementation; the server detects dead
+    peers when [Ws.Wsd.is_closed] flips or the underlying write raises a
+    classify_write_failure-recognised error. *)
+let heartbeat_interval_s = 30.0
+
 (** WebSocket handler factory.
 
     For each accepted connection, httpun-ws-eio calls this with the
     client address and a [Wsd.t].  We create a session in the shared
-    registry and wire frame callbacks to [on_message]. *)
-let make_websocket_handler ~on_message _client_addr (wsd : Ws.Wsd.t) :
-    Ws.Websocket_connection.input_handlers =
+    registry and wire frame callbacks to [on_message].
+
+    [~sw] is the server-wide switch — heartbeat fibers fork onto it and
+    self-exit as soon as the session closes.  [~clock] drives the
+    heartbeat sleep. *)
+let make_websocket_handler ~sw ~clock ~on_message _client_addr
+    (wsd : Ws.Wsd.t) : Ws.Websocket_connection.input_handlers =
   let session_id = Server_mcp_transport_ws.next_id () in
   let session = Server_mcp_transport_ws.new_session ~id:session_id ~wsd in
   Server_mcp_transport_ws.with_sessions_rw (fun () ->
@@ -52,6 +66,34 @@ let make_websocket_handler ~on_message _client_addr (wsd : Ws.Wsd.t) :
       then
         Server_mcp_transport_ws.cleanup_session session_id)
     ();
+  (* Heartbeat fiber: emit a protocol-level ping every
+     [heartbeat_interval_s] to keep NAT/proxy mappings warm and surface
+     silent disconnects so the reconnect path on the client can engage
+     instead of hanging on a dead socket.  Exits once [session.closed]
+     flips or the writer is closed, so it does not outlive the
+     connection beyond one sleep tick. *)
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec loop () =
+      Eio.Time.sleep clock heartbeat_interval_s;
+      if not session.closed && not (Ws.Wsd.is_closed session.wsd) then begin
+        (try Ws.Wsd.send_ping wsd with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn -> (
+             match
+               Http_server_eio.Late_response.classify_write_failure exn
+             with
+             | Some _ ->
+                 Log.Server.debug
+                   "[ws-standalone] heartbeat skipped (writer closed during \
+                    cancel race)"
+             | None ->
+                 Log.Server.warn
+                   "[ws-standalone] heartbeat send_ping failed: %s"
+                   (Printexc.to_string exn)));
+        loop ()
+      end
+    in
+    loop ());
   (* #10875: WS storm (#10701) emits ~190k connect/close lines/day at INFO,
      drowning real signal in noise. Per-session lifecycle is DEBUG; aggregate
      state surfaces via Transport_metrics.set_ws_sessions and shutdown_hooks
@@ -130,9 +172,10 @@ let start
     | socket ->
       Transport_metrics.set_ws_runtime_listening true;
       Transport_metrics.set_ws_listen_status "listening";
+      let clock = Eio.Stdenv.clock env in
       let connection_handler =
         Ws_eio.Server.create_connection_handler ~sw
-          (make_websocket_handler ~on_message)
+          (make_websocket_handler ~sw ~clock ~on_message)
       in
       Eio.Fiber.fork ~sw (fun () ->
         (* Safe: finally is Atomic.set — no I/O, no exception risk *)

@@ -1089,13 +1089,22 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               with
               | None ->
                   Error
-                    (Agent_sdk.Error.Api
-                       (Timeout
+                    (Oas_worker_named.sdk_error_of_masc_internal_error
+                       (Oas_worker_named.Oas_timeout_budget
                           {
-                            message =
-                              Printf.sprintf
-                                "Turn wall-clock budget exhausted before retry (remaining=%.1fs)"
-                                (remaining_turn_budget_s ());
+                            budget_sec = 0.0;
+                            keeper_turn_timeout_sec = timeout_sec;
+                            estimated_input_tokens =
+                              prompt_timeout_estimate_tokens;
+                            source =
+                              (if is_retry then "pre_retry_budget_unavailable"
+                               else "pre_attempt_budget_unavailable");
+                            remaining_turn_budget_sec =
+                              Some (remaining_turn_budget_s ());
+                            min_required_sec = min_oas_timeout_budget_sec;
+                            phase =
+                              (if is_retry then "pre_retry_budget_gate"
+                               else "pre_attempt_budget_gate");
                           }))
               | Some timeout_budget ->
                   attempt_timeout_budget := Some timeout_budget;

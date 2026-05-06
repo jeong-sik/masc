@@ -59,6 +59,9 @@ type masc_internal_error =
       keeper_turn_timeout_sec : float;
       estimated_input_tokens : int;
       source : string;
+      remaining_turn_budget_sec : float option;
+      min_required_sec : float;
+      phase : string;
     }
   | Ambiguous_post_commit of {
       is_timeout : bool;

@@ -324,6 +324,10 @@ let reclassify_oas_timeout_for_attempt
                timeout_budget.keeper_turn_timeout_sec;
              estimated_input_tokens = timeout_budget.estimated_input_tokens;
              source = timeout_budget.source;
+             remaining_turn_budget_sec =
+               Some timeout_budget.remaining_turn_budget_sec;
+             min_required_sec = min_oas_timeout_budget_sec;
+             phase = "cascade_attempt_watchdog";
            })
   | _ -> err
 

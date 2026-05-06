@@ -1602,15 +1602,10 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
             if trimmed = "" then reason else trimmed
         | Some
             (Oas_worker_named.Oas_timeout_budget
-               {
-                 budget_sec;
-                 keeper_turn_timeout_sec;
-                 estimated_input_tokens;
-                 source;
-               }) ->
-            Printf.sprintf
-              "OAS budget timeout after %.1fs (%s, estimated input %d tokens, keeper hard cap %.1fs)"
-              budget_sec source estimated_input_tokens keeper_turn_timeout_sec
+               _ as err) ->
+            Option.value
+              ~default:reason
+              (Oas_worker_named.summary_of_masc_internal_error err)
         | Some (Oas_worker_named.No_tool_capable_provider _ as err) -> (
             match Oas_worker_named.summary_of_masc_internal_error err with
             | Some summary -> summary

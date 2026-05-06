@@ -58,6 +58,9 @@ type masc_internal_error =
       keeper_turn_timeout_sec : float;
       estimated_input_tokens : int;
       source : string;
+      remaining_turn_budget_sec : float option;
+      min_required_sec : float;
+      phase : string;
     }
   | Ambiguous_post_commit of {
       is_timeout : bool;
@@ -187,6 +190,9 @@ let masc_internal_error_to_json = function
         keeper_turn_timeout_sec;
         estimated_input_tokens;
         source;
+        remaining_turn_budget_sec;
+        min_required_sec;
+        phase;
       } ->
     `Assoc
       [
@@ -195,6 +201,10 @@ let masc_internal_error_to_json = function
         ("keeper_turn_timeout_sec", `Float keeper_turn_timeout_sec);
         ("estimated_input_tokens", `Int estimated_input_tokens);
         ("source", `String source);
+        ( "remaining_turn_budget_sec",
+          Json_util.float_opt_to_json remaining_turn_budget_sec );
+        ("min_required_sec", `Float min_required_sec);
+        ("phase", `String phase);
       ]
   | Ambiguous_post_commit { is_timeout; tools; original_error } ->
     `Assoc
@@ -235,6 +245,26 @@ let summary_of_masc_internal_error = function
            (summarize_list required_tool_names)
            (summarize_provider_rejections provider_rejections)
            (summarize_list configured_labels))
+  | Oas_timeout_budget
+      {
+        budget_sec;
+        keeper_turn_timeout_sec;
+        estimated_input_tokens;
+        source;
+        remaining_turn_budget_sec;
+        min_required_sec;
+        phase;
+      } ->
+      let remaining =
+        match remaining_turn_budget_sec with
+        | Some value -> Printf.sprintf "%.1fs" value
+        | None -> "unknown"
+      in
+      Some
+        (Printf.sprintf
+           "OAS timeout budget exhausted; phase=%s; source=%s; budget=%.1fs; remaining=%s; min_required=%.1fs; estimated_input_tokens=%d; keeper_turn_timeout=%.1fs"
+           phase source budget_sec remaining min_required_sec
+           estimated_input_tokens keeper_turn_timeout_sec)
   | _ -> None
 
 (* #9933: classify emitted [masc_oas_error] payloads by kind so
@@ -336,6 +366,16 @@ let classify_masc_internal_error (err : Agent_sdk.Error.sdk_error) :
         match List.assoc_opt key fields with
         | Some (`Int value) -> Some value
         | Some (`Intlit value) -> int_of_string_opt value
+        | _ -> None)
+    | _ -> None
+  in
+  let float_opt_of_assoc key = function
+    | `Assoc fields -> (
+        match List.assoc_opt key fields with
+        | Some (`Float value) -> Some value
+        | Some (`Int value) -> Some (float_of_int value)
+        | Some (`Intlit value) ->
+            Option.map float_of_int (int_of_string_opt value)
         | _ -> None)
     | _ -> None
   in
@@ -462,6 +502,15 @@ let classify_masc_internal_error (err : Agent_sdk.Error.sdk_error) :
                               keeper_turn_timeout_sec;
                               estimated_input_tokens;
                               source;
+                              remaining_turn_budget_sec =
+                                float_opt_of_assoc
+                                  "remaining_turn_budget_sec" json;
+                              min_required_sec =
+                                Option.value ~default:0.0
+                                  (float_opt_of_assoc "min_required_sec" json);
+                              phase =
+                                Option.value ~default:"unknown"
+                                  (string_opt_of_assoc "phase" json);
                             })
                    | _ -> None)
                | _ -> None)

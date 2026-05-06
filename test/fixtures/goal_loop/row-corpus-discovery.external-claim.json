@@ -125,5 +125,6 @@
     ],
     "disposition": "Covered by structured-id-triage.external-claim.json, not folded into the strict 206-row audit catalog."
   },
-  "next_required_artifact": "A strict row-level corpus with 206 itemized findings, stable finding IDs, source references, severity, decision mapping, and replay expectations."
+  "next_required_artifact": "A strict row-level corpus with 206 itemized findings, stable finding IDs, source references, severity, decision mapping, and replay expectations.",
+  "next_required_artifact_contract": "test/fixtures/goal_loop/strict-row-corpus-contract.json"
 }

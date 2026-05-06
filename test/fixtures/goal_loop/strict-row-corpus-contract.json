@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "contract_id": "goal-loop-strict-row-corpus-contract-v1",
+  "applies_to_catalog_id": "goal-loop-206-audit-external-claim-2026-05-05",
+  "status_required": "COMPLETE",
+  "expected_findings_total": 206,
+  "path_policy": "logical_paths_only_no_user_local_paths",
+  "source_path_prefix": "prompt_corpus/GOAL_LOOP/",
+  "accepted_severities": ["critical", "warning", "info"],
+  "required_top_level_fields": [
+    "schema_version",
+    "corpus_id",
+    "source_catalog_id",
+    "status",
+    "expected_findings_total",
+    "findings"
+  ],
+  "required_finding_fields": [
+    "finding_id",
+    "title",
+    "severity",
+    "actionability",
+    "source",
+    "replay_expectation"
+  ],
+  "finding_contract": {
+    "finding_id": "stable unique string",
+    "title": "non-empty string",
+    "severity": "critical | warning | info",
+    "actionability": "non-empty string",
+    "decision_id": "string or null",
+    "patterns": "array of strings",
+    "source": {
+      "path": "logical path beginning with prompt_corpus/GOAL_LOOP/",
+      "line_refs": "non-empty array of positive integers"
+    },
+    "replay_expectation": {
+      "phase": "non-empty GOAL LOOP phase string",
+      "expected_status": "non-empty expected replay status string"
+    }
+  },
+  "closeout_rule": "A supplied corpus validates only the artifact shape. The completion audit still requires Orient to report the strict row-level catalog as COMPLETE with 206 itemized findings and zero missing rows."
+}

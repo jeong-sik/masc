@@ -26,6 +26,9 @@ ROW_DISCOVERY_FIXTURE = (
     / "goal_loop"
     / "row-corpus-discovery.external-claim.json"
 )
+STRICT_ROW_CORPUS_CONTRACT_FIXTURE = (
+    REPO_ROOT / "test" / "fixtures" / "goal_loop" / "strict-row-corpus-contract.json"
+)
 
 spec = importlib.util.spec_from_file_location("goal_loop_completion_audit", SCRIPT_PATH)
 assert spec is not None
@@ -198,6 +201,36 @@ def strict_catalog_only_blocked_status() -> dict[str, object]:
     return status
 
 
+def synthetic_strict_row_corpus(row_count: int = 206) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "corpus_id": "synthetic-goal-loop-strict-row-corpus",
+        "source_catalog_id": "goal-loop-206-audit-external-claim-2026-05-05",
+        "status": "COMPLETE",
+        "expected_findings_total": 206,
+        "path_policy": "logical_paths_only_no_user_local_paths",
+        "findings": [
+            {
+                "finding_id": f"ROW-{index + 1:03d}",
+                "title": f"synthetic strict row {index + 1}",
+                "severity": "warning",
+                "actionability": "actionable",
+                "decision_id": None,
+                "patterns": [],
+                "source": {
+                    "path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+                    "line_refs": [1],
+                },
+                "replay_expectation": {
+                    "phase": "orient",
+                    "expected_status": "critical",
+                },
+            }
+            for index in range(row_count)
+        ],
+    }
+
+
 class GoalLoopCompletionAuditTest(unittest.TestCase):
     def test_completion_audit_passes_when_all_criteria_pass(self) -> None:
         audit = goal_loop_completion_audit.build_completion_audit(complete_status())
@@ -336,6 +369,61 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertEqual(discovery_evidence["candidate_artifacts_checked"], 6)
         self.assertFalse(discovery_evidence["local_path_leaks"])
 
+    def test_completion_audit_validates_supplied_strict_row_corpus_without_closing_stale_orient(
+        self,
+    ) -> None:
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            strict_row_corpus=synthetic_strict_row_corpus(),
+        )
+
+        self.assertEqual(audit.status, "BLOCKED")
+        self.assertEqual(audit.blockers, ["strict_row_level_catalog_complete"])
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        corpus_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "strict_row_corpus"
+        ]
+        self.assertTrue(corpus_evidence["provided"])
+        self.assertTrue(corpus_evidence["validated"])
+        self.assertEqual(corpus_evidence["row_count"], 206)
+        self.assertFalse(corpus_evidence["orient_itemized_matches_corpus"])
+
+    def test_completion_audit_rejects_invalid_supplied_strict_row_corpus(
+        self,
+    ) -> None:
+        corpus = synthetic_strict_row_corpus()
+        findings = corpus["findings"]
+        assert isinstance(findings, list)
+        first = findings[0]
+        second = findings[1]
+        third = findings[2]
+        assert isinstance(first, dict)
+        assert isinstance(second, dict)
+        assert isinstance(third, dict)
+        second["finding_id"] = first["finding_id"]
+        source = third["source"]
+        assert isinstance(source, dict)
+        source["path"] = "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md"
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            complete_status(),
+            strict_row_corpus=corpus,
+        )
+
+        self.assertEqual(audit.status, "BLOCKED")
+        self.assertEqual(audit.blockers, ["strict_row_level_catalog_complete"])
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        corpus_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "strict_row_corpus"
+        ]
+        self.assertFalse(corpus_evidence["validated"])
+        self.assertIn("finding_ids_must_be_unique", corpus_evidence["errors"])
+        self.assertIn("contains_user_local_path", corpus_evidence["errors"])
+        self.assertIn(
+            "source_paths_must_be_logical_prompt_corpus_paths",
+            corpus_evidence["errors"],
+        )
+
     def test_completion_audit_marks_missing_row_corpus_discovery(self) -> None:
         audit = goal_loop_completion_audit.build_completion_audit(
             strict_catalog_only_blocked_status(),
@@ -349,10 +437,25 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertEqual(discovery_evidence["discovery_status"], "MISSING")
         self.assertFalse(discovery_evidence["recorded"])
 
+    def test_strict_row_corpus_contract_fixture_is_json(self) -> None:
+        contract = json.loads(STRICT_ROW_CORPUS_CONTRACT_FIXTURE.read_text())
+
+        self.assertEqual(contract["schema_version"], 1)
+        self.assertEqual(contract["expected_findings_total"], 206)
+        self.assertEqual(
+            contract["source_path_prefix"],
+            "prompt_corpus/GOAL_LOOP/",
+        )
+
     def test_completion_audit_cli_can_fail_until_goal_is_closeable(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:
             status_path = Path(raw_dir) / "status.json"
+            corpus_path = Path(raw_dir) / "strict-row-corpus.json"
             status_path.write_text(json.dumps(blocked_status()), encoding="utf-8")
+            corpus_path.write_text(
+                json.dumps(synthetic_strict_row_corpus()),
+                encoding="utf-8",
+            )
             result = subprocess.run(
                 [
                     sys.executable,
@@ -362,6 +465,8 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
                     str(TRIAGE_FIXTURE),
                     "--row-corpus-discovery",
                     str(ROW_DISCOVERY_FIXTURE),
+                    "--strict-row-corpus",
+                    str(corpus_path),
                     "--require-complete",
                 ],
                 text=True,
@@ -380,6 +485,11 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
             "row_corpus_discovery"
         ]
         self.assertTrue(row_discovery["recorded"])
+        strict_row_corpus = by_id["strict_row_level_catalog_complete"]["evidence"][
+            "strict_row_corpus"
+        ]
+        self.assertTrue(strict_row_corpus["validated"])
+        self.assertFalse(strict_row_corpus["orient_itemized_matches_corpus"])
 
 
 if __name__ == "__main__":

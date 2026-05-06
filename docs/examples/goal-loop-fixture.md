@@ -206,6 +206,19 @@ python3 scripts/goal_loop_completion_audit.py \
   --format text
 ```
 
+When a candidate 206-row corpus is available, pass it through the same closeout
+gate:
+
+```bash
+python3 scripts/goal_loop_completion_audit.py \
+  /tmp/goal-loop-status-audit.json \
+  --structured-id-triage test/fixtures/goal_loop/structured-id-triage.external-claim.json \
+  --row-corpus-discovery test/fixtures/goal_loop/row-corpus-discovery.external-claim.json \
+  --strict-row-corpus <STRICT_ROW_CORPUS_JSON> \
+  --require-complete \
+  --format text
+```
+
 Expected key fact: this exits non-zero until every completion criterion passes.
 With the current fixture and external source manifest it reports `BLOCKED`
 because the strict row-level catalog is incomplete and post-ACT Verify is still
@@ -215,7 +228,12 @@ broader structured-ID criterion passes only when the triage manifest covers
 every uncataloged family and expected occurrence count. The row-corpus
 discovery manifest records the unsuccessful search for a full 206-row strict
 corpus and attaches that evidence to `strict_row_level_catalog_complete`, but
-it does not satisfy the criterion.
+it does not satisfy the criterion. A supplied strict-row corpus is validated
+against `test/fixtures/goal_loop/strict-row-corpus-contract.json`: 206 unique
+rows, logical `prompt_corpus/GOAL_LOOP/...` source paths, positive line refs,
+severity/actionability, and replay expectations. A valid supplied corpus still
+does not close the blocker unless Orient also reports the strict row-level
+catalog as `COMPLETE` with 206 itemized findings and zero missing rows.
 
 When the Verify input is replaced with a live post-ACT artifact that carries
 the required evidence-window metadata, `post_act_verify_complete` can pass.

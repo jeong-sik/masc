@@ -143,6 +143,15 @@
   that do not contain the missing 206-row corpus, and an independent cascade
   completion report that keeps #13265 open because the corpus is not
   replayable.
+- [근거] `python3 test/test_goal_loop_completion_audit.py` checked at
+  2026-05-06T09:59:29+09:00, confidence High: the completion audit now accepts
+  an optional `--strict-row-corpus` artifact and validates it against the
+  checked contract in `test/fixtures/goal_loop/strict-row-corpus-contract.json`
+  without using that artifact as a proxy for completion. A synthetic valid
+  206-row corpus is recorded as `validated=true`, but the closeout remains
+  `BLOCKED` while Orient still reports only 19 itemized rows; invalid supplied
+  corpora with duplicate IDs or `/Users/...` paths block
+  `strict_row_level_catalog_complete`.
 - [근거] `python3 scripts/observe_goal_loop_logs.py
   /Users/dancer/me/.masc/events/2026-05/06.jsonl
   /Users/dancer/me/.masc/transition-audit/2026-05/06.jsonl` plus
@@ -213,7 +222,9 @@ the aggregate-count mismatch: the 214 integrated total is represented as the
 prove the full row-level aggregate from live production state; 187 rows remain
 missing from the 206-itemized corpus, the 214 claim has no row-level corpus,
 and several prompt claims remain evidence-absent in the fixture (`NF-5`,
-`NF-7`, `NF-8`, `R-FATAL-1`, `CF-1`).
+`NF-7`, `NF-8`, `R-FATAL-1`, `CF-1`). The required row-corpus shape is now
+machine-checkable via `--strict-row-corpus`, but that supplied artifact still
+must be replayed into Orient before the strict catalog criterion can pass.
 
 **Verification command**:
 

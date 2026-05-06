@@ -123,6 +123,7 @@
         test_keeper_fsm_edges
         test_keeper_fsm_guard_actions
         test_keeper_callback_hardening
+        test_keeper_callback_failure_telemetry
         test_keeper_behavioral_regime
         test_keeper_toml
         test_keeper_runtime_toml
@@ -345,6 +346,7 @@
           test_keeper_fsm_edges
           test_keeper_fsm_guard_actions
           test_keeper_callback_hardening
+          test_keeper_callback_failure_telemetry
           test_keeper_behavioral_regime
           test_keeper_toml
           test_keeper_runtime_toml

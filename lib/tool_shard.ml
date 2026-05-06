@@ -653,7 +653,8 @@ let coding_workspace_tools : Masc_domain.tool_schema list =
 (** Coding tools — shell/github bridges plus worktree-first code workflow.
     Always granted. *)
 let coding_tools : Masc_domain.tool_schema list =
-  coding_keeper_bridge_tools @ coding_workspace_tools
+  coding_keeper_bridge_tools @ coding_workspace_tools @ keeper_preflight_tools
+  @ keeper_github_pr_tools @ keeper_pr_review_tools
 
 let voice_tools : Masc_domain.tool_schema list = [
   {

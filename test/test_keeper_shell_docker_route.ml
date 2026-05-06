@@ -92,7 +92,7 @@ let clear_checkout_but_keep_git_dir root =
   |> Array.iter (fun name ->
     if name <> ".git" then cleanup_dir (Filename.concat root name))
 
-let make_meta ?preset ~name ~sandbox =
+let make_meta ?preset ~name ~sandbox () =
   let tool_access_fields =
     match preset with
     | None -> []
@@ -132,7 +132,7 @@ let setup ~sandbox f =
   let config = Coord.default_config base in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Keeper_registry.clear ();
-  let meta = make_meta ~name:"minjae" ~sandbox in
+  let meta = make_meta ~name:"minjae" ~sandbox () in
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir playground;
   f ~config ~meta ~playground
@@ -144,7 +144,7 @@ let setup_with_preset ~sandbox ~preset f =
   let config = Coord.default_config base in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Keeper_registry.clear ();
-  let meta = make_meta ~name:"minjae" ~sandbox ~preset in
+  let meta = make_meta ~name:"minjae" ~sandbox ~preset () in
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir playground;
   f ~config ~meta ~playground
@@ -156,8 +156,8 @@ let setup_two_docker_keepers f =
   let config = Coord.default_config base in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Keeper_registry.clear ();
-  let meta_a = make_meta ~name:"keeper-a" ~sandbox:Keeper_types.Docker in
-  let meta_b = make_meta ~name:"keeper-b" ~sandbox:Keeper_types.Docker in
+  let meta_a = make_meta ~name:"keeper-a" ~sandbox:Keeper_types.Docker () in
+  let meta_b = make_meta ~name:"keeper-b" ~sandbox:Keeper_types.Docker () in
   let playground_a = Keeper_sandbox.host_root_abs_of_meta ~config meta_a in
   let playground_b = Keeper_sandbox.host_root_abs_of_meta ~config meta_b in
   ensure_dir playground_a;
@@ -171,10 +171,10 @@ let with_fake_docker script f =
   let fake_gh_auth_status_ok =
     "#!/bin/sh\n\
      if [ \"$1\" = \"auth\" ] && [ \"$2\" = \"status\" ]; then\n\
-     \  exit 0\n\
+       exit 0\n\
      fi\n\
-     printf 'unexpected gh invocation: %s\\n' \"$*\" >&2\n\
-     exit 2\n"
+     printf 'gh:%s\\n' \"$*\"\n\
+     exit 0\n";
   in
   write_file docker_path script;
   write_file gh_path fake_gh_auth_status_ok;

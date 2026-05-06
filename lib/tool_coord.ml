@@ -204,7 +204,7 @@ let safe_read_backlog (ctx : context) =
         (Stdlib.Printexc.to_string exn);
       {
         Masc_domain.tasks = [];
-        last_updated = Coord.now_iso ();
+        last_updated = Masc_domain.now_iso ();
         version = 1;
       }
 

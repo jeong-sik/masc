@@ -13,6 +13,158 @@ module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
 end
 
+type shell_quote_state = No_quote | Single_quote | Double_quote
+
+type shell_word = {
+  text : string;
+  starts_command : bool;
+}
+
+let shell_words_with_boundaries cmd =
+  let len = String.length cmd in
+  let buf = Buffer.create len in
+  let quote_state = ref No_quote in
+  let escaped = ref false in
+  let at_command_start = ref true in
+  let word_started_at_command_start = ref true in
+  let push_word acc =
+    if Buffer.length buf = 0 then acc
+    else
+      let text =
+        Buffer.contents buf
+        |> String.trim
+        |> String.lowercase_ascii
+      in
+      Buffer.clear buf;
+      at_command_start := false;
+      { text; starts_command = !word_started_at_command_start } :: acc
+  in
+  let start_word_if_needed () =
+    if Buffer.length buf = 0 then
+      word_started_at_command_start := !at_command_start
+  in
+  let rec loop i acc =
+    if i >= len then List.rev (push_word acc)
+    else if !escaped then (
+      start_word_if_needed ();
+      Buffer.add_char buf cmd.[i];
+      escaped := false;
+      loop (i + 1) acc)
+    else
+      match !quote_state, cmd.[i] with
+      | Single_quote, '\'' ->
+        quote_state := No_quote;
+        loop (i + 1) acc
+      | Single_quote, ch ->
+        start_word_if_needed ();
+        Buffer.add_char buf ch;
+        loop (i + 1) acc
+      | Double_quote, '"' ->
+        quote_state := No_quote;
+        loop (i + 1) acc
+      | Double_quote, '\\' ->
+        escaped := true;
+        loop (i + 1) acc
+      | Double_quote, ch ->
+        start_word_if_needed ();
+        Buffer.add_char buf ch;
+        loop (i + 1) acc
+      | No_quote, '\\' ->
+        escaped := true;
+        loop (i + 1) acc
+      | No_quote, '\'' ->
+        start_word_if_needed ();
+        quote_state := Single_quote;
+        loop (i + 1) acc
+      | No_quote, '"' ->
+        start_word_if_needed ();
+        quote_state := Double_quote;
+        loop (i + 1) acc
+      | No_quote, (' ' | '\t') ->
+        loop (i + 1) (push_word acc)
+      | No_quote, ('\n' | '\r' | ';' | '&' | '|') ->
+        let acc = push_word acc in
+        at_command_start := true;
+        loop (i + 1) acc
+      | No_quote, ch ->
+        start_word_if_needed ();
+        Buffer.add_char buf ch;
+        loop (i + 1) acc
+  in
+  loop 0 []
+
+let shell_interpreter_names = [ "bash"; "sh"; "zsh" ]
+
+let command_name text = Filename.basename text
+
+let shell_c_payload words =
+  match words with
+  | shell :: rest when
+    shell.starts_command
+    && List.mem (command_name shell.text) shell_interpreter_names ->
+    let rec loop = function
+      | [] -> None
+      | flag :: payload :: _ when
+        String.length flag.text > 1
+        && flag.text.[0] = '-'
+        && String.contains flag.text 'c' ->
+        Some payload.text
+      | flag :: rest when String.length flag.text > 0 && flag.text.[0] = '-' ->
+        loop rest
+      | _ -> None
+    in
+    loop rest
+  | _ -> None
+
+let is_env_assignment text =
+  match String.index_opt text '=' with
+  | Some i when i > 0 ->
+    let lhs = String.sub text 0 i in
+    not (String.contains lhs '/')
+  | _ -> false
+
+let rec strip_command_wrappers = function
+  | [] -> []
+  | word :: rest when is_env_assignment word.text ->
+    strip_command_wrappers rest
+  | word :: rest when
+    let name = command_name word.text in
+    String.equal name "command" || String.equal name "exec" ->
+    strip_command_wrappers rest
+  | word :: rest when String.equal (command_name word.text) "env" ->
+    strip_env_args rest
+  | words -> words
+
+and strip_env_args = function
+  | word :: rest when String.starts_with ~prefix:"-" word.text ->
+    strip_env_args rest
+  | word :: rest when is_env_assignment word.text ->
+    strip_env_args rest
+  | words -> strip_command_wrappers words
+
+let gh_pr_create_sequence = function
+  | gh :: pr :: create :: _ ->
+    String.equal (command_name gh.text) "gh"
+    && String.equal pr.text "pr"
+    && String.equal create.text "create"
+  | _ -> false
+
+let rec cmd_contains_gh_pr_create cmd =
+  let words = shell_words_with_boundaries cmd in
+  let rec loop = function
+    | word :: rest when
+      word.starts_command
+      && gh_pr_create_sequence (strip_command_wrappers (word :: rest)) ->
+      true
+    | _ :: rest -> loop rest
+    | [] -> false
+  in
+  loop words
+  ||
+  match shell_c_payload words with
+  | Some payload -> cmd_contains_gh_pr_create payload
+  | None -> false
+
 let handle_keeper_bash
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(turn_sandbox_factory_git : Keeper_sandbox_factory.t option)
@@ -40,6 +192,25 @@ let handle_keeper_bash
     | Some preset -> Keeper_tool_policy.allows_shell_write_for_preset preset
     | None -> false
   in
+  let gh_pr_create_block () =
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_shell_bash_failures
+      ~labels:[("keeper", meta.name); ("site", "gh_pr_create")]
+      ();
+    Log.Keeper.warn
+      "keeper_bash gh pr create blocked: keeper=%s cmd=%s"
+      meta.name cmd_for_log;
+    Yojson.Safe.to_string
+      (`Assoc
+         [ "ok", `Bool false
+         ; "error", `String "gh_pr_create_requires_keeper_pr_create"
+         ; "reason", `String
+             "keeper_bash cannot bypass the PR creation approval and audit policy"
+         ; "hint", `String
+             "Use keeper_pr_create with draft=true so governance approval and PR lifecycle markers are enforced."
+         ; "cmd", `String cmd_for_log
+         ])
+  in
   if cmd = ""
   then error_json "cmd is required. Good: cmd='ls -la lib/'. Bad: cmd=''."
   else if Env_config_keeper.KeeperSandbox.hard_mode ()
@@ -47,6 +218,8 @@ let handle_keeper_bash
   then
     error_json
       "MASC_KEEPER_SANDBOX_HARD_MODE requires sandbox_profile=docker"
+  else if cmd_contains_gh_pr_create cmd
+  then gh_pr_create_block ()
 
   else begin
     (* Tick 22: dark-launch shadow logger.  Runs
@@ -171,6 +344,8 @@ let handle_keeper_bash
            ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
            ~env_snapshot:env_snap
            ()))
+    else if cmd_contains_gh_pr_create cmd
+    then gh_pr_create_block ()
     else if base_profile = Docker
             && Env_config_keeper.KeeperSandbox.hard_mode ()
             && Keeper_shell_shared.cmd_targets_gh cmd

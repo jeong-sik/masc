@@ -192,6 +192,57 @@ let test_minimal_preset_has_web_search () =
   check bool "has masc_web_search" true
     (has_tool "masc_web_search" tools)
 
+let test_minimal_preset_has_approval_pending () =
+  let meta = make_meta ~preset:Keeper_types.Minimal () in
+  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let schema_names =
+    Keeper_exec_tools.keeper_allowed_model_tools meta
+    |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+  in
+  check bool "approval_pending does not require MCP session" false
+    (Keeper_tool_policy.is_keeper_mcp_context_required "masc_approval_pending");
+  check bool "approval_get still requires MCP session" true
+    (Keeper_tool_policy.is_keeper_mcp_context_required "masc_approval_get");
+  check bool "minimal has approval pending tool" true
+    (has_tool "masc_approval_pending" tools);
+  check bool "minimal has approval pending schema" true
+    (has_tool "masc_approval_pending" schema_names);
+  check bool "minimal excludes admin approval detail" false
+    (has_tool "masc_approval_get" tools)
+
+let test_all_presets_have_approval_pending () =
+  Keeper_types.all_tool_presets
+  |> List.iter (fun preset ->
+       let label = Keeper_types.tool_preset_to_string preset in
+       let meta = make_meta ~preset () in
+       let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+       let schema_names =
+         Keeper_exec_tools.keeper_allowed_model_tools meta
+         |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+       in
+       check bool (label ^ " has approval pending tool") true
+         (has_tool "masc_approval_pending" tools);
+       check bool (label ^ " has approval pending schema") true
+         (has_tool "masc_approval_pending" schema_names))
+
+let test_feature_catalog_required_tools_reachable_by_full_keeper () =
+  let meta = make_meta ~preset:Keeper_types.Full () in
+  let schema_names =
+    Keeper_exec_tools.keeper_allowed_model_tools meta
+    |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+  in
+  let required =
+    Dashboard_keeper_feature_catalog.tool_features
+    |> List.concat_map
+         (fun (feature : Dashboard_keeper_feature_catalog.feature_spec) ->
+           feature.required_tools)
+    |> List.sort_uniq String.compare
+  in
+  let missing =
+    required |> List.filter (fun name -> not (has_tool name schema_names))
+  in
+  check (list string) "feature proof tools reachable by full keeper" [] missing
+
 let test_coding_preset_has_keeper_bash () =
   let meta = make_meta ~preset:Keeper_types.Coding () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
@@ -801,6 +852,12 @@ let () =
         test_minimal_preset_excludes_keeper_fs_edit;
       test_case "minimal preset has web search" `Quick
         test_minimal_preset_has_web_search;
+      test_case "minimal preset has keeper-safe approval pending" `Quick
+        test_minimal_preset_has_approval_pending;
+      test_case "all presets have keeper-safe approval pending" `Quick
+        test_all_presets_have_approval_pending;
+      test_case "feature proof required tools are reachable" `Quick
+        test_feature_catalog_required_tools_reachable_by_full_keeper;
       test_case "coding preset has keeper_bash and keeper_shell" `Quick
         test_coding_preset_has_keeper_bash;
     ]);

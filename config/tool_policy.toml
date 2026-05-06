@@ -101,7 +101,7 @@ tools = ["keeper_board_delete", "keeper_board_cleanup"]
 
 # Essential: tools every keeper needs (orientation + web search).
 [masc.essential]
-tools = ["masc_status", "masc_web_search"]
+tools = ["masc_status", "masc_web_search", "masc_approval_pending"]
 
 # Coordination: external agent coordination tools.
 # Only needed by keepers that manage tasks across agents.

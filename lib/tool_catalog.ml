@@ -435,7 +435,9 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Keeper TK.Library_read
   | TN.Keeper TK.Library_search
   | TN.Keeper TK.Memory_search
+  | TN.Keeper TK.Pr_list
   | TN.Keeper TK.Pr_review_read
+  | TN.Keeper TK.Pr_status
   | TN.Keeper TK.Preflight_check
   | TN.Keeper TK.Stay_silent
   | TN.Keeper TK.Tasks_audit
@@ -457,6 +459,7 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Keeper TK.Board_vote
   | TN.Keeper TK.Broadcast
   | TN.Keeper TK.Handoff
+  | TN.Keeper TK.Pr_create
   | TN.Keeper TK.Pr_review_comment
   | TN.Keeper TK.Pr_review_reply
   | TN.Keeper TK.Task_claim
@@ -520,6 +523,7 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Who
   | TN.Masc TM.Workflow_guide
   | TN.Masc TM.Worktree_list
+  | TN.Masc TM.Approval_pending
   | TN.Masc TM.Approval_get
   | TN.Masc TM.Webrtc_answer
   | TN.Masc TM.Webrtc_offer ->
@@ -645,9 +649,12 @@ let tool_group_of_typed_tool_name = function
       | TK.Context_status
       | TK.Discovery
       | TK.Handoff
+      | TK.Pr_create
+      | TK.Pr_list
       | TK.Pr_review_comment
       | TK.Pr_review_read
       | TK.Pr_review_reply
+      | TK.Pr_status
       | TK.Preflight_check
       | TK.Stay_silent
       | TK.Time_now
@@ -705,6 +712,7 @@ let tool_group_of_typed_tool_name = function
       Some Masc_agent
   | TN.Masc
       ( TM.Add_task
+      | TM.Approval_pending
       | TM.Approval_get
       | TM.Batch_add_tasks
       | TM.Broadcast

@@ -74,6 +74,12 @@ val gh_cache_max_output_bytes : unit -> int
 
 (** {1 MASC Schema Injection} *)
 
+(** Inline MCP-runtime tools that are safe for keepers without an MCP session
+    context. Shared by keeper policy and MCP protocol context metadata. *)
+val keeper_safe_inline_tools : string list
+
+val is_keeper_safe_inline_tool : string -> bool
+
 (** Filter and inject MASC schemas for keeper tool selection.
     Call once after MASC schemas are registered. *)
 val inject_masc_schemas : Masc_domain.tool_schema list -> unit

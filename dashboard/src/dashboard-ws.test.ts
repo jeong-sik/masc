@@ -72,6 +72,31 @@ class MockWebSocket {
   }
 }
 
+class MockParseWorker {
+  static holdResponses = false
+
+  onmessage: ((event: MessageEvent) => void) | null = null
+  onerror: ((event: ErrorEvent) => void) | null = null
+  onmessageerror: ((event: MessageEvent) => void) | null = null
+  terminated = false
+
+  constructor(readonly url: URL) {}
+
+  postMessage(message: { id: number; data: string }): void {
+    if (MockParseWorker.holdResponses) return
+    this.onmessage?.({
+      data: {
+        id: message.id,
+        payloads: [JSON.parse(message.data) as unknown],
+      },
+    } as MessageEvent)
+  }
+
+  terminate(): void {
+    this.terminated = true
+  }
+}
+
 function installWebSocketMocks(): void {
   mockSockets.length = 0
   vi.stubGlobal('WebSocket', MockWebSocket)
@@ -128,6 +153,7 @@ beforeEach(() => {
 
 afterEach(() => {
   disconnectDashboardWS()
+  MockParseWorker.holdResponses = false
   dashboardWsConnected.value = false
   dashboardWsLastError.value = null
   dashboardWsLastSeq.value = 0
@@ -375,6 +401,46 @@ describe('dashboard websocket route subscriptions', () => {
     })
     expect(ack).not.toHaveProperty('id')
     expect(dashboardWsLastSeq.value).toBe(42)
+  })
+
+  it('falls back to main-thread parsing when the parse worker stops responding', async () => {
+    vi.useFakeTimers()
+    installWebSocketMocks()
+    vi.stubGlobal('Worker', MockParseWorker)
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const socket = mockSockets[0]!
+    socket.open()
+    const hello = parseRpc(socket, 0)
+    socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    await flushPromises()
+
+    const subscribe = parseRpc(socket, 1)
+    socket.receive({
+      jsonrpc: '2.0',
+      id: subscribe.id,
+      result: { snapshot: { seq: 1, slices: {} } },
+    })
+    await flushPromises()
+    sseStoreMocks.hydrateDashboardSlice.mockClear()
+
+    MockParseWorker.holdResponses = true
+    socket.receive({
+      jsonrpc: '2.0',
+      method: 'dashboard/delta',
+      params: { seq: 43, slice: 'execution', payload: { agents: [] } },
+    })
+    expect(sseStoreMocks.hydrateDashboardSlice).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(5_000)
+    flushPendingInbound()
+
+    expect(dashboardWsLastSeq.value).toBe(43)
+    expect(sseStoreMocks.hydrateDashboardSlice).toHaveBeenCalledWith(
+      'execution',
+      { agents: [] },
+      undefined,
+    )
   })
 
   it('ignores stale subscribe snapshots that arrive after a newer route subscription', async () => {

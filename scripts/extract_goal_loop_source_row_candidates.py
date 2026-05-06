@@ -318,6 +318,10 @@ def inventory_sources(
         by_rule[candidate.extraction_rule] = (
             by_rule.get(candidate.extraction_rule, 0) + 1
         )
+    sources_with_candidates = set(by_file)
+    sources_without_candidates = sorted(
+        source for source in sources_checked if source not in sources_with_candidates
+    )
 
     row_count = len(candidates)
     status = (
@@ -346,6 +350,12 @@ def inventory_sources(
         "unique_candidate_rows": row_count,
         "missing_candidate_rows": max(expected_total - row_count, 0),
         "prompt_sources_checked": sorted(sources_checked),
+        "source_candidate_coverage": {
+            "sources_checked": len(sources_checked),
+            "sources_with_candidates": len(sources_with_candidates),
+            "sources_without_candidates": len(sources_without_candidates),
+        },
+        "sources_without_candidates": sources_without_candidates,
         "source_errors_total": len(source_errors),
         "source_errors": source_errors,
         "candidates_by_file": [
@@ -377,6 +387,8 @@ def report_to_text(report: dict[str, Any]) -> str:
     ]
     for item in report["candidates_by_file"]:
         lines.append(f"FILE: {item['path']} rows={item['unique_candidate_rows']}")
+    for source_path in report.get("sources_without_candidates", []):
+        lines.append(f"NO_ROWS: {source_path} rows=0")
     for error in report["source_errors"]:
         lines.append(f"ERROR: {error['path']} {error['error']}")
     return "\n".join(lines)

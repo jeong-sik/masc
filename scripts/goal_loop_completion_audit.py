@@ -360,6 +360,49 @@ def source_row_candidate_inventory_evidence(
     )
     candidates_by_file_total_matches = candidates_by_file_total == candidate_rows
     candidates_by_rule_total_matches = candidates_by_rule_total == candidate_rows
+    candidates_by_file_raw = source_row_candidate_inventory.get("candidates_by_file")
+    candidates_by_file = (
+        candidates_by_file_raw if isinstance(candidates_by_file_raw, list) else []
+    )
+    source_paths_with_candidates = {
+        item.get("path")
+        for item in candidates_by_file
+        if isinstance(item, dict) and isinstance(item.get("path"), str)
+    }
+    sources_without_candidates_raw = source_row_candidate_inventory.get(
+        "sources_without_candidates"
+    )
+    sources_without_candidates = (
+        sources_without_candidates_raw
+        if isinstance(sources_without_candidates_raw, list)
+        else []
+    )
+    source_paths_without_candidates = {
+        item for item in sources_without_candidates if isinstance(item, str)
+    }
+    source_candidate_coverage_raw = source_row_candidate_inventory.get(
+        "source_candidate_coverage"
+    )
+    source_candidate_coverage = (
+        source_candidate_coverage_raw
+        if isinstance(source_candidate_coverage_raw, dict)
+        else {}
+    )
+    sources_accounted = set(sources) == (
+        source_paths_with_candidates | source_paths_without_candidates
+    )
+    zero_source_count_matches = source_candidate_coverage.get(
+        "sources_without_candidates"
+    ) == len(source_paths_without_candidates)
+    candidate_source_count_matches = source_candidate_coverage.get(
+        "sources_with_candidates"
+    ) == len(source_paths_with_candidates)
+    source_count_matches = source_candidate_coverage.get("sources_checked") == len(
+        sources
+    )
+    no_candidate_source_overlap = (
+        len(source_paths_with_candidates & source_paths_without_candidates) == 0
+    )
     local_path_leaks = contains_user_local_path(source_row_candidate_inventory)
     recorded = (
         source_row_candidate_inventory.get("schema_version") == 1
@@ -372,6 +415,11 @@ def source_row_candidate_inventory_evidence(
         and incomplete_against_expected
         and candidates_by_file_total_matches
         and candidates_by_rule_total_matches
+        and sources_accounted
+        and source_count_matches
+        and candidate_source_count_matches
+        and zero_source_count_matches
+        and no_candidate_source_overlap
         and len(sources) >= 12
         and source_row_candidate_inventory.get("source_errors_total") == 0
         and len(source_errors) == 0
@@ -396,6 +444,13 @@ def source_row_candidate_inventory_evidence(
         "candidates_by_rule_total": candidates_by_rule_total,
         "candidates_by_rule_total_matches": candidates_by_rule_total_matches,
         "prompt_sources_checked": len(sources),
+        "sources_with_candidates": len(source_paths_with_candidates),
+        "sources_without_candidates": len(source_paths_without_candidates),
+        "sources_accounted": sources_accounted,
+        "source_count_matches": source_count_matches,
+        "candidate_source_count_matches": candidate_source_count_matches,
+        "zero_source_count_matches": zero_source_count_matches,
+        "no_candidate_source_overlap": no_candidate_source_overlap,
         "source_errors_total": source_row_candidate_inventory.get(
             "source_errors_total"
         ),

@@ -540,6 +540,13 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertTrue(inventory_evidence["candidates_by_file_total_matches"])
         self.assertTrue(inventory_evidence["candidates_by_rule_total_matches"])
         self.assertEqual(inventory_evidence["prompt_sources_checked"], 12)
+        self.assertEqual(inventory_evidence["sources_with_candidates"], 5)
+        self.assertEqual(inventory_evidence["sources_without_candidates"], 7)
+        self.assertTrue(inventory_evidence["sources_accounted"])
+        self.assertTrue(inventory_evidence["source_count_matches"])
+        self.assertTrue(inventory_evidence["candidate_source_count_matches"])
+        self.assertTrue(inventory_evidence["zero_source_count_matches"])
+        self.assertTrue(inventory_evidence["no_candidate_source_overlap"])
         self.assertFalse(inventory_evidence["local_path_leaks"])
 
     def test_completion_audit_rejects_inconsistent_source_row_candidate_inventory(
@@ -566,6 +573,30 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertFalse(inventory_evidence["recorded"])
         self.assertFalse(inventory_evidence["candidates_by_file_total_matches"])
         self.assertTrue(inventory_evidence["candidates_by_rule_total_matches"])
+
+    def test_completion_audit_rejects_unaccounted_source_row_inventory(
+        self,
+    ) -> None:
+        inventory = json.loads(
+            SOURCE_ROW_CANDIDATE_INVENTORY_FIXTURE.read_text(encoding="utf-8")
+        )
+        sources_without_candidates = inventory["sources_without_candidates"]
+        assert isinstance(sources_without_candidates, list)
+        sources_without_candidates.pop()
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            source_row_candidate_inventory=inventory,
+        )
+
+        self.assertEqual(audit.status, "BLOCKED")
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        inventory_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "source_row_candidate_inventory"
+        ]
+        self.assertFalse(inventory_evidence["recorded"])
+        self.assertFalse(inventory_evidence["sources_accounted"])
+        self.assertFalse(inventory_evidence["zero_source_count_matches"])
+        self.assertTrue(inventory_evidence["source_count_matches"])
 
     def test_completion_audit_rejects_wrong_catalog_source_row_candidate_inventory(
         self,

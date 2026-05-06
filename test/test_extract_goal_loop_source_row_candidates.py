@@ -56,9 +56,14 @@ class ExtractGoalLoopSourceRowCandidatesTest(unittest.TestCase):
                 "| F01 | Fake Fallback | `backend.ml` | coerced | validate |\n",
                 encoding="utf-8",
             )
+            no_rows = root / "fundamental_roadmap.md"
+            no_rows.write_text(
+                "P-STR-01~03 is a range and must not invent omitted rows.\n",
+                encoding="utf-8",
+            )
 
             report = extract_goal_loop_source_row_candidates.inventory_sources(
-                [goal_loop, derived, deep, llm],
+                [goal_loop, derived, deep, llm, no_rows],
                 expected_total=6,
             )
 
@@ -82,6 +87,23 @@ class ExtractGoalLoopSourceRowCandidatesTest(unittest.TestCase):
                 row["source"]["path"].startswith("prompt_corpus/GOAL_LOOP/")
                 for row in report["candidate_rows"]
             )
+        )
+        self.assertEqual(
+            report["sources_without_candidates"],
+            ["prompt_corpus/GOAL_LOOP/fundamental_roadmap.md"],
+        )
+        self.assertEqual(
+            report["source_candidate_coverage"],
+            {
+                "sources_checked": 5,
+                "sources_with_candidates": 4,
+                "sources_without_candidates": 1,
+            },
+        )
+        text_report = extract_goal_loop_source_row_candidates.report_to_text(report)
+        self.assertIn(
+            "NO_ROWS: prompt_corpus/GOAL_LOOP/fundamental_roadmap.md rows=0",
+            text_report,
         )
 
     def test_cli_require_complete_fails_when_rows_are_missing(self) -> None:

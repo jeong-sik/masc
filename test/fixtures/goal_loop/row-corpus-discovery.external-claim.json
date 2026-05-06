@@ -514,6 +514,8 @@
       "observed_expected_findings_total": 206,
       "observed_missing_candidate_rows": 74,
       "observed_source_errors": 0,
+      "observed_sources_with_candidates": 5,
+      "observed_sources_without_candidates": 7,
       "observed_candidates_by_file": [
         {
           "path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
@@ -535,6 +537,15 @@
           "path": "prompt_corpus/GOAL_LOOP/llm_compatibility.agent.final.md",
           "unique_candidate_rows": 14
         }
+      ],
+      "observed_zero_candidate_sources": [
+        "prompt_corpus/GOAL_LOOP/INTEGRATED_IMPROVEMENT_DESIGN.md",
+        "prompt_corpus/GOAL_LOOP/RUTHLESS_JUDGMENT.md",
+        "prompt_corpus/GOAL_LOOP/fundamental_roadmap.md",
+        "prompt_corpus/GOAL_LOOP/issues_analysis_done_vs_todo.md",
+        "prompt_corpus/GOAL_LOOP/live_incident_analysis.md",
+        "prompt_corpus/GOAL_LOOP/masc_final_diagnosis.md",
+        "prompt_corpus/GOAL_LOOP/progress-evaluation.md"
       ],
       "observed_candidates_by_rule": [
         {
@@ -564,7 +575,7 @@
       ],
       "extraction_policy": "Conservative explicit rows only: exact finding IDs, exact S/F anti-pattern IDs, markdown table ID rows, and numbered audit section headings in the two audit reports. Ranges and roadmap phase bullets are not expanded into invented rows.",
       "command": "python3 scripts/extract_goal_loop_source_row_candidates.py <12 prompt source docs> --summary-only --require-complete --format text",
-      "note": "The repo source-row candidate extractor scanned the 12 prompt-supplied source documents. It found only 132 explicit row candidates, leaving at least 74 missing rows versus the required 206. This is not a strict corpus because it lacks 206 complete replay rows and intentionally does not synthesize rows from ranges or roadmap bullets."
+      "note": "The repo source-row candidate extractor scanned the 12 prompt-supplied source documents. It found only 132 explicit row candidates across 5 source files, leaving 7 checked prompt files with zero explicit row candidates and at least 74 missing rows versus the required 206. This is not a strict corpus because it lacks 206 complete replay rows and intentionally does not synthesize rows from ranges or roadmap bullets."
     }
   ],
   "broader_structured_id_triage": {

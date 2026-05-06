@@ -184,14 +184,16 @@
   discovery evidence.
 - [근거] `python3 scripts/extract_goal_loop_source_row_candidates.py
   <12 prompt source files> --summary-only --require-complete --format text`
-  checked at 2026-05-06T14:14:24+09:00, confidence High: exits non-zero with
+  checked at 2026-05-06T14:35:29+09:00, confidence High: exits non-zero with
   `rows=132 expected=206 missing=74 sources=12 errors=0`. This conservative
   extractor records only explicit IDs, explicit S/F anti-pattern rows,
   markdown table ID rows, and numbered audit sections; it does not expand
   ranges or roadmap phase bullets into invented rows. The result is recorded
   in `test/fixtures/goal_loop/source-row-candidate-inventory.external-claim.json`
   and mirrored in `test/fixtures/goal_loop/row-corpus-discovery.external-claim.json`
-  as `prompt_source_docs_explicit_row_candidate_inventory`.
+  as `prompt_source_docs_explicit_row_candidate_inventory`; the inventory now
+  accounts for the prompt-source split explicitly, with 5 files contributing
+  candidates and 7 checked prompt files yielding zero explicit candidate rows.
 - [근거] `gh pr view 13577 --repo jeong-sik/masc-mcp --json
   number,state,isDraft,mergeable,mergeStateStatus,headRefOid,labels,url`,
   `gh issue view 13265 --repo jeong-sik/masc-mcp --json number,state,url`, and
@@ -223,24 +225,28 @@
   test/fixtures/goal_loop/prompt-closeout-checklist.external-claim.json
   --source-row-candidate-inventory
   test/fixtures/goal_loop/source-row-candidate-inventory.external-claim.json
-  --require-complete --format text` checked at 2026-05-06T14:25:31+09:00,
+  --require-complete --format text` checked at 2026-05-06T14:35:29+09:00,
   confidence High: exits non-zero with only
   `strict_row_level_catalog_complete`, while the new
   `prompt_to_artifact_checklist_recorded` criterion passes, and the strict row
-  evidence directly records the source-row candidate inventory as 132/206. The
+  evidence directly records the source-row candidate inventory as 132/206 and
+  validates the 5/7 source-file coverage split with no unaccounted prompt
+  source files. The
   checklist maps 15 prompt requirements to concrete artifacts and blockers
   across all 12 prompt source documents: 2 `PASS`, 11 `PARTIAL`, and 2 `BLOCKED`
   requirements, with the strict 206-row corpus explicitly bound to
   `strict_row_level_catalog_complete`.
 - [근거] `python3 test/test_goal_loop_completion_audit.py` checked at
-  2026-05-06T14:25:31+09:00, confidence High: the completion audit accepts
+  2026-05-06T14:35:29+09:00, confidence High: the completion audit accepts
   optional `--strict-row-corpus` and `--source-row-candidate-inventory`
   artifacts, validates catalog identity and internal totals, and still does not
   use either artifact as a proxy for completion. A synthetic valid 206-row
   corpus is recorded as `validated=true`, while the explicit source-row
-  inventory is recorded as 132/206; the closeout remains `BLOCKED` while Orient
-  still reports only 19 itemized rows. Invalid supplied corpora or inconsistent
-  source-row inventories block `strict_row_level_catalog_complete`.
+  inventory is recorded as 132/206 with the 5 source files that contain
+  candidates and 7 checked source files that do not; the closeout remains
+  `BLOCKED` while Orient still reports only 19 itemized rows. Invalid supplied
+  corpora or inconsistent source-row inventories block
+  `strict_row_level_catalog_complete`.
 - [근거] `python3 test/test_observe_goal_loop_logs.py` and
   `python3 test/test_goal_loop_status.py` checked at 2026-05-06T10:15:47+09:00,
   confidence High: Orient now accepts the same optional `--strict-row-corpus`
@@ -329,7 +335,7 @@ keeps the strict corpus blocker explicit.
 | 7 GOAL LOOP dashboard | `goal_loop_status.py` aggregate output | PARTIAL: CLI status exists; UI dashboard integration remains open. |
 | 8 anti-stagnation rules | ACT reference guard and completion audit blocker | PARTIAL: reference integrity exists; SLA timers/escalation are not implemented. |
 | 9 expected convergence after week/month | completion audit and #13265 | BLOCKED: no measured convergence claim is valid without the strict corpus and live SLO proof. |
-| Full 206-row strict corpus | `row-corpus-discovery.external-claim.json`, `strict-row-corpus-contract.json`, `--strict-row-corpus` path | BLOCKED: 24 searches/inventories checked; `FULL_ROW_CORPUS_NOT_FOUND`, 19/206 strict rows, 187 strict rows missing. The source-doc explicit-row extractor finds only 132/206 candidate rows and cannot close the strict corpus gap. |
+| Full 206-row strict corpus | `row-corpus-discovery.external-claim.json`, `strict-row-corpus-contract.json`, `--strict-row-corpus` path | BLOCKED: 24 searches/inventories checked; `FULL_ROW_CORPUS_NOT_FOUND`, 19/206 strict rows, 187 strict rows missing. The source-doc explicit-row extractor finds only 132/206 candidate rows across 5 source files, with 7 checked prompt files yielding zero explicit candidates, and cannot close the strict corpus gap. |
 
 ## Section-by-Section Audit
 

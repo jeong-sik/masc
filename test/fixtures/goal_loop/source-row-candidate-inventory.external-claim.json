@@ -22,6 +22,20 @@
     "prompt_corpus/GOAL_LOOP/masc_final_diagnosis.md",
     "prompt_corpus/GOAL_LOOP/progress-evaluation.md"
   ],
+  "source_candidate_coverage": {
+    "sources_checked": 12,
+    "sources_with_candidates": 5,
+    "sources_without_candidates": 7
+  },
+  "sources_without_candidates": [
+    "prompt_corpus/GOAL_LOOP/INTEGRATED_IMPROVEMENT_DESIGN.md",
+    "prompt_corpus/GOAL_LOOP/RUTHLESS_JUDGMENT.md",
+    "prompt_corpus/GOAL_LOOP/fundamental_roadmap.md",
+    "prompt_corpus/GOAL_LOOP/issues_analysis_done_vs_todo.md",
+    "prompt_corpus/GOAL_LOOP/live_incident_analysis.md",
+    "prompt_corpus/GOAL_LOOP/masc_final_diagnosis.md",
+    "prompt_corpus/GOAL_LOOP/progress-evaluation.md"
+  ],
   "source_errors_total": 0,
   "source_errors": [],
   "candidates_by_file": [

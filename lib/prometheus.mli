@@ -363,6 +363,7 @@ val metric_keeper_ollama_saturation_skip : string
     by [keeper] and [cascade] so dashboards can attribute starvation
     to specific cascade profiles. *)
 val metric_persistence_read_drops : string
+val metric_discovery_history_failures : string
 val metric_codex_cli_mcp_tool_omission : string
 (** #10097: per-tool counter for codex_cli keeper-bound runtime
     MCP omissions.  Paired with a once-per-fingerprint WARN log

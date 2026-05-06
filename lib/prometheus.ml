@@ -696,6 +696,8 @@ let metric_keeper_observation_query_failures =
   "masc_keeper_observation_query_failures_total"
 let metric_persistence_read_drops =
   "masc_persistence_read_drops_total"
+let metric_discovery_history_failures =
+  "masc_discovery_history_failures_total"
 
 (* #10097: codex_cli provider cannot carry keeper-bound runtime MCP
    tools that need request-scoped auth headers.  Every time
@@ -1928,6 +1930,10 @@ let init () =
   add metric_persistence_read_drops
     "Total persisted read-model entries dropped during filesystem scans, \
      labeled by surface and reason"
+    Counter;
+  add metric_discovery_history_failures
+    "Total discovery history JSONL persistence/read/prune failures, \
+     labeled by site"
     Counter;
   add metric_oas_sse_relay_retries
     "Total OAS SSE relay retry attempts, labeled by failed stage"

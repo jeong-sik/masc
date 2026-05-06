@@ -84,6 +84,20 @@ let record_to_json (r : probe_record) : Yojson.Safe.t =
 
 (* ── Write ────────────────────────────────────────────────── *)
 
+let observe_failure ~site ~base_path exn =
+  match exn with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Prometheus.inc_counter Prometheus.metric_discovery_history_failures
+        ~labels:[("site", site)]
+        ();
+      Log.Discovery.error "discovery_history: %s failed base_path=%s: %s"
+        site base_path (Printexc.to_string exn)
+
+module For_testing = struct
+  let observe_failure = observe_failure
+end
+
 let record_probe ~base_path (endpoints : Llm_provider.Discovery.endpoint_status list) =
   try
     let store = get_or_create_store ~base_path in
@@ -93,8 +107,7 @@ let record_probe ~base_path (endpoints : Llm_provider.Discovery.endpoint_status 
       Dated_jsonl.append store json
     ) endpoints
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-    Log.Discovery.error "discovery_history: append failed: %s"
-      (Printexc.to_string exn)
+    observe_failure ~site:"record_probe" ~base_path exn
 
 (* ── Read ─────────────────────────────────────────────────── *)
 
@@ -103,8 +116,7 @@ let read_recent ~base_path ~count : Yojson.Safe.t list =
     let store = get_or_create_store ~base_path in
     Dated_jsonl.read_recent store count
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-    Log.Discovery.error "discovery_history: read failed: %s"
-      (Printexc.to_string exn);
+    observe_failure ~site:"read_recent" ~base_path exn;
     []
 
 let read_range ~base_path ~since ~until : Yojson.Safe.t list =
@@ -112,8 +124,7 @@ let read_range ~base_path ~since ~until : Yojson.Safe.t list =
     let store = get_or_create_store ~base_path in
     Dated_jsonl.read_range store ~since ~until
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-    Log.Discovery.error "discovery_history: read_range failed: %s"
-      (Printexc.to_string exn);
+    observe_failure ~site:"read_range" ~base_path exn;
     []
 
 (* ── Prune ────────────────────────────────────────────────── *)
@@ -125,5 +136,4 @@ let prune ~base_path ~days =
     if deleted > 0 then
       Log.Discovery.info "discovery_history: pruned %d old day-files" deleted
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-    Log.Discovery.error "discovery_history: prune failed: %s"
-      (Printexc.to_string exn)
+    observe_failure ~site:"prune" ~base_path exn

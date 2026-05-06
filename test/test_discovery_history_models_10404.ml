@@ -6,6 +6,7 @@
 
 open Alcotest
 module DH = Masc_mcp.Discovery_history
+module P = Masc_mcp.Prometheus
 
 let make ~models : DH.probe_record = {
   ts = 1777129200.0;
@@ -62,6 +63,44 @@ let test_single_model_round_trip () =
     (Astring.String.is_infix
        ~affix:"\"model_id\":\"qwen3.6:27b-coding-nvfp4\"" s)
 
+let text_has_literal text literal =
+  Astring.String.is_infix ~affix:literal text
+
+let test_failure_observer_increments_metric () =
+  let labels = [("site", "unit_test")] in
+  let before =
+    P.metric_value_or_zero P.metric_discovery_history_failures ~labels ()
+  in
+  DH.For_testing.observe_failure
+    ~site:"unit_test"
+    ~base_path:"/tmp/masc-discovery-history"
+    (Failure "synthetic discovery history failure");
+  let after =
+    P.metric_value_or_zero P.metric_discovery_history_failures ~labels ()
+  in
+  check (float 0.0001) "discovery history failure counted"
+    (before +. 1.0)
+    after
+
+let test_failure_observer_reraises_cancelled () =
+  let raised = ref false in
+  (try
+     DH.For_testing.observe_failure
+       ~site:"unit_test_cancel"
+       ~base_path:"/tmp/masc-discovery-history"
+       (Eio.Cancel.Cancelled (Failure "synthetic cancel"))
+   with Eio.Cancel.Cancelled _ -> raised := true);
+  check bool "cancel is re-raised" true !raised
+
+let test_failure_metric_registered () =
+  let text = P.to_prometheus_text () in
+  check bool "has discovery history failure HELP" true
+    (text_has_literal text
+       ("# HELP " ^ P.metric_discovery_history_failures ^ " "));
+  check bool "has discovery history failure TYPE" true
+    (text_has_literal text
+       ("# TYPE " ^ P.metric_discovery_history_failures ^ " counter"))
+
 let () =
   run "discovery_history_models_10404" [
     ("model_preservation", [
@@ -73,5 +112,13 @@ let () =
           test_empty_models_omits_field;
         test_case "single-model round-trip stays consistent" `Quick
           test_single_model_round_trip;
+      ]);
+    ("failure_observer", [
+        test_case "increments metric" `Quick
+          test_failure_observer_increments_metric;
+        test_case "re-raises cancellation" `Quick
+          test_failure_observer_reraises_cancelled;
+        test_case "metric registered" `Quick
+          test_failure_metric_registered;
       ]);
   ]

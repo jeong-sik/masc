@@ -253,6 +253,21 @@ describe('EventStream', () => {
     expect(older.dataset.streamEventAttractionBand).toBe('low')
   })
 
+  it('renders gradient attraction metadata on event rows', () => {
+    const container = document.createElement('div')
+    render(h(EventStream, { events: baseEvents }), container)
+    const root = container.querySelector('[data-event-stream]') as HTMLElement
+    const latest = container.querySelector('[data-stream-event-id="e3"]') as HTMLElement
+    const middle = container.querySelector('[data-stream-event-id="e2"]') as HTMLElement
+    const older = container.querySelector('[data-stream-event-id="e1"]') as HTMLElement
+
+    expect(root.dataset.eventStreamHighAttractionCount).toBe('1')
+    expect(latest.dataset.streamEventAttractionScore).toBe('0.90')
+    expect(latest.dataset.streamEventAttractionBand).toBe('high')
+    expect(middle.dataset.streamEventAttractionBand).toBe('medium')
+    expect(older.dataset.streamEventAttractionBand).toBe('low')
+  })
+
   it('treats maxItems zero as an empty visible window', () => {
     const container = document.createElement('div')
     render(h(EventStream, { events: baseEvents, maxItems: 0 }), container)

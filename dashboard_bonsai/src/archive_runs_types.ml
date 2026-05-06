@@ -31,14 +31,24 @@ type loop =
   ; target_file : string
   }
 
+type fetch_status =
+  | Fetch_pending
+  | Fetch_fresh
+  | Fetch_stale of
+      { reason : string
+      ; consecutive_failures : int
+      }
+
 type response =
   { loops : loop list
   ; total : int
   ; offset : int
   ; limit : int
+  ; fetch_status : fetch_status
   }
 
-let fixture : response = { loops = []; total = 0; offset = 0; limit = 100 }
+let fixture : response =
+  { loops = []; total = 0; offset = 0; limit = 100; fetch_status = Fetch_pending }
 
 (* ---------- manual Yojson decoding ---------- *)
 
@@ -113,6 +123,7 @@ let response_of_yojson json : response =
   ; total = int_field json "total"
   ; offset = int_field json "offset"
   ; limit = int_field ~default:100 json "limit"
+  ; fetch_status = Fetch_fresh
   }
 ;;
 
@@ -123,4 +134,11 @@ let status_label = function
   | Failed -> "failed"
   | Completed -> "completed"
   | Unknown -> "—"
+;;
+
+let fetch_status_label = function
+  | Fetch_pending -> "fetch pending"
+  | Fetch_fresh -> "fetch ok"
+  | Fetch_stale { consecutive_failures; _ } ->
+    Printf.sprintf "stale %dx" consecutive_failures
 ;;

@@ -1484,6 +1484,14 @@ let make_hooks
      [make_hooks] closure — one state per keeper. *)
   let streak_state = Keeper_guards.make_streak_state () in
   let streak_threshold = 5 in
+  (* #11083: cap passive status/read loops inside one actionable turn.
+     Cross-turn passive loops are handled by Keeper_passive_loop_detector;
+     this per-turn budget prevents a single turn from spending all tool calls
+     on read-only observation before failing the completion contract. *)
+  let passive_tool_budget_state =
+    Keeper_guards.make_passive_tool_budget_state ()
+  in
+  let passive_tool_budget_threshold = 5 in
   let record_gate_decision event =
     record_pre_tool_gate_attempt
       ~meta_ref
@@ -1502,6 +1510,8 @@ let make_hooks
       ~tool_start_time
       ~streak_state
       ~streak_threshold
+      ~passive_tool_budget_state
+      ~passive_tool_budget_threshold
       ~denied:keeper_denied_tools
       ~max_cost_usd
       ~destructive_check
@@ -1556,6 +1566,7 @@ let make_hooks
     after_turn = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.AfterTurn { turn; response } ->
+        Keeper_guards.reset_passive_tool_budget_state passive_tool_budget_state;
         let meta = !meta_ref in
         let model = resolve_after_turn_model ~keeper_name:meta.name ~response in
         let usage_trust =

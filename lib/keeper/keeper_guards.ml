@@ -364,6 +364,16 @@ type streak_state = { mutable entry : string * int }
 
 let make_streak_state () : streak_state = { entry = ("", 0) }
 
+(** Mutable per-turn passive-tool budget state captured by
+    [passive_tool_budget_guard]. *)
+type passive_tool_budget_state = { mutable passive_count : int }
+
+let make_passive_tool_budget_state () : passive_tool_budget_state =
+  { passive_count = 0 }
+
+let reset_passive_tool_budget_state (state : passive_tool_budget_state) =
+  state.passive_count <- 0
+
 (* -------------------------------------------------------------- *)
 (* Timing guard — records tool_start_time for post_tool_use use    *)
 (* -------------------------------------------------------------- *)
@@ -474,6 +484,61 @@ let streak_guard
              ~tool_name ~reason_code:"streak_gate" ~reason_text)
       end
       else Agent_sdk.Hooks.Continue
+    | _ -> Agent_sdk.Hooks.Continue)
+
+(** Passive status/read budget gate: allow a small amount of observation,
+    then force the next tool call to be productive.  This targets the
+    #11083 failure mode where a keeper spends an entire actionable turn on
+    board/task/status reads and only fails at the completion contract. *)
+let passive_tool_budget_guard
+    ~(meta_ref : Keeper_types.keeper_meta ref)
+    ~on_gate_decision
+    ~(state : passive_tool_budget_state)
+    ~(max_passive_tools : int)
+  : Agent_sdk.Hooks.hooks =
+  hooks_of_pre_tool_use (fun event ->
+    match event with
+    | Agent_sdk.Hooks.PreToolUse
+        { tool_name; input; accumulated_cost_usd; turn; _ } ->
+      let t0 = Time_compat.now () in
+      if Keeper_tool_disclosure.is_passive_status_tool_name tool_name then begin
+        state.passive_count <- state.passive_count + 1;
+        if state.passive_count > max_passive_tools then begin
+          let keeper_name = (!meta_ref).Keeper_types.name in
+          let reason_text =
+            Printf.sprintf
+              "%s is passive status/read tool #%d in this turn (max=%d). Use an execution or completion tool next, such as keeper_shell, keeper_board_post, keeper_board_comment, keeper_task_claim, keeper_task_done, or keeper_stay_silent with typed no-work proof."
+              tool_name state.passive_count max_passive_tools
+          in
+          let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
+          Prometheus.inc_counter
+            Prometheus.metric_keeper_guards_failures
+            ~labels:[("keeper", keeper_name); ("site", "passive_tool_budget")]
+            ();
+          Log.Keeper.warn
+            "keeper:%s passive_tool_budget: blocked %s after %d passive tools in current turn"
+            keeper_name tool_name state.passive_count;
+          broadcast_tool_skipped
+            ~keeper_name ~tool_name ~reason_code:"passive_tool_budget";
+          let source_path = keeper_guards_source_path in
+          let source_line = __LINE__ in
+          report_gate_decision on_gate_decision
+            ~source_path:(Some source_path) ~source_line:(Some source_line)
+            ~stage:"passive_tool_budget" ~decision:Gate_override
+            ~reason_code:"passive_tool_budget" ~reason_text
+            ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
+            ~stage_latency_ms:latency_ms;
+          Agent_sdk.Hooks.Override
+            (render_inline_skip_reason_with_source
+               ~source_path ~source_line
+               ~tool_name ~reason_code:"passive_tool_budget" ~reason_text)
+        end
+        else Agent_sdk.Hooks.Continue
+      end
+      else begin
+        reset_passive_tool_budget_state state;
+        Agent_sdk.Hooks.Continue
+      end
     | _ -> Agent_sdk.Hooks.Continue)
 
 (** Keeper deny list. Block administrative / destructive tools that
@@ -666,6 +731,8 @@ let build_chain
     ~(tool_start_time : float ref)
     ~(streak_state : streak_state)
     ~(streak_threshold : int)
+    ~(passive_tool_budget_state : passive_tool_budget_state)
+    ~(passive_tool_budget_threshold : int)
     ~(denied : string list)
     ~(max_cost_usd : float option)
     ~(destructive_check : bool)
@@ -677,6 +744,9 @@ let build_chain
     timing_guard ~tool_start_time;
     custom_guard ~meta_ref ~on_gate_decision ~guard:pre_tool_use_guard;
     streak_guard ~meta_ref ~on_gate_decision ~state:streak_state ~threshold:streak_threshold;
+    passive_tool_budget_guard ~meta_ref ~on_gate_decision
+      ~state:passive_tool_budget_state
+      ~max_passive_tools:passive_tool_budget_threshold;
     deny_guard ~meta_ref ~on_gate_decision ~denied;
     cost_guard ~meta_ref ~on_gate_decision ~max_cost_usd;
     destructive_guard ~meta_ref ~on_gate_decision ~enabled:destructive_check;

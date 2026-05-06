@@ -129,6 +129,14 @@ type streak_state = { mutable entry : string * int }
 
 val make_streak_state : unit -> streak_state
 
+(** Mutable per-turn passive status/read budget state captured by
+    [passive_tool_budget_guard]. *)
+type passive_tool_budget_state
+
+val make_passive_tool_budget_state : unit -> passive_tool_budget_state
+
+val reset_passive_tool_budget_state : passive_tool_budget_state -> unit
+
 (** Record [tool_start_time] so the post_tool_use phase can compute
     latency. Always returns [Continue]. Compose FIRST so the
     timestamp is set even when a later guard returns [Override]. *)
@@ -151,6 +159,15 @@ val streak_guard :
   on_gate_decision:(gate_decision_event -> unit) ->
   state:streak_state ->
   threshold:int ->
+  Agent_sdk.Hooks.hooks
+
+(** Block further passive status/read tools once a turn has consumed
+    [max_passive_tools]. Non-passive tools reset the per-turn count. *)
+val passive_tool_budget_guard :
+  meta_ref:Keeper_types.keeper_meta ref ->
+  on_gate_decision:(gate_decision_event -> unit) ->
+  state:passive_tool_budget_state ->
+  max_passive_tools:int ->
   Agent_sdk.Hooks.hooks
 
 (** Reject every tool name in [denied]. *)
@@ -184,13 +201,15 @@ val governance_approval_guard :
   Agent_sdk.Hooks.hooks
 
 (** Build the full keeper pre_tool_use chain in canonical order:
-    timing -> custom -> streak -> deny -> cost -> destructive ->
-    governance_approval. *)
+    timing -> custom -> streak -> passive budget -> deny -> cost ->
+    destructive -> governance_approval. *)
 val build_chain :
   meta_ref:Keeper_types.keeper_meta ref ->
   tool_start_time:float ref ->
   streak_state:streak_state ->
   streak_threshold:int ->
+  passive_tool_budget_state:passive_tool_budget_state ->
+  passive_tool_budget_threshold:int ->
   denied:string list ->
   max_cost_usd:float option ->
   destructive_check:bool ->

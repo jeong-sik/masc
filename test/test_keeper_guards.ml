@@ -330,6 +330,66 @@ let test_streak_state_manual_reset () =
   let d = invoke hook (pre_tool_use_event ~tool_name:"t" ()) in
   check string "after reset -> Continue" "Continue" (decision_kind d)
 
+let test_passive_tool_budget_blocks_after_limit () =
+  let meta_ref = make_meta_ref "test_keeper" in
+  let state = KG.make_passive_tool_budget_state () in
+  let observed = ref [] in
+  let on_gate_decision event = observed := event :: !observed in
+  let hook =
+    KG.passive_tool_budget_guard ~meta_ref ~on_gate_decision
+      ~state ~max_passive_tools:2
+  in
+  let first =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ())
+  in
+  let second =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_board_get" ())
+  in
+  check string "first passive -> Continue" "Continue" (decision_kind first);
+  check string "second passive -> Continue" "Continue" (decision_kind second);
+  let blocked = invoke hook (pre_tool_use_event ~tool_name:"masc_status" ()) in
+  check string "third passive -> Override" "Override" (decision_kind blocked);
+  let text = override_text blocked in
+  check bool "override mentions passive budget" true
+    (contains_substring text "code=passive_tool_budget");
+  match !observed with
+  | [ event ] ->
+    check string "stage" "passive_tool_budget" event.KG.stage;
+    check string "reason_code" "passive_tool_budget" event.KG.reason_code;
+    check string "tool_name" "masc_status" event.KG.tool_name;
+    check string "decision" "override"
+      (KG.gate_decision_to_string event.KG.decision);
+    check bool "reason mentions current turn" true
+      (contains_substring event.KG.reason_text "in this turn")
+  | events ->
+    failf "expected one observer event, got %d" (List.length events)
+
+let test_passive_tool_budget_resets_on_productive_tool () =
+  let meta_ref = make_meta_ref "test_keeper" in
+  let state = KG.make_passive_tool_budget_state () in
+  let hook =
+    KG.passive_tool_budget_guard ~meta_ref
+      ~on_gate_decision:no_gate_observer ~state ~max_passive_tools:2
+  in
+  let _ = invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ()) in
+  let _ = invoke hook (pre_tool_use_event ~tool_name:"keeper_board_get" ()) in
+  let productive =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_task_done" ())
+  in
+  check string "productive tool resets and continues" "Continue"
+    (decision_kind productive);
+  let after_reset =
+    invoke hook (pre_tool_use_event ~tool_name:"masc_status" ())
+  in
+  check string "passive after productive reset -> Continue" "Continue"
+    (decision_kind after_reset);
+  KG.reset_passive_tool_budget_state state;
+  let after_manual_reset =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ())
+  in
+  check string "passive after manual reset -> Continue" "Continue"
+    (decision_kind after_manual_reset)
+
 let test_custom_guard_blocks () =
   let meta_ref = make_meta_ref "test_keeper" in
   let guard ~tool_name ~input:_ =
@@ -491,6 +551,12 @@ let () = run "Keeper_guards" [
     test_case "at threshold -> override" `Quick test_streak_guard_at_threshold;
     test_case "resets on different tool" `Quick test_streak_guard_resets_on_different_tool;
     test_case "manual state reset" `Quick test_streak_state_manual_reset;
+  ];
+  "passive_tool_budget_guard", [
+    test_case "blocks after passive limit" `Quick
+      test_passive_tool_budget_blocks_after_limit;
+    test_case "resets on productive tool" `Quick
+      test_passive_tool_budget_resets_on_productive_tool;
   ];
   "custom_guard", [
     test_case "user blocks" `Quick test_custom_guard_blocks;

@@ -8,6 +8,10 @@ import {
   flagBoardModerationTarget,
   submitBoardModerationAction,
 } from '../../api/board-moderation'
+import {
+  resetDashboardSessionActorForTests,
+  setCanonicalDashboardActor,
+} from '../../lib/dashboard-session-actor'
 
 vi.mock('../../api/board-moderation', () => ({
   fetchBoardModerationQueue: vi.fn(),
@@ -69,6 +73,7 @@ describe('BoardModerationSurface', () => {
   afterEach(() => {
     cleanup()
     vi.clearAllMocks()
+    resetDashboardSessionActorForTests()
   })
 
   it('renders queue entries with moderation state', async () => {
@@ -136,6 +141,24 @@ describe('BoardModerationSurface', () => {
       reason: 'harassment',
     }))
     expect(fetchQueueMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('defaults the reporter to the current dashboard actor', async () => {
+    setCanonicalDashboardActor('codex')
+    fetchQueueMock.mockResolvedValueOnce({ count: 0, entries: [] })
+    render(h(BoardModerationSurface, null))
+
+    await waitFor(() => expect(fetchQueueMock).toHaveBeenCalledTimes(1))
+    expect(screen.getByTestId('moderation-reporter')).toHaveValue('codex')
+    fireEvent.input(screen.getByTestId('moderation-target-id'), { target: { value: 'post-2' } })
+    fireEvent.click(screen.getByTestId('moderation-flag-submit'))
+
+    await waitFor(() => expect(flagTargetMock).toHaveBeenCalledWith({
+      target_kind: 'post',
+      target_id: 'post-2',
+      reporter: 'codex',
+      reason: 'spam',
+    }))
   })
 
   it('locks queue controls while a flag submission is in flight', async () => {

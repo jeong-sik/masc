@@ -17,6 +17,7 @@ import { Select } from '../common/select'
 import { SurfaceCard } from '../common/card'
 import { TimeAgo } from '../common/time-ago'
 import { showToast } from '../common/toast'
+import { currentCanonicalDashboardActor } from '../../lib/dashboard-session-actor'
 
 type QueueFilter = 'open' | 'resolved' | 'all'
 
@@ -134,7 +135,7 @@ export function BoardModerationSurface() {
   const [error, setError] = useState<string | null>(null)
   const [targetKind, setTargetKind] = useState<BoardModerationTargetKind>('post')
   const [targetId, setTargetId] = useState('')
-  const [reporter, setReporter] = useState('dashboard')
+  const [reporter, setReporter] = useState(() => currentCanonicalDashboardActor() ?? '')
   const [reason, setReason] = useState<BoardModerationFlagReason>('spam')
   const [submitting, setSubmitting] = useState(false)
   const [busyAction, setBusyAction] = useState<string | null>(null)
@@ -304,7 +305,7 @@ export function BoardModerationSurface() {
             <${TextInput}
               value=${reporter}
               disabled=${submitting}
-              placeholder="dashboard"
+              placeholder="operator"
               ariaLabel="Moderation reporter"
               testId="moderation-reporter"
               onInput=${(event: Event) => setReporter((event.target as HTMLInputElement).value)}

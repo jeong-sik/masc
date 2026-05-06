@@ -102,7 +102,7 @@
       ],
       "status": "PARTIAL",
       "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "Prompt evidence is represented in the partial catalog and startup replay. Draft implementation PR #13630 adds the Observe metric contract, but the full 206-row strict corpus and merged production metric surface are still absent.",
+      "gap": "Prompt evidence is represented in the partial catalog and startup replay. Merged PR #13630 adds the Observe metric contract, but the full 206-row strict corpus and production metric replay remain absent.",
       "implementation_pr_refs": [
         "https://github.com/jeong-sik/masc-mcp/pull/13630"
       ],
@@ -158,7 +158,7 @@
       ],
       "status": "PARTIAL",
       "criterion_id": "post_act_verify_complete",
-      "gap": "Deterministic log and metric replay exists. Draft implementation PR #13630 adds the Observe metric contract, but Prometheus/Grafana runtime metric wiring is not merged and replayed through Verify.",
+      "gap": "Deterministic log and metric replay exists. Merged PR #13630 adds the Observe metric contract, but production metric wiring has not been replayed through Verify.",
       "implementation_pr_refs": [
         "https://github.com/jeong-sik/masc-mcp/pull/13630"
       ],
@@ -287,8 +287,9 @@
       ],
       "status": "PARTIAL",
       "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "Branch semantics exist. Draft implementation PR #13657 adds the Verify pipeline gate contract, but complete-corpus Verify and post-ACT live replay remain blocked.",
+      "gap": "Branch semantics exist. Draft implementation PR #13657 adds the Verify pipeline gate contract, and draft PR #13507 adds the post-ACT live replay runner. Complete-corpus Verify remains blocked until those PRs are merged/live-replayed and the 206-row corpus exists.",
       "implementation_pr_refs": [
+        "https://github.com/jeong-sik/masc-mcp/pull/13507",
         "https://github.com/jeong-sik/masc-mcp/pull/13657"
       ],
       "tracking_issue_refs": [

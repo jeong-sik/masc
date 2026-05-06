@@ -1249,6 +1249,9 @@ def build_completion_audit(
                     "implementation_pr_refs_total": checklist_evidence.get(
                         "implementation_pr_refs_total"
                     ),
+                    "invalid_implementation_pr_refs": checklist_evidence.get(
+                        "invalid_implementation_pr_refs"
+                    ),
                     "missing_tracking_issue_refs": checklist_evidence.get(
                         "missing_tracking_issue_refs"
                     ),

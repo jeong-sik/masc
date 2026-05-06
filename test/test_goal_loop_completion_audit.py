@@ -823,7 +823,7 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
             checklist_evidence["requirements_with_implementation_pr_refs"],
             9,
         )
-        self.assertEqual(checklist_evidence["implementation_pr_refs_total"], 5)
+        self.assertEqual(checklist_evidence["implementation_pr_refs_total"], 6)
         self.assertEqual(checklist_evidence["invalid_implementation_pr_refs"], [])
         self.assertEqual(checklist_evidence["artifact_refs_total"], 57)
         self.assertEqual(checklist_evidence["artifact_refs_resolved"], 57)
@@ -845,7 +845,8 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
             closeout_evidence["requirements_with_implementation_pr_refs"],
             9,
         )
-        self.assertEqual(closeout_evidence["implementation_pr_refs_total"], 5)
+        self.assertEqual(closeout_evidence["implementation_pr_refs_total"], 6)
+        self.assertEqual(closeout_evidence["invalid_implementation_pr_refs"], [])
         self.assertTrue(closeout_evidence["has_strict_corpus_blocker"])
 
     def test_completion_audit_rejects_invalid_closeout_prompt_sources(
@@ -987,7 +988,12 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
             f"{first['requirement_id']}: invalid_implementation_pr_refs",
             checklist_evidence["invalid_requirements"],
         )
-        self.assertEqual(by_id["prompt_requirements_closeout_complete"].status, "FAIL")
+        closeout_criterion = by_id["prompt_requirements_closeout_complete"]
+        self.assertEqual(closeout_criterion.status, "FAIL")
+        self.assertEqual(
+            closeout_criterion.evidence["invalid_implementation_pr_refs"],
+            [first["requirement_id"]],
+        )
 
     def test_completion_audit_rejects_missing_prompt_artifact_refs(self) -> None:
         checklist = json.loads(PROMPT_CHECKLIST_FIXTURE.read_text(encoding="utf-8"))

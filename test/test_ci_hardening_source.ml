@@ -1243,6 +1243,25 @@ let test_keeper_github_pr_tool_contracts () =
     (file_contains_pattern "config/tool_policy.toml"
        {|keeper_pr_create|})
 
+let test_keeper_pr_audit_contracts () =
+  check bool "keeper fleet audit has explicit PR-create flag" true
+    (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
+       "--require-pr-create-evidence");
+  check bool "keeper fleet audit treats keeper_pr_create as creation evidence" true
+    (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
+       "PR_CREATE_TOOLS");
+  check bool "keeper fleet audit requires structured create markers" true
+    (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
+       "has_gh_pr_create_marker");
+  check bool "keeper fleet audit scans filesystem JSONL evidence" true
+    (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
+       "pr_action_metric_paths"
+     && file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
+          "tool_call_paths");
+  check bool "keeper fleet audit survives live invalid utf8 rows" true
+    (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
+       {|errors="replace"|})
+
 let test_dashboard_warm_hydration_contracts () =
   check bool "execution default route hydrates cache on first success" true
     (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
@@ -1998,6 +2017,8 @@ let () =
             test_tool_failure_classification_contracts;
           test_case "keeper github PR tool contracts" `Quick
             test_keeper_github_pr_tool_contracts;
+          test_case "keeper PR audit contracts" `Quick
+            test_keeper_pr_audit_contracts;
           test_case "dashboard warm hydration contracts" `Quick
             test_dashboard_warm_hydration_contracts;
            test_case "http read surface contracts" `Quick test_http_read_surface_contracts;

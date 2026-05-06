@@ -11,6 +11,10 @@ let attr_bool = function
   | Some (`Bool b) -> Some b
   | _ -> None
 
+let attr_int = function
+  | Some (`Int i) -> Some i
+  | _ -> None
+
 let test_keeper_turn_span_name () =
   check
     string
@@ -136,6 +140,25 @@ let test_attr_key_registry_boundaries () =
        Lib.Otel_genai.Attr_key.keeper_name)
 ;;
 
+let test_attr_key_registry_full_coverage () =
+  let module K = Lib.Otel_genai.Attr_key in
+  let check_official key =
+    check bool (key ^ " official") true (K.is_official_gen_ai key);
+    check bool (key ^ " not masc extension") false (K.is_masc_extension key)
+  in
+  let check_extension key =
+    check bool (key ^ " extension") true (K.is_masc_extension key);
+    check bool (key ^ " not official") false (K.is_official_gen_ai key)
+  in
+  let check_legacy key =
+    check bool (key ^ " not official") false (K.is_official_gen_ai key);
+    check bool (key ^ " not extension") false (K.is_masc_extension key)
+  in
+  List.iter check_official K.official_gen_ai;
+  List.iter check_extension K.masc_extensions;
+  List.iter check_legacy K.legacy
+;;
+
 let test_tool_execution_attrs () =
   let attrs = Lib.Otel_genai.tool_execution_attrs ~tool_name:"keeper_shell" in
   check
@@ -150,6 +173,64 @@ let test_tool_execution_attrs () =
     (attr_string (assoc Lib.Otel_genai.Attr_key.gen_ai_tool_name attrs))
 ;;
 
+let test_dispatch_hook_emits_tool_span_payload () =
+  Lib.Tool_dispatch.clear_hooks ();
+  Fun.protect
+    ~finally:Lib.Tool_dispatch.clear_hooks
+    (fun () ->
+      let spans = ref [] in
+      Lib.Otel_dispatch_hook.with_test_span_emitter
+        ~enabled:true
+        ~emit_span:(fun ~name ~attrs -> spans := (name, attrs) :: !spans)
+        (fun () ->
+          Lib.Otel_dispatch_hook.install ();
+          let result : Lib.Tool_result.t =
+            { success = true
+            ; data = `String "ok"
+            ; tool_name = "keeper_shell"
+            ; duration_ms = 123.4
+            }
+          in
+          let returned = Lib.Tool_dispatch.run_post_hooks result in
+          check bool "post-hook preserves success" true returned.success);
+      match !spans with
+      | [ (name, attrs) ] ->
+          check string "span name" "tool/keeper_shell" name;
+          check
+            (option (of_pp Fmt.Dump.string))
+            "tool operation"
+            (Some "execute_tool")
+            (attr_string
+               (assoc Lib.Otel_genai.Attr_key.gen_ai_operation_name attrs));
+          check
+            (option (of_pp Fmt.Dump.string))
+            "gen_ai tool name"
+            (Some "keeper_shell")
+            (attr_string
+               (assoc Lib.Otel_genai.Attr_key.gen_ai_tool_name attrs));
+          check
+            (option (of_pp Fmt.Dump.string))
+            "legacy tool name"
+            (Some "keeper_shell")
+            (attr_string (assoc Lib.Otel_genai.Attr_key.tool_name attrs));
+          check
+            (option bool)
+            "legacy tool success"
+            (Some true)
+            (attr_bool (assoc Lib.Otel_genai.Attr_key.tool_success attrs));
+          check
+            (option int)
+            "legacy duration ms"
+            (Some 123)
+            (attr_int (assoc Lib.Otel_genai.Attr_key.tool_duration_ms attrs));
+          check
+            (option (of_pp Fmt.Dump.string))
+            "otel status"
+            (Some "OK")
+            (attr_string (assoc "otel.status_code" attrs))
+      | _ -> fail "expected exactly one emitted span")
+;;
+
 let () =
   run
     "otel_genai"
@@ -159,7 +240,11 @@ let () =
         ; test_case "omit missing task id" `Quick test_keeper_turn_attrs_omit_missing_task
         ; test_case "attr key registry boundaries" `Quick
             test_attr_key_registry_boundaries
+        ; test_case "attr key registry full coverage" `Quick
+            test_attr_key_registry_full_coverage
         ; test_case "tool execution attrs" `Quick test_tool_execution_attrs
+        ; test_case "dispatch hook emits tool span payload" `Quick
+            test_dispatch_hook_emits_tool_span_payload
         ] )
     ]
 ;;

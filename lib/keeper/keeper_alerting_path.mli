@@ -14,6 +14,9 @@ val strip_trailing_slashes : string -> string
     tree until an ancestor resolves, then reconstructs the suffix. *)
 val normalize_path_for_check : string -> string
 
+(** [normalize_path_for_check] with trailing slashes stripped. *)
+val normalize_path_for_check_stripped : string -> string
+
 (** Normalize an allowed-paths entry against [root], returning [None]
     when blank or unresolvable. *)
 val normalize_allowed_path_for_check :

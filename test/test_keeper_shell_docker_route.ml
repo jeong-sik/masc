@@ -168,13 +168,16 @@ let with_fake_docker script f =
   let dir = temp_dir () in
   let docker_path = Filename.concat dir "docker" in
   let gh_path = Filename.concat dir "gh" in
-  write_file docker_path script;
-  write_file gh_path
+  let fake_gh_auth_status_ok =
     "#!/bin/sh\n\
      if [ \"$1\" = \"auth\" ] && [ \"$2\" = \"status\" ]; then\n\
-       exit 0\n\
+     \  exit 0\n\
      fi\n\
-     exit 0\n";
+     printf 'unexpected gh invocation: %s\\n' \"$*\" >&2\n\
+     exit 2\n"
+  in
+  write_file docker_path script;
+  write_file gh_path fake_gh_auth_status_ok;
   Unix.chmod docker_path 0o755;
   Unix.chmod gh_path 0o755;
   let path =
@@ -189,22 +192,18 @@ let with_fake_docker script f =
 let with_tool_policy_config f =
   let project_root = Masc_test_deps.find_project_root () in
   let config_dir = Filename.concat project_root "config" in
+  let reset () =
+    Masc_mcp.Config_dir_resolver.reset ();
+    Tool_code_write.reset_policy_config_cache ();
+    Masc_mcp.Keeper_tool_policy.reset_policy_config_for_test ()
+  in
+  reset ();
   with_env "MASC_CONFIG_DIR" config_dir @@ fun () ->
-  Masc_mcp.Config_dir_resolver.reset ();
-  Tool_code_write.reset_policy_config_cache ();
-  Masc_mcp.Keeper_tool_policy.reset_policy_config_for_test ();
-  Fun.protect
-    ~finally:(fun () ->
-      Tool_code_write.reset_policy_config_cache ();
-      Masc_mcp.Keeper_tool_policy.reset_policy_config_for_test ();
-      Masc_mcp.Config_dir_resolver.reset ())
-    (fun () ->
-      (match
-         Masc_mcp.Keeper_tool_policy.init_policy_config ~base_path:project_root
-       with
-       | Ok () -> ()
-       | Error e -> Alcotest.failf "init_policy_config failed: %s" e);
-      f ())
+  reset ();
+  Fun.protect ~finally:reset @@ fun () ->
+  match Masc_mcp.Keeper_tool_policy.init_policy_config ~base_path:project_root with
+  | Ok () -> f ()
+  | Error msg -> Alcotest.failf "init_policy_config failed: %s" msg
 
 let with_config_dir config_dir f =
   let prior = Sys.getenv_opt "MASC_CONFIG_DIR" in

@@ -63,8 +63,7 @@ let keeper_private_container_root (meta : keeper_meta) =
 let docker_private_workspace_cwd ~(config : Coord.config) ~(meta : keeper_meta)
     host_cwd =
   let normalize_path_for_containment path =
-    Keeper_alerting_path.normalize_path_for_check path
-    |> Keeper_alerting_path.strip_trailing_slashes
+    Keeper_alerting_path.normalize_path_for_check_stripped path
   in
   let host_root =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
@@ -91,8 +90,7 @@ let rewrite_docker_command_paths ~(config : Coord.config) ~(meta : keeper_meta)
   in
   let normalized_host_root =
     raw_host_root
-    |> Keeper_alerting_path.normalize_path_for_check
-    |> Keeper_alerting_path.strip_trailing_slashes
+    |> Keeper_alerting_path.normalize_path_for_check_stripped
   in
   let container_root = keeper_private_container_root meta in
   let rewritten =

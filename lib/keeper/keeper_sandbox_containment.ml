@@ -1,8 +1,7 @@
 (** Keeper_sandbox_containment — see .mli for contract. *)
 
 let normalize p =
-  Keeper_alerting_path.normalize_path_for_check p
-  |> Keeper_alerting_path.strip_trailing_slashes
+  Keeper_alerting_path.normalize_path_for_check_stripped p
 
 let starts_with ~prefix s = String.starts_with ~prefix s
 

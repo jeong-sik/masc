@@ -223,7 +223,7 @@
   test/fixtures/goal_loop/prompt-closeout-checklist.external-claim.json
   --source-row-candidate-inventory
   test/fixtures/goal_loop/source-row-candidate-inventory.external-claim.json
-  --require-complete --format text` checked at 2026-05-06T14:21:58+09:00,
+  --require-complete --format text` checked at 2026-05-06T14:25:31+09:00,
   confidence High: exits non-zero with only
   `strict_row_level_catalog_complete`, while the new
   `prompt_to_artifact_checklist_recorded` criterion passes, and the strict row
@@ -233,14 +233,14 @@
   requirements, with the strict 206-row corpus explicitly bound to
   `strict_row_level_catalog_complete`.
 - [근거] `python3 test/test_goal_loop_completion_audit.py` checked at
-  2026-05-06T09:59:29+09:00, confidence High: the completion audit now accepts
-  an optional `--strict-row-corpus` artifact and validates it against the
-  checked contract in `test/fixtures/goal_loop/strict-row-corpus-contract.json`
-  without using that artifact as a proxy for completion. A synthetic valid
-  206-row corpus is recorded as `validated=true`, but the closeout remains
-  `BLOCKED` while Orient still reports only 19 itemized rows; invalid supplied
-  corpora with duplicate IDs or `/Users/...` paths block
-  `strict_row_level_catalog_complete`.
+  2026-05-06T14:25:31+09:00, confidence High: the completion audit accepts
+  optional `--strict-row-corpus` and `--source-row-candidate-inventory`
+  artifacts, validates catalog identity and internal totals, and still does not
+  use either artifact as a proxy for completion. A synthetic valid 206-row
+  corpus is recorded as `validated=true`, while the explicit source-row
+  inventory is recorded as 132/206; the closeout remains `BLOCKED` while Orient
+  still reports only 19 itemized rows. Invalid supplied corpora or inconsistent
+  source-row inventories block `strict_row_level_catalog_complete`.
 - [근거] `python3 test/test_observe_goal_loop_logs.py` and
   `python3 test/test_goal_loop_status.py` checked at 2026-05-06T10:15:47+09:00,
   confidence High: Orient now accepts the same optional `--strict-row-corpus`

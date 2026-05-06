@@ -245,7 +245,8 @@ let make_keeper_tool_handler
              (ToolCalled + ToolCompleted). MASC-side observers removed
              in refactor/tool-call-single-source. *)
           (let tr = Tool_result.{ tool_name = name; success = false;
-              duration_ms = Float.of_int duration_ms; data = `Null } in
+              duration_ms = Float.of_int duration_ms; data = `Null;
+              legacy_message = raw_result } in
            ignore (Tool_dispatch.run_post_hooks tr));
           let detail =
             let s = String.trim raw_result in
@@ -297,7 +298,8 @@ let make_keeper_tool_handler
           !Keeper_exec_tools.on_keeper_tool_call ~tool_name:name ~success:true ~duration_ms;
           (* Tool-call observability via OAS Event_bus. See above. *)
           (let tr = Tool_result.{ tool_name = name; success = true;
-              duration_ms = Float.of_int duration_ms; data = `Null } in
+              duration_ms = Float.of_int duration_ms; data = `Null;
+              legacy_message = raw_result } in
            ignore (Tool_dispatch.run_post_hooks tr));
           let ts = Time_compat.now () in
           (try Sse.broadcast

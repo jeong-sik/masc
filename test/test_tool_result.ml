@@ -46,6 +46,19 @@ let test_wrap_prefixed_json_response () =
         Yojson.Safe.Util.(List.assoc "content" fields |> to_string)
   | _ -> Alcotest.fail "expected parsed JSON from prefixed payload"
 
+let test_prefixed_json_legacy_message_roundtrip () =
+  let start = 1000.0 in
+  let message =
+    "Post created:\n{\"id\":\"post-1\",\"content\":\"hello\",\"ok\":true}"
+  in
+  let r =
+    Tool_result.wrap ~tool_name:"masc_board_post" ~start_time:start
+      (true, message)
+  in
+  Alcotest.(check bool) "success preserved" true r.success;
+  let legacy = Tool_result.message r in
+  Alcotest.(check string) "legacy prefix preserved" message legacy
+
 let test_to_json () =
   let start = Time_compat.now () in
   let raw = (true, "done") in
@@ -107,6 +120,8 @@ let () =
       Alcotest.test_case "plain string" `Quick test_wrap_plain_string;
       Alcotest.test_case "prefixed json response" `Quick
         test_wrap_prefixed_json_response;
+      Alcotest.test_case "prefixed json legacy message roundtrip" `Quick
+        test_prefixed_json_legacy_message_roundtrip;
     ];
     "to_json", [
       Alcotest.test_case "fields present" `Quick test_to_json;

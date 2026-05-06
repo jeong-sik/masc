@@ -248,9 +248,12 @@ let test_chronicle_memory_episode_shape () =
   check bool "goal ids metadata"
     true
     (List.mem "task-123" (metadata_list "goal_ids" episode.metadata));
-  check bool "summary mentions commit count"
-    true
-    (String.contains episode.action '2')
+  let expected_summary =
+    "Git chronicle PK-999: ship chronicle memory adapter (2 commits; files: \
+     lib/chronicle_memory.ml, test/test_chronicle_ingest.ml)"
+  in
+  check string "summary includes structured commit count" expected_summary
+    episode.action
 
 let test_chronicle_memory_store_recall () =
   let memory = Agent_sdk.Memory.create () in

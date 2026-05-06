@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
 import {
+  buildTemporalSyncRows,
   EventStream,
   getVisibleStreamEvents,
   summarizeEventStream,
@@ -122,6 +123,9 @@ describe('EventStream', () => {
     expect(root.dataset.eventStreamWarnCount).toBe('1')
     expect(root.dataset.eventStreamErrorCount).toBe('1')
     expect(root.dataset.eventStreamLatestTimestamp).toBe(String(latest.timestamp))
+    expect(root.dataset.eventStreamTemporalSyncWindowMs).toBe('5000')
+    expect(root.dataset.eventStreamTemporalSyncGroupCount).toBe('0')
+    expect(root.dataset.eventStreamMaxTemporalSyncGroupSize).toBe('1')
   })
 
   it('exposes event row metadata and datetime', () => {
@@ -159,6 +163,38 @@ describe('EventStream', () => {
       hiddenCount: 1,
       status: 'error',
     })
+  })
+
+  it('groups adjacent visible events inside the temporal synchronization window', () => {
+    const rows = buildTemporalSyncRows(getVisibleStreamEvents(baseEvents, 100), 65000)
+
+    expect(rows.map(row => row.event.id)).toEqual(['e3', 'e2', 'e1'])
+    expect(rows[0]?.syncGroupId).toBe(rows[1]?.syncGroupId)
+    expect(rows[0]?.syncGroupSize).toBe(2)
+    expect(rows[1]?.syncGroupSize).toBe(2)
+    expect(rows[2]?.syncGroupSize).toBe(1)
+    expect(summarizeEventStream(baseEvents, 100, 65000)).toMatchObject({
+      temporalSyncGroupCount: 1,
+      maxTemporalSyncGroupSize: 2,
+    })
+  })
+
+  it('renders temporal synchronization metadata and cue badges', () => {
+    const container = document.createElement('div')
+    render(h(EventStream, { events: baseEvents, temporalSyncWindowMs: 65000 }), container)
+    const root = container.querySelector('[data-event-stream]') as HTMLElement
+    const latest = container.querySelector('[data-stream-event-id="e3"]') as HTMLElement
+    const neighbor = container.querySelector('[data-stream-event-id="e2"]') as HTMLElement
+    const older = container.querySelector('[data-stream-event-id="e1"]') as HTMLElement
+
+    expect(root.dataset.eventStreamTemporalSyncWindowMs).toBe('65000')
+    expect(root.dataset.eventStreamTemporalSyncGroupCount).toBe('1')
+    expect(root.dataset.eventStreamMaxTemporalSyncGroupSize).toBe('2')
+    expect(latest.dataset.streamEventSyncGroup).toBe(neighbor.dataset.streamEventSyncGroup)
+    expect(latest.dataset.streamEventSyncSize).toBe('2')
+    expect(neighbor.dataset.streamEventSyncSize).toBe('2')
+    expect(older.dataset.streamEventSyncSize).toBe('1')
+    expect(container.textContent).toContain('sync 2')
   })
 
   it('treats maxItems zero as an empty visible window', () => {

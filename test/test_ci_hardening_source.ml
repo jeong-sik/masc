@@ -602,7 +602,21 @@ let test_keeper_agent_upgrade_source_contracts () =
   check bool "keeper post-turn tail order is tool emission before multimodal" true
     (match tool_emission, multimodal with
      | Some t, Some m -> t < m
-     | _ -> false)
+     | _ -> false);
+  let guarded_wirein_catch message =
+    file_contains_pattern "lib/keeper/keeper_post_turn.ml"
+      ("with\n        | Eio.Cancel.Cancelled _ as e -> raise e\n        | exn ->\n\
+        \          Log.Keeper.warn\n            \"keeper:%s "
+       ^ message ^ " failed: %s\"")
+  in
+  check bool "autonomous post-turn wire-in re-raises cancellation" true
+    (guarded_wirein_catch "autonomous wire-in");
+  check bool "resilience post-turn wire-in re-raises cancellation" true
+    (guarded_wirein_catch "resilience wire-in");
+  check bool "tool emission post-turn wire-in re-raises cancellation" true
+    (guarded_wirein_catch "tool emission drain");
+  check bool "multimodal post-turn wire-in re-raises cancellation" true
+    (guarded_wirein_catch "multimodal wire-in")
 
 let test_contract_harness_contracts () =
   check bool "contract harness exposes extract_text helper" true

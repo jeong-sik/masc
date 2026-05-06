@@ -293,6 +293,17 @@ let record_dashboard_oas_response ~config ~total_duration_ms ?serialization_ms
         "oas_worker %s: dashboard_oas_bridge record failed: %s"
         config.name (Printexc.to_string exn)
 
+let close_agent_for_cleanup ?(propagate_cancel = true) ~config agent =
+  try Agent_sdk.Agent.close agent with
+  | Eio.Cancel.Cancelled _ as e ->
+      Log.Misc.warn
+        "oas_worker %s: agent close cancelled during cleanup"
+        config.name;
+      if propagate_cancel then raise e
+  | close_exn ->
+      Log.Misc.warn "oas_worker %s: agent close failed during cleanup: %s"
+        config.name (Printexc.to_string close_exn)
+
 (* ================================================================ *)
 (* Resume from checkpoint                                            *)
 (* ================================================================ *)
@@ -561,14 +572,12 @@ let run
          Log.Misc.debug "oas_worker: agent errored (no proof): %s" detail);
       Error err)
   with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Eio.Cancel.Cancelled _ as exn ->
+    close_agent_for_cleanup ~propagate_cancel:false ~config agent;
+    raise exn
   | exn ->
     let bt = Printexc.get_backtrace () in
-    (try Agent_sdk.Agent.close agent with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | close_exn ->
-       Log.Misc.warn "agent close failed during cleanup: %s"
-         (Printexc.to_string close_exn));
+    close_agent_for_cleanup ~config agent;
     let detail =
       Printf.sprintf "execution exception: %s" (Printexc.to_string exn)
     in

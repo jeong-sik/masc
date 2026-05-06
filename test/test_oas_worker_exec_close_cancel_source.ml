@@ -61,14 +61,16 @@ let () =
           (Printf.sprintf "no oas_worker_exec.ml source path resolved (cwd=%s, exe=%s)"
              (Sys.getcwd ()) exe)
   in
-  let cancel_guard = "Eio.Cancel.Cancelled _ as e -> raise e" in
+  let cancel_guard = "Eio.Cancel.Cancelled _ as e ->" in
+  let cancel_reraise = "if propagate_cancel then raise e" in
   let close_warning = "agent close failed during cleanup" in
   assert_contains ~label:"close cleanup cancel guard block" src
-    "try Agent_sdk.Agent.close agent with\n\
-     \     | Eio.Cancel.Cancelled _ as e -> raise e\n\
-     \     | close_exn ->";
+    "let close_agent_for_cleanup ?(propagate_cancel = true) ~config agent =";
   assert_contains ~label:"cleanup cancel guard" src cancel_guard;
+  assert_contains ~label:"cleanup cancel re-raise" src cancel_reraise;
   assert_contains ~label:"cleanup warning anchor" src close_warning;
   assert_order ~label:"cancel guard before cleanup warning" src cancel_guard
     close_warning;
+  assert_order ~label:"cancel guard before conditional re-raise" src cancel_guard
+    cancel_reraise;
   print_endline "test_oas_worker_exec_close_cancel_source: OK"

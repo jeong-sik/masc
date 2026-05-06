@@ -266,8 +266,9 @@ let board_contributor_quality_fields = function
   | None -> []
   | Some quality -> [ ("contributor_quality", quality) ]
 
-let board_comment_dashboard_json ?(include_moderation = false) ?current_vote
-    ?(blind_votes = false) ?reactions (c : Board.comment) : Yojson.Safe.t =
+let board_comment_dashboard_json ?(include_moderation = false)
+    ?(blind_votes = false) ?current_vote ?reactions (c : Board.comment) :
+    Yojson.Safe.t =
   let author = Board.Agent_id.to_string c.author in
   let comment_id = Board.Comment_id.to_string c.id in
   match Board.comment_to_yojson c with

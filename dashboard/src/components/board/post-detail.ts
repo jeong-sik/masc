@@ -494,7 +494,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
           </div>
 
           <!-- Badges -->
-          ${(post.hearth || post.visibility || post.expires_at || post.classification_reason || (post.moderation_status && post.moderation_status !== 'none') || (post.report_count ?? 0) > 0)
+          ${(post.hearth || post.visibility || post.expires_at || post.classification_reason || qualityPercent !== null || (post.moderation_status && post.moderation_status !== 'none') || (post.report_count ?? 0) > 0)
             ? html`
                 <div class="flex flex-col gap-2">
                   <div class="flex gap-1.5 flex-wrap">

@@ -56,9 +56,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
           ~voter
       in
       let reactions_for = board_reactions_lookup reaction_rows in
-      let contributor_quality_for =
-        board_contributor_quality_lookup ~config ()
-      in
+      let contributor_quality_for = board_contributor_quality_lookup ?config () in
       let posts_json = List.map (fun (p : Board.post) ->
         let author = Board.Agent_id.to_string p.author in
         let post_id = Board.Post_id.to_string p.id in
@@ -115,7 +113,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
       in
       let (status, body) =
         board_post_detail_json ~include_moderation:false ~blind_votes ~voter
-          ~config:(Some config)
+          ~config
           ~response_format:format ~post_id
       in
       h2_respond_json h2_reqd body ~status ~extra_headers:cors;

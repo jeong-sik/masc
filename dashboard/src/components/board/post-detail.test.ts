@@ -476,6 +476,32 @@ describe('PostDetail', () => {
     expect(screen.getByLabelText('기여자 품질 91점 · 우수')).toHaveTextContent('품질 91')
   })
 
+  it('renders contributor quality when it is the only detail badge', () => {
+    const post = {
+      id: 'post-quality',
+      author: 'sleepers',
+      title: 'Post',
+      body: 'Body',
+      content: 'Body',
+      created_at: '2026-04-02T00:00:00Z',
+      updated_at: '2026-04-02T00:00:00Z',
+      votes: 0,
+      comment_count: 0,
+      post_kind: 'direct',
+      moderation_status: 'none',
+      contributor_quality: {
+        score: 0.42,
+        band: 'watch',
+        source: 'agent_reputation',
+      },
+      comments: [],
+    } as any
+
+    render(h(PostDetail, { post }))
+
+    expect(screen.getByLabelText('기여자 품질 42점 · 관찰')).toHaveTextContent('품질 42')
+  })
+
   it('marks the current post vote as pressed', async () => {
     const post = {
       id: 'post-1',

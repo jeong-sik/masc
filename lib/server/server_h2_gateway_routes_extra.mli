@@ -11,7 +11,7 @@ val dispatch :
   httpun_request:Httpun.Request.t ->
   cors:(string * string) list ->
   path:string ->
-  config:Coord.config ->
+  config:Coord.config option ->
   [ `GET | `POST | `DELETE | `OPTIONS | `PUT | `HEAD
   | `CONNECT | `TRACE | `Other of string ] ->
   bool

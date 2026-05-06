@@ -22,7 +22,7 @@
     - {b Vote log persistence}: [append_vote_log],
       [rewrite_vote_log].
     - {b Internal vote outcome}: the [vote_outcome] record
-      carries the score delta, optional fresh-upvote economy
+      carries the score delta, optional fresh peer-upvote economy
       credit, and post-lock vote log / feedback side effects.
     - {b Persistence loaders}: [load_persisted_posts],
       [load_persisted_comments], [load_persisted_votes],
@@ -94,7 +94,7 @@ val vote :
 
     Vote flips swap up↔down without re-counting (and
     {b without} earning credits, to prevent down/up
-    alternation abuse).  Fresh upvotes earn the post
+    alternation abuse).  Fresh peer upvotes earn the post
     author a credit via [Agent_economy.earn] {b outside}
     the lock so the ledger write does not block other
     readers.  Every vote is broadcast to
@@ -201,7 +201,8 @@ val karma_score_for_direction : vote_direction -> int
 val build_karma_ledger : store -> karma_event list
 (** Rebuild the full karma ledger from the in-memory vote log and
     author tables.  One {!karma_event} is emitted per [Up] vote
-    whose target post/comment still exists in the store.
+    whose target post/comment still exists in the store and whose
+    voter differs from the content author.
 
     The function:
     - Holds the store lock for the duration of the snapshot.
@@ -209,10 +210,11 @@ val build_karma_ledger : store -> karma_event list
       callers can replay them in chronological order.
     - Silently drops votes whose target has since been deleted
       (content gone, vote orphan — not an error).
+    - Excludes self-upvotes from karma. The board score can still
+      record a self-vote, but reputation is peer recognition only.
 
     Replay contract: [totals_of_karma_ledger (build_karma_ledger s)]
-    must equal the output of [get_all_karma s] when no votes have
-    been quarantined or dropped. *)
+    must equal the output of [get_all_karma s]. *)
 
 val totals_of_karma_ledger : karma_event list -> (string * int) list
 (** Aggregate [(recipient, total_karma)] pairs from a ledger.
@@ -225,13 +227,14 @@ val karma_event_to_yojson : karma_event -> Yojson.Safe.t
     [ts_iso] is RFC-3339 UTC (["YYYY-MM-DDTHH:MM:SSZ"]). *)
 
 val get_agent_karma : store -> agent_name:string -> int
-(** Sums [votes_up] across every post + comment authored
-    by [agent_name].  Lock-free read of the in-memory
-    [posts] / [comments] tables. *)
+(** Returns the karma projection for [agent_name] from the same
+    ledger-backed totals used by {!get_all_karma}.  Self-upvotes are
+    excluded. *)
 
 val get_all_karma : store -> (string * int) list
-(** Returns [(agent_name, total_upvotes)] for every author
-    in the store.  Memoised in [store.karma_cache] —
+(** Returns [(agent_name, total_peer_upvotes)] for every author in
+    the store by replaying the karma ledger.  Memoised in
+    [store.karma_cache] —
     {!invalidate_post_caches} and
     {!invalidate_comment_caches} clear the entry on every
     relevant mutation. *)

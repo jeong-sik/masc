@@ -253,8 +253,11 @@ val karma_score_for_direction : vote_direction -> int
 (* Up → +1,  Down → 0 *)
 ```
 
-Downvotes do **not** subtract karma.  All replay and rebuild operations
-must call `karma_score_for_direction` — never inline the rule.
+Downvotes do **not** subtract karma. Self-upvotes can affect the visible
+content score, but they do **not** emit karma events and do **not** mint
+`Earn_upvote` economy credit; karma is peer recognition only. All replay
+and rebuild operations must call `karma_score_for_direction` — never
+inline the rule.
 
 ### 9a.2 Karma Event Type
 
@@ -273,15 +276,16 @@ type karma_event = {
 
 ```ocaml
 val build_karma_ledger : store -> karma_event list
-(* Reads vote_log; returns Up-only events sorted by ts ascending. *)
+(* Reads vote_log; returns peer Up-only events sorted by ts ascending. *)
 
 val totals_of_karma_ledger : karma_event list -> (string * int) list
 (* Aggregates (recipient, total) pairs sorted descending by total. *)
 ```
 
 **Invariant:** `totals_of_karma_ledger (build_karma_ledger store)` must
-equal `get_all_karma store` for every recipient in the store (modulo
-quarantined fixture votes).
+equal `get_all_karma store` for every recipient in the store. Deleted
+targets, quarantined fixture votes, and self-upvotes are excluded by the
+ledger projection before totals are computed.
 
 ### 9a.4 HTTP API
 

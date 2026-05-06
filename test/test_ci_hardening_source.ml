@@ -27,6 +27,10 @@ let file_contains_pattern file_rel pattern =
 let file_not_contains_pattern file_rel pattern =
   not (file_contains_pattern file_rel pattern)
 
+let guarded_file_not_contains_pattern file_rel pattern =
+  Sys.file_exists (source_path file_rel)
+  && file_not_contains_pattern file_rel pattern
+
 let file_contains_line_with_patterns file_rel patterns =
   let path = source_path file_rel in
   if not (Sys.file_exists path) then false
@@ -825,16 +829,82 @@ let test_keeper_zombie_field_contracts () =
       "lib/keeper/keeper_meta_json.ml";
       "lib/keeper/keeper_meta_json_parse.ml";
       "dashboard/src/types/core.ts";
+      "dashboard/src/types/dashboard-execution.ts";
       "dashboard/src/keeper-store-normalize.ts";
     ]
   in
-  check bool "last_tools_used stays removed from keeper meta surfaces" true
-    (List.for_all
-       (fun file -> file_not_contains_pattern file "last_tools_used")
-       files);
+  List.iter
+    (fun file ->
+       check bool
+         ("last_tools_used stays removed from keeper meta surface: " ^ file)
+         true
+         (guarded_file_not_contains_pattern file "last_tools_used"))
+    files;
   check bool "per-turn tools_used remains on execution receipts" true
     (file_contains_pattern "lib/keeper/keeper_execution_receipt.mli"
-       "tools_used : string list")
+       "tools_used : string list");
+  let module R = Masc_mcp.Keeper_execution_receipt in
+  let receipt : R.t =
+    {
+      keeper_name = "test-keeper";
+      agent_name = "test-agent";
+      trace_id = "trace-test";
+      generation = 1;
+      turn_count = Some 1;
+      current_task_id = Some "task-123";
+      goal_ids = [ "goal-123" ];
+      outcome = "ok";
+      terminal_reason_code = "turn_complete";
+      response_text_present = true;
+      model_used = Some "test-model";
+      requested_tools = [ "Read" ];
+      reported_tools = [ "Read" ];
+      observed_tools = [ "Read" ];
+      canonical_tools = [ "Read" ];
+      unexpected_tools = [];
+      tools_used = [ "Read" ];
+      tool_contract_result = "satisfied";
+      tool_surface =
+        {
+          turn_lane = "unified";
+          tool_surface_class = "post_dispatch";
+          tool_requirement = Masc_mcp.Keeper_agent_tool_surface.Required;
+          visible_tool_count = 1;
+          tool_gate_enabled = true;
+          tool_surface_fallback_used = false;
+          required_tools = [ "Read" ];
+          missing_required_tools = [];
+        };
+      sandbox_kind = "local";
+      sandbox_root = None;
+      network_mode = "offline";
+      approval_profile = None;
+      approval_profile_derived = false;
+      cascade_name = R.cascade_name_of_string "default";
+      cascade_selected_model = Some "test-model";
+      cascade_attempt_count = 1;
+      cascade_fallback_applied = false;
+      cascade_outcome = "completed";
+      degraded_retry_applied = false;
+      degraded_retry_cascade = None;
+      fallback_reason = None;
+      cascade_rotation_attempts = [];
+      stop_reason = None;
+      error_kind = None;
+      error_message = None;
+      started_at = "2026-05-06T00:00:00Z";
+      ended_at = "2026-05-06T00:00:01Z";
+    }
+  in
+  let json = R.to_json receipt in
+  check bool "execution receipt wire serializes tools_used" true
+    (match Yojson.Safe.Util.member "tools_used" json with
+     | `List [ `String "Read" ] -> true
+     | _ -> false);
+  check bool "execution receipt wire does not reintroduce last_tools_used" true
+    (match Yojson.Safe.Util.member "last_tools_used" json with
+     | `Null -> true
+     | _ -> false)
 
 let test_keeper_sandbox_credential_volume_contracts () =
   check bool "keeper sandbox documents credential projection path" true

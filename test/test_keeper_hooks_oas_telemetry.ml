@@ -624,12 +624,13 @@ let test_pr_review_action_metric_extracts_approve () =
       ~tool_name:"keeper_pr_review_comment"
       ~input:(`Assoc [ ("pr_number", `Int 13177); ("event", `String "COMMENT") ])
       ~output_text:
-        {|{"ok":true,"pr_number":13177,"event":"APPROVE","keeper":"sangsu"}|}
+        {|{"ok":true,"pr_number":13177,"event":"APPROVE","keeper":"sangsu","via":"docker"}|}
     |> require_pr_review_event "approve"
   in
   check string "action from output" "APPROVE" event.action;
   check (option int) "pr number" (Some 13177) event.pr_number;
-  check bool "success" true event.success
+  check bool "success" true event.success;
+  check (option string) "route via" (Some "docker") event.route_via
 
 let test_pr_review_action_metric_marks_structured_failure () =
   let event =
@@ -648,12 +649,13 @@ let test_pr_review_action_metric_extracts_reply () =
     pr_review_event
       ~tool_name:"keeper_pr_review_reply"
       ~input:(`Assoc [ ("pr_number", `Int 9); ("comment_id", `Int 1234) ])
-      ~output_text:{|{"ok":true,"pr_number":9,"comment_id":1234}|}
+      ~output_text:{|{"ok":true,"pr_number":9,"comment_id":1234,"via":"host"}|}
     |> require_pr_review_event "reply"
   in
   check string "reply action" "REPLY" event.action;
   check (option int) "reply pr" (Some 9) event.pr_number;
-  check (option int) "comment id" (Some 1234) event.comment_id
+  check (option int) "comment id" (Some 1234) event.comment_id;
+  check (option string) "reply route via" (Some "host") event.route_via
 
 let pr_work_events ~tool_name ~input ~output_text =
   Hooks.For_testing.pr_work_action_metric_events_of_tool_io
@@ -666,7 +668,7 @@ let test_pr_work_action_metric_extracts_masc_code_git_push () =
     pr_work_events
       ~tool_name:"masc_code_git"
       ~input:(`Assoc [ ("action", `String "push") ])
-      ~output_text:{|{"status":"ok","action":"push"}|}
+      ~output_text:{|{"status":"ok","action":"push","via":"docker"}|}
   in
   check (list string) "actions" [ "GIT_PUSH" ] (work_actions events);
   let event =
@@ -675,7 +677,8 @@ let test_pr_work_action_metric_extracts_masc_code_git_push () =
     | _ -> failf "expected one git push event"
   in
   check string "source" "masc_code_git" event.work_source;
-  check bool "success" true event.success
+  check bool "success" true event.success;
+  check (option string) "route via" (Some "docker") event.route_via
 
 let test_pr_work_action_metric_extracts_gh_pr_create () =
   let events =
@@ -685,10 +688,15 @@ let test_pr_work_action_metric_extracts_gh_pr_create () =
         (`Assoc
           [ ("op", `String "gh");
             ("cmd", `String "pr create --draft --title t") ])
-      ~output_text:{|{"ok":true,"op":"gh","command":"gh pr create --draft"}|}
+      ~output_text:
+        {|{"ok":true,"op":"gh","command":"gh pr create --draft","route":{"via":"docker"}}|}
   in
   check (list string) "pr create action" [ "PR_CREATE" ]
-    (work_actions events)
+    (work_actions events);
+  match events with
+  | [ event ] ->
+      check (option string) "route via nested" (Some "docker") event.route_via
+  | _ -> failf "expected one pr create event"
 
 let test_pr_work_action_metric_extracts_bash_git_sequence_failure () =
   let events =

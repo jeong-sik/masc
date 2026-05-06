@@ -204,6 +204,21 @@
   path_errors=0`. This result is recorded in
   `test/fixtures/goal_loop/row-corpus-discovery.external-claim.json` as
   `downloads_tar_gzip_compressed_strict_corpus_validation_sweep`.
+- [근거] `python3 scripts/goal_loop_completion_audit.py
+  /tmp/goal-loop-13266-b367-status-audit.json --structured-id-triage
+  test/fixtures/goal_loop/structured-id-triage.external-claim.json
+  --row-corpus-discovery
+  test/fixtures/goal_loop/row-corpus-discovery.external-claim.json
+  --prompt-closeout-checklist
+  test/fixtures/goal_loop/prompt-closeout-checklist.external-claim.json
+  --require-complete --format text` checked at 2026-05-06T14:00:29+09:00,
+  confidence High: exits non-zero with only
+  `strict_row_level_catalog_complete`, while the new
+  `prompt_to_artifact_checklist_recorded` criterion passes. The checklist
+  maps 15 prompt requirements to concrete artifacts and blockers across all 12
+  prompt source documents: 2 `PASS`, 11 `PARTIAL`, and 2 `BLOCKED`
+  requirements, with the strict 206-row corpus explicitly bound to
+  `strict_row_level_catalog_complete`.
 - [근거] `python3 test/test_goal_loop_completion_audit.py` checked at
   2026-05-06T09:59:29+09:00, confidence High: the completion audit now accepts
   an optional `--strict-row-corpus` artifact and validates it against the
@@ -273,7 +288,11 @@ This checklist is the closeout map from the prompt requirements to concrete
 repo or runtime evidence. A `PASS` here means the requirement has direct
 evidence; `PARTIAL` means a concrete artifact exists but does not cover the
 full prompt requirement; `BLOCKED` means the next required input is outside the
-current repo evidence.
+current repo evidence. The machine-readable mirror is
+`test/fixtures/goal_loop/prompt-closeout-checklist.external-claim.json`, and
+`goal_loop_completion_audit.py --prompt-closeout-checklist` validates that it
+is catalog-bound, covers all 12 prompt sources, has no local path leaks, and
+keeps the strict corpus blocker explicit.
 
 | Prompt requirement | Concrete artifact or command | Status |
 |--------------------|------------------------------|--------|

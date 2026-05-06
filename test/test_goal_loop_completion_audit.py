@@ -26,6 +26,13 @@ ROW_DISCOVERY_FIXTURE = (
     / "goal_loop"
     / "row-corpus-discovery.external-claim.json"
 )
+PROMPT_CHECKLIST_FIXTURE = (
+    REPO_ROOT
+    / "test"
+    / "fixtures"
+    / "goal_loop"
+    / "prompt-closeout-checklist.external-claim.json"
+)
 STRICT_ROW_CORPUS_CONTRACT_FIXTURE = (
     REPO_ROOT / "test" / "fixtures" / "goal_loop" / "strict-row-corpus-contract.json"
 )
@@ -500,6 +507,41 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertEqual(discovery_evidence["discovery_status"], "MISSING")
         self.assertFalse(discovery_evidence["recorded"])
 
+    def test_completion_audit_attaches_prompt_closeout_checklist(self) -> None:
+        checklist = json.loads(PROMPT_CHECKLIST_FIXTURE.read_text(encoding="utf-8"))
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            prompt_closeout_checklist=checklist,
+        )
+
+        self.assertEqual(audit.status, "BLOCKED")
+        self.assertEqual(audit.blockers, ["strict_row_level_catalog_complete"])
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
+        self.assertTrue(checklist_evidence["recorded"])
+        self.assertEqual(checklist_evidence["prompt_sources_checked"], 12)
+        self.assertTrue(checklist_evidence["has_strict_corpus_blocker"])
+        self.assertFalse(checklist_evidence["local_path_leaks"])
+        self.assertGreaterEqual(checklist_evidence["requirements_total"], 10)
+        self.assertEqual(checklist_evidence["status_counts"]["BLOCKED"], 2)
+
+    def test_completion_audit_rejects_wrong_catalog_prompt_closeout_checklist(
+        self,
+    ) -> None:
+        checklist = json.loads(PROMPT_CHECKLIST_FIXTURE.read_text(encoding="utf-8"))
+        checklist["source_catalog_id"] = "wrong-catalog"
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            prompt_closeout_checklist=checklist,
+        )
+
+        self.assertEqual(audit.status, "BLOCKED")
+        self.assertIn("prompt_to_artifact_checklist_recorded", audit.blockers)
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
+        self.assertFalse(checklist_evidence["recorded"])
+        self.assertFalse(checklist_evidence["source_catalog_id_matches"])
+
     def test_strict_row_corpus_contract_fixture_is_json(self) -> None:
         contract = json.loads(STRICT_ROW_CORPUS_CONTRACT_FIXTURE.read_text())
 
@@ -530,6 +572,8 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
                     str(ROW_DISCOVERY_FIXTURE),
                     "--strict-row-corpus",
                     str(corpus_path),
+                    "--prompt-closeout-checklist",
+                    str(PROMPT_CHECKLIST_FIXTURE),
                     "--require-complete",
                 ],
                 text=True,
@@ -553,6 +597,8 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         ]
         self.assertTrue(strict_row_corpus["validated"])
         self.assertFalse(strict_row_corpus["orient_itemized_matches_corpus"])
+        prompt_checklist = by_id["prompt_to_artifact_checklist_recorded"]
+        self.assertEqual(prompt_checklist["status"], "PASS")
 
 
 if __name__ == "__main__":

@@ -32,6 +32,7 @@ POST_ACT_EVIDENCE_KINDS = {
     "live_runtime_logs",
     "live_runtime_status",
 }
+PROMPT_CHECKLIST_STATUSES = {"PASS", "PARTIAL", "BLOCKED"}
 
 
 @dataclass(frozen=True)
@@ -330,12 +331,95 @@ def strict_row_corpus_evidence(
     return report
 
 
+def prompt_closeout_checklist_evidence(
+    audit_catalog: dict[str, Any],
+    prompt_closeout_checklist: dict[str, Any],
+) -> tuple[bool, dict[str, Any]]:
+    source_catalog_id = audit_catalog.get("catalog_id")
+    checklist_catalog_id = prompt_closeout_checklist.get("source_catalog_id")
+    source_catalog_id_matches = (
+        isinstance(source_catalog_id, str)
+        and isinstance(checklist_catalog_id, str)
+        and checklist_catalog_id == source_catalog_id
+    )
+
+    source_docs_raw = prompt_closeout_checklist.get("prompt_sources_checked", [])
+    source_docs = source_docs_raw if isinstance(source_docs_raw, list) else []
+    requirements_raw = prompt_closeout_checklist.get("requirements", [])
+    requirements = requirements_raw if isinstance(requirements_raw, list) else []
+
+    invalid_requirements: list[str] = []
+    status_counts = {"PASS": 0, "PARTIAL": 0, "BLOCKED": 0}
+    blocked_criteria: set[str] = set()
+    requirement_ids: set[str] = set()
+    for index, requirement in enumerate(requirements):
+        if not isinstance(requirement, dict):
+            invalid_requirements.append(f"#{index}: not_object")
+            continue
+        requirement_id = requirement.get("requirement_id")
+        if isinstance(requirement_id, str) and requirement_id:
+            requirement_ids.add(requirement_id)
+        else:
+            invalid_requirements.append(f"#{index}: missing_requirement_id")
+        if not as_nonempty_str(requirement.get("prompt_requirement")):
+            invalid_requirements.append(f"{requirement_id or index}: missing_prompt")
+        artifacts = requirement.get("artifact_refs")
+        if not isinstance(artifacts, list) or len(artifacts) == 0:
+            invalid_requirements.append(f"{requirement_id or index}: missing_artifacts")
+        status = requirement.get("status")
+        if status in PROMPT_CHECKLIST_STATUSES:
+            status_counts[status] += 1
+        else:
+            invalid_requirements.append(f"{requirement_id or index}: invalid_status")
+        criterion_id = requirement.get("criterion_id")
+        if status == "BLOCKED" and isinstance(criterion_id, str):
+            blocked_criteria.add(criterion_id)
+
+    expected_source_docs = as_int(audit_catalog.get("source_documents_expected"))
+    source_docs_complete = (
+        expected_source_docs >= 12
+        and len(source_docs) == expected_source_docs
+        and all(isinstance(path, str) for path in source_docs)
+    )
+    has_strict_corpus_blocker = "strict_row_level_catalog_complete" in blocked_criteria
+    local_path_leaks = contains_user_local_path(prompt_closeout_checklist)
+    status = prompt_closeout_checklist.get("status")
+    recorded = (
+        prompt_closeout_checklist.get("schema_version") == 1
+        and status == "RECORDED"
+        and source_catalog_id_matches
+        and source_docs_complete
+        and len(requirements) > 0
+        and not invalid_requirements
+        and has_strict_corpus_blocker
+        and not local_path_leaks
+    )
+    return recorded, {
+        "checklist_status": status,
+        "checklist_id": prompt_closeout_checklist.get("checklist_id"),
+        "source_catalog_id": source_catalog_id,
+        "checklist_source_catalog_id": checklist_catalog_id,
+        "source_catalog_id_matches": source_catalog_id_matches,
+        "prompt_sources_checked": len(source_docs),
+        "prompt_sources_expected": expected_source_docs,
+        "source_docs_complete": source_docs_complete,
+        "requirements_total": len(requirements),
+        "status_counts": status_counts,
+        "blocked_criteria": sorted(blocked_criteria),
+        "has_strict_corpus_blocker": has_strict_corpus_blocker,
+        "invalid_requirements": invalid_requirements,
+        "local_path_leaks": local_path_leaks,
+        "recorded": recorded,
+    }
+
+
 def build_completion_audit(
     status: dict[str, Any],
     *,
     structured_id_triage: dict[str, Any] | None = None,
     row_corpus_discovery: dict[str, Any] | None = None,
     strict_row_corpus: dict[str, Any] | None = None,
+    prompt_closeout_checklist: dict[str, Any] | None = None,
 ) -> CompletionAudit:
     audit_catalog = nested_dict(status, "phases", "orient", "summary", "audit_catalog")
     verify_summary = nested_dict(status, "phases", "verify", "summary")
@@ -602,6 +686,19 @@ def build_completion_audit(
             verify_evidence,
         ),
     ]
+    if prompt_closeout_checklist is not None:
+        checklist_passed, checklist_evidence = prompt_closeout_checklist_evidence(
+            audit_catalog,
+            prompt_closeout_checklist,
+        )
+        criteria.append(
+            criterion(
+                "prompt_to_artifact_checklist_recorded",
+                checklist_passed,
+                "Prompt requirements are mapped to concrete artifacts and blockers.",
+                checklist_evidence,
+            )
+        )
     blockers = [item.criterion_id for item in criteria if item.status == "FAIL"]
     status_text = "COMPLETE" if not blockers else "BLOCKED"
     return CompletionAudit(
@@ -652,6 +749,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Optional strict 206-row corpus artifact to validate against the closeout contract.",
     )
     parser.add_argument(
+        "--prompt-closeout-checklist",
+        help="Optional prompt-to-artifact closeout checklist manifest.",
+    )
+    parser.add_argument(
         "--require-complete",
         action="store_true",
         help="Exit non-zero unless every completion criterion passes.",
@@ -666,6 +767,9 @@ def main(argv: list[str] | None = None) -> int:
         structured_id_triage=load_optional_json_file(args.structured_id_triage),
         row_corpus_discovery=load_optional_json_file(args.row_corpus_discovery),
         strict_row_corpus=load_optional_json_file(args.strict_row_corpus),
+        prompt_closeout_checklist=load_optional_json_file(
+            args.prompt_closeout_checklist
+        ),
     )
     if args.format == "json":
         print(audit_to_json(audit))

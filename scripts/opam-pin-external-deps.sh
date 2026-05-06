@@ -109,7 +109,7 @@ version_gt() {
 installed_agent_sdk_version() {
   command -v opam >/dev/null 2>&1 || return 1
 
-  local installed_packages agent_sdk_row installed_version show_version
+  local installed_packages agent_sdk_row installed_version show_output show_status
   if ! installed_packages="$(OPAMCOLOR=never opam list --installed --columns=name,version 2>&1)"; then
     echo "[opam-pin] ERROR: failed to inspect installed agent_sdk via opam list" >&2
     echo "[opam-pin] opam list output: ${installed_packages:-<empty>}" >&2
@@ -127,21 +127,47 @@ installed_agent_sdk_version() {
     return 0
   fi
 
-  # Fallback: opam show reads package metadata directly from the switch.  This
+  # Fallback: opam show reads package metadata directly from the switch. This
   # covers cases where opam list output is incomplete but the switch still knows
-  # the package version.
-  show_version="$(OPAMCOLOR=never opam show agent_sdk --field=version 2>/dev/null || true)"
-  if [[ -n "${show_version}" ]]; then
-    installed_version="$(normalize_version_triplet "${show_version}")"
+  # the package version. Unexpected opam failures fail closed; only an explicit
+  # missing-package result means the package is not installed yet.
+  set +e
+  show_output="$(OPAMCOLOR=never opam show agent_sdk --field=version 2>&1)"
+  show_status=$?
+  set -e
+  if [[ "${show_status}" -eq 0 && -n "${show_output}" ]]; then
+    installed_version="$(normalize_version_triplet "${show_output}")"
     if [[ -z "${installed_version}" ]]; then
-      echo "[opam-pin] ERROR: could not parse installed agent_sdk version from opam show output: ${show_version}" >&2
+      echo "[opam-pin] ERROR: could not parse installed agent_sdk version from opam show output: ${show_output}" >&2
       return 2
     fi
     printf '%s' "${installed_version}"
     return 0
   fi
 
-  echo "[opam-pin] ERROR: could not determine installed agent_sdk version from opam list or opam show" >&2
+  # Anchor the missing-package patterns on the package name. Generic
+  # "not found" / "not installed" output (file errors, network errors,
+  # corrupt switch state) must NOT silently classify as fresh-switch and
+  # bypass the downgrade floor; only an explicit "...agent_sdk..." form
+  # qualifies. This mirrors PR #13787 which closed the same family of
+  # bypass on the sibling installed_agent_sdk_version() implementation.
+  if [[ "${show_status}" -ne 0 ]] \
+    && grep -Eiq 'No package named (agent_sdk|"agent_sdk")|no packages matching .*agent_sdk|unknown package .*agent_sdk' <<<"${show_output}"; then
+    return 1
+  fi
+
+  if [[ "${show_status}" -ne 0 ]]; then
+    echo "[opam-pin] ERROR: failed to inspect installed agent_sdk via opam show" >&2
+    echo "[opam-pin] opam show output: ${show_output:-<empty>}" >&2
+    return 2
+  fi
+
+  # opam show exited 0 with empty output: this is an unexpected
+  # inspection result (a successful command should produce a version
+  # field). Fail closed with rc=2 so the downgrade guard surfaces the
+  # ambiguity to the operator instead of silently treating it as a
+  # fresh switch and allowing the pin.
+  echo "[opam-pin] ERROR: opam show agent_sdk returned exit 0 but empty output; refusing to bypass downgrade guard" >&2
   return 2
 }
 

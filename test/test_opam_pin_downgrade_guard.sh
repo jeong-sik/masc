@@ -44,6 +44,10 @@ case "$1" in
   show)
     shift
     if [[ "${1:-}" == "agent_sdk" && "${2:-}" == "--field=version" ]]; then
+      if [[ "${FAKE_OPAM_SHOW_MISSING:-0}" == "1" ]]; then
+        echo "No package named agent_sdk found" >&2
+        exit 1
+      fi
       [[ "${FAKE_OPAM_SHOW_FAIL:-0}" == "1" ]] && exit 43
       printf '%s\n' "${FAKE_OPAM_SHOW_VERSION:-${FAKE_AGENT_SDK_VERSION:-0.0.0}}"
       exit 0
@@ -199,20 +203,33 @@ assert_contains "${TMP}/case8.err" "refusing to downgrade installed agent_sdk 99
 assert_not_contains "${CALLS_FILE}" "pin add agent_sdk"
 echo "ok case 8 - opam show fallback preserves installed-version protection"
 
-case9_err="${TMP}/case9.err"
 : > "${CALLS_FILE}"
 rm -f "${FLOOR_FILE}"
 if run_pin_script \
   FAKE_AGENT_SDK_LIST_OUTPUT=$'other_pkg 1.0.0\n' \
   FAKE_OPAM_SHOW_FAIL=1 \
-  bash "${PIN_SCRIPT}" >"${TMP}/case9.out" 2>"${case9_err}"; then
-  echo "FAIL case 9: missing agent_sdk list row plus failed opam show should fail closed" >&2
+  bash "${PIN_SCRIPT}" >"${TMP}/case9.out" 2>"${TMP}/case9.err"; then
+  echo "FAIL case 9: unexpected opam show failure should fail closed" >&2
   exit 1
 fi
-assert_contains "${case9_err}" "could not determine installed agent_sdk version"
-assert_contains "${case9_err}" "refusing to mutate agent_sdk pin because installed version could not be determined"
+assert_contains "${TMP}/case9.err" "failed to inspect installed agent_sdk via opam show"
+assert_contains "${TMP}/case9.err" "refusing to mutate agent_sdk pin because installed version could not be determined"
 assert_not_contains "${CALLS_FILE}" "pin add agent_sdk"
-echo "ok case 9 - unavailable installed version fails closed when opam is present"
+echo "ok case 9 - unexpected opam show failure fails closed"
+
+: > "${CALLS_FILE}"
+rm -f "${FLOOR_FILE}"
+run_pin_script \
+  FAKE_AGENT_SDK_LIST_OUTPUT=$'other_pkg 1.0.0\n' \
+  FAKE_OPAM_SHOW_MISSING=1 \
+  bash "${PIN_SCRIPT}" >"${TMP}/case10.out" 2>"${TMP}/case10.err"
+assert_contains "${CALLS_FILE}" "pin add agent_sdk"
+recorded_floor="$(head -n 1 "${FLOOR_FILE}" 2>/dev/null || true)"
+if [[ "${recorded_floor}" != "${OAS_AGENT_SDK_MIN_VERSION}" ]]; then
+  echo "FAIL case 10: fresh switch should record floor ${OAS_AGENT_SDK_MIN_VERSION}, got ${recorded_floor}" >&2
+  exit 1
+fi
+echo "ok case 10 - fresh switch without installed agent_sdk permits initial pinning"
 
 echo ""
-echo "[opam-pin-downgrade-guard test] PASS - 9/9 cases"
+echo "[opam-pin-downgrade-guard test] PASS - 10/10 cases"

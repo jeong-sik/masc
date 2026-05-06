@@ -92,6 +92,12 @@ def as_nonempty_str(value: Any) -> str | None:
     return stripped if stripped else None
 
 
+def string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
 def criterion(
     criterion_id: str,
     passed: bool,
@@ -320,13 +326,19 @@ def source_row_candidate_inventory_evidence(
     row_catalog_evidence: dict[str, Any],
     source_row_candidate_inventory: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    if row_catalog_evidence["status"] == "COMPLETE":
+    if (
+        row_catalog_evidence["status"] == "COMPLETE"
+        and source_row_candidate_inventory is None
+    ):
         return {"inventory_status": "NOT_REQUIRED", "recorded": False}
     if source_row_candidate_inventory is None:
         return {"inventory_status": "MISSING", "recorded": False}
 
     sources_raw = source_row_candidate_inventory.get("prompt_sources_checked", [])
-    sources = sources_raw if isinstance(sources_raw, list) else []
+    sources = string_list(sources_raw)
+    invalid_sources_checked = (
+        len(sources_raw) - len(sources) if isinstance(sources_raw, list) else 0
+    )
     source_errors_raw = source_row_candidate_inventory.get("source_errors", [])
     source_errors = source_errors_raw if isinstance(source_errors_raw, list) else []
     expected_total = source_row_candidate_inventory.get("expected_findings_total")
@@ -351,6 +363,12 @@ def source_row_candidate_inventory_evidence(
         isinstance(candidate_rows, int)
         and isinstance(expected_total, int)
         and candidate_rows < expected_total
+    )
+    complete_against_expected = (
+        isinstance(candidate_rows, int)
+        and isinstance(expected_total, int)
+        and candidate_rows == expected_total
+        and missing_candidate_rows == 0
     )
     candidates_by_file_total = sum_unique_candidate_rows(
         source_row_candidate_inventory.get("candidates_by_file")
@@ -404,15 +422,23 @@ def source_row_candidate_inventory_evidence(
         len(source_paths_with_candidates & source_paths_without_candidates) == 0
     )
     local_path_leaks = contains_user_local_path(source_row_candidate_inventory)
-    recorded = (
-        source_row_candidate_inventory.get("schema_version") == 1
-        and source_row_candidate_inventory.get("status") == "INCOMPLETE"
+    inventory_result_consistent = (
+        source_row_candidate_inventory.get("status") == "INCOMPLETE"
         and source_row_candidate_inventory.get("result")
         == "EXPLICIT_SOURCE_ROWS_INSUFFICIENT"
+        and incomplete_against_expected
+    ) or (
+        source_row_candidate_inventory.get("status") == "COMPLETE"
+        and source_row_candidate_inventory.get("result")
+        == "EXPLICIT_SOURCE_ROWS_MATCH_EXPECTED"
+        and complete_against_expected
+    )
+    recorded = (
+        source_row_candidate_inventory.get("schema_version") == 1
+        and inventory_result_consistent
         and source_catalog_id_matches
         and expected_matches
         and missing_candidate_rows_matches
-        and incomplete_against_expected
         and candidates_by_file_total_matches
         and candidates_by_rule_total_matches
         and sources_accounted
@@ -423,6 +449,7 @@ def source_row_candidate_inventory_evidence(
         and len(sources) >= 12
         and source_row_candidate_inventory.get("source_errors_total") == 0
         and len(source_errors) == 0
+        and invalid_sources_checked == 0
         and not local_path_leaks
     )
     return {
@@ -439,11 +466,14 @@ def source_row_candidate_inventory_evidence(
         "missing_candidate_rows": missing_candidate_rows,
         "missing_candidate_rows_matches": missing_candidate_rows_matches,
         "incomplete_against_expected": incomplete_against_expected,
+        "complete_against_expected": complete_against_expected,
+        "inventory_result_consistent": inventory_result_consistent,
         "candidates_by_file_total": candidates_by_file_total,
         "candidates_by_file_total_matches": candidates_by_file_total_matches,
         "candidates_by_rule_total": candidates_by_rule_total,
         "candidates_by_rule_total_matches": candidates_by_rule_total_matches,
         "prompt_sources_checked": len(sources),
+        "invalid_prompt_sources_checked": invalid_sources_checked,
         "sources_with_candidates": len(source_paths_with_candidates),
         "sources_without_candidates": len(source_paths_without_candidates),
         "sources_accounted": sources_accounted,
@@ -501,7 +531,12 @@ def prompt_closeout_checklist_evidence(
     )
 
     source_docs_raw = prompt_closeout_checklist.get("prompt_sources_checked", [])
-    source_docs = source_docs_raw if isinstance(source_docs_raw, list) else []
+    source_docs = string_list(source_docs_raw)
+    invalid_source_docs = (
+        len(source_docs_raw) - len(source_docs)
+        if isinstance(source_docs_raw, list)
+        else 0
+    )
     requirements_raw = prompt_closeout_checklist.get("requirements", [])
     requirements = requirements_raw if isinstance(requirements_raw, list) else []
 
@@ -509,13 +544,20 @@ def prompt_closeout_checklist_evidence(
     status_counts = {"PASS": 0, "PARTIAL": 0, "BLOCKED": 0}
     blocked_criteria: set[str] = set()
     requirement_ids: set[str] = set()
+    duplicate_requirement_ids: list[str] = []
     for index, requirement in enumerate(requirements):
         if not isinstance(requirement, dict):
             invalid_requirements.append(f"#{index}: not_object")
             continue
         requirement_id = requirement.get("requirement_id")
         if isinstance(requirement_id, str) and requirement_id:
-            requirement_ids.add(requirement_id)
+            if requirement_id in requirement_ids:
+                duplicate_requirement_ids.append(requirement_id)
+                invalid_requirements.append(
+                    f"{requirement_id}: duplicate_requirement_id"
+                )
+            else:
+                requirement_ids.add(requirement_id)
         else:
             invalid_requirements.append(f"#{index}: missing_requirement_id")
         if not as_nonempty_str(requirement.get("prompt_requirement")):
@@ -536,7 +578,7 @@ def prompt_closeout_checklist_evidence(
     source_docs_complete = (
         expected_source_docs >= 12
         and len(source_docs) == expected_source_docs
-        and all(isinstance(path, str) for path in source_docs)
+        and invalid_source_docs == 0
     )
     has_strict_corpus_blocker = "strict_row_level_catalog_complete" in blocked_criteria
     local_path_leaks = contains_user_local_path(prompt_closeout_checklist)
@@ -548,7 +590,6 @@ def prompt_closeout_checklist_evidence(
         and source_docs_complete
         and len(requirements) > 0
         and not invalid_requirements
-        and has_strict_corpus_blocker
         and not local_path_leaks
     )
     return recorded, {
@@ -558,9 +599,12 @@ def prompt_closeout_checklist_evidence(
         "checklist_source_catalog_id": checklist_catalog_id,
         "source_catalog_id_matches": source_catalog_id_matches,
         "prompt_sources_checked": len(source_docs),
+        "invalid_prompt_sources_checked": invalid_source_docs,
         "prompt_sources_expected": expected_source_docs,
         "source_docs_complete": source_docs_complete,
         "requirements_total": len(requirements),
+        "requirement_ids_total": len(requirement_ids),
+        "duplicate_requirement_ids": sorted(set(duplicate_requirement_ids)),
         "status_counts": status_counts,
         "blocked_criteria": sorted(blocked_criteria),
         "has_strict_corpus_blocker": has_strict_corpus_blocker,

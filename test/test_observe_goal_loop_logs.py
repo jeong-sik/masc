@@ -620,6 +620,22 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertTrue(report["validated"])
         self.assertNotIn("expected_findings_total_mismatch", report["errors"])
 
+    def test_strict_row_corpus_rejects_sources_when_catalog_manifest_is_empty(
+        self,
+    ) -> None:
+        report = orient_goal_loop_logs.validate_strict_row_corpus(
+            synthetic_strict_row_corpus(),
+            catalog={"external_sources": []},
+        )
+
+        self.assertFalse(report["validated"])
+        self.assertIn(
+            "source_paths_must_match_catalog_external_sources",
+            report["errors"],
+        )
+        self.assertEqual(report["catalog_external_sources_total"], 0)
+        self.assertFalse(report["catalog_source_binding_valid"])
+
     def test_strict_row_corpus_binds_sources_to_catalog_manifest(self) -> None:
         catalog = orient_goal_loop_logs.load_audit_catalog_input(
             str(FIXTURE_DIR / "audit-corpus.external-claim.json")
@@ -665,6 +681,27 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
             report["invalid_catalog_line_ref_values"][0]["line_count"],
             606,
         )
+
+    def test_strict_row_corpus_rejects_empty_catalog_source_manifest(self) -> None:
+        corpus = synthetic_strict_row_corpus()
+        catalog = {
+            "catalog_id": "goal-loop-206-audit-external-claim-2026-05-05",
+            "expected_findings_total": 206,
+            "external_sources": [],
+        }
+
+        report = orient_goal_loop_logs.validate_strict_row_corpus(
+            corpus,
+            catalog=catalog,
+        )
+
+        self.assertFalse(report["validated"])
+        self.assertIn(
+            "source_paths_must_match_catalog_external_sources",
+            report["errors"],
+        )
+        self.assertEqual(report["catalog_external_sources_total"], 0)
+        self.assertFalse(report["catalog_source_binding_valid"])
 
     def test_orient_catalog_validates_source_identity_hash_and_line_count(self) -> None:
         content = "206건 감사 결과\nR-FATAL-1\n"

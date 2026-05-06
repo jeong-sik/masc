@@ -195,12 +195,11 @@
   accounts for the prompt-source split explicitly, with 5 files contributing
   candidates and 7 checked prompt files yielding zero explicit candidate rows.
 - [근거] `gh pr view 13577 --repo jeong-sik/masc-mcp --json
-  number,state,isDraft,mergeable,mergeStateStatus,headRefOid,labels,url`,
+  number,state,isDraft,mergeable,mergeStateStatus,labels,url`,
   `gh issue view 13265 --repo jeong-sik/masc-mcp --json number,state,url`, and
   `gh pr checks 13577 --repo jeong-sik/masc-mcp` checked at
-  2026-05-06T13:43:19+09:00, confidence High: #13577 is open, draft,
-  mergeable, label-free, and at
-  `4ffc4cbf1afddc9e4e28933b95c3627a0ffed95a`; #13265 is open. Current red
+  2026-05-06T15:00:55+09:00, confidence High: #13577 is open, draft,
+  mergeable, and label-free; #13265 is open. Current red
   checks are `CI Gate` and `Draft Auto-Merge Guard`; their logs identify the
   missing verified human approval label `human-approved-ready` as the policy
   blocker, while quick non-policy guards pass and heavy jobs are skipped under

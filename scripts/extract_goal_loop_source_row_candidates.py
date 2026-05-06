@@ -19,7 +19,6 @@ DEFAULT_EXPECTED_TOTAL = 206
 EXACT_ID_RE = re.compile(
     r"\b(?P<id>(?:R-FATAL|CD|CC|CE|CF|NF)-\d+|P-[A-Z]+-\d{2}|[SF]\d{2})\b"
 )
-MARKDOWN_TABLE_ROW_RE = re.compile(r"^\|\s*(?P<id>[^|]+?)\s*\|(?P<rest>.*)$")
 CODE_SWITCH_ID_RE = re.compile(
     r'^\s*\|\s*"(?P<id>(?:R-FATAL|CD|CC|CE|CF|NF)-\d+)"\s*'
     r"(?:\(\*\s*(?P<title>.*?)\s*\*\))?"
@@ -260,8 +259,8 @@ def inventory_sources(
         source_path = logical_source_path(path, source_prefix)
         sources_checked.append(source_path)
         try:
-            lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
-        except OSError as exc:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError) as exc:
             source_errors.append(
                 {"path": source_path, "error": f"{type(exc).__name__}: {exc}"}
             )

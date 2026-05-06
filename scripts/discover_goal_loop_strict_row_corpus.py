@@ -189,7 +189,7 @@ def tar_member_texts(path: Path, max_bytes: int) -> list[tuple[str, str]]:
     texts: list[tuple[str, str]] = []
     try:
         with tarfile.open(path, mode="r:*") as archive:
-            for member in archive.getmembers():
+            for member in archive:
                 if not member.isfile():
                     continue
                 suffix = Path(member.name).suffix.lower()

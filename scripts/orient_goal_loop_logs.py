@@ -284,6 +284,7 @@ def validate_strict_row_corpus(
     catalog_sources_raw = (
         catalog.get("external_sources") if isinstance(catalog, dict) else None
     )
+    catalog_source_binding_required = isinstance(catalog_sources_raw, list)
     catalog_source_line_counts: dict[str, int | None] = {}
     if isinstance(catalog_sources_raw, list):
         for source_raw in catalog_sources_raw:
@@ -391,7 +392,7 @@ def validate_strict_row_corpus(
                     }
                 )
             elif (
-                catalog_source_line_counts
+                catalog_source_binding_required
                 and source_path not in catalog_source_line_counts
             ):
                 invalid_catalog_source_paths.append(label)

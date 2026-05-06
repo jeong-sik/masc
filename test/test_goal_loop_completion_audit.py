@@ -549,6 +549,63 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertTrue(inventory_evidence["no_candidate_source_overlap"])
         self.assertFalse(inventory_evidence["local_path_leaks"])
 
+    def test_completion_audit_accepts_complete_source_row_candidate_inventory(
+        self,
+    ) -> None:
+        inventory = json.loads(
+            SOURCE_ROW_CANDIDATE_INVENTORY_FIXTURE.read_text(encoding="utf-8")
+        )
+        inventory["status"] = "COMPLETE"
+        inventory["result"] = "EXPLICIT_SOURCE_ROWS_MATCH_EXPECTED"
+        inventory["unique_candidate_rows"] = 206
+        inventory["missing_candidate_rows"] = 0
+        by_file = inventory["candidates_by_file"]
+        by_rule = inventory["candidates_by_rule"]
+        assert isinstance(by_file, list)
+        assert isinstance(by_rule, list)
+        first_file = by_file[0]
+        first_rule = by_rule[0]
+        assert isinstance(first_file, dict)
+        assert isinstance(first_rule, dict)
+        first_file["unique_candidate_rows"] += 74
+        first_rule["unique_candidate_rows"] += 74
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            source_row_candidate_inventory=inventory,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        inventory_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "source_row_candidate_inventory"
+        ]
+        self.assertTrue(inventory_evidence["recorded"])
+        self.assertTrue(inventory_evidence["complete_against_expected"])
+        self.assertTrue(inventory_evidence["inventory_result_consistent"])
+
+    def test_completion_audit_rejects_unhashable_source_inventory_paths(
+        self,
+    ) -> None:
+        inventory = json.loads(
+            SOURCE_ROW_CANDIDATE_INVENTORY_FIXTURE.read_text(encoding="utf-8")
+        )
+        sources = inventory["prompt_sources_checked"]
+        assert isinstance(sources, list)
+        sources.append(["not", "hashable"])
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            source_row_candidate_inventory=inventory,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        inventory_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "source_row_candidate_inventory"
+        ]
+        self.assertFalse(inventory_evidence["recorded"])
+        self.assertEqual(inventory_evidence["invalid_prompt_sources_checked"], 1)
+        self.assertTrue(inventory_evidence["sources_accounted"])
+
     def test_completion_audit_rejects_inconsistent_source_row_candidate_inventory(
         self,
     ) -> None:
@@ -640,6 +697,52 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertFalse(checklist_evidence["local_path_leaks"])
         self.assertGreaterEqual(checklist_evidence["requirements_total"], 10)
         self.assertEqual(checklist_evidence["status_counts"]["BLOCKED"], 2)
+
+    def test_completion_audit_accepts_prompt_checklist_without_strict_blocker(
+        self,
+    ) -> None:
+        checklist = json.loads(PROMPT_CHECKLIST_FIXTURE.read_text(encoding="utf-8"))
+        requirements = checklist["requirements"]
+        assert isinstance(requirements, list)
+        for requirement in requirements:
+            assert isinstance(requirement, dict)
+            requirement["status"] = "PASS"
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            prompt_closeout_checklist=checklist,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        checklist_criterion = by_id["prompt_to_artifact_checklist_recorded"]
+        self.assertEqual(checklist_criterion.status, "PASS")
+        self.assertFalse(checklist_criterion.evidence["has_strict_corpus_blocker"])
+        self.assertTrue(checklist_criterion.evidence["recorded"])
+
+    def test_completion_audit_rejects_duplicate_prompt_requirement_ids(
+        self,
+    ) -> None:
+        checklist = json.loads(PROMPT_CHECKLIST_FIXTURE.read_text(encoding="utf-8"))
+        requirements = checklist["requirements"]
+        assert isinstance(requirements, list)
+        first = requirements[0]
+        second = requirements[1]
+        assert isinstance(first, dict)
+        assert isinstance(second, dict)
+        second["requirement_id"] = first["requirement_id"]
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            prompt_closeout_checklist=checklist,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
+        self.assertFalse(checklist_evidence["recorded"])
+        self.assertEqual(
+            checklist_evidence["duplicate_requirement_ids"],
+            [first["requirement_id"]],
+        )
 
     def test_completion_audit_rejects_wrong_catalog_prompt_closeout_checklist(
         self,

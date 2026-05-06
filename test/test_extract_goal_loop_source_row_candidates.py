@@ -106,6 +106,23 @@ class ExtractGoalLoopSourceRowCandidatesTest(unittest.TestCase):
             text_report,
         )
 
+    def test_inventory_reports_utf8_decode_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            path = Path(raw_dir) / "bad-source.md"
+            path.write_bytes(b"\xff\xfe")
+
+            report = extract_goal_loop_source_row_candidates.inventory_sources(
+                [path],
+                expected_total=0,
+            )
+
+        self.assertEqual(report["status"], "INCOMPLETE")
+        self.assertEqual(report["source_errors_total"], 1)
+        self.assertIn(
+            "UnicodeDecodeError",
+            report["source_errors"][0]["error"],
+        )
+
     def test_cli_require_complete_fails_when_rows_are_missing(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:
             path = Path(raw_dir) / "GOAL_LOOP_INTEGRATION.md"

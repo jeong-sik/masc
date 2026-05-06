@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import gzip
+import io
 import json
 import subprocess
 import sys
@@ -222,6 +223,40 @@ class DiscoverGoalLoopStrictRowCorpusTest(unittest.TestCase):
                 archive_path,
                 max_bytes=10,
             )
+
+        self.assertEqual(texts, [("nested/marker.json", "strict_row")])
+
+    def test_tar_member_texts_streams_archive_members(self) -> None:
+        class Member:
+            name = "nested/marker.json"
+
+            def isfile(self) -> bool:
+                return True
+
+        class IterOnlyArchive:
+            def __enter__(self) -> "IterOnlyArchive":
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+            def __iter__(self) -> object:
+                yield Member()
+
+            def extractfile(self, member: Member) -> io.BytesIO:
+                return io.BytesIO(b"strict_row")
+
+        original_open = discover_goal_loop_strict_row_corpus.tarfile.open
+        discover_goal_loop_strict_row_corpus.tarfile.open = (
+            lambda *args, **kwargs: IterOnlyArchive()
+        )
+        try:
+            texts = discover_goal_loop_strict_row_corpus.tar_member_texts(
+                Path("candidate.tar"),
+                max_bytes=10,
+            )
+        finally:
+            discover_goal_loop_strict_row_corpus.tarfile.open = original_open
 
         self.assertEqual(texts, [("nested/marker.json", "strict_row")])
 

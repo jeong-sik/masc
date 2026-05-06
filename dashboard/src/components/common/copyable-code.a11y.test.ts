@@ -3,7 +3,7 @@
 // jest-axe coverage for CopyableCode — single-line shell snippet with
 // a copy button. The button is icon-only by default, so tests guard
 // the accessible-name fallback chain (ariaLabel || `${label} 복사` ||
-// '명령 복사' — same pattern as CopyIdButton).
+// '명령 복사').
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'

@@ -31,9 +31,12 @@ module Keeper : sig
     | Library_read
     | Library_search
     | Memory_search
+    | Pr_create
+    | Pr_list
     | Pr_review_comment
     | Pr_review_read
     | Pr_review_reply
+    | Pr_status
     | Preflight_check
     | Shell
     | Stay_silent
@@ -160,6 +163,7 @@ module Masc : sig
     | Worktree_create
     | Worktree_list
     | Worktree_remove
+    | Approval_pending
     | Approval_get
     | Config
     | Gc

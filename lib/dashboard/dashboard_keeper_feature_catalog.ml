@@ -87,12 +87,12 @@ let tool_features =
     };
     {
       id = "approval_tools";
-      label = "Approval read tool";
+      label = "Approval pending queue read tool";
       required_tools = [
-        "masc_approval_get";
+        "masc_approval_pending";
       ];
       next_action =
-        "Exercise approval readback through the current public keeper/MCP tool surface.";
+        "Exercise approval pending-queue readback through the current public keeper/MCP tool surface.";
     };
     {
       id = "goal_tools";

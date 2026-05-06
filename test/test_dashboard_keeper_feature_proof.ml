@@ -122,6 +122,28 @@ let log_tool
     ?goal_ids
     ()
 
+let docker_bash_output ?(success = true) () =
+  if success then
+    {|{"ok":true,"sandbox_profile":"docker","via":"docker","git_creds_enabled":true}|}
+  else
+    {|{"ok":false,"error":"fixture_failure","sandbox_profile":"docker","via":"docker","git_creds_enabled":true}|}
+
+let log_docker_bash ?(keeper_name = "alpha") ?(success = true) command =
+  Keeper_tool_call_log.log_call
+    ~keeper_name
+    ~tool_name:"keeper_bash"
+    ~input:
+      (`Assoc [
+        ("cmd", `String command);
+        ("git_creds_enabled", `Bool true);
+      ])
+    ~output_text:(docker_bash_output ~success ())
+    ~success
+    ~duration_ms:1.0
+    ~sandbox_profile:"docker"
+    ~network_mode:"inherit"
+    ()
+
 let write_decision_lines config keeper_name rows =
   let path = KT.keeper_decision_log_path config keeper_name in
   Fs_compat.mkdir_p (Filename.dirname path);
@@ -205,6 +227,13 @@ let keeper_evidence_tool tool_name id json =
   |> List.find_opt (fun item ->
     Safe_ops.json_string_opt "name" item = Some tool_name)
 
+let keeper_evidence_stage stage_id json =
+  keeper_evidence "docker_git_pr_workflow" json
+  |> Yojson.Safe.Util.member "stages"
+  |> Yojson.Safe.Util.to_list
+  |> List.find_opt (fun item ->
+    Safe_ops.json_string_opt "id" item = Some stage_id)
+
 let test_json_reports_feature_gaps () =
   with_store @@ fun config ->
   ignore
@@ -257,7 +286,7 @@ let test_json_reports_feature_gaps () =
   check bool "retired governance tools are not required" false
     (List.mem "governance_tools" (feature_ids json));
   check (list string) "approval proof follows current public surface"
-    [ "masc_approval_get" ]
+    [ "masc_approval_pending" ]
     (required_tools "approval_tools" json);
   let worktree_failure_classes =
     match weak_tool "masc_worktree_create" "coding_tools" json with
@@ -329,6 +358,48 @@ let test_operator_tool_calls_do_not_satisfy_keeper_tool_proof () =
   check (list string) "known keeper remains missing"
     ["alpha"]
     (json_string_values "missing_keepers" (keeper_evidence "base_tools" json))
+
+let test_docker_git_pr_workflow_reports_partial_chain () =
+  with_store @@ fun config ->
+  ignore
+    (persist_keeper config ~name:"alpha" ~total_turns:3
+       ~autonomous_action_count:2 ~autonomous_tool_turn_count:2
+       ~board_reactive_turn_count:1 ~proactive_count_total:1);
+  log_docker_bash
+    "git clone https://github.com/jeong-sik/masc-mcp.git /workspace/masc-mcp";
+  log_docker_bash "git checkout -b fix/keeper-proof";
+  log_docker_bash "git commit -m keeper-proof";
+  log_docker_bash ~success:false "git push origin fix/keeper-proof";
+  let json =
+    Dashboard_keeper_feature_proof.json
+      ~config
+      ~n:100
+      ~success_threshold_pct:80.0
+      ()
+  in
+  check string "partial Docker git PR workflow is warn" "warn"
+    (feature_status "docker_git_pr_workflow" json);
+  let stage_passed id =
+    match keeper_evidence_stage id json with
+    | Some row -> Safe_ops.json_bool ~default:false "passed" row
+    | None -> false
+  in
+  check bool "clone stage passes" true (stage_passed "docker_clone");
+  check bool "branch stage passes" true (stage_passed "branch_create");
+  check bool "commit stage passes" true (stage_passed "commit");
+  check bool "push stage fails without success evidence" false
+    (stage_passed "push");
+  let push_failures =
+    match keeper_evidence_stage "push" json with
+    | Some row -> Safe_ops.json_int ~default:0 "failures" row
+    | None -> 0
+  in
+  check int "push failure evidence is retained" 1 push_failures;
+  check bool "PR creation remains missing" false (stage_passed "pr_create");
+  check (list string) "workflow evidence is keeper-originated"
+    ["alpha"]
+    (json_string_values "observed_keepers"
+       (keeper_evidence "docker_git_pr_workflow" json))
 
 let test_decision_log_counts_as_scheduled_proof () =
   with_store @@ fun config ->
@@ -416,6 +487,8 @@ let () =
             test_json_reports_feature_gaps;
           test_case "operator calls do not prove keeper tool use" `Quick
             test_operator_tool_calls_do_not_satisfy_keeper_tool_proof;
+          test_case "Docker git PR workflow reports partial chain" `Quick
+            test_docker_git_pr_workflow_reports_partial_chain;
           test_case "decision log counts as scheduled proof" `Quick
             test_decision_log_counts_as_scheduled_proof;
           test_case "decision log counts as 24h turn exchange proof" `Quick

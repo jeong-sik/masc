@@ -9,6 +9,7 @@
  dashboard_keeper_decision_log_proof
  dashboard_keeper_feature_catalog
  dashboard_keeper_feature_proof
+ dashboard_keeper_git_pr_proof
  dashboard_keeper_tool_failure_proof
  board_core
  board_curation

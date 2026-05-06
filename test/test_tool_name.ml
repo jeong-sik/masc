@@ -10,7 +10,8 @@ let all_keeper : Tool_name.Keeper.t list =
   ; Board_get; Board_list; Board_post; Board_search; Board_stats; Board_vote
   ; Broadcast; Code_read; Context_status; Discovery; Fs_edit; Fs_read
   ; Handoff; Library_read; Library_search; Memory_search
-  ; Pr_review_comment; Pr_review_read; Pr_review_reply
+  ; Pr_create; Pr_list; Pr_review_comment; Pr_review_read; Pr_review_reply
+  ; Pr_status
   ; Preflight_check; Shell; Stay_silent
   ; Task_claim; Task_create; Task_done; Task_submit_for_verification
   ; Task_force_done; Task_force_release
@@ -40,7 +41,7 @@ let all_masc : Tool_name.Masc.t list =
   ; Set_current_task; Status; Task_history; Tasks; Tool_grant; Tool_help
   ; Tool_list; Tool_revoke; Transition; Update_priority; Web_search; Who
   ; Workflow_guide; Worktree_create; Worktree_list; Worktree_remove
-  ; Approval_get; Config; Gc; Get_metrics; Mcp_session
+  ; Approval_pending; Approval_get; Config; Gc; Get_metrics; Mcp_session
   ; Pause; Resume; Spawn; Start; Tool_admin_snapshot; Tool_admin_update
   ; Tool_stats; Webrtc_answer; Webrtc_offer ]
 

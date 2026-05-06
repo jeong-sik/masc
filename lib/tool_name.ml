@@ -46,9 +46,12 @@ module Keeper = struct
     | Library_read
     | Library_search
     | Memory_search
+    | Pr_create
+    | Pr_list
     | Pr_review_comment
     | Pr_review_read
     | Pr_review_reply
+    | Pr_status
     | Preflight_check
     | Shell
     | Stay_silent
@@ -96,9 +99,12 @@ module Keeper = struct
     | Library_read -> "keeper_library_read"
     | Library_search -> "keeper_library_search"
     | Memory_search -> "keeper_memory_search"
+    | Pr_create -> "keeper_pr_create"
+    | Pr_list -> "keeper_pr_list"
     | Pr_review_comment -> "keeper_pr_review_comment"
     | Pr_review_read -> "keeper_pr_review_read"
     | Pr_review_reply -> "keeper_pr_review_reply"
+    | Pr_status -> "keeper_pr_status"
     | Preflight_check -> "keeper_preflight_check"
     | Shell -> "keeper_shell"
     | Stay_silent -> "keeper_stay_silent"
@@ -146,9 +152,12 @@ module Keeper = struct
     | "keeper_library_read" -> Some Library_read
     | "keeper_library_search" -> Some Library_search
     | "keeper_memory_search" -> Some Memory_search
+    | "keeper_pr_create" -> Some Pr_create
+    | "keeper_pr_list" -> Some Pr_list
     | "keeper_pr_review_comment" -> Some Pr_review_comment
     | "keeper_pr_review_read" -> Some Pr_review_read
     | "keeper_pr_review_reply" -> Some Pr_review_reply
+    | "keeper_pr_status" -> Some Pr_status
     | "keeper_preflight_check" -> Some Preflight_check
     | "keeper_shell" -> Some Shell
     | "keeper_stay_silent" -> Some Stay_silent
@@ -299,6 +308,7 @@ module Masc = struct
     | Worktree_create
     | Worktree_list
     | Worktree_remove
+    | Approval_pending
     | Approval_get
     | Config
     | Gc
@@ -407,6 +417,7 @@ module Masc = struct
     | Worktree_create -> "masc_worktree_create"
     | Worktree_list -> "masc_worktree_list"
     | Worktree_remove -> "masc_worktree_remove"
+    | Approval_pending -> "masc_approval_pending"
     | Approval_get -> "masc_approval_get"
     | Config -> "masc_config"
     | Gc -> "masc_gc"
@@ -515,6 +526,7 @@ module Masc = struct
     | "masc_worktree_create" -> Some Worktree_create
     | "masc_worktree_list" -> Some Worktree_list
     | "masc_worktree_remove" -> Some Worktree_remove
+    | "masc_approval_pending" -> Some Approval_pending
     | "masc_approval_get" -> Some Approval_get
     | "masc_config" -> Some Config
     | "masc_gc" -> Some Gc

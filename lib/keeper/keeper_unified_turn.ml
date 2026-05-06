@@ -1649,7 +1649,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             end))
         with
         | result -> cleanup (); result
-        | exception e -> cleanup (); raise e
+        | exception e ->
+            let backtrace = Printexc.get_raw_backtrace () in
+            cleanup ();
+            Printexc.raise_with_backtrace e backtrace
       in
       let turn_event_bus = drain_turn_event_bus ~site:"turn_finalize_capture" () in
       (match turn_event_bus.correlation_id with

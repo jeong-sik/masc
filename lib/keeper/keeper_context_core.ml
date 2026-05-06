@@ -237,13 +237,42 @@ let content_blocks_to_json
 let content_blocks_of_json
     (json : Yojson.Safe.t) : Agent_sdk.Types.content_block list option =
   let open Yojson.Safe.Util in
-  match json |> member "content_blocks" with
+  let parse_block_list = function
+    | `List blocks ->
+        let parsed =
+          List.filter_map Agent_sdk.Api.content_block_of_json blocks
+        in
+        if List.length parsed = List.length blocks then Some parsed else None
+    | _ -> None
+  in
+  match parse_block_list (json |> member "content_blocks") with
+  | Some _ as blocks -> blocks
+  | None ->
+      (* Some OAS/OpenAI-style checkpoints use a structured [content] array
+         instead of MASC's [content_blocks] field. Treat that as the same
+         block source rather than forcing the legacy flat-string path. *)
+      parse_block_list (json |> member "content")
+
+let legacy_content_text_of_json (json : Yojson.Safe.t) : string =
+  let open Yojson.Safe.Util in
+  match json |> member "content" with
+  | `String value -> Inference_utils.sanitize_text_utf8 value
+  | `Null -> ""
   | `List blocks ->
       let parsed =
         List.filter_map Agent_sdk.Api.content_block_of_json blocks
       in
-      if List.length parsed = List.length blocks then Some parsed else None
-  | _ -> None
+      let msg : Agent_sdk.Types.message =
+        {
+          Agent_sdk.Types.role = Agent_sdk.Types.User;
+          content = parsed;
+          name = None;
+          tool_call_id = None;
+          metadata = [];
+        }
+      in
+      Inference_utils.sanitize_text_utf8 (text_of_message msg)
+  | _ -> ""
 
 let string_field_opt key value =
   match value with
@@ -289,11 +318,7 @@ let message_to_json (m : Agent_sdk.Types.message) : Yojson.Safe.t =
 let message_of_json (json : Yojson.Safe.t) : Agent_sdk.Types.message =
   let open Yojson.Safe.Util in
   let role = json |> member "role" |> to_string |> role_of_string in
-  let text =
-    match json |> member "content" |> to_string_option with
-    | Some value -> Inference_utils.sanitize_text_utf8 value
-    | None -> ""
-  in
+  let text = legacy_content_text_of_json json in
   let content =
     match content_blocks_of_json json with
     | Some blocks ->
@@ -340,9 +365,7 @@ let text_of_history_jsonl_json (json : Yojson.Safe.t) : string =
       in
       Inference_utils.sanitize_text_utf8 (text_of_message msg)
   | _ ->
-      (match json |> member "content" |> to_string_option with
-       | Some value -> Inference_utils.sanitize_text_utf8 value
-       | None -> "")
+      legacy_content_text_of_json json
 
 let tool_use_ids_of_message (msg : Agent_sdk.Types.message) : string list =
   List.filter_map

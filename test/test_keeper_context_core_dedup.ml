@@ -67,6 +67,31 @@ let test_message_of_json_new_content_blocks_only () =
   | [ T.Text s ] -> Alcotest.(check string) "text" "world" s
   | _ -> Alcotest.fail "expected one Text block"
 
+let test_message_of_json_legacy_content_array () =
+  (* OAS/OpenAI-style legacy checkpoints may store structured blocks under
+     content instead of content_blocks. This must not raise Type_error. *)
+  let source : T.message =
+    {
+      T.role = T.Assistant;
+      content = [ T.Text "array payload" ];
+      name = None;
+      tool_call_id = None;
+      metadata = [];
+    }
+  in
+  let content_blocks =
+    match C.message_to_json source with
+    | `Assoc fields -> List.assoc "content_blocks" fields
+    | _ -> Alcotest.fail "expected object"
+  in
+  let legacy : Yojson.Safe.t =
+    `Assoc [ ("role", `String "assistant"); ("content", content_blocks) ]
+  in
+  let parsed = C.message_of_json legacy in
+  match parsed.content with
+  | [ T.Text s ] -> Alcotest.(check string) "text" "array payload" s
+  | _ -> Alcotest.fail "expected one Text block"
+
 (* --- text_of_history_jsonl_json --- *)
 
 let test_history_jsonl_text_uses_blocks_first () =
@@ -93,6 +118,27 @@ let test_history_jsonl_text_legacy_fallback () =
   in
   let text = C.text_of_history_jsonl_json legacy in
   Alcotest.(check string) "fallback to flat content" "legacy payload" text
+
+let test_history_jsonl_text_legacy_content_array () =
+  let source : T.message =
+    {
+      T.role = T.User;
+      content = [ T.Text "array history payload" ];
+      name = None;
+      tool_call_id = None;
+      metadata = [];
+    }
+  in
+  let content_blocks =
+    match C.message_to_json source with
+    | `Assoc fields -> List.assoc "content_blocks" fields
+    | _ -> Alcotest.fail "expected object"
+  in
+  let legacy : Yojson.Safe.t =
+    `Assoc [ ("role", `String "user"); ("content", content_blocks) ]
+  in
+  let text = C.text_of_history_jsonl_json legacy in
+  Alcotest.(check string) "text from array content" "array history payload" text
 
 let test_history_jsonl_text_empty_when_neither () =
   let empty : Yojson.Safe.t = `Assoc [ ("role", `String "user") ] in
@@ -185,6 +231,8 @@ let () =
             test_message_of_json_legacy_content_only;
           Alcotest.test_case "new content_blocks-only loads" `Quick
             test_message_of_json_new_content_blocks_only;
+          Alcotest.test_case "legacy content array loads" `Quick
+            test_message_of_json_legacy_content_array;
           Alcotest.test_case "round-trip text preserved" `Quick
             test_roundtrip_text_preserved;
         ] );
@@ -194,6 +242,8 @@ let () =
             test_history_jsonl_text_uses_blocks_first;
           Alcotest.test_case "legacy fallback" `Quick
             test_history_jsonl_text_legacy_fallback;
+          Alcotest.test_case "legacy content array fallback" `Quick
+            test_history_jsonl_text_legacy_content_array;
           Alcotest.test_case "empty when neither" `Quick
             test_history_jsonl_text_empty_when_neither;
         ] );

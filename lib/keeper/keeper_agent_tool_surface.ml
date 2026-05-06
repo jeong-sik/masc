@@ -231,7 +231,12 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
   in
   if has_turn_affordance Board_curation turn_affordances
      && progress_tool_available "keeper_board_curation_submit"
-  then Agent_sdk.Types.Tool "keeper_board_curation_submit"
+  then
+    (* Keep the curation submit tool visible, but do not force exact
+       tool_choice. Several keeper cascades can use runtime MCP tools while
+       lacking inline exact-tool-choice support; exact forcing turns those
+       productive lanes into spurious pause-human failures. *)
+    Agent_sdk.Types.Any
   else if (not has_current_task)
      && has_task_claim_affordance turn_affordances
      && progress_tool_available "keeper_task_claim"
@@ -239,12 +244,14 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
   else if has_turn_affordance Task_audit turn_affordances
           && progress_tool_available "keeper_tasks_audit"
   then Agent_sdk.Types.Tool "keeper_tasks_audit"
-  else if has_turn_affordance Task_verify turn_affordances
+  else if has_current_task
+          && has_turn_affordance Task_verify turn_affordances
           && progress_tool_available "keeper_task_submit_for_verification"
-  then Agent_sdk.Types.Tool "keeper_task_submit_for_verification"
-  else if has_turn_affordance Task_verify turn_affordances
+  then Agent_sdk.Types.Any
+  else if has_current_task
+          && has_turn_affordance Task_verify turn_affordances
           && progress_tool_available "keeper_task_done"
-  then Agent_sdk.Types.Tool "keeper_task_done"
+  then Agent_sdk.Types.Any
   else if not has_current_task then
     (* #10008: no active task and no applicable specific claim tool
        to force.  Fall back to [Auto] instead of [Any] so the model

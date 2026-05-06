@@ -150,14 +150,59 @@ let of_oas_tool_result : Agent_sdk.Types.tool_result -> bool * string = function
 
 (** {1 Schema Conversion}
 
-    Delegates to [Agent_sdk.Mcp.json_schema_to_params] — the canonical
-    JSON Schema to OAS [tool_param list] conversion.
-
-    @since 2.221.0 — delegates to OAS Mcp module (removes 40-line duplicate) *)
+    Convert MASC JSON Schemas into the narrower OAS [tool_param list]
+    representation. Keep this adapter tolerant: MASC schemas may contain
+    JSON Schema unions such as ["object"; "string"; "array"], while the
+    OAS param model has a single scalar [param_type]. *)
 
 let param_type_of_string = Agent_sdk.Mcp.json_schema_type_to_param_type
 
-let params_of_json_schema = Agent_sdk.Mcp.json_schema_to_params
+let string_of_json_member key json =
+  match Yojson.Safe.Util.member key json with
+  | `String value -> Some value
+  | _ -> None
+
+let type_string_of_schema_property prop =
+  match Yojson.Safe.Util.member "type" prop with
+  | `String value -> Some value
+  | `List values ->
+      List.find_map
+        (function
+          | `String value when not (String.equal value "null") -> Some value
+          | _ -> None)
+        values
+  | _ -> None
+
+let params_of_json_schema schema =
+  let open Yojson.Safe.Util in
+  let required_list =
+    match schema |> member "required" with
+    | `List items ->
+        List.filter_map
+          (function
+            | `String value -> Some value
+            | _ -> None)
+          items
+    | _ -> []
+  in
+  match schema |> member "properties" with
+  | `Assoc pairs ->
+      List.map
+        (fun (name, prop) ->
+          let param_type =
+            prop
+            |> type_string_of_schema_property
+            |> Option.value ~default:"string"
+            |> param_type_of_string
+          in
+          let description =
+            string_of_json_member "description" prop
+            |> Option.value ~default:""
+          in
+          let required = List.mem name required_list in
+          { Agent_sdk.Types.name = name; description; param_type; required })
+        pairs
+  | _ -> []
 
 (** {1 OAS Tool.t Creation}
 

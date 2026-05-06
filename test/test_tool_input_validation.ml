@@ -250,6 +250,43 @@ let test_empty_schema_passes () =
   | Proceed _ -> Alcotest.fail "Empty schema should Pass"
   | Reject r -> Alcotest.fail (Yojson.Safe.to_string r.data)
 
+let test_schema_union_type_does_not_raise () =
+  let schema =
+    `Assoc
+      [
+        ("type", `String "object");
+        ( "properties",
+          `Assoc
+            [
+              ( "quantitative_evidence",
+                `Assoc
+                  [
+                    ( "type",
+                      `List
+                        [ `String "object"; `String "string"; `String "array" ]
+                    );
+                    ( "description",
+                      `String
+                        "Required for code-count or line-number claims."
+                    );
+                  ] );
+            ] );
+      ]
+  in
+  match Tool_bridge.params_of_json_schema schema with
+  | [ (param : Agent_sdk.Types.tool_param) ] ->
+      Alcotest.(check string)
+        "name"
+        "quantitative_evidence"
+        param.name;
+      Alcotest.(check bool) "optional" false param.required;
+      (match param.param_type with
+       | Agent_sdk.Types.Object -> ()
+       | _ -> Alcotest.fail "expected first non-null union type to be object")
+  | params ->
+      Alcotest.failf "expected one converted parameter, got %d"
+        (List.length params)
+
 (* ================================================================ *)
 (* Test: registered pre-hook path                                    *)
 (* ================================================================ *)
@@ -421,6 +458,8 @@ let () =
       Alcotest.test_case "null args with required" `Quick test_null_args_with_required;
       Alcotest.test_case "extra fields allowed" `Quick test_extra_fields_allowed;
       Alcotest.test_case "empty schema passes" `Quick test_empty_schema_passes;
+      Alcotest.test_case "schema union type does not raise" `Quick
+        test_schema_union_type_does_not_raise;
     ]);
     ("registered_hook", [
       Alcotest.test_case "coercion flows through registered hook" `Quick

@@ -883,8 +883,11 @@ let run_keepalive_unified_turn
         Prometheus.metric_keeper_cycle_exceptions
         ~labels:[("keeper", meta_after_triage.name)]
         ();
-      Log.Keeper.error "%s: keeper cycle exception: %s"
-        meta_after_triage.name (Printexc.to_string exn);
+      let backtrace = Printexc.get_backtrace () in
+      Log.Keeper.error "%s: keeper cycle exception: %s%s"
+        meta_after_triage.name
+        (Printexc.to_string exn)
+        (if String.equal backtrace "" then "" else "\n" ^ backtrace);
       meta_after_triage)
 ;;
 

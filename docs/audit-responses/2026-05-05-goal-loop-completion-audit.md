@@ -145,7 +145,7 @@
   completion report that keeps #13265 open because the corpus is not
   replayable. A design research note with aggregate 206/STILL_PRESENT claims
   and a single `R-FATAL-1` example was also checked and does not contain the
-  missing row corpus. The closest GOAL-loop export archive was checked as
+  missing row corpus. The closest GOAL LOOP export archive was checked as
   well; it contains the same prompt documents and research notes, with no
   `source_catalog_id`, strict-row schema, or 206 itemized rows. A later
   workspace/tmp sweep checked 16 generated JSON artifacts mentioning the

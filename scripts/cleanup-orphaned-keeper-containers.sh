@@ -101,7 +101,8 @@ while IFS= read -r cid; do
   # disappears between listing and inspect (or inspect errors transiently),
   # the script must not exit under [set -e]. Default to the container ID
   # so log lines remain attributable.
-  name=$(docker inspect --format '{{.Name}}' "$cid" 2>/dev/null | sed 's|^/||' || echo "")
+  name_raw=$(docker inspect --format '{{.Name}}' "$cid" 2>/dev/null || true)
+  name=$(printf '%s\n' "$name_raw" | sed 's|^/||')
   if [ -z "$name" ]; then name="$cid"; fi
   if [ -z "$finished" ] || [ "$finished" = "0001-01-01T00:00:00Z" ]; then
     # never started cleanly — treat as old

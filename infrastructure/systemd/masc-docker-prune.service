@@ -37,9 +37,10 @@ ExecStart=/opt/masc-mcp/scripts/cleanup-orphaned-keeper-containers.sh --apply
 
 TimeoutStartSec=15min
 
-# Hardening — note we do NOT enable PrivateTmp because docker
-# may need /tmp visibility for layer staging on some configurations.
+# Hardening. PrivateTmp is safe here because this unit only invokes Docker CLI
+# prune operations; mktemp scratch files do not need to be visible to dockerd.
 NoNewPrivileges=true
+PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/opt/masc-mcp

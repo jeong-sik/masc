@@ -120,25 +120,39 @@ export function CognitiveDisclosure({
               </div>
 
               <div class="divide-y divide-[var(--color-border-default)] border-t border-[var(--color-border-default)]">
-                ${entries.map((entry, entryIndex) => html`
-                  <details
-                    key=${`${level}:${entryIndex}`}
-                    open=${entry.defaultOpen}
-                    class="group"
-                    data-cognitive-has-detail=${entry.detail == null ? 'false' : 'true'}
-                  >
-                    <summary class="grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] gap-2 px-3 py-2.5 text-left text-xs text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-elevated)]">
-                      <span class="min-w-0 font-medium text-[var(--color-fg-primary)]">${entry.title}</span>
-                      ${entry.metric != null
-                        ? html`<span class="font-mono text-3xs text-[var(--color-fg-muted)]">${entry.metric}</span>`
-                        : null}
-                      <span class="col-span-2 min-w-0 text-[var(--color-fg-muted)]">${entry.summary}</span>
-                    </summary>
-                    ${entry.detail != null
-                      ? html`<div class="px-3 pb-3 text-xs leading-relaxed text-[var(--color-fg-secondary)]">${entry.detail}</div>`
+                ${entries.map((entry, entryIndex) => {
+                  const rowBody = html`
+                    <span class="min-w-0 font-medium text-[var(--color-fg-primary)]">${entry.title}</span>
+                    ${entry.metric != null
+                      ? html`<span class="font-mono text-3xs text-[var(--color-fg-muted)]">${entry.metric}</span>`
                       : null}
-                  </details>
-                `)}
+                    <span class="col-span-2 min-w-0 text-[var(--color-fg-muted)]">${entry.summary}</span>
+                  `
+
+                  return entry.detail == null
+                    ? html`
+                        <div
+                          key=${`${level}:${entryIndex}`}
+                          class="grid grid-cols-[minmax(0,1fr)_auto] gap-2 px-3 py-2.5 text-left text-xs text-[var(--color-fg-secondary)]"
+                          data-cognitive-has-detail="false"
+                        >
+                          ${rowBody}
+                        </div>
+                      `
+                    : html`
+                        <details
+                          key=${`${level}:${entryIndex}`}
+                          open=${entry.defaultOpen}
+                          class="group"
+                          data-cognitive-has-detail="true"
+                        >
+                          <summary class="grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] gap-2 px-3 py-2.5 text-left text-xs text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-elevated)]">
+                            ${rowBody}
+                          </summary>
+                          <div class="px-3 pb-3 text-xs leading-relaxed text-[var(--color-fg-secondary)]">${entry.detail}</div>
+                        </details>
+                      `
+                })}
               </div>
             </div>
           `

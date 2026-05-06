@@ -67,9 +67,10 @@ describe('CognitiveDisclosure', () => {
 
     const root = screen.getByTestId('disclosure')
     const routeCoverage = root.querySelector('details[data-cognitive-has-detail="true"]')
-    const planeGrouping = screen.getByText('Plane grouping').closest('details')
+    const planeGrouping = screen.getByText('Plane grouping').closest('[data-cognitive-has-detail]')
 
     expect(routeCoverage).toHaveTextContent('Live route counts')
     expect(planeGrouping).toHaveAttribute('data-cognitive-has-detail', 'false')
+    expect(planeGrouping?.tagName.toLowerCase()).toBe('div')
   })
 })

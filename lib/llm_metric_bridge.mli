@@ -23,7 +23,9 @@ val emit_http_status :
 
 (** Emit a single latency observation to the Prometheus histogram.  Values
     below 1ms are recorded as 1ms so fast calls still produce a non-zero
-    histogram sum.
+    histogram sum; non-positive inputs also increment
+    [masc_llm_provider_request_latency_clamped_total] so sentinel or missing
+    durations remain visible.
 
     Called by both the global sink built in {!make_sink} and any
     per-call OAS [Metrics.t] literal that wants to forward

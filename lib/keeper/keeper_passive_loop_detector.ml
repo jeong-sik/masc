@@ -111,6 +111,16 @@ let detect_labels_for_progress_class keeper_name progress_class =
   then [("keeper", keeper_name); ("kind", progress_class)]
   else [("keeper", keeper_name)]
 
+let emit_detected_loop_metrics keeper_name progress_class =
+  Prometheus.inc_counter
+    (detect_counter_for_progress_class progress_class)
+    ~labels:(detect_labels_for_progress_class keeper_name progress_class)
+    ();
+  Prometheus.inc_counter
+    Prometheus.metric_keeper_zombie_loop_detected_total
+    ~labels:[("keeper_name", keeper_name)]
+    ()
+
 let log_detected_loop keeper_name progress_class streak threshold =
   if is_required_tool_progress_class progress_class then
     Log.Keeper.warn
@@ -148,10 +158,7 @@ let record_turn ~keeper_name ~progress_class =
         let t = threshold_for_progress_class progress_class in
         if s.streak >= t && not s.detected_latched then begin
           s.detected_latched <- true;
-          Prometheus.inc_counter
-            (detect_counter_for_progress_class progress_class)
-            ~labels:(detect_labels_for_progress_class keeper_name progress_class)
-            ();
+          emit_detected_loop_metrics keeper_name progress_class;
           log_detected_loop keeper_name progress_class s.streak t
         end
       end

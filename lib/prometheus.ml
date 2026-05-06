@@ -1116,6 +1116,8 @@ let metric_keeper_passive_loop_detected_total =
   "masc_keeper_passive_loop_detected_total"
 let metric_keeper_required_tool_loop_detected_total =
   "masc_keeper_required_tool_loop_detected_total"
+let metric_keeper_zombie_loop_detected_total =
+  "masc_keeper_zombie_loop_detected_total"
 let metric_keeper_required_tool_gate_suppressed_total =
   "masc_keeper_required_tool_gate_suppressed_total"
 
@@ -1867,6 +1869,11 @@ let init () =
     "#13362 Total required-tool contract loops: keeper hit N consecutive \
      actionable required-tool failures before making execution/completion \
      progress. Labeled by keeper and kind."
+    Counter;
+  add metric_keeper_zombie_loop_detected_total
+    "Goal-loop Observe counter for no-progress keeper loops. Emitted by the \
+     passive/required-tool loop detector when progress-signalling turns make \
+     no execution or completion progress. Labeled by keeper_name."
     Counter;
   add metric_keeper_required_tool_gate_suppressed_total
     "#13631 Total Require_tool_use gate suppressions caused by actionable \

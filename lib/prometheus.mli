@@ -403,6 +403,12 @@ val metric_keeper_required_tool_loop_detected_total : string
     actionable required-tool failures before making execution/completion
     progress.  Incremented once per loop episode. Labels: [keeper, kind]. *)
 
+val metric_keeper_zombie_loop_detected_total : string
+(** Goal-loop Observe counter for no-progress keeper loops. Emitted by the
+    passive/required-tool loop detector when progress-signalling turns make no
+    execution or completion progress. Incremented once per loop episode.
+    Labels: [keeper_name]. *)
+
 val metric_keeper_required_tool_gate_suppressed_total : string
 (** #13631 Total Require_tool_use gate suppressions caused by actionable
     affordances whose visible keeper tool surface contains no

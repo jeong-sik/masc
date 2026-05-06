@@ -1150,8 +1150,15 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         )
         keeper_rows = warmup_fairness["keeper_rows"]
         assert isinstance(keeper_rows, list)
-        verifier_row = keeper_rows[-1]
-        assert isinstance(verifier_row, dict)
+        # Locate the verifier row by keeper_name rather than positional
+        # index so the test stays correct under any harmless fixture
+        # reordering.
+        verifier_row = next(
+            (row for row in keeper_rows
+             if isinstance(row, dict) and row.get("keeper_name") == "verifier"),
+            None,
+        )
+        assert verifier_row is not None, "fixture must contain a verifier row"
         verifier_row["warmup_sec"] = 255
         verifier_row["within_bound"] = False
         late_check = warmup_fairness["late_keeper_check"]

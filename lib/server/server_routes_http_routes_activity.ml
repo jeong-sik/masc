@@ -293,6 +293,7 @@ let add_routes ~sw ~clock router =
              let description =
                Safe_ops.json_string_opt "description" args |> Option.value ~default:""
              in
+             let members = Safe_ops.json_string_list "members" args in
              let agent_name =
                (let hdr k = Option.bind
                  (Httpun.Headers.get request.Httpun.Request.headers k)
@@ -306,7 +307,7 @@ let add_routes ~sw ~clock router =
                | None -> None
              in
              (match Board_dispatch.create_sub_board ~slug ~name ~description
-                      ~owner:agent_name ?access () with
+                      ~owner:agent_name ~members ?access () with
               | Ok sb ->
                   Http.Response.json
                     (Yojson.Safe.to_string (Board.sub_board_to_yojson sb)) reqd

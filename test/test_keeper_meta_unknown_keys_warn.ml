@@ -57,6 +57,36 @@ let test_counter_ticks_on_genuine_unknown_key () =
     true
     (after > before)
 
+let fresh_tmpdir () =
+  let path = Filename.temp_file "masc-progress-refresh-" ".tmp" in
+  Sys.remove path;
+  Keeper_types.mkdir_p path;
+  path
+
+let cleanup_tmpdir path =
+  ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote path)))
+
+let test_progress_updated_line_failure_is_observable () =
+  let dir = fresh_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
+    let config = Coord.default_config dir in
+    let keeper_name = "progress-refresh-failure" in
+    let progress_path = Keeper_types.keeper_progress_path config keeper_name in
+    Keeper_types.mkdir_p progress_path;
+    let before =
+      Prometheus.metric_total
+        Prometheus.metric_keeper_progress_updated_line_failures
+    in
+    Keeper_meta_store.refresh_progress_updated_line config keeper_name;
+    let after =
+      Prometheus.metric_total
+        Prometheus.metric_keeper_progress_updated_line_failures
+    in
+    Alcotest.(check bool)
+      "progress Updated-line refresh failure increments counter"
+      true
+      (after > before))
+
 let () =
   Alcotest.run
     "keeper_meta_unknown_keys_warn"
@@ -69,6 +99,10 @@ let () =
             "counter still ticks on genuine unknown"
             `Quick
             test_counter_ticks_on_genuine_unknown_key
+        ; Alcotest.test_case
+            "progress Updated-line refresh failure is observable"
+            `Quick
+            test_progress_updated_line_failure_is_observable
         ] )
     ]
 ;;

@@ -61,6 +61,8 @@ let keeper_internal_tools =
     "keeper_board_vote";
     "keeper_board_stats";
     "keeper_board_search";
+    "keeper_board_curation_read";
+    "keeper_board_curation_submit";
     (* keeper_board_delete removed from default shard in #4309.
        Dispatch still accepts it for backward compat. *)
     "keeper_shell";
@@ -96,6 +98,8 @@ let keeper_internal_replacement = function
   | "keeper_board_vote" -> Some "masc_board_vote"
   | "keeper_board_stats" -> Some "masc_board_stats"
   | "keeper_board_search" -> Some "masc_board_search"
+  | "keeper_board_curation_read" -> Some "masc_board_curation_read"
+  | "keeper_board_curation_submit" -> Some "masc_board_curation_submit"
   | "keeper_voice_speak"
   | "keeper_voice_agent"
   | "keeper_voice_sessions"
@@ -154,14 +158,19 @@ let public_mcp_surface_tools =
        remain on Keeper_denied so managed keepers never receive them. *)
     "masc_persona_list"; "masc_persona_schema"; "masc_persona_generate";
     "masc_persona_save"; "masc_keeper_create_from_persona";
-    (* Board *)
+    (* Board. [masc_board_reaction] is intentionally public: it is the
+       operator/client counterpart to existing board comment/vote actions,
+       while managed keepers continue to receive keeper_* board tools. *)
     "masc_board_post"; "masc_board_list"; "masc_board_get";
     "masc_board_comment"; "masc_board_vote";
+    "masc_board_curation_read"; "masc_board_curation_submit";
+    "masc_board_reaction";
     (* Agent discovery *)
     "masc_agents"; "masc_agent_card"; "masc_dashboard";
     (* Utility *)
     "masc_tool_help"; "masc_web_search"; "masc_check";
     (* HITL approval queue *)
+    "masc_approval_pending";
     "masc_approval_get";
     (* Board extended *)
     "masc_board_comment_vote";
@@ -180,6 +189,7 @@ let spawned_agent_surface_tools =
     "masc_worktree_create"; "masc_worktree_remove"; "masc_worktree_list";
     "masc_board_list"; "masc_board_post"; "masc_board_comment";
     "masc_board_vote"; "masc_board_get";
+    "masc_board_curation_read"; "masc_board_curation_submit";
     "masc_tool_help"; "masc_web_search";
     "masc_spawn";
     (* Phase 2: surface SSOT *)
@@ -199,6 +209,7 @@ let local_worker_surface_tools =
     "masc_goal_transition"; "masc_goal_verify"; "masc_coordination_fsm_snapshot";
     "masc_board_post"; "masc_board_list"; "masc_board_get";
     "masc_board_comment"; "masc_board_vote"; "masc_board_search";
+    "masc_board_curation_read"; "masc_board_curation_submit";
     "masc_code_search"; "masc_code_symbols"; "masc_code_read";
     "masc_worktree_create"; "masc_worktree_remove"; "masc_worktree_list";
     "masc_run_init"; "masc_run_plan"; "masc_run_log";
@@ -278,6 +289,14 @@ let system_internal_surface_tools =
     (* Library tools *)
     "masc_library_add"; "masc_library_list"; "masc_library_promote";
     "masc_library_read"; "masc_library_search";
+    (* Keeper board maintenance schemas remain callable for backward
+       compatibility, but are hidden from keeper/public discovery. *)
+    "keeper_board_delete"; "keeper_board_cleanup";
+    (* Keeper GitHub workflow tools are schema-registered for keeper model
+       routing, but must stay hidden from public tools/list. *)
+    "keeper_preflight_check";
+    "keeper_pr_list"; "keeper_pr_status"; "keeper_pr_create";
+    "keeper_pr_review_read"; "keeper_pr_review_comment"; "keeper_pr_review_reply";
   ]
 
 (* ================================================================ *)

@@ -219,6 +219,7 @@ type sub_board = {
   name: string;
   description: string;
   owner: Agent_id.t;
+  members: Agent_id.t list;
   access: sub_board_access;
   created_at: float;
   post_count: int;

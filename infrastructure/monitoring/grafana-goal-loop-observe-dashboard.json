@@ -1,0 +1,346 @@
+{
+  "__meta": {
+    "purpose": "MASC GOAL LOOP Observe contract dashboard - imports into Grafana 10+ via File -> Import.",
+    "metrics": [
+      "masc_keeper_turn_completed_total{keeper_name}",
+      "masc_keeper_turn_scheduled_total{keeper_name}",
+      "masc_keeper_semaphore_wait_seconds_bucket{keeper_name,cascade_profile}",
+      "masc_keeper_alive_but_stuck_seconds{keeper_name}",
+      "masc_keeper_alive_but_stuck_threshold_seconds{keeper_name}",
+      "masc_keeper_zombie_loop_detected_total{keeper_name}",
+      "masc_provider_health_probe_skipped_total{provider_name,profile_name}",
+      "masc_provider_actual_health_status{provider_name}",
+      "masc_pricing_catalog_miss_total{model_id}",
+      "masc_dashboard_metric_all_zeros{keeper_name}",
+      "masc_dashboard_snapshot_latency_seconds_bucket",
+      "masc_config_unknown_keys_ignored_total{file_path}",
+      "masc_config_credential_archived_starvation_total{keeper_name}",
+      "masc_governance_judge_unparseable_total",
+      "masc_governance_lenient_json_fallback_hit_total",
+      "masc_persistence_utf8_repair_total",
+      "masc_write_meta_cas_retry_total{keeper_name}"
+    ],
+    "companion_alerts": "infrastructure/monitoring/goal-loop-observe-alerts.yml",
+    "companion_contract": "infrastructure/monitoring/goal-loop-observe-metrics.contract.json",
+    "companion_doc": "docs/observability/goal-loop-observe-metrics.md"
+  },
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "targets": [
+        {
+          "expr": "sum by (keeper_name) (rate(masc_keeper_turn_completed_total[5m])) / clamp_min(sum by (keeper_name) (rate(masc_keeper_turn_scheduled_total[5m])), 0.001)",
+          "legendFormat": "{{keeper_name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Keeper Turn Success Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "unit": "s"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".* stuck ratio"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".* zombie loops"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ops"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "id": 2,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, keeper_name, cascade_profile) (rate(masc_keeper_semaphore_wait_seconds_bucket[5m])))",
+          "legendFormat": "{{keeper_name}} {{cascade_profile}}",
+          "refId": "A"
+        },
+        {
+          "expr": "masc_keeper_alive_but_stuck_seconds / clamp_min(masc_keeper_alive_but_stuck_threshold_seconds, 1)",
+          "legendFormat": "{{keeper_name}} stuck ratio",
+          "refId": "B"
+        },
+        {
+          "expr": "increase(masc_keeper_zombie_loop_detected_total[5m])",
+          "legendFormat": "{{keeper_name}} zombie loops",
+          "refId": "C"
+        }
+      ],
+      "title": "Keeper Stuck Signals",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "id": 3,
+      "targets": [
+        {
+          "expr": "increase(masc_provider_health_probe_skipped_total[5m])",
+          "legendFormat": "{{provider_name}} {{profile_name}} skipped",
+          "refId": "A"
+        },
+        {
+          "expr": "masc_provider_actual_health_status",
+          "legendFormat": "{{provider_name}} health",
+          "refId": "B"
+        },
+        {
+          "expr": "increase(masc_pricing_catalog_miss_total[5m])",
+          "legendFormat": "{{model_id}} pricing miss",
+          "refId": "C"
+        }
+      ],
+      "title": "Provider Health And Pricing",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "snapshot p99"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "id": 4,
+      "targets": [
+        {
+          "expr": "masc_dashboard_metric_all_zeros",
+          "legendFormat": "{{keeper_name}} all-zero",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(masc_dashboard_snapshot_latency_seconds_bucket[5m])))",
+          "legendFormat": "snapshot p99",
+          "refId": "B"
+        }
+      ],
+      "title": "Dashboard Metric Integrity",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "id": 5,
+      "targets": [
+        {
+          "expr": "increase(masc_config_unknown_keys_ignored_total[5m])",
+          "legendFormat": "{{file_path}} unknown keys",
+          "refId": "A"
+        },
+        {
+          "expr": "increase(masc_config_credential_archived_starvation_total[5m])",
+          "legendFormat": "{{keeper_name}} credential starvation",
+          "refId": "B"
+        }
+      ],
+      "title": "Config And Credential Drift",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "id": 6,
+      "targets": [
+        {
+          "expr": "increase(masc_governance_judge_unparseable_total[5m])",
+          "legendFormat": "judge unparseable",
+          "refId": "A"
+        },
+        {
+          "expr": "increase(masc_governance_lenient_json_fallback_hit_total[5m])",
+          "legendFormat": "lenient fallback",
+          "refId": "B"
+        },
+        {
+          "expr": "increase(masc_persistence_utf8_repair_total[5m])",
+          "legendFormat": "utf8 repair",
+          "refId": "C"
+        },
+        {
+          "expr": "increase(masc_write_meta_cas_retry_total[5m])",
+          "legendFormat": "{{keeper_name}} CAS retry",
+          "refId": "D"
+        }
+      ],
+      "title": "Governance And Data Integrity",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": [
+    "masc",
+    "goal-loop",
+    "observe"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": "Prometheus",
+          "value": "Prometheus"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Prometheus",
+        "multi": false,
+        "name": "DS_PROMETHEUS",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "MASC GOAL LOOP Observe",
+  "uid": "masc-goal-loop-observe",
+  "version": 1,
+  "weekStart": ""
+}

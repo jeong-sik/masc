@@ -42,6 +42,18 @@ Pair with masc_subscription to receive session-scoped event notifications.";
   (* masc_cancellation, masc_subscription, masc_progress,
      masc_governance_set removed: pruned from surfaces *)
 
+  (* masc_approval_pending *)
+  {
+    name = "masc_approval_pending";
+    description = "Keeper-safe read-only view of the pending HITL approval queue. \
+Use this to detect whether any approvals are waiting before asking an operator or using an admin-only detail/resolve path.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+      ("additionalProperties", `Bool false);
+    ];
+  };
+
   (* masc_approval_get *)
   {
     name = "masc_approval_get";

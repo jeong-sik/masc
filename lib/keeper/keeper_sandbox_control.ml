@@ -354,10 +354,10 @@ let why_no_container (meta : keeper_meta) ~preflight containers =
         match meta.network_mode with
         | Network_inherit ->
             Some
-              "network_mode=inherit uses one-shot Docker containers unless a managed sandbox is explicitly started"
+              "no visible managed sandbox container; network_mode=inherit uses one-shot Docker containers on sandboxed tool calls, and those containers still mount the keeper playground"
         | Network_none ->
             Some
-              "no active turn or managed sandbox container; Docker containers start on sandboxed tool calls or via masc_keeper_sandbox_start")
+              "no active turn or visible managed sandbox container; Docker containers start on sandboxed tool calls or via masc_keeper_sandbox_start, with the keeper playground mounted")
 
 let recommendation (meta : keeper_meta) ~preflight containers =
   if meta.sandbox_profile = Local then
@@ -372,7 +372,7 @@ let recommendation (meta : keeper_meta) ~preflight containers =
     | _ ->
         Some
           (Printf.sprintf
-             "Run masc_keeper_sandbox_start with name=%S to prewarm a visible managed container."
+             "Run masc_keeper_sandbox_start with name=%S only when you need a visible prewarmed container; repo access also requires playground_repos to include the target repo."
              meta.name)
 
 let identity_json (meta : keeper_meta) =

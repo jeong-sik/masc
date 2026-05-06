@@ -75,6 +75,24 @@ let oas_telemetry_limit_param req =
 
 let oas_telemetry_provider_param req = trimmed_query_param req "provider"
 
+let observe_worktree_status_sse_write writer event =
+  Telemetry_observe.observe_or_fail
+    ~kind:"dashboard_worktree_status_sse_write" (fun () ->
+      Httpun.Body.Writer.write_string writer event)
+
+let rec observe_worktree_status_sse_write_all writer = function
+  | [] -> Ok ()
+  | event :: rest ->
+      (match observe_worktree_status_sse_write writer event with
+       | Ok () -> observe_worktree_status_sse_write_all writer rest
+       | Error _ as err -> err)
+
+let observe_worktree_status_sse_close writer =
+  Telemetry_observe.observe_or_default
+    ~kind:"dashboard_worktree_status_sse_close"
+    ~default:() (fun () ->
+      Httpun.Body.Writer.close writer)
+
 let sync_keeper_cascade_meta ~(config : Coord.config) ~(name : string)
     ~(cascade_name : string) : (bool, string) result =
   let updated_at = Keeper_types.now_iso () in
@@ -483,11 +501,23 @@ let rec add_routes ~sw ~clock router =
              handle_dashboard_link_previews state req reqd body_str))
          request reqd)
   |> Http.Router.get "/api/v1/dashboard/memory-subsystems" (fun request reqd ->
-       with_public_read (fun state req reqd ->
+       let include_memory_entries =
+         dashboard_memory_subsystems_include_entries request
+       in
+       let handler state req reqd =
          let config = state.Mcp_server.room_config in
-         let json = dashboard_memory_subsystems_http_json ~config req in
-         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
-       ) request reqd)
+         let json =
+           dashboard_memory_subsystems_http_json ~config
+             ~include_memory_entries req
+         in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       in
+       if include_memory_entries then
+         with_token_permission_auth ~permission:Masc_domain.CanReadState
+           (fun state _agent_name req reqd -> handler state req reqd)
+           request reqd
+       else with_public_read handler request reqd)
   |> Http.Router.get "/api/v1/dashboard/doctor" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let self_bin = Sys.argv.(0) in
@@ -729,6 +759,41 @@ let rec add_routes ~sw ~clock router =
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/keeper-feature-proof" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let n =
+           let raw = match Server_utils.query_param req "n" with
+             | Some s -> int_of_string_opt s |> Option.value ~default:5000
+             | None -> 5000
+           in
+           max 1 (min 50000 raw)
+         in
+         let window_hours =
+           match Server_utils.query_param req "window_hours" with
+           | Some s ->
+             (match float_of_string_opt s with
+              | Some value when Float.is_finite value ->
+                Some (max 0.1 (min 168.0 value))
+              | Some _ | None -> None)
+           | None -> None
+         in
+         let success_threshold_pct =
+           match Server_utils.query_param req "success_threshold_pct" with
+           | Some s ->
+             (match float_of_string_opt s with
+              | Some value when Float.is_finite value ->
+                Some (max 0.0 (min 100.0 value))
+              | Some _ | None -> None)
+           | None -> None
+         in
+         let config = state.Mcp_server.room_config in
+         let json =
+           Dashboard_keeper_feature_proof.json
+             ~config ~n ?window_hours ?success_threshold_pct ()
+         in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/transport-health" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = dashboard_transport_health_http_json ~state in
@@ -775,12 +840,8 @@ let rec add_routes ~sw ~clock router =
          let response = Httpun.Response.create ~headers `OK in
          let writer = Httpun.Reqd.respond_with_streaming inner_reqd response in
          let events = Dashboard_worktree_status.sse_events ~base_path in
-         List.iter
-           (fun event ->
-             try Httpun.Body.Writer.write_string writer event
-             with _ -> ())
-           events;
-         (try Httpun.Body.Writer.close writer with _ -> ())
+         ignore (observe_worktree_status_sse_write_all writer events);
+         observe_worktree_status_sse_close writer
        ) request reqd)
 
   (* ── Eval feed (RFC-MASC-005 Phase 2) ── *)

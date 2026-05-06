@@ -604,12 +604,24 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                   | Some c -> `Float c
                   | None -> `Null
                 in
+                let tool_call_evidence =
+                  result.tool_calls
+                  |> List.filter_map (fun detail ->
+                         match detail.Keeper_agent_run.route_evidence with
+                         | Some _ ->
+                             Some
+                               (Keeper_agent_run.tool_call_detail_to_json
+                                  detail)
+                         | None -> None)
+                in
                 `Assoc [
                   ("reply", `String result.response_text);
                   ("model", `String surface_model_used);
                   ("model_used_raw", `String result.model_used);
                   ("turns", `Int result.turn_count);
                   ("tool_calls", `Int result.tool_calls_made);
+                  ( "tool_call_evidence",
+                    `List tool_call_evidence );
                   ("usage", `Assoc [
                     ("input_tokens", `Int u.input_tokens);
                     ("output_tokens", `Int u.output_tokens);

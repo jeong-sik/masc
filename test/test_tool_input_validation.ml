@@ -44,6 +44,7 @@ let validate_via_oas ~tool_name ~(schema : Yojson.Safe.t) ~(args : Yojson.Safe.t
       Reject {
         Tool_result.success = false;
         data = `Assoc [("error", `String msg)];
+        legacy_message = msg;
         tool_name;
         duration_ms = 0.0;
       }

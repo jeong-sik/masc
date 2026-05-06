@@ -255,6 +255,7 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Board_comment
     | Board_comment_vote
     | Board_curation_read
+    | Board_curation_submit
     | Board_delete
     | Board_get
     | Board_hearths
@@ -265,6 +266,7 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Board_search
     | Board_stats
     | Board_vote
+    | Approval_pending
     | Approval_get
     | Broadcast
     | Join

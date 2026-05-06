@@ -27,6 +27,57 @@ let keep_last_n n item lst =
   if List.length full <= n then full
   else List.filteri (fun i _ -> i < n) full
 
+let supervision_cohort_size = 8
+
+type supervision_cohort = {
+  cohort_id : int;
+  keepers : Keeper_registry.registry_entry list;
+}
+
+let supervision_cohorts ?(cohort_size = supervision_cohort_size)
+    (entries : Keeper_registry.registry_entry list) =
+  let cohort_size = max 1 cohort_size in
+  let sorted =
+    List.sort
+      (fun (a : Keeper_registry.registry_entry)
+           (b : Keeper_registry.registry_entry) ->
+        String.compare a.name b.name)
+      entries
+  in
+  let rec take n acc rest =
+    match n, rest with
+    | 0, rest -> (List.rev acc, rest)
+    | _, [] -> (List.rev acc, [])
+    | n, entry :: rest -> take (n - 1) (entry :: acc) rest
+  in
+  let rec loop cohort_id acc remaining =
+    match remaining with
+    | [] -> List.rev acc
+    | _ ->
+        let keepers, rest = take cohort_size [] remaining in
+        loop (cohort_id + 1) ({ cohort_id; keepers } :: acc) rest
+  in
+  loop 0 [] sorted
+
+let fresh_supervision_cohort_keepers ~base_path
+    (cohort : supervision_cohort) =
+  List.filter_map
+    (fun (entry : Keeper_registry.registry_entry) ->
+      Keeper_registry.get ~base_path entry.name)
+    cohort.keepers
+
+let iter_supervision_cohorts ?(yield_between = Eio_guard.fair_yield)
+    cohorts ~f =
+  let rec loop = function
+    | [] -> ()
+    | [ cohort ] -> f cohort
+    | cohort :: rest ->
+        f cohort;
+        yield_between ();
+        loop rest
+  in
+  loop cohorts
+
 let should_cleanup_dead ~now ~dead_ttl_sec
     (entry : Keeper_registry.registry_entry) =
   match entry.phase, entry.dead_since_ts with
@@ -47,15 +98,12 @@ let is_stale_paused_meta ~now ~paused_ttl_sec (meta : keeper_meta) =
 let paused_meta_requires_reconcile_recovery (meta : keeper_meta) =
   meta.paused
   && (match meta.runtime.last_blocker_class with
-      | Some Ambiguous_post_commit_timeout | Some Ambiguous_post_commit_failure ->
-          true
+      | Some cls -> blocker_class_continue_gate cls
       | None ->
           (match Keeper_status_bridge.blocker_class_of_string
                   meta.runtime.last_blocker with
-           | Some Ambiguous_post_commit_timeout
-           | Some Ambiguous_post_commit_failure -> true
-           | _ -> false)
-      | _ -> false)
+           | Some cls -> blocker_class_continue_gate cls
+           | None -> false))
 
 let committed_tools_of_ambiguous_blocker (blocker : string) =
   let trimmed = String.trim blocker in
@@ -126,6 +174,11 @@ let fork_stale_watchdog = Keeper_stale_watchdog.fork_stale_watchdog
 
 (* ── Supervised fiber launch ─────────────────────────────── *)
 
+let restart_launch_noop_for_test = Atomic.make false
+
+let set_restart_launch_noop_for_test enabled =
+  Atomic.set restart_launch_noop_for_test enabled
+
 let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
     (reg : Keeper_registry.registry_entry) =
   let base_path = ctx.config.base_path in
@@ -142,6 +195,8 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
          Prometheus.metric_keeper_supervisor_cleanup_failures
          ~labels:[("keeper", meta.name); ("site", "fiber_start_rejected")]
          ());
+  if Atomic.get restart_launch_noop_for_test then ()
+  else begin
   fork_stale_watchdog ctx meta reg;
   (* Task 137: Inject bootstrap signal to ensure at least one warm-up turn runs
      and break the initial proactive deadlock. *)
@@ -370,6 +425,7 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
           Log.Keeper.warn
             "%s: supervisor finally cleanup failed (suppressed to avoid Fun.Finally_raised): %s"
             meta.name (Printexc.to_string exn)))
+  end
 
 (* #10993: persona drift visibility.
 
@@ -989,9 +1045,12 @@ let handle_crash_auto_pause (ctx : _ context)
            meta.auto_resume_after_sec
        in
        let blocker_text =
-         match blocker_class with
-         | Some cls -> blocker_class_to_string cls
-         | None -> reason_tag
+         let existing = String.trim meta.runtime.last_blocker in
+         if existing <> "" then existing
+         else
+           match blocker_class with
+           | Some cls -> blocker_class_to_string cls
+           | None -> reason_tag
        in
        (* Task-138 §"Max no-task-progress 30min = release claimed":
           when the supervisor pauses a keeper because the same blocker
@@ -1244,36 +1303,42 @@ let sweep_and_recover (ctx : _ context) =
        | None -> ())
     end
   in
-  (* Yield meter: the entry scan is pure in-memory and may cover 64+
-     keepers; yield every ~1000 iterations to stay scheduler-fair. *)
+  (* 2-level supervision slice: process the flat registry through stable
+     8-keeper cohorts.  Each cohort re-reads its entries by name before
+     processing so earlier cohort actions cannot leave later cohorts walking
+     stale registry records.  The iterator yields between cohort groups; the
+     yield meter still protects unusually large cohorts or non-default sizes. *)
+  let entry_cohorts = supervision_cohorts entries in
   let sweep_ym = Eio_guard.create_yield_meter () in
-  List.iter (fun (entry : Keeper_registry.registry_entry) ->
-    (match entry.phase with
-    | Keeper_state_machine.Dead | Keeper_state_machine.Zombie ->
-        (match entry.dead_since_ts with
-         | Some dead_since when now -. dead_since >= dead_ttl_sec ->
-             to_cleanup_dead := entry :: !to_cleanup_dead
-         | _ -> ())
-    | Keeper_state_machine.Stopped ->
-        to_unregister := entry :: !to_unregister
-    | Keeper_state_machine.Running | Keeper_state_machine.Paused
-    | Keeper_state_machine.Crashed
-    | Keeper_state_machine.Failing | Keeper_state_machine.Overflowed
-    | Keeper_state_machine.Compacting
-    | Keeper_state_machine.HandingOff | Keeper_state_machine.Draining
-    | Keeper_state_machine.Restarting | Keeper_state_machine.Offline ->
-      (match Eio.Promise.peek entry.done_p with
-      | None when entry.phase = Keeper_state_machine.Stopped ->
-          to_unregister := entry :: !to_unregister
-      | None when watchdog_stop_pending entry ->
-          force_unresolved_watchdog_crash entry
-      | None -> ()  (* Alive — skip *)
-      | Some `Stopped ->
-          to_unregister := entry :: !to_unregister
-      | Some (`Crashed msg) ->
-          queue_crashed_entry entry msg));
-    Eio_guard.yield_step sweep_ym
-  ) entries;
+  iter_supervision_cohorts entry_cohorts ~f:(fun cohort ->
+      let cohort_keepers =
+        fresh_supervision_cohort_keepers ~base_path cohort
+      in
+      List.iter
+        (fun (entry : Keeper_registry.registry_entry) ->
+          (match entry.phase with
+           | Keeper_state_machine.Dead | Keeper_state_machine.Zombie ->
+               (match entry.dead_since_ts with
+                | Some dead_since when now -. dead_since >= dead_ttl_sec ->
+                    to_cleanup_dead := entry :: !to_cleanup_dead
+                | _ -> ())
+           | Keeper_state_machine.Stopped ->
+               to_unregister := entry :: !to_unregister
+           | Keeper_state_machine.Running | Keeper_state_machine.Paused
+           | Keeper_state_machine.Crashed | Keeper_state_machine.Failing
+           | Keeper_state_machine.Overflowed | Keeper_state_machine.Compacting
+           | Keeper_state_machine.HandingOff | Keeper_state_machine.Draining
+           | Keeper_state_machine.Restarting | Keeper_state_machine.Offline ->
+               (match Eio.Promise.peek entry.done_p with
+                | None when watchdog_stop_pending entry ->
+                    force_unresolved_watchdog_crash entry
+                | None -> ()  (* Alive — skip *)
+                | Some `Stopped ->
+                    to_unregister := entry :: !to_unregister
+                | Some (`Crashed msg) ->
+                    queue_crashed_entry entry msg));
+          Eio_guard.yield_step sweep_ym)
+        cohort_keepers);
   List.iter (fun (entry : Keeper_registry.registry_entry) ->
     Keeper_registry.unregister ~base_path entry.name;
     (* K4c — restart-budget exhaustion: keeper is permanently

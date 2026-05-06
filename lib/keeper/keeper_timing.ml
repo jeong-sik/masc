@@ -11,3 +11,14 @@ let timed (f : unit -> 'a) : 'a * float =
   let result = f () in
   let elapsed_ms = (Time_compat.now () -. t0) *. 1000.0 in
   (result, elapsed_ms)
+
+(** [elapsed_duration_ms ~start_time ~end_time] converts a monotonic time
+    interval to an integer millisecond telemetry value. Positive elapsed time
+    smaller than 1ms is rounded up so completed calls are not recorded as
+    [0ms]. *)
+let elapsed_duration_ms ~start_time ~end_time =
+  let elapsed_ms = (end_time -. start_time) *. 1000.0 in
+  if (not (Float.is_finite elapsed_ms)) || Float.compare elapsed_ms 0.0 <= 0
+  then 0
+  else if Float.compare elapsed_ms (float_of_int max_int) >= 0 then max_int
+  else max 1 (int_of_float elapsed_ms)

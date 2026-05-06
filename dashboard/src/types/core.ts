@@ -105,6 +105,7 @@ export interface Message {
   content: string
   timestamp?: string
   type?: string
+  room?: string
 }
 
 // --- Board ---
@@ -195,10 +196,35 @@ export interface BoardCurationSnapshot {
   generated_at: string
   submitted_by: string
   model?: string | null
+  summary?: string | null
   ordering: string[]
   highlights: string[]
+  tag_suggestions: BoardCurationTagSuggestion[]
+  answer_matches: BoardCurationAnswerMatch[]
+  health_score?: number | null
+  health_components: BoardCurationHealthComponent[]
   rationale: string
   provenance?: unknown
+}
+
+export interface BoardCurationTagSuggestion {
+  post_id: string
+  tags: string[]
+  rationale: string
+}
+
+export interface BoardCurationAnswerMatch {
+  question_post_id: string
+  answer_post_id: string
+  score: number
+  rationale: string
+}
+
+export interface BoardCurationHealthComponent {
+  name: string
+  score: number
+  weight: number
+  rationale: string
 }
 
 // --- SubBoard ---
@@ -211,6 +237,7 @@ export interface SubBoard {
   name: string
   description: string
   owner: string
+  members: string[]
   access: SubBoardAccess
   created_at: string
   post_count: number
@@ -230,7 +257,7 @@ export interface InferenceTelemetry {
   } | null
   reasoning_tokens: number | null
   peak_memory_gb: number | null
-  request_latency_ms: number
+  request_latency_ms: number | null
 }
 
 export interface PromptSegmentTelemetry {
@@ -268,7 +295,7 @@ export interface KeeperMetricPoint {
   context_ratio: number
   context_tokens: number
   context_max: number
-  latency_ms: number
+  latency_ms: number | null
   generation: number
   channel: string
   is_handoff: boolean
@@ -299,6 +326,22 @@ export interface KeeperMetricPoint {
   fallback_to: string | null
   fallback_reason: string | null
 }
+
+export type KeeperRuntimeBlockerClass =
+  | 'ambiguous_post_commit_timeout'
+  | 'ambiguous_post_commit_failure'
+  | 'autonomous_slot_wait_timeout'
+  | 'admission_queue_wait_timeout'
+  | 'turn_timeout_after_queue_wait'
+  | 'oas_timeout_budget'
+  | 'turn_timeout'
+  | 'completion_contract_violation'
+  | 'cascade_exhausted'
+  | 'no_tool_capable_provider'
+  | 'provider_runtime_error'
+  | 'tool_required_unsatisfied'
+  | 'fiber_unresolved'
+  | 'stale_turn_timeout'
 
 export interface KeeperTrustLatestEvent {
   kind: string
@@ -750,20 +793,7 @@ export interface Keeper {
   proactive_enabled?: boolean
   proactive_idle_sec?: number
   proactive_cooldown_sec?: number
-  runtime_blocker_class?:
-    | 'ambiguous_post_commit_timeout'
-    | 'ambiguous_post_commit_failure'
-    | 'autonomous_slot_wait_timeout'
-    | 'admission_queue_wait_timeout'
-    | 'turn_timeout_after_queue_wait'
-    | 'oas_timeout_budget'
-    | 'turn_timeout'
-    | 'completion_contract_violation'
-    | 'cascade_exhausted'
-    | 'no_tool_capable_provider'
-    | 'fiber_unresolved'
-    | 'stale_turn_timeout'
-    | null
+  runtime_blocker_class?: KeeperRuntimeBlockerClass | null
   runtime_blocker_summary?: string | null
   runtime_blocker_continue_gate?: boolean | null
   needs_attention?: boolean | null
@@ -1089,17 +1119,7 @@ interface KeeperConfigRuntime {
   fiber_health: string
   presence_keepalive: boolean
   presence_keepalive_sec: number
-  runtime_blocker_class?:
-    | 'ambiguous_post_commit_timeout'
-    | 'ambiguous_post_commit_failure'
-    | 'autonomous_slot_wait_timeout'
-    | 'admission_queue_wait_timeout'
-    | 'turn_timeout_after_queue_wait'
-    | 'oas_timeout_budget'
-    | 'turn_timeout'
-    | 'completion_contract_violation'
-    | 'cascade_exhausted'
-    | null
+  runtime_blocker_class?: KeeperRuntimeBlockerClass | null
   active_model_label?: string | null
   last_model_used_label?: string | null
   runtime_blocker_summary?: string | null

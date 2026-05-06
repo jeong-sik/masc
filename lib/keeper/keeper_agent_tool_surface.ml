@@ -77,6 +77,7 @@ type computed_tool_surface =
   }
 
 type turn_affordance =
+  | Board_curation
   | Board_post_or_comment
   | Message_sweep
   | Reply_in_room
@@ -87,6 +88,7 @@ type turn_affordance =
   | Inspect_worktree_delta
 
 let turn_affordance_of_string = function
+  | "board_curation" -> Some Board_curation
   | "board_post_or_comment" -> Some Board_post_or_comment
   | "message_sweep" -> Some Message_sweep
   | "reply_in_room" -> Some Reply_in_room
@@ -98,6 +100,7 @@ let turn_affordance_of_string = function
   | _ -> None
 
 let should_tool_gate_affordance = function
+  | Board_curation
   | Board_post_or_comment
   | Message_sweep
   | Reply_in_room
@@ -120,6 +123,7 @@ let turn_affordances_require_tool_gate turn_affordances =
    contract for that affordance and must be allowed to respond with
    text instead. *)
 let tools_for_gated_affordance = function
+  | Board_curation -> [ "keeper_board_curation_submit" ]
   | Board_post_or_comment ->
     [ "keeper_board_post"; "keeper_board_comment"; "masc_broadcast" ]
   | Message_sweep -> [ "masc_messages"; "masc_keeper_msg" ]
@@ -141,6 +145,21 @@ let tools_for_gated_affordance = function
   | Inspect_worktree_delta ->
     [ "keeper_shell"; "keeper_bash"; "masc_code_git";
       "keeper_fs_read" ]
+
+let preferred_tool_names_for_turn_affordances turn_affordances =
+  turn_affordances
+  |> List.filter_map turn_affordance_of_string
+  |> List.concat_map (function
+       | Board_curation -> [ "keeper_board_curation_submit" ]
+       | Board_post_or_comment
+       | Message_sweep
+       | Reply_in_room
+       | Task_claim
+       | Task_audit
+       | Task_verify
+       | Work_discovery
+       | Inspect_worktree_delta -> [])
+  |> Keeper_types.dedupe_keep_order
 
 (* Filtered variant of [turn_affordances_require_tool_gate]:  a gated
    affordance only counts when the keeper actually has a tool that can
@@ -183,7 +202,10 @@ let has_task_claim_affordance = has_turn_affordance Task_claim
 
 let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
     ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
-  if (not has_current_task)
+  if has_turn_affordance Board_curation turn_affordances
+     && List.mem "keeper_board_curation_submit" allowed_tool_names
+  then Agent_sdk.Types.Tool "keeper_board_curation_submit"
+  else if (not has_current_task)
      && has_task_claim_affordance turn_affordances
      && List.mem "keeper_task_claim" allowed_tool_names
   then Agent_sdk.Types.Tool "keeper_task_claim"
@@ -269,6 +291,7 @@ let tool_search_alias_entries =
   ; "keeper_board_delete", "게시판 삭제 제거 글삭제"
   ; "keeper_board_stats", "게시판 통계 활동 참여 게시글수"
   ; "keeper_board_curation_read", "게시판 AI 큐레이션 추천순서 하이라이트"
+  ; "keeper_board_curation_submit", "게시판 AI 큐레이션 요약 태그 답변매칭 건강도 제출"
   ; "keeper_stay_silent", "침묵 대기 아무것도 안함 넘어가기"
   ; "keeper_tool_search", "도구 검색 발견 찾기 어떤도구"
   ; "keeper_voice_listen", "음성 듣기 마이크 녹음 입력"
@@ -291,6 +314,9 @@ let tool_search_alias_entries =
   ; "keeper_task_submit_for_verification", "태스크 검증제출 리뷰요청 PR검토"
   ; "keeper_task_force_release", "태스크 강제해제 반환"
   ; "keeper_task_force_done", "태스크 강제완료"
+  ; "keeper_pr_review_read", "pr review pull request github diff comments reviews 읽기 검토"
+  ; "keeper_pr_review_comment", "pr review pull request github comment approve request_changes 코멘트 승인 변경요청"
+  ; "keeper_pr_review_reply", "pr review pull request github reply inline comment 답글 리뷰댓글"
   ; "keeper_voice_speak", "음성 말하기 보이스"
   ; "keeper_voice_agent", "음성 설정 보이스"
   ; "keeper_voice_sessions", "음성 세션 목록"

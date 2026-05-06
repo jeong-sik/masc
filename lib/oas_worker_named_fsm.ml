@@ -439,6 +439,8 @@ let provider_error_capacity_scope_label = function
 let emit_provider_error_metric ~cascade_name ~provider error =
   let cascade_name = provider_label (cascade_name_to_string cascade_name) in
   let provider = provider_label provider in
+  Dashboard_oas_bridge.record_provider_error ~cascade_name ~provider_id:provider
+    error;
   Prometheus.inc_counter provider_error_total_metric
     ~labels:
       [

@@ -62,6 +62,7 @@ let test_turn_reason_to_string_coverage () =
     WO.Task_reactive_cooldown_elapsed;
     WO.Never_started;
     WO.Min_interval_elapsed;
+    WO.Entropic_oscillation;
   ] in
   List.iter (fun v ->
     let s = WO.turn_reason_to_string v in
@@ -69,6 +70,32 @@ let test_turn_reason_to_string_coverage () =
       (Printf.sprintf "turn_reason_to_string(%s) is non-empty" s)
       true (String.length s > 0)
   ) variants
+
+let test_turn_reason_to_string_distinguishes_entropy () =
+  check string "min interval tag preserved"
+    "min_interval_elapsed"
+    (WO.turn_reason_to_string WO.Min_interval_elapsed);
+  check string "entropic wakeup has distinct tag"
+    "entropic_oscillation"
+    (WO.turn_reason_to_string WO.Entropic_oscillation)
+
+let test_entropic_oscillation_policy () =
+  check bool "does not inject before interval"
+    false
+    (WO.should_inject_entropic_oscillation
+       ~since_last_scheduled_autonomous:
+         (WO.entropic_oscillation_interval_sec - 1)
+       ~draw_percent:0);
+  check bool "injects at interval below probability"
+    true
+    (WO.should_inject_entropic_oscillation
+       ~since_last_scheduled_autonomous:WO.entropic_oscillation_interval_sec
+       ~draw_percent:(WO.entropic_oscillation_probability_percent - 1));
+  check bool "does not inject at probability boundary"
+    false
+    (WO.should_inject_entropic_oscillation
+       ~since_last_scheduled_autonomous:WO.entropic_oscillation_interval_sec
+       ~draw_percent:WO.entropic_oscillation_probability_percent)
 
 let test_skip_reason_to_string_coverage () =
   let variants = [
@@ -212,6 +239,8 @@ let make_obs_meta name =
     ("agent_name", `String ("agent-" ^ name));
     ("trace_id", `String ("trace-obs-" ^ name));
     ("goal", `String "observer test");
+    ("sandbox_profile", `String "local");
+    ("network_mode", `String "inherit");
   ] in
   match KTypes.meta_of_json json with
   | Ok meta -> meta
@@ -411,7 +440,11 @@ let () =
     ];
     "typed_variant_coverage", [
       test_case "turn_reason_to_string all variants" `Quick test_turn_reason_to_string_coverage;
+      test_case "turn_reason_to_string distinguishes entropy" `Quick test_turn_reason_to_string_distinguishes_entropy;
       test_case "skip_reason_to_string all variants" `Quick test_skip_reason_to_string_coverage;
+    ];
+    "entropic_oscillation", [
+      test_case "policy interval and probability boundary" `Quick test_entropic_oscillation_policy;
     ];
     "recovery_floor", [
       test_case "floor shard names non-empty" `Quick test_recovery_floor_non_empty;

@@ -42,6 +42,14 @@ type meta_cognition =
   ; dominant_belief : belief option
   }
 
+type fetch_status =
+  | Fetch_pending
+  | Fetch_fresh
+  | Fetch_stale of
+      { reason : string
+      ; consecutive_failures : int
+      }
+
 type response =
   { generated_at : string
   ; status : status
@@ -49,6 +57,7 @@ type response =
   ; configured_keepers : int
   ; meta_cognition : meta_cognition
   ; base_path : string
+  ; fetch_status : fetch_status
   }
 
 let fixture_build : build =
@@ -82,6 +91,7 @@ let fixture : response =
   ; configured_keepers = 0
   ; meta_cognition = fixture_meta
   ; base_path = ""
+  ; fetch_status = Fetch_pending
   }
 ;;
 
@@ -175,5 +185,13 @@ let response_of_yojson json : response =
       meta_cognition_of_yojson
         (Yojson.Safe.Util.member "meta_cognition" json)
   ; base_path
+  ; fetch_status = Fetch_fresh
   }
+;;
+
+let fetch_status_label = function
+  | Fetch_pending -> "fetch pending"
+  | Fetch_fresh -> "fetch ok"
+  | Fetch_stale { consecutive_failures; _ } ->
+    Printf.sprintf "stale %dx" consecutive_failures
 ;;

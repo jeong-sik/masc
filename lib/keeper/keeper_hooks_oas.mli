@@ -58,6 +58,11 @@ val pre_tool_gate_error :
   Keeper_guards.gate_decision_event -> string
 (** Render the gate decision as a structured error message for logs. *)
 
+val trajectory_duration_ms : float -> int
+(** Convert hook-reported millisecond durations for trajectory rows.
+    Positive sub-1ms durations are rounded up to 1 so real tool work does
+    not appear as missing/zero-duration telemetry. *)
+
 val record_pre_tool_gate_attempt :
   meta_ref:Keeper_types.keeper_meta ref ->
   tool_call_count_ref:int ref ->

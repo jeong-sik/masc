@@ -1976,6 +1976,11 @@ function normalizeRuntimeBlockerClass(value: unknown): KeeperConfig['runtime']['
     case 'turn_timeout':
     case 'completion_contract_violation':
     case 'cascade_exhausted':
+    case 'no_tool_capable_provider':
+    case 'provider_runtime_error':
+    case 'tool_required_unsatisfied':
+    case 'fiber_unresolved':
+    case 'stale_turn_timeout':
       return blockerClass
     default:
       return null
@@ -2741,6 +2746,14 @@ export interface MemorySubsystemsEpisode {
   context: Record<string, string>
 }
 
+export interface MemorySubsystemsMemoryEntry {
+  keeper: string
+  kind: string
+  text: string
+  priority: number
+  ts_unix: number
+}
+
 export interface MemorySubsystemsResponse {
   generated_at: string
   hebbian: {
@@ -2754,9 +2767,17 @@ export interface MemorySubsystemsResponse {
     limit: number
     items: MemorySubsystemsEpisode[]
   }
+  memory_entries?: {
+    total: number
+    filtered: number
+    shown: number
+    limit: number
+    items: MemorySubsystemsMemoryEntry[]
+  }
   filters: {
     keepers: string[]
     outcomes: string[]
+    memory_kinds?: string[]
   }
 }
 
@@ -2765,6 +2786,7 @@ interface MemorySubsystemsQuery {
   keeper?: string
   outcome?: string
   q?: string
+  includeMemoryEntries?: boolean
   signal?: AbortSignal
 }
 
@@ -2776,6 +2798,7 @@ export function fetchMemorySubsystems(
   if (opts?.keeper) params.set('keeper', opts.keeper)
   if (opts?.outcome) params.set('outcome', opts.outcome)
   if (opts?.q) params.set('q', opts.q)
+  if (opts?.includeMemoryEntries) params.set('include_memory_entries', 'true')
   const qs = params.toString()
   return get<MemorySubsystemsResponse>(
     `/api/v1/dashboard/memory-subsystems${qs ? `?${qs}` : ''}`,

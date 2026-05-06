@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
-import { AgentPresence, agentStatusToPresence, presenceConfig } from './agent-presence'
+import {
+  AgentPresence,
+  agentStatusToPresence,
+  presenceConfig,
+  summarizeAgentPresence,
+} from './agent-presence'
 
 describe('agentStatusToPresence', () => {
   it('maps active to online', () => {
@@ -40,9 +45,38 @@ describe('agentStatusToPresence', () => {
 describe('presenceConfig', () => {
   it('returns config for each state', () => {
     expect(presenceConfig('online').label).toBe('온라인')
+    expect(presenceConfig('online').colorClass).toContain('var(--color-status-ok)')
     expect(presenceConfig('working').pulse).toBe(true)
+    expect(presenceConfig('working').colorClass).toContain('var(--color-accent-fg)')
     expect(presenceConfig('idle').label).toBe('대기')
+    expect(presenceConfig('idle').colorClass).toContain('var(--color-status-warn)')
     expect(presenceConfig('offline').label).toBe('오프라인')
+  })
+})
+
+describe('summarizeAgentPresence', () => {
+  it('summarizes mapped status, label, size, and detail', () => {
+    expect(summarizeAgentPresence('busy', 'compacting', 'md')).toEqual({
+      rawStatus: 'busy',
+      state: 'working',
+      label: '작업 중',
+      pulse: true,
+      size: 'md',
+      detail: 'compacting',
+      detailPresent: true,
+    })
+  })
+
+  it('normalizes null status and detail', () => {
+    expect(summarizeAgentPresence(null, null, 'sm')).toEqual({
+      rawStatus: '',
+      state: 'offline',
+      label: '오프라인',
+      pulse: false,
+      size: 'sm',
+      detail: '',
+      detailPresent: false,
+    })
   })
 })
 
@@ -52,6 +86,29 @@ describe('AgentPresence', () => {
     render(h(AgentPresence, { status: 'active' }), container)
     const el = container.querySelector('[data-presence-state]')
     expect(el?.getAttribute('data-presence-state')).toBe('online')
+  })
+
+  it('exposes summary data attributes', () => {
+    const container = document.createElement('div')
+    render(h(AgentPresence, { status: 'busy', detail: 'task-123', size: 'md' }), container)
+    const el = container.querySelector('[data-agent-presence]') as HTMLElement
+    expect(el.dataset.presenceRawStatus).toBe('busy')
+    expect(el.dataset.presenceState).toBe('working')
+    expect(el.dataset.presenceLabel).toBe('작업 중')
+    expect(el.dataset.presencePulse).toBe('true')
+    expect(el.dataset.presenceSize).toBe('md')
+    expect(el.dataset.presenceDetailPresent).toBe('true')
+    expect(el.hasAttribute('data-presence-detail')).toBe(false)
+  })
+
+  it('omits false boolean and detail-copy metadata', () => {
+    const container = document.createElement('div')
+    render(h(AgentPresence, { status: null }), container)
+    const el = container.querySelector('[data-agent-presence]') as HTMLElement
+    expect(el.dataset.presenceRawStatus).toBe('')
+    expect(el.hasAttribute('data-presence-pulse')).toBe(false)
+    expect(el.hasAttribute('data-presence-detail-present')).toBe(false)
+    expect(el.hasAttribute('data-presence-detail')).toBe(false)
   })
 
   it('renders label text', () => {
@@ -64,6 +121,7 @@ describe('AgentPresence', () => {
     const container = document.createElement('div')
     render(h(AgentPresence, { status: 'active', detail: 'task-123' }), container)
     expect(container.textContent).toContain('task-123')
+    expect(container.querySelector('[title="task-123"]')).not.toBeNull()
   })
 
   it('uses sm size by default', () => {

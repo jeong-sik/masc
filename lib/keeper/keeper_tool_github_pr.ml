@@ -130,7 +130,45 @@ let status_ok = function
   | Unix.WEXITED 0 -> true
   | _ -> false
 
-let output_json ~ok ~tool ~operation ~meta ~binding ~state ~cwd ~output =
+type gh_exec_result =
+  { status : Unix.process_status
+  ; output : string
+  ; via : string
+  }
+
+let quote_argv argv =
+  String.concat " " (List.map Filename.quote argv)
+
+let run_gh_argv ~(config : Coord.config) ~(meta : keeper_meta) ~env ~cwd
+    ~timeout_sec argv =
+  if
+    meta.sandbox_profile = Docker
+    && Env_config_keeper.KeeperSandbox.hard_mode ()
+  then
+    let status, output =
+      Process_eio.run_argv_with_status ~env ~cwd ~timeout_sec argv
+    in
+    { status; output; via = "brokered" }
+  else if meta.sandbox_profile = Docker then
+    match
+      Keeper_shell_shared.run_docker_shell_command_with_status
+        ~config ~meta ~cwd ~timeout_sec ~cmd:(quote_argv argv)
+        ~git_creds_enabled:true ~network_mode:Network_inherit
+    with
+    | Ok result ->
+        { status = result.Keeper_shell_docker.status
+        ; output = result.output
+        ; via = "docker"
+        }
+    | Error msg ->
+        { status = Unix.WEXITED 1; output = msg; via = "docker" }
+  else
+    let status, output =
+      Process_eio.run_argv_with_status ~env ~cwd ~timeout_sec argv
+    in
+    { status; output; via = "host" }
+
+let output_json ~ok ~tool ~operation ~meta ~binding ~state ~cwd ~via ~output =
   Yojson.Safe.to_string
     (`Assoc
       [
@@ -138,6 +176,7 @@ let output_json ~ok ~tool ~operation ~meta ~binding ~state ~cwd ~output =
         "tool", `String tool;
         "operation", `String operation;
         "keeper", `String meta.name;
+        "via", `String via;
         "credential", binding_json binding ~state;
         "cwd", `String cwd;
         "output", `String output;
@@ -170,11 +209,11 @@ let run_gh ~tool ~operation ~config ~meta ~args ~write argv =
               ~caller:(if write then Pr_review_post else Pr_review)
               ()
           in
-          let st, output =
-            Process_eio.run_argv_with_status ~env ~cwd ~timeout_sec argv
+          let result =
+            run_gh_argv ~config ~meta ~env ~cwd ~timeout_sec argv
           in
-          output_json ~ok:(status_ok st) ~tool ~operation ~meta ~binding
-            ~state ~cwd ~output)
+          output_json ~ok:(status_ok result.status) ~tool ~operation ~meta
+            ~binding ~state ~cwd ~via:result.via ~output:result.output)
 
 let handle_keeper_pr_list ~(config : Coord.config) ~(meta : keeper_meta)
     ~(args : Yojson.Safe.t) =
@@ -227,4 +266,5 @@ module For_testing = struct
   let build_pr_status_argv = build_pr_status_argv
   let build_pr_create_argv = build_pr_create_argv
   let draft_request_allowed = draft_request_allowed
+  let quote_argv = quote_argv
 end

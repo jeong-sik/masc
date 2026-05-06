@@ -5,6 +5,7 @@ open Alcotest
 
 module Audit = Masc_mcp.Keeper_transition_audit
 module KSM = Masc_mcp.Keeper_state_machine
+module P = Masc_mcp.Prometheus
 
 let fail = Alcotest.fail
 
@@ -61,6 +62,25 @@ let transition ?(prev_phase = KSM.Running) ?(new_phase = KSM.Paused)
     transition_outcome = "applied";
     wall_clock_at_decision = 1_712_000_000.5;
   }
+
+let transition_audit_failure_count site =
+  P.metric_value_or_zero P.metric_keeper_transition_audit_failures
+    ~labels:[("site", site)]
+    ()
+
+let with_invalid_default_store f =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Audit.For_testing.reset_state ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let base_file = Filename.concat base_dir "not-a-dir" in
+      let oc = open_out base_file in
+      close_out oc;
+      with_env "MASC_KEEPER_TRANSITION_LOG" "" (fun () ->
+          with_env "MASC_BASE_PATH" base_file (fun () ->
+              with_env "MASC_BASE_PATH_INPUT" base_file f)))
 
 (* ── Helpers to exercise the JSON round-trip via store ─────────── *)
 
@@ -192,6 +212,106 @@ let test_runtime_trust_timeline_carries_transition_operator_signal () =
           check string "transition severity" "warn"
             (event |> member "severity" |> to_string)))
 
+let test_default_transition_append_failure_is_observed_and_ring_retained () =
+  Audit.For_testing.reset_state ();
+  with_invalid_default_store (fun () ->
+      let keeper_name = "default-transition-failure-keeper" in
+      let before =
+        transition_audit_failure_count "default_transition_append"
+      in
+      Audit.record_transition ~keeper_name (transition ());
+      let after =
+        transition_audit_failure_count "default_transition_append"
+      in
+      check (float 0.0001) "default transition append failure counted"
+        (before +. 1.0) after;
+      check int "ring still records transition" 1
+        (List.length (Audit.recent_transitions ~keeper_name ~limit:5)))
+
+let test_default_completed_append_failure_is_observed_and_ring_retained () =
+  Audit.For_testing.reset_state ();
+  with_invalid_default_store (fun () ->
+      let keeper_name = "default-completed-failure-keeper" in
+      let before =
+        transition_audit_failure_count "default_completed_append"
+      in
+      Audit.record_completed_turn ~keeper_name
+        {
+          Audit.turn_id = 1;
+          started_at = 1.0;
+          ended_at = 2.0;
+          outcome = Audit.Turn_failed;
+        };
+      let after =
+        transition_audit_failure_count "default_completed_append"
+      in
+      check (float 0.0001) "default completed append failure counted"
+        (before +. 1.0) after;
+      check int "completed turn ring still records turn" 1
+        (List.length
+           (Audit.recent_completed_turns ~keeper_name ~limit:5)))
+
+let test_sink_append_failure_is_observed_and_ring_retained () =
+  Audit.For_testing.reset_state ();
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Audit.For_testing.reset_state ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let missing_parent = Filename.concat base_dir "missing-parent" in
+      let sink = Filename.concat missing_parent "transition-audit.jsonl" in
+      with_env "MASC_KEEPER_TRANSITION_LOG" sink (fun () ->
+          let keeper_name = "sink-failure-keeper" in
+          let before = transition_audit_failure_count "sink_append" in
+          Audit.record_transition ~keeper_name (transition ());
+          let after = transition_audit_failure_count "sink_append" in
+          check (float 0.0001) "sink append failure counted"
+            (before +. 1.0) after;
+          check int "ring still records transition" 1
+            (List.length
+               (Audit.recent_transitions ~keeper_name ~limit:5))))
+
+let test_completed_turn_sink_failure_is_observed_and_ring_retained () =
+  Audit.For_testing.reset_state ();
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Audit.For_testing.reset_state ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let missing_parent = Filename.concat base_dir "missing-parent" in
+      let sink = Filename.concat missing_parent "transition-audit.jsonl" in
+      with_env "MASC_KEEPER_TRANSITION_LOG" sink (fun () ->
+          let keeper_name = "completed-sink-failure-keeper" in
+          let before =
+            transition_audit_failure_count "sink_completed_append"
+          in
+          Audit.record_completed_turn ~keeper_name
+            {
+              Audit.turn_id = 1;
+              started_at = 1.0;
+              ended_at = 2.0;
+              outcome = Audit.Turn_failed;
+            };
+          let after =
+            transition_audit_failure_count "sink_completed_append"
+          in
+          check (float 0.0001) "completed sink append failure counted"
+            (before +. 1.0) after;
+          check int "completed turn ring still records turn" 1
+            (List.length
+               (Audit.recent_completed_turns ~keeper_name ~limit:5))))
+
+let test_append_failure_observer_reraises_cancelled () =
+  let raised = ref false in
+  (try
+     Audit.For_testing.observe_append_failure
+       ~site:"unit_cancel"
+       (Eio.Cancel.Cancelled (Failure "synthetic cancel"))
+   with Eio.Cancel.Cancelled _ -> raised := true);
+  check bool "cancel is re-raised" true !raised
+
 (* ── Run ───────────────────────────────────────────────────────── *)
 
 let () =
@@ -213,5 +333,18 @@ let () =
             test_compact_retry_exhausted_signal_is_alerting;
           test_case "runtime trust timeline carries signal" `Quick
             test_runtime_trust_timeline_carries_transition_operator_signal;
+        ] );
+      ( "append_failures",
+        [
+          test_case "default transition append failure observed and ring retained" `Quick
+            test_default_transition_append_failure_is_observed_and_ring_retained;
+          test_case "default completed append failure observed and ring retained" `Quick
+            test_default_completed_append_failure_is_observed_and_ring_retained;
+          test_case "sink append failure observed and ring retained" `Quick
+            test_sink_append_failure_is_observed_and_ring_retained;
+          test_case "completed sink append failure observed and ring retained" `Quick
+            test_completed_turn_sink_failure_is_observed_and_ring_retained;
+          test_case "observer re-raises cancellation" `Quick
+            test_append_failure_observer_reraises_cancelled;
         ] );
     ]

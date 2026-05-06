@@ -47,6 +47,37 @@ val backoff_delay : int -> float
 val keep_last_n : int -> 'a -> 'a list -> 'a list
 (** [keep_last_n n item lst] prepends [item] and keeps at most [n] entries. *)
 
+val supervision_cohort_size : int
+(** Target keeper count per supervisor cohort.  The first 2-level
+    supervision slice groups the 64-keeper fleet as 8 cohorts of 8. *)
+
+type supervision_cohort = {
+  cohort_id : int;
+  keepers : Keeper_registry.registry_entry list;
+}
+(** Deterministic keeper cohort used by the supervisor sweep. *)
+
+val supervision_cohorts :
+  ?cohort_size:int ->
+  Keeper_registry.registry_entry list ->
+  supervision_cohort list
+(** Sort and chunk registry entries into deterministic supervisor cohorts.
+    [cohort_size <= 0] is coerced to 1. *)
+
+val fresh_supervision_cohort_keepers :
+  base_path:string ->
+  supervision_cohort ->
+  Keeper_registry.registry_entry list
+(** Re-read a cohort's keeper entries from the registry by name. Entries that
+    disappeared since the original sweep snapshot are omitted. *)
+
+val iter_supervision_cohorts :
+  ?yield_between:(unit -> unit) ->
+  supervision_cohort list ->
+  f:(supervision_cohort -> unit) ->
+  unit
+(** Iterate cohorts in order and yield only between cohort boundaries. *)
+
 val next_auto_resume_after_sec :
   initial_sec:float -> max_sec:float -> float option -> float option
 (** Compute the next auto-resume backoff delay after an auto-pause.  [None]
@@ -74,6 +105,10 @@ val apply_self_preservation :
 
 val reset_self_preservation_escape_state_for_test : unit -> unit
 (** Reset the self-preservation probe state. Test-only. *)
+
+val set_restart_launch_noop_for_test : bool -> unit
+(** Test-only: when enabled, restart bookkeeping still runs but the
+    replacement heartbeat/watchdog fibers are not forked. *)
 
 (** {1 Liveness Recovery} *)
 

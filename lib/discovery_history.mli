@@ -8,7 +8,7 @@
 val record_probe :
   base_path:string -> Llm_provider.Discovery.endpoint_status list -> unit
 (** Append probe results for all endpoints to today's JSONL file.
-    Silently catches I/O failures (best-effort persistence). *)
+    Logs and counts I/O failures while preserving best-effort persistence. *)
 
 (** #10404: probe records previously stored only the head model in
     [model_id], silently discarding additional models loaded on the
@@ -42,3 +42,9 @@ val read_range :
 val prune :
   base_path:string -> days:int -> unit
 (** Delete discovery day-files older than [days] days. *)
+
+module For_testing : sig
+  val observe_failure : site:string -> base_path:string -> exn -> unit
+  (** White-box helper. [site] is canonicalized before metric emission and is
+      not part of the stable public API. *)
+end

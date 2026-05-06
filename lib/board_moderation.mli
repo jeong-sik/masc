@@ -113,7 +113,10 @@ val flag :
   reason:flag_reason ->
   (queue_entry, string) result
 (** Flag [target_id] for operator review.  Returns an error if the same
-    [target_id] was already flagged and is still unresolved. *)
+    [target_id] was already flagged and is still unresolved, or if the
+    same [reporter] flags again inside
+    [MASC_BOARD_MODERATION_FLAG_RATE_LIMIT_SEC] (default 1s, set to 0 to
+    disable). *)
 
 val get_queue : ?resolved:bool -> unit -> queue_entry list
 (** Return queue entries sorted by [flagged_at] descending.

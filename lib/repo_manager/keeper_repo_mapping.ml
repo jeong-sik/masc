@@ -287,7 +287,7 @@ let path_segments rel =
 type playground_path =
   | Playground_internal
   | Playground_repos_root
-  | Playground_repo of string
+  | Playground_repo of { segment : string; repo_root : string }
 
 let playground_path_of_path ~base_path ~path =
   let playground_root =
@@ -297,9 +297,19 @@ let playground_path_of_path ~base_path ~path =
   | None -> None
   | Some rel -> (
       match path_segments rel with
-      | "docker" :: _keeper :: "repos" :: repo_id :: _
-      | _keeper :: "repos" :: repo_id :: _ ->
-          Some (Playground_repo repo_id)
+      | "docker" :: keeper :: "repos" :: repo_id :: _ ->
+          let repo_root =
+            Filename.concat playground_root
+              (Filename.concat "docker"
+                 (Filename.concat keeper (Filename.concat "repos" repo_id)))
+          in
+          Some (Playground_repo { segment = repo_id; repo_root })
+      | keeper :: "repos" :: repo_id :: _ ->
+          let repo_root =
+            Filename.concat playground_root
+              (Filename.concat keeper (Filename.concat "repos" repo_id))
+          in
+          Some (Playground_repo { segment = repo_id; repo_root })
       | "docker" :: _keeper :: ["repos"]
       | _keeper :: ["repos"] ->
           Some Playground_repos_root
@@ -317,7 +327,148 @@ let repository_url_basename url =
       String.sub base 0 (String.length base - 4)
     else base
 
-let resolve_repository_id_segment ~base_path segment =
+let max_git_probe_file_bytes = 64 * 1024
+
+let safe_lstat path =
+  try Some (Unix.lstat path)
+  with Unix.Unix_error _ -> None
+
+let safe_file_exists path = Option.is_some (safe_lstat path)
+
+let safe_is_directory path =
+  match safe_lstat path with
+  | Some { Unix.st_kind = Unix.S_DIR; _ } -> true
+  | _ -> false
+
+let safe_is_symlink path =
+  match safe_lstat path with
+  | Some { Unix.st_kind = Unix.S_LNK; _ } -> true
+  | _ -> false
+
+let safe_realpath path =
+  try Some (Unix.realpath path)
+  with Unix.Unix_error _ -> None
+
+let read_file_opt path =
+  match safe_lstat path with
+  | Some { Unix.st_kind = Unix.S_REG; st_size; _ }
+    when st_size <= max_git_probe_file_bytes -> (
+      try
+        Some
+          (In_channel.with_open_bin path (fun ic ->
+               really_input_string ic st_size))
+      with Sys_error _ | End_of_file -> None)
+  | _ -> None
+
+let normalize_lexical_path path =
+  let absolute = String.starts_with ~prefix:"/" path in
+  let segments =
+    String.split_on_char '/' path
+    |> List.filter (fun segment ->
+         not (String.equal segment "" || String.equal segment "."))
+  in
+  let normalized =
+    List.fold_left
+      (fun acc segment ->
+        if String.equal segment ".." then
+          match acc with
+          | [] -> []
+          | _ :: rest -> rest
+        else
+          segment :: acc)
+      [] segments
+    |> List.rev
+  in
+  let body = String.concat "/" normalized in
+  if absolute then "/" ^ body else body
+
+let gitdir_config_path ~repo_root gitdir =
+  let gitdir =
+    if Filename.is_relative gitdir then Filename.concat repo_root gitdir
+    else gitdir
+  in
+  let repo_lane = Filename.dirname repo_root |> normalize_lexical_path in
+  let gitdir_lexical = normalize_lexical_path gitdir in
+  match (safe_realpath repo_lane, safe_realpath gitdir_lexical) with
+  | Some repo_lane_real, Some gitdir_real -> (
+      match relative_under ~root:repo_lane_real gitdir_real with
+      | None -> None
+      | Some _ ->
+          if
+            safe_is_directory gitdir_real
+            && not (safe_is_symlink gitdir_lexical)
+          then Some (Filename.concat gitdir_real "config")
+          else None)
+  | _ -> None
+
+let git_config_path_of_repo_root repo_root =
+  let dot_git = Filename.concat repo_root ".git" in
+  if safe_file_exists dot_git && safe_is_directory dot_git then
+    Some (Filename.concat dot_git "config")
+  else if safe_file_exists dot_git then
+    match read_file_opt dot_git with
+    | None -> None
+    | Some content ->
+        content
+        |> String.split_on_char '\n'
+        |> List.find_map (fun line ->
+             let line = String.trim line in
+             if String.starts_with ~prefix:"gitdir:" line then
+               let gitdir =
+                 String.sub line 7 (String.length line - 7)
+                 |> String.trim
+               in
+               gitdir_config_path ~repo_root gitdir
+             else None)
+  else
+    None
+
+let remote_origin_url_of_repo_root repo_root =
+  match git_config_path_of_repo_root repo_root with
+  | None -> None
+  | Some config_path -> (
+      match read_file_opt config_path with
+      | None -> None
+      | Some content ->
+          let rec loop in_origin = function
+            | [] -> None
+            | line :: rest ->
+                let line = String.trim line in
+                if String.starts_with ~prefix:"[" line then
+                  loop (String.equal line {|[remote "origin"]|}) rest
+                else if in_origin && String.starts_with ~prefix:"url" line then
+                  (match String.index_opt line '=' with
+                   | None -> loop in_origin rest
+                   | Some idx ->
+                       let value =
+                         String.sub line (idx + 1)
+                           (String.length line - idx - 1)
+                         |> String.trim
+                       in
+                       if value = "" then loop in_origin rest else Some value)
+                else
+                  loop in_origin rest
+          in
+          loop false (String.split_on_char '\n' content))
+
+let repository_matches_token ~base_path token (repo : repository) =
+  String.equal repo.id token
+  || String.equal repo.name token
+  || String.equal (repository_url_basename repo.url) token
+  || String.equal
+       (basename_of_path (Repo_store.local_path ~base_path repo))
+       token
+
+let repository_matches_remote_url ~remote_url (repo : repository) =
+  let remote_basename = repository_url_basename remote_url in
+  remote_url <> ""
+  && (String.equal repo.url remote_url
+      || (remote_basename <> ""
+          && (String.equal repo.id remote_basename
+              || String.equal repo.name remote_basename
+              || String.equal (repository_url_basename repo.url) remote_basename)))
+
+let resolve_repository_id_segment ~base_path ?repo_root segment =
   match Repo_store.load_all ~base_path with
   | Error msg ->
       Log.Misc.warn
@@ -328,17 +479,17 @@ let resolve_repository_id_segment ~base_path segment =
   | Ok repos -> (
       match
         List.find_opt
-          (fun (repo : repository) ->
-            String.equal repo.id segment
-            || String.equal repo.name segment
-            || String.equal (repository_url_basename repo.url) segment
-            || String.equal
-                 (basename_of_path (Repo_store.local_path ~base_path repo))
-                 segment)
+          (repository_matches_token ~base_path segment)
           repos
       with
       | Some repo -> repo.id
-      | None -> segment)
+      | None -> (
+          match Option.bind repo_root remote_origin_url_of_repo_root with
+          | None -> segment
+          | Some remote_url -> (
+              match List.find_opt (repository_matches_remote_url ~remote_url) repos with
+              | Some repo -> repo.id
+              | None -> segment)))
 
 (** [path_under_repo ~base_path repo path] returns [true] when [path]
     is equal to or strictly under [repo]'s resolved local_path. *)
@@ -355,8 +506,8 @@ let path_under_repo ~base_path repo path =
 let repository_id_of_path ~base_path ~path =
   match playground_path_of_path ~base_path ~path with
   | Some Playground_internal | Some Playground_repos_root -> None
-  | Some (Playground_repo repo_id) ->
-      Some (resolve_repository_id_segment ~base_path repo_id)
+  | Some (Playground_repo { segment; repo_root }) ->
+      Some (resolve_repository_id_segment ~base_path ~repo_root segment)
   | None -> (
   match Repo_store.load_all ~base_path with
   | Error msg ->

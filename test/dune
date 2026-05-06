@@ -70,9 +70,11 @@
         test_gc_sampler
         test_process_timeout_counter
         test_git_fetch_timeout_9587
+        test_inference_utils
         test_auth_ambiguous_lookup_9786
         test_auth_load_credential_of
         test_keeper_wake_telemetry
+        test_keeper_timing
         test_keeper_memory
         test_keeper_accountability
         test_reputation_ledger_v2
@@ -283,9 +285,11 @@
           test_gc_sampler
           test_process_timeout_counter
           test_git_fetch_timeout_9587
+          test_inference_utils
           test_auth_ambiguous_lookup_9786
           test_auth_load_credential_of
           test_keeper_wake_telemetry
+          test_keeper_timing
           test_keeper_memory
           test_keeper_accountability
           test_reputation_ledger_v2
@@ -496,6 +500,7 @@
         test_dashboard_governance
         test_dashboard_labels
         test_dashboard_safe_autonomy
+        test_dashboard_keeper_feature_proof
         test_dashboard_surface_readiness
         test_activity_graph
         test_masc_log
@@ -697,6 +702,7 @@
         test_dashboard_governance
         test_dashboard_labels
         test_dashboard_safe_autonomy
+        test_dashboard_keeper_feature_proof
         test_dashboard_surface_readiness
         test_activity_graph
         test_masc_log
@@ -1185,6 +1191,7 @@
 (include stanzas/test_oas_bridge_timeout_ssot_10094.inc)
 (include stanzas/test_oas_timeout_budget_strike.inc)
 (include stanzas/test_oas_worker.inc)
+(include stanzas/test_oas_worker_exec_close_cancel_source.inc)
 (include stanzas/test_oas_worker_exec_checkpoint.inc)
 (include stanzas/test_openapi_api_e2e.inc)
 (include stanzas/test_operator_control.inc)
@@ -1225,4 +1232,9 @@
 (test
  (name test_dashboard_yjs)
  (modules test_dashboard_yjs)
+ (libraries masc_test_deps))
+
+(test
+ (name test_masc_contract_catalog)
+ (modules test_masc_contract_catalog)
  (libraries masc_test_deps))

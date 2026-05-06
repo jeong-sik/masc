@@ -291,65 +291,79 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
              Some "auth_error"
          | _ -> None)
 
-let normalized_cascade_name name =
+let normalized_cascade_name ~catalog_names name =
   let trimmed = String.trim name in
+  let is_live_catalog_profile =
+    List.exists (String.equal trimmed) catalog_names
+  in
+  (* Fallback candidates are concrete catalog profiles, not keeper-declared
+     logical routes.  Preserve live profile names like [local_recovery] so a
+     fallback_cascade does not collapse back to routes.phase_recovery. *)
   if
-    String.equal trimmed Keeper_config.local_only_cascade_name
+    is_live_catalog_profile
+    || String.equal trimmed Keeper_config.local_only_cascade_name
     || String.equal trimmed Keeper_config.local_recovery_cascade_name
     || String.equal trimmed Keeper_config.tool_use_strict_cascade_name
   then trimmed
   else Keeper_cascade_profile.normalize_declared_name trimmed
 
-let required_tool_rotation_candidate name =
-  let normalized = normalized_cascade_name name in
-  let default_cascade = Keeper_config.default_cascade_name in
+let required_tool_rotation_candidate ~catalog_names name =
+  let normalized = normalized_cascade_name ~catalog_names name in
   let routed_local_only_is_distinct =
-    not (String.equal Keeper_config.local_only_cascade_name default_cascade)
-  in
-  let routed_local_recovery_is_distinct =
     not
-      (String.equal Keeper_config.local_recovery_cascade_name default_cascade)
+      (String.equal
+         Keeper_config.local_only_cascade_name
+         Keeper_config.default_cascade_name)
   in
+  (* Required-tool turns may still use [local_recovery] when the catalog
+     declares it as a tool-capable fallback profile.  Keep excluding the
+     local-only/buffer lane here: those routes are recovery/control lanes and
+     may not satisfy a required keeper-tool contract. *)
   not
     ((routed_local_only_is_distinct
-      && String.equal normalized Keeper_config.local_only_cascade_name)
-     || (routed_local_recovery_is_distinct
-         && String.equal normalized Keeper_config.local_recovery_cascade_name))
+      && String.equal normalized Keeper_config.local_only_cascade_name))
 
 let legacy_degraded_rotation_candidates
+    ~catalog_names
     ~(base_cascade : string)
     ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement) =
-  let normalized_base = normalized_cascade_name base_cascade in
+  let normalized_base = normalized_cascade_name ~catalog_names base_cascade in
   let default_cascade =
-    normalized_cascade_name Keeper_config.default_cascade_name
+    normalized_cascade_name ~catalog_names Keeper_config.default_cascade_name
   in
   let local_recovery_cascade =
-    normalized_cascade_name Keeper_config.local_recovery_cascade_name
+    normalized_cascade_name ~catalog_names
+      Keeper_config.local_recovery_cascade_name
   in
   match tool_requirement with
   | Required -> [ normalized_base; default_cascade ]
   | Optional | No_tools ->
     [ normalized_base; default_cascade; local_recovery_cascade ]
 
-let normalize_rotation_candidates candidates =
+let normalize_rotation_candidates ~catalog_names candidates =
   candidates
   |> List.filter_map (fun candidate ->
          let trimmed = String.trim candidate in
-         if String.equal trimmed "" then None else Some (normalized_cascade_name trimmed))
+         if String.equal trimmed "" then None
+         else Some (normalized_cascade_name ~catalog_names trimmed))
   |> dedupe_keep_order
 
 let degraded_rotation_candidates
+    ~catalog_names
     ~(rotation_cascades : string list option)
     ~(fallback_hint : string option)
     ~(base_cascade : string)
     ~(effective_cascade : string)
     ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement) =
-  let normalized_effective = normalized_cascade_name effective_cascade in
+  let normalized_effective =
+    normalized_cascade_name ~catalog_names effective_cascade
+  in
   let raw_candidates =
     match rotation_cascades with
     | None ->
-        legacy_degraded_rotation_candidates ~base_cascade ~tool_requirement
-    | Some catalog -> normalize_rotation_candidates catalog
+        legacy_degraded_rotation_candidates ~catalog_names ~base_cascade
+          ~tool_requirement
+    | Some catalog -> normalize_rotation_candidates ~catalog_names catalog
   in
   let candidates =
     match fallback_hint with
@@ -358,13 +372,13 @@ let degraded_rotation_candidates
         let trimmed = String.trim hint in
         if String.equal trimmed "" then raw_candidates
         else
-          normalize_rotation_candidates (trimmed :: raw_candidates)
+          normalize_rotation_candidates ~catalog_names (trimmed :: raw_candidates)
   in
   candidates
   |> List.filter (fun candidate ->
          (not (String.equal candidate normalized_effective))
          && (tool_requirement <> Required
-             || required_tool_rotation_candidate candidate))
+             || required_tool_rotation_candidate ~catalog_names candidate))
 
 let degraded_rotation_after_recoverable_error
     ?rotation_cascades
@@ -377,12 +391,17 @@ let degraded_rotation_after_recoverable_error
   match recoverable_cascade_failure_reason err with
   | None -> None
   | Some fallback_reason ->
+      (* Load the live catalog once at the degraded-rotation boundary and pass
+         the snapshot through normalization/filter helpers.  This preserves
+         concrete profile names without adding per-candidate catalog I/O. *)
+      let catalog_names = Keeper_cascade_profile.catalog_names () in
       let attempted =
         attempted_cascades
-        |> List.map normalized_cascade_name
+        |> List.map (normalized_cascade_name ~catalog_names)
         |> dedupe_keep_order
       in
       degraded_rotation_candidates
+        ~catalog_names
         ~rotation_cascades
         ~fallback_hint
         ~base_cascade ~effective_cascade ~tool_requirement

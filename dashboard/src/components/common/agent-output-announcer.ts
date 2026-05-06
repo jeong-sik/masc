@@ -4,13 +4,24 @@
 // Converts structured agent outputs into concise aria-live friendly strings.
 
 import { html } from 'htm/preact'
-import { useEffect, useRef } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 
-interface AgentOutput {
+export interface AgentOutput {
   id: string
   type: 'code' | 'text' | 'table' | 'error'
   content: string
   metadata?: { language?: string; lineCount?: number }
+}
+
+export type AgentOutputPriority = 'polite' | 'assertive'
+export type AgentOutputPriorityPolicy = AgentOutputPriority | 'auto'
+
+export interface AgentOutputAnnouncement {
+  readonly id: string
+  readonly type: AgentOutput['type']
+  readonly message: string
+  readonly priority: AgentOutputPriority
+  readonly contentLength: number
 }
 
 export function announceAgentOutput(output: AgentOutput): string {
@@ -28,9 +39,30 @@ export function announceAgentOutput(output: AgentOutput): string {
   }
 }
 
+export function resolveAgentOutputPriority(
+  output: AgentOutput,
+  priority: AgentOutputPriorityPolicy = 'polite',
+): AgentOutputPriority {
+  if (priority !== 'auto') return priority
+  return output.type === 'error' ? 'assertive' : 'polite'
+}
+
+export function summarizeAgentOutput(
+  output: AgentOutput,
+  priority: AgentOutputPriorityPolicy = 'polite',
+): AgentOutputAnnouncement {
+  return {
+    id: output.id,
+    type: output.type,
+    message: announceAgentOutput(output),
+    priority: resolveAgentOutputPriority(output, priority),
+    contentLength: output.content.length,
+  }
+}
+
 interface AgentOutputAnnouncerProps {
   outputs: AgentOutput[]
-  priority?: 'polite' | 'assertive'
+  priority?: AgentOutputPriorityPolicy
   testId?: string
 }
 
@@ -39,21 +71,48 @@ export function AgentOutputAnnouncer({
   priority = 'polite',
   testId,
 }: AgentOutputAnnouncerProps) {
-  const prevCountRef = useRef(0)
-  const liveRef = useRef<HTMLDivElement>(null)
+  const lastAnnouncedRef = useRef<string | null>(null)
+  const renderedMessageRef = useRef('')
+  const pendingAnnouncementTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [announcement, setAnnouncement] = useState<AgentOutputAnnouncement | null>(null)
+
+  useEffect(() => () => {
+    if (pendingAnnouncementTimerRef.current !== null) {
+      clearTimeout(pendingAnnouncementTimerRef.current)
+    }
+  }, [])
 
   useEffect(() => {
-    if (outputs.length > prevCountRef.current && liveRef.current) {
-      const latest = outputs[outputs.length - 1]
-      if (latest) {
-        liveRef.current.textContent = announceAgentOutput(latest)
-      }
-    }
-    prevCountRef.current = outputs.length
-  }, [outputs])
+    const latest = outputs[outputs.length - 1]
+    if (!latest) return
 
-  const ariaLive = priority === 'assertive' ? 'assertive' : 'polite'
-  const ariaAtomic = priority === 'assertive' ? 'true' : 'false'
+    const next = summarizeAgentOutput(latest, priority)
+    const announcementKey = `${next.id}:${next.priority}`
+    if (announcementKey === lastAnnouncedRef.current) return
+
+    if (pendingAnnouncementTimerRef.current !== null) {
+      clearTimeout(pendingAnnouncementTimerRef.current)
+      pendingAnnouncementTimerRef.current = null
+    }
+
+    lastAnnouncedRef.current = announcementKey
+    if (renderedMessageRef.current === next.message) {
+      renderedMessageRef.current = ''
+      setAnnouncement(null)
+      pendingAnnouncementTimerRef.current = setTimeout(() => {
+        renderedMessageRef.current = next.message
+        setAnnouncement(next)
+        pendingAnnouncementTimerRef.current = null
+      }, 0)
+      return
+    }
+
+    renderedMessageRef.current = next.message
+    setAnnouncement(next)
+  }, [outputs, priority])
+
+  const ariaLive = announcement?.priority ?? (priority === 'assertive' ? 'assertive' : 'polite')
+  const ariaAtomic = ariaLive === 'assertive' ? 'true' : 'false'
 
   return html`
     <div
@@ -61,10 +120,14 @@ export function AgentOutputAnnouncer({
       role="log"
       aria-live=${ariaLive}
       aria-atomic=${ariaAtomic}
+      aria-relevant="additions text"
       aria-label="에이전트 출력 알림"
-      ref=${liveRef}
       data-agent-output-announcer
+      data-agent-output-announcer-priority=${ariaLive}
+      data-agent-output-announcer-output-id=${announcement?.id}
+      data-agent-output-announcer-output-type=${announcement?.type}
+      data-agent-output-announcer-content-length=${announcement?.contentLength}
       data-testid=${testId}
-    ></div>
+    >${announcement?.message ?? ''}</div>
   `
 }

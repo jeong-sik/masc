@@ -14,6 +14,7 @@
 type t = {
   success : bool;
   data : Yojson.Safe.t;
+  legacy_message : string;
   tool_name : string;
   duration_ms : float;
 }
@@ -22,7 +23,9 @@ type t = {
     tuple into a structured result.
 
     The [data] field is built by parsing the string as JSON; if parsing
-    fails, the raw string is stored as a JSON string value.
+    fails, the raw string is stored as a JSON string value. The original
+    message is always preserved in [legacy_message] so legacy callers keep
+    handler prefixes such as ["Post created:\n"] after round-tripping.
 
     @param tool_name The MCP tool name (e.g. ["masc_status"])
     @param start_time Wall-clock time when the handler started
@@ -34,7 +37,7 @@ val wrap : tool_name:string -> start_time:float -> (bool * string) -> t
 (** [to_json t] serializes to JSON for logging and observability. *)
 val to_json : t -> Yojson.Safe.t
 
-(** [message t] returns the human-readable legacy message body without
+(** [message t] returns the raw human-readable legacy message body without
     collapsing the full result into an untyped tuple. *)
 val message : t -> string
 

@@ -213,6 +213,8 @@ let explicit_metadata : (string * metadata) list =
     ("masc_board_get", readonly_tool);
     ( "masc_board_curation_read",
       { readonly_tool with required_permission = Some Masc_domain.CanReadState } );
+    ( "masc_board_curation_submit",
+      { actor_bound_masc_coordination_tool with required_permission = Some Masc_domain.CanBroadcast } );
     ("masc_tool_help", readonly_tool);
     ("masc_keeper_list", readonly_tool);
     ("masc_keeper_status", readonly_tool);
@@ -433,7 +435,9 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Keeper TK.Library_read
   | TN.Keeper TK.Library_search
   | TN.Keeper TK.Memory_search
+  | TN.Keeper TK.Pr_list
   | TN.Keeper TK.Pr_review_read
+  | TN.Keeper TK.Pr_status
   | TN.Keeper TK.Preflight_check
   | TN.Keeper TK.Stay_silent
   | TN.Keeper TK.Tasks_audit
@@ -449,11 +453,13 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Keeper TK.Board_cleanup
   | TN.Keeper TK.Board_comment
   | TN.Keeper TK.Board_comment_vote
+  | TN.Keeper TK.Board_curation_submit
   | TN.Keeper TK.Board_delete
   | TN.Keeper TK.Board_post
   | TN.Keeper TK.Board_vote
   | TN.Keeper TK.Broadcast
   | TN.Keeper TK.Handoff
+  | TN.Keeper TK.Pr_create
   | TN.Keeper TK.Pr_review_comment
   | TN.Keeper TK.Pr_review_reply
   | TN.Keeper TK.Task_claim
@@ -517,6 +523,7 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Who
   | TN.Masc TM.Workflow_guide
   | TN.Masc TM.Worktree_list
+  | TN.Masc TM.Approval_pending
   | TN.Masc TM.Approval_get
   | TN.Masc TM.Webrtc_answer
   | TN.Masc TM.Webrtc_offer ->
@@ -537,6 +544,7 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Board_cleanup
   | TN.Masc TM.Board_comment
   | TN.Masc TM.Board_comment_vote
+  | TN.Masc TM.Board_curation_submit
   | TN.Masc TM.Board_delete
   | TN.Masc TM.Board_post
   | TN.Masc TM.Board_reaction
@@ -602,6 +610,7 @@ let tool_group_of_typed_tool_name = function
       | TK.Board_comment
       | TK.Board_comment_vote
       | TK.Board_curation_read
+      | TK.Board_curation_submit
       | TK.Board_delete
       | TK.Board_get
       | TK.Board_list
@@ -640,9 +649,12 @@ let tool_group_of_typed_tool_name = function
       | TK.Context_status
       | TK.Discovery
       | TK.Handoff
+      | TK.Pr_create
+      | TK.Pr_list
       | TK.Pr_review_comment
       | TK.Pr_review_read
       | TK.Pr_review_reply
+      | TK.Pr_status
       | TK.Preflight_check
       | TK.Stay_silent
       | TK.Time_now
@@ -654,6 +666,7 @@ let tool_group_of_typed_tool_name = function
       | TM.Board_comment
       | TM.Board_comment_vote
       | TM.Board_curation_read
+      | TM.Board_curation_submit
       | TM.Board_delete
       | TM.Board_get
       | TM.Board_hearths
@@ -699,6 +712,7 @@ let tool_group_of_typed_tool_name = function
       Some Masc_agent
   | TN.Masc
       ( TM.Add_task
+      | TM.Approval_pending
       | TM.Approval_get
       | TM.Batch_add_tasks
       | TM.Broadcast

@@ -712,14 +712,12 @@ sequenceDiagram
 부트스트랩 순서 (`run_server` -> `Server_runtime_bootstrap.run`):
 
 1. `init_runtime_context`: Eio 환경(clock, net, proc_mgr, fs) 추출
-2. `create_server_state`: 서버 상태 생성 (Room config, Caqti DB pool, Eio context 설정)
+2. `create_server_state`: 서버 상태 생성 (Room config, Eio context 설정)
 3. `bootstrap_server_state`: Room 초기화, Chain bootstrap, Tool registry warm-up, JSONL pruning
 4. `bootstrap_keepers`: Keeper 에이전트 부트스트랩
 5. `init_task_backend`: 태스크 백엔드 초기화
-6. `inject_shared_pg_pool`: PostgreSQL 연결 풀 주입
-7. `init_memory_pg_schema`: 메모리 PG 스키마 초기화
-8. `start_background_maintenance`: 주기적 cleanup fiber 시작
-9. HTTP 서버 listen 시작
+6. `start_background_maintenance`: 주기적 cleanup fiber 시작
+7. HTTP 서버 listen 시작
 
 ### 14.1 Graceful Shutdown
 

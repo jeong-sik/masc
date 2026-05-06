@@ -1220,7 +1220,16 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
               Error
                 (System (System_error.IoError
                    "Failed to fetch origin before worktree creation. Verify network/auth and retry so the task starts from the latest remote ref."))
-            else match Coord_git.resolve_base_branch root base_branch with
+            else begin
+              let playground_dir =
+                repos_dir_of_keeper config agent_name
+                |> strip_trailing_slashes
+                |> Filename.dirname
+              in
+              Playground_repo_cache.update ~playground_dir ~repo_name
+                ~repo_path:root ~action:"fetch"
+                ~shallow:(Playground_repo_cache.is_shallow_repo root);
+              match Coord_git.resolve_base_branch root base_branch with
             | Error e -> Error e
             | Ok (resolved_base, fallback_from) ->
                 let note = match fallback_from with
@@ -1290,6 +1299,7 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
                   Error (System (System_error.IoError (Printf.sprintf "Failed to create worktree from origin/%s: %s"
                     resolved_base (if detail = "" then "(no output)" else detail))))
                 end
+            end
           end
   end
 

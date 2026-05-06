@@ -18,8 +18,13 @@ let test_submit_and_retrieve () =
     generated_at = 1_735_689_600.0;
     submitted_by = "agent-test";
     model        = Some "gpt-4o";
+    summary      = None;
     ordering     = [ "p-aaa"; "p-bbb" ];
     highlights   = [ "p-aaa" ];
+    tag_suggestions = [];
+    answer_matches = [];
+    health_score = None;
+    health_components = [];
     rationale    = "Test rationale";
     provenance   = `Assoc [];
   } in
@@ -40,8 +45,13 @@ let test_reset_clears () =
     generated_at = 1_735_689_600.0;
     submitted_by = "agent-test";
     model        = None;
+    summary      = None;
     ordering     = [];
     highlights   = [];
+    tag_suggestions = [];
+    answer_matches = [];
+    health_score = None;
+    health_components = [];
     rationale    = "x";
     provenance   = `Assoc [];
   } in
@@ -55,7 +65,9 @@ let test_submit_replaces () =
   Board_curation.reset_for_test ();
   let make id rationale : Board_curation.curation_snapshot = {
     id; generated_at = 1_735_689_600.0; submitted_by = "a";
-    model = None; ordering = []; highlights = []; rationale; provenance = `Assoc [];
+    model = None; summary = None; ordering = []; highlights = [];
+    tag_suggestions = []; answer_matches = []; health_score = None;
+    health_components = []; rationale; provenance = `Assoc [];
   } in
   Board_curation.submit_snapshot (make "cu-first"  "first");
   Board_curation.submit_snapshot (make "cu-second" "second");
@@ -72,8 +84,19 @@ let test_to_yojson_round_trip () =
     generated_at = 1_748_779_200.0;
     submitted_by = "model-agent";
     model        = Some "claude-3";
+    summary      = Some "Two active questions need routing.";
     ordering     = [ "p-1"; "p-2"; "p-3" ];
     highlights   = [ "p-2" ];
+    tag_suggestions = [
+      { post_id = "p-2"; tags = [ "incident"; "ops" ]; rationale = "Incident-like thread" };
+    ];
+    answer_matches = [
+      { question_post_id = "p-1"; answer_post_id = "p-3"; score = 0.82; rationale = "Same failure signature" };
+    ];
+    health_score = Some 0.74;
+    health_components = [
+      { name = "answer_rate"; score = 0.8; weight = 0.25; rationale = "Most questions have replies" };
+    ];
     rationale    = "Highlight active discussions first";
     provenance   = `Assoc [ ("source", `String "daily-batch") ];
   } in
@@ -83,8 +106,16 @@ let test_to_yojson_round_trip () =
      let get k = List.assoc_opt k kvs in
      Alcotest.(check (option pass)) "id present"    (Some (`String "cu-json-01"))    (get "id");
      Alcotest.(check (option pass)) "model present" (Some (`String "claude-3"))      (get "model");
+     Alcotest.(check (option pass)) "summary present"
+       (Some (`String "Two active questions need routing.")) (get "summary");
      Alcotest.(check bool) "ordering is list"
        true (match get "ordering" with Some (`List _) -> true | _ -> false);
+     Alcotest.(check bool) "tag suggestions is list"
+       true (match get "tag_suggestions" with Some (`List [ _ ]) -> true | _ -> false);
+     Alcotest.(check bool) "answer matches is list"
+       true (match get "answer_matches" with Some (`List [ _ ]) -> true | _ -> false);
+     Alcotest.(check (option pass)) "health score present"
+       (Some (`Float 0.74)) (get "health_score");
    | _ -> Alcotest.fail "expected assoc")
 
 let () =

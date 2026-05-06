@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
-import { AgentOutputAnnouncer, announceAgentOutput } from './agent-output-announcer'
+import {
+  AgentOutputAnnouncer,
+  announceAgentOutput,
+  resolveAgentOutputPriority,
+  summarizeAgentOutput,
+} from './agent-output-announcer'
 
 describe('announceAgentOutput', () => {
   it('announces code output', () => {
@@ -44,6 +49,26 @@ describe('announceAgentOutput', () => {
     expect(announceAgentOutput(out)).toContain('텍스트 출력')
     expect(announceAgentOutput(out)).toContain('300')
   })
+
+  it('summarizes output identity, type, priority, and content length', () => {
+    const summary = summarizeAgentOutput(
+      { id: 'o8', type: 'error', content: 'failed' },
+      'auto',
+    )
+    expect(summary).toEqual({
+      id: 'o8',
+      type: 'error',
+      message: '오류 발생: failed',
+      priority: 'assertive',
+      contentLength: 6,
+    })
+  })
+
+  it('classifies auto live-region priority by output type', () => {
+    expect(resolveAgentOutputPriority({ id: 't', type: 'text', content: 'ok' }, 'auto')).toBe('polite')
+    expect(resolveAgentOutputPriority({ id: 'e', type: 'error', content: 'bad' }, 'auto')).toBe('assertive')
+    expect(resolveAgentOutputPriority({ id: 'e', type: 'error', content: 'bad' }, 'polite')).toBe('polite')
+  })
 })
 
 describe('AgentOutputAnnouncer', () => {
@@ -67,6 +92,42 @@ describe('AgentOutputAnnouncer', () => {
     const el = container.querySelector('[role="log"]') as HTMLElement
     expect(el?.getAttribute('aria-live')).toBe('assertive')
     expect(el?.getAttribute('aria-atomic')).toBe('true')
+  })
+
+  it('auto priority renders errors as assertive after announcement', async () => {
+    const container = document.createElement('div')
+    render(h(AgentOutputAnnouncer, {
+      outputs: [{ id: 'o-error', type: 'error', content: 'disk full' }],
+      priority: 'auto',
+    }), container)
+    await new Promise((r) => setTimeout(r, 10))
+    const el = container.querySelector('[role="log"]') as HTMLElement
+    expect(el?.getAttribute('aria-live')).toBe('assertive')
+    expect(el?.getAttribute('aria-atomic')).toBe('true')
+    expect(el?.getAttribute('data-agent-output-announcer-priority')).toBe('assertive')
+    expect(el?.getAttribute('data-agent-output-announcer-output-type')).toBe('error')
+  })
+
+  it('updates announcement priority when the policy changes for the same output', async () => {
+    const container = document.createElement('div')
+    const outputs = [{ id: 'o-error', type: 'error' as const, content: 'disk full' }]
+    render(h(AgentOutputAnnouncer, { outputs, priority: 'polite' }), container)
+    await new Promise((r) => setTimeout(r, 10))
+    const el = container.querySelector('[role="log"]') as HTMLElement
+    const textMutations: string[] = []
+    const observer = new MutationObserver(() => {
+      textMutations.push(el.textContent ?? '')
+    })
+    observer.observe(el, { childList: true, characterData: true, subtree: true })
+
+    render(h(AgentOutputAnnouncer, { outputs, priority: 'auto' }), container)
+    await new Promise((r) => setTimeout(r, 10))
+    observer.disconnect()
+
+    expect(el?.getAttribute('aria-live')).toBe('assertive')
+    expect(el?.getAttribute('data-agent-output-announcer-priority')).toBe('assertive')
+    expect(textMutations).toContain('')
+    expect(textMutations.at(-1)).toBe('오류 발생: disk full')
   })
 
   it('renders aria-label', () => {
@@ -95,5 +156,49 @@ describe('AgentOutputAnnouncer', () => {
     await new Promise((r) => setTimeout(r, 10))
     const el = container.querySelector('[role="log"]') as HTMLElement
     expect(el?.textContent).toContain('hello')
+    expect(el?.getAttribute('data-agent-output-announcer-output-id')).toBe('o1')
+    expect(el?.getAttribute('data-agent-output-announcer-content-length')).toBe('5')
+  })
+
+  it('announces a changed latest output id even when output count stays the same', async () => {
+    const container = document.createElement('div')
+    render(h(AgentOutputAnnouncer, {
+      outputs: [{ id: 'o1', type: 'text', content: 'first' }],
+    }), container)
+    await new Promise((r) => setTimeout(r, 10))
+    render(h(AgentOutputAnnouncer, {
+      outputs: [{ id: 'o2', type: 'text', content: 'second' }],
+    }), container)
+    await new Promise((r) => setTimeout(r, 10))
+
+    const el = container.querySelector('[role="log"]') as HTMLElement
+    expect(el?.textContent).toContain('second')
+    expect(el?.getAttribute('data-agent-output-announcer-output-id')).toBe('o2')
+  })
+
+  it('re-adds identical announcement text when only the output id changes', async () => {
+    const container = document.createElement('div')
+    render(h(AgentOutputAnnouncer, {
+      outputs: [{ id: 'o1', type: 'text', content: 'same message' }],
+    }), container)
+    await new Promise((r) => setTimeout(r, 10))
+
+    const el = container.querySelector('[role="log"]') as HTMLElement
+    const textMutations: string[] = []
+    const observer = new MutationObserver(() => {
+      textMutations.push(el.textContent ?? '')
+    })
+    observer.observe(el, { childList: true, characterData: true, subtree: true })
+
+    render(h(AgentOutputAnnouncer, {
+      outputs: [{ id: 'o2', type: 'text', content: 'same message' }],
+    }), container)
+    await new Promise((r) => setTimeout(r, 10))
+    observer.disconnect()
+
+    expect(el?.textContent).toBe('텍스트 출력: same message')
+    expect(el?.getAttribute('data-agent-output-announcer-output-id')).toBe('o2')
+    expect(textMutations).toContain('')
+    expect(textMutations.at(-1)).toBe('텍스트 출력: same message')
   })
 })

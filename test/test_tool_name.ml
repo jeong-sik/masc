@@ -5,11 +5,13 @@ module Types = Masc_domain
 open Masc_mcp
 
 let all_keeper : Tool_name.Keeper.t list =
-  [ Bash; Bash_kill; Bash_output; Board_cleanup; Board_comment; Board_comment_vote; Board_delete
+  [ Bash; Bash_kill; Bash_output; Board_cleanup; Board_comment; Board_comment_vote
+  ; Board_curation_read; Board_curation_submit; Board_delete
   ; Board_get; Board_list; Board_post; Board_search; Board_stats; Board_vote
   ; Broadcast; Code_read; Context_status; Discovery; Fs_edit; Fs_read
   ; Handoff; Library_read; Library_search; Memory_search
-  ; Pr_review_comment; Pr_review_read; Pr_review_reply
+  ; Pr_create; Pr_list; Pr_review_comment; Pr_review_read; Pr_review_reply
+  ; Pr_status
   ; Preflight_check; Shell; Stay_silent
   ; Task_claim; Task_create; Task_done; Task_submit_for_verification
   ; Task_force_done; Task_force_release
@@ -23,6 +25,7 @@ let all_masc : Tool_name.Masc.t list =
   ; Autoresearch_record_finding; Autoresearch_search_findings
   ; Autoresearch_status; Autoresearch_stop
   ; Batch_add_tasks; Board_cleanup; Board_comment; Board_comment_vote
+  ; Board_curation_read; Board_curation_submit
   ; Board_delete; Board_get; Board_hearths; Board_list; Board_post
   ; Board_profile; Board_search
   ; Board_stats; Board_vote; Broadcast; Cancel_task; Check; Claim_next
@@ -38,7 +41,7 @@ let all_masc : Tool_name.Masc.t list =
   ; Set_current_task; Status; Task_history; Tasks; Tool_grant; Tool_help
   ; Tool_list; Tool_revoke; Transition; Update_priority; Web_search; Who
   ; Workflow_guide; Worktree_create; Worktree_list; Worktree_remove
-  ; Approval_get; Config; Gc; Get_metrics; Mcp_session
+  ; Approval_pending; Approval_get; Config; Gc; Get_metrics; Mcp_session
   ; Pause; Resume; Spawn; Start; Tool_admin_snapshot; Tool_admin_update
   ; Tool_stats; Webrtc_answer; Webrtc_offer ]
 
@@ -146,8 +149,9 @@ let test_keeper_board_write_helpers () =
          (Printf.sprintf "%s is board" (to_string tool))
          true
          (is_board tool))
-    [ Board_cleanup; Board_comment; Board_comment_vote; Board_delete; Board_get
-    ; Board_list; Board_post; Board_search; Board_stats; Board_vote ];
+    [ Board_cleanup; Board_comment; Board_comment_vote; Board_curation_read
+    ; Board_curation_submit; Board_delete; Board_get; Board_list; Board_post
+    ; Board_search; Board_stats; Board_vote ];
   List.iter
     (fun tool ->
        Alcotest.(check bool)
@@ -156,7 +160,7 @@ let test_keeper_board_write_helpers () =
          (is_board tool))
     [ Broadcast; Task_done; Write ];
   Alcotest.(check (list string)) "canonical board write names"
-    [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote" ]
+    [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote"; "keeper_board_curation_submit" ]
     board_write_tool_names;
   List.iter
     (fun tool ->
@@ -171,13 +175,15 @@ let test_keeper_board_write_helpers () =
          (Printf.sprintf "%s is not board write" (to_string tool))
          false
          (is_board_write tool))
-    [ Board_list; Board_get; Board_comment_vote; Task_done; Write ];
+    [ Board_list; Board_get; Board_curation_read; Board_comment_vote; Task_done; Write ];
   Alcotest.(check (option string)) "post action kind"
     (Some "post") (board_write_action_kind Board_post);
   Alcotest.(check (option string)) "comment action kind"
     (Some "comment") (board_write_action_kind Board_comment);
   Alcotest.(check (option string)) "vote action kind"
     (Some "vote") (board_write_action_kind Board_vote);
+  Alcotest.(check (option string)) "curation action kind"
+    (Some "curation") (board_write_action_kind Board_curation_submit);
   Alcotest.(check (option string)) "non-board action kind"
     None (board_write_action_kind Board_list)
 

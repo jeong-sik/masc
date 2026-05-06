@@ -1,17 +1,19 @@
-(** Board_curation — AI curation readonly surface for the board.
+(** Board_curation — AI curation projection surface for the board.
 
     Implements the board AI curation contract described in the
-    board-ai-curation-readonly PR split.  Provides:
+    board AI curation PR split.  Provides:
 
-    - A typed curation snapshot: AI-produced ordering, highlighted
-      post IDs, overall rationale, and operator-auditable provenance.
+    - A typed curation snapshot: AI-produced summary, ordering,
+      highlighted post IDs, tag suggestions, question/answer matches,
+      health score, overall rationale, and operator-auditable provenance.
     - In-memory singleton store of the latest snapshot (single-writer;
       callers must serialise [submit_snapshot] if needed).
     - JSON projection used by the HTTP read endpoint.
     - Test-only [reset_for_test] for isolation.
 
     Design properties:
-    - Read-only surface: no board posts are mutated.
+    - Projection-only surface: snapshots may be submitted, but board posts,
+      comments, and votes are not mutated.
     - Operator-auditable: [provenance] is a free-form JSON blob that
       callers populate with model name, parameters, run metadata etc.
     - Crypto IDs: snapshot IDs carry a ["cu-"] prefix and are
@@ -20,7 +22,7 @@
       in-process.  Callers that need durable history should persist
       the JSON blob returned by {!snapshot_to_yojson}.
 
-    @since board-ai-curation-readonly *)
+    @since board-ai-curation *)
 
 (** {1 Types} *)
 
@@ -33,15 +35,45 @@ type curation_snapshot = {
   (** Agent or keeper name that submitted the snapshot. *)
   model : string option;
   (** AI model used to produce the curation, if known. *)
+  summary : string option;
+  (** Optional TL;DR summary of the current board window. *)
   ordering : string list;
   (** Post IDs in AI-suggested reading order (most relevant first). *)
   highlights : string list;
   (** Subset of [ordering] marked as especially noteworthy. *)
+  tag_suggestions : curation_tag_suggestion list;
+  (** Suggested tags by post. *)
+  answer_matches : curation_answer_match list;
+  (** Candidate question/answer matches. *)
+  health_score : float option;
+  (** Optional normalized community health score in the range [0.0, 1.0]. *)
+  health_components : curation_health_component list;
+  (** Auditable health-score component breakdown. *)
   rationale : string;
   (** Human-readable explanation of the curation decisions. *)
   provenance : Yojson.Safe.t;
   (** Operator-auditable provenance blob (model params, run metadata,
       etc.).  Opaque to this module; callers control the schema. *)
+}
+
+and curation_tag_suggestion = {
+  post_id : string;
+  tags : string list;
+  rationale : string;
+}
+
+and curation_answer_match = {
+  question_post_id : string;
+  answer_post_id : string;
+  score : float;
+  rationale : string;
+}
+
+and curation_health_component = {
+  name : string;
+  score : float;
+  weight : float;
+  rationale : string;
 }
 
 (** {1 ID generation} *)

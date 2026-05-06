@@ -55,6 +55,30 @@ let read_keeper_meta_exn config keeper_name =
   | Ok None -> Alcotest.fail ("keeper meta missing: " ^ keeper_name)
   | Error err -> Alcotest.fail ("keeper meta read failed: " ^ err)
 
+let seed_keeper_meta_exn config keeper_name ~goal =
+  let trace_id = "trace-" ^ keeper_name in
+  let meta =
+    match
+      Keeper_types.meta_of_json
+        (`Assoc
+          [
+            ("name", `String keeper_name);
+            ("agent_name", `String (Keeper_types.keeper_agent_name keeper_name));
+            ("trace_id", `String trace_id);
+            ("goal", `String goal);
+            ("cascade_name", `String Keeper_config.default_cascade_name);
+            ("sandbox_profile", `String "local");
+            ("network_mode", `String "inherit");
+          ])
+    with
+    | Ok meta -> meta
+    | Error err -> Alcotest.fail ("keeper meta fixture failed: " ^ err)
+  in
+  (match Keeper_types.write_meta config meta with
+   | Ok () -> ()
+   | Error err -> Alcotest.fail ("keeper meta seed failed: " ^ err));
+  read_keeper_meta_exn config keeper_name
+
 let with_fake_docker script f =
   let dir = temp_dir () in
   let docker_path = Filename.concat dir "docker" in
@@ -342,6 +366,92 @@ let test_keeper_sandbox_status_exposes_local_summary () =
                   (repo |> member "path" |> to_string)
                   "repos/sandbox-repo")
            status_repos))
+
+let test_keeper_sandbox_status_clarifies_visible_container_gap () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "sandbox-docker-visible-gap" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Inspect visible Docker container gap");
+                ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      update_keeper_sandbox_mode config keeper_name
+        ~sandbox_profile:Keeper_types.Docker
+        ~network_mode:Keeper_types.Network_inherit;
+      Keeper_status_detail.invalidate_status_cache_for keeper_name;
+      let state_dir = Filename.concat base_dir "fake-docker" in
+      let state_file = Filename.concat state_dir "containers.tsv" in
+      let log_path = Filename.concat state_dir "docker.log" in
+      ensure_dir state_dir;
+      with_fake_docker fake_docker_managed_sandbox_script @@ fun () ->
+      with_env "KEEPER_DOCKER_STATE_FILE" state_file @@ fun () ->
+      with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+      with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+      let ok, body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_sandbox_status"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("include_preflight", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "sandbox status ok" true ok;
+      let open Yojson.Safe.Util in
+      let sandbox_json =
+        parse_json_exn body |> Yojson.Safe.Util.member "sandbox"
+      in
+      Alcotest.(check string) "effective mode"
+        "oneshot_or_managed_inherit"
+        (sandbox_json |> member "effective_mode" |> to_string);
+      Alcotest.(check int) "no visible containers" 0
+        (sandbox_json |> member "container_count" |> to_int);
+      let why_no_container =
+        sandbox_json |> member "why_no_container" |> to_string
+      in
+      Alcotest.(check bool) "reason says visible managed container" true
+        (contains_substring why_no_container
+           "no visible managed sandbox container");
+      Alcotest.(check bool) "reason says one-shot still mounts playground" true
+        (contains_substring why_no_container
+           "still mount the keeper playground");
+      let recommendation =
+        sandbox_json |> member "recommendation" |> to_string
+      in
+      Alcotest.(check bool) "recommendation scopes prewarm" true
+        (contains_substring recommendation
+           "only when you need a visible prewarmed container");
+      Alcotest.(check bool) "recommendation mentions repo readiness" true
+        (contains_substring recommendation "playground_repos"))
 
 let test_keeper_sandbox_status_fleet_includes_persisted_keeper () =
   Eio_main.run @@ fun env ->
@@ -1082,6 +1192,233 @@ let test_keeper_up_ignores_non_public_social_model_arg () =
         Yojson.Safe.Util.(json |> member "name" |> to_string);
       Alcotest.(check string) "ignores arg social_model" "bdi_speech_v1"
         Yojson.Safe.Util.(json |> member "social_model" |> to_string))
+
+let test_keeper_up_resumes_auto_paused_keeper () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "resume-paused-keeper" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let meta =
+        seed_keeper_meta_exn config keeper_name ~goal:"Resume a paused keeper"
+      in
+      let blocker_text =
+        Keeper_types.blocker_class_to_string Keeper_types.Turn_timeout
+      in
+      let paused_meta =
+        {
+          meta with
+          paused = true;
+          auto_resume_after_sec = Some 3600.0;
+          runtime =
+            {
+              meta.runtime with
+              last_blocker = blocker_text;
+              last_blocker_class = Some Keeper_types.Turn_timeout;
+            };
+        }
+      in
+      (match Keeper_types.write_meta config paused_meta with
+       | Ok () -> ()
+       | Error err -> Alcotest.fail ("paused meta write failed: " ^ err));
+      let ok, body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "resume keeper up ok" true ok;
+      let json = parse_json_exn body in
+      Alcotest.(check bool) "response paused false" false
+        Yojson.Safe.Util.(json |> member "paused" |> to_bool);
+      let resumed = read_keeper_meta_exn config keeper_name in
+      Alcotest.(check bool) "meta paused false" false resumed.paused;
+      Alcotest.(check bool) "auto resume delay cleared" true
+        (Option.is_none resumed.auto_resume_after_sec);
+      Alcotest.(check string) "runtime blocker cleared" ""
+        resumed.runtime.last_blocker;
+      Alcotest.(check bool) "runtime blocker class cleared" true
+        (Option.is_none resumed.runtime.last_blocker_class))
+
+let test_keeper_up_keeps_paused_keeper_with_continue_gate_blocker () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "resume-continue-gated-keeper" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let meta =
+        seed_keeper_meta_exn config keeper_name
+          ~goal:"Stay paused behind a continue gate"
+      in
+      let blocker_text =
+        "turn outcome ambiguous after committed mutating tool call(s): \
+         [keeper_board_cleanup]; turn wall-clock timeout"
+      in
+      let paused_meta =
+        {
+          meta with
+          paused = true;
+          auto_resume_after_sec = Some 3600.0;
+          runtime =
+            {
+              meta.runtime with
+              last_blocker = blocker_text;
+              last_blocker_class = None;
+            };
+        }
+      in
+      (match Keeper_types.write_meta config paused_meta with
+       | Ok () -> ()
+       | Error err -> Alcotest.fail ("paused meta write failed: " ^ err));
+      let ok, body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up accepted" true ok;
+      let json = parse_json_exn body in
+      Alcotest.(check bool) "response stays paused" true
+        Yojson.Safe.Util.(json |> member "paused" |> to_bool);
+      let still_paused = read_keeper_meta_exn config keeper_name in
+      Alcotest.(check bool) "meta remains paused" true still_paused.paused;
+      Alcotest.(check bool) "auto resume delay preserved" true
+        (Option.is_some still_paused.auto_resume_after_sec);
+      Alcotest.(check string) "runtime blocker preserved" blocker_text
+        still_paused.runtime.last_blocker)
+
+let test_keeper_up_keeps_paused_keeper_with_pending_approval () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "resume-approval-gated-keeper" in
+  let pending_id = ref None in
+  Fun.protect
+    ~finally:(fun () ->
+      Option.iter
+        (fun id ->
+          ignore
+            (Keeper_approval_queue.resolve ~id
+               ~decision:(Agent_sdk.Hooks.Reject "test cleanup")))
+        !pending_id;
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let meta =
+        seed_keeper_meta_exn config keeper_name ~goal:"Stay paused behind approval"
+      in
+      let blocker_text =
+        Keeper_types.blocker_class_to_string Keeper_types.Turn_timeout
+      in
+      let paused_meta =
+        {
+          meta with
+          paused = true;
+          auto_resume_after_sec = Some 3600.0;
+          runtime =
+            {
+              meta.runtime with
+              last_blocker = blocker_text;
+              last_blocker_class = Some Keeper_types.Turn_timeout;
+            };
+        }
+      in
+      (match Keeper_types.write_meta config paused_meta with
+       | Ok () -> ()
+       | Error err -> Alcotest.fail ("paused meta write failed: " ^ err));
+      pending_id :=
+        Some
+          (Keeper_approval_queue.submit_pending
+             ~keeper_name
+             ~tool_name:"keeper_continue_after_partial_commit"
+             ~input:(`Assoc [("kind", `String "continue_gate_required")])
+             ~risk_level:Keeper_approval_queue.Critical
+             ~base_path:base_dir
+             ~on_resolution:(fun _ -> ())
+             ());
+      Alcotest.(check bool) "keeper has pending approval" true
+        (Keeper_approval_queue.has_pending_for_keeper ~keeper_name);
+      let ok, body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up accepted" true ok;
+      let json = parse_json_exn body in
+      Alcotest.(check bool) "response stays paused" true
+        Yojson.Safe.Util.(json |> member "paused" |> to_bool);
+      let still_paused = read_keeper_meta_exn config keeper_name in
+      Alcotest.(check bool) "meta remains paused" true still_paused.paused;
+      Alcotest.(check bool) "auto resume delay preserved" true
+        (Option.is_some still_paused.auto_resume_after_sec);
+      Alcotest.(check string) "runtime blocker preserved" blocker_text
+        still_paused.runtime.last_blocker)
 
 let test_keeper_status_defaults_name_to_caller () =
   Eio_main.run @@ fun env ->

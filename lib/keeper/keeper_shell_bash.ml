@@ -1,6 +1,170 @@
 open Keeper_types
 open Keeper_exec_shared
 
+let elapsed_duration_ms ~start_time ~end_time =
+  let elapsed_ms = (end_time -. start_time) *. 1000. in
+  match classify_float elapsed_ms with
+  | FP_nan | FP_infinite -> 0
+  | _ when elapsed_ms <= 0. -> 0
+  | _ when elapsed_ms < 1. -> 1
+  | _ -> int_of_float elapsed_ms
+
+module For_testing = struct
+  let elapsed_duration_ms = elapsed_duration_ms
+end
+
+type shell_quote_state = No_quote | Single_quote | Double_quote
+
+type shell_word = {
+  text : string;
+  starts_command : bool;
+}
+
+let shell_words_with_boundaries cmd =
+  let len = String.length cmd in
+  let buf = Buffer.create len in
+  let quote_state = ref No_quote in
+  let escaped = ref false in
+  let at_command_start = ref true in
+  let word_started_at_command_start = ref true in
+  let push_word acc =
+    if Buffer.length buf = 0 then acc
+    else
+      let text =
+        Buffer.contents buf
+        |> String.trim
+        |> String.lowercase_ascii
+      in
+      Buffer.clear buf;
+      at_command_start := false;
+      { text; starts_command = !word_started_at_command_start } :: acc
+  in
+  let start_word_if_needed () =
+    if Buffer.length buf = 0 then
+      word_started_at_command_start := !at_command_start
+  in
+  let rec loop i acc =
+    if i >= len then List.rev (push_word acc)
+    else if !escaped then (
+      start_word_if_needed ();
+      Buffer.add_char buf cmd.[i];
+      escaped := false;
+      loop (i + 1) acc)
+    else
+      match !quote_state, cmd.[i] with
+      | Single_quote, '\'' ->
+        quote_state := No_quote;
+        loop (i + 1) acc
+      | Single_quote, ch ->
+        start_word_if_needed ();
+        Buffer.add_char buf ch;
+        loop (i + 1) acc
+      | Double_quote, '"' ->
+        quote_state := No_quote;
+        loop (i + 1) acc
+      | Double_quote, '\\' ->
+        escaped := true;
+        loop (i + 1) acc
+      | Double_quote, ch ->
+        start_word_if_needed ();
+        Buffer.add_char buf ch;
+        loop (i + 1) acc
+      | No_quote, '\\' ->
+        escaped := true;
+        loop (i + 1) acc
+      | No_quote, '\'' ->
+        start_word_if_needed ();
+        quote_state := Single_quote;
+        loop (i + 1) acc
+      | No_quote, '"' ->
+        start_word_if_needed ();
+        quote_state := Double_quote;
+        loop (i + 1) acc
+      | No_quote, (' ' | '\t') ->
+        loop (i + 1) (push_word acc)
+      | No_quote, ('\n' | '\r' | ';' | '&' | '|') ->
+        let acc = push_word acc in
+        at_command_start := true;
+        loop (i + 1) acc
+      | No_quote, ch ->
+        start_word_if_needed ();
+        Buffer.add_char buf ch;
+        loop (i + 1) acc
+  in
+  loop 0 []
+
+let shell_interpreter_names = [ "bash"; "sh"; "zsh" ]
+
+let command_name text = Filename.basename text
+
+let shell_c_payload words =
+  match words with
+  | shell :: rest when
+    shell.starts_command
+    && List.mem (command_name shell.text) shell_interpreter_names ->
+    let rec loop = function
+      | [] -> None
+      | flag :: payload :: _ when
+        String.length flag.text > 1
+        && flag.text.[0] = '-'
+        && String.contains flag.text 'c' ->
+        Some payload.text
+      | flag :: rest when String.length flag.text > 0 && flag.text.[0] = '-' ->
+        loop rest
+      | _ -> None
+    in
+    loop rest
+  | _ -> None
+
+let is_env_assignment text =
+  match String.index_opt text '=' with
+  | Some i when i > 0 ->
+    let lhs = String.sub text 0 i in
+    not (String.contains lhs '/')
+  | _ -> false
+
+let rec strip_command_wrappers = function
+  | [] -> []
+  | word :: rest when is_env_assignment word.text ->
+    strip_command_wrappers rest
+  | word :: rest when
+    let name = command_name word.text in
+    String.equal name "command" || String.equal name "exec" ->
+    strip_command_wrappers rest
+  | word :: rest when String.equal (command_name word.text) "env" ->
+    strip_env_args rest
+  | words -> words
+
+and strip_env_args = function
+  | word :: rest when String.starts_with ~prefix:"-" word.text ->
+    strip_env_args rest
+  | word :: rest when is_env_assignment word.text ->
+    strip_env_args rest
+  | words -> strip_command_wrappers words
+
+let gh_pr_create_sequence = function
+  | gh :: pr :: create :: _ ->
+    String.equal (command_name gh.text) "gh"
+    && String.equal pr.text "pr"
+    && String.equal create.text "create"
+  | _ -> false
+
+let rec cmd_contains_gh_pr_create cmd =
+  let words = shell_words_with_boundaries cmd in
+  let rec loop = function
+    | word :: rest when
+      word.starts_command
+      && gh_pr_create_sequence (strip_command_wrappers (word :: rest)) ->
+      true
+    | _ :: rest -> loop rest
+    | [] -> false
+  in
+  loop words
+  ||
+  match shell_c_payload words with
+  | Some payload -> cmd_contains_gh_pr_create payload
+  | None -> false
+
 let handle_keeper_bash
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(turn_sandbox_factory_git : Keeper_sandbox_factory.t option)
@@ -28,6 +192,25 @@ let handle_keeper_bash
     | Some preset -> Keeper_tool_policy.allows_shell_write_for_preset preset
     | None -> false
   in
+  let gh_pr_create_block () =
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_shell_bash_failures
+      ~labels:[("keeper", meta.name); ("site", "gh_pr_create")]
+      ();
+    Log.Keeper.warn
+      "keeper_bash gh pr create blocked: keeper=%s cmd=%s"
+      meta.name cmd_for_log;
+    Yojson.Safe.to_string
+      (`Assoc
+         [ "ok", `Bool false
+         ; "error", `String "gh_pr_create_requires_keeper_pr_create"
+         ; "reason", `String
+             "keeper_bash cannot bypass the PR creation approval and audit policy"
+         ; "hint", `String
+             "Use keeper_pr_create with draft=true so governance approval and PR lifecycle markers are enforced."
+         ; "cmd", `String cmd_for_log
+         ])
+  in
   if cmd = ""
   then error_json "cmd is required. Good: cmd='ls -la lib/'. Bad: cmd=''."
   else if Env_config_keeper.KeeperSandbox.hard_mode ()
@@ -35,6 +218,8 @@ let handle_keeper_bash
   then
     error_json
       "MASC_KEEPER_SANDBOX_HARD_MODE requires sandbox_profile=docker"
+  else if cmd_contains_gh_pr_create cmd
+  then gh_pr_create_block ()
 
   else begin
     (* Tick 22: dark-launch shadow logger.  Runs
@@ -123,6 +308,7 @@ let handle_keeper_bash
       then (Docker, Network_inherit, true)
       else (base_profile, base_network_mode, false)
     in
+    let sandbox_root = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
     (* Destructive guard: always active regardless of Docker or preset *)
     if Worker_dev_tools.is_destructive_bash_operation cmd
     then (
@@ -158,6 +344,8 @@ let handle_keeper_bash
            ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
            ~env_snapshot:env_snap
            ()))
+    else if cmd_contains_gh_pr_create cmd
+    then gh_pr_create_block ()
     else if base_profile = Docker
             && Env_config_keeper.KeeperSandbox.hard_mode ()
             && Keeper_shell_shared.cmd_targets_gh cmd
@@ -179,6 +367,112 @@ let handle_keeper_bash
                "Use keeper_shell op=gh cmd=\"...\"; hard mode runs validated gh commands through the host broker with keeper-scoped GH_CONFIG_DIR."
            ; "cmd", `String cmd_for_log
            ]))
+    else if Worker_dev_tools.is_git_branch_switch cmd
+            && not (write_enabled && in_playground)
+    then (
+      Log.Keeper.info
+        "keeper_bash branch-switch blocked: %s (keeper=%s, write_enabled=%b, playground=%b)"
+        cmd_for_log meta.name write_enabled in_playground;
+      Yojson.Safe.to_string
+        (Exec_core.blocked_result_json
+           ~cmd
+           ~error:"branch_switch_blocked"
+           ~reason:
+             "git checkout/switch/branch mutations require a write-enabled preset \
+              (Coding/Delivery/Full) and a keeper-owned sandbox repo or \
+              worktree. Clone into your sandbox first \
+              (keeper_shell op=git_clone), then create or enter a worktree \
+              under repos/<repo>/.worktrees/<task>."
+           ~hint:(Printf.sprintf
+                    "Use cwd=%srepos/REPO/.worktrees/TASK"
+                    sandbox_root)
+           ~alternatives:
+             [ Printf.sprintf
+                 "Clone the repo first: keeper_shell op=git_clone, then use cwd=%srepos/REPO/.worktrees/TASK."
+                 sandbox_root
+             ; "Use keeper_shell op=git op_cmd='branch -a' to list available branches."
+             ]
+           ~retryability:Exec_core.Operator_required
+           ~diag:
+             (Some { Exec_core.rule_id = "branch_switch_blocked"
+                    ; explanation =
+                        "git checkout/switch/branch mutations need a write-enabled preset and a sandbox clone."
+                    ; rewrite =
+                        Some (Printf.sprintf
+                          "First: keeper_shell op=git_clone. Then: set cwd=%srepos/REPO/.worktrees/TASK"
+                          sandbox_root)
+                    ; tool_suggestion = None })
+           ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
+           ()))
+    else if (not write_enabled) && Worker_dev_tools.is_write_operation cmd
+    then (
+      Log.Keeper.info "keeper_bash write-gate: %s (keeper=%s, playground=%b)"
+        cmd_for_log meta.name in_playground;
+      Yojson.Safe.to_string
+        (Exec_core.blocked_result_json
+           ~cmd
+           ~error:"write_operation_gated"
+           ~reason:
+             "This command modifies state (git push/commit, make deploy, etc.). \
+              A write-enabled preset (Coding/Delivery/Full) is required."
+           ~alternatives:
+             [ "Read-only alternatives: use keeper_bash for git log, git diff, git status."
+             ; "If you need write access, ask the operator to assign a Coding/Delivery/Full preset."
+             ]
+           ~retryability:Exec_core.Operator_required
+           ~diag:
+             (Some { Exec_core.rule_id = "write_operation_gated"
+                    ; explanation =
+                        "This command modifies state but the current preset is read-only. Write operations require Coding, Delivery, or Full preset."
+                    ; rewrite = None
+                    ; tool_suggestion =
+                        Some "Ask the operator for a write-enabled preset" })
+           ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
+           ~env_snapshot:env_snap
+           ()))
+    else if write_enabled
+            && Worker_dev_tools.is_write_operation cmd
+            && not in_playground
+    then (
+      Log.Keeper.info
+        "keeper_bash write-containment blocked: %s (keeper=%s, cwd=%s, playground=%b)"
+        cmd_for_log meta.name cwd in_playground;
+      Yojson.Safe.to_string
+        (Exec_core.blocked_result_json
+           ~cmd
+           ~error:"write_outside_playground_blocked"
+           ~reason:
+             (Printf.sprintf
+                "Write operations (git push/commit, make deploy, etc.) \
+                 must run with cwd inside your keeper-owned sandbox clone \
+                 or one of its worktrees under %srepos/<repo>/.worktrees/. \
+                 Open a sandbox clone first with keeper_shell op=git_clone \
+                 if needed, then use masc_worktree_create and set cwd to \
+                 the returned worktree path."
+                sandbox_root)
+           ~hint:(Printf.sprintf
+                    "cwd must start with %s and usually looks like %srepos/REPO/.worktrees/TASK"
+                    sandbox_root
+                    sandbox_root)
+           ~alternatives:
+             [ Printf.sprintf
+                 "Clone into your sandbox: keeper_shell op=git_clone, then cd to %srepos/REPO/."
+                 sandbox_root
+             ; "Create a worktree inside your sandbox with masc_worktree_create."
+             ; "Use keeper_bash with a cwd pointing to your sandbox worktree."
+             ]
+           ~retryability:Exec_core.Operator_required
+           ~diag:
+             (Some { Exec_core.rule_id = "write_outside_playground_blocked"
+                    ; explanation =
+                        "Write operations must run inside the keeper sandbox. The current cwd is outside the sandbox root."
+                    ; rewrite =
+                        Some (Printf.sprintf
+                          "Clone into sandbox: keeper_shell op=git_clone, then set cwd=%srepos/REPO/.worktrees/TASK"
+                          sandbox_root)
+                    ; tool_suggestion = None })
+           ~extra:[ "cmd", `String cmd_for_log; "cwd", `String cwd; "execution_time_ms", `Int 0 ]
+           ()))
     else if sandbox_profile = Docker && git_creds_enabled then (
       let detected_tool = if Keeper_shell_shared.cmd_targets_gh cmd then "gh" else "git" in
       Log.Keeper.info
@@ -287,124 +581,7 @@ let handle_keeper_bash
              ~env_snapshot:env_snap
              ())
       | Ok () ->
-        (* Branch-switch guard *)
-        let sandbox_root = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
-        if Worker_dev_tools.is_git_branch_switch cmd
-                && not (write_enabled && in_playground)
-        then (
-          Log.Keeper.info
-            "keeper_bash branch-switch blocked: %s (keeper=%s, write_enabled=%b, playground=%b)"
-            cmd_for_log meta.name write_enabled in_playground;
-          Yojson.Safe.to_string
-            (Exec_core.blocked_result_json
-               ~cmd
-               ~error:"branch_switch_blocked"
-               ~reason:
-                 "git checkout/switch/branch mutations require a write-enabled preset \
-                  (Coding/Delivery/Full) and a keeper-owned sandbox repo or \
-                  worktree. Clone into your sandbox first \
-                  (keeper_shell op=git_clone), then create or enter a worktree \
-                  under repos/<repo>/.worktrees/<task>."
-               ~hint:(Printf.sprintf
-                        "Use cwd=%srepos/REPO/.worktrees/TASK"
-                        sandbox_root)
-               ~alternatives:
-                 [ Printf.sprintf
-                     "Clone the repo first: keeper_shell op=git_clone, then use cwd=%srepos/REPO/.worktrees/TASK."
-                     sandbox_root
-                 ; "Use keeper_shell op=git op_cmd='branch -a' to list available branches."
-                 ]
-               ~retryability:Exec_core.Operator_required
-               ~diag:
-                 (Some { Exec_core.rule_id = "branch_switch_blocked"
-                        ; explanation =
-                            "git checkout/switch/branch mutations need a                              write-enabled preset and a sandbox clone."
-                        ; rewrite =
-                            Some (Printf.sprintf
-                              "First: keeper_shell op=git_clone.                                Then: set cwd=%srepos/REPO/.worktrees/TASK"
-                              sandbox_root)
-                        ; tool_suggestion = None })
-               ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
-               ()))
-        (* Write gate — preset layer *)
-        else if (not write_enabled) && Worker_dev_tools.is_write_operation cmd
-        then (
-          Log.Keeper.info "keeper_bash write-gate: %s (keeper=%s, playground=%b)"
-            cmd_for_log meta.name in_playground;
-          Yojson.Safe.to_string
-            (Exec_core.blocked_result_json
-               ~cmd
-               ~error:"write_operation_gated"
-               ~reason:
-                 "This command modifies state (git push/commit, make deploy, etc.). \
-                  A write-enabled preset (Coding/Delivery/Full) is required."
-               ~alternatives:
-                 [ "Read-only alternatives: use keeper_bash for git log, git diff, git status."
-                 ; "If you need write access, ask the operator to assign a Coding/Delivery/Full preset."
-                 ]
-               ~retryability:Exec_core.Operator_required
-               ~diag:
-                 (Some { Exec_core.rule_id = "write_operation_gated"
-                        ; explanation =
-                            "This command modifies state but the current preset                              is read-only. Write operations require Coding,                              Delivery, or Full preset."
-                        ; rewrite = None
-                        ; tool_suggestion =
-                            Some "Ask the operator for a write-enabled preset" })
-               ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
-               ~env_snapshot:env_snap
-               ()))
-        (* Write gate — playground containment layer (#6527 iter 3).
-           A write-enabled keeper still must not mutate anything outside
-           its own playground bundle. branch-switch already requires
-           in_playground; match the same invariant for the general
-           write operations (git push/commit, make deploy, etc.) so
-           a coding-preset keeper cannot push from, e.g., a
-           workspace-default `.worktrees/` path or `lib/` on the server
-           repo. *)
-        else if write_enabled
-                && Worker_dev_tools.is_write_operation cmd
-                && not in_playground
-        then (
-          Log.Keeper.info
-            "keeper_bash write-containment blocked: %s (keeper=%s, cwd=%s, playground=%b)"
-            cmd_for_log meta.name cwd in_playground;
-          Yojson.Safe.to_string
-            (Exec_core.blocked_result_json
-               ~cmd
-               ~error:"write_outside_playground_blocked"
-               ~reason:
-                 (Printf.sprintf
-                    "Write operations (git push/commit, make deploy, etc.) \
-                     must run with cwd inside your keeper-owned sandbox clone \
-                     or one of its worktrees under %srepos/<repo>/.worktrees/. \
-                     Open a sandbox clone first with keeper_shell op=git_clone \
-                     if needed, then use masc_worktree_create and set cwd to \
-                     the returned worktree path."
-                    sandbox_root)
-               ~hint:(Printf.sprintf
-                        "cwd must start with %s and usually looks like %srepos/REPO/.worktrees/TASK"
-                        sandbox_root
-                        sandbox_root)
-               ~alternatives:
-                 [ Printf.sprintf
-                     "Clone into your sandbox: keeper_shell op=git_clone, then cd to %srepos/REPO/."
-                     sandbox_root
-                 ; "Create a worktree inside your sandbox with masc_worktree_create."
-                 ; "Use keeper_bash with a cwd pointing to your sandbox worktree."
-                 ]
-               ~retryability:Exec_core.Operator_required
-               ~diag:
-                 (Some { Exec_core.rule_id = "write_outside_playground_blocked"
-                        ; explanation =
-                            "Write operations must run inside the keeper sandbox.                              The current cwd is outside the sandbox root."
-                        ; rewrite =
-                            Some (Printf.sprintf
-                              "Clone into sandbox: keeper_shell op=git_clone,                                then set cwd=%srepos/REPO/.worktrees/TASK"
-                              sandbox_root)
-                        ; tool_suggestion = None })
-               ~extra:[ "cmd", `String cmd_for_log; "cwd", `String cwd; "execution_time_ms", `Int 0 ]
-               ()))
-        else (
+        (
             (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with
              | Error e -> error_json e
              | Ok () ->
@@ -524,7 +701,8 @@ let handle_keeper_bash
                              ~cwd ~timeout_sec argv_merged
                          in
                          let elapsed_ms =
-                           int_of_float ((Unix.gettimeofday () -. t0) *. 1000.)
+                           elapsed_duration_ms
+                             ~start_time:t0 ~end_time:(Unix.gettimeofday ())
                          in
                          if not (Keeper_shell_shared.process_status_is_timeout st) then begin
                            let exit_code = match st with
@@ -571,7 +749,8 @@ let handle_keeper_bash
                        ~cwd ~timeout_sec argv_merged
                    in
                    let elapsed_ms =
-                     int_of_float ((Unix.gettimeofday () -. t0) *. 1000.)
+                     elapsed_duration_ms
+                       ~start_time:t0 ~end_time:(Unix.gettimeofday ())
                    in
                    (if auto_bg_observe_enabled then begin
                       let budget_ms =
@@ -620,7 +799,8 @@ let handle_keeper_bash
                    (match outcome with
                     | Masc_exec.Exec_run.Completed r ->
                       let elapsed_ms =
-                        int_of_float ((Unix.gettimeofday () -. t0_bg) *. 1000.)
+                        elapsed_duration_ms
+                          ~start_time:t0_bg ~end_time:(Unix.gettimeofday ())
                       in
                       (* P21: store in exec cache if not a timeout *)
                       if not (Keeper_shell_shared.process_status_is_timeout r.status) then
@@ -649,7 +829,8 @@ let handle_keeper_bash
                            ())
                     | Masc_exec.Exec_run.Promoted p ->
                       let elapsed_ms =
-                        int_of_float ((Unix.gettimeofday () -. t0_bg) *. 1000.)
+                        elapsed_duration_ms
+                          ~start_time:t0_bg ~end_time:(Unix.gettimeofday ())
                       in
                       Log.Keeper.info
                         "BG_PROMOTE: keeper=%s task_id=%s budget_ms=%d cmd=%s"

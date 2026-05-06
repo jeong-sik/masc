@@ -38,4 +38,6 @@ module For_testing : sig
     string list
 
   val draft_request_allowed : Yojson.Safe.t -> bool
+
+  val quote_argv : string list -> string
 end

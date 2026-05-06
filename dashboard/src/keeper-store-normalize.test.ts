@@ -646,6 +646,42 @@ describe('normalizeKeepers lifecycle metrics', () => {
     expect(metric?.inference_telemetry?.timings?.predicted_per_second).toBe(140)
   })
 
+  it('preserves missing latency as null in keeper runtime metrics', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'missing-latency',
+        status: 'active',
+        metrics_series: [
+          {
+            ts_unix: 7,
+            context_ratio: 0.3,
+            context_tokens: 300,
+            context_max: 1000,
+            generation: 2,
+            channel: 'turn',
+            model_used: 'glm-5',
+            cost_usd: 0.05,
+            usage: {
+              input_tokens: 120,
+              output_tokens: 80,
+              total_tokens: 200,
+            },
+            inference_telemetry: {
+              timings: {
+                predicted_per_second: 140,
+              },
+            },
+          },
+        ],
+      },
+    ])
+
+    const metric = keeper?.metrics_series?.[0]
+    expect(metric?.latency_ms).toBeNull()
+    expect(metric?.wall_tokens_per_second).toBeNull()
+    expect(metric?.inference_telemetry?.request_latency_ms).toBeNull()
+  })
+
   it('preserves paused runtime signals and blocker metadata for keeper UI', () => {
     const [keeper] = normalizeKeepers([
       {

@@ -61,16 +61,21 @@ let broadcast_channel config =
 let on_broadcast_mention : (string option -> unit) ref =
   ref (fun _mention -> ())
 
-let broadcast ?trace_context config ~from_agent ~content =
+let broadcast ?trace_context ?(msg_type = "broadcast") config ~from_agent ~content =
   ensure_initialized config;
   let seq = Coord_state.next_seq config in
   let mention = Mention.extract content in
   let safe_content = sanitize_message content in
   let safe_agent = sanitize_agent_name from_agent in
+  let safe_msg_type =
+    match String.trim msg_type with
+    | "" -> "broadcast"
+    | value -> sanitize_message value
+  in
   let msg = {
     seq;
     from_agent = safe_agent;
-    msg_type = "broadcast";
+    msg_type = safe_msg_type;
     content = safe_content;
     mention;
     timestamp = now_iso ();

@@ -11,6 +11,7 @@ module Config_boot_overrides = Config_boot_overrides
 module Keeper_exec_shell = Masc_mcp.Keeper_exec_shell
 module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
+module Keeper_shell_docker = Masc_mcp.Keeper_shell_docker
 module Keeper_types = Masc_mcp.Keeper_types
 module Json = Yojson.Safe.Util
 
@@ -312,6 +313,17 @@ let parse_error_field raw =
   |> Json.member "error"
   |> Json.to_string_option
 
+let test_keeper_bash_elapsed_duration_preserves_positive_sub_ms () =
+  let elapsed = Keeper_exec_shell.For_testing.elapsed_duration_ms in
+  Alcotest.(check int) "sub-ms positive duration rounds up to 1" 1
+    (elapsed ~start_time:10.0 ~end_time:10.0004);
+  Alcotest.(check int) "one ms duration stays one" 1
+    (elapsed ~start_time:10.0 ~end_time:10.001);
+  Alcotest.(check int) "negative clock drift is zero" 0
+    (elapsed ~start_time:10.0 ~end_time:9.999);
+  Alcotest.(check int) "nan duration is zero" 0
+    (elapsed ~start_time:Float.nan ~end_time:10.0)
+
 let test_docker_blocks_nested_docker_command () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
@@ -353,6 +365,269 @@ let test_docker_blocks_docker_socket_reference () =
            "blocks nested container runtimes and host socket references")
   | None ->
       Alcotest.fail ("expected error json, got: " ^ raw)
+
+let test_nested_runtime_detector_ignores_git_commit_message () =
+  Alcotest.(check bool)
+    "quoted docker in git commit message is not a nested runtime"
+    false
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "git commit -m 'docs: Docker sandbox proof'");
+  Alcotest.(check bool)
+    "unquoted docker argument is not a nested runtime unless command-position"
+    false
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "git commit -m Docker-sandbox-proof");
+  Alcotest.(check bool)
+    "docker after command separator is still blocked"
+    true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "git status && docker run --rm alpine true");
+  Alcotest.(check bool)
+    "quoted docker command word is still blocked"
+    true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "\"docker\" run --rm alpine true");
+  Alcotest.(check bool)
+    "partially quoted docker command word is still blocked"
+    true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "do\"cker\" run --rm alpine true");
+  Alcotest.(check bool)
+    "env option wrapper still exposes docker command"
+    true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "env -i docker run --rm alpine true");
+  Alcotest.(check bool)
+    "env terminator still exposes docker command"
+    true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "env -- docker run --rm alpine true");
+  Alcotest.(check bool)
+    "env value option does not treat its argument as command"
+    false
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "env -u docker git commit -m Docker-sandbox-proof");
+  Alcotest.(check bool)
+    "env split-string wrapper still exposes docker command"
+    true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "env -S 'docker run --rm alpine true'");
+  Alcotest.(check bool)
+    "env inline split-string wrapper still exposes docker command"
+    true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "env --split-string='docker run --rm alpine true'");
+  Alcotest.(check bool)
+    "env split-string assignment without runtime remains allowed"
+    false
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "env -S 'FOO=docker git commit -m Docker-sandbox-proof'");
+  Alcotest.(check bool)
+    "quoted socket text is not a nested docker runtime"
+    false
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "git commit -m \"mention /var/run/docker.sock in review text\"");
+  Alcotest.(check bool) "shell -c docker runtime is blocked" true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "bash -lc \"docker run --rm alpine true\"");
+  Alcotest.(check bool) "command substitution docker runtime is blocked" true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "echo $(docker run --rm alpine true)");
+  Alcotest.(check bool) "path-prefixed docker runtime is blocked" true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "/usr/bin/docker run --rm alpine true")
+
+let test_docker_nested_guard_blocks_command_substitution () =
+  Alcotest.(check bool) "command substitution docker runtime is blocked" true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "echo $(docker run --rm alpine true)")
+
+let test_docker_nested_guard_blocks_path_prefixed_runtime () =
+  Alcotest.(check bool) "path-prefixed docker runtime is blocked" true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "/usr/bin/docker run --rm alpine true")
+
+let test_docker_blocks_raw_gh_pr_create () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_docker_meta "pr-create-block" in
+  let playground =
+    Filename.concat base_path (playground_path_of meta.name)
+  in
+  ensure_dir playground;
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+           [ ("cmd", `String "gh pr create --draft --title proof")
+           ; ("cwd", `String playground)
+           ])
+      ()
+  in
+  match parse_error_field raw with
+  | Some err ->
+      Alcotest.(check string) "direct gh pr create blocked"
+        "gh_pr_create_requires_keeper_pr_create" err
+  | None ->
+      Alcotest.fail ("expected gh pr create error json, got: " ^ raw)
+
+let test_docker_blocks_chained_gh_pr_create () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_docker_meta "pr-create-chain-block" in
+  let playground =
+    Filename.concat base_path (playground_path_of meta.name)
+  in
+  ensure_dir playground;
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+           [ ( "cmd"
+             , `String
+                 "cd repos/masc-mcp && gh pr create --draft --title proof"
+             )
+           ; ("cwd", `String playground)
+           ])
+      ()
+  in
+  match parse_error_field raw with
+  | Some err ->
+      Alcotest.(check string) "chained gh pr create blocked"
+        "gh_pr_create_requires_keeper_pr_create" err
+  | None ->
+      Alcotest.fail ("expected chained gh pr create error json, got: " ^ raw)
+
+let test_docker_blocks_newline_gh_pr_create () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_docker_meta "pr-create-newline-block" in
+  let playground =
+    Filename.concat base_path (playground_path_of meta.name)
+  in
+  ensure_dir playground;
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+           [ ( "cmd"
+             , `String
+                 "echo ok\ngh pr create --draft --title proof"
+             )
+           ; ("cwd", `String playground)
+           ])
+      ()
+  in
+  match parse_error_field raw with
+  | Some err ->
+      Alcotest.(check string) "newline gh pr create blocked"
+        "gh_pr_create_requires_keeper_pr_create" err
+  | None ->
+      Alcotest.fail ("expected newline gh pr create error json, got: " ^ raw)
+
+let test_docker_blocks_env_wrapped_gh_pr_create () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_docker_meta "pr-create-env-block" in
+  let playground =
+    Filename.concat base_path (playground_path_of meta.name)
+  in
+  ensure_dir playground;
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+           [ ( "cmd"
+             , `String
+                 "env GH_CONFIG_DIR=/tmp/gh gh pr create --draft --title proof"
+             )
+           ; ("cwd", `String playground)
+           ])
+      ()
+  in
+  match parse_error_field raw with
+  | Some err ->
+      Alcotest.(check string) "env-wrapped gh pr create blocked"
+        "gh_pr_create_requires_keeper_pr_create" err
+  | None ->
+      Alcotest.fail ("expected env-wrapped gh pr create error json, got: " ^ raw)
+
+let test_docker_blocks_command_wrapped_gh_pr_create () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_docker_meta "pr-create-command-block" in
+  let playground =
+    Filename.concat base_path (playground_path_of meta.name)
+  in
+  ensure_dir playground;
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+           [ ( "cmd"
+             , `String "command gh pr create --draft --title proof"
+             )
+           ; ("cwd", `String playground)
+           ])
+      ()
+  in
+  match parse_error_field raw with
+  | Some err ->
+      Alcotest.(check string) "command-wrapped gh pr create blocked"
+        "gh_pr_create_requires_keeper_pr_create" err
+  | None ->
+      Alcotest.fail
+        ("expected command-wrapped gh pr create error json, got: " ^ raw)
+
+let test_docker_allows_gh_pr_create_prose () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_docker_meta "pr-create-prose" in
+  let playground =
+    Filename.concat base_path (playground_path_of meta.name)
+  in
+  ensure_dir playground;
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+           [ ("cmd", `String "echo gh pr create")
+           ; ("cwd", `String playground)
+           ])
+      ()
+  in
+  Alcotest.(check bool) "prose mention is not PR-create policy block" false
+    (parse_error_field raw = Some "gh_pr_create_requires_keeper_pr_create")
 
 let test_docker_missing_seccomp_profile_fails_closed () =
   with_eio_fs @@ fun () ->
@@ -665,11 +940,31 @@ let () =
       Alcotest.test_case "git write classification" `Quick test_git_write_classification;
     ]);
     ("edge", [
+      Alcotest.test_case "elapsed duration preserves positive sub-ms" `Quick
+        test_keeper_bash_elapsed_duration_preserves_positive_sub_ms;
       Alcotest.test_case "empty command blocked" `Quick test_empty_command;
       Alcotest.test_case "docker blocks nested docker command" `Quick
         test_docker_blocks_nested_docker_command;
       Alcotest.test_case "docker blocks docker socket reference" `Quick
         test_docker_blocks_docker_socket_reference;
+      Alcotest.test_case "nested runtime detector ignores commit messages" `Quick
+        test_nested_runtime_detector_ignores_git_commit_message;
+      Alcotest.test_case "command substitution trips docker guard" `Quick
+        test_docker_nested_guard_blocks_command_substitution;
+      Alcotest.test_case "path-prefixed runtime trips docker guard" `Quick
+        test_docker_nested_guard_blocks_path_prefixed_runtime;
+      Alcotest.test_case "docker blocks raw gh pr create" `Quick
+        test_docker_blocks_raw_gh_pr_create;
+      Alcotest.test_case "docker blocks chained gh pr create" `Quick
+        test_docker_blocks_chained_gh_pr_create;
+      Alcotest.test_case "docker blocks newline gh pr create" `Quick
+        test_docker_blocks_newline_gh_pr_create;
+      Alcotest.test_case "docker blocks env-wrapped gh pr create" `Quick
+        test_docker_blocks_env_wrapped_gh_pr_create;
+      Alcotest.test_case "docker blocks command-wrapped gh pr create" `Quick
+        test_docker_blocks_command_wrapped_gh_pr_create;
+      Alcotest.test_case "docker allows gh pr create prose" `Quick
+        test_docker_allows_gh_pr_create_prose;
       Alcotest.test_case "docker missing seccomp fails closed" `Quick
         test_docker_missing_seccomp_profile_fails_closed;
     ]);

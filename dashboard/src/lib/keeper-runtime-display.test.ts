@@ -4,6 +4,8 @@ import {
   keeperActivityDisplay,
   keeperDisplayModel,
   keeperDisplayStatus,
+  keeperRuntimeBlockerHint,
+  keeperRuntimeBlockerLabel,
 } from './keeper-runtime-display'
 
 /** Minimal Keeper stub with only the fields relevant to status classification. */
@@ -149,6 +151,37 @@ describe('keeperDisplayModel', () => {
         ],
       }),
     ).toEqual({ label: '최근 모델', value: 'anthropic:claude-sonnet-4-6' })
+  })
+})
+
+describe('keeperRuntimeBlockerLabel', () => {
+  it('labels backend-emitted terminal keeper failure classes', () => {
+    expect(keeperRuntimeBlockerLabel('provider_runtime_error')).toBe(
+      'Provider 런타임 오류',
+    )
+    expect(keeperRuntimeBlockerLabel('tool_required_unsatisfied')).toBe(
+      '필수 도구 미충족',
+    )
+  })
+})
+
+describe('keeperRuntimeBlockerHint', () => {
+  it('explains provider runtime terminal failures when no summary is available', () => {
+    expect(
+      keeperRuntimeBlockerHint(makeKeeper({
+        runtime_blocker_class: 'provider_runtime_error',
+        runtime_blocker_summary: 'provider_runtime_error',
+      })),
+    ).toBe('Provider, adapter, or cascade가 keeper 진행 전에 실패했습니다.')
+  })
+
+  it('explains unsatisfied required tool terminal failures when no summary is available', () => {
+    expect(
+      keeperRuntimeBlockerHint(makeKeeper({
+        runtime_blocker_class: 'tool_required_unsatisfied',
+        runtime_blocker_summary: 'tool_required_unsatisfied',
+      })),
+    ).toBe('액션 가능한 신호에 필요한 keeper 도구 호출이 충족되지 않았습니다.')
   })
 })
 

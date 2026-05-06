@@ -293,6 +293,7 @@ val metric_keeper_stale_storm_paused : string
 val metric_keeper_oas_timeout_budget_loop_paused : string
 val metric_keeper_cycle_exceptions : string
 val metric_keeper_snapshot_write_failures : string
+val metric_keeper_progress_updated_line_failures : string
 val metric_keeper_sse_broadcast_failures : string
 val metric_keeper_room_heartbeat_failures : string
 val metric_keeper_turn_metrics_snapshot_failures : string
@@ -363,6 +364,7 @@ val metric_keeper_ollama_saturation_skip : string
     by [keeper] and [cascade] so dashboards can attribute starvation
     to specific cascade profiles. *)
 val metric_persistence_read_drops : string
+val metric_discovery_history_failures : string
 val metric_codex_cli_mcp_tool_omission : string
 (** #10097: per-tool counter for codex_cli keeper-bound runtime
     MCP omissions.  Paired with a once-per-fingerprint WARN log
@@ -374,6 +376,11 @@ val metric_telemetry_coverage_gap : string
     [source, producer, dashboard_surface, stale_reason]. This is the
     alertable pair to the durable
     [.masc/telemetry-coverage-gaps/YYYY-MM/DD.jsonl] store. *)
+
+val metric_telemetry_unified_source_read_failures : string
+(** Total telemetry unified source discovery/read failures. Labels:
+    [source] is {!Telemetry_unified.source_to_string}; [site] is a bounded
+    read/discovery call-site vocabulary. *)
 
 val metric_coord_telemetry_drop : string
 (** #10358 (c1): total times [lib/coord.ml]'s lifecycle hook caught
@@ -695,6 +702,11 @@ val metric_runtime_ollama_probe_generate_skips : string
 val metric_process_timeout : string
 (** #9632: subprocess executions that exceeded their configured
     timeout. Labels: [program, timeout_sec]. *)
+
+val metric_bg_task_sidecar_failures : string
+(** Background-task PID sidecar persistence failures. Labels:
+    [site] = [write | read | read_parse | readdir | is_dir | unlink]. *)
+
 val metric_distributed_lock_acquire_failed : string
 (** #9645: distributed lock acquire retry-budget exhaustions.
     Labels: [key, attempts]. *)

@@ -29,6 +29,18 @@ let resolve_active_goal_ids config p old_ids =
           (Printf.sprintf "unknown active_goal_ids: %s"
              (String.concat ", " missing))
 
+let blocker_requires_continue_gate (old : keeper_meta) =
+  match old.runtime.last_blocker_class with
+  | Some cls -> blocker_class_continue_gate cls
+  | None -> (
+      match Keeper_status_bridge.blocker_class_of_string old.runtime.last_blocker with
+      | Some cls -> blocker_class_continue_gate cls
+      | None -> false)
+
+let paused_state_requires_approval (old : keeper_meta) =
+  Keeper_approval_queue.has_pending_for_keeper ~keeper_name:old.name
+  || blocker_requires_continue_gate old
+
 let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool_result =
   match p.tool_access_opt, old.tool_access, p.tool_preset_opt, p.tool_also_allow_opt with
   | None, Custom _, None, Some _ ->
@@ -195,6 +207,28 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
   warn_personality_cap "will" old.will new_will;
   warn_personality_cap "needs" old.needs new_needs;
   warn_personality_cap "desires" old.desires new_desires;
+  let resume_paused_keeper =
+    old.paused && not (paused_state_requires_approval old)
+  in
+  if resume_paused_keeper then (
+    let blocker_class =
+      old.runtime.last_blocker_class
+      |> Option.map blocker_class_to_string
+      |> Option.value ~default:"none"
+    in
+    let auto_resume_after_sec =
+      old.auto_resume_after_sec
+      |> Option.map (Printf.sprintf "%.0f")
+      |> Option.value ~default:"none"
+    in
+    Log.Keeper.warn
+      "update_keeper resumed paused keeper %s; clearing \
+       auto_resume_after_sec=%s last_blocker_class=%s last_blocker=%S"
+      old.name auto_resume_after_sec blocker_class old.runtime.last_blocker);
+  if old.paused && not resume_paused_keeper then
+    Log.Keeper.warn
+      "update_keeper kept %s paused because an approval/reconcile gate is pending"
+      old.name;
   let updated = { old with
     goal;
     short_goal;
@@ -235,6 +269,17 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     tool_preset_source = p.profile_defaults.tool_preset_source;
     autoboot_enabled;
     active_goal_ids;
+    paused = if resume_paused_keeper then false else old.paused;
+    auto_resume_after_sec =
+      if resume_paused_keeper then None else old.auto_resume_after_sec;
+    runtime =
+      (if resume_paused_keeper then
+         {
+           old.runtime with
+           last_blocker = "";
+           last_blocker_class = None;
+         }
+       else old.runtime);
     voice_enabled =
       Option.value ~default:old.voice_enabled p.voice_enabled_opt;
     voice_channel =

@@ -52,6 +52,10 @@ describe('cockpit entrypoint registry', () => {
       tab: 'monitoring',
       params: { section: 'cognition', view: 'keeper', focus: 'tool-access' },
     })
+    expect(cockpitTargetForParams({ mode: 'Cognition', tab: 'dc-mem' })).toEqual({
+      tab: 'monitoring',
+      params: { section: 'cognition', view: 'memory', focus: 'entries' },
+    })
     expect(cockpitTargetForParams({ mode: 'Observe', tab: 'sa-dash' })).toEqual({
       tab: 'command',
       params: { section: 'operations', view: 'safety' },
@@ -86,5 +90,22 @@ describe('cockpit entrypoint registry', () => {
       tab: 'code',
       params: { section: 'ide-shell', view: 'source', find: 'open' },
     })
+  })
+
+  it('routes covered C3 composer variants to focused quick intervention modes', () => {
+    const variants = [
+      ['cm-bc', 'broadcast'],
+      ['cm-mn', 'mention'],
+      ['cm-st', 'state'],
+    ] as const
+
+    for (const [alias, focus] of variants) {
+      const entrypoint = COCKPIT_ENTRYPOINTS.find(entry => entry.aliases.includes(alias))
+      expect(entrypoint?.coverage).toBe('covered')
+      expect(cockpitTargetForParams({ mode: 'Comms', tab: alias })).toEqual({
+        tab: 'command',
+        params: { section: 'operations', view: 'ops', focus },
+      })
+    }
   })
 })

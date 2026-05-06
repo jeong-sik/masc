@@ -32,11 +32,22 @@ let store_failure (reason : string) : unit =
   Bonsai.Expert.Var.set Goals_var.var response
 ;;
 
+let invalid_response_reason json =
+  match
+    Yojson.Safe.Util.member "status" json, Yojson.Safe.Util.member "message" json
+  with
+  | `String status, `String message ->
+    Printf.sprintf "unexpected goals response: %s: %s" status message
+  | `String status, _ -> Printf.sprintf "unexpected goals response: %s" status
+  | _ -> "unexpected goals response envelope"
+;;
+
 let parse_and_store (text : Jstr.t) : unit =
   match Yojson.Safe.from_string (Jstr.to_string text) with
-  | json ->
+  | json when Goals_types.is_response_envelope json ->
     let response = Goals_types.response_of_yojson json in
     store_success response
+  | json -> store_failure (invalid_response_reason json)
   | exception exn ->
     store_failure ("parse failed: " ^ Exn.to_string exn)
 ;;

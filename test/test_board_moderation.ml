@@ -14,12 +14,36 @@ open Alcotest
 open Masc_mcp
 module BM = Board_moderation
 
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
 (* Initialise Mirage crypto RNG — required for Random_id.prefixed *)
 let () = Mirage_crypto_rng_unix.use_default ()
 
 (* ── Helpers ──────────────────────────────────────────────────────── *)
 
 let reset () = BM.reset_for_test ()
+
+let with_env key value f =
+  let prev = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match prev with
+      | Some v -> Unix.putenv key v
+      | None -> unsetenv key)
+    f
+
+let with_flag_rate_limit value f =
+  with_env "MASC_BOARD_MODERATION_FLAG_RATE_LIMIT_SEC" value f
+
+let test_with_env_restores_unset () =
+  let key = "MASC_BOARD_MODERATION_TEST_UNSET" in
+  unsetenv key;
+  check (option string) "starts unset" None (Sys.getenv_opt key);
+  with_env key "set-for-test" (fun () ->
+    check (option string) "set inside scope" (Some "set-for-test")
+      (Sys.getenv_opt key));
+  check (option string) "restored unset" None (Sys.getenv_opt key)
 
 (* ── flag_reason roundtrips ───────────────────────────────────────── *)
 
@@ -118,14 +142,80 @@ let test_flag_duplicate_rejected () =
 
 let test_flag_different_targets () =
   reset ();
-  let r1 = BM.flag ~target_kind:BM.Target_post ~target_id:"p3"
-             ~reporter:"agent-c" ~reason:BM.Spam in
-  let r2 = BM.flag ~target_kind:BM.Target_comment ~target_id:"c1"
-             ~reporter:"agent-c" ~reason:BM.Off_topic in
-  (match r1, r2 with
-   | Ok e1, Ok e2 ->
-       check bool "different ids" true (e1.BM.entry_id <> e2.BM.entry_id)
-   | _ -> fail "both flags should succeed")
+  with_flag_rate_limit "0" (fun () ->
+    let r1 = BM.flag ~target_kind:BM.Target_post ~target_id:"p3"
+               ~reporter:"agent-c" ~reason:BM.Spam in
+    let r2 = BM.flag ~target_kind:BM.Target_comment ~target_id:"c1"
+               ~reporter:"agent-c" ~reason:BM.Off_topic in
+    match r1, r2 with
+    | Ok e1, Ok e2 ->
+        check bool "different ids" true (e1.BM.entry_id <> e2.BM.entry_id)
+    | _ -> fail "both flags should succeed")
+
+let test_flag_rate_limited_same_reporter () =
+  reset ();
+  with_flag_rate_limit "60" (fun () ->
+    (match BM.flag ~target_kind:BM.Target_post ~target_id:"rl1"
+             ~reporter:"agent-rl" ~reason:BM.Spam with
+     | Ok _ -> ()
+     | Error m -> fail ("first flag failed: " ^ m));
+    match BM.flag ~target_kind:BM.Target_comment ~target_id:"rl2"
+            ~reporter:"agent-rl" ~reason:BM.Off_topic with
+    | Error m ->
+        check bool "rate-limit message" true
+          (String.starts_with
+             ~prefix:"reporter agent-rl is rate limited" m)
+    | Ok _ -> fail "second flag by same reporter should be rate limited")
+
+let test_flag_rate_limit_allows_different_reporters () =
+  reset ();
+  with_flag_rate_limit "60" (fun () ->
+    let r1 = BM.flag ~target_kind:BM.Target_post ~target_id:"rl3"
+               ~reporter:"agent-rl-a" ~reason:BM.Spam in
+    let r2 = BM.flag ~target_kind:BM.Target_comment ~target_id:"rl4"
+               ~reporter:"agent-rl-b" ~reason:BM.Off_topic in
+    match r1, r2 with
+    | Ok _, Ok _ -> ()
+    | _ -> fail "different reporters should not rate-limit each other")
+
+let test_flag_rate_limit_non_finite_falls_back () =
+  let check_non_finite value target_a target_b =
+    reset ();
+    with_flag_rate_limit value (fun () ->
+      (match BM.flag ~target_kind:BM.Target_post ~target_id:target_a
+               ~reporter:"agent-nonfinite" ~reason:BM.Spam with
+       | Ok _ -> ()
+       | Error m -> fail ("first flag failed: " ^ m));
+      match BM.flag ~target_kind:BM.Target_comment ~target_id:target_b
+              ~reporter:"agent-nonfinite" ~reason:BM.Off_topic with
+      | Error m ->
+          check bool ("fallback rate-limit " ^ value) true
+            (String.starts_with
+               ~prefix:"reporter agent-nonfinite is rate limited" m)
+      | Ok _ -> fail ("non-finite rate limit should fall back: " ^ value))
+  in
+  check_non_finite "nan" "rl-nan-1" "rl-nan-2";
+  check_non_finite "+inf" "rl-inf-1" "rl-inf-2"
+
+let test_flag_rate_limit_survives_resolved_entries () =
+  reset ();
+  with_flag_rate_limit "60" (fun () ->
+    let first_entry =
+      match BM.flag ~target_kind:BM.Target_post ~target_id:"rl-resolved-1"
+              ~reporter:"agent-resolved" ~reason:BM.Spam with
+      | Ok entry -> entry
+      | Error m -> fail ("first flag failed: " ^ m)
+    in
+    (match BM.resolve_entry ~entry_id:first_entry.BM.entry_id with
+     | Ok () -> ()
+     | Error m -> fail ("resolve failed: " ^ m));
+    match BM.flag ~target_kind:BM.Target_comment ~target_id:"rl-resolved-2"
+            ~reporter:"agent-resolved" ~reason:BM.Off_topic with
+    | Error m ->
+        check bool "resolved entry still rate-limits reporter" true
+          (String.starts_with
+             ~prefix:"reporter agent-resolved is rate limited" m)
+    | Ok _ -> fail "resolved entries should still enforce reporter burst window")
 
 (* ── get_queue filtering ─────────────────────────────────────────── *)
 
@@ -140,9 +230,9 @@ let test_get_queue_unresolved () =
 let test_get_queue_all () =
   reset ();
   let _ = BM.flag ~target_kind:BM.Target_post ~target_id:"q2"
-            ~reporter:"r" ~reason:BM.Spam in
+            ~reporter:"r1" ~reason:BM.Spam in
   let _ = BM.flag ~target_kind:BM.Target_comment ~target_id:"c2"
-            ~reporter:"r" ~reason:BM.Harassment in
+            ~reporter:"r2" ~reason:BM.Harassment in
   let q = BM.get_queue () in
   check int "two entries total" 2 (List.length q)
 
@@ -206,6 +296,22 @@ let test_record_action_auto_resolves_queue () =
               (List.length (BM.get_queue ~resolved:false ()))));
   (* resolved entry should exist *)
   check int "one resolved" 1 (List.length (BM.get_queue ~resolved:true ()))
+
+let test_record_action_allows_target_to_be_reflagged () =
+  reset ();
+  with_flag_rate_limit "0" (fun () ->
+    (match BM.flag ~target_kind:BM.Target_post ~target_id:"p13"
+             ~reporter:"r1" ~reason:BM.Spam with
+     | Ok _ -> ()
+     | Error m -> fail ("flag failed: " ^ m));
+    (match BM.record_action ~target_kind:BM.Target_post ~target_id:"p13"
+             ~actor:"op" ~action:BM.Remove () with
+     | Ok _ -> ()
+     | Error m -> fail ("action failed: " ^ m));
+    match BM.flag ~target_kind:BM.Target_post ~target_id:"p13"
+            ~reporter:"r2" ~reason:BM.Harassment with
+    | Ok _ -> ()
+    | Error m -> fail ("resolved target should be flaggable again: " ^ m))
 
 (* ── get_audit_trail ─────────────────────────────────────────────── *)
 
@@ -304,7 +410,10 @@ let test_audit_entry_no_optional_fields_when_absent () =
 
 let () =
   run "Board_moderation"
-    [ ( "flag_reason",
+    [ ( "env",
+        [ test_case "with_env restores unset" `Quick
+            test_with_env_restores_unset ] );
+      ( "flag_reason",
         [ test_case "spam roundtrip"       `Quick test_flag_reason_spam;
           test_case "harassment roundtrip" `Quick test_flag_reason_harassment;
           test_case "off_topic roundtrip"  `Quick test_flag_reason_off_topic;
@@ -317,7 +426,15 @@ let () =
       ( "flag",
         [ test_case "happy path"             `Quick test_flag_happy_path;
           test_case "duplicate rejected"     `Quick test_flag_duplicate_rejected;
-          test_case "different targets ok"   `Quick test_flag_different_targets ] );
+          test_case "different targets ok"   `Quick test_flag_different_targets;
+          test_case "same reporter rate limited" `Quick
+            test_flag_rate_limited_same_reporter;
+          test_case "different reporters bypass rate limit" `Quick
+            test_flag_rate_limit_allows_different_reporters;
+          test_case "non-finite rate limit falls back" `Quick
+            test_flag_rate_limit_non_finite_falls_back;
+          test_case "resolved entries still rate-limit reporter" `Quick
+            test_flag_rate_limit_survives_resolved_entries ] );
       ( "get_queue",
         [ test_case "unresolved filter"      `Quick test_get_queue_unresolved;
           test_case "all entries"            `Quick test_get_queue_all;
@@ -327,7 +444,10 @@ let () =
       ( "record_action",
         [ test_case "happy path"             `Quick test_record_action_happy_path;
           test_case "note capped at 500"     `Quick test_record_action_note_capped;
-          test_case "auto-resolves queue"    `Quick test_record_action_auto_resolves_queue ] );
+          test_case "auto-resolves queue"    `Quick
+            test_record_action_auto_resolves_queue;
+          test_case "allows target to be reflagged" `Quick
+            test_record_action_allows_target_to_be_reflagged ] );
       ( "get_audit_trail",
         [ test_case "actor filter"           `Quick test_audit_trail_actor_filter;
           test_case "target filter"          `Quick test_audit_trail_target_filter;

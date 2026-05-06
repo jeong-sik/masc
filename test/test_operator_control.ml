@@ -122,6 +122,16 @@ let () =
             `Quick
             Test_operator_control_keeper
             .test_keeper_up_ignores_non_public_social_model_arg;
+          Alcotest.test_case "keeper up resumes auto-paused keeper" `Quick
+            Test_operator_control_keeper.test_keeper_up_resumes_auto_paused_keeper;
+          Alcotest.test_case
+            "keeper up keeps paused keeper behind continue gate" `Quick
+            Test_operator_control_keeper
+            .test_keeper_up_keeps_paused_keeper_with_continue_gate_blocker;
+          Alcotest.test_case
+            "keeper up keeps paused keeper behind pending approval" `Quick
+            Test_operator_control_keeper
+            .test_keeper_up_keeps_paused_keeper_with_pending_approval;
           Alcotest.test_case "keeper status accepts agent alias" `Quick
             Test_operator_control_keeper
             .test_keeper_status_accepts_agent_name_alias;
@@ -178,6 +188,10 @@ let () =
             `Quick
             Test_operator_control_keeper
             .test_keeper_sandbox_status_exposes_local_summary;
+          Alcotest.test_case
+            "keeper sandbox status clarifies visible container gap" `Quick
+            Test_operator_control_keeper
+            .test_keeper_sandbox_status_clarifies_visible_container_gap;
           Alcotest.test_case
             "keeper sandbox fleet includes persisted keeper" `Quick
             Test_operator_control_keeper

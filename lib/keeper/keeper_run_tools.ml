@@ -55,6 +55,42 @@ let freeze (acc : hook_accumulator) : hook_outputs =
   ; out_receipt_tool_contract_result = acc.receipt_tool_contract_result
   }
 
+type tool_search_hit_partition =
+  { visible_core_hits : (string * float) list
+  ; discoverable_hits : (string * float) list
+  ; filtered_by_policy : int
+  }
+
+let partition_tool_search_hits ~core ~core_always ~allowed ~retrieved
+    ~max_results =
+  let allowed =
+    allowed |> Keeper_tool_alias.expand_universe
+  in
+  let allowed_set =
+    let tbl = Hashtbl.create (List.length allowed) in
+    List.iter (fun n -> Hashtbl.replace tbl n ()) allowed;
+    List.iter (fun n -> Hashtbl.replace tbl n ()) core_always;
+    tbl
+  in
+  let allowed_retrieved =
+    retrieved |> List.filter (fun (name, _) -> Hashtbl.mem allowed_set name)
+  in
+  let is_core name =
+    List.mem name core || List.mem name core_always
+  in
+  let visible_core_hits =
+    allowed_retrieved |> List.filter (fun (name, _) -> is_core name)
+  in
+  let discoverable_hits =
+    allowed_retrieved
+    |> List.filter (fun (name, _) -> not (is_core name))
+    |> List.filteri (fun i _ -> i < max_results)
+  in
+  { visible_core_hits
+  ; discoverable_hits
+  ; filtered_by_policy = List.length retrieved - List.length allowed_retrieved
+  }
+
 (** Agent setup produced by Step 7.
 
     Hook mutations flow through {!acc}, receipt refs are kept for
@@ -286,41 +322,29 @@ let prepare_agent_setup
    := fun ~query ~max_results ->
         let core = Keeper_exec_tools.effective_core_tools () in
         let retrieved = Agent_sdk.Tool_index.retrieve search_index query in
-        let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
-        let allowed_set =
-          let tbl = Hashtbl.create (List.length allowed) in
-          List.iter (fun n -> Hashtbl.replace tbl n ()) allowed;
-          tbl
+        let partition =
+          partition_tool_search_hits
+            ~core
+            ~core_always:Keeper_tool_registry.core_always_tools
+            ~allowed:(Keeper_exec_tools.keeper_allowed_tool_names meta)
+            ~retrieved
+            ~max_results
         in
         let raw_hit_count = List.length retrieved in
         let matched_core_names =
-          retrieved
-          |> List.filter_map (fun (name, _) ->
-            if List.mem name core || name = "keeper_tool_search" then Some name else None)
+          List.map fst partition.visible_core_hits
         in
-        let after_core_filter =
-          retrieved
-          |> List.filter (fun (name, _) ->
-            (not (List.mem name core)) && name <> "keeper_tool_search")
-        in
-        let after_policy_filter =
-          after_core_filter |> List.filter (fun (name, _) -> Hashtbl.mem allowed_set name)
-        in
-        let new_discoveries =
-          after_policy_filter |> List.filteri (fun i _ -> i < max_results)
-        in
-        let filtered_by_policy =
-          List.length after_core_filter - List.length after_policy_filter
-        in
+        let core_hit_count = List.length matched_core_names in
+        let filtered_by_core = 0 in
+        let new_discoveries = partition.discoverable_hits in
+        let filtered_by_policy = partition.filtered_by_policy in
         let discovered_names = List.map fst new_discoveries in
         Keeper_discovered_tools.add
           acc.discovered
           ~turn:acc.current_turn
           ~names:discovered_names;
         let masc_schemas = !Keeper_exec_tools.masc_schemas_ref in
-        let results =
-          List.map
-            (fun (name, score) ->
+        let result_json ~already_visible (name, score) =
                let help_opt = Tool_help_registry.find_entry masc_schemas name in
                let desc =
                  match help_opt with
@@ -353,11 +377,21 @@ let prepare_agent_setup
                  ; "description", desc
                  ; "when_to_use", when_to_use
                  ; "input_schema", input_schema
-                 ])
+                 ; "already_visible", `Bool already_visible
+                 ]
+        in
+        let matched_core_results =
+          partition.visible_core_hits
+          |> List.map (result_json ~already_visible:true)
+        in
+        let discovery_results =
+          List.map
+            (result_json ~already_visible:false)
             new_discoveries
         in
+        let results = matched_core_results @ discovery_results in
         let hint =
-          match results, matched_core_names with
+          match discovery_results, matched_core_names with
           | [], [] when raw_hit_count = 0 ->
             "No tools match this query. Try different keywords (e.g., 'worktree', \
              'board', 'github')."
@@ -394,8 +428,8 @@ let prepare_agent_setup
            @ [ ( "diagnostics"
                , `Assoc
                    [ "raw_bm25_hits", `Int raw_hit_count
-                   ; ( "filtered_by_core"
-                     , `Int (raw_hit_count - List.length after_core_filter) )
+                   ; "filtered_by_core", `Int filtered_by_core
+                   ; "core_hit_count", `Int core_hit_count
                    ; "filtered_by_policy", `Int filtered_by_policy
                    ] )
              ; "hint", `String hint
@@ -687,8 +721,14 @@ let prepare_agent_setup
       |> validate_allow_list ~turn
       |> Keeper_types.dedupe_keep_order
     in
+    let visible_affordance_tool_names =
+      preferred_tool_names_for_turn_affordances turn_affordances
+      |> validate_allow_list ~turn
+      |> Keeper_types.dedupe_keep_order
+    in
     let merged =
-      Keeper_types.dedupe_keep_order (merged @ visible_required_tool_names)
+      Keeper_types.dedupe_keep_order
+        (merged @ visible_required_tool_names @ visible_affordance_tool_names)
     in
     let selection_mode =
       if llm_rerank_enabled
@@ -752,9 +792,14 @@ let prepare_agent_setup
           max_tools;
         let required_turn_essential_tool_names =
           if required_tool_names <> [] then visible_required_tool_names
-          else if tool_gate_requested
-             && has_task_claim_affordance turn_affordances
-          then [ "keeper_task_claim" ]
+          else if tool_gate_requested then
+            let claim_tools =
+              if has_task_claim_affordance turn_affordances
+              then [ "keeper_task_claim" ]
+              else []
+            in
+            Keeper_types.dedupe_keep_order
+              (visible_affordance_tool_names @ claim_tools)
           else []
         in
         let essential_names =
@@ -984,11 +1029,17 @@ let prepare_agent_setup
       ?trajectory_acc
       ~on_tool_executed:(fun
           ~tool_name
-          ~input:_
-          ~output_text:_
+          ~input
+          ~output_text
           ~success
           ~duration_ms
           ~provider ->
+        let route_evidence =
+          Keeper_tool_call_log.route_evidence_json_of_tool_io
+            ~tool_name
+            ~input
+            ~output_text
+        in
         (match Keeper_registry.get ~base_path:config.base_path meta.name with
          | Some entry ->
            acc.meta <- entry.meta;
@@ -999,6 +1050,7 @@ let prepare_agent_setup
           ; provider
           ; outcome = if success then "ok" else "error"
           ; latency_ms = duration_ms
+          ; route_evidence
           }
           :: acc.tool_calls)
       ~discover_work_nudge
@@ -1377,7 +1429,7 @@ let prepare_agent_setup
         ~episode_limit:30
         ~procedure_limit:10 ()
     in
-    Agent_sdk.Hooks.compose ~outer:mem_hooks ~inner:hooks
+    Memory_hooks.compose_with_inner ~memory_hooks:mem_hooks ~inner:hooks
   in
   (* Tier K4b/K4c: install the tool-emission PostToolUse hook so
      tagged tool results flow into this keeper's own accumulator

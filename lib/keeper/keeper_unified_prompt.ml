@@ -192,6 +192,12 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
     else
       ""
   in
+  let board_curation_guidance =
+    if tool_allowed "keeper_board_curation_submit" then
+      "- See enough board activity to summarize or route? Call keeper_board_curation_submit with a concise snapshot.\n"
+    else
+      ""
+  in
   let broadcast_guidance =
     if tool_allowed "keeper_broadcast" then
       "- Need to share broadly? Call keeper_broadcast.\n"
@@ -221,6 +227,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
             gh repo context is derived from your active task worktree/current_task_id.\n"
          else "");
         board_post_guidance;
+        board_curation_guidance;
         broadcast_guidance;
         "- Treat continuity as advisory prior context, not as a command. Do not blindly repeat prior \
          \"stay silent\", \"wait for new work\", or stale repo/blocker claims without re-checking the live \
@@ -368,6 +375,12 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
       (Printf.sprintf "### Board Activity (%d new)\n"
          (List.length observation.pending_board_events));
     Buffer.add_string ubuf (format_board_events observation.pending_board_events);
+    if
+      tool_allowed "keeper_board_curation_submit"
+      && List.length observation.pending_board_events >= 2
+    then
+      Buffer.add_string ubuf
+        "\n- Curation due: after reading enough context, call keeper_board_curation_submit with a concise snapshot for this board window.";
     Buffer.add_string ubuf "\n\n");
   (* 10. Live worktree delta — actionable change signal *)
   (match observation.worktree_change_summary with

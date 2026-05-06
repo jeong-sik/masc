@@ -452,7 +452,9 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
   | "masc_board_list" | "masc_board_get"
   | "masc_board_stats"
   | "masc_board_search" | "masc_board_profile"
-  | "masc_board_hearths" ->
+  | "masc_board_hearths"
+  | "masc_board_curation_read"
+  | "masc_board_curation_submit" ->
       Some (tuple_of_tool_result (Tool_board.handle_tool name arguments))
 
   | _ -> None

@@ -61,11 +61,23 @@ val json_string_list : string -> Yojson.Safe.t -> string list
 val latest_receipt_blocks_required_tool_claim :
   config -> agent_name:string -> required_tools:string list -> bool
 
+val active_task_assignees_by_task_id :
+  Masc_domain.backlog -> (string, string) Hashtbl.t
+
+val agent_current_task_matches_assignments :
+  (string, string) Hashtbl.t -> agent_name:string -> string -> bool
+
 val agent_current_task_matches_backlog :
   Masc_domain.backlog -> agent_name:string -> string -> bool
 
 val reconcile_agent_current_task_with_backlog :
-  config -> agent_name:string -> Masc_domain.backlog -> unit
+  config -> ?touch_last_seen:bool -> agent_name:string -> Masc_domain.backlog -> unit
+
+val reconcile_all_agent_current_tasks_with_backlog :
+  config -> ?touch_last_seen:bool -> Masc_domain.backlog -> unit
+
+val reconcile_all_agent_current_tasks_with_fresh_backlog :
+  ?touch_last_seen:bool -> config -> Masc_domain.backlog
 
 val claim_next_r :
   config ->

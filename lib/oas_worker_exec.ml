@@ -564,8 +564,11 @@ let run
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     let bt = Printexc.get_backtrace () in
-    (try Agent_sdk.Agent.close agent with close_exn ->
-      Log.Misc.warn "agent close failed during cleanup: %s" (Printexc.to_string close_exn));
+    (try Agent_sdk.Agent.close agent with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | close_exn ->
+       Log.Misc.warn "agent close failed during cleanup: %s"
+         (Printexc.to_string close_exn));
     let detail =
       Printf.sprintf "execution exception: %s" (Printexc.to_string exn)
     in

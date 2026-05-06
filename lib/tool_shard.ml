@@ -289,6 +289,39 @@ Use when looking for specific topics, past discussions, or related prior work.";
     ];
   };
   {
+    name = "keeper_board_curation_read";
+    description = "Read the latest AI curation snapshot for the board, including summary, \
+recommended ordering, highlights, tag suggestions, answer matches, health score, rationale, \
+and provenance. Returns null when no snapshot has been submitted yet.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+  {
+    name = "keeper_board_curation_submit";
+    description = "Submit an AI curation snapshot for the current board window. Use after reading \
+recent board activity to publish a summary, recommended reading order, highlights, tag suggestions, \
+answer matches, health score, and rationale. This does not edit board posts/comments/votes; \
+submitted_by is filled from your keeper identity.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("model", `Assoc [("type", `String "string"); ("description", `String "Model or provider label used for the curation")]);
+        ("summary", `Assoc [("type", `String "string"); ("description", `String "Short TL;DR summary of the current board window")]);
+        ("ordering", `Assoc [("type", `String "array"); ("items", `Assoc [("type", `String "string")]); ("description", `String "Recommended post id reading order")]);
+        ("highlights", `Assoc [("type", `String "array"); ("items", `Assoc [("type", `String "string")]); ("description", `String "Important post ids to highlight")]);
+        ("tag_suggestions", `Assoc [("type", `String "array"); ("description", `String "Objects with post_id, tags[], rationale")]);
+        ("answer_matches", `Assoc [("type", `String "array"); ("description", `String "Objects with question_post_id, answer_post_id, score, rationale")]);
+        ("health_score", `Assoc [("type", `String "number"); ("minimum", `Float 0.0); ("maximum", `Float 1.0); ("description", `String "Optional normalized health score in [0.0, 1.0]")]);
+        ("health_components", `Assoc [("type", `String "array"); ("description", `String "Objects with name, score, weight, rationale")]);
+        ("rationale", `Assoc [("type", `String "string"); ("description", `String "Why this curation snapshot is useful now")]);
+        ("provenance", `Assoc [("type", `String "object"); ("description", `String "Audit metadata such as source window, prompt/run id, and model params")]);
+      ]);
+      ("required", `List [`String "rationale"]);
+    ];
+  };
+  {
     name = "keeper_board_delete";
     description = "Delete a board post by post_id. Use only for generated garbage, \
 expired automation, or other explicitly-approved cleanup cases.";
@@ -620,7 +653,8 @@ let coding_workspace_tools : Masc_domain.tool_schema list =
 (** Coding tools — shell/github bridges plus worktree-first code workflow.
     Always granted. *)
 let coding_tools : Masc_domain.tool_schema list =
-  coding_keeper_bridge_tools @ coding_workspace_tools
+  coding_keeper_bridge_tools @ coding_workspace_tools @ keeper_preflight_tools
+  @ keeper_github_pr_tools @ keeper_pr_review_tools
 
 let voice_tools : Masc_domain.tool_schema list = [
   {
@@ -894,6 +928,7 @@ let shard_board : shard = {
   read_only_tools = [
     "keeper_board_get"; "keeper_board_list";
     "keeper_board_stats"; "keeper_board_search";
+    "keeper_board_curation_read";
   ];
   removable = true;
   description = "MASC Board: post, list, comment";

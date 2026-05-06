@@ -39,12 +39,37 @@ describe('MemoryTimeline a11y', () => {
     const img = container.querySelector('[role="img"]')
     expect(img).not.toBeNull()
     expect(img?.getAttribute('aria-label')).toContain('메모리')
+    expect(img?.getAttribute('aria-label')).toContain('총 5회')
+    expect(img?.getAttribute('aria-label')).toContain('고유 메모리 5개')
   })
 
   it('renders 24 hour bars', () => {
     render(html`<${MemoryTimeline} entries=${makeEntries()} />`, container)
     const bars = container.querySelectorAll('[role="graphics-symbol"]')
     expect(bars.length).toBe(24)
+  })
+
+  it('labels each hour with dominant access type and unique memory count', () => {
+    const base = new Date()
+    base.setHours(8, 0, 0, 0)
+    render(html`<${MemoryTimeline}
+      entries=${[
+        { timestamp: base.getTime(), memoryId: 'm1', accessType: 'read' },
+        { timestamp: base.getTime() + 60000, memoryId: 'm2', accessType: 'write' },
+        { timestamp: base.getTime() + 120000, memoryId: 'm3', accessType: 'write' },
+      ]}
+    />`, container)
+    const bar = container.querySelector('[data-memory-timeline-hour="8"]')
+    expect(bar?.getAttribute('aria-label')).toBe('8시: 3회, 쓰기 우세, 고유 메모리 3개')
+    expect(bar?.getAttribute('data-memory-timeline-dominant-type')).toBe('write')
+  })
+
+  it('exposes timeline summary metadata', () => {
+    render(html`<${MemoryTimeline} entries=${makeEntries()} />`, container)
+    const summary = container.querySelector('[data-memory-timeline-summary]')
+    expect(summary).not.toBeNull()
+    expect(summary?.getAttribute('data-memory-timeline-total')).toBe('5')
+    expect(summary?.getAttribute('data-memory-timeline-unique')).toBe('5')
   })
 
   it('renders time labels', () => {

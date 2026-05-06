@@ -527,7 +527,62 @@ let test_keeper_board_dispatch_uses_typed_tool_names () =
   in
   Alcotest.(check string) "typed curation read reaches board handler" "null" curation;
   Alcotest.(check bool) "typed curation read is not unknown" false
-    (contains_substring curation "unknown_board_tool")
+    (contains_substring curation "unknown_board_tool");
+  let curation_submit =
+    Keeper_exec_board.handle_keeper_board_tool
+      ~meta:keeper_meta
+      ~name:"keeper_board_curation_submit"
+      ~args:
+        (make_args
+           [
+             ("summary", `String "Two active threads need routing.");
+             ("ordering", `List [ `String "p-1"; `String "p-2" ]);
+             ("highlights", `List [ `String "p-1" ]);
+             ("tag_suggestions",
+              `List
+                [
+                  `Assoc
+                    [
+                      ("post_id", `String "p-1");
+                      ("tags", `List [ `String "ops" ]);
+                      ("rationale", `String "Operational thread");
+                    ];
+                ]);
+             ("answer_matches",
+              `List
+                [
+                  `Assoc
+                    [
+                      ("question_post_id", `String "p-1");
+                      ("answer_post_id", `String "p-2");
+                      ("score", `Float 0.8);
+                      ("rationale", `String "Same issue");
+                    ];
+                ]);
+             ("health_score", `Float 0.7);
+             ("health_components",
+              `List
+                [
+                  `Assoc
+                    [
+                      ("name", `String "answer_rate");
+                      ("score", `Float 0.7);
+                      ("weight", `Float 0.25);
+                      ("rationale", `String "Some answers present");
+                    ];
+                ]);
+             ("rationale", `String "Summarize active board activity");
+             ("provenance", `Assoc [ ("source", `String "test") ]);
+           ])
+  in
+  Alcotest.(check bool) "typed curation submit is not unknown" false
+    (contains_substring curation_submit "unknown_board_tool");
+  let submit_json = Yojson.Safe.from_string curation_submit in
+  Alcotest.(check string) "keeper source injected for curation" "typed-keeper"
+    Yojson.Safe.Util.(submit_json |> member "submitted_by" |> to_string);
+  Alcotest.(check string) "curation summary persisted"
+    "Two active threads need routing."
+    Yojson.Safe.Util.(submit_json |> member "summary" |> to_string)
 
 let test_board_curation_read_empty_returns_json_null () =
   Eio_main.run @@ fun env ->
@@ -536,6 +591,169 @@ let test_board_curation_read_empty_returns_json_null () =
   let ok, body = dispatch "masc_board_curation_read" (make_args []) in
   Alcotest.(check bool) "curation read ok" true ok;
   Alcotest.(check string) "empty curation snapshot is JSON null" "null" body
+
+let test_board_curation_submit_roundtrips_to_read () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let missing_ok, missing_body =
+    dispatch "masc_board_curation_submit"
+      (make_args [ ("rationale", `String "missing submitted_by") ])
+  in
+  Alcotest.(check bool) "raw submit requires submitted_by" false missing_ok;
+  Alcotest.(check string) "missing submitted_by error" "submitted_by required"
+    missing_body;
+  let invalid_score_ok, invalid_score_body =
+    dispatch "masc_board_curation_submit"
+      (make_args
+         [
+           ("submitted_by", `String "curator");
+           ("rationale", `String "score out of range");
+           ("health_score", `Float 1.5);
+         ])
+  in
+  Alcotest.(check bool) "raw submit rejects out-of-range health score" false
+    invalid_score_ok;
+  Alcotest.(check bool) "invalid score error mentions health_score" true
+    (contains_substring invalid_score_body "health_score");
+  let invalid_provenance_ok, invalid_provenance_body =
+    dispatch "masc_board_curation_submit"
+      (make_args
+         [
+           ("submitted_by", `String "curator");
+           ("rationale", `String "provenance shape");
+           ("provenance", `String "not-an-object");
+         ])
+  in
+  Alcotest.(check bool) "raw submit rejects non-object provenance" false
+    invalid_provenance_ok;
+  Alcotest.(check bool) "invalid provenance error mentions object" true
+    (contains_substring invalid_provenance_body "object");
+  let ok, body =
+    dispatch "masc_board_curation_submit"
+      (make_args
+         [
+           ("submitted_by", `String "curator");
+           ("model", `String " test-model ");
+           ("summary", `String " Board has one high-priority routing item. ");
+           ("ordering", `List [ `String " p-7 "; `String " "; `String "" ]);
+           ("highlights", `List [ `String " p-7 "; `String " " ]);
+           ("tag_suggestions",
+            `List
+              [
+                `Assoc
+                  [
+                    ("post_id", `String "p-7");
+                    ("tags", `List [ `String "routing"; `String "ops" ]);
+                    ("rationale", `String "Needs owner routing");
+                  ];
+              ]);
+           ("answer_matches",
+            `List
+              [
+                `Assoc
+                  [
+                    ("question_post_id", `String "p-7");
+                    ("answer_post_id", `String "p-8");
+                    ("score", `String " 0.9 ");
+                    ("rationale", `String "Direct answer candidate");
+                  ];
+              ]);
+           ("health_score", `Float 0.65);
+           ("health_components",
+            `List
+              [
+                `Assoc
+                  [
+                    ("name", `String "routing_latency");
+                    ("score", `String "0.65");
+                    ("weight", `String " 0.5 ");
+                    ("rationale", `String "Some delay visible");
+                  ];
+              ]);
+           ("rationale", `String "Useful routing snapshot");
+           ("provenance", `Assoc [ ("source", `String "unit-test") ]);
+         ])
+  in
+  Alcotest.(check bool) "curation submit ok" true ok;
+  let submitted = Yojson.Safe.from_string body in
+  Alcotest.(check string) "submitted_by persisted" "curator"
+    Yojson.Safe.Util.(submitted |> member "submitted_by" |> to_string);
+  Alcotest.(check string) "model trimmed" "test-model"
+    Yojson.Safe.Util.(submitted |> member "model" |> to_string);
+  Alcotest.(check string) "summary persisted"
+    "Board has one high-priority routing item."
+    Yojson.Safe.Util.(submitted |> member "summary" |> to_string);
+  Alcotest.(check (list string)) "ordering trims and drops blanks" [ "p-7" ]
+    Yojson.Safe.Util.(submitted |> member "ordering" |> to_list |> List.map to_string);
+  Alcotest.(check (list string)) "highlights trim and drop blanks" [ "p-7" ]
+    Yojson.Safe.Util.(submitted |> member "highlights" |> to_list |> List.map to_string);
+  Alcotest.(check (float 0.0001)) "health score persisted" 0.65
+    Yojson.Safe.Util.(submitted |> member "health_score" |> to_float);
+  let answer_match =
+    Yojson.Safe.Util.(submitted |> member "answer_matches" |> to_list |> List.hd)
+  in
+  Alcotest.(check (float 0.0001)) "string answer score parsed" 0.9
+    Yojson.Safe.Util.(answer_match |> member "score" |> to_float);
+  let health_component =
+    Yojson.Safe.Util.(submitted |> member "health_components" |> to_list |> List.hd)
+  in
+  Alcotest.(check (float 0.0001)) "string health component score parsed" 0.65
+    Yojson.Safe.Util.(health_component |> member "score" |> to_float);
+  Alcotest.(check (float 0.0001)) "string health component weight parsed" 0.5
+    Yojson.Safe.Util.(health_component |> member "weight" |> to_float);
+  let read_ok, read_body = dispatch "masc_board_curation_read" (make_args []) in
+  Alcotest.(check bool) "curation read after submit ok" true read_ok;
+  let read_json = Yojson.Safe.from_string read_body in
+  Alcotest.(check string) "read returns latest id"
+    Yojson.Safe.Util.(submitted |> member "id" |> to_string)
+    Yojson.Safe.Util.(read_json |> member "id" |> to_string);
+  Alcotest.(check string) "read returns latest summary"
+    "Board has one high-priority routing item."
+    Yojson.Safe.Util.(read_json |> member "summary" |> to_string)
+
+let inline_board_dispatch ~sw ~clock name args =
+  let state = Mcp_server.create_state ~base_path:_test_base_path in
+  Tool_inline_dispatch_extra.dispatch ~config:state.Mcp_server.room_config
+    ~agent_name:"inline-curator" ~arguments:args ~state ~sw ~clock ~name
+
+let require_inline_result ~sw ~clock name args =
+  match inline_board_dispatch ~sw ~clock name args with
+  | Some result -> result
+  | None -> Alcotest.failf "%s not routed by inline board dispatch" name
+
+let test_board_curation_inline_dispatch_routes_read_and_submit () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  Eio.Switch.run @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  let read_ok, read_body =
+    require_inline_result ~sw ~clock "masc_board_curation_read" (make_args [])
+  in
+  Alcotest.(check bool) "inline curation read ok" true read_ok;
+  Alcotest.(check string) "inline curation read empty" "null" read_body;
+  let submit_ok, submit_body =
+    require_inline_result ~sw ~clock "masc_board_curation_submit"
+      (make_args
+         [
+           ("submitted_by", `String "inline-curator");
+           ("summary", `String "Inline MCP curation route works.");
+           ("rationale", `String "Pin schema-to-dispatch curation routing");
+         ])
+  in
+  Alcotest.(check bool) "inline curation submit ok" true submit_ok;
+  let submitted = Yojson.Safe.from_string submit_body in
+  Alcotest.(check string) "inline submitted_by persisted" "inline-curator"
+    Yojson.Safe.Util.(submitted |> member "submitted_by" |> to_string);
+  let read2_ok, read2_body =
+    require_inline_result ~sw ~clock "masc_board_curation_read" (make_args [])
+  in
+  Alcotest.(check bool) "inline curation read after submit ok" true read2_ok;
+  Alcotest.(check string) "inline curation read after submit summary"
+    "Inline MCP curation route works."
+    Yojson.Safe.Util.(
+      Yojson.Safe.from_string read2_body |> member "summary" |> to_string)
 
 let test_post_create_accepts_automation_rejects_system () =
   Eio_main.run @@ fun env ->
@@ -920,7 +1138,7 @@ let test_tools_count () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  Alcotest.(check int) "13 tool schemas" 13 (List.length Tool_board.tools)
+  Alcotest.(check int) "14 tool schemas" 14 (List.length Tool_board.tools)
 
 let test_tools_names_unique () =
   Eio_main.run @@ fun env ->
@@ -938,6 +1156,35 @@ let test_tools_all_have_descriptions () =
     Alcotest.(check bool) (Printf.sprintf "%s has description" t.name) true
       (String.length t.description > 0)
   ) Tool_board.tools
+
+let health_score_schema (tool : Masc_domain.tool_schema) =
+  match tool.input_schema with
+  | `Assoc fields ->
+    (match List.assoc_opt "properties" fields with
+     | Some (`Assoc properties) ->
+       (match List.assoc_opt "health_score" properties with
+        | Some (`Assoc schema) -> schema
+        | _ -> Alcotest.failf "%s missing health_score schema" tool.name)
+     | _ -> Alcotest.failf "%s missing properties schema" tool.name)
+  | _ -> Alcotest.failf "%s input_schema is not an object" tool.name
+
+let find_tool name tools =
+  match List.find_opt (fun (tool : Masc_domain.tool_schema) -> String.equal tool.name name) tools with
+  | Some tool -> tool
+  | None -> Alcotest.failf "missing tool schema %s" name
+
+let test_curation_health_score_schema_bounds () =
+  let check_bounds label tool =
+    let schema = health_score_schema tool in
+    Alcotest.(check (float 0.0001)) (label ^ " minimum") 0.0
+      Yojson.Safe.Util.(List.assoc "minimum" schema |> to_float);
+    Alcotest.(check (float 0.0001)) (label ^ " maximum") 1.0
+      Yojson.Safe.Util.(List.assoc "maximum" schema |> to_float)
+  in
+  check_bounds "raw curation submit"
+    (find_tool "masc_board_curation_submit" Tool_board.tools);
+  check_bounds "keeper curation submit"
+    (find_tool "keeper_board_curation_submit" Tool_shard.shard_board.tools)
 
 (** {1 Test Runner} *)
 
@@ -984,6 +1231,10 @@ let () =
             test_keeper_board_dispatch_uses_typed_tool_names;
           Alcotest.test_case "curation read empty returns JSON null" `Quick
             test_board_curation_read_empty_returns_json_null;
+          Alcotest.test_case "curation submit roundtrips to read" `Quick
+            test_board_curation_submit_roundtrips_to_read;
+          Alcotest.test_case "curation inline dispatch routes read and submit" `Quick
+            test_board_curation_inline_dispatch_routes_read_and_submit;
           Alcotest.test_case "accept automation reject system" `Quick
             test_post_create_accepts_automation_rejects_system;
           Alcotest.test_case "create empty content" `Quick test_post_create_empty_content;
@@ -1040,6 +1291,8 @@ let () =
           Alcotest.test_case "tools count" `Quick test_tools_count;
           Alcotest.test_case "unique names" `Quick test_tools_names_unique;
           Alcotest.test_case "all have descriptions" `Quick test_tools_all_have_descriptions;
+          Alcotest.test_case "curation health score schema bounds" `Quick
+            test_curation_health_score_schema_bounds;
         ] );
       ( "post_kind_registry",
         [

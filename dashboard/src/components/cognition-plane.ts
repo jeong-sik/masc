@@ -6,7 +6,7 @@ import { FilterChips } from './common/filter-chips'
 import { KeeperDecisionsStream } from './keeper-decisions-stream'
 import { KeeperCognitionInspector } from './keeper-cognition-inspector'
 import { KeeperTokenStats } from './keeper-token-stats'
-import { MemorySubsystems } from './memory-subsystems'
+import { MemorySubsystems, type MemorySubsystemsFocus } from './memory-subsystems'
 
 type CognitionView = 'overview' | 'keeper' | 'token-stats' | 'decisions' | 'memory' | 'episodes' | 'autoresearch'
 
@@ -38,7 +38,9 @@ function currentView(): CognitionView {
 }
 
 function updateViewParam(view: CognitionView): void {
+  if (view === currentView()) return
   const next: Record<string, string> = { ...route.value.params, section: 'cognition' }
+  delete next.focus
   if (view === 'overview') {
     delete next.view
   } else {
@@ -47,8 +49,14 @@ function updateViewParam(view: CognitionView): void {
   navigate('monitoring', next)
 }
 
+function currentMemoryFocus(view: CognitionView): MemorySubsystemsFocus {
+  if (view === 'episodes') return 'episodes'
+  return route.value.params.focus === 'entries' ? 'entries' : 'overview'
+}
+
 export function CognitionPlane() {
   const view = currentView()
+  const memoryFocus = currentMemoryFocus(view)
 
   return html`
     <div class="flex flex-col gap-5">
@@ -67,7 +75,7 @@ export function CognitionPlane() {
       ` : view === 'decisions' ? html`
         <${KeeperDecisionsStream} />
       ` : view === 'memory' || view === 'episodes' ? html`
-        <${MemorySubsystems} />
+        <${MemorySubsystems} focus=${memoryFocus} />
       ` : view === 'autoresearch' ? html`
         <${Autoresearch} />
       ` : html`

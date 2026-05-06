@@ -129,6 +129,15 @@ let approval_decision_to_string = function
   | Agent_sdk.Hooks.Reject reason -> "reject:" ^ reason
   | Agent_sdk.Hooks.Edit _ -> "edit"
 
+let record_queue_failure ~keeper_name ~site ?(id = "-") ?(event_type = "-") exn =
+  Prometheus.inc_counter
+    Prometheus.metric_keeper_approval_queue_failures
+    ~labels:[ ("keeper", keeper_name); ("site", site) ]
+    ();
+  Log.Keeper.warn
+    "approval_queue: %s failed keeper=%s id=%s event=%s err=%s"
+    site keeper_name id event_type (Printexc.to_string exn)
+
 let approval_audit_decision_to_string = function
   | Approval_resolved decision -> approval_decision_to_string decision
   | Approval_expired reason -> "reject:" ^ reason
@@ -526,11 +535,16 @@ let audit_approval_event ?base_path ~event_type ~id ~keeper_name ~tool_name
          | Some value -> [ ("auto_approved", `Bool value) ]
          | None -> []))
     in
-    Safe_ops.protect ~default:() (fun () ->
-      Eio.Mutex.use_rw ~protect:true audit_io_mu (fun () ->
+    Eio.Mutex.use_rw ~protect:true audit_io_mu (fun () ->
+      try
         Fs_compat.append_jsonl
           (audit_today_path (Dated_jsonl.base_dir store))
-          json))
+          json
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+          record_queue_failure ~keeper_name ~site:"audit_append" ~id
+            ~event_type exn)
 
 let audit_rule_event ?base_path ~event_type (rule : approval_rule) =
   audit_approval_event ?base_path ~event_type ~id:rule.id
@@ -711,7 +725,9 @@ let broadcast_pending entry =
        ])
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | _ -> ()
+  | exn ->
+      record_queue_failure ~keeper_name:entry.keeper_name
+        ~site:"broadcast_pending" ~id:entry.id ~event_type:"pending" exn
 
 let record_pending (entry : pending_approval) =
   Log.Keeper.info
@@ -774,7 +790,9 @@ let resolve_entry ?base_path (entry : pending_approval) (decision : decision) =
        ])
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | _ -> ()
+  | exn ->
+      record_queue_failure ~keeper_name:entry.keeper_name
+        ~site:"broadcast_resolved" ~id:entry.id ~event_type:"resolved" exn
 
 let pending_entry_matches (entry : pending_approval)
     ~keeper_name ~tool_name ~action_key ~input_hash

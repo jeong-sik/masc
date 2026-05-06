@@ -106,6 +106,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
          ) in
          let _ =
            broadcast config ~from_agent:nickname
+             ~msg_type:"lifecycle_rejoin"
              ~content:(Printf.sprintf "👋 %s rejoined the namespace" nickname)
          in
          log_event config (`Assoc [
@@ -175,6 +176,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
   (* Broadcast join *)
   let _ =
     broadcast config ~from_agent:nickname
+      ~msg_type:"lifecycle_join"
       ~content:(Printf.sprintf "👋 %s joined the namespace" nickname)
   in
 
@@ -241,6 +243,7 @@ let leave config ~agent_name =
 
     let _ =
       broadcast config ~from_agent:"system"
+        ~msg_type:"lifecycle_leave"
         ~content:(Printf.sprintf "👋 %s left the namespace" actual_name)
     in
 

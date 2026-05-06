@@ -73,9 +73,9 @@ let user_timeout_max_sec = env_float "MASC_KEEPER_USER_TIMEOUT_MAX_SEC" 180.0
    sub-network-latency timeout without masking genuine hangs. *)
 let gh_min_timeout_sec = 15.0
 
-(* Ceiling for lightweight git metadata commands (rev-parse, log --oneline).
-   These are local disk ops that should complete in <1s; 5s is generous
-   without masking genuine repository corruption or NFS hangs. *)
+(* Public shell metadata timeout used by git-status helpers. The playground
+   repo-cache writer keeps its own copy in the lower-level coord module so
+   Coord_worktree can update the same cache without depending on this file. *)
 let git_meta_timeout_sec = env_float "MASC_KEEPER_GIT_META_TIMEOUT_SEC" 5.0
 
 let clamp_shell_timeout ?(min_sec = 1.0) ~default args =
@@ -374,55 +374,8 @@ let shell_command_available name =
 let update_playground_repo_cache
       ~(playground_dir : string) ~(repo_name : string) ~(repo_path : string)
       ~(action : string) ~(shallow : bool) : unit =
-  try
-    let branch =
-      let st, s = Process_eio.run_argv_with_status ~timeout_sec:git_meta_timeout_sec
-        [ "git"; "-C"; repo_path; "rev-parse"; "--abbrev-ref"; "HEAD" ] in
-      if st = Unix.WEXITED 0 then String.trim s else "unknown"
-    in
-    let commit =
-      let st, s = Process_eio.run_argv_with_status ~timeout_sec:git_meta_timeout_sec
-        [ "git"; "-C"; repo_path; "log"; "--oneline"; "-1" ] in
-      if st = Unix.WEXITED 0 then String.trim s else ""
-    in
-    let ts = Printf.sprintf "%.0f" (Unix.gettimeofday ()) in
-    let entry = `Assoc [
-      "name", `String repo_name;
-      "branch", `String branch;
-      "latest_commit", `String commit;
-      "shallow", `Bool shallow;
-      "last_action", `String action;
-      "updated_at", `String ts;
-    ] in
-    let cache_path = Filename.concat playground_dir ".playground_state.json" in
-    let existing =
-      try
-        let json = Yojson.Safe.from_file cache_path in
-        (match Yojson.Safe.Util.member "repos" json with
-         | `List repos -> repos
-         | _ -> [])
-      with Sys_error _ | Yojson.Json_error _ -> []
-    in
-    let updated =
-      entry :: List.filter (fun r ->
-        match Yojson.Safe.Util.member "name" r with
-        | `String n -> n <> repo_name
-        | _ -> true) existing
-    in
-    let json = `Assoc [
-      "repos", `List updated;
-      "last_updated", `String ts;
-    ] in
-    (match Fs_compat.save_file_atomic cache_path
-       (Yojson.Safe.pretty_to_string json ^ "\n") with
-     | Ok () -> ()
-     | Error e ->
-         Logs.warn (fun f -> f "playground cache save failed: %s" e))
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    Logs.warn (fun f -> f "playground cache update failed: %s"
-      (Printexc.to_string exn))
+  Playground_repo_cache.update ~playground_dir ~repo_name ~repo_path ~action
+    ~shallow
 
 let resolve_keeper_shell_read_cwd
       ~(config : Coord.config)

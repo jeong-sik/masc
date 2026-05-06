@@ -45,6 +45,10 @@ let test_all_tool_names_contains_approval_get () =
   check bool "masc_approval_get registered" true
     (List.mem "masc_approval_get" (Config.all_tool_names ()))
 
+let test_all_tool_names_contains_approval_pending () =
+  check bool "masc_approval_pending registered" true
+    (List.mem "masc_approval_pending" (Config.all_tool_names ()))
+
 let test_shard_base_tools_registered_for_help () =
   List.iter
     (fun (tool : Masc_domain.tool_schema) ->
@@ -61,6 +65,9 @@ let test_shard_base_tools_registered_for_help () =
     Tool_shard.base_tools
 
 let test_approval_get_requires_admin_permission () =
+  check bool "approval_pending is keeper-safe read" true
+    (Auth.permission_for_tool "masc_approval_pending"
+     = Some Masc_domain.CanReadState);
   check bool "approval_get admin-only" true
     (Auth.permission_for_tool "masc_approval_get" = Some Masc_domain.CanAdmin);
   check bool "approval_resolve admin-only" true
@@ -99,6 +106,8 @@ let () =
             test_all_tool_names_contains_pause;
           test_case "all_tool_names contains approval_get" `Quick
             test_all_tool_names_contains_approval_get;
+          test_case "all_tool_names contains approval_pending" `Quick
+            test_all_tool_names_contains_approval_pending;
           test_case "shard base tools registered for help" `Quick
             test_shard_base_tools_registered_for_help;
           test_case "approval get requires admin permission" `Quick

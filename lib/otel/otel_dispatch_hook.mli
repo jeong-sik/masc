@@ -16,6 +16,18 @@
 
     @since 2.103.0 *)
 
+val tool_span_attrs : Tool_result.t -> Opentelemetry.key_value list
+(** Build the full tool-span payload used by the post-hook. Exposed so tests can
+    pin the legacy + GenAI dual-emission contract without installing a collector. *)
+
+val with_test_span_emitter :
+  enabled:bool ->
+  emit_span:(name:string -> attrs:Opentelemetry.key_value list -> unit) ->
+  (unit -> 'a) ->
+  'a
+(** Temporarily override OTel enablement and span emission for focused
+    post-hook tests. Restores the previous emitter after [f] returns/raises. *)
+
 val install : unit -> unit
 (** Register {!on_tool_result} as a [Tool_dispatch] post-hook.
     Idempotent at the call site (calling twice would register the

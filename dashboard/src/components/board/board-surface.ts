@@ -16,8 +16,11 @@ import { CursorPagination } from '../common/pagination'
 import { stripStateBlocks } from '../../keeper-message'
 import { navigate, navigateToPost, route } from '../../router'
 import { registerBoardHearthsRefresh } from '../../sse-store'
+import { MessageRoomTimeline } from './message-room-timeline'
+import { MentionInbox } from './mention-inbox'
 import { PostDetail } from './post-detail'
 import { ReactionBar } from './reaction-bar'
+import { StateBlockMessages } from './state-block-messages'
 import {
   boardActorAvatarKey,
   boardActorDisplayName,
@@ -698,6 +701,7 @@ export function BoardSurface() {
   const grouped = splitVisiblePosts(filteredPosts)
   const posts = grouped.groups.flatMap(g => g.posts)
   const hint = filterHint(grouped)
+  const focus = route.value.params.focus ?? null
   const postId = route.value.params.post ?? null
   const post = postId
     ? posts.find(row => row.id === postId) ?? (detailPostId.value === postId ? detailPost.value : null)
@@ -725,6 +729,33 @@ export function BoardSurface() {
               : html`<${EmptyState} message="글을 찾지 못했습니다" compact />`}
           </div>
         `
+  }
+
+  if (focus === 'mention-inbox') {
+    return html`
+      <div>
+        <${BoardSummary} />
+        <${MentionInbox} />
+      </div>
+    `
+  }
+
+  if (focus === 'messages-room') {
+    return html`
+      <div>
+        <${BoardSummary} />
+        <${MessageRoomTimeline} />
+      </div>
+    `
+  }
+
+  if (focus === 'state-block') {
+    return html`
+      <div>
+        <${BoardSummary} />
+        <${StateBlockMessages} />
+      </div>
+    `
   }
 
   return html`

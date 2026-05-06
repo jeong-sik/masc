@@ -1037,6 +1037,35 @@ let test_memory_search_bank_empty () =
     let match_count = Yojson.Safe.Util.(json |> member "match_count" |> to_int) in
     check int "match_count is 0" 0 match_count)
 
+let test_memory_search_decision_log_failure_is_observable () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir_r dir) (fun () ->
+    let config = make_test_room_config dir in
+    let keeper_name = "memory-search-log-failure" in
+    let meta = keeper_meta ~name:keeper_name ~mention_targets:[keeper_name] () in
+    Keeper_types.mkdir_p (Keeper_types.keeper_decision_log_path config keeper_name);
+    let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
+    let before =
+      Masc_mcp.Prometheus.metric_value_or_zero
+        Masc_mcp.Prometheus.metric_keeper_decision_audit_flush_failures
+        ~labels:[("keeper", keeper_name)]
+        ()
+    in
+    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work ~exec_cache:None
+      ~name:"keeper_memory_search"
+      ~input:(`Assoc [ ("query", `String "anything") ])
+      () in
+    let after =
+      Masc_mcp.Prometheus.metric_value_or_zero
+        Masc_mcp.Prometheus.metric_keeper_decision_audit_flush_failures
+        ~labels:[("keeper", keeper_name)]
+        ()
+    in
+    let json = Yojson.Safe.from_string result in
+    let no_match = Yojson.Safe.Util.(json |> member "no_match" |> to_bool) in
+    check bool "memory search still returns result" true no_match;
+    check bool "decision-log append failure increments counter" true (after > before))
+
 (** Test: query with no matching text returns no_match: true *)
 let test_memory_search_bank_no_match () =
   let dir = test_tmpdir () in
@@ -1288,6 +1317,7 @@ let memory_bank_test_row ~kind ~trace_id ~text ~priority ~idx =
 let test_compaction_records_consolidation_metrics () =
   with_env "MASC_KEEPER_MEMORY_MAX_NOTES" "40" @@ fun () ->
   with_env "MASC_KEEPER_MEMORY_MAX_LENGTH" "4096" @@ fun () ->
+  with_env "MASC_KEEPER_MEMORY_COMPACT_TRIGGER_BYTES" "60000" @@ fun () ->
   let dir = test_tmpdir () in
   Fun.protect ~finally:(fun () -> cleanup_tmpdir_recursive dir) (fun () ->
     let keeper = "metric-memory-keeper" in
@@ -1365,7 +1395,11 @@ let test_compaction_records_consolidation_metrics () =
     let compaction =
       Keeper_memory_bank.compact_memory_bank_if_needed config meta
     in
-    check bool "compaction ran" true compaction.performed;
+    let compaction_reason =
+      Option.value ~default:"none" compaction.reason
+    in
+    check bool (Printf.sprintf "compaction ran (%s)" compaction_reason)
+      true compaction.performed;
     check (float 0.001) "progress consolidation generated"
       (generated_progress_before +. 1.0)
       (memory_metric_value
@@ -1525,6 +1559,8 @@ let () =
             test_memory_search_bank_prefers_long_term_over_stale_short_term;
           test_case "empty bank returns no_match" `Quick
             test_memory_search_bank_empty;
+          test_case "decision log append failure is observable" `Quick
+            test_memory_search_decision_log_failure_is_observable;
           test_case "no matching query returns no_match" `Quick
             test_memory_search_bank_no_match;
           test_case "source=history uses legacy search" `Quick

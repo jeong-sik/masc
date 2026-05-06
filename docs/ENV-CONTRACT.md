@@ -61,7 +61,7 @@ should be treated as restart-required.
 | --- | --- | --- |
 | Runtime root and config roots | `MASC_BASE_PATH`, `MASC_CONFIG_DIR`, `MASC_PERSONAS_DIR`, `HOME` | `Config_dir_resolver` caches the resolved root for the life of the process |
 | Server bind and socket topology | `MASC_HOST`, `MASC_HTTP_PORT`, `MASC_GRPC_PORT`, `MASC_WS_PORT`, `MASC_GRPC_ENABLED`, `MASC_WS_ENABLED`, `MASC_WEBRTC_ENABLED` | listeners and advertised base URLs are fixed during server startup |
-| Backend/bootstrap wiring | `MASC_STORAGE_TYPE`, `MASC_POSTGRES_URL`, `MASC_PG_POOL_SIZE`, `MASC_STARTUP_WATCHDOG_SEC` | boot-time backend wiring and watchdog setup |
+| Backend/bootstrap wiring | `MASC_STORAGE_TYPE`, `MASC_STARTUP_WATCHDOG_SEC`; retired/ignored: `MASC_POSTGRES_URL`, `MASC_PG_POOL_SIZE` | boot-time filesystem storage enforcement and watchdog setup |
 | Startup-only TOML seeding | every `MASC_KEEPER_*` value sourced from `keeper_runtime.toml` | TOML is loaded once and injected into the process env during boot |
 | Startup-loaded policy | tool policy related env plus `tool_policy.toml`-driven behavior | presets are loaded once at startup |
 

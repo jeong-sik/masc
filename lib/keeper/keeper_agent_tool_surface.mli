@@ -67,6 +67,7 @@ type computed_tool_surface =
 
 (** Affordances that influence per-turn tool gating. *)
 type turn_affordance =
+  | Board_curation
   | Board_post_or_comment
   | Message_sweep
   | Reply_in_room
@@ -87,6 +88,10 @@ val turn_affordances_require_tool_gate : string list -> bool
 (** Tools that satisfy a gated affordance (used by
     [turn_affordances_require_tool_gate_with_allowed]). *)
 val tools_for_gated_affordance : turn_affordance -> string list
+
+(** Specific tools that should be force-included/preferred for an
+    affordance, when the keeper policy exposes them. *)
+val preferred_tool_names_for_turn_affordances : string list -> string list
 
 (** Like [turn_affordances_require_tool_gate] but only fires when at
     least one of the gating affordance's tools is in

@@ -439,6 +439,70 @@ let append_comment (c : comment) =
     rotate_if_needed path
   with Sys_error msg -> record_persist_error ~where:"append_comment" msg
 
+let sub_board_access_to_string = function
+  | Open -> "open"
+  | Members_only -> "members_only"
+  | Owner_only -> "owner_only"
+
+let sub_board_access_of_string_opt = function
+  | "open" -> Some Open
+  | "members_only" -> Some Members_only
+  | "owner_only" -> Some Owner_only
+  | _ -> None
+
+let sub_board_post_counts_unlocked store =
+  let counts = Hashtbl.create 64 in
+  Hashtbl.iter
+    (fun _ (p : post) ->
+       match p.hearth with
+       | None -> ()
+       | Some slug ->
+           let count = Hashtbl.find_opt counts slug |> Option.value ~default:0 in
+           Hashtbl.replace counts slug (count + 1))
+    store.posts;
+  counts
+
+let sub_board_post_count_from_counts counts slug =
+  Hashtbl.find_opt counts slug |> Option.value ~default:0
+
+let sub_board_with_post_count_unlocked store (sb : sub_board) =
+  let counts = sub_board_post_counts_unlocked store in
+  { sb with post_count = sub_board_post_count_from_counts counts sb.slug }
+
+let sub_board_with_post_count counts (sb : sub_board) =
+  { sb with post_count = sub_board_post_count_from_counts counts sb.slug }
+
+let sub_board_author_allowed (sb : sub_board) ~author_id =
+  let author = Agent_id.to_string author_id in
+  let owner = Agent_id.to_string sb.owner in
+  match sb.access with
+  | Open -> true
+  | Owner_only -> String.equal author owner
+  | Members_only ->
+      String.equal author owner
+      || List.exists
+           (fun member_id -> String.equal author (Agent_id.to_string member_id))
+           sb.members
+
+let validate_sub_board_post_policy_unlocked store ~author_id ~hearth =
+  match hearth with
+  | None -> Ok ()
+  | Some slug ->
+      (match Hashtbl.find_opt store.sub_boards_by_slug slug with
+       | None -> Ok ()
+       | Some id ->
+           (match Hashtbl.find_opt store.sub_boards id with
+            | None -> Ok ()
+            | Some sb when sub_board_author_allowed sb ~author_id -> Ok ()
+            | Some sb ->
+                let author = Agent_id.to_string author_id in
+                let access = sub_board_access_to_string sb.access in
+                Error
+                  (Validation_error
+                     (Printf.sprintf
+                        "Sub-board %S is %s; %s cannot post"
+                        sb.slug access author))))
+
 (** {1 Post Operations} *)
 
 let create_post store ~author ~content ?title ?body ~post_kind ?meta_json
@@ -481,34 +545,39 @@ let create_post store ~author ~content ?title ?body ~post_kind ?meta_json
 
   let board_result =
     with_lock store (fun () ->
-      (* Check capacity *)
-      if !(store.post_count) >= Limits.max_posts then
-        Error (Capacity_exceeded { current = !(store.post_count); max = Limits.max_posts })
-      else begin
-        let now = Time_compat.now () in
-        let post = {
-          id = Post_id.generate ();
-          author = author_id;
-          title = normalized_title;
-          body = normalized_body;
-          content = normalized_body;
-          post_kind = normalized_kind;
-          meta_json = normalized_meta;
-          visibility;
-          created_at = now;
-          updated_at = now;  (* Initially same as created_at *)
-          expires_at;
-          votes_up = 0;
-          votes_down = 0;
-          reply_count = 0;
-          hearth;
-          thread_id;
-        } in
-        Hashtbl.add store.posts (Post_id.to_string post.id) post;
-        Stdlib.incr store.post_count;
-        invalidate_post_caches store;
-        Ok post
-      end)
+      match validate_sub_board_post_policy_unlocked store ~author_id ~hearth with
+      | Error e -> Error e
+      | Ok () ->
+          (* Check capacity *)
+          if !(store.post_count) >= Limits.max_posts then
+            Error
+              (Capacity_exceeded
+                 { current = !(store.post_count); max = Limits.max_posts })
+          else begin
+            let now = Time_compat.now () in
+            let post = {
+              id = Post_id.generate ();
+              author = author_id;
+              title = normalized_title;
+              body = normalized_body;
+              content = normalized_body;
+              post_kind = normalized_kind;
+              meta_json = normalized_meta;
+              visibility;
+              created_at = now;
+              updated_at = now;  (* Initially same as created_at *)
+              expires_at;
+              votes_up = 0;
+              votes_down = 0;
+              reply_count = 0;
+              hearth;
+              thread_id;
+            } in
+            Hashtbl.add store.posts (Post_id.to_string post.id) post;
+            Stdlib.incr store.post_count;
+            invalidate_post_caches store;
+            Ok post
+          end)
   in
   (* Agent Economy: earn credits for board post.  Moved OUTSIDE
      [with_lock] because [Agent_economy.earn] does its own disk I/O
@@ -1022,17 +1091,6 @@ let toggle_reaction store ~target_type ~target_id ~user_id ~emoji :
 
 (** {1 SubBoard Operations} *)
 
-let sub_board_access_to_string = function
-  | Open -> "open"
-  | Members_only -> "members_only"
-  | Owner_only -> "owner_only"
-
-let sub_board_access_of_string_opt = function
-  | "open" -> Some Open
-  | "members_only" -> Some Members_only
-  | "owner_only" -> Some Owner_only
-  | _ -> None
-
 let sub_board_to_yojson (sb : sub_board) : Yojson.Safe.t =
   `Assoc [
     ("id", `String (Sub_board_id.to_string sb.id));
@@ -1040,10 +1098,40 @@ let sub_board_to_yojson (sb : sub_board) : Yojson.Safe.t =
     ("name", `String sb.name);
     ("description", `String sb.description);
     ("owner", `String (Agent_id.to_string sb.owner));
+    ("members",
+     `List (List.map (fun id -> `String (Agent_id.to_string id)) sb.members));
     ("access", `String (sub_board_access_to_string sb.access));
     ("created_at", `Float sb.created_at);
     ("post_count", `Int sb.post_count);
   ]
+
+let dedupe_agent_ids ids =
+  let rec loop seen acc = function
+    | [] -> List.rev acc
+    | id :: rest ->
+        let name = Agent_id.to_string id in
+        if List.mem name seen then loop seen acc rest
+        else loop (name :: seen) (id :: acc) rest
+  in
+  loop [] [] ids
+
+let parse_sub_board_members ~owner members =
+  let rec loop acc = function
+    | [] -> Ok (dedupe_agent_ids (owner :: List.rev acc))
+    | member_name :: rest ->
+        (match Agent_id.of_string member_name with
+         | Ok member_id -> loop (member_id :: acc) rest
+         | Error e -> Error e)
+  in
+  loop [] members
+
+let parse_sub_board_members_lenient ~owner members =
+  members
+  |> List.filter_map (fun member_name ->
+       match Agent_id.of_string member_name with
+       | Ok member_id -> Some member_id
+       | Error _ -> None)
+  |> fun parsed -> dedupe_agent_ids (owner :: parsed)
 
 let sub_board_of_yojson (json : Yojson.Safe.t) : sub_board option =
   let open Safe_ops in
@@ -1057,10 +1145,14 @@ let sub_board_of_yojson (json : Yojson.Safe.t) : sub_board option =
       let access_s = json_string_opt "access" json |> Option.value ~default:"open" in
       let created_at = json_float_opt "created_at" json |> Option.value ~default:0.0 in
       let post_count = json_int_opt "post_count" json |> Option.value ~default:0 in
+      let member_names = json_string_list "members" json in
       (match Sub_board_id.of_string id_s, Agent_id.of_string owner_s,
              sub_board_access_of_string_opt access_s with
        | Ok id, Ok owner, Some access when slug <> "" ->
-           Some { id; slug; name; description; owner; access; created_at; post_count }
+           let members = parse_sub_board_members_lenient ~owner member_names in
+           Some
+             { id; slug; name; description; owner; members; access; created_at;
+               post_count }
        | _ -> None)
   | _ -> None
 
@@ -1088,7 +1180,7 @@ let append_sub_board (sb : sub_board) =
 let valid_slug_pattern = Re.Pcre.re {|^[a-z0-9][a-z0-9_-]*$|} |> Re.compile
 
 let create_sub_board store ~slug ~name ~description ~owner
-    ?(access = Open) () : (sub_board, board_error) Result.t =
+    ?(members = []) ?(access = Open) () : (sub_board, board_error) Result.t =
   let slug = String.lowercase_ascii (String.trim slug) in
   if String.length slug < 1 || String.length slug > 64
      || not (Re.execp valid_slug_pattern slug) then
@@ -1098,49 +1190,59 @@ let create_sub_board store ~slug ~name ~description ~owner
     match Agent_id.of_string owner with
     | Error e -> Error e
     | Ok owner_id ->
-        with_lock store (fun () ->
-          if Hashtbl.mem store.sub_boards_by_slug slug then
-            Error (Already_exists
-              (Printf.sprintf "Sub-board slug %S already exists" slug))
-          else begin
-            let current = Hashtbl.length store.sub_boards in
-            if current >= Limits.max_sub_boards then
-              Error (Capacity_exceeded { current; max = Limits.max_sub_boards })
-            else begin
-              let id = Sub_board_id.generate () in
-              let sb = {
-                id;
-                slug;
-                name = String.trim name;
-                description = String.trim description;
-                owner = owner_id;
-                access;
-                created_at = Time_compat.now ();
-                post_count = 0;
-              } in
-              Hashtbl.replace store.sub_boards (Sub_board_id.to_string id) sb;
-              Hashtbl.replace store.sub_boards_by_slug slug (Sub_board_id.to_string id);
-              append_sub_board sb;
-              Ok sb
-            end
-          end)
+        match parse_sub_board_members ~owner:owner_id members with
+        | Error e -> Error e
+        | Ok members ->
+            with_lock store (fun () ->
+              if Hashtbl.mem store.sub_boards_by_slug slug then
+                Error
+                  (Already_exists
+                     (Printf.sprintf "Sub-board slug %S already exists" slug))
+              else begin
+                let current = Hashtbl.length store.sub_boards in
+                if current >= Limits.max_sub_boards then
+                  Error
+                    (Capacity_exceeded { current; max = Limits.max_sub_boards })
+                else begin
+                  let id = Sub_board_id.generate () in
+                  let sb = {
+                    id;
+                    slug;
+                    name = String.trim name;
+                    description = String.trim description;
+                    owner = owner_id;
+                    members;
+                    access;
+                    created_at = Time_compat.now ();
+                    post_count = 0;
+                  } in
+                  Hashtbl.replace store.sub_boards (Sub_board_id.to_string id) sb;
+                  Hashtbl.replace store.sub_boards_by_slug slug
+                    (Sub_board_id.to_string id);
+                  append_sub_board sb;
+                  Ok sb
+                end
+              end)
 
 let get_sub_board store ~sub_board_id : (sub_board, board_error) Result.t =
   with_lock store (fun () ->
     match Hashtbl.find_opt store.sub_boards sub_board_id with
-    | Some sb -> Ok sb
+    | Some sb -> Ok (sub_board_with_post_count_unlocked store sb)
     | None ->
         (* fallback: try slug *)
         match Hashtbl.find_opt store.sub_boards_by_slug sub_board_id with
         | Some id ->
             (match Hashtbl.find_opt store.sub_boards id with
-             | Some sb -> Ok sb
+             | Some sb -> Ok (sub_board_with_post_count_unlocked store sb)
              | None -> Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id)))
         | None -> Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id)))
 
 let list_sub_boards store : sub_board list =
   with_lock store (fun () ->
-    Hashtbl.fold (fun _ sb acc -> sb :: acc) store.sub_boards []
+    let counts = sub_board_post_counts_unlocked store in
+    Hashtbl.fold
+      (fun _ sb acc -> sub_board_with_post_count counts sb :: acc)
+      store.sub_boards []
     |> List.sort (fun (a : sub_board) (b : sub_board) ->
         compare a.created_at b.created_at))
 

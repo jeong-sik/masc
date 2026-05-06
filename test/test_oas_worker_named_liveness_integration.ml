@@ -12,9 +12,10 @@
 
     2. The observer module is reachable through the
        [Cascade_attempt_liveness_observer.{create, wrap_on_event,
-       finalize}] surface that try_provider depends on, with the
-       expected mode contract (Off pass-through; Observe wraps; Enforce
-       wraps + raises). Same surface, exercised end-to-end.
+       register_attempt_switch, finalize}] surface that try_provider
+       depends on, with the expected mode contract (Off pass-through;
+       Observe wraps; Enforce wraps + scopes cancellation to the provider
+       attempt switch even when no clock is available).
 
     3. End-to-end finalize emits the observed_total counter with the
        outcome label that try_provider's `finalize_liveness ()` call
@@ -116,6 +117,36 @@ let test_e2e_off_no_observed_total () =
       Alcotest.(check (float 1e-6))
         "Off finalize emits no observed counter" before after)
 
+let test_enforce_registered_switch_kills_attempt_without_tick_clock () =
+  let cascade = "integ_enforce_cascade" in
+  let provider = "integ_enforce_provider" in
+  let raised = ref None in
+  with_env (Some "enforce") (fun () ->
+      Eio_main.run (fun _env ->
+          try
+            Eio.Switch.run (fun attempt_sw ->
+                let mode = Cfg.current_mode () in
+                let budget = Cfg.budget_for_label provider in
+                let obs =
+                  Obs.create ~mode ~budget ~cascade_label:cascade
+                    ~provider_label:provider ~started_at:0.0
+                in
+                Obs.register_attempt_switch obs ~sw:attempt_sw;
+                let wrapped = Obs.wrap_on_event obs None in
+                (match wrapped with
+                 | Some f -> f (Agent_sdk.Types.SSEError "wire boom")
+                 | None -> Alcotest.fail "Enforce should wrap");
+                Eio.Fiber.yield ())
+          with
+          | Obs.Liveness_kill failure ->
+              raised := Some (Cascade_attempt_liveness.failure_kind_label failure)
+          | exn ->
+              Alcotest.failf "unexpected exception: %s" (Printexc.to_string exn)));
+  Alcotest.(check (option string))
+    "registered attempt switch receives enforce kill without tick fiber"
+    (Some "provider_error")
+    !raised
+
 let () =
   Alcotest.run "oas_worker_named_liveness_integration"
     [
@@ -132,5 +163,11 @@ let () =
             `Quick test_e2e_observe_finalize_emits_observed_total;
           Alcotest.test_case "Off e2e emits nothing" `Quick
             test_e2e_off_no_observed_total;
+        ] );
+      ( "source contract",
+        [
+          Alcotest.test_case
+            "enforce kill is scoped without clock tick fiber" `Quick
+            test_enforce_registered_switch_kills_attempt_without_tick_clock;
         ] );
     ]

@@ -20,6 +20,7 @@ module Float = Stdlib.Float
 type t = {
   success : bool;
   data : Yojson.Safe.t;
+  legacy_message : string;
   tool_name : string;
   duration_ms : float;
 }
@@ -66,7 +67,7 @@ let wrap ~tool_name ~start_time (success, message) =
     | Some json -> json
     | None -> `String message
   in
-  { success; data; tool_name; duration_ms }
+  { success; data; legacy_message = message; tool_name; duration_ms }
 
 let to_json t =
   `Assoc
@@ -76,9 +77,6 @@ let to_json t =
     ; ("duration_ms", `Float t.duration_ms)
     ]
 
-let message t =
-  match t.data with
-  | `String s -> s
-  | json -> Yojson.Safe.to_string json
+let message t = t.legacy_message
 
 let to_legacy_compat t = (t.success, message t)

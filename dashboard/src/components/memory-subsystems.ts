@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { signal, useSignal } from '@preact/signals'
 import { useEffect, useMemo } from 'preact/hooks'
 import { LoadingState } from './common/feedback-state'
+import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
 import { MermaidGraph } from './common/mermaid-graph'
 import { Select } from './common/select'
@@ -11,6 +12,7 @@ import {
   type MemorySubsystemsResponse,
   type MemorySubsystemsSynapse,
   type MemorySubsystemsEpisode,
+  type MemorySubsystemsMemoryEntry,
   type KeeperDecision,
 } from '../api/dashboard'
 import { formatTimeAgo } from '../lib/format-time'
@@ -21,6 +23,8 @@ import { openAgentDetail } from './agent-detail-state'
 import { ringFocusClasses } from './common/ring'
 
 const REFRESH_MS = 30_000
+
+export type MemorySubsystemsFocus = 'overview' | 'entries' | 'episodes'
 
 export const ARCHITECTURE_FLOW = `graph LR
     subgraph Keeper["키퍼 턴"]
@@ -161,6 +165,14 @@ export function filterSynapses(
     if (s.to_agent.toLowerCase().includes(needle)) return true
     return false
   })
+}
+
+export function filterMemoryEntries(
+  entries: readonly MemorySubsystemsMemoryEntry[],
+  kind: string,
+): readonly MemorySubsystemsMemoryEntry[] {
+  if (kind === '' || kind === 'all') return entries
+  return entries.filter(entry => entry.kind === kind)
 }
 
 function HebbianMatrix({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
@@ -464,12 +476,109 @@ function EpisodeCard({ ep }: { ep: MemorySubsystemsEpisode }) {
   `
 }
 
-export function MemorySubsystems() {
+function MemoryEntryRow({ entry }: { readonly entry: MemorySubsystemsMemoryEntry }) {
+  return html`
+    <div
+      class="grid grid-cols-[5.5rem_8rem_6rem_minmax(0,1fr)_3rem] items-start gap-2 border-b border-[var(--color-border-default)] px-2 py-2 text-xs last:border-b-0 max-md:grid-cols-[4.5rem_minmax(0,1fr)]"
+      role="listitem"
+      aria-label=${`${entry.keeper} · ${entry.kind} · priority ${entry.priority} · ${entry.text}`}
+    >
+      <span class="font-mono text-[var(--color-fg-disabled)] tabular-nums">
+        ${formatTimeAgo(entry.ts_unix * 1000)}
+      </span>
+      <span class="truncate font-mono text-[var(--color-fg-muted)]" title=${entry.keeper}>
+        ${entry.keeper}
+      </span>
+      <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 text-center font-mono text-[var(--color-accent-fg)]">
+        ${entry.kind}
+      </span>
+      <span class="min-w-0 text-[var(--color-fg-primary)] max-md:col-span-2">
+        ${entry.text}
+      </span>
+      <span class="text-right font-mono text-[var(--color-fg-disabled)] max-md:hidden">
+        p${entry.priority}
+      </span>
+    </div>
+  `
+}
+
+function MemoryEntriesPanel({
+  entries,
+  visibleEntries,
+  total,
+  filtered,
+  knownKinds,
+  activeKind,
+  onKindChange,
+  focused,
+}: {
+  readonly entries: readonly MemorySubsystemsMemoryEntry[]
+  readonly visibleEntries: readonly MemorySubsystemsMemoryEntry[]
+  readonly total: number
+  readonly filtered: number
+  readonly knownKinds: readonly string[]
+  readonly activeKind: string
+  readonly onKindChange: (kind: string) => void
+  readonly focused: boolean
+}) {
+  const chips = [
+    { key: 'all', label: 'all', count: entries.length },
+    ...knownKinds.map(kind => ({
+      key: kind,
+      label: kind,
+      count: entries.filter(entry => entry.kind === kind).length,
+    })),
+  ]
+
+  return html`
+    <section
+      data-testid="memory-entries"
+      aria-label=${`Memory entries · ${visibleEntries.length} rows`}
+      class=${`flex flex-col gap-2 ${focused ? 'rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3' : ''}`}
+    >
+      <div class="flex flex-wrap items-center gap-2">
+        <h3 class="text-base font-semibold text-[var(--color-fg-muted)]">Memory entries</h3>
+        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">
+          memory.jsonl
+        </span>
+        <span class="ml-auto text-xs text-[var(--color-fg-muted)]">
+          total ${total} · filtered ${filtered} · shown ${visibleEntries.length}
+        </span>
+      </div>
+      <${FilterChips}
+        chips=${chips}
+        value=${activeKind}
+        onChange=${onKindChange}
+        size="sm"
+        tone="accent"
+      />
+      ${
+        visibleEntries.length === 0
+          ? html`<div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4 text-center text-sm text-[var(--color-fg-muted)]">
+              memory entries 없음
+            </div>`
+          : html`
+              <div
+                class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)]"
+                role="list"
+                aria-label=${`${visibleEntries.length} memory entries`}
+              >
+                ${visibleEntries.map(entry => html`<${MemoryEntryRow} entry=${entry} />`)}
+              </div>
+            `
+      }
+    </section>
+  `
+}
+
+export function MemorySubsystems({ focus = 'overview' }: { readonly focus?: MemorySubsystemsFocus }) {
   const resource = useManagedAsyncResource<MemorySubsystemsResponse>(null)
+  const includeMemoryEntries = focus === 'entries'
 
   const keeperFilter = useSignal<string>('')
   const outcomeFilter = useSignal<string>('')
   const searchQuery = useSignal<string>('')
+  const memoryKindFilter = useSignal<string>('all')
   // Client-side substring filter for the Hebbian synapses table. Independent
   // from the episodes filter bar above — the synapses table is N² in fleet
   // size and needs its own needle.
@@ -483,6 +592,7 @@ export function MemorySubsystems() {
           keeper: keeperFilter.value || undefined,
           outcome: outcomeFilter.value || undefined,
           q: searchQuery.value || undefined,
+          includeMemoryEntries,
           signal,
         }),
       )
@@ -493,7 +603,7 @@ export function MemorySubsystems() {
       resource.cancel()
       cleanup()
     }
-  }, [keeperFilter.value, outcomeFilter.value, searchQuery.value, resource])
+  }, [keeperFilter.value, outcomeFilter.value, searchQuery.value, includeMemoryEntries, resource])
 
   const { loading, error, data } = resource.state.value
   if (loading && !data) return html`<${LoadingState} label="기억 서브시스템 로드 중..." />`
@@ -511,8 +621,16 @@ export function MemorySubsystems() {
   const episodes = data?.episodes?.items ?? []
   const totalEpisodes = data?.episodes?.total ?? 0
   const filteredTotal = data?.episodes?.filtered ?? episodes.length
+  const memoryEntries = data?.memory_entries?.items ?? []
+  const memoryEntryTotal = data?.memory_entries?.total ?? memoryEntries.length
+  const memoryEntryFiltered = data?.memory_entries?.filtered ?? memoryEntries.length
   const knownKeepers = data?.filters?.keepers ?? []
   const knownOutcomes = data?.filters?.outcomes ?? ['success', 'partial', 'failure']
+  const knownMemoryKinds = data?.filters?.memory_kinds ?? Array.from(new Set(memoryEntries.map(entry => entry.kind))).sort()
+  const visibleMemoryEntries = useMemo(
+    () => filterMemoryEntries(memoryEntries, memoryKindFilter.value),
+    [memoryEntries, memoryKindFilter.value],
+  )
 
   const onSearchInput = (e: Event) => {
     const v = (e.target as HTMLInputElement).value
@@ -524,6 +642,7 @@ export function MemorySubsystems() {
     outcomeFilter.value = ''
     searchQuery.value = ''
     synapsePairFilter.value = null
+    memoryKindFilter.value = 'all'
   }
 
   const pairFilter = synapsePairFilter.value
@@ -543,6 +662,8 @@ export function MemorySubsystems() {
     : episodes
 
   const showArch = useSignal(false)
+  const focusEntries = focus === 'entries'
+  const showMemoryEntries = focusEntries || memoryEntries.length > 0
 
   return html`
     <div class="space-y-6">
@@ -551,6 +672,21 @@ export function MemorySubsystems() {
         institution episodes와 Hebbian graph는 여기서 보고,
         keeper checkpoint/history/memory bank는 Keeper Detail에서 확인합니다.
       </div>
+
+      ${showMemoryEntries ? html`
+        <${MemoryEntriesPanel}
+          entries=${memoryEntries}
+          visibleEntries=${visibleMemoryEntries}
+          total=${memoryEntryTotal}
+          filtered=${memoryEntryFiltered}
+          knownKinds=${knownMemoryKinds}
+          activeKind=${memoryKindFilter.value}
+          onKindChange=${(kind: string) => { memoryKindFilter.value = kind }}
+          focused=${focusEntries}
+        />
+      ` : null}
+
+      ${focusEntries ? null : html`
 
       <!-- Architecture Flow (collapsible) -->
       <section aria-label="아키텍처 데이터 흐름도">
@@ -742,6 +878,7 @@ export function MemorySubsystems() {
       </section>
 
       <${DecisionsStream} />
+      `}
 
       ${
         error

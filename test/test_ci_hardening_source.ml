@@ -27,6 +27,10 @@ let file_contains_pattern file_rel pattern =
 let file_not_contains_pattern file_rel pattern =
   not (file_contains_pattern file_rel pattern)
 
+let guarded_file_not_contains_pattern file_rel pattern =
+  Sys.file_exists (source_path file_rel)
+  && file_not_contains_pattern file_rel pattern
+
 let file_contains_line_with_patterns file_rel patterns =
   let path = source_path file_rel in
   if not (Sys.file_exists path) then false
@@ -558,6 +562,76 @@ let test_doc_truth_guard_contracts () =
     (file_contains_pattern "scripts/check-doc-truth.sh"
        "command-plane.ts         -- Command plane types")
 
+let test_storage_truth_guard_contracts () =
+  check bool "bootstrap enforces filesystem-only storage" true
+    (file_contains_pattern "lib/server/server_runtime_bootstrap.ml"
+       "filesystem-only bootstrap");
+  check bool "storage inventory names filesystem as only active backend" true
+    (file_contains_pattern "docs/BOOT-ENV-STATE-INVENTORY.md"
+       "Only `filesystem` is active");
+  check bool "storage inventory marks PG envs retired" true
+    (file_contains_pattern "docs/BOOT-ENV-STATE-INVENTORY.md"
+       "Retired PostgreSQL backend envs");
+  check bool "env contract keeps PG envs ignored" true
+    (file_contains_pattern "docs/ENV-CONTRACT.md"
+       "retired/ignored: `MASC_POSTGRES_URL`, `MASC_PG_POOL_SIZE`");
+  check bool "v2 design forbids distributed storage targets" true
+    (file_contains_pattern "docs/MASC-V2-DESIGN.md"
+       "Redis/PostgreSQL storage modes are not operator targets");
+  check bool "v2 design no longer recommends postgres mode" true
+    (file_not_contains_pattern "docs/MASC-V2-DESIGN.md"
+       "PostgreSQL Mode");
+  check bool "v2 design no longer exposes redis mode as storage option" true
+    (file_not_contains_pattern "docs/MASC-V2-DESIGN.md"
+       "Redis Mode");
+  check bool "board spec no longer advertises dual backend operation" true
+    (file_not_contains_pattern "docs/spec/11-board.md"
+       "JSONL 파일 또는 PostgreSQL 두 가지 백엔드");
+  check bool "board spec no longer documents env-based PG selection" true
+    (file_not_contains_pattern "docs/spec/11-board.md"
+       "MASC_POSTGRES_URL 존재");
+  check bool "board spec no longer depends on Board_pg" true
+    (file_not_contains_pattern "docs/spec/11-board.md" "Board_pg");
+  check bool "board spec forbids JSONL to PostgreSQL migration" true
+    (file_contains_pattern "docs/spec/11-board.md"
+       "JSONL -> PostgreSQL migration path는 지원하지 않는다");
+  check bool "memory spec no longer maps OAS bridge to Memory_pg" true
+    (file_not_contains_pattern "docs/spec/12-memory-systems.md"
+       "Memory_pg");
+  check bool "memory spec no longer says PostgreSQL is primary" true
+    (file_not_contains_pattern "docs/spec/12-memory-systems.md"
+       "PostgreSQL은 primary");
+  check bool "system overview no longer lists postgres for board state" true
+    (file_not_contains_pattern "docs/spec/01-system-overview.md"
+       "Board 게시판, session 상태");
+  check bool "system overview keeps pgvector external-only" true
+    (file_contains_pattern "docs/spec/01-system-overview.md"
+       "Current Board/session runtime state is not stored in PostgreSQL");
+  check bool "performance SLO no longer tells operators to switch to PG" true
+    (file_not_contains_pattern "docs/PERFORMANCE-SLO.md"
+       "PostgreSQL 백엔드로 전환");
+  check bool "spec index lists filesystem board backend" true
+    (file_contains_pattern "docs/spec/SPEC-INDEX.md"
+       "filesystem/JSONL backend");
+  check bool "glossary no longer describes board PG primary" true
+    (file_not_contains_pattern "docs/spec/00-glossary.md"
+       "PostgreSQL(primary)");
+  check bool "room spec no longer documents PG dual-write" true
+    (file_not_contains_pattern "docs/spec/03-room-coordination.md"
+       "dual-write");
+  check bool "server transport no longer bootstraps shared PG pool" true
+    (file_not_contains_pattern "docs/spec/09-server-transport.md"
+       "inject_shared_pg_pool");
+  check bool "dashboard spec no longer documents PostgresNative runtime" true
+    (file_not_contains_pattern "docs/spec/10-dashboard.md"
+       "PostgresNative");
+  check bool "migration targets no longer say board PostgreSQL primary" true
+    (file_not_contains_pattern "docs/spec/B-migration-targets.md"
+       "PostgreSQL (primary)");
+  check bool "implementation status no longer claims JSONL+PG backend" true
+    (file_not_contains_pattern "docs/spec/C-implementation-status.md"
+       "JSONL+PG dual backend")
+
 let test_proof_store_reader_truth_contracts () =
   check bool "proof artifact reader delegates ref resolution to OAS" true
     (file_contains_pattern "lib/proof_artifact_reader.ml"
@@ -855,6 +929,93 @@ let test_keeper_list_cache_atomic_contracts () =
     (file_not_contains_pattern "lib/tool_keeper.ml" "_keeper_list_cache.value <-");
   check bool "keeper list cache no longer mutates expiry field in place" true
     (file_not_contains_pattern "lib/tool_keeper.ml" "_keeper_list_cache.expires_at <-")
+
+let test_keeper_zombie_field_contracts () =
+  let files =
+    [
+      "lib/keeper/keeper_meta_contract.ml";
+      "lib/keeper/keeper_meta_contract.mli";
+      "lib/keeper/keeper_types.ml";
+      "lib/keeper/keeper_types.mli";
+      "lib/keeper/keeper_meta_json.ml";
+      "lib/keeper/keeper_meta_json_parse.ml";
+      "dashboard/src/types/core.ts";
+      "dashboard/src/types/dashboard-execution.ts";
+      "dashboard/src/keeper-store-normalize.ts";
+    ]
+  in
+  List.iter
+    (fun file ->
+       check bool
+         ("last_tools_used stays removed from keeper meta surface: " ^ file)
+         true
+         (guarded_file_not_contains_pattern file "last_tools_used"))
+    files;
+  check bool "per-turn tools_used remains on execution receipts" true
+    (file_contains_pattern "lib/keeper/keeper_execution_receipt.mli"
+       "tools_used : string list");
+  let module R = Masc_mcp.Keeper_execution_receipt in
+  let receipt : R.t =
+    {
+      keeper_name = "test-keeper";
+      agent_name = "test-agent";
+      trace_id = "trace-test";
+      generation = 1;
+      turn_count = Some 1;
+      current_task_id = Some "task-123";
+      goal_ids = [ "goal-123" ];
+      outcome = "ok";
+      terminal_reason_code = "turn_complete";
+      response_text_present = true;
+      model_used = Some "test-model";
+      requested_tools = [ "Read" ];
+      reported_tools = [ "Read" ];
+      observed_tools = [ "Read" ];
+      canonical_tools = [ "Read" ];
+      unexpected_tools = [];
+      tools_used = [ "Read" ];
+      tool_contract_result = "satisfied";
+      tool_surface =
+        {
+          turn_lane = "unified";
+          tool_surface_class = "post_dispatch";
+          tool_requirement = Masc_mcp.Keeper_agent_tool_surface.Required;
+          visible_tool_count = 1;
+          tool_gate_enabled = true;
+          tool_surface_fallback_used = false;
+          required_tools = [ "Read" ];
+          missing_required_tools = [];
+        };
+      sandbox_kind = "local";
+      sandbox_root = None;
+      network_mode = "offline";
+      approval_profile = None;
+      approval_profile_derived = false;
+      cascade_name = R.cascade_name_of_string "default";
+      cascade_selected_model = Some "test-model";
+      cascade_attempt_count = 1;
+      cascade_fallback_applied = false;
+      cascade_outcome = "completed";
+      degraded_retry_applied = false;
+      degraded_retry_cascade = None;
+      fallback_reason = None;
+      cascade_rotation_attempts = [];
+      stop_reason = None;
+      error_kind = None;
+      error_message = None;
+      started_at = "2026-05-06T00:00:00Z";
+      ended_at = "2026-05-06T00:00:01Z";
+    }
+  in
+  let json = R.to_json receipt in
+  check bool "execution receipt wire serializes tools_used" true
+    (match Yojson.Safe.Util.member "tools_used" json with
+     | `List [ `String "Read" ] -> true
+     | _ -> false);
+  check bool "execution receipt wire does not reintroduce last_tools_used" true
+    (match Yojson.Safe.Util.member "last_tools_used" json with
+     | `Null -> true
+     | _ -> false)
 
 let test_keeper_sandbox_credential_volume_contracts () =
   check bool "keeper sandbox documents credential projection path" true
@@ -1353,6 +1514,33 @@ let test_worktree_list_contracts () =
   check bool "worktree list stays read-only" true
     (file_contains_pattern "lib/tool_worktree.ml"
        {|let _tool_spec_read_only = [ "masc_worktree_list" ]|});
+  check bool "dashboard worktree-status SSE writes are observed" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
+       "dashboard_worktree_status_sse_write"
+    && file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
+         "Telemetry_observe.observe_or_fail");
+  check bool "dashboard worktree-status SSE close is observed" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
+       "dashboard_worktree_status_sse_close");
+  check bool "dashboard worktree-status SSE route uses observed write/close helpers" true
+    (file_contains_nearby_line_with_patterns
+       "lib/server/server_routes_http_routes_dashboard.ml"
+       ~anchor:{|/api/dashboard/worktree-status|}
+       ~patterns:[ "observe_worktree_status_sse_write_all" ]
+       ~max_lines:24
+     && file_contains_nearby_line_with_patterns
+          "lib/server/server_routes_http_routes_dashboard.ml"
+          ~anchor:{|/api/dashboard/worktree-status|}
+          ~patterns:[ "observe_worktree_status_sse_close" ]
+          ~max_lines:24);
+  check bool "dashboard worktree-status SSE writes fail fast" true
+    (file_not_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
+       "List.iter (observe_worktree_status_sse_write writer) events");
+  check bool "dashboard worktree-status SSE has no raw writer swallow" true
+    (file_not_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
+       "try Httpun.Body.Writer.write_string writer event"
+    && file_not_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
+         "try Httpun.Body.Writer.close writer with _ -> ()");
   check bool "worker oas no longer reads global net directly" true
     (file_not_contains_pattern "lib/worker_oas.ml"
        "Eio_context.get_net_opt ()");
@@ -1690,6 +1878,8 @@ let () =
            test_case "release truth contracts" `Quick test_release_truth_contracts;
            test_case "oas pin source contracts" `Quick test_oas_pin_source_contracts;
            test_case "doc truth guard contracts" `Quick test_doc_truth_guard_contracts;
+           test_case "storage truth guard contracts" `Quick
+             test_storage_truth_guard_contracts;
            test_case "proof store reader truth contracts" `Quick
              test_proof_store_reader_truth_contracts;
            test_case "keeper agent upgrade source contracts" `Quick
@@ -1702,6 +1892,8 @@ let () =
              test_keeper_direct_reply_contracts;
            test_case "keeper list cache atomic contracts" `Quick
              test_keeper_list_cache_atomic_contracts;
+           test_case "keeper zombie field contracts" `Quick
+             test_keeper_zombie_field_contracts;
            test_case "keeper sandbox credential volume contracts" `Quick
              test_keeper_sandbox_credential_volume_contracts;
            test_case "keeper docker multi-keeper isolation contracts" `Quick

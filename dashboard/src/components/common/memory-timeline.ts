@@ -7,10 +7,30 @@
 import { html } from 'htm/preact'
 import { useMemo } from 'preact/hooks'
 
+export type MemoryAccessType = 'read' | 'write' | 'search'
+export type DominantMemoryAccessType = MemoryAccessType | 'mixed'
+
 export interface TimelineEntry {
   timestamp: number
   memoryId: string
-  accessType: 'read' | 'write' | 'search'
+  accessType: MemoryAccessType
+}
+
+export interface HourlyMemoryAccess {
+  readonly hour: number
+  readonly count: number
+  readonly intensity: number
+  readonly dominantType: DominantMemoryAccessType | null
+  readonly uniqueMemoryCount: number
+  readonly typeCounts: Record<MemoryAccessType, number>
+}
+
+export interface MemoryTimelineSummary {
+  readonly totalAccesses: number
+  readonly uniqueMemoryCount: number
+  readonly peakHour: number | null
+  readonly peakCount: number
+  readonly typeCounts: Record<MemoryAccessType, number>
 }
 
 interface MemoryTimelineProps {
@@ -18,40 +38,136 @@ interface MemoryTimelineProps {
   testId?: string
 }
 
-function accessTypeColor(accessType: string): string {
+const ACCESS_TYPES: readonly MemoryAccessType[] = ['read', 'write', 'search']
+const ACCESS_TYPE_LABEL: Record<MemoryAccessType, string> = {
+  read: '읽기',
+  write: '쓰기',
+  search: '검색',
+}
+
+function emptyTypeCounts(): Record<MemoryAccessType, number> {
+  return { read: 0, write: 0, search: 0 }
+}
+
+function dominantAccessType(typeCounts: Record<MemoryAccessType, number>): DominantMemoryAccessType | null {
+  const maxCount = Math.max(...ACCESS_TYPES.map(accessType => typeCounts[accessType]))
+  if (maxCount === 0) return null
+  const winners = ACCESS_TYPES.filter(accessType => typeCounts[accessType] === maxCount)
+  return winners.length === 1 ? (winners[0] ?? null) : 'mixed'
+}
+
+export function summarizeMemoryTimeline(entries: TimelineEntry[]): MemoryTimelineSummary {
+  const typeCounts = emptyTypeCounts()
+  const memoryIds = new Set<string>()
+  const hourCounts: Record<number, number> = {}
+
+  entries.forEach((entry) => {
+    typeCounts[entry.accessType] += 1
+    memoryIds.add(entry.memoryId)
+    const hour = new Date(entry.timestamp).getHours()
+    hourCounts[hour] = (hourCounts[hour] ?? 0) + 1
+  })
+
+  const peak = Object.entries(hourCounts).reduce<{ hour: number | null; count: number }>(
+    (best, [hour, count]) => {
+      const hourNumber = Number(hour)
+      if (count > best.count) return { hour: hourNumber, count }
+      if (count === best.count && best.hour !== null && hourNumber < best.hour) {
+        return { hour: hourNumber, count }
+      }
+      return best
+    },
+    { hour: null, count: 0 },
+  )
+
+  return {
+    totalAccesses: entries.length,
+    uniqueMemoryCount: memoryIds.size,
+    peakHour: peak.hour,
+    peakCount: peak.count,
+    typeCounts,
+  }
+}
+
+export function buildMemoryTimelineHeatmap(entries: TimelineEntry[]): HourlyMemoryAccess[] {
+  const hours = Array.from({ length: 24 }, (_, i) => i)
+  const map: Record<number, { count: number; typeCounts: Record<MemoryAccessType, number>; memoryIds: Set<string> }> = {}
+
+  entries.forEach((entry) => {
+    const hour = new Date(entry.timestamp).getHours()
+    if (!map[hour]) {
+      map[hour] = { count: 0, typeCounts: emptyTypeCounts(), memoryIds: new Set() }
+    }
+    map[hour].count += 1
+    map[hour].typeCounts[entry.accessType] += 1
+    map[hour].memoryIds.add(entry.memoryId)
+  })
+
+  const max = Math.max(...Object.values(map).map((v) => v.count), 1)
+  return hours.map((hour) => {
+    const bucket = map[hour]
+    const typeCounts = bucket?.typeCounts ?? emptyTypeCounts()
+    const count = bucket?.count ?? 0
+    return {
+      hour,
+      count,
+      intensity: count / max,
+      dominantType: dominantAccessType(typeCounts),
+      uniqueMemoryCount: bucket?.memoryIds.size ?? 0,
+      typeCounts,
+    }
+  })
+}
+
+function accessTypeColor(accessType: DominantMemoryAccessType | null): string {
+  if (accessType === null) return 'var(--color-border-default)'
   return accessType === 'write'
     ? 'var(--warn-10)'
     : accessType === 'search'
       ? 'var(--color-accent)'
+      : accessType === 'mixed'
+        ? 'var(--color-fg-muted)'
       : 'var(--ok-10)'
 }
 
+function formatPeakHour(summary: MemoryTimelineSummary): string {
+  return summary.peakHour === null ? '없음' : `${summary.peakHour}시`
+}
+
+function formatHourTitle(hour: HourlyMemoryAccess): string {
+  if (hour.count === 0 || !hour.dominantType) return `${hour.hour}시 — 접근 없음`
+  const typeLabel = hour.dominantType === 'mixed' ? '접근 유형 동등' : `${ACCESS_TYPE_LABEL[hour.dominantType]} 우세`
+  return `${hour.hour}시 — ${hour.count}회 접근 · ${typeLabel} · ${hour.uniqueMemoryCount}개 메모리`
+}
+
+function formatHourAriaLabel(hour: HourlyMemoryAccess): string {
+  if (hour.count === 0 || !hour.dominantType) return `${hour.hour}시: 접근 없음`
+  const typeLabel = hour.dominantType === 'mixed' ? '접근 유형 동등' : `${ACCESS_TYPE_LABEL[hour.dominantType]} 우세`
+  return `${hour.hour}시: ${hour.count}회, ${typeLabel}, 고유 메모리 ${hour.uniqueMemoryCount}개`
+}
+
 export function MemoryTimeline({ entries, testId }: MemoryTimelineProps) {
-  const hours = useMemo(() => Array.from({ length: 24 }, (_, i) => i), [])
-
-  const heatmap = useMemo(() => {
-    const map: Record<number, { count: number; type: string }> = {}
-    entries.forEach(e => {
-      const hour = new Date(e.timestamp).getHours()
-      if (!map[hour]) {
-        map[hour] = { count: 0, type: e.accessType }
-      }
-      map[hour].count += 1
-    })
-    const max = Math.max(...Object.values(map).map(v => v.count), 1)
-    return hours.map(h => ({
-      hour: h,
-      count: map[h]?.count || 0,
-      intensity: (map[h]?.count || 0) / max,
-      type: map[h]?.type || 'read',
-    }))
-  }, [entries])
-
-  const maxCount = Math.max(...heatmap.map(h => h.count), 1)
+  const heatmap = useMemo(() => buildMemoryTimelineHeatmap(entries), [entries])
+  const summary = useMemo(() => summarizeMemoryTimeline(entries), [entries])
+  const chartLabel = summary.totalAccesses === 0
+    ? '시간대별 메모리 접근 패턴, 접근 없음'
+    : `시간대별 메모리 접근 패턴, 총 ${summary.totalAccesses}회, 고유 메모리 ${summary.uniqueMemoryCount}개, 최대 ${formatPeakHour(summary)} ${summary.peakCount}회`
 
   return html`
     <div class="w-full" data-memory-timeline data-testid=${testId}>
-      <div class="flex items-end gap-1 h-16" role="img" aria-label="시간대별 메모리 접근 패턴">
+      <div
+        class="mb-2 grid grid-cols-3 gap-2 text-3xs text-[var(--color-fg-secondary)]"
+        data-memory-timeline-summary
+        data-memory-timeline-total=${summary.totalAccesses}
+        data-memory-timeline-unique=${summary.uniqueMemoryCount}
+        data-memory-timeline-peak-hour=${summary.peakHour ?? ''}
+        data-memory-timeline-peak-count=${summary.peakCount}
+      >
+        <span>총 ${summary.totalAccesses}회</span>
+        <span>고유 ${summary.uniqueMemoryCount}개</span>
+        <span>피크 ${formatPeakHour(summary)} · ${summary.peakCount}회</span>
+      </div>
+      <div class="flex h-16 items-end gap-1" role="img" aria-label=${chartLabel}>
         ${heatmap.map(
           h => html`
             <div
@@ -60,11 +176,15 @@ export function MemoryTimeline({ entries, testId }: MemoryTimelineProps) {
               style=${{
                 opacity: 0.1 + h.intensity * 0.9,
                 height: `${20 + h.intensity * 80}%`,
-                background: accessTypeColor(h.type),
+                background: accessTypeColor(h.dominantType),
               }}
-              title="${h.hour}시 — ${h.count}회 접근"
+              title=${formatHourTitle(h)}
               role="graphics-symbol"
-              aria-label="${h.hour}시: ${h.count}회"
+              aria-label=${formatHourAriaLabel(h)}
+              data-memory-timeline-hour=${h.hour}
+              data-memory-timeline-count=${h.count}
+              data-memory-timeline-dominant-type=${h.dominantType ?? ''}
+              data-memory-timeline-unique=${h.uniqueMemoryCount}
             ></div>
           `,
         )}
@@ -79,17 +199,17 @@ export function MemoryTimeline({ entries, testId }: MemoryTimelineProps) {
       <div class="mt-1.5 flex items-center gap-3 text-3xs text-[var(--color-fg-muted)]">
         <span class="inline-flex items-center gap-1">
           <span class="inline-block h-2 w-2 rounded-[var(--r-0)]" style=${{ background: 'var(--ok-10)' }}></span>
-          읽기
+          읽기 ${summary.typeCounts.read}
         </span>
         <span class="inline-flex items-center gap-1">
           <span class="inline-block h-2 w-2 rounded-[var(--r-0)]" style=${{ background: 'var(--warn-10)' }}></span>
-          쓰기
+          쓰기 ${summary.typeCounts.write}
         </span>
         <span class="inline-flex items-center gap-1">
           <span class="inline-block h-2 w-2 rounded-[var(--r-0)]" style=${{ background: 'var(--color-accent)' }}></span>
-          검색
+          검색 ${summary.typeCounts.search}
         </span>
-        <span class="ml-auto">최대 ${maxCount}회</span>
+        <span class="ml-auto">최대 ${summary.peakCount}회</span>
       </div>
     </div>
   `

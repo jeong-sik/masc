@@ -160,8 +160,13 @@ let dispatch
 
   (* ── Tier C: MCP-state-dependent ───────────────────────────── *)
 
+  | Mod_inline when String.equal name "masc_approval_pending" ->
+      let json = Keeper_approval_queue.list_pending_json () in
+      Some (true, Yojson.Safe.to_string json)
+
   | Mod_inline ->
       (* Handler registry catches masc_board_* before we reach here.
+         masc_approval_pending is handled above as a keeper-safe inline read.
          Remaining Mod_inline tools need full MCP session context
          (registry, state, SSE callbacks) that keepers do not have.
          Return actionable error. *)

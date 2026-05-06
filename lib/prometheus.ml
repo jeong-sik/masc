@@ -649,6 +649,8 @@ let metric_keeper_cycle_exceptions =
   "masc_keeper_cycle_exceptions_total"
 let metric_keeper_snapshot_write_failures =
   "masc_keeper_snapshot_write_failures_total"
+let metric_keeper_progress_updated_line_failures =
+  "masc_keeper_progress_updated_line_failures_total"
 let metric_keeper_sse_broadcast_failures =
   "masc_keeper_sse_broadcast_failures_total"
 let metric_keeper_room_heartbeat_failures =
@@ -696,6 +698,8 @@ let metric_keeper_observation_query_failures =
   "masc_keeper_observation_query_failures_total"
 let metric_persistence_read_drops =
   "masc_persistence_read_drops_total"
+let metric_discovery_history_failures =
+  "masc_discovery_history_failures_total"
 
 (* #10097: codex_cli provider cannot carry keeper-bound runtime MCP
    tools that need request-scoped auth headers.  Every time
@@ -715,6 +719,12 @@ let metric_codex_cli_mcp_tool_omission =
    producers. *)
 let metric_telemetry_coverage_gap =
   "masc_telemetry_coverage_gap_total"
+
+(* Phase 0 telemetry fan-in: source discovery/read failures must not collapse
+   into an indistinguishable empty dashboard. Labels are bounded by the
+   Telemetry_unified.source enum and a small site vocabulary. *)
+let metric_telemetry_unified_source_read_failures =
+  "masc_telemetry_unified_source_read_failures_total"
 
 (* #10358 (c1): observability for the silent [Effect.Unhandled] catch-all
    in [lib/coord.ml] [observe_agent_lifecycle] / [observe_task_transition_event] /
@@ -1051,6 +1061,8 @@ let metric_oas_bus_publish = "masc_oas_bus_publish_total"
 let metric_runtime_ollama_probe_generate_skips =
   "masc_runtime_ollama_probe_generate_skips_total"
 let metric_process_timeout = "masc_process_timeout_total"
+let metric_bg_task_sidecar_failures =
+  "masc_bg_task_sidecar_failures_total"
 let metric_distributed_lock_acquire_failed =
   "masc_distributed_lock_acquire_failed_total"
 
@@ -1829,6 +1841,12 @@ let init () =
     "Total heartbeat snapshot persistence failures causing metric \
      data loss. Labeled by keeper."
     Counter;
+  add metric_keeper_progress_updated_line_failures
+    "Total failures refreshing the Updated line in keeper progress.md. \
+     Missing progress files are no-ops; non-zero rates mean progress \
+     metadata refresh is failing after a successful meta write. Labeled \
+     by keeper."
+    Counter;
   add metric_keeper_sse_broadcast_failures
     "Total in-turn heartbeat SSE broadcast failures. Labeled by keeper."
     Counter;
@@ -1928,6 +1946,10 @@ let init () =
   add metric_persistence_read_drops
     "Total persisted read-model entries dropped during filesystem scans, \
      labeled by surface and reason"
+    Counter;
+  add metric_discovery_history_failures
+    "Total discovery history JSONL persistence/read/prune failures, \
+     labeled by site"
     Counter;
   add metric_oas_sse_relay_retries
     "Total OAS SSE relay retry attempts, labeled by failed stage"
@@ -2044,6 +2066,14 @@ let init () =
     "Total subprocess executions that exceeded their configured timeout. \
      Labeled by program and timeout_sec."
     Counter;
+  add metric_bg_task_sidecar_failures
+    "Total background-task PID sidecar persistence failures. \
+     Labeled by site=write|read|read_parse|readdir|is_dir|unlink."
+    Counter;
+  Bg_task.set_sidecar_failure_observer (fun ~site _exn ->
+      inc_counter metric_bg_task_sidecar_failures
+        ~labels:[("site", site)]
+        ());
   add metric_distributed_lock_acquire_failed
     "Total distributed lock acquire exhaustions. Labeled by key and attempts. \
      A non-zero rate indicates lock contention exhausted the retry budget."
@@ -2089,6 +2119,13 @@ let init () =
      stale_reason. Any positive rate means a telemetry lane is missing, \
      stale, or failed to append and dashboards should mark the source \
      coverage_gap."
+    Counter;
+  add metric_telemetry_unified_source_read_failures
+    "Total telemetry unified source discovery/read failures. Labels: \
+     source=keeper_metric|agent_event|tool_call_io|trajectory_tool_call|\
+     tool_usage|oas_event|execution_receipt|goal_event|tool_metric and \
+     site=<bounded read/discovery call-site>. Any positive rate means the \
+     dashboard fan-in returned partial data instead of a true empty source."
     Counter;
   add metric_coord_telemetry_drop
     "Total times a Coord lifecycle/transition hook dropped its Audit_log \

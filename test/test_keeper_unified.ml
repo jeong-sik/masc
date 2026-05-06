@@ -796,6 +796,43 @@ let test_observe_collects_scope_messages_for_room_signal_keepers () =
       check bool "scope messages collected" true
         (List.length obs.pending_scope_messages >= 1))
 
+let test_observe_damps_keeper_scope_chatter_but_keeps_direct_mentions () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Unix.putenv "MASC_BASE_PATH" base_dir;
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      ignore
+        (Masc_mcp.Coord.broadcast config
+           ~from_agent:"keeper-ramarama-agent"
+           ~content:"general keeper room update");
+      ignore
+        (Masc_mcp.Coord.broadcast config
+           ~from_agent:"keeper-ramarama-agent"
+           ~content:"@test-keeper please inspect this");
+      ignore
+        (Masc_mcp.Coord.broadcast config ~from_agent:"operator"
+           ~content:"general operator room update");
+      let meta = { room_signal_meta with joined_room_ids = [ "default" ] } in
+      let obs =
+        WO.observe ~allowed_tool_names:None
+          ~pending_board_events:(Some [])
+          ~config ~meta
+      in
+      check int "keeper direct mention collected" 1
+        (List.length obs.pending_mentions);
+      check int "only operator scope collected" 1
+        (List.length obs.pending_scope_messages);
+      match obs.pending_scope_messages with
+      | [ (author, content) ] ->
+          check string "scope author" "operator" author;
+          check string "scope content" "general operator room update" content
+      | _ -> fail "expected one operator scope message")
+
 let test_scheduled_turn_uses_cooldown_only () =
   let meta =
     { minimal_meta with
@@ -1475,6 +1512,41 @@ let test_min_interval_fires_without_work_signal () =
       (match decision.verdict with
        | WO.Run { reasons = (first, rest) } ->
            List.mem WO.Min_interval_elapsed (first :: rest)
+       | WO.Skip _ -> false))
+
+let test_min_interval_turn_is_not_tagged_entropic () =
+  with_env "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC" "900" (fun () ->
+    Fun.protect ~finally:Random.self_init @@ fun () ->
+    Random.init 15;
+    let meta =
+      { minimal_meta with
+        proactive =
+          { enabled = true; idle_sec = 0; cooldown_sec = 600 };
+        runtime =
+          { minimal_meta.runtime with
+            proactive_rt =
+              { minimal_meta.runtime.proactive_rt with
+                last_ts = Time_compat.now () -. 1000.0;
+              };
+          };
+      }
+    in
+    let obs = { base_observation with idle_seconds = 0 } in
+    let decision =
+      WO.keeper_cycle_decision
+        ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+        ~meta obs
+    in
+    check bool "min interval elapsed fires turn" true decision.should_run;
+    check bool "Min_interval_elapsed reason emitted" true
+      (match decision.verdict with
+       | WO.Run { reasons = (first, rest) } ->
+           List.mem WO.Min_interval_elapsed (first :: rest)
+       | WO.Skip _ -> false);
+    check bool "Min_interval_elapsed is not tagged as entropic" false
+      (match decision.verdict with
+       | WO.Run { reasons = (first, rest) } ->
+           List.mem WO.Entropic_oscillation (first :: rest)
        | WO.Skip _ -> false))
 
 let test_min_interval_does_not_fire_before_elapsed () =
@@ -3461,11 +3533,24 @@ let test_append_decision_record_persists_tool_calls () =
           ; provider = "codex_cli"
           ; outcome = "ok"
           ; latency_ms = 12.5
+          ; route_evidence =
+              Some
+                (`Assoc
+                   [
+                     ("tool_name", `String "keeper_shell");
+                     ("command", `String "git_status");
+                     ("cwd", `String "repos/masc-mcp");
+                     ("via", `String "docker");
+                     ("sandbox_profile", `String "docker");
+                     ("git_creds_enabled", `Bool true);
+                     ("network_mode", `String "bridge");
+                   ])
           }
         ; { tool_name = "keeper_board_post"
           ; provider = "codex_cli"
           ; outcome = "error"
           ; latency_ms = 3.0
+          ; route_evidence = None
           }
         ]
       in
@@ -3553,8 +3638,23 @@ let test_append_decision_record_persists_tool_calls () =
         Yojson.Safe.Util.(List.nth recorded_tool_calls 0 |> member "tool_name" |> to_string);
       check string "first provider" "codex_cli"
         Yojson.Safe.Util.(List.nth recorded_tool_calls 0 |> member "provider" |> to_string);
+      check string "first route via" "docker"
+        Yojson.Safe.Util.(
+          List.nth recorded_tool_calls 0 |> member "route_evidence"
+          |> member "via" |> to_string);
+      check bool "first route git creds" true
+        Yojson.Safe.Util.(
+          List.nth recorded_tool_calls 0 |> member "route_evidence"
+          |> member "git_creds_enabled" |> to_bool);
 	      check string "second outcome" "error"
 	        Yojson.Safe.Util.(List.nth recorded_tool_calls 1 |> member "outcome" |> to_string);
+      check bool "second route evidence absent" true
+        (match
+           Yojson.Safe.Util.(
+             List.nth recorded_tool_calls 1 |> member "route_evidence")
+         with
+         | `Null -> true
+         | _ -> false);
 	      check (float 0.001) "second latency" 3.0
 	        Yojson.Safe.Util.(List.nth recorded_tool_calls 1 |> member "latency_ms" |> to_float);
 	      check string "terminal reason success" "success"
@@ -3654,6 +3754,43 @@ let test_append_decision_record_classifies_legacy_worktree_error () =
         (json |> member "terminal_reason" |> member "next_action" |> to_string);
       check string "tool contract unknown for error path" "unknown"
         (json |> member "tool_contract" |> member "requirement" |> to_string))
+
+let test_append_decision_record_preserves_no_result_skipped_outcome () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      UM.append_decision_record
+        ~config
+        ~meta:minimal_meta
+        ~observation:base_observation
+        ~latency_ms:11
+        ~outcome:"skipped"
+        ~terminal_reason:(Masc_mcp.Keeper_turn_terminal.of_code "ollama_saturated")
+        ();
+      let json =
+        read_jsonl_line (Keeper_types.keeper_decision_log_path config minimal_meta.name)
+      in
+      let open Yojson.Safe.Util in
+      let telemetry = json |> member "telemetry" in
+      check string "top-level skipped outcome persisted" "skipped"
+        (json |> member "outcome" |> to_string);
+      check string "telemetry skipped outcome persisted" "skipped"
+        (telemetry |> member "outcome" |> to_string);
+      check bool "skipped telemetry category is null" true
+        Yojson.Safe.Util.(telemetry |> member "error_category" = `Null);
+      check string "skipped telemetry coverage stage" "pre_dispatch"
+        (telemetry |> member "coverage_stage" |> to_string);
+      check string "skipped telemetry coverage reason" "skipped_turn"
+        (telemetry |> member "coverage_reason" |> to_string);
+      check string "terminal code alias" "ollama_saturated"
+        (json |> member "terminal_reason_code" |> to_string);
+      check int "duration alias persisted" 11
+        (json |> member "duration_ms" |> to_int))
 
 let test_run_keeper_cycle_skips_non_executable_phase () =
   Eio_main.run @@ fun env ->
@@ -3886,6 +4023,13 @@ let test_run_keeper_cycle_records_trajectory_source_contract () =
   check bool "saturation skip has durable terminal reason" true
     (source_file_contains "lib/keeper/keeper_unified_turn.ml"
        "~terminal_reason_code:\"ollama_saturated\"");
+  check bool "saturation skip is not recorded as error" true
+    (source_file_contains "lib/keeper/keeper_unified_turn.ml"
+       "~terminal_reason_code:\"ollama_saturated\"\n\
+       \                ~activity_kind:\"keeper.turn_skipped\"");
+  check bool "saturation skip uses fsm-allowed cascade unavailable transition" true
+    (source_file_contains "lib/keeper/keeper_unified_turn.ml"
+       "Keeper_turn_fsm.Failure_cascade_unavailable");
   check bool "livelock block has durable terminal reason" true
     (source_file_contains "lib/keeper/keeper_unified_turn.ml"
        "Printf.sprintf \"turn_livelock:%s\"")
@@ -4564,6 +4708,21 @@ let test_degraded_rotation_after_recoverable_error_filters_required_catalog_dire
   expect_degraded_retry "required catalog classifier rotation"
     "big_three" "required_tool_contract_violation" degraded_retry
 
+let test_degraded_rotation_preserves_local_recovery_profile_hint_for_required_tool
+    () =
+  let degraded_retry =
+    EC.degraded_rotation_after_recoverable_error
+      ~rotation_cascades:[ "big_three"; "local_recovery" ]
+      ~fallback_hint:"local_recovery"
+      ~base_cascade:"tier_fast"
+      ~effective_cascade:"keeper_bound_safe"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
+      ~attempted_cascades:[ "tier_fast"; "keeper_bound_safe"; "big_three" ]
+      (required_tool_contract_violation_error ())
+  in
+  expect_degraded_retry "required local_recovery fallback profile"
+    "local_recovery" "required_tool_contract_violation" degraded_retry
+
 let test_degraded_rotation_after_recoverable_error_normalizes_catalog_directly () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
@@ -4947,6 +5106,28 @@ let test_prompt_includes_board_activity_section () =
        try ignore (Str.search_forward (Str.regexp_string "Please take a look.") user 0); true
        with Not_found -> false
      in found)
+
+let test_prompt_marks_board_curation_due_for_multi_event_window () =
+  let second_board_event =
+    {
+      sample_board_event with
+      post_id = "board-post-2";
+      title = "Answer candidate";
+      preview = "This may answer the earlier thread.";
+    }
+  in
+  let obs =
+    { base_observation with
+      pending_board_events = [ sample_board_event; second_board_event ]
+    }
+  in
+  let _sys, user =
+    UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs ()
+  in
+  check bool "marks curation due" true
+    (contains_substring user "Curation due");
+  check bool "names curation submit tool" true
+    (contains_substring user "keeper_board_curation_submit")
 
 let test_prompt_prefers_silence_guidance () =
   let sys, _user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:base_observation () in
@@ -5524,6 +5705,41 @@ let test_bounded_oas_timeout_reserves_degraded_retry_budget () =
         "adaptive_estimated_input_tokens_capped_by_degraded_retry_budget"
         budget.source
   | None -> fail "expected bounded timeout"
+
+let test_attempt_watchdog_preserves_degraded_retry_reserve () =
+  match
+    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+      ~is_retry:false ~reserve_degraded_retry_budget:true
+      ~estimated_input_tokens:2_000 ~max_turns:4
+      ~remaining_turn_budget_s:500.0
+  with
+  | Some budget ->
+      check (float 0.01)
+        "attempt watchdog includes OAS timeout plus finalization guard"
+        257.5
+        (UT.attempt_watchdog_timeout_sec
+           ~remaining_turn_budget_s:500.0
+           budget)
+  | None -> fail "expected bounded timeout"
+
+let test_attempt_watchdog_fires_before_outer_turn_timeout () =
+  let budget =
+    {
+      UT.effective_timeout_sec = 293.0;
+      adaptive_timeout_sec = 600.0;
+      keeper_turn_timeout_sec = 600.0;
+      remaining_turn_budget_sec = 293.0;
+      estimated_input_tokens = 2_000;
+      max_turns = 4;
+      source = "adaptive_per_attempt_retry";
+    }
+  in
+  check (float 0.01)
+    "retry watchdog is capped just before the enclosing turn timeout"
+    292.0
+    (UT.attempt_watchdog_timeout_sec
+       ~remaining_turn_budget_s:293.0
+       budget)
 
 let test_bounded_oas_timeout_refuses_too_little_budget () =
   check (option (float 0.01)) "insufficient budget returns none" None
@@ -6878,6 +7094,9 @@ let test_should_require_tools_for_initial_turn_matches_first_turn_gate () =
   check bool "two-turn board action can require initial tools" true
     (KAR.should_require_tools_for_initial_turn ~max_turns:2
        ~turn_affordances:[ "board_post_or_comment" ]);
+  check bool "two-turn board curation can require initial tools" true
+    (KAR.should_require_tools_for_initial_turn ~max_turns:2
+       ~turn_affordances:[ "board_curation" ]);
   check bool "three-turn call can require initial tools" true
     (KAR.should_require_tools_for_initial_turn ~max_turns:3 ~turn_affordances:affordances);
   check bool "pending verification requires an action tool" true
@@ -6899,6 +7118,8 @@ let test_should_require_tools_for_initial_turn_covers_actionable_affordances () 
   in
   check bool "reply requires tool gate" true (require "reply_in_room");
   check bool "verification requires tool gate" true (require "task_verify");
+  check bool "board curation requires tool gate" true
+    (require "board_curation");
   check bool "worktree inspection requires tool gate" true
     (require "inspect_worktree_delta")
 
@@ -6925,6 +7146,13 @@ let test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool () =
     "board_post_or_comment without any post tool -> gate suppressed" false
     (gate ~tools:[ "keeper_task_claim"; "keeper_tasks_list" ]
        [ "board_post_or_comment" ]);
+  check bool
+    "board_curation with submit tool -> gate fires" true
+    (gate ~tools:[ "keeper_board_curation_submit" ] [ "board_curation" ]);
+  check bool
+    "board_curation without submit tool -> gate suppressed" false
+    (gate ~tools:[ "keeper_board_post"; "keeper_board_comment" ]
+       [ "board_curation" ]);
   check bool
     "any matching affordance is enough" true
     (gate
@@ -6962,6 +7190,7 @@ let test_tools_for_gated_affordance_covers_each_variant () =
       (Printf.sprintf "tools_for_gated_affordance known tools for %s" label)
       [] (List.filter (fun name -> not (known_tool_name name)) tools)
   in
+  nonempty "Board_curation" Surface.Board_curation;
   nonempty "Board_post_or_comment" Surface.Board_post_or_comment;
   nonempty "Message_sweep" Surface.Message_sweep;
   nonempty "Reply_in_room" Surface.Reply_in_room;
@@ -6969,7 +7198,17 @@ let test_tools_for_gated_affordance_covers_each_variant () =
   nonempty "Task_audit" Surface.Task_audit;
   nonempty "Task_verify" Surface.Task_verify;
   nonempty "Work_discovery" Surface.Work_discovery;
-  nonempty "Inspect_worktree_delta" Surface.Inspect_worktree_delta
+  nonempty "Inspect_worktree_delta" Surface.Inspect_worktree_delta;
+  check (list string)
+    "board_curation force-includes submit tool"
+    [ "keeper_board_curation_submit" ]
+    (Surface.preferred_tool_names_for_turn_affordances
+       [ "board_curation"; "task_claim"; "board_curation" ]);
+  check (list string)
+    "generic board affordance has no forced specific tool"
+    []
+    (Surface.preferred_tool_names_for_turn_affordances
+       [ "board_post_or_comment" ])
 
 let test_preferred_tool_choice_for_required_turn_claims_first () =
   let choose ?(has_current_task = false) ?(turn_affordances = [ "task_claim" ])
@@ -6992,6 +7231,40 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
        fail
          (Printf.sprintf
             "expected Any when already owning work, got %s"
+            (Agent_sdk.Types.show_tool_choice other)));
+  (* Board curation is the most specific action for a due curation
+     window, so prefer the submit tool over generic board/task tools. *)
+  (match
+     choose
+       ~turn_affordances:[ "board_curation"; "task_claim" ]
+       ~allowed_tool_names:
+         [
+           "keeper_board_curation_submit";
+           "keeper_task_claim";
+           "keeper_board_post";
+         ]
+       ()
+   with
+   | Agent_sdk.Types.Tool name ->
+       check string "board curation prefers submit tool"
+         "keeper_board_curation_submit" name
+   | other ->
+       fail
+         (Printf.sprintf
+            "expected Tool keeper_board_curation_submit, got %s"
+            (Agent_sdk.Types.show_tool_choice other)));
+  (match
+     choose
+       ~turn_affordances:[ "board_curation" ]
+       ~allowed_tool_names:[ "keeper_board_post" ]
+       ()
+   with
+   | Agent_sdk.Types.Auto -> ()
+   | other ->
+       fail
+         (Printf.sprintf
+            "expected Auto when curation submit is unavailable and keeper is idle, \
+             got %s"
             (Agent_sdk.Types.show_tool_choice other)));
   (* #10008: when no specific tool is applicable for the current
      affordance, fall back to [Auto] so the model can respond with
@@ -7252,6 +7525,8 @@ let () =
             test_observe_ignores_scope_messages_without_room_signal_opt_in;
           test_case "room-signal keepers collect scope messages" `Quick
             test_observe_collects_scope_messages_for_room_signal_keepers;
+          test_case "room-signal keepers damp keeper scope chatter" `Quick
+            test_observe_damps_keeper_scope_chatter_but_keeps_direct_mentions;
           test_case "scheduled turn uses cooldown only when work exists" `Quick
             test_scheduled_turn_uses_cooldown_only;
           test_case "scheduled turn skips without structured work signal" `Quick
@@ -7312,6 +7587,8 @@ let () =
             test_provider_cooldown_blocks_bootstrap_turn;
           test_case "min interval: fires without work signal after interval" `Quick
             test_min_interval_fires_without_work_signal;
+          test_case "min interval: not tagged entropic" `Quick
+            test_min_interval_turn_is_not_tagged_entropic;
           test_case "min interval: does not fire before elapsed" `Quick
             test_min_interval_does_not_fire_before_elapsed;
           test_case "min interval: never fires for bootstrap turn" `Quick
@@ -7355,6 +7632,8 @@ let () =
           test_case "includes mentions" `Quick test_prompt_includes_mentions_section;
           test_case "includes board activity" `Quick
             test_prompt_includes_board_activity_section;
+          test_case "marks board curation due" `Quick
+            test_prompt_marks_board_curation_due_for_multi_event_window;
           test_case "includes goals" `Quick test_prompt_includes_goals_section;
           test_case "includes context ratio" `Quick test_prompt_includes_context_ratio;
           test_case "includes idle" `Quick test_prompt_includes_idle;
@@ -7463,6 +7742,8 @@ let () =
 	            test_append_decision_record_nulls_unreported_usage;
 	          test_case "decision record classifies worktree blocker" `Quick
 	            test_append_decision_record_classifies_legacy_worktree_error;
+	          test_case "decision record preserves no-result skipped outcome" `Quick
+	            test_append_decision_record_preserves_no_result_skipped_outcome;
 	          test_case "social fields" `Quick
 	            test_metrics_persist_social_state_fields;
           test_case "failure response" `Quick test_metrics_failure_response;
@@ -7723,6 +8004,10 @@ let () =
             test_bounded_oas_timeout_uses_channel_turn_budget_override;
           test_case "bounded OAS timeout reserves degraded retry budget" `Quick
             test_bounded_oas_timeout_reserves_degraded_retry_budget;
+          test_case "attempt watchdog preserves degraded retry reserve" `Quick
+            test_attempt_watchdog_preserves_degraded_retry_reserve;
+          test_case "attempt watchdog fires before outer turn timeout" `Quick
+            test_attempt_watchdog_fires_before_outer_turn_timeout;
           test_case "bounded OAS timeout refuses too little remaining budget" `Quick
             test_bounded_oas_timeout_refuses_too_little_budget;
           test_case "OAS timeout classification uses current attempt budget" `Quick
@@ -7879,6 +8164,10 @@ let () =
           test_case "classifier filters required-tool catalog rotation"
             `Quick
             test_degraded_rotation_after_recoverable_error_filters_required_catalog_directly;
+          test_case
+            "classifier preserves explicit local_recovery fallback profile"
+            `Quick
+            test_degraded_rotation_preserves_local_recovery_profile_hint_for_required_tool;
           test_case "classifier normalizes catalog rotation"
             `Quick
             test_degraded_rotation_after_recoverable_error_normalizes_catalog_directly;
@@ -7968,6 +8257,42 @@ let () =
               in
               check bool "work_discovery present" true
                 (List.mem "work_discovery" affordances));
+          test_case "affordance: board curation requires multi-event window"
+            `Quick
+            (fun () ->
+              let second_board_event =
+                {
+                  sample_board_event with
+                  post_id = "board-post-2";
+                  title = "Follow-up";
+                  preview = "Another board item needs routing.";
+                }
+              in
+              let obs =
+                {
+                  base_observation with
+                  pending_board_events =
+                    [ sample_board_event; second_board_event ];
+                }
+              in
+              let affordances =
+                UM.observed_affordances_of_observation obs
+              in
+              check bool "board_curation present" true
+                (List.mem "board_curation" affordances));
+          test_case "affordance: single board event skips curation gate" `Quick
+            (fun () ->
+              let obs =
+                {
+                  base_observation with
+                  pending_board_events = [ sample_board_event ];
+                }
+              in
+              let affordances =
+                UM.observed_affordances_of_observation obs
+              in
+              check bool "board_curation absent" false
+                (List.mem "board_curation" affordances));
           test_case "affordance: task claim requires matched backlog" `Quick
             (fun () ->
               let obs =

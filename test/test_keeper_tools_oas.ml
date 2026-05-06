@@ -541,6 +541,121 @@ let test_transient_mutex_contention_envelope () =
   check bool "backtrace available" true
     Yojson.Safe.Util.(member "backtrace_available" detail |> to_bool)
 
+let test_result_markers_capture_docker_approve () =
+  let output =
+    Keeper_tools_oas.normalize_tool_result ~success:true
+      {|{"ok":true,"via":"docker","event":"APPROVE"}|}
+  in
+  let markers =
+    Keeper_tools_oas.tool_exec_result_markers
+      ~input:(`Assoc [])
+      ~output
+  in
+  check bool "via marker" true (List.mem "via=docker" markers);
+  check bool "approve marker" true (List.mem "event=APPROVE" markers)
+
+let test_result_markers_keep_git_push_class_only () =
+  let output =
+    Keeper_tools_oas.normalize_tool_result ~success:true
+      {|{"ok":true,"via":"docker"}|}
+  in
+  let markers =
+    Keeper_tools_oas.tool_exec_result_markers
+      ~input:
+        (`Assoc
+          [
+            ("cmd", `String "git push origin feature/secret-proof");
+          ])
+      ~output
+  in
+  check bool "git push class marker" true (List.mem "git push" markers);
+  check bool "via marker" true (List.mem "via=docker" markers);
+  check bool "raw command not persisted as marker" false
+    (List.mem "git push origin feature/secret-proof" markers)
+
+let test_result_markers_ignore_lifecycle_mentions () =
+  let output =
+    Keeper_tools_oas.normalize_tool_result ~success:true
+      {|{"ok":true,"via":"docker"}|}
+  in
+  let markers =
+    Keeper_tools_oas.tool_exec_result_markers
+      ~input:
+        (`Assoc
+          [
+            ("cmd", `String "echo git push");
+            ("command", `String "printf 'gh pr create'");
+          ])
+      ~output
+  in
+  check bool "mentioned git push not marked" false
+    (List.mem "git push" markers);
+  check bool "mentioned pr create not marked" false
+    (List.mem "gh pr create" markers);
+  check bool "output via marker still captured" true
+    (List.mem "via=docker" markers)
+
+let test_result_markers_ignore_input_via () =
+  let output =
+    Keeper_tools_oas.normalize_tool_result ~success:true {|{"ok":true}|}
+  in
+  let markers =
+    Keeper_tools_oas.tool_exec_result_markers
+      ~input:(`Assoc [ ("via", `String "docker") ])
+      ~output
+  in
+  check bool "input via marker ignored" false
+    (List.mem "via=docker" markers)
+
+let test_result_markers_ignore_input_route_fields () =
+  let output =
+    Keeper_tools_oas.normalize_tool_result ~success:true {|{"ok":true}|}
+  in
+  let markers =
+    Keeper_tools_oas.tool_exec_result_markers
+      ~input:
+        (`Assoc
+          [
+            ("action", `String "push");
+            ("event", `String "APPROVE");
+            ("operation", `String "pr_create");
+          ])
+      ~output
+  in
+  check bool "input action marker ignored" false (List.mem "git push" markers);
+  check bool "input event marker ignored" false
+    (List.mem "event=APPROVE" markers);
+  check bool "input operation marker ignored" false
+    (List.mem "gh pr create" markers)
+
+let test_result_markers_reject_untrusted_via () =
+  let output =
+    Keeper_tools_oas.normalize_tool_result ~success:true
+      {|{"ok":true,"via":"<script>alert(1)</script>"}|}
+  in
+  let markers =
+    Keeper_tools_oas.tool_exec_result_markers
+      ~input:(`Assoc [])
+      ~output
+  in
+  check bool "untrusted via marker rejected" false
+    (List.exists
+       (fun marker -> String.starts_with ~prefix:"via=" marker)
+       markers)
+
+let test_result_markers_capture_pr_create_operation () =
+  let output =
+    Keeper_tools_oas.normalize_tool_result ~success:true
+      {|{"ok":true,"via":"docker","operation":"pr_create"}|}
+  in
+  let markers =
+    Keeper_tools_oas.tool_exec_result_markers
+      ~input:(`Assoc [])
+      ~output
+  in
+  check bool "pr create marker" true (List.mem "gh pr create" markers);
+  check bool "via marker" true (List.mem "via=docker" markers)
+
 (* ── Tool_output_validation tests (memory cap) ──────────────── *)
 
 let test_cap_short_unchanged () =
@@ -596,6 +711,22 @@ let () =
       test_case "failure plain text wraps as error" `Quick test_normalize_failure_plain_text;
       test_case "EDEADLK envelope is recoverable" `Quick
         test_transient_mutex_contention_envelope;
+    ];
+    "result_markers", [
+      test_case "captures docker approve markers" `Quick
+        test_result_markers_capture_docker_approve;
+      test_case "keeps git push class only" `Quick
+        test_result_markers_keep_git_push_class_only;
+      test_case "ignores lifecycle mentions" `Quick
+        test_result_markers_ignore_lifecycle_mentions;
+      test_case "ignores caller-provided via marker" `Quick
+        test_result_markers_ignore_input_via;
+      test_case "ignores caller-provided route fields" `Quick
+        test_result_markers_ignore_input_route_fields;
+      test_case "rejects untrusted via marker" `Quick
+        test_result_markers_reject_untrusted_via;
+      test_case "captures pr create operation" `Quick
+        test_result_markers_capture_pr_create_operation;
     ];
     "research_profile", [
       test_case "has autoresearch tools" `Quick test_research_keeper_has_autoresearch_tools;

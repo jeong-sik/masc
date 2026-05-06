@@ -248,6 +248,24 @@ let test_admin_dispatched_keeper_tools_not_orphaned () =
             name)
         [ "keeper_board_cleanup"; "keeper_board_delete" ]
 
+let test_keeper_schema_only_tools_not_orphaned () =
+  (* Keeper PR/preflight tools are model-schema tools, not public MCP tools.
+     The startup validator must still recognise them as keeper runtime tools
+     so live tool_policy.toml can grant them without noisy false positives. *)
+  match Keeper_exec_tools.init_policy_config ~base_path:(repo_root ()) with
+  | Error msg ->
+      Alcotest.failf "failed to load tool policy config: %s" msg
+  | Ok () ->
+      let validation = Tool_registration_check.validate () in
+      List.iter (fun name ->
+        if List.mem name validation.Tool_registration_check.orphan_toml then
+          Alcotest.failf
+            "keeper schema tool %s must not be reported as orphan_toml"
+            name)
+        [ "keeper_preflight_check"; "keeper_pr_list"; "keeper_pr_status";
+          "keeper_pr_create"; "keeper_pr_review_read";
+          "keeper_pr_review_comment"; "keeper_pr_review_reply" ]
+
 let test_tool_registration_check_does_not_depend_on_injected_masc_schemas () =
   match Keeper_exec_tools.init_policy_config ~base_path:(repo_root ()) with
   | Error msg ->
@@ -372,6 +390,10 @@ let () =
             "admin-dispatched keeper tools not flagged as orphan_toml (#7696)"
             `Quick
             test_admin_dispatched_keeper_tools_not_orphaned;
+          Alcotest.test_case
+            "keeper schema-only tools not flagged as orphan_toml"
+            `Quick
+            test_keeper_schema_only_tools_not_orphaned;
           Alcotest.test_case "keeper_backend_tool_name matches keeper_internal_replacement" `Quick
             test_keeper_alias_ssot_consistency;
         ] );

@@ -286,8 +286,13 @@ val flush : unit -> unit
 val submit_curation_snapshot :
   submitted_by:string ->
   ?model:string ->
+  ?summary:string ->
   ordering:string list ->
   highlights:string list ->
+  ?tag_suggestions:Board_curation.curation_tag_suggestion list ->
+  ?answer_matches:Board_curation.curation_answer_match list ->
+  ?health_score:float ->
+  ?health_components:Board_curation.curation_health_component list ->
   rationale:string ->
   ?provenance:Yojson.Safe.t ->
   unit ->
@@ -308,6 +313,7 @@ val create_sub_board :
   name:string ->
   description:string ->
   owner:string ->
+  ?members:string list ->
   ?access:Board.sub_board_access ->
   unit ->
   (Board.sub_board, Board.board_error) Result.t

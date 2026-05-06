@@ -114,6 +114,11 @@ code_refs:
   - fleet-health attribution view
 - `GET /api/v1/dashboard/safe-autonomy`
   - operations safety view
+- `GET /api/v1/dashboard/keeper-feature-proof`
+  - keeper autonomy feature proof gates, including 24h turn-span and web-search tool evidence
+  - tool gates count only calls from known keeper names and expose `keeper_evidence.provenance_scope=known_keeper_tool_call_log`, per-tool successful/failing keepers, sandbox/network modes, task IDs, and goal IDs
+  - Docker git-to-PR workflow proof exposes clone, branch, commit, push, and draft-PR creation as separate keeper-originated stages
+  - read-only CLI equivalent: `masc-keeper-feature-proof --base-path <runtime-root>`
 - `GET /api/v1/models/metrics`, `GET /api/v1/dashboard/keeper-costs`
   - runtime cost/latency view
 - `GET /api/v1/cascade/strategy-trace`, `GET /api/v1/cascade/health`

@@ -7,10 +7,12 @@ import {
   fetchDashboardTools,
   fetchCostLatency,
   fetchKeeperConfig,
+  fetchMemorySubsystems,
   fetchRuntimeModelMetrics,
   fetchTlcResults,
   fetchToolQuality,
 } from './dashboard'
+import { keeperRuntimeBlockerLabel } from '../lib/keeper-runtime-display'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -67,18 +69,52 @@ describe('fetchDashboardShell', () => {
       status: { project: 'default' },
       counts: { agents: 1, tasks: 2, keepers: 3 },
     }
-    const fetchMock = vi.fn().mockResolvedValue(
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
       new Response(JSON.stringify(rawResponse), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
-    )
+    ))
     vi.stubGlobal('fetch', fetchMock)
 
     await fetchDashboardShell({ light: true })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/shell?light=true')
+  })
+})
+
+describe('fetchMemorySubsystems', () => {
+  it('adds the sensitive memory entries query only when requested', async () => {
+    const rawResponse = {
+      generated_at: '2026-05-06T00:00:00Z',
+      hebbian: { synapses: [], last_consolidation: 0 },
+      episodes: { total: 0, filtered: 0, shown: 0, limit: 100, items: [] },
+      filters: { keepers: [], outcomes: [] },
+    }
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchMemorySubsystems({ limit: 100 })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    let requestUrl = new URL(fetchMock.mock.calls[0]?.[0] as string, 'http://dashboard.local')
+    expect(requestUrl.searchParams.has('include_memory_entries')).toBe(false)
+
+    fetchMock.mockClear()
+
+    await fetchMemorySubsystems({ limit: 100, includeMemoryEntries: true })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    requestUrl = new URL(fetchMock.mock.calls[0]?.[0] as string, 'http://dashboard.local')
+    expect(requestUrl.pathname).toBe('/api/v1/dashboard/memory-subsystems')
+    expect(requestUrl.searchParams.get('limit')).toBe('100')
+    expect(requestUrl.searchParams.get('include_memory_entries')).toBe('true')
   })
 })
 
@@ -929,6 +965,40 @@ describe('fetchKeeperConfig', () => {
     expect(result.coordination.active_goal_ids).toEqual(['goal-runtime'])
     expect(result.coordination.active_goals[0]?.title).toBe('Ship runtime clarity')
     expect(result.runtime_trust?.disposition).toBe('Pass')
+  })
+
+  it('preserves terminal runtime blocker classes through config fetch and display labeling', async () => {
+    const cases = [
+      ['no_tool_capable_provider', '도구 실행 Provider 없음'],
+      ['provider_runtime_error', 'Provider 런타임 오류'],
+      ['tool_required_unsatisfied', '필수 도구 미충족'],
+      ['fiber_unresolved', 'Fiber 미해결'],
+      ['stale_turn_timeout', '오래된 턴 만료'],
+    ] as const
+
+    for (const [blockerClass, label] of cases) {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            name: 'keeper-sangsu',
+            runtime: {
+              runtime_blocker_class: blockerClass,
+              runtime_blocker_summary: blockerClass,
+            },
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      )
+      vi.stubGlobal('fetch', fetchMock)
+
+      const result = await fetchKeeperConfig('keeper-sangsu')
+
+      expect(result.runtime.runtime_blocker_class).toBe(blockerClass)
+      expect(keeperRuntimeBlockerLabel(result.runtime.runtime_blocker_class)).toBe(label)
+    }
   })
 })
 

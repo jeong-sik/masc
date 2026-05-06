@@ -277,7 +277,7 @@ let host_path_of_own_container_path ~(config : Coord.config) ~(meta : keeper_met
   else
     let strip = Keeper_alerting_path.strip_trailing_slashes in
     let normalize path =
-      Keeper_alerting_path.normalize_path_for_check path |> strip
+      Keeper_alerting_path.normalize_path_for_check_stripped path
     in
     let container_root = Keeper_sandbox.container_root meta.name |> normalize in
     let raw_norm = normalize raw in
@@ -446,6 +446,8 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
     | Tool_name.Keeper.Board_cleanup
     | Tool_name.Keeper.Board_comment
     | Tool_name.Keeper.Board_comment_vote
+    | Tool_name.Keeper.Board_curation_read
+    | Tool_name.Keeper.Board_curation_submit
     | Tool_name.Keeper.Board_delete
     | Tool_name.Keeper.Board_get
     | Tool_name.Keeper.Board_list

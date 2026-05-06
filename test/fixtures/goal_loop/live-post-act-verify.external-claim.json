@@ -55,13 +55,15 @@
     "checked_at": "2026-05-06T11:20:09+00:00"
   },
   "combined_completion_audit": {
-    "command": "python3 scripts/goal_loop_completion_audit.py /tmp/goal-loop-status-live-verify-combined.json --structured-id-triage test/fixtures/goal_loop/structured-id-triage.external-claim.json --row-corpus-discovery test/fixtures/goal_loop/row-corpus-discovery.external-claim.json --prompt-closeout-checklist test/fixtures/goal_loop/prompt-closeout-checklist.external-claim.json --source-row-candidate-inventory test/fixtures/goal_loop/source-row-candidate-inventory.external-claim.json --require-complete --format text",
+    "command": "python3 scripts/goal_loop_completion_audit.py /tmp/goal-loop-status-live-verify-combined.json --structured-id-triage test/fixtures/goal_loop/structured-id-triage.external-claim.json --row-corpus-discovery test/fixtures/goal_loop/row-corpus-discovery.external-claim.json --prompt-closeout-checklist test/fixtures/goal_loop/prompt-closeout-checklist.external-claim.json --source-row-candidate-inventory test/fixtures/goal_loop/source-row-candidate-inventory.external-claim.json --verify-pipeline test/fixtures/goal_loop/verify-pipeline.current.external-claim.json --require-complete --format text",
     "status": "BLOCKED",
     "blockers": [
       "strict_row_level_catalog_complete",
-      "prompt_requirements_closeout_complete"
+      "prompt_requirements_closeout_complete",
+      "verify_pipeline_complete"
     ],
-    "post_act_verify_complete": "PASS"
+    "post_act_verify_complete": "PASS",
+    "verify_pipeline_complete": "FAIL"
   },
-  "non_completion_reason": "This clears the post-ACT Verify criterion for the current replay input only. The GOAL LOOP remains blocked because the strict 206-row corpus is missing and the prompt checklist still contains non-PASS rows."
+  "non_completion_reason": "This clears the post-ACT Verify criterion for the current replay input only. The GOAL LOOP remains blocked because the strict 206-row corpus is missing, the repo-owned Verify pipeline result is not all-PASS, and the prompt checklist still contains non-PASS rows."
 }

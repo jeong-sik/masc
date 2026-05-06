@@ -286,18 +286,22 @@
       "prompt_requirement": "Verify unit/regression/TLA/log/metric/orient gates",
       "artifact_refs": [
         "scripts/verify_goal_loop_logs.py",
+        "scripts/goal_loop_verify_pipeline.py",
         "scripts/goal_loop_completion_audit.py",
         "test/fixtures/goal_loop/live-post-act-verify.external-claim.json",
+        "test/fixtures/goal_loop/verify-pipeline.current.external-claim.json",
+        "docs/observability/goal-loop-verify-pipeline.md",
+        "test/test_goal_loop_verify_pipeline.py",
         "test/test_goal_loop_completion_audit.py"
       ],
       "status": "PARTIAL",
-      "criterion_id": "post_act_verify_complete",
-      "gap": "Closeout verifier exists and live post-ACT log replay evidence is recorded. Draft implementation PR #13657 adds explicit unit/regression/TLA/log/metric/orient gates, but it is not merged and full metric/TLA gate inputs are still incomplete.",
+      "criterion_id": "verify_pipeline_complete",
+      "gap": "Closeout verifier and the repo-owned Verify pipeline contract are merged, but the current pipeline fixture is BLOCKED/SKIPPED because production metrics, prompt TLA specs, unit-test run evidence, and post-ACT log-contract inputs are missing.",
       "implementation_pr_refs": [
         "https://github.com/jeong-sik/masc-mcp/pull/13657"
       ],
       "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13610",
+        "https://github.com/jeong-sik/masc-mcp/issues/13795",
         "https://github.com/jeong-sik/masc-mcp/issues/13636"
       ]
     },
@@ -312,14 +316,14 @@
       ],
       "status": "PARTIAL",
       "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "Branch semantics and the post-ACT live replay runner are merged through #13507. Draft implementation PR #13657 still adds the explicit Verify pipeline gate contract. Complete-corpus Verify remains blocked until #13657 lands and the 206-row corpus exists.",
+      "gap": "Branch semantics, the post-ACT live replay runner, and the explicit Verify pipeline gate contract are merged through #13507 and #13657. Complete-corpus Verify remains blocked until the 206-row corpus exists and the Verify pipeline result passes.",
       "implementation_pr_refs": [
         "https://github.com/jeong-sik/masc-mcp/pull/13507",
         "https://github.com/jeong-sik/masc-mcp/pull/13657"
       ],
       "tracking_issue_refs": [
         "https://github.com/jeong-sik/masc-mcp/issues/13265",
-        "https://github.com/jeong-sik/masc-mcp/issues/13610",
+        "https://github.com/jeong-sik/masc-mcp/issues/13795",
         "https://github.com/jeong-sik/masc-mcp/issues/13636"
       ]
     },

@@ -51,6 +51,13 @@ SOURCE_ROW_CANDIDATE_INVENTORY_FIXTURE = (
 STRICT_ROW_CORPUS_CONTRACT_FIXTURE = (
     REPO_ROOT / "test" / "fixtures" / "goal_loop" / "strict-row-corpus-contract.json"
 )
+VERIFY_PIPELINE_FIXTURE = (
+    REPO_ROOT
+    / "test"
+    / "fixtures"
+    / "goal_loop"
+    / "verify-pipeline.current.external-claim.json"
+)
 
 spec = importlib.util.spec_from_file_location("goal_loop_completion_audit", SCRIPT_PATH)
 assert spec is not None
@@ -521,6 +528,25 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
 
         self.assertEqual(audit.status, "BLOCKED")
         self.assertIn("verify_pipeline_complete", audit.blockers)
+
+    def test_current_verify_pipeline_fixture_blocks_missing_inputs(self) -> None:
+        pipeline = json.loads(VERIFY_PIPELINE_FIXTURE.read_text(encoding="utf-8"))
+        audit = goal_loop_completion_audit.build_completion_audit(
+            complete_status(),
+            verify_pipeline=pipeline,
+        )
+
+        self.assertEqual(audit.status, "BLOCKED")
+        self.assertIn("verify_pipeline_complete", audit.blockers)
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        evidence = by_id["verify_pipeline_complete"].evidence
+        self.assertEqual(evidence["pipeline_status"], "BLOCKED")
+        self.assertEqual(evidence["gates_total"], 14)
+        self.assertEqual(evidence["gates_passed"], 0)
+        self.assertEqual(evidence["gates_blocked"], 13)
+        self.assertEqual(evidence["gates_skipped"], 1)
+        self.assertEqual(evidence["missing_gate_ids"], [])
+        self.assertIn("post_act_log_contract", evidence["non_pass_gate_ids"])
 
     def test_completion_audit_accepts_structured_id_triage_manifest(self) -> None:
         triage = json.loads(TRIAGE_FIXTURE.read_text(encoding="utf-8"))
@@ -1162,8 +1188,8 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         )
         self.assertEqual(checklist_evidence["implementation_pr_refs_total"], 11)
         self.assertEqual(checklist_evidence["invalid_implementation_pr_refs"], [])
-        self.assertEqual(checklist_evidence["artifact_refs_total"], 107)
-        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 107)
+        self.assertEqual(checklist_evidence["artifact_refs_total"], 111)
+        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 111)
         self.assertEqual(checklist_evidence["artifact_ref_anchors_total"], 22)
         self.assertEqual(checklist_evidence["artifact_ref_anchors_resolved"], 22)
         self.assertTrue(checklist_evidence["artifact_refs_all_resolved"])
@@ -1422,8 +1448,8 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
         self.assertFalse(checklist_evidence["recorded"])
         self.assertFalse(checklist_evidence["artifact_refs_all_resolved"])
-        self.assertEqual(checklist_evidence["artifact_refs_total"], 104)
-        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 103)
+        self.assertEqual(checklist_evidence["artifact_refs_total"], 108)
+        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 107)
         self.assertEqual(
             checklist_evidence["missing_artifact_refs"],
             [
@@ -1457,8 +1483,8 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
         self.assertFalse(checklist_evidence["recorded"])
         self.assertFalse(checklist_evidence["artifact_refs_all_resolved"])
-        self.assertEqual(checklist_evidence["artifact_refs_total"], 103)
-        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 102)
+        self.assertEqual(checklist_evidence["artifact_refs_total"], 107)
+        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 106)
         self.assertEqual(checklist_evidence["artifact_ref_anchors_total"], 20)
         self.assertEqual(checklist_evidence["artifact_ref_anchors_resolved"], 19)
         self.assertEqual(

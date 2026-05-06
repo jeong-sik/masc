@@ -913,6 +913,18 @@ val metric_ws_bytes_cache_misses : string
     enrichment cost from unrelated snapshot or assembly latency. *)
 val metric_dashboard_execution_render_phase_sec : string
 
+val metric_dashboard_snapshot_latency_seconds : string
+(** Dashboard snapshot phase latency in seconds. *)
+
+val metric_dashboard_snapshot_latency_seconds_bucket : string
+(** Cumulative bucket counter for dashboard snapshot phase latency.
+    Labels: [le]. *)
+
+val metric_dashboard_metric_all_zeros : string
+(** Dashboard render sub-operation timing all-zero diagnostic.
+    Labels: [keeper_name], using [__dashboard__] for the render-level
+    singleton required by the Observe dashboard contract. *)
+
 (** PR-0.2.A (RFC 2026-04-masc-ide-strategy): cache lookup hit/miss
     counters. Labels: [cache] with values
     - ["eio"]      — [Cache_eio.get] (filesystem-backed key/value cache).

@@ -113,9 +113,52 @@ let observe_render_phase phase ms =
     ~labels:[("phase", phase)]
     (render_phase_seconds ms)
 
+let dashboard_snapshot_latency_seconds_buckets =
+  [ 0.05; 0.1; 0.25; 0.5; 1.0; 2.5; 5.0; 10.0; 30.0; 60.0 ]
+
+let observe_dashboard_snapshot_latency ms =
+  let seconds = render_phase_seconds ms in
+  Prometheus.observe_histogram
+    Prometheus.metric_dashboard_snapshot_latency_seconds
+    seconds;
+  let inc_bucket le =
+    Prometheus.inc_counter
+      Prometheus.metric_dashboard_snapshot_latency_seconds_bucket
+      ~labels:[("le", le)]
+      ()
+  in
+  List.iter
+    (fun upper ->
+      if seconds <= upper then
+        inc_bucket (Printf.sprintf "%g" upper))
+    dashboard_snapshot_latency_seconds_buckets;
+  inc_bucket "+Inf"
+
+let dashboard_all_zero_labels = [("keeper_name", "__dashboard__")]
+
+let render_sub_operation_timings_all_zero (t : render_phase_timings_ms) =
+  t.n_keepers > 0
+  && t.snapshot_ms <= 0.0
+  && t.operations_ms <= 0.0
+  && t.enrich_ms <= 0.0
+  && t.data_load_ms <= 0.0
+  && t.assemble_ms <= 0.0
+
+let record_dashboard_all_zero_metric t =
+  let value =
+    if render_sub_operation_timings_all_zero t then 1.0 else 0.0
+  in
+  Prometheus.set_gauge
+    Prometheus.metric_dashboard_metric_all_zeros
+    ~labels:dashboard_all_zero_labels
+    value
+
 let record_render_phase_timings (t : render_phase_timings_ms) =
+  record_dashboard_all_zero_metric t;
   observe_render_phase "total" t.total_ms;
   observe_render_phase "snapshot" t.snapshot_ms;
+  if t.snapshot_ms > 0.0 then
+    observe_dashboard_snapshot_latency t.snapshot_ms;
   observe_render_phase "operations" t.operations_ms;
   observe_render_phase "enrich" t.enrich_ms;
   (* Idle renders (n_keepers = 0) would otherwise inject a fake 0s sample

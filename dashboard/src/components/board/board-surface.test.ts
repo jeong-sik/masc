@@ -297,7 +297,12 @@ describe('BoardSurface Component', () => {
     render(h(BoardSurface, null))
 
     expect(screen.getByLabelText('목록 지연 42밀리초')).toHaveTextContent('목록 42ms')
-    expect(screen.getByLabelText('리액션 지연 17밀리초 실패')).toHaveTextContent('리액션 17ms 실패')
+    const failedChip = screen.getByLabelText('리액션 지연 17밀리초 실패')
+    expect(failedChip).toHaveTextContent('리액션 17ms 실패')
+    expect(failedChip.className).toContain('text-[var(--color-status-err)]')
+    expect(failedChip.className).toContain('border-[var(--bad-30)]')
+    expect(failedChip.className).not.toContain('color-status-bad')
+    expect(failedChip.className).not.toContain('bad-25')
   })
 
   it('hides system posts by default', () => {

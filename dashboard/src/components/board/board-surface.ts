@@ -509,7 +509,7 @@ function renderLatencyChip(label: string, metric: BoardLatencyMetric) {
     <span
       class=${`text-2xs tabular-nums px-1.5 py-0.5 rounded-[var(--r-0)] border ${
         failed
-          ? 'text-[var(--color-status-bad)] border-[var(--bad-25)] bg-[var(--bad-10)]'
+          ? 'text-[var(--color-status-err)] border-[var(--bad-30)] bg-[var(--bad-10)]'
           : 'text-[var(--color-fg-muted)] border-[var(--color-border-divider)] bg-[var(--color-bg-hover)]'
       }`}
       title=${failed && metric.last_error ? metric.last_error : `${label} latency`}

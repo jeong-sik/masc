@@ -175,6 +175,7 @@ val board_reactions_lookup :
 
 val board_comment_dashboard_json :
   ?include_moderation:bool ->
+  ?blind_votes:bool ->
   ?current_vote:Board.vote_direction option ->
   ?reactions:Board.reaction_summary list ->
   Board.comment ->
@@ -182,10 +183,13 @@ val board_comment_dashboard_json :
 (** [board_comment_dashboard_json c] renders a comment with the
     [author_identity] field appended for dashboard inspection.  When
     [include_moderation] is [true], it also appends operator-only
-    [report_count] and [moderation_status] fields. *)
+    [report_count] and [moderation_status] fields.  When [blind_votes]
+    is [true], score fields are hidden until [current_vote] records a
+    viewer vote. *)
 
 val board_post_dashboard_json :
   ?include_moderation:bool ->
+  ?blind_votes:bool ->
   ?current_vote:Board.vote_direction option ->
   ?reactions:Board.reaction_summary list ->
   author_karma:int ->
@@ -204,6 +208,8 @@ val board_post_dashboard_json :
     - [author_identity] from {!board_actor_identity_json}.
     - [report_count] / [moderation_status] from {!Board_moderation}
       only when [include_moderation] is [true].
+    - [vote_blind] / [vote_blind_reason] and null score fields when
+      [blind_votes] is [true] and the viewer has not voted yet.
 
     The base fields [title] / [votes] / [comment_count] /
     [created_at_iso] / [updated_at_iso] / [hearth_count] are

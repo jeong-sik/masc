@@ -36,6 +36,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path
       let offset = int_query_param httpun_request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
       let base_fetch = board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset in
       let voter = board_voter_query httpun_request in
+      let blind_votes = bool_query_param httpun_request "blind_votes" ~default:false in
       let posts =
         Board_dispatch.list_posts ?hearth ~sort_by ~exclude_system
           ~exclude_automation ?author_filter ~limit:base_fetch ()
@@ -60,7 +61,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path
         let post_id = Board.Post_id.to_string p.id in
         let current_vote = board_current_vote_for_post ~voter ~post_id in
         let reactions = reactions_for (Board.Reaction_post, post_id) in
-        board_post_dashboard_json ?current_vote ~reactions
+        board_post_dashboard_json ~blind_votes ?current_vote ~reactions
           ~author_karma:(get_karma author) p
       ) paged in
       let json = `Assoc [
@@ -105,8 +106,11 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path
       let post_id = String.sub p 14 (String.length p - 14) in
       let format = Option.value ~default:"nested" (query_param httpun_request "format") in
       let voter = board_voter_query httpun_request in
+      let blind_votes =
+        bool_query_param httpun_request "blind_votes" ~default:false
+      in
       let (status, body) =
-        board_post_detail_json ~include_moderation:false ~voter
+        board_post_detail_json ~include_moderation:false ~blind_votes ~voter
           ~response_format:format ~post_id
       in
       h2_respond_json h2_reqd body ~status ~extra_headers:cors;

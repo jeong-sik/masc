@@ -298,7 +298,7 @@ function PostCard(post: BoardPost, focused: boolean, onFocus: () => void) {
         ` : null}
         <p class="ide-conversation-body">${bodyText}</p>
         <div style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)' }}>
-          ${post.comment_count > 0 ? `${post.comment_count} replies · ` : ''}${post.votes > 0 ? `${post.votes} votes` : ''}
+          ${post.comment_count > 0 ? `${post.comment_count} replies · ` : ''}${(post.votes ?? 0) > 0 ? `${post.votes ?? 0} votes` : ''}
         </div>
       </button>
     </li>

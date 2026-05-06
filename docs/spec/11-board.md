@@ -319,6 +319,28 @@ truth.  `build_karma_ledger` replays it deterministically.  Rows whose
 post/comment has been deleted are silently dropped; the vote file is
 never modified by the replay path.
 
+### 9a.6 Vote-Blind Projection
+
+Board read endpoints may opt into vote-blind scoring with
+`blind_votes=true` and a canonical `voter`.  When the viewer has not
+voted on a post or comment, the response emits:
+
+```json
+{
+  "vote_blind": true,
+  "vote_blind_reason": "vote_before_score",
+  "votes": null,
+  "vote_balance": null,
+  "score": null,
+  "votes_up": null,
+  "votes_down": null
+}
+```
+
+After that viewer votes, the same row emits `vote_blind: false` and the
+normal score fields.  This is a read-time projection only: it does not
+change storage, sorting, karma ledger replay, or moderation state.
+
 
 
 ## 10. MCP Tool Surface

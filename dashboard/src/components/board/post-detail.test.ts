@@ -268,6 +268,27 @@ describe('CommentThread', () => {
     expect(screen.getByLabelText('댓글 moderation 숨김 1건')).toHaveTextContent('숨김 1')
   })
 
+  it('renders vote-blind comment scores as hidden until voting', () => {
+    const comments = [
+      {
+        id: 'c1',
+        post_id: 'post-1',
+        parent_id: null,
+        author: 'agent',
+        content: 'review me',
+        created_at: '2026-04-02T00:00:00Z',
+        votes: null,
+        vote_balance: null,
+        vote_blind: true,
+        vote_blind_reason: 'vote_before_score',
+      },
+    ] as any
+
+    render(h(CommentThread, { comments, postId: 'post-1' }))
+
+    expect(screen.getByLabelText('댓글 점수 투표 후 공개')).toHaveTextContent('투표 후 공개')
+  })
+
   it('marks the current comment vote as pressed', () => {
     const comments = [
       {
@@ -478,5 +499,28 @@ describe('PostDetail', () => {
     await waitFor(() => {
       expect(votePost).toHaveBeenCalledWith('post-1', 'up')
     })
+  })
+
+  it('renders vote-blind post scores as hidden until voting', () => {
+    const post = {
+      id: 'post-1',
+      author: 'sleepers',
+      title: 'Post',
+      body: 'Body',
+      content: 'Body',
+      created_at: '2026-04-02T00:00:00Z',
+      updated_at: '2026-04-02T00:00:00Z',
+      votes: null,
+      vote_balance: null,
+      vote_blind: true,
+      vote_blind_reason: 'vote_before_score',
+      comment_count: 0,
+      post_kind: 'direct',
+      comments: [],
+    } as any
+
+    render(h(PostDetail, { post }))
+
+    expect(screen.getByLabelText('게시글 점수 투표 후 공개')).toHaveTextContent('투표 후 공개')
   })
 })

@@ -5,6 +5,7 @@ import {
   fetchDashboardGoalDetail,
   fetchDashboardGoalsTree,
   fetchDashboardTools,
+  fetchDashboardMemory,
   fetchCostLatency,
   fetchKeeperConfig,
   fetchMemorySubsystems,
@@ -274,6 +275,25 @@ describe('fetchToolQuality', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/tool-quality?window_hours=24')
     expect(result.window_hours).toBe(24)
     expect(result.sampling_mode).toBe('window_hours')
+  })
+})
+
+describe('fetchDashboardMemory', () => {
+  it('requests vote-blind dashboard board rows for the current actor', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ posts: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchDashboardMemory('hot')
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('/api/v1/dashboard/board?')
+    expect(url).toContain('voter=')
+    expect(url).toContain('blind_votes=true')
   })
 })
 

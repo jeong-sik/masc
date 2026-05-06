@@ -149,6 +149,22 @@ let board_vote_state_fields = function
         ("has_voted", `Bool true);
       ]
 
+let board_vote_blind_active ~blind_votes = function
+  | Some (Some _) -> false
+  | _ -> blind_votes
+
+let board_vote_blind_fields ~blind_active =
+  if blind_active then
+    [
+      ("vote_blind", `Bool true);
+      ("vote_blind_reason", `String "vote_before_score");
+      ("vote_balance", `Null);
+      ("score", `Null);
+      ("votes_up", `Null);
+      ("votes_down", `Null);
+    ]
+  else [ ("vote_blind", `Bool false) ]
+
 let board_reactions_for_post ~voter ~post_id =
   match
     Board_dispatch.list_reactions ~target_type:Board.Reaction_post
@@ -197,24 +213,39 @@ let board_moderation_fields ~include_moderation ~target_kind ~target_id =
       ("moderation_status", `String summary.Board_moderation.moderation_status);
     ]
 
-let board_comment_dashboard_json ?(include_moderation = false) ?current_vote
-    ?reactions (c : Board.comment) : Yojson.Safe.t =
+let board_comment_dashboard_json ?(include_moderation = false)
+    ?(blind_votes = false) ?current_vote ?reactions (c : Board.comment) :
+    Yojson.Safe.t =
   let author = Board.Agent_id.to_string c.author in
   let comment_id = Board.Comment_id.to_string c.id in
   match Board.comment_to_yojson c with
   | `Assoc fields ->
+      let blind_active = board_vote_blind_active ~blind_votes current_vote in
+      let fields =
+        if blind_active then
+          fields
+          |> List.remove_assoc "votes"
+          |> List.remove_assoc "vote_balance"
+          |> List.remove_assoc "score"
+          |> List.remove_assoc "votes_up"
+          |> List.remove_assoc "votes_down"
+        else fields
+      in
       `Assoc
         (fields
          @ [ ("author_identity", board_actor_identity_json author) ]
          @ board_moderation_fields ~include_moderation
              ~target_kind:Board_moderation.Target_comment
              ~target_id:comment_id
+         @ (if blind_active then [ ("votes", `Null) ] else [])
+         @ board_vote_blind_fields ~blind_active
          @ board_vote_state_fields current_vote
          @ board_reaction_fields reactions)
   | other -> other
 
-let board_post_dashboard_json ?(include_moderation = false) ?current_vote
-    ?reactions ~author_karma (p : Board.post) : Yojson.Safe.t =
+let board_post_dashboard_json ?(include_moderation = false)
+    ?(blind_votes = false) ?current_vote ?reactions ~author_karma
+    (p : Board.post) : Yojson.Safe.t =
   let author = Board.Agent_id.to_string p.author in
   let post_id = Board.Post_id.to_string p.id in
   let base_fields =
@@ -231,13 +262,23 @@ let board_post_dashboard_json ?(include_moderation = false) ?current_vote
     |> List.remove_assoc "updated_at_iso"
     |> List.remove_assoc "hearth_count"
   in
+  let blind_active = board_vote_blind_active ~blind_votes current_vote in
+  let fields =
+    if blind_active then
+      fields
+      |> List.remove_assoc "vote_balance"
+      |> List.remove_assoc "score"
+      |> List.remove_assoc "votes_up"
+      |> List.remove_assoc "votes_down"
+    else fields
+  in
   let score = p.votes_up - p.votes_down in
   `Assoc
     ( fields
       @ [
           ("title", `String p.title);
           ("body", `String p.body);
-          ("votes", `Int score);
+          ("votes", if blind_active then `Null else `Int score);
           ("comment_count", `Int p.reply_count);
           ("created_at_iso", `String (iso8601_of_unix p.created_at));
           ("updated_at_iso", `String (iso8601_of_unix p.updated_at));
@@ -247,6 +288,7 @@ let board_post_dashboard_json ?(include_moderation = false) ?current_vote
       @ board_moderation_fields ~include_moderation
           ~target_kind:Board_moderation.Target_post
           ~target_id:post_id
+      @ board_vote_blind_fields ~blind_active
       @ board_vote_state_fields current_vote
       @ board_reaction_fields reactions )
 

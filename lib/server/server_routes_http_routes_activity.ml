@@ -227,6 +227,7 @@ let add_routes ~sw ~clock router =
          let offset = int_query_param req "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
          let base_fetch = board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset in
          let voter = board_voter_query req in
+         let blind_votes = bool_query_param req "blind_votes" ~default:false in
          let include_moderation =
            include_moderation_projection
              ~base_path:state.Mcp_server.room_config.base_path
@@ -258,8 +259,8 @@ let add_routes ~sw ~clock router =
                let post_id = Board.Post_id.to_string p.id in
                let current_vote = board_current_vote_for_post ~voter ~post_id in
                let reactions = reactions_for (Board.Reaction_post, post_id) in
-               board_post_dashboard_json ~include_moderation ?current_vote
-                 ~reactions
+               board_post_dashboard_json ~include_moderation ~blind_votes
+                 ?current_vote ~reactions
                  ~author_karma:(get_karma author) p)
              paged
          in
@@ -373,13 +374,16 @@ let add_routes ~sw ~clock router =
                 query_param req "format" |> Option.value ~default:"nested"
               in
               let voter = board_voter_query req in
+              let blind_votes =
+                bool_query_param req "blind_votes" ~default:false
+              in
               let include_moderation =
                 include_moderation_projection
                   ~base_path:state.Mcp_server.room_config.base_path
                   req
               in
               let (status, body) =
-                board_post_detail_json ~include_moderation ~voter
+                board_post_detail_json ~include_moderation ~blind_votes ~voter
                   ~response_format:format ~post_id
               in
               respond_json_with_cors ~status request reqd body)

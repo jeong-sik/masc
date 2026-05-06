@@ -30,4 +30,9 @@ module For_testing : sig
 
   val mount_if_present :
     host:string -> container:string -> Credential_provider.ro_mount list
+
+  val compose_ro_mounts_result :
+    ?keeper_name:string ->
+    Keeper_gh_env.keeper_binding ->
+    (Credential_provider.ro_mount list, string) result
 end

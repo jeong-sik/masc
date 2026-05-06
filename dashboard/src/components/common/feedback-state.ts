@@ -10,8 +10,35 @@
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
-import { AlertTriangle, AlertOctagon, Loader2, RefreshCw } from 'lucide-preact'
 import { ActionButton } from './button'
+
+export type FeedbackStateKind = 'empty' | 'loading' | 'error' | 'recoverable' | 'fatal'
+
+export interface FeedbackStateSummary {
+  kind: FeedbackStateKind
+  compact: boolean
+  hasIcon: boolean
+  hasAction: boolean
+  hasDetail: boolean
+}
+
+export function summarizeFeedbackState(
+  kind: FeedbackStateKind,
+  options: {
+    compact?: boolean
+    icon?: unknown
+    action?: unknown
+    detail?: unknown
+  } = {},
+): FeedbackStateSummary {
+  return {
+    kind,
+    compact: Boolean(options.compact),
+    hasIcon: Boolean(options.icon),
+    hasAction: Boolean(options.action),
+    hasDetail: Boolean(options.detail),
+  }
+}
 
 interface EmptyStateProps {
   message?: string
@@ -31,10 +58,30 @@ export function EmptyState({
   children,
 }: EmptyStateProps) {
   const content = children ?? message
+  const summary = summarizeFeedbackState('empty', { compact, icon, action })
 
   return html`
-    <div class="flex flex-col items-center justify-center gap-2 text-center ${compact ? 'py-4' : 'py-8'} text-sm text-[var(--color-fg-muted)] ${cx ?? ''}" role="status">
-      ${icon ? html`<span class="text-2xl opacity-40" aria-hidden="true">${icon}</span>` : null}
+    <div
+      class="flex flex-col items-center justify-center gap-2 text-center ${compact ? 'py-4' : 'py-8'} text-sm text-[var(--color-fg-muted)] ${cx ?? ''}"
+      role="status"
+      data-feedback-state
+      data-feedback-kind=${summary.kind}
+      data-feedback-compact=${summary.compact}
+      data-feedback-has-icon=${summary.hasIcon}
+      data-feedback-has-action=${summary.hasAction}
+      data-feedback-has-detail=${summary.hasDetail}
+    >
+      ${icon
+        ? html`
+            <span
+              class="inline-flex h-6 min-w-6 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-subtle)] px-1 font-mono text-[10px] opacity-60"
+              aria-hidden="true"
+              data-feedback-icon
+            >
+              ${icon}
+            </span>
+          `
+        : null}
       ${content ? html`<span class="leading-relaxed">${content}</span>` : null}
       ${action ?? null}
     </div>
@@ -48,9 +95,26 @@ interface LoadingStateProps {
 
 /** Loading indicator with spin animation */
 export function LoadingState({ class: cx, children }: LoadingStateProps) {
+  const summary = summarizeFeedbackState('loading', { icon: true })
   return html`
-    <div class="loading-state flex flex-col items-center py-8 text-sm ${cx ?? ''}" role="status" aria-live="polite">
-      <${Loader2} size=${24} class="animate-spin mb-3 opacity-60 text-accent-fg" aria-hidden="true" />
+    <div
+      class="loading-state flex flex-col items-center py-8 text-sm ${cx ?? ''}"
+      role="status"
+      aria-live="polite"
+      data-feedback-state
+      data-feedback-kind=${summary.kind}
+      data-feedback-compact=${summary.compact}
+      data-feedback-has-icon=${summary.hasIcon}
+      data-feedback-has-action=${summary.hasAction}
+      data-feedback-has-detail=${summary.hasDetail}
+    >
+      <span
+        class="mb-3 inline-flex h-6 min-w-6 animate-pulse items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-subtle)] px-1 font-mono text-[10px] text-[var(--color-fg-accent)] opacity-70"
+        aria-hidden="true"
+        data-feedback-icon
+      >
+        LD
+      </span>
       <span>${children ?? '불러오는 중...'}</span>
     </div>
   `
@@ -62,9 +126,21 @@ interface ErrorStateProps {
 }
 
 export function ErrorState({ message, class: cx }: ErrorStateProps) {
+  const summary = summarizeFeedbackState('error', { icon: true })
   return html`
-    <div class="flex items-start gap-2 rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-12)] px-4 py-3 text-sm text-[var(--bad-light)] ${cx ?? ''}" role="alert">
-      <${AlertTriangle} size=${16} class="mt-0.5 shrink-0" aria-hidden="true" />
+    <div
+      class="flex items-start gap-2 rounded-[var(--r-0)] border border-[var(--bad-30)] bg-[var(--bad-12)] px-4 py-3 text-sm text-[var(--bad-light)] ${cx ?? ''}"
+      role="alert"
+      data-feedback-state
+      data-feedback-kind=${summary.kind}
+      data-feedback-compact=${summary.compact}
+      data-feedback-has-icon=${summary.hasIcon}
+      data-feedback-has-action=${summary.hasAction}
+      data-feedback-has-detail=${summary.hasDetail}
+    >
+      <span class="mt-0.5 inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--bad-30)] px-1 font-mono text-[10px]" aria-hidden="true" data-feedback-icon>
+        ER
+      </span>
       <span>${message}</span>
     </div>
   `
@@ -94,23 +170,33 @@ export function ErrorRecoverable({
   retryLabel = '다시 시도',
   class: cx,
 }: ErrorRecoverableProps) {
+  const summary = summarizeFeedbackState('recoverable', {
+    icon: true,
+    action: onRetry,
+    detail,
+  })
   return html`
     <section
       role="alert"
-      class="flex flex-col gap-2 rounded-[var(--r-1)] border border-[var(--warn-20)] border-l-[3px] border-l-[var(--color-status-warn)] bg-[var(--warn-soft)] px-4 py-3 ${cx ?? ''}"
+      class="flex flex-col gap-2 rounded-[var(--r-0)] border border-[var(--warn-20)] border-l-[3px] border-l-[var(--color-status-warn)] bg-[var(--warn-soft)] px-4 py-3 ${cx ?? ''}"
+      data-feedback-state
+      data-feedback-kind=${summary.kind}
+      data-feedback-compact=${summary.compact}
+      data-feedback-has-icon=${summary.hasIcon}
+      data-feedback-has-action=${summary.hasAction}
+      data-feedback-has-detail=${summary.hasDetail}
     >
       <div class="flex items-center gap-2">
-        <${AlertTriangle} size=${16} class="shrink-0 text-[var(--warn-bright)]" aria-hidden="true" />
+        <span class="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--warn-20)] px-1 font-mono text-[10px] text-[var(--warn-bright)]" aria-hidden="true" data-feedback-icon>
+          RT
+        </span>
         <span class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--warn-bright)]">
           복구 가능
         </span>
         ${onRetry ? html`
           <span class="ml-auto">
             <${ActionButton} variant="ghost" size="sm" onClick=${onRetry}>
-              <span class="inline-flex items-center gap-1">
-                <${RefreshCw} size=${12} aria-hidden="true" />
-                ${retryLabel}
-              </span>
+              ${retryLabel}
             <//>
           </span>
         ` : null}
@@ -146,13 +232,26 @@ export function ErrorFatal({
   reloadLabel = '다시 불러오기',
   class: cx,
 }: ErrorFatalProps) {
+  const summary = summarizeFeedbackState('fatal', {
+    icon: true,
+    action: onReload,
+    detail,
+  })
   return html`
     <section
       role="alert"
-      class="flex flex-col gap-2 rounded-[var(--r-1)] border border-[var(--bad-20)] border-l-[3px] border-l-[var(--color-status-err)] bg-[var(--bad-soft)] px-4 py-3 ${cx ?? ''}"
+      class="flex flex-col gap-2 rounded-[var(--r-0)] border border-[var(--bad-20)] border-l-[3px] border-l-[var(--color-status-err)] bg-[var(--bad-soft)] px-4 py-3 ${cx ?? ''}"
+      data-feedback-state
+      data-feedback-kind=${summary.kind}
+      data-feedback-compact=${summary.compact}
+      data-feedback-has-icon=${summary.hasIcon}
+      data-feedback-has-action=${summary.hasAction}
+      data-feedback-has-detail=${summary.hasDetail}
     >
       <div class="flex items-center gap-2">
-        <${AlertOctagon} size=${16} class="shrink-0 text-[var(--bad-light)]" aria-hidden="true" />
+        <span class="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--bad-20)] px-1 font-mono text-[10px] text-[var(--bad-light)]" aria-hidden="true" data-feedback-icon>
+          FT
+        </span>
         <span class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--bad-light)]">
           치명적
         </span>

@@ -92,7 +92,7 @@ describe('ErrorRecoverable a11y', () => {
   it('with retry callback passes axe', async () => {
     render(
       html`<${ErrorRecoverable}
-        message="Sync failed"
+        title="Sync failed"
         onRetry=${() => {}}
       />`,
       container,
@@ -115,8 +115,7 @@ describe('ErrorFatal a11y', () => {
   it('with retry+reload callbacks passes axe', async () => {
     render(
       html`<${ErrorFatal}
-        message="Session expired"
-        onRetry=${() => {}}
+        title="Session expired"
         onReload=${() => {}}
       />`,
       container,

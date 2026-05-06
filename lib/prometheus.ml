@@ -827,6 +827,12 @@ let metric_oas_sse_relay_drops =
   "masc_oas_sse_relay_drops_total"
 let metric_oas_sse_relay_queue_depth =
   "masc_oas_sse_relay_queue_depth"
+let metric_oas_inference_telemetry_tokens =
+  "masc_oas_inference_telemetry_tokens"
+let metric_oas_inference_prompt_tok_per_sec =
+  "masc_oas_inference_prompt_tok_per_sec"
+let metric_oas_inference_decode_tok_per_sec =
+  "masc_oas_inference_decode_tok_per_sec"
 
 (* MCP tool schema budget (set once at boot from mcp_server_eio.ml
    via [set_tool_schema_stats]). *)
@@ -1351,6 +1357,16 @@ let init () =
     "AfterTurn responses where response.telemetry was None." Counter;
   add metric_after_turn_telemetry_zero_latency
     "AfterTurn responses where telemetry was present but request_latency_ms was 0." Counter;
+  add metric_oas_inference_telemetry_tokens
+    "OAS InferenceTelemetry token histogram for events suppressed from SSE. \
+     Labels are bounded to model_bucket, phase, and token_bucket; max token \
+     histogram cardinality is 8 * 2 * 5 = 80 labelled series." Histogram;
+  add metric_oas_inference_prompt_tok_per_sec
+    "OAS InferenceTelemetry prompt throughput histogram for events suppressed \
+     from SSE. Labelled only by bounded model_bucket." Histogram;
+  add metric_oas_inference_decode_tok_per_sec
+    "OAS InferenceTelemetry decode throughput histogram for events suppressed \
+     from SSE. Labelled only by bounded model_bucket." Histogram;
   add metric_tasks "Total tasks processed" Counter;
   add metric_errors "Total errors" Counter;
   add metric_error_events

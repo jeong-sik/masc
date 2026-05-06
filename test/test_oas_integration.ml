@@ -866,7 +866,46 @@ let test_oas_event_bridge_logs_tool_completed_with_agent_name () =
    relaying per-token telemetry over SSE (high-frequency flood path that
    was deliberately suppressed in #10590).  Pin both invariants. *)
 
-let test_inference_telemetry_stays_none_after_fallback () =
+let inference_token_labels ~model_bucket ~phase ~token_bucket =
+  [
+    ("model_bucket", model_bucket);
+    ("phase", phase);
+    ("token_bucket", token_bucket);
+  ]
+
+let test_inference_telemetry_aggregates_without_sse_relay () =
+  let prompt_labels =
+    inference_token_labels ~model_bucket:"openai" ~phase:"prompt"
+      ~token_bucket:"1_1k"
+  in
+  let completion_labels =
+    inference_token_labels ~model_bucket:"openai" ~phase:"completion"
+      ~token_bucket:"over_8k"
+  in
+  let rate_labels = [ ("model_bucket", "openai") ] in
+  let token_metric = Prometheus.metric_oas_inference_telemetry_tokens in
+  let prompt_rate_metric = Prometheus.metric_oas_inference_prompt_tok_per_sec in
+  let decode_rate_metric = Prometheus.metric_oas_inference_decode_tok_per_sec in
+  let before_prompt_tokens =
+    Prometheus.metric_value_or_zero token_metric ~labels:prompt_labels ()
+  in
+  let before_prompt_count =
+    Prometheus.metric_value_or_zero (token_metric ^ "_count")
+      ~labels:prompt_labels ()
+  in
+  let before_completion_tokens =
+    Prometheus.metric_value_or_zero token_metric ~labels:completion_labels ()
+  in
+  let before_prompt_rate =
+    Prometheus.metric_value_or_zero prompt_rate_metric ~labels:rate_labels ()
+  in
+  let before_decode_rate =
+    Prometheus.metric_value_or_zero decode_rate_metric ~labels:rate_labels ()
+  in
+  let before_decode_count =
+    Prometheus.metric_value_or_zero (decode_rate_metric ^ "_count")
+      ~labels:rate_labels ()
+  in
   let evt : Event_bus.event =
     Event_bus.mk_event
       ~correlation_id:"test-corr"
@@ -875,21 +914,47 @@ let test_inference_telemetry_stays_none_after_fallback () =
          {
            agent_name = "test-agent";
            turn = 1;
-           provider = "test-provider";
-           model = "test-model";
+           provider = "openai";
+           model = "gpt-5";
            prompt_tokens = Some 10;
-           completion_tokens = Some 20;
+           completion_tokens = Some 9000;
            prompt_ms = Some 5.0;
            decode_ms = Some 50.0;
            decode_tok_s = Some 100.0;
          })
   in
-  match Oas_event_bridge.native_event_to_json evt with
-  | None -> ()
-  | Some _ ->
-      Alcotest.fail
-        "InferenceTelemetry must remain None — catch-all fallback \
-         must not absorb the high-frequency suppression case"
+  (match Oas_event_bridge.native_event_to_json evt with
+   | None -> ()
+   | Some _ ->
+       Alcotest.fail
+         "InferenceTelemetry must remain None — catch-all fallback \
+          must not absorb the high-frequency suppression case");
+  Alcotest.(check (float 0.0001))
+    "prompt token histogram sum"
+    (before_prompt_tokens +. 10.0)
+    (Prometheus.metric_value_or_zero token_metric ~labels:prompt_labels ());
+  Alcotest.(check (float 0.0001))
+    "prompt token histogram count"
+    (before_prompt_count +. 1.0)
+    (Prometheus.metric_value_or_zero (token_metric ^ "_count")
+       ~labels:prompt_labels ());
+  Alcotest.(check (float 0.0001))
+    "completion token histogram sum"
+    (before_completion_tokens +. 9000.0)
+    (Prometheus.metric_value_or_zero token_metric ~labels:completion_labels ());
+  Alcotest.(check (float 0.0001))
+    "prompt throughput histogram sum"
+    (before_prompt_rate +. 2000.0)
+    (Prometheus.metric_value_or_zero prompt_rate_metric ~labels:rate_labels ());
+  Alcotest.(check (float 0.0001))
+    "decode throughput histogram sum"
+    (before_decode_rate +. 100.0)
+    (Prometheus.metric_value_or_zero decode_rate_metric ~labels:rate_labels ());
+  Alcotest.(check (float 0.0001))
+    "decode throughput histogram count"
+    (before_decode_count +. 1.0)
+    (Prometheus.metric_value_or_zero (decode_rate_metric ^ "_count")
+       ~labels:rate_labels ())
 
 let test_payload_kind_labels_match_envelope_event_type () =
   (* For the explicit-arm path, the [event_type] embedded in the wrap
@@ -960,8 +1025,9 @@ let () =
         test_oas_event_bridge_logs_turn_completed_with_agent_name;
       Alcotest.test_case "sse bridge logs tool completed with agent name" `Quick
         test_oas_event_bridge_logs_tool_completed_with_agent_name;
-      Alcotest.test_case "inference telemetry stays None after fallback added (#10584)" `Quick
-        test_inference_telemetry_stays_none_after_fallback;
+      Alcotest.test_case
+        "inference telemetry aggregates without sse relay (#10584)" `Quick
+        test_inference_telemetry_aggregates_without_sse_relay;
       Alcotest.test_case "payload_kind labels match wrap envelope event_type" `Quick
         test_payload_kind_labels_match_envelope_event_type;
     ];

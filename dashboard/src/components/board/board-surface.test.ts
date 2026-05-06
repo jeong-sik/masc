@@ -282,6 +282,26 @@ describe('BoardSurface Component', () => {
     expect(screen.queryByText('+ 새 글 작성')).not.toBeInTheDocument()
   })
 
+  it('routes the karma focus to the board karma surface', async () => {
+    route.value = { params: { focus: 'karma' } } as any
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        events: [],
+        count: 0,
+        scoring_rule: '',
+        totals: [],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    render(h(BoardSurface, null))
+
+    expect(await screen.findByRole('heading', { name: 'Karma ledger' })).toBeInTheDocument()
+    expect(screen.queryByText('+ 새 글 작성')).not.toBeInTheDocument()
+  })
+
   it('renders compact board latency metrics when samples exist', () => {
     boardPosts.value = [
       makePost({

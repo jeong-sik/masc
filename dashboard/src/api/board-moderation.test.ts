@@ -130,6 +130,51 @@ describe('board moderation api', () => {
     })
   })
 
+  it('rejects invalid target kinds instead of falling back to posts', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(flagBoardModerationTarget({
+      target_kind: 'message' as never,
+      target_id: 'post-1',
+    })).rejects.toThrow('unknown board moderation target_kind: message; valid: post, comment')
+
+    await expect(submitBoardModerationAction({
+      target_kind: 'message' as never,
+      target_id: 'post-1',
+      action: 'approve',
+    })).rejects.toThrow('unknown board moderation target_kind: message; valid: post, comment')
+
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('names rejected moderation actions and reasons with valid options', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(submitBoardModerationAction({
+      target_id: 'post-1',
+      action: 'delete' as never,
+    })).rejects.toThrow('unknown board moderation action: delete; valid: approve, remove, hide, warn')
+
+    await expect(flagBoardModerationTarget({
+      target_id: 'post-1',
+      reason: 'duplicate' as never,
+    })).rejects.toThrow(
+      'unknown board moderation reason: duplicate; valid: spam, harassment, off_topic, policy:<non-empty>',
+    )
+
+    await expect(submitBoardModerationAction({
+      target_id: 'post-1',
+      action: 'approve',
+      reason: 'duplicate' as never,
+    })).rejects.toThrow(
+      'unknown board moderation reason: duplicate; valid: spam, harassment, off_topic, policy:<non-empty>',
+    )
+
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('returns null for malformed queue and audit entries', () => {
     expect(normalizeBoardModerationQueueEntry({
       entry_id: 'flag-1',

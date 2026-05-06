@@ -12,6 +12,9 @@ import {
 const MODERATION_QUEUE_PATH = '/api/v1/dashboard/board/moderation/queue'
 const MODERATION_FLAG_PATH = '/api/v1/dashboard/board/moderation/flag'
 const MODERATION_ACTION_PATH = '/api/v1/dashboard/board/moderation/action'
+const VALID_TARGET_KINDS = ['post', 'comment'] as const
+const VALID_ACTION_KINDS = ['approve', 'remove', 'hide', 'warn'] as const
+const VALID_REASON_HINT = 'spam, harassment, off_topic, policy:<non-empty>'
 
 export type BoardModerationTargetKind = 'post' | 'comment'
 export type BoardModerationFlagReason =
@@ -59,10 +62,25 @@ function trimNonEmpty(value: string | null | undefined): string | null {
   return trimmed ? trimmed : null
 }
 
+function describeInvalid(value: unknown): string {
+  if (typeof value === 'string') return value.trim() || '<blank>'
+  if (value === undefined) return '<undefined>'
+  if (value === null) return '<null>'
+  return String(value)
+}
+
 function normalizeTargetKind(value: unknown): BoardModerationTargetKind | null {
   const kind = asString(value, '').trim()
   if (kind === 'post' || kind === 'comment') return kind
   return null
+}
+
+function requireTargetKind(value: unknown): BoardModerationTargetKind {
+  const kind = normalizeTargetKind(value)
+  if (kind) return kind
+  throw new Error(
+    `unknown board moderation target_kind: ${describeInvalid(value)}; valid: ${VALID_TARGET_KINDS.join(', ')}`,
+  )
 }
 
 function normalizeFlagReason(value: unknown): BoardModerationFlagReason | null {
@@ -167,9 +185,13 @@ export async function flagBoardModerationTarget(args: {
 }): Promise<BoardModerationQueueEntry> {
   const targetId = trimNonEmpty(args.target_id)
   if (!targetId) throw new Error('target_id is required')
-  const targetKind = normalizeTargetKind(args.target_kind) ?? 'post'
+  const targetKind = args.target_kind === undefined ? 'post' : requireTargetKind(args.target_kind)
   const reason = args.reason === undefined ? 'spam' : normalizeFlagReason(args.reason)
-  if (!reason) throw new Error('unknown board moderation reason')
+  if (!reason) {
+    throw new Error(
+      `unknown board moderation reason: ${describeInvalid(args.reason)}; valid: ${VALID_REASON_HINT}`,
+    )
+  }
   const reporter = trimNonEmpty(args.reporter)
 
   const body: Record<string, string> = {
@@ -197,12 +219,18 @@ export async function submitBoardModerationAction(args: {
 }): Promise<BoardModerationActionResult> {
   const targetId = trimNonEmpty(args.target_id)
   if (!targetId) throw new Error('target_id is required')
-  const targetKind = normalizeTargetKind(args.target_kind) ?? 'post'
+  const targetKind = args.target_kind === undefined ? 'post' : requireTargetKind(args.target_kind)
   const action = normalizeActionKind(args.action)
-  if (!action) throw new Error('unknown board moderation action')
+  if (!action) {
+    throw new Error(
+      `unknown board moderation action: ${describeInvalid(args.action)}; valid: ${VALID_ACTION_KINDS.join(', ')}`,
+    )
+  }
   const reason = args.reason === undefined ? null : normalizeFlagReason(args.reason)
   if (args.reason !== undefined && !reason) {
-    throw new Error('unknown board moderation reason')
+    throw new Error(
+      `unknown board moderation reason: ${describeInvalid(args.reason)}; valid: ${VALID_REASON_HINT}`,
+    )
   }
 
   const body: Record<string, string> = {

@@ -426,6 +426,15 @@ let metric_tool_join_required_guard =
 let metric_keeper_semaphore_wait_timeout =
   "masc_keeper_semaphore_wait_timeout_total"
 
+(* Goal-loop Observe contract: the Grafana p99 query consumes
+   [masc_keeper_semaphore_wait_seconds_bucket] grouped by keeper and cascade.
+   The generic [register_histogram] exporter currently exposes summaries, so
+   keeper_turn_slot emits the cumulative bucket companion explicitly. *)
+let metric_keeper_semaphore_wait_seconds =
+  "masc_keeper_semaphore_wait_seconds"
+let metric_keeper_semaphore_wait_seconds_bucket =
+  "masc_keeper_semaphore_wait_seconds_bucket"
+
 let metric_keeper_slot_yield_total =
   "masc_keeper_slot_yield_total"
 
@@ -1419,6 +1428,9 @@ let init () =
   add metric_keeper_turn_queue_depth
     "Current keeper turn wait queue depth (labels: channel=autonomous_queue)"
     Gauge;
+  register_histogram ~name:metric_keeper_semaphore_wait_seconds
+    ~help:"Seconds spent waiting to acquire keeper turn semaphores \
+           (labels: keeper_name, cascade_profile, channel)." ();
   (* P-DASH-13: provider block duration histogram.
      Records the duration (in seconds) for which a provider is placed in
      cooldown each time a cooldown is applied or extended.  Labels: provider. *)

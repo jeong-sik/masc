@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shlex
 import sys
 import time
 from collections import Counter
@@ -254,6 +255,19 @@ def bool_field(row: dict[str, Any], key: str) -> bool:
     return value if isinstance(value, bool) else False
 
 
+def output_json(row: dict[str, Any]) -> dict[str, Any]:
+    output = row.get("output")
+    if isinstance(output, dict):
+        return output
+    if isinstance(output, str):
+        try:
+            parsed = json.loads(output)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
 def tool_succeeded_in_row(row: dict[str, Any], tool_name: str) -> bool:
     if row.get("tool") == tool_name:
         return row.get("ok") is True
@@ -403,6 +417,74 @@ def has_docker_execution_marker(row: dict[str, Any]) -> bool:
     )
 
 
+def has_tool_call_docker_execution_marker(row: dict[str, Any]) -> bool:
+    return has_docker_execution_marker(row) or has_docker_execution_marker(
+        output_json(row)
+    )
+
+
+def shell_words(command: str) -> list[str]:
+    try:
+        return shlex.split(command)
+    except ValueError:
+        return []
+
+
+def tool_call_command_candidates(row: dict[str, Any]) -> list[str]:
+    candidates: list[str] = []
+
+    def add(raw: Any) -> None:
+        if isinstance(raw, str):
+            command = raw.strip()
+            if command and command not in candidates:
+                candidates.append(command)
+
+    input_json = row.get("input")
+    if isinstance(input_json, dict):
+        tool = row.get("tool")
+        if tool == "keeper_shell" and input_json.get("op") == "gh":
+            cmd = input_json.get("cmd")
+            if isinstance(cmd, str):
+                add("gh " + cmd.strip())
+        elif tool == "keeper_bash":
+            add(input_json.get("cmd"))
+        elif tool == "masc_code_shell":
+            add(input_json.get("command"))
+        elif tool == "masc_code_git":
+            add(input_json.get("action"))
+
+    add(output_json(row).get("command"))
+    return candidates
+
+
+def gh_argv(command: str) -> list[str]:
+    words = shell_words(command)
+    if words and words[0].lower() == "gh":
+        return words[1:]
+    return []
+
+
+def command_is_git_push(command: str) -> bool:
+    words = shell_words(command)
+    return len(words) >= 2 and words[0].lower() == "git" and words[1].lower() == "push"
+
+
+def command_is_gh_pr_create(command: str) -> bool:
+    argv = gh_argv(command)
+    return len(argv) >= 2 and argv[0].lower() == "pr" and argv[1].lower() == "create"
+
+
+def command_is_gh_pr_approve(command: str) -> bool:
+    argv = gh_argv(command)
+    lowered_args = [arg.lower() for arg in argv[3:]]
+    return (
+        len(argv) >= 3
+        and argv[0].lower() == "pr"
+        and argv[1].lower() == "review"
+        and "--approve" in lowered_args
+    )
+
+
 def pr_lifecycle_evidence_from_decision(
     row: dict[str, Any],
 ) -> tuple[set[str], set[str]]:
@@ -436,6 +518,38 @@ def pr_lifecycle_evidence_from_decision(
         row
     ):
         add("pr_approve:keeper_pr_review_comment")
+    return evidence, docker_evidence
+
+
+def pr_lifecycle_evidence_from_tool_call(
+    row: dict[str, Any],
+) -> tuple[set[str], set[str]]:
+    evidence: set[str] = set()
+    docker_evidence: set[str] = set()
+    tool = row.get("tool")
+    if not isinstance(tool, str) or not bool_field(row, "success"):
+        return evidence, docker_evidence
+
+    def add(item: str) -> None:
+        evidence.add(item)
+        if has_tool_call_docker_execution_marker(row):
+            docker_evidence.add(item)
+
+    if tool == "keeper_pr_create":
+        add("pr_create:keeper_pr_create")
+    elif tool == "masc_code_git":
+        for command in tool_call_command_candidates(row):
+            if command.strip().lower() == "push":
+                add("git_push:masc_code_git")
+                break
+    elif tool in SHELL_TOOLS or tool == "masc_code_shell":
+        for command in tool_call_command_candidates(row):
+            if command_is_git_push(command):
+                add(f"git_push:{tool}")
+            if command_is_gh_pr_create(command):
+                add(f"pr_create:{tool}")
+            if command_is_gh_pr_approve(command):
+                add(f"pr_approve:{tool}")
     return evidence, docker_evidence
 
 
@@ -658,6 +772,13 @@ def scan_keeper_board_posts(
     return latest_ts, board_post_evidence, product_evidence, design_evidence
 
 
+def tool_call_paths(base_path: Path) -> list[Path]:
+    calls_dir = base_path / ".masc" / "tool_calls"
+    if not calls_dir.exists():
+        return []
+    return sorted(path for path in calls_dir.rglob("*.jsonl") if path.is_file())
+
+
 def scan_keeper_evidence(
     base_path: Path,
     name: str,
@@ -704,6 +825,31 @@ def scan_keeper_evidence(
             pr_lifecycle_evidence
         ) and complete_lifecycle_evidence(docker_pr_lifecycle_evidence):
             break
+    if not (
+        complete_lifecycle_evidence(pr_lifecycle_evidence)
+        and complete_lifecycle_evidence(docker_pr_lifecycle_evidence)
+    ):
+        for calls in tool_call_paths(base_path):
+            for row in iter_jsonl(calls):
+                if row.get("keeper") != name:
+                    continue
+                ts = numeric_field(row, "ts") or numeric_field(row, "ts_unix")
+                if min_metric_ts is not None and ts is not None and ts < min_metric_ts:
+                    continue
+                if ts is not None:
+                    latest_ts = ts if latest_ts is None else max(latest_ts, ts)
+                tool = row.get("tool")
+                if isinstance(tool, str):
+                    tools.add(tool)
+                row_evidence, row_docker_evidence = (
+                    pr_lifecycle_evidence_from_tool_call(row)
+                )
+                pr_lifecycle_evidence.update(row_evidence)
+                docker_pr_lifecycle_evidence.update(row_docker_evidence)
+            if complete_lifecycle_evidence(
+                pr_lifecycle_evidence
+            ) and complete_lifecycle_evidence(docker_pr_lifecycle_evidence):
+                break
     return latest_ts, tools, pr_lifecycle_evidence, docker_pr_lifecycle_evidence
 
 

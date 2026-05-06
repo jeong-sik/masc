@@ -851,6 +851,26 @@ let test_pr_review_action_metric_observes_invalid_output_json () =
   check (float 0.001) "parse failure counted" (before +. 1.0)
     (hook_output_parse_failures "pr_review_action")
 
+let test_pr_review_action_metric_extracts_keeper_shell_approve () =
+  let event =
+    pr_review_event
+      ~tool_name:"keeper_shell"
+      ~input:
+        (`Assoc
+          [
+            ("op", `String "gh");
+            ("cmd", `String "pr review 13680 --approve --body ok");
+          ])
+      ~output_text:
+        {|{"ok":true,"op":"gh","command":"gh 'pr' 'review' '13680' '--approve' '--body' 'ok'","via":"docker"}|}
+      ()
+    |> require_pr_review_event "keeper_shell approve"
+  in
+  check string "approve action" "APPROVE" event.action;
+  check (option int) "approve pr" (Some 13680) event.pr_number;
+  check bool "approve success" true event.success;
+  check (option string) "approve route via" (Some "docker") event.route_via
+
 let pr_work_events ?route_via_fallback ~tool_name ~input ~output_text () =
   Hooks.For_testing.pr_work_action_metric_events_of_tool_io
     ~route_via_fallback ~tool_name ~input ~output_text
@@ -908,6 +928,28 @@ let test_pr_work_action_metric_extracts_gh_pr_create () =
   | [ event ] ->
       check (option string) "route via nested" (Some "docker") event.route_via
   | _ -> failf "expected one pr create event"
+
+let test_pr_work_action_metric_extracts_quoted_output_gh_pr_create () =
+  let events =
+    pr_work_events
+      ~tool_name:"keeper_shell"
+      ~input:
+        (`Assoc
+          [
+            ("op", `String "gh");
+            ("cmd", `String "pr status");
+          ])
+      ~output_text:
+        {|{"ok":true,"op":"gh","command":"gh 'pr' 'create' '--draft' '--base' 'main' '--head' 'keeper/proof'","via":"docker"}|}
+      ()
+  in
+  check (list string) "quoted output pr create action" [ "PR_CREATE" ]
+    (work_actions events);
+  match events with
+  | [ event ] ->
+      check (option string) "quoted output route via" (Some "docker")
+        event.route_via
+  | _ -> failf "expected one quoted output pr create event"
 
 let test_pr_work_action_metric_extracts_keeper_pr_create () =
   let events =
@@ -1124,6 +1166,8 @@ let () =
             test_pr_review_action_metric_extracts_reply
         ; test_case "observes invalid output JSON" `Quick
             test_pr_review_action_metric_observes_invalid_output_json
+        ; test_case "extracts keeper_shell approve" `Quick
+            test_pr_review_action_metric_extracts_keeper_shell_approve
         ] )
     ; ( "pr_work_action",
         [ test_case "extracts masc_code_git push" `Quick
@@ -1132,6 +1176,8 @@ let () =
             test_pr_work_action_metric_observes_invalid_output_json
         ; test_case "extracts keeper_shell gh pr create" `Quick
             test_pr_work_action_metric_extracts_gh_pr_create
+        ; test_case "extracts quoted output gh pr create" `Quick
+            test_pr_work_action_metric_extracts_quoted_output_gh_pr_create
         ; test_case "extracts keeper_pr_create" `Quick
             test_pr_work_action_metric_extracts_keeper_pr_create
         ; test_case "uses native pr create route fallback" `Quick

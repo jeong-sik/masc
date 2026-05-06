@@ -1120,6 +1120,7 @@ let test_keeper_up_resumes_auto_paused_keeper () =
               ])
       in
       Alcotest.(check bool) "initial keeper up ok" true ok;
+      Keeper_keepalive.stop_keepalive keeper_name;
       let meta = read_keeper_meta_exn config keeper_name in
       let blocker_text =
         Keeper_types.blocker_class_to_string Keeper_types.Turn_timeout
@@ -1200,6 +1201,7 @@ let test_keeper_up_keeps_paused_keeper_with_continue_gate_blocker () =
               ])
       in
       Alcotest.(check bool) "initial keeper up ok" true ok;
+      Keeper_keepalive.stop_keepalive keeper_name;
       let meta = read_keeper_meta_exn config keeper_name in
       let blocker_text =
         "turn outcome ambiguous after committed mutating tool call(s): \
@@ -1286,6 +1288,7 @@ let test_keeper_up_keeps_paused_keeper_with_pending_approval () =
               ])
       in
       Alcotest.(check bool) "initial keeper up ok" true ok;
+      Keeper_keepalive.stop_keepalive keeper_name;
       let meta = read_keeper_meta_exn config keeper_name in
       let blocker_text =
         Keeper_types.blocker_class_to_string Keeper_types.Turn_timeout

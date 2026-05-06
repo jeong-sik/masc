@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -33,6 +34,9 @@ POST_ACT_EVIDENCE_KINDS = {
     "live_runtime_status",
 }
 PROMPT_CHECKLIST_STATUSES = {"PASS", "PARTIAL", "BLOCKED"}
+PROMPT_CHECKLIST_ISSUE_REF_RE = re.compile(
+    r"^https://github\.com/jeong-sik/masc-mcp/issues/\d+$"
+)
 
 
 @dataclass(frozen=True)
@@ -545,6 +549,11 @@ def prompt_closeout_checklist_evidence(
     blocked_criteria: set[str] = set()
     requirement_ids: set[str] = set()
     duplicate_requirement_ids: list[str] = []
+    non_pass_requirements = 0
+    requirements_with_tracking_issue_refs = 0
+    tracking_issue_refs: set[str] = set()
+    missing_tracking_issue_refs: list[str] = []
+    invalid_tracking_issue_refs: list[str] = []
     for index, requirement in enumerate(requirements):
         if not isinstance(requirement, dict):
             invalid_requirements.append(f"#{index}: not_object")
@@ -573,6 +582,32 @@ def prompt_closeout_checklist_evidence(
         criterion_id = requirement.get("criterion_id")
         if status == "BLOCKED" and isinstance(criterion_id, str):
             blocked_criteria.add(criterion_id)
+        tracking_refs_raw = requirement.get("tracking_issue_refs", [])
+        tracking_refs = tracking_refs_raw if isinstance(tracking_refs_raw, list) else []
+        valid_tracking_refs = [
+            item
+            for item in tracking_refs
+            if isinstance(item, str)
+            and PROMPT_CHECKLIST_ISSUE_REF_RE.fullmatch(item) is not None
+        ]
+        tracking_issue_refs.update(valid_tracking_refs)
+        if status in {"PARTIAL", "BLOCKED"}:
+            requirement_label = str(requirement_id or f"#{index}")
+            non_pass_requirements += 1
+            if not valid_tracking_refs:
+                missing_tracking_issue_refs.append(requirement_label)
+                invalid_requirements.append(
+                    f"{requirement_label}: missing_tracking_issue_refs"
+                )
+            else:
+                requirements_with_tracking_issue_refs += 1
+            if not isinstance(tracking_refs_raw, list) or len(
+                valid_tracking_refs
+            ) != len(tracking_refs):
+                invalid_tracking_issue_refs.append(requirement_label)
+                invalid_requirements.append(
+                    f"{requirement_label}: invalid_tracking_issue_refs"
+                )
 
     expected_source_docs = as_int(audit_catalog.get("source_documents_expected"))
     source_docs_complete = (
@@ -608,6 +643,13 @@ def prompt_closeout_checklist_evidence(
         "status_counts": status_counts,
         "blocked_criteria": sorted(blocked_criteria),
         "has_strict_corpus_blocker": has_strict_corpus_blocker,
+        "non_pass_requirements": non_pass_requirements,
+        "requirements_with_tracking_issue_refs": (
+            requirements_with_tracking_issue_refs
+        ),
+        "tracking_issue_refs_total": len(tracking_issue_refs),
+        "missing_tracking_issue_refs": missing_tracking_issue_refs,
+        "invalid_tracking_issue_refs": invalid_tracking_issue_refs,
         "invalid_requirements": invalid_requirements,
         "local_path_leaks": local_path_leaks,
         "recorded": recorded,
@@ -933,6 +975,18 @@ def build_completion_audit(
                         checklist_status_counts.get("PARTIAL")
                     )
                     + as_int(checklist_status_counts.get("BLOCKED")),
+                    "non_pass_requirements": checklist_evidence.get(
+                        "non_pass_requirements"
+                    ),
+                    "requirements_with_tracking_issue_refs": checklist_evidence.get(
+                        "requirements_with_tracking_issue_refs"
+                    ),
+                    "tracking_issue_refs_total": checklist_evidence.get(
+                        "tracking_issue_refs_total"
+                    ),
+                    "missing_tracking_issue_refs": checklist_evidence.get(
+                        "missing_tracking_issue_refs"
+                    ),
                     "has_strict_corpus_blocker": checklist_evidence.get(
                         "has_strict_corpus_blocker"
                     ),

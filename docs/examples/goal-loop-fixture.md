@@ -315,4 +315,7 @@ The closeout audit must still remain `BLOCKED` until
 `prompt_requirements_closeout_complete` passes for every prompt-mapped
 requirement. The `prompt_to_artifact_checklist_recorded` criterion only proves
 that the prompt-to-artifact map is present; it is not a completion proxy while
-the checklist still contains `PARTIAL` or `BLOCKED` requirements.
+the checklist still contains `PARTIAL` or `BLOCKED` requirements. Every
+non-PASS prompt checklist row must also include at least one valid GitHub issue
+tracking ref, so incomplete prompt coverage cannot be recorded without an
+owned follow-up.

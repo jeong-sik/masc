@@ -29,7 +29,11 @@
       ],
       "status": "PARTIAL",
       "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "Startup signature is replayed, but the full 206-row strict corpus is absent."
+      "gap": "Startup signature is replayed, but the full 206-row strict corpus is absent.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13265",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
     },
     {
       "requirement_id": "startup-credential-starvation",
@@ -41,7 +45,10 @@
       ],
       "status": "PARTIAL",
       "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "Signature and ACT links exist, but full keeper recovery SLO proof is not recorded."
+      "gap": "Signature and ACT links exist, but full keeper recovery SLO proof is not recorded.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
     },
     {
       "requirement_id": "startup-alive-but-stuck",
@@ -52,7 +59,10 @@
       ],
       "status": "PARTIAL",
       "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "Failure is modeled, but runtime recovery success across all keepers is not proven."
+      "gap": "Failure is modeled, but runtime recovery success across all keepers is not proven.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
     },
     {
       "requirement_id": "startup-governance-fallback",
@@ -63,7 +73,10 @@
       ],
       "status": "PARTIAL",
       "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "Visibility exists, but strict judge-output failure policy is incomplete."
+      "gap": "Visibility exists, but strict judge-output failure policy is incomplete.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
     },
     {
       "requirement_id": "startup-unknown-toml-keys",
@@ -74,7 +87,42 @@
       ],
       "status": "PARTIAL",
       "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "Health visibility exists, but strict schema rejection is not enforced."
+      "gap": "Health visibility exists, but strict schema rejection is not enforced.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
+    },
+    {
+      "requirement_id": "dashboard-metric-all-zero",
+      "prompt_requirement": "Dashboard metric all-zero detection",
+      "artifact_refs": [
+        "test/fixtures/goal_loop/observe.startup.json",
+        "test/fixtures/goal_loop/orient.startup.json",
+        "test/fixtures/goal_loop/audit-corpus.external-claim.json#CD-10"
+      ],
+      "status": "PARTIAL",
+      "criterion_id": "strict_row_level_catalog_complete",
+      "gap": "Prompt evidence is represented only in the partial catalog and startup replay, not the full 206-row strict corpus or production metric surface.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13265",
+        "https://github.com/jeong-sik/masc-mcp/issues/13608",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
+    },
+    {
+      "requirement_id": "linear-autoboot-warmup",
+      "prompt_requirement": "Linear autoboot warmup visibility",
+      "artifact_refs": [
+        "test/fixtures/goal_loop/audit-corpus.external-claim.json#NF-5",
+        "test/fixtures/goal_loop/orient.startup.json"
+      ],
+      "status": "PARTIAL",
+      "criterion_id": "strict_row_level_catalog_complete",
+      "gap": "Source claim is tracked, but no full row-level replay proves the warmup behavior is closed.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13265",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
     },
     {
       "requirement_id": "goal-loop-phase-chain",
@@ -88,7 +136,27 @@
       ],
       "status": "PARTIAL",
       "criterion_id": "post_act_verify_complete",
-      "gap": "Deterministic chain exists, but long-running scheduler cadence is not implemented."
+      "gap": "Deterministic chain exists, but long-running scheduler cadence is not implemented.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13607",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
+    },
+    {
+      "requirement_id": "observe-prometheus-grafana-metrics",
+      "prompt_requirement": "Prometheus/Grafana Observe metrics",
+      "artifact_refs": [
+        "scripts/observe_goal_loop_logs.py",
+        "test/fixtures/goal_loop/observe.startup.json",
+        "docs/audit-responses/2026-05-05-goal-loop-completion-audit.md"
+      ],
+      "status": "PARTIAL",
+      "criterion_id": "post_act_verify_complete",
+      "gap": "Deterministic log and metric replay exists, but Prometheus/Grafana runtime metric wiring is not shipped.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13608",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
     },
     {
       "requirement_id": "observe-log-parser",
@@ -111,7 +179,26 @@
       ],
       "status": "PARTIAL",
       "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "Engine and triage exist, but only 19 of 206 strict rows are itemized."
+      "gap": "Engine and triage exist, but only 19 of 206 strict rows are itemized.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13265",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
+    },
+    {
+      "requirement_id": "orient-dashboard-counts",
+      "prompt_requirement": "Orient dashboard counts",
+      "artifact_refs": [
+        "scripts/goal_loop_status.py",
+        "docs/examples/goal-loop-fixture.md"
+      ],
+      "status": "PARTIAL",
+      "criterion_id": "strict_row_level_catalog_complete",
+      "gap": "CLI JSON/text exists, but the operator dashboard panel is not wired.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13609",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
     },
     {
       "requirement_id": "decide-priority-algorithm",
@@ -125,6 +212,22 @@
       "gap": null
     },
     {
+      "requirement_id": "weekly-act-priority-queue",
+      "prompt_requirement": "Weekly ACT priority queue",
+      "artifact_refs": [
+        "test/fixtures/goal_loop/act-map.startup.json",
+        "test/fixtures/goal_loop/known-prs.startup.json",
+        "scripts/validate_goal_loop_act_map.py"
+      ],
+      "status": "PARTIAL",
+      "criterion_id": "strict_row_level_catalog_complete",
+      "gap": "Reference integrity exists, but SLA ownership workflow and automatic queueing are not implemented.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13611",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
+    },
+    {
       "requirement_id": "act-pr-proof",
       "prompt_requirement": "ACT checklist and PR proof",
       "artifact_refs": [
@@ -134,7 +237,11 @@
       ],
       "status": "PARTIAL",
       "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "Known ACTs are mapped; not every still-present row can have ACT proof until the missing 187 rows exist."
+      "gap": "Known ACTs are mapped; not every still-present row can have ACT proof until the missing 187 rows exist.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13265",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
     },
     {
       "requirement_id": "verify-closeout-gates",
@@ -146,7 +253,29 @@
       ],
       "status": "PARTIAL",
       "criterion_id": "post_act_verify_complete",
-      "gap": "Closeout verifier exists; TLA and production metric gates are not fully implemented."
+      "gap": "Closeout verifier exists; TLA and production metric gates are not fully implemented.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13610",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
+    },
+    {
+      "requirement_id": "verify-pass-fail-branch",
+      "prompt_requirement": "Verify PASS/FAIL branch semantics",
+      "artifact_refs": [
+        "test/fixtures/goal_loop/verify.fail.json",
+        "scripts/verify_goal_loop_logs.py",
+        "scripts/goal_loop_completion_audit.py"
+      ],
+      "status": "PARTIAL",
+      "criterion_id": "strict_row_level_catalog_complete",
+      "gap": "Branch semantics exist, but complete-corpus Verify is still blocked.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13265",
+        "https://github.com/jeong-sik/masc-mcp/issues/13505",
+        "https://github.com/jeong-sik/masc-mcp/issues/13610",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
     },
     {
       "requirement_id": "goal-loop-dashboard",
@@ -157,7 +286,11 @@
       ],
       "status": "PARTIAL",
       "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "CLI status exists; operator dashboard panel is not wired."
+      "gap": "CLI status exists; operator dashboard panel is not wired.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13609",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
     },
     {
       "requirement_id": "anti-stagnation-rules",
@@ -168,7 +301,11 @@
       ],
       "status": "PARTIAL",
       "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "Reference integrity exists; SLA timers and automatic escalation are not implemented."
+      "gap": "Reference integrity exists; SLA timers and automatic escalation are not implemented.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13611",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
     },
     {
       "requirement_id": "expected-convergence",
@@ -179,7 +316,11 @@
       ],
       "status": "BLOCKED",
       "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "No measured convergence claim is valid without the strict corpus and live SLO proof."
+      "gap": "No measured convergence claim is valid without the strict corpus and live SLO proof.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13265",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
     },
     {
       "requirement_id": "full-206-row-strict-corpus",
@@ -193,7 +334,11 @@
       ],
       "status": "BLOCKED",
       "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "Discovery records FULL_ROW_CORPUS_NOT_FOUND with 19 of 206 strict rows itemized and 187 missing; the source-doc candidate extractor finds only 132 explicit row candidates across 5 source files, with 7 checked prompt files yielding zero explicit candidates. Candidate corpora must also bind row source paths and line refs to the audit catalog external_sources. This is not the required 206-row strict corpus."
+      "gap": "Discovery records FULL_ROW_CORPUS_NOT_FOUND with 19 of 206 strict rows itemized and 187 missing; the source-doc candidate extractor finds only 132 explicit row candidates across 5 source files, with 7 checked prompt files yielding zero explicit candidates. Candidate corpora must also bind row source paths and line refs to the audit catalog external_sources. This is not the required 206-row strict corpus.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13265",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
     }
   ],
   "next_required_artifact": "A strict row-level corpus with 206 itemized findings, stable finding IDs, source references, severity, decision mapping, and replay expectations.",

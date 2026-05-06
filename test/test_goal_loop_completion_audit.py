@@ -701,11 +701,26 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertEqual(checklist_evidence["prompt_sources_checked"], 12)
         self.assertTrue(checklist_evidence["has_strict_corpus_blocker"])
         self.assertFalse(checklist_evidence["local_path_leaks"])
-        self.assertGreaterEqual(checklist_evidence["requirements_total"], 10)
+        self.assertEqual(checklist_evidence["requirements_total"], 21)
+        self.assertEqual(checklist_evidence["status_counts"]["PASS"], 2)
+        self.assertEqual(checklist_evidence["status_counts"]["PARTIAL"], 17)
         self.assertEqual(checklist_evidence["status_counts"]["BLOCKED"], 2)
+        self.assertEqual(checklist_evidence["non_pass_requirements"], 19)
+        self.assertEqual(
+            checklist_evidence["requirements_with_tracking_issue_refs"],
+            19,
+        )
+        self.assertEqual(checklist_evidence["tracking_issue_refs_total"], 8)
+        self.assertEqual(checklist_evidence["missing_tracking_issue_refs"], [])
+        self.assertEqual(checklist_evidence["invalid_tracking_issue_refs"], [])
         closeout_evidence = by_id["prompt_requirements_closeout_complete"].evidence
         self.assertEqual(by_id["prompt_requirements_closeout_complete"].status, "FAIL")
-        self.assertEqual(closeout_evidence["incomplete_requirements"], 13)
+        self.assertEqual(closeout_evidence["incomplete_requirements"], 19)
+        self.assertEqual(closeout_evidence["non_pass_requirements"], 19)
+        self.assertEqual(
+            closeout_evidence["requirements_with_tracking_issue_refs"],
+            19,
+        )
         self.assertTrue(closeout_evidence["has_strict_corpus_blocker"])
 
     def test_completion_audit_accepts_prompt_checklist_without_strict_blocker(
@@ -755,6 +770,34 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertEqual(
             checklist_evidence["duplicate_requirement_ids"],
             [first["requirement_id"]],
+        )
+        self.assertEqual(by_id["prompt_requirements_closeout_complete"].status, "FAIL")
+
+    def test_completion_audit_rejects_untracked_incomplete_prompt_requirement(
+        self,
+    ) -> None:
+        checklist = json.loads(PROMPT_CHECKLIST_FIXTURE.read_text(encoding="utf-8"))
+        requirements = checklist["requirements"]
+        assert isinstance(requirements, list)
+        first = requirements[0]
+        assert isinstance(first, dict)
+        first.pop("tracking_issue_refs")
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            prompt_closeout_checklist=checklist,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
+        self.assertFalse(checklist_evidence["recorded"])
+        self.assertEqual(
+            checklist_evidence["missing_tracking_issue_refs"],
+            [first["requirement_id"]],
+        )
+        self.assertIn(
+            f"{first['requirement_id']}: missing_tracking_issue_refs",
+            checklist_evidence["invalid_requirements"],
         )
         self.assertEqual(by_id["prompt_requirements_closeout_complete"].status, "FAIL")
 
@@ -842,7 +885,7 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertEqual(prompt_checklist["status"], "PASS")
         prompt_closeout = by_id["prompt_requirements_closeout_complete"]
         self.assertEqual(prompt_closeout["status"], "FAIL")
-        self.assertEqual(prompt_closeout["evidence"]["incomplete_requirements"], 13)
+        self.assertEqual(prompt_closeout["evidence"]["incomplete_requirements"], 19)
 
 
 if __name__ == "__main__":

@@ -9,13 +9,26 @@ Prometheus / Grafana files that live alongside the masc-mcp source so deployment
 | `cascade-alerts.yml` | cascade | alerts | `docs/observability/cascade-metrics.md` |
 | `cascade-slo.yml` | cascade | recording rules + SLO alerts | `docs/observability/cascade-metrics.md` |
 | `grafana-cascade-dashboard.json` | cascade | Grafana dashboard | `docs/observability/cascade-metrics.md` |
+| `grafana-goal-loop-observe-dashboard.json` | GOAL LOOP Observe | Grafana dashboard | `docs/observability/goal-loop-observe-metrics.md` |
 | `grafana-keeper-turn-fsm-dashboard.json` | keeper turn FSM | Grafana dashboard | `docs/observability/keeper-turn-fsm-metrics.md` |
+| `goal-loop-observe-alerts.yml` | GOAL LOOP Observe | alerts | `docs/observability/goal-loop-observe-metrics.md` |
+| `goal-loop-observe-metrics.contract.json` | GOAL LOOP Observe | exporter contract | `docs/observability/goal-loop-observe-metrics.md` |
 | `keeper-turn-fsm-alerts.yml` | keeper turn FSM | alerts | `docs/observability/keeper-turn-fsm-metrics.md` |
 | `keeper-turn-fsm-slo.yml` | keeper turn FSM | recording rules | `docs/observability/keeper-turn-fsm-metrics.md` |
 
 ## Domains
 
 The two domains are **deliberately separate**.
+
+### GOAL LOOP Observe
+
+Tracks the Observe phase signals from the GOAL LOOP design: keeper
+liveness, semaphore wait, provider health skips, pricing misses,
+dashboard all-zero diagnostics, config drift, governance fallback, UTF-8
+repair, and CAS retries. The exporter contract is
+`goal-loop-observe-metrics.contract.json`; `scripts/validate_goal_loop_observe_metrics.py`
+checks that the alert rules and Grafana dashboard cover every required
+signal.
 
 ### Cascade
 

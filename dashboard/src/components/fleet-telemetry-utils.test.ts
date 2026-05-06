@@ -515,6 +515,25 @@ describe('buildToolQualityMap', () => {
   })
 })
 
+describe('buildFleetRows', () => {
+  it('does not turn tool-quality-only data into runtime fleet rows', () => {
+    const rows = buildFleetRows([], {
+      total: 5,
+      success: 5,
+      failure: 0,
+      success_rate: 100,
+      by_tool: [],
+      by_keeper: [
+        { name: 'keeper-tool-only', calls: 5, success_pct: 100 },
+      ],
+      failure_categories: [],
+      hourly_trend: [],
+    })
+
+    expect(rows).toEqual([])
+  })
+})
+
 describe('buildRuntimeWarnings', () => {
   it('warns about admission queue blockage', () => {
     const rows = [makeRow({ runtime_blocker_class: 'admission_queue_wait_timeout' })]

@@ -460,43 +460,7 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
                 : 'env',
           }
         })
-      : toolQuality.by_keeper.map((keeper): FleetRow => ({
-          name: keeper.name,
-          status: 'unknown',
-          keepalive_running: false,
-          diagnostic_health_state: null,
-          diagnostic_summary: null,
-          context_ratio: 0,
-          turn_count: 0,
-          last_latency_ms: 0,
-          last_activity_ago_s: null,
-          activity_label: '최근 활동',
-          activity_source: 'none',
-          model: 'unknown',
-          cascade_label: null,
-          provider_label: null,
-          fallback_label: null,
-          tool_calls: keeper.calls,
-          tool_success_pct: keeper.success_pct,
-          tool_activity_known: keeper.calls > 0,
-          recent_tools: [],
-          runtime_blocker_class: null,
-          runtime_blocker_summary: null,
-          runtime_trust_attention: false,
-          runtime_trust_reason: null,
-          runtime_trust_next_action: null,
-          terminal_reason_code: null,
-          terminal_reason_severity: null,
-          tool_audit_at: null,
-          goal_label: null,
-          goal_linked: false,
-          active_goal_count: 0,
-          sandbox_profile: null,
-          sandbox_last_error: null,
-          effective_sandbox_image: null,
-          decision_required: false,
-          budget_source: null,
-        }))
+      : []
 
   return [...rows].sort(compareFleetRows)
 }

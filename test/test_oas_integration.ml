@@ -309,8 +309,8 @@ let test_oas_event_bridge_broadcasts_lifecycle_to_observers () =
             let coordinator_event = Masc_mcp.Sse.try_pop "coordinator-lifecycle" in
             Alcotest.(check bool) "observer got oas lifecycle" true
               (observer_event <> None);
-            Alcotest.(check bool) "coordinator got oas lifecycle" true
-              (coordinator_event <> None);
+            Alcotest.(check bool) "coordinator skips non-jsonrpc lifecycle" true
+              (coordinator_event = None);
             raise Exit)
       with Exit -> ())
 

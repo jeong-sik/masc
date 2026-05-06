@@ -143,6 +143,29 @@ let test_concurrent_two_instances_no_corruption () =
   in
   check int "every line parses as JSON" (2 * n) parsed_count
 
+let test_append_failure_does_not_poison_registry_mutex () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "djmr_retry" in
+  let base_dir = Filename.concat dir "blocked" in
+  Out_channel.with_open_text base_dir (fun oc -> output_string oc "blocked");
+  let store = D.create ~base_dir () in
+  let failed =
+    try
+      D.append store (`Assoc [ ("phase", `String "initial") ]);
+      false
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | _ -> true
+  in
+  check bool "initial append failed" true failed;
+  Sys.remove base_dir;
+  Unix.mkdir base_dir 0o755;
+  let retry_store = D.create ~base_dir () in
+  D.append retry_store (`Assoc [ ("phase", `String "retry") ]);
+  let records = D.read_recent retry_store 1 in
+  check int "retry append persisted" 1 (List.length records)
+
 let () =
   run "dated_jsonl_mutex_registry_10372"
     [
@@ -161,5 +184,7 @@ let () =
         [
           test_case "two instances at same dir do not corrupt" `Quick
             test_concurrent_two_instances_no_corruption;
+          test_case "append failure does not poison registry mutex" `Quick
+            test_append_failure_does_not_poison_registry_mutex;
         ] );
     ]

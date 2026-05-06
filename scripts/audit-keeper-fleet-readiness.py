@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
+from collections import Counter
 from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -54,6 +56,22 @@ SHELL_TOOLS = {
     "keeper_bash",
     "keeper_shell",
 }
+PRODUCT_DOMAIN_MARKERS = {
+    "customer",
+    "goal",
+    "goals",
+    "pm",
+    "product",
+    "roadmap",
+    "strategy",
+}
+DESIGN_DOMAIN_MARKERS = {
+    "design",
+    "interface",
+    "product-design",
+    "ui",
+    "ux",
+}
 
 
 @dataclass
@@ -72,6 +90,8 @@ class KeeperAudit:
     last_turn_age_hours: float | None
     recent_action: bool
     board_action: bool
+    product_action: bool
+    design_action: bool
     pr_surface_action: bool
     pr_review_mutation: bool
     pr_create_action: bool
@@ -83,6 +103,9 @@ class KeeperAudit:
     docker_pr_approve_mutation: bool
     docker_pr_lifecycle_action: bool
     evidence_tools: list[str]
+    board_post_evidence: list[str]
+    product_evidence: list[str]
+    design_evidence: list[str]
     pr_lifecycle_evidence: list[str]
     docker_pr_lifecycle_evidence: list[str]
     failures: list[str]
@@ -525,6 +548,116 @@ def complete_lifecycle_evidence(evidence: set[str]) -> bool:
     )
 
 
+def board_post_paths(base_path: Path) -> list[Path]:
+    path = base_path / ".masc" / "board_posts.jsonl"
+    return [path] if path.exists() else []
+
+
+def domain_tokens(value: Any) -> set[str]:
+    if not isinstance(value, str):
+        return set()
+    raw = value.strip().lower()
+    if not raw:
+        return set()
+    tokens = set(re.split(r"[^a-z0-9]+", raw))
+    tokens.discard("")
+    tokens.add(raw)
+    return tokens
+
+
+def domain_marker_sources(
+    value: Any,
+    *,
+    prefix: str,
+    domain_markers: set[str],
+) -> list[str]:
+    sources: list[str] = []
+    if isinstance(value, str):
+        if domain_tokens(value) & domain_markers:
+            sources.append(f"{prefix}={value.strip().lower()}")
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            sources.extend(
+                domain_marker_sources(
+                    item,
+                    prefix=f"{prefix}[{index}]",
+                    domain_markers=domain_markers,
+                )
+            )
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            if isinstance(key, str):
+                sources.extend(
+                    domain_marker_sources(
+                        item,
+                        prefix=f"{prefix}.{key}",
+                        domain_markers=domain_markers,
+                    )
+                )
+    return sources
+
+
+def board_post_domain_sources(
+    row: dict[str, Any],
+    domain_markers: set[str],
+) -> list[str]:
+    sources = domain_marker_sources(
+        row.get("hearth"),
+        prefix="hearth",
+        domain_markers=domain_markers,
+    )
+    meta = row.get("meta")
+    if isinstance(meta, dict):
+        sources.extend(
+            domain_marker_sources(
+                meta,
+                prefix="meta",
+                domain_markers=domain_markers,
+            )
+        )
+    return sorted(set(sources))
+
+
+def board_post_evidence_item(kind: str, row: dict[str, Any], source: str) -> str:
+    post_id = string_field(row, "id") or "unknown"
+    source_slug = re.sub(r"[^a-z0-9_.=-]+", "_", source.lower()).strip("_")
+    return f"{kind}:board_post:{post_id}:{source_slug}"
+
+
+def scan_keeper_board_posts(
+    base_path: Path,
+    name: str,
+    *,
+    max_silence_hours: float | None = None,
+    now: float | None = None,
+) -> tuple[float | None, set[str], set[str], set[str]]:
+    latest_ts: float | None = None
+    board_post_evidence: set[str] = set()
+    product_evidence: set[str] = set()
+    design_evidence: set[str] = set()
+    min_ts: float | None = None
+    if max_silence_hours is not None:
+        min_ts = (time.time() if now is None else now) - (max_silence_hours * 3600.0)
+
+    for path in board_post_paths(base_path):
+        for row in iter_jsonl(path):
+            if string_field(row, "author") != name:
+                continue
+            ts = numeric_field(row, "updated_at") or numeric_field(row, "created_at")
+            if min_ts is not None and ts is not None and ts < min_ts:
+                continue
+            if ts is not None:
+                latest_ts = ts if latest_ts is None else max(latest_ts, ts)
+            post_id = string_field(row, "id") or "unknown"
+            board_post_evidence.add(f"board_post:{post_id}")
+            for source in board_post_domain_sources(row, PRODUCT_DOMAIN_MARKERS):
+                product_evidence.add(board_post_evidence_item("product", row, source))
+            for source in board_post_domain_sources(row, DESIGN_DOMAIN_MARKERS):
+                design_evidence.add(board_post_evidence_item("design", row, source))
+
+    return latest_ts, board_post_evidence, product_evidence, design_evidence
+
+
 def scan_keeper_evidence(
     base_path: Path,
     name: str,
@@ -580,6 +713,8 @@ def audit_keeper(
     config_path: Path,
     max_silence_hours: float,
     require_board_evidence: bool,
+    require_product_evidence: bool,
+    require_design_evidence: bool,
     require_pr_surface_evidence: bool,
     require_pr_review_evidence: bool,
     require_pr_create_evidence: bool,
@@ -588,6 +723,7 @@ def audit_keeper(
     require_docker_pr_create_evidence: bool,
     require_docker_git_push_evidence: bool,
     require_docker_pr_approve_evidence: bool,
+    forbidden_github_identities: set[str] | None = None,
 ) -> KeeperAudit:
     name = config_path.stem
     config = load_keeper_config(config_path)
@@ -622,6 +758,8 @@ def audit_keeper(
         failures.append("preset_not_pr_capable")
     if not github_identity:
         failures.append("github_identity_missing")
+    elif forbidden_github_identities and github_identity in forbidden_github_identities:
+        failures.append(f"github_identity_forbidden_{github_identity}")
     if git_identity_mode != "github_identity":
         failures.append("git_identity_mode_not_github_identity")
 
@@ -641,10 +779,22 @@ def audit_keeper(
         pr_lifecycle_evidence,
         docker_pr_lifecycle_evidence,
     ) = scan_keeper_evidence(base_path, name, max_silence_hours=max_silence_hours)
+    (
+        board_post_ts,
+        board_post_evidence,
+        product_evidence,
+        design_evidence,
+    ) = scan_keeper_board_posts(
+        base_path, name, max_silence_hours=max_silence_hours
+    )
     runtime_turn_ts = numeric_field(runtime, "last_turn_ts")
     updated_ts = iso_to_unix(string_field(runtime, "updated_at"))
     last_turn_ts = max(
-        (ts for ts in (evidence_ts, runtime_turn_ts, updated_ts) if ts is not None),
+        (
+            ts
+            for ts in (evidence_ts, board_post_ts, runtime_turn_ts, updated_ts)
+            if ts is not None
+        ),
         default=None,
     )
     last_turn_age_hours: float | None = None
@@ -657,7 +807,9 @@ def audit_keeper(
         if not recent_action:
             failures.append("silence_window_exceeded")
 
-    board_action = bool(tools & BOARD_TOOLS)
+    board_action = bool(tools & BOARD_TOOLS) or bool(board_post_evidence)
+    product_action = bool(product_evidence)
+    design_action = bool(design_evidence)
     pr_surface_action = bool(tools & PR_SURFACE_TOOLS)
     pr_review_mutation = bool(tools & PR_REVIEW_MUTATION_TOOLS)
     pr_create_action = any(
@@ -686,6 +838,10 @@ def audit_keeper(
     )
     if require_board_evidence and not board_action:
         failures.append("board_action_evidence_missing")
+    if require_product_evidence and not product_action:
+        failures.append("product_action_evidence_missing")
+    if require_design_evidence and not design_action:
+        failures.append("design_action_evidence_missing")
     if require_pr_surface_evidence and not pr_surface_action:
         failures.append("pr_surface_evidence_missing")
     elif not pr_surface_action:
@@ -722,6 +878,8 @@ def audit_keeper(
         last_turn_age_hours=last_turn_age_hours,
         recent_action=recent_action,
         board_action=board_action,
+        product_action=product_action,
+        design_action=design_action,
         pr_surface_action=pr_surface_action,
         pr_review_mutation=pr_review_mutation,
         pr_create_action=pr_create_action,
@@ -733,6 +891,9 @@ def audit_keeper(
         docker_pr_approve_mutation=docker_pr_approve_mutation,
         docker_pr_lifecycle_action=docker_pr_lifecycle_action,
         evidence_tools=sorted(tools),
+        board_post_evidence=sorted(board_post_evidence),
+        product_evidence=sorted(product_evidence),
+        design_evidence=sorted(design_evidence),
         pr_lifecycle_evidence=sorted(pr_lifecycle_evidence),
         docker_pr_lifecycle_evidence=sorted(docker_pr_lifecycle_evidence),
         failures=failures,
@@ -755,6 +916,8 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             config_path=path,
             max_silence_hours=args.max_silence_hours,
             require_board_evidence=args.require_board_evidence,
+            require_product_evidence=args.require_product_evidence,
+            require_design_evidence=args.require_design_evidence,
             require_pr_surface_evidence=args.require_pr_surface_evidence,
             require_pr_review_evidence=args.require_pr_review_evidence,
             require_pr_create_evidence=(
@@ -778,6 +941,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
                 args.require_docker_pr_approve_evidence
                 or args.require_docker_pr_lifecycle_evidence
             ),
+            forbidden_github_identities=set(args.forbid_github_identity or []),
         )
         for path in config_paths
     ]
@@ -786,6 +950,18 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     if len(config_paths) < args.expected_keepers:
         fleet_failures.append(
             f"minimum_{args.expected_keepers}_configured_keepers_got_{len(config_paths)}"
+        )
+    github_identity_counts = Counter(
+        keeper.github_identity for keeper in keepers if keeper.github_identity
+    )
+    requires_docker_approve = (
+        args.require_docker_pr_approve_evidence
+        or args.require_docker_pr_lifecycle_evidence
+    )
+    if requires_docker_approve and len(github_identity_counts) < 2:
+        fleet_failures.append(
+            "docker_pr_approve_identity_pool_insufficient"
+            f"_unique_github_identities_{len(github_identity_counts)}"
         )
     failed_keepers = [keeper for keeper in keepers if keeper.failures]
     ok = not fleet_failures and not failed_keepers
@@ -796,8 +972,12 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         "expected_keepers": args.expected_keepers,
         "configured_keepers": len(config_paths),
         "max_silence_hours": args.max_silence_hours,
+        "github_identity_counts": dict(sorted(github_identity_counts.items())),
         "requirements": {
             "require_board_evidence": args.require_board_evidence,
+            "require_product_evidence": args.require_product_evidence,
+            "require_design_evidence": args.require_design_evidence,
+            "forbid_github_identity": args.forbid_github_identity or [],
             "require_pr_surface_evidence": args.require_pr_surface_evidence,
             "require_pr_review_evidence": args.require_pr_review_evidence,
             "require_pr_create_evidence": args.require_pr_create_evidence,
@@ -843,6 +1023,7 @@ def print_text(report: dict[str, Any]) -> None:
         print(
             "- {name}: {marker} preset={preset} sandbox={sandbox}/{network} "
             "gh={github} recent={recent} age={age} board={board} "
+            "product={product} design={design} "
             "pr_surface={pr_surface} pr_review={pr_review} "
             "pr_create={pr_create} git_push={git_push} "
             "pr_approve={pr_approve} docker_pr_create={docker_pr_create} "
@@ -857,6 +1038,8 @@ def print_text(report: dict[str, Any]) -> None:
                 recent=str(keeper["recent_action"]).lower(),
                 age=age_label,
                 board=str(keeper["board_action"]).lower(),
+                product=str(keeper["product_action"]).lower(),
+                design=str(keeper["design_action"]).lower(),
                 pr_surface=str(keeper["pr_surface_action"]).lower(),
                 pr_review=str(keeper["pr_review_mutation"]).lower(),
                 pr_create=str(keeper["pr_create_action"]).lower(),
@@ -888,10 +1071,36 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--max-silence-hours", type=float, default=2400.0)
     parser.add_argument(
+        "--forbid-github-identity",
+        action="append",
+        default=[],
+        metavar="IDENTITY",
+        help=(
+            "Fail keepers using this GitHub identity. Repeat for multiple "
+            "operator or unsafe identity names."
+        ),
+    )
+    parser.add_argument(
         "--no-require-board-evidence",
         action="store_false",
         dest="require_board_evidence",
         help="Do not fail when a keeper lacks board action evidence.",
+    )
+    parser.add_argument(
+        "--require-product-evidence",
+        action="store_true",
+        help=(
+            "Fail unless each keeper has recent product-domain board evidence "
+            "from explicit hearth or metadata markers."
+        ),
+    )
+    parser.add_argument(
+        "--require-design-evidence",
+        action="store_true",
+        help=(
+            "Fail unless each keeper has recent design-domain board evidence "
+            "from explicit hearth or metadata markers."
+        ),
     )
     parser.add_argument(
         "--require-pr-surface-evidence",

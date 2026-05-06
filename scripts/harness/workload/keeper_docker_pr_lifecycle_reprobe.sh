@@ -16,6 +16,8 @@ PROMPT_DIR="$RUN_DIR/prompts"
 REQUESTS_FILE="$RUN_DIR/requests.jsonl"
 RESULTS_FILE="$RUN_DIR/results.jsonl"
 POLL_ERRORS_FILE="$RUN_DIR/poll_errors.jsonl"
+REVIEW_TARGETS_FILE="$RUN_DIR/review-targets.jsonl"
+GITHUB_IDENTITY_COUNTS_FILE="$RUN_DIR/github-identity-counts.json"
 SUMMARY_FILE="$RUN_DIR/summary.json"
 AUDIT_FILE="$RUN_DIR/audit-docker-pr-lifecycle.json"
 AUDIT_STATUS_RESULT=0
@@ -38,6 +40,11 @@ REQUIRED_TOOLS="${REQUIRED_TOOLS:-keeper_shell,keeper_bash,masc_code_git,keeper_
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 MCP_TOKEN="${MASC_MCP_TOKEN:-}"
 MCP_CLIENT_NAME="${MCP_CLIENT_NAME:-keeper-docker-pr-lifecycle-reprobe}"
+EXPECTED_SERVER_COMMIT="${EXPECTED_SERVER_COMMIT:-}"
+FORBID_GITHUB_IDENTITIES="${FORBID_GITHUB_IDENTITIES:-}"
+SERVER_HEALTH_URL="${SERVER_HEALTH_URL:-}"
+SERVER_COMMIT_ACTUAL=""
+SERVER_HEALTH_CHECK_FILE=""
 
 usage() {
   cat <<'EOF'
@@ -46,8 +53,8 @@ Usage: scripts/harness_keeper_docker_pr_lifecycle_reprobe.sh [options]
 Post-merge/live reprobe harness for Docker PR lifecycle evidence.
 
 Default mode is dry-run: discover target keepers, render per-keeper prompts,
-and run the read-only Docker lifecycle audit. It does not send keeper messages
-unless --mutate is supplied.
+render a cross-keeper approval ring, and run the read-only Docker lifecycle
+audit. It does not send keeper messages unless --mutate is supplied.
 
 Options:
   --mutate                 Send prompts to keepers via masc_keeper_msg.
@@ -58,6 +65,12 @@ Options:
   --repo OWNER/REPO        Target repository slug in the keeper prompt.
   --base-path PATH         MASC base path for audit (default: $HOME/me).
   --mcp-url URL            MCP endpoint (default: http://127.0.0.1:8935/mcp).
+  --expected-server-commit COMMIT
+                           Fail unless /health build.commit matches this commit.
+  --forbid-github-identity NAME
+                           Fail --mutate preflight when a target keeper uses
+                           this GitHub identity. Repeat or pass comma-separated.
+  --server-health-url URL  Health endpoint for commit verification.
   --board-post-id ID       Post a final board comment to this thread.
   --run-id ID              Stable run id for prompts and artifacts.
   --run-dir PATH           Artifact directory.
@@ -71,6 +84,8 @@ Environment:
   KEEPER_TURN_TIMEOUT_SEC  Per-keeper Agent.run timeout_sec sent to masc_keeper_msg.
   REQUIRED_TOOLS           CSV required_tools sent to masc_keeper_msg when mutating.
   RUN_AUDIT=0              Skip final audit.
+  EXPECTED_SERVER_COMMIT   Optional expected /health build.commit prefix.
+  FORBID_GITHUB_IDENTITIES Optional CSV of forbidden keeper GitHub identities.
 EOF
 }
 
@@ -108,6 +123,22 @@ while [[ $# -gt 0 ]]; do
       MCP_URL="$2"
       shift 2
       ;;
+    --expected-server-commit)
+      EXPECTED_SERVER_COMMIT="$2"
+      shift 2
+      ;;
+    --forbid-github-identity)
+      if [[ -n "$FORBID_GITHUB_IDENTITIES" ]]; then
+        FORBID_GITHUB_IDENTITIES="$FORBID_GITHUB_IDENTITIES,$2"
+      else
+        FORBID_GITHUB_IDENTITIES="$2"
+      fi
+      shift 2
+      ;;
+    --server-health-url)
+      SERVER_HEALTH_URL="$2"
+      shift 2
+      ;;
     --board-post-id)
       BOARD_POST_ID="$2"
       shift 2
@@ -121,6 +152,8 @@ while [[ $# -gt 0 ]]; do
         REQUESTS_FILE="$RUN_DIR/requests.jsonl"
         RESULTS_FILE="$RUN_DIR/results.jsonl"
         POLL_ERRORS_FILE="$RUN_DIR/poll_errors.jsonl"
+        REVIEW_TARGETS_FILE="$RUN_DIR/review-targets.jsonl"
+        GITHUB_IDENTITY_COUNTS_FILE="$RUN_DIR/github-identity-counts.json"
         SUMMARY_FILE="$RUN_DIR/summary.json"
         AUDIT_FILE="$RUN_DIR/audit-docker-pr-lifecycle.json"
       fi
@@ -134,6 +167,8 @@ while [[ $# -gt 0 ]]; do
       REQUESTS_FILE="$RUN_DIR/requests.jsonl"
       RESULTS_FILE="$RUN_DIR/results.jsonl"
       POLL_ERRORS_FILE="$RUN_DIR/poll_errors.jsonl"
+      REVIEW_TARGETS_FILE="$RUN_DIR/review-targets.jsonl"
+      GITHUB_IDENTITY_COUNTS_FILE="$RUN_DIR/github-identity-counts.json"
       SUMMARY_FILE="$RUN_DIR/summary.json"
       AUDIT_FILE="$RUN_DIR/audit-docker-pr-lifecycle.json"
       shift 2
@@ -158,6 +193,7 @@ mkdir -p "$RUN_DIR" "$RAW_DIR" "$PROMPT_DIR"
 : >"$REQUESTS_FILE"
 : >"$RESULTS_FILE"
 : >"$POLL_ERRORS_FILE"
+: >"$REVIEW_TARGETS_FILE"
 
 log() {
   printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2
@@ -168,6 +204,48 @@ require_cmd() {
     echo "required command not found: $1" >&2
     exit 127
   fi
+}
+
+server_health_url() {
+  if [[ -n "$SERVER_HEALTH_URL" ]]; then
+    printf '%s\n' "$SERVER_HEALTH_URL"
+    return 0
+  fi
+  local base="$MCP_URL"
+  base="${base%/mcp}"
+  if [[ "$base" == "$MCP_URL" ]]; then
+    base="${MCP_URL%/}"
+  fi
+  printf '%s/health\n' "$base"
+}
+
+assert_expected_server_commit() {
+  if [[ -z "$EXPECTED_SERVER_COMMIT" ]]; then
+    return 0
+  fi
+
+  local health_url health_file actual
+  health_url="$(server_health_url)"
+  health_file="$RAW_DIR/server-health.json"
+  if ! curl -fsS --max-time 5 "$health_url" >"$health_file"; then
+    echo "failed to fetch server health for commit check: $health_url" >&2
+    exit 1
+  fi
+
+  actual="$(jq -r '.build.commit // .build_commit // .commit // empty' "$health_file")"
+  SERVER_COMMIT_ACTUAL="$actual"
+  SERVER_HEALTH_CHECK_FILE="$health_file"
+  if [[ -z "$actual" ]]; then
+    echo "server health did not expose build.commit: $health_url" >&2
+    exit 1
+  fi
+  if [[ "$actual" != "$EXPECTED_SERVER_COMMIT" \
+      && "$actual" != "$EXPECTED_SERVER_COMMIT"* \
+      && "$EXPECTED_SERVER_COMMIT" != "$actual"* ]]; then
+    echo "server commit mismatch: expected=$EXPECTED_SERVER_COMMIT actual=$actual url=$health_url" >&2
+    exit 1
+  fi
+  log "server commit verified: expected=$EXPECTED_SERVER_COMMIT actual=$actual"
 }
 
 load_mcp_token() {
@@ -409,8 +487,229 @@ PY
   log "target keepers: $count"
 }
 
+build_review_targets() {
+  python3 - "$RUN_DIR/keepers.txt" "$GITHUB_IDENTITY_COUNTS_FILE" \
+    "$REVIEW_TARGETS_FILE" <<'PY'
+import json
+import pathlib
+import sys
+
+keepers_file = pathlib.Path(sys.argv[1])
+identity_counts_file = pathlib.Path(sys.argv[2])
+review_targets_file = pathlib.Path(sys.argv[3])
+
+keepers = [line.strip() for line in keepers_file.read_text().splitlines() if line.strip()]
+try:
+    identity_payload = json.loads(identity_counts_file.read_text())
+except Exception:
+    identity_payload = {}
+identities = identity_payload.get("keepers")
+if not isinstance(identities, dict):
+    identities = {}
+
+
+def fallback_target(index):
+    if len(keepers) < 2:
+        return None
+    return keepers[(index + 1) % len(keepers)]
+
+
+with review_targets_file.open("w", encoding="utf-8") as handle:
+    for index, keeper in enumerate(keepers):
+        keeper_identity = identities.get(keeper)
+        review_target = None
+        mode = "insufficient_targets"
+
+        if len(keepers) >= 2 and isinstance(keeper_identity, str):
+            for candidate in keepers:
+                if candidate == keeper:
+                    continue
+                candidate_identity = identities.get(candidate)
+                if isinstance(candidate_identity, str) and candidate_identity != keeper_identity:
+                    review_target = candidate
+                    mode = "identity_aware"
+                    break
+            if review_target is None:
+                mode = "identity_pool_insufficient"
+        elif len(keepers) >= 2:
+            review_target = fallback_target(index)
+            mode = "ring_unverified_identity"
+
+        row = {
+            "keeper": keeper,
+            "keeper_identity": keeper_identity,
+            "review_target": review_target,
+            "review_target_identity": identities.get(review_target) if review_target else None,
+            "mode": mode,
+        }
+        handle.write(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n")
+PY
+  if [[ "$MUTATE" == "1" ]] \
+    && jq -e 'select(.review_target == null)' "$REVIEW_TARGETS_FILE" >/dev/null; then
+    echo "cross-keeper approval targets could not be assigned for every keeper" >&2
+    jq -c 'select(.review_target == null)' "$REVIEW_TARGETS_FILE" >&2 || true
+    exit 1
+  fi
+  log "review targets: $REVIEW_TARGETS_FILE"
+}
+
+build_github_identity_counts() {
+  python3 - "$BASE_PATH" "$RUN_DIR/keepers.txt" "$GITHUB_IDENTITY_COUNTS_FILE" "$FORBID_GITHUB_IDENTITIES" <<'PY'
+import json
+import pathlib
+import sys
+from collections import Counter
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib  # type: ignore
+
+
+base_path = pathlib.Path(sys.argv[1]).expanduser().resolve()
+keepers_file = pathlib.Path(sys.argv[2])
+out_file = pathlib.Path(sys.argv[3])
+forbidden = {
+    item.strip()
+    for item in sys.argv[4].split(",")
+    if item.strip()
+}
+config_dir = base_path / ".masc" / "config" / "keepers"
+runtime_dir = base_path / ".masc" / "keepers"
+
+
+def merge_dicts(base, overlay):
+    merged = dict(base)
+    for key, value in overlay.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = merge_dicts(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def load_keeper_config(path, seen=None):
+    seen = set() if seen is None else seen
+    resolved = path.resolve()
+    if resolved in seen:
+        return {}
+    seen.add(resolved)
+    try:
+        raw = tomllib.loads(path.read_text())
+    except Exception:
+        return {}
+    keeper = raw.get("keeper")
+    if not isinstance(keeper, dict):
+        return {}
+    base_name = keeper.get("base")
+    if isinstance(base_name, str) and base_name.strip():
+        return merge_dicts(load_keeper_config(path.parent / base_name, seen), keeper)
+    return keeper
+
+
+def string_field(data, key):
+    value = data.get(key)
+    return value if isinstance(value, str) and value else None
+
+
+keepers = [line.strip() for line in keepers_file.read_text().splitlines() if line.strip()]
+identities = {}
+missing = []
+forbidden_keepers = []
+for keeper in keepers:
+    config = load_keeper_config(config_dir / f"{keeper}.toml")
+    runtime = {}
+    runtime_path = runtime_dir / f"{keeper}.json"
+    if runtime_path.exists():
+        try:
+            loaded = json.loads(runtime_path.read_text())
+            if isinstance(loaded, dict):
+                runtime = loaded
+        except Exception:
+            runtime = {}
+    identity = string_field(runtime, "github_identity") or string_field(
+        config, "github_identity"
+    )
+    if identity:
+        identities[keeper] = identity
+        if identity in forbidden:
+            forbidden_keepers.append({"keeper": keeper, "github_identity": identity})
+    else:
+        missing.append(keeper)
+
+counts = Counter(identities.values())
+out_file.write_text(
+    json.dumps(
+        {
+            "base_path": str(base_path),
+            "keeper_count": len(keepers),
+            "unique_count": len(counts),
+            "counts": dict(sorted(counts.items())),
+            "keepers": identities,
+            "missing": missing,
+            "forbidden_identities": sorted(forbidden),
+            "forbidden_keepers": forbidden_keepers,
+        },
+        sort_keys=True,
+        indent=2,
+    )
+    + "\n"
+)
+PY
+}
+
+assert_github_identity_pool_for_mutate() {
+  build_github_identity_counts
+  local unique_count
+  unique_count="$(jq -r '.unique_count // 0' "$GITHUB_IDENTITY_COUNTS_FILE")"
+  if [[ "$MUTATE" == "1" && "$unique_count" -lt 2 ]]; then
+    echo "at least two unique github_identity values are required for cross-keeper approval proof" >&2
+    jq -c '{unique_count, counts, missing}' "$GITHUB_IDENTITY_COUNTS_FILE" >&2 || true
+    exit 1
+  fi
+  if [[ "$MUTATE" == "1" ]] \
+    && jq -e '(.forbidden_keepers // []) | length > 0' "$GITHUB_IDENTITY_COUNTS_FILE" >/dev/null; then
+    echo "target keeper set includes forbidden github_identity values" >&2
+    jq -c '{forbidden_identities, forbidden_keepers}' "$GITHUB_IDENTITY_COUNTS_FILE" >&2 || true
+    exit 1
+  fi
+}
+
+review_target_for_keeper() {
+  local keeper="$1"
+  jq -r --arg keeper "$keeper" '
+    select(.keeper == $keeper) | .review_target // empty
+  ' "$REVIEW_TARGETS_FILE" | head -n 1
+}
+
 prompt_for_keeper() {
   local keeper="$1"
+  local review_target="${2:-}"
+  local review_branch=""
+  local review_target_json="null"
+  local review_branch_json="null"
+  local review_instruction=""
+  if [[ -n "$review_target" ]]; then
+    review_branch="keeper/$review_target-docker-pr-proof-$RUN_ID"
+    review_target_json="\"$review_target\""
+    review_branch_json="\"$review_branch\""
+    review_instruction="$(cat <<EOF
+Cross-keeper approval target:
+- You must review and APPROVE the draft PR whose head branch is: $review_branch
+- This target belongs to keeper: $review_target
+- Do not approve your own PR or your own branch.
+- If the target PR is not visible yet, wait/retry briefly by listing PRs for that head branch before declaring a blocker.
+- If GitHub reports the target PR has the same author identity as your current credential and rejects approval as self-approval, stop and report blocker="github_self_approve_policy" with the exact tool output.
+EOF
+)"
+  else
+    review_instruction="$(cat <<'EOF'
+Cross-keeper approval target:
+- No distinct review target was available. You can create/push/comment on your own draft PR, but this run cannot satisfy PR APPROVE evidence.
+- Stop before approval and report blocker="insufficient_review_targets".
+EOF
+)"
+  fi
   cat <<EOF
 Docker PR lifecycle proof run: $RUN_ID
 
@@ -425,13 +724,19 @@ Required proof lane:
 3. Make a minimal, non-product proof edit under docs/runtime-proof/keepers/$keeper-$RUN_ID.md.
 4. Commit and git push that branch. The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
 5. Create a draft PR for that branch with keeper_pr_create or the native PR-create tool path. Do not mark ready, do not merge, do not add human-approved-ready.
-6. Use keeper_pr_review_read and keeper_pr_review_comment for review evidence. COMMENT is allowed on your proof PR. APPROVE is allowed only when the PR is a draft agent/keeper proof PR and the tool preflight permits it.
+6. Use keeper_pr_review_read and keeper_pr_review_comment for review evidence. COMMENT is allowed on your own proof PR. APPROVE must target the cross-keeper PR below, not your own PR.
+
+$review_instruction
+
 7. Reply with one compact JSON object:
    {
      "run_id": "$RUN_ID",
      "keeper": "$keeper",
      "branch": "keeper/$keeper-docker-pr-proof-$RUN_ID",
+     "review_target_keeper": $review_target_json,
+     "review_target_branch": $review_branch_json,
      "pr_url": "...",
+     "approved_pr_url": "...",
      "docker_pr_create": true,
      "docker_git_push": true,
      "docker_pr_review": true,
@@ -455,7 +760,7 @@ EOF
 render_prompts() {
   while IFS= read -r keeper; do
     [[ -n "$keeper" ]] || continue
-    prompt_for_keeper "$keeper" >"$PROMPT_DIR/$keeper.txt"
+    prompt_for_keeper "$keeper" "$(review_target_for_keeper "$keeper")" >"$PROMPT_DIR/$keeper.txt"
   done <"$RUN_DIR/keepers.txt"
 }
 
@@ -498,7 +803,8 @@ send_prompts() {
       --arg keeper "$keeper" \
       --arg request_id "$request_id" \
       --arg prompt_file "$PROMPT_DIR/$keeper.txt" \
-      '{keeper:$keeper, request_id:$request_id, prompt_file:$prompt_file, status:"pending"}' \
+      --arg review_target "$(review_target_for_keeper "$keeper")" \
+      '{keeper:$keeper, request_id:$request_id, prompt_file:$prompt_file, review_target:$review_target, status:"pending"}' \
       >>"$REQUESTS_FILE"
   done <"$RUN_DIR/keepers.txt"
 }
@@ -569,12 +875,26 @@ run_audit() {
     return 0
   fi
   log "running Docker PR lifecycle audit"
+  local audit_args=(
+    "$REPO_ROOT/scripts/audit-keeper-fleet-readiness.py"
+    --base-path "$BASE_PATH"
+    --expected-keepers "$EXPECTED_KEEPERS"
+    --require-docker-pr-lifecycle-evidence
+    --json
+  )
+  if [[ -n "$FORBID_GITHUB_IDENTITIES" ]]; then
+    IFS=',' read -r -a forbidden_items <<<"$FORBID_GITHUB_IDENTITIES"
+    local forbidden_item
+    for forbidden_item in "${forbidden_items[@]}"; do
+      forbidden_item="${forbidden_item#"${forbidden_item%%[![:space:]]*}"}"
+      forbidden_item="${forbidden_item%"${forbidden_item##*[![:space:]]}"}"
+      if [[ -n "$forbidden_item" ]]; then
+        audit_args+=(--forbid-github-identity "$forbidden_item")
+      fi
+    done
+  fi
   set +e
-  python3 "$REPO_ROOT/scripts/audit-keeper-fleet-readiness.py" \
-    --base-path "$BASE_PATH" \
-    --expected-keepers "$EXPECTED_KEEPERS" \
-    --require-docker-pr-lifecycle-evidence \
-    --json >"$AUDIT_FILE"
+  python3 "${audit_args[@]}" >"$AUDIT_FILE"
   local audit_status=$?
   set -e
   AUDIT_STATUS_RESULT="$audit_status"
@@ -594,6 +914,12 @@ write_summary() {
     --arg run_dir "$RUN_DIR" \
     --arg repo "$REPO_SLUG" \
     --arg base_path "$BASE_PATH" \
+    --arg expected_server_commit "$EXPECTED_SERVER_COMMIT" \
+    --arg forbid_github_identities "$FORBID_GITHUB_IDENTITIES" \
+    --arg server_commit "$SERVER_COMMIT_ACTUAL" \
+    --arg server_health_file "$SERVER_HEALTH_CHECK_FILE" \
+    --arg review_targets_file "$REVIEW_TARGETS_FILE" \
+    --arg github_identity_counts_file "$GITHUB_IDENTITY_COUNTS_FILE" \
     --argjson mutate "$MUTATE" \
     --argjson keeper_count "$keeper_count" \
     --argjson request_count "$request_count" \
@@ -607,6 +933,12 @@ write_summary() {
       run_dir:$run_dir,
       repo:$repo,
       base_path:$base_path,
+      expected_server_commit:$expected_server_commit,
+      forbid_github_identities:$forbid_github_identities,
+      server_commit:$server_commit,
+      server_health_file:$server_health_file,
+      review_targets_file:$review_targets_file,
+      github_identity_counts_file:$github_identity_counts_file,
       mutate:$mutate,
       keeper_count:$keeper_count,
       request_count:$request_count,
@@ -644,8 +976,11 @@ require_cmd jq
 require_cmd python3
 require_cmd curl
 
+assert_expected_server_commit
 ensure_mcp_session_if_needed
 discover_keepers
+assert_github_identity_pool_for_mutate
+build_review_targets
 render_prompts
 
 if [[ "$MUTATE" == "1" ]]; then

@@ -868,7 +868,7 @@ let test_stale_fleet_batch_latch_marks_batch_members () =
       Reg.set_failure_reason ~base_path:config.base_path "batch-provider"
         (Some (Reg.Provider_runtime_error { code = "auth"; detail = "401" }));
       Watchdog.latch_stale_fleet_batch_reasons_for_test
-        ~base_path:config.base_path ~distinct_count:3 names;
+        ~config ~distinct_count:3 names;
       let reason name =
         match Reg.get ~base_path:config.base_path name with
         | Some entry -> entry.Reg.last_failure_reason

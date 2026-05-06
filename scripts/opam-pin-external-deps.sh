@@ -109,7 +109,7 @@ version_gt() {
 installed_agent_sdk_version() {
   command -v opam >/dev/null 2>&1 || return 1
 
-  local installed_packages agent_sdk_row installed_version show_version
+  local installed_packages agent_sdk_row installed_version show_output show_status
   if ! installed_packages="$(OPAMCOLOR=never opam list --installed --columns=name,version 2>&1)"; then
     echo "[opam-pin] ERROR: failed to inspect installed agent_sdk via opam list" >&2
     echo "[opam-pin] opam list output: ${installed_packages:-<empty>}" >&2
@@ -127,18 +127,33 @@ installed_agent_sdk_version() {
     return 0
   fi
 
-  # Fallback: opam show reads package metadata directly from the switch.  This
+  # Fallback: opam show reads package metadata directly from the switch. This
   # covers cases where opam list output is incomplete but the switch still knows
-  # the package version.
-  show_version="$(OPAMCOLOR=never opam show agent_sdk --field=version 2>/dev/null || true)"
-  if [[ -n "${show_version}" ]]; then
-    installed_version="$(normalize_version_triplet "${show_version}")"
+  # the package version. Unexpected opam failures fail closed; only an explicit
+  # missing-package result means the package is not installed yet.
+  set +e
+  show_output="$(OPAMCOLOR=never opam show agent_sdk --field=version 2>&1)"
+  show_status=$?
+  set -e
+  if [[ "${show_status}" -eq 0 && -n "${show_output}" ]]; then
+    installed_version="$(normalize_version_triplet "${show_output}")"
     if [[ -z "${installed_version}" ]]; then
-      echo "[opam-pin] ERROR: could not parse installed agent_sdk version from opam show output: ${show_version}" >&2
+      echo "[opam-pin] ERROR: could not parse installed agent_sdk version from opam show output: ${show_output}" >&2
       return 2
     fi
     printf '%s' "${installed_version}"
     return 0
+  fi
+
+  if [[ "${show_status}" -ne 0 ]] \
+    && grep -Eiq 'no package|not found|unknown package|not installed' <<<"${show_output}"; then
+    return 1
+  fi
+
+  if [[ "${show_status}" -ne 0 ]]; then
+    echo "[opam-pin] ERROR: failed to inspect installed agent_sdk via opam show" >&2
+    echo "[opam-pin] opam show output: ${show_output:-<empty>}" >&2
+    return 2
   fi
 
   # Clean CI switches have no installed agent_sdk yet and may not have

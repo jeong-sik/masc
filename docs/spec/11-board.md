@@ -421,6 +421,14 @@ slug 중복 생성 시 `Already_exists` 에러.
 - API 함수: `fetchSubBoards()`, `fetchSubBoard(id)`, `createSubBoard(slug, name, description, access?, members?)` in `dashboard/src/api/board.ts`
 - 네비게이션: workspace 섹션에 `sub-boards` 항목 추가 (`dashboard/src/config/navigation.ts`)
 
+### 11.6 Moderation Safety
+
+`Board_moderation.flag` enforces a per-reporter burst guard before adding
+new moderation queue rows. `MASC_BOARD_MODERATION_FLAG_RATE_LIMIT_SEC`
+defaults to `1.0`; set it to `0` to disable the guard for fixtures or bulk
+imports. Duplicate unresolved flags for the same target are still rejected
+independently of the rate-limit window.
+
 ---
 
 ## 11a. AI Curation Snapshot
@@ -459,6 +467,7 @@ AI curation은 board post/comment/vote mutation과 분리된 projection 계약�
 6. **댓글 삭제 cascade:** JSONL에서는 delete_post 시 comments/votes를 수동 정리한다.
 7. **JSONL rotation:** 10MB 초과 시 자동 rotation. 2세대 백업 유지.
 8. **Write path consistency:** 투표 연산(조회 + INSERT/UPDATE + 카운터 변경)은 Board store lock 안에서 일관되게 처리한다.
+9. **Moderation burst guard:** 동일 reporter의 연속 flag는 `MASC_BOARD_MODERATION_FLAG_RATE_LIMIT_SEC` 창 안에서 거부된다.
 
 ---
 

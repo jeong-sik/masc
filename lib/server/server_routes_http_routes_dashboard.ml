@@ -718,6 +718,20 @@ let rec add_routes ~sw ~clock router =
              dashboard_planning_http_json
                ~config:state.Mcp_server.room_config)
          in
+         let namespace_truth =
+           slice "namespace_truth" (fun () ->
+             dashboard_namespace_truth_http_json ~state ~sw ~clock req)
+         in
+         let goals =
+           slice "goals" (fun () ->
+             dashboard_goals_tree_http_json
+               ~config:state.Mcp_server.room_config)
+         in
+         let goal_loop_status =
+           slice "goal_loop_status" (fun () ->
+             Dashboard_goal_loop.status_json
+               ~base_path:state.Mcp_server.room_config.base_path ())
+         in
          let json =
            `Assoc
              [ ("served_at", `String (Masc_domain.now_iso ()))
@@ -725,6 +739,9 @@ let rec add_routes ~sw ~clock router =
              ; shell
              ; execution
              ; planning
+             ; namespace_truth
+             ; goals
+             ; goal_loop_status
              ]
          in
          Http.Response.json ~compress:true ~request:req

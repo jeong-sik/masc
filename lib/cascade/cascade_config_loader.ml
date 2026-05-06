@@ -285,7 +285,10 @@ let deprecated_logical_profile_names =
     "keeper_unified";
     "phase_recovery";
     "phase_buffer";
-    "local_recovery";
+    (* [local_recovery] is intentionally not listed here. Operators can
+       declare it as a concrete fallback_cascade profile, and the loader must
+       keep that profile visible so fallback chains do not collapse back into
+       routes.phase_recovery. *)
     "local_only";
     "tool_required";
     "tool_use_strict";

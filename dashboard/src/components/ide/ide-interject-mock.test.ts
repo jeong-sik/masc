@@ -53,4 +53,23 @@ describe('IdeInterjectMock', () => {
 
     expect(send.disabled).toBe(false)
   })
+
+  it('prefers the route keeper over the global active keeper signal', async () => {
+    activeKeeperName.value = ''
+    const container = document.createElement('div')
+    await act(async () => {
+      render(h(IdeInterjectMock, { keeperName: 'tech_glutton' }), container)
+    })
+
+    expect(container.textContent).toContain('tech_glutton')
+    const input = container.querySelector('input') as HTMLInputElement
+    const send = container.querySelector('button') as HTMLButtonElement
+
+    await act(async () => {
+      input.value = 'inspect the current IDE context'
+      input.dispatchEvent(new InputEvent('input', { bubbles: true }))
+    })
+
+    expect(send.disabled).toBe(false)
+  })
 })

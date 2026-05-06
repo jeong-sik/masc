@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
+import type { FunctionComponent } from 'preact'
 import { dispatchKeeperInterjectAction } from '../../keeper-actions'
 import { activeKeeperName } from '../../keeper-state'
 import {
@@ -20,18 +21,30 @@ async function dispatchInterject(request: InterjectDispatchRequest): Promise<voi
   })
 }
 
-export function IdeInterjectMock() {
+interface IdeInterjectMockProps {
+  readonly keeperName?: string | null
+}
+
+function resolveActiveKeeper(keeperName?: string | null): string {
+  const routeKeeper = keeperName?.trim()
+  return routeKeeper || activeKeeperName.value
+}
+
+export const IdeInterjectMock: FunctionComponent<IdeInterjectMockProps> = ({ keeperName = null }) => {
   const interjectStore = useMemo(() =>
     createInterjectStore({
-      initialActiveKeeper: activeKeeperName.value,
+      initialActiveKeeper: resolveActiveKeeper(keeperName),
       dispatch: dispatchInterject,
-    }), [])
+    }), [keeperName])
   const [, forceRender] = useState(0)
 
   useEffect(() => interjectStore.subscribe(() => forceRender(tick => tick + 1)), [interjectStore])
   useEffect(() => activeKeeperName.subscribe(name => {
-    interjectStore.setActiveKeeper(name)
-  }), [interjectStore])
+    interjectStore.setActiveKeeper(keeperName?.trim() || name)
+  }), [interjectStore, keeperName])
+  useEffect(() => {
+    interjectStore.setActiveKeeper(resolveActiveKeeper(keeperName))
+  }, [interjectStore, keeperName])
 
   const snapshot = interjectStore.snapshot()
   const actions = interjectStore.actions()

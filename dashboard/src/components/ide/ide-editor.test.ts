@@ -130,4 +130,27 @@ describe('IdeEditor', () => {
         .toContain('2 of 2 matches')
     })
   })
+
+  it('includes keeper trace in active layer summary and count', () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'const runtime = 1\n',
+    })
+    const ownershipStore = createKeeperLineOwnershipStore('runtime.ts')
+
+    render(
+      h(IdeEditor, {
+        documentStore,
+        ownershipStore,
+        diffRows: () => [],
+        activeLayers: new Set(['time', 'keeper-trace']),
+      }),
+      container,
+    )
+
+    expect(container.textContent).toContain('2 layers')
+    expect(container.querySelector('[aria-label="Active IDE overlays"]')?.textContent)
+      .toContain('Trace')
+  })
 })

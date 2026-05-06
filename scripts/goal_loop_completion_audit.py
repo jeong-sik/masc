@@ -453,17 +453,25 @@ def source_candidate_row_details(
     text_redacted: bool,
 ) -> dict[str, Any]:
     if candidate_rows_raw is None:
+        # The inventory generator only emits [candidate_text_redacted] when
+        # [candidate_rows] are included. A truthy redaction flag with no rows
+        # is an inconsistent artifact shape; surface it as a validation error
+        # instead of silently treating the missing rows as "fully valid".
+        text_redaction_valid = not text_redacted
+        invalid_rows: list[str] = []
+        if not text_redaction_valid:
+            invalid_rows.append("redaction_flag_without_candidate_rows")
         return {
             "candidate_rows_recorded": False,
             "candidate_rows_count": 0,
-            "candidate_rows_valid": True,
+            "candidate_rows_valid": text_redaction_valid,
             "candidate_rows_count_matches": True,
             "candidate_row_ids_unique": True,
             "candidate_row_paths_match_summary": True,
             "candidate_row_rules_match_summary": True,
             "candidate_text_redacted": text_redacted,
-            "candidate_text_redaction_valid": True,
-            "invalid_candidate_rows": [],
+            "candidate_text_redaction_valid": text_redaction_valid,
+            "invalid_candidate_rows": invalid_rows,
             "duplicate_candidate_row_ids": [],
         }
     if not isinstance(candidate_rows_raw, list):

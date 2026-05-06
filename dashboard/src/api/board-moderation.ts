@@ -71,7 +71,9 @@ function describeInvalid(value: unknown): string {
 
 function normalizeTargetKind(value: unknown): BoardModerationTargetKind | null {
   const kind = asString(value, '').trim()
-  if (kind === 'post' || kind === 'comment') return kind
+  if ((VALID_TARGET_KINDS as readonly string[]).includes(kind)) {
+    return kind as BoardModerationTargetKind
+  }
   return null
 }
 
@@ -96,15 +98,15 @@ function normalizeFlagReason(value: unknown): BoardModerationFlagReason | null {
 
 function normalizeActionKind(value: unknown): BoardModerationActionKind | null {
   const action = asString(value, '').trim()
-  if (action === 'approve' || action === 'remove' || action === 'hide' || action === 'warn') {
-    return action
+  if ((VALID_ACTION_KINDS as readonly string[]).includes(action)) {
+    return action as BoardModerationActionKind
   }
   return null
 }
 
 function requiredTimestamp(value: unknown): number | null {
   const timestamp = asNumber(value)
-  return timestamp === undefined ? null : timestamp
+  return timestamp === undefined || timestamp <= 0 ? null : timestamp
 }
 
 export function normalizeBoardModerationQueueEntry(raw: unknown): BoardModerationQueueEntry | null {
@@ -155,7 +157,7 @@ export function normalizeBoardModerationAuditEntry(raw: unknown): BoardModeratio
 }
 
 export async function fetchBoardModerationQueue(
-  options: { resolved?: boolean } = {},
+  options: { resolved?: boolean; signal?: AbortSignal } = {},
 ): Promise<BoardModerationQueue> {
   return withRetries('fetchBoardModerationQueue', async () => {
     const params = new URLSearchParams()
@@ -163,7 +165,9 @@ export async function fetchBoardModerationQueue(
       params.set('resolved', options.resolved ? 'true' : 'false')
     }
     const qs = params.toString()
-    const raw = await get<unknown>(`${MODERATION_QUEUE_PATH}${qs ? `?${qs}` : ''}`)
+    const raw = await get<unknown>(`${MODERATION_QUEUE_PATH}${qs ? `?${qs}` : ''}`, {
+      signal: options.signal,
+    })
     if (!isRecord(raw)) return { entries: [], count: 0 }
     const entries = Array.isArray(raw.entries)
       ? raw.entries

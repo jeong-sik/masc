@@ -46,10 +46,16 @@ describe('board moderation api', () => {
     }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await fetchBoardModerationQueue({ resolved: false })
+    const controller = new AbortController()
+    controller.abort()
+    const result = await fetchBoardModerationQueue({
+      resolved: false,
+      signal: controller.signal,
+    })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/board/moderation/queue?resolved=false')
+    expect(((fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.signal as AbortSignal | undefined)?.aborted).toBe(true)
     expect(result.count).toBe(2)
     expect(result.entries).toHaveLength(1)
     expect(result.entries[0]?.entry_id).toBe('flag-1')
@@ -192,6 +198,25 @@ describe('board moderation api', () => {
       actor: 'operator-a',
       action: 'delete',
       acted_at: 1,
+    })).toBeNull()
+
+    expect(normalizeBoardModerationQueueEntry({
+      entry_id: 'flag-zero',
+      target_kind: 'post',
+      target_id: 'post-1',
+      reporter: 'keeper-a',
+      reason: 'spam',
+      flagged_at: 0,
+      resolved: false,
+    })).toBeNull()
+
+    expect(normalizeBoardModerationAuditEntry({
+      audit_id: 'audit-negative',
+      target_kind: 'post',
+      target_id: 'post-1',
+      actor: 'operator-a',
+      action: 'approve',
+      acted_at: -1,
     })).toBeNull()
   })
 })

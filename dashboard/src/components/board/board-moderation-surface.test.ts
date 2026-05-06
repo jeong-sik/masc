@@ -78,7 +78,44 @@ describe('BoardModerationSurface', () => {
     expect(screen.getByText('spam')).toBeTruthy()
     expect(screen.getByText('keeper-a')).toBeTruthy()
     expect(screen.getByText('open')).toBeTruthy()
-    expect(fetchQueueMock).toHaveBeenCalledWith({ resolved: false })
+    expect(fetchQueueMock).toHaveBeenCalledWith(expect.objectContaining({
+      resolved: false,
+      signal: expect.any(AbortSignal),
+    }))
+  })
+
+  it('ignores aborted stale queue loads', async () => {
+    let rejectFirst: ((reason?: unknown) => void) | null = null
+    fetchQueueMock
+      .mockImplementationOnce((options = {}) => new Promise((_, reject) => {
+        const { signal } = options
+        rejectFirst = reject
+        signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+      }))
+      .mockResolvedValueOnce({
+        count: 1,
+        entries: [
+          {
+            entry_id: 'flag-resolved',
+            target_kind: 'post',
+            target_id: 'post-resolved',
+            reporter: 'keeper-b',
+            reason: 'spam',
+            flagged_at: 1_779_000_010,
+            flagged_at_iso: '2026-05-17T06:40:10.000Z',
+            resolved: true,
+          },
+        ],
+      })
+
+    render(h(BoardModerationSurface, null))
+    await waitFor(() => expect(fetchQueueMock).toHaveBeenCalledTimes(1))
+    fireEvent.change(screen.getByTestId('moderation-filter'), { target: { value: 'resolved' } })
+
+    expect(rejectFirst).not.toBeNull()
+    await screen.findByText('post-resolved')
+    expect(screen.queryByText('post-1')).toBeNull()
+    expect(fetchQueueMock.mock.calls[0]?.[0]?.signal?.aborted).toBe(true)
   })
 
   it('flags a target and reloads the queue', async () => {

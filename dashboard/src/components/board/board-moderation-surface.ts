@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { CheckCircle2, EyeOff, RefreshCw, ShieldAlert, Trash2 } from 'lucide-preact'
 import {
   fetchBoardModerationQueue,
@@ -138,24 +138,44 @@ export function BoardModerationSurface() {
   const [reason, setReason] = useState<BoardModerationFlagReason>('spam')
   const [submitting, setSubmitting] = useState(false)
   const [busyAction, setBusyAction] = useState<string | null>(null)
+  const activeLoad = useRef<{ id: number; controller: AbortController } | null>(null)
+  const nextLoadId = useRef(0)
 
   const load = useCallback(async () => {
+    activeLoad.current?.controller.abort()
+    const controller = new AbortController()
+    const id = nextLoadId.current + 1
+    nextLoadId.current = id
+    activeLoad.current = { id, controller }
     setLoading(true)
     setError(null)
     try {
-      const queue = await fetchBoardModerationQueue({ resolved: resolvedQuery(filter) })
+      const queue = await fetchBoardModerationQueue({
+        resolved: resolvedQuery(filter),
+        signal: controller.signal,
+      })
+      if (activeLoad.current?.id !== id || controller.signal.aborted) return
       setEntries(queue.entries)
       setServerCount(queue.count)
     } catch (err) {
+      if (activeLoad.current?.id !== id || controller.signal.aborted) return
       const message = err instanceof Error ? err.message : 'Failed to load moderation queue'
       setError(message)
     } finally {
-      setLoading(false)
+      if (activeLoad.current?.id === id) {
+        activeLoad.current = null
+        setLoading(false)
+      }
     }
   }, [filter])
 
   useEffect(() => {
     void load()
+    return () => {
+      activeLoad.current?.controller.abort()
+      activeLoad.current = null
+      nextLoadId.current += 1
+    }
   }, [load])
 
   const openCount = useMemo(() => entries.filter(entry => !entry.resolved).length, [entries])

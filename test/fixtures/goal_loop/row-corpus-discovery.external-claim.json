@@ -113,7 +113,7 @@
       "note": "Goal-driven design note repeats aggregate 206 and STILL_PRESENT claims plus one R-FATAL-1 example, but does not provide the missing 206 itemized strict rows."
     },
     {
-      "artifact_name": "Kimi_Agent_code_cleanup.zip",
+      "artifact_name": "Kimi_Agent_코드 정리와 중복 제거.zip",
       "artifact_kind": "zip",
       "result": "NOT_ROW_CORPUS",
       "sha256": "c41ad0b7e719e27f557e5b93e422048a64ccf993ba3ebdcc04e296452497ff28",

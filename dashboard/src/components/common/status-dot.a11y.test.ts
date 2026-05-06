@@ -45,4 +45,13 @@ describe('StatusDot a11y', () => {
     const results = await axe(container)
     expect(results).toHaveNoViolations()
   })
+
+  it('blank ariaLabel stays decorative instead of rendering a nameless image', async () => {
+    render(html`<${StatusDot} ariaLabel="   " />`, container)
+    const dot = container.querySelector('[data-status-dot]')!
+    expect(dot.getAttribute('data-status-dot-mode')).toBe('decorative')
+    expect(dot.getAttribute('role')).toBeNull()
+    const results = await axe(container)
+    expect(results).toHaveNoViolations()
+  })
 })

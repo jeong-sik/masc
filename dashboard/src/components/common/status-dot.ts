@@ -59,6 +59,11 @@ export function statusDotClasses(
   return parts.join(' ')
 }
 
+export function normalizeStatusDotAriaLabel(ariaLabel?: string): string | undefined {
+  const normalized = ariaLabel?.trim()
+  return normalized === '' ? undefined : normalized
+}
+
 export function summarizeStatusDot({
   size = 'sm',
   className,
@@ -68,10 +73,10 @@ export function summarizeStatusDot({
   className?: string
   ariaLabel?: string
 }): StatusDotSummary {
-  const hasAriaLabel = ariaLabel !== undefined && ariaLabel !== ''
+  const hasAriaLabel = normalizeStatusDotAriaLabel(ariaLabel) !== undefined
   return {
     size,
-    mode: ariaLabel !== undefined ? 'semantic' : 'decorative',
+    mode: hasAriaLabel ? 'semantic' : 'decorative',
     hasCustomClass: className !== undefined && className !== '',
     hasAriaLabel,
     classNameLength: className?.length ?? 0,
@@ -100,11 +105,12 @@ export function StatusDot({
 }: StatusDotProps) {
   const summary = summarizeStatusDot({ size, className: cx, ariaLabel })
   const cls = statusDotClasses(size, cx)
+  const normalizedAriaLabel = normalizeStatusDotAriaLabel(ariaLabel)
   const semantic = summary.mode === 'semantic'
   return html`<span
     class=${cls}
     role=${semantic ? 'img' : undefined}
-    aria-label=${ariaLabel}
+    aria-label=${normalizedAriaLabel}
     aria-hidden=${semantic ? undefined : 'true'}
     data-status-dot
     data-status-dot-size=${summary.size}

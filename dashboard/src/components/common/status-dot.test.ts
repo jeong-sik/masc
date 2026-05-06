@@ -4,6 +4,7 @@ import { render } from 'preact'
 import { html } from 'htm/preact'
 import {
   StatusDot,
+  normalizeStatusDotAriaLabel,
   summarizeStatusDot,
   statusDotClasses,
   statusDotSizeClass,
@@ -49,6 +50,15 @@ describe('statusDotClasses (pure)', () => {
   })
 })
 
+describe('normalizeStatusDotAriaLabel (pure)', () => {
+  it('trims usable labels and drops empty labels', () => {
+    expect(normalizeStatusDotAriaLabel(' running ')).toBe('running')
+    expect(normalizeStatusDotAriaLabel('')).toBeUndefined()
+    expect(normalizeStatusDotAriaLabel('   ')).toBeUndefined()
+    expect(normalizeStatusDotAriaLabel()).toBeUndefined()
+  })
+})
+
 describe('summarizeStatusDot (pure)', () => {
   it('summarizes the decorative default without reading the DOM', () => {
     expect(summarizeStatusDot({})).toEqual({
@@ -68,6 +78,17 @@ describe('summarizeStatusDot (pure)', () => {
       hasCustomClass: true,
       hasAriaLabel: true,
       classNameLength: tone.length,
+    })
+  })
+
+  it('keeps empty aria labels decorative to avoid nameless role=img dots', () => {
+    expect(summarizeStatusDot({ ariaLabel: '' })).toMatchObject({
+      mode: 'decorative',
+      hasAriaLabel: false,
+    })
+    expect(summarizeStatusDot({ ariaLabel: '   ' })).toMatchObject({
+      mode: 'decorative',
+      hasAriaLabel: false,
     })
   })
 })
@@ -124,6 +145,16 @@ describe('StatusDot component', () => {
     expect(el.getAttribute('aria-hidden')).toBeNull()
     expect(el.getAttribute('data-status-dot-mode')).toBe('semantic')
     expect(el.getAttribute('data-status-dot-has-aria-label')).toBe('true')
+  })
+
+  it('empty ariaLabel remains decorative and omits a blank accessible name', () => {
+    render(html`<${StatusDot} ariaLabel="   " />`, container)
+    const el = container.querySelector('[data-status-dot]') as HTMLElement
+    expect(el.getAttribute('role')).toBeNull()
+    expect(el.getAttribute('aria-hidden')).toBe('true')
+    expect(el.getAttribute('aria-label')).toBeNull()
+    expect(el.getAttribute('data-status-dot-mode')).toBe('decorative')
+    expect(el.getAttribute('data-status-dot-has-aria-label')).toBe('false')
   })
 
   it('each size variant renders distinct Tailwind tokens', () => {

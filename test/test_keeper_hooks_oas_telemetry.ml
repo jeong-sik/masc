@@ -698,6 +698,27 @@ let test_pr_work_action_metric_extracts_gh_pr_create () =
       check (option string) "route via nested" (Some "docker") event.route_via
   | _ -> failf "expected one pr create event"
 
+let test_pr_work_action_metric_extracts_keeper_pr_create () =
+  let events =
+    pr_work_events
+      ~tool_name:"keeper_pr_create"
+      ~input:
+        (`Assoc
+          [
+            ("title", `String "proof");
+            ("head", `String "proof/keeper-docker");
+          ])
+      ~output_text:
+        {|{"ok":true,"tool":"keeper_pr_create","operation":"pr_create","via":"brokered"}|}
+  in
+  check (list string) "pr create action" [ "PR_CREATE" ]
+    (work_actions events);
+  match events with
+  | [ event ] ->
+      check string "source" "keeper_pr_create" event.work_source;
+      check (option string) "route via" (Some "brokered") event.route_via
+  | _ -> failf "expected one keeper_pr_create event"
+
 let test_pr_work_action_metric_extracts_bash_git_sequence_failure () =
   let events =
     pr_work_events
@@ -834,6 +855,8 @@ let () =
             test_pr_work_action_metric_extracts_masc_code_git_push
         ; test_case "extracts keeper_shell gh pr create" `Quick
             test_pr_work_action_metric_extracts_gh_pr_create
+        ; test_case "extracts keeper_pr_create" `Quick
+            test_pr_work_action_metric_extracts_keeper_pr_create
         ; test_case "extracts conservative bash git failure" `Quick
             test_pr_work_action_metric_extracts_bash_git_sequence_failure
         ; test_case "ignores quoted command words" `Quick

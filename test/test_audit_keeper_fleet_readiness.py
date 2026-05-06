@@ -122,6 +122,21 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(evidence, {"git_push:masc_code_git"})
         self.assertEqual(docker_evidence, {"git_push:masc_code_git"})
 
+    def test_action_metric_brokered_route_counts_as_docker_backed(self):
+        row = {
+            "metric_event": "keeper_pr_work_action",
+            "tool_name": "keeper_pr_create",
+            "pr_work_action": "PR_CREATE",
+            "pr_work_action_source": "keeper_pr_create",
+            "pr_work_action_success": True,
+            "route_via": "brokered",
+        }
+
+        evidence, docker_evidence = audit.pr_lifecycle_evidence_from_action_metric(row)
+
+        self.assertEqual(evidence, {"pr_create:keeper_pr_create"})
+        self.assertEqual(docker_evidence, {"pr_create:keeper_pr_create"})
+
     def test_action_metric_does_not_treat_sandbox_as_docker_route(self):
         row = {
             "metric_event": "keeper_pr_work_action",

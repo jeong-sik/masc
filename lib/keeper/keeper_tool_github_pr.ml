@@ -168,6 +168,11 @@ let run_gh_argv ~(config : Coord.config) ~(meta : keeper_meta) ~env ~cwd
     in
     { status; output; via = "host" }
 
+let sandbox_profile_string (meta : keeper_meta) =
+  match meta.sandbox_profile with
+  | Docker -> "docker"
+  | Local -> "local"
+
 let output_json ~ok ~tool ~operation ~meta ~binding ~state ~cwd ~via ~output =
   Yojson.Safe.to_string
     (`Assoc
@@ -176,7 +181,9 @@ let output_json ~ok ~tool ~operation ~meta ~binding ~state ~cwd ~via ~output =
         "tool", `String tool;
         "operation", `String operation;
         "keeper", `String meta.name;
+        "sandbox_profile", `String (sandbox_profile_string meta);
         "via", `String via;
+        "route_via", `String via;
         "credential", binding_json binding ~state;
         "cwd", `String cwd;
         "output", `String output;

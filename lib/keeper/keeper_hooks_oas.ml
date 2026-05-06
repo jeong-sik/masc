@@ -1284,6 +1284,16 @@ let pr_work_action_metric_events_of_tool_io
                route_via;
              };
            ])
+  | "keeper_pr_create" ->
+      [
+        {
+          work_action = "PR_CREATE";
+          work_source = "keeper_pr_create";
+          command = None;
+          success;
+          route_via;
+        };
+      ]
   | "keeper_shell" | "keeper_bash" | "masc_code_shell" ->
       (match command_input_of_tool ~tool_name input with
        | None -> []

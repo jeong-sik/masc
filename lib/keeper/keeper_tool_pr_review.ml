@@ -46,6 +46,18 @@ let pr_review_mutation_preset_ok = function
 let pr_review_mutation_preset_reason tool_name =
   Printf.sprintf "%s requires research, delivery, coding, or full preset" tool_name
 
+let route_fields (meta : keeper_meta) =
+  let sandbox_profile, route_via =
+    match meta.sandbox_profile with
+    | Docker -> "docker", "brokered"
+    | Local -> "local", "host"
+  in
+  [
+    "sandbox_profile", `String sandbox_profile;
+    "via", `String route_via;
+    "route_via", `String route_via;
+  ]
+
 (* Both "pr_number" and "number" are accepted for schema-drift compat. *)
 let pr_number_of_args args =
   let from_pr = Safe_ops.json_int ~default:0 "pr_number" args in
@@ -304,25 +316,25 @@ let handle_keeper_pr_review_read
     if not meta_ok && (pr_not_found_in_output meta_result.output || pr_not_found_in_output diff_result.output) then
       Yojson.Safe.to_string
         (`Assoc
-            [ "ok", `Bool false
-            ; "error", `String "pr_not_found"
-            ; "pr_number", `Int pr_number
-            ; "repo", `String repo_slug
-            ; "via", `String meta_result.via
-            ; "hint", `String "PR may have been closed/deleted or the number is wrong. Use keeper_pr_list (or `gh pr list`) to see open PRs before retrying."
-            ])
+            ([ "ok", `Bool false
+             ; "error", `String "pr_not_found"
+             ; "pr_number", `Int pr_number
+             ; "repo", `String repo_slug
+             ; "execution_via", `String meta_result.via
+             ; "hint", `String "PR may have been closed/deleted or the number is wrong. Use keeper_pr_list (or `gh pr list`) to see open PRs before retrying."
+             ] @ route_fields meta))
     else
       Yojson.Safe.to_string
         (`Assoc
-            [ "ok", `Bool meta_ok
-            ; "pr_number", `Int pr_number
-            ; "repo", `String repo_slug
-            ; "via", `String meta_result.via
-            ; "metadata", `String meta_result.output
-            ; "diff", `String diff_result.output
-            ; "diff_truncated", `Bool diff_truncated
-            ; "diff_status", `Bool (status_ok diff_result.status)
-            ])
+            ([ "ok", `Bool meta_ok
+             ; "pr_number", `Int pr_number
+             ; "repo", `String repo_slug
+             ; "execution_via", `String meta_result.via
+             ; "metadata", `String meta_result.output
+             ; "diff", `String diff_result.output
+             ; "diff_truncated", `Bool diff_truncated
+             ; "diff_status", `Bool (status_ok diff_result.status)
+             ] @ route_fields meta))
 ;;
 
 let handle_keeper_pr_review_comment
@@ -349,19 +361,19 @@ let handle_keeper_pr_review_comment
       pr_review_mutation_preset_ok
         (Keeper_types.tool_access_preset meta.tool_access)
     in
-    if not preset_ok then
-      Yojson.Safe.to_string
-        (`Assoc
-          [ "ok", `Bool false
-          ; "error", `String "preset_insufficient"
-          ; "reason", `String
-              (pr_review_mutation_preset_reason "keeper_pr_review_comment")
-          ])
-    else
-      match effective_repo_slug ~config ~repo with
-      | Error msg -> error_json msg
-      | Ok repo_slug ->
-      let repo_flag_arg = repo_flag repo_slug in
+	    if not preset_ok then
+	      Yojson.Safe.to_string
+	        (`Assoc
+	          [ "ok", `Bool false
+	          ; "error", `String "preset_insufficient"
+	          ; "reason", `String
+	              (pr_review_mutation_preset_reason "keeper_pr_review_comment")
+	          ])
+	    else
+	      match effective_repo_slug ~config ~repo with
+	      | Error msg -> error_json msg
+	      | Ok repo_slug ->
+	      let repo_flag_arg = repo_flag repo_slug in
       let approve_preflight_result =
         match event with
         | Approve ->
@@ -377,23 +389,23 @@ let handle_keeper_pr_review_comment
              | Some value -> value
              | None -> "unknown"
            in
-           Log.Keeper.info
-             "pr_review_comment: pr=%d event=%s keeper=%s approve_preflight=blocked"
-             pr_number (pr_review_event_to_string event) meta.name;
-           Yojson.Safe.to_string
-             (`Assoc
-                 [ "ok", `Bool false
-                 ; "error", `String "approve_event_blocked"
-                 ; "pr_number", `Int pr_number
-                 ; "repo", `String repo_slug
-                 ; "via", `String preflight_via
-                 ; "event", `String (pr_review_event_to_string event)
-                 ; "keeper", `String meta.name
-                 ; "preflight", preflight
-                 ])
-       | Ok approve_preflight_json ->
-           (* Use gh pr review to create a review *)
-           let cmd = Printf.sprintf
+	           Log.Keeper.info
+	             "pr_review_comment: pr=%d event=%s keeper=%s approve_preflight=blocked"
+	             pr_number (pr_review_event_to_string event) meta.name;
+	           Yojson.Safe.to_string
+	             (`Assoc
+	                 ([ "ok", `Bool false
+	                  ; "error", `String "approve_event_blocked"
+	                  ; "pr_number", `Int pr_number
+	                  ; "repo", `String repo_slug
+	                  ; "preflight_via", `String preflight_via
+	                  ; "event", `String (pr_review_event_to_string event)
+	                  ; "keeper", `String meta.name
+	                  ; "preflight", preflight
+	                  ] @ route_fields meta))
+	       | Ok approve_preflight_json ->
+	           (* Use gh pr review to create a review *)
+	           let cmd = Printf.sprintf
              "gh pr review %d%s --body %s %s 2>&1"
              pr_number repo_flag_arg
              (Filename.quote body)
@@ -405,21 +417,22 @@ let handle_keeper_pr_review_comment
            Log.Keeper.info "pr_review_comment: pr=%d event=%s keeper=%s ok=%b"
              pr_number (pr_review_event_to_string event) meta.name
              (status_ok result.status);
-           Yojson.Safe.to_string
-             (`Assoc
-                 ([
-                   "ok", `Bool (status_ok result.status)
-                 ; "pr_number", `Int pr_number
-                 ; "repo", `String repo_slug
-                 ; "via", `String result.via
-                 ; "event", `String (pr_review_event_to_string event)
-                 ; "output", `String result.output
-                 ; "keeper", `String meta.name
-                 ]
-                  @
-                  match approve_preflight_json with
-                  | Some json -> [ "preflight", json ]
-                  | None -> [])))
+	           Yojson.Safe.to_string
+	             (`Assoc
+	                 ([
+	                   "ok", `Bool (status_ok result.status)
+	                 ; "pr_number", `Int pr_number
+	                 ; "repo", `String repo_slug
+	                 ; "execution_via", `String result.via
+	                 ; "event", `String (pr_review_event_to_string event)
+	                 ; "output", `String result.output
+	                 ; "keeper", `String meta.name
+	                 ]
+	                  @ route_fields meta
+	                  @
+	                  match approve_preflight_json with
+	                  | Some json -> [ "preflight", json ]
+	                  | None -> [])))
 ;;
 
 let handle_keeper_pr_review_reply
@@ -466,12 +479,12 @@ let handle_keeper_pr_review_reply
           pr_number comment_id meta.name (status_ok result.status);
         Yojson.Safe.to_string
           (`Assoc
-              [ "ok", `Bool (status_ok result.status)
-              ; "pr_number", `Int pr_number
-              ; "repo", `String owner_repo
-              ; "via", `String result.via
-              ; "comment_id", `Int comment_id
-              ; "output", `String result.output
-              ; "keeper", `String meta.name
-              ])
+              ([ "ok", `Bool (status_ok result.status)
+               ; "pr_number", `Int pr_number
+               ; "repo", `String owner_repo
+               ; "execution_via", `String result.via
+               ; "comment_id", `Int comment_id
+               ; "output", `String result.output
+               ; "keeper", `String meta.name
+               ] @ route_fields meta))
 ;;

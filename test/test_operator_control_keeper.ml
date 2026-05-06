@@ -55,6 +55,30 @@ let read_keeper_meta_exn config keeper_name =
   | Ok None -> Alcotest.fail ("keeper meta missing: " ^ keeper_name)
   | Error err -> Alcotest.fail ("keeper meta read failed: " ^ err)
 
+let seed_keeper_meta_exn config keeper_name ~goal =
+  let trace_id = "trace-" ^ keeper_name in
+  let meta =
+    match
+      Keeper_types.meta_of_json
+        (`Assoc
+          [
+            ("name", `String keeper_name);
+            ("agent_name", `String (Keeper_types.keeper_agent_name keeper_name));
+            ("trace_id", `String trace_id);
+            ("goal", `String goal);
+            ("cascade_name", `String Keeper_config.default_cascade_name);
+            ("sandbox_profile", `String "local");
+            ("network_mode", `String "inherit");
+          ])
+    with
+    | Ok meta -> meta
+    | Error err -> Alcotest.fail ("keeper meta fixture failed: " ^ err)
+  in
+  (match Keeper_types.write_meta config meta with
+   | Ok () -> ()
+   | Error err -> Alcotest.fail ("keeper meta seed failed: " ^ err));
+  read_keeper_meta_exn config keeper_name
+
 let with_fake_docker script f =
   let dir = temp_dir () in
   let docker_path = Filename.concat dir "docker" in
@@ -1108,20 +1132,9 @@ let test_keeper_up_resumes_auto_paused_keeper () =
           net = None;
         }
       in
-      let ok, _ =
-        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
-          ~args:
-            (`Assoc
-              [
-                ("name", `String keeper_name);
-                ("goal", `String "Resume a paused keeper");
-                ("proactive_enabled", `Bool false);
-                ("autoboot_enabled", `Bool false);
-              ])
+      let meta =
+        seed_keeper_meta_exn config keeper_name ~goal:"Resume a paused keeper"
       in
-      Alcotest.(check bool) "initial keeper up ok" true ok;
-      Keeper_keepalive.stop_keepalive keeper_name;
-      let meta = read_keeper_meta_exn config keeper_name in
       let blocker_text =
         Keeper_types.blocker_class_to_string Keeper_types.Turn_timeout
       in
@@ -1189,20 +1202,10 @@ let test_keeper_up_keeps_paused_keeper_with_continue_gate_blocker () =
           net = None;
         }
       in
-      let ok, _ =
-        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
-          ~args:
-            (`Assoc
-              [
-                ("name", `String keeper_name);
-                ("goal", `String "Stay paused behind a continue gate");
-                ("proactive_enabled", `Bool false);
-                ("autoboot_enabled", `Bool false);
-              ])
+      let meta =
+        seed_keeper_meta_exn config keeper_name
+          ~goal:"Stay paused behind a continue gate"
       in
-      Alcotest.(check bool) "initial keeper up ok" true ok;
-      Keeper_keepalive.stop_keepalive keeper_name;
-      let meta = read_keeper_meta_exn config keeper_name in
       let blocker_text =
         "turn outcome ambiguous after committed mutating tool call(s): \
          [keeper_board_cleanup]; turn wall-clock timeout"
@@ -1276,20 +1279,9 @@ let test_keeper_up_keeps_paused_keeper_with_pending_approval () =
           net = None;
         }
       in
-      let ok, _ =
-        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
-          ~args:
-            (`Assoc
-              [
-                ("name", `String keeper_name);
-                ("goal", `String "Stay paused behind approval");
-                ("proactive_enabled", `Bool false);
-                ("autoboot_enabled", `Bool false);
-              ])
+      let meta =
+        seed_keeper_meta_exn config keeper_name ~goal:"Stay paused behind approval"
       in
-      Alcotest.(check bool) "initial keeper up ok" true ok;
-      Keeper_keepalive.stop_keepalive keeper_name;
-      let meta = read_keeper_meta_exn config keeper_name in
       let blocker_text =
         Keeper_types.blocker_class_to_string Keeper_types.Turn_timeout
       in

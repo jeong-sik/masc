@@ -371,11 +371,16 @@ let next_fail_open_cascade_for_turn_with_budget
   | Some retry ->
       (* The candidate is always a retry, so use per-attempt budget semantics
          regardless of whether the current attempt was itself a retry. *)
+      let first_contract_rotation =
+        EC.is_required_tool_contract_violation err
+        && List.length attempted_cascades <= 1
+      in
       if
         match time_spent_in_turn_s with
         | Some time_spent_in_turn_s ->
             (not (degraded_retry_slot_phase_available ~time_spent_in_turn_s))
             && not (degraded_retry_bypasses_slot_phase_guard err)
+            && not first_contract_rotation
         | None -> false
       then Degraded_retry_slot_phase_exhausted retry
       else if

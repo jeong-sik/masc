@@ -243,6 +243,20 @@ let json_string_list_member key json =
          | _ -> None)
   | _ -> []
 
+let json_string_member_opt key json =
+  match Yojson.Safe.Util.member key json with
+  | `String value when String.trim value <> "" -> Some value
+  | _ -> None
+
+let terminal_reason_code_of_decision_json json =
+  match json_string_member_opt "terminal_reason_code" json with
+  | Some _ as value -> value
+  | None ->
+    (match Yojson.Safe.Util.member "terminal_reason" json with
+     | `Assoc _ as terminal_reason ->
+       json_string_member_opt "code" terminal_reason
+     | _ -> None)
+
 let keeper_trust_json ?(include_receipt = false)
     (config : Coord.config) (meta : Keeper_types.keeper_meta) =
   let latest_receipt = Keeper_execution_receipt.latest_json config meta.name in
@@ -2071,11 +2085,22 @@ let keeper_decisions_json
         | `Float f -> `Int (int_of_float f)
         | _ -> `Null
       in
+      let duration_ms =
+        match float_or_null "duration_ms" with
+        | `Null -> float_or_null "latency_ms"
+        | value -> value
+      in
+      let terminal_reason_code =
+        match terminal_reason_code_of_decision_json json with
+        | Some value -> `String value
+        | None -> `Null
+      in
       `Assoc [
         ("ts_unix", float_or_null "ts_unix");
         ("keeper_name", `String keeper_name);
         ("event_type", `String event_type);
         ("outcome", string_or_null "outcome");
+        ("terminal_reason_code", terminal_reason_code);
         ("model_used", string_or_null "model_used");
         ("latency_ms", float_or_null "latency_ms");
         ("cost_usd", float_or_null "cost_usd");
@@ -2084,7 +2109,7 @@ let keeper_decisions_json
         ("stop_reason", string_or_null "stop_reason");
         ("error_category", string_or_null "error_category");
         ("tool", string_or_null "tool");
-        ("duration_ms", float_or_null "duration_ms");
+        ("duration_ms", duration_ms);
         ("match_count", int_or_null "match_count");
       ]
     ) top
@@ -2166,6 +2191,20 @@ let keeper_decisions_log_json
                 let outcome = str "outcome" in
                 if outcome <> "" then outcome else "turn"
             in
+            let terminal_reason_code =
+              terminal_reason_code_of_decision_json json
+            in
+            let duration_ms =
+              let number key =
+                match Yojson.Safe.Util.member key json with
+                | `Float value -> Some value
+                | `Int value -> Some (float_of_int value)
+                | _ -> None
+              in
+              match number "duration_ms" with
+              | Some _ as value -> value
+              | None -> number "latency_ms"
+            in
             let belief_summary = str "belief_summary" in
             let current_intention = str "current_intention" in
             let blocker = str "blocker" in
@@ -2174,6 +2213,9 @@ let keeper_decisions_log_json
               List.filter (fun s -> s <> "")
                 [ decision_type
                 ; (if channel <> "" then "via " ^ channel else "")
+                ; (match terminal_reason_code with
+                   | Some code -> "reason: " ^ code
+                   | None -> "")
                 ; (if current_intention <> "" then "\xe2\x86\x92 " ^ current_intention else "")
                 ; (if blocker <> "" then "blocked: " ^ blocker else "")
                 ; (if belief_summary <> "" then belief_summary else "")
@@ -2195,6 +2237,14 @@ let keeper_decisions_log_json
               ("keeper", `String keeper_name);
               ("decision_type", `String decision_type);
               ("summary", `String summary);
+              ( "terminal_reason_code",
+                match terminal_reason_code with
+                | Some code -> `String code
+                | None -> `Null );
+              ( "duration_ms",
+                match duration_ms with
+                | Some value -> `Float value
+                | None -> `Null );
               ("evidence_refs", `List evidence_refs);
             ])
           with

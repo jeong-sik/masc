@@ -186,6 +186,55 @@ let test_decisions_log_json_shape () =
      contains_substring ~needle:"deploy" s)
 ;;
 
+let test_decisions_json_terminal_reason_duration_fallback () =
+  with_config
+  @@ fun config ->
+  let meta = keeper_meta "k2-decision-terminal-duration" in
+  let path = Keeper_types.keeper_decision_log_path config meta.name in
+  append_jsonl
+    path
+    (`Assoc
+        [ "ts_unix", `Float 1_300.0
+        ; "keeper_name", `String meta.name
+        ; "outcome", `String "error"
+        ; "latency_ms", `Int 321
+        ; ( "terminal_reason"
+          , `Assoc
+              [ "code", `String "provider_error"
+              ; "source", `String "typed"
+              ; "severity", `String "bad"
+              ; "summary", `String "provider failed"
+              ] )
+        ]);
+  let compact =
+    Dash.keeper_decisions_json ~config ~keepers:[ meta ] ~limit:10 ()
+  in
+  let compact_event =
+    match Json.(compact |> member "events" |> to_list) with
+    | event :: _ -> event
+    | [] -> fail "expected compact decision event"
+  in
+  check string "compact terminal reason" "provider_error"
+    Json.(compact_event |> member "terminal_reason_code" |> to_string);
+  check (float 0.001) "compact duration fallback" 321.0
+    Json.(compact_event |> member "duration_ms" |> to_float);
+  let log =
+    Dash.keeper_decisions_log_json ~config ~keepers:[ meta ] ~limit:10 ()
+  in
+  let log_event =
+    match Json.(log |> member "events" |> to_list) with
+    | event :: _ -> event
+    | [] -> fail "expected decision log event"
+  in
+  check string "log terminal reason" "provider_error"
+    Json.(log_event |> member "terminal_reason_code" |> to_string);
+  check (float 0.001) "log duration fallback" 321.0
+    Json.(log_event |> member "duration_ms" |> to_float);
+  check bool "log summary includes reason" true
+    (let s = Json.(log_event |> member "summary" |> to_string) in
+     contains_substring ~needle:"reason: provider_error" s)
+;;
+
 (* --- Memory log tests --- *)
 
 let memory_row ~ts text =
@@ -269,6 +318,10 @@ let () =
         ; test_case "clamps low limit" `Quick test_decisions_log_clamps_low_limit
         ; test_case "clamps high limit" `Quick test_decisions_log_clamps_high_limit
         ; test_case "json shape matches spec" `Quick test_decisions_log_json_shape
+        ; test_case
+            "terminal reason and duration fallback"
+            `Quick
+            test_decisions_json_terminal_reason_duration_fallback
         ] )
     ; ( "memory log"
       , [ test_case

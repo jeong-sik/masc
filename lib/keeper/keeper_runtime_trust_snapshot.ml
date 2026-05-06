@@ -114,7 +114,10 @@ let severity_of_tool_call success = if success then "ok" else "bad"
 let terminal_reason_from_decision json =
   match json_member "terminal_reason" json with
   | `Assoc _ as terminal_reason -> Keeper_turn_terminal.of_json terminal_reason
-  | _ -> None
+  | _ ->
+      Option.map
+        (Keeper_turn_terminal.of_code ~source:"decision_log")
+        (json_string_opt_member "terminal_reason_code" json)
 
 let terminal_reason_from_receipt receipt =
   match json_string_opt_member "terminal_reason_code" receipt with

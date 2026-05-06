@@ -30,6 +30,12 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let with_restart_launch_noop f =
+  Sup.set_restart_launch_noop_for_test true;
+  Fun.protect
+    ~finally:(fun () -> Sup.set_restart_launch_noop_for_test false)
+    f
+
 (* ── Pure tests: backoff_delay ──────────────────────────── *)
 
 let test_backoff_delay_attempt_0 () =
@@ -193,6 +199,85 @@ let make_meta name =
   match KT.meta_of_json json with
   | Ok meta -> meta
   | Error err -> fail ("make_meta: " ^ err)
+
+let registered_entries names =
+  Reg.clear ();
+  List.map
+    (fun name -> Reg.register ~base_path:bp name (make_meta name))
+    names
+
+let test_supervision_cohorts_64_keepers_8x8 () =
+  let names =
+    List.init 64 (fun i -> Printf.sprintf "keeper-%02d" i)
+  in
+  let entries = registered_entries (List.rev names) in
+  let cohorts = Sup.supervision_cohorts entries in
+  check int "cohort count" 8 (List.length cohorts);
+  List.iteri
+    (fun i (cohort : Sup.supervision_cohort) ->
+      check int "cohort id" i cohort.cohort_id;
+      check int "cohort size" Sup.supervision_cohort_size
+        (List.length cohort.keepers))
+    cohorts;
+  let flattened =
+    cohorts
+    |> List.concat_map (fun (cohort : Sup.supervision_cohort) -> cohort.keepers)
+    |> List.map (fun (entry : Reg.registry_entry) -> entry.name)
+  in
+  check (list string) "all keepers exactly once in stable order"
+    names flattened
+
+let test_supervision_cohorts_custom_size_and_floor () =
+  let names = [ "delta"; "alpha"; "echo"; "bravo"; "charlie" ] in
+  let entries = registered_entries names in
+  let sizes =
+    Sup.supervision_cohorts ~cohort_size:2 entries
+    |> List.map (fun (cohort : Sup.supervision_cohort) ->
+           List.length cohort.keepers)
+  in
+  check (list int) "custom cohort sizes" [ 2; 2; 1 ] sizes;
+  let floored_sizes =
+    Sup.supervision_cohorts ~cohort_size:0 entries
+    |> List.map (fun (cohort : Sup.supervision_cohort) ->
+           List.length cohort.keepers)
+  in
+  check (list int) "non-positive cohort size coerces to one"
+    [ 1; 1; 1; 1; 1 ] floored_sizes
+
+let test_supervision_cohorts_large_custom_size_yields_between_only () =
+  let names = List.init 192 (fun i -> Printf.sprintf "keeper-%03d" i) in
+  let entries = registered_entries names in
+  let cohorts = Sup.supervision_cohorts ~cohort_size:64 entries in
+  check int "cohort count" 3 (List.length cohorts);
+  let visited = ref [] in
+  let yields = ref 0 in
+  Sup.iter_supervision_cohorts
+    ~yield_between:(fun () -> incr yields)
+    cohorts
+    ~f:(fun (cohort : Sup.supervision_cohort) ->
+      visited := cohort.cohort_id :: !visited);
+  check (list int) "visited cohorts" [ 0; 1; 2 ] (List.rev !visited);
+  check int "yield between cohorts only" 2 !yields
+
+let test_fresh_supervision_cohort_keepers_rereads_registry () =
+  let entries = registered_entries [ "alpha"; "bravo" ] in
+  let cohort =
+    match Sup.supervision_cohorts ~cohort_size:2 entries with
+    | [ cohort ] -> cohort
+    | _ -> fail "expected one cohort"
+  in
+  Reg.unregister ~base_path:bp "alpha";
+  Reg.unregister ~base_path:bp "bravo";
+  ignore (Reg.register_offline ~base_path:bp "bravo" (make_meta "bravo"));
+  let fresh = Sup.fresh_supervision_cohort_keepers ~base_path:bp cohort in
+  check (list string) "removed entries omitted"
+    [ "bravo" ]
+    (List.map (fun (entry : Reg.registry_entry) -> entry.name) fresh);
+  match fresh with
+  | [ entry ] ->
+      check string "entry was re-read from registry" "offline"
+        (KSM.phase_to_string entry.phase)
+  | _ -> fail "expected one fresh entry"
 
 let test_self_preservation_subset () =
   Eio_main.run @@ fun _env ->
@@ -407,6 +492,7 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
         (Reg.is_registered ~base_path:config.base_path meta.name))
 
 let test_restart_path_emits_attempt_and_started_outcome_metrics () =
+  with_restart_launch_noop @@ fun () ->
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -1221,6 +1307,16 @@ let () =
     ];
     "keep_last_n_properties", [
       test_case "never exceeds limit" `Quick test_keep_last_n_never_exceeds;
+    ];
+    "supervision_cohorts", [
+      test_case "64 keepers form 8 cohorts of 8" `Quick
+        test_supervision_cohorts_64_keepers_8x8;
+      test_case "custom size and floor" `Quick
+        test_supervision_cohorts_custom_size_and_floor;
+      test_case "large custom size yields between cohorts only" `Quick
+        test_supervision_cohorts_large_custom_size_yields_between_only;
+      test_case "fresh cohort entries are re-read by name" `Quick
+        test_fresh_supervision_cohort_keepers_rereads_registry;
     ];
     "self_preservation_properties", [
       test_case "output subset of input" `Quick test_self_preservation_subset;

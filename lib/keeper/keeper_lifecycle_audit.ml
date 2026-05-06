@@ -26,7 +26,7 @@ let ring : (string, lifecycle_event_entry array * int ref) Hashtbl.t =
 let mu = Eio.Mutex.create ()
 
 let with_lock f =
-  Eio.Mutex.use_rw ~protect:true mu f
+  Eio_guard.with_mutex mu f
 
 let record ~keeper_name ~event_name ~phase ~detail =
   with_lock (fun () ->

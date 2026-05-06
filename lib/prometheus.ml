@@ -619,6 +619,8 @@ let metric_tool_policy_unloaded_query =
   "masc_tool_policy_unloaded_query_total"
 let metric_tool_policy_init_failed =
   "masc_tool_policy_init_failed_total"
+let metric_cache_desync_cleared =
+  "masc_cache_desync_cleared_total"
 let metric_keeper_reconcile_failures =
   "masc_keeper_reconcile_failures_total"
 let metric_keeper_decision_audit_flush_failures =
@@ -1803,6 +1805,10 @@ let init () =
   add metric_tool_policy_init_failed
     "Total server startup tool-policy initialization failures. \
      Labeled by base_path."
+    Counter;
+  add metric_cache_desync_cleared
+    "Total stale task-state cache emissions cleared after reloading backlog \
+     truth. Labeled by module and status."
     Counter;
   add metric_keeper_reconcile_failures
     "Total current-task reconciliation failures. \

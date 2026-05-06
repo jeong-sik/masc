@@ -833,6 +833,48 @@ let test_observe_damps_keeper_scope_chatter_but_keeps_direct_mentions () =
           check string "scope content" "general operator room update" content
       | _ -> fail "expected one operator scope message")
 
+let test_observe_skips_stale_terminal_task_mentions () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Unix.putenv "MASC_BASE_PATH" base_dir;
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      ignore
+        (Masc_mcp.Coord.add_task config ~title:"Terminal task" ~priority:1
+           ~description:"");
+      ignore
+        (Masc_mcp.Coord.claim_task config ~agent_name:"nick0cave"
+           ~task_id:"task-001");
+      ignore
+        (Masc_mcp.Coord.broadcast config ~from_agent:"taskmaster"
+           ~content:
+             "@test-keeper task-001 stale claim detected: current_task_id=null \
+              but MASC still lists task-001 as claimed by you. Please release \
+              it.");
+      (match
+         Masc_mcp.Coord.force_done_task_r config ~agent_name:"operator"
+           ~task_id:"task-001" ~notes:"terminal in backlog" ()
+       with
+       | Ok _ -> ()
+       | Error err -> fail (Masc_domain.masc_error_to_string err));
+      let meta = { minimal_meta with joined_room_ids = [ "default" ] } in
+      let obs =
+        WO.observe ~allowed_tool_names:None
+          ~pending_board_events:(Some [])
+          ~config ~meta
+      in
+      check int "stale mention skipped" 0 (List.length obs.pending_mentions);
+      check int "scope messages stay empty" 0
+        (List.length obs.pending_scope_messages);
+      check bool "cursor advanced" true
+        (List.exists
+           (fun (room_id, seq) -> String.equal room_id "default" && seq > 0)
+           obs.message_cursor_updates))
+
 let test_scheduled_turn_uses_cooldown_only () =
   let meta =
     { minimal_meta with
@@ -7580,6 +7622,8 @@ let () =
             test_observe_collects_scope_messages_for_room_signal_keepers;
           test_case "room-signal keepers damp keeper scope chatter" `Quick
             test_observe_damps_keeper_scope_chatter_but_keeps_direct_mentions;
+          test_case "stale terminal task mentions advance cursor" `Quick
+            test_observe_skips_stale_terminal_task_mentions;
           test_case "scheduled turn uses cooldown only when work exists" `Quick
             test_scheduled_turn_uses_cooldown_only;
           test_case "scheduled turn skips without structured work signal" `Quick

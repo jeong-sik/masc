@@ -98,6 +98,11 @@ interface TextAreaProps {
   class?: string
   name?: string
   ariaLabel?: string
+  ariaAutocomplete?: string
+  ariaControls?: string
+  ariaExpanded?: boolean | string
+  ariaActiveDescendant?: string
+  role?: string
   disabled?: boolean
   required?: boolean
   /** Forwards a Preact ref to the inner <textarea>. Mirrors TextInput —
@@ -105,6 +110,7 @@ interface TextAreaProps {
       focus, dialog `initialFocusRef`, etc.). */
   inputRef?: { current: HTMLTextAreaElement | null }
   onInput?: (e: Event) => void
+  onKeyDown?: (e: KeyboardEvent) => void
 }
 
 export function TextArea({
@@ -115,10 +121,16 @@ export function TextArea({
   class: cx,
   name,
   ariaLabel,
+  ariaAutocomplete,
+  ariaControls,
+  ariaExpanded,
+  ariaActiveDescendant,
+  role,
   disabled,
   required,
   inputRef,
   onInput,
+  onKeyDown,
 }: TextAreaProps) {
   return html`
     <textarea
@@ -128,11 +140,17 @@ export function TextArea({
       placeholder=${placeholder}
       rows=${rows}
       name=${name}
+      role=${role}
       aria-label=${ariaLabel}
+      aria-autocomplete=${ariaAutocomplete}
+      aria-controls=${ariaControls}
+      aria-expanded=${ariaExpanded}
+      aria-activedescendant=${ariaActiveDescendant}
       disabled=${disabled}
       required=${required}
       value=${value}
       onInput=${onInput}
+      onKeyDown=${onKeyDown}
     ></textarea>
   `
 }

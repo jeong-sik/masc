@@ -48,16 +48,16 @@ export const COCKPIT_ENTRYPOINTS: CockpitEntrypoint[] = [
   { mode: 'work', aliases: ['acc-led', 'accountability-ledger'], target: { tab: 'workspace', params: { section: 'planning', focus: 'accountability-ledger' } }, coverage: 'partial' },
   { mode: 'work', aliases: ['acc-mtx', 'accountability-matrix'], target: { tab: 'workspace', params: { section: 'planning', focus: 'accountability-matrix' } }, coverage: 'partial' },
 
-  // Comms Plane: board and message focus surfaces have production coverage; composer zones remain partial.
+  // Comms Plane: board, message focus, and composer surfaces have production coverage.
   { mode: 'comms', aliases: ['bd-feed', 'board-feed'], target: { tab: 'workspace', params: { section: 'board' } }, coverage: 'covered' },
   { mode: 'comms', aliases: ['bd-thr', 'board-thread'], target: { tab: 'workspace', params: { section: 'board', focus: 'thread' } }, coverage: 'covered' },
   { mode: 'comms', aliases: ['bd-tog', 'board-direct-automation'], target: { tab: 'workspace', params: { section: 'board', focus: 'automation' } }, coverage: 'covered' },
   { mode: 'comms', aliases: ['ms-rm', 'messages-room'], target: { tab: 'workspace', params: { section: 'board', focus: 'messages-room' } }, coverage: 'covered' },
   { mode: 'comms', aliases: ['ms-inb', 'messages-mention-inbox'], target: { tab: 'workspace', params: { section: 'board', focus: 'mention-inbox' } }, coverage: 'covered' },
   { mode: 'comms', aliases: ['ms-st', 'messages-state-block'], target: { tab: 'workspace', params: { section: 'board', focus: 'state-block' } }, coverage: 'covered' },
-  { mode: 'comms', aliases: ['cm-bc', 'composer-broadcast'], target: { tab: 'command', params: { section: 'operations', view: 'ops', focus: 'broadcast' } }, coverage: 'partial' },
-  { mode: 'comms', aliases: ['cm-mn', 'composer-mention'], target: { tab: 'command', params: { section: 'operations', view: 'ops', focus: 'mention' } }, coverage: 'partial' },
-  { mode: 'comms', aliases: ['cm-st', 'composer-state'], target: { tab: 'command', params: { section: 'operations', view: 'ops', focus: 'state' } }, coverage: 'partial' },
+  { mode: 'comms', aliases: ['cm-bc', 'composer-broadcast'], target: { tab: 'command', params: { section: 'operations', view: 'ops', focus: 'broadcast' } }, coverage: 'covered' },
+  { mode: 'comms', aliases: ['cm-mn', 'composer-mention'], target: { tab: 'command', params: { section: 'operations', view: 'ops', focus: 'mention' } }, coverage: 'covered' },
+  { mode: 'comms', aliases: ['cm-st', 'composer-state'], target: { tab: 'command', params: { section: 'operations', view: 'ops', focus: 'state' } }, coverage: 'covered' },
 
   // Observe Plane: split prototype tabs across the consolidated production surfaces.
   { mode: 'observe', aliases: ['cs-list', 'cascade-list'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'cascade' } }, coverage: 'covered' },

@@ -271,11 +271,7 @@ let test_tool_registration_check_does_not_depend_on_injected_masc_schemas () =
   | Error msg ->
       Alcotest.failf "failed to load tool policy config: %s" msg
   | Ok () ->
-      let saved = !(Keeper_exec_tools.masc_schemas_ref) in
-      Fun.protect
-        ~finally:(fun () -> Keeper_exec_tools.masc_schemas_ref := saved)
-        (fun () ->
-          Keeper_exec_tools.masc_schemas_ref := [];
+      Keeper_exec_tools.with_masc_schemas_for_test [] (fun () ->
           let validation = Tool_registration_check.validate () in
           let masc_orphans =
             validation.Tool_registration_check.orphan_toml

@@ -41,20 +41,11 @@ let payload_int_opt key = function
       | _ -> None)
   | _ -> None
 
-let string_contains haystack needle =
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
-  let rec loop index =
-    if needle_len = 0 then true
-    else if index + needle_len > haystack_len then false
-    else if String.sub haystack index needle_len = needle then true
-    else loop (index + 1)
-  in
-  loop 0
-
 let inference_model_bucket ~provider ~model =
-  let text = String.lowercase_ascii (provider ^ " " ^ model) in
-  let has needle = string_contains text needle in
+  let has needle =
+    String_util.contains_substring_ci provider needle
+    || String_util.contains_substring_ci model needle
+  in
   if has "kimi" then "kimi"
   else if has "claude" || has "anthropic" then "anthropic"
   else if has "openai" || has "gpt" || has "codex" then "openai"

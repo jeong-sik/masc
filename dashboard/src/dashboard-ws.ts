@@ -204,6 +204,12 @@ function rejectPendingRpcs(err: Error): void {
   pending.clear()
 }
 
+function formatCloseEventError(event: CloseEvent): string {
+  const parts = [`code=${event.code}`, `wasClean=${event.wasClean}`]
+  if (event.reason) parts.splice(1, 0, `reason=${event.reason}`)
+  return `dashboard websocket closed (${parts.join(', ')})`
+}
+
 function scheduleReconnect(): void {
   if (!shouldReconnect) return
   if (reconnectTimer) return
@@ -526,15 +532,17 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
       dashboardWsLastError.value = 'dashboard websocket error'
     })
   }
-  ws.onclose = () => {
+  ws.onclose = (event) => {
     if (socket !== ws) return
+    const closeError = new Error(formatCloseEventError(event))
     batch(() => {
       dashboardWsConnected.value = false
       dashboardWsReady.value = false
+      dashboardWsLastError.value = closeError.message
     })
     lastSubscribeKey = ''
     socket = null
-    rejectPendingRpcs(new Error('dashboard websocket closed'))
+    rejectPendingRpcs(closeError)
     scheduleReconnect()
   }
 }

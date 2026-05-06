@@ -1175,6 +1175,45 @@ let test_keeper_msg_timeout_contracts () =
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
        {|--argjson timeout "$KEEPER_TURN_TIMEOUT_SEC"|});
+  check bool "docker PR lifecycle harness pins server incarnation" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       "SERVER_INCARNATION_ACTUAL");
+  check bool "docker PR lifecycle harness checks incarnation during polling" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       "assert_server_incarnation_unchanged");
+  check bool "docker PR lifecycle harness captures incarnation failures under set -e" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       {|if fields="$(capture_server_incarnation "$health_file")"; then|});
+  check bool "docker PR lifecycle harness reports missing commit separately" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       "server health missing build.commit for incarnation check");
+  check bool "docker PR lifecycle harness records restart-lost requests" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       "server_incarnation_changed");
+  check bool "docker PR lifecycle prompt routes mutating git through masc_code_git" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       "Do not run git commit, git push, or other mutating git commands through keeper_bash");
+  check bool "docker PR lifecycle prompt names masc_code_git for push" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       "Commit and git push that branch with masc_code_git");
+  check bool "docker PR lifecycle prompt uses keeper_fs_edit for proof edit" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       "with keeper_fs_edit");
+  check bool "docker PR lifecycle prompt forbids gh pr shell mutation" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       "Do not run gh pr create, gh pr review, or other mutating GitHub commands through keeper_shell or keeper_bash");
+  check bool "runbook documents server incarnation restart classification" true
+    (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+       "`server_incarnation_changed`");
   check bool "runbook documents keeper turn timeout" true
     (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
        "`masc_keeper_msg.timeout_sec` through `KEEPER_TURN_TIMEOUT_SEC`")

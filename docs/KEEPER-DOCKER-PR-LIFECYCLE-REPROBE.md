@@ -32,12 +32,31 @@ HTTP health is up but MCP startup is still completing does not fail the run.
 Transient `masc_keeper_msg_result` transport/tool errors are recorded in
 `poll_errors.jsonl` and kept pending until the poll deadline instead of being
 treated as terminal keeper results.
+For mutation runs, the harness pins the server incarnation from `/health`
+using `build.commit` plus `build.started_at`. If the server restarts or is
+replaced while keeper turns are pending, the pending requests are recorded as
+`server_incarnation_changed` instead of accumulating misleading
+`request_id not found` poll errors from a fresh in-memory request registry.
+The incarnation check classifies failures into three statuses:
+`server_incarnation_changed` (real restart, terminates polling),
+`server_health_unavailable` (transient `/health` HTTP failure, polling
+continues), and `server_health_missing_commit` (the response was reachable
+but lacked `build.commit`, also treated as transient). Only the first
+status records pending requests as lost; the other two log a transient
+notice and the next poll iteration retries.
 When mutation is enabled, the harness sends `required_tools` with each
 `masc_keeper_msg` call. By default that one-turn contract requires
 `keeper_shell`, `keeper_bash`, `masc_code_git`, `keeper_pr_create`, and
 `keeper_pr_review_comment`, so the runtime records `tool_surface_mismatch` if
 those tools are not visible and `missing_required_tool_use` if the keeper
 replies without exercising them.
+The prompt reserves `keeper_shell` and `keeper_bash` for read-only inspection.
+Mutating git operations must go through `masc_code_git`; otherwise the shell
+guard can correctly reject `git commit`/`git push` with `write_operation_gated`
+and the run will not produce Docker push evidence.
+Likewise, proof-file writes should use `keeper_fs_edit`, and PR create/review
+mutations should use `keeper_pr_create` / `keeper_pr_review_comment` rather
+than `gh pr ...` through shell tools.
 Override the CSV with `REQUIRED_TOOLS=...` for a narrower or broader proof
 lane.
 `MSG_TIMEOUT_SEC` only bounds the harness HTTP request to the MCP server.

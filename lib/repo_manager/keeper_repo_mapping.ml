@@ -345,6 +345,10 @@ let safe_is_symlink path =
   | Some { Unix.st_kind = Unix.S_LNK; _ } -> true
   | _ -> false
 
+let safe_realpath path =
+  try Some (Unix.realpath path)
+  with Unix.Unix_error _ -> None
+
 let read_file_opt path =
   match safe_lstat path with
   | Some { Unix.st_kind = Unix.S_REG; st_size; _ }
@@ -384,14 +388,18 @@ let gitdir_config_path ~repo_root gitdir =
     else gitdir
   in
   let repo_lane = Filename.dirname repo_root |> normalize_lexical_path in
-  let gitdir = normalize_lexical_path gitdir in
-  match relative_under ~root:repo_lane gitdir with
-  | None -> None
-  | Some _ ->
-      if safe_is_directory gitdir && not (safe_is_symlink gitdir) then
-        Some (Filename.concat gitdir "config")
-      else
-        None
+  let gitdir_lexical = normalize_lexical_path gitdir in
+  match (safe_realpath repo_lane, safe_realpath gitdir_lexical) with
+  | Some repo_lane_real, Some gitdir_real -> (
+      match relative_under ~root:repo_lane_real gitdir_real with
+      | None -> None
+      | Some _ ->
+          if
+            safe_is_directory gitdir_real
+            && not (safe_is_symlink gitdir_lexical)
+          then Some (Filename.concat gitdir_real "config")
+          else None)
+  | _ -> None
 
 let git_config_path_of_repo_root repo_root =
   let dot_git = Filename.concat repo_root ".git" in

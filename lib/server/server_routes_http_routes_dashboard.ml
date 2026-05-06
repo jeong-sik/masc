@@ -692,6 +692,13 @@ let rec add_routes ~sw ~clock router =
           and returned as [{"error": "..."}] under the slice key so a
           single slow/broken slice does not 500 the whole call. *)
        with_public_read (fun state req reqd ->
+         (* The bootstrap endpoint is reachable on the public dashboard
+            read surface, so per-slice error payloads must not leak
+            internal details (filesystem paths, dependency stack traces,
+            config hints carried in [Printexc.to_string]). Server-side
+            logs keep the full exception for ops debugging; the client
+            sees a stable [{error:"slice_unavailable", slice:<name>}]
+            shape it can render without parsing free text. *)
          let slice name f =
            try (name, f ())
            with
@@ -700,7 +707,11 @@ let rec add_routes ~sw ~clock router =
              Log.Server.warn
                "[dashboard-bootstrap] slice %s failed: %s"
                name (Printexc.to_string exn);
-             (name, `Assoc [ ("error", `String (Printexc.to_string exn)) ])
+             ( name
+             , `Assoc
+                 [ ("error", `String "slice_unavailable")
+                 ; ("slice", `String name)
+                 ] )
          in
          let shell =
            slice "shell" (fun () ->

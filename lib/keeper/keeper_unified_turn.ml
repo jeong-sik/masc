@@ -74,11 +74,34 @@ let record_streaming_cancelled_observation
     ~prev:Keeper_turn_fsm.Streaming
     (Keeper_turn_fsm.Cancelled Keeper_turn_fsm.Cancelled_supervisor_stop)
 
+let sdk_error_of_retry_slot_reacquire_timeout
+    ~(keeper_name : string)
+    (timeout : Keeper_turn_slot.semaphore_wait_timeout) =
+  let phase =
+    Keeper_turn_slot.semaphore_wait_phase_to_string timeout.timeout_phase
+  in
+  let holder_summary =
+    Keeper_turn_slot.format_slot_holders timeout.timeout_holders
+  in
+  Agent_sdk.Error.Api
+    (Agent_sdk.Retry.Timeout
+       {
+         message =
+           Printf.sprintf
+             "keeper turn slot reacquire timed out after degraded retry \
+              (keeper=%s phase=%s wait=%.0fs holders=%s)"
+             keeper_name
+             phase
+             timeout.timeout_wait_sec
+             holder_summary;
+       })
+
 let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(generation : int)
     ?(channel : Keeper_world_observation.keeper_cycle_channel = Scheduled_autonomous)
     ?(semaphore_wait_ms = 0)
+    ?turn_slot_control
     ?shared_context
     () : (keeper_meta, Agent_sdk.Error.sdk_error) result =
   (* Spec navigation (OCaml -> TLA+) — plan §19 Cycle 28 anchor for
@@ -1252,7 +1275,15 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                           let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
                             current_turn_phase_elapsed_ms ()
                           in
+                          let slot_release_at_phase =
+                            match turn_slot_control with
+                            | Some slot_control ->
+                                slot_control.Keeper_turn_slot.release_for_retry ();
+                                Some "retry_scheduled"
+                            | None -> None
+                          in
                           record_cascade_rotation_attempt
+                            ?slot_release_at_phase
                             ~productive_phase_elapsed_ms
                             ?retry_phase_elapsed_ms
                             ~from_cascade:execution.cascade_name
@@ -1271,17 +1302,45 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                             (match
                                next_execution.max_context_resolution.requested_override
                              with
-                             | Some requested -> string_of_int requested
-                             | None -> "none")
+                            | Some requested -> string_of_int requested
+                            | None -> "none")
                             (short_preview (Agent_sdk.Error.to_string err));
                           Eio.Fiber.yield ();
-                          retry_loop ~run_meta ~execution:next_execution
-                            ~run_generation
-                            ~attempt:1
-                            ~is_retry:true
-                            ~overflow_retry_used
-                            ~attempted_cascades:
-                              (next_execution_cascade_name :: attempted_cascades))
+                          let run_retry_after_reacquire () =
+                            retry_loop ~run_meta ~execution:next_execution
+                              ~run_generation
+                              ~attempt:1
+                              ~is_retry:true
+                              ~overflow_retry_used
+                              ~attempted_cascades:
+                                (next_execution_cascade_name :: attempted_cascades)
+                          in
+                          match turn_slot_control with
+                          | None -> run_retry_after_reacquire ()
+                          | Some slot_control -> (
+                              match
+                                slot_control.Keeper_turn_slot.reacquire_after_retry ()
+                              with
+                              | Ok retry_semaphore_wait_ms ->
+                                  Log.Keeper.info
+                                    "%s: reacquired keeper turn slot for degraded retry on cascade=%s wait_ms=%d"
+                                    meta.name
+                                    next_execution_cascade_name
+                                    retry_semaphore_wait_ms;
+                                  run_retry_after_reacquire ()
+                              | Error (`Semaphore_wait_timeout timeout) ->
+                                  let slot_err =
+                                    sdk_error_of_retry_slot_reacquire_timeout
+                                      ~keeper_name:meta.name timeout
+                                  in
+                                  Log.Keeper.warn
+                                    "%s: degraded retry to %s skipped because turn slot reacquire timed out: %s"
+                                    meta.name
+                                    next_execution_cascade_name
+                                    (short_preview
+                                       (Agent_sdk.Error.to_string slot_err));
+                                  mark_terminal_error slot_err;
+                                  Error slot_err))
                   | Degraded_retry_budget_exhausted degraded_retry ->
                       (* #13120 review (P1, threads 2 & 4): record the
                          rejection in [cascade_rotation_attempts] so
@@ -1743,6 +1802,14 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   (Some failure_reason)
             | None -> ()
           end;
+          (match
+             Keeper_passive_loop_detector.progress_class_of_terminal_reason_code
+               terminal_reason.code
+           with
+           | Some progress_class ->
+               Keeper_passive_loop_detector.record_turn
+                 ~keeper_name:updated_meta.name ~progress_class
+           | None -> ());
           Keeper_unified_metrics.append_decision_record ~config ~meta:updated_meta ~observation
             ~latency_ms ~semaphore_wait_ms
             ~outcome:(if is_ambiguous_partial then "partial" else "error")
@@ -1947,8 +2014,15 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               ~model:used_model_id
               result.usage
           in
+          let resilience_handles =
+            post_turn_resilience_handles ~config ~meta
+          in
           let lifecycle =
-            apply_post_turn_lifecycle ~base_dir
+            apply_post_turn_lifecycle_with_resilience_handles ~base_dir
+              ~resilience_audit_store:
+                resilience_handles.resilience_audit_store
+              ~resilience_strategy_executor:
+                resilience_handles.resilience_strategy_executor
               ~on_compaction_started:(fun () ->
                 dispatch_keeper_phase_event
                   ~config
@@ -1964,6 +2038,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               ~primary_model_max_tokens:final_execution.max_context
               ~current_turn_overflow_blocker:!current_turn_overflow_blocker
               ~checkpoint:result.checkpoint
+            |> resilience_handles.sync_lifecycle_meta
           in
           dispatch_post_turn_lifecycle_events
             ~config

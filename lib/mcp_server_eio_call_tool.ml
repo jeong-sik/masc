@@ -36,31 +36,50 @@ let contains_casefold haystack needle =
   String.length needle = 0
   || String_util.contains_substring_ci haystack needle
 
+type tool_failure_class =
+  | Workflow_rejection
+  | Policy_rejection
+  | Runtime_failure
+
+let tool_failure_class_to_string = function
+  | Workflow_rejection -> "workflow_rejection"
+  | Policy_rejection -> "policy_rejection"
+  | Runtime_failure -> "runtime_failure"
+
 (* #10975: tool-call failure severity classification.
 
    Without this, every [success=false] result downstream is logged
    at [Log.Error], including normal policy/workflow rejections like
    [awaiting_approval] (governance critical-risk pending),
    [Join required] (keeper called masc_transition before masc_join),
-   [egress_blocked] (network policy denial), [path_outside_sandbox]
-   (sandbox boundary), and [team memory is disabled] (config-disabled
-   scope).  Single 24h window: 41 such events at ERROR, polluting
+   [egress_blocked] (network policy denial), and [path_outside_sandbox]
+   (sandbox boundary).  Single 24h window: 41 such events at ERROR, polluting
    alert ROC, supervisor escape-valve heuristics (#10887 SP cohort
    detection counts ERROR rate), and the dashboard red counter that
    operators use to triage genuine system errors.
 
-   Demote those byte-substring-matched rejection patterns to WARN.
-   Anything else stays ERROR.  Same family pattern as #10881 / #10908
-   / #10919 (single-flag split between normal and catastrophic). *)
-let classify_tool_failure_severity error_detail : Log.level =
+   Classify the current untyped message boundary into a stable semantic
+   class first, then map class -> severity and telemetry. Anything unknown
+   stays [Runtime_failure] / ERROR. *)
+let classify_tool_failure_class error_detail =
   let detail = Option.value ~default:"" error_detail in
   if contains_casefold detail "awaiting_approval"
      || contains_casefold detail "join required"
-     || contains_casefold detail "egress_blocked"
-     || contains_casefold detail "path_outside_sandbox"
-     || contains_casefold detail "team memory is disabled"
-  then Log.Warn
-  else Log.Error
+  then Workflow_rejection
+  else if
+    contains_casefold detail "egress_blocked"
+    || contains_casefold detail "path_outside_sandbox"
+  then Policy_rejection
+  else Runtime_failure
+
+let log_level_of_tool_failure_class = function
+  | Workflow_rejection | Policy_rejection -> Log.Warn
+  | Runtime_failure -> Log.Error
+
+let classify_tool_failure_severity error_detail : Log.level =
+  error_detail
+  |> classify_tool_failure_class
+  |> log_level_of_tool_failure_class
 
 let parse_status_from_message ~success ~message =
   if not success then
@@ -702,12 +721,15 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   Audit_log.log_tool_call state.Mcp_server.room_config
     ~agent_id:agent_name ~tool_name:name ~success ~error_msg:error_detail
     ?trace_id:otel_trace_id ();
-  if not success then
-    Log.Mcp.emit (classify_tool_failure_severity error_detail)
+  if not success then (
+    let failure_class = classify_tool_failure_class error_detail in
+    Log.Mcp.emit (log_level_of_tool_failure_class failure_class)
       ~details:
         (`Assoc
           [
             ("event_family", `String "tool_call_failure");
+            ( "failure_class",
+              `String (tool_failure_class_to_string failure_class) );
             ("tool_name", `String name);
             ("phase", `String "failure");
             ("request_id", `String jsonrpc_id_str);
@@ -720,7 +742,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
             ("error_detail", `String (Option.value ~default:"" error_detail));
           ])
       (Printf.sprintf "tool call failed: %s — %s" name
-         (Option.value ~default:"(no detail)" error_detail));
+         (Option.value ~default:"(no detail)" error_detail)));
 
   (* Classify call source: Keeper_internal if the resolved agent_name matches
      a registered keeper (keeper-internal dispatch via cli_agent runtime),

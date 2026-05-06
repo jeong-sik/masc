@@ -12,6 +12,7 @@ module Keeper : sig
     | Board_cleanup
     | Board_comment
     | Board_comment_vote
+    | Board_curation_read
     | Board_delete
     | Board_get
     | Board_list
@@ -69,6 +70,7 @@ module Masc : sig
     | Add_task
     | Agent_fitness
     | Agent_update
+    | Agent_card
     | Agents
     | Autoresearch_cycle
     | Autoresearch_inject
@@ -81,6 +83,7 @@ module Masc : sig
     | Board_cleanup
     | Board_comment
     | Board_comment_vote
+    | Board_curation_read
     | Board_delete
     | Board_get
     | Board_hearths

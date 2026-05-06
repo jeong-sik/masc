@@ -27,6 +27,8 @@ val start_keeper_loops :
 module For_testing : sig
   val autoboot_proactive_warmup_sec :
     base_warmup:int -> stagger_window_sec:int -> keeper_name:string -> int
+
+  val board_sse_event_params : Board_dispatch.board_sse_event -> Yojson.Safe.t
 end
 
 val start_background_maintenance :

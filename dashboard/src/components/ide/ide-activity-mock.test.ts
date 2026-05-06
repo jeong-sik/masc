@@ -9,7 +9,7 @@ describe('IdeActivityMock', () => {
     render(h(IdeActivityMock, {}), container)
 
     const region = container.querySelector('[role="region"]')
-    expect(region?.getAttribute('aria-label')).toBe('ACTIVITY')
+    expect(region?.getAttribute('aria-label')).toBe('EVENT TIMELINE')
     expect(container.textContent).toContain('0 events · 0 keepers')
   })
 })

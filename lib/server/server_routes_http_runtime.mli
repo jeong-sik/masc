@@ -90,6 +90,11 @@ val transport_json : Httpun.Request.t -> Yojson.Safe.t
     JSON (HTTP + WS + protocol set).  Sub-projection used by
     {!make_health_json}'s [transport] field. *)
 
+val agent_card_json : Httpun.Request.t -> Yojson.Safe.t
+(** [agent_card_json request] returns the public well-known MASC server
+    card served from [/.well-known/agent.json].  This route is public
+    discovery metadata; mutable operations still require normal tool auth. *)
+
 (** {1 Health endpoints} *)
 
 val health_path_diagnostics :
@@ -152,11 +157,14 @@ val readiness_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** {1 Board} *)
 
 val board_post_detail_json :
+  voter:string option ->
   response_format:string ->
   post_id:string ->
   [> `OK | `Not_found ] * string
-(** [board_post_detail_json ~response_format ~post_id] returns
+(** [board_post_detail_json ~voter ~response_format ~post_id] returns
     [(status, json_string)] for [GET /api/v1/board/<post_id>].
+    When [voter] is supplied, post/comment rows include vote state for
+    that voter.
 
     {2 response_format values (case-insensitive, trimmed)}
 

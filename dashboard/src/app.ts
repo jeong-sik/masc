@@ -32,8 +32,8 @@ import {
 } from './components/dashboard-shell'
 import { ThemeSwitch } from './components/theme-switch'
 import { TransportBeacon } from './components/transport-beacon'
-import { SurfaceIcon } from './components/surface-icon'
-import { RouteLink } from './components/common/route-link'
+import { DashboardSurfaceTabs } from './components/dashboard-surface-tabs'
+import { SkipLink } from './components/skip-link'
 import { selectedAgentName } from './components/agent-detail-selection'
 import { selectedTask } from './components/goals/task-detail-selection'
 import { ToastContainer } from './components/common/toast'
@@ -41,6 +41,9 @@ import { ConfirmDialogOverlay } from './components/common/confirm-dialog'
 import { startErrorCleanup, stopErrorCleanup } from './components/common/error-notification-state'
 import { DASHBOARD_NAV_ITEMS, currentSectionForRoute } from './config/navigation'
 import { Menu, X } from 'lucide-preact'
+import { useKeyboardShortcutHost } from '../design-system/headless-preact/use-keyboard-shortcut'
+import { globalShortcutManager } from './lib/global-shortcut-manager'
+import { useKeeperPinShortcuts } from './components/ide/use-keeper-pin-shortcuts'
 
 // Sidebar collapsed state persists across reloads — a user who picks
 // the dense layout keeps it. Namespaced key avoids clashing with any
@@ -90,6 +93,21 @@ function refreshCurrentRoute(options?: { recordVisit?: boolean }): void {
 }
 
 export function App() {
+  // RFC-0012 §3.2: bind a single document-level keydown listener once at
+  // the app root. Registry starts empty; per RFC §8 each ad-hoc keydown
+  // owner (command palette, modal Escape, IDE multi-keeper pin promote /
+  // unpin) migrates onto `globalShortcutManager` in its own PR. The
+  // manager's `dispatch` returns `false` on no-match so the host does not
+  // `preventDefault`, leaving existing element-scoped listeners working.
+  useKeyboardShortcutHost(globalShortcutManager)
+
+  // RFC-0027 PR-γ-2: 5 multi-keeper-pin shortcuts (Mod+Shift+1..4
+  // promote, Mod+Shift+W unpin head). First consumer of the global
+  // shortcut manager (RFC-0012 §8 consumer-migration pattern). Chord
+  // namespace deliberately distinct from RFC-0012 §4 default IDE set
+  // (Mod+1..9 reserved for tab switching, Mod+W for tab close).
+  useKeeperPinShortcuts(globalShortcutManager)
+
   useEffect(() => {
     let cancelled = false
     // Resolved once per mount; runtime changes require a reload.  The
@@ -101,10 +119,20 @@ export function App() {
     // Initialize hash router and compatible deep links
     initRouter()
 
-    // Prime the lightweight shell status first so build/version metadata lands
-    // while the project snapshot warms heavier execution/command projections.
-    void refreshShell({ light: true })
-    requestNamespaceTruthNow()
+    const ensureLoopbackAuth = () => ensureDevToken()
+      .catch(err => {
+        console.warn('[app] dashboard dev-token bootstrap failed', err instanceof Error ? err.message : err)
+      })
+
+    // Loopback dashboards can self-provision a dev bearer token. Do that before
+    // the first authenticated projections so the header auth badge and runtime
+    // stores do not briefly settle on an unauthenticated shell snapshot.
+    void ensureLoopbackAuth()
+      .finally(() => {
+        if (cancelled) return
+        void refreshShell({ light: true })
+        requestNamespaceTruthNow()
+      })
 
     // Fetch runtime thresholds so health-strip and lifecycle state use
     // server-side config instead of compiled fallback defaults (P-DASH-07).
@@ -130,10 +158,7 @@ export function App() {
       })
       .finally(() => {
         if (cancelled) return
-        void ensureDevToken()
-          .catch(err => {
-            console.warn('[app] dashboard dev-token bootstrap failed', err instanceof Error ? err.message : err)
-          })
+        void ensureLoopbackAuth()
           .finally(() => {
             if (cancelled) return
             void connectDashboardWS(route.value)
@@ -196,11 +221,11 @@ export function App() {
   const currentTab = route.value.tab
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
   const currentSection = currentSectionForRoute(route.value)
-  const topbarNavItems = DASHBOARD_NAV_ITEMS.filter(item => item.id !== 'code')
+  const isCodeSurface = currentTab === 'code'
 
   return html`
     <div class="flex min-h-screen h-screen flex-col overflow-hidden bg-[var(--color-bg-page)] text-[var(--color-fg-primary)]">
-      <a href="#main-content" class="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-[100] focus:rounded-[var(--r-2)] focus:bg-[var(--color-bg-page)] focus:px-4 focus:py-2 focus:text-sm focus:text-[var(--color-fg-secondary)] focus:shadow-[var(--shadow-panel)] focus:ring-2 focus:ring-[var(--select-20)]">Skip to main content</a>
+      <${SkipLink} />
       <header class="relative z-10 shrink-0 border-b border-[var(--color-border-default)] bg-[var(--shell-header-bg)] px-3 py-1.5 backdrop-blur-xl">
         <div class="absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-[var(--accent-15)] to-transparent"></div>
         <div class="flex w-full items-center justify-between gap-3 max-[1080px]:flex-col max-[1080px]:items-stretch">
@@ -236,29 +261,7 @@ export function App() {
               </div>
             </div>
 
-            <nav class="min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] max-[520px]:w-full" aria-label="Dashboard surfaces">
-              <div class="inline-flex min-w-max items-center gap-0.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-0.5">
-                ${topbarNavItems.map(item => {
-                  const active = item.id === currentTab
-                  return html`
-                    <${RouteLink}
-                      tab=${item.id}
-                      params=${item.defaultParams}
-                      ariaCurrent=${active ? 'page' : undefined}
-                      title=${item.description}
-                      class=${`inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-[var(--radius-sm)] border px-2 font-mono text-3xs uppercase leading-none tracking-[var(--track-caps)] transition-colors ${
-                        active
-                          ? 'border-[var(--brass-3)] bg-[var(--accent-22)] text-[var(--brass-1)] shadow-[inset_0_-1px_0_var(--brass-3)]'
-                          : 'border-transparent text-[var(--color-fg-muted)] hover:border-[var(--color-border-strong)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-secondary)]'
-                      }`}
-                    >
-                      <${SurfaceIcon} icon=${item.icon} size=${13} />
-                      <span>${item.label}</span>
-                    <//>
-                  `
-                })}
-              </div>
-            </nav>
+            <${DashboardSurfaceTabs} items=${DASHBOARD_NAV_ITEMS} currentTab=${currentTab} />
           </div>
 
           <div class="flex shrink-0 flex-wrap items-center justify-end gap-2 max-[1080px]:justify-between">
@@ -284,7 +287,7 @@ export function App() {
         </aside>
 
         <main id="main-content" tabindex=${-1} class="min-w-0 flex-1 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-main-bg)] backdrop-blur-lg max-[1100px]:min-h-0">
-          <div class="h-full overflow-y-auto p-4">
+          <div class=${isCodeSurface ? 'h-full overflow-hidden p-0' : 'h-full overflow-y-auto p-4'}>
             <${DashboardMain} />
           </div>
         </main>

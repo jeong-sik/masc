@@ -14,9 +14,13 @@ describe('IdeConversationRailMock', () => {
     render(h(IdeConversationRailMock, {}), container)
 
     const region = container.querySelector('[role="region"]')
-    expect(region?.getAttribute('aria-label')).toBe('CONVERSATION')
-    expect(container.textContent).toContain('CONVERSATION')
+    expect(region?.getAttribute('aria-label')).toBe('REACTION THREAD')
+    expect(region?.classList.contains('ide-conversation-panel')).toBe(true)
+    expect(container.querySelector('.ide-rail-scope')?.getAttribute('aria-label')).toBe('Keeper workspace scope')
+    expect(container.querySelector('.ide-rail-list')).not.toBeNull()
+    expect(container.textContent).toContain('REACTION THREAD')
     expect(container.textContent).toContain('0')
+    expect(container.textContent).toContain('no conversation activity')
   })
 
   it('orders thread, decision, and cascade replay items on one timeline', () => {

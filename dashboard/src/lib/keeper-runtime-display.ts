@@ -227,12 +227,34 @@ function continueGateHint(keeper: Keeper): string {
   return '계속 진행 승인 대기 · 일부 변경이 반영되었을 수 있어 운영자 확인이 필요합니다.'
 }
 
+const runtimeBlockerLabels = {
+  ambiguous_post_commit_timeout: '커밋 후 응답 없음',
+  ambiguous_post_commit_failure: '커밋 후 실패',
+  autonomous_slot_wait_timeout: '자율 슬롯 대기 만료',
+  admission_queue_wait_timeout: '대기열 진입 만료',
+  turn_timeout_after_queue_wait: '대기 후 턴 만료',
+  oas_timeout_budget: 'OAS 응답 만료',
+  turn_timeout: '턴 응답 만료',
+  completion_contract_violation: '완료 계약 위반',
+  cascade_exhausted: '캐스케이드 소진',
+  no_tool_capable_provider: '도구 실행 Provider 없음',
+  fiber_unresolved: 'Fiber 미해결',
+  stale_turn_timeout: '오래된 턴 만료',
+} satisfies Record<NonNullable<Keeper['runtime_blocker_class']>, string>
+
+export function keeperRuntimeBlockerLabel(
+  blockerClass: Keeper['runtime_blocker_class'] | null | undefined,
+): string | null {
+  if (!blockerClass) return null
+  return runtimeBlockerLabels[blockerClass] ?? null
+}
+
 export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): string | null {
   if (!keeper) return null
   if (keeper.runtime_blocker_continue_gate) return continueGateHint(keeper)
   const blockerClass = keeper.runtime_blocker_class
   const runtimeBlocker = keeper.runtime_blocker_summary?.trim()
-  if (runtimeBlocker) return runtimeBlocker
+  if (runtimeBlocker && runtimeBlocker !== blockerClass) return runtimeBlocker
   if (blockerClass === 'ambiguous_post_commit_timeout') {
     return '최근 변경 이후 응답이 끊겨 상태 확인이 필요합니다.'
   }
@@ -256,6 +278,18 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
   }
   if (blockerClass === 'completion_contract_violation') {
     return '완료 계약 조건을 만족하지 못해 재확인이 필요합니다.'
+  }
+  if (blockerClass === 'cascade_exhausted') {
+    return '캐스케이드 후보가 모두 소진되어 provider 상태 확인이 필요합니다.'
+  }
+  if (blockerClass === 'no_tool_capable_provider') {
+    return '요구 도구를 실행할 수 있는 provider가 없어 라우팅 또는 tool surface 확인이 필요합니다.'
+  }
+  if (blockerClass === 'fiber_unresolved') {
+    return 'Keeper fiber가 종료 상태를 확정하지 못해 supervisor 확인이 필요합니다.'
+  }
+  if (blockerClass === 'stale_turn_timeout') {
+    return '오래된 턴 제한 시간이 만료되어 최신 실행 상태 확인이 필요합니다.'
   }
   return null
 }

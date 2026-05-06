@@ -1,6 +1,10 @@
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
+import { bridgePostsToTrace } from './anchored-thread-trace-bridge'
+import { bridgeCascadeEventsToTrace } from './cascade-hop-trace-bridge'
+import { bridgeDecisionsToTrace } from './decision-log-trace-bridge'
 import { keeperHueIndex } from '../../../design-system/headless-core/keeper-line-ownership'
+import { KeeperBadge } from '../keeper-badge'
 import {
   fetchKeeperDecisions,
   type KeeperDecision,
@@ -15,6 +19,8 @@ import {
   filterReplayEvents,
   type AuditReplayEvent,
 } from './audit-replay-slider'
+import { activeIdeFile } from './ide-shell'
+import { activeKeeperName } from '../../keeper-state'
 
 interface BoardPost {
   readonly id: string
@@ -106,6 +112,8 @@ export function IdeConversationRailMock() {
   const [cascadeEvents, setCascadeEvents] = useState<ReadonlyArray<CascadeStrategyTraceEvent>>(EMPTY_CASCADE)
   const [focusedId, setFocusedId] = useState<string | null>(null)
   const [replayUntilMs, setReplayUntilMs] = useState<number | null>(null)
+  const [activeFile, setActiveFile] = useState(activeIdeFile.value)
+  const [keeperName, setKeeperName] = useState(activeKeeperName.value)
 
   useEffect(() => {
     let cancelled = false
@@ -121,7 +129,35 @@ export function IdeConversationRailMock() {
     })
     return () => { cancelled = true }
   }, [])
+  useEffect(() => activeIdeFile.subscribe(file => setActiveFile(file)), [])
+  useEffect(() => activeKeeperName.subscribe(name => setKeeperName(name)), [])
 
+  // RFC-0028 PR-δ anchored-thread producer: each fetched post becomes a
+  // keeper-trace event the first time it is observed, deduplicated by id
+  // across renders. The ref carries the cumulative known-id set so a
+  // re-render with the same posts is a no-op.
+  const knownPostIds = useRef<ReadonlySet<string>>(new Set())
+  useEffect(() => {
+    knownPostIds.current = bridgePostsToTrace(posts, knownPostIds.current)
+  }, [posts])
+
+  // RFC-0028 PR-δ-2 cascade-hop producer: each cascade strategy_trace
+  // event becomes a keeper-trace event the first time it is observed.
+  // Dedup key is `cascade:${cascade_name}:${cycle}:${ts}` so a server
+  // restart that resets cycle counters cannot collide with prior runs.
+  const knownCascadeKeys = useRef<ReadonlySet<string>>(new Set())
+  useEffect(() => {
+    knownCascadeKeys.current = bridgeCascadeEventsToTrace(cascadeEvents, knownCascadeKeys.current)
+  }, [cascadeEvents])
+
+  // RFC-0028 PR-δ-3 decision-log producer: each KeeperDecision becomes a
+  // keeper-trace event the first time it is observed. Dedup key is
+  // `decision:${keeper_name}:${ts_unix}:${event_type}` since the
+  // KeeperDecision payload has no native id field.
+  const knownDecisionKeys = useRef<ReadonlySet<string>>(new Set())
+  useEffect(() => {
+    knownDecisionKeys.current = bridgeDecisionsToTrace(decisions, knownDecisionKeys.current)
+  }, [decisions])
   const replayItems = replayRailItems(posts, decisions, cascadeEvents)
   const replayEvents = replayEventsForItems(replayItems)
   const visibleItemIds = new Set(filterReplayEvents(replayEvents, replayUntilMs).map(event => event.id))
@@ -132,32 +168,23 @@ export function IdeConversationRailMock() {
 
   return html`
     <div
+      class="ide-rail-panel ide-conversation-panel"
       role="region"
-      aria-label="CONVERSATION"
-      style=${{
-        display: 'flex',
-        flexDirection: 'column',
-        background: 'var(--color-bg-surface)',
-        borderLeft: '1px solid var(--color-border-default)',
-        minHeight: 0,
-      }}
+      aria-label="REACTION THREAD"
     >
       <div
-        style=${{
-          display: 'flex',
-          justifyContent: 'space-between',
-          padding: 'var(--sp-2) var(--sp-3)',
-          color: 'var(--color-fg-muted)',
-          font: 'var(--type-eyebrow)',
-          borderBottom: '1px solid var(--color-border-divider)',
-        }}
+        class="ide-rail-head"
       >
-        <span>CONVERSATION</span>
+        <span>REACTION THREAD</span>
         <span>
           ${visibleCounts.thread}/${posts.length} threads ·
           ${visibleCounts.decision}/${decisions.length} decisions ·
           ${visibleCounts.cascade}/${cascadeEvents.length} cascade
         </span>
+      </div>
+      <div class="ide-rail-scope" aria-label="Keeper workspace scope">
+        <span>${keeperName ? `@${keeperName}` : 'all keepers'}</span>
+        <span title=${activeFile}>${activeFile}</span>
       </div>
       <${AuditReplaySlider}
         events=${replayEvents}
@@ -165,21 +192,15 @@ export function IdeConversationRailMock() {
         onChange=${setReplayUntilMs}
       />
       <ol
-        style=${{
-          listStyle: 'none',
-          padding: 'var(--sp-2)',
-          margin: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 'var(--sp-2)',
-          overflow: 'auto',
-        }}
+        class="ide-rail-list"
       >
-        ${visibleItems.map(item => ReplayRailCard(
-          item,
-          focusedId,
-          nextFocusedId => setFocusedId(focusedId === nextFocusedId ? null : nextFocusedId),
-        ))}
+        ${visibleItems.length === 0
+          ? html`<li class="ide-rail-empty">no conversation activity</li>`
+          : visibleItems.map(item => ReplayRailCard(
+              item,
+              focusedId,
+              nextFocusedId => setFocusedId(focusedId === nextFocusedId ? null : nextFocusedId),
+            ))}
       </ol>
     </div>
   `
@@ -254,29 +275,20 @@ function PostCard(post: BoardPost, focused: boolean, onFocus: () => void) {
   const bodyText = post.body || post.title || ''
 
   return html`
-    <li style=${{ display: 'block' }}>
+    <li class="ide-rail-item">
       <button
+        class="ide-conversation-card"
         type="button"
         aria-current=${focused ? 'true' : undefined}
         onClick=${onFocus}
         style=${{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 'var(--sp-1)',
-          width: '100%',
-          padding: 'var(--sp-2)',
-          background: focused ? 'var(--color-bg-muted)' : 'var(--color-bg-elevated)',
-          border: '1px solid var(--color-border-default)',
+          '--ide-conversation-bg': focused ? 'var(--color-bg-muted)' : 'var(--color-bg-elevated)',
           borderLeft: `2px solid ${keeperColor}`,
-          borderRadius: 'var(--r-2)',
-          color: 'inherit',
-          textAlign: 'left',
-          cursor: 'pointer',
         }}
       >
-        <div style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-2)' }}>
+        <div class="ide-conversation-meta">
           <span style=${{ fontSize: 'var(--fs-11)', color: kindColor, letterSpacing: '0.05em' }}>${KIND_LABEL[kind]}</span>
-          <span style=${{ fontSize: 'var(--fs-11)', color: keeperColor }}>${post.author_identity}</span>
+          <${KeeperBadge} id=${post.author_identity} variant="full" size="sm" />
           <span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)', marginLeft: 'auto' }}>${formatThreadTime(createdMs)}</span>
         </div>
         ${post.hearth ? html`
@@ -284,7 +296,7 @@ function PostCard(post: BoardPost, focused: boolean, onFocus: () => void) {
             ${post.hearth}
           </div>
         ` : null}
-        <p style=${{ font: 'var(--type-body)', color: 'var(--color-fg-secondary)', margin: 0 }}>${bodyText}</p>
+        <p class="ide-conversation-body">${bodyText}</p>
         <div style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)' }}>
           ${post.comment_count > 0 ? `${post.comment_count} replies · ` : ''}${post.votes > 0 ? `${post.votes} votes` : ''}
         </div>
@@ -320,7 +332,7 @@ function DecisionCard(item: Extract<ReplayRailItem, { source: 'decision' }>) {
       >
         <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
           <span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-status-info)', letterSpacing: '0.05em' }}>DECISION</span>
-          <span style=${{ fontSize: 'var(--fs-11)', color }}>${keeper}</span>
+          <${KeeperBadge} id=${keeper} variant="full" size="sm" />
           <span style=${{ marginLeft: 'auto', fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)' }}>${formatThreadTime(item.timestamp_ms)}</span>
         </div>
         <p style=${{ margin: 0, color: 'var(--color-fg-secondary)', fontSize: 'var(--fs-12)' }}>${summary || 'decision event'}</p>

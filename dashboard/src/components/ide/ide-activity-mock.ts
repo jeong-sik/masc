@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { keeperHueIndex } from '../../../design-system/headless-core/keeper-line-ownership'
+import { KeeperBadge } from '../keeper-badge'
 import {
   createRunActivityStore,
   type RunActivityEvent,
@@ -128,42 +129,22 @@ export function IdeActivityMock() {
 
   return html`
     <div
+      class="ide-rail-panel ide-activity-panel"
       role="region"
-      aria-label="ACTIVITY"
-      style=${{
-        display: 'flex',
-        flexDirection: 'column',
-        background: 'var(--color-bg-surface)',
-        borderLeft: '1px solid var(--color-border-default)',
-        borderTop: '1px solid var(--color-border-divider)',
-        minHeight: 0,
-      }}
+      aria-label="EVENT TIMELINE"
     >
       <div
-        style=${{
-          display: 'flex',
-          justifyContent: 'space-between',
-          padding: 'var(--sp-2) var(--sp-3)',
-          color: 'var(--color-fg-muted)',
-          font: 'var(--type-eyebrow)',
-          borderBottom: '1px solid var(--color-border-divider)',
-        }}
+        class="ide-rail-head"
       >
-        <span>ACTIVITY</span>
+        <span>EVENT TIMELINE</span>
         <span>${events.length} events · ${keepers.length} keepers</span>
       </div>
       <ol
-        style=${{
-          listStyle: 'none',
-          padding: 'var(--sp-2)',
-          margin: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 'var(--sp-1)',
-          overflow: 'auto',
-        }}
+        class="ide-rail-list ide-activity-list"
       >
-        ${events.map(item => ActivityRow(item))}
+        ${events.length === 0
+          ? html`<li class="ide-rail-empty">no recent activity</li>`
+          : events.map(item => ActivityRow(item))}
       </ol>
     </div>
   `
@@ -174,21 +155,17 @@ function ActivityRow(item: RunActivityEvent) {
   const dot = `var(--color-keeper-${hue}-glow, var(--k-${hue}))`
   return html`
     <li
+      class="ide-activity-row"
       style=${{
-        display: 'grid',
-        gridTemplateColumns: '52px 8px 1fr',
-        gap: 'var(--sp-2)',
-        alignItems: 'baseline',
-        padding: '4px 6px',
-        font: 'var(--type-body)',
-        color: 'var(--color-fg-secondary)',
+        '--ide-activity-dot': dot,
       }}
     >
-      <span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)' }}>${formatActivityTime(item.timestamp_ms)}</span>
-      <span aria-hidden="true" style=${{ width: '6px', height: '6px', borderRadius: '50%', background: dot, alignSelf: 'center' }} />
+      <span class="ide-activity-time">${formatActivityTime(item.timestamp_ms)}</span>
+      <span class="ide-activity-dot" aria-hidden="true" />
       <div style=${{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
         <span style=${{ fontSize: 'var(--fs-11)' }}>
-          <strong style=${{ color: dot }}>${item.keeper_id}</strong> ${' '}${item.verb}${' '}<span style=${{ color: 'var(--color-fg-muted)' }}>${item.target}</span>
+          <${KeeperBadge} id=${item.keeper_id} variant="full" size="sm" />
+          ${' '}${item.verb}${' '}<span style=${{ color: 'var(--color-fg-muted)' }}>${item.target}</span>
         </span>
         ${item.detail ? html`<span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)' }}>${item.detail}</span>` : null}
       </div>

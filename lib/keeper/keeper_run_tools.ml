@@ -734,6 +734,7 @@ let prepare_agent_setup
     in
     let safe_last_turn_tools =
       Keeper_tool_policy.last_turn_safe_tool_names ()
+      |> Keeper_tool_alias.expand_universe
     in
     let all_allowed =
       if is_last_turn && required_tool_names = [] then

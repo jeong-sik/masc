@@ -1,6 +1,7 @@
 (** Tests for Tool_dispatch — O(1) central dispatch registry. *)
 
 module Tool_dispatch = Masc_mcp.Tool_dispatch
+module Tool_result = Masc_mcp.Tool_result
 module Mcp_eio = Masc_mcp.Mcp_server_eio
 module KE = Masc_mcp.Keeper_exec_tools
 module Types = Masc_domain
@@ -35,7 +36,9 @@ let () =
               let token = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
               let result = Tool_dispatch.dispatch ~token ~args:`Null in
               check bool "found" true (Option.is_some result);
-              let (ok, msg) = Option.get result in
+              let tr = Option.get result in
+              let ok = tr.success in
+              let msg = Tool_result.message tr in
               check bool "success" true ok;
               check string "message" ("ok:" ^ tool) msg);
           test_case "mint_token unknown tool returns Error" `Quick (fun () ->
@@ -61,7 +64,9 @@ let () =
               let result =
                 Tool_dispatch.dispatch ~token ~args:`Null
               in
-              let (ok, msg) = Option.get result in
+              let tr = Option.get result in
+              let ok = tr.success in
+              let msg = Tool_result.message tr in
               check bool "ok" true ok;
               check string "msg" "ok:__test_bulk_b" msg);
         ] );
@@ -71,15 +76,14 @@ let () =
               let tool = "__test_dispatch_replace" in
               register_full ~tool_name:tool ~handler:echo_handler;
               let token1 = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
-              let (ok1, _) =
-                Option.get (Tool_dispatch.dispatch ~token:token1 ~args:`Null)
-              in
+              let result1 = Option.get (Tool_dispatch.dispatch ~token:token1 ~args:`Null) in
+              let ok1 = result1.success in
               check bool "first ok" true ok1;
               register_full ~tool_name:tool ~handler:fail_handler;
               let token2 = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
-              let (ok2, msg2) =
-                Option.get (Tool_dispatch.dispatch ~token:token2 ~args:`Null)
-              in
+              let result2 = Option.get (Tool_dispatch.dispatch ~token:token2 ~args:`Null) in
+              let ok2 = result2.success in
+              let msg2 = Tool_result.message result2 in
               check bool "replaced fail" false ok2;
               check string "fail msg" "fail" msg2);
         ] );
@@ -217,7 +221,9 @@ let () =
               let token = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
               let result = Tool_dispatch.dispatch ~token ~args:`Null in
               check bool "still returns Some" true (Option.is_some result);
-              let (ok, msg) = Option.get result in
+              let tr = Option.get result in
+              let ok = tr.success in
+              let msg = Tool_result.message tr in
               check bool "marked as failure" false ok;
               check bool "contains error info" true
                 (String.length msg > 0 && Astring.String.is_infix ~affix:"boom" msg));

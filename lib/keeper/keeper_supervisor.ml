@@ -578,6 +578,7 @@ let restore_reconcile_continue_gate (ctx : _ context) (meta : keeper_meta) =
       ~tool_name:"keeper_continue_after_reconcile"
       ~input
       ~risk_level:Keeper_approval_queue.Critical
+      ~base_path:ctx.config.base_path
       ~on_resolution:(fun decision ->
         match decision with
         | Agent_sdk.Hooks.Approve
@@ -1741,10 +1742,15 @@ let liveness_recovery_scan (ctx : _ context) =
     [max(stall_floor_sec, stall_multiplier * cooldown_sec)] without a
     proactive turn.
 
-    Reference timestamp: [proactive_rt.last_ts] if that has ever
-    fired ([> 0.0]), otherwise [entry.started_at] — this catches the
-    "never_started" case (e.g. [glm-coding-plan] in the production
-    sample) without a separate code path.
+    Reference timestamp: the newer of [proactive_rt.last_ts] and
+    [entry.started_at] when proactive has ever fired ([> 0.0]),
+    otherwise [entry.started_at].  Persisted proactive timestamps can
+    predate the current server lifecycle; [started_at] is the lower
+    bound for the current fiber, so a restart must not immediately mark
+    old-but-freshly-booted keepers stuck, while long-running frozen
+    keepers still trip the detector.  The [entry.started_at] fallback
+    also catches the "never_started" case (e.g. [glm-coding-plan] in the
+    production sample) without a separate code path.
 
     Returns [None] when not stuck.  Pure: no I/O, no global state. *)
 let detect_alive_but_stuck ~now ~stall_multiplier ~stall_floor_sec
@@ -1763,8 +1769,10 @@ let detect_alive_but_stuck ~now ~stall_multiplier ~stall_floor_sec
     in
     let last_proactive_ts = meta.runtime.proactive_rt.last_ts in
     let reference_ts =
-      if last_proactive_ts > 0.0 then last_proactive_ts
-      else entry.started_at
+      if last_proactive_ts > 0.0 then
+        Float.max last_proactive_ts entry.started_at
+      else
+        entry.started_at
     in
     let elapsed = now -. reference_ts in
     if elapsed > stall_threshold then Some elapsed else None
@@ -1840,6 +1848,9 @@ let request_alive_but_stuck_recovery ~base_path ~elapsed
   let kill_class =
     Keeper_registry.Idle_turn { stall_seconds = elapsed }
   in
+  let current_entry =
+    Keeper_registry.get ~base_path entry.name |> Option.value ~default:entry
+  in
   (* PR #13106 review: must NOT route through
      [stale_watchdog_failure_reason], which preserves prior reasons
      like [Turn_consecutive_failures] / [Exception] / etc.  Those
@@ -1859,17 +1870,13 @@ let request_alive_but_stuck_recovery ~base_path ~elapsed
      ([Stale_turn_timeout] / [Stale_termination_storm] /
      [Oas_timeout_budget_loop]), preserve it so we don't churn the
      [stall_seconds] field on every poll. *)
-  let current_failure_reason =
-    match Keeper_registry.get ~base_path entry.name with
-    | Some current -> current.last_failure_reason
-    | None -> entry.last_failure_reason
-  in
   let prior_str =
-    Option.map Keeper_registry.failure_reason_to_string current_failure_reason
+    Option.map Keeper_registry.failure_reason_to_string
+      current_entry.last_failure_reason
     |> Option.value ~default:"none"
   in
   let reason =
-    match current_failure_reason with
+    match current_entry.last_failure_reason with
     | Some
         ( Keeper_registry.Stale_turn_timeout _
         | Keeper_registry.Stale_termination_storm _

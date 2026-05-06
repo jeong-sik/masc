@@ -206,6 +206,22 @@ let run_named
       ~label:cascade_name
       candidate_cfgs
   in
+  let candidate_cfgs =
+    List.filter
+      (fun (provider_cfg : Llm_provider.Provider_config.t) ->
+         match
+           Cascade_health_tracker.check_circuit_breaker
+             Cascade_health_tracker.global
+             ~provider_key:provider_cfg.model_id
+         with
+         | Ok () -> true
+         | Error msg ->
+             Log.Misc.debug
+               "cascade %s: prefilter skipped %s (provider cooldown: %s)"
+               cascade_name provider_cfg.model_id msg;
+             false)
+      candidate_cfgs
+  in
   (* Cross-cascade health-aware fallback: when the current cascade has no
      tool-capable providers after filtering, search all other cascades for
      a healthy tool-capable provider. Depth 1 only (no recursive search). *)
@@ -569,7 +585,7 @@ let run_named
       Error
         terminal_error
     | (provider_cfg : Llm_provider.Provider_config.t) :: rest ->
-      Eio.Fiber.yield (); (* Task 4-3: Prevent starvation during fast-fail cascades *)
+      Eio_guard.fair_yield (); (* P0: keep fast-fail cascades scheduler-fair. *)
       match Cascade_health_tracker.check_circuit_breaker Cascade_health_tracker.global ~provider_key:provider_cfg.model_id with
       | Error msg ->
           Log.Misc.debug "cascade %s: skipping %s (provider cooldown: %s)" cascade_name provider_cfg.model_id msg;
@@ -1177,7 +1193,7 @@ let run_named_with_masc_tools
     ?priority
     ?(system_prompt = "")
     ~(masc_tools : Masc_domain.tool_schema list)
-    ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
+    ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.t)
     ?(max_turns = 20)
     ?stream_idle_timeout_s
     ?(temperature = Oas_worker_cascade.default_temperature)
@@ -1228,7 +1244,7 @@ let run_model_with_masc_tools
     ~goal
     ?(system_prompt = "")
     ~(masc_tools : Masc_domain.tool_schema list)
-    ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
+    ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.t)
     ?(max_turns = 20)
     ?stream_idle_timeout_s
     ?(temperature = Oas_worker_cascade.default_temperature)

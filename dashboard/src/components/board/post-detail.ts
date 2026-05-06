@@ -208,6 +208,8 @@ function CommentItem({
   const authorLabel = boardActorDisplayName(comment.author, comment.author_identity)
   const authorAvatarKey = boardActorAvatarKey(comment.author, comment.author_identity)
   const authorTitle = boardActorTitle(comment.author, comment.author_identity)
+  const upvoteActive = comment.current_vote === 'up'
+  const downvoteActive = comment.current_vote === 'down'
 
   const handleCommentVote = async (dir: 'up' | 'down') => {
     try {
@@ -239,15 +241,19 @@ function CommentItem({
           <div class="ml-auto flex items-center gap-1">
             <button
               type="button"
-              class="h-5 w-6 rounded-[var(--r-1)] border-0 bg-transparent text-2xs text-[var(--color-fg-muted)] hover:bg-[var(--warn-10)] hover:text-[var(--warn-bright)]"
+              class=${`h-5 w-6 rounded-[var(--r-1)] border-0 bg-transparent text-2xs ${upvoteActive ? 'active text-[var(--warn-bright)] bg-[var(--warn-10)] cursor-default' : 'text-[var(--color-fg-muted)] hover:bg-[var(--warn-10)] hover:text-[var(--warn-bright)]'}`}
               aria-label="댓글 추천"
+              aria-pressed=${upvoteActive ? 'true' : 'false'}
+              disabled=${upvoteActive}
               onClick=${() => handleCommentVote('up')}
             >▲</button>
             <span class="min-w-5 text-center text-2xs font-semibold tabular-nums text-[var(--color-fg-secondary)]">${score}</span>
             <button
               type="button"
-              class="h-5 w-6 rounded-[var(--r-1)] border-0 bg-transparent text-2xs text-[var(--color-fg-muted)] hover:bg-[var(--accent-10)] hover:text-[var(--color-accent-fg)]"
+              class=${`h-5 w-6 rounded-[var(--r-1)] border-0 bg-transparent text-2xs ${downvoteActive ? 'active text-[var(--color-accent-fg)] bg-[var(--accent-10)] cursor-default' : 'text-[var(--color-fg-muted)] hover:bg-[var(--accent-10)] hover:text-[var(--color-accent-fg)]'}`}
               aria-label="댓글 비추천"
+              aria-pressed=${downvoteActive ? 'true' : 'false'}
+              disabled=${downvoteActive}
               onClick=${() => handleCommentVote('down')}
             >▼</button>
           </div>
@@ -268,7 +274,7 @@ function CommentItem({
           >${expanded ? '접기' : '더 보기...'}<//>
         ` : null}
         <div class="mt-2">
-          <${ReactionBar} targetType="comment" targetId=${comment.id} compact />
+          <${ReactionBar} targetType="comment" targetId=${comment.id} compact initialSummaries=${comment.reactions} />
         </div>
         ${isReplying ? html`
           <div class="mt-2">
@@ -423,6 +429,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
   const handleVote = async (dir: 'up' | 'down') => {
     try {
       await votePost(post.id, dir)
+      await loadPostDetail(post.id)
       refreshBoard()
     } catch (err) {
       console.warn(`[board] vote failed (post=${post.id}, dir=${dir})`, err instanceof Error ? err.message : err)
@@ -432,6 +439,8 @@ export function PostDetail({ post }: { post: BoardPost }) {
   const authorLabel = boardActorDisplayName(post.author, post.author_identity)
   const authorAvatarKey = boardActorAvatarKey(post.author, post.author_identity)
   const authorTitle = boardActorTitle(post.author, post.author_identity)
+  const upvoteActive = post.current_vote === 'up'
+  const downvoteActive = post.current_vote === 'down'
 
   return html`
     <div>
@@ -497,18 +506,22 @@ export function PostDetail({ post }: { post: BoardPost }) {
             <${ActionButton}
               variant="ghost"
               size="sm"
-              class="vote-btn upvote text-xs hover:text-[var(--warn-bright)] hover:border-[var(--warn-30)] hover:bg-[var(--warn-10)]"
+              class=${`vote-btn upvote text-xs hover:text-[var(--warn-bright)] hover:border-[var(--warn-30)] hover:bg-[var(--warn-10)] ${upvoteActive ? 'active text-[var(--warn-bright)] border-[var(--warn-30)] bg-[var(--warn-10)]' : ''}`}
+              pressed=${upvoteActive}
+              disabled=${upvoteActive}
               onClick=${() => handleVote('up')}
             >▲ 추천<//>
             <${ActionButton}
               variant="ghost"
               size="sm"
-              class="vote-btn downvote text-xs hover:text-[var(--color-accent-fg)] hover:border-[var(--accent-30)] hover:bg-[var(--accent-10)]"
+              class=${`vote-btn downvote text-xs hover:text-[var(--color-accent-fg)] hover:border-[var(--accent-30)] hover:bg-[var(--accent-10)] ${downvoteActive ? 'active text-[var(--color-accent-fg)] border-[var(--accent-30)] bg-[var(--accent-10)]' : ''}`}
+              pressed=${downvoteActive}
+              disabled=${downvoteActive}
               onClick=${() => handleVote('down')}
             >▼ 비추천<//>
           </div>
 
-          <${ReactionBar} targetType="post" targetId=${post.id} />
+          <${ReactionBar} targetType="post" targetId=${post.id} initialSummaries=${post.reactions} />
         </div>
       <//>
 

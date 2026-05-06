@@ -28,7 +28,7 @@ export interface LoAFEntry extends PerformanceEntry {
   readonly scripts: readonly LoAFScript[]
 }
 
-export interface PerformanceMonitorOptions {
+interface PerformanceMonitorOptions {
   /** Maximum number of frames retained in the ring buffer. */
   maxBufferSize?: number
   /** Duration threshold (ms) above which a frame is considered "slow". */

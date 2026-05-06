@@ -434,6 +434,53 @@ let test_vote_flip () =
       | Ok score ->
           Alcotest.(check int) "score after flip" (-1) score
 
+let test_current_vote_lookup () =
+  let vote_label = Option.map Board.vote_direction_to_string in
+  match
+    Board_dispatch.create_post ~author:"state-test" ~content:"state vote"
+      ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      let pid = Board.Post_id.to_string post.id in
+      (match Board_dispatch.current_vote_for_post ~voter:"reader" ~post_id:pid with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok vote ->
+           Alcotest.(check (option string)) "post vote starts empty" None
+             (vote_label vote));
+      ignore (Board_dispatch.vote ~voter:"reader" ~post_id:pid ~direction:Board.Up);
+      (match Board_dispatch.current_vote_for_post ~voter:"reader" ~post_id:pid with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok vote ->
+           Alcotest.(check (option string)) "post vote state" (Some "up")
+             (vote_label vote));
+      (match
+         Board_dispatch.add_comment ~post_id:pid ~author:"commenter"
+           ~content:"vote this comment" ()
+       with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok comment ->
+           let cid = Board.Comment_id.to_string comment.id in
+           (match
+              Board_dispatch.current_vote_for_comment ~voter:"reader"
+                ~comment_id:cid
+            with
+            | Error e -> Alcotest.fail (Board.show_board_error e)
+            | Ok vote ->
+                Alcotest.(check (option string)) "comment vote starts empty" None
+                  (vote_label vote));
+           ignore
+             (Board_dispatch.vote_comment ~voter:"reader" ~comment_id:cid
+                ~direction:Board.Down);
+           match
+             Board_dispatch.current_vote_for_comment ~voter:"reader"
+               ~comment_id:cid
+           with
+           | Error e -> Alcotest.fail (Board.show_board_error e)
+           | Ok vote ->
+               Alcotest.(check (option string)) "comment vote state"
+                 (Some "down") (vote_label vote))
+
 let test_vote_persisted_by_flusher_actor () =
   try
     Eio_main.run @@ fun env ->
@@ -479,6 +526,40 @@ let test_vote_persisted_by_flusher_actor () =
              Alcotest.(check int) "vote persisted after restart" 1 post.votes_up);
         Eio.Switch.fail sw Exit)
   with Exit -> ()
+
+let test_flusher_start_retries_forced_cas_conflicts () =
+  try
+    Eio_main.run @@ fun env ->
+    Eio.Switch.run @@ fun sw ->
+    let clock = Eio.Stdenv.clock env in
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    Eio_context.with_test_env
+      ~net:(Eio.Stdenv.net env)
+      ~clock
+      ~mono_clock:(Eio.Stdenv.mono_clock env)
+      ~sw
+      (fun () ->
+        ignore (fresh_test_base_path ());
+        Board.reset_global_for_test ();
+        Board_dispatch.reset_for_test ();
+        Board_dispatch.force_flusher_start_cas_conflicts_for_test 2;
+        Board_dispatch.init_jsonl ();
+        Alcotest.(check bool)
+          "flusher starts after forced CAS contention" true
+          (Board_dispatch.flusher_started_for_test ());
+        Eio.Switch.fail sw Exit)
+  with Exit -> ()
+
+let test_flusher_start_backoff_delay_doubles_and_caps () =
+  Alcotest.(check (float 0.0001))
+    "attempt 0 delay" 0.001
+    (Board_dispatch.flusher_start_backoff_delay_for_test ~attempt:0);
+  Alcotest.(check (float 0.0001))
+    "attempt 1 delay doubles" 0.002
+    (Board_dispatch.flusher_start_backoff_delay_for_test ~attempt:1);
+  Alcotest.(check (float 0.0001))
+    "large attempt caps" 0.02
+    (Board_dispatch.flusher_start_backoff_delay_for_test ~attempt:10)
 
 (** {1 Reaction Operations} *)
 
@@ -606,6 +687,60 @@ let test_reaction_summary_recent_user_ids () =
                      (List.mem user_id summary.recent_user_ids))
                 [ "reactor-a"; "reactor-b"; "reactor-c" ]
           | [] -> Alcotest.fail "expected reaction summary"
+
+let test_reaction_summary_batch () =
+  match
+    Board_dispatch.create_post ~author:"reaction-author"
+      ~content:"batch reactors parent" ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      let post_id = Board.Post_id.to_string post.id in
+      let comment_id =
+        match
+          Board_dispatch.add_comment ~post_id ~author:"commenter"
+            ~content:"batch reaction child" ()
+        with
+        | Error e -> Alcotest.fail (Board.show_board_error e)
+        | Ok comment -> Board.Comment_id.to_string comment.id
+      in
+      List.iter
+        (fun (target_type, target_id, user_id, emoji) ->
+           match
+             Board_dispatch.toggle_reaction ~target_type ~target_id ~user_id
+               ~emoji
+           with
+           | Ok _ -> ()
+           | Error e -> Alcotest.fail (Board.show_board_error e))
+        [
+          (Board.Reaction_post, post_id, "reactor-a", "👍");
+          (Board.Reaction_post, post_id, "reactor-b", "👍");
+          (Board.Reaction_comment, comment_id, "reactor-b", "👏");
+        ];
+      let rows =
+        Board_dispatch.list_reactions_batch
+          ~targets:
+            [
+              (Board.Reaction_post, post_id);
+              (Board.Reaction_comment, comment_id);
+            ]
+          ~user_id:"reactor-b" ()
+      in
+      let summaries_for target =
+        List.assoc_opt target rows |> Option.value ~default:[]
+      in
+      (match summaries_for (Board.Reaction_post, post_id) with
+       | summary :: _ ->
+           Alcotest.(check string) "post emoji" "👍" summary.emoji;
+           Alcotest.(check int) "post count" 2 summary.count;
+           Alcotest.(check bool) "post reacted" true summary.reacted
+       | [] -> Alcotest.fail "expected post reaction summary");
+      (match summaries_for (Board.Reaction_comment, comment_id) with
+       | summary :: _ ->
+           Alcotest.(check string) "comment emoji" "👏" summary.emoji;
+           Alcotest.(check int) "comment count" 1 summary.count;
+           Alcotest.(check bool) "comment reacted" true summary.reacted
+       | [] -> Alcotest.fail "expected comment reaction summary")
 
 let test_board_sse_reaction_changed () =
   let post_id =
@@ -739,6 +874,67 @@ let test_jsonl_forced_case_insensitive () =
     true (Board_dispatch.jsonl_forced ());
   Unix.putenv "MASC_BOARD_BACKEND" ""
 
+(** {1 SubBoard CRUD} *)
+
+let test_sub_board_create_and_get () =
+  (match Board_dispatch.create_sub_board ~slug:"alpha-board" ~name:"Alpha"
+           ~description:"First sub-board" ~owner:"agent-1" () with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok sb ->
+      Alcotest.(check string) "slug matches" "alpha-board" sb.Board.slug;
+      Alcotest.(check string) "name matches" "Alpha" sb.name;
+      Alcotest.(check string) "owner matches" "agent-1"
+        (Board.Agent_id.to_string sb.owner);
+      let id = Board.Sub_board_id.to_string sb.id in
+      (match Board_dispatch.get_sub_board ~sub_board_id:id with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok fetched ->
+           Alcotest.(check string) "fetched id" id (Board.Sub_board_id.to_string fetched.id)));
+  (* lookup by slug *)
+  (match Board_dispatch.get_sub_board ~sub_board_id:"alpha-board" with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok fetched ->
+       Alcotest.(check string) "slug lookup" "alpha-board" fetched.Board.slug)
+
+let test_sub_board_list () =
+  ignore (Board_dispatch.create_sub_board ~slug:"list-a" ~name:"A" ~description:""
+            ~owner:"agent-1" ());
+  ignore (Board_dispatch.create_sub_board ~slug:"list-b" ~name:"B" ~description:""
+            ~owner:"agent-2" ());
+  let all = Board_dispatch.list_sub_boards () in
+  Alcotest.(check bool) "has sub-boards" true (List.length all >= 2)
+
+let test_sub_board_slug_conflict () =
+  ignore (Board_dispatch.create_sub_board ~slug:"conflict-slug" ~name:"First"
+            ~description:"" ~owner:"agent-1" ());
+  (match Board_dispatch.create_sub_board ~slug:"conflict-slug" ~name:"Second"
+           ~description:"" ~owner:"agent-2" () with
+  | Error Board.Already_exists _ -> ()  (* expected *)
+  | Ok _ -> Alcotest.fail "expected Already_exists for duplicate slug"
+  | Error e -> Alcotest.fail ("unexpected error: " ^ Board.show_board_error e))
+
+let test_sub_board_delete () =
+  (match Board_dispatch.create_sub_board ~slug:"delete-me" ~name:"Temp"
+           ~description:"" ~owner:"agent-1" () with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok sb ->
+      let id = Board.Sub_board_id.to_string sb.Board.id in
+      (match Board_dispatch.delete_sub_board ~sub_board_id:id with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok () ->
+           (match Board_dispatch.get_sub_board ~sub_board_id:id with
+            | Error (Board.Invalid_id _) -> ()  (* expected after delete *)
+            | Ok _ -> Alcotest.fail "expected not found after delete"
+            | Error e -> Alcotest.fail (Board.show_board_error e))))
+
+let test_sub_board_access_default_open () =
+  (match Board_dispatch.create_sub_board ~slug:"open-board" ~name:"Open"
+           ~description:"" ~owner:"agent-1" () with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok sb ->
+      Alcotest.(check bool) "default access is Open"
+        true (sb.Board.access = Board.Open))
+
 (** {1 Test Runner} *)
 
 let () =
@@ -779,8 +975,14 @@ let () =
       Alcotest.test_case "upvote" `Quick (with_eio test_vote_post);
       Alcotest.test_case "dedup" `Quick (with_eio test_vote_dedup);
       Alcotest.test_case "flip" `Quick (with_eio test_vote_flip);
+      Alcotest.test_case "current vote lookup" `Quick
+        (with_eio test_current_vote_lookup);
       Alcotest.test_case "vote persisted by flusher actor" `Quick
         test_vote_persisted_by_flusher_actor;
+      Alcotest.test_case "flusher start retries forced CAS conflicts" `Quick
+        test_flusher_start_retries_forced_cas_conflicts;
+      Alcotest.test_case "flusher start backoff doubles and caps" `Quick
+        test_flusher_start_backoff_delay_doubles_and_caps;
     ];
     "reactions", [
       Alcotest.test_case "toggle and summary" `Quick
@@ -789,6 +991,8 @@ let () =
         (with_eio test_comment_reaction_survives_restart);
       Alcotest.test_case "summary recent user ids" `Quick
         (with_eio test_reaction_summary_recent_user_ids);
+      Alcotest.test_case "summary batch" `Quick
+        (with_eio test_reaction_summary_batch);
       Alcotest.test_case "SSE reaction_changed" `Quick
         (with_eio test_board_sse_reaction_changed);
       Alcotest.test_case "unsupported emoji rejected" `Quick
@@ -810,5 +1014,12 @@ let () =
       Alcotest.test_case "jsonl forced" `Quick (with_eio test_jsonl_forced_explicit);
       Alcotest.test_case "pg not forced" `Quick (with_eio test_jsonl_forced_pg);
       Alcotest.test_case "case insensitive" `Quick (with_eio test_jsonl_forced_case_insensitive);
+    ];
+    "sub_boards", [
+      Alcotest.test_case "create and get" `Quick (with_eio test_sub_board_create_and_get);
+      Alcotest.test_case "list" `Quick (with_eio test_sub_board_list);
+      Alcotest.test_case "slug conflict" `Quick (with_eio test_sub_board_slug_conflict);
+      Alcotest.test_case "delete" `Quick (with_eio test_sub_board_delete);
+      Alcotest.test_case "default access open" `Quick (with_eio test_sub_board_access_default_open);
     ];
   ]

@@ -141,7 +141,7 @@ export function deriveTimelineRows(
   return rows
 }
 
-export interface HandoffArc {
+interface HandoffArc {
   fromIdx: number
   toIdx: number
   xPct: number

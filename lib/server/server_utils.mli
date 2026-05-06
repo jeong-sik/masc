@@ -142,15 +142,52 @@ val board_actor_author_for_write : string -> string
     the keeper's canonical name regardless of which alias the
     write request used. *)
 
+val board_voter_query : Httpun.Request.t -> string option
+(** Reads and canonicalizes the board [voter] query parameter. *)
+
+val board_current_vote_for_post :
+  voter:string option -> post_id:string -> Board.vote_direction option option
+(** [None] means no voter was supplied; [Some None] means a voter was
+    supplied but has not voted on this post. *)
+
+val board_current_vote_for_comment :
+  voter:string option -> comment_id:string -> Board.vote_direction option option
+
+val board_reactions_for_post :
+  voter:string option -> post_id:string -> Board.reaction_summary list
+
+val board_reactions_for_comment :
+  voter:string option -> comment_id:string -> Board.reaction_summary list
+
+val board_reactions_batch :
+  targets:(Board.reaction_target_type * string) list ->
+  voter:string option ->
+  ((Board.reaction_target_type * string) * Board.reaction_summary list) list
+(** [board_reactions_batch ~targets ~voter] returns dashboard reaction
+    summaries for a request's target set using one board-store scan. *)
+
+val board_reactions_lookup :
+  ((Board.reaction_target_type * string) * Board.reaction_summary list) list ->
+  Board.reaction_target_type * string ->
+  Board.reaction_summary list
+
 (** {1 Dashboard helpers} *)
 
-val board_comment_dashboard_json : Board.comment -> Yojson.Safe.t
+val board_comment_dashboard_json :
+  ?current_vote:Board.vote_direction option ->
+  ?reactions:Board.reaction_summary list ->
+  Board.comment ->
+  Yojson.Safe.t
 (** [board_comment_dashboard_json c] renders a comment with the
     [author_identity] field appended via
     {!board_actor_identity_json}. *)
 
 val board_post_dashboard_json :
-  author_karma:int -> Board.post -> Yojson.Safe.t
+  ?current_vote:Board.vote_direction option ->
+  ?reactions:Board.reaction_summary list ->
+  author_karma:int ->
+  Board.post ->
+  Yojson.Safe.t
 (** [board_post_dashboard_json ~author_karma p] renders a post
     with explicit operator-visible fields:
 

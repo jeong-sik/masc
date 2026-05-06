@@ -118,7 +118,8 @@ let () = test "dispatch_coordination_fsm_snapshot" (fun () ->
       let open Yojson.Safe.Util in
       assert (json |> member "mode" |> to_string = "advisory");
       assert (json |> member "summary" |> member "products" |> to_int >= 0);
-      assert (json |> member "summary" |> member "evidence" |> to_int >= 0)
+      assert (json |> member "summary" |> member "evidence" |> to_int >= 0);
+      assert (json |> member "truncation" |> member "product_limit" |> to_int > 0)
   | None -> failwith "dispatch returned None"
 )
 

@@ -109,8 +109,11 @@ let codex_cli_cannot_carry_keeper_bound_runtime_mcp
   | Llm_provider.Provider_config.Codex_cli, Some agent_name, Some policy
     when Option.is_some (Keeper_identity.keeper_name_from_agent_name agent_name)
     ->
-      List.exists Oas_worker_exec.runtime_mcp_tool_requires_bound_actor
-        policy.allowed_tool_names
+      (not
+         (Oas_worker_exec.codex_cli_can_auth_keeper_bound_runtime_mcp
+            ~agent_name policy))
+      && List.exists Oas_worker_exec.runtime_mcp_tool_requires_bound_actor
+           policy.allowed_tool_names
   | _ -> false
 
 (* #10681: per-provider rejection reason produced by the cascade filter.

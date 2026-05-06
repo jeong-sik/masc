@@ -110,4 +110,16 @@ describe('CommandBar', () => {
     render(h(CommandBar, { actions, testId: 'cmd-1' }), container)
     expect(container.querySelector('[data-testid="cmd-1"]')).not.toBeNull()
   })
+
+  it('keeps aria-controls stable across rerenders', () => {
+    const container = document.createElement('div')
+    render(h(CommandBar, { actions }), container)
+    const first = container.querySelector('input')?.getAttribute('aria-controls')
+
+    render(h(CommandBar, { actions, placeholder: 'Next command...' }), container)
+    const second = container.querySelector('input')?.getAttribute('aria-controls')
+
+    expect(first).toBeTruthy()
+    expect(second).toBe(first)
+  })
 })

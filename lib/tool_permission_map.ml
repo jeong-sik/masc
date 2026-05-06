@@ -34,6 +34,7 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_tasks", CanReadState);
     ("masc_messages", CanReadState);
     ("masc_agents", CanReadState);
+    ("masc_agent_card", CanReadState);
     ("masc_worktree_list", CanReadState);
     ("masc_task_history", CanReadState);
     ("masc_operator_snapshot", CanReadState);

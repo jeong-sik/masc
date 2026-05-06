@@ -231,8 +231,8 @@ let command_blocked_hint name =
     | "curl" | "wget" -> " Use masc_web_search for content fetching."
     | "gh" ->
       " 'gh' is NOT available in the keeper sandbox. For pull-request \
-       work use keeper_pr_list / keeper_pr_view / keeper_pr_comment / \
-       keeper_pr_review_read. For issues use masc_board_list / \
+       work use keeper_pr_list / keeper_pr_status / keeper_pr_create / \
+       keeper_pr_review_read / keeper_pr_review_comment. For issues use masc_board_list / \
        masc_board_post / masc_board_comment. For commits or branches \
        just use 'git' directly — it is on the allowlist."
     | "docker" | "podman" | "kubectl" | "systemctl" | "brew" | "apt"

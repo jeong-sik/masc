@@ -82,7 +82,21 @@ let escape_field s =
 (** Render structured skip reason for inline Override injection.
     The LLM sees this as the ToolResult content immediately within
     the same turn. *)
-let render_inline_skip_reason ~tool_name ~reason_code ~reason_text : string =
+let keeper_guards_source_path = "lib/keeper/keeper_guards.ml"
+
+let source_hint ~source_path ~source_line =
+  match source_path, source_line with
+  | None, None -> ""
+  | Some path, None ->
+    Printf.sprintf " source_path=%s" (escape_field path)
+  | None, Some line ->
+    Printf.sprintf " source_line=%d" line
+  | Some path, Some line ->
+    Printf.sprintf " source_path=%s source_line=%d"
+      (escape_field path) line
+
+let render_inline_skip_reason_impl ~source_path ~source_line
+    ~tool_name ~reason_code ~reason_text : string =
   let replacement_hint =
     match (Tool_catalog.metadata tool_name).Tool_catalog.replacement with
     | Some replacement ->
@@ -90,11 +104,29 @@ let render_inline_skip_reason ~tool_name ~reason_code ~reason_text : string =
     | None -> ""
   in
   Printf.sprintf
-    "[tool_skipped] tool=%s source=keeper_hook code=%s reason=%s%s"
+    "[tool_skipped] tool=%s source=keeper_hook code=%s reason=%s%s%s"
     (escape_field tool_name)
     (escape_field reason_code)
     (escape_field reason_text)
     replacement_hint
+    (source_hint ~source_path ~source_line)
+
+let render_inline_skip_reason ~tool_name ~reason_code ~reason_text : string =
+  render_inline_skip_reason_impl
+    ~source_path:None
+    ~source_line:None
+    ~tool_name
+    ~reason_code
+    ~reason_text
+
+let render_inline_skip_reason_with_source
+    ~source_path ~source_line ~tool_name ~reason_code ~reason_text : string =
+  render_inline_skip_reason_impl
+    ~source_path:(Some source_path)
+    ~source_line:(Some source_line)
+    ~tool_name
+    ~reason_code
+    ~reason_text
 
 (** Broadcast a tool skip event via SSE for dashboard visibility.
     Also records in [Dashboard_governance_metrics] for aggregation. *)
@@ -164,6 +196,8 @@ type gate_decision_event = {
   turn : int;
   accumulated_cost_usd : float;
   stage_latency_ms : float;
+  source_path : string option;
+  source_line : int option;
 }
 
 let ignore_gate_decision (_ : gate_decision_event) = ()
@@ -236,6 +270,7 @@ let () =
     ()
 
 let emit_gate_event
+    ~source_path ~source_line
     ~stage ~decision ~reason_code
     ~tool_name ~agent_name ~turn
     ~accumulated_cost_usd ~stage_latency_ms ~reason_text =
@@ -270,6 +305,10 @@ let emit_gate_event
       ("reason_text", `String reason_text);
       ("source", `String "hook");
       ("cascade_attempted", `Bool (not is_gate_rejection));
+      ("source_path",
+       (match source_path with Some path -> `String path | None -> `Null));
+      ("source_line",
+       (match source_line with Some line -> `Int line | None -> `Null));
     ] in
     (try
       Oas_bus_instrument.publish bus
@@ -287,15 +326,16 @@ let emit_gate_event
         stage tool_name (Printexc.to_string exn))
 
 let report_gate_decision on_gate_decision
+    ~source_path ~source_line
     ~stage ~decision ~reason_code ~reason_text
     ~tool_name ~keeper_name ~input ~turn
     ~accumulated_cost_usd ~stage_latency_ms =
-  emit_gate_event ~stage ~decision ~reason_code ~tool_name
+  emit_gate_event ~source_path ~source_line ~stage ~decision ~reason_code ~tool_name
     ~agent_name:keeper_name ~turn ~accumulated_cost_usd
     ~stage_latency_ms ~reason_text;
   notify_gate_decision on_gate_decision
     { stage; decision; reason_code; reason_text; tool_name; input; turn;
-      accumulated_cost_usd; stage_latency_ms }
+      accumulated_cost_usd; stage_latency_ms; source_path; source_line }
 
 (* -------------------------------------------------------------- *)
 (* Composition helpers                                             *)
@@ -366,13 +406,17 @@ let custom_guard
            keeper_name tool_name;
          broadcast_tool_skipped
            ~keeper_name ~tool_name ~reason_code:"pre_tool_use_guard";
+         let source_path = keeper_guards_source_path in
+         let source_line = __LINE__ in
          report_gate_decision on_gate_decision
+           ~source_path:(Some source_path) ~source_line:(Some source_line)
            ~stage:"pre_tool_use_guard" ~decision:Gate_override
            ~reason_code:"pre_tool_use_guard" ~reason_text:reason
            ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
            ~stage_latency_ms:latency_ms;
          Agent_sdk.Hooks.Override
-           (render_inline_skip_reason
+           (render_inline_skip_reason_with_source
+              ~source_path ~source_line
               ~tool_name ~reason_code:"pre_tool_use_guard"
               ~reason_text:reason)
        | None -> Agent_sdk.Hooks.Continue)
@@ -416,13 +460,17 @@ let streak_guard
           keeper_name tool_name new_count;
         broadcast_tool_skipped
           ~keeper_name ~tool_name ~reason_code:"streak_gate";
+        let source_path = keeper_guards_source_path in
+        let source_line = __LINE__ in
         report_gate_decision on_gate_decision
+          ~source_path:(Some source_path) ~source_line:(Some source_line)
           ~stage:"streak_gate" ~decision:Gate_override
           ~reason_code:"streak_gate" ~reason_text
           ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
           ~stage_latency_ms:latency_ms;
         Agent_sdk.Hooks.Override
-          (render_inline_skip_reason
+          (render_inline_skip_reason_with_source
+             ~source_path ~source_line
              ~tool_name ~reason_code:"streak_gate" ~reason_text)
       end
       else Agent_sdk.Hooks.Continue
@@ -452,13 +500,17 @@ let deny_guard
           keeper_name tool_name;
         broadcast_tool_skipped
           ~keeper_name ~tool_name ~reason_code:"keeper_deny";
+        let source_path = keeper_guards_source_path in
+        let source_line = __LINE__ in
         report_gate_decision on_gate_decision
+          ~source_path:(Some source_path) ~source_line:(Some source_line)
           ~stage:"keeper_deny" ~decision:Gate_override
           ~reason_code:"keeper_deny" ~reason_text
           ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
           ~stage_latency_ms:latency_ms;
         Agent_sdk.Hooks.Override
-          (render_inline_skip_reason
+          (render_inline_skip_reason_with_source
+             ~source_path ~source_line
              ~tool_name ~reason_code:"keeper_deny" ~reason_text)
       end
       else Agent_sdk.Hooks.Continue
@@ -494,13 +546,17 @@ let cost_guard
            keeper_name accumulated_cost_usd limit tool_name;
          broadcast_tool_skipped
            ~keeper_name ~tool_name ~reason_code:"cost_gate";
+         let source_path = keeper_guards_source_path in
+         let source_line = __LINE__ in
          report_gate_decision on_gate_decision
+           ~source_path:(Some source_path) ~source_line:(Some source_line)
            ~stage:"cost_gate" ~decision:Gate_override
            ~reason_code:"cost_gate" ~reason_text
            ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
            ~stage_latency_ms:latency_ms;
          Agent_sdk.Hooks.Override
-           (render_inline_skip_reason
+           (render_inline_skip_reason_with_source
+              ~source_path ~source_line
               ~tool_name ~reason_code:"cost_gate" ~reason_text)
        | _ -> Agent_sdk.Hooks.Continue)
     | _ -> Agent_sdk.Hooks.Continue)
@@ -540,13 +596,17 @@ let destructive_guard
              keeper_name tool_name pattern desc;
            broadcast_tool_skipped
              ~keeper_name ~tool_name ~reason_code:"destructive_guard";
+           let source_path = keeper_guards_source_path in
+           let source_line = __LINE__ in
            report_gate_decision on_gate_decision
+             ~source_path:(Some source_path) ~source_line:(Some source_line)
              ~stage:"destructive_guard" ~decision:Gate_override
              ~reason_code:"destructive_guard" ~reason_text
              ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
              ~stage_latency_ms:latency_ms;
            Agent_sdk.Hooks.Override
-             (render_inline_skip_reason
+             (render_inline_skip_reason_with_source
+                ~source_path ~source_line
                 ~tool_name ~reason_code:"destructive_guard"
                 ~reason_text))
     | _ -> Agent_sdk.Hooks.Continue)
@@ -576,7 +636,10 @@ let governance_approval_guard
       in
       if needs_approval then begin
         let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
+        let source_path = keeper_guards_source_path in
+        let source_line = __LINE__ in
         report_gate_decision on_gate_decision
+          ~source_path:(Some source_path) ~source_line:(Some source_line)
           ~stage:"governance_approval" ~decision:Gate_approval_required
           ~reason_code:"governance_approval"
           ~reason_text:"risk threshold reached; operator approval required"

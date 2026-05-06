@@ -120,6 +120,15 @@ let test_retryable_rate_limit () =
 let test_retryable_429 () =
   check bool "429" true (Bounded.is_retryable_error "HTTP 429 Too Many Requests")
 
+let test_not_retryable_hard_quota_429 () =
+  check bool "hard quota 429" false
+    (Bounded.is_retryable_error
+       "claude exited with code 1: {\"api_error_status\":429,\"result\":\"You've hit your limit resets Apr 24 at 4am\"}")
+
+let test_not_retryable_quota_exhausted () =
+  check bool "quota exhausted" false
+    (Bounded.is_retryable_error "provider returned quota_exhausted for this account")
+
 let test_retryable_502 () =
   check bool "502" true (Bounded.is_retryable_error "Error 502 Bad Gateway")
 
@@ -243,6 +252,8 @@ let () =
       test_case "ETIMEDOUT" `Quick test_retryable_etimedout;
       test_case "rate limit" `Quick test_retryable_rate_limit;
       test_case "429" `Quick test_retryable_429;
+      test_case "not hard quota 429" `Quick test_not_retryable_hard_quota_429;
+      test_case "not quota exhausted" `Quick test_not_retryable_quota_exhausted;
       test_case "502" `Quick test_retryable_502;
       test_case "503" `Quick test_retryable_503;
       test_case "504" `Quick test_retryable_504;

@@ -191,9 +191,36 @@ let retryable_error_re =
   ] in
   Re.(compile (no_case (alt (List.map str patterns))))
 
+(** Hard quota/capacity exhaustion is not retryable inside this
+    same-agent bounded loop.  Cross-provider fallback and long
+    cooldown decisions are owned by keeper/cascade classifiers. *)
+let hard_quota_error_indicators = [
+  "hard_quota";
+  "terminalquotaerror";
+  "quota_exhausted";
+  "quota exceeded";
+  "insufficient_quota";
+  "you exceeded your current quota";
+  "exhausted your capacity on this model";
+  "quota will reset after";
+  "you've hit your limit";
+  "monthly usage limit";
+  "org's monthly usage limit";
+  "reached your specified api usage limits";
+  "you will regain access on";
+]
+
+let message_looks_like_hard_quota_error msg =
+  let contains needle = String_util.contains_substring_ci msg needle in
+  List.exists contains hard_quota_error_indicators
+  || (contains "claude exited with code 1"
+      && contains "\"api_error_status\":429"
+      && contains "you've hit your limit")
+
 (** Check if error is retryable (transient failures) *)
 let is_retryable_error msg =
-  Re.execp retryable_error_re msg
+  (not (message_looks_like_hard_quota_error msg))
+  && Re.execp retryable_error_re msg
 
 (** Create new bounded state *)
 let create_state constraints =

@@ -339,6 +339,11 @@ val metric_keeper_passive_loop_detected_total : string
     Incremented once per loop episode (streak resets on any execution-progress
     turn). Labels: [keeper]. *)
 
+val metric_keeper_required_tool_loop_detected_total : string
+(** #13362 Total required-tool contract loops: keeper hit N consecutive
+    actionable required-tool failures before making execution/completion
+    progress.  Incremented once per loop episode. Labels: [keeper, kind]. *)
+
 val metric_keeper_consecutive_idle : string
 (** Task-138 Current consecutive-idle streak (passive-only turns) per
     keeper.  Resets to 0 on the next execution/completion turn.  Pairs

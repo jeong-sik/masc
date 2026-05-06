@@ -198,13 +198,13 @@ let test_pipeline_classifies_permanent_handoff () =
 let test_pipeline_classifies_resource_token () =
   let outcome =
     KB.apply_post_turn_resilience witness ~now:4.0 ~working_context:None
-      ~maybe_error:(Some "token budget exhausted") ()
+      ~maybe_error:(Some "429 rate limit: token budget exhausted") ()
   in
   match outcome.resilience_meta with
   | Some (`Assoc kv) ->
       let kind = List.assoc "classified_kind" kv in
-      (* "token" matches resource phrase, "budget" might also; first
-         resource phrase wins per Recovery.classify_string ordering. *)
+      (* Resource exhaustion must win over generic transient/rate-limit
+         wording so hard quota failures do not enter the retry strategy. *)
       assert (kind = `String "ResourceExhausted");
       let strat = List.assoc "default_strategy_class" kv in
       assert (strat = `String "Abort")

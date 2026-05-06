@@ -109,6 +109,45 @@ type board_sse_event =
     }
 
 let backend_state : backend_state Atomic.t = Atomic.make Uninitialized
+let flusher_start_cas_retries = 3
+let flusher_start_backoff_base_s = 0.001
+let flusher_start_backoff_cap_s = 0.02
+let forced_flusher_start_cas_conflicts_for_test : int Atomic.t = Atomic.make 0
+
+let flusher_start_backoff_delay_s ~attempt =
+  let rec pow2 acc n =
+    if n <= 0 then acc else pow2 (acc *. 2.0) (n - 1)
+  in
+  Float.min flusher_start_backoff_cap_s
+    (flusher_start_backoff_base_s *. pow2 1.0 attempt)
+
+let sleep_flusher_start_backoff ~attempt =
+  let delay = flusher_start_backoff_delay_s ~attempt in
+  match Eio_context.get_clock_opt () with
+  | Some clock -> Eio.Time.sleep clock delay
+  | None -> Time_compat.sleep delay
+
+let consume_forced_flusher_start_cas_conflict_for_test () =
+  let rec loop () =
+    let remaining = Atomic.get forced_flusher_start_cas_conflicts_for_test in
+    if remaining <= 0 then false
+    else if Atomic.compare_and_set forced_flusher_start_cas_conflicts_for_test
+        remaining (remaining - 1)
+    then true
+    else loop ()
+  in
+  loop ()
+
+let force_flusher_start_cas_conflicts_for_test count =
+  Atomic.set forced_flusher_start_cas_conflicts_for_test (Int.max 0 count)
+
+let flusher_started_for_test () =
+  match Atomic.get backend_state with
+  | Active (_, true) -> true
+  | Active (_, false) | Uninitialized -> false
+
+let flusher_start_backoff_delay_for_test ~attempt =
+  flusher_start_backoff_delay_s ~attempt
 
 let start_flusher_actor ~sw store =
   Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -131,10 +170,11 @@ let start_flusher_actor ~sw store =
   )
 
 (** CAS [Active (b, false) -> Active (b, true)] for the current [b], then
-    spawn the flusher daemon.  If the CAS loses (someone else flipped the
-    flag concurrently, or the state went back to [Uninitialized]), bail
-    out without spawning.  On daemon-spawn failure, roll the flag back so
-    a later caller can retry.
+    spawn the flusher daemon.  If the CAS loses to another fiber, retry a
+    bounded number of times with short exponential backoff while the state
+    still needs a flusher; if another fiber already flipped the flag,
+    return.  On daemon-spawn failure, roll the flag back so a later caller
+    can retry.
 
     Pre-D-7 this was a sibling [Atomic.compare_and_set flusher_started
     false true]; the flag now lives in the variant so it cannot drift
@@ -143,26 +183,41 @@ let ensure_flusher_actor store =
   match Eio_context.get_switch_opt () with
   | None -> ()
   | Some sw ->
-      let current = Atomic.get backend_state in
-      (match current with
-       | Uninitialized -> ()
-       | Active (_, true) -> ()
-       | Active (b, false) ->
-           if Atomic.compare_and_set backend_state current (Active (b, true)) then
-             try start_flusher_actor ~sw store
-             with exn ->
-               (* Roll the flag back so a future caller can retry.  Only
-                  roll back if the state hasn't been swapped out from
-                  under us. *)
-               let _ : bool =
-                 Atomic.compare_and_set backend_state
-                   (Active (b, true)) (Active (b, false))
-               in
-               match exn with
-               | Invalid_argument msg when String.equal msg "Switch finished!" ->
-                   Log.BoardLog.warn
-                     "Skipping board flusher actor startup on finished switch"
-               | _ -> raise exn)
+      let rec loop attempts_left =
+        let current = Atomic.get backend_state in
+        match current with
+        | Uninitialized -> ()
+        | Active (_, true) -> ()
+        | Active (b, false) ->
+            let cas_won =
+              if consume_forced_flusher_start_cas_conflict_for_test () then false
+              else Atomic.compare_and_set backend_state current (Active (b, true))
+            in
+            if cas_won then
+              try start_flusher_actor ~sw store
+              with exn ->
+                (* Roll the flag back so a future caller can retry.  Only
+                   roll back if the state hasn't been swapped out from
+                   under us. *)
+                let _ : bool =
+                  Atomic.compare_and_set backend_state
+                    (Active (b, true)) (Active (b, false))
+                in
+                match exn with
+                | Invalid_argument msg when String.equal msg "Switch finished!" ->
+                    Log.BoardLog.warn
+                      "Skipping board flusher actor startup on finished switch"
+                | _ -> raise exn
+            else if attempts_left > 0 then begin
+              Eio.Fiber.yield ();
+              sleep_flusher_start_backoff
+                ~attempt:(flusher_start_cas_retries - attempts_left);
+              loop (attempts_left - 1)
+            end else
+              Log.BoardLog.warn
+                "Board flusher actor startup CAS contention exhausted; retrying on next backend access"
+      in
+      loop flusher_start_cas_retries
 
 
 let keeper_board_signal_hook : (keeper_board_signal -> unit) option Atomic.t = Atomic.make None
@@ -213,6 +268,7 @@ let reset_for_test () =
   (* D-7: dropping [Active] also drops the flusher-started flag, since
      it now lives inside the variant. *)
   Atomic.set backend_state Uninitialized;
+  Atomic.set forced_flusher_start_cas_conflicts_for_test 0;
   Atomic.set keeper_board_signal_hook None;
   Atomic.set board_sse_hook None
 
@@ -429,6 +485,10 @@ let add_comment ~post_id ~author ~content ?parent_id
           ok
       | Error _ as err -> err)
 
+let current_vote_for_post ~voter ~post_id =
+  match backend () with
+  | Jsonl store -> Board.current_vote_for_post store ~voter ~post_id
+
 let vote ~voter ~post_id ~direction =
   let result =
     match backend () with
@@ -443,6 +503,10 @@ let vote ~voter ~post_id ~direction =
          "board vote failed: post_id=%s voter=%s: %s"
          post_id voter (Board_types.show_board_error e));
   result
+
+let current_vote_for_comment ~voter ~comment_id =
+  match backend () with
+  | Jsonl store -> Board.current_vote_for_comment store ~voter ~comment_id
 
 let vote_comment ~voter ~comment_id ~direction =
   let result =
@@ -486,6 +550,10 @@ let toggle_reaction ~target_type ~target_id ~user_id ~emoji =
 let list_reactions ~target_type ~target_id ?user_id () =
   match backend () with
   | Jsonl store -> Board.list_reactions store ~target_type ~target_id ?user_id ()
+
+let list_reactions_batch ~targets ?user_id () =
+  match backend () with
+  | Jsonl store -> Board.list_reactions_batch store ~targets ?user_id ()
 
 let stats () =
   match backend () with
@@ -539,6 +607,21 @@ let get_agent_karma ~agent_name =
   match backend () with
   | Jsonl store -> Board.get_agent_karma store ~agent_name
 
+let karma_score_for_direction = Board.karma_score_for_direction
+
+let get_karma_ledger ?agent ?(limit = max_int) () =
+  let events =
+    match backend () with
+    | Jsonl store -> Board.build_karma_ledger store
+  in
+  let filtered =
+    match agent with
+    | None -> events
+    | Some name ->
+        List.filter (fun (e : Board.karma_event) -> String.equal e.recipient name) events
+  in
+  Board.take limit filtered
+
 let post_to_yojson_with_karma (p : Board.post) ~author_karma =
   Board.post_to_yojson_with_karma p ~author_karma
 
@@ -550,3 +633,41 @@ let backend_name () =
   match Atomic.get backend_state with
   | Active (Jsonl _, _) -> "jsonl"
   | Uninitialized -> "uninitialized"
+
+(* AI curation delegate — thin wrappers around Board_curation *)
+
+let submit_curation_snapshot ~submitted_by ?model ~ordering ~highlights
+    ~rationale ?(provenance = `Assoc []) () =
+  let snap : Board_curation.curation_snapshot = {
+    id = Board_curation.generate_id ();
+    generated_at = Time_compat.now ();
+    submitted_by;
+    model;
+    ordering;
+    highlights;
+    rationale;
+    provenance;
+  } in
+  Board_curation.submit_snapshot snap;
+  snap
+
+let latest_curation_snapshot () =
+  Board_curation.latest_snapshot ()
+
+(** {1 SubBoard operations} *)
+
+let create_sub_board ~slug ~name ~description ~owner ?access () =
+  match backend () with
+  | Jsonl store -> Board.create_sub_board store ~slug ~name ~description ~owner ?access ()
+
+let get_sub_board ~sub_board_id =
+  match backend () with
+  | Jsonl store -> Board.get_sub_board store ~sub_board_id
+
+let list_sub_boards () =
+  match backend () with
+  | Jsonl store -> Board.list_sub_boards store
+
+let delete_sub_board ~sub_board_id =
+  match backend () with
+  | Jsonl store -> Board.delete_sub_board store ~sub_board_id

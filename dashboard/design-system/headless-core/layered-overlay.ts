@@ -28,6 +28,14 @@ export interface OverlayLayer {
   readonly label: string
   readonly description: string
   readonly mutuallyExclusive?: boolean
+  /**
+   * RFC-0028 §3 / §10: layers whose visual surfaces collide with this one.
+   * Activating this layer drops every active layer in `conflictsWith`, and
+   * activating any layer that lists this one in *its* `conflictsWith` drops
+   * this one — i.e. the relationship is treated as symmetric at runtime
+   * even when declared on only one side.
+   */
+  readonly conflictsWith?: ReadonlyArray<string>
 }
 
 export interface LayeredOverlayController {
@@ -61,6 +69,23 @@ export function createLayeredOverlay(layers: ReadonlyArray<OverlayLayer>): Layer
 
   const isExclusive = (kind: string): boolean => layerByKind.get(kind)?.mutuallyExclusive === true
 
+  // Symmetric: kindA and kindB conflict if either declares the other in its
+  // `conflictsWith`. Self-pairs are never conflicts.
+  const isConflicting = (kindA: string, kindB: string): boolean => {
+    if (kindA === kindB) return false
+    const a = layerByKind.get(kindA)
+    const b = layerByKind.get(kindB)
+    if (a?.conflictsWith?.includes(kindB)) return true
+    if (b?.conflictsWith?.includes(kindA)) return true
+    return false
+  }
+
+  const dropConflicts = (target: Set<string>, kind: string): void => {
+    for (const active of [...target]) {
+      if (isConflicting(kind, active)) target.delete(active)
+    }
+  }
+
   const sameActive = (left: ReadonlySet<string>, right: ReadonlySet<string>): boolean => {
     if (left.size !== right.size) return false
     for (const kind of left) {
@@ -76,6 +101,18 @@ export function createLayeredOverlay(layers: ReadonlyArray<OverlayLayer>): Layer
     const next = new Set<string>()
     for (const layer of layers) {
       if (requested.has(layer.kind)) next.add(layer.kind)
+    }
+    // Drop conflicting pairs in registration order: first declared wins. This
+    // is a deterministic resolution for batched setActive() calls where
+    // multiple conflicting layers arrive together.
+    for (const layer of layers) {
+      if (next.has(layer.kind)) {
+        for (const other of [...next]) {
+          if (other !== layer.kind && isConflicting(layer.kind, other)) {
+            next.delete(other)
+          }
+        }
+      }
     }
     return next
   }
@@ -99,9 +136,11 @@ export function createLayeredOverlay(layers: ReadonlyArray<OverlayLayer>): Layer
       next.add(kind)
     } else {
       // Activating any non-exclusive layer drops any active exclusive
-      // layer first, then adds the new layer.
+      // layer first, drops any active layer that conflicts with this kind,
+      // then adds the new layer.
       const exclusive = hasExclusiveActive()
       if (exclusive !== null) next.delete(exclusive)
+      dropConflicts(next, kind)
       next.add(kind)
     }
 

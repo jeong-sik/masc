@@ -386,6 +386,10 @@ val mark_dead : base_path:string -> string -> at:float -> unit
 (** Return the started_at timestamp, or None if not registered. *)
 val started_at : base_path:string -> string -> float option
 
+(** Test-only: override [started_at] for registry fixtures that need to
+    model a long-running fiber without waiting for wall-clock time. *)
+val set_started_at_for_test : base_path:string -> string -> float -> unit
+
 (** Count keepers in Running state. *)
 val count_running : ?base_path:string -> unit -> int
 

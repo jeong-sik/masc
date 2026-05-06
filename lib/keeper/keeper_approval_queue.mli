@@ -41,6 +41,7 @@ type pending_approval =
   ; selected_model : string option
   ; disposition : string option
   ; disposition_reason : string option
+  ; audit_base_path : string option
   ; resolver : Agent_sdk.Hooks.approval_decision Eio.Promise.u option
   ; on_resolution : (Agent_sdk.Hooks.approval_decision -> unit) option
   }
@@ -183,6 +184,7 @@ val submit_and_await :
   tool_name:string ->
   input:Yojson.Safe.t ->
   risk_level:risk_level ->
+  ?base_path:string ->
   ?turn_id:int ->
   ?task_id:string ->
   ?goal_id:string ->
@@ -205,6 +207,7 @@ val submit_pending :
   tool_name:string ->
   input:Yojson.Safe.t ->
   risk_level:risk_level ->
+  ?base_path:string ->
   ?turn_id:int ->
   ?task_id:string ->
   ?goal_id:string ->

@@ -23,8 +23,11 @@
   },
   "_comment_big_three": "Canonical keeper/workflow profile. Keep operator-chosen providers here; code must route logical usages through [routes] instead of hardcoding extra profile names.",
   "big_three_models": [
-    "codex_cli:gpt-5.3-codex-spark", "gemini_cli:auto",
-    "kimi_cli:kimi-for-coding", "glm-coding:auto", "claude_code:auto"
+    "codex_cli:gpt-5.3-codex-spark",
+    "gemini_cli:auto",
+    "kimi_cli:kimi-for-coding",
+    { "model": "glm-coding:auto", "supports_tool_choice": true },
+    "claude_code:auto"
   ],
   "big_three_temperature": 0.2,
   "big_three_max_tokens": 16384,
@@ -60,18 +63,30 @@
   "tier_medium_fallback_cascade": "big_three",
   "_comment___safe_lane": "System-only baseline cascade. Satisfies every capability profile. Used as last-resort fallback target. Not keeper-assignable.",
   "__safe_lane_models": [
-    "claude_code:auto", "glm-coding:auto", "kimi_cli:kimi-for-coding"
+    "claude_code:auto",
+    { "model": "glm-coding:auto", "supports_tool_choice": true },
+    "kimi_cli:kimi-for-coding"
   ],
   "__safe_lane_temperature": 0.2,
   "__safe_lane_max_tokens": 16384,
   "__safe_lane_keeper_assignable": false,
   "__safe_lane_required_capability_profile": "tool_strict",
+  "_comment_local_recovery": "Alias for the phase_recovery logical route. Profiles that declare fallback_cascade = \"local_recovery\" resolve here instead of silently ignoring the hint. Not keeper-assignable.",
+  "local_recovery_models": [
+    "codex_cli:gpt-5.3-codex-spark", "gemini_cli:auto", "claude_code:auto"
+  ],
+  "local_recovery_temperature": 0.2,
+  "local_recovery_max_tokens": 16384,
+  "local_recovery_keeper_assignable": false,
+  "local_recovery_fallback_cascade": "big_three",
   "_comment_tier_fast": "Cheap+fast tool-capable cloud models for keeper turns. Bias toward latency and cost over reasoning depth. All entries support tool calling. Falls back to big_three on exhaustion.",
   "tier_fast_models": [
-    "claude_code:claude-haiku-4-5-20251001", "codex_cli:gpt-5.3-codex-spark",
+    "claude_code:claude-haiku-4-5-20251001",
+    "codex_cli:gpt-5.3-codex-spark",
     "gemini_cli:gemini-3-flash-preview",
-    "gemini_cli:gemini-3.1-flash-lite-preview", "glm-coding:glm-5-turbo",
-    "glm-coding:glm-4.7-flashx"
+    "gemini_cli:gemini-3.1-flash-lite-preview",
+    { "model": "glm-coding:glm-5-turbo", "supports_tool_choice": true },
+    { "model": "glm-coding:glm-4.7-flashx", "supports_tool_choice": true }
   ],
   "tier_fast_temperature": 0.2,
   "tier_fast_max_tokens": 8192,

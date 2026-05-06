@@ -407,7 +407,13 @@ let test_refresh_once_skips_fresh_cached_result () =
       Lib.Dashboard_governance_judge.refresh_once ~sw
         ~net:(Eio.Stdenv.net env)
         ~masc_tools:[]
-        ~dispatch:(fun ~name:_ ~args:_ -> (false, "unused"))
+        ~dispatch:(fun ~name ~args:_ ->
+          {
+            Lib.Tool_result.success = false;
+            data = `String "unused";
+            tool_name = name;
+            duration_ms = 0.0;
+          })
         ~base_path:dir
         ~build_facts:(fun () ->
           build_called := true;

@@ -109,12 +109,17 @@ let with_env name value f =
 let with_temp_masc_base_path prefix f =
   let base = temp_dir prefix in
   let previous = Sys.getenv_opt "MASC_BASE_PATH" in
+  let previous_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
   Unix.putenv "MASC_BASE_PATH" base;
+  Unix.putenv "MASC_BASE_PATH_INPUT" base;
   Fun.protect
     ~finally:(fun () ->
       (match previous with
        | Some value -> Unix.putenv "MASC_BASE_PATH" value
        | None -> Unix.putenv "MASC_BASE_PATH" "");
+      (match previous_input with
+       | Some value -> Unix.putenv "MASC_BASE_PATH_INPUT" value
+       | None -> Unix.putenv "MASC_BASE_PATH_INPUT" "");
       cleanup_dir base)
     f
 
@@ -132,16 +137,21 @@ let with_temp_masc_config cascade_json f =
   output_string oc cascade_json;
   close_out oc;
   let prev_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
+  let prev_base_path_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
   let prev_config_dir = Sys.getenv_opt "MASC_CONFIG_DIR" in
   Config_dir_resolver.reset ();
   Cascade_catalog_runtime.reset_cache_for_tests ();
   Unix.putenv "MASC_BASE_PATH" base;
+  Unix.putenv "MASC_BASE_PATH_INPUT" base;
   Unix.putenv "MASC_CONFIG_DIR" config_dir;
   Fun.protect
     ~finally:(fun () ->
       (match prev_base_path with
        | Some value -> Unix.putenv "MASC_BASE_PATH" value
        | None -> Unix.putenv "MASC_BASE_PATH" "");
+      (match prev_base_path_input with
+       | Some value -> Unix.putenv "MASC_BASE_PATH_INPUT" value
+       | None -> Unix.putenv "MASC_BASE_PATH_INPUT" "");
       (match prev_config_dir with
        | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
        | None -> Unix.putenv "MASC_CONFIG_DIR" "");
@@ -208,6 +218,24 @@ let start_multi_mock ~sw ~net ~port (responses : string list) =
   Eio.Fiber.fork ~sw (fun () ->
       Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
   Printf.sprintf "http://127.0.0.1:%d" port
+
+let start_counting_mock ~sw ~net ~port response =
+  let calls = Atomic.make 0 in
+  let handler _conn _req body =
+    let _ = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    ignore (Atomic.fetch_and_add calls 1);
+    Cohttp_eio.Server.respond_string ~status:`OK ~body:response ()
+  in
+  let socket =
+    Eio.Net.listen net ~sw ~backlog:8 ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+  in
+  let server = Cohttp_eio.Server.make ~callback:handler () in
+  Eio.Fiber.fork ~sw (fun () ->
+      Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+  ( Printf.sprintf "http://127.0.0.1:%d" port,
+    (fun () -> Atomic.get calls),
+    (fun () -> Atomic.set calls 0) )
 
 let start_delayed_mock ~sw ~net ~clock ~port ~delay_s response =
   let handler _conn _req body =
@@ -1124,6 +1152,128 @@ let test_run_named_per_provider_timeout_uses_clock_fallback_and_exempts_last_pro
     | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
   with Exit -> ()
 
+let test_run_named_skips_cooldown_primary_and_falls_back () =
+  try
+    Eio.Switch.run @@ fun sw ->
+    let primary_port =
+      match find_free_port () with Some port -> port | None -> Alcotest.skip ()
+    in
+    let primary_url, primary_calls, reset_primary_calls =
+      try
+        start_counting_mock
+          ~sw
+          ~net:(require_test_net ())
+          ~port:primary_port
+          (openai_text_response "primary should be skipped")
+      with
+      | Unix.Unix_error (Unix.EPERM, "bind", _)
+      | Unix.Unix_error (Unix.EACCES, "bind", _) ->
+          Alcotest.skip ()
+    in
+    let fallback_port =
+      match find_free_port () with Some port -> port | None -> Alcotest.skip ()
+    in
+    let fallback_url, fallback_calls, reset_fallback_calls =
+      try
+        start_counting_mock
+          ~sw
+          ~net:(require_test_net ())
+          ~port:fallback_port
+          (openai_text_response "fallback survived open circuit")
+      with
+      | Unix.Unix_error (Unix.EPERM, "bind", _)
+      | Unix.Unix_error (Unix.EACCES, "bind", _) ->
+          Alcotest.skip ()
+    in
+    let primary_key = "anthropic_open_13318" in
+    let fallback_key = "moonshot_fallback_13318" in
+    with_temp_masc_config
+      (Printf.sprintf
+         {|{
+  "breaker_probe_13318_models": [
+    "custom:%s@%s",
+    "custom:%s@%s"
+  ]
+}|}
+         primary_key
+         primary_url
+         fallback_key
+         fallback_url)
+    @@ fun () ->
+    let resolved =
+      match
+        Masc_mcp.Cascade_catalog_runtime.resolve_named_providers_strict
+          ~sw
+          ~net:(require_test_net ())
+          ~cascade_name:"breaker_probe_13318"
+          ()
+      with
+      | Ok providers -> providers
+      | Error err -> Alcotest.fail err
+    in
+    (match resolved with
+     | [ primary; fallback ] ->
+         Alcotest.(check string) "primary model id"
+           primary_key primary.Llm_provider.Provider_config.model_id;
+         Alcotest.(check string) "fallback model id"
+           fallback_key fallback.model_id;
+         Alcotest.(check string) "primary base url" primary_url primary.base_url;
+         Alcotest.(check string) "fallback base url" fallback_url fallback.base_url
+     | providers ->
+         Alcotest.failf "expected 2 resolved providers, got %d"
+           (List.length providers));
+    for _ = 1 to Masc_mcp.Cascade_health_tracker.cooldown_threshold do
+      Masc_mcp.Cascade_health_tracker.record_failure
+        Masc_mcp.Cascade_health_tracker.global
+        ~provider_key:primary_key
+        ()
+    done;
+    reset_primary_calls ();
+    reset_fallback_calls ();
+    (match
+       Masc_mcp.Cascade_health_tracker.check_circuit_breaker
+         Masc_mcp.Cascade_health_tracker.global
+         ~provider_key:primary_key
+     with
+     | Ok () -> Alcotest.fail "primary provider should be OPEN before run_named"
+     | Error _ -> ());
+    Alcotest.(check int)
+      "primary has no requests before run_named"
+      0
+      (primary_calls ());
+    match
+      Oas_worker_named.run_named
+        ~cascade_name:"breaker_probe_13318"
+        ~goal:"say hello"
+        ~system_prompt:"system"
+        ~sw
+        ~net:(require_test_net ())
+        ()
+    with
+    | Ok _result ->
+        Alcotest.(check int)
+          "OPEN primary receives no request"
+          0
+          (primary_calls ());
+        Alcotest.(check bool)
+          "fallback provider receives requests"
+          true
+          (fallback_calls () > 0);
+        (match
+           Masc_mcp.Cascade_health_tracker.provider_info
+             Masc_mcp.Cascade_health_tracker.global
+             ~provider_key:fallback_key
+         with
+         | None -> Alcotest.fail "fallback provider should have health info"
+         | Some info ->
+             Alcotest.(check bool)
+               "fallback success is reflected in health tracker"
+               true
+               (info.success_rate > 0.0));
+        Eio.Switch.fail sw Exit
+    | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
+  with Exit -> ()
+
 let make_worker_meta ?(effective_model = "local-qwen") () :
     Worker_container_types.worker_container_meta =
   {
@@ -1495,7 +1645,9 @@ let test_run_model_with_masc_tools_rejects_invalid_explicit_label () =
       ~model_label:"not-a-model-label"
       ~goal:"test goal"
       ~masc_tools:[]
-      ~dispatch:(fun ~name:_ ~args:_ -> (true, "ok"))
+      ~dispatch:(fun ~name ~args:_ ->
+        Tool_result.wrap ~tool_name:name ~start_time:(Time_compat.now ())
+          (true, "ok"))
       ()
   with
   | Ok _ ->
@@ -1874,6 +2026,8 @@ let test_resolve_tool_lane_for_codex_cli_public_tools_with_agent_name_keeps_iden
 let test_resolve_tool_lane_for_codex_cli_keeper_bound_public_tools_omits_bound_tools () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  with_env "MASC_MCP_TOKEN" "" @@ fun () ->
+  with_temp_masc_base_path "codex-bound-no-token" @@ fun _base_path ->
   let tools =
     [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_claim_next" ]
   in
@@ -1908,6 +2062,49 @@ let test_resolve_tool_lane_for_codex_cli_keeper_bound_public_tools_omits_bound_t
   | Ok (_, None) ->
       Alcotest.fail
         "expected codex_cli keeper-bound public MCP tools to keep safe runtime lane"
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
+
+let test_resolve_tool_lane_for_codex_cli_keeper_bound_public_tools_with_per_keeper_token_keeps_bound_tools
+    () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  with_env "MASC_MCP_TOKEN" "" @@ fun () ->
+  with_temp_masc_base_path "codex-bound-token" @@ fun () ->
+  let base_path = Sys.getenv "MASC_BASE_PATH" in
+  seed_raw_token base_path "keeper-sangsu-agent" "keeper-bearer-xyz";
+  let tools =
+    [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_claim_next" ]
+  in
+  match
+    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+      ~agent_name:"keeper-sangsu-agent"
+      ~provider_cfg:(make_codex_cli_provider_cfg ())
+      ~tools ()
+  with
+  | Ok (effective_tools, Some policy) ->
+      let masc_headers =
+        List.find_map
+          (function
+            | Llm_provider.Llm_transport.Http_server server
+              when String.equal server.name "masc" -> Some server.headers
+            | _ -> None)
+          policy.servers
+      in
+      Alcotest.(check int) "runtime lane strips inline tools" 0
+        (List.length effective_tools);
+      Alcotest.(check (list string)) "keeper-bound tool preserved for codex_cli"
+        [ "masc_status"; "masc_claim_next" ] policy.allowed_tool_names;
+      Alcotest.(check (option string)) "codex_cli uses per-keeper bearer"
+        (Some "Bearer keeper-bearer-xyz")
+        (Option.bind masc_headers (List.assoc_opt "Authorization"));
+      Alcotest.(check (option string)) "codex_cli preserves agent identity header"
+        (Some "keeper-sangsu-agent")
+        (Option.bind masc_headers (List.assoc_opt "x-masc-agent-name"));
+      Alcotest.(check (option string)) "codex_cli strips internal token" None
+        (Option.bind masc_headers (List.assoc_opt "x-masc-internal-token"))
+  | Ok (_, None) ->
+      Alcotest.fail
+        "expected codex_cli keeper-bound public MCP tools to use runtime MCP lane"
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_resolve_tool_lane_for_kimi_cli_public_tools_uses_runtime_mcp_policy () =
@@ -2078,6 +2275,8 @@ let test_resolve_tool_lane_for_codex_cli_internal_tools_rejects () =
 let test_resolve_tool_lane_for_codex_cli_keeper_internal_tools_with_agent_rejects () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  with_env "MASC_MCP_TOKEN" "" @@ fun () ->
+  with_temp_masc_base_path "codex-internal-no-token" @@ fun _base_path ->
   match
     Oas_worker_exec.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
@@ -2091,26 +2290,41 @@ let test_resolve_tool_lane_for_codex_cli_keeper_internal_tools_with_agent_reject
       Alcotest.(check string) "field" "tool_support" field
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
-let test_resolve_tool_lane_for_codex_cli_keeper_task_claim_with_agent_rejects () =
+let test_resolve_tool_lane_for_codex_cli_keeper_internal_tools_with_agent_and_per_keeper_token_uses_runtime_mcp
+    () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
   with_env "MASC_MCP_TOKEN" "" @@ fun () ->
-  with_temp_masc_base_path "codex-keeper-claim" @@ fun () ->
+  with_temp_masc_base_path "codex-internal-token" @@ fun () ->
   let base_path = Sys.getenv "MASC_BASE_PATH" in
-  seed_raw_token base_path "keeper-sangsu-agent" "keeper-raw-token";
+  seed_raw_token base_path "keeper-sangsu-agent" "keeper-bearer-abc";
   match
     Oas_worker_exec.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
       ~provider_cfg:(make_codex_cli_provider_cfg ())
-      ~tools:[ make_named_noop_tool "keeper_task_claim" ] ()
+      ~tools:[ make_named_noop_tool "keeper_bash" ] ()
   with
-  | Ok _ ->
+  | Ok (effective_tools, Some policy) ->
+      let masc_headers =
+        List.find_map
+          (function
+            | Llm_provider.Llm_transport.Http_server server
+              when String.equal server.name "masc" -> Some server.headers
+            | _ -> None)
+          policy.servers
+      in
+      Alcotest.(check int) "runtime lane strips inline tools" 0
+        (List.length effective_tools);
+      Alcotest.(check (list string)) "keeper internal tool preserved"
+        [ "keeper_bash" ] policy.allowed_tool_names;
+      Alcotest.(check (option string)) "codex_cli uses per-keeper bearer"
+        (Some "Bearer keeper-bearer-abc")
+        (Option.bind masc_headers (List.assoc_opt "Authorization"));
+      Alcotest.(check (option string)) "codex_cli strips internal token" None
+        (Option.bind masc_headers (List.assoc_opt "x-masc-internal-token"))
+  | Ok (_, None) ->
       Alcotest.fail
-        "expected codex_cli to reject required keeper_task_claim despite per-keeper token auth"
-  | Error (Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; detail })) ->
-      Alcotest.(check string) "field" "tool_support" field;
-      Alcotest.(check bool) "detail mentions keeper_task_claim" true
-        (contains_substring ~needle:"keeper_task_claim" detail)
+        "expected codex_cli keeper-internal tools with per-keeper token to use runtime MCP lane"
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_resolve_tool_lane_for_kimi_cli_internal_tools_rejects () =
@@ -2166,6 +2380,8 @@ let test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_boun
     () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  with_env "MASC_MCP_TOKEN" "" @@ fun () ->
+  with_temp_masc_base_path "codex-filter-no-token" @@ fun _base_path ->
   let runtime_mcp_policy =
     Oas_worker_exec.public_mcp_runtime_policy_of_tool_names
       ~agent_name:"keeper-sangsu-agent" [ "masc_status"; "masc_claim_next" ]
@@ -2230,7 +2446,7 @@ let test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_boun
       Alcotest.failf "expected only kimi_cli provider to remain, got %d"
         (List.length filtered)
 
-let test_filter_candidate_providers_for_tool_support_drops_codex_with_per_keeper_token
+let test_filter_candidate_providers_for_tool_support_keeps_codex_with_per_keeper_token
     () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   with_env "MASC_MCP_TOKEN" "" @@ fun () ->
@@ -2251,14 +2467,16 @@ let test_filter_candidate_providers_for_tool_support_drops_codex_with_per_keeper
       [ make_codex_cli_provider_cfg (); make_kimi_cli_provider_cfg () ]
   in
   Alcotest.(check (list string))
-    "codex remains rejected even when bearer auth can be sourced"
-    [ "kimi_cli:kimi-for-coding" ]
+    "codex remains when bearer auth can be sourced"
+    [ "codex_cli:codex"; "kimi_cli:kimi-for-coding" ]
     (List.map Provider_tool_support.provider_debug_label filtered)
 
 let test_filter_candidate_providers_for_tool_support_keeps_header_capable_cli_for_keeper_internal_tools
     () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  with_env "MASC_MCP_TOKEN" "" @@ fun () ->
+  with_temp_masc_base_path "codex-header-capable-no-token" @@ fun _base_path ->
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   let runtime_mcp_policy =
     Masc_mcp.Oas_worker_named.runtime_mcp_policy_for_tools
@@ -2286,6 +2504,7 @@ let test_filter_candidate_providers_for_tool_support_secondary_preserves_priorit
     () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  with_temp_masc_base_path "codex-secondary-priority" @@ fun () ->
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   let runtime_mcp_policy =
     Masc_mcp.Oas_worker_named.runtime_mcp_policy_for_tools
@@ -2316,6 +2535,7 @@ let test_filter_candidate_providers_for_tool_support_secondary_uses_candidate_in
     () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  with_temp_masc_base_path "codex-secondary-index" @@ fun () ->
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   let runtime_mcp_policy =
     Masc_mcp.Oas_worker_named.runtime_mcp_policy_for_tools
@@ -2360,6 +2580,7 @@ let count_swap_metric ~detail =
 let test_dual_track_swap_emits_secondary_kind_label_on_success () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  with_temp_masc_base_path "codex-secondary-metric-success" @@ fun () ->
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   let runtime_mcp_policy =
     Masc_mcp.Oas_worker_named.runtime_mcp_policy_for_tools
@@ -2389,6 +2610,7 @@ let test_dual_track_swap_emits_secondary_kind_label_on_success () =
 let test_dual_track_swap_emits_secondary_kind_label_on_rejection () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  with_temp_masc_base_path "codex-secondary-metric-rejection" @@ fun () ->
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   let runtime_mcp_policy =
     Masc_mcp.Oas_worker_named.runtime_mcp_policy_for_tools
@@ -2427,6 +2649,8 @@ let test_dual_track_swap_emits_secondary_kind_label_on_rejection () =
 let test_classify_filter_rejection_codex_keeper_bound_actor () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  with_env "MASC_MCP_TOKEN" "" @@ fun () ->
+  with_temp_masc_base_path "codex-classify-no-token" @@ fun _base_path ->
   let runtime_mcp_policy =
     Oas_worker_exec.public_mcp_runtime_policy_of_tool_names
       ~agent_name:"keeper-sangsu-agent" [ "masc_status"; "masc_claim_next" ]
@@ -2449,6 +2673,34 @@ let test_classify_filter_rejection_codex_keeper_bound_actor () =
   Alcotest.(check (option string))
     "codex_cli with bound-actor policy classified as keeper_bound_actor"
     (Some "codex_keeper_bound_actor_required")
+    (Option.map
+       Masc_mcp.Oas_worker_named.filter_rejection_reason_label reason)
+
+let test_classify_filter_rejection_codex_keeper_bound_actor_passes_with_per_keeper_token
+    () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  with_env "MASC_MCP_TOKEN" "" @@ fun () ->
+  with_temp_masc_base_path "codex-classify-token" @@ fun () ->
+  let base_path = Sys.getenv "MASC_BASE_PATH" in
+  seed_raw_token base_path "keeper-sangsu-agent" "keeper-bearer-xyz";
+  let tools = [ make_named_noop_tool "keeper_bash" ] in
+  let runtime_mcp_policy =
+    Masc_mcp.Oas_worker_named.runtime_mcp_policy_for_tools
+      ~keeper_name:"sangsu" tools
+  in
+  let reason =
+    Masc_mcp.Oas_worker_named.classify_filter_rejection
+      ~keeper_name:"sangsu"
+      ?runtime_mcp_policy
+      ~tools
+      ~require_tool_choice_support:true
+      ~require_tool_support:true
+      (make_codex_cli_provider_cfg ())
+  in
+  Alcotest.(check (option string))
+    "codex_cli passes keeper-bound policy when per-keeper bearer exists"
+    None
     (Option.map
        Masc_mcp.Oas_worker_named.filter_rejection_reason_label reason)
 
@@ -4205,6 +4457,100 @@ let test_enrich_idle_detail_picks_last_tool () =
   Alcotest.(check string) "exact string with last tool" expected result
 
 (* ================================================================ *)
+(* P0: Circuit-breaker fallback at run_named boundary               *)
+(* ================================================================ *)
+
+(** P0 regression: when the first provider in a two-provider cascade has
+    3 consecutive failures (OPEN / cooldown), [run_named] must skip it
+    without spending a request, then attempt the second (healthy) provider
+    and succeed.
+
+    Invariants pinned by this test:
+    1. First provider remains OPEN and receives zero HTTP requests.
+    2. Second provider is attempted and returns the expected response.
+    3. The health tracker records success for the fallback provider.
+
+    Implementation note: the primary provider's URL is deliberately set to
+    an unreachable endpoint (127.0.0.1:1).  Because the circuit breaker check
+    happens *before* [try_provider] is called, no connection attempt is ever
+    made to that address.  If the circuit-breaker logic were removed or
+    broken, [try_provider] would attempt port 1, get a connection-refused
+    error, and the cascade would fail — surfacing the regression immediately. *)
+let test_run_named_circuit_breaker_skips_open_provider () =
+  let primary_key = "cb_open_primary" in
+  let fallback_key = "cb_healthy_fallback" in
+  (* 1. Seed the global health tracker: 3 consecutive failures → OPEN. *)
+  Cascade_health_tracker.(
+    record_failure global ~provider_key:primary_key ();
+    record_failure global ~provider_key:primary_key ();
+    record_failure global ~provider_key:primary_key ());
+  Alcotest.(check bool) "pre-condition: primary is in cooldown after 3 failures"
+    true
+    (Cascade_health_tracker.is_in_cooldown
+       Cascade_health_tracker.global ~provider_key:primary_key);
+  try
+    Eio.Switch.run @@ fun sw ->
+    (* 2. Start a mock HTTP server for the fallback provider only. *)
+    let fallback_port =
+      match find_free_port () with Some p -> p | None -> Alcotest.skip ()
+    in
+    let fallback_url =
+      try
+        start_multi_mock ~sw ~net:(require_test_net ()) ~port:fallback_port
+          [ openai_text_response "fallback succeeded" ]
+      with
+      | Unix.Unix_error (Unix.EPERM, "bind", _)
+      | Unix.Unix_error (Unix.EACCES, "bind", _) ->
+          Alcotest.skip ()
+    in
+    (* 3. Configure the cascade: primary (OPEN, unreachable) → fallback
+          (healthy mock).  Use the model-id strings as the health-tracker
+          provider keys so the circuit-breaker lookup matches exactly. *)
+    with_temp_masc_config
+      (Printf.sprintf
+         {|{"cb_probe_models":["custom:%s@http://127.0.0.1:1","custom:%s@%s"]}|}
+         primary_key fallback_key fallback_url)
+    @@ fun () ->
+    (* 4. Run the named cascade. *)
+    (match
+       Oas_worker_named.run_named
+         ~cascade_name:"cb_probe"
+         ~goal:"circuit breaker test"
+         ~system_prompt:"system"
+         ~sw
+         ~net:(require_test_net ())
+         ()
+     with
+     | Ok result ->
+         (* 5. Fallback provider returned the expected response. *)
+         Alcotest.(check string) "fallback provider response"
+           "fallback succeeded"
+           (response_text result.response);
+         (* 6. Primary provider is still OPEN — no request reset its streak. *)
+         Alcotest.(check bool)
+           "primary remains OPEN (zero requests spent on open provider)"
+           true
+           (Cascade_health_tracker.is_in_cooldown
+              Cascade_health_tracker.global ~provider_key:primary_key);
+         (* 7. Fallback provider has a recorded success in the tracker. *)
+         Alcotest.(check bool) "fallback is not in cooldown after success"
+           false
+           (Cascade_health_tracker.is_in_cooldown
+              Cascade_health_tracker.global ~provider_key:fallback_key);
+         let rate =
+           Cascade_health_tracker.success_rate
+             Cascade_health_tracker.global ~provider_key:fallback_key
+         in
+         Alcotest.(check bool) "fallback success_rate > 0 after run_named"
+           true (rate > 0.0);
+         Eio.Switch.fail sw Exit
+     | Error err ->
+         Alcotest.failf
+           "expected fallback provider to succeed, got: %s"
+           (Agent_sdk.Error.to_string err))
+  with Exit -> ()
+
+(* ================================================================ *)
 (* Runner                                                           *)
 (* ================================================================ *)
 
@@ -4316,6 +4662,8 @@ let () =
         test_default_config_preserves_custom_local_request_path;
       Alcotest.test_case "per-provider timeout uses context clock and exempts last provider" `Quick
         test_run_named_per_provider_timeout_uses_clock_fallback_and_exempts_last_provider;
+      Alcotest.test_case "open circuit primary falls back without request" `Quick
+        test_run_named_skips_cooldown_primary_and_falls_back;
     ];
     "resume_config", [
       Alcotest.test_case "checkpoint model wins" `Quick
@@ -4372,6 +4720,10 @@ let () =
         "keeper-bound public MCP tools on codex_cli omit request-scoped tools"
         `Quick
         test_resolve_tool_lane_for_codex_cli_keeper_bound_public_tools_omits_bound_tools;
+      Alcotest.test_case
+        "keeper-bound public MCP tools on codex_cli use per-keeper bearer"
+        `Quick
+        test_resolve_tool_lane_for_codex_cli_keeper_bound_public_tools_with_per_keeper_token_keeps_bound_tools;
       Alcotest.test_case "public MCP tools on kimi_cli use runtime MCP lane" `Quick
         test_resolve_tool_lane_for_kimi_cli_public_tools_uses_runtime_mcp_policy;
       Alcotest.test_case
@@ -4397,9 +4749,9 @@ let () =
         `Quick
         test_resolve_tool_lane_for_codex_cli_keeper_internal_tools_with_agent_rejects;
       Alcotest.test_case
-        "keeper_task_claim on codex_cli with keeper actor is rejected"
+        "keeper-internal tools on codex_cli with per-keeper bearer use runtime MCP"
         `Quick
-        test_resolve_tool_lane_for_codex_cli_keeper_task_claim_with_agent_rejects;
+        test_resolve_tool_lane_for_codex_cli_keeper_internal_tools_with_agent_and_per_keeper_token_uses_runtime_mcp;
       Alcotest.test_case "keeper-internal tools on kimi_cli are rejected" `Quick
         test_resolve_tool_lane_for_kimi_cli_internal_tools_rejects;
       Alcotest.test_case "optional keeper-internal tools on codex_cli drop to text" `Quick
@@ -4411,9 +4763,9 @@ let () =
         `Quick
         test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_bound_actor_tools;
       Alcotest.test_case
-        "provider-normalized filter drops codex bound actor despite per-keeper token"
+        "provider-normalized filter keeps codex bound actor with per-keeper token"
         `Quick
-        test_filter_candidate_providers_for_tool_support_drops_codex_with_per_keeper_token;
+        test_filter_candidate_providers_for_tool_support_keeps_codex_with_per_keeper_token;
       Alcotest.test_case
         "provider-normalized filter keeps header-capable keeper-internal lanes"
         `Quick
@@ -4437,6 +4789,10 @@ let () =
       Alcotest.test_case
         "classify_filter_rejection: codex bound-actor policy → keeper_bound_actor"
         `Quick test_classify_filter_rejection_codex_keeper_bound_actor;
+      Alcotest.test_case
+        "classify_filter_rejection: codex bound-actor policy passes with per-keeper bearer"
+        `Quick
+        test_classify_filter_rejection_codex_keeper_bound_actor_passes_with_per_keeper_token;
       Alcotest.test_case
         "classify_filter_rejection: returns None when provider passes"
         `Quick test_classify_filter_rejection_passes_when_provider_supported;
@@ -4556,5 +4912,11 @@ let () =
         test_enrich_idle_detail_non_idle_error;
       Alcotest.test_case "last tool name wins over earlier ones" `Quick
         test_enrich_idle_detail_picks_last_tool;
+    ];
+    "circuit_breaker_cascade_fallback", [
+      Alcotest.test_case
+        "P0: open provider is skipped and fallback succeeds at run_named boundary"
+        `Quick
+        test_run_named_circuit_breaker_skips_open_provider;
     ];
   ]

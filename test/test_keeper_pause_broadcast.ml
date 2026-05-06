@@ -120,6 +120,35 @@ let test_pause_human_when_no_tools_used () =
   let r = mk_receipt ~tools_used:[] () in
   check_disp "tools_used=[]" r "pause_human" "tool_required_unsatisfied"
 
+(* Regression: the completion-contract layer can report
+   [terminal_reason="completion_contract_violation:require_tool_use"] while
+   the earlier tool_contract classifier reports
+   [tool_contract_result="satisfied_completion"]. Before this branch the
+   two-layer disagreement fell through to ("unknown","unmapped_cascade_state")
+   and tripped the #11651 regression counter. The terminal_reason is
+   authoritative — pause_human/tool_required_unsatisfied. *)
+let test_pause_human_for_completion_contract_violation_with_satisfied_inner () =
+  let r =
+    mk_receipt
+      ~terminal_reason_code:"completion_contract_violation:require_tool_use"
+      ~tool_contract_result:"satisfied_completion"
+      ~error_kind:(Some (R.error_kind_of_string "agent"))
+      ~tools_used:[ "keeper_board_list"; "keeper_stay_silent" ]
+      ()
+  in
+  check_disp "completion_contract_violation overrides satisfied inner" r
+    "pause_human" "tool_required_unsatisfied"
+
+let test_pause_human_for_completion_contract_violation_other_subclause () =
+  let r =
+    mk_receipt
+      ~terminal_reason_code:"completion_contract_violation:other_subclause"
+      ~tool_contract_result:"satisfied"
+      ~tools_used:[ "Read" ] ()
+  in
+  check_disp "completion_contract_violation:other_subclause" r "pause_human"
+    "tool_required_unsatisfied"
+
 let test_provider_failure_not_reported_as_tool_unsatisfied () =
   let r =
     mk_receipt ~tools_used:[] ~terminal_reason_code:"api_error_invalid_request"
@@ -267,6 +296,15 @@ let () =
             test_pause_human_for_each_violation;
           test_case "tools_used=[] -> pause_human" `Quick
             test_pause_human_when_no_tools_used;
+          test_case
+            "completion_contract_violation:* with satisfied_completion inner \
+             -> pause_human (#11651 regression)"
+            `Quick
+            test_pause_human_for_completion_contract_violation_with_satisfied_inner;
+          test_case
+            "completion_contract_violation:other_subclause -> pause_human"
+            `Quick
+            test_pause_human_for_completion_contract_violation_other_subclause;
           test_case "provider failure before tool use -> provider_runtime_error" `Quick
             test_provider_failure_not_reported_as_tool_unsatisfied;
           test_case "config failure before tool use -> preflight_config_error" `Quick

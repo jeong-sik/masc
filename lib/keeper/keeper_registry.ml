@@ -808,6 +808,9 @@ let started_at ~base_path name =
   | Some entry -> Some entry.started_at
   | None -> None
 
+let set_started_at_for_test ~base_path name started_at =
+  update_entry ~base_path name (fun entry -> { entry with started_at })
+
 let spawn_slots_available () =
   let max_keepers = Keeper_runtime_resolved.bootstrap_max_active_keepers () in
   max_keepers <= 0

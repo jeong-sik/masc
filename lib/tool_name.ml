@@ -27,6 +27,7 @@ module Keeper = struct
     | Board_cleanup
     | Board_comment
     | Board_comment_vote
+    | Board_curation_read
     | Board_delete
     | Board_get
     | Board_list
@@ -75,6 +76,7 @@ module Keeper = struct
     | Board_cleanup -> "keeper_board_cleanup"
     | Board_comment -> "keeper_board_comment"
     | Board_comment_vote -> "keeper_board_comment_vote"
+    | Board_curation_read -> "keeper_board_curation_read"
     | Board_delete -> "keeper_board_delete"
     | Board_get -> "keeper_board_get"
     | Board_list -> "keeper_board_list"
@@ -123,6 +125,7 @@ module Keeper = struct
     | "keeper_board_cleanup" -> Some Board_cleanup
     | "keeper_board_comment" -> Some Board_comment
     | "keeper_board_comment_vote" -> Some Board_comment_vote
+    | "keeper_board_curation_read" -> Some Board_curation_read
     | "keeper_board_delete" -> Some Board_delete
     | "keeper_board_get" -> Some Board_get
     | "keeper_board_list" -> Some Board_list
@@ -174,6 +177,7 @@ module Keeper = struct
     | Board_cleanup
     | Board_comment
     | Board_comment_vote
+    | Board_curation_read
     | Board_delete
     | Board_get
     | Board_list
@@ -201,6 +205,7 @@ module Masc = struct
     | Add_task
     | Agent_fitness
     | Agent_update
+    | Agent_card
     | Agents
     | Autoresearch_cycle
     | Autoresearch_inject
@@ -213,6 +218,7 @@ module Masc = struct
     | Board_cleanup
     | Board_comment
     | Board_comment_vote
+    | Board_curation_read
     | Board_delete
     | Board_get
     | Board_hearths
@@ -306,11 +312,13 @@ module Masc = struct
     | Add_task -> "masc_add_task"
     | Agent_fitness -> "masc_agent_fitness"
     | Agent_update -> "masc_agent_update"
+    | Agent_card -> "masc_agent_card"
     | Agents -> "masc_agents"
     | Batch_add_tasks -> "masc_batch_add_tasks"
     | Board_cleanup -> "masc_board_cleanup"
     | Board_comment -> "masc_board_comment"
     | Board_comment_vote -> "masc_board_comment_vote"
+    | Board_curation_read -> "masc_board_curation_read"
     | Board_delete -> "masc_board_delete"
     | Board_get -> "masc_board_get"
     | Board_hearths -> "masc_board_hearths"
@@ -411,11 +419,13 @@ module Masc = struct
     | "masc_add_task" -> Some Add_task
     | "masc_agent_fitness" -> Some Agent_fitness
     | "masc_agent_update" -> Some Agent_update
+    | "masc_agent_card" -> Some Agent_card
     | "masc_agents" -> Some Agents
     | "masc_batch_add_tasks" -> Some Batch_add_tasks
     | "masc_board_cleanup" -> Some Board_cleanup
     | "masc_board_comment" -> Some Board_comment
     | "masc_board_comment_vote" -> Some Board_comment_vote
+    | "masc_board_curation_read" -> Some Board_curation_read
     | "masc_board_delete" -> Some Board_delete
     | "masc_board_get" -> Some Board_get
     | "masc_board_hearths" -> Some Board_hearths
@@ -517,6 +527,7 @@ module Masc = struct
     | Board_cleanup
     | Board_comment
     | Board_comment_vote
+    | Board_curation_read
     | Board_delete
     | Board_get
     | Board_hearths

@@ -211,6 +211,22 @@ val set_budget_exhaustion_for_test :
 (** Test-only: pre-load strike count.  [strikes <= 0] is equivalent
     to [reset_budget_exhaustion]. *)
 
+type keeper_turn_slot_control = Keeper_turn_slot.keeper_turn_slot_control = {
+  release_for_retry : unit -> unit;
+  reacquire_after_retry :
+    unit ->
+    (int, [ `Semaphore_wait_timeout of Keeper_turn_slot.semaphore_wait_timeout ])
+      result;
+}
+
+(** Test-only wrapper around the keeper turn slot acquisition path with
+    explicit in-turn release/reacquire controls. *)
+val with_keeper_turn_slot_control_for_test :
+  keeper_name:string ->
+  channel:Keeper_world_observation.keeper_cycle_channel ->
+  (semaphore_wait_ms:int -> slot_control:keeper_turn_slot_control -> 'a) ->
+  ('a, [> `Semaphore_wait_timeout of semaphore_wait_timeout ]) result
+
 (** Test-only wrapper around the keeper turn slot acquisition path. *)
 val with_keeper_turn_slot_for_test :
   keeper_name:string ->

@@ -34,7 +34,7 @@ function loadOasRuntimeStore(): Promise<typeof import('./oas-runtime-store')> {
 // --- Signals ---
 
 export const connected = signal(false)
-export const eventCount = signal(0)
+const eventCount = signal(0)
 export const lastEvent = signal<SSEEvent | null>(null)
 export const journal = signal<JournalEntry[]>([])
 
@@ -965,6 +965,5 @@ export function disconnectSSE(): void {
   connected.value = false
 }
 
-// Re-export as readable signals for components
-export const isConnected: ReadonlySignal<boolean> = connected
+// Re-export as readable signal for components
 export const totalEvents: ReadonlySignal<number> = eventCount

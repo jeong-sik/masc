@@ -641,8 +641,8 @@ let run_keepalive_unified_turn
             ~keeper_id:meta_after_triage.name
         in
         match
-          Keeper_turn_slot.with_keeper_turn_slot ~keeper_name:meta_after_triage.name
-            ~channel:turn_decision.channel (fun ~semaphore_wait_ms ->
+          Keeper_turn_slot.with_keeper_turn_slot_control ~keeper_name:meta_after_triage.name
+            ~channel:turn_decision.channel (fun ~semaphore_wait_ms ~slot_control ->
             match
               with_in_turn_liveness_pulse ~ctx ~meta:meta_after_observe ~stop
                 (fun () ->
@@ -653,6 +653,7 @@ let run_keepalive_unified_turn
                     ~generation:meta_after_observe.runtime.generation
                     ~channel:turn_decision.channel
                     ~semaphore_wait_ms:semaphore_wait_ms
+                    ~turn_slot_control:slot_control
                     ~shared_context
                     ())
             with
@@ -1243,7 +1244,7 @@ let run_heartbeat_loop
       (* Yield before each heartbeat cycle to prevent N keeper fibers
                from monopolizing the Eio scheduler during CPU-bound phases
                (tool filtering, snapshot construction, prompt building). *)
-      Eio.Fiber.yield ();
+      Eio_guard.fair_yield ();
       (* Phase 0: timing markers *)
       let t_presence_start = Time_compat.now () in
       let disk_meta_opt, new_meta_mtime =

@@ -35,6 +35,25 @@ let result_to_response = function
    [tool_schemas_agent.ml] mirrors the SSOT (cycle-aware, sync test).
    The previous code used a string match with a wildcard `_ -> Get`
    branch which silently routed any unknown action to Get. *)
+type agent_card_action =
+  | Agent_card_get
+  | Agent_card_refresh
+
+let agent_card_action_to_string = function
+  | Agent_card_get -> "get"
+  | Agent_card_refresh -> "refresh"
+
+let valid_agent_card_action_strings =
+  [ Agent_card_get; Agent_card_refresh ] |> List.map agent_card_action_to_string
+
+let agent_card_action_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "get" -> Some Agent_card_get
+  | "refresh" -> Some Agent_card_refresh
+  | _ -> None
+
+let valid_collaboration_format_strings = [ "text"; "json" ]
+
 (** Handle masc_agents *)
 let handle_agents ctx args =
   let limit = get_int args "limit" 20 |> max 1 |> min 50 in
@@ -253,6 +272,60 @@ let handle_agent_fitness ctx args =
 
 (** Handle masc_collaboration_graph *)
 (** Handle masc_agent_card *)
+let handle_agent_card ctx args =
+  let action_raw = get_string args "action" "get" in
+  match agent_card_action_of_string action_raw with
+  | None ->
+      error_result_typed ~code:Validation_error
+        (Printf.sprintf "invalid action %S; expected one of: %s" action_raw
+           (String.concat ", " valid_agent_card_action_strings))
+  | Some action ->
+      let agents = Coord.get_agents_raw ctx.config in
+      let target = get_string_opt args "agent_name" in
+      let target_agent =
+        Option.bind target (fun name ->
+          List.find_opt
+            (fun (agent : Masc_domain.agent) -> String.equal agent.name name)
+            agents)
+      in
+      let json =
+        `Assoc [
+          ("schema", `String "masc.agent_card.v1");
+          ("name", `String "MASC-MCP");
+          ("description", `String "MASC multi-agent coordination MCP server");
+          ("action", `String (agent_card_action_to_string action));
+          ("requested_by", `String ctx.agent_name);
+          ("base_path", `String ctx.config.base_path);
+          ("workspace_path", `String ctx.config.workspace_path);
+          ("agent_count", `Int (List.length agents));
+          ( "agent",
+            match target_agent with
+            | Some agent -> Masc_domain.agent_to_yojson agent
+            | None -> `Null );
+          ( "capabilities",
+            `Assoc [
+              ("coordination", `Bool true);
+              ("task_backlog", `Bool true);
+              ("keeper_runtime", `Bool true);
+              ("dashboard", `Bool true);
+            ] );
+          ( "tools",
+            `List
+              (List.map
+                 (fun name -> `String name)
+                 [
+                   "masc_status";
+                   "masc_agents";
+                   "masc_tasks";
+                   "masc_claim_next";
+                   "masc_transition";
+                   "masc_dashboard";
+                   "masc_tool_help";
+                 ]) );
+        ]
+      in
+      (true, Yojson.Safe.to_string json)
+
 (** Dispatch handler. Returns Some (success, result) if handled, None otherwise *)
 let dispatch ctx ~name ~args =
   match name with
@@ -261,7 +334,8 @@ let dispatch ctx ~name ~args =
   | "masc_agent_update" -> Some (handle_agent_update ctx args)
   | "masc_get_metrics" -> Some (handle_get_metrics ctx args)
   | "masc_agent_fitness" -> Some (handle_agent_fitness ctx args)
-      | _ -> None
+  | "masc_agent_card" -> Some (handle_agent_card ctx args)
+  | _ -> None
 
 let schemas = Tool_schemas_agent.schemas
 
@@ -270,11 +344,11 @@ let schemas = Tool_schemas_agent.schemas
 (* ================================================================ *)
 
 let _tool_spec_read_only =
-  [ "masc_agents";  ]
+  [ "masc_agents"; "masc_agent_card" ]
 let _tool_spec_requires_join = [ "masc_register_capabilities" ]
 
 let tool_required_permission = function
-  | "masc_agents" | "masc_agent_fitness"
+  | "masc_agents" | "masc_agent_fitness" | "masc_agent_card"
   | "masc_get_metrics" ->
       Some Masc_domain.CanReadState
   | "masc_register_capabilities" | "masc_agent_update" ->

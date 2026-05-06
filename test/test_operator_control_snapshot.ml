@@ -481,6 +481,93 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
         (trust |> member "latest_terminal_reason" |> member "code"
        |> to_string))
 
+let test_lightweight_snapshot_preserves_receipt_latest_causal_event () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "receipt-causal-lightweight" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Keep receipt causal signal in summary");
+                ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      Keeper_keepalive.stop_keepalive keeper_name;
+      let meta =
+        match Keeper_types.read_meta config keeper_name with
+        | Ok (Some meta) -> meta
+        | Ok None -> Alcotest.fail "expected keeper meta"
+        | Error err -> Alcotest.fail err
+      in
+      Dated_jsonl.append
+        (Keeper_types_support.keeper_execution_receipt_store config keeper_name)
+        (`Assoc
+          [
+            ("schema", `String "keeper.execution_receipt.v1");
+            ("keeper_name", `String keeper_name);
+            ("agent_name", `String meta.agent_name);
+            ("trace_id", `String "trace-receipt-causal-lightweight");
+            ("turn_count", `Int 3);
+            ("outcome", `String "ok");
+            ("operator_disposition", `String "pass");
+            ("operator_disposition_reason", `String "healthy");
+            ("tool_contract_result", `String "satisfied");
+            ("tools_used", `List [ `String "keeper_status" ]);
+            ("requested_tools", `List [ `String "keeper_status" ]);
+            ( "cascade",
+              `Assoc
+                [
+                  ("name", `String "big_three");
+                  ("selected_model", `String "kimi-for-coding");
+                  ("outcome", `String "completed");
+                ] );
+            ("ended_at", `String (Masc_domain.now_iso ()));
+          ]);
+      Operator_control.invalidate_snapshot_cache ();
+      let snapshot =
+        Operator_control.snapshot_json ~view:"summary" ~include_messages:false
+          ~include_keepers:true ~include_summary_fields:false
+          ~lightweight_summary:true
+          (operator_ctx env sw config "operator")
+      in
+      let open Yojson.Safe.Util in
+      let keeper =
+        snapshot |> member "keepers" |> member "items" |> to_list
+        |> List.find_opt (fun row -> row |> member "name" |> to_string = keeper_name)
+        |> Option.value ~default:`Null
+      in
+      Alcotest.(check bool) "keeper present" true (keeper <> `Null);
+      let trust = keeper |> member "runtime_trust" in
+      Alcotest.(check string) "receipt remains latest causal fallback"
+        "execution_receipt"
+        (trust |> member "latest_causal_event" |> member "kind" |> to_string))
+
 let test_snapshot_has_expected_sections () =
   Eio_main.run @@ fun env ->
   ensure_fs env;

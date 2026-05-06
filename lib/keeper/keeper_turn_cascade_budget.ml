@@ -614,6 +614,170 @@ let current_keeper_meta ~(config : Coord.config) ~(fallback_meta : keeper_meta) 
   | Some entry -> entry.meta
   | None -> fallback_meta
 
+type post_turn_resilience_handles = {
+  resilience_audit_store : Shared_audit.Store.t option;
+  resilience_strategy_executor : Resilience.Recovery.strategy_executor option;
+  sync_lifecycle_meta : post_turn_lifecycle -> post_turn_lifecycle;
+}
+
+let resilience_audit_dir
+    ~(config : Coord.config)
+    ~(keeper_name : string) : string =
+  let masc_root =
+    Common.masc_dir_from_base_path ~base_path:config.base_path
+  in
+  Filename.concat
+    (Filename.concat masc_root "resilience_audit")
+    (Coord_utils.safe_filename keeper_name)
+
+let short_resilience_detail detail =
+  let detail = String.trim detail in
+  if String.length detail <= 240 then detail
+  else String.sub detail 0 240 ^ "..."
+
+let resilience_execution_event_to_string = function
+  | Resilience.Recovery.RetryAttempt { attempt; max_attempts } ->
+      Printf.sprintf "retry_attempt(%d/%d)" attempt max_attempts
+  | Resilience.Recovery.RetryBackoff { attempt; delay_s; error } ->
+      Printf.sprintf "retry_backoff(attempt=%d,delay_s=%.3f,error=%s)"
+        attempt delay_s (short_resilience_detail error)
+  | Resilience.Recovery.FallbackApply { value; confidence_delta } ->
+      Printf.sprintf "fallback_apply(value=%s,confidence_delta=%.3f)"
+        (short_resilience_detail value) confidence_delta
+  | Resilience.Recovery.HandoffRequest { message; preserve_state } ->
+      Printf.sprintf "handoff_request(preserve_state=%b,message=%s)"
+        preserve_state (short_resilience_detail message)
+  | Resilience.Recovery.AbortRun { reason } ->
+      Printf.sprintf "abort_run(reason=%s)"
+        (short_resilience_detail reason)
+
+let make_post_turn_resilience_executor
+    ~(config : Coord.config)
+    ~(meta : keeper_meta)
+    ~(on_paused : keeper_meta -> unit)
+  : Resilience.Recovery.strategy_executor =
+  let pause_for_operator ~code ~detail =
+    let detail = short_resilience_detail detail in
+    let latest_meta = current_keeper_meta ~config ~fallback_meta:meta in
+    Keeper_registry.set_failure_reason ~base_path:config.base_path meta.name
+      (Some (Keeper_registry.Provider_runtime_error { code; detail }));
+    match sync_keeper_paused_state ~config ~meta:latest_meta ~paused:true with
+    | Ok paused_meta ->
+        on_paused paused_meta;
+        Ok ()
+    | Error err -> Error err
+  in
+  let fail_and_pause ~code ~detail =
+    let detail = short_resilience_detail detail in
+    match pause_for_operator ~code ~detail with
+    | Ok () -> detail
+    | Error err -> Printf.sprintf "%s (pause failed: %s)" detail err
+  in
+  {
+    Resilience.Recovery.run_retry_attempt =
+      (fun ~attempt ->
+        let detail =
+          Printf.sprintf
+            "post-turn resilience retry attempt %d has no operation-specific \
+             retry callback; paused for operator recovery"
+            attempt
+        in
+        Resilience.Recovery.Fatal_failure
+          (fail_and_pause ~code:"resilience_retry_unbound" ~detail));
+    sleep =
+      (fun delay_s ->
+        if delay_s > 0.0 then
+          match Eio_context.get_clock_opt () with
+          | Some clock -> Eio.Time.sleep clock delay_s
+          | None -> ());
+    on_event =
+      (fun event ->
+        Log.Keeper.warn "keeper:%s post-turn resilience event: %s"
+          meta.name (resilience_execution_event_to_string event));
+    apply_fallback =
+      (fun ~value ~confidence_delta ->
+        let detail =
+          Printf.sprintf
+            "post-turn resilience fallback has no typed target \
+             (value=%s confidence_delta=%.3f); paused for operator recovery"
+            (short_resilience_detail value) confidence_delta
+        in
+        Error
+          (fail_and_pause ~code:"resilience_fallback_unbound" ~detail));
+    request_handoff =
+      (fun ~message ~preserve_state ->
+        let detail =
+          Printf.sprintf
+            "post-turn resilience handoff requested preserve_state=%b: %s"
+            preserve_state message
+        in
+        pause_for_operator ~code:"resilience_handoff" ~detail);
+    abort =
+      (fun ~reason ->
+        let detail =
+          Printf.sprintf
+            "post-turn resilience abort requested: %s"
+            reason
+        in
+        pause_for_operator ~code:"resilience_abort" ~detail);
+  }
+
+let post_turn_resilience_handles
+    ~(config : Coord.config)
+    ~(meta : keeper_meta) : post_turn_resilience_handles =
+  let paused_meta = ref None in
+  let sync_lifecycle_meta lifecycle =
+    match !paused_meta with
+    | None -> lifecycle
+    | Some paused ->
+        { lifecycle with
+          updated_meta =
+            { lifecycle.updated_meta with
+              paused = paused.paused;
+              updated_at = paused.updated_at;
+              auto_resume_after_sec = paused.auto_resume_after_sec;
+            };
+        }
+  in
+  if not (Resilience.Keeper_bridge.masc_resilience_enabled ()) then
+    {
+      resilience_audit_store = None;
+      resilience_strategy_executor = None;
+      sync_lifecycle_meta;
+    }
+  else
+    match
+      (try
+         Ok
+           (Shared_audit.Store.create
+              ~base_dir:(resilience_audit_dir ~config ~keeper_name:meta.name))
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn -> Error (Printexc.to_string exn))
+    with
+    | Error detail ->
+        Prometheus.inc_counter Prometheus.metric_keeper_oas_execution_errors
+          ~labels:[("keeper", meta.name); ("phase", "resilience_audit_store")]
+          ();
+        Log.Keeper.error
+          "keeper:%s resilience audit store unavailable; execution disabled: %s"
+          meta.name detail;
+        {
+          resilience_audit_store = None;
+          resilience_strategy_executor = None;
+          sync_lifecycle_meta;
+        }
+    | Ok audit_store ->
+        let executor =
+          make_post_turn_resilience_executor ~config ~meta
+            ~on_paused:(fun meta -> paused_meta := Some meta)
+        in
+        {
+          resilience_audit_store = Some audit_store;
+          resilience_strategy_executor = Some executor;
+          sync_lifecycle_meta;
+        }
+
 let enqueue_partial_commit_continue_gate
     ~(config : Coord.config)
     ~(meta : keeper_meta)
@@ -635,6 +799,7 @@ let enqueue_partial_commit_continue_gate
     ~tool_name:"keeper_continue_after_partial_commit"
     ~input
     ~risk_level:Keeper_approval_queue.Critical
+    ~base_path:config.base_path
     ~on_resolution:(fun decision ->
       let latest_meta = current_keeper_meta ~config ~fallback_meta:meta in
       match decision with

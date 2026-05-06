@@ -245,9 +245,6 @@ let test_turn_context_fields_stored () =
     Alcotest.(check (option string)) "network_mode field"
       (Some "inherit")
       (Safe_ops.json_string_opt "network_mode" entry);
-    Alcotest.(check (option string)) "shared_memory_scope field"
-      (Some "team")
-      (Safe_ops.json_string_opt "shared_memory_scope" entry);
     Alcotest.(check (option string)) "approval_mode field"
       (Some "manual")
       (Safe_ops.json_string_opt "approval_mode" entry);

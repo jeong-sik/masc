@@ -197,9 +197,12 @@ let oas_descriptor_of_masc_tool name =
   in
   Option.map descriptor_of_permission (oas_permission_of_masc_tool name)
 
-(** Create an OAS [Tool.t] from a MASC tool schema and a handler function.
+let to_oas_typed_result (tr : Tool_result.t) : Agent_sdk.Types.tool_result =
+  to_oas_tool_result (tr.success, Tool_result.message tr)
 
-    [handler] receives raw JSON args and returns MASC [(bool * string)].
+(** Create an OAS [Tool.t] from a MASC tool schema and a typed handler.
+
+    [handler] receives raw JSON args and returns a {!Tool_result.t}.
     The bridge converts the result to OAS [tool_result] automatically.
 
     {[
@@ -214,7 +217,6 @@ let oas_tool_of_masc ~name ~description ~input_schema
   let parameters = params_of_json_schema input_schema in
   let descriptor = oas_descriptor_of_masc_tool name in
   let oas_handler json_args =
-    let success, msg = handler json_args in
-    to_oas_tool_result (success, msg)
+    to_oas_typed_result (handler json_args)
   in
   Agent_sdk.Tool.create ?descriptor ~name ~description ~parameters oas_handler

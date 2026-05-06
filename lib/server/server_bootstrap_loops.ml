@@ -39,8 +39,62 @@ let autoboot_proactive_warmup_sec ~base_warmup ~stagger_window_sec ~keeper_name 
     base_warmup
     + (stable_keeper_name_hash keeper_name mod (stagger_window_sec + 1))
 
+let board_sse_event_params event =
+  match event with
+  | Board_dispatch.Post_created { post_id; author; title; content; post_kind; hearth } ->
+      let preview =
+        if String.length content > 200 then String.sub content 0 200
+        else content
+      in
+      let base = [("type", `String "post_created");
+                  ("event_type", `String "post.created");
+                  ("post_id", `String post_id);
+                  ("author", `String author);
+                  ("author_identity", Server_utils.board_actor_identity_json author);
+                  ("title", `String title);
+                  ("content", `String preview);
+                  ("post_kind", `String (Board.post_kind_to_string post_kind))] in
+      `Assoc (match hearth with
+              | Some h -> ("hearth", `String h) :: base
+              | None -> base)
+  | Board_dispatch.Comment_added { post_id; comment_id; author } ->
+      `Assoc [("type", `String "comment_added");
+              ("event_type", `String "comment.created");
+              ("post_id", `String post_id);
+              ("comment_id", `String comment_id);
+              ("author", `String author);
+              ("author_identity", Server_utils.board_actor_identity_json author)]
+  | Board_dispatch.Post_voted { post_id; voter; direction } ->
+      let dir = Board_votes.vote_direction_to_string direction in
+      `Assoc [("type", `String "post_voted");
+              ("event_type", `String "vote.changed");
+              ("target_type", `String "post");
+              ("post_id", `String post_id);
+              ("voter", `String voter);
+              ("voter_identity", Server_utils.board_actor_identity_json voter);
+              ("direction", `String dir)]
+  | Board_dispatch.Comment_voted { comment_id; voter; direction } ->
+      let dir = Board_votes.vote_direction_to_string direction in
+      `Assoc [("type", `String "comment_voted");
+              ("event_type", `String "vote.changed");
+              ("target_type", `String "comment");
+              ("comment_id", `String comment_id);
+              ("voter", `String voter);
+              ("voter_identity", Server_utils.board_actor_identity_json voter);
+              ("direction", `String dir)]
+  | Board_dispatch.Reaction_changed { target_type; target_id; user_id; emoji; reacted } ->
+      `Assoc [("type", `String "reaction_changed");
+              ("event_type", `String "reaction.changed");
+              ("target_type", `String (Board.reaction_target_type_to_string target_type));
+              ("target_id", `String target_id);
+              ("user_id", `String user_id);
+              ("user_identity", Server_utils.board_actor_identity_json user_id);
+              ("emoji", `String emoji);
+              ("reacted", `Bool reacted)]
+
 module For_testing = struct
   let autoboot_proactive_warmup_sec = autoboot_proactive_warmup_sec
+  let board_sse_event_params = board_sse_event_params
 end
 
 let filteri_with_fair_yield f xs =
@@ -341,51 +395,7 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       ~config:state.room_config
       signal);
   Board_dispatch.set_board_sse_hook (fun event ->
-    let params = match event with
-      | Board_dispatch.Post_created { post_id; author; title; content; post_kind; hearth } ->
-          let preview =
-            if String.length content > 200 then String.sub content 0 200
-            else content
-          in
-          let base = [("type", `String "post_created");
-                      ("post_id", `String post_id);
-                      ("author", `String author);
-                      ("author_identity", Server_utils.board_actor_identity_json author);
-                      ("title", `String title);
-                      ("content", `String preview);
-                      ("post_kind", `String (Board.post_kind_to_string post_kind))] in
-          `Assoc (match hearth with
-                  | Some h -> ("hearth", `String h) :: base
-                  | None -> base)
-      | Board_dispatch.Comment_added { post_id; comment_id; author } ->
-          `Assoc [("type", `String "comment_added");
-                  ("post_id", `String post_id);
-                  ("comment_id", `String comment_id);
-                  ("author", `String author);
-                  ("author_identity", Server_utils.board_actor_identity_json author)]
-      | Board_dispatch.Post_voted { post_id; voter; direction } ->
-          let dir = Board_votes.vote_direction_to_string direction in
-          `Assoc [("type", `String "post_voted");
-                  ("post_id", `String post_id);
-                  ("voter", `String voter);
-                  ("voter_identity", Server_utils.board_actor_identity_json voter);
-                  ("direction", `String dir)]
-      | Board_dispatch.Comment_voted { comment_id; voter; direction } ->
-          let dir = Board_votes.vote_direction_to_string direction in
-          `Assoc [("type", `String "comment_voted");
-                  ("comment_id", `String comment_id);
-                  ("voter", `String voter);
-                  ("voter_identity", Server_utils.board_actor_identity_json voter);
-                  ("direction", `String dir)]
-      | Board_dispatch.Reaction_changed { target_type; target_id; user_id; emoji; reacted } ->
-          `Assoc [("type", `String "reaction_changed");
-                  ("target_type", `String (Board.reaction_target_type_to_string target_type));
-                  ("target_id", `String target_id);
-                  ("user_id", `String user_id);
-                  ("user_identity", Server_utils.board_actor_identity_json user_id);
-                  ("emoji", `String emoji);
-                  ("reacted", `Bool reacted)]
-    in
+    let params = board_sse_event_params event in
     Sse.broadcast (`Assoc [
       ("jsonrpc", `String "2.0");
       ("method", `String "notifications/board");
@@ -503,7 +513,8 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
         []
   in
   let make_judge_dispatch ~actor ~(name : string) ~(args : Yojson.Safe.t)
-      : bool * string =
+      : Tool_result.t =
+    let start_time = Time_compat.now () in
     let config = state.room_config in
     let agent_name = actor in
     let ctx_room : Tool_coord.context = { config; agent_name } in
@@ -512,19 +523,30 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
     match name with
     | "masc_status" -> (
         match Tool_coord.dispatch ctx_room ~name ~args with
-        | Some { Coord_types.success; message } -> (success, message)
-        | None -> (false, "masc_status: dispatch failed"))
+        | Some { Coord_types.success; message } ->
+            Tool_result.wrap ~tool_name:name ~start_time (success, message)
+        | None ->
+            Tool_result.wrap ~tool_name:name ~start_time
+              (false, "masc_status: dispatch failed"))
     | "masc_tasks" -> (
         match Tool_task.dispatch ctx_task ~name ~args with
-        | Some result -> result
-        | None -> (false, "masc_tasks: dispatch failed"))
+        | Some result ->
+            Tool_result.wrap ~tool_name:name ~start_time result
+        | None ->
+            Tool_result.wrap ~tool_name:name ~start_time
+              (false, "masc_tasks: dispatch failed"))
     | "masc_agents" -> (
         match Tool_agent.dispatch ctx_agent ~name ~args with
-        | Some result -> result
-        | None -> (false, "masc_agents: dispatch failed"))
+        | Some result ->
+            Tool_result.wrap ~tool_name:name ~start_time result
+        | None ->
+            Tool_result.wrap ~tool_name:name ~start_time
+              (false, "masc_agents: dispatch failed"))
     | "masc_board_list" ->
         Tool_board.handle_tool name args
-    | _ -> (false, Printf.sprintf "judge: tool '%s' not allowed" name)
+    | _ ->
+        Tool_result.wrap ~tool_name:name ~start_time
+          (false, Printf.sprintf "judge: tool '%s' not allowed" name)
   in
   let governance_judge_dispatch = make_judge_dispatch ~actor:"governance-judge" in
   let operator_judge_dispatch = make_judge_dispatch ~actor:"operator-judge" in

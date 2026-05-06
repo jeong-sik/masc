@@ -67,6 +67,9 @@ let github_guard_fragments =
     "tool call failed";
     "gh_auth: failed";
     "could not determine repository";
+    "state must be one of open, closed, merged, all";
+    "pr_number is required";
+    "keeper_pr_create is draft-only";
   ]
 
 let voice_guard_fragments =
@@ -337,6 +340,18 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
           ("reply", `String "tool matrix reply");
           ("repo", `String "owner/tool-matrix");
         ]
+  | "keeper_pr_list" ->
+      `Assoc [ ("repo", `String "owner/tool-matrix"); ("state", `String "invalid") ]
+  | "keeper_pr_status" ->
+      `Assoc [ ("repo", `String "owner/tool-matrix"); ("pr_number", `Int 0) ]
+  | "keeper_pr_create" ->
+      `Assoc
+        [
+          ("repo", `String "owner/tool-matrix");
+          ("title", `String "tool matrix draft PR");
+          ("body", `String "tool matrix draft PR body");
+          ("draft", `Bool false);
+        ]
   | "keeper_preflight_check" -> `Assoc []
   | "keeper_stay_silent" ->
       `Assoc [ ("reason", `String "tool matrix silence") ]
@@ -360,6 +375,9 @@ let keeper_expectation_for_name name =
   | "keeper_pr_review_read"
   | "keeper_pr_review_comment"
   | "keeper_pr_review_reply"
+  | "keeper_pr_list"
+  | "keeper_pr_status"
+  | "keeper_pr_create"
   | "keeper_preflight_check" ->
       Expect_success_or_guard github_guard_fragments
   | "keeper_task_done" ->
@@ -388,10 +406,6 @@ let extra_guard_fragments_for_name = function
       [ "agent_name must match the authenticated agent";
         "no credential found" ]
   | "masc_auth_revoke" -> [ "no credential found" ]
-  | "masc_team_memory_read"
-  | "masc_team_memory_search"
-  | "masc_team_memory_write" ->
-      [ "keeper-only"; "not a keeper agent" ]
   | "masc_autoresearch_cycle"
   | "masc_autoresearch_inject"
   | "masc_autoresearch_status"

@@ -21,6 +21,8 @@ const SHIKI_LANG_ALIASES: Record<string, string> = {
   zsh: 'bash',
   yml: 'yaml',
   md: 'markdown',
+  ml: 'ocaml',
+  mli: 'ocaml',
 }
 const SHIKI_LANG_LOADERS: Record<string, ShikiLanguageLoader> = {
   bash: () => import('shiki/langs/bash.mjs'),

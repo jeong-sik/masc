@@ -4,6 +4,7 @@ import {
   streamKeeperShell,
   type KeeperShellStreamEvent,
 } from '../../api/keeper-shell'
+import { Terminal, type TerminalLine } from '../common/terminal'
 
 const MAX_TERMINAL_LINES = 5000
 
@@ -55,14 +56,14 @@ function appendLines(current: ShellLine[], next: ShellLine[]): ShellLine[] {
   return [...current, ...next].slice(-MAX_TERMINAL_LINES)
 }
 
-function lineClass(stream: ShellLine['stream']): string {
-  switch (stream) {
+function toTerminalLine(line: ShellLine): TerminalLine {
+  switch (line.stream) {
     case 'stderr':
-      return 'term-line is-err'
+      return { text: line.text, tone: 'err' }
     case 'meta':
-      return 'term-line is-meta'
+      return { text: line.text, tone: 'meta' }
     default:
-      return 'term-line is-out'
+      return { text: line.text, tone: 'out' }
   }
 }
 
@@ -72,6 +73,7 @@ export function KeeperShellDrawer({ keeperName }: KeeperShellDrawerProps) {
   const [status, setStatus] = useState<'idle' | 'streaming' | 'closed' | 'error'>('idle')
   const [taskId, setTaskId] = useState<string | null>(null)
   const viewportRef = useRef<HTMLDivElement | null>(null)
+  const terminalLines = useMemo(() => lines.map(toTerminalLine), [lines])
 
   const prefersReducedMotion = useMemo(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
@@ -138,21 +140,15 @@ export function KeeperShellDrawer({ keeperName }: KeeperShellDrawerProps) {
           : null}
         <span class="ml-auto text-[var(--color-fg-muted)]">${status}</span>
       </div>
-      <div
-        ref=${viewportRef}
-        class="h-[260px] overflow-auto bg-[var(--color-bg-page)] px-3 py-2 font-mono text-xs leading-relaxed"
-        role="log"
-        aria-live="polite"
-        aria-atomic="false"
-      >
-        ${lines.length === 0
-          ? html`<div class="term-line is-meta">waiting for keeper shell output</div>`
-          : lines.map(
-              (line, index) => html`
-                <div key=${index} class=${lineClass(line.stream)}>${line.text}</div>
-              `,
-            )}
-      </div>
+      <${Terminal}
+        lines=${terminalLines}
+        prompt=${status === 'streaming' ? `${keeper || 'keeper'}:$ ` : ''}
+        testId="keeper-shell-terminal"
+        ariaLabel="Keeper shell terminal"
+        emptyText="waiting for keeper shell output"
+        className="h-[260px] overflow-auto bg-[var(--color-bg-page)] px-3 py-2 font-mono text-xs leading-relaxed"
+        viewportRef=${viewportRef}
+      />
     </aside>
   `
 }

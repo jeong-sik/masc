@@ -150,9 +150,6 @@ let test_permissions_promoted_to_metadata_ssot () =
       ("masc_agent_card", Masc_domain.CanReadState);
       ("masc_heartbeat", Masc_domain.CanBroadcast);
       ("masc_config", Masc_domain.CanReadState);
-      ("masc_team_memory_read", Masc_domain.CanReadState);
-      ("masc_team_memory_search", Masc_domain.CanReadState);
-      ("masc_team_memory_write", Masc_domain.CanBroadcast);
       ("masc_tool_list", Masc_domain.CanReadState);
       ("masc_tool_admin_snapshot", Masc_domain.CanAdmin);
       ("masc_runtime_verify", Masc_domain.CanReadState);

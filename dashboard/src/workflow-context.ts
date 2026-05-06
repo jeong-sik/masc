@@ -96,7 +96,7 @@ function initialContext(): DashboardWorkflowContext | null {
   return null
 }
 
-export const dashboardWorkflowContext = signal<DashboardWorkflowContext | null>(initialContext())
+const dashboardWorkflowContext = signal<DashboardWorkflowContext | null>(initialContext())
 
 export function extractActionPayload(
   action?: OperatorRecommendedAction | null,

@@ -1595,14 +1595,25 @@ let keeper_config_json (config : Coord.config) (name : string)
       let runtime_trust =
         Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta:m
       in
+      let git_clone_allowed_orgs =
+        Keeper_tool_policy.git_clone_allowed_orgs ()
+      in
+      let git_clone_denied_repos =
+        Keeper_tool_policy.git_clone_denied_repos ()
+      in
+      let git_clone_policy_loaded =
+        Option.is_some git_clone_allowed_orgs
+        && Option.is_some git_clone_denied_repos
+      in
       let effective_system_prompt =
         Keeper_prompt.build_keeper_system_prompt
           ~goal:m.goal ~short_goal:m.short_goal ~mid_goal:m.mid_goal
           ~long_goal:m.long_goal ~will:m.will
           ~needs:m.needs ~desires:m.desires ~instructions:m.instructions
           ~persona_extended ~keeper_name:m.name
-          ~allowed_orgs:(Option.value (Keeper_tool_policy.git_clone_allowed_orgs ()) ~default:[])
-          ~denied_repos:(Option.value (Keeper_tool_policy.git_clone_denied_repos ()) ~default:[])
+          ~allowed_orgs:(Option.value git_clone_allowed_orgs ~default:[])
+          ~denied_repos:(Option.value git_clone_denied_repos ~default:[])
+          ~git_clone_policy_loaded
           ~active_goals
           ()
       in

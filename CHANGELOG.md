@@ -1,6 +1,16 @@
 # Changelog
 
 
+## [0.19.16] - 2026-05-07
+
+### Added
+- `lib/alignment_score.{ml,mli}`: backend OCaml implementation of Master Report section 3.3 Alignment Score (AS) formula - Dim03 P2 first slice. 10 raw metrics (TRC/COV/CMP/CRN/DBT/TMP/DIR/COH/BND/CNF), default weights summing to 1.0, normalization with 5 distinct patterns (linear, distance-from-1, complement, midpoint, complement-with-clamp), 5-step grade A/B/C/D/F, 5 warning flags. JSON codec with stable keys for the dashboard score panel. Pure OCaml, no Eio, no I/O. RFC-0035 PR-6.
+- `test/test_alignment_score.ml`: 16 alcotest cases covering weights-sum invariant, overweight custom-weight clamping, ideal-metrics -> 100/A/no-warnings, worst-metrics -> low/F, rounded displayed-score grade consistency, normalization on each axis, out-of-range clamping, grade boundaries (90/75/60/40), floating precision at grade boundaries, all 5 warnings, no false warnings on ideal, and JSON-shape contract.
+
+### Fixed (vs Master Report TS reference)
+- `normalized.TMP > 150 -> Behind_schedule` was structurally impossible (normalized cap is 100); replaced with raw `tmp > 1.5`.
+- `normalized.DBT > 50 -> High_debt` had inverted semantics (normalized.DBT large = low debt); replaced with raw `dbt > 0.5`.
+
 ## [0.19.15] - 2026-05-07
 
 ### Added

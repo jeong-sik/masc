@@ -1306,6 +1306,11 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertFalse(report["validated"])
         self.assertEqual(report["corpus_status"], "INCOMPLETE")
         self.assertEqual(report["row_count"], 0)
+        self.assertTrue(report["looks_like_source_row_candidate_inventory"])
+        self.assertIn(
+            "source_row_candidate_inventory_is_not_strict_corpus",
+            report["errors"],
+        )
         self.assertIn("corpus_id_missing", report["errors"])
         self.assertIn("findings_must_be_list", report["errors"])
         self.assertIn("findings_count_mismatch", report["errors"])

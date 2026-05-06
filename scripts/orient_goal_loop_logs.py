@@ -271,6 +271,12 @@ def validate_strict_row_corpus(
     expected_total = strict_row_corpus.get("expected_findings_total")
     findings_raw = strict_row_corpus.get("findings")
     findings = findings_raw if isinstance(findings_raw, list) else []
+    looks_like_source_row_candidate_inventory = (
+        strict_row_corpus.get("inventory_id")
+        == "goal-loop-explicit-source-row-candidates-v1"
+        or "candidate_rows" in strict_row_corpus
+        or "source_candidate_coverage" in strict_row_corpus
+    )
     catalog_id = catalog.get("catalog_id") if isinstance(catalog, dict) else None
     catalog_expected_total = (
         catalog.get("expected_findings_total") if isinstance(catalog, dict) else None
@@ -293,6 +299,8 @@ def validate_strict_row_corpus(
 
     if schema_version != 1:
         errors.append("schema_version_must_be_1")
+    if looks_like_source_row_candidate_inventory:
+        errors.append("source_row_candidate_inventory_is_not_strict_corpus")
     if not isinstance(corpus_id, str) or not corpus_id:
         errors.append("corpus_id_missing")
     if not isinstance(source_catalog_id, str) or not source_catalog_id:
@@ -484,6 +492,9 @@ def validate_strict_row_corpus(
         "row_count": len(findings),
         "row_count_matches_expected": isinstance(expected_total, int)
         and len(findings) == expected_total,
+        "looks_like_source_row_candidate_inventory": (
+            looks_like_source_row_candidate_inventory
+        ),
         "unique_finding_ids": len(seen_ids),
         "duplicate_finding_ids": sorted(set(duplicate_ids))[
             :STRICT_ROW_CORPUS_ERROR_LIMIT

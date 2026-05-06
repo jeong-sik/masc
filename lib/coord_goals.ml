@@ -78,6 +78,7 @@ let make_type_field_error ~field ~constraint_violated ~expected ~received =
 let parse_optional_horizon args field =
   match Yojson.Safe.Util.member field args with
   | `Null -> Ok None
+  | `String raw when String.trim raw = "" -> Ok None
   | `String raw -> (
       match Goal_store.parse_horizon (Some raw) with
       | Some horizon -> Ok (Some horizon)
@@ -94,6 +95,7 @@ let parse_optional_horizon args field =
 let parse_optional_goal_status args field =
   match Yojson.Safe.Util.member field args with
   | `Null -> Ok None
+  | `String raw when String.trim raw = "" -> Ok None
   | `String raw -> (
       match Goal_store.parse_goal_status (Some raw) with
       | Some status -> Ok (Some status)
@@ -110,6 +112,7 @@ let parse_optional_goal_status args field =
 let parse_optional_goal_phase args field =
   match Yojson.Safe.Util.member field args with
   | `Null -> Ok None
+  | `String raw when String.trim raw = "" -> Ok None
   | `String raw -> (
       match Goal_store.parse_goal_phase (Some raw) with
       | Some phase -> Ok (Some phase)
@@ -132,6 +135,7 @@ let goal_upsert_lifecycle_error field =
 let parse_optional_review_outcome args field =
   match Yojson.Safe.Util.member field args with
   | `Null -> Ok None
+  | `String raw when String.trim raw = "" -> Ok None
   | `String raw -> (
       match Goal_store.parse_review_outcome raw with
       | Some outcome -> Ok (Some outcome)

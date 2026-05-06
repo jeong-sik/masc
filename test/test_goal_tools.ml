@@ -182,6 +182,29 @@ let test_goal_list_filters_by_phase () =
         (get_string_field goal_json "phase")
   | _ -> fail "expected one filtered goal"
 
+let test_goal_list_ignores_blank_optional_filters () =
+  with_room @@ fun config ->
+  (match Goal_store.upsert_goal config ~title:"Blank filter goal" () with
+   | Ok _ -> ()
+   | Error msg -> fail msg);
+  let listed =
+    Tool_coord.dispatch (coord_ctx config) ~name:"masc_goal_list"
+      ~args:
+        (`Assoc
+          [
+            ("horizon", `String "");
+            ("phase", `String "");
+            ("status", `String "");
+          ])
+  in
+  let listed_json =
+    match listed with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_list not handled"
+  in
+  check int "blank filters are ignored" 1
+    (Yojson.Safe.Util.member "count" listed_json |> Yojson.Safe.Util.to_int)
+
 let test_goal_upsert_rejects_lifecycle_fields () =
   with_room @@ fun config ->
   let rejected_phase =
@@ -709,6 +732,8 @@ let () =
         [
           test_case "upsert and list" `Quick test_goal_upsert_and_list;
           test_case "list filters by phase" `Quick test_goal_list_filters_by_phase;
+          test_case "list ignores blank optional filters" `Quick
+            test_goal_list_ignores_blank_optional_filters;
           test_case "upsert rejects lifecycle fields" `Quick
             test_goal_upsert_rejects_lifecycle_fields;
           test_case "review updates status" `Quick test_goal_review_updates_status;

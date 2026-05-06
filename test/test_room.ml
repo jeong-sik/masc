@@ -344,6 +344,32 @@ let with_test_env f =
     Unix.rmdir tmp_dir;
     raise e
 
+let test_lifecycle_messages_are_typed () =
+  with_test_env (fun config ->
+    let join_result = Coord.join config ~agent_name:"gemini" ~capabilities:[] () in
+    Alcotest.(check bool) "join success" true
+      (str_contains join_result "joined");
+    let leave_result = Coord.leave config ~agent_name:"gemini" in
+    Alcotest.(check bool) "leave success" true (str_contains leave_result "left");
+    ignore (Coord.join config ~agent_name:"gemini" ~capabilities:[] ());
+
+    let messages = Coord.get_all_messages_raw config ~since_seq:0 in
+    let has_msg_type msg_type =
+      List.exists
+        (fun (message : Types.message) -> String.equal message.msg_type msg_type)
+        messages
+    in
+    Alcotest.(check bool) "join typed" true (has_msg_type "lifecycle_join");
+    Alcotest.(check bool) "leave typed" true (has_msg_type "lifecycle_leave");
+    Alcotest.(check bool) "rejoin typed" true (has_msg_type "lifecycle_rejoin");
+    Alcotest.(check bool) "lifecycle pings not plain broadcasts" false
+      (List.exists
+         (fun (message : Types.message) ->
+           String.equal message.msg_type "broadcast"
+           && str_contains message.content "namespace")
+         messages)
+  )
+
 let with_memory_test_env f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1109,6 +1135,29 @@ let test_xss_in_agent_name () =
     Alcotest.(check bool) "agent registered" true (List.length state.active_agents > 0)
   )
 
+let test_xss_in_message_type () =
+  with_test_env (fun config ->
+    ignore (Coord.join config ~agent_name:"tester" ~capabilities:[] ());
+    let xss_msg_type = "<script>alert('xss')</script>" in
+    ignore
+      (Coord.broadcast config ~from_agent:"tester" ~msg_type:xss_msg_type
+         ~content:"hello");
+    let messages = Coord.get_all_messages_raw config ~since_seq:0 in
+    let msg_type =
+      match
+        List.find_opt
+          (fun (message : Types.message) -> String.equal message.content "hello")
+          messages
+      with
+      | Some message -> message.msg_type
+      | None -> Alcotest.fail "broadcast message not found"
+    in
+    Alcotest.(check bool) "msg_type raw script removed" false
+      (str_contains msg_type "<script>" || str_contains msg_type "</script>");
+    Alcotest.(check bool) "msg_type escaped" true
+      (str_contains msg_type "&lt;script&gt;")
+  )
+
 (* === Board Admin Tests === *)
 
 (* Use 3-part nicknames so join() preserves them as-is
@@ -1548,6 +1597,8 @@ let () =
     ];
     "messages", [
       Alcotest.test_case "broadcast" `Quick test_broadcast_message;
+      Alcotest.test_case "lifecycle messages are typed" `Quick
+        test_lifecycle_messages_are_typed;
     ];
     "worktree", [
       Alcotest.test_case "list no git" `Quick test_worktree_list_no_git;
@@ -1684,6 +1735,7 @@ let () =
     "security", [
       Alcotest.test_case "xss in message" `Quick test_xss_in_message;
       Alcotest.test_case "xss in agent name" `Quick test_xss_in_agent_name;
+      Alcotest.test_case "xss in message type" `Quick test_xss_in_message_type;
     ];
 
     (* === Board Admin Tests === *)

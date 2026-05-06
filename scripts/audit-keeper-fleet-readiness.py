@@ -49,9 +49,6 @@ PR_REVIEW_MUTATION_TOOLS = {
 PR_CREATE_TOOLS = {
     "keeper_pr_create",
 }
-GIT_PUSH_TOOLS = {
-    "masc_code_git",
-}
 SHELL_TOOLS = {
     "keeper_bash",
     "keeper_shell",
@@ -230,6 +227,11 @@ def row_success(row: dict[str, Any]) -> bool:
     return outcome == "success"
 
 
+def bool_field(row: dict[str, Any], key: str) -> bool:
+    value = row.get(key)
+    return value if isinstance(value, bool) else False
+
+
 def tool_succeeded_in_row(row: dict[str, Any], tool_name: str) -> bool:
     if row.get("tool") == tool_name:
         return row.get("ok") is True
@@ -267,18 +269,23 @@ def normalized_marker(value: Any) -> str | None:
 def structured_markers(row: dict[str, Any]) -> set[str]:
     markers: set[str] = set()
 
-    def add_value(value: Any) -> None:
+    def add_marker(value: Any) -> None:
         marker = normalized_marker(value)
         if marker is not None:
             markers.add(marker)
+
+    def add_key_value(key: str, value: Any) -> None:
+        marker = normalized_marker(value)
+        if marker is not None:
+            markers.add(f"{key}={marker}")
 
     for key in MARKER_LIST_FIELDS:
         value = row.get(key)
         if isinstance(value, list):
             for item in value:
-                add_value(item)
+                add_marker(item)
         else:
-            add_value(value)
+            add_marker(value)
 
     for key in MARKER_OBJECT_FIELDS:
         value = row.get(key)
@@ -287,11 +294,19 @@ def structured_markers(row: dict[str, Any]) -> set[str]:
                 nested = value.get(marker_key)
                 if isinstance(nested, list):
                     for item in nested:
-                        add_value(item)
+                        add_marker(item)
                 else:
-                    add_value(nested)
-            for scalar_key in ("action", "event", "op", "sandbox_profile", "via"):
-                add_value(value.get(scalar_key))
+                    add_marker(nested)
+            for scalar_key in (
+                "action",
+                "event",
+                "execution_via",
+                "op",
+                "route_via",
+                "sandbox_profile",
+                "via",
+            ):
+                add_key_value(f"{key}.{scalar_key}", value.get(scalar_key))
 
     for key in (
         "action",
@@ -303,7 +318,7 @@ def structured_markers(row: dict[str, Any]) -> set[str]:
         "tool_action",
         "via",
     ):
-        add_value(row.get(key))
+        add_key_value(key, row.get(key))
 
     return markers
 
@@ -317,11 +332,6 @@ def marker_matches(markers: set[str], *needles: str) -> bool:
     return False
 
 
-def has_git_push_marker(row: dict[str, Any]) -> bool:
-    markers = structured_markers(row)
-    return marker_matches(markers, "git_push", "action=push") or "push" in markers
-
-
 def has_gh_pr_create_marker(row: dict[str, Any]) -> bool:
     markers = structured_markers(row)
     return marker_matches(markers, "pr_create", "gh_pr_create")
@@ -329,12 +339,32 @@ def has_gh_pr_create_marker(row: dict[str, Any]) -> bool:
 
 def has_pr_approve_marker(row: dict[str, Any]) -> bool:
     markers = structured_markers(row)
-    return marker_matches(markers, "pr_approve", "approve") or "approve" in markers
+    return marker_matches(
+        markers,
+        "pr_approve",
+        "approve",
+        "action=approve",
+        "review_event=approve",
+    )
 
 
 def has_docker_execution_marker(row: dict[str, Any]) -> bool:
     markers = structured_markers(row)
-    return marker_matches(markers, "docker", "via=docker") or "docker" in markers
+    return marker_matches(
+        markers,
+        "execution_via=docker",
+        "metadata.execution_via=docker",
+        "metadata.route_via=docker",
+        "metadata.via=docker",
+        "route.execution_via=docker",
+        "route.route_via=docker",
+        "route.via=docker",
+        "route_via=docker",
+        "tool_metadata.execution_via=docker",
+        "tool_metadata.route_via=docker",
+        "tool_metadata.via=docker",
+        "via=docker",
+    )
 
 
 def pr_lifecycle_evidence_from_decision(
@@ -357,28 +387,69 @@ def pr_lifecycle_evidence_from_decision(
 
     if any(tool_succeeded_in_row(row, tool) for tool in PR_CREATE_TOOLS):
         add("pr_create:keeper_pr_create")
-    if any(
-        tool_succeeded_in_row(row, tool) for tool in GIT_PUSH_TOOLS
-    ) and has_git_push_marker(row):
-        add("git_push:masc_code_git")
+    tool = row.get("tool")
     if (
         row.get("event") == "tool_exec"
-        and row.get("tool") in SHELL_TOOLS
+        and isinstance(tool, str)
+        and tool in SHELL_TOOLS
         and row_success(row)
         and has_gh_pr_create_marker(row)
     ):
-        add(f"pr_create:{row['tool']}:gh_pr_create")
-    if (
-        row.get("event") == "tool_exec"
-        and row.get("tool") in SHELL_TOOLS
-        and row_success(row)
-        and has_git_push_marker(row)
-    ):
-        add(f"git_push:{row['tool']}:git_push")
+        add(f"pr_create:{tool}:gh_pr_create")
     if tool_succeeded_in_row(row, "keeper_pr_review_comment") and has_pr_approve_marker(
         row
     ):
         add("pr_approve:keeper_pr_review_comment")
+    return evidence, docker_evidence
+
+
+def metric_source(row: dict[str, Any]) -> str:
+    for key in ("pr_work_action_source", "tool_name", "tool"):
+        value = row.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return "pr_action_metrics"
+
+
+def tools_from_action_metric(row: dict[str, Any]) -> list[str]:
+    tools: list[str] = []
+    for key in ("pr_work_action_source", "tool_name", "tool"):
+        value = row.get(key)
+        if isinstance(value, str):
+            tools.append(value)
+    return tools
+
+
+def pr_lifecycle_evidence_from_action_metric(
+    row: dict[str, Any],
+) -> tuple[set[str], set[str]]:
+    evidence: set[str] = set()
+    docker_evidence: set[str] = set()
+    source = metric_source(row)
+
+    def add(item: str) -> None:
+        evidence.add(item)
+        if has_docker_execution_marker(row):
+            docker_evidence.add(item)
+
+    metric_event = row.get("metric_event")
+    if metric_event == "keeper_pr_work_action":
+        if not bool_field(row, "pr_work_action_success"):
+            return evidence, docker_evidence
+        action = row.get("pr_work_action")
+        if not isinstance(action, str):
+            return evidence, docker_evidence
+        match action.upper():
+            case "PR_CREATE":
+                add(f"pr_create:{source}")
+            case "GIT_PUSH":
+                add(f"git_push:{source}")
+    elif metric_event == "keeper_pr_review_action":
+        if not bool_field(row, "pr_review_action_success"):
+            return evidence, docker_evidence
+        action = row.get("pr_review_action")
+        if isinstance(action, str) and action.upper() == "APPROVE":
+            add(f"pr_approve:{source}")
     return evidence, docker_evidence
 
 
@@ -397,6 +468,13 @@ def decision_log_paths(base_path: Path, name: str) -> list[Path]:
     return [path for _, path in sorted(paths, key=lambda item: item[0])]
 
 
+def pr_action_metric_paths(base_path: Path, name: str) -> list[Path]:
+    metrics_dir = base_path / ".masc" / "keepers" / name / "pr-action-metrics"
+    if not metrics_dir.exists():
+        return []
+    return sorted(path for path in metrics_dir.rglob("*.jsonl") if path.is_file())
+
+
 def scan_keeper_evidence(
     base_path: Path, name: str
 ) -> tuple[float | None, set[str], set[str], set[str]]:
@@ -411,6 +489,17 @@ def scan_keeper_evidence(
                 latest_ts = ts if latest_ts is None else max(latest_ts, ts)
             tools.update(tools_from_decision(row))
             row_evidence, row_docker_evidence = pr_lifecycle_evidence_from_decision(row)
+            pr_lifecycle_evidence.update(row_evidence)
+            docker_pr_lifecycle_evidence.update(row_docker_evidence)
+    for metrics in pr_action_metric_paths(base_path, name):
+        for row in iter_jsonl(metrics):
+            ts = numeric_field(row, "ts_unix")
+            if ts is not None:
+                latest_ts = ts if latest_ts is None else max(latest_ts, ts)
+            tools.update(tools_from_action_metric(row))
+            row_evidence, row_docker_evidence = (
+                pr_lifecycle_evidence_from_action_metric(row)
+            )
             pr_lifecycle_evidence.update(row_evidence)
             docker_pr_lifecycle_evidence.update(row_docker_evidence)
     return latest_ts, tools, pr_lifecycle_evidence, docker_pr_lifecycle_evidence

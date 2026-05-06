@@ -114,6 +114,7 @@ _detect_subcommand() {
 }
 _subcommand="$(_detect_subcommand)"
 script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+dune_lock_warning_emitted=0
 
 _needs_dune_lock() {
   [[ "${GITHUB_ACTIONS:-}" != "true" ]] || return 1
@@ -135,6 +136,7 @@ if _needs_dune_lock; then
     exec flock "$lock_path" env MASC_DUNE_LOCK_HELD=1 "$script_path" "$@"
   else
     printf '[dune-local] warning: neither lockf nor flock found; running unlocked\n' >&2
+    dune_lock_warning_emitted=1
   fi
 fi
 
@@ -155,6 +157,11 @@ if _needs_opam_lock; then
     if [[ "${MASC_DUNE_LOCK_HELD:-0}" = "1" \
           && "${MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT:-60}" != "0" ]]; then
       opam_lock_timeout="${MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT:-60}"
+      if ! [[ "$opam_lock_timeout" =~ ^[0-9]+$ ]]; then
+        printf '[dune-local] invalid MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT=%q; expected non-negative integer seconds\n' \
+          "$opam_lock_timeout" >&2
+        exit 2
+      fi
       set +e
       lockf -k -t "$opam_lock_timeout" "$opam_lock_path" \
         env MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
@@ -163,15 +170,21 @@ if _needs_opam_lock; then
       if [[ "$status" -eq 0 ]]; then
         exit 0
       fi
-      printf '[dune-local] opam switch lock stayed busy for %ss after acquiring Dune lock; releasing Dune lock to avoid mixed lock-order deadlock\n' \
-        "$opam_lock_timeout" >&2
-      printf '[dune-local] retry after older dune-local invocations drain, or set MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT=0 to wait indefinitely\n' >&2
+      if [[ "$status" -eq 75 ]]; then
+        printf '[dune-local] opam switch lock stayed busy for %ss after acquiring Dune lock; releasing Dune lock to avoid mixed lock-order deadlock\n' \
+          "$opam_lock_timeout" >&2
+        printf '[dune-local] retry after older dune-local invocations drain, or set MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT=0 to wait indefinitely\n' >&2
+      fi
       exit "$status"
     fi
     exec lockf -k "$opam_lock_path" env MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
   elif command -v flock >/dev/null 2>&1; then
     exec flock "$opam_lock_path" env MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
-  else
+  elif [[ "${MASC_DUNE_LOCK_HELD:-0}" != "1" ]]; then
+    # Skip the warning when the Dune-lock branch above already emitted
+    # an equivalent "neither lockf nor flock found" message in this
+    # process. Without the guard, both paths print and operators see
+    # two warnings even though there is only one underlying problem.
     printf '[dune-local] warning: neither lockf nor flock found; opam switch checks are unlocked\n' >&2
   fi
 fi
@@ -308,5 +321,7 @@ if [[ "${GITHUB_ACTIONS:-}" = "true" \
   exec "${cmd[@]}"
 fi
 
-printf '[dune-local] warning: neither lockf nor flock found; running unlocked\n' >&2
+if [[ "$dune_lock_warning_emitted" -eq 0 ]]; then
+  printf '[dune-local] warning: neither lockf nor flock found; running unlocked\n' >&2
+fi
 exec "${cmd[@]}"

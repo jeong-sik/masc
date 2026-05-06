@@ -175,6 +175,29 @@ describe('GitGraphPanel', () => {
     expect(fallbackDirtyModel.statusLabel).toBe('1 dirty worktree')
   })
 
+  it('scopes checkout dirty status to the selected repo', () => {
+    const graph = makeGraph({
+      repos: [
+        makeRepo({ id: 'repo-1', dirty: false }),
+        makeRepo({ id: 'repo-2', dirty: true }),
+      ],
+      stats: {
+        repo_count: 2,
+        agent_count: 0,
+        branch_count: 0,
+        commit_count: 0,
+        dirty_count: 1,
+        conflict_count: 0,
+      },
+    })
+
+    const model = buildGitGraphContextModel(graph, graph.repos[0]!)
+
+    expect(model.tone).toBe('clean')
+    expect(model.statusLabel).toBe('clean')
+    expect(model.dirtyCount).toBe(0)
+  })
+
   it('compacts long worktree paths for lane labels', () => {
     expect(compactGitGraphPath('/workspace/masc-mcp/.worktrees/fix-git-context')).toBe('.worktrees/fix-git-context')
     expect(compactGitGraphPath('repo')).toBe('repo')

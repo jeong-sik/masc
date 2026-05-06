@@ -56,11 +56,11 @@ export function buildGitGraphContextModel(
   const repoNodes = graph.nodes.filter(node => node.repo_id === repo.id)
   const repoAgentIds = new Set(repoNodes.map(node => node.agent_id).filter((id): id is string => Boolean(id)))
   const conflictCount = repo.conflict_count
-  const dirtyCount = graph.stats.dirty_count
+  const dirtyCount = repo.dirty ? 1 : 0
   const dirtyStatusCount = dirtyCount > 0 ? dirtyCount : 1
   const tone: GitGraphContextTone =
     conflictCount > 0 ? 'conflict'
-      : repo.dirty || dirtyCount > 0 ? 'dirty'
+      : dirtyCount > 0 ? 'dirty'
         : 'clean'
 
   const statusLabel =

@@ -17,6 +17,8 @@ type tool_keeper_stat = {
   task_ids : string list;
   goal_ids : string list;
   latest_ts : float option;
+  latest_success_ts : float option;
+  latest_failure_ts : float option;
 }
 
 type mutable_tool_keeper_stat = {
@@ -30,6 +32,8 @@ type mutable_tool_keeper_stat = {
   task_ids : (string, unit) Hashtbl.t;
   goal_ids : (string, unit) Hashtbl.t;
   latest_ts : float option ref;
+  latest_success_ts : float option ref;
+  latest_failure_ts : float option ref;
 }
 
 let bool_field_opt record field =
@@ -133,6 +137,8 @@ let empty_mutable_stat () =
     task_ids = Hashtbl.create 8;
     goal_ids = Hashtbl.create 8;
     latest_ts = ref None;
+    latest_success_ts = ref None;
+    latest_failure_ts = ref None;
   }
 
 let update_latest latest ts =
@@ -167,7 +173,10 @@ let add_tool_stat table record =
     Option.iter (add_set stat.task_ids)
       (Safe_ops.json_string_opt "task_id" record);
     List.iter (add_set stat.goal_ids) (string_list_field record "goal_ids");
-    Option.iter (update_latest stat.latest_ts) (float_field_opt record "ts")
+    let ts = float_field_opt record "ts" in
+    Option.iter (update_latest stat.latest_ts) ts;
+    if ok then Option.iter (update_latest stat.latest_success_ts) ts
+    else Option.iter (update_latest stat.latest_failure_ts) ts
   | _ -> ()
 
 let materialize_tool_stat name stat =
@@ -190,6 +199,8 @@ let materialize_tool_stat name stat =
     task_ids = sorted_set stat.task_ids;
     goal_ids = sorted_set stat.goal_ids;
     latest_ts = !(stat.latest_ts);
+    latest_success_ts = !(stat.latest_success_ts);
+    latest_failure_ts = !(stat.latest_failure_ts);
   }
 
 let keeper_stats_by_tool ?window_hours ~n ~keeper_names () =
@@ -284,13 +295,13 @@ let string_list_json values =
   `List (List.map (fun value -> `String value) values)
 
 let stat_json (stat : tool_keeper_stat) =
-  let latest_fields =
-    match stat.latest_ts with
-    | None -> [("latest_ts", `Null); ("latest_at", `Null)]
+  let ts_fields key ts_opt =
+    match ts_opt with
+    | None -> [(key ^ "_ts", `Null); (key ^ "_at", `Null)]
     | Some ts ->
       [
-        ("latest_ts", `Float ts);
-        ("latest_at", `String (Masc_domain.iso8601_of_unix_seconds ts));
+        (key ^ "_ts", `Float ts);
+        (key ^ "_at", `String (Masc_domain.iso8601_of_unix_seconds ts));
       ]
   in
   `Assoc
@@ -307,7 +318,9 @@ let stat_json (stat : tool_keeper_stat) =
        ("task_ids", string_list_json stat.task_ids);
        ("goal_ids", string_list_json stat.goal_ids);
      ]
-     @ latest_fields)
+     @ ts_fields "latest" stat.latest_ts
+     @ ts_fields "latest_success" stat.latest_success_ts
+     @ ts_fields "latest_failure" stat.latest_failure_ts)
 
 let empty_stat_json tool =
   `Assoc [
@@ -324,6 +337,10 @@ let empty_stat_json tool =
     ("goal_ids", `List []);
     ("latest_ts", `Null);
     ("latest_at", `Null);
+    ("latest_success_ts", `Null);
+    ("latest_success_at", `Null);
+    ("latest_failure_ts", `Null);
+    ("latest_failure_at", `Null);
   ]
 
 let keeper_evidence_json

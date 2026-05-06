@@ -69,6 +69,24 @@ let tool_stat_json ?failure_classes stat =
 let tool_stat_of_keeper_stat (stat : Failure.tool_keeper_stat) =
   { name = stat.name; calls = stat.calls; success_pct = stat.success_pct }
 
+let latest_success_after_last_failure (stat : Failure.tool_keeper_stat) =
+  match stat.latest_success_ts with
+  | None -> false
+  | Some latest_success ->
+    (match stat.latest_failure_ts with
+     | None -> true
+     | Some latest_failure -> latest_success >= latest_failure)
+
+let accepts_latest_recovery (spec : Dashboard_keeper_feature_catalog.feature_spec) =
+  String.equal spec.id "approval_tools"
+
+let tool_stat_passes ~success_threshold_pct spec
+    (stat : Failure.tool_keeper_stat) =
+  stat.calls > 0
+  && (stat.success_pct >= success_threshold_pct
+      || (accepts_latest_recovery spec
+          && latest_success_after_last_failure stat))
+
 let uniq_sorted names =
   names
   |> List.filter (fun name -> String.trim name <> "")
@@ -412,8 +430,7 @@ let tool_feature_json
     |> List.fold_left (fun (passing, weak, missing) tool_name ->
       match Hashtbl.find_opt tool_stats tool_name with
       | Some (keeper_stat : Failure.tool_keeper_stat)
-        when keeper_stat.calls > 0
-             && keeper_stat.success_pct >= success_threshold_pct ->
+        when tool_stat_passes ~success_threshold_pct spec keeper_stat ->
         let stat = tool_stat_of_keeper_stat keeper_stat in
         (stat :: passing, weak, missing)
       | Some (keeper_stat : Failure.tool_keeper_stat) when keeper_stat.calls > 0 ->
@@ -438,10 +455,13 @@ let tool_feature_json
     ("summary",
      `String
        (Printf.sprintf
-          "%d/%d required tools meet %.1f%% success threshold; %d weak; %d missing"
+          "%d/%d required tools meet %.1f%% success threshold%s; %d weak; %d missing"
           (List.length passing)
           required_count
           success_threshold_pct
+          (if accepts_latest_recovery spec
+           then " or latest-success recovery"
+           else "")
           (List.length weak)
           (List.length missing)));
     ("required_tools", json_string_list spec.required_tools);

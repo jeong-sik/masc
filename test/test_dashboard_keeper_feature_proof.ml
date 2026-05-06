@@ -368,6 +368,37 @@ let test_operator_tool_calls_do_not_satisfy_keeper_tool_proof () =
     ["alpha"]
     (json_string_values "missing_keepers" (keeper_evidence "base_tools" json))
 
+let test_approval_latest_success_proves_recovery () =
+  with_store @@ fun config ->
+  ignore
+    (persist_keeper config ~name:"alpha" ~total_turns:3
+       ~autonomous_action_count:2 ~autonomous_tool_turn_count:2
+       ~board_reactive_turn_count:1 ~proactive_count_total:1);
+  for _ = 1 to 4 do
+    log_tool ~success:false "masc_approval_pending"
+  done;
+  log_tool "masc_approval_pending";
+  let json =
+    Dashboard_keeper_feature_proof.json
+      ~config
+      ~n:100
+      ~success_threshold_pct:80.0
+      ()
+  in
+  check string "latest success after failure proves approval readback" "pass"
+    (feature_status "approval_tools" json);
+  let evidence =
+    match keeper_evidence_tool "masc_approval_pending" "approval_tools" json with
+    | Some row -> row
+    | None -> fail "missing approval pending keeper evidence"
+  in
+  check (float 0.001) "success pct still records historical failures" 20.0
+    (Safe_ops.json_float ~default:0.0 "success_pct" evidence);
+  check bool "latest success timestamp exposed" true
+    (Safe_ops.json_float_opt "latest_success_ts" evidence <> None);
+  check bool "latest failure timestamp exposed" true
+    (Safe_ops.json_float_opt "latest_failure_ts" evidence <> None)
+
 let test_docker_git_pr_workflow_reports_partial_chain () =
   with_store @@ fun config ->
   ignore
@@ -496,6 +527,8 @@ let () =
             test_json_reports_feature_gaps;
           test_case "operator calls do not prove keeper tool use" `Quick
             test_operator_tool_calls_do_not_satisfy_keeper_tool_proof;
+          test_case "approval latest success proves recovery" `Quick
+            test_approval_latest_success_proves_recovery;
           test_case "Docker git PR workflow reports partial chain" `Quick
             test_docker_git_pr_workflow_reports_partial_chain;
           test_case "decision log counts as scheduled proof" `Quick

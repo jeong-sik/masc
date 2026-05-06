@@ -319,7 +319,14 @@ let board_reactive_feature snapshots =
     ~next_action:
       "Post board events and confirm every active keeper records board-reactive turns."
 
-let scheduled_proactive_feature ~config snapshots =
+let timestamp_within_window ?window_hours ~now ts =
+  ts > 0.0
+  &&
+  match window_hours with
+  | None -> true
+  | Some hours -> now -. ts <= hours *. 3600.0
+
+let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
   let decision_stats =
     snapshots
     |> List.map (fun snapshot ->
@@ -338,9 +345,18 @@ let scheduled_proactive_feature ~config snapshots =
       | None -> false)
   in
   let total = keeper_count enabled in
-  let has_scheduled_evidence snapshot meta =
+  let has_recent_meta_evidence meta =
     meta.Keeper_types.runtime.proactive_rt.count_total > 0
-    || (decision_stat_for snapshot.keeper_name).decision_count > 0
+    && timestamp_within_window ?window_hours ~now
+         meta.Keeper_types.runtime.proactive_rt.last_ts
+  in
+  let has_recent_decision_evidence snapshot =
+    match (decision_stat_for snapshot.keeper_name).latest_ts_unix with
+    | Some ts -> timestamp_within_window ?window_hours ~now ts
+    | None -> false
+  in
+  let has_scheduled_evidence snapshot meta =
+    has_recent_meta_evidence meta || has_recent_decision_evidence snapshot
   in
   let observed =
     enabled
@@ -373,9 +389,22 @@ let scheduled_proactive_feature ~config snapshots =
         | Some meta -> meta.Keeper_types.runtime.proactive_rt.count_total
         | None -> 0
       in
+      let meta_last_ts =
+        match snapshot.meta with
+        | Some meta -> meta.Keeper_types.runtime.proactive_rt.last_ts
+        | None -> 0.0
+      in
+      let meta_recent =
+        match snapshot.meta with
+        | Some meta -> has_recent_meta_evidence meta
+        | None -> false
+      in
       `Assoc [
         ("keeper", `String snapshot.keeper_name);
         ("meta_proactive_count_total", `Int meta_count);
+        ( "meta_last_proactive_ts",
+          if meta_last_ts > 0.0 then `Float meta_last_ts else `Null );
+        ("meta_evidence_within_window", `Bool meta_recent);
         ("decision_log", Decision.scheduled_evidence_json stat);
       ])
   in
@@ -386,8 +415,11 @@ let scheduled_proactive_feature ~config snapshots =
     ("summary",
      `String
        (Printf.sprintf
-          "%d/%d proactive-enabled keepers have scheduled proactive evidence"
-          (List.length observed) total));
+          "%d/%d proactive-enabled keepers have scheduled proactive evidence%s"
+          (List.length observed) total
+          (match window_hours with
+           | Some hours -> Printf.sprintf " in the last %.1fh" hours
+           | None -> "")));
     ("required_tools", `List []);
     ("passing_tools", `List []);
     ("weak_tools", `List []);
@@ -535,7 +567,7 @@ let json
       persistent_turn_exchange_feature ~config ~now snapshots;
       autonomous_tool_feature snapshots;
       board_reactive_feature snapshots;
-      scheduled_proactive_feature ~config snapshots;
+      scheduled_proactive_feature ~config ?window_hours ~now snapshots;
       Git_pr.json ~n ?window_hours ~keeper_names ();
     ]
     @ List.map

@@ -500,6 +500,7 @@
         test_dashboard_governance
         test_dashboard_labels
         test_dashboard_safe_autonomy
+        test_dashboard_keeper_feature_proof
         test_dashboard_surface_readiness
         test_activity_graph
         test_masc_log
@@ -701,6 +702,7 @@
         test_dashboard_governance
         test_dashboard_labels
         test_dashboard_safe_autonomy
+        test_dashboard_keeper_feature_proof
         test_dashboard_surface_readiness
         test_activity_graph
         test_masc_log

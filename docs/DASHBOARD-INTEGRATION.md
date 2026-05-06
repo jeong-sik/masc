@@ -114,6 +114,8 @@ code_refs:
   - fleet-health attribution view
 - `GET /api/v1/dashboard/safe-autonomy`
   - operations safety view
+- `GET /api/v1/dashboard/keeper-feature-proof`
+  - keeper autonomy feature proof gates
 - `GET /api/v1/models/metrics`, `GET /api/v1/dashboard/keeper-costs`
   - runtime cost/latency view
 - `GET /api/v1/cascade/strategy-trace`, `GET /api/v1/cascade/health`

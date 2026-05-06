@@ -195,6 +195,19 @@ let safe_get_agents (ctx : context) =
       Log.Coord.warn "get_agents_raw failed: %s" (Stdlib.Printexc.to_string exn);
       []
 
+let safe_read_backlog (ctx : context) =
+  try
+    Coord.read_backlog ctx.config
+  with
+  | exn ->
+      Log.Coord.warn "read_backlog failed: %s"
+        (Stdlib.Printexc.to_string exn);
+      {
+        Masc_domain.tasks = [];
+        last_updated = Coord.now_iso ();
+        version = 1;
+      }
+
 let safe_is_zombie_agent ~agent_name last_seen =
   try Coord.is_zombie_agent ~agent_name last_seen
   with
@@ -319,7 +332,7 @@ let coordination_fsm_attention_items ctx =
 let status_summary_string (ctx : context) =
   Coord.ensure_initialized ctx.config;
   let state = Coord.read_state ctx.config in
-  let backlog = Coord.read_backlog ctx.config in
+  let backlog = safe_read_backlog ctx in
   let joined =
     try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name
     with Sys_error _ | Yojson.Json_error _ -> false
@@ -333,8 +346,26 @@ let status_summary_string (ctx : context) =
   let current_task = safe_current_task ctx ~joined in
   let worktree_active = status_worktree_active ctx in
   let effective_cluster_name = effective_cluster_name ctx.config in
+  let active_task_assignees =
+    Coord.active_task_assignees_by_task_id backlog
+  in
   let agents =
     safe_get_agents ctx
+    |> List.map (fun (agent : Masc_domain.agent) ->
+           match agent.current_task with
+           | Some task_id
+             when not
+                    (Coord.agent_current_task_matches_assignments
+                       active_task_assignees
+                       ~agent_name:agent.name task_id) ->
+               let status =
+                 match agent.status with
+                 | Masc_domain.Inactive -> Masc_domain.Inactive
+                 | Masc_domain.Active | Masc_domain.Busy | Masc_domain.Listening ->
+                     Masc_domain.Active
+               in
+               { agent with status; current_task = None }
+           | Some _ | None -> agent)
     |> List.sort (fun (a : Masc_domain.agent) (b : Masc_domain.agent) ->
            String.compare a.name b.name)
   in

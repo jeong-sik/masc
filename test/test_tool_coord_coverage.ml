@@ -78,6 +78,27 @@ let make_test_ctx () =
     { Masc_domain.default_auth_config with enabled = false; require_token = false };
   { Tool_coord.config; agent_name = "test-agent" }
 
+let agent_file ctx =
+  let agent_name = Coord.resolve_agent_name ctx.config ctx.agent_name in
+  Filename.concat (Coord.agents_dir ctx.config)
+    (Coord.safe_filename agent_name ^ ".json")
+
+let read_agent ctx =
+  match Types.agent_of_yojson (Coord.read_json ctx.config (agent_file ctx)) with
+  | Ok agent -> agent
+  | Error msg -> failwith ("agent decode failed: " ^ msg)
+
+let write_agent ctx agent =
+  Coord.write_json ctx.config (agent_file ctx)
+    (Types.agent_to_yojson agent)
+
+let seed_stale_current_task ctx =
+  let old_last_seen = "2000-01-01T00:00:00Z" in
+  let agent = read_agent ctx in
+  write_agent ctx
+    { agent with status = Busy; current_task = Some "task-missing"; last_seen = old_last_seen };
+  old_last_seen
+
 (* Test dispatch returns None for unknown tool *)
 let () = test "dispatch_unknown_tool" (fun () ->
   let ctx = make_test_ctx () in
@@ -100,10 +121,35 @@ let () = test "dispatch_status" (fun () ->
   match Tool_coord.dispatch ctx ~name:"masc_status" ~args with
   | Some { success; message } ->
       assert success;
-      assert (str_contains message "⚡ Snapshot:");
+      assert (str_contains message "Snapshot:");
       assert (str_contains message "🧭 You:");
-      assert (str_contains message "💡 Suggested next:")
+      assert (str_contains message "Suggested next:")
   | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_status_hides_stale_current_task_without_writing" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Coord.init ctx.config ~agent_name:(Some ctx.agent_name) in
+  let old_last_seen = seed_stale_current_task ctx in
+  match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+  | Some { success; message } ->
+      assert success;
+      assert (str_contains message "test-agent (you) -> active");
+      let agent = read_agent ctx in
+      assert (agent.current_task = Some "task-missing");
+      assert (agent.last_seen = old_last_seen)
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "coord_status_hides_stale_current_task_without_writing" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Coord.init ctx.config ~agent_name:(Some ctx.agent_name) in
+  let old_last_seen = seed_stale_current_task ctx in
+  let output = Coord.status ctx.config in
+  assert (str_contains output "test-agent → idle");
+  let agent = read_agent ctx in
+  assert (agent.current_task = Some "task-missing");
+  assert (agent.last_seen = old_last_seen)
 )
 
 (* Test dispatch coordination FSM snapshot *)
@@ -135,7 +181,7 @@ let () = test "dispatch_status_summary_and_cap" (fun () ->
   | Some { success; message = result } ->
       assert success;
       assert (str_contains result "tasks active=35 todo=35 claimed=0 in_progress=0");
-      assert (str_contains result "⚠️ Attention:");
+      assert (str_contains result "Attention:");
       assert_contains result "35 unclaimed task(s) are available right now.";
       assert (str_contains result "Summary: active=35, done=0, cancelled=0, total=35");
       assert (str_contains result "and 5 more active tasks")
@@ -164,6 +210,49 @@ let () = test "dispatch_status_done_summary" (fun () ->
       assert (str_contains result "(no active tasks)")
   | None -> failwith "dispatch returned None"
 )
+
+let () = test "dispatch_status_hides_awaiting_verification_current_task" (fun () ->
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    let ctx = make_test_ctx () in
+    let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
+    let actual_name = Coord.resolve_agent_name ctx.config "test-agent" in
+    ignore
+      (Coord.add_task ctx.config ~title:"Awaiting verifier" ~priority:2
+         ~description:"");
+    ignore (Coord.claim_task ctx.config ~agent_name:actual_name ~task_id:"task-001");
+    (match
+       Coord.transition_task_r ctx.config ~agent_name:actual_name
+         ~task_id:"task-001" ~action:Masc_domain.Submit_for_verification ()
+     with
+    | Ok _ -> ()
+    | Error err -> failwith (Masc_domain.masc_error_to_string err));
+    let agent_file =
+      Filename.concat (Coord.agents_dir ctx.config)
+        (Coord.safe_filename actual_name ^ ".json")
+    in
+    let stale_agent =
+      match Coord.read_json ctx.config agent_file |> Masc_domain.agent_of_yojson with
+      | Ok agent ->
+          { agent with
+            status = Masc_domain.Busy;
+            current_task = Some "task-001";
+          }
+      | Error msg -> failwith ("agent parse failed: " ^ msg)
+    in
+    Coord.write_json ctx.config agent_file
+      (Masc_domain.agent_to_yojson stale_agent);
+    match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+    | Some { success; message = result } ->
+        assert success;
+        assert_contains result (actual_name ^ " (you) -> active");
+        let agent_after =
+          match Coord.read_json ctx.config agent_file |> Masc_domain.agent_of_yojson with
+          | Ok agent -> agent
+          | Error msg -> failwith ("agent parse failed after status: " ^ msg)
+        in
+        assert (agent_after.current_task = Some "task-001");
+        assert (agent_after.status = Masc_domain.Busy)
+    | None -> failwith "dispatch returned None"))
 
 (* Test dispatch reset without confirm *)
 let () = test "dispatch_reset_no_confirm" (fun () ->
@@ -319,7 +408,7 @@ let () = test "dispatch_status_surfaces_owned_current_drift" (fun () ->
       assert (str_contains result "current=task-002");
       assert_contains result
         "Do not retry generic masc_plan_init from a drifted surface";
-      assert (not (str_contains result "💡 Suggested next: masc_plan_init -> masc_status"));
+      assert (not (str_contains result "Suggested next: masc_plan_init -> masc_status"));
       assert (str_contains result "planning current_task is unset or drifted")
   | None -> failwith "dispatch returned None"
 )
@@ -336,10 +425,10 @@ let () = test "dispatch_status_suppresses_lifecycle_guidance_without_credential"
   match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
   | Some { success; message = result } ->
       assert success;
-      assert (str_contains result "🔐 Credential: required=yes | available=no | candidates=test-agent");
+      assert (str_contains result "Credential: required=yes | available=no | candidates=test-agent");
       assert (str_contains result "Lifecycle actions are credential-blocked for test-agent");
-      assert (not (str_contains result "💡 Suggested next: masc_status -> masc_transition"));
-      assert (not (str_contains result "💡 Suggested next: masc_claim_next"))
+      assert (not (str_contains result "Suggested next: masc_status -> masc_transition"));
+      assert (not (str_contains result "Suggested next: masc_claim_next"))
   | None -> failwith "dispatch returned None"
 )
 
@@ -358,12 +447,12 @@ let () = test "dispatch_status_treats_keeper_internal_auth_as_credential" (fun (
       assert success;
       assert (
         str_contains result
-          "🔐 Credential: required=yes | available=yes | candidates=keeper-sangsu-agent");
+          "Credential: required=yes | available=yes | candidates=keeper-sangsu-agent");
       assert (
         not
           (str_contains result
              "Lifecycle actions are credential-blocked for keeper-sangsu-agent"));
-      assert (str_contains result "💡 Suggested next:")
+      assert (str_contains result "Suggested next:")
   | None -> failwith "dispatch returned None"
 )
 
@@ -382,8 +471,8 @@ let () = test "dispatch_status_no_owned_prefers_claim_next_over_transition" (fun
       assert (str_contains result "owned=- | current=task-001");
       assert (str_contains result "drift_reason=no_owned");
       assert (str_contains result "claim_first_suppressed=no");
-      assert_contains result "💡 Suggested next: masc_claim_next -> masc_status";
-      assert_not_contains result "💡 Suggested next: masc_status -> masc_transition"
+      assert_contains result "Suggested next: masc_claim_next -> masc_status";
+      assert_not_contains result "Suggested next: masc_status -> masc_transition"
   | None -> failwith "dispatch returned None"
 )
 
@@ -400,15 +489,15 @@ let () = test "dispatch_status_surfaces_missing_planning_for_owned_task" (fun ()
   | Some { success; message = result } ->
       assert success;
       assert (str_contains result "owned=task-001 | current=task-001");
-      assert (str_contains result "📝 Planning: missing=yes | task=task-001");
+      assert (str_contains result "Planning: missing=yes | task=task-001");
       assert_contains result "Owned task task-001 has no planning context.";
       assert (
         str_contains result
           "Do not retry generic masc_plan_init from a drifted surface");
       assert (str_contains result "handoff/worktree/test logs as the temporary SSOT");
-      assert (not (str_contains result "💡 Suggested next: masc_plan_init -> masc_status"));
-      assert (not (str_contains result "💡 Suggested next: masc_heartbeat"));
-      assert (not (str_contains result "💡 Suggested next: masc_status -> masc_transition"))
+      assert (not (str_contains result "Suggested next: masc_plan_init -> masc_status"));
+      assert (not (str_contains result "Suggested next: masc_heartbeat"));
+      assert (not (str_contains result "Suggested next: masc_status -> masc_transition"))
   | None -> failwith "dispatch returned None"
 )
 
@@ -428,11 +517,11 @@ let () = test "dispatch_status_surfaces_completed_deliverable_conflict_for_activ
   | Some { success; message = result } ->
       assert success;
       assert (str_contains result "owned=task-001 | current=task-001");
-      assert (str_contains result "📝 Planning: deliverable_conflict=yes | task=task-001");
+      assert (str_contains result "Planning: deliverable_conflict=yes | task=task-001");
       assert_contains result
         "Owned task task-001 already has a completed-looking deliverable";
-      assert (str_contains result "💡 Suggested next: masc_deliver -> masc_status");
-      assert (not (str_contains result "💡 Suggested next: masc_status -> masc_transition"))
+      assert (str_contains result "Suggested next: masc_deliver -> masc_status");
+      assert (not (str_contains result "Suggested next: masc_status -> masc_transition"))
   | None -> failwith "dispatch returned None"
 )
 
@@ -450,7 +539,7 @@ let () = test "dispatch_status_flags_todo_with_completed_deliverable_as_conflict
   match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
   | Some { success; message = result } ->
       assert success;
-      assert (str_contains result "⚠️ task-001 P2 [todo_conflict] Conflicted todo (unclaimed)");
+      assert (str_contains result "warning task-001 P2 [todo_conflict] Conflicted todo (unclaimed)");
       assert (str_contains result "📋 task-002 P2 [todo] Fresh todo (unclaimed)");
       assert_contains result
         "1 todo task(s) have completed-looking planning deliverables";

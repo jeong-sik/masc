@@ -41,6 +41,49 @@ let payload_int_opt key = function
       | _ -> None)
   | _ -> None
 
+let stop_reason_to_wire = function
+  | Agent_sdk.Types.EndTurn -> "end_turn"
+  | Agent_sdk.Types.StopToolUse -> "tool_use"
+  | Agent_sdk.Types.MaxTokens -> "max_tokens"
+  | Agent_sdk.Types.StopSequence -> "stop_sequence"
+  | Agent_sdk.Types.Unknown value -> value
+
+let agent_completed_usage_fields (response : Agent_sdk.Types.api_response) =
+  match response.usage with
+  | None -> [ ("usage_reported", `Bool false) ]
+  | Some usage ->
+      [
+        ("usage_reported", `Bool true);
+        ("input_tokens", `Int usage.input_tokens);
+        ("output_tokens", `Int usage.output_tokens);
+        ( "cache_creation_input_tokens",
+          `Int usage.cache_creation_input_tokens );
+        ("cache_read_input_tokens", `Int usage.cache_read_input_tokens);
+        ("total_tokens", `Int (usage.input_tokens + usage.output_tokens));
+        ( "cost_usd",
+          match usage.cost_usd with
+          | Some cost -> `Float cost
+          | None -> `Null );
+      ]
+
+let agent_completed_result_fields = function
+  | Ok (response : Agent_sdk.Types.api_response) ->
+      [
+        ("success", `Bool true);
+        ("result", `String "ok");
+        ("response_id", `String response.id);
+        ("model", `String response.model);
+        ("stop_reason", `String (stop_reason_to_wire response.stop_reason));
+      ]
+      @ agent_completed_usage_fields response
+  | Error error ->
+      [
+        ("success", `Bool false);
+        ("result", `String "error");
+        ("error", `String (Agent_sdk.Error.to_string error));
+        ("usage_reported", `Bool false);
+      ]
+
 let payload_agent_name payload =
   (* Check [agent_name], [agent], then [keeper_name] for Custom events
      whose publisher stores the per-agent attribution under the
@@ -171,7 +214,6 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
       in
       Some (wrap ~event_type:"agent_started" ~payload ~agent_name ~task_id ())
   | Agent_sdk.Event_bus.AgentCompleted { agent_name; task_id; elapsed; result } ->
-      let usage_fields = match result with Ok _ -> [] | Error _ -> [] in
       let payload =
         `Assoc
           ([
@@ -179,7 +221,7 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
              ("task_id", `String task_id);
              ("elapsed_s", `Float elapsed);
            ]
-          @ usage_fields)
+          @ agent_completed_result_fields result)
       in
       Some (wrap ~event_type:"agent_completed" ~payload ~agent_name ~task_id ())
   | Agent_sdk.Event_bus.AgentFailed { agent_name; task_id; error; elapsed } ->

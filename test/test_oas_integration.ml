@@ -581,8 +581,25 @@ let test_agent_completed_includes_usage () =
         | Some (`Int v) -> v
         | _ -> -1
       in
+      let string_field name =
+        match List.assoc_opt name payload_fields with
+        | Some (`String v) -> v
+        | _ -> ""
+      in
+      let bool_field name =
+        match List.assoc_opt name payload_fields with
+        | Some (`Bool v) -> v
+        | _ -> false
+      in
+      Alcotest.(check bool) "success" true (bool_field "success");
+      Alcotest.(check string) "result" "ok" (string_field "result");
+      Alcotest.(check string) "response_id" "msg-test" (string_field "response_id");
+      Alcotest.(check string) "model" "test-model" (string_field "model");
+      Alcotest.(check string) "stop_reason" "end_turn" (string_field "stop_reason");
+      Alcotest.(check bool) "usage_reported" true (bool_field "usage_reported");
       Alcotest.(check int) "input_tokens" 500 (int_field "input_tokens");
       Alcotest.(check int) "output_tokens" 150 (int_field "output_tokens");
+      Alcotest.(check int) "total_tokens" 650 (int_field "total_tokens");
       (match List.assoc_opt "cost_usd" payload_fields with
        | Some (`Float f) ->
            Alcotest.(check (float 0.001)) "cost_usd" 0.003 f
@@ -591,6 +608,54 @@ let test_agent_completed_includes_usage () =
         (match List.assoc_opt "event_type" fields with
          | Some (`String s) -> s
          | _ -> "")
+  | Some _ -> Alcotest.fail "expected assoc"
+
+let test_agent_completed_omits_usage_fields_when_success_has_no_usage () =
+  let open Agent_sdk in
+  let resp : Llm_provider.Types.api_response =
+    {
+      id = "msg-no-usage";
+      model = "test-model";
+      stop_reason = EndTurn;
+      content = [];
+      usage = None;
+      telemetry = None;
+    }
+  in
+  let evt =
+    Event_bus.mk_event ~correlation_id:"sess-no-usage" ~run_id:"run-no-usage"
+      (AgentCompleted
+         {
+           agent_name = "no-usage-agent";
+           task_id = "task-no-usage";
+           result = Ok resp;
+           elapsed = 0.25;
+         })
+  in
+  match Oas_event_bridge.native_event_to_json evt with
+  | None -> Alcotest.fail "expected Some for AgentCompleted without usage"
+  | Some (`Assoc fields) ->
+      let payload_fields =
+        match List.assoc_opt "payload" fields with
+        | Some (`Assoc p) -> p
+        | _ -> Alcotest.failf "expected payload assoc"
+      in
+      let absent name =
+        Option.is_none (List.assoc_opt name payload_fields)
+      in
+      Alcotest.(check bool) "success" true
+        (match List.assoc_opt "success" payload_fields with
+         | Some (`Bool v) -> v
+         | _ -> false);
+      Alcotest.(check bool) "usage_reported" false
+        (match List.assoc_opt "usage_reported" payload_fields with
+         | Some (`Bool v) -> v
+         | _ -> true);
+      Alcotest.(check bool) "input_tokens absent" true (absent "input_tokens");
+      Alcotest.(check bool) "output_tokens absent" true
+        (absent "output_tokens");
+      Alcotest.(check bool) "total_tokens absent" true (absent "total_tokens");
+      Alcotest.(check bool) "cost_usd absent" true (absent "cost_usd")
   | Some _ -> Alcotest.fail "expected assoc"
 
 let test_agent_completed_no_usage_on_error () =
@@ -615,7 +680,24 @@ let test_agent_completed_no_usage_on_error () =
         | None -> Alcotest.fail "expected payload field"
       in
       Alcotest.(check bool) "no input_tokens on error" true
-        (Option.is_none (List.assoc_opt "input_tokens" payload_fields))
+        (Option.is_none (List.assoc_opt "input_tokens" payload_fields));
+      Alcotest.(check bool) "success" false
+        (match List.assoc_opt "success" payload_fields with
+         | Some (`Bool v) -> v
+         | _ -> true);
+      Alcotest.(check string) "result" "error"
+        (match List.assoc_opt "result" payload_fields with
+         | Some (`String v) -> v
+         | _ -> "");
+      Alcotest.(check bool) "usage_reported" false
+        (match List.assoc_opt "usage_reported" payload_fields with
+         | Some (`Bool v) -> v
+         | _ -> true);
+      (match List.assoc_opt "error" payload_fields with
+       | Some (`String value) ->
+           Alcotest.(check bool) "error includes message" true
+             (contains_substring value "test failure")
+       | _ -> Alcotest.fail "expected error string")
   | Some _ -> Alcotest.fail "expected assoc"
 
 let test_oas_log_bridge_turn_completed_summary () =
@@ -867,6 +949,9 @@ let () =
         test_oas_event_bridge_broadcast_retry_does_not_duplicate_append;
       Alcotest.test_case "agent_completed includes usage" `Quick
         test_agent_completed_includes_usage;
+      Alcotest.test_case "agent_completed success without usage omits usage fields"
+        `Quick
+        test_agent_completed_omits_usage_fields_when_success_has_no_usage;
       Alcotest.test_case "agent_completed no usage on error" `Quick
         test_agent_completed_no_usage_on_error;
       Alcotest.test_case "oas log bridge adds turn completed summary" `Quick

@@ -7,9 +7,20 @@ import { Copy, Check } from 'lucide-preact'
 import { useState } from 'preact/hooks'
 import { showToast } from './toast'
 
-type CopyableVariant = 'primary' | 'secondary'
+export type CopyableVariant = 'primary' | 'secondary'
 
-interface CopyableCodeProps {
+export type CopyableCodeState = 'idle' | 'copied'
+
+export interface CopyableCodeSummary {
+  variant: CopyableVariant
+  state: CopyableCodeState
+  hasLabel: boolean
+  hasExplicitAriaLabel: boolean
+  commandLength: number
+  ariaLabel: string
+}
+
+export interface CopyableCodeProps {
   command: string
   label?: string
   ariaLabel?: string
@@ -20,6 +31,33 @@ interface CopyableCodeProps {
       primary. Inspired by Vercel "Deploy your project" and Railway
       deploy-log next-steps hierarchy. */
   variant?: CopyableVariant
+}
+
+export function copyableCodeAriaLabel(label?: string, ariaLabel?: string): string {
+  return ariaLabel || (label ? `${label} 복사` : '명령 복사')
+}
+
+export function summarizeCopyableCode({
+  command,
+  label,
+  ariaLabel,
+  variant,
+  copied,
+}: {
+  command: string
+  label?: string
+  ariaLabel?: string
+  variant: CopyableVariant
+  copied: boolean
+}): CopyableCodeSummary {
+  return {
+    variant,
+    state: copied ? 'copied' : 'idle',
+    hasLabel: label !== undefined && label !== '',
+    hasExplicitAriaLabel: ariaLabel !== undefined && ariaLabel !== '',
+    commandLength: command.length,
+    ariaLabel: copyableCodeAriaLabel(label, ariaLabel),
+  }
 }
 
 export async function copyToClipboard(text: string): Promise<boolean> {
@@ -80,6 +118,7 @@ export function CopyableCode({
   variant = 'secondary',
 }: CopyableCodeProps) {
   const [justCopied, setJustCopied] = useState(false)
+  const summary = summarizeCopyableCode({ command, label, ariaLabel, variant, copied: justCopied })
   const onCopy = async () => {
     const ok = await copyToClipboard(command)
     if (ok) {
@@ -100,26 +139,33 @@ export function CopyableCode({
   const labelTone = copyableLabelClasses(variant)
   return html`
     <div
-      class=${`group flex items-center gap-2 rounded-[var(--r-1)] border transition-colors hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] ${wrapperTone}`}
+      class=${`group flex items-center gap-2 rounded-[var(--r-0)] border transition-colors hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] ${wrapperTone}`}
       data-copyable-code
-      data-copyable-variant=${variant}
+      data-copyable-variant=${summary.variant}
+      data-copyable-state=${summary.state}
+      data-copyable-has-label=${summary.hasLabel}
+      data-copyable-has-explicit-aria-label=${summary.hasExplicitAriaLabel}
+      data-copyable-command-length=${summary.commandLength}
       data-copied=${justCopied ? 'true' : 'false'}
     >
       ${label
-        ? html`<span class=${labelTone}>${label}</span>`
+        ? html`<span class=${labelTone} data-copyable-label>${label}</span>`
         : null}
-      <code class="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-2xs text-[var(--color-fg-primary)]">${command}</code>
+      <code class="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-2xs text-[var(--color-fg-primary)]" data-copyable-command>${command}</code>
       ${justCopied
         ? html`<span class="shrink-0 text-3xs font-semibold text-[var(--color-status-ok)]" data-copied-badge aria-live="polite">✓ Copied</span>`
         : null}
       <button
         type="button"
-        class="shrink-0 cursor-pointer rounded-[var(--r-1)] border border-transparent p-1 text-[var(--color-fg-disabled)] opacity-60 transition-opacity hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] focus-visible:opacity-100 group-hover:opacity-100"
-        aria-label=${ariaLabel || (label ? `${label} 복사` : '명령 복사')}
+        class="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-[var(--r-0)] border border-transparent text-[var(--color-fg-muted)] opacity-75 transition-[background-color,border-color,color,opacity] hover:border-[var(--color-border-subtle)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] hover:opacity-100 focus-visible:opacity-100 group-hover:opacity-100"
+        aria-label=${summary.ariaLabel}
         data-copy-button
+        data-copyable-button
         onClick=${onCopy}
       >
-        ${justCopied ? html`<${Check} size=${14} />` : html`<${Copy} size=${14} />`}
+        ${justCopied
+          ? html`<${Check} size=${14} strokeWidth=${2.25} aria-hidden="true" data-copyable-icon />`
+          : html`<${Copy} size=${14} strokeWidth=${2.25} aria-hidden="true" data-copyable-icon />`}
       </button>
     </div>
   `

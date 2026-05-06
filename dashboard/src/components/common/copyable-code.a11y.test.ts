@@ -3,7 +3,7 @@
 // jest-axe coverage for CopyableCode — single-line shell snippet with
 // a copy button. The button is icon-only by default, so tests guard
 // the accessible-name fallback chain (ariaLabel || `${label} 복사` ||
-// '복사' — same pattern as CopyIdButton).
+// '명령 복사' — same pattern as CopyIdButton).
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
@@ -23,6 +23,9 @@ describe('CopyableCode a11y', () => {
 
   it('default (secondary) variant renders accessibly', async () => {
     render(html`<${CopyableCode} command="npm install" />`, container)
+    const root = container.querySelector('[data-copyable-code]')!
+    expect(root.getAttribute('data-copyable-state')).toBe('idle')
+    expect(root.getAttribute('data-copyable-command-length')).toBe('11')
     expect(await axe(container)).toHaveNoViolations()
   })
 
@@ -31,6 +34,7 @@ describe('CopyableCode a11y', () => {
       html`<${CopyableCode} command="masc deploy" variant="primary" />`,
       container,
     )
+    expect(container.querySelector('[data-copyable-code]')!.getAttribute('data-copyable-variant')).toBe('primary')
     expect(await axe(container)).toHaveNoViolations()
   })
 
@@ -39,6 +43,7 @@ describe('CopyableCode a11y', () => {
       html`<${CopyableCode} command="masc start" label="Start command" />`,
       container,
     )
+    expect(container.querySelector('[data-copyable-code]')!.getAttribute('data-copyable-has-label')).toBe('true')
     expect(await axe(container)).toHaveNoViolations()
   })
 
@@ -50,6 +55,7 @@ describe('CopyableCode a11y', () => {
       />`,
       container,
     )
+    expect(container.querySelector('[data-copyable-code]')!.getAttribute('data-copyable-has-explicit-aria-label')).toBe('true')
     expect(await axe(container)).toHaveNoViolations()
   })
 })

@@ -799,6 +799,7 @@ let enqueue_partial_commit_continue_gate
     ~tool_name:"keeper_continue_after_partial_commit"
     ~input
     ~risk_level:Keeper_approval_queue.Critical
+    ~base_path:config.base_path
     ~on_resolution:(fun decision ->
       let latest_meta = current_keeper_meta ~config ~fallback_meta:meta in
       match decision with

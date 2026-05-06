@@ -516,7 +516,7 @@ let _keeper_sem = Eio.Semaphore.make _keeper_snapshot_max_concurrency
 let compact_keeper_runtime_trust_json ~(config : Coord.config)
     ~(meta : Keeper_types.keeper_meta) =
   let runtime_trust =
-    Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
+    Keeper_runtime_trust_snapshot.summary_json ~config ~meta
   in
   let member key = Yojson.Safe.Util.member key runtime_trust in
   `Assoc
@@ -575,13 +575,14 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
          let dt_audit = ref 0.0 in
          let dt_profile = ref 0.0 in
          let dt_phase = ref 0.0 in
+         let dt_trust = ref 0.0 in
          let dt_activity = ref 0.0 in
          let emit_timing_log total_work =
            if total_work > 0.3 then
              Log.Dashboard.info
                "[keepers_json:%s] sub-op: meta=%.0fms agent=%.0fms ka=%.0fms \
-                audit=%.0fms profile=%.0fms phase=%.0fms activity=%.0fms \
-                total=%.0fms"
+                audit=%.0fms profile=%.0fms phase=%.0fms trust=%.0fms \
+                activity=%.0fms total=%.0fms"
                name
                (!dt_meta *. 1000.0)
                (!dt_agent *. 1000.0)
@@ -589,6 +590,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                (!dt_audit *. 1000.0)
                (!dt_profile *. 1000.0)
                (!dt_phase *. 1000.0)
+               (!dt_trust *. 1000.0)
                (!dt_activity *. 1000.0)
                (total_work *. 1000.0)
          in
@@ -608,14 +610,19 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                    in
                    dt_phase := Time_compat.now () -. t_ph;
                    let runtime_trust =
-                     try compact_keeper_runtime_trust_json ~config ~meta
-                     with
-                     | Eio.Cancel.Cancelled _ as e -> raise e
-                     | exn ->
-                         Log.Dashboard.warn
-                           "operator snapshot trust compact failed for paused keeper %s: %s"
-                           meta.name (Printexc.to_string exn);
-                         `Null
+                     let t_trust = Time_compat.now () in
+                     let result =
+                       try compact_keeper_runtime_trust_json ~config ~meta
+                       with
+                       | Eio.Cancel.Cancelled _ as e -> raise e
+                       | exn ->
+                           Log.Dashboard.warn
+                             "operator snapshot trust compact failed for paused keeper %s: %s"
+                             meta.name (Printexc.to_string exn);
+                           `Null
+                     in
+                     dt_trust := Time_compat.now () -. t_trust;
+                     result
                    in
                    emit_timing_log (Time_compat.now () -. t_work_start);
                    Some
@@ -771,14 +778,19 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                    else keeper_context_snapshot_of_meta config meta
                  in
                  let runtime_trust =
-                   try compact_keeper_runtime_trust_json ~config ~meta
-                   with
-                   | Eio.Cancel.Cancelled _ as e -> raise e
-                   | exn ->
-                       Log.Dashboard.warn
-                         "operator snapshot trust compact failed for keeper %s: %s"
-                         meta.name (Printexc.to_string exn);
-                       `Null
+                   let t_trust = Time_compat.now () in
+                   let result =
+                     try compact_keeper_runtime_trust_json ~config ~meta
+                     with
+                     | Eio.Cancel.Cancelled _ as e -> raise e
+                     | exn ->
+                         Log.Dashboard.warn
+                           "operator snapshot trust compact failed for keeper %s: %s"
+                           meta.name (Printexc.to_string exn);
+                         `Null
+                   in
+                   dt_trust := Time_compat.now () -. t_trust;
+                   result
                  in
                  let row =
                    `Assoc

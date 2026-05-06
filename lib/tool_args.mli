@@ -60,8 +60,13 @@ val error_code_to_string : error_code -> string
 (** {1 Canonical error / OK response helpers}
 
     New tool handlers should use these instead of local helpers.
-    Returns either a JSON string or the [(bool * string)] pair matching
-    the standard tool dispatch signature. *)
+    These functions return [(bool * string)] tuples — the pre-dispatch
+    handler-level contract.  The dispatch boundary ({!Tool_dispatch.dispatch})
+    wraps these tuples into a {!Tool_result.t} automatically via
+    {!Tool_result.wrap}.
+
+    Handlers producing results via these helpers do {e not} need to
+    import [Tool_result] directly. *)
 
 (** [{"status":"error","message":"…"}] *)
 val error_response : string -> string

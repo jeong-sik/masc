@@ -29,7 +29,7 @@ export function parseThemeFromSearch(search: string): ThemeId | null {
   return null
 }
 
-export interface ThemeSyncListeners {
+interface ThemeSyncListeners {
   onStorageChange?: (theme: ThemeId) => void
   onSearchChange?: (theme: ThemeId) => void
 }

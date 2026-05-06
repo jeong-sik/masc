@@ -17,7 +17,9 @@ let test_known_aliases_resolve () =
   Alcotest.(check (option string)) "Write -> keeper_fs_edit"
     (Some "keeper_fs_edit") (Alias.to_internal "Write");
   Alcotest.(check (option string)) "Grep -> keeper_shell"
-    (Some "keeper_shell") (Alias.to_internal "Grep")
+    (Some "keeper_shell") (Alias.to_internal "Grep");
+  Alcotest.(check (option string)) "WebSearch -> masc_web_search"
+    (Some "masc_web_search") (Alias.to_internal "WebSearch")
 
 let test_unknown_returns_none () =
   Alcotest.(check (option string)) "Skill has no cognate"
@@ -36,6 +38,8 @@ let test_to_public_round_trip () =
     "Read" (Alias.to_public "keeper_fs_read");
   Alcotest.(check string) "keeper_shell stays internal"
     "keeper_shell" (Alias.to_public "keeper_shell");
+  Alcotest.(check string) "masc_web_search -> WebSearch"
+    "WebSearch" (Alias.to_public "masc_web_search");
   (* Edit/Write collapse: first occurrence wins for stability *)
   Alcotest.(check string) "keeper_fs_edit -> Edit (first wins)"
     "Edit" (Alias.to_public "keeper_fs_edit")
@@ -49,7 +53,15 @@ let test_to_public_pass_through () =
 
 let test_canonicalize_observed () =
   let input =
-    [ "Bash"; "keeper_board_post"; "masc_board_post"; "Read"; "Skill"; "Write" ]
+    [
+      "Bash";
+      "keeper_board_post";
+      "masc_board_post";
+      "Read";
+      "Skill";
+      "WebSearch";
+      "Write";
+    ]
   in
   let expected =
     [
@@ -58,6 +70,7 @@ let test_canonicalize_observed () =
       "keeper_board_post";
       "keeper_fs_read";
       "Skill";
+      "masc_web_search";
       "keeper_fs_edit";
     ]
   in
@@ -95,8 +108,10 @@ let test_hallucinated_builtins () =
     true (Alias.is_hallucinated_builtin "Skill");
   Alcotest.(check bool) "Agent is hallucinated"
     true (Alias.is_hallucinated_builtin "Agent");
-  Alcotest.(check bool) "WebSearch is hallucinated"
-    true (Alias.is_hallucinated_builtin "WebSearch");
+  Alcotest.(check bool) "WebSearch is NOT hallucinated (has cognate)"
+    false (Alias.is_hallucinated_builtin "WebSearch");
+  Alcotest.(check bool) "WebFetch is hallucinated"
+    true (Alias.is_hallucinated_builtin "WebFetch");
   Alcotest.(check bool) "Bash is NOT hallucinated (has cognate)"
     false (Alias.is_hallucinated_builtin "Bash");
   Alcotest.(check bool) "keeper_bash is NOT hallucinated"
@@ -113,7 +128,7 @@ let test_no_overlap_alias_and_hallucinated () =
 
 let test_alias_table_is_stable () =
   let pairs = Alias.all_aliases () in
-  Alcotest.(check int) "six canonical aliases" 6 (List.length pairs);
+  Alcotest.(check int) "seven canonical aliases" 7 (List.length pairs);
   (* Round-trip: every alias should round-trip via to_internal then to_public,
      except where collapse happens (Write -> keeper_fs_edit -> Edit). *)
   List.iter
@@ -127,11 +142,11 @@ let test_alias_table_is_stable () =
 
 (** Mirrors the call sequence in [keeper_agent_run.ml:1875] after
     canonicalization is applied. Pins the contract: a turn whose only
-    tool calls are Anthropic Code aliases (Bash/Read/Edit/Grep/Write)
+    tool calls are Anthropic Code aliases (Bash/Read/Edit/Grep/WebSearch/Write)
     must NOT produce any unexpected names. *)
 let allowed_keeper_surface =
   [ "keeper_bash"; "keeper_fs_read"; "keeper_fs_edit"; "keeper_shell";
-    "keeper_board_post"; "extend_turns" ]
+    "keeper_board_post"; "masc_web_search"; "extend_turns" ]
 
 let test_pure_alias_turn_no_longer_unexpected () =
   let observed = [ "Bash" ] in
@@ -146,7 +161,7 @@ let test_pure_alias_turn_no_longer_unexpected () =
     [] unexpected
 
 let test_mixed_alias_and_internal_no_unexpected () =
-  let observed = [ "Read"; "keeper_board_post"; "Edit" ] in
+  let observed = [ "Read"; "keeper_board_post"; "Edit"; "WebSearch" ] in
   let canonical = Alias.canonicalize_observed observed in
   let unexpected =
     Disclosure.unexpected_tool_names
@@ -194,8 +209,8 @@ let yojson_field name j =
 let test_oas_dual_register_subset () =
   let pairs = Alias.oas_dual_register_aliases () in
   let names = List.map fst pairs in
-  Alcotest.(check (list string)) "Phase A.4 dual-reg covers Bash/Edit/Grep/Read/Write"
-    [ "Bash"; "Edit"; "Grep"; "Read"; "Write" ] names;
+  Alcotest.(check (list string)) "dual-reg covers shell/fs/search aliases"
+    [ "Bash"; "Edit"; "Grep"; "Read"; "WebSearch"; "Write" ] names;
   (* Every entry must also appear in the full alias table. *)
   let full = List.map fst (Alias.all_aliases ()) in
   List.iter
@@ -211,7 +226,7 @@ let test_public_input_schema_present () =
       Alcotest.(check bool)
         (Printf.sprintf "%s has tailored schema" name)
         true (Option.is_some (Alias.public_input_schema name)))
-    [ "Bash"; "Edit"; "Grep"; "Read"; "Write" ];
+    [ "Bash"; "Edit"; "Grep"; "Read"; "WebSearch"; "Write" ];
   Alcotest.(check bool) "unknown public name has no schema"
     true (Option.is_none (Alias.public_input_schema "Nope"))
 
@@ -313,6 +328,23 @@ let test_grep_schema_uses_anthropic_fields () =
     true (Option.is_some (yojson_field "pattern" props));
   Alcotest.(check bool) "Grep schema does not expose internal 'op' to LLM"
     true (Option.is_none (yojson_field "op" props))
+
+let test_web_search_schema_uses_public_fields () =
+  let schema = Option.get (Alias.public_input_schema "WebSearch") in
+  let props = Option.get (yojson_field "properties" schema) in
+  Alcotest.(check bool) "WebSearch schema exposes 'query'"
+    true (Option.is_some (yojson_field "query" props));
+  Alcotest.(check bool) "WebSearch schema exposes 'limit'"
+    true (Option.is_some (yojson_field "limit" props));
+  let required =
+    match yojson_field "required" schema with
+    | Some (`List items) ->
+        List.filter_map
+          (function `String s -> Some s | _ -> None) items
+    | _ -> []
+  in
+  Alcotest.(check (list string)) "WebSearch requires 'query'"
+    [ "query" ] required
 
 let test_translate_edit_input () =
   let input =
@@ -417,6 +449,15 @@ let test_translate_grep_input () =
   Alcotest.(check bool) "-n shim dropped" true
     (Option.is_none (yojson_field "-n" translated))
 
+let test_translate_web_search_input_is_identity () =
+  let input =
+    `Assoc
+      [ ("query", `String "OpenAI API release notes"); ("limit", `Int 5) ]
+  in
+  let translated = Alias.translate_input ~public:"WebSearch" input in
+  Alcotest.(check string) "WebSearch payload already matches masc_web_search"
+    (Yojson.Safe.to_string input) (Yojson.Safe.to_string translated)
+
 let test_translate_unknown_is_identity () =
   let input = `Assoc [ ("foo", `String "bar") ] in
   let translated = Alias.translate_input ~public:"NoSuchTool" input in
@@ -430,12 +471,16 @@ let test_translate_malformed_input_is_identity () =
     (Yojson.Safe.to_string input) (Yojson.Safe.to_string translated)
 
 let test_expand_universe_adds_aliases () =
-  let internal = [ "keeper_bash"; "keeper_fs_read"; "keeper_board_post" ] in
+  let internal =
+    [ "keeper_bash"; "keeper_fs_read"; "masc_web_search"; "keeper_board_post" ]
+  in
   let expanded = Alias.expand_universe internal in
   Alcotest.(check bool) "Bash appears after expansion"
     true (List.mem "Bash" expanded);
   Alcotest.(check bool) "Read appears after expansion"
     true (List.mem "Read" expanded);
+  Alcotest.(check bool) "WebSearch appears after expansion"
+    true (List.mem "WebSearch" expanded);
   Alcotest.(check bool) "internal names preserved"
     true (List.for_all (fun n -> List.mem n expanded) internal);
   Alcotest.(check bool) "no duplicate Bash entries"
@@ -449,6 +494,8 @@ let test_expand_universe_skips_when_internal_absent () =
     true (not (List.mem "Bash" expanded));
   Alcotest.(check bool) "Read NOT added when keeper_fs_read absent"
     true (not (List.mem "Read" expanded));
+  Alcotest.(check bool) "WebSearch NOT added when masc_web_search absent"
+    true (not (List.mem "WebSearch" expanded));
   Alcotest.(check int) "expanded length unchanged"
     (List.length internal) (List.length expanded)
 
@@ -490,19 +537,21 @@ let () =
         ] );
       ( "oas-dual-register",
         [
-          Alcotest.test_case "subset is Bash + Read only" `Quick test_oas_dual_register_subset;
+          Alcotest.test_case "dual registration subset is stable" `Quick test_oas_dual_register_subset;
           Alcotest.test_case "tailored input schema present" `Quick test_public_input_schema_present;
           Alcotest.test_case "Bash schema uses 'command' field" `Quick test_bash_schema_uses_command_field;
           Alcotest.test_case "Read schema uses 'file_path' field" `Quick test_read_schema_uses_file_path;
           Alcotest.test_case "Edit schema uses Anthropic field names" `Quick test_edit_schema_uses_anthropic_fields;
           Alcotest.test_case "Write schema uses Anthropic field names" `Quick test_write_schema_uses_anthropic_fields;
           Alcotest.test_case "Grep schema uses Anthropic field names" `Quick test_grep_schema_uses_anthropic_fields;
+          Alcotest.test_case "WebSearch schema uses public field names" `Quick test_web_search_schema_uses_public_fields;
           Alcotest.test_case "translate Bash input shape" `Quick test_translate_bash_input;
           Alcotest.test_case "translate Read input shape" `Quick test_translate_read_input;
           Alcotest.test_case "translate Edit input shape" `Quick test_translate_edit_input;
           Alcotest.test_case "translate Edit drops caller mode" `Quick test_translate_edit_drops_caller_supplied_mode;
           Alcotest.test_case "translate Write input shape" `Quick test_translate_write_input;
           Alcotest.test_case "translate Grep input shape" `Quick test_translate_grep_input;
+          Alcotest.test_case "translate WebSearch input shape" `Quick test_translate_web_search_input_is_identity;
           Alcotest.test_case "translate unknown is identity" `Quick test_translate_unknown_is_identity;
           Alcotest.test_case "translate malformed is identity" `Quick test_translate_malformed_input_is_identity;
           Alcotest.test_case "expand_universe adds aliases" `Quick test_expand_universe_adds_aliases;

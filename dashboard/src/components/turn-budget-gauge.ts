@@ -26,7 +26,7 @@ export const BUDGET_CRIT_RATIO = 0.8
 
 // ── Derivations ───────────────────────────────────────────────────────────
 
-export interface BudgetGaugeState {
+interface BudgetGaugeState {
   used: number
   max: number
   ratio: number

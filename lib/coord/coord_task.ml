@@ -436,8 +436,11 @@ let transition_task_r
                  then (
                    let t =
                      match action with
-                     | Masc_domain.Claim -> clear_soft_do_not_reclaim_reason t
-                     | Masc_domain.Release
+                     | Masc_domain.Claim ->
+                       t
+                       |> clear_soft_do_not_reclaim_reason
+                       |> clear_stale_worktree_binding
+                     | Masc_domain.Release -> clear_stale_worktree_binding t
                      | Masc_domain.Start
                      | Masc_domain.Done_action
                      | Masc_domain.Cancel
@@ -635,6 +638,26 @@ let transition_task_r
                  | Ok msg ->
                    Log.RoomTask.info
                      "%s worktree auto-cleanup: %s" reason_label msg
+                 | Error
+                     (System (System_error.WorktreeNotFound
+                        { worktree; searched_in })) ->
+                   (* P2-1: the task had a worktree record (worktree = Some _)
+                      but no matching directory was found under the sandbox
+                      repo clones — typical for Docker-isolated keepers whose
+                      sandbox lives inside the container, or for tasks where
+                      the worktree was already cleaned up by a prior
+                      transition.  This is the desired end state; demote to
+                      INFO so routine best-effort cleanup no longer fires
+                      false-alarm WARNs.
+
+                      #13304 originally implemented this demotion by matching
+                      the [IoError] message prefix; this typed-variant pattern
+                      replaces the string match so a future format change in
+                      [coord_worktree] cannot silently regress the demotion. *)
+                   Log.RoomTask.info
+                     "%s worktree auto-cleanup: skipped (already absent: \
+                      worktree=%s searched_in=%s)"
+                     reason_label worktree searched_in
                  | Error e ->
                    Log.RoomTask.warn
                      "%s worktree auto-cleanup failed \

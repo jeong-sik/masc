@@ -14,6 +14,12 @@ type cascade_name = Keeper_cascade_profile.runtime_name
 let cascade_name_of_string raw = Keeper_cascade_profile.Runtime_name raw
 let cascade_name_to_string = Keeper_cascade_profile.runtime_name_to_string
 
+type provider_rejection = {
+  provider_label : string;
+  provider_kind : string;
+  reason : string;
+}
+
 type masc_internal_error =
   | Cascade_exhausted of {
       cascade_name : cascade_name;
@@ -27,6 +33,8 @@ type masc_internal_error =
   | No_tool_capable_provider of {
       cascade_name : cascade_name;
       configured_labels : string list;
+      required_tool_names : string list;
+      provider_rejections : provider_rejection list;
     }
   | Accept_rejected of {
       scope : string;
@@ -59,6 +67,48 @@ type masc_internal_error =
 
 let masc_internal_error_prefix = "[masc_oas_error] "
 
+let string_list_json values =
+  `List (List.map (fun value -> `String value) values)
+
+let string_list_of_assoc key = function
+  | `Assoc fields -> (
+      match List.assoc_opt key fields with
+      | Some (`List values) ->
+          values
+          |> List.filter_map (function
+               | `String value -> Some value
+               | _ -> None)
+      | _ -> [])
+  | _ -> []
+
+let provider_rejection_to_json r =
+  `Assoc
+    [
+      ("provider_label", `String r.provider_label);
+      ("provider_kind", `String r.provider_kind);
+      ("reason", `String r.reason);
+    ]
+
+let provider_rejection_of_json = function
+  | `Assoc fields ->
+      let field name =
+        match List.assoc_opt name fields with
+        | Some (`String value) -> Some value
+        | _ -> None
+      in
+      (match field "provider_label", field "provider_kind", field "reason" with
+       | Some provider_label, Some provider_kind, Some reason ->
+           Some { provider_label; provider_kind; reason }
+       | _ -> None)
+  | _ -> None
+
+let provider_rejections_of_assoc key = function
+  | `Assoc fields -> (
+      match List.assoc_opt key fields with
+      | Some (`List values) -> List.filter_map provider_rejection_of_json values
+      | _ -> [])
+  | _ -> []
+
 let string_opt_of_assoc key = function
   | `Assoc fields -> (
       match List.assoc_opt key fields with
@@ -84,14 +134,22 @@ let masc_internal_error_to_json = function
         ("detail", `String detail);
         ("exit_code", Json_util.int_opt_to_json exit_code);
       ]
-  | No_tool_capable_provider { cascade_name; configured_labels } ->
+  | No_tool_capable_provider
+      {
+        cascade_name;
+        configured_labels;
+        required_tool_names;
+        provider_rejections;
+      } ->
     let cascade_name = cascade_name_to_string cascade_name in
     `Assoc
       [
         ("kind", `String "no_tool_capable_provider");
         ("cascade_name", `String cascade_name);
-        ( "configured_labels",
-          `List (List.map (fun value -> `String value) configured_labels) );
+        ("configured_labels", string_list_json configured_labels);
+        ("required_tool_names", string_list_json required_tool_names);
+        ( "provider_rejections",
+          `List (List.map provider_rejection_to_json provider_rejections) );
       ]
   | Accept_rejected { scope; model; reason } ->
     `Assoc
@@ -143,9 +201,41 @@ let masc_internal_error_to_json = function
       [
         ("kind", `String "ambiguous_post_commit");
         ("is_timeout", `Bool is_timeout);
-        ("tools", `List (List.map (fun v -> `String v) tools));
+        ("tools", string_list_json tools);
         ("original_error", `String original_error);
       ]
+
+let summarize_list ?(empty = "none") values =
+  match values with
+  | [] -> empty
+  | _ -> String.concat ", " values
+
+let summarize_provider_rejections rejections =
+  match rejections with
+  | [] -> "none"
+  | _ ->
+      rejections
+      |> List.map (fun r ->
+           Printf.sprintf "%s:%s" r.provider_label r.reason)
+      |> String.concat "; "
+
+let summary_of_masc_internal_error = function
+  | No_tool_capable_provider
+      {
+        cascade_name;
+        configured_labels;
+        required_tool_names;
+        provider_rejections;
+      } ->
+      let cascade_name = cascade_name_to_string cascade_name in
+      Some
+        (Printf.sprintf
+           "No tool-capable provider for cascade %s; required_tools=[%s]; rejected_providers=[%s]; configured=[%s]"
+           cascade_name
+           (summarize_list required_tool_names)
+           (summarize_provider_rejections provider_rejections)
+           (summarize_list configured_labels))
+  | _ -> None
 
 (* #9933: classify emitted [masc_oas_error] payloads by kind so
    dashboards and Grafana alerts can watch the fleet-wide rate per
@@ -292,23 +382,17 @@ let classify_masc_internal_error (err : Agent_sdk.Error.sdk_error) :
            | Some (`String "no_tool_capable_provider") -> (
                match string_opt_of_assoc "cascade_name" json with
                | Some cascade_name ->
-                 let configured_labels =
-                   match json with
-                   | `Assoc fields -> (
-                       match List.assoc_opt "configured_labels" fields with
-                       | Some (`List values) ->
-                         values
-                         |> List.filter_map (function
-                              | `String value -> Some value
-                              | _ -> None)
-                       | _ -> [])
-                   | _ -> []
-                 in
                  Some
                    (No_tool_capable_provider
                       {
                         cascade_name = cascade_name_of_string cascade_name;
-                        configured_labels;
+                        configured_labels =
+                          string_list_of_assoc "configured_labels" json;
+                        required_tool_names =
+                          string_list_of_assoc "required_tool_names" json;
+                        provider_rejections =
+                          provider_rejections_of_assoc "provider_rejections"
+                            json;
                       })
                | None -> None)
            | Some (`String "accept_rejected") -> (

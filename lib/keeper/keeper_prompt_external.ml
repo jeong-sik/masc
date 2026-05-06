@@ -58,9 +58,14 @@ let load_uncached name =
           path;
         None)
   else (
-    Log.Keeper.warn
+    (* P1-4: missing external prompt file is expected during startup when
+       the operator's base-path config does not yet have the file.  The
+       in-source OCaml fallback in keeper_prompt.ml handles this path
+       explicitly, so a WARN here fires on every startup and becomes noise.
+       Downgrade to INFO so the path is visible but not alarming. *)
+    Log.Keeper.info
       "keeper_prompt_external: missing %s (returning None; caller will \
-       use fallback)"
+       use in-source fallback)"
       path;
     None)
 

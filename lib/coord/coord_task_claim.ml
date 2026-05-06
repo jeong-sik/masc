@@ -67,6 +67,12 @@ let clear_soft_do_not_reclaim_reason (task : Masc_domain.task) =
   | Some _ | None -> task
 ;;
 
+let clear_stale_worktree_binding (task : Masc_domain.task) =
+  match task.worktree with
+  | None -> task
+  | Some _ -> { task with worktree = None }
+;;
+
 (** Claim task with file locking (TOCTOU prevention) *)
 let claim_task config ~agent_name ~task_id =
   ensure_initialized config;
@@ -97,7 +103,11 @@ let claim_task config ~agent_name ~task_id =
                     match task.task_status with
                     | _ when !blocked_reason <> None -> task
                     | Todo ->
-                      let task = clear_soft_do_not_reclaim_reason task in
+                      let task =
+                        task
+                        |> clear_soft_do_not_reclaim_reason
+                        |> clear_stale_worktree_binding
+                      in
                       { task with
                         task_status =
                           Claimed { assignee = agent_name; claimed_at = now_iso () }
@@ -226,7 +236,11 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
                 then (
                   match t.task_status with
                   | Todo ->
-                    let t = clear_soft_do_not_reclaim_reason t in
+                    let t =
+                      t
+                      |> clear_soft_do_not_reclaim_reason
+                      |> clear_stale_worktree_binding
+                    in
                     let t' =
                       { t with
                         task_status =

@@ -82,7 +82,8 @@ let handle_keeper_board_tool
     let result =
       Tool_board.handle_tool (Tool_name.Masc.to_string Tool_name.Masc.Board_post) board_args
     in
-    let ok, msg = result in
+    let ok = result.success in
+    let msg = Tool_result.message result in
     Log.Keeper.info
       "handle_tool result: ok=%b msg=%s"
       ok
@@ -106,6 +107,8 @@ let handle_keeper_board_tool
     dispatch_board Tool_name.Masc.Board_stats args
   | Some Tool_name.Keeper.Board_search ->
     dispatch_board Tool_name.Masc.Board_search args
+  | Some Tool_name.Keeper.Board_curation_read ->
+    dispatch_board Tool_name.Masc.Board_curation_read args
   | Some Tool_name.Keeper.Board_delete ->
     dispatch_board Tool_name.Masc.Board_delete args
   | Some Tool_name.Keeper.Board_cleanup ->

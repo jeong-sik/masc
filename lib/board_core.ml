@@ -45,6 +45,8 @@ let create_store () = {
   dirty_comment_ids = Hashtbl.create 512;
   last_flush = Time_compat.now ();
   flusher_inbox = Eio.Stream.create 1000;
+  sub_boards = Hashtbl.create 64;
+  sub_boards_by_slug = Hashtbl.create 64;
 }
 
 (** Remove [value] from the string list stored at [key] in [tbl].
@@ -219,6 +221,9 @@ let comments_path () =
 
 let reactions_path () =
   Filename.concat (board_masc_dir ()) "board_reactions.jsonl"
+
+let sub_boards_path () =
+  Filename.concat (board_masc_dir ()) "board_sub_boards.jsonl"
 
 let ensure_dir path =
   if String.equal path "" || String.equal path "." || String.equal path "/" then ()
@@ -857,35 +862,40 @@ let ensure_reaction_target_unlocked store ~target_type ~target_id =
            if Hashtbl.mem store.comments (Comment_id.to_string cid) then Ok ()
            else Error (Comment_not_found target_id))
 
-let reaction_summaries_unlocked store ~target_type ~target_id ?user_id () =
-  let counts = Hashtbl.create 8 in
-  let reacted = Hashtbl.create 8 in
-  let recent_users = Hashtbl.create 8 in
-  Hashtbl.iter
-    (fun _ (reaction : reaction) ->
-       if (=) reaction.target_type target_type
-          && String.equal reaction.target_id target_id
-       then begin
-         let reaction_user_id = Agent_id.to_string reaction.user_id in
-         let current =
-           Hashtbl.find_opt counts reaction.emoji |> Option.value ~default:0
-         in
-         Hashtbl.replace counts reaction.emoji (current + 1);
-         let users =
-           Hashtbl.find_opt recent_users reaction.emoji
-           |> Option.value ~default:[]
-         in
-         Hashtbl.replace recent_users reaction.emoji
-           ((reaction_user_id, reaction.created_at) :: users);
-         match user_id with
-         | Some user when String.equal reaction_user_id user ->
-             Hashtbl.replace reacted reaction.emoji true
-         | Some _ | None -> ()
-       end)
-    store.reactions;
+type reaction_summary_bucket = {
+  counts : (string, int) Hashtbl.t;
+  reacted : (string, bool) Hashtbl.t;
+  recent_users : (string, (string * float) list) Hashtbl.t;
+}
+
+let create_reaction_summary_bucket () =
+  {
+    counts = Hashtbl.create 8;
+    reacted = Hashtbl.create 8;
+    recent_users = Hashtbl.create 8;
+  }
+
+let add_reaction_to_summary_bucket bucket ?user_id (reaction : reaction) =
+  let reaction_user_id = Agent_id.to_string reaction.user_id in
+  let current =
+    Hashtbl.find_opt bucket.counts reaction.emoji |> Option.value ~default:0
+  in
+  Hashtbl.replace bucket.counts reaction.emoji (current + 1);
+  let users =
+    Hashtbl.find_opt bucket.recent_users reaction.emoji
+    |> Option.value ~default:[]
+  in
+  Hashtbl.replace bucket.recent_users reaction.emoji
+    ((reaction_user_id, reaction.created_at) :: users);
+  match user_id with
+  | Some user when String.equal reaction_user_id user ->
+      Hashtbl.replace bucket.reacted reaction.emoji true
+  | Some _ | None -> ()
+
+let reaction_summaries_of_bucket bucket =
   List.filter_map
     (fun emoji ->
-       let count = Hashtbl.find_opt counts emoji |> Option.value ~default:0 in
+       let count = Hashtbl.find_opt bucket.counts emoji |> Option.value ~default:0 in
        if count = 0 then None
        else
          Some
@@ -893,9 +903,9 @@ let reaction_summaries_unlocked store ~target_type ~target_id ?user_id () =
              emoji;
              count;
              reacted =
-               Hashtbl.find_opt reacted emoji |> Option.value ~default:false;
+               Hashtbl.find_opt bucket.reacted emoji |> Option.value ~default:false;
              recent_user_ids =
-               Hashtbl.find_opt recent_users emoji
+               Hashtbl.find_opt bucket.recent_users emoji
                |> Option.value ~default:[]
                |> List.sort (fun (_, a_ts) (_, b_ts) ->
                       Stdlib.Float.compare b_ts a_ts)
@@ -904,14 +914,46 @@ let reaction_summaries_unlocked store ~target_type ~target_id ?user_id () =
            })
     board_reaction_emojis
 
+let reaction_summaries_unlocked store ~target_type ~target_id ?user_id () =
+  let bucket = create_reaction_summary_bucket () in
+  Hashtbl.iter
+    (fun _ (reaction : reaction) ->
+       if (=) reaction.target_type target_type
+          && String.equal reaction.target_id target_id
+       then add_reaction_to_summary_bucket bucket ?user_id reaction)
+    store.reactions;
+  reaction_summaries_of_bucket bucket
+
+let reaction_summaries_batch_unlocked store ~targets ?user_id () =
+  let target_buckets = Hashtbl.create (List.length targets) in
+  List.iter
+    (fun target ->
+       Hashtbl.replace target_buckets target
+         (create_reaction_summary_bucket ()))
+    targets;
+  Hashtbl.iter
+    (fun _ (reaction : reaction) ->
+       match
+         Hashtbl.find_opt target_buckets
+           (reaction.target_type, reaction.target_id)
+       with
+       | None -> ()
+       | Some bucket ->
+           add_reaction_to_summary_bucket bucket ?user_id reaction)
+    store.reactions;
+  Hashtbl.fold
+    (fun target bucket acc ->
+       (target, reaction_summaries_of_bucket bucket) :: acc)
+    target_buckets []
+
+let normalize_reaction_user_id = function
+  | Some user when not (String.equal (String.trim user) "") ->
+      Some (String.trim user)
+  | Some _ | None -> None
+
 let list_reactions store ~target_type ~target_id ?user_id () =
   maybe_sweep store;
-  let user_id =
-    match user_id with
-    | Some user when not (String.equal (String.trim user) "") ->
-        Some (String.trim user)
-    | Some _ | None -> None
-  in
+  let user_id = normalize_reaction_user_id user_id in
   with_lock store (fun () ->
       match ensure_reaction_target_unlocked store ~target_type ~target_id with
       | Error e -> Error e
@@ -919,6 +961,12 @@ let list_reactions store ~target_type ~target_id ?user_id () =
           Ok
             (reaction_summaries_unlocked store ~target_type ~target_id ?user_id
                ()))
+
+let list_reactions_batch store ~targets ?user_id () =
+  maybe_sweep store;
+  let user_id = normalize_reaction_user_id user_id in
+  with_lock store (fun () ->
+      reaction_summaries_batch_unlocked store ~targets ?user_id ())
 
 let toggle_reaction store ~target_type ~target_id ~user_id ~emoji :
     (reaction_toggle_result, board_error) Result.t =
@@ -971,5 +1019,146 @@ let toggle_reaction store ~target_type ~target_id ~user_id ~emoji :
        | Ok _ -> rewrite_reactions store
        | Error _ -> ());
       result
+
+(** {1 SubBoard Operations} *)
+
+let sub_board_access_to_string = function
+  | Open -> "open"
+  | Members_only -> "members_only"
+  | Owner_only -> "owner_only"
+
+let sub_board_access_of_string_opt = function
+  | "open" -> Some Open
+  | "members_only" -> Some Members_only
+  | "owner_only" -> Some Owner_only
+  | _ -> None
+
+let sub_board_to_yojson (sb : sub_board) : Yojson.Safe.t =
+  `Assoc [
+    ("id", `String (Sub_board_id.to_string sb.id));
+    ("slug", `String sb.slug);
+    ("name", `String sb.name);
+    ("description", `String sb.description);
+    ("owner", `String (Agent_id.to_string sb.owner));
+    ("access", `String (sub_board_access_to_string sb.access));
+    ("created_at", `Float sb.created_at);
+    ("post_count", `Int sb.post_count);
+  ]
+
+let sub_board_of_yojson (json : Yojson.Safe.t) : sub_board option =
+  let open Safe_ops in
+  match json with
+  | `Assoc _ ->
+      let id_s = json_string_opt "id" json |> Option.value ~default:"" in
+      let slug = json_string_opt "slug" json |> Option.value ~default:"" in
+      let name = json_string_opt "name" json |> Option.value ~default:"" in
+      let description = json_string_opt "description" json |> Option.value ~default:"" in
+      let owner_s = json_string_opt "owner" json |> Option.value ~default:"" in
+      let access_s = json_string_opt "access" json |> Option.value ~default:"open" in
+      let created_at = json_float_opt "created_at" json |> Option.value ~default:0.0 in
+      let post_count = json_int_opt "post_count" json |> Option.value ~default:0 in
+      (match Sub_board_id.of_string id_s, Agent_id.of_string owner_s,
+             sub_board_access_of_string_opt access_s with
+       | Ok id, Ok owner, Some access when slug <> "" ->
+           Some { id; slug; name; description; owner; access; created_at; post_count }
+       | _ -> None)
+  | _ -> None
+
+let rewrite_sub_boards store =
+  try
+    ensure_masc_dir ();
+    let path = sub_boards_path () in
+    let buf = Buffer.create 1024 in
+    Hashtbl.iter (fun _ (sb : sub_board) ->
+      Buffer.add_string buf (Yojson.Safe.to_string (sub_board_to_yojson sb));
+      Buffer.add_char buf '\n'
+    ) store.sub_boards;
+    (match Fs_compat.save_file_atomic path (Buffer.contents buf) with
+     | Ok () -> ()
+     | Error msg -> record_persist_error ~where:"rewrite_sub_boards" msg)
+  with Sys_error msg -> record_persist_error ~where:"rewrite_sub_boards" msg
+
+let append_sub_board (sb : sub_board) =
+  try
+    ensure_masc_dir ();
+    let path = sub_boards_path () in
+    Fs_compat.append_file path (Yojson.Safe.to_string (sub_board_to_yojson sb) ^ "\n")
+  with Sys_error msg -> record_persist_error ~where:"append_sub_board" msg
+
+let valid_slug_pattern = Re.Pcre.re {|^[a-z0-9][a-z0-9_-]*$|} |> Re.compile
+
+let create_sub_board store ~slug ~name ~description ~owner
+    ?(access = Open) () : (sub_board, board_error) Result.t =
+  let slug = String.lowercase_ascii (String.trim slug) in
+  if String.length slug < 1 || String.length slug > 64
+     || not (Re.execp valid_slug_pattern slug) then
+    Error (Validation_error
+      (Printf.sprintf "Invalid sub-board slug %S: must be 1-64 lowercase alphanumeric/-/_" slug))
+  else
+    match Agent_id.of_string owner with
+    | Error e -> Error e
+    | Ok owner_id ->
+        with_lock store (fun () ->
+          if Hashtbl.mem store.sub_boards_by_slug slug then
+            Error (Already_exists
+              (Printf.sprintf "Sub-board slug %S already exists" slug))
+          else begin
+            let current = Hashtbl.length store.sub_boards in
+            if current >= Limits.max_sub_boards then
+              Error (Capacity_exceeded { current; max = Limits.max_sub_boards })
+            else begin
+              let id = Sub_board_id.generate () in
+              let sb = {
+                id;
+                slug;
+                name = String.trim name;
+                description = String.trim description;
+                owner = owner_id;
+                access;
+                created_at = Time_compat.now ();
+                post_count = 0;
+              } in
+              Hashtbl.replace store.sub_boards (Sub_board_id.to_string id) sb;
+              Hashtbl.replace store.sub_boards_by_slug slug (Sub_board_id.to_string id);
+              append_sub_board sb;
+              Ok sb
+            end
+          end)
+
+let get_sub_board store ~sub_board_id : (sub_board, board_error) Result.t =
+  with_lock store (fun () ->
+    match Hashtbl.find_opt store.sub_boards sub_board_id with
+    | Some sb -> Ok sb
+    | None ->
+        (* fallback: try slug *)
+        match Hashtbl.find_opt store.sub_boards_by_slug sub_board_id with
+        | Some id ->
+            (match Hashtbl.find_opt store.sub_boards id with
+             | Some sb -> Ok sb
+             | None -> Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id)))
+        | None -> Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id)))
+
+let list_sub_boards store : sub_board list =
+  with_lock store (fun () ->
+    Hashtbl.fold (fun _ sb acc -> sb :: acc) store.sub_boards []
+    |> List.sort (fun (a : sub_board) (b : sub_board) ->
+        compare a.created_at b.created_at))
+
+let delete_sub_board store ~sub_board_id : (unit, board_error) Result.t =
+  with_lock store (fun () ->
+    match Hashtbl.find_opt store.sub_boards sub_board_id with
+    | None ->
+        (match Hashtbl.find_opt store.sub_boards_by_slug sub_board_id with
+         | None -> Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id))
+         | Some id ->
+             Hashtbl.remove store.sub_boards id;
+             Hashtbl.remove store.sub_boards_by_slug sub_board_id;
+             rewrite_sub_boards store;
+             Ok ())
+    | Some sb ->
+        Hashtbl.remove store.sub_boards sub_board_id;
+        Hashtbl.remove store.sub_boards_by_slug sb.slug;
+        rewrite_sub_boards store;
+        Ok ())
 
 (** {1 Voting - Deduplicated} *)

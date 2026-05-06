@@ -33,6 +33,10 @@ function statusGlyph(status: Task['status']): string {
   }
 }
 
+function keeperLabel(keeper: string): string {
+  return keeper === UNASSIGNED ? '미할당' : keeper
+}
+
 const wallColumns = computed<KeeperColumn[]>(() => {
   const grouped = new Map<string, Task[]>()
   for (const t of tasks.value) {
@@ -82,10 +86,11 @@ export function TaskWall() {
           <div
             key=${col.keeper}
             class="flex flex-col gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-2"
+            aria-label=${`${keeperLabel(col.keeper)} 태스크 ${col.tasks.length}건`}
           >
             <div class="flex items-baseline justify-between gap-1 text-2xs">
               <span class="font-mono ${col.keeper === UNASSIGNED ? 'text-text-disabled' : 'text-text-strong'}">
-                ${col.keeper === UNASSIGNED ? '미할당' : col.keeper}
+                ${keeperLabel(col.keeper)}
               </span>
               <span class="text-text-muted">${col.tasks.length}</span>
             </div>
@@ -101,6 +106,9 @@ export function TaskWall() {
                     type="button"
                     class="flex w-full items-center gap-1.5 rounded-[var(--r-0)] border border-[var(--color-border-default)]/50 bg-[var(--color-bg-surface)] px-1.5 py-0.5 text-left text-2xs hover:border-[var(--accent-40)] hover:bg-[var(--accent-10)]"
                     title=${titleAttr}
+                    aria-label=${branch
+                      ? `태스크 ${t.id} 열기: ${t.title}, branch ${branch}`
+                      : `태스크 ${t.id} 열기: ${t.title}`}
                     onClick=${() => navigate('workspace', { section: 'planning', task: t.id })}
                   >
                     <span aria-hidden="true" class="text-text-muted">${statusGlyph(t.status)}</span>

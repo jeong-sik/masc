@@ -308,6 +308,15 @@ let playground_path_of_path ~base_path ~path =
 let basename_of_path path =
   normalize_path_for_prefix_check path |> Filename.basename
 
+let repository_url_basename url =
+  let stripped = normalize_path_for_prefix_check url in
+  if stripped = "" then ""
+  else
+    let base = Filename.basename stripped in
+    if Filename.check_suffix base ".git" then
+      String.sub base 0 (String.length base - 4)
+    else base
+
 let resolve_repository_id_segment ~base_path segment =
   match Repo_store.load_all ~base_path with
   | Error msg ->
@@ -322,6 +331,7 @@ let resolve_repository_id_segment ~base_path segment =
           (fun (repo : repository) ->
             String.equal repo.id segment
             || String.equal repo.name segment
+            || String.equal (repository_url_basename repo.url) segment
             || String.equal
                  (basename_of_path (Repo_store.local_path ~base_path repo))
                  segment)

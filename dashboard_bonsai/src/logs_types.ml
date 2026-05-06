@@ -25,7 +25,16 @@ type entry =
 type response =
   { total : int
   ; entries : entry list
+  ; fetch_status : fetch_status
   }
+
+and fetch_status =
+  | Fetch_pending
+  | Fetch_fresh
+  | Fetch_stale of
+      { reason : string
+      ; consecutive_failures : int
+      }
 
 (* ---------- manual Yojson decoding ---------- *)
 
@@ -74,10 +83,26 @@ let response_of_yojson (json : Yojson.Safe.t) : response =
     | `List lst -> List.map entry_of_yojson lst
     | _ -> []
   in
-  { total = int_field json "total"; entries }
+  { total = int_field json "total"
+  ; entries
+  ; fetch_status = Fetch_fresh
+  }
 ;;
 
 (* ---------- helpers ---------- *)
+
+let fetch_status_label = function
+  | Fetch_pending -> "fetch pending"
+  | Fetch_fresh -> "fetch fresh"
+  | Fetch_stale { consecutive_failures; _ } ->
+    Printf.sprintf "fetch stale x%d" consecutive_failures
+;;
+
+let fetch_status_reason = function
+  | Fetch_pending -> "waiting for first logs response"
+  | Fetch_fresh -> "latest logs response parsed"
+  | Fetch_stale { reason; _ } -> reason
+;;
 
 (** Level comparison — matches [Log.level_to_int] on the server. *)
 let level_order = function
@@ -91,6 +116,7 @@ let level_order = function
 (** Fixture for Phase 1a static render. Remove when fetch lands. *)
 let fixture : response =
   { total = 3
+  ; fetch_status = Fetch_pending
   ; entries =
       [ { seq = 3
         ; ts = "2026-04-19T17:12:03Z"

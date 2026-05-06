@@ -64,7 +64,8 @@ let active_goal_ids_have_eligible_claim_task
             latest_verification_status
             task)
 
-let resolve_claim_goal_scope ?agent_tool_names ~(config : Coord.config)
+let resolve_claim_goal_scope ?agent_tool_names
+    ?(allow_empty_goal_scope_fallback = true) ~(config : Coord.config)
     ~(meta : keeper_meta) () =
   match meta.active_goal_ids with
   | [] ->
@@ -86,19 +87,27 @@ let resolve_claim_goal_scope ?agent_tool_names ~(config : Coord.config)
         let is_auto_goal =
           active_goal_ids_are_auto_keeper_goals config ~meta goal_ids
         in
-        {
-          task_filter = (fun (_task : Masc_domain.task) -> true);
-          mode =
-            (if is_auto_goal then "auto_goal_fallback_all_tasks"
-             else "empty_goal_scope_fallback_all_tasks");
-          effective_goal_ids = [];
-          fallback_reason =
-            Some
-              (if is_auto_goal then
-                 "auto keeper goal has no claimable linked tasks; falling back to all claimable tasks"
-               else
-                 "active goal scope has no claimable linked tasks; falling back to all claimable tasks");
-        }
+        if is_auto_goal || allow_empty_goal_scope_fallback then
+          {
+            task_filter = (fun (_task : Masc_domain.task) -> true);
+            mode =
+              (if is_auto_goal then "auto_goal_fallback_all_tasks"
+               else "empty_goal_scope_fallback_all_tasks");
+            effective_goal_ids = [];
+            fallback_reason =
+              Some
+                (if is_auto_goal then
+                   "auto keeper goal has no claimable linked tasks; falling back to all claimable tasks"
+                 else
+                   "active goal scope has no claimable linked tasks; falling back to all claimable tasks");
+          }
+        else
+          {
+            task_filter = scoped_filter;
+            mode = "active_goal_ids";
+            effective_goal_ids = goal_ids;
+            fallback_reason = None;
+          }
       else
         {
           task_filter = scoped_filter;

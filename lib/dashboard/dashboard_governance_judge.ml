@@ -483,7 +483,7 @@ let prompt_for_facts facts_json =
 
 let compute_judgments
     ~(masc_tools : Masc_domain.tool_schema list)
-    ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
+    ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.t)
     ~build_facts =
   let cascade_name =
     Keeper_cascade_profile.cascade_name_for_use
@@ -627,7 +627,7 @@ let should_backoff ~sw ~net =
 
 let refresh_once ~sw ~net
     ~(masc_tools : Masc_domain.tool_schema list)
-    ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
+    ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.t)
     ~base_path ~build_facts =
   let st = get_state base_path in
   (* Cycle-start log so an operator can confirm the daemon fiber is alive.
@@ -703,7 +703,7 @@ let refresh_once ~sw ~net
 
 let start ~sw ~clock ~net ~base_path
     ~(masc_tools : Masc_domain.tool_schema list)
-    ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
+    ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.t)
     ~build_facts () =
   (* Ensure governance directories exist before first read/write *)
   ensure_dir (governance_dir base_path);

@@ -83,6 +83,7 @@ val derive_failure_state :
   observation:Keeper_world_observation.world_observation ->
   previous_state:social_state option ->
   is_auto_recoverable:bool ->
+  sdk_error:Agent_sdk.Error.sdk_error option ->
   reason:string ->
   social_state * transition_reason
 

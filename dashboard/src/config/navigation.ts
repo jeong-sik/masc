@@ -29,6 +29,7 @@ type SurfaceSectionId =
   | 'connector-status'      // all connectors with internal connector picker
   // workspace
   | 'board'
+  | 'sub-boards'     // Phase 2: SubBoard named spaces within the board
   | 'planning'       // Phase 1: absorbs goals
   | 'repositories'   // Multi-repository cockpit and keeper access mapping
   | 'verification'   // CDAL follow-up (#7531): Mission detail verification table
@@ -228,6 +229,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Board',
       description: 'Human, agent, automation, and system posts.',
       params: { section: 'board' },
+    },
+    {
+      id: 'sub-boards',
+      label: 'Sub-Boards',
+      description: 'Named spaces within the board with distinct access policies.',
+      params: { section: 'sub-boards' },
     },
     {
       id: 'planning',

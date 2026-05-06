@@ -1,4 +1,4 @@
-(** Keeper_passive_loop_detector — detect keepers stuck in passive-read loops.
+(** Keeper_passive_loop_detector — detect keepers stuck in no-progress loops.
 
     A "passive loop" occurs when a keeper completes N consecutive turns
     using only read-only / status tools without any execution or completion
@@ -7,7 +7,17 @@
     calls but they are all passive reads that cannot satisfy an owned task
     contract.
 
+    The same detector also tracks repeated required-tool contract failures
+    where an actionable turn returns no keeper tool call. Those failed turns
+    never reach the normal post-success progress classifier, so the keeper
+    failure path records them explicitly here.
+
     @since #12799 *)
+
+val progress_class_of_terminal_reason_code : string -> string option
+(** Map typed terminal-reason codes into detector progress classes. Returns
+    [Some _] only for required-tool failures that should count toward an
+    inter-turn no-progress loop. *)
 
 val record_turn :
   keeper_name:string ->
@@ -20,6 +30,8 @@ val record_turn :
     [Keeper_tool_disclosure.tool_progress_class] for the turn's dominant
     tool usage:
     - ["passive_status"] or ["claim_context"] increments the streak.
+    - ["required_tool_no_call"] or ["required_tool_unsatisfied"] increments
+      the required-tool failure streak.
     - Any other value (["execution"] / ["completion"]) resets the streak
       and clears the detection latch.
 

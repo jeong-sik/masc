@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Keeper } from '../types'
 import {
   keeperDisplayStatus,
+  keeperRuntimeBlockerLabel,
   keeperRecentActionLabel,
   keeperRecentHeartbeatLabel,
   keeperRuntimeHint,
@@ -87,6 +88,25 @@ describe('mission keeper runtime helpers', () => {
 
     expect(keeperRuntimeHint(keeper)).toBe(
       '계속 진행 승인 대기 · Mutating tools [keeper_fs_edit] committed before the turn timed out.',
+    )
+  })
+
+  it('labels backend runtime blocker classes used by keeper_status_bridge', () => {
+    expect(keeperRuntimeBlockerLabel('no_tool_capable_provider')).toBe('도구 실행 Provider 없음')
+    expect(keeperRuntimeBlockerLabel('fiber_unresolved')).toBe('Fiber 미해결')
+    expect(keeperRuntimeBlockerLabel('stale_turn_timeout')).toBe('오래된 턴 만료')
+  })
+
+  it('turns raw backend blocker codes into operator-readable hints', () => {
+    const keeper = {
+      name: 'tool-less',
+      status: 'idle',
+      runtime_blocker_class: 'no_tool_capable_provider',
+      runtime_blocker_summary: 'no_tool_capable_provider',
+    } as Keeper
+
+    expect(keeperRuntimeHint(keeper)).toBe(
+      '요구 도구를 실행할 수 있는 provider가 없어 라우팅 또는 tool surface 확인이 필요합니다.',
     )
   })
 

@@ -5,7 +5,7 @@
 
 import { useState } from 'preact/hooks'
 
-export interface RovingTabIndexResult {
+interface RovingTabIndexResult {
   activeIndex: number
   handleKeyDown: (e: KeyboardEvent) => void
   getTabIndex: (index: number) => number

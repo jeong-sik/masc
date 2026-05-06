@@ -31,7 +31,12 @@ let make_cascade_exhausted reason =
 let make_no_tool_capable () =
   Owne.sdk_error_of_masc_internal_error
     (Owne.No_tool_capable_provider
-       { cascade_name = cascade_name "test_cascade"; configured_labels = [] })
+       {
+         cascade_name = cascade_name "test_cascade";
+         configured_labels = [];
+         required_tool_names = [];
+         provider_rejections = [];
+       })
 
 let make_accept_rejected () =
   Owne.sdk_error_of_masc_internal_error

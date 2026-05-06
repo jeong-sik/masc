@@ -566,6 +566,47 @@ let repos_dir_of_keeper config agent_name =
   in
   Filename.concat config.base_path repos_rel
 
+let strip_trailing_slashes path =
+  let rec loop i =
+    if i > 0 && path.[i - 1] = '/' then loop (i - 1) else i
+  in
+  let len = loop (String.length path) in
+  if len = String.length path then path else String.sub path 0 len
+
+let suffix_under ~prefix path =
+  let prefix = strip_trailing_slashes prefix in
+  let path = strip_trailing_slashes path in
+  if String.equal path prefix then Some ""
+  else
+    let prefix_with_sep = prefix ^ "/" in
+    if String.starts_with ~prefix:prefix_with_sep path then
+      Some
+        (String.sub path (String.length prefix_with_sep)
+           (String.length path - String.length prefix_with_sep))
+    else None
+
+let keeper_visible_worktree_path ~config ~agent_name ~host_path =
+  if not (keeper_uses_docker_sandbox ~config ~agent_name) then host_path
+  else
+    let safe_name = Playground_paths.sanitize_keeper_name agent_name in
+    let container_repos_dir =
+      Filename.concat
+        (Filename.concat
+           Env_config_keeper.DockerPlayground.container_playground_root
+           safe_name)
+        "repos"
+    in
+    match suffix_under ~prefix:(repos_dir_of_keeper config agent_name) host_path with
+    | Some "" -> container_repos_dir
+    | Some suffix -> Filename.concat container_repos_dir suffix
+    | None -> host_path
+
+let worktree_next_step keeper_path =
+  Printf.sprintf
+    "Next: keeper_bash cwd=%S cmd=\"git status -sb\"; after edits, git \
+     add/commit/push, then keeper_shell op=gh cmd=\"pr create --draft ...\"."
+    keeper_path
+
 type repo_candidate = {
   name : string;
   path : string;
@@ -996,8 +1037,11 @@ let auto_provision_sandbox_clone ~config ~agent_name ~repos_dir ~repo_name =
                      ( clone_path,
                        Some
                          (Printf.sprintf
-                            "Sandbox clone auto-provisioned from origin %s (discovered via workspace repo %s)."
-                            origin_url source_root) )))
+                            "Sandbox clone auto-provisioned from %s."
+                            (match extract_github_org_repo origin_url with
+                             | Some org_repo ->
+                                 "https://github.com/" ^ org_repo ^ ".git"
+                             | None -> "a validated local workspace origin")) )))
   | matches ->
       Error
         (workspace_repo_ambiguous_error ~repo_name ~search_root ~matches)
@@ -1129,6 +1173,10 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
 
           let existing_worktree_ok ?(created_concurrently=false) () =
             update_agent_current_task ();
+            let keeper_path =
+              keeper_visible_worktree_path ~config ~agent_name
+                ~host_path:worktree_path
+            in
             let race_note =
               if created_concurrently then
                 "\n  Note: Worktree was created concurrently by another worker."
@@ -1138,9 +1186,9 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
             Ok
               (Printf.sprintf
                  "Worktree already exists:\n  Path: %s\n  Branch: %s\n  \
-                  Repo: %s%s%s\n\nNext: cd %s"
-                 worktree_path branch_name repo_name race_note link_note
-                 worktree_path)
+                  Repo: %s%s%s\n\n%s"
+                 keeper_path branch_name repo_name race_note link_note
+                 (worktree_next_step keeper_path))
           in
 
           (* Create .worktrees directory if not exists *)
@@ -1215,6 +1263,10 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
                 if exit_code = Unix.WEXITED 0 then begin
                   (* Update agent's current_worktree in state *)
                   update_agent_current_task ();
+                  let keeper_path =
+                    keeper_visible_worktree_path ~config ~agent_name
+                      ~host_path:worktree_path
+                  in
 
                   (* Link to task *)
                   let link_note = maybe_link_task () in
@@ -1225,9 +1277,10 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
                     agent_name branch_name worktree_path repo_name task_id (now_iso ()) in
                   log_event config (Yojson.Safe.from_string event);
 
-                  Ok (Printf.sprintf "Worktree created:\n  Path: %s\n  Branch: %s\n  Repo: %s%s%s\n\nNext: cd %s && work && gh pr create --draft"
-                      worktree_path branch_name repo_name note
-                      (provision_note ^ link_note) worktree_path)
+                  Ok (Printf.sprintf "Worktree created:\n  Path: %s\n  Branch: %s\n  Repo: %s%s%s\n\n%s"
+                      keeper_path branch_name repo_name note
+                      (provision_note ^ link_note)
+                      (worktree_next_step keeper_path))
                 end
                 else if is_usable_git_worktree worktree_path then
                   existing_worktree_ok ~created_concurrently:true ()
@@ -1283,11 +1336,15 @@ let worktree_remove_r config ~agent_name ~task_id : string masc_result =
       match find_matching_clone repos_dir with
       | Some root -> Ok root
       | None ->
+        (* #13302 P2-1 follow-up: typed variant replaces the previous
+           [IoError "Worktree ... not found under ..."] string-formatted
+           error.  #13304 demoted the WARN by matching that prefix in
+           [coord_task.cleanup_worktree_for_transition]; the typed
+           variant here lets the caller pattern-match safely so a future
+           message-format change does not silently regress the demotion. *)
         Error
-          (System (System_error.IoError
-             (Printf.sprintf
-                "Worktree %s not found under sandbox repo clones in %s"
-                worktree_name repos_dir)))
+          (System (System_error.WorktreeNotFound
+             { worktree = worktree_name; searched_in = repos_dir }))
     in
     match resolve_existing_worktree_root () with
     | Error e -> Error e

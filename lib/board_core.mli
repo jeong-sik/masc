@@ -301,6 +301,16 @@ val list_reactions :
   unit ->
   (reaction_summary list, board_error) Result.t
 
+val list_reactions_batch :
+  store ->
+  targets:(reaction_target_type * string) list ->
+  ?user_id:string ->
+  unit ->
+  ((reaction_target_type * string) * reaction_summary list) list
+(** Returns reaction summaries for all requested [targets] after one
+    scan of the reaction table. Intended for callers that already hold
+    valid post/comment ids from the board store. *)
+
 val toggle_reaction :
   store ->
   target_type:reaction_target_type ->
@@ -308,3 +318,46 @@ val toggle_reaction :
   user_id:string ->
   emoji:string ->
   (reaction_toggle_result, board_error) Result.t
+
+(** {1 SubBoard operations} *)
+
+val sub_boards_path : unit -> string
+(** Path to the sub-boards JSONL snapshot under
+    [<base>/.masc/board_sub_boards.jsonl]. *)
+
+val sub_board_access_to_string : sub_board_access -> string
+val sub_board_access_of_string_opt : string -> sub_board_access option
+
+val sub_board_to_yojson : sub_board -> Yojson.Safe.t
+val sub_board_of_yojson : Yojson.Safe.t -> sub_board option
+
+val rewrite_sub_boards : store -> unit
+(** Atomically rewrites {!sub_boards_path} from [store.sub_boards]. *)
+
+val create_sub_board :
+  store ->
+  slug:string ->
+  name:string ->
+  description:string ->
+  owner:string ->
+  ?access:sub_board_access ->
+  unit ->
+  (sub_board, board_error) Result.t
+(** Creates a new sub-board with the given slug (unique, lowercase).
+    Returns [Validation_error] when the slug is invalid or already taken,
+    [Capacity_exceeded] when the sub-board limit is reached. *)
+
+val get_sub_board :
+  store ->
+  sub_board_id:string ->
+  (sub_board, board_error) Result.t
+(** Resolves a sub-board by its ID or slug. *)
+
+val list_sub_boards : store -> sub_board list
+(** Returns all sub-boards sorted by [created_at] ascending. *)
+
+val delete_sub_board :
+  store ->
+  sub_board_id:string ->
+  (unit, board_error) Result.t
+(** Removes a sub-board by ID or slug and persists the change. *)

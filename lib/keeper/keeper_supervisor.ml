@@ -578,6 +578,7 @@ let restore_reconcile_continue_gate (ctx : _ context) (meta : keeper_meta) =
       ~tool_name:"keeper_continue_after_reconcile"
       ~input
       ~risk_level:Keeper_approval_queue.Critical
+      ~base_path:ctx.config.base_path
       ~on_resolution:(fun decision ->
         match decision with
         | Agent_sdk.Hooks.Approve

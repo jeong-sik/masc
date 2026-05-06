@@ -34,6 +34,21 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/oas-agent-sdk-pin.sh"
+opam_lock_path="${MASC_OPAM_LOCK_PATH:-/tmp/me-opam-switch.lock}"
+
+if [[ "${MASC_OPAM_LOCK:-1}" != "0" \
+      && "${MASC_SKIP_OPAM_LOCK:-0}" != "1" \
+      && "${MASC_OPAM_LOCK_HELD:-0}" != "1" ]]; then
+  script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+  echo "[opam-pin] waiting for opam switch lock ${opam_lock_path}" >&2
+  if command -v lockf >/dev/null 2>&1; then
+    exec lockf -k "$opam_lock_path" env MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
+  elif command -v flock >/dev/null 2>&1; then
+    exec flock "$opam_lock_path" env MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
+  else
+    echo "[opam-pin] WARN: neither lockf nor flock found; mutating opam switch unlocked" >&2
+  fi
+fi
 
 # --- Pin SHAs (bump these when upstream changes are needed) ---
 readonly WEBRTC_SHA="1b7993605b293f45169369d488f970ba15132a9f"

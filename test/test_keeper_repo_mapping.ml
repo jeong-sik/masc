@@ -272,6 +272,39 @@ let test_validate_path_access_playground_repo_uses_registered_name () =
             ("expected playground repo path to resolve by registered name, got: "
              ^ e))
 
+let test_validate_path_access_playground_repo_uses_url_basename () =
+  with_temp_base_path (fun base_path ->
+      let root_repo =
+        { (sample_repo "me") with name = "me"; local_path = base_path }
+      in
+      let masc_path =
+        Filename.concat base_path "workspace/yousleepwhen/masc-mcp"
+      in
+      ensure_dir masc_path;
+      let masc_repo =
+        { (sample_repo "masc") with
+          name = "masc";
+          url = "https://github.com/jeong-sik/masc-mcp.git";
+          local_path = Filename.concat base_path ".masc/repos/masc";
+        }
+      in
+      write_repositories base_path [ root_repo; masc_repo ];
+      write_mapping base_path "executor" [ "masc" ];
+      let path =
+        Filename.concat base_path
+          ".masc/playground/docker/executor/repos/masc-mcp/lib"
+      in
+      ensure_dir path;
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
+          ~base_path ~path
+      with
+      | Ok () -> ()
+      | Error e ->
+          Alcotest.fail
+            ("expected playground repo path to resolve by repository URL basename, got: "
+             ^ e))
+
 let test_validate_path_access_playground_unknown_repo_denied () =
   with_temp_base_path (fun base_path ->
       let root_repo =
@@ -590,6 +623,8 @@ let () =
             test_validate_path_access_playground_repos_root_ignores_base_repo;
           Alcotest.test_case "playground repo resolves registered name" `Quick
             test_validate_path_access_playground_repo_uses_registered_name;
+          Alcotest.test_case "playground repo resolves repository URL basename" `Quick
+            test_validate_path_access_playground_repo_uses_url_basename;
           Alcotest.test_case "playground unknown repo denied" `Quick
             test_validate_path_access_playground_unknown_repo_denied;
         ] );

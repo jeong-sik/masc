@@ -20,6 +20,10 @@ val do_not_reclaim_reason_blocks_claim : string option -> string option
 val clear_soft_do_not_reclaim_reason : Masc_domain.task -> Masc_domain.task
 (** Clears soft cycle/routing reasons before a task is claimed. *)
 
+val clear_stale_worktree_binding : Masc_domain.task -> Masc_domain.task
+(** Clears per-claim worktree metadata before a new owner claims a task or a
+    released task returns to [Todo]. *)
+
 (** {1 Task claiming} *)
 
 val claim_task :

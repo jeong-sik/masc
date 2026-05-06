@@ -7,8 +7,9 @@
     sources (here: brr's [Fut]-based Fetch API) into the incremental
     computation.
 
-    Initial value is [Logs_types.fixture]; it is replaced on the first
-    successful fetch. *)
+    Initial value is [Logs_types.fixture] with [Fetch_pending]. It is
+    replaced on the first successful fetch, and failed polls mark the
+    last good response as stale. *)
 
 let var : Logs_types.response Bonsai.Expert.Var.t =
   Bonsai.Expert.Var.create Logs_types.fixture

@@ -430,7 +430,7 @@ let claim_next_r
       let sorted = List.sort (fun a b ->
         let priority_cmp = compare (effective_priority a) (effective_priority b) in
         if priority_cmp <> 0 then priority_cmp
-        else compare b.created_at a.created_at  (* Newer first to unblock stale queues *)
+        else compare a.created_at b.created_at
       ) working_tasks in
       (* Identify blocked Todo tasks for observability *)
       let all_todo = List.filter (fun (t : Masc_domain.task) ->
@@ -596,7 +596,11 @@ let claim_next_r
           (* Claim this task *)
           let new_tasks = List.map (fun (t : task) ->
             if t.id = task.id then
-              let t = Coord_task.clear_soft_do_not_reclaim_reason t in
+              let t =
+                t
+                |> Coord_task.clear_soft_do_not_reclaim_reason
+                |> Coord_task.clear_stale_worktree_binding
+              in
               {
                 t with
                 task_status =
@@ -653,6 +657,12 @@ let claim_next_r
                    (Masc_domain.Claimed
                       { assignee = agent_name; claimed_at = now_iso () })
                  ());
+          (try
+             (Atomic.get Coord_hooks.claim_post_provision_fn) config ~agent_name
+               ~task_id:task.id
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | _ -> ());
 
           let message = match released_task_id with
             | Some rid ->
@@ -721,7 +731,10 @@ let release_stale_claims config ~ttl_seconds =
                   ("age_s", age_seconds_json ts);
                   ("ts", `String now_str);
                 ]);
-                { task with task_status = Todo }
+                { task with
+                  task_status = Todo;
+                  worktree = None;
+                }
               end else task
           | InProgress { assignee; started_at } ->
               let ts = parse_iso8601 ~default_time:(now_f -. ttl_seconds -. 1.0) started_at in
@@ -734,7 +747,10 @@ let release_stale_claims config ~ttl_seconds =
                   ("age_s", age_seconds_json ts);
                   ("ts", `String now_str);
                 ]);
-                { task with task_status = Todo }
+                { task with
+                  task_status = Todo;
+                  worktree = None;
+                }
               end else task
           | AwaitingVerification _ -> task  (* leave alone; awaiting verifier *)
         | Todo | Done _ | Cancelled _ -> task

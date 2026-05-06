@@ -484,6 +484,56 @@ Returns structured JSON with all check results. Read-only, no side effects.";
   };
 ]
 
+(** Dedicated GitHub PR workflow tools. *)
+let keeper_github_pr_tools : Masc_domain.tool_schema list = [
+  {
+    name = "keeper_pr_list";
+    description = "List GitHub pull requests with keeper-scoped credentials. \
+Runs credential preflight before gh, accepts repo owner/name or cwd, and returns gh JSON. Read-only.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("repo", `Assoc [("type", `String "string"); ("description", `String "GitHub repo (owner/name). Optional when cwd is a git repo.")]);
+        ("cwd", `Assoc [("type", `String "string"); ("description", `String "Optional keeper sandbox repo/worktree cwd.")]);
+        ("state", `Assoc [("type", `String "string"); ("enum", `List [`String "open"; `String "closed"; `String "merged"; `String "all"]); ("description", `String "PR state filter. Default open.")]);
+        ("limit", `Assoc [("type", `String "integer"); ("description", `String "Max PRs to return, 1-100. Default 20.")]);
+      ]);
+    ];
+  };
+  {
+    name = "keeper_pr_status";
+    description = "Read one GitHub PR status/details with keeper-scoped credentials. \
+Runs credential preflight before gh. Pass pr_number (preferred) or number.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("repo", `Assoc [("type", `String "string"); ("description", `String "GitHub repo (owner/name). Optional when cwd is a git repo.")]);
+        ("cwd", `Assoc [("type", `String "string"); ("description", `String "Optional keeper sandbox repo/worktree cwd.")]);
+        ("pr_number", `Assoc [("type", `String "integer"); ("description", `String "PR number (preferred field name)")]);
+        ("number", `Assoc [("type", `String "integer"); ("description", `String "PR number (legacy alias for pr_number)")]);
+      ]);
+    ];
+  };
+  {
+    name = "keeper_pr_create";
+    description = "Create a draft GitHub pull request with keeper-scoped credentials. \
+Draft-only by policy: omit draft or set draft=true. Requires delivery, coding, or full preset.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("repo", `Assoc [("type", `String "string"); ("description", `String "GitHub repo (owner/name). Optional when cwd is a git repo.")]);
+        ("cwd", `Assoc [("type", `String "string"); ("description", `String "Keeper sandbox repo/worktree cwd. Required when repo cannot infer the branch context.")]);
+        ("title", `Assoc [("type", `String "string"); ("description", `String "PR title")]);
+        ("body", `Assoc [("type", `String "string"); ("description", `String "PR body")]);
+        ("base", `Assoc [("type", `String "string"); ("description", `String "Optional base branch")]);
+        ("head", `Assoc [("type", `String "string"); ("description", `String "Optional head branch")]);
+        ("draft", `Assoc [("type", `String "boolean"); ("description", `String "Must be true if provided; ready PR creation is rejected.")]);
+      ]);
+      ("required", `List [`String "title"; `String "body"]);
+    ];
+  };
+]
+
 (** PR review tools — read diffs, leave comments, approve/request changes. *)
 let keeper_pr_review_tools : Masc_domain.tool_schema list = [
   {
@@ -968,7 +1018,7 @@ let all_read_only_keeper_tools () : string list =
    Built from [all_shards] (every shard category flows through
    automatically — no future fix will regress the registry when
    a new shard is added) plus the two non-shard tool lists
-   [keeper_preflight_tools] and [keeper_pr_review_tools] that
+   [keeper_preflight_tools], [keeper_github_pr_tools], and [keeper_pr_review_tools] that
    live in this module but are not owned by any shard definition.
 
    Callers must still run [Config.dedupe_schemas] because a
@@ -981,7 +1031,8 @@ let all_keeper_tool_schemas : Masc_domain.tool_schema list =
       (fun _name (shard : shard) acc -> shard.tools @ acc)
       all_shards []
   in
-  shard_schemas @ keeper_preflight_tools @ keeper_pr_review_tools
+  shard_schemas @ keeper_preflight_tools @ keeper_github_pr_tools
+  @ keeper_pr_review_tools
 
 let recovery_minimum_shard_names () : string list =
   StringMap.fold (fun name shard acc ->

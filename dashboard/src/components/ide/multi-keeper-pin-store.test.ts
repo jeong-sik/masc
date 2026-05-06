@@ -5,7 +5,9 @@ import {
   headPinnedKeeper,
   pinKeeper,
   pinnedKeepers,
+  promotePinAt,
   reorderPins,
+  unpinHead,
   unpinKeeper,
 } from './multi-keeper-pin-store'
 
@@ -215,5 +217,101 @@ describe('multi-keeper-pin-store — reorderPins (RFC-0027 PR-γ §4)', () => {
     expect(pinnedKeepers.value.entries.length).toBe(PIN_CAP)
     reorderPins('c', 3)
     expect(pinnedKeepers.value.entries.length).toBe(PIN_CAP)
+  })
+})
+
+describe('multi-keeper-pin-store — promotePinAt (RFC-0027 PR-γ-2 keyboard)', () => {
+  function seed4(): void {
+    pinKeeper('a')
+    pinKeeper('b')
+    pinKeeper('c')
+    pinKeeper('d')
+    // pinKeeper inserts at head, so post-seed order is [d, c, b, a].
+  }
+
+  it('promotePinAt(2) moves the slot-2 entry to head', () => {
+    seed4()
+    promotePinAt(2)
+    expect(pinnedKeepers.value.entries.map(e => e.keeperName)).toEqual(['c', 'd', 'b', 'a'])
+  })
+
+  it('promotePinAt(4) moves the slot-4 entry to head', () => {
+    seed4()
+    promotePinAt(4)
+    expect(pinnedKeepers.value.entries.map(e => e.keeperName)).toEqual(['a', 'd', 'c', 'b'])
+  })
+
+  it('promotePinAt(1) is a no-op (already head)', () => {
+    seed4()
+    const before = pinnedKeepers.value
+    promotePinAt(1)
+    expect(pinnedKeepers.value).toBe(before)
+  })
+
+  it('promotePinAt(0) is a no-op (1-indexed; idx<1 rejected)', () => {
+    seed4()
+    const before = pinnedKeepers.value
+    promotePinAt(0)
+    expect(pinnedKeepers.value).toBe(before)
+  })
+
+  it('promotePinAt(idx > entries.length) is a no-op', () => {
+    seed4()
+    const before = pinnedKeepers.value
+    promotePinAt(5)
+    promotePinAt(99)
+    expect(pinnedKeepers.value).toBe(before)
+  })
+
+  it('promotePinAt preserves pinnedAtMs (position-only, not fresh pin)', () => {
+    seed4()
+    const slot2Before = pinnedKeepers.value.entries[1]!
+    const tsBefore = slot2Before.pinnedAtMs
+    vi.advanceTimersByTime(120000)
+    promotePinAt(2)
+    const head = pinnedKeepers.value.entries[0]!
+    expect(head.keeperName).toBe(slot2Before.keeperName)
+    expect(head.pinnedAtMs).toBe(tsBefore)
+  })
+
+  it('promotePinAt is a no-op on empty pin list', () => {
+    const before = pinnedKeepers.value
+    promotePinAt(1)
+    promotePinAt(2)
+    expect(pinnedKeepers.value).toBe(before)
+  })
+})
+
+describe('multi-keeper-pin-store — unpinHead (RFC-0027 PR-γ-2 keyboard)', () => {
+  it('removes the head entry, leaving the rest in order', () => {
+    pinKeeper('a')
+    pinKeeper('b')
+    pinKeeper('c')
+    // order = [c, b, a]
+    unpinHead()
+    expect(pinnedKeepers.value.entries.map(e => e.keeperName)).toEqual(['b', 'a'])
+  })
+
+  it('updates headPinnedKeeper to the new head', () => {
+    pinKeeper('a')
+    pinKeeper('b')
+    expect(headPinnedKeeper.value?.keeperName).toBe('b')
+    unpinHead()
+    expect(headPinnedKeeper.value?.keeperName).toBe('a')
+  })
+
+  it('is a no-op when nothing is pinned', () => {
+    const before = pinnedKeepers.value
+    unpinHead()
+    expect(pinnedKeepers.value).toBe(before)
+  })
+
+  it('clears the collection when called repeatedly', () => {
+    pinKeeper('a')
+    pinKeeper('b')
+    unpinHead()
+    unpinHead()
+    expect(pinnedKeepers.value.entries.length).toBe(0)
+    expect(headPinnedKeeper.value).toBeNull()
   })
 })

@@ -150,8 +150,14 @@ let run_dune_local base bin_dir ?(env = []) ?(unset_env = []) subcommand =
   in
   let path = Printf.sprintf "%s:%s" bin_dir system_path in
   let lock_path = Filename.concat base "dune-local.lock" in
+  let opam_lock_path = Filename.concat base "opam-switch.lock" in
   let full_env =
-    [ ("PATH", path); ("GIT_CEILING_DIRECTORIES", base); ("DUNE_LOCAL_LOCK", lock_path) ]
+    [
+      ("PATH", path);
+      ("GIT_CEILING_DIRECTORIES", base);
+      ("DUNE_LOCAL_LOCK", lock_path);
+      ("MASC_OPAM_LOCK_PATH", opam_lock_path);
+    ]
     @ List.filter
         (fun (k, _) ->
           k <> "PATH" && k <> "GIT_CEILING_DIRECTORIES" && k <> "DUNE_LOCAL_LOCK")
@@ -238,6 +244,18 @@ printf '%%s\n' "${1:-build}" >> %s
 exit 0
 |}
            (quote dune_log));
+      let opam_lock_path = Filename.concat dir "opam.lock" in
+      let lockf_log = Filename.concat dir "lockf-calls.log" in
+      write_executable
+        (Filename.concat bin_dir "lockf")
+        (Printf.sprintf
+           {|#!/bin/sh
+printf 'lock=%%s argv=%%s\n' "$2" "$*" >> %s
+if [ "$2" = %s ]; then exit 97; fi
+shift 2
+exec "$@"
+|}
+           (quote lockf_log) (quote opam_lock_path));
       (* Use a minimal PATH (no opam install directories) so that
          'command -v opam' fails and the guard is skipped.
          opam is typically in ~/.opam/SWITCH/bin/, not in /usr/bin or /bin. *)
@@ -250,13 +268,115 @@ exit 0
               ("PATH", minimal_path);
               ("GIT_CEILING_DIRECTORIES", dir);
               ("DUNE_LOCAL_LOCK", lock_path);
+              ("MASC_OPAM_LOCK_PATH", opam_lock_path);
             ]
           ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
           (Printf.sprintf "bash %s build"
              (quote (Filename.concat scripts_dir "dune-local.sh")))
       in
       check int "exits zero when opam absent" 0 code;
+      let lock_log =
+        if Sys.file_exists lockf_log then read_file lockf_log else ""
+      in
+      check bool "opam lockf not invoked" false
+        (contains_substring lock_log opam_lock_path);
       check bool "dune was invoked" true (Sys.file_exists dune_log))
+
+let test_opam_lockf_reexec_env_passthrough () =
+  with_temp_dir "dune-local-opam-lockf" (fun dir ->
+      let bin_dir, dune_log =
+        setup_fake_repo dir ~pin_check_exit_code:0
+          ~pin_check_stderr_msg:"pin ok"
+      in
+      let lockf_log = Filename.concat dir "lockf-calls.log" in
+      write_executable
+        (Filename.concat bin_dir "lockf")
+        (Printf.sprintf
+           {|#!/bin/sh
+printf 'held=%%s argv=%%s\n' "${MASC_OPAM_LOCK_HELD:-unset}" "$*" >> %s
+shift 2
+exec "$@"
+|}
+           (quote lockf_log));
+      let opam_lock_path = Filename.concat dir "opam.lock" in
+      let code, _stdout, _stderr =
+        run_dune_local dir bin_dir
+          ~env:[ ("MASC_OPAM_LOCK_PATH", opam_lock_path) ]
+          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_OPAM_LOCK_HELD" ]
+          "build"
+      in
+      check int "exits zero through lockf reexec" 0 code;
+      check bool "lockf invoked" true (Sys.file_exists lockf_log);
+      let lock_log = read_file lockf_log in
+      check bool "lock path passed to lockf" true
+        (contains_substring lock_log opam_lock_path);
+      check bool "held env passed through argv" true
+        (contains_substring lock_log "MASC_OPAM_LOCK_HELD=1");
+      check bool "dune was invoked after reexec" true
+        (Sys.file_exists dune_log))
+
+let test_opam_flock_reexec_env_passthrough () =
+  with_temp_dir "dune-local-opam-flock" (fun dir ->
+      let bin_dir, dune_log =
+        setup_fake_repo dir ~pin_check_exit_code:0
+          ~pin_check_stderr_msg:"pin ok"
+      in
+      write_executable (Filename.concat bin_dir "dirname")
+        {|#!/bin/sh
+case "$1" in
+  */*) printf '%s\n' "${1%/*}" ;;
+  *) printf '.\n' ;;
+esac
+|};
+      write_executable (Filename.concat bin_dir "basename")
+        {|#!/bin/sh
+base="${1##*/}"
+printf '%s\n' "$base"
+|};
+      let flock_log = Filename.concat dir "flock-calls.log" in
+      write_executable
+        (Filename.concat bin_dir "flock")
+        (Printf.sprintf
+           {|#!/bin/sh
+printf 'held=%%s argv=%%s\n' "${MASC_OPAM_LOCK_HELD:-unset}" "$*" >> %s
+shift
+if [ "${1:-}" = "env" ]; then
+  shift
+  export "$1"
+  shift
+fi
+exec "$@"
+|}
+           (quote flock_log));
+      let opam_lock_path = Filename.concat dir "opam.lock" in
+      let dune_lock_path = Filename.concat dir "dune-local.lock" in
+      let code, _stdout, _stderr =
+        run_shell ~cwd:dir
+          ~env:
+            [
+              ("PATH", Printf.sprintf "%s:/bin" bin_dir);
+              ("GIT_CEILING_DIRECTORIES", dir);
+              ("DUNE_LOCAL_LOCK", dune_lock_path);
+              ("MASC_OPAM_LOCK_PATH", opam_lock_path);
+              ("MASC_SKIP_DEPS_CHECK", "1");
+              ("MASC_SKIP_OCAML_VERSION_CHECK", "1");
+            ]
+          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_OPAM_LOCK_HELD" ]
+          (Printf.sprintf "bash %s build"
+             (quote
+                (Filename.concat
+                   (Filename.concat dir "scripts")
+                   "dune-local.sh")))
+      in
+      check int "exits zero through flock reexec" 0 code;
+      check bool "flock invoked" true (Sys.file_exists flock_log);
+      let lock_log = read_file flock_log in
+      check bool "lock path passed to flock" true
+        (contains_substring lock_log opam_lock_path);
+      check bool "held env passed through argv" true
+        (contains_substring lock_log "MASC_OPAM_LOCK_HELD=1");
+      check bool "dune was invoked after flock reexec" true
+        (Sys.file_exists dune_log))
 
 let test_clean_subcommand_skips_pin_guard () =
   with_temp_dir "dune-local-clean" (fun dir ->
@@ -553,6 +673,10 @@ let () =
             test_github_actions_bypasses_pin_guard;
           test_case "opam absent skips pin guard" `Quick
             test_opam_absent_skips_pin_guard;
+          test_case "opam lockf reexec propagates env" `Quick
+            test_opam_lockf_reexec_env_passthrough;
+          test_case "opam flock reexec propagates env" `Quick
+            test_opam_flock_reexec_env_passthrough;
           test_case "clean subcommand skips pin guard" `Quick
             test_clean_subcommand_skips_pin_guard;
           test_case

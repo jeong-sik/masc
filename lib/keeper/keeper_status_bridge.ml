@@ -257,6 +257,16 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
         if summary = "" then
           "OAS budget timeout fired before the keeper hard timeout."
         else summary
+    | No_tool_capable_provider -> (
+        match
+          Oas_worker_named.classify_masc_internal_error
+            (Agent_sdk.Error.Internal summary)
+        with
+        | Some err -> (
+            match Oas_worker_named.summary_of_masc_internal_error err with
+            | Some structured_summary -> structured_summary
+            | None -> if summary = "" then str else summary)
+        | None -> if summary = "" then str else summary)
     | _ -> if summary = "" then str else summary
   in
   { blocker_class = str; summary; continue_gate }

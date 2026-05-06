@@ -90,11 +90,12 @@ BoardActivity, IdleTimeout, MetricsAnomaly, StrategicReview.
 | Workflow | Primary tools |
 |----------|---------------|
 | 의견 내기 / 토론 참여 | `keeper_board_post`, `keeper_board_comment` |
+| 최신 정보 / 외부 자료 확인 | `masc_web_search` (also exposed to model clients as `WebSearch`) |
 | 찬성 / 반대 신호 | `keeper_board_vote`, `masc_case_brief_submit` (`stance = support|oppose|neutral`) |
 | 거버넌스 의견 제출 | `masc_petition_submit`, `masc_case_brief_submit`, `masc_case_status`, `masc_governance_feed` |
 | 코드 작성 / 수정 | `masc_worktree_create` -> `masc_code_write` / `masc_code_edit` / `masc_code_git` |
 | 테스트 실행 | `masc_code_shell` (worktree `cwd` required) |
-| GitHub 이슈 작성 | `keeper_github` with `gh issue create ...` |
+| GitHub PR / 이슈 작업 | `keeper_preflight_check`, `keeper_pr_list`, `keeper_pr_status`, `keeper_pr_create` (draft-only), plus `keeper_shell op=gh` when repo context is bound |
 
 ## Research Profile Additions
 

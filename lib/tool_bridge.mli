@@ -1,8 +1,8 @@
 
 (** OAS boundary adapter for tool results, schemas, and tool definitions.
 
-    Converts between MASC tool conventions [(bool * string)] and
-    OAS typed [{!Agent_sdk.Types.tool_result}].
+    Converts between MASC {!Tool_result.t} and
+    OAS [{!Agent_sdk.Types.tool_result}].
 
     Also converts MASC JSON schemas to OAS [{!Agent_sdk.Types.tool_param}] lists,
     and creates OAS [{!Agent_sdk.Tool.t}] from MASC handler functions.
@@ -37,7 +37,15 @@ val to_oas_tool_result :
   ?recoverable:bool -> bool * string -> Agent_sdk.Types.tool_result
 (** Convert MASC [(success, message)] to OAS [tool_result].
     [recoverable] defaults to [true] for error cases.
-    Large [message] values are externalized via {!maybe_externalize}. *)
+    Large [message] values are externalized via {!maybe_externalize}.
+
+    @deprecated Prefer {!to_oas_typed_result} when a {!Tool_result.t} is
+    available.  This overload accepts legacy handler output and exists
+    for callers that have not yet migrated to the typed interface. *)
+
+val to_oas_typed_result : Tool_result.t -> Agent_sdk.Types.tool_result
+(** Convert a {!Tool_result.t} to OAS [tool_result].
+    Preserves the structured payload and applies externalization. *)
 
 val of_oas_tool_result : Agent_sdk.Types.tool_result -> bool * string
 (** Convert OAS [tool_result] back to MASC [(success, message)]. *)
@@ -58,10 +66,10 @@ val oas_tool_of_masc :
   name:string ->
   description:string ->
   input_schema:Yojson.Safe.t ->
-  (Yojson.Safe.t -> bool * string) ->
+  (Yojson.Safe.t -> Tool_result.t) ->
   Agent_sdk.Tool.t
 (** Create an OAS [Tool.t] from a MASC tool name, description,
-    JSON input schema, and handler function.
+    JSON input schema, and typed handler function.
 
-    The handler receives raw JSON args and returns MASC [(bool * string)].
-    Result conversion is applied automatically via {!to_oas_tool_result}. *)
+    The handler receives raw JSON args and returns a {!Tool_result.t}.
+    Conversion to OAS [tool_result] is applied automatically. *)

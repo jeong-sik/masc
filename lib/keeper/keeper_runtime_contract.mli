@@ -13,6 +13,7 @@ type claim_goal_scope = {
 
 val resolve_claim_goal_scope :
   ?agent_tool_names:string list ->
+  ?allow_empty_goal_scope_fallback:bool ->
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   unit ->

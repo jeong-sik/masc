@@ -137,16 +137,21 @@ let with_temp_masc_config cascade_json f =
   output_string oc cascade_json;
   close_out oc;
   let prev_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
+  let prev_base_path_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
   let prev_config_dir = Sys.getenv_opt "MASC_CONFIG_DIR" in
   Config_dir_resolver.reset ();
   Cascade_catalog_runtime.reset_cache_for_tests ();
   Unix.putenv "MASC_BASE_PATH" base;
+  Unix.putenv "MASC_BASE_PATH_INPUT" base;
   Unix.putenv "MASC_CONFIG_DIR" config_dir;
   Fun.protect
     ~finally:(fun () ->
       (match prev_base_path with
        | Some value -> Unix.putenv "MASC_BASE_PATH" value
        | None -> Unix.putenv "MASC_BASE_PATH" "");
+      (match prev_base_path_input with
+       | Some value -> Unix.putenv "MASC_BASE_PATH_INPUT" value
+       | None -> Unix.putenv "MASC_BASE_PATH_INPUT" "");
       (match prev_config_dir with
        | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
        | None -> Unix.putenv "MASC_CONFIG_DIR" "");
@@ -213,6 +218,24 @@ let start_multi_mock ~sw ~net ~port (responses : string list) =
   Eio.Fiber.fork ~sw (fun () ->
       Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
   Printf.sprintf "http://127.0.0.1:%d" port
+
+let start_counting_mock ~sw ~net ~port response =
+  let calls = Atomic.make 0 in
+  let handler _conn _req body =
+    let _ = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    ignore (Atomic.fetch_and_add calls 1);
+    Cohttp_eio.Server.respond_string ~status:`OK ~body:response ()
+  in
+  let socket =
+    Eio.Net.listen net ~sw ~backlog:8 ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+  in
+  let server = Cohttp_eio.Server.make ~callback:handler () in
+  Eio.Fiber.fork ~sw (fun () ->
+      Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+  ( Printf.sprintf "http://127.0.0.1:%d" port,
+    (fun () -> Atomic.get calls),
+    (fun () -> Atomic.set calls 0) )
 
 let start_delayed_mock ~sw ~net ~clock ~port ~delay_s response =
   let handler _conn _req body =
@@ -1129,6 +1152,128 @@ let test_run_named_per_provider_timeout_uses_clock_fallback_and_exempts_last_pro
     | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
   with Exit -> ()
 
+let test_run_named_skips_cooldown_primary_and_falls_back () =
+  try
+    Eio.Switch.run @@ fun sw ->
+    let primary_port =
+      match find_free_port () with Some port -> port | None -> Alcotest.skip ()
+    in
+    let primary_url, primary_calls, reset_primary_calls =
+      try
+        start_counting_mock
+          ~sw
+          ~net:(require_test_net ())
+          ~port:primary_port
+          (openai_text_response "primary should be skipped")
+      with
+      | Unix.Unix_error (Unix.EPERM, "bind", _)
+      | Unix.Unix_error (Unix.EACCES, "bind", _) ->
+          Alcotest.skip ()
+    in
+    let fallback_port =
+      match find_free_port () with Some port -> port | None -> Alcotest.skip ()
+    in
+    let fallback_url, fallback_calls, reset_fallback_calls =
+      try
+        start_counting_mock
+          ~sw
+          ~net:(require_test_net ())
+          ~port:fallback_port
+          (openai_text_response "fallback survived open circuit")
+      with
+      | Unix.Unix_error (Unix.EPERM, "bind", _)
+      | Unix.Unix_error (Unix.EACCES, "bind", _) ->
+          Alcotest.skip ()
+    in
+    let primary_key = "anthropic_open_13318" in
+    let fallback_key = "moonshot_fallback_13318" in
+    with_temp_masc_config
+      (Printf.sprintf
+         {|{
+  "breaker_probe_13318_models": [
+    "custom:%s@%s",
+    "custom:%s@%s"
+  ]
+}|}
+         primary_key
+         primary_url
+         fallback_key
+         fallback_url)
+    @@ fun () ->
+    let resolved =
+      match
+        Masc_mcp.Cascade_catalog_runtime.resolve_named_providers_strict
+          ~sw
+          ~net:(require_test_net ())
+          ~cascade_name:"breaker_probe_13318"
+          ()
+      with
+      | Ok providers -> providers
+      | Error err -> Alcotest.fail err
+    in
+    (match resolved with
+     | [ primary; fallback ] ->
+         Alcotest.(check string) "primary model id"
+           primary_key primary.Llm_provider.Provider_config.model_id;
+         Alcotest.(check string) "fallback model id"
+           fallback_key fallback.model_id;
+         Alcotest.(check string) "primary base url" primary_url primary.base_url;
+         Alcotest.(check string) "fallback base url" fallback_url fallback.base_url
+     | providers ->
+         Alcotest.failf "expected 2 resolved providers, got %d"
+           (List.length providers));
+    for _ = 1 to Masc_mcp.Cascade_health_tracker.cooldown_threshold do
+      Masc_mcp.Cascade_health_tracker.record_failure
+        Masc_mcp.Cascade_health_tracker.global
+        ~provider_key:primary_key
+        ()
+    done;
+    reset_primary_calls ();
+    reset_fallback_calls ();
+    (match
+       Masc_mcp.Cascade_health_tracker.check_circuit_breaker
+         Masc_mcp.Cascade_health_tracker.global
+         ~provider_key:primary_key
+     with
+     | Ok () -> Alcotest.fail "primary provider should be OPEN before run_named"
+     | Error _ -> ());
+    Alcotest.(check int)
+      "primary has no requests before run_named"
+      0
+      (primary_calls ());
+    match
+      Oas_worker_named.run_named
+        ~cascade_name:"breaker_probe_13318"
+        ~goal:"say hello"
+        ~system_prompt:"system"
+        ~sw
+        ~net:(require_test_net ())
+        ()
+    with
+    | Ok _result ->
+        Alcotest.(check int)
+          "OPEN primary receives no request"
+          0
+          (primary_calls ());
+        Alcotest.(check bool)
+          "fallback provider receives requests"
+          true
+          (fallback_calls () > 0);
+        (match
+           Masc_mcp.Cascade_health_tracker.provider_info
+             Masc_mcp.Cascade_health_tracker.global
+             ~provider_key:fallback_key
+         with
+         | None -> Alcotest.fail "fallback provider should have health info"
+         | Some info ->
+             Alcotest.(check bool)
+               "fallback success is reflected in health tracker"
+               true
+               (info.success_rate > 0.0));
+        Eio.Switch.fail sw Exit
+    | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
+  with Exit -> ()
+
 let make_worker_meta ?(effective_model = "local-qwen") () :
     Worker_container_types.worker_container_meta =
   {
@@ -1500,7 +1645,9 @@ let test_run_model_with_masc_tools_rejects_invalid_explicit_label () =
       ~model_label:"not-a-model-label"
       ~goal:"test goal"
       ~masc_tools:[]
-      ~dispatch:(fun ~name:_ ~args:_ -> (true, "ok"))
+      ~dispatch:(fun ~name ~args:_ ->
+        Tool_result.wrap ~tool_name:name ~start_time:(Time_compat.now ())
+          (true, "ok"))
       ()
   with
   | Ok _ ->
@@ -4310,6 +4457,100 @@ let test_enrich_idle_detail_picks_last_tool () =
   Alcotest.(check string) "exact string with last tool" expected result
 
 (* ================================================================ *)
+(* P0: Circuit-breaker fallback at run_named boundary               *)
+(* ================================================================ *)
+
+(** P0 regression: when the first provider in a two-provider cascade has
+    3 consecutive failures (OPEN / cooldown), [run_named] must skip it
+    without spending a request, then attempt the second (healthy) provider
+    and succeed.
+
+    Invariants pinned by this test:
+    1. First provider remains OPEN and receives zero HTTP requests.
+    2. Second provider is attempted and returns the expected response.
+    3. The health tracker records success for the fallback provider.
+
+    Implementation note: the primary provider's URL is deliberately set to
+    an unreachable endpoint (127.0.0.1:1).  Because the circuit breaker check
+    happens *before* [try_provider] is called, no connection attempt is ever
+    made to that address.  If the circuit-breaker logic were removed or
+    broken, [try_provider] would attempt port 1, get a connection-refused
+    error, and the cascade would fail — surfacing the regression immediately. *)
+let test_run_named_circuit_breaker_skips_open_provider () =
+  let primary_key = "cb_open_primary" in
+  let fallback_key = "cb_healthy_fallback" in
+  (* 1. Seed the global health tracker: 3 consecutive failures → OPEN. *)
+  Cascade_health_tracker.(
+    record_failure global ~provider_key:primary_key ();
+    record_failure global ~provider_key:primary_key ();
+    record_failure global ~provider_key:primary_key ());
+  Alcotest.(check bool) "pre-condition: primary is in cooldown after 3 failures"
+    true
+    (Cascade_health_tracker.is_in_cooldown
+       Cascade_health_tracker.global ~provider_key:primary_key);
+  try
+    Eio.Switch.run @@ fun sw ->
+    (* 2. Start a mock HTTP server for the fallback provider only. *)
+    let fallback_port =
+      match find_free_port () with Some p -> p | None -> Alcotest.skip ()
+    in
+    let fallback_url =
+      try
+        start_multi_mock ~sw ~net:(require_test_net ()) ~port:fallback_port
+          [ openai_text_response "fallback succeeded" ]
+      with
+      | Unix.Unix_error (Unix.EPERM, "bind", _)
+      | Unix.Unix_error (Unix.EACCES, "bind", _) ->
+          Alcotest.skip ()
+    in
+    (* 3. Configure the cascade: primary (OPEN, unreachable) → fallback
+          (healthy mock).  Use the model-id strings as the health-tracker
+          provider keys so the circuit-breaker lookup matches exactly. *)
+    with_temp_masc_config
+      (Printf.sprintf
+         {|{"cb_probe_models":["custom:%s@http://127.0.0.1:1","custom:%s@%s"]}|}
+         primary_key fallback_key fallback_url)
+    @@ fun () ->
+    (* 4. Run the named cascade. *)
+    (match
+       Oas_worker_named.run_named
+         ~cascade_name:"cb_probe"
+         ~goal:"circuit breaker test"
+         ~system_prompt:"system"
+         ~sw
+         ~net:(require_test_net ())
+         ()
+     with
+     | Ok result ->
+         (* 5. Fallback provider returned the expected response. *)
+         Alcotest.(check string) "fallback provider response"
+           "fallback succeeded"
+           (response_text result.response);
+         (* 6. Primary provider is still OPEN — no request reset its streak. *)
+         Alcotest.(check bool)
+           "primary remains OPEN (zero requests spent on open provider)"
+           true
+           (Cascade_health_tracker.is_in_cooldown
+              Cascade_health_tracker.global ~provider_key:primary_key);
+         (* 7. Fallback provider has a recorded success in the tracker. *)
+         Alcotest.(check bool) "fallback is not in cooldown after success"
+           false
+           (Cascade_health_tracker.is_in_cooldown
+              Cascade_health_tracker.global ~provider_key:fallback_key);
+         let rate =
+           Cascade_health_tracker.success_rate
+             Cascade_health_tracker.global ~provider_key:fallback_key
+         in
+         Alcotest.(check bool) "fallback success_rate > 0 after run_named"
+           true (rate > 0.0);
+         Eio.Switch.fail sw Exit
+     | Error err ->
+         Alcotest.failf
+           "expected fallback provider to succeed, got: %s"
+           (Agent_sdk.Error.to_string err))
+  with Exit -> ()
+
+(* ================================================================ *)
 (* Runner                                                           *)
 (* ================================================================ *)
 
@@ -4421,6 +4662,8 @@ let () =
         test_default_config_preserves_custom_local_request_path;
       Alcotest.test_case "per-provider timeout uses context clock and exempts last provider" `Quick
         test_run_named_per_provider_timeout_uses_clock_fallback_and_exempts_last_provider;
+      Alcotest.test_case "open circuit primary falls back without request" `Quick
+        test_run_named_skips_cooldown_primary_and_falls_back;
     ];
     "resume_config", [
       Alcotest.test_case "checkpoint model wins" `Quick
@@ -4669,5 +4912,11 @@ let () =
         test_enrich_idle_detail_non_idle_error;
       Alcotest.test_case "last tool name wins over earlier ones" `Quick
         test_enrich_idle_detail_picks_last_tool;
+    ];
+    "circuit_breaker_cascade_fallback", [
+      Alcotest.test_case
+        "P0: open provider is skipped and fallback succeeds at run_named boundary"
+        `Quick
+        test_run_named_circuit_breaker_skips_open_provider;
     ];
   ]

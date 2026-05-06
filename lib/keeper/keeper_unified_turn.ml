@@ -35,6 +35,14 @@ let registry_failure_reason_of_terminal_reason
            { code = terminal_reason.code; detail })
   | _ -> None
 
+let should_auto_pause_required_tool_contract_violation
+    ~(paused : bool)
+    ~(consecutive_failures : int)
+    (err : Agent_sdk.Error.sdk_error) : bool =
+  EC.is_required_tool_contract_violation err
+  && consecutive_failures >= Keeper_behavioral_regime.turn_fail_streak_threshold
+  && not paused
+
 let record_streaming_cancelled_observation
     ~(config : Coord.config)
     ~(run_meta : keeper_meta)
@@ -1702,7 +1710,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           let social_state, social_transition_reason =
             Social.derive_failure_state ~meta ~observation
               ~previous_state:previous_social_state
-              ~is_auto_recoverable ~reason:e_str
+              ~is_auto_recoverable ~sdk_error:(Some err) ~reason:e_str
           in
           let failure_meta_base =
             match !paused_meta_override with
@@ -1802,6 +1810,14 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   (Some failure_reason)
             | None -> ()
           end;
+          (match
+             Keeper_passive_loop_detector.progress_class_of_terminal_reason_code
+               terminal_reason.code
+           with
+           | Some progress_class ->
+               Keeper_passive_loop_detector.record_turn
+                 ~keeper_name:updated_meta.name ~progress_class
+           | None -> ());
           Keeper_unified_metrics.append_decision_record ~config ~meta:updated_meta ~observation
             ~latency_ms ~semaphore_wait_ms
             ~outcome:(if is_ambiguous_partial then "partial" else "error")
@@ -1935,31 +1951,72 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             && count >= Keeper_behavioral_regime.turn_fail_streak_threshold
             && not updated_meta.paused
           in
-          if cascade_auto_paused then begin
-            match
-              sync_keeper_paused_state ~config ~meta:updated_meta ~paused:true
-            with
-            | Ok _ ->
-                Keeper_registry.set_failure_reason ~base_path:config.base_path
-                  meta.name
-                  (Some (Keeper_registry.Turn_consecutive_failures count));
-                Log.Keeper.warn
-                  "%s: auto-paused after %d cascade_exhausted failures \
-                   (pause_threshold=%d, crash_threshold=%d); operator must \
-                   resume after cascade fix"
-                  meta.name count
-                  Keeper_behavioral_regime.turn_fail_streak_threshold
-                  threshold
-            | Error sync_err ->
-                Log.Keeper.error
-                  "%s: cascade auto-pause sync failed: %s \
-                   (falling through to crash path)" meta.name sync_err;
-                Prometheus.inc_counter
-                  Prometheus.metric_keeper_cascade_sync_failures
-                  ~labels:[("keeper", meta.name); ("site", "auto_pause")]
-                  ();
-          end;
-          if count >= threshold && not cascade_auto_paused then begin
+          let tool_contract_auto_paused =
+            should_auto_pause_required_tool_contract_violation
+              ~paused:updated_meta.paused
+              ~consecutive_failures:count err
+          in
+          let auto_pause_succeeded =
+            if cascade_auto_paused || tool_contract_auto_paused then begin
+              let released_task_id =
+                if tool_contract_auto_paused then
+                  Option.map Keeper_id.Task_id.to_string
+                    updated_meta.current_task_id
+                else None
+              in
+              let pause_meta =
+                if tool_contract_auto_paused then
+                  { updated_meta with current_task_id = None }
+                else
+                  updated_meta
+              in
+              match
+                sync_keeper_paused_state ~config ~meta:pause_meta ~paused:true
+              with
+              | Ok _ ->
+                  if cascade_auto_paused then begin
+                    Keeper_registry.set_failure_reason ~base_path:config.base_path
+                      meta.name
+                      (Some (Keeper_registry.Turn_consecutive_failures count));
+                    Log.Keeper.warn
+                      "%s: auto-paused after %d cascade_exhausted failures \
+                       (pause_threshold=%d, crash_threshold=%d); operator must \
+                       resume after cascade fix"
+                      meta.name count
+                      Keeper_behavioral_regime.turn_fail_streak_threshold
+                      threshold
+                  end else
+                    Log.Keeper.warn
+                      "%s: auto-paused after %d required-tool contract \
+                       failures (pause_threshold=%d, crash_threshold=%d, \
+                       released_task=%s); operator must inspect provider tool \
+                       contract before resuming"
+                      meta.name count
+                      Keeper_behavioral_regime.turn_fail_streak_threshold
+                      threshold
+                      (Option.value ~default:"none" released_task_id);
+                  true
+              | Error sync_err ->
+                  let auto_pause_kind =
+                    if cascade_auto_paused then "cascade" else "tool_contract"
+                  in
+                  Log.Keeper.error
+                    "%s: %s auto-pause sync failed: %s \
+                     (persistent failure remains on the crash path)"
+                    meta.name auto_pause_kind sync_err;
+                  Prometheus.inc_counter
+                    Prometheus.metric_keeper_cascade_sync_failures
+                    ~labels:
+                      [ ("keeper", meta.name);
+                        ( "site",
+                          if cascade_auto_paused then "auto_pause"
+                          else "tool_contract_auto_pause" ) ]
+                    ();
+                  false
+            end else
+              false
+          in
+          if count >= threshold && not auto_pause_succeeded then begin
             Prometheus.inc_counter
               Prometheus.metric_keeper_oas_execution_errors
               ~labels:[("keeper", meta.name); ("phase", "persistent_escalation")]

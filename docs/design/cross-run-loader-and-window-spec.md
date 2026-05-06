@@ -165,11 +165,24 @@ Runs may use different proof manifest schema versions. The loader must handle ve
 
 Since the current schema remains at version 1 (with optional fields added via `[@yojson.default]`), normalization is handled by the existing `Cdal_proof.of_json` decoder. A separate `normalize_manifest` function is not needed at this time. If a future schema v2 introduces breaking field changes, an explicit normalizer should be added.
 
-## 11. Proof_store Read-Side API (OAS)
+## 11. Proof_store Read-Side API (OAS, Implemented)
 
-The current `Proof_store.list_runs` returns `string list` (unordered directory listing). Cross-run windows require a richer API.
+OAS now owns the `proof-store://` read side through `Agent_sdk.Proof_store`.
+MASC must consume that public surface through `lib/proof_artifact_reader.ml`
+instead of reconstructing proof-store paths.
 
-Proposed additions to `proof_store.mli`:
+Current public read surface in OAS `proof_store.mli`:
+
+- `resolve_ref`
+- `read_json`
+- `read_jsonl`
+- `load_manifest`
+- `load_contract`
+- `list_runs`
+- `list_runs_ordered`
+- `load_window`
+
+The cross-run window APIs use the following public types:
 
 ```ocaml
 (** Run metadata for ordering and filtering. *)
@@ -205,11 +218,13 @@ val load_window :
   ((Cdal_proof.t * Yojson.Safe.t) list * string list, string) result
 ```
 
-These signatures keep the existing `list_runs` unchanged (backward compatible) and add structured alternatives. Implemented in OAS `proof_store.ml`.
+These signatures keep the existing `list_runs` backward compatible and add
+structured alternatives for deterministic window queries. Implementation and
+layout validation stay in OAS `proof_store.ml`; MASC adapters only delegate.
 
-## 12. Exit Criteria
+## 12. Regression Checklist
 
-Cross-run windows may ship when:
+Future cross-run reader changes must preserve:
 
 - `list_runs_ordered` is implemented with stable ordering
 - scope and ordering rules are explicit

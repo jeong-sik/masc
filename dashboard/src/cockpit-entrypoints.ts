@@ -93,7 +93,7 @@ export const COCKPIT_ENTRYPOINTS: CockpitEntrypoint[] = [
   { mode: 'ide', aliases: ['review', 'pr-thread'], target: { tab: 'code', params: { section: 'ide-shell', view: 'unified', focus: 'review' } }, coverage: 'partial' },
   { mode: 'ide', aliases: ['merge', 'split', 'split-diff'], target: { tab: 'code', params: { section: 'ide-shell', view: 'split-diff' } }, coverage: 'partial' },
   { mode: 'ide', aliases: ['graph', 'git-graph'], target: { tab: 'workspace', params: { section: 'repositories', view: 'graph' } }, coverage: 'partial' },
-  { mode: 'ide', aliases: ['search', 'find'], target: { tab: 'code', params: { section: 'ide-shell', view: 'source', focus: 'search' } }, coverage: 'partial' },
+  { mode: 'ide', aliases: ['search', 'find'], target: { tab: 'code', params: { section: 'ide-shell', view: 'source', find: 'open' } }, coverage: 'covered' },
 ]
 
 const ENTRYPOINT_TARGETS = new Map<string, CockpitRouteTarget>()

@@ -26,7 +26,7 @@ function GoalHorizonRow({
   `
 }
 
-export interface KeeperBDIPanelProps {
+interface KeeperBDIPanelProps {
   will?: string | null
   needs?: string | null
   desires?: string | null

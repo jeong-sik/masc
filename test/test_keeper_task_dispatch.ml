@@ -55,6 +55,22 @@ let task_by_title config title =
   | Some task -> task
   | None -> failwith (Printf.sprintf "task not found: %s" title)
 
+let set_task_created_at_by_title config ~title ~created_at =
+  let backlog = Coord.read_backlog config in
+  let seen = ref false in
+  let tasks =
+    List.map
+      (fun (task : Masc_domain.task) ->
+         if String.equal task.title title
+         then (
+           seen := true;
+           { task with created_at })
+         else task)
+      backlog.tasks
+  in
+  if not !seen then failwith (Printf.sprintf "task not found: %s" title);
+  Coord.write_backlog config { backlog with tasks; version = backlog.version + 1 }
+
 let strict_contract ?(verify_gate_evidence = []) () : Masc_domain.task_contract =
   {
     strict = true;
@@ -177,6 +193,33 @@ let with_registered_keeper config meta f =
 let current_task_id_string (meta : Keeper_types.keeper_meta) =
   Option.map Keeper_id.Task_id.to_string meta.current_task_id
 
+let with_claim_post_provision_hook hook f =
+  let previous = Atomic.get Coord_hooks.claim_post_provision_fn in
+  Atomic.set Coord_hooks.claim_post_provision_fn hook;
+  Fun.protect
+    ~finally:(fun () -> Atomic.set Coord_hooks.claim_post_provision_fn previous)
+    f
+
+let stale_worktree_info ~agent_name ~task_id : Masc_domain.worktree_info =
+  {
+    branch = Printf.sprintf "%s/%s" agent_name task_id;
+    path = Printf.sprintf ".worktrees/%s-%s" agent_name task_id;
+    git_root = "/tmp/stale-sandbox/repos/masc-mcp";
+    repo_name = "masc-mcp";
+  }
+
+let link_stale_worktree config ~agent_name ~task_id =
+  match
+    Coord_worktree.link_worktree_to_task config ~task_id
+      ~worktree_info:(stale_worktree_info ~agent_name ~task_id)
+  with
+  | Ok () -> ()
+  | Error e ->
+    fail
+      (Printf.sprintf
+         "failed to link stale worktree: %s"
+         (Masc_domain.masc_error_to_string e))
+
 (* --- keeper_task_claim tests --- *)
 
 let test_claim_returns_result () =
@@ -280,6 +323,77 @@ let test_release_clears_keeper_current_task_id () =
       check (option string) "persisted current_task_id cleared" None
         (current_task_id_string persisted_meta)))
 
+let test_claim_clears_stale_task_worktree_metadata () =
+  with_claim_post_provision_hook
+    (fun _config ~agent_name:_ ~task_id:_ -> ())
+    (fun () ->
+      with_room (fun config ->
+        let meta = make_test_meta () in
+        with_registered_keeper config meta (fun () ->
+          let _ =
+            Coord.add_task config ~title:"Stale worktree claim" ~priority:1
+              ~description:"desc"
+          in
+          let task_id = (only_task config).id in
+          link_stale_worktree config ~agent_name:"previous-agent" ~task_id;
+          check bool "stale worktree linked" true
+            (Option.is_some (only_task config).worktree);
+          let _ = call_tool config meta "keeper_task_claim" (`Assoc []) in
+          check bool "stale worktree cleared on claim" true
+            (Option.is_none (only_task config).worktree))))
+
+let test_release_clears_task_worktree_metadata () =
+  with_claim_post_provision_hook
+    (fun _config ~agent_name:_ ~task_id:_ -> ())
+    (fun () ->
+      with_room (fun config ->
+        let meta = make_test_meta () in
+        with_registered_keeper config meta (fun () ->
+          let _ =
+            Coord.add_task config ~title:"Worktree release task" ~priority:1
+              ~description:"desc"
+          in
+          let result = call_tool config meta "keeper_task_claim" (`Assoc []) in
+          let json = parse_json result in
+          let task_id =
+            Yojson.Safe.Util.(
+              json |> member "claimed_task" |> member "task_id" |> to_string)
+          in
+          link_stale_worktree config ~agent_name:meta.agent_name ~task_id;
+          check bool "worktree linked before release" true
+            (Option.is_some (only_task config).worktree);
+          let ok, message =
+            Tool_task.handle_transition
+              { Tool_task.config; agent_name = meta.agent_name; sw = None }
+              (`Assoc
+                 [
+                   ("task_id", `String task_id);
+                   ("action", `String "release");
+                   ("reason", `String "handoff to another keeper");
+                 ])
+          in
+          if not ok then fail message;
+          check bool "worktree cleared on release" true
+            (Option.is_none (only_task config).worktree))))
+
+let test_claim_next_runs_post_provision_hook () =
+  let observed = ref None in
+  with_claim_post_provision_hook
+    (fun _config ~agent_name ~task_id -> observed := Some (agent_name, task_id))
+    (fun () ->
+      with_room (fun config ->
+        let meta = make_test_meta () in
+        with_registered_keeper config meta (fun () ->
+          let _ =
+            Coord.add_task config ~title:"Provision hook task" ~priority:1
+              ~description:"desc"
+          in
+          let task_id = (only_task config).id in
+          let _ = call_tool config meta "keeper_task_claim" (`Assoc []) in
+          check (option (pair string string)) "claim-next provision hook"
+            (Some (meta.agent_name, task_id))
+            !observed)))
+
 let test_stale_current_task_id_is_cleared_from_backlog () =
   with_room (fun config ->
     let task_id =
@@ -311,6 +425,25 @@ let test_claim_empty_room () =
       match Yojson.Safe.Util.member "error" json with
       | `String _ -> () (* also ok *)
       | _ -> fail "expected result or error in empty room claim")
+
+let test_claim_prefers_oldest_same_priority_task () =
+  with_room (fun config ->
+    let meta = make_test_meta () in
+    ignore
+      (Coord.add_task config ~title:"Fresh P0" ~priority:1
+         ~description:"newer high-priority work");
+    ignore
+      (Coord.add_task config ~title:"Stale P0" ~priority:1
+         ~description:"older high-priority work");
+    set_task_created_at_by_title config ~title:"Fresh P0"
+      ~created_at:"2026-05-05T12:00:00Z";
+    set_task_created_at_by_title config ~title:"Stale P0"
+      ~created_at:"2026-05-04T12:00:00Z";
+    let result = call_tool config meta "keeper_task_claim" (`Assoc []) in
+    let json = parse_json result in
+    check string "oldest same-priority task claimed first" "Stale P0"
+      Yojson.Safe.Util.(
+        json |> member "claimed_task" |> member "title" |> to_string))
 
 let test_claim_respects_active_goal_ids () =
   with_room (fun config ->
@@ -531,6 +664,54 @@ let test_claim_falls_back_when_scoped_task_is_verification_blocked () =
       check string "claim scope matched product goal" product_goal.id
         Yojson.Safe.Util.(scope |> member "matched_goal_id" |> to_string)
     | None -> fail "expected fallback to claim product task")
+
+let test_claim_no_eligible_after_fallback_reports_scope_truth () =
+  with_room (fun config ->
+    let scoped_goal, _ =
+      match Goal_store.upsert_goal config ~title:"Scoped keeper goal" () with
+      | Ok payload -> payload
+      | Error msg -> fail msg
+    in
+    let product_goal, _ =
+      match Goal_store.upsert_goal config ~title:"Product goal" () with
+      | Ok payload -> payload
+      | Error msg -> fail msg
+    in
+    let meta =
+      { (make_meta_with_tools [ "keeper_task_claim"; "keeper_tasks_list" ]) with
+        active_goal_ids = [ scoped_goal.id ];
+      }
+    in
+    let _ =
+      Coord_task.add_task
+        ~contract:(contract_requiring_tools [ "keeper_bash" ])
+        ~goal_id:scoped_goal.id
+        config
+        ~title:"Scoped task needing bash"
+        ~priority:1
+        ~description:"requires shell execution"
+    in
+    let _ =
+      Coord_task.add_task
+        ~contract:(contract_requiring_tools [ "keeper_fs_edit" ])
+        ~goal_id:product_goal.id
+        config
+        ~title:"Fallback task also missing tools"
+        ~priority:2
+        ~description:"also requires unavailable write access"
+    in
+    let result = call_tool config meta "keeper_task_claim" (`Assoc []) in
+    let json = parse_json result in
+    let message = Yojson.Safe.Util.(json |> member "result" |> to_string) in
+    let scope = Yojson.Safe.Util.member "claim_scope" json in
+    check string "claim scope mode" "empty_goal_scope_fallback_all_tasks"
+      Yojson.Safe.Util.(scope |> member "mode" |> to_string);
+    check bool "message names fallback search" true
+      (contains_substring message "fallback to all tasks");
+    check bool "message stops scope-lock diagnosis" true
+      (contains_substring message "Stop scope-lock diagnosis");
+    check bool "message avoids stale active scope" false
+      (contains_substring message "within active_goal_ids"))
 
 let test_claim_skips_required_tools_without_access () =
   with_room (fun config ->
@@ -988,9 +1169,17 @@ let () =
         test_claim_syncs_keeper_current_task_id;
       test_case "release clears keeper current_task_id" `Quick
         test_release_clears_keeper_current_task_id;
+      test_case "claim clears stale task worktree metadata" `Quick
+        test_claim_clears_stale_task_worktree_metadata;
+      test_case "release clears task worktree metadata" `Quick
+        test_release_clears_task_worktree_metadata;
+      test_case "claim-next runs post-provision hook" `Quick
+        test_claim_next_runs_post_provision_hook;
       test_case "stale current_task_id clears from backlog" `Quick
         test_stale_current_task_id_is_cleared_from_backlog;
       test_case "claim empty room" `Quick test_claim_empty_room;
+      test_case "claim prefers oldest same-priority task" `Quick
+        test_claim_prefers_oldest_same_priority_task;
       test_case "claim respects active_goal_ids" `Quick
         test_claim_respects_active_goal_ids;
       test_case "claim falls back from empty auto goal scope" `Quick
@@ -1001,6 +1190,8 @@ let () =
         test_claim_falls_back_when_scoped_task_requires_missing_tool;
       test_case "claim falls back when scoped task is verification blocked" `Quick
         test_claim_falls_back_when_scoped_task_is_verification_blocked;
+      test_case "claim no eligible after fallback reports scope truth" `Quick
+        test_claim_no_eligible_after_fallback_reports_scope_truth;
       test_case "claim skips tasks requiring missing tools" `Quick
         test_claim_skips_required_tools_without_access;
       test_case "claim allows tasks requiring available tools" `Quick

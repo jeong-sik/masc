@@ -173,10 +173,10 @@ let test_coding_preset_includes_keeper_fs_edit () =
   check bool "has keeper_fs_edit" true
     (has_tool "keeper_fs_edit" tools)
 
-let test_research_preset_excludes_keeper_fs_edit () =
+let test_research_preset_includes_keeper_fs_edit () =
   let meta = make_meta ~preset:Keeper_types.Research () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "no keeper_fs_edit" false
+  check bool "has keeper_fs_edit" true
     (has_tool "keeper_fs_edit" tools)
 
 let test_minimal_preset_excludes_keeper_fs_edit () =
@@ -184,6 +184,12 @@ let test_minimal_preset_excludes_keeper_fs_edit () =
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "no keeper_fs_edit" false
     (has_tool "keeper_fs_edit" tools)
+
+let test_minimal_preset_has_web_search () =
+  let meta = make_meta ~preset:Keeper_types.Minimal () in
+  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  check bool "has masc_web_search" true
+    (has_tool "masc_web_search" tools)
 
 let test_coding_preset_has_keeper_bash () =
   let meta = make_meta ~preset:Keeper_types.Coding () in
@@ -233,6 +239,16 @@ let test_research_preset_has_read_tools () =
   check bool "has keeper_fs_read" true (has_tool "keeper_fs_read" tools);
   check bool "has keeper_library_search" true (has_tool "keeper_library_search" tools);
   check bool "has masc_web_search" true (has_tool "masc_web_search" tools)
+
+let test_last_turn_safe_keeps_discovery_and_web_search () =
+  let tools = Keeper_tool_policy.last_turn_safe_tool_names () in
+  let alias_expanded = Keeper_tool_alias.expand_universe tools in
+  check bool "last turn allows keeper_tool_search" true
+    (has_tool "keeper_tool_search" tools);
+  check bool "last turn allows masc_web_search" true
+    (has_tool "masc_web_search" tools);
+  check bool "last turn allows WebSearch alias" true
+    (has_tool "WebSearch" alias_expanded)
 
 let test_coding_preset_has_coordination_tools () =
   let meta = make_meta ~preset:Keeper_types.Coding () in
@@ -760,10 +776,12 @@ let () =
         test_full_preset_includes_keeper_fs_edit;
       test_case "coding preset includes keeper_fs_edit" `Quick
         test_coding_preset_includes_keeper_fs_edit;
-      test_case "research preset excludes keeper_fs_edit" `Quick
-        test_research_preset_excludes_keeper_fs_edit;
+      test_case "research preset includes keeper_fs_edit" `Quick
+        test_research_preset_includes_keeper_fs_edit;
       test_case "minimal preset excludes keeper_fs_edit" `Quick
         test_minimal_preset_excludes_keeper_fs_edit;
+      test_case "minimal preset has web search" `Quick
+        test_minimal_preset_has_web_search;
       test_case "coding preset has keeper_bash and keeper_shell" `Quick
         test_coding_preset_has_keeper_bash;
     ]);
@@ -774,6 +792,8 @@ let () =
       test_case "presets have different tool count" `Quick test_presets_have_different_tool_count;
       test_case "messaging has board tools" `Quick test_messaging_preset_has_board_tools;
       test_case "research has read tools" `Quick test_research_preset_has_read_tools;
+      test_case "last turn keeps discovery and web search" `Quick
+        test_last_turn_safe_keeps_discovery_and_web_search;
       test_case "coding has coordination tools" `Quick test_coding_preset_has_coordination_tools;
       test_case "messaging legacy governance tools removed" `Quick test_messaging_preset_has_no_legacy_governance_tools;
       test_case "sufficient tool count" `Quick test_sufficient_tool_count;

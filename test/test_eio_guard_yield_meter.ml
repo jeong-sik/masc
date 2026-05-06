@@ -30,6 +30,12 @@ let test_no_op_outside_eio () =
     EG.yield_step m
   done
 
+let test_default_interval_contract () =
+  check int "P0 fair-yield interval" 1000 EG.default_fair_yield_interval
+
+let test_fair_yield_no_op_outside_eio () =
+  EG.fair_yield ()
+
 let test_custom_interval_outside_eio () =
   let m = EG.create_yield_meter ~interval:7 () in
   for _ = 1 to 21 do     (* 3 full batches of 7 *)
@@ -111,6 +117,10 @@ let () =
     [ ( "no-op",
         [ test_case "safe outside Eio runtime (default interval)" `Quick
             test_no_op_outside_eio
+        ; test_case "default interval is 1000" `Quick
+            test_default_interval_contract
+        ; test_case "fair_yield is safe outside Eio runtime" `Quick
+            test_fair_yield_no_op_outside_eio
         ; test_case "safe outside Eio runtime (custom interval)" `Quick
             test_custom_interval_outside_eio ] )
     ; ( "eio-runtime",

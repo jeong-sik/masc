@@ -7,7 +7,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 
-export interface RecoveryStep {
+interface RecoveryStep {
   id: string
   label: string
   status: 'pending' | 'running' | 'completed' | 'failed'

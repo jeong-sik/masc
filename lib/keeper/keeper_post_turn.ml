@@ -146,7 +146,9 @@ let apply_autonomous_wirein
             { cp with Agent_sdk.Checkpoint.working_context = new_wc }
           in
           { lifecycle with checkpoint = Some new_cp }
-        with exn ->
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
           Log.Keeper.warn
             "keeper:%s autonomous wire-in failed: %s"
             lifecycle.updated_meta.name (Printexc.to_string exn);
@@ -205,7 +207,9 @@ let apply_resilience_wirein
             }
           in
           { lifecycle with checkpoint = Some new_cp }
-        with exn ->
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
           Log.Keeper.warn
             "keeper:%s resilience wire-in failed: %s"
             lifecycle.updated_meta.name (Printexc.to_string exn);
@@ -272,7 +276,9 @@ let apply_tool_emission_wirein
             { cp with Agent_sdk.Checkpoint.working_context = new_wc }
           in
           { lifecycle with checkpoint = Some new_cp }
-        with exn ->
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
           Log.Keeper.warn
             "keeper:%s tool emission drain failed: %s"
             lifecycle.updated_meta.name
@@ -340,7 +346,9 @@ let apply_multimodal_wirein
             { cp with Agent_sdk.Checkpoint.working_context = new_wc }
           in
           { lifecycle with checkpoint = Some new_cp }
-        with exn ->
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
           Log.Keeper.warn
             "keeper:%s multimodal wire-in failed: %s"
             lifecycle.updated_meta.name (Printexc.to_string exn);

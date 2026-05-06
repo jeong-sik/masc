@@ -78,7 +78,7 @@ interface PendingConfirmSource {
   available_actions?: OperatorActionDescriptor[] | null
 }
 
-export interface PendingConfirmState {
+interface PendingConfirmState {
   items: PendingConfirmation[]
   summary: PendingConfirmSummary
   actor_filter: string | null

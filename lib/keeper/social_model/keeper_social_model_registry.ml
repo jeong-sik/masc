@@ -23,11 +23,12 @@ let derive_failure_state ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(previous_state : Types.social_state option)
     ~(is_auto_recoverable : bool)
+    ~(sdk_error : Agent_sdk.Error.sdk_error option)
     ~(reason : string) =
   match active_model_of_meta meta with
   | Types.Bdi_speech_v1 ->
       Keeper_social_model_bdi_speech_v1.derive_failure_state ~meta
-        ~observation ~previous_state ~is_auto_recoverable ~reason
+        ~observation ~previous_state ~is_auto_recoverable ~sdk_error ~reason
   | Types.Magentic_ledger_v1 ->
       Keeper_social_model_magentic_ledger_v1.derive_failure_state ~meta
-        ~observation ~previous_state ~is_auto_recoverable ~reason
+        ~observation ~previous_state ~is_auto_recoverable ~sdk_error ~reason

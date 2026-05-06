@@ -79,7 +79,7 @@ placement: RFC 0024 의 single-slot 위치 (`ide-shell.ts` 우측). single-pin c
 
 | Action | Result |
 |--------|--------|
-| line click (RFC 0019 ownership) → `setPinnedKeeper(K)` | K 가 이미 pinned 면 기존 entry 를 제거하고 새 `pinned_at_ms` 로 head 에 prepend. `candidate = [entry(K, now), ...prev.filter(e => e.keeper_id !== K)]`; cap 초과 시 array tail 이 아니라 `min(pinned_at_ms)` entry 를 drop. |
+| line click (RFC 0019 ownership) → `setPinnedKeeper(K)` | K 가 이미 pinned 면 기존 entry 를 제거하고 새 `pinned_at_ms` 로 head 에 prepend. `candidate = [entry(K, now), ...prev.filter(e => e.keeper_id !== K)]`; cap 초과 시 array tail 이 아니라 `min(pinned_at_ms)` entry 를 drop. tie 면 minima 중 current UI order 에서 가장 뒤의 entry 를 drop. |
 | command palette `Pin keeper <id>` | 같은 reorder/cap 로직 |
 | X 버튼 또는 `Esc` (RFC 0012) | 활성 pin (focus 된 entry) unpin. focus 없으면 head unpin. |
 | drag (mouse 또는 keyboard `Alt+ArrowLeft/Right`) | `reorderPins` 호출, source_line 보존 |
@@ -166,7 +166,7 @@ rollup 은 client-side 계산 (server-side aggregation 안 함 — RFC 0026 audi
 
 **State migration**: 기존 `keeper-pin-store.ts` (single keeper id 를 hold) → `multi-keeper-pin-store.ts` 로 import path 변경. v1 에 stored single pin 이 있으면 startup 에 entries=[그 keeper] 로 hydrate (localStorage 호환).
 
-**Hook entry point**: `setPinnedKeeper(K)` 시그니처 유지 (single keeper id 받음) — internally existing K 를 먼저 제거한 뒤 `candidate = [entry(K, now), ...prev.filter(e => e.keeper_id !== K)]` 를 만들고, cap 초과 시 `pinned_at_ms` 가 가장 오래된 entry 를 drop. repeated pin 은 duplicate 없이 single entry 를 head 로 promote. v1 caller 변경 없음.
+**Hook entry point**: `setPinnedKeeper(K)` 시그니처 유지 (single keeper id 받음) — internally existing K 를 먼저 제거한 뒤 `candidate = [entry(K, now), ...prev.filter(e => e.keeper_id !== K)]` 를 만들고, cap 초과 시 `pinned_at_ms` 가 가장 오래된 entry 를 drop. tie 면 minima 중 current UI order 에서 가장 뒤의 entry 를 drop. repeated pin 은 duplicate 없이 single entry 를 head 로 promote. v1 caller 변경 없음.
 
 ## 11. Open questions
 

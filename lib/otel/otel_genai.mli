@@ -25,6 +25,15 @@ module Attr_key : sig
   val tool_name : string
   val tool_success : string
   val tool_duration_ms : string
+
+  (** Every registered Attr_key constant exported by this module.
+
+      Exported constants are created through the internal registration helper,
+      and this list is derived from that registry. Tests assert that exported
+      string constants are registered and that the boundary lists form a
+      disjoint partition of the registry. *)
+  val all_known : string list
+
   val official_gen_ai : string list
   val masc_extensions : string list
   val legacy : string list

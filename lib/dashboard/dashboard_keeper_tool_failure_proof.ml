@@ -4,6 +4,15 @@ type failure_class = {
   sample : string option;
 }
 
+type failure_category_accumulator = {
+  mutable count : int;
+  mutable sample : string option;
+}
+
+type failure_categories = (string, failure_category_accumulator) Hashtbl.t
+
+type failure_table = (string, failure_categories) Hashtbl.t
+
 type tool_keeper_stat = {
   name : string;
   calls : int;
@@ -228,17 +237,17 @@ let add_failure table tool category sample =
       Hashtbl.replace table tool categories;
       categories
   in
-  let count, saved_sample =
+  let accumulator =
     match Hashtbl.find_opt by_category key with
-    | Some values -> values
+    | Some accumulator -> accumulator
     | None ->
-      let values = (ref 0, ref None) in
-      Hashtbl.replace by_category key values;
-      values
+      let accumulator = { count = 0; sample = None } in
+      Hashtbl.replace by_category key accumulator;
+      accumulator
   in
-  incr count;
-  if !saved_sample = None && String.trim sample <> "" then
-    saved_sample := Some sample
+  accumulator.count <- accumulator.count + 1;
+  if accumulator.sample = None && String.trim sample <> "" then
+    accumulator.sample <- Some sample
 
 let keeper_record_filter keeper_names =
   let known_keepers = known_keeper_table keeper_names in
@@ -296,10 +305,11 @@ let classes_for table tool =
   | None -> []
   | Some categories ->
     Hashtbl.fold
-      (fun category (count, sample) acc ->
-         { category; count = !count; sample = !sample } :: acc)
+      (fun category accumulator acc ->
+         { category; count = accumulator.count; sample = accumulator.sample }
+         :: acc)
       categories []
-    |> List.sort (fun a b ->
+    |> List.sort (fun (a : failure_class) (b : failure_class) ->
       match Int.compare b.count a.count with
       | 0 -> String.compare a.category b.category
       | n -> n)

@@ -1,0 +1,152 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  fetchBoardModerationQueue,
+  flagBoardModerationTarget,
+  normalizeBoardModerationAuditEntry,
+  normalizeBoardModerationQueueEntry,
+  submitBoardModerationAction,
+} from './board-moderation'
+
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+})
+
+describe('board moderation api', () => {
+  it('fetches the queue with resolved filter and drops malformed entries', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      ok: true,
+      entries: [
+        {
+          entry_id: 'flag-1',
+          target_kind: 'post',
+          target_id: 'post-1',
+          reporter: 'keeper-a',
+          reason: 'spam',
+          flagged_at: 1_779_000_000,
+          resolved: false,
+        },
+        {
+          entry_id: 'bad',
+          target_kind: 'post',
+          reporter: 'keeper-a',
+          reason: 'spam',
+          flagged_at: 1_779_000_000,
+          resolved: false,
+        },
+      ],
+      count: 2,
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchBoardModerationQueue({ resolved: false })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/board/moderation/queue?resolved=false')
+    expect(result.count).toBe(2)
+    expect(result.entries).toHaveLength(1)
+    expect(result.entries[0]?.entry_id).toBe('flag-1')
+    expect(result.entries[0]?.flagged_at_iso).toBe('2026-05-17T06:40:00.000Z')
+  })
+
+  it('flags a target through the dashboard moderation route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      ok: true,
+      entry: {
+        entry_id: 'flag-2',
+        target_kind: 'post',
+        target_id: 'post-2',
+        reporter: 'keeper-b',
+        reason: 'policy:duplicate',
+        flagged_at: 1_779_000_100,
+        resolved: false,
+      },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const entry = await flagBoardModerationTarget({
+      target_id: ' post-2 ',
+      reporter: ' keeper-b ',
+      reason: 'policy:duplicate',
+    })
+
+    expect(entry.entry_id).toBe('flag-2')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/dashboard/board/moderation/flag')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({
+      target_kind: 'post',
+      target_id: 'post-2',
+      reporter: 'keeper-b',
+      reason: 'policy:duplicate',
+    })
+  })
+
+  it('submits a moderation action and preserves delete warnings', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      ok: true,
+      entry: {
+        audit_id: 'audit-1',
+        target_kind: 'comment',
+        target_id: 'comment-1',
+        actor: 'operator-a',
+        action: 'remove',
+        reason: 'harassment',
+        note: 'remove offensive comment',
+        acted_at: 1_779_000_200,
+      },
+      delete_warning: 'comment removal is audit-only',
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await submitBoardModerationAction({
+      target_kind: 'comment',
+      target_id: ' comment-1 ',
+      action: 'remove',
+      actor: ' operator-a ',
+      reason: 'harassment',
+      note: ' remove offensive comment ',
+    })
+
+    expect(result.entry.audit_id).toBe('audit-1')
+    expect(result.delete_warning).toBe('comment removal is audit-only')
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/dashboard/board/moderation/action')
+    expect(JSON.parse(String(init.body))).toEqual({
+      target_kind: 'comment',
+      target_id: 'comment-1',
+      action: 'remove',
+      actor: 'operator-a',
+      reason: 'harassment',
+      note: 'remove offensive comment',
+    })
+  })
+
+  it('returns null for malformed queue and audit entries', () => {
+    expect(normalizeBoardModerationQueueEntry({
+      entry_id: 'flag-1',
+      target_kind: 'post',
+      reporter: 'keeper-a',
+      reason: 'spam',
+      flagged_at: 1,
+      resolved: false,
+    })).toBeNull()
+
+    expect(normalizeBoardModerationAuditEntry({
+      audit_id: 'audit-1',
+      target_kind: 'post',
+      target_id: 'post-1',
+      actor: 'operator-a',
+      action: 'delete',
+      acted_at: 1,
+    })).toBeNull()
+  })
+})

@@ -1038,6 +1038,32 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
             inventory_evidence["invalid_candidate_rows"],
         )
 
+    def test_completion_audit_rejects_redaction_flag_without_candidate_rows(
+        self,
+    ) -> None:
+        inventory = json.loads(
+            SOURCE_ROW_CANDIDATE_INVENTORY_FIXTURE.read_text(encoding="utf-8")
+        )
+        inventory.pop("candidate_rows", None)
+        inventory["candidate_text_redacted"] = True
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            source_row_candidate_inventory=inventory,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        inventory_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "source_row_candidate_inventory"
+        ]
+        self.assertFalse(inventory_evidence["recorded"])
+        self.assertFalse(inventory_evidence["candidate_rows_valid"])
+        self.assertFalse(inventory_evidence["candidate_text_redaction_valid"])
+        self.assertIn(
+            "redaction_flag_without_candidate_rows",
+            inventory_evidence["invalid_candidate_rows"],
+        )
+
     def test_completion_audit_rejects_unaccounted_source_row_inventory(
         self,
     ) -> None:

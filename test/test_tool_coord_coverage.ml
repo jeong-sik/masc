@@ -93,7 +93,9 @@ let write_agent ctx agent =
     (Types.agent_to_yojson agent)
 
 let seed_stale_current_task ctx =
-  let old_last_seen = Masc_domain.now_iso () in
+  let old_last_seen =
+    Masc_domain.iso8601_of_unix_seconds (Time_compat.now () -. 10.0)
+  in
   let agent = read_agent ctx in
   write_agent ctx
     { agent with status = Busy; current_task = Some "task-missing"; last_seen = old_last_seen };

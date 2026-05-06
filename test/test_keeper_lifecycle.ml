@@ -548,6 +548,88 @@ let test_apply_post_turn_lifecycle_handoffs_after_compaction () =
             (List.length (ctx_messages loaded) > 0)
       | None -> fail "expected rollover checkpoint in new trace")
 
+let test_handoff_callback_failure_records_coverage_gap () =
+  let base_dir = temp_dir "keeper_lifecycle_handoff_callback_gap" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let meta =
+        let base =
+          make_keeper_meta ~name:"handoff-gap-keeper"
+            ~trace_id:"trace-handoff-gap" ()
+        in
+        {
+          base with
+          auto_handoff = true;
+          handoff_threshold = 0.0;
+          handoff_cooldown_sec = 0;
+          compaction =
+            {
+              base.compaction with
+              ratio_gate = 1.0;
+              message_gate = 0;
+              token_gate = 0;
+              cooldown_sec = 0;
+            };
+        }
+      in
+      let checkpoint =
+        KEC.create ~system_prompt:"stable" ~max_tokens:4096
+        |> fun ctx -> KEC.append ctx (Agent_sdk.Types.user_msg "checkpoint")
+        |> KEC.sync_oas_context
+        |> fun ctx -> save_checkpoint ~base_dir ~meta ~ctx
+      in
+      let labels = [ ("callback", "on_handoff_started") ] in
+      let before =
+        P.metric_value_or_zero
+          P.metric_keeper_lifecycle_callback_failures
+          ~labels
+          ()
+      in
+      let lifecycle =
+        KEC.apply_post_turn_lifecycle
+          ~on_compaction_started:(fun () -> ())
+          ~on_handoff_started:(fun () ->
+            failwith "synthetic handoff callback failure")
+          ~base_dir ~meta
+          ~model:"llama:auto"
+          ~primary_model_max_tokens:4096
+          ~current_turn_overflow_blocker:None
+          ~checkpoint:(Some checkpoint)
+      in
+      check bool "handoff attempted" true lifecycle.handoff_attempted;
+      check (option string) "handoff no failure" None
+        lifecycle.handoff_failure_reason;
+      check bool "handoff emitted" true
+        (Option.is_some lifecycle.handoff_json);
+      check (float 0.0001) "handoff callback failure metric increments"
+        (before +. 1.0)
+        (P.metric_value_or_zero
+           P.metric_keeper_lifecycle_callback_failures
+           ~labels
+           ());
+      match TCG.read_recent ~masc_root:base_dir ~n:1 with
+      | [ row ] ->
+        let open Yojson.Safe.Util in
+        check string "gap source" "keeper_lifecycle_callback"
+          (row |> member "source" |> to_string);
+        check string "gap producer" "on_handoff_started"
+          (row |> member "producer" |> to_string);
+        check string "gap reason" "callback_exception"
+          (row |> member "stale_reason" |> to_string);
+        check string "gap keeper" "handoff-gap-keeper"
+          (row |> member "keeper_name" |> to_string);
+        check string "gap trace" "trace-handoff-gap"
+          (row |> member "trace_id" |> to_string);
+        check bool "gap error recorded" true
+          (contains_substring
+             (row |> member "error" |> to_string)
+             "synthetic handoff callback failure")
+      | _ -> fail "expected one telemetry coverage gap row")
+
 let test_apply_post_turn_lifecycle_handoffs_on_current_turn_overflow_signal ()
     =
   let base_dir = temp_dir "keeper_lifecycle_overflow_signal_handoff" in
@@ -2495,6 +2577,8 @@ let () =
             test_apply_post_turn_lifecycle_keeps_checkpoint_when_compaction_skips;
           test_case "handoff runs after compaction" `Quick
             test_apply_post_turn_lifecycle_handoffs_after_compaction;
+          test_case "handoff callback failure records coverage gap" `Quick
+            test_handoff_callback_failure_records_coverage_gap;
           test_case "handoff runs on current-turn overflow signal" `Quick
             test_apply_post_turn_lifecycle_handoffs_on_current_turn_overflow_signal;
           test_case "resilience handles reach bridge" `Quick

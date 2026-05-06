@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "reasons": [
+    {
+      "code": "success",
+      "severity": "ok",
+      "summary": "turn completed",
+      "next_action": null
+    },
+    {
+      "code": "external_cancel",
+      "severity": "warn",
+      "summary": "keeper turn was cancelled before completion",
+      "next_action": "rerun_if_still_relevant"
+    },
+    {
+      "code": "oas_timeout_budget",
+      "severity": "warn",
+      "summary": "OAS call was skipped or failed because the turn timeout budget was exhausted",
+      "next_action": "inspect_timeout_budget"
+    },
+    {
+      "code": "turn_wall_clock_timeout",
+      "severity": "warn",
+      "summary": "keeper turn hit the wall-clock timeout",
+      "next_action": "inspect_timeout_budget"
+    },
+    {
+      "code": "gh_repo_context_missing_worktree",
+      "severity": "warn",
+      "summary": "GitHub command blocked because the active task has no linked worktree",
+      "next_action": "create_or_link_worktree"
+    },
+    {
+      "code": "required_tool_use_no_tool_call",
+      "severity": "bad",
+      "summary": "required keeper tool use was requested, but the model returned no keeper tool call",
+      "next_action": "inspect_provider_tool_contract"
+    },
+    {
+      "code": "required_tool_use_unsatisfied",
+      "severity": "bad",
+      "summary": "required keeper tool use was requested, but the tool contract was not satisfied",
+      "next_action": "inspect_provider_tool_contract"
+    },
+    {
+      "code": "post_commit_ambiguous",
+      "severity": "bad",
+      "summary": "provider failed after a mutating tool may have committed side effects",
+      "next_action": "reconcile_partial_commit"
+    },
+    {
+      "code": "provider_error",
+      "severity": "bad",
+      "summary": "provider or cascade failed",
+      "next_action": "inspect_latest_error"
+    },
+    {
+      "code": "unknown_error",
+      "severity": "bad",
+      "summary": "keeper turn failed without a classified terminal reason",
+      "next_action": "inspect_latest_error"
+    }
+  ],
+  "aliases": [
+    {
+      "from": "completed",
+      "to": "success"
+    },
+    {
+      "from": "completion_contract_violation:require_tool_use",
+      "to": "required_tool_use_unsatisfied"
+    },
+    {
+      "from": "api_error_timeout",
+      "to": "provider_error"
+    }
+  ],
+  "severity_prefixes": [
+    {
+      "prefix": "api_error_",
+      "severity": "bad"
+    }
+  ]
+}

@@ -1,4 +1,16 @@
 (include_subdirs unqualified)
+
+(rule
+ (target keeper_turn_terminal_catalog.ml)
+ (deps
+  ../config/keeper_turn_terminal_reasons.json
+  ../scripts/gen_keeper_turn_terminal_catalog.py)
+ (action
+  (run python3
+   %{dep:../scripts/gen_keeper_turn_terminal_catalog.py}
+   %{dep:../config/keeper_turn_terminal_reasons.json}
+   %{target})))
+
 (library
  (name masc_mcp)
  (public_name masc_mcp)
@@ -112,6 +124,7 @@
   keeper_agent_tool_surface
   keeper_agent_result
   keeper_agent_error
+  keeper_turn_terminal_catalog
   keeper_agent_memory_episode
   keeper_exec_context
   keeper_guards

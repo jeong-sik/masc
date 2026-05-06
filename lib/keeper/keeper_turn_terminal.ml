@@ -20,69 +20,46 @@ let severity_to_string = function
   | Bad -> "bad"
   | Unknown_bad -> "bad"
 
-let severity_of_code = function
-  | "success" -> Ok
-  | "external_cancel"
-  | "oas_timeout_budget"
-  | "turn_wall_clock_timeout"
-  | "gh_repo_context_missing_worktree" ->
-      Warn
-  | "required_tool_use_no_tool_call"
-  | "required_tool_use_unsatisfied"
-  | "post_commit_ambiguous"
-  | "provider_error"
-  | "unknown_error" ->
-      Bad
-  | code when String.starts_with ~prefix:"api_error_" code -> Bad
-  | _unknown -> Unknown_bad
+let severity_of_catalog_value = function
+  | "ok" -> Ok
+  | "warn" -> Warn
+  | "bad" -> Bad
+  | _ -> Unknown_bad
 
-let summary_of_code = function
-  | "success" -> "turn completed"
-  | "required_tool_use_no_tool_call" ->
-      "required keeper tool use was requested, but the model returned no keeper tool call"
-  | "required_tool_use_unsatisfied" ->
-      "required keeper tool use was requested, but the tool contract was not satisfied"
-  | "gh_repo_context_missing_worktree" ->
-      "GitHub command blocked because the active task has no linked worktree"
-  | "oas_timeout_budget" ->
-      "OAS call was skipped or failed because the turn timeout budget was exhausted"
-  | "turn_wall_clock_timeout" ->
-      "keeper turn hit the wall-clock timeout"
-  | "external_cancel" ->
-      "keeper turn was cancelled before completion"
-  | "post_commit_ambiguous" ->
-      "provider failed after a mutating tool may have committed side effects"
-  | "provider_error" ->
-      "provider or cascade failed"
-  | "unknown_error" ->
-      "keeper turn failed without a classified terminal reason"
-  | code ->
-      Printf.sprintf "keeper turn ended with %s" code
+let catalog_reason code =
+  List.find_opt
+    (fun (entry : Keeper_turn_terminal_catalog.reason) ->
+       String.equal entry.code code)
+    Keeper_turn_terminal_catalog.reasons
 
-let next_action_of_code = function
-  | "required_tool_use_no_tool_call"
-  | "required_tool_use_unsatisfied" ->
-      Some "inspect_provider_tool_contract"
-  | "gh_repo_context_missing_worktree" ->
-      Some "create_or_link_worktree"
-  | "oas_timeout_budget"
-  | "turn_wall_clock_timeout" ->
-      Some "inspect_timeout_budget"
-  | "external_cancel" ->
-      Some "rerun_if_still_relevant"
-  | "post_commit_ambiguous" ->
-      Some "reconcile_partial_commit"
-  | "provider_error"
-  | "unknown_error" ->
-      Some "inspect_latest_error"
-  | _ -> None
+let prefixed_severity code =
+  Keeper_turn_terminal_catalog.severity_prefixes
+  |> List.find_opt (fun (prefix, _severity) ->
+    String.starts_with ~prefix code)
+  |> Option.map snd
 
-let normalize_code = function
-  | "completed" -> "success"
-  | "completion_contract_violation:require_tool_use" ->
-      "required_tool_use_unsatisfied"
-  | "api_error_timeout" -> "provider_error"
-  | code -> code
+let severity_of_code code =
+  match catalog_reason code with
+  | Some entry -> severity_of_catalog_value entry.severity
+  | None ->
+      (match prefixed_severity code with
+       | Some severity -> severity_of_catalog_value severity
+       | None -> Unknown_bad)
+
+let summary_of_code code =
+  match catalog_reason code with
+  | Some entry -> entry.summary
+  | None -> Printf.sprintf "keeper turn ended with %s" code
+
+let next_action_of_code code =
+  match catalog_reason code with
+  | Some entry -> entry.next_action
+  | None -> None
+
+let normalize_code code =
+  Keeper_turn_terminal_catalog.aliases
+  |> List.assoc_opt code
+  |> Option.value ~default:code
 
 let make ?(source = "typed") ?summary ?next_action code =
   let code = normalize_code code in

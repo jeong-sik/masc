@@ -304,6 +304,21 @@ let test_legacy_gh_worktree_text () =
   check (option string) "next action" (Some "create_or_link_worktree")
     (terminal_next_action terminal)
 
+let test_terminal_reason_catalog_aliases_and_metadata () =
+  let completed = KT.of_code "completed" in
+  check string "completed alias" "success" (terminal_code completed);
+  check string "completed summary" "turn completed" completed.summary;
+  check string "completed severity" "ok"
+    (KT.severity_to_string (terminal_severity completed));
+  let timeout_alias = KT.of_code "api_error_timeout" in
+  check string "timeout alias" "provider_error" (terminal_code timeout_alias);
+  check (option string) "provider action" (Some "inspect_latest_error")
+    (terminal_next_action timeout_alias);
+  let prefixed = KT.of_code "api_error_server:503" in
+  check string "api prefix severity" "bad"
+    (KT.severity_to_string (terminal_severity prefixed));
+  check (option string) "unknown api action" None (terminal_next_action prefixed)
+
 let () =
   run "keeper_terminal_reason"
     [
@@ -366,5 +381,7 @@ let () =
 	            test_structured_turn_wall_clock_timeout;
 	          test_case "legacy gh missing worktree text" `Quick
 	            test_legacy_gh_worktree_text;
+	          test_case "catalog aliases and metadata" `Quick
+	            test_terminal_reason_catalog_aliases_and_metadata;
 	        ] );
 	    ]

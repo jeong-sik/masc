@@ -110,6 +110,18 @@ let log_tool ?(success = true) tool_name =
     ~duration_ms:1.0
     ()
 
+let write_scheduled_decision config keeper_name =
+  let path = KT.keeper_decision_log_path config keeper_name in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Fs_compat.save_file path
+    (Yojson.Safe.to_string
+       (`Assoc [
+         ("ts", `String "2026-05-06T01:00:00Z");
+         ("channel", `String "scheduled_autonomous");
+         ("outcome", `String "success");
+       ])
+     ^ "\n")
+
 let feature id json =
   Yojson.Safe.Util.(json |> member "features" |> to_list)
   |> List.find_opt (fun item ->
@@ -167,6 +179,37 @@ let test_json_reports_feature_gaps () =
   check string "coding tools are partial/weak proof" "warn"
     (feature_status "coding_tools" json)
 
+let test_decision_log_counts_as_scheduled_proof () =
+  with_store @@ fun config ->
+  ignore
+    (persist_keeper config ~name:"alpha" ~total_turns:3
+       ~autonomous_action_count:2 ~autonomous_tool_turn_count:2
+       ~board_reactive_turn_count:1 ~proactive_count_total:0);
+  ignore
+    (persist_keeper config ~name:"beta" ~total_turns:2
+       ~autonomous_action_count:1 ~autonomous_tool_turn_count:1
+       ~board_reactive_turn_count:1 ~proactive_count_total:0);
+  write_scheduled_decision config "alpha";
+  write_scheduled_decision config "beta";
+  let json =
+    Dashboard_keeper_feature_proof.json
+      ~config
+      ~n:100
+      ~success_threshold_pct:80.0
+      ()
+  in
+  let scheduled = feature "scheduled_proactive_autonomy" json in
+  check string "decision log satisfies scheduled proof" "pass"
+    (Safe_ops.json_string ~default:"missing" "status" scheduled);
+  let observed =
+    Yojson.Safe.Util.(
+      scheduled
+      |> member "keeper_evidence"
+      |> member "observed_keepers"
+      |> to_list)
+  in
+  check int "both keepers observed" 2 (List.length observed)
+
 let () =
   run "dashboard_keeper_feature_proof"
     [
@@ -174,5 +217,7 @@ let () =
         [
           test_case "json reports feature gaps" `Quick
             test_json_reports_feature_gaps;
+          test_case "decision log counts as scheduled proof" `Quick
+            test_decision_log_counts_as_scheduled_proof;
         ] );
     ]

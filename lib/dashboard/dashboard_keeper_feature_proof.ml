@@ -18,6 +18,11 @@ type keeper_snapshot = {
   read_error : string option;
 }
 
+type scheduled_decision_stat = {
+  decision_count : int;
+  latest_ts : string option;
+}
+
 type feature_spec = {
   id : string;
   label : string;
@@ -129,6 +134,46 @@ let count_meta snapshots =
   snapshots
   |> List.filter (fun snapshot -> Option.is_some snapshot.meta)
   |> List.length
+
+let empty_scheduled_decision_stat = { decision_count = 0; latest_ts = None }
+
+let scheduled_decision_stats ~config keeper_name =
+  let path = Keeper_types.keeper_decision_log_path config keeper_name in
+  if not (Sys.file_exists path) then empty_scheduled_decision_stat
+  else
+    match Safe_ops.read_file_safe path with
+    | Error _ -> empty_scheduled_decision_stat
+    | Ok contents ->
+      contents
+      |> String.split_on_char '\n'
+      |> List.fold_left
+           (fun acc line ->
+              let line = String.trim line in
+              if line = "" then acc
+              else
+                match Yojson.Safe.from_string line with
+                | exception Yojson.Json_error _ -> acc
+                | json ->
+                  match Safe_ops.json_string_opt "channel" json with
+                  | Some "scheduled_autonomous" ->
+                    {
+                      decision_count = acc.decision_count + 1;
+                      latest_ts =
+                        (match Safe_ops.json_string_opt "ts" json with
+                         | Some ts when String.trim ts <> "" -> Some ts
+                         | _ -> acc.latest_ts);
+                    }
+                  | _ -> acc)
+           empty_scheduled_decision_stat
+
+let scheduled_decision_evidence_json stat =
+  `Assoc [
+    ("decision_count", `Int stat.decision_count);
+    ( "latest_ts",
+      match stat.latest_ts with
+      | Some ts -> `String ts
+      | None -> `Null );
+  ]
 
 let meta_feature_json
       ~id
@@ -242,19 +287,99 @@ let board_reactive_feature snapshots =
     ~next_action:
       "Post board events and confirm every active keeper records board-reactive turns."
 
-let scheduled_proactive_feature snapshots =
-  meta_counter_feature snapshots
-    ~id:"scheduled_proactive_autonomy"
-    ~label:"Scheduled proactive cycles"
-    ~eligible:(fun snapshot ->
+let scheduled_proactive_feature ~config snapshots =
+  let decision_stats =
+    snapshots
+    |> List.map (fun snapshot ->
+      snapshot.keeper_name,
+      scheduled_decision_stats ~config snapshot.keeper_name)
+  in
+  let decision_stat_for keeper_name =
+    List.assoc_opt keeper_name decision_stats
+    |> Option.value ~default:empty_scheduled_decision_stat
+  in
+  let enabled =
+    snapshots
+    |> List.filter (fun snapshot ->
       match snapshot.meta with
       | Some meta -> meta.Keeper_types.proactive.enabled
       | None -> false)
-    ~predicate:(fun meta -> meta.Keeper_types.runtime.proactive_rt.count_total > 0)
-    ~summary_label:"proactive-enabled keepers have scheduled proactive cycles"
-    ~evidence_refs:[keeper_meta_evidence; route_evidence "/api/v1/dashboard/execution"]
-    ~next_action:
-      "Fix scheduler or per-keeper blockers until every proactive-enabled keeper has proactive_count_total > 0."
+  in
+  let total = keeper_count enabled in
+  let has_scheduled_evidence snapshot meta =
+    meta.Keeper_types.runtime.proactive_rt.count_total > 0
+    || (decision_stat_for snapshot.keeper_name).decision_count > 0
+  in
+  let observed =
+    enabled
+    |> List.filter_map (fun snapshot ->
+      match snapshot.meta with
+      | Some meta when has_scheduled_evidence snapshot meta ->
+        Some snapshot.keeper_name
+      | _ -> None)
+    |> uniq_sorted
+  in
+  let missing =
+    enabled
+    |> List.filter_map (fun snapshot ->
+      match snapshot.meta with
+      | Some meta when has_scheduled_evidence snapshot meta -> None
+      | _ -> Some snapshot.keeper_name)
+    |> uniq_sorted
+  in
+  let status =
+    if total = 0 || observed = [] then Fail
+    else if List.length observed = total then Pass
+    else Warn
+  in
+  let per_keeper =
+    enabled
+    |> List.map (fun snapshot ->
+      let stat = decision_stat_for snapshot.keeper_name in
+      let meta_count =
+        match snapshot.meta with
+        | Some meta -> meta.Keeper_types.runtime.proactive_rt.count_total
+        | None -> 0
+      in
+      `Assoc [
+        ("keeper", `String snapshot.keeper_name);
+        ("meta_proactive_count_total", `Int meta_count);
+        ("decision_log", scheduled_decision_evidence_json stat);
+      ])
+  in
+  `Assoc [
+    ("id", `String "scheduled_proactive_autonomy");
+    ("label", `String "Scheduled proactive cycles");
+    ("status", `String (status_to_string status));
+    ("summary",
+     `String
+       (Printf.sprintf
+          "%d/%d proactive-enabled keepers have scheduled proactive evidence"
+          (List.length observed) total));
+    ("required_tools", `List []);
+    ("passing_tools", `List []);
+    ("weak_tools", `List []);
+    ("missing_tools", `List []);
+    ("keeper_evidence",
+     `Assoc [
+       ("keeper_count", `Int (keeper_count snapshots));
+       ("meta_count", `Int (count_meta snapshots));
+       ("observed_keepers", json_string_list observed);
+       ("missing_keepers", json_string_list missing);
+       ("read_errors", `List (keeper_read_errors snapshots));
+       ("per_keeper", `List per_keeper);
+     ]);
+    ( "evidence_refs",
+      `List [
+        keeper_meta_evidence;
+        evidence_ref ~kind:"store" ~id:"keeper_decision_log"
+          ~value:"Keeper_types.keeper_decision_log_path";
+        route_evidence "/api/v1/dashboard/execution";
+      ] );
+    ( "next_action",
+      `String
+        "Fix scheduler or per-keeper blockers until every proactive-enabled keeper has meta or decision-log evidence for scheduled autonomous cycles." );
+  ]
 
 let tool_features =
   [
@@ -467,7 +592,7 @@ let json ~config ?(n = 5000) ?window_hours ?(success_threshold_pct = 80.0) () =
       runtime_liveness_feature snapshots;
       autonomous_tool_feature snapshots;
       board_reactive_feature snapshots;
-      scheduled_proactive_feature snapshots;
+      scheduled_proactive_feature ~config snapshots;
     ]
     @ List.map
         (tool_feature_json ~success_threshold_pct tool_stats)

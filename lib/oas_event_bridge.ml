@@ -161,6 +161,304 @@ let agent_completed_result_fields = function
         ("usage_reported", `Bool false);
       ]
 
+let json_float_opt = function
+  | Some value -> `Float value
+  | None -> `Null
+
+let json_int_opt = function
+  | Some value -> `Int value
+  | None -> `Null
+
+let network_error_kind_to_wire = function
+  | Llm_provider.Http_client.Connection_refused -> "connection_refused"
+  | Llm_provider.Http_client.Dns_failure -> "dns_failure"
+  | Llm_provider.Http_client.Tls_error -> "tls_error"
+  | Llm_provider.Http_client.Timeout -> "timeout"
+  | Llm_provider.Http_client.Local_resource_exhaustion ->
+      "local_resource_exhaustion"
+  | Llm_provider.Http_client.End_of_file -> "end_of_file"
+  | Llm_provider.Http_client.Unknown -> "unknown"
+
+let sdk_api_error_fields = function
+  | Agent_sdk.Retry.RateLimited { retry_after; message } ->
+      [
+        ("variant", `String "rate_limited");
+        ("message", `String message);
+        ("retry_after_s", json_float_opt retry_after);
+      ]
+  | Agent_sdk.Retry.Overloaded { message } ->
+      [
+        ("variant", `String "overloaded");
+        ("message", `String message);
+      ]
+  | Agent_sdk.Retry.ServerError { status; message } ->
+      [
+        ("variant", `String "server_error");
+        ("status", `Int status);
+        ("message", `String message);
+      ]
+  | Agent_sdk.Retry.AuthError { message } ->
+      [
+        ("variant", `String "auth_error");
+        ("message", `String message);
+      ]
+  | Agent_sdk.Retry.InvalidRequest { message } ->
+      [
+        ("variant", `String "invalid_request");
+        ("message", `String message);
+      ]
+  | Agent_sdk.Retry.NotFound { message } ->
+      [
+        ("variant", `String "not_found");
+        ("message", `String message);
+      ]
+  | Agent_sdk.Retry.ContextOverflow { message; limit } ->
+      [
+        ("variant", `String "context_overflow");
+        ("message", `String message);
+        ("limit", json_int_opt limit);
+      ]
+  | Agent_sdk.Retry.NetworkError { message; kind } ->
+      [
+        ("variant", `String "network_error");
+        ("message", `String message);
+        ("network_kind", `String (network_error_kind_to_wire kind));
+      ]
+  | Agent_sdk.Retry.Timeout { message } ->
+      [
+        ("variant", `String "timeout");
+        ("message", `String message);
+      ]
+
+let sdk_agent_error_fields = function
+  | Agent_sdk.Error.MaxTurnsExceeded { turns; limit } ->
+      [
+        ("variant", `String "max_turns_exceeded");
+        ("turns", `Int turns);
+        ("limit", `Int limit);
+      ]
+  | Agent_sdk.Error.TokenBudgetExceeded { kind; used; limit } ->
+      [
+        ("variant", `String "token_budget_exceeded");
+        ("kind", `String kind);
+        ("used", `Int used);
+        ("limit", `Int limit);
+      ]
+  | Agent_sdk.Error.CostBudgetExceeded { spent_usd; limit_usd } ->
+      [
+        ("variant", `String "cost_budget_exceeded");
+        ("spent_usd", `Float spent_usd);
+        ("limit_usd", `Float limit_usd);
+      ]
+  | Agent_sdk.Error.UnrecognizedStopReason { reason } ->
+      [
+        ("variant", `String "unrecognized_stop_reason");
+        ("reason", `String reason);
+      ]
+  | Agent_sdk.Error.IdleDetected { consecutive_idle_turns } ->
+      [
+        ("variant", `String "idle_detected");
+        ("consecutive_idle_turns", `Int consecutive_idle_turns);
+      ]
+  | Agent_sdk.Error.ToolRetryExhausted { attempts; limit; detail } ->
+      [
+        ("variant", `String "tool_retry_exhausted");
+        ("attempts", `Int attempts);
+        ("limit", `Int limit);
+        ("detail", `String detail);
+      ]
+  | Agent_sdk.Error.CompletionContractViolation { contract; reason } ->
+      [
+        ("variant", `String "completion_contract_violation");
+        ( "contract",
+          `String (Agent_sdk.Completion_contract_id.to_string contract) );
+        ("reason", `String reason);
+      ]
+  | Agent_sdk.Error.GuardrailViolation { validator; reason } ->
+      [
+        ("variant", `String "guardrail_violation");
+        ("validator", `String validator);
+        ("reason", `String reason);
+      ]
+  | Agent_sdk.Error.TripwireViolation { tripwire; reason } ->
+      [
+        ("variant", `String "tripwire_violation");
+        ("tripwire", `String tripwire);
+        ("reason", `String reason);
+      ]
+  | Agent_sdk.Error.ExitConditionMet { turn } ->
+      [
+        ("variant", `String "exit_condition_met");
+        ("turn", `Int turn);
+      ]
+
+let sdk_mcp_error_fields = function
+  | Agent_sdk.Error.ServerStartFailed { command; detail } ->
+      [
+        ("variant", `String "server_start_failed");
+        ("command", `String command);
+        ("detail", `String detail);
+      ]
+  | Agent_sdk.Error.InitializeFailed { detail } ->
+      [
+        ("variant", `String "initialize_failed");
+        ("detail", `String detail);
+      ]
+  | Agent_sdk.Error.ToolListFailed { detail } ->
+      [
+        ("variant", `String "tool_list_failed");
+        ("detail", `String detail);
+      ]
+  | Agent_sdk.Error.ToolCallFailed { tool_name; detail } ->
+      [
+        ("variant", `String "tool_call_failed");
+        ("tool_name", `String tool_name);
+        ("detail", `String detail);
+      ]
+  | Agent_sdk.Error.HttpTransportFailed { url; detail } ->
+      [
+        ("variant", `String "http_transport_failed");
+        ("url", `String url);
+        ("detail", `String detail);
+      ]
+
+let sdk_config_error_fields = function
+  | Agent_sdk.Error.MissingEnvVar { var_name } ->
+      [
+        ("variant", `String "missing_env_var");
+        ("var_name", `String var_name);
+      ]
+  | Agent_sdk.Error.UnsupportedProvider { detail } ->
+      [
+        ("variant", `String "unsupported_provider");
+        ("detail", `String detail);
+      ]
+  | Agent_sdk.Error.InvalidConfig { field; detail } ->
+      [
+        ("variant", `String "invalid_config");
+        ("field", `String field);
+        ("detail", `String detail);
+      ]
+
+let sdk_serialization_error_fields = function
+  | Agent_sdk.Error.JsonParseError { detail } ->
+      [
+        ("variant", `String "json_parse_error");
+        ("detail", `String detail);
+      ]
+  | Agent_sdk.Error.VersionMismatch { expected; got } ->
+      [
+        ("variant", `String "version_mismatch");
+        ("expected", `Int expected);
+        ("got", `Int got);
+      ]
+  | Agent_sdk.Error.UnknownVariant { type_name; value } ->
+      [
+        ("variant", `String "unknown_variant");
+        ("type_name", `String type_name);
+        ("value", `String value);
+      ]
+
+let sdk_io_error_fields = function
+  | Agent_sdk.Error.FileOpFailed { op; path; detail } ->
+      [
+        ("variant", `String "file_op_failed");
+        ("op", `String op);
+        ("path", `String path);
+        ("detail", `String detail);
+      ]
+  | Agent_sdk.Error.ValidationFailed { detail } ->
+      [
+        ("variant", `String "validation_failed");
+        ("detail", `String detail);
+      ]
+
+let sdk_orchestration_error_fields = function
+  | Agent_sdk.Error.UnknownAgent { name } ->
+      [
+        ("variant", `String "unknown_agent");
+        ("name", `String name);
+      ]
+  | Agent_sdk.Error.TaskTimeout { task_id } ->
+      [
+        ("variant", `String "task_timeout");
+        ("task_id", `String task_id);
+      ]
+  | Agent_sdk.Error.DiscoveryFailed { url; detail } ->
+      [
+        ("variant", `String "discovery_failed");
+        ("url", `String url);
+        ("detail", `String detail);
+      ]
+
+let sdk_a2a_error_fields = function
+  | Agent_sdk.Error.TaskNotFound { task_id } ->
+      [
+        ("variant", `String "task_not_found");
+        ("task_id", `String task_id);
+      ]
+  | Agent_sdk.Error.InvalidTransition { task_id; from_state; to_state } ->
+      [
+        ("variant", `String "invalid_transition");
+        ("task_id", `String task_id);
+        ("from_state", `String from_state);
+        ("to_state", `String to_state);
+      ]
+  | Agent_sdk.Error.MessageSendFailed { task_id; detail } ->
+      [
+        ("variant", `String "message_send_failed");
+        ("task_id", `String task_id);
+        ("detail", `String detail);
+      ]
+  | Agent_sdk.Error.ProtocolError { detail } ->
+      [
+        ("variant", `String "protocol_error");
+        ("detail", `String detail);
+      ]
+  | Agent_sdk.Error.StoreCapacityExceeded { current; max } ->
+      [
+        ("variant", `String "store_capacity_exceeded");
+        ("current", `Int current);
+        ("max", `Int max);
+      ]
+
+let sdk_error_detail_fields (error : Agent_sdk.Error.sdk_error) =
+  match error with
+  | Agent_sdk.Error.Api error -> sdk_api_error_fields error
+  | Agent_sdk.Error.Agent error -> sdk_agent_error_fields error
+  | Agent_sdk.Error.Mcp error -> sdk_mcp_error_fields error
+  | Agent_sdk.Error.Config error -> sdk_config_error_fields error
+  | Agent_sdk.Error.Serialization error -> sdk_serialization_error_fields error
+  | Agent_sdk.Error.Io error -> sdk_io_error_fields error
+  | Agent_sdk.Error.Orchestration error -> sdk_orchestration_error_fields error
+  | Agent_sdk.Error.A2a error -> sdk_a2a_error_fields error
+  | Agent_sdk.Error.Internal message ->
+      [
+        ("variant", `String "internal");
+        ("message", `String message);
+      ]
+
+let sdk_error_json error =
+  let domain = Keeper_agent_error.sdk_error_kind error in
+  let code = Keeper_agent_error.terminal_reason_code_of_sdk_error error in
+  `Assoc
+    ([
+       ("domain", `String domain);
+       ("code", `String code);
+       ("retryable", `Bool (Agent_sdk.Error.is_retryable error));
+     ]
+    @ sdk_error_detail_fields error)
+
+let agent_failed_error_fields error =
+  [
+    ("error", `String (Agent_sdk.Error.to_string error));
+    ("error_domain", `String (Keeper_agent_error.sdk_error_kind error));
+    ( "error_code",
+      `String (Keeper_agent_error.terminal_reason_code_of_sdk_error error) );
+    ("error_retryable", `Bool (Agent_sdk.Error.is_retryable error));
+    ("error_detail", sdk_error_json error);
+  ]
+
 let payload_agent_name payload =
   (* Check [agent_name], [agent], then [keeper_name] for Custom events
      whose publisher stores the per-agent attribution under the
@@ -304,12 +602,12 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
   | Agent_sdk.Event_bus.AgentFailed { agent_name; task_id; error; elapsed } ->
       let payload =
         `Assoc
-          [
-            ("agent_name", `String agent_name);
-            ("task_id", `String task_id);
-            ("elapsed_s", `Float elapsed);
-            ("error", `String (Agent_sdk.Error.to_string error));
-          ]
+          ([
+             ("agent_name", `String agent_name);
+             ("task_id", `String task_id);
+             ("elapsed_s", `Float elapsed);
+           ]
+          @ agent_failed_error_fields error)
       in
       Some (wrap ~event_type:"agent_failed" ~payload ~agent_name ~task_id ())
   | Agent_sdk.Event_bus.ToolCalled { agent_name; tool_name; _ } ->

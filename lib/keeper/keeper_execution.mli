@@ -91,6 +91,7 @@ val build_keeper_system_prompt :
   ?keeper_name:string ->
   ?allowed_orgs:string list ->
   ?denied_repos:string list ->
+  ?git_clone_policy_loaded:bool ->
   ?active_goals:(string * string * string) list ->
   unit ->
   string
@@ -108,4 +109,3 @@ val user_visible_reply_text : ?fallback:string -> string -> string
 
 (** Check if text appears fragmentary (incomplete sentence fragments). *)
 val looks_fragmentary_history_text : string -> bool
-

@@ -29,6 +29,7 @@ val build_keeper_system_prompt :
   ?keeper_name:string ->
   ?allowed_orgs:string list ->
   ?denied_repos:string list ->
+  ?git_clone_policy_loaded:bool ->
   ?active_goals:(string * string * string) list ->
   unit ->
   string
@@ -38,7 +39,12 @@ val build_keeper_system_prompt :
     [Keeper_tool_policy.git_clone_allowed_orgs] /
     [git_clone_denied_repos].
 
-    Empty-list semantics differ between the two:
+    [git_clone_policy_loaded=false] means the caller could not read
+    [tool_policy.toml] yet; the prompt should say git/gh operations fail
+    closed instead of treating an unavailable allowlist as an explicitly empty
+    one.
+
+    Empty-list semantics differ between the two once policy is loaded:
     - Empty [allowed_orgs] = "gate OFF, any account-accessible repo is
       permitted" (matches [validate_gh_command]'s skip-check behaviour).
     - Empty [denied_repos] = "no repos blocked" (renders as "(none)").

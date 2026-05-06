@@ -313,6 +313,17 @@ let parse_error_field raw =
   |> Json.member "error"
   |> Json.to_string_option
 
+let test_keeper_bash_elapsed_duration_preserves_positive_sub_ms () =
+  let elapsed = Keeper_exec_shell.For_testing.elapsed_duration_ms in
+  Alcotest.(check int) "sub-ms positive duration rounds up to 1" 1
+    (elapsed ~start_time:10.0 ~end_time:10.0004);
+  Alcotest.(check int) "one ms duration stays one" 1
+    (elapsed ~start_time:10.0 ~end_time:10.001);
+  Alcotest.(check int) "negative clock drift is zero" 0
+    (elapsed ~start_time:10.0 ~end_time:9.999);
+  Alcotest.(check int) "nan duration is zero" 0
+    (elapsed ~start_time:Float.nan ~end_time:10.0)
+
 let test_docker_blocks_nested_docker_command () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
@@ -723,6 +734,8 @@ let () =
       Alcotest.test_case "git write classification" `Quick test_git_write_classification;
     ]);
     ("edge", [
+      Alcotest.test_case "elapsed duration preserves positive sub-ms" `Quick
+        test_keeper_bash_elapsed_duration_preserves_positive_sub_ms;
       Alcotest.test_case "empty command blocked" `Quick test_empty_command;
       Alcotest.test_case "docker blocks nested docker command" `Quick
         test_docker_blocks_nested_docker_command;

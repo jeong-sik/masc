@@ -25,6 +25,12 @@ set -euo pipefail
 
 case "$1" in
   list)
+    for arg in "$@"; do
+      if [[ "${arg}" == "--short" ]]; then
+        echo "fake opam list rejects --short with explicit columns" >&2
+        exit 44
+      fi
+    done
     if [[ "${FAKE_OPAM_LIST_FAIL:-0}" == "1" ]]; then
       echo "fake opam list failure" >&2
       exit 42
@@ -193,5 +199,20 @@ assert_contains "${TMP}/case8.err" "refusing to downgrade installed agent_sdk 99
 assert_not_contains "${CALLS_FILE}" "pin add agent_sdk"
 echo "ok case 8 - opam show fallback preserves installed-version protection"
 
+case9_err="${TMP}/case9.err"
+: > "${CALLS_FILE}"
+rm -f "${FLOOR_FILE}"
+if run_pin_script \
+  FAKE_AGENT_SDK_LIST_OUTPUT=$'other_pkg 1.0.0\n' \
+  FAKE_OPAM_SHOW_FAIL=1 \
+  bash "${PIN_SCRIPT}" >"${TMP}/case9.out" 2>"${case9_err}"; then
+  echo "FAIL case 9: missing agent_sdk list row plus failed opam show should fail closed" >&2
+  exit 1
+fi
+assert_contains "${case9_err}" "could not determine installed agent_sdk version"
+assert_contains "${case9_err}" "refusing to mutate agent_sdk pin because installed version could not be determined"
+assert_not_contains "${CALLS_FILE}" "pin add agent_sdk"
+echo "ok case 9 - unavailable installed version fails closed when opam is present"
+
 echo ""
-echo "[opam-pin-downgrade-guard test] PASS - 8/8 cases"
+echo "[opam-pin-downgrade-guard test] PASS - 9/9 cases"

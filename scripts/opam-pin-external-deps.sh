@@ -110,7 +110,7 @@ installed_agent_sdk_version() {
   command -v opam >/dev/null 2>&1 || return 1
 
   local installed_packages agent_sdk_row installed_version show_version
-  if ! installed_packages="$(OPAMCOLOR=never opam list --installed --columns=name,version --short 2>&1)"; then
+  if ! installed_packages="$(OPAMCOLOR=never opam list --installed --columns=name,version 2>&1)"; then
     echo "[opam-pin] ERROR: failed to inspect installed agent_sdk via opam list" >&2
     echo "[opam-pin] opam list output: ${installed_packages:-<empty>}" >&2
     return 2
@@ -141,7 +141,8 @@ installed_agent_sdk_version() {
     return 0
   fi
 
-  return 1
+  echo "[opam-pin] ERROR: could not determine installed agent_sdk version from opam list or opam show" >&2
+  return 2
 }
 
 guard_agent_sdk_downgrade() {

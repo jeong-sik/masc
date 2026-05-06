@@ -1099,19 +1099,37 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
             checklist_evidence["requirements_with_tracking_issue_refs"],
             10,
         )
+<<<<<<< HEAD
         self.assertEqual(checklist_evidence["tracking_issue_refs_total"], 7)
+||||||| parent of 3f641fd33d (test(goal-loop): close startup policy checklist rows)
+        self.assertEqual(checklist_evidence["tracking_issue_refs_total"], 8)
+=======
+        self.assertEqual(checklist_evidence["tracking_issue_refs_total"], 6)
+>>>>>>> 3f641fd33d (test(goal-loop): close startup policy checklist rows)
         self.assertEqual(checklist_evidence["missing_tracking_issue_refs"], [])
         self.assertEqual(checklist_evidence["invalid_tracking_issue_refs"], [])
         self.assertEqual(
             checklist_evidence["requirements_with_implementation_pr_refs"],
-            10,
+            12,
         )
-        self.assertEqual(checklist_evidence["implementation_pr_refs_total"], 9)
+        self.assertEqual(checklist_evidence["implementation_pr_refs_total"], 11)
         self.assertEqual(checklist_evidence["invalid_implementation_pr_refs"], [])
+<<<<<<< HEAD
         self.assertEqual(checklist_evidence["artifact_refs_total"], 96)
         self.assertEqual(checklist_evidence["artifact_refs_resolved"], 96)
         self.assertEqual(checklist_evidence["artifact_ref_anchors_total"], 32)
         self.assertEqual(checklist_evidence["artifact_ref_anchors_resolved"], 32)
+||||||| parent of 3f641fd33d (test(goal-loop): close startup policy checklist rows)
+        self.assertEqual(checklist_evidence["artifact_refs_total"], 88)
+        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 88)
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_total"], 22)
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_resolved"], 22)
+=======
+        self.assertEqual(checklist_evidence["artifact_refs_total"], 102)
+        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 102)
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_total"], 36)
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_resolved"], 36)
+>>>>>>> 3f641fd33d (test(goal-loop): close startup policy checklist rows)
         self.assertTrue(checklist_evidence["artifact_refs_all_resolved"])
         self.assertEqual(checklist_evidence["missing_artifact_refs"], [])
         self.assertEqual(checklist_evidence["missing_artifact_ref_anchors"], [])
@@ -1136,9 +1154,9 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         )
         self.assertEqual(
             closeout_evidence["requirements_with_implementation_pr_refs"],
-            10,
+            12,
         )
-        self.assertEqual(closeout_evidence["implementation_pr_refs_total"], 9)
+        self.assertEqual(closeout_evidence["implementation_pr_refs_total"], 11)
         self.assertEqual(closeout_evidence["invalid_implementation_pr_refs"], [])
         self.assertTrue(closeout_evidence["has_strict_corpus_blocker"])
 
@@ -1371,8 +1389,16 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
         self.assertFalse(checklist_evidence["recorded"])
         self.assertFalse(checklist_evidence["artifact_refs_all_resolved"])
+<<<<<<< HEAD
         self.assertEqual(checklist_evidence["artifact_refs_total"], 93)
         self.assertEqual(checklist_evidence["artifact_refs_resolved"], 92)
+||||||| parent of 3f641fd33d (test(goal-loop): close startup policy checklist rows)
+        self.assertEqual(checklist_evidence["artifact_refs_total"], 85)
+        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 84)
+=======
+        self.assertEqual(checklist_evidence["artifact_refs_total"], 99)
+        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 98)
+>>>>>>> 3f641fd33d (test(goal-loop): close startup policy checklist rows)
         self.assertEqual(
             checklist_evidence["missing_artifact_refs"],
             [
@@ -1406,10 +1432,22 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
         self.assertFalse(checklist_evidence["recorded"])
         self.assertFalse(checklist_evidence["artifact_refs_all_resolved"])
+<<<<<<< HEAD
         self.assertEqual(checklist_evidence["artifact_refs_total"], 92)
         self.assertEqual(checklist_evidence["artifact_refs_resolved"], 91)
         self.assertEqual(checklist_evidence["artifact_ref_anchors_total"], 30)
         self.assertEqual(checklist_evidence["artifact_ref_anchors_resolved"], 29)
+||||||| parent of 3f641fd33d (test(goal-loop): close startup policy checklist rows)
+        self.assertEqual(checklist_evidence["artifact_refs_total"], 84)
+        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 83)
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_total"], 20)
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_resolved"], 19)
+=======
+        self.assertEqual(checklist_evidence["artifact_refs_total"], 98)
+        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 97)
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_total"], 34)
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_resolved"], 33)
+>>>>>>> 3f641fd33d (test(goal-loop): close startup policy checklist rows)
         self.assertEqual(
             checklist_evidence["missing_artifact_ref_anchors"],
             [
@@ -1458,8 +1496,16 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
         self.assertFalse(checklist_evidence["recorded"])
         self.assertFalse(checklist_evidence["artifact_refs_all_resolved"])
+<<<<<<< HEAD
         self.assertEqual(checklist_evidence["artifact_ref_anchors_total"], 30)
         self.assertEqual(checklist_evidence["artifact_ref_anchors_resolved"], 29)
+||||||| parent of 3f641fd33d (test(goal-loop): close startup policy checklist rows)
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_total"], 20)
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_resolved"], 19)
+=======
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_total"], 34)
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_resolved"], 33)
+>>>>>>> 3f641fd33d (test(goal-loop): close startup policy checklist rows)
         self.assertEqual(
             checklist_evidence["artifact_ref_read_errors"],
             [

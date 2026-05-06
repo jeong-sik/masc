@@ -35,6 +35,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/oas-agent-sdk-pin.sh"
 opam_lock_path="${MASC_OPAM_LOCK_PATH:-/tmp/me-opam-switch.lock}"
+agent_sdk_floor_path="${MASC_AGENT_SDK_FLOOR_PATH:-/tmp/me-agent-sdk-floor}"
 
 if [[ "${MASC_OPAM_LOCK:-1}" != "0" \
       && "${MASC_SKIP_OPAM_LOCK:-0}" != "1" \
@@ -78,6 +79,146 @@ for arg in "$@"; do
   esac
 done
 
+normalize_version_triplet() {
+  local value
+  value="$(printf '%s' "$1" | sed -E $'s/\x1B\\[[0-9;]*[[:alpha:]]//g')"
+  if [[ "${value}" =~ ([0-9]+(\.[0-9]+){0,2}) ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  fi
+}
+
+# Returns true when $1 > $2 for three-part semver-ish versions.
+version_gt() {
+  local lhs rhs
+  lhs="$(normalize_version_triplet "$1")"
+  rhs="$(normalize_version_triplet "$2")"
+  [[ -n "${lhs}" && -n "${rhs}" ]] || return 1
+
+  local IFS='.'
+  # shellcheck disable=SC2206
+  local a=(${lhs}) b=(${rhs})
+  local i
+  for i in 0 1 2; do
+    local va=${a[$i]:-0} vb=${b[$i]:-0}
+    if (( va > vb )); then return 0; fi
+    if (( va < vb )); then return 1; fi
+  done
+  return 1
+}
+
+installed_agent_sdk_version() {
+  command -v opam >/dev/null 2>&1 || return 1
+
+  local installed_packages agent_sdk_row installed_version show_version
+  if ! installed_packages="$(OPAMCOLOR=never opam list --installed --columns=name,version 2>&1)"; then
+    echo "[opam-pin] ERROR: failed to inspect installed agent_sdk via opam list" >&2
+    echo "[opam-pin] opam list output: ${installed_packages:-<empty>}" >&2
+    return 2
+  fi
+
+  agent_sdk_row="$(awk '$1 == "agent_sdk" { print; exit }' <<<"${installed_packages}")"
+  if [[ -n "${agent_sdk_row}" ]]; then
+    installed_version="$(awk '{ print $2 }' <<<"${agent_sdk_row}")"
+    if [[ -z "$(normalize_version_triplet "${installed_version}")" ]]; then
+      echo "[opam-pin] ERROR: could not parse installed agent_sdk version from opam list row: ${agent_sdk_row}" >&2
+      return 2
+    fi
+    printf '%s' "${installed_version}"
+    return 0
+  fi
+
+  # Fallback: opam show reads package metadata directly from the switch.  This
+  # covers cases where opam list output is incomplete but the switch still knows
+  # the package version.
+  show_version="$(OPAMCOLOR=never opam show agent_sdk --field=version 2>/dev/null || true)"
+  if [[ -n "${show_version}" ]]; then
+    installed_version="$(normalize_version_triplet "${show_version}")"
+    if [[ -z "${installed_version}" ]]; then
+      echo "[opam-pin] ERROR: could not parse installed agent_sdk version from opam show output: ${show_version}" >&2
+      return 2
+    fi
+    printf '%s' "${installed_version}"
+    return 0
+  fi
+
+  echo "[opam-pin] ERROR: could not determine installed agent_sdk version from opam list or opam show" >&2
+  return 2
+}
+
+guard_agent_sdk_downgrade() {
+  [[ "${MASC_ALLOW_OAS_PIN_DOWNGRADE:-0}" != "1" ]] || return 0
+
+  local recorded_floor
+  if [[ -r "${agent_sdk_floor_path}" ]]; then
+    recorded_floor="$(head -n 1 "${agent_sdk_floor_path}" 2>/dev/null || true)"
+    if [[ -n "${recorded_floor}" ]] && version_gt "${recorded_floor}" "${OAS_AGENT_SDK_MIN_VERSION}"; then
+      echo "[opam-pin] ERROR: refusing to downgrade agent_sdk below recorded floor ${recorded_floor}; branch floor is ${OAS_AGENT_SDK_MIN_VERSION}" >&2
+      echo "[opam-pin] recorded floor: ${agent_sdk_floor_path}" >&2
+      echo "[opam-pin] branch pin source: ${agent_sdk_pin_source}" >&2
+      echo "[opam-pin] script path: ${SCRIPT_DIR}/opam-pin-external-deps.sh" >&2
+      echo "[opam-pin] likely cause: a stale worktree is trying to repin the shared opam switch to an older OAS SDK" >&2
+      echo "[opam-pin] repair: rebase/update this worktree to the current OAS pin, or set MASC_ALLOW_OAS_PIN_DOWNGRADE=1 for an intentional rollback" >&2
+      exit 1
+    fi
+  fi
+
+  local installed_version
+  if installed_version="$(installed_agent_sdk_version)"; then
+    :
+  else
+    case "$?" in
+      1)
+        return 0
+        ;;
+      *)
+        echo "[opam-pin] ERROR: refusing to mutate agent_sdk pin because installed version could not be determined" >&2
+        echo "[opam-pin] branch pin source: ${agent_sdk_pin_source}" >&2
+        echo "[opam-pin] script path: ${SCRIPT_DIR}/opam-pin-external-deps.sh" >&2
+        echo "[opam-pin] repair: fix opam switch inspection, or set MASC_ALLOW_OAS_PIN_DOWNGRADE=1 for an intentional rollback" >&2
+        exit 1
+        ;;
+    esac
+  fi
+
+  if version_gt "${installed_version}" "${OAS_AGENT_SDK_MIN_VERSION}"; then
+    echo "[opam-pin] ERROR: refusing to downgrade installed agent_sdk ${installed_version} to branch floor ${OAS_AGENT_SDK_MIN_VERSION}" >&2
+    echo "[opam-pin] branch pin source: ${agent_sdk_pin_source}" >&2
+    echo "[opam-pin] script path: ${SCRIPT_DIR}/opam-pin-external-deps.sh" >&2
+    echo "[opam-pin] likely cause: a stale worktree is trying to repin the shared opam switch to an older OAS SDK" >&2
+    echo "[opam-pin] repair: rebase/update this worktree to the current OAS pin, or set MASC_ALLOW_OAS_PIN_DOWNGRADE=1 for an intentional rollback" >&2
+    exit 1
+  fi
+}
+
+record_agent_sdk_floor() {
+  # Explicit local/rollback use should not ratchet the shared default floor down.
+  [[ -z "${AGENT_SDK_PIN_URL:-}" ]] || return 0
+
+  local recorded_floor
+  if [[ -r "${agent_sdk_floor_path}" ]]; then
+    recorded_floor="$(head -n 1 "${agent_sdk_floor_path}" 2>/dev/null || true)"
+    if [[ -n "${recorded_floor}" ]] && version_gt "${recorded_floor}" "${OAS_AGENT_SDK_MIN_VERSION}"; then
+      return 0
+    fi
+  fi
+
+  local floor_dir tmp_path
+  floor_dir="$(dirname "${agent_sdk_floor_path}")"
+  mkdir -p "${floor_dir}" 2>/dev/null || {
+    echo "[opam-pin] WARN: could not create agent_sdk floor dir: ${floor_dir}" >&2
+    return 0
+  }
+  tmp_path="${agent_sdk_floor_path}.tmp.$$"
+  if printf '%s\n' "${OAS_AGENT_SDK_MIN_VERSION}" > "${tmp_path}" \
+    && mv "${tmp_path}" "${agent_sdk_floor_path}"; then
+    return 0
+  fi
+  rm -f "${tmp_path}" 2>/dev/null || true
+  echo "[opam-pin] WARN: could not record agent_sdk floor: ${agent_sdk_floor_path}" >&2
+}
+
+guard_agent_sdk_downgrade
+
 # Accumulate the package names we pin so a follow-up `opam install` in
 # --install mode can rebuild exactly the set that changed, nothing more.
 pinned_pkgs=()
@@ -119,6 +260,7 @@ fi
 opam_pin_add mcp_protocol https://github.com/jeong-sik/mcp-protocol-sdk.git#v1.3.0 -n -y
 pinned_pkgs+=("mcp_protocol")
 opam_pin_add agent_sdk "${agent_sdk_pin_source}" -n -y
+record_agent_sdk_floor
 pinned_pkgs+=("agent_sdk")
 opam_pin_add ocaml-webrtc "https://github.com/jeong-sik/ocaml-webrtc.git#${WEBRTC_SHA}" -n -y
 pinned_pkgs+=("ocaml-webrtc")

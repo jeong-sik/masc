@@ -7159,6 +7159,16 @@ let test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool () =
        ~tools:[ "masc_claim_next" ]
        [ "task_claim"; "task_audit"; "board_post_or_comment" ]);
   check bool
+    "task_audit with only passive audit/list tools -> gate suppressed" false
+    (gate ~tools:[ "keeper_tasks_audit"; "keeper_tasks_list" ]
+       [ "task_audit" ]);
+  check bool
+    "task_verify with only passive task list -> gate suppressed" false
+    (gate ~tools:[ "keeper_tasks_list" ] [ "task_verify" ]);
+  check bool
+    "task_verify with submit tool -> gate fires" true
+    (gate ~tools:[ "keeper_task_submit_for_verification" ] [ "task_verify" ]);
+  check bool
     "all gated affordances missing tools -> gate suppressed" false
     (gate
        ~tools:[ "keeper_context_status"; "keeper_time_now" ]
@@ -7276,11 +7286,11 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
        ~allowed_tool_names:[ "keeper_tasks_audit"; "keeper_board_post" ]
        ()
    with
-   | Agent_sdk.Types.Tool name ->
-       check string "task audit prefers audit tool" "keeper_tasks_audit" name
+   | Agent_sdk.Types.Auto -> ()
    | other ->
        fail
-         (Printf.sprintf "expected Tool keeper_tasks_audit, got %s"
+         (Printf.sprintf
+            "expected Auto for task audit with passive audit tool, got %s"
             (Agent_sdk.Types.show_tool_choice other)));
   (match
      choose
@@ -7301,11 +7311,26 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
        ~allowed_tool_names:[ "keeper_tasks_list"; "keeper_board_post" ]
        ()
    with
-   | Agent_sdk.Types.Tool name ->
-       check string "task verify prefers task list" "keeper_tasks_list" name
+   | Agent_sdk.Types.Auto -> ()
    | other ->
        fail
-         (Printf.sprintf "expected Tool keeper_tasks_list, got %s"
+         (Printf.sprintf
+            "expected Auto for task verify with passive task list, got %s"
+            (Agent_sdk.Types.show_tool_choice other)));
+  (match
+     choose
+       ~turn_affordances:[ "task_verify" ]
+       ~allowed_tool_names:
+         [ "keeper_tasks_list"; "keeper_task_submit_for_verification" ]
+       ()
+   with
+   | Agent_sdk.Types.Tool name ->
+       check string "task verify prefers submit tool"
+         "keeper_task_submit_for_verification" name
+   | other ->
+       fail
+         (Printf.sprintf
+            "expected Tool keeper_task_submit_for_verification, got %s"
             (Agent_sdk.Types.show_tool_choice other)));
   (match choose ~allowed_tool_names:[ "keeper_board_post" ] () with
   | Agent_sdk.Types.Auto -> ()

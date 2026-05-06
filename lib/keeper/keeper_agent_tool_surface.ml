@@ -171,7 +171,9 @@ let turn_affordances_require_tool_gate_with_allowed
     ~(allowed_tool_names : string list) turn_affordances : bool =
   let has_matching_tool affordance =
     List.exists
-      (fun tool -> List.mem tool allowed_tool_names)
+      (fun tool ->
+         List.mem tool allowed_tool_names
+         && Keeper_tool_disclosure.tool_name_can_satisfy_required_contract tool)
       (tools_for_gated_affordance affordance)
   in
   List.exists
@@ -202,19 +204,26 @@ let has_task_claim_affordance = has_turn_affordance Task_claim
 
 let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
     ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
+  let progress_tool_available name =
+    List.mem name allowed_tool_names
+    && Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name
+  in
   if has_turn_affordance Board_curation turn_affordances
-     && List.mem "keeper_board_curation_submit" allowed_tool_names
+     && progress_tool_available "keeper_board_curation_submit"
   then Agent_sdk.Types.Tool "keeper_board_curation_submit"
   else if (not has_current_task)
      && has_task_claim_affordance turn_affordances
-     && List.mem "keeper_task_claim" allowed_tool_names
+     && progress_tool_available "keeper_task_claim"
   then Agent_sdk.Types.Tool "keeper_task_claim"
   else if has_turn_affordance Task_audit turn_affordances
-          && List.mem "keeper_tasks_audit" allowed_tool_names
+          && progress_tool_available "keeper_tasks_audit"
   then Agent_sdk.Types.Tool "keeper_tasks_audit"
   else if has_turn_affordance Task_verify turn_affordances
-          && List.mem "keeper_tasks_list" allowed_tool_names
-  then Agent_sdk.Types.Tool "keeper_tasks_list"
+          && progress_tool_available "keeper_task_submit_for_verification"
+  then Agent_sdk.Types.Tool "keeper_task_submit_for_verification"
+  else if has_turn_affordance Task_verify turn_affordances
+          && progress_tool_available "keeper_task_done"
+  then Agent_sdk.Types.Tool "keeper_task_done"
   else if not has_current_task then
     (* #10008: no active task and no applicable specific claim tool
        to force.  Fall back to [Auto] instead of [Any] so the model

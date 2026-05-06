@@ -549,7 +549,8 @@ let prepare_agent_setup
     in
     validate_allow_list ~turn (fallback_floor_tool_names @ repo_probe)
   in
-  let tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn =
+  let tool_gate_requested_for_turn
+      ~current_tool_choice ~is_last_turn ~allowed_tool_names =
     let caller_requires_tools =
       match current_tool_choice with
       | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) -> true
@@ -557,7 +558,9 @@ let prepare_agent_setup
     in
     max_turns > 1
     && not is_last_turn
-    && (caller_requires_tools || turn_affordances_require_tool_gate turn_affordances)
+    && (caller_requires_tools
+        || turn_affordances_require_tool_gate_with_allowed
+             ~allowed_tool_names turn_affordances)
   in
   let compute_tool_surface ~turn ~messages ~current_tool_choice ~decay_discovered
       : computed_tool_surface =
@@ -764,6 +767,7 @@ let prepare_agent_setup
     let tool_gate_requested =
       required_tool_names <> []
       || tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn
+           ~allowed_tool_names:all_allowed
     in
     let all_allowed, tool_surface_fallback_used =
       if all_allowed = [] then

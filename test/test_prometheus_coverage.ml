@@ -247,6 +247,10 @@ let test_keeper_metrics_registered () =
        ("# TYPE " ^ Prometheus.metric_keeper_total_cost_usd ^ " gauge"));
   check bool "has keeper tool duration histogram" true
     (has "masc_keeper_tool_call_duration_seconds");
+  check bool "has keeper underused allowed tool count gauge" true
+    (has "masc_keeper_tool_underused_allowed_count");
+  check bool "has keeper underused allowed tool gauge" true
+    (has "masc_keeper_tool_underused_allowed");
   check bool "has operator compact counter" true
     (has "masc_keeper_operator_compact_total");
   check bool "has operator clear counter" true

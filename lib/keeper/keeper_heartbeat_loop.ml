@@ -593,24 +593,28 @@ let run_keepalive_unified_turn
           "keepalive turn scheduled for %s: channel=%s reasons=%s"
           meta_after_triage.name channel_str
           (String.concat "," verdict_strs);
+      let tool_usage_entries =
+        Keeper_registry.tool_usage_of
+          ~base_path:ctx.config.base_path meta_after_triage.name
+      in
+      let available_tools =
+        Keeper_tool_policy.keeper_allowed_tool_names meta_after_triage
+      in
+      let tool_diversity_summary =
+        let stats =
+          Keeper_tool_diversity.stats_of_registry_entries tool_usage_entries
+        in
+        Keeper_tool_diversity.compute_diversity ~available_tools stats
+      in
+      Keeper_tool_diversity.record_underused_tool_metrics
+        ~keeper_name:meta_after_triage.name ~available_tools
+        tool_diversity_summary;
       (* Phase A2: record decision in audit trail (skip all work when disabled) *)
       if Keeper_decision_audit.audit_enabled () then begin
         let audit_wall_clock = Time_compat.now () in
         let tool_diversity_entropy =
-          let entries =
-            Keeper_registry.tool_usage_of
-              ~base_path:ctx.config.base_path meta_after_triage.name
-          in
-          if entries = [] then None
-          else
-            let stats = Keeper_tool_diversity.stats_of_registry_entries entries in
-            let available_tools =
-              Keeper_tool_policy.keeper_allowed_tool_names meta_after_triage
-            in
-            let summary =
-              Keeper_tool_diversity.compute_diversity ~available_tools stats
-            in
-            Some summary.normalized_entropy
+          if tool_usage_entries = [] then None
+          else Some tool_diversity_summary.normalized_entropy
         in
         Keeper_decision_audit.append
           ~keeper_name:meta_after_triage.name

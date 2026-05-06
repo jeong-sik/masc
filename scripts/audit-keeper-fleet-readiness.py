@@ -13,6 +13,7 @@ import argparse
 import json
 import sys
 import time
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -96,10 +97,9 @@ def load_json(path: Path) -> dict[str, Any]:
     return data
 
 
-def iter_jsonl(path: Path) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
+def iter_jsonl(path: Path) -> Iterator[dict[str, Any]]:
     if not path.exists():
-        return rows
+        return
     with path.open("r", encoding="utf-8") as handle:
         for line_no, line in enumerate(handle, start=1):
             line = line.strip()
@@ -110,8 +110,7 @@ def iter_jsonl(path: Path) -> list[dict[str, Any]]:
             except json.JSONDecodeError as exc:
                 raise ValueError(f"{path}:{line_no}: {exc}") from exc
             if isinstance(row, dict):
-                rows.append(row)
-    return rows
+                yield row
 
 
 def load_toml(path: Path) -> dict[str, Any]:
@@ -486,7 +485,11 @@ def pr_action_metric_paths(base_path: Path, name: str) -> list[Path]:
     metrics_dir = base_path / ".masc" / "keepers" / name / "pr-action-metrics"
     if not metrics_dir.exists():
         return []
-    return sorted(path for path in metrics_dir.rglob("*.jsonl") if path.is_file())
+    return sorted(
+        (path for path in metrics_dir.rglob("*.jsonl") if path.is_file()),
+        key=lambda path: path.relative_to(metrics_dir).as_posix(),
+        reverse=True,
+    )
 
 
 def scan_keeper_evidence(

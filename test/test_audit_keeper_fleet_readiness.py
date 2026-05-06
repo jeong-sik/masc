@@ -96,6 +96,44 @@ def write_ready_keeper(root: Path, name: str) -> None:
 
 
 class AuditKeeperFleetReadinessTest(unittest.TestCase):
+    def test_iter_jsonl_streams_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_path = root / "events.jsonl"
+            log_path.write_text(
+                json.dumps({"a": 1}) + "\n\n" + json.dumps({"b": 2}) + "\n",
+                encoding="utf-8",
+            )
+
+            rows = audit.iter_jsonl(log_path)
+
+            self.assertNotIsInstance(rows, list)
+            self.assertEqual(next(rows), {"a": 1})
+            self.assertEqual(next(rows), {"b": 2})
+            with self.assertRaises(StopIteration):
+                next(rows)
+            self.assertEqual(list(audit.iter_jsonl(root / "missing.jsonl")), [])
+
+    def test_pr_action_metric_paths_returns_newest_date_split_first(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            metrics_root = root / ".masc" / "keepers" / "alpha" / "pr-action-metrics"
+            for relative_path in (
+                "2026-04/30.jsonl",
+                "2026-05/05.jsonl",
+                "2026-05/06.jsonl",
+            ):
+                path = metrics_root / relative_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("{}\n", encoding="utf-8")
+
+            paths = audit.pr_action_metric_paths(root, "alpha")
+
+        self.assertEqual(
+            [path.relative_to(metrics_root).as_posix() for path in paths],
+            ["2026-05/06.jsonl", "2026-05/05.jsonl", "2026-04/30.jsonl"],
+        )
+
     def test_decision_lifecycle_evidence_ignores_git_push_markers(self):
         row = {
             "event": "tool_exec",

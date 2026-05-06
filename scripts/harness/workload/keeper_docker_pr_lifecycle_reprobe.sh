@@ -812,9 +812,15 @@ Tool route rules:
 
 Required proof lane:
 1. Confirm your runtime is sandbox_profile=docker before mutating.
-2. Create a unique proof branch named: keeper/$keeper-docker-pr-proof-$RUN_ID
-3. Make a minimal, non-product proof edit under docs/runtime-proof/keepers/$keeper-$RUN_ID.md with keeper_bash from inside the Docker playground.
-4. Commit and git push that branch with keeper_bash. The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
+2. Create a unique proof worktree/branch for exactly this run id:
+   - branch: keeper/$keeper-docker-pr-proof-$RUN_ID
+   - preferred tool: masc_worktree_create
+   - use the returned worktree path for every later keeper_bash git/file command.
+   - Do not reuse any branch, worktree, or proof file from another run id.
+   - Do not remove this run's worktree during the proof attempt. If Git says
+     the branch/worktree already exists, stop and report blocker="branch_collision".
+3. Make a minimal, non-product proof edit under docs/runtime-proof/keepers/$keeper-$RUN_ID.md with keeper_bash from inside the Docker playground. The file content must include run_id=$RUN_ID and branch=keeper/$keeper-docker-pr-proof-$RUN_ID.
+4. Commit and git push exactly branch keeper/$keeper-docker-pr-proof-$RUN_ID with keeper_bash. The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
 5. Create a draft PR for that branch with keeper_pr_create or the native PR-create tool path. Do not mark ready, do not merge, do not add human-approved-ready.
 6. Use keeper_pr_review_read and keeper_pr_review_comment for review evidence. COMMENT is allowed on your own proof PR. APPROVE must target the cross-keeper PR below, not your own PR.
 
@@ -990,6 +996,7 @@ run_audit() {
     --base-path "$BASE_PATH"
     --expected-keepers "$EXPECTED_KEEPERS"
     --require-docker-pr-lifecycle-evidence
+    --evidence-run-id "$RUN_ID"
     --json
   )
   if [[ -n "$FORBID_GITHUB_IDENTITIES" ]]; then

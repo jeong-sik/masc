@@ -74,6 +74,12 @@ val oas_timeout_budget_observation_reasons : string list
 val record_oas_timeout_budget_observation :
   base_path:string -> keeper_name:string -> unit
 
+val persist_message_cursor_updates :
+  config:Coord.config -> keeper_meta -> (string * int) list -> keeper_meta
+(** Persist room-message cursor updates immediately after observation.
+    This is intentionally exposed for the regression that proves a failed
+    turn cannot replay the same scoped messages forever. *)
+
 val run_keepalive_unified_turn :
   ctx:'a context ->
   meta_after_triage:keeper_meta ->

@@ -61,7 +61,9 @@ the offending branch ref(s) so operators can clean up stale local/remote
 branches before re-running. An empty file means no collisions; rows look like:
 ```json
 {"keeper":"executor","branch":"keeper-executor-agent/<run_id>",
- "kinds":["local","remote_tracking"]}
+ "local_branch":true,"remote_tracking_branch":true,
+ "remote_head":false,"worktree_branch":false,
+ "blocker":"branch_collision_preflight"}
 ```
 After collision evidence is clear, the review phase requires `keeper_pr_review_comment`.
 This avoids the old single-turn shape where one keeper could wait on another

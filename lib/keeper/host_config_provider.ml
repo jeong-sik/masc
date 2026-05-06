@@ -357,6 +357,51 @@ let bind_from_credential ~keeper_name (cred : Repo_manager_types.credential) =
               | None -> []
               | Some path -> [ ("ssh_key_path", path) ]))
 
+let gh_config_dir_matches_identity ~expected gh_config_dir =
+  String.equal (Filename.basename gh_config_dir) "gh"
+  && String.equal (Filename.basename (Filename.dirname gh_config_dir)) expected
+
+let credential_matches_explicit_github_identity ~expected
+    (cred : Repo_manager_types.credential) =
+  let expected = String.trim expected in
+  expected <> ""
+  && (String.equal cred.id expected
+      || String.equal cred.username expected
+      ||
+      match cred.gh_config_dir with
+      | Some gh_config_dir ->
+          gh_config_dir_matches_identity ~expected (String.trim gh_config_dir)
+      | None -> false)
+
+let explicit_github_identity_conflict ~keeper_name
+    (cred : Repo_manager_types.credential) =
+  let defaults = Keeper_types_profile.load_keeper_profile_defaults keeper_name in
+  match defaults.github_identity, defaults.git_identity_mode with
+  | Some expected, Some "github_identity"
+    when not (credential_matches_explicit_github_identity ~expected cred) ->
+      Some expected
+  | _ -> None
+
+let bind_from_credential_checked ~keeper_name cred =
+  match explicit_github_identity_conflict ~keeper_name cred with
+  | Some expected ->
+      let gh_config_dir =
+        Option.value ~default:"<none>" cred.Repo_manager_types.gh_config_dir
+      in
+      Error
+        (Credential_provider.Missing_bundle
+           { identity = keeper_name
+           ; path =
+               Printf.sprintf
+                 "keeper %s declares github_identity %s but credential \
+                  mapping selected credential_id=%s username=%s \
+                  gh_config_dir=%s. Update keeper_repo_mappings.toml to \
+                  select the declared identity bundle or remove the \
+                  conflicting mapping."
+                 keeper_name expected cred.id cred.username gh_config_dir
+           })
+  | None -> bind_from_credential ~keeper_name cred
+
 let resolve ~config ~identity:keeper_name =
   match
     Keeper_repo_mapping.credentials_for_keeper
@@ -381,7 +426,7 @@ let resolve ~config ~identity:keeper_name =
   | Ok [cred] ->
       count_resolve_outcome ~keeper_name ~source:"credential_store"
         ~reason:"single_mapping";
-      bind_from_credential ~keeper_name cred
+      bind_from_credential_checked ~keeper_name cred
   | Ok many ->
       count_resolve_outcome ~keeper_name ~source:"ambiguous"
         ~reason:"multi_mapping";

@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from contextlib import contextmanager
 from pathlib import Path
 
 
@@ -18,7 +19,17 @@ CATALOG_FIXTURE = (
     REPO_ROOT / "test" / "fixtures" / "goal_loop" / "audit-corpus.external-claim.json"
 )
 
-sys.path.insert(0, str(SCRIPT_DIR))
+
+@contextmanager
+def script_import_path():
+    previous = list(sys.path)
+    sys.path.insert(0, str(SCRIPT_DIR))
+    try:
+        yield
+    finally:
+        sys.path[:] = previous
+
+
 spec = importlib.util.spec_from_file_location(
     "discover_goal_loop_strict_row_corpus",
     SCRIPT_PATH,
@@ -27,7 +38,8 @@ assert spec is not None
 discover_goal_loop_strict_row_corpus = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
 sys.modules[spec.name] = discover_goal_loop_strict_row_corpus
-spec.loader.exec_module(discover_goal_loop_strict_row_corpus)
+with script_import_path():
+    spec.loader.exec_module(discover_goal_loop_strict_row_corpus)
 
 
 def synthetic_strict_row_corpus(row_count: int = 206) -> dict[str, object]:
@@ -151,6 +163,36 @@ class DiscoverGoalLoopStrictRowCorpusTest(unittest.TestCase):
             )
 
         self.assertEqual(text, "strict_row")
+
+    def test_discover_reports_missing_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            missing = Path(raw_dir) / "missing-root"
+
+            report = discover_goal_loop_strict_row_corpus.discover([missing])
+
+        self.assertEqual(report["files_considered"], 0)
+        self.assertEqual(report["path_errors_total"], 1)
+        self.assertEqual(report["path_errors"][0]["path"], str(missing))
+        self.assertEqual(report["path_errors"][0]["error"], "missing")
+
+    def test_cli_rejects_non_positive_max_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT_PATH),
+                    raw_dir,
+                    "--max-bytes",
+                    "0",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must be > 0", result.stderr)
 
     def test_zip_member_texts_reads_only_bounded_prefix(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:

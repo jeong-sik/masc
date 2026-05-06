@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import zipfile
 from pathlib import Path
@@ -46,14 +47,46 @@ ZIP_TEXT_SUFFIXES = TEXT_SUFFIXES | {".xml"}
 ARCHIVE_SUFFIXES = {".docx", ".jar", ".ods", ".xlsx", ".zip"}
 
 
-def iter_paths(roots: list[Path]) -> list[Path]:
+def path_error(path: Path, exc: BaseException | str) -> dict[str, str]:
+    message = exc if isinstance(exc, str) else f"{type(exc).__name__}: {exc}"
+    return {"path": str(path), "error": message}
+
+
+def iter_dir_paths(root: Path, path_errors: list[dict[str, str]]) -> list[Path]:
     paths: list[Path] = []
+    stack = [root]
+    while stack:
+        current = stack.pop()
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    entry_path = Path(entry.path)
+                    try:
+                        if entry.is_file(follow_symlinks=False):
+                            paths.append(entry_path)
+                        elif entry.is_dir(follow_symlinks=False):
+                            stack.append(entry_path)
+                    except OSError as exc:
+                        path_errors.append(path_error(entry_path, exc))
+        except OSError as exc:
+            path_errors.append(path_error(current, exc))
+    return paths
+
+
+def iter_paths(roots: list[Path]) -> tuple[list[Path], list[dict[str, str]]]:
+    paths: list[Path] = []
+    path_errors: list[dict[str, str]] = []
     for root in roots:
-        if root.is_dir():
-            paths.extend(path for path in root.rglob("*") if path.is_file())
-        elif root.is_file():
-            paths.append(root)
-    return sorted(paths)
+        try:
+            if root.is_dir():
+                paths.extend(iter_dir_paths(root, path_errors))
+            elif root.is_file():
+                paths.append(root)
+            else:
+                path_errors.append(path_error(root, "missing"))
+        except OSError as exc:
+            path_errors.append(path_error(root, exc))
+    return sorted(paths), sorted(path_errors, key=lambda item: item["path"])
 
 
 def read_text_file(path: Path, max_bytes: int) -> str | None:
@@ -142,7 +175,7 @@ def discover(
     markers: tuple[str, ...] = DEFAULT_MARKERS,
     max_bytes: int = 10_000_000,
 ) -> dict[str, Any]:
-    files = iter_paths(roots)
+    files, path_errors = iter_paths(roots)
     text_units_scanned = 0
     marker_matches: list[dict[str, Any]] = []
     candidate_corpora: list[dict[str, Any]] = []
@@ -187,6 +220,8 @@ def discover(
         "roots": [str(root) for root in roots],
         "markers_checked": list(markers),
         "files_considered": len(files),
+        "path_errors_total": len(path_errors),
+        "path_errors": path_errors,
         "text_units_scanned": text_units_scanned,
         "marker_hits_total": len(marker_matches),
         "marker_matches": marker_matches,
@@ -205,9 +240,12 @@ def report_to_text(report: dict[str, Any]) -> str:
             f"candidates={report['candidate_corpora_total']} "
             f"marker_hits={report['marker_hits_total']} "
             f"text_units={report['text_units_scanned']} "
-            f"files={report['files_considered']}"
+            f"files={report['files_considered']} "
+            f"path_errors={report['path_errors_total']}"
         )
     ]
+    for error in report["path_errors"]:
+        lines.append(f"PATH_ERROR: {error['path']} error={error['error']}")
     for candidate in report["candidate_corpora"]:
         status = "VALID" if candidate["validated"] else "INVALID"
         lines.append(
@@ -217,6 +255,16 @@ def report_to_text(report: dict[str, Any]) -> str:
             f"errors={','.join(candidate['errors']) or '-'}"
         )
     return "\n".join(lines)
+
+
+def positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be > 0")
+    return parsed
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -240,7 +288,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--max-bytes",
-        type=int,
+        type=positive_int,
         default=10_000_000,
         help="Maximum bytes to read per text unit (default: 10000000).",
     )

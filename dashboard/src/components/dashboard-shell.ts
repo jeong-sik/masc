@@ -674,6 +674,15 @@ function composeDocumentTitle(
   return `MASC · ${leaf}`
 }
 
+function useSurfaceDocumentTitle(): void {
+  const currentTab = route.value.tab
+  const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
+  const currentSection = currentSectionForRoute(route.value)
+
+  useEffect(() => {
+    document.title = composeDocumentTitle(currentView?.label ?? null, currentSection?.label ?? null)
+  }, [currentView?.label, currentSection?.label])
+}
 
 function SurfaceLead() {
   const currentTab = route.value.tab
@@ -690,13 +699,6 @@ function SurfaceLead() {
   const trail = currentSection !== null
     ? deriveBreadcrumbTrail(currentView?.label ?? null, currentSection.label, currentTab)
     : []
-
-  // Sync document.title — syncing to an external system (the browser
-  // tab title) is a legitimate useEffect. Keyed on the two labels so
-  // the effect only re-runs on actual navigation, not every render.
-  useEffect(() => {
-    document.title = composeDocumentTitle(currentView?.label ?? null, currentSection?.label ?? null)
-  }, [currentView?.label, currentSection?.label])
 
   return html`
     <div class="mb-3 flex flex-col gap-1.5">
@@ -738,6 +740,8 @@ function SurfaceLead() {
 }
 
 export function DashboardMain() {
+  useSurfaceDocumentTitle()
+
   if (dashboardLoading.value && !connected.value && !namespaceTruthInitializing.value) {
     return html`<${LoadingState}>Loading dashboard...<//>`
   }
@@ -759,8 +763,9 @@ export function DashboardMain() {
       : 'min-h-0 flex-1 overflow-y-auto p-3 max-[520px]:p-2'
 
     return html`
-      <div class="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-[var(--color-bg-page)]">
+      <div class="grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] bg-[var(--color-bg-page)]">
         <${WidgetSoloBar} routeState=${route.value} />
+        <${ObservatoryFilterBar} />
         <div class=${soloBodyClass}>
           ${warmingBanner}
           <${ErrorBoundary} key=${routeLabel} label=${routeLabel || 'dashboard'}>

@@ -283,12 +283,23 @@ export function App() {
       </header>
 
       ${widgetSoloMode
-        ? null
-        : html`
-          <${Suspense} fallback=${null}>
-            <${LazyRemoteWarningBanner} />
-          <//>
-        `}
+        ? html`
+          <div
+            class="flex shrink-0 flex-wrap items-center justify-end gap-2 border-b border-[var(--color-border-default)] bg-[var(--shell-header-bg)] px-3 py-1.5"
+            data-testid="dashboard-widget-solo-auth-strip"
+            aria-label="Solo view auth and runtime status"
+          >
+            <${Suspense} fallback=${authStatusFallback()}>
+              <${LazyAuthStatus} />
+            <//>
+            <${ConnectionStatus} />
+            <${ErrorCounterBadge} />
+          </div>
+        `
+        : null}
+      <${Suspense} fallback=${null}>
+        <${LazyRemoteWarningBanner} />
+      <//>
 
       <div class=${widgetSoloMode ? 'flex flex-1 overflow-hidden p-0' : 'flex flex-1 gap-2 overflow-hidden p-2 max-[1100px]:flex-col'}>
         ${widgetSoloMode

@@ -104,22 +104,37 @@ function SectionHeading({
 // SPEC §3.6 v0.3: color alone never identifies a keeper. Always emit
 // color + sigil. <KeeperBadge> is the canonical attribution unit.
 //
-// kSlot(id)  → 1..12, deterministic hash → palette slot
-// kSigil(id) → 2-letter monogram for the badge face
+// kSlot(id)  → optional runtime override, else deterministic hash → palette slot
+// kSigil(id) → optional runtime override, else 2-letter monogram
 //
 // 12-slot mapping uses skip-3 stride so adjacent IDs in a list land on
 // hues ≥90° apart, preserving discriminability up to ~10 active keepers.
 
-const KEEPER_REGISTRY = {
-  // canonical 5 — pinned to fixed slots for brand recall.
-  // These match the legacy alias targets in tokens.css §3 so visual
-  // identity is preserved across the v0.2→v0.3 migration.
-  'nick0cave':     { slot: 3,  sigil: 'NK' },  /* amber */
-  'masc-improver': { slot: 6,  sigil: 'MS' },  /* jade  */
-  'sangsu':        { slot: 9,  sigil: 'SS' },  /* sky   */
-  'qa-king':       { slot: 2,  sigil: 'QA' },  /* clay  */
-  'rama':          { slot: 11, sigil: 'RM' },  /* violet */
-};
+const KEEPER_REGISTRY = Object.freeze({});
+
+function _keeperRegistryEntry(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const slot = Number(raw.slot);
+  const sigil = String(raw.sigil || '').replace(/[^a-z0-9]/gi, '').slice(0, 2).toUpperCase();
+  if (!Number.isInteger(slot) || slot < 1 || slot > 12 || sigil.length !== 2) return null;
+  return { slot, sigil };
+}
+
+function _keeperRegistry() {
+  const data = window.MASC_DATA || {};
+  const raw = data.keeper_registry || data.keeperRegistry || KEEPER_REGISTRY;
+  if (!raw || typeof raw !== 'object') return {};
+  const resolved = {};
+  Object.entries(raw).forEach(([id, entry]) => {
+    const normalized = _keeperRegistryEntry(entry);
+    if (normalized) resolved[id] = normalized;
+  });
+  return resolved;
+}
+
+function _keeperRegistryLookup(id) {
+  return _keeperRegistry()[String(id)] || null;
+}
 
 // FNV-1a 32-bit hash → 1..12 (avoid 0)
 function _hash12(str) {
@@ -132,12 +147,14 @@ function _hash12(str) {
 }
 
 function kSlot(id) {
-  if (KEEPER_REGISTRY[id]) return KEEPER_REGISTRY[id].slot;
+  const reg = _keeperRegistryLookup(id);
+  if (reg) return reg.slot;
   return _hash12(String(id));
 }
 
 function kSigil(id) {
-  if (KEEPER_REGISTRY[id]) return KEEPER_REGISTRY[id].sigil;
+  const reg = _keeperRegistryLookup(id);
+  if (reg) return reg.sigil;
   // Auto-derive: first letter + first letter after hyphen, else first 2.
   const s = String(id).replace(/[^a-z0-9-]/gi, '');
   const parts = s.split('-').filter(Boolean);

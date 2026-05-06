@@ -1,13 +1,38 @@
 import { describe, it, expect } from 'vitest'
-import { kSlot, kSigil, KEEPER_REGISTRY } from './keeper-badge'
+import {
+  kSlot,
+  kSigil,
+  KEEPER_REGISTRY,
+  normalizeKeeperRegistry,
+} from './keeper-badge'
+
+interface TestMascWindow extends Window {
+  MASC_DATA?: {
+    keeper_registry?: unknown
+    keeperRegistry?: unknown
+  }
+}
+
+function withMascData(data: TestMascWindow['MASC_DATA'], fn: () => void) {
+  const w = window as TestMascWindow
+  const previous = w.MASC_DATA
+  w.MASC_DATA = data
+  try {
+    fn()
+  } finally {
+    if (previous === undefined) {
+      delete w.MASC_DATA
+    } else {
+      w.MASC_DATA = previous
+    }
+  }
+}
 
 describe('kSlot', () => {
-  it('returns pinned slot for KEEPER_REGISTRY ids', () => {
-    expect(kSlot('nick0cave')).toBe(3)
-    expect(kSlot('masc-improver')).toBe(6)
-    expect(kSlot('sangsu')).toBe(9)
-    expect(kSlot('qa-king')).toBe(2)
-    expect(kSlot('rama')).toBe(11)
+  it('uses runtime keeper_registry overrides when present', () => {
+    withMascData({ keeper_registry: { runtime_keeper: { slot: 7, sigil: 'RK' } } }, () => {
+      expect(kSlot('runtime_keeper')).toBe(7)
+    })
   })
 
   it('returns deterministic slot 1..12 for unknown ids', () => {
@@ -25,10 +50,10 @@ describe('kSlot', () => {
 })
 
 describe('kSigil', () => {
-  it('returns pinned sigil for KEEPER_REGISTRY ids', () => {
-    expect(kSigil('nick0cave')).toBe('NK')
-    expect(kSigil('masc-improver')).toBe('MS')
-    expect(kSigil('rama')).toBe('RM')
+  it('uses runtime keeper_registry sigils when present', () => {
+    withMascData({ keeper_registry: { runtime_keeper: { slot: 7, sigil: 'RK' } } }, () => {
+      expect(kSigil('runtime_keeper')).toBe('RK')
+    })
   })
 
   it('extracts first letter + first letter after hyphen for hyphenated ids', () => {
@@ -51,26 +76,28 @@ describe('kSigil', () => {
   })
 })
 
+describe('normalizeKeeperRegistry', () => {
+  it('keeps valid runtime entries and drops invalid entries', () => {
+    expect(
+      normalizeKeeperRegistry({
+        good: { slot: 12, sigil: 'GK' },
+        low: { slot: 0, sigil: 'LO' },
+        high: { slot: 13, sigil: 'HI' },
+        sigil: { slot: 1, sigil: '?' },
+      }),
+    ).toEqual({ good: { slot: 12, sigil: 'GK' } })
+  })
+
+  it('accepts camelCase runtime key for browser data', () => {
+    withMascData({ keeperRegistry: { camel: { slot: 4, sigil: 'CM' } } }, () => {
+      expect(kSlot('camel')).toBe(4)
+      expect(kSigil('camel')).toBe('CM')
+    })
+  })
+})
+
 describe('KEEPER_REGISTRY', () => {
-  it('has 5 pinned canonical ids', () => {
-    expect(Object.keys(KEEPER_REGISTRY)).toHaveLength(5)
-  })
-
-  it('all pinned slots are within 1..12', () => {
-    for (const entry of Object.values(KEEPER_REGISTRY)) {
-      expect(entry.slot).toBeGreaterThanOrEqual(1)
-      expect(entry.slot).toBeLessThanOrEqual(12)
-    }
-  })
-
-  it('all sigils are exactly 2 uppercase chars', () => {
-    for (const entry of Object.values(KEEPER_REGISTRY)) {
-      expect(entry.sigil).toMatch(/^[A-Z]{2}$/)
-    }
-  })
-
-  it('all pinned slots are unique', () => {
-    const slots = Object.values(KEEPER_REGISTRY).map((e) => e.slot)
-    expect(new Set(slots).size).toBe(slots.length)
+  it('ships with no baked-in keeper names', () => {
+    expect(Object.keys(KEEPER_REGISTRY)).toHaveLength(0)
   })
 })

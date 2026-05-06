@@ -4,10 +4,9 @@
 // a keeper. Always emit color + sigil. <KeeperBadge> is the canonical
 // attribution unit anywhere in the dashboard.
 //
-// Slot resolution: kSlot(id) → 1..12 deterministic FNV-1a hash, with
-// 5 anchor ids in KEEPER_REGISTRY pinned for brand recall.
-// Sigil: kSigil(id) → 2-letter monogram (registry override or
-// auto-derived from id).
+// Slot resolution: kSlot(id) → optional runtime override, else 1..12
+// deterministic FNV-1a hash.
+// Sigil: kSigil(id) → optional runtime override, else 2-letter monogram.
 
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
@@ -18,15 +17,43 @@ export interface KeeperRegistryEntry {
   sigil: string
 }
 
-export const KEEPER_REGISTRY: Record<string, KeeperRegistryEntry> = {
-  // Canonical 5 — pinned slots for brand recall.
-  // These match the v0.2 alias targets in design-system tokens
-  // so visual identity is preserved across the v0.2→v0.3 migration.
-  'nick0cave':     { slot: 3,  sigil: 'NK' },  /* amber  */
-  'masc-improver': { slot: 6,  sigil: 'MS' },  /* jade   */
-  'sangsu':        { slot: 9,  sigil: 'SS' },  /* sky    */
-  'qa-king':       { slot: 2,  sigil: 'QA' },  /* clay   */
-  'rama':          { slot: 11, sigil: 'RM' },  /* violet */
+export const KEEPER_REGISTRY: Record<string, KeeperRegistryEntry> = {}
+
+interface MascDataWindow extends Window {
+  MASC_DATA?: {
+    keeper_registry?: unknown
+    keeperRegistry?: unknown
+  }
+}
+
+function normalizeKeeperSigil(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const sigil = raw.replace(/[^a-z0-9]/gi, '').slice(0, 2).toUpperCase()
+  return sigil.length === 2 ? sigil : null
+}
+
+export function normalizeKeeperRegistry(
+  raw: unknown,
+): Record<string, KeeperRegistryEntry> {
+  if (!raw || typeof raw !== 'object') return {}
+  const resolved: Record<string, KeeperRegistryEntry> = {}
+  for (const [id, value] of Object.entries(raw)) {
+    if (!value || typeof value !== 'object') continue
+    const entry = value as Record<string, unknown>
+    const slot = Number(entry.slot)
+    const sigil = normalizeKeeperSigil(entry.sigil)
+    if (!Number.isInteger(slot) || slot < 1 || slot > 12 || !sigil) continue
+    resolved[id] = { slot, sigil }
+  }
+  return resolved
+}
+
+function runtimeKeeperRegistry(): Record<string, KeeperRegistryEntry> {
+  if (typeof window === 'undefined') return KEEPER_REGISTRY
+  const data = (window as MascDataWindow).MASC_DATA
+  return normalizeKeeperRegistry(
+    data?.keeper_registry ?? data?.keeperRegistry ?? KEEPER_REGISTRY,
+  )
 }
 
 // FNV-1a 32-bit hash mapped onto 1..12 (avoids 0 so slot is 1-indexed).
@@ -40,13 +67,13 @@ function hash12(str: string): number {
 }
 
 export function kSlot(id: string): number {
-  const reg = KEEPER_REGISTRY[id]
+  const reg = runtimeKeeperRegistry()[id]
   if (reg) return reg.slot
   return hash12(String(id))
 }
 
 export function kSigil(id: string): string {
-  const reg = KEEPER_REGISTRY[id]
+  const reg = runtimeKeeperRegistry()[id]
   if (reg) return reg.sigil
   // Auto-derive: first letter + first letter after hyphen, else first 2.
   const s = String(id).replace(/[^a-z0-9-]/gi, '')
@@ -152,4 +179,3 @@ export function KeeperBadge({
     </span>
   `
 }
-

@@ -55,6 +55,14 @@ class ReplaySummary:
     metadata_json: str
 
 
+@dataclass(frozen=True)
+class SourceSnapshot:
+    inode: int
+    size: int
+    mtime_ns: int
+    offset: int
+
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -72,11 +80,28 @@ def artifact_log_name(index: int, source: Path) -> str:
     return f"{index:02d}-{name}"
 
 
-def source_offsets(paths: list[Path], *, tail_only: bool) -> dict[Path, int]:
-    offsets: dict[Path, int] = {}
+def source_snapshots(paths: list[Path], *, tail_only: bool) -> dict[Path, SourceSnapshot]:
+    snapshots: dict[Path, SourceSnapshot] = {}
     for path in paths:
-        offsets[path] = path.stat().st_size if tail_only else 0
-    return offsets
+        stat = path.stat()
+        snapshots[path] = SourceSnapshot(
+            inode=stat.st_ino,
+            size=stat.st_size,
+            mtime_ns=stat.st_mtime_ns,
+            offset=stat.st_size if tail_only else 0,
+        )
+    return snapshots
+
+
+def capture_offset_after_window(source: Path, snapshot: SourceSnapshot) -> int:
+    current = source.stat()
+    if current.st_ino != snapshot.inode:
+        return 0
+    if current.st_size < snapshot.size:
+        return 0
+    if current.st_size == snapshot.size and current.st_mtime_ns != snapshot.mtime_ns:
+        return 0
+    return snapshot.offset
 
 
 def capture_log_window(
@@ -94,7 +119,7 @@ def capture_log_window(
 
     log_dir = artifact_dir / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    offsets = source_offsets(sources, tail_only=duration_seconds > 0)
+    snapshots = source_snapshots(sources, tail_only=duration_seconds > 0)
     if duration_seconds > 0:
         time.sleep(duration_seconds)
 
@@ -104,8 +129,9 @@ def capture_log_window(
         if duration_seconds <= 0:
             shutil.copyfile(source, target)
         else:
+            offset = capture_offset_after_window(source, snapshots[source])
             with source.open("rb") as input_handle:
-                input_handle.seek(offsets[source])
+                input_handle.seek(offset)
                 target.write_bytes(input_handle.read())
         captured.append(str(target))
     return captured
@@ -177,6 +203,7 @@ def replay_logs(
     base_path: str | None,
 ) -> ReplaySummary:
     artifact_dir.mkdir(parents=True, exist_ok=True)
+    max_samples_effective = max(max_samples, 0)
     window_start = utc_now_iso()
     captured_logs = capture_log_window(
         log_paths,
@@ -187,7 +214,7 @@ def replay_logs(
 
     observe_report = observe_goal_loop_logs.scan_logs(
         captured_logs,
-        max_samples=max(max_samples, 0),
+        max_samples=max_samples_effective,
     )
     observe_json = asdict(observe_report)
 
@@ -249,7 +276,9 @@ def replay_logs(
         "evidence_window_end": window_end,
         "act_map_path": act_map_path,
         "verify_policy": verify_policy,
-        "max_samples": max_samples,
+        "max_samples": max_samples_effective,
+        "max_samples_requested": max_samples,
+        "max_samples_effective": max_samples_effective,
     }
 
     paths = {

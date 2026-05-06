@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -75,6 +76,61 @@ class GoalLoopLiveReplayTest(unittest.TestCase):
             self.assertIsInstance(verify["evidence_window_start"], str)
             self.assertIsInstance(verify["evidence_window_end"], str)
             self.assertIsInstance(verify["checked_at"], str)
+            metadata = read_json(artifact_dir / "metadata.json")
+            self.assertEqual(metadata["max_samples"], 2)
+            self.assertEqual(metadata["max_samples_requested"], 2)
+            self.assertEqual(metadata["max_samples_effective"], 2)
+
+    def test_replay_metadata_records_requested_and_effective_max_samples(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            root = Path(raw_dir)
+            log_path = root / "server.log"
+            artifact_dir = root / "artifacts"
+            log_path.write_text(
+                "[INFO] provider_health_probe_completed provider=ollama\n",
+                encoding="utf-8",
+            )
+
+            goal_loop_live_replay.replay_logs(
+                log_paths=[str(log_path)],
+                artifact_dir=artifact_dir,
+                duration_seconds=0,
+                act_map_path=None,
+                loop_iteration="test-negative-max-samples",
+                verify_policy="critical",
+                max_samples=-7,
+                runtime_source="unit-test",
+                base_path=None,
+            )
+
+            metadata = read_json(artifact_dir / "metadata.json")
+            self.assertEqual(metadata["max_samples_requested"], -7)
+            self.assertEqual(metadata["max_samples_effective"], 0)
+            self.assertEqual(metadata["max_samples"], 0)
+
+    def test_capture_window_reads_from_start_after_truncation(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            root = Path(raw_dir)
+            log_path = root / "server.log"
+            artifact_dir = root / "artifacts"
+            log_path.write_text("old line before capture\n", encoding="utf-8")
+
+            def truncate_during_sleep(_duration: float) -> None:
+                log_path.write_text("new\n", encoding="utf-8")
+
+            with mock.patch.object(
+                goal_loop_live_replay.time,
+                "sleep",
+                side_effect=truncate_during_sleep,
+            ):
+                captured = goal_loop_live_replay.capture_log_window(
+                    [str(log_path)],
+                    artifact_dir=artifact_dir,
+                    duration_seconds=1.0,
+                )
+
+            captured_text = Path(captured[0]).read_text(encoding="utf-8")
+            self.assertEqual(captured_text, "new\n")
 
     def test_replay_keeps_loop_red_when_critical_signature_remains(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:

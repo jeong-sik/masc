@@ -26,6 +26,11 @@ let option_or_dash = function
   | Some value when not (String.equal (String.trim value) "") -> value
   | _ -> "-"
 
+let first_line text =
+  match String.index_opt text '\n' with
+  | Some i -> String.sub text 0 i
+  | None -> text
+
 let take_items limit items =
   let rec loop remaining acc = function
     | _ when remaining <= 0 -> List.rev acc
@@ -113,20 +118,19 @@ let agent_focus_label ~is_zombie ~active_assigned_task_ids
     | task :: rest -> Printf.sprintf "%s (+%d)" task (List.length rest)
     | [] -> (
         match agent.current_task with
-        | Some task when not (String.equal (String.trim task) "") ->
-            Printf.sprintf "%s (stale:%s)"
-              (Masc_domain.agent_status_to_string agent.status)
-              task
+        | Some raw_task ->
+            let task = raw_task |> String.trim |> first_line in
+            if String.equal task "" then
+              Masc_domain.agent_status_to_string agent.status
+            else
+              Printf.sprintf "%s (stale:%s)"
+                (Masc_domain.agent_status_to_string agent.status)
+                task
         | _ -> Masc_domain.agent_status_to_string agent.status)
 
 let task_id_list_label = function
   | [] -> "[]"
   | ids -> "[" ^ String.concat "," ids ^ "]"
-
-let first_line text =
-  match String.index_opt text '\n' with
-  | Some i -> String.sub text 0 i
-  | None -> text
 
 let deliverable_claims_completion ~task_id deliverable =
   let normalized =

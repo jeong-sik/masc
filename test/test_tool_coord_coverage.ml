@@ -93,9 +93,7 @@ let write_agent ctx agent =
     (Types.agent_to_yojson agent)
 
 let seed_stale_current_task ctx =
-  let old_last_seen =
-    Masc_domain.iso8601_of_unix_seconds (Time_compat.now () -. 10.0)
-  in
+  let old_last_seen = Masc_domain.now_iso () in
   let agent = read_agent ctx in
   write_agent ctx
     { agent with status = Busy; current_task = Some "task-missing"; last_seen = old_last_seen };
@@ -283,12 +281,16 @@ let () = test "dispatch_status_marks_stale_agent_current_task_label" (fun () ->
   | Error err -> failwith (Masc_domain.masc_error_to_string err));
   let actual_name = actual_test_agent_name ctx.config in
   write_agent_state ctx.config actual_name (fun agent ->
-      { agent with status = Masc_domain.Busy; current_task = Some "task-001" });
+      { agent with
+        status = Masc_domain.Busy;
+        current_task = Some " task-001\nignored-line "
+      });
   match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
   | Some { success; message = result } ->
       assert success;
       assert_not_contains result (actual_name ^ " (you) -> task-001");
       assert_contains result (actual_name ^ " (you) -> busy (stale:task-001)");
+      assert_not_contains result "ignored-line";
       assert_contains result "Summary: active=0, done=1, cancelled=0, total=1"
   | None -> failwith "dispatch returned None"
 )

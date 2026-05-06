@@ -305,14 +305,17 @@ broader structured-ID criterion passes only when the triage manifest covers
 every uncataloged family and expected occurrence count. The row-corpus
 discovery manifest records the unsuccessful search for a full 206-row strict
 corpus and attaches that evidence to `strict_row_level_catalog_complete`, but
-it does not satisfy the criterion. A supplied strict-row corpus is validated
-against `test/fixtures/goal_loop/strict-row-corpus-contract.json`: 206 unique
+it does not satisfy the criterion. The completion audit validates the supplied
+strict-row corpus against the shape it can prove from status input: 206 unique
 rows, logical `prompt_corpus/GOAL_LOOP/...` source paths, positive line refs,
-catalog external-source binding, catalog line-count bounds when available,
-severity/actionability, and replay expectations. A valid supplied corpus still
-does not close the blocker unless the status input was produced from Orient
-with the same corpus and reports the strict row-level catalog as `COMPLETE`
-with 206 itemized findings and zero missing rows.
+severity/actionability, and replay expectations. Catalog external-source
+binding and catalog line-count bounds require the full audit catalog manifest,
+so they are enforced by the Orient replay or the standalone
+`validate_goal_loop_strict_row_corpus.py --audit-catalog` intake check above.
+A valid supplied corpus still does not close the blocker unless the status
+input was produced from Orient with the same corpus and reports the strict
+row-level catalog as `COMPLETE` with 206 itemized findings and zero missing
+rows.
 
 When the Verify input is replaced with a live post-ACT artifact that carries
 the required evidence-window metadata, `post_act_verify_complete` can pass.

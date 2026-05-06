@@ -249,6 +249,7 @@ def validate_strict_row_corpus(
     strict_row_corpus: dict[str, Any],
     *,
     catalog: dict[str, Any] | None = None,
+    require_catalog_sources: bool = True,
 ) -> dict[str, Any]:
     errors: list[str] = []
     duplicate_ids: list[str] = []
@@ -284,7 +285,10 @@ def validate_strict_row_corpus(
     catalog_sources_raw = (
         catalog.get("external_sources") if isinstance(catalog, dict) else None
     )
-    catalog_source_binding_required = isinstance(catalog_sources_raw, list)
+    catalog_source_binding_required = catalog is not None and require_catalog_sources
+    catalog_sources_manifest_valid = catalog is None or (
+        isinstance(catalog_sources_raw, list) if require_catalog_sources else True
+    )
     catalog_source_line_counts: dict[str, int | None] = {}
     if isinstance(catalog_sources_raw, list):
         for source_raw in catalog_sources_raw:
@@ -315,6 +319,8 @@ def validate_strict_row_corpus(
         and expected_total != catalog_expected_total
     ):
         errors.append("expected_findings_total_mismatch")
+    if not catalog_sources_manifest_valid:
+        errors.append("catalog_external_sources_must_be_list")
     if not isinstance(expected_total, int):
         errors.append("expected_findings_total_must_be_int")
     if not isinstance(findings_raw, list):
@@ -533,7 +539,9 @@ def validate_strict_row_corpus(
         ],
         "path_policy_valid": not local_path_leaks and not invalid_source_paths,
         "catalog_external_sources_total": len(catalog_source_line_counts),
-        "catalog_source_binding_valid": not invalid_catalog_source_paths
+        "catalog_source_binding_required": catalog_source_binding_required,
+        "catalog_source_binding_valid": catalog_sources_manifest_valid
+        and not invalid_catalog_source_paths
         and not invalid_catalog_line_refs,
         "local_path_leaks": local_path_leaks,
         "required_source_prefix": STRICT_ROW_CORPUS_SOURCE_PREFIX,

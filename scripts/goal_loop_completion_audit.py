@@ -37,6 +37,9 @@ PROMPT_CHECKLIST_STATUSES = {"PASS", "PARTIAL", "BLOCKED"}
 PROMPT_CHECKLIST_ISSUE_REF_RE = re.compile(
     r"^https://github\.com/jeong-sik/masc-mcp/issues/\d+$"
 )
+PROMPT_CHECKLIST_PR_REF_RE = re.compile(
+    r"^https://github\.com/jeong-sik/masc-mcp/pull/\d+$"
+)
 PROMPT_SOURCE_PATH_PREFIX = "prompt_corpus/GOAL_LOOP/"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -678,7 +681,11 @@ def strict_row_corpus_evidence(
     if isinstance(catalog_id, str) and catalog_id:
         catalog["catalog_id"] = catalog_id
 
-    report = validate_strict_row_corpus(strict_row_corpus, catalog=catalog)
+    report = validate_strict_row_corpus(
+        strict_row_corpus,
+        catalog=catalog,
+        require_catalog_sources=False,
+    )
     report["expected_matches_catalog"] = (
         report.get("expected_findings_total")
         == row_catalog_evidence["expected_findings_total"]
@@ -716,6 +723,9 @@ def prompt_closeout_checklist_evidence(
     tracking_issue_refs: set[str] = set()
     missing_tracking_issue_refs: list[str] = []
     invalid_tracking_issue_refs: list[str] = []
+    requirements_with_implementation_pr_refs = 0
+    implementation_pr_refs: set[str] = set()
+    invalid_implementation_pr_refs: list[str] = []
     artifact_refs_total = 0
     artifact_refs_resolved = 0
     artifact_ref_anchors_total = 0
@@ -813,6 +823,29 @@ def prompt_closeout_checklist_evidence(
                 invalid_requirements.append(
                     f"{requirement_label}: invalid_tracking_issue_refs"
                 )
+        implementation_pr_refs_raw = requirement.get("implementation_pr_refs", [])
+        implementation_refs = (
+            implementation_pr_refs_raw
+            if isinstance(implementation_pr_refs_raw, list)
+            else []
+        )
+        valid_implementation_refs = [
+            item
+            for item in implementation_refs
+            if isinstance(item, str)
+            and PROMPT_CHECKLIST_PR_REF_RE.fullmatch(item) is not None
+        ]
+        implementation_pr_refs.update(valid_implementation_refs)
+        if valid_implementation_refs:
+            requirements_with_implementation_pr_refs += 1
+        if not isinstance(implementation_pr_refs_raw, list) or len(
+            valid_implementation_refs
+        ) != len(implementation_refs):
+            requirement_label = str(requirement_id or f"#{index}")
+            invalid_implementation_pr_refs.append(requirement_label)
+            invalid_requirements.append(
+                f"{requirement_label}: invalid_implementation_pr_refs"
+            )
 
     expected_source_docs = as_int(audit_catalog.get("source_documents_expected"))
     source_docs_complete = (
@@ -855,6 +888,11 @@ def prompt_closeout_checklist_evidence(
         "tracking_issue_refs_total": len(tracking_issue_refs),
         "missing_tracking_issue_refs": missing_tracking_issue_refs,
         "invalid_tracking_issue_refs": invalid_tracking_issue_refs,
+        "requirements_with_implementation_pr_refs": (
+            requirements_with_implementation_pr_refs
+        ),
+        "implementation_pr_refs_total": len(implementation_pr_refs),
+        "invalid_implementation_pr_refs": invalid_implementation_pr_refs,
         "artifact_refs_total": artifact_refs_total,
         "artifact_refs_resolved": artifact_refs_resolved,
         "artifact_ref_anchors_total": artifact_ref_anchors_total,

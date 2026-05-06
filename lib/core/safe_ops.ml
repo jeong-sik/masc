@@ -226,6 +226,12 @@ let sanitize_text_utf8 (s : string) : string =
     loop 0;
     Buffer.contents buf
 
+type sanitized_json_utf8 =
+  { raw : Yojson.Safe.t
+  ; sanitized : Yojson.Safe.t
+  ; changed : bool
+  }
+
 let rec sanitize_json_utf8 (json : Yojson.Safe.t) : Yojson.Safe.t =
   match json with
   | `String s ->
@@ -256,6 +262,10 @@ let rec sanitize_json_utf8 (json : Yojson.Safe.t) : Yojson.Safe.t =
       in
       if !changed then `List sanitized_items else json
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as other -> other
+
+let sanitize_json_utf8_with_raw raw =
+  let sanitized = sanitize_json_utf8 raw in
+  { raw; sanitized; changed = sanitized != raw }
 
 let count_invalid_utf8_bytes s =
   let len = String.length s in

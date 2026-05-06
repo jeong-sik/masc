@@ -37,7 +37,7 @@ val build_keeper_system_prompt :
     the keeper sees the live git_clone allow/deny lists without having
     to query [tool_policy.toml].  Callers should pass the values from
     [Keeper_tool_policy.git_clone_allowed_orgs] /
-    [git_clone_denied_repos].
+    [Keeper_tool_policy.git_clone_denied_repos].
 
     [git_clone_policy_loaded=false] means the caller could not read
     [tool_policy.toml] yet; the prompt should say git/gh operations fail

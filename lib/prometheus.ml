@@ -1848,7 +1848,8 @@ let init () =
      by keeper."
     Counter;
   add metric_keeper_sse_broadcast_failures
-    "Total in-turn heartbeat SSE broadcast failures. Labeled by keeper."
+    "Total keeper SSE broadcast failures. Labeled by keeper and site \
+     when available."
     Counter;
   add metric_keeper_room_heartbeat_failures
     "Total room heartbeat failures (consecutive, leads to crash). \

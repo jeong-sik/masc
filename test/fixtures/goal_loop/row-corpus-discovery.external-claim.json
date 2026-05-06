@@ -111,6 +111,14 @@
       "result": "NOT_ROW_CORPUS",
       "sha256": "f92b304c95d2e49ef1888c22665212e7e0b0cb1607f598665559f045ded89f01",
       "note": "Goal-driven design note repeats aggregate 206 and STILL_PRESENT claims plus one R-FATAL-1 example, but does not provide the missing 206 itemized strict rows."
+    },
+    {
+      "artifact_name": "Kimi_Agent_code_cleanup.zip",
+      "artifact_kind": "zip",
+      "result": "NOT_ROW_CORPUS",
+      "sha256": "c41ad0b7e719e27f557e5b93e422048a64ccf993ba3ebdcc04e296452497ff28",
+      "contents_summary": "46 markdown files including the 12 prompt documents and research notes",
+      "note": "Archive search finds aggregate 206 claims, top finding examples, and ACT-title placeholders, but no source_catalog_id, strict-row schema, or 206 itemized finding rows."
     }
   ],
   "broader_structured_id_triage": {

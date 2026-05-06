@@ -91,6 +91,22 @@ let runtime_mcp_policy_for_tools ~(keeper_name : string) (tools : Agent_sdk.Tool
   | Some policy, None -> Some policy
   | None, _ -> None
 
+let keeper_internal_tool_names_for_runtime_surface ~(keeper_name : string)
+    (tools : Agent_sdk.Tool.t list) =
+  match keeper_agent_name_opt keeper_name with
+  | None -> []
+  | Some _ ->
+      tools
+      |> List.filter (fun (tool : Agent_sdk.Tool.t) ->
+             Tool_catalog.is_on_surface Tool_catalog.Keeper_internal
+               tool.schema.name)
+      |> List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name)
+      |> List.sort_uniq String.compare
+
+let keeper_internal_tools_require_materialized_runtime_surface
+    ~(keeper_name : string) (tools : Agent_sdk.Tool.t list) =
+  keeper_internal_tool_names_for_runtime_surface ~keeper_name tools <> []
+
 let runtime_mcp_policy_for_provider
     ~(keeper_name : string)
     ~(provider_cfg : Llm_provider.Provider_config.t)

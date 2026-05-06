@@ -78,6 +78,15 @@ let keeper_internal_tools =
     "keeper_voice_session_end";
     (* Tool discovery *)
     "keeper_tool_search";
+    (* Keeper-scoped GitHub PR tools. These are native keeper tools, not
+       public MCP tools, so CLI lanes must materialize them through the
+       keeper-bound runtime MCP surface instead of silently dropping them. *)
+    "keeper_pr_list";
+    "keeper_pr_status";
+    "keeper_pr_create";
+    "keeper_pr_review_read";
+    "keeper_pr_review_comment";
+    "keeper_pr_review_reply";
     (* keeper_deliberation_decision: Agent_sdk.Structured result schema, not
        a regular tool — does not need a keeper shard entry.
        keeper_unified: cascade name, not a tool. *)

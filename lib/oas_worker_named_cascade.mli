@@ -61,6 +61,17 @@ val runtime_mcp_policy_for_tools :
 (** Build a runtime MCP policy from the tool list, honouring public MCP tools
     and keeper-internal surface classifications. *)
 
+val keeper_internal_tool_names_for_runtime_surface :
+  keeper_name:string -> Agent_sdk.Tool.t list -> string list
+(** Keeper-internal tool names that require a keeper-bound runtime surface for
+    the given keeper. Empty when [keeper_name] does not resolve to a keeper
+    agent name. *)
+
+val keeper_internal_tools_require_materialized_runtime_surface :
+  keeper_name:string -> Agent_sdk.Tool.t list -> bool
+(** [true] when the active tool surface contains keeper-internal tools that
+    must not be silently dropped by an optional CLI/runtime-MCP lane. *)
+
 val runtime_mcp_policy_for_provider :
   keeper_name:string ->
   provider_cfg:Llm_provider.Provider_config.t ->

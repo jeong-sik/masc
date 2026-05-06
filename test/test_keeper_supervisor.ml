@@ -31,6 +31,16 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop index =
+    if index + needle_len > haystack_len then false
+    else if String.sub haystack index needle_len = needle then true
+    else loop (index + 1)
+  in
+  needle_len = 0 || loop 0
+
 let with_restart_launch_noop f =
   Sup.set_restart_launch_noop_for_test true;
   Fun.protect
@@ -867,12 +877,19 @@ let test_stale_fleet_batch_latch_marks_batch_members () =
       (match reason "batch-a", reason "batch-b", reason "batch-provider" with
        | Some (Reg.Stale_fleet_batch { distinct_count = a }),
          Some (Reg.Stale_fleet_batch { distinct_count = b }),
-         Some (Reg.Provider_runtime_error { code; detail }) ->
+         Some (Reg.Stale_fleet_batch { distinct_count = c }) ->
            check int "batch-a distinct_count" 3 a;
            check int "batch-b distinct_count" 3 b;
-           check string "provider reason preserved code" "auth" code;
-           check string "provider reason preserved detail" "401" detail
-       | _ -> fail "unexpected batch latch failure reasons"))
+           check int "batch-provider distinct_count" 3 c
+       | _ -> fail "unexpected batch latch failure reasons");
+      (match KT.read_meta config "batch-provider" with
+       | Ok (Some m) ->
+           check bool "provider root cause remains in blocker text" true
+             (contains_substring m.runtime.last_blocker "provider_runtime_error");
+           check bool "provider blocker class is fleet batch" true
+             (m.runtime.last_blocker_class = Some KT.Stale_fleet_batch)
+       | Ok None -> fail "batch-provider meta missing"
+       | Error err -> fail ("read_meta failed: " ^ err)))
 
 let test_oas_timeout_budget_loop_pause_skips_restart () =
   Eio_main.run @@ fun env ->
@@ -976,7 +993,9 @@ let test_unresolved_watchdog_stopped_budget_loop_is_reaped () =
       (match KT.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused = true after unresolved watchdog stop"
-             true m.paused
+             true m.paused;
+           check bool "budget loop blocker class preserved"
+             true (m.runtime.last_blocker_class = Some KT.Oas_timeout_budget)
        | Ok None -> fail "meta missing after unresolved watchdog stop"
        | Error err -> fail ("read_meta failed: " ^ err));
       check bool "unresolved watchdog-stopped entry reaped"

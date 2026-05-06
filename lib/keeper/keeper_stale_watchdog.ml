@@ -172,6 +172,7 @@ let failure_reason_batch_root_cause
       Some Fd_exhaustion
   | Stale_turn_timeout _
   | Stale_termination_storm _
+  | Stale_fleet_batch _
   | Oas_timeout_budget_loop _
   | Provider_runtime_error _ ->
       Some Cascade_unhealthy
@@ -304,30 +305,59 @@ let reset_batch_terminations_for_test () =
 
 let record_batch_termination_for_test = record_batch_termination
 
-let latch_stale_fleet_batch_reasons ~base_path ~distinct_count keeper_names =
+let stamp_stale_fleet_batch_meta ~config ~keeper_name ~distinct_count
+    ~root_reason =
+  let base_path = config.Coord.base_path in
+  match Keeper_registry.get ~base_path keeper_name with
+  | None -> ()
+  | Some entry ->
+    let root_text =
+      root_reason
+      |> Option.map Keeper_registry.failure_reason_to_string
+      |> Option.value ~default:"none"
+    in
+    let blocker =
+      Printf.sprintf "stale_fleet_batch(distinct_count=%d root_cause=%s)"
+        distinct_count root_text
+    in
+    let meta =
+      { entry.meta with
+        runtime =
+          { entry.meta.runtime with
+            last_blocker = blocker;
+            last_blocker_class = Some Stale_fleet_batch;
+          };
+      }
+    in
+    (match
+       write_meta_with_merge
+         ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+         config meta
+     with
+     | Ok () -> ()
+     | Error err ->
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_write_meta_failures
+         ~labels:[("keeper", keeper_name); ("phase", "stale_fleet_batch_stamp")]
+         ();
+       Log.Keeper.warn
+         "%s: stale_fleet_batch meta stamp failed: %s"
+         keeper_name err)
+
+let latch_stale_fleet_batch_reasons ~config ~distinct_count keeper_names =
+  let base_path = config.Coord.base_path in
   List.iter
     (fun keeper_name ->
        match Keeper_registry.get ~base_path keeper_name with
        | None -> ()
        | Some entry ->
            (match entry.last_failure_reason with
-            | Some
-                ( Keeper_registry.Oas_timeout_budget_loop _
-                | Keeper_registry.Provider_runtime_error _
-                | Keeper_registry.Tool_required_unsatisfied _
-                | Keeper_registry.Ambiguous_partial_commit _
-                | Keeper_registry.Turn_consecutive_failures _
-                | Keeper_registry.Heartbeat_consecutive_failures _
-                | Keeper_registry.Stale_termination_storm _
-                | Keeper_registry.Exception _ ) ->
-                ()
             | Some (Keeper_registry.Stale_fleet_batch { distinct_count = n })
               when n >= distinct_count ->
                 ()
-            | Some (Keeper_registry.Stale_turn_timeout _)
-            | Some (Keeper_registry.Stale_fleet_batch _)
-            | Some Keeper_registry.Fiber_unresolved
-            | None ->
+            | root_reason ->
+                stamp_stale_fleet_batch_meta ~config ~keeper_name
+                  ~distinct_count ~root_reason;
                 Keeper_registry.set_failure_reason ~base_path keeper_name
                   (Some
                      (Keeper_registry.Stale_fleet_batch { distinct_count }))))
@@ -632,7 +662,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                    batch_root_cause_to_string root_cause
                  in
                  let distinct_count = List.length batch in
-                 latch_stale_fleet_batch_reasons ~base_path ~distinct_count
+                 latch_stale_fleet_batch_reasons ~config:ctx.config ~distinct_count
                    batch;
                  Prometheus.inc_counter
                    Prometheus.metric_keeper_stale_termination_batch

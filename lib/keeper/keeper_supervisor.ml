@@ -1251,9 +1251,10 @@ let sweep_and_recover (ctx : _ context) =
       match entry.last_failure_reason with
       | Some (Keeper_registry.Stale_fleet_batch _) ->
         Some Stale_fleet_batch
-      | Some (Keeper_registry.Stale_turn_timeout _)
-      | Some (Keeper_registry.Stale_termination_storm _)
       | Some (Keeper_registry.Oas_timeout_budget_loop _) ->
+        Some Oas_timeout_budget
+      | Some (Keeper_registry.Stale_turn_timeout _)
+      | Some (Keeper_registry.Stale_termination_storm _) ->
         Some Stale_turn_timeout
       | _ -> None
     in

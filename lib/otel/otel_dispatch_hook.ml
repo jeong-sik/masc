@@ -46,19 +46,19 @@ let on_tool_result (result : Tool_result.t) : Tool_result.t =
         [("otel.status_code", `String "ERROR")]
     in
     let legacy_attrs =
-      [ ("tool.name", `String result.tool_name);
-        ("tool.success", `Bool result.success);
-        ("tool.duration_ms", `Int (int_of_float result.duration_ms)) ]
+      [ (Otel_genai.Attr_key.tool_name, `String result.tool_name);
+        (Otel_genai.Attr_key.tool_success, `Bool result.success);
+        (Otel_genai.Attr_key.tool_duration_ms, `Int (int_of_float result.duration_ms)) ]
     in
     (* OpenTelemetry GenAI semantic conventions
        (https://opentelemetry.io/docs/specs/semconv/gen-ai/). Tool execution
        within an agent run is the [execute_tool] operation per the spec.
-       [gen_ai.system] / [gen_ai.request.model] are intentionally omitted —
-       those belong on the parent agent / chat span (Step 2 of #7461),
-       not on the inner tool span which is provider-agnostic. *)
+       provider/model keys are intentionally omitted — those belong on the
+       parent agent / model span, not on the inner tool span which is
+       provider-agnostic. *)
     let gen_ai_attrs =
-      [ ("gen_ai.operation.name", `String "execute_tool");
-        ("gen_ai.tool.name", `String result.tool_name) ]
+      Otel_genai.tool_execution_attrs ~tool_name:result.tool_name
+      |> List.map (fun (key, value) -> key, (value :> OT.value))
     in
     let attrs = legacy_attrs @ gen_ai_attrs @ status_attrs in
     ignore (OT.Trace.with_ ("tool/" ^ result.tool_name) ~attrs

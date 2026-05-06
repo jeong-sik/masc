@@ -384,9 +384,17 @@ let rec view_node ~(depth : int) (n : Goals_types.node) : Node.t =
 
 let view_meta_strip (r : Goals_types.response) =
   let s = r.summary in
+  let fetch_color =
+    match r.fetch_status with
+    | Goals_types.Fetch_pending -> `Brass
+    | Goals_types.Fetch_fresh -> `Ok
+    | Goals_types.Fetch_stale _ -> `Blood
+  in
   Meta.strip
     ~label:"Goals summary"
-    [ Meta.cell ~k:"goals" ~v:(Printf.sprintf "%d" s.total_goals) ()
+    [ Meta.cell ~color:fetch_color ~k:"feed"
+        ~v:(Goals_types.fetch_status_label r.fetch_status) ()
+    ; Meta.cell ~k:"goals" ~v:(Printf.sprintf "%d" s.total_goals) ()
     ; Meta.cell ~color:`Ok ~k:"active"
         ~v:(Printf.sprintf "%d" s.active_goals) ()
     ; Meta.cell ~k:"tasks"

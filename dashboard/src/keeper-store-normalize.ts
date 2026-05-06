@@ -328,12 +328,12 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
           : null
       const rawTel = isRecord(item.inference_telemetry) ? item.inference_telemetry : null
       const rawTimings = rawTel && isRecord(rawTel.timings) ? rawTel.timings : null
-      const latencyMs = asNumber(item.latency_ms) ?? 0
+      const latencyMs = asNumber(item.latency_ms) ?? null
       const inputTokens = rawUsage ? (asNumber(rawUsage.input_tokens) ?? null) : null
       const outputTokens = rawUsage ? (asNumber(rawUsage.output_tokens) ?? null) : null
       const totalTokens = rawUsage ? (asNumber(rawUsage.total_tokens) ?? null) : null
       const wallTokensPerSecond =
-        outputTokens != null && latencyMs > 0
+        outputTokens != null && latencyMs != null && latencyMs > 0
           ? outputTokens / (latencyMs / 1000)
           : null
       const inference_telemetry = rawTel ? {
@@ -349,7 +349,7 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         } : null,
         reasoning_tokens: asNumber(rawTel.reasoning_tokens) ?? null,
         peak_memory_gb: asNumber(rawTel.peak_memory_gb) ?? null,
-        request_latency_ms: asNumber(rawTel.request_latency_ms) ?? 0,
+        request_latency_ms: asNumber(rawTel.request_latency_ms) ?? null,
       } : null
       const cascadeObj = isRecord(item.cascade) ? item.cascade : null
       const fallbackEvents = cascadeObj && Array.isArray(cascadeObj.fallback_events) ? cascadeObj.fallback_events : []

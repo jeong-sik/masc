@@ -900,17 +900,26 @@ const SPARKLINE_H = 40
 const SPARKLINE_PAD = 2
 const MODEL_NAME_MAX_LEN = 20
 
+function isFiniteMetricValue(value: number | null | undefined): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
 function miniSparkline(
-  data: number[],
+  data: Array<number | null | undefined>,
   maxOverride?: number,
 ): string {
   const W = SPARKLINE_W, H = SPARKLINE_H, pad = SPARKLINE_PAD
   const n = data.length
-  if (n < 2) return ''
-  const maxVal = maxOverride ?? Math.max(...data, 1)
-  return data.map((v, i) => {
-    const x = pad + (i / (n - 1)) * (W - 2 * pad)
-    const y = H - pad - (v / maxVal) * (H - 2 * pad)
+  const points = data
+    .map((value, index) => ({ value, index }))
+    .filter((point): point is { value: number; index: number } =>
+      isFiniteMetricValue(point.value),
+    )
+  if (points.length < 2) return ''
+  const maxVal = maxOverride ?? Math.max(...points.map(point => point.value), 1)
+  return points.map(({ value, index }) => {
+    const x = pad + (index / Math.max(n - 1, 1)) * (W - 2 * pad)
+    const y = H - pad - (value / maxVal) * (H - 2 * pad)
     return `${x.toFixed(1)},${y.toFixed(1)}`
   }).join(' ')
 }
@@ -928,8 +937,8 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
   const hwTokPerSec = telemetryPoints
     .map((p: KeeperMetricPoint) => p.inference_telemetry?.timings?.predicted_per_second)
     .filter((value): value is number => value != null)
-  const latencies = telemetryPoints.map(
-    (p: KeeperMetricPoint) => p.inference_telemetry?.request_latency_ms ?? 0,
+  const latencySeries = telemetryPoints.map(
+    (p: KeeperMetricPoint) => p.inference_telemetry?.request_latency_ms ?? null,
   )
   const cacheNs = telemetryPoints.map(
     (p: KeeperMetricPoint) => p.inference_telemetry?.timings?.cache_n ?? 0,
@@ -949,13 +958,13 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
     hwTokPerSec.length > 0
       ? hwTokPerSec.reduce((a, b) => a + b, 0) / hwTokPerSec.length
       : 0
-  const lastLatency = latencies[latencies.length - 1] ?? 0
+  const lastLatency = latencySeries[latencySeries.length - 1] ?? null
   const totalCacheN = cacheNs.reduce((a, b) => a + b, 0)
   const totalReasoning = reasoningTokens.reduce((a, b) => a + b, 0)
 
   const wallTpsLine = wallTokPerSec.length > 1 ? miniSparkline(wallTokPerSec) : ''
   const hwTpsLine = hwTokPerSec.length > 1 ? miniSparkline(hwTokPerSec) : ''
-  const latencyLine = miniSparkline(latencies)
+  const latencyLine = miniSparkline(latencySeries)
 
   const lastFp = telemetryPoints[telemetryPoints.length - 1]?.inference_telemetry?.system_fingerprint
 
@@ -997,7 +1006,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
         <${DetailCard}>
           <${DetailRow}>
             <${Eyebrow}>API latency</${Eyebrow}>
-            <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${lastLatency > 0 ? `${(lastLatency / 1000).toFixed(1)}s` : '-'}</span>
+            <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${isFiniteMetricValue(lastLatency) && lastLatency > 0 ? `${(lastLatency / 1000).toFixed(1)}s` : '-'}</span>
           </${DetailRow}>
           <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" role="img" aria-label="API 지연 시간 추이" style="background:var(--bg-deepest);">
             ${latencyLine ? html`<polyline points="${latencyLine}" fill="none" stroke="var(--sky-400)" stroke-width="1.5"/>` : null}
@@ -1026,11 +1035,11 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
   const series = keeper.metrics_series ?? []
   if (series.length < 2) return null
 
-  const latencies = series.map((p: KeeperMetricPoint) => p.latency_ms ?? 0)
+  const latencySeries = series.map((p: KeeperMetricPoint) => p.latency_ms)
   const costs = series.map((p: KeeperMetricPoint) => p.cost_usd ?? 0)
   const W = SPARKLINE_W, H = SPARKLINE_H
 
-  const lastLatency = latencies[latencies.length - 1] ?? 0
+  const lastLatency = latencySeries[latencySeries.length - 1] ?? null
   const totalCost = costs.reduce((a: number, b: number) => a + b, 0)
 
   const modelSwitches: { index: number; model: string }[] = []
@@ -1040,7 +1049,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
     }
   }
 
-  const latencyLine = miniSparkline(latencies)
+  const latencyLine = miniSparkline(latencySeries)
   const costLine = miniSparkline(costs)
 
   // Fallback markers on latency chart
@@ -1058,7 +1067,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
           <${Eyebrow}>지연 시간</${Eyebrow}>
           <span class="flex items-center gap-2">
             ${fallbackCount > 0 ? html`<span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--bad-soft)] text-[var(--color-status-err)] font-mono">FB ${fallbackCount}</span>` : null}
-            <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${lastLatency > 0 ? `${(lastLatency / 1000).toFixed(1)}s` : '-'}</span>
+            <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${isFiniteMetricValue(lastLatency) && lastLatency > 0 ? `${(lastLatency / 1000).toFixed(1)}s` : '-'}</span>
           </span>
         </${DetailRow}>
         <svg aria-hidden="true" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" style="background:var(--bg-deepest);">

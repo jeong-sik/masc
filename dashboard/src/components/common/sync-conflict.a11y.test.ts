@@ -66,6 +66,10 @@ describe('SyncConflict a11y', () => {
     const region = container.querySelector('[role="region"]') as HTMLElement
     expect(region).not.toBeNull()
     expect(region.getAttribute('aria-describedby')).toMatch(/sync-conflict-summary/)
+    const summary = document.getElementById(region.getAttribute('aria-describedby') ?? '')
+    expect(summary?.getAttribute('aria-label')).toBeNull()
+    expect(summary?.textContent).toContain('전체')
+    expect(summary?.textContent).toContain('남음')
     expect(region.dataset.syncConflictStatus).toBe('partial')
     expect(region.dataset.syncConflictActionRequired).toBe('true')
   })

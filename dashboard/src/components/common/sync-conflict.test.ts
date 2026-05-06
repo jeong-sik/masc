@@ -131,7 +131,15 @@ describe('SyncConflict', () => {
     expect(summary.actionRequired).toBe(false)
     expect(summary.resolvedFields).toEqual(['name', 'age'])
     expect(summary.unresolvedFields).toEqual([])
-    expect(isConflictResolved(conflicts[0]!, { name: '' })).toBe(true)
+    expect(isConflictResolved(conflicts[0]!, { name: '' })).toBe(false)
+    expect(isConflictResolved(conflicts[0]!, { name: '   ' })).toBe(false)
     expect(getConflictResolutionState(conflicts[0]!)).toBe('unresolved')
+  })
+
+  it('keeps empty merged values unresolved', () => {
+    const emptyMerged = [{ field: 'name', localValue: 'Alice', remoteValue: 'Bob', mergedValue: '' }]
+
+    expect(summarizeSyncConflicts(emptyMerged).status).toBe('open')
+    expect(isConflictResolved(emptyMerged[0]!)).toBe(false)
   })
 })

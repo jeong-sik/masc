@@ -39,7 +39,11 @@ export function isConflictResolved(
   conflict: ConflictEntry,
   resolutions: Record<string, string> = {},
 ): boolean {
-  return resolutions[conflict.field] !== undefined || conflict.mergedValue !== undefined
+  const resolvedValue = resolutions[conflict.field]
+  return (
+    (resolvedValue !== undefined && resolvedValue.trim() !== '') ||
+    (conflict.mergedValue !== undefined && conflict.mergedValue.trim() !== '')
+  )
 }
 
 export function getConflictResolutionState(
@@ -122,7 +126,6 @@ export function SyncConflict({ conflicts, onResolve, testId }: SyncConflictProps
       <div
         id=${summaryId}
         class="mb-3 grid grid-cols-3 gap-2 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] p-2"
-        aria-label="동기화 충돌 요약"
       >
         <div>
           <div class="text-3xs text-[var(--color-fg-secondary)]">전체</div>

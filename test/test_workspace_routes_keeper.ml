@@ -26,6 +26,18 @@ let lookup_for known name = if name = known then Some playground_root else None
 let lookup_repo_for known name = if name = known then Some repository_root else None
 let exists_only path expected = path = expected
 
+let contains needle haystack =
+  let hlen = String.length haystack in
+  let nlen = String.length needle in
+  if nlen = 0 then true
+  else
+    let rec loop i =
+      if i + nlen > hlen then false
+      else if String.sub haystack i nlen = needle then true
+      else loop (i + 1)
+    in
+    loop 0
+
 let test_no_param () =
   let (base, src) =
     W.classify_keeper_query
@@ -372,6 +384,17 @@ let test_workspace_failure_observer_increments_metric () =
   Alcotest.(check (float 0.0001))
     "workspace route failure counted" (before +. 1.0) after
 
+let test_workspace_log_value_sanitizer_bounds_controlled_text () =
+  let sanitized =
+    W.For_testing.sanitize_log_value ~max_bytes:12
+      "alpha\nbeta\radmin\ttrail-with-extra"
+  in
+  Alcotest.(check bool) "newlines removed" false (contains "\n" sanitized);
+  Alcotest.(check bool) "carriage returns removed" false
+    (contains "\r" sanitized);
+  Alcotest.(check bool) "tabs removed" false (contains "\t" sanitized);
+  Alcotest.(check bool) "bounded with suffix" true (contains "..." sanitized)
+
 let test_workspace_failure_observer_reraises_cancelled () =
   let raised = ref false in
   (try
@@ -484,6 +507,8 @@ let () =
         ; Alcotest.test_case "limit signed lone underscore is junk" `Quick test_tree_node_limit_signed_lone_underscore_is_junk
         ; Alcotest.test_case "failure observer increments metric" `Quick
             test_workspace_failure_observer_increments_metric
+        ; Alcotest.test_case "log sanitizer bounds controlled text" `Quick
+            test_workspace_log_value_sanitizer_bounds_controlled_text
         ; Alcotest.test_case "failure observer re-raises cancel" `Quick
             test_workspace_failure_observer_reraises_cancelled
         ] )

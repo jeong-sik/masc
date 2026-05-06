@@ -79,6 +79,11 @@ val scan_dir :
 val valid_git_ref : string -> bool
 
 module For_testing : sig
+  (** White-box helpers for route-level regression tests. Not part of the
+      stable/public workspace API. *)
+
+  val sanitize_log_value : ?max_bytes:int -> string -> string
+
   val observe_workspace_route_failure :
     site:string -> path:string -> exn -> unit
 end

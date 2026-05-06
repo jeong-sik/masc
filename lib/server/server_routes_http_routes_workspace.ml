@@ -6,6 +6,18 @@ module Http = Http_server_eio
 
 let base_path_of_state state = state.Mcp_server.room_config.base_path
 
+let sanitize_log_value ?(max_bytes = 240) s =
+  let without_controls =
+    String.map
+      (fun c ->
+        let code = Char.code c in
+        if code < 0x20 || code = 0x7f then '_' else c)
+      s
+  in
+  String_util.utf8_safe ~max_bytes:(max_bytes + 3) ~suffix:"..."
+    without_controls
+  |> String_util.to_string
+
 let observe_workspace_route_failure ~site ~path exn =
   match exn with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -14,7 +26,9 @@ let observe_workspace_route_failure ~site ~path exn =
         ~labels:[("site", site)]
         ();
       Log.Server.warn "workspace route %s failed path=%s err=%s"
-        site path (Printexc.to_string exn)
+        (sanitize_log_value ~max_bytes:64 site)
+        (sanitize_log_value ~max_bytes:180 path)
+        (sanitize_log_value (Printexc.to_string exn))
 
 let workspace_or_default ~site ~path ~default f =
   try f () with
@@ -24,6 +38,7 @@ let workspace_or_default ~site ~path ~default f =
       default
 
 module For_testing = struct
+  let sanitize_log_value = sanitize_log_value
   let observe_workspace_route_failure = observe_workspace_route_failure
 end
 

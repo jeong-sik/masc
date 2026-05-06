@@ -1,11 +1,206 @@
 import { html } from 'htm/preact'
+import { Activity, ArrowUpRight, Brain, Code2, GitBranch, MessageSquare } from 'lucide-preact'
+import type { ComponentChildren } from 'preact'
+import {
+  COCKPIT_ENTRYPOINTS,
+  type CockpitEntrypoint,
+  type CockpitMode,
+} from '../../cockpit-entrypoints'
+import { RouteLink } from '../common/route-link'
 import { WorldVisualizer } from '../world-visualizer'
 
-export function Cockpit() {
+type CockpitPlane = Extract<CockpitMode, 'work' | 'comms' | 'observe' | 'cognition' | 'ide'>
+
+interface PlaneMeta {
+  label: string
+  summary: string
+  stat: string
+}
+
+const PLANE_ORDER: CockpitPlane[] = ['work', 'comms', 'observe', 'cognition', 'ide']
+
+const PLANE_META: Record<CockpitPlane, PlaneMeta> = {
+  work: {
+    label: 'Work',
+    summary: 'Goals, tasks, and accountability routes',
+    stat: 'planning',
+  },
+  comms: {
+    label: 'Comms',
+    summary: 'Board, message, and composer routes',
+    stat: 'board',
+  },
+  observe: {
+    label: 'Observe',
+    summary: 'Runtime, safety, audit, and cost routes',
+    stat: 'runtime',
+  },
+  cognition: {
+    label: 'Cognition',
+    summary: 'Keeper, decision, memory, and research routes',
+    stat: 'fleet',
+  },
+  ide: {
+    label: 'IDE',
+    summary: 'Source, review, diff, graph, and search routes',
+    stat: 'code',
+  },
+}
+
+function planeIcon(plane: CockpitPlane): ComponentChildren {
+  switch (plane) {
+    case 'work':
+      return html`<${GitBranch} size=${16} aria-hidden="true" />`
+    case 'comms':
+      return html`<${MessageSquare} size=${16} aria-hidden="true" />`
+    case 'observe':
+      return html`<${Activity} size=${16} aria-hidden="true" />`
+    case 'cognition':
+      return html`<${Brain} size=${16} aria-hidden="true" />`
+    case 'ide':
+      return html`<${Code2} size=${16} aria-hidden="true" />`
+  }
+}
+
+function displayLabel(entrypoint: CockpitEntrypoint): string {
+  const source = entrypoint.aliases[1] ?? entrypoint.aliases[0] ?? ''
+  return source
+    .split('-')
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+function routeCaption(entrypoint: CockpitEntrypoint): string {
+  const params = entrypoint.target.params ?? {}
+  return [
+    `#${entrypoint.target.tab}`,
+    params.section,
+    params.view,
+    params.focus,
+  ].filter(Boolean).join(' / ')
+}
+
+function coverageClass(coverage: CockpitEntrypoint['coverage']): string {
+  switch (coverage) {
+    case 'covered':
+      return 'border-ok/30 bg-ok/10 text-ok'
+    case 'partial':
+      return 'border-warn/30 bg-warn/10 text-warn'
+    case 'backend-blocked':
+      return 'border-[var(--color-border-strong)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]'
+  }
+}
+
+function PlaneSection({ plane, entries }: { plane: CockpitPlane; entries: CockpitEntrypoint[] }) {
+  const meta = PLANE_META[plane]
+  const covered = entries.filter(entry => entry.coverage === 'covered').length
+  const partial = entries.filter(entry => entry.coverage === 'partial').length
+  const blocked = entries.filter(entry => entry.coverage === 'backend-blocked').length
+
   return html`
-    <div class="flex h-full w-full flex-col bg-black">
-      <div class="flex-none border-b border-solid border-[var(--color-border-default)]">
-        <${WorldVisualizer} />
+    <section
+      class="min-w-0 border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
+      data-cockpit-plane=${plane}
+      aria-label=${`${meta.label} cockpit routes`}
+    >
+      <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-3">
+        <div class="flex min-w-0 items-start gap-2">
+          <span class="mt-0.5 inline-flex size-7 shrink-0 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] text-[var(--color-fg-secondary)]">
+            ${planeIcon(plane)}
+          </span>
+          <div class="min-w-0">
+            <h2 class="text-sm font-semibold text-[var(--color-fg-primary)]">${meta.label}</h2>
+            <p class="mt-1 text-xs leading-relaxed text-[var(--color-fg-muted)]">${meta.summary}</p>
+          </div>
+        </div>
+        <div class="flex shrink-0 flex-wrap justify-end gap-1.5 font-mono text-3xs">
+          <span class="rounded-[var(--r-0)] border border-ok/30 bg-ok/10 px-1.5 py-0.5 text-ok">${covered} covered</span>
+          <span class="rounded-[var(--r-0)] border border-warn/30 bg-warn/10 px-1.5 py-0.5 text-warn">${partial} partial</span>
+          ${blocked > 0
+            ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-1.5 py-0.5 text-[var(--color-fg-muted)]">${blocked} blocked</span>`
+            : null}
+        </div>
+      </div>
+
+      <div class="grid gap-2 p-3 sm:grid-cols-2 xl:grid-cols-3">
+        ${entries.map(entrypoint => html`
+          <${RouteLink}
+            key=${`${entrypoint.mode}:${entrypoint.aliases[0]}`}
+            tab=${entrypoint.target.tab}
+            params=${entrypoint.target.params}
+            class="group flex min-h-24 min-w-0 flex-col justify-between gap-3 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2.5 text-left no-underline transition-colors hover:border-[var(--color-border-strong)] hover:bg-[var(--color-bg-elevated)]"
+            title=${routeCaption(entrypoint)}
+            aria-label=${`Open ${displayLabel(entrypoint)} in ${routeCaption(entrypoint)}`}
+          >
+            <span class="flex min-w-0 items-start justify-between gap-2">
+              <span class="min-w-0">
+                <span class="block truncate text-xs font-semibold text-[var(--color-fg-primary)]">
+                  ${displayLabel(entrypoint)}
+                </span>
+                <span class="mt-1 block truncate font-mono text-3xs text-[var(--color-fg-disabled)]">
+                  ${routeCaption(entrypoint)}
+                </span>
+              </span>
+              <${ArrowUpRight} class="mt-0.5 shrink-0 text-[var(--color-fg-muted)] transition-colors group-hover:text-[var(--color-fg-primary)]" size=${14} aria-hidden="true" />
+            </span>
+            <span class="flex items-center justify-between gap-2">
+              <span class=${`rounded-[var(--r-0)] border px-1.5 py-0.5 font-mono text-3xs ${coverageClass(entrypoint.coverage)}`}>
+                ${entrypoint.coverage}
+              </span>
+              <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">${meta.stat}</span>
+            </span>
+          <//>
+        `)}
+      </div>
+    </section>
+  `
+}
+
+export function Cockpit() {
+  const entriesByPlane = new Map<CockpitPlane, CockpitEntrypoint[]>()
+  for (const plane of PLANE_ORDER) entriesByPlane.set(plane, [])
+  for (const entrypoint of COCKPIT_ENTRYPOINTS) {
+    if (PLANE_ORDER.includes(entrypoint.mode as CockpitPlane)) {
+      entriesByPlane.get(entrypoint.mode as CockpitPlane)?.push(entrypoint)
+    }
+  }
+
+  return html`
+    <div class="flex h-full w-full flex-col overflow-hidden bg-[var(--color-bg-page)]">
+      <div class="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[minmax(18rem,26rem)_minmax(0,1fr)]">
+        <aside class="min-h-70 border-b border-[var(--color-border-default)] bg-black xl:border-r xl:border-b-0">
+          <${WorldVisualizer} />
+        </aside>
+
+        <main class="min-h-0 overflow-y-auto" data-testid="cockpit-command-map">
+          <div class="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 sm:px-5">
+            <section class="border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-3">
+              <div class="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <p class="font-mono text-3xs text-[var(--color-fg-muted)]">MASC Cockpit</p>
+                  <h1 class="mt-1 text-lg font-semibold text-[var(--color-fg-primary)]">Command Map</h1>
+                </div>
+                <div class="flex flex-wrap gap-1.5 font-mono text-3xs text-[var(--color-fg-muted)]">
+                  <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-1.5 py-0.5">
+                    ${COCKPIT_ENTRYPOINTS.length} routes
+                  </span>
+                  <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-1.5 py-0.5">
+                    ${PLANE_ORDER.length} planes
+                  </span>
+                </div>
+              </div>
+            </section>
+
+            ${PLANE_ORDER.map(plane => html`
+              <${PlaneSection}
+                key=${plane}
+                plane=${plane}
+                entries=${entriesByPlane.get(plane) ?? []}
+              />
+            `)}
+          </div>
+        </main>
       </div>
     </div>
   `

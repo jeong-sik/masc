@@ -1466,6 +1466,12 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          the default noop sink instead of the Prometheus-backed one. *)
       Llm_metric_bridge.install ();
       Log.Server.info "Llm_metric_bridge installed (masc_llm_provider_http_status_total)";
+      (* #13885: install backend mutex observers from the top-level
+         masc_mcp layer.  Backend/coord sub-libraries cannot depend on
+         Prometheus without creating dependency cycles, but the global
+         observer refs can be wired before any FileSystem backend writes. *)
+      Backend_mutex_metrics.install ();
+      Log.Server.info "Backend_mutex_metrics installed (masc_backend_mutex_*)";
       (* Forward Agent_sdk.Log records (per-turn timing from oas#816 and
          any subsequent structured emits) into the masc-mcp log ring so
          they land in ~/.masc/logs/system_log_*.jsonl alongside

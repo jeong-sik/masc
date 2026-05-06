@@ -1230,6 +1230,9 @@ let init () =
      complete while preserving semaphore release (labels: op, \
      kind=cancelled|exception)"
     Counter;
+  add Keeper_metrics.metric_keeper_semaphore_wait_timeout
+    "Total keeper turn semaphore wait timeouts (labels: keeper, channel)"
+    Counter;
   register_histogram ~name:Keeper_metrics.metric_keeper_semaphore_wait_seconds
     ~help:"Seconds spent waiting to acquire keeper turn semaphores \
            (labels: keeper_name, cascade_profile, channel)." ();

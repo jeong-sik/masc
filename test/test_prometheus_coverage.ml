@@ -435,6 +435,48 @@ let test_goal_attainment_metrics_registered () =
     (text_has_literal text
        ("# TYPE " ^ Prometheus.metric_goal_attainment_measured ^ " gauge"))
 
+let test_goal_loop_starvation_metrics_registered () =
+  let text = Prometheus.to_prometheus_text () in
+  check bool "has semaphore wait timeout HELP" true
+    (text_has_literal text
+       ("# HELP " ^ Prometheus.metric_keeper_semaphore_wait_timeout ^ " "));
+  check bool "has semaphore wait timeout TYPE" true
+    (text_has_literal text
+       ("# TYPE " ^ Prometheus.metric_keeper_semaphore_wait_timeout
+        ^ " counter"));
+  check bool "has turn scheduled HELP" true
+    (text_has_literal text
+       ("# HELP " ^ Prometheus.metric_keeper_turn_scheduled ^ " "));
+  check bool "has turn scheduled TYPE" true
+    (text_has_literal text
+       ("# TYPE " ^ Prometheus.metric_keeper_turn_scheduled ^ " counter"))
+
+let test_goal_loop_starvation_counter_emits_labelled_sample () =
+  let labels = [ ("keeper", "qa-king-13960"); ("channel", "autonomous_queue") ] in
+  let before =
+    Prometheus.metric_value_or_zero
+      Prometheus.metric_keeper_semaphore_wait_timeout
+      ~labels
+      ()
+  in
+  Prometheus.inc_counter
+    Prometheus.metric_keeper_semaphore_wait_timeout
+    ~labels
+    ();
+  Alcotest.(check (float 0.0001))
+    "counter incremented"
+    (before +. 1.0)
+    (Prometheus.metric_value_or_zero
+       Prometheus.metric_keeper_semaphore_wait_timeout
+       ~labels
+       ());
+  let text = Prometheus.to_prometheus_text () in
+  check bool "labelled sample exported" true
+    (text_has_literal
+       text
+       (Prometheus.metric_keeper_semaphore_wait_timeout
+        ^ "{keeper=\"qa-king-13960\",channel=\"autonomous_queue\"} "))
+
 let test_histogram_exported_as_summary () =
   let name = "test_hist_export_fmt" in
   Prometheus.register_histogram ~name ~help:"export format test" ();
@@ -642,6 +684,10 @@ let () =
         test_builtin_gauge_update_does_not_duplicate_sample;
       test_case "goal attainment metrics registered" `Quick
         test_goal_attainment_metrics_registered;
+      test_case "goal loop starvation metrics registered" `Quick
+        test_goal_loop_starvation_metrics_registered;
+      test_case "goal loop starvation counter emits labelled sample" `Quick
+        test_goal_loop_starvation_counter_emits_labelled_sample;
       test_case "histogram exported as summary with _sum/_count"
         `Quick test_histogram_exported_as_summary;
       test_case "backend mutex observers emit histogram samples" `Quick

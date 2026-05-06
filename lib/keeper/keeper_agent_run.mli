@@ -250,6 +250,7 @@ val run_turn :
   -> cascade_name:Keeper_cascade_profile.runtime_name
   -> ?world_observation:Keeper_world_observation.world_observation
   -> ?turn_affordances:string list
+  -> ?required_tool_names:string list
   -> ?provider_filter:string list
   -> generation:int
   -> ?max_turns:int

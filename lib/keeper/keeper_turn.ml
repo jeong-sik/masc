@@ -149,6 +149,14 @@ let resolve_turn_cascade_name (meta : keeper_meta) =
            "invalid cascade_name %S for keeper %s: %s"
            raw_name meta.name detail)
 
+let keeper_msg_timeout_override args =
+  match get_float_opt args "timeout_sec" with
+  | None -> Ok None
+  | Some timeout_sec
+    when Float.is_finite timeout_sec && timeout_sec > 0.0 ->
+      Ok (Some timeout_sec)
+  | Some _ -> Error "timeout_sec must be a positive finite number"
+
 (* -- handle_keeper_msg: orchestrator ---------------------------------------- *)
 
 let handle_keeper_msg ?on_text_delta ctx args : tool_result =
@@ -171,6 +179,16 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
     let no_state_block = get_bool args "no_state_block" false in
     let direct_reply = get_bool args "direct_reply" false in
     let channel_session_key = get_string_opt args "channel_session_key" in
+    let required_tool_names =
+      get_string_list args "required_tools"
+      @ get_string_list args "required_tool_names"
+      |> List.map String.trim
+      |> List.filter (fun name -> name <> "")
+      |> Keeper_types.dedupe_keep_order
+    in
+    (match keeper_msg_timeout_override args with
+    | Error e -> (false, e)
+    | Ok keeper_msg_oas_timeout_s ->
     (match reject_legacy_model_args ~tool_name:"masc_keeper_msg" args with
     | Error e -> (false, "" ^ e)
     | Ok () ->
@@ -357,12 +375,21 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                 | Some ti ->
                   "--- Turn-specific instructions ---\n" ^ ti
               in
+              let required_tools_text =
+                match required_tool_names with
+                | [] -> ""
+                | tools ->
+                  "--- Required tools for this turn ---\n"
+                  ^ "Use all of these tools before your final reply: "
+                  ^ String.concat ", " tools
+              in
               let soft_parts = List.filter
                 (fun s -> String.trim s <> "")
                 [ continuity_text;
                   skill_route_text;
                   worktree_text;
-                  turn_instructions_text ]
+                  turn_instructions_text;
+                  required_tools_text ]
               in
               let dynamic_context = String.concat "\n\n" soft_parts in
               (* === HARD CONSTRAINTS (stay in system_prompt) === *)
@@ -414,6 +441,8 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                     ~cascade_name:
                       (Keeper_cascade_profile.Runtime_name turn_cascade_name)
                     ~world_observation:(direct_turn_observation meta)
+                    ~required_tool_names
+                    ?oas_timeout_s:keeper_msg_oas_timeout_s
                     ?provider_filter:(Env_config_keeper.KeeperCascade.provider_allowlist ())
                     ~generation:meta.runtime.generation
                     ?on_event
@@ -633,4 +662,4 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               in
               (true, Yojson.Safe.to_string reply_json)
 
-))))
+)))))

@@ -52,6 +52,7 @@ let run_turn
       ~(cascade_name : Keeper_cascade_profile.runtime_name)
       ?world_observation
       ?(turn_affordances = [])
+      ?(required_tool_names = [])
       ?provider_filter
       ~(generation : int)
       ?(max_turns : int = Keeper_runtime_resolved.reactive_max_turns_per_call ())
@@ -151,7 +152,8 @@ let run_turn
       ~history_messages ~prompt_metrics ~shared_context ~context_injector
       ~start_turn_count ~generation ~max_turns
       ~cascade_name ~is_retry
-      ~turn_affordances ~config_root ~cascade_config_path ~gemini_mcp_disabled
+      ~turn_affordances ~required_tool_names
+      ~config_root ~cascade_config_path ~gemini_mcp_disabled
       ~approval_mode_effective ~approval_mode_derived
       ?max_cost_usd ~trajectory_acc ~tool_overlay
       ()

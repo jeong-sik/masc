@@ -13,6 +13,8 @@ module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_types = Masc_mcp.Keeper_types
 module Json = Yojson.Safe.Util
 
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
 let with_env key value f =
   let prior = Sys.getenv_opt key in
   Unix.putenv key value;
@@ -20,7 +22,7 @@ let with_env key value f =
     ~finally:(fun () ->
       match prior with
       | Some v -> Unix.putenv key v
-      | None -> Unix.unsetenv key)
+      | None -> unsetenv key)
     f
 
 let temp_dir () =
@@ -224,7 +226,7 @@ let parse_nested_string_field raw outer field =
 
 let test_with_env_restores_unset_variable () =
   let key = "MASC_KEEPER_PR_REVIEW_WITH_ENV_UNSET_TEST" in
-  Unix.unsetenv key;
+  unsetenv key;
   with_env key "temporary" (fun () ->
     check (option string) "env set inside scope" (Some "temporary")
       (Sys.getenv_opt key));
@@ -278,6 +280,8 @@ let test_read_routes_docker_and_injects_repo_flag () =
   in
   check (option string) "read via docker" (Some "docker")
     (parse_string_field raw "via");
+  check (option string) "read route_via docker" (Some "docker")
+    (parse_string_field raw "route_via");
   check (option string) "repo inferred from project remote"
     (Some "jeong-sik/masc-mcp")
     (parse_string_field raw "repo");
@@ -319,6 +323,8 @@ let test_comment_and_approve_route_through_docker () =
   in
   check (option string) "approve via docker" (Some "docker")
     (parse_string_field raw "via");
+  check (option string) "approve route_via docker" (Some "docker")
+    (parse_string_field raw "route_via");
   check (option bool) "approve preflight under unified key" (Some true)
     (parse_nested_bool_field raw "preflight" "ok");
   check bool "legacy approve_preflight key absent" true
@@ -385,6 +391,8 @@ let test_reply_routes_through_docker_and_infers_repo () =
   in
   check (option string) "reply via docker" (Some "docker")
     (parse_string_field raw "via");
+  check (option string) "reply route_via docker" (Some "docker")
+    (parse_string_field raw "route_via");
   check (option string) "repo inferred for reply"
     (Some "jeong-sik/masc-mcp")
     (parse_string_field raw "repo");

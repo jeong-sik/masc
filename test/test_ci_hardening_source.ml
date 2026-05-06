@@ -97,6 +97,22 @@ let file_pattern_position file_rel pattern =
         let re = Str.regexp_string pattern in
         try Some (Str.search_forward re content 0) with Not_found -> None)
 
+let file_pattern_position_after file_rel ~anchor pattern =
+  let path = source_path file_rel in
+  if not (Sys.file_exists path) then None
+  else
+    let ic = open_in path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+        let content = In_channel.input_all ic in
+        let anchor_re = Str.regexp_string anchor in
+        let pattern_re = Str.regexp_string pattern in
+        try
+          let anchor_pos = Str.search_forward anchor_re content 0 in
+          Some (Str.search_forward pattern_re content anchor_pos)
+        with Not_found -> None)
+
 let quote = Filename.quote
 
 let run_agent_draft_policy env =
@@ -1076,6 +1092,78 @@ let test_keeper_docker_multikeeper_isolation_contracts () =
      && file_contains_pattern "lib/keeper/keeper_sandbox_runtime.ml"
           "sandbox runtime requires Docker userns support")
 
+let test_keeper_required_tool_contracts () =
+  let tool_choice_anchor = "let tool_choice =" in
+  let required_first =
+    file_pattern_position_after "lib/keeper/keeper_run_tools.ml"
+      ~anchor:tool_choice_anchor
+      "if computed_surface.required_tool_names <> []"
+  in
+  let any_tool_after =
+    file_pattern_position_after "lib/keeper/keeper_run_tools.ml"
+      ~anchor:tool_choice_anchor
+      "then Some Agent_sdk.Types.Any"
+  in
+  let last_turn_after =
+    file_pattern_position_after "lib/keeper/keeper_run_tools.ml"
+      ~anchor:tool_choice_anchor
+      "else if computed_surface.is_last_turn"
+  in
+  check bool "required_tools force tool_choice before last-turn relaxation" true
+    (match required_first, any_tool_after, last_turn_after with
+     | Some required_pos, Some any_pos, Some last_turn_pos ->
+         required_pos < any_pos && any_pos < last_turn_pos
+     | _ -> false);
+  check bool "last-turn relaxation no longer bypasses required_tools" true
+    (file_not_contains_pattern "lib/keeper/keeper_run_tools.ml"
+       "let tool_choice =\n                 if computed_surface.is_last_turn\n                 then current_params.tool_choice\n                 else if computed_surface.required_tool_names <> []");
+  check bool "final-turn required tool prompt matches all-tools enforcement" true
+    (file_contains_pattern "lib/keeper/keeper_run_tools.ml"
+       "You MUST either use every");
+  check bool "final-turn required tool prompt does not allow one-tool partial success" true
+    (file_not_contains_pattern "lib/keeper/keeper_run_tools.ml"
+       "call at least one");
+  check bool "docker PR lifecycle harness default matches runbook" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       {|REQUIRED_TOOLS="${REQUIRED_TOOLS:-keeper_shell,keeper_bash,masc_code_git,keeper_pr_create,keeper_pr_review_comment}"|});
+  check bool "runbook documents docker PR lifecycle required tool default" true
+    (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+       "`keeper_shell`, `keeper_bash`, `masc_code_git`, `keeper_pr_create`, and");
+  check bool "docker PR lifecycle prompt accepts brokered route proof" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       "via=docker, route_via=docker, via=brokered, or route_via=brokered")
+  ;
+  check bool "keeper msg schema documents required_tool_names alias" true
+    (file_contains_pattern "lib/keeper/keeper_schema.ml"
+       "required_tool_names")
+
+let test_keeper_msg_timeout_contracts () =
+  check bool "keeper msg schema exposes timeout_sec" true
+    (file_contains_pattern "lib/keeper/keeper_schema.ml"
+       "Optional: overall cascade timeout (sec) for this keeper message call");
+  check bool "keeper msg parses timeout_sec override" true
+    (file_contains_pattern "lib/keeper/keeper_turn.ml"
+       "get_float_opt args \"timeout_sec\"");
+  check bool "keeper msg rejects non-positive timeout override" true
+    (file_contains_pattern "lib/keeper/keeper_turn.ml"
+       "timeout_sec must be a positive finite number");
+  check bool "keeper msg forwards timeout_sec into Agent.run" true
+    (file_contains_pattern "lib/keeper/keeper_turn.ml"
+       "?oas_timeout_s:keeper_msg_oas_timeout_s");
+  check bool "docker PR lifecycle harness decouples HTTP and keeper turn timeout" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       {|KEEPER_TURN_TIMEOUT_SEC="${KEEPER_TURN_TIMEOUT_SEC:-900}"|});
+  check bool "docker PR lifecycle harness sends keeper turn timeout" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       {|--argjson timeout "$KEEPER_TURN_TIMEOUT_SEC"|});
+  check bool "runbook documents keeper turn timeout" true
+    (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+       "`masc_keeper_msg.timeout_sec` through `KEEPER_TURN_TIMEOUT_SEC`")
+
 let test_board_flusher_start_retry_contracts () =
   check bool "board flusher start has bounded CAS retry count" true
     (file_contains_pattern "lib/board_dispatch.ml"
@@ -1898,6 +1986,10 @@ let () =
              test_keeper_sandbox_credential_volume_contracts;
            test_case "keeper docker multi-keeper isolation contracts" `Quick
              test_keeper_docker_multikeeper_isolation_contracts;
+           test_case "keeper required tool contracts" `Quick
+             test_keeper_required_tool_contracts;
+           test_case "keeper msg timeout contracts" `Quick
+             test_keeper_msg_timeout_contracts;
            test_case "board flusher start retry contracts" `Quick
              test_board_flusher_start_retry_contracts;
            test_case "docker config storage contracts" `Quick

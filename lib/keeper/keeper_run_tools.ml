@@ -138,6 +138,7 @@ let prepare_agent_setup
       ~(cascade_name : Keeper_cascade_profile.runtime_name)
       ~(is_retry : bool)
       ~(turn_affordances : string list)
+      ~(required_tool_names : string list)
       ~(config_root : string)
       ~(cascade_config_path : string option)
       ~(gemini_mcp_disabled : bool)
@@ -712,7 +713,7 @@ let prepare_agent_setup
 
     in
     let required_tool_names =
-      current_task_required_tools ()
+      current_task_required_tools () @ required_tool_names
       |> Keeper_types.dedupe_keep_order
     in
     let visible_required_tool_names =
@@ -1214,6 +1215,18 @@ let prepare_agent_setup
                in
                let ctx =
                  if computed_surface.is_last_turn
+                    && computed_surface.required_tool_names <> []
+                 then
+                   append_ctx
+                     ctx
+                     (Printf.sprintf
+                        "[REQUIRED TOOLS - FINAL TURN] This Agent.run call is on \
+                         its final turn, but this message has explicit \
+                                 required_tools: %s. You MUST either use every \
+                                 required tool now or return a concise blocker naming \
+                         the missing policy/tool/runtime condition."
+                        (String.concat ", " computed_surface.required_tool_names))
+                 else if computed_surface.is_last_turn
                  then
                    append_ctx
                      ctx
@@ -1272,7 +1285,10 @@ let prepare_agent_setup
                let all_allowed = computed_surface.all_allowed in
                let tool_filter = Agent_sdk.Guardrails.AllowList all_allowed in
                let tool_choice =
-                 if computed_surface.is_last_turn
+                 if computed_surface.required_tool_names <> []
+                    && all_allowed <> []
+                 then Some Agent_sdk.Types.Any
+                 else if computed_surface.is_last_turn
                  then current_params.tool_choice
                  else if computed_surface.tool_gate_requested && all_allowed <> []
                  then

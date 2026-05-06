@@ -253,8 +253,20 @@ mcp_jsonrpc_call() {
     rm -f "$body_file" "$stderr_file" "$resp_file"
 
     if [[ "$status" -eq 0 ]]; then
-      jsonrpc_normalize_response "$raw" "$id"
-      return 0
+      local normalized
+      normalized="$(jsonrpc_normalize_response "$raw" "$id")"
+      if printf '%s' "$normalized" | jq -e . >/dev/null 2>&1; then
+        printf '%s' "$normalized"
+        return 0
+      fi
+
+      if printf '%s' "$raw" | grep -Eq '^(retry:|id:|event:|data:)'; then
+        stderr_text="MCP SSE response did not contain JSON-RPC data"
+        status=28
+      else
+        printf '%s' "$normalized"
+        return 0
+      fi
     fi
 
     if [[ "$attempt" -ge "$max_attempts" ]]; then

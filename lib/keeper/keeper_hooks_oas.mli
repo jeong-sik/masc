@@ -299,6 +299,7 @@ type pr_review_action_metric_event = {
   pr_number : int option;
   comment_id : int option;
   success : bool;
+  route_via : string option;
 }
 (** Parsed PR-review action telemetry derived from keeper tool I/O. *)
 
@@ -307,6 +308,7 @@ type pr_work_action_metric_event = {
   work_source : string;
   command : string option;
   success : bool;
+  route_via : string option;
 }
 (** Parsed PR create/push/commit/add telemetry derived from keeper tool I/O. *)
 

@@ -180,6 +180,14 @@ val metric_keeper_semaphore_wait_timeout : string
     Labels: [keeper, channel] with channel in
     [autonomous_queue_head | autonomous | turn]. *)
 
+val metric_keeper_semaphore_wait_seconds : string
+(** Cumulative keeper turn-slot semaphore wait seconds. Labels:
+    [keeper_name, cascade_profile, channel]. *)
+
+val metric_keeper_semaphore_wait_seconds_bucket : string
+(** Cumulative bucket counter for keeper turn-slot semaphore wait seconds.
+    Labels: [keeper_name, cascade_profile, channel, le]. *)
+
 val metric_keeper_turn_queue_depth : string
 (** P-DASH-02: gauge for keeper turn wait queue depth.
     Labels: [channel] with [autonomous_queue] for the explicit autonomous

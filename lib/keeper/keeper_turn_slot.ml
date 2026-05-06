@@ -875,7 +875,36 @@ let rec wait_for_autonomous_queue_head ~(keeper_name : string) ~(ticket : int)
            Eio.Fiber.yield ());
       wait_for_autonomous_queue_head ~keeper_name ~ticket ~started_at)
 
-let with_keeper_turn_slot_control ~keeper_name ~channel f =
+let semaphore_wait_seconds_buckets =
+  [ 0.001; 0.005; 0.01; 0.025; 0.05; 0.1; 0.25; 0.5; 1.0; 2.5; 5.0; 10.0;
+    30.0; 60.0 ]
+
+let observe_semaphore_wait_seconds ~keeper_name ~cascade_profile ~channel seconds =
+  let seconds = if seconds < 0.0 then 0.0 else seconds in
+  let labels =
+    [ ("keeper_name", keeper_name);
+      ("cascade_profile", cascade_profile);
+      ("channel", channel) ]
+  in
+  Prometheus.observe_histogram
+    Prometheus.metric_keeper_semaphore_wait_seconds
+    ~labels
+    seconds;
+  let inc_bucket le =
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_semaphore_wait_seconds_bucket
+      ~labels:(labels @ [ ("le", le) ])
+      ()
+  in
+  List.iter
+    (fun upper ->
+      if seconds <= upper then
+        inc_bucket (Printf.sprintf "%g" upper))
+    semaphore_wait_seconds_buckets;
+  inc_bucket "+Inf"
+
+let with_keeper_turn_slot_control ?(cascade_profile = "unknown") ~keeper_name
+    ~channel f =
   let is_autonomous =
     match channel with
     | Keeper_world_observation.Scheduled_autonomous -> true
@@ -1062,8 +1091,14 @@ let with_keeper_turn_slot_control ~keeper_name ~channel f =
               ~acquired_at:(Time_compat.now ())
           in
               slot_state.turn_acquisition_id := Some acquisition_id;
+              let semaphore_wait_sec = Time_compat.now () -. t0 in
+              observe_semaphore_wait_seconds ~keeper_name ~cascade_profile
+                ~channel:channel_label semaphore_wait_sec;
               let semaphore_wait_ms =
-                int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
+                int_of_float
+                  ((if semaphore_wait_sec < 0.0 then 0.0 else semaphore_wait_sec)
+                   *. 1000.0)
+              in
               Ok semaphore_wait_ms
   in
   let slot_control =
@@ -1096,17 +1131,17 @@ let with_keeper_turn_slot_control ~keeper_name ~channel f =
           Ok (f ~semaphore_wait_ms ~slot_control))
 ;;
 
-let with_keeper_turn_slot ~keeper_name ~channel f =
-  with_keeper_turn_slot_control ~keeper_name ~channel
+let with_keeper_turn_slot ?cascade_profile ~keeper_name ~channel f =
+  with_keeper_turn_slot_control ?cascade_profile ~keeper_name ~channel
     (fun ~semaphore_wait_ms ~slot_control:_ -> f ~semaphore_wait_ms)
 ;;
 
-let with_keeper_turn_slot_control_for_test ~keeper_name ~channel f =
-  with_keeper_turn_slot_control ~keeper_name ~channel f
+let with_keeper_turn_slot_control_for_test ?cascade_profile ~keeper_name ~channel f =
+  with_keeper_turn_slot_control ?cascade_profile ~keeper_name ~channel f
 ;;
 
-let with_keeper_turn_slot_for_test ~keeper_name ~channel f =
-  with_keeper_turn_slot ~keeper_name ~channel f
+let with_keeper_turn_slot_for_test ?cascade_profile ~keeper_name ~channel f =
+  with_keeper_turn_slot ?cascade_profile ~keeper_name ~channel f
 ;;
 
 let wait_for_autonomous_queue_head_for_test ~keeper_name ~ticket ~started_at =

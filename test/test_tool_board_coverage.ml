@@ -526,6 +526,81 @@ let test_keeper_board_post_rejects_quantitative_line_claim_without_evidence () =
   Alcotest.(check int) "no post created" 0
     (List.length (Board_dispatch.list_posts ~limit:10 ()))
 
+let test_keeper_board_post_rejects_keyword_only_quantitative_evidence () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let keeper_meta = make_keeper_meta ~name:"audit-keeper" () in
+  let body =
+    Keeper_exec_board.handle_keeper_board_tool
+      ~meta:keeper_meta
+      ~name:"keeper_board_post"
+      ~args:
+        (make_args
+           [
+             ( "content",
+               `String
+                 "Found 12 hits at L44 and L78; quantitative_evidence will \
+                  be added later." );
+           ])
+  in
+  let json = Yojson.Safe.from_string body in
+  Alcotest.(check string)
+    "keyword is not evidence"
+    "missing_quantitative_evidence"
+    Yojson.Safe.Util.(json |> member "reason" |> to_string);
+  Alcotest.(check int) "no post created" 0
+    (List.length (Board_dispatch.list_posts ~limit:10 ()))
+
+let test_keeper_board_post_rejects_numeric_line_claim_without_keyword () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let keeper_meta = make_keeper_meta ~name:"audit-keeper" () in
+  let body =
+    Keeper_exec_board.handle_keeper_board_tool
+      ~meta:keeper_meta
+      ~name:"keeper_board_post"
+      ~args:
+        (make_args
+           [
+             ( "content",
+               `String
+                 "Found 3 regressions at L97, L102, and L148 in \
+                  keeper_tool_policy.ml." );
+           ])
+  in
+  let json = Yojson.Safe.from_string body in
+  Alcotest.(check string)
+    "standalone count is risky"
+    "missing_quantitative_evidence"
+    Yojson.Safe.Util.(json |> member "reason" |> to_string);
+  Alcotest.(check int) "no post created" 0
+    (List.length (Board_dispatch.list_posts ~limit:10 ()))
+
+let test_keeper_board_post_accepts_inline_quantitative_command_evidence () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let keeper_meta = make_keeper_meta ~name:"audit-keeper" () in
+  let body =
+    Keeper_exec_board.handle_keeper_board_tool
+      ~meta:keeper_meta
+      ~name:"keeper_board_post"
+      ~args:
+        (make_args
+           [
+             ( "content",
+               `String
+                 "Found 3 regressions at L97, L102, and L148.\n\
+                  Command: rg -n 'regression' lib/keeper\n\
+                  Output: lib/keeper/foo.ml:97:regression" );
+           ])
+  in
+  ignore (parse_create_response_json body);
+  Alcotest.(check int) "one post created" 1
+    (List.length (Board_dispatch.list_posts ~limit:10 ()))
+
 let test_keeper_board_post_accepts_quantitative_line_claim_with_evidence () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1051,6 +1126,18 @@ let () =
             "keeper board post rejects quantitative line claim without evidence"
             `Quick
             test_keeper_board_post_rejects_quantitative_line_claim_without_evidence;
+          Alcotest.test_case
+            "keeper board post rejects keyword-only quantitative evidence"
+            `Quick
+            test_keeper_board_post_rejects_keyword_only_quantitative_evidence;
+          Alcotest.test_case
+            "keeper board post rejects numeric line claim without keyword"
+            `Quick
+            test_keeper_board_post_rejects_numeric_line_claim_without_keyword;
+          Alcotest.test_case
+            "keeper board post accepts inline quantitative command evidence"
+            `Quick
+            test_keeper_board_post_accepts_inline_quantitative_command_evidence;
           Alcotest.test_case
             "keeper board post accepts quantitative line claim with evidence"
             `Quick

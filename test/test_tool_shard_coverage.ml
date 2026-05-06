@@ -346,8 +346,28 @@ let test_keeper_board_post_schema_supports_judgment () =
             (List.mem_assoc "judgment" props);
           Alcotest.(check bool) "has sources" true
             (List.mem_assoc "sources" props);
-          Alcotest.(check bool) "has quantitative_evidence" true
-            (List.mem_assoc "quantitative_evidence" props)
+          let quantitative_evidence_schema =
+            match List.assoc_opt "quantitative_evidence" props with
+            | Some schema -> schema
+            | None -> Alcotest.fail "quantitative_evidence missing"
+          in
+          (match quantitative_evidence_schema with
+           | `Assoc fields ->
+             let type_values =
+               match List.assoc_opt "type" fields with
+               | Some (`List values) ->
+                 List.filter_map
+                   (function
+                     | `String value -> Some value
+                     | _ -> None)
+                   values
+               | _ -> []
+             in
+             Alcotest.(check (list string))
+               "quantitative_evidence schema types"
+               [ "object"; "string"; "array" ]
+               type_values
+           | _ -> Alcotest.fail "quantitative_evidence schema not object")
       | None -> Alcotest.fail "keeper_board_post missing properties"
 
 (* ============================================================

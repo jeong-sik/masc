@@ -77,8 +77,37 @@ let content_has_inline_quantitative_evidence content =
   let lower = String.lowercase_ascii content in
   List.exists
     (contains_substring lower)
-    [ "rg -n"; "grep -n"; "git grep -n"; "wc -l"; "tool evidence";
-      "quantitative_evidence" ]
+    [ "command: rg -n"; "command: grep -n"; "command: git grep -n";
+      "command: wc -l"; "$ rg -n"; "$ grep -n"; "$ git grep -n";
+      "$ wc -l"; "`rg -n"; "`grep -n"; "`git grep -n"; "`wc -l" ]
+
+let is_digit = function
+  | '0' .. '9' -> true
+  | _ -> false
+
+let is_numeric_claim_boundary = function
+  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | ':' -> false
+  | _ -> true
+
+let content_has_standalone_count content =
+  let len = String.length content in
+  let rec skip_digits idx =
+    if idx < len && is_digit content.[idx] then skip_digits (idx + 1) else idx
+  in
+  let rec loop idx =
+    if idx >= len then false
+    else if is_digit content.[idx] then
+      let next_idx = skip_digits idx in
+      let before_ok =
+        idx = 0 || is_numeric_claim_boundary content.[idx - 1]
+      in
+      let after_ok =
+        next_idx = len || is_numeric_claim_boundary content.[next_idx]
+      in
+      (before_ok && after_ok) || loop next_idx
+    else loop (idx + 1)
+  in
+  loop 0
 
 let is_word_char = function
   | 'a' .. 'z' | '0' .. '9' | '_' -> true
@@ -111,6 +140,7 @@ let content_has_risky_quantitative_claim content =
         "occurrences"; "pattern"; "patterns"; "instance"; "instances";
         "accuracy" ]
     || re_matches "[0-9][0-9]*%" content
+    || content_has_standalone_count content
   in
   has_line_ref && has_quantifier
 

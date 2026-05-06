@@ -339,7 +339,9 @@ let last_turn_safe_tool_names () =
   resolve_policy_group
     ~fallback:[ "keeper_board_post"; "keeper_board_comment";
                 "keeper_context_status"; "extend_turns";
-                "keeper_time_now"; "keeper_broadcast" ]
+                "keeper_time_now"; "keeper_tool_search";
+                "keeper_broadcast"; "keeper_task_done";
+                "masc_web_search" ]
     "last_turn_safe"
 
 let explicit_optional_candidate_tool_names (meta : keeper_meta) =

@@ -19,6 +19,7 @@ import { RingBuffer } from './lib/ring-buffer'
 
 import {
   RECONNECT_BASE_MS,
+  RECONNECT_JITTER_MS,
   RECONNECT_MAX_MS,
   MAX_JOURNAL_ENTRIES,
 } from './config/constants'
@@ -231,7 +232,9 @@ function scheduleReconnect(): void {
   if (reconnectTimer) return
   reconnectAttempts++
   const exp = Math.min(reconnectAttempts, 5)
-  const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * Math.pow(2, exp))
+  const backoff = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * Math.pow(2, exp))
+  const jitter = Math.random() * RECONNECT_JITTER_MS
+  const delay = backoff + jitter
   console.debug(`[SSE] reconnect #${reconnectAttempts} in ${delay}ms`)
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null

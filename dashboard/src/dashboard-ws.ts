@@ -3,6 +3,11 @@ import { parseSSEMessage } from './schemas/sse'
 import { hydrateDashboardSlice, routeServerPushEvent } from './sse-store'
 import { batch } from '@preact/signals'
 import { parseWebSocketSseFrames as parseWebSocketSseFramesImpl } from './dashboard-ws-parse'
+import {
+  DASHBOARD_WS_RPC_TIMEOUT_MS,
+  RECONNECT_JITTER_MS,
+  RECONNECT_MAX_MS,
+} from './config/constants'
 
 // Re-export for test consumers that assert on frame parsing.
 export const parseWebSocketSseFrames = parseWebSocketSseFramesImpl
@@ -37,7 +42,6 @@ interface DashboardWsDiscoveryResult {
   retry: boolean
 }
 
-const DASHBOARD_WS_RPC_TIMEOUT_MS = 15_000
 const DASHBOARD_WS_PARSE_TIMEOUT_MS = 5_000
 
 let socket: WebSocket | null = null
@@ -245,7 +249,10 @@ function scheduleReconnect(): void {
   if (!shouldReconnect) return
   if (reconnectTimer) return
   reconnectAttempts += 1
-  const delay = Math.min(15_000, 500 * Math.pow(2, Math.min(reconnectAttempts, 5)))
+  const exp = Math.min(reconnectAttempts, 5)
+  const backoff = Math.min(RECONNECT_MAX_MS, 500 * Math.pow(2, exp))
+  const jitter = Math.random() * RECONNECT_JITTER_MS
+  const delay = backoff + jitter
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null
     void connectDashboardWS()

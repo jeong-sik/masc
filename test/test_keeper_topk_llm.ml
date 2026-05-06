@@ -408,10 +408,17 @@ let test_deterministic_prefilter_surfaces_pr_review_for_explicit_request () =
         "Use ONLY keeper_pr_review_read and keeper_pr_review_comment for PR #13526. Do not use gh."
       ~selection_limit:10
   in
-  Alcotest.(check bool) "pr review read appears for explicit request"
-    true (List.mem "keeper_pr_review_read" selected);
-  Alcotest.(check bool) "pr review comment appears for explicit request"
-    true (List.mem "keeper_pr_review_comment" selected)
+  let visible =
+    Keeper_tool_disclosure.merge_tool_selection_boundary
+      ~core:(Keeper_exec_tools.effective_core_tools ())
+      ~deterministic_prefilter:selected
+      ~llm_selected:[]
+      ~discovered:[]
+  in
+  Alcotest.(check bool) "pr review read appears in final visible surface"
+    true (List.mem "keeper_pr_review_read" visible);
+  Alcotest.(check bool) "pr review comment appears in final visible surface"
+    true (List.mem "keeper_pr_review_comment" visible)
 
 let test_tool_search_partition_returns_allowed_core_hits () =
   let partition =

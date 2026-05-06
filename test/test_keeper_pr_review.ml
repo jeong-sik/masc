@@ -142,6 +142,16 @@ while [ \"$#\" -gt 0 ]; do\n\
   fi\n\
   shift\n\
 done\n\
+case \"$*\" in\n\
+  *\"--json isDraft,headRefName,labels\"*)\n\
+    if [ -n \"$KEEPER_FAKE_PR_VIEW_JSON\" ]; then\n\
+      printf '%s\\n' \"$KEEPER_FAKE_PR_VIEW_JSON\"\n\
+    else\n\
+      printf '%s\\n' '{\"isDraft\":true,\"headRefName\":\"keeper/docker-approve-proof\",\"labels\":[{\"name\":\"agent-pr\"}]}'\n\
+    fi\n\
+    exit 0\n\
+    ;;\n\
+esac\n\
 printf 'stdout:%s\\n' \"$*\"\n\
 exit 0\n"
 
@@ -196,6 +206,15 @@ let parse_field raw field =
 
 let parse_string_field raw field =
   parse_field raw field |> Json.to_string_option
+
+let parse_bool_field raw field =
+  parse_field raw field |> Json.to_bool_option
+
+let parse_nested_string_field raw outer field =
+  Yojson.Safe.from_string raw
+  |> Json.member outer
+  |> Json.member field
+  |> Json.to_string_option
 
 let test_research_preset_can_mutate_pr_reviews () =
   check bool "research can comment/approve through review tool" true
@@ -293,9 +312,42 @@ let test_comment_and_approve_route_through_docker () =
     (contains_substring log "--comment");
   check bool "approve event flag passed" true
     (contains_substring log "--approve");
+  check bool "approve preflight read PR metadata" true
+    (contains_substring log "--json isDraft,headRefName,labels");
   check bool "repo flag injected for review mutation" true
     (contains_substring log "-R"
      && contains_substring log "jeong-sik/masc-mcp")
+
+let test_approve_blocks_human_ready_pr_before_review () =
+  with_fake_docker @@ fun () ->
+  setup_docker_review @@ fun ~config ~meta ->
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_env "KEEPER_FAKE_PR_VIEW_JSON"
+    "{\"isDraft\":false,\"headRefName\":\"fix/real-pr\",\"labels\":[{\"name\":\"human-approved-ready\"}]}"
+  @@ fun () ->
+  let raw =
+    KTPR.handle_keeper_pr_review_comment ~config ~meta
+      ~args:
+        (`Assoc
+          [ ("pr_number", `Int 13510)
+          ; ("body", `String "unsafe approve should stop")
+          ; ("event", `String "APPROVE")
+          ])
+  in
+  check (option bool) "approval blocked" (Some false)
+    (parse_bool_field raw "ok");
+  check (option string) "structured block error"
+    (Some "approve_event_blocked")
+    (parse_string_field raw "error");
+  check (option string) "block reason preserves human-ready gate"
+    (Some "APPROVE is blocked once human-approved-ready is present")
+    (parse_nested_string_field raw "preflight" "reason");
+  let log = read_file log_path in
+  check bool "preflight used gh pr view" true
+    (contains_substring log "gh pr view 13510");
+  check bool "blocked before gh pr review approve" false
+    (contains_substring log "--approve")
 
 let test_reply_routes_through_docker_and_infers_repo () =
   with_fake_docker @@ fun () ->
@@ -347,6 +399,8 @@ let () =
         test_read_routes_docker_and_injects_repo_flag;
       test_case "comment and approve route through docker" `Quick
         test_comment_and_approve_route_through_docker;
+      test_case "approve blocks human-ready PR before review" `Quick
+        test_approve_blocks_human_ready_pr_before_review;
       test_case "reply routes through docker and infers repo" `Quick
         test_reply_routes_through_docker_and_infers_repo;
     ]

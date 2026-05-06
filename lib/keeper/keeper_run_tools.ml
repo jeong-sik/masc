@@ -334,6 +334,7 @@ let prepare_agent_setup
         let matched_core_names =
           List.map fst partition.visible_core_hits
         in
+        let filtered_by_core = List.length matched_core_names in
         let new_discoveries = partition.discoverable_hits in
         let filtered_by_policy = partition.filtered_by_policy in
         let discovered_names = List.map fst new_discoveries in
@@ -426,8 +427,7 @@ let prepare_agent_setup
            @ [ ( "diagnostics"
                , `Assoc
                    [ "raw_bm25_hits", `Int raw_hit_count
-                   ; ( "filtered_by_core"
-                     , `Int (raw_hit_count - List.length after_core_filter) )
+                   ; "filtered_by_core", `Int filtered_by_core
                    ; "filtered_by_policy", `Int filtered_by_policy
                    ] )
              ; "hint", `String hint

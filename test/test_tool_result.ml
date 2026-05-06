@@ -4,6 +4,9 @@ module Tool_result = Masc_mcp.Tool_result
 module Tool_dispatch = Masc_mcp.Tool_dispatch
 module Time_compat = Time_compat
 
+let to_legacy_compat_for_test =
+  (Tool_result.to_legacy_compat [@alert "-legacy_tuple"])
+
 let test_wrap_json_response () =
   let start = 1000.0 in
   let raw = (true, {|{"status":"ok","count":42}|}) in
@@ -56,8 +59,24 @@ let test_prefixed_json_legacy_message_roundtrip () =
       (true, message)
   in
   Alcotest.(check bool) "success preserved" true r.success;
-  let legacy = Tool_result.message r in
+  let legacy_success, legacy = to_legacy_compat_for_test r in
+  Alcotest.(check bool) "legacy success preserved" true legacy_success;
   Alcotest.(check string) "legacy prefix preserved" message legacy
+
+let test_empty_legacy_message_is_preserved () =
+  let r =
+    {
+      Tool_result.success = true;
+      data = `Assoc [ ("status", `String "ok") ];
+      legacy_message = "";
+      tool_name = "direct";
+      duration_ms = 0.0;
+    }
+  in
+  Alcotest.(check string) "message remains empty" "" (Tool_result.message r);
+  let legacy_success, legacy = to_legacy_compat_for_test r in
+  Alcotest.(check bool) "legacy success preserved" true legacy_success;
+  Alcotest.(check string) "legacy message remains empty" "" legacy
 
 let test_to_json () =
   let start = Time_compat.now () in
@@ -122,6 +141,8 @@ let () =
         test_wrap_prefixed_json_response;
       Alcotest.test_case "prefixed json legacy message roundtrip" `Quick
         test_prefixed_json_legacy_message_roundtrip;
+      Alcotest.test_case "empty legacy message preserved" `Quick
+        test_empty_legacy_message_is_preserved;
     ];
     "to_json", [
       Alcotest.test_case "fields present" `Quick test_to_json;

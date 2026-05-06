@@ -77,11 +77,6 @@ let to_json t =
     ; ("duration_ms", `Float t.duration_ms)
     ]
 
-let message t =
-  if t.legacy_message <> "" then t.legacy_message
-  else
-    match t.data with
-    | `String s -> s
-    | json -> Yojson.Safe.to_string json
+let message t = t.legacy_message
 
 let to_legacy_compat t = (t.success, message t)

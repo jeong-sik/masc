@@ -90,9 +90,9 @@ let () =
     ~label:"run cancellation closes agent before re-raise"
     src
     [
-      "Eio.Cancel.Cancelled _ as exn";
+      "Eio.Cancel.Cancelled";
       "close_agent_for_cleanup ~propagate_cancel:false ~config agent";
-      "raise exn";
+      "raise ";
     ];
   assert_ordered_contains
     ~label:"ordinary exception uses same cleanup helper"

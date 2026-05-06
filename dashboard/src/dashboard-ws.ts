@@ -20,6 +20,10 @@ type PendingRpc = {
   reject: (err: Error) => void
   timeout: ReturnType<typeof setTimeout>
 }
+type ParseWorkerJob = {
+  data: string
+  timeout: ReturnType<typeof setTimeout>
+}
 type DashboardRouteState = Pick<RouteState, 'tab' | 'params'>
 
 interface DashboardWsDiscovery {
@@ -34,6 +38,7 @@ interface DashboardWsDiscoveryResult {
 }
 
 const DASHBOARD_WS_RPC_TIMEOUT_MS = 15_000
+const DASHBOARD_WS_PARSE_TIMEOUT_MS = 5_000
 
 let socket: WebSocket | null = null
 let rpcId = 0
@@ -57,7 +62,31 @@ let flushHandle = 0
 // main thread never blocks on large payloads.
 let parseWorker: Worker | null = null
 let workerJobId = 0
-const workerJobs = new Map<number, (payloads: unknown[]) => void>()
+const workerJobs = new Map<number, ParseWorkerJob>()
+
+function deliverParsedPayloads(payloads: unknown[]): void {
+  for (const payload of payloads) {
+    pendingInbound.push(payload)
+  }
+  scheduleFlush()
+}
+
+function fallbackParseWorkerJob(id: number): void {
+  const job = workerJobs.get(id)
+  if (!job) return
+  workerJobs.delete(id)
+  clearTimeout(job.timeout)
+  pendingInbound.push(job.data)
+  scheduleFlush()
+}
+
+function fallbackAllParseWorkerJobs(): void {
+  for (const id of Array.from(workerJobs.keys())) {
+    fallbackParseWorkerJob(id)
+  }
+  parseWorker?.terminate()
+  parseWorker = null
+}
 
 function initParseWorker(): Worker | null {
   if (parseWorker) return parseWorker
@@ -71,12 +100,14 @@ function initParseWorker(): Worker | null {
         id: number
         payloads: unknown[]
       }
-      const cb = workerJobs.get(id)
-      if (cb) {
-        cb(payloads)
-        workerJobs.delete(id)
-      }
+      const job = workerJobs.get(id)
+      if (!job) return
+      workerJobs.delete(id)
+      clearTimeout(job.timeout)
+      deliverParsedPayloads(Array.isArray(payloads) ? payloads : [])
     }
+    parseWorker.onerror = fallbackAllParseWorkerJobs
+    parseWorker.onmessageerror = fallbackAllParseWorkerJobs
     return parseWorker
   } catch {
     return null
@@ -417,13 +448,18 @@ function handleMessage(data: unknown): void {
   const worker = initParseWorker()
   if (worker) {
     const id = ++workerJobId
-    workerJobs.set(id, (payloads) => {
-      for (const p of payloads) {
-        pendingInbound.push(p)
-      }
-      scheduleFlush()
+    workerJobs.set(id, {
+      data,
+      timeout: setTimeout(() => {
+        fallbackParseWorkerJob(id)
+      }, DASHBOARD_WS_PARSE_TIMEOUT_MS),
     })
-    worker.postMessage({ id, data })
+    try {
+      worker.postMessage({ id, data })
+    } catch {
+      fallbackParseWorkerJob(id)
+      parseWorker = null
+    }
     return
   }
   pendingInbound.push(data)

@@ -3080,6 +3080,12 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
         KD.baseline_execution_result
           (KD.empty_world_observation ~keeper_name:minimal_meta.name)
       in
+      let completed_before =
+        Masc_mcp.Prometheus.metric_value_or_zero
+          Masc_mcp.Prometheus.metric_keeper_turn_completed
+          ~labels:[("keeper_name", minimal_meta.name)]
+          ()
+      in
       UM.append_metrics_snapshot
         ~config
         ~meta:minimal_meta
@@ -3108,6 +3114,15 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
         ~handoff_json:None
         ~deliberation_execution
         ();
+      let completed_after =
+        Masc_mcp.Prometheus.metric_value_or_zero
+          Masc_mcp.Prometheus.metric_keeper_turn_completed
+          ~labels:[("keeper_name", minimal_meta.name)]
+          ()
+      in
+      check (float 0.0001) "turn completed counter increments"
+        (completed_before +. 1.0)
+        completed_after;
       let metrics_store =
         Masc_mcp.Keeper_types.keeper_metrics_store config minimal_meta.name
       in

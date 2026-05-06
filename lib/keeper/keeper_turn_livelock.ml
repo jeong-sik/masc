@@ -78,6 +78,9 @@ let record_started_metrics ~keeper outcome =
   Prometheus.inc_counter
     Prometheus.metric_keeper_turn_starts
     ~labels:[ ("keeper", keeper) ] ();
+  Prometheus.inc_counter
+    Prometheus.metric_keeper_turn_scheduled
+    ~labels:[ ("keeper_name", keeper) ] ();
   (match outcome with
    | Fresh -> ()
    | Reattempt _ ->

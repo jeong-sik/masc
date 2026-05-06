@@ -1822,6 +1822,23 @@ let () =
                   }
                 in
                 Sup.alive_but_stuck_scan ctx;
+                let labels = [("keeper_name", name)] in
+                let stuck_seconds =
+                  Masc_mcp.Prometheus.metric_value_or_zero
+                    Masc_mcp.Prometheus.metric_keeper_alive_but_stuck_seconds
+                    ~labels
+                    ()
+                in
+                let threshold_seconds =
+                  Masc_mcp.Prometheus.metric_value_or_zero
+                    Masc_mcp.Prometheus.metric_keeper_alive_but_stuck_threshold_seconds
+                    ~labels
+                    ()
+                in
+                check bool "alive-but-stuck seconds crosses threshold" true
+                  (stuck_seconds > threshold_seconds);
+                check bool "alive-but-stuck threshold exported" true
+                  (threshold_seconds > 0.0);
                 let queue =
                   Reg.event_queue_snapshot ~base_path:config.base_path name
                 in

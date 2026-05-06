@@ -75,6 +75,11 @@ val metric_keeper_cache_creation_tokens : string
 val metric_keeper_cache_read_tokens : string
 val metric_keeper_usage_anomalies : string
 val metric_keeper_total_cost_usd : string
+val metric_keeper_turn_scheduled : string
+(** Goal-loop Observe turn-success denominator. Labels: [keeper_name]. *)
+
+val metric_keeper_turn_completed : string
+(** Goal-loop Observe turn-success numerator. Labels: [keeper_name]. *)
 
 (** #10530: keeper required-tool-contract violations.
     Labels: keeper_name, kind \in \{passive,text_only\}. *)
@@ -83,6 +88,12 @@ val metric_keeper_contract_violations : string
 (** #12838: keepers detected as alive-but-stuck.  Bounded to one
     increment per dedup window per keeper. Labels: keeper. *)
 val metric_keeper_alive_but_stuck : string
+
+val metric_keeper_alive_but_stuck_seconds : string
+(** Current alive-but-stuck elapsed seconds. Labels: [keeper_name]. *)
+
+val metric_keeper_alive_but_stuck_threshold_seconds : string
+(** Alive-but-stuck detector threshold seconds. Labels: [keeper_name]. *)
 
 (** #12838 follow-up: alive-but-stuck recovery requests.  Each increment
     means the supervisor requested a supervised restart via

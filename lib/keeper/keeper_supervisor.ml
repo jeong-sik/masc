@@ -1951,6 +1951,18 @@ let alive_but_stuck_threshold ~stall_multiplier ~stall_floor_sec
     (float_of_int entry.meta.proactive.cooldown_sec
      *. float_of_int stall_multiplier)
 
+let set_alive_but_stuck_gauges ~(entry : Keeper_registry.registry_entry)
+    ~threshold ~elapsed =
+  let labels = [("keeper_name", entry.name)] in
+  Prometheus.set_gauge
+    Prometheus.metric_keeper_alive_but_stuck_seconds
+    ~labels
+    (Option.value elapsed ~default:0.0);
+  Prometheus.set_gauge
+    Prometheus.metric_keeper_alive_but_stuck_threshold_seconds
+    ~labels
+    threshold
+
 let alive_but_stuck_recovery_stimulus ~now ~elapsed ~threshold
     (entry : Keeper_registry.registry_entry) : Keeper_event_queue.stimulus =
   let payload =
@@ -2075,15 +2087,17 @@ let alive_but_stuck_scan (ctx : _ context) =
     let entries = Keeper_registry.all ~base_path () in
     let abs_ym = Eio_guard.create_yield_meter () in
     List.iter (fun (entry : Keeper_registry.registry_entry) ->
-      (match
+      let threshold =
+        alive_but_stuck_threshold ~stall_multiplier ~stall_floor_sec entry
+      in
+      let elapsed =
         detect_alive_but_stuck ~now ~stall_multiplier ~stall_floor_sec entry
-      with
+      in
+      set_alive_but_stuck_gauges ~entry ~threshold ~elapsed;
+      (match elapsed with
       | None -> ()
       | Some elapsed ->
         if alive_but_stuck_should_emit ~now ~dedup_ttl_sec entry.name then begin
-          let threshold =
-            alive_but_stuck_threshold ~stall_multiplier ~stall_floor_sec entry
-          in
           let recovery =
             queue_alive_but_stuck_recovery ~base_path ~now ~elapsed
               ~threshold entry

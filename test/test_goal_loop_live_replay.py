@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -144,6 +145,48 @@ class GoalLoopLiveReplayTest(unittest.TestCase):
                 metadata["dashboard_status_json"], str(dashboard_status_path)
             )
 
+    def test_replay_normalizes_tilde_base_path_for_dashboard_publish(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            root = Path(raw_dir)
+            home = root / "home"
+            home.mkdir()
+            log_path = root / "server.log"
+            artifact_dir = root / "artifacts"
+            log_path.write_text(
+                "[INFO] provider_health_probe_completed provider=ollama\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                summary = goal_loop_live_replay.replay_logs(
+                    log_paths=[str(log_path)],
+                    artifact_dir=artifact_dir,
+                    duration_seconds=0,
+                    act_map_path=None,
+                    loop_iteration="test-dashboard-publish-tilde",
+                    verify_policy="critical",
+                    max_samples=2,
+                    runtime_source="unit-test",
+                    base_path="~/runtime",
+                    publish_dashboard_status=True,
+                )
+
+            normalized_base_path = home / "runtime"
+            dashboard_status_path = (
+                normalized_base_path / ".masc" / "goal-loop" / "status.json"
+            )
+            self.assertEqual(summary.dashboard_status_json, str(dashboard_status_path))
+            self.assertTrue(dashboard_status_path.is_file())
+            metadata = read_json(artifact_dir / "metadata.json")
+            self.assertEqual(metadata["base_path"], str(normalized_base_path))
+            self.assertEqual(
+                metadata["dashboard_status_json"], str(dashboard_status_path)
+            )
+            verify = read_json(artifact_dir / "verify.json")
+            self.assertIn(
+                f"base_path={normalized_base_path}", verify["evidence_source"]
+            )
+
     def test_dashboard_status_publish_requires_base_path(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:
             root = Path(raw_dir)
@@ -164,6 +207,20 @@ class GoalLoopLiveReplayTest(unittest.TestCase):
                     max_samples=2,
                     runtime_source="unit-test",
                     base_path=None,
+                    publish_dashboard_status=True,
+                )
+
+            with self.assertRaisesRegex(ValueError, "requires --base-path"):
+                goal_loop_live_replay.replay_logs(
+                    log_paths=[str(log_path)],
+                    artifact_dir=root / "artifacts-blank",
+                    duration_seconds=0,
+                    act_map_path=None,
+                    loop_iteration="test-dashboard-publish-blank-base",
+                    verify_policy="critical",
+                    max_samples=2,
+                    runtime_source="unit-test",
+                    base_path="   ",
                     publish_dashboard_status=True,
                 )
 

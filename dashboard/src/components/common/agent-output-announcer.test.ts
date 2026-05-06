@@ -113,12 +113,21 @@ describe('AgentOutputAnnouncer', () => {
     const outputs = [{ id: 'o-error', type: 'error' as const, content: 'disk full' }]
     render(h(AgentOutputAnnouncer, { outputs, priority: 'polite' }), container)
     await new Promise((r) => setTimeout(r, 10))
+    const el = container.querySelector('[role="log"]') as HTMLElement
+    const textMutations: string[] = []
+    const observer = new MutationObserver(() => {
+      textMutations.push(el.textContent ?? '')
+    })
+    observer.observe(el, { childList: true, characterData: true, subtree: true })
+
     render(h(AgentOutputAnnouncer, { outputs, priority: 'auto' }), container)
     await new Promise((r) => setTimeout(r, 10))
+    observer.disconnect()
 
-    const el = container.querySelector('[role="log"]') as HTMLElement
     expect(el?.getAttribute('aria-live')).toBe('assertive')
     expect(el?.getAttribute('data-agent-output-announcer-priority')).toBe('assertive')
+    expect(textMutations).toContain('')
+    expect(textMutations.at(-1)).toBe('오류 발생: disk full')
   })
 
   it('renders aria-label', () => {
@@ -165,5 +174,31 @@ describe('AgentOutputAnnouncer', () => {
     const el = container.querySelector('[role="log"]') as HTMLElement
     expect(el?.textContent).toContain('second')
     expect(el?.getAttribute('data-agent-output-announcer-output-id')).toBe('o2')
+  })
+
+  it('re-adds identical announcement text when only the output id changes', async () => {
+    const container = document.createElement('div')
+    render(h(AgentOutputAnnouncer, {
+      outputs: [{ id: 'o1', type: 'text', content: 'same message' }],
+    }), container)
+    await new Promise((r) => setTimeout(r, 10))
+
+    const el = container.querySelector('[role="log"]') as HTMLElement
+    const textMutations: string[] = []
+    const observer = new MutationObserver(() => {
+      textMutations.push(el.textContent ?? '')
+    })
+    observer.observe(el, { childList: true, characterData: true, subtree: true })
+
+    render(h(AgentOutputAnnouncer, {
+      outputs: [{ id: 'o2', type: 'text', content: 'same message' }],
+    }), container)
+    await new Promise((r) => setTimeout(r, 10))
+    observer.disconnect()
+
+    expect(el?.textContent).toBe('텍스트 출력: same message')
+    expect(el?.getAttribute('data-agent-output-announcer-output-id')).toBe('o2')
+    expect(textMutations).toContain('')
+    expect(textMutations.at(-1)).toBe('텍스트 출력: same message')
   })
 })

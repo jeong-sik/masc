@@ -72,7 +72,15 @@ export function AgentOutputAnnouncer({
   testId,
 }: AgentOutputAnnouncerProps) {
   const lastAnnouncedRef = useRef<string | null>(null)
+  const renderedMessageRef = useRef('')
+  const pendingAnnouncementTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [announcement, setAnnouncement] = useState<AgentOutputAnnouncement | null>(null)
+
+  useEffect(() => () => {
+    if (pendingAnnouncementTimerRef.current !== null) {
+      clearTimeout(pendingAnnouncementTimerRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     const latest = outputs[outputs.length - 1]
@@ -82,7 +90,24 @@ export function AgentOutputAnnouncer({
     const announcementKey = `${next.id}:${next.priority}`
     if (announcementKey === lastAnnouncedRef.current) return
 
+    if (pendingAnnouncementTimerRef.current !== null) {
+      clearTimeout(pendingAnnouncementTimerRef.current)
+      pendingAnnouncementTimerRef.current = null
+    }
+
     lastAnnouncedRef.current = announcementKey
+    if (renderedMessageRef.current === next.message) {
+      renderedMessageRef.current = ''
+      setAnnouncement(null)
+      pendingAnnouncementTimerRef.current = setTimeout(() => {
+        renderedMessageRef.current = next.message
+        setAnnouncement(next)
+        pendingAnnouncementTimerRef.current = null
+      }, 0)
+      return
+    }
+
+    renderedMessageRef.current = next.message
     setAnnouncement(next)
   }, [outputs, priority])
 

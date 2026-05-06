@@ -485,9 +485,10 @@ let test_dispatch_event_observes_phase_sse_broadcast_failure () =
       ~labels ()
   in
   ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+  let original_hook = Atomic.get Masc_mcp.Sse.buffer_commit_test_hook in
   Fun.protect
     ~finally:(fun () ->
-      Atomic.set Masc_mcp.Sse.buffer_commit_test_hook None)
+      Atomic.set Masc_mcp.Sse.buffer_commit_test_hook original_hook)
     (fun () ->
       Atomic.set Masc_mcp.Sse.buffer_commit_test_hook
         (Some (fun () -> failwith "forced phase broadcast failure"));

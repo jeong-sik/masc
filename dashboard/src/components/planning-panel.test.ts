@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { cleanup, render, screen } from '@testing-library/preact'
+import { cleanup, fireEvent, render, screen } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const routeSignal = signal<{ tab: string; params: Record<string, string>; postId: string | null }>({
@@ -188,6 +188,42 @@ describe('PlanningPanel', () => {
     expect(screen.getAllByText('verify').length).toBeGreaterThan(0)
   })
 
+  it('preserves planning view params when selecting accountability focus', () => {
+    setRoute('default')
+    routeSignal.value = {
+      tab: 'workspace',
+      params: { section: 'planning', view: 'default', task: 'task-keep' },
+      postId: null,
+    }
+
+    render(html`<${PlanningPanel} />`)
+    fireEvent.click(screen.getByRole('tab', { name: /책임 원장/ }))
+
+    expect(routeSignal.value.params).toEqual({
+      section: 'planning',
+      view: 'default',
+      task: 'task-keep',
+      focus: 'accountability-ledger',
+    })
+  })
+
+  it('does not count cancelled accountability tasks as active', () => {
+    setRoute(undefined, 'accountability-ledger')
+    tasksSignal.value = [
+      {
+        id: 'task-cancelled-001',
+        title: 'Cancelled old work',
+        status: 'cancelled',
+        assignee: 'keeper-delta',
+        updated_at: '2026-05-06T00:00:00Z',
+      },
+    ]
+
+    render(html`<${PlanningPanel} />`)
+
+    expect(screen.getByText('active 0 · total 1')).toBeTruthy()
+  })
+
   it('renders accountability matrix focus from route param', () => {
     setRoute(undefined, 'accountability-matrix')
     tasksSignal.value = [
@@ -202,5 +238,18 @@ describe('PlanningPanel', () => {
     expect(screen.getAllByText('책임 매트릭스').length).toBeGreaterThan(0)
     expect(screen.getByText('keeper-alpha')).toBeTruthy()
     expect(screen.getByText('keeper-beta')).toBeTruthy()
+  })
+
+  it('uses a concrete minimum width for the accountability matrix table', () => {
+    setRoute(undefined, 'accountability-matrix')
+    tasksSignal.value = [
+      { id: 'task-matrix-width-1', title: 'A', status: 'todo', assignee: 'keeper-alpha', updated_at: '2026-05-06T00:00:00Z' },
+    ]
+
+    render(html`<${PlanningPanel} />`)
+
+    const table = screen.getByRole('table', { name: '책임 매트릭스' })
+    expect(table.className).toContain('min-w-[37.5rem]')
+    expect(table.className).not.toContain('min-w-150')
   })
 })

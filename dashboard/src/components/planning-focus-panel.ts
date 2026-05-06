@@ -53,15 +53,16 @@ const activeFocus = computed<PlanningFocus>(() => {
 })
 
 function updateFocusParam(focus: PlanningFocus): void {
+  const params: Record<string, string> = { ...route.value.params, section: 'planning' }
   if (focus === 'none') {
-    const { focus: _focus, ...params } = route.value.params
-    replaceRoute('workspace', { ...params, section: 'planning' })
+    delete params.focus
+    replaceRoute('workspace', params)
     return
   }
 
-  replaceRoute('workspace', focus === 'stale'
-    ? { section: 'planning', view: 'default', focus }
-    : { section: 'planning', focus })
+  params.focus = focus
+  if (focus === 'stale') params.view = 'default'
+  replaceRoute('workspace', params)
 }
 
 function statusBucket(status: Task['status']): TaskStatusBucket {
@@ -69,6 +70,10 @@ function statusBucket(status: Task['status']): TaskStatusBucket {
     return status
   }
   return 'other'
+}
+
+function isActiveStatusBucket(status: TaskStatusBucket): boolean {
+  return status === 'todo' || status === 'claimed' || status === 'in_progress' || status === 'awaiting_verification'
 }
 
 function taskTimeMs(task: Task): number {
@@ -112,7 +117,7 @@ function deriveAccountabilityRows(
     const stale = staleIds.has(task.id)
     row.total += 1
     row.counts[bucket] += 1
-    if (bucket !== 'done') row.active += 1
+    if (isActiveStatusBucket(bucket)) row.active += 1
     if (stale) row.stale += 1
     row.tasks.push({
       task,
@@ -320,7 +325,7 @@ function MatrixFocus({ rows }: { rows: AccountabilityRow[] }) {
         <${EmptyFocus} message="매트릭스로 표시할 태스크가 없습니다." />
       ` : html`
         <div class="overflow-x-auto" data-testid="planning-focus-matrix">
-          <table class="w-full min-w-150 border-separate border-spacing-0 text-xs" aria-label="책임 매트릭스">
+          <table class="w-full min-w-[37.5rem] border-separate border-spacing-0 text-xs" aria-label="책임 매트릭스">
             <thead>
               <tr class="text-left font-mono text-3xs uppercase tracking-[var(--track-caps)] text-text-muted">
                 <th class="px-2 py-2">assignee</th>

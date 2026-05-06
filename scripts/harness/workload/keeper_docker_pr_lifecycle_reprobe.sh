@@ -39,6 +39,8 @@ INIT_TIMEOUT_SEC="${INIT_TIMEOUT_SEC:-60}"
 POLL_TIMEOUT_SEC="${POLL_TIMEOUT_SEC:-1200}"
 POLL_INTERVAL_SEC="${POLL_INTERVAL_SEC:-10}"
 LIFECYCLE_MUTATION_MODE="split"
+PHASE_MODE="${PHASE_MODE:-both}"
+REVIEW_RESUME="${REVIEW_RESUME:-0}"
 REQUIRED_TOOLS_LEGACY="${REQUIRED_TOOLS:-}"
 CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-masc_web_search,keeper_bash,keeper_pr_create}}"
 REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_pr_review_comment}}"
@@ -89,6 +91,11 @@ Options:
   --board-post-id ID       Post a final board comment to this thread.
   --run-id ID              Stable run id for prompts and artifacts.
   --run-dir PATH           Artifact directory.
+  --phase create|review|both
+                           Which lifecycle phase to mutate (default: both).
+  --review-resume          With --phase review, send review prompts even when
+                           create result readiness is incomplete. Keeper-side
+                           target PR resolution still decides success/failure.
   -h, --help               Show this help.
 
 Environment:
@@ -102,6 +109,9 @@ Environment:
   CREATE_REQUIRED_TOOLS    CSV required_tools for split create phase.
   REVIEW_REQUIRED_TOOLS    CSV required_tools for split review phase.
   RUN_AUDIT=0              Skip final audit.
+  PHASE_MODE=create|review|both
+                           Same as --phase.
+  REVIEW_RESUME=1          Same as --review-resume.
   EXPECTED_SERVER_COMMIT   Optional expected /health build.commit prefix.
   FORBID_GITHUB_IDENTITIES Optional CSV of forbidden keeper GitHub identities.
   ALLOW_FORK_PR_FOR_READONLY=1
@@ -200,6 +210,14 @@ while [[ $# -gt 0 ]]; do
       SUMMARY_FILE="$RUN_DIR/summary.json"
       AUDIT_FILE="$RUN_DIR/audit-docker-pr-lifecycle.json"
       shift 2
+      ;;
+    --phase)
+      PHASE_MODE="$2"
+      shift 2
+      ;;
+    --review-resume)
+      REVIEW_RESUME=1
+      shift
       ;;
     -h|--help)
       usage
@@ -1620,6 +1638,14 @@ require_cmd curl
 # the run with a less obvious git-not-found error.
 require_cmd git
 
+case "$PHASE_MODE" in
+  create|review|both) ;;
+  *)
+    echo "invalid --phase: $PHASE_MODE (expected create, review, or both)" >&2
+    exit 2
+    ;;
+esac
+
 if [[ "$MUTATE" == "1" || -n "$EXPECTED_SERVER_COMMIT" ]]; then
   assert_expected_server_commit
 fi
@@ -1628,7 +1654,9 @@ discover_keepers
 assert_github_identity_pool_for_mutate
 build_review_targets
 render_prompts
-assert_no_proof_branch_collisions_for_mutate
+if [[ "$PHASE_MODE" != "review" ]]; then
+  assert_no_proof_branch_collisions_for_mutate
+fi
 
 if [[ "$MUTATE" == "1" ]]; then
   # Share one POLL_TIMEOUT_SEC budget across both phases so the overall
@@ -1636,14 +1664,30 @@ if [[ "$MUTATE" == "1" ]]; then
   # silently doubling when create + review each compute their own
   # deadline (PR #13842 review).
   export MUTATE_POLL_DEADLINE_TS=$(( $(date +%s) + POLL_TIMEOUT_SEC ))
-  send_phase_prompts "create" "$CREATE_REQUIRED_TOOLS"
-  poll_results "create"
-  if all_create_results_ready_for_review; then
-    send_phase_prompts "review" "$REVIEW_REQUIRED_TOOLS"
-    poll_results "review"
-  else
-    log "skipping review phase because create phase did not produce complete success evidence"
-  fi
+  case "$PHASE_MODE" in
+    create)
+      send_phase_prompts "create" "$CREATE_REQUIRED_TOOLS"
+      poll_results "create"
+      ;;
+    review)
+      if [[ "$REVIEW_RESUME" == "1" ]] || all_create_results_ready_for_review; then
+        send_phase_prompts "review" "$REVIEW_REQUIRED_TOOLS"
+        poll_results "review"
+      else
+        log "skipping review phase because create phase did not produce complete success evidence"
+      fi
+      ;;
+    both)
+      send_phase_prompts "create" "$CREATE_REQUIRED_TOOLS"
+      poll_results "create"
+      if all_create_results_ready_for_review; then
+        send_phase_prompts "review" "$REVIEW_REQUIRED_TOOLS"
+        poll_results "review"
+      else
+        log "skipping review phase because create phase did not produce complete success evidence"
+      fi
+      ;;
+  esac
   unset MUTATE_POLL_DEADLINE_TS
 else
   log "dry-run mode: prompts rendered under $PROMPT_DIR; no keeper messages sent"

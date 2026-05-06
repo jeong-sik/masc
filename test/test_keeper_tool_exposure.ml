@@ -210,6 +210,21 @@ let test_minimal_preset_has_approval_pending () =
   check bool "minimal excludes admin approval detail" false
     (has_tool "masc_approval_get" tools)
 
+let test_all_presets_have_approval_pending () =
+  Keeper_types.all_tool_presets
+  |> List.iter (fun preset ->
+       let label = Keeper_types.tool_preset_to_string preset in
+       let meta = make_meta ~preset () in
+       let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+       let schema_names =
+         Keeper_exec_tools.keeper_allowed_model_tools meta
+         |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+       in
+       check bool (label ^ " has approval pending tool") true
+         (has_tool "masc_approval_pending" tools);
+       check bool (label ^ " has approval pending schema") true
+         (has_tool "masc_approval_pending" schema_names))
+
 let test_feature_catalog_required_tools_reachable_by_full_keeper () =
   let meta = make_meta ~preset:Keeper_types.Full () in
   let schema_names =
@@ -839,6 +854,8 @@ let () =
         test_minimal_preset_has_web_search;
       test_case "minimal preset has keeper-safe approval pending" `Quick
         test_minimal_preset_has_approval_pending;
+      test_case "all presets have keeper-safe approval pending" `Quick
+        test_all_presets_have_approval_pending;
       test_case "feature proof required tools are reachable" `Quick
         test_feature_catalog_required_tools_reachable_by_full_keeper;
       test_case "coding preset has keeper_bash and keeper_shell" `Quick

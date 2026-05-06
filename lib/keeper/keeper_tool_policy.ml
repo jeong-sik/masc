@@ -232,13 +232,16 @@ let is_keeper_denied (name : string) : bool =
 let keeper_safe_inline_tools =
   [ "masc_approval_pending" ]
 
+let is_keeper_safe_inline_tool name =
+  List.mem name keeper_safe_inline_tools
+
 let keeper_mcp_context_required_tools =
   Tool_schemas_inline.schemas
   |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
-  |> List.filter (fun name -> not (List.mem name keeper_safe_inline_tools))
+  |> List.filter (fun name -> not (is_keeper_safe_inline_tool name))
 
 let is_keeper_mcp_context_required name =
-  not (List.mem name keeper_safe_inline_tools)
+  not (is_keeper_safe_inline_tool name)
   && (List.mem name keeper_mcp_context_required_tools
       || Tool_dispatch.is_mcp_context_required name)
 
@@ -394,7 +397,8 @@ let tool_policy_of_meta (meta : keeper_meta) =
   let allow =
     match meta.tool_access with
     | Preset { preset; also_allow } ->
-        Tool_access_policy.Names (preset_allowlist preset @ also_allow)
+        Tool_access_policy.Names
+          (preset_allowlist preset @ keeper_safe_inline_tools @ also_allow)
     | Custom allowlist ->
         Tool_access_policy.Names allowlist
   in

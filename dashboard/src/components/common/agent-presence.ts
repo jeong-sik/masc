@@ -11,27 +11,38 @@
 
 import { html } from 'htm/preact'
 
-type PresenceVisualState = 'online' | 'working' | 'idle' | 'offline'
+export type PresenceVisualState = 'online' | 'working' | 'idle' | 'offline'
+export type AgentPresenceSize = 'sm' | 'md'
 
-interface PresenceConfig {
+export interface PresenceConfig {
   colorClass: string
   pulse: boolean
   label: string
 }
 
+export interface AgentPresenceSummary {
+  readonly rawStatus: string
+  readonly state: PresenceVisualState
+  readonly label: string
+  readonly pulse: boolean
+  readonly size: AgentPresenceSize
+  readonly detail: string
+  readonly detailPresent: boolean
+}
+
 const PRESENCE_CONFIG: Record<PresenceVisualState, PresenceConfig> = {
   online: {
-    colorClass: 'bg-[var(--ok-10)]',
+    colorClass: 'bg-[var(--color-status-ok)]',
     pulse: false,
     label: '온라인',
   },
   working: {
-    colorClass: 'bg-[var(--color-accent)]',
+    colorClass: 'bg-[var(--color-accent-fg)]',
     pulse: true,
     label: '작업 중',
   },
   idle: {
-    colorClass: 'bg-[var(--warn-10)]',
+    colorClass: 'bg-[var(--color-status-warn)]',
     pulse: false,
     label: '대기',
   },
@@ -68,10 +79,29 @@ export function presenceConfig(state: PresenceVisualState): PresenceConfig {
   return PRESENCE_CONFIG[state]
 }
 
+export function summarizeAgentPresence(
+  status: string | null | undefined,
+  detail: string | null | undefined,
+  size: AgentPresenceSize,
+): AgentPresenceSummary {
+  const state = agentStatusToPresence(status)
+  const config = presenceConfig(state)
+  const normalizedDetail = detail ?? ''
+  return {
+    rawStatus: status ?? '',
+    state,
+    label: config.label,
+    pulse: config.pulse,
+    size,
+    detail: normalizedDetail,
+    detailPresent: normalizedDetail.length > 0,
+  }
+}
+
 interface AgentPresenceProps {
   status: string | null | undefined
   detail?: string | null
-  size?: 'sm' | 'md'
+  size?: AgentPresenceSize
   testId?: string
 }
 
@@ -86,8 +116,8 @@ export function AgentPresence({
   size = 'sm',
   testId,
 }: AgentPresenceProps) {
-  const state = agentStatusToPresence(status)
-  const config = PRESENCE_CONFIG[state]
+  const summary = summarizeAgentPresence(status, detail, size)
+  const config = PRESENCE_CONFIG[summary.state]
   const dotSize = SIZE_CLASSES[size]
   const pulseRing = config.pulse
     ? html`<span
@@ -97,7 +127,18 @@ export function AgentPresence({
     : null
 
   return html`
-    <div class="inline-flex items-center gap-2" data-agent-presence data-presence-state=${state} data-testid=${testId}>
+    <div
+      class="inline-flex max-w-full flex-wrap items-center gap-x-2 gap-y-1"
+      data-agent-presence
+      data-presence-raw-status=${summary.rawStatus}
+      data-presence-state=${summary.state}
+      data-presence-label=${summary.label}
+      data-presence-pulse=${summary.pulse}
+      data-presence-size=${summary.size}
+      data-presence-detail-present=${summary.detailPresent}
+      data-presence-detail=${summary.detail}
+      data-testid=${testId}
+    >
       <span class="relative inline-flex ${dotSize}">
         ${pulseRing}
         <span
@@ -107,7 +148,13 @@ export function AgentPresence({
         ></span>
       </span>
       <span class="text-xs text-[var(--color-fg-secondary)]">${config.label}</span>
-      ${detail ? html`<span class="max-w-[120px] truncate text-xs text-[var(--color-fg-muted)]">${detail}</span>` : null}
+      ${summary.detailPresent
+        ? html`<span
+            class="min-w-0 max-w-[12rem] truncate text-xs text-[var(--color-fg-muted)]"
+            title=${summary.detail}
+            >${summary.detail}</span
+          >`
+        : null}
     </div>
   `
 }

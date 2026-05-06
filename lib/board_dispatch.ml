@@ -630,6 +630,26 @@ let backend_name () =
   | Active (Jsonl _, _) -> "jsonl"
   | Uninitialized -> "uninitialized"
 
+(* AI curation delegate — thin wrappers around Board_curation *)
+
+let submit_curation_snapshot ~submitted_by ?model ~ordering ~highlights
+    ~rationale ?(provenance = `Assoc []) () =
+  let snap : Board_curation.curation_snapshot = {
+    id = Board_curation.generate_id ();
+    generated_at = Time_compat.now ();
+    submitted_by;
+    model;
+    ordering;
+    highlights;
+    rationale;
+    provenance;
+  } in
+  Board_curation.submit_snapshot snap;
+  snap
+
+let latest_curation_snapshot () =
+  Board_curation.latest_snapshot ()
+
 (** {1 SubBoard operations} *)
 
 let create_sub_board ~slug ~name ~description ~owner ?access () =

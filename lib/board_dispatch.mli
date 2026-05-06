@@ -275,6 +275,26 @@ val stats : unit -> Yojson.Safe.t
 val flush : unit -> unit
 (** Force-flush dirty posts/comments to disk. *)
 
+(** {1 AI curation} *)
+
+val submit_curation_snapshot :
+  submitted_by:string ->
+  ?model:string ->
+  ordering:string list ->
+  highlights:string list ->
+  rationale:string ->
+  ?provenance:Yojson.Safe.t ->
+  unit ->
+  Board_curation.curation_snapshot
+(** Create a fresh {!Board_curation.curation_snapshot} and make it the
+    current latest snapshot.  Returns the snapshot (including its
+    generated ID and timestamp) so callers can log or forward it. *)
+
+val latest_curation_snapshot :
+  unit -> Board_curation.curation_snapshot option
+(** Return the most recently submitted curation snapshot, or [None] if
+    none has been submitted in this process lifetime. *)
+
 (** {1 SubBoard operations} *)
 
 val create_sub_board :

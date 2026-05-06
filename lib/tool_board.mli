@@ -10,8 +10,9 @@
       through {!handle_tool} (one entry per
       [masc_board_*] tool name),
     - the {b tools} list advertised to MCP clients
-      (12 schemas: post, list, get, comment, vote, stats,
-      search, comment_vote, reaction, profile, hearth_list, delete),
+      (13 schemas: post, list, get, comment, vote, stats,
+      search, comment_vote, reaction, profile, hearth_list,
+      curation_read, delete),
     - the {b truncated-markdown detector}
       ({!detect_truncated_markdown} +
       {!detect_truncated_markdown_with_reason}) used by

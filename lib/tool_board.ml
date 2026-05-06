@@ -781,6 +781,14 @@ let handle_hearth_list _args =
     ) hearths in
     (true, Printf.sprintf "Active Hearths:\n%s" (String.concat "\n" formatted))
 
+let handle_board_curation_read _args =
+  match Board_dispatch.latest_curation_snapshot () with
+  | None ->
+    (true, Yojson.Safe.to_string `Null)
+  | Some snap ->
+    let json = Board_curation.snapshot_to_yojson snap in
+    (true, Yojson.Safe.to_string json)
+
 (** {1 Tool Definitions} *)
 
 let tool_post_create : Masc_domain.tool_schema = {
@@ -1096,6 +1104,15 @@ Safety: never deletes posts with comments or votes unless filters are overridden
 }
 
 (** All board tools *)
+let tool_board_curation_read : Masc_domain.tool_schema = {
+  name = "masc_board_curation_read";
+  description = "Read the latest AI curation snapshot for the board: AI-produced post ordering, highlights, rationale, and operator-auditable provenance. Returns null when no snapshot has been submitted yet.";
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc []);
+  ];
+}
+
 let tools = [
   tool_post_create;
   tool_post_list;
@@ -1108,6 +1125,7 @@ let tools = [
   tool_reaction;
   tool_profile;
   tool_hearth_list;
+  tool_board_curation_read;
   tool_delete;
 ]
 
@@ -1144,6 +1162,7 @@ let handle_tool name args =
       result
     | "masc_board_profile" -> handle_profile args
     | "masc_board_hearths" -> handle_hearth_list args
+    | "masc_board_curation_read" -> handle_board_curation_read args
     | "masc_board_delete" ->
       let result = handle_delete args in
       invalidate_board_list_cache ();
@@ -1164,6 +1183,7 @@ let tool_spec_read_only =
     "masc_board_search";
     "masc_board_profile";
     "masc_board_hearths";
+    "masc_board_curation_read";
   ]
 
 let register () =
@@ -1174,7 +1194,8 @@ let register () =
   in
   let tool_required_permission = function
     | "masc_board_list" | "masc_board_get" | "masc_board_stats"
-    | "masc_board_search" | "masc_board_profile" | "masc_board_hearths" ->
+    | "masc_board_search" | "masc_board_profile" | "masc_board_hearths"
+    | "masc_board_curation_read" ->
         Some Masc_domain.CanReadState
     | "masc_board_post" | "masc_board_comment" | "masc_board_vote"
     | "masc_board_comment_vote" | "masc_board_reaction" ->

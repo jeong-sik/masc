@@ -4,6 +4,7 @@ import type {
   BoardActorIdentity, BoardPost, BoardComment, BoardReactionSummary,
   BoardReactionTargetType, BoardReactionToggleResult, BoardSortMode,
   BoardVoteDirection,
+  BoardCurationSnapshot,
   GovernanceContextRef,
   GovernanceDecisionItem, GovernanceExecutedRoute,
   GovernanceGuardrailState, GovernanceJudgeSummary, GovernanceJudgment,
@@ -461,6 +462,19 @@ function normalizeBoardHearth(raw: unknown): BoardHearth | null {
   }
 }
 
+function normalizeBoardCurationSnapshot(raw: unknown): BoardCurationSnapshot | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id, '').trim()
+  const generated_at = asNullableIsoTimestamp(raw.generated_at)
+  const submitted_by = asString(raw.submitted_by, '').trim()
+  if (!id || !generated_at || !submitted_by) return null
+  const ordering = Array.isArray(raw.ordering) ? raw.ordering.map(v => String(v)) : []
+  const highlights = Array.isArray(raw.highlights) ? raw.highlights.map(v => String(v)) : []
+  const rationale = asString(raw.rationale, '')
+  const model = asNullableString(raw.model)
+  return { id, generated_at, submitted_by, model, ordering, highlights, rationale, provenance: raw.provenance }
+}
+
 function normalizeBoardReactionSummary(raw: unknown): BoardReactionSummary | null {
   if (!isRecord(raw)) return null
   const emoji = asString(raw.emoji, '').trim()
@@ -530,6 +544,13 @@ export async function fetchBoardHearths(): Promise<BoardHearth[]> {
     return Array.isArray(raw.hearths)
       ? raw.hearths.map(normalizeBoardHearth).filter((row): row is BoardHearth => row !== null)
       : []
+  })
+}
+
+export async function fetchBoardCuration(): Promise<BoardCurationSnapshot | null> {
+  return withRetries('fetchBoardCuration', async () => {
+    const raw = await get<{ snapshot?: unknown }>('/api/v1/board/curation')
+    return raw.snapshot != null ? normalizeBoardCurationSnapshot(raw.snapshot) : null
   })
 }
 

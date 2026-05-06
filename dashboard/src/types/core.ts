@@ -190,6 +190,17 @@ export interface BoardReactionToggleResult {
   summary: BoardReactionSummary[]
 }
 
+export interface BoardCurationSnapshot {
+  id: string
+  generated_at: string
+  submitted_by: string
+  model?: string | null
+  ordering: string[]
+  highlights: string[]
+  rationale: string
+  provenance?: unknown
+}
+
 // --- SubBoard ---
 
 export type SubBoardAccess = 'open' | 'members_only' | 'owner_only'
@@ -204,7 +215,6 @@ export interface SubBoard {
   created_at: string
   post_count: number
 }
-
 // --- Keeper Metrics ---
 
 export interface InferenceTelemetry {

@@ -254,6 +254,7 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Board_cleanup
     | Board_comment
     | Board_comment_vote
+    | Board_curation_read
     | Board_delete
     | Board_get
     | Board_hearths

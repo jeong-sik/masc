@@ -107,6 +107,8 @@ let handle_keeper_board_tool
     dispatch_board Tool_name.Masc.Board_stats args
   | Some Tool_name.Keeper.Board_search ->
     dispatch_board Tool_name.Masc.Board_search args
+  | Some Tool_name.Keeper.Board_curation_read ->
+    dispatch_board Tool_name.Masc.Board_curation_read args
   | Some Tool_name.Keeper.Board_delete ->
     dispatch_board Tool_name.Masc.Board_delete args
   | Some Tool_name.Keeper.Board_cleanup ->

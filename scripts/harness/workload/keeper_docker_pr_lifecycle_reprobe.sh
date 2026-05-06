@@ -33,7 +33,7 @@ MSG_TIMEOUT_SEC="${MSG_TIMEOUT_SEC:-120}"
 INIT_TIMEOUT_SEC="${INIT_TIMEOUT_SEC:-60}"
 POLL_TIMEOUT_SEC="${POLL_TIMEOUT_SEC:-1200}"
 POLL_INTERVAL_SEC="${POLL_INTERVAL_SEC:-10}"
-REQUIRED_TOOLS="${REQUIRED_TOOLS:-keeper_bash,keeper_pr_create,keeper_pr_review_comment}"
+REQUIRED_TOOLS="${REQUIRED_TOOLS:-keeper_shell,keeper_bash,masc_code_git,keeper_pr_create,keeper_pr_review_comment}"
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 MCP_TOKEN="${MASC_MCP_TOKEN:-}"
 MCP_CLIENT_NAME="${MCP_CLIENT_NAME:-keeper-docker-pr-lifecycle-reprobe}"
@@ -207,8 +207,19 @@ init_mcp_session() {
     session_id=""
     protocol_version=""
 
+    local now_ts remaining_sec init_attempt_timeout
+    now_ts="$(date +%s)"
+    remaining_sec=$((deadline - now_ts))
+    if [[ "$remaining_sec" -le 0 ]]; then
+      break
+    fi
+    init_attempt_timeout="$remaining_sec"
+    if [[ "$MSG_TIMEOUT_SEC" -gt 0 && "$MSG_TIMEOUT_SEC" -lt "$init_attempt_timeout" ]]; then
+      init_attempt_timeout="$MSG_TIMEOUT_SEC"
+    fi
+
     local -a cmd=(
-      curl -sS --max-time "$MSG_TIMEOUT_SEC"
+      curl -sS --max-time "$init_attempt_timeout"
       -D "$headers_file"
       -o "$body_file"
       -X POST "$MCP_URL"

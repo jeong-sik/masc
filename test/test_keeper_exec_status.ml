@@ -4,6 +4,8 @@ module ES = Masc_mcp.Keeper_exec_status
 module KSB = Masc_mcp.Keeper_status_bridge
 module KR = Masc_mcp.Keeper_registry
 module KT = Masc_mcp.Keeper_types
+module KMP = Masc_mcp.Keeper_memory_policy
+module KTS = Masc_mcp.Keeper_types_support
 module Coord = Masc_mcp.Coord
 module OWN = Masc_mcp.Oas_worker_named
 
@@ -789,6 +791,101 @@ let test_runtime_surface_maps_registry_failure_reason_blockers () =
          (runtime |> member "needs_attention" |> to_bool))
     cases
 
+let test_runtime_surface_classifies_progress_narrative_blockers () =
+  let cases =
+    [
+      ( "operator-gate",
+        "OpenQuestions: Why hasn't the push gate been resolved in 24h+?",
+        "awaiting_operator",
+        "push gate" );
+      ( "sandbox-egress",
+        "OpenQuestions: whether keeper docker sandboxes can be granted github.com push egress",
+        "awaiting_sandbox_egress",
+        "github.com push egress" );
+      ( "supervisor-paused",
+        "Decisions: [SYNTHETIC] Last output: 실제 막힘. supervisor가 의도적으로 건 pause",
+        "supervisor_paused",
+        "supervisor" );
+      ( "synthetic-stall",
+        "Decisions: [SYNTHETIC] BELIEF_SUMMARY: Continuity advisory flags backlog delta",
+        "synthetic_stall",
+        "BELIEF_SUMMARY" );
+      ( "self-imposed-idle",
+        "Next: watch the next dispatch cycle; no next action",
+        "self_imposed_idle",
+        "no next action" );
+    ]
+  in
+  List.iter
+    (fun (suffix, continuity_summary, expected_class, expected_summary_substring) ->
+       KR.clear ();
+       let base = make_meta ~name:("runtime-progress-" ^ suffix ^ "-test") () in
+       let meta = { base with continuity_summary } in
+       let config =
+         Coord.default_config ("/tmp/test-keeper-exec-status-progress-" ^ suffix)
+       in
+       let runtime = KSB.runtime_surface_json config meta in
+       let open Yojson.Safe.Util in
+       check string (suffix ^ " runtime blocker class") expected_class
+         (runtime |> member "runtime_blocker_class" |> to_string);
+       let summary =
+         runtime |> member "runtime_blocker_summary" |> to_string
+       in
+       check bool (suffix ^ " summary preserves progress narrative") true
+         (has_substring summary expected_summary_substring);
+       check bool (suffix ^ " runtime attention needed") true
+         (runtime |> member "needs_attention" |> to_bool))
+    cases
+
+let test_runtime_surface_reads_progress_md_narrative_blocker () =
+  KR.clear ();
+  with_temp_base_path "test-keeper-exec-status-progress-md-" (fun base_path ->
+    let meta = make_meta ~name:"runtime-progress-md-narrative-test" () in
+    let config = Coord.default_config base_path in
+    let snapshot =
+      {
+        KMP.empty_keeper_state_snapshot with
+        open_questions =
+          [
+            "when operator responds to the 4-gate decision tree";
+          ];
+      }
+    in
+    let path = KTS.keeper_progress_path config meta.name in
+    match KMP.write_progress_snapshot_path ~path snapshot with
+    | Error err -> fail ("write_progress_snapshot_path failed: " ^ err)
+    | Ok () ->
+        let runtime = KSB.runtime_surface_json config meta in
+        let open Yojson.Safe.Util in
+        check string "progress.md blocker class" "awaiting_operator"
+          (runtime |> member "runtime_blocker_class" |> to_string);
+        check bool "progress.md blocker summary keeps narrative" true
+          (has_substring
+             (runtime |> member "runtime_blocker_summary" |> to_string)
+             "4-gate decision tree"))
+
+let test_runtime_surface_prefers_typed_blocker_over_progress_narrative () =
+  KR.clear ();
+  let base = make_meta ~name:"runtime-progress-typed-priority-test" () in
+  let meta =
+    {
+      base with
+      continuity_summary =
+        "OpenQuestions: when operator responds to the 4-gate decision tree";
+      runtime =
+        {
+          base.runtime with
+          last_blocker = "turn wall-clock timeout exceeded";
+          last_blocker_class = Some KT.Turn_timeout;
+        };
+    }
+  in
+  let config = Coord.default_config "/tmp/test-keeper-exec-status-progress-priority" in
+  let runtime = KSB.runtime_surface_json config meta in
+  let open Yojson.Safe.Util in
+  check string "typed runtime blocker wins" "turn_timeout"
+    (runtime |> member "runtime_blocker_class" |> to_string)
+
 let test_runtime_surface_exposes_social_model_resolution_fields () =
   KR.clear ();
   let base = make_meta ~name:"runtime-social-model-test" () in
@@ -982,6 +1079,15 @@ let () =
             test_runtime_surface_maps_heartbeat_failure_reason;
           test_case "runtime surface maps registry failure blockers" `Quick
             test_runtime_surface_maps_registry_failure_reason_blockers;
+          test_case "runtime surface classifies progress narrative blockers"
+            `Quick
+            test_runtime_surface_classifies_progress_narrative_blockers;
+          test_case "runtime surface reads progress.md narrative blocker"
+            `Quick
+            test_runtime_surface_reads_progress_md_narrative_blocker;
+          test_case "runtime surface prefers typed blocker over progress narrative"
+            `Quick
+            test_runtime_surface_prefers_typed_blocker_over_progress_narrative;
           test_case "runtime surface exposes social model fields" `Quick
             test_runtime_surface_exposes_social_model_resolution_fields;
           test_case "runtime surface exposes model display labels" `Quick

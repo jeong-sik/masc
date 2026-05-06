@@ -389,6 +389,155 @@ let runtime_blocker_surface_of_failure_reason
           continue_gate = false;
         }
 
+let has_any_ci text needles =
+  List.exists (String_util.contains_substring_ci text) needles
+
+let first_nonempty_line label values =
+  values
+  |> List.map String.trim
+  |> List.find_map (fun value ->
+         if String.equal value "" then None
+         else Some (Printf.sprintf "%s: %s" label value))
+
+let progress_snapshot_narrative_lines
+    (snapshot : Keeper_memory_policy.keeper_state_snapshot) =
+  [
+    (match snapshot.progress with
+     | Some progress -> Some ("Progress: " ^ String.trim progress)
+     | None -> None);
+    (match snapshot.done_summary with
+     | Some done_summary -> Some ("Done: " ^ String.trim done_summary)
+     | None -> None);
+    (match snapshot.next_summary with
+     | Some next_summary -> Some ("Next plan: " ^ String.trim next_summary)
+     | None -> None);
+    first_nonempty_line "Next" snapshot.next_items;
+    first_nonempty_line "Decisions" snapshot.decisions;
+    first_nonempty_line "OpenQuestions" snapshot.open_questions;
+    first_nonempty_line "Constraints" snapshot.constraints;
+  ]
+  |> List.filter_map (function
+         | Some line when not (String.equal (String.trim line) "") -> Some line
+         | _ -> None)
+
+let narrative_summary line =
+  String_util.utf8_safe ~max_bytes:220 ~suffix:"..." line
+  |> String_util.to_string
+
+let runtime_blocker_surface_of_progress_snapshot
+    (snapshot : Keeper_memory_policy.keeper_state_snapshot) =
+  let lines = progress_snapshot_narrative_lines snapshot in
+  let text = String.concat "\n" lines in
+  let line_with needles =
+    List.find_opt (fun line -> has_any_ci line needles) lines
+  in
+  let surface blocker_class line =
+    Some
+      {
+        blocker_class;
+        summary = narrative_summary line;
+        continue_gate = false;
+      }
+  in
+  if lines = [] then None
+  else
+    match
+      line_with
+        [
+          "sandbox egress";
+          "push egress";
+          "github.com push";
+          "github push";
+          "network egress";
+          "sandbox";
+        ]
+    with
+    | Some line
+      when has_any_ci line [ "egress"; "push"; "github.com"; "network" ] ->
+        surface "awaiting_sandbox_egress" line
+    | _ ->
+      (match line_with [ "supervisor"; "supervisor가" ] with
+       | Some line when has_any_ci line [ "pause"; "paused"; "unpause"; "의도" ]
+         -> surface "supervisor_paused" line
+       | _ ->
+         (match
+            line_with
+              [
+                "push gate";
+                "operator";
+                "human";
+                "approval";
+                "approve";
+                "decision tree";
+                "4-gate";
+                "4 gate";
+                "unblock";
+                "manual";
+              ]
+          with
+          | Some line
+            when has_any_ci
+                   line
+                   [
+                     "waiting";
+                     "await";
+                     "blocked";
+                     "respond";
+                     "resolved";
+                     "gate";
+                     "decision";
+                     "approval";
+                     "approve";
+                     "unblock";
+                     "manual";
+                   ] ->
+              surface "awaiting_operator" line
+          | _ ->
+            if Keeper_synthetic_marker.contains_marker text
+               && has_any_ci
+                    text
+                    [
+                      "no visible output";
+                      "last output";
+                      "belief_summary";
+                      "social_model";
+                      "실제 막힘";
+                    ]
+            then
+              surface "synthetic_stall"
+                (line_with [ Keeper_synthetic_marker.marker_prefix ]
+                 |> Option.value ~default:(List.hd lines))
+            else (
+              match
+                line_with
+                  [
+                    "watching";
+                    "monitor";
+                    "no action";
+                    "no next action";
+                    "자체 action 부재";
+                    "감시";
+                  ]
+              with
+              | Some line -> surface "self_imposed_idle" line
+              | None -> None)))
+
+let runtime_blocker_surface_of_progress_narrative config
+    (meta : keeper_meta) =
+  let from_continuity_summary =
+    match
+      Keeper_memory_policy.progress_snapshot_cache_of_text meta.continuity_summary
+    with
+    | Some cache -> runtime_blocker_surface_of_progress_snapshot cache.snapshot
+    | None -> None
+  in
+  match from_continuity_summary with
+  | Some _ as blocker -> blocker
+  | None ->
+      (match Keeper_memory_policy.read_progress_snapshot ~config ~name:meta.name with
+       | Some snapshot -> runtime_blocker_surface_of_progress_snapshot snapshot
+       | None -> None)
+
 let proactive_runtime_reason_is_current (meta : keeper_meta) =
   let proactive_ts = meta.runtime.proactive_rt.last_ts in
   let last_turn_ts = meta.runtime.usage.last_turn_ts in
@@ -426,7 +575,7 @@ let runtime_blocker_surface_opt (config : Coord_utils.config)
                  Some (runtime_blocker_surface_of_legacy_string
                          meta.runtime.proactive_rt.last_reason cls)
              | None -> None)
-        | None -> None)
+        | None -> runtime_blocker_surface_of_progress_narrative config meta)
   in
   derived
 

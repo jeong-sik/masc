@@ -453,6 +453,20 @@ val metric_oas_bridge_cancel : string
 val metric_oas_sse_relay_retries : string
 val metric_oas_sse_relay_drops : string
 val metric_oas_sse_relay_queue_depth : string
+(** Histogram populated from OAS [InferenceTelemetry] events that are
+    intentionally not relayed over SSE. Labels: [model_bucket], [phase],
+    and [token_bucket]. Cardinality bound: 8 model buckets * 2 phases *
+    5 token buckets = 80 labelled series. *)
+val metric_oas_inference_telemetry_tokens : string
+
+(** Histogram populated from OAS [InferenceTelemetry.prompt_ms] and
+    [prompt_tokens]. Labels: [model_bucket] only. *)
+val metric_oas_inference_prompt_tok_per_sec : string
+
+(** Histogram populated from OAS [InferenceTelemetry.decode_tok_s] or
+    [decode_ms] plus [completion_tokens]. Labels: [model_bucket] only. *)
+val metric_oas_inference_decode_tok_per_sec : string
+
 val metric_mcp_tool_schema_count : string
 val metric_mcp_tool_schema_tokens_approx : string
 

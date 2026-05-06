@@ -41,6 +41,92 @@ let payload_int_opt key = function
       | _ -> None)
   | _ -> None
 
+let string_contains haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop index =
+    if needle_len = 0 then true
+    else if index + needle_len > haystack_len then false
+    else if String.sub haystack index needle_len = needle then true
+    else loop (index + 1)
+  in
+  loop 0
+
+let inference_model_bucket ~provider ~model =
+  let text = String.lowercase_ascii (provider ^ " " ^ model) in
+  let has needle = string_contains text needle in
+  if has "kimi" then "kimi"
+  else if has "claude" || has "anthropic" then "anthropic"
+  else if has "openai" || has "gpt" || has "codex" then "openai"
+  else if has "gemini" || has "google" then "gemini"
+  else if has "glm" || has "zai" then "glm"
+  else if has "qwen" then "qwen"
+  else if has "llama" then "llama"
+  else "other"
+
+let inference_token_bucket = function
+  | None -> "missing"
+  | Some tokens when tokens <= 0 -> "0"
+  | Some tokens when tokens <= 1024 -> "1_1k"
+  | Some tokens when tokens <= 8192 -> "1k_8k"
+  | Some _ -> "over_8k"
+
+let positive_finite value =
+  value > 0.0
+  && match classify_float value with
+  | FP_nan | FP_infinite -> false
+  | FP_normal | FP_subnormal | FP_zero -> true
+
+let observe_inference_tokens ~model_bucket ~phase tokens =
+  let labels =
+    [
+      ("model_bucket", model_bucket);
+      ("phase", phase);
+      ("token_bucket", inference_token_bucket tokens);
+    ]
+  in
+  let value =
+    match tokens with
+    | Some tokens when tokens > 0 -> float_of_int tokens
+    | _ -> 0.0
+  in
+  Prometheus.observe_histogram Prometheus.metric_oas_inference_telemetry_tokens
+    ~labels value
+
+let tok_per_sec_from_ms ~tokens ~ms =
+  match (tokens, ms) with
+  | Some tokens, Some ms when tokens > 0 && positive_finite ms ->
+      Some (float_of_int tokens /. (ms /. 1000.0))
+  | _ -> None
+
+let observe_inference_rate metric ~model_bucket = function
+  | Some rate when positive_finite rate ->
+      Prometheus.observe_histogram metric
+        ~labels:[ ("model_bucket", model_bucket) ]
+        rate
+  | _ -> ()
+
+let observe_inference_telemetry ~provider ~model ~prompt_tokens
+    ~completion_tokens ~prompt_ms ~decode_ms ~decode_tok_s =
+  let model_bucket =
+    inference_model_bucket ~provider ~model
+  in
+  observe_inference_tokens ~model_bucket ~phase:"prompt"
+    prompt_tokens;
+  observe_inference_tokens ~model_bucket ~phase:"completion"
+    completion_tokens;
+  observe_inference_rate Prometheus.metric_oas_inference_prompt_tok_per_sec
+    ~model_bucket
+    (tok_per_sec_from_ms ~tokens:prompt_tokens ~ms:prompt_ms);
+  let decode_tok_s =
+    match decode_tok_s with
+    | Some rate when positive_finite rate -> Some rate
+    | _ ->
+        tok_per_sec_from_ms ~tokens:completion_tokens ~ms:decode_ms
+  in
+  observe_inference_rate Prometheus.metric_oas_inference_decode_tok_per_sec
+    ~model_bucket decode_tok_s
+
 let stop_reason_to_wire = function
   | Agent_sdk.Types.EndTurn -> "end_turn"
   | Agent_sdk.Types.StopToolUse -> "tool_use"
@@ -413,11 +499,23 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
            ?turn:(payload_int_opt "turn" payload)
            ?tool_name:(payload_string_opt "tool_name" payload)
            ())
-  | Agent_sdk.Event_bus.InferenceTelemetry _ ->
-      (* Per-token telemetry from OAS#1202; not surfaced over SSE — the
-         dashboard receives token usage via the existing AgentCompleted
-         payload aggregate. Skip the relay to avoid flooding SSE
-         consumers with high-frequency low-value events. *)
+  | Agent_sdk.Event_bus.InferenceTelemetry
+      {
+        provider;
+        model;
+        prompt_tokens;
+        completion_tokens;
+        prompt_ms;
+        decode_ms;
+        decode_tok_s;
+        _;
+      } ->
+      (* Per-token telemetry from OAS#1202; not surfaced over SSE. Preserve
+         the aggregate signal with bounded Prometheus labels so operators can
+         see model-family/token-bin trends without flooding SSE consumers or
+         creating raw-model cardinality. *)
+      observe_inference_telemetry ~provider ~model ~prompt_tokens
+        ~completion_tokens ~prompt_ms ~decode_ms ~decode_tok_s;
       None
   | other ->
       (* Graceful fallback for OAS variants that ship before this consumer

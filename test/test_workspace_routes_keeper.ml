@@ -13,6 +13,7 @@
      - [`KeeperUnknown]      — no keeper meta for the given name *)
 
 module W = Masc_mcp.Server_routes_http_routes_workspace
+module P = Masc_mcp.Prometheus
 
 let project = "/repo"
 let repository_root = "/repo/.masc/repos/masc"
@@ -356,6 +357,31 @@ let test_tree_node_limit_signed_lone_underscore_is_junk () =
     750
     (W.tree_node_limit_of_query (Some "+_"))
 
+let test_workspace_failure_observer_increments_metric () =
+  let labels = [("site", "unit_test")] in
+  let before =
+    P.metric_value_or_zero P.metric_workspace_route_failures ~labels ()
+  in
+  W.For_testing.observe_workspace_route_failure
+    ~site:"unit_test"
+    ~path:"/tmp/missing"
+    (Failure "synthetic workspace failure");
+  let after =
+    P.metric_value_or_zero P.metric_workspace_route_failures ~labels ()
+  in
+  Alcotest.(check (float 0.0001))
+    "workspace route failure counted" (before +. 1.0) after
+
+let test_workspace_failure_observer_reraises_cancelled () =
+  let raised = ref false in
+  (try
+     W.For_testing.observe_workspace_route_failure
+       ~site:"unit_test_cancel"
+       ~path:"/tmp/missing"
+       (Eio.Cancel.Cancelled (Failure "synthetic cancel"))
+   with Eio.Cancel.Cancelled _ -> raised := true);
+  Alcotest.(check bool) "cancel is re-raised" true !raised
+
 (* ─── valid_git_ref (option-injection guard) ────────────────────── *)
 
 let test_valid_ref_main () =
@@ -456,6 +482,10 @@ let () =
         ; Alcotest.test_case "limit leading underscore is junk" `Quick test_tree_node_limit_leading_underscore_is_junk
         ; Alcotest.test_case "limit double underscore is junk" `Quick test_tree_node_limit_double_underscore_is_junk
         ; Alcotest.test_case "limit signed lone underscore is junk" `Quick test_tree_node_limit_signed_lone_underscore_is_junk
+        ; Alcotest.test_case "failure observer increments metric" `Quick
+            test_workspace_failure_observer_increments_metric
+        ; Alcotest.test_case "failure observer re-raises cancel" `Quick
+            test_workspace_failure_observer_reraises_cancelled
         ] )
     ; ( "valid_git_ref"
       , [ Alcotest.test_case "main"              `Quick test_valid_ref_main

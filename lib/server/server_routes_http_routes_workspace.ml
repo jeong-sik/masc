@@ -6,6 +6,27 @@ module Http = Http_server_eio
 
 let base_path_of_state state = state.Mcp_server.room_config.base_path
 
+let observe_workspace_route_failure ~site ~path exn =
+  match exn with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Prometheus.inc_counter Prometheus.metric_workspace_route_failures
+        ~labels:[("site", site)]
+        ();
+      Log.Server.warn "workspace route %s failed path=%s err=%s"
+        site path (Printexc.to_string exn)
+
+let workspace_or_default ~site ~path ~default f =
+  try f () with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      observe_workspace_route_failure ~site ~path exn;
+      default
+
+module For_testing = struct
+  let observe_workspace_route_failure = observe_workspace_route_failure
+end
+
 (* Pure classification of the [?keeper=<name>] query param into a
    workspace base directory plus a source tag.
 
@@ -246,8 +267,11 @@ let rec scan_dir_bounded ~base ~depth ~max_depth ~remaining acc dir =
   if depth > max_depth || remaining <= 0 then (acc, remaining)
   else
     let entries =
-      try Sys.readdir dir |> Array.to_list
-      with _ -> []
+      workspace_or_default
+        ~site:"tree_readdir"
+        ~path:dir
+        ~default:[]
+        (fun () -> Sys.readdir dir |> Array.to_list)
     in
     let rec fold acc remaining = function
       | [] -> (acc, remaining)
@@ -257,7 +281,13 @@ let rec scan_dir_bounded ~base ~depth ~max_depth ~remaining acc dir =
         else if List.mem f excluded_dirs then fold acc remaining rest
         else
           let full = Filename.concat dir f in
-          let is_dir = try Sys.is_directory full with _ -> false in
+          let is_dir =
+            workspace_or_default
+              ~site:"tree_is_directory"
+              ~path:full
+              ~default:false
+              (fun () -> Sys.is_directory full)
+          in
           let rel = rel_under base full in
           let has_children = is_dir && depth < max_depth in
           let parent = if depth = 0 then "" else Filename.dirname rel in
@@ -296,7 +326,14 @@ let git_run ~cwd args =
     match status with
     | Unix.WEXITED 0 -> Some (String.trim out)
     | _ -> None
-  with _ -> None
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      observe_workspace_route_failure
+        ~site:"git_run"
+        ~path:cwd
+        exn;
+      None
 
 let git_run_lines ~cwd args =
   match git_run ~cwd args with
@@ -489,7 +526,14 @@ let add_routes router =
                    let content = Fs_compat.load_file path in
                    let json = `Assoc [("ok", `Bool true); ("content", `String content)] in
                    json_response_with_source ~status:`OK ~source request reqd json
-                 with _ -> json_response ~status:`Internal_server_error request reqd (json_error "Failed to read file")
+                 with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | exn ->
+                     observe_workspace_route_failure
+                       ~site:"file_read"
+                       ~path
+                       exn;
+                     json_response ~status:`Internal_server_error request reqd (json_error "Failed to read file")
                else
                  json_response ~status:`Not_found request reqd (json_error "File not found"))
          request reqd)

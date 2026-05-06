@@ -77,3 +77,8 @@ val scan_dir :
     ["-"]. Used to refuse query-string values that could be parsed as
     git options (e.g. [?base_ref=-L1,9999]). Exposed for unit testing. *)
 val valid_git_ref : string -> bool
+
+module For_testing : sig
+  val observe_workspace_route_failure :
+    site:string -> path:string -> exn -> unit
+end

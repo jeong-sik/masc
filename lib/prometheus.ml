@@ -872,6 +872,7 @@ let metric_after_turn_telemetry_zero_latency =
 let metric_tasks = "masc_tasks_total"
 let metric_errors = "masc_errors_total"
 let metric_error_events = "masc_error_events_total"
+let metric_workspace_route_failures = "masc_workspace_route_failures_total"
 let metric_active_agents = "masc_active_agents"
 let metric_pending_tasks = "masc_pending_tasks"
 let metric_uptime_seconds = "masc_uptime_seconds"
@@ -1287,6 +1288,9 @@ let init () =
   add metric_errors "Total errors" Counter;
   add metric_error_events
     "Error events by type (parsing, missing_config, etc.)" Counter;
+  add metric_workspace_route_failures
+    "Total workspace route filesystem/git/read exceptions, labeled by site"
+    Counter;
   add metric_active_agents "Currently active agents" Gauge;
   add metric_pending_tasks "Tasks waiting to be claimed" Gauge;
   add metric_uptime_seconds "Server uptime in seconds" Gauge;

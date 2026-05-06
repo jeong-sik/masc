@@ -2347,6 +2347,29 @@ let test_handle_request_tools_call_internal_keeper_runtime_allows_keeper_interna
       Alcotest.(check bool) "keeper_bash ok" true
         Yojson.Safe.Util.(structured |> member "ok" |> to_bool))
 
+let test_internal_keeper_runtime_cleanup_preserves_primary_exception () =
+  let module T = Masc_mcp.Mcp_server_eio_execute.For_testing in
+  let cleanup_called = ref false in
+  let cleanup ~during_exception () =
+    T.cleanup_internal_keeper_runtime_resource ~during_exception
+      ~label:"test sandbox" (fun () ->
+        cleanup_called := true;
+        failwith "cleanup failed")
+  in
+  let observed =
+    try
+      ignore
+        (T.run_with_cleanup_preserving_primary ~cleanup (fun () ->
+             failwith "tool failed"));
+      None
+    with
+    | Failure message -> Some message
+    | exn -> Some (Printexc.to_string exn)
+  in
+  Alcotest.(check (option string)) "primary tool exception surfaces"
+    (Some "tool failed") observed;
+  Alcotest.(check bool) "cleanup ran on exception path" true !cleanup_called
+
 let test_handle_request_batch_rejected () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -3173,6 +3196,8 @@ let eio_tests = [
     test_handle_request_tools_list_internal_keeper_runtime_includes_keeper_internal_tools;
   "handle tools/call internal keeper runtime allows keeper tool", `Quick,
     test_handle_request_tools_call_internal_keeper_runtime_allows_keeper_internal_tool;
+  "internal keeper runtime cleanup preserves primary exception", `Quick,
+    test_internal_keeper_runtime_cleanup_preserves_primary_exception;
   "handle invalid json", `Quick, test_handle_request_invalid_json;
   "handle method not found", `Quick, test_handle_request_method_not_found;
   (* TRPG tool tests removed — modules archived *)

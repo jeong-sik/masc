@@ -1147,23 +1147,6 @@ let test_keeper_oas_cleanup_contracts () =
     (file_contains_pattern "lib/tool_compact.ml"
        "OAS-backed compaction pipeline")
 
-let test_runtime_tool_cleanup_preserves_primary_exception () =
-  check bool "runtime tool cleanup no longer uses Fun.protect finally" true
-    (file_not_contains_pattern "lib/mcp_server_eio_execute.ml"
-       "~finally:cleanup");
-  check bool "runtime tool cleanup tracks exception path" true
-    (file_contains_pattern "lib/mcp_server_eio_execute.ml"
-       "cleanup ~during_exception:true ();");
-  check bool "runtime tool cleanup re-raises primary exception" true
-    (file_contains_pattern "lib/mcp_server_eio_execute.ml"
-       "Printexc.raise_with_backtrace exn bt");
-  check bool "runtime tool cleanup preserves cleanup-only cancellation" true
-    (file_contains_pattern "lib/mcp_server_eio_execute.ml"
-       "Eio.Cancel.Cancelled _ as e when not during_exception -> raise e");
-  check bool "runtime tool cleanup warns on suppressed cleanup failure" true
-    (file_contains_pattern "lib/mcp_server_eio_execute.ml"
-       "internal keeper runtime %s cleanup failed%s: %s")
-
 let test_dashboard_executor_pool_contracts () =
   check bool "dashboard runtime support defines executor pool helper" true
     (file_contains_pattern "lib/server/server_dashboard_http_runtime_support.ml"
@@ -1672,8 +1655,6 @@ let () =
            test_case "activity surface contracts" `Quick test_activity_surface_contracts;
            test_case "local review script contracts" `Quick test_local_review_script_contracts;
            test_case "keeper oas cleanup contracts" `Quick test_keeper_oas_cleanup_contracts;
-           test_case "runtime tool cleanup preserves primary exception (#10395)" `Quick
-             test_runtime_tool_cleanup_preserves_primary_exception;
            test_case "dashboard executor pool contracts" `Quick
              test_dashboard_executor_pool_contracts;
            test_case "transport route contracts" `Quick

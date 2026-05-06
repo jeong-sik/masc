@@ -65,6 +65,7 @@ let allow_inherited_test_config_paths () =
   Env_config_core.get_bool ~default:false
     test_config_path_override_env
 
+let initial_env_base_path = Env_config_core.base_path_raw_opt ()
 let initial_env_config_dir = Env_config_core.config_dir_opt ()
 let initial_env_personas_dir = Env_config_core.personas_dir_opt ()
 let initial_env_home = Sys.getenv_opt "HOME" |> trim_opt
@@ -79,6 +80,29 @@ let sanitize_inherited_test_env_opt ~running_under_test_executable ~allow_inheri
   else
     current
 
+let path_equal_or_under ~parent path =
+  String.equal path parent
+  || (not (String.equal parent "/")
+     && String.starts_with ~prefix:(parent ^ "/") path)
+  || (String.equal parent "/" && String.starts_with ~prefix:"/" path)
+
+let sanitize_inherited_test_base_path_opt ~running_under_test_executable
+    ~allow_inherited ~initial ~current ~home =
+  if running_under_test_executable && not allow_inherited then
+    match current, initial, home with
+    | Some current_value, Some initial_value, Some home
+      when String.equal current_value initial_value ->
+        let current_base =
+          Env_config_core.normalize_masc_base_path_input current_value
+        in
+        let home_base = Env_config_core.normalize_masc_base_path_input home in
+        if home_base <> "" && path_equal_or_under ~parent:home_base current_base
+        then None
+        else current
+    | _ -> current
+  else
+    current
+
 let current_env_config_dir_opt () =
   sanitize_inherited_test_env_opt
     ~running_under_test_executable:
@@ -86,6 +110,15 @@ let current_env_config_dir_opt () =
     ~allow_inherited:(allow_inherited_test_config_paths ())
     ~initial:initial_env_config_dir
     ~current:(Env_config_core.config_dir_opt ())
+
+let current_env_base_path_opt () =
+  sanitize_inherited_test_base_path_opt
+    ~running_under_test_executable:
+      (running_under_test_executable Sys.executable_name)
+    ~allow_inherited:(allow_inherited_test_config_paths ())
+    ~initial:initial_env_base_path
+    ~current:(Env_config_core.base_path_raw_opt ())
+    ~home:initial_env_home
 
 let current_env_personas_dir_opt () =
   sanitize_inherited_test_env_opt
@@ -324,7 +357,7 @@ let inputs_from_env () =
   {
     cwd = Sys.getcwd ();
     executable_name = Sys.executable_name;
-    env_base_path = Env_config_core.base_path_opt ();
+    env_base_path = current_env_base_path_opt ();
     env_config_dir = current_env_config_dir_opt ();
     env_personas_dir = current_env_personas_dir_opt ();
     env_home = current_env_home_opt ();
@@ -379,7 +412,13 @@ let reset () =
 
 let cascade_path_opt () =
   let resolution = resolve () in
-  if resolution.cascade.exists then Some resolution.cascade.path else None
+  match resolution.config_root.source with
+  | Env | Local_masc | Home_masc | Exe_relative | Cwd
+    when resolution.cascade.exists ->
+      Some resolution.cascade.path
+  | Env | Local_masc | Home_masc | Exe_relative | Cwd
+  | Invalid_env | Missing ->
+      None
 
 let cascade_path_candidate () =
   (resolve ()).cascade.path
@@ -388,8 +427,14 @@ let cascade_toml_path_candidate () =
   Filename.concat (resolve ()).config_root.path cascade_toml_filename
 
 let cascade_toml_path_opt () =
-  let path = cascade_toml_path_candidate () in
-  if existing_file path then Some path else None
+  let resolution = resolve () in
+  match resolution.config_root.source with
+  | Env | Local_masc | Home_masc | Exe_relative | Cwd
+    when resolution.cascade_authoring.exists ->
+      Some resolution.cascade_authoring.path
+  | Env | Local_masc | Home_masc | Exe_relative | Cwd
+  | Invalid_env | Missing ->
+      None
 
 let prompts_dir () =
   (resolve ()).prompts.path
@@ -399,7 +444,13 @@ let keepers_dir () =
 
 let personas_dir_opt () =
   let resolution = resolve () in
-  if resolution.personas.exists then Some resolution.personas.path else None
+  match resolution.config_root.source with
+  | Env | Local_masc | Home_masc | Exe_relative | Cwd
+    when resolution.personas.exists ->
+      Some resolution.personas.path
+  | Env | Local_masc | Home_masc | Exe_relative | Cwd
+  | Invalid_env | Missing ->
+      None
 
 let dedupe_paths paths =
   let rec go seen acc = function
@@ -411,8 +462,16 @@ let dedupe_paths paths =
   go StringSet.empty [] paths
 
 let personas_dirs_with inputs resolution =
+  (* Mirror [personas_dir_opt]'s invariant: when the resolver is Missing or
+     Invalid_env, never expose a personas path even if [resolution.personas.exists]
+     happens to be true (e.g. [default_missing_root] pointing at a repo-local
+     config/ tree). Without this gate, callers can silently load personas from
+     a fallback root the resolver explicitly disowned. *)
   let primary =
-    if resolution.personas.exists then [ resolution.personas.path ] else []
+    match resolution.config_root.source with
+    | Invalid_env | Missing -> []
+    | Env | Local_masc | Home_masc | Exe_relative | Cwd ->
+      if resolution.personas.exists then [ resolution.personas.path ] else []
   in
   let explicit_personas_dir_override = trim_opt inputs.env_personas_dir in
   (* Persona resolution is intentionally single-source:

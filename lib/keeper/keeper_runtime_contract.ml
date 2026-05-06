@@ -65,7 +65,8 @@ let active_goal_ids_have_eligible_claim_task
             task)
 
 let resolve_claim_goal_scope ?agent_tool_names
-    ?(allow_empty_goal_scope_fallback = false) ~(config : Coord.config)
+    ?(allow_empty_goal_scope_fallback = false)
+    ?(allow_auto_goal_scope_fallback = false) ~(config : Coord.config)
     ~(meta : keeper_meta) () =
   match meta.active_goal_ids with
   | [] ->
@@ -77,6 +78,9 @@ let resolve_claim_goal_scope ?agent_tool_names
       }
   | goal_ids ->
       let scoped_filter task = task_is_linked_to_keeper_goals goal_ids task in
+      let is_auto_goal =
+        active_goal_ids_are_auto_keeper_goals config ~meta goal_ids
+      in
       if
         not
           (active_goal_ids_have_eligible_claim_task
@@ -84,10 +88,8 @@ let resolve_claim_goal_scope ?agent_tool_names
              config
              goal_ids)
       then
-        if allow_empty_goal_scope_fallback then
-          let is_auto_goal =
-            active_goal_ids_are_auto_keeper_goals config ~meta goal_ids
-          in
+        if allow_empty_goal_scope_fallback
+           || (allow_auto_goal_scope_fallback && is_auto_goal) then
           {
             task_filter = (fun (_task : Masc_domain.task) -> true);
             mode =

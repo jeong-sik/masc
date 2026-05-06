@@ -262,6 +262,26 @@ let test_structured_required_tool_no_tool_call () =
   check (option string) "next action" (Some "inspect_provider_tool_contract")
     (terminal_next_action terminal)
 
+let test_structured_specific_required_tool_no_tool_call () =
+  let err =
+    Agent_sdk.Error.Agent
+      (Agent_sdk.Error.CompletionContractViolation
+         {
+           contract =
+             Agent_sdk.Completion_contract_id.Require_specific_tool
+               "keeper_pr_review_comment";
+           reason =
+             "required tool contract unsatisfied: tool_choice requested tool 'keeper_pr_review_comment', but the model returned no ToolUse block";
+         })
+  in
+  let terminal =
+    KT.of_failure ~raw_error:(Agent_sdk.Error.to_string err) err
+  in
+  check string "code" "required_tool_use_no_tool_call"
+    (terminal_code terminal);
+  check (option string) "next action" (Some "inspect_provider_tool_contract")
+    (terminal_next_action terminal)
+
 let test_structured_oas_timeout_budget () =
   let err =
     Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
@@ -360,6 +380,8 @@ let () =
 	        [
 	          test_case "required tool no tool call" `Quick
 	            test_structured_required_tool_no_tool_call;
+	          test_case "specific required tool no tool call" `Quick
+	            test_structured_specific_required_tool_no_tool_call;
 	          test_case "oas timeout budget" `Quick
 	            test_structured_oas_timeout_budget;
 	          test_case "turn wall-clock timeout" `Quick

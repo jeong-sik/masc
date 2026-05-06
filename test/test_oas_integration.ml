@@ -41,6 +41,26 @@ let contains_substring s needle =
   in
   if n_len = 0 then true else loop 0
 
+let json_string_field name fields =
+  match List.assoc_opt name fields with
+  | Some (`String value) -> value
+  | _ -> ""
+
+let json_bool_field name fields =
+  match List.assoc_opt name fields with
+  | Some (`Bool value) -> value
+  | _ -> false
+
+let json_int_field name fields =
+  match List.assoc_opt name fields with
+  | Some (`Int value) -> value
+  | _ -> -1
+
+let json_assoc_field name fields =
+  match List.assoc_opt name fields with
+  | Some (`Assoc values) -> values
+  | _ -> Alcotest.failf "expected %s assoc" name
+
 let sse_data_json raw_event =
   let prefix = "data: " in
   let prefix_len = String.length prefix in
@@ -719,6 +739,82 @@ let test_agent_completed_no_usage_on_error () =
        | _ -> Alcotest.fail "expected error string")
   | Some _ -> Alcotest.fail "expected assoc"
 
+let agent_failed_payload_fields error =
+  let open Agent_sdk in
+  let evt =
+    Event_bus.mk_event
+      ~correlation_id:"sess-agent-failed"
+      ~run_id:"run-agent-failed"
+      (AgentFailed
+         {
+           agent_name = "failed-agent";
+           task_id = "task-failed";
+           error;
+           elapsed = 2.5;
+         })
+  in
+  match Oas_event_bridge.native_event_to_json evt with
+  | None -> Alcotest.fail "expected Some for AgentFailed"
+  | Some (`Assoc fields) -> json_assoc_field "payload" fields
+  | Some _ -> Alcotest.fail "expected assoc"
+
+let test_agent_failed_preserves_api_structured_error () =
+  let open Agent_sdk in
+  let payload_fields =
+    agent_failed_payload_fields
+      (Error.Api
+         (Retry.RateLimited
+            { retry_after = Some 2.5; message = "slow down" }))
+  in
+  let detail_fields = json_assoc_field "error_detail" payload_fields in
+  Alcotest.(check string) "error string" "Rate limited: slow down"
+    (json_string_field "error" payload_fields);
+  Alcotest.(check string) "error domain" "api"
+    (json_string_field "error_domain" payload_fields);
+  Alcotest.(check string) "error code" "api_error_rate_limited"
+    (json_string_field "error_code" payload_fields);
+  Alcotest.(check bool) "retryable" true
+    (json_bool_field "error_retryable" payload_fields);
+  Alcotest.(check string) "detail domain" "api"
+    (json_string_field "domain" detail_fields);
+  Alcotest.(check string) "detail variant" "rate_limited"
+    (json_string_field "variant" detail_fields);
+  Alcotest.(check string) "detail message" "slow down"
+    (json_string_field "message" detail_fields);
+  (match List.assoc_opt "retry_after_s" detail_fields with
+   | Some (`Float value) ->
+       Alcotest.(check (float 0.001)) "retry_after_s" 2.5 value
+   | _ -> Alcotest.fail "expected retry_after_s float")
+
+let test_agent_failed_preserves_agent_structured_error () =
+  let open Agent_sdk in
+  let payload_fields =
+    agent_failed_payload_fields
+      (Error.Agent
+         (Error.TokenBudgetExceeded
+            { kind = "input"; used = 1200; limit = 1000 }))
+  in
+  let detail_fields = json_assoc_field "error_detail" payload_fields in
+  Alcotest.(check bool) "error string includes token budget" true
+    (contains_substring
+       (json_string_field "error" payload_fields)
+       "token budget exceeded");
+  Alcotest.(check string) "error domain" "agent"
+    (json_string_field "error_domain" payload_fields);
+  Alcotest.(check string) "error code"
+    "agent_error_token_budget_exceeded:kind=input,used=1200,limit=1000"
+    (json_string_field "error_code" payload_fields);
+  Alcotest.(check bool) "retryable" false
+    (json_bool_field "error_retryable" payload_fields);
+  Alcotest.(check string) "detail variant" "token_budget_exceeded"
+    (json_string_field "variant" detail_fields);
+  Alcotest.(check string) "detail kind" "input"
+    (json_string_field "kind" detail_fields);
+  Alcotest.(check int) "detail used" 1200
+    (json_int_field "used" detail_fields);
+  Alcotest.(check int) "detail limit" 1000
+    (json_int_field "limit" detail_fields)
+
 let test_oas_log_bridge_turn_completed_summary () =
   Oas_log_bridge.install ();
   let before_seq =
@@ -1041,6 +1137,10 @@ let () =
         test_agent_completed_omits_usage_fields_when_success_has_no_usage;
       Alcotest.test_case "agent_completed no usage on error" `Quick
         test_agent_completed_no_usage_on_error;
+      Alcotest.test_case "agent_failed preserves api structured error" `Quick
+        test_agent_failed_preserves_api_structured_error;
+      Alcotest.test_case "agent_failed preserves agent structured error" `Quick
+        test_agent_failed_preserves_agent_structured_error;
       Alcotest.test_case "oas log bridge adds turn completed summary" `Quick
         test_oas_log_bridge_turn_completed_summary;
       Alcotest.test_case "sse bridge logs turn completed with agent name" `Quick

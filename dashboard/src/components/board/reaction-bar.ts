@@ -21,21 +21,28 @@ export function ReactionBar({
   const hasInitialSummaries = initialSummaries !== undefined
   const [summaries, setSummaries] = useState<BoardReactionSummary[]>(() => initialSummaries ?? [])
   const [busyEmoji, setBusyEmoji] = useState<string | null>(null)
+  const [statusMessage, setStatusMessage] = useState('')
 
   useEffect(() => {
     setSummaries(initialSummaries ?? [])
+    setStatusMessage('')
   }, [targetType, targetId, initialSummaries])
 
   useEffect(() => {
     let cancelled = false
     const refresh = () => {
+      setStatusMessage('')
       void fetchBoardReactions(targetType, targetId)
         .then(next => {
-          if (!cancelled) setSummaries(next)
+          if (!cancelled) {
+            setSummaries(next)
+            setStatusMessage('')
+          }
         })
         .catch(err => {
           if (!cancelled) {
             console.warn('[board] reaction summary failed', err instanceof Error ? err.message : err)
+            setStatusMessage('리액션 요약을 불러오지 못했습니다')
           }
         })
     }
@@ -61,12 +68,15 @@ export function ReactionBar({
   const handleToggle = async (emoji: string) => {
     if (busyEmoji) return
     setBusyEmoji(emoji)
+    setStatusMessage('')
     try {
       const result = await toggleReaction(targetType, targetId, emoji)
       setSummaries(result.summary)
     } catch (err) {
       console.warn('[board] reaction toggle failed', err instanceof Error ? err.message : err)
-      showToast('리액션 반영에 실패했습니다', 'error')
+      const message = '리액션 반영에 실패했습니다'
+      setStatusMessage(message)
+      showToast(message, 'error')
     } finally {
       setBusyEmoji(null)
     }
@@ -97,6 +107,7 @@ export function ReactionBar({
           </button>
         `
       })}
+      <span class="sr-only" role="status" aria-live="polite" aria-atomic="true">${statusMessage}</span>
     </div>
   `
 }

@@ -1,12 +1,21 @@
 // Unified time formatting utilities.
 
 const rtf = new Intl.RelativeTimeFormat('ko', { numeric: 'auto' })
+const UNIX_MS_THRESHOLD = 1_000_000_000_000
 
-function formatRelativeSec(deltaSec: number): string {
+export function formatRelativeSec(deltaSec: number): string {
   if (deltaSec < 60) return rtf.format(-deltaSec, 'second')
   if (deltaSec < 3600) return rtf.format(-Math.round(deltaSec / 60), 'minute')
   if (deltaSec < 86400) return rtf.format(-Math.round(deltaSec / 3600), 'hour')
   return rtf.format(-Math.round(deltaSec / 86400), 'day')
+}
+
+export function normalizeTimestampMs(ts: number): number {
+  return ts < UNIX_MS_THRESHOLD ? ts * 1000 : ts
+}
+
+export function formatRelativeAgeMs(ageMs: number): string {
+  return formatRelativeSec(Math.max(0, Math.round(ageMs / 1000)))
 }
 
 /** Relative time from ISO string — "3분 전", "2시간 전" etc. Uses Intl.RelativeTimeFormat. */
@@ -14,7 +23,7 @@ export function relativeTime(iso?: string | null, fallback = '정보 없음'): s
   if (!iso) return fallback
   const ts = Date.parse(iso)
   if (Number.isNaN(ts)) return iso
-  return formatRelativeSec(Math.max(0, Math.round((Date.now() - ts) / 1000)))
+  return formatRelativeAgeMs(Date.now() - ts)
 }
 
 /** Format elapsed seconds — "3초", "5분", "2시간". Returns '정보 없음' for invalid. */
@@ -65,7 +74,7 @@ export function formatTimeAgo(ts: string | number): string {
   const now = Date.now()
   const then =
     typeof ts === 'number'
-      ? (ts < 1_000_000_000_000 ? ts * 1000 : ts)
+      ? normalizeTimestampMs(ts)
       : new Date(ts).getTime()
   return formatRelativeSec(Math.max(0, Math.floor((now - then) / 1000)))
 }

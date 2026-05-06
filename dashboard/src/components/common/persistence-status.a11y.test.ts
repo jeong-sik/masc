@@ -49,6 +49,7 @@ describe('PersistenceStatus a11y', () => {
     const el = container.querySelector('[data-testid="ps"]') as HTMLElement
     expect(el.getAttribute('role')).toBe('status')
     expect(el.getAttribute('aria-live')).toBe('polite')
+    expect(el.getAttribute('aria-busy')).toBe('true')
   })
 
   it('contains the correct label text for each state', () => {
@@ -64,5 +65,36 @@ describe('PersistenceStatus a11y', () => {
       render(html`<${PersistenceStatus} status=${status} />`, container)
       expect(container.textContent).toContain(label)
     }
+  })
+
+  it('exposes state, freshness, and action metadata', () => {
+    render(
+      html`<${PersistenceStatus}
+        status="conflict"
+        lastSaved="2026-05-05T22:00:00Z"
+        now="2026-05-06T00:00:00Z"
+      />`,
+      container,
+    )
+    const el = container.querySelector('[data-persistence-status]')
+    expect(el?.getAttribute('data-persistence-state')).toBe('conflict')
+    expect(el?.getAttribute('data-persistence-severity')).toBe('attention')
+    expect(el?.getAttribute('data-persistence-freshness')).toBe('stale')
+    expect(el?.getAttribute('data-persistence-action-required')).toBe('true')
+    expect(el?.getAttribute('aria-label')).toContain('오래됨')
+  })
+
+  it('renders machine-readable time metadata when lastSaved is valid', () => {
+    render(
+      html`<${PersistenceStatus}
+        status="saved"
+        lastSaved="2026-05-05T23:58:00Z"
+        now="2026-05-06T00:00:00Z"
+      />`,
+      container,
+    )
+    const time = container.querySelector('time[data-persistence-time]')
+    expect(time?.getAttribute('datetime')).toBe('2026-05-05T23:58:00.000Z')
+    expect(container.querySelector('[data-persistence-freshness-label]')?.textContent).toBe('최신')
   })
 })

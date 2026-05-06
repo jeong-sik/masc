@@ -237,6 +237,9 @@ let test_keeper_metrics_registered () =
     (has "masc_keeper_heartbeat_successes_total");
   check bool "has keeper heartbeat failures counter" true
     (has "masc_keeper_heartbeat_failures_total");
+  check bool "has keeper total cost gauge" true
+    (text_has_literal text
+       ("# TYPE " ^ Prometheus.metric_keeper_total_cost_usd ^ " gauge"));
   check bool "has keeper tool duration histogram" true
     (has "masc_keeper_tool_call_duration_seconds");
   check bool "has operator compact counter" true

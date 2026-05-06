@@ -5,6 +5,7 @@ import {
   readOnlyExt,
   themeExt,
   languageExt,
+  languageIdForFilePath,
   lineNumberExt,
   syntaxHighlightExt,
   blameExtensions,
@@ -80,6 +81,26 @@ describe('languageExt', () => {
   it('returns a language extension for .json files', async () => {
     const ext = await languageExt('package.json')
     expect(ext).toBeDefined()
+  })
+
+  it('maps OCaml source and interface files to the OCaml language', async () => {
+    expect(languageIdForFilePath('lib/server.ml')).toBe('ocaml')
+    expect(languageIdForFilePath('lib/server.mli')).toBe('ocaml')
+    expect(languageIdForFilePath('scratch.ocaml')).toBe('ocaml')
+
+    const lang = await languageExt('lib/server.ml')
+    const { view, container } = createTestView([
+      themeExt(),
+      lineNumberExt(),
+      syntaxHighlightExt(),
+      lang,
+    ], 'module type S = sig\n  val run : unit -> int\nend\n')
+
+    expect(container.querySelector('.cm-line span')).not.toBeNull()
+    expect(view.state.languageDataAt('name', 0)).toContain('ocaml')
+
+    view.destroy()
+    container.remove()
   })
 })
 

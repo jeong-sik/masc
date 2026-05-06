@@ -91,7 +91,6 @@ describe('IdeExplorer tree row keyboard accessibility', () => {
     expect(keeperOwnedRow?.textContent).toContain('NK')
     expect(keeperOwnedRow?.textContent).toContain('router.ts')
   })
-
   it('renders repository source in the explorer header', () => {
     const store = createFileTreeStore()
     store.seed(SAMPLE)
@@ -103,5 +102,22 @@ describe('IdeExplorer tree row keyboard accessibility', () => {
 
     expect(container.textContent).toContain('EXPLORER · masc-mcp')
     expect(container.textContent).not.toContain('EXPLORER · project')
+  })
+
+  it('keeps header controls outside the scrollable tree body', () => {
+    const store = createFileTreeStore()
+    store.seed(SAMPLE)
+    render(h(IdeExplorer, { fileTreeStore: store }), container)
+
+    const explorer = container.querySelector<HTMLElement>('.ide-explorer')
+    const scroller = container.querySelector<HTMLElement>('.ide-explorer-scroll')
+    const tree = container.querySelector<HTMLElement>('.ide-explorer-tree')
+
+    expect(explorer).not.toBeNull()
+    expect(scroller).not.toBeNull()
+    expect(tree).not.toBeNull()
+    expect(scroller?.contains(tree)).toBe(true)
+    expect(scroller?.contains(container.querySelector('header'))).toBe(false)
+    expect(scroller?.contains(container.querySelector('input[type="search"]'))).toBe(false)
   })
 })

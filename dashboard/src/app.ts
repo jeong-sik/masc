@@ -119,10 +119,20 @@ export function App() {
     // Initialize hash router and compatible deep links
     initRouter()
 
-    // Prime the lightweight shell status first so build/version metadata lands
-    // while the project snapshot warms heavier execution/command projections.
-    void refreshShell({ light: true })
-    requestNamespaceTruthNow()
+    const ensureLoopbackAuth = () => ensureDevToken()
+      .catch(err => {
+        console.warn('[app] dashboard dev-token bootstrap failed', err instanceof Error ? err.message : err)
+      })
+
+    // Loopback dashboards can self-provision a dev bearer token. Do that before
+    // the first authenticated projections so the header auth badge and runtime
+    // stores do not briefly settle on an unauthenticated shell snapshot.
+    void ensureLoopbackAuth()
+      .finally(() => {
+        if (cancelled) return
+        void refreshShell({ light: true })
+        requestNamespaceTruthNow()
+      })
 
     // Fetch runtime thresholds so health-strip and lifecycle state use
     // server-side config instead of compiled fallback defaults (P-DASH-07).
@@ -148,10 +158,7 @@ export function App() {
       })
       .finally(() => {
         if (cancelled) return
-        void ensureDevToken()
-          .catch(err => {
-            console.warn('[app] dashboard dev-token bootstrap failed', err instanceof Error ? err.message : err)
-          })
+        void ensureLoopbackAuth()
           .finally(() => {
             if (cancelled) return
             void connectDashboardWS(route.value)

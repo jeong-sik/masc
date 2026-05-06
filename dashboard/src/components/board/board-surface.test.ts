@@ -267,6 +267,21 @@ describe('BoardSurface Component', () => {
     expect(screen.queryByText('+ 새 글 작성')).not.toBeInTheDocument()
   })
 
+  it('routes the curation focus to the board curation surface', async () => {
+    route.value = { params: { focus: 'curation' } } as any
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ snapshot: null }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    render(h(BoardSurface, null))
+
+    expect(await screen.findByRole('heading', { name: 'AI curation snapshot' })).toBeInTheDocument()
+    expect(screen.queryByText('+ 새 글 작성')).not.toBeInTheDocument()
+  })
+
   it('renders compact board latency metrics when samples exist', () => {
     boardPosts.value = [
       makePost({

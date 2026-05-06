@@ -221,9 +221,7 @@ let text_has_literal text literal =
 
 let count_lines_with_prefix text prefix =
   String.split_on_char '\n' text
-  |> List.filter (fun line ->
-         String.length line >= String.length prefix
-         && String.sub line 0 (String.length prefix) = prefix)
+  |> List.filter (fun line -> String.starts_with ~prefix line)
   |> List.length
 
 let test_keeper_metrics_registered () =
@@ -338,10 +336,20 @@ let test_memory_usage_metric_registered () =
        ("# TYPE " ^ Prometheus.metric_memory_usage_bytes ^ " gauge"))
 
 let test_builtin_gauge_update_does_not_duplicate_sample () =
-  Prometheus.set_gauge Prometheus.metric_memory_usage_bytes 123.0;
-  let text = Prometheus.to_prometheus_text () in
-  check int "single memory usage sample" 1
-    (count_lines_with_prefix text (Prometheus.metric_memory_usage_bytes ^ " "))
+  (* Save and restore the gauge so this test does not leak Prometheus
+     process state into other tests that may assume the default. *)
+  let prior =
+    Prometheus.metric_value_or_zero Prometheus.metric_memory_usage_bytes ()
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Prometheus.set_gauge Prometheus.metric_memory_usage_bytes prior)
+    (fun () ->
+      Prometheus.set_gauge Prometheus.metric_memory_usage_bytes 123.0;
+      let text = Prometheus.to_prometheus_text () in
+      check int "single memory usage sample" 1
+        (count_lines_with_prefix text
+           (Prometheus.metric_memory_usage_bytes ^ " ")))
 
 let test_goal_attainment_metrics_registered () =
   let text = Prometheus.to_prometheus_text () in

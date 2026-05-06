@@ -28,10 +28,15 @@ that can be copied into the snapshot's `metric_evidence` map before the numeric
 override is supplied. The Verify gate then carries `value_provenance`, so a
 log-derived zero is visible as log-derived evidence rather than as a native
 Prometheus sample.
+For Orient rechecks, `scripts/goal_loop_orient_recheck_metrics.py` converts an
+Orient JSON report into `orient_recheck_still_present` and
+`orient_recheck_new_finding` metric values with redacted source-file
+provenance.
 The current live-derived metric fixture is
 `test/fixtures/goal_loop/verify-pipeline-live-metrics.external-claim.json`.
 It is intentionally not green: the fixture turns observed regressions into
-`FAIL` gates while leaving absent Orient metric families as `BLOCKED`.
+`FAIL` gates while recording the post-ACT Orient recheck counts as redacted
+metric evidence.
 The current redacted log-contract fixture is
 `test/fixtures/goal_loop/verify-pipeline-live-log-contract.external-claim.json`.
 It records only aggregate violation counts with `--max-samples 0`; raw runtime

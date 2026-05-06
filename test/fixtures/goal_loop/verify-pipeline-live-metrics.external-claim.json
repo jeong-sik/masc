@@ -1,6 +1,6 @@
 {
-  "checked_at": "2026-05-07T00:58:27+09:00",
-  "evidence_id": "goal-loop-live-metrics-2026-05-07T005827+0900",
+  "checked_at": "2026-05-07T01:25:28+09:00",
+  "evidence_id": "goal-loop-live-metrics-2026-05-07T012528+0900",
   "metric_evidence": {
     "keeper_skipping_turn_rate_5m": {
       "checked_at": "2026-05-07T00:58:27+09:00",
@@ -18,6 +18,45 @@
       "window_seconds": 300.0,
       "window_start": "2026-05-06T15:53:05Z"
     },
+    "orient_recheck_new_finding": {
+      "checked_at": "2026-05-07T01:25:28+09:00",
+      "checked_files": [
+        "<MASC_BASE_PATH>/.masc/events/2026-05/06.jsonl",
+        "<MASC_BASE_PATH>/.masc/transition-audit/2026-05/06.jsonl"
+      ],
+      "critical_present": 0,
+      "evidence_present": 0,
+      "findings_total": 19,
+      "kind": "orient_recheck_report",
+      "matched_lines": 0,
+      "metric_value_semantics": "count of EVIDENCE_PRESENT Orient findings whose finding_id starts with a configured new-finding prefix",
+      "new_finding_prefixes": [
+        "NEW"
+      ],
+      "not_evaluated": 9,
+      "present_new_finding_ids": [],
+      "raw_log_lines_committed": false,
+      "script": "scripts/goal_loop_orient_recheck_metrics.py",
+      "total_lines": 21
+    },
+    "orient_recheck_still_present": {
+      "checked_at": "2026-05-07T01:25:28+09:00",
+      "checked_files": [
+        "<MASC_BASE_PATH>/.masc/events/2026-05/06.jsonl",
+        "<MASC_BASE_PATH>/.masc/transition-audit/2026-05/06.jsonl"
+      ],
+      "critical_present": 0,
+      "evidence_present": 0,
+      "findings_total": 19,
+      "kind": "orient_recheck_report",
+      "matched_lines": 0,
+      "metric_value_semantics": "count of Orient findings with status EVIDENCE_PRESENT",
+      "not_evaluated": 9,
+      "present_finding_ids": [],
+      "raw_log_lines_committed": false,
+      "script": "scripts/goal_loop_orient_recheck_metrics.py",
+      "total_lines": 21
+    },
     "recovery_strategy_executed_total_1h": {
       "checked_at": "2026-05-07T00:58:47+09:00",
       "kind": "redacted_log_contract_required_missing",
@@ -31,6 +70,8 @@
     "dashboard_snapshot_latency_p99": 4.787499999999998,
     "keeper_skipping_turn_rate_5m": 0.0,
     "keeper_turn_success_rate": 0.5555555555555556,
+    "orient_recheck_new_finding": 0.0,
+    "orient_recheck_still_present": 0.0,
     "persistence_utf8_repair_total": 49.0,
     "pricing_catalog_miss_total": 0.0,
     "recovery_strategy_executed_total_1h": 0.0
@@ -48,9 +89,11 @@
   "schema_version": 1,
   "snapshot_kind": "goal_loop_verify_metrics",
   "source": {
-    "command": "curl -sS -m 5 -H 'Authorization: Bearer <local-token>' http://127.0.0.1:8935/metrics -o <TEMP_DIR>/goal-loop-live-metrics.prom && python3 scripts/goal_loop_log_window_metric.py <MASC_BASE_PATH>/.masc/logs/system_log_2026-05-06.jsonl --metric-name keeper_skipping_turn_rate_5m --pattern 'skipping turn.*semaphore wait' --window-start 2026-05-06T15:53:05Z --window-end 2026-05-06T15:58:05Z --display-path '<MASC_BASE_PATH>/.masc/logs/system_log_2026-05-06.jsonl' --pretty && python3 scripts/goal_loop_metrics_snapshot.py <TEMP_DIR>/goal-loop-live-metrics.prom --set keeper_skipping_turn_rate_5m=0 --set recovery_strategy_executed_total_1h=0 --pretty",
+    "command": "curl -sS -m 5 -H 'Authorization: Bearer <local-token>' http://127.0.0.1:8935/metrics -o <TEMP_DIR>/goal-loop-live-metrics.prom && python3 scripts/goal_loop_log_window_metric.py <MASC_BASE_PATH>/.masc/logs/system_log_2026-05-06.jsonl --metric-name keeper_skipping_turn_rate_5m --pattern 'skipping turn.*semaphore wait' --window-start 2026-05-06T15:53:05Z --window-end 2026-05-06T15:58:05Z --display-path '<MASC_BASE_PATH>/.masc/logs/system_log_2026-05-06.jsonl' --pretty && python3 scripts/goal_loop_orient_recheck_metrics.py <TEMP_DIR>/goal-loop-orient-live-post-act.json --checked-at 2026-05-07T01:25:28+09:00 --redact-prefix '<MASC_BASE_PATH>/.masc=<MASC_BASE_PATH>/.masc' --pretty && python3 scripts/goal_loop_metrics_snapshot.py <TEMP_DIR>/goal-loop-live-metrics.prom --set keeper_skipping_turn_rate_5m=0 --set recovery_strategy_executed_total_1h=0 --set orient_recheck_still_present=0 --set orient_recheck_new_finding=0 --pretty",
     "manual_overrides": {
       "keeper_skipping_turn_rate_5m": "0, derived from the redacted 5-minute log-window metric report with zero matching semaphore-wait skip lines",
+      "orient_recheck_new_finding": "0, derived from the redacted post-act Orient recheck report: zero EVIDENCE_PRESENT finding_id values used the NEW prefix",
+      "orient_recheck_still_present": "0, derived from the redacted post-act Orient recheck report: zero findings had status EVIDENCE_PRESENT",
       "recovery_strategy_executed_total_1h": "0, derived from the redacted log-contract report where recovery_strategy_executed is required_missing"
     },
     "prometheus_checked_at": "2026-05-07T00:45:05+09:00",

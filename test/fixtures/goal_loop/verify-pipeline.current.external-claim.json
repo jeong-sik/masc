@@ -208,12 +208,30 @@
         "metric_source": "GOAL_LOOP_METRICS_JSON (--metrics-json)",
         "predicate": "== 0",
         "prometheus_sources": [],
-        "value": null
+        "value": 0.0,
+        "value_provenance": {
+          "checked_at": "2026-05-07T01:25:28+09:00",
+          "checked_files": [
+            "<MASC_BASE_PATH>/.masc/events/2026-05/06.jsonl",
+            "<MASC_BASE_PATH>/.masc/transition-audit/2026-05/06.jsonl"
+          ],
+          "critical_present": 0,
+          "evidence_present": 0,
+          "findings_total": 19,
+          "kind": "orient_recheck_report",
+          "matched_lines": 0,
+          "metric_value_semantics": "count of Orient findings with status EVIDENCE_PRESENT",
+          "not_evaluated": 9,
+          "present_finding_ids": [],
+          "raw_log_lines_committed": false,
+          "script": "scripts/goal_loop_orient_recheck_metrics.py",
+          "total_lines": 21
+        }
       },
       "gate_id": "orient_recheck_no_still_present",
-      "reason": "missing_metric",
-      "status": "BLOCKED",
-      "summary": "orient_recheck_still_present is absent from the production metric snapshot."
+      "reason": null,
+      "status": "PASS",
+      "summary": "orient_recheck_still_present == 0"
     },
     {
       "category": "orient_recheck",
@@ -230,12 +248,33 @@
         "metric_source": "GOAL_LOOP_METRICS_JSON (--metrics-json)",
         "predicate": "== 0",
         "prometheus_sources": [],
-        "value": null
+        "value": 0.0,
+        "value_provenance": {
+          "checked_at": "2026-05-07T01:25:28+09:00",
+          "checked_files": [
+            "<MASC_BASE_PATH>/.masc/events/2026-05/06.jsonl",
+            "<MASC_BASE_PATH>/.masc/transition-audit/2026-05/06.jsonl"
+          ],
+          "critical_present": 0,
+          "evidence_present": 0,
+          "findings_total": 19,
+          "kind": "orient_recheck_report",
+          "matched_lines": 0,
+          "metric_value_semantics": "count of EVIDENCE_PRESENT Orient findings whose finding_id starts with a configured new-finding prefix",
+          "new_finding_prefixes": [
+            "NEW"
+          ],
+          "not_evaluated": 9,
+          "present_new_finding_ids": [],
+          "raw_log_lines_committed": false,
+          "script": "scripts/goal_loop_orient_recheck_metrics.py",
+          "total_lines": 21
+        }
       },
       "gate_id": "orient_recheck_no_new_finding",
-      "reason": "missing_metric",
-      "status": "BLOCKED",
-      "summary": "orient_recheck_new_finding is absent from the production metric snapshot."
+      "reason": null,
+      "status": "PASS",
+      "summary": "orient_recheck_new_finding == 0"
     },
     {
       "category": "tla_check",
@@ -372,9 +411,9 @@
       "summary": "Post-ACT production log contract was evaluated from supplied report JSON."
     }
   ],
-  "gates_blocked": 2,
+  "gates_blocked": 0,
   "gates_failed": 5,
-  "gates_passed": 6,
+  "gates_passed": 8,
   "gates_skipped": 1,
   "gates_total": 14,
   "schema_version": 1,

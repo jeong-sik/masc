@@ -169,9 +169,9 @@ class GoalLoopVerifyPipelineTest(unittest.TestCase):
 
         by_id = {item.gate_id: item for item in report.gates}
         self.assertEqual(report.status, "FAIL")
-        self.assertEqual(report.gates_passed, 6)
+        self.assertEqual(report.gates_passed, 8)
         self.assertEqual(report.gates_failed, 4)
-        self.assertEqual(report.gates_blocked, 3)
+        self.assertEqual(report.gates_blocked, 1)
         self.assertEqual(report.gates_skipped, 1)
         self.assertEqual(by_id["keeper_turn_success_rate_healthy"].status, "FAIL")
         self.assertEqual(by_id["no_semaphore_skip"].status, "PASS")
@@ -184,6 +184,14 @@ class GoalLoopVerifyPipelineTest(unittest.TestCase):
         self.assertEqual(by_id["recovery_executed"].status, "FAIL")
         self.assertEqual(by_id["admission_backpressure_observed"].status, "FAIL")
         self.assertEqual(by_id["dashboard_snapshot_latency_p99"].status, "PASS")
+        self.assertEqual(by_id["orient_recheck_no_still_present"].status, "PASS")
+        self.assertEqual(by_id["orient_recheck_no_new_finding"].status, "PASS")
+        self.assertEqual(
+            by_id["orient_recheck_no_still_present"].evidence["value_provenance"][
+                "kind"
+            ],
+            "orient_recheck_report",
+        )
 
     def test_live_log_contract_fixture_records_current_failures(self) -> None:
         log_contract = json.loads(LIVE_LOG_CONTRACT_FIXTURE.read_text(encoding="utf-8"))

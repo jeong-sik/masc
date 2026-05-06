@@ -70,4 +70,13 @@ describe('BoardCurationPanel', () => {
     await waitFor(() => expect(fetchBoardCurationMock).toHaveBeenCalledTimes(1))
     expect(await screen.findByText('No curation snapshot yet.')).toBeTruthy()
   })
+
+  it('renders the fetch error instead of the empty state when loading fails', async () => {
+    fetchBoardCurationMock.mockRejectedValue(new Error('network unavailable'))
+
+    render(h(BoardCurationPanel, null))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('network unavailable')
+    expect(screen.queryByText('No curation snapshot yet.')).toBeNull()
+  })
 })

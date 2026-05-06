@@ -5,7 +5,7 @@ import { fetchBoardCuration } from '../../api/board'
 import type { BoardCurationSnapshot } from '../../types'
 import { navigate } from '../../router'
 import { ActionButton } from '../common/button'
-import { EmptyState, LoadingState } from '../common/feedback-state'
+import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { SurfaceCard } from '../common/card'
 import { TimeAgo } from '../common/time-ago'
 
@@ -157,14 +157,16 @@ export function BoardCurationPanel() {
         </div>
       </div>
 
-      ${error ? html`
+      ${error && snapshot ? html`
         <div class="rounded-[var(--r-1)] border border-[var(--color-status-err)]/40 bg-[var(--color-status-err)]/10 px-3 py-2 text-xs text-[var(--color-status-err)]" role="alert">${error}</div>
       ` : null}
       ${loading
         ? html`<${LoadingState}>Loading board curation...<//>`
-        : snapshot
-          ? html`<${CurationSnapshot} snapshot=${snapshot} />`
-          : html`<${EmptyState} message="No curation snapshot yet." compact />`}
+        : error && !snapshot
+          ? html`<${ErrorState} message=${error} />`
+          : snapshot
+            ? html`<${CurationSnapshot} snapshot=${snapshot} />`
+            : html`<${EmptyState} message="No curation snapshot yet." compact />`}
     </section>
   `
 }

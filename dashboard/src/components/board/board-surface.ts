@@ -546,11 +546,11 @@ function BoardSummary() {
         size="sm"
         class="${lastBoardRefreshAt.value ? '' : 'ml-auto'} !px-2"
         onClick=${() => navigate('workspace', { section: 'board', focus: 'curation' })}
-        ariaLabel="Open board curation"
+        ariaLabel="보드 큐레이션 열기"
       >
         <span class="inline-flex items-center gap-1">
           <${Sparkles} size=${12} aria-hidden="true" />
-          Curation
+          큐레이션
         </span>
       <//>
     </div>

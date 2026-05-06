@@ -839,6 +839,12 @@ let metric_ws_bytes_cache_hits = "masc_ws_bytes_cache_hits_total"
 let metric_ws_bytes_cache_misses = "masc_ws_bytes_cache_misses_total"
 let metric_dashboard_execution_render_phase_sec =
   "masc_dashboard_execution_render_phase_seconds"
+let metric_dashboard_snapshot_latency_seconds =
+  "masc_dashboard_snapshot_latency_seconds"
+let metric_dashboard_snapshot_latency_seconds_bucket =
+  "masc_dashboard_snapshot_latency_seconds_bucket"
+let metric_dashboard_metric_all_zeros =
+  "masc_dashboard_metric_all_zeros"
 (* PR-0.2.A (RFC 2026-04-masc-ide-strategy): generic cache hit/miss
    counters, labelled by [cache] = "eio" | "dashboard".  Distinct from
    the WS-specific parse/bytes cache counters above; these track the
@@ -2465,6 +2471,16 @@ let init () =
     ~help:
       "Dashboard execution render phase latency in seconds. Labels: \
        phase=total|snapshot|operations|enrich|enrich_per_keeper|data_load|assemble."
+    ();
+  register_histogram ~name:metric_dashboard_snapshot_latency_seconds
+    ~help:"Dashboard snapshot phase latency in seconds." ();
+  register_gauge ~name:metric_dashboard_metric_all_zeros
+    ~help:
+      "Dashboard render sub-operation timing all-zero diagnostic. 1 means \
+       snapshot/operations/enrich/data_load/assemble were all zero for a \
+       non-empty render. Labels: keeper_name, with keeper_name=__dashboard__ \
+       for this render-level singleton."
+    ~labels:[("keeper_name", "__dashboard__")]
     ();
   (* PR-0.2.A: generic cache hit/miss counters.  Labels: cache=eio|dashboard.
      [eio] tracks Cache_eio.get; [dashboard] tracks Dashboard_cache.get_or_compute.

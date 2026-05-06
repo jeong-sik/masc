@@ -178,13 +178,17 @@ export function InspectorKeeperBDI({
   const pin = useInspectorKeeperPin()
   const activeKeeper = useActiveKeeperName()
   const reducedMotion = useReducedMotion()
-  const keeperName = pin?.keeperName ?? activeKeeper
+  // Single trim point: fetch URL, header display, and OverlayKeeperTrace's
+  // keeperFilter all share the same string. Untrimmed sources (e.g. an
+  // activeKeeperName signal set without trimming) would otherwise let polling
+  // succeed for "scholar" while the overlay filter "  scholar  " misses the
+  // events the producer pushed under the trimmed keeper name.
+  const keeperName = (pin?.keeperName ?? activeKeeper).trim()
   const [snapshot, setSnapshot] = useState<KeeperBdiSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    const name = keeperName.trim()
-    if (!name) {
+    if (!keeperName) {
       setSnapshot(null)
       setError(null)
       return
@@ -194,7 +198,7 @@ export function InspectorKeeperBDI({
     let timer: number | null = null
     const refresh = async () => {
       try {
-        const next = await fetchKeeperBdiSnapshot(name, controller.signal)
+        const next = await fetchKeeperBdiSnapshot(keeperName, controller.signal)
         if (controller.signal.aborted) return
         setSnapshot(next)
         setError(next ? null : 'snapshot unavailable')

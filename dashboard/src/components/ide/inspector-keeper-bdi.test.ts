@@ -174,4 +174,30 @@ describe('InspectorKeeperBDI', () => {
 
     render(null, container)
   })
+
+  it('trims whitespace from the keeper name so polling and overlay filter stay consistent', async () => {
+    pushTrace({
+      id: 'inspector-trace-trimmed',
+      tsMs: Date.parse('2026-05-06T01:00:00Z'),
+      keeperName: 'scholar',
+      source: 'bdi-snapshot',
+      intention: 'inspect selected line',
+    })
+
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(snapshot)))
+    vi.stubGlobal('fetch', fetchMock)
+    activeKeeperName.value = '  scholar  '
+
+    const container = createContainer()
+    render(html`<${InspectorKeeperBDI} pollMs=${60_000} traceActive=${true} />`, container)
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/v1/keepers/scholar/bdi-snapshot', expect.any(Object))
+    })
+
+    const overlay = container.querySelector('[data-overlay="keeper-trace"]')
+    expect(overlay).not.toBeNull()
+    expect(overlay?.querySelector('[data-keeper="scholar"]')).not.toBeNull()
+
+    render(null, container)
+  })
 })

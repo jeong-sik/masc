@@ -1200,6 +1200,7 @@
 (include stanzas/test_keeper_tool_policy_paths.inc)
 (include stanzas/test_keeper_turn_fsm_tla_parity.inc)
 (include stanzas/test_keeper_turn_livelock_10121.inc)
+(include stanzas/test_keeper_turn_helpers_side_effect_metric.inc)
 (include stanzas/test_keeper_turn_slot_force_release.inc)
 (include stanzas/test_keeper_turn_slot_holders.inc)
 (include stanzas/test_keeper_turn_slot_release_cancel_safe.inc)

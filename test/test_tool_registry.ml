@@ -50,6 +50,15 @@ let () =
               Tool_registry.record_call_if_known ~tool_name:"totally_unknown_tool"
                 ~success:false ~duration_ms:1 ();
               check int "total" 0 (Tool_registry.total_calls ()));
+          test_case "gated recording includes keeper-internal tools" `Quick (fun () ->
+              Tool_registry.reset ();
+              Tool_registry.record_call_if_known ~source:Keeper_internal
+                ~tool_name:"keeper_stay_silent" ~success:true ~duration_ms:1 ();
+              let stats = Tool_registry.get_stats () in
+              let s = List.assoc "keeper_stay_silent" stats in
+              check int "call_count" 1 (Atomic.get s.call_count);
+              check int "keeper_internal_count" 1
+                (Atomic.get s.keeper_internal_count));
           test_case "tracks source attribution" `Quick (fun () ->
               Tool_registry.reset ();
               Tool_registry.record_call ~source:External_mcp

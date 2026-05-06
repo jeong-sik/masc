@@ -277,6 +277,39 @@ let test_post_hook_does_not_duplicate_handler_logged_io () =
       check int "post hook did not duplicate handler row" 1
         (List.length entries))
 
+let test_oas_wrapper_records_keeper_internal_tool_call () =
+  let meta = make_test_meta ~name:"test-keeper-tool-registry" () in
+  let ctx_snapshot = make_test_ctx () in
+  let dir = Filename.temp_file "test_keeper_tools_registry_" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Tool_registry.reset ();
+      let config = Coord.default_config dir in
+      let bundle =
+        Keeper_tools_oas.make_tool_bundle ~config ~meta ~ctx_snapshot ()
+      in
+      Fun.protect
+        ~finally:(fun () ->
+          bundle.cleanup ();
+          Tool_registry.reset ())
+        (fun () ->
+          let tool = find_tool "keeper_stay_silent" bundle.tools in
+          match Tool.execute tool (`Assoc []) with
+          | Error { Agent_sdk.Types.message; _ } ->
+              fail (Printf.sprintf "expected tool success, got error: %s" message)
+          | Ok _ ->
+              let stats = Tool_registry.get_stats () in
+              let entry = List.assoc "keeper_stay_silent" stats in
+              check int "call_count" 1 (Atomic.get entry.call_count);
+              check int "success_count" 1 (Atomic.get entry.success_count);
+              check int "keeper_internal_count" 1
+                (Atomic.get entry.keeper_internal_count)))
+
 let is_guardrail_message message =
   string_contains
     ~sub:"failed 3 times in a row with the same arguments"
@@ -900,6 +933,8 @@ let () =
         test_handler_persists_tool_call_io_without_post_hook;
       test_case "post hook skips handler-logged tool-call I/O" `Quick
         test_post_hook_does_not_duplicate_handler_logged_io;
+      test_case "wrapper records keeper-internal calls" `Quick
+        test_oas_wrapper_records_keeper_internal_tool_call;
     ];
     "normalize_tool_result", [
       test_case "success JSON wraps under result" `Quick test_normalize_success_json;

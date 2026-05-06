@@ -125,14 +125,7 @@ let () =
      + String.length (Yojson.Safe.to_string s.input_schema)
    ) 0 schemas in
    Prometheus.set_tool_schema_stats ~count ~approx_tokens:(chars / 4));
-  (* Wire keeper-internal tool call recording to break Config dependency cycle.
-     keeper_exec_tools cannot reference Tool_registry directly. *)
-  Keeper_exec_tools.set_on_keeper_tool_call
-    (fun ~tool_name ~success ~duration_ms ->
-       Tool_registry.record_call ~source:Keeper_internal
-         ~tool_name ~success ~duration_ms ());
   (* Wire tag-based dispatch for keeper masc_* tools.
-     Breaks the same Config dependency cycle as on_keeper_tool_call.
      See #4579: keeper_exec_tools uses handler registry (Tool_Board only),
      this callback adds tag-registry dispatch for ~190 more tools. *)
   Keeper_exec_shared.tag_dispatch_fn := Keeper_tag_dispatch.dispatch;

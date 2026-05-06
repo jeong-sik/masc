@@ -70,16 +70,21 @@ let registry : (string, call_stats) Hashtbl.t = Hashtbl.create 128
 let registry_mu = Eio.Mutex.create ()
 let with_registry_rw f = Eio_guard.with_mutex registry_mu f
 let with_registry_ro f = Eio_guard.with_mutex_ro registry_mu f
-(** Use raw_all_tool_schemas to include hidden/internal tools.
-    Previously used Config.all_tool_schemas (public-filtered), which caused
-    hidden tools to be structurally undercounted in telemetry. *)
+(** Use the leaf surface-name SSOT instead of Config.raw_all_tool_schemas.
+    Tool_registry sits below keeper/OAS dispatch, and depending on Config
+    creates Config -> keeper -> Tool_registry -> Config cycles.  Surface names
+    still include hidden/internal tools without importing the full schema graph. *)
 module StringSet = Set.Make (String)
 
 let known_tool_names : StringSet.t Eio.Lazy.t =
   Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
     List.fold_left
-      (fun set (schema : Masc_domain.tool_schema) -> StringSet.add schema.name set)
-      StringSet.empty Config.raw_all_tool_schemas)
+      (fun set surface ->
+        List.fold_left
+          (fun set name -> StringSet.add name set)
+          set
+          (Tool_catalog_surfaces.tools_for_surface surface))
+      StringSet.empty Tool_catalog_surfaces.all_surfaces)
 
 let is_known_tool tool_name =
   StringSet.mem tool_name (Eio.Lazy.force known_tool_names)

@@ -43,6 +43,10 @@ let tool_usage_json keeper_name : Yojson.Safe.t =
     ]
   ) (tool_usage_for_keeper keeper_name))
 
+let record_keeper_internal_tool_call ~tool_name ~success ~duration_ms =
+  Tool_registry.record_call ~source:Keeper_internal ~tool_name ~success
+    ~duration_ms ()
+
 let recent_tools_for_keeper ?(limit = 5) keeper_name : string list =
   tool_usage_for_keeper keeper_name
   |> List.sort (fun (_, a) (_, b) -> Float.compare b.last_used_at a.last_used_at)
@@ -416,7 +420,7 @@ let append_tool_exec_decision_log ~config ~keeper_name ~site entry =
 
     Telemetry SSOT contract: [~name] flows into every observability
     sink (Keeper_registry.record_tool_use, SSE broadcast tool_name,
-    decision-log "tool" field, record_keeper_tool_call). The LLM-facing
+    decision-log "tool" field, Tool_registry). The LLM-facing
     public name (Bash/Read/...) only appears as the [Tool.schema.name]
     set by [Tool_bridge.oas_tool_of_masc] above this helper.
 
@@ -531,8 +535,8 @@ let make_keeper_tool_handler
         if is_failure then begin
           let count = failure_count_record_failure failure_counts key in
           Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:name ~success:false;
-          Keeper_exec_tools.record_keeper_tool_call
-            ~tool_name:name ~success:false ~duration_ms;
+          record_keeper_internal_tool_call ~tool_name:name ~success:false
+            ~duration_ms;
           (* Tool-call observability flows through the OAS Event_bus
              (ToolCalled + ToolCompleted). MASC-side observers removed
              in refactor/tool-call-single-source. *)
@@ -587,8 +591,8 @@ let make_keeper_tool_handler
         end else begin
           failure_count_reset failure_counts key;
           Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:name ~success:true;
-          Keeper_exec_tools.record_keeper_tool_call
-            ~tool_name:name ~success:true ~duration_ms;
+          record_keeper_internal_tool_call ~tool_name:name ~success:true
+            ~duration_ms;
           (* Tool-call observability via OAS Event_bus. See above. *)
           (let tr = Tool_result.{ tool_name = name; success = true;
               duration_ms = Float.of_int duration_ms; data = `Null;
@@ -717,8 +721,8 @@ let make_keeper_tool_handler
           else failure_count_record_failure failure_counts key
         in
         Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:name ~success:false;
-        Keeper_exec_tools.record_keeper_tool_call
-          ~tool_name:name ~success:false ~duration_ms;
+        record_keeper_internal_tool_call ~tool_name:name ~success:false
+          ~duration_ms;
         (* Tool-call observability via OAS Event_bus. See above. *)
         broadcast_keeper_tool_call_event
           ~keeper_name:meta.name ~tool_name:name ~duration_ms

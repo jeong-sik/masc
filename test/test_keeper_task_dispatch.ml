@@ -1320,30 +1320,18 @@ let test_tool_search_whitespace_query_returns_error () =
     | `String _ -> () (* expected *)
     | _ -> fail "expected error field for whitespace-only query")
 
-let test_tool_search_returns_results_list () =
+let test_tool_search_without_search_fn_returns_error () =
   with_room (fun config ->
     let meta = make_test_meta () in
-    (* With no custom search_fn, the global default must still be truthful:
-       search the static keeper schema universe instead of claiming no tools
-       match. Normal keeper turns pass a richer session-scoped BM25 search_fn. *)
+
     let result = call_tool config meta "keeper_tool_search"
       (`Assoc [ ("query", `String "filesystem read file") ]) in
     let json = parse_json result in
-    match Yojson.Safe.Util.member "results" json with
-    | `List results ->
-      check bool "default search returns static fallback hits" true
-        (List.length results > 0);
-      let names =
-        List.filter_map
-          (fun hit ->
-             match Yojson.Safe.Util.member "name" hit with
-             | `String name -> Some name
-             | _ -> None)
-          results
-      in
-      check bool "keeper_fs_read discoverable by default" true
-        (List.mem "keeper_fs_read" names)
-    | _ -> fail "expected results list in response")
+    match Yojson.Safe.Util.member "error" json with
+    | `String msg ->
+      check bool "error mentions missing search wiring" true
+        (String_util.contains_substring msg "not configured")
+    | _ -> fail "expected error field for missing search_fn")
 
 let test_tool_search_max_results_clamped_to_10 () =
   with_room (fun config ->
@@ -1481,7 +1469,8 @@ let () =
     "keeper_tool_search", [
       test_case "empty query returns error" `Quick test_tool_search_empty_query_returns_error;
       test_case "whitespace query returns error" `Quick test_tool_search_whitespace_query_returns_error;
-      test_case "non-empty query returns results list" `Quick test_tool_search_returns_results_list;
+      test_case "non-empty query requires search_fn" `Quick
+        test_tool_search_without_search_fn_returns_error;
       test_case "max_results clamped to 10" `Quick test_tool_search_max_results_clamped_to_10;
       test_case "max_results minimum is 1" `Quick test_tool_search_max_results_minimum_1;
       test_case "uses provided search_fn" `Quick test_tool_search_uses_provided_search_fn;

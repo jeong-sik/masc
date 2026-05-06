@@ -202,3 +202,10 @@ val run_model_with_masc_tools :
   unit ->
   (Oas_worker_exec.run_result, Agent_sdk.Error.sdk_error) result
 (** [run_model_by_label] variant that bridges MASC tool schemas into OAS tools. *)
+
+module For_testing : sig
+  val checkpoint_after_attempt :
+    ?agent_ref:Agent_sdk.Agent.t option ref ->
+    Agent_sdk.Agent.t option ->
+    Agent_sdk.Checkpoint.t option
+end

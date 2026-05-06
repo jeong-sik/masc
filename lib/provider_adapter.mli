@@ -370,7 +370,10 @@ val adapter_of_provider_config :
 val provider_label_of_config :
   Llm_provider.Provider_config.t -> string
 
-(** Stable provider-level key for cascade health and circuit-breaker state. *)
+(** Stable key for cascade health and circuit-breaker state.
+    Most providers are keyed at provider level. Local OpenAI-compatible
+    endpoints include model and base URL so independent loopback runtimes can
+    fail over without sharing cooldown state. *)
 val provider_health_key_of_config :
   Llm_provider.Provider_config.t -> string
 

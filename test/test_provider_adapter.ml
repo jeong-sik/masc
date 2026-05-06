@@ -367,6 +367,18 @@ let test_provider_health_key_is_provider_scoped () =
     (Adapter.provider_health_key_of_config claude_auto
      <> Adapter.provider_health_key_of_config gemini_auto)
 
+let test_local_openai_compat_health_key_is_endpoint_scoped () =
+  let cfg label =
+    match Masc_mcp.Cascade_config.parse_model_string label with
+    | Some cfg -> cfg
+    | None -> fail ("expected model label to parse: " ^ label)
+  in
+  let primary = cfg "custom:primary@http://127.0.0.1:11111" in
+  let fallback = cfg "custom:primary@http://127.0.0.1:22222" in
+  check bool "same local model on different endpoints is isolated" true
+    (Adapter.provider_health_key_of_config primary
+     <> Adapter.provider_health_key_of_config fallback)
+
 let test_provider_of_model_label_uses_typed_boundaries () =
   check string "explicit prefix wins over coarse kind" "glm-coding"
     (Adapter.provider_of_model_label
@@ -455,6 +467,8 @@ let () =
             test_provider_label_of_config_preserves_cli_vs_api_identity;
           test_case "provider health key is provider scoped" `Quick
             test_provider_health_key_is_provider_scoped;
+          test_case "local openai compat health key is endpoint scoped" `Quick
+            test_local_openai_compat_health_key_is_endpoint_scoped;
           test_case "provider model label uses typed boundaries" `Quick
             test_provider_of_model_label_uses_typed_boundaries;
           test_case "unmetered provider uses telemetry policy" `Quick

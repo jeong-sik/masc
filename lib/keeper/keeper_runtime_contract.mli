@@ -13,7 +13,7 @@ type claim_goal_scope = {
 
 val resolve_claim_goal_scope :
   ?agent_tool_names:string list ->
-  (** [allow_empty_goal_scope_fallback] should stay false for normal keeper
+  (* [allow_empty_goal_scope_fallback] should stay false for normal keeper
       task claims. Auto-repaired keeper-purpose goals may still fall back to
       all tasks; explicit persisted [active_goal_ids] stay scoped unless this
       flag is set. *)
@@ -22,6 +22,16 @@ val resolve_claim_goal_scope :
   meta:Keeper_types.keeper_meta ->
   unit ->
   claim_goal_scope
+
+val resolve_observation_claim_goal_scope :
+  ?agent_tool_names:string list ->
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  unit ->
+  claim_goal_scope
+(** Signal-only claim scope for world observations. Auto-repaired keeper-purpose
+    goals may fall back to all claimable tasks; explicit persisted
+    [active_goal_ids] remain scoped. *)
 
 val runtime_contract_json :
   ?config:Coord.config -> Keeper_types.keeper_meta -> Yojson.Safe.t

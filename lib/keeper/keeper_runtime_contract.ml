@@ -116,6 +116,14 @@ let resolve_claim_goal_scope ?agent_tool_names
           fallback_reason = None;
         }
 
+let resolve_observation_claim_goal_scope ?agent_tool_names ~(config : Coord.config)
+    ~(meta : keeper_meta) () =
+  let allow_empty_goal_scope_fallback =
+    active_goal_ids_are_auto_keeper_goals config ~meta meta.active_goal_ids
+  in
+  resolve_claim_goal_scope ?agent_tool_names ~allow_empty_goal_scope_fallback
+    ~config ~meta ()
+
 let task_is_blocked (task : Masc_domain.task) =
   match task.task_status with
   | Masc_domain.AwaitingVerification _ -> true

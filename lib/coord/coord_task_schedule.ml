@@ -298,6 +298,37 @@ let agent_current_task_matches_backlog backlog ~agent_name task_id =
   agent_current_task_matches_assignments active_task_assignees ~agent_name
     task_id
 
+let reconcile_agent_current_task_record config ?(touch_last_seen = true)
+    ~agent_file ~(agent : Masc_domain.agent) active_task_assignees =
+  match agent.current_task with
+  | Some task_id
+    when not
+           (agent_current_task_matches_assignments active_task_assignees
+              ~agent_name:agent.name task_id)
+    ->
+      let updated_status =
+        match agent.status with
+        | Inactive -> Inactive
+        | Active | Busy | Listening -> Active
+      in
+      let updated =
+        {
+          agent with
+          status = updated_status;
+          current_task = None;
+          last_seen =
+            (if touch_last_seen then now_iso () else agent.last_seen);
+        }
+      in
+      write_json config agent_file (agent_to_yojson updated);
+      log_event config (`Assoc [
+           ("type", `String "agent_current_task_reconciled");
+           ("agent", `String agent.name);
+           ("stale_task", `String task_id);
+           ("ts", `String (now_iso ()));
+         ])
+  | Some _ | None -> ()
+
 let reconcile_agent_current_task_with_assignments config ?(touch_last_seen = true)
     ~agent_name active_task_assignees =
   let agent_file =
@@ -306,35 +337,9 @@ let reconcile_agent_current_task_with_assignments config ?(touch_last_seen = tru
   if path_exists config agent_file then
     with_file_lock config agent_file (fun () ->
       match read_agent_with_repair config agent_file with
-      | Ok agent -> (
-          match agent.current_task with
-          | Some task_id
-            when not
-                   (agent_current_task_matches_assignments active_task_assignees
-                      ~agent_name task_id)
-            ->
-              let updated_status =
-                match agent.status with
-                | Inactive -> Inactive
-                | Active | Busy | Listening -> Active
-              in
-              let updated =
-                {
-                  agent with
-                  status = updated_status;
-                  current_task = None;
-                  last_seen =
-                    (if touch_last_seen then now_iso () else agent.last_seen);
-                }
-              in
-              write_json config agent_file (agent_to_yojson updated);
-              log_event config (`Assoc [
-                   ("type", `String "agent_current_task_reconciled");
-                   ("agent", `String agent_name);
-                   ("stale_task", `String task_id);
-                   ("ts", `String (now_iso ()));
-                 ])
-          | Some _ | None -> ())
+      | Ok agent ->
+          reconcile_agent_current_task_record config ~touch_last_seen ~agent_file
+            ~agent active_task_assignees
       | Error msg ->
           Log.Misc.error "agent state reconcile failed: %s" msg)
 
@@ -356,16 +361,14 @@ let reconcile_all_agent_current_tasks_with_backlog config
       |> List.iter (fun name ->
            Coord_query.safe_yield ();
            let path = Filename.concat agents_path name in
-           match read_agent_with_repair config path with
-           | Ok (agent : Masc_domain.agent) -> (
-               match agent.current_task with
-               | None -> ()
-               | Some _ ->
-                   reconcile_agent_current_task_with_assignments config
-                     ~touch_last_seen ~agent_name:agent.name
-                     active_task_assignees)
-           | Error msg ->
-               Log.Misc.error "agent state reconcile failed for %s: %s" name msg))
+           with_file_lock config path (fun () ->
+             match read_agent_with_repair config path with
+             | Ok (agent : Masc_domain.agent) ->
+                 reconcile_agent_current_task_record config ~touch_last_seen
+                   ~agent_file:path ~agent active_task_assignees
+             | Error msg ->
+                 Log.Misc.error "agent state reconcile failed for %s: %s" name
+                   msg)))
   with
   | Sys_error msg ->
       Log.Misc.error "agent state reconcile scan failed: %s" msg

@@ -333,7 +333,7 @@ let test_claim_next_reconciles_stale_agent_current_task () =
     | _ -> Alcotest.fail "expected no_unclaimed after stale reconcile"
   )
 
-let test_status_reconciles_stale_agent_current_task () =
+let test_status_hides_stale_agent_current_task_without_writing () =
   with_env "MASC_VERIFICATION_FSM_ENABLED" "true" (fun () ->
     with_test_env (fun config ->
       let agent_name =
@@ -363,16 +363,20 @@ let test_status_reconciles_stale_agent_current_task () =
         | Error msg -> Alcotest.fail ("agent parse failed: " ^ msg)
       in
       Coord.write_json config agent_file (Masc_domain.agent_to_yojson stale_agent);
-      ignore (Coord.status config);
+      let output = Coord.status config in
+      Alcotest.(check bool)
+        "status renders stale task as idle" true
+        (str_contains output (Printf.sprintf "%s → idle" agent_name));
       let agent_after =
         match Coord.read_json config agent_file |> Masc_domain.agent_of_yojson with
         | Ok agent -> agent
         | Error msg -> Alcotest.fail ("agent parse failed after status: " ^ msg)
       in
       Alcotest.(check (option string))
-        "stale current_task cleared on status" None agent_after.current_task;
+        "status read does not clear stale current_task" (Some "task-001")
+        agent_after.current_task;
       Alcotest.(check string)
-        "status reset to active on status" "active"
+        "status read does not reset stored status" "busy"
         (Masc_domain.agent_status_to_string agent_after.status)))
 
 (* ============================================================ *)
@@ -1492,8 +1496,8 @@ let () =
 
     (* === Status === *)
     "status", [
-      Alcotest.test_case "reconciles stale current_task on read" `Quick
-        test_status_reconciles_stale_agent_current_task;
+      Alcotest.test_case "hides stale current_task on read without writing" `Quick
+        test_status_hides_stale_agent_current_task_without_writing;
     ];
 
     (* === Claim Next === *)

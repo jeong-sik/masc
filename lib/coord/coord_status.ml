@@ -12,10 +12,7 @@ let status config =
   ensure_initialized config;
 
   let state = read_state config in
-  let backlog =
-    Coord_task_schedule.reconcile_all_agent_current_tasks_with_fresh_backlog
-      ~touch_last_seen:false config
-  in
+  let backlog = read_backlog config in
   let current_room = "default" in
   let max_agents_display = 40 in
   let max_active_tasks_display = 30 in
@@ -47,10 +44,26 @@ let status config =
           match agent_of_yojson json with
           | Ok agent ->
               let is_zombie = is_zombie_agent ~agent_name:agent.name agent.last_seen in
+              let stale_current_task =
+                match agent.current_task with
+                | Some task_id ->
+                    not
+                      (Coord_task_schedule.agent_current_task_matches_backlog
+                         backlog ~agent_name:agent.name task_id)
+                | None -> false
+              in
+              let display_status =
+                if stale_current_task then
+                  match agent.status with
+                  | Inactive -> Inactive
+                  | Active | Busy | Listening -> Active
+                else
+                  agent.status
+              in
               let icon =
                 if is_zombie then "💀"
                 else
-                  match agent.status with
+                  match display_status with
                   | Busy -> "🔴"
                   | Active -> "🟢"
                   | Listening -> "🎧"
@@ -58,6 +71,7 @@ let status config =
               in
               let task =
                 if is_zombie then "zombie"
+                else if stale_current_task then "idle"
                 else Option.value agent.current_task ~default:"idle"
               in
               Some (agent.name, icon, task)

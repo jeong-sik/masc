@@ -195,14 +195,13 @@ let safe_get_agents (ctx : context) =
       Log.Coord.warn "get_agents_raw failed: %s" (Stdlib.Printexc.to_string exn);
       []
 
-let safe_reconcile_agent_current_tasks (ctx : context) =
+let safe_read_backlog (ctx : context) =
   try
-    Coord.reconcile_all_agent_current_tasks_with_fresh_backlog
-      ~touch_last_seen:false ctx.config
+    Coord.read_backlog ctx.config
   with
   | Sys_error _ | Yojson.Json_error _ -> Coord.read_backlog ctx.config
   | exn ->
-      Log.Coord.warn "agent current_task reconcile failed: %s"
+      Log.Coord.warn "read_backlog failed: %s"
         (Stdlib.Printexc.to_string exn);
       Coord.read_backlog ctx.config
 
@@ -330,7 +329,7 @@ let coordination_fsm_attention_items ctx =
 let status_summary_string (ctx : context) =
   Coord.ensure_initialized ctx.config;
   let state = Coord.read_state ctx.config in
-  let backlog = safe_reconcile_agent_current_tasks ctx in
+  let backlog = safe_read_backlog ctx in
   let joined =
     try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name
     with Sys_error _ | Yojson.Json_error _ -> false
@@ -346,6 +345,20 @@ let status_summary_string (ctx : context) =
   let effective_cluster_name = effective_cluster_name ctx.config in
   let agents =
     safe_get_agents ctx
+    |> List.map (fun (agent : Masc_domain.agent) ->
+           match agent.current_task with
+           | Some task_id
+             when not
+                    (Coord.agent_current_task_matches_backlog backlog
+                       ~agent_name:agent.name task_id) ->
+               let status =
+                 match agent.status with
+                 | Masc_domain.Inactive -> Masc_domain.Inactive
+                 | Masc_domain.Active | Masc_domain.Busy | Masc_domain.Listening ->
+                     Masc_domain.Active
+               in
+               { agent with status; current_task = None }
+           | Some _ | None -> agent)
     |> List.sort (fun (a : Masc_domain.agent) (b : Masc_domain.agent) ->
            String.compare a.name b.name)
   in

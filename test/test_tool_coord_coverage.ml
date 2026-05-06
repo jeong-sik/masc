@@ -127,26 +127,28 @@ let () = test "dispatch_status" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
-let () = test "dispatch_status_reconciles_current_task_without_touching_last_seen" (fun () ->
+let () = test "dispatch_status_hides_stale_current_task_without_writing" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Coord.init ctx.config ~agent_name:(Some ctx.agent_name) in
   let old_last_seen = seed_stale_current_task ctx in
   match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-  | Some { success; _ } ->
+  | Some { success; message } ->
       assert success;
+      assert (str_contains message "test-agent (you) -> active");
       let agent = read_agent ctx in
-      assert (agent.current_task = None);
+      assert (agent.current_task = Some "task-missing");
       assert (agent.last_seen = old_last_seen)
   | None -> failwith "dispatch returned None"
 )
 
-let () = test "coord_status_reconciles_current_task_without_touching_last_seen" (fun () ->
+let () = test "coord_status_hides_stale_current_task_without_writing" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Coord.init ctx.config ~agent_name:(Some ctx.agent_name) in
   let old_last_seen = seed_stale_current_task ctx in
-  ignore (Coord.status ctx.config);
+  let output = Coord.status ctx.config in
+  assert (str_contains output "test-agent → idle");
   let agent = read_agent ctx in
-  assert (agent.current_task = None);
+  assert (agent.current_task = Some "task-missing");
   assert (agent.last_seen = old_last_seen)
 )
 
@@ -209,7 +211,7 @@ let () = test "dispatch_status_done_summary" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
-let () = test "dispatch_status_reconciles_stale_agent_current_task" (fun () ->
+let () = test "dispatch_status_hides_awaiting_verification_current_task" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx () in
     let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
@@ -248,8 +250,8 @@ let () = test "dispatch_status_reconciles_stale_agent_current_task" (fun () ->
           | Ok agent -> agent
           | Error msg -> failwith ("agent parse failed after status: " ^ msg)
         in
-        assert (agent_after.current_task = None);
-        assert (agent_after.status = Masc_domain.Active)
+        assert (agent_after.current_task = Some "task-001");
+        assert (agent_after.status = Masc_domain.Busy)
     | None -> failwith "dispatch returned None"))
 
 (* Test dispatch reset without confirm *)

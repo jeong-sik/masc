@@ -61,6 +61,32 @@ class GoalLoopAntiStagnationTest(unittest.TestCase):
         rule_ids = {violation.rule_id for violation in report.violations}
         self.assertIn("act_creation_deadline_missed", rule_ids)
 
+    def test_act_creation_deadline_flags_late_act(self) -> None:
+        report = goal_loop_anti_stagnation.build_report(
+            {
+                "findings": [
+                    {
+                        "finding_id": "R-FATAL-2",
+                        "status": "STILL_PRESENT",
+                        "detected_at": "2026-05-05T00:00:00Z",
+                        "act": {
+                            "ref": "PR#13053",
+                            "created_at": "2026-05-07T12:00:00Z",
+                        },
+                    }
+                ]
+            },
+            now=NOW,
+        )
+
+        violation = report.violations[0]
+        self.assertEqual(violation.rule_id, "act_creation_deadline_missed")
+        self.assertEqual(violation.age_hours, 60.0)
+        self.assertEqual(
+            violation.evidence["first_seen_at"], "2026-05-05T00:00:00+00:00"
+        )
+        self.assertEqual(violation.evidence["first_seen_source"], "detected_at")
+
     def test_verify_after_merge_deadline_misses_after_24_hours(self) -> None:
         report = goal_loop_anti_stagnation.build_report(
             {
@@ -84,6 +110,34 @@ class GoalLoopAntiStagnationTest(unittest.TestCase):
         self.assertEqual(
             report.violations[0].rule_id, "verify_after_merge_deadline_missed"
         )
+
+    def test_verify_after_merge_deadline_flags_late_verify(self) -> None:
+        report = goal_loop_anti_stagnation.build_report(
+            {
+                "findings": [
+                    {
+                        "finding_id": "CD-9",
+                        "status": "VERIFIED_FIXED",
+                        "first_seen_at": "2026-05-05T00:00:00Z",
+                        "act": {
+                            "ref": "PR#13054",
+                            "created_at": "2026-05-05T06:00:00Z",
+                            "merged_at": "2026-05-06T00:00:00Z",
+                        },
+                        "verify": {
+                            "status": "PASS",
+                            "checked_at": "2026-05-07T06:00:00Z",
+                        },
+                    }
+                ]
+            },
+            now=NOW,
+        )
+
+        violation = report.violations[0]
+        self.assertEqual(violation.rule_id, "verify_after_merge_deadline_missed")
+        self.assertEqual(violation.age_hours, 30.0)
+        self.assertEqual(violation.evidence["verify_after_merge_hours"], 30.0)
 
     def test_failed_verify_requires_repair_or_rollback_within_4_hours(self) -> None:
         report = goal_loop_anti_stagnation.build_report(
@@ -111,6 +165,60 @@ class GoalLoopAntiStagnationTest(unittest.TestCase):
             report.violations[0].rule_id,
             "verify_fail_repair_deadline_missed",
         )
+
+    def test_failed_verify_requires_timestamped_repair_within_4_hours(self) -> None:
+        report = goal_loop_anti_stagnation.build_report(
+            {
+                "findings": [
+                    {
+                        "finding_id": "CF-2",
+                        "status": "PARTIALLY_FIXED",
+                        "first_seen_at": "2026-05-07T00:00:00Z",
+                        "act": {
+                            "ref": "PR#13055",
+                            "created_at": "2026-05-07T01:00:00Z",
+                            "repair_ref": "PR#13056",
+                        },
+                        "verify": {
+                            "status": "FAIL",
+                            "failed_at": "2026-05-07T18:00:00Z",
+                        },
+                    }
+                ]
+            },
+            now=NOW,
+        )
+
+        violation = report.violations[0]
+        self.assertEqual(violation.rule_id, "verify_fail_repair_deadline_missed")
+        self.assertEqual(violation.evidence["repair_ref"], "PR#13056")
+        self.assertIsNone(violation.evidence["repair_created_at"])
+
+    def test_timestamped_repair_within_4_hours_satisfies_failed_verify(self) -> None:
+        report = goal_loop_anti_stagnation.build_report(
+            {
+                "findings": [
+                    {
+                        "finding_id": "CF-3",
+                        "status": "PARTIALLY_FIXED",
+                        "first_seen_at": "2026-05-07T00:00:00Z",
+                        "act": {
+                            "ref": "PR#13057",
+                            "created_at": "2026-05-07T01:00:00Z",
+                            "repair_ref": "PR#13058",
+                            "repair_created_at": "2026-05-07T21:00:00Z",
+                        },
+                        "verify": {
+                            "status": "FAIL",
+                            "failed_at": "2026-05-07T18:00:00Z",
+                        },
+                    }
+                ]
+            },
+            now=NOW,
+        )
+
+        self.assertEqual(report.violations_total, 0)
 
     def test_week_old_still_present_requires_escalation(self) -> None:
         report = goal_loop_anti_stagnation.build_report(

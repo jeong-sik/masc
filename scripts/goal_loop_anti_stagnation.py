@@ -89,6 +89,12 @@ def age_hours(now: datetime, timestamp: datetime | None) -> float | None:
     return round(max((now - timestamp).total_seconds(), 0.0) / 3600.0, 3)
 
 
+def delta_hours(later: datetime | None, earlier: datetime | None) -> float | None:
+    if later is None or earlier is None:
+        return None
+    return round((later - earlier).total_seconds() / 3600.0, 3)
+
+
 def load_json(path: str) -> dict[str, Any]:
     with Path(path).open("r", encoding="utf-8") as handle:
         data = json.load(handle)
@@ -133,12 +139,21 @@ def finding_status(raw: dict[str, Any]) -> str:
     return value.upper() if value is not None else "UNKNOWN"
 
 
-def first_seen_at(raw: dict[str, Any]) -> datetime | None:
+def first_seen_at(raw: dict[str, Any]) -> tuple[datetime | None, str | None]:
     for key in ("first_seen_at", "detected_at", "created_at"):
         parsed = parse_timestamp(raw.get(key))
         if parsed is not None:
-            return parsed
-    return None
+            return parsed, key
+    return None, None
+
+
+def first_seen_evidence(
+    first_seen: datetime | None, first_seen_source: str | None
+) -> dict[str, Any]:
+    return {
+        "first_seen_at": iso_utc(first_seen) if first_seen is not None else None,
+        "first_seen_source": first_seen_source,
+    }
 
 
 def violation(
@@ -164,7 +179,7 @@ def violation(
 
 def evaluate_finding(raw: dict[str, Any], *, now: datetime) -> StagnationFinding:
     status = finding_status(raw)
-    first_seen = first_seen_at(raw)
+    first_seen, first_seen_source = first_seen_at(raw)
     finding_age = age_hours(now, first_seen)
     act = nested_object(raw, "act")
     verify = nested_object(raw, "verify")
@@ -175,6 +190,12 @@ def evaluate_finding(raw: dict[str, Any], *, now: datetime) -> StagnationFinding
     act_merged = parse_timestamp(act.get("merged_at") or raw.get("act_merged_at"))
     repair_ref = string_field(act.get("repair_ref") or raw.get("repair_ref"))
     rollback_ref = string_field(act.get("rollback_ref") or raw.get("rollback_ref"))
+    repair_created = parse_timestamp(
+        act.get("repair_created_at") or raw.get("repair_created_at")
+    )
+    rollback_created = parse_timestamp(
+        act.get("rollback_created_at") or raw.get("rollback_created_at")
+    )
     verify_status = string_field(verify.get("status") or raw.get("verify_status"))
     verify_status_upper = verify_status.upper() if verify_status is not None else None
     verify_checked = parse_timestamp(
@@ -205,32 +226,41 @@ def evaluate_finding(raw: dict[str, Any], *, now: datetime) -> StagnationFinding
             )
         )
 
-    if (
-        is_still_present
-        and finding_age is not None
+    act_creation_hours = delta_hours(act_created, first_seen)
+    act_creation_missing_overdue = (
+        finding_age is not None
         and finding_age > ACT_CREATION_DEADLINE_HOURS
         and act_created is None
-    ):
+    )
+    act_creation_late = (
+        act_creation_hours is not None
+        and act_creation_hours > ACT_CREATION_DEADLINE_HOURS
+    )
+    if is_still_present and (act_creation_missing_overdue or act_creation_late):
+        evidence = first_seen_evidence(first_seen, first_seen_source)
+        evidence.update(
+            {
+                "act_ref": act_ref,
+                "act_created_at": iso_utc(act_created) if act_created else None,
+                "act_creation_hours": act_creation_hours,
+            }
+        )
         violations.append(
             violation(
                 raw=raw,
                 rule_id="act_creation_deadline_missed",
                 severity="critical",
                 message="ACT was not created within 48 hours of a present finding.",
-                age=finding_age,
+                age=act_creation_hours if act_creation_late else finding_age,
                 deadline_hours=ACT_CREATION_DEADLINE_HOURS,
-                evidence={
-                    "first_seen_at": raw.get("first_seen_at"),
-                    "act_ref": act_ref,
-                },
+                evidence=evidence,
             )
         )
 
     merge_age = age_hours(now, act_merged)
-    verify_after_merge_ok = (
-        verify_checked is not None
-        and act_merged is not None
-        and verify_checked >= act_merged
+    verify_after_merge_hours = delta_hours(verify_checked, act_merged)
+    verify_after_merge_ok = verify_after_merge_hours is not None and (
+        0.0 <= verify_after_merge_hours <= VERIFY_AFTER_MERGE_DEADLINE_HOURS
     )
     if (
         act_merged is not None
@@ -244,23 +274,38 @@ def evaluate_finding(raw: dict[str, Any], *, now: datetime) -> StagnationFinding
                 rule_id="verify_after_merge_deadline_missed",
                 severity="critical",
                 message="Merged ACT has no Verify evidence within 24 hours.",
-                age=merge_age,
+                age=(
+                    verify_after_merge_hours
+                    if verify_after_merge_hours is not None
+                    else merge_age
+                ),
                 deadline_hours=VERIFY_AFTER_MERGE_DEADLINE_HOURS,
                 evidence={
                     "act_merged_at": act.get("merged_at") or raw.get("act_merged_at"),
                     "verify_checked_at": verify.get("checked_at")
                     or raw.get("verify_checked_at"),
+                    "verify_after_merge_hours": verify_after_merge_hours,
                 },
             )
         )
 
     verify_failed_age = age_hours(now, verify_failed)
+    repair_after_failure_hours = delta_hours(repair_created, verify_failed)
+    rollback_after_failure_hours = delta_hours(rollback_created, verify_failed)
+    repair_in_deadline = repair_ref is not None and (
+        repair_after_failure_hours is not None
+        and 0.0 <= repair_after_failure_hours <= VERIFY_FAIL_REPAIR_DEADLINE_HOURS
+    )
+    rollback_in_deadline = rollback_ref is not None and (
+        rollback_after_failure_hours is not None
+        and 0.0 <= rollback_after_failure_hours <= VERIFY_FAIL_REPAIR_DEADLINE_HOURS
+    )
     if (
         verify_status_upper == "FAIL"
         and verify_failed_age is not None
         and verify_failed_age > VERIFY_FAIL_REPAIR_DEADLINE_HOURS
-        and repair_ref is None
-        and rollback_ref is None
+        and not repair_in_deadline
+        and not rollback_in_deadline
     ):
         violations.append(
             violation(
@@ -274,7 +319,15 @@ def evaluate_finding(raw: dict[str, Any], *, now: datetime) -> StagnationFinding
                     "verify_failed_at": verify.get("failed_at")
                     or raw.get("verify_failed_at"),
                     "repair_ref": repair_ref,
+                    "repair_created_at": iso_utc(repair_created)
+                    if repair_created
+                    else None,
+                    "repair_after_failure_hours": repair_after_failure_hours,
                     "rollback_ref": rollback_ref,
+                    "rollback_created_at": iso_utc(rollback_created)
+                    if rollback_created
+                    else None,
+                    "rollback_after_failure_hours": rollback_after_failure_hours,
                 },
             )
         )
@@ -285,6 +338,8 @@ def evaluate_finding(raw: dict[str, Any], *, now: datetime) -> StagnationFinding
         and finding_age > WEEK_OLD_ESCALATION_HOURS
         and not escalated
     ):
+        evidence = first_seen_evidence(first_seen, first_seen_source)
+        evidence["escalated"] = escalated
         violations.append(
             violation(
                 raw=raw,
@@ -293,10 +348,7 @@ def evaluate_finding(raw: dict[str, Any], *, now: datetime) -> StagnationFinding
                 message="Finding is still present for more than one week without escalation.",
                 age=finding_age,
                 deadline_hours=WEEK_OLD_ESCALATION_HOURS,
-                evidence={
-                    "first_seen_at": raw.get("first_seen_at"),
-                    "escalated": escalated,
-                },
+                evidence=evidence,
             )
         )
 

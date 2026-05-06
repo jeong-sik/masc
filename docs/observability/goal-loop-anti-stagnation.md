@@ -20,6 +20,7 @@ The input JSON is a finding lifecycle snapshot:
         "created_at": "2026-05-05T06:00:00Z",
         "merged_at": "2026-05-06T00:00:00Z",
         "repair_ref": "PR#13060",
+        "repair_created_at": "2026-05-06T05:00:00Z",
         "rollback_ref": null
       },
       "verify": {
@@ -44,7 +45,8 @@ The input JSON is a finding lifecycle snapshot:
 - `verify_after_merge_deadline_missed`: merged ACT work must have Verify
   evidence within 24 hours.
 - `verify_fail_repair_deadline_missed`: failed Verify needs a repair PR or
-  rollback reference within 4 hours.
+  rollback reference with `repair_created_at` or `rollback_created_at` within
+  4 hours. A bare reference without a timestamp does not prove the SLA.
 - `week_old_escalation_required`: findings still present for more than one week
   must have an escalation record.
 

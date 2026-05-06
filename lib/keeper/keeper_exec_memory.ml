@@ -318,7 +318,17 @@ let keeper_memory_search_json
          | Some s -> [ "top_score", `Float s ]
          | None -> [])) in
     append_jsonl_line (keeper_decision_log_path config meta.name) log_entry
-  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_decision_audit_flush_failures
+      ~labels:[("keeper", meta.name)]
+      ();
+    Log.Keeper.warn
+      "keeper:%s memory_search decision-log append failed: %s"
+      meta.name
+      (Printexc.to_string exn));
   Yojson.Safe.to_string result
 ;;
 

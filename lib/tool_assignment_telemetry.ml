@@ -331,8 +331,7 @@ let warm_up () : unit =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
       let error = Stdlib.Printexc.to_string exn in
-      observe_failure ~site:"warm_up_exception" ~error;
-      Log.Telemetry.warn "warm_up failed: %s" error
+      observe_failure ~site:"warm_up_exception" ~error
 
 let reset_for_testing () : unit =
   store_ref := None;

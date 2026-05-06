@@ -163,6 +163,18 @@
       ]
     },
     {
+      "signal_id": "memory_usage",
+      "metric_names": [
+        "masc_memory_usage_bytes"
+      ],
+      "alert_names": [
+        "GoalLoopMemoryUsageInvalidWarning"
+      ],
+      "threshold_fragments": [
+        "<= 0"
+      ]
+    },
+    {
       "signal_id": "config_unknown_keys_ignored",
       "metric_names": [
         "masc_config_unknown_keys_ignored_total"

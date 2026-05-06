@@ -110,7 +110,6 @@ tools = [
   "masc_tasks", "masc_claim_next", "masc_transition", "masc_add_task",
   "masc_batch_add_tasks", "masc_agents", "masc_dashboard",
   "masc_agent_card", "masc_tool_help",
-  "masc_goal_list", "masc_coordination_fsm_snapshot",
   "masc_task_history", "masc_plan_get", "masc_plan_get_task",
   "masc_join", "masc_leave", "masc_who", "masc_heartbeat",
   "masc_messages", "masc_broadcast",
@@ -138,11 +137,19 @@ tools = [
   "masc_keeper_msg_result",
   "masc_keeper_list",
   "masc_keeper_status",
+  "masc_goal_review",
+]
+
+# Goal lifecycle: Goal Store + FSM proof surface.
+# `masc_goal_review` stays in dispatch as a legacy compatibility wrapper;
+# keepers that need feature-proof Goal work should use this group instead.
+[masc.goal]
+tools = [
   "masc_goal_list",
   "masc_goal_upsert",
-  "masc_goal_review",
   "masc_goal_transition",
   "masc_goal_verify",
+  "masc_coordination_fsm_snapshot",
 ]
 
 [masc.code_observe]
@@ -225,12 +232,11 @@ masc_groups = ["essential", "coordination"]
 
 [presets.dispatch]
 groups = ["base", "board_core", "filesystem", "library", "shell"]
-masc_groups = ["essential", "dispatch", "code_observe", "coordination"]
+masc_groups = ["essential", "dispatch", "goal", "code_observe", "coordination"]
 
 [presets.coding]
 groups = ["base", "board_core", "filesystem", "filesystem_write", "library", "shell", "coordination", "coding_shard", "coding", "github", "github_review"]
-masc_groups = ["essential", "coding"]
-masc_tools = ["masc_goal_list", "masc_coordination_fsm_snapshot"]
+masc_groups = ["essential", "goal", "coding"]
 
 # Step 9 (bloodflow restoration plan): the research preset is granted
 # delivery-oriented capabilities so analyst/scholar/verifier-tier keepers
@@ -240,13 +246,13 @@ masc_tools = ["masc_goal_list", "masc_coordination_fsm_snapshot"]
 # [keeper_routine_allowlist.ml].
 [presets.research]
 groups = ["base", "filesystem", "filesystem_write", "library", "shell", "coordination", "board_core", "autoresearch", "coding_shard", "coding", "github", "github_review"]
-masc_groups = ["essential", "coordination", "coding"]
+masc_groups = ["essential", "goal", "coordination", "coding"]
 
 # Delivery preset: research + coding for keepers that need to produce code changes.
 # Use for keepers whose goal involves PRs, issues, or code fixes.
 [presets.delivery]
 groups = ["base", "filesystem", "filesystem_write", "library", "shell", "coordination", "board_core", "autoresearch", "coding_shard", "coding", "github", "github_review", "voice"]
-masc_groups = ["essential", "coordination", "coding"]
+masc_groups = ["essential", "goal", "coordination", "coding"]
 
 [presets.full]
 all_candidates = true

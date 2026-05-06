@@ -227,6 +227,41 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(refs, set())
         self.assertEqual(sources, set())
 
+    def test_scan_pr_creation_evidence_reads_keeper_scoped_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            keepers_dir = root / ".masc" / "keepers"
+            keepers_dir.mkdir(parents=True)
+            (keepers_dir / "alpha.decisions.jsonl").write_text(
+                json.dumps(
+                    {
+                        "tool": "keeper_pr_create",
+                        "ok": True,
+                        "output": {
+                            "pr_url": "https://github.com/acme/repo/pull/125",
+                            "number": 125,
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            evidence = audit.scan_pr_creation_evidence(root, "alpha")
+
+        self.assertEqual(
+            evidence.refs,
+            {
+                "keeper_pr_create",
+                "https://github.com/acme/repo/pull/125",
+                "PR#125",
+            },
+        )
+        self.assertEqual(
+            evidence.sources,
+            {str(keepers_dir / "alpha.decisions.jsonl")},
+        )
+
     def test_pr_action_metric_paths_returns_newest_date_split_first(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

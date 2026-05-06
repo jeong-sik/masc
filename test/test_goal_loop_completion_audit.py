@@ -819,6 +819,11 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertEqual(checklist_evidence["tracking_issue_refs_total"], 8)
         self.assertEqual(checklist_evidence["missing_tracking_issue_refs"], [])
         self.assertEqual(checklist_evidence["invalid_tracking_issue_refs"], [])
+        self.assertEqual(checklist_evidence["artifact_refs_total"], 57)
+        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 57)
+        self.assertTrue(checklist_evidence["artifact_refs_all_resolved"])
+        self.assertEqual(checklist_evidence["missing_artifact_refs"], [])
+        self.assertEqual(checklist_evidence["invalid_artifact_refs"], [])
         closeout_evidence = by_id["prompt_requirements_closeout_complete"].evidence
         self.assertEqual(by_id["prompt_requirements_closeout_complete"].status, "FAIL")
         self.assertEqual(closeout_evidence["incomplete_requirements"], 19)
@@ -938,6 +943,72 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
             checklist_evidence["invalid_requirements"],
         )
         self.assertEqual(by_id["prompt_requirements_closeout_complete"].status, "FAIL")
+
+    def test_completion_audit_rejects_missing_prompt_artifact_refs(self) -> None:
+        checklist = json.loads(PROMPT_CHECKLIST_FIXTURE.read_text(encoding="utf-8"))
+        requirements = checklist["requirements"]
+        assert isinstance(requirements, list)
+        first = requirements[0]
+        assert isinstance(first, dict)
+        first["artifact_refs"] = [
+            "test/fixtures/goal_loop/observe.startup.json",
+            "test/fixtures/goal_loop/missing.prompt-artifact.json#NF-1",
+        ]
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            prompt_closeout_checklist=checklist,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
+        self.assertFalse(checklist_evidence["recorded"])
+        self.assertFalse(checklist_evidence["artifact_refs_all_resolved"])
+        self.assertEqual(checklist_evidence["artifact_refs_total"], 56)
+        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 55)
+        self.assertEqual(
+            checklist_evidence["missing_artifact_refs"],
+            [
+                (
+                    f"{first['requirement_id']}: "
+                    "test/fixtures/goal_loop/missing.prompt-artifact.json"
+                )
+            ],
+        )
+        self.assertIn(
+            f"{first['requirement_id']}: missing_artifact_ref",
+            checklist_evidence["invalid_requirements"],
+        )
+
+    def test_completion_audit_rejects_invalid_prompt_artifact_refs(self) -> None:
+        checklist = json.loads(PROMPT_CHECKLIST_FIXTURE.read_text(encoding="utf-8"))
+        requirements = checklist["requirements"]
+        assert isinstance(requirements, list)
+        first = requirements[0]
+        assert isinstance(first, dict)
+        first["artifact_refs"] = [
+            "../outside.json",
+            "/Users/dancer/Downloads/private-goal-loop.json",
+        ]
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            prompt_closeout_checklist=checklist,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
+        self.assertFalse(checklist_evidence["recorded"])
+        self.assertFalse(checklist_evidence["artifact_refs_all_resolved"])
+        self.assertEqual(
+            checklist_evidence["invalid_artifact_refs"],
+            [first["requirement_id"]],
+        )
+        self.assertEqual(checklist_evidence["missing_artifact_refs"], [])
+        self.assertIn(
+            f"{first['requirement_id']}: invalid_artifact_ref",
+            checklist_evidence["invalid_requirements"],
+        )
 
     def test_completion_audit_rejects_wrong_catalog_prompt_closeout_checklist(
         self,

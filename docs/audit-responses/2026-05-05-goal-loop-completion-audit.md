@@ -244,7 +244,10 @@
   checklist maps all 21 prompt requirements to concrete artifacts and blockers
   across all 12 prompt source documents: 2 `PASS`, 17 `PARTIAL`, and 2
   `BLOCKED` requirements, with all 19 non-PASS rows carrying valid GitHub issue
-  tracking refs.
+  tracking refs. The prompt checklist also validates that all `artifact_refs`
+  resolve to repo-local files after optional `#...` anchors are stripped; user
+  local paths, path escapes, and missing artifact files make the checklist
+  unrecorded.
 - [근거] `python3 scripts/goal_loop_completion_audit.py
   /tmp/goal-loop-13266-b367-status-audit.json --structured-id-triage
   test/fixtures/goal_loop/structured-id-triage.external-claim.json
@@ -288,7 +291,9 @@
   `prompt_requirements_closeout_complete` criterion fails while any mapped
   requirement remains `PARTIAL` or `BLOCKED`, passes only when every mapped
   requirement is `PASS`, and rejects incomplete rows that lack valid GitHub
-  issue tracking refs.
+  issue tracking refs. It also rejects prompt checklist rows whose
+  `artifact_refs` are missing, invalid, user-local, or not backed by repo-local
+  files.
 - [근거] `python3 test/test_observe_goal_loop_logs.py` checked at
   2026-05-06T14:43:35+09:00, confidence High: the strict-row corpus validator
   now binds row sources to the audit catalog external-source manifest when a

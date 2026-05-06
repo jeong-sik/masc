@@ -324,4 +324,6 @@ that the prompt-to-artifact map is present; it is not a completion proxy while
 the checklist still contains `PARTIAL` or `BLOCKED` requirements. Every
 non-PASS prompt checklist row must also include at least one valid GitHub issue
 tracking ref, so incomplete prompt coverage cannot be recorded without an
-owned follow-up.
+owned follow-up. Checklist `artifact_refs` must resolve to repo-local files
+after optional `#...` anchors are stripped; absolute paths, parent-directory
+escapes, user-local paths, and missing files make the checklist unrecorded.

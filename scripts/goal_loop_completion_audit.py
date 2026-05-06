@@ -38,6 +38,7 @@ PROMPT_CHECKLIST_ISSUE_REF_RE = re.compile(
     r"^https://github\.com/jeong-sik/masc-mcp/issues/\d+$"
 )
 PROMPT_SOURCE_PATH_PREFIX = "prompt_corpus/GOAL_LOOP/"
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 @dataclass(frozen=True)
@@ -143,6 +144,19 @@ def prompt_source_list(value: Any) -> tuple[list[str], dict[str, Any]]:
             and prompt_sources_have_expected_prefix
         ),
     }
+
+
+def repo_artifact_path(value: Any) -> str | None:
+    artifact_ref = as_nonempty_str(value)
+    if artifact_ref is None or contains_user_local_path(artifact_ref):
+        return None
+    artifact_path = artifact_ref.split("#", 1)[0].strip()
+    if not artifact_path:
+        return None
+    parsed = Path(artifact_path)
+    if parsed.is_absolute() or ".." in parsed.parts:
+        return None
+    return artifact_path
 
 
 def criterion(
@@ -694,6 +708,10 @@ def prompt_closeout_checklist_evidence(
     tracking_issue_refs: set[str] = set()
     missing_tracking_issue_refs: list[str] = []
     invalid_tracking_issue_refs: list[str] = []
+    artifact_refs_total = 0
+    artifact_refs_resolved = 0
+    missing_artifact_refs: list[str] = []
+    invalid_artifact_refs: list[str] = []
     for index, requirement in enumerate(requirements):
         if not isinstance(requirement, dict):
             invalid_requirements.append(f"#{index}: not_object")
@@ -714,6 +732,26 @@ def prompt_closeout_checklist_evidence(
         artifacts = requirement.get("artifact_refs")
         if not isinstance(artifacts, list) or len(artifacts) == 0:
             invalid_requirements.append(f"{requirement_id or index}: missing_artifacts")
+        else:
+            requirement_label = str(requirement_id or f"#{index}")
+            artifact_refs_total += len(artifacts)
+            for artifact in artifacts:
+                artifact_path = repo_artifact_path(artifact)
+                if artifact_path is None:
+                    invalid_artifact_refs.append(requirement_label)
+                    invalid_requirements.append(
+                        f"{requirement_label}: invalid_artifact_ref"
+                    )
+                    continue
+                if (REPO_ROOT / artifact_path).is_file():
+                    artifact_refs_resolved += 1
+                else:
+                    missing_artifact_refs.append(
+                        f"{requirement_label}: {artifact_path}"
+                    )
+                    invalid_requirements.append(
+                        f"{requirement_label}: missing_artifact_ref"
+                    )
         status = requirement.get("status")
         if status in PROMPT_CHECKLIST_STATUSES:
             status_counts[status] += 1
@@ -790,6 +828,16 @@ def prompt_closeout_checklist_evidence(
         "tracking_issue_refs_total": len(tracking_issue_refs),
         "missing_tracking_issue_refs": missing_tracking_issue_refs,
         "invalid_tracking_issue_refs": invalid_tracking_issue_refs,
+        "artifact_refs_total": artifact_refs_total,
+        "artifact_refs_resolved": artifact_refs_resolved,
+        "artifact_refs_all_resolved": (
+            artifact_refs_total > 0
+            and artifact_refs_resolved == artifact_refs_total
+            and not missing_artifact_refs
+            and not invalid_artifact_refs
+        ),
+        "missing_artifact_refs": missing_artifact_refs,
+        "invalid_artifact_refs": sorted(set(invalid_artifact_refs)),
         "invalid_requirements": invalid_requirements,
         "local_path_leaks": local_path_leaks,
         "recorded": recorded,

@@ -37,6 +37,20 @@ const DECK_PANEL = 'overflow-hidden rounded-[var(--r-0)] border border-[var(--co
 const DECK_HEAD = 'border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2'
 const DECK_CHIP = 'rounded-[var(--r-0)] border border-[var(--color-border-strong)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs'
 const META_CHIP = 'rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs'
+const BACKLOG_PRESSURE_PRIORITIES = [1, 2, 3, 4] as const
+const BACKLOG_STALE_THRESHOLD_HOURS: Record<number, number | undefined> = {
+  1: 1,
+  2: 6,
+}
+
+export type BacklogPressureRow = {
+  priority: number
+  count: number
+  oldestAgeMs: number | null
+  oldestTask: Task | null
+  staleThresholdHours: number | null
+  tone: 'bad' | 'warn' | 'ok' | 'idle'
+}
 
 export function resetTaskBacklogState() {
   doneVisibleCount.value = DONE_PAGE_SIZE
@@ -50,6 +64,72 @@ function priorityToneClass(priority: number): string {
     case 3: return 'border-[var(--color-info-border)] bg-[var(--color-info-soft)] text-[var(--color-info-fg)]'
     default: return 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]'
   }
+}
+
+function pressureToneClass(row: BacklogPressureRow): string {
+  switch (row.tone) {
+    case 'bad': return 'border-[var(--color-err-border)] bg-[var(--color-err-soft)] text-[var(--color-err-fg)]'
+    case 'warn': return 'border-[var(--color-warn-border)] bg-[var(--color-warn-soft)] text-[var(--color-warn-fg)]'
+    case 'ok': return 'border-[var(--color-info-border)] bg-[var(--color-info-soft)] text-[var(--color-info-fg)]'
+    default: return 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]'
+  }
+}
+
+function taskCreatedAtMs(task: Task): number | null {
+  if (!task.created_at) return null
+  const ts = Date.parse(task.created_at)
+  return Number.isFinite(ts) ? ts : null
+}
+
+function formatAgeMs(ageMs: number | null): string {
+  if (ageMs == null) return 'unknown'
+  const minutes = Math.max(0, Math.floor(ageMs / 60_000))
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 48) return `${hours}h`
+  const days = Math.floor(hours / 24)
+  return `${days}d`
+}
+
+export function buildBacklogPressureRows(tasks: Task[], nowMs = Date.now()): BacklogPressureRow[] {
+  const todoTasks = tasks.filter(task => task.status === 'todo')
+  return BACKLOG_PRESSURE_PRIORITIES.map(priority => {
+    const matching = todoTasks.filter(task => (task.priority ?? 4) === priority)
+    const withAge = matching
+      .map(task => {
+        const createdAt = taskCreatedAtMs(task)
+        return {
+          task,
+          ageMs: createdAt == null ? null : Math.max(0, nowMs - createdAt),
+        }
+      })
+      .sort((a, b) => {
+        if (a.ageMs == null && b.ageMs == null) return a.task.id.localeCompare(b.task.id)
+        if (a.ageMs == null) return 1
+        if (b.ageMs == null) return -1
+        return b.ageMs - a.ageMs
+      })
+    const oldest = withAge[0] ?? null
+    const staleThresholdHours = BACKLOG_STALE_THRESHOLD_HOURS[priority] ?? null
+    const stale =
+      staleThresholdHours != null
+      && oldest?.ageMs != null
+      && oldest.ageMs >= staleThresholdHours * 60 * 60 * 1000
+    const tone =
+      matching.length === 0
+        ? 'idle'
+        : stale
+          ? priority === 1 ? 'bad' : 'warn'
+          : 'ok'
+    return {
+      priority,
+      count: matching.length,
+      oldestAgeMs: oldest?.ageMs ?? null,
+      oldestTask: oldest?.task ?? null,
+      staleThresholdHours,
+      tone,
+    }
+  })
 }
 
 function taskScope(task: Task): string | null {
@@ -212,6 +292,56 @@ function TaskColumn({
   `
 }
 
+function BacklogPressure({ todoTasks }: { todoTasks: Task[] }) {
+  const rows = buildBacklogPressureRows(todoTasks)
+  const total = rows.reduce((sum, row) => sum + row.count, 0)
+  const staleRows = rows.filter(row => row.tone === 'bad' || row.tone === 'warn')
+  if (total === 0) return null
+
+  return html`
+    <section class="mb-3 ${DECK_PANEL}" aria-label="Backlog pressure">
+      <div class="${DECK_HEAD} flex items-start justify-between gap-3">
+        <div>
+          <h3 class="font-mono text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-primary)]">Backlog Pressure</h3>
+          <p class="mt-1 text-3xs leading-relaxed text-[var(--color-fg-muted)]">Unclaimed tasks grouped by priority and oldest age.</p>
+        </div>
+        <span class=${`rounded-[var(--r-0)] border px-1.5 py-0.5 font-mono text-3xs font-semibold ${
+          staleRows.length > 0
+            ? 'border-[var(--color-err-border)] bg-[var(--color-err-soft)] text-[var(--color-err-fg)]'
+            : 'border-[var(--color-info-border)] bg-[var(--color-info-soft)] text-[var(--color-info-fg)]'
+        }`}>${total} todo</span>
+      </div>
+      <div class="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-2 p-2.5">
+        ${rows.map(row => html`
+          <button
+            key=${row.priority}
+            type="button"
+            disabled=${!row.oldestTask}
+            onClick=${() => row.oldestTask ? openTaskDetail(row.oldestTask) : undefined}
+            class=${`min-h-22 rounded-[var(--r-0)] border p-2 text-left transition-colors ${pressureToneClass(row)} ${row.oldestTask ? 'hover:border-[var(--color-border-strong)]' : 'opacity-60'}`}
+            aria-label=${`${priorityLabel(row.priority)} backlog pressure: ${row.count} unclaimed`}
+          >
+            <div class="flex items-center justify-between gap-2">
+              <span class="font-mono text-2xs font-semibold">${priorityLabel(row.priority)}</span>
+              <span class="font-mono text-2xs font-semibold">${row.count}</span>
+            </div>
+            <div class="mt-2 font-mono text-3xs uppercase">oldest ${formatAgeMs(row.oldestAgeMs)}</div>
+            <div class="mt-1 truncate text-3xs">
+              ${row.count === 0
+                ? 'clear'
+                : row.staleThresholdHours == null
+                  ? 'watch'
+                  : row.tone === 'bad' || row.tone === 'warn'
+                    ? `breached ${row.staleThresholdHours}h`
+                    : `within ${row.staleThresholdHours}h`}
+            </div>
+          </button>
+        `)}
+      </div>
+    </section>
+  `
+}
+
 export function TaskBacklog() {
   const { todo, inProgress, awaitingVerification, done } = tasksByStatus.value
   const totalTasks = todo.length + inProgress.length + awaitingVerification.length + done.length
@@ -304,6 +434,7 @@ export function TaskBacklog() {
           <span class="font-mono text-3xs text-[var(--color-fg-muted)]">${filteredTotal}/${totalTasks}</span>
         ` : null}
       </div>
+      <${BacklogPressure} todoTasks=${todo} />
       <div class="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-3 items-start">
         <${TaskColumn}
           title="할 일"

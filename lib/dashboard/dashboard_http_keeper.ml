@@ -1933,16 +1933,13 @@ let keeper_cost_aggregates_json
             in
             let latency_ms = Safe_ops.json_int ~default:0 "latency_ms" j in
             let input_t =
-              Safe_ops.json_int_opt "input_tokens" j
-              |> Option.value ~default:0
+              int_member_fallback "input_tokens" j |> Option.value ~default:0
             in
             let output_t =
-              Safe_ops.json_int_opt "output_tokens" j
-              |> Option.value ~default:0
+              int_member_fallback "output_tokens" j |> Option.value ~default:0
             in
             let total_t =
-              Safe_ops.json_int_opt "total_tokens" j
-              |> Option.value ~default:0
+              int_member_fallback "total_tokens" j |> Option.value ~default:0
             in
             let model_used =
               Safe_ops.json_string ~default:"" "model_used" j

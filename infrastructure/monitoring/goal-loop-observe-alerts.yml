@@ -164,9 +164,10 @@ groups:
         annotations:
           summary: "Provider health probe skipped for {{ $labels.provider_name }}"
           description: |
-            Bootstrap skipped a live probe and treated provider health as
-            advisory. The provider must not be counted healthy until a
-            completed probe writes actual health status.
+            Bootstrap expected a live probe but skipped it. Cloud and CLI
+            providers that do not support auth-free bootstrap health probes
+            are reported as not_applicable instead of incrementing this
+            warning counter.
 
       - alert: GoalLoopProviderActualHealthUnhealthyCritical
         expr: |
@@ -180,7 +181,7 @@ groups:
           summary: "Provider {{ $labels.provider_name }} is unhealthy"
           description: |
             Provider actual health status is unhealthy. Values are:
-            0 unknown, 1 healthy, 2 degraded, 3 unhealthy.
+            0 unknown or not_applicable, 1 healthy, 2 degraded, 3 unhealthy.
 
       - alert: GoalLoopPricingCatalogMissCritical
         expr: |

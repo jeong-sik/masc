@@ -486,6 +486,48 @@ let test_valid_catalog_probes_local_endpoints_when_eio_caps_available () =
     (skip_metric () -. before_skip_metric);
   check (float 0.0001) "unhealthy local probe gauge" 3.0 (health_metric ())
 
+let test_cloud_probe_is_not_applicable_not_skipped () =
+  with_temp_dir "cascade-catalog-runtime-cloud-probe" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  with_config_dir config_dir @@ fun () ->
+  let skipped_metric () =
+    Prometheus.metric_value_or_zero
+      Prometheus.metric_provider_health_probe_skipped
+      ~labels:[("provider_name", "codex_cli"); ("profile_name", "big_three")]
+      ()
+  in
+  let before_skipped_metric = skipped_metric () in
+  ignore
+    (write_cascade_json config_dir
+       {|{
+  "big_three_models": ["codex_cli:auto"]
+}|});
+  let snapshot =
+    match Cascade_catalog_runtime.inspect_active () with
+    | Ok (Cascade_catalog_runtime.Validated snapshot) -> snapshot
+    | Ok state ->
+        failf "expected fully validated cloud-only snapshot, got %s"
+          (Yojson.Safe.to_string
+             (Cascade_catalog_runtime.state_to_yojson state))
+    | Error rejection ->
+        failf "unexpected cloud-only rejection: %s"
+          (Yojson.Safe.to_string
+             (Cascade_catalog_runtime.rejection_to_yojson rejection))
+  in
+  let snapshot_string =
+    Yojson.Safe.to_string (Cascade_catalog_runtime.snapshot_to_yojson snapshot)
+  in
+  check bool "cloud probe is explicitly not applicable" true
+    (contains_substring snapshot_string "\"status\":\"not_applicable\"");
+  check bool "cloud probe explains auth-free bootstrap boundary" true
+    (contains_substring snapshot_string "auth-free bootstrap probe");
+  check bool "cloud probe is not counted as skipped" false
+    (contains_substring snapshot_string "\"status\":\"skipped\"");
+  check (float 0.0001) "cloud probe skipped metric does not increment"
+    0.0
+    (skipped_metric () -. before_skipped_metric)
+
 let test_invalid_hot_reload_preserves_last_known_good () =
   with_temp_dir "cascade-catalog-lkg" @@ fun dir ->
   let config_dir = Filename.concat dir "config" in
@@ -1192,6 +1234,10 @@ let () =
             "invalid hot reload preserves last-known-good"
             `Quick
             test_invalid_hot_reload_preserves_last_known_good;
+          test_case
+            "cloud probe is not applicable, not skipped"
+            `Quick
+            test_cloud_probe_is_not_applicable_not_skipped;
           test_case
             "legacy runtime wrapper does not fallback to defaults"
             `Quick

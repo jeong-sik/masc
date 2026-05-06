@@ -5,6 +5,7 @@
 open Alcotest
 module Sup = Masc_mcp.Keeper_supervisor
 module Reg = Masc_mcp.Keeper_registry
+module Watchdog = Masc_mcp.Keeper_stale_watchdog
 module KT = Masc_mcp.Keeper_types
 module AQ = Masc_mcp.Keeper_approval_queue
 module KSM = Masc_mcp.Keeper_state_machine
@@ -29,6 +30,16 @@ let cleanup_dir dir =
         Unix.unlink path
   in
   try rm dir with _ -> ()
+
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop index =
+    if index + needle_len > haystack_len then false
+    else if String.sub haystack index needle_len = needle then true
+    else loop (index + 1)
+  in
+  needle_len = 0 || loop 0
 
 let with_restart_launch_noop f =
   Sup.set_restart_launch_noop_for_test true;
@@ -762,6 +773,124 @@ let test_stale_storm_pause_skips_restart () =
       check bool "registry entry unregistered after storm pause"
         false (Reg.is_registered ~base_path:config.base_path name))
 
+let test_stale_fleet_batch_pause_skips_restart () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let name = "stale-fleet-batch-keeper" in
+      let meta = make_meta name in
+      (match KT.write_meta config meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let reg = Reg.register ~base_path:config.base_path name meta in
+      Eio.Promise.resolve reg.done_r (`Crashed "synthetic stale fleet batch");
+      Reg.restore_supervisor_state ~base_path:config.base_path name
+        ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
+      Reg.set_failure_reason ~base_path:config.base_path name
+        (Some (Reg.Stale_fleet_batch { distinct_count = 3 }));
+      let baseline_pause =
+        Masc_mcp.Prometheus.metric_total
+          "masc_keeper_stale_fleet_batch_paused_total"
+      in
+      let baseline_dead =
+        Masc_mcp.Prometheus.metric_total
+          Masc_mcp.Prometheus.metric_keeper_dead_total
+      in
+      let ctx : _ KT.context =
+        {
+          config;
+          agent_name = "supervisor";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = Some (Eio.Stdenv.net env);
+        }
+      in
+      Sup.sweep_and_recover ctx;
+      let after_pause =
+        Masc_mcp.Prometheus.metric_total
+          "masc_keeper_stale_fleet_batch_paused_total"
+      in
+      let after_dead =
+        Masc_mcp.Prometheus.metric_total
+          Masc_mcp.Prometheus.metric_keeper_dead_total
+      in
+      check (float 0.001) "stale_fleet_batch_paused counter incremented by 1"
+        (baseline_pause +. 1.0) after_pause;
+      check (float 0.001) "dead counter NOT incremented (batch is not death)"
+        baseline_dead after_dead;
+      (match KT.read_meta config name with
+       | Ok (Some m) ->
+           check bool "meta.paused = true after fleet batch pause"
+             true m.paused;
+           check string "last_blocker records fleet batch"
+             "stale_fleet_batch" m.runtime.last_blocker
+       | Ok None -> fail "meta missing after fleet batch pause"
+       | Error err -> fail ("read_meta failed: " ^ err));
+      check bool "registry entry unregistered after fleet batch pause"
+        false (Reg.is_registered ~base_path:config.base_path name))
+
+let test_stale_fleet_batch_latch_marks_batch_members () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      Watchdog.reset_batch_terminations_for_test ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let names = [ "batch-a"; "batch-b"; "batch-provider" ] in
+      List.iter
+        (fun name ->
+           let meta = make_meta name in
+           (match KT.write_meta config meta with
+            | Ok () -> ()
+            | Error err -> fail err);
+           ignore (Reg.register ~base_path:config.base_path name meta))
+        names;
+      Reg.set_failure_reason ~base_path:config.base_path "batch-a"
+        (Some (Reg.Stale_turn_timeout (Reg.Idle_turn { stall_seconds = 305.0 })));
+      Reg.set_failure_reason ~base_path:config.base_path "batch-b"
+        (Some Reg.Fiber_unresolved);
+      Reg.set_failure_reason ~base_path:config.base_path "batch-provider"
+        (Some (Reg.Provider_runtime_error { code = "auth"; detail = "401" }));
+      Watchdog.latch_stale_fleet_batch_reasons_for_test
+        ~config ~distinct_count:3 names;
+      let reason name =
+        match Reg.get ~base_path:config.base_path name with
+        | Some entry -> entry.Reg.last_failure_reason
+        | None -> fail ("missing registry entry " ^ name)
+      in
+      (match reason "batch-a", reason "batch-b", reason "batch-provider" with
+       | Some (Reg.Stale_fleet_batch { distinct_count = a }),
+         Some (Reg.Stale_fleet_batch { distinct_count = b }),
+         Some (Reg.Stale_fleet_batch { distinct_count = c }) ->
+           check int "batch-a distinct_count" 3 a;
+           check int "batch-b distinct_count" 3 b;
+           check int "batch-provider distinct_count" 3 c
+       | _ -> fail "unexpected batch latch failure reasons");
+      (match KT.read_meta config "batch-provider" with
+       | Ok (Some m) ->
+           check bool "provider root cause remains in blocker text" true
+             (contains_substring m.runtime.last_blocker "provider_runtime_error");
+           check bool "provider blocker class is fleet batch" true
+             (m.runtime.last_blocker_class = Some KT.Stale_fleet_batch)
+       | Ok None -> fail "batch-provider meta missing"
+       | Error err -> fail ("read_meta failed: " ^ err)))
+
 let test_oas_timeout_budget_loop_pause_skips_restart () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -864,7 +993,9 @@ let test_unresolved_watchdog_stopped_budget_loop_is_reaped () =
       (match KT.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused = true after unresolved watchdog stop"
-             true m.paused
+             true m.paused;
+           check bool "budget loop blocker class preserved"
+             true (m.runtime.last_blocker_class = Some KT.Oas_timeout_budget)
        | Ok None -> fail "meta missing after unresolved watchdog stop"
        | Error err -> fail ("read_meta failed: " ^ err));
       check bool "unresolved watchdog-stopped entry reaped"
@@ -1351,6 +1482,10 @@ let () =
     "stale_storm_phase2", [
       test_case "Stale_termination_storm skips restart, persists paused, increments counter" `Quick
         test_stale_storm_pause_skips_restart;
+      test_case "Stale_fleet_batch skips restart, persists paused, increments counter" `Quick
+        test_stale_fleet_batch_pause_skips_restart;
+      test_case "watchdog fleet batch latch marks batch members" `Quick
+        test_stale_fleet_batch_latch_marks_batch_members;
       test_case "Oas_timeout_budget_loop skips restart, persists paused, increments counter" `Quick
         test_oas_timeout_budget_loop_pause_skips_restart;
       test_case "unresolved watchdog-stopped budget loop is reaped" `Quick
@@ -1830,7 +1965,7 @@ let () =
            [Turn_consecutive_failures] / [Exception] / etc., and
            [watchdog_stop_pending] only restarts on
            [Stale_turn_timeout | Stale_termination_storm |
-           Oas_timeout_budget_loop].  Recovery would set
+           Stale_fleet_batch | Oas_timeout_budget_loop].  Recovery would set
            [fiber_stop=true] but the supervisor would never convert
            it into a crash/restart.  Pin the post-recovery cohort to
            [stale_turn_timeout] so this regression is caught. *)

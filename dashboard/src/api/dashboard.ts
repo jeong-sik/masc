@@ -1985,6 +1985,7 @@ function normalizeRuntimeBlockerClass(value: unknown): KeeperConfig['runtime']['
     case 'heartbeat_failures':
     case 'turn_failures':
     case 'exception':
+    case 'stale_fleet_batch':
       return blockerClass
     default:
       return null

@@ -113,6 +113,11 @@ type blocker_class =
         per-keeper meta read [last_blocker_class = null] for the
         majority cohort during a fleet stall (observed: 6/14 keepers
         in cohort=stale_turn_timeout, every meta showing null). *)
+  | Stale_fleet_batch
+    (** Multiple keepers were stale-watchdog terminated inside the fleet
+        batch window. This mirrors [Keeper_registry.Stale_fleet_batch] so
+        keeper_meta and dashboard status can report the systemic blocker
+        instead of collapsing it to a generic turn timeout. *)
 
 let blocker_class_to_string = function
   | Cascade_exhausted _ -> "cascade_exhausted"
@@ -127,6 +132,7 @@ let blocker_class_to_string = function
   | No_tool_capable_provider -> "no_tool_capable_provider"
   | Fiber_unresolved -> "fiber_unresolved"
   | Stale_turn_timeout -> "stale_turn_timeout"
+  | Stale_fleet_batch -> "stale_fleet_batch"
 ;;
 
 let blocker_class_of_serialized_string = function
@@ -142,6 +148,7 @@ let blocker_class_of_serialized_string = function
   | "no_tool_capable_provider" -> Some No_tool_capable_provider
   | "fiber_unresolved" -> Some Fiber_unresolved
   | "stale_turn_timeout" -> Some Stale_turn_timeout
+  | "stale_fleet_batch" -> Some Stale_fleet_batch
   | _ -> None
 ;;
 

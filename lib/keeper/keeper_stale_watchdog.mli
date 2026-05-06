@@ -27,6 +27,16 @@ val classify_batch_root_cause_for_test :
   Keeper_registry.failure_reason list -> batch_root_cause
 (** Test-only view of the batch root-cause classifier. *)
 
+val reset_batch_terminations_for_test : unit -> unit
+(** Test-only reset for fleet batch termination history. *)
+
+val record_batch_termination_for_test : string -> float -> string list
+(** Test-only wrapper around the fleet batch termination window. *)
+
+val latch_stale_fleet_batch_reasons_for_test :
+  config:Coord.config -> distinct_count:int -> string list -> unit
+(** Test-only wrapper for the batch failure-reason latch. *)
+
 val fork_stale_watchdog :
   'a context -> keeper_meta -> Keeper_registry.registry_entry -> unit
 (** Fork a stale-turn watchdog fiber for the given keeper.
@@ -49,5 +59,6 @@ val fork_stale_watchdog :
     per-class root-cause attribution.
 
     On detection, sets [fiber_stop] and emits a stale broadcast. The
-    supervisor's [sweep_and_recover] picks up the stopped fiber and
-    restarts with exponential backoff. *)
+    supervisor's [sweep_and_recover] picks up the stopped fiber and restarts
+    with exponential backoff, unless a per-keeper stale storm or fleet batch
+    latch routes the keeper to auto-pause/backoff first. *)

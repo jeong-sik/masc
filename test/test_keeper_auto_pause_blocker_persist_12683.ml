@@ -32,10 +32,21 @@ let test_oas_timeout_budget_blocker_class_roundtrip () =
   | Some _ -> ()
   | None -> fail "Oas_timeout_budget label did not parse back"
 
+let test_stale_fleet_batch_blocker_class_roundtrip () =
+  let cls = KT.Stale_fleet_batch in
+  let label = KT.blocker_class_to_string cls in
+  check string "label" "stale_fleet_batch" label;
+  match MC.blocker_class_of_serialized_string label with
+  | Some MC.Stale_fleet_batch -> ()
+  | Some _ -> fail "Stale_fleet_batch label parsed as wrong class"
+  | None -> fail "Stale_fleet_batch label did not parse back"
+
 let test_blocker_class_labels_are_distinct () =
   let tt = KT.blocker_class_to_string KT.Turn_timeout in
   let ot = KT.blocker_class_to_string KT.Oas_timeout_budget in
-  check bool "Turn_timeout <> Oas_timeout_budget" true (tt <> ot)
+  let fb = KT.blocker_class_to_string KT.Stale_fleet_batch in
+  check bool "Turn_timeout <> Oas_timeout_budget" true (tt <> ot);
+  check bool "Stale_fleet_batch distinct" true (fb <> tt && fb <> ot)
 
 let test_meta_json_roundtrip_with_auto_pause_blocker () =
   let base_json = `Assoc [
@@ -113,6 +124,8 @@ let () =
             test_turn_timeout_blocker_class_roundtrip;
           test_case "Oas_timeout_budget roundtrip" `Quick
             test_oas_timeout_budget_blocker_class_roundtrip;
+          test_case "Stale_fleet_batch roundtrip" `Quick
+            test_stale_fleet_batch_blocker_class_roundtrip;
           test_case "labels are distinct" `Quick
             test_blocker_class_labels_are_distinct;
         ] );

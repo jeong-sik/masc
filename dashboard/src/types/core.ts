@@ -346,6 +346,7 @@ export type KeeperRuntimeBlockerClass =
   | 'heartbeat_failures'
   | 'turn_failures'
   | 'exception'
+  | 'stale_fleet_batch'
 
 export interface KeeperTrustLatestEvent {
   kind: string

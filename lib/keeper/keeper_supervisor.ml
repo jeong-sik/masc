@@ -226,16 +226,18 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
               watchdog sets fiber_stop + Stale_turn_timeout, the heartbeat
               loop exits normally but the supervisor must treat this as a
               crash so sweep_and_recover restarts the keeper.
-              #10765 Phase 2: [Stale_termination_storm] also funnels through
-              the crash path, but [sweep_and_recover]'s [`Crashed] branch
-              detects this variant and routes to auto-pause instead of
-              [to_restart], breaking the restart-loop-back-to-stale cycle. *)
+              #10765 Phase 2: [Stale_termination_storm] and
+              [Stale_fleet_batch] also funnel through the crash path, but
+              [sweep_and_recover]'s [`Crashed] branch detects these variants
+              and routes to auto-pause instead of [to_restart], breaking the
+              restart-loop-back-to-stale cycle. *)
            let watchdog_triggered =
              match Keeper_registry.get ~base_path meta.name with
              | Some e -> (
                  match e.last_failure_reason with
                  | Some (Keeper_registry.Stale_turn_timeout _)
                  | Some (Keeper_registry.Stale_termination_storm _)
+                 | Some (Keeper_registry.Stale_fleet_batch _)
                  | Some (Keeper_registry.Oas_timeout_budget_loop _) -> true
                  | _ -> false)
              | None -> false
@@ -1137,6 +1139,23 @@ let handle_stale_storm_pause (ctx : _ context)
           See issue #10765."
          count)
 
+let handle_stale_fleet_batch_pause (ctx : _ context)
+    (entry : Keeper_registry.registry_entry) ~distinct_count =
+  handle_crash_auto_pause ctx entry
+    ~reason_tag:"stale_fleet_batch"
+    ~metric_name:Prometheus.metric_keeper_stale_fleet_batch_paused
+    ~lifecycle_detail:
+      (Printf.sprintf "stale_fleet_batch distinct_count=%d" distinct_count)
+    ~blocker_class:(Some Stale_fleet_batch)
+    ~log_message:
+      (Printf.sprintf
+         "STALE FLEET BATCH AUTO-PAUSED (distinct_keepers=%d in batch \
+          window). Supervisor will attempt self-healing auto-resume with \
+          exponential back-off instead of restarting each keeper into the \
+          same systemic failure mode (cascade dead, provider auth, fd leak, \
+          etc.). See #10765 / #10474 / #10745."
+         distinct_count)
+
 let handle_oas_timeout_budget_pause (ctx : _ context)
     (entry : Keeper_registry.registry_entry) ~count =
   handle_crash_auto_pause ctx entry
@@ -1181,6 +1200,12 @@ let sweep_and_recover (ctx : _ context) =
            once per storm, not once per sweep tick). *)
         handle_stale_storm_pause ctx entry ~count;
         to_unregister := entry :: !to_unregister
+    | Some (Keeper_registry.Stale_fleet_batch { distinct_count }) ->
+        (* Fleet batch detection means multiple keepers crossed the stale
+           watchdog together. Treating those as independent keeper crashes
+           immediately replays the batch. Pause/backoff instead. *)
+        handle_stale_fleet_batch_pause ctx entry ~distinct_count;
+        to_unregister := entry :: !to_unregister
     | Some (Keeper_registry.Oas_timeout_budget_loop { count }) ->
         (* Repeated OAS budget exhaustion means the active
            cascade/model is not producing within the turn budget.
@@ -1203,6 +1228,7 @@ let sweep_and_recover (ctx : _ context) =
     match entry.last_failure_reason with
     | Some (Keeper_registry.Stale_turn_timeout _)
     | Some (Keeper_registry.Stale_termination_storm _)
+    | Some (Keeper_registry.Stale_fleet_batch _)
     | Some (Keeper_registry.Oas_timeout_budget_loop _) -> true
     | _ -> false
   in
@@ -1220,14 +1246,15 @@ let sweep_and_recover (ctx : _ context) =
        finally branch; this branch — [force_unresolved_watchdog_crash]
        — was the other silent path where the stamp was missing.
        Mapping covers all three watchdog cohorts handled by
-       [watchdog_stop_pending]; only [Stale_turn_timeout] currently
-       has a dedicated [blocker_class] variant, the other two map to
-       it as a best-effort signal until they get their own variants. *)
+       [watchdog_stop_pending]. *)
     let stamp_cohort =
       match entry.last_failure_reason with
-      | Some (Keeper_registry.Stale_turn_timeout _)
-      | Some (Keeper_registry.Stale_termination_storm _)
+      | Some (Keeper_registry.Stale_fleet_batch _) ->
+        Some Stale_fleet_batch
       | Some (Keeper_registry.Oas_timeout_budget_loop _) ->
+        Some Oas_timeout_budget
+      | Some (Keeper_registry.Stale_turn_timeout _)
+      | Some (Keeper_registry.Stale_termination_storm _) ->
         Some Stale_turn_timeout
       | _ -> None
     in
@@ -1921,7 +1948,7 @@ let request_alive_but_stuck_recovery ~base_path ~elapsed
      like [Turn_consecutive_failures] / [Exception] / etc.  Those
      reasons are not in the [watchdog_stop_pending] restart set
      ([Stale_turn_timeout | Stale_termination_storm |
-     Oas_timeout_budget_loop]), so preserving them would set
+     Stale_fleet_batch | Oas_timeout_budget_loop]), so preserving them would set
      [fiber_stop = true] and then the supervisor's next sweep would
      skip [force_unresolved_watchdog_crash] — the fiber goes dormant
      instead of being restarted, defeating the entire recovery.
@@ -1933,7 +1960,7 @@ let request_alive_but_stuck_recovery ~base_path ~elapsed
 
      Idempotent: if the keeper is already in a watchdog cohort
      ([Stale_turn_timeout] / [Stale_termination_storm] /
-     [Oas_timeout_budget_loop]), preserve it so we don't churn the
+     [Stale_fleet_batch] / [Oas_timeout_budget_loop]), preserve it so we don't churn the
      [stall_seconds] field on every poll. *)
   let prior_str =
     Option.map Keeper_registry.failure_reason_to_string
@@ -1945,6 +1972,7 @@ let request_alive_but_stuck_recovery ~base_path ~elapsed
     | Some
         ( Keeper_registry.Stale_turn_timeout _
         | Keeper_registry.Stale_termination_storm _
+        | Keeper_registry.Stale_fleet_batch _
         | Keeper_registry.Oas_timeout_budget_loop _ ) as kept ->
         kept
     | _ -> Some (Keeper_registry.Stale_turn_timeout kill_class)

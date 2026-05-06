@@ -170,6 +170,7 @@ type blocker_class =
   | No_tool_capable_provider
   | Fiber_unresolved
   | Stale_turn_timeout
+  | Stale_fleet_batch
 
 val blocker_class_to_string : blocker_class -> string
 val cascade_exhaustion_summary : cascade_exhaustion_reason -> string

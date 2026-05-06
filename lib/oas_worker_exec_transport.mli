@@ -25,6 +25,15 @@ val claude_code_max_turns_hard_cap : int
 val provider_effective_max_turns :
   Llm_provider.Provider_config.provider_kind -> int -> int
 
+val sanitize_cli_completion_request_for_argv :
+  Llm_provider.Llm_transport.completion_request ->
+  Llm_provider.Llm_transport.completion_request
+(** Scrub request text that CLI transports may flatten into argv.
+
+    Codex CLI passes sub-threshold prompts as a positional argument, so any
+    invalid UTF-8 in history, system prompt, or request-scoped MCP overrides
+    can make the subprocess fail before the cascade reaches provider logic. *)
+
 (** Sorted, comma-joined fingerprint of a tool list.  Used as the dedup key
     by the [#10097] omission machinery — identical sets fingerprint to the
     same string regardless of input order. *)

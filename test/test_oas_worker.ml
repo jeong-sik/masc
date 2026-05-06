@@ -3372,6 +3372,107 @@ let test_codex_cli_prompt_preflight_scales_retry_limit_for_argv_only_overflow ()
         (preflight.retry_limit_tokens < preflight.context_window_tokens)
   | None -> Alcotest.fail "expected argv-only codex preflight overflow"
 
+let test_sanitize_cli_completion_request_for_argv_scrubs_codex_request () =
+  let provider_cfg = make_codex_cli_provider_cfg () in
+  let policy =
+    {
+      Llm_provider.Llm_transport.empty_runtime_mcp_policy with
+      servers =
+        [
+          Llm_provider.Llm_transport.Http_server
+            {
+              name = "masc\001http";
+              url = "http://127.0.0.1:8935/mcp\127";
+              headers = [ ("X-MASC\000Agent", "keeper\127one") ];
+            };
+        ];
+      allowed_server_names = [ "masc\001http" ];
+      allowed_tool_names = [ "keeper\127shell" ];
+      permission_mode = Some "approve\001all";
+      approval_mode = Some "manual\127gate";
+    }
+  in
+  let req =
+    {
+      Llm_provider.Llm_transport.config =
+        { provider_cfg with system_prompt = Some "sys\001prompt" };
+      messages =
+        [
+          Agent_sdk.Types.user_msg "go\127now";
+          Agent_sdk.Types.
+            {
+              role = Assistant;
+              content =
+                [
+                  ToolUse
+                    {
+                      id = "call\001id";
+                      name = "keeper\127shell";
+                      input = `Assoc [ ("cmd\000", `String "pwd\127") ];
+                    };
+                ];
+              name = None;
+              tool_call_id = None;
+              metadata = [];
+            };
+        ];
+      tools = [];
+      runtime_mcp_policy = Some policy;
+    }
+  in
+  let sanitized =
+    Oas_worker_exec_transport.sanitize_cli_completion_request_for_argv req
+  in
+  Alcotest.(check (option string))
+    "system prompt sanitized" (Some "sys prompt")
+    sanitized.config.system_prompt;
+  (match sanitized.messages with
+   | user_msg :: assistant_msg :: _ ->
+       Alcotest.(check string)
+         "message text sanitized" "go now"
+         (Agent_sdk.Types.text_of_message user_msg);
+       (match assistant_msg.Agent_sdk.Types.content with
+        | [ Agent_sdk.Types.ToolUse { id; name; input } ] ->
+            Alcotest.(check string) "tool id sanitized" "call id" id;
+            Alcotest.(check string) "tool name sanitized" "keeper shell" name;
+            (match input with
+             | `Assoc [ (key, `String value) ] ->
+                 Alcotest.(check string) "tool input key sanitized" "cmd " key;
+                 Alcotest.(check string) "tool input value sanitized" "pwd " value
+             | _ -> Alcotest.fail "expected sanitized tool input")
+        | _ -> Alcotest.fail "expected sanitized ToolUse")
+   | _ -> Alcotest.fail "expected sanitized messages");
+  (match sanitized.runtime_mcp_policy with
+   | Some
+       {
+         Llm_provider.Llm_transport.servers =
+           [
+             Llm_provider.Llm_transport.Http_server
+               { name; url; headers = [ (header_key, header_value) ] };
+           ];
+         allowed_server_names;
+         allowed_tool_names;
+         permission_mode;
+         approval_mode;
+         _;
+       } ->
+       Alcotest.(check string) "server name sanitized" "masc http" name;
+       Alcotest.(check string) "server url sanitized"
+         "http://127.0.0.1:8935/mcp " url;
+       Alcotest.(check string) "header key sanitized" "X-MASC Agent"
+         header_key;
+       Alcotest.(check string) "header value sanitized" "keeper one"
+         header_value;
+       Alcotest.(check (list string)) "allowed servers sanitized"
+         [ "masc http" ] allowed_server_names;
+       Alcotest.(check (list string)) "allowed tools sanitized"
+         [ "keeper shell" ] allowed_tool_names;
+       Alcotest.(check (option string)) "permission mode sanitized"
+         (Some "approve all") permission_mode;
+       Alcotest.(check (option string)) "approval mode sanitized"
+         (Some "manual gate") approval_mode
+   | _ -> Alcotest.fail "expected sanitized runtime MCP policy")
+
 let test_worker_build_agent_uses_default_internal_retry_policy () =
   with_raw_trace "worker_build_agent_retry" @@ fun raw_trace ->
   let meta = make_worker_meta () in
@@ -4744,6 +4845,8 @@ let () =
         test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback;
       Alcotest.test_case "codex preflight scales retry limit for argv overflow" `Quick
         test_codex_cli_prompt_preflight_scales_retry_limit_for_argv_only_overflow;
+      Alcotest.test_case "codex argv scrubber cleans request text" `Quick
+        test_sanitize_cli_completion_request_for_argv_scrubs_codex_request;
       Alcotest.test_case "public MCP tools on codex_cli use runtime MCP lane" `Quick
         test_resolve_tool_lane_for_codex_cli_public_tools_uses_runtime_mcp_policy;
       Alcotest.test_case

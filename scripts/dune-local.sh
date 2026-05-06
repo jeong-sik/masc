@@ -162,15 +162,17 @@ if _needs_opam_lock; then
   opam_bounded_wait=0
   opam_lock_timeout=""
   if [[ "${MASC_DUNE_LOCK_HELD:-0}" = "1" \
-        && -n "${MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT:-}" \
-        && "${MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT}" != "0" ]]; then
+        && -n "${MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT:-}" ]]; then
     opam_lock_timeout="${MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT}"
     if ! [[ "$opam_lock_timeout" =~ ^[0-9]+$ ]]; then
       printf '[dune-local] invalid MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT=%q; expected non-negative integer seconds\n' \
         "$opam_lock_timeout" >&2
       exit 2
     fi
-    opam_bounded_wait=1
+    opam_lock_timeout="$((10#$opam_lock_timeout))"
+    if (( opam_lock_timeout > 0 )); then
+      opam_bounded_wait=1
+    fi
   fi
   if command -v lockf >/dev/null 2>&1; then
     if [[ "$opam_bounded_wait" = "1" ]]; then

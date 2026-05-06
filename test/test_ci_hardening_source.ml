@@ -562,8 +562,9 @@ let test_oas_pin_source_contracts () =
        "MASC_OPAM_LOCK_PATH:-/tmp/me-opam-switch.lock");
   check bool "dune-local.sh takes build lock before opam switch lock" true
     (match
-       file_pattern_position "scripts/dune-local.sh" "_needs_dune_lock",
-       file_pattern_position "scripts/dune-local.sh" "_needs_opam_lock"
+       file_pattern_position "scripts/dune-local.sh" "waiting for lock %s",
+       file_pattern_position "scripts/dune-local.sh"
+         "waiting for opam switch lock"
      with
      | Some dune_pos, Some opam_pos -> dune_pos < opam_pos
      | _ -> false);

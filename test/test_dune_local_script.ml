@@ -432,6 +432,42 @@ exec "$@"
         (contains_substring stderr "releasing Dune lock");
       check bool "dune was invoked" true (Sys.file_exists dune_log))
 
+let test_zero_like_opam_lock_timeout_waits_forever () =
+  with_temp_dir "dune-local-opam-lock-timeout-zero-like" (fun dir ->
+      let bin_dir, dune_log =
+        setup_fake_repo dir ~pin_check_exit_code:0
+          ~pin_check_stderr_msg:"pin ok"
+      in
+      let lockf_log = Filename.concat dir "lockf-calls.log" in
+      write_executable
+        (Filename.concat bin_dir "lockf")
+        (Printf.sprintf
+           {|#!/bin/sh
+printf 'argv=%%s\n' "$*" >> %s
+while [ "${1#-}" != "$1" ]; do
+  case "$1" in
+    -t) printf 'timeout=%%s\n' "$2" >> %s; exit 98 ;;
+    *) shift ;;
+  esac
+done
+shift
+exec "$@"
+|}
+           (quote lockf_log) (quote lockf_log));
+      let code, _stdout, stderr =
+        run_dune_local dir bin_dir
+          ~env:[ ("MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT", "00") ]
+          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_OPAM_LOCK_HELD" ]
+          "build"
+      in
+      check int "zero-like timeout waits forever" 0 code;
+      let lock_log = read_file lockf_log in
+      check bool "lockf timeout flag not used for zero-like value" false
+        (contains_substring lock_log "timeout=");
+      check bool "timeout message not emitted for zero-like value" false
+        (contains_substring stderr "releasing Dune lock");
+      check bool "dune was invoked" true (Sys.file_exists dune_log))
+
 let test_opam_lockf_wrapped_failure_does_not_claim_timeout () =
   with_temp_dir "dune-local-opam-lock-wrapped-failure" (fun dir ->
       let bin_dir, dune_log =
@@ -980,6 +1016,8 @@ let () =
             test_opam_lock_timeout_releases_dune_lock;
           test_case "unset opam lock timeout waits forever" `Quick
             test_unset_opam_lock_timeout_waits_forever;
+          test_case "zero-like opam lock timeout waits forever" `Quick
+            test_zero_like_opam_lock_timeout_waits_forever;
           test_case "opam lock wrapped failure is not labeled timeout" `Quick
             test_opam_lockf_wrapped_failure_does_not_claim_timeout;
           test_case "opam lock timeout env must be numeric" `Quick

@@ -26,6 +26,10 @@ The current live-derived metric fixture is
 `test/fixtures/goal_loop/verify-pipeline-live-metrics.external-claim.json`.
 It is intentionally not green: the fixture turns observed regressions into
 `FAIL` gates while leaving absent metric families as `BLOCKED`.
+The current redacted log-contract fixture is
+`test/fixtures/goal_loop/verify-pipeline-live-log-contract.external-claim.json`.
+It records only aggregate violation counts with `--max-samples 0`; raw runtime
+log lines are not committed.
 
 Covered gate groups:
 
@@ -46,6 +50,8 @@ The prompt-level specs live under `specs/goal-loop/`:
 the current fixture is recorded in
 `test/fixtures/goal_loop/verify-pipeline-tla-results.external-claim.json` and
 fed into the pipeline with `--tla-results-json`.
+Precomputed log-contract evidence is fed with `--log-contract-json`; direct
+log paths can still be supplied with repeated `--log`.
 
 ## Completion Audit
 

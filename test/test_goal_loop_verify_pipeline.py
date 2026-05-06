@@ -26,6 +26,13 @@ LIVE_METRICS_FIXTURE = (
     / "goal_loop"
     / "verify-pipeline-live-metrics.external-claim.json"
 )
+LIVE_LOG_CONTRACT_FIXTURE = (
+    REPO_ROOT
+    / "test"
+    / "fixtures"
+    / "goal_loop"
+    / "verify-pipeline-live-log-contract.external-claim.json"
+)
 
 spec = importlib.util.spec_from_file_location("goal_loop_verify_pipeline", SCRIPT_PATH)
 assert spec is not None
@@ -156,15 +163,60 @@ class GoalLoopVerifyPipelineTest(unittest.TestCase):
 
         by_id = {item.gate_id: item for item in report.gates}
         self.assertEqual(report.status, "FAIL")
-        self.assertEqual(report.gates_passed, 3)
+        self.assertEqual(report.gates_passed, 5)
         self.assertEqual(report.gates_failed, 4)
-        self.assertEqual(report.gates_blocked, 6)
+        self.assertEqual(report.gates_blocked, 4)
         self.assertEqual(report.gates_skipped, 1)
         self.assertEqual(by_id["keeper_turn_success_rate_healthy"].status, "FAIL")
-        self.assertEqual(by_id["no_pricing_miss"].status, "FAIL")
+        self.assertEqual(by_id["no_pricing_miss"].status, "PASS")
+        self.assertEqual(by_id["no_utf8_repair"].status, "FAIL")
+        self.assertEqual(by_id["recovery_executed"].status, "FAIL")
         self.assertEqual(by_id["admission_backpressure_observed"].status, "FAIL")
-        self.assertEqual(by_id["dashboard_snapshot_latency_p99"].status, "FAIL")
-        self.assertEqual(by_id["no_utf8_repair"].reason, "missing_metric")
+        self.assertEqual(by_id["dashboard_snapshot_latency_p99"].status, "PASS")
+        self.assertEqual(by_id["no_semaphore_skip"].reason, "missing_metric")
+
+    def test_live_log_contract_fixture_records_current_failures(self) -> None:
+        log_contract = json.loads(LIVE_LOG_CONTRACT_FIXTURE.read_text(encoding="utf-8"))
+        report = goal_loop_verify_pipeline.build_pipeline_report(
+            repo_root=REPO_ROOT,
+            metrics_json=None,
+            tla_results=None,
+            log_paths=[],
+            log_contract_json=log_contract,
+            unit_tests_passed=False,
+            unit_tests_failed=False,
+        )
+
+        by_id = {item.gate_id: item for item in report.gates}
+        gate = by_id["post_act_log_contract"]
+        self.assertEqual(gate.status, "FAIL")
+        self.assertEqual(gate.reason, "log_contract_failed")
+        self.assertEqual(gate.evidence["status"], "FAIL")
+        self.assertEqual(len(gate.evidence["violations"]), 9)
+        self.assertEqual(gate.evidence["violations"][0]["samples"], [])
+
+    def test_cli_accepts_precomputed_log_contract_json(self) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT_PATH),
+                "--log-contract-json",
+                str(LIVE_LOG_CONTRACT_FIXTURE),
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        by_id = {item["gate_id"]: item for item in payload["gates"]}
+        self.assertEqual(by_id["post_act_log_contract"]["status"], "FAIL")
+        self.assertEqual(
+            by_id["post_act_log_contract"]["reason"],
+            "log_contract_failed",
+        )
 
     def test_metric_gate_commands_reference_snapshot_metric_keys(self) -> None:
         report = goal_loop_verify_pipeline.build_pipeline_report(

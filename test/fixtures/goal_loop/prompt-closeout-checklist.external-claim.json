@@ -291,6 +291,7 @@
         "scripts/goal_loop_completion_audit.py",
         "test/fixtures/goal_loop/live-post-act-verify.external-claim.json",
         "test/fixtures/goal_loop/verify-pipeline.current.external-claim.json",
+        "test/fixtures/goal_loop/verify-pipeline-live-log-contract.external-claim.json",
         "test/fixtures/goal_loop/verify-pipeline-live-metrics.external-claim.json",
         "test/fixtures/goal_loop/verify-pipeline-tla-results.external-claim.json",
         "specs/goal-loop/TierRouting.tla",
@@ -306,7 +307,7 @@
       ],
       "status": "PARTIAL",
       "criterion_id": "verify_pipeline_complete",
-      "gap": "Closeout verifier, the repo-owned Verify pipeline contract, the live metric snapshot, and the three prompt TLA specs now exist. The current pipeline fixture is FAIL/BLOCKED/SKIPPED: live metrics fail keeper success rate, pricing miss, admission backpressure, and dashboard latency gates; semaphore/UTF-8/recovery/Orient metrics, unit-test run evidence, and post-ACT log-contract inputs are still missing.",
+      "gap": "Closeout verifier, the repo-owned Verify pipeline contract, the redacted live log-contract report, the live metric snapshot, and the three prompt TLA specs now exist. The current pipeline fixture is FAIL/BLOCKED/SKIPPED: live metrics fail keeper success rate, UTF-8 repair, recovery execution, and admission backpressure gates; the live log-contract report fails on forbidden-present and required-missing patterns; semaphore and Orient metrics plus unit-test run evidence are still missing.",
       "implementation_pr_refs": [
         "https://github.com/jeong-sik/masc-mcp/pull/13657"
       ],

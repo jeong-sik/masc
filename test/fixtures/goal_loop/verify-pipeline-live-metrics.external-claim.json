@@ -1,12 +1,14 @@
 {
-  "checked_at": "2026-05-07T00:21:04+09:00",
-  "evidence_id": "goal-loop-live-metrics-2026-05-07T002104+0900",
+  "checked_at": "2026-05-07T00:45:05+09:00",
+  "evidence_id": "goal-loop-live-metrics-2026-05-07T004505+0900",
   "metrics": {
     "admission_queue_depth": 0.0,
     "admission_queue_wait_ms": 0.0,
-    "dashboard_snapshot_latency_p99": 27.19999999999999,
-    "keeper_turn_success_rate": 0.5384615384615384,
-    "pricing_catalog_miss_total": 6.0
+    "dashboard_snapshot_latency_p99": 4.787499999999998,
+    "keeper_turn_success_rate": 0.5555555555555556,
+    "persistence_utf8_repair_total": 49.0,
+    "pricing_catalog_miss_total": 0.0,
+    "recovery_strategy_executed_total_1h": 0.0
   },
   "runtime": {
     "effective_base_path": "<MASC_BASE_PATH>",
@@ -21,7 +23,10 @@
   "schema_version": 1,
   "snapshot_kind": "goal_loop_verify_metrics",
   "source": {
-    "command": "curl -sS -m 5 -H 'Authorization: Bearer <local-token>' http://127.0.0.1:8935/metrics -o <TEMP_DIR>/goal-loop-live-metrics.prom && python3 scripts/goal_loop_metrics_snapshot.py <TEMP_DIR>/goal-loop-live-metrics.prom --pretty",
+    "command": "curl -sS -m 5 -H 'Authorization: Bearer <local-token>' http://127.0.0.1:8935/metrics -o <TEMP_DIR>/goal-loop-live-metrics.prom && python3 scripts/goal_loop_metrics_snapshot.py <TEMP_DIR>/goal-loop-live-metrics.prom --set recovery_strategy_executed_total_1h=0 --pretty",
+    "manual_overrides": {
+      "recovery_strategy_executed_total_1h": "0, derived from the redacted log-contract report where recovery_strategy_executed is required_missing"
+    },
     "raw_prometheus_text_committed": false
   }
 }

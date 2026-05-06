@@ -417,7 +417,11 @@ def build_tla_gates(
     return gates
 
 
-def build_log_gate(log_paths: list[str]) -> VerifyGate:
+def build_log_gate(
+    log_paths: list[str],
+    *,
+    log_contract_json: dict[str, Any] | None = None,
+) -> VerifyGate:
     command = [
         "scripts/verify_goal_loop_logs.py",
         "--mode",
@@ -427,6 +431,20 @@ def build_log_gate(log_paths: list[str]) -> VerifyGate:
         "--must-not-contain",
         "...",
     ]
+    if log_contract_json is not None:
+        status = log_contract_json.get("status")
+        if status not in {"PASS", "FAIL"}:
+            raise ValueError("log contract JSON status must be PASS or FAIL")
+        return gate(
+            "post_act_log_contract",
+            "log_verification",
+            status,
+            "Post-ACT production log contract was evaluated from supplied report JSON.",
+            command=command,
+            reason=None if status == "PASS" else "log_contract_failed",
+            evidence=log_contract_json,
+        )
+
     if not log_paths:
         return gate(
             "post_act_log_contract",
@@ -539,12 +557,13 @@ def build_pipeline_report(
     log_paths: list[str],
     unit_tests_passed: bool,
     unit_tests_failed: bool,
+    log_contract_json: dict[str, Any] | None = None,
 ) -> VerifyPipelineReport:
     gates = [
         build_unit_gate(unit_tests_passed, unit_tests_failed),
         *build_metric_gates(metrics_json),
         *build_tla_gates(repo_root=repo_root, tla_results=tla_results),
-        build_log_gate(log_paths),
+        build_log_gate(log_paths, log_contract_json=log_contract_json),
     ]
     _assert_emitted_gate_ids_match_required(gates)
     counts = {
@@ -614,6 +633,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Post-ACT production log path. Repeat for multiple files.",
     )
     parser.add_argument(
+        "--log-contract-json",
+        help=(
+            "Optional precomputed log-contract report JSON from "
+            "verify_goal_loop_logs.py --mode log-contract."
+        ),
+    )
+    parser.add_argument(
         "--unit-tests-passed",
         action="store_true",
         help="Record the unit test gate as PASS.",
@@ -645,6 +671,7 @@ def main(argv: list[str] | None = None) -> int:
         metrics_json=load_json_file(args.metrics_json),
         tla_results=load_json_file(args.tla_results_json),
         log_paths=list(args.log),
+        log_contract_json=load_json_file(args.log_contract_json),
         unit_tests_passed=args.unit_tests_passed,
         unit_tests_failed=args.unit_tests_failed,
     )

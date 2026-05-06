@@ -30,7 +30,7 @@
         "prometheus_sources": [
           "masc_keeper_turns_total"
         ],
-        "value": 0.5384615384615384
+        "value": 0.5555555555555556
       },
       "gate_id": "keeper_turn_success_rate_healthy",
       "reason": "predicate_failed",
@@ -74,11 +74,11 @@
         "prometheus_sources": [
           "masc_pricing_catalog_miss_total"
         ],
-        "value": 6.0
+        "value": 0.0
       },
       "gate_id": "no_pricing_miss",
-      "reason": "predicate_failed",
-      "status": "FAIL",
+      "reason": null,
+      "status": "PASS",
       "summary": "pricing_catalog_miss_total == 0"
     },
     {
@@ -96,12 +96,12 @@
         "prometheus_sources": [
           "masc_persistence_utf8_repair_total"
         ],
-        "value": null
+        "value": 49.0
       },
       "gate_id": "no_utf8_repair",
-      "reason": "missing_metric",
-      "status": "BLOCKED",
-      "summary": "persistence_utf8_repair_total is absent from the production metric snapshot."
+      "reason": "predicate_failed",
+      "status": "FAIL",
+      "summary": "persistence_utf8_repair_total == 0"
     },
     {
       "category": "regression_metric",
@@ -116,12 +116,12 @@
         "metric_source": "GOAL_LOOP_METRICS_JSON (--metrics-json)",
         "predicate": "> 0",
         "prometheus_sources": [],
-        "value": null
+        "value": 0.0
       },
       "gate_id": "recovery_executed",
-      "reason": "missing_metric",
-      "status": "BLOCKED",
-      "summary": "recovery_strategy_executed_total_1h is absent from the production metric snapshot."
+      "reason": "predicate_failed",
+      "status": "FAIL",
+      "summary": "recovery_strategy_executed_total_1h > 0"
     },
     {
       "category": "regression_metric",
@@ -164,11 +164,11 @@
         "prometheus_sources": [
           "masc_dashboard_snapshot_latency_seconds_bucket"
         ],
-        "value": 27.19999999999999
+        "value": 4.787499999999998
       },
       "gate_id": "dashboard_snapshot_latency_p99",
-      "reason": "predicate_failed",
-      "status": "FAIL",
+      "reason": null,
+      "status": "PASS",
       "summary": "dashboard_snapshot_latency_p99 < 5.0"
     },
     {
@@ -272,29 +272,87 @@
         "..."
       ],
       "evidence": {
-        "must_contain": [
-          "recovery_strategy_executed",
-          "provider_health_probe_completed",
-          "fallback_ladder_activated"
+        "checked_at": "2026-05-07T00:39:10+09:00",
+        "checked_files": [
+          "<MASC_BASE_PATH>/.masc/logs/system_log_2026-05-06.jsonl"
         ],
-        "must_not_contain": [
-          "skipping turn.*semaphore wait",
-          "pricing_catalog_miss",
-          "persistence UTF-8 repaired",
-          "alive-but-stuck detected",
-          "Lenient_json fallback hit",
-          "archived credential.*starvation"
+        "evidence_id": "goal-loop-live-log-contract-2026-05-07T003910+0900",
+        "forbidden_patterns": 6,
+        "required_patterns": 3,
+        "schema_version": 1,
+        "source": {
+          "command": "python3 scripts/verify_goal_loop_logs.py --mode log-contract --max-samples 0 --must-contain recovery_strategy_executed --must-contain provider_health_probe_completed --must-contain fallback_ladder_activated --must-not-contain 'skipping turn.*semaphore wait' --must-not-contain pricing_catalog_miss --must-not-contain 'persistence UTF-8 repaired' --must-not-contain 'alive-but-stuck detected' --must-not-contain 'Lenient_json fallback hit' --must-not-contain 'archived credential.*starvation' <MASC_BASE_PATH>/.masc/logs/system_log_2026-05-06.jsonl --format json",
+          "max_samples": 0,
+          "raw_log_lines_committed": false
+        },
+        "status": "FAIL",
+        "total_lines": 117472,
+        "violations": [
+          {
+            "count": 14,
+            "kind": "forbidden_present",
+            "pattern": "skipping turn.*semaphore wait",
+            "samples": []
+          },
+          {
+            "count": 192,
+            "kind": "forbidden_present",
+            "pattern": "pricing_catalog_miss",
+            "samples": []
+          },
+          {
+            "count": 114,
+            "kind": "forbidden_present",
+            "pattern": "persistence UTF-8 repaired",
+            "samples": []
+          },
+          {
+            "count": 19,
+            "kind": "forbidden_present",
+            "pattern": "alive-but-stuck detected",
+            "samples": []
+          },
+          {
+            "count": 2,
+            "kind": "forbidden_present",
+            "pattern": "Lenient_json fallback hit",
+            "samples": []
+          },
+          {
+            "count": 782,
+            "kind": "forbidden_present",
+            "pattern": "archived credential.*starvation",
+            "samples": []
+          },
+          {
+            "count": 0,
+            "kind": "required_missing",
+            "pattern": "recovery_strategy_executed",
+            "samples": []
+          },
+          {
+            "count": 0,
+            "kind": "required_missing",
+            "pattern": "provider_health_probe_completed",
+            "samples": []
+          },
+          {
+            "count": 0,
+            "kind": "required_missing",
+            "pattern": "fallback_ladder_activated",
+            "samples": []
+          }
         ]
       },
       "gate_id": "post_act_log_contract",
-      "reason": "missing_post_act_logs",
-      "status": "BLOCKED",
-      "summary": "Post-ACT production log contract was not evaluated."
+      "reason": "log_contract_failed",
+      "status": "FAIL",
+      "summary": "Post-ACT production log contract was evaluated from supplied report JSON."
     }
   ],
-  "gates_blocked": 6,
-  "gates_failed": 4,
-  "gates_passed": 3,
+  "gates_blocked": 3,
+  "gates_failed": 5,
+  "gates_passed": 5,
   "gates_skipped": 1,
   "gates_total": 14,
   "schema_version": 1,

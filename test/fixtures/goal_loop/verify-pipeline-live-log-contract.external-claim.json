@@ -1,0 +1,73 @@
+{
+  "checked_at": "2026-05-07T00:39:10+09:00",
+  "checked_files": [
+    "<MASC_BASE_PATH>/.masc/logs/system_log_2026-05-06.jsonl"
+  ],
+  "evidence_id": "goal-loop-live-log-contract-2026-05-07T003910+0900",
+  "forbidden_patterns": 6,
+  "required_patterns": 3,
+  "schema_version": 1,
+  "source": {
+    "command": "python3 scripts/verify_goal_loop_logs.py --mode log-contract --max-samples 0 --must-contain recovery_strategy_executed --must-contain provider_health_probe_completed --must-contain fallback_ladder_activated --must-not-contain 'skipping turn.*semaphore wait' --must-not-contain pricing_catalog_miss --must-not-contain 'persistence UTF-8 repaired' --must-not-contain 'alive-but-stuck detected' --must-not-contain 'Lenient_json fallback hit' --must-not-contain 'archived credential.*starvation' <MASC_BASE_PATH>/.masc/logs/system_log_2026-05-06.jsonl --format json",
+    "max_samples": 0,
+    "raw_log_lines_committed": false
+  },
+  "status": "FAIL",
+  "total_lines": 117472,
+  "violations": [
+    {
+      "count": 14,
+      "kind": "forbidden_present",
+      "pattern": "skipping turn.*semaphore wait",
+      "samples": []
+    },
+    {
+      "count": 192,
+      "kind": "forbidden_present",
+      "pattern": "pricing_catalog_miss",
+      "samples": []
+    },
+    {
+      "count": 114,
+      "kind": "forbidden_present",
+      "pattern": "persistence UTF-8 repaired",
+      "samples": []
+    },
+    {
+      "count": 19,
+      "kind": "forbidden_present",
+      "pattern": "alive-but-stuck detected",
+      "samples": []
+    },
+    {
+      "count": 2,
+      "kind": "forbidden_present",
+      "pattern": "Lenient_json fallback hit",
+      "samples": []
+    },
+    {
+      "count": 782,
+      "kind": "forbidden_present",
+      "pattern": "archived credential.*starvation",
+      "samples": []
+    },
+    {
+      "count": 0,
+      "kind": "required_missing",
+      "pattern": "recovery_strategy_executed",
+      "samples": []
+    },
+    {
+      "count": 0,
+      "kind": "required_missing",
+      "pattern": "provider_health_probe_completed",
+      "samples": []
+    },
+    {
+      "count": 0,
+      "kind": "required_missing",
+      "pattern": "fallback_ladder_activated",
+      "samples": []
+    }
+  ]
+}

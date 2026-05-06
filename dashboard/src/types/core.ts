@@ -227,6 +227,28 @@ export interface BoardCurationHealthComponent {
   rationale: string
 }
 
+export interface BoardKarmaLedgerEvent {
+  recipient: string
+  voter: string
+  target_kind: 'post' | 'comment' | string
+  target_id: string
+  delta: number
+  ts: number
+  ts_iso: string
+}
+
+export interface BoardKarmaTotal {
+  agent: string
+  karma: number
+}
+
+export interface BoardKarmaLedger {
+  events: BoardKarmaLedgerEvent[]
+  count: number
+  scoring_rule: string
+  totals: BoardKarmaTotal[]
+}
+
 // --- SubBoard ---
 
 export type SubBoardAccess = 'open' | 'members_only' | 'owner_only'

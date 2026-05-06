@@ -6,8 +6,10 @@ import {
   fetchBoard,
   fetchBoardCuration,
   fetchBoardHearths,
+  fetchBoardKarmaLedger,
   fetchBoardPost,
   fetchBoardReactions,
+  normalizeBoardKarmaLedger,
   sanitizeBoardTitle,
   toggleReaction,
   voteComment,
@@ -781,6 +783,79 @@ describe('SubBoard API helpers', () => {
       description: 'Operations',
       access: 'members_only',
       members: ['agent-a', 'agent-b'],
+    })
+  })
+})
+
+describe('fetchBoardKarmaLedger', () => {
+  it('normalizes ledger events, totals, and scoring rule', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        events: [
+          {
+            recipient: 'keeper-a',
+            voter: 'operator',
+            target_kind: 'post',
+            target_id: 'post-1',
+            delta: 1,
+            ts: 1_748_779_200,
+            ts_iso: '2025-06-01T12:00:00Z',
+          },
+          { recipient: '', voter: 'ignored', target_kind: 'post', target_id: 'post-x' },
+        ],
+        count: 2,
+        scoring_rule: 'up=+1,down=0',
+        totals: [
+          { agent: 'keeper-a', karma: 3 },
+          { agent: '', karma: 9 },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchBoardKarmaLedger({ agent: ' keeper-a ', limit: 25.9 })
+
+    expect(result).toEqual({
+      events: [
+        {
+          recipient: 'keeper-a',
+          voter: 'operator',
+          target_kind: 'post',
+          target_id: 'post-1',
+          delta: 1,
+          ts: 1_748_779_200,
+          ts_iso: '2025-06-01T12:00:00Z',
+        },
+      ],
+      count: 2,
+      scoring_rule: 'up=+1,down=0',
+      totals: [{ agent: 'keeper-a', karma: 3 }],
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/board/karma/ledger?agent=keeper-a&limit=25',
+      expect.any(Object),
+    )
+  })
+
+  it('falls back to event length when the ledger count is absent', () => {
+    expect(normalizeBoardKarmaLedger({
+      events: [
+        {
+          recipient: 'keeper-a',
+          voter: 'operator',
+          target_kind: 'comment',
+          target_id: 'comment-1',
+          delta: 1,
+          ts: 1_748_779_200,
+        },
+      ],
+    })).toMatchObject({
+      count: 1,
+      events: [{ ts_iso: '2025-06-01T12:00:00.000Z' }],
+      totals: [],
     })
   })
 })

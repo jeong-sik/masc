@@ -497,6 +497,31 @@ let add_routes ~sw ~clock router =
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
+  |> Http.Router.get "/api/v1/board/karma/ledger" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let agent = query_param req "agent" in
+         let limit =
+           int_query_param req "limit" ~default:500
+           |> clamp ~min_v:1 ~max_v:5000
+         in
+         let events = Board_dispatch.get_karma_ledger ?agent ~limit () in
+         let totals =
+           Board_dispatch.get_all_karma ()
+           |> List.sort (fun (_, a) (_, b) -> compare b a)
+         in
+         let json =
+           `Assoc [
+             ("events", `List (List.map Board.karma_event_to_yojson events));
+             ("count", `Int (List.length events));
+             ("scoring_rule", `String "up=+1,down=0");
+             ("totals", `List (List.map (fun (agent_name, k) ->
+               `Assoc [("agent", `String agent_name); ("karma", `Int k)])
+               totals));
+           ]
+         in
+         Http.Response.json (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
   (* Mention Inbox API *)
   |> Http.Router.prefix_get "/api/v1/mentions/" (fun request reqd ->
        with_public_read (fun state _req reqd ->

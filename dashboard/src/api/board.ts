@@ -5,7 +5,7 @@ import type {
   BoardActorIdentity, BoardPost, BoardComment, BoardReactionSummary,
   BoardReactionTargetType, BoardReactionToggleResult, BoardSortMode,
   BoardVoteDirection,
-  BoardCurationSnapshot,
+  BoardCurationSnapshot, BoardKarmaLedger, BoardKarmaLedgerEvent, BoardKarmaTotal,
   GovernanceContextRef,
   GovernanceDecisionItem, GovernanceExecutedRoute,
   GovernanceGuardrailState, GovernanceJudgeSummary, GovernanceJudgment,
@@ -544,6 +544,53 @@ function normalizeBoardCurationHealthComponents(raw: unknown): BoardCurationSnap
   })
 }
 
+function normalizeBoardKarmaLedgerEvent(raw: unknown): BoardKarmaLedgerEvent | null {
+  if (!isRecord(raw)) return null
+  const recipient = asString(raw.recipient, '').trim()
+  const voter = asString(raw.voter, '').trim()
+  const targetKind = asString(raw.target_kind, '').trim()
+  const targetId = asString(raw.target_id, '').trim()
+  const tsIso = asNullableIsoTimestamp(raw.ts_iso ?? raw.ts)
+  if (!recipient || !voter || !targetKind || !targetId || !tsIso) return null
+  return {
+    recipient,
+    voter,
+    target_kind: targetKind,
+    target_id: targetId,
+    delta: asNumber(raw.delta, 0),
+    ts: asNumber(raw.ts, 0),
+    ts_iso: tsIso,
+  }
+}
+
+function normalizeBoardKarmaTotal(raw: unknown): BoardKarmaTotal | null {
+  if (!isRecord(raw)) return null
+  const agent = asString(raw.agent, '').trim()
+  if (!agent) return null
+  return {
+    agent,
+    karma: asNumber(raw.karma, 0),
+  }
+}
+
+export function normalizeBoardKarmaLedger(raw: unknown): BoardKarmaLedger {
+  if (!isRecord(raw)) {
+    return { events: [], count: 0, scoring_rule: '', totals: [] }
+  }
+  const events = Array.isArray(raw.events)
+    ? raw.events.map(normalizeBoardKarmaLedgerEvent).filter((row): row is BoardKarmaLedgerEvent => row !== null)
+    : []
+  const totals = Array.isArray(raw.totals)
+    ? raw.totals.map(normalizeBoardKarmaTotal).filter((row): row is BoardKarmaTotal => row !== null)
+    : []
+  return {
+    events,
+    count: asInt(raw.count) ?? events.length,
+    scoring_rule: asString(raw.scoring_rule, ''),
+    totals,
+  }
+}
+
 function normalizeBoardReactionSummary(raw: unknown): BoardReactionSummary | null {
   if (!isRecord(raw)) return null
   const emoji = asString(raw.emoji, '').trim()
@@ -620,6 +667,20 @@ export async function fetchBoardCuration(): Promise<BoardCurationSnapshot | null
   return withRetries('fetchBoardCuration', async () => {
     const raw = await get<{ snapshot?: unknown }>('/api/v1/board/curation')
     return raw.snapshot != null ? normalizeBoardCurationSnapshot(raw.snapshot) : null
+  })
+}
+
+export async function fetchBoardKarmaLedger(options: { agent?: string; limit?: number } = {}): Promise<BoardKarmaLedger> {
+  return withRetries('fetchBoardKarmaLedger', async () => {
+    const params = new URLSearchParams()
+    const agent = options.agent?.trim()
+    if (agent) params.set('agent', agent)
+    if (typeof options.limit === 'number' && Number.isFinite(options.limit)) {
+      params.set('limit', String(Math.trunc(options.limit)))
+    }
+    const qs = params.toString()
+    const raw = await get<unknown>(`/api/v1/board/karma/ledger${qs ? `?${qs}` : ''}`)
+    return normalizeBoardKarmaLedger(raw)
   })
 }
 

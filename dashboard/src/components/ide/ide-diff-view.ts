@@ -96,6 +96,13 @@ function DiffSummaryStrip({
   readonly summary: DiffSummary
   readonly mode: 'Unified' | 'Split'
 }) {
+  // In Split mode buildSplitDiff visually pairs each delete with its add on
+  // the same row, so additions+deletions over-counts the visible "changed
+  // rows". Use max(additions,deletions) — that matches one logical row per
+  // pair plus any unpaired add/delete. Unified mode keeps the linear count.
+  const changedRows = mode === 'Split'
+    ? Math.max(summary.additions, summary.deletions)
+    : summary.changed
   return html`
     <div
       role="status"
@@ -114,7 +121,7 @@ function DiffSummaryStrip({
       }}
     >
       <span style=${{ color: 'var(--color-fg-secondary)' }}>${mode} diff</span>
-      <span style=${{ color: 'var(--color-fg-disabled)' }}>${summary.changed} changed rows</span>
+      <span style=${{ color: 'var(--color-fg-disabled)' }}>${changedRows} changed rows</span>
       <span
         style=${{
           display: 'inline-flex',
@@ -161,6 +168,7 @@ export function SplitDiffView(rows: ReadonlyArray<UnifiedDiffRow>) {
   const splitRows: SplitDiffRow[] = buildSplitDiff(rows)
   return html`
     <div
+      role="region"
       aria-label="Split diff preview"
       style=${{
         display: 'grid',

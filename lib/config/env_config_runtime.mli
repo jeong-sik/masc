@@ -240,6 +240,8 @@ module Tools : sig
   val dispatch_v2_enabled : bool
   val full_surface_enabled : unit -> bool
   val list_page_size : unit -> int
+  val timeout_default_sec : unit -> float
+  val board_write_timeout_sec : unit -> float
   val description_budget_opt : unit -> int option
   val readonly_retry_limit : int
   val public_tools_extra_opt : unit -> string option

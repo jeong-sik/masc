@@ -86,6 +86,7 @@ logs. Candidates:
 
 | Site | Current cap | Owning issue |
 |------|-------------|--------------|
+| MCP `tools/call` default | 60 s via `MASC_TOOL_TIMEOUT_DEFAULT_SEC`; board write tools use 90 s via `MASC_TOOL_TIMEOUT_BOARD_SEC` | #10569 |
 | `keeper_llm_bridge` | 300 s default inside 600 s keeper turn | #9639, #9662 |
 | Governance `compute_judgments` | 60 s | #9629 |
 | `Process_eio` `git status --porcelain` | 15 s | #9632 |

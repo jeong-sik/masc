@@ -66,7 +66,8 @@ val task_completion_path_observed_fn : (path:string -> contract_state:string -> 
 val task_auto_release_observed_fn :
   (agent_name:string -> from_status:string -> unit) Atomic.t
 val cache_desync_cleared_fn :
-  (module_name:string -> task_id:string -> status:string -> unit) Atomic.t
+  (Coord_utils_backend_setup.config ->
+   module_name:string -> task_id:string -> status:string -> unit) Atomic.t
 val claim_post_provision_fn : (Coord_utils_backend_setup.config ->
             agent_name:string ->
             task_id:string -> unit)

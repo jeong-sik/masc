@@ -140,19 +140,20 @@ let remember_invalidation ~module_name ~task_id ~status =
        first_seen)
 ;;
 
-let record_cache_desync_cleared ~module_name stale_tasks =
+let record_cache_desync_cleared ~config ~module_name stale_tasks =
   List.iter
     (fun task ->
        if remember_invalidation ~module_name ~task_id:task.task_id ~status:task.status
        then
          (Atomic.get Coord_hooks.cache_desync_cleared_fn)
+           config
            ~module_name
            ~task_id:task.task_id
            ~status:task.status)
     stale_tasks
 ;;
 
-let record_backlog_unavailable ~module_name task_ids =
+let record_backlog_unavailable ~config ~module_name task_ids =
   List.iter
     (fun task_id ->
        if
@@ -162,6 +163,7 @@ let record_backlog_unavailable ~module_name task_ids =
            ~status:"backlog_unavailable"
        then
          (Atomic.get Coord_hooks.cache_desync_cleared_fn)
+           config
            ~module_name
            ~task_id
            ~status:"backlog_unavailable")
@@ -177,9 +179,9 @@ let stale_active_task_signal_present ~config ~from_agent ~module_name ~content =
   | stale_tasks ->
     (match stale_tasks with
      | Terminal_tasks stale_tasks ->
-       record_cache_desync_cleared ~module_name stale_tasks
+       record_cache_desync_cleared ~config ~module_name stale_tasks
      | Backlog_unavailable { task_ids; _ } ->
-       record_backlog_unavailable ~module_name task_ids
+       record_backlog_unavailable ~config ~module_name task_ids
      | No_cache_signal | No_terminal_task -> ());
     true
 ;;
@@ -192,9 +194,9 @@ let rewrite_broadcast_content ~config ~from_agent ~module_name ~content =
     match check_cache_signal ~config ~content with
     | No_cache_signal | No_terminal_task -> content
     | Backlog_unavailable { task_ids; error = _ } ->
-      record_backlog_unavailable ~module_name task_ids;
+      record_backlog_unavailable ~config ~module_name task_ids;
       backlog_unavailable_message ~from_agent task_ids
     | Terminal_tasks stale_tasks ->
-      record_cache_desync_cleared ~module_name stale_tasks;
+      record_cache_desync_cleared ~config ~module_name stale_tasks;
       invalidation_message ~from_agent stale_tasks
 ;;

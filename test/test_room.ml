@@ -166,6 +166,12 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
   Unix.mkdir tmp_dir 0o755;
 
   let config = room_config tmp_dir in
+  let current_task_for agent_name =
+    Coord.get_agents_raw config
+    |> List.find_opt (fun (agent : Masc_domain.agent) ->
+      String.equal agent.name agent_name)
+    |> Option.bind (fun agent -> agent.current_task)
+  in
   let _ = Coord.init config ~agent_name:(Some "taskmaster") in
   let _ = Coord.add_task config ~title:"Terminal task" ~priority:1 ~description:"" in
   let _ = Coord.claim_task config ~agent_name:"nick0cave" ~task_id:"task-001" in
@@ -179,6 +185,10 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
    with
    | Ok _ -> ()
    | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err));
+  Alcotest.(check (option string))
+    "assignee has stale current_task before invariant"
+    (Some "task-001")
+    (current_task_for "nick0cave");
 
   let stale_message =
     "@nick0cave task-001 stale claim detected: current_task_id=null but \
@@ -208,6 +218,10 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
        (str_contains msg.content "task-001=done")
    | msgs ->
      Alcotest.failf "expected one replacement message, got %d" (List.length msgs));
+  Alcotest.(check (option string))
+    "stale current_task cleared"
+    None
+    (current_task_for "nick0cave");
 
   let normal_update =
     "Normal update: blocked by task-001 while I wait for review context."

@@ -316,11 +316,65 @@ let () =
   Atomic.set Coord_hooks.task_auto_release_observed_fn
     record_task_auto_release
 
+let clear_agent_current_task_cache config ~task_id =
+  let agents_path = agents_dir config in
+  if path_exists config agents_path then
+    let agent_files =
+      try Sys.readdir agents_path with
+      | Sys_error msg ->
+        Log.Misc.warn "cache desync agent scan failed: %s" msg;
+        [||]
+    in
+    Array.iter
+      (fun name ->
+         if Filename.check_suffix name ".json"
+         then (
+           let path = Filename.concat agents_path name in
+           if path_exists config path
+           then
+             with_file_lock config path (fun () ->
+               match read_agent_with_repair config path with
+               | Ok agent when agent.current_task = Some task_id ->
+                 let status =
+                   match agent.status with
+                   | Inactive -> Inactive
+                   | Active | Busy | Listening -> Active
+                 in
+                 let updated =
+                   {
+                     agent with
+                     status;
+                     current_task = None;
+                     last_seen = now_iso ();
+                   }
+                 in
+                 write_json config path (agent_to_yojson updated);
+                 log_event
+                   config
+                   (`Assoc
+                      [
+                        ("type", `String "agent_current_task_cache_cleared");
+                        ("agent", `String agent.name);
+                        ("stale_task", `String task_id);
+                        ("ts", `String (now_iso ()));
+                      ])
+               | Ok _ -> ()
+               | Error msg ->
+                 Log.Misc.warn
+                   "cache desync agent read failed for %s: %s"
+                   name
+                   msg)))
+      agent_files
+
 (* #13460: cache desync invalidation counter. Coord_broadcast emits this when
    it replaces an active-claim/release message for a terminal backlog task with
-   a cache_invalidated broadcast.  Keep labels fleet-bounded; the task id stays
-   in the replacement message, not the Prometheus series key. *)
-let record_cache_desync_cleared ~module_name ~task_id:_ ~status =
+   a cache_invalidated broadcast.  Clear coord-owned current_task caches so the
+   same stale claim does not re-emit every taskmaster cycle.  Keep labels
+   fleet-bounded; the task id stays in the replacement message/event, not the
+   Prometheus series key. *)
+let record_cache_desync_cleared config ~module_name ~task_id ~status =
+  if not (String.equal status "backlog_unavailable")
+  then clear_agent_current_task_cache config ~task_id;
   Prometheus.inc_counter
     Prometheus.metric_cache_desync_cleared
     ~labels:

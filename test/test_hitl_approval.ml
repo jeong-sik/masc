@@ -76,6 +76,26 @@ let audit_event_names ~base_path ~keeper_name =
   |> List.map (fun json ->
          Yojson.Safe.Util.(json |> member "event" |> to_string))
 
+let test_approval_queue_failure_metric_labels_site () =
+  let keeper_name = "approval-failure-observe-test" in
+  let site = "audit_append" in
+  let labels = [ ("keeper", keeper_name); ("site", site) ] in
+  let before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_keeper_approval_queue_failures
+      ~labels
+      ()
+  in
+  AQ.For_testing.record_failure ~keeper_name ~site (Failure "boom");
+  let after =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_keeper_approval_queue_failures
+      ~labels
+      ()
+  in
+  Alcotest.(check (float 0.0001)) "failure counter delta" 1.0
+    (after -. before)
+
 let execute_approval_get args =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1176,6 +1196,8 @@ let () =
         test_submit_and_await_clock_returns_manual_decision;
       Alcotest.test_case "resolve nonexistent" `Quick test_approval_resolve_nonexistent;
       Alcotest.test_case "cancel cleans up" `Quick test_approval_queue_cancel_cleans_up;
+      Alcotest.test_case "failure observation labels site" `Quick
+        test_approval_queue_failure_metric_labels_site;
       Alcotest.test_case "background pending callback" `Quick
         test_background_pending_callback_and_keeper_lookup;
       Alcotest.test_case "background pending reuses existing entry" `Quick

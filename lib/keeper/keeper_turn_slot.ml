@@ -345,7 +345,16 @@ type autonomous_waiter =
    to use this. *)
 let autonomous_wait_queue_mutex = Eio.Mutex.create ()
 
-let autonomous_wait_queue : autonomous_waiter list ref = ref []
+(* FIFO waiters use an append-only queue plus an active-ticket table.
+   Removing a middle waiter only tombstones its ticket; the physical queue
+   is pruned lazily from the head. This keeps enqueue/drop O(1) under the
+   queue mutex while preserving observable FIFO order. *)
+let autonomous_wait_queue : autonomous_waiter Queue.t = Queue.create ()
+
+let autonomous_wait_queue_active_tickets : (int, unit) Hashtbl.t =
+  Hashtbl.create 32
+
+let autonomous_wait_queue_active_count = ref 0
 
 let autonomous_wait_queue_next_ticket = ref 0
 
@@ -367,9 +376,44 @@ let record_autonomous_queue_depth depth =
     ~labels:autonomous_queue_depth_labels
     (float_of_int depth)
 
+let autonomous_queue_peek_opt () =
+  try Some (Queue.peek autonomous_wait_queue)
+  with Queue.Empty -> None
+
+let prune_autonomous_wait_queue_locked () =
+  let rec loop () =
+    match autonomous_queue_peek_opt () with
+    | None -> ()
+    | Some waiter ->
+      if Hashtbl.mem autonomous_wait_queue_active_tickets waiter.ticket
+      then ()
+      else begin
+        ignore (Queue.take autonomous_wait_queue);
+        loop ()
+      end
+  in
+  loop ()
+
+let active_autonomous_waiters_locked () =
+  prune_autonomous_wait_queue_locked ();
+  let active = ref [] in
+  Queue.iter
+    (fun waiter ->
+       if Hashtbl.mem autonomous_wait_queue_active_tickets waiter.ticket
+       then active := waiter :: !active)
+    autonomous_wait_queue;
+  List.rev !active
+
+let autonomous_wait_queue_depth () =
+  with_autonomous_wait_queue (fun () ->
+    prune_autonomous_wait_queue_locked ();
+    !autonomous_wait_queue_active_count)
+
 let reset_autonomous_turn_queue_for_test () =
   with_autonomous_wait_queue (fun () ->
-    autonomous_wait_queue := [];
+    Queue.clear autonomous_wait_queue;
+    Hashtbl.reset autonomous_wait_queue_active_tickets;
+    autonomous_wait_queue_active_count := 0;
     autonomous_wait_queue_next_ticket := 0;
     record_autonomous_queue_depth 0)
 
@@ -377,20 +421,26 @@ let enqueue_autonomous_waiter ~(keeper_name : string) : int =
   with_autonomous_wait_queue (fun () ->
     let ticket = !autonomous_wait_queue_next_ticket in
     incr autonomous_wait_queue_next_ticket;
-    autonomous_wait_queue :=
-      !autonomous_wait_queue @ [{ ticket; keeper_name }];
-    record_autonomous_queue_depth (List.length !autonomous_wait_queue);
+    Queue.add { ticket; keeper_name } autonomous_wait_queue;
+    Hashtbl.replace autonomous_wait_queue_active_tickets ticket ();
+    incr autonomous_wait_queue_active_count;
+    record_autonomous_queue_depth !autonomous_wait_queue_active_count;
     ticket)
 
 let drop_autonomous_waiter ~(ticket : int) : unit =
   with_autonomous_wait_queue (fun () ->
-    autonomous_wait_queue :=
-      List.filter (fun waiter -> waiter.ticket <> ticket) !autonomous_wait_queue;
-    record_autonomous_queue_depth (List.length !autonomous_wait_queue))
+    if Hashtbl.mem autonomous_wait_queue_active_tickets ticket then begin
+      Hashtbl.remove autonomous_wait_queue_active_tickets ticket;
+      decr autonomous_wait_queue_active_count
+    end;
+    prune_autonomous_wait_queue_locked ();
+    record_autonomous_queue_depth !autonomous_wait_queue_active_count)
 
 let autonomous_waiter_snapshot_for_test () : string list =
   with_autonomous_wait_queue (fun () ->
-    List.map (fun waiter -> waiter.keeper_name) !autonomous_wait_queue)
+    List.map
+      (fun waiter -> waiter.keeper_name)
+      (active_autonomous_waiters_locked ()))
 
 let enqueue_autonomous_waiter_for_test keeper_name =
   enqueue_autonomous_waiter ~keeper_name
@@ -400,19 +450,25 @@ let drop_autonomous_waiter_for_test ticket =
 
 let autonomous_waiter_head_ticket () : int option =
   with_autonomous_wait_queue (fun () ->
-    match !autonomous_wait_queue with
-    | head :: _ -> Some head.ticket
-    | [] -> None)
+    prune_autonomous_wait_queue_locked ();
+    match autonomous_queue_peek_opt () with
+    | Some head -> Some head.ticket
+    | None -> None)
 
 let autonomous_waiter_position ~(ticket : int) : int option =
   with_autonomous_wait_queue (fun () ->
-    let rec loop idx = function
-      | [] -> None
-      | waiter :: rest ->
-          if waiter.ticket = ticket then Some idx
-          else loop (idx + 1) rest
-    in
-    loop 0 !autonomous_wait_queue)
+    prune_autonomous_wait_queue_locked ();
+    let position = ref None in
+    let idx = ref 0 in
+    Queue.iter
+      (fun waiter ->
+         if Option.is_none !position
+            && Hashtbl.mem autonomous_wait_queue_active_tickets waiter.ticket
+         then
+           if waiter.ticket = ticket then position := Some !idx
+           else incr idx)
+      autonomous_wait_queue;
+    !position)
 
 (** Wall-clock cap on [Eio.Semaphore.acquire] when waiting for a keeper
     turn slot. Without this, a keeper whose peers hold all slots while
@@ -447,7 +503,7 @@ let semaphore_wait_timeout_snapshot
     timeout_autonomous_available = Eio.Semaphore.get_value autonomous_turn_semaphore;
     timeout_reactive_available = Eio.Semaphore.get_value reactive_turn_semaphore;
     timeout_turn_available = Eio.Semaphore.get_value turn_semaphore;
-    timeout_queue_depth = List.length (autonomous_waiter_snapshot_for_test ());
+    timeout_queue_depth = autonomous_wait_queue_depth ();
     timeout_queue_ahead = queue_ahead;
     timeout_holders = holders;
   }
@@ -789,8 +845,16 @@ let autonomous_fairness_cooldown_sec =
 
 let others_waiting_in_queue ~(keeper_name : string) : bool =
   with_autonomous_wait_queue (fun () ->
-    List.exists (fun w -> w.keeper_name <> keeper_name)
-      !autonomous_wait_queue)
+    prune_autonomous_wait_queue_locked ();
+    let found = ref false in
+    Queue.iter
+      (fun w ->
+         if (not !found)
+            && Hashtbl.mem autonomous_wait_queue_active_tickets w.ticket
+            && w.keeper_name <> keeper_name
+         then found := true)
+      autonomous_wait_queue;
+    !found)
 
 (** Pure computation: how many seconds [keeper_name] should yield before
     re-entering the queue at time [now].  Returns [0.0] when no yield is
@@ -1000,7 +1064,7 @@ let with_keeper_turn_slot_control ?(cascade_profile = "unknown") ~keeper_name
       end
   in
   let log_acquire_attempt () =
-    let queue_depth = List.length (autonomous_waiter_snapshot_for_test ()) in
+    let queue_depth = autonomous_wait_queue_depth () in
     Log.Keeper.routine
       "semaphore_acquire: keeper=%s channel=%s autonomous_available=%d turn_available=%d queue_depth=%d"
       keeper_name

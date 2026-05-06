@@ -29,10 +29,16 @@ include Backend_types
 (** {1 FileSystem Backend (Eio)} *)
 
 module FileSystem = struct
+  (** Number of striped locks for write serialisation.
+      64 stripes means up to 64 concurrent writers on disjoint keys,
+      reducing lock contention from O(K) keeper serialisation to
+      O(K/64) average wait. *)
+  let num_stripes = 64
+
   type t = {
     config: config;
     fs: Eio.Fs.dir_ty Eio.Path.t;
-    mutex: Eio.Mutex.t;
+    mutexes: Eio.Mutex.t array;
     key_index: (string, unit) Hashtbl.t;
     key_index_mu: Mutex.t;
     (** Domain-safe mutex for [key_index].
@@ -42,6 +48,9 @@ module FileSystem = struct
     mutable key_index_promise: unit Eio.Promise.or_exn option;
     clock: float Eio.Time.clock_ty Eio.Resource.t option;
   }
+
+  let stripe_for_key t key =
+    t.mutexes.(Hashtbl.hash key mod Array.length t.mutexes)
 
   (** {2 Mutex contention observers}
 
@@ -80,7 +89,8 @@ module FileSystem = struct
       released, so they cannot extend the critical section even if
       the underlying Prometheus implementation contends on its own
       mutex. *)
-  let with_observed_mutex ~op t f =
+  let with_observed_mutex ~op ~key t f =
+    let mutex = stripe_for_key t key in
     let started = Time_compat.now () in
     let acquired = ref false in
     let acquire_seconds = ref 0.0 in
@@ -93,7 +103,7 @@ module FileSystem = struct
         notify_mutex_observer ~kind:"held" !mutex_held_observer
           ~op ~seconds:!held_seconds)
       (fun () ->
-        Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
+        Eio.Mutex.use_rw ~protect:true mutex (fun () ->
           let acquired_at = Time_compat.now () in
           acquired := true;
           acquire_seconds := acquired_at -. started;
@@ -115,7 +125,7 @@ module FileSystem = struct
     {
       config;
       fs = path;
-      mutex = Eio.Mutex.create ();
+      mutexes = Array.init num_stripes (fun _ -> Eio.Mutex.create ());
       key_index = Hashtbl.create 256;
       key_index_mu = Mutex.create ();
       key_index_promise = None;
@@ -305,7 +315,7 @@ module FileSystem = struct
       The mutex inside [t] already serialises writers against each
       other; this change adds atomicity against concurrent readers. *)
   let set t key value =
-    with_observed_mutex ~op:"set" t (fun () ->
+    with_observed_mutex ~op:"set" ~key t (fun () ->
       match validate_key key with
       | Error e -> Error e
       | Ok safe_key ->
@@ -334,7 +344,7 @@ module FileSystem = struct
 
   (** Delete key *)
   let delete t key =
-    with_observed_mutex ~op:"delete" t (fun () ->
+    with_observed_mutex ~op:"delete" ~key t (fun () ->
       match key_to_path t key with
       | Error e -> Error e
       | Ok path ->
@@ -547,7 +557,7 @@ module FileSystem = struct
   let set_if_not_exists t key value =
     (* Compact Protocol v4: Compress before saving *)
     let compressed = _compress value in
-    with_observed_mutex ~op:"set_if_not_exists" t (fun () ->
+    with_observed_mutex ~op:"set_if_not_exists" ~key t (fun () ->
       match key_to_path t key with
       | Error e -> Error e
       | Ok path ->

@@ -282,10 +282,6 @@ let class_json item =
   `Assoc [
     ("category", `String item.category);
     ("count", `Int item.count);
-    ( "sample",
-      match item.sample with
-      | Some sample -> `String sample
-      | None -> `Null );
   ]
 
 let classes_json table tool =

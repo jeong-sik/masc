@@ -209,7 +209,7 @@ let meta_counter_feature
     ~missing_keepers:missing
     ~evidence_refs
     ~next_action
-    snapshots
+    eligible_snapshots
 
 let runtime_liveness_feature snapshots =
   meta_counter_feature snapshots
@@ -399,11 +399,11 @@ let scheduled_proactive_feature ~config snapshots =
     ("missing_tools", `List []);
     ("keeper_evidence",
      `Assoc [
-       ("keeper_count", `Int (keeper_count snapshots));
-       ("meta_count", `Int (count_meta snapshots));
+       ("keeper_count", `Int (keeper_count enabled));
+       ("meta_count", `Int (count_meta enabled));
        ("observed_keepers", json_string_list observed);
        ("missing_keepers", json_string_list missing);
-       ("read_errors", `List (keeper_read_errors snapshots));
+       ("read_errors", `List (keeper_read_errors enabled));
        ("per_keeper", `List per_keeper);
      ]);
     ( "evidence_refs",
@@ -499,6 +499,24 @@ let count_status needle statuses =
   |> List.filter (fun status -> status_rank status = status_rank needle)
   |> List.length
 
+let keeper_tool_sample_summary
+      (tool_stats : (string, Failure.tool_keeper_stat) Hashtbl.t)
+  =
+  let calls, successes =
+    Hashtbl.fold
+      (fun _tool_name (stat : Failure.tool_keeper_stat) (calls, successes) ->
+         (calls + stat.calls, successes + stat.successes))
+      tool_stats
+      (0, 0)
+  in
+  let success_rate =
+    if calls = 0 then 0.0
+    else
+      let pct = Float.of_int successes /. Float.of_int calls *. 100.0 in
+      Float.round (pct *. 100.0) /. 100.0
+  in
+  calls, success_rate
+
 let json
       ~config
       ?(n = 5000)
@@ -537,9 +555,8 @@ let json
   let pass_count = count_status Pass statuses in
   let warn_count = count_status Warn statuses in
   let fail_count = count_status Fail statuses in
-  let tool_sample_total = Safe_ops.json_int ~default:0 "total" tool_summary in
-  let tool_sample_success_rate =
-    Safe_ops.json_float ~default:0.0 "success_rate" tool_summary
+  let tool_sample_total, tool_sample_success_rate =
+    keeper_tool_sample_summary tool_stats
   in
   `Assoc [
     ("generated_at", `String (Masc_domain.now_iso ()));
@@ -561,6 +578,7 @@ let json
     ("tool_quality",
      `Assoc [
        ("route", `String "/api/v1/dashboard/tool-quality");
+       ("scope", `String "known_keepers");
        ("sample_total", `Int tool_sample_total);
        ("success_rate", `Float tool_sample_success_rate);
        ("sampling_mode",

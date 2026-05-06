@@ -21,20 +21,20 @@ such as preset selection, shard assignment, and tool access, not through a
 
 | Shard | Tools | Count | Removable |
 |-------|-------|-------|-----------|
-| **base** | `keeper_time_now`, `keeper_context_status`, `keeper_memory_search` | 3 | No |
-| **board** | `keeper_board_{get,post,list,comment,vote}` | 5 | Yes |
-| **filesystem** | `keeper_fs_read` | 1 | Yes |
+| **base** | `keeper_stay_silent`, `keeper_time_now`, `keeper_context_status`, `keeper_memory_search`, `keeper_tools_list` | 5 | No |
+| **board** | `keeper_board_{get,post,list,comment,vote,stats,search}` | 7 | Yes |
+| **filesystem** | `keeper_fs_{read,edit}` | 2 | Yes |
 | **shell** | `keeper_shell` | 1 | Yes |
 | **library** | `keeper_library_{search,read}` | 2 | Yes |
-| **taskboard** | `keeper_tasks_{list,audit}`, `keeper_task_{force_release,force_done,claim,done}`, `keeper_broadcast` | 7 | Yes |
-| **voice** | `keeper_voice_{speak,agent,sessions,session_start,session_end}` | 5 | Yes |
-| **weather** | `keeper_weather_note` | 1 | Yes |
-| **coding** | `keeper_{bash,github}`, `masc_{worktree_create,worktree_list,code_search,code_symbols,code_read}` | 7 | Yes |
+| **taskboard** | `keeper_tasks_{list,audit}`, `keeper_task_{force_release,force_done,claim,done,submit_for_verification,create}`, `keeper_broadcast` | 9 | Yes |
+| **voice** | `keeper_voice_{speak,listen,agent,sessions,session_start,session_end}` | 6 | Yes |
+| **coding** | `keeper_bash{,_output,_kill}`, `keeper_preflight_check`, `keeper_pr_{list,status,create,review_read,review_comment,review_reply}`, `masc_{worktree_create,worktree_list,code_search,code_symbols,code_read}` | 15 | Yes |
+| **autoresearch** | `masc_autoresearch_{start,status,stop,inject,cycle,record_finding,search_findings}` | 7 | Yes |
 
 Notes:
-- `voice` and `weather` shards still exist, but they are no longer part of the default keeper surface.
+- The `voice` shard still exists, but it is no longer part of the default keeper surface. The historical weather shard is retired from `Tool_shard`.
 - The old governance petition/case tools were retired from the callable tool surface. Governance-style participation now uses board discussion/vote paths plus dashboard governance/audit read models.
-- `keeper_fs_edit` remains a legacy internal tool but is intentionally excluded from default keeper exposure.
+- Write-capable tools such as `keeper_fs_edit` and code mutation tools are present in the keeper surface; preset/policy and eval gates decide whether a keeper may execute the mutation.
 - `keeper_shell` is structured-only (`pwd`, `ls`, `cat`, `rg`, `find`, `head`, `tail`, `wc`, `tree`, `git_status`, `git_log`, `git_diff`, `git_worktree`, `git_clone`, `gh`). Raw command execution lives in `Bash`/`keeper_bash`.
 - Code mutation uses `masc_code_{write,edit,delete,shell,git}` in addition to the `coding` shard above.
 

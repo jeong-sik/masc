@@ -31,11 +31,15 @@ let contains_substring text needle =
   else if needle_len > text_len
   then false
   else (
+    let rec matches_at i j =
+      j = needle_len
+      || (String.get text (i + j) = String.get needle j
+          && matches_at i (j + 1))
+    in
     let rec loop i =
       if i + needle_len > text_len
       then false
-      else if String.sub text i needle_len = needle
-      then true
+      else if matches_at i 0 then true
       else loop (i + 1)
     in
     loop 0)
@@ -145,11 +149,11 @@ let stage_ids_for_record record =
   if docker && git_creds && contains_substring input "git push"
   then stages := "push" :: !stages;
   if
-    String.equal tool "keeper_pr_create"
-    || (docker
-        && git_creds
-        && (contains_substring input "gh pr create"
-            || contains_substring input "pr create --draft"))
+    docker
+    && git_creds
+    && (String.equal tool "keeper_pr_create"
+        || contains_substring input "gh pr create"
+        || contains_substring input "pr create --draft")
   then stages := "pr_create" :: !stages;
   List.rev !stages
 ;;

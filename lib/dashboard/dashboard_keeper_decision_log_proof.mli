@@ -1,6 +1,8 @@
 type scheduled_stat = {
   decision_count : int;
   latest_ts : string option;
+  latest_ts_unix : float option;
+  failure_count : int;
 }
 
 type turn_span_stat

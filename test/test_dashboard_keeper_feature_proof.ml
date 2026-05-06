@@ -55,6 +55,7 @@ let make_meta ?(name = "alpha") () =
 
 let persist_keeper
       config
+      ?(proactive_enabled = true)
       ~name
       ~total_turns
       ~autonomous_action_count
@@ -67,7 +68,7 @@ let persist_keeper
   let meta =
     {
       base with
-      proactive = { enabled = true; idle_sec = 1; cooldown_sec = 1 };
+      proactive = { enabled = proactive_enabled; idle_sec = 1; cooldown_sec = 1 };
       runtime =
         {
           base.runtime with
@@ -234,6 +235,20 @@ let keeper_evidence_stage stage_id json =
   |> List.find_opt (fun item ->
     Safe_ops.json_string_opt "id" item = Some stage_id)
 
+let scheduled_decision_log keeper_name json =
+  keeper_evidence "scheduled_proactive_autonomy" json
+  |> Yojson.Safe.Util.member "per_keeper"
+  |> Yojson.Safe.Util.to_list
+  |> List.find_opt (fun item ->
+    Safe_ops.json_string_opt "keeper" item = Some keeper_name)
+  |> Option.value
+       ~default:
+         (`Assoc [
+           ("keeper", `String keeper_name);
+           ("decision_log", `Assoc []);
+         ])
+  |> Yojson.Safe.Util.member "decision_log"
+
 let test_json_reports_feature_gaps () =
   with_store @@ fun config ->
   ignore
@@ -308,6 +323,10 @@ let test_json_reports_feature_gaps () =
     (List.exists
        (fun row -> Safe_ops.json_string_opt "category" row = Some "fixture_failure")
        worktree_failure_classes);
+  check bool "public failure classes omit raw samples" true
+    (List.for_all
+       (fun row -> Yojson.Safe.Util.member "sample" row = `Null)
+       worktree_failure_classes);
   let worktree_evidence =
     match keeper_evidence_tool "masc_worktree_create" "coding_tools" json with
     | Some row -> row
@@ -348,6 +367,11 @@ let test_operator_tool_calls_do_not_satisfy_keeper_tool_proof () =
   in
   check string "non-keeper tool calls do not prove base tools" "fail"
     (feature_status "base_tools" json);
+  let summary = Yojson.Safe.Util.member "summary" json in
+  check int "operator calls excluded from keeper sample total" 0
+    (Safe_ops.json_int ~default:(-1) "tool_sample_total" summary);
+  check (float 0.001) "operator calls excluded from keeper success rate" 0.0
+    (Safe_ops.json_float ~default:(-1.0) "tool_sample_success_rate" summary);
   check (list string) "base tools still missing from keeper proof"
     [
       "keeper_time_now";
@@ -410,6 +434,7 @@ let test_docker_git_pr_workflow_reports_partial_chain () =
   log_docker_bash "git checkout -b fix/keeper-proof";
   log_docker_bash "git commit -m keeper-proof";
   log_docker_bash ~success:false "git push origin fix/keeper-proof";
+  log_tool "keeper_pr_create";
   let json =
     Dashboard_keeper_feature_proof.json
       ~config
@@ -443,6 +468,9 @@ let test_docker_git_pr_workflow_reports_partial_chain () =
 
 let test_decision_log_counts_as_scheduled_proof () =
   with_store @@ fun config ->
+  let latest_success_ts = 1_777_001_500.0 in
+  let older_success_ts = 1_777_001_000.0 in
+  let newer_failure_ts = 1_777_002_000.0 in
   ignore
     (persist_keeper config ~name:"alpha" ~total_turns:3
        ~autonomous_action_count:2 ~autonomous_tool_turn_count:2
@@ -451,7 +479,27 @@ let test_decision_log_counts_as_scheduled_proof () =
     (persist_keeper config ~name:"beta" ~total_turns:2
        ~autonomous_action_count:1 ~autonomous_tool_turn_count:1
        ~board_reactive_turn_count:1 ~proactive_count_total:0);
-  write_scheduled_decision config "alpha";
+  write_decision_lines config "alpha"
+    [
+      `Assoc [
+        ("ts_unix", `Float latest_success_ts);
+        ("ts", `String (Masc_domain.iso8601_of_unix_seconds latest_success_ts));
+        ("channel", `String "scheduled_autonomous");
+        ("outcome", `String "success");
+      ];
+      `Assoc [
+        ("ts_unix", `Float older_success_ts);
+        ("ts", `String (Masc_domain.iso8601_of_unix_seconds older_success_ts));
+        ("channel", `String "scheduled_autonomous");
+        ("outcome", `String "success");
+      ];
+      `Assoc [
+        ("ts_unix", `Float newer_failure_ts);
+        ("ts", `String (Masc_domain.iso8601_of_unix_seconds newer_failure_ts));
+        ("channel", `String "scheduled_autonomous");
+        ("outcome", `String "failure");
+      ];
+    ];
   write_scheduled_decision config "beta";
   let json =
     Dashboard_keeper_feature_proof.json
@@ -470,7 +518,44 @@ let test_decision_log_counts_as_scheduled_proof () =
       |> member "observed_keepers"
       |> to_list)
   in
-  check int "both keepers observed" 2 (List.length observed)
+  check int "both keepers observed" 2 (List.length observed);
+  let alpha_decision_log = scheduled_decision_log "alpha" json in
+  check int "only successful scheduled decisions prove autonomy" 2
+    (Safe_ops.json_int ~default:0 "decision_count" alpha_decision_log);
+  check int "failed scheduled decisions stay visible" 1
+    (Safe_ops.json_int ~default:0 "failure_count" alpha_decision_log);
+  check (float 0.001) "latest scheduled proof uses max successful timestamp"
+    latest_success_ts
+    (Safe_ops.json_float ~default:0.0 "latest_ts_unix" alpha_decision_log)
+
+let test_scheduled_proactive_evidence_uses_enabled_population () =
+  with_store @@ fun config ->
+  ignore
+    (persist_keeper config ~name:"alpha" ~total_turns:3
+       ~autonomous_action_count:2 ~autonomous_tool_turn_count:2
+       ~board_reactive_turn_count:1 ~proactive_count_total:1);
+  ignore
+    (persist_keeper config ~proactive_enabled:false ~name:"beta" ~total_turns:2
+       ~autonomous_action_count:1 ~autonomous_tool_turn_count:1
+       ~board_reactive_turn_count:1 ~proactive_count_total:0);
+  let json =
+    Dashboard_keeper_feature_proof.json
+      ~config
+      ~n:100
+      ~success_threshold_pct:80.0
+      ()
+  in
+  let evidence = keeper_evidence "scheduled_proactive_autonomy" json in
+  check int "scheduled evidence counts only enabled keepers" 1
+    (Safe_ops.json_int ~default:0 "keeper_count" evidence);
+  check int "scheduled meta count follows enabled keepers" 1
+    (Safe_ops.json_int ~default:0 "meta_count" evidence);
+  check (list string) "disabled keepers are not reported missing"
+    []
+    (json_string_values "missing_keepers" evidence);
+  check (list string) "enabled keeper is observed"
+    ["alpha"]
+    (json_string_values "observed_keepers" evidence)
 
 let test_persistent_24h_turn_exchange_counts_decision_span () =
   with_store @@ fun config ->
@@ -533,6 +618,8 @@ let () =
             test_docker_git_pr_workflow_reports_partial_chain;
           test_case "decision log counts as scheduled proof" `Quick
             test_decision_log_counts_as_scheduled_proof;
+          test_case "scheduled proof uses enabled population" `Quick
+            test_scheduled_proactive_evidence_uses_enabled_population;
           test_case "decision log counts as 24h turn exchange proof" `Quick
             test_persistent_24h_turn_exchange_counts_decision_span;
         ] );

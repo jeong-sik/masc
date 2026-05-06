@@ -475,40 +475,69 @@ PY
 }
 
 build_review_targets() {
-  local keeper_count
-  keeper_count="$(awk 'NF { c++ } END { print c + 0 }' "$RUN_DIR/keepers.txt")"
-  : >"$REVIEW_TARGETS_FILE"
-  if [[ "$keeper_count" -lt 2 ]]; then
-    while IFS= read -r keeper; do
-      [[ -n "$keeper" ]] || continue
-      jq -nc \
-        --arg keeper "$keeper" \
-        '{keeper:$keeper, review_target:null, mode:"insufficient_targets"}' \
-        >>"$REVIEW_TARGETS_FILE"
-    done <"$RUN_DIR/keepers.txt"
-    if [[ "$MUTATE" == "1" ]]; then
-      echo "at least two target keepers are required for cross-keeper approval proof" >&2
-      exit 1
-    fi
-    return 0
-  fi
+  python3 - "$RUN_DIR/keepers.txt" "$GITHUB_IDENTITY_COUNTS_FILE" \
+    "$REVIEW_TARGETS_FILE" <<'PY'
+import json
+import pathlib
+import sys
 
-  awk 'NF { keepers[++n] = $0 }
-       END {
-         for (i = 1; i <= n; i++) {
-           target = keepers[(i % n) + 1]
-           printf "%s\t%s\n", keepers[i], target
-         }
-       }' "$RUN_DIR/keepers.txt" |
-    while IFS=$'\t' read -r keeper review_target; do
-      [[ -n "$keeper" ]] || continue
-      jq -nc \
-        --arg keeper "$keeper" \
-        --arg review_target "$review_target" \
-        '{keeper:$keeper, review_target:$review_target, mode:"ring"}' \
-        >>"$REVIEW_TARGETS_FILE"
-    done
-  log "review target ring: $REVIEW_TARGETS_FILE"
+keepers_file = pathlib.Path(sys.argv[1])
+identity_counts_file = pathlib.Path(sys.argv[2])
+review_targets_file = pathlib.Path(sys.argv[3])
+
+keepers = [line.strip() for line in keepers_file.read_text().splitlines() if line.strip()]
+try:
+    identity_payload = json.loads(identity_counts_file.read_text())
+except Exception:
+    identity_payload = {}
+identities = identity_payload.get("keepers")
+if not isinstance(identities, dict):
+    identities = {}
+
+
+def fallback_target(index):
+    if len(keepers) < 2:
+        return None
+    return keepers[(index + 1) % len(keepers)]
+
+
+with review_targets_file.open("w", encoding="utf-8") as handle:
+    for index, keeper in enumerate(keepers):
+        keeper_identity = identities.get(keeper)
+        review_target = None
+        mode = "insufficient_targets"
+
+        if len(keepers) >= 2 and isinstance(keeper_identity, str):
+            for candidate in keepers:
+                if candidate == keeper:
+                    continue
+                candidate_identity = identities.get(candidate)
+                if isinstance(candidate_identity, str) and candidate_identity != keeper_identity:
+                    review_target = candidate
+                    mode = "identity_aware"
+                    break
+            if review_target is None:
+                mode = "identity_pool_insufficient"
+        elif len(keepers) >= 2:
+            review_target = fallback_target(index)
+            mode = "ring_unverified_identity"
+
+        row = {
+            "keeper": keeper,
+            "keeper_identity": keeper_identity,
+            "review_target": review_target,
+            "review_target_identity": identities.get(review_target) if review_target else None,
+            "mode": mode,
+        }
+        handle.write(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n")
+PY
+  if [[ "$MUTATE" == "1" ]] \
+    && jq -e 'select(.review_target == null)' "$REVIEW_TARGETS_FILE" >/dev/null; then
+    echo "cross-keeper approval targets could not be assigned for every keeper" >&2
+    jq -c 'select(.review_target == null)' "$REVIEW_TARGETS_FILE" >&2 || true
+    exit 1
+  fi
+  log "review targets: $REVIEW_TARGETS_FILE"
 }
 
 build_github_identity_counts() {
@@ -905,8 +934,8 @@ require_cmd curl
 assert_expected_server_commit
 ensure_mcp_session_if_needed
 discover_keepers
-build_review_targets
 assert_github_identity_pool_for_mutate
+build_review_targets
 render_prompts
 
 if [[ "$MUTATE" == "1" ]]; then

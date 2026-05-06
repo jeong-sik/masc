@@ -131,6 +131,18 @@ When the full 206-row strict corpus is available, feed it into Orient instead
 of using it only at closeout:
 
 ```bash
+python3 scripts/validate_goal_loop_strict_row_corpus.py \
+  <STRICT_ROW_CORPUS_JSON> \
+  --audit-catalog test/fixtures/goal_loop/audit-corpus.external-claim.json \
+  --require-valid \
+  --format text
+```
+
+Expected key fact: this is a fast intake check for the candidate artifact
+shape. It must report `strict_row_corpus: VALID rows=206 expected=206
+errors=0` before the corpus can be useful in the full Orient replay below.
+
+```bash
 python3 scripts/orient_goal_loop_logs.py \
   test/fixtures/goal_loop/observe.startup.json \
   --audit-catalog test/fixtures/goal_loop/audit-corpus.external-claim.json \

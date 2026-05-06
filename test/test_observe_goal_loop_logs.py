@@ -14,6 +14,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "observe_goal_loop_logs.py"
 ORIENT_SCRIPT_PATH = REPO_ROOT / "scripts" / "orient_goal_loop_logs.py"
+VALIDATE_STRICT_CORPUS_SCRIPT_PATH = (
+    REPO_ROOT / "scripts" / "validate_goal_loop_strict_row_corpus.py"
+)
 DECIDE_SCRIPT_PATH = REPO_ROOT / "scripts" / "decide_goal_loop_findings.py"
 VERIFY_SCRIPT_PATH = REPO_ROOT / "scripts" / "verify_goal_loop_logs.py"
 FIXTURE_DIR = REPO_ROOT / "test" / "fixtures" / "goal_loop"
@@ -1002,6 +1005,95 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         )
         self.assertIn(
             "strict_row_corpus: validated=True rows=206 errors=0", result.stdout
+        )
+
+    def test_validate_strict_row_corpus_cli_accepts_valid_corpus(self) -> None:
+        catalog = orient_goal_loop_logs.load_audit_catalog_input(
+            str(FIXTURE_DIR / "audit-corpus.external-claim.json")
+        )
+        assert catalog is not None
+
+        with tempfile.TemporaryDirectory() as raw_dir:
+            root = Path(raw_dir)
+            catalog_path = root / "catalog.json"
+            corpus_path = root / "strict-row-corpus.json"
+            catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+            corpus_path.write_text(
+                json.dumps(synthetic_strict_row_corpus()),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(VALIDATE_STRICT_CORPUS_SCRIPT_PATH),
+                    str(corpus_path),
+                    "--audit-catalog",
+                    str(catalog_path),
+                    "--require-valid",
+                    "--format",
+                    "text",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            "strict_row_corpus: VALID rows=206 expected=206 errors=0",
+            result.stdout,
+        )
+        self.assertIn("path_policy_valid: True", result.stdout)
+
+    def test_validate_strict_row_corpus_cli_rejects_invalid_corpus(self) -> None:
+        catalog = orient_goal_loop_logs.load_audit_catalog_input(
+            str(FIXTURE_DIR / "audit-corpus.external-claim.json")
+        )
+        assert catalog is not None
+        corpus = synthetic_strict_row_corpus(row_count=205)
+        findings = corpus["findings"]
+        assert isinstance(findings, list)
+        first = findings[0]
+        assert isinstance(first, dict)
+        first["source"] = {
+            "path": "/Users/dancer/Downloads/source.md",
+            "line_refs": [1],
+        }
+
+        with tempfile.TemporaryDirectory() as raw_dir:
+            root = Path(raw_dir)
+            catalog_path = root / "catalog.json"
+            corpus_path = root / "strict-row-corpus.json"
+            catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+            corpus_path.write_text(json.dumps(corpus), encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(VALIDATE_STRICT_CORPUS_SCRIPT_PATH),
+                    str(corpus_path),
+                    "--audit-catalog",
+                    str(catalog_path),
+                    "--require-valid",
+                    "--format",
+                    "json",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 1)
+        report = json.loads(result.stdout)
+        self.assertFalse(report["validated"])
+        self.assertEqual(report["row_count"], 205)
+        self.assertIn("findings_count_mismatch", report["errors"])
+        self.assertIn("contains_user_local_path", report["errors"])
+        self.assertIn(
+            "source_paths_must_be_logical_prompt_corpus_paths", report["errors"]
         )
 
     def test_decide_prioritizes_p0_actions_from_orient_json(self) -> None:

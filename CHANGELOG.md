@@ -1,6 +1,15 @@
 # Changelog
 
 
+## [0.19.14] - 2026-05-07
+
+### Added
+- `lib/chronicle_event.{ml,mli}`: backend OCaml schema for the chronicle event stream — Master Report Dim02 P1 ChronicleEvent. JSON-shape compatible with the dashboard read model `dashboard/src/components/chronicle/chronicle-types.ts` (camelCase: eventType, displayName, sessionId, parentEventId, relatedEventIds, projectState, filesChanged, statedGoal, inferredIntent). 21 event types, 4 actor kinds, 7 target kinds. Custom yojson codec (not [@@deriving]) so the wire format stays string-level stable across pin bumps. RFC-0035 PR-4.
+- `test/test_chronicle_event.ml`: 10 alcotest cases covering the full round-trip of every variant in all three taxonomies, full event JSON round-trip, dashboard camelCase key contract, optional-intent absent semantics, decode-rejects on unknown eventType / missing required field, and well-formedness invariant.
+
+### Changed
+- `docs/rfc/RFC-0035-cognitive-ide-roadmap.md`: mapping table Dim02 row updated — `chronicle_event` is now in-flight (PR-4) on the lib side. PR-stack table extended to mark PR-4 as in-flight and PR-5 (Librarian retriever) as the next P1 item.
+
 ## [0.19.13] - 2026-05-06
 
 ### Changed

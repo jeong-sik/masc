@@ -230,12 +230,14 @@ let test_read_recent_decode_failure_is_observed () =
     Tool_assignment_telemetry.reset_for_testing ();
     append_raw_tool_event
       (`Assoc [ ("event_type", `String "Bogus"); ("timestamp", `Float 1.0) ]);
+    append_raw_tool_event
+      (`Assoc [ ("event_type", `String "Broken"); ("timestamp", `Float 2.0) ]);
     let before = failure_metric "read_recent_decode" in
     match Tool_assignment_telemetry.read_recent ~n:10 with
     | Error msg -> fail ("read_recent failed: " ^ msg)
     | Ok events ->
         check int "malformed row dropped" 0 (List.length events);
-        check (float 0.001) "decode failure counted" (before +. 1.0)
+        check (float 0.001) "decode failures counted" (before +. 2.0)
           (failure_metric "read_recent_decode"))
 
 let test_warm_up_decode_failure_is_observed () =
@@ -243,9 +245,11 @@ let test_warm_up_decode_failure_is_observed () =
     Tool_assignment_telemetry.reset_for_testing ();
     append_raw_tool_event
       (`Assoc [ ("event_type", `String "Bogus"); ("timestamp", `Float 1.0) ]);
+    append_raw_tool_event
+      (`Assoc [ ("event_type", `String "Broken"); ("timestamp", `Float 2.0) ]);
     let before = failure_metric "warm_up_decode" in
     Tool_assignment_telemetry.warm_up ();
-    check (float 0.001) "warm-up decode failure counted" (before +. 1.0)
+    check (float 0.001) "warm-up decode failures counted" (before +. 2.0)
       (failure_metric "warm_up_decode"))
 
 let () =

@@ -51,6 +51,10 @@ module For_testing : sig
 
   val make_pending : Yojson.Safe.t -> pending_relay
 
+  val relay_max_queue_depth : int
+
+  val should_drain_subscription : pending_relay list -> bool
+
   val deliver_pending_with :
     append_json:(Yojson.Safe.t -> unit) ->
     broadcast_json:(Yojson.Safe.t -> unit) ->

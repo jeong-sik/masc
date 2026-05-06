@@ -455,6 +455,25 @@ let test_oas_event_bridge_broadcast_retry_does_not_duplicate_append () =
   Alcotest.(check int) "retry does not duplicate durable append" 1 !append_count;
   Alcotest.(check int) "broadcast retried once" 2 !broadcast_count
 
+let test_oas_event_bridge_backpressures_when_retry_queue_full () =
+  let json =
+    `Assoc
+      [
+        ("type", `String "oas:tool_called");
+        ("event_type", `String "tool_called");
+        ("correlation_id", `String "sess-backpressure");
+        ("run_id", `String "run-backpressure");
+      ]
+  in
+  let pending =
+    List.init Oas_event_bridge.For_testing.relay_max_queue_depth
+      (fun _ -> Oas_event_bridge.For_testing.make_pending json)
+  in
+  Alcotest.(check bool) "empty queue drains subscription" true
+    (Oas_event_bridge.For_testing.should_drain_subscription []);
+  Alcotest.(check bool) "full retry queue blocks subscription drain" false
+    (Oas_event_bridge.For_testing.should_drain_subscription pending)
+
 (* ================================================================ *)
 (* Message conversion tests (formerly oas_checkpoint_bridge)         *)
 (* ================================================================ *)
@@ -1012,6 +1031,9 @@ let () =
         test_oas_event_bridge_drop_marker_on_exhausted_append_failure;
       Alcotest.test_case "sse bridge retry avoids duplicate append after broadcast failure" `Quick
         test_oas_event_bridge_broadcast_retry_does_not_duplicate_append;
+      Alcotest.test_case "sse bridge retry queue backpressures instead of dropping head"
+        `Quick
+        test_oas_event_bridge_backpressures_when_retry_queue_full;
       Alcotest.test_case "agent_completed includes usage" `Quick
         test_agent_completed_includes_usage;
       Alcotest.test_case "agent_completed success without usage omits usage fields"

@@ -352,6 +352,16 @@ let () =
   Atomic.set Coord_hooks.distributed_lock_acquire_failed_fn
     record_distributed_lock_acquire_failed
 
+let record_claim_post_provision_failed ~site ~agent_name ~task_id:_ ~error:_ =
+  Prometheus.inc_counter
+    Prometheus.metric_coord_claim_post_provision_failures
+    ~labels:[ ("site", site); ("agent_name", agent_name) ]
+    ()
+
+let () =
+  Atomic.set Coord_hooks.claim_post_provision_failed_fn
+    record_claim_post_provision_failed
+
 (* Activity graph emit — wraps Activity_graph for room sub-modules *)
 let () = Atomic.set Coord_hooks.activity_emit_fn (fun config ~actor ?subject ~kind ~payload ~tags () ->
     (try

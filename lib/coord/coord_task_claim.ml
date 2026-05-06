@@ -319,7 +319,9 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
               (Atomic.get Coord_hooks.claim_post_provision_fn) config ~agent_name ~task_id
             with
             | Eio.Cancel.Cancelled _ as e -> raise e
-            | _ -> ());
+            | exn ->
+                Coord_hooks.observe_claim_post_provision_failure
+                  ~site:"claim_task" ~agent_name ~task_id exn);
            Ok (Printf.sprintf "%s claimed %s" agent_name task_id)
        with
        | Eio.Cancel.Cancelled _ as e -> raise e

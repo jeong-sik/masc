@@ -743,6 +743,8 @@ let metric_telemetry_unified_source_read_failures =
    most 19 (3 + 8 + 8). *)
 let metric_coord_telemetry_drop =
   "masc_coord_telemetry_drop_total"
+let metric_coord_claim_post_provision_failures =
+  "masc_coord_claim_post_provision_failures_total"
 
 (* #10094: per-caller counter for [Masc_oas_bridge.run_safe]
    timeouts.  The [caller] string supplied at the run_safe entry
@@ -2133,6 +2135,11 @@ let init () =
      series (3 + 8 + 8). Non-zero rate means a production path is \
      firing the lifecycle outside an Eio context; before this counter \
      the drop was silent (#10358 attrition root cause)."
+    Counter;
+  add metric_coord_claim_post_provision_failures
+    "Total best-effort claim post-provision hook failures. Labels: site \
+     (claim_task | claim_next) and agent_name. Task IDs are logged but \
+     not labeled to keep series cardinality bounded."
     Counter;
   add metric_auth_credential_ambiguous_lookup
     "Total runtime credential lookups where N>=2 credentials share the \

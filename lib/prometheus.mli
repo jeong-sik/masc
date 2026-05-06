@@ -397,6 +397,9 @@ val metric_coord_telemetry_drop : string
     outside an Eio fiber and the corresponding audit/telemetry rows
     are missing — the silent root cause behind the [#10358] 5-tag → 2-tag
     durable-ledger attrition. *)
+val metric_coord_claim_post_provision_failures : string
+(** Total best-effort claim post-provision hook failures. Labels: [site]
+    and [agent_name]. *)
 
 val metric_oas_bridge_timeout : string
 (** #10094: labelled [caller, timeout_s] so operators can

@@ -313,7 +313,7 @@ submitted_by is filled from your keeper identity.";
         ("highlights", `Assoc [("type", `String "array"); ("items", `Assoc [("type", `String "string")]); ("description", `String "Important post ids to highlight")]);
         ("tag_suggestions", `Assoc [("type", `String "array"); ("description", `String "Objects with post_id, tags[], rationale")]);
         ("answer_matches", `Assoc [("type", `String "array"); ("description", `String "Objects with question_post_id, answer_post_id, score, rationale")]);
-        ("health_score", `Assoc [("type", `String "number"); ("description", `String "Optional normalized health score")]);
+        ("health_score", `Assoc [("type", `String "number"); ("minimum", `Float 0.0); ("maximum", `Float 1.0); ("description", `String "Optional normalized health score in [0.0, 1.0]")]);
         ("health_components", `Assoc [("type", `String "array"); ("description", `String "Objects with name, score, weight, rationale")]);
         ("rationale", `Assoc [("type", `String "string"); ("description", `String "Why this curation snapshot is useful now")]);
         ("provenance", `Assoc [("type", `String "object"); ("description", `String "Audit metadata such as source window, prompt/run id, and model params")]);

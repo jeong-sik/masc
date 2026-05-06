@@ -506,7 +506,7 @@ function normalizeBoardCurationTagSuggestions(raw: unknown): BoardCurationSnapsh
     if (!post_id) return []
     return [{
       post_id,
-      tags: asStringList(item.tags),
+      tags: asStrictStringArray(item.tags),
       rationale: asString(item.rationale, ''),
     }]
   })

@@ -655,7 +655,7 @@ let test_board_curation_submit_roundtrips_to_read () =
                   [
                     ("question_post_id", `String "p-7");
                     ("answer_post_id", `String "p-8");
-                    ("score", `Float 0.9);
+                    ("score", `String " 0.9 ");
                     ("rationale", `String "Direct answer candidate");
                   ];
               ]);
@@ -666,8 +666,8 @@ let test_board_curation_submit_roundtrips_to_read () =
                 `Assoc
                   [
                     ("name", `String "routing_latency");
-                    ("score", `Float 0.65);
-                    ("weight", `Float 0.5);
+                    ("score", `String "0.65");
+                    ("weight", `String " 0.5 ");
                     ("rationale", `String "Some delay visible");
                   ];
               ]);
@@ -690,6 +690,18 @@ let test_board_curation_submit_roundtrips_to_read () =
     Yojson.Safe.Util.(submitted |> member "highlights" |> to_list |> List.map to_string);
   Alcotest.(check (float 0.0001)) "health score persisted" 0.65
     Yojson.Safe.Util.(submitted |> member "health_score" |> to_float);
+  let answer_match =
+    Yojson.Safe.Util.(submitted |> member "answer_matches" |> to_list |> List.hd)
+  in
+  Alcotest.(check (float 0.0001)) "string answer score parsed" 0.9
+    Yojson.Safe.Util.(answer_match |> member "score" |> to_float);
+  let health_component =
+    Yojson.Safe.Util.(submitted |> member "health_components" |> to_list |> List.hd)
+  in
+  Alcotest.(check (float 0.0001)) "string health component score parsed" 0.65
+    Yojson.Safe.Util.(health_component |> member "score" |> to_float);
+  Alcotest.(check (float 0.0001)) "string health component weight parsed" 0.5
+    Yojson.Safe.Util.(health_component |> member "weight" |> to_float);
   let read_ok, read_body = dispatch "masc_board_curation_read" (make_args []) in
   Alcotest.(check bool) "curation read after submit ok" true read_ok;
   let read_json = Yojson.Safe.from_string read_body in
@@ -1102,6 +1114,35 @@ let test_tools_all_have_descriptions () =
       (String.length t.description > 0)
   ) Tool_board.tools
 
+let health_score_schema (tool : Masc_domain.tool_schema) =
+  match tool.input_schema with
+  | `Assoc fields ->
+    (match List.assoc_opt "properties" fields with
+     | Some (`Assoc properties) ->
+       (match List.assoc_opt "health_score" properties with
+        | Some (`Assoc schema) -> schema
+        | _ -> Alcotest.failf "%s missing health_score schema" tool.name)
+     | _ -> Alcotest.failf "%s missing properties schema" tool.name)
+  | _ -> Alcotest.failf "%s input_schema is not an object" tool.name
+
+let find_tool name tools =
+  match List.find_opt (fun (tool : Masc_domain.tool_schema) -> String.equal tool.name name) tools with
+  | Some tool -> tool
+  | None -> Alcotest.failf "missing tool schema %s" name
+
+let test_curation_health_score_schema_bounds () =
+  let check_bounds label tool =
+    let schema = health_score_schema tool in
+    Alcotest.(check (float 0.0001)) (label ^ " minimum") 0.0
+      Yojson.Safe.Util.(List.assoc "minimum" schema |> to_float);
+    Alcotest.(check (float 0.0001)) (label ^ " maximum") 1.0
+      Yojson.Safe.Util.(List.assoc "maximum" schema |> to_float)
+  in
+  check_bounds "raw curation submit"
+    (find_tool "masc_board_curation_submit" Tool_board.tools);
+  check_bounds "keeper curation submit"
+    (find_tool "keeper_board_curation_submit" Tool_shard.shard_board.tools)
+
 (** {1 Test Runner} *)
 
 let () =
@@ -1205,6 +1246,8 @@ let () =
           Alcotest.test_case "tools count" `Quick test_tools_count;
           Alcotest.test_case "unique names" `Quick test_tools_names_unique;
           Alcotest.test_case "all have descriptions" `Quick test_tools_all_have_descriptions;
+          Alcotest.test_case "curation health score schema bounds" `Quick
+            test_curation_health_score_schema_bounds;
         ] );
       ( "post_kind_registry",
         [

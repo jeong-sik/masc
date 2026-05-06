@@ -557,7 +557,7 @@ describe('fetchBoardCuration', () => {
           ordering: ['post-a', { id: 'not-coerced' }, 'post-b', 7, ' '],
           highlights: ['post-a', { name: 'not-coerced' }, null],
           tag_suggestions: [
-            { post_id: 'post-a', tags: ['incident', 'ops'], rationale: 'Incident thread' },
+            { post_id: 'post-a', tags: ['incident', { name: 'not-coerced' }, ' ops ', ' '], rationale: 'Incident thread' },
             { post_id: ' ', tags: ['ignored'], rationale: 'missing post id' },
           ],
           answer_matches: [

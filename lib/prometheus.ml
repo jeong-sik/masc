@@ -1281,7 +1281,7 @@ let init () =
   (* Module-level init runs before Eio context exists.
      Single-threaded at load time — bypass mutex. *)
   let add name help mt =
-    let key = name in
+    let key = metric_key name [] in
     if not (Hashtbl.mem metrics key) then
       Hashtbl.add metrics key { name; help; metric_type = mt; value = 0.0; labels = [] }
   in

@@ -219,6 +219,13 @@ let text_has_literal text literal =
     true
   with Not_found -> false
 
+let count_lines_with_prefix text prefix =
+  String.split_on_char '\n' text
+  |> List.filter (fun line ->
+         String.length line >= String.length prefix
+         && String.sub line 0 (String.length prefix) = prefix)
+  |> List.length
+
 let test_keeper_metrics_registered () =
   let text = Prometheus.to_prometheus_text () in
   let has metric =
@@ -329,6 +336,12 @@ let test_memory_usage_metric_registered () =
   check bool "has memory usage TYPE" true
     (text_has_literal text
        ("# TYPE " ^ Prometheus.metric_memory_usage_bytes ^ " gauge"))
+
+let test_builtin_gauge_update_does_not_duplicate_sample () =
+  Prometheus.set_gauge Prometheus.metric_memory_usage_bytes 123.0;
+  let text = Prometheus.to_prometheus_text () in
+  check int "single memory usage sample" 1
+    (count_lines_with_prefix text (Prometheus.metric_memory_usage_bytes ^ " "))
 
 let test_goal_attainment_metrics_registered () =
   let text = Prometheus.to_prometheus_text () in
@@ -526,6 +539,8 @@ let () =
         test_build_identity_probe_metric_registered;
       test_case "memory usage metric registered" `Quick
         test_memory_usage_metric_registered;
+      test_case "built-in gauge update does not duplicate sample" `Quick
+        test_builtin_gauge_update_does_not_duplicate_sample;
       test_case "goal attainment metrics registered" `Quick
         test_goal_attainment_metrics_registered;
       test_case "histogram exported as summary with _sum/_count"

@@ -737,6 +737,8 @@ let metric_keeper_observation_query_failures =
   "masc_keeper_observation_query_failures_total"
 let metric_persistence_read_drops =
   "masc_persistence_read_drops_total"
+let metric_persistence_utf8_repair =
+  "masc_persistence_utf8_repair_total"
 let metric_discovery_history_failures =
   "masc_discovery_history_failures_total"
 
@@ -2102,6 +2104,11 @@ let init () =
     "Total persisted read-model entries dropped during filesystem scans, \
      labeled by surface and reason"
     Counter;
+  add metric_persistence_utf8_repair
+    "Total persistence JSON reads repaired after invalid UTF-8 was detected."
+    Counter;
+  Safe_ops.set_persistence_utf8_repair_metric_hook (fun () ->
+    inc_counter metric_persistence_utf8_repair ());
   add metric_discovery_history_failures
     "Total discovery history JSONL persistence/read/prune failures, \
      labeled by site"

@@ -12,6 +12,7 @@ import argparse
 import json
 import re
 import sys
+from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, TextIO
@@ -525,8 +526,11 @@ def source_candidate_row_details(
             text_redaction_valid = False
             invalid_rows.append(f"{label}: unredacted_candidate_text")
 
+    # Single-pass O(n) duplicate detection. The previous comprehension called
+    # row_ids.count() per element, making this O(n^2) — fine at today's
+    # ~132–206 rows but a footgun if the inventory ever grows.
     duplicate_ids = sorted(
-        {candidate_id for candidate_id in row_ids if row_ids.count(candidate_id) > 1}
+        candidate_id for candidate_id, freq in Counter(row_ids).items() if freq > 1
     )
     candidate_rows_count = len(candidate_rows_raw)
     candidate_rows_count_matches = (

@@ -30,4 +30,7 @@ RUN apt-get update \
 
 COPY --from=build /src/_build/install/default/bin/masc-worker-run /usr/local/bin/masc-worker-run
 
+# Worker reads spec on stdin, exits cleanly on EOF or SIGTERM.
+STOPSIGNAL SIGTERM
+
 ENTRYPOINT ["/usr/local/bin/masc-worker-run", "--spec-stdin"]

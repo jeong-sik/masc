@@ -76,6 +76,12 @@ VOLUME ["/app/.masc"]
 
 EXPOSE 8080
 
+# Graceful shutdown: bin/main_eio.ml runs a 4-phase shutdown
+# (NOTIFY → HOOKS → BOARD → CANCEL) on SIGTERM. Make the contract
+# explicit so docker stop / compose / k8s never replace it with SIGKILL
+# without going through the OCaml shutdown path first.
+STOPSIGNAL SIGTERM
+
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD curl -fsS http://localhost:${PORT}/health || exit 1
 

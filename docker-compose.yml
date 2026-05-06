@@ -1,0 +1,60 @@
+# MASC MCP – local / single-host docker-compose orchestration.
+#
+# Production runs on Railway today; this compose file is for:
+#   - reproducible local stack-style runs (so docker stop respects
+#     the OCaml 4-phase graceful shutdown),
+#   - k8s/Nomad migrations that read compose for restart/log knobs,
+#   - smoke tests in `.github/workflows/deploy-railway.yml` if we ever
+#     want to drive them via compose.
+#
+# Knobs explained:
+#   - restart: unless-stopped — re-launch on crash, but never on a
+#     `docker compose stop`. Aligns with infrastructure/launchd plist
+#     `KeepAlive.SuccessfulExit=false`.
+#   - stop_grace_period: 60s — must exceed bin/main_eio.ml
+#     `shutdown_cfg.force_timeout_s` so phases NOTIFY/HOOKS/BOARD/CANCEL
+#     run before docker escalates to SIGKILL.
+#   - logging: json-file with max-size=10m × max-file=3 → ~30MB upper
+#     bound per container. Container logs cap is independent of the
+#     in-tree `lib/masc_log/log.ml` 7-day rotation.
+#   - volumes: durable JSONL state under /app/.masc (matches Dockerfile
+#     VOLUME). The image-baked /app/config remains read-only seed.
+
+services:
+  masc-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Override locally:
+        #   docker compose build --build-arg BINARY_PATH=_build/default/bin/main_eio.exe
+        BINARY_PATH: masc-mcp-linux-x64
+    image: masc-mcp:local
+    container_name: masc-mcp
+    init: true
+    restart: unless-stopped
+    stop_signal: SIGTERM
+    stop_grace_period: 60s
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      MASC_BASE_PATH: /app
+      MASC_CONFIG_DIR: /app/config
+    volumes:
+      - masc-state:/app/.masc
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  masc-state:
+    driver: local

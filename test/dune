@@ -1224,3 +1224,8 @@
  (name test_dashboard_yjs)
  (modules test_dashboard_yjs)
  (libraries masc_test_deps))
+
+(test
+ (name test_masc_contract_catalog)
+ (modules test_masc_contract_catalog)
+ (libraries masc_test_deps))

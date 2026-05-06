@@ -109,6 +109,26 @@ let compute_diversity ~(available_tools : string list)
     entropy = raw_h; normalized_entropy = norm_h;
     underused_tools = underused; overused_tools = overused }
 
+let record_underused_tool_metrics ~keeper_name ~available_tools summary =
+  let available_tools = List.sort_uniq String.compare available_tools in
+  let underused_tools =
+    List.sort_uniq String.compare summary.underused_tools
+  in
+  Prometheus.set_gauge
+    Prometheus.metric_keeper_tool_underused_allowed_count
+    ~labels:[ ("keeper", keeper_name) ]
+    (float_of_int (List.length underused_tools));
+  List.iter
+    (fun tool ->
+       let value =
+         if List.mem tool underused_tools then 1.0 else 0.0
+       in
+       Prometheus.set_gauge
+         Prometheus.metric_keeper_tool_underused_allowed
+         ~labels:[ ("keeper", keeper_name); ("tool", tool) ]
+         value)
+    available_tools
+
 (** Default normalized entropy threshold.  Below this, the keeper is
     considered to be in an exploitation-only pattern.
     Empirical: a keeper using 5 of 25 tools at roughly equal rates

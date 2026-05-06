@@ -39,6 +39,40 @@ let test_stats_of_registry () =
   check string "first name" "tool_a" first.name;
   check int "first count" 50 first.count
 
+let test_underused_tool_metrics_flag_unused_web_search () =
+  let keeper_name = "test-underused-tool-metrics" in
+  let available_tools = [ "keeper_board_post"; "masc_web_search" ] in
+  let stats =
+    [
+      {
+        Masc_mcp.Keeper_tool_diversity.name = "keeper_board_post";
+        count = 100;
+        successes = 100;
+        failures = 0;
+      };
+    ]
+  in
+  let summary =
+    Masc_mcp.Keeper_tool_diversity.compute_diversity
+      ~available_tools stats
+  in
+  Masc_mcp.Keeper_tool_diversity.record_underused_tool_metrics
+    ~keeper_name ~available_tools summary;
+  check (float 0.001) "one underused allowed tool" 1.0
+    (Masc_mcp.Prometheus.metric_value_or_zero
+       Masc_mcp.Prometheus.metric_keeper_tool_underused_allowed_count
+       ~labels:[ ("keeper", keeper_name) ] ());
+  check (float 0.001) "web search flagged underused" 1.0
+    (Masc_mcp.Prometheus.metric_value_or_zero
+       Masc_mcp.Prometheus.metric_keeper_tool_underused_allowed
+       ~labels:[ ("keeper", keeper_name); ("tool", "masc_web_search") ]
+       ());
+  check (float 0.001) "used board post cleared" 0.0
+    (Masc_mcp.Prometheus.metric_value_or_zero
+       Masc_mcp.Prometheus.metric_keeper_tool_underused_allowed
+       ~labels:[ ("keeper", keeper_name); ("tool", "keeper_board_post") ]
+       ())
+
 (* ── QCheck properties ───────────────────────────────────── *)
 
 let int_list_gen ~min_len ~max_len ~min_val ~max_val =
@@ -84,6 +118,8 @@ let () =
           test_case "shannon_entropy empty" `Quick test_shannon_entropy_empty;
           test_case "normalized uniform" `Quick test_normalized_uniform;
           test_case "stats_of_registry" `Quick test_stats_of_registry;
+          test_case "underused tool metrics flag unused web search" `Quick
+            test_underused_tool_metrics_flag_unused_web_search;
         ] );
       ( "qcheck",
         List.map QCheck_alcotest.to_alcotest

@@ -256,6 +256,16 @@ val metric_keeper_tool_emission_registry_size : string
     into the keeper's accumulator. *)
 val metric_keeper_tool_emission_pushes : string
 
+(** #13387: per-keeper count of allowed tools that the diversity
+    analyzer classifies as unused or below threshold. Labels:
+    [keeper]. *)
+val metric_keeper_tool_underused_allowed_count : string
+
+(** #13387: per-tool gauge for allowed keeper tools that are unused
+    or below threshold. Value is [1.0] when underused and [0.0]
+    otherwise. Labels: [keeper], [tool]. *)
+val metric_keeper_tool_underused_allowed : string
+
 val metric_keeper_operator_compact : string
 val metric_keeper_operator_clear : string
 

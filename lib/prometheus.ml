@@ -517,6 +517,18 @@ let metric_keeper_tool_emission_registry_size =
 let metric_keeper_tool_emission_pushes =
   "masc_keeper_tool_emission_pushes_total"
 
+(* #13387: keeper tool diversity gauges. The count gauge gives
+   dashboard/operator summaries a cheap per-keeper signal; the per-tool
+   gauge identifies exactly which allowed tools are available but unused
+   or below the diversity threshold. Labels:
+   - [keeper] for the count gauge
+   - [keeper, tool] for the per-tool gauge *)
+let metric_keeper_tool_underused_allowed_count =
+  "masc_keeper_tool_underused_allowed_count"
+
+let metric_keeper_tool_underused_allowed =
+  "masc_keeper_tool_underused_allowed"
+
 (* #10349: keeper FS path rejection counter.  Pre-fix the
    user-facing read-path rejection strings carried the resolver's
    view of allowed sandbox roots (for example [(roots=[<list>])]
@@ -1552,6 +1564,14 @@ let init () =
     "Total tagged tool results captured into the K4c per-keeper \
      accumulator (labels: keeper)"
     Counter;
+  add metric_keeper_tool_underused_allowed_count
+    "Number of keeper-allowed tools that have no calls or are below \
+     the diversity threshold (labels: keeper)"
+    Gauge;
+  add metric_keeper_tool_underused_allowed
+    "Whether an allowed keeper tool is unused or below the diversity \
+     threshold (1=yes, 0=no; labels: keeper, tool)"
+    Gauge;
   (* Operator-initiated overflow recovery — emitted by tool_keeper.ml *)
   add metric_keeper_operator_compact
     "Total operator-invoked masc_keeper_compact calls (labels: result=ok|no_checkpoint|precondition|not_found)" Counter;

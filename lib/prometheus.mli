@@ -721,6 +721,9 @@ val metric_bg_task_sidecar_failures : string
 (** Background-task PID sidecar persistence failures. Labels:
     [site] = [write | read | read_parse | readdir | is_dir | unlink]. *)
 
+val metric_build_identity_probe_failures : string
+(** Build identity git probe failures. Labels:
+    [site] = [commit_ts_git_capture | commit_ts_parse]. *)
 val metric_distributed_lock_acquire_failed : string
 (** #9645: distributed lock acquire retry-budget exhaustions.
     Labels: [key, attempts]. *)

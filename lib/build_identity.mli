@@ -48,3 +48,11 @@ val pick_repo_candidates :
     before [cwd] so the binary's own source tree wins when the process is
     launched from an unrelated cwd. Returns a single entry when both
     arguments are equal. Pure — exposed for unit testing. *)
+
+val parse_commit_unix_ts_output : string -> float option
+(** Parse raw [git log -1 --format=%ct] output. Pure — exposed for unit
+    testing. *)
+
+module For_testing : sig
+  val observe_probe_failure : site:string -> exn -> unit
+end

@@ -71,6 +71,33 @@ let test_pick_repo_candidates_not_sorted_alphabetically () =
         first
   | [] -> Alcotest.fail "pick_repo_candidates returned empty list"
 
+let test_parse_commit_unix_ts_output () =
+  Alcotest.(check (option (float 0.001)))
+    "valid timestamp"
+    (Some 1_712_000_000.0)
+    (Build_identity.parse_commit_unix_ts_output " 1712000000\n");
+  Alcotest.(check (option (float 0.001)))
+    "invalid timestamp"
+    None
+    (Build_identity.parse_commit_unix_ts_output "not-a-timestamp\n")
+
+let build_identity_probe_failure_count site =
+  Prometheus.metric_value_or_zero
+    Prometheus.metric_build_identity_probe_failures
+    ~labels:[("site", site)]
+    ()
+
+let test_probe_failure_observer_increments_metric () =
+  let before = build_identity_probe_failure_count "commit_ts_parse" in
+  Build_identity.For_testing.observe_probe_failure
+    ~site:"commit_ts_parse"
+    (Failure "synthetic parse failure");
+  let after = build_identity_probe_failure_count "commit_ts_parse" in
+  Alcotest.(check (float 0.0001))
+    "probe failure counted"
+    (before +. 1.0)
+    after
+
 let () =
   Alcotest.run "build_identity"
     [
@@ -91,5 +118,9 @@ let () =
           Alcotest.test_case
             "pick_repo_candidates not sorted alphabetically" `Quick
             test_pick_repo_candidates_not_sorted_alphabetically;
+          Alcotest.test_case "parse commit timestamp output" `Quick
+            test_parse_commit_unix_ts_output;
+          Alcotest.test_case "probe failure observer increments metric" `Quick
+            test_probe_failure_observer_increments_metric;
         ] );
     ]

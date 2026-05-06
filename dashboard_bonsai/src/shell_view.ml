@@ -780,9 +780,20 @@ let hud_cell ?(tone : tone = `Neutral) ~k ~v () =
     ]
 ;;
 
-let default_hud ~(active : Route.t) =
+let shell_fetch_tone (status : Overview_types.fetch_status) : tone =
+  match status with
+  | Overview_types.Fetch_pending -> `Warn
+  | Overview_types.Fetch_fresh -> `Ok
+  | Overview_types.Fetch_stale _ -> `Bad
+;;
+
+let default_hud ~(shell : Overview_types.response) ~(active : Route.t) =
   [ hud_cell ~k:"Runtime" ~v:"local" ()
-  ; hud_cell ~tone:`Ok ~k:"Snapshot" ~v:"running" ()
+  ; hud_cell
+      ~tone:(shell_fetch_tone shell.fetch_status)
+      ~k:"Shell"
+      ~v:(Overview_types.fetch_status_label shell.fetch_status)
+      ()
   ; hud_cell ~k:"Surface" ~v:"bonsai" ()
   ; hud_cell ~tone:`Warn ~k:"Route" ~v:(label active) ()
   ; hud_cell ~k:"Base" ~v:"/dashboard/b" ()
@@ -1001,7 +1012,7 @@ let view ?(shell = Overview_types.fixture) ?hud ?aside ~(active : Route.t) (chil
   let hud_nodes =
     match hud with
     | Some nodes -> nodes
-    | None -> default_hud ~active
+    | None -> default_hud ~shell ~active
   in
   let aside_node =
     match aside with

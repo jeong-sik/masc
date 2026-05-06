@@ -349,6 +349,24 @@ let test_provider_label_of_config_preserves_cli_vs_api_identity () =
   check string "kimi cli model label" "kimi_cli:kimi-for-coding"
     (Adapter.model_label_of_config kimi_cli_cfg)
 
+let test_provider_health_key_is_provider_scoped () =
+  let cfg label =
+    match Masc_mcp.Cascade_config.parse_model_string label with
+    | Some cfg -> cfg
+    | None -> fail ("expected model label to parse: " ^ label)
+  in
+  let claude_auto = cfg "claude_code:auto" in
+  let claude_sonnet = cfg "claude_code:claude-sonnet-4-6" in
+  let gemini_auto = cfg "gemini_cli:auto" in
+  check string "same provider shares health key" "claude_code"
+    (Adapter.provider_health_key_of_config claude_auto);
+  check string "same provider different model shares health key"
+    (Adapter.provider_health_key_of_config claude_auto)
+    (Adapter.provider_health_key_of_config claude_sonnet);
+  check bool "same model id across providers remains isolated" true
+    (Adapter.provider_health_key_of_config claude_auto
+     <> Adapter.provider_health_key_of_config gemini_auto)
+
 let test_provider_of_model_label_uses_typed_boundaries () =
   check string "explicit prefix wins over coarse kind" "glm-coding"
     (Adapter.provider_of_model_label
@@ -435,6 +453,8 @@ let () =
             test_runtime_mcp_header_support_uses_declared_policy;
           test_case "provider label keeps cli vs api identity" `Quick
             test_provider_label_of_config_preserves_cli_vs_api_identity;
+          test_case "provider health key is provider scoped" `Quick
+            test_provider_health_key_is_provider_scoped;
           test_case "provider model label uses typed boundaries" `Quick
             test_provider_of_model_label_uses_typed_boundaries;
           test_case "unmetered provider uses telemetry policy" `Quick

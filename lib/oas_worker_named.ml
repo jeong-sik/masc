@@ -248,16 +248,19 @@ let run_named
   let candidate_cfgs =
     List.filter
       (fun (provider_cfg : Llm_provider.Provider_config.t) ->
+         let provider_health_key =
+           Provider_adapter.provider_health_key_of_config provider_cfg
+         in
          match
            Cascade_health_tracker.check_circuit_breaker
              Cascade_health_tracker.global
-             ~provider_key:provider_cfg.model_id
+             ~provider_key:provider_health_key
          with
          | Ok () -> true
          | Error msg ->
              Log.Misc.debug
-               "cascade %s: prefilter skipped %s (provider cooldown: %s)"
-               cascade_name provider_cfg.model_id msg;
+               "cascade %s: prefilter skipped %s (provider_key=%s cooldown: %s)"
+               cascade_name provider_cfg.model_id provider_health_key msg;
              false)
       candidate_cfgs
   in
@@ -680,9 +683,12 @@ let run_named
         terminal_error
     | (provider_cfg : Llm_provider.Provider_config.t) :: rest ->
       Eio_guard.fair_yield (); (* P0: keep fast-fail cascades scheduler-fair. *)
-      match Cascade_health_tracker.check_circuit_breaker Cascade_health_tracker.global ~provider_key:provider_cfg.model_id with
+      let provider_health_key =
+        Provider_adapter.provider_health_key_of_config provider_cfg
+      in
+      match Cascade_health_tracker.check_circuit_breaker Cascade_health_tracker.global ~provider_key:provider_health_key with
       | Error msg ->
-          Log.Misc.debug "cascade %s: skipping %s (provider cooldown: %s)" cascade_name provider_cfg.model_id msg;
+          Log.Misc.debug "cascade %s: skipping %s (provider_key=%s cooldown: %s)" cascade_name provider_cfg.model_id provider_health_key msg;
           try_cascade ~on_success ?resume_checkpoint ?per_provider_timeout_s rest last_err
       | Ok () ->
       let is_last = rest = [] in
@@ -720,7 +726,7 @@ let run_named
          a single number, which would mislead strategy ranking. *)
       (match result with
       | Ok result when accept result.response ->
-        Cascade_health_tracker.(record_success global ~provider_key:provider_cfg.model_id
+        Cascade_health_tracker.(record_success global ~provider_key:provider_health_key
           ~latency_ms:attempt_latency_ms ());
         (* FSM: Call_ok → Accept *)
         let observation =
@@ -734,7 +740,7 @@ let run_named
         Oas_worker_cascade.record_cascade ~keeper_name
           ~cascade_name:error_cascade_name
           ~outcome:`Success ~observation:(Some observation) ();
-        on_success ~provider_key:provider_cfg.model_id;
+        on_success ~provider_key:provider_health_key;
         Ok result
       | Ok result ->
         (* Response arrived but failed the cascade's [accept] predicate
@@ -746,7 +752,7 @@ let run_named
            weight but keeps the [Rejected] tag so the dashboard can
            distinguish it from hard errors. *)
         Cascade_health_tracker.(
-          record_rejected global ~provider_key:provider_cfg.model_id
+          record_rejected global ~provider_key:provider_health_key
             ~error_kind:(error_kind_of_string "accept_rejected") ());
         (* FSM: Accept_rejected → decide *)
         let reason = Printf.sprintf "response rejected by accept (model=%s)" result.response.model in
@@ -765,7 +771,7 @@ let run_named
            Oas_worker_cascade.record_cascade ~keeper_name
              ~cascade_name:error_cascade_name
              ~outcome:`Success ~observation:(Some observation) ();
-           on_success ~provider_key:provider_cfg.model_id;
+           on_success ~provider_key:provider_health_key;
            Ok result
          | Cascade_fsm.Try_next { last_err = new_err } ->
            (* Demoted from WARN to INFO (task-239): cascade will retry the
@@ -812,7 +818,7 @@ let run_named
            Oas_worker_cascade.record_cascade ~keeper_name
              ~cascade_name:error_cascade_name
              ~outcome:`Success ~observation:(Some observation) ();
-           on_success ~provider_key:provider_cfg.model_id;
+           on_success ~provider_key:provider_health_key;
            Ok result)
       | Error sdk_err ->
         let sdk_err =
@@ -837,14 +843,14 @@ let run_named
         in
         if sdk_error_is_hard_quota sdk_err then
           Cascade_health_tracker.(
-            record_hard_quota global ~provider_key:provider_cfg.model_id
+            record_hard_quota global ~provider_key:provider_health_key
               ~error_kind:(error_kind_of_string "hard_quota")
               ~error_reason:err_str ())
         else if sdk_error_is_resumable_cli_session sdk_err
                 || sdk_error_is_terminal_provider_runtime_failure sdk_err
         then
           Cascade_health_tracker.(
-            record_terminal_failure global ~provider_key:provider_cfg.model_id
+            record_terminal_failure global ~provider_key:provider_health_key
               ~error_kind:
                 (error_kind_of_string
                    (if sdk_error_is_resumable_cli_session sdk_err then
@@ -863,7 +869,7 @@ let run_named
              hard_quota; the tracker's max-clamp guards against a
              misclassified hard quota silently producing a long blackout. *)
           Cascade_health_tracker.(
-            record_soft_rate_limited global ~provider_key:provider_cfg.model_id
+            record_soft_rate_limited global ~provider_key:provider_health_key
               ?retry_after_s:retry_after_opt
               ~error_kind:(error_kind_of_string "http_429")
               ~error_reason:err_str ())
@@ -902,7 +908,7 @@ let run_named
             else "failure"
           in
           Cascade_health_tracker.(
-            record_failure global ~provider_key:provider_cfg.model_id
+            record_failure global ~provider_key:provider_health_key
               ~error_kind:(error_kind_of_string error_kind)
               ~error_reason:err_str ())));
         (* FSM: Call_err → decide.
@@ -1084,7 +1090,7 @@ let run_named
      Cascade_client_capacity.auto_register_cli_with_override
        ~capacity_keys:candidate_capacity_keys ~max_concurrent:n);
   let adapter : Llm_provider.Provider_config.t Cascade_strategy.adapter = {
-    health_key = (fun (c : Llm_provider.Provider_config.t) -> c.model_id);
+    health_key = Provider_adapter.provider_health_key_of_config;
     capacity_key = capacity_key_of;
     weight = (fun _ -> 1);
   } in

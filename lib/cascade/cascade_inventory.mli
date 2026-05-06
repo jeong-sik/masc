@@ -26,7 +26,7 @@
     [score = success_rate × latency_score × is_not_in_cooldown]
 
     - 0.0 when the provider is in cooldown.
-    - 0.0 when the provider's [model_id] appears in the [exclude] list.
+    - 0.0 when the provider's provider-health key appears in the [exclude] list.
     - 0.0 when [keeper_assignable = false] for the cascade the provider
       came from (caller must filter externally — see
       {!score_provider}'s [keeper_assignable] flag).
@@ -65,8 +65,8 @@ type scored_provider = {
     [candidates] from {!Cascade_catalog_runtime} which has its own
     enumeration order.
 
-    [exclude] is the list of [provider.model_id]s to skip — typically
-    populated with the model IDs from the cascade that just exhausted,
+    [exclude] is the list of provider-health keys to skip — typically
+    populated with the provider keys from the cascade that just exhausted,
     so cross-cascade promotion never re-elects a provider that already
     failed in the current turn. *)
 val best_runner_among :

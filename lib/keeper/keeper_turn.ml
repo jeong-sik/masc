@@ -186,7 +186,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
       |> List.filter (fun name -> name <> "")
       |> Keeper_types.dedupe_keep_order
     in
-    (match keeper_msg_timeout_override args with
+    match keeper_msg_timeout_override args with
     | Error e -> (false, e)
     | Ok keeper_msg_oas_timeout_s ->
     (match reject_legacy_model_args ~tool_name:"masc_keeper_msg" args with

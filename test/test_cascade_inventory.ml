@@ -20,6 +20,9 @@ let provider_of_label label =
   | Some cfg -> cfg
   | None -> fail ("expected model label to parse: " ^ label)
 
+let provider_health_key provider =
+  Masc_mcp.Provider_adapter.provider_health_key_of_config provider
+
 let mk_scored ?(cascade_name = "test") ?(score = 0.0) label =
   Inv.
     {
@@ -42,7 +45,7 @@ let test_score_excluded_zero () =
   let h = H.create () in
   let p = provider_of_label "codex_cli:gpt-5.3-codex" in
   let s = Inv.score_provider h
-            ~exclude:[p.Llm_provider.Provider_config.model_id]
+            ~exclude:[provider_health_key p]
             ~keeper_assignable:true p
   in
   check (float 0.001) "excluded provider scores 0.0" 0.0 s
@@ -51,9 +54,9 @@ let test_score_cooldown_zero () =
   let h = H.create () in
   let p = provider_of_label "codex_cli:gpt-5.3-codex" in
   (* Trigger cooldown via 3 consecutive failures (default threshold). *)
-  H.record_failure h ~provider_key:p.model_id ();
-  H.record_failure h ~provider_key:p.model_id ();
-  H.record_failure h ~provider_key:p.model_id ();
+  H.record_failure h ~provider_key:(provider_health_key p) ();
+  H.record_failure h ~provider_key:(provider_health_key p) ();
+  H.record_failure h ~provider_key:(provider_health_key p) ();
   let s = Inv.score_provider h ~exclude:[] ~keeper_assignable:true p in
   check (float 0.001) "cooled-down provider scores 0.0" 0.0 s
 
@@ -69,12 +72,27 @@ let test_score_combines_success_and_latency () =
      should produce score ≈ 0.125, not 1.0 and not 0.0. *)
   let h = H.create () in
   let p = provider_of_label "codex_cli:gpt-5.3-codex" in
-  H.record_success h ~provider_key:p.model_id ~latency_ms:8000.0 ();
-  H.record_failure h ~provider_key:p.model_id ();
+  H.record_success h ~provider_key:(provider_health_key p) ~latency_ms:8000.0 ();
+  H.record_failure h ~provider_key:(provider_health_key p) ();
   let s = Inv.score_provider h ~exclude:[] ~keeper_assignable:true p in
   check bool
     (Printf.sprintf "score=%.3f should be in (0.05, 0.20)" s)
     true (s > 0.05 && s < 0.20)
+
+let test_score_cooldown_is_provider_scoped () =
+  let h = H.create () in
+  let primary = provider_of_label "gemini_cli:auto" in
+  let same_provider_other_model =
+    provider_of_label "gemini_cli:gemini-3-flash-preview"
+  in
+  H.record_failure h ~provider_key:(provider_health_key primary) ();
+  H.record_failure h ~provider_key:(provider_health_key primary) ();
+  H.record_failure h ~provider_key:(provider_health_key primary) ();
+  let s =
+    Inv.score_provider h ~exclude:[] ~keeper_assignable:true
+      same_provider_other_model
+  in
+  check (float 0.001) "same provider other model is cooled down" 0.0 s
 
 (* ── best_runner_among ──────────────────────────────────────────── *)
 
@@ -108,14 +126,14 @@ let test_best_runner_picks_highest_score () =
 
 let test_best_runner_excludes_provider () =
   (* The exclude list takes precedence over the score — even a 1.0
-     candidate is skipped if its model_id is in [exclude]. *)
+     candidate is skipped if its provider-health key is in [exclude]. *)
   let h = H.create () in
   let high = mk_scored "codex_cli:gpt-5.3-codex" ~score:1.0 in
   let lower = mk_scored "gemini_cli:auto" ~score:0.4 in
   let candidates = [high; lower] in
   match Inv.best_runner_among
           ~health:h
-          ~exclude:[high.provider.model_id]
+          ~exclude:[provider_health_key high.provider]
           candidates
   with
   | None -> fail "lower-score provider should win after exclusion"
@@ -148,6 +166,8 @@ let () =
         test_score_keeper_unassignable_zero;
       test_case "score combines success_rate and latency" `Quick
         test_score_combines_success_and_latency;
+      test_case "cooldown is provider scoped" `Quick
+        test_score_cooldown_is_provider_scoped;
     ];
     "best_runner_among", [
       test_case "empty input returns None" `Quick

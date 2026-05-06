@@ -370,6 +370,10 @@ val adapter_of_provider_config :
 val provider_label_of_config :
   Llm_provider.Provider_config.t -> string
 
+(** Stable provider-level key for cascade health and circuit-breaker state. *)
+val provider_health_key_of_config :
+  Llm_provider.Provider_config.t -> string
+
 (** User-facing provider label for a provider config. *)
 val display_provider_name_of_config :
   Llm_provider.Provider_config.t -> string

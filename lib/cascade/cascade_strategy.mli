@@ -312,7 +312,7 @@ val default_sticky_ttl_ms : int
 (** {1 Candidate adapter}
 
     Strategies read three pieces of information from each candidate:
-    the health-tracker key (typically [model_id]), the capacity key
+    the health-tracker key (typically provider-scoped), the capacity key
     (typically [base_url]), and the weight used by weighted_random.
     We expose an adapter so tests can drive the strategy with simple
     in-memory records, and production wires it to

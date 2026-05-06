@@ -11,6 +11,7 @@ open Alcotest
 module R = Masc_mcp.Cascade_model_resolve
 module C = Masc_mcp.Cascade_config
 module State = Masc_mcp.Cascade_state
+module H = Masc_mcp.Cascade_health_tracker
 
 let unset_env k =
   try Unix.putenv k "" with _ -> ()
@@ -71,6 +72,7 @@ let test_glm_coding_auto_models_default_order () =
   with_clean_env (fun () ->
     check (list string) "glm-coding:auto expands to coding-plan order"
       [
+        "glm-5-code";
         "glm-5.1";
         "glm-5";
         "glm-5-turbo";
@@ -294,6 +296,32 @@ let test_order_weighted_entries_rotation_scope_rotates_top_level_providers () =
       "claude_code:auto"
       (List.hd other_scope))
 
+let test_order_weighted_entries_cooldown_is_provider_scoped () =
+  with_clean_env (fun () ->
+    let entry model =
+      {
+        Masc_mcp.Cascade_config_loader.model = model;
+        weight = 100;
+        supports_tool_choice = None;
+        secondary = None;
+        secondary_supports_tool_choice = None;
+      }
+    in
+    H.record_failure H.global ~provider_key:"test-provider" ();
+    H.record_failure H.global ~provider_key:"test-provider" ();
+    H.record_failure H.global ~provider_key:"test-provider" ();
+    let ordered =
+      C.order_weighted_entries ~rand_int:(fun _ -> 0)
+        [
+          entry "test-provider:model-a";
+          entry "other-provider:model-a";
+        ]
+      |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) ->
+             e.model)
+    in
+    check string "cooled provider model is skipped"
+      "other-provider:model-a" (List.hd ordered))
+
 let () =
   run "Cascade_model_resolve" [
     "gemini auto", [
@@ -328,5 +356,7 @@ let () =
       test_case "weighted ordering rotates provider order by scope"
         `Quick
         test_order_weighted_entries_rotation_scope_rotates_top_level_providers;
+      test_case "weighted ordering cooldown is provider scoped" `Quick
+        test_order_weighted_entries_cooldown_is_provider_scoped;
     ];
   ]

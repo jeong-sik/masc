@@ -144,8 +144,8 @@ PR-1 is mergeable only if all of the following hold:
 | PR-1 | `cognitive_gravity` ranker | P0 | merged (#13797) |
 | PR-2 | `intentional_projection` ranker | P0 | merged (#13821) |
 | PR-3 | bump 0.19.12 → 0.19.13 + this RFC refresh | chore | merged (#13841) |
-| PR-4 | `chronicle_event` data model | P1 | in-flight (this PR) |
-| PR-5 | Librarian retriever (lib only) | P1 | not started |
+| PR-4 | `chronicle_event` data model | P1 | in-flight (#13937) |
+| PR-5 | `chronicle_librarian` retriever (lib only) | P1 | in-flight (this PR) |
 | PR-6 | Alignment score metric backbone | P2 | not started |
 
 PR-4 onward will be sequenced in further `/loop` iterations and will not be

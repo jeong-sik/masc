@@ -70,34 +70,54 @@ let run_all () =
     || Unix.gettimeofday () -. t_tmp >= tmp_cleanup_wall_budget_s
   in
   let cleanup_dir dir =
-    match Sys.readdir dir with
-    | exception Sys_error _ -> ()
-    | entries ->
-      let i = ref 0 in
-      let len = Array.length entries in
-      while !i < len && not (tmp_budget_exceeded ()) do
-        let name = entries.(!i) in
-        incr i;
-        incr inspected;
-        let path = Filename.concat dir name in
-        match Unix.lstat path with
-        | exception Unix.Unix_error (e, _, _) ->
-          Log.Server.debug "[Shutdown] tmp lstat skipped %s: %s"
-            path (Unix.error_message e)
-        | st when st.Unix.st_kind = Unix.S_REG ->
-          (try
-             Unix.unlink path;
-             incr removed;
-             bytes_freed := !bytes_freed + st.Unix.st_size
-           with Unix.Unix_error (e, _, _) ->
-             Log.Server.warn "[Shutdown] tmp unlink failed %s: %s"
-               path (Unix.error_message e))
-        | _ -> () (* skip dirs / symlinks / fifos *)
-      done;
-      if !i < len then budget_exhausted := true
+    (* Stream entries via [Unix.opendir]/[readdir] instead of
+       [Sys.readdir], which materializes the whole directory into an
+       OCaml array up-front. A [.masc/tmp] with millions of files would
+       otherwise allocate a million-string array even when the loop
+       trips the file/wall budget after the first 500 entries. *)
+    match Unix.opendir dir with
+    | exception Unix.Unix_error _ -> ()
+    | dh ->
+      let stop = ref false in
+      let count_after_budget = ref 0 in
+      Fun.protect
+        ~finally:(fun () -> try Unix.closedir dh with _ -> ())
+        (fun () ->
+          while not !stop do
+            match Unix.readdir dh with
+            | exception End_of_file -> stop := true
+            | name when name = "." || name = ".." -> ()
+            | _ when tmp_budget_exceeded () ->
+              budget_exhausted := true;
+              incr count_after_budget;
+              stop := true
+            | name ->
+              incr inspected;
+              let path = Filename.concat dir name in
+              (match Unix.lstat path with
+               | exception Unix.Unix_error (e, _, _) ->
+                 Log.Server.debug "[Shutdown] tmp lstat skipped %s: %s"
+                   path (Unix.error_message e)
+               | st when st.Unix.st_kind = Unix.S_REG ->
+                 (try
+                    Unix.unlink path;
+                    incr removed;
+                    bytes_freed := !bytes_freed + st.Unix.st_size
+                  with Unix.Unix_error (e, _, _) ->
+                    Log.Server.warn "[Shutdown] tmp unlink failed %s: %s"
+                      path (Unix.error_message e))
+               | _ -> () (* skip dirs / symlinks / fifos *))
+          done);
+      ignore count_after_budget
   in
-  (match Sys.getenv_opt "MASC_BASE_PATH" with
-   | None -> ()
+  (* Treat empty/whitespace-only [MASC_BASE_PATH] as unset. The repo
+     convention sets env vars to "" via [Unix.putenv name ""] when
+     "unset" is the intended semantic (see test_board_vote_quarantine
+     comment), and a non-trimmed empty string here would resolve
+     [tmp_dir] to ".masc/tmp" relative to the cwd and start unlinking
+     unrelated files. *)
+  (match Sys.getenv_opt "MASC_BASE_PATH" |> Option.map String.trim with
+   | None | Some "" -> ()
    | Some base_path ->
      let tmp_dir = Filename.concat base_path ".masc/tmp" in
      (match Unix.lstat tmp_dir with

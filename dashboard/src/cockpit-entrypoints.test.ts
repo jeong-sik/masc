@@ -80,6 +80,14 @@ describe('cockpit entrypoint registry', () => {
       tab: 'code',
       params: { section: 'ide-shell', view: 'unified', focus: 'review' },
     })
+    expect(cockpitTargetForParams({ mode: 'Observe', tab: 'au-act' })).toEqual({
+      tab: 'monitoring',
+      params: { section: 'runtime', view: 'audit', focus: 'actor' },
+    })
+    expect(cockpitTargetForParams({ mode: 'Observe', tab: 'audit-summary' })).toEqual({
+      tab: 'monitoring',
+      params: { section: 'runtime', view: 'audit', focus: 'summary' },
+    })
   })
   it('routes the covered IDE search entrypoint directly to the find panel', () => {
     const entrypoint = COCKPIT_ENTRYPOINTS.find(entry => entry.aliases.includes('find'))
@@ -179,6 +187,21 @@ describe('cockpit entrypoint registry', () => {
     expect(cockpitTargetForParams({ mode: 'Observe', tab: 'cascade-compare' })).toEqual({
       tab: 'monitoring',
       params: { section: 'runtime', view: 'inspector', focus: 'compare' },
+    })
+  })
+
+  it('marks audit actor and summary entrypoints as covered runtime routes', () => {
+    const byAlias = new Map(COCKPIT_ENTRYPOINTS.flatMap(entrypoint =>
+      entrypoint.aliases.map(alias => [alias, entrypoint] as const),
+    ))
+
+    expect(byAlias.get('au-act')).toMatchObject({
+      coverage: 'covered',
+      target: { tab: 'monitoring', params: { section: 'runtime', view: 'audit', focus: 'actor' } },
+    })
+    expect(byAlias.get('au-sum')).toMatchObject({
+      coverage: 'covered',
+      target: { tab: 'monitoring', params: { section: 'runtime', view: 'audit', focus: 'summary' } },
     })
   })
 })

@@ -108,7 +108,7 @@ export function lifecycleTransitionKey(from: string, to: string): string {
 }
 
 export function formatLifecycleTransitionTime(timestamp?: number | null): string {
-  if (!timestamp) return ''
+  if (timestamp == null) return ''
   return new Date(timestamp).toLocaleTimeString()
 }
 
@@ -264,7 +264,7 @@ export function AgentLifecycle({
         ${summary.transitions.map((transition) => {
           return html`
             <g
-              key=${transition.label}
+              key=${transition.key}
               data-lifecycle-transition
               data-lifecycle-transition-key=${transition.key}
               data-lifecycle-transition-from=${transition.from}

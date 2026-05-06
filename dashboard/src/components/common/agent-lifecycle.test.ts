@@ -12,6 +12,7 @@ describe('AgentLifecycle', () => {
   it('formats lifecycle transition timestamps', () => {
     const timestamp = new Date('2024-01-15T09:30:00').getTime()
     expect(formatLifecycleTransitionTime(timestamp)).not.toBe('')
+    expect(formatLifecycleTransitionTime(0)).not.toBe('')
     expect(formatLifecycleTransitionTime()).toBe('')
   })
 

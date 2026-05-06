@@ -116,7 +116,8 @@
       "gap": null,
       "implementation_pr_refs": [
         "https://github.com/jeong-sik/masc-mcp/pull/13630"
-      ]
+      ],
+      "tracking_issue_refs": []
     },
     {
       "requirement_id": "linear-autoboot-warmup",
@@ -155,7 +156,8 @@
       "gap": null,
       "implementation_pr_refs": [
         "https://github.com/jeong-sik/masc-mcp/pull/13624"
-      ]
+      ],
+      "tracking_issue_refs": []
     },
     {
       "requirement_id": "observe-prometheus-grafana-metrics",
@@ -176,7 +178,8 @@
       "gap": null,
       "implementation_pr_refs": [
         "https://github.com/jeong-sik/masc-mcp/pull/13630"
-      ]
+      ],
+      "tracking_issue_refs": []
     },
     {
       "requirement_id": "observe-log-parser",
@@ -187,7 +190,8 @@
       ],
       "status": "PASS",
       "criterion_id": "post_act_verify_complete",
-      "gap": null
+      "gap": null,
+      "tracking_issue_refs": []
     },
     {
       "requirement_id": "orient-audit-comparison",
@@ -222,7 +226,8 @@
       "gap": null,
       "implementation_pr_refs": [
         "https://github.com/jeong-sik/masc-mcp/pull/13655"
-      ]
+      ],
+      "tracking_issue_refs": []
     },
     {
       "requirement_id": "decide-priority-algorithm",
@@ -233,7 +238,8 @@
       ],
       "status": "PASS",
       "criterion_id": "aggregate_consistency_resolved",
-      "gap": null
+      "gap": null,
+      "tracking_issue_refs": []
     },
     {
       "requirement_id": "weekly-act-priority-queue",
@@ -333,7 +339,8 @@
       "gap": null,
       "implementation_pr_refs": [
         "https://github.com/jeong-sik/masc-mcp/pull/13655"
-      ]
+      ],
+      "tracking_issue_refs": []
     },
     {
       "requirement_id": "anti-stagnation-rules",

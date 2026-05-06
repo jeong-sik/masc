@@ -15,8 +15,8 @@
     "startup_phase": "ready"
   },
   "replay": {
-    "command": "python3 scripts/goal_loop_live_replay.py --log <MASC_BASE_PATH>/.masc/events/2026-05/06.jsonl --log <MASC_BASE_PATH>/.masc/transition-audit/2026-05/06.jsonl --duration-seconds 0 --artifact-dir /private/tmp/goal-loop-live-post-act-full-20260506T1122Z --act-map test/fixtures/goal_loop/act-map.startup.json --runtime-source localhost:8935 --base-path <MASC_BASE_PATH> --loop-iteration post-act-live-full-20260506T1122Z --fail-on verify --format text",
-    "artifact_dir": "/private/tmp/goal-loop-live-post-act-full-20260506T1122Z",
+    "command": "python3 scripts/goal_loop_live_replay.py --log <MASC_BASE_PATH>/.masc/events/2026-05/06.jsonl --log <MASC_BASE_PATH>/.masc/transition-audit/2026-05/06.jsonl --duration-seconds 0 --artifact-dir <TEMP_DIR>/goal-loop-live-post-act-full-20260506T1122Z --act-map test/fixtures/goal_loop/act-map.startup.json --runtime-source localhost:8935 --base-path <MASC_BASE_PATH> --loop-iteration post-act-live-full-20260506T1122Z --fail-on verify --format text",
+    "artifact_dir": "<TEMP_DIR>/goal-loop-live-post-act-full-20260506T1122Z",
     "duration_seconds": 0,
     "loop_iteration": "post-act-live-full-20260506T1122Z",
     "source_logs": [
@@ -49,7 +49,7 @@
     "violation_kinds": [],
     "post_act_verify": true,
     "evidence_kind": "live_runtime_logs",
-    "evidence_source": "runtime_source=localhost:8935;base_path=<MASC_BASE_PATH>;logs=/private/tmp/goal-loop-live-post-act-full-20260506T1122Z/logs/01-06.jsonl,/private/tmp/goal-loop-live-post-act-full-20260506T1122Z/logs/02-06.jsonl",
+    "evidence_source": "runtime_source=localhost:8935;base_path=<MASC_BASE_PATH>;logs=<TEMP_DIR>/goal-loop-live-post-act-full-20260506T1122Z/logs/01-06.jsonl,<TEMP_DIR>/goal-loop-live-post-act-full-20260506T1122Z/logs/02-06.jsonl",
     "evidence_window_start": "2026-05-06T11:20:09+00:00",
     "evidence_window_end": "2026-05-06T11:20:09+00:00",
     "checked_at": "2026-05-06T11:20:09+00:00"

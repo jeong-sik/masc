@@ -11,14 +11,4 @@ let text_of_response (response : api_response) =
 let model_used (response : api_response) =
   response.model
 
-let usage_or_zero (response : api_response) =
-  match response.usage with
-  | Some usage -> usage
-  | None ->
-      {
-        Agent_sdk.Types.input_tokens = 0;
-        output_tokens = 0;
-        cache_creation_input_tokens = 0;
-        cache_read_input_tokens = 0;
-        cost_usd = None;
-      }
+let usage (response : api_response) = response.usage

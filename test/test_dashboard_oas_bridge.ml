@@ -1,6 +1,6 @@
 (** Tests for [Dashboard_oas_bridge].
 
-    Twelve-signal collector for I1 telemetry pipeline (#11924). Covers
+    Per-call telemetry collector for I1 telemetry pipeline (#11924). Covers
     ring-buffer semantics (record/recent/clear), provider filter, and
     the nearest-rank percentile in {!Dashboard_oas_bridge.summary}, plus
     provider-error count aggregation for I2 (#11925). *)
@@ -15,6 +15,7 @@ let make_sample
     ?(ttfb = 100.0)
     ?(dur = 200.0)
     ?(serialization = 5.0)
+    ?(usage_reported = true)
     ?(input = 100)
     ?(output = 200)
     ?(throughput = 1000.0)
@@ -29,11 +30,13 @@ let make_sample
     ttfb_ms = ttfb;
     total_duration_ms = dur;
     serialization_ms = serialization;
-    input_tokens = input;
-    output_tokens = output;
-    throughput_tokens_per_s = throughput;
-    cost_usd = cost;
-    cache_hit = cache;
+    usage_reported;
+    input_tokens = (if usage_reported then Some input else None);
+    output_tokens = (if usage_reported then Some output else None);
+    throughput_tokens_per_s =
+      (if usage_reported then Some throughput else None);
+    cost_usd = (if usage_reported then Some cost else None);
+    cache_hit = (if usage_reported then Some cache else None);
     status;
     retry_count = retry;
   }
@@ -165,6 +168,8 @@ let test_sample_json_preserves_signal_fields () =
     (json |> Json.member "total_duration_ms" |> Json.to_float);
   Alcotest.(check (float 1e-9)) "serialization" 2.0
     (json |> Json.member "serialization_ms" |> Json.to_float);
+  Alcotest.(check bool) "usage reported" true
+    (json |> Json.member "usage_reported" |> Json.to_bool);
   Alcotest.(check int) "input" 123
     (json |> Json.member "input_tokens" |> Json.to_int);
   Alcotest.(check int) "output" 45
@@ -343,15 +348,18 @@ let test_sample_of_response_uses_usage_and_native_telemetry () =
   in
   Alcotest.(check string) "provider" "openai_compat" sample.provider_id;
   Alcotest.(check string) "model" "gpt-4" sample.model_id;
-  Alcotest.(check int) "input tokens" 11 sample.input_tokens;
-  Alcotest.(check int) "output tokens" 5 sample.output_tokens;
+  Alcotest.(check bool) "usage reported" true sample.usage_reported;
+  Alcotest.(check bool) "input tokens" true
+    (sample.input_tokens = Some 11);
+  Alcotest.(check bool) "output tokens" true
+    (sample.output_tokens = Some 5);
   Alcotest.(check (float 1e-9)) "ttfb" 510.0 sample.ttfb_ms;
   Alcotest.(check (float 1e-9)) "duration" 620.0
     sample.total_duration_ms;
-  Alcotest.(check (float 1e-9)) "native throughput" 81.56
-    sample.throughput_tokens_per_s;
-  Alcotest.(check (float 1e-9)) "cost" 0.12 sample.cost_usd;
-  Alcotest.(check bool) "cache hit" true sample.cache_hit
+  Alcotest.(check bool) "native throughput" true
+    (sample.throughput_tokens_per_s = Some 81.56);
+  Alcotest.(check bool) "cost" true (sample.cost_usd = Some 0.12);
+  Alcotest.(check bool) "cache hit" true (sample.cache_hit = Some true)
 
 let test_sample_of_response_derives_wall_throughput () =
   let usage = make_usage ~input:100 ~output:50 () in
@@ -363,10 +371,10 @@ let test_sample_of_response_derives_wall_throughput () =
   in
   Alcotest.(check (float 1e-9)) "duration" 250.0
     sample.total_duration_ms;
-  Alcotest.(check (float 1e-9)) "wall throughput" 200.0
-    sample.throughput_tokens_per_s
+  Alcotest.(check bool) "wall throughput" true
+    (sample.throughput_tokens_per_s = Some 200.0)
 
-let test_record_response_records_missing_usage_as_zero_sample () =
+let test_record_response_records_missing_usage_as_unknown_sample () =
   setup ();
   let response =
     make_response ~telemetry:(make_telemetry ~request_latency_ms:33 ())
@@ -376,17 +384,25 @@ let test_record_response_records_missing_usage_as_zero_sample () =
     ~status:(DOB.Error { transient = false }) response;
   match DOB.recent ~provider:"kimi_cli" () with
   | [ (sample, _) ] ->
-      Alcotest.(check int) "input tokens" 0 sample.input_tokens;
-      Alcotest.(check int) "output tokens" 0 sample.output_tokens;
+      Alcotest.(check bool) "usage reported" false
+        sample.usage_reported;
+      Alcotest.(check bool) "input tokens unknown" true
+        (sample.input_tokens = None);
+      Alcotest.(check bool) "output tokens unknown" true
+        (sample.output_tokens = None);
+      Alcotest.(check bool) "throughput unknown" true
+        (sample.throughput_tokens_per_s = None);
+      Alcotest.(check bool) "cost unknown" true (sample.cost_usd = None);
       Alcotest.(check (float 1e-9)) "duration" 33.0
         sample.total_duration_ms;
-      Alcotest.(check bool) "cache hit" false sample.cache_hit
+      Alcotest.(check bool) "cache hit unknown" true
+        (sample.cache_hit = None)
   | xs ->
       Alcotest.failf "expected one sample, got %d" (List.length xs)
 
-(* --- 12-signal coverage ratchet --- *)
+(* --- signal coverage ratchet --- *)
 
-(** Verify that all 12 telemetry signals are present as keys in the JSON output
+(** Verify that all telemetry signals are present as keys in the JSON output
     of [sample_to_yojson].  This ratchet fails CI if any signal is dropped from
     the serialization layer. *)
 let expected_signal_keys =
@@ -396,6 +412,7 @@ let expected_signal_keys =
     "ttfb_ms";
     "total_duration_ms";
     "serialization_ms";
+    "usage_reported";
     "input_tokens";
     "output_tokens";
     "throughput_tokens_per_s";
@@ -405,7 +422,7 @@ let expected_signal_keys =
     "retry_count";
   ]
 
-let test_twelve_signal_json_keys_all_present () =
+let test_signal_json_keys_all_present () =
   let json = DOB.sample_to_yojson (make_sample ()) in
   let keys =
     match json with
@@ -418,7 +435,7 @@ let test_twelve_signal_json_keys_all_present () =
         (Printf.sprintf "signal key '%s' present" expected_key)
         true (List.mem expected_key keys))
     expected_signal_keys;
-  Alcotest.(check int) "exactly 12 signal keys" 12 (List.length keys)
+  Alcotest.(check int) "exactly 13 signal keys" 13 (List.length keys)
 
 let test_serialization_ms_propagates_through_sample_of_response () =
   let usage = make_usage ~input:10 ~output:5 () in
@@ -501,13 +518,13 @@ let () =
             test_sample_of_response_uses_usage_and_native_telemetry;
           Alcotest.test_case "wall throughput fallback" `Quick
             test_sample_of_response_derives_wall_throughput;
-          Alcotest.test_case "missing usage records zero sample" `Quick
-            test_record_response_records_missing_usage_as_zero_sample;
+          Alcotest.test_case "missing usage records unknown sample" `Quick
+            test_record_response_records_missing_usage_as_unknown_sample;
         ] );
-      ( "twelve_signal_ratchet",
+      ( "signal_ratchet",
         [
-          Alcotest.test_case "all 12 JSON keys present" `Quick
-            test_twelve_signal_json_keys_all_present;
+          Alcotest.test_case "all 13 JSON keys present" `Quick
+            test_signal_json_keys_all_present;
           Alcotest.test_case "serialization_ms via sample_of_response" `Quick
             test_serialization_ms_propagates_through_sample_of_response;
           Alcotest.test_case "serialization_ms defaults to zero" `Quick

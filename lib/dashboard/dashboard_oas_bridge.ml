@@ -14,11 +14,12 @@ type sample = {
   ttfb_ms : float;
   total_duration_ms : float;
   serialization_ms : float;
-  input_tokens : int;
-  output_tokens : int;
-  throughput_tokens_per_s : float;
-  cost_usd : float;
-  cache_hit : bool;
+  usage_reported : bool;
+  input_tokens : int option;
+  output_tokens : int option;
+  throughput_tokens_per_s : float option;
+  cost_usd : float option;
+  cache_hit : bool option;
   status : status;
   retry_count : int;
 }
@@ -64,6 +65,10 @@ let status_to_yojson = function
         ]
   | Timeout -> `Assoc [ ("kind", `String "timeout") ]
 
+let int_opt_to_yojson = function Some value -> `Int value | None -> `Null
+let float_opt_to_yojson = function Some value -> `Float value | None -> `Null
+let bool_opt_to_yojson = function Some value -> `Bool value | None -> `Null
+
 let sample_to_yojson (s : sample) =
   `Assoc
     [
@@ -72,11 +77,13 @@ let sample_to_yojson (s : sample) =
       ("ttfb_ms", `Float s.ttfb_ms);
       ("total_duration_ms", `Float s.total_duration_ms);
       ("serialization_ms", `Float s.serialization_ms);
-      ("input_tokens", `Int s.input_tokens);
-      ("output_tokens", `Int s.output_tokens);
-      ("throughput_tokens_per_s", `Float s.throughput_tokens_per_s);
-      ("cost_usd", `Float s.cost_usd);
-      ("cache_hit", `Bool s.cache_hit);
+      ("usage_reported", `Bool s.usage_reported);
+      ("input_tokens", int_opt_to_yojson s.input_tokens);
+      ("output_tokens", int_opt_to_yojson s.output_tokens);
+      ( "throughput_tokens_per_s",
+        float_opt_to_yojson s.throughput_tokens_per_s );
+      ("cost_usd", float_opt_to_yojson s.cost_usd);
+      ("cache_hit", bool_opt_to_yojson s.cache_hit);
       ("status", status_to_yojson s.status);
       ("retry_count", `Int s.retry_count);
     ]
@@ -154,29 +161,43 @@ let ttfb_from_response (response : Agent_sdk.Types.api_response) =
       ms
   | _ -> 0.0
 
-let cache_hit_from_response ~(usage : Agent_sdk.Types.api_usage)
+let cache_hit_from_response ~(usage : Agent_sdk.Types.api_usage option)
     (response : Agent_sdk.Types.api_response) =
-  usage.cache_read_input_tokens > 0
-  ||
-  match response.telemetry with
-  | Some { timings = Some { cache_n = Some n; _ }; _ } -> n > 0
-  | _ -> false
+  let usage_cache_hit =
+    Option.map
+      (fun (usage : Agent_sdk.Types.api_usage) ->
+        usage.cache_read_input_tokens > 0)
+      usage
+  in
+  let telemetry_cache_hit =
+    match response.telemetry with
+    | Some { timings = Some { cache_n = Some n; _ }; _ } -> Some (n > 0)
+    | _ -> None
+  in
+  match usage_cache_hit, telemetry_cache_hit with
+  | Some true, _ | _, Some true -> Some true
+  | Some false, _ | _, Some false -> Some false
+  | None, None -> None
 
-let throughput_from_response ~(usage : Agent_sdk.Types.api_usage) ~ttfb_ms
+let throughput_from_response ~(usage : Agent_sdk.Types.api_usage option)
+    ~ttfb_ms
     ~total_duration_ms (response : Agent_sdk.Types.api_response) =
   match response.telemetry with
   | Some { timings = Some { predicted_per_second = Some v; _ }; _ }
-    when v > 0.0 -> v
+    when v > 0.0 -> Some v
   | _ ->
-      if usage.output_tokens <= 0 then 0.0
-      else
-        let decode_ms = Float.max 1.0 (total_duration_ms -. ttfb_ms) in
-        Float.of_int usage.output_tokens /. (decode_ms /. 1000.0)
+      Option.map
+        (fun (usage : Agent_sdk.Types.api_usage) ->
+          if usage.output_tokens <= 0 then 0.0
+          else
+            let decode_ms = Float.max 1.0 (total_duration_ms -. ttfb_ms) in
+            Float.of_int usage.output_tokens /. (decode_ms /. 1000.0))
+        usage
 
 let sample_of_response ~provider_id ~model_id ?total_duration_ms
     ?(serialization_ms = 0.0) ?(retry_count = 0) ~status
     (response : Agent_sdk.Types.api_response) =
-  let usage = Oas_response.usage_or_zero response in
+  let usage = Oas_response.usage response in
   let total_duration_ms =
     duration_from_response ?total_duration_ms response
   in
@@ -187,11 +208,20 @@ let sample_of_response ~provider_id ~model_id ?total_duration_ms
     ttfb_ms;
     total_duration_ms;
     serialization_ms;
-    input_tokens = usage.input_tokens;
-    output_tokens = usage.output_tokens;
+    usage_reported = Option.is_some usage;
+    input_tokens =
+      Option.map
+        (fun (usage : Agent_sdk.Types.api_usage) -> usage.input_tokens)
+        usage;
+    output_tokens =
+      Option.map
+        (fun (usage : Agent_sdk.Types.api_usage) -> usage.output_tokens)
+        usage;
     throughput_tokens_per_s =
       throughput_from_response ~usage ~ttfb_ms ~total_duration_ms response;
-    cost_usd = Option.value ~default:0.0 usage.cost_usd;
+    cost_usd =
+      Option.bind usage (fun (usage : Agent_sdk.Types.api_usage) ->
+          usage.cost_usd);
     cache_hit = cache_hit_from_response ~usage response;
     status;
     retry_count;
@@ -345,13 +375,17 @@ let summary ?provider ?limit () =
         List.map (fun (s, _) -> s.total_duration_ms) xs |> Array.of_list
       in
       Array.sort Float.compare durs;
+      let cache_values = List.filter_map (fun (s, _) -> s.cache_hit) xs in
       let cache_hits =
         List.fold_left
-          (fun acc (s, _) -> if s.cache_hit then acc + 1 else acc)
-          0 xs
+          (fun acc cache_hit -> if cache_hit then acc + 1 else acc)
+          0 cache_values
       in
       let total_cost =
-        List.fold_left (fun acc (s, _) -> acc +. s.cost_usd) 0.0 xs
+        List.fold_left
+          (fun acc (s, _) ->
+            match s.cost_usd with Some cost -> acc +. cost | None -> acc)
+          0.0 xs
       in
       let errors =
         List.fold_left
@@ -374,7 +408,11 @@ let summary ?provider ?limit () =
         total_duration_p50_ms = percentile durs 0.50;
         total_duration_p95_ms = percentile durs 0.95;
         total_duration_p99_ms = percentile durs 0.99;
-        cache_hit_ratio = float_of_int cache_hits /. float_of_int n;
+        cache_hit_ratio =
+          (match cache_values with
+          | [] -> 0.0
+          | values ->
+              float_of_int cache_hits /. float_of_int (List.length values));
         total_cost_usd = total_cost;
         error_ratio = float_of_int errors /. float_of_int n;
         cancelled_count = cancels;

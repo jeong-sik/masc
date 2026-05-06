@@ -11,5 +11,6 @@ val text_of_response : api_response -> string
 val model_used : api_response -> string
 (** Return the model identifier used for the response. *)
 
-val usage_or_zero : api_response -> Agent_sdk.Types.api_usage
-(** Return usage stats, defaulting to zero when absent. *)
+val usage : api_response -> Agent_sdk.Types.api_usage option
+(** Return provider-reported usage stats, if present. [None] means the
+    provider did not report usage; callers must not treat it as zero. *)

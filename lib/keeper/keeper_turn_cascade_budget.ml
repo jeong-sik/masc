@@ -291,6 +291,23 @@ let reclassify_oas_timeout_for_attempt
            })
   | _ -> err
 
+let attempt_watchdog_outer_turn_reserve_sec = 1.0
+
+let attempt_watchdog_timeout_sec
+    ~(remaining_turn_budget_s : float)
+    (timeout_budget : oas_timeout_budget_resolution) : float =
+  let desired =
+    timeout_budget.effective_timeout_sec +. oas_timeout_guard_sec
+  in
+  let cap_before_outer_timeout =
+    Float.max 0.001
+      (remaining_turn_budget_s -. attempt_watchdog_outer_turn_reserve_sec)
+  in
+  let floor =
+    Float.min min_oas_timeout_budget_sec cap_before_outer_timeout
+  in
+  Float.max floor (Float.min desired cap_before_outer_timeout)
+
 type degraded_retry_budget_decision =
   | No_degraded_retry
   | Degraded_retry_slot_phase_exhausted of EC.degraded_retry

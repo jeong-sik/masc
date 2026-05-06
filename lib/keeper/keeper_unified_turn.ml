@@ -900,7 +900,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             else Keeper_agent_tool_surface.Optional
           in
           let do_run ~(execution : cascade_execution) ~run_meta ~run_generation ~is_retry
-              ~oas_timeout_s =
+              ~oas_timeout_s ~attempt_watchdog_s =
             last_execution := execution;
             Otel_genai.with_keeper_turn_span
               ~keeper_name:run_meta.name
@@ -922,37 +922,39 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   ~prev:Keeper_turn_fsm.Awaiting_provider
                   Keeper_turn_fsm.Streaming;
                 try
-                  Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
-                    ~max_context:execution.max_context ~build_turn_prompt
-                    ~user_message ~cascade_name:execution.cascade_name
-                    ~world_observation:observation
-                    ~turn_affordances
-                    ?provider_filter:(Env_config_keeper.KeeperCascade.provider_allowlist ())
-                    ~generation:run_generation
-                    ~max_turns
-                    ~max_idle_turns
-                    ~history_user_source:"world_state_prompt"
-                    ~history_assistant_source:"internal_assistant"
-                    ~degraded_retry_applied:(Option.is_some !degraded_retry_info)
-                    ?degraded_retry_cascade:
-                      (Option.map
-                         (fun (retry : EC.degraded_retry) -> retry.next_cascade)
-                         !degraded_retry_info)
-                    ?fallback_reason:
-                      (Option.map
-                         (fun (retry : EC.degraded_retry) -> retry.fallback_reason)
-                         !degraded_retry_info)
-                    ~cascade_rotation_attempts:
-                      (List.rev !cascade_rotation_attempts)
-                    ~temperature:execution.temperature
-                    ~max_tokens:execution.max_tokens
-                    ~oas_timeout_s
-                    ?max_cost_usd
-                    ~trajectory_acc
-                    ~is_retry
-                    ?shared_context
-                    ?event_bus:(Keeper_event_bus.get ())
-                    ()
+                  Eio.Time.with_timeout_exn clock attempt_watchdog_s (fun () ->
+                      Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
+                        ~max_context:execution.max_context ~build_turn_prompt
+                        ~user_message ~cascade_name:execution.cascade_name
+                        ~world_observation:observation
+                        ~turn_affordances
+                        ?provider_filter:
+                          (Env_config_keeper.KeeperCascade.provider_allowlist ())
+                        ~generation:run_generation
+                        ~max_turns
+                        ~max_idle_turns
+                        ~history_user_source:"world_state_prompt"
+                        ~history_assistant_source:"internal_assistant"
+                        ~degraded_retry_applied:(Option.is_some !degraded_retry_info)
+                        ?degraded_retry_cascade:
+                          (Option.map
+                             (fun (retry : EC.degraded_retry) -> retry.next_cascade)
+                             !degraded_retry_info)
+                        ?fallback_reason:
+                          (Option.map
+                             (fun (retry : EC.degraded_retry) -> retry.fallback_reason)
+                             !degraded_retry_info)
+                        ~cascade_rotation_attempts:
+                          (List.rev !cascade_rotation_attempts)
+                        ~temperature:execution.temperature
+                        ~max_tokens:execution.max_tokens
+                        ~oas_timeout_s
+                        ?max_cost_usd
+                        ~trajectory_acc
+                        ~is_retry
+                        ?shared_context
+                        ?event_bus:(Keeper_event_bus.get ())
+                        ())
                 with Eio.Cancel.Cancelled _ as e ->
                   (* Cycle 1b-iv: external cancellation that escapes the
                      in-band receipt builder in [Keeper_agent_run.run_turn].
@@ -979,7 +981,18 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                     ~cascade_name:execution.cascade_name
                     ~keeper_turn_id
                     ();
-                  raise e)
+                  raise e
+                | Eio.Time.Timeout ->
+                  Error
+                    (Agent_sdk.Error.Api
+                       (Timeout
+                          {
+                            message =
+                              Printf.sprintf
+                                "Turn wall-clock budget exhausted during cascade attempt \
+                                 (budget=%.1fs, watchdog=%.1fs)"
+                                oas_timeout_s attempt_watchdog_s;
+                          })))
           in
           let fail_open_rotation_cascades =
             active_fail_open_rotation_cascades ()
@@ -1081,8 +1094,14 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   Keeper_registry.set_turn_cascade_state
                     ~base_path:config.base_path meta.name
                     Keeper_registry.Cascade_trying;
+                  let attempt_watchdog_s =
+                    attempt_watchdog_timeout_sec
+                      ~remaining_turn_budget_s:(remaining_turn_budget_s ())
+                      timeout_budget
+                  in
                   do_run ~execution ~run_meta ~run_generation ~is_retry
                     ~oas_timeout_s:timeout_budget.effective_timeout_sec
+                    ~attempt_watchdog_s
             in
             match attempt_result with
             | Ok result ->

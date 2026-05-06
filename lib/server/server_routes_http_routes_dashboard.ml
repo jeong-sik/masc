@@ -76,10 +76,16 @@ let oas_telemetry_limit_param req =
 let oas_telemetry_provider_param req = trimmed_query_param req "provider"
 
 let observe_worktree_status_sse_write writer event =
-  Telemetry_observe.observe_or_default
-    ~kind:"dashboard_worktree_status_sse_write"
-    ~default:() (fun () ->
+  Telemetry_observe.observe_or_fail
+    ~kind:"dashboard_worktree_status_sse_write" (fun () ->
       Httpun.Body.Writer.write_string writer event)
+
+let rec observe_worktree_status_sse_write_all writer = function
+  | [] -> Ok ()
+  | event :: rest ->
+      (match observe_worktree_status_sse_write writer event with
+       | Ok () -> observe_worktree_status_sse_write_all writer rest
+       | Error _ as err -> err)
 
 let observe_worktree_status_sse_close writer =
   Telemetry_observe.observe_or_default
@@ -787,7 +793,7 @@ let rec add_routes ~sw ~clock router =
          let response = Httpun.Response.create ~headers `OK in
          let writer = Httpun.Reqd.respond_with_streaming inner_reqd response in
          let events = Dashboard_worktree_status.sse_events ~base_path in
-         List.iter (observe_worktree_status_sse_write writer) events;
+         ignore (observe_worktree_status_sse_write_all writer events);
          observe_worktree_status_sse_close writer
        ) request reqd)
 

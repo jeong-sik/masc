@@ -100,8 +100,6 @@ let make_websocket_handler ~sw ~clock ~on_message _client_addr
              the rest of the pipeline (sessions table, heartbeat budget,
              aggregate metrics) drops the half-open session immediately
              instead of leaking a fiber per failure. *)
-          session.closed <- true;
-          (try Ws.Wsd.close session.wsd with _ -> ());
           Server_mcp_transport_ws.cleanup_session session_id
         end else
           loop ()

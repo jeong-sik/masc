@@ -21,8 +21,10 @@ dev-dashboard:
 # --root . pins dune to dashboard_bonsai/dune-project — otherwise dune walks
 # up the directory tree (out of the worktree, into the real repo root) and
 # misresolves the project. Must pair with OPAMSWITCH= so the env loads.
+# Override the repo-level DUNE_BUILD_DIR export so the copied artifact lives
+# under dashboard_bonsai/_build as this target expects.
 bonsai-dashboard:
-	cd dashboard_bonsai && OPAMSWITCH=bonsai-dashboard opam exec -- dune build --root .
+	cd dashboard_bonsai && OPAMSWITCH=bonsai-dashboard DUNE_BUILD_DIR=$(CURDIR)/dashboard_bonsai/_build opam exec -- dune build --root . bin/main.bc.js
 	mkdir -p assets/dashboard_bonsai
 	rm -f assets/dashboard_bonsai/main.bc.js
 	cp dashboard_bonsai/_build/default/bin/main.bc.js assets/dashboard_bonsai/main.bc.js
@@ -49,7 +51,7 @@ bonsai-dashboard-if-available:
 # Watch mode for the Bonsai island. Does not copy the artifact — pair with
 # a separate tail of main.bc.js or re-run `make bonsai-dashboard` on save.
 dev-bonsai-dashboard:
-	cd dashboard_bonsai && OPAMSWITCH=bonsai-dashboard opam exec -- dune build --root . --watch
+	cd dashboard_bonsai && OPAMSWITCH=bonsai-dashboard DUNE_BUILD_DIR=$(CURDIR)/dashboard_bonsai/_build opam exec -- dune build --root . bin/main.bc.js --watch
 
 clean-bonsai-dashboard:
 	rm -rf dashboard_bonsai/_build assets/dashboard_bonsai

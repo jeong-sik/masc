@@ -606,6 +606,9 @@ except Exception:
 identities = identity_payload.get("keepers")
 if not isinstance(identities, dict):
     identities = {}
+accounts = identity_payload.get("keeper_accounts")
+if not isinstance(accounts, dict):
+    accounts = {}
 
 
 def fallback_target(index):
@@ -617,20 +620,32 @@ def fallback_target(index):
 with review_targets_file.open("w", encoding="utf-8") as handle:
     for index, keeper in enumerate(keepers):
         keeper_identity = identities.get(keeper)
+        keeper_account = accounts.get(keeper)
         review_target = None
         mode = "insufficient_targets"
 
-        if len(keepers) >= 2 and isinstance(keeper_identity, str):
+        if len(keepers) >= 2 and isinstance(keeper_account, str):
+            for candidate in keepers:
+                if candidate == keeper:
+                    continue
+                candidate_account = accounts.get(candidate)
+                if isinstance(candidate_account, str) and candidate_account != keeper_account:
+                    review_target = candidate
+                    mode = "account_aware"
+                    break
+            if review_target is None:
+                mode = "account_pool_insufficient"
+        elif len(keepers) >= 2 and isinstance(keeper_identity, str):
             for candidate in keepers:
                 if candidate == keeper:
                     continue
                 candidate_identity = identities.get(candidate)
                 if isinstance(candidate_identity, str) and candidate_identity != keeper_identity:
                     review_target = candidate
-                    mode = "identity_aware"
+                    mode = "identity_name_aware_unresolved_account"
                     break
             if review_target is None:
-                mode = "identity_pool_insufficient"
+                mode = "identity_name_pool_insufficient"
         elif len(keepers) >= 2:
             review_target = fallback_target(index)
             mode = "ring_unverified_identity"
@@ -638,8 +653,10 @@ with review_targets_file.open("w", encoding="utf-8") as handle:
         row = {
             "keeper": keeper,
             "keeper_identity": keeper_identity,
+            "keeper_account_login": keeper_account,
             "review_target": review_target,
             "review_target_identity": identities.get(review_target) if review_target else None,
+            "review_target_account_login": accounts.get(review_target) if review_target else None,
             "mode": mode,
         }
         handle.write(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n")
@@ -712,9 +729,28 @@ def string_field(data, key):
     return value if isinstance(value, str) and value else None
 
 
+def read_account_login(identity):
+    hosts_path = base_path / ".masc" / "github-identities" / identity / "gh" / "hosts.yml"
+    if not hosts_path.is_file():
+        return None
+    try:
+        lines = hosts_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except Exception:
+        return None
+    for line in lines:
+        stripped = line.strip()
+        if not stripped.startswith("user:"):
+            continue
+        value = stripped.split(":", 1)[1].split("#", 1)[0].strip().strip("'\"")
+        return value or None
+    return None
+
+
 keepers = [line.strip() for line in keepers_file.read_text().splitlines() if line.strip()]
 identities = {}
+accounts = {}
 missing = []
+unresolved_accounts = []
 forbidden_keepers = []
 for keeper in keepers:
     config = load_keeper_config(config_dir / f"{keeper}.toml")
@@ -732,21 +768,46 @@ for keeper in keepers:
     )
     if identity:
         identities[keeper] = identity
+        account_login = read_account_login(identity)
+        if account_login:
+            accounts[keeper] = account_login
+        else:
+            unresolved_accounts.append({"keeper": keeper, "github_identity": identity})
         if identity in forbidden:
-            forbidden_keepers.append({"keeper": keeper, "github_identity": identity})
+            forbidden_keepers.append(
+                {
+                    "keeper": keeper,
+                    "github_identity": identity,
+                    "matched": "github_identity",
+                }
+            )
+        if account_login and account_login in forbidden and account_login != identity:
+            forbidden_keepers.append(
+                {
+                    "keeper": keeper,
+                    "github_identity": identity,
+                    "github_account_login": account_login,
+                    "matched": "github_account_login",
+                }
+            )
     else:
         missing.append(keeper)
 
 counts = Counter(identities.values())
+account_counts = Counter(accounts.values())
 out_file.write_text(
     json.dumps(
         {
             "base_path": str(base_path),
             "keeper_count": len(keepers),
             "unique_count": len(counts),
+            "account_unique_count": len(account_counts),
             "counts": dict(sorted(counts.items())),
+            "account_counts": dict(sorted(account_counts.items())),
             "keepers": identities,
+            "keeper_accounts": accounts,
             "missing": missing,
+            "unresolved_accounts": unresolved_accounts,
             "forbidden_identities": sorted(forbidden),
             "forbidden_keepers": forbidden_keepers,
         },
@@ -762,9 +823,23 @@ assert_github_identity_pool_for_mutate() {
   build_github_identity_counts
   local unique_count
   unique_count="$(jq -r '.unique_count // 0' "$GITHUB_IDENTITY_COUNTS_FILE")"
+  local unresolved_accounts_count
+  unresolved_accounts_count="$(jq -r '(.unresolved_accounts // []) | length' "$GITHUB_IDENTITY_COUNTS_FILE")"
   if [[ "$MUTATE" == "1" && "$unique_count" -lt 2 ]]; then
     echo "at least two unique github_identity values are required for cross-keeper approval proof" >&2
     jq -c '{unique_count, counts, missing}' "$GITHUB_IDENTITY_COUNTS_FILE" >&2 || true
+    exit 1
+  fi
+  if [[ "$MUTATE" == "1" && "$unresolved_accounts_count" -gt 0 ]]; then
+    echo "target keeper set has unresolved GitHub account logins" >&2
+    jq -c '{unresolved_accounts}' "$GITHUB_IDENTITY_COUNTS_FILE" >&2 || true
+    exit 1
+  fi
+  local account_unique_count
+  account_unique_count="$(jq -r '.account_unique_count // 0' "$GITHUB_IDENTITY_COUNTS_FILE")"
+  if [[ "$MUTATE" == "1" && "$account_unique_count" -lt 2 ]]; then
+    echo "at least two unique authenticated GitHub accounts are required for cross-keeper approval proof" >&2
+    jq -c '{account_unique_count, account_counts, keeper_accounts}' "$GITHUB_IDENTITY_COUNTS_FILE" >&2 || true
     exit 1
   fi
   if [[ "$MUTATE" == "1" ]] \

@@ -54,7 +54,11 @@ def audit_args(base_path: Path, expected_keepers: int):
 
 
 def write_ready_keeper(
-    root: Path, name: str, *, github_identity: str = "anyang-keepers"
+    root: Path,
+    name: str,
+    *,
+    github_identity: str = "anyang-keepers",
+    github_account_login: str | None = None,
 ) -> None:
     config_dir = root / ".masc" / "config" / "keepers"
     runtime_dir = root / ".masc" / "keepers"
@@ -62,6 +66,18 @@ def write_ready_keeper(
     config_dir.mkdir(parents=True, exist_ok=True)
     runtime_dir.mkdir(parents=True, exist_ok=True)
     credential_dir.mkdir(parents=True, exist_ok=True)
+    account_login = github_account_login or github_identity
+    (credential_dir / "hosts.yml").write_text(
+        "\n".join(
+            [
+                "github.com:",
+                "    git_protocol: https",
+                f"    user: {account_login}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
     (config_dir / f"{name}.toml").write_text(
         "\n".join(
             [
@@ -713,6 +729,26 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             ["github_identity_forbidden_operator"],
         )
 
+    def test_forbid_github_identity_fails_matching_account_login(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ready_keeper(
+                root,
+                "alpha",
+                github_identity="reviewer-keepers",
+                github_account_login="operator",
+            )
+            args = audit_args(root, expected_keepers=1)
+            args.forbid_github_identity = ["operator"]
+
+            report = audit.build_report(args)
+
+        self.assertFalse(report["ok"])
+        self.assertEqual(
+            report["keepers"][0]["failures"],
+            ["github_account_forbidden_operator"],
+        )
+
     def test_docker_pr_approve_requirement_fails_with_single_identity_pool(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -725,8 +761,44 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
 
         self.assertFalse(report["ok"])
         self.assertEqual(report["github_identity_counts"], {"anyang-keepers": 2})
+        self.assertEqual(report["github_account_counts"], {"anyang-keepers": 2})
         self.assertIn(
             "docker_pr_approve_identity_pool_insufficient_unique_github_identities_1",
+            report["fleet_failures"],
+        )
+        self.assertIn(
+            "docker_pr_approve_account_pool_insufficient_unique_accounts_1",
+            report["fleet_failures"],
+        )
+
+    def test_docker_pr_approve_requirement_fails_aliases_to_same_account(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ready_keeper(
+                root,
+                "alpha",
+                github_identity="anyang-keepers",
+                github_account_login="anyang-keepers",
+            )
+            write_ready_keeper(
+                root,
+                "bravo",
+                github_identity="reviewer-keepers",
+                github_account_login="anyang-keepers",
+            )
+            args = audit_args(root, expected_keepers=2)
+            args.require_docker_pr_approve_evidence = True
+
+            report = audit.build_report(args)
+
+        self.assertFalse(report["ok"])
+        self.assertEqual(
+            report["github_identity_counts"],
+            {"anyang-keepers": 1, "reviewer-keepers": 1},
+        )
+        self.assertEqual(report["github_account_counts"], {"anyang-keepers": 2})
+        self.assertIn(
+            "docker_pr_approve_account_pool_insufficient_unique_accounts_1",
             report["fleet_failures"],
         )
 
@@ -744,8 +816,16 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             report["github_identity_counts"],
             {"anyang-keepers": 1, "reviewer-keepers": 1},
         )
+        self.assertEqual(
+            report["github_account_counts"],
+            {"anyang-keepers": 1, "reviewer-keepers": 1},
+        )
         self.assertNotIn(
             "docker_pr_approve_identity_pool_insufficient_unique_github_identities_1",
+            report["fleet_failures"],
+        )
+        self.assertNotIn(
+            "docker_pr_approve_account_pool_insufficient_unique_accounts_1",
             report["fleet_failures"],
         )
 

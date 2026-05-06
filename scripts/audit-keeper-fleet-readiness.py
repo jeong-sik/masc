@@ -82,6 +82,7 @@ PR_CREATED_NUMBER_RE = re.compile(
     re.IGNORECASE,
 )
 GH_PR_CREATE_RE = re.compile(r"\bgh\s+pr\s+create\b", re.IGNORECASE)
+GH_HOSTS_USER_RE = re.compile(r"^\s*user:\s*['\"]?([^'\"\s#]+)")
 
 
 @dataclass
@@ -93,6 +94,7 @@ class KeeperAudit:
     network_mode: str | None
     tool_preset: str | None
     github_identity: str | None
+    github_account_login: str | None
     git_identity_mode: str | None
     credential_dir: str | None
     credential_dir_exists: bool
@@ -170,6 +172,19 @@ def load_toml(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError(f"{path}: expected TOML object")
     return data
+
+
+def read_github_account_login(gh_config_dir: Path | None) -> str | None:
+    if gh_config_dir is None:
+        return None
+    hosts_path = gh_config_dir / "hosts.yml"
+    if not hosts_path.is_file():
+        return None
+    for line in hosts_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        match = GH_HOSTS_USER_RE.match(line)
+        if match:
+            return match.group(1).strip()
+    return None
 
 
 def merge_dicts(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
@@ -1138,6 +1153,7 @@ def audit_keeper(
 
     credential_dir: Path | None = None
     credential_dir_exists = False
+    github_account_login: str | None = None
     if github_identity:
         credential_dir = (
             base_path / ".masc" / "github-identities" / github_identity / "gh"
@@ -1145,6 +1161,14 @@ def audit_keeper(
         credential_dir_exists = credential_dir.is_dir()
         if not credential_dir_exists:
             failures.append("github_credential_dir_missing")
+        else:
+            github_account_login = read_github_account_login(credential_dir)
+            if (
+                forbidden_github_identities
+                and github_account_login in forbidden_github_identities
+                and github_account_login != github_identity
+            ):
+                failures.append(f"github_account_forbidden_{github_account_login}")
 
     (
         evidence_ts,
@@ -1258,6 +1282,7 @@ def audit_keeper(
         network_mode=network_mode,
         tool_preset=tool_preset,
         github_identity=github_identity,
+        github_account_login=github_account_login,
         git_identity_mode=git_identity_mode,
         credential_dir=str(credential_dir) if credential_dir else None,
         credential_dir_exists=credential_dir_exists,
@@ -1348,6 +1373,11 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     github_identity_counts = Counter(
         keeper.github_identity for keeper in keepers if keeper.github_identity
     )
+    github_account_counts = Counter(
+        keeper.github_account_login
+        for keeper in keepers
+        if keeper.github_account_login
+    )
     requires_docker_approve = (
         args.require_docker_pr_approve_evidence
         or args.require_docker_pr_lifecycle_evidence
@@ -1357,6 +1387,24 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             "docker_pr_approve_identity_pool_insufficient"
             f"_unique_github_identities_{len(github_identity_counts)}"
         )
+    if requires_docker_approve:
+        unresolved_account_identities = sorted(
+            {
+                keeper.github_identity
+                for keeper in keepers
+                if keeper.github_identity and not keeper.github_account_login
+            }
+        )
+        if unresolved_account_identities:
+            fleet_failures.append(
+                "docker_pr_approve_identity_pool_unresolved_github_accounts_"
+                f"{len(unresolved_account_identities)}"
+            )
+        elif len(github_account_counts) < 2:
+            fleet_failures.append(
+                "docker_pr_approve_account_pool_insufficient"
+                f"_unique_accounts_{len(github_account_counts)}"
+            )
     failed_keepers = [keeper for keeper in keepers if keeper.failures]
     ok = not fleet_failures and not failed_keepers
     return {
@@ -1367,6 +1415,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         "configured_keepers": len(config_paths),
         "max_silence_hours": args.max_silence_hours,
         "github_identity_counts": dict(sorted(github_identity_counts.items())),
+        "github_account_counts": dict(sorted(github_account_counts.items())),
         "requirements": {
             "require_board_evidence": args.require_board_evidence,
             "require_product_evidence": args.require_product_evidence,
@@ -1420,6 +1469,7 @@ def print_text(report: dict[str, Any]) -> None:
         print(
             "- {name}: {marker} preset={preset} sandbox={sandbox}/{network} "
             "gh={github} recent={recent} age={age} board={board} "
+            "gh_account={github_account} "
             "product={product} design={design} "
             "pr_surface={pr_surface} pr_review={pr_review} "
             "pr_create={pr_create} git_push={git_push} "
@@ -1433,6 +1483,7 @@ def print_text(report: dict[str, Any]) -> None:
                 sandbox=keeper["sandbox_profile"],
                 network=keeper["network_mode"],
                 github=keeper["github_identity"],
+                github_account=keeper["github_account_login"],
                 recent=str(keeper["recent_action"]).lower(),
                 age=age_label,
                 board=str(keeper["board_action"]).lower(),

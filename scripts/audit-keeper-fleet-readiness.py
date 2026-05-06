@@ -303,36 +303,48 @@ def pr_lifecycle_evidence_from_decision(
 ) -> tuple[set[str], set[str]]:
     evidence: set[str] = set()
     docker_evidence: set[str] = set()
-    text = serialized_row(row)
-    docker_routed = has_docker_execution_marker(text)
+    text_cache: str | None = None
+    docker_routed_cache: bool | None = None
+
+    def row_text() -> str:
+        nonlocal text_cache
+        if text_cache is None:
+            text_cache = serialized_row(row)
+        return text_cache
+
+    def docker_routed() -> bool:
+        nonlocal docker_routed_cache
+        if docker_routed_cache is None:
+            docker_routed_cache = has_docker_execution_marker(row_text())
+        return docker_routed_cache
 
     def add(item: str) -> None:
         evidence.add(item)
-        if docker_routed:
+        if docker_routed():
             docker_evidence.add(item)
 
     if any(tool_succeeded_in_row(row, tool) for tool in PR_CREATE_TOOLS):
         add("pr_create:keeper_pr_create")
     if any(
         tool_succeeded_in_row(row, tool) for tool in GIT_PUSH_TOOLS
-    ) and has_git_push_marker(text):
+    ) and has_git_push_marker(row_text()):
         add("git_push:masc_code_git")
     if (
         row.get("event") == "tool_exec"
         and row.get("tool") in SHELL_TOOLS
         and row_success(row)
-        and has_gh_pr_create_marker(text)
+        and has_gh_pr_create_marker(row_text())
     ):
         add(f"pr_create:{row['tool']}:gh_pr_create")
     if (
         row.get("event") == "tool_exec"
         and row.get("tool") in SHELL_TOOLS
         and row_success(row)
-        and has_git_push_marker(text)
+        and has_git_push_marker(row_text())
     ):
         add(f"git_push:{row['tool']}:git_push")
     if tool_succeeded_in_row(row, "keeper_pr_review_comment") and has_pr_approve_marker(
-        text
+        row_text()
     ):
         add("pr_approve:keeper_pr_review_comment")
     return evidence, docker_evidence

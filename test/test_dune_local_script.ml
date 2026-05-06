@@ -392,6 +392,112 @@ exec "$@"
       check bool "dune was not invoked after opam timeout" false
         (Sys.file_exists dune_log))
 
+let test_opam_lockf_wrapped_failure_does_not_claim_timeout () =
+  with_temp_dir "dune-local-opam-lock-wrapped-failure" (fun dir ->
+      let bin_dir, dune_log =
+        setup_fake_repo dir ~pin_check_exit_code:42
+          ~pin_check_stderr_msg:"pin check failed after opam lock"
+      in
+      write_executable
+        (Filename.concat bin_dir "lockf")
+        {|#!/bin/sh
+while [ "${1#-}" != "$1" ]; do
+  case "$1" in
+    -t) shift 2 ;;
+    *) shift ;;
+  esac
+done
+shift
+exec "$@"
+|};
+      let code, _stdout, stderr =
+        run_dune_local dir bin_dir
+          ~env:[ ("MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT", "1") ]
+          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_OPAM_LOCK_HELD" ]
+          "build"
+      in
+      check int "wrapped command status propagates" 1 code;
+      check bool "timeout message suppressed for wrapped failure" false
+        (contains_substring stderr "releasing Dune lock");
+      check bool "dune was not invoked after pin failure" false
+        (Sys.file_exists dune_log))
+
+let test_opam_lock_timeout_env_must_be_numeric () =
+  with_temp_dir "dune-local-opam-timeout-invalid" (fun dir ->
+      let bin_dir, dune_log =
+        setup_fake_repo dir ~pin_check_exit_code:0
+          ~pin_check_stderr_msg:"pin ok"
+      in
+      write_executable (Filename.concat bin_dir "lockf")
+        {|#!/bin/sh
+while [ "${1#-}" != "$1" ]; do
+  case "$1" in
+    -t) shift 2 ;;
+    *) shift ;;
+  esac
+done
+shift
+exec "$@"
+|};
+      let code, _stdout, stderr =
+        run_dune_local dir bin_dir
+          ~env:[ ("MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT", "abc") ]
+          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_OPAM_LOCK_HELD" ]
+          "build"
+      in
+      check int "invalid timeout exits usage error" 2 code;
+      check bool "invalid timeout named" true
+        (contains_substring stderr "invalid MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT");
+      check bool "dune was not invoked" false (Sys.file_exists dune_log))
+
+let test_missing_lock_tools_warn_once () =
+  with_temp_dir "dune-local-no-lock-tools" (fun dir ->
+      let bin_dir, dune_log =
+        setup_fake_repo dir ~pin_check_exit_code:0
+          ~pin_check_stderr_msg:"pin ok"
+      in
+      write_executable (Filename.concat bin_dir "dirname")
+        {|#!/bin/sh
+case "$1" in
+  */*) printf '%s\n' "${1%/*}" ;;
+  *) printf '.\n' ;;
+esac
+|};
+      write_executable (Filename.concat bin_dir "basename")
+        {|#!/bin/sh
+base="${1##*/}"
+printf '%s\n' "$base"
+|};
+      let script =
+        Filename.concat (Filename.concat dir "scripts") "dune-local.sh"
+      in
+      let code, _stdout, stderr =
+        run_shell ~cwd:dir
+          ~env:
+            [
+              ("PATH", bin_dir);
+              ("GIT_CEILING_DIRECTORIES", dir);
+              ("DUNE_LOCAL_LOCK", Filename.concat dir "dune-local.lock");
+              ("MASC_SKIP_PIN_CHECK", "1");
+              ("MASC_SKIP_DEPS_CHECK", "1");
+              ("MASC_SKIP_OCAML_VERSION_CHECK", "1");
+            ]
+          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_DUNE_LOCK_HELD" ]
+          (Printf.sprintf "/bin/bash %s build" (quote script))
+      in
+      let needle = "neither lockf nor flock found; running unlocked" in
+      let only_once =
+        match substring_index stderr needle with
+        | None -> false
+        | Some idx ->
+            let start = idx + String.length needle in
+            let tail = String.sub stderr start (String.length stderr - start) in
+            substring_index tail needle = None
+      in
+      check int "no-lock-tools run exits zero" 0 code;
+      check bool "warning emitted exactly once" true only_once;
+      check bool "dune was invoked" true (Sys.file_exists dune_log))
+
 let test_opam_flock_reexec_env_passthrough () =
   with_temp_dir "dune-local-opam-flock" (fun dir ->
       let bin_dir, dune_log =
@@ -754,6 +860,12 @@ let () =
             test_opam_lockf_reexec_env_passthrough;
           test_case "opam lock timeout releases Dune lock" `Quick
             test_opam_lock_timeout_releases_dune_lock;
+          test_case "opam lock wrapped failure is not labeled timeout" `Quick
+            test_opam_lockf_wrapped_failure_does_not_claim_timeout;
+          test_case "opam lock timeout env must be numeric" `Quick
+            test_opam_lock_timeout_env_must_be_numeric;
+          test_case "missing lock tools warn once" `Quick
+            test_missing_lock_tools_warn_once;
           test_case "opam flock reexec propagates env" `Quick
             test_opam_flock_reexec_env_passthrough;
           test_case "clean subcommand skips pin guard" `Quick

@@ -10,6 +10,7 @@ import { coordinationFsmSnapshot } from '../store'
 import { FilterChips } from './common/filter-chips'
 import { Planning } from './goals'
 import { GoalTree } from './goals/goal-tree'
+import { PlanningFocusPanel } from './planning-focus-panel'
 import type {
   DashboardCoordinationFsmEvidence,
   DashboardCoordinationFsmRefs,
@@ -198,6 +199,7 @@ export function PlanningPanel() {
         tone="accent"
       />
       <${CoordinationHealthPanel} />
+      <${PlanningFocusPanel} />
       ${view === 'goal-tree'
         ? html`<${GoalTree} />`
         : html`<${Planning} />`}

@@ -17,20 +17,20 @@ import type { Task } from '../../types'
 // 30 minutes in seconds. Matches the spec's "claim_age ends in `h` or
 // > 10 minutes" rule of thumb but lifted slightly to avoid noise on
 // fast-iterating tasks. Keep this as a named constant — `feedback_no-hyperparameter-as-env-knob`.
-const STALE_THRESHOLD_SECONDS = 30 * 60
+export const STALE_THRESHOLD_SECONDS = 30 * 60
 
-interface StaleEntry {
+export interface StaleEntry {
   task: Task
   ageSeconds: number
   label: string
 }
 
-function ageSeconds(task: Task): number | null {
+function ageSeconds(task: Task, nowMs = Date.now()): number | null {
   const ref = task.updated_at ?? task.created_at
   if (!ref) return null
   const ts = Date.parse(ref)
   if (Number.isNaN(ts)) return null
-  return Math.max(0, Math.floor((Date.now() - ts) / 1000))
+  return Math.max(0, Math.floor((nowMs - ts) / 1000))
 }
 
 function ageLabel(s: number): string {
@@ -40,16 +40,20 @@ function ageLabel(s: number): string {
   return `${Math.floor(s / 86400)}d`
 }
 
-const staleEntries = computed<StaleEntry[]>(() => {
+export function deriveStaleTaskEntries(taskList: Task[], nowMs = Date.now()): StaleEntry[] {
   const acc: StaleEntry[] = []
-  for (const t of tasks.value) {
+  for (const t of taskList) {
     if (t.status !== 'claimed' && t.status !== 'in_progress') continue
-    const age = ageSeconds(t)
+    const age = ageSeconds(t, nowMs)
     if (age == null || age < STALE_THRESHOLD_SECONDS) continue
     acc.push({ task: t, ageSeconds: age, label: ageLabel(age) })
   }
   acc.sort((a, b) => b.ageSeconds - a.ageSeconds)
   return acc
+}
+
+const staleEntries = computed<StaleEntry[]>(() => {
+  return deriveStaleTaskEntries(tasks.value)
 })
 
 export function TaskStaleAlert() {

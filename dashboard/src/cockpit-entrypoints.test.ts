@@ -127,4 +127,22 @@ describe('cockpit entrypoint registry', () => {
       target: { tab: 'code', params: { section: 'ide-shell', view: 'unified', focus: 'review' } },
     })
   })
+
+  it('marks planning focus cockpit entries as route-covered', () => {
+    const byAlias = new Map(COCKPIT_ENTRYPOINTS.flatMap(entrypoint =>
+      entrypoint.aliases.map(alias => [alias, entrypoint] as const),
+    ))
+
+    expect(byAlias.get('task-st')?.coverage).toBe('covered')
+    expect(byAlias.get('acc-led')?.coverage).toBe('covered')
+    expect(byAlias.get('acc-mtx')?.coverage).toBe('covered')
+    expect(cockpitTargetForParams({ mode: 'Work', tab: 'acc-led' })).toEqual({
+      tab: 'workspace',
+      params: { section: 'planning', focus: 'accountability-ledger' },
+    })
+    expect(cockpitTargetForParams({ mode: 'Work', tab: 'acc-mtx' })).toEqual({
+      tab: 'workspace',
+      params: { section: 'planning', focus: 'accountability-matrix' },
+    })
+  })
 })

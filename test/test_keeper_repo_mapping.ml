@@ -103,6 +103,18 @@ let write_repositories base_path repos =
   let oc = open_out path in
   Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc content)
 
+let write_git_origin repo_root url =
+  let git_dir = Filename.concat repo_root ".git" in
+  ensure_dir git_dir;
+  let config_path = Filename.concat git_dir "config" in
+  let content =
+    Printf.sprintf "[remote \"origin\"]\n\turl = %s\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n" url
+  in
+  let oc = open_out config_path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
 let repo_under_base base_path id =
   let local_path = Filename.concat base_path ("repo-" ^ id) in
   Unix.mkdir local_path 0o755;
@@ -303,6 +315,37 @@ let test_validate_path_access_playground_repo_uses_url_basename () =
       | Error e ->
           Alcotest.fail
             ("expected playground repo path to resolve by repository URL basename, got: "
+             ^ e))
+
+let test_validate_path_access_playground_unique_clone_uses_git_remote () =
+  with_temp_base_path (fun base_path ->
+      let root_repo =
+        { (sample_repo "me") with name = "me"; local_path = base_path }
+      in
+      let masc_repo =
+        { (sample_repo "masc") with
+          name = "masc";
+          url = "https://github.com/jeong-sik/masc-mcp.git";
+          local_path = Filename.concat base_path ".masc/repos/masc";
+        }
+      in
+      write_repositories base_path [ root_repo; masc_repo ];
+      write_mapping base_path "executor" [ "masc" ];
+      let repo_root =
+        Filename.concat base_path
+          ".masc/playground/docker/executor/repos/keeper-direct-clone-proof-0506"
+      in
+      let path = Filename.concat repo_root "docs/proof.md" in
+      ensure_dir (Filename.dirname path);
+      write_git_origin repo_root "https://github.com/jeong-sik/masc-mcp.git";
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
+          ~base_path ~path
+      with
+      | Ok () -> ()
+      | Error e ->
+          Alcotest.fail
+            ("expected unique playground clone to resolve by git remote, got: "
              ^ e))
 
 let test_validate_path_access_playground_unknown_repo_denied () =
@@ -625,6 +668,8 @@ let () =
             test_validate_path_access_playground_repo_uses_registered_name;
           Alcotest.test_case "playground repo resolves repository URL basename" `Quick
             test_validate_path_access_playground_repo_uses_url_basename;
+          Alcotest.test_case "playground unique clone resolves git remote" `Quick
+            test_validate_path_access_playground_unique_clone_uses_git_remote;
           Alcotest.test_case "playground unknown repo denied" `Quick
             test_validate_path_access_playground_unknown_repo_denied;
         ] );

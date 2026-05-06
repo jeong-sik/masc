@@ -214,6 +214,31 @@ let test_history_dedupes_identical_payloads () =
       check bool "latest file is valid json" true
         (match latest_json with `Assoc _ -> true | _ -> false)))
 
+let test_history_field_returns_last_15_scores () =
+  with_safe_autonomy_store @@ fun config ->
+  ignore (persist_keeper config);
+  let history_dir =
+    Filename.concat (Coord.masc_root_dir config) "audits/safe_autonomy"
+  in
+  Fs_compat.mkdir_p history_dir;
+  let history_path = Filename.concat history_dir "history.jsonl" in
+  for i = 1 to 20 do
+    Fs_compat.append_jsonl history_path
+      (`Assoc
+        [
+          ( "summary",
+            `Assoc [ ("global_score", `Float (float_of_int i)) ] );
+        ])
+  done;
+  let json = Dashboard_safe_autonomy.json ~config () in
+  let history =
+    Yojson.Safe.Util.(json |> member "history" |> to_list |> List.map to_float)
+  in
+  check int "history length capped" 15 (List.length history);
+  check (list (float 0.001)) "history keeps newest 15 scores"
+    (List.init 15 (fun idx -> float_of_int (idx + 6)))
+    history
+
 let test_sandbox_live_probe_is_bounded_per_keeper () =
   with_safe_autonomy_store @@ fun config ->
   ignore (persist_docker_keeper config ~name:"docker-a");
@@ -243,6 +268,8 @@ let () =
             test_json_emits_scorecard_and_artifacts;
           test_case "artifact history dedupes identical payloads" `Quick
             test_history_dedupes_identical_payloads;
+          test_case "history field returns last 15 scores" `Quick
+            test_history_field_returns_last_15_scores;
           test_case "sandbox live probe is bounded per keeper" `Quick
             test_sandbox_live_probe_is_bounded_per_keeper;
         ] );

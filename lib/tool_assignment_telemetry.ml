@@ -170,6 +170,36 @@ let rng = Random.State.make_self_init ()
 let rng_mu = Eio.Mutex.create ()
 let with_rng f = Eio.Mutex.use_ro rng_mu (fun () -> f rng)
 
+let record_failure_metric ?(delta = 1.0) ~site () =
+  Prometheus.inc_counter Prometheus.metric_tool_assignment_telemetry_failures
+    ~labels:[ ("site", site) ] ~delta ()
+
+let observe_failure ~site ~error =
+  record_failure_metric ~site ();
+  Log.Telemetry.warn "tool_assignment_telemetry failure: site=%s error=%s"
+    site error
+
+type failure_acc =
+  { mutable count : int
+  ; mutable first_error : string option
+  }
+
+let create_failure_acc () = { count = 0; first_error = None }
+
+let add_decode_failure acc error =
+  acc.count <- acc.count + 1;
+  match acc.first_error with
+  | Some _ -> ()
+  | None -> acc.first_error <- Some error
+
+let observe_decode_failures ~site acc =
+  if acc.count > 0 then (
+    record_failure_metric ~site ~delta:(float_of_int acc.count) ();
+    let first_error = Option.value ~default:"unknown" acc.first_error in
+    Log.Telemetry.warn
+      "tool_assignment_telemetry failures: site=%s count=%d first_error=%s"
+      site acc.count first_error)
+
 (* ── Store lifecycle ──────────────────────────────────── *)
 
 let get_or_create_store () : Dated_jsonl.t =
@@ -287,22 +317,32 @@ let read_recent ~n : (tool_event list, string) Result.t =
   try
     let store = get_or_create_store () in
     let jsons = Dated_jsonl.read_recent store n in
+    let decode_failures = create_failure_acc () in
     let events =
       List.filter_map
         (fun json ->
-          match event_of_json json with Ok ev -> Some ev | Error _ -> None)
+          match event_of_json json with
+          | Ok ev -> Some ev
+          | Error msg ->
+              add_decode_failure decode_failures msg;
+              None)
         jsons
     in
+    observe_decode_failures ~site:"read_recent_decode" decode_failures;
     (* Dated_jsonl returns oldest-first; API promises newest-first. *)
     Ok (List.rev events)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> Error (Stdlib.Printexc.to_string exn)
+  | exn ->
+      let error = Stdlib.Printexc.to_string exn in
+      observe_failure ~site:"read_recent_exception" ~error;
+      Error error
 
 let warm_up () : unit =
   try
     let store = get_or_create_store () in
     let jsons = Dated_jsonl.read_recent store 100_000 in
+    let decode_failures = create_failure_acc () in
     Eio_guard.with_mutex index_mu (fun () ->
       Hashtbl.clear agent_index;
       List.iter
@@ -310,11 +350,15 @@ let warm_up () : unit =
           match event_of_json json with
           | Ok (Assigned { assignment_id; agent_id; _ }) ->
               Hashtbl.replace agent_index agent_id assignment_id
+          | Error msg -> add_decode_failure decode_failures msg
           | _ -> ())
-        jsons)
+        jsons);
+    observe_decode_failures ~site:"warm_up_decode" decode_failures
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> Log.Telemetry.warn "warm_up failed: %s" (Stdlib.Printexc.to_string exn)
+  | exn ->
+      let error = Stdlib.Printexc.to_string exn in
+      observe_failure ~site:"warm_up_exception" ~error
 
 let reset_for_testing () : unit =
   store_ref := None;

@@ -130,6 +130,42 @@ let has_docker_evidence record text =
 
 let has_git_credentials text = contains_substring text "\"git_creds_enabled\":true"
 
+let json_of_string_opt text =
+  try Some (Yojson.Safe.from_string text) with
+  | Yojson.Json_error _ -> None
+;;
+
+let rec string_field_values field = function
+  | `Assoc fields ->
+    let direct =
+      match List.assoc_opt field fields with
+      | Some (`String value) -> [ value ]
+      | _ -> []
+    in
+    direct @ List.concat_map (fun (_, value) -> string_field_values field value) fields
+  | `List values -> List.concat_map (string_field_values field) values
+  | _ -> []
+;;
+
+let json_has_string_field json field expected =
+  string_field_values field json |> List.exists (String.equal expected)
+;;
+
+let has_keeper_identity_credentials text =
+  let structured =
+    match json_of_string_opt text with
+    | None -> false
+    | Some json ->
+      json_has_string_field json "credential_scope" "keeper_identity"
+      && (json_has_string_field json "git_identity_mode" "github_identity"
+          || json_has_string_field json "state" "materialized")
+  in
+  structured
+  || (contains_substring text "\"credential_scope\":\"keeper_identity\""
+      && (contains_substring text "\"git_identity_mode\":\"github_identity\""
+          || contains_substring text "\"credential_state\":{\"state\":\"materialized\""))
+;;
+
 let stage_ids_for_record record =
   let tool = string_field_opt record "tool" |> Option.value ~default:"" in
   let input = lower (input_text record) in
@@ -137,6 +173,7 @@ let stage_ids_for_record record =
   let text = input ^ "\n" ^ output in
   let docker = has_docker_evidence record text in
   let git_creds = has_git_credentials text in
+  let keeper_creds = git_creds || has_keeper_identity_credentials output in
   let stages = ref [] in
   if docker && git_creds && contains_substring input "git clone"
   then stages := "docker_clone" :: !stages;
@@ -147,7 +184,7 @@ let stage_ids_for_record record =
   then stages := "push" :: !stages;
   if
     docker
-    && git_creds
+    && keeper_creds
     && String.equal tool "keeper_pr_create"
   then stages := "pr_create" :: !stages;
   List.rev !stages

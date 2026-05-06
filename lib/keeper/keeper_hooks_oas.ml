@@ -1005,6 +1005,7 @@ type pr_review_action_metric_event = {
   pr_number : int option;
   comment_id : int option;
   success : bool;
+  route_via : string option;
 }
 
 type pr_work_action_metric_event = {
@@ -1012,6 +1013,7 @@ type pr_work_action_metric_event = {
   work_source : string;
   command : string option;
   success : bool;
+  route_via : string option;
 }
 
 let normalize_pr_review_action raw =
@@ -1036,6 +1038,44 @@ let output_json_opt output_text =
   | Ok json -> Some json
   | Error _ -> None
 
+let normalized_route_via raw =
+  let value = String.trim raw |> String.lowercase_ascii in
+  if value = "" then None else Some value
+
+let assoc_field key = function
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+
+let route_via_of_json json =
+  let direct key =
+    match assoc_field key json with
+    | Some (`String value) -> normalized_route_via value
+    | _ -> None
+  in
+  let nested parent key =
+    match assoc_field parent json with
+    | Some nested_json ->
+        (match assoc_field key nested_json with
+         | Some (`String value) -> normalized_route_via value
+         | _ -> None)
+    | None -> None
+  in
+  [
+    direct "via";
+    direct "execution_via";
+    direct "route_via";
+    nested "route" "via";
+    nested "route" "execution_via";
+    nested "route" "route_via";
+    nested "metadata" "via";
+    nested "metadata" "execution_via";
+    nested "metadata" "route_via";
+    nested "tool_metadata" "via";
+    nested "tool_metadata" "execution_via";
+    nested "tool_metadata" "route_via";
+  ]
+  |> List.find_map Fun.id
+
 let output_success ~transport_success = function
   | Some json ->
       (match Safe_ops.json_bool_opt "ok" json with
@@ -1056,6 +1096,7 @@ let pr_review_action_metric_event_of_tool_io
   match tool_name with
   | "keeper_pr_review_comment" ->
       let output_json = output_json_opt output_text in
+      let route_via = Option.bind output_json route_via_of_json in
       let action =
         match output_json with
         | Some json -> Safe_ops.json_string_opt "event" json
@@ -1071,22 +1112,24 @@ let pr_review_action_metric_event_of_tool_io
       in
       Option.map
         (fun action ->
-             {
-               action;
-               pr_number =
-                 first_some
-                   (first_some
-                      (match output_json with
-                       | Some json -> json_int_opt "pr_number" json
-                       | None -> None)
-                      (json_int_opt "pr_number" input))
-                   (json_int_opt "number" input);
-               comment_id = None;
-               success;
-             })
+           {
+             action;
+             pr_number =
+               first_some
+                 (first_some
+                    (match output_json with
+                     | Some json -> json_int_opt "pr_number" json
+                     | None -> None)
+                    (json_int_opt "pr_number" input))
+                 (json_int_opt "number" input);
+             comment_id = None;
+             success;
+             route_via;
+           })
         (Option.bind action normalize_pr_review_action)
   | "keeper_pr_review_reply" ->
       let output_json = output_json_opt output_text in
+      let route_via = Option.bind output_json route_via_of_json in
       let success =
         output_success ~transport_success output_json
       in
@@ -1108,6 +1151,7 @@ let pr_review_action_metric_event_of_tool_io
                | None -> None)
               (json_int_opt "comment_id" input);
           success;
+          route_via;
         }
   | _ -> None
 
@@ -1214,6 +1258,7 @@ let pr_work_action_metric_events_of_tool_io
     ~(output_text : string)
     ~(transport_success : bool) =
   let output_json = output_json_opt output_text in
+  let route_via = Option.bind output_json route_via_of_json in
   let success = output_success ~transport_success output_json in
   match tool_name with
   | "masc_code_git" ->
@@ -1236,8 +1281,19 @@ let pr_work_action_metric_events_of_tool_io
                work_source = "masc_code_git";
                command = None;
                success;
+               route_via;
              };
            ])
+  | "keeper_pr_create" ->
+      [
+        {
+          work_action = "PR_CREATE";
+          work_source = "keeper_pr_create";
+          command = None;
+          success;
+          route_via;
+        };
+      ]
   | "keeper_shell" | "keeper_bash" | "masc_code_shell" ->
       (match command_input_of_tool ~tool_name input with
        | None -> []
@@ -1249,6 +1305,7 @@ let pr_work_action_metric_events_of_tool_io
                   work_source = tool_name;
                   command = Some command;
                   success;
+                  route_via;
                 }))
   | _ -> []
 
@@ -1270,27 +1327,33 @@ let append_pr_review_action_metric
   | Some event ->
       let now = Time_compat.now () in
       let store = Keeper_types.keeper_pr_action_metrics_store config meta.name in
+      let route_fields =
+        match event.route_via with
+        | None -> []
+        | Some via -> [("via", `String via); ("route_via", `String via)]
+      in
       let snapshot =
         `Assoc
-          [
-            ("ts", `String (Masc_domain.iso8601_of_unix_seconds now));
-            ("ts_unix", `Float now);
-            ("channel", `String "tool_event");
-            ("metric_event", `String "keeper_pr_review_action");
-            ("name", `String meta.name);
-            ("agent_name", `String meta.agent_name);
-            ( "trace_id",
-              `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) );
-            ("generation", `Int generation);
-            ("tool_name", `String tool_name);
-            ("pr_review_action", `String event.action);
-            ("pr_review_action_success", `Bool event.success);
-            ("tool_call_count", `Int 0);
-            ("tools_used", `List []);
-            ("pr_number", Json_util.int_opt_to_json event.pr_number);
-            ("comment_id", Json_util.int_opt_to_json event.comment_id);
-            ("duration_ms", `Float duration_ms);
-          ]
+          ([
+             ("ts", `String (Masc_domain.iso8601_of_unix_seconds now));
+             ("ts_unix", `Float now);
+             ("channel", `String "tool_event");
+             ("metric_event", `String "keeper_pr_review_action");
+             ("name", `String meta.name);
+             ("agent_name", `String meta.agent_name);
+             ( "trace_id",
+               `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) );
+             ("generation", `Int generation);
+             ("tool_name", `String tool_name);
+             ("pr_review_action", `String event.action);
+             ("pr_review_action_success", `Bool event.success);
+             ("tool_call_count", `Int 0);
+             ("tools_used", `List []);
+             ("pr_number", Json_util.int_opt_to_json event.pr_number);
+             ("comment_id", Json_util.int_opt_to_json event.comment_id);
+             ("duration_ms", `Float duration_ms);
+           ]
+           @ route_fields)
       in
       Dated_jsonl.append store (Inference_utils.sanitize_json_utf8 snapshot)
 
@@ -1315,29 +1378,35 @@ let append_pr_work_action_metrics
       List.iter
         (fun event ->
            let now = Time_compat.now () in
+           let route_fields =
+             match event.route_via with
+             | None -> []
+             | Some via -> [("via", `String via); ("route_via", `String via)]
+           in
            let snapshot =
              `Assoc
-               [
-                 ("ts", `String (Masc_domain.iso8601_of_unix_seconds now));
-                 ("ts_unix", `Float now);
-                 ("channel", `String "tool_event");
-                 ("metric_event", `String "keeper_pr_work_action");
-                 ("name", `String meta.name);
-                 ("agent_name", `String meta.agent_name);
-                 ( "trace_id",
-                   `String
-                     (Keeper_id.Trace_id.to_string meta.runtime.trace_id) );
-                 ("generation", `Int generation);
-                 ("tool_name", `String tool_name);
-                 ("pr_work_action", `String event.work_action);
-                 ("pr_work_action_source", `String event.work_source);
-                 ("pr_work_action_success", `Bool event.success);
-                 ( "pr_work_command",
-                   Json_util.string_opt_to_json event.command );
-                 ("tool_call_count", `Int 0);
-                 ("tools_used", `List []);
-                 ("duration_ms", `Float duration_ms);
-               ]
+               ([
+                  ("ts", `String (Masc_domain.iso8601_of_unix_seconds now));
+                  ("ts_unix", `Float now);
+                  ("channel", `String "tool_event");
+                  ("metric_event", `String "keeper_pr_work_action");
+                  ("name", `String meta.name);
+                  ("agent_name", `String meta.agent_name);
+                  ( "trace_id",
+                    `String
+                      (Keeper_id.Trace_id.to_string meta.runtime.trace_id) );
+                  ("generation", `Int generation);
+                  ("tool_name", `String tool_name);
+                  ("pr_work_action", `String event.work_action);
+                  ("pr_work_action_source", `String event.work_source);
+                  ("pr_work_action_success", `Bool event.success);
+                  ( "pr_work_command",
+                    Json_util.string_opt_to_json event.command );
+                  ("tool_call_count", `Int 0);
+                  ("tools_used", `List []);
+                  ("duration_ms", `Float duration_ms);
+                ]
+                @ route_fields)
            in
            Dated_jsonl.append store
              (Inference_utils.sanitize_json_utf8 snapshot))

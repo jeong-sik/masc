@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
-import { Kbd, kbdClasses } from './kbd'
+import { Kbd, kbdClasses, summarizeKbd } from './kbd'
 
 describe('kbdClasses (pure)', () => {
   it('default size is md (shortcut-sheet row baseline)', () => {
@@ -62,6 +62,33 @@ describe('kbdClasses (pure)', () => {
   })
 })
 
+describe('summarizeKbd (pure)', () => {
+  it('summarizes the default keyboard pill without reading the DOM', () => {
+    expect(summarizeKbd({})).toEqual({
+      size: 'md',
+      hasTitle: false,
+      hasCustomClass: false,
+      titleLength: 0,
+      classNameLength: 0,
+    })
+  })
+
+  it('summarizes title and custom class metadata from KbdProps', () => {
+    expect(summarizeKbd({ size: 'sm', title: 'Search', class: 'ml-1' })).toEqual({
+      size: 'sm',
+      hasTitle: true,
+      hasCustomClass: true,
+      titleLength: 6,
+      classNameLength: 4,
+    })
+  })
+
+  it('keeps className as a fallback alias but lets class win', () => {
+    expect(summarizeKbd({ className: 'ml-1' }).classNameLength).toBe(4)
+    expect(summarizeKbd({ class: 'mr-22', className: 'ml-1' }).classNameLength).toBe(5)
+  })
+})
+
 describe('Kbd component', () => {
   let container: HTMLElement
   beforeEach(() => {
@@ -78,6 +105,10 @@ describe('Kbd component', () => {
     const el = container.querySelector('kbd[data-kbd]')!
     expect(el.tagName).toBe('KBD')
     expect(el.textContent).toBe('⌘K')
+    expect(el.getAttribute('data-kbd-has-title')).toBe('false')
+    expect(el.getAttribute('data-kbd-has-custom-class')).toBe('false')
+    expect(el.getAttribute('data-kbd-title-length')).toBe('0')
+    expect(el.getAttribute('data-kbd-class-length')).toBe('0')
   })
 
   it('data-kbd-size reflects the size prop (default md)', () => {
@@ -90,8 +121,20 @@ describe('Kbd component', () => {
   })
 
   it('title attribute propagates (hover tooltip parity with raw <kbd>)', () => {
-    render(html`<${Kbd} title="단축키 목록 (?)">?<//>`, container)
+    const title = '단축키 목록 (?)'
+    render(html`<${Kbd} title=${title}>?<//>`, container)
     expect(container.querySelector('[data-kbd]')!.getAttribute('title')).toBe('단축키 목록 (?)')
+    expect(container.querySelector('[data-kbd]')!.getAttribute('data-kbd-has-title')).toBe('true')
+    expect(container.querySelector('[data-kbd]')!.getAttribute('data-kbd-title-length')).toBe(String(title.length))
+  })
+
+  it('custom class metadata reflects caller composition', () => {
+    const className = 'ml-1'
+    render(html`<${Kbd} class=${className}>?<//>`, container)
+    const el = container.querySelector('[data-kbd]')!
+    expect(el.className).toContain(className)
+    expect(el.getAttribute('data-kbd-has-custom-class')).toBe('true')
+    expect(el.getAttribute('data-kbd-class-length')).toBe(String(className.length))
   })
 
   it('testId renders as data-testid', () => {

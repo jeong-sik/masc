@@ -678,6 +678,42 @@ let test_repair_container_worktree_gitdirs () =
   Alcotest.(check bool) "container path removed from worktree .git" false
     (contains_substring (read_file wt_git) container_root)
 
+let test_prepare_container_worktree_gitdirs () =
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config:_ ~meta ~playground ->
+  let container_root = Keeper_sandbox.container_root meta.name in
+  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  let wt = Filename.concat (Filename.concat repo ".worktrees") "task-045" in
+  let admin = Filename.concat (Filename.concat repo ".git") "worktrees/task-045" in
+  ensure_dir wt;
+  ensure_dir admin;
+  let wt_git = Filename.concat wt ".git" in
+  let admin_gitdir = Filename.concat admin "gitdir" in
+  write_file wt_git
+    (Printf.sprintf "gitdir: %s/repos/masc-mcp/.git/worktrees/task-045\n"
+       playground);
+  write_file admin_gitdir
+    (Printf.sprintf "%s/repos/masc-mcp/.worktrees/task-045/.git\n"
+       playground);
+  let prepared =
+    Keeper_shell_docker.prepare_container_worktree_gitdirs
+      ~host_root:playground ~container_root
+  in
+  Alcotest.(check int) "prepared both gitdir pointer files" 2 prepared;
+  Alcotest.(check bool) "worktree .git uses container path" true
+    (contains_substring (read_file wt_git) container_root);
+  Alcotest.(check bool) "host path removed from worktree .git" false
+    (contains_substring (read_file wt_git) playground);
+  let repaired =
+    Keeper_shell_docker.repair_container_worktree_gitdirs
+      ~host_root:playground ~container_root
+  in
+  Alcotest.(check int) "repaired both files back to host" 2 repaired;
+  Alcotest.(check bool) "worktree .git restored to host path" true
+    (contains_substring (read_file wt_git) playground);
+  Alcotest.(check bool) "admin gitdir restored to host path" true
+    (contains_substring (read_file admin_gitdir) playground)
+
 let test_git_worktree_add_uses_host_git_metadata () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
@@ -1182,15 +1218,18 @@ let () =
             `Quick test_git_creds_mounts_only_selected_keeper_identity;
           Alcotest.test_case "hard mode git_clone uses brokered route" `Quick
             test_hard_mode_git_clone_uses_brokered_route;
-	          Alcotest.test_case "git_clone repairs existing docker clone checkout"
-	            `Quick test_git_clone_repairs_existing_docker_clone_checkout;
-	          Alcotest.test_case "docker worktree gitdir paths are host-repaired"
-	            `Quick test_repair_container_worktree_gitdirs;
-	          Alcotest.test_case
-	            "git_worktree add keeps host-readable metadata"
-	            `Quick test_git_worktree_add_uses_host_git_metadata;
-	          Alcotest.test_case
-	            "sandbox-root git with no repo blocks before docker exec"
+          Alcotest.test_case "git_clone repairs existing docker clone checkout"
+            `Quick test_git_clone_repairs_existing_docker_clone_checkout;
+          Alcotest.test_case "docker worktree gitdir paths are host-repaired"
+            `Quick test_repair_container_worktree_gitdirs;
+          Alcotest.test_case
+            "docker worktree gitdir paths are container-prepared"
+            `Quick test_prepare_container_worktree_gitdirs;
+          Alcotest.test_case
+            "git_worktree add keeps host-readable metadata"
+            `Quick test_git_worktree_add_uses_host_git_metadata;
+          Alcotest.test_case
+            "sandbox-root git with no repo blocks before docker exec"
             `Quick test_sandbox_root_git_cwd_zero_repo_blocks_before_exec;
           Alcotest.test_case
             "sandbox-root git with one repo auto-selects cwd"

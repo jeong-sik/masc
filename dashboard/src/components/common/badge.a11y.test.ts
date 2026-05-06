@@ -23,11 +23,15 @@ describe('CountBadge a11y', () => {
 
   it('default tone renders accessibly', async () => {
     render(html`<${CountBadge}>12<//>`, container)
+    const badge = container.querySelector('[data-count-badge]')!
+    expect(badge.getAttribute('data-count-badge-tone')).toBe('default')
+    expect(badge.getAttribute('data-count-badge-has-custom-class')).toBe('false')
     expect(await axe(container)).toHaveNoViolations()
   })
 
   it('warn tone renders accessibly', async () => {
     render(html`<${CountBadge} tone="warn">3<//>`, container)
+    expect(container.querySelector('[data-count-badge]')!.getAttribute('data-count-badge-tone')).toBe('warn')
     expect(await axe(container)).toHaveNoViolations()
   })
 
@@ -43,6 +47,7 @@ describe('CountBadge a11y', () => {
 
   it('accent tone renders accessibly', async () => {
     render(html`<${CountBadge} tone="accent">21<//>`, container)
+    expect(container.querySelector('[data-count-badge]')!.getAttribute('data-count-badge-tone')).toBe('accent')
     expect(await axe(container)).toHaveNoViolations()
   })
 })

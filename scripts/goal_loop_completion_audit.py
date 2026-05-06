@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -32,6 +33,15 @@ POST_ACT_EVIDENCE_KINDS = {
     "live_runtime_logs",
     "live_runtime_status",
 }
+PROMPT_CHECKLIST_STATUSES = {"PASS", "PARTIAL", "BLOCKED"}
+PROMPT_CHECKLIST_ISSUE_REF_RE = re.compile(
+    r"^https://github\.com/jeong-sik/masc-mcp/issues/\d+$"
+)
+PROMPT_CHECKLIST_PR_REF_RE = re.compile(
+    r"^https://github\.com/jeong-sik/masc-mcp/pull/\d+$"
+)
+PROMPT_SOURCE_PATH_PREFIX = "prompt_corpus/GOAL_LOOP/"
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 @dataclass(frozen=True)
@@ -89,6 +99,77 @@ def as_nonempty_str(value: Any) -> str | None:
         return None
     stripped = value.strip()
     return stripped if stripped else None
+
+
+def string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [
+        stripped for item in value if (stripped := as_nonempty_str(item)) is not None
+    ]
+
+
+def prompt_source_list(value: Any) -> tuple[list[str], dict[str, Any]]:
+    if not isinstance(value, list):
+        return [], {
+            "prompt_sources_is_list": False,
+            "invalid_prompt_sources_checked": 1,
+            "duplicate_prompt_sources_checked": [],
+            "invalid_prompt_source_prefixes": [],
+            "prompt_sources_unique": True,
+            "prompt_sources_have_expected_prefix": True,
+            "prompt_sources_valid": False,
+        }
+
+    sources = string_list(value)
+    invalid_count = len(value) - len(sources)
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for source in sources:
+        if source in seen:
+            duplicates.add(source)
+        seen.add(source)
+    invalid_prefixes = sorted(
+        source
+        for source in set(sources)
+        if not source.startswith(PROMPT_SOURCE_PATH_PREFIX)
+    )
+    prompt_sources_unique = not duplicates
+    prompt_sources_have_expected_prefix = not invalid_prefixes
+    return sources, {
+        "prompt_sources_is_list": True,
+        "invalid_prompt_sources_checked": invalid_count,
+        "duplicate_prompt_sources_checked": sorted(duplicates),
+        "invalid_prompt_source_prefixes": invalid_prefixes,
+        "prompt_sources_unique": prompt_sources_unique,
+        "prompt_sources_have_expected_prefix": prompt_sources_have_expected_prefix,
+        "prompt_sources_valid": (
+            invalid_count == 0
+            and prompt_sources_unique
+            and prompt_sources_have_expected_prefix
+        ),
+    }
+
+
+def repo_artifact_path(value: Any) -> str | None:
+    artifact_ref = as_nonempty_str(value)
+    if artifact_ref is None or contains_user_local_path(artifact_ref):
+        return None
+    artifact_path = artifact_ref.split("#", 1)[0].strip()
+    if not artifact_path:
+        return None
+    parsed = Path(artifact_path)
+    if parsed.is_absolute() or ".." in parsed.parts:
+        return None
+    return artifact_path
+
+
+def repo_artifact_anchor(value: Any) -> str | None:
+    artifact_ref = as_nonempty_str(value)
+    if artifact_ref is None or "#" not in artifact_ref:
+        return None
+    anchor = artifact_ref.split("#", 1)[1].strip()
+    return anchor or None
 
 
 def criterion(
@@ -301,6 +382,420 @@ def row_corpus_discovery_evidence(
     }
 
 
+def sum_unique_candidate_rows(value: Any) -> int | None:
+    if not isinstance(value, list):
+        return None
+    total = 0
+    for item in value:
+        if not isinstance(item, dict):
+            return None
+        rows = item.get("unique_candidate_rows")
+        if not isinstance(rows, int):
+            return None
+        total += rows
+    return total
+
+
+def source_row_candidate_inventory_evidence(
+    row_catalog_evidence: dict[str, Any],
+    source_row_candidate_inventory: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if (
+        row_catalog_evidence["status"] == "COMPLETE"
+        and source_row_candidate_inventory is None
+    ):
+        return {"inventory_status": "NOT_REQUIRED", "recorded": False}
+    if source_row_candidate_inventory is None:
+        return {"inventory_status": "MISSING", "recorded": False}
+
+    sources_raw = source_row_candidate_inventory.get("prompt_sources_checked", [])
+    sources, prompt_source_validation = prompt_source_list(sources_raw)
+    source_errors_raw = source_row_candidate_inventory.get("source_errors", [])
+    source_errors = source_errors_raw if isinstance(source_errors_raw, list) else []
+    expected_total = source_row_candidate_inventory.get("expected_findings_total")
+    candidate_rows = source_row_candidate_inventory.get("unique_candidate_rows")
+    missing_candidate_rows = source_row_candidate_inventory.get(
+        "missing_candidate_rows"
+    )
+    expected_matches = expected_total == row_catalog_evidence["expected_findings_total"]
+    missing_candidate_rows_matches = (
+        isinstance(expected_total, int)
+        and isinstance(candidate_rows, int)
+        and missing_candidate_rows == max(expected_total - candidate_rows, 0)
+    )
+    inventory_catalog_id = source_row_candidate_inventory.get("source_catalog_id")
+    row_catalog_id = row_catalog_evidence.get("catalog_id")
+    source_catalog_id_matches = (
+        isinstance(row_catalog_id, str)
+        and isinstance(inventory_catalog_id, str)
+        and inventory_catalog_id == row_catalog_id
+    )
+    incomplete_against_expected = (
+        isinstance(candidate_rows, int)
+        and isinstance(expected_total, int)
+        and candidate_rows < expected_total
+    )
+    complete_against_expected = (
+        isinstance(candidate_rows, int)
+        and isinstance(expected_total, int)
+        and candidate_rows == expected_total
+        and missing_candidate_rows == 0
+    )
+    candidates_by_file_total = sum_unique_candidate_rows(
+        source_row_candidate_inventory.get("candidates_by_file")
+    )
+    candidates_by_rule_total = sum_unique_candidate_rows(
+        source_row_candidate_inventory.get("candidates_by_rule")
+    )
+    candidates_by_file_total_matches = candidates_by_file_total == candidate_rows
+    candidates_by_rule_total_matches = candidates_by_rule_total == candidate_rows
+    candidates_by_file_raw = source_row_candidate_inventory.get("candidates_by_file")
+    candidates_by_file = (
+        candidates_by_file_raw if isinstance(candidates_by_file_raw, list) else []
+    )
+    source_paths_with_candidates = {
+        item.get("path")
+        for item in candidates_by_file
+        if isinstance(item, dict) and isinstance(item.get("path"), str)
+    }
+    sources_without_candidates_raw = source_row_candidate_inventory.get(
+        "sources_without_candidates"
+    )
+    sources_without_candidates = (
+        sources_without_candidates_raw
+        if isinstance(sources_without_candidates_raw, list)
+        else []
+    )
+    source_paths_without_candidates = {
+        item for item in sources_without_candidates if isinstance(item, str)
+    }
+    source_candidate_coverage_raw = source_row_candidate_inventory.get(
+        "source_candidate_coverage"
+    )
+    source_candidate_coverage = (
+        source_candidate_coverage_raw
+        if isinstance(source_candidate_coverage_raw, dict)
+        else {}
+    )
+    no_candidate_details_raw = source_row_candidate_inventory.get(
+        "sources_without_candidate_details"
+    )
+    no_candidate_details = (
+        no_candidate_details_raw if isinstance(no_candidate_details_raw, list) else []
+    )
+    source_currentness_raw = source_row_candidate_inventory.get("source_currentness")
+    source_currentness = (
+        source_currentness_raw if isinstance(source_currentness_raw, dict) else {}
+    )
+    future_date_claims_raw = source_currentness.get("future_date_claims", [])
+    future_date_claims = (
+        future_date_claims_raw if isinstance(future_date_claims_raw, list) else []
+    )
+    invalid_future_date_claims = []
+    future_date_claim_paths = set()
+    blocking_future_date_claim_paths = set()
+    for item in future_date_claims:
+        if not isinstance(item, dict):
+            invalid_future_date_claims.append("not_object")
+            continue
+        path = item.get("path")
+        line_ref = item.get("line_ref")
+        date_claim = item.get("date")
+        if not isinstance(path, str):
+            invalid_future_date_claims.append("missing_path")
+            continue
+        future_date_claim_paths.add(path)
+        if not isinstance(line_ref, int) or line_ref <= 0:
+            invalid_future_date_claims.append(path)
+        if not isinstance(date_claim, str) or not date_claim:
+            invalid_future_date_claims.append(path)
+        if not isinstance(item.get("claim_kind"), str) or not item.get("claim_kind"):
+            invalid_future_date_claims.append(path)
+        currentness_blocking = item.get("currentness_blocking")
+        if not isinstance(currentness_blocking, bool):
+            invalid_future_date_claims.append(path)
+        elif currentness_blocking:
+            blocking_future_date_claim_paths.add(path)
+    source_currentness_evaluated = source_currentness.get("evaluated") is True
+    future_date_claims_total_matches = source_currentness.get(
+        "future_date_claims_total"
+    ) == len(future_date_claims)
+    sources_with_future_date_claims_raw = source_currentness.get(
+        "sources_with_future_date_claims"
+    )
+    sources_with_future_date_claims = (
+        sources_with_future_date_claims_raw
+        if isinstance(sources_with_future_date_claims_raw, list)
+        else []
+    )
+    future_date_sources_match = (
+        set(item for item in sources_with_future_date_claims if isinstance(item, str))
+        == future_date_claim_paths
+    )
+    future_date_sources_count_matches = source_currentness.get(
+        "sources_with_future_date_claims_total"
+    ) == len(future_date_claim_paths)
+    blocking_future_date_claims_total = sum(
+        1
+        for item in future_date_claims
+        if isinstance(item, dict) and item.get("currentness_blocking") is True
+    )
+    blocking_future_date_claims_total_matches = (
+        source_currentness.get("blocking_future_date_claims_total")
+        == blocking_future_date_claims_total
+    )
+    sources_with_blocking_future_date_claims_raw = source_currentness.get(
+        "sources_with_blocking_future_date_claims"
+    )
+    sources_with_blocking_future_date_claims = (
+        sources_with_blocking_future_date_claims_raw
+        if isinstance(sources_with_blocking_future_date_claims_raw, list)
+        else []
+    )
+    blocking_future_date_sources_match = (
+        set(
+            item
+            for item in sources_with_blocking_future_date_claims
+            if isinstance(item, str)
+        )
+        == blocking_future_date_claim_paths
+    )
+    blocking_future_date_sources_count_matches = source_currentness.get(
+        "sources_with_blocking_future_date_claims_total"
+    ) == len(blocking_future_date_claim_paths)
+    source_currentness_consistent = (
+        source_currentness.get("evaluated") is False
+        and source_currentness.get("checked_at") is None
+        and source_currentness.get("future_date_claims_total") == 0
+        and source_currentness.get("sources_with_future_date_claims_total") == 0
+        and source_currentness.get("blocking_future_date_claims_total") == 0
+        and source_currentness.get("sources_with_blocking_future_date_claims_total")
+        == 0
+        and source_currentness.get("current") is True
+        and len(future_date_claims) == 0
+    ) or (
+        source_currentness_evaluated
+        and isinstance(source_currentness.get("checked_at"), str)
+        and future_date_claims_total_matches
+        and future_date_sources_match
+        and future_date_sources_count_matches
+        and blocking_future_date_claims_total_matches
+        and blocking_future_date_sources_match
+        and blocking_future_date_sources_count_matches
+        and source_currentness.get("current")
+        == (blocking_future_date_claims_total == 0)
+        and not invalid_future_date_claims
+    )
+    no_candidate_detail_paths = {
+        item.get("path")
+        for item in no_candidate_details
+        if isinstance(item, dict) and isinstance(item.get("path"), str)
+    }
+    invalid_no_candidate_details = []
+    unstructured_markers_without_candidates = 0
+    no_candidate_sources_with_tracking_issue_refs = 0
+    no_candidate_tracking_issue_refs: set[str] = set()
+    missing_no_candidate_tracking_issue_refs: list[str] = []
+    invalid_no_candidate_tracking_issue_refs: list[str] = []
+    for item in no_candidate_details:
+        if not isinstance(item, dict):
+            invalid_no_candidate_details.append("not_object")
+            continue
+        path = item.get("path")
+        if not isinstance(path, str):
+            invalid_no_candidate_details.append("missing_path")
+            continue
+        marker_values = [
+            item.get("markdown_headings"),
+            item.get("markdown_table_rows"),
+            item.get("numbered_items"),
+            item.get("bullet_items"),
+        ]
+        if not all(isinstance(value, int) and value >= 0 for value in marker_values):
+            invalid_no_candidate_details.append(path)
+            continue
+        expected_marker_total = sum(marker_values)
+        marker_total = item.get("unstructured_marker_total")
+        if marker_total != expected_marker_total:
+            invalid_no_candidate_details.append(path)
+            continue
+        unstructured_markers_without_candidates += expected_marker_total
+        tracking_refs_raw = item.get("tracking_issue_refs", [])
+        tracking_refs = tracking_refs_raw if isinstance(tracking_refs_raw, list) else []
+        valid_tracking_refs = [
+            ref
+            for ref in tracking_refs
+            if isinstance(ref, str)
+            and PROMPT_CHECKLIST_ISSUE_REF_RE.fullmatch(ref) is not None
+        ]
+        no_candidate_tracking_issue_refs.update(valid_tracking_refs)
+        if expected_marker_total > 0:
+            if valid_tracking_refs:
+                no_candidate_sources_with_tracking_issue_refs += 1
+            else:
+                missing_no_candidate_tracking_issue_refs.append(path)
+                invalid_no_candidate_details.append(path)
+            if not isinstance(tracking_refs_raw, list) or len(
+                valid_tracking_refs
+            ) != len(tracking_refs):
+                invalid_no_candidate_tracking_issue_refs.append(path)
+                invalid_no_candidate_details.append(path)
+    sources_accounted = set(sources) == (
+        source_paths_with_candidates | source_paths_without_candidates
+    )
+    no_candidate_details_accounted = (
+        no_candidate_detail_paths == source_paths_without_candidates
+        and len(no_candidate_details) == len(source_paths_without_candidates)
+        and not invalid_no_candidate_details
+    )
+    zero_source_count_matches = source_candidate_coverage.get(
+        "sources_without_candidates"
+    ) == len(source_paths_without_candidates)
+    candidate_source_count_matches = source_candidate_coverage.get(
+        "sources_with_candidates"
+    ) == len(source_paths_with_candidates)
+    source_count_matches = source_candidate_coverage.get("sources_checked") == len(
+        sources
+    )
+    unstructured_source_count_matches = source_candidate_coverage.get(
+        "unstructured_sources_without_candidates"
+    ) == sum(
+        1
+        for item in no_candidate_details
+        if isinstance(item, dict) and as_int(item.get("unstructured_marker_total")) > 0
+    )
+    unstructured_marker_count_matches = (
+        source_candidate_coverage.get("unstructured_markers_without_candidates")
+        == unstructured_markers_without_candidates
+    )
+    no_candidate_tracking_source_count_matches = (
+        source_candidate_coverage.get("no_candidate_sources_with_tracking_issue_refs")
+        == no_candidate_sources_with_tracking_issue_refs
+    )
+    no_candidate_source_overlap = (
+        len(source_paths_with_candidates & source_paths_without_candidates) == 0
+    )
+    local_path_leaks = contains_user_local_path(source_row_candidate_inventory)
+    inventory_result_consistent = (
+        source_row_candidate_inventory.get("status") == "INCOMPLETE"
+        and source_row_candidate_inventory.get("result")
+        == "EXPLICIT_SOURCE_ROWS_INSUFFICIENT"
+        and incomplete_against_expected
+    ) or (
+        source_row_candidate_inventory.get("status") == "COMPLETE"
+        and source_row_candidate_inventory.get("result")
+        == "EXPLICIT_SOURCE_ROWS_MATCH_EXPECTED"
+        and complete_against_expected
+    )
+    recorded = (
+        source_row_candidate_inventory.get("schema_version") == 1
+        and inventory_result_consistent
+        and source_catalog_id_matches
+        and expected_matches
+        and missing_candidate_rows_matches
+        and candidates_by_file_total_matches
+        and candidates_by_rule_total_matches
+        and sources_accounted
+        and no_candidate_details_accounted
+        and source_count_matches
+        and candidate_source_count_matches
+        and zero_source_count_matches
+        and unstructured_source_count_matches
+        and unstructured_marker_count_matches
+        and no_candidate_tracking_source_count_matches
+        and source_currentness_consistent
+        and no_candidate_source_overlap
+        and len(sources) >= 12
+        and source_row_candidate_inventory.get("source_errors_total") == 0
+        and len(source_errors) == 0
+        and prompt_source_validation["prompt_sources_valid"]
+        and not local_path_leaks
+    )
+    return {
+        "inventory_status": source_row_candidate_inventory.get("status"),
+        "inventory_id": source_row_candidate_inventory.get("inventory_id"),
+        "result": source_row_candidate_inventory.get("result"),
+        "recorded": recorded,
+        "source_catalog_id": row_catalog_id,
+        "inventory_source_catalog_id": inventory_catalog_id,
+        "source_catalog_id_matches": source_catalog_id_matches,
+        "expected_findings_total": expected_total,
+        "expected_matches": expected_matches,
+        "unique_candidate_rows": candidate_rows,
+        "missing_candidate_rows": missing_candidate_rows,
+        "missing_candidate_rows_matches": missing_candidate_rows_matches,
+        "incomplete_against_expected": incomplete_against_expected,
+        "complete_against_expected": complete_against_expected,
+        "inventory_result_consistent": inventory_result_consistent,
+        "candidates_by_file_total": candidates_by_file_total,
+        "candidates_by_file_total_matches": candidates_by_file_total_matches,
+        "candidates_by_rule_total": candidates_by_rule_total,
+        "candidates_by_rule_total_matches": candidates_by_rule_total_matches,
+        "prompt_sources_checked": len(sources),
+        **prompt_source_validation,
+        "sources_with_candidates": len(source_paths_with_candidates),
+        "sources_without_candidates": len(source_paths_without_candidates),
+        "sources_accounted": sources_accounted,
+        "sources_without_candidate_details": len(no_candidate_details),
+        "no_candidate_details_accounted": no_candidate_details_accounted,
+        "invalid_no_candidate_details": invalid_no_candidate_details,
+        "unstructured_markers_without_candidates": (
+            unstructured_markers_without_candidates
+        ),
+        "no_candidate_sources_with_tracking_issue_refs": (
+            no_candidate_sources_with_tracking_issue_refs
+        ),
+        "no_candidate_tracking_issue_refs_total": len(no_candidate_tracking_issue_refs),
+        "missing_no_candidate_tracking_issue_refs": (
+            missing_no_candidate_tracking_issue_refs
+        ),
+        "invalid_no_candidate_tracking_issue_refs": (
+            invalid_no_candidate_tracking_issue_refs
+        ),
+        "source_count_matches": source_count_matches,
+        "candidate_source_count_matches": candidate_source_count_matches,
+        "zero_source_count_matches": zero_source_count_matches,
+        "unstructured_source_count_matches": unstructured_source_count_matches,
+        "unstructured_marker_count_matches": unstructured_marker_count_matches,
+        "no_candidate_tracking_source_count_matches": (
+            no_candidate_tracking_source_count_matches
+        ),
+        "source_currentness_evaluated": source_currentness_evaluated,
+        "source_currentness_checked_at": source_currentness.get("checked_at"),
+        "source_currentness_current": source_currentness.get("current"),
+        "source_currentness_consistent": source_currentness_consistent,
+        "future_date_claims_total": source_currentness.get("future_date_claims_total"),
+        "future_date_claims_count": len(future_date_claims),
+        "future_date_claims_total_matches": future_date_claims_total_matches,
+        "sources_with_future_date_claims_total": source_currentness.get(
+            "sources_with_future_date_claims_total"
+        ),
+        "future_date_sources_count_matches": future_date_sources_count_matches,
+        "future_date_sources_match": future_date_sources_match,
+        "blocking_future_date_claims_total": source_currentness.get(
+            "blocking_future_date_claims_total"
+        ),
+        "blocking_future_date_claims_count": blocking_future_date_claims_total,
+        "blocking_future_date_claims_total_matches": (
+            blocking_future_date_claims_total_matches
+        ),
+        "sources_with_blocking_future_date_claims_total": source_currentness.get(
+            "sources_with_blocking_future_date_claims_total"
+        ),
+        "blocking_future_date_sources_count_matches": (
+            blocking_future_date_sources_count_matches
+        ),
+        "blocking_future_date_sources_match": blocking_future_date_sources_match,
+        "invalid_future_date_claims": invalid_future_date_claims,
+        "no_candidate_source_overlap": no_candidate_source_overlap,
+        "source_errors_total": source_row_candidate_inventory.get(
+            "source_errors_total"
+        ),
+        "source_errors_count": len(source_errors),
+        "local_path_leaks": local_path_leaks,
+    }
+
+
 def strict_row_corpus_evidence(
     row_catalog_evidence: dict[str, Any],
     strict_row_corpus: dict[str, Any] | None,
@@ -318,8 +813,16 @@ def strict_row_corpus_evidence(
     catalog_id = row_catalog_evidence.get("catalog_id")
     if isinstance(catalog_id, str) and catalog_id:
         catalog["catalog_id"] = catalog_id
+    external_sources = row_catalog_evidence.get("external_sources")
+    require_catalog_sources = isinstance(external_sources, list)
+    if require_catalog_sources:
+        catalog["external_sources"] = external_sources
 
-    report = validate_strict_row_corpus(strict_row_corpus, catalog=catalog)
+    report = validate_strict_row_corpus(
+        strict_row_corpus,
+        catalog=catalog,
+        require_catalog_sources=require_catalog_sources,
+    )
     report["expected_matches_catalog"] = (
         report.get("expected_findings_total")
         == row_catalog_evidence["expected_findings_total"]
@@ -330,12 +833,244 @@ def strict_row_corpus_evidence(
     return report
 
 
+def prompt_closeout_checklist_evidence(
+    audit_catalog: dict[str, Any],
+    prompt_closeout_checklist: dict[str, Any],
+) -> tuple[bool, dict[str, Any]]:
+    source_catalog_id = audit_catalog.get("catalog_id")
+    checklist_catalog_id = prompt_closeout_checklist.get("source_catalog_id")
+    source_catalog_id_matches = (
+        isinstance(source_catalog_id, str)
+        and isinstance(checklist_catalog_id, str)
+        and checklist_catalog_id == source_catalog_id
+    )
+
+    source_docs_raw = prompt_closeout_checklist.get("prompt_sources_checked", [])
+    source_docs, prompt_source_validation = prompt_source_list(source_docs_raw)
+    requirements_raw = prompt_closeout_checklist.get("requirements", [])
+    requirements = requirements_raw if isinstance(requirements_raw, list) else []
+
+    invalid_requirements: list[str] = []
+    status_counts = {"PASS": 0, "PARTIAL": 0, "BLOCKED": 0}
+    blocked_criteria: set[str] = set()
+    requirement_ids: set[str] = set()
+    duplicate_requirement_ids: list[str] = []
+    non_pass_requirements = 0
+    requirements_with_tracking_issue_refs = 0
+    tracking_issue_refs: set[str] = set()
+    missing_tracking_issue_refs: list[str] = []
+    invalid_tracking_issue_refs: list[str] = []
+    requirements_with_implementation_pr_refs = 0
+    implementation_pr_refs: set[str] = set()
+    invalid_implementation_pr_refs: list[str] = []
+    artifact_refs_total = 0
+    artifact_refs_resolved = 0
+    artifact_ref_anchors_total = 0
+    artifact_ref_anchors_resolved = 0
+    missing_artifact_refs: list[str] = []
+    missing_artifact_ref_anchors: list[str] = []
+    artifact_ref_read_errors: list[str] = []
+    invalid_artifact_refs: list[str] = []
+    for index, requirement in enumerate(requirements):
+        if not isinstance(requirement, dict):
+            invalid_requirements.append(f"#{index}: not_object")
+            continue
+        requirement_id = requirement.get("requirement_id")
+        if isinstance(requirement_id, str) and requirement_id:
+            if requirement_id in requirement_ids:
+                duplicate_requirement_ids.append(requirement_id)
+                invalid_requirements.append(
+                    f"{requirement_id}: duplicate_requirement_id"
+                )
+            else:
+                requirement_ids.add(requirement_id)
+        else:
+            invalid_requirements.append(f"#{index}: missing_requirement_id")
+        if not as_nonempty_str(requirement.get("prompt_requirement")):
+            invalid_requirements.append(f"{requirement_id or index}: missing_prompt")
+        artifacts = requirement.get("artifact_refs")
+        if not isinstance(artifacts, list) or len(artifacts) == 0:
+            invalid_requirements.append(f"{requirement_id or index}: missing_artifacts")
+        else:
+            requirement_label = str(requirement_id or f"#{index}")
+            artifact_refs_total += len(artifacts)
+            for artifact in artifacts:
+                artifact_path = repo_artifact_path(artifact)
+                if artifact_path is None:
+                    invalid_artifact_refs.append(requirement_label)
+                    invalid_requirements.append(
+                        f"{requirement_label}: invalid_artifact_ref"
+                    )
+                    continue
+                full_artifact_path = REPO_ROOT / artifact_path
+                if full_artifact_path.is_file():
+                    anchor = repo_artifact_anchor(artifact)
+                    if anchor is not None:
+                        artifact_ref_anchors_total += 1
+                        try:
+                            artifact_text = full_artifact_path.read_text(
+                                encoding="utf-8", errors="replace"
+                            )
+                        except OSError as exc:
+                            artifact_ref_read_errors.append(
+                                f"{requirement_label}: {artifact_path}: "
+                                f"{type(exc).__name__}"
+                            )
+                            invalid_requirements.append(
+                                f"{requirement_label}: artifact_ref_read_error"
+                            )
+                            continue
+                        if anchor not in artifact_text:
+                            missing_artifact_ref_anchors.append(
+                                f"{requirement_label}: {artifact_path}#{anchor}"
+                            )
+                            invalid_requirements.append(
+                                f"{requirement_label}: missing_artifact_ref_anchor"
+                            )
+                            continue
+                        artifact_ref_anchors_resolved += 1
+                    artifact_refs_resolved += 1
+                else:
+                    missing_artifact_refs.append(
+                        f"{requirement_label}: {artifact_path}"
+                    )
+                    invalid_requirements.append(
+                        f"{requirement_label}: missing_artifact_ref"
+                    )
+        status = requirement.get("status")
+        if status in PROMPT_CHECKLIST_STATUSES:
+            status_counts[status] += 1
+        else:
+            invalid_requirements.append(f"{requirement_id or index}: invalid_status")
+        criterion_id = requirement.get("criterion_id")
+        if status == "BLOCKED" and isinstance(criterion_id, str):
+            blocked_criteria.add(criterion_id)
+        tracking_refs_raw = requirement.get("tracking_issue_refs", [])
+        tracking_refs = tracking_refs_raw if isinstance(tracking_refs_raw, list) else []
+        valid_tracking_refs = [
+            item
+            for item in tracking_refs
+            if isinstance(item, str)
+            and PROMPT_CHECKLIST_ISSUE_REF_RE.fullmatch(item) is not None
+        ]
+        tracking_issue_refs.update(valid_tracking_refs)
+        if status in {"PARTIAL", "BLOCKED"}:
+            requirement_label = str(requirement_id or f"#{index}")
+            non_pass_requirements += 1
+            if not valid_tracking_refs:
+                missing_tracking_issue_refs.append(requirement_label)
+                invalid_requirements.append(
+                    f"{requirement_label}: missing_tracking_issue_refs"
+                )
+            else:
+                requirements_with_tracking_issue_refs += 1
+            if not isinstance(tracking_refs_raw, list) or len(
+                valid_tracking_refs
+            ) != len(tracking_refs):
+                invalid_tracking_issue_refs.append(requirement_label)
+                invalid_requirements.append(
+                    f"{requirement_label}: invalid_tracking_issue_refs"
+                )
+        implementation_pr_refs_raw = requirement.get("implementation_pr_refs", [])
+        implementation_refs = (
+            implementation_pr_refs_raw
+            if isinstance(implementation_pr_refs_raw, list)
+            else []
+        )
+        valid_implementation_refs = [
+            item
+            for item in implementation_refs
+            if isinstance(item, str)
+            and PROMPT_CHECKLIST_PR_REF_RE.fullmatch(item) is not None
+        ]
+        implementation_pr_refs.update(valid_implementation_refs)
+        if valid_implementation_refs:
+            requirements_with_implementation_pr_refs += 1
+        if not isinstance(implementation_pr_refs_raw, list) or len(
+            valid_implementation_refs
+        ) != len(implementation_refs):
+            requirement_label = str(requirement_id or f"#{index}")
+            invalid_implementation_pr_refs.append(requirement_label)
+            invalid_requirements.append(
+                f"{requirement_label}: invalid_implementation_pr_refs"
+            )
+
+    expected_source_docs = as_int(audit_catalog.get("source_documents_expected"))
+    source_docs_complete = (
+        expected_source_docs >= 12
+        and len(source_docs) == expected_source_docs
+        and prompt_source_validation["prompt_sources_valid"]
+    )
+    has_strict_corpus_blocker = "strict_row_level_catalog_complete" in blocked_criteria
+    local_path_leaks = contains_user_local_path(prompt_closeout_checklist)
+    status = prompt_closeout_checklist.get("status")
+    recorded = (
+        prompt_closeout_checklist.get("schema_version") == 1
+        and status == "RECORDED"
+        and source_catalog_id_matches
+        and source_docs_complete
+        and len(requirements) > 0
+        and not invalid_requirements
+        and not local_path_leaks
+    )
+    return recorded, {
+        "checklist_status": status,
+        "checklist_id": prompt_closeout_checklist.get("checklist_id"),
+        "source_catalog_id": source_catalog_id,
+        "checklist_source_catalog_id": checklist_catalog_id,
+        "source_catalog_id_matches": source_catalog_id_matches,
+        "prompt_sources_checked": len(source_docs),
+        **prompt_source_validation,
+        "prompt_sources_expected": expected_source_docs,
+        "source_docs_complete": source_docs_complete,
+        "requirements_total": len(requirements),
+        "requirement_ids_total": len(requirement_ids),
+        "duplicate_requirement_ids": sorted(set(duplicate_requirement_ids)),
+        "status_counts": status_counts,
+        "blocked_criteria": sorted(blocked_criteria),
+        "has_strict_corpus_blocker": has_strict_corpus_blocker,
+        "non_pass_requirements": non_pass_requirements,
+        "requirements_with_tracking_issue_refs": (
+            requirements_with_tracking_issue_refs
+        ),
+        "tracking_issue_refs_total": len(tracking_issue_refs),
+        "missing_tracking_issue_refs": missing_tracking_issue_refs,
+        "invalid_tracking_issue_refs": invalid_tracking_issue_refs,
+        "requirements_with_implementation_pr_refs": (
+            requirements_with_implementation_pr_refs
+        ),
+        "implementation_pr_refs_total": len(implementation_pr_refs),
+        "invalid_implementation_pr_refs": invalid_implementation_pr_refs,
+        "artifact_refs_total": artifact_refs_total,
+        "artifact_refs_resolved": artifact_refs_resolved,
+        "artifact_ref_anchors_total": artifact_ref_anchors_total,
+        "artifact_ref_anchors_resolved": artifact_ref_anchors_resolved,
+        "artifact_refs_all_resolved": (
+            artifact_refs_total > 0
+            and artifact_refs_resolved == artifact_refs_total
+            and not missing_artifact_refs
+            and not missing_artifact_ref_anchors
+            and not artifact_ref_read_errors
+            and not invalid_artifact_refs
+        ),
+        "missing_artifact_refs": missing_artifact_refs,
+        "missing_artifact_ref_anchors": missing_artifact_ref_anchors,
+        "artifact_ref_read_errors": artifact_ref_read_errors,
+        "invalid_artifact_refs": sorted(set(invalid_artifact_refs)),
+        "invalid_requirements": invalid_requirements,
+        "local_path_leaks": local_path_leaks,
+        "recorded": recorded,
+    }
+
+
 def build_completion_audit(
     status: dict[str, Any],
     *,
     structured_id_triage: dict[str, Any] | None = None,
     row_corpus_discovery: dict[str, Any] | None = None,
     strict_row_corpus: dict[str, Any] | None = None,
+    prompt_closeout_checklist: dict[str, Any] | None = None,
+    source_row_candidate_inventory: dict[str, Any] | None = None,
 ) -> CompletionAudit:
     audit_catalog = nested_dict(status, "phases", "orient", "summary", "audit_catalog")
     verify_summary = nested_dict(status, "phases", "verify", "summary")
@@ -441,9 +1176,18 @@ def build_completion_audit(
         "missing_itemized_findings": audit_catalog.get("missing_itemized_findings"),
         "extra_itemized_findings": audit_catalog.get("extra_itemized_findings"),
     }
+    external_sources = audit_catalog.get("external_sources")
+    if isinstance(external_sources, list):
+        row_catalog_evidence["external_sources"] = external_sources
     row_catalog_evidence["row_corpus_discovery"] = row_corpus_discovery_evidence(
         row_catalog_evidence,
         row_corpus_discovery,
+    )
+    row_catalog_evidence["source_row_candidate_inventory"] = (
+        source_row_candidate_inventory_evidence(
+            row_catalog_evidence,
+            source_row_candidate_inventory,
+        )
     )
     row_catalog_evidence["strict_row_corpus"] = strict_row_corpus_evidence(
         row_catalog_evidence,
@@ -602,6 +1346,74 @@ def build_completion_audit(
             verify_evidence,
         ),
     ]
+    if prompt_closeout_checklist is not None:
+        checklist_passed, checklist_evidence = prompt_closeout_checklist_evidence(
+            audit_catalog,
+            prompt_closeout_checklist,
+        )
+        checklist_status_counts = checklist_evidence.get("status_counts", {})
+        checklist_status_counts = (
+            checklist_status_counts if isinstance(checklist_status_counts, dict) else {}
+        )
+        requirements_total = as_int(checklist_evidence.get("requirements_total"))
+        prompt_requirements_passed = (
+            checklist_passed
+            and requirements_total > 0
+            and as_int(checklist_status_counts.get("PASS")) == requirements_total
+            and as_int(checklist_status_counts.get("PARTIAL")) == 0
+            and as_int(checklist_status_counts.get("BLOCKED")) == 0
+        )
+        criteria.append(
+            criterion(
+                "prompt_to_artifact_checklist_recorded",
+                checklist_passed,
+                "Prompt requirements are mapped to concrete artifacts and blockers.",
+                checklist_evidence,
+            )
+        )
+        criteria.append(
+            criterion(
+                "prompt_requirements_closeout_complete",
+                prompt_requirements_passed,
+                "Every prompt-mapped requirement is fully satisfied.",
+                {
+                    "checklist_id": checklist_evidence.get("checklist_id"),
+                    "checklist_recorded": checklist_passed,
+                    "requirements_total": requirements_total,
+                    "status_counts": checklist_status_counts,
+                    "incomplete_requirements": as_int(
+                        checklist_status_counts.get("PARTIAL")
+                    )
+                    + as_int(checklist_status_counts.get("BLOCKED")),
+                    "non_pass_requirements": checklist_evidence.get(
+                        "non_pass_requirements"
+                    ),
+                    "requirements_with_tracking_issue_refs": checklist_evidence.get(
+                        "requirements_with_tracking_issue_refs"
+                    ),
+                    "tracking_issue_refs_total": checklist_evidence.get(
+                        "tracking_issue_refs_total"
+                    ),
+                    "requirements_with_implementation_pr_refs": (
+                        checklist_evidence.get(
+                            "requirements_with_implementation_pr_refs"
+                        )
+                    ),
+                    "implementation_pr_refs_total": checklist_evidence.get(
+                        "implementation_pr_refs_total"
+                    ),
+                    "invalid_implementation_pr_refs": checklist_evidence.get(
+                        "invalid_implementation_pr_refs"
+                    ),
+                    "missing_tracking_issue_refs": checklist_evidence.get(
+                        "missing_tracking_issue_refs"
+                    ),
+                    "has_strict_corpus_blocker": checklist_evidence.get(
+                        "has_strict_corpus_blocker"
+                    ),
+                },
+            )
+        )
     blockers = [item.criterion_id for item in criteria if item.status == "FAIL"]
     status_text = "COMPLETE" if not blockers else "BLOCKED"
     return CompletionAudit(
@@ -652,6 +1464,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Optional strict 206-row corpus artifact to validate against the closeout contract.",
     )
     parser.add_argument(
+        "--prompt-closeout-checklist",
+        help="Optional prompt-to-artifact closeout checklist manifest.",
+    )
+    parser.add_argument(
+        "--source-row-candidate-inventory",
+        help="Optional explicit source-row candidate inventory manifest.",
+    )
+    parser.add_argument(
         "--require-complete",
         action="store_true",
         help="Exit non-zero unless every completion criterion passes.",
@@ -666,6 +1486,12 @@ def main(argv: list[str] | None = None) -> int:
         structured_id_triage=load_optional_json_file(args.structured_id_triage),
         row_corpus_discovery=load_optional_json_file(args.row_corpus_discovery),
         strict_row_corpus=load_optional_json_file(args.strict_row_corpus),
+        prompt_closeout_checklist=load_optional_json_file(
+            args.prompt_closeout_checklist
+        ),
+        source_row_candidate_inventory=load_optional_json_file(
+            args.source_row_candidate_inventory
+        ),
     )
     if args.format == "json":
         print(audit_to_json(audit))

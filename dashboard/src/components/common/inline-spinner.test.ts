@@ -7,6 +7,8 @@ import {
   inlineSpinnerClasses,
   inlineSpinnerSizeClass,
   inlineSpinnerToneClass,
+  normalizeInlineSpinnerAriaLabel,
+  summarizeInlineSpinner,
 } from './inline-spinner'
 
 describe('inlineSpinnerSizeClass (pure)', () => {
@@ -73,6 +75,9 @@ describe('InlineSpinner component', () => {
     expect(el.tagName).toBe('SPAN')
     expect(el.getAttribute('data-inline-spinner-size')).toBe('sm')
     expect(el.getAttribute('data-inline-spinner-tone')).toBe('accent')
+    expect(el.getAttribute('data-inline-spinner-has-semantic-label')).toBe('false')
+    expect(el.getAttribute('data-inline-spinner-has-custom-class')).toBe('false')
+    expect(el.getAttribute('data-inline-spinner-has-test-id')).toBe('false')
   })
 
   it('size + tone reflect in data attributes', () => {
@@ -93,22 +98,64 @@ describe('InlineSpinner component', () => {
     expect(el.getAttribute('role')).toBeNull()
   })
 
+  it('blank ariaLabel stays decorative', () => {
+    render(html`<${InlineSpinner} ariaLabel="   " />`, container)
+    const el = container.querySelector('[data-inline-spinner]') as HTMLElement
+    expect(el.getAttribute('aria-hidden')).toBe('true')
+    expect(el.getAttribute('role')).toBeNull()
+    expect(el.getAttribute('aria-label')).toBeNull()
+    expect(el.getAttribute('data-inline-spinner-has-semantic-label')).toBe('false')
+  })
+
   it('ariaLabel promotes to semantic: role="status" + no aria-hidden', () => {
     render(
-      html`<${InlineSpinner} ariaLabel="Loading tool metrics" />`,
+      html`<${InlineSpinner} ariaLabel="  Loading tool metrics  " />`,
       container,
     )
     const el = container.querySelector('[data-inline-spinner]')!
     expect(el.getAttribute('role')).toBe('status')
     expect(el.getAttribute('aria-label')).toBe('Loading tool metrics')
     expect(el.getAttribute('aria-hidden')).toBeNull()
+    expect(el.getAttribute('data-inline-spinner-has-semantic-label')).toBe('true')
+    expect(el.getAttribute('data-inline-spinner-aria-label-length')).toBe('20')
   })
 
   it('testId renders as data-testid', () => {
     render(
-      html`<${InlineSpinner} testId="refresh-spinner" />`,
+      html`<${InlineSpinner} class="mr-2" testId="refresh-spinner" />`,
       container,
     )
-    expect(container.querySelector('[data-testid="refresh-spinner"]')).toBeTruthy()
+    const el = container.querySelector('[data-testid="refresh-spinner"]')!
+    expect(el).toBeTruthy()
+    expect(el.getAttribute('data-inline-spinner-has-custom-class')).toBe('true')
+    expect(el.getAttribute('data-inline-spinner-has-test-id')).toBe('true')
+    expect(el.getAttribute('data-inline-spinner-class-length')).toBe('4')
+    expect(el.getAttribute('data-inline-spinner-test-id-length')).toBe('15')
+  })
+
+  it('normalizes aria labels for semantic use', () => {
+    expect(normalizeInlineSpinnerAriaLabel()).toBeUndefined()
+    expect(normalizeInlineSpinnerAriaLabel('')).toBeUndefined()
+    expect(normalizeInlineSpinnerAriaLabel('   ')).toBeUndefined()
+    expect(normalizeInlineSpinnerAriaLabel(' Loading ')).toBe('Loading')
+  })
+
+  it('summarizes inline spinner state', () => {
+    expect(summarizeInlineSpinner({
+      size: 'xs',
+      tone: 'muted',
+      className: 'mr-2',
+      ariaLabel: ' Loading ',
+      testId: 'sync-spinner',
+    })).toEqual({
+      size: 'xs',
+      tone: 'muted',
+      hasSemanticLabel: true,
+      hasCustomClass: true,
+      hasTestId: true,
+      ariaLabelLength: 7,
+      classNameLength: 4,
+      testIdLength: 12,
+    })
   })
 })

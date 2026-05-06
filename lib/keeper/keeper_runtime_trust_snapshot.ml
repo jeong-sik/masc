@@ -120,15 +120,119 @@ let terminal_reason_from_decision json =
         (json_string_opt_member "terminal_reason_code" json)
 
 let terminal_reason_from_receipt receipt =
-  match json_string_opt_member "terminal_reason_code" receipt with
+  let terminal_reason_code = json_string_opt_member "terminal_reason_code" receipt in
+  let operator_disposition =
+    json_string_opt_member "operator_disposition" receipt
+    |> Option.map String.lowercase_ascii
+  in
+  let operator_disposition_reason =
+    json_string_opt_member "operator_disposition_reason" receipt
+    |> Option.map String.lowercase_ascii
+  in
+  let tool_contract_result =
+    json_string_opt_member "tool_contract_result" receipt
+    |> Option.map String.lowercase_ascii
+  in
+  let receipt_requires_tool_attention =
+    match operator_disposition, operator_disposition_reason, tool_contract_result with
+    | Some "pause_human", Some "tool_required_unsatisfied", _
+    | _, Some "tool_required_unsatisfied", _
+    | _, _, Some "needs_execution_progress"
+    | _, _, Some "missing_required_tool_use"
+    | _, _, Some "passive_only"
+    | _, _, Some "violated" ->
+        true
+    | _ -> false
+  in
+  match terminal_reason_code with
+  | Some code when receipt_requires_tool_attention
+                   && (String.equal code "completed"
+                       || String.equal code "success") ->
+      Some
+        (Keeper_turn_terminal.of_code ~source:"execution_receipt"
+           "required_tool_use_unsatisfied")
   | Some code ->
       Some (Keeper_turn_terminal.of_code ~source:"execution_receipt" code)
+  | None when receipt_requires_tool_attention ->
+      Some
+        (Keeper_turn_terminal.of_code ~source:"execution_receipt"
+           "required_tool_use_unsatisfied")
   | None -> None
 
-let latest_terminal_reason_opt ~latest_decision ~latest_receipt =
+let terminal_reason_code_of_runtime_blocker_class = function
+  | "completion_contract_violation" | "tool_required_unsatisfied" ->
+      "required_tool_use_unsatisfied"
+  | "oas_timeout_budget" ->
+      "oas_timeout_budget"
+  | "turn_timeout" | "turn_timeout_after_queue_wait" | "stale_turn_timeout" ->
+      "turn_wall_clock_timeout"
+  | "ambiguous_post_commit_timeout" | "ambiguous_post_commit_failure" ->
+      "post_commit_ambiguous"
+  | "cascade_exhausted" | "no_tool_capable_provider"
+  | "provider_runtime_error" ->
+      "provider_error"
+  | _ ->
+      "unknown_error"
+
+let terminal_reason_from_runtime_blocker_fields runtime_blocker_fields =
+  match assoc_string_opt "runtime_blocker_class" runtime_blocker_fields with
+  | None -> None
+  | Some blocker_class ->
+      let code = terminal_reason_code_of_runtime_blocker_class blocker_class in
+      let summary = assoc_string_opt "runtime_blocker_summary" runtime_blocker_fields in
+      Some
+        (Keeper_turn_terminal.of_code ~source:"runtime_blocker" ?summary code)
+
+let receipt_ended_at_unix receipt =
+  match json_string_opt_member "ended_at" receipt with
+  | Some ended_at ->
+      let ts = Masc_domain.parse_iso8601 ~default_time:0.0 ended_at in
+      if ts > 0.0 then Some ts else None
+  | None -> None
+
+(* Receipt timestamps are serialized with lower precision than runtime
+   last-turn observations, so a tiny tolerance avoids treating same-turn
+   observations as newer blockers because of formatting jitter. *)
+let runtime_blocker_receipt_timestamp_epsilon_sec = 0.001
+
+let runtime_blocker_supersedes_receipt ~meta ~runtime_blocker_fields
+    latest_receipt =
+  match assoc_string_opt "runtime_blocker_class" runtime_blocker_fields with
+  | None -> false
+  | Some _ -> (
+      match latest_receipt with
+      | None -> true
+      | Some receipt -> (
+          match receipt_ended_at_unix receipt with
+          | Some receipt_ts ->
+              meta.runtime.usage.last_turn_ts
+              > receipt_ts +. runtime_blocker_receipt_timestamp_epsilon_sec
+          | None -> meta.runtime.usage.last_turn_ts > 0.0))
+
+let current_receipt_for_runtime_state ~meta ~runtime_blocker_fields
+    latest_receipt =
+  if runtime_blocker_supersedes_receipt ~meta ~runtime_blocker_fields
+       latest_receipt
+  then None
+  else latest_receipt
+
+let runtime_blocker_timeline_ts ~meta ~runtime_blocker_fields latest_receipt =
+  if
+    runtime_blocker_supersedes_receipt ~meta ~runtime_blocker_fields
+      latest_receipt
+    && meta.runtime.usage.last_turn_ts > 0.0
+  then meta.runtime.usage.last_turn_ts
+  else Time_compat.now ()
+
+let latest_terminal_reason_opt ~meta ~runtime_blocker_fields ~latest_decision
+    ~latest_receipt =
   match Option.bind latest_decision terminal_reason_from_decision with
   | Some _ as value -> value
-  | None -> Option.bind latest_receipt terminal_reason_from_receipt
+  | None ->
+      if runtime_blocker_supersedes_receipt ~meta ~runtime_blocker_fields
+           latest_receipt
+      then terminal_reason_from_runtime_blocker_fields runtime_blocker_fields
+      else Option.bind latest_receipt terminal_reason_from_receipt
 
 let severity_of_approval_event event decision =
   match event with
@@ -476,7 +580,7 @@ let receipt_timeline_event receipt =
 
 let blocker_timeline_event ?task_id ?(goal_ids = []) ?trace_id
     ?observed_at_unix ~ts_unix ~runtime_blocker_fields
-    ~next_human_action () =
+    ~next_human_action ?(observation_only = true) () =
   let blocker_class = assoc_string_opt "runtime_blocker_class" runtime_blocker_fields in
   let blocker_summary =
     assoc_string_opt "runtime_blocker_summary" runtime_blocker_fields
@@ -487,7 +591,7 @@ let blocker_timeline_event ?task_id ?(goal_ids = []) ?trace_id
     when String.trim summary <> "" ->
       Some
         (timeline_event_json ?trace_id ?task_id ~goal_ids ?next_human_action
-           ?observed_at_unix ~observation_only:true
+           ?observed_at_unix ~observation_only
            ~ts_unix ~kind:"runtime_blocker"
            ~title:"Runtime Blocker"
            ~summary
@@ -500,14 +604,14 @@ let blocker_timeline_event ?task_id ?(goal_ids = []) ?trace_id
     when String.trim summary <> "" ->
       Some
         (timeline_event_json ?trace_id ?task_id ~goal_ids ?next_human_action
-           ?observed_at_unix ~observation_only:true
+           ?observed_at_unix ~observation_only
            ~ts_unix ~kind:"runtime_blocker"
            ~title:"Runtime Blocker"
            ~summary ~severity:"warn" ())
   | Some blocker_class, None ->
       Some
         (timeline_event_json ?trace_id ?task_id ~goal_ids ?next_human_action
-           ?observed_at_unix ~observation_only:true
+           ?observed_at_unix ~observation_only
            ~ts_unix ~kind:"runtime_blocker"
            ~title:"Runtime Blocker"
            ~summary:blocker_class ~severity:"warn" ())
@@ -589,6 +693,20 @@ let effective_disposition_fields ~fallback_disposition ~fallback_reason
         fallback_reason,
         operator_disposition,
         operator_disposition_reason )
+
+let attention_reason_or_disposition ~needs_attention ~disposition_reason
+    attention_fields =
+  match assoc_string_opt "attention_reason" attention_fields with
+  | Some _ as value -> value
+  | None when needs_attention -> Some disposition_reason
+  | None -> None
+
+let next_human_action_or_terminal ~needs_attention ~latest_next_action
+    attention_fields =
+  match assoc_string_opt "next_human_action" attention_fields with
+  | Some _ as value -> value
+  | None when needs_attention -> latest_next_action
+  | None -> None
 
 let disposition_fields_json ~(config : Coord.config) ~(meta : keeper_meta) :
     Yojson.Safe.t =
@@ -891,7 +1009,14 @@ let execution_summary_json ~meta ~latest_receipt =
 let latest_causal_event_summary ~meta ~latest_decision ~latest_receipt
     ~latest_tool_call ~latest_approval_audit ~runtime_blocker_fields
     ~next_human_action =
-  let observed_at_unix = Time_compat.now () in
+  let observed_at_unix =
+    runtime_blocker_timeline_ts ~meta ~runtime_blocker_fields latest_receipt
+  in
+  let blocker_observation_only =
+    not
+      (runtime_blocker_supersedes_receipt ~meta ~runtime_blocker_fields
+         latest_receipt)
+  in
   let task_id = Keeper_runtime_contract.current_task_id_opt meta in
   let goal_ids = meta.active_goal_ids in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
@@ -903,7 +1028,8 @@ let latest_causal_event_summary ~meta ~latest_decision ~latest_receipt
     Option.bind latest_approval_audit approval_event_timeline_event;
     blocker_timeline_event ~ts_unix:observed_at_unix ~observed_at_unix
       ~runtime_blocker_fields ?task_id ~goal_ids
-      ~trace_id ~next_human_action ();
+      ~trace_id ~next_human_action
+      ~observation_only:blocker_observation_only ();
   ]
   |> List.filter_map Fun.id
   |> sort_timeline_events
@@ -921,8 +1047,19 @@ let summary_json ~(config : Coord.config) ~(meta : keeper_meta) =
     | json :: _ -> Some json
     | [] -> None
   in
+  let pending_approval_count =
+    Keeper_approval_queue.pending_count_for_keeper ~keeper_name:meta.name
+  in
+  let runtime_blocker_fields =
+    Keeper_status_bridge.runtime_blocker_fields_json config meta
+  in
+  let latest_receipt_for_runtime_state =
+    current_receipt_for_runtime_state ~meta ~runtime_blocker_fields
+      latest_receipt
+  in
   let latest_terminal_reason =
-    latest_terminal_reason_opt ~latest_decision ~latest_receipt
+    latest_terminal_reason_opt ~meta ~runtime_blocker_fields ~latest_decision
+      ~latest_receipt
   in
   let latest_terminal_reason_json =
     latest_terminal_reason
@@ -931,12 +1068,6 @@ let summary_json ~(config : Coord.config) ~(meta : keeper_meta) =
   in
   let latest_next_action =
     Option.bind latest_terminal_reason (fun reason -> reason.next_action)
-  in
-  let pending_approval_count =
-    Keeper_approval_queue.pending_count_for_keeper ~keeper_name:meta.name
-  in
-  let runtime_blocker_fields =
-    Keeper_status_bridge.runtime_blocker_fields_json config meta
   in
   let attention_fields =
     Keeper_status_bridge.attention_fields_json config meta
@@ -947,7 +1078,8 @@ let summary_json ~(config : Coord.config) ~(meta : keeper_meta) =
   let disposition, disposition_reason, operator_disposition,
       operator_disposition_reason =
     effective_disposition_fields ~fallback_disposition
-      ~fallback_reason:fallback_disposition_reason latest_receipt
+      ~fallback_reason:fallback_disposition_reason
+      latest_receipt_for_runtime_state
   in
   let needs_attention =
     assoc_bool_default "needs_attention" ~default:false attention_fields
@@ -955,10 +1087,12 @@ let summary_json ~(config : Coord.config) ~(meta : keeper_meta) =
     || String.equal disposition "Alert"
   in
   let attention_reason =
-    assoc_string_opt "attention_reason" attention_fields
+    attention_reason_or_disposition ~needs_attention ~disposition_reason
+      attention_fields
   in
   let next_human_action =
-    assoc_string_opt "next_human_action" attention_fields
+    next_human_action_or_terminal ~needs_attention ~latest_next_action
+      attention_fields
   in
   let execution_summary =
     execution_summary_json ~meta ~latest_receipt
@@ -1021,11 +1155,19 @@ let causal_timeline_json ~base_path ~meta ~latest_decision ~latest_receipt
     let task_id = Keeper_runtime_contract.current_task_id_opt meta in
     let goal_ids = meta.active_goal_ids in
     let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-    let observed_at_unix = Time_compat.now () in
+    let observed_at_unix =
+      runtime_blocker_timeline_ts ~meta ~runtime_blocker_fields latest_receipt
+    in
+    let blocker_observation_only =
+      not
+        (runtime_blocker_supersedes_receipt ~meta ~runtime_blocker_fields
+           latest_receipt)
+    in
     [
       blocker_timeline_event ~ts_unix:observed_at_unix ~observed_at_unix
         ~runtime_blocker_fields ?task_id ~goal_ids
-        ~trace_id ~next_human_action ()
+        ~trace_id ~next_human_action
+        ~observation_only:blocker_observation_only ()
     ]
     |> List.filter_map Fun.id
   in
@@ -1071,17 +1213,6 @@ let snapshot_json ~(config : Coord.config) ~(meta : keeper_meta) =
   let latest_decision = latest_decision_json ~config ~keeper_name:meta.name in
   let latest_tool_call = latest_tool_call_json ~keeper_name:meta.name in
   let latest_receipt = latest_receipt_json ~config ~keeper_name:meta.name in
-  let latest_terminal_reason =
-    latest_terminal_reason_opt ~latest_decision ~latest_receipt
-  in
-  let latest_terminal_reason_json =
-    latest_terminal_reason
-    |> Option.map Keeper_turn_terminal.to_json
-    |> Option.value ~default:`Null
-  in
-  let latest_next_action =
-    Option.bind latest_terminal_reason (fun reason -> reason.next_action)
-  in
   let latest_approval_audit =
     match
       Keeper_approval_queue.read_recent_audit ~base_path:config.base_path
@@ -1098,6 +1229,22 @@ let snapshot_json ~(config : Coord.config) ~(meta : keeper_meta) =
   in
   let runtime_blocker_fields =
     Keeper_status_bridge.runtime_blocker_fields_json config meta
+  in
+  let latest_receipt_for_runtime_state =
+    current_receipt_for_runtime_state ~meta ~runtime_blocker_fields
+      latest_receipt
+  in
+  let latest_terminal_reason =
+    latest_terminal_reason_opt ~meta ~runtime_blocker_fields ~latest_decision
+      ~latest_receipt
+  in
+  let latest_terminal_reason_json =
+    latest_terminal_reason
+    |> Option.map Keeper_turn_terminal.to_json
+    |> Option.value ~default:`Null
+  in
+  let latest_next_action =
+    Option.bind latest_terminal_reason (fun reason -> reason.next_action)
   in
   let attention_fields =
     Keeper_status_bridge.attention_fields_json config meta
@@ -1125,7 +1272,8 @@ let snapshot_json ~(config : Coord.config) ~(meta : keeper_meta) =
   let disposition, disposition_reason, operator_disposition,
       operator_disposition_reason =
     effective_disposition_fields ~fallback_disposition
-      ~fallback_reason:fallback_disposition_reason latest_receipt
+      ~fallback_reason:fallback_disposition_reason
+      latest_receipt_for_runtime_state
   in
   let needs_attention =
     assoc_bool_default "needs_attention" ~default:false attention_fields
@@ -1133,10 +1281,12 @@ let snapshot_json ~(config : Coord.config) ~(meta : keeper_meta) =
     || String.equal disposition "Alert"
   in
   let attention_reason =
-    assoc_string_opt "attention_reason" attention_fields
+    attention_reason_or_disposition ~needs_attention ~disposition_reason
+      attention_fields
   in
   let next_human_action =
-    assoc_string_opt "next_human_action" attention_fields
+    next_human_action_or_terminal ~needs_attention ~latest_next_action
+      attention_fields
   in
   let approval_state =
     approval_state_json ~pending_approval_count ~pending_approvals

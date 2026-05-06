@@ -276,6 +276,7 @@ let test_review_blocker_metrics_registered () =
   check_registered Prometheus.metric_auth_credential_token_rotated;
   check_registered Prometheus.metric_telemetry_coverage_gap;
   check_registered Prometheus.metric_telemetry_unified_source_read_failures;
+  check_registered Prometheus.metric_tool_assignment_telemetry_failures;
   check_registered Prometheus.metric_coord_telemetry_drop;
   check_registered Prometheus.metric_coord_claim_post_provision_failures
 
@@ -297,6 +298,15 @@ let test_bg_task_sidecar_metric_registered () =
   check bool "has bg task sidecar TYPE" true
     (text_has_literal text
        ("# TYPE " ^ Prometheus.metric_bg_task_sidecar_failures ^ " counter"))
+
+let test_workspace_route_metric_registered () =
+  let text = Prometheus.to_prometheus_text () in
+  check bool "has workspace route failure HELP" true
+    (text_has_literal text
+       ("# HELP " ^ Prometheus.metric_workspace_route_failures ^ " "));
+  check bool "has workspace route failure TYPE" true
+    (text_has_literal text
+       ("# TYPE " ^ Prometheus.metric_workspace_route_failures ^ " counter"))
 
 let test_histogram_exported_as_summary () =
   let name = "test_hist_export_fmt" in
@@ -473,6 +483,8 @@ let () =
         test_distributed_lock_metric_registered;
       test_case "bg task sidecar metric registered" `Quick
         test_bg_task_sidecar_metric_registered;
+      test_case "workspace route metric registered" `Quick
+        test_workspace_route_metric_registered;
       test_case "histogram exported as summary with _sum/_count"
         `Quick test_histogram_exported_as_summary;
     ];

@@ -130,6 +130,17 @@ let emit_fallback_triggered ~kind ~detail =
     the AfterTurn hook later runs.  Provides redundant latency
     observability so a broken hook does not blank out the dashboard. *)
 let request_latency_metric = Prometheus.metric_llm_provider_request_latency
+let request_latency_clamped_metric =
+  Prometheus.metric_llm_provider_request_latency_clamped
+
+let request_latency_seconds ~latency_ms =
+  let latency_ms = Stdlib.max 1 latency_ms in
+  Float.of_int latency_ms /. 1000.0
+
+let emit_request_latency_clamped ~model_id ~reason =
+  Prometheus.inc_counter request_latency_clamped_metric
+    ~labels:[("model", model_id); ("reason", reason)]
+    ()
 
 (** Emit a single latency observation to the Prometheus histogram.
 
@@ -138,7 +149,9 @@ let request_latency_metric = Prometheus.metric_llm_provider_request_latency
     same histogram without duplicating the label shape.  This is the
     single source of truth for the label key names. *)
 let emit_request_latency ~model_id ~latency_ms =
-  let seconds = Float.of_int latency_ms /. 1000.0 in
+  if latency_ms <= 0 then
+    emit_request_latency_clamped ~model_id ~reason:"non_positive_latency_ms";
+  let seconds = request_latency_seconds ~latency_ms in
   Prometheus.observe_histogram request_latency_metric
     ~labels:[("model", model_id)] seconds
 

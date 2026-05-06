@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
-import { EventStream } from './event-stream'
+import {
+  EventStream,
+  getVisibleStreamEvents,
+  summarizeEventStream,
+} from './event-stream'
 
 const baseEvents = [
   { id: 'e1', timestamp: new Date('2024-01-01T09:30:00').getTime(), level: 'info' as const, message: 'started', source: 'agent-a' },
@@ -26,7 +30,8 @@ describe('EventStream', () => {
     const container = document.createElement('div')
     render(h(EventStream, { events: [] }), container)
     const el = container.querySelector('[role="log"]') as HTMLElement
-    expect(el?.getAttribute('aria-label')).toBe('이벤트 스트림')
+    expect(el?.getAttribute('aria-label')).toContain('이벤트 스트림')
+    expect(el?.getAttribute('aria-label')).toContain('이벤트 0개')
   })
 
   it('renders empty state', () => {
@@ -41,6 +46,9 @@ describe('EventStream', () => {
     expect(container.textContent).toContain('started')
     expect(container.textContent).toContain('slow')
     expect(container.textContent).toContain('failed')
+    expect(container.textContent).toContain('전체')
+    expect(container.textContent).toContain('표시')
+    expect(container.textContent).toContain('에러')
   })
 
   it('renders source labels', () => {
@@ -81,6 +89,10 @@ describe('EventStream', () => {
     }))
     render(h(EventStream, { events: many, maxItems: 5 }), container)
     expect(container.querySelectorAll('[role="listitem"]').length).toBe(5)
+    const root = container.querySelector('[data-event-stream]') as HTMLElement
+    expect(root.dataset.eventStreamTotalCount).toBe('10')
+    expect(root.dataset.eventStreamVisibleCount).toBe('5')
+    expect(root.dataset.eventStreamHiddenCount).toBe('5')
   })
 
   it('applies testId', () => {
@@ -95,5 +107,69 @@ describe('EventStream', () => {
     expect(container.textContent).toContain('정보')
     expect(container.textContent).toContain('경고')
     expect(container.textContent).toContain('에러')
+  })
+
+  it('exposes stream summary metadata', () => {
+    const container = document.createElement('div')
+    render(h(EventStream, { events: baseEvents }), container)
+    const root = container.querySelector('[data-event-stream]') as HTMLElement
+    const latest = baseEvents[2]!
+
+    expect(root.dataset.eventStreamStatus).toBe('error')
+    expect(root.dataset.eventStreamTotalCount).toBe('3')
+    expect(root.dataset.eventStreamVisibleCount).toBe('3')
+    expect(root.dataset.eventStreamInfoCount).toBe('1')
+    expect(root.dataset.eventStreamWarnCount).toBe('1')
+    expect(root.dataset.eventStreamErrorCount).toBe('1')
+    expect(root.dataset.eventStreamLatestTimestamp).toBe(String(latest.timestamp))
+  })
+
+  it('exposes event row metadata and datetime', () => {
+    const container = document.createElement('div')
+    render(h(EventStream, { events: baseEvents }), container)
+    const item = container.querySelector('[data-stream-event-id="e3"]') as HTMLElement
+    const time = item.querySelector('time') as HTMLTimeElement
+    const latest = baseEvents[2]!
+
+    expect(item.dataset.streamEventLevel).toBe('error')
+    expect(item.dataset.streamEventVisibleIndex).toBe('0')
+    expect(item.dataset.streamEventTimestamp).toBe(String(latest.timestamp))
+    expect(time.dateTime).toBe(new Date(latest.timestamp).toISOString())
+  })
+
+  it('summarizes visible event status', () => {
+    expect(summarizeEventStream([], 100)).toMatchObject({
+      totalCount: 0,
+      visibleCount: 0,
+      status: 'empty',
+    })
+    expect(summarizeEventStream(baseEvents.slice(0, 1), 100)).toMatchObject({
+      visibleCount: 1,
+      infoCount: 1,
+      status: 'ok',
+    })
+    expect(summarizeEventStream(baseEvents.slice(0, 2), 100)).toMatchObject({
+      visibleCount: 2,
+      warnCount: 1,
+      status: 'warning',
+    })
+    expect(summarizeEventStream(baseEvents, 2)).toMatchObject({
+      totalCount: 3,
+      visibleCount: 2,
+      hiddenCount: 1,
+      status: 'error',
+    })
+  })
+
+  it('treats maxItems zero as an empty visible window', () => {
+    const container = document.createElement('div')
+    render(h(EventStream, { events: baseEvents, maxItems: 0 }), container)
+    expect(container.querySelectorAll('[role="listitem"]').length).toBe(0)
+    expect(getVisibleStreamEvents(baseEvents, 0)).toEqual([])
+    const root = container.querySelector('[data-event-stream]') as HTMLElement
+    expect(root.dataset.eventStreamTotalCount).toBe('3')
+    expect(root.dataset.eventStreamVisibleCount).toBe('0')
+    expect(root.dataset.eventStreamHiddenCount).toBe('3')
+    expect(root.dataset.eventStreamStatus).toBe('empty')
   })
 })

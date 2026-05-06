@@ -611,14 +611,121 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertFalse(string_report["validated"])
         self.assertIn("expected_findings_total_must_be_int", string_report["errors"])
 
-    def test_strict_row_corpus_can_validate_without_catalog_total(self) -> None:
+    def test_strict_row_corpus_rejects_partial_catalog_by_default(self) -> None:
         report = orient_goal_loop_logs.validate_strict_row_corpus(
             synthetic_strict_row_corpus(),
             catalog={},
         )
 
+        self.assertFalse(report["validated"])
+        self.assertIn("catalog_external_sources_must_be_list", report["errors"])
+        self.assertFalse(report["catalog_source_binding_valid"])
+
+    def test_strict_row_corpus_can_skip_catalog_binding_explicitly(self) -> None:
+        report = orient_goal_loop_logs.validate_strict_row_corpus(
+            synthetic_strict_row_corpus(),
+            catalog={},
+            require_catalog_sources=False,
+        )
+
         self.assertTrue(report["validated"])
         self.assertNotIn("expected_findings_total_mismatch", report["errors"])
+        self.assertFalse(report["catalog_source_binding_required"])
+
+    def test_catalog_with_strict_row_corpus_allows_standalone_corpus(self) -> None:
+        catalog = orient_goal_loop_logs.catalog_with_strict_row_corpus(
+            None,
+            synthetic_strict_row_corpus(),
+        )
+
+        assert catalog is not None
+        report = catalog["strict_row_corpus"]
+        self.assertTrue(report["validated"])
+        self.assertFalse(report["catalog_source_binding_required"])
+        self.assertTrue(report["catalog_source_binding_valid"])
+
+    def test_strict_row_corpus_rejects_sources_when_catalog_manifest_is_empty(
+        self,
+    ) -> None:
+        report = orient_goal_loop_logs.validate_strict_row_corpus(
+            synthetic_strict_row_corpus(),
+            catalog={"external_sources": []},
+        )
+
+        self.assertFalse(report["validated"])
+        self.assertIn(
+            "source_paths_must_match_catalog_external_sources",
+            report["errors"],
+        )
+        self.assertEqual(report["catalog_external_sources_total"], 0)
+        self.assertFalse(report["catalog_source_binding_valid"])
+
+    def test_strict_row_corpus_binds_sources_to_catalog_manifest(self) -> None:
+        catalog = orient_goal_loop_logs.load_audit_catalog_input(
+            str(FIXTURE_DIR / "audit-corpus.external-claim.json")
+        )
+        assert catalog is not None
+        corpus = synthetic_strict_row_corpus()
+        findings = corpus["findings"]
+        assert isinstance(findings, list)
+        unknown_source = findings[0]
+        out_of_bounds_source = findings[1]
+        assert isinstance(unknown_source, dict)
+        assert isinstance(out_of_bounds_source, dict)
+        unknown_source["source"] = {
+            "path": "prompt_corpus/GOAL_LOOP/not-in-manifest.md",
+            "line_refs": [1],
+        }
+        out_of_bounds_source["source"] = {
+            "path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+            "line_refs": [607],
+        }
+
+        report = orient_goal_loop_logs.validate_strict_row_corpus(
+            corpus,
+            catalog=catalog,
+        )
+
+        self.assertFalse(report["validated"])
+        self.assertIn(
+            "source_paths_must_match_catalog_external_sources",
+            report["errors"],
+        )
+        self.assertIn(
+            "source_line_refs_must_be_within_catalog_line_count",
+            report["errors"],
+        )
+        self.assertEqual(report["catalog_external_sources_total"], 12)
+        self.assertFalse(report["catalog_source_binding_valid"])
+        self.assertEqual(
+            report["invalid_catalog_source_path_values"][0]["path"],
+            "prompt_corpus/GOAL_LOOP/not-in-manifest.md",
+        )
+        self.assertEqual(
+            report["invalid_catalog_line_ref_values"][0]["line_count"],
+            606,
+        )
+
+    def test_strict_row_corpus_rejects_empty_catalog_source_manifest(self) -> None:
+        corpus = synthetic_strict_row_corpus()
+        catalog = {
+            "catalog_id": "goal-loop-206-audit-external-claim-2026-05-05",
+            "expected_findings_total": 206,
+            "external_sources": [],
+        }
+
+        report = orient_goal_loop_logs.validate_strict_row_corpus(
+            corpus,
+            catalog=catalog,
+        )
+
+        self.assertFalse(report["validated"])
+        self.assertIn(
+            "source_paths_must_match_catalog_external_sources",
+            report["errors"],
+        )
+        self.assertEqual(report["catalog_external_sources_total"], 0)
+        self.assertFalse(report["catalog_source_binding_valid"])
 
     def test_orient_catalog_validates_source_identity_hash_and_line_count(self) -> None:
         content = "206건 감사 결과\nR-FATAL-1\n"
@@ -1186,6 +1293,60 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         )
         self.assertIn("path_policy_valid: True", result.stdout)
 
+    def test_validate_strict_row_corpus_cli_prints_catalog_value_errors(
+        self,
+    ) -> None:
+        catalog = orient_goal_loop_logs.load_audit_catalog_input(
+            str(FIXTURE_DIR / "audit-corpus.external-claim.json")
+        )
+        assert catalog is not None
+        corpus = synthetic_strict_row_corpus()
+        findings = corpus["findings"]
+        assert isinstance(findings, list)
+        unknown_source = findings[0]
+        out_of_bounds_source = findings[1]
+        assert isinstance(unknown_source, dict)
+        assert isinstance(out_of_bounds_source, dict)
+        unknown_source["source"] = {
+            "path": "prompt_corpus/GOAL_LOOP/not-in-manifest.md",
+            "line_refs": [1],
+        }
+        out_of_bounds_source["source"] = {
+            "path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+            "line_refs": [607],
+        }
+
+        with tempfile.TemporaryDirectory() as raw_dir:
+            root = Path(raw_dir)
+            catalog_path = root / "catalog.json"
+            corpus_path = root / "strict-row-corpus.json"
+            catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+            corpus_path.write_text(json.dumps(corpus), encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(VALIDATE_STRICT_CORPUS_SCRIPT_PATH),
+                    str(corpus_path),
+                    "--audit-catalog",
+                    str(catalog_path),
+                    "--format",
+                    "text",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("invalid_catalog_source_path_rows: ROW-001", result.stdout)
+        self.assertIn(
+            "path='prompt_corpus/GOAL_LOOP/not-in-manifest.md'", result.stdout
+        )
+        self.assertIn("invalid_catalog_line_ref_rows: ROW-002", result.stdout)
+        self.assertIn("line_refs=[607] line_count=606", result.stdout)
+
     def test_validate_strict_row_corpus_cli_rejects_invalid_corpus(self) -> None:
         catalog = orient_goal_loop_logs.load_audit_catalog_input(
             str(FIXTURE_DIR / "audit-corpus.external-claim.json")
@@ -1234,6 +1395,41 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertIn(
             "source_paths_must_be_logical_prompt_corpus_paths", report["errors"]
         )
+
+    def test_validate_strict_row_corpus_cli_rejects_source_row_inventory(
+        self,
+    ) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(VALIDATE_STRICT_CORPUS_SCRIPT_PATH),
+                str(FIXTURE_DIR / "source-row-candidate-inventory.external-claim.json"),
+                "--audit-catalog",
+                str(FIXTURE_DIR / "audit-corpus.external-claim.json"),
+                "--require-valid",
+                "--format",
+                "json",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1)
+        report = json.loads(result.stdout)
+        self.assertFalse(report["validated"])
+        self.assertEqual(report["corpus_status"], "INCOMPLETE")
+        self.assertEqual(report["row_count"], 0)
+        self.assertTrue(report["looks_like_source_row_candidate_inventory"])
+        self.assertIn(
+            "source_row_candidate_inventory_is_not_strict_corpus",
+            report["errors"],
+        )
+        self.assertIn("corpus_id_missing", report["errors"])
+        self.assertIn("findings_must_be_list", report["errors"])
+        self.assertIn("findings_count_mismatch", report["errors"])
+        self.assertIn("status_must_be_COMPLETE", report["errors"])
 
     def test_decide_prioritizes_p0_actions_from_orient_json(self) -> None:
         report = decide_goal_loop_findings.decide_orient(

@@ -559,6 +559,26 @@ let repair_container_worktree_gitdirs ~host_root ~container_root =
            | Sys_error _ | End_of_file -> repaired)
        0
 
+let prepare_container_worktree_gitdirs ~host_root ~container_root =
+  container_worktree_gitdir_candidates ~host_root
+  |> List.fold_left
+       (fun prepared path ->
+         if not (is_regular_file path) then prepared
+         else
+           try
+             let before = read_file path in
+             let after =
+               replace_all ~needle:host_root ~replacement:container_root before
+             in
+             if String.equal before after then prepared
+             else begin
+               write_file path after;
+               prepared + 1
+             end
+           with
+           | Sys_error _ | End_of_file -> prepared)
+       0
+
 (* ── Docker invocation ─────────────────────────────────── *)
 
 type docker_shell_result =
@@ -657,6 +677,25 @@ let run_docker_shell_command_with_status
       let container_name = keeper_sandbox_container_name meta in
       let container_root = keeper_private_container_root meta in
       let container_cwd = docker_private_workspace_cwd ~config ~meta cwd in
+      let prepared_gitdirs =
+        if git_creds_enabled && cmd_targets_git_or_gh cmd then
+          prepare_container_worktree_gitdirs ~host_root ~container_root
+        else 0
+      in
+      let restore_gitdirs () =
+        if git_creds_enabled then
+          let restored =
+            repair_container_worktree_gitdirs ~host_root ~container_root
+          in
+          if restored > 0 then
+            Log.Keeper.info
+              "%s: restored %d docker worktree gitdir path(s) under %s"
+              meta.name restored host_root
+      in
+      if prepared_gitdirs > 0 then
+        Log.Keeper.info
+          "%s: prepared %d docker worktree gitdir path(s) under %s"
+          meta.name prepared_gitdirs host_root;
       let uid = Unix.getuid () in
       let gid = Unix.getgid () in
       match
@@ -750,8 +789,8 @@ let run_docker_shell_command_with_status
       in
       (try
          let status, output =
-           Process_eio.run_argv_with_status
-             ~env:(Unix.environment ())
+           Fun.protect ~finally:restore_gitdirs @@ fun () ->
+           Process_eio.run_argv_with_status ~env:(Unix.environment ())
              ~cwd:(Sys.getcwd ()) ~timeout_sec argv
          in
          if status <> Unix.WEXITED 0 then

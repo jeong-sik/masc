@@ -666,6 +666,22 @@ let handle_code_shell ctx args =
                  (false, Printf.sprintf "Command failed: %s" (truncate_output output)))
 
 (* Handler: masc_code_git — Git operations *)
+let code_git_route_fields (ctx : context) =
+  let sandbox_profile, route_via =
+    if
+      Coord_worktree.keeper_uses_docker_sandbox
+        ~config:ctx.config ~agent_name:ctx.agent_name
+    then
+      ("docker", "brokered")
+    else
+      ("local", "host")
+  in
+  [
+    ("sandbox_profile", `String sandbox_profile);
+    ("via", `String route_via);
+    ("route_via", `String route_via);
+  ]
+
 let handle_code_git ctx args =
   let action = get_string args "action" "" in
   let git_args = match args with
@@ -722,14 +738,18 @@ let handle_code_git ctx args =
           in
           match Process_eio.run_argv_with_status ~timeout_sec:timeout cmd with
           | Unix.WEXITED code, output ->
-            let response = `Assoc [
-              ("status", `String (if code = 0 then "ok" else "error"));
-              ("exit_code", `Int code);
-              ("output", `String (truncate_output output));
-              ("action", `String "clone");
-              ("url", `String url);
-              ("agent", `String ctx.agent_name);
-            ] in
+            let response =
+              `Assoc
+                ([
+                   ("status", `String (if code = 0 then "ok" else "error"));
+                   ("exit_code", `Int code);
+                   ("output", `String (truncate_output output));
+                   ("action", `String "clone");
+                   ("url", `String url);
+                   ("agent", `String ctx.agent_name);
+                 ]
+                 @ code_git_route_fields ctx)
+            in
             (code = 0, Yojson.Safe.pretty_to_string response)
           | _, output ->
             (false, Printf.sprintf "Git clone failed: %s" (truncate_output output))
@@ -772,13 +792,17 @@ let handle_code_git ctx args =
         in
         match Process_eio.run_argv_with_status ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ()) ?env:env_opt cmd with
         | Unix.WEXITED code, output ->
-          let response = `Assoc [
-            ("status", `String (if code = 0 then "ok" else "error"));
-            ("exit_code", `Int code);
-            ("output", `String (truncate_output output));
-            ("action", `String action);
-            ("agent", `String ctx.agent_name);
-          ] in
+          let response =
+            `Assoc
+              ([
+                 ("status", `String (if code = 0 then "ok" else "error"));
+                 ("exit_code", `Int code);
+                 ("output", `String (truncate_output output));
+                 ("action", `String action);
+                 ("agent", `String ctx.agent_name);
+               ]
+               @ code_git_route_fields ctx)
+          in
           (code = 0, Yojson.Safe.pretty_to_string response)
         | _, output ->
           (false, Printf.sprintf "Git command failed: %s" (truncate_output output))

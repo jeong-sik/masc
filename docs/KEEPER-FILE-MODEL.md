@@ -143,7 +143,7 @@ persona_name = "analyst"
 | `tool_preset` | Optional | Deployment-specific policy override | Only when intentionally overriding persona default. |
 | `github_identity` | Optional | Bound GitHub CLI identity bundle | Resolves to `.masc/github-identities/<identity>/gh` for keeper-scoped `gh` auth. Required when `MASC_KEEPER_SANDBOX_HARD_MODE=true`. |
 | `git_identity_mode` | Optional | Commit identity policy | `keeper_alias` keeps git author separate from GitHub auth; `github_identity` is reserved for future explicit coupling. |
-| `active_goal_ids` | Optional | Goal-scoped claim filter | When set, `keeper_task_claim` prefers tasks linked to these goals, then falls back to all claimable tasks if the scoped pool has no task claimable with the keeper's current capabilities. |
+| `active_goal_ids` | Optional | Goal-scoped claim filter | When set, `keeper_task_claim` claims only tasks linked to these goals. If the scoped pool has no task claimable with the keeper's current capabilities, the claim stops; only auto-repaired keeper-purpose goals may fall back to all claimable tasks. |
 
 ### Additional supported overlay fields
 

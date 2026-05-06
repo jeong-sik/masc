@@ -15,6 +15,25 @@ from orient_goal_loop_logs import (
 )
 
 
+def format_catalog_value_errors(values: list[dict[str, Any]]) -> str:
+    parts: list[str] = []
+    for item in values:
+        row = item.get("row")
+        path = item.get("path")
+        error = item.get("error")
+        line_refs = item.get("line_refs")
+        line_count = item.get("line_count")
+        detail = f"{row}: path={path!r}"
+        if line_refs is not None:
+            detail += f" line_refs={line_refs!r}"
+        if line_count is not None:
+            detail += f" line_count={line_count!r}"
+        if error is not None:
+            detail += f" error={error}"
+        parts.append(detail)
+    return "; ".join(parts)
+
+
 def report_to_text(report: dict[str, Any]) -> str:
     status = "VALID" if report["validated"] else "INVALID"
     lines = [
@@ -39,6 +58,26 @@ def report_to_text(report: dict[str, Any]) -> str:
         )
     if report["invalid_line_refs"]:
         lines.append("invalid_line_refs: " + ", ".join(report["invalid_line_refs"]))
+    if report.get("invalid_catalog_source_paths"):
+        lines.append(
+            "invalid_catalog_source_path_rows: "
+            + ", ".join(report["invalid_catalog_source_paths"])
+        )
+    if report.get("invalid_catalog_source_path_values"):
+        lines.append(
+            "invalid_catalog_source_path_values: "
+            + format_catalog_value_errors(report["invalid_catalog_source_path_values"])
+        )
+    if report.get("invalid_catalog_line_refs"):
+        lines.append(
+            "invalid_catalog_line_ref_rows: "
+            + ", ".join(report["invalid_catalog_line_refs"])
+        )
+    if report.get("invalid_catalog_line_ref_values"):
+        lines.append(
+            "invalid_catalog_line_ref_values: "
+            + format_catalog_value_errors(report["invalid_catalog_line_ref_values"])
+        )
     if report["invalid_replay_expectations"]:
         lines.append(
             "invalid_replay_expectations: "

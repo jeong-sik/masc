@@ -284,6 +284,60 @@ let tool_exec_result_markers ~(input : Yojson.Safe.t) ~(output : string)
   in
   List.rev markers
 
+let keeper_tool_call_event_json ~keeper_name ~tool_name ~duration_ms ~success
+    ?error_text ?(extra_fields = []) ~ts () =
+  let fields =
+    [
+      ("type", `String "keeper_tool_call");
+      ("name", `String keeper_name);
+      ("tool_name", `String tool_name);
+      ("duration_ms", `Int duration_ms);
+      ("success", `Bool success);
+      ("ts_unix", `Float ts);
+    ]
+  in
+  let fields =
+    match error_text with
+    | Some error_text -> fields @ [ ("error_text", `String error_text) ]
+    | None -> fields
+  in
+  `Assoc (fields @ extra_fields)
+;;
+
+let broadcast_keeper_tool_call_event ~keeper_name ~tool_name ~duration_ms
+    ~success ?error_text ?(extra_fields = []) ~site ~ts () =
+  try
+    Sse.broadcast
+      (keeper_tool_call_event_json ~keeper_name ~tool_name ~duration_ms
+         ~success ?error_text ~extra_fields ~ts ())
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_sse_broadcast_failures
+        ~labels:[("keeper", keeper_name)]
+        ();
+      Log.Keeper.warn
+        "keeper tool-call SSE broadcast failed: keeper=%s tool=%s site=%s err=%s"
+        keeper_name tool_name site (Printexc.to_string exn)
+;;
+
+let append_tool_exec_decision_log ~config ~keeper_name ~site entry =
+  try
+    Keeper_types_support.append_jsonl_line
+      (Keeper_types_support.keeper_decision_log_path config keeper_name)
+      entry
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_decision_audit_flush_failures
+        ~labels:[("keeper", keeper_name)]
+        ();
+      Log.Keeper.warn
+        "keeper tool execution decision-log append failed: keeper=%s site=%s err=%s"
+        keeper_name site (Printexc.to_string exn)
+
 (** RFC-0006 Phase A.2: build the per-tool handler closure.
 
     Extracted from the original anonymous closure inside [make_tools] so
@@ -372,17 +426,9 @@ let make_keeper_tool_handler
             String_util.utf8_safe ~max_bytes:(sse_error_preview_max_chars + 3) ~suffix:"..." s |> String_util.to_string
           in
           let ts = Time_compat.now () in
-          (try Sse.broadcast
-            (`Assoc [
-              ("type", `String "keeper_tool_call");
-              ("name", `String meta.name);
-              ("tool_name", `String name);
-              ("duration_ms", `Int duration_ms);
-              ("success", `Bool false);
-              ("error_text", `String detail);
-              ("ts_unix", `Float ts);
-            ])
-           with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+          broadcast_keeper_tool_call_event
+            ~keeper_name:meta.name ~tool_name:name ~duration_ms
+            ~success:false ~error_text:detail ~site:"error_result" ~ts ();
           Prometheus.inc_counter
             Prometheus.metric_keeper_tools_oas_failures
             ~labels:[("tool", name); ("site", "error_result")]
@@ -393,20 +439,18 @@ let make_keeper_tool_handler
           let normalized_error =
             normalize_tool_result ~success:false raw_result
           in
-          (try
-            Keeper_types_support.append_jsonl_line
-              (Keeper_types_support.keeper_decision_log_path config meta.name)
-              (`Assoc [
-                "ts_unix", `Float ts;
-                "event", `String "tool_exec";
-                "keeper_name", `String meta.name;
-                "tool", `String name;
-                "duration_ms", `Int duration_ms;
-                "result_bytes", `Int (String.length normalized_error);
-                "ok", `Bool false;
-                "error_preview", `String detail;
-              ])
-          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+          append_tool_exec_decision_log ~config ~keeper_name:meta.name
+            ~site:"error_result"
+            (`Assoc [
+              "ts_unix", `Float ts;
+              "event", `String "tool_exec";
+              "keeper_name", `String meta.name;
+              "tool", `String name;
+              "duration_ms", `Int duration_ms;
+              "result_bytes", `Int (String.length normalized_error);
+              "ok", `Bool false;
+              "error_preview", `String detail;
+            ]);
           Keeper_tool_call_log.set_truncation_info
             ~keeper_name:meta.name
             ~original_bytes:(String.length normalized_error) ();
@@ -421,16 +465,9 @@ let make_keeper_tool_handler
               legacy_message = raw_result } in
            ignore (Tool_dispatch.run_post_hooks tr));
           let ts = Time_compat.now () in
-          (try Sse.broadcast
-            (`Assoc [
-              ("type", `String "keeper_tool_call");
-              ("name", `String meta.name);
-              ("tool_name", `String name);
-              ("duration_ms", `Int duration_ms);
-              ("success", `Bool true);
-              ("ts_unix", `Float ts);
-            ])
-           with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+          broadcast_keeper_tool_call_event
+            ~keeper_name:meta.name ~tool_name:name ~duration_ms
+            ~success:true ~site:"success" ~ts ();
           (* Notify session callback (e.g., mark_used for discovered tools) *)
           (match on_tool_called with Some f -> f name | None -> ());
           (* PR#814 Gap 1: Capture git status delta after successful tool execution.
@@ -481,21 +518,19 @@ let make_keeper_tool_handler
           if was_truncated then
             Log.Keeper.info "tool %s output truncated: %d -> %d chars"
               name original_len (String.length truncated_result);
-          (try
-            Keeper_types_support.append_jsonl_line
-              (Keeper_types_support.keeper_decision_log_path config meta.name)
-              (`Assoc ([
-                "ts_unix", `Float ts;
-                "event", `String "tool_exec";
-                "keeper_name", `String meta.name;
-                "tool", `String name;
-                "duration_ms", `Int duration_ms;
-                "result_bytes", `Int original_len;
-                "ok", `Bool true;
-              ] @ result_marker_fields @ (if was_truncated then
-                ["truncated_to", `Int (String.length truncated_result)]
-              else [])))
-          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+          append_tool_exec_decision_log ~config ~keeper_name:meta.name
+            ~site:"success"
+            (`Assoc ([
+              "ts_unix", `Float ts;
+              "event", `String "tool_exec";
+              "keeper_name", `String meta.name;
+              "tool", `String name;
+              "duration_ms", `Int duration_ms;
+              "result_bytes", `Int original_len;
+              "ok", `Bool true;
+            ] @ result_marker_fields @ (if was_truncated then
+              ["truncated_to", `Int (String.length truncated_result)]
+            else [])));
           (* Publish truncation info for OAS hook's tool_call_log *)
           Keeper_tool_call_log.set_truncation_info
             ~keeper_name:meta.name
@@ -542,25 +577,18 @@ let make_keeper_tool_handler
         Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:name ~success:false;
         !Keeper_exec_tools.on_keeper_tool_call ~tool_name:name ~success:false ~duration_ms;
         (* Tool-call observability via OAS Event_bus. See above. *)
-        (try Sse.broadcast
-          (`Assoc ([
-            ("type", `String "keeper_tool_call");
-            ("name", `String meta.name);
-            ("tool_name", `String name);
-            ("duration_ms", `Int duration_ms);
-            ("success", `Bool false);
-            ("error_text", `String error_text);
-            ("ts_unix", `Float ts);
-          ]
-          @
-          if is_edeadlk then
-            [
-              ( "error_class",
-                `String transient_mutex_contention_error_class );
-              ("recoverable", `Bool true);
-            ]
-          else []))
-         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+        broadcast_keeper_tool_call_event
+          ~keeper_name:meta.name ~tool_name:name ~duration_ms
+          ~success:false ~error_text
+          ~extra_fields:
+            (if is_edeadlk then
+               [
+                 ( "error_class",
+                   `String transient_mutex_contention_error_class );
+                 ("recoverable", `Bool true);
+               ]
+             else [])
+          ~site:"exception" ~ts ();
         let msg =
           if is_edeadlk then
             Printf.sprintf
@@ -589,28 +617,26 @@ let make_keeper_tool_handler
           else
             normalize_tool_result ~success:false msg
         in
-        (try
-          Keeper_types_support.append_jsonl_line
-            (Keeper_types_support.keeper_decision_log_path config meta.name)
-            (`Assoc ([
-              "ts_unix", `Float ts;
-              "event", `String "tool_exec";
-              "keeper_name", `String meta.name;
-              "tool", `String name;
-              "duration_ms", `Int duration_ms;
-              "result_bytes", `Int (String.length normalized_exn);
-              "ok", `Bool false;
-              "error", `String error_text;
+        append_tool_exec_decision_log ~config ~keeper_name:meta.name
+          ~site:"exception"
+          (`Assoc ([
+            "ts_unix", `Float ts;
+            "event", `String "tool_exec";
+            "keeper_name", `String meta.name;
+            "tool", `String name;
+            "duration_ms", `Int duration_ms;
+            "result_bytes", `Int (String.length normalized_exn);
+            "ok", `Bool false;
+            "error", `String error_text;
+          ]
+          @
+          if is_edeadlk then
+            [
+              ( "error_class",
+                `String transient_mutex_contention_error_class );
+              ("recoverable", `Bool true);
             ]
-            @
-            if is_edeadlk then
-              [
-                ( "error_class",
-                  `String transient_mutex_contention_error_class );
-                ("recoverable", `Bool true);
-              ]
-            else []))
-        with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+          else []));
         Keeper_tool_call_log.set_truncation_info
           ~keeper_name:meta.name
           ~original_bytes:(String.length normalized_exn) ();

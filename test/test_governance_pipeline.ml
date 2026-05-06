@@ -206,6 +206,11 @@ let test_risk_medium_worktree_create () =
   Alcotest.(check string) "worktree_create is medium"
     "medium" (Gp.risk_level_to_string risk)
 
+let test_risk_medium_keeper_pr_create () =
+  let risk = Gp.assess_risk ~tool_name:"keeper_pr_create" ~input:no_args in
+  Alcotest.(check string) "keeper_pr_create is medium"
+    "medium" (Gp.risk_level_to_string risk)
+
 let test_risk_medium_transition_start () =
   let risk =
     Gp.assess_risk ~tool_name:generic_transition_tool ~input:transition_start_input
@@ -905,6 +910,8 @@ let () =
         test_risk_medium_transition_start;
       Alcotest.test_case "medium: worktree create" `Quick
         test_risk_medium_worktree_create;
+      Alcotest.test_case "medium: keeper PR create" `Quick
+        test_risk_medium_keeper_pr_create;
       Alcotest.test_case "payload: rm -rf is critical" `Quick
         test_risk_payload_destructive_rm_rf;
       Alcotest.test_case "payload: $(date) is medium not critical" `Quick

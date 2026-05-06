@@ -363,8 +363,8 @@ let metric_board_persist_lock_held_sec =
    [Backend.FileSystem.with_observed_mutex] via
    [Backend.FileSystem.set_mutex_observers] (installed once from the
    main library at startup).  Scoped to writer paths
-   (set / delete / set_if_not_exists); read paths are lock-free and
-   are not measured.  Labels: [op]. *)
+   (set / delete / set_if_not_exists). Read paths are not measured by
+   these histograms. Labels: [op]. *)
 let metric_backend_mutex_acquire_sec =
   "masc_backend_mutex_acquire_sec"
 
@@ -1448,18 +1448,17 @@ let init () =
     ~help:"Seconds the board persist mutex is held by one fiber, \
            covering the disk I/O performed inside the lock." ();
   (* Backend filesystem mutex diagnostic histograms.  acquire =
-     wait-for-write-lock, held = inside-lock compress + rename/unlink
-     syscalls.  Together they let operators decide whether keeper
-     storage I/O latency is queueing (acquire high) or syscall stall
-     (held high), without inferring from external symptoms.
+     wait-for-write-lock, held = time spent in the write critical
+     section. Together they let operators decide whether keeper storage
+     I/O latency is queueing (acquire high) or filesystem work while
+     holding the mutex (held high), without inferring from external symptoms.
      Labels: op in {set, delete, set_if_not_exists}. *)
   register_histogram ~name:metric_backend_mutex_acquire_sec
     ~help:"Seconds spent waiting to acquire the backend filesystem \
            write mutex.  Labels: op." ();
   register_histogram ~name:metric_backend_mutex_held_sec
     ~help:"Seconds the backend filesystem mutex is held by one fiber, \
-           covering compress + atomic-rename / unlink syscalls. \
-           Labels: op." ();
+           covering the write critical section. Labels: op." ();
   add metric_keeper_slot_yield_total
     "Total autonomous turn slot yields (successfully yielded and reacquired). \
      Labels: keeper."

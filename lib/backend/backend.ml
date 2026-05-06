@@ -65,6 +65,14 @@ module FileSystem = struct
     mutex_acquire_observer := acquire;
     mutex_held_observer := held
 
+  let notify_mutex_observer ~kind observer ~op ~seconds =
+    try observer ~op ~seconds
+    with exn ->
+      Log.legacy_traceln ~level:Log.Debug ~module_name:"Backend"
+        (Printf.sprintf
+           "[DEBUG] backend mutex %s observer failed for op=%s: %s"
+           kind op (Printexc.to_string exn))
+
   (** Wrap a write critical section with acquire/held observers.
 
       Acquire latency is measured as [now - call_start]; held latency
@@ -74,19 +82,25 @@ module FileSystem = struct
       mutex. *)
   let with_observed_mutex ~op t f =
     let started = Time_compat.now () in
+    let acquired = ref false in
     let acquire_seconds = ref 0.0 in
     let held_seconds = ref 0.0 in
-    let result =
-      Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
-        let acquired = Time_compat.now () in
-        acquire_seconds := acquired -. started;
-        let value = f () in
-        held_seconds := Time_compat.now () -. acquired;
-        value)
-    in
-    !mutex_acquire_observer ~op ~seconds:!acquire_seconds;
-    !mutex_held_observer ~op ~seconds:!held_seconds;
-    result
+    Fun.protect
+      ~finally:(fun () ->
+        if not !acquired then acquire_seconds := Time_compat.now () -. started;
+        notify_mutex_observer ~kind:"acquire" !mutex_acquire_observer
+          ~op ~seconds:!acquire_seconds;
+        notify_mutex_observer ~kind:"held" !mutex_held_observer
+          ~op ~seconds:!held_seconds)
+      (fun () ->
+        Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
+          let acquired_at = Time_compat.now () in
+          acquired := true;
+          acquire_seconds := acquired_at -. started;
+          Fun.protect
+            ~finally:(fun () ->
+              held_seconds := Time_compat.now () -. acquired_at)
+            f))
 
   (** Create a new FileSystem backend *)
   let create ~fs ?clock config =

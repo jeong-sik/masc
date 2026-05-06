@@ -21,12 +21,12 @@ module FileSystem : sig
       [Prometheus] at link time.
 
       [acquire] receives the seconds a fiber waited before entering
-      the lock; [held] receives the seconds the lock was held during
-      compress + rename / unlink.  Both run *outside* the mutex
-      critical section to avoid nested locking.
+      the lock; [held] receives the seconds spent in the write critical
+      section. Both run *outside* the mutex critical section to avoid
+      nested locking.
 
-      [op] is one of [set | delete | set_if_not_exists]; read paths
-      ([get], [atomic_get]) run lock-free and are not measured. *)
+      [op] is one of [set | delete | set_if_not_exists]. Read paths
+      are not measured by these histograms. *)
   val set_mutex_observers :
     acquire:(op:string -> seconds:float -> unit) ->
     held:(op:string -> seconds:float -> unit) ->

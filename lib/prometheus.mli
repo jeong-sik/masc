@@ -165,8 +165,8 @@ val metric_backend_mutex_acquire_sec : string
 
     Combined with [metric_backend_mutex_held_sec] this distinguishes
     keeper write contention (acquire high) from disk I/O stall (held
-    high) inside the storage layer.  Read paths ([get], [atomic_get])
-    run lock-free and are not measured.
+    high) inside the storage layer. Read paths are not measured by
+    these histograms.
 
     Wired by [Backend.FileSystem.set_mutex_observers] from the main
     library at startup so that [masc_backend] does not depend on
@@ -174,11 +174,10 @@ val metric_backend_mutex_acquire_sec : string
 
 val metric_backend_mutex_held_sec : string
 (** Time spent inside the backend persist lock, from acquisition to
-    release.  Labels: [op] in {[set | delete | set_if_not_exists]}.
+    release. Labels: [op] in {[set | delete | set_if_not_exists]}.
 
-    Captures the actual compress + atomic-rename / unlink syscall
-    latency per write call, used together with
-    [metric_backend_mutex_acquire_sec]. *)
+    Captures time spent in the write critical section, used together
+    with [metric_backend_mutex_acquire_sec]. *)
 
 val metric_keeper_turn_queue_depth : string
 (** P-DASH-02: turn queue depth gauge.  Semaphore waiter count

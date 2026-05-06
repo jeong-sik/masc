@@ -460,6 +460,25 @@
         "goal-loop-206-audit-external-claim-2026-05-05"
       ],
       "note": "The repo strict-row-corpus discovery CLI scanned Downloads text-like files and text-like archive members against the audit catalog. It found eight JSON objects with findings arrays, all unrelated fixtures rejected by strict-corpus validation, and zero valid 206-row corpora."
+    },
+    {
+      "artifact_name": "prompt_source_docs_discovery_cli_strict_corpus_validation_sweep",
+      "artifact_kind": "discovery_cli_validation_report",
+      "result": "NOT_ROW_CORPUS",
+      "observed_files_considered": 12,
+      "observed_text_units_scanned": 12,
+      "observed_marker_hits": 0,
+      "observed_candidate_corpora": 0,
+      "observed_validated_strict_corpora": 0,
+      "markers_checked": [
+        "source_catalog_id",
+        "corpus_id",
+        "expected_findings_total",
+        "strict_row",
+        "strict-row",
+        "goal-loop-206-audit-external-claim-2026-05-05"
+      ],
+      "note": "The repo strict-row-corpus discovery CLI scanned the 12 prompt-supplied source documents directly against the audit catalog. It found no strict-corpus markers, no JSON findings-array candidates, and zero valid 206-row corpora."
     }
   ],
   "broader_structured_id_triage": {

@@ -30,37 +30,47 @@ module Attr_key = struct
   let tool_success = "tool.success"
   let tool_duration_ms = "tool.duration_ms"
 
-  let official_gen_ai =
-    [ gen_ai_operation_name
-    ; gen_ai_provider_name
-    ; gen_ai_agent_name
-    ; gen_ai_agent_id
-    ; gen_ai_conversation_id
-    ; gen_ai_tool_name
+  type boundary =
+    | Official_gen_ai
+    | Masc_extension
+    | Legacy
+
+  let registry =
+    [ gen_ai_operation_name, Official_gen_ai
+    ; gen_ai_provider_name, Official_gen_ai
+    ; gen_ai_agent_name, Official_gen_ai
+    ; gen_ai_agent_id, Official_gen_ai
+    ; gen_ai_conversation_id, Official_gen_ai
+    ; gen_ai_tool_name, Official_gen_ai
+    ; masc_gen_ai_keeper_name, Masc_extension
+    ; masc_gen_ai_cascade_name, Masc_extension
+    ; keeper_name, Legacy
+    ; keeper_agent_name, Legacy
+    ; keeper_cascade_name, Legacy
+    ; keeper_trace_id, Legacy
+    ; keeper_generation, Legacy
+    ; keeper_max_context, Legacy
+    ; keeper_max_turns, Legacy
+    ; keeper_max_idle_turns, Legacy
+    ; keeper_channel, Legacy
+    ; keeper_is_retry, Legacy
+    ; keeper_current_task_id, Legacy
+    ; tool_name, Legacy
+    ; tool_success, Legacy
+    ; tool_duration_ms, Legacy
     ]
   ;;
 
-  let masc_extensions = [ masc_gen_ai_keeper_name; masc_gen_ai_cascade_name ]
-
-  let legacy =
-    [ keeper_name
-    ; keeper_agent_name
-    ; keeper_cascade_name
-    ; keeper_trace_id
-    ; keeper_generation
-    ; keeper_max_context
-    ; keeper_max_turns
-    ; keeper_max_idle_turns
-    ; keeper_channel
-    ; keeper_is_retry
-    ; keeper_current_task_id
-    ; tool_name
-    ; tool_success
-    ; tool_duration_ms
-    ]
+  let keys_for boundary =
+    registry
+    |> List.filter_map (fun (key, registered_boundary) ->
+      if registered_boundary = boundary then Some key else None)
   ;;
 
-  let all_known = official_gen_ai @ masc_extensions @ legacy
+  let all_known = List.map fst registry
+  let official_gen_ai = keys_for Official_gen_ai
+  let masc_extensions = keys_for Masc_extension
+  let legacy = keys_for Legacy
 
   let is_official_gen_ai key = List.mem key official_gen_ai
   let is_masc_extension key = List.mem key masc_extensions

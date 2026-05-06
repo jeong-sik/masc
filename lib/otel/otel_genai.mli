@@ -28,8 +28,9 @@ module Attr_key : sig
 
   (** Every Attr_key constant exported by this module.
 
-      Keep this list in sync with the classification lists below. Tests assert
-      that each known key appears in exactly one registry boundary. *)
+      Derived from the same internal registry that drives the boundary lists
+      below. Tests assert that the boundary lists form a disjoint partition of
+      this registry. *)
   val all_known : string list
 
   val official_gen_ai : string list

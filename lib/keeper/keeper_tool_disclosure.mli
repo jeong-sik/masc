@@ -138,6 +138,12 @@ val tool_name_can_satisfy_required_contract : string -> bool
 val required_tool_satisfaction :
   Agent_sdk.Completion_contract.tool_call -> (unit, string) result
 
+(** Return a canonical exact-required-tool violation for required tool names
+    that can satisfy a required-tool contract. Runtime MCP-prefixed observed
+    names are canonicalized before comparison. *)
+val required_tool_violation_reason :
+  required_tool_names:string list -> tool_names:string list -> string option
+
 (** Project a tool name to its [tool_progress_class]. *)
 val classify_tool_progress : string -> tool_progress_class
 

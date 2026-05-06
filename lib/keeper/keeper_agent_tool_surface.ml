@@ -259,9 +259,13 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
        productive lanes into spurious pause-human failures. *)
     Agent_sdk.Types.Any
   else if (not has_current_task)
-     && has_task_claim_affordance turn_affordances
-     && progress_tool_available "keeper_task_claim"
-  then Agent_sdk.Types.Tool "keeper_task_claim"
+          && has_task_claim_affordance turn_affordances
+          && progress_tool_available "keeper_task_claim"
+  then
+    (* Runtime MCP providers report names as mcp__masc__keeper_task_claim,
+       while the internal keeper surface is keeper_task_claim. Use Any here;
+       keeper_agent_run post-validates the canonical required name. *)
+    Agent_sdk.Types.Any
   else if has_turn_affordance Task_audit turn_affordances
           && progress_tool_available "keeper_tasks_audit"
   then Agent_sdk.Types.Tool "keeper_tasks_audit"
@@ -307,7 +311,11 @@ let preferred_tool_choice_for_required_tool_names
     |> Keeper_types.dedupe_keep_order
   in
   match visible_required with
-  | [ name ] -> Agent_sdk.Types.Tool name
+  | [ _name ] ->
+      (* Exact SDK tool_choice compares raw response names. Runtime MCP
+         namespaces those names, so MASC enforces exact canonical required
+         usage after the turn instead. *)
+      Agent_sdk.Types.Any
   | _ :: _ -> Agent_sdk.Types.Any
   | [] -> Agent_sdk.Types.Auto
 

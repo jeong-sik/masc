@@ -6605,6 +6605,8 @@ let test_required_tool_satisfaction_rejects_passive_tools () =
     (satisfies_required_tool "masc_status" (`Assoc []));
   check bool "keeper_tasks_list is passive" false
     (satisfies_required_tool "keeper_tasks_list" (`Assoc []));
+  check bool "runtime MCP task list is passive" false
+    (satisfies_required_tool "mcp__masc__keeper_tasks_list" (`Assoc []));
   (* keeper_stay_silent is a Completion tool and intentionally satisfies
      the required-tool contract despite its Read_only effect_domain.
      See keeper_tool_disclosure.ml is_completion_tool_name exemption. *)
@@ -6623,6 +6625,8 @@ let test_required_tool_satisfaction_rejects_passive_tools () =
 let test_required_tool_satisfaction_accepts_mutating_tools () =
   check bool "keeper_task_claim mutates" true
     (satisfies_required_tool "keeper_task_claim" (`Assoc []));
+  check bool "runtime MCP task claim mutates" true
+    (satisfies_required_tool "mcp__masc__keeper_task_claim" (`Assoc []));
   check bool "Write alias mutates" true
     (satisfies_required_tool "Write" (`Assoc []));
   check bool "mutating gh shell satisfies" true
@@ -6631,7 +6635,16 @@ let test_required_tool_satisfaction_accepts_mutating_tools () =
           [
             ("op", `String "gh");
             ("cmd", `String "pr comment 123 --body ok");
-          ]))
+          ]));
+  check (option string) "prefixed required task claim is canonical" None
+    (KTD.required_tool_violation_reason
+       ~required_tool_names:[ "keeper_task_claim" ]
+       ~tool_names:[ "mcp__masc__keeper_task_claim" ]);
+  check bool "wrong mutating tool misses required claim" true
+    (Option.is_some
+       (KTD.required_tool_violation_reason
+          ~required_tool_names:[ "keeper_task_claim" ]
+          ~tool_names:[ "keeper_board_post" ]))
 
 let test_tool_usage_delta_uses_registry_counts () =
   let before =
@@ -7564,7 +7577,7 @@ let test_tools_for_gated_affordance_covers_each_variant () =
     (List.mem "keeper_task_create"
        (Surface.tools_for_gated_affordance Surface.Work_discovery))
 
-let test_preferred_tool_choice_for_required_turn_claims_first () =
+let test_preferred_tool_choice_for_required_turn_uses_any_for_required_tools () =
   let module Surface = Masc_mcp.Keeper_agent_tool_surface in
   let choose ?(has_current_task = false) ?(turn_affordances = [ "task_claim" ])
       ?(allowed_tool_names =
@@ -7574,11 +7587,10 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
       ~turn_affordances ~allowed_tool_names
   in
   (match choose () with
-   | Agent_sdk.Types.Tool name ->
-       check string "forces claim tool first" "keeper_task_claim" name
+   | Agent_sdk.Types.Any -> ()
    | other ->
        fail
-         (Printf.sprintf "expected Tool keeper_task_claim, got %s"
+         (Printf.sprintf "expected Any for claim gate, got %s"
             (Agent_sdk.Types.show_tool_choice other)));
   (match choose ~has_current_task:true () with
    | Agent_sdk.Types.Any -> ()
@@ -7712,14 +7724,11 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
        ~allowed_tool_names:
          [ "keeper_board_curation_submit"; "keeper_board_post" ]
    with
-   | Agent_sdk.Types.Tool name ->
-       check string
-         "product/design per-call board post is not hijacked by stale curation"
-         "keeper_board_post" name
+   | Agent_sdk.Types.Any -> ()
    | other ->
        fail
          (Printf.sprintf
-            "expected Tool keeper_board_post for product/design reprobe, got %s"
+            "expected Any for product/design per-call board post, got %s"
             (Agent_sdk.Types.show_tool_choice other)));
   check (list string)
     "active task required tools remain when no per-call requirement exists"
@@ -7733,13 +7742,10 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
        ~allowed_tool_names:
          [ "keeper_board_curation_submit"; "keeper_board_post" ]
    with
-   | Agent_sdk.Types.Tool name ->
-       check string "single per-call required tool is forced"
-         "keeper_board_post" name
+   | Agent_sdk.Types.Any -> ()
    | other ->
-       fail
-         (Printf.sprintf "expected Tool keeper_board_post, got %s"
-            (Agent_sdk.Types.show_tool_choice other)));
+       fail (Printf.sprintf "expected Any for single required tool, got %s"
+               (Agent_sdk.Types.show_tool_choice other)));
   (match
      Surface.preferred_tool_choice_for_required_tool_names
        ~required_tool_names:
@@ -7768,14 +7774,11 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
        ~required_tool_names:[ "keeper_tasks_audit"; "keeper_board_post" ]
        ~allowed_tool_names:[ "keeper_tasks_audit"; "keeper_board_post" ]
    with
-   | Agent_sdk.Types.Tool name ->
-       check string "active required tool remains forced" "keeper_board_post"
-         name
+   | Agent_sdk.Types.Any -> ()
    | other ->
        fail
          (Printf.sprintf
-            "expected Tool keeper_board_post for mixed passive/active required \
-             tools, got %s"
+            "expected Any for mixed passive/active required tools, got %s"
             (Agent_sdk.Types.show_tool_choice other)));
   (* Active task keeper retains the strict gate even without a
      specific applicable tool — the caller is expected to make
@@ -8701,8 +8704,9 @@ let () =
           test_case "initial tool requirement covers actionable affordances"
             `Quick
             test_should_require_tools_for_initial_turn_covers_actionable_affordances;
-          test_case "task backlog required turn prefers claim tool choice"
-            `Quick test_preferred_tool_choice_for_required_turn_claims_first;
+          test_case "task backlog required turn uses any for required tools"
+            `Quick
+            test_preferred_tool_choice_for_required_turn_uses_any_for_required_tools;
           test_case "direct keeper msg timeout overrides stale per-provider timeout"
             `Quick
             test_direct_keeper_msg_timeout_overrides_meta_per_provider_timeout;

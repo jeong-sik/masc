@@ -135,9 +135,10 @@ val required_tool_names_for_turn :
   per_call_required_tool_names:string list ->
   string list
 
-(** Pick the model-facing [tool_choice] for an explicit required-tool list. A
-    single visible required tool should be forced specifically; multiple visible
-    required tools use [Any] and are checked after execution. *)
+(** Pick the model-facing [tool_choice] for an explicit required-tool list.
+    Required keeper tools use [Any] because runtime MCP providers namespace
+    response tool names; exact canonical required usage is checked after
+    execution. *)
 val preferred_tool_choice_for_required_tool_names :
   required_tool_names:string list ->
   allowed_tool_names:string list ->

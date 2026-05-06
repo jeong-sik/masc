@@ -697,6 +697,16 @@ let run_turn
              ~actionable_signal_context
              ~tool_names:actual_keeper_tool_names
          in
+         let required_tool_violation_reason =
+           Keeper_tool_disclosure.required_tool_violation_reason
+             ~required_tool_names:acc.tool_surface.required_tool_names
+             ~tool_names:actual_keeper_tool_names
+         in
+         let tool_contract_violation_reason =
+           match required_tool_violation_reason with
+           | Some _ -> required_tool_violation_reason
+           | None -> actionable_tool_contract_violation_reason
+         in
          let contract_violation_error reason =
            Agent_sdk.Error.Agent
              (Agent_sdk.Error.CompletionContractViolation
@@ -761,7 +771,7 @@ let run_turn
              Keeper_tool_disclosure.validate_completion_contract_presence
                ~contract:effective_completion_contract
                ~tool_present:acc.keeper_surface_tool_used
-             , actionable_tool_contract_violation_reason
+             , tool_contract_violation_reason
            with
            | Ok (), Some reason ->
                let contract_status =

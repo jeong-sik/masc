@@ -303,6 +303,38 @@ let required_tool_satisfaction
            "tool '%s' is read-only/passive and cannot satisfy a required-tool contract"
            tool_name)
 
+let canonical_dedupe_tool_names names =
+  names |> List.map canonical_tool_name |> Keeper_types.dedupe_keep_order
+
+let required_tool_violation_reason
+      ~(required_tool_names : string list)
+      ~(tool_names : string list)
+  : string option
+  =
+  let used_tool_names = canonical_dedupe_tool_names tool_names in
+  let required_tool_names =
+    required_tool_names
+    |> canonical_dedupe_tool_names
+    |> List.filter tool_name_can_satisfy_required_contract
+  in
+  match
+    List.filter
+      (fun name -> not (List.mem name used_tool_names))
+      required_tool_names
+  with
+  | [] -> None
+  | missing ->
+    let used =
+      match used_tool_names with
+      | [] -> "<none>"
+      | names -> String.concat ", " names
+    in
+    Some
+      (Printf.sprintf
+         "required keeper tool(s) not used: %s (used: %s)"
+         (String.concat ", " missing)
+         used)
+
 let classify_tool_progress name =
   let name = canonical_tool_name name in
   if is_completion_tool_name name

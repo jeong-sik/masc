@@ -711,11 +711,30 @@ export function DashboardMain() {
   }
 
   const routeLabel = dashboardRouteBoundaryKey(route.value)
+  const immersiveSurface = route.value.tab === 'code'
+  const warmingBanner = namespaceTruthInitializing.value ? html`
+    <div class=${immersiveSurface
+      ? 'shrink-0 border-b border-solid border-[var(--warn-20)] bg-[var(--warn-10)] px-4 py-1.5 text-center text-xs text-[var(--color-status-warn)]'
+      : 'mb-3 shrink-0 rounded-[var(--r-2)] border border-solid border-[var(--warn-20)] bg-[var(--warn-10)] px-4 py-1.5 text-center text-xs text-[var(--color-status-warn)]'}>
+      Server data warming; this view will refresh automatically.
+    </div>
+  ` : null
+
+  if (immersiveSurface) {
+    return html`
+      <div class=${`animate-in fade-in slide-in-from-bottom-2 duration-[var(--t-slow)] fill-mode-both h-full min-h-0 overflow-hidden ${namespaceTruthInitializing.value ? 'grid grid-rows-[auto_minmax(0,1fr)]' : ''}`}>
+        ${warmingBanner}
+        <${ErrorBoundary} key=${routeLabel} label=${routeLabel || 'dashboard'}>
+          <div class="h-full min-h-0 overflow-hidden">
+            <${TabContent} />
+          </div>
+        <//>
+      </div>
+    `
+  }
 
   return html`
-    ${namespaceTruthInitializing.value ? html`
-      <div class="mb-3 shrink-0 rounded-[var(--r-2)] border border-solid border-[var(--warn-20)] bg-[var(--warn-10)] px-4 py-1.5 text-center text-xs text-[var(--color-status-warn)]">Server data warming; this view will refresh automatically.</div>
-    ` : null}
+    ${warmingBanner}
     <${SurfaceLead} />
     <${ObservatoryFilterBar} />
     <${ErrorBoundary} key=${routeLabel} label=${routeLabel || 'dashboard'}>

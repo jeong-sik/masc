@@ -153,7 +153,11 @@ val set_after_acquire_flag_hook_for_test :
   (label:string -> keeper_name:string -> unit) option -> unit
 
 (** PR-M (Leak 9): consecutive [oas_timeout_budget] cycle FAILED strikes
-    per keeper. Promoted to [Keeper_fiber_crash] at this limit. *)
+    per keeper. Promoted to [Keeper_fiber_crash] at this limit.
+
+    Counts are stored in an in-process CAS map and can be seeded from the
+    persisted [Oas_timeout_budget_loop] failure reason on the first bump after
+    restart or another process update. *)
 val oas_timeout_budget_strike_limit : int
 
 val bump_budget_exhaustion_seeded :
@@ -165,10 +169,31 @@ val set_budget_exhaustion_for_test : keeper_name:string -> strikes:int -> unit
 
 type keeper_turn_slot_state
 
+type keeper_turn_slot_control = {
+  release_for_retry : unit -> unit;
+  reacquire_after_retry :
+    unit ->
+    (int, [ `Semaphore_wait_timeout of semaphore_wait_timeout ]) result;
+}
+
+val with_keeper_turn_slot_control :
+  keeper_name:string ->
+  channel:Keeper_world_observation.keeper_cycle_channel ->
+  (semaphore_wait_ms:int -> slot_control:keeper_turn_slot_control -> 'a) ->
+  ('a, [> `Semaphore_wait_timeout of semaphore_wait_timeout ]) result
+
 val with_keeper_turn_slot :
   keeper_name:string ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
   (semaphore_wait_ms:int -> 'a) ->
+  ('a, [> `Semaphore_wait_timeout of semaphore_wait_timeout ]) result
+
+(** Test-only wrapper around the keeper turn slot acquisition path with
+    explicit in-turn release/reacquire controls. *)
+val with_keeper_turn_slot_control_for_test :
+  keeper_name:string ->
+  channel:Keeper_world_observation.keeper_cycle_channel ->
+  (semaphore_wait_ms:int -> slot_control:keeper_turn_slot_control -> 'a) ->
   ('a, [> `Semaphore_wait_timeout of semaphore_wait_timeout ]) result
 
 (** Test-only wrapper around the keeper turn slot acquisition path. *)

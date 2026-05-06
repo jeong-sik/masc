@@ -16,6 +16,7 @@ import { stripStateBlocks } from '../../keeper-message'
 import { navigate, navigateToPost, route } from '../../router'
 import { registerBoardHearthsRefresh } from '../../sse-store'
 import { PostDetail } from './post-detail'
+import { ReactionBar } from './reaction-bar'
 import {
   boardActorAvatarKey,
   boardActorDisplayName,
@@ -505,6 +506,9 @@ function PostCard({ post }: { post: BoardPost }) {
   const authorLabel = boardActorDisplayName(post.author, post.author_identity)
   const authorAvatarKey = boardActorAvatarKey(post.author, post.author_identity)
   const authorTitle = boardActorTitle(post.author, post.author_identity)
+  const upvoteActive = post.current_vote === 'up'
+  const downvoteActive = post.current_vote === 'down'
+  const reactionPreview = post.reactions?.some(summary => summary.count > 0 || summary.reacted || summary.has_reacted)
 
   const handleVote = async (dir: 'up' | 'down', event: Event) => {
     event.stopPropagation()
@@ -568,13 +572,17 @@ function PostCard({ post }: { post: BoardPost }) {
       <div class="flex flex-col items-center gap-0.5 pt-0.5 min-w-9">
         <button type="button"
           aria-label="추천"
-          class="vote-btn upvote w-7 h-5 flex items-center justify-center rounded-[var(--r-1)] text-2xs text-[var(--color-fg-muted)] hover:text-[var(--warn-bright)] hover:bg-[var(--warn-10)] transition-colors cursor-pointer border-0 bg-transparent"
+          aria-pressed=${upvoteActive ? 'true' : 'false'}
+          disabled=${upvoteActive}
+          class=${`vote-btn upvote w-7 h-5 flex items-center justify-center rounded-[var(--r-1)] text-2xs transition-colors border-0 bg-transparent ${upvoteActive ? 'active text-[var(--warn-bright)] bg-[var(--warn-10)] cursor-default' : 'text-[var(--color-fg-muted)] hover:text-[var(--warn-bright)] hover:bg-[var(--warn-10)] cursor-pointer'}`}
           onClick=${(event: Event) => handleVote('up', event)}
         ><span aria-hidden="true">▲</span></button>
         <span class="text-sm font-semibold tabular-nums text-[var(--color-fg-secondary)]">${post.votes ?? 0}</span>
         <button type="button"
           aria-label="비추천"
-          class="vote-btn downvote w-7 h-5 flex items-center justify-center rounded-[var(--r-1)] text-2xs text-[var(--color-fg-muted)] hover:text-[var(--color-accent-fg)] hover:bg-[var(--accent-10)] transition-colors cursor-pointer border-0 bg-transparent"
+          aria-pressed=${downvoteActive ? 'true' : 'false'}
+          disabled=${downvoteActive}
+          class=${`vote-btn downvote w-7 h-5 flex items-center justify-center rounded-[var(--r-1)] text-2xs transition-colors border-0 bg-transparent ${downvoteActive ? 'active text-[var(--color-accent-fg)] bg-[var(--accent-10)] cursor-default' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-accent-fg)] hover:bg-[var(--accent-10)] cursor-pointer'}`}
           onClick=${(event: Event) => handleVote('down', event)}
         ><span aria-hidden="true">▼</span></button>
       </div>
@@ -630,6 +638,20 @@ function PostCard({ post }: { post: BoardPost }) {
             ${isDeleting ? '삭제 중...' : '삭제'}
           <//>
         </div>
+        ${reactionPreview ? html`
+          <div
+            class="mt-2"
+            onClick=${(event: Event) => event.stopPropagation()}
+            onKeyDown=${(event: KeyboardEvent) => event.stopPropagation()}
+          >
+            <${ReactionBar}
+              targetType="post"
+              targetId=${post.id}
+              compact
+              initialSummaries=${post.reactions}
+            />
+          </div>
+        ` : null}
       </div>
     </article>
   `

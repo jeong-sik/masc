@@ -11,13 +11,20 @@ export function ReactionBar({
   targetType,
   targetId,
   compact = false,
+  initialSummaries,
 }: {
   targetType: BoardReactionTargetType
   targetId: string
   compact?: boolean
+  initialSummaries?: BoardReactionSummary[]
 }) {
-  const [summaries, setSummaries] = useState<BoardReactionSummary[]>([])
+  const hasInitialSummaries = initialSummaries !== undefined
+  const [summaries, setSummaries] = useState<BoardReactionSummary[]>(() => initialSummaries ?? [])
   const [busyEmoji, setBusyEmoji] = useState<string | null>(null)
+
+  useEffect(() => {
+    setSummaries(initialSummaries ?? [])
+  }, [targetType, targetId, initialSummaries])
 
   useEffect(() => {
     let cancelled = false
@@ -32,7 +39,7 @@ export function ReactionBar({
           }
         })
     }
-    refresh()
+    if (!hasInitialSummaries) refresh()
     const unsubscribe = lastEvent.subscribe(event => {
       if (event?.type !== 'reaction_changed') return
       if (event.target_type === targetType && event.target_id === targetId) {
@@ -43,7 +50,7 @@ export function ReactionBar({
       cancelled = true
       unsubscribe()
     }
-  }, [targetType, targetId])
+  }, [targetType, targetId, hasInitialSummaries])
 
   const summaryByEmoji = useMemo(() => {
     const map = new Map<string, BoardReactionSummary>()

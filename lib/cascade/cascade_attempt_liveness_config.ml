@@ -61,3 +61,17 @@ let budget_for_label (label : string) : Cascade_attempt_liveness.budget =
   | "local_70b" | "local_70b_plus" | "ollama_70b" ->
       Cascade_attempt_liveness.local_70b_plus
   | _ -> Cascade_attempt_liveness.cloud_fast
+
+(* RFC-0022 §1 — see .mli for contract. *)
+let outer_wall_for_attempt
+    ~mode ~observer_attached ~per_provider_timeout_s ~provider_label =
+  match mode, observer_attached with
+  | Enforce, true -> None
+  | _, true ->
+      let budget_wall =
+        (budget_for_label provider_label).Cascade_attempt_liveness.attempt_wall_max
+      in
+      Option.map
+        (fun t -> Float.max t budget_wall)
+        per_provider_timeout_s
+  | _, false -> per_provider_timeout_s

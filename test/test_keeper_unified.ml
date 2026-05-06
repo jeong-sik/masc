@@ -2140,12 +2140,16 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     (contains_substring social_guidance "`keeper_task_claim` {}");
   check bool "social guidance includes board post when allowed" true
     (contains_substring social_guidance "`keeper_board_post` { content:");
+  check bool "social guidance includes web search when allowed" true
+    (contains_substring social_guidance "`masc_web_search` { query:");
   check bool "social guidance omits bash outside preset" false
     (contains_substring social_guidance "`keeper_bash` { cmd:");
   check bool "social guidance omits worktree outside preset" false
     (contains_substring social_guidance "`masc_worktree_create` { task_id:");
   check bool "coding guidance includes bash schema" true
     (contains_substring coding_guidance "`keeper_bash` { cmd:");
+  check bool "coding guidance includes web search schema" true
+    (contains_substring coding_guidance "`masc_web_search` { query:");
   check bool "coding guidance includes worktree schema" true
     (contains_substring coding_guidance "`masc_worktree_create` { task_id:");
   check bool "legacy worktree branch_name schema removed" false
@@ -6004,6 +6008,16 @@ let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
        check bool "reason mentions typed no-work proof" true
          (contains_substring reason "typed no-work proof")
    | None -> fail "expected stay_silent actionable violation");
+  check (option string) "execution plus stay_silent remains accepted" None
+    (KTD.actionable_tool_contract_violation_reason
+       ~claim_context_allowed:true
+       ~actionable_signal_context:true
+       ~tool_names:[ "keeper_board_comment"; "keeper_stay_silent" ]);
+  check (option string) "owned-task progress plus stay_silent remains accepted" None
+    (KTD.actionable_tool_contract_violation_reason
+       ~claim_context_allowed:false
+       ~actionable_signal_context:true
+       ~tool_names:[ "keeper_bash"; "keeper_stay_silent" ]);
   check (option string) "non-actionable stay_silent remains allowed" None
     (KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true

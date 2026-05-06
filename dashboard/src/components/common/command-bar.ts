@@ -6,8 +6,9 @@
 
 import { html } from 'htm/preact'
 import { useMemo, useRef, useState } from 'preact/hooks'
+import { useId } from '../../../design-system/headless-preact/use-id'
 
-interface CommandBarAction {
+export interface CommandBarAction {
   id: string
   title: string
   keywords?: string
@@ -16,6 +17,8 @@ interface CommandBarAction {
 
 interface CommandBarProps {
   actions: CommandBarAction[]
+  className?: string
+  inputClassName?: string
   placeholder?: string
   onSelect?: (action: CommandBarAction) => void
   testId?: string
@@ -50,6 +53,8 @@ function filterActions(actions: CommandBarAction[], query: string): CommandBarAc
 
 export function CommandBar({
   actions,
+  className,
+  inputClassName = 'w-full rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-sm text-[var(--color-fg-primary)] outline-none transition-colors focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)]',
   placeholder = '명령어 검색...',
   onSelect,
   testId,
@@ -58,7 +63,7 @@ export function CommandBar({
   const [open, setOpen] = useState(false)
   const [activeIndex, setActiveIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
-  const listId = useMemo(() => `cmdbar-list-${Math.random().toString(36).slice(2, 8)}`, [])
+  const listId = `${useId()}-cmdbar-list`
 
   const filtered = useMemo(() => filterActions(actions, query), [actions, query])
 
@@ -120,11 +125,11 @@ export function CommandBar({
   }
 
   return html`
-    <div class="relative w-full" data-command-bar data-testid=${testId}>
+    <div class=${`relative w-full ${className ?? ''}`} data-command-bar data-testid=${testId}>
       <input
         ref=${inputRef}
         type="text"
-        class="w-full rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-sm text-[var(--color-fg-primary)] outline-none transition-colors focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)]"
+        class=${inputClassName}
         placeholder=${placeholder}
         value=${query}
         onInput=${handleInput}

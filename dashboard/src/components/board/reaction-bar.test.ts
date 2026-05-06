@@ -27,6 +27,24 @@ describe('ReactionBar', () => {
     }
   })
 
+  it('uses embedded initial summaries without an initial fetch', async () => {
+    render(h(ReactionBar, {
+      targetType: 'post',
+      targetId: 'post-1',
+      initialSummaries: [{
+        emoji: '👏',
+        count: 5,
+        reacted: true,
+        has_reacted: true,
+        recent_user_ids: ['agent-a'],
+      }],
+    }))
+
+    expect(screen.getByRole('button', { name: '👏 리액션 5개' })).toHaveAttribute('aria-pressed', 'true')
+    await Promise.resolve()
+    expect(fetchBoardReactions).not.toHaveBeenCalled()
+  })
+
   it('refreshes summaries only when a matching reaction_changed event arrives', async () => {
     vi.mocked(fetchBoardReactions)
       .mockResolvedValueOnce([])

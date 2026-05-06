@@ -637,7 +637,7 @@ let handle_workflow_guide ctx _args =
 let handle_coordination_fsm_snapshot ctx _args =
   { success = true;
     message = Yojson.Safe.to_string
-      (Coordination_product_snapshot.safe_build_yojson ctx.config) }
+      (Coordination_product_snapshot.safe_build_tool_yojson ctx.config) }
 
 (* ── State check (assertion-based verification) ────────────────── *)
 

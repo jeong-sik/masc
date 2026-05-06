@@ -1,7 +1,8 @@
 (** Coord_task_schedule — Scheduling: claim_next, release_stale_claims.
 
     Extracted from Coord_task to separate scheduling logic (priority queue,
-    stale detection, auto-release) from task CRUD and state transitions. *)
+    stale detection, existing-claim preservation) from task CRUD and state
+    transitions. *)
 
 open Masc_domain
 include Coord_utils
@@ -9,9 +10,9 @@ include Coord_state
 
 (** #10421: stable lowercase string label for a [task_status] suitable
     for embedding in JSONL diagnostic events.  Mirrors what the
-    [task_transition] from→to fields already use so dashboards can
-    join the new auto-release rows on identical vocabulary.  Pure;
-    exposed for tests. *)
+    [task_transition] from/to fields already use so dashboards can
+    join claim-loop diagnostics on identical vocabulary.  Pure; exposed for
+    tests. *)
 let task_status_label (status : Masc_domain.task_status) : string =
   match status with
   | Todo -> "todo"
@@ -332,7 +333,8 @@ let reconcile_agent_current_task_with_backlog config ~agent_name backlog =
     while the backlog lock is held.
 
     Scheduling logic:
-    - Auto-releases any previous claim held by this agent (BUG-004)
+    - Preserves any active claim held by this agent; callers must explicitly
+      release or finish before claiming different work.
     - Applies starvation prevention: tasks waiting >24h get priority boost
     - Within same effective priority, prefers older tasks (FIFO) *)
 let claim_next_r
@@ -343,6 +345,7 @@ let claim_next_r
       ?(task_filter = fun _ -> true)
       ()
   =
+  let exception Existing_claim of claim_next_result in
   ensure_initialized config;
 
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
@@ -353,74 +356,59 @@ let claim_next_r
       | Ok backlog ->
       reconcile_agent_current_task_with_backlog config ~agent_name backlog;
 
-      (* BUG-004: Detect and auto-release previous claim to prevent orphaned tasks.
-         If this agent already holds a Claimed or InProgress task, release it
-         back to Todo before proceeding. AwaitingVerification is deliberately
-         excluded: releasing it would drop the verification FSM edge and reopen
-         work before a verifier approve/reject decision. *)
+      (* #10421: If this agent already holds a Claimed or InProgress task,
+         return that task instead of implicitly releasing it.  Automatic
+         release caused keeper hot-potato loops: a repeated claim_next call
+         could drop InProgress work back to Todo and let another keeper steal
+         it before the original owner had a chance to finish.  AwaitingVerification
+         is still excluded: it is no longer active implementation work for
+         the claimant. *)
       let previous_claim = List.find_opt (fun (t : Masc_domain.task) ->
         match t.task_status with
         | Claimed { assignee; _ } | InProgress { assignee; _ } ->
             String.equal assignee agent_name
         | Todo | AwaitingVerification _ | Done _ | Cancelled _ -> false
       ) backlog.tasks in
-      let observe_auto_release () =
-        match previous_claim with
-        | Some prev ->
-            Coord_task.observe_task_transition config ~agent_name ~task_id:prev.id
-              ~transition:Masc_domain.Release
-              ~details:
-                (Coord_task.task_transition_details ~from_status:prev.task_status
-                   ~to_status:Masc_domain.Todo
-                   ~reason:"auto_release_before_claim_next" ())
-        | None -> ()
+      (match previous_claim with
+       | None -> ()
+       | Some prev ->
+           let from_status = task_status_label prev.task_status in
+           log_event config (`Assoc [
+             ("type", `String "task_claim_next_existing_task");
+             ("agent", `String agent_name);
+             ("task", `String prev.id);
+             ("from_status", `String from_status);
+             ("reason", `String "existing_claim_preserved");
+             ("ts", `String (now_iso ()));
+           ]);
+           Log.RoomTask.info
+             "task_claim_next preserved existing task: agent=%s task=%s \
+              from_status=%s — finish or explicitly release before claiming \
+              different work (#10421)"
+             agent_name prev.id from_status;
+           Coord_task.update_local_agent_state config ~agent_name (fun agent ->
+             { agent with status = Busy; current_task = Some prev.id });
+           let message =
+             Printf.sprintf
+               "%s already holds [P%d] %s: %s. ACTION: Resume this task; \
+                do not call claim_next again until it is done or explicitly \
+                released."
+               agent_name prev.priority prev.id prev.title
+           in
+           raise
+             (Existing_claim
+                (Claim_next_claimed
+                   {
+                     task_id = prev.id;
+                     title = prev.title;
+                     priority = prev.priority;
+                     released_task_id = None;
+                     message;
+                   })));
+      let observe_legacy_release () =
+        ()
       in
-      let released_task_id, working_tasks = match previous_claim with
-        | None -> None, backlog.tasks
-        | Some prev ->
-            (* #10421: include [reason] and [from_status] in the JSONL
-               event so the auto-release tail (43/24 release/claim
-               ratio, 5x hot-potato on task-056) is discriminable
-               without cross-referencing observe_task_transition.
-               [from_status] separates Claimed (most cases) from
-               InProgress (rare; signals a keeper that started work
-               and then re-entered claim_next).  Same reason vocabulary
-               the structured observation already uses. *)
-            let from_status = task_status_label prev.task_status in
-            log_event config (`Assoc [
-              ("type", `String "task_claim_next_auto_release");
-              ("agent", `String agent_name);
-              ("released_task", `String prev.id);
-              ("from_status", `String from_status);
-              ("reason", `String "prev_claim_implicit_replaced");
-              ("ts", `String (now_iso ()));
-            ]);
-            (* #10421: warn-level log so dashboards see the implicit
-               release at fleet scale. [InProgress → Todo] is the
-               more concerning subset (mid-work churn) — from_status
-               surfaces that distinction in a single line. *)
-            Log.RoomTask.warn
-              "task_claim_next auto-released prev claim: agent=%s task=%s \
-               from_status=%s — keeper called claim_next without \
-               releasing/finishing the prior task (#10421)"
-              agent_name prev.id from_status;
-            (* #10421: Prometheus counter so operators can graph rate
-               and split by keeper. Hook indirection lives in
-               [coord_hooks]; emit wired in [lib/coord.ml] to avoid
-               a [masc_coord → Prometheus] dep cycle. *)
-            (try
-               (Atomic.get Coord_hooks.task_auto_release_observed_fn)
-                 ~agent_name ~from_status
-             with
-             | Eio.Cancel.Cancelled _ as e -> raise e
-             | _ -> ());
-            (* No broadcast — internal state transition, log_event suffices. *)
-            let updated = List.map (fun (t : Masc_domain.task) ->
-              if String.equal t.id prev.id then { t with task_status = Todo }
-              else t
-            ) backlog.tasks in
-            Some prev.id, updated
-      in
+      let released_task_id, working_tasks = None, backlog.tasks in
 
       (* Starvation prevention: Calculate effective priority
          Tasks waiting >24h get priority boost (-1 per 24h, min 1) *)
@@ -556,8 +544,8 @@ let claim_next_r
         | [] -> eligible_from soft_unclaimed
       in
 
-      (* Helper: clear agent current_task and reset status after auto-release
-         when no replacement task can be claimed.  Delegates to
+      (* Helper: clear agent current_task and reset status after a legacy
+         released_task_id path when no replacement task can be claimed. Delegates to
          [Coord_task.update_local_agent_state] so the agent-file write
          holds [with_file_lock] on the agent file itself, matching the
          discipline used by [Coord_task] transitions (PR #6634). *)
@@ -581,7 +569,7 @@ let claim_next_r
                  version = backlog.version + 1;
                } in
                write_backlog config new_backlog;
-               observe_auto_release ()
+               observe_legacy_release ()
            | None -> ());
           clear_agent_state_after_release ();
           Claim_next_no_unclaimed
@@ -594,7 +582,7 @@ let claim_next_r
                  version = backlog.version + 1;
                } in
                write_backlog config new_backlog;
-               observe_auto_release ()
+               observe_legacy_release ()
            | None -> ());
           clear_agent_state_after_release ();
           Claim_next_no_eligible
@@ -638,7 +626,7 @@ let claim_next_r
                Coord_task.emit_task_activity config ~agent_name ~task_id:rid
                  ~kind:(Event_kind.Task.to_string Event_kind.Task.Released)
                  ~payload:(`Assoc [ ("task_id", `String rid) ]);
-               observe_auto_release ()
+               observe_legacy_release ()
            | None -> ());
           Coord_task.emit_task_activity config ~agent_name ~task_id:task.id
             ~kind:(Event_kind.Task.to_string Event_kind.Task.Claimed)
@@ -668,7 +656,7 @@ let claim_next_r
 
           let message = match released_task_id with
             | Some rid ->
-                Printf.sprintf "%s auto-released %s, then claimed [P%d] %s: %s"
+                Printf.sprintf "%s released %s, then claimed [P%d] %s: %s"
                   agent_name rid task.priority task.id task.title
             | None ->
                 Printf.sprintf "%s auto-claimed [P%d] %s: %s"
@@ -682,6 +670,7 @@ let claim_next_r
             message;
           }
     with
+    | Existing_claim result -> result
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e ->
       Claim_next_error (Printexc.to_string e)

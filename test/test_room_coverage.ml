@@ -334,62 +334,66 @@ let test_claim_next_reconciles_stale_agent_current_task () =
   )
 
 (* ============================================================ *)
-(* BUG-004: claim_next auto-release Tests                        *)
+(* #10421: claim_next existing-task preservation                 *)
 (* ============================================================ *)
 
-(** BUG-004: Same agent calling claim_next twice should auto-release
-    the first task, not orphan it. *)
-let test_claim_next_auto_releases_previous () =
+(** Same agent calling claim_next twice should keep the current task bound.
+    Implicit release creates keeper hot-potato loops when a model repeats the
+    claim tool before doing the work. *)
+let test_claim_next_preserves_existing_task () =
   with_test_env (fun config ->
     let _ = Coord.add_task config ~title:"First" ~priority:1 ~description:"" in
     let _ = Coord.add_task config ~title:"Second" ~priority:2 ~description:"" in
 
-    (* First claim: agent gets task-001 *)
     let r1 = Coord.claim_next config ~agent_name:"claude" in
-    Alcotest.(check bool) "first claim ok" true (contains_check r1);
     Alcotest.(check bool) "first claim has task-001" true (str_contains r1 "task-001");
 
-    (* Second claim by same agent: should auto-release task-001, claim task-002 *)
     let r2 = Coord.claim_next config ~agent_name:"claude" in
-    (* Result should contain warning about auto-release *)
-    Alcotest.(check bool) "second claim contains warning" true (contains_warning r2);
-    Alcotest.(check bool) "mentions released task" true (str_contains r2 "task-001");
-    Alcotest.(check bool) "claims new task" true (str_contains r2 "task-002");
+    Alcotest.(check bool) "second claim keeps current task" true
+      (str_contains r2 "already holds");
+    Alcotest.(check bool) "second claim mentions task-001" true
+      (str_contains r2 "task-001");
+    Alcotest.(check bool) "second claim does not move to task-002" false
+      (str_contains r2 "task-002");
 
-    (* Verify task-001 is back to Todo (not orphaned) via raw task data *)
     let tasks = Coord.get_tasks_raw config in
     let task_001 = List.find_opt (fun (t : Masc_domain.task) -> t.id = "task-001") tasks in
+    let task_002 = List.find_opt (fun (t : Masc_domain.task) -> t.id = "task-002") tasks in
     (match task_001 with
      | Some t ->
-         Alcotest.(check string) "task-001 released to todo"
+         Alcotest.(check string) "task-001 stays claimed"
+           "claimed" (Masc_domain.task_status_to_string t.task_status)
+     | None -> Alcotest.fail "task-001 not found in backlog");
+    (match task_002 with
+     | Some t ->
+         Alcotest.(check string) "task-002 stays todo"
            "todo" (Masc_domain.task_status_to_string t.task_status)
-     | None -> Alcotest.fail "task-001 not found in backlog")
+     | None -> Alcotest.fail "task-002 not found in backlog")
   )
 
-(** BUG-004: After auto-release, the released task is claimable by others. *)
-let test_claim_next_released_task_claimable_by_others () =
+(** A repeated claim by the owner must not make the current task claimable by
+    other agents. Peers should move to the next Todo task. *)
+let test_claim_next_preserved_task_not_claimable_by_others () =
   with_test_env (fun config ->
     let _ = Coord.add_task config ~title:"Task A" ~priority:1 ~description:"" in
     let _ = Coord.add_task config ~title:"Task B" ~priority:2 ~description:"" in
 
-    (* Claude claims task-001 *)
     let _ = Coord.claim_next config ~agent_name:"claude" in
-    (* Claude claims again, auto-releasing task-001 *)
     let _ = Coord.claim_next config ~agent_name:"claude" in
 
-    (* Gemini should be able to claim the released task-001 *)
     let r = Coord.claim_next config ~agent_name:"gemini" in
-    Alcotest.(check bool) "gemini can claim released task" true (contains_check r);
-    Alcotest.(check bool) "gemini gets task-001" true (str_contains r "task-001")
+    Alcotest.(check bool) "gemini does not get preserved task" false
+      (str_contains r "task-001");
+    Alcotest.(check bool) "gemini gets task-002" true (str_contains r "task-002")
   )
 
-(** BUG-004: claim_next_r returns released_task_id in structured result. *)
-let test_claim_next_r_released_task_field () =
+(** claim_next_r keeps the legacy released_task_id field but no longer sets it
+    for repeated owner calls. *)
+let test_claim_next_r_preserved_task_field () =
   with_test_env (fun config ->
     let _ = Coord.add_task config ~title:"Alpha" ~priority:1 ~description:"" in
     let _ = Coord.add_task config ~title:"Beta" ~priority:2 ~description:"" in
 
-    (* First claim: no previous task to release *)
     let r1 = Coord.claim_next_r config ~agent_name:"claude" () in
     (match r1 with
      | Coord.Claim_next_claimed { released_task_id = None; task_id; _ } ->
@@ -398,14 +402,14 @@ let test_claim_next_r_released_task_field () =
          Alcotest.fail "first claim should not release anything"
      | _ -> Alcotest.fail "first claim should succeed");
 
-    (* Second claim: should release task-001 *)
     let r2 = Coord.claim_next_r config ~agent_name:"claude" () in
     (match r2 with
-     | Coord.Claim_next_claimed { released_task_id = Some rid; task_id; _ } ->
-         Alcotest.(check string) "released task-001" "task-001" rid;
-         Alcotest.(check string) "claimed task-002" "task-002" task_id
-     | Coord.Claim_next_claimed { released_task_id = None; _ } ->
-         Alcotest.fail "second claim should report released task"
+     | Coord.Claim_next_claimed { released_task_id = None; task_id; message; _ } ->
+         Alcotest.(check string) "still task-001" "task-001" task_id;
+         Alcotest.(check bool) "message says already holds" true
+           (str_contains message "already holds")
+     | Coord.Claim_next_claimed { released_task_id = Some _; _ } ->
+         Alcotest.fail "second claim should not report a released task"
      | _ -> Alcotest.fail "second claim should succeed")
   )
 
@@ -1115,7 +1119,7 @@ let test_transition_done_from_claimed_emits_observability () =
              ("task_id", "task-001");
            ]))
 
-let test_claim_next_auto_release_emits_release_observability () =
+let test_claim_next_existing_task_does_not_emit_release_observability () =
   with_test_env (fun config ->
     let before_seq = latest_ring_seq () in
     let claude = find_agent_name_by_prefix config "claude" in
@@ -1126,13 +1130,14 @@ let test_claim_next_auto_release_emits_release_observability () =
     | Coord.Claim_next_claimed _ -> ()
     | _ -> Alcotest.fail "expected first claim_next_r to succeed");
     (match Coord.claim_next_r config ~agent_name:claude () with
-    | Coord.Claim_next_claimed { released_task_id = Some released; task_id; _ } ->
-        Alcotest.(check string) "released task id" "task-001" released;
-        Alcotest.(check string) "new task id" "task-002" task_id
-    | _ -> Alcotest.fail "expected auto-release on second claim_next_r");
+    | Coord.Claim_next_claimed { released_task_id = None; task_id; _ } ->
+        Alcotest.(check string) "keeps task id" "task-001" task_id
+    | Coord.Claim_next_claimed { released_task_id = Some _; _ } ->
+        Alcotest.fail "second claim_next_r should not auto-release"
+    | _ -> Alcotest.fail "expected existing task on second claim_next_r");
 
     let audit_entries = Audit_log.read_entries ~n:50 config in
-    Alcotest.(check bool) "audit release recorded" true
+    Alcotest.(check bool) "audit release not recorded" false
       (audit_has_entry audit_entries ~agent_id:claude
          ~action_pred:(function Audit_log.ReleaseTask -> true | _ -> false)
          ~details:
@@ -1145,7 +1150,7 @@ let test_claim_next_auto_release_emits_release_observability () =
     let ring_entries =
       Log.Ring.recent ~limit:50 ~module_filter:"Task" ~since_seq:before_seq ()
     in
-    Alcotest.(check bool) "ring release recorded" true
+    Alcotest.(check bool) "ring release not recorded" false
       (ring_has_entry ring_entries
          ~details:
            [
@@ -1456,9 +1461,12 @@ let () =
       Alcotest.test_case "consecutive" `Quick test_claim_next_consecutive;
       Alcotest.test_case "reconciles stale current_task" `Quick
         test_claim_next_reconciles_stale_agent_current_task;
-      Alcotest.test_case "BUG-004: auto-releases previous" `Quick test_claim_next_auto_releases_previous;
-      Alcotest.test_case "BUG-004: released task claimable" `Quick test_claim_next_released_task_claimable_by_others;
-      Alcotest.test_case "BUG-004: released_task_id field" `Quick test_claim_next_r_released_task_field;
+      Alcotest.test_case "#10421: preserves existing task" `Quick
+        test_claim_next_preserves_existing_task;
+      Alcotest.test_case "#10421: preserved task not claimable" `Quick
+        test_claim_next_preserved_task_not_claimable_by_others;
+      Alcotest.test_case "#10421: preserved task result field" `Quick
+        test_claim_next_r_preserved_task_field;
       Alcotest.test_case "release hard-stop blocks future claim_next" `Quick
         test_release_hard_stop_blocks_future_claim_next;
       Alcotest.test_case "release hard-stop blocks direct reclaim" `Quick
@@ -1514,8 +1522,8 @@ let () =
         test_task_transitions_emit_observability;
       Alcotest.test_case "claimed done fan-out" `Quick
         test_transition_done_from_claimed_emits_observability;
-      Alcotest.test_case "claim_next auto-release fan-out" `Quick
-        test_claim_next_auto_release_emits_release_observability;
+      Alcotest.test_case "claim_next existing task no release fan-out" `Quick
+        test_claim_next_existing_task_does_not_emit_release_observability;
     ];
 
     (* === Pause/Resume === *)

@@ -206,6 +206,22 @@ let run_named
       ~label:cascade_name
       candidate_cfgs
   in
+  let candidate_cfgs =
+    List.filter
+      (fun (provider_cfg : Llm_provider.Provider_config.t) ->
+         match
+           Cascade_health_tracker.check_circuit_breaker
+             Cascade_health_tracker.global
+             ~provider_key:provider_cfg.model_id
+         with
+         | Ok () -> true
+         | Error msg ->
+             Log.Misc.debug
+               "cascade %s: prefilter skipped %s (provider cooldown: %s)"
+               cascade_name provider_cfg.model_id msg;
+             false)
+      candidate_cfgs
+  in
   (* Cross-cascade health-aware fallback: when the current cascade has no
      tool-capable providers after filtering, search all other cascades for
      a healthy tool-capable provider. Depth 1 only (no recursive search). *)
@@ -428,8 +444,21 @@ let run_named
                 ?on_yield ?on_resume ~agent_ref:local_agent_ref ?proof_ref
                 ?contract goal
             in
+            (* RFC-0022 §1 (in-attempt liveness layer): see
+               [Cascade_attempt_liveness_config.outer_wall_for_attempt]
+               for the rule. The legacy [per_provider_timeout_s] is
+               clipped to the profile's wall budget so slow-but-honest
+               streams (local Ollama 27B / 70B+) are not pre-empted
+               before the observer would consider them stalled. *)
+            let outer_wall_for_provider =
+              Cascade_attempt_liveness_config.outer_wall_for_attempt
+                ~mode:liveness_mode
+                ~observer_attached:(Option.is_some liveness_observer_opt)
+                ~per_provider_timeout_s
+                ~provider_label:provider_cfg.model_id
+            in
             let result =
-              match per_provider_timeout_s with
+              match outer_wall_for_provider with
               | None -> run_fn ()
               | Some t ->
                   let clock_opt =
@@ -556,7 +585,7 @@ let run_named
       Error
         terminal_error
     | (provider_cfg : Llm_provider.Provider_config.t) :: rest ->
-      Eio.Fiber.yield (); (* Task 4-3: Prevent starvation during fast-fail cascades *)
+      Eio_guard.fair_yield (); (* P0: keep fast-fail cascades scheduler-fair. *)
       match Cascade_health_tracker.check_circuit_breaker Cascade_health_tracker.global ~provider_key:provider_cfg.model_id with
       | Error msg ->
           Log.Misc.debug "cascade %s: skipping %s (provider cooldown: %s)" cascade_name provider_cfg.model_id msg;
@@ -1164,7 +1193,7 @@ let run_named_with_masc_tools
     ?priority
     ?(system_prompt = "")
     ~(masc_tools : Masc_domain.tool_schema list)
-    ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
+    ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.t)
     ?(max_turns = 20)
     ?stream_idle_timeout_s
     ?(temperature = Oas_worker_cascade.default_temperature)
@@ -1215,7 +1244,7 @@ let run_model_with_masc_tools
     ~goal
     ?(system_prompt = "")
     ~(masc_tools : Masc_domain.tool_schema list)
-    ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
+    ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.t)
     ?(max_turns = 20)
     ?stream_idle_timeout_s
     ?(temperature = Oas_worker_cascade.default_temperature)

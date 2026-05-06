@@ -473,6 +473,30 @@ type keeper_turn_slot_state = {
   autonomous_ticket : int option ref;
 }
 
+type keeper_turn_slot_control = {
+  release_for_retry : unit -> unit;
+  reacquire_after_retry :
+    unit ->
+    (int, [ `Semaphore_wait_timeout of semaphore_wait_timeout ]) result;
+}
+
+let make_keeper_turn_slot_state () =
+  {
+    acquired_autonomous = ref false;
+    acquired_reactive = ref false;
+    acquired_turn = ref false;
+    autonomous_acquisition_id = ref None;
+    reactive_acquisition_id = ref None;
+    turn_acquisition_id = ref None;
+    autonomous_ticket = ref None;
+  }
+
+let keeper_turn_slot_is_held state =
+  !(state.acquired_autonomous)
+  || !(state.acquired_reactive)
+  || !(state.acquired_turn)
+  || Option.is_some !(state.autonomous_ticket)
+
 let after_acquire_flag_hook_for_test :
   (label:string -> keeper_name:string -> unit) option ref =
   ref None
@@ -534,18 +558,24 @@ let release_recorded_holder
       Eio.Semaphore.release sem
     end
 
-let release_keeper_turn_slot ~keeper_name state =
+let release_keeper_turn_slot_impl
+    ~keeper_name
+    ~(stamp_autonomous_completion : bool)
+    state =
   safe_bookkeeping ~op:"drop_autonomous_waiter" (fun () ->
     Option.iter
       (fun ticket -> drop_autonomous_waiter ~ticket)
       !(state.autonomous_ticket));
+  state.autonomous_ticket := None;
   (* Release exactly what we acquired. The turn, autonomous, and reactive
      semaphores account for separate quotas, so release order does not affect
      permit ownership. *)
   if !(state.acquired_turn) then begin
     release_recorded_holder ~keeper_name ~label:"turn"
       ~acquisition_id:!(state.turn_acquisition_id)
-      turn_semaphore
+      turn_semaphore;
+    state.acquired_turn := false;
+    state.turn_acquisition_id := None
   end;
   if !(state.acquired_autonomous) then begin
     release_recorded_holder ~keeper_name ~label:"autonomous"
@@ -555,15 +585,28 @@ let release_keeper_turn_slot ~keeper_name state =
            the semaphore so that [maybe_yield_for_fairness] can measure the
            correct interval when this keeper's heartbeat loops back
            immediately. *)
-        safe_bookkeeping ~op:"record_autonomous_completion" (fun () ->
-          record_autonomous_completion ~keeper_name))
-      autonomous_turn_semaphore
+        if stamp_autonomous_completion then
+          safe_bookkeeping ~op:"record_autonomous_completion" (fun () ->
+            record_autonomous_completion ~keeper_name))
+      autonomous_turn_semaphore;
+    state.acquired_autonomous := false;
+    state.autonomous_acquisition_id := None
   end;
   if !(state.acquired_reactive) then begin
     release_recorded_holder ~keeper_name ~label:"reactive"
       ~acquisition_id:!(state.reactive_acquisition_id)
-      reactive_turn_semaphore
+      reactive_turn_semaphore;
+    state.acquired_reactive := false;
+    state.reactive_acquisition_id := None
   end
+
+let release_keeper_turn_slot ~keeper_name state =
+  release_keeper_turn_slot_impl
+    ~keeper_name ~stamp_autonomous_completion:true state
+
+let release_keeper_turn_slot_for_retry ~keeper_name state =
+  release_keeper_turn_slot_impl
+    ~keeper_name ~stamp_autonomous_completion:false state
 
 (** Force-release every slot recorded for [keeper_name] in [holder_table].
     Called by the supervisor when a keeper has been declared crashed but
@@ -667,20 +710,46 @@ let reset_autonomous_completion_for_test () : unit =
    partially observed loop. *)
 let oas_timeout_budget_strike_limit = 3
 
-let bump_budget_exhaustion_seeded ~keeper_name:_ ~prior_strikes : int =
-  max 0 prior_strikes + 1
+module Budget_strike_map = Map.Make (String)
 
-let bump_budget_exhaustion ~keeper_name:_ : int =
-  1
+let budget_exhaustions : int Budget_strike_map.t Atomic.t =
+  Atomic.make Budget_strike_map.empty
 
-let reset_budget_exhaustion ~keeper_name:_ : unit =
-  ()
+let update_budget_exhaustions f =
+  let rec loop () =
+    let current = Atomic.get budget_exhaustions in
+    let next, result = f current in
+    if Atomic.compare_and_set budget_exhaustions current next then result
+    else loop ()
+  in
+  loop ()
 
-let peek_budget_exhaustion_for_test ~keeper_name:_ : int =
-  0
+let bump_budget_exhaustion_seeded ~keeper_name ~prior_strikes : int =
+  let prior_strikes = max 0 prior_strikes in
+  update_budget_exhaustions (fun current ->
+    let current_strikes =
+      Budget_strike_map.find_opt keeper_name current
+      |> Option.value ~default:prior_strikes
+    in
+    let next_strikes = max current_strikes prior_strikes + 1 in
+    (Budget_strike_map.add keeper_name next_strikes current, next_strikes))
 
-let set_budget_exhaustion_for_test ~keeper_name:_ ~strikes:_ : unit =
-  ()
+let bump_budget_exhaustion ~keeper_name : int =
+  bump_budget_exhaustion_seeded ~keeper_name ~prior_strikes:0
+
+let reset_budget_exhaustion ~keeper_name : unit =
+  update_budget_exhaustions (fun current ->
+    (Budget_strike_map.remove keeper_name current, ()))
+
+let peek_budget_exhaustion_for_test ~keeper_name : int =
+  Budget_strike_map.find_opt keeper_name (Atomic.get budget_exhaustions)
+  |> Option.value ~default:0
+
+let set_budget_exhaustion_for_test ~keeper_name ~strikes : unit =
+  if strikes <= 0 then reset_budget_exhaustion ~keeper_name
+  else
+    update_budget_exhaustions (fun current ->
+      (Budget_strike_map.add keeper_name strikes current, ()))
 
 (** Test-only: stamp a completion time directly without going through
     [Time_compat.now].  Allows deterministic fairness-cooldown scenarios. *)
@@ -790,7 +859,7 @@ let rec wait_for_autonomous_queue_head ~(keeper_name : string) ~(ticket : int)
            Eio.Fiber.yield ());
       wait_for_autonomous_queue_head ~keeper_name ~ticket ~started_at)
 
-let with_keeper_turn_slot ~keeper_name ~channel f =
+let with_keeper_turn_slot_control ~keeper_name ~channel f =
   let is_autonomous =
     match channel with
     | Keeper_world_observation.Scheduled_autonomous -> true
@@ -805,33 +874,12 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
      log lines from every other surface that uses the SSOT helper —
      operators grepping for one form silently missed the other. *)
   let channel_label = Keeper_world_observation.channel_to_string channel in
-  let t0 = Time_compat.now () in
-  let queue_depth = List.length (autonomous_waiter_snapshot_for_test ()) in
-  Log.Keeper.routine "semaphore_acquire: keeper=%s channel=%s autonomous_available=%d turn_available=%d queue_depth=%d"
-    keeper_name
-    channel_label
-    (Eio.Semaphore.get_value autonomous_turn_semaphore)
-    (Eio.Semaphore.get_value turn_semaphore)
-    queue_depth;
-  Prometheus.set_gauge Prometheus.metric_keeper_turn_queue_depth
-    ~labels:[("keeper", keeper_name); ("channel", channel_label)]
-    (float_of_int queue_depth);
   (* Track acquisitions in mutable flags so the outer Fun.protect can
      release exactly the slots we hold — regardless of which result or
      exception path fires (Eio.Cancel.Cancelled or any other). This
      keeps resource cleanup independent of Eio.Semaphore's internal
      cancel-race handling. *)
-  let slot_state =
-    {
-      acquired_autonomous = ref false;
-      acquired_reactive = ref false;
-      acquired_turn = ref false;
-      autonomous_acquisition_id = ref None;
-      reactive_acquisition_id = ref None;
-      turn_acquisition_id = ref None;
-      autonomous_ticket = ref None;
-    }
-  in
+  let slot_state = make_keeper_turn_slot_state () in
   let acquire_bounded ~label ~phase sem =
     match Eio_context.get_clock_opt () with
     | Some clock ->
@@ -888,9 +936,22 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
          record_holder is the caller's responsibility, after flag set. *)
       Ok ()
   in
-  Fun.protect
-    ~finally:(fun () -> release_keeper_turn_slot ~keeper_name slot_state)
-    (fun () ->
+  let log_acquire_attempt () =
+    let queue_depth = List.length (autonomous_waiter_snapshot_for_test ()) in
+    Log.Keeper.routine
+      "semaphore_acquire: keeper=%s channel=%s autonomous_available=%d turn_available=%d queue_depth=%d"
+      keeper_name
+      channel_label
+      (Eio.Semaphore.get_value autonomous_turn_semaphore)
+      (Eio.Semaphore.get_value turn_semaphore)
+      queue_depth;
+    Prometheus.set_gauge Prometheus.metric_keeper_turn_queue_depth
+      ~labels:[("keeper", keeper_name); ("channel", channel_label)]
+      (float_of_int queue_depth)
+  in
+  let acquire_all () =
+    let t0 = Time_compat.now () in
+    log_acquire_attempt ();
       let autonomous_result =
         if is_autonomous
         then begin
@@ -984,10 +1045,48 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
             record_holder ~label:"turn" ~keeper_name
               ~acquired_at:(Time_compat.now ())
           in
-          slot_state.turn_acquisition_id := Some acquisition_id;
-          let semaphore_wait_ms =
-            int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
-          Ok (f ~semaphore_wait_ms))
+              slot_state.turn_acquisition_id := Some acquisition_id;
+              let semaphore_wait_ms =
+                int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
+              Ok semaphore_wait_ms
+  in
+  let slot_control =
+    {
+      release_for_retry =
+        (fun () ->
+          if keeper_turn_slot_is_held slot_state then begin
+            Log.Keeper.info
+              "%s: releasing keeper turn slot before degraded retry"
+              keeper_name;
+            release_keeper_turn_slot_for_retry ~keeper_name slot_state
+          end);
+      reacquire_after_retry =
+        (fun () ->
+          if keeper_turn_slot_is_held slot_state then begin
+            Log.Keeper.warn
+              "%s: retry slot reacquire requested while a slot is still held; releasing first"
+              keeper_name;
+            release_keeper_turn_slot_for_retry ~keeper_name slot_state
+          end;
+          acquire_all ());
+    }
+  in
+  Fun.protect
+    ~finally:(fun () -> release_keeper_turn_slot ~keeper_name slot_state)
+    (fun () ->
+      match acquire_all () with
+      | Error _ as e -> e
+      | Ok semaphore_wait_ms ->
+          Ok (f ~semaphore_wait_ms ~slot_control))
+;;
+
+let with_keeper_turn_slot ~keeper_name ~channel f =
+  with_keeper_turn_slot_control ~keeper_name ~channel
+    (fun ~semaphore_wait_ms ~slot_control:_ -> f ~semaphore_wait_ms)
+;;
+
+let with_keeper_turn_slot_control_for_test ~keeper_name ~channel f =
+  with_keeper_turn_slot_control ~keeper_name ~channel f
 ;;
 
 let with_keeper_turn_slot_for_test ~keeper_name ~channel f =

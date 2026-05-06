@@ -34,47 +34,43 @@ type _ turn_state =
   | Failed : failure_reason -> [`Failed] turn_state [@tla.terminal]
   | Cancelled : cancel_reason -> [`Cancelled] turn_state [@tla.terminal]
 
-let to_tla_symbol : type a. a turn_state -> string = function
-  | Idle -> "idle"
-  | Phase_gating -> "phase_gating"
-  | Cascade_routing -> "cascade_routing"
-  | Awaiting_provider -> "awaiting_provider"
-  | Streaming -> "streaming"
-  | Awaiting_tool_result -> "awaiting_tool"
-  | Completing -> "completing"
-  | Done -> "done"
-  | Failed _ -> "failed"
-  | Cancelled _ -> "cancelled"
+module Tla_symbol = struct
+  type t =
+    | Idle [@tla.idle]
+    | Phase_gating [@tla.active]
+    | Cascade_routing [@tla.active]
+    | Awaiting_provider [@tla.active]
+    | Streaming [@tla.active]
+    | Awaiting_tool_result [@tla.symbol "awaiting_tool"] [@tla.active]
+    | Completing [@tla.active]
+    | Done [@tla.terminal]
+    | Failed of failure_reason [@tla.terminal]
+    | Cancelled of cancel_reason [@tla.terminal]
+  [@@deriving tla]
+end
 
-let all_symbols = [
-  "idle"; "phase_gating"; "cascade_routing"; "awaiting_provider";
-  "streaming"; "awaiting_tool"; "completing"; "done"; "failed"; "cancelled"
-]
+let tla_symbol_variant : type a. a turn_state -> Tla_symbol.t = function
+  | Idle -> Tla_symbol.Idle
+  | Phase_gating -> Tla_symbol.Phase_gating
+  | Cascade_routing -> Tla_symbol.Cascade_routing
+  | Awaiting_provider -> Tla_symbol.Awaiting_provider
+  | Streaming -> Tla_symbol.Streaming
+  | Awaiting_tool_result -> Tla_symbol.Awaiting_tool_result
+  | Completing -> Tla_symbol.Completing
+  | Done -> Tla_symbol.Done
+  | Failed reason -> Tla_symbol.Failed reason
+  | Cancelled reason -> Tla_symbol.Cancelled reason
 
-let active_symbols = [
-  "phase_gating"; "cascade_routing"; "awaiting_provider";
-  "streaming"; "awaiting_tool"; "completing"
-]
+let to_tla_symbol state = Tla_symbol.to_tla_symbol (tla_symbol_variant state)
 
-let terminal_symbols = [
-  "done"; "failed"; "cancelled"
-]
+let all_symbols = Tla_symbol.all_symbols
+let active_symbols = Tla_symbol.active_symbols
+let terminal_symbols = Tla_symbol.terminal_symbols
+let idle_symbols = Tla_symbol.idle_symbols
 
-let idle_symbols = [ "idle" ]
-
-let is_active : type a. a turn_state -> bool = function
-  | Phase_gating | Cascade_routing | Awaiting_provider | Streaming | Awaiting_tool_result | Completing -> true
-  | _ -> false
-
-let is_terminal : type a. a turn_state -> bool = function
-  | Done | Failed _ | Cancelled _ -> true
-  | _ -> false
-
-let is_idle : type a. a turn_state -> bool = function
-  | Idle -> true
-  | _ -> false
-
-
+let is_active state = Tla_symbol.is_active (tla_symbol_variant state)
+let is_terminal state = Tla_symbol.is_terminal (tla_symbol_variant state)
+let is_idle state = Tla_symbol.is_idle (tla_symbol_variant state)
 
 let cancel_reason_label = function
   | Cancelled_supervisor_stop -> "supervisor_stop"
@@ -120,8 +116,6 @@ let pp_failure_reason fmt = function
       Format.fprintf fmt "runtime_error(%s)" msg
   | Failure_unexpected_exception { exn; _ } ->
       Format.fprintf fmt "unexpected_exception(%s)" exn
-
-let to_tla_symbol = turn_state_label
 
 let pp_turn_state fmt (s : _ turn_state) =
   Format.pp_print_string fmt (turn_state_label s)

@@ -112,6 +112,9 @@ type agent_activity = {
 
 val read_all_events : ?fs:'a -> config -> event_record list
 
+val read_recent_events :
+  ?fs:'a -> config -> limit:int -> event_record list
+
 val read_events_since :
   ?fs:'a -> config -> since:float -> event_record list
 

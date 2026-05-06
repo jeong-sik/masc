@@ -26,6 +26,14 @@ val render_inline_skip_reason :
   reason_text:string ->
   string
 
+val render_inline_skip_reason_with_source :
+  source_path:string ->
+  source_line:int ->
+  tool_name:string ->
+  reason_code:string ->
+  reason_text:string ->
+  string
+
 (** Broadcast a tool-skip event to SSE listeners and record it in
     [Dashboard_governance_metrics]. *)
 val broadcast_tool_skipped :
@@ -61,6 +69,8 @@ type gate_decision_event =
   ; turn : int
   ; accumulated_cost_usd : float
   ; stage_latency_ms : float
+  ; source_path : string option
+  ; source_line : int option
   }
 
 (** Default gate observer — discards events. *)
@@ -75,6 +85,8 @@ val notify_gate_decision :
     when one is registered. Marks the turn as gate-rejected on
     [override] / [approval_required] decisions. *)
 val emit_gate_event :
+  source_path:string option ->
+  source_line:int option ->
   stage:string ->
   decision:gate_decision ->
   reason_code:string ->
@@ -90,6 +102,8 @@ val emit_gate_event :
     single call used by every guard. *)
 val report_gate_decision :
   (gate_decision_event -> unit) ->
+  source_path:string option ->
+  source_line:int option ->
   stage:string ->
   decision:gate_decision ->
   reason_code:string ->

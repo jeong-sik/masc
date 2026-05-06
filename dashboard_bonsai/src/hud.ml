@@ -4,7 +4,7 @@
     optional semantic color class. Phase 1에서 logs_view.ml에 인라인이었으나
     Phase 2.A shell 추출로 공용 모듈 분리.
 
-    logs 탭은 8 cells (Source/Total/Level/Refresh/Limit/Link/Fleet/Synced)을
+    logs 탭은 8 cells (Source/Total/Level/Refresh/Logs/Keepers/Fleet/Synced)을
     쓰지만, 다른 탭은 자기 필요에 맞게 셀 리스트만 다르게 조립 — API는
     cell 렌더 primitive + strip container만 제공.
 

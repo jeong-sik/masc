@@ -1542,38 +1542,6 @@ legacy_scope = "removed"
     check (list string) "base include is a loader key"
       ["keeper.legacy_scope"] unknown
 
-let test_shared_memory_scope_is_canonical_toml () =
-  let input = {|
-[keeper]
-goal = "g"
-shared_memory_scope = "room"
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    let unknown = KTP.detect_unknown_keeper_toml_keys doc in
-    check (list string) "shared_memory_scope is canonical" [] unknown;
-    match KTP.profile_defaults_of_toml doc with
-    | Error e -> fail e
-    | Ok d ->
-      check (option string) "shared_memory_scope parsed"
-        (Some "room") d.KTP.shared_memory_scope
-
-let test_shared_memory_scope_rejects_invalid_value () =
-  let input = {|
-[keeper]
-goal = "g"
-shared_memory_scope = "global"
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    match KTP.profile_defaults_of_toml doc with
-    | Ok _ -> fail "expected invalid shared_memory_scope to be rejected"
-    | Error e ->
-      check bool "mentions shared_memory_scope" true
-        (contains_substring e "shared_memory_scope")
-
 let test_oas_env_parses_allowed_keys () =
   let input = {|
 [keeper]
@@ -1962,10 +1930,6 @@ let () =
             test_detect_unknown_keys_accepts_tool_access_table;
           test_case "accepts loader base include" `Quick
             test_detect_unknown_keys_accepts_loader_base;
-          test_case "accepts shared_memory_scope" `Quick
-            test_shared_memory_scope_is_canonical_toml;
-          test_case "rejects invalid shared_memory_scope" `Quick
-            test_shared_memory_scope_rejects_invalid_value;
           test_case "also_allow alias flagged" `Quick
             test_detect_unknown_keys_flags_also_allow_alias;
           test_case "oas_env keys not flagged as unknown" `Quick

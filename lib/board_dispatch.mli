@@ -109,6 +109,16 @@ val init_jsonl : unit -> unit
 val reset_for_test : unit -> unit
 (** Drop the in-memory backend. Test-only. *)
 
+val force_flusher_start_cas_conflicts_for_test : int -> unit
+(** Force the next [n] flusher-start CAS attempts to lose. Test-only. *)
+
+val flusher_started_for_test : unit -> bool
+(** [true] iff the active backend has marked its flusher daemon as started.
+    Test-only. *)
+
+val flusher_start_backoff_delay_for_test : attempt:int -> float
+(** Exponential backoff delay used after a flusher-start CAS loss. Test-only. *)
+
 val backend_name : unit -> string
 (** ["jsonl"] when initialised, ["uninitialized"] otherwise. *)
 
@@ -187,11 +197,21 @@ val list_comments : ?limit:int -> unit -> Board.comment list
 
 (** {1 Votes} *)
 
+val current_vote_for_post :
+  voter:string ->
+  post_id:string ->
+  (Board.vote_direction option, Board.board_error) Result.t
+
 val vote :
   voter:string ->
   post_id:string ->
   direction:Board.vote_direction ->
   (int, Board.board_error) Result.t
+
+val current_vote_for_comment :
+  voter:string ->
+  comment_id:string ->
+  (Board.vote_direction option, Board.board_error) Result.t
 
 val vote_comment :
   voter:string ->
@@ -215,6 +235,29 @@ val list_reactions :
 
 (** {1 Karma} *)
 
+val karma_score_for_direction : Board.vote_direction -> int
+(** Scoring contract re-export: [Up] → [+1], [Down] → [0].
+    See {!Board.karma_score_for_direction}. *)
+
+val get_karma_ledger :
+  ?agent:string ->
+  ?limit:int ->
+  unit ->
+  Board.karma_event list
+(** Return attributed karma events from the active backend.
+
+    Events are drawn from the in-memory vote log via
+    {!Board.build_karma_ledger} and are sorted ascending by [ts]
+    (oldest first).
+
+    @param agent  When provided, filters to events where
+                  [karma_event.recipient = agent] (case-sensitive).
+    @param limit  Caps the result list (applied after filtering).
+                  Default: unlimited.
+
+    The rebuild contract: summing [delta] over the unfiltered
+    result must equal [get_all_karma ()] for every recipient. *)
+
 val get_all_karma : unit -> (string * int) list
 
 val get_agent_karma : agent_name:string -> int
@@ -231,3 +274,24 @@ val stats : unit -> Yojson.Safe.t
 
 val flush : unit -> unit
 (** Force-flush dirty posts/comments to disk. *)
+
+(** {1 SubBoard operations} *)
+
+val create_sub_board :
+  slug:string ->
+  name:string ->
+  description:string ->
+  owner:string ->
+  ?access:Board.sub_board_access ->
+  unit ->
+  (Board.sub_board, Board.board_error) Result.t
+
+val get_sub_board :
+  sub_board_id:string ->
+  (Board.sub_board, Board.board_error) Result.t
+
+val list_sub_boards : unit -> Board.sub_board list
+
+val delete_sub_board :
+  sub_board_id:string ->
+  (unit, Board.board_error) Result.t

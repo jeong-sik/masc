@@ -1,7 +1,13 @@
 (* Recovery — Cycle 23 / Tier B6.
    Classification plus callback-driven strategy execution. Keeper-turn
    lifecycle integration remains outside this module; see recovery.mli for
-   the design rationale. *)
+   the design rationale.
+
+   Audit response 2026-05-05 §4: classification + audit log entry only;
+   strategy execution is deferred until the keeper-turn wire-in lands
+   (see resilience_runtime.mli §Deferred). External audits should read the
+   matrix at docs/audit-responses/2026-05-05-dashboard-heuristic.md before
+   filing claims against this module. *)
 
 type error_mode =
   | TransientError of {
@@ -256,23 +262,31 @@ let transient_phrases =
 
 let resource_phrases =
   [ ("token", `Tokens);
+    ("context overflow", `Tokens);
+    ("context window", `Tokens);
+    ("context length", `Tokens);
     ("memory", `Memory);
     ("disk", `Disk);
+    ("quota", `Cost);
+    ("credit", `Cost);
+    ("resource exhausted", `Cost);
     ("budget", `Cost);
+    ("cost", `Cost);
   ]
 
 let classify_string (s : string) : error_mode =
-  if List.exists (fun p -> lowercased_contains s p) transient_phrases then
-    transient ~detail:s ~max_retries:3 ~backoff_ms:250 ()
-  else
-    match
-      List.find_opt
-        (fun (p, _) -> lowercased_contains s p)
-        resource_phrases
-    with
-    | Some (_, resource) ->
-        resource_exhausted_unknown ~resource ~detail:s
-    | None -> permanent ~detail:s ~fallback:(HumanHandoff s)
+  match
+    List.find_opt
+      (fun (p, _) -> lowercased_contains s p)
+      resource_phrases
+  with
+  | Some (_, resource) ->
+      resource_exhausted_unknown ~resource ~detail:s
+  | None ->
+      if List.exists (fun p -> lowercased_contains s p) transient_phrases then
+        transient ~detail:s ~max_retries:3 ~backoff_ms:250 ()
+      else
+        permanent ~detail:s ~fallback:(HumanHandoff s)
 
 (* ── Default strategy selection ───────────────────────────────── *)
 

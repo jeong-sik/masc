@@ -8,6 +8,7 @@ import {
   normalizeKeeperBdiSnapshot,
   pinInspectorKeeper,
 } from './inspector-keeper-bdi'
+import { clearPins } from './multi-keeper-pin-store'
 
 const snapshot = {
   keeper: 'scholar',
@@ -51,7 +52,8 @@ afterEach(() => {
   }
   vi.unstubAllGlobals()
   activeKeeperName.value = ''
-  inspectorKeeperPin.value = null
+  clearPins()
+  void inspectorKeeperPin.value
 })
 
 describe('normalizeKeeperBdiSnapshot', () => {

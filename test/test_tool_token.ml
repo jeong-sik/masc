@@ -101,9 +101,12 @@ let test_dispatch_with_token () =
   | Error e -> fail e
   | Ok token ->
     match Tool_dispatch.dispatch ~token ~args:`Null with
-    | Some (true, msg) ->
-      check string "dispatch result" ("dispatched:" ^ tool) msg
-    | Some (false, msg) -> fail ("dispatch returned false: " ^ msg)
+    | Some tr ->
+      let ok = tr.success in
+      let msg = Tool_result.message tr in
+      (match ok with
+       | true -> check string "dispatch result" ("dispatched:" ^ tool) msg
+       | false -> fail ("dispatch returned false: " ^ msg))
     | None -> fail "dispatch returned None for minted token"
 
 (* ================================================================ *)

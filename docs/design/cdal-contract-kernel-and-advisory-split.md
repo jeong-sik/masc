@@ -150,16 +150,16 @@ Any kernel that reconstructs missing facts from traces by filename, timestamp pr
 That is acceptable for transport.
 It is not acceptable as part of a deterministic contract kernel unless the participating subset is typed and fail-closed.
 
-### 3.4 Proof Integrity and Loading Are Weak
+### 3.4 Proof Integrity and Loading Boundaries
 
-`proof-store://` is currently a write-side naming convention, not a full read-side public API.
+`proof-store://` is an OAS-owned read/write scheme. OAS exposes the public
+read surface through `Agent_sdk.Proof_store`; MASC uses
+`lib/proof_artifact_reader.ml` as a narrow adapter and must not mirror the
+directory layout.
 
-Current gaps:
+Remaining deterministic-kernel gap:
 
-- no public dereference surface
-- no typed artifact readers
-- no artifact digest in the manifest
-- no strict fail-closed handling for unsupported schema versions
+- raw evidence artifacts are not all digest-bound in the manifest
 
 ## 4. Proposed Architecture
 
@@ -714,22 +714,29 @@ Cdal_advice
   advisory_input -> advice option
 ```
 
-### 11.2 Long-Term OAS Reader API
+### 11.2 OAS Reader API Status
 
-Long-term, OAS should own the read side for the `proof-store://` scheme.
+OAS owns the read side for the `proof-store://` scheme. MASC readers should
+delegate to `Agent_sdk.Proof_store` through the local adapter, preserving OAS as
+the authority for scheme parsing, traversal rejection, and filesystem layout.
 
-Required public APIs:
+Current public APIs:
 
 - `Proof_store.resolve_ref`
 - `Proof_store.read_json`
 - `Proof_store.read_jsonl`
+- `Proof_store.load_manifest`
 - `Proof_store.load_contract`
 
-This keeps the proof-store scheme and layout authoritative in OAS rather than MASC.
+This keeps the proof-store scheme and layout authoritative in OAS rather than
+MASC.
 
-## 12. Rollout Plan
+## 12. Regression Checklist
 
-### Phase 1A: Single-Run Deterministic Audit in MASC
+The phase-1 deterministic audit lane is implemented in MASC, but future reader
+or judge changes must preserve the boundaries above.
+
+### Single-Run Deterministic Audit in MASC
 
 Preconditions:
 

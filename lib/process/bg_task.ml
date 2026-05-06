@@ -59,6 +59,8 @@ type state = {
   timeout_sec : float;
   stdout_buf : Buffer.t;
   stderr_buf : Buffer.t;
+  mutable stdout_base_offset : int;
+  mutable stderr_base_offset : int;
   mutable status : Unix.process_status option;
   mutable closed : bool;
   mutable stdout_eof : bool;
@@ -123,6 +125,49 @@ let fresh_id () =
 
 let try_set_nonblock fd = Safe_ops.protect ~default:() (fun () -> Unix.set_nonblock fd)
 
+let shell_ring_line_limit () =
+  match Sys.getenv_opt "MASC_KEEPER_SHELL_RING_LINES" with
+  | Some raw -> (
+      match int_of_string_opt (String.trim raw) with
+      | Some n when n >= 0 -> n
+      | _ -> 5000)
+  | None -> 5000
+
+let retained_start_for_last_lines s ~limit =
+  if limit <= 0 then String.length s
+  else
+    let line_count = ref 0 in
+    String.iter (fun ch -> if ch = '\n' then incr line_count) s;
+    if String.length s > 0 && s.[String.length s - 1] <> '\n' then
+      incr line_count;
+    if !line_count <= limit then
+      0
+    else
+      let drop_newlines = !line_count - limit in
+      let seen = ref 0 in
+      let start = ref 0 in
+      let i = ref 0 in
+      while !i < String.length s && !seen < drop_newlines do
+        if s.[!i] = '\n' then begin
+          incr seen;
+          start := !i + 1
+        end;
+        incr i
+      done;
+      !start
+
+let trim_buffer_to_ring buf base_offset =
+  let limit = shell_ring_line_limit () in
+  let contents = Buffer.contents buf in
+  let drop_len = retained_start_for_last_lines contents ~limit in
+  if drop_len <= 0 then base_offset
+  else begin
+    Buffer.clear buf;
+    if drop_len < String.length contents then
+      Buffer.add_substring buf contents drop_len (String.length contents - drop_len);
+    base_offset + drop_len
+  end
+
 (* [drain_fd_to_buf buf fd] reads every byte currently available on
    [fd] without blocking. Returns [true] if EOF was observed. *)
 let drain_fd_to_buf buf fd =
@@ -151,10 +196,14 @@ let poll_state st =
   else begin
     if not st.stdout_eof then begin
       let eof = drain_fd_to_buf st.stdout_buf st.handle.stdout_fd in
+      st.stdout_base_offset <-
+        trim_buffer_to_ring st.stdout_buf st.stdout_base_offset;
       st.stdout_eof <- eof
     end;
     if not st.stderr_eof then begin
       let eof = drain_fd_to_buf st.stderr_buf st.handle.stderr_fd in
+      st.stderr_base_offset <-
+        trim_buffer_to_ring st.stderr_buf st.stderr_base_offset;
       st.stderr_eof <- eof
     end;
     (match st.status with
@@ -210,6 +259,8 @@ let spawn ?base_path ~keeper ~argv ~cwd ~envp ~timeout_sec () =
           timeout_sec;
           stdout_buf = Buffer.create 4096;
           stderr_buf = Buffer.create 4096;
+          stdout_base_offset = 0;
+          stderr_base_offset = 0;
           status = None;
           closed = false;
           stdout_eof = false;
@@ -220,10 +271,17 @@ let spawn ?base_path ~keeper ~argv ~cwd ~envp ~timeout_sec () =
       with_reg (fun () -> Hashtbl.replace registry tid st);
       Ok tid
 
-let bufsub buf since =
+let bufsub buf ~base_offset since =
   let len = Buffer.length buf in
-  if since < 0 || since >= len then ""
-  else Buffer.sub buf since (len - since)
+  if since < base_offset then
+    Buffer.contents buf
+  else
+    let local_since = since - base_offset in
+    if local_since < 0 || local_since >= len then ""
+    else Buffer.sub buf local_since (len - local_since)
+
+let bytes_dropped_since ~base_offset since =
+  if since < base_offset then base_offset - since else 0
 
 let read tid ~since_stdout ~since_stderr =
   let st_opt = with_reg (fun () -> Hashtbl.find_opt registry tid) in
@@ -234,12 +292,20 @@ let read tid ~since_stdout ~since_stderr =
          with_reg (fun () -> poll_state st);
          Ok
            {
-             stdout_since = bufsub st.stdout_buf since_stdout;
-             stderr_since = bufsub st.stderr_buf since_stderr;
+             stdout_since =
+               bufsub st.stdout_buf ~base_offset:st.stdout_base_offset
+                 since_stdout;
+             stderr_since =
+               bufsub st.stderr_buf ~base_offset:st.stderr_base_offset
+                 since_stderr;
              closed = st.closed;
              status = st.status;
-             bytes_dropped_stdout = 0;
-             bytes_dropped_stderr = 0;
+             bytes_dropped_stdout =
+               bytes_dropped_since ~base_offset:st.stdout_base_offset
+                 since_stdout;
+             bytes_dropped_stderr =
+               bytes_dropped_since ~base_offset:st.stderr_base_offset
+                 since_stderr;
            }
        with e -> Error (Read_failed (Printexc.to_string e)))
 

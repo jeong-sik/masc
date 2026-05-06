@@ -196,6 +196,19 @@ let read_all_events ?fs:_ config : event_record list =
   else
     read_all_events_from_path (telemetry_file config)
 
+let read_recent_events ?fs:_ config ~limit : event_record list =
+  if limit <= 0 then []
+  else
+    let store = get_telemetry_store config in
+    let jsons = Dated_jsonl.read_recent store limit in
+    if jsons <> [] then
+      parse_event_records jsons
+    else
+      read_all_events_from_path (telemetry_file config)
+      |> List.rev
+      |> List.filteri (fun i _ -> i < limit)
+      |> List.rev
+
 let summarize_tool_usage ?fs config : tool_usage_summary =
   let telemetry_path = telemetry_file config in
   let store = get_telemetry_store config in

@@ -126,6 +126,8 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
         return ['harness']
       }
       return []
+    case 'code':
+      return ['namespaceTruth', 'execution', 'missionSnapshot']
     case 'logs':
     default:
       return []

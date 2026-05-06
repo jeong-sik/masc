@@ -69,6 +69,7 @@ module Masc : sig
     | Add_task
     | Agent_fitness
     | Agent_update
+    | Agent_card
     | Agents
     | Autoresearch_cycle
     | Autoresearch_inject

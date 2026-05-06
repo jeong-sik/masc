@@ -139,6 +139,12 @@ let test_dispatch_agent_update () =
   Alcotest.(check bool) "agent_update dispatches" true (result <> None);
   )
 
+let test_dispatch_agent_card () =
+  with_ctx (fun ctx ->
+  let result = Tool_agent.dispatch ctx ~name:"masc_agent_card" ~args:(`Assoc []) in
+  Alcotest.(check bool) "agent_card dispatches" true (result <> None);
+  )
+
 
 (* ============================================================
    Handler tests — masc_agents
@@ -149,6 +155,28 @@ let test_handle_agents () =
   let (ok, msg) = Tool_agent.handle_agents ctx (`Assoc []) in
   Alcotest.(check bool) "agents succeeds" true ok;
   Alcotest.(check bool) "has response" true (String.length msg > 0);
+  )
+
+let test_handle_agent_card () =
+  with_ctx (fun ctx ->
+  let (ok, msg) = Tool_agent.handle_agent_card ctx (`Assoc []) in
+  Alcotest.(check bool) "agent card succeeds" true ok;
+  let json = Yojson.Safe.from_string msg in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string) "card name" "MASC-MCP"
+    (json |> member "name" |> to_string);
+  Alcotest.(check string) "card schema" "masc.agent_card.v1"
+    (json |> member "schema" |> to_string);
+  )
+
+let test_handle_agent_card_rejects_unknown_action () =
+  with_ctx (fun ctx ->
+  let (ok, msg) =
+    Tool_agent.handle_agent_card ctx (`Assoc [("action", `String "bogus")])
+  in
+  Alcotest.(check bool) "agent card rejects" false ok;
+  Alcotest.(check bool) "mentions invalid action" true
+    (String.contains msg 'b');
   )
 
 (* ============================================================
@@ -385,9 +413,13 @@ let () =
       Alcotest.test_case "agents dispatches" `Quick test_dispatch_agents;
       Alcotest.test_case "register_capabilities dispatches" `Quick test_dispatch_register_capabilities;
       Alcotest.test_case "agent_update dispatches" `Quick test_dispatch_agent_update;
+      Alcotest.test_case "agent_card dispatches" `Quick test_dispatch_agent_card;
     ]);
     ("agents", [
       Alcotest.test_case "handle_agents" `Quick test_handle_agents;
+      Alcotest.test_case "handle_agent_card" `Quick test_handle_agent_card;
+      Alcotest.test_case "handle_agent_card rejects unknown action" `Quick
+        test_handle_agent_card_rejects_unknown_action;
     ]);
     ("register_capabilities", [
       Alcotest.test_case "with capabilities" `Quick test_register_capabilities;

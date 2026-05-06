@@ -339,7 +339,9 @@ let last_turn_safe_tool_names () =
   resolve_policy_group
     ~fallback:[ "keeper_board_post"; "keeper_board_comment";
                 "keeper_context_status"; "extend_turns";
-                "keeper_time_now"; "keeper_broadcast" ]
+                "keeper_time_now"; "keeper_tool_search";
+                "keeper_broadcast"; "keeper_task_done";
+                "masc_web_search" ]
     "last_turn_safe"
 
 let explicit_optional_candidate_tool_names (meta : keeper_meta) =
@@ -559,6 +561,7 @@ let all_keeper_schemas ~(masc_schemas_fn : keeper_meta -> Masc_domain.tool_schem
   @ Tool_shard.coding_tools
   @ Tool_code_write.schemas
   @ Tool_shard.keeper_preflight_tools
+  @ Tool_shard.keeper_github_pr_tools
   @ Tool_shard.keeper_pr_review_tools
   @ (masc_schemas_fn meta)
 

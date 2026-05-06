@@ -130,6 +130,13 @@ describe('refreshPlanForRoute', () => {
     })).toEqual([])
   })
 
+  it('hydrates the Code IDE route from live execution state', () => {
+    expect(refreshPlanForRoute({
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source' },
+    })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot'])
+  })
+
   it('refreshes the inspector shell through server config once (Phase 6: view param)', async () => {
     refreshForRoute({
       tab: 'command',
@@ -178,6 +185,15 @@ describe('refreshPlanForRoute', () => {
     refreshForRoute({
       tab: 'monitoring',
       params: { section: 'journey' },
+    })
+
+    expect(refreshExecution).toHaveBeenCalledWith()
+  })
+
+  it('uses the scheduler-backed execution refresh path on Code IDE navigation', () => {
+    refreshForRoute({
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source' },
     })
 
     expect(refreshExecution).toHaveBeenCalledWith()

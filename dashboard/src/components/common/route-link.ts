@@ -5,22 +5,34 @@ import type { TabId } from '../../types'
 import { ringFocusClasses } from './ring'
 
 interface RouteLinkProps {
+  id?: string
   tab: TabId
   params?: Record<string, string>
   class?: string
+  role?: string
   title?: string
+  tabIndex?: number
   'aria-label'?: string
+  ariaControls?: string
   ariaCurrent?: 'page' | 'location' | undefined
+  ariaSelected?: boolean | 'true' | 'false'
+  onKeyDown?: (event: KeyboardEvent) => void
   children: ComponentChildren
 }
 
 export function RouteLink({
+  id,
   tab,
   params,
   class: className,
+  role,
   title,
+  tabIndex,
   'aria-label': ariaLabel,
+  ariaControls,
   ariaCurrent,
+  ariaSelected,
+  onKeyDown,
   children,
 }: RouteLinkProps) {
   const href = hashForRoute(tab, params)
@@ -31,11 +43,17 @@ export function RouteLink({
 
   return html`
     <a
+      id=${id}
       href=${href}
       class=${classNameWithFocus}
+      role=${role}
       title=${title}
+      tabindex=${tabIndex}
       aria-label=${ariaLabel}
+      aria-controls=${ariaControls}
       aria-current=${ariaCurrent}
+      aria-selected=${ariaSelected}
+      onKeyDown=${onKeyDown}
       onClick=${(event: MouseEvent) => {
         if (
           event.defaultPrevented

@@ -80,6 +80,46 @@ let transport_json request =
   in
   Transport_read_model.transport_status_json ctx
 
+let agent_card_json request =
+  let (host, port) = advertised_host_port request in
+  let base_url = Printf.sprintf "http://%s:%d" host port in
+  let build = Build_identity.current () in
+  `Assoc
+    [
+      ("schema", `String "masc.agent_card.v1");
+      ("name", `String "MASC-MCP");
+      ("description", `String "MASC multi-agent coordination MCP server");
+      ("url", `String base_url);
+      ("version", `String build.release_version);
+      ( "build",
+        `Assoc
+          [
+            ( "commit",
+              Option.fold ~none:`Null ~some:(fun value -> `String value)
+                build.commit );
+            ("started_at", `String build.started_at);
+            ("uptime_seconds", `Int build.uptime_seconds);
+          ] );
+      ( "endpoints",
+        `Assoc
+          [
+            ("mcp", `String (base_url ^ "/mcp"));
+            ("health", `String (base_url ^ "/health"));
+            ("dashboard", `String (base_url ^ "/dashboard/"));
+            ("websocket", `String (base_url ^ "/ws"));
+          ] );
+      ("transport", Transport_bridge.agent_card_transports_json ~host ~port);
+      ( "capabilities",
+        `Assoc
+          [
+            ("coordination", `Bool true);
+            ("task_backlog", `Bool true);
+            ("keeper_runtime", `Bool true);
+            ("dashboard", `Bool true);
+            ("graphql_readonly", `Bool true);
+          ] );
+    ]
+
 let health_path_diagnostics () =
   match current_server_state_opt () with
   | Some state ->
@@ -237,7 +277,7 @@ let readiness_handler _request reqd =
             ]))
       reqd
 
-let board_post_detail_json ~response_format ~post_id =
+let board_post_detail_json ~voter ~response_format ~post_id =
   match Board_dispatch.get_post ~post_id with
   | Error err ->
       (`Not_found, Printf.sprintf {|{"error":"%s"}|}
@@ -253,8 +293,17 @@ let board_post_detail_json ~response_format ~post_id =
               post_id (Board_types.show_board_error err);
             []
       in
-      let post_json = board_post_dashboard_json ~author_karma post in
-      let comments_json = `List (List.map board_comment_dashboard_json comments) in
+      let current_vote = board_current_vote_for_post ~voter ~post_id in
+      let reactions = board_reactions_for_post ~voter ~post_id in
+      let post_json = board_post_dashboard_json ?current_vote ~reactions ~author_karma post in
+      let comments_json =
+        `List (List.map (fun (comment : Board.comment) ->
+          let comment_id = Board.Comment_id.to_string comment.id in
+          let current_vote = board_current_vote_for_comment ~voter ~comment_id in
+          let reactions = board_reactions_for_comment ~voter ~comment_id in
+          board_comment_dashboard_json ?current_vote ~reactions comment
+        ) comments)
+      in
       let json =
         if String.equal (String.lowercase_ascii (String.trim response_format)) "flat" then
           match post_json with

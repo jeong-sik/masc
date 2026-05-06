@@ -24,6 +24,7 @@ let all_satisfied : Obs.invariants_check = {
   no_cascade_before_measurement = true;
   compaction_atomicity = true;
   event_priority_monotone = true;
+  phase_derivation_agreement = true;
 }
 
 let all_violated : Obs.invariants_check = {
@@ -31,6 +32,7 @@ let all_violated : Obs.invariants_check = {
   no_cascade_before_measurement = false;
   compaction_atomicity = false;
   event_priority_monotone = false;
+  phase_derivation_agreement = false;
 }
 
 let make_meta name =
@@ -86,7 +88,8 @@ let test_bump_increments_each_violated () =
   let keeper = "test-bump-all-violated" in
   let invariants =
     [ "PhaseTurnAlignment"; "NoCascadeBeforeMeasurement";
-      "CompactionAtomicity"; "EventPriorityMonotone" ]
+      "CompactionAtomicity"; "EventPriorityMonotone";
+      "PhaseDerivationAgreement" ]
   in
   let before = List.map (fun inv -> (inv, read ~keeper ~invariant:inv)) invariants in
   Obs.bump_invariant_violations ~keeper_name:keeper all_violated;
@@ -106,11 +109,13 @@ let test_bump_selective_increments () =
     no_cascade_before_measurement = true;  (* satisfied, no bump *)
     compaction_atomicity = false;
     event_priority_monotone = true;        (* satisfied, no bump *)
+    phase_derivation_agreement = false;
   } in
   let pt_before = read ~keeper ~invariant:"PhaseTurnAlignment" in
   let nc_before = read ~keeper ~invariant:"NoCascadeBeforeMeasurement" in
   let ca_before = read ~keeper ~invariant:"CompactionAtomicity" in
   let ep_before = read ~keeper ~invariant:"EventPriorityMonotone" in
+  let pd_before = read ~keeper ~invariant:"PhaseDerivationAgreement" in
   Obs.bump_invariant_violations ~keeper_name:keeper mixed;
   check (float 0.0001) "phase_turn_alignment +1"
     (pt_before +. 1.0) (read ~keeper ~invariant:"PhaseTurnAlignment");
@@ -119,7 +124,9 @@ let test_bump_selective_increments () =
   check (float 0.0001) "compaction_atomicity +1"
     (ca_before +. 1.0) (read ~keeper ~invariant:"CompactionAtomicity");
   check (float 0.0001) "event_priority_monotone unchanged"
-    ep_before (read ~keeper ~invariant:"EventPriorityMonotone")
+    ep_before (read ~keeper ~invariant:"EventPriorityMonotone");
+  check (float 0.0001) "phase_derivation_agreement +1"
+    (pd_before +. 1.0) (read ~keeper ~invariant:"PhaseDerivationAgreement")
 
 (* --- bump: per-keeper isolation ----------------------------------- *)
 
@@ -139,11 +146,31 @@ let test_all_invariant_keys_mapped () =
   let strings =
     List.map Obs.invariant_key_to_string Obs.all_invariant_keys
   in
-  check int "4 invariant keys" 4 (List.length strings);
+  check int "5 invariant keys" 5 (List.length strings);
   check (list string) "key names match alert-rule labels"
     [ "PhaseTurnAlignment"; "NoCascadeBeforeMeasurement";
-      "CompactionAtomicity"; "EventPriorityMonotone" ]
+      "CompactionAtomicity"; "EventPriorityMonotone";
+      "PhaseDerivationAgreement" ]
     strings
+
+let test_phase_derivation_agreement_detects_mismatch () =
+  with_registry (fun () ->
+    let base_path = "/tmp/keeper-composite-phase-derivation" in
+    let keeper_name = "phase-derivation-drift" in
+    let entry = Reg.register ~base_path keeper_name (make_meta keeper_name) in
+    check bool "registered entry agrees" true
+      (Obs.check_phase_derivation_agreement entry);
+    let drifted_entry = { entry with Reg.phase = Ksm.Paused } in
+    check bool "recorded phase drift is detected" false
+      (Obs.check_phase_derivation_agreement drifted_entry);
+    let before = read ~keeper:keeper_name ~invariant:"PhaseDerivationAgreement" in
+    let snapshot = Obs.observe drifted_entry |> Obs.snapshot_to_json in
+    let invariants = Json.member "invariants" snapshot in
+    check bool "snapshot exposes phase_derivation_agreement=false" false
+      (Json.member "phase_derivation_agreement" invariants |> Json.to_bool);
+    check (float 0.0001) "counter increments on phase derivation drift"
+      (before +. 1.0)
+      (read ~keeper:keeper_name ~invariant:"PhaseDerivationAgreement"))
 
 let test_snapshot_reports_collapsed_from_for_stable_phase () =
   with_registry (fun () ->
@@ -256,6 +283,8 @@ let () =
     ; test_case "active phase leaves collapsed_from null" `Quick test_snapshot_omits_collapsed_from_for_active_phase
     ; test_case "snapshot exposes keeper identity" `Quick test_snapshot_reports_keeper_identity
     ; test_case "snapshot exposes phase diagnosis" `Quick test_snapshot_reports_phase_diagnosis
+    ; test_case "phase derivation mismatch is visible" `Quick
+        test_phase_derivation_agreement_detects_mismatch
     ];
     "composite change signals",
     [ test_case "direct turn mutations emit composite tick" `Quick test_direct_turn_mutations_emit_composite_changed ];

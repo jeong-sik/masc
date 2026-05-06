@@ -38,7 +38,7 @@ export function canvasHeight(): number {
   return TOP_PAD + 7 * (CELL + GAP) - GAP + LEGEND_HEIGHT
 }
 
-export interface HeatmapCell {
+interface HeatmapCell {
   day: number
   hour: number
   count: number

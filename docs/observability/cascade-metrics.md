@@ -165,11 +165,11 @@ This is the spec → code → dashboard → metric consistency contract.
 | Label       | Values                                                                             |
 | ----------- | ---------------------------------------------------------------------------------- |
 | `keeper`    | Keeper name (bounded by keepers registered on host, typically < 50)                |
-| `invariant` | `PhaseTurnAlignment`, `NoCascadeBeforeMeasurement`, `CompactionAtomicity`, `EventPriorityMonotone` |
+| `invariant` | `PhaseTurnAlignment`, `NoCascadeBeforeMeasurement`, `CompactionAtomicity`, `EventPriorityMonotone`, `PhaseDerivationAgreement` |
 
 Incremented from `Keeper_composite_observer.bump_invariant_violations`, invoked by `observe` on every snapshot. One counter tick **per violated invariant per snapshot**. A sustained rate means the FSM composition is wedged in an inconsistent cross-axis state.
 
-Label cardinality: `keepers × 4` (≤ 200 series in practice).
+Label cardinality: `keepers × 5` (≤ 250 series in practice).
 
 ### PromQL patterns
 
@@ -181,7 +181,7 @@ sum by (invariant) (increase(masc_keeper_invariant_violations_total[5m]))
 topk(5, rate(masc_keeper_invariant_violations_total
               {invariant="PhaseTurnAlignment"}[5m]))
 
-# Invariant health SLO (what fraction of snapshots satisfy all 4?)
+# Invariant health SLO (what fraction of snapshots satisfy all 5?)
 # Requires pairing with a snapshots_total counter in a follow-up; out of
 # scope for LT-13.
 ```

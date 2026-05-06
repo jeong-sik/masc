@@ -32,6 +32,11 @@ val of_yojson : Yojson.Safe.t -> (t, string) result
 val current : unit -> t
 (** Snapshot of the running build identity with current uptime. *)
 
+val repo_root : unit -> string option
+(** Git root used for the running server binary, preferring the executable
+    directory over the process cwd.  This is separate from the MASC base path,
+    which may intentionally point at a different workspace such as [~/me]. *)
+
 val resolve_commit :
   env_value:string option -> probe:(unit -> string option) -> string option
 (** Resolve commit hash from env var or probe function.

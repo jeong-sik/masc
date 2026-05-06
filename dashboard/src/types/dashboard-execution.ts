@@ -107,6 +107,8 @@ export interface DashboardRuntimeResolution {
   resolved_base_path: DashboardConfigResolutionItem
   data_root: DashboardConfigResolutionItem
   prompt_markdown_dir: DashboardConfigResolutionItem
+  server_repo_path?: DashboardConfigResolutionItem | null
+  server_repo_git_commit?: string | null
   workspace_git_commit: string | null
   resolved_base_git_commit: string | null
   source_mismatch: boolean

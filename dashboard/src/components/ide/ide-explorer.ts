@@ -7,6 +7,7 @@ import { activeIdeFile } from './ide-shell'
 import type { WorkspaceSource } from '../../api/workspace-source'
 import type { Repository } from '../../api/repositories'
 import { showToast } from '../common/toast'
+import { KeeperBadge } from '../keeper-badge'
 
 interface IdeExplorerProps {
   readonly fileTreeStore: FileTreeStore
@@ -23,6 +24,45 @@ interface IdeExplorerProps {
   readonly onRepositoryChange?: (repoId: string | null) => void
   readonly onRepositoryScan?: () => Promise<ReadonlyArray<Repository>>
   readonly subscribeRepositories?: (listener: () => void) => () => void
+}
+
+type ExplorerScopeTone = 'accent' | 'muted'
+
+interface ExplorerScopeLabel {
+  readonly label: string
+  readonly tone: ExplorerScopeTone
+}
+
+function repositoryLabel(
+  repositories: ReadonlyArray<Repository>,
+  repoId: string,
+): string {
+  const repository = repositories.find(candidate => candidate.id === repoId)
+  return repository?.name.trim() || repoId
+}
+
+export function explorerScopeLabel(
+  source: WorkspaceSource,
+  keeperName: string,
+  repositories: ReadonlyArray<Repository> = [],
+): ExplorerScopeLabel {
+  const keeper = keeperName.trim()
+  if (keeper) return { label: `@${keeper}`, tone: 'accent' }
+
+  switch (source.kind) {
+    case 'repository':
+      return { label: repositoryLabel(repositories, source.repoId), tone: 'accent' }
+    case 'repository_missing':
+    case 'repository_unknown':
+      return { label: `${repositoryLabel(repositories, source.repoId)} fallback`, tone: 'muted' }
+    case 'playground':
+      return { label: `@${source.keeper}`, tone: 'accent' }
+    case 'playground_missing':
+    case 'keeper_unknown':
+      return { label: `@${source.keeper} fallback`, tone: 'muted' }
+    case 'project':
+      return { label: 'project', tone: 'muted' }
+  }
 }
 
 export function IdeExplorer({
@@ -68,6 +108,8 @@ export function IdeExplorer({
 
   const [filter, setFilter] = useState('')
   const [isScanningRepositories, setIsScanningRepositories] = useState(false)
+  const [activeFile, setActiveFile] = useState(activeIdeFile.value)
+  useEffect(() => activeIdeFile.subscribe(file => setActiveFile(file)), [])
 
   const handleRepositoryScan = async (): Promise<void> => {
     if (!onRepositoryScan || isScanningRepositories) return
@@ -98,21 +140,13 @@ export function IdeExplorer({
     return visible.filter(n => n.label.toLowerCase().includes(needle))
   }, [visible, filter])
   const fileCount = filtered.filter(n => !n.hasChildren).length
+  const scopeLabel = explorerScopeLabel(source, keeperName, repoList)
 
   return html`
     <div
+      class="ide-explorer"
       role="region"
       aria-label="EXPLORER"
-      style=${{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--sp-2)',
-        padding: 'var(--sp-3)',
-        background: 'var(--color-bg-surface)',
-        borderRight: '1px solid var(--color-border-default)',
-        minHeight: 0,
-        overflow: 'auto',
-      }}
     >
       <header
         style=${{
@@ -124,7 +158,13 @@ export function IdeExplorer({
           borderBottom: '1px solid var(--color-border-divider)',
         }}
       >
-        <span>EXPLORER ${keeperName ? html`· <span style=${{ color: 'var(--color-accent-fg)' }}>@${keeperName}</span>` : '· project'}</span>
+        <span>EXPLORER · <span
+            style=${{
+              color: scopeLabel.tone === 'accent'
+                ? 'var(--color-accent-fg)'
+                : 'var(--color-fg-muted)',
+            }}
+          >${scopeLabel.label}</span></span>
         <span>${fileCount} FILES</span>
       </header>
       ${repoList.length > 0 || onRepositoryScan ? html`
@@ -231,16 +271,23 @@ export function IdeExplorer({
           padding: 'var(--sp-1) var(--sp-2)',
         }}
       />
-      <ul
-        role="tree"
-        aria-label="File tree"
-        style=${{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '2px' }}
-      >
-        ${filtered.map(node => TreeRow(node, store.isExpanded(node.path), () => {
-          if (node.hasChildren) store.toggle(node.path)
-          else activeIdeFile.value = node.path
-        }))}
-      </ul>
+      <div class="ide-explorer-scroll" role="presentation">
+        <ul
+          class="ide-explorer-tree"
+          role="tree"
+          aria-label="File tree"
+        >
+          ${filtered.map(node => TreeRow(
+            node,
+            store.isExpanded(node.path),
+            node.path === activeFile,
+            () => {
+              if (node.hasChildren) store.toggle(node.path)
+              else activeIdeFile.value = node.path
+            },
+          ))}
+        </ul>
+      </div>
     </div>
   `
 }
@@ -270,11 +317,8 @@ function SourceHint(source: WorkspaceSource) {
   `
 }
 
-function TreeRow(node: FileTreeNode, expanded: boolean, onClick: () => void) {
+function TreeRow(node: FileTreeNode, expanded: boolean, selected: boolean, onClick: () => void) {
   const indent = node.depth * 12
-  const dotColor = node.hueIndex !== null
-    ? `var(--color-keeper-${node.hueIndex}-glow, var(--k-${node.hueIndex}))`
-    : 'transparent'
   const chevron = node.hasChildren ? (expanded ? '▾' : '▸') : ''
   const onKeyDown = (e: KeyboardEvent): void => {
     if (e.key === 'Enter' || e.key === ' ') {
@@ -284,36 +328,22 @@ function TreeRow(node: FileTreeNode, expanded: boolean, onClick: () => void) {
   }
   return html`
     <li
+      class="ide-explorer-row"
       role="treeitem"
       aria-expanded=${node.hasChildren ? (expanded ? 'true' : 'false') : undefined}
+      aria-selected=${selected ? 'true' : undefined}
       tabIndex=${0}
       onClick=${onClick}
       onKeyDown=${onKeyDown}
       style=${{
-        display: 'grid',
-        gridTemplateColumns: 'auto auto 1fr auto',
-        alignItems: 'center',
-        gap: 'var(--sp-2)',
-        padding: '2px 4px',
         paddingLeft: `${4 + indent}px`,
-        font: 'var(--type-body)',
-        color: 'var(--color-fg-secondary)',
-        cursor: 'pointer',
-        userSelect: 'none',
       }}
     >
       <span aria-hidden="true" style=${{ color: 'var(--color-fg-muted)', width: '12px', textAlign: 'center' }}>${chevron}</span>
-      <span
-        aria-hidden="true"
-        style=${{
-          width: '8px',
-          height: '8px',
-          borderRadius: '50%',
-          background: dotColor,
-          opacity: node.hueIndex !== null ? 0.85 : 0,
-        }}
-      />
-      <span>${node.label}</span>
+      ${node.keeperId
+        ? html`<${KeeperBadge} id=${node.keeperId} variant="sigil" size="sm" />`
+        : html`<span aria-hidden="true" style=${{ width: '14px', height: '14px' }} />`}
+      <span class="ide-explorer-row-label">${node.label}</span>
       ${node.diff !== null
         ? html`<span style=${{ color: 'var(--color-fg-muted)', font: 'var(--fs-11)' }}>${node.diff}</span>`
         : null}

@@ -309,6 +309,19 @@ let operator_disposition (receipt : t) =
   else if provider_runtime_failure then
     ("pause_human", "provider_runtime_error")
   else if
+    String.starts_with ~prefix:"completion_contract_violation:" terminal_reason
+  then
+    (* The downstream completion-contract layer has already decided the turn
+       violated [require_tool_use] (or another contract sub-clause) and emits
+       [terminal_reason="completion_contract_violation:<sub_clause>"]. The
+       earlier-layer [tool_contract_result] can show [satisfied_completion]
+       from a separate classifier that judged the same turn locally OK; the
+       two-layer disagreement was the unmapped fall-through that #11651
+       regression counter is meant to flag. Treat terminal_reason as
+       authoritative — the disposition is the same as the explicit
+       [tool_required_unsatisfied] branch below. *)
+    ("pause_human", "tool_required_unsatisfied")
+  else if
     receipt.tool_surface.tool_requirement = Required
     && (List.mem tool_contract_result
           [

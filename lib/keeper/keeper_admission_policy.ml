@@ -41,12 +41,13 @@ let tier_compare a b =
   in
   Stdlib.compare (rank a) (rank b)
 
-let has_duplicate_provider candidates =
+let has_duplicate_candidate candidates =
   let rec aux seen = function
     | [] -> None
     | c :: rest ->
-        if List.mem c.provider seen then Some c.provider
-        else aux (c.provider :: seen) rest
+        let key = (c.provider, c.model) in
+        if List.mem key seen then Some c.provider
+        else aux (key :: seen) rest
   in
   aux [] candidates
 
@@ -60,7 +61,7 @@ let of_fields ~keeper_id ~candidates ~weight ~min_tier =
         if tier_compare min_tier head_candidate.tier < 0 then
           Error Min_tier_above_preferred
         else
-          match has_duplicate_provider candidates with
+          match has_duplicate_candidate candidates with
           | Some p -> Error (Duplicate_provider p)
           | None -> Ok { keeper_id; candidates; weight; min_tier }
 

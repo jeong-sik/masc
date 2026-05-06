@@ -153,11 +153,15 @@ val coding_tools : Masc_domain.tool_schema list
 val keeper_preflight_tools : Masc_domain.tool_schema list
 (** Pre-flight validation tool schema. *)
 
+val keeper_github_pr_tools : Masc_domain.tool_schema list
+(** Dedicated GitHub PR workflow tools (list, status, draft create). *)
+
 val all_keeper_tool_schemas : Masc_domain.tool_schema list
 (** #10101: every keeper-facing tool schema exposed by this
     module, built from [all_shards] (so new shard categories
     flow through automatically) plus the non-shard lists
-    [keeper_preflight_tools] and [keeper_pr_review_tools].
+    [keeper_preflight_tools], [keeper_github_pr_tools], and
+    [keeper_pr_review_tools].
     Feeds [Config.raw_all_tool_schemas] so
     [Tool_help_registry.find_entry] can resolve every shard
     tool.  Duplicates are possible; dedupe at consumer. *)

@@ -39,7 +39,7 @@ export type BandKind =
   | 'err'
   | 'stalled'
 
-export interface BandProps {
+interface BandProps {
   /** State tone. `undefined` ≡ `default` (idle, border-strong color). */
   kind?: BandKind
   /** Forwarded to data-testid. */

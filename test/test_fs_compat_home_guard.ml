@@ -69,15 +69,23 @@ let test_tmp_write_allowed () =
 let test_escape_hatch_allows_home () =
   Unix.putenv "MASC_TEST_ALLOW_HOME_BASE_PATH" "1";
   let path = Filename.concat (home ()) ".masc/_9921_guard_probe_bypass.jsonl" in
-  (try
-    FC.append_file path "{\"bypass\":1}\n";
-    Alcotest.(check bool) "bypass write succeeded" true (Sys.file_exists path)
-  with FC.Test_isolation_breach msg ->
-    Alcotest.failf
-      "escape hatch should allow HOME write, got Test_isolation_breach: %s" msg);
-  (* clean up so we do not leave probe junk in the real ledger dir *)
-  (try Sys.remove path with Sys_error _ -> ());
-  Unix.putenv "MASC_TEST_ALLOW_HOME_BASE_PATH" ""
+  let parent = Filename.dirname path in
+  let parent_existed = Sys.file_exists parent in
+  Fun.protect
+    ~finally:(fun () ->
+      (* clean up so we do not leave probe junk in the real ledger dir *)
+      (try Sys.remove path with Sys_error _ -> ());
+      (if not parent_existed then
+         try Unix.rmdir parent with Unix.Unix_error _ -> ());
+      Unix.putenv "MASC_TEST_ALLOW_HOME_BASE_PATH" "")
+    (fun () ->
+      FC.mkdir_p parent;
+      try
+        FC.append_file path "{\"bypass\":1}\n";
+        Alcotest.(check bool) "bypass write succeeded" true (Sys.file_exists path)
+      with FC.Test_isolation_breach msg ->
+        Alcotest.failf
+          "escape hatch should allow HOME write, got Test_isolation_breach: %s" msg)
 
 let () =
   Alcotest.run "fs_compat_home_guard" [

@@ -97,6 +97,7 @@ type invariant_key =
   | Invariant_no_cascade_before_measurement
   | Invariant_compaction_atomicity
   | Invariant_event_priority_monotone
+  | Invariant_phase_derivation_agreement
 
 val all_invariant_keys : invariant_key list
 
@@ -109,6 +110,7 @@ type invariants_check = {
   no_cascade_before_measurement : bool;
   compaction_atomicity : bool;
   event_priority_monotone : bool;
+  phase_derivation_agreement : bool;
 }
 
 (** Increment [masc_keeper_invariant_violations_total\{keeper, invariant\}]
@@ -120,10 +122,9 @@ val bump_invariant_violations :
 
 (** {2 Pure invariant predicates}
 
-    The four [check_*] functions below are the OCaml mirror of the
-    [SafetyInvariant] conjuncts in
-    [specs/keeper-state-machine/KeeperCompositeLifecycle.tla] (lines
-    354-377). They are exposed so cross-FSM joint tests
+    The [check_*] functions below mirror the composite TLA+
+    [SafetyInvariant] conjuncts and the runtime phase-derivation
+    agreement check. They are exposed so cross-FSM joint tests
     ([test/test_keeper_fsm_joints.ml]) can drive realistic state
     combinations through the same predicates that production
     [compute_invariants] uses, without having to construct a full
@@ -146,6 +147,12 @@ val check_compaction_atomicity : ksm_phase -> compaction_stage -> bool
     requires a captured measurement. *)
 val check_no_cascade_before_measurement :
   cascade_state:cascade_state -> measurement_captured:bool -> bool
+
+val check_phase_derivation_agreement :
+  Keeper_registry.registry_entry -> bool
+(** Runtime-visible mirror of
+    [Keeper_invariant_check.DerivePhaseAgreement]: the recorded registry
+    phase must equal [Keeper_state_machine.derive_phase conditions]. *)
 
 (** Project the 12-state {!Keeper_state_machine.phase} into the 7-state
     composite {!ksm_phase} per the 12->7 mapping documented in

@@ -38,7 +38,7 @@ export type BtnSize = 'xs' | 'sm' | 'default' | 'lg'
 
 type ResolvedVariant = 'default' | BtnVariant
 
-export interface BtnProps {
+interface BtnProps {
   children?: ComponentChildren
   /** Semantic tone. `undefined` ≡ default (warm-bordered base). */
   variant?: BtnVariant

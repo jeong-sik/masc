@@ -73,6 +73,7 @@
    host_config_provider
    in_container_login_provider
    keeper_gh_shared
+   keeper_tool_github_pr
    keeper_tool_pr_review
    keeper_exec_preflight
    keeper_exec_task

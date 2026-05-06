@@ -10,7 +10,13 @@
     runs in its own session via {!Process_eio.spawn_detached};
     tree-kill via [Unix.kill (-pgid)] reaches descendants.
 
-    Tick 7 (planned): introduce a daemon switch and push-based
+    Tick 7 (current partial): stdout/stderr are retained in a bounded
+    in-memory line ring (default 5000 lines, override with
+    [MASC_KEEPER_SHELL_RING_LINES]).  Slow readers get the retained
+    suffix plus [bytes_dropped_*] evidence instead of unbounded heap
+    growth.
+
+    Tick 7 follow-up: introduce a daemon switch and push-based
     drainers so slow readers can't stall producers, plus
     append-only backing files under
     \`.masc/keeper/<name>/bg/<id>.{out,err}\` for persistence across

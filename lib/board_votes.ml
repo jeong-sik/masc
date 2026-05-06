@@ -134,6 +134,21 @@ let record_vote_side_effect store outcome =
     ~agent_name:outcome.vote_author_name
     ~direction:vote_dir
 
+let current_vote_for_post store ~voter ~post_id
+    : (vote_direction option, board_error) Result.t =
+  match Agent_id.of_string voter with
+  | Error e -> Error e
+  | Ok agent ->
+  match Post_id.of_string post_id with
+  | Error e -> Error e
+  | Ok pid ->
+      with_lock store (fun () ->
+        let post_key = Post_id.to_string pid in
+        if not (Hashtbl.mem store.posts post_key) then Error (Post_not_found post_id)
+        else
+          let vote_key = "post:" ^ post_key ^ ":" ^ Agent_id.to_string agent in
+          Ok (Option.map fst (Hashtbl.find_opt store.vote_log vote_key)))
+
 let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
   match Agent_id.of_string voter with
   | Error e -> Error e
@@ -214,6 +229,24 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
            record_vote_side_effect store outcome;
            Ok delta
        | Error _ as e -> e)
+
+let current_vote_for_comment store ~voter ~comment_id
+    : (vote_direction option, board_error) Result.t =
+  match Agent_id.of_string voter with
+  | Error e -> Error e
+  | Ok agent ->
+  match Comment_id.of_string comment_id with
+  | Error e -> Error e
+  | Ok cid ->
+      with_lock store (fun () ->
+        let comment_key = Comment_id.to_string cid in
+        if not (Hashtbl.mem store.comments comment_key) then
+          Error (Comment_not_found comment_id)
+        else
+          let vote_key =
+            "comment:" ^ comment_key ^ ":" ^ Agent_id.to_string agent
+          in
+          Ok (Option.map fst (Hashtbl.find_opt store.vote_log vote_key)))
 
 (** Vote on a comment *)
 let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result.t =
@@ -609,6 +642,32 @@ let load_persisted_reactions store =
         Log.BoardLog.error "load reactions failed: %s" (Printexc.to_string e)
   end
 
+let load_persisted_sub_boards store =
+  let path = sub_boards_path () in
+  if Fs_compat.file_exists path then begin
+    try
+      let loaded = ref 0 in
+      let lines = Fs_compat.load_jsonl path in
+      List.iter
+        (fun json ->
+           match sub_board_of_yojson json with
+           | Some sb ->
+               let id = Sub_board_id.to_string sb.id in
+               Hashtbl.replace store.sub_boards id sb;
+               Hashtbl.replace store.sub_boards_by_slug sb.slug id;
+               Stdlib.incr loaded
+           | None -> ())
+        lines;
+      if !loaded > 0 then
+        Log.BoardLog.info "loaded %d sub-boards from %s" !loaded path
+      else
+        Log.BoardLog.debug "loaded 0 sub-boards from %s" path
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e ->
+        Log.BoardLog.error "load sub-boards failed: %s" (Printexc.to_string e)
+  end
+
 (** {1 Hearth (topic) operations} *)
 
 (** List active hearths with post counts *)
@@ -713,6 +772,7 @@ let global_lazy : store Eio.Lazy.t ref =
     recalculate_reply_counts store;
     load_persisted_votes store;
     load_persisted_reactions store;
+    load_persisted_sub_boards store;
     store))
 
 let global () = Eio.Lazy.force !global_lazy
@@ -727,6 +787,7 @@ let reset_global_for_test () =
     recalculate_reply_counts store;
     load_persisted_votes store;
     load_persisted_reactions store;
+    load_persisted_sub_boards store;
     store)
 
 (** Flush any dirty state to disk. Call on shutdown to prevent data loss. *)
@@ -773,6 +834,122 @@ let flush_dirty store =
 
 
 (** {1 Karma & Flair - Reddit-style} *)
+
+(** Scoring contract: returns the karma delta for a vote direction.
+    Upvotes earn +1 karma; downvotes do not deduct karma (delta = 0).
+    Callers that want to replay or rebuild the ledger must use this
+    function as the single source of truth for karma scoring. *)
+let karma_score_for_direction = function
+  | Up -> 1
+  | Down -> 0
+
+(** Parse a vote-log key into [(target_kind, target_id, voter)].
+
+    Key format: ["post:<id>:<voter>"] or ["comment:<id>:<voter>"].
+    Both [<id>] and [<voter>] are safe for the ID character set but
+    voter may contain a colon in namespace:agent form, so we split
+    only on the first two colons and keep the remainder as voter. *)
+let parse_vote_key key =
+  match String.index_opt key ':' with
+  | None -> None
+  | Some i1 ->
+      let kind = String.sub key 0 i1 in
+      let rest1 = String.sub key (i1 + 1) (String.length key - i1 - 1) in
+      (match String.index_opt rest1 ':' with
+      | None -> None
+      | Some i2 ->
+          let target_id = String.sub rest1 0 i2 in
+          let voter =
+            String.sub rest1 (i2 + 1) (String.length rest1 - i2 - 1)
+          in
+          if kind = "" || target_id = "" || voter = "" then None
+          else Some (kind, target_id, voter))
+
+(** Rebuild the karma ledger from the in-memory vote log and
+    post/comment author tables.
+
+    Contract:
+    - Only [Up] votes generate karma events (scoring rule via
+      {!karma_score_for_direction}).
+    - Events are sorted ascending by [ts] (oldest first) so callers
+      can replay them in order.
+    - Author lookup is done against the live in-memory store; entries
+      whose post/comment has been deleted are silently dropped (the
+      vote remains in the log but the content is gone).
+    - The function holds the store lock for the duration of the read
+      so the snapshot is consistent. *)
+let build_karma_ledger store =
+  with_lock store (fun () ->
+    Hashtbl.fold
+      (fun key (direction, ts) acc ->
+         let delta = karma_score_for_direction direction in
+         if delta = 0 then acc
+         else
+           match parse_vote_key key with
+           | None -> acc
+           | Some (kind, target_id, voter) ->
+               let recipient_opt =
+                 match kind with
+                 | "post" ->
+                     (match Hashtbl.find_opt store.posts target_id with
+                      | Some (p : post) -> Some (Agent_id.to_string p.author)
+                      | None -> None)
+                 | "comment" ->
+                     (match Hashtbl.find_opt store.comments target_id with
+                      | Some (c : comment) -> Some (Agent_id.to_string c.author)
+                      | None -> None)
+                 | _ -> None
+               in
+               (match recipient_opt with
+                | None -> acc
+                | Some recipient ->
+                    { recipient; voter; target_kind = kind;
+                      target_id; delta; ts } :: acc))
+      store.vote_log [])
+  |> List.sort (fun a b -> Float.compare a.ts b.ts)
+
+(** Aggregate karma totals from a ledger.
+
+    Returns [(recipient, total_karma)] pairs sorted descending by
+    total so the highest-karma agents appear first.  Suitable for
+    populating the karma leaderboard without re-reading the store. *)
+let totals_of_karma_ledger events =
+  let tbl = Hashtbl.create 64 in
+  List.iter (fun (e : karma_event) ->
+    let prev = Hashtbl.find_opt tbl e.recipient |> Option.value ~default:0 in
+    Hashtbl.replace tbl e.recipient (prev + e.delta)
+  ) events;
+  Hashtbl.fold (fun k v acc -> (k, v) :: acc) tbl []
+  |> List.sort (fun (_, a) (_, b) -> Int.compare b a)
+
+(** JSON serialiser for a single karma event.
+
+    Wire format (stable):
+    {v
+      { "recipient": "<agent>",
+        "voter":     "<agent>",
+        "target_kind": "post" | "comment",
+        "target_id": "<id>",
+        "delta": 1,
+        "ts": 1234567890.0,
+        "ts_iso": "YYYY-MM-DDTHH:MM:SSZ" }
+    v} *)
+let karma_event_to_yojson (e : karma_event) : Yojson.Safe.t =
+  let tm = Unix.gmtime e.ts in
+  let ts_iso =
+    Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+      (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+      tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+  in
+  `Assoc [
+    ("recipient",   `String e.recipient);
+    ("voter",       `String e.voter);
+    ("target_kind", `String e.target_kind);
+    ("target_id",   `String e.target_id);
+    ("delta",       `Int    e.delta);
+    ("ts",          `Float  e.ts);
+    ("ts_iso",      `String ts_iso);
+  ]
 
 (** Calculate karma (total upvotes) for an agent *)
 let get_agent_karma store ~agent_name =

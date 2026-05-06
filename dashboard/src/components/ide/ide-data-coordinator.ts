@@ -39,6 +39,7 @@ export interface IdeDataCoordinator {
   readonly repositories: () => ReadonlyArray<Repository>
   readonly activeRepositoryId: () => string | null
   readonly setActiveRepositoryId: (repoId: string | null) => void
+  readonly subscribeActiveRepositoryId: (listener: () => void) => () => void
   readonly scanRepositories: () => Promise<ReadonlyArray<Repository>>
   readonly subscribeRepositories: (listener: () => void) => () => void
   readonly dispose: () => void
@@ -211,6 +212,8 @@ export function createIdeDataCoordinator(): IdeDataCoordinator {
     setActiveRepositoryId: (repoId: string | null) => {
       activeRepositoryIdSignal.value = repoId
     },
+    subscribeActiveRepositoryId: (listener: () => void) =>
+      activeRepositoryIdSignal.subscribe(listener),
     scanRepositories,
     subscribeRepositories: (listener: () => void) =>
       repositoriesSignal.subscribe(listener),

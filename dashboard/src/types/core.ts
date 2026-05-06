@@ -116,6 +116,8 @@ type BoardPostMeta = Record<string, unknown> & {
   judgment?: unknown
 }
 
+export type BoardVoteDirection = 'up' | 'down'
+
 export interface BoardActorIdentity {
   kind: 'keeper' | 'agent'
   id: string
@@ -139,6 +141,8 @@ export interface BoardPost {
   tags: string[]
   votes: number
   vote_balance?: number
+  current_vote?: BoardVoteDirection | null
+  has_voted?: boolean
   comment_count: number
   created_at: string
   updated_at: string
@@ -147,6 +151,7 @@ export interface BoardPost {
   visibility?: string
   expires_at?: string | null
   hearth_count?: number
+  reactions?: BoardReactionSummary[]
 }
 
 export interface BoardComment {
@@ -161,6 +166,9 @@ export interface BoardComment {
   vote_balance?: number
   votes_up?: number
   votes_down?: number
+  current_vote?: BoardVoteDirection | null
+  has_voted?: boolean
+  reactions?: BoardReactionSummary[]
 }
 
 export type BoardReactionTargetType = 'post' | 'comment'
@@ -180,6 +188,21 @@ export interface BoardReactionToggleResult {
   emoji: string
   reacted: boolean
   summary: BoardReactionSummary[]
+}
+
+// --- SubBoard ---
+
+export type SubBoardAccess = 'open' | 'members_only' | 'owner_only'
+
+export interface SubBoard {
+  id: string
+  slug: string
+  name: string
+  description: string
+  owner: string
+  access: SubBoardAccess
+  created_at: string
+  post_count: number
 }
 
 // --- Keeper Metrics ---
@@ -280,10 +303,18 @@ export interface KeeperTrustLatestEvent {
   next_human_action?: string | null
 }
 
+export interface KeeperTrustApprovalPendingFirst {
+  id?: string | null
+  tool_name?: string | null
+  task_id?: string | null
+  blocker_class?: string | null
+}
+
 export interface KeeperTrustApprovalState {
   state?: string | null
   summary?: string | null
   pending_count?: number | null
+  pending_first?: KeeperTrustApprovalPendingFirst | null
 }
 
 export interface KeeperTrustExecutionSummary {
@@ -719,6 +750,9 @@ export interface Keeper {
     | 'turn_timeout'
     | 'completion_contract_violation'
     | 'cascade_exhausted'
+    | 'no_tool_capable_provider'
+    | 'fiber_unresolved'
+    | 'stale_turn_timeout'
     | null
   runtime_blocker_summary?: string | null
   runtime_blocker_continue_gate?: boolean | null

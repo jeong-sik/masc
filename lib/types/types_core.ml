@@ -956,7 +956,7 @@ type claim_next_result =
       task_id : string;
       title : string;
       priority : int;
-      released_task_id : string option;  (** Previous task auto-released, if any *)
+      released_task_id : string option;  (** Legacy field; claim_next no longer auto-releases active work. *)
       message : string;
     }
   | Claim_next_no_unclaimed

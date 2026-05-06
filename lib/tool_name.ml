@@ -201,6 +201,7 @@ module Masc = struct
     | Add_task
     | Agent_fitness
     | Agent_update
+    | Agent_card
     | Agents
     | Autoresearch_cycle
     | Autoresearch_inject
@@ -306,6 +307,7 @@ module Masc = struct
     | Add_task -> "masc_add_task"
     | Agent_fitness -> "masc_agent_fitness"
     | Agent_update -> "masc_agent_update"
+    | Agent_card -> "masc_agent_card"
     | Agents -> "masc_agents"
     | Batch_add_tasks -> "masc_batch_add_tasks"
     | Board_cleanup -> "masc_board_cleanup"
@@ -411,6 +413,7 @@ module Masc = struct
     | "masc_add_task" -> Some Add_task
     | "masc_agent_fitness" -> Some Agent_fitness
     | "masc_agent_update" -> Some Agent_update
+    | "masc_agent_card" -> Some Agent_card
     | "masc_agents" -> Some Agents
     | "masc_batch_add_tasks" -> Some Batch_add_tasks
     | "masc_board_cleanup" -> Some Board_cleanup

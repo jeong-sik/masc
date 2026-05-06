@@ -102,6 +102,7 @@
         test_keeper_tool_surface_guard
         test_keeper_benchmark_canary
         test_keeper_pr_review
+        test_keeper_github_pr
         test_playground_paths
         test_keeper_llama_only
         test_keeper_meta_cwd_resilience
@@ -313,6 +314,7 @@
           test_keeper_tool_surface_guard
           test_keeper_benchmark_canary
           test_keeper_pr_review
+          test_keeper_github_pr
           test_playground_paths
           test_keeper_llama_only
           test_keeper_meta_cwd_resilience
@@ -584,6 +586,7 @@
         test_board_dispatch
         test_board_fixture_detector
         test_vote_ts_preservation_10086
+        test_board_karma_ledger
 
         test_task_dispatch
         test_drift_guard_core
@@ -666,6 +669,7 @@
         test_goal_verification
         test_string_util
         test_board_core_payload
+        test_board_moderation
         test_voice_config)
  (modules
         test_runtime_params
@@ -782,6 +786,7 @@
         test_board_dispatch
         test_board_fixture_detector
         test_vote_ts_preservation_10086
+        test_board_karma_ledger
 
         test_task_dispatch
         test_drift_guard_core
@@ -863,6 +868,7 @@
         test_goal_verification
         test_string_util
         test_board_core_payload
+        test_board_moderation
         test_voice_config)
  (libraries masc_test_deps)
  (deps ../bin/main_eio.exe))
@@ -1028,6 +1034,7 @@
 (include stanzas/test_auth_token_uniqueness_audit.inc)
 (include stanzas/test_base_path_prod_guard.inc)
 (include stanzas/test_board_api_e2e.inc)
+(include stanzas/test_board_sse_canonical_event_type.inc)
 (include stanzas/test_briefing_compactors.inc)
 (include stanzas/test_briefing_gaps.inc)
 (include stanzas/test_briefing_json_helpers.inc)
@@ -1037,6 +1044,7 @@
 (include stanzas/test_cascade_attempt_liveness_counters.inc)
 (include stanzas/test_cascade_attempt_liveness_observer.inc)
 (include stanzas/test_cascade_attempt_liveness_runtime.inc)
+(include stanzas/test_cascade_attempt_outer_wall.inc)
 (include stanzas/test_oas_worker_named_liveness_integration.inc)
 (include stanzas/test_cascade_capability_gate.inc)
 (include stanzas/test_cascade_catalog_runtime.inc)

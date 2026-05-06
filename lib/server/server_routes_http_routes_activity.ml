@@ -213,6 +213,7 @@ let add_routes ~sw ~clock router =
          let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
          let offset = int_query_param req "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
          let base_fetch = board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset in
+         let voter = board_voter_query req in
          let posts =
            Board_dispatch.list_posts ?hearth ~sort_by ~exclude_system
              ~exclude_automation ?author_filter ~limit:base_fetch ()
@@ -226,7 +227,12 @@ let add_routes ~sw ~clock router =
            List.map
              (fun (p : Board.post) ->
                let author = Board.Agent_id.to_string p.author in
-               board_post_dashboard_json ~author_karma:(get_karma author) p)
+               let post_id = Board.Post_id.to_string p.id in
+               let current_vote = board_current_vote_for_post ~voter ~post_id in
+               let reactions = board_reactions_for_post ~voter ~post_id in
+               board_post_dashboard_json ?current_vote
+                 ~reactions
+                 ~author_karma:(get_karma author) p)
              paged
          in
          let json = `Assoc [
@@ -255,6 +261,76 @@ let add_routes ~sw ~clock router =
        let json = `Assoc [("flairs", `List flairs)] in
        Http.Response.json (Yojson.Safe.to_string json) reqd)
 
+  |> Http.Router.get "/api/v1/board/sub-boards" (fun _request reqd ->
+       let sub_boards = Board_dispatch.list_sub_boards () in
+       let json = `Assoc [
+         ("sub_boards", `List (List.map Board.sub_board_to_yojson sub_boards));
+       ] in
+       Http.Response.json (Yojson.Safe.to_string json) reqd)
+
+  |> Http.Router.post "/api/v1/board/sub-boards" (fun request reqd ->
+       with_tool_auth ~tool_name:"board_sub_board_create"
+         (fun _state _req reqd ->
+         Http.Request.read_body_async reqd (fun body ->
+           try
+             let args = Yojson.Safe.from_string body in
+             let slug =
+               Safe_ops.json_string_opt "slug" args |> Option.value ~default:""
+             in
+             let name =
+               Safe_ops.json_string_opt "name" args |> Option.value ~default:""
+             in
+             let description =
+               Safe_ops.json_string_opt "description" args |> Option.value ~default:""
+             in
+             let agent_name =
+               (let hdr k = Option.bind
+                 (Httpun.Headers.get request.Httpun.Request.headers k)
+                 (fun s -> if s = "" then None else Some s) in
+               match hdr "x-gate-agent" with Some _ as v -> v | None -> hdr "x-masc-agent")
+               |> Option.value ~default:"dashboard"
+             in
+             let access =
+               match Safe_ops.json_string_opt "access" args with
+               | Some s -> Board.sub_board_access_of_string_opt s
+               | None -> None
+             in
+             (match Board_dispatch.create_sub_board ~slug ~name ~description
+                      ~owner:agent_name ?access () with
+              | Ok sb ->
+                  Http.Response.json
+                    (Yojson.Safe.to_string (Board.sub_board_to_yojson sb)) reqd
+              | Error e ->
+                  Http.Response.json ~status:`Bad_request
+                    (Yojson.Safe.to_string
+                       (`Assoc [("error", `String (Tool_board.board_error_to_string e))]))
+                    reqd)
+           with Yojson.Json_error msg ->
+             Http.Response.json ~status:`Bad_request
+               (Yojson.Safe.to_string
+                  (`Assoc [("error", `String ("invalid JSON: " ^ msg))]))
+               reqd))
+         request reqd)
+
+  |> Http.Router.prefix_get "/api/v1/board/sub-boards/" (fun request reqd ->
+       let path = Http.Request.path request in
+       (match extract_path_param ~prefix:"/api/v1/board/sub-boards/" path with
+        | None ->
+            Http.Response.json ~status:`Bad_request
+              (Yojson.Safe.to_string
+                 (`Assoc [("error", `String "sub_board_id is required")]))
+              reqd
+        | Some sub_board_id ->
+            (match Board_dispatch.get_sub_board ~sub_board_id with
+             | Ok sb ->
+                 Http.Response.json
+                   (Yojson.Safe.to_string (Board.sub_board_to_yojson sb)) reqd
+             | Error e ->
+                 Http.Response.json ~status:`Not_found
+                   (Yojson.Safe.to_string
+                      (`Assoc [("error", `String (Tool_board.board_error_to_string e))]))
+                   reqd)))
+
   |> Http.Router.prefix_get "/api/v1/board/" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let path = Http.Request.path request in
@@ -267,7 +343,10 @@ let add_routes ~sw ~clock router =
               let format =
                 query_param req "format" |> Option.value ~default:"nested"
               in
-              let (status, body) = board_post_detail_json ~response_format:format ~post_id in
+              let voter = board_voter_query req in
+              let (status, body) =
+                board_post_detail_json ~voter ~response_format:format ~post_id
+              in
               respond_json_with_cors ~status request reqd body)
        ) request reqd)
 
@@ -296,7 +375,9 @@ let add_routes ~sw ~clock router =
              in
              let voter = board_actor_author_for_write agent_name in
              let* args = json_upsert_string_field "voter" voter args in
-             let (ok, msg) = Tool_board.handle_tool "masc_board_vote" args in
+             let result = Tool_board.handle_tool "masc_board_vote" args in
+             let ok = result.success in
+             let msg = Tool_result.message result in
              let status = if ok then `OK else `Bad_request in
              respond_json_with_cors ~status request reqd
                (Yojson.Safe.to_string (`Assoc [
@@ -338,7 +419,9 @@ let add_routes ~sw ~clock router =
                else json_ensure_meta_string_field "author_raw_agent_name" agent_name args
              in
              let* args = json_ensure_meta_source "dashboard_board_post" args in
-             let (ok, msg) = Tool_board.handle_tool "masc_board_post" args in
+             let result = Tool_board.handle_tool "masc_board_post" args in
+             let ok = result.success in
+             let msg = Tool_result.message result in
              let status = if ok then `Created else `Bad_request in
              respond_json_with_cors ~status request reqd
                (Yojson.Safe.to_string (`Assoc [
@@ -375,7 +458,9 @@ let add_routes ~sw ~clock router =
              in
              let author = board_actor_author_for_write agent_name in
              let* args = json_upsert_string_field "author" author args in
-             let (ok, msg) = Tool_board.handle_tool "masc_board_comment" args in
+             let result = Tool_board.handle_tool "masc_board_comment" args in
+             let ok = result.success in
+             let msg = Tool_result.message result in
              let status = if ok then `Created else `Bad_request in
              respond_json_with_cors ~status request reqd
                (Yojson.Safe.to_string (`Assoc [

@@ -185,6 +185,67 @@ let test_add_or_replace_replaces () =
   | Some s -> check string "replaced status" (CT.show_epoch_status CT.Completed) (CT.show_epoch_status s.CI.status)
   | None -> fail "epoch missing after replace"
 
+let test_bound_conductivity_uses_max_min_policy () =
+  let policy =
+    { CI.default_pheromone_policy with
+      CI.tau_min = 0.20;
+      tau_max = 0.80;
+    }
+  in
+  check (float 0.0001) "min clamp" 0.20
+    (CI.bound_conductivity ~policy (-1.0));
+  check (float 0.0001) "max clamp" 0.80
+    (CI.bound_conductivity ~policy 1.5)
+
+let test_active_trail_stagnation_one_path () =
+  let active = sample_summary () in
+  check (float 0.0001) "single active trail monopolizes conductivity" 1.0
+    (CI.active_trail_stagnation_score [ active ])
+
+let test_active_trail_stagnation_balanced_paths () =
+  let a = { (sample_summary ()) with CI.id = "a"; conductivity = 0.5 } in
+  let b = { (sample_summary ()) with CI.id = "b"; conductivity = 0.5 } in
+  check (float 0.0001) "balanced trails are not stagnant" 0.0
+    (CI.active_trail_stagnation_score [ a; b ])
+
+let test_adaptive_evaporation_boosts_on_stagnation () =
+  let policy =
+    { CI.tau_min = 0.05;
+      tau_max = 1.0;
+      base_evaporation = 0.10;
+      stagnation_threshold = 0.65;
+      stagnation_boost = 0.20;
+    }
+  in
+  check (float 0.0001) "base rate below threshold" 0.10
+    (CI.adaptive_evaporation_rate ~policy ~stagnation_score:0.20 ());
+  check (float 0.0001) "boosted rate at full stagnation" 0.30
+    (CI.adaptive_evaporation_rate ~policy ~stagnation_score:1.0 ());
+  check (float 0.0001) "conductivity decays by boosted rate" 0.70
+    (CI.evaporate_conductivity ~policy ~stagnation_score:1.0 1.0)
+
+let test_evaporate_active_epochs_preserves_inactive () =
+  let active = { (sample_summary ()) with CI.id = "active"; conductivity = 1.0 } in
+  let completed =
+    { (sample_summary ()) with
+      CI.id = "completed";
+      status = CT.Completed;
+      conductivity = 0.9;
+    }
+  in
+  let idx =
+    { (CI.empty ~repo:"masc-mcp" ~now:"2026-05-01T00:00:00Z") with
+      CI.epochs = [ active; completed ];
+    }
+  in
+  let evaporated = CI.evaporate_active_epochs idx in
+  match CI.find_epoch evaporated "active", CI.find_epoch evaporated "completed" with
+  | Some active', Some completed' ->
+      check bool "active decayed" true (active'.CI.conductivity < active.CI.conductivity);
+      check (float 0.0001) "inactive preserved" completed.CI.conductivity
+        completed'.CI.conductivity
+  | _ -> fail "expected both epochs after evaporation"
+
 let test_json_roundtrip_index () =
   let idx = CI.empty ~repo:"masc-mcp" ~now:"2026-05-01T00:00:00Z" in
   let summary = sample_summary () in
@@ -223,5 +284,15 @@ let () =
       test_case "find_epoch missing" `Quick test_find_epoch_missing;
       test_case "active_epochs" `Quick test_active_epochs;
       test_case "add_or_replace replaces" `Quick test_add_or_replace_replaces;
+      test_case "bound conductivity uses Max-Min policy" `Quick
+        test_bound_conductivity_uses_max_min_policy;
+      test_case "one active trail is stagnant" `Quick
+        test_active_trail_stagnation_one_path;
+      test_case "balanced active trails are not stagnant" `Quick
+        test_active_trail_stagnation_balanced_paths;
+      test_case "adaptive evaporation boosts on stagnation" `Quick
+        test_adaptive_evaporation_boosts_on_stagnation;
+      test_case "evaporation preserves inactive epochs" `Quick
+        test_evaporate_active_epochs_preserves_inactive;
     ]);
   ]

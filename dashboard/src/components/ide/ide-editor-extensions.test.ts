@@ -1,20 +1,23 @@
 import { describe, it, expect } from 'vitest'
-import { EditorState } from '@codemirror/state'
+import { EditorState, type Extension } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import {
   readOnlyExt,
   themeExt,
   languageExt,
+  languageIdForFilePath,
+  lineNumberExt,
+  syntaxHighlightExt,
   blameExtensions,
   pushOwnership,
   setOwnership,
 } from './ide-editor-extensions'
 import type { LineOwnership } from './keeper-line-ownership-store'
 
-function createTestView(extensions: ReturnType<typeof readOnlyExt>[]) {
+function createTestView(extensions: Extension[], doc = 'hello\nworld\n') {
   const container = document.createElement('div')
   document.body.appendChild(container)
-  const state = EditorState.create({ doc: 'hello\nworld\n', extensions })
+  const state = EditorState.create({ doc, extensions })
   const view = new EditorView({ state, parent: container })
   return { view, container }
 }
@@ -40,6 +43,25 @@ describe('themeExt', () => {
   })
 })
 
+describe('lineNumberExt + syntaxHighlightExt', () => {
+  it('renders line numbers and syntax highlight spans', async () => {
+    const lang = await languageExt('index.ts')
+    const { view, container } = createTestView([
+      themeExt(),
+      lineNumberExt(),
+      syntaxHighlightExt(),
+      lang,
+    ], 'const answer = 42\n')
+
+    expect(container.querySelector('.cm-lineNumbers')).not.toBeNull()
+    expect(container.querySelectorAll('.cm-lineNumbers .cm-gutterElement').length).toBeGreaterThan(0)
+    expect(container.querySelector('.cm-line span')).not.toBeNull()
+
+    view.destroy()
+    container.remove()
+  })
+})
+
 describe('languageExt', () => {
   it('returns empty extension for unknown file types', async () => {
     const ext = await languageExt('readme.xyz')
@@ -60,6 +82,26 @@ describe('languageExt', () => {
     const ext = await languageExt('package.json')
     expect(ext).toBeDefined()
   })
+
+  it('maps OCaml source and interface files to the OCaml language', async () => {
+    expect(languageIdForFilePath('lib/server.ml')).toBe('ocaml')
+    expect(languageIdForFilePath('lib/server.mli')).toBe('ocaml')
+    expect(languageIdForFilePath('scratch.ocaml')).toBe('ocaml')
+
+    const lang = await languageExt('lib/server.ml')
+    const { view, container } = createTestView([
+      themeExt(),
+      lineNumberExt(),
+      syntaxHighlightExt(),
+      lang,
+    ], 'module type S = sig\n  val run : unit -> int\nend\n')
+
+    expect(container.querySelector('.cm-line span')).not.toBeNull()
+    expect(view.state.languageDataAt('name', 0)).toContain('ocaml')
+
+    view.destroy()
+    container.remove()
+  })
 })
 
 describe('blameExtensions', () => {
@@ -76,8 +118,8 @@ describe('pushOwnership + setOwnership effect', () => {
     const { view, container } = createTestView(exts)
 
     const ownership = new Map([
-      [1, { keeper_id: 'alpha', hue_index: 0, last_edit_kind: 'write', last_edit_ms: Date.now() }],
-      [2, { keeper_id: 'beta', hue_index: 1, last_edit_kind: 'edit', last_edit_ms: Date.now() }],
+      [1, { keeper_id: 'alpha', hue_index: 1, last_edit_kind: 'edit', last_edit_ms: Date.now() }],
+      [2, { keeper_id: 'beta', hue_index: 2, last_edit_kind: 'create', last_edit_ms: Date.now() }],
     ]) as ReadonlyMap<number, LineOwnership>
 
     expect(() => pushOwnership(view, ownership)).not.toThrow()
@@ -87,10 +129,28 @@ describe('pushOwnership + setOwnership effect', () => {
     container.remove()
   })
 
+  it('renders keeper sigil and name markers in the blame gutter', () => {
+    const exts = [themeExt(), readOnlyExt(), ...blameExtensions()]
+    const { view, container } = createTestView(exts)
+
+    const ownership = new Map([
+      [1, { keeper_id: 'alpha-keeper', hue_index: 3, last_edit_kind: 'edit', last_edit_ms: 1000 }],
+    ]) as ReadonlyMap<number, LineOwnership>
+
+    pushOwnership(view, ownership)
+
+    expect(container.querySelector('.cm-blame-marker')).not.toBeNull()
+    expect(container.querySelector('.cm-blame-sigil')?.textContent).toBe('AK')
+    expect(container.querySelector('.cm-blame-name')?.textContent).toBe('alpha-keeper')
+
+    view.destroy()
+    container.remove()
+  })
+
   it('setOwnership effect carries the ownership map', () => {
     const ownership = new Map([
-      [1, { keeper_id: 'gamma', hue_index: 2, last_edit_kind: 'write', last_edit_ms: 1000 }],
-    ]) as unknown as ReadonlyMap<number, LineOwnership>
+      [1, { keeper_id: 'gamma', hue_index: 2, last_edit_kind: 'edit', last_edit_ms: 1000 }],
+    ]) as ReadonlyMap<number, LineOwnership>
     const effect = (setOwnership as any).of(ownership)
     expect((effect as any).is(setOwnership)).toBe(true)
     expect((effect as any).value).toBe(ownership)

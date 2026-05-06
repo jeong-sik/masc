@@ -961,8 +961,6 @@ let test_agent_purge_route_removes_plain_agent_artifacts () =
   seed_agent_file ~capabilities:[ "coding" ] config agent_name;
   ignore
     (Masc_mcp.Auth.create_token config.base_path ~agent_name ~role:Masc_domain.Admin);
-  ignore
-    (Heartbeat.start ~agent_name ~interval:30 ~message:"route-test");
   let metrics_dir = Masc_mcp.Metrics_store_eio.agent_metrics_dir config agent_name in
   Fs_compat.mkdir_p metrics_dir;
   write_file (Filename.concat metrics_dir "2026-04.jsonl") "{}\n";
@@ -989,12 +987,12 @@ let test_agent_purge_route_removes_plain_agent_artifacts () =
   in
   check int "agent purge reports pending confirms" 0
     (cleanup_row |> member "pending_confirms_removed" |> to_int);
-  check int "agent purge reports stopped heartbeats" 1
+  (* The route runs inside [main_eio.exe], not this test process. A plain
+     seeded file-backed agent has no in-process server heartbeat to stop. *)
+  check int "agent purge reports server-process stopped heartbeats" 0
     (cleanup_row |> member "heartbeats_stopped" |> to_int);
   check string "agent purge reports coord leave" (agent_name ^ " left the namespace")
     (cleanup_row |> member "coord_leave_result" |> to_string);
-  check int "agent purge leaves no duplicate heartbeat stop work" 0
-    (Heartbeat.stop_by_agent ~agent_name);
   check bool "agent file removed" false
     (Sys.file_exists
        (Filename.concat (Masc_mcp.Coord.agents_dir config)

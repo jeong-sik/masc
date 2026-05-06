@@ -1599,6 +1599,10 @@ let keeper_toml_config_error_to_json
       ("reason", `String reason);
       ("error", `String error);
       ("terminal_reason", `String "config_parse_failed");
+      ("severity", `String "error");
+      ("blocking", `Bool true);
+      ("operator_action_required", `Bool true);
+      ("next_action", `String "fix_keeper_toml_config");
     ]
 
 let keeper_toml_unknown_keys_to_json
@@ -1611,6 +1615,10 @@ let keeper_toml_unknown_keys_to_json
       ("unknown_key_count", `Int (List.length unknown_keys));
       ("unknown_keys", `List (List.map (fun key -> `String key) unknown_keys));
       ("terminal_reason", `String "config_unknown_keys");
+      ("severity", `String "error");
+      ("blocking", `Bool true);
+      ("operator_action_required", `Bool true);
+      ("next_action", `String "remove_unknown_keeper_toml_keys");
     ]
 
 let keeper_name_of_toml_path path =
@@ -1634,9 +1642,24 @@ let keeper_toml_unknown_keys_of_path path =
                 }))
 
 let keeper_toml_config_error_of_path path =
-  match load_keeper_toml path with
-  | Ok _ -> None
-  | Error error ->
+  let error =
+    match Safe_ops.read_file_safe path with
+    | Error e -> Some (Printf.sprintf "cannot read %s: %s" path e)
+    | Ok content -> (
+        match Keeper_toml_loader.parse_toml content with
+        | Error e -> Some (Printf.sprintf "%s: %s" path e)
+        | Ok doc -> (
+            match profile_defaults_of_toml doc with
+            | Error e -> Some (Printf.sprintf "%s: %s" path e)
+            | Ok _ -> (
+                match Keeper_toml_loader.toml_string_opt doc "keeper.name" with
+                | Some name when name <> "" && not (validate_name name) ->
+                    Some (Printf.sprintf "%s: invalid keeper name '%s'" path name)
+                | _ -> None)))
+  in
+  match error with
+  | None -> None
+  | Some error ->
       Some
         {
           keeper_name = keeper_name_of_toml_path path;

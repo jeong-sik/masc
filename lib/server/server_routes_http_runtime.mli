@@ -119,7 +119,11 @@ val make_health_json :
     [startup] / [subsystems] / [feature_flags] / [gc] /
     [keeper_fibers] / [keeper_config_parse_error_count] /
     [keeper_config_parse_errors] / [keeper_config_unknown_key_count] /
-    [keeper_config_unknown_keys] / [lazy_task_boot_guard_fires_total].
+    [keeper_config_unknown_keys] / [keeper_config_schema_status] /
+    [keeper_config_schema_blocking] /
+    [keeper_config_schema_terminal_reason] /
+    [keeper_config_operator_action_required] /
+    [lazy_task_boot_guard_fires_total].
 
     {2 lazy_task_boot_guard_fires_total contract (P2 silent-
     failure fix)}

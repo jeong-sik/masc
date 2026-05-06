@@ -177,6 +177,15 @@ let make_health_json ?(listener = "http/1.1") request =
       0
       keeper_config_unknown_keys
   in
+  let keeper_config_parse_error_count = List.length keeper_config_parse_errors in
+  let keeper_config_schema_blocking =
+    keeper_config_parse_error_count > 0 || keeper_config_unknown_key_count > 0
+  in
+  let keeper_config_schema_terminal_reason =
+    if keeper_config_parse_error_count > 0 then "config_parse_failed"
+    else if keeper_config_unknown_key_count > 0 then "config_unknown_keys"
+    else "none"
+  in
   `Assoc [
     ("status", `String "ok");
     ("server", `String "masc-mcp");
@@ -209,7 +218,7 @@ let make_health_json ?(listener = "http/1.1") request =
     ]);
     ("keeper_fibers", `Int (Keeper_registry.count_running ()));
     ("keeper_config_parse_error_count",
-     `Int (List.length keeper_config_parse_errors));
+     `Int keeper_config_parse_error_count);
     ( "keeper_config_parse_errors",
       `List
         (List.map Keeper_types_profile.keeper_toml_config_error_to_json
@@ -220,6 +229,14 @@ let make_health_json ?(listener = "http/1.1") request =
       `List
         (List.map Keeper_types_profile.keeper_toml_unknown_keys_to_json
            keeper_config_unknown_keys) );
+    ( "keeper_config_schema_status",
+      `String (if keeper_config_schema_blocking then "blocked" else "ok") );
+    ( "keeper_config_schema_blocking",
+      `Bool keeper_config_schema_blocking );
+    ( "keeper_config_schema_terminal_reason",
+      `String keeper_config_schema_terminal_reason );
+    ( "keeper_config_operator_action_required",
+      `Bool keeper_config_schema_blocking );
     (* P2 silent-failure fix: lazy_task_boot_guard fires when a keeper
        startup task exceeds the boot timeout (server_bootstrap_loops.ml:116).
        The Prometheus counter `masc_lazy_task_boot_guard_fired_total`

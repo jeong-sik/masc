@@ -23,7 +23,7 @@ let recency_tau_seconds = 86_400.0
 
 let clamp ~lo ~hi x = if x < lo then lo else if x > hi then hi else x
 
-(* Jaccard similarity between two string lists, treated as multisets of
+(* Jaccard similarity between two string lists, treated as sets of unique
    case-insensitive tokens. Returns 0.0 when both sides are empty so that
    "no signal" never accidentally rewards an item. *)
 let jaccard a b =
@@ -37,14 +37,17 @@ let jaccard a b =
   match a', b' with
   | [], [] -> 0.0
   | _, _ ->
-    let set_a = a' in
-    let set_b = b' in
-    let intersect =
-      List.filter (fun k -> List.mem k set_b) set_a |> List.length
+    let rec intersection_count xs ys =
+      match xs, ys with
+      | [], _ | _, [] -> 0
+      | x :: xt, y :: yt ->
+        let ordering = String.compare x y in
+        if ordering = 0 then 1 + intersection_count xt yt
+        else if ordering < 0 then intersection_count xt ys
+        else intersection_count xs yt
     in
-    let union =
-      List.sort_uniq String.compare (set_a @ set_b) |> List.length
-    in
+    let intersect = intersection_count a' b' in
+    let union = List.length a' + List.length b' - intersect in
     if union = 0 then 0.0
     else float_of_int intersect /. float_of_int union
 
@@ -63,4 +66,4 @@ let gravity_score weights ~query item =
 let rank ?(weights = default_weights) ~query items =
   (* Stable sort: List.stable_sort preserves input order for equal scores. *)
   let scored = List.map (fun it -> (it, gravity_score weights ~query it)) items in
-  List.stable_sort (fun (_, a) (_, b) -> compare b a) scored
+  List.stable_sort (fun (_, a) (_, b) -> Float.compare b a) scored

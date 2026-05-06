@@ -89,12 +89,17 @@ let test_frequency_weight_clamped_to_unit_interval () =
     (approx_eq s_over s_unit)
 
 let test_jaccard_case_insensitive () =
-  let it = mk_item "case" ~keywords:[ "Foo"; "BAR" ] in
-  let result = rank ~query:[ "foo"; "bar" ] [ it ] in
-  let _item, score = List.hd result in
+  let case_folded = mk_item "case" ~keywords:[ "Foo"; "BAR" ] in
+  let exact = mk_item "exact" ~keywords:[ "foo"; "bar" ] in
+  let case_score =
+    gravity_score default_weights ~query:[ "foo"; "bar" ] case_folded
+  in
+  let exact_score =
+    gravity_score default_weights ~query:[ "foo"; "bar" ] exact
+  in
   Alcotest.(check bool)
-    "case-folded match scores like exact match" true
-    (score > 0.5)
+    "case-folded match scores exactly like exact match" true
+    (approx_eq case_score exact_score)
 
 let () =
   Alcotest.run "cognitive_gravity"

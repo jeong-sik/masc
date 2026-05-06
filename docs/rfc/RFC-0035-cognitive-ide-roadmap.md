@@ -3,7 +3,9 @@
 - **Status**: Draft
 - **Author**: Claude (autonomous, /loop iteration 1)
 - **Created**: 2026-05-06
-- **Source**: `~/Downloads/masc-cognitive-ide-master.md` (137KB / 3417 lines / 12 chapters / 11 dimensions, hereafter "Master Report")
+- **Source basis**: self-contained summary of the operator-provided Master
+  Report (137KB / 3417 lines / 12 chapters / 11 dimensions). This RFC records
+  the actionable repo-owned mapping so reviewers do not need a local file.
 - **Related**: #13768 cognitive-disclosure-cockpit, #13773 cognitive-mode-registry,
   #13779 event-stream-temporal-sync, #13781 event-stream-gradient-attraction
 - **Out of scope**: dashboard credential/identity (RFC-0008 territory), oas/agent_sdk
@@ -111,8 +113,9 @@ algorithm itself is decoupled from any UI surface. The dashboard PRs deal with
 
 1. `lib/cognitive_gravity.mli` + `.ml`: pure OCaml module exposing
    `default_weights`, `gravity_score`, and `rank`.
-2. `test/test_cognitive_gravity.ml`: 5 unit tests covering the empty-list,
-   single-item, ordering, weight-zero, and recency-decay properties.
+2. `test/test_cognitive_gravity.ml`: 7 unit tests covering the empty-list,
+   single-item, ordering, weight-zero, recency-decay, frequency-clamp, and
+   case-insensitive properties.
 3. `test/dune`: append `test_cognitive_gravity` to the synchronous test group.
 4. `dune-project`: bump version `0.19.11` → `0.19.12`.
 5. `CHANGELOG.md`: new `[0.19.12]` section.

@@ -206,6 +206,7 @@
         test_tool_prefilter
         test_keeper_state_machine
         test_keeper_state_machine_correspondence
+        test_keeper_lifecycle_hooks
         test_keeper_social_model_magentic_ledger_fsm
         test_keeper_overflow_recovery
         test_telemetry_unified
@@ -426,6 +427,7 @@
           test_tool_prefilter
           test_keeper_state_machine
           test_keeper_state_machine_correspondence
+          test_keeper_lifecycle_hooks
           test_keeper_social_model_magentic_ledger_fsm
           test_keeper_overflow_recovery
           test_telemetry_unified

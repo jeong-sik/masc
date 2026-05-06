@@ -18,24 +18,28 @@ let sanitize_log_value ?(max_bytes = 240) s =
     without_controls
   |> String_util.to_string
 
-let observe_workspace_route_failure ~site ~path exn =
+let observe_workspace_route_failure ?(warn_on_failure = true) ~site ~path exn =
   match exn with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
       let site = sanitize_log_value ~max_bytes:64 site in
+      let path = sanitize_log_value ~max_bytes:180 path in
+      let error = sanitize_log_value (Printexc.to_string exn) in
       Prometheus.inc_counter Prometheus.metric_workspace_route_failures
         ~labels:[("site", site)]
         ();
-      Log.Server.warn "workspace route %s failed path=%s err=%s"
-        site
-        (sanitize_log_value ~max_bytes:180 path)
-        (sanitize_log_value (Printexc.to_string exn))
+      if warn_on_failure then
+        Log.Server.warn "workspace route %s failed path=%s err=%s"
+          site path error
+      else
+        Log.Server.debug "workspace route %s failed path=%s err=%s"
+          site path error
 
-let workspace_or_default ~site ~path ~default f =
+let workspace_or_default ?(warn_on_failure = true) ~site ~path ~default f =
   try f () with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-      observe_workspace_route_failure ~site ~path exn;
+      observe_workspace_route_failure ~warn_on_failure ~site ~path exn;
       default
 
 module For_testing = struct
@@ -299,6 +303,7 @@ let rec scan_dir_bounded ~base ~depth ~max_depth ~remaining acc dir =
           let full = Filename.concat dir f in
           let is_dir =
             workspace_or_default
+              ~warn_on_failure:false
               ~site:"tree_is_directory"
               ~path:full
               ~default:false

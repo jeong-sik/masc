@@ -384,6 +384,22 @@ let test_workspace_failure_observer_increments_metric () =
   Alcotest.(check (float 0.0001))
     "workspace route failure counted" (before +. 1.0) after
 
+let test_workspace_failure_observer_counts_when_warn_suppressed () =
+  let labels = [("site", "unit_test_debug")] in
+  let before =
+    P.metric_value_or_zero P.metric_workspace_route_failures ~labels ()
+  in
+  W.For_testing.observe_workspace_route_failure
+    ~warn_on_failure:false
+    ~site:"unit_test_debug"
+    ~path:"/tmp/racy-entry"
+    (Failure "synthetic per-entry workspace failure");
+  let after =
+    P.metric_value_or_zero P.metric_workspace_route_failures ~labels ()
+  in
+  Alcotest.(check (float 0.0001))
+    "workspace route failure counted without WARN" (before +. 1.0) after
+
 let test_workspace_log_value_sanitizer_bounds_controlled_text () =
   let sanitized =
     W.For_testing.sanitize_log_value ~max_bytes:12
@@ -531,6 +547,8 @@ let () =
         ; Alcotest.test_case "limit signed lone underscore is junk" `Quick test_tree_node_limit_signed_lone_underscore_is_junk
         ; Alcotest.test_case "failure observer increments metric" `Quick
             test_workspace_failure_observer_increments_metric
+        ; Alcotest.test_case "failure observer counts when warn suppressed" `Quick
+            test_workspace_failure_observer_counts_when_warn_suppressed
         ; Alcotest.test_case "log sanitizer bounds controlled text" `Quick
             test_workspace_log_value_sanitizer_bounds_controlled_text
         ; Alcotest.test_case "failure observer bounds site label" `Quick

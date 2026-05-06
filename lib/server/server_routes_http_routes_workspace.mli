@@ -85,5 +85,5 @@ module For_testing : sig
   val sanitize_log_value : ?max_bytes:int -> string -> string
 
   val observe_workspace_route_failure :
-    site:string -> path:string -> exn -> unit
+    ?warn_on_failure:bool -> site:string -> path:string -> exn -> unit
 end

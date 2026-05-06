@@ -6,6 +6,24 @@
     @since Phase 1 — MASC->OAS migration
     @since Phase A — OAS #215 streaming verification *)
 
+(* Direct binary runs bypass test/dune's env block. Pin runtime env before
+   [Masc_mcp] is referenced so module init cannot load operator state. *)
+let pin_direct_run_masc_env () =
+  let base =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "test_oas_worker_env_%d_%06x" (Unix.getpid ())
+         (Random.bits ()))
+  in
+  if not (Sys.file_exists base) then Unix.mkdir base 0o755;
+  Unix.putenv "MASC_BASE_PATH" base;
+  Unix.putenv "MASC_BASE_PATH_INPUT" base;
+  Unix.putenv "MASC_CONFIG_DIR" "";
+  Unix.putenv "MASC_PERSONAS_DIR" "";
+  Unix.putenv "MASC_KEEPER_AUTONOMOUS_CONCURRENCY" "";
+  Unix.putenv "MASC_KEEPER_REACTIVE_CONCURRENCY" ""
+
+let () = pin_direct_run_masc_env ()
+
 open Masc_mcp
 
 module Oas = Agent_sdk
@@ -1143,10 +1161,11 @@ let test_default_config_preserves_custom_local_request_path () =
       "custom local OpenAI-compatible provider should stay OpenAICompat"
 
 let test_run_named_per_provider_timeout_uses_clock_fallback_and_exempts_last_provider () =
-  with_cascade_attempt_liveness "off" @@ fun () ->
+  Masc_mcp.Masc_eio_env.reset_for_test ();
   Alcotest.(check bool) "test requires no global Masc_eio_env"
     true
-    (Option.is_none (Masc_eio_env.get_opt ()));
+    (Option.is_none (Masc_mcp.Masc_eio_env.get_opt ()));
+  with_cascade_attempt_liveness "off" @@ fun () ->
   try
     Eio.Switch.run @@ fun sw ->
     let clock =
@@ -4874,6 +4893,7 @@ let () =
   Eio_guard.enable ();
   Eio.Switch.run @@ fun sw ->
   Masc_mcp.Oas_worker_cascade.start_actor_if_needed ~sw;
+  Masc_mcp.Masc_eio_env.reset_for_test ();
   Alcotest.run "OAS Worker" [
     "sse_event_bridge", [
       Alcotest.test_case "text delta extraction" `Quick

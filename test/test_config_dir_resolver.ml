@@ -218,6 +218,8 @@ let test_cwd_fallback_disabled_by_default () =
     (Lib.Config_dir_resolver.status_to_string resolution.status);
   check string "root source" "missing"
     (Lib.Config_dir_resolver.source_to_string resolution.config_root.source);
+  check bool "cascade hidden when repo fallback disabled"
+    false resolution.cascade.exists;
   check bool "warning mentions opt-in" true
     (List.exists
        (string_contains ~needle:"MASC_ALLOW_REPO_CONFIG_FALLBACK=true")

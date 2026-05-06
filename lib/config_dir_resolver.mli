@@ -92,8 +92,11 @@ val config_signature_exists : string -> bool
 (** {1 Env introspection}
 
     Sanitized env var readers that strip inherited test values when running
-    under a test executable and [MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE] is unset. *)
+    under a test executable. [MASC_BASE_PATH] uses
+    [MASC_TEST_ALLOW_BASE_PATH_OVERRIDE]; config/persona paths and [HOME]
+    use [MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE]. *)
 
+val current_env_base_path_opt : unit -> string option
 val current_env_config_dir_opt : unit -> string option
 val current_env_base_path_opt : unit -> string option
 val current_env_personas_dir_opt : unit -> string option

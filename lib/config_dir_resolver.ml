@@ -60,10 +60,15 @@ let running_under_test_executable executable_name =
   |> String.starts_with ~prefix:"test_"
 
 let test_config_path_override_env = "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE"
+let test_base_path_override_env = "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE"
 
 let allow_inherited_test_config_paths () =
   Env_config_core.get_bool ~default:false
     test_config_path_override_env
+
+let allow_inherited_test_base_path () =
+  Env_config_core.get_bool ~default:false
+    test_base_path_override_env
 
 let initial_env_base_path = Env_config_core.base_path_raw_opt ()
 let initial_env_config_dir = Env_config_core.config_dir_opt ()
@@ -115,7 +120,7 @@ let current_env_base_path_opt () =
   sanitize_inherited_test_base_path_opt
     ~running_under_test_executable:
       (running_under_test_executable Sys.executable_name)
-    ~allow_inherited:(allow_inherited_test_config_paths ())
+    ~allow_inherited:(allow_inherited_test_base_path ())
     ~initial:initial_env_base_path
     ~current:(Env_config_core.base_path_raw_opt ())
     ~home:initial_env_home
@@ -329,15 +334,19 @@ let config_root_resolution (inputs : inputs) =
 let child_item (root : path_item) name =
   let path = Filename.concat root.path name in
   let exists =
-    if String.equal name cascade_json_filename then existing_file path
+    root.exists
+    &&
+    if String.equal name cascade_json_filename then
+      existing_file path
       || existing_file (Filename.concat root.path cascade_toml_filename)
-    else existing_dir path
+    else
+      existing_dir path
   in
   { path; exists; source = root.source }
 
 let file_item (root : path_item) name =
   let path = Filename.concat root.path name in
-  let exists = existing_file path in
+  let exists = root.exists && existing_file path in
   { path; exists; source = root.source }
 
 let personas_item (inputs : inputs) root =

@@ -74,29 +74,33 @@ function jsonResponse(body: unknown): Response {
   })
 }
 
+const dashboardFetchHandlers: ReadonlyArray<[
+  RegExp,
+  () => Response,
+]> = [
+  [/\/api\/v1\/workspace\/tree/, () => jsonResponse([])],
+  [/\/api\/v1\/workspace\/file/, () => jsonResponse({ ok: false, content: '' })],
+  [/\/api\/v1\/git\/blame/, () => jsonResponse([])],
+  [/\/api\/v1\/git\/diff/, () => jsonResponse({ unified: [] })],
+  [/\/state-diagram/, () => jsonResponse({
+    keeper: 'sangsu',
+    current_phase: 'observe',
+    memory_kind_usage: [],
+  })],
+  [/\/bdi-snapshot/, () => jsonResponse({
+    keeper: 'sangsu',
+    generated_at: '2026-05-06T00:00:00Z',
+    poll_interval_ms: 5000,
+    recent_token_spend: [],
+    source: 'test',
+  })],
+]
+
 function dashboardFetchMock(input: RequestInfo | URL): Promise<Response> {
   const url = String(input)
-  if (url.includes('/api/v1/workspace/tree')) return Promise.resolve(jsonResponse([]))
-  if (url.includes('/api/v1/workspace/file')) return Promise.resolve(jsonResponse({ ok: false, content: '' }))
-  if (url.includes('/api/v1/git/blame')) return Promise.resolve(jsonResponse([]))
-  if (url.includes('/api/v1/git/diff')) return Promise.resolve(jsonResponse({ unified: [] }))
-  if (url.includes('/state-diagram')) {
-    return Promise.resolve(jsonResponse({
-      keeper: 'sangsu',
-      current_phase: 'observe',
-      memory_kind_usage: [],
-    }))
-  }
-  if (url.includes('/bdi-snapshot')) {
-    return Promise.resolve(jsonResponse({
-      keeper: 'sangsu',
-      generated_at: '2026-05-06T00:00:00Z',
-      poll_interval_ms: 5000,
-      recent_token_spend: [],
-      source: 'test',
-    }))
-  }
-  return Promise.resolve(jsonResponse({}))
+  const handler = dashboardFetchHandlers.find(([pattern]) => pattern.test(url))
+  if (!handler) throw new Error(`Unmocked fetch URL: ${url}`)
+  return Promise.resolve(handler[1]())
 }
 
 describe('IdeShell', () => {
@@ -113,6 +117,12 @@ describe('IdeShell', () => {
     window.location.hash = ''
     route.value = { tab: 'overview', params: {}, postId: null }
     clearTraces()
+  })
+
+  it('fails fast for unmocked dashboard fetch URLs', () => {
+    expect(() => dashboardFetchMock('/api/v1/dashboard/unexpected')).toThrow(
+      'Unmocked fetch URL: /api/v1/dashboard/unexpected',
+    )
   })
 
   it('hydrates layer buttons from the route layers param', () => {

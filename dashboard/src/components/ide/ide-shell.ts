@@ -29,7 +29,9 @@ type ViewTab = IdeEditorView
 type IdeFocus = 'review'
 
 const IDE_LAYER_KINDS = new Set(IDE_LAYERS.map(layer => layer.kind))
-const REVIEW_FOCUS_LAYER_PARAM = 'approve,keeper-trace,notes'
+const IDE_LAYER_LABELS = new Map(IDE_LAYERS.map(layer => [layer.kind, layer.label]))
+export const REVIEW_FOCUS_LAYERS = ['keeper-trace', 'approve', 'notes'] as const
+const REVIEW_FOCUS_LAYER_PARAM = REVIEW_FOCUS_LAYERS.join(',')
 
 function viewFromRoute(raw: string | null | undefined): ViewTab {
   const normalized = raw
@@ -229,9 +231,9 @@ export function IdeShell() {
 }
 
 function IdeReviewFocusStrip({ activeLayers }: { readonly activeLayers: ReadonlySet<string> }) {
-  const layerLabels = ['keeper-trace', 'approve', 'notes']
+  const layerLabels = REVIEW_FOCUS_LAYERS
     .filter(layer => activeLayers.has(layer))
-    .map(layer => layer === 'keeper-trace' ? 'Trace' : layer[0]!.toUpperCase() + layer.slice(1))
+    .map(layer => IDE_LAYER_LABELS.get(layer) ?? layer)
 
   return html`
     <div

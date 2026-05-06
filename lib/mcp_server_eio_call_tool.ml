@@ -568,9 +568,7 @@ let is_board_write_tool_name = function
   | "masc_board_delete"
   | "masc_board_cleanup"
   | "masc_board_reaction"
-  | "masc_board_curation_submit"
-  | "masc_board_delete"
-  | "masc_board_cleanup" -> true
+  | "masc_board_curation_submit" -> true
   | _ -> false
 
 let tool_timeout ~(tool_name : string) ~(_arguments : Yojson.Safe.t) :

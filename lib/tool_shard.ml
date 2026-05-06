@@ -607,6 +607,7 @@ Pass the PR number as `pr_number` (preferred) or `number` (legacy alias).";
     name = "keeper_pr_review_comment";
     description = "Submit a PR review with optional inline comments. \
 Events: COMMENT, APPROVE, REQUEST_CHANGES. Requires research, delivery, coding, or full preset. \
+Use REQUEST_CHANGES for actionable blockers; use APPROVE only when the draft proof preflight permits it. \
 Pass the PR number as `pr_number` (preferred) or `number` (legacy alias).";
     input_schema = `Assoc [
       ("type", `String "object");

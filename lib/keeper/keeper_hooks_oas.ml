@@ -1029,15 +1029,15 @@ let first_some a b =
   | Some _ -> a
   | None -> b
 
-let observe_output_parse_failure ~surface ~error =
+let observe_output_parse_failure ~surface ~output_bytes =
   Safe_ops.protect ~default:() (fun () ->
       Prometheus.inc_counter
         Prometheus.metric_keeper_oas_hook_output_parse_failures
         ~labels:[ ("surface", surface) ] ());
   Safe_ops.protect ~default:() (fun () ->
       Log.Keeper.warn
-        "keeper_hooks_oas output JSON parse failed: surface=%s error=%s"
-        surface error)
+        "keeper_hooks_oas output JSON parse failed: surface=%s output_bytes=%d"
+        surface output_bytes)
 
 let output_json_opt ~surface output_text =
   match
@@ -1046,8 +1046,9 @@ let output_json_opt ~surface output_text =
       output_text
   with
   | Ok json -> Some json
-  | Error error ->
-      observe_output_parse_failure ~surface ~error;
+  | Error _ ->
+      observe_output_parse_failure ~surface
+        ~output_bytes:(String.length output_text);
       None
 
 let normalized_route_via raw =

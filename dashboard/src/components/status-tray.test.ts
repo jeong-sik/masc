@@ -92,10 +92,12 @@ describe('summarizeStatusTray', () => {
       keeperAttention: 1,
       pendingVerificationTasks: 1,
       unacknowledgedErrors: 2,
+      reconnectCount: 1,
+      wsEventCount60s: 4,
     })
   })
 
-  it('uses the newest journal entry for activity state', () => {
+  it('uses the first journal entry for activity state from newest-first snapshots', () => {
     const summary = summarizeStatusTray({
       wsOnly: false,
       sseConnected: true,
@@ -110,8 +112,8 @@ describe('summarizeStatusTray', () => {
       staleKeeperNames: new Set(),
       tasks: [],
       journalEntries: [
-        { agent: 'old', text: 'old entry', timestamp: NOW - 20_000, kind: 'system' },
         { agent: 'new', text: 'new warning', timestamp: NOW - 1000, kind: 'keepers', severity: 'warn' },
+        { agent: 'old', text: 'old entry', timestamp: NOW - 20_000, kind: 'system' },
       ],
       unacknowledgedErrors: 0,
       now: NOW,
@@ -120,6 +122,32 @@ describe('summarizeStatusTray', () => {
     expect(summary.items.activity.tone).toBe('warn')
     expect(summary.items.activity.value).toBe('keepers')
     expect(summary.latestJournalEntries[0]?.agent).toBe('new')
+  })
+
+  it('preserves journal snapshot order instead of resorting by timestamp', () => {
+    const summary = summarizeStatusTray({
+      wsOnly: false,
+      sseConnected: true,
+      wsConnected: false,
+      wsReady: false,
+      wsLastEventAt: 0,
+      wsEventCount60s: 0,
+      wsLastError: null,
+      reconnectCount: 0,
+      lastDisconnectedAt: 0,
+      keepers: [],
+      staleKeeperNames: new Set(),
+      tasks: [],
+      journalEntries: [
+        { agent: 'first', text: 'ring buffer first entry', timestamp: NOW - 20_000, kind: 'system' },
+        { agent: 'second', text: 'higher timestamp but older snapshot position', timestamp: NOW, kind: 'keepers', severity: 'warn' },
+      ],
+      unacknowledgedErrors: 0,
+      now: NOW,
+    })
+
+    expect(summary.latestJournalEntries.map(entry => entry.agent)).toEqual(['first', 'second'])
+    expect(summary.items.activity.value).toBe('system')
   })
 })
 
@@ -165,10 +193,22 @@ describe('DashboardStatusTray', () => {
 
     fireEvent.click(screen.getByTestId('dashboard-status-tray-activity'))
 
+    expect(screen.getByTestId('dashboard-status-tray-activity')).toHaveAttribute('aria-haspopup', 'dialog')
     expect(screen.getByTestId('dashboard-status-tray-popover')).toBeInTheDocument()
     expect(screen.getAllByText('keeper completed a pass')).toHaveLength(2)
 
     fireEvent.keyDown(document, { key: 'Escape' })
+
+    expect(screen.queryByTestId('dashboard-status-tray-popover')).not.toBeInTheDocument()
+  })
+
+  it('closes the popover on outside click', () => {
+    render(h(DashboardStatusTray, { sideRailCollapsed: false }))
+
+    fireEvent.click(screen.getByTestId('dashboard-status-tray-activity'))
+    expect(screen.getByTestId('dashboard-status-tray-popover')).toBeInTheDocument()
+
+    fireEvent.mouseDown(document.body)
 
     expect(screen.queryByTestId('dashboard-status-tray-popover')).not.toBeInTheDocument()
   })

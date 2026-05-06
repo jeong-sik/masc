@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { Activity, AlertTriangle, Bell, Radio, Users, X } from 'lucide-preact'
 import type { JournalEntry, Keeper, Task } from '../types'
 import { dashboardWsOnlyEnabled } from '../dashboard-ws-cutover'
@@ -50,6 +50,8 @@ export interface StatusTraySummary {
     keeperAttention: number
     pendingVerificationTasks: number
     unacknowledgedErrors: number
+    reconnectCount: number
+    wsEventCount60s: number
   }
 }
 
@@ -129,9 +131,7 @@ function countKeeperAttention(keeperInput: readonly Keeper[]): number {
 }
 
 function latestEntries(entries: readonly JournalEntry[]): JournalEntry[] {
-  return [...entries]
-    .sort((left, right) => right.timestamp - left.timestamp)
-    .slice(0, 5)
+  return entries.slice(0, 5)
 }
 
 export function summarizeStatusTray(input: StatusTrayInput): StatusTraySummary {
@@ -211,6 +211,8 @@ export function summarizeStatusTray(input: StatusTrayInput): StatusTraySummary {
       keeperAttention,
       pendingVerificationTasks,
       unacknowledgedErrors: input.unacknowledgedErrors,
+      reconnectCount: input.reconnectCount,
+      wsEventCount60s: input.wsEventCount60s,
     },
     items: {
       transport,
@@ -262,6 +264,7 @@ function TrayButton({
       class=${`inline-flex h-9 shrink-0 items-center gap-2 rounded-[var(--r-1)] border border-solid px-2.5 text-left shadow-[var(--shadow-1)] transition-colors hover:bg-[var(--color-bg-hover)] max-[520px]:gap-1.5 max-[520px]:px-2 ${TONE_CLASS[item.tone]} ${active ? 'ring-2 ring-[var(--select-20)]' : ''} ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 1, offsetSurface: 'surface' })}`}
       title=${`${meta.title}: ${item.detail}`}
       aria-label=${`${meta.title}: ${item.value}. ${item.detail}`}
+      aria-haspopup="dialog"
       aria-expanded=${active}
       aria-controls=${active ? 'dashboard-status-tray-popover' : undefined}
       data-testid=${`dashboard-status-tray-${item.key}`}
@@ -316,11 +319,11 @@ function PopoverContent({
         <div class="grid grid-cols-2 gap-2">
           <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
             <div class="font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Reconnects</div>
-            <div class="mt-0.5 text-sm font-semibold tabular-nums">${reconnectCount.value}</div>
+            <div class="mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.reconnectCount}</div>
           </div>
           <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
             <div class="font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">WS events</div>
-            <div class="mt-0.5 text-sm font-semibold tabular-nums">${dashboardWsEventCount60s.value}/60s</div>
+            <div class="mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.wsEventCount60s}/60s</div>
           </div>
         </div>
       </div>
@@ -387,6 +390,7 @@ function PopoverContent({
 
 export function DashboardStatusTray({ sideRailCollapsed = false }: DashboardStatusTrayProps) {
   const [activeKey, setActiveKey] = useState<StatusTrayKey | null>(null)
+  const trayRef = useRef<HTMLElement>(null)
   const wsOnly = dashboardWsOnlyEnabled()
   const summary = summarizeStatusTray({
     wsOnly,
@@ -413,9 +417,18 @@ export function DashboardStatusTray({ sideRailCollapsed = false }: DashboardStat
         setActiveKey(null)
       }
     }
+    const onPointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node | null
+      if (!target || trayRef.current?.contains(target)) return
+      setActiveKey(null)
+    }
     document.addEventListener('keydown', onKeyDown)
+    document.addEventListener('mousedown', onPointerDown, true)
+    document.addEventListener('touchstart', onPointerDown, true)
     return () => {
       document.removeEventListener('keydown', onKeyDown)
+      document.removeEventListener('mousedown', onPointerDown, true)
+      document.removeEventListener('touchstart', onPointerDown, true)
     }
   }, [activeKey])
 
@@ -425,6 +438,7 @@ export function DashboardStatusTray({ sideRailCollapsed = false }: DashboardStat
 
   return html`
     <aside
+      ref=${trayRef}
       class=${`fixed z-40 max-w-[calc(100vw-1.5rem)] ${sideRailOffset} max-[1100px]:left-2 max-[1100px]:right-2 max-[1100px]:max-w-none ${codeOffset}`}
       aria-label="Dashboard status tray"
       data-testid="dashboard-status-tray"

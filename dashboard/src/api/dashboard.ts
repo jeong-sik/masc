@@ -1981,6 +1981,10 @@ function normalizeRuntimeBlockerClass(value: unknown): KeeperConfig['runtime']['
     case 'tool_required_unsatisfied':
     case 'fiber_unresolved':
     case 'stale_turn_timeout':
+    case 'stale_termination_storm':
+    case 'heartbeat_failures':
+    case 'turn_failures':
+    case 'exception':
       return blockerClass
     default:
       return null

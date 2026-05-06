@@ -342,6 +342,10 @@ export type KeeperRuntimeBlockerClass =
   | 'tool_required_unsatisfied'
   | 'fiber_unresolved'
   | 'stale_turn_timeout'
+  | 'stale_termination_storm'
+  | 'heartbeat_failures'
+  | 'turn_failures'
+  | 'exception'
 
 export interface KeeperTrustLatestEvent {
   kind: string

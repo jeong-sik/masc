@@ -292,6 +292,15 @@ let test_read_routes_docker_and_injects_repo_flag () =
   check (option string) "repo inferred from project remote"
     (Some "jeong-sik/masc-mcp")
     (parse_string_field raw "repo");
+  check (option string) "read attests keeper"
+    (Some "reviewer")
+    (parse_nested_string_field raw "identity_attestation" "keeper");
+  check (option string) "read attests effective identity"
+    (Some "root")
+    (parse_nested_string_field raw "identity_attestation" "effective_github_identity");
+  check (option string) "read exposes credential identity"
+    (Some "root")
+    (parse_nested_string_field raw "credential" "effective_github_identity");
   let log = read_file log_path in
   check bool "read used docker run" true
     (contains_substring log "run --rm");
@@ -319,6 +328,12 @@ let test_comment_and_approve_route_through_docker () =
   in
   check (option string) "comment via docker" (Some "docker")
     (parse_string_field raw "via");
+  check (option string) "comment attests keeper"
+    (Some "reviewer")
+    (parse_nested_string_field raw "identity_attestation" "keeper");
+  check (option string) "comment exposes credential identity"
+    (Some "root")
+    (parse_nested_string_field raw "credential" "effective_github_identity");
   let raw =
     KTPR.handle_keeper_pr_review_comment ~config ~meta
       ~args:
@@ -403,6 +418,12 @@ let test_reply_routes_through_docker_and_infers_repo () =
   check (option string) "repo inferred for reply"
     (Some "jeong-sik/masc-mcp")
     (parse_string_field raw "repo");
+  check (option string) "reply attests keeper"
+    (Some "reviewer")
+    (parse_nested_string_field raw "identity_attestation" "keeper");
+  check (option string) "reply exposes credential identity"
+    (Some "root")
+    (parse_nested_string_field raw "credential" "effective_github_identity");
   let log = read_file log_path in
   check bool "reply used docker run" true
     (contains_substring log "run --rm");

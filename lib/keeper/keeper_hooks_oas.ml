@@ -1035,6 +1035,8 @@ type pr_review_action_metric_event = {
   comment_id : int option;
   success : bool;
   route_via : string option;
+  credential : Yojson.Safe.t option;
+  identity_attestation : Yojson.Safe.t option;
 }
 
 type pr_work_action_metric_event = {
@@ -1217,6 +1219,11 @@ let gh_pr_review_action_of_command command =
       Some ("COMMENT", int_of_string_opt pr_number)
   | _ -> None
 
+let assoc_json_opt key json =
+  match assoc_field key json with
+  | Some (`Assoc _ as value) -> Some value
+  | _ -> None
+
 let output_success ~transport_success = function
   | Some json ->
       (match Safe_ops.json_bool_opt "ok" json with
@@ -1255,6 +1262,10 @@ let pr_review_action_metric_event_of_tool_io
       let success =
         output_success ~transport_success output_json
       in
+      let credential = Option.bind output_json (assoc_json_opt "credential") in
+      let identity_attestation =
+        Option.bind output_json (assoc_json_opt "identity_attestation")
+      in
       Option.map
         (fun action ->
            {
@@ -1270,6 +1281,8 @@ let pr_review_action_metric_event_of_tool_io
              comment_id = None;
              success;
              route_via;
+             credential;
+             identity_attestation;
            })
         (Option.bind action normalize_pr_review_action)
   | "keeper_pr_review_reply" ->
@@ -1280,6 +1293,10 @@ let pr_review_action_metric_event_of_tool_io
       in
       let success =
         output_success ~transport_success output_json
+      in
+      let credential = Option.bind output_json (assoc_json_opt "credential") in
+      let identity_attestation =
+        Option.bind output_json (assoc_json_opt "identity_attestation")
       in
       Some
         {
@@ -1300,6 +1317,8 @@ let pr_review_action_metric_event_of_tool_io
               (json_int_opt "comment_id" input);
           success;
           route_via;
+          credential;
+          identity_attestation;
         }
   | "keeper_shell" ->
       let output_json = output_json_opt ~surface:"pr_review_action" output_text in
@@ -1319,6 +1338,8 @@ let pr_review_action_metric_event_of_tool_io
              comment_id = None;
              success;
              route_via;
+             credential = None;
+             identity_attestation = None;
            })
   | _ -> None
 
@@ -1509,6 +1530,18 @@ let append_pr_review_action_metric
         | None -> []
         | Some via -> [("via", `String via); ("route_via", `String via)]
       in
+      let identity_fields =
+        []
+        |> (fun fields ->
+             match event.credential with
+             | None -> fields
+             | Some credential -> ("credential", credential) :: fields)
+        |> (fun fields ->
+             match event.identity_attestation with
+             | None -> fields
+             | Some attestation -> ("identity_attestation", attestation) :: fields)
+        |> List.rev
+      in
       let snapshot =
         `Assoc
           ([
@@ -1530,7 +1563,8 @@ let append_pr_review_action_metric
              ("comment_id", Json_util.int_opt_to_json event.comment_id);
              ("duration_ms", `Float duration_ms);
            ]
-           @ route_fields)
+           @ route_fields
+           @ identity_fields)
       in
       Dated_jsonl.append store (Inference_utils.sanitize_json_utf8 snapshot)
 

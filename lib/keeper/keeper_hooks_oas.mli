@@ -308,6 +308,8 @@ type pr_review_action_metric_event = {
   comment_id : int option;
   success : bool;
   route_via : string option;
+  credential : Yojson.Safe.t option;
+  identity_attestation : Yojson.Safe.t option;
 }
 (** Parsed PR-review action telemetry derived from keeper tool I/O. *)
 

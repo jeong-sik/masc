@@ -800,14 +800,28 @@ let test_pr_review_action_metric_extracts_approve () =
       ~tool_name:"keeper_pr_review_comment"
       ~input:(`Assoc [ ("pr_number", `Int 13177); ("event", `String "COMMENT") ])
       ~output_text:
-        {|{"ok":true,"pr_number":13177,"event":"APPROVE","keeper":"sangsu","via":"docker"}|}
+        {|{"ok":true,"pr_number":13177,"event":"APPROVE","keeper":"sangsu","via":"docker","credential":{"effective_github_identity":"root"},"identity_attestation":{"keeper":"sangsu","effective_github_identity":"root"}}|}
       ()
     |> require_pr_review_event "approve"
   in
   check string "action from output" "APPROVE" event.action;
   check (option int) "pr number" (Some 13177) event.pr_number;
   check bool "success" true event.success;
-  check (option string) "route via" (Some "docker") event.route_via
+  check (option string) "route via" (Some "docker") event.route_via;
+  let attestation =
+    match event.identity_attestation with
+    | Some json -> json
+    | None -> fail "expected identity attestation"
+  in
+  check string "attested keeper" "sangsu"
+    (attestation |> member "keeper" |> to_string);
+  let credential =
+    match event.credential with
+    | Some json -> json
+    | None -> fail "expected credential"
+  in
+  check string "credential identity" "root"
+    (credential |> member "effective_github_identity" |> to_string)
 
 let test_pr_review_action_metric_marks_structured_failure () =
   let event =

@@ -19,7 +19,7 @@ const flushUi = async () => {
   for (let i = 0; i < 5; i++) await Promise.resolve()
 }
 
-describe('copyToClipboard', () => {
+describe('copy id button and clipboard helpers', () => {
   const realClipboard = typeof navigator !== 'undefined' ? navigator.clipboard : undefined
   const realExec: ExecCommandFn | undefined = doc.execCommand
   const mounted: HTMLElement[] = []
@@ -81,6 +81,16 @@ describe('copyToClipboard', () => {
       valueLength: 7,
       ariaLabel: 'Session ID 복사',
     })
+  })
+
+  it('summarizes copy button metadata with the component default size', () => {
+    expect(
+      summarizeCopyIdButton({
+        value: 'abc-123',
+        label: 'Session ID',
+        copied: false,
+      }).size,
+    ).toBe(13)
   })
 
   it('renders stable summary hooks on the icon-only button', () => {

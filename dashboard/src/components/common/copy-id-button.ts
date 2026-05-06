@@ -11,6 +11,8 @@ import { copyToClipboard } from './copyable-code'
 
 export type CopyIdButtonState = 'idle' | 'copied'
 
+const DEFAULT_COPY_ID_BUTTON_ICON_SIZE = 13
+
 export interface CopyIdButtonSummary {
   state: CopyIdButtonState
   hasLabel: boolean
@@ -35,15 +37,9 @@ export function summarizeCopyIdButton({
   value,
   label,
   ariaLabel,
-  size,
+  size = DEFAULT_COPY_ID_BUTTON_ICON_SIZE,
   copied,
-}: {
-  value: string
-  label?: string
-  ariaLabel?: string
-  size: number
-  copied: boolean
-}): CopyIdButtonSummary {
+}: CopyIdButtonProps & { copied: boolean }): CopyIdButtonSummary {
   return {
     state: copied ? 'copied' : 'idle',
     hasLabel: label !== undefined && label !== '',
@@ -54,7 +50,12 @@ export function summarizeCopyIdButton({
   }
 }
 
-export function CopyIdButton({ value, label, ariaLabel, size = 13 }: CopyIdButtonProps) {
+export function CopyIdButton({
+  value,
+  label,
+  ariaLabel,
+  size = DEFAULT_COPY_ID_BUTTON_ICON_SIZE,
+}: CopyIdButtonProps) {
   const [justCopied, setJustCopied] = useState(false)
   const summary = summarizeCopyIdButton({ value, label, ariaLabel, size, copied: justCopied })
 

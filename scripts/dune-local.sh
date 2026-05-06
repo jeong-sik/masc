@@ -21,6 +21,7 @@ Local Dune wrapper for multi-agent development:
 Set MASC_DUNE_THROTTLE=0 to bypass the local lock.
 Set MASC_OPAM_LOCK=0 or MASC_SKIP_OPAM_LOCK=1 to bypass the shared opam switch lock.
 Set MASC_OPAM_LOCK_PATH=/path/to/lock to override the shared opam lock path.
+Set MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT=seconds to bound opam-lock wait after the Dune lock (0 = wait forever).
 Set MASC_DUNE_DRY_RUN=1 to print the command without running it.
 Set MASC_SKIP_PIN_CHECK=1 to skip the agent_sdk pin guard.
 Set MASC_SKIP_DEPS_CHECK=1 to skip the core-deps installed guard.
@@ -112,6 +113,30 @@ _detect_subcommand() {
   printf 'build\n'
 }
 _subcommand="$(_detect_subcommand)"
+script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+
+_needs_dune_lock() {
+  [[ "${GITHUB_ACTIONS:-}" != "true" ]] || return 1
+  [[ "${MASC_DUNE_THROTTLE:-1}" != "0" ]] || return 1
+  [[ "${MASC_DUNE_DRY_RUN:-0}" != "1" ]] || return 1
+  [[ "${MASC_DUNE_LOCK_HELD:-0}" != "1" ]] || return 1
+  return 0
+}
+
+# Acquire the build throttle before the opam-switch lock.  The opam lock is
+# intentionally held while the active build uses the shared switch, but queued
+# builds must not hold it while waiting for the Dune throttle; otherwise stale
+# worktrees can block pin repair before they are actually compiling.
+if _needs_dune_lock; then
+  printf '[dune-local] waiting for lock %s\n' "$lock_path" >&2
+  if command -v lockf >/dev/null 2>&1; then
+    exec lockf -k "$lock_path" env MASC_DUNE_LOCK_HELD=1 "$script_path" "$@"
+  elif command -v flock >/dev/null 2>&1; then
+    exec flock "$lock_path" env MASC_DUNE_LOCK_HELD=1 "$script_path" "$@"
+  else
+    printf '[dune-local] warning: neither lockf nor flock found; running unlocked\n' >&2
+  fi
+fi
 
 _needs_opam_lock() {
   [[ "${GITHUB_ACTIONS:-}" != "true" ]] || return 1
@@ -125,9 +150,24 @@ _needs_opam_lock() {
 }
 
 if _needs_opam_lock; then
-  script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
   printf '[dune-local] waiting for opam switch lock %s\n' "$opam_lock_path" >&2
   if command -v lockf >/dev/null 2>&1; then
+    if [[ "${MASC_DUNE_LOCK_HELD:-0}" = "1" \
+          && "${MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT:-60}" != "0" ]]; then
+      opam_lock_timeout="${MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT:-60}"
+      set +e
+      lockf -k -t "$opam_lock_timeout" "$opam_lock_path" \
+        env MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
+      status=$?
+      set -e
+      if [[ "$status" -eq 0 ]]; then
+        exit 0
+      fi
+      printf '[dune-local] opam switch lock stayed busy for %ss after acquiring Dune lock; releasing Dune lock to avoid mixed lock-order deadlock\n' \
+        "$opam_lock_timeout" >&2
+      printf '[dune-local] retry after older dune-local invocations drain, or set MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT=0 to wait indefinitely\n' >&2
+      exit "$status"
+    fi
     exec lockf -k "$opam_lock_path" env MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
   elif command -v flock >/dev/null 2>&1; then
     exec flock "$opam_lock_path" env MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
@@ -262,16 +302,11 @@ if [[ "${MASC_DUNE_DRY_RUN:-0}" = "1" ]]; then
   exit 0
 fi
 
-if [[ "${GITHUB_ACTIONS:-}" = "true" || "${MASC_DUNE_THROTTLE:-1}" = "0" ]]; then
+if [[ "${GITHUB_ACTIONS:-}" = "true" \
+      || "${MASC_DUNE_THROTTLE:-1}" = "0" \
+      || "${MASC_DUNE_LOCK_HELD:-0}" = "1" ]]; then
   exec "${cmd[@]}"
 fi
 
-printf '[dune-local] waiting for lock %s\n' "$lock_path" >&2
-if command -v lockf >/dev/null 2>&1; then
-  exec lockf -k "$lock_path" "${cmd[@]}"
-elif command -v flock >/dev/null 2>&1; then
-  exec flock "$lock_path" "${cmd[@]}"
-else
-  printf '[dune-local] warning: neither lockf nor flock found; running unlocked\n' >&2
-  exec "${cmd[@]}"
-fi
+printf '[dune-local] warning: neither lockf nor flock found; running unlocked\n' >&2
+exec "${cmd[@]}"

@@ -22,6 +22,17 @@ let contains_substring haystack needle =
   in
   nlen = 0 || loop 0
 
+let substring_index haystack needle =
+  let hlen = String.length haystack in
+  let nlen = String.length needle in
+  let rec loop idx =
+    if nlen = 0 then Some 0
+    else if idx + nlen > hlen then None
+    else if String.sub haystack idx nlen = needle then Some idx
+    else loop (idx + 1)
+  in
+  loop 0
+
 let write_file path content =
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
 
@@ -250,12 +261,20 @@ exit 0
         (Filename.concat bin_dir "lockf")
         (Printf.sprintf
            {|#!/bin/sh
-printf 'lock=%%s argv=%%s\n' "$2" "$*" >> %s
-if [ "$2" = %s ]; then exit 97; fi
-shift 2
+printf 'argv=%%s\n' "$*" >> %s
+while [ "${1#-}" != "$1" ]; do
+  case "$1" in
+    -t) shift 2 ;;
+    *) shift ;;
+  esac
+done
+lock_path="$1"
+printf 'lock=%%s\n' "$lock_path" >> %s
+if [ "$lock_path" = %s ]; then exit 97; fi
+shift
 exec "$@"
 |}
-           (quote lockf_log) (quote opam_lock_path));
+           (quote lockf_log) (quote lockf_log) (quote opam_lock_path));
       (* Use a minimal PATH (no opam install directories) so that
          'command -v opam' fails and the guard is skipped.
          opam is typically in ~/.opam/SWITCH/bin/, not in /usr/bin or /bin. *)
@@ -294,7 +313,13 @@ let test_opam_lockf_reexec_env_passthrough () =
         (Printf.sprintf
            {|#!/bin/sh
 printf 'held=%%s argv=%%s\n' "${MASC_OPAM_LOCK_HELD:-unset}" "$*" >> %s
-shift 2
+while [ "${1#-}" != "$1" ]; do
+  case "$1" in
+    -t) shift 2 ;;
+    *) shift ;;
+  esac
+done
+shift
 exec "$@"
 |}
            (quote lockf_log));
@@ -308,11 +333,63 @@ exec "$@"
       check int "exits zero through lockf reexec" 0 code;
       check bool "lockf invoked" true (Sys.file_exists lockf_log);
       let lock_log = read_file lockf_log in
+      let dune_lock_path = Filename.concat dir "dune-local.lock" in
       check bool "lock path passed to lockf" true
         (contains_substring lock_log opam_lock_path);
+      check bool "dune lock acquired before opam lock" true
+        (match
+           ( substring_index lock_log dune_lock_path,
+             substring_index lock_log opam_lock_path )
+         with
+        | Some dune_pos, Some opam_pos -> dune_pos < opam_pos
+        | _ -> false);
       check bool "held env passed through argv" true
         (contains_substring lock_log "MASC_OPAM_LOCK_HELD=1");
+      check bool "dune held env passed through argv" true
+        (contains_substring lock_log "MASC_DUNE_LOCK_HELD=1");
       check bool "dune was invoked after reexec" true
+        (Sys.file_exists dune_log))
+
+let test_opam_lock_timeout_releases_dune_lock () =
+  with_temp_dir "dune-local-opam-lock-timeout" (fun dir ->
+      let bin_dir, dune_log =
+        setup_fake_repo dir ~pin_check_exit_code:0
+          ~pin_check_stderr_msg:"pin ok"
+      in
+      let lockf_log = Filename.concat dir "lockf-calls.log" in
+      let opam_lock_path = Filename.concat dir "opam.lock" in
+      write_executable
+        (Filename.concat bin_dir "lockf")
+        (Printf.sprintf
+           {|#!/bin/sh
+printf 'argv=%%s\n' "$*" >> %s
+while [ "${1#-}" != "$1" ]; do
+  case "$1" in
+    -t) shift 2 ;;
+    *) shift ;;
+  esac
+done
+lock_path="$1"
+printf 'lock=%%s\n' "$lock_path" >> %s
+if [ "$lock_path" = %s ]; then exit 75; fi
+shift
+exec "$@"
+|}
+           (quote lockf_log) (quote lockf_log) (quote opam_lock_path));
+      let code, _stdout, stderr =
+        run_dune_local dir bin_dir
+          ~env:
+            [
+              ("MASC_OPAM_LOCK_PATH", opam_lock_path);
+              ("MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT", "1");
+            ]
+          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_OPAM_LOCK_HELD" ]
+          "build"
+      in
+      check int "opam lock timeout exits with lockf status" 75 code;
+      check bool "timeout explains Dune lock release" true
+        (contains_substring stderr "releasing Dune lock");
+      check bool "dune was not invoked after opam timeout" false
         (Sys.file_exists dune_log))
 
 let test_opam_flock_reexec_env_passthrough () =
@@ -675,6 +752,8 @@ let () =
             test_opam_absent_skips_pin_guard;
           test_case "opam lockf reexec propagates env" `Quick
             test_opam_lockf_reexec_env_passthrough;
+          test_case "opam lock timeout releases Dune lock" `Quick
+            test_opam_lock_timeout_releases_dune_lock;
           test_case "opam flock reexec propagates env" `Quick
             test_opam_flock_reexec_env_passthrough;
           test_case "clean subcommand skips pin guard" `Quick

@@ -16,6 +16,7 @@ import { CursorPagination } from '../common/pagination'
 import { stripStateBlocks } from '../../keeper-message'
 import { navigate, navigateToPost, route } from '../../router'
 import { registerBoardHearthsRefresh } from '../../sse-store'
+import { boardLatencyMetrics, type BoardLatencyMetric } from '../../board-metrics'
 import { MessageRoomTimeline } from './message-room-timeline'
 import { MentionInbox } from './mention-inbox'
 import { PostDetail } from './post-detail'
@@ -501,9 +502,28 @@ function SortBar() {
 }
 
 // ── Board summary stats (compact inline) ─────────────────────────
+function renderLatencyChip(label: string, metric: BoardLatencyMetric) {
+  if (metric.last_latency_ms === null) return null
+  const failed = metric.last_ok === false
+  return html`
+    <span
+      class=${`text-2xs tabular-nums px-1.5 py-0.5 rounded-[var(--r-0)] border ${
+        failed
+          ? 'text-[var(--color-status-err)] border-[var(--bad-30)] bg-[var(--bad-10)]'
+          : 'text-[var(--color-fg-muted)] border-[var(--color-border-divider)] bg-[var(--color-bg-hover)]'
+      }`}
+      title=${failed && metric.last_error ? metric.last_error : `${label} latency`}
+      aria-label=${failed ? `${label} 지연 ${metric.last_latency_ms}밀리초 실패` : `${label} 지연 ${metric.last_latency_ms}밀리초`}
+    >
+      ${label} ${metric.last_latency_ms}ms${failed ? ' 실패' : ''}
+    </span>
+  `
+}
+
 function BoardSummary() {
   const grouped = splitVisiblePosts(boardPosts.value)
   const visibleCount = grouped.groups.reduce((sum, g) => sum + g.posts.length, 0)
+  const metrics = boardLatencyMetrics.value
   return html`
     <div class="flex flex-wrap items-center gap-2 mb-4 px-3 py-2.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-xs text-[var(--color-fg-muted)]">
       <span class="font-semibold text-[var(--color-fg-secondary)] tabular-nums text-md">${visibleCount}</span>
@@ -515,6 +535,8 @@ function BoardSummary() {
           <span>${meta?.icon ?? ''} ${g.posts.length}</span>
         `
       })}
+      ${renderLatencyChip('목록', metrics.list)}
+      ${renderLatencyChip('리액션', metrics.reaction_toggle)}
       ${lastBoardRefreshAt.value ? html`
         <span class="ml-auto text-2xs">갱신 <${TimeAgo} timestamp=${lastBoardRefreshAt.value} /></span>
       ` : null}

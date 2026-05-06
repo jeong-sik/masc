@@ -48,6 +48,7 @@ import { setArrayByKeyIfChanged } from './signal-utils'
 import { FetchScheduler } from './lib/fetch-scheduler'
 import { isRecord, asString, asNumber } from './components/common/normalize'
 import { setCanonicalDashboardActor } from './lib/dashboard-session-actor'
+import { timeBoardRequest } from './board-metrics'
 import {
   normalizeAgent, normalizeTask, normalizeMessage,
   normalizeExecutionQueueItem,
@@ -878,14 +879,14 @@ export async function refreshBoard(): Promise<void> {
   try {
     const { fetchDashboardMemory } = await import('./api/dashboard')
     const limit = boardPageSize()
-    const data = await fetchDashboardMemory(boardSortMode.value, {
+    const data = await timeBoardRequest('list', () => fetchDashboardMemory(boardSortMode.value, {
       excludeSystem: boardExcludeSystem.value,
       excludeAutomation: boardExcludeAutomation.value,
       author: boardAuthorFilter.value || undefined,
       hearth: boardHearthFilter.value || undefined,
       limit,
       offset: 0,
-    })
+    }))
     const next = data.posts ?? []
     boardPosts.value = reconcileBoardPosts(boardPosts.value, next)
     boardOffset.value = next.length
@@ -925,14 +926,14 @@ export async function loadMoreBoardPosts(): Promise<void> {
     const { fetchDashboardMemory } = await import('./api/dashboard')
     const limit = boardPageSize()
     const offset = boardOffset.value
-    const data = await fetchDashboardMemory(boardSortMode.value, {
+    const data = await timeBoardRequest('list_more', () => fetchDashboardMemory(boardSortMode.value, {
       excludeSystem: boardExcludeSystem.value,
       excludeAutomation: boardExcludeAutomation.value,
       author: boardAuthorFilter.value || undefined,
       hearth: boardHearthFilter.value || undefined,
       limit,
       offset,
-    })
+    }))
     const incoming = data.posts ?? []
     const merged = appendBoardPosts(boardPosts.value, incoming)
     boardPosts.value = merged

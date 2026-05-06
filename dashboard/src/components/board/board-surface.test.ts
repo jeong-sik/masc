@@ -5,6 +5,7 @@ import { BoardSurface } from './board-surface'
 import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter, boardHasMore, boardLoadingMore, messages, shellAuthSummary } from '../../store'
 import { route } from '../../router'
 import { PAGE_SIZE, boardHearths, boardHearthsError, categoryVisibleLimits, contentCategory, newPostHearth, newPostSubmitting, showNewPostForm } from './board-state'
+import { boardLatencyMetrics, resetBoardLatencyMetrics } from '../../board-metrics'
 import type { BoardPost } from '../../types'
 
 import '@testing-library/jest-dom'
@@ -133,6 +134,7 @@ describe('BoardSurface Component', () => {
     await vi.dynamicImportSettled()
     await Promise.resolve()
     vi.unstubAllGlobals()
+    resetBoardLatencyMetrics()
   })
 
   beforeEach(() => {
@@ -159,6 +161,7 @@ describe('BoardSurface Component', () => {
     boardHearthFilter.value = ''
     boardHearths.value = [{ name: 'ops', count: 0 }]
     boardHearthsError.value = false
+    resetBoardLatencyMetrics()
     showNewPostForm.value = false
     newPostHearth.value = ''
     newPostSubmitting.value = false
@@ -262,6 +265,44 @@ describe('BoardSurface Component', () => {
 
     expect(screen.getByRole('heading', { name: 'State-block messages' })).toBeInTheDocument()
     expect(screen.queryByText('+ 새 글 작성')).not.toBeInTheDocument()
+  })
+
+  it('renders compact board latency metrics when samples exist', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'post-1',
+        title: 'Latency sample',
+        body: 'content',
+        author: 'keeper',
+      }),
+    ]
+    boardLatencyMetrics.value = {
+      ...boardLatencyMetrics.value,
+      list: {
+        last_latency_ms: 42,
+        last_ok: true,
+        sample_count: 1,
+        failure_count: 0,
+        last_error: null,
+      },
+      reaction_toggle: {
+        last_latency_ms: 17,
+        last_ok: false,
+        sample_count: 1,
+        failure_count: 1,
+        last_error: 'network down',
+      },
+    }
+
+    render(h(BoardSurface, null))
+
+    expect(screen.getByLabelText('목록 지연 42밀리초')).toHaveTextContent('목록 42ms')
+    const failedChip = screen.getByLabelText('리액션 지연 17밀리초 실패')
+    expect(failedChip).toHaveTextContent('리액션 17ms 실패')
+    expect(failedChip.className).toContain('text-[var(--color-status-err)]')
+    expect(failedChip.className).toContain('border-[var(--bad-30)]')
+    expect(failedChip.className).not.toContain('color-status-bad')
+    expect(failedChip.className).not.toContain('bad-25')
   })
 
   it('hides system posts by default', () => {

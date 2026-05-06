@@ -462,8 +462,16 @@ let dedupe_paths paths =
   go StringSet.empty [] paths
 
 let personas_dirs_with inputs resolution =
+  (* Mirror [personas_dir_opt]'s invariant: when the resolver is Missing or
+     Invalid_env, never expose a personas path even if [resolution.personas.exists]
+     happens to be true (e.g. [default_missing_root] pointing at a repo-local
+     config/ tree). Without this gate, callers can silently load personas from
+     a fallback root the resolver explicitly disowned. *)
   let primary =
-    if resolution.personas.exists then [ resolution.personas.path ] else []
+    match resolution.config_root.source with
+    | Invalid_env | Missing -> []
+    | Env | Local_masc | Home_masc | Exe_relative | Cwd ->
+      if resolution.personas.exists then [ resolution.personas.path ] else []
   in
   let explicit_personas_dir_override = trim_opt inputs.env_personas_dir in
   (* Persona resolution is intentionally single-source:

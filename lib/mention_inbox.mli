@@ -30,8 +30,12 @@ val mention_record_of_json : Yojson.Safe.t -> mention_record option
 val inbox_path : Coord.config -> string
 (** Returns the path to `.masc/mention_inbox.jsonl`. *)
 
-val append_mention : Coord.config -> mention_record -> unit
-(** Append a mention record to the JSONL file. *)
+val append_mention : ?task_id:string -> Coord.config -> mention_record -> unit
+(** Append a mention record to the JSONL file.
+
+    If [~task_id] is provided and the backlog reports the task as terminal
+    (Done / Cancelled), the append is skipped and a [cache_desync.cleared]
+    event is logged instead (fleet-wide invariant, issue #13397). *)
 
 val read_mentions : Coord.config -> target_agent:string -> limit:int -> mention_record list
 (** Read mentions for a target agent, newest first, up to [limit] items. *)

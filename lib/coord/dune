@@ -25,6 +25,7 @@
   coord_task
   coord_task_classify
   coord_task_cache_invariant
+  task_cache_invariant
   coord_task_claim
   coord_task_create
   coord_task_lifecycle

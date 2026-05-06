@@ -1072,6 +1072,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               in
               match
                 resolve_bounded_oas_timeout_budget_with_turn_budget
+                  ~allow_wall_clock_retry_budget:
+                    (is_retry && List.length attempted_cascades > 1)
                   ~is_retry
                   ~reserve_degraded_retry_budget
                   ~max_turns

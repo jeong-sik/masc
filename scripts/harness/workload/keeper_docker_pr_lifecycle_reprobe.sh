@@ -18,6 +18,8 @@ RESULTS_FILE="$RUN_DIR/results.jsonl"
 POLL_ERRORS_FILE="$RUN_DIR/poll_errors.jsonl"
 REVIEW_TARGETS_FILE="$RUN_DIR/review-targets.jsonl"
 GITHUB_IDENTITY_COUNTS_FILE="$RUN_DIR/github-identity-counts.json"
+PROOF_BRANCH_COLLISIONS_FILE="$RUN_DIR/proof-branch-collisions.jsonl"
+CREATE_READINESS_FAILURES_FILE="$RUN_DIR/create-readiness-failures.jsonl"
 SUMMARY_FILE="$RUN_DIR/summary.json"
 AUDIT_FILE="$RUN_DIR/audit-docker-pr-lifecycle.json"
 AUDIT_STATUS_RESULT=0
@@ -165,6 +167,8 @@ while [[ $# -gt 0 ]]; do
         POLL_ERRORS_FILE="$RUN_DIR/poll_errors.jsonl"
         REVIEW_TARGETS_FILE="$RUN_DIR/review-targets.jsonl"
         GITHUB_IDENTITY_COUNTS_FILE="$RUN_DIR/github-identity-counts.json"
+        PROOF_BRANCH_COLLISIONS_FILE="$RUN_DIR/proof-branch-collisions.jsonl"
+        CREATE_READINESS_FAILURES_FILE="$RUN_DIR/create-readiness-failures.jsonl"
         SUMMARY_FILE="$RUN_DIR/summary.json"
         AUDIT_FILE="$RUN_DIR/audit-docker-pr-lifecycle.json"
       fi
@@ -180,6 +184,8 @@ while [[ $# -gt 0 ]]; do
       POLL_ERRORS_FILE="$RUN_DIR/poll_errors.jsonl"
       REVIEW_TARGETS_FILE="$RUN_DIR/review-targets.jsonl"
       GITHUB_IDENTITY_COUNTS_FILE="$RUN_DIR/github-identity-counts.json"
+      PROOF_BRANCH_COLLISIONS_FILE="$RUN_DIR/proof-branch-collisions.jsonl"
+      CREATE_READINESS_FAILURES_FILE="$RUN_DIR/create-readiness-failures.jsonl"
       SUMMARY_FILE="$RUN_DIR/summary.json"
       AUDIT_FILE="$RUN_DIR/audit-docker-pr-lifecycle.json"
       shift 2
@@ -205,6 +211,8 @@ mkdir -p "$RUN_DIR" "$RAW_DIR" "$PROMPT_DIR"
 : >"$RESULTS_FILE"
 : >"$POLL_ERRORS_FILE"
 : >"$REVIEW_TARGETS_FILE"
+: >"$PROOF_BRANCH_COLLISIONS_FILE"
+: >"$CREATE_READINESS_FAILURES_FILE"
 
 log() {
   printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2
@@ -779,6 +787,87 @@ proof_branch_for_keeper() {
   printf 'keeper-%s-agent/%s' "$keeper" "$RUN_ID"
 }
 
+assert_no_proof_branch_collisions_for_mutate() {
+  [[ "$MUTATE" == "1" ]] || return 0
+
+  local branches_file remote_heads_file
+  branches_file="$RUN_DIR/proof-branches.txt"
+  remote_heads_file="$RUN_DIR/proof-branch-remote-heads.txt"
+  : >"$branches_file"
+  : >"$remote_heads_file"
+  : >"$PROOF_BRANCH_COLLISIONS_FILE"
+
+  local keeper branch
+  while IFS= read -r keeper; do
+    [[ -n "$keeper" ]] || continue
+    branch="$(proof_branch_for_keeper "$keeper")"
+    printf '%s\t%s\n' "$keeper" "$branch" >>"$branches_file"
+  done <"$RUN_DIR/keepers.txt"
+
+  local proof_branches=()
+  while IFS=$'\t' read -r _ branch; do
+    [[ -n "$branch" ]] || continue
+    proof_branches+=( "$branch" )
+  done <"$branches_file"
+  if [[ "${#proof_branches[@]}" -gt 0 ]]; then
+    if ! git -C "$REPO_ROOT" ls-remote --heads origin "${proof_branches[@]}" \
+        >"$remote_heads_file"; then
+      echo "failed to check remote proof branch uniqueness before mutate" >&2
+      exit 1
+    fi
+  fi
+
+  while IFS=$'\t' read -r keeper branch; do
+    [[ -n "$keeper" && -n "$branch" ]] || continue
+    local local_branch remote_tracking_branch remote_head worktree_branch
+    local_branch=false
+    remote_tracking_branch=false
+    remote_head=false
+    worktree_branch=false
+
+    if git -C "$REPO_ROOT" show-ref --verify --quiet "refs/heads/$branch"; then
+      local_branch=true
+    fi
+    if git -C "$REPO_ROOT" show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+      remote_tracking_branch=true
+    fi
+    if awk -v ref="refs/heads/$branch" '$2 == ref { found = 1 } END { exit(found ? 0 : 1) }' \
+        "$remote_heads_file"; then
+      remote_head=true
+    fi
+    if git -C "$REPO_ROOT" worktree list --porcelain \
+        | awk -v ref="refs/heads/$branch" '$1 == "branch" && $2 == ref { found = 1 } END { exit(found ? 0 : 1) }'; then
+      worktree_branch=true
+    fi
+
+    if [[ "$local_branch" == "true" || "$remote_tracking_branch" == "true" \
+        || "$remote_head" == "true" || "$worktree_branch" == "true" ]]; then
+      jq -nc \
+        --arg keeper "$keeper" \
+        --arg branch "$branch" \
+        --argjson local_branch "$local_branch" \
+        --argjson remote_tracking_branch "$remote_tracking_branch" \
+        --argjson remote_head "$remote_head" \
+        --argjson worktree_branch "$worktree_branch" \
+        '{
+          keeper:$keeper,
+          branch:$branch,
+          local_branch:$local_branch,
+          remote_tracking_branch:$remote_tracking_branch,
+          remote_head:$remote_head,
+          worktree_branch:$worktree_branch,
+          blocker:"branch_collision_preflight"
+        }' >>"$PROOF_BRANCH_COLLISIONS_FILE"
+    fi
+  done <"$branches_file"
+
+  if [[ -s "$PROOF_BRANCH_COLLISIONS_FILE" ]]; then
+    echo "proof branch collision preflight failed; choose a fresh --run-id" >&2
+    cat "$PROOF_BRANCH_COLLISIONS_FILE" >&2
+    exit 1
+  fi
+}
+
 prompt_for_keeper_create() {
   local keeper="$1"
   local branch
@@ -1057,6 +1146,72 @@ poll_results() {
   fi
 }
 
+ere_escape() {
+  # Escape ERE metacharacters in a literal value before splicing it
+  # into a [grep -Eq] pattern. Without this, an operator-supplied
+  # --run-id like "post-act.live" or a branch name carrying a literal
+  # "+" would produce false matches/false failures.
+  printf '%s' "$1" | sed -e 's/[][\\^$.|?*+(){}]/\\&/g'
+}
+
+create_result_has_success_markers() {
+  local keeper="$1"
+  local text_file="$2"
+  local branch reply run_id_re branch_re
+  branch="$(proof_branch_for_keeper "$keeper")"
+  run_id_re="$(ere_escape "$RUN_ID")"
+  branch_re="$(ere_escape "$branch")"
+  reply="$(jq -r '.result.reply // .reply // empty' "$text_file" 2>/dev/null || true)"
+
+  printf '%s' "$reply" | grep -Eq '"run_id"[[:space:]]*:[[:space:]]*"'"$run_id_re"'"' \
+    && printf '%s' "$reply" | grep -Eq '"branch"[[:space:]]*:[[:space:]]*"'"$branch_re"'"' \
+    && printf '%s' "$reply" | grep -Eq '"docker_pr_create"[[:space:]]*:[[:space:]]*true' \
+    && printf '%s' "$reply" | grep -Eq '"docker_git_push"[[:space:]]*:[[:space:]]*true' \
+    && printf '%s' "$reply" | grep -Eq '"blocker"[[:space:]]*:[[:space:]]*null' \
+    && printf '%s' "$reply" | grep -Eq 'https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]+'
+}
+
+all_create_results_ready_for_review() {
+  : >"$CREATE_READINESS_FAILURES_FILE"
+
+  local keeper status text_file
+  while IFS= read -r keeper; do
+    [[ -n "$keeper" ]] || continue
+    status="$(
+      jq -r --arg keeper "$keeper" '
+        select(.phase == "create" and .keeper == $keeper)
+        | .status // empty
+      ' "$RESULTS_FILE" | tail -n 1
+    )"
+    text_file="$(
+      jq -r --arg keeper "$keeper" '
+        select(.phase == "create" and .keeper == $keeper)
+        | .text_file // empty
+      ' "$RESULTS_FILE" | tail -n 1
+    )"
+
+    if [[ -z "$status" || -z "$text_file" ]]; then
+      jq -nc --arg keeper "$keeper" \
+        '{keeper:$keeper, blocker:"create_result_missing"}' \
+        >>"$CREATE_READINESS_FAILURES_FILE"
+      continue
+    fi
+    if [[ "$status" != "done" && "$status" != "completed" && "$status" != "complete" ]]; then
+      jq -nc --arg keeper "$keeper" --arg status "$status" \
+        '{keeper:$keeper, status:$status, blocker:"create_status_not_success"}' \
+        >>"$CREATE_READINESS_FAILURES_FILE"
+      continue
+    fi
+    if ! create_result_has_success_markers "$keeper" "$text_file"; then
+      jq -nc --arg keeper "$keeper" --arg status "$status" --arg text_file "$text_file" \
+        '{keeper:$keeper, status:$status, text_file:$text_file, blocker:"create_success_markers_missing"}' \
+        >>"$CREATE_READINESS_FAILURES_FILE"
+    fi
+  done <"$RUN_DIR/keepers.txt"
+
+  [[ ! -s "$CREATE_READINESS_FAILURES_FILE" ]]
+}
+
 run_audit() {
   if [[ "$RUN_AUDIT" != "1" ]]; then
     AUDIT_STATUS_RESULT=0
@@ -1114,6 +1269,8 @@ write_summary() {
     --arg server_health_file "$SERVER_HEALTH_CHECK_FILE" \
     --arg review_targets_file "$REVIEW_TARGETS_FILE" \
     --arg github_identity_counts_file "$GITHUB_IDENTITY_COUNTS_FILE" \
+    --arg proof_branch_collisions_file "$PROOF_BRANCH_COLLISIONS_FILE" \
+    --arg create_readiness_failures_file "$CREATE_READINESS_FAILURES_FILE" \
     --argjson mutate "$MUTATE" \
     --argjson keeper_count "$keeper_count" \
     --argjson request_count "$request_count" \
@@ -1138,6 +1295,8 @@ write_summary() {
       server_health_file:$server_health_file,
       review_targets_file:$review_targets_file,
       github_identity_counts_file:$github_identity_counts_file,
+      proof_branch_collisions_file:$proof_branch_collisions_file,
+      create_readiness_failures_file:$create_readiness_failures_file,
       mutate:$mutate,
       keeper_count:$keeper_count,
       request_count:$request_count,
@@ -1174,6 +1333,12 @@ post_board_summary() {
 require_cmd jq
 require_cmd python3
 require_cmd curl
+# git is used by assert_no_proof_branch_collisions_for_mutate
+# (ls-remote/show-ref/worktree). Surface it up-front so a missing
+# git binary fails immediately at startup with a consistent
+# "required command not found" message rather than partway through
+# the run with a less obvious git-not-found error.
+require_cmd git
 
 if [[ "$MUTATE" == "1" || -n "$EXPECTED_SERVER_COMMIT" ]]; then
   assert_expected_server_commit
@@ -1183,6 +1348,7 @@ discover_keepers
 assert_github_identity_pool_for_mutate
 build_review_targets
 render_prompts
+assert_no_proof_branch_collisions_for_mutate
 
 if [[ "$MUTATE" == "1" ]]; then
   # Share one POLL_TIMEOUT_SEC budget across both phases so the overall
@@ -1192,8 +1358,12 @@ if [[ "$MUTATE" == "1" ]]; then
   export MUTATE_POLL_DEADLINE_TS=$(( $(date +%s) + POLL_TIMEOUT_SEC ))
   send_phase_prompts "create" "$CREATE_REQUIRED_TOOLS"
   poll_results "create"
-  send_phase_prompts "review" "$REVIEW_REQUIRED_TOOLS"
-  poll_results "review"
+  if all_create_results_ready_for_review; then
+    send_phase_prompts "review" "$REVIEW_REQUIRED_TOOLS"
+    poll_results "review"
+  else
+    log "skipping review phase because create phase did not produce complete success evidence"
+  fi
   unset MUTATE_POLL_DEADLINE_TS
 else
   log "dry-run mode: prompts rendered under $PROMPT_DIR; no keeper messages sent"

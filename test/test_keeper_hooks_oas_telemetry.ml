@@ -962,7 +962,7 @@ let test_pr_work_action_metric_extracts_keeper_pr_create () =
             ("head", `String "proof/keeper-docker");
           ])
       ~output_text:
-        {|{"ok":true,"tool":"keeper_pr_create","operation":"pr_create","via":"brokered"}|}
+        {|{"ok":true,"tool":"keeper_pr_create","operation":"pr_create","via":"brokered","result":{"output":"https://github.com/acme/repo/pull/42\n"}}|}
       ()
   in
   check (list string) "pr create action" [ "PR_CREATE" ]
@@ -970,6 +970,11 @@ let test_pr_work_action_metric_extracts_keeper_pr_create () =
   match events with
   | [ event ] ->
       check string "source" "keeper_pr_create" event.work_source;
+      check (option string) "head ref" (Some "proof/keeper-docker")
+        event.work_ref;
+      check (option string) "pr url"
+        (Some "https://github.com/acme/repo/pull/42")
+        event.pr_url;
       check (option string) "route via" (Some "brokered") event.route_via
   | _ -> failf "expected one keeper_pr_create event"
 
@@ -991,6 +996,8 @@ let test_pr_work_action_metric_uses_native_pr_create_route_fallback () =
     (work_actions events);
   match events with
   | [ event ] ->
+      check (option string) "head ref" (Some "proof/keeper-docker")
+        event.work_ref;
       check (option string) "route fallback" (Some "brokered")
         event.route_via
   | _ -> failf "expected one keeper_pr_create event"

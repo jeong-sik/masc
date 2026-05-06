@@ -318,6 +318,8 @@ type pr_review_action_metric_event = {
 type pr_work_action_metric_event = {
   work_action : string;
   work_source : string;
+  work_ref : string option;
+  pr_url : string option;
   command : string option;
   success : bool;
   route_via : string option;

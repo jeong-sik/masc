@@ -54,6 +54,8 @@ val dashboard_board_json :
   ?exclude_automation:bool ->
   ?limit:int ->
   ?offset:int ->
+  ?voter:string ->
+  ?blind_votes:bool ->
   unit ->
   Yojson.Safe.t
 

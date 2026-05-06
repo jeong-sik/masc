@@ -21,17 +21,19 @@ let dashboard_namespace_truth_http_json =
 
 let dashboard_board_json ?hearth ?author_filter
     ?(sort_by = Board_dispatch.Hot) ?(exclude_system = false)
-    ?(exclude_automation = false) ?(limit = 100) ?(offset = 0) () :
-    Yojson.Safe.t =
+    ?(exclude_automation = false) ?(limit = 100) ?(offset = 0) ?voter
+    ?(blind_votes = false) () : Yojson.Safe.t =
   let limit = clamp ~min_v:1 ~max_v:500 limit in
   let offset = clamp ~min_v:0 ~max_v:5000 offset in
   let author_filter = Option.map board_actor_author_for_write author_filter in
   let cache_key =
-    Printf.sprintf "board:memory:%s;%s;%s;%b;%b;%d;%d"
+    Printf.sprintf "board:memory:%s;%s;%s;%b;%b;%d;%d;%s;%b"
       (Option.value ~default:"-" hearth)
       (Option.value ~default:"-" author_filter)
       (board_sort_label sort_by)
       exclude_system exclude_automation limit offset
+      (Option.value ~default:"-" voter)
+      blind_votes
   in
   Dashboard_cache.get_or_compute cache_key ~ttl:10.0 (fun () ->
     let base_fetch = board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset in
@@ -58,7 +60,10 @@ let dashboard_board_json ?hearth ?author_filter
       List.map
         (fun (post : Board.post) ->
           let author = Board.Agent_id.to_string post.author in
-          board_post_dashboard_json ~author_karma:(get_karma author) post)
+          let post_id = Board.Post_id.to_string post.id in
+          let current_vote = board_current_vote_for_post ~voter ~post_id in
+          board_post_dashboard_json ~blind_votes ?current_vote
+            ~author_karma:(get_karma author) post)
         paged
     in
     `Assoc
@@ -100,8 +105,10 @@ let dashboard_memory_http_json request : Yojson.Safe.t =
   let offset =
     int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000
   in
+  let voter = board_voter_query request in
+  let blind_votes = bool_query_param request "blind_votes" ~default:false in
   dashboard_board_json ?hearth ?author_filter ~sort_by ~exclude_system
-    ~exclude_automation ~limit ~offset ()
+    ~exclude_automation ~limit ~offset ?voter ~blind_votes ()
 
 let memory_subsystems_entry_cache_ttl_sec = 30.0
 

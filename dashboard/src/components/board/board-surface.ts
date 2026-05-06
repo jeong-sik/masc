@@ -582,6 +582,8 @@ function PostCard({ post }: { post: BoardPost }) {
   const authorTitle = boardActorTitle(post.author, post.author_identity)
   const upvoteActive = post.current_vote === 'up'
   const downvoteActive = post.current_vote === 'down'
+  const voteScoreLabel = post.vote_blind ? '투표 후 공개' : String(post.votes ?? 0)
+  const voteScoreAria = post.vote_blind ? '점수 투표 후 공개' : `점수 ${post.votes ?? 0}`
   const reactionPreview = post.reactions?.some(summary => summary.count > 0 || summary.reacted || summary.has_reacted)
 
   const handleVote = async (dir: 'up' | 'down', event: Event) => {
@@ -643,7 +645,7 @@ function PostCard({ post }: { post: BoardPost }) {
       </div>
 
       <!-- Vote column -->
-      <div class="flex flex-col items-center gap-0.5 pt-0.5 min-w-9">
+      <div class="flex flex-col items-center gap-0.5 pt-0.5 min-w-14">
         <button type="button"
           aria-label="추천"
           aria-pressed=${upvoteActive ? 'true' : 'false'}
@@ -651,7 +653,13 @@ function PostCard({ post }: { post: BoardPost }) {
           class=${`vote-btn upvote w-7 h-5 flex items-center justify-center rounded-[var(--r-1)] text-2xs transition-colors border-0 bg-transparent ${upvoteActive ? 'active text-[var(--warn-bright)] bg-[var(--warn-10)] cursor-default' : 'text-[var(--color-fg-muted)] hover:text-[var(--warn-bright)] hover:bg-[var(--warn-10)] cursor-pointer'}`}
           onClick=${(event: Event) => handleVote('up', event)}
         ><span aria-hidden="true">▲</span></button>
-        <span class="text-sm font-semibold tabular-nums text-[var(--color-fg-secondary)]">${post.votes ?? 0}</span>
+        <span
+          class=${post.vote_blind
+            ? 'max-w-14 text-center text-[10px] font-medium leading-tight text-[var(--color-fg-muted)]'
+            : 'text-sm font-semibold tabular-nums text-[var(--color-fg-secondary)]'}
+          aria-label=${voteScoreAria}
+          title=${voteScoreLabel}
+        >${voteScoreLabel}</span>
         <button type="button"
           aria-label="비추천"
           aria-pressed=${downvoteActive ? 'true' : 'false'}

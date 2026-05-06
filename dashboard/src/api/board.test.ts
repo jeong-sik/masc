@@ -527,6 +527,43 @@ describe('fetchBoard', () => {
     expect(url).toContain('hearth=ops')
     expect(url).toContain('limit=150')
   })
+
+  it('normalizes vote-blind rows and opts into the board projection when requested', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        posts: [
+          {
+            id: 'post-blind',
+            author: 'analyst',
+            title: 'Blind score',
+            body: 'Working',
+            created_at: 1_713_000_000,
+            updated_at: 1_713_000_000,
+            votes: null,
+            score: null,
+            votes_up: null,
+            votes_down: null,
+            vote_blind: true,
+            vote_blind_reason: 'vote_before_score',
+          },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchBoard('hot', { blindVotes: true })
+
+    expect(result.posts[0]).toMatchObject({
+      id: 'post-blind',
+      vote_blind: true,
+      vote_blind_reason: 'vote_before_score',
+    })
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('blind_votes=true')
+  })
 })
 
 describe('fetchBoardHearths', () => {
@@ -723,6 +760,7 @@ describe('fetchBoardPost', () => {
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toContain('format=flat')
     expect(url).toContain('voter=')
+    expect(url).toContain('blind_votes=true')
   })
 })
 

@@ -254,6 +254,25 @@ describe('BoardSurface Component', () => {
     expect(screen.getByLabelText('게시글 moderation 신고됨 2건')).toHaveTextContent('신고됨 2')
   })
 
+  it('renders vote-blind post scores as hidden until voting', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'post-blind',
+        title: 'Blind score',
+        body: 'content',
+        author: 'ani1999',
+        votes: null,
+        vote_balance: null,
+        vote_blind: true,
+        vote_blind_reason: 'vote_before_score',
+      }),
+    ]
+
+    render(h(BoardSurface, null))
+
+    expect(screen.getByLabelText('점수 투표 후 공개')).toHaveTextContent('투표 후 공개')
+  })
+
   it('routes the mention inbox focus to the message surface', () => {
     route.value = { params: { focus: 'mention-inbox' } } as any
     messages.value = [{ id: 'm-1', from: 'sojin', content: '@dashboard needs review' }]

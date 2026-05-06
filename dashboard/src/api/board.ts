@@ -367,6 +367,8 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
   const votes = asNumber(raw.votes, score || (votesUp - votesDown))
   const currentVote = normalizeBoardVoteDirection(raw.current_vote)
   const hasVoted = typeof raw.has_voted === 'boolean' ? raw.has_voted : currentVote !== null
+  const voteBlind = raw.vote_blind === true
+  const voteBlindReason = asString(raw.vote_blind_reason, '').trim() || undefined
   const commentCount = asNumber(raw.comment_count, asNumber(raw.reply_count, 0))
   const flairValue = (() => {
     const flair = raw.flair
@@ -412,6 +414,8 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
     tags,
     votes,
     vote_balance: score,
+    vote_blind: voteBlind,
+    ...(voteBlindReason ? { vote_blind_reason: voteBlindReason } : {}),
     current_vote: currentVote,
     has_voted: hasVoted,
     comment_count: commentCount,
@@ -446,6 +450,8 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
   const votes = asNumber(raw.votes, score)
   const currentVote = normalizeBoardVoteDirection(raw.current_vote)
   const hasVoted = typeof raw.has_voted === 'boolean' ? raw.has_voted : currentVote !== null
+  const voteBlind = raw.vote_blind === true
+  const voteBlindReason = asString(raw.vote_blind_reason, '').trim() || undefined
   const reactions = Array.isArray(raw.reactions)
     ? raw.reactions
         .map(normalizeBoardReactionSummary)
@@ -463,6 +469,8 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
     vote_balance: score,
     votes_up: votesUp,
     votes_down: votesDown,
+    vote_blind: voteBlind,
+    ...(voteBlindReason ? { vote_blind_reason: voteBlindReason } : {}),
     current_vote: currentVote,
     has_voted: hasVoted,
     report_count: Math.max(0, Math.trunc(asNumber(raw.report_count, 0))),
@@ -652,7 +660,13 @@ function normalizeBoardReactionToggleResult(raw: unknown): BoardReactionToggleRe
 
 export async function fetchBoard(
   sortBy?: BoardSortMode,
-  options?: { excludeSystem?: boolean; excludeAutomation?: boolean; author?: string; hearth?: string },
+  options?: {
+    excludeSystem?: boolean
+    excludeAutomation?: boolean
+    author?: string
+    hearth?: string
+    blindVotes?: boolean
+  },
 ): Promise<{ posts: BoardPost[] }> {
   return timeBoardRequest('list', () => withRetries('fetchBoard', async () => {
     const params = new URLSearchParams()
@@ -662,6 +676,7 @@ export async function fetchBoard(
     if (options?.author) params.set('author', options.author)
     if (options?.hearth) params.set('hearth', options.hearth)
     params.set('voter', currentDashboardActor())
+    if (options?.blindVotes) params.set('blind_votes', 'true')
     params.set('limit', options?.excludeSystem || options?.excludeAutomation || options?.author || options?.hearth ? '150' : '100')
     const qs = params.toString()
     const raw = await get<{ posts?: unknown[] }>(`/api/v1/board${qs ? `?${qs}` : ''}`)
@@ -724,6 +739,7 @@ export async function fetchBoardPost(postId: string): Promise<BoardPost & { comm
     const params = new URLSearchParams({
       format: 'flat',
       voter: currentDashboardActor(),
+      blind_votes: 'true',
     })
     const raw = await get<Record<string, unknown>>(`/api/v1/board/${postId}?${params}`)
     const postRaw = isRecord(raw.post) ? raw.post : raw

@@ -575,6 +575,11 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "number");
           ("description", `String "Optional: overall cascade timeout (sec) for this keeper message call");
         ]);
+        ("required_tools", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Optional: tool names that must be visible and used during this one keeper turn. Missing required tools surface as tool_surface_mismatch/missing_required_tool_use.");
+        ]);
         ("no_skill_route", `Assoc [
           ("type", `String "boolean");
           ("description", `String "Optional: do not emit SKILL/SKILL_REASON headers in reply");

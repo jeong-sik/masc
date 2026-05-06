@@ -32,6 +32,13 @@ HTTP health is up but MCP startup is still completing does not fail the run.
 Transient `masc_keeper_msg_result` transport/tool errors are recorded in
 `poll_errors.jsonl` and kept pending until the poll deadline instead of being
 treated as terminal keeper results.
+When mutation is enabled, the harness sends `required_tools` with each
+`masc_keeper_msg` call. By default that one-turn contract requires
+`keeper_bash`, `keeper_pr_create`, and `keeper_pr_review_comment`, so the
+runtime records `tool_surface_mismatch` if those tools are not visible and
+`missing_required_tool_use` if the keeper replies without exercising them.
+Override the CSV with `REQUIRED_TOOLS=...` for a narrower or broader proof
+lane.
 
 ```bash
 ./scripts/harness_keeper_docker_pr_lifecycle_reprobe.sh

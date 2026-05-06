@@ -138,6 +138,7 @@ let prepare_agent_setup
       ~(cascade_name : Keeper_cascade_profile.runtime_name)
       ~(is_retry : bool)
       ~(turn_affordances : string list)
+      ~(required_tool_names : string list)
       ~(config_root : string)
       ~(cascade_config_path : string option)
       ~(gemini_mcp_disabled : bool)
@@ -712,7 +713,7 @@ let prepare_agent_setup
 
     in
     let required_tool_names =
-      current_task_required_tools ()
+      current_task_required_tools () @ required_tool_names
       |> Keeper_types.dedupe_keep_order
     in
     let visible_required_tool_names =
@@ -1274,6 +1275,9 @@ let prepare_agent_setup
                let tool_choice =
                  if computed_surface.is_last_turn
                  then current_params.tool_choice
+                 else if computed_surface.required_tool_names <> []
+                         && all_allowed <> []
+                 then Some Agent_sdk.Types.Any
                  else if computed_surface.tool_gate_requested && all_allowed <> []
                  then
                    Some

@@ -290,6 +290,20 @@ let handle_dashboard_task_history state req reqd =
       Tool_task.task_history_events_json state.Mcp_server.room_config ~task_id ~limit
     in
     Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+
+let handle_dashboard_rooms state req reqd =
+  let limit =
+    Server_utils.int_query_param req "limit" ~default:50
+    |> Server_utils.clamp ~min_v:1 ~max_v:200
+  in
+  let me =
+    match trimmed_query_param req "me" with
+    | Some _ as value -> value
+    | None -> trimmed_query_param req "agent"
+  in
+  let json = Dashboard_rooms.json ~config:state.Mcp_server.room_config ?me ~limit () in
+  Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+
 let rec add_routes ~sw ~clock router =
   router
   |> Http.Router.post "/api/v1/broadcast" (fun request reqd ->
@@ -357,6 +371,10 @@ let rec add_routes ~sw ~clock router =
          let json = Dashboard_branches.json ~config:state.Mcp_server.room_config in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/rooms" (fun request reqd ->
+       with_public_read handle_dashboard_rooms request reqd)
+  |> Http.Router.get "/api/v1/rooms" (fun request reqd ->
+       with_public_read handle_dashboard_rooms request reqd)
   (* Dev-only shared bearer for the dashboard UI. Served exclusively when the
      server binds to loopback and strict-auth env overrides are disabled, so
      that a LAN deployment never hands out a token over the wire. The token is

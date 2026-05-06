@@ -139,8 +139,10 @@
   post-ACT Verify. The row-corpus discovery manifest is attached as evidence
   for the strict blocker; it records the 12 prompt documents checked, 19
   strict itemized IDs, 187 missing rows, 72 broader uncataloged structured IDs,
-  260 broader source occurrences, and checked 47-issue audit artifacts that do
-  not contain the missing 206-row corpus.
+  260 broader source occurrences, duplicate checked 47-issue audit artifacts
+  that do not contain the missing 206-row corpus, and an independent cascade
+  completion report that keeps #13265 open because the corpus is not
+  replayable.
 - [근거] `python3 scripts/observe_goal_loop_logs.py
   /Users/dancer/me/.masc/events/2026-05/06.jsonl
   /Users/dancer/me/.masc/transition-audit/2026-05/06.jsonl` plus
@@ -302,8 +304,9 @@ identity checks verified against checked SHA-256 and line-count metadata, 91
 broader structured source IDs with 72 not in the strict audit catalog across 12
 uncataloged ID families and 260 source occurrences, 187 missing 206-itemized
 rows, row-corpus discovery evidence showing the checked 47-issue audit
-artifacts are not the missing 206-row corpus, and 9 itemized rows that are not
-evaluable from the startup log patterns.
+artifacts and duplicates are not the missing 206-row corpus, an independent
+report that confirms the #13265 replay gap remains open, and 9 itemized rows
+that are not evaluable from the startup log patterns.
 `goal_loop_completion_audit.py --require-complete` turns those facts into a
 closeout gate so the objective cannot be marked complete while those blockers
 remain.
@@ -441,8 +444,9 @@ No convergence claim is valid yet. The only safe current statement is:
    reconciled at 1/1, so the remaining catalog gap is row-level completeness,
    not whether the aggregate numbers appear in the supplied documents. The
    checked row-corpus discovery manifest records that the known 47-issue audit
-   artifacts are not the missing corpus; it is evidence for the blocker, not a
-   substitute for the rows.
+   artifacts and duplicates are not the missing corpus, and that the cascade
+   completion report still lists #13265 as open; this is evidence for the
+   blocker, not a substitute for the rows.
 2. Decide whether the source artifacts should be checked in under
    `prompt_corpus/GOAL_LOOP/...` or kept external. Local external validation
    passes via `<GOAL_LOOP_SOURCE_ROOT>` plus `--audit-source-strip-prefix`, and

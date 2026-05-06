@@ -50,6 +50,7 @@
       "artifact_kind": "zip",
       "result": "NOT_ROW_CORPUS",
       "observed_issue_total": 47,
+      "sha256": "41bf451170f10ddb68e29385ef784ddae13d192550cdd7a72c516e2d46654dad",
       "contents": [
         "masc_mcp_audit_complete.agent.final.md",
         "roadmap_timeline.png",
@@ -58,6 +59,21 @@
         "fig_telemetry_gap.png"
       ],
       "note": "Archive contains a 47-issue audit report and images, not a 206-row strict finding corpus."
+    },
+    {
+      "artifact_name": "masc_mcp_audit_complete.agent.final (1).zip",
+      "artifact_kind": "zip",
+      "result": "NOT_ROW_CORPUS",
+      "observed_issue_total": 47,
+      "sha256": "59854bccc7d62cd385a338f9816fcb41e1af0862306962d817b572d86d7ff15b",
+      "contents": [
+        "masc_mcp_audit_complete.agent.final.md",
+        "god_file_decomposition.png",
+        "readme_code_mismatch.png",
+        "fig_telemetry_gap.png",
+        "roadmap_timeline.png"
+      ],
+      "note": "Duplicate-named archive has the same 47-issue report shape and no 206-row strict finding corpus."
     },
     {
       "artifact_name": "masc_mcp_audit_complete.agent.final.md",
@@ -71,7 +87,23 @@
       "artifact_kind": "docx",
       "result": "NOT_ROW_CORPUS",
       "observed_issue_total": 47,
+      "sha256": "f2f925b7d7a72ad537d2fd12bd8e013babb2ffd01ba84331575cb7ac2a4d8ac2",
       "note": "Docx variant mirrors the 47-issue report shape and does not provide the missing strict rows."
+    },
+    {
+      "artifact_name": "masc_mcp_audit_complete.agent.final.footnote (1).docx",
+      "artifact_kind": "docx",
+      "result": "DUPLICATE_NOT_ROW_CORPUS",
+      "observed_issue_total": 47,
+      "sha256": "f2f925b7d7a72ad537d2fd12bd8e013babb2ffd01ba84331575cb7ac2a4d8ac2",
+      "note": "Duplicate docx has the same digest as the first footnote docx and does not provide the missing strict rows."
+    },
+    {
+      "artifact_name": "keeper_cascade_completion.agent.final.md",
+      "artifact_kind": "markdown",
+      "result": "CONFIRMS_CORPUS_GAP_OPEN",
+      "sha256": "e7457705309b352f3b298e7b617faff614962c762fb35022eb8990bb38cbc36b",
+      "note": "Independent cascade completion report lists GOAL LOOP audit corpus not replayable as #13265 Open, with 206-finding replay unavailable."
     }
   ],
   "broader_structured_id_triage": {

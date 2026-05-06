@@ -395,7 +395,18 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
             "FULL_ROW_CORPUS_NOT_FOUND",
         )
         self.assertEqual(discovery_evidence["prompt_sources_checked"], 12)
-        self.assertGreater(discovery_evidence["candidate_artifacts_checked"], 0)
+        self.assertEqual(
+            discovery_evidence["candidate_artifacts_checked"],
+            len(discovery["candidate_artifacts_checked"]),
+        )
+        marker_sweeps = [
+            artifact
+            for artifact in discovery["candidate_artifacts_checked"]
+            if artifact["artifact_name"] == "downloads_zip_strict_corpus_marker_sweep"
+        ]
+        self.assertEqual(len(marker_sweeps), 1)
+        self.assertEqual(marker_sweeps[0]["observed_archives_checked"], 43)
+        self.assertEqual(marker_sweeps[0]["observed_marker_hits"], 0)
         self.assertFalse(discovery_evidence["local_path_leaks"])
         self.assertTrue(discovery_evidence["source_catalog_id_matches"])
 

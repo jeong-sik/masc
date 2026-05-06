@@ -105,20 +105,24 @@ let fallback_targets (msg : Masc_domain.message) =
 
 let nudge_id (msg : Masc_domain.message) = Printf.sprintf "n-%09d" msg.seq
 
-let decode_message_entities content =
-  (* HTML entity decoding is the inverse of encoding, so [&amp;] must be
-     replaced FIRST. Coord.sanitize_message encodes [&] last (so it does
-     not double-encode existing entities); decoding has to reverse that
-     order or a literal "&quot;" round-tripped through sanitize as
-     "&amp;quot;" decodes to "\"" instead of restoring "&quot;". The
-     symmetric rule is: encode [&] last, decode [&] first. *)
+let decode_message_for_parsing content =
+  (* Restore JSON syntax escaped by Coord.sanitize_message. Decode structural
+     quotes before [&amp;] so body text that originally contained [&quot;]
+     stays as an entity until after JSON parsing. *)
+  content
+  |> String_util.replace_substring ~needle:"&quot;" ~by:"\""
+  |> String_util.replace_substring ~needle:"&amp;" ~by:"&"
+
+let decode_body_entities content =
+  (* Keep angle brackets escaped for dashboard defense-in-depth, but decode
+     quote/apostrophe entities for readable operator text. *)
   content
   |> String_util.replace_substring ~needle:"&amp;" ~by:"&"
   |> String_util.replace_substring ~needle:"&quot;" ~by:"\""
   |> String_util.replace_substring ~needle:"&#x27;" ~by:"'"
+  |> String_util.replace_substring ~needle:"&#39;" ~by:"'"
+  |> String_util.replace_substring ~needle:"&#039;" ~by:"'"
   |> String_util.replace_substring ~needle:"&apos;" ~by:"'"
-  |> String_util.replace_substring ~needle:"&lt;" ~by:"<"
-  |> String_util.replace_substring ~needle:"&gt;" ~by:">"
 ;;
 
 let structured_entry_of_json ~(msg : Masc_domain.message) json =
@@ -133,6 +137,7 @@ let structured_entry_of_json ~(msg : Masc_domain.message) json =
         first_string_member [ "body"; "message"; "content" ] json
         |> Option.value ~default:""
         |> String.trim
+        |> decode_body_entities
       in
       let targets =
         match target_list json with
@@ -257,13 +262,13 @@ let tagged_entry_of_message (msg : Masc_domain.message) =
       ; at = msg.timestamp
       ; channel
       ; to_ = (if targets = [] then fallback_targets msg else targets)
-      ; body
+      ; body = decode_body_entities body
       ; ack = false
       }
 ;;
 
 let entry_of_message (msg : Masc_domain.message) =
-  let msg = { msg with content = decode_message_entities msg.content } in
+  let msg = { msg with content = decode_message_for_parsing msg.content } in
   match Yojson.Safe.from_string msg.content with
   | json ->
     (match structured_entry_of_json ~msg json with

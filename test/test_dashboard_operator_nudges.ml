@@ -77,6 +77,23 @@ let test_tagged_broadcast_nudge () =
   Alcotest.(check bool) "ack" false (field_bool "ack" item)
 ;;
 
+let test_structured_nudge_preserves_angle_entities () =
+  with_room
+  @@ fun config ->
+  ignore
+    (Coord.broadcast
+       config
+       ~from_agent:"operator"
+       ~msg_type:"operator_nudge"
+       ~content:
+         {|{"kind":"operator_nudge","channel":"hint","body":"<b>&#39;&#039;&apos;&quot;</b>"}|});
+  let json = Dashboard_operator_nudges.json ~config ~limit:10 () in
+  let items = nudges json in
+  Alcotest.(check int) "count" 1 (List.length items);
+  let item = List.hd items in
+  Alcotest.(check string) "body" "&lt;b&gt;'''\"&lt;/b&gt;" (field_string "body" item)
+;;
+
 let test_non_nudge_broadcast_ignored () =
   with_room
   @@ fun config ->
@@ -94,6 +111,10 @@ let () =
             `Quick
             test_structured_operator_nudge
         ; Alcotest.test_case "tagged broadcast nudge" `Quick test_tagged_broadcast_nudge
+        ; Alcotest.test_case
+            "structured nudge preserves angle entities"
+            `Quick
+            test_structured_nudge_preserves_angle_entities
         ; Alcotest.test_case
             "non nudge broadcast ignored"
             `Quick

@@ -93,6 +93,19 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(evidence, {"pr_create:keeper_pr_create"})
         self.assertEqual(docker_evidence, set())
 
+    def test_lifecycle_evidence_does_not_treat_plain_docker_marker_as_route(self):
+        row = {
+            "event": "tool_exec",
+            "tool": "keeper_pr_create",
+            "ok": True,
+            "route_markers": ["docker"],
+        }
+
+        evidence, docker_evidence = audit.pr_lifecycle_evidence_from_decision(row)
+
+        self.assertEqual(evidence, {"pr_create:keeper_pr_create"})
+        self.assertEqual(docker_evidence, set())
+
     def test_action_metric_git_push_drives_lifecycle_evidence(self):
         row = {
             "ts_unix": 30.0,

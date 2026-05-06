@@ -18,12 +18,22 @@ type artifact =
   ; created_by : string  (* from provenance.created_by, "" if absent *)
   }
 
+type fetch_status =
+  | Fetch_pending
+  | Fetch_fresh
+  | Fetch_stale of
+      { reason : string
+      ; consecutive_failures : int
+      }
+
 type response =
   { count : int
   ; artifacts : artifact list
+  ; fetch_status : fetch_status
   }
 
-let empty_response : response = { count = 0; artifacts = [] }
+let empty_response : response =
+  { count = 0; artifacts = []; fetch_status = Fetch_pending }
 
 let string_field json name : string =
   match Yojson.Safe.Util.member name json with
@@ -62,5 +72,12 @@ let response_of_yojson (json : Yojson.Safe.t) : response =
     | `List xs -> List.map xs ~f:artifact_of_yojson
     | _ -> []
   in
-  { count; artifacts }
+  { count; artifacts; fetch_status = Fetch_fresh }
+;;
+
+let fetch_status_label = function
+  | Fetch_pending -> "fetch pending"
+  | Fetch_fresh -> "fetch ok"
+  | Fetch_stale { consecutive_failures; _ } ->
+    Printf.sprintf "stale %dx" consecutive_failures
 ;;

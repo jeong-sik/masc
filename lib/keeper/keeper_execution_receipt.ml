@@ -322,6 +322,13 @@ let operator_disposition (receipt : t) =
        [tool_required_unsatisfied] branch below. *)
     ("pause_human", "tool_required_unsatisfied")
   else if
+    String.starts_with ~prefix:"turn_livelock:" terminal_reason
+    ||
+    (match error_kind with
+     | Some "turn_livelock_blocked" -> true
+     | Some _ | None -> false)
+  then ("pause_human", "turn_livelock_blocked")
+  else if
     receipt.tool_surface.tool_requirement = Required
     && (List.mem tool_contract_result
           [

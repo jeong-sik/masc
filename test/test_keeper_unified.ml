@@ -4024,6 +4024,75 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
               trajectory_summary |> member "outcome" |> member "reason"
               |> to_string))
 
+let test_run_keeper_cycle_livelock_block_returns_error () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.clear ();
+      Masc_mcp.Keeper_turn_livelock.reset_for_tests ();
+      cleanup_dir base_dir)
+    (fun () ->
+      with_test_runtime_roots base_dir @@ fun () ->
+      KR.clear ();
+      Masc_mcp.Keeper_turn_livelock.reset_for_tests ();
+      with_env "MASC_KEEPER_TURN_LIVELOCK_MAX_ATTEMPTS" "1" @@ fun () ->
+      with_env "MASC_KEEPER_TURN_LIVELOCK_STUCK_AFTER_SEC" "1800.0" @@ fun () ->
+      let meta = make_meta "livelock-blocked-keeper" in
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      ignore (KR.register ~base_path:base_dir meta.name meta);
+      ignore
+        (Masc_mcp.Keeper_turn_livelock.guard_and_record_turn_start
+           ~keeper:meta.name
+           ~turn_id:meta.runtime.usage.total_turns
+           ~max_attempts:1
+           ~stuck_after_sec:1800.0
+           ());
+      match
+        UT.run_keeper_cycle
+          ~config
+          ~meta
+          ~observation:base_observation
+          ~generation:meta.runtime.generation
+          ()
+      with
+      | Ok _ -> fail "expected livelock-blocked turn to return Error"
+      | Error err ->
+          let error_message = Agent_sdk.Error.to_string err in
+          check bool "error mentions livelock" true
+            (contains_substring error_message "livelock blocked");
+          (match
+             Masc_mcp.Keeper_execution_receipt.latest_json config meta.name
+           with
+           | None -> fail "expected livelock-blocked execution receipt"
+           | Some receipt ->
+               check string "blocked receipt outcome" "receipt_failed"
+                 Yojson.Safe.Util.(receipt |> member "outcome" |> to_string);
+               check string "blocked operator disposition" "pause_human"
+                 Yojson.Safe.Util.(
+                   receipt |> member "operator_disposition" |> to_string);
+               check string "blocked disposition reason"
+                 "turn_livelock_blocked"
+                 Yojson.Safe.Util.(
+                   receipt |> member "operator_disposition_reason"
+                   |> to_string);
+               check string "blocked receipt error kind"
+                 "turn_livelock_blocked"
+                 Yojson.Safe.Util.(
+                   receipt |> member "error" |> member "kind" |> to_string);
+               check bool "blocked receipt error message" true
+                 (contains_substring
+                    Yojson.Safe.Util.(
+                      receipt |> member "error" |> member "message" |> to_string)
+                    "livelock blocked");
+               check bool "blocked receipt terminal reason" true
+                 (contains_substring
+                    Yojson.Safe.Util.(
+                      receipt |> member "terminal_reason_code" |> to_string)
+                    "turn_livelock:attempts_exhausted")))
+
 let test_streaming_cancel_records_supervisor_stop_when_fiber_stop_set () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -8503,6 +8572,8 @@ let () =
         [
           test_case "run_keeper_cycle skips paused keeper" `Quick
             test_run_keeper_cycle_skips_non_executable_phase;
+          test_case "run_keeper_cycle errors on livelock block" `Quick
+            test_run_keeper_cycle_livelock_block_returns_error;
           test_case "streaming cancel records supervisor stop" `Quick
             test_streaming_cancel_records_supervisor_stop_when_fiber_stop_set;
           test_case "run_keeper_cycle records trajectory contract" `Quick

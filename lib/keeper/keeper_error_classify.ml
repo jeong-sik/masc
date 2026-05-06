@@ -316,8 +316,9 @@ let required_tool_rotation_candidate ~catalog_names name =
          Keeper_config.default_cascade_name)
   in
   (* Required-tool turns may still use [local_recovery] when the catalog
-     declares it as a tool-capable fallback profile; only the buffer/local-only
-     lane is filtered here. *)
+     declares it as a tool-capable fallback profile.  Keep excluding the
+     local-only/buffer lane here: those routes are recovery/control lanes and
+     may not satisfy a required keeper-tool contract. *)
   not
     ((routed_local_only_is_distinct
       && String.equal normalized Keeper_config.local_only_cascade_name))
@@ -390,6 +391,9 @@ let degraded_rotation_after_recoverable_error
   match recoverable_cascade_failure_reason err with
   | None -> None
   | Some fallback_reason ->
+      (* Load the live catalog once at the degraded-rotation boundary and pass
+         the snapshot through normalization/filter helpers.  This preserves
+         concrete profile names without adding per-candidate catalog I/O. *)
       let catalog_names = Keeper_cascade_profile.catalog_names () in
       let attempted =
         attempted_cascades

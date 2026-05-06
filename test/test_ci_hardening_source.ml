@@ -2064,6 +2064,18 @@ let test_dashboard_bootstrap_contracts () =
   check bool "HTTP/2 gateway delegates to SSOT" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        "dashboard_bootstrap_http_json ~state ~sw ~clock");
+  check bool "HTTP/2 dashboard reads use shared public-read wrapper" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "| `GET, \"/api/v1/dashboard/shell\" ->\n          with_h2_public_read");
+  check bool "HTTP/2 public-read wrapper enforces read auth" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "authorize_read_request");
+  check bool "HTTP/2 public-read wrapper applies agent rate limit" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "Rate_limit.check_agent_global");
+  check bool "HTTP/2 public-read wrapper returns cold-start payload" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "not_initialized_response path");
   (* Slice list — the SSOT must list all six slices it bundles. *)
   let slice_listed name =
     file_contains_pattern "lib/server/server_dashboard_http.ml"

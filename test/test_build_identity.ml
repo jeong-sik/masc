@@ -79,7 +79,14 @@ let test_parse_commit_unix_ts_output () =
   Alcotest.(check (option (float 0.001)))
     "invalid timestamp"
     None
-    (Build_identity.parse_commit_unix_ts_output "not-a-timestamp\n")
+    (Build_identity.parse_commit_unix_ts_output "not-a-timestamp\n");
+  List.iter
+    (fun raw ->
+      Alcotest.(check (option (float 0.001)))
+        ("reject non-integer timestamp " ^ raw)
+        None
+        (Build_identity.parse_commit_unix_ts_output raw))
+    [ "nan"; "inf"; "-1"; "1.0"; "1e9"; "0x660b7d80"; "4102444801" ]
 
 let build_identity_probe_failure_count site =
   Prometheus.metric_value_or_zero

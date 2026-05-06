@@ -108,15 +108,26 @@ let probe_repo_root () =
     ~cwd:(Sys.getcwd ())
   |> List.find_map find_git_root
 
+let decimal_digits_only s =
+  String.length s > 0
+  && String.for_all (fun c -> c >= '0' && c <= '9') s
+
+let max_reasonable_commit_unix_ts = 4_102_444_800
+
 let parse_commit_unix_ts_output raw =
   match trim_to_option raw with
   | None -> None
-  | Some s -> float_of_string_opt s
+  | Some s when not (decimal_digits_only s) -> None
+  | Some s -> (
+      match int_of_string_opt s with
+      | Some ts when ts >= 0 && ts <= max_reasonable_commit_unix_ts ->
+          Some (float_of_int ts)
+      | _ -> None)
 
 (** Probe the unix timestamp of [commit] from the same git repo we
     resolved [commit] against.  Best-effort: returns [None] if [commit]
     is [None], the repo cannot be located, or git fails / output is
-    not a valid float.
+    not a sane integer Unix timestamp.
 
     Why we run this: a 2026-05-05 fleet-stuck recurrence boiled down
     to a deploy gap — the server kept running an 8-hour-old binary

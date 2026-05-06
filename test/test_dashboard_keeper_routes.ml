@@ -956,16 +956,19 @@ let test_keeper_directive_resume_updates_paused_meta () =
 let test_agent_purge_route_removes_plain_agent_artifacts () =
   with_seeded_server
   @@ fun ~port ~config ~admin_token ~keeper_name:_ ->
-  let agent_name = "worker-swift-fox" in
+  let requested_agent_name = "worker-swift-fox" in
+  let agent_name = "worker-swift-fox-001" in
   seed_agent_file ~capabilities:[ "coding" ] config agent_name;
   ignore
     (Masc_mcp.Auth.create_token config.base_path ~agent_name ~role:Masc_domain.Admin);
+  ignore
+    (Masc_mcp.Heartbeat.start ~agent_name ~interval:30 ~message:"route-test");
   let metrics_dir = Masc_mcp.Metrics_store_eio.agent_metrics_dir config agent_name in
   Fs_compat.mkdir_p metrics_dir;
   write_file (Filename.concat metrics_dir "2026-04.jsonl") "{}\n";
   let purge_result =
     run_curl_post
-      ~body:(Printf.sprintf {|{"agent_name":"%s"}|} agent_name)
+      ~body:(Printf.sprintf {|{"agent_name":"%s"}|} requested_agent_name)
       ~token:admin_token
       ~port
       ~path:"/api/v1/dashboard/agents/purge"
@@ -977,6 +980,8 @@ let test_agent_purge_route_removes_plain_agent_artifacts () =
   let open Yojson.Safe.Util in
   let purge_json = Yojson.Safe.from_string purge_result.body in
   let cleanup_rows = purge_json |> member "cleanup_results" |> to_list in
+  check int "agent purge returns one normalized cleanup row" 1
+    (List.length cleanup_rows);
   let cleanup_row =
     cleanup_rows
     |> List.find (fun row ->
@@ -984,10 +989,12 @@ let test_agent_purge_route_removes_plain_agent_artifacts () =
   in
   check int "agent purge reports pending confirms" 0
     (cleanup_row |> member "pending_confirms_removed" |> to_int);
-  check int "agent purge reports stopped heartbeats" 0
+  check int "agent purge reports stopped heartbeats" 1
     (cleanup_row |> member "heartbeats_stopped" |> to_int);
   check string "agent purge reports coord leave" (agent_name ^ " left the namespace")
     (cleanup_row |> member "coord_leave_result" |> to_string);
+  check int "agent purge leaves no duplicate heartbeat stop work" 0
+    (Masc_mcp.Heartbeat.stop_by_agent ~agent_name);
   check bool "agent file removed" false
     (Sys.file_exists
        (Filename.concat (Masc_mcp.Coord.agents_dir config)

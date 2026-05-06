@@ -27,4 +27,7 @@ val join :
   string
 
 val leave :
-  Coord_utils_backend_setup.config -> agent_name:string -> string
+  ?stop_heartbeats:bool ->
+  Coord_utils_backend_setup.config ->
+  agent_name:string ->
+  string

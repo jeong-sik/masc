@@ -17,10 +17,15 @@ type keeper_purge_target =
   }
 
 type agent_purge_cleanup_result =
-  { cleanup_agent_name : string
+  { agent_name : string
   ; pending_confirms_removed : int
   ; heartbeats_stopped : int
   ; coord_leave_result : string
+  }
+
+type agent_purge_cleanup_target =
+  { agent_name : string
+  ; aliases : string list
   }
 
 type keeper_purge_cleanup_result =
@@ -170,41 +175,83 @@ let resolve_plain_agent_target config requested_name =
 ;;
 
 let agent_purge_cleanup_result_to_json
-    { cleanup_agent_name
+    { agent_name
     ; pending_confirms_removed
     ; heartbeats_stopped
     ; coord_leave_result
     } =
   `Assoc
-    [ ("agent_name", `String cleanup_agent_name)
+    [ ("agent_name", `String agent_name)
     ; ("pending_confirms_removed", `Int pending_confirms_removed)
     ; ("heartbeats_stopped", `Int heartbeats_stopped)
     ; ("coord_leave_result", `String coord_leave_result)
     ]
 ;;
 
+let resolve_agent_purge_targets config agent_names =
+  let aliases_by_agent = Hashtbl.create (List.length agent_names) in
+  let order = ref [] in
+  let add_alias ~agent_name alias =
+    let aliases =
+      match Hashtbl.find_opt aliases_by_agent agent_name with
+      | Some existing -> existing
+      | None ->
+        order := agent_name :: !order;
+        []
+    in
+    Hashtbl.replace aliases_by_agent agent_name
+      (aliases @ [ alias; agent_name ] |> dedupe_keep_order)
+  in
+  agent_names
+  |> List.iter (fun requested_name ->
+       let alias = String.trim requested_name in
+       if alias <> ""
+       then (
+         let agent_name = Coord.resolve_agent_name config alias |> String.trim in
+         if agent_name <> "" then add_alias ~agent_name alias));
+  !order
+  |> List.rev
+  |> List.map (fun agent_name ->
+       let aliases =
+         Hashtbl.find_opt aliases_by_agent agent_name
+         |> Option.value ~default:[ agent_name ]
+         |> List.rev
+         |> dedupe_keep_order
+         |> List.rev
+       in
+       { agent_name; aliases })
+;;
+
 let purge_agent_filesystem_artifacts config agent_names =
   agent_names
-  |> dedupe_keep_order
-  |> List.map (fun agent_name ->
+  |> resolve_agent_purge_targets config
+  |> List.map (fun { agent_name; aliases } ->
        let pending_confirms_removed =
-         Operator_pending_confirm.remove_pending_confirms_by_target config
-           ~target_type:"agent" ~target_id:(Some agent_name)
+         aliases
+         |> List.map (fun alias ->
+              Operator_pending_confirm.remove_pending_confirms_by_target config
+                ~target_type:"agent" ~target_id:(Some alias))
+         |> List.fold_left ( + ) 0
        in
        let heartbeats_stopped = Heartbeat.stop_by_agent ~agent_name in
-       let coord_leave_result = Coord.leave config ~agent_name in
+       let coord_leave_result =
+         Coord.leave ~stop_heartbeats:false config ~agent_name
+       in
+       let aliases_label = String.concat "," aliases in
        Log.Misc.info
-         "[agent_purge] cleanup agent=%s pending_confirms_removed=%d heartbeats_stopped=%d coord_leave=%S"
-         agent_name pending_confirms_removed heartbeats_stopped
+         "[agent_purge] cleanup agent=%s aliases=%s pending_confirms_removed=%d heartbeats_stopped=%d coord_leave=%S"
+         agent_name aliases_label pending_confirms_removed heartbeats_stopped
          coord_leave_result;
-       remove_path_if_exists ~context:"agent_purge"
-         (agent_file_path config agent_name);
-       remove_path_if_exists ~context:"agent_purge"
-         (Metrics_store_eio.agent_metrics_dir config agent_name);
-       Tool_shard.remove_agent_shards agent_name;
-       credential_aliases agent_name
-       |> List.iter (Auth.delete_credential config.base_path);
-       { cleanup_agent_name = agent_name
+       aliases
+       |> List.iter (fun alias ->
+            remove_path_if_exists ~context:"agent_purge"
+              (agent_file_path config alias);
+            remove_path_if_exists ~context:"agent_purge"
+              (Metrics_store_eio.agent_metrics_dir config alias);
+            Tool_shard.remove_agent_shards alias;
+            credential_aliases alias
+            |> List.iter (Auth.delete_credential config.base_path));
+       { agent_name
        ; pending_confirms_removed
        ; heartbeats_stopped
        ; coord_leave_result

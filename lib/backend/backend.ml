@@ -206,24 +206,31 @@ module FileSystem = struct
       Log.Backend.warn "[EioFS] decompress fallback for %s" context;
     decompressed
 
-  (** Get value by key (auto-decompresses ZSTD if detected) *)
+  (** Get value by key (auto-decompresses ZSTD if detected).
+
+      Reads run lock-free: writers in this module go through a sibling
+      [.tmp-atomic] file and [Eio.Path.rename] into place (see [set]
+      below). Because POSIX rename is atomic, a concurrent reader either
+      observes the old inode or the new one — never a partial/truncated
+      payload. Holding [t.mutex] here would only serialise readers
+      against unrelated writers without buying any extra atomicity, and
+      would queue dashboard reads behind every keeper's compress+write
+      cycle. *)
   let get t key =
-    Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
-      match key_to_path t key with
-      | Error e -> Error e
-        | Ok path ->
-          try
-            let content = Eio.Path.load path in
-            (* Compact Protocol v4: Auto-decompress if ZSTD header present *)
-            let decompressed = decompress_with_context ~context:key content in
-            Ok decompressed
-          with
-          | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
-              Error (NotFound key)
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn ->
-              Error (IOError (Printexc.to_string exn))
-    )
+    match key_to_path t key with
+    | Error e -> Error e
+    | Ok path ->
+        try
+          let content = Eio.Path.load path in
+          (* Compact Protocol v4: Auto-decompress if ZSTD header present *)
+          let decompressed = decompress_with_context ~context:key content in
+          Ok decompressed
+        with
+        | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
+            Error (NotFound key)
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+            Error (IOError (Printexc.to_string exn))
 
   (** Set value (auto-compresses with ZSTD if beneficial).
 

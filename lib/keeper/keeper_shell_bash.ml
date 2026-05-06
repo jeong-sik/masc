@@ -13,6 +13,46 @@ module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
 end
 
+let shell_tokenize_simple cmd =
+  let len = String.length cmd in
+  let rec loop i current acc =
+    if i >= len then
+      let acc =
+        if Buffer.length current = 0 then acc
+        else Buffer.contents current :: acc
+      in
+      List.rev acc
+    else
+      match cmd.[i] with
+      | ' ' | '\t' | '\n' | '\r' | ';' | '&' | '|' ->
+          let acc =
+            if Buffer.length current = 0 then acc
+            else Buffer.contents current :: acc
+          in
+          Buffer.clear current;
+          loop (i + 1) current acc
+      | ch ->
+          Buffer.add_char current ch;
+          loop (i + 1) current acc
+  in
+  loop 0 (Buffer.create 32) []
+
+let cmd_contains_gh_pr_create cmd =
+  let tokens =
+    shell_tokenize_simple cmd
+    |> List.map (fun token ->
+           token
+           |> String.trim
+           |> String.lowercase_ascii
+           |> Filename.basename)
+  in
+  let rec loop = function
+    | "gh" :: "pr" :: "create" :: _ -> true
+    | _ :: rest -> loop rest
+    | [] -> false
+  in
+  loop tokens
+
 let handle_keeper_bash
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(turn_sandbox_factory_git : Keeper_sandbox_factory.t option)
@@ -171,6 +211,25 @@ let handle_keeper_bash
            ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
            ~env_snapshot:env_snap
            ()))
+    else if cmd_contains_gh_pr_create cmd
+    then (
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_shell_bash_failures
+        ~labels:[("keeper", meta.name); ("site", "gh_pr_create")]
+        ();
+      Log.Keeper.warn
+        "keeper_bash gh pr create blocked: keeper=%s cmd=%s"
+        meta.name cmd_for_log;
+      Yojson.Safe.to_string
+        (`Assoc
+           [ "ok", `Bool false
+           ; "error", `String "gh_pr_create_requires_keeper_pr_create"
+           ; "reason", `String
+               "keeper_bash cannot bypass the PR creation approval and audit policy"
+           ; "hint", `String
+               "Use keeper_pr_create with draft=true so governance approval and PR lifecycle markers are enforced."
+           ; "cmd", `String cmd_for_log
+           ]))
     else if base_profile = Docker
             && Env_config_keeper.KeeperSandbox.hard_mode ()
             && Keeper_shell_shared.cmd_targets_gh cmd

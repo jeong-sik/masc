@@ -40,6 +40,17 @@ export function summarizeFeedbackState(
   }
 }
 
+function feedbackStateAttrs(summary: FeedbackStateSummary) {
+  return {
+    'data-feedback-state': '',
+    'data-feedback-kind': summary.kind,
+    'data-feedback-compact': summary.compact,
+    'data-feedback-has-icon': summary.hasIcon,
+    'data-feedback-has-action': summary.hasAction,
+    'data-feedback-has-detail': summary.hasDetail,
+  }
+}
+
 interface EmptyStateProps {
   message?: string
   icon?: string
@@ -64,12 +75,7 @@ export function EmptyState({
     <div
       class="flex flex-col items-center justify-center gap-2 text-center ${compact ? 'py-4' : 'py-8'} text-sm text-[var(--color-fg-muted)] ${cx ?? ''}"
       role="status"
-      data-feedback-state
-      data-feedback-kind=${summary.kind}
-      data-feedback-compact=${summary.compact}
-      data-feedback-has-icon=${summary.hasIcon}
-      data-feedback-has-action=${summary.hasAction}
-      data-feedback-has-detail=${summary.hasDetail}
+      ...${feedbackStateAttrs(summary)}
     >
       ${icon
         ? html`
@@ -93,7 +99,7 @@ interface LoadingStateProps {
   children?: ComponentChildren
 }
 
-/** Loading indicator with spin animation */
+/** Loading indicator with a pulsing mono glyph. */
 export function LoadingState({ class: cx, children }: LoadingStateProps) {
   const summary = summarizeFeedbackState('loading', { icon: true })
   return html`
@@ -101,12 +107,7 @@ export function LoadingState({ class: cx, children }: LoadingStateProps) {
       class="loading-state flex flex-col items-center py-8 text-sm ${cx ?? ''}"
       role="status"
       aria-live="polite"
-      data-feedback-state
-      data-feedback-kind=${summary.kind}
-      data-feedback-compact=${summary.compact}
-      data-feedback-has-icon=${summary.hasIcon}
-      data-feedback-has-action=${summary.hasAction}
-      data-feedback-has-detail=${summary.hasDetail}
+      ...${feedbackStateAttrs(summary)}
     >
       <span
         class="mb-3 inline-flex h-6 min-w-6 animate-pulse items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-subtle)] px-1 font-mono text-[10px] text-[var(--color-fg-accent)] opacity-70"
@@ -131,12 +132,7 @@ export function ErrorState({ message, class: cx }: ErrorStateProps) {
     <div
       class="flex items-start gap-2 rounded-[var(--r-0)] border border-[var(--bad-30)] bg-[var(--bad-12)] px-4 py-3 text-sm text-[var(--bad-light)] ${cx ?? ''}"
       role="alert"
-      data-feedback-state
-      data-feedback-kind=${summary.kind}
-      data-feedback-compact=${summary.compact}
-      data-feedback-has-icon=${summary.hasIcon}
-      data-feedback-has-action=${summary.hasAction}
-      data-feedback-has-detail=${summary.hasDetail}
+      ...${feedbackStateAttrs(summary)}
     >
       <span class="mt-0.5 inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--bad-30)] px-1 font-mono text-[10px]" aria-hidden="true" data-feedback-icon>
         ER
@@ -179,12 +175,7 @@ export function ErrorRecoverable({
     <section
       role="alert"
       class="flex flex-col gap-2 rounded-[var(--r-0)] border border-[var(--warn-20)] border-l-[3px] border-l-[var(--color-status-warn)] bg-[var(--warn-soft)] px-4 py-3 ${cx ?? ''}"
-      data-feedback-state
-      data-feedback-kind=${summary.kind}
-      data-feedback-compact=${summary.compact}
-      data-feedback-has-icon=${summary.hasIcon}
-      data-feedback-has-action=${summary.hasAction}
-      data-feedback-has-detail=${summary.hasDetail}
+      ...${feedbackStateAttrs(summary)}
     >
       <div class="flex items-center gap-2">
         <span class="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--warn-20)] px-1 font-mono text-[10px] text-[var(--warn-bright)]" aria-hidden="true" data-feedback-icon>
@@ -241,12 +232,7 @@ export function ErrorFatal({
     <section
       role="alert"
       class="flex flex-col gap-2 rounded-[var(--r-0)] border border-[var(--bad-20)] border-l-[3px] border-l-[var(--color-status-err)] bg-[var(--bad-soft)] px-4 py-3 ${cx ?? ''}"
-      data-feedback-state
-      data-feedback-kind=${summary.kind}
-      data-feedback-compact=${summary.compact}
-      data-feedback-has-icon=${summary.hasIcon}
-      data-feedback-has-action=${summary.hasAction}
-      data-feedback-has-detail=${summary.hasDetail}
+      ...${feedbackStateAttrs(summary)}
     >
       <div class="flex items-center gap-2">
         <span class="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--bad-20)] px-1 font-mono text-[10px] text-[var(--bad-light)]" aria-hidden="true" data-feedback-icon>

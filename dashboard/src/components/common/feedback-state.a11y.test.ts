@@ -112,7 +112,7 @@ describe('ErrorFatal a11y', () => {
     document.body.removeChild(container)
   })
 
-  it('with retry+reload callbacks passes axe', async () => {
+  it('with reload callback passes axe', async () => {
     render(
       html`<${ErrorFatal}
         title="Session expired"

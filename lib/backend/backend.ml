@@ -43,6 +43,51 @@ module FileSystem = struct
     clock: float Eio.Time.clock_ty Eio.Resource.t option;
   }
 
+  (** {2 Mutex contention observers}
+
+      Hooks for write-mutex contention metrics.  Default is a no-op
+      so [masc_backend] does not depend on [Prometheus] at link time;
+      the main library wires Prometheus histograms via
+      [set_mutex_observers] at startup.
+
+      Observers run *outside* the critical section to avoid nested
+      locking against [Prometheus]'s internal Stdlib.Mutex. *)
+
+  let mutex_acquire_observer
+    : (op:string -> seconds:float -> unit) ref =
+    ref (fun ~op:_ ~seconds:_ -> ())
+
+  let mutex_held_observer
+    : (op:string -> seconds:float -> unit) ref =
+    ref (fun ~op:_ ~seconds:_ -> ())
+
+  let set_mutex_observers ~acquire ~held =
+    mutex_acquire_observer := acquire;
+    mutex_held_observer := held
+
+  (** Wrap a write critical section with acquire/held observers.
+
+      Acquire latency is measured as [now - call_start]; held latency
+      as [now - mutex_acquired].  Observers run after the lock is
+      released, so they cannot extend the critical section even if
+      the underlying Prometheus implementation contends on its own
+      mutex. *)
+  let with_observed_mutex ~op t f =
+    let started = Time_compat.now () in
+    let acquire_seconds = ref 0.0 in
+    let held_seconds = ref 0.0 in
+    let result =
+      Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
+        let acquired = Time_compat.now () in
+        acquire_seconds := acquired -. started;
+        let value = f () in
+        held_seconds := Time_compat.now () -. acquired;
+        value)
+    in
+    !mutex_acquire_observer ~op ~seconds:!acquire_seconds;
+    !mutex_held_observer ~op ~seconds:!held_seconds;
+    result
+
   (** Create a new FileSystem backend *)
   let create ~fs ?clock config =
     let path = Eio.Path.(fs / config.base_path) in
@@ -239,7 +284,7 @@ module FileSystem = struct
       The mutex inside [t] already serialises writers against each
       other; this change adds atomicity against concurrent readers. *)
   let set t key value =
-    Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
+    with_observed_mutex ~op:"set" t (fun () ->
       match validate_key key with
       | Error e -> Error e
       | Ok safe_key ->
@@ -268,7 +313,7 @@ module FileSystem = struct
 
   (** Delete key *)
   let delete t key =
-    Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
+    with_observed_mutex ~op:"delete" t (fun () ->
       match key_to_path t key with
       | Error e -> Error e
       | Ok path ->
@@ -481,7 +526,7 @@ module FileSystem = struct
   let set_if_not_exists t key value =
     (* Compact Protocol v4: Compress before saving *)
     let compressed = _compress value in
-    Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
+    with_observed_mutex ~op:"set_if_not_exists" t (fun () ->
       match key_to_path t key with
       | Error e -> Error e
       | Ok path ->

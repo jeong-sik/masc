@@ -39,7 +39,7 @@ POLL_INTERVAL_SEC="${POLL_INTERVAL_SEC:-10}"
 LIFECYCLE_MUTATION_MODE="split"
 REQUIRED_TOOLS_LEGACY="${REQUIRED_TOOLS:-}"
 CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_bash,keeper_pr_create}}"
-REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_shell,keeper_pr_review_comment}}"
+REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_pr_review_comment}}"
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 MCP_TOKEN="${MASC_MCP_TOKEN:-}"
 MCP_CLIENT_NAME="${MCP_CLIENT_NAME:-keeper-docker-pr-lifecycle-reprobe}"
@@ -898,7 +898,8 @@ Safety rules:
 
 This prompt is sent with review-phase masc_keeper_msg.required_tools so the
 runtime records tool_surface_mismatch or missing_required_tool_use when
-keeper_shell/keeper_pr_review_comment are not visible or not used.
+keeper_pr_review_comment is not visible or not used. keeper_shell is read-only
+inspection and intentionally not part of the required-tool contract.
 EOF
 }
 

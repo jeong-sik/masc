@@ -1147,14 +1147,14 @@ let test_keeper_required_tool_contracts () =
           {|CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_bash,keeper_pr_create}}"|}
      && file_contains_pattern
           "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          {|REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_shell,keeper_pr_review_comment}}"|});
+          {|REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_pr_review_comment}}"|});
   check bool "runbook documents docker PR lifecycle split phases" true
     (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
        "The create phase"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
           "requires `keeper_bash` and `keeper_pr_create`"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-          "the review phase requires `keeper_shell` and");
+          "the review phase requires `keeper_pr_review_comment`");
   check bool "docker PR lifecycle prompt accepts brokered route proof" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"

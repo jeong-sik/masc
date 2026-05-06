@@ -46,12 +46,13 @@ status records pending requests as lost; the other two log a transient
 notice and the next poll iteration retries.
 When mutation is enabled, the harness sends two sequential phases. The create phase
 requires `keeper_bash` and `keeper_pr_create`. After all create requests
-reach terminal status, the review phase requires `keeper_shell` and
-`keeper_pr_review_comment`. This avoids the old single-turn shape where one
-keeper could wait on another keeper's missing PR until the Agent.run timeout.
-The review prompt reserves `keeper_shell` for read-only GitHub inspection and
-instructs keepers to report `target_pr_missing` after one failed branch lookup
-instead of polling in a loop.
+reach terminal status, the review phase requires `keeper_pr_review_comment`.
+This avoids the old single-turn shape where one keeper could wait on another
+keeper's missing PR until the Agent.run timeout. The review prompt reserves
+`keeper_shell` for read-only GitHub inspection, but does not put it in
+`required_tools` because passive read-only tools cannot satisfy the runtime
+required-tool predicate. Keepers are instructed to report `target_pr_missing`
+after one failed branch lookup instead of polling in a loop.
 Keepers must create/use the exact run-scoped branch
 `keeper/<keeper>-docker-pr-proof-<run_id>` and proof file
 `docs/runtime-proof/keepers/<keeper>-<run_id>.md`; older proof branches or

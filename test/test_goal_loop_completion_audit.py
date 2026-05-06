@@ -247,6 +247,61 @@ def synthetic_strict_row_corpus(row_count: int = 206) -> dict[str, object]:
     }
 
 
+def blocked_verify_pipeline() -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "status": "BLOCKED",
+        "gates_total": 3,
+        "gates_passed": 1,
+        "gates_failed": 0,
+        "gates_blocked": 1,
+        "gates_skipped": 1,
+        "gates": [
+            {
+                "gate_id": "unit_tests",
+                "category": "unit_tests",
+                "status": "PASS",
+            },
+            {
+                "gate_id": "tla_prompt_spec_tierrouting",
+                "category": "tla_check",
+                "status": "BLOCKED",
+                "reason": "prompt_tla_spec_missing",
+            },
+            {
+                "gate_id": "post_act_log_contract",
+                "category": "log_verification",
+                "status": "SKIPPED",
+                "reason": "missing_post_act_logs",
+            },
+        ],
+    }
+
+
+def passing_verify_pipeline() -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "status": "PASS",
+        "gates_total": 2,
+        "gates_passed": 2,
+        "gates_failed": 0,
+        "gates_blocked": 0,
+        "gates_skipped": 0,
+        "gates": [
+            {
+                "gate_id": "unit_tests",
+                "category": "unit_tests",
+                "status": "PASS",
+            },
+            {
+                "gate_id": "keeper_turn_success_rate_healthy",
+                "category": "metric_verification",
+                "status": "PASS",
+            },
+        ],
+    }
+
+
 class GoalLoopCompletionAuditTest(unittest.TestCase):
     def test_string_list_strips_and_rejects_empty_entries(self) -> None:
         self.assertEqual(
@@ -384,6 +439,43 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
             by_id["post_act_verify_complete"].evidence["evidence_kind"],
             "fixture",
         )
+
+    def test_completion_audit_blocks_partial_verify_pipeline(self) -> None:
+        audit = goal_loop_completion_audit.build_completion_audit(
+            complete_status(),
+            verify_pipeline=blocked_verify_pipeline(),
+        )
+
+        self.assertEqual(audit.status, "BLOCKED")
+        self.assertIn("verify_pipeline_complete", audit.blockers)
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        evidence = by_id["verify_pipeline_complete"].evidence
+        self.assertEqual(evidence["pipeline_status"], "BLOCKED")
+        self.assertEqual(
+            evidence["non_pass_gate_ids"],
+            ["tla_prompt_spec_tierrouting", "post_act_log_contract"],
+        )
+
+    def test_completion_audit_accepts_passing_verify_pipeline(self) -> None:
+        audit = goal_loop_completion_audit.build_completion_audit(
+            complete_status(),
+            verify_pipeline=passing_verify_pipeline(),
+        )
+
+        self.assertEqual(audit.status, "COMPLETE")
+        self.assertNotIn("verify_pipeline_complete", audit.blockers)
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        self.assertEqual(by_id["verify_pipeline_complete"].status, "PASS")
+
+    def test_completion_audit_consumes_embedded_verify_pipeline(self) -> None:
+        status = complete_status()
+        verify_summary = status["phases"]["verify"]["summary"]
+        verify_summary["verify_pipeline"] = blocked_verify_pipeline()
+
+        audit = goal_loop_completion_audit.build_completion_audit(status)
+
+        self.assertEqual(audit.status, "BLOCKED")
+        self.assertIn("verify_pipeline_complete", audit.blockers)
 
     def test_completion_audit_accepts_structured_id_triage_manifest(self) -> None:
         triage = json.loads(TRIAGE_FIXTURE.read_text(encoding="utf-8"))
@@ -1375,9 +1467,14 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw_dir:
             status_path = Path(raw_dir) / "status.json"
             corpus_path = Path(raw_dir) / "strict-row-corpus.json"
+            pipeline_path = Path(raw_dir) / "verify-pipeline.json"
             status_path.write_text(json.dumps(blocked_status()), encoding="utf-8")
             corpus_path.write_text(
                 json.dumps(synthetic_strict_row_corpus()),
+                encoding="utf-8",
+            )
+            pipeline_path.write_text(
+                json.dumps(blocked_verify_pipeline()),
                 encoding="utf-8",
             )
             result = subprocess.run(
@@ -1395,6 +1492,8 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
                     str(PROMPT_CHECKLIST_FIXTURE),
                     "--source-row-candidate-inventory",
                     str(SOURCE_ROW_CANDIDATE_INVENTORY_FIXTURE),
+                    "--verify-pipeline",
+                    str(pipeline_path),
                     "--require-complete",
                 ],
                 text=True,

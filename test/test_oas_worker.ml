@@ -255,6 +255,8 @@ let with_cascade_attempt_liveness mode f =
 let flush_cascade_actor () =
   ignore (Oas_worker_cascade.cascade_metrics_json () : Yojson.Safe.t)
 
+let with_liveness_off f = with_cascade_attempt_liveness "off" f
+
 let with_temp_masc_base_path prefix f =
   let base = temp_dir prefix in
   let previous = Sys.getenv_opt "MASC_BASE_PATH" in
@@ -1312,6 +1314,11 @@ let test_run_named_per_provider_timeout_uses_clock_fallback_and_exempts_last_pro
          first_url
          second_url)
     @@ fun () ->
+    (* Disable liveness observer so [outer_wall_for_attempt] passes
+       per_provider_timeout_s through unchanged.  With Observe/Enforce
+       the budget wall (e.g. 180 s) clamps the 0.05 s test timeout
+       upward, letting the first provider succeed instead of timing out. *)
+    with_liveness_off @@ fun () ->
     match
       Oas_worker_named.run_named
         ~cascade_name:"timeout_probe"
@@ -4971,6 +4978,27 @@ let test_run_named_circuit_breaker_skips_open_provider () =
 (* ================================================================ *)
 (* Runner                                                           *)
 (* ================================================================ *)
+
+(* Hermetic isolation for direct-binary invocations.
+   When run via [dune test], the stanza's [setenv] directives supply
+   MASC_BASE_PATH / MASC_BASE_PATH_INPUT.  When the compiled binary is
+   executed directly (./_build/default/test/test_oas_worker.exe) those
+   env vars are absent, so tests would fall through to the developer's
+   live ~/.masc config and trigger ~40/150 failures.
+
+   Set a safe /tmp base when neither variable is present; individual
+   tests that need a specific config still use [with_temp_masc_base_path]
+   / [with_temp_masc_config] to create their own isolated trees. *)
+let () =
+  (match Sys.getenv_opt "MASC_BASE_PATH" |> Option.map String.trim with
+   | None | Some "" ->
+       let base = temp_dir "oas_worker_runner" in
+       let config_dir = Filename.concat base ".masc/config" in
+       mkdir_p config_dir;
+       Unix.putenv "MASC_BASE_PATH" base;
+       Unix.putenv "MASC_BASE_PATH_INPUT" base;
+       Unix.putenv "MASC_CONFIG_DIR" config_dir
+   | Some _ -> ())
 
 let () =
   configure_direct_test_environment ();

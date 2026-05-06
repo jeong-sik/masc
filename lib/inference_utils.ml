@@ -42,10 +42,16 @@ let usage_of_response (resp : Oas_response.api_response) : Agent_sdk.Types.api_u
 
 (** Measure wall-clock latency of a thunk in milliseconds.
     Use at call sites that need per-call timing (keeper tool loops, etc.). *)
+let elapsed_duration_ms elapsed_s =
+  let elapsed_ms = elapsed_s *. 1000.0 in
+  if (not (Float.is_finite elapsed_ms)) || Float.compare elapsed_ms 0.0 <= 0
+  then 0
+  else max 1 (int_of_float elapsed_ms)
+
 let timed (f : unit -> 'a) : 'a * int =
   let t0 = Time_compat.now () in
   let result = f () in
-  let ms = int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
+  let ms = elapsed_duration_ms (Time_compat.now () -. t0) in
   (result, ms)
 
 (* ================================================================ *)

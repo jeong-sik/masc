@@ -20,6 +20,11 @@ val zero_usage : Agent_sdk.Types.api_usage
 (** Extract usage from an api_response, defaulting to {!zero_usage}. *)
 val usage_of_response : Oas_response.api_response -> Agent_sdk.Types.api_usage
 
+(** Convert elapsed seconds to integer milliseconds for telemetry. Positive
+    sub-1ms intervals are rounded up to 1; non-positive or non-finite
+    intervals return 0. *)
+val elapsed_duration_ms : float -> int
+
 (** Measure wall-clock latency of a thunk in milliseconds. *)
 val timed : (unit -> 'a) -> 'a * int
 

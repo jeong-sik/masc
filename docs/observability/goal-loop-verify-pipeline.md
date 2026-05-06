@@ -17,6 +17,12 @@ gate evidence records those snapshot keys separately from any underlying
 therefore query `GOAL_LOOP_METRICS_JSON` with `jq` instead of naming a
 non-repo `prometheus` CLI.
 
+`scripts/goal_loop_metrics_snapshot.py` converts a Prometheus text scrape into
+that JSON shape. It derives the keeper turn success rate, regression counters,
+admission queue values, and dashboard latency p99 from `/metrics` text, while
+requiring explicit `--set key=value` overrides for non-Prometheus evidence such
+as Orient recheck totals or recovery execution counts.
+
 Covered gate groups:
 
 - `unit_tests`: `dune runtest test/`

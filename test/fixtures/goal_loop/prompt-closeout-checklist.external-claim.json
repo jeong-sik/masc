@@ -287,11 +287,13 @@
       "artifact_refs": [
         "scripts/verify_goal_loop_logs.py",
         "scripts/goal_loop_verify_pipeline.py",
+        "scripts/goal_loop_metrics_snapshot.py",
         "scripts/goal_loop_completion_audit.py",
         "test/fixtures/goal_loop/live-post-act-verify.external-claim.json",
         "test/fixtures/goal_loop/verify-pipeline.current.external-claim.json",
         "docs/observability/goal-loop-verify-pipeline.md",
         "test/test_goal_loop_verify_pipeline.py",
+        "test/test_goal_loop_metrics_snapshot.py",
         "test/test_goal_loop_completion_audit.py"
       ],
       "status": "PARTIAL",

@@ -298,6 +298,15 @@ let test_bg_task_sidecar_metric_registered () =
     (text_has_literal text
        ("# TYPE " ^ Prometheus.metric_bg_task_sidecar_failures ^ " counter"))
 
+let test_workspace_route_metric_registered () =
+  let text = Prometheus.to_prometheus_text () in
+  check bool "has workspace route failure HELP" true
+    (text_has_literal text
+       ("# HELP " ^ Prometheus.metric_workspace_route_failures ^ " "));
+  check bool "has workspace route failure TYPE" true
+    (text_has_literal text
+       ("# TYPE " ^ Prometheus.metric_workspace_route_failures ^ " counter"))
+
 let test_histogram_exported_as_summary () =
   let name = "test_hist_export_fmt" in
   Prometheus.register_histogram ~name ~help:"export format test" ();
@@ -473,6 +482,8 @@ let () =
         test_distributed_lock_metric_registered;
       test_case "bg task sidecar metric registered" `Quick
         test_bg_task_sidecar_metric_registered;
+      test_case "workspace route metric registered" `Quick
+        test_workspace_route_metric_registered;
       test_case "histogram exported as summary with _sum/_count"
         `Quick test_histogram_exported_as_summary;
     ];

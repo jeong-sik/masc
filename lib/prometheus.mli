@@ -441,6 +441,7 @@ val metric_after_turn_telemetry_zero_latency : string
 val metric_tasks : string
 val metric_errors : string
 val metric_error_events : string
+val metric_workspace_route_failures : string
 val metric_active_agents : string
 val metric_pending_tasks : string
 val metric_uptime_seconds : string

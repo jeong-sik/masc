@@ -71,6 +71,16 @@ let set_task_created_at_by_title config ~title ~created_at =
   if not !seen then failwith (Printf.sprintf "task not found: %s" title);
   Coord.write_backlog config { backlog with tasks; version = backlog.version + 1 }
 
+let transition_task_exn ?notes config ~agent_name ~task_id ~action () =
+  match
+    Coord.transition_task_r config ~agent_name ~task_id ~action ?notes ()
+  with
+  | Ok _ -> ()
+  | Error err ->
+      fail
+        (Printf.sprintf "transition %s failed: %s" task_id
+           (Masc_domain.masc_error_to_string err))
+
 let strict_contract ?(verify_gate_evidence = []) () : Masc_domain.task_contract =
   {
     strict = true;
@@ -616,6 +626,52 @@ let test_claim_does_not_cross_goal_when_persisted_goal_scope_empty () =
     check bool "does not claim product fallback" false
       (contains_substring message "fallback to all tasks"))
 
+let test_explicit_empty_goal_scope_fallback_override_still_claims_cross_goal () =
+  with_room (fun config ->
+    let scoped_goal, _ =
+      match Goal_store.upsert_goal config ~title:"Scoped keeper goal" () with
+      | Ok payload -> payload
+      | Error msg -> fail msg
+    in
+    let product_goal, _ =
+      match Goal_store.upsert_goal config ~title:"Product goal" () with
+      | Ok payload -> payload
+      | Error msg -> fail msg
+    in
+    let meta = make_goal_scoped_meta [ scoped_goal.id ] in
+    let _ =
+      Coord_task.add_task ~goal_id:product_goal.id config
+        ~title:"Product fallback task" ~priority:1 ~description:"desc"
+    in
+    let scope =
+      Keeper_runtime_contract.resolve_claim_goal_scope
+        ~allow_empty_goal_scope_fallback:true ~config ~meta ()
+    in
+    check string "claim scope fallback mode"
+      "empty_goal_scope_fallback_all_tasks" scope.mode;
+    check (list string) "effective goal ids cleared" [] scope.effective_goal_ids;
+    check bool "fallback reason present" true
+      (Option.is_some scope.fallback_reason);
+    match
+      Coord.claim_next_r config ~agent_name:meta.agent_name
+        ~agent_tool_names:(Keeper_tool_policy.keeper_allowed_tool_names meta)
+        ~task_filter:scope.task_filter ()
+    with
+    | Coord.Claim_next_claimed { task_id; _ } ->
+        let task =
+          Coord.get_tasks_raw config
+          |> List.find_opt (fun (task : Masc_domain.task) ->
+               String.equal task.id task_id)
+        in
+        (match task with
+         | Some task ->
+             check string "fallback claimed product task" "Product fallback task"
+               task.title;
+             check string "fallback claimed product goal" product_goal.id
+               (Option.value task.goal_id ~default:"")
+         | None -> fail "claimed task not found")
+    | _ -> fail "expected explicit fallback override to claim product task")
+
 let test_claim_does_not_cross_goal_when_scoped_task_requires_missing_tool () =
   with_room (fun config ->
     let scoped_goal, _ =
@@ -645,6 +701,64 @@ let test_claim_does_not_cross_goal_when_scoped_task_requires_missing_tool () =
     let _ =
       Coord_task.add_task ~goal_id:product_goal.id config
         ~title:"Product fallback task" ~priority:2 ~description:"desc"
+    in
+    let result = call_tool config meta "keeper_task_claim" (`Assoc []) in
+    let json = parse_json result in
+    let message = Yojson.Safe.Util.(json |> member "result" |> to_string) in
+    check_no_task_claimed config meta;
+    check_active_goal_scope_no_fallback json ~goal_id:scoped_goal.id;
+    check bool "message keeps active scope" true
+      (contains_substring message "within active_goal_ids");
+    check bool "does not claim product fallback" false
+      (contains_substring message "fallback to all tasks"))
+
+let test_claim_does_not_cross_goal_when_all_scoped_tasks_unavailable () =
+  with_room (fun config ->
+    let scoped_goal, _ =
+      match Goal_store.upsert_goal config ~title:"Scoped keeper goal" () with
+      | Ok payload -> payload
+      | Error msg -> fail msg
+    in
+    let product_goal, _ =
+      match Goal_store.upsert_goal config ~title:"Product goal" () with
+      | Ok payload -> payload
+      | Error msg -> fail msg
+    in
+    let meta =
+      { (make_meta_with_tools [ "keeper_task_claim"; "keeper_tasks_list" ]) with
+        active_goal_ids = [ scoped_goal.id ];
+      }
+    in
+    let _ =
+      Coord_task.add_task ~goal_id:scoped_goal.id config
+        ~title:"Scoped already in progress" ~priority:1
+        ~description:"owned by another worker"
+    in
+    let in_progress_task = task_by_title config "Scoped already in progress" in
+    ignore
+      (Coord.claim_task config ~agent_name:"other-agent"
+         ~task_id:in_progress_task.id);
+    transition_task_exn config ~agent_name:"other-agent"
+      ~task_id:in_progress_task.id ~action:Masc_domain.Start ();
+    let _ =
+      Coord_task.add_task ~goal_id:scoped_goal.id config
+        ~title:"Scoped already done" ~priority:2 ~description:"terminal"
+    in
+    let done_task = task_by_title config "Scoped already done" in
+    ignore
+      (Coord.claim_task config ~agent_name:"other-agent" ~task_id:done_task.id);
+    transition_task_exn config ~agent_name:"other-agent"
+      ~task_id:done_task.id ~action:Masc_domain.Done_action ~notes:"done" ();
+    let _ =
+      Coord_task.add_task
+        ~contract:(contract_requiring_tools [ "keeper_bash" ])
+        ~goal_id:scoped_goal.id config
+        ~title:"Scoped task needing bash" ~priority:3
+        ~description:"requires unavailable shell access"
+    in
+    let _ =
+      Coord_task.add_task ~goal_id:product_goal.id config
+        ~title:"Product fallback task" ~priority:1 ~description:"desc"
     in
     let result = call_tool config meta "keeper_task_claim" (`Assoc []) in
     let json = parse_json result in
@@ -1213,9 +1327,16 @@ let () =
       test_case "claim does not cross-goal when persisted goal scope is empty"
         `Quick
         test_claim_does_not_cross_goal_when_persisted_goal_scope_empty;
+      test_case
+        "explicit empty goal scope fallback override still claims cross-goal"
+        `Quick
+        test_explicit_empty_goal_scope_fallback_override_still_claims_cross_goal;
       test_case "claim does not cross-goal when scoped task requires missing tool"
         `Quick
         test_claim_does_not_cross_goal_when_scoped_task_requires_missing_tool;
+      test_case "claim does not cross-goal when all scoped tasks unavailable"
+        `Quick
+        test_claim_does_not_cross_goal_when_all_scoped_tasks_unavailable;
       test_case
         "claim does not cross-goal when scoped task is verification blocked"
         `Quick

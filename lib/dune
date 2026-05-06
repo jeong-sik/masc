@@ -234,6 +234,7 @@
    cohttp
    cohttp-eio
    agent_sdk
+   agent_sdk.base
    agent_sdk.llm_provider
    masc_mcp.oas_compat
 

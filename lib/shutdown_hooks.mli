@@ -32,7 +32,13 @@ val run_all : unit -> unit
        (Eio.Cancel.Cancelled re-raised; any other exception is
        logged at warn and swallowed so a partial flush failure
        cannot block shutdown of the rest of the chain).
-    6. Clear [Agent_registry_eio] session caches.
+    5. Clear [Agent_registry_eio] session caches.
+    6. Best-effort purge of transient files under [<MASC_BASE_PATH>/.masc/tmp/].
+       Bounded by an inspect-budget (500 files) and a wall-time
+       budget (250ms) so the synchronous Eio shutdown phase cannot
+       overrun the configured force timeout. Per-file errors are
+       logged and ignored; durable JSONL state and lock files
+       outside [tmp/] are never touched.
 
     Each step's elapsed time and (where applicable) the count of
     affected resources are logged. The function never raises

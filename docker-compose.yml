@@ -32,7 +32,12 @@ services:
     container_name: masc-mcp
     restart: unless-stopped
     stop_signal: SIGTERM
-    stop_grace_period: 60s
+    # Give the server's force-exit watchdog (MASC_SHUTDOWN_FORCE_TIMEOUT
+    # below) a few seconds of headroom before Docker sends SIGKILL.
+    # Setting these equal would race: the watchdog and Docker would
+    # both fire at ~60s and the process could be killed mid-final-flush,
+    # losing the last log lines and post-shutdown hook telemetry.
+    stop_grace_period: 75s
     ports:
       - "8080:8080"
     environment:

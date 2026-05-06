@@ -37,12 +37,16 @@ Environment=MASC_SHUTDOWN_FORCE_TIMEOUT=60
 
 ExecStart=/opt/masc-mcp/bin/masc-mcp --http --port 8080 --base-path /var/lib/masc-mcp
 
-# Graceful shutdown contract — TimeoutStopSec must be >= the server force
-# timeout and match docker-compose stop_grace_period. SIGTERM triggers the
-# 4-phase shutdown (NOTIFY -> HOOKS -> BOARD -> CANCEL).
+# Graceful shutdown contract — TimeoutStopSec is set a few seconds
+# larger than the server's force timeout (MASC_SHUTDOWN_FORCE_TIMEOUT=60)
+# and matches docker-compose stop_grace_period. The headroom lets the
+# in-process force-exit watchdog flush the last log line and post-
+# shutdown hook telemetry before systemd escalates to SIGKILL — without
+# it both timers race at ~60s and final state is lost.
+# SIGTERM triggers the 4-phase shutdown (NOTIFY -> HOOKS -> BOARD -> CANCEL).
 KillSignal=SIGTERM
 KillMode=mixed
-TimeoutStopSec=60s
+TimeoutStopSec=75s
 
 # Mirrors launchd KeepAlive.SuccessfulExit=false: restart only on failure,
 # never on a clean exit (prevents tight loops if the binary chooses to

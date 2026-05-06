@@ -97,13 +97,31 @@ while IFS= read -r cid; do
   [ -z "$cid" ] && continue
   inspected=$((inspected + 1))
   finished=$(docker inspect --format '{{.State.FinishedAt}}' "$cid" 2>/dev/null || echo "")
-  name=$(docker inspect --format '{{.Name}}' "$cid" 2>/dev/null | sed 's|^/||')
+  # Make the name lookup best-effort like [finished]: if the container
+  # disappears between listing and inspect (or inspect errors transiently),
+  # the script must not exit under [set -e]. Default to the container ID
+  # so log lines remain attributable.
+  name=$(docker inspect --format '{{.Name}}' "$cid" 2>/dev/null | sed 's|^/||' || echo "")
+  if [ -z "$name" ]; then name="$cid"; fi
   if [ -z "$finished" ] || [ "$finished" = "0001-01-01T00:00:00Z" ]; then
     # never started cleanly — treat as old
     age_hours=999
   else
+    # Trim Docker RFC3339Nano fractional seconds to 6 digits so
+    # python3 datetime.fromisoformat accepts the value on platforms
+    # without GNU [date -d]. Docker emits up to 9 fractional digits
+    # (e.g. ...123456789Z) which the stdlib parser rejected, leaving
+    # finished_epoch=0 and silently skipping removals on macOS.
+    finished_iso="$finished"
     finished_epoch=$(date -u -d "$finished" +%s 2>/dev/null \
-      || python3 -c "import datetime,sys; print(int(datetime.datetime.fromisoformat(sys.argv[1].replace('Z','+00:00')).timestamp()))" "$finished" 2>/dev/null \
+      || python3 -c "
+import datetime, re, sys
+raw = sys.argv[1].replace('Z', '+00:00')
+m = re.match(r'(.*?\\.\\d{0,6})\\d*([+-].*)$', raw)
+if m:
+    raw = m.group(1) + m.group(2)
+print(int(datetime.datetime.fromisoformat(raw).timestamp()))
+" "$finished_iso" 2>/dev/null \
       || echo 0)
     if [ "$finished_epoch" -eq 0 ]; then
       echo "  skip $cid ($name): could not parse FinishedAt=$finished"

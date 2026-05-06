@@ -52,6 +52,7 @@ describe('SyncConflict a11y', () => {
     expect(container.textContent).toContain('config.timeout')
     expect(container.textContent).toContain('로컬')
     expect(container.textContent).toContain('원격')
+    expect(container.textContent).toContain('남음')
   })
 
   it('has region role', () => {
@@ -62,7 +63,29 @@ describe('SyncConflict a11y', () => {
       />`,
       container,
     )
-    expect(container.querySelector('[role="region"]')).not.toBeNull()
+    const region = container.querySelector('[role="region"]') as HTMLElement
+    expect(region).not.toBeNull()
+    expect(region.getAttribute('aria-describedby')).toMatch(/sync-conflict-summary/)
+    const summary = document.getElementById(region.getAttribute('aria-describedby') ?? '')
+    expect(summary?.getAttribute('aria-label')).toBeNull()
+    expect(summary?.textContent).toContain('전체')
+    expect(summary?.textContent).toContain('남음')
+    expect(region.dataset.syncConflictStatus).toBe('partial')
+    expect(region.dataset.syncConflictActionRequired).toBe('true')
+  })
+
+  it('labels row resolution state for assistive review', () => {
+    render(
+      html`<${SyncConflict}
+        conflicts=${makeConflicts()}
+        onResolve=${() => {}}
+      />`,
+      container,
+    )
+    const resolved = container.querySelector('[data-sync-conflict-field="config.timeout"]')
+    const unresolved = container.querySelector('[data-sync-conflict-field="config.retry"]')
+    expect(resolved?.getAttribute('aria-label')).toContain('해결됨')
+    expect(unresolved?.getAttribute('aria-label')).toContain('미해결')
   })
 
   it('has merge apply button', () => {
@@ -75,5 +98,16 @@ describe('SyncConflict a11y', () => {
     )
     const btn = container.querySelector('button[aria-label="병합 적용"]')
     expect(btn).not.toBeNull()
+  })
+
+  it('announces empty conflicts as a status', () => {
+    render(
+      html`<${SyncConflict} conflicts=${[]} onResolve=${() => {}} />`,
+      container,
+    )
+    const status = container.querySelector('[role="status"]')
+    const btn = container.querySelector('button[aria-label="병합 적용"]') as HTMLButtonElement
+    expect(status?.textContent).toContain('충돌 없음')
+    expect(btn.disabled).toBe(true)
   })
 })

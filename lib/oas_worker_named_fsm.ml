@@ -517,3 +517,11 @@ let sdk_error_is_max_turns_exceeded (err : Agent_sdk.Error.sdk_error) : bool =
       | Agent_sdk.Error.Internal message ->
           message_looks_like_cli_wrapped_max_turns message
       | _ -> false)
+
+let sdk_error_cascade_fallback_class (err : Agent_sdk.Error.sdk_error) :
+    string option =
+  if sdk_error_is_hard_quota err then Some "hard_quota"
+  else if sdk_error_is_max_turns_exceeded err then Some "max_turns"
+  else if sdk_error_is_resumable_cli_session err then
+    Some "resumable_cli_session"
+  else None

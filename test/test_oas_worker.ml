@@ -978,6 +978,22 @@ let test_sdk_error_is_resumable_cli_session_detects_raw_kimi_hint () =
   Alcotest.(check bool) "raw Kimi resume hint detected" true
     (Oas_worker_named.sdk_error_is_resumable_cli_session err)
 
+let test_fallback_class_labels_resumable_cli_session () =
+  let err =
+    Oas_worker_named.sdk_error_of_masc_internal_error
+      (Oas_worker_named.Resumable_cli_session
+         {
+           cascade_name = internal_cascade_name "tier_fast";
+           detail =
+             "kimi_cli reported a resumable CLI session (exit 1). \
+              Resumable session available via -r.";
+           exit_code = Some 1;
+         })
+  in
+  Alcotest.(check (option string))
+    "resumable session fallback class" (Some "resumable_cli_session")
+    (Oas_worker_named.sdk_error_cascade_fallback_class err)
+
 let make_openai_compat_provider_cfg ?(model_id = "mock-model")
     ?(base_url = "http://127.0.0.1:18080/v1")
     ?(request_path = "/chat/completions") ?(api_key = "") () =
@@ -4688,6 +4704,8 @@ let () =
         test_sdk_error_is_resumable_cli_session_detects_structured_error;
       Alcotest.test_case "sdk_error_is_resumable_cli_session detects raw Kimi hint" `Quick
         test_sdk_error_is_resumable_cli_session_detects_raw_kimi_hint;
+      Alcotest.test_case "fallback class labels resumable CLI session" `Quick
+        test_fallback_class_labels_resumable_cli_session;
       Alcotest.test_case "Moonshot auth errors include configured env hint" `Quick
         test_enrich_sdk_error_for_moonshot_auth_includes_env_hint;
       Alcotest.test_case "OpenAI-compatible 404 errors include endpoint hint" `Quick

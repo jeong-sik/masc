@@ -942,10 +942,9 @@ let run_named
                  which masked that this was a graceful turn-budget exit
                  (33/day claude_code, 2.5x growth). *)
               let class_label =
-                if sdk_error_is_hard_quota sdk_err then "[hard_quota] "
-                else if sdk_error_is_max_turns_exceeded sdk_err
-                then "[max_turns] "
-                else ""
+                match sdk_error_cascade_fallback_class sdk_err with
+                | Some class_name -> Printf.sprintf "[%s] " class_name
+                | None -> ""
               in
               (* #10982: [max_turns] failures cost ~$2.74 mean per
                  fallback (24h sample: 11 events / $30.20 sunk).  The

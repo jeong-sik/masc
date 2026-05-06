@@ -1421,21 +1421,25 @@ let test_run_named_skips_cooldown_primary_and_falls_back () =
       | Ok providers -> providers
       | Error err -> Alcotest.fail err
     in
-    (match resolved with
-     | [ primary; fallback ] ->
+    let primary_health_key, fallback_health_key =
+      match resolved with
+      | [ primary; fallback ] ->
          Alcotest.(check string) "primary model id"
            primary_key primary.Llm_provider.Provider_config.model_id;
          Alcotest.(check string) "fallback model id"
            fallback_key fallback.model_id;
          Alcotest.(check string) "primary base url" primary_url primary.base_url;
-         Alcotest.(check string) "fallback base url" fallback_url fallback.base_url
-     | providers ->
+         Alcotest.(check string) "fallback base url" fallback_url fallback.base_url;
+         ( Masc_mcp.Provider_adapter.provider_health_key_of_config primary,
+           Masc_mcp.Provider_adapter.provider_health_key_of_config fallback )
+      | providers ->
          Alcotest.failf "expected 2 resolved providers, got %d"
-           (List.length providers));
+           (List.length providers)
+    in
     for _ = 1 to Masc_mcp.Cascade_health_tracker.cooldown_threshold do
       Masc_mcp.Cascade_health_tracker.record_failure
         Masc_mcp.Cascade_health_tracker.global
-        ~provider_key:primary_key
+        ~provider_key:primary_health_key
         ()
     done;
     reset_primary_calls ();
@@ -1443,7 +1447,7 @@ let test_run_named_skips_cooldown_primary_and_falls_back () =
     (match
        Masc_mcp.Cascade_health_tracker.check_circuit_breaker
          Masc_mcp.Cascade_health_tracker.global
-         ~provider_key:primary_key
+         ~provider_key:primary_health_key
      with
      | Ok () -> Alcotest.fail "primary provider should be OPEN before run_named"
      | Error _ -> ());
@@ -1472,7 +1476,7 @@ let test_run_named_skips_cooldown_primary_and_falls_back () =
         (match
            Masc_mcp.Cascade_health_tracker.provider_info
              Masc_mcp.Cascade_health_tracker.global
-             ~provider_key:fallback_key
+             ~provider_key:fallback_health_key
          with
          | None -> Alcotest.fail "fallback provider should have health info"
          | Some info ->
@@ -1584,6 +1588,45 @@ let test_run_named_accept_rejected_does_not_replay_rejected_checkpoint () =
         Eio.Switch.fail sw Exit
     | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
   with Exit -> ()
+
+let test_zero_turn_attempt_preserves_checkpoint () =
+  let initial_messages =
+    [
+      {
+        Agent_sdk.Types.role = Agent_sdk.Types.User;
+        content = [ Agent_sdk.Types.Text "pre-start recovery seed" ];
+        name = None;
+        tool_call_id = None;
+        metadata = [];
+      };
+    ]
+  in
+  let config =
+    {
+      Agent_sdk.Types.default_config with
+      name = "zero-turn-agent";
+      model = "mock-model";
+      system_prompt = Some "system";
+      initial_messages;
+    }
+  in
+  let agent = Agent_sdk.Agent.create ~net:(require_test_net ()) ~config () in
+  let agent_ref = ref None in
+  Fun.protect
+    ~finally:(fun () -> Agent_sdk.Agent.close agent)
+    (fun () ->
+      match
+        Oas_worker_named.For_testing.checkpoint_after_attempt ~agent_ref
+          (Some agent)
+      with
+      | Some checkpoint ->
+          Alcotest.(check int) "zero turns preserved" 0
+            checkpoint.Agent_sdk.Checkpoint.turn_count;
+          Alcotest.(check int) "initial messages preserved" 1
+            (List.length checkpoint.messages);
+          Alcotest.(check bool) "agent_ref propagated" true
+            (Option.is_some !agent_ref)
+      | None -> Alcotest.fail "expected zero-turn checkpoint")
 
 let make_worker_meta ?(effective_model = "local-qwen") () :
     Worker_container_types.worker_container_meta =
@@ -5422,6 +5465,8 @@ let () =
         test_run_named_default_accept_allows_empty_content;
       Alcotest.test_case "accept-rejected fallback skips rejected checkpoint" `Quick
         test_run_named_accept_rejected_does_not_replay_rejected_checkpoint;
+      Alcotest.test_case "zero-turn attempt preserves checkpoint" `Quick
+        test_zero_turn_attempt_preserves_checkpoint;
     ];
     "resume_config", [
       Alcotest.test_case "checkpoint model wins" `Quick

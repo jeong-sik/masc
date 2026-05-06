@@ -104,6 +104,12 @@ let apply_stream_idle_timeout_default = function
   | Some _ as v -> v
   | None -> Some Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec
 
+let checkpoint_after_attempt ?agent_ref = function
+  | Some agent ->
+      (match agent_ref with Some r -> r := Some agent | None -> ());
+      Some (Agent_sdk.Agent.checkpoint agent)
+  | None -> None
+
 (* ================================================================ *)
 (* Facade-only: run_named, run_model_by_label, and MASC tool bridges  *)
 (* ================================================================ *)
@@ -588,17 +594,11 @@ let run_named
           (enrich_sdk_error ~cascade_name:error_cascade_name ~provider_cfg)
           result
       in
-      (* Extract checkpoint from the agent if it made progress.
-         The agent's mutable state reflects all completed turns even on Error. *)
-      let checkpoint_after = match !local_agent_ref with
-        | Some agent when (Agent_sdk.Agent.state agent).turn_count > 0 ->
-          (* Also propagate to caller's agent_ref for final result *)
-          (match agent_ref with Some r -> r := Some agent | None -> ());
-          Some (Agent_sdk.Agent.checkpoint agent)
-        | Some agent ->
-          (match agent_ref with Some r -> r := Some agent | None -> ());
-          None
-        | None -> None
+      (* Extract checkpoint from the agent even when no turn completed.
+         A zero-turn agent still carries built context, initial messages,
+         and sidecar state needed by cancel-before-start recovery. *)
+      let checkpoint_after =
+        checkpoint_after_attempt ?agent_ref !local_agent_ref
       in
       (result, checkpoint_after)
   in
@@ -1406,3 +1406,7 @@ let run_model_with_masc_tools
           Error
             (sdk_error_of_masc_internal_error
                (Admission_queue_rejected { keeper_name = "oas-explicit-model"; reason }))
+
+module For_testing = struct
+  let checkpoint_after_attempt = checkpoint_after_attempt
+end

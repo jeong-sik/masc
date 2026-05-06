@@ -1473,8 +1473,16 @@ let provider_label_of_config (cfg : Llm_provider.Provider_config.t) =
   | Some adapter -> adapter.cascade_prefix
   | None -> provider_label_from_registry cfg
 
-let provider_health_key_of_config cfg =
-  provider_label_of_config cfg
+let provider_health_key_of_config (cfg : Llm_provider.Provider_config.t) =
+  match cfg.kind with
+  | Llm_provider.Provider_config.OpenAI_compat
+    when Llm_provider.Provider_config.is_local cfg ->
+      let base_url = String.trim cfg.base_url in
+      if base_url = "" then provider_label_of_config cfg
+      else
+        Printf.sprintf "%s:%s@%s" (provider_label_of_config cfg)
+          cfg.model_id base_url
+  | _ -> provider_label_of_config cfg
 
 let display_provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
   display_provider_name (provider_label_of_config cfg)

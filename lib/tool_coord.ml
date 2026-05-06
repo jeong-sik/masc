@@ -199,11 +199,14 @@ let safe_read_backlog (ctx : context) =
   try
     Coord.read_backlog ctx.config
   with
-  | Sys_error _ | Yojson.Json_error _ -> Coord.read_backlog ctx.config
   | exn ->
       Log.Coord.warn "read_backlog failed: %s"
         (Stdlib.Printexc.to_string exn);
-      Coord.read_backlog ctx.config
+      {
+        Masc_domain.tasks = [];
+        last_updated = Coord.now_iso ();
+        version = 1;
+      }
 
 let safe_is_zombie_agent ~agent_name last_seen =
   try Coord.is_zombie_agent ~agent_name last_seen
@@ -343,13 +346,17 @@ let status_summary_string (ctx : context) =
   let current_task = safe_current_task ctx ~joined in
   let worktree_active = status_worktree_active ctx in
   let effective_cluster_name = effective_cluster_name ctx.config in
+  let active_task_assignees =
+    Coord.active_task_assignees_by_task_id backlog
+  in
   let agents =
     safe_get_agents ctx
     |> List.map (fun (agent : Masc_domain.agent) ->
            match agent.current_task with
            | Some task_id
              when not
-                    (Coord.agent_current_task_matches_backlog backlog
+                    (Coord.agent_current_task_matches_assignments
+                       active_task_assignees
                        ~agent_name:agent.name task_id) ->
                let status =
                  match agent.status with

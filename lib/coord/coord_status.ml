@@ -13,6 +13,9 @@ let status config =
 
   let state = read_state config in
   let backlog = read_backlog config in
+  let active_task_assignees =
+    Coord_task_schedule.active_task_assignees_by_task_id backlog
+  in
   let current_room = "default" in
   let max_agents_display = 40 in
   let max_active_tasks_display = 30 in
@@ -48,8 +51,8 @@ let status config =
                 match agent.current_task with
                 | Some task_id ->
                     not
-                      (Coord_task_schedule.agent_current_task_matches_backlog
-                         backlog ~agent_name:agent.name task_id)
+                      (Coord_task_schedule.agent_current_task_matches_assignments
+                         active_task_assignees ~agent_name:agent.name task_id)
                 | None -> false
               in
               let display_status =

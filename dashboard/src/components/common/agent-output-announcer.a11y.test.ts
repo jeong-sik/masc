@@ -4,7 +4,12 @@ import { render } from 'preact'
 import { act } from 'preact/test-utils'
 import { html } from 'htm/preact'
 import { axe } from 'jest-axe'
-import { AgentOutputAnnouncer, announceAgentOutput } from './agent-output-announcer'
+import {
+  AgentOutputAnnouncer,
+  announceAgentOutput,
+  resolveAgentOutputPriority,
+  summarizeAgentOutput,
+} from './agent-output-announcer'
 
 describe('AgentOutputAnnouncer a11y', () => {
   let container: HTMLElement
@@ -42,6 +47,7 @@ describe('AgentOutputAnnouncer a11y', () => {
     const region = container.querySelector('[aria-live="polite"]')
     expect(region).not.toBeNull()
     expect(region?.getAttribute('aria-atomic')).toBe('false')
+    expect(region?.getAttribute('aria-relevant')).toBe('additions text')
     expect(region?.getAttribute('aria-label')).toBe('에이전트 출력 알림')
   })
 
@@ -57,6 +63,44 @@ describe('AgentOutputAnnouncer a11y', () => {
     const region = container.querySelector('[aria-live="assertive"]')
     expect(region).not.toBeNull()
     expect(region?.getAttribute('aria-atomic')).toBe('true')
+  })
+
+  it('uses auto priority to promote errors to assertive announcements', async () => {
+    renderInAct(
+      html`<${AgentOutputAnnouncer}
+          outputs=${[{ id: 'error-1', type: 'error', content: 'Failed' }]}
+          priority=${'auto'}
+        />
+      `,
+      container,
+    )
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    const region = container.querySelector('[aria-live="assertive"]')
+    expect(region).not.toBeNull()
+    expect(region?.getAttribute('data-agent-output-announcer-output-id')).toBe('error-1')
+    expect(region?.getAttribute('data-agent-output-announcer-output-type')).toBe('error')
+  })
+
+  it('keeps auto priority polite for non-error announcements', () => {
+    expect(resolveAgentOutputPriority(
+      { id: 'text-1', type: 'text', content: 'ok' },
+      'auto',
+    )).toBe('polite')
+  })
+
+  it('returns structured announcement metadata', () => {
+    expect(summarizeAgentOutput(
+      { id: 'code-1', type: 'code', content: 'let x = 1', metadata: { language: 'ocaml', lineCount: 1 } },
+      'auto',
+    )).toEqual({
+      id: 'code-1',
+      type: 'code',
+      message: '코드 출력, ocaml 언어, 1 줄',
+      priority: 'polite',
+      contentLength: 9,
+    })
   })
 
   it('announces text output', () => {
@@ -137,6 +181,7 @@ describe('AgentOutputAnnouncer a11y', () => {
     })
     const region = container.querySelector('[aria-live]') as HTMLDivElement
     expect(region?.textContent).toBe('텍스트 출력: First')
+    expect(region?.getAttribute('data-agent-output-announcer-output-id')).toBe('1')
 
     const next = [
       ...outputs,
@@ -147,6 +192,30 @@ describe('AgentOutputAnnouncer a11y', () => {
       await new Promise((r) => setTimeout(r, 0))
     })
     expect(region?.textContent).toBe('오류 발생: Failed')
+    expect(region?.getAttribute('data-agent-output-announcer-output-id')).toBe('2')
+  })
+
+  it('updates live region when the latest output id changes at the same count', async () => {
+    const { rerender } = renderInAct(
+      html`<${AgentOutputAnnouncer}
+          outputs=${[{ id: '1', type: 'text', content: 'First' }]}
+        />`,
+      container,
+    )
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    const region = container.querySelector('[aria-live]') as HTMLDivElement
+    expect(region?.textContent).toBe('텍스트 출력: First')
+
+    rerender(html`<${AgentOutputAnnouncer}
+        outputs=${[{ id: '2', type: 'text', content: 'Second' }]}
+      />`)
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    expect(region?.textContent).toBe('텍스트 출력: Second')
+    expect(region?.getAttribute('data-agent-output-announcer-output-id')).toBe('2')
   })
 })
 

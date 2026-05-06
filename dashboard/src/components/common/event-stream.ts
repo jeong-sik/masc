@@ -144,10 +144,26 @@ function normalizedSemanticTerms(focus: EventStreamSemanticFocus | undefined): s
   for (const value of values) {
     const normalized = value.trim().toLowerCase()
     if (!normalized) continue
-    terms.push(normalized)
-    for (const part of normalized.split(/[^a-z0-9_.:/-]+/)) {
-      if (part.length >= 2) terms.push(part)
+    // Tokenize on non-word chars and feed only the parts into [terms].
+    // Previously we also pushed the full [normalized] string, but
+    // streamEventSemanticGravityScore averages over [terms.length], so
+    // multi-word focus strings (e.g. "agent-a started") were paying an
+    // extra averaging slot for a literal-string term that almost never
+    // matches event fields — systematically lowering the score even when
+    // every meaningful token did match. Set dedupe still collapses
+    // single-token focuses (where token === normalized) to one entry.
+    const parts = normalized.split(/[^a-z0-9_.:/-]+/)
+    let tokenized = false
+    for (const part of parts) {
+      if (part.length >= 2) {
+        terms.push(part)
+        tokenized = true
+      }
     }
+    // Fall back to the full normalized string only when tokenization
+    // produced nothing usable (e.g. a single character like "a"); we
+    // still want a non-empty terms list for the score path.
+    if (!tokenized) terms.push(normalized)
   }
 
   return Array.from(new Set(terms)).slice(0, 16)
@@ -175,13 +191,8 @@ function eventMatchesTerms(event: StreamEvent, terms: readonly string[]): boolea
   )
 }
 
-export function streamEventSemanticGravityScore(
-  event: StreamEvent,
-  semanticFocus?: EventStreamSemanticFocus,
-): number {
-  const terms = normalizedSemanticTerms(semanticFocus)
+function scoreEventForTerms(event: StreamEvent, terms: readonly string[]): number {
   if (terms.length === 0) return 0
-
   const total = terms.reduce((sum, term) => {
     const termScore = Math.max(
       fieldIncludes(event.source, term) ? 0.9 : 0,
@@ -190,21 +201,32 @@ export function streamEventSemanticGravityScore(
     )
     return sum + termScore
   }, 0)
-
   return roundedScore(clamp01(total / terms.length))
+}
+
+export function streamEventSemanticGravityScore(
+  event: StreamEvent,
+  semanticFocus?: EventStreamSemanticFocus,
+): number {
+  return scoreEventForTerms(event, normalizedSemanticTerms(semanticFocus))
 }
 
 export function buildSemanticGravityRows(
   rows: TemporalSyncStreamRow[],
   semanticFocus?: EventStreamSemanticFocus,
 ): SemanticGravityStreamRow[] {
+  // Normalize once per build instead of once per row. Repeated
+  // [normalizedSemanticTerms(semanticFocus)] calls inside the hot loop
+  // produced the same terms for every row, turning the build into
+  // O(rows × terms) when rows × terms ≪ rows alone could cover.
+  const terms = normalizedSemanticTerms(semanticFocus)
+  const hasFocus = terms.length > 0
   const scored = rows.map((row, originalIndex) => ({
     row,
     originalIndex,
-    score: streamEventSemanticGravityScore(row.event, semanticFocus),
+    score: scoreEventForTerms(row.event, terms),
   }))
 
-  const hasFocus = normalizedSemanticTerms(semanticFocus).length > 0
   const ordered = hasFocus
     ? [...scored].sort((a, b) => (b.score - a.score) || (a.originalIndex - b.originalIndex))
     : scored
@@ -407,7 +429,10 @@ function buildEventStreamModel(
   const visible = getVisibleStreamEvents(events, maxItems)
   const syncRows = buildTemporalSyncRows(visible, temporalSyncWindowMs)
   const semanticRows = buildSemanticGravityRows(syncRows, semanticFocus)
-  const intentProjections = buildIntentProjectionRows(events, semanticFocus, maxIntentProjections)
+  // Bound projection work to the visible window, but preserve the
+  // chronological order expected by buildIntentProjectionRows.
+  const projectionWindow = [...visible].reverse()
+  const intentProjections = buildIntentProjectionRows(projectionWindow, semanticFocus, maxIntentProjections)
   return {
     visible,
     syncRows,

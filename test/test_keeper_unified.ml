@@ -4210,12 +4210,18 @@ let test_run_keeper_cycle_surfaces_side_effect_failures_source_contract () =
   check bool "local discovery refresh is not silently ignored" false
     (source_file_contains "lib/keeper/keeper_unified_turn.ml"
        "ignore (Cascade_runtime.refresh_local_discovery_if_possible model_labels)");
+  check bool "manual keeper_msg local discovery refresh is not silently ignored" false
+    (source_file_contains "lib/keeper/keeper_turn.ml"
+       "ignore (Cascade_runtime.refresh_local_discovery_if_possible effective_models)");
   check bool "activity graph emit is not silently ignored" false
     (source_file_contains "lib/keeper/keeper_unified_turn.ml"
        "ignore (Activity_graph.emit config");
   check bool "discovery helper guards keeper setup" true
     (source_file_contains "lib/keeper/keeper_unified_turn.ml"
-       "ensure_local_discovery_ready model_labels")
+       "ensure_local_discovery_ready model_labels");
+  check bool "manual keeper_msg discovery helper guards keeper setup" true
+    (source_file_contains "lib/keeper/keeper_turn.ml"
+       "ensure_local_discovery_ready effective_models")
 
 let test_sync_keeper_paused_state_surfaces_write_failure_without_mutating_registry () =
   let base_dir = temp_dir () in

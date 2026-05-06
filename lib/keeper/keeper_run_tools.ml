@@ -991,7 +991,13 @@ let prepare_agent_setup
                         (List.length tasks) n preview)
                   with
                   | Eio.Cancel.Cancelled _ as e -> raise e
-                  | _ -> None)
+                  | exn ->
+                    Keeper_callback_failure.record
+                      ~base_dir:config.base_path
+                      ~meta
+                      ~callback:"work_discovery_nudge"
+                      exn;
+                    None)
                | _ -> None)
             sources
         in

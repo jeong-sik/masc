@@ -133,6 +133,7 @@ let test_documented_callback_label_vocabulary () =
       "on_tool_executed";
       "on_error";
       "on_tool_error";
+      "work_discovery_nudge";
     ]
   in
   List.iter (fun label ->

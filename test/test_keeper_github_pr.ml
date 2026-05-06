@@ -146,6 +146,14 @@ let fake_gh_echo_script =
 
 let fake_gh_pr_create_504_then_view_script =
   "#!/bin/sh\n\
+   if [ \"$1\" = \"auth\" ] && [ \"$2\" = \"status\" ]; then\n\
+   \  printf 'github.com\\n'\n\
+   \  exit 0\n\
+   fi\n\
+   if [ \"$1\" = \"api\" ] && [ \"$2\" = \"graphql\" ]; then\n\
+   \  printf 'test-user\\n'\n\
+   \  exit 0\n\
+   fi\n\
    if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"create\" ]; then\n\
    \  printf 'pull request create failed: HTTP 504: 504 Gateway Timeout (https://api.github.com/graphql)\\n' >&2\n\
    \  exit 1\n\
@@ -402,6 +410,9 @@ let unrelated_failure_payload =
   "pull request create failed: GraphQL: Resource not accessible by \
    integration (createPullRequest)\n"
 
+let non_pr_already_exists_payload =
+  "git push failed: remote ref already exists for refs/heads/feature/dup\n"
+
 let test_classifier_already_exists_matches_verbatim_payload () =
   check bool "verbatim already-exists matches" true
     (K.For_testing.pr_create_failure_already_exists already_exists_payload);
@@ -412,6 +423,9 @@ let test_classifier_already_exists_matches_verbatim_payload () =
     (K.For_testing.pr_create_failure_already_exists transient_504_payload);
   check bool "unrelated failure does not match already-exists" false
     (K.For_testing.pr_create_failure_already_exists unrelated_failure_payload);
+  check bool "non-PR already-exists does not match" false
+    (K.For_testing.pr_create_failure_already_exists
+       non_pr_already_exists_payload);
   check bool "empty payload does not match already-exists" false
     (K.For_testing.pr_create_failure_already_exists "")
 
@@ -425,6 +439,9 @@ let test_classifier_recovery_reason_routing () =
   check (option string) "unrelated failure does not classify"
     None
     (K.For_testing.classify_pr_create_recovery unrelated_failure_payload);
+  check (option string) "non-PR already-exists does not classify"
+    None
+    (K.For_testing.classify_pr_create_recovery non_pr_already_exists_payload);
   check (option string) "empty payload does not classify"
     None
     (K.For_testing.classify_pr_create_recovery "")

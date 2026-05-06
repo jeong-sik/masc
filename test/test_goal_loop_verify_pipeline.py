@@ -150,6 +150,12 @@ class GoalLoopVerifyPipelineTest(unittest.TestCase):
             self.assertEqual(by_id[gate_id].status, "PASS", gate_id)
             self.assertEqual(by_id[gate_id].evidence["resolved_path"], path)
             self.assertEqual(by_id[gate_id].evidence["result_status"], "PASS")
+            command = by_id[gate_id].command or []
+            self.assertEqual(command[:4], ["make", "-C", "specs", "check-clean"])
+            self.assertEqual(
+                command[4],
+                "CLEAN_CFGS=./goal-loop/" + Path(path).with_suffix(".cfg").name,
+            )
         self.assertEqual(report.status, "BLOCKED")
         self.assertEqual(report.gates_passed, 3)
         self.assertEqual(report.gates_blocked, 10)

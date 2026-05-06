@@ -275,7 +275,11 @@
     {
       "category": "tla_check",
       "command": [
-        "scripts/tla-check.sh"
+        "make",
+        "-C",
+        "specs",
+        "check-clean",
+        "CLEAN_CFGS=./goal-loop/TierRouting.cfg"
       ],
       "evidence": {
         "prompt_spec": "TierRouting.tla",
@@ -290,7 +294,11 @@
     {
       "category": "tla_check",
       "command": [
-        "scripts/tla-check.sh"
+        "make",
+        "-C",
+        "specs",
+        "check-clean",
+        "CLEAN_CFGS=./goal-loop/Validation.cfg"
       ],
       "evidence": {
         "prompt_spec": "Validation.tla",
@@ -305,7 +313,11 @@
     {
       "category": "tla_check",
       "command": [
-        "scripts/tla-check.sh"
+        "make",
+        "-C",
+        "specs",
+        "check-clean",
+        "CLEAN_CFGS=./goal-loop/Liveness.cfg"
       ],
       "evidence": {
         "prompt_spec": "Liveness.tla",

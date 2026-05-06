@@ -440,6 +440,16 @@ def tla_result_for(tla_results: dict[str, Any] | None, spec_name: str) -> str | 
     return None
 
 
+def tla_check_command(found_path: str | None, spec_name: str) -> list[str]:
+    if found_path is None:
+        cfg_path = f"./goal-loop/{spec_name.removesuffix('.tla')}.cfg"
+    else:
+        cfg_path = Path(found_path).with_suffix(".cfg").as_posix()
+        if cfg_path.startswith("specs/"):
+            cfg_path = "./" + cfg_path.removeprefix("specs/")
+    return ["make", "-C", "specs", "check-clean", f"CLEAN_CFGS={cfg_path}"]
+
+
 def build_tla_gates(
     *,
     repo_root: Path,
@@ -449,6 +459,7 @@ def build_tla_gates(
     for spec_name in PROMPT_TLA_SPECS:
         found_path = find_tla_spec(repo_root, spec_name)
         result = tla_result_for(tla_results, spec_name)
+        command = tla_check_command(found_path, spec_name)
         evidence = {
             "prompt_spec": spec_name,
             "resolved_path": found_path,
@@ -461,7 +472,7 @@ def build_tla_gates(
                     "tla_check",
                     "BLOCKED",
                     f"Prompt TLA spec {spec_name} is not present in specs/.",
-                    command=["scripts/tla-check.sh"],
+                    command=command,
                     reason="prompt_tla_spec_missing",
                     evidence=evidence,
                 )
@@ -474,7 +485,7 @@ def build_tla_gates(
                     "tla_check",
                     "SKIPPED",
                     f"Prompt TLA spec {spec_name} exists but no TLC result was supplied.",
-                    command=["scripts/tla-check.sh"],
+                    command=command,
                     reason="tla_result_not_supplied",
                     evidence=evidence,
                 )
@@ -487,7 +498,7 @@ def build_tla_gates(
                 "tla_check",
                 "PASS" if passed else "FAIL",
                 f"Prompt TLA spec {spec_name} TLC result is {result}.",
-                command=["scripts/tla-check.sh"],
+                command=command,
                 reason=None if passed else "tla_check_failed",
                 evidence=evidence,
             )

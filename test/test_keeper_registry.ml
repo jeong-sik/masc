@@ -475,6 +475,40 @@ let test_dispatch_event_emits_lifecycle_transition_metric_only_on_phase_change (
   check (float 0.001) "phase-change transition metric incremented"
     (changed_before +. 1.0) changed_after
 
+let test_dispatch_event_observes_phase_sse_broadcast_failure () =
+  R.clear ();
+  let keeper_name = "k4-lifecycle-sse-failure" in
+  let labels = [("keeper", keeper_name); ("site", "phase_changed")] in
+  let before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_keeper_sse_broadcast_failures
+      ~labels ()
+  in
+  ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Masc_mcp.Sse.buffer_commit_test_hook None)
+    (fun () ->
+      Atomic.set Masc_mcp.Sse.buffer_commit_test_hook
+        (Some (fun () -> failwith "forced phase broadcast failure"));
+      match R.dispatch_event ~base_path:bp keeper_name KSM.Operator_pause with
+      | Error err ->
+          fail
+            (KSM.transition_error_to_string err)
+      | Ok _ -> ());
+  let after =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_keeper_sse_broadcast_failures
+      ~labels ()
+  in
+  check (float 0.001) "phase SSE failure metric incremented"
+    (before +. 1.0) after;
+  match R.get ~base_path:bp keeper_name with
+  | None -> fail "expected registered keeper"
+  | Some entry ->
+      check string "phase transition still applied" "paused"
+        (KSM.phase_to_string entry.phase)
+
 let test_extended_states () =
   R.clear ();
   let _entry = R.register ~base_path:bp "k4x" (make_meta "k4x") in
@@ -1311,6 +1345,8 @@ let () =
             test_dispatch_event_emits_phase_sse;
           eio_test "dispatch event emits lifecycle metric only on phase change"
             test_dispatch_event_emits_lifecycle_transition_metric_only_on_phase_change;
+          eio_test "dispatch event observes phase SSE broadcast failure"
+            test_dispatch_event_observes_phase_sse_broadcast_failure;
           eio_test "extended states" test_extended_states;
           eio_test "stopped entry action is observability-only"
             test_stopped_entry_action_is_observability_only;

@@ -131,6 +131,10 @@ let emit_fallback_triggered ~kind ~detail =
     observability so a broken hook does not blank out the dashboard. *)
 let request_latency_metric = Prometheus.metric_llm_provider_request_latency
 
+let request_latency_seconds ~latency_ms =
+  let latency_ms = Stdlib.max 1 latency_ms in
+  Float.of_int latency_ms /. 1000.0
+
 (** Emit a single latency observation to the Prometheus histogram.
 
     Exposed so that per-call metrics sinks (e.g. the cascade-observation
@@ -138,7 +142,7 @@ let request_latency_metric = Prometheus.metric_llm_provider_request_latency
     same histogram without duplicating the label shape.  This is the
     single source of truth for the label key names. *)
 let emit_request_latency ~model_id ~latency_ms =
-  let seconds = Float.of_int latency_ms /. 1000.0 in
+  let seconds = request_latency_seconds ~latency_ms in
   Prometheus.observe_histogram request_latency_metric
     ~labels:[("model", model_id)] seconds
 

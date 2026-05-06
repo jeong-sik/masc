@@ -91,6 +91,25 @@ let test_sink_records_oas_callbacks () =
     Prom.metric_llm_provider_output_tokens
     ~labels:provider_model_labels ~before:before_output ~delta:23.0
 
+let test_request_latency_clamps_zero_ms () =
+  let model_id =
+    Printf.sprintf "bridge-latency-zero-%d" (Unix.getpid ())
+  in
+  let labels = [ ("model", model_id) ] in
+  let before_sum =
+    metric Prom.metric_llm_provider_request_latency ~labels
+  in
+  let before_count =
+    metric (Prom.metric_llm_provider_request_latency ^ "_count") ~labels
+  in
+  Bridge.emit_request_latency ~model_id ~latency_ms:0;
+  check_metric_delta "latency sum floors to 1ms"
+    Prom.metric_llm_provider_request_latency
+    ~labels ~before:before_sum ~delta:0.001;
+  check_metric_delta "latency count +1"
+    (Prom.metric_llm_provider_request_latency ^ "_count")
+    ~labels ~before:before_count ~delta:1.0
+
 let () =
   Alcotest.run "llm_metric_bridge"
     [
@@ -100,5 +119,7 @@ let () =
             test_metric_names_stable;
           Alcotest.test_case "sink records OAS callbacks" `Quick
             test_sink_records_oas_callbacks;
+          Alcotest.test_case "request latency floors zero ms" `Quick
+            test_request_latency_clamps_zero_ms;
         ] );
     ]

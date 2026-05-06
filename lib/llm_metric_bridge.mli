@@ -21,7 +21,10 @@ val http_status_metric : string
 val emit_http_status :
   provider:string -> model_id:string -> status:int -> unit
 
-(** Emit a single latency observation to the Prometheus histogram.
+(** Emit a single latency observation to the Prometheus histogram.  Values
+    below 1ms are recorded as 1ms so fast calls still produce a non-zero
+    histogram sum.
+
     Called by both the global sink built in {!make_sink} and any
     per-call OAS [Metrics.t] literal that wants to forward
     [on_request_end] (e.g. cascade observation captures).  Single

@@ -997,10 +997,20 @@ export interface HeuristicEvent {
   detail?: string
 }
 
+export interface HeuristicFiring {
+  id: string
+  ts: number
+  rule_id: string
+  agent?: string
+  action: string
+  cooldown_remaining_ms?: number
+}
+
 export interface HeuristicsResponse {
   limit: number
   count: number
   events: HeuristicEvent[]
+  heuristics: HeuristicFiring[]
 }
 
 function decodeHeuristicEvent(raw: unknown): HeuristicEvent | null {
@@ -1020,6 +1030,20 @@ function decodeHeuristicEvent(raw: unknown): HeuristicEvent | null {
   }
 }
 
+function decodeHeuristicFiring(raw: unknown): HeuristicFiring | null {
+  if (!isRecord(raw)) return null
+  return {
+    id: asString(raw.id) ?? '',
+    ts: asNumber(raw.ts) ?? 0,
+    rule_id: asString(raw.rule_id) ?? '',
+    agent: asNullableString(raw.agent) ?? undefined,
+    action: asString(raw.action) ?? '',
+    cooldown_remaining_ms: raw.cooldown_remaining_ms === undefined
+      ? undefined
+      : (asInt(raw.cooldown_remaining_ms) ?? 0),
+  }
+}
+
 function decodeHeuristicsResponse(raw: unknown): HeuristicsResponse | null {
   if (!isRecord(raw)) return null
   return {
@@ -1028,6 +1052,9 @@ function decodeHeuristicsResponse(raw: unknown): HeuristicsResponse | null {
     events: asRecordArray(raw.events)
       .map(decodeHeuristicEvent)
       .filter((e): e is HeuristicEvent => e !== null),
+    heuristics: asRecordArray(raw.heuristics)
+      .map(decodeHeuristicFiring)
+      .filter((e): e is HeuristicFiring => e !== null),
   }
 }
 
@@ -1062,6 +1089,19 @@ export interface StressResponse {
   limit: number
   count: number
   events: StressEvent[]
+  agent_stress: AgentStressRow[]
+}
+
+export interface AgentStressRow {
+  agent: string
+  budget_pressure: number
+  ctx_pressure: number
+  queue_depth: number
+  blocked_on?: string
+  ts: number
+  budget_pressure_source?: string
+  ctx_pressure_source?: string
+  queue_depth_source?: string
 }
 
 function decodeStressKind(raw: unknown): StressKind | null {
@@ -1089,6 +1129,21 @@ function decodeStressEvent(raw: unknown): StressEvent | null {
   }
 }
 
+function decodeAgentStressRow(raw: unknown): AgentStressRow | null {
+  if (!isRecord(raw)) return null
+  return {
+    agent: asString(raw.agent) ?? '',
+    budget_pressure: asNumber(raw.budget_pressure) ?? 0,
+    ctx_pressure: asNumber(raw.ctx_pressure) ?? 0,
+    queue_depth: asInt(raw.queue_depth) ?? 0,
+    blocked_on: asNullableString(raw.blocked_on) ?? undefined,
+    ts: asNumber(raw.ts) ?? 0,
+    budget_pressure_source: asNullableString(raw.budget_pressure_source) ?? undefined,
+    ctx_pressure_source: asNullableString(raw.ctx_pressure_source) ?? undefined,
+    queue_depth_source: asNullableString(raw.queue_depth_source) ?? undefined,
+  }
+}
+
 function decodeStressResponse(raw: unknown): StressResponse | null {
   if (!isRecord(raw)) return null
   return {
@@ -1097,6 +1152,9 @@ function decodeStressResponse(raw: unknown): StressResponse | null {
     events: asRecordArray(raw.events)
       .map(decodeStressEvent)
       .filter((e): e is StressEvent => e !== null),
+    agent_stress: asRecordArray(raw.agent_stress)
+      .map(decodeAgentStressRow)
+      .filter((row): row is AgentStressRow => row !== null),
   }
 }
 

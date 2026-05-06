@@ -671,9 +671,11 @@ PY
 }
 
 build_github_identity_counts() {
-  python3 - "$BASE_PATH" "$RUN_DIR/keepers.txt" "$GITHUB_IDENTITY_COUNTS_FILE" "$FORBID_GITHUB_IDENTITIES" <<'PY'
+  python3 - "$BASE_PATH" "$RUN_DIR/keepers.txt" "$GITHUB_IDENTITY_COUNTS_FILE" "$FORBID_GITHUB_IDENTITIES" "$REPO_SLUG" <<'PY'
 import json
+import os
 import pathlib
+import subprocess
 import sys
 from collections import Counter
 
@@ -691,6 +693,7 @@ forbidden = {
     for item in sys.argv[4].split(",")
     if item.strip()
 }
+repo_slug = sys.argv[5]
 config_dir = base_path / ".masc" / "config" / "keepers"
 runtime_dir = base_path / ".masc" / "keepers"
 
@@ -746,11 +749,48 @@ def read_account_login(identity):
     return None
 
 
+def read_repo_permission(identity):
+    gh_config_dir = base_path / ".masc" / "github-identities" / identity / "gh"
+    if not gh_config_dir.is_dir():
+        return None, "gh_config_dir_missing"
+    env = os.environ.copy()
+    env["GH_CONFIG_DIR"] = str(gh_config_dir)
+    try:
+        completed = subprocess.run(
+            [
+                "gh",
+                "repo",
+                "view",
+                repo_slug,
+                "--json",
+                "viewerPermission",
+                "--jq",
+                ".viewerPermission",
+            ],
+            check=False,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=20,
+        )
+    except Exception as exc:
+        return None, f"repo_permission_probe_exception:{exc}"
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip().splitlines()
+        preview = detail[0] if detail else f"gh_exit_{completed.returncode}"
+        return None, preview[:200]
+    permission = completed.stdout.strip()
+    return permission or None, None
+
+
 keepers = [line.strip() for line in keepers_file.read_text().splitlines() if line.strip()]
 identities = {}
 accounts = {}
+permissions = {}
 missing = []
 unresolved_accounts = []
+permission_errors = []
 forbidden_keepers = []
 for keeper in keepers:
     config = load_keeper_config(config_dir / f"{keeper}.toml")
@@ -773,6 +813,17 @@ for keeper in keepers:
             accounts[keeper] = account_login
         else:
             unresolved_accounts.append({"keeper": keeper, "github_identity": identity})
+        permission, permission_error = read_repo_permission(identity)
+        if permission:
+            permissions[keeper] = permission
+        else:
+            permission_errors.append(
+                {
+                    "keeper": keeper,
+                    "github_identity": identity,
+                    "error": permission_error or "permission_unresolved",
+                }
+            )
         if identity in forbidden:
             forbidden_keepers.append(
                 {
@@ -795,6 +846,7 @@ for keeper in keepers:
 
 counts = Counter(identities.values())
 account_counts = Counter(accounts.values())
+permission_counts = Counter(permissions.values())
 out_file.write_text(
     json.dumps(
         {
@@ -804,10 +856,13 @@ out_file.write_text(
             "account_unique_count": len(account_counts),
             "counts": dict(sorted(counts.items())),
             "account_counts": dict(sorted(account_counts.items())),
+            "repo_permission_counts": dict(sorted(permission_counts.items())),
             "keepers": identities,
             "keeper_accounts": accounts,
+            "keeper_repo_permissions": permissions,
             "missing": missing,
             "unresolved_accounts": unresolved_accounts,
+            "repo_permission_errors": permission_errors,
             "forbidden_identities": sorted(forbidden),
             "forbidden_keepers": forbidden_keepers,
         },
@@ -840,6 +895,31 @@ assert_github_identity_pool_for_mutate() {
   if [[ "$MUTATE" == "1" && "$account_unique_count" -lt 2 ]]; then
     echo "at least two unique authenticated GitHub accounts are required for cross-keeper approval proof" >&2
     jq -c '{account_unique_count, account_counts, keeper_accounts}' "$GITHUB_IDENTITY_COUNTS_FILE" >&2 || true
+    exit 1
+  fi
+  local repo_permission_error_count
+  repo_permission_error_count="$(jq -r '(.repo_permission_errors // []) | length' "$GITHUB_IDENTITY_COUNTS_FILE")"
+  if [[ "$MUTATE" == "1" && "$repo_permission_error_count" -gt 0 ]]; then
+    echo "target keeper set has unresolved GitHub repository permissions" >&2
+    jq -c '{repo_permission_errors}' "$GITHUB_IDENTITY_COUNTS_FILE" >&2 || true
+    exit 1
+  fi
+  if [[ "$MUTATE" == "1" ]] \
+    && jq -e '
+      (.keeper_repo_permissions // {})
+      | to_entries
+      | map(select(.value as $p | ["ADMIN", "MAINTAIN", "WRITE"] | index($p) | not))
+      | length > 0
+    ' "$GITHUB_IDENTITY_COUNTS_FILE" >/dev/null; then
+    echo "target keeper set includes accounts without upstream write permission" >&2
+    jq -c '{
+      keeper_repo_permissions,
+      non_writable_keepers: (
+        (.keeper_repo_permissions // {})
+        | to_entries
+        | map(select(.value as $p | ["ADMIN", "MAINTAIN", "WRITE"] | index($p) | not))
+      )
+    }' "$GITHUB_IDENTITY_COUNTS_FILE" >&2 || true
     exit 1
   fi
   if [[ "$MUTATE" == "1" ]] \
@@ -976,7 +1056,11 @@ Required create lane:
      the branch/worktree already exists, stop and report blocker="branch_collision".
 3. Make a minimal, non-product proof edit under docs/runtime-proof/keepers/$keeper-$RUN_ID.md with keeper_bash from inside the Docker playground. The file content must include run_id=$RUN_ID and branch=$branch.
 4. Commit and git push exactly branch $branch with keeper_bash. The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
-5. Create a draft PR for that branch with keeper_pr_create. Do not mark ready, do not merge, do not add human-approved-ready.
+5. Create a draft PR for that branch with keeper_pr_create. The call must include
+   repo="$REPO_SLUG", head="$branch", base="main", draft=true, and cwd set to
+   the returned proof worktree path. Do not leave head/base empty and do not use
+   the base repo path if the proof branch lives in a separate worktree. Do not
+   mark ready, do not merge, do not add human-approved-ready.
 6. Reply with one compact JSON object:
    {
      "run_id": "$RUN_ID",

@@ -130,6 +130,7 @@ let test_attention_fields_promote_runtime_trust_attention () =
       ("needs_attention", `Bool false);
       ("attention_reason", `Null);
       ("next_human_action", `Null);
+      ("source", `String "exec_status");
     ]
   in
   let trust =
@@ -146,7 +147,9 @@ let test_attention_fields_promote_runtime_trust_attention () =
   check string "trust reason promoted" "required_tool_use_unsatisfied"
     (Yojson.Safe.Util.to_string (assoc_member "attention_reason" merged));
   check string "trust action promoted" "inspect_runtime_trust"
-    (Yojson.Safe.Util.to_string (assoc_member "next_human_action" merged))
+    (Yojson.Safe.Util.to_string (assoc_member "next_human_action" merged));
+  check string "extra field preserved" "exec_status"
+    (Yojson.Safe.Util.to_string (assoc_member "source" merged))
 
 let test_attention_fields_keep_existing_attention_reason () =
   let fields =

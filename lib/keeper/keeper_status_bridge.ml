@@ -411,12 +411,21 @@ let attention_fields_json (config : Coord_utils.config) (meta : keeper_meta) =
     ("next_human_action", Json_util.string_opt_to_json next_human_action);
   ]
 
-let json_string_opt_member key json =
+let json_string_opt_member json key =
   match Yojson.Safe.Util.member key json with
   | `String value ->
       let trimmed = String.trim value in
       if trimmed = "" then None else Some trimmed
   | _ -> None
+
+let assoc_upsert fields key value =
+  let rec loop acc = function
+    | [] -> List.rev ((key, value) :: acc)
+    | (existing_key, _) :: rest when String.equal existing_key key ->
+        List.rev_append acc ((key, value) :: rest)
+    | field :: rest -> loop (field :: acc) rest
+  in
+  loop [] fields
 
 let attention_fields_with_runtime_trust attention_fields runtime_trust =
   let existing_needs_attention =
@@ -435,26 +444,27 @@ let attention_fields_with_runtime_trust attention_fields runtime_trust =
       match List.assoc_opt "attention_reason" attention_fields with
       | Some (`String value) when String.trim value <> "" -> Some value
       | _ -> (
-          match json_string_opt_member "attention_reason" runtime_trust with
+          match json_string_opt_member runtime_trust "attention_reason" with
           | Some _ as value -> value
-          | None -> json_string_opt_member "disposition_reason" runtime_trust)
+          | None -> json_string_opt_member runtime_trust "disposition_reason")
     in
     let next_human_action =
       match List.assoc_opt "next_human_action" attention_fields with
       | Some (`String value) when String.trim value <> "" -> Some value
       | _ -> (
-          match json_string_opt_member "next_human_action" runtime_trust with
+          match json_string_opt_member runtime_trust "next_human_action" with
           | Some _ as value -> value
           | None -> (
-              match json_string_opt_member "latest_next_action" runtime_trust with
+              match json_string_opt_member runtime_trust "latest_next_action" with
               | Some _ as value -> value
               | None -> Some "inspect_runtime_trust"))
     in
-    [
-      ("needs_attention", `Bool true);
-      ("attention_reason", Json_util.string_opt_to_json attention_reason);
-      ("next_human_action", Json_util.string_opt_to_json next_human_action);
-    ]
+    attention_fields
+    |> assoc_upsert "needs_attention" (`Bool true)
+    |> assoc_upsert "attention_reason"
+         (Json_util.string_opt_to_json attention_reason)
+    |> assoc_upsert "next_human_action"
+         (Json_util.string_opt_to_json next_human_action)
 
 let trimmed_string_json value =
   let trimmed = String.trim value in

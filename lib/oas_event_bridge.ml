@@ -722,13 +722,15 @@ let deliver_pending ?store_ref (pending : pending_relay) =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> Retryable_failure (pending, Append, exn)
 
-let enqueue_pending pending item =
-  if List.length pending < relay_max_queue_depth then
-    (pending @ [ item ], None)
-  else
-    match pending with
-    | dropped :: rest -> (rest @ [ item ], Some dropped)
-    | [] -> ([ item ], None)
+let should_drain_subscription pending =
+  (* Do not move new OAS bus events into the local retry queue while
+     failed relays are still pending.  The OAS subscriber stream is
+     bounded, so leaving it undrained applies publisher backpressure
+     instead of dropping the oldest local relay event. *)
+  pending = []
+
+let prepare_pending_events events =
+  List.filter_map prepare_pending_event events
 
 let rec process_pending ?store_ref acc = function
   | [] -> List.rev acc
@@ -780,6 +782,8 @@ module For_testing = struct
 
   let make_pending json = { json; attempts = 0; appended = false; }
 
+  let relay_max_queue_depth = relay_max_queue_depth
+
   let to_pending (pending : pending_relay) : bridge_pending_relay =
     { json = pending.json;
       attempts = pending.attempts;
@@ -812,6 +816,9 @@ module For_testing = struct
       ~broadcast_json
       (to_pending pending)
     |> of_result
+
+  let should_drain_subscription pending =
+    should_drain_subscription (List.map to_pending pending)
 end
 
 let start_impl ~interval_s ~sw ~clock ~(config : Coord.config) ~bus =
@@ -834,27 +841,12 @@ let start_impl ~interval_s ~sw ~clock ~(config : Coord.config) ~bus =
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       (try
-         let events = Oas_bus_instrument.drain sub in
-         List.iter
-           (fun evt ->
-              match prepare_pending_event evt with
-              | None -> ()
-              | Some item ->
-                  let next_pending, dropped = enqueue_pending !pending item in
-                  pending := next_pending;
-                  (match dropped with
-                   | None -> ()
-                   | Some dropped ->
-                       Prometheus.inc_counter Prometheus.metric_oas_sse_relay_drops
-                         ~labels:[ ("stage", "queue") ] ();
-                       emit_relay_drop_log ~pending:dropped
-                         ~stage_label:"queue"
-                         ~attempts:dropped.attempts;
-                       broadcast_drop_marker ~pending:dropped
-                         ~stage_label:"queue"
-                         ~attempts:dropped.attempts))
-           events;
          pending := process_pending ~store_ref:store [] !pending;
+         if should_drain_subscription !pending then begin
+           let events = Oas_bus_instrument.drain sub in
+           pending := prepare_pending_events events;
+           pending := process_pending ~store_ref:store [] !pending
+         end;
          update_relay_queue_depth !pending
        with
        | Eio.Cancel.Cancelled _ as e -> raise e

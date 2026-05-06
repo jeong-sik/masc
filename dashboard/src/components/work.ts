@@ -4,20 +4,20 @@
 import { html } from 'htm/preact'
 import { lazy, Suspense } from 'preact/compat'
 import { route } from '../router'
-import { BoardSurface, SubBoardSurface } from './board'
+import { BoardModerationSurface, BoardSurface, SubBoardSurface } from './board'
 import { PlanningPanel } from './planning-panel'
 import { VerificationRequestsPanel } from './verification-requests-panel'
 import { ErrorBoundary } from './common/error-boundary'
 import { LoadingState } from './common/feedback-state'
 
-type WorkSection = 'board' | 'sub-boards' | 'planning' | 'repositories' | 'verification'
+type WorkSection = 'board' | 'sub-boards' | 'moderation' | 'planning' | 'repositories' | 'verification'
 
 const LazyRepositoryManagement = lazy(async () => ({
   default: (await import('./repository-management')).RepositoryManagement,
 }))
 
 function isWorkSection(v: string | undefined): v is WorkSection {
-  return v === 'board' || v === 'sub-boards' || v === 'planning' || v === 'repositories' || v === 'verification'
+  return v === 'board' || v === 'sub-boards' || v === 'moderation' || v === 'planning' || v === 'repositories' || v === 'verification'
 }
 
 export function Work() {
@@ -31,6 +31,7 @@ export function Work() {
         <${ErrorBoundary} label=${current}>
           ${current === 'board' ? html`<${BoardSurface} />`
             : current === 'sub-boards' ? html`<${SubBoardSurface} />`
+            : current === 'moderation' ? html`<${BoardModerationSurface} />`
             : current === 'planning' ? html`<${PlanningPanel} />`
             : current === 'repositories' ? html`
               <${Suspense} fallback=${html`<${LoadingState}>저장소 화면 불러오는 중...<//>`}>

@@ -16,6 +16,7 @@ vi.mock('../router', () => ({
 
 vi.mock('./board', () => ({
   BoardSurface: () => html`<div data-testid="board-surface">Board</div>`,
+  BoardModerationSurface: () => html`<div data-testid="board-moderation-surface">Moderation</div>`,
   SubBoardSurface: () => html`<div data-testid="sub-board-surface">Sub-Boards</div>`,
 }))
 
@@ -46,6 +47,19 @@ describe('Work', () => {
     render(html`<${Work} />`)
 
     expect(screen.getByTestId('sub-board-surface')).toBeTruthy()
+    expect(screen.queryByTestId('board-surface')).toBeNull()
+  })
+
+  it('renders the board moderation surface for the workspace moderation section', () => {
+    routeSignal.value = {
+      tab: 'workspace',
+      params: { section: 'moderation' },
+      postId: null,
+    }
+
+    render(html`<${Work} />`)
+
+    expect(screen.getByTestId('board-moderation-surface')).toBeTruthy()
     expect(screen.queryByTestId('board-surface')).toBeNull()
   })
 

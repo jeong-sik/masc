@@ -430,7 +430,7 @@ let claim_next_r
       let sorted = List.sort (fun a b ->
         let priority_cmp = compare (effective_priority a) (effective_priority b) in
         if priority_cmp <> 0 then priority_cmp
-        else compare b.created_at a.created_at  (* Newer first to unblock stale queues *)
+        else compare a.created_at b.created_at
       ) working_tasks in
       (* Identify blocked Todo tasks for observability *)
       let all_todo = List.filter (fun (t : Masc_domain.task) ->

@@ -109,8 +109,13 @@ let drain ~keeper_id ~grace_ms : drain_result =
       ) !alive;
       alive := !still;
       if !alive <> [] then
-        (try ignore (Unix.select [] [] [] poll_interval)
-         with Unix.Unix_error _ -> ())
+        match Unix.select [] [] [] poll_interval with
+        | _, _, _ -> ()
+        | exception Unix.Unix_error (Unix.EINTR, _, _) -> ()
+        | exception Unix.Unix_error (err, fn, arg) ->
+            Log.Keeper.warn
+              "[SubprocessDrain] poll failed fn=%s arg=%s error=%s"
+              fn arg (Unix.error_message err)
     done;
     (* Phase 2: SIGKILL stragglers *)
     List.iter (fun pid ->

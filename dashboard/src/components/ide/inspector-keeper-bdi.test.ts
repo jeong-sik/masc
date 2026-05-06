@@ -200,4 +200,27 @@ describe('InspectorKeeperBDI', () => {
 
     render(null, container)
   })
+
+  it('does not render an unscoped keeper-trace overlay without a selected keeper', async () => {
+    pushTrace({
+      id: 'inspector-trace-no-keeper',
+      tsMs: Date.parse('2026-05-06T01:00:00Z'),
+      keeperName: 'scholar',
+      source: 'bdi-snapshot',
+      intention: 'should stay hidden',
+    })
+
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(snapshot)))
+    vi.stubGlobal('fetch', fetchMock)
+    activeKeeperName.value = '   '
+
+    const container = createContainer()
+    render(html`<${InspectorKeeperBDI} pollMs=${60_000} traceActive=${true} />`, container)
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(container.querySelector('[data-overlay="keeper-trace"]')).toBeNull()
+    expect(container.querySelector('[data-keeper="scholar"]')).toBeNull()
+
+    render(null, container)
+  })
 })

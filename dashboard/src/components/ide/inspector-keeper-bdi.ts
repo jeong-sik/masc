@@ -293,7 +293,9 @@ export function InspectorKeeperBDI({
           : null}
       </div>
 
-      <${OverlayKeeperTrace} active=${traceActive} keeperFilter=${keeperName} />
+      ${keeperName
+        ? html`<${OverlayKeeperTrace} active=${traceActive} keeperFilter=${keeperName} />`
+        : null}
     </section>
   `
 }

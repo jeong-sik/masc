@@ -64,8 +64,7 @@ val runtime_mcp_policy_for_tools :
 val keeper_internal_tool_names_for_runtime_surface :
   keeper_name:string -> Agent_sdk.Tool.t list -> string list
 (** Keeper-internal tool names that require a keeper-bound runtime surface for
-    the given keeper. Empty when [keeper_name] does not resolve to a keeper
-    agent name. *)
+    the given keeper. Empty when [keeper_name] is blank. *)
 
 val keeper_internal_tools_require_materialized_runtime_surface :
   keeper_name:string -> Agent_sdk.Tool.t list -> bool

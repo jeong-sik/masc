@@ -121,6 +121,22 @@
       "note": "Archive search finds aggregate 206 claims, top finding examples, and ACT-title placeholders, but no source_catalog_id, strict-row schema, or 206 itemized finding rows."
     },
     {
+      "artifact_name": "workspace_tmp_goal_loop_catalog_mentions",
+      "artifact_kind": "runtime_search_report",
+      "result": "NOT_ROW_CORPUS",
+      "observed_files_checked": 16,
+      "observed_file_classes": [
+        "orient_snapshot",
+        "status_snapshot",
+        "pretty_printed_audit_catalog"
+      ],
+      "observed_candidate_row_counts": [
+        18,
+        19
+      ],
+      "note": "Workspace and temporary JSON artifacts mentioning goal-loop-206-audit-external-claim-2026-05-05 were checked. They were generated Orient/status/catalog snapshots, not a COMPLETE strict row corpus with 206 findings and a corpus_id."
+    },
+    {
       "artifact_name": "Kimi_Agent_Keeper 사양.zip",
       "artifact_kind": "zip",
       "result": "NOT_ROW_CORPUS",

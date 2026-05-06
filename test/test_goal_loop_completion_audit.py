@@ -407,6 +407,13 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertEqual(len(marker_sweeps), 1)
         self.assertEqual(marker_sweeps[0]["observed_archives_checked"], 43)
         self.assertEqual(marker_sweeps[0]["observed_marker_hits"], 0)
+        workspace_sweeps = [
+            artifact
+            for artifact in discovery["candidate_artifacts_checked"]
+            if artifact["artifact_name"] == "workspace_tmp_goal_loop_catalog_mentions"
+        ]
+        self.assertEqual(len(workspace_sweeps), 1)
+        self.assertEqual(workspace_sweeps[0]["observed_files_checked"], 16)
         self.assertFalse(discovery_evidence["local_path_leaks"])
         self.assertTrue(discovery_evidence["source_catalog_id_matches"])
 

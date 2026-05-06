@@ -147,13 +147,16 @@
   and a single `R-FATAL-1` example was also checked and does not contain the
   missing row corpus. The closest GOAL-loop export archive was checked as
   well; it contains the same prompt documents and research notes, with no
-  `source_catalog_id`, strict-row schema, or 206 itemized rows. A Kimi keeper
-  spec archive with an older GOAL LOOP fixture/script snapshot was also checked
-  and has no `source_catalog_id`, `expected_findings_total`, strict-row schema,
-  or 206-row corpus artifact in its goal-loop members. A broader filename-level
-  sweep of 43 Downloads zip archives matching Kimi/audit/goal/keeper/masc found
-  no `source_catalog_id`, `corpus_id`, `expected_findings_total`, strict-row
-  marker, or GOAL LOOP catalog-id marker in text-like archive members.
+  `source_catalog_id`, strict-row schema, or 206 itemized rows. A workspace/tmp
+  sweep checked 16 generated JSON artifacts mentioning the catalog id; those
+  were Orient/status/catalog snapshots with 18 or 19 rows, not a complete
+  strict 206-row corpus. A Kimi keeper spec archive with an older GOAL LOOP
+  fixture/script snapshot was also checked and has no `source_catalog_id`,
+  `expected_findings_total`, strict-row schema, or 206-row corpus artifact in
+  its goal-loop members. A broader filename-level sweep of 43 Downloads zip
+  archives matching Kimi/audit/goal/keeper/masc found no `source_catalog_id`,
+  `corpus_id`, `expected_findings_total`, strict-row marker, or GOAL LOOP
+  catalog-id marker in text-like archive members.
 - [근거] `python3 test/test_goal_loop_completion_audit.py` checked at
   2026-05-06T09:59:29+09:00, confidence High: the completion audit now accepts
   an optional `--strict-row-corpus` artifact and validates it against the

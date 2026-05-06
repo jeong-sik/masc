@@ -206,6 +206,17 @@ or starting discussions that other keepers should see.";
         ("thread_id", `Assoc [("type", `String "string"); ("description", `String "Linked conversation thread ID (optional)")]);
         ("classification_reason", `Assoc [("type", `String "string"); ("description", `String "Optional explicit rationale for why this should appear as automation/direct in board views")]);
         ("judgment", `Assoc [("type", `String "object"); ("description", `String "Optional structured LLM judgment metadata. Use summary or reason to preserve why you posted/classified it this way")]);
+        ("sources", `Assoc [
+          ("type", `String "array");
+          ("description", `String "Optional external evidence sources appended to the post and persisted in meta.sources");
+          ("items", `Assoc [
+            ("type", `String "object");
+            ("properties", `Assoc [
+              ("url", `Assoc [("type", `String "string"); ("description", `String "Source URL")]);
+              ("quote", `Assoc [("type", `String "string"); ("description", `String "Short relevant quote or snippet")]);
+            ]);
+          ]);
+        ]);
       ]);
       ("required", `List [`String "content"]);
     ];

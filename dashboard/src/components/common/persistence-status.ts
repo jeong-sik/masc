@@ -140,9 +140,10 @@ export function PersistenceStatus({
 }: PersistenceStatusProps) {
   const cfg = getPersistenceStatusConfig(status)
   const summary = summarizePersistenceStatus(status, lastSaved, now)
-  const timeText = summary.lastSavedIso && summary.ageMs !== null
-    ? relativeTimeFromAgeMs(summary.ageMs)
-    : null
+  const timeText =
+    summary.lastSavedIso && summary.ageMs !== null
+      ? relativeTimeFromAgeMs(summary.ageMs)
+      : null
   const freshnessLabel = FRESHNESS_LABEL[summary.freshness]
 
   return html`

@@ -23,7 +23,9 @@ describe('PersistenceStatus', () => {
       ageMs: 120000,
       lastSavedIso: '2026-05-05T23:58:00.000Z',
     })
-    expect(classifyPersistenceFreshness('2026-05-05T23:58:00Z', 1778025600)).toMatchObject({
+    expect(
+      classifyPersistenceFreshness('2026-05-05T23:58:00Z', 1778025600),
+    ).toMatchObject({
       freshness: 'fresh',
       ageMs: 120000,
       lastSavedIso: '2026-05-05T23:58:00.000Z',
@@ -122,25 +124,35 @@ describe('PersistenceStatus', () => {
 
   it('keeps rendered relative time aligned with provided now', () => {
     const container = document.createElement('div')
-    render(h(PersistenceStatus, {
-      status: 'saved',
-      lastSaved: '2026-05-05T23:58:00Z',
-      now: '2026-05-06T00:00:00Z',
-    }), container)
+    render(
+      h(PersistenceStatus, {
+        status: 'saved',
+        lastSaved: '2026-05-05T23:58:00Z',
+        now: '2026-05-06T00:00:00Z',
+      }),
+      container,
+    )
     expect(container.querySelector('[data-persistence-time]')?.textContent).toBe('2분 전')
-    expect(container.querySelector('[data-persistence-status]')?.getAttribute('data-persistence-age-ms')).toBe('120000')
+    expect(
+      container.querySelector('[data-persistence-status]')?.getAttribute('data-persistence-age-ms'),
+    ).toBe('120000')
   })
 
   it('does not render raw invalid timestamps as time elements', () => {
     const container = document.createElement('div')
-    render(h(PersistenceStatus, {
-      status: 'saved',
-      lastSaved: 'not-a-date',
-      now: '2026-05-06T00:00:00Z',
-    }), container)
+    render(
+      h(PersistenceStatus, {
+        status: 'saved',
+        lastSaved: 'not-a-date',
+        now: '2026-05-06T00:00:00Z',
+      }),
+      container,
+    )
     expect(container.querySelector('time[data-persistence-time]')).toBeNull()
     expect(container.textContent).not.toContain('not-a-date')
-    expect(container.querySelector('[data-persistence-status]')?.getAttribute('data-persistence-last-saved')).toBeNull()
+    expect(
+      container.querySelector('[data-persistence-status]')?.getAttribute('data-persistence-last-saved'),
+    ).toBeNull()
   })
 
   it('marks syncing as busy for assistive tech', () => {

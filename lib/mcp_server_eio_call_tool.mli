@@ -72,7 +72,8 @@ val tool_timeout_sec_opt :
     [MASC_TOOL_TIMEOUT_BOARD_SEC] (default 90s, clamped
     5s..300s). This includes keeper/masc board post/comment/vote,
     comment_vote, delete, cleanup, curation_submit, and
-    [masc_board_reaction]. Other bounded tools use
+    [masc_board_reaction]. [masc_persona_generate] uses a fixed
+    outer timeout above its internal OAS worker budget. Other bounded tools use
     [MASC_TOOL_TIMEOUT_DEFAULT_SEC] (default 60s, same
     clamp). [_arguments] is accepted for parity with future
     per-arg overrides but currently unused. *)

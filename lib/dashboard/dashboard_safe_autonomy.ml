@@ -1020,7 +1020,7 @@ let normalize_for_hash (json : Yojson.Safe.t) =
         `Assoc
           (fields
           |> List.filter_map (fun (key, value) ->
-                 if List.mem key [ "generated_at"; "generated_at_unix" ] then None
+                 if List.mem key [ "generated_at"; "generated_at_unix"; "history" ] then None
                  else Some (key, aux value)))
     | `List values -> `List (List.map aux values)
     | other -> other

@@ -152,7 +152,7 @@ installed_agent_sdk_version() {
   # qualifies. This mirrors PR #13787 which closed the same family of
   # bypass on the sibling installed_agent_sdk_version() implementation.
   if [[ "${show_status}" -ne 0 ]] \
-    && grep -Eiq 'No package named (agent_sdk|"agent_sdk")|no packages matching .*agent_sdk|unknown package .*agent_sdk' <<<"${show_output}"; then
+    && grep -Eiq 'No package named (agent_sdk|"agent_sdk")|No package matching .*agent_sdk|no packages matching .*agent_sdk|unknown package .*agent_sdk' <<<"${show_output}"; then
     return 1
   fi
 

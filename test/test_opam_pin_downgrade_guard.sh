@@ -45,7 +45,7 @@ case "$1" in
     shift
     if [[ "${1:-}" == "agent_sdk" && "${2:-}" == "--field=version" ]]; then
       if [[ "${FAKE_OPAM_SHOW_MISSING:-0}" == "1" ]]; then
-        echo "No package named agent_sdk found" >&2
+        echo "[ERROR] No package matching agent_sdk found" >&2
         exit 1
       fi
       [[ "${FAKE_OPAM_SHOW_FAIL:-0}" == "1" ]] && exit 43

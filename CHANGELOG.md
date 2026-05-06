@@ -1,6 +1,11 @@
 # Changelog
 
 
+## [0.19.13] - 2026-05-06
+
+### Changed
+- `docs/rfc/RFC-0035-cognitive-ide-roadmap.md`: refreshed mapping table after Master Report Dim01 dashboard PRs landed. P0 #1~#4 (#13768, #13773, #13781, #13779) now marked merged; P0 #5 backend (cognitive_gravity, #13797) marked merged with #13800 added as the dashboard renderer counterpart for both #5 and #6; P0 #6 backend (intentional_projection, #13821) marked in-flight. PR-stack section renumbered: PR-3 is the bump+refresh chore, PR-4 onward are the deferred items. RFC-0035 PR-3.
+
 ## [0.19.12] - 2026-05-06
 
 ### Added

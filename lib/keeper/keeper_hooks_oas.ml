@@ -1118,6 +1118,105 @@ let route_via_of_json json =
   ]
   |> List.find_map Fun.id
 
+let command_input_of_tool ~(tool_name : string) (input : Yojson.Safe.t) =
+  match tool_name with
+  | "keeper_shell" ->
+      let op =
+        Safe_ops.json_string ~default:"" "op" input
+        |> String.trim |> String.lowercase_ascii
+      in
+      if op = "gh" then
+        Safe_ops.json_string_opt "cmd" input
+        |> Option.map (fun cmd -> "gh " ^ String.trim cmd)
+      else None
+  | "keeper_bash" ->
+      Safe_ops.json_string_opt "cmd" input
+  | "masc_code_shell" ->
+      Safe_ops.json_string_opt "command" input
+  | _ -> None
+
+let output_command_of_json = function
+  | Some json -> Safe_ops.json_string_opt "command" json
+  | None -> None
+
+let command_candidates_of_tool_io ~tool_name ~input ~output_json =
+  let add_candidate candidate acc =
+    match candidate with
+    | None -> acc
+    | Some value ->
+        let command = String.trim value in
+        if command = "" || List.mem command acc then acc else acc @ [ command ]
+  in
+  []
+  |> add_candidate (command_input_of_tool ~tool_name input)
+  |> add_candidate (output_command_of_json output_json)
+
+let shell_words_prefix ?(max_words = 8) command =
+  let len = String.length command in
+  let buf = Buffer.create 32 in
+  let push acc =
+    if Buffer.length buf = 0 then acc
+    else
+      let word = Buffer.contents buf in
+      Buffer.clear buf;
+      word :: acc
+  in
+  let rec loop acc i in_single in_double escaped =
+    if i >= len || List.length acc >= max_words then List.rev (push acc)
+    else
+      let c = command.[i] in
+      if escaped then (
+        Buffer.add_char buf c;
+        loop acc (i + 1) in_single in_double false)
+      else
+        match c with
+        | '\\' when not in_single ->
+            loop acc (i + 1) in_single in_double true
+        | '\'' when not in_double ->
+            loop acc (i + 1) (not in_single) in_double false
+        | '"' when not in_single ->
+            loop acc (i + 1) in_single (not in_double) false
+        | ' ' | '\t' | '\r' | '\n' when (not in_single) && not in_double ->
+            let acc = push acc in
+            loop acc (i + 1) in_single in_double false
+        | _ ->
+            Buffer.add_char buf c;
+            loop acc (i + 1) in_single in_double false
+  in
+  loop [] 0 false false false
+
+let gh_argv_of_segment segment =
+  match Keeper_gh_shared.parse_simple_gh_command segment with
+  | Ok cmd -> Some (Keeper_gh_shared.gh_simple_command_argv cmd)
+  | Error _ ->
+      (match shell_words_prefix segment with
+       | bin :: args when String.equal (String.lowercase_ascii bin) "gh" ->
+           Some args
+       | _ -> None)
+
+let gh_pr_review_action_of_command command =
+  match gh_argv_of_segment command with
+  | Some (subcommand :: action :: pr_number :: args)
+    when String.equal (String.lowercase_ascii subcommand) "pr"
+         && String.equal (String.lowercase_ascii action) "review" ->
+      let has_flag flag =
+        List.exists
+          (fun arg -> String.equal (String.lowercase_ascii arg) flag)
+          args
+      in
+      let action =
+        if has_flag "--approve" then Some "APPROVE"
+        else if has_flag "--request-changes" then Some "REQUEST_CHANGES"
+        else if has_flag "--comment" then Some "COMMENT"
+        else None
+      in
+      Option.map (fun action -> (action, int_of_string_opt pr_number)) action
+  | Some (subcommand :: action :: pr_number :: _)
+    when String.equal (String.lowercase_ascii subcommand) "pr"
+         && String.equal (String.lowercase_ascii action) "comment" ->
+      Some ("COMMENT", int_of_string_opt pr_number)
+  | _ -> None
+
 let output_success ~transport_success = function
   | Some json ->
       (match Safe_ops.json_bool_opt "ok" json with
@@ -1131,6 +1230,7 @@ let output_success ~transport_success = function
   | None -> transport_success
 
 let pr_review_action_metric_event_of_tool_io
+    ~route_via_fallback
     ~(tool_name : string)
     ~(input : Yojson.Safe.t)
     ~(output_text : string)
@@ -1138,7 +1238,10 @@ let pr_review_action_metric_event_of_tool_io
   match tool_name with
   | "keeper_pr_review_comment" ->
       let output_json = output_json_opt ~surface:"pr_review_action" output_text in
-      let route_via = Option.bind output_json route_via_of_json in
+      let route_via =
+        first_some (Option.bind output_json route_via_of_json)
+          route_via_fallback
+      in
       let action =
         match output_json with
         | Some json -> Safe_ops.json_string_opt "event" json
@@ -1171,7 +1274,10 @@ let pr_review_action_metric_event_of_tool_io
         (Option.bind action normalize_pr_review_action)
   | "keeper_pr_review_reply" ->
       let output_json = output_json_opt ~surface:"pr_review_action" output_text in
-      let route_via = Option.bind output_json route_via_of_json in
+      let route_via =
+        first_some (Option.bind output_json route_via_of_json)
+          route_via_fallback
+      in
       let success =
         output_success ~transport_success output_json
       in
@@ -1195,6 +1301,25 @@ let pr_review_action_metric_event_of_tool_io
           success;
           route_via;
         }
+  | "keeper_shell" ->
+      let output_json = output_json_opt ~surface:"pr_review_action" output_text in
+      let route_via =
+        first_some (Option.bind output_json route_via_of_json)
+          route_via_fallback
+      in
+      let success =
+        output_success ~transport_success output_json
+      in
+      command_candidates_of_tool_io ~tool_name ~input ~output_json
+      |> List.find_map gh_pr_review_action_of_command
+      |> Option.map (fun (action, pr_number) ->
+           {
+             action;
+             pr_number;
+             comment_id = None;
+             success;
+             route_via;
+           })
   | _ -> None
 
 let split_top_level_command_segments command =
@@ -1252,18 +1377,25 @@ let pr_work_actions_of_git_segment segment =
        | Masc_exec.Shell_ir.Lit action :: _ ->
            pr_work_action_of_git_action action |> Option.to_list
        | _ -> [])
-  | _ -> []
+  | _ ->
+      let lower = String.trim segment |> String.lowercase_ascii in
+      let starts_with_word prefix =
+        String.equal lower prefix
+        || (String.length lower > String.length prefix
+            && String.starts_with ~prefix:(prefix ^ " ") lower)
+      in
+      if starts_with_word "git push" then [ "GIT_PUSH" ]
+      else if starts_with_word "git commit" then [ "GIT_COMMIT" ]
+      else if starts_with_word "git add" then [ "GIT_ADD" ]
+      else []
 
 let pr_work_actions_of_gh_segment segment =
-  match Keeper_gh_shared.parse_simple_gh_command segment with
-  | Ok cmd ->
-      (match Keeper_gh_shared.gh_simple_command_argv cmd with
-       | subcommand :: action :: _
-         when String.equal (String.lowercase_ascii subcommand) "pr"
-              && String.equal (String.lowercase_ascii action) "create" ->
-           [ "PR_CREATE" ]
-       | _ -> [])
-  | Error _ -> []
+  match gh_argv_of_segment segment with
+  | Some (subcommand :: action :: _)
+    when String.equal (String.lowercase_ascii subcommand) "pr"
+         && String.equal (String.lowercase_ascii action) "create" ->
+      [ "PR_CREATE" ]
+  | _ -> []
 
 let pr_work_actions_of_command command =
   split_top_level_command_segments command
@@ -1277,30 +1409,17 @@ let pr_work_actions_of_command command =
          | [] -> pr_work_actions_of_git_segment segment
          | actions -> actions)
 
-let command_input_of_tool ~(tool_name : string) (input : Yojson.Safe.t) =
-  match tool_name with
-  | "keeper_shell" ->
-      let op =
-        Safe_ops.json_string ~default:"" "op" input
-        |> String.trim |> String.lowercase_ascii
-      in
-      if op = "gh" then
-        Safe_ops.json_string_opt "cmd" input
-        |> Option.map (fun cmd -> "gh " ^ String.trim cmd)
-      else None
-  | "keeper_bash" ->
-      Safe_ops.json_string_opt "cmd" input
-  | "masc_code_shell" ->
-      Safe_ops.json_string_opt "command" input
-  | _ -> None
-
 let pr_work_action_metric_events_of_tool_io
+    ~route_via_fallback
     ~(tool_name : string)
     ~(input : Yojson.Safe.t)
     ~(output_text : string)
     ~(transport_success : bool) =
   let output_json = output_json_opt ~surface:"pr_work_action" output_text in
-  let route_via = Option.bind output_json route_via_of_json in
+  let route_via =
+    first_some (Option.bind output_json route_via_of_json)
+      route_via_fallback
+  in
   let success = output_success ~transport_success output_json in
   match tool_name with
   | "masc_code_git" ->
@@ -1337,18 +1456,25 @@ let pr_work_action_metric_events_of_tool_io
         };
       ]
   | "keeper_shell" | "keeper_bash" | "masc_code_shell" ->
-      (match command_input_of_tool ~tool_name input with
-       | None -> []
-       | Some command ->
+      command_candidates_of_tool_io ~tool_name ~input ~output_json
+      |> List.concat_map (fun command ->
            pr_work_actions_of_command command
            |> List.map (fun work_action ->
-                {
-                  work_action;
-                  work_source = tool_name;
-                  command = Some command;
-                  success;
-                  route_via;
-                }))
+                ( command,
+                  {
+                    work_action;
+                    work_source = tool_name;
+                    command = Some command;
+                    success;
+                    route_via;
+                  } )))
+      |> List.fold_left
+           (fun (seen, events) (_command, event) ->
+              let key = event.work_action in
+              if List.mem key seen then (seen, events)
+              else (key :: seen, events @ [ event ]))
+           ([], [])
+      |> snd
   | _ -> []
 
 let append_pr_review_action_metric
@@ -1361,9 +1487,18 @@ let append_pr_review_action_metric
     ~(transport_success : bool)
     ~(duration_ms : float)
     () =
+  let route_via_fallback =
+    match meta.sandbox_profile, tool_name with
+    | Docker, ("keeper_pr_review_comment" | "keeper_pr_review_reply") ->
+        Some "brokered"
+    | Docker, "keeper_shell" ->
+        if Env_config_keeper.KeeperSandbox.hard_mode () then Some "brokered"
+        else Some "docker"
+    | _ -> None
+  in
   match
     pr_review_action_metric_event_of_tool_io
-      ~tool_name ~input ~output_text ~transport_success
+      ~route_via_fallback ~tool_name ~input ~output_text ~transport_success
   with
   | None -> ()
   | Some event ->
@@ -1409,9 +1544,21 @@ let append_pr_work_action_metrics
     ~(transport_success : bool)
     ~(duration_ms : float)
     () =
+  let route_via_fallback =
+    match meta.sandbox_profile, tool_name with
+    | Docker, "keeper_pr_create" ->
+        if Env_config_keeper.KeeperSandbox.hard_mode () then Some "brokered"
+        else Some "docker"
+    | Docker, "keeper_shell" ->
+        if Env_config_keeper.KeeperSandbox.hard_mode () then Some "brokered"
+        else Some "docker"
+    | Docker, ("keeper_bash" | "masc_code_shell" | "masc_code_git") ->
+        Some "docker"
+    | _ -> None
+  in
   let events =
     pr_work_action_metric_events_of_tool_io
-      ~tool_name ~input ~output_text ~transport_success
+      ~route_via_fallback ~tool_name ~input ~output_text ~transport_success
   in
   match events with
   | [] -> ()

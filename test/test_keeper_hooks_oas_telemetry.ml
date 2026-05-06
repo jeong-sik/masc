@@ -779,9 +779,10 @@ let test_on_idle_hook_returns_runtime_nudge () =
             tool_names = [ "keeper_bash" ];
           }))
 
-let pr_review_event ~tool_name ~input ~output_text =
+let pr_review_event ?route_via_fallback ~tool_name ~input ~output_text () =
   Hooks.For_testing.pr_review_action_metric_event_of_tool_io
-    ~tool_name ~input ~output_text ~transport_success:true
+    ~route_via_fallback ~tool_name ~input ~output_text
+    ~transport_success:true
 
 let require_pr_review_event label = function
   | Some event -> event
@@ -800,6 +801,7 @@ let test_pr_review_action_metric_extracts_approve () =
       ~input:(`Assoc [ ("pr_number", `Int 13177); ("event", `String "COMMENT") ])
       ~output_text:
         {|{"ok":true,"pr_number":13177,"event":"APPROVE","keeper":"sangsu","via":"docker"}|}
+      ()
     |> require_pr_review_event "approve"
   in
   check string "action from output" "APPROVE" event.action;
@@ -813,6 +815,7 @@ let test_pr_review_action_metric_marks_structured_failure () =
       ~tool_name:"keeper_pr_review_comment"
       ~input:(`Assoc [ ("number", `Int 42); ("event", `String "approve") ])
       ~output_text:{|{"ok":false,"error":"gh_failed"}|}
+      ()
     |> require_pr_review_event "failed approve"
   in
   check string "action fallback from input" "APPROVE" event.action;
@@ -825,6 +828,7 @@ let test_pr_review_action_metric_extracts_reply () =
       ~tool_name:"keeper_pr_review_reply"
       ~input:(`Assoc [ ("pr_number", `Int 9); ("comment_id", `Int 1234) ])
       ~output_text:{|{"ok":true,"pr_number":9,"comment_id":1234,"via":"host"}|}
+      ()
     |> require_pr_review_event "reply"
   in
   check string "reply action" "REPLY" event.action;
@@ -839,6 +843,7 @@ let test_pr_review_action_metric_observes_invalid_output_json () =
       ~tool_name:"keeper_pr_review_comment"
       ~input:(`Assoc [ ("number", `Int 7); ("event", `String "comment") ])
       ~output_text:"{not-json"
+      ()
     |> require_pr_review_event "invalid output json"
   in
   check string "action fallback from input" "COMMENT" event.action;
@@ -846,9 +851,30 @@ let test_pr_review_action_metric_observes_invalid_output_json () =
   check (float 0.001) "parse failure counted" (before +. 1.0)
     (hook_output_parse_failures "pr_review_action")
 
-let pr_work_events ~tool_name ~input ~output_text =
+let test_pr_review_action_metric_extracts_keeper_shell_approve () =
+  let event =
+    pr_review_event
+      ~tool_name:"keeper_shell"
+      ~input:
+        (`Assoc
+          [
+            ("op", `String "gh");
+            ("cmd", `String "pr review 13680 --approve --body ok");
+          ])
+      ~output_text:
+        {|{"ok":true,"op":"gh","command":"gh 'pr' 'review' '13680' '--approve' '--body' 'ok'","via":"docker"}|}
+      ()
+    |> require_pr_review_event "keeper_shell approve"
+  in
+  check string "approve action" "APPROVE" event.action;
+  check (option int) "approve pr" (Some 13680) event.pr_number;
+  check bool "approve success" true event.success;
+  check (option string) "approve route via" (Some "docker") event.route_via
+
+let pr_work_events ?route_via_fallback ~tool_name ~input ~output_text () =
   Hooks.For_testing.pr_work_action_metric_events_of_tool_io
-    ~tool_name ~input ~output_text ~transport_success:true
+    ~route_via_fallback ~tool_name ~input ~output_text
+    ~transport_success:true
 
 let work_actions events = List.map (fun e -> e.Hooks.work_action) events
 
@@ -858,6 +884,7 @@ let test_pr_work_action_metric_extracts_masc_code_git_push () =
       ~tool_name:"masc_code_git"
       ~input:(`Assoc [ ("action", `String "push") ])
       ~output_text:{|{"status":"ok","action":"push","via":"docker"}|}
+      ()
   in
   check (list string) "actions" [ "GIT_PUSH" ] (work_actions events);
   let event =
@@ -876,6 +903,7 @@ let test_pr_work_action_metric_observes_invalid_output_json () =
       ~tool_name:"masc_code_git"
       ~input:(`Assoc [ ("action", `String "push") ])
       ~output_text:"{not-json"
+      ()
   in
   check (list string) "actions fallback from input" [ "GIT_PUSH" ]
     (work_actions events);
@@ -892,6 +920,7 @@ let test_pr_work_action_metric_extracts_gh_pr_create () =
             ("cmd", `String "pr create --draft --title t") ])
       ~output_text:
         {|{"ok":true,"op":"gh","command":"gh pr create --draft","route":{"via":"docker"}}|}
+      ()
   in
   check (list string) "pr create action" [ "PR_CREATE" ]
     (work_actions events);
@@ -899,6 +928,28 @@ let test_pr_work_action_metric_extracts_gh_pr_create () =
   | [ event ] ->
       check (option string) "route via nested" (Some "docker") event.route_via
   | _ -> failf "expected one pr create event"
+
+let test_pr_work_action_metric_extracts_quoted_output_gh_pr_create () =
+  let events =
+    pr_work_events
+      ~tool_name:"keeper_shell"
+      ~input:
+        (`Assoc
+          [
+            ("op", `String "gh");
+            ("cmd", `String "pr status");
+          ])
+      ~output_text:
+        {|{"ok":true,"op":"gh","command":"gh 'pr' 'create' '--draft' '--base' 'main' '--head' 'keeper/proof'","via":"docker"}|}
+      ()
+  in
+  check (list string) "quoted output pr create action" [ "PR_CREATE" ]
+    (work_actions events);
+  match events with
+  | [ event ] ->
+      check (option string) "quoted output route via" (Some "docker")
+        event.route_via
+  | _ -> failf "expected one quoted output pr create event"
 
 let test_pr_work_action_metric_extracts_keeper_pr_create () =
   let events =
@@ -912,6 +963,7 @@ let test_pr_work_action_metric_extracts_keeper_pr_create () =
           ])
       ~output_text:
         {|{"ok":true,"tool":"keeper_pr_create","operation":"pr_create","via":"brokered"}|}
+      ()
   in
   check (list string) "pr create action" [ "PR_CREATE" ]
     (work_actions events);
@@ -920,6 +972,48 @@ let test_pr_work_action_metric_extracts_keeper_pr_create () =
       check string "source" "keeper_pr_create" event.work_source;
       check (option string) "route via" (Some "brokered") event.route_via
   | _ -> failf "expected one keeper_pr_create event"
+
+let test_pr_work_action_metric_uses_native_pr_create_route_fallback () =
+  let events =
+    pr_work_events ~route_via_fallback:"brokered"
+      ~tool_name:"keeper_pr_create"
+      ~input:
+        (`Assoc
+          [
+            ("title", `String "proof");
+            ("head", `String "proof/keeper-docker");
+          ])
+      ~output_text:
+        {|{"ok":true,"tool":"keeper_pr_create","operation":"pr_create"}|}
+      ()
+  in
+  check (list string) "pr create action" [ "PR_CREATE" ]
+    (work_actions events);
+  match events with
+  | [ event ] ->
+      check (option string) "route fallback" (Some "brokered")
+        event.route_via
+  | _ -> failf "expected one keeper_pr_create event"
+
+let test_pr_work_action_metric_extracts_bash_git_push_with_redirection () =
+  let events =
+    pr_work_events
+      ~tool_name:"keeper_bash"
+      ~input:
+        (`Assoc
+          [
+            ( "cmd",
+              `String "git push -u origin keeper/proof-branch 2>&1" );
+          ])
+      ~output_text:{|{"ok":true,"via":"docker"}|}
+      ()
+  in
+  check (list string) "git push with redirection" [ "GIT_PUSH" ]
+    (work_actions events);
+  match events with
+  | [ event ] ->
+      check (option string) "route via" (Some "docker") event.route_via
+  | _ -> failf "expected one git push event"
 
 let test_pr_work_action_metric_extracts_bash_git_sequence_failure () =
   let events =
@@ -931,6 +1025,7 @@ let test_pr_work_action_metric_extracts_bash_git_sequence_failure () =
               `String "git add lib/foo.ml && git commit -m x && git push origin feat/x" );
           ])
       ~output_text:{|{"ok":false,"cmd":"git push origin feat/x"}|}
+      ()
   in
   check (list string) "git action sequence"
     [ "GIT_ADD" ]
@@ -951,6 +1046,7 @@ let test_pr_work_action_metric_ignores_quoted_command_words () =
             );
           ])
       ~output_text:{|{"ok":true}|}
+      ()
   in
   check (list string) "quoted command words do not add actions"
     [ "GIT_COMMIT" ] (work_actions bash_events);
@@ -964,6 +1060,7 @@ let test_pr_work_action_metric_ignores_quoted_command_words () =
             ("cmd", `String "issue comment 1 --body \"please pr create later\"");
           ])
       ~output_text:{|{"ok":true}|}
+      ()
   in
   check (list string) "quoted pr create is not a command" [] (work_actions gh_events)
 
@@ -973,6 +1070,7 @@ let test_pr_work_action_metric_skips_shell_control_flow_segments () =
       ~tool_name:"keeper_bash"
       ~input:(`Assoc [ ("cmd", `String "false && git push origin feat/x") ])
       ~output_text:{|{"ok":false}|}
+      ()
   in
   check (list string) "skipped && segment" [] (work_actions and_events);
   let or_events =
@@ -986,6 +1084,7 @@ let test_pr_work_action_metric_skips_shell_control_flow_segments () =
                 "git commit -m reviewed || gh pr create --draft --title retry" );
           ])
       ~output_text:{|{"ok":true}|}
+      ()
   in
   check (list string) "skipped || fallback segment" [ "GIT_COMMIT" ]
     (work_actions or_events)
@@ -1067,6 +1166,8 @@ let () =
             test_pr_review_action_metric_extracts_reply
         ; test_case "observes invalid output JSON" `Quick
             test_pr_review_action_metric_observes_invalid_output_json
+        ; test_case "extracts keeper_shell approve" `Quick
+            test_pr_review_action_metric_extracts_keeper_shell_approve
         ] )
     ; ( "pr_work_action",
         [ test_case "extracts masc_code_git push" `Quick
@@ -1075,8 +1176,14 @@ let () =
             test_pr_work_action_metric_observes_invalid_output_json
         ; test_case "extracts keeper_shell gh pr create" `Quick
             test_pr_work_action_metric_extracts_gh_pr_create
+        ; test_case "extracts quoted output gh pr create" `Quick
+            test_pr_work_action_metric_extracts_quoted_output_gh_pr_create
         ; test_case "extracts keeper_pr_create" `Quick
             test_pr_work_action_metric_extracts_keeper_pr_create
+        ; test_case "uses native pr create route fallback" `Quick
+            test_pr_work_action_metric_uses_native_pr_create_route_fallback
+        ; test_case "extracts bash git push with redirection" `Quick
+            test_pr_work_action_metric_extracts_bash_git_push_with_redirection
         ; test_case "extracts conservative bash git failure" `Quick
             test_pr_work_action_metric_extracts_bash_git_sequence_failure
         ; test_case "ignores quoted command words" `Quick

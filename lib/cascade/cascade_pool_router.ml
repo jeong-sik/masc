@@ -3,16 +3,28 @@ type t = {
   keeper_pool_map : (string, Cascade_pool.pool_id) Hashtbl.t;
 }
 
+let parse_provider_list ~env_var ~default =
+  match Env_config_core.get_string ~default:"" env_var with
+  | "" -> default
+  | raw -> String.split_on_char ',' raw |> List.map String.trim
+           |> List.filter (fun s -> s <> "")
+
 let create () =
-  let tier1 =
-    Cascade_pool.create Cascade_pool.Tier1 ~provider_keys:["glm"; "kimi"; "claude"; "gemini"]
+  let tier1_keys =
+    parse_provider_list ~env_var:"MASC_POOL_TIER1_PROVIDERS"
+      ~default:["glm"; "kimi"; "claude"; "gemini"]
   in
-  let tier2 =
-    Cascade_pool.create Cascade_pool.Tier2 ~provider_keys:["ollama"]
+  let tier2_keys =
+    parse_provider_list ~env_var:"MASC_POOL_TIER2_PROVIDERS"
+      ~default:["ollama"]
   in
-  let emergency =
-    Cascade_pool.create Cascade_pool.Emergency ~provider_keys:[]
+  let emergency_keys =
+    parse_provider_list ~env_var:"MASC_POOL_EMERGENCY_PROVIDERS"
+      ~default:["ollama"; "openai"]
   in
+  let tier1 = Cascade_pool.create Cascade_pool.Tier1 ~provider_keys:tier1_keys in
+  let tier2 = Cascade_pool.create Cascade_pool.Tier2 ~provider_keys:tier2_keys in
+  let emergency = Cascade_pool.create Cascade_pool.Emergency ~provider_keys:emergency_keys in
   let pools = [tier1; tier2; emergency] in
   let keeper_pool_map = Hashtbl.create 64 in
   { pools; keeper_pool_map }

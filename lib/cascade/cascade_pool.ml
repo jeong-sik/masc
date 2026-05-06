@@ -21,8 +21,10 @@ let pool_id_of_string = function
   | _ -> None
 
 let create pool_id ~provider_keys =
-  if pool_id <> Emergency && provider_keys = [] then
-    raise (Invalid_argument "Cascade_pool.create: provider_keys must not be empty for non-Emergency pools")
+  if provider_keys = [] then
+    raise (Invalid_argument
+             (Printf.sprintf "Cascade_pool.create: provider_keys must not be empty for %s pool"
+                (pool_id_to_string pool_id)))
   ;
   {
     id = pool_id;

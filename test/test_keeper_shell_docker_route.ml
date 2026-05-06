@@ -915,6 +915,40 @@ let test_bash_rewrites_host_path_command_for_docker () =
   Alcotest.(check bool) "command no longer leaks host playground path" false
     (response_mentions raw "output" playground)
 
+let test_nested_runtime_detector_ignores_commit_message_words () =
+  let cases =
+    [
+      "git commit --allow-empty -m 'docker sandbox proof'";
+      "git -C /tmp/repo commit -m 'podman nerdctl buildah mentioned as text'";
+      "echo 'docker podman buildah are just words'";
+    ]
+  in
+  List.iter
+    (fun cmd ->
+      Alcotest.(check bool)
+        ("does not block quoted/plain argument text: " ^ cmd)
+        false
+        (Keeper_shell_docker.command_uses_nested_container_runtime cmd))
+    cases
+
+let test_nested_runtime_detector_blocks_runtime_binaries () =
+  let cases =
+    [
+      "docker ps";
+      "podman run alpine true";
+      "nerdctl images";
+      "buildah bud .";
+      "cd /tmp && docker ps";
+    ]
+  in
+  List.iter
+    (fun cmd ->
+      Alcotest.(check bool)
+        ("blocks nested runtime command: " ^ cmd)
+        true
+        (Keeper_shell_docker.command_uses_nested_container_runtime cmd))
+    cases
+
 let () =
   Alcotest.run "Keeper_shell_docker_route"
     [
@@ -970,6 +1004,12 @@ let () =
           Alcotest.test_case
             "git-creds uses GitHub author only in github_identity mode"
             `Quick test_git_creds_uses_github_identity_mode;
+          Alcotest.test_case
+            "nested runtime detector ignores commit message words"
+            `Quick test_nested_runtime_detector_ignores_commit_message_words;
+          Alcotest.test_case
+            "nested runtime detector blocks runtime binaries"
+            `Quick test_nested_runtime_detector_blocks_runtime_binaries;
           Alcotest.test_case "hard mode git_clone uses brokered route" `Quick
             test_hard_mode_git_clone_uses_brokered_route;
 	          Alcotest.test_case "git_clone repairs existing docker clone checkout"

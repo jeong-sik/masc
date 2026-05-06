@@ -145,11 +145,32 @@ let sandbox_socket_markers =
     "buildkitd.sock";
   ]
 
+let rec shell_ir_uses_nested_container_runtime = function
+  | Masc_exec.Shell_ir.Simple simple ->
+      let bin =
+        Masc_exec.Bin.to_string simple.bin
+        |> Filename.basename
+        |> String.lowercase_ascii
+      in
+      List.mem bin nested_container_runtime_tokens
+  | Masc_exec.Shell_ir.Pipeline stages ->
+      List.exists shell_ir_uses_nested_container_runtime stages
+
 let command_uses_nested_container_runtime cmd =
-  let lowered_words = lowercase_shell_words cmd in
   let lowered_cmd = String.lowercase_ascii cmd in
-  List.exists (fun token -> List.mem token nested_container_runtime_tokens)
-    lowered_words
+  let runtime_bin =
+    match Masc_exec_bash_parser.Bash.parse_string cmd with
+    | Masc_exec.Parsed.Parsed ir ->
+        shell_ir_uses_nested_container_runtime ir
+    | Masc_exec.Parsed.Parse_error _
+    | Masc_exec.Parsed.Parse_aborted _
+    | Masc_exec.Parsed.Too_complex _ ->
+        let lowered_words = lowercase_shell_words cmd in
+        List.exists
+          (fun token -> List.mem token nested_container_runtime_tokens)
+          lowered_words
+  in
+  runtime_bin
   || List.exists (String_util.contains_substring lowered_cmd) sandbox_socket_markers
 
 (* ── Sandbox runtime preflight ─────────────────────────── *)

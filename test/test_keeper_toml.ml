@@ -1766,12 +1766,26 @@ legacy_scope = "removed"
   let open Yojson.Safe.Util in
   check int "unknown key count" 1
     (json |> member "keeper_config_unknown_key_count" |> to_int);
+  check string "schema status" "blocked"
+    (json |> member "keeper_config_schema_status" |> to_string);
+  check bool "schema blocks" true
+    (json |> member "keeper_config_schema_blocking" |> to_bool);
+  check string "schema terminal reason" "config_unknown_keys"
+    (json |> member "keeper_config_schema_terminal_reason" |> to_string);
+  check bool "operator action required" true
+    (json |> member "keeper_config_operator_action_required" |> to_bool);
   let rows = json |> member "keeper_config_unknown_keys" |> to_list in
   (match rows with
    | [ row ] ->
      check string "keeper" "alpha" (row |> member "keeper" |> to_string);
      check string "terminal reason" "config_unknown_keys"
        (row |> member "terminal_reason" |> to_string);
+     check string "severity" "error" (row |> member "severity" |> to_string);
+     check bool "row blocks" true (row |> member "blocking" |> to_bool);
+     check bool "row operator action required" true
+       (row |> member "operator_action_required" |> to_bool);
+     check string "row next action" "remove_unknown_keeper_toml_keys"
+       (row |> member "next_action" |> to_string);
      check (list string) "unknown keys"
        [ "keeper.legacy_scope" ]
        (row |> member "unknown_keys" |> to_list |> List.map to_string)

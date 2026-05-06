@@ -241,6 +241,20 @@ let contains needle haystack =
 let check_contains label needle haystack =
   check bool label true (contains needle haystack)
 
+let playground_cache_repo ~base_path ~agent_name ~repo_name =
+  let cache_path =
+    Filename.concat base_path
+      (Printf.sprintf ".masc/playground/%s/.playground_state.json" agent_name)
+  in
+  let open Yojson.Safe.Util in
+  Yojson.Safe.from_file cache_path
+  |> member "repos"
+  |> to_list
+  |> List.find (fun repo ->
+       match member "name" repo with
+       | `String name -> String.equal name repo_name
+       | _ -> false)
+
 let test_dispatch_worktree_create_spoofed_agent_blocked () =
   let ctx = make_ctx () in
   let args = `Assoc [
@@ -371,6 +385,54 @@ let test_dispatch_worktree_create_auto_provisions_workspace_repo () =
         (contains "auto-provisioned" msg);
       check bool "sandbox clone created" true (Sys.file_exists sandbox_clone);
       check bool "worktree created" true (Sys.file_exists worktree_path)
+
+let test_dispatch_worktree_create_refreshes_playground_repo_cache () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  init_process_eio env;
+  run_ok ~cwd:base_path "git init -q -b main";
+  ignore
+    (setup_nested_repo_with_remote ~base_path
+       ~repo_rel:"workspace/yousleepwhen/masc-mcp");
+  let config = Masc_mcp.Coord.default_config base_path in
+  ignore (Masc_mcp.Coord.init config ~agent_name:(Some "test-agent"));
+  let playground_dir =
+    Filename.concat base_path ".masc/playground/test-agent"
+  in
+  ensure_dir playground_dir;
+  write_file
+    (Filename.concat playground_dir ".playground_state.json")
+    {|{"repos":[{"name":"masc-mcp","branch":"main","latest_commit":"old-cache","shallow":false,"last_action":"clone","updated_at":"1"}],"last_updated":"1"}|};
+  let ctx : Tool_worktree.context = { config; agent_name = "test-agent" } in
+  let args =
+    `Assoc
+      [
+        ("task_id", `String "task-cache-refresh");
+        ("repo_name", `String "masc-mcp");
+        ("base_branch", `String "main");
+      ]
+  in
+  match Tool_worktree.dispatch ctx ~name:"masc_worktree_create" ~args with
+  | None -> fail "dispatch returned None for masc_worktree_create"
+  | Some (false, msg) ->
+      fail
+        (Printf.sprintf
+           "expected worktree create to refresh cache, got error: %s" msg)
+  | Some (true, _msg) ->
+      let repo =
+        playground_cache_repo ~base_path ~agent_name:"test-agent"
+          ~repo_name:"masc-mcp"
+      in
+      let open Yojson.Safe.Util in
+      let latest_commit = repo |> member "latest_commit" |> to_string in
+      check string "cache action" "fetch"
+        (repo |> member "last_action" |> to_string);
+      check bool "cache commit is refreshed" false
+        (contains "old-cache" latest_commit);
+      check bool "cache commit uses live git metadata" true
+        (contains "init" latest_commit)
 
 let test_dispatch_worktree_create_auto_provisions_after_file_storm () =
   let base_path = temp_dir () in
@@ -815,6 +877,8 @@ let () =
         test_dispatch_worktree_create_reports_missing_sandbox_clone;
       test_case "workspace repo auto-provisions sandbox clone" `Quick
         test_dispatch_worktree_create_auto_provisions_workspace_repo;
+      test_case "worktree create refreshes playground repo cache" `Quick
+        test_dispatch_worktree_create_refreshes_playground_repo_cache;
       test_case "workspace repo auto-provisions after file storm" `Quick
         test_dispatch_worktree_create_auto_provisions_after_file_storm;
       test_case "workspace repo wins before hidden dir storm" `Quick

@@ -524,6 +524,7 @@ val metric_llm_decode_tok_per_sec : string
     tell absence apart from zero. *)
 
 val metric_after_turn_hook : string
+val metric_keeper_oas_on_stop : string
 val metric_after_turn_telemetry_missing : string
 val metric_after_turn_telemetry_zero_latency : string
 val metric_tasks : string

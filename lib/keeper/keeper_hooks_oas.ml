@@ -64,6 +64,13 @@ let current_keeper_model meta =
   let m = meta.Keeper_types.runtime.usage.last_model_used in
   if m = "" then meta.Keeper_types.cascade_name else m
 
+let stop_reason_to_label = function
+  | Agent_sdk.Types.EndTurn -> "end_turn"
+  | Agent_sdk.Types.StopToolUse -> "tool_use"
+  | Agent_sdk.Types.MaxTokens -> "max_tokens"
+  | Agent_sdk.Types.StopSequence -> "stop_sequence"
+  | Agent_sdk.Types.Unknown _ -> "unknown"
+
 let render_pre_tool_gate_source_hint
     (event : Keeper_guards.gate_decision_event) =
   match event.source_path, event.source_line with
@@ -2193,6 +2200,19 @@ let make_hooks
        destructive + governance_approval) is composed with these
        non-gate hooks at the end of [make_hooks]. *)
 
+    on_stop = Some (fun event ->
+      match event with
+      | Agent_sdk.Hooks.OnStop { reason; _ } ->
+        Prometheus.inc_counter Prometheus.metric_keeper_oas_on_stop
+          ~labels:
+            [
+              ("keeper", (!meta_ref).name);
+              ("stop_reason", stop_reason_to_label reason);
+            ]
+          ();
+        Agent_sdk.Hooks.Continue
+      | _ -> Agent_sdk.Hooks.Continue);
+
     on_idle = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.OnIdle { consecutive_idle_turns; tool_names; _ } ->
@@ -2383,9 +2403,9 @@ let hook_introspection_json
         ~effects:[ "tool_use_failure_metric" ]
         "post_tool_use_failure";
       slot
-        ~active:false
-        ~source:"not_registered"
-        ~reason:"keeper runtime has no stop hook"
+        ~active:true
+        ~source:"keeper_hooks_oas"
+        ~effects:[ "stop_reason_metric" ]
         "on_stop";
       slot
         ~active:true

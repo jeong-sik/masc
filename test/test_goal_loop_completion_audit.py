@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -773,6 +774,28 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertFalse(inventory_evidence["prompt_sources_have_expected_prefix"])
         self.assertFalse(inventory_evidence["prompt_sources_valid"])
 
+    def test_completion_audit_rejects_non_list_source_inventory_paths(
+        self,
+    ) -> None:
+        inventory = json.loads(
+            SOURCE_ROW_CANDIDATE_INVENTORY_FIXTURE.read_text(encoding="utf-8")
+        )
+        inventory["prompt_sources_checked"] = "prompt_corpus/GOAL_LOOP/not-a-list.md"
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            source_row_candidate_inventory=inventory,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        inventory_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "source_row_candidate_inventory"
+        ]
+        self.assertFalse(inventory_evidence["recorded"])
+        self.assertFalse(inventory_evidence["prompt_sources_is_list"])
+        self.assertEqual(inventory_evidence["invalid_prompt_sources_checked"], 1)
+        self.assertFalse(inventory_evidence["prompt_sources_valid"])
+
     def test_completion_audit_rejects_inconsistent_source_row_candidate_inventory(
         self,
     ) -> None:
@@ -1000,6 +1023,25 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertFalse(checklist_evidence["prompt_sources_have_expected_prefix"])
         self.assertFalse(checklist_evidence["prompt_sources_valid"])
 
+    def test_completion_audit_rejects_non_list_closeout_prompt_sources(
+        self,
+    ) -> None:
+        checklist = json.loads(PROMPT_CHECKLIST_FIXTURE.read_text(encoding="utf-8"))
+        checklist["prompt_sources_checked"] = "prompt_corpus/GOAL_LOOP/not-a-list.md"
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            prompt_closeout_checklist=checklist,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
+        self.assertFalse(checklist_evidence["recorded"])
+        self.assertFalse(checklist_evidence["source_docs_complete"])
+        self.assertFalse(checklist_evidence["prompt_sources_is_list"])
+        self.assertEqual(checklist_evidence["invalid_prompt_sources_checked"], 1)
+        self.assertFalse(checklist_evidence["prompt_sources_valid"])
+
     def test_completion_audit_accepts_prompt_checklist_without_strict_blocker(
         self,
     ) -> None:
@@ -1185,6 +1227,56 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         )
         self.assertIn(
             f"{first['requirement_id']}: missing_artifact_ref_anchor",
+            checklist_evidence["invalid_requirements"],
+        )
+
+    def test_completion_audit_reports_prompt_artifact_ref_read_errors(self) -> None:
+        checklist = json.loads(PROMPT_CHECKLIST_FIXTURE.read_text(encoding="utf-8"))
+        requirements = checklist["requirements"]
+        assert isinstance(requirements, list)
+        first = requirements[0]
+        assert isinstance(first, dict)
+        first["artifact_refs"] = [
+            "test/fixtures/goal_loop/audit-corpus.external-claim.json#NF-1"
+        ]
+        original_read_text = goal_loop_completion_audit.Path.read_text
+        failed_once = False
+
+        def read_text_with_error(path: Path, *args: object, **kwargs: object) -> str:
+            nonlocal failed_once
+            if path.name == "audit-corpus.external-claim.json" and not failed_once:
+                failed_once = True
+                raise OSError("synthetic read failure")
+            return original_read_text(path, *args, **kwargs)
+
+        with mock.patch.object(
+            goal_loop_completion_audit.Path,
+            "read_text",
+            read_text_with_error,
+        ):
+            audit = goal_loop_completion_audit.build_completion_audit(
+                strict_catalog_only_blocked_status(),
+                prompt_closeout_checklist=checklist,
+            )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
+        self.assertFalse(checklist_evidence["recorded"])
+        self.assertFalse(checklist_evidence["artifact_refs_all_resolved"])
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_total"], 7)
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_resolved"], 6)
+        self.assertEqual(
+            checklist_evidence["artifact_ref_read_errors"],
+            [
+                (
+                    f"{first['requirement_id']}: "
+                    "test/fixtures/goal_loop/audit-corpus.external-claim.json: "
+                    "OSError"
+                )
+            ],
+        )
+        self.assertIn(
+            f"{first['requirement_id']}: artifact_ref_read_error",
             checklist_evidence["invalid_requirements"],
         )
 

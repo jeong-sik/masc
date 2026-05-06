@@ -112,12 +112,13 @@ def string_list(value: Any) -> list[str]:
 def prompt_source_list(value: Any) -> tuple[list[str], dict[str, Any]]:
     if not isinstance(value, list):
         return [], {
-            "invalid_prompt_sources_checked": 0,
+            "prompt_sources_is_list": False,
+            "invalid_prompt_sources_checked": 1,
             "duplicate_prompt_sources_checked": [],
             "invalid_prompt_source_prefixes": [],
             "prompt_sources_unique": True,
             "prompt_sources_have_expected_prefix": True,
-            "prompt_sources_valid": True,
+            "prompt_sources_valid": False,
         }
 
     sources = string_list(value)
@@ -136,6 +137,7 @@ def prompt_source_list(value: Any) -> tuple[list[str], dict[str, Any]]:
     prompt_sources_unique = not duplicates
     prompt_sources_have_expected_prefix = not invalid_prefixes
     return sources, {
+        "prompt_sources_is_list": True,
         "invalid_prompt_sources_checked": invalid_count,
         "duplicate_prompt_sources_checked": sorted(duplicates),
         "invalid_prompt_source_prefixes": invalid_prefixes,
@@ -867,6 +869,7 @@ def prompt_closeout_checklist_evidence(
     artifact_ref_anchors_resolved = 0
     missing_artifact_refs: list[str] = []
     missing_artifact_ref_anchors: list[str] = []
+    artifact_ref_read_errors: list[str] = []
     invalid_artifact_refs: list[str] = []
     for index, requirement in enumerate(requirements):
         if not isinstance(requirement, dict):
@@ -904,9 +907,19 @@ def prompt_closeout_checklist_evidence(
                     anchor = repo_artifact_anchor(artifact)
                     if anchor is not None:
                         artifact_ref_anchors_total += 1
-                        artifact_text = full_artifact_path.read_text(
-                            encoding="utf-8", errors="replace"
-                        )
+                        try:
+                            artifact_text = full_artifact_path.read_text(
+                                encoding="utf-8", errors="replace"
+                            )
+                        except OSError as exc:
+                            artifact_ref_read_errors.append(
+                                f"{requirement_label}: {artifact_path}: "
+                                f"{type(exc).__name__}"
+                            )
+                            invalid_requirements.append(
+                                f"{requirement_label}: artifact_ref_read_error"
+                            )
+                            continue
                         if anchor not in artifact_text:
                             missing_artifact_ref_anchors.append(
                                 f"{requirement_label}: {artifact_path}#{anchor}"
@@ -1037,10 +1050,12 @@ def prompt_closeout_checklist_evidence(
             and artifact_refs_resolved == artifact_refs_total
             and not missing_artifact_refs
             and not missing_artifact_ref_anchors
+            and not artifact_ref_read_errors
             and not invalid_artifact_refs
         ),
         "missing_artifact_refs": missing_artifact_refs,
         "missing_artifact_ref_anchors": missing_artifact_ref_anchors,
+        "artifact_ref_read_errors": artifact_ref_read_errors,
         "invalid_artifact_refs": sorted(set(invalid_artifact_refs)),
         "invalid_requirements": invalid_requirements,
         "local_path_leaks": local_path_leaks,

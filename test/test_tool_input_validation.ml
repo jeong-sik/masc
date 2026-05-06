@@ -353,6 +353,9 @@ let find_schema_exn name schemas =
 let masc_transition_schema =
   find_schema_exn "masc_transition" Tool_task_schemas.schemas
 
+let masc_goal_list_schema =
+  find_schema_exn "masc_goal_list" Tool_schemas_coord_extra.schemas
+
 let assoc_string key json =
   match Yojson.Safe.Util.member key json with
   | `String value -> value
@@ -428,6 +431,73 @@ let test_registered_hook_transition_strips_internal_agent_marker () =
   Alcotest.(check string) "agent_name preserved" "codex-local-admin"
     (assoc_string "agent_name" forwarded)
 
+let test_registered_hook_goal_list_strips_blank_optional_enums () =
+  let args =
+    `Assoc
+      [
+        ("horizon", `String "");
+        ("phase", `String " ");
+        ("status", `String "");
+      ]
+  in
+  let blocked, forwarded =
+    run_registered_hook
+      ~schema:masc_goal_list_schema
+      ~tool_name:"masc_goal_list"
+      ~args
+      ()
+  in
+  Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
+  Alcotest.(check bool) "horizon removed" true
+    (Yojson.Safe.Util.member "horizon" forwarded = `Null);
+  Alcotest.(check bool) "phase removed" true
+    (Yojson.Safe.Util.member "phase" forwarded = `Null);
+  Alcotest.(check bool) "status removed" true
+    (Yojson.Safe.Util.member "status" forwarded = `Null)
+
+let test_registered_hook_goal_list_preserves_invalid_enum_for_handler () =
+  let args = `Assoc [("horizon", `String "week")] in
+  let blocked, forwarded =
+    run_registered_hook
+      ~schema:masc_goal_list_schema
+      ~tool_name:"masc_goal_list"
+      ~args
+      ()
+  in
+  Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
+  Alcotest.(check string) "invalid value preserved for handler validation" "week"
+    (assoc_string "horizon" forwarded)
+
+let test_registered_hook_required_enum_blank_is_not_stripped () =
+  let schema =
+    `Assoc
+      [
+        ("type", `String "object");
+        ( "properties",
+          `Assoc
+            [
+              ( "mode",
+                `Assoc
+                  [
+                    ("type", `String "string");
+                    ("enum", `List [ `String "strict"; `String "lenient" ]);
+                  ] );
+            ] );
+        ("required", `List [ `String "mode" ]);
+      ]
+  in
+  let args = `Assoc [("mode", `String "")] in
+  let blocked, forwarded =
+    run_registered_hook
+      ~schema
+      ~tool_name:"__tool_input_validation_required_enum_blank"
+      ~args
+      ()
+  in
+  Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
+  Alcotest.(check string) "required blank preserved for handler validation" ""
+    (assoc_string "mode" forwarded)
+
 (* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
@@ -476,5 +546,11 @@ let () =
         test_registered_hook_transition_compat_status_action;
       Alcotest.test_case "masc_transition strips internal markers" `Quick
         test_registered_hook_transition_strips_internal_agent_marker;
+      Alcotest.test_case "masc_goal_list strips blank optional enum filters"
+        `Quick test_registered_hook_goal_list_strips_blank_optional_enums;
+      Alcotest.test_case "masc_goal_list preserves invalid enum filters" `Quick
+        test_registered_hook_goal_list_preserves_invalid_enum_for_handler;
+      Alcotest.test_case "required enum blanks are not stripped" `Quick
+        test_registered_hook_required_enum_blank_is_not_stripped;
     ]);
   ]

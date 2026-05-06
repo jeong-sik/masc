@@ -375,6 +375,11 @@ val metric_telemetry_coverage_gap : string
     alertable pair to the durable
     [.masc/telemetry-coverage-gaps/YYYY-MM/DD.jsonl] store. *)
 
+val metric_telemetry_unified_source_read_failures : string
+(** Total telemetry unified source discovery/read failures. Labels:
+    [source] is {!Telemetry_unified.source_to_string}; [site] is a bounded
+    read/discovery call-site vocabulary. *)
+
 val metric_coord_telemetry_drop : string
 (** #10358 (c1): total times [lib/coord.ml]'s lifecycle hook caught
     [Stdlib.Effect.Unhandled] and dropped its Audit_log + Telemetry

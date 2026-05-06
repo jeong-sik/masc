@@ -716,6 +716,12 @@ let metric_codex_cli_mcp_tool_omission =
 let metric_telemetry_coverage_gap =
   "masc_telemetry_coverage_gap_total"
 
+(* Phase 0 telemetry fan-in: source discovery/read failures must not collapse
+   into an indistinguishable empty dashboard. Labels are bounded by the
+   Telemetry_unified.source enum and a small site vocabulary. *)
+let metric_telemetry_unified_source_read_failures =
+  "masc_telemetry_unified_source_read_failures_total"
+
 (* #10358 (c1): observability for the silent [Effect.Unhandled] catch-all
    in [lib/coord.ml] [observe_agent_lifecycle] / [observe_task_transition_event] /
    [Keeper_accountability.record_task_transition].  Those three try/with
@@ -2089,6 +2095,13 @@ let init () =
      stale_reason. Any positive rate means a telemetry lane is missing, \
      stale, or failed to append and dashboards should mark the source \
      coverage_gap."
+    Counter;
+  add metric_telemetry_unified_source_read_failures
+    "Total telemetry unified source discovery/read failures. Labels: \
+     source=keeper_metric|agent_event|tool_call_io|trajectory_tool_call|\
+     tool_usage|oas_event|execution_receipt|goal_event|tool_metric and \
+     site=<bounded read/discovery call-site>. Any positive rate means the \
+     dashboard fan-in returned partial data instead of a true empty source."
     Counter;
   add metric_coord_telemetry_drop
     "Total times a Coord lifecycle/transition hook dropped its Audit_log \

@@ -64,6 +64,27 @@ let all_sources =
   ; Tool_metric
   ]
 
+let observe_source_read_failure source ~site ~error =
+  let source = source_to_string source in
+  Prometheus.inc_counter
+    Prometheus.metric_telemetry_unified_source_read_failures
+    ~labels:[ ("source", source); ("site", site) ]
+    ();
+  Log.Telemetry.warn
+    "telemetry_unified source read failure: source=%s site=%s error=%s"
+    source site error
+
+let observe_source_read_failure_exn source ~site exn =
+  observe_source_read_failure source ~site ~error:(Printexc.to_string exn)
+
+let protect_source_read source ~site ~default f =
+  match f () with
+  | value -> value
+  | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+  | exception exn ->
+    observe_source_read_failure_exn source ~site exn;
+    default
+
 type read_result = {
   entries : Yojson.Safe.t list;
   total_matching_entries : int;
@@ -132,14 +153,36 @@ let source_durable_store ~masc_root ~base_path = function
       | Some dir -> dir
       | None -> "")
 
+type store_dir_state =
+  | Store_missing
+  | Store_directory
+  | Store_invalid
+
+let classify_store_dir source ~site dir =
+  match Sys.file_exists dir with
+  | false -> Store_missing
+  | true ->
+    (match Sys.is_directory dir with
+     | true -> Store_directory
+     | false ->
+       observe_source_read_failure source ~site
+         ~error:(Printf.sprintf "%s exists but is not a directory" dir);
+       Store_invalid)
+  | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+  | exception exn ->
+    observe_source_read_failure_exn source ~site exn;
+    Store_invalid
+
 (** Discover all keeper metric directories under [masc_root/keepers/]. *)
 let discover_keeper_metric_dirs masc_root : (string * string) list =
   let keepers_dir = Filename.concat masc_root "keepers" in
-  if not (Sys.file_exists keepers_dir) then []
-  else
+  match classify_store_dir Keeper_metric ~site:"discover_keeper_metric_root"
+          keepers_dir with
+  | Store_missing | Store_invalid -> []
+  | Store_directory ->
     let entries =
-      Safe_ops.protect ~default:[] (fun () ->
-        Array.to_list (Sys.readdir keepers_dir))
+      protect_source_read Keeper_metric ~site:"discover_keeper_metric_dirs"
+        ~default:[] (fun () -> Array.to_list (Sys.readdir keepers_dir))
     in
     List.filter_map (fun name ->
       let metrics_dir = Filename.concat keepers_dir (name ^ "/metrics") in
@@ -147,31 +190,41 @@ let discover_keeper_metric_dirs masc_root : (string * string) list =
       else None
     ) entries
 
-let is_directory path =
-  Safe_ops.protect ~default:false (fun () ->
+let is_directory source ~site path =
+  protect_source_read source ~site ~default:false (fun () ->
     Sys.file_exists path && Sys.is_directory path)
 
-let is_jsonl_file path =
-  Safe_ops.protect ~default:false (fun () ->
+let is_jsonl_file source ~site path =
+  protect_source_read source ~site ~default:false (fun () ->
     Sys.file_exists path && (not (Sys.is_directory path))
     && Filename.check_suffix path ".jsonl")
 
 let discover_trajectory_keeper_dirs masc_root : (string * string) list =
   let trajectories_root = Filename.concat masc_root "trajectories" in
-  if not (is_directory trajectories_root) then []
-  else
-    Safe_ops.protect ~default:[] (fun () ->
+  match classify_store_dir Trajectory_tool_call
+          ~site:"discover_trajectory_root" trajectories_root with
+  | Store_missing | Store_invalid -> []
+  | Store_directory ->
+    protect_source_read Trajectory_tool_call
+      ~site:"discover_trajectory_keeper_dirs" ~default:[] (fun () ->
       Sys.readdir trajectories_root
       |> Array.to_list
       |> List.filter_map (fun name ->
            let dir = Filename.concat trajectories_root name in
-           if is_directory dir then Some (name, dir) else None))
+           if
+             is_directory Trajectory_tool_call
+               ~site:"discover_trajectory_keeper_dir_stat" dir
+           then Some (name, dir)
+           else None))
 
 let discover_execution_receipt_dirs masc_root : (string * string) list =
   let keepers_dir = Filename.concat masc_root "keepers" in
-  if not (is_directory keepers_dir) then []
-  else
-    Safe_ops.protect ~default:[] (fun () ->
+  match classify_store_dir Execution_receipt
+          ~site:"discover_execution_receipt_root" keepers_dir with
+  | Store_missing | Store_invalid -> []
+  | Store_directory ->
+    protect_source_read Execution_receipt
+      ~site:"discover_execution_receipt_dirs" ~default:[] (fun () ->
       Sys.readdir keepers_dir
       |> Array.to_list
       |> List.filter_map (fun name ->
@@ -179,7 +232,11 @@ let discover_execution_receipt_dirs masc_root : (string * string) list =
              Filename.concat (Filename.concat keepers_dir name)
                "execution-receipts"
            in
-           if is_directory dir then Some (name, dir) else None))
+           if
+             is_directory Execution_receipt
+               ~site:"discover_execution_receipt_dir_stat" dir
+           then Some (name, dir)
+           else None))
 
 let trajectory_tool_call_json = function
   | `Assoc fields -> (
@@ -267,15 +324,15 @@ let latest_ts_of_entries (entries : Yojson.Safe.t list) : float option =
       if ts > 0.0 then max_ts_opt acc ts else acc)
     None entries
 
-let latest_store_ts dir label : float option =
+let latest_store_ts source dir label : float option =
   if not (Sys.file_exists dir) then None
   else
     match Dated_jsonl.create ~base_dir:dir () with
     | store -> latest_ts_of_entries (Dated_jsonl.read_recent store 64)
     | exception (Eio.Cancel.Cancelled _ as e) -> raise e
     | exception exn ->
-      Log.Telemetry.warn "latest_store_ts: %s store open failed: %s" label
-        (Printexc.to_string exn);
+      observe_source_read_failure_exn source ~site:"latest_store_ts" exn;
+      Log.Telemetry.warn "latest_store_ts: %s store open failed" label;
       None
 
 let sort_newest_first entries =
@@ -298,7 +355,7 @@ let freshness_fields ~now latest_ts =
     [ ("latest_ts_unix", `Null); ("latest_ts_iso", `Null); ("latest_age_s", `Null) ]
 
 let source_health_fields ~now ~exists ~entry_count ~latest_ts ~freshness_slo_s
-    ?(optional_when_missing = false) ?coverage_gap () =
+    ?(optional_when_missing = false) ?(read_error = false) ?coverage_gap () =
   match coverage_gap with
   | Some gap ->
     [
@@ -315,7 +372,8 @@ let source_health_fields ~now ~exists ~entry_count ~latest_ts ~freshness_slo_s
          dashboard fatigue; report a neutral [not_yet] with an explanatory
          reason instead. Real write failures still surface via [coverage_gap]
          regardless of this flag. *)
-      if not exists && optional_when_missing then ("not_yet", "no_entries_yet")
+      if read_error then ("error", "read_failed")
+      else if not exists && optional_when_missing then ("not_yet", "no_entries_yet")
       else if not exists then ("missing", "store_missing")
       else if entry_count = 0 then ("empty", "no_entries")
       else
@@ -558,8 +616,9 @@ let matches_scope ?session_id ?operation_id ?worker_run_id (json : Yojson.Safe.t
 (* ── Read from a single fixed-path source ───────────── *)
 
 let read_fixed_source dir source ~n ?since_ts ?until_ts () : Yojson.Safe.t list =
-  if not (Sys.file_exists dir) then []
-  else
+  match classify_store_dir source ~site:"read_fixed_source_dir" dir with
+  | Store_missing | Store_invalid -> []
+  | Store_directory ->
     match Dated_jsonl.create ~base_dir:dir () with
     | store ->
       let entries =
@@ -574,8 +633,9 @@ let read_fixed_source dir source ~n ?since_ts ?until_ts () : Yojson.Safe.t list 
       List.map (tag_entry source) entries
     | exception (Eio.Cancel.Cancelled _ as e) -> raise e
     | exception exn ->
-      Log.Telemetry.warn "read_fixed_source: %s store open failed: %s"
-        (source_to_string source) (Printexc.to_string exn);
+      observe_source_read_failure_exn source ~site:"read_fixed_source" exn;
+      Log.Telemetry.warn "read_fixed_source: %s store open failed"
+        (source_to_string source);
       []
 
 (* ── Read keeper metrics (per-keeper directories) ───── *)
@@ -655,16 +715,22 @@ let read_execution_receipts ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
+        observe_source_read_failure_exn Execution_receipt
+          ~site:"read_execution_receipts" exn;
         Log.Telemetry.warn
-          "read_execution_receipts: store open failed for %s: %s"
-          dir (Printexc.to_string exn);
+          "read_execution_receipts: store open failed for %s" dir;
         [])
     dirs
 
 let read_trajectory_file path ?since_ts ?until_ts () =
-  if not (is_jsonl_file path) then []
+  if
+    not
+      (is_jsonl_file Trajectory_tool_call
+         ~site:"read_trajectory_file_stat" path)
+  then []
   else
-    try
+    protect_source_read Trajectory_tool_call ~site:"read_trajectory_file"
+      ~default:[] (fun () ->
       Fs_compat.load_file path
       |> String.split_on_char '\n'
       |> List.filter_map (fun line ->
@@ -677,8 +743,10 @@ let read_trajectory_file path ?since_ts ?until_ts () =
                   && within_requested_window ?since_ts ?until_ts json
                then Some json
                else None
-             with Yojson.Json_error _ -> None)
-    with Sys_error _ -> []
+             with Yojson.Json_error msg ->
+               observe_source_read_failure Trajectory_tool_call
+                 ~site:"read_trajectory_file_parse" ~error:msg;
+               None))
 
 let read_trajectory_tool_calls ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
     : Yojson.Safe.t list =
@@ -691,7 +759,8 @@ let read_trajectory_tool_calls ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
   let entries =
     List.concat_map
       (fun (_name, dir) ->
-        Safe_ops.protect ~default:[] (fun () ->
+        protect_source_read Trajectory_tool_call
+          ~site:"read_trajectory_tool_calls_readdir" ~default:[] (fun () ->
           Sys.readdir dir
           |> Array.to_list
           |> List.filter (fun name -> Filename.check_suffix name ".jsonl")
@@ -713,7 +782,8 @@ let read_goal_events ~masc_root ?since_ts ?until_ts ~n () : Yojson.Safe.t list =
   if not (Sys.file_exists path) then []
   else
     let entries =
-      Safe_ops.protect ~default:[] (fun () ->
+      protect_source_read Goal_event ~site:"read_goal_events" ~default:[]
+        (fun () ->
         Fs_compat.load_jsonl path
         |> List.filter (within_requested_window ?since_ts ?until_ts))
     in
@@ -805,14 +875,17 @@ let count_fixed_source_entries ~masc_root ~base_path source : int =
   match fixed_store_dir ~masc_root ~base_path source with
   | None -> 0
   | Some dir ->
-    if not (Sys.file_exists dir) then 0
-    else
+    match classify_store_dir source ~site:"count_fixed_source_entries_dir" dir with
+    | Store_missing | Store_invalid -> 0
+    | Store_directory ->
       (match Dated_jsonl.create ~base_dir:dir () with
        | store -> Dated_jsonl.count_entries store
        | exception (Eio.Cancel.Cancelled _ as e) -> raise e
        | exception exn ->
-         Log.Telemetry.warn "count_source_entries: %s store open failed: %s"
-           (source_to_string source) (Printexc.to_string exn);
+         observe_source_read_failure_exn source
+           ~site:"count_fixed_source_entries" exn;
+         Log.Telemetry.warn "count_source_entries: %s store open failed"
+           (source_to_string source);
          0)
 
 let execution_receipt_summary_stats ~masc_root =
@@ -822,16 +895,17 @@ let execution_receipt_summary_stats ~masc_root =
          match Dated_jsonl.create ~base_dir:dir () with
          | store ->
            let count = Dated_jsonl.count_entries store in
-           let latest = latest_store_ts dir "execution_receipt" in
+           let latest = latest_store_ts Execution_receipt dir "execution_receipt" in
            ( count_acc + count,
              match latest with
              | Some ts -> max_ts_opt latest_acc ts
              | None -> latest_acc )
          | exception (Eio.Cancel.Cancelled _ as e) -> raise e
          | exception exn ->
+           observe_source_read_failure_exn Execution_receipt
+             ~site:"execution_receipt_summary_stats" exn;
            Log.Telemetry.warn
-             "execution_receipt_summary_stats: store open failed for %s: %s"
-             dir (Printexc.to_string exn);
+             "execution_receipt_summary_stats: store open failed for %s" dir;
            (count_acc, latest_acc))
        (0, None)
 
@@ -840,7 +914,9 @@ let trajectory_tool_call_summary_stats ~masc_root =
   |> List.fold_left
        (fun (count_acc, latest_acc) (_name, dir) ->
          let entries =
-           Safe_ops.protect ~default:[] (fun () ->
+           protect_source_read Trajectory_tool_call
+             ~site:"trajectory_tool_call_summary_readdir" ~default:[]
+             (fun () ->
              Sys.readdir dir
              |> Array.to_list
              |> List.filter (fun name -> Filename.check_suffix name ".jsonl")
@@ -858,7 +934,8 @@ let goal_event_summary_stats ~masc_root =
   if not (Sys.file_exists path) then (0, None)
   else
     let entries =
-      Safe_ops.protect ~default:[] (fun () -> Fs_compat.load_jsonl path)
+      protect_source_read Goal_event ~site:"goal_event_summary_stats"
+        ~default:[] (fun () -> Fs_compat.load_jsonl path)
     in
     (List.length entries, latest_ts_of_entries entries)
 
@@ -873,15 +950,18 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
        | store -> Dated_jsonl.count_entries store
        | exception (Eio.Cancel.Cancelled _ as e) -> raise e
        | exception exn ->
-         Log.Telemetry.warn "summary_json: keeper %s store open failed: %s"
-           name (Printexc.to_string exn);
+         observe_source_read_failure_exn Keeper_metric
+           ~site:"summary_keeper_count" exn;
+         Log.Telemetry.warn "summary_json: keeper %s store open failed" name;
          0)
     ) 0 keeper_dirs
   in
   let keeper_latest_ts =
     List.fold_left
       (fun acc (name, dir) ->
-        match latest_store_ts dir (Printf.sprintf "keeper %s" name) with
+        match
+          latest_store_ts Keeper_metric dir (Printf.sprintf "keeper %s" name)
+        with
         | Some ts -> max_ts_opt acc ts
         | None -> acc)
       None keeper_dirs
@@ -934,9 +1014,20 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
     | Trajectory_tool_call ->
       let trajectories_root = Filename.concat masc_root "trajectories" in
       let dirs = discover_trajectory_keeper_dirs masc_root in
-      let exists = is_directory trajectories_root in
+      let dir_state =
+        classify_store_dir Trajectory_tool_call
+          ~site:"summary_trajectory_root" trajectories_root
+      in
+      let exists = match dir_state with
+        | Store_directory | Store_invalid -> true
+        | Store_missing -> false
+      in
+      let read_error = match dir_state with
+        | Store_invalid -> true
+        | Store_missing | Store_directory -> false
+      in
       let count, latest_ts =
-        if exists then trajectory_tool_call_summary_stats ~masc_root
+        if dir_state = Store_directory then trajectory_tool_call_summary_stats ~masc_root
         else (0, None)
       in
       ( `Assoc
@@ -952,14 +1043,25 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
           @ source_health_fields ~now ~exists ~entry_count:count ~latest_ts
               ~freshness_slo_s
               ~optional_when_missing:(source_optional_when_missing source)
-              ?coverage_gap ()),
+              ~read_error ?coverage_gap ()),
         count )
     | Execution_receipt ->
       let keepers_root = Filename.concat masc_root "keepers" in
       let dirs = discover_execution_receipt_dirs masc_root in
-      let exists = is_directory keepers_root in
+      let dir_state =
+        classify_store_dir Execution_receipt
+          ~site:"summary_execution_receipt_root" keepers_root
+      in
+      let exists = match dir_state with
+        | Store_directory | Store_invalid -> true
+        | Store_missing -> false
+      in
+      let read_error = match dir_state with
+        | Store_invalid -> true
+        | Store_missing | Store_directory -> false
+      in
       let count, latest_ts =
-        if exists then execution_receipt_summary_stats ~masc_root
+        if dir_state = Store_directory then execution_receipt_summary_stats ~masc_root
         else (0, None)
       in
       ( `Assoc
@@ -975,7 +1077,7 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
           @ source_health_fields ~now ~exists ~entry_count:count ~latest_ts
               ~freshness_slo_s
               ~optional_when_missing:(source_optional_when_missing source)
-              ?coverage_gap ()),
+              ~read_error ?coverage_gap ()),
         count )
     | Goal_event ->
       let path = goal_events_path ~masc_root in
@@ -1001,10 +1103,27 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
     | _ ->
       let dir = match fixed_store_dir ~masc_root ~base_path source with
         | Some d -> d | None -> "" in
-      let exists = dir <> "" && Sys.file_exists dir in
-      let count = if exists then count_fixed_source_entries ~masc_root ~base_path source else 0 in
+      let dir_state =
+        if dir = "" then Store_missing
+        else classify_store_dir source ~site:"summary_fixed_source_dir" dir
+      in
+      let exists = match dir_state with
+        | Store_directory | Store_invalid -> true
+        | Store_missing -> false
+      in
+      let read_error = match dir_state with
+        | Store_invalid -> true
+        | Store_missing | Store_directory -> false
+      in
+      let count =
+        if dir_state = Store_directory then
+          count_fixed_source_entries ~masc_root ~base_path source
+        else 0
+      in
       let latest_ts =
-        if exists then latest_store_ts dir (source_to_string source) else None
+        if dir_state = Store_directory then
+          latest_store_ts source dir (source_to_string source)
+        else None
       in
       ( `Assoc
           ([
@@ -1018,7 +1137,7 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
           @ source_health_fields ~now ~exists ~entry_count:count ~latest_ts
               ~freshness_slo_s
               ~optional_when_missing:(source_optional_when_missing source)
-              ?coverage_gap ()),
+              ~read_error ?coverage_gap ()),
         count )
   in
   let source_summaries = List.map source_json_and_count all_sources in

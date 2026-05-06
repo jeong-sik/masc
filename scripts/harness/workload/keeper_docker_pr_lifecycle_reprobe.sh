@@ -47,6 +47,7 @@ MCP_TOKEN="${MASC_MCP_TOKEN:-}"
 MCP_CLIENT_NAME="${MCP_CLIENT_NAME:-keeper-docker-pr-lifecycle-reprobe}"
 EXPECTED_SERVER_COMMIT="${EXPECTED_SERVER_COMMIT:-}"
 FORBID_GITHUB_IDENTITIES="${FORBID_GITHUB_IDENTITIES:-}"
+ALLOW_FORK_PR_FOR_READONLY="${ALLOW_FORK_PR_FOR_READONLY:-0}"
 SERVER_HEALTH_URL="${SERVER_HEALTH_URL:-}"
 SERVER_COMMIT_ACTUAL=""
 SERVER_STARTED_AT_ACTUAL=""
@@ -80,6 +81,10 @@ Options:
   --forbid-github-identity NAME
                            Fail --mutate preflight when a target keeper uses
                            this GitHub identity. Repeat or pass comma-separated.
+  --allow-fork-pr-for-readonly
+                           Permit PUBLIC repo READ/TRIAGE credentials to satisfy
+                           create proof by pushing to their own fork and opening
+                           a draft PR with head OWNER:BRANCH.
   --server-health-url URL  Health endpoint for commit verification.
   --board-post-id ID       Post a final board comment to this thread.
   --run-id ID              Stable run id for prompts and artifacts.
@@ -99,6 +104,8 @@ Environment:
   RUN_AUDIT=0              Skip final audit.
   EXPECTED_SERVER_COMMIT   Optional expected /health build.commit prefix.
   FORBID_GITHUB_IDENTITIES Optional CSV of forbidden keeper GitHub identities.
+  ALLOW_FORK_PR_FOR_READONLY=1
+                           Same as --allow-fork-pr-for-readonly.
 EOF
 }
 
@@ -147,6 +154,10 @@ while [[ $# -gt 0 ]]; do
         FORBID_GITHUB_IDENTITIES="$2"
       fi
       shift 2
+      ;;
+    --allow-fork-pr-for-readonly)
+      ALLOW_FORK_PR_FOR_READONLY=1
+      shift
       ;;
     --server-health-url)
       SERVER_HEALTH_URL="$2"
@@ -606,6 +617,9 @@ except Exception:
 identities = identity_payload.get("keepers")
 if not isinstance(identities, dict):
     identities = {}
+accounts = identity_payload.get("keeper_accounts")
+if not isinstance(accounts, dict):
+    accounts = {}
 
 
 def fallback_target(index):
@@ -617,20 +631,32 @@ def fallback_target(index):
 with review_targets_file.open("w", encoding="utf-8") as handle:
     for index, keeper in enumerate(keepers):
         keeper_identity = identities.get(keeper)
+        keeper_account = accounts.get(keeper)
         review_target = None
         mode = "insufficient_targets"
 
-        if len(keepers) >= 2 and isinstance(keeper_identity, str):
+        if len(keepers) >= 2 and isinstance(keeper_account, str):
+            for candidate in keepers:
+                if candidate == keeper:
+                    continue
+                candidate_account = accounts.get(candidate)
+                if isinstance(candidate_account, str) and candidate_account != keeper_account:
+                    review_target = candidate
+                    mode = "account_aware"
+                    break
+            if review_target is None:
+                mode = "account_pool_insufficient"
+        elif len(keepers) >= 2 and isinstance(keeper_identity, str):
             for candidate in keepers:
                 if candidate == keeper:
                     continue
                 candidate_identity = identities.get(candidate)
                 if isinstance(candidate_identity, str) and candidate_identity != keeper_identity:
                     review_target = candidate
-                    mode = "identity_aware"
+                    mode = "identity_name_aware_unresolved_account"
                     break
             if review_target is None:
-                mode = "identity_pool_insufficient"
+                mode = "identity_name_pool_insufficient"
         elif len(keepers) >= 2:
             review_target = fallback_target(index)
             mode = "ring_unverified_identity"
@@ -638,8 +664,10 @@ with review_targets_file.open("w", encoding="utf-8") as handle:
         row = {
             "keeper": keeper,
             "keeper_identity": keeper_identity,
+            "keeper_account_login": keeper_account,
             "review_target": review_target,
             "review_target_identity": identities.get(review_target) if review_target else None,
+            "review_target_account_login": accounts.get(review_target) if review_target else None,
             "mode": mode,
         }
         handle.write(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n")
@@ -654,9 +682,11 @@ PY
 }
 
 build_github_identity_counts() {
-  python3 - "$BASE_PATH" "$RUN_DIR/keepers.txt" "$GITHUB_IDENTITY_COUNTS_FILE" "$FORBID_GITHUB_IDENTITIES" <<'PY'
+  python3 - "$BASE_PATH" "$RUN_DIR/keepers.txt" "$GITHUB_IDENTITY_COUNTS_FILE" "$FORBID_GITHUB_IDENTITIES" "$REPO_SLUG" <<'PY'
 import json
+import os
 import pathlib
+import subprocess
 import sys
 from collections import Counter
 
@@ -674,6 +704,7 @@ forbidden = {
     for item in sys.argv[4].split(",")
     if item.strip()
 }
+repo_slug = sys.argv[5]
 config_dir = base_path / ".masc" / "config" / "keepers"
 runtime_dir = base_path / ".masc" / "keepers"
 
@@ -712,9 +743,71 @@ def string_field(data, key):
     return value if isinstance(value, str) and value else None
 
 
+def read_account_login(identity):
+    hosts_path = base_path / ".masc" / "github-identities" / identity / "gh" / "hosts.yml"
+    if not hosts_path.is_file():
+        return None
+    try:
+        lines = hosts_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except Exception:
+        return None
+    for line in lines:
+        stripped = line.strip()
+        if not stripped.startswith("user:"):
+            continue
+        value = stripped.split(":", 1)[1].split("#", 1)[0].strip().strip("'\"")
+        return value or None
+    return None
+
+
+def read_repo_info(identity):
+    gh_config_dir = base_path / ".masc" / "github-identities" / identity / "gh"
+    if not gh_config_dir.is_dir():
+        return None, None, "gh_config_dir_missing"
+    env = os.environ.copy()
+    env["GH_CONFIG_DIR"] = str(gh_config_dir)
+    try:
+        completed = subprocess.run(
+            [
+                "gh",
+                "repo",
+                "view",
+                repo_slug,
+                "--json",
+                "viewerPermission,visibility",
+            ],
+            check=False,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=20,
+        )
+    except Exception as exc:
+        return None, None, f"repo_permission_probe_exception:{exc}"
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip().splitlines()
+        preview = detail[0] if detail else f"gh_exit_{completed.returncode}"
+        return None, None, preview[:200]
+    try:
+        payload = json.loads(completed.stdout)
+    except Exception as exc:
+        return None, None, f"repo_permission_probe_json_error:{exc}"
+    permission = payload.get("viewerPermission")
+    visibility = payload.get("visibility")
+    permission = permission if isinstance(permission, str) and permission else None
+    visibility = visibility if isinstance(visibility, str) and visibility else None
+    return permission, visibility, None
+
+
 keepers = [line.strip() for line in keepers_file.read_text().splitlines() if line.strip()]
 identities = {}
+accounts = {}
+permissions = {}
+visibilities = {}
 missing = []
+unresolved_accounts = []
+permission_errors = []
 forbidden_keepers = []
 for keeper in keepers:
     config = load_keeper_config(config_dir / f"{keeper}.toml")
@@ -732,21 +825,66 @@ for keeper in keepers:
     )
     if identity:
         identities[keeper] = identity
+        account_login = read_account_login(identity)
+        if account_login:
+            accounts[keeper] = account_login
+        else:
+            unresolved_accounts.append({"keeper": keeper, "github_identity": identity})
+        permission, visibility, permission_error = read_repo_info(identity)
+        if permission:
+            permissions[keeper] = permission
+            if visibility:
+                visibilities[keeper] = visibility
+        else:
+            permission_errors.append(
+                {
+                    "keeper": keeper,
+                    "github_identity": identity,
+                    "error": permission_error or "permission_unresolved",
+                }
+            )
         if identity in forbidden:
-            forbidden_keepers.append({"keeper": keeper, "github_identity": identity})
+            forbidden_keepers.append(
+                {
+                    "keeper": keeper,
+                    "github_identity": identity,
+                    "matched": "github_identity",
+                }
+            )
+        if account_login and account_login in forbidden and account_login != identity:
+            forbidden_keepers.append(
+                {
+                    "keeper": keeper,
+                    "github_identity": identity,
+                    "github_account_login": account_login,
+                    "matched": "github_account_login",
+                }
+            )
     else:
         missing.append(keeper)
 
 counts = Counter(identities.values())
+account_counts = Counter(accounts.values())
+permission_counts = Counter(permissions.values())
+visibility_counts = Counter(visibilities.values())
 out_file.write_text(
     json.dumps(
         {
             "base_path": str(base_path),
             "keeper_count": len(keepers),
             "unique_count": len(counts),
+            "account_unique_count": len(account_counts),
             "counts": dict(sorted(counts.items())),
+            "account_counts": dict(sorted(account_counts.items())),
+            "repo_permission_counts": dict(sorted(permission_counts.items())),
+            "repo_visibility_counts": dict(sorted(visibility_counts.items())),
             "keepers": identities,
+            "keeper_accounts": accounts,
+            "keeper_repo_permissions": permissions,
+            "keeper_repo_visibilities": visibilities,
             "missing": missing,
+            "unresolved_accounts": unresolved_accounts,
+            "repo_permission_errors": permission_errors,
             "forbidden_identities": sorted(forbidden),
             "forbidden_keepers": forbidden_keepers,
         },
@@ -762,9 +900,74 @@ assert_github_identity_pool_for_mutate() {
   build_github_identity_counts
   local unique_count
   unique_count="$(jq -r '.unique_count // 0' "$GITHUB_IDENTITY_COUNTS_FILE")"
+  local unresolved_accounts_count
+  unresolved_accounts_count="$(jq -r '(.unresolved_accounts // []) | length' "$GITHUB_IDENTITY_COUNTS_FILE")"
   if [[ "$MUTATE" == "1" && "$unique_count" -lt 2 ]]; then
     echo "at least two unique github_identity values are required for cross-keeper approval proof" >&2
     jq -c '{unique_count, counts, missing}' "$GITHUB_IDENTITY_COUNTS_FILE" >&2 || true
+    exit 1
+  fi
+  if [[ "$MUTATE" == "1" && "$unresolved_accounts_count" -gt 0 ]]; then
+    echo "target keeper set has unresolved GitHub account logins" >&2
+    jq -c '{unresolved_accounts}' "$GITHUB_IDENTITY_COUNTS_FILE" >&2 || true
+    exit 1
+  fi
+  local account_unique_count
+  account_unique_count="$(jq -r '.account_unique_count // 0' "$GITHUB_IDENTITY_COUNTS_FILE")"
+  if [[ "$MUTATE" == "1" && "$account_unique_count" -lt 2 ]]; then
+    echo "at least two unique authenticated GitHub accounts are required for cross-keeper approval proof" >&2
+    jq -c '{account_unique_count, account_counts, keeper_accounts}' "$GITHUB_IDENTITY_COUNTS_FILE" >&2 || true
+    exit 1
+  fi
+  local repo_permission_error_count
+  repo_permission_error_count="$(jq -r '(.repo_permission_errors // []) | length' "$GITHUB_IDENTITY_COUNTS_FILE")"
+  if [[ "$MUTATE" == "1" && "$repo_permission_error_count" -gt 0 ]]; then
+    echo "target keeper set has unresolved GitHub repository permissions" >&2
+    jq -c '{repo_permission_errors}' "$GITHUB_IDENTITY_COUNTS_FILE" >&2 || true
+    exit 1
+  fi
+  local non_writable_file
+  non_writable_file="$RUN_DIR/non-writable-keepers.json"
+  python3 - "$GITHUB_IDENTITY_COUNTS_FILE" "$ALLOW_FORK_PR_FOR_READONLY" >"$non_writable_file" <<'PY'
+import json
+import pathlib
+import sys
+
+payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+allow_fork = sys.argv[2] == "1"
+permissions = payload.get("keeper_repo_permissions")
+if not isinstance(permissions, dict):
+    permissions = {}
+visibilities = payload.get("keeper_repo_visibilities")
+if not isinstance(visibilities, dict):
+    visibilities = {}
+
+writable = {"ADMIN", "MAINTAIN", "WRITE"}
+forkable_read = {"READ", "TRIAGE"}
+non_writable = []
+for keeper, permission in sorted(permissions.items()):
+    visibility = visibilities.get(keeper)
+    if permission in writable:
+        continue
+    if allow_fork and permission in forkable_read and visibility == "PUBLIC":
+        continue
+    non_writable.append(
+        {"keeper": keeper, "permission": permission, "visibility": visibility}
+    )
+
+print(json.dumps({"non_writable_keepers": non_writable}, sort_keys=True))
+PY
+  if [[ "$MUTATE" == "1" && -s "$non_writable_file" ]] \
+    && jq -e '(.non_writable_keepers // []) | length > 0' "$non_writable_file" >/dev/null; then
+    echo "target keeper set includes accounts without upstream write permission" >&2
+    jq -c --arg allow_fork "$ALLOW_FORK_PR_FOR_READONLY" '{
+      keeper_repo_permissions,
+      keeper_repo_visibilities,
+      non_writable_keepers: (
+        input.non_writable_keepers
+      ),
+      allow_fork_pr_for_readonly: $allow_fork
+    }' "$GITHUB_IDENTITY_COUNTS_FILE" "$non_writable_file" >&2 || true
     exit 1
   fi
   if [[ "$MUTATE" == "1" ]] \
@@ -785,6 +988,31 @@ review_target_for_keeper() {
 proof_branch_for_keeper() {
   local keeper="$1"
   printf 'keeper-%s-agent/%s' "$keeper" "$RUN_ID"
+}
+
+github_account_for_keeper() {
+  local keeper="$1"
+  jq -r --arg keeper "$keeper" '.keeper_accounts[$keeper] // empty' "$GITHUB_IDENTITY_COUNTS_FILE"
+}
+
+repo_permission_for_keeper() {
+  local keeper="$1"
+  jq -r --arg keeper "$keeper" '.keeper_repo_permissions[$keeper] // empty' "$GITHUB_IDENTITY_COUNTS_FILE"
+}
+
+repo_visibility_for_keeper() {
+  local keeper="$1"
+  jq -r --arg keeper "$keeper" '.keeper_repo_visibilities[$keeper] // empty' "$GITHUB_IDENTITY_COUNTS_FILE"
+}
+
+keeper_uses_fork_pr_route() {
+  local keeper="$1"
+  local permission visibility
+  permission="$(repo_permission_for_keeper "$keeper")"
+  visibility="$(repo_visibility_for_keeper "$keeper")"
+  [[ "$ALLOW_FORK_PR_FOR_READONLY" == "1" \
+    && "$visibility" == "PUBLIC" \
+    && ( "$permission" == "READ" || "$permission" == "TRIAGE" ) ]]
 }
 
 assert_no_proof_branch_collisions_for_mutate() {
@@ -872,19 +1100,62 @@ prompt_for_keeper_create() {
   local keeper="$1"
   local branch
   branch="$(proof_branch_for_keeper "$keeper")"
+  local account permission visibility head_ref git_route_rule push_step pr_step
+  account="$(github_account_for_keeper "$keeper")"
+  permission="$(repo_permission_for_keeper "$keeper")"
+  visibility="$(repo_visibility_for_keeper "$keeper")"
+  if keeper_uses_fork_pr_route "$keeper"; then
+    head_ref="$account:$branch"
+    git_route_rule="- You may use keeper_bash for gh repo fork / git remote setup only to prepare your own fork branch for this proof. Do not run gh pr create, gh pr review, or other PR mutations through keeper_shell or keeper_bash."
+    push_step="$(cat <<EOF
+4. Commit and push exactly branch $branch with keeper_bash using the fork PR route because your upstream repo permission is $permission:
+   - Confirm your GitHub account login is $account.
+   - Ensure the fork $account/${REPO_SLUG#*/} exists. If needed, run gh repo fork $REPO_SLUG --remote=false from keeper_bash; if GitHub blocks fork creation, stop and report blocker="fork_create_blocked" with the exact output.
+   - Add or update a remote named keeper-fork pointing at https://github.com/$account/${REPO_SLUG#*/}.git in the returned proof worktree.
+   - Push with git push keeper-fork HEAD:$branch.
+   - The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
+EOF
+)"
+    pr_step="$(cat <<EOF
+5. Create a draft PR from your fork branch with keeper_pr_create. The call must include
+   repo="$REPO_SLUG", head="$head_ref", base="main", draft=true, and cwd set to
+   the returned proof worktree path. Do not leave head/base empty and do not use
+   the base repo path if the proof branch lives in a separate worktree. Do not
+   mark ready, do not merge, do not add human-approved-ready.
+EOF
+)"
+  else
+    head_ref="$branch"
+    git_route_rule="- Do not run gh pr create, gh pr review, or other mutating GitHub commands through keeper_shell or keeper_bash."
+    push_step="$(cat <<EOF
+4. Commit and git push exactly branch $branch with keeper_bash. The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
+EOF
+)"
+    pr_step="$(cat <<EOF
+5. Create a draft PR for that branch with keeper_pr_create. The call must include
+   repo="$REPO_SLUG", head="$head_ref", base="main", draft=true, and cwd set to
+   the returned proof worktree path. Do not leave head/base empty and do not use
+   the base repo path if the proof branch lives in a separate worktree. Do not
+   mark ready, do not merge, do not add human-approved-ready.
+EOF
+)"
+  fi
   cat <<EOF
 Docker PR lifecycle proof run: $RUN_ID
 Phase: create
 
 Target repo: $REPO_SLUG
 Keeper: $keeper
+GitHub account: ${account:-unknown}
+Repo permission: ${permission:-unknown}
+Repo visibility: ${visibility:-unknown}
 
 Goal: create a fresh, auditable Docker-backed proof branch and draft PR. Do
 not review or approve another keeper's PR in this phase.
 
 Tool route rules:
 - Use keeper_bash inside your Docker playground for proof-file creation and git add/commit/push on the proof branch.
-- Do not run gh pr create, gh pr review, or other mutating GitHub commands through keeper_shell or keeper_bash.
+$git_route_rule
 - Do not use approval-requiring host code-write paths such as masc_code_write for this proof file.
 - If keeper_bash rejects mutating git as policy-blocked, stop and report the exact blocker instead of switching to host-local credentials.
 - Use keeper_pr_create for PR creation.
@@ -900,14 +1171,15 @@ Required create lane:
    - Do not remove this run's worktree during the proof attempt. If Git says
      the branch/worktree already exists, stop and report blocker="branch_collision".
 3. Make a minimal, non-product proof edit under docs/runtime-proof/keepers/$keeper-$RUN_ID.md with keeper_bash from inside the Docker playground. The file content must include run_id=$RUN_ID and branch=$branch.
-4. Commit and git push exactly branch $branch with keeper_bash. The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
-5. Create a draft PR for that branch with keeper_pr_create. Do not mark ready, do not merge, do not add human-approved-ready.
+$push_step
+$pr_step
 6. Reply with one compact JSON object:
    {
      "run_id": "$RUN_ID",
      "phase": "create",
      "keeper": "$keeper",
      "branch": "$branch",
+     "head": "$head_ref",
      "pr_url": "...",
      "docker_pr_create": true,
      "docker_git_push": true,
@@ -1263,6 +1535,7 @@ write_summary() {
     --arg review_required_tools "$REVIEW_REQUIRED_TOOLS" \
     --arg expected_server_commit "$EXPECTED_SERVER_COMMIT" \
     --arg forbid_github_identities "$FORBID_GITHUB_IDENTITIES" \
+    --arg allow_fork_pr_for_readonly "$ALLOW_FORK_PR_FOR_READONLY" \
     --arg server_commit "$SERVER_COMMIT_ACTUAL" \
     --arg server_started_at "$SERVER_STARTED_AT_ACTUAL" \
     --arg server_incarnation "$SERVER_INCARNATION_ACTUAL" \
@@ -1289,6 +1562,7 @@ write_summary() {
       review_required_tools:$review_required_tools,
       expected_server_commit:$expected_server_commit,
       forbid_github_identities:$forbid_github_identities,
+      allow_fork_pr_for_readonly:$allow_fork_pr_for_readonly,
       server_commit:$server_commit,
       server_started_at:$server_started_at,
       server_incarnation:$server_incarnation,

@@ -81,6 +81,12 @@ val metric_keeper_turn_scheduled : string
 val metric_keeper_turn_completed : string
 (** Goal-loop Observe turn-success numerator. Labels: [keeper_name]. *)
 
+val metric_keeper_idle_seconds : string
+(** Current keeper world-observation idle seconds. Updated from
+    [observation.idle_seconds] during keeper metrics emission so long idle
+    gaps are visible as a scrapeable gauge, not only in message text.
+    Labels: [keeper_name]. *)
+
 (** #10530: keeper required-tool-contract violations.
     Labels: keeper_name, kind \in \{passive,text_only\}. *)
 val metric_keeper_contract_violations : string

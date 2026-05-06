@@ -237,6 +237,7 @@ let metric_keeper_turn_scheduled =
   "masc_keeper_turn_scheduled_total"
 let metric_keeper_turn_completed =
   "masc_keeper_turn_completed_total"
+let metric_keeper_idle_seconds = "masc_keeper_idle_seconds"
 
 (** #10530: keeper required-tool-contract violations (passive-only or
     text-only turns rejected by the keeper agent loop).
@@ -2199,6 +2200,11 @@ let init () =
     Counter;
   add metric_keeper_total_cost_usd
     "Accumulated trusted USD cost per keeper (labels: keeper_name)"
+    Gauge;
+  add metric_keeper_idle_seconds
+    "Current keeper world-observation idle seconds by keeper_name. Updated \
+     from observation.idle_seconds during keeper metrics emission so long \
+     idle gaps are visible as Prometheus data, not only in message text."
     Gauge;
   add metric_keeper_contract_violations
     "Keeper turns rejected for required-tool-contract violations (labels: keeper_name, kind={passive|text_only}). #10530."

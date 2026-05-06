@@ -151,7 +151,7 @@ let tools_for_gated_affordance = function
       "masc_transition" ]
   | Work_discovery ->
     [ "keeper_task_claim"; "masc_claim_next";
-      "keeper_board_post"; "masc_add_task";
+      "keeper_board_post"; "keeper_task_create"; "masc_add_task";
       "keeper_tasks_audit" ]
   | Inspect_worktree_delta ->
     [ "keeper_shell"; "keeper_bash"; "masc_code_git";

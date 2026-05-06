@@ -7354,7 +7354,10 @@ let test_tools_for_gated_affordance_covers_each_variant () =
     "generic board affordance has no forced specific tool"
     []
     (Surface.preferred_tool_names_for_turn_affordances
-       [ "board_post_or_comment" ])
+       [ "board_post_or_comment" ]);
+  check bool "work discovery includes keeper-native task creation" true
+    (List.mem "keeper_task_create"
+       (Surface.tools_for_gated_affordance Surface.Work_discovery))
 
 let test_preferred_tool_choice_for_required_turn_claims_first () =
   let module Surface = Masc_mcp.Keeper_agent_tool_surface in

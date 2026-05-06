@@ -20,6 +20,12 @@ let hints =
     ; call = "`keeper_tasks_list` {}"
     ; description = "inspect eligible task context"
     }
+  ; { name = "keeper_task_create"
+    ; call =
+        "`keeper_task_create` { title: \"<verb + object>\", description: \
+         \"<acceptance criteria>\" }"
+    ; description = "create a new backlog task with keeper-native evidence"
+    }
   ; { name = "keeper_board_get"
     ; call = "`keeper_board_get` { id: \"<post-id>\" }"
     ; description = "read a board post before replying"

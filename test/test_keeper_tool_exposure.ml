@@ -304,11 +304,15 @@ let test_last_turn_safe_keeps_discovery_and_web_search () =
   check bool "last turn allows WebSearch alias" true
     (has_tool "WebSearch" alias_expanded)
 
-let test_core_coordination_presets_can_submit_for_verification () =
+let test_core_coordination_presets_have_task_lifecycle_tools () =
   [ "social", Keeper_types.Social; "messaging", Keeper_types.Messaging ]
   |> List.iter (fun (label, preset) ->
        let meta = make_meta ~preset () in
        let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+       check bool
+         (label ^ " has keeper_task_create")
+         true
+         (has_tool "keeper_task_create" tools);
        check bool
          (label ^ " has keeper_task_submit_for_verification")
          true
@@ -884,8 +888,8 @@ let () =
       test_case "research has read tools" `Quick test_research_preset_has_read_tools;
       test_case "last turn keeps discovery and web search" `Quick
         test_last_turn_safe_keeps_discovery_and_web_search;
-      test_case "core coordination presets can submit for verification" `Quick
-        test_core_coordination_presets_can_submit_for_verification;
+      test_case "core coordination presets have task lifecycle tools" `Quick
+        test_core_coordination_presets_have_task_lifecycle_tools;
       test_case "coding has coordination tools" `Quick test_coding_preset_has_coordination_tools;
       test_case "messaging legacy governance tools removed" `Quick test_messaging_preset_has_no_legacy_governance_tools;
       test_case "sufficient tool count" `Quick test_sufficient_tool_count;

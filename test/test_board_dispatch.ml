@@ -688,6 +688,60 @@ let test_reaction_summary_recent_user_ids () =
                 [ "reactor-a"; "reactor-b"; "reactor-c" ]
           | [] -> Alcotest.fail "expected reaction summary"
 
+let test_reaction_summary_batch () =
+  match
+    Board_dispatch.create_post ~author:"reaction-author"
+      ~content:"batch reactors parent" ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      let post_id = Board.Post_id.to_string post.id in
+      let comment_id =
+        match
+          Board_dispatch.add_comment ~post_id ~author:"commenter"
+            ~content:"batch reaction child" ()
+        with
+        | Error e -> Alcotest.fail (Board.show_board_error e)
+        | Ok comment -> Board.Comment_id.to_string comment.id
+      in
+      List.iter
+        (fun (target_type, target_id, user_id, emoji) ->
+           match
+             Board_dispatch.toggle_reaction ~target_type ~target_id ~user_id
+               ~emoji
+           with
+           | Ok _ -> ()
+           | Error e -> Alcotest.fail (Board.show_board_error e))
+        [
+          (Board.Reaction_post, post_id, "reactor-a", "👍");
+          (Board.Reaction_post, post_id, "reactor-b", "👍");
+          (Board.Reaction_comment, comment_id, "reactor-b", "👏");
+        ];
+      let rows =
+        Board_dispatch.list_reactions_batch
+          ~targets:
+            [
+              (Board.Reaction_post, post_id);
+              (Board.Reaction_comment, comment_id);
+            ]
+          ~user_id:"reactor-b" ()
+      in
+      let summaries_for target =
+        List.assoc_opt target rows |> Option.value ~default:[]
+      in
+      (match summaries_for (Board.Reaction_post, post_id) with
+       | summary :: _ ->
+           Alcotest.(check string) "post emoji" "👍" summary.emoji;
+           Alcotest.(check int) "post count" 2 summary.count;
+           Alcotest.(check bool) "post reacted" true summary.reacted
+       | [] -> Alcotest.fail "expected post reaction summary");
+      (match summaries_for (Board.Reaction_comment, comment_id) with
+       | summary :: _ ->
+           Alcotest.(check string) "comment emoji" "👏" summary.emoji;
+           Alcotest.(check int) "comment count" 1 summary.count;
+           Alcotest.(check bool) "comment reacted" true summary.reacted
+       | [] -> Alcotest.fail "expected comment reaction summary")
+
 let test_board_sse_reaction_changed () =
   let post_id =
     match
@@ -937,6 +991,8 @@ let () =
         (with_eio test_comment_reaction_survives_restart);
       Alcotest.test_case "summary recent user ids" `Quick
         (with_eio test_reaction_summary_recent_user_ids);
+      Alcotest.test_case "summary batch" `Quick
+        (with_eio test_reaction_summary_batch);
       Alcotest.test_case "SSE reaction_changed" `Quick
         (with_eio test_board_sse_reaction_changed);
       Alcotest.test_case "unsupported emoji rejected" `Quick

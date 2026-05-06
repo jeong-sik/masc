@@ -294,13 +294,22 @@ let board_post_detail_json ~voter ~response_format ~post_id =
             []
       in
       let current_vote = board_current_vote_for_post ~voter ~post_id in
-      let reactions = board_reactions_for_post ~voter ~post_id in
+      let reaction_targets =
+        (Board.Reaction_post, post_id)
+        :: List.map
+             (fun (comment : Board.comment) ->
+                (Board.Reaction_comment, Board.Comment_id.to_string comment.id))
+             comments
+      in
+      let reaction_rows = board_reactions_batch ~targets:reaction_targets ~voter in
+      let reactions_for = board_reactions_lookup reaction_rows in
+      let reactions = reactions_for (Board.Reaction_post, post_id) in
       let post_json = board_post_dashboard_json ?current_vote ~reactions ~author_karma post in
       let comments_json =
         `List (List.map (fun (comment : Board.comment) ->
           let comment_id = Board.Comment_id.to_string comment.id in
           let current_vote = board_current_vote_for_comment ~voter ~comment_id in
-          let reactions = board_reactions_for_comment ~voter ~comment_id in
+          let reactions = reactions_for (Board.Reaction_comment, comment_id) in
           board_comment_dashboard_json ?current_vote ~reactions comment
         ) comments)
       in

@@ -45,11 +45,21 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path
         Option.value ~default:0 (List.assoc_opt author karma_map)
       in
       let paged = posts |> drop offset |> take limit in
+      let reaction_rows =
+        board_reactions_batch
+          ~targets:
+            (List.map
+               (fun (p : Board.post) ->
+                  (Board.Reaction_post, Board.Post_id.to_string p.id))
+               paged)
+          ~voter
+      in
+      let reactions_for = board_reactions_lookup reaction_rows in
       let posts_json = List.map (fun (p : Board.post) ->
         let author = Board.Agent_id.to_string p.author in
         let post_id = Board.Post_id.to_string p.id in
         let current_vote = board_current_vote_for_post ~voter ~post_id in
-        let reactions = board_reactions_for_post ~voter ~post_id in
+        let reactions = reactions_for (Board.Reaction_post, post_id) in
         board_post_dashboard_json ?current_vote ~reactions
           ~author_karma:(get_karma author) p
       ) paged in

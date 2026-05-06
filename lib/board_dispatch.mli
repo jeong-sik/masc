@@ -233,6 +233,12 @@ val list_reactions :
   unit ->
   (Board.reaction_summary list, Board.board_error) Result.t
 
+val list_reactions_batch :
+  targets:(Board.reaction_target_type * string) list ->
+  ?user_id:string ->
+  unit ->
+  ((Board.reaction_target_type * string) * Board.reaction_summary list) list
+
 (** {1 Karma} *)
 
 val karma_score_for_direction : Board.vote_direction -> int

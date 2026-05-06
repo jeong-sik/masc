@@ -862,35 +862,40 @@ let ensure_reaction_target_unlocked store ~target_type ~target_id =
            if Hashtbl.mem store.comments (Comment_id.to_string cid) then Ok ()
            else Error (Comment_not_found target_id))
 
-let reaction_summaries_unlocked store ~target_type ~target_id ?user_id () =
-  let counts = Hashtbl.create 8 in
-  let reacted = Hashtbl.create 8 in
-  let recent_users = Hashtbl.create 8 in
-  Hashtbl.iter
-    (fun _ (reaction : reaction) ->
-       if (=) reaction.target_type target_type
-          && String.equal reaction.target_id target_id
-       then begin
-         let reaction_user_id = Agent_id.to_string reaction.user_id in
-         let current =
-           Hashtbl.find_opt counts reaction.emoji |> Option.value ~default:0
-         in
-         Hashtbl.replace counts reaction.emoji (current + 1);
-         let users =
-           Hashtbl.find_opt recent_users reaction.emoji
-           |> Option.value ~default:[]
-         in
-         Hashtbl.replace recent_users reaction.emoji
-           ((reaction_user_id, reaction.created_at) :: users);
-         match user_id with
-         | Some user when String.equal reaction_user_id user ->
-             Hashtbl.replace reacted reaction.emoji true
-         | Some _ | None -> ()
-       end)
-    store.reactions;
+type reaction_summary_bucket = {
+  counts : (string, int) Hashtbl.t;
+  reacted : (string, bool) Hashtbl.t;
+  recent_users : (string, (string * float) list) Hashtbl.t;
+}
+
+let create_reaction_summary_bucket () =
+  {
+    counts = Hashtbl.create 8;
+    reacted = Hashtbl.create 8;
+    recent_users = Hashtbl.create 8;
+  }
+
+let add_reaction_to_summary_bucket bucket ?user_id (reaction : reaction) =
+  let reaction_user_id = Agent_id.to_string reaction.user_id in
+  let current =
+    Hashtbl.find_opt bucket.counts reaction.emoji |> Option.value ~default:0
+  in
+  Hashtbl.replace bucket.counts reaction.emoji (current + 1);
+  let users =
+    Hashtbl.find_opt bucket.recent_users reaction.emoji
+    |> Option.value ~default:[]
+  in
+  Hashtbl.replace bucket.recent_users reaction.emoji
+    ((reaction_user_id, reaction.created_at) :: users);
+  match user_id with
+  | Some user when String.equal reaction_user_id user ->
+      Hashtbl.replace bucket.reacted reaction.emoji true
+  | Some _ | None -> ()
+
+let reaction_summaries_of_bucket bucket =
   List.filter_map
     (fun emoji ->
-       let count = Hashtbl.find_opt counts emoji |> Option.value ~default:0 in
+       let count = Hashtbl.find_opt bucket.counts emoji |> Option.value ~default:0 in
        if count = 0 then None
        else
          Some
@@ -898,9 +903,9 @@ let reaction_summaries_unlocked store ~target_type ~target_id ?user_id () =
              emoji;
              count;
              reacted =
-               Hashtbl.find_opt reacted emoji |> Option.value ~default:false;
+               Hashtbl.find_opt bucket.reacted emoji |> Option.value ~default:false;
              recent_user_ids =
-               Hashtbl.find_opt recent_users emoji
+               Hashtbl.find_opt bucket.recent_users emoji
                |> Option.value ~default:[]
                |> List.sort (fun (_, a_ts) (_, b_ts) ->
                       Stdlib.Float.compare b_ts a_ts)
@@ -909,14 +914,46 @@ let reaction_summaries_unlocked store ~target_type ~target_id ?user_id () =
            })
     board_reaction_emojis
 
+let reaction_summaries_unlocked store ~target_type ~target_id ?user_id () =
+  let bucket = create_reaction_summary_bucket () in
+  Hashtbl.iter
+    (fun _ (reaction : reaction) ->
+       if (=) reaction.target_type target_type
+          && String.equal reaction.target_id target_id
+       then add_reaction_to_summary_bucket bucket ?user_id reaction)
+    store.reactions;
+  reaction_summaries_of_bucket bucket
+
+let reaction_summaries_batch_unlocked store ~targets ?user_id () =
+  let target_buckets = Hashtbl.create (List.length targets) in
+  List.iter
+    (fun target ->
+       Hashtbl.replace target_buckets target
+         (create_reaction_summary_bucket ()))
+    targets;
+  Hashtbl.iter
+    (fun _ (reaction : reaction) ->
+       match
+         Hashtbl.find_opt target_buckets
+           (reaction.target_type, reaction.target_id)
+       with
+       | None -> ()
+       | Some bucket ->
+           add_reaction_to_summary_bucket bucket ?user_id reaction)
+    store.reactions;
+  Hashtbl.fold
+    (fun target bucket acc ->
+       (target, reaction_summaries_of_bucket bucket) :: acc)
+    target_buckets []
+
+let normalize_reaction_user_id = function
+  | Some user when not (String.equal (String.trim user) "") ->
+      Some (String.trim user)
+  | Some _ | None -> None
+
 let list_reactions store ~target_type ~target_id ?user_id () =
   maybe_sweep store;
-  let user_id =
-    match user_id with
-    | Some user when not (String.equal (String.trim user) "") ->
-        Some (String.trim user)
-    | Some _ | None -> None
-  in
+  let user_id = normalize_reaction_user_id user_id in
   with_lock store (fun () ->
       match ensure_reaction_target_unlocked store ~target_type ~target_id with
       | Error e -> Error e
@@ -924,6 +961,12 @@ let list_reactions store ~target_type ~target_id ?user_id () =
           Ok
             (reaction_summaries_unlocked store ~target_type ~target_id ?user_id
                ()))
+
+let list_reactions_batch store ~targets ?user_id () =
+  maybe_sweep store;
+  let user_id = normalize_reaction_user_id user_id in
+  with_lock store (fun () ->
+      reaction_summaries_batch_unlocked store ~targets ?user_id ())
 
 let toggle_reaction store ~target_type ~target_id ~user_id ~emoji :
     (reaction_toggle_result, board_error) Result.t =

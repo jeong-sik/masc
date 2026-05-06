@@ -67,9 +67,9 @@ val dispatch :
     {2 Failure modes}
 
     - Path-traversal attempts on the dashboard assets route return
-      [404 Not Found] (NOT [400 Bad Request] — the spec is to not
+      [404 Not Found] (NOT [400 Bad Request]).  The spec does not
       reveal whether the path traversal was rejected vs the
-      filename was missing).  Pinned at the contract seam.
+      filename was missing.  Pinned at the contract seam.
     - Missing static asset files return [404 Not Found] with the
       literal body [404 Not Found] (operator runbooks grep on this
       exact string).

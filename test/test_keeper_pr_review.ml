@@ -13,6 +13,9 @@ module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_types = Masc_mcp.Keeper_types
 module Json = Yojson.Safe.Util
 
+(* [Unix.unsetenv] is not portably available in OCaml's stdlib Unix module,
+   so the repo convention is to clear via [Unix.putenv key ""]. See e.g.
+   [test/test_board_vote_quarantine.ml] and [test/test_provider_kind_resolution.ml]. *)
 let with_env key value f =
   let prior = Sys.getenv_opt key in
   Unix.putenv key value;
@@ -20,7 +23,7 @@ let with_env key value f =
     ~finally:(fun () ->
       match prior with
       | Some v -> Unix.putenv key v
-      | None -> Unix.unsetenv key)
+      | None -> Unix.putenv key "")
     f
 
 let temp_dir () =
@@ -222,13 +225,19 @@ let parse_nested_string_field raw outer field =
   |> Json.member field
   |> Json.to_string_option
 
-let test_with_env_restores_unset_variable () =
+(* OCaml stdlib's Unix module has no portable unsetenv, so the [with_env]
+   helper clears via [Unix.putenv NAME ""]. This test verifies the helper's
+   actual contract: the value is restored to empty after the scope (not to
+   the literal "unset" state). See repo convention notes in
+   test_board_vote_quarantine.ml and test_env_config_sandbox.ml. *)
+let test_with_env_restores_cleared_variable () =
   let key = "MASC_KEEPER_PR_REVIEW_WITH_ENV_UNSET_TEST" in
-  Unix.unsetenv key;
+  Unix.putenv key "";
   with_env key "temporary" (fun () ->
     check (option string) "env set inside scope" (Some "temporary")
       (Sys.getenv_opt key));
-  check (option string) "env unset after scope" None (Sys.getenv_opt key)
+  check (option string) "env cleared after scope" (Some "")
+    (Sys.getenv_opt key)
 
 let test_research_preset_can_mutate_pr_reviews () =
   check bool "research can comment/approve through review tool" true
@@ -415,8 +424,8 @@ let () =
         test_passes_through_unrelated_errors;
     ];
     "docker_route", [
-      test_case "with_env restores unset variables" `Quick
-        test_with_env_restores_unset_variable;
+      test_case "with_env restores cleared variables" `Quick
+        test_with_env_restores_cleared_variable;
       test_case "read routes through docker and injects repo flag" `Quick
         test_read_routes_docker_and_injects_repo_flag;
       test_case "comment and approve route through docker" `Quick

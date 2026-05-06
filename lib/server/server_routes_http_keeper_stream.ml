@@ -63,7 +63,7 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
           (false, Printf.sprintf "Internal error: %s" err))
   in
   let end_time = Eio.Time.now clock in
-  let duration_ms = int_of_float ((end_time -. start_time) *. 1000.0) in
+  let duration_ms = Keeper_timing.elapsed_duration_ms ~start_time ~end_time in
   let error_msg =
     if success then None
     else Some (Printf.sprintf "duration_ms=%d" duration_ms)
@@ -294,7 +294,7 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
           (false, Printf.sprintf "Internal error: %s" err))
   in
   let end_time = Eio.Time.now clock in
-  let duration_ms = int_of_float ((end_time -. start_time) *. 1000.0) in
+  let duration_ms = Keeper_timing.elapsed_duration_ms ~start_time ~end_time in
   let error_msg =
     if success then None
     else Some (Printf.sprintf "duration_ms=%d" duration_ms)

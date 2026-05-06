@@ -1,6 +1,9 @@
 (** Decide on-disk materialisation status for a credential record.
     See {!Credential_materializer} module documentation for the full
-    state-derivation table.  RFC-0019 §4.4. *)
+    state-derivation table.  A bundle is materialized only when its
+    [hosts.yml] contains an [oauth_token] that can be projected into a
+    Docker keeper container; host keyring-only gh auth is [Stale].
+    RFC-0019 §4.4. *)
 
 open Repo_manager_types
 

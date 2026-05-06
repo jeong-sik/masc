@@ -529,8 +529,8 @@ let test_f1_gate_resolve_stub () =
 (* --- 6. #12685: credential preflight gate --- *)
 
 let test_preflight_missing_hosts_yml () =
-  (* gh_config_dir exists but has no hosts.yml -> verify_state
-     returns Unmaterialized -> resolve must return Missing_bundle. *)
+  (* gh_config_dir exists but has no hosts.yml/oauth_token ->
+     verify_state returns Stale -> resolve must return Missing_bundle. *)
   with_temp_base_path (fun base_path ->
       let config = Masc_mcp.Coord.default_config base_path in
       let gh_config_dir =

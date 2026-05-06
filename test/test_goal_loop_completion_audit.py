@@ -890,6 +890,8 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertTrue(inventory_evidence["recorded"])
         self.assertTrue(inventory_evidence["complete_against_expected"])
         self.assertTrue(inventory_evidence["inventory_result_consistent"])
+        self.assertTrue(inventory_evidence["candidate_rows_valid"])
+        self.assertFalse(inventory_evidence["candidate_rows_count_matches"])
 
     def test_completion_audit_rejects_unhashable_source_inventory_paths(
         self,
@@ -1058,6 +1060,7 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         ]
         self.assertFalse(inventory_evidence["recorded"])
         self.assertFalse(inventory_evidence["candidate_rows_valid"])
+        self.assertFalse(inventory_evidence["candidate_rows_count_matches"])
         self.assertFalse(inventory_evidence["candidate_text_redaction_valid"])
         self.assertIn(
             "redaction_flag_without_candidate_rows",

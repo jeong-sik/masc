@@ -172,6 +172,7 @@ let degraded_reason_of_error message =
   if
     contains_substring lower "unparseable"
     || contains_substring lower "structurally invalid"
+    || contains_substring lower "invalid json"
     || contains_substring lower "guardrail_state"
   then
     "judge_output_invalid"
@@ -504,7 +505,11 @@ let parse_lenient_governance_json raw_text =
   | `Assoc [("raw", `String raw)] -> (
       match Judge_json_recovery.extract_balanced_object raw with
       | Some block -> (
-          try Ok (Llm_provider.Lenient_json.parse block)
+          try
+            match Llm_provider.Lenient_json.parse block with
+            | `Assoc [ ("raw", `String recovered_raw) ] ->
+                Error (Lenient_fallback recovered_raw)
+            | parsed -> Ok parsed
           with
           | Yojson.Json_error _ -> Error (Lenient_fallback raw)
           | Failure _ -> Error (Lenient_fallback raw))

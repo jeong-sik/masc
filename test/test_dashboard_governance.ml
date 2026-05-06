@@ -499,6 +499,20 @@ let test_parse_governance_response_requires_items_array () =
       fail "expected structural error, got lenient fallback"
   | Ok _ -> fail "missing items array must fail closed"
 
+let test_parse_governance_response_rejects_unparseable_recovered_block () =
+  let raw = "prefix {\"items\": [} suffix" in
+  match
+    Lib.Dashboard_governance_judge.parse_governance_response_for_testing
+      ~raw_text:raw ~generated_at:"2026-05-06T00:00:00Z"
+      ~expires_at:"2026-05-06T00:10:00Z" ~model_used:"glm:test"
+  with
+  | Error (Lib.Dashboard_governance_judge.Lenient_fallback recovered) ->
+      check bool "fallback keeps recovered fragment" true
+        (string_contains recovered "items")
+  | Error (Lib.Dashboard_governance_judge.Structural_error reason) ->
+      fail ("expected lenient fallback, got structural error: " ^ reason)
+  | Ok _ -> fail "unparseable recovered JSON must stay lenient fallback"
+
 let test_refresh_failure_keeps_fresh_cache_online () =
   let dir = test_dir () in
   Fun.protect
@@ -581,6 +595,31 @@ let test_refresh_failure_marks_judge_output_invalid () =
         "Governance judge returned structurally invalid response \
          (item agent_health:dreamer missing guardrail_state)"
       in
+      Lib.Dashboard_governance_judge.with_lock st (fun () ->
+        st.refreshing <- true;
+        st.judge_online <- false;
+        st.last_error <- None;
+        Lib.Dashboard_governance_judge.mark_refresh_failure
+          ~now_ts:now st ~message);
+      let status =
+        Lib.Dashboard_governance_judge.runtime_status_at ~now_ts:now dir
+      in
+      check string "runtime status is offline" "offline" status.status;
+      check (option string) "degraded_reason is judge_output_invalid"
+        (Some "judge_output_invalid") status.degraded_reason;
+      check (option string) "last_error recorded" (Some message)
+        status.last_error)
+
+let test_refresh_failure_marks_invalid_json_as_judge_output_invalid () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      with_test_fs env @@ fun () ->
+      let st = Lib.Dashboard_governance_judge.get_state dir in
+      let now = Unix.gettimeofday () in
+      let message = "Governance judge returned invalid JSON: malformed items" in
       Lib.Dashboard_governance_judge.with_lock st (fun () ->
         st.refreshing <- true;
         st.judge_online <- false;
@@ -946,12 +985,16 @@ let () =
             test_parse_governance_response_requires_guardrail_fields;
           test_case "parser requires items array" `Quick
             test_parse_governance_response_requires_items_array;
+          test_case "parser rejects unparseable recovered block" `Quick
+            test_parse_governance_response_rejects_unparseable_recovered_block;
           test_case "refresh failure keeps fresh cache online" `Quick
             test_refresh_failure_keeps_fresh_cache_online;
           test_case "refresh failure marks expired cache offline" `Quick
             test_refresh_failure_marks_expired_cache_offline;
           test_case "refresh failure marks judge output invalid" `Quick
             test_refresh_failure_marks_judge_output_invalid;
+          test_case "refresh failure marks invalid JSON invalid" `Quick
+            test_refresh_failure_marks_invalid_json_as_judge_output_invalid;
           test_case "refresh_once skips fresh cached result" `Quick
             test_refresh_once_skips_fresh_cached_result;
           test_case "backoff runtime status is structured" `Quick

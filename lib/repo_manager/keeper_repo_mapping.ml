@@ -327,15 +327,38 @@ let repository_url_basename url =
       String.sub base 0 (String.length base - 4)
     else base
 
-let read_file_opt path =
-  try Some (In_channel.with_open_bin path In_channel.input_all)
-  with Sys_error _ -> None
+let max_git_probe_file_bytes = 64 * 1024
 
-let safe_file_exists path =
-  try Sys.file_exists path with Sys_error _ -> false
+let safe_lstat path =
+  try Some (Unix.lstat path)
+  with Unix.Unix_error _ -> None
+
+let safe_file_exists path = Option.is_some (safe_lstat path)
 
 let safe_is_directory path =
-  try Sys.is_directory path with Sys_error _ -> false
+  match safe_lstat path with
+  | Some { Unix.st_kind = Unix.S_DIR; _ } -> true
+  | _ -> false
+
+let safe_is_symlink path =
+  match safe_lstat path with
+  | Some { Unix.st_kind = Unix.S_LNK; _ } -> true
+  | _ -> false
+
+let safe_realpath path =
+  try Some (Unix.realpath path)
+  with Unix.Unix_error _ -> None
+
+let read_file_opt path =
+  match safe_lstat path with
+  | Some { Unix.st_kind = Unix.S_REG; st_size; _ }
+    when st_size <= max_git_probe_file_bytes -> (
+      try
+        Some
+          (In_channel.with_open_bin path (fun ic ->
+               really_input_string ic st_size))
+      with Sys_error _ | End_of_file -> None)
+  | _ -> None
 
 let normalize_lexical_path path =
   let absolute = String.starts_with ~prefix:"/" path in
@@ -365,10 +388,18 @@ let gitdir_config_path ~repo_root gitdir =
     else gitdir
   in
   let repo_lane = Filename.dirname repo_root |> normalize_lexical_path in
-  let gitdir = normalize_lexical_path gitdir in
-  match relative_under ~root:repo_lane gitdir with
-  | None -> None
-  | Some _ -> Some (Filename.concat gitdir "config")
+  let gitdir_lexical = normalize_lexical_path gitdir in
+  match (safe_realpath repo_lane, safe_realpath gitdir_lexical) with
+  | Some repo_lane_real, Some gitdir_real -> (
+      match relative_under ~root:repo_lane_real gitdir_real with
+      | None -> None
+      | Some _ ->
+          if
+            safe_is_directory gitdir_real
+            && not (safe_is_symlink gitdir_lexical)
+          then Some (Filename.concat gitdir_real "config")
+          else None)
+  | _ -> None
 
 let git_config_path_of_repo_root repo_root =
   let dot_git = Filename.concat repo_root ".git" in

@@ -12,6 +12,17 @@ let contains_substring s needle =
   in
   if n_len = 0 then true else loop 0
 
+let is_directory_no_follow path =
+  match Unix.lstat path with
+  | { Unix.st_kind = Unix.S_DIR; _ } -> true
+  | _ -> false
+  | exception Unix.Unix_error _ -> false
+
+let path_exists_no_follow path =
+  match Unix.lstat path with
+  | _ -> true
+  | exception Unix.Unix_error _ -> false
+
 let with_temp_base_path f =
   let dir = Filename.temp_file "mapping_test" "" in
   Sys.remove dir;
@@ -23,8 +34,8 @@ let with_temp_base_path f =
   Fun.protect
     ~finally:(fun () ->
       let rec rm_rf path =
-        if Sys.file_exists path then
-          if Sys.is_directory path then begin
+        if path_exists_no_follow path then
+          if is_directory_no_follow path then begin
             Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
             Unix.rmdir path
           end else
@@ -40,8 +51,8 @@ let with_empty_temp_base_path f =
   Fun.protect
     ~finally:(fun () ->
       let rec rm_rf path =
-        if Sys.file_exists path then
-          if Sys.is_directory path then begin
+        if path_exists_no_follow path then
+          if is_directory_no_follow path then begin
             Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
             Unix.rmdir path
           end else
@@ -464,6 +475,139 @@ let test_validate_path_access_playground_gitdir_escape_denied () =
           Alcotest.(check bool)
             "mentions not allowed" true (contains_substring msg "not allowed"))
 
+let test_validate_path_access_playground_dot_git_symlink_denied () =
+  with_temp_base_path (fun base_path ->
+      let root_repo =
+        { (sample_repo "me") with name = "me"; local_path = base_path }
+      in
+      let masc_repo =
+        { (sample_repo "masc") with
+          name = "masc";
+          url = "https://github.com/jeong-sik/masc-mcp.git";
+          local_path = Filename.concat base_path ".masc/repos/masc";
+        }
+      in
+      write_repositories base_path [ root_repo; masc_repo ];
+      write_mapping base_path "executor" [ "masc" ];
+      let repos_root =
+        Filename.concat base_path ".masc/playground/docker/executor/repos"
+      in
+      let repo_root = Filename.concat repos_root "symlink-worktree" in
+      let outside_gitdir = Filename.concat base_path "outside-symlink-gitdir" in
+      let path = Filename.concat repo_root "docs/proof.md" in
+      ensure_dir (Filename.dirname path);
+      write_file (Filename.concat outside_gitdir "config")
+        "[remote \"origin\"]\n\turl = https://github.com/jeong-sik/masc-mcp.git\n";
+      Unix.symlink outside_gitdir (Filename.concat repo_root ".git");
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
+          ~base_path ~path
+      with
+      | Ok () -> Alcotest.fail "expected .git symlink to be denied"
+      | Error _ -> ())
+
+let test_validate_path_access_playground_gitdir_symlink_denied () =
+  with_temp_base_path (fun base_path ->
+      let root_repo =
+        { (sample_repo "me") with name = "me"; local_path = base_path }
+      in
+      let masc_repo =
+        { (sample_repo "masc") with
+          name = "masc";
+          url = "https://github.com/jeong-sik/masc-mcp.git";
+          local_path = Filename.concat base_path ".masc/repos/masc";
+        }
+      in
+      write_repositories base_path [ root_repo; masc_repo ];
+      write_mapping base_path "executor" [ "masc" ];
+      let repos_root =
+        Filename.concat base_path ".masc/playground/docker/executor/repos"
+      in
+      let repo_root = Filename.concat repos_root "gitdir-symlink-worktree" in
+      let outside_gitdir = Filename.concat base_path "outside-gitdir-target" in
+      let symlink_gitdir = Filename.concat repos_root "gitdir-link" in
+      let path = Filename.concat repo_root "docs/proof.md" in
+      ensure_dir (Filename.dirname path);
+      write_file (Filename.concat outside_gitdir "config")
+        "[remote \"origin\"]\n\turl = https://github.com/jeong-sik/masc-mcp.git\n";
+      Unix.symlink outside_gitdir symlink_gitdir;
+      write_file (Filename.concat repo_root ".git")
+        (Printf.sprintf "gitdir: %s\n" symlink_gitdir);
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
+          ~base_path ~path
+      with
+      | Ok () -> Alcotest.fail "expected gitdir symlink to be denied"
+      | Error _ -> ())
+
+let test_validate_path_access_playground_gitdir_parent_symlink_escape_denied () =
+  with_temp_base_path (fun base_path ->
+      let root_repo =
+        { (sample_repo "me") with name = "me"; local_path = base_path }
+      in
+      let masc_repo =
+        { (sample_repo "masc") with
+          name = "masc";
+          url = "https://github.com/jeong-sik/masc-mcp.git";
+          local_path = Filename.concat base_path ".masc/repos/masc";
+        }
+      in
+      write_repositories base_path [ root_repo; masc_repo ];
+      write_mapping base_path "executor" [ "masc" ];
+      let repos_root =
+        Filename.concat base_path ".masc/playground/docker/executor/repos"
+      in
+      let repo_root = Filename.concat repos_root "parent-symlink-worktree" in
+      let outside_parent = Filename.concat base_path "outside-parent" in
+      let outside_gitdir = Filename.concat outside_parent "gitdir" in
+      let symlink_parent = Filename.concat repos_root "escape-parent" in
+      let path = Filename.concat repo_root "docs/proof.md" in
+      ensure_dir (Filename.dirname path);
+      write_file (Filename.concat outside_gitdir "config")
+        "[remote \"origin\"]\n\turl = https://github.com/jeong-sik/masc-mcp.git\n";
+      Unix.symlink outside_parent symlink_parent;
+      write_file (Filename.concat repo_root ".git")
+        "gitdir: ../escape-parent/gitdir\n";
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
+          ~base_path ~path
+      with
+      | Ok () -> Alcotest.fail "expected parent symlink gitdir escape to be denied"
+      | Error _ -> ())
+
+let test_validate_path_access_playground_large_git_config_denied () =
+  with_temp_base_path (fun base_path ->
+      let root_repo =
+        { (sample_repo "me") with name = "me"; local_path = base_path }
+      in
+      let masc_repo =
+        { (sample_repo "masc") with
+          name = "masc";
+          url = "https://github.com/jeong-sik/masc-mcp.git";
+          local_path = Filename.concat base_path ".masc/repos/masc";
+        }
+      in
+      write_repositories base_path [ root_repo; masc_repo ];
+      write_mapping base_path "executor" [ "masc" ];
+      let repos_root =
+        Filename.concat base_path ".masc/playground/docker/executor/repos"
+      in
+      let repo_root = Filename.concat repos_root "large-config-worktree" in
+      let path = Filename.concat repo_root "docs/proof.md" in
+      ensure_dir (Filename.dirname path);
+      ensure_dir (Filename.concat repo_root ".git");
+      write_file (Filename.concat repo_root ".git/config")
+        (String.make (70 * 1024) 'x'
+         ^ "\n[remote \"origin\"]\n\turl = https://github.com/jeong-sik/masc-mcp.git\n");
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
+          ~base_path ~path
+      with
+      | Ok () -> Alcotest.fail "expected oversized git config to be denied"
+      | Error msg ->
+          Alcotest.(check bool)
+            "mentions not allowed" true (contains_substring msg "not allowed"))
+
 let test_validate_path_access_playground_unknown_repo_denied () =
   with_temp_base_path (fun base_path ->
       let root_repo =
@@ -792,6 +936,15 @@ let () =
             test_validate_path_access_playground_gitdir_absolute_under_sandbox_uses_git_remote;
           Alcotest.test_case "playground escaping gitdir is denied" `Quick
             test_validate_path_access_playground_gitdir_escape_denied;
+          Alcotest.test_case "playground .git symlink is denied" `Quick
+            test_validate_path_access_playground_dot_git_symlink_denied;
+          Alcotest.test_case "playground gitdir symlink is denied" `Quick
+            test_validate_path_access_playground_gitdir_symlink_denied;
+          Alcotest.test_case
+            "playground gitdir parent symlink escape is denied" `Quick
+            test_validate_path_access_playground_gitdir_parent_symlink_escape_denied;
+          Alcotest.test_case "playground large git config is denied" `Quick
+            test_validate_path_access_playground_large_git_config_denied;
           Alcotest.test_case "playground unknown repo denied" `Quick
             test_validate_path_access_playground_unknown_repo_denied;
         ] );

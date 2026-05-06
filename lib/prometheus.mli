@@ -487,6 +487,7 @@ val metric_fallback_triggered : string
     drill-down; this counter exists so the "Zero Silent Failure"
     dashboard panel has a single numerator across all classes. *)
 val metric_board_truncated_posts : string
+val metric_keeper_quantitative_claim_rejections : string
 val metric_anti_rationalization_fallback : string
 val metric_anti_rationalization_excuse_pattern : string
 (** #10113: per-pattern + per-decision counter for the gate 2

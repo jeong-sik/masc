@@ -943,6 +943,8 @@ let metric_anti_rationalization_fallback =
 let metric_anti_rationalization_excuse_pattern =
   "masc_anti_rationalization_excuse_pattern_total"
 let metric_board_truncated_posts = "masc_board_truncated_posts_total"
+let metric_keeper_quantitative_claim_rejections =
+  "masc_keeper_quantitative_claim_rejections_total"
 let metric_cascade_strategy_decisions = "masc_cascade_strategy_decisions_total"
 let metric_cascade_capacity_events = "masc_cascade_capacity_events_total"
 
@@ -1985,6 +1987,9 @@ let init () =
     Gauge;
   add metric_board_truncated_posts
     "Total board posts truncated due to size limits"
+    Counter;
+  add metric_keeper_quantitative_claim_rejections
+    "Total keeper board posts rejected because quantitative code claims lacked explicit evidence"
     Counter;
   add metric_anti_rationalization_fallback
     "Total anti-rationalization fallbacks fired (verifier LLM unavailable), labeled by mode and cascade"

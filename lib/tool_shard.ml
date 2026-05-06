@@ -217,6 +217,10 @@ or starting discussions that other keepers should see.";
             ]);
           ]);
         ]);
+        ("quantitative_evidence", `Assoc [
+          ("type", `List [`String "object"; `String "string"; `String "array"]);
+          ("description", `String "Required for code-count or line-number claims. Include the exact command/output or checked count that supports the quantitative claim.");
+        ]);
       ]);
       ("required", `List [`String "content"]);
     ];

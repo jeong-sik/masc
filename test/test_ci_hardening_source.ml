@@ -1114,10 +1114,10 @@ let test_keeper_required_tool_contracts () =
       ~anchor:tool_choice_anchor
       "if computed_surface.required_tool_names <> []"
   in
-  let any_tool_after =
+  let preferred_required_after =
     file_pattern_position_after "lib/keeper/keeper_run_tools.ml"
       ~anchor:tool_choice_anchor
-      "then Some Agent_sdk.Types.Any"
+      "preferred_tool_choice_for_required_tool_names"
   in
   let last_turn_after =
     file_pattern_position_after "lib/keeper/keeper_run_tools.ml"
@@ -1125,9 +1125,9 @@ let test_keeper_required_tool_contracts () =
       "else if computed_surface.is_last_turn"
   in
   check bool "required_tools force tool_choice before last-turn relaxation" true
-    (match required_first, any_tool_after, last_turn_after with
-     | Some required_pos, Some any_pos, Some last_turn_pos ->
-         required_pos < any_pos && any_pos < last_turn_pos
+    (match required_first, preferred_required_after, last_turn_after with
+     | Some required_pos, Some preferred_pos, Some last_turn_pos ->
+         required_pos < preferred_pos && preferred_pos < last_turn_pos
      | _ -> false);
   check bool "last-turn relaxation no longer bypasses required_tools" true
     (file_not_contains_pattern "lib/keeper/keeper_run_tools.ml"

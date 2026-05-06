@@ -15,6 +15,7 @@ python3 scripts/goal_loop_live_replay.py \
   --act-map test/fixtures/goal_loop/act-map.startup.json \
   --runtime-source localhost:8935 \
   --base-path /Users/dancer/me \
+  --publish-dashboard-status \
   --loop-iteration post-act-live \
   --fail-on verify \
   --format text
@@ -31,6 +32,11 @@ Artifacts written:
   `evidence_kind=live_runtime_logs`, concrete evidence source, evidence window,
   and `checked_at`.
 - `status.json`: aggregate GOAL LOOP status and next action.
+
+When `--publish-dashboard-status` is set, the same status snapshot is also
+written to `<base-path>/.masc/goal-loop/status.json`. The dashboard endpoint
+`/api/v1/dashboard/goal-loop/status` reads that runtime path, so use this flag
+with the active server base path when the replay should update the operator UI.
 
 Interpretation:
 

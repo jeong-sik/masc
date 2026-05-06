@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 import time
@@ -53,6 +54,7 @@ class ReplaySummary:
     verify_json: str
     status_json: str
     metadata_json: str
+    dashboard_status_json: str | None
 
 
 @dataclass(frozen=True)
@@ -73,6 +75,21 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
         json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+
+def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        write_json(temp_path, payload)
+        temp_path.replace(path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+
+
+def dashboard_status_path_for_base_path(base_path: str) -> Path:
+    return Path(base_path).expanduser() / ".masc" / "goal-loop" / "status.json"
 
 
 def artifact_log_name(index: int, source: Path) -> str:
@@ -203,7 +220,11 @@ def replay_logs(
     max_samples: int,
     runtime_source: str,
     base_path: str | None,
+    publish_dashboard_status: bool = False,
 ) -> ReplaySummary:
+    if publish_dashboard_status and not base_path:
+        raise ValueError("--publish-dashboard-status requires --base-path")
+
     artifact_dir.mkdir(parents=True, exist_ok=True)
     max_samples_effective = max(max_samples, 0)
     window_start = utc_now_iso()
@@ -264,6 +285,11 @@ def replay_logs(
     )
     status_json = asdict(status_report)
     status_json = status_summary_with_verify_metadata(status_json, verify_json)
+    dashboard_status_json = (
+        dashboard_status_path_for_base_path(base_path)
+        if publish_dashboard_status and base_path
+        else None
+    )
 
     metadata = {
         "schema_version": 1,
@@ -281,6 +307,9 @@ def replay_logs(
         "max_samples": max_samples_effective,
         "max_samples_requested": max_samples,
         "max_samples_effective": max_samples_effective,
+        "dashboard_status_json": str(dashboard_status_json)
+        if dashboard_status_json is not None
+        else None,
     }
 
     paths = {
@@ -297,6 +326,8 @@ def replay_logs(
     write_json(paths["decide_json"], decide_json)
     write_json(paths["verify_json"], verify_json)
     write_json(paths["status_json"], status_json)
+    if dashboard_status_json is not None:
+        write_json_atomic(dashboard_status_json, status_json)
 
     return ReplaySummary(
         artifact_dir=str(artifact_dir),
@@ -309,6 +340,9 @@ def replay_logs(
         verify_json=str(paths["verify_json"]),
         status_json=str(paths["status_json"]),
         metadata_json=str(paths["metadata_json"]),
+        dashboard_status_json=str(dashboard_status_json)
+        if dashboard_status_json is not None
+        else None,
     )
 
 
@@ -325,6 +359,8 @@ def summary_to_text(summary: ReplaySummary) -> str:
         f"status_json: {summary.status_json}",
         f"metadata_json: {summary.metadata_json}",
     ]
+    if summary.dashboard_status_json:
+        lines.append(f"dashboard_status_json: {summary.dashboard_status_json}")
     return "\n".join(lines)
 
 
@@ -374,6 +410,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Runtime base path associated with the captured logs.",
     )
     parser.add_argument(
+        "--publish-dashboard-status",
+        action="store_true",
+        help=(
+            "Also write status.json to <base-path>/.masc/goal-loop/status.json, "
+            "which is the dashboard runtime status path."
+        ),
+    )
+    parser.add_argument(
         "--loop-iteration",
         default="post-act-live",
         help="Loop iteration label stored in status.json.",
@@ -417,6 +461,7 @@ def main(argv: list[str] | None = None) -> int:
         max_samples=args.max_samples,
         runtime_source=args.runtime_source,
         base_path=args.base_path,
+        publish_dashboard_status=args.publish_dashboard_status,
     )
     if args.format == "json":
         print(json.dumps(asdict(summary), ensure_ascii=False, indent=2, sort_keys=True))

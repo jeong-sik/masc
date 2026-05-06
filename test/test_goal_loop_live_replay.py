@@ -108,6 +108,65 @@ class GoalLoopLiveReplayTest(unittest.TestCase):
             self.assertEqual(metadata["max_samples_effective"], 0)
             self.assertEqual(metadata["max_samples"], 0)
 
+    def test_replay_can_publish_dashboard_status_for_base_path(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            root = Path(raw_dir)
+            log_path = root / "server.log"
+            artifact_dir = root / "artifacts"
+            base_path = root / "base"
+            log_path.write_text(
+                "[INFO] provider_health_probe_completed provider=ollama\n",
+                encoding="utf-8",
+            )
+
+            summary = goal_loop_live_replay.replay_logs(
+                log_paths=[str(log_path)],
+                artifact_dir=artifact_dir,
+                duration_seconds=0,
+                act_map_path=None,
+                loop_iteration="test-dashboard-publish",
+                verify_policy="critical",
+                max_samples=2,
+                runtime_source="unit-test",
+                base_path=str(base_path),
+                publish_dashboard_status=True,
+            )
+
+            dashboard_status_path = base_path / ".masc" / "goal-loop" / "status.json"
+            self.assertEqual(summary.dashboard_status_json, str(dashboard_status_path))
+            self.assertTrue(dashboard_status_path.is_file())
+            self.assertEqual(
+                read_json(dashboard_status_path),
+                read_json(artifact_dir / "status.json"),
+            )
+            metadata = read_json(artifact_dir / "metadata.json")
+            self.assertEqual(
+                metadata["dashboard_status_json"], str(dashboard_status_path)
+            )
+
+    def test_dashboard_status_publish_requires_base_path(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            root = Path(raw_dir)
+            log_path = root / "server.log"
+            log_path.write_text(
+                "[INFO] provider_health_probe_completed provider=ollama\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "requires --base-path"):
+                goal_loop_live_replay.replay_logs(
+                    log_paths=[str(log_path)],
+                    artifact_dir=root / "artifacts",
+                    duration_seconds=0,
+                    act_map_path=None,
+                    loop_iteration="test-dashboard-publish-missing-base",
+                    verify_policy="critical",
+                    max_samples=2,
+                    runtime_source="unit-test",
+                    base_path=None,
+                    publish_dashboard_status=True,
+                )
+
     def test_capture_window_reads_from_start_after_truncation(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:
             root = Path(raw_dir)

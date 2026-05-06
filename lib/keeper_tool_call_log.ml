@@ -264,11 +264,17 @@ let route_safe_input_string value =
     (Observability_redact.redact_preview ~max_len:max_output_len)
     value
 
+let route_text_for_evidence output_text =
+  match Tool_output.decode_from_oas output_text with
+  | Tool_output.Stored { preview; _ } -> preview
+  | Tool_output.Inline value -> value
+
 let route_evidence_json_of_tool_io ~tool_name ~input ~output_text =
+  let route_text = route_text_for_evidence output_text in
   let parsed_output =
     match Safe_ops.parse_json_safe
             ~context:"Keeper_tool_call_log.route_evidence"
-            output_text
+            route_text
     with
     | Ok json -> Some json
     | Error _ -> None
@@ -301,9 +307,11 @@ let route_evidence_json_of_tool_io ~tool_name ~input ~output_text =
   let output_json = Option.value ~default:(`Assoc []) route_json in
   let pr_url =
     match parsed_output with
-    | Some json -> route_output_url json output_text
-    | None -> github_pull_url_of_text output_text
+    | Some json -> route_output_url json route_text
+    | None -> github_pull_url_of_text route_text
   in
+  if Option.is_none route_json && Option.is_none pr_url then None
+  else
   let fields =
     []
     |> add_string "pr_url" pr_url

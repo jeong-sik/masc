@@ -408,6 +408,73 @@ let test_route_evidence_extracts_pr_url_from_gh_output () =
        | None -> Alcotest.fail "expected command evidence")
     | _ -> Alcotest.fail "expected exactly one entry")
 
+let test_route_evidence_stored_for_blob_backed_git_push () =
+  with_tmp_log (fun () ->
+    let sentinel =
+      Tool_output.encode_for_oas
+        (Tool_output.Stored {
+          sha256 = String.make 64 'b';
+          bytes = 8192;
+          mime = "application/json";
+          preview =
+            {|{"ok":true,"via":"docker","sandbox_profile":"docker","git_creds_enabled":true,"network_mode":"bridge","effective_sandbox_image":"masc-keeper-sandbox:local","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|};
+        })
+    in
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"executor"
+      ~tool_name:"keeper_bash"
+      ~input:
+        (`Assoc
+           [
+             ("cmd", `String "git push -u origin keeper/large-route-proof");
+             ("cwd", `String "repos/masc-mcp-keeper-direct-proof");
+           ])
+      ~output_text:sentinel
+      ~success:true
+      ~duration_ms:42.0
+      ();
+    let entries = Keeper_tool_call_log.read_recent ~n:1 () in
+    Alcotest.(check int) "entry persisted" 1 (List.length entries);
+    match entries with
+    | [ entry ] ->
+      let evidence = Yojson.Safe.Util.member "route_evidence" entry in
+      Alcotest.(check (option string)) "via captured from blob preview"
+        (Some "docker")
+        (Safe_ops.json_string_opt "via" evidence);
+      Alcotest.(check (option string)) "network mode captured"
+        (Some "bridge")
+        (Safe_ops.json_string_opt "network_mode" evidence);
+      Alcotest.(check bool) "git creds captured" true
+        (Safe_ops.json_bool ~default:false "git_creds_enabled" evidence);
+      let status = Yojson.Safe.Util.member "status" evidence in
+      Alcotest.(check (option string)) "status label captured"
+        (Some "success")
+        (Safe_ops.json_string_opt "label" status);
+      Alcotest.(check (option string)) "command captured"
+        (Some "git push -u origin [REDACTED]")
+        (Safe_ops.json_string_opt "command" evidence)
+    | _ -> Alcotest.fail "expected exactly one entry")
+
+let test_route_evidence_skips_unproven_filesystem_calls () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"executor"
+      ~tool_name:"keeper_fs_read"
+      ~input:(`Assoc [ ("path", `String "README.md") ])
+      ~output_text:"file contents"
+      ~success:true
+      ~duration_ms:4.0
+      ();
+    let entries = Keeper_tool_call_log.read_recent ~n:1 () in
+    Alcotest.(check int) "entry persisted" 1 (List.length entries);
+    match entries with
+    | [ entry ] ->
+      Alcotest.(check bool) "route evidence absent without proof" true
+        (match Yojson.Safe.Util.member "route_evidence" entry with
+         | `Null -> true
+         | _ -> false)
+    | _ -> Alcotest.fail "expected exactly one entry")
+
 let find_bucket name json =
   json
   |> Yojson.Safe.Util.to_list
@@ -743,6 +810,10 @@ let () =
             test_route_evidence_stored_for_git_push
         ; eio_test "route evidence extracts PR URL"
             test_route_evidence_extracts_pr_url_from_gh_output
+        ; eio_test "route evidence reads blob-backed git push preview"
+            test_route_evidence_stored_for_blob_backed_git_push
+        ; eio_test "route evidence skips unproven filesystem calls"
+            test_route_evidence_skips_unproven_filesystem_calls
         ; eio_test "dashboard aggregate groups runtime fields"
             test_dashboard_aggregate_groups_runtime_fields
         ; eio_test "dashboard hourly trend buckets numeric ts"

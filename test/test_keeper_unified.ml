@@ -3461,11 +3461,24 @@ let test_append_decision_record_persists_tool_calls () =
           ; provider = "codex_cli"
           ; outcome = "ok"
           ; latency_ms = 12.5
+          ; route_evidence =
+              Some
+                (`Assoc
+                   [
+                     ("tool_name", `String "keeper_shell");
+                     ("command", `String "git_status");
+                     ("cwd", `String "repos/masc-mcp");
+                     ("via", `String "docker");
+                     ("sandbox_profile", `String "docker");
+                     ("git_creds_enabled", `Bool true);
+                     ("network_mode", `String "bridge");
+                   ])
           }
         ; { tool_name = "keeper_board_post"
           ; provider = "codex_cli"
           ; outcome = "error"
           ; latency_ms = 3.0
+          ; route_evidence = None
           }
         ]
       in
@@ -3553,8 +3566,23 @@ let test_append_decision_record_persists_tool_calls () =
         Yojson.Safe.Util.(List.nth recorded_tool_calls 0 |> member "tool_name" |> to_string);
       check string "first provider" "codex_cli"
         Yojson.Safe.Util.(List.nth recorded_tool_calls 0 |> member "provider" |> to_string);
+      check string "first route via" "docker"
+        Yojson.Safe.Util.(
+          List.nth recorded_tool_calls 0 |> member "route_evidence"
+          |> member "via" |> to_string);
+      check bool "first route git creds" true
+        Yojson.Safe.Util.(
+          List.nth recorded_tool_calls 0 |> member "route_evidence"
+          |> member "git_creds_enabled" |> to_bool);
 	      check string "second outcome" "error"
 	        Yojson.Safe.Util.(List.nth recorded_tool_calls 1 |> member "outcome" |> to_string);
+      check bool "second route evidence absent" true
+        (match
+           Yojson.Safe.Util.(
+             List.nth recorded_tool_calls 1 |> member "route_evidence")
+         with
+         | `Null -> true
+         | _ -> false);
 	      check (float 0.001) "second latency" 3.0
 	        Yojson.Safe.Util.(List.nth recorded_tool_calls 1 |> member "latency_ms" |> to_float);
 	      check string "terminal reason success" "success"

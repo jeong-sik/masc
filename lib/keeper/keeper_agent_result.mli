@@ -5,7 +5,10 @@ type tool_call_detail =
   ; provider : string
   ; outcome : string
   ; latency_ms : float
+  ; route_evidence : Yojson.Safe.t option
   }
+
+val tool_call_detail_to_json : tool_call_detail -> Yojson.Safe.t
 
 (** Result of a single Agent.run() keeper turn. *)
 type run_result =

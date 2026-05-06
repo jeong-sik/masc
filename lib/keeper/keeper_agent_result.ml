@@ -8,7 +8,23 @@ type tool_call_detail =
   ; provider : string
   ; outcome : string
   ; latency_ms : float
+  ; route_evidence : Yojson.Safe.t option
   }
+
+let tool_call_detail_to_json (detail : tool_call_detail) =
+  let route_evidence_field =
+    match detail.route_evidence with
+    | Some evidence -> [ ("route_evidence", evidence) ]
+    | None -> []
+  in
+  `Assoc
+    ([
+       ("tool_name", `String detail.tool_name);
+       ("provider", `String detail.provider);
+       ("outcome", `String detail.outcome);
+       ("latency_ms", `Float detail.latency_ms);
+     ]
+     @ route_evidence_field)
 
 (** Result of a single Agent.run() keeper turn. *)
 type run_result =

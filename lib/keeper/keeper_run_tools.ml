@@ -995,11 +995,17 @@ let prepare_agent_setup
       ?trajectory_acc
       ~on_tool_executed:(fun
           ~tool_name
-          ~input:_
-          ~output_text:_
+          ~input
+          ~output_text
           ~success
           ~duration_ms
           ~provider ->
+        let route_evidence =
+          Keeper_tool_call_log.route_evidence_json_of_tool_io
+            ~tool_name
+            ~input
+            ~output_text
+        in
         (match Keeper_registry.get ~base_path:config.base_path meta.name with
          | Some entry ->
            acc.meta <- entry.meta;
@@ -1010,6 +1016,7 @@ let prepare_agent_setup
           ; provider
           ; outcome = if success then "ok" else "error"
           ; latency_ms = duration_ms
+          ; route_evidence
           }
           :: acc.tool_calls)
       ~discover_work_nudge

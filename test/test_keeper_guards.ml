@@ -10,6 +10,7 @@
 open Alcotest
 module KG = Masc_mcp.Keeper_guards
 module HK = Masc_mcp.Keeper_hooks_oas
+module P = Masc_mcp.Prometheus
 
 (* ----------------------------------------------------------------- *)
 (* Helpers                                                             *)
@@ -129,6 +130,7 @@ let test_render_inline_skip_reason () =
 
 let make_gate_event ?(decision = KG.Gate_override) () =
   { KG.stage = "keeper_deny";
+    keeper_name = "test_keeper";
     decision;
     reason_code = "keeper_deny";
     reason_text = "tool is on the keeper deny list";
@@ -207,6 +209,7 @@ let test_deny_guard_notifies_gate_observer () =
   match !observed with
   | [ event ] ->
     check string "stage" "keeper_deny" event.KG.stage;
+    check string "keeper_name" "test_keeper" event.KG.keeper_name;
     check string "decision" "override"
       (KG.gate_decision_to_string event.KG.decision);
     check string "reason_code" "keeper_deny" event.KG.reason_code;
@@ -225,6 +228,27 @@ let test_deny_guard_notifies_gate_observer () =
        | _ -> false)
   | events ->
     failf "expected one observer event, got %d" (List.length events)
+
+let test_gate_observer_failure_counts_actual_keeper () =
+  let meta_ref = make_meta_ref "keeper_gate_observer_failure" in
+  let keeper = (!meta_ref).name in
+  let labels = [ ("keeper", keeper); ("site", "gate_observer") ] in
+  let before =
+    P.metric_value_or_zero P.metric_keeper_guards_failures ~labels ()
+  in
+  let on_gate_decision _event =
+    raise (Failure "synthetic gate observer failure")
+  in
+  let hook =
+    KG.deny_guard ~meta_ref ~on_gate_decision ~denied:["dangerous_tool"]
+  in
+  let d = invoke hook (pre_tool_use_event ~tool_name:"dangerous_tool" ()) in
+  check string "denied tool still overrides" "Override" (decision_kind d);
+  let after =
+    P.metric_value_or_zero P.metric_keeper_guards_failures ~labels ()
+  in
+  check (float 0.0001) "observer failure counted for keeper"
+    (before +. 1.0) after
 
 let test_deny_guard_continues () =
   let meta_ref = make_meta_ref "test_keeper" in
@@ -479,6 +503,8 @@ let () = run "Keeper_guards" [
     test_case "blocks denied tool" `Quick test_deny_guard_blocks;
     test_case "notifies observer on block" `Quick
       test_deny_guard_notifies_gate_observer;
+    test_case "observer failure counts actual keeper" `Quick
+      test_gate_observer_failure_counts_actual_keeper;
     test_case "continues for allowed tool" `Quick test_deny_guard_continues;
   ];
   "cost_guard", [

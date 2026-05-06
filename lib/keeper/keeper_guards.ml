@@ -188,6 +188,7 @@ let gate_decision_is_rejection = function
 
 type gate_decision_event = {
   stage : string;
+  keeper_name : string;
   decision : gate_decision;
   reason_code : string;
   reason_text : string;
@@ -209,11 +210,11 @@ let notify_gate_decision on_gate_decision (event : gate_decision_event) =
   | exn ->
       Prometheus.inc_counter
         Prometheus.metric_keeper_guards_failures
-        ~labels:[("keeper", "aggregate"); ("site", "gate_observer")]
+        ~labels:[("keeper", event.keeper_name); ("site", "gate_observer")]
         ();
       Log.Keeper.warn
-        "keeper_guards: gate observer failed stage=%s tool=%s err=%s"
-        event.stage event.tool_name (Printexc.to_string exn)
+        "keeper_guards: gate observer failed keeper=%s stage=%s tool=%s err=%s"
+        event.keeper_name event.stage event.tool_name (Printexc.to_string exn)
 
 (** Emit a [masc:keeper_gate] Event_bus Custom event.
 
@@ -334,7 +335,7 @@ let report_gate_decision on_gate_decision
     ~agent_name:keeper_name ~turn ~accumulated_cost_usd
     ~stage_latency_ms ~reason_text;
   notify_gate_decision on_gate_decision
-    { stage; decision; reason_code; reason_text; tool_name; input; turn;
+    { stage; keeper_name; decision; reason_code; reason_text; tool_name; input; turn;
       accumulated_cost_usd; stage_latency_ms; source_path; source_line }
 
 (* -------------------------------------------------------------- *)

@@ -11,7 +11,9 @@ describe('BreadcrumbHistory', () => {
   it('formats breadcrumb timestamps', () => {
     const timestamp = new Date('2024-01-15T09:30:00').getTime()
     expect(formatBreadcrumbTime(timestamp)).not.toBe('')
+    expect(formatBreadcrumbTime(0)).not.toBe('')
     expect(formatBreadcrumbTime()).toBe('')
+    expect(formatBreadcrumbTime(Number.NaN)).toBe('')
   })
 
   it('summarizes empty history', () => {
@@ -59,6 +61,16 @@ describe('BreadcrumbHistory', () => {
     })
   })
 
+  it('treats epoch zero as a valid breadcrumb timestamp', () => {
+    const summary = summarizeBreadcrumbHistory([{ id: 'epoch', label: 'Epoch', timestamp: 0 }])
+    expect(summary.hasTimestamps).toBe(true)
+    expect(summary.items[0]).toMatchObject({
+      timestamp: 0,
+      hasTimestamp: true,
+    })
+    expect(summary.items[0]?.timeLabel).not.toBe('')
+  })
+
   it('renders empty message when no items', () => {
     const container = document.createElement('div')
     render(h(BreadcrumbHistory, { items: [] }), container)
@@ -66,6 +78,7 @@ describe('BreadcrumbHistory', () => {
     const nav = container.querySelector('[data-breadcrumb-history]') as HTMLElement
     expect(nav.dataset.breadcrumbCount).toBe('0')
     expect(nav.dataset.breadcrumbEmpty).toBe('true')
+    expect(nav.dataset.breadcrumbNavigable).toBe('false')
   })
 
   it('renders breadcrumb items', () => {
@@ -80,6 +93,9 @@ describe('BreadcrumbHistory', () => {
     const nav = container.querySelector('[data-breadcrumb-history]') as HTMLElement
     expect(nav.dataset.breadcrumbCount).toBe('2')
     expect(nav.dataset.breadcrumbEmpty).toBe('false')
+    expect(nav.dataset.breadcrumbHasActive).toBe('false')
+    expect(nav.dataset.breadcrumbHasTimestamps).toBe('false')
+    expect(nav.dataset.breadcrumbNavigable).toBe('false')
   })
 
   it('renders separators between items', () => {
@@ -133,6 +149,10 @@ describe('BreadcrumbHistory', () => {
     const item = container.querySelector('[data-breadcrumb-item-id="a"]') as HTMLElement
     expect(item.dataset.breadcrumbItemActive).toBe('true')
     expect(item.dataset.breadcrumbItemFirst).toBe('true')
+    const inactiveItem = container.querySelector('[data-breadcrumb-item-id="b"]') as HTMLElement
+    expect(inactiveItem.dataset.breadcrumbItemActive).toBe('false')
+    expect(inactiveItem.dataset.breadcrumbItemFirst).toBe('false')
+    expect(inactiveItem.dataset.breadcrumbItemLast).toBe('true')
   })
 
   it('renders timestamp when provided', () => {

@@ -39,8 +39,15 @@ interface BreadcrumbHistoryProps {
   testId?: string
 }
 
+const dataBool = (value: boolean): 'true' | 'false' => (value ? 'true' : 'false')
+
+function normalizeBreadcrumbTimestamp(ts: number | undefined): number | null {
+  if (ts == null || !Number.isFinite(ts)) return null
+  return ts
+}
+
 export function formatBreadcrumbTime(ts?: number): string {
-  if (!ts) return ''
+  if (ts == null || !Number.isFinite(ts)) return ''
   const d = new Date(ts)
   return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
 }
@@ -48,7 +55,8 @@ export function formatBreadcrumbTime(ts?: number): string {
 export function summarizeBreadcrumbHistory(items: BreadcrumbItem[]): BreadcrumbHistorySummary {
   const activeIndex = items.findIndex((item) => item.active === true)
   const summaryItems = items.map((item, index) => {
-    const timeLabel = formatBreadcrumbTime(item.timestamp)
+    const timestamp = normalizeBreadcrumbTimestamp(item.timestamp)
+    const timeLabel = timestamp == null ? '' : formatBreadcrumbTime(timestamp)
     return {
       id: item.id,
       label: item.label,
@@ -56,7 +64,7 @@ export function summarizeBreadcrumbHistory(items: BreadcrumbItem[]): BreadcrumbH
       active: item.active === true,
       first: index === 0,
       last: index === items.length - 1,
-      timestamp: item.timestamp ?? null,
+      timestamp,
       timeLabel,
       hasTimestamp: timeLabel.length > 0,
     }
@@ -87,7 +95,7 @@ export function BreadcrumbHistory({ items, onNavigate, testId }: BreadcrumbHisto
         data-breadcrumb-active-index="-1"
         data-breadcrumb-has-active="false"
         data-breadcrumb-has-timestamps="false"
-        data-breadcrumb-navigable=${navigable}
+        data-breadcrumb-navigable=${dataBool(navigable)}
         data-testid=${testId}
         class="text-xs text-[var(--color-fg-muted)]"
         aria-label="작업 히스토리"
@@ -104,9 +112,9 @@ export function BreadcrumbHistory({ items, onNavigate, testId }: BreadcrumbHisto
       data-breadcrumb-empty="false"
       data-breadcrumb-active-id=${summary.activeId}
       data-breadcrumb-active-index=${summary.activeIndex}
-      data-breadcrumb-has-active=${summary.hasActive}
-      data-breadcrumb-has-timestamps=${summary.hasTimestamps}
-      data-breadcrumb-navigable=${navigable}
+      data-breadcrumb-has-active=${dataBool(summary.hasActive)}
+      data-breadcrumb-has-timestamps=${dataBool(summary.hasTimestamps)}
+      data-breadcrumb-navigable=${dataBool(navigable)}
       data-testid=${testId}
       aria-label="작업 히스토리"
     >
@@ -124,10 +132,10 @@ export function BreadcrumbHistory({ items, onNavigate, testId }: BreadcrumbHisto
               data-breadcrumb-item
               data-breadcrumb-item-id=${item.id}
               data-breadcrumb-item-index=${item.index}
-              data-breadcrumb-item-active=${item.active}
-              data-breadcrumb-item-first=${item.first}
-              data-breadcrumb-item-last=${item.last}
-              data-breadcrumb-item-has-timestamp=${item.hasTimestamp}
+              data-breadcrumb-item-active=${dataBool(item.active)}
+              data-breadcrumb-item-first=${dataBool(item.first)}
+              data-breadcrumb-item-last=${dataBool(item.last)}
+              data-breadcrumb-item-has-timestamp=${dataBool(item.hasTimestamp)}
               data-breadcrumb-item-time-label=${item.timeLabel}
             >
               ${item.index > 0

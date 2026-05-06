@@ -1259,6 +1259,11 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_dashboard_o5_feeds)
+ (modules test_dashboard_o5_feeds)
+ (libraries masc_test_deps))
+
+(test
  (name test_masc_contract_catalog)
  (modules test_masc_contract_catalog)
  (libraries masc_test_deps))

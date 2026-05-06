@@ -79,6 +79,66 @@ let event_to_json (e : event) : Yojson.Safe.t =
     ("timestamp", `Float e.timestamp);
   ]
 
+let string_field name fields =
+  match List.assoc_opt name fields with
+  | Some (`String s) -> Some s
+  | _ -> None
+
+let float_field name fields =
+  match List.assoc_opt name fields with
+  | Some (`Float f) -> Some f
+  | Some (`Int n) -> Some (float_of_int n)
+  | _ -> None
+
+let bool_field name fields =
+  match List.assoc_opt name fields with
+  | Some (`Bool b) -> Some b
+  | _ -> None
+
+let non_empty_or fallback value =
+  let trimmed = String.trim value in
+  if trimmed = "" then fallback else trimmed
+
+let rule_id_of_fields fields =
+  let module_name =
+    string_field "module" fields |> Option.value ~default:""
+    |> non_empty_or "unknown"
+  in
+  let site =
+    string_field "site" fields |> Option.value ~default:""
+    |> non_empty_or "unknown"
+  in
+  if String.equal module_name "unknown" then site
+  else module_name ^ "." ^ site
+
+let dashboard_issue_event_to_json (json : Yojson.Safe.t) : Yojson.Safe.t option =
+  match json with
+  | `Assoc fields ->
+      let rule_id = rule_id_of_fields fields in
+      let timestamp = float_field "timestamp" fields |> Option.value ~default:0.0 in
+      let triggered = bool_field "triggered" fields |> Option.value ~default:false in
+      let id = Printf.sprintf "%s:%.3f" rule_id timestamp in
+      Some (`Assoc [
+        ("id", `String id);
+        ("ts", `Float timestamp);
+        ("rule_id", `String rule_id);
+        ("action", `String (if triggered then "triggered" else "observed"));
+        ("cooldown_remaining_ms", `Int 0);
+        ("source", `String "heuristic_metrics");
+      ])
+  | _ -> None
+
+let dashboard_issue_events events =
+  List.filter_map dashboard_issue_event_to_json events
+
+let dashboard_feed_json ~limit events =
+  `Assoc [
+    ("limit", `Int limit);
+    ("count", `Int (List.length events));
+    ("events", `List events);
+    ("heuristics", `List (dashboard_issue_events events));
+  ]
+
 (* ================================================================ *)
 (* Storage                                                          *)
 (* ================================================================ *)

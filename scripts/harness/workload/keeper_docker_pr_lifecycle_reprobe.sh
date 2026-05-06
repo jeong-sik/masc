@@ -909,12 +909,22 @@ poll_results() {
 
   while [[ -s "$pending_file" && "$(date +%s)" -lt "$deadline" ]]; do
     if ! assert_server_incarnation_unchanged; then
-      log "server incarnation changed while polling keeper results: expected=$SERVER_INCARNATION_ACTUAL actual=${SERVER_INCARNATION_LAST_ACTUAL:-unknown}"
-      record_pending_server_incarnation_loss "$pending_file" \
-        "$SERVER_INCARNATION_LAST_REASON" \
-        "$SERVER_INCARNATION_LAST_FILE"
-      : >"$pending_file"
-      break
+      # Only terminate early on a confirmed restart. Transient failures
+      # (server_health_unavailable, server_health_missing_commit) can fix
+      # themselves on the next /health poll without the server having
+      # restarted, so prematurely clearing pending requests here would
+      # discard live in-flight keeper results.
+      if [[ "$SERVER_INCARNATION_LAST_REASON" == "server_incarnation_changed" ]]; then
+        log "server incarnation changed while polling keeper results: expected=$SERVER_INCARNATION_ACTUAL actual=${SERVER_INCARNATION_LAST_ACTUAL:-unknown}"
+        record_pending_server_incarnation_loss "$pending_file" \
+          "$SERVER_INCARNATION_LAST_REASON" \
+          "$SERVER_INCARNATION_LAST_FILE"
+        : >"$pending_file"
+        break
+      fi
+      log "server health transient ($SERVER_INCARNATION_LAST_REASON); keep polling pending=$(wc -l <"$pending_file" | tr -d ' ')"
+      sleep 1
+      continue
     fi
     local next_pending="$RUN_DIR/pending.next"
     : >"$next_pending"

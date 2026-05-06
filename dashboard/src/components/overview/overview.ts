@@ -113,6 +113,15 @@ function trimTickerText(text: string, max = 96): string {
   return `${normalized.slice(0, max - 3)}...`
 }
 
+function firstNonEmptyTrimmed(...values: Array<string | null | undefined>): string | null {
+  for (const value of values) {
+    if (typeof value !== 'string') continue
+    const trimmed = value.trim()
+    if (trimmed !== '') return trimmed
+  }
+  return null
+}
+
 function taskTickerTone(status?: Task['status']): FleetTickerEvent['tone'] {
   switch (status) {
     case 'done':
@@ -199,9 +208,9 @@ export function deriveFleetTickerEvents({
     pushTickerEvent(events, {
       id: `board:${post.id}`,
       timestamp: post.updated_at || post.created_at,
-      actor: post.author,
+      actor: firstNonEmptyTrimmed(post.author) ?? 'board',
       label: post.post_kind ?? 'board',
-      text: post.title || post.content || post.body,
+      text: firstNonEmptyTrimmed(post.title, post.content, post.body) ?? '',
       kind: 'board',
       tone: post.post_kind === 'system' ? 'warn' : 'info',
     })

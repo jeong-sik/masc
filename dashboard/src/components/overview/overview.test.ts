@@ -298,6 +298,29 @@ describe('deriveFleetTickerEvents', () => {
     expect(events).toEqual([])
   })
 
+  it('uses trimmed board content fallback when title or author is whitespace', () => {
+    const events = deriveFleetTickerEvents({
+      taskList: [],
+      messageList: [],
+      boardPostList: [
+        makeBoardPost({
+          id: 'post-whitespace-title',
+          author: '   ',
+          title: '   ',
+          content: '  usable content  ',
+          body: 'body fallback',
+          updated_at: localIsoAt(3),
+        }),
+      ],
+      keeperList: [],
+    })
+
+    expect(events).toHaveLength(1)
+    expect(events[0]?.id).toBe('board:post-whitespace-title')
+    expect(events[0]?.actor).toBe('board')
+    expect(events[0]?.text).toBe('usable content')
+  })
+
   it('limits output and maps operational tones', () => {
     const events = deriveFleetTickerEvents({
       max: 2,

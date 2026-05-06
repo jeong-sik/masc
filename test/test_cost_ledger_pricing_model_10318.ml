@@ -154,12 +154,19 @@ let test_catalog_status_miss () =
                  ~pricing_model:"catalog-probe-unknown-model-10318" in
   check string "unknown model → miss" "miss" status
 
-let test_catalog_status_miss_for_auto_alias () =
+let test_catalog_status_unresolved_for_auto_alias () =
   (* "auto" is not in the pricing catalog; once the pricing_model is
-     "auto" (because telemetry was missing), the status must be "miss"
-     so the operator knows to fix telemetry propagation. *)
+     "auto" (because telemetry was missing), the status must stay distinct
+     from real catalog misses so the operator knows to fix telemetry
+     propagation. *)
   let status = H.pricing_catalog_status ~pricing_model:"auto" in
-  check string "auto alias → miss" "miss" status
+  check string "auto alias → alias_unresolved" "alias_unresolved" status
+
+let test_catalog_status_known_unpriced_codex_spark () =
+  let status =
+    H.pricing_catalog_status ~pricing_model:"gpt-5.3-codex-spark"
+  in
+  check string "codex spark preview → known_unpriced" "known_unpriced" status
 
 (* ------------------------------------------------------------------ *)
 (* cost_status_for_event                                               *)
@@ -246,14 +253,23 @@ let test_status_unpriced_model () =
     ~cost_usd:0.0
     "unpriced_model"
 
-let test_status_auto_alias_unpriced_model () =
+let test_status_auto_alias_unresolved_model () =
   check_status
-    ~msg:"known provider + auto alias → unpriced_model"
+    ~msg:"known provider + auto alias → unresolved_model_alias"
     ~provider:"openai" ~pricing_model:"auto"
     ~usage_missing:false ~usage_trusted:true
     ~input_tokens:500 ~output_tokens:200
     ~cost_usd:0.0
-    "unpriced_model"
+    "unresolved_model_alias"
+
+let test_status_known_unpriced_codex_spark () =
+  check_status
+    ~msg:"known provider + codex spark preview → known_unpriced_model"
+    ~provider:"openai" ~pricing_model:"gpt-5.3-codex-spark"
+    ~usage_missing:false ~usage_trusted:true
+    ~input_tokens:500 ~output_tokens:200
+    ~cost_usd:0.0
+    "known_unpriced_model"
 
 (* Trusted + known-paid provider + model in catalog + zero cost (despite
    tokens) → priced status because the catalog hit means we estimated
@@ -293,10 +309,12 @@ let test_status_strings_non_empty () =
   let variants =
     [ H.Cost_reported_or_estimated
     ; H.Cost_known_free
+    ; H.Cost_known_unpriced_model
     ; H.Cost_no_tokens
     ; H.Cost_usage_missing
     ; H.Cost_usage_untrusted
     ; H.Cost_provider_unknown
+    ; H.Cost_unresolved_model_alias
     ; H.Cost_unpriced_model
     ]
   in
@@ -334,7 +352,8 @@ let () =
         [ test_case "known paid → hit_paid"        `Quick test_catalog_status_hit_paid
         ; test_case "known free (ollama) → hit_free" `Quick test_catalog_status_hit_free
         ; test_case "unknown model → miss"         `Quick test_catalog_status_miss
-        ; test_case "auto alias → miss"            `Quick test_catalog_status_miss_for_auto_alias
+        ; test_case "auto alias → alias_unresolved" `Quick test_catalog_status_unresolved_for_auto_alias
+        ; test_case "codex spark preview → known_unpriced" `Quick test_catalog_status_known_unpriced_codex_spark
         ] )
     ; ( "cost_status_for_event",
         [ test_case "usage_missing wins"           `Quick test_status_usage_missing_wins
@@ -344,7 +363,8 @@ let () =
         ; test_case "known_free unmetered"         `Quick test_status_known_free_for_unmetered
         ; test_case "provider_unknown"             `Quick test_status_provider_unknown
         ; test_case "unpriced_model"               `Quick test_status_unpriced_model
-        ; test_case "auto alias unpriced_model"    `Quick test_status_auto_alias_unpriced_model
+        ; test_case "auto alias unresolved"        `Quick test_status_auto_alias_unresolved_model
+        ; test_case "codex spark known unpriced"   `Quick test_status_known_unpriced_codex_spark
         ; test_case "priced real model"            `Quick test_status_priced_path_with_real_model
         ; test_case "known_free via catalog"       `Quick test_status_known_free_via_catalog
         ] )

@@ -94,17 +94,26 @@ let test_pricing_catalog_miss_for_unknown_model () =
     ~cost_usd:0.0
     "pricing_catalog_miss"
 
-let test_pricing_catalog_miss_for_auto_alias () =
+let test_unresolved_model_alias_for_auto_alias () =
   (* The OAS catalog may carry zero-price fallback entries for selector
      aliases, but "auto" is not a billable model id. Treating it as
-     free would hide missing canonical telemetry. *)
+     free or a real catalog miss would hide missing canonical telemetry. *)
   check_source
-    ~msg:"auto alias on paid provider => pricing_catalog_miss"
+    ~msg:"auto alias on paid provider => unresolved_model_alias"
     ~usage_missing:false ~usage_trusted:true
     ~provider:"openai"
     ~model:"auto"
     ~cost_usd:0.0
-    "pricing_catalog_miss"
+    "unresolved_model_alias"
+
+let test_known_unpriced_model_for_codex_spark () =
+  check_source
+    ~msg:"codex spark preview => known_unpriced_model"
+    ~usage_missing:false ~usage_trusted:true
+    ~provider:"openai"
+    ~model:"gpt-5.3-codex-spark"
+    ~cost_usd:0.0
+    "known_unpriced_model"
 
 (* --- counter wiring (only non-computed sources tick) ------------- *)
 
@@ -159,8 +168,10 @@ let () =
             test_computed_when_trusted_and_positive;
           test_case "pricing_catalog_miss for unknown model" `Quick
             test_pricing_catalog_miss_for_unknown_model;
-          test_case "pricing_catalog_miss for auto alias" `Quick
-            test_pricing_catalog_miss_for_auto_alias;
+          test_case "unresolved_model_alias for auto alias" `Quick
+            test_unresolved_model_alias_for_auto_alias;
+          test_case "known_unpriced_model for codex spark" `Quick
+            test_known_unpriced_model_for_codex_spark;
         ] );
       ( "counter",
         [

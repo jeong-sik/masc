@@ -1204,7 +1204,7 @@ interface KeeperConfigMetrics {
   last_input_tokens: number
   last_output_tokens: number
   last_total_tokens: number
-  last_latency_ms: number
+  last_latency_ms: number | null
   last_total_tokens_per_sec: number | null
   last_output_tokens_per_sec: number | null
   compaction_count: number

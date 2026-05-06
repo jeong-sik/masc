@@ -991,6 +991,36 @@ describe('fetchKeeperConfig', () => {
     expect(result.runtime_trust?.disposition).toBe('Pass')
   })
 
+  it('preserves missing keeper config latency as null instead of zero', async () => {
+    const cases: Array<[string, Record<string, unknown>]> = [
+      ['null', { last_latency_ms: null }],
+      ['missing', {}],
+      ['zero number', { last_latency_ms: 0 }],
+      ['zero string', { last_latency_ms: '0' }],
+    ]
+
+    for (const [label, metrics] of cases) {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            name: 'keeper-sangsu',
+            metrics,
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      )
+      vi.stubGlobal('fetch', fetchMock)
+
+      const result = await fetchKeeperConfig('keeper-sangsu')
+
+      expect(result.metrics.last_latency_ms, label).toBeNull()
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('preserves terminal runtime blocker classes through config fetch and display labeling', async () => {
     const cases = [
       ['no_tool_capable_provider', '도구 실행 Provider 없음'],

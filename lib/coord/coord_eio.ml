@@ -82,17 +82,12 @@ let create_config ~fs ?clock base_path =
     pubsub_max_messages = Backend.pubsub_max_messages;
   } in
   let backend = Backend.FileSystem.create ~fs ?clock backend_config in
-  Backend.FileSystem.set_mutex_observers
-    ~acquire:(fun ~op ~seconds ->
-      Prometheus.observe_histogram
-        Prometheus.metric_backend_mutex_acquire_sec
-        ~labels:[("op", op)]
-        seconds)
-    ~held:(fun ~op ~seconds ->
-      Prometheus.observe_histogram
-        Prometheus.metric_backend_mutex_held_sec
-        ~labels:[("op", op)]
-        seconds);
+  (* Prometheus mutex observers were wired here by PR #13851, but this
+     library (masc_coord) cannot depend on Prometheus (which lives in the
+     masc_mcp top-level lib) without a dependency cycle. The wiring
+     therefore failed to compile.  Removed pending follow-up that installs
+     Backend.FileSystem.set_mutex_observers from a masc_mcp startup site
+     where Prometheus is in scope. See follow-up issue. *)
   {
     base_path;
     lock_expiry_minutes = 30;

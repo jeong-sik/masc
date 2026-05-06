@@ -210,6 +210,7 @@
         test_keeper_topk_llm
         test_warn_root_causes
         test_memory_hooks
+        test_keeper_agent_memory_episode_activity
         test_agent_stress_timeout_wire_10341
         test_institution_episodes_failure_learnings_10325
         test_institution_of_string_fail_closed
@@ -425,6 +426,7 @@
           test_keeper_topk_llm
           test_warn_root_causes
           test_memory_hooks
+          test_keeper_agent_memory_episode_activity
           test_agent_stress_timeout_wire_10341
           test_institution_episodes_failure_learnings_10325
           test_institution_of_string_fail_closed

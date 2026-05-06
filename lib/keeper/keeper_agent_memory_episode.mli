@@ -4,8 +4,8 @@
     preserving the keeper runner as a thin orchestration layer. *)
 
 (** Emit an [episode.flush] activity payload via [Coord_hooks.activity_emit_fn].
-    No-op if both [episodes] and [procedures] are zero. Swallows non-cancel
-    exceptions; re-raises [Eio.Cancel.Cancelled]. *)
+    No-op if both [episodes] and [procedures] are zero. Logs and counts
+    non-cancel exceptions; re-raises [Eio.Cancel.Cancelled]. *)
 val emit_flush_activity :
   config:Coord_utils.config ->
   keeper_name:string ->

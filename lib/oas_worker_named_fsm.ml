@@ -87,6 +87,20 @@ let sdk_error_to_cascade_outcome (err : Agent_sdk.Error.sdk_error)
          (Llm_provider.Http_client.AcceptRejected { reason = detail }))
   | _ -> None)
 
+let sdk_error_is_model_access_denied (err : Agent_sdk.Error.sdk_error) =
+  match sdk_error_to_cascade_outcome err with
+  | Some
+      (Cascade_fsm.Call_err
+         (Llm_provider.Http_client.ProviderFailure
+            {
+              kind =
+                Llm_provider.Http_client.Capability_mismatch
+                  { capability = Some "model_access" };
+              _;
+            })) ->
+    true
+  | _ -> false
+
 let moonshot_auth_hint_marker = "Moonshot returned 401"
 let openai_compat_not_found_hint_marker =
   "OpenAI-compatible endpoint returned 404"

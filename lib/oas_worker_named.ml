@@ -16,6 +16,25 @@ include Oas_worker_named_cascade
 include Oas_worker_named_error
 include Oas_worker_named_fsm
 
+let provider_health_keys_of_config provider_cfg =
+  let provider_key = Provider_adapter.provider_health_key_of_config provider_cfg in
+  let model_key =
+    Provider_adapter.provider_model_health_key_of_config provider_cfg
+  in
+  if String.equal provider_key model_key then [ provider_key ]
+  else [ provider_key; model_key ]
+
+let first_health_cooldown provider_cfg =
+  provider_health_keys_of_config provider_cfg
+  |> List.find_map (fun provider_key ->
+         match
+           Cascade_health_tracker.check_circuit_breaker
+             Cascade_health_tracker.global
+             ~provider_key
+         with
+         | Ok () -> None
+         | Error msg -> Some (provider_key, msg))
+
 type provider_attempt_timeout_constraints = {
   min_timeout_s : float option;
   max_timeout_s : float option;
@@ -254,16 +273,9 @@ let run_named
   let candidate_cfgs =
     List.filter
       (fun (provider_cfg : Llm_provider.Provider_config.t) ->
-         let provider_health_key =
-           Provider_adapter.provider_health_key_of_config provider_cfg
-         in
-         match
-           Cascade_health_tracker.check_circuit_breaker
-             Cascade_health_tracker.global
-             ~provider_key:provider_health_key
-         with
-         | Ok () -> true
-         | Error msg ->
+         match first_health_cooldown provider_cfg with
+         | None -> true
+         | Some (provider_health_key, msg) ->
              Log.Misc.debug
                "cascade %s: prefilter skipped %s (provider_key=%s cooldown: %s)"
                cascade_name provider_cfg.model_id provider_health_key msg;
@@ -697,11 +709,16 @@ let run_named
       let provider_health_key =
         Provider_adapter.provider_health_key_of_config provider_cfg
       in
-      match Cascade_health_tracker.check_circuit_breaker Cascade_health_tracker.global ~provider_key:provider_health_key with
-      | Error msg ->
-          Log.Misc.debug "cascade %s: skipping %s (provider_key=%s cooldown: %s)" cascade_name provider_cfg.model_id provider_health_key msg;
+      let provider_model_health_key =
+        Provider_adapter.provider_model_health_key_of_config provider_cfg
+      in
+      match first_health_cooldown provider_cfg with
+      | Some (blocked_health_key, msg) ->
+          Log.Misc.debug
+            "cascade %s: skipping %s (provider_key=%s cooldown: %s)"
+            cascade_name provider_cfg.model_id blocked_health_key msg;
           try_cascade ~on_success ?resume_checkpoint ?per_provider_timeout_s rest last_err
-      | Ok () ->
+      | None ->
       let is_last = rest = [] in
       Log.Misc.debug "cascade %s: trying %s (is_last=%b)" cascade_name provider_cfg.model_id is_last;
       let pp_timeout =
@@ -856,6 +873,11 @@ let run_named
           Cascade_health_tracker.(
             record_hard_quota global ~provider_key:provider_health_key
               ~error_kind:(error_kind_of_string "hard_quota")
+              ~error_reason:err_str ())
+        else if sdk_error_is_model_access_denied sdk_err then
+          Cascade_health_tracker.(
+            record_terminal_failure global ~provider_key:provider_model_health_key
+              ~error_kind:(error_kind_of_string "model_access_denied")
               ~error_reason:err_str ())
         else if sdk_error_is_resumable_cli_session sdk_err
                 || sdk_error_is_terminal_provider_runtime_failure sdk_err

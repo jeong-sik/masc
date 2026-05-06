@@ -1484,6 +1484,9 @@ let provider_health_key_of_config (cfg : Llm_provider.Provider_config.t) =
           cfg.model_id base_url
   | _ -> provider_label_of_config cfg
 
+let provider_model_health_key_of_config cfg =
+  Printf.sprintf "%s:%s" (provider_health_key_of_config cfg) cfg.model_id
+
 let display_provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
   display_provider_name (provider_label_of_config cfg)
 

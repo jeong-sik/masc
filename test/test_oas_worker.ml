@@ -1086,6 +1086,25 @@ let test_sdk_error_to_cascade_outcome_cascades_model_access_denied () =
         "expected model access InvalidRequest to cascade as ProviderFailure Capability_mismatch, got %s"
         (Cascade_fsm.provider_outcome_option_to_string outcome)
 
+let test_sdk_error_is_model_access_denied_predicate () =
+  let denied =
+    Agent_sdk.Error.Api
+      (Llm_provider.Retry.InvalidRequest
+         {
+           message =
+             "Invalid request: You do not have permission to access glm-5-code";
+         })
+  in
+  let ordinary =
+    Agent_sdk.Error.Api
+      (Llm_provider.Retry.InvalidRequest { message = {|{"detail":"Bad Request"}|} })
+  in
+  Alcotest.(check bool) "model access denied is detected" true
+    (Oas_worker_named.sdk_error_is_model_access_denied denied);
+  Alcotest.(check bool) "ordinary invalid request is not model access denial"
+    false
+    (Oas_worker_named.sdk_error_is_model_access_denied ordinary)
+
 let test_sdk_error_to_cascade_outcome_cascades_runtime_mcp_auth_config () =
   let detail = "codex_cli runtime MCP cannot carry keeper-bound auth headers" in
   let err =
@@ -1421,7 +1440,7 @@ let test_run_named_skips_cooldown_primary_and_falls_back () =
       | Ok providers -> providers
       | Error err -> Alcotest.fail err
     in
-    let primary_health_key, fallback_health_key =
+    let primary_model_health_key, fallback_provider_health_key =
       match resolved with
       | [ primary; fallback ] ->
          Alcotest.(check string) "primary model id"
@@ -1430,7 +1449,15 @@ let test_run_named_skips_cooldown_primary_and_falls_back () =
            fallback_key fallback.model_id;
          Alcotest.(check string) "primary base url" primary_url primary.base_url;
          Alcotest.(check string) "fallback base url" fallback_url fallback.base_url;
-         ( Masc_mcp.Provider_adapter.provider_health_key_of_config primary,
+         let primary_model_health_key =
+           Masc_mcp.Provider_adapter.provider_model_health_key_of_config primary
+         in
+         let fallback_model_health_key =
+           Masc_mcp.Provider_adapter.provider_model_health_key_of_config fallback
+         in
+         Alcotest.(check bool) "model health keys are isolated" true
+           (primary_model_health_key <> fallback_model_health_key);
+         ( primary_model_health_key,
            Masc_mcp.Provider_adapter.provider_health_key_of_config fallback )
       | providers ->
          Alcotest.failf "expected 2 resolved providers, got %d"
@@ -1439,7 +1466,7 @@ let test_run_named_skips_cooldown_primary_and_falls_back () =
     for _ = 1 to Masc_mcp.Cascade_health_tracker.cooldown_threshold do
       Masc_mcp.Cascade_health_tracker.record_failure
         Masc_mcp.Cascade_health_tracker.global
-        ~provider_key:primary_health_key
+        ~provider_key:primary_model_health_key
         ()
     done;
     reset_primary_calls ();
@@ -1447,7 +1474,7 @@ let test_run_named_skips_cooldown_primary_and_falls_back () =
     (match
        Masc_mcp.Cascade_health_tracker.check_circuit_breaker
          Masc_mcp.Cascade_health_tracker.global
-         ~provider_key:primary_health_key
+         ~provider_key:primary_model_health_key
      with
      | Ok () -> Alcotest.fail "primary provider should be OPEN before run_named"
      | Error _ -> ());
@@ -1476,7 +1503,7 @@ let test_run_named_skips_cooldown_primary_and_falls_back () =
         (match
            Masc_mcp.Cascade_health_tracker.provider_info
              Masc_mcp.Cascade_health_tracker.global
-             ~provider_key:fallback_health_key
+             ~provider_key:fallback_provider_health_key
          with
          | None -> Alcotest.fail "fallback provider should have health info"
          | Some info ->
@@ -5441,6 +5468,8 @@ let () =
         test_sdk_error_to_cascade_outcome_keeps_invalid_request_as_400;
       Alcotest.test_case "sdk_error_to_cascade_outcome cascades model access denial" `Quick
         test_sdk_error_to_cascade_outcome_cascades_model_access_denied;
+      Alcotest.test_case "sdk_error_is_model_access_denied classifies model access denial" `Quick
+        test_sdk_error_is_model_access_denied_predicate;
       Alcotest.test_case "sdk_error_to_cascade_outcome cascades runtime MCP auth config" `Quick
         test_sdk_error_to_cascade_outcome_cascades_runtime_mcp_auth_config;
       Alcotest.test_case "sdk_error_to_cascade_outcome cascades resumable CLI session" `Quick

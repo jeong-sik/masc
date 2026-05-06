@@ -10,7 +10,9 @@ CI fails on drift (`Env knob catalog drift gate`). To add a new
 module and regenerate this file.
 
 See [#10733](https://github.com/jeong-sik/masc-mcp/issues/10733) for
-the categorization roadmap (`@category` tags are a follow-up).
+the categorization roadmap. Newly-added typed getters in
+`lib/config/env_config_*.ml` must carry nearby `@category` and
+`@ops_class` tags; existing knobs remain in the backfill lane.
 
 **Total**: 412 unique knobs across 8 modules.
 

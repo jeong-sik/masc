@@ -9,8 +9,9 @@
    in one mechanically derived document so operators can see ops-class
    knobs without grepping. CI runs this and fails on drift.
 
-   Out-of-scope here: tagging knobs with @category Timeouts | Concurrency |
-   Thresholds | Policies. That is a follow-up. The catalog is the prereq.
+   Classification tags are enforced for newly-added typed getters by
+   scripts/ci/check-env-knob-classification.py. Existing knobs remain in the
+   generated catalog/backfill lane.
 
    Design: regex-line scan, not full OCaml parse. The env_config_*.ml files
    follow a stylistically uniform convention which makes line-scan reliable
@@ -247,7 +248,9 @@ let render entries =
      module and regenerate this file.\n\
      \n\
      See [#10733](https://github.com/jeong-sik/masc-mcp/issues/10733) for\n\
-     the categorization roadmap (`@category` tags are a follow-up).\n\
+     the categorization roadmap. Newly-added typed getters in\n\
+     `lib/config/env_config_*.ml` must carry nearby `@category` and\n\
+     `@ops_class` tags; existing knobs remain in the backfill lane.\n\
      \n";
   let by_module = Hashtbl.create 16 in
   List.iter

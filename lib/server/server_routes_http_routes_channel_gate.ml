@@ -111,6 +111,10 @@ let record_internal_error_metric ~duration_ms body_str exn =
   with
   | Yojson.Json_error _ -> fallback ()
 
+let request_elapsed_ms request_started =
+  Keeper_timing.elapsed_duration_ms ~start_time:request_started
+    ~end_time:(Unix.gettimeofday ())
+
 let handle_gate_message ~sw ~clock state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
     let request_started = Unix.gettimeofday () in
@@ -126,9 +130,7 @@ let handle_gate_message ~sw ~clock state request reqd =
         let json = Yojson.Safe.from_string body_str in
         match Channel_gate.inbound_of_json json with
         | Error e ->
-            let duration_ms =
-              int_of_float ((Unix.gettimeofday () -. request_started) *. 1000.0)
-            in
+            let duration_ms = request_elapsed_ms request_started in
             record_validation_error_metric ~duration_ms body_str e;
             Error (Channel_gate.Validation Channel_gate.Empty_content, e)
         | Ok msg ->
@@ -138,17 +140,13 @@ let handle_gate_message ~sw ~clock state request reqd =
                 Error (gate_err, Channel_gate.gate_error_to_string gate_err))
       with
       | Yojson.Json_error _e ->
-          let duration_ms =
-            int_of_float ((Unix.gettimeofday () -. request_started) *. 1000.0)
-          in
+          let duration_ms = request_elapsed_ms request_started in
           record_validation_error_metric ~duration_ms body_str "invalid json";
           Error (Channel_gate.Validation Channel_gate.Empty_content, "invalid json")
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
           (* Log details server-side, return generic message to client *)
-          let duration_ms =
-            int_of_float ((Unix.gettimeofday () -. request_started) *. 1000.0)
-          in
+          let duration_ms = request_elapsed_ms request_started in
           record_internal_error_metric ~duration_ms body_str exn;
           Log.Misc.error "channel_gate internal error: %s" (Printexc.to_string exn);
           Error (Channel_gate.Internal "", "internal error")

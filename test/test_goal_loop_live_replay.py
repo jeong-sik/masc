@@ -274,6 +274,56 @@ class GoalLoopLiveReplayTest(unittest.TestCase):
             self.assertIn("runtime_source=cli-test", verify["evidence_source"])
             self.assertIn("base_path=/tmp/masc", verify["evidence_source"])
 
+    def test_cli_publish_dashboard_status_writes_under_base_path(self) -> None:
+        # Exercise --publish-dashboard-status end-to-end through the CLI so a
+        # future refactor that drops the wiring (e.g., main() forgetting to
+        # pass the flag through to replay_logs) would fail this test rather
+        # than silently dropping the dashboard publish path.
+        with tempfile.TemporaryDirectory() as raw_dir:
+            root = Path(raw_dir)
+            base_path = root / "base"
+            base_path.mkdir()
+            log_path = root / "server.log"
+            artifact_dir = root / "artifacts"
+            log_path.write_text(
+                "[WARN] [Keeper] executor: alive-but-stuck detected\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT_PATH),
+                    "--log",
+                    str(log_path),
+                    "--artifact-dir",
+                    str(artifact_dir),
+                    "--act-map",
+                    str(FIXTURE_DIR / "act-map.startup.json"),
+                    "--loop-iteration",
+                    "cli-publish",
+                    "--runtime-source",
+                    "cli-test",
+                    "--base-path",
+                    str(base_path),
+                    "--publish-dashboard-status",
+                    "--format",
+                    "text",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+            published = base_path / ".masc" / "goal-loop" / "status.json"
+            self.assertTrue(
+                published.exists(),
+                f"dashboard status not published: stdout={result.stdout} stderr={result.stderr}",
+            )
+            status = read_json(published)
+            self.assertEqual(status["loop_iteration"], "cli-publish")
+
 
 if __name__ == "__main__":
     unittest.main()

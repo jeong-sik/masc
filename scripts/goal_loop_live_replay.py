@@ -98,7 +98,13 @@ def normalize_base_path(base_path: str | None) -> str | None:
     """
     if base_path is None:
         return None
-    return str(Path(base_path).expanduser())
+    stripped = base_path.strip()
+    if not stripped:
+        # Whitespace-only is treated the same as missing so the publish-mode
+        # guard does not silently fall through and write
+        # ./.masc/goal-loop/status.json relative to CWD.
+        return ""
+    return str(Path(stripped).expanduser())
 
 
 def dashboard_status_path_for_base_path(base_path: str) -> Path:
@@ -235,6 +241,14 @@ def replay_logs(
     base_path: str | None,
     publish_dashboard_status: bool = False,
 ) -> ReplaySummary:
+    # Normalize at the API boundary (not just in main()) so callers that go
+    # through replay_logs directly — unit tests, downstream Python harnesses —
+    # also see consistent base_path semantics. Strip whitespace before any
+    # check so a base_path of "  " is treated as missing instead of writing
+    # ./.masc/goal-loop/status.json relative to CWD.
+    base_path = normalize_base_path(base_path)
+    if base_path is not None and not base_path.strip():
+        base_path = None
     if publish_dashboard_status and not base_path:
         raise ValueError("--publish-dashboard-status requires --base-path")
 
@@ -473,7 +487,9 @@ def main(argv: list[str] | None = None) -> int:
         verify_policy=args.verify_policy,
         max_samples=args.max_samples,
         runtime_source=args.runtime_source,
-        base_path=normalize_base_path(args.base_path),
+        # replay_logs normalizes base_path internally, so unit tests and
+        # other Python callers get the same expansion + whitespace handling.
+        base_path=args.base_path,
         publish_dashboard_status=args.publish_dashboard_status,
     )
     if args.format == "json":

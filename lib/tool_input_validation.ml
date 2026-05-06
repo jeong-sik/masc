@@ -70,10 +70,56 @@ let normalize_transition_args (args : Yojson.Safe.t) : Yojson.Safe.t =
       `Assoc fields
   | _ -> args
 
-let prepare_args ~name args =
+let required_names schema =
+  match Yojson.Safe.Util.member "required" schema with
+  | `List items ->
+      List.filter_map
+        (function
+          | `String name -> Some name
+          | _ -> None)
+        items
+  | _ -> []
+
+let has_enum schema =
+  match Yojson.Safe.Util.member "enum" schema with
+  | `List (_ :: _) -> true
+  | _ -> false
+
+let optional_enum_fields schema =
+  let required = required_names schema in
+  match Yojson.Safe.Util.member "properties" schema with
+  | `Assoc props ->
+      List.filter_map
+        (fun (name, prop_schema) ->
+          if (not (List.mem name required)) && has_enum prop_schema then Some name
+          else None)
+        props
+  | _ -> []
+
+let normalize_blank_optional_enum_args ?schema args =
+  match schema, args with
+  | Some schema, `Assoc fields ->
+      let optional_enums = optional_enum_fields schema in
+      if optional_enums = [] then args
+      else
+        `Assoc
+          (List.filter
+             (fun (key, value) ->
+               match value with
+               | `String raw
+                 when List.mem key optional_enums && String.trim raw = "" ->
+                   false
+               | _ -> true)
+             fields)
+  | _ -> args
+
+let prepare_args ?schema ~name args =
   let args = strip_internal_marker_args args in
-  if String.equal name "masc_transition" then normalize_transition_args args
-  else args
+  let args =
+    if String.equal name "masc_transition" then normalize_transition_args args
+    else args
+  in
+  normalize_blank_optional_enum_args ?schema args
 
 let register_pre_hook () =
   let lookup name =
@@ -83,7 +129,8 @@ let register_pre_hook () =
   in
   let hook = Agent_sdk.Tool_middleware.make_validation_hook ~lookup in
   Tool_dispatch.register_pre_hook (fun ~name ~args ->
-    let prepared_args = prepare_args ~name args in
+    let schema = Tool_dispatch.lookup_schema name in
+    let prepared_args = prepare_args ?schema ~name args in
     match hook ~name ~args:prepared_args with
     | Agent_sdk.Tool_middleware.Pass
       when not (Yojson.Safe.equal prepared_args args) ->

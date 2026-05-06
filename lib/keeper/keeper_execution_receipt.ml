@@ -715,6 +715,7 @@ let stale_terminal_reason_code = function
   | Some (Keeper_registry.Stale_turn_timeout _) -> "stale_turn_timeout"
   | Some (Keeper_registry.Stale_termination_storm _) ->
       "stale_termination_storm"
+  | Some (Keeper_registry.Stale_fleet_batch _) -> "stale_fleet_batch"
   | Some (Keeper_registry.Heartbeat_consecutive_failures _) ->
       "heartbeat_failures"
   | Some (Keeper_registry.Turn_consecutive_failures _) -> "turn_failures"

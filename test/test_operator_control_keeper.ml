@@ -534,7 +534,7 @@ let test_playground_repo_status_refreshes_cached_git_metadata () =
       write_file
         (Filename.concat playground_abs ".playground_state.json")
         (Printf.sprintf
-           {|{"repos":[{"name":%S,"branch":"stale-branch","latest_commit":"stale-commit","shallow":true,"last_action":"clone"}],"last_updated":"1"}|}
+           {|{"repos":[{"name":%S,"branch":"stale-branch","latest_commit":"stale-commit","shallow":true,"last_action":"clone"},{"name":"../outside","branch":"bad-cache"}],"last_updated":"1"}|}
            repo_name);
       let open Yojson.Safe.Util in
       let status_repos =
@@ -566,7 +566,24 @@ let test_playground_repo_status_refreshes_cached_git_metadata () =
       Alcotest.(check string) "cache context preserved" "clone"
         (repo |> member "last_action" |> to_string);
       Alcotest.(check bool) "status is observed live" true
-        (repo |> member "observed_at" |> to_string |> String.length > 0))
+        (repo |> member "observed_at" |> to_string |> contains_substring "T");
+      Alcotest.(check bool) "unix observation timestamp is numeric" true
+        (match repo |> member "observed_at_unix" with
+         | `Float _ | `Int _ -> true
+         | _ -> false);
+      let invalid_repo =
+        List.find_opt
+          (fun repo ->
+            String.equal (repo |> member "name" |> to_string) "../outside")
+          status_repos
+      in
+      match invalid_repo with
+      | Some repo ->
+          let source = repo |> member "source" in
+          let path = repo |> member "path" in
+          Alcotest.(check bool) "invalid cached repo not git-enriched" true
+            (source = `Null && path = `Null)
+      | None -> ())
 
 let test_keeper_sandbox_status_fleet_includes_persisted_keeper () =
   Eio_main.run @@ fun env ->

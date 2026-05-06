@@ -265,7 +265,17 @@ let safe_is_dir path =
 let repo_name_of_json = function
   | `Assoc fields -> (
       match List.assoc_opt "name" fields with
-      | Some (`String name) when String.trim name <> "" -> Some name
+      | Some (`String raw_name) ->
+          let name = String.trim raw_name in
+          if
+            name <> ""
+            && name <> "."
+            && name <> ".."
+            && not (String.contains name '/')
+            && not (String.contains name '\\')
+            && String.equal (Filename.basename name) name
+          then Some name
+          else None
       | _ -> None)
   | _ -> None
 
@@ -273,6 +283,7 @@ let upsert_assoc key value fields =
   (key, value) :: List.remove_assoc key fields
 
 let git_metadata_timeout_sec = 2.0
+let max_live_git_enrichment_repos = 20
 
 let git_string_opt repo_path args =
   try
@@ -292,6 +303,7 @@ let git_string_opt repo_path args =
 let enrich_playground_repo_from_git
       ~(source : string) ~(repo_name : string) ~(repo_path : string)
       (repo_json : Yojson.Safe.t) =
+  let observed_at_unix = Time_compat.now () in
   let fields =
     match repo_json with
     | `Assoc fields -> fields
@@ -303,7 +315,8 @@ let enrich_playground_repo_from_git
     |> upsert_assoc "path" (`String (Filename.concat "repos" repo_name))
     |> upsert_assoc "source" (`String source)
     |> upsert_assoc "observed_at"
-         (`String (Printf.sprintf "%.0f" (Unix.gettimeofday ())))
+         (`String (Masc_domain.iso8601_of_unix_seconds observed_at_unix))
+    |> upsert_assoc "observed_at_unix" (`Float observed_at_unix)
   in
   let fields =
     match git_string_opt repo_path [ "rev-parse"; "--abbrev-ref"; "HEAD" ] with
@@ -324,6 +337,23 @@ let enrich_playground_repo_from_git
     | None -> fields
   in
   `Assoc fields
+
+let playground_repo_entry_json ~(source : string) ~(repo_name : string)
+    (repo_json : Yojson.Safe.t) =
+  let observed_at_unix = Time_compat.now () in
+  let fields =
+    match repo_json with
+    | `Assoc fields -> fields
+    | _ -> [ ("name", `String repo_name) ]
+  in
+  fields
+  |> upsert_assoc "name" (`String repo_name)
+  |> upsert_assoc "path" (`String (Filename.concat "repos" repo_name))
+  |> upsert_assoc "source" (`String source)
+  |> upsert_assoc "observed_at"
+       (`String (Masc_domain.iso8601_of_unix_seconds observed_at_unix))
+  |> upsert_assoc "observed_at_unix" (`Float observed_at_unix)
+  |> fun fields -> `Assoc fields
 
 let cached_playground_repo_entries playground_abs =
   let cache_path = Filename.concat playground_abs ".playground_state.json" in
@@ -358,6 +388,7 @@ let playground_repos_json ~(config : Coord.config) ~(meta : keeper_meta) =
     |> normalize_path
   in
   let repos_dir = Filename.concat playground_abs "repos" in
+  let live_enriched_count = ref 0 in
   let cached =
     cached_playground_repo_entries playground_abs
     |> List.map (fun repo ->
@@ -366,10 +397,12 @@ let playground_repos_json ~(config : Coord.config) ~(meta : keeper_meta) =
           let repo_path = Filename.concat repos_dir name in
           if safe_is_dir repo_path
              && safe_file_exists (Filename.concat repo_path ".git")
+             && !live_enriched_count < max_live_git_enrichment_repos
           then
+            (incr live_enriched_count;
             enrich_playground_repo_from_git ~source:"git" ~repo_name:name
-              ~repo_path repo
-          else repo
+              ~repo_path repo)
+          else playground_repo_entry_json ~source:"cache" ~repo_name:name repo
       | None -> repo)
   in
   let cached_names = List.filter_map repo_name_of_json cached in
@@ -377,9 +410,8 @@ let playground_repos_json ~(config : Coord.config) ~(meta : keeper_meta) =
     filesystem_playground_repo_names playground_abs
     |> List.filter (fun name -> not (List.mem name cached_names))
     |> List.map (fun name ->
-      let repo_path = Filename.concat repos_dir name in
-      enrich_playground_repo_from_git ~source:"filesystem" ~repo_name:name
-        ~repo_path (`Assoc []))
+      playground_repo_entry_json ~source:"filesystem" ~repo_name:name
+        (`Assoc []))
   in
   `List (cached @ fs_entries)
 

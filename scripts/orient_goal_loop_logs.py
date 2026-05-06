@@ -848,6 +848,7 @@ def source_artifact_summary(
     source_identity_checked_paths: set[str] = set()
     source_identity_checks_total = 0
     source_identity_checks_verified = 0
+    source_read_errors: list[dict[str, Any]] = []
     source_decode_errors: list[dict[str, Any]] = []
 
     source_root_resolved = source_root.resolve(strict=False)
@@ -880,7 +881,18 @@ def source_artifact_summary(
             missing_paths.append(path_text)
             continue
         resolved += 1
-        content_bytes = candidate.read_bytes()
+        try:
+            content_bytes = candidate.read_bytes()
+        except OSError as exc:
+            error: dict[str, Any] = {
+                "path": path_text,
+                "error": "read_error",
+                "exception": type(exc).__name__,
+            }
+            if exc.errno is not None:
+                error["errno"] = exc.errno
+            source_read_errors.append(error)
+            continue
         try:
             content = content_bytes.decode("utf-8")
         except UnicodeDecodeError as exc:
@@ -1009,6 +1021,7 @@ def source_artifact_summary(
         "COMPLETE"
         if not invalid_paths
         and not missing_paths
+        and not source_read_errors
         and not source_decode_errors
         and not line_ref_errors
         and source_itemized_id_status == "COMPLETE"
@@ -1025,6 +1038,7 @@ def source_artifact_summary(
         "source_artifacts_resolved": resolved,
         "source_artifacts_missing": len(missing_paths),
         "source_artifacts_invalid_paths": len(invalid_paths),
+        "source_read_errors": len(source_read_errors),
         "source_decode_errors": len(source_decode_errors),
         "line_ref_errors": len(line_ref_errors),
         "source_itemized_id_status": source_itemized_id_status,
@@ -1051,6 +1065,7 @@ def source_artifact_summary(
         "source_identity_error_samples": source_identity_errors[:10],
         "invalid_paths": invalid_paths[:10],
         "missing_paths": missing_paths[:10],
+        "source_read_error_samples": source_read_errors[:10],
         "source_decode_error_samples": source_decode_errors[:10],
         "line_ref_error_samples": line_ref_errors[:10],
         "source_ids_missing_from_catalog_samples": source_ids_missing_from_catalog[:10],

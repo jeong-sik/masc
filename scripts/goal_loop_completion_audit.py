@@ -334,6 +334,7 @@ def build_completion_audit(
         "source_artifacts_total": audit_catalog.get("source_artifacts_total"),
         "source_artifacts_resolved": audit_catalog.get("source_artifacts_resolved"),
         "source_artifacts_missing": audit_catalog.get("source_artifacts_missing"),
+        "source_read_errors": audit_catalog.get("source_read_errors"),
         "source_decode_errors": audit_catalog.get("source_decode_errors"),
         "source_line_ref_errors": audit_catalog.get("source_line_ref_errors"),
     }
@@ -341,6 +342,7 @@ def build_completion_audit(
         source_artifacts_evidence["source_artifacts_status"] == "COMPLETE"
         and as_int(source_artifacts_evidence["source_artifacts_total"]) >= 12
         and as_int(source_artifacts_evidence["source_artifacts_missing"]) == 0
+        and as_int(source_artifacts_evidence["source_read_errors"]) == 0
         and as_int(source_artifacts_evidence["source_decode_errors"]) == 0
         and as_int(source_artifacts_evidence["source_line_ref_errors"]) == 0
         and source_artifacts_evidence["source_artifacts_resolved"]

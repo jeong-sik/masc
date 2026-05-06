@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -666,6 +667,43 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(sample["error"], "unicode_decode_error")
         self.assertEqual(source_artifacts["source_identity_status"], "COMPLETE")
         self.assertEqual(source_artifacts["source_itemized_id_status"], "COMPLETE")
+
+    def test_source_artifact_read_error_is_reported_without_crashing(self) -> None:
+        catalog = {
+            "external_sources": [
+                {
+                    "path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+                    "line_refs": [1],
+                }
+            ],
+            "findings": [{"finding_id": "R-FATAL-1"}],
+        }
+
+        with tempfile.TemporaryDirectory() as raw_dir:
+            source_path = Path(raw_dir) / "GOAL_LOOP_INTEGRATION.md"
+            source_path.write_text("R-FATAL-1\n", encoding="utf-8")
+            with mock.patch.object(
+                Path,
+                "read_bytes",
+                side_effect=PermissionError(13, "denied"),
+            ):
+                source_artifacts = orient_goal_loop_logs.source_artifact_summary(
+                    catalog,
+                    Path(raw_dir),
+                    source_strip_prefix="prompt_corpus/GOAL_LOOP",
+                )
+
+        assert source_artifacts is not None
+        self.assertEqual(source_artifacts["status"], "INCOMPLETE")
+        self.assertEqual(source_artifacts["source_read_errors"], 1)
+        sample = source_artifacts["source_read_error_samples"][0]
+        self.assertEqual(
+            sample["path"],
+            "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+        )
+        self.assertEqual(sample["error"], "read_error")
+        self.assertEqual(sample["exception"], "PermissionError")
+        self.assertEqual(sample["errno"], 13)
 
     def test_orient_catalog_validates_aggregate_reconciliation_arithmetic(self) -> None:
         catalog: dict[str, object] = {

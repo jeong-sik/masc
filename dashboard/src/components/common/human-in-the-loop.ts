@@ -6,49 +6,96 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 
+export type ApprovalRiskLevel = 'low' | 'medium' | 'high' | 'critical'
+
 export interface ApprovalRequest {
   id: string
   agentId: string
   action: string
   details: string
-  riskLevel: 'low' | 'medium' | 'high' | 'critical'
+  riskLevel: ApprovalRiskLevel
   timeoutSeconds: number
   requestedAt: number
 }
 
-interface RiskConfig {
+export interface RiskConfig {
   border: string
   bg: string
   label: string
 }
 
-const RISK_CONFIG: Record<ApprovalRequest['riskLevel'], RiskConfig> = {
+export interface HumanInTheLoopSummary {
+  readonly requestId: string
+  readonly agentId: string
+  readonly agentShort: string
+  readonly riskLevel: ApprovalRiskLevel
+  readonly riskLabel: string
+  readonly isCritical: boolean
+  readonly timeoutSeconds: number
+  readonly remainingSeconds: number
+  readonly countdown: string
+  readonly expired: boolean
+  readonly actionLength: number
+  readonly detailsLength: number
+  readonly hasDetails: boolean
+}
+
+const RISK_CONFIG: Record<ApprovalRiskLevel, RiskConfig> = {
   low: {
-    border: 'border-[var(--ok-10)]',
-    bg: 'bg-[var(--ok-1)]',
+    border: 'border-[var(--color-status-ok)]/40',
+    bg: 'bg-[var(--color-status-ok)]/12',
     label: '낮은 위험',
   },
   medium: {
-    border: 'border-[var(--warn-10)]',
-    bg: 'bg-[var(--warn-1)]',
+    border: 'border-[var(--color-status-warn)]/40',
+    bg: 'bg-[var(--color-status-warn)]/12',
     label: '중간 위험',
   },
   high: {
-    border: 'border-[var(--error-10)]',
-    bg: 'bg-[var(--error-1)]',
+    border: 'border-[var(--color-status-err)]/40',
+    bg: 'bg-[var(--color-status-err)]/12',
     label: '높은 위험',
   },
   critical: {
-    border: 'border-[var(--error-10)]',
-    bg: 'bg-[var(--error-3)]',
+    border: 'border-[var(--color-status-err)]/60',
+    bg: 'bg-[var(--color-status-err)]/20',
     label: '심각한 위험',
   },
 }
 
-function formatCountdown(totalSeconds: number): string {
-  const m = Math.floor(totalSeconds / 60)
-  const s = totalSeconds % 60
+export function riskConfig(riskLevel: ApprovalRiskLevel): RiskConfig {
+  return RISK_CONFIG[riskLevel]
+}
+
+export function formatCountdown(totalSeconds: number): string {
+  const safeSeconds = Math.max(0, Math.floor(totalSeconds))
+  const m = Math.floor(safeSeconds / 60)
+  const s = safeSeconds % 60
   return `${m}:${s.toString().padStart(2, '0')}`
+}
+
+export function summarizeHumanInTheLoop(
+  request: ApprovalRequest,
+  remainingSeconds = request.timeoutSeconds,
+): HumanInTheLoopSummary {
+  const risk = riskConfig(request.riskLevel)
+  const normalizedRemaining = Math.max(0, Math.floor(remainingSeconds))
+
+  return {
+    requestId: request.id,
+    agentId: request.agentId,
+    agentShort: request.agentId.slice(0, 8),
+    riskLevel: request.riskLevel,
+    riskLabel: risk.label,
+    isCritical: request.riskLevel === 'critical',
+    timeoutSeconds: request.timeoutSeconds,
+    remainingSeconds: normalizedRemaining,
+    countdown: formatCountdown(normalizedRemaining),
+    expired: normalizedRemaining === 0,
+    actionLength: request.action.length,
+    detailsLength: request.details.length,
+    hasDetails: request.details.length > 0,
+  }
 }
 
 interface HumanInTheLoopProps {
@@ -71,7 +118,8 @@ export function HumanInTheLoop({
   const [modifiedAction, setModifiedAction] = useState(request.action)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const risk = RISK_CONFIG[request.riskLevel]
+  const summary = summarizeHumanInTheLoop(request, remaining)
+  const risk = riskConfig(summary.riskLevel)
 
   useEffect(() => {
     timerRef.current = setInterval(() => {
@@ -105,38 +153,50 @@ export function HumanInTheLoop({
     setModifying(false)
   }
 
-  const agentShort = request.agentId.slice(0, 8)
-  const isCritical = request.riskLevel === 'critical'
-  const riskLabelClass = isCritical
-    ? 'text-[var(--error-10)]'
+  const riskLabelClass = summary.isCritical
+    ? 'text-[var(--color-status-err)]'
     : 'text-[var(--color-fg-secondary)]'
 
   return html`
     <div
-      class="rounded-[var(--r-1)] border p-3 ${risk.border} ${risk.bg}"
+      class="max-w-full rounded-[var(--r-1)] border p-3 ${risk.border} ${risk.bg}"
       role="alertdialog"
       aria-label="사람 개입 요청"
       aria-live="polite"
       data-human-in-the-loop
+      data-approval-id=${summary.requestId}
+      data-approval-agent-id=${summary.agentId}
+      data-approval-agent-short=${summary.agentShort}
+      data-approval-risk-level=${summary.riskLevel}
+      data-approval-risk-label=${summary.riskLabel}
+      data-approval-critical=${summary.isCritical}
+      data-approval-timeout-seconds=${summary.timeoutSeconds}
+      data-approval-remaining-seconds=${summary.remainingSeconds}
+      data-approval-countdown=${summary.countdown}
+      data-approval-expired=${summary.expired}
+      data-approval-modifying=${modifying}
+      data-approval-action-length=${summary.actionLength}
+      data-approval-details-length=${summary.detailsLength}
+      data-approval-has-details=${summary.hasDetails}
       data-testid=${testId}
     >
       <div class="mb-2 flex items-center justify-between">
         <span class="text-xs font-medium ${riskLabelClass}">
-          ${risk.label} · ${agentShort}
+          ${summary.riskLabel} · ${summary.agentShort}
         </span>
         <span
           class="font-mono text-xs text-[var(--color-fg-secondary)]"
-          aria-label="남은 시간 ${formatCountdown(remaining)}"
+          aria-label="남은 시간 ${summary.countdown}"
           data-testid="${testId ? `${testId}-timer` : undefined}"
         >
-          ${formatCountdown(remaining)}
+          ${summary.countdown}
         </span>
       </div>
 
-      <div class="mb-1 text-sm font-medium text-[var(--color-fg-primary)]">
+      <div class="mb-1 break-words text-sm font-medium text-[var(--color-fg-primary)]">
         ${request.action}
       </div>
-      <div class="mb-3 text-xs text-[var(--color-fg-secondary)]">
+      <div class="mb-3 break-words text-xs text-[var(--color-fg-secondary)]">
         ${request.details}
       </div>
 
@@ -144,7 +204,7 @@ export function HumanInTheLoop({
         ? html`
             <div class="mb-2">
               <textarea
-                class="w-full rounded-[var(--r-1)] border border-[var(--color-accent)] bg-[var(--color-bg-surface)] p-2 text-sm text-[var(--color-fg-primary)] outline-none"
+                class="w-full rounded-[var(--r-1)] border border-[var(--color-accent-fg)] bg-[var(--color-bg-surface)] p-2 text-sm text-[var(--color-fg-primary)] outline-none"
                 rows="2"
                 aria-label="수정 내용"
                 value=${modifiedAction}
@@ -152,7 +212,7 @@ export function HumanInTheLoop({
                   setModifiedAction((e.target as HTMLTextAreaElement).value)}
               />
               <button
-                class="mt-1 text-xs text-[var(--color-accent)] hover:underline"
+                class="mt-1 text-xs text-[var(--color-accent-fg)] hover:underline"
                 onClick=${handleApplyModify}
               >
                 수정 내용 적용
@@ -161,21 +221,21 @@ export function HumanInTheLoop({
           `
         : null}
 
-      <div class="flex gap-2">
+      <div class="flex flex-wrap gap-2">
         <button
-          class="flex-1 rounded-[var(--r-1)] bg-[var(--ok-10)] py-1.5 text-sm text-white transition-opacity hover:opacity-90"
+          class="min-w-[4rem] flex-1 rounded-[var(--r-1)] bg-[var(--color-status-ok)] py-1.5 text-sm text-white transition-opacity hover:opacity-90"
           onClick=${handleApprove}
         >
           승인
         </button>
         <button
-          class="flex-1 rounded-[var(--r-1)] bg-[var(--error-10)] py-1.5 text-sm text-white transition-opacity hover:opacity-90"
+          class="min-w-[4rem] flex-1 rounded-[var(--r-1)] bg-[var(--color-status-err)] py-1.5 text-sm text-white transition-opacity hover:opacity-90"
           onClick=${handleReject}
         >
           거부
         </button>
         <button
-          class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-3 py-1.5 text-sm text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-elevated)]"
+          class="min-w-[4rem] flex-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] px-3 py-1.5 text-sm text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-elevated)]"
           onClick=${() => setModifying((m) => !m)}
         >
           ${modifying ? '취소' : '수정'}

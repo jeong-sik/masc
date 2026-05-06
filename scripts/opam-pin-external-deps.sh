@@ -141,8 +141,10 @@ installed_agent_sdk_version() {
     return 0
   fi
 
-  echo "[opam-pin] ERROR: could not determine installed agent_sdk version from opam list or opam show" >&2
-  return 2
+  # Clean CI switches have no installed agent_sdk yet and may not have
+  # package metadata before this script pins it.  Treat that as "not
+  # installed" so the initial pin can proceed.
+  return 1
 }
 
 guard_agent_sdk_downgrade() {

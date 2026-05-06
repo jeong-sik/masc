@@ -12,6 +12,9 @@ let check_json msg expected actual =
     (Yojson.Safe.to_string expected)
     (Yojson.Safe.to_string actual)
 
+let timeout_kind json =
+  Yojson.Safe.Util.(member "timeout_kind" json |> to_string)
+
 (* -- 1. Nested get_or_compute must not deadlock ----------------------------- *)
 
 let test_nested_no_deadlock () =
@@ -356,7 +359,48 @@ let test_timeout_no_stale_returns_error ~clock () =
   in
   check_json "recompute after timeout" (`String "recovered") v2
 
-(* -- 12. Waiter timeout returns fast error without poisoning cache --------- *)
+(* -- 12. Repeated no-stale timeouts open a fail-fast circuit --------------- *)
+
+(** A hot dashboard key with no stale fallback should not keep spending the
+    full caller timeout on every request.  After repeated owner timeouts, the
+    key fails fast without caching timeout JSON into the normal cache table. *)
+let test_repeated_no_stale_timeout_opens_circuit ~clock () =
+  Dashboard_cache.invalidate_all ();
+  let computes = Atomic.make 0 in
+  let slow_compute () =
+    Atomic.incr computes;
+    Eio.Time.sleep clock 1.0;
+    `String "never_reached"
+  in
+  for _ = 1 to 3 do
+    let result =
+      Dashboard_cache.get_or_compute_with_timeout "circuit_timeout" ~ttl:1.0
+        ~clock ~timeout_sec:0.05 slow_compute
+    in
+    Alcotest.(check string) "owner timeout kind" "owner"
+      (timeout_kind result)
+  done;
+  let fail_fast =
+    Dashboard_cache.get_or_compute_with_timeout "circuit_timeout" ~ttl:1.0
+      ~clock ~timeout_sec:0.05 slow_compute
+  in
+  Alcotest.(check string) "circuit timeout kind" "circuit_open"
+    (timeout_kind fail_fast);
+  Alcotest.(check int) "circuit avoids fourth compute" 3
+    (Atomic.get computes);
+  Dashboard_cache.invalidate "circuit_timeout";
+  let recovered =
+    Dashboard_cache.get_or_compute_with_timeout "circuit_timeout" ~ttl:1.0
+      ~clock ~timeout_sec:0.5 (fun () ->
+        Atomic.incr computes;
+        `String "recovered")
+  in
+  check_json "invalidate clears timeout circuit" (`String "recovered")
+    recovered;
+  Alcotest.(check int) "compute allowed after invalidate" 4
+    (Atomic.get computes)
+
+(* -- 13. Waiter timeout returns fast error without poisoning cache --------- *)
 
 (** When another fiber already owns the compute slot, waiters should honor the
     caller's timeout budget instead of waiting for the global 130s eviction.
@@ -481,6 +525,8 @@ let () =
             (test_expired_stale_restored_on_timeout ~clock);
           test_case "no-stale timeout returns error, not cached" `Quick
             (test_timeout_no_stale_returns_error ~clock);
+          test_case "repeated no-stale timeout opens circuit" `Quick
+            (test_repeated_no_stale_timeout_opens_circuit ~clock);
           test_case "waiter timeout returns error, not cached" `Quick
             (test_waiter_timeout_returns_error_not_cached ~clock);
         ] );

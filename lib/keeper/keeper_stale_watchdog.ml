@@ -121,6 +121,88 @@ let stale_kill_class_label (cls : Keeper_registry.stale_kill_class) : string =
   | In_turn_hung _ -> "in_turn_hung"
   | Noop_failure_loop _ -> "noop_failure_loop"
 
+type batch_root_cause =
+  | Cascade_unhealthy
+  | Provider_auth
+  | Fd_exhaustion
+  | Mixed
+  | Unknown
+
+let batch_root_cause_to_string = function
+  | Cascade_unhealthy -> "cascade_unhealthy"
+  | Provider_auth -> "provider_auth"
+  | Fd_exhaustion -> "fd_exhaustion"
+  | Mixed -> "mixed"
+  | Unknown -> "unknown"
+
+let contains_any_ci haystack needles =
+  List.exists
+    (fun needle -> String_util.contains_substring_ci haystack needle)
+    needles
+
+let provider_auth_failure ~code ~detail =
+  contains_any_ci code
+    [ "auth"; "unauthorized"; "permission_denied"; "permission denied" ]
+  || contains_any_ci detail
+       [
+         "auth";
+         "unauthorized";
+         "invalid api key";
+         "bad key";
+         "permission denied";
+       ]
+
+let fd_exhaustion_failure detail =
+  contains_any_ci detail
+    [
+      "too many open files";
+      "file descriptor";
+      "fd leak";
+      "os error 24";
+      "emfile";
+    ]
+
+let failure_reason_batch_root_cause
+    (reason : Keeper_registry.failure_reason) : batch_root_cause option =
+  match reason with
+  | Provider_runtime_error { code; detail }
+    when provider_auth_failure ~code ~detail ->
+      Some Provider_auth
+  | Exception detail when fd_exhaustion_failure detail ->
+      Some Fd_exhaustion
+  | Stale_turn_timeout _
+  | Stale_termination_storm _
+  | Oas_timeout_budget_loop _
+  | Provider_runtime_error _ ->
+      Some Cascade_unhealthy
+  | Heartbeat_consecutive_failures _
+  | Turn_consecutive_failures _
+  | Tool_required_unsatisfied _
+  | Ambiguous_partial_commit _
+  | Fiber_unresolved
+  | Exception _ ->
+      None
+
+let classify_batch_root_cause reasons =
+  let causes =
+    reasons
+    |> List.filter_map failure_reason_batch_root_cause
+    |> List.sort_uniq compare
+  in
+  match causes with
+  | [] -> Unknown
+  | [ cause ] -> cause
+  | _ -> Mixed
+
+let classify_batch_root_cause_for_test = classify_batch_root_cause
+
+let batch_failure_reasons ~base_path keeper_names =
+  keeper_names
+  |> List.filter_map (fun keeper_name ->
+         match Keeper_registry.get ~base_path keeper_name with
+         | Some entry -> entry.last_failure_reason
+         | None -> None)
+
 let slot_holder_age ~now keeper_name =
   let holder_age holders = List.assoc_opt keeper_name holders in
   [
@@ -188,15 +270,14 @@ let () =
    cross-keeper pattern.  Issue evidence: 8 keepers terminated
    within the same second at 12:54:13Z (analyst, executor,
    issue_king, janitor, masc-improver, nick0cave, ollama-local,
-   qa-king).  That shape is a *systemic* signal — typically cascade
-   dead (#10474), provider auth failure, or fd exhaustion (#10745) —
-   not 8 independent stuck fibers.  The supervisor will keep
-   restarting each one individually unless an operator notices.
+   qa-king).  That shape is a *systemic* signal, not 8 independent
+   stuck fibers.  The supervisor will keep restarting each one
+   individually unless an operator notices.
 
    Track recent terminations across all keepers in a small bounded
    window.  When the number of distinct keepers in the window
-   reaches the threshold we emit a fleet-tier ERROR pointing at the
-   systemic root-cause issue list, plus a Prometheus counter.  No
+   reaches the threshold we emit a fleet-tier ERROR and a Prometheus
+   counter labelled by the low-cardinality [batch_root_cause].  No
    state-machine change: the per-keeper restart still proceeds.  The
    point is to make the batch event visible at all. *)
 let batch_window_sec = Env_config_keeper.KeeperWatchdog.batch_window_sec
@@ -505,17 +586,25 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                   comment on [batch_terminations] for rationale. *)
                let batch = record_batch_termination meta.name now in
                if List.length batch >= batch_threshold then begin
+                 let root_cause =
+                   batch_failure_reasons ~base_path batch
+                   |> classify_batch_root_cause
+                 in
+                 let root_cause_label =
+                   batch_root_cause_to_string root_cause
+                 in
                  Prometheus.inc_counter
                    Prometheus.metric_keeper_stale_termination_batch
+                   ~labels:[ ("root_cause", root_cause_label) ]
                    ();
                  Log.Keeper.error
                    "FLEET BATCH TERMINATION: %d distinct keepers \
                     terminated in last %.0fs [%s] — systemic signal \
-                    (cascade dead, provider auth, fd leak).  \
+                    root_cause=%s.  \
                     Per-keeper restarts will loop without operator \
                     intervention.  See #10765, #10474, #10745."
                    (List.length batch) batch_window_sec
-                   (String.concat ", " batch)
+                   (String.concat ", " batch) root_cause_label
                end;
                (try
                   Keeper_execution_receipt.emit_stale_keeper_broadcast

@@ -2209,7 +2209,7 @@ let init () =
   add metric_keeper_stale_termination_threshold_breached
     "Total stale termination threshold breaches triggering auto-pause.      Labels: keeper." Counter;
   add metric_keeper_stale_termination_batch
-    "Total fleet-wide batch termination events (multiple keepers terminated      within the batch window)." Counter;
+    "Total fleet-wide batch termination events (multiple keepers terminated      within the batch window). Labels: root_cause." Counter;
   add metric_keeper_stale_broadcast_emit_failures
     "Total failures emitting stale keeper broadcast events. Labels: keeper." Counter;
   add metric_keeper_tool_use_failure

@@ -279,6 +279,7 @@ let test_review_blocker_metrics_registered () =
   check_registered Prometheus.metric_tool_assignment_telemetry_failures;
   check_registered Prometheus.metric_keeper_oas_hook_output_parse_failures;
   check_registered Prometheus.metric_inference_queue_rejected;
+  check_registered Prometheus.metric_telemetry_observe_failures;
   check_registered Prometheus.metric_coord_telemetry_drop;
   check_registered Prometheus.metric_coord_claim_post_provision_failures;
   check_registered Prometheus.metric_keeper_lifecycle_callback_failures;

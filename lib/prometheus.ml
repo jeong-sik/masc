@@ -737,6 +737,11 @@ let metric_telemetry_unified_source_read_failures =
 let metric_tool_assignment_telemetry_failures =
   "masc_tool_assignment_telemetry_failures_total"
 
+(* Phase 0 exception visibility for [Telemetry_observe]: every swallowed
+   non-cancel exception logs and increments this bounded-by-callsite counter. *)
+let metric_telemetry_observe_failures =
+  "masc_telemetry_observe_failures_total"
+
 (* #10358 (c1): observability for the silent [Effect.Unhandled] catch-all
    in [lib/coord.ml] [observe_agent_lifecycle] / [observe_task_transition_event] /
    [Keeper_accountability.record_task_transition].  Those three try/with
@@ -2216,6 +2221,11 @@ let init () =
      site=read_recent_decode|read_recent_exception|warm_up_decode|\
      warm_up_exception. Any positive rate means tool assignment lifecycle \
      rows were dropped from the reconstructed read model."
+    Counter;
+  add metric_telemetry_observe_failures
+    "Total Telemetry_observe wrapper failures that were caught and returned \
+     as Error/default instead of silently disappearing. Labels: kind=<bounded \
+     call-site vocabulary>. Eio.Cancel.Cancelled is re-raised and not counted."
     Counter;
   add metric_coord_telemetry_drop
     "Total times a Coord lifecycle/transition hook dropped its Audit_log \

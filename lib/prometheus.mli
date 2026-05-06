@@ -406,6 +406,11 @@ val metric_tool_assignment_telemetry_failures : string
 (** Total tool-assignment telemetry decode/read failures. Labels:
     [site] is a bounded read/warm-up call-site vocabulary. *)
 
+val metric_telemetry_observe_failures : string
+(** Total {!Telemetry_observe} wrapper failures caught and returned as
+    [Error]/default. Labels: [kind] is the wrapper call-site vocabulary.
+    [Eio.Cancel.Cancelled] is re-raised and not counted. *)
+
 val metric_coord_telemetry_drop : string
 (** #10358 (c1): total times [lib/coord.ml]'s lifecycle hook caught
     [Stdlib.Effect.Unhandled] and dropped its Audit_log + Telemetry

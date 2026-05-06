@@ -69,7 +69,7 @@ describe('KeeperShellDrawer event mapping', () => {
     const terminal = mounted.querySelector('[data-terminal][data-testid="keeper-shell-terminal"]')
     expect(terminal?.getAttribute('aria-label')).toBe('Keeper shell terminal')
     expect(terminal?.querySelector('.term-line.is-meta')?.textContent).toContain('no keeper selected')
-    expect(mounted.querySelector('[data-testid="keeper-shell-summary"]')?.textContent).toContain('1 lines')
+    expect(mounted.querySelector('[data-testid="keeper-shell-summary"]')?.textContent).toContain('1 line')
     expect(mounted.querySelector('[data-status-chip-tone="neutral"]')?.textContent).toContain('idle')
   })
 
@@ -94,6 +94,7 @@ describe('KeeperShellDrawer event mapping', () => {
 
     await waitFor(() => expect(mounted?.textContent).toContain('task-123'))
     const summary = mounted.querySelector('[data-testid="keeper-shell-summary"]')
+    expect(summary?.getAttribute('role')).toBeNull()
     expect(summary?.getAttribute('aria-label')).toContain('4 lines, 2 stdout, 1 stderr, 1 meta')
     expect(summary?.getAttribute('aria-label')).toContain('15 dropped bytes')
     expect(summary?.textContent).toContain('stdout 2')

@@ -109,10 +109,14 @@ function statusTone(status: KeeperShellStatus): StatusChipTone {
   return 'neutral'
 }
 
+function lineCountLabel(count: number): string {
+  return `${count} ${count === 1 ? 'line' : 'lines'}`
+}
+
 function shellSummaryLabel(summary: KeeperShellSummary, status: KeeperShellStatus): string {
   const last = summary.lastStream ?? 'none'
   const dropped = summary.droppedBytes > 0 ? `, ${summary.droppedBytes} dropped bytes` : ''
-  return `Keeper shell ${status}: ${summary.total} lines, ${summary.stdout} stdout, ${summary.stderr} stderr, ${summary.meta} meta, last ${last}${dropped}`
+  return `Keeper shell ${status}: ${lineCountLabel(summary.total)}, ${summary.stdout} stdout, ${summary.stderr} stderr, ${summary.meta} meta, last ${last}${dropped}`
 }
 
 function KeeperShellSummaryStrip({
@@ -124,12 +128,11 @@ function KeeperShellSummaryStrip({
 }) {
   return html`
     <div
-      role="status"
       aria-label=${shellSummaryLabel(summary, status)}
       data-testid="keeper-shell-summary"
       class="flex min-w-0 flex-wrap items-center gap-1.5 text-[var(--color-fg-muted)]"
     >
-      <${StatusChip} tone="neutral" uppercase=${false}>${summary.total} lines</${StatusChip}>
+      <${StatusChip} tone="neutral" uppercase=${false}>${lineCountLabel(summary.total)}</${StatusChip}>
       <${StatusChip} tone="ok" uppercase=${false}>stdout ${summary.stdout}</${StatusChip}>
       <${StatusChip} tone=${summary.stderr > 0 ? 'bad' : 'neutral'} uppercase=${false}>stderr ${summary.stderr}</${StatusChip}>
       <${StatusChip} tone="neutral" uppercase=${false}>meta ${summary.meta}</${StatusChip}>

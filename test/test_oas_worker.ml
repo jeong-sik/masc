@@ -104,6 +104,13 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let write_executable_file path contents =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc contents);
+  Unix.chmod path 0o755
+
 let test_process_base_path = ref None
 
 let configure_direct_test_environment () =
@@ -3472,6 +3479,47 @@ let test_kimi_cli_should_log_stderr_line_filters_resume_noise () =
   Alcotest.(check bool) "other stderr guidance remains visible" true
     (should_log "warning: upstream endpoint is slow")
 
+let test_kimi_cli_error_completion_uses_measured_latency () =
+  let dir = temp_dir "kimi_cli_error_latency" in
+  let fake_kimi_path = Filename.concat dir "fake-kimi" in
+  write_executable_file fake_kimi_path
+    "#!/bin/sh\nsleep 0.05\nprintf '%s\\n' 'simulated failure' >&2\nexit 7\n";
+  let config =
+    {
+      Oas_worker_exec.Kimi_cli_transport_local.default_config with
+      kimi_path = fake_kimi_path;
+    }
+  in
+  let req =
+    {
+      (mock_completion_request ()) with
+      config = make_kimi_cli_provider_cfg ();
+      messages =
+        [
+          {
+            Agent_sdk.Types.role = Agent_sdk.Types.User;
+            content = [ Agent_sdk.Types.Text "hello" ];
+            name = None;
+            tool_call_id = None;
+            metadata = [];
+          };
+        ];
+    }
+  in
+  Eio.Switch.run @@ fun sw ->
+  let transport =
+    Oas_worker_exec.Kimi_cli_transport_local.create ~sw
+      ~mgr:(require_test_proc_mgr ()) ~config
+  in
+  let { Llm_provider.Llm_transport.response; latency_ms } =
+    transport.complete_sync req
+  in
+  Alcotest.(check bool) "failed subprocess latency is measured" true
+    (latency_ms > 0);
+  match response with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "expected fake kimi subprocess to fail"
+
 let test_kimi_cli_classify_cli_error_redacts_resumable_session_detail () =
   let raw_message =
     "kimi exited with code 75: \nTo resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc"
@@ -5308,6 +5356,8 @@ let () =
         test_kimi_cli_config_uses_oas_context_ssot;
       Alcotest.test_case "kimi stderr resume noise is filtered" `Quick
         test_kimi_cli_should_log_stderr_line_filters_resume_noise;
+      Alcotest.test_case "kimi error completion measures latency" `Quick
+        test_kimi_cli_error_completion_uses_measured_latency;
       Alcotest.test_case "kimi exit 75 detail is redacted" `Quick
         test_kimi_cli_classify_cli_error_redacts_resumable_session_detail;
       Alcotest.test_case "kimi exit 1 resume hint is resumable" `Quick

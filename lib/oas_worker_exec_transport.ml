@@ -1228,15 +1228,20 @@ module Kimi_cli_transport_local = struct
           let on_line line =
             if String.trim line <> "" then seen_lines := line :: !seen_lines
           in
-          match
-            Llm_provider.Cli_common_subprocess.run_stream_lines ~sw ~mgr
-              ~name:"kimi" ~cwd:config.cwd ~extra_env:config.extra_env
-              ~on_stderr_line
-              ?stdin_content:(stdin_for_prompt prompt)
-              ~on_line ?cancel:config.cancel argv
-          with
+          let run_result, measured_latency_ms =
+            Inference_utils.timed (fun () ->
+                Llm_provider.Cli_common_subprocess.run_stream_lines ~sw ~mgr
+                  ~name:"kimi" ~cwd:config.cwd ~extra_env:config.extra_env
+                  ~on_stderr_line
+                  ?stdin_content:(stdin_for_prompt prompt)
+                  ~on_line ?cancel:config.cancel argv)
+          in
+          match run_result with
           | Error _ as err ->
-              { Llm_provider.Llm_transport.response = classify_cli_error err; latency_ms = 0 }
+              {
+                Llm_provider.Llm_transport.response = classify_cli_error err;
+                latency_ms = measured_latency_ms;
+              }
           | Ok { latency_ms; _ } ->
               let response =
                 parse_jsonl_result ~model_id (List.rev !seen_lines)

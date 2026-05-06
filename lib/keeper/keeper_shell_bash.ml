@@ -159,6 +159,25 @@ let handle_keeper_bash
     | Some preset -> Keeper_tool_policy.allows_shell_write_for_preset preset
     | None -> false
   in
+  let gh_pr_create_block () =
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_shell_bash_failures
+      ~labels:[("keeper", meta.name); ("site", "gh_pr_create")]
+      ();
+    Log.Keeper.warn
+      "keeper_bash gh pr create blocked: keeper=%s cmd=%s"
+      meta.name cmd_for_log;
+    Yojson.Safe.to_string
+      (`Assoc
+         [ "ok", `Bool false
+         ; "error", `String "gh_pr_create_requires_keeper_pr_create"
+         ; "reason", `String
+             "keeper_bash cannot bypass the PR creation approval and audit policy"
+         ; "hint", `String
+             "Use keeper_pr_create with draft=true so governance approval and PR lifecycle markers are enforced."
+         ; "cmd", `String cmd_for_log
+         ])
+  in
   if cmd = ""
   then error_json "cmd is required. Good: cmd='ls -la lib/'. Bad: cmd=''."
   else if Env_config_keeper.KeeperSandbox.hard_mode ()
@@ -166,6 +185,8 @@ let handle_keeper_bash
   then
     error_json
       "MASC_KEEPER_SANDBOX_HARD_MODE requires sandbox_profile=docker"
+  else if cmd_contains_gh_pr_create cmd
+  then gh_pr_create_block ()
 
   else begin
     (* Tick 22: dark-launch shadow logger.  Runs
@@ -291,24 +312,7 @@ let handle_keeper_bash
            ~env_snapshot:env_snap
            ()))
     else if cmd_contains_gh_pr_create cmd
-    then (
-      Prometheus.inc_counter
-        Prometheus.metric_keeper_shell_bash_failures
-        ~labels:[("keeper", meta.name); ("site", "gh_pr_create")]
-        ();
-      Log.Keeper.warn
-        "keeper_bash gh pr create blocked: keeper=%s cmd=%s"
-        meta.name cmd_for_log;
-      Yojson.Safe.to_string
-        (`Assoc
-           [ "ok", `Bool false
-           ; "error", `String "gh_pr_create_requires_keeper_pr_create"
-           ; "reason", `String
-               "keeper_bash cannot bypass the PR creation approval and audit policy"
-           ; "hint", `String
-               "Use keeper_pr_create with draft=true so governance approval and PR lifecycle markers are enforced."
-           ; "cmd", `String cmd_for_log
-           ]))
+    then gh_pr_create_block ()
     else if base_profile = Docker
             && Env_config_keeper.KeeperSandbox.hard_mode ()
             && Keeper_shell_shared.cmd_targets_gh cmd

@@ -152,7 +152,12 @@ let parse_agent_status (config : Coord.config) ~(agent_name : string) : Yojson.S
                 ("last_seen", `String agent.last_seen);
                 ("age_s", `Float age_s);
                 ("last_seen_ago_s", `Float last_seen_ago_s);
-                ("is_zombie", `Bool (Coord.is_zombie_agent ~agent_name:agent.name agent.last_seen));
+                ("is_zombie",
+                 `Bool
+                   (Coord.is_zombie_agent
+                      ~agent_type:agent.agent_type
+                      ~agent_name:agent.name
+                      agent.last_seen));
               ]))
 
 let json_string_opt key json =

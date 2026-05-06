@@ -900,15 +900,15 @@ let iso_ago seconds =
     tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
 
 (** Helper: join an agent then overwrite its last_seen to simulate staleness *)
-let make_stale_agent config ~name ~age_seconds =
+let make_stale_agent ?(agent_type = "test") config ~name ~age_seconds =
   let _ = Coord.join config ~agent_name:name ~capabilities:[] () in
   (* Overwrite the agent file with a stale last_seen *)
   let agents_path = Filename.concat (Coord.masc_dir config) "agents" in
   let path = Filename.concat agents_path (Coord.safe_filename name ^ ".json") in
   let stale_ts = iso_ago age_seconds in
   let agent_json = Printf.sprintf
-    {|{"name":"%s","agent_type":"test","status":"inactive","capabilities":[],"joined_at":"%s","last_seen":"%s"}|}
-    name stale_ts stale_ts
+    {|{"name":"%s","agent_type":"%s","status":"inactive","capabilities":[],"joined_at":"%s","last_seen":"%s"}|}
+    name agent_type stale_ts stale_ts
   in
   Coord.write_json config path (Yojson.Safe.from_string agent_json)
 
@@ -937,6 +937,19 @@ let test_cleanup_zombies_spares_recent_keeper () =
     let result = Coord.cleanup_zombies config in
     Alcotest.(check bool) "recent keeper spared"
       true (not (str_contains result "keeper-active-agent"))
+  )
+
+let test_cleanup_zombies_spares_type_keeper () =
+  with_test_env (fun config ->
+    (* Non-pattern keeper agents also use the keeper threshold. *)
+    make_stale_agent
+      ~agent_type:"keeper"
+      config
+      ~name:"regular-keeper-runtime"
+      ~age_seconds:600.0;
+    let result = Coord.cleanup_zombies config in
+    Alcotest.(check bool) "agent_type=keeper spared below keeper threshold"
+      true (not (str_contains result "regular-keeper-runtime"))
   )
 
 let test_cleanup_zombies_removes_broken_agent_file () =
@@ -1773,6 +1786,7 @@ let () =
       Alcotest.test_case "cleanup detects regular zombie" `Quick test_cleanup_zombies_detects_regular;
       Alcotest.test_case "cleanup detects keeper zombie" `Quick test_cleanup_zombies_detects_keeper;
       Alcotest.test_case "cleanup spares recent keeper" `Quick test_cleanup_zombies_spares_recent_keeper;
+      Alcotest.test_case "cleanup spares type keeper" `Quick test_cleanup_zombies_spares_type_keeper;
       Alcotest.test_case "cleanup removes broken agent file" `Quick test_cleanup_zombies_removes_broken_agent_file;
       Alcotest.test_case "cleanup preserves non-json files" `Quick test_cleanup_zombies_preserves_non_json_files;
     ];

@@ -46,7 +46,12 @@ let status config =
           let json = read_json config path in
           match agent_of_yojson json with
           | Ok agent ->
-              let is_zombie = is_zombie_agent ~agent_name:agent.name agent.last_seen in
+              let is_zombie =
+                is_zombie_agent
+                  ~agent_type:agent.agent_type
+                  ~agent_name:agent.name
+                  agent.last_seen
+              in
               let stale_current_task =
                 match agent.current_task with
                 | Some task_id ->

@@ -269,10 +269,7 @@ let test_after_turn_flush_failure_still_continues () =
   let config = make_test_config ~base_path:tmp_dir in
   let memory = Memory_oas_bridge.create_memory ~agent_name:"test_after_fail" () in
   let labels =
-    [
-      ("keeper", "test_after_fail");
-      ("callback", "memory_after_turn_flush");
-    ]
+    [("callback", "memory_after_turn_flush")]
   in
   let before =
     P.metric_value_or_zero P.metric_keeper_lifecycle_callback_failures

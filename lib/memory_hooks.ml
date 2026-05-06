@@ -8,8 +8,8 @@
     This eliminates the MASC-to-OAS lifecycle invasion where the former
     [create_memory_full] directly manipulated OAS memory state.
 
-    The hook is composed (via [Hooks.compose]) with existing keeper hooks
-    so existing safety/cost/tool-disclosure hooks remain untouched.
+    The hook is composed (via [compose_with_inner]) with existing keeper
+    hooks so existing safety/cost/tool-disclosure hooks remain untouched.
 
     Phase 1 introduced this as an opt-in path behind
     [MASC_MEMORY_HOOK_FIRST]. Phase 2 made it the only path and
@@ -93,15 +93,18 @@ let compose_with_inner ~memory_hooks ~inner =
     @param memory OAS Memory.t instance (for AfterTurn flush)
     @param episode_limit Max episodes to inject (default 30)
     @param procedure_limit Max procedures to inject (default 10)
+    @param flush_incremental Dependency-injection seam for tests; returns
+           persisted episode/procedure counts.
 
     Returns a [Hooks.hooks] record with:
     - [before_turn_params]: injects memory text via [extra_system_context]
     - [after_turn]: incrementally flushes episodes/procedures
 
-    Compose with other hooks via [Hooks.compose]:
+    Compose with other hooks via [compose_with_inner] so memory-adjusted
+    [BeforeTurnParams] are passed to the inner keeper hooks:
     {[
       let memory_hooks = Memory_hooks.make ~agent_name ~config ~memory () in
-      let hooks = Hooks.compose ~outer:memory_hooks ~inner:base_hooks
+      let hooks = Memory_hooks.compose_with_inner ~memory_hooks ~inner:base_hooks
     ]} *)
 let make
     ~(agent_name : string)
@@ -148,10 +151,7 @@ let make
              Prometheus.inc_counter
                Prometheus.metric_keeper_lifecycle_callback_failures
                ~labels:
-                 [
-                   ("keeper", agent_name);
-                   ("callback", "memory_after_turn_flush");
-                 ]
+                 [("callback", "memory_after_turn_flush")]
                ();
              Log.Keeper.warn
                "memory_hooks: flush_incremental failed agent=%s: %s"

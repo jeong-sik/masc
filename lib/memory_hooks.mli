@@ -15,6 +15,8 @@
     @param memory OAS Memory.t instance (for AfterTurn flush)
     @param episode_limit Max episodes to inject (default 30)
     @param procedure_limit Max procedures to inject (default 10)
+    @param flush_incremental Dependency-injection hook for tests; it returns
+           persisted episode/procedure counts.
 
     Returns a [Hooks.hooks] record with:
     - [before_turn_params]: injects memory text via [extra_system_context]

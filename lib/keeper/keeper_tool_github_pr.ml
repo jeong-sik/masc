@@ -89,8 +89,18 @@ let draft_request_allowed args =
       | Some true -> false
       | Some false | None -> true)
 
+(* Research is intentionally allowed here: [config/tool_policy.toml]'s
+   [presets.research] grants the [github] group (which contains
+   [keeper_pr_create]) per the "Step 9 bloodflow restoration plan"
+   comment, so analyst/scholar/verifier-tier keepers can open draft
+   PRs as part of their work. Without Research, the tool stays visible
+   in the surface but fails at dispatch with [preset_insufficient] —
+   the visible/callable contradiction surfaced when an analyst keeper
+   tried a Docker PR-lifecycle proof. Mirrors
+   [Keeper_tool_pr_review.pr_review_mutation_preset_ok], which already
+   includes Research. *)
 let mutation_preset_ok = function
-  | Some (Delivery | Coding | Full) -> true
+  | Some (Research | Delivery | Coding | Full) -> true
   | _ -> false
 
 let scoped_credential_or_error ~config ~meta =
@@ -274,4 +284,5 @@ module For_testing = struct
   let build_pr_create_argv = build_pr_create_argv
   let draft_request_allowed = draft_request_allowed
   let quote_argv = quote_argv
+  let mutation_preset_ok = mutation_preset_ok
 end

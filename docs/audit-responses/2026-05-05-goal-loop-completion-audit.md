@@ -150,7 +150,10 @@
   `source_catalog_id`, strict-row schema, or 206 itemized rows. A Kimi keeper
   spec archive with an older GOAL LOOP fixture/script snapshot was also checked
   and has no `source_catalog_id`, `expected_findings_total`, strict-row schema,
-  or 206-row corpus artifact in its goal-loop members.
+  or 206-row corpus artifact in its goal-loop members. A broader filename-level
+  sweep of 43 Downloads zip archives matching Kimi/audit/goal/keeper/masc found
+  no `source_catalog_id`, `corpus_id`, `expected_findings_total`, strict-row
+  marker, or GOAL LOOP catalog-id marker in text-like archive members.
 - [근거] `python3 test/test_goal_loop_completion_audit.py` checked at
   2026-05-06T09:59:29+09:00, confidence High: the completion audit now accepts
   an optional `--strict-row-corpus` artifact and validates it against the
@@ -334,8 +337,9 @@ broader structured source IDs with 72 not in the strict audit catalog across 12
 uncataloged ID families and 260 source occurrences, 187 missing 206-itemized
 rows, row-corpus discovery evidence showing the checked 47-issue audit
 artifacts and duplicates are not the missing 206-row corpus, an independent
-report that confirms the #13265 replay gap remains open, and 9 itemized rows
-that are not evaluable from the startup log patterns.
+report that confirms the #13265 replay gap remains open, and a 43-archive
+Downloads marker sweep with zero strict-corpus marker hits. There are still 9
+itemized rows that are not evaluable from the startup log patterns.
 `goal_loop_completion_audit.py --require-complete` turns those facts into a
 closeout gate so the objective cannot be marked complete while those blockers
 remain.

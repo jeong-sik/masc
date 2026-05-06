@@ -127,6 +127,22 @@
       "sha256": "f23dfb6c89ea7f386ae99e24bbcb6d22800f78c383c550bbf9bc27a1ddf29fa4",
       "contents_summary": "6,229 files including an older GOAL LOOP fixture/script snapshot",
       "note": "Targeted scan of the goal_loop members finds fixture and script snapshots but no source_catalog_id, expected_findings_total, strict-row schema, or 206-row corpus artifact."
+    },
+    {
+      "artifact_name": "downloads_zip_strict_corpus_marker_sweep",
+      "artifact_kind": "archive_marker_search_report",
+      "result": "NOT_ROW_CORPUS",
+      "observed_archives_checked": 43,
+      "observed_marker_hits": 0,
+      "markers_checked": [
+        "source_catalog_id",
+        "corpus_id",
+        "expected_findings_total",
+        "strict_row",
+        "strict-row",
+        "goal-loop-206-audit-external-claim-2026-05-05"
+      ],
+      "note": "Filename-level sweep of Downloads zip archives matching Kimi, audit, goal, keeper, or masc found no strict-corpus markers in text-like archive members."
     }
   ],
   "broader_structured_id_triage": {

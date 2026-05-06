@@ -20,7 +20,7 @@ let with_env key value f =
     ~finally:(fun () ->
       match prior with
       | Some v -> Unix.putenv key v
-      | None -> Unix.putenv key "")
+      | None -> Unix.unsetenv key)
     f
 
 let temp_dir () =
@@ -210,11 +210,25 @@ let parse_string_field raw field =
 let parse_bool_field raw field =
   parse_field raw field |> Json.to_bool_option
 
+let parse_nested_bool_field raw outer field =
+  Yojson.Safe.from_string raw
+  |> Json.member outer
+  |> Json.member field
+  |> Json.to_bool_option
+
 let parse_nested_string_field raw outer field =
   Yojson.Safe.from_string raw
   |> Json.member outer
   |> Json.member field
   |> Json.to_string_option
+
+let test_with_env_restores_unset_variable () =
+  let key = "MASC_KEEPER_PR_REVIEW_WITH_ENV_UNSET_TEST" in
+  Unix.unsetenv key;
+  with_env key "temporary" (fun () ->
+    check (option string) "env set inside scope" (Some "temporary")
+      (Sys.getenv_opt key));
+  check (option string) "env unset after scope" None (Sys.getenv_opt key)
 
 let test_research_preset_can_mutate_pr_reviews () =
   check bool "research can comment/approve through review tool" true
@@ -305,6 +319,12 @@ let test_comment_and_approve_route_through_docker () =
   in
   check (option string) "approve via docker" (Some "docker")
     (parse_string_field raw "via");
+  check (option bool) "approve preflight under unified key" (Some true)
+    (parse_nested_bool_field raw "preflight" "ok");
+  check bool "legacy approve_preflight key absent" true
+    (match parse_field raw "approve_preflight" with
+     | `Null -> true
+     | _ -> false);
   let log = read_file log_path in
   check bool "review comment used gh pr review" true
     (contains_substring log "gh pr review 13510");
@@ -395,6 +415,8 @@ let () =
         test_passes_through_unrelated_errors;
     ];
     "docker_route", [
+      test_case "with_env restores unset variables" `Quick
+        test_with_env_restores_unset_variable;
       test_case "read routes through docker and injects repo flag" `Quick
         test_read_routes_docker_and_injects_repo_flag;
       test_case "comment and approve route through docker" `Quick

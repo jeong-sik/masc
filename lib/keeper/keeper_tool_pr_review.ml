@@ -418,7 +418,7 @@ let handle_keeper_pr_review_comment
                  ]
                   @
                   match approve_preflight_json with
-                  | Some json -> [ "approve_preflight", json ]
+                  | Some json -> [ "preflight", json ]
                   | None -> [])))
 ;;
 

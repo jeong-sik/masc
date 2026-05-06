@@ -305,7 +305,7 @@ let test_stale_broadcast_payload_uses_low_cardinality_stale_reason () =
     (payload |> U.member "terminal_reason_code" |> U.to_string);
   check string "failure cohort" "stale_turn_timeout"
     (payload |> U.member "failure_reason_cohort" |> U.to_string);
-  check string "stale bucket" "stale_turn_629s"
+  check string "stale bucket" "stale_turn_10m_to_30m"
     (payload |> U.member "stale_turn_bucket" |> U.to_string);
   check bool "failure reason null" true
     (match payload |> U.member "failure_reason" with
@@ -337,7 +337,61 @@ let test_stale_broadcast_payload_preserves_provider_failure_reason () =
   check string "failure reason detail"
     "provider_runtime_error(api_error_timeout:Timeout after 300.0s)"
     (payload |> U.member "failure_reason" |> U.to_string);
-  check string "stale bucket" "stale_turn_630s"
+  check string "stale bucket" "stale_turn_10m_to_30m"
+    (payload |> U.member "stale_turn_bucket" |> U.to_string)
+
+let test_stale_broadcast_payload_preserves_required_tool_failure_reason () =
+  let failure_reason =
+    Masc_mcp.Keeper_registry.Tool_required_unsatisfied
+      { code = "missing_required_tool_use"; detail = "keeper_shell missing" }
+  in
+  let payload =
+    R.stale_broadcast_payload
+      ~keeper_name:"executor"
+      ~agent_name:"executor-agent"
+      ~cascade_name:(R.cascade_name_of_string "tier_fast")
+      ~trace_id:"trace-stale"
+      ~generation:7
+      ~failure_reason:(Some failure_reason)
+      ~stale_seconds:75.0
+      ~last_turn_ts:1777990000.0
+  in
+  check string "disposition reason" "tool_required_unsatisfied"
+    (payload |> U.member "disposition_reason" |> U.to_string);
+  check string "terminal reason" "missing_required_tool_use"
+    (payload |> U.member "terminal_reason_code" |> U.to_string);
+  check string "failure cohort" "tool_required_unsatisfied"
+    (payload |> U.member "failure_reason_cohort" |> U.to_string);
+  check string "failure reason detail"
+    "tool_required_unsatisfied(missing_required_tool_use:keeper_shell missing)"
+    (payload |> U.member "failure_reason" |> U.to_string);
+  check string "stale bucket" "stale_turn_1m_to_5m"
+    (payload |> U.member "stale_turn_bucket" |> U.to_string)
+
+let test_stale_broadcast_payload_preserves_timeout_budget_failure_reason () =
+  let failure_reason =
+    Masc_mcp.Keeper_registry.Oas_timeout_budget_loop { count = 4 }
+  in
+  let payload =
+    R.stale_broadcast_payload
+      ~keeper_name:"executor"
+      ~agent_name:"executor-agent"
+      ~cascade_name:(R.cascade_name_of_string "tier_fast")
+      ~trace_id:"trace-stale"
+      ~generation:7
+      ~failure_reason:(Some failure_reason)
+      ~stale_seconds:1_900.0
+      ~last_turn_ts:1777990000.0
+  in
+  check string "disposition reason" "oas_timeout_budget_loop"
+    (payload |> U.member "disposition_reason" |> U.to_string);
+  check string "terminal reason" "oas_timeout_budget"
+    (payload |> U.member "terminal_reason_code" |> U.to_string);
+  check string "failure cohort" "oas_timeout_budget_loop"
+    (payload |> U.member "failure_reason_cohort" |> U.to_string);
+  check string "failure reason detail" "oas_timeout_budget_loop(count=4)"
+    (payload |> U.member "failure_reason" |> U.to_string);
+  check string "stale bucket" "stale_turn_ge_30m"
     (payload |> U.member "stale_turn_bucket" |> U.to_string)
 
 let () =
@@ -382,5 +436,9 @@ let () =
             test_stale_broadcast_payload_uses_low_cardinality_stale_reason;
           test_case "stale payload preserves provider failure reason" `Quick
             test_stale_broadcast_payload_preserves_provider_failure_reason;
+          test_case "stale payload preserves required-tool failure reason" `Quick
+            test_stale_broadcast_payload_preserves_required_tool_failure_reason;
+          test_case "stale payload preserves timeout-budget failure reason" `Quick
+            test_stale_broadcast_payload_preserves_timeout_budget_failure_reason;
         ] );
     ]

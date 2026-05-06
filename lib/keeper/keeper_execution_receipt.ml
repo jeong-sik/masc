@@ -733,6 +733,14 @@ let stale_broadcast_kill_class = function
       Some (stale_kill_class_label cls)
   | _ -> None
 
+let stale_turn_bucket stale_seconds =
+  if stale_seconds < 30.0 then "stale_turn_lt_30s"
+  else if stale_seconds < 60.0 then "stale_turn_30s_to_60s"
+  else if stale_seconds < 300.0 then "stale_turn_1m_to_5m"
+  else if stale_seconds < 600.0 then "stale_turn_5m_to_10m"
+  else if stale_seconds < 1_800.0 then "stale_turn_10m_to_30m"
+  else "stale_turn_ge_30m"
+
 let stale_broadcast_payload
     ~keeper_name ~agent_name ~cascade_name ~trace_id ~generation
     ~failure_reason
@@ -755,7 +763,7 @@ let stale_broadcast_payload
     ; "failure_reason", string_opt_json failure_reason_text
     ; "failure_reason_cohort", `String failure_reason_cohort
     ; "stale_kill_class", string_opt_json (stale_broadcast_kill_class failure_reason)
-    ; "stale_turn_bucket", `String (Printf.sprintf "stale_turn_%.0fs" stale_seconds)
+    ; "stale_turn_bucket", `String (stale_turn_bucket stale_seconds)
     ; "stale_seconds", `Float stale_seconds
     ; "last_turn_ts", `Float last_turn_ts
     ; "source", `String "watchdog"

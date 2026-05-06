@@ -38,6 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsqlite3-0 \
     libssl3t64 \
     libzstd1 \
+    tini \
     zlib1g \
     && rm -rf /var/lib/apt/lists/*
 
@@ -76,10 +77,22 @@ VOLUME ["/app/.masc"]
 
 EXPOSE 8080
 
+# Graceful shutdown: bin/main_eio.ml runs a 4-phase shutdown
+# (NOTIFY → HOOKS → BOARD → CANCEL) on SIGTERM. Make the contract
+# explicit so docker stop / compose / k8s never replace it with SIGKILL
+# without going through the OCaml shutdown path first.
+STOPSIGNAL SIGTERM
+
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD curl -fsS http://localhost:${PORT}/health || exit 1
 
 USER appuser
+
+# tini is PID 1, masc-mcp runs as PID 2. tini forwards SIGTERM to its
+# child (preserving STOPSIGNAL contract) and reaps zombies. Compose's
+# `init: true` would do the same via docker-init, but baking tini in
+# guarantees zombie reaping for plain `docker run` without --init too.
+ENTRYPOINT ["/usr/bin/tini", "--"]
 
 # --base-path is already set via MASC_BASE_PATH; avoid duplication.
 CMD ["/app/masc-mcp", "--port", "8080"]

@@ -47,4 +47,8 @@ ENV PATH="/opt/opam/default/bin:${PATH}"
 
 VOLUME ["/tmp/keeper-creds"]
 
+# Keeper sandbox: bash + tools (Read/Edit/Bash). SIGTERM lets bash and
+# any in-flight tool process exit gracefully before docker stop escalates.
+STOPSIGNAL SIGTERM
+
 CMD ["/bin/bash"]

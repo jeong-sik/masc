@@ -1,0 +1,71 @@
+# MASC MCP – Linux systemd unit, parity with infrastructure/launchd/com.jeong-sik.masc-mcp.plist.
+#
+# Why this exists:
+#   The launchd plist covers macOS dev/prod, but production Linux hosts
+#   (Railway/k8s/bare metal) have nothing equivalent in-tree. Operators
+#   end up writing ad-hoc systemd units that drift from the launchd
+#   contract (KeepAlive=on-failure, ThrottleInterval=30s).
+#
+# Install (per-host, machine-specific paths must be edited):
+#   sudo install -m 0644 infrastructure/systemd/masc-mcp.service \
+#     /etc/systemd/system/masc-mcp.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now masc-mcp.service
+#
+# Status:
+#   sudo systemctl status masc-mcp.service
+#   sudo journalctl -u masc-mcp.service -f
+
+[Unit]
+Description=MASC MCP server (Multi-Agent Streaming Coordination)
+Documentation=https://github.com/jeong-sik/masc-mcp
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Adjust to your install layout.
+User=masc
+Group=masc
+WorkingDirectory=/opt/masc-mcp
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=ME_ROOT=/opt/masc-mcp
+Environment=MASC_BASE_PATH=/var/lib/masc-mcp
+Environment=MASC_CONFIG_DIR=/opt/masc-mcp/config
+Environment=MASC_MCP_PORT=8080
+Environment=MASC_SHUTDOWN_CLEANUP_TIMEOUT=10
+Environment=MASC_SHUTDOWN_FORCE_TIMEOUT=60
+
+ExecStart=/opt/masc-mcp/bin/masc-mcp --http --port 8080 --base-path /var/lib/masc-mcp
+
+# Graceful shutdown contract — TimeoutStopSec is set a few seconds
+# larger than the server's force timeout (MASC_SHUTDOWN_FORCE_TIMEOUT=60)
+# and matches docker-compose stop_grace_period. The headroom lets the
+# in-process force-exit watchdog flush the last log line and post-
+# shutdown hook telemetry before systemd escalates to SIGKILL — without
+# it both timers race at ~60s and final state is lost.
+# SIGTERM triggers the 4-phase shutdown (NOTIFY -> HOOKS -> BOARD -> CANCEL).
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=75s
+
+# Mirrors launchd KeepAlive.SuccessfulExit=false: restart only on failure,
+# never on a clean exit (prevents tight loops if the binary chooses to
+# exit 0 for an upgrade handoff).
+Restart=on-failure
+RestartSec=30s
+
+# Production hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ReadWritePaths=/var/lib/masc-mcp /var/log/masc-mcp
+
+# Logs go to journald by default; set StandardOutput/Error explicitly so
+# `journalctl -u masc-mcp` is the SSOT (parity with launchd StandardOutPath).
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

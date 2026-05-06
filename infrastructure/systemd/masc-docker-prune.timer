@@ -1,0 +1,15 @@
+# Weekly Docker prune. Sunday 04:23 local with up to 30min jitter.
+# Persistent=true so a missed week catches up.
+
+[Unit]
+Description=Weekly MASC MCP Docker prune
+Documentation=https://github.com/jeong-sik/masc-mcp
+
+[Timer]
+OnCalendar=Sun *-*-* 04:23:00
+Persistent=true
+RandomizedDelaySec=30min
+Unit=masc-docker-prune.service
+
+[Install]
+WantedBy=timers.target

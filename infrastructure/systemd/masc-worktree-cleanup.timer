@@ -1,0 +1,18 @@
+# Daily worktree cleanup. Uses Persistent=true so a missed run (host off
+# during the trigger window) catches up on next boot instead of skipping.
+#
+# RandomizedDelaySec spreads load across hosts running the same unit
+# concurrently and avoids the :00 thundering-herd pattern.
+
+[Unit]
+Description=Daily MASC MCP worktree cleanup
+Documentation=https://github.com/jeong-sik/masc-mcp
+
+[Timer]
+OnCalendar=*-*-* 03:17:00
+Persistent=true
+RandomizedDelaySec=10min
+Unit=masc-worktree-cleanup.service
+
+[Install]
+WantedBy=timers.target

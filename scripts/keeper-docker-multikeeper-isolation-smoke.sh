@@ -47,6 +47,8 @@ run_keeper() {
   local expected_playground="$keeper-playground"
 
   docker run --rm -i \
+    --label masc.keeper.sandbox=true \
+    --label "masc.keeper.id=$keeper" \
     --user "$(id -u):$(id -g)" \
     --read-only \
     --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m \

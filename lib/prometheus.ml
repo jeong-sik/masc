@@ -909,6 +909,8 @@ let metric_tool_call_duration = "masc_tool_call_duration_seconds"
 let metric_llm_provider_http_status = "masc_llm_provider_http_status_total"
 let metric_llm_provider_request_latency =
   "masc_llm_provider_request_latency_seconds"
+let metric_llm_provider_request_latency_clamped =
+  "masc_llm_provider_request_latency_clamped_total"
 let metric_llm_provider_capability_drops =
   "masc_llm_provider_capability_drops_total"
 let metric_llm_provider_cache_hits = "masc_llm_provider_cache_hits_total"
@@ -1505,6 +1507,10 @@ let init () =
     Counter;
   add metric_llm_provider_errors
     "Total OAS LLM request errors, labeled by model"
+    Counter;
+  add metric_llm_provider_request_latency_clamped
+    "Total OAS LLM request latency observations clamped before histogram \
+     emission, labeled by model and reason"
     Counter;
   add metric_llm_provider_retries
     "Total OAS LLM retries, labeled by provider, model, and attempt"

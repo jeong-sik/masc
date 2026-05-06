@@ -463,6 +463,32 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertEqual(temp_sweeps[0]["observed_marker_files"], 37)
         self.assertEqual(temp_sweeps[0]["observed_candidate_json_corpora"], 0)
         self.assertEqual(temp_sweeps[0]["observed_max_json_findings"], 19)
+        remote_sweeps = [
+            artifact
+            for artifact in discovery["candidate_artifacts_checked"]
+            if artifact["artifact_name"] == "github_remote_strict_corpus_marker_sweep"
+        ]
+        self.assertEqual(len(remote_sweeps), 1)
+        self.assertEqual(
+            remote_sweeps[0]["issue_search"]["matching_issue_numbers"],
+            [13265],
+        )
+        self.assertEqual(
+            remote_sweeps[0]["remote_ref_search"][
+                "exact_marker_hits_outside_known_paths"
+            ],
+            0,
+        )
+        self.assertEqual(
+            remote_sweeps[0]["actions_artifact_search"]["metadata_matches"],
+            1,
+        )
+        self.assertEqual(
+            remote_sweeps[0]["actions_artifact_search"]["downloaded_artifacts_checked"][
+                0
+            ]["artifact_name"],
+            "health-snapshot",
+        )
         workspace_sweeps = [
             artifact
             for artifact in discovery["candidate_artifacts_checked"]

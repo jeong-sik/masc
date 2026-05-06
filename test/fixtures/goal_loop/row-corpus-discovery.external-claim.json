@@ -290,6 +290,73 @@
         "goal-loop-206-audit-external-claim-2026-05-05"
       ],
       "note": "Top-level temp files were searched for exact strict-corpus markers. Marker hits were PR/issue notes, helper scripts, and Orient/status/audit snapshots; no JSON file had a 206-row findings corpus, and the largest JSON finding set observed was 19."
+    },
+    {
+      "artifact_name": "github_remote_strict_corpus_marker_sweep",
+      "artifact_kind": "remote_marker_search_report",
+      "result": "NOT_ROW_CORPUS",
+      "issue_comment_search": {
+        "issue": "jeong-sik/masc-mcp#13265",
+        "result": "NO_STRICT_CORPUS_POINTER",
+        "note": "Issue body and comments record the blocker and negative searches but do not attach or link a strict 206-row corpus."
+      },
+      "pr_comment_search": {
+        "prs_checked": [
+          "jeong-sik/masc-mcp#13266",
+          "jeong-sik/masc-mcp#13577"
+        ],
+        "result": "NO_STRICT_CORPUS_POINTER",
+        "note": "PR comments contain verification and negative-evidence updates only; no strict corpus artifact or stable external corpus URL was found."
+      },
+      "issue_search": {
+        "query": "goal-loop-206-audit-external-claim-2026-05-05 repo:jeong-sik/masc-mcp",
+        "results_total": 1,
+        "matching_issue_numbers": [
+          13265
+        ],
+        "result": "ONLY_OPEN_TRACKING_ISSUE"
+      },
+      "remote_ref_search": {
+        "refs_source": "origin refs after git fetch --prune plus local tags",
+        "filename_matches": "Known goal_loop fixtures only: audit-corpus.external-claim.json, row-corpus-discovery.external-claim.json, strict-row-corpus-contract.json",
+        "exact_marker_hits_outside_known_paths": 0,
+        "excluded_known_paths": [
+          "test/fixtures/goal_loop/*",
+          "test/test_goal_loop_status.py",
+          "test/test_observe_goal_loop_logs.py",
+          "test/test_goal_loop_completion_audit.py",
+          "docs/audit-responses/*",
+          "scripts/goal_loop_completion_audit.py",
+          "scripts/orient_goal_loop_logs.py",
+          "scripts/validate_goal_loop_strict_row_corpus.py"
+        ],
+        "result": "NO_NEW_REMOTE_REF_CORPUS_MARKER"
+      },
+      "actions_artifact_search": {
+        "query_scope": "non-expired GitHub Actions artifacts whose artifact name matched goal, corpus, row, strict, 13265, 13266, or 1357, or whose head branch matched goal-loop, 13266, 13577, or corpus",
+        "metadata_matches": 1,
+        "downloaded_artifacts_checked": [
+          {
+            "artifact_id": 6137280397,
+            "artifact_name": "health-snapshot",
+            "head_branch": "feat/agent-ecosystem-corpus",
+            "head_sha": "ab1cfacbd210d98ed913a1049dffb38e222b9c89",
+            "downloaded_file": "health-snapshot.json",
+            "result": "NOT_ROW_CORPUS",
+            "note": "The artifact contains CI health counts only, not GOAL LOOP source_catalog_id, strict-row schema, or a 206-row findings array."
+          }
+        ],
+        "result": "NO_ACTIONS_ARTIFACT_CORPUS"
+      },
+      "markers_checked": [
+        "source_catalog_id",
+        "corpus_id",
+        "expected_findings_total",
+        "strict_row",
+        "strict-row",
+        "goal-loop-206-audit-external-claim-2026-05-05"
+      ],
+      "note": "Remote GitHub comments, issue search, fetched refs/tags, and narrowly matching non-expired Actions artifacts were checked. They produced only the existing open tracking issue, known fixture/test/doc/script markers, and one unrelated health snapshot artifact."
     }
   ],
   "broader_structured_id_triage": {

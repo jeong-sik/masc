@@ -217,6 +217,40 @@ describe('IdeShell', () => {
     expect(buttonByText(container, 'Notes').getAttribute('aria-pressed')).toBe('false')
   })
 
+  it('persists an explicit empty review-focus layer override', () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'unified', focus: 'review' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+    fireEvent.click(buttonByText(container, 'Trace'))
+    fireEvent.click(buttonByText(container, 'Approve'))
+    fireEvent.click(buttonByText(container, 'Notes'))
+
+    expect(route.value.params.layers).toBe('none')
+    expect(container.querySelector('[data-testid="ide-review-focus"]')).not.toBeNull()
+    expect(buttonByText(container, 'Trace').getAttribute('aria-pressed')).toBe('false')
+    expect(buttonByText(container, 'Approve').getAttribute('aria-pressed')).toBe('false')
+    expect(buttonByText(container, 'Notes').getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('does not activate review focus outside the unified view', () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source', focus: 'review' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    expect(container.querySelector('[data-testid="ide-review-focus"]')).toBeNull()
+    expect(buttonByText(container, 'Trace').getAttribute('aria-pressed')).toBe('false')
+    expect(buttonByText(container, 'Approve').getAttribute('aria-pressed')).toBe('false')
+    expect(buttonByText(container, 'Notes').getAttribute('aria-pressed')).toBe('false')
+  })
+
   it('runs view commands from the IDE command bar', async () => {
     route.value = {
       tab: 'code',
@@ -237,7 +271,7 @@ describe('IdeShell', () => {
   it('clears review focus when switching away from unified review mode', () => {
     route.value = {
       tab: 'code',
-      params: { section: 'ide-shell', view: 'unified', focus: 'review' },
+      params: { section: 'ide-shell', view: 'unified', focus: ' Review ' },
       postId: null,
     }
 
@@ -246,6 +280,7 @@ describe('IdeShell', () => {
 
     expect(route.value.params.view).toBe('source')
     expect(route.value.params.focus).toBeUndefined()
+    expect(route.value.params.layers).toBeUndefined()
   })
 
   it('runs layer commands from the IDE command bar', async () => {

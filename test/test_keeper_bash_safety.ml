@@ -421,7 +421,21 @@ let test_nested_runtime_detector_ignores_git_commit_message () =
     "env split-string assignment without runtime remains allowed"
     false
     (Keeper_shell_docker.command_uses_nested_container_runtime
-       "env -S 'FOO=docker git commit -m Docker-sandbox-proof'")
+       "env -S 'FOO=docker git commit -m Docker-sandbox-proof'");
+  Alcotest.(check bool)
+    "quoted socket text is not a nested docker runtime"
+    false
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "git commit -m \"mention /var/run/docker.sock in review text\"");
+  Alcotest.(check bool) "shell -c docker runtime is blocked" true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "bash -lc \"docker run --rm alpine true\"");
+  Alcotest.(check bool) "command substitution docker runtime is blocked" true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "echo $(docker run --rm alpine true)");
+  Alcotest.(check bool) "path-prefixed docker runtime is blocked" true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "/usr/bin/docker run --rm alpine true")
 
 let test_docker_missing_seccomp_profile_fails_closed () =
   with_eio_fs @@ fun () ->

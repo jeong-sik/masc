@@ -216,7 +216,34 @@ let env_split_string_inline_value word =
   else
     None
 
-let command_word_mentions_nested_runtime cmd =
+let shell_interpreter_names = [ "bash"; "sh"; "zsh" ]
+
+let is_shell_interpreter word =
+  List.mem (Filename.basename word) shell_interpreter_names
+
+let word_contains_runtime_token text token =
+  String.equal (Filename.basename text) token
+  || String.starts_with ~prefix:("$(" ^ token) text
+  || String.starts_with ~prefix:("`" ^ token) text
+
+let shell_c_payload = function
+  | Guard_word (shell, false) :: rest when is_shell_interpreter shell ->
+      let rec loop = function
+        | [] -> None
+        | Guard_word (flag, false) :: Guard_word (payload, _) :: _
+          when String.length flag > 1
+               && flag.[0] = '-'
+               && String.contains flag 'c' ->
+            Some payload
+        | Guard_word (flag, false) :: rest
+          when String.length flag > 0 && flag.[0] = '-' ->
+            loop rest
+        | _ -> None
+      in
+      loop rest
+  | _ -> None
+
+let command_word_mentions_nested_runtime tokens =
   let rec scan expect_command in_env skip_env_arg = function
     | [] -> false
     | Guard_separator :: rest -> scan true false false rest
@@ -225,7 +252,8 @@ let command_word_mentions_nested_runtime cmd =
         else if in_env then scan_env_word word skip_env_arg rest
         else scan_command_word word rest
   and scan_command_word word rest =
-    if List.mem word nested_container_runtime_tokens then
+    if List.exists (word_contains_runtime_token word)
+         nested_container_runtime_tokens then
       true
     else if word = "sudo" || word = "command" || word = "time" then
       scan true false false rest
@@ -261,12 +289,38 @@ let command_word_mentions_nested_runtime cmd =
   and nested_in_split_arg split_arg =
     scan true false false (shell_guard_tokens split_arg)
   in
-  scan true false false (shell_guard_tokens cmd)
+  scan true false false tokens
 
-let command_uses_nested_container_runtime cmd =
-  let lowered_cmd = String.lowercase_ascii cmd in
-  command_word_mentions_nested_runtime cmd
-  || List.exists (String_util.contains_substring lowered_cmd) sandbox_socket_markers
+let command_substitution_mentions_nested_runtime tokens =
+  List.exists
+    (function
+      | Guard_word (word, false)
+        when String.starts_with ~prefix:"$(" word
+             || String.starts_with ~prefix:"`" word ->
+          List.exists (word_contains_runtime_token word)
+            nested_container_runtime_tokens
+      | _ -> false)
+    tokens
+
+let unquoted_word_mentions_socket_marker tokens =
+  List.exists
+    (function
+      | Guard_word (word, false) ->
+          List.exists
+            (fun marker -> String_util.contains_substring word marker)
+            sandbox_socket_markers
+      | _ -> false)
+    tokens
+
+let rec command_uses_nested_container_runtime cmd =
+  let tokens = shell_guard_tokens cmd in
+  command_word_mentions_nested_runtime tokens
+  || command_substitution_mentions_nested_runtime tokens
+  || unquoted_word_mentions_socket_marker tokens
+  ||
+  match shell_c_payload tokens with
+  | None -> false
+  | Some payload -> command_uses_nested_container_runtime payload
 
 (* ── Sandbox runtime preflight ─────────────────────────── *)
 

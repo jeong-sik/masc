@@ -2,7 +2,7 @@ import { h } from 'preact'
 import { cleanup, fireEvent, render, screen } from '@testing-library/preact'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { BoardSurface } from './board-surface'
-import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter, boardHasMore, boardLoadingMore } from '../../store'
+import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter, boardHasMore, boardLoadingMore, messages, shellAuthSummary } from '../../store'
 import { route } from '../../router'
 import { PAGE_SIZE, boardHearths, boardHearthsError, categoryVisibleLimits, contentCategory, newPostHearth, newPostSubmitting, showNewPostForm } from './board-state'
 import type { BoardPost } from '../../types'
@@ -168,6 +168,8 @@ describe('BoardSurface Component', () => {
       notice: PAGE_SIZE,
       system: PAGE_SIZE,
     }
+    messages.value = []
+    shellAuthSummary.value = null
     route.value = { params: {} } as any
   })
 
@@ -230,6 +232,36 @@ describe('BoardSurface Component', () => {
     render(h(BoardSurface, null))
 
     expect(screen.getByRole('button', { name: '🔥 리액션 2개' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('routes the mention inbox focus to the message surface', () => {
+    route.value = { params: { focus: 'mention-inbox' } } as any
+    messages.value = [{ id: 'm-1', from: 'sojin', content: '@dashboard needs review' }]
+
+    render(h(BoardSurface, null))
+
+    expect(screen.getByRole('heading', { name: 'Mention inbox' })).toBeInTheDocument()
+    expect(screen.queryByText('+ 새 글 작성')).not.toBeInTheDocument()
+  })
+
+  it('routes the message room focus to the room timeline surface', () => {
+    route.value = { params: { focus: 'messages-room' } } as any
+    messages.value = [{ id: 'm-room', from: 'sangsu', room: 'ops', content: 'room update' }]
+
+    render(h(BoardSurface, null))
+
+    expect(screen.getByRole('heading', { name: 'Room timeline' })).toBeInTheDocument()
+    expect(screen.queryByText('+ 새 글 작성')).not.toBeInTheDocument()
+  })
+
+  it('routes the state-block focus to the message surface', () => {
+    route.value = { params: { focus: 'state-block' } } as any
+    messages.value = [{ id: 'm-state', from: 'sangsu', content: '[STATE]\nGoal: keep context\n[/STATE]' }]
+
+    render(h(BoardSurface, null))
+
+    expect(screen.getByRole('heading', { name: 'State-block messages' })).toBeInTheDocument()
+    expect(screen.queryByText('+ 새 글 작성')).not.toBeInTheDocument()
   })
 
   it('hides system posts by default', () => {

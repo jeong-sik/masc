@@ -105,6 +105,7 @@ export interface Message {
   content: string
   timestamp?: string
   type?: string
+  room?: string
 }
 
 // --- Board ---

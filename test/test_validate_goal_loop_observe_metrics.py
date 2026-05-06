@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -42,7 +43,7 @@ def load_current_report(
     contract: dict[str, object] | None = None,
     alert_text: str | None = None,
     dashboard_text: str | None = None,
-) -> object:
+) -> Any:
     return validate_goal_loop_observe_metrics.validate_contract(
         contract
         if contract is not None
@@ -65,9 +66,31 @@ class GoalLoopObserveMetricsValidatorTest(unittest.TestCase):
         report = load_current_report()
 
         self.assertEqual("PASS", report.status)
-        self.assertEqual(15, report.checked_signals)
-        self.assertEqual(15, report.passing_signals)
+        self.assertEqual(16, report.checked_signals)
+        self.assertEqual(16, report.passing_signals)
         self.assertEqual(0, report.failing_signals)
+
+    def test_contract_pins_starvation_rate_signal(self) -> None:
+        contract = validate_goal_loop_observe_metrics.load_json_object(
+            str(CONTRACT_PATH)
+        )
+        signals = {
+            signal["signal_id"]: signal
+            for signal in contract["required_signals"]
+        }
+
+        starvation_rate = signals["starvation_rate"]
+        self.assertEqual(
+            [
+                "masc_keeper_semaphore_wait_timeout_total",
+                "masc_keeper_turn_scheduled_total",
+            ],
+            starvation_rate["metric_names"],
+        )
+        self.assertEqual(
+            ["GoalLoopKeeperStarvationRateCritical"],
+            starvation_rate["alert_names"],
+        )
 
     def test_cli_require_complete_passes(self) -> None:
         result = subprocess.run(

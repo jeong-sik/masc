@@ -728,17 +728,19 @@ let oas_timeout_budget_strike_limit = 3
 
 module Budget_strike_map = Map.Make (String)
 
-let budget_exhaustions : int Budget_strike_map.t Atomic.t =
-  Atomic.make Budget_strike_map.empty
+let budget_exhaustions : int Budget_strike_map.t ref =
+  ref Budget_strike_map.empty
+
+(* Stdlib.Mutex: this is a global, pure, non-yielding critical section and
+   the test helpers can run outside an Eio context. *)
+let budget_exhaustions_mutex = Stdlib.Mutex.create ()
 
 let update_budget_exhaustions f =
-  let rec loop () =
-    let current = Atomic.get budget_exhaustions in
+  Stdlib.Mutex.protect budget_exhaustions_mutex (fun () ->
+    let current = !budget_exhaustions in
     let next, result = f current in
-    if Atomic.compare_and_set budget_exhaustions current next then result
-    else loop ()
-  in
-  loop ()
+    budget_exhaustions := next;
+    result)
 
 let bump_budget_exhaustion_seeded ~keeper_name ~prior_strikes : int =
   let prior_strikes = max 0 prior_strikes in
@@ -758,8 +760,9 @@ let reset_budget_exhaustion ~keeper_name : unit =
     (Budget_strike_map.remove keeper_name current, ()))
 
 let peek_budget_exhaustion_for_test ~keeper_name : int =
-  Budget_strike_map.find_opt keeper_name (Atomic.get budget_exhaustions)
-  |> Option.value ~default:0
+  Stdlib.Mutex.protect budget_exhaustions_mutex (fun () ->
+    Budget_strike_map.find_opt keeper_name !budget_exhaustions
+    |> Option.value ~default:0)
 
 let set_budget_exhaustion_for_test ~keeper_name ~strikes : unit =
   if strikes <= 0 then reset_budget_exhaustion ~keeper_name

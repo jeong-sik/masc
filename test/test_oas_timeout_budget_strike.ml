@@ -42,6 +42,24 @@ let test_reset_clears () =
   Alcotest.(check int) "reset clears" 0
     (KK.peek_budget_exhaustion_for_test ~keeper_name:"reset")
 
+let test_parallel_bumps_preserve_all_updates () =
+  let keeper_name = "parallel" in
+  let workers = 4 in
+  let bumps_per_worker = 250 in
+  with_reset keeper_name (fun () ->
+    let domains =
+      List.init workers (fun _ ->
+        Domain.spawn (fun () ->
+          for _ = 1 to bumps_per_worker do
+            ignore (KK.bump_budget_exhaustion ~keeper_name : int)
+          done))
+    in
+    List.iter Domain.join domains;
+    Alcotest.(check int)
+      "all domain-local bumps are preserved"
+      (workers * bumps_per_worker)
+      (KK.peek_budget_exhaustion_for_test ~keeper_name))
+
 let () =
   Alcotest.run "oas_timeout_budget_strike"
   [
@@ -54,5 +72,7 @@ let () =
         Alcotest.test_case "seeded bump uses higher persisted count" `Quick
           test_seeded_bump_uses_higher_persisted_count;
         Alcotest.test_case "reset clears" `Quick test_reset_clears;
+        Alcotest.test_case "parallel bumps preserve all updates" `Quick
+          test_parallel_bumps_preserve_all_updates;
       ] );
   ]

@@ -208,14 +208,16 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
    Use [join] directly. *)
 
 (** Leave room *)
-let leave config ~agent_name =
+let leave ?(stop_heartbeats = true) config ~agent_name =
   ensure_initialized config;
 
   (* Support both exact nickname match and agent_type prefix match *)
   let actual_name = resolve_agent_name config agent_name in
 
   (* Stop any heartbeats owned by this agent *)
-  let _stopped = Heartbeat.stop_by_agent ~agent_name:actual_name in
+  let _stopped =
+    if stop_heartbeats then Heartbeat.stop_by_agent ~agent_name:actual_name else 0
+  in
 
   let agent_file = Filename.concat (agents_dir config) (safe_filename actual_name ^ ".json") in
   let in_fs = Sys.file_exists agent_file in

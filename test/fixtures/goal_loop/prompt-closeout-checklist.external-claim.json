@@ -30,7 +30,7 @@
         "test/test_cascade_catalog_runtime.ml#test_valid_catalog_records_probe_error_without_eio_caps"
       ],
       "status": "PASS",
-      "criterion_id": "post_act_verify_complete",
+      "criterion_id": "recovery_slo_proof_recorded",
       "gap": null
     },
     {
@@ -39,30 +39,33 @@
       "artifact_refs": [
         "test/fixtures/goal_loop/observe.startup.json",
         "test/fixtures/goal_loop/audit-corpus.external-claim.json#NF-2",
-        "test/fixtures/goal_loop/act-map.startup.json"
+        "test/fixtures/goal_loop/act-map.startup.json",
+        "test/fixtures/goal_loop/recovery-slo.external-claim.json#startup-credential-starvation",
+        "scripts/validate_goal_loop_recovery_slo.py#credential_archived_starvation",
+        "test/test_validate_goal_loop_recovery_slo.py#test_recovery_slo_fixture_passes",
+        "lib/keeper/keeper_supervisor.ml#Credential_recovery_reissued",
+        "test/test_keeper_supervisor.ml#credential recovery mints canonical keeper credential"
       ],
-      "status": "PARTIAL",
-      "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "Signature and ACT links exist, but full keeper recovery SLO proof is not recorded.",
-      "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13684",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
-      ]
+      "status": "PASS",
+      "criterion_id": "recovery_slo_proof_recorded",
+      "gap": null
     },
     {
       "requirement_id": "startup-alive-but-stuck",
       "prompt_requirement": "Alive-but-stuck supervisor recovery failure",
       "artifact_refs": [
         "test/fixtures/goal_loop/audit-corpus.external-claim.json#NF-3",
-        "test/fixtures/goal_loop/act-map.startup.json"
+        "test/fixtures/goal_loop/act-map.startup.json",
+        "test/fixtures/goal_loop/recovery-slo.external-claim.json#startup-alive-but-stuck",
+        "scripts/validate_goal_loop_recovery_slo.py#alive_but_stuck",
+        "test/test_validate_goal_loop_recovery_slo.py#test_recovery_slo_fixture_passes",
+        "lib/keeper/keeper_supervisor.ml#alive_but_stuck_recovery_stimulus",
+        "lib/keeper/keeper_heartbeat_loop.ml#alive-but-stuck recovery stimulus consumed",
+        "test/test_keeper_supervisor.ml#scan queues recovery wakeup for running stalled keeper"
       ],
-      "status": "PARTIAL",
-      "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "Failure is modeled, but runtime recovery success across all keepers is not proven.",
-      "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13686",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
-      ]
+      "status": "PASS",
+      "criterion_id": "post_act_verify_complete",
+      "gap": null
     },
     {
       "requirement_id": "startup-governance-fallback",

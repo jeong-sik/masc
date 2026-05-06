@@ -713,6 +713,7 @@ let stale_terminal_reason_code = function
   | Some (Keeper_registry.Tool_required_unsatisfied { code; _ }) -> code
   | Some (Keeper_registry.Oas_timeout_budget_loop _) -> "oas_timeout_budget"
   | Some (Keeper_registry.Stale_turn_timeout _) -> "stale_turn_timeout"
+  | Some (Keeper_registry.Stale_fleet_batch _) -> "stale_fleet_batch"
   | Some (Keeper_registry.Stale_termination_storm _) ->
       "stale_termination_storm"
   | Some (Keeper_registry.Heartbeat_consecutive_failures _) ->

@@ -9,7 +9,18 @@ export type BadgeTone = 'default' | 'warn' | 'ok' | 'bad' | 'accent'
 export interface CountBadgeSummary {
   readonly tone: BadgeTone
   readonly hasCustomClass: boolean
-  readonly classNameLength: number
+  readonly customClassLength: number
+}
+
+export interface CountBadgeProps {
+  tone?: BadgeTone
+  class?: string
+  children?: ComponentChildren
+}
+
+type CountBadgeSummaryInput = Pick<CountBadgeProps, 'tone' | 'class'> & {
+  /** Back-compat alias for older pure callers. `class` wins when both exist. */
+  className?: string
 }
 
 const TONE_CLASSES: Record<BadgeTone, string> = {
@@ -28,33 +39,26 @@ export function countBadgeClasses(tone: BadgeTone = 'default', extra?: string): 
 
 export function summarizeCountBadge({
   tone = 'default',
+  class: classProp,
   className,
-}: {
-  tone?: BadgeTone
-  className?: string
-}): CountBadgeSummary {
+}: CountBadgeSummaryInput): CountBadgeSummary {
+  const customClass = classProp ?? className
   return {
     tone,
-    hasCustomClass: className !== undefined && className !== '',
-    classNameLength: className?.length ?? 0,
+    hasCustomClass: customClass !== undefined && customClass !== '',
+    customClassLength: customClass?.length ?? 0,
   }
-}
-
-export interface CountBadgeProps {
-  tone?: BadgeTone
-  class?: string
-  children?: ComponentChildren
 }
 
 /** Compact count pill — e.g. task counts, filter chips */
 export function CountBadge({ tone = 'default', class: cx, children }: CountBadgeProps) {
-  const summary = summarizeCountBadge({ tone, className: cx })
+  const summary = summarizeCountBadge({ tone, class: cx })
   const cls = countBadgeClasses(tone, cx)
   return html`<span
     class=${cls}
     data-count-badge
     data-count-badge-tone=${summary.tone}
     data-count-badge-has-custom-class=${summary.hasCustomClass}
-    data-count-badge-class-length=${summary.classNameLength}
+    data-count-badge-custom-class-length=${summary.customClassLength}
   >${children}</span>`
 }

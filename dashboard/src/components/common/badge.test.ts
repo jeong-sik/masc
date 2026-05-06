@@ -30,17 +30,22 @@ describe('summarizeCountBadge (pure)', () => {
     expect(summarizeCountBadge({})).toEqual({
       tone: 'default',
       hasCustomClass: false,
-      classNameLength: 0,
+      customClassLength: 0,
     })
   })
 
-  it('summarizes custom class metadata', () => {
+  it('summarizes custom class metadata from CountBadgeProps', () => {
     const className = 'ml-2 ring-1'
-    expect(summarizeCountBadge({ tone: 'accent', className })).toEqual({
+    expect(summarizeCountBadge({ tone: 'accent', class: className })).toEqual({
       tone: 'accent',
       hasCustomClass: true,
-      classNameLength: className.length,
+      customClassLength: className.length,
     })
+  })
+
+  it('keeps className as a fallback alias but lets class win', () => {
+    expect(summarizeCountBadge({ className: 'ml-2' }).customClassLength).toBe(4)
+    expect(summarizeCountBadge({ class: 'ring-1', className: 'ml-2' }).customClassLength).toBe(6)
   })
 })
 
@@ -58,7 +63,7 @@ describe('CountBadge', () => {
     expect(el?.classList.contains('text-[var(--color-fg-muted)]')).toBe(true)
     expect(el?.getAttribute('data-count-badge-tone')).toBe('default')
     expect(el?.getAttribute('data-count-badge-has-custom-class')).toBe('false')
-    expect(el?.getAttribute('data-count-badge-class-length')).toBe('0')
+    expect(el?.getAttribute('data-count-badge-custom-class-length')).toBe('0')
   })
 
   it('applies warn tone', () => {
@@ -81,6 +86,6 @@ describe('CountBadge', () => {
     const el = container.querySelector('span')
     expect(el?.classList.contains(className)).toBe(true)
     expect(el?.getAttribute('data-count-badge-has-custom-class')).toBe('true')
-    expect(el?.getAttribute('data-count-badge-class-length')).toBe(String(className.length))
+    expect(el?.getAttribute('data-count-badge-custom-class-length')).toBe(String(className.length))
   })
 })

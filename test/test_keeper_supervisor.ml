@@ -9,6 +9,7 @@ module Watchdog = Masc_mcp.Keeper_stale_watchdog
 module KT = Masc_mcp.Keeper_types
 module AQ = Masc_mcp.Keeper_approval_queue
 module KSM = Masc_mcp.Keeper_state_machine
+module KLH = Masc_mcp.Keeper_lifecycle_hooks
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_supervisor_" "" in
@@ -716,6 +717,75 @@ let test_max_restarts_exhaustion_emits_dead_alert () =
       in
       check bool "keeper phase advanced to Dead"
         true (phase = Masc_mcp.Keeper_state_machine.Dead))
+
+let with_reap_ready_dead_keeper name f =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      KLH.reset_for_testing ();
+      Reg.clear ();
+      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let meta = make_meta name in
+      (match KT.write_meta config meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      ignore (Reg.register ~base_path:config.base_path name meta);
+      Reg.mark_dead ~base_path:config.base_path name ~at:0.0;
+      let ctx : _ KT.context =
+        {
+          config;
+          agent_name = "supervisor";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = Some (Eio.Stdenv.net env);
+        }
+      in
+      f ~config ctx)
+
+let event_label = function
+  | KLH.Tombstone_reaped -> "tombstone_reaped"
+  | KLH.Phase_transition _ -> "phase_transition"
+
+let test_sweep_and_recover_fires_tombstone_reaped_hook () =
+  KLH.reset_for_testing ();
+  let name = "tombstone-hook-keeper" in
+  let fired = ref [] in
+  KLH.register (fun ~keeper_id event ->
+    fired := (keeper_id, event_label event) :: !fired);
+  with_reap_ready_dead_keeper name @@ fun ~config ctx ->
+  Sup.sweep_and_recover ctx;
+  check (list (pair string string))
+    "single Tombstone_reaped event"
+    [ (name, "tombstone_reaped") ] (List.rev !fired);
+  check bool "dead keeper unregistered after tombstone cleanup"
+    false (Reg.is_registered ~base_path:config.base_path name)
+
+let test_sweep_and_recover_swallows_failing_tombstone_hook () =
+  KLH.reset_for_testing ();
+  let name = "tombstone-failing-hook-keeper" in
+  let failing_hook_calls = ref 0 in
+  let later_hook_events = ref [] in
+  KLH.register (fun ~keeper_id:_ _ ->
+    incr failing_hook_calls;
+    raise (Failure "intentional tombstone hook failure"));
+  KLH.register (fun ~keeper_id event ->
+    later_hook_events := (keeper_id, event_label event) :: !later_hook_events);
+  with_reap_ready_dead_keeper name @@ fun ~config ctx ->
+  Sup.sweep_and_recover ctx;
+  check int "failing hook invoked exactly once" 1 !failing_hook_calls;
+  check (list (pair string string))
+    "later hook still observes Tombstone_reaped"
+    [ (name, "tombstone_reaped") ] (List.rev !later_hook_events);
+  check bool "dead keeper still unregistered after failing hook"
+    false (Reg.is_registered ~base_path:config.base_path name)
 
 (* ── Phase 2 (#10765): stale-termination storm auto-pause ──────── *)
 
@@ -1512,6 +1582,10 @@ let () =
     "dead_state_alert", [
       test_case "max_restarts exhaustion emits Dead alert" `Quick
         test_max_restarts_exhaustion_emits_dead_alert;
+      test_case "sweep cleanup fires Tombstone_reaped hook" `Quick
+        test_sweep_and_recover_fires_tombstone_reaped_hook;
+      test_case "failing Tombstone_reaped hook is swallowed" `Quick
+        test_sweep_and_recover_swallows_failing_tombstone_hook;
     ];
     "stale_storm_phase2", [
       test_case "Stale_termination_storm skips restart, persists paused, increments counter" `Quick

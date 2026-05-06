@@ -2101,7 +2101,7 @@ let init () =
         ());
   add metric_build_identity_probe_failures
     "Total build identity git probe failures. \
-     Labeled by site=commit_ts_git_capture|commit_ts_parse."
+     Labeled by site=commit_ts_git_capture|commit_ts_git_status|commit_ts_parse."
     Counter;
   add metric_distributed_lock_acquire_failed
     "Total distributed lock acquire exhaustions. Labeled by key and attempts. \

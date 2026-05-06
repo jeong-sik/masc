@@ -56,15 +56,29 @@ let run_all () =
      Durable JSONL state and lock files outside of the tmp/ directory are
      never touched. Dir missing or symlinked → noop. Per-file errors are
      logged and ignored so a single permission error cannot block the rest
-     of shutdown. *)
+     of shutdown. Cleanup is explicitly bounded because this hook runs in a
+     synchronous shutdown path that Eio timeouts cannot preempt. *)
   let t_tmp = Unix.gettimeofday () in
+  let tmp_cleanup_file_budget = 500 in
+  let tmp_cleanup_wall_budget_s = 0.25 in
+  let inspected = ref 0 in
   let removed = ref 0 in
   let bytes_freed = ref 0 in
+  let budget_exhausted = ref false in
+  let tmp_budget_exceeded () =
+    !inspected >= tmp_cleanup_file_budget
+    || Unix.gettimeofday () -. t_tmp >= tmp_cleanup_wall_budget_s
+  in
   let cleanup_dir dir =
     match Sys.readdir dir with
     | exception Sys_error _ -> ()
     | entries ->
-      Array.iter (fun name ->
+      let i = ref 0 in
+      let len = Array.length entries in
+      while !i < len && not (tmp_budget_exceeded ()) do
+        let name = entries.(!i) in
+        incr i;
+        incr inspected;
         let path = Filename.concat dir name in
         match Unix.lstat path with
         | exception Unix.Unix_error (e, _, _) ->
@@ -79,7 +93,8 @@ let run_all () =
              Log.Server.warn "[Shutdown] tmp unlink failed %s: %s"
                path (Unix.error_message e))
         | _ -> () (* skip dirs / symlinks / fifos *)
-      ) entries
+      done;
+      if !i < len then budget_exhausted := true
   in
   (match Sys.getenv_opt "MASC_BASE_PATH" with
    | None -> ()
@@ -91,8 +106,13 @@ let run_all () =
       | _ ->
         Log.Server.debug
           "[Shutdown] tmp cleanup skipped non-directory path %s" tmp_dir));
+  if !budget_exhausted then
+    Log.Server.warn
+      "[Shutdown] basepath tmp cleanup budget reached (inspected=%d, max_files=%d, budget=%.0fms)"
+      !inspected tmp_cleanup_file_budget (tmp_cleanup_wall_budget_s *. 1000.);
   if !removed > 0 then
-    Log.Server.info "[Shutdown] basepath tmp: removed %d files (%d bytes, %.2fs)"
-      !removed !bytes_freed (Unix.gettimeofday () -. t_tmp);
+    Log.Server.info
+      "[Shutdown] basepath tmp: inspected %d, removed %d files (%d bytes, %.2fs)"
+      !inspected !removed !bytes_freed (Unix.gettimeofday () -. t_tmp);
   Log.Server.info "[Shutdown] hooks total: %.2fs"
     (Unix.gettimeofday () -. t0)

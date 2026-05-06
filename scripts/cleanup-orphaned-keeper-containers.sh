@@ -36,7 +36,7 @@ for arg in "$@"; do
   case "$arg" in
     --apply) APPLY=1 ;;
     --help|-h)
-      sed -n '1,30p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -45,6 +45,17 @@ for arg in "$@"; do
       ;;
   esac
 done
+
+case "$AGE_HOURS" in
+  ''|*[!0-9]*)
+    echo "invalid AGE_HOURS=${AGE_HOURS}; expected positive integer hours" >&2
+    exit 2
+    ;;
+esac
+if [ "$AGE_HOURS" -le 0 ]; then
+  echo "invalid AGE_HOURS=${AGE_HOURS}; expected positive integer hours" >&2
+  exit 2
+fi
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "docker not found in PATH; nothing to do." >&2

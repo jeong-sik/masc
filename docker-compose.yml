@@ -11,9 +11,8 @@
 #   - restart: unless-stopped — re-launch on crash, but never on a
 #     `docker compose stop`. Aligns with infrastructure/launchd plist
 #     `KeepAlive.SuccessfulExit=false`.
-#   - stop_grace_period: 60s — must exceed bin/main_eio.ml
-#     `shutdown_cfg.force_timeout_s` so phases NOTIFY/HOOKS/BOARD/CANCEL
-#     run before docker escalates to SIGKILL.
+#   - stop_grace_period: 60s — matches MASC_SHUTDOWN_FORCE_TIMEOUT so
+#     phases NOTIFY/HOOKS/BOARD/CANCEL run before docker escalates to SIGKILL.
 #   - logging: json-file with max-size=10m × max-file=3 → ~30MB upper
 #     bound per container. Container logs cap is independent of the
 #     in-tree `lib/masc_log/log.ml` 7-day rotation.
@@ -31,7 +30,6 @@ services:
         BINARY_PATH: masc-mcp-linux-x64
     image: masc-mcp:local
     container_name: masc-mcp
-    init: true
     restart: unless-stopped
     stop_signal: SIGTERM
     stop_grace_period: 60s
@@ -41,6 +39,8 @@ services:
       PORT: "8080"
       MASC_BASE_PATH: /app
       MASC_CONFIG_DIR: /app/config
+      MASC_SHUTDOWN_CLEANUP_TIMEOUT: "10"
+      MASC_SHUTDOWN_FORCE_TIMEOUT: "60"
     volumes:
       - masc-state:/app/.masc
     healthcheck:

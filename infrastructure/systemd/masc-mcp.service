@@ -32,12 +32,14 @@ Environment=ME_ROOT=/opt/masc-mcp
 Environment=MASC_BASE_PATH=/var/lib/masc-mcp
 Environment=MASC_CONFIG_DIR=/opt/masc-mcp/config
 Environment=MASC_MCP_PORT=8080
+Environment=MASC_SHUTDOWN_CLEANUP_TIMEOUT=10
+Environment=MASC_SHUTDOWN_FORCE_TIMEOUT=60
 
 ExecStart=/opt/masc-mcp/bin/masc-mcp --http --port 8080 --base-path /var/lib/masc-mcp
 
-# Graceful shutdown contract — must match docker-compose stop_grace_period
-# and bin/main_eio.ml shutdown_cfg.force_timeout_s. SIGTERM triggers the
-# 4-phase shutdown (NOTIFY → HOOKS → BOARD → CANCEL).
+# Graceful shutdown contract — TimeoutStopSec must be >= the server force
+# timeout and match docker-compose stop_grace_period. SIGTERM triggers the
+# 4-phase shutdown (NOTIFY -> HOOKS -> BOARD -> CANCEL).
 KillSignal=SIGTERM
 KillMode=mixed
 TimeoutStopSec=60s

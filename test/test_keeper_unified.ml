@@ -6653,6 +6653,27 @@ let test_tool_usage_delta_ignores_removed_tools () =
     []
     (KTD.tool_usage_delta ~before ~after)
 
+let test_merge_observed_tool_names_prefers_hook_without_double_counting () =
+  let merged =
+    KTD.merge_observed_tool_names
+      ~hook_observed_tool_names:[ "keeper_bash"; "keeper_pr_create" ]
+      ~registry_observed_tool_names:
+        [ "keeper_bash"; "keeper_pr_create"; "keeper_board_post" ]
+  in
+  check (list string) "hook evidence plus registry-only tail"
+    [ "keeper_bash"; "keeper_pr_create"; "keeper_board_post" ]
+    merged
+
+let test_merge_observed_tool_names_preserves_extra_registry_repeats () =
+  let merged =
+    KTD.merge_observed_tool_names
+      ~hook_observed_tool_names:[ "keeper_bash" ]
+      ~registry_observed_tool_names:[ "keeper_bash"; "keeper_bash" ]
+  in
+  check (list string) "max count per observed source"
+    [ "keeper_bash"; "keeper_bash" ]
+    merged
+
 let test_merge_reported_and_observed_tool_names_preserves_synthetic_tools () =
   let merged =
     KTD.merge_reported_and_observed_tool_names
@@ -8194,6 +8215,10 @@ let () =
             test_tool_usage_delta_uses_registry_counts;
           test_case "tool usage delta ignores removed tools" `Quick
             test_tool_usage_delta_ignores_removed_tools;
+          test_case "merge observed tool names uses hook evidence" `Quick
+            test_merge_observed_tool_names_prefers_hook_without_double_counting;
+          test_case "merge observed tool names keeps extra registry repeats" `Quick
+            test_merge_observed_tool_names_preserves_extra_registry_repeats;
           test_case "merge observed and synthetic tool names" `Quick
             test_merge_reported_and_observed_tool_names_preserves_synthetic_tools;
           test_case "final keeper tool names fall back to reported tools"

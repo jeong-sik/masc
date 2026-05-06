@@ -25,6 +25,34 @@ let tool_usage_delta ~(before : (string * int) list) ~(after : (string * int) li
     List.init (max 0 (after_count - before_count)) (fun _ -> tool_name))
 ;;
 
+let merge_observed_tool_names
+      ~(registry_observed_tool_names : string list)
+      ~(hook_observed_tool_names : string list)
+  : string list
+  =
+  let hook_counts = Hashtbl.create 16 in
+  List.iter
+    (fun tool_name ->
+      let count = Option.value ~default:0 (Hashtbl.find_opt hook_counts tool_name) in
+      Hashtbl.replace hook_counts tool_name (count + 1))
+    hook_observed_tool_names;
+  let emitted_extra = Hashtbl.create 16 in
+  hook_observed_tool_names
+  @ List.filter
+      (fun tool_name ->
+        let hook_count =
+          Option.value ~default:0 (Hashtbl.find_opt hook_counts tool_name)
+        in
+        let already_emitted =
+          Option.value ~default:0 (Hashtbl.find_opt emitted_extra tool_name)
+        in
+        if already_emitted < hook_count then (
+          Hashtbl.replace emitted_extra tool_name (already_emitted + 1);
+          false)
+        else true)
+      registry_observed_tool_names
+;;
+
 let merge_reported_and_observed_tool_names
       ~(reported_tool_names : string list)
       ~(observed_tool_names : string list)

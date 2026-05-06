@@ -19,6 +19,16 @@ val tool_usage_delta :
   after:(string * int) list ->
   string list
 
+(** Merge provider hook-observed tool names with registry-observed
+    deltas. The hook path is the most direct runtime signal, while
+    registry deltas are retained for tools that only update the
+    keeper registry. Duplicate sources are combined by max count per
+    tool instead of double-counting the same execution. *)
+val merge_observed_tool_names :
+  registry_observed_tool_names:string list ->
+  hook_observed_tool_names:string list ->
+  string list
+
 (** Merge model-reported tool names with provider-observed ones.
     When [observed_tool_names] is non-empty it dominates the head
     of the result; reported-only tails are appended. *)

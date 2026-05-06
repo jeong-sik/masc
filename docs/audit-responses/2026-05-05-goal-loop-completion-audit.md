@@ -237,7 +237,7 @@
   test/fixtures/goal_loop/prompt-closeout-checklist.external-claim.json
   --source-row-candidate-inventory
   test/fixtures/goal_loop/source-row-candidate-inventory.external-claim.json
-  --require-complete --format text` checked at 2026-05-06T16:03:11+09:00,
+  --require-complete --format text` checked at 2026-05-06T17:16:07+09:00,
   confidence High: exits non-zero with two closeout blockers:
   `strict_row_level_catalog_complete` and
   `prompt_requirements_closeout_complete`. The strict row evidence directly
@@ -252,8 +252,8 @@
   `blocking_future_date_claims_total=3`, and
   `source_currentness_current=false`. The
   checklist maps all 21 prompt requirements to concrete artifacts and blockers
-  across all 12 prompt source documents: 2 `PASS`, 17 `PARTIAL`, and 2
-  `BLOCKED` requirements, with all 19 non-PASS rows carrying valid GitHub issue
+  across all 12 prompt source documents: 5 `PASS`, 14 `PARTIAL`, and 2
+  `BLOCKED` requirements, with all 16 non-PASS rows carrying valid GitHub issue
   tracking refs. The prompt checklist also validates that all `artifact_refs`
   resolve to repo-local files after optional `#...` anchors are stripped; user
   local paths, path escapes, and missing artifact files make the checklist
@@ -274,15 +274,15 @@
   `prompt_requirements_closeout_complete`. The first blocker proves the real
   strict 206-row corpus is still missing. The second blocker prevents the
   prompt objective from being marked complete while the recorded checklist
-  still has 17 `PARTIAL` and 2 `BLOCKED` prompt requirements. The
+  still has 14 `PARTIAL` and 2 `BLOCKED` prompt requirements. The
   `prompt_to_artifact_checklist_recorded` criterion remains `PASS`, with 21
-  unique requirement IDs, 8 unique issue refs, and no missing or invalid
+  unique requirement IDs, 6 unique issue refs, and no missing or invalid
   tracking refs; recording the map is separate from satisfying every mapped
   prompt requirement.
 - [근거] `gh issue view <issue> --repo jeong-sik/masc-mcp --json
-  number,state,title,url,labels` for #13265, #13505, #13607, #13608, #13609,
-  #13610, #13611, and #13636 checked at 2026-05-06T15:36:26+09:00, confidence
-  High: all eight prompt-checklist tracking issue refs resolve to open,
+  number,state,title,url,labels` for #13265, #13505, #13609, #13610, #13611,
+  and #13636 checked at 2026-05-06T17:16:07+09:00, confidence
+  High: all six prompt-checklist tracking issue refs resolve to open,
   label-free GitHub issues.
 - [근거] `python3 test/test_goal_loop_completion_audit.py` checked at
   2026-05-06T16:03:11+09:00, confidence High: the completion audit accepts
@@ -389,10 +389,10 @@ GitHub issue tracking ref.
 | 0-3 alive-but-stuck supervisor recovery failure | `NF-3`, #13123/#13126 references, post-ACT Verify metadata | PARTIAL: failure is modeled; runtime recovery success across all keepers is not proven. |
 | 0-4 governance unparseable/lenient fallback | `NF-4`, #13143 references | PARTIAL: visibility exists; strict judge-output failure policy is incomplete. |
 | 0-5 keeper TOML unknown keys | `NF-6`, #13138 references | PARTIAL: health visibility exists; strict schema rejection is not enforced. |
-| 0-6 dashboard metric all-zero | startup fixture and audit catalog examples | PARTIAL: prompt evidence is represented only in the 19-row catalog, not the full corpus. |
+| 0-6 dashboard metric all-zero | startup fixture, audit catalog examples, Observe metric contract, alerts, Grafana dashboard, validator and tests | PASS for all-zero Observe metric detection coverage. |
 | 0-7 linear autoboot warmup | `NF-5` source reference in catalog boundary | PARTIAL: source claim is tracked; no full row-level replay. |
-| 1 GOAL LOOP Observe -> Orient -> Decide -> Act -> Verify | `scripts/observe_goal_loop_logs.py`, `scripts/orient_goal_loop_logs.py`, `scripts/decide_goal_loop_findings.py`, `scripts/verify_goal_loop_logs.py`, `scripts/goal_loop_status.py` | PARTIAL: deterministic chain exists; long-running scheduler cadence is not implemented. |
-| 2-1 `observe.yml` Prometheus/Grafana metrics | `observe_goal_loop_logs.py`, fixture metrics, audit response | PARTIAL: deterministic log/metric replay exists; no Prometheus/Grafana config shipped. |
+| 1 GOAL LOOP Observe -> Orient -> Decide -> Act -> Verify | `scripts/observe_goal_loop_logs.py`, `scripts/orient_goal_loop_logs.py`, `scripts/decide_goal_loop_findings.py`, `scripts/verify_goal_loop_logs.py`, `scripts/goal_loop_status.py`, `scripts/goal_loop_scheduler.py`, scheduler tests and runtime scheduler docs | PASS for scheduler cadence and Verify-fail Observe re-entry coverage. |
+| 2-1 `observe.yml` Prometheus/Grafana metrics | `observe_goal_loop_logs.py`, fixture metrics, audit response, Observe metric contract, alerts, Grafana dashboard, validator and tests | PASS for the required Observe metric/alert/dashboard contract coverage. |
 | 2-2 `observe_logs.py` pattern parser | `scripts/observe_goal_loop_logs.py`, `test/test_observe_goal_loop_logs.py` | PASS for deterministic parser coverage. |
 | 3-1 `orient.ml` audit comparison engine | `scripts/orient_goal_loop_logs.py`, `audit-corpus.external-claim.json`, `structured-id-triage.external-claim.json` | PARTIAL: engine and triage exist; only 19/206 strict rows are itemized. |
 | 3-2 Orient dashboard counts | `scripts/goal_loop_status.py`, `docs/examples/goal-loop-fixture.md` | PARTIAL: CLI JSON/text exists; operator dashboard panel is not wired. |

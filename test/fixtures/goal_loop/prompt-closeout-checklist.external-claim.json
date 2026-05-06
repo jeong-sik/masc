@@ -98,18 +98,19 @@
       "artifact_refs": [
         "test/fixtures/goal_loop/observe.startup.json",
         "test/fixtures/goal_loop/orient.startup.json",
-        "test/fixtures/goal_loop/audit-corpus.external-claim.json#CD-10"
+        "test/fixtures/goal_loop/audit-corpus.external-claim.json#CD-10",
+        "infrastructure/monitoring/goal-loop-observe-metrics.contract.json",
+        "infrastructure/monitoring/goal-loop-observe-alerts.yml",
+        "infrastructure/monitoring/grafana-goal-loop-observe-dashboard.json",
+        "docs/observability/goal-loop-observe-metrics.md",
+        "scripts/validate_goal_loop_observe_metrics.py",
+        "test/test_validate_goal_loop_observe_metrics.py"
       ],
-      "status": "PARTIAL",
-      "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "Prompt evidence is represented in the partial catalog and startup replay. Merged PR #13630 adds the Observe metric contract, but the full 206-row strict corpus and production metric replay remain absent.",
+      "status": "PASS",
+      "criterion_id": "post_act_verify_complete",
+      "gap": null,
       "implementation_pr_refs": [
         "https://github.com/jeong-sik/masc-mcp/pull/13630"
-      ],
-      "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13265",
-        "https://github.com/jeong-sik/masc-mcp/issues/13608",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
       ]
     },
     {
@@ -135,17 +136,16 @@
         "scripts/orient_goal_loop_logs.py",
         "scripts/decide_goal_loop_findings.py",
         "scripts/verify_goal_loop_logs.py",
-        "scripts/goal_loop_status.py"
+        "scripts/goal_loop_status.py",
+        "scripts/goal_loop_scheduler.py",
+        "test/test_goal_loop_scheduler.py",
+        "docs/GOAL-LOOP-RUNTIME-SCHEDULER.md"
       ],
-      "status": "PARTIAL",
+      "status": "PASS",
       "criterion_id": "post_act_verify_complete",
-      "gap": "Deterministic chain exists, and scheduler cadence landed in merged PR #13624. The prompt remains PARTIAL until the closeout branch is refreshed against that merge and post-ACT Verify proof is recorded.",
+      "gap": null,
       "implementation_pr_refs": [
         "https://github.com/jeong-sik/masc-mcp/pull/13624"
-      ],
-      "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13607",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
       ]
     },
     {
@@ -154,17 +154,19 @@
       "artifact_refs": [
         "scripts/observe_goal_loop_logs.py",
         "test/fixtures/goal_loop/observe.startup.json",
-        "docs/audit-responses/2026-05-05-goal-loop-completion-audit.md"
+        "docs/audit-responses/2026-05-05-goal-loop-completion-audit.md",
+        "infrastructure/monitoring/goal-loop-observe-metrics.contract.json",
+        "infrastructure/monitoring/goal-loop-observe-alerts.yml",
+        "infrastructure/monitoring/grafana-goal-loop-observe-dashboard.json",
+        "docs/observability/goal-loop-observe-metrics.md",
+        "scripts/validate_goal_loop_observe_metrics.py",
+        "test/test_validate_goal_loop_observe_metrics.py"
       ],
-      "status": "PARTIAL",
+      "status": "PASS",
       "criterion_id": "post_act_verify_complete",
-      "gap": "Deterministic log and metric replay exists. Merged PR #13630 adds the Observe metric contract, but production metric wiring has not been replayed through Verify.",
+      "gap": null,
       "implementation_pr_refs": [
         "https://github.com/jeong-sik/masc-mcp/pull/13630"
-      ],
-      "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13608",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
       ]
     },
     {

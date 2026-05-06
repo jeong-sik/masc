@@ -116,6 +116,12 @@ val sdk_error_soft_rate_limited :
 
 val sdk_error_is_max_turns_exceeded : Agent_sdk.Error.sdk_error -> bool
 
+val sdk_error_cascade_fallback_class :
+  Agent_sdk.Error.sdk_error -> string option
+(** Stable class label for cascade fallback logs/audit reasons.  This keeps
+    operator-facing [top_level_reason] aggregation on typed causes instead of
+    generic SDK/Internal wrapper strings. *)
+
 (** {1 Moonshot / Kimi helpers} *)
 
 val is_moonshot_provider : Llm_provider.Provider_config.t -> bool

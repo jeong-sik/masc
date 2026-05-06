@@ -971,15 +971,33 @@ let with_keeper_turn_slot_control ?(cascade_profile = "unknown") ~keeper_name
       (* No Eio clock available: we are running outside an Eio main loop
          (e.g. Alcotest without [Eio_main.run]). Production masc-mcp
          always provides a clock via [Masc_eio_env.init]; reaching this
-         branch at runtime would indicate an environment-setup drift,
-         so log it prominently before falling back to unbounded acquire. *)
-      Log.Keeper.warn
-        "semaphore_wait: no Eio clock available — %s acquire will be unbounded (environment drift?)"
-        label;
-      Eio.Semaphore.acquire sem;
-      (* Cancel-race fix: see comment in the with-clock branch above.
-         record_holder is the caller's responsibility, after flag set. *)
-      Ok ()
+         branch at runtime would indicate an environment-setup drift.  If
+         the permit is immediately available we can still acquire without
+         waiting; otherwise fail closed rather than blocking forever. *)
+      if Eio.Semaphore.get_value sem > 0 then begin
+        Log.Keeper.warn
+          "semaphore_wait: no Eio clock available — %s acquire is immediate only (environment drift?)"
+          label;
+        Eio.Semaphore.acquire sem;
+        (* Cancel-race fix: see comment in the with-clock branch above.
+           record_holder is the caller's responsibility, after flag set. *)
+        Ok ()
+      end else begin
+        let holders =
+          snapshot_holders ~label ~now:(Time_compat.now ())
+        in
+        Log.Keeper.warn
+          "semaphore_wait: no Eio clock available and %s semaphore has no permits; failing closed instead of waiting unboundedly"
+          label;
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_semaphore_wait_timeout
+          ~labels:[ ("keeper", keeper_name);
+                    ("channel", label) ]
+          ();
+        Error
+          (`Semaphore_wait_timeout
+            (semaphore_wait_timeout_snapshot ~phase ~holders ()))
+      end
   in
   let log_acquire_attempt () =
     let queue_depth = List.length (autonomous_waiter_snapshot_for_test ()) in

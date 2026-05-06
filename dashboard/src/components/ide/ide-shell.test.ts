@@ -109,10 +109,13 @@ describe('IdeShell', () => {
     const tabs = container.querySelector('[data-testid="ide-toolbar-tabs"]')
     const layers = container.querySelector('[data-testid="ide-toolbar-layers"]')
 
-    expect(toolbar?.className).toContain('grid-cols-1')
-    expect(toolbar?.className).toContain('lg:grid-cols-')
-    expect(tabs?.className).toContain('overflow-x-auto')
-    expect(layers?.className).toContain('overflow-x-auto')
+    expect(toolbar?.classList.contains('ide-toolbar')).toBe(true)
+    expect(toolbar?.getAttribute('role')).toBe('toolbar')
+    expect(tabs?.classList.contains('ide-toolbar-tabs')).toBe(true)
+    expect(tabs?.getAttribute('role')).toBe('tablist')
+    expect(layers?.classList.contains('ide-toolbar-layers')).toBe(true)
+    expect(layers?.getAttribute('aria-label')).toBe('Layers (multi-select)')
+    expect(tabs).not.toBe(layers)
     expect(container.querySelector('.ide-toolbar-spacer')).toBeNull()
   })
 

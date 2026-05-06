@@ -98,14 +98,13 @@ export function IdeToolbar({
 
   return html`
     <div
-      class="ide-toolbar"
       role="toolbar"
       aria-label="IDE editor toolbar"
       data-testid="ide-toolbar"
-      class="grid min-w-0 grid-cols-1 items-center gap-2 border-b border-[var(--color-border-divider)] bg-[var(--color-bg-surface)] px-3 py-2 lg:grid-cols-[minmax(0,max-content)_minmax(12rem,16rem)_minmax(0,1fr)]"
+      class="ide-toolbar grid min-w-0 grid-cols-1 items-center gap-2 border-b border-[var(--color-border-divider)] bg-[var(--color-bg-surface)] px-3 py-2 lg:grid-cols-[minmax(0,max-content)_minmax(12rem,16rem)_minmax(0,1fr)]"
     >
       <div
-        class="ide-toolbar-tabs flex min-w-0 gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none]"
+        class="ide-toolbar-tabs flex min-w-0 gap-1.5 overflow-x-auto pb-0.5"
         role="tablist"
         aria-label="View mode"
         data-testid="ide-toolbar-tabs"
@@ -135,10 +134,9 @@ export function IdeToolbar({
         inputClassName="h-7 w-full rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 font-mono text-2xs text-[var(--color-fg-primary)] outline-none transition-colors placeholder:text-[var(--color-fg-disabled)] focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)]"
       />
       <div
-        class="ide-toolbar-layers"
         aria-label="Layers (multi-select)"
         data-testid="ide-toolbar-layers"
-        class="flex min-w-0 items-center gap-1.5 overflow-x-auto pb-0.5 font-mono text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] [scrollbar-width:none]"
+        class="ide-toolbar-layers flex min-w-0 items-center gap-1.5 overflow-x-auto pb-0.5 font-mono text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]"
       >
         <span class="shrink-0">LAYERS</span>
         ${IDE_LAYERS.map(layer => html`

@@ -900,6 +900,110 @@ let test_goal_detail_does_not_promote_synthetic_blocker_over_receipt () =
           check bool "runtime blocker marked observation-only" true
             (event |> member "observation_only" |> to_bool)
 
+let test_goal_detail_promotes_newer_runtime_blocker_over_stale_receipt () =
+  with_room @@ fun config ->
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Ship newer blocker" () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  let meta = make_keeper_meta ~name:"newer-blocker-keeper" ~goal_id:goal.id in
+  (match Keeper_types.write_meta ~force:true config meta with
+   | Ok () -> ()
+   | Error err -> fail ("write_meta failed: " ^ err));
+  append_keeper_receipt config meta;
+  let blocked_meta =
+    {
+      meta with
+      runtime =
+        {
+          meta.runtime with
+          usage =
+            {
+              meta.runtime.usage with
+              total_turns = meta.runtime.usage.total_turns + 1;
+              last_turn_ts = Unix.gettimeofday () +. 60.0;
+            };
+          last_blocker =
+            "Internal error: [masc_oas_error] {\"kind\":\"oas_timeout_budget\"}";
+          last_blocker_class = Some Keeper_types.Oas_timeout_budget;
+        };
+    }
+  in
+  (match Keeper_types.write_meta ~force:true config blocked_meta with
+   | Ok () -> ()
+   | Error err -> fail ("write_meta failed: " ^ err));
+  match Dashboard_goals.goal_detail_json ~config ~goal_id:goal.id with
+  | Error msg -> fail msg
+  | Ok json ->
+      let linked_keeper =
+        match json |> member "linked_keepers" |> to_list with
+        | keeper :: _ -> keeper
+        | [] -> fail "expected linked keeper detail"
+      in
+      let runtime_trust = linked_keeper |> member "runtime_trust" in
+      let terminal_reason =
+        runtime_trust |> member "latest_terminal_reason"
+      in
+      check string "newer blocker drives disposition" "Alert"
+        (runtime_trust |> member "disposition" |> to_string);
+      check string "newer blocker drives operator disposition"
+        "alert_exhausted"
+        (runtime_trust |> member "operator_disposition" |> to_string);
+      check string "timeout blocker keeps attention reason"
+        "timeout_budget_exhausted"
+        (runtime_trust |> member "attention_reason" |> to_string);
+      check string "latest terminal reason comes from blocker"
+        "runtime_blocker"
+        (terminal_reason |> member "source" |> to_string);
+      check string "latest terminal reason is timeout budget"
+        "oas_timeout_budget"
+        (terminal_reason |> member "code" |> to_string);
+      check string "latest causal event follows runtime blocker"
+        "runtime_blocker"
+        (runtime_trust |> member "latest_causal_event" |> member "kind" |> to_string)
+
+let test_goal_detail_derives_attention_from_receipt_disposition () =
+  with_room @@ fun config ->
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Ship receipt disposition" () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  let meta = make_keeper_meta ~name:"receipt-disposition-keeper" ~goal_id:goal.id in
+  (match Keeper_types.write_meta ~force:true config meta with
+   | Ok () -> ()
+   | Error err -> fail ("write_meta failed: " ^ err));
+  append_keeper_receipt
+    ~tool_contract_result:"needs_execution_progress"
+    config meta;
+  match Dashboard_goals.goal_detail_json ~config ~goal_id:goal.id with
+  | Error msg -> fail msg
+  | Ok json ->
+      let linked_keeper =
+        match json |> member "linked_keepers" |> to_list with
+        | keeper :: _ -> keeper
+        | [] -> fail "expected linked keeper detail"
+      in
+      let runtime_trust = linked_keeper |> member "runtime_trust" in
+      let terminal_reason =
+        runtime_trust |> member "latest_terminal_reason"
+      in
+      check string "receipt disposition pauses" "Pause"
+        (runtime_trust |> member "disposition" |> to_string);
+      check string "receipt disposition fills attention reason"
+        "tool_required_unsatisfied"
+        (runtime_trust |> member "attention_reason" |> to_string);
+      check string "receipt terminal reason follows operator disposition"
+        "required_tool_use_unsatisfied"
+        (terminal_reason |> member "code" |> to_string);
+      check string "receipt terminal reason source"
+        "execution_receipt"
+        (terminal_reason |> member "source" |> to_string);
+      check string "next action follows terminal reason"
+        "inspect_provider_tool_contract"
+        (runtime_trust |> member "next_human_action" |> to_string)
+
 let () =
   run "Dashboard_goals"
     [
@@ -954,5 +1058,13 @@ let () =
             "goal detail keeps synthetic runtime blocker out of latest causal"
             `Quick
             test_goal_detail_does_not_promote_synthetic_blocker_over_receipt;
+          test_case
+            "goal detail promotes newer runtime blocker over stale receipt"
+            `Quick
+            test_goal_detail_promotes_newer_runtime_blocker_over_stale_receipt;
+          test_case
+            "goal detail derives attention from receipt disposition"
+            `Quick
+            test_goal_detail_derives_attention_from_receipt_disposition;
         ] );
     ]

@@ -64,7 +64,11 @@ const VARIANT_CLASSES: Record<CardVariant, string> = {
 }
 
 function hasNonEmptyString(value: string | undefined): boolean {
-  return value !== undefined && value !== ''
+  return value !== undefined && value.trim() !== ''
+}
+
+function trimmedTextLength(value: string | undefined): number {
+  return value?.trim().length ?? 0
 }
 
 function contentState(children: ComponentChildren | undefined): CardContentState {
@@ -136,11 +140,11 @@ export function summarizeSurfaceCard({
     tone: tone ?? '',
     toneSource: hasNonEmptyString(tone) ? 'tone-class' : 'none',
     hasTone: hasNonEmptyString(tone),
-    toneLength: tone?.length ?? 0,
+    toneLength: trimmedTextLength(tone),
     hasCustomClass: hasNonEmptyString(cx),
-    classNameLength: cx?.length ?? 0,
+    classNameLength: trimmedTextLength(cx),
     hasTestId: hasNonEmptyString(testId),
-    testIdLength: testId?.length ?? 0,
+    testIdLength: trimmedTextLength(testId),
     contentState: contentState(children),
   }
 }
@@ -210,13 +214,15 @@ export function summarizeSectionCard({
   children,
 }: SectionCardProps): SectionCardSummary {
   const sectionLabel = label ?? title
+  const normalizedStatus = normalizeStatus(status)
+  const hasStatus = normalizedStatus !== ''
   const labelSource =
     label != null ? 'label' :
       title != null ? 'title' :
         'empty'
   const tailSource =
     right != null ? 'right' :
-      eyebrow != null || status != null ? 'status-eyebrow' :
+      eyebrow != null || hasStatus ? 'status-eyebrow' :
         'none'
   const effectiveTestId = testId ?? dataTestId
 
@@ -228,20 +234,20 @@ export function summarizeSectionCard({
     labelTextLength: textLength(sectionLabel),
     tailSource,
     status: status ?? '',
-    normalizedStatus: normalizeStatus(status),
+    normalizedStatus,
     statusDotTone: sectionCardStatusDotTone(status),
-    hasStatus: hasNonEmptyString(status),
-    statusLength: status?.length ?? 0,
+    hasStatus,
+    statusLength: normalizedStatus.length,
     hasEyebrow: eyebrow != null,
     eyebrowState: contentState(eyebrow),
     eyebrowTextLength: textLength(eyebrow),
     hasRightSlot: right != null,
     hasTone: hasNonEmptyString(tone),
-    toneLength: tone?.length ?? 0,
+    toneLength: trimmedTextLength(tone),
     hasCustomClass: hasNonEmptyString(cx),
-    classNameLength: cx?.length ?? 0,
+    classNameLength: trimmedTextLength(cx),
     hasTestId: hasNonEmptyString(effectiveTestId),
-    testIdLength: effectiveTestId?.length ?? 0,
+    testIdLength: trimmedTextLength(effectiveTestId),
     contentState: contentState(children),
   }
 }
@@ -284,10 +290,10 @@ export function SectionCard({
   const bodyPadding = summary.bodyPadding
   const sectionLabel = label ?? title ?? ''
   const tail = right ?? (
-    eyebrow != null || status != null
+    eyebrow != null || summary.hasStatus
       ? html`
           <span class="inline-flex items-center gap-1.5 text-2xs text-[var(--color-fg-muted)]">
-            ${status != null ? html`<span class="h-1.5 w-1.5 rounded-full ${statusDotClass(status)}" />` : null}
+            ${summary.hasStatus ? html`<span class="h-1.5 w-1.5 rounded-full ${statusDotClass(status)}" />` : null}
             ${eyebrow != null ? html`<span>${eyebrow}</span>` : null}
           </span>
         `

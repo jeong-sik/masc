@@ -93,6 +93,50 @@ describe('summarizeSectionCard', () => {
       children: 'Body',
     }).tailSource).toBe('right')
   })
+
+  it('treats blank string metadata as absent', () => {
+    expect(summarizeSurfaceCard({
+      tone: '  ',
+      class: ' ',
+      testId: '\t',
+      children: 'Body',
+    })).toMatchObject({
+      hasTone: false,
+      toneLength: 0,
+      hasCustomClass: false,
+      classNameLength: 0,
+      hasTestId: false,
+      testIdLength: 0,
+    })
+
+    expect(summarizeSectionCard({
+      title: 'Queue',
+      status: '  ',
+      tone: ' ',
+      testId: ' ',
+      children: 'Body',
+    })).toMatchObject({
+      tailSource: 'none',
+      normalizedStatus: '',
+      hasStatus: false,
+      statusLength: 0,
+      hasTone: false,
+      hasTestId: false,
+    })
+  })
+
+  it('keeps status length aligned to normalized status metadata', () => {
+    expect(summarizeSectionCard({
+      title: 'Queue',
+      status: ' Watch ',
+      children: 'Body',
+    })).toMatchObject({
+      tailSource: 'status-eyebrow',
+      normalizedStatus: 'watch',
+      hasStatus: true,
+      statusLength: 5,
+    })
+  })
 })
 
 describe('sectionCardStatusDotTone', () => {
@@ -241,12 +285,15 @@ describe('SectionCard', () => {
     render(
       h(
         SectionCard,
-        { title: 'Transport', status: 'Watch', eyebrow: 'observing' },
+        { title: 'Transport', status: ' Watch ', eyebrow: 'observing' },
         h('p', null, 'Body'),
       ),
       container,
     )
     expect(container.innerHTML).toContain('bg-[var(--color-status-warn)]')
+    const el = container.querySelector('[data-section-card]')
+    expect(el?.getAttribute('data-section-card-status')).toBe('watch')
+    expect(el?.getAttribute('data-section-card-status-length')).toBe('5')
   })
 
   it('maps offline status through the shared neutral dot tone', () => {

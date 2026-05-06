@@ -81,7 +81,10 @@ let mk_oas_timeout_budget () =
        { budget_sec = 30.0;
          keeper_turn_timeout_sec = 60.0;
          estimated_input_tokens = 1000;
-         source = "test" })
+         source = "test";
+         remaining_turn_budget_sec = Some 10.0;
+         min_required_sec = 15.0;
+         phase = "test_phase" })
 
 let mk_turn_timeout () =
   Owne.sdk_error_of_masc_internal_error

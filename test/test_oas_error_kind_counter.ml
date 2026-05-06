@@ -38,6 +38,9 @@ let test_oas_timeout_budget_kind () =
            keeper_turn_timeout_sec = 1200.0;
            estimated_input_tokens = 2519;
            source = "adaptive_estimated_input_tokens";
+           remaining_turn_budget_sec = Some 300.0;
+           min_required_sec = 15.0;
+           phase = "test_phase";
          })
   in
   Alcotest.(check (float 0.0001))

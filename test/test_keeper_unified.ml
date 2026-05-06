@@ -4600,6 +4600,9 @@ let test_degraded_retry_after_recoverable_error_includes_oas_timeout_budget () =
               keeper_turn_timeout_sec = 1200.0;
               estimated_input_tokens = 2_000;
               source = "adaptive_estimated_input_tokens";
+              remaining_turn_budget_sec = Some 600.0;
+              min_required_sec = 15.0;
+              phase = "test_phase";
             }))
   in
   expect_degraded_retry "oas timeout budget degraded retry"
@@ -5145,6 +5148,9 @@ let test_metrics_failure_timeout_increments_proactive_backoff () =
            keeper_turn_timeout_sec = 90.0;
            estimated_input_tokens = 42_000;
            source = "test";
+           remaining_turn_budget_sec = Some 0.0;
+           min_required_sec = 15.0;
+           phase = "test_phase";
          })
   in
   let updated =
@@ -5920,10 +5926,14 @@ let test_oas_timeout_reclassifies_only_current_attempt_budget () =
        | Some (Masc_mcp.Oas_worker_named.Oas_timeout_budget budget) ->
            check int "estimated tokens preserved" 2_000
              budget.estimated_input_tokens;
-           check string "source preserved" timeout_budget.source budget.source
+           check string "source preserved" timeout_budget.source budget.source;
+           check (option (float 0.001)) "remaining budget preserved"
+             (Some timeout_budget.remaining_turn_budget_sec)
+             budget.remaining_turn_budget_sec;
+           check string "phase" "cascade_attempt_watchdog" budget.phase
        | _ -> fail "expected OAS timeout budget classification")
 
-let test_pre_retry_budget_exhaustion_not_reclassified_with_stale_budget () =
+let test_pre_retry_timeout_helper_does_not_reuse_stale_budget () =
   let err =
     Agent_sdk.Error.Api
       (Timeout
@@ -5935,7 +5945,7 @@ let test_pre_retry_budget_exhaustion_not_reclassified_with_stale_budget () =
   let classified =
     UT.reclassify_oas_timeout_for_attempt ~timeout_budget:None err
   in
-  check bool "pre-dispatch exhaustion remains raw timeout" true
+  check bool "plain helper call without budget stays raw timeout" true
     (Option.is_none
        (Masc_mcp.Oas_worker_named.classify_masc_internal_error classified))
 
@@ -5947,6 +5957,9 @@ let oas_timeout_budget_error () =
          keeper_turn_timeout_sec = 1200.0;
          estimated_input_tokens = 2_000;
          source = "adaptive_estimated_input_tokens";
+         remaining_turn_budget_sec = Some 600.0;
+         min_required_sec = 15.0;
+         phase = "test_phase";
        })
 
 let test_degraded_retry_budget_gate_allows_remaining_budget () =
@@ -8429,8 +8442,8 @@ let () =
             test_bounded_oas_timeout_refuses_too_little_budget;
           test_case "OAS timeout classification uses current attempt budget" `Quick
             test_oas_timeout_reclassifies_only_current_attempt_budget;
-          test_case "pre-retry budget exhaustion does not reuse stale budget" `Quick
-            test_pre_retry_budget_exhaustion_not_reclassified_with_stale_budget;
+          test_case "plain pre-retry timeout helper does not reuse stale budget" `Quick
+            test_pre_retry_timeout_helper_does_not_reuse_stale_budget;
           test_case "degraded retry is allowed when turn budget remains" `Quick
             test_degraded_retry_budget_gate_allows_remaining_budget;
           test_case "degraded retry is blocked when turn budget is exhausted" `Quick

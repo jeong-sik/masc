@@ -271,6 +271,9 @@ let test_structured_oas_timeout_budget () =
            keeper_turn_timeout_sec = 1200.0;
            estimated_input_tokens = 10_000;
            source = "test";
+           remaining_turn_budget_sec = Some 42.0;
+           min_required_sec = 15.0;
+           phase = "test_phase";
          })
   in
   let terminal =

@@ -62,7 +62,7 @@ export function composerModeForFocus(focus?: string | null): QuickComposerMode |
 }
 
 function stateBlockBody(message: string): string | null {
-  const match = message.match(/\[STATE\]([\s\S]*?)\[\/STATE\]/i)
+  const match = message.match(/\[STATE\]([\s\S]*?)\[\/STATE\]/)
   return match?.[1] ?? null
 }
 
@@ -89,7 +89,7 @@ export function hasStateBlock(message: string): boolean {
 }
 
 export function ensureStateBlockDraft(draft: string): string {
-  if (/\[STATE\][\s\S]*?\[\/STATE\]/i.test(draft)) return draft
+  if (/\[STATE\][\s\S]*?\[\/STATE\]/.test(draft)) return draft
   const trimmed = draft.trimEnd()
   return trimmed ? `${trimmed}\n\n${STATE_BLOCK_TEMPLATE}` : STATE_BLOCK_TEMPLATE
 }

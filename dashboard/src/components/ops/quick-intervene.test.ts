@@ -299,12 +299,18 @@ describe('QuickIntervene', () => {
     await flushUi()
 
     const listbox = container.querySelector('div[role="listbox"]')
+    const combobox = container.querySelector('textarea[name="quick_intervene_message"]') as HTMLTextAreaElement | null
     const nickOption = Array.from(listbox?.querySelectorAll('button[role="option"]') ?? [])
       .find(button => button.textContent?.includes('@nick0cave')) as HTMLButtonElement | undefined
     const runtimeOption = Array.from(listbox?.querySelectorAll('button[role="option"]') ?? [])
       .find(button => button.textContent?.includes('@runtime'))
 
     expect(listbox?.getAttribute('aria-label')).toBe('Mention autocomplete (1 matches)')
+    expect(listbox?.getAttribute('id')).toBe('quick-intervene-mention-listbox')
+    expect(combobox?.getAttribute('role')).toBe('combobox')
+    expect(combobox?.getAttribute('aria-autocomplete')).toBe('list')
+    expect(combobox?.getAttribute('aria-controls')).toBe('quick-intervene-mention-listbox')
+    expect(combobox?.getAttribute('aria-expanded')).toBe('true')
     expect(nickOption).not.toBeUndefined()
     expect(runtimeOption).toBeUndefined()
 
@@ -316,6 +322,52 @@ describe('QuickIntervene', () => {
     expect(editor?.value).toContain('@nick0cave')
     expect(quickMessage.value).toContain('@nick0cave')
     expect(container.querySelector('div[aria-label="Will mention: @nick0cave"]')).not.toBeNull()
+  }, 15000)
+
+  it('supports keyboard selection in mention autocomplete', async () => {
+    const {
+      QuickIntervene,
+      operatorActionBusy,
+      operatorSnapshot,
+      quickComposerMode,
+      quickMessage,
+      quickTarget,
+      route,
+    } = await loadQuickIntervene()
+
+    operatorActionBusy.value = false
+    quickComposerMode.value = 'dm'
+    quickMessage.value = 'Please verify @'
+    quickTarget.value = 'keeper:improver'
+    route.value = { tab: 'command', params: { section: 'operations', view: 'ops', focus: 'mention' }, postId: null }
+    operatorSnapshot.value = {
+      root: { paused: false, namespace: 'default' },
+      sessions: [],
+      keepers: [
+        { name: 'improver', status: 'online' },
+        { name: 'nick0cave', status: 'busy' },
+        { name: 'runtime', status: 'online' },
+      ],
+      recent_messages: [],
+      pending_confirms: [],
+      available_actions: [],
+    } as unknown as OperatorSnapshot
+
+    await act(async () => { render(html`<${QuickIntervene} />`, container) })
+    await flushUi()
+
+    const editor = container.querySelector('textarea[name="quick_intervene_message"]') as HTMLTextAreaElement
+    expect(editor.getAttribute('aria-activedescendant')).toBe('quick-intervene-mention-listbox-option-0')
+
+    await act(async () => { editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
+    await flushUi()
+    expect(editor.getAttribute('aria-activedescendant')).toBe('quick-intervene-mention-listbox-option-1')
+
+    await act(async () => { editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
+    await flushUi()
+
+    expect(quickTarget.value).toBe('keeper:nick0cave')
+    expect(quickMessage.value).toContain('@nick0cave')
   }, 15000)
 
   it('sends to a typed exact keeper mention without requiring an autocomplete click', async () => {

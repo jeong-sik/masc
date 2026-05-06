@@ -15,7 +15,6 @@ import {
   actorName,
   composerModeForFocus,
   ensureStateBlockDraft,
-  hasStateBlock,
   persistActorName,
   quickComposerMode,
   quickTarget,
@@ -49,6 +48,8 @@ const MODE_OPTIONS: Array<{ value: QuickComposerMode, label: string, description
   { value: 'dm', label: 'DM', description: 'One keeper' },
   { value: 'state', label: 'State', description: 'Structured' },
 ]
+
+const MENTION_LISTBOX_ID = 'quick-intervene-mention-listbox'
 
 function keeperNameFromTarget(value: string): string | null {
   if (!value.startsWith('keeper:')) return null
@@ -131,7 +132,8 @@ async function submitQuickMessage(onlineKeepers: OnlineKeeper[]) {
   const message = quickMessage.value.trim()
   if (!message) return
   const mode = quickComposerMode.value
-  if (mode === 'state' && !hasStateBlock(message)) return
+  const submitStateKeys = mode === 'state' ? stateBlockKeys(message) : []
+  if (mode === 'state' && submitStateKeys.length === 0) return
   const target = parseComposerTarget(mode, onlineKeepers)
   if (!target) return
 
@@ -152,6 +154,8 @@ async function submitQuickMessage(onlineKeepers: OnlineKeeper[]) {
 
 export function QuickIntervene() {
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [activeMentionIndex, setActiveMentionIndex] = useState(0)
+  const [dismissedMentionQuery, setDismissedMentionQuery] = useState<string | null>(null)
   const appliedRouteFocus = useRef<string | null>(null)
   const snapshot = operatorSnapshot.value
   const keepers = snapshot?.keepers ?? []
@@ -171,10 +175,20 @@ export function QuickIntervene() {
   const effectiveKeeper = trailingMentionTarget ?? selectedKeeper
   const effectiveKeeperOnline = !!trailingMentionTarget || selectedKeeperOnline
   const mentionMatches = mode === 'dm' ? mentionCandidates(onlineKeepers, mentionQuery, effectiveKeeper) : []
+  const mentionListOpen = mentionQuery !== null && dismissedMentionQuery !== mentionQuery
+  const activeMention = mentionListOpen ? mentionMatches[activeMentionIndex] ?? mentionMatches[0] : null
+  const activeMentionOptionId = activeMention
+    ? `${MENTION_LISTBOX_ID}-option-${Math.max(mentionMatches.indexOf(activeMention), 0)}`
+    : undefined
   const sendDisabled = busy
     || quickMessage.value.trim() === ''
     || (mode === 'dm' && (!effectiveKeeperOnline || unresolvedTrailingMention))
-    || (mode === 'state' && !hasStateBlock(quickMessage.value))
+    || (mode === 'state' && stateKeys.length === 0)
+
+  useEffect(() => {
+    setActiveMentionIndex(0)
+    setDismissedMentionQuery(null)
+  }, [mentionQuery, onlineKeeperNames])
 
   useEffect(() => {
     const focus = currentRoute.params.focus ?? null
@@ -246,19 +260,25 @@ export function QuickIntervene() {
                 onInput=${(v: string) => { quickTarget.value = v }}
                 disabled=${busy || onlineKeepers.length === 0}
               />
-              ${mentionQuery !== null
+              ${mentionListOpen
                 ? html`
-                    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]" role="listbox" aria-label=${`Mention autocomplete (${mentionMatches.length} matches)`}>
+                    <div
+                      id=${MENTION_LISTBOX_ID}
+                      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
+                      role="listbox"
+                      aria-label=${`Mention autocomplete (${mentionMatches.length} matches)`}
+                    >
                       <div class="border-b border-[var(--color-border-default)] px-2 py-1 text-2xs font-medium uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
                         Match @${mentionQuery}
                       </div>
                       ${mentionMatches.length > 0
-                        ? mentionMatches.map(candidate => html`
+                        ? mentionMatches.map((candidate, index) => html`
                             <button
+                              id=${`${MENTION_LISTBOX_ID}-option-${index}`}
                               type="button"
-                              class="flex w-full items-center gap-2 border-0 border-l-2 border-solid ${candidate.selected ? 'border-l-[var(--color-accent-fg)] bg-[var(--color-bg-elevated)]' : 'border-l-transparent bg-transparent'} px-2 py-1.5 text-left text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--button-ghost-bg-hover)]"
+                              class="flex w-full items-center gap-2 border-0 border-l-2 border-solid ${candidate.selected || index === activeMentionIndex ? 'border-l-[var(--color-accent-fg)] bg-[var(--color-bg-elevated)]' : 'border-l-transparent bg-transparent'} px-2 py-1.5 text-left text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--button-ghost-bg-hover)]"
                               role="option"
-                              aria-selected=${candidate.selected ? 'true' : 'false'}
+                              aria-selected=${candidate.selected || index === activeMentionIndex ? 'true' : 'false'}
                               onClick=${() => { chooseMentionTarget(candidate.name) }}
                               disabled=${busy}
                             >
@@ -298,9 +318,39 @@ export function QuickIntervene() {
           placeholder=${mode === 'state' ? STATE_BLOCK_TEMPLATE : 'Message'}
           value=${quickMessage.value}
           name="quick_intervene_message"
+          role=${mode === 'dm' ? 'combobox' : undefined}
+          ariaAutocomplete=${mode === 'dm' ? 'list' : undefined}
+          ariaControls=${mentionListOpen ? MENTION_LISTBOX_ID : undefined}
+          ariaExpanded=${mode === 'dm' ? String(mentionListOpen) : undefined}
+          ariaActiveDescendant=${activeMentionOptionId}
           ariaLabel=${mode === 'state' ? 'Structured state block message' : 'Quick intervention message'}
-          onInput=${(e: Event) => { quickMessage.value = (e.target as HTMLTextAreaElement).value }}
+          onInput=${(e: Event) => {
+            if (dismissedMentionQuery !== null) setDismissedMentionQuery(null)
+            quickMessage.value = (e.target as HTMLTextAreaElement).value
+          }}
           onKeyDown=${(e: KeyboardEvent) => {
+            if (mode === 'dm' && mentionListOpen && mentionMatches.length > 0) {
+              if (e.key === 'ArrowDown') {
+                e.preventDefault()
+                setActiveMentionIndex(index => (index + 1) % mentionMatches.length)
+                return
+              }
+              if (e.key === 'ArrowUp') {
+                e.preventDefault()
+                setActiveMentionIndex(index => (index - 1 + mentionMatches.length) % mentionMatches.length)
+                return
+              }
+              if (e.key === 'Enter' && !(e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) {
+                e.preventDefault()
+                chooseMentionTarget(mentionMatches[activeMentionIndex]?.name ?? mentionMatches[0]!.name)
+                return
+              }
+            }
+            if (mode === 'dm' && mentionListOpen && e.key === 'Escape') {
+              e.preventDefault()
+              setDismissedMentionQuery(mentionQuery ?? '')
+              return
+            }
             const shouldSubmit = e.key === 'Enter'
               && ((e.metaKey || e.ctrlKey) || (mode !== 'state' && !e.shiftKey && !e.altKey))
             if (!shouldSubmit) return

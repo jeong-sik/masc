@@ -98,6 +98,11 @@ interface TextAreaProps {
   class?: string
   name?: string
   ariaLabel?: string
+  ariaAutocomplete?: string
+  ariaControls?: string
+  ariaExpanded?: boolean | string
+  ariaActiveDescendant?: string
+  role?: string
   disabled?: boolean
   required?: boolean
   /** Forwards a Preact ref to the inner <textarea>. Mirrors TextInput —
@@ -116,6 +121,11 @@ export function TextArea({
   class: cx,
   name,
   ariaLabel,
+  ariaAutocomplete,
+  ariaControls,
+  ariaExpanded,
+  ariaActiveDescendant,
+  role,
   disabled,
   required,
   inputRef,
@@ -130,7 +140,12 @@ export function TextArea({
       placeholder=${placeholder}
       rows=${rows}
       name=${name}
+      role=${role}
       aria-label=${ariaLabel}
+      aria-autocomplete=${ariaAutocomplete}
+      aria-controls=${ariaControls}
+      aria-expanded=${ariaExpanded}
+      aria-activedescendant=${ariaActiveDescendant}
       disabled=${disabled}
       required=${required}
       value=${value}

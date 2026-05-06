@@ -102,4 +102,11 @@ describe('ops-state', () => {
     expect(ensureStateBlockDraft('Heads up')).toBe(`Heads up\n\n${STATE_BLOCK_TEMPLATE}`)
     expect(ensureStateBlockDraft(STATE_BLOCK_TEMPLATE)).toBe(STATE_BLOCK_TEMPLATE)
   })
+
+  it('requires canonical uppercase state block tags', () => {
+    const lower = '[state]\nGoal: ship\n[/state]'
+    expect(stateBlockKeys(lower)).toEqual([])
+    expect(hasStateBlock(lower)).toBe(false)
+    expect(ensureStateBlockDraft(lower)).toBe(`${lower}\n\n${STATE_BLOCK_TEMPLATE}`)
+  })
 })

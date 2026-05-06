@@ -260,6 +260,9 @@ val metric_keeper_board_signal_no_wake_total : string
 
 val metric_keeper_meta_json_failures : string
 val metric_keeper_tools_oas_failures : string
+val metric_keeper_oas_hook_output_parse_failures : string
+(** Total keeper OAS hook tool-output JSON parse failures. Labels:
+    [surface] is [pr_review_action] or [pr_work_action]. *)
 val metric_keeper_turn_up_update_failures : string
 val metric_keeper_exec_tools_failures : string
 val metric_keeper_circuit_breaker_trips : string

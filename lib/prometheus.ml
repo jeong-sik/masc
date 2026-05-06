@@ -541,6 +541,8 @@ let metric_keeper_meta_json_failures =
   "masc_keeper_meta_json_failures_total"
 let metric_keeper_tools_oas_failures =
   "masc_keeper_tools_oas_failures_total"
+let metric_keeper_oas_hook_output_parse_failures =
+  "masc_keeper_oas_hook_output_parse_failures_total"
 let metric_keeper_turn_up_update_failures =
   "masc_keeper_turn_up_update_failures_total"
 let metric_keeper_exec_tools_failures =
@@ -1577,6 +1579,9 @@ let init () =
     Counter;
   add metric_keeper_tools_oas_failures
     "Total keeper OAS tool failures (blocked/error result/deadlock), labeled by tool and site"
+    Counter;
+  add metric_keeper_oas_hook_output_parse_failures
+    "Total keeper OAS hook tool-output JSON parse failures, labeled by surface"
     Counter;
   add metric_keeper_turn_up_update_failures
     "Total keeper turn-up update failures (prompt cap/sandbox validation/preflight), labeled by keeper and site"

@@ -618,6 +618,12 @@ let require_pr_review_event label = function
   | Some event -> event
   | None -> failf "expected PR review action event for %s" label
 
+let hook_output_parse_failures surface =
+  Masc_mcp.Prometheus.metric_value_or_zero
+    Masc_mcp.Prometheus.metric_keeper_oas_hook_output_parse_failures
+    ~labels:[ ("surface", surface) ]
+    ()
+
 let test_pr_review_action_metric_extracts_approve () =
   let event =
     pr_review_event
@@ -657,6 +663,20 @@ let test_pr_review_action_metric_extracts_reply () =
   check (option int) "comment id" (Some 1234) event.comment_id;
   check (option string) "reply route via" (Some "host") event.route_via
 
+let test_pr_review_action_metric_observes_invalid_output_json () =
+  let before = hook_output_parse_failures "pr_review_action" in
+  let event =
+    pr_review_event
+      ~tool_name:"keeper_pr_review_comment"
+      ~input:(`Assoc [ ("number", `Int 7); ("event", `String "comment") ])
+      ~output_text:"{not-json"
+    |> require_pr_review_event "invalid output json"
+  in
+  check string "action fallback from input" "COMMENT" event.action;
+  check (option int) "number fallback" (Some 7) event.pr_number;
+  check (float 0.001) "parse failure counted" (before +. 1.0)
+    (hook_output_parse_failures "pr_review_action")
+
 let pr_work_events ~tool_name ~input ~output_text =
   Hooks.For_testing.pr_work_action_metric_events_of_tool_io
     ~tool_name ~input ~output_text ~transport_success:true
@@ -679,6 +699,19 @@ let test_pr_work_action_metric_extracts_masc_code_git_push () =
   check string "source" "masc_code_git" event.work_source;
   check bool "success" true event.success;
   check (option string) "route via" (Some "docker") event.route_via
+
+let test_pr_work_action_metric_observes_invalid_output_json () =
+  let before = hook_output_parse_failures "pr_work_action" in
+  let events =
+    pr_work_events
+      ~tool_name:"masc_code_git"
+      ~input:(`Assoc [ ("action", `String "push") ])
+      ~output_text:"{not-json"
+  in
+  check (list string) "actions fallback from input" [ "GIT_PUSH" ]
+    (work_actions events);
+  check (float 0.001) "parse failure counted" (before +. 1.0)
+    (hook_output_parse_failures "pr_work_action")
 
 let test_pr_work_action_metric_extracts_gh_pr_create () =
   let events =
@@ -849,10 +882,14 @@ let () =
             test_pr_review_action_metric_marks_structured_failure
         ; test_case "extracts reply action" `Quick
             test_pr_review_action_metric_extracts_reply
+        ; test_case "observes invalid output JSON" `Quick
+            test_pr_review_action_metric_observes_invalid_output_json
         ] )
     ; ( "pr_work_action",
         [ test_case "extracts masc_code_git push" `Quick
             test_pr_work_action_metric_extracts_masc_code_git_push
+        ; test_case "observes invalid output JSON" `Quick
+            test_pr_work_action_metric_observes_invalid_output_json
         ; test_case "extracts keeper_shell gh pr create" `Quick
             test_pr_work_action_metric_extracts_gh_pr_create
         ; test_case "extracts keeper_pr_create" `Quick

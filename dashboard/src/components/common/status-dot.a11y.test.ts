@@ -16,8 +16,9 @@ describe('StatusDot a11y', () => {
     document.body.removeChild(container)
   })
 
-  it('default render passes axe (decorative dot, role=presentation expected)', async () => {
+  it('default render passes axe (decorative dot, aria-hidden expected)', async () => {
     render(html`<${StatusDot} />`, container)
+    expect(container.querySelector('[data-status-dot]')!.getAttribute('data-status-dot-mode')).toBe('decorative')
     const results = await axe(container)
     expect(results).toHaveNoViolations()
   })
@@ -32,6 +33,24 @@ describe('StatusDot a11y', () => {
       </div>`,
       container,
     )
+    const results = await axe(container)
+    expect(results).toHaveNoViolations()
+  })
+
+  it('semantic mode passes axe with an accessible name', async () => {
+    render(html`<${StatusDot} ariaLabel="job healthy" class="bg-[var(--ok-10)]" />`, container)
+    const dot = container.querySelector('[data-status-dot]')!
+    expect(dot.getAttribute('data-status-dot-mode')).toBe('semantic')
+    expect(dot.getAttribute('data-status-dot-has-aria-label')).toBe('true')
+    const results = await axe(container)
+    expect(results).toHaveNoViolations()
+  })
+
+  it('blank ariaLabel stays decorative instead of rendering a nameless image', async () => {
+    render(html`<${StatusDot} ariaLabel="   " />`, container)
+    const dot = container.querySelector('[data-status-dot]')!
+    expect(dot.getAttribute('data-status-dot-mode')).toBe('decorative')
+    expect(dot.getAttribute('role')).toBeNull()
     const results = await axe(container)
     expect(results).toHaveNoViolations()
   })

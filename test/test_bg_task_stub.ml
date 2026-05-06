@@ -7,18 +7,24 @@
 open Alcotest
 
 let sidecar_observer_counts : (string, float) Hashtbl.t = Hashtbl.create 8
+let sidecar_observer_messages : (string, string) Hashtbl.t = Hashtbl.create 8
 
 let () =
-  Bg_task.set_sidecar_failure_observer (fun ~site _exn ->
+  Bg_task.set_sidecar_failure_observer (fun ~site exn ->
       let current =
         Hashtbl.find_opt sidecar_observer_counts site
         |> Option.value ~default:0.0
       in
-      Hashtbl.replace sidecar_observer_counts site (current +. 1.0))
+      Hashtbl.replace sidecar_observer_counts site (current +. 1.0);
+      Hashtbl.replace sidecar_observer_messages site (Printexc.to_string exn))
 
 let bg_sidecar_failure_count site =
   Hashtbl.find_opt sidecar_observer_counts site
   |> Option.value ~default:0.0
+
+let bg_sidecar_failure_message site =
+  Hashtbl.find_opt sidecar_observer_messages site
+  |> Option.value ~default:""
 
 let wait_until ~timeout_s f =
   let deadline = Unix.gettimeofday () +. timeout_s in
@@ -55,7 +61,11 @@ let with_temp_base prefix f =
       f base)
 
 let bg_dir_for ~base ~keeper =
-  Filename.concat base (Printf.sprintf ".masc/keeper/%s/bg" keeper)
+  Filename.concat
+    (Filename.concat
+       (Common.masc_dir_from_base_path ~base_path:base)
+       (Filename.concat "keeper" keeper))
+    "bg"
 
 let with_ring_line_limit raw f =
   let previous = Sys.getenv_opt "MASC_KEEPER_SHELL_RING_LINES" in
@@ -368,8 +378,33 @@ let test_reap_orphans_observes_malformed_pid_file () =
       let after = bg_sidecar_failure_count "read_parse" in
       check (float 0.0001) "read parse failure counted"
         (before +. 1.0) after;
+      check bool "read parse message includes path" true
+        (String_util.contains_substring
+           (bg_sidecar_failure_message "read_parse")
+           stale);
       check int "malformed sidecar removed" 1 n;
       check bool "malformed pid file gone" false (Sys.file_exists stale))
+
+let test_reap_orphans_observes_truncated_pid_file_as_parse () =
+  with_temp_base "bg_task_reap_truncated" (fun base ->
+      let keeper = "kp-reap-truncated" in
+      let bg_dir = bg_dir_for ~base ~keeper in
+      mkdir_p bg_dir;
+      let stale = Filename.concat bg_dir "truncated-pid.pid" in
+      let oc = open_out stale in
+      output_string oc "999999\n";
+      close_out oc;
+      let before = bg_sidecar_failure_count "read_parse" in
+      let n = Bg_task.reap_orphans ~base_path:base in
+      let after = bg_sidecar_failure_count "read_parse" in
+      check (float 0.0001) "truncated parse failure counted"
+        (before +. 1.0) after;
+      check bool "truncated parse message includes path" true
+        (String_util.contains_substring
+           (bg_sidecar_failure_message "read_parse")
+           stale);
+      check int "truncated sidecar removed" 1 n;
+      check bool "truncated pid file gone" false (Sys.file_exists stale))
 
 let test_reap_orphans_observes_unlink_failure () =
   with_temp_base "bg_task_reap_unlink" (fun base ->
@@ -423,6 +458,8 @@ let () =
             test_pid_file_write_failure_observed;
           test_case "malformed pid sidecar is observed" `Quick
             test_reap_orphans_observes_malformed_pid_file;
+          test_case "truncated pid sidecar is a parse failure" `Quick
+            test_reap_orphans_observes_truncated_pid_file_as_parse;
           test_case "pid sidecar unlink failure is observed" `Quick
             test_reap_orphans_observes_unlink_failure;
         ] );

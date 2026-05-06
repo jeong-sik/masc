@@ -396,19 +396,28 @@ let read_pid_file path =
   try
     let ic = open_in path in
     Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-      match int_of_string_opt (String.trim (input_line ic)),
-            int_of_string_opt (String.trim (input_line ic))
-      with
+      let input_line_opt ic =
+        try Some (input_line ic) with End_of_file -> None
+      in
+      let pid_line = input_line_opt ic in
+      let pgid_line = input_line_opt ic in
+      let parse_int line =
+        line |> Option.map String.trim |> Option.bind int_of_string_opt
+      in
+      match parse_int pid_line, parse_int pgid_line with
       | Some pid, Some pgid -> Some (pid, pgid)
       | _ ->
           observe_sidecar_failure ~site:"read_parse"
-            (Failure "invalid PID sidecar");
+            (Failure (Printf.sprintf "invalid PID sidecar: %s" path));
           None)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
       if Sys.file_exists path then
-        observe_sidecar_failure ~site:"read" exn;
+        observe_sidecar_failure ~site:"read"
+          (Failure
+             (Printf.sprintf "read PID sidecar %s: %s" path
+                (Printexc.to_string exn)));
       None
 
 let pid_is_live pid =

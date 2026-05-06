@@ -5784,6 +5784,7 @@ let test_bounded_oas_timeout_uses_channel_turn_budget_override () =
 let test_bounded_oas_timeout_reserves_degraded_retry_budget () =
   match
     UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+      ~allow_wall_clock_retry_budget:false
       ~is_retry:false ~reserve_degraded_retry_budget:true
       ~estimated_input_tokens:2_000 ~max_turns:4
       ~remaining_turn_budget_s:500.0
@@ -5802,6 +5803,7 @@ let test_bounded_oas_timeout_reserves_degraded_retry_budget () =
 let test_attempt_watchdog_preserves_degraded_retry_reserve () =
   match
     UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+      ~allow_wall_clock_retry_budget:false
       ~is_retry:false ~reserve_degraded_retry_budget:true
       ~estimated_input_tokens:2_000 ~max_turns:4
       ~remaining_turn_budget_s:500.0
@@ -5846,6 +5848,7 @@ let test_oas_timeout_reclassifies_only_current_attempt_budget () =
   in
   match
     UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+      ~allow_wall_clock_retry_budget:false
       ~is_retry:false ~reserve_degraded_retry_budget:false
       ~estimated_input_tokens:2_000 ~max_turns:4
       ~remaining_turn_budget_s:1200.0
@@ -5937,7 +5940,7 @@ let test_degraded_retry_budget_gate_blocks_exhausted_budget () =
   | UT.Degraded_retry_allowed _ -> fail "expected exhausted retry budget"
   | UT.No_degraded_retry -> fail "expected recoverable retry candidate"
 
-let test_degraded_retry_slot_phase_blocks_late_rotation () =
+let test_degraded_retry_slot_phase_allows_oas_timeout_local_recovery () =
   match
     UT.next_fail_open_cascade_for_turn_with_budget
       ~base_cascade:"underdog"
@@ -5947,16 +5950,40 @@ let test_degraded_retry_slot_phase_blocks_late_rotation () =
       ~estimated_input_tokens:2_000
       ~max_turns:4
       ~time_spent_in_turn_s:(UT.degraded_retry_slot_phase_budget_sec +. 1.0)
-      ~remaining_turn_budget_s:1200.0
+      ~remaining_turn_budget_s:300.0
       (oas_timeout_budget_error ())
   with
-  | UT.Degraded_retry_slot_phase_exhausted retry ->
+  | UT.Degraded_retry_allowed retry ->
       check string "retry cascade candidate" KC.local_recovery_cascade_name
         retry.next_cascade;
       check string "fallback reason" "oas_timeout_budget"
         retry.fallback_reason
+  | UT.Degraded_retry_slot_phase_exhausted _ ->
+      fail "expected OAS timeout budget to bypass slot phase for local recovery"
+  | UT.Degraded_retry_budget_exhausted _ ->
+      fail "expected retry budget to remain"
+  | UT.No_degraded_retry -> fail "expected recoverable retry candidate"
+
+let test_degraded_retry_slot_phase_blocks_contract_rotation () =
+  match
+    UT.next_fail_open_cascade_for_turn_with_budget
+      ~base_cascade:KC.default_cascade_name
+      ~effective_cascade:"strict_exec"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
+      ~attempted_cascades:[ "strict_exec" ]
+      ~estimated_input_tokens:2_000
+      ~max_turns:4
+      ~time_spent_in_turn_s:(UT.degraded_retry_slot_phase_budget_sec +. 1.0)
+      ~remaining_turn_budget_s:1200.0
+      (required_tool_contract_violation_error ())
+  with
+  | UT.Degraded_retry_slot_phase_exhausted retry ->
+      check string "retry cascade candidate" KC.default_cascade_name
+        retry.next_cascade;
+      check string "fallback reason" "required_tool_contract_violation"
+        retry.fallback_reason
   | UT.Degraded_retry_allowed _ ->
-      fail "expected degraded retry blocked after productive slot phase"
+      fail "expected contract rotation blocked after productive slot phase"
   | UT.Degraded_retry_budget_exhausted _ ->
       fail "expected slot phase exhaustion before retry budget exhaustion"
   | UT.No_degraded_retry -> fail "expected recoverable retry candidate"
@@ -5969,6 +5996,7 @@ let test_degraded_retry_slot_phase_blocks_late_rotation () =
 let test_per_attempt_retry_budget_with_near_zero_remaining () =
   match
     UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+      ~allow_wall_clock_retry_budget:false
       ~is_retry:true
       ~reserve_degraded_retry_budget:false
       ~estimated_input_tokens:2_000
@@ -5976,11 +6004,15 @@ let test_per_attempt_retry_budget_with_near_zero_remaining () =
       ~remaining_turn_budget_s:3.0
   with
   | None -> () (* expected: retry is aborted to release the slot cleanly *)
-  | Some _ -> fail "is_retry=true must refuse budget when outer turn time spent exceeds per-attempt cap"
+  | Some _ ->
+      fail
+        "is_retry=true must refuse budget when outer turn time spent exceeds \
+         per-attempt cap"
 
 let test_per_attempt_retry_budget_capped_by_remaining_when_healthy () =
   match
     UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+      ~allow_wall_clock_retry_budget:false
       ~is_retry:true
       ~reserve_degraded_retry_budget:false
       ~estimated_input_tokens:2_000
@@ -5992,9 +6024,63 @@ let test_per_attempt_retry_budget_capped_by_remaining_when_healthy () =
       check bool "effective capped by min(adaptive, remaining)" true
         (budget.effective_timeout_sec <= 1200.0)
 
+let test_per_attempt_retry_blocks_after_adaptive_budget_spent () =
+  match
+    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+      ~allow_wall_clock_retry_budget:false
+      ~is_retry:true
+      ~reserve_degraded_retry_budget:false
+      ~estimated_input_tokens:2_000
+      ~max_turns:4
+      ~remaining_turn_budget_s:300.0
+  with
+  | None -> ()
+  | Some _ ->
+      fail "plain retry should refuse once the adaptive budget was already spent"
+
+let test_degraded_retry_wall_clock_budget_allows_remaining_turn_time () =
+  match
+    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+      ~allow_wall_clock_retry_budget:true
+      ~is_retry:true
+      ~reserve_degraded_retry_budget:false
+      ~estimated_input_tokens:2_000
+      ~max_turns:4
+      ~remaining_turn_budget_s:300.0
+  with
+  | None -> fail "degraded retry should use remaining wall-clock budget"
+  | Some budget ->
+      check string "source marks wall-clock retry"
+        "adaptive_wall_clock_retry" budget.source;
+      check (float 0.01) "wall-clock retry leaves finalization guard"
+        285.0 budget.effective_timeout_sec
+
+let test_degraded_retry_wall_clock_budget_gate_is_one_shot () =
+  let allowed ~degraded_rotation_first_attempt ~attempt ~attempted_cascades =
+    UT.allow_wall_clock_retry_budget_for_attempt
+      ~is_retry:true
+      ~degraded_rotation_first_attempt
+      ~attempt
+      ~attempted_cascades
+  in
+  let rotated_cascades = [ "local_recovery"; "underdog" ] in
+  check bool "first degraded rotation attempt may use wall clock" true
+    (allowed ~degraded_rotation_first_attempt:true ~attempt:1
+       ~attempted_cascades:rotated_cascades);
+  check bool "same-cascade retry after rotation uses per-attempt budget" false
+    (allowed ~degraded_rotation_first_attempt:false ~attempt:2
+       ~attempted_cascades:rotated_cascades);
+  check bool "attempt counter still blocks later retries" false
+    (allowed ~degraded_rotation_first_attempt:true ~attempt:2
+       ~attempted_cascades:rotated_cascades);
+  check bool "non-rotated retry cannot use wall clock" false
+    (allowed ~degraded_rotation_first_attempt:true ~attempt:1
+       ~attempted_cascades:[ "underdog" ])
+
 let test_non_retry_still_refuses_tiny_budget () =
   match
     UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+      ~allow_wall_clock_retry_budget:false
       ~is_retry:false
       ~reserve_degraded_retry_budget:false
       ~estimated_input_tokens:2_000
@@ -6010,6 +6096,7 @@ let test_per_attempt_retry_refuses_zero_remaining () =
      cancelled by the outer turn timeout — resolver must return None. *)
   match
     UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+      ~allow_wall_clock_retry_budget:false
       ~is_retry:true
       ~reserve_degraded_retry_budget:false
       ~estimated_input_tokens:2_000
@@ -8240,12 +8327,20 @@ let () =
             test_degraded_retry_budget_gate_allows_remaining_budget;
           test_case "degraded retry is blocked when turn budget is exhausted" `Quick
             test_degraded_retry_budget_gate_blocks_exhausted_budget;
-          test_case "degraded retry is blocked after productive slot phase (#12888)" `Quick
-            test_degraded_retry_slot_phase_blocks_late_rotation;
+          test_case "OAS timeout budget can still rotate to local recovery after slot phase" `Quick
+            test_degraded_retry_slot_phase_allows_oas_timeout_local_recovery;
+          test_case "contract retry is blocked after productive slot phase (#12888)" `Quick
+            test_degraded_retry_slot_phase_blocks_contract_rotation;
           test_case "per-attempt retry budget with near-zero remaining (#12675)" `Quick
             test_per_attempt_retry_budget_with_near_zero_remaining;
           test_case "per-attempt retry budget capped by healthy remaining" `Quick
             test_per_attempt_retry_budget_capped_by_remaining_when_healthy;
+          test_case "plain retry blocks after adaptive budget is spent" `Quick
+            test_per_attempt_retry_blocks_after_adaptive_budget_spent;
+          test_case "degraded retry can use remaining wall-clock budget" `Quick
+            test_degraded_retry_wall_clock_budget_allows_remaining_turn_time;
+          test_case "degraded retry wall-clock budget is one-shot" `Quick
+            test_degraded_retry_wall_clock_budget_gate_is_one_shot;
           test_case "non-retry still refuses tiny budget" `Quick
             test_non_retry_still_refuses_tiny_budget;
           test_case "per-attempt retry refuses zero remaining (#12675)" `Quick

@@ -50,6 +50,7 @@ type oas_timeout_budget_resolution = {
 }
 
 val resolve_bounded_oas_timeout_budget_with_turn_budget :
+  allow_wall_clock_retry_budget:bool ->
   is_retry:bool ->
   reserve_degraded_retry_budget:bool ->
   estimated_input_tokens:int ->
@@ -63,7 +64,15 @@ val resolve_bounded_oas_timeout_budget_with_turn_budget :
 val attempt_watchdog_timeout_sec :
   remaining_turn_budget_s:float -> oas_timeout_budget_resolution -> float
 
+val allow_wall_clock_retry_budget_for_attempt :
+  is_retry:bool ->
+  degraded_rotation_first_attempt:bool ->
+  attempt:int ->
+  attempted_cascades:string list ->
+  bool
+
 val oas_retry_budget_available_for_turn :
+  allow_wall_clock_retry_budget:bool ->
   is_retry:bool ->
   estimated_input_tokens:int ->
   max_turns:int ->

@@ -145,6 +145,7 @@ let oas_timeout_budget_resolution_to_yojson
     ]
 
 let resolve_bounded_oas_timeout_budget_with_turn_budget
+    ~(allow_wall_clock_retry_budget : bool)
     ~(is_retry : bool)
     ~(reserve_degraded_retry_budget : bool)
     ~(estimated_input_tokens : int) ~(max_turns : int)
@@ -159,19 +160,36 @@ let resolve_bounded_oas_timeout_budget_with_turn_budget
     let time_spent_in_turn = runtime.turn_timeout_sec.value -. remaining_turn_budget_s in
     let usable_retry_budget = adaptive_timeout_sec -. time_spent_in_turn in
 
-    (* Guard: cascade rotation cannot consume more than 1x per-attempt budget
-       per slot acquisition. If we've already spent more than the adaptive timeout
-       budget in this turn, do not allow further retries. This prevents a retry
-       loop from hogging the slot for the entire outer turn budget when inner
-       OAS attempts timeout early. *)
-    if remaining_turn_budget_s <= 0.0 || usable_retry_budget < min_oas_timeout_budget_sec then None
-    else begin
-      let effective_timeout_sec = usable_retry_budget
-      in
+    (* Guard: same-cascade retries cannot consume more than 1x per-attempt
+       budget per slot acquisition. Degraded cascade rotation can opt into
+       wall-clock retry budget so a first cascade that legitimately spent its
+       OAS timeout budget can still fail open inside the remaining turn time. *)
+    let wall_clock_retry_budget =
+      let usable_budget = remaining_turn_budget_s -. oas_timeout_guard_sec in
+      if usable_budget < min_oas_timeout_budget_sec
+      then None
+      else Some (Float.min adaptive_timeout_sec usable_budget)
+    in
+    let retry_budget =
+      if remaining_turn_budget_s <= 0.0 then None
+      else if usable_retry_budget >= min_oas_timeout_budget_sec then
+        Some (usable_retry_budget, false)
+      else if allow_wall_clock_retry_budget then
+        Option.map (fun timeout -> (timeout, true)) wall_clock_retry_budget
+      else None
+    in
+    match retry_budget with
+    | None -> None
+    | Some (effective_timeout_sec, used_wall_clock_retry_budget) ->
       let source =
-        match runtime.oas_timeout_override_sec.value with
-        | Some _ -> "override_per_attempt_retry"
-        | None -> "adaptive_per_attempt_retry"
+        match
+          ( runtime.oas_timeout_override_sec.value,
+            used_wall_clock_retry_budget )
+        with
+        | Some _, true -> "override_wall_clock_retry"
+        | Some _, false -> "override_per_attempt_retry"
+        | None, true -> "adaptive_wall_clock_retry"
+        | None, false -> "adaptive_per_attempt_retry"
       in
       Some
         {
@@ -183,7 +201,6 @@ let resolve_bounded_oas_timeout_budget_with_turn_budget
           max_turns;
           source;
         }
-    end
   end else begin
     let usable_budget = remaining_turn_budget_s -. oas_timeout_guard_sec in
     if usable_budget < min_oas_timeout_budget_sec
@@ -245,8 +262,19 @@ let bounded_oas_timeout_for_turn_budget_with_turn_budget
   Option.map
     (fun (budget : oas_timeout_budget_resolution) -> budget.effective_timeout_sec)
     (resolve_bounded_oas_timeout_budget_with_turn_budget
+       ~allow_wall_clock_retry_budget:false
        ~is_retry:false ~reserve_degraded_retry_budget:false
        ~estimated_input_tokens ~max_turns ~remaining_turn_budget_s)
+
+let allow_wall_clock_retry_budget_for_attempt
+    ~(is_retry : bool)
+    ~(degraded_rotation_first_attempt : bool)
+    ~(attempt : int)
+    ~(attempted_cascades : string list) : bool =
+  is_retry
+  && degraded_rotation_first_attempt
+  && attempt = 1
+  && List.length attempted_cascades > 1
 
 let bounded_oas_timeout_for_turn_budget ~(estimated_input_tokens : int)
     ~(remaining_turn_budget_s : float) : float option =
@@ -254,11 +282,13 @@ let bounded_oas_timeout_for_turn_budget ~(estimated_input_tokens : int)
     ~max_turns:(Keeper_runtime_resolved.reactive_max_turns_per_call ())
     ~remaining_turn_budget_s
 
-let oas_retry_budget_available_for_turn ~(is_retry : bool)
+let oas_retry_budget_available_for_turn
+    ~(allow_wall_clock_retry_budget : bool) ~(is_retry : bool)
     ~(estimated_input_tokens : int) ~(max_turns : int)
     ~(remaining_turn_budget_s : float) : bool =
   Option.is_some
     (resolve_bounded_oas_timeout_budget_with_turn_budget
+       ~allow_wall_clock_retry_budget
        ~reserve_degraded_retry_budget:false ~is_retry ~estimated_input_tokens
        ~max_turns ~remaining_turn_budget_s)
 
@@ -273,6 +303,12 @@ let degraded_retry_slot_phase_budget_sec =
 
 let degraded_retry_slot_phase_available ~(time_spent_in_turn_s : float) : bool =
   Float.max 0.0 time_spent_in_turn_s < degraded_retry_slot_phase_budget_sec
+
+let degraded_retry_bypasses_slot_phase_guard
+    (err : Agent_sdk.Error.sdk_error) : bool =
+  match Oas_worker_named.classify_masc_internal_error err with
+  | Some (Oas_worker_named.Oas_timeout_budget _) -> true
+  | _ -> false
 
 let reclassify_oas_timeout_for_attempt
     ~(timeout_budget : oas_timeout_budget_resolution option)
@@ -338,11 +374,13 @@ let next_fail_open_cascade_for_turn_with_budget
       if
         match time_spent_in_turn_s with
         | Some time_spent_in_turn_s ->
-            not (degraded_retry_slot_phase_available ~time_spent_in_turn_s)
+            (not (degraded_retry_slot_phase_available ~time_spent_in_turn_s))
+            && not (degraded_retry_bypasses_slot_phase_guard err)
         | None -> false
       then Degraded_retry_slot_phase_exhausted retry
       else if
         oas_retry_budget_available_for_turn
+          ~allow_wall_clock_retry_budget:true
           ~is_retry:true ~estimated_input_tokens ~max_turns
           ~remaining_turn_budget_s
       then Degraded_retry_allowed retry

@@ -919,8 +919,10 @@ module KeeperRetryBackoff = struct
       degraded retry rotation is rejected (the rotation evidence is
       still recorded in [cascade_rotation_attempts] for audit).  The
       keeper releases the outer slot instead of holding it for a
-      retry that may itself stall.  Floor 5s prevents accidental
-      always-reject configs.
+      retry that may itself stall.  OAS timeout-budget failures may
+      still rotate to the next degraded cascade when retry budget remains,
+      because the first attempt already consumed its bounded provider
+      budget.  Floor 5s prevents accidental always-reject configs.
 
       Declared here (not in keeper_turn_cascade_budget.ml) so the
       env knob catalog generator at bin/env_knob_catalog.ml picks

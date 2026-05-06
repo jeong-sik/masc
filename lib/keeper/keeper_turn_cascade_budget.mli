@@ -64,12 +64,20 @@ val oas_timeout_budget_resolution_to_yojson :
   oas_timeout_budget_resolution -> Yojson.Safe.t
 
 val resolve_bounded_oas_timeout_budget_with_turn_budget :
+  allow_wall_clock_retry_budget:bool ->
   is_retry:bool ->
   reserve_degraded_retry_budget:bool ->
   estimated_input_tokens:int ->
   max_turns:int ->
   remaining_turn_budget_s:float ->
   oas_timeout_budget_resolution option
+
+val allow_wall_clock_retry_budget_for_attempt :
+  is_retry:bool ->
+  degraded_rotation_first_attempt:bool ->
+  attempt:int ->
+  attempted_cascades:string list ->
+  bool
 
 val bounded_oas_timeout_for_turn_budget_with_turn_budget :
   estimated_input_tokens:int ->
@@ -83,6 +91,7 @@ val bounded_oas_timeout_for_turn_budget :
   float option
 
 val oas_retry_budget_available_for_turn :
+  allow_wall_clock_retry_budget:bool ->
   is_retry:bool ->
   estimated_input_tokens:int ->
   max_turns:int ->
@@ -94,7 +103,9 @@ val degraded_retry_slot_phase_budget_sec : float
     suppressed. This is a guardrail for #12888: once the productive
     phase has already consumed this much wall clock, rotation should end
     the cycle instead of holding the same slot for another provider
-    attempt. *)
+    attempt. OAS timeout-budget failures may still rotate to the next
+    degraded cascade when retry budget remains, because the failed attempt
+    already represents the budgeted provider wait. *)
 
 val degraded_retry_slot_phase_available :
   time_spent_in_turn_s:float -> bool

@@ -50,13 +50,21 @@ export function chronicleLaneLabel(lane: ChronicleLane): string {
 
 export function sortChronicleEvents(events: readonly ChronicleEvent[]): ChronicleEvent[] {
   return [...events].sort((a, b) => {
-    const timeDelta = (finiteTimestamp(b.timestamp) ?? -Infinity) - (finiteTimestamp(a.timestamp) ?? -Infinity)
+    const aTimestamp = finiteTimestamp(a.timestamp)
+    const bTimestamp = finiteTimestamp(b.timestamp)
+    if (aTimestamp == null && bTimestamp == null) return a.id.localeCompare(b.id)
+    if (aTimestamp == null) return 1
+    if (bTimestamp == null) return -1
+    const timeDelta = bTimestamp - aTimestamp
     if (timeDelta !== 0) return timeDelta
     return a.id.localeCompare(b.id)
   })
 }
 
-export function summarizeChronicleEvents(events: readonly ChronicleEvent[]): ChronicleSummary {
+export function summarizeChronicleEvents(
+  events: readonly ChronicleEvent[],
+  totalCount = events.length,
+): ChronicleSummary {
   const sorted = sortChronicleEvents(events)
   const sessionIds = new Set<string>()
   const laneCounts = { ...EMPTY_LANE_COUNTS }
@@ -71,7 +79,7 @@ export function summarizeChronicleEvents(events: readonly ChronicleEvent[]): Chr
   }
 
   return {
-    totalCount: events.length,
+    totalCount,
     visibleCount: sorted.length,
     latestTimestamp: sorted.length > 0 ? finiteTimestamp(sorted[0]!.timestamp) : null,
     oldestTimestamp: sorted.length > 0 ? finiteTimestamp(sorted[sorted.length - 1]!.timestamp) : null,
@@ -120,7 +128,12 @@ export function buildChronicleViewModel(
 ): ChronicleViewModel {
   const limit = Number.isFinite(maxEvents) ? Math.max(0, Math.floor(maxEvents)) : 0
   const sorted = sortChronicleEvents(events).slice(0, limit)
-  const selectedEvent = sorted.find(event => event.id === selectedEventId) ?? sorted[0] ?? null
+  const selectedEvent =
+    selectedEventId === null
+      ? null
+      : selectedEventId === undefined
+        ? sorted[0] ?? null
+        : sorted.find(event => event.id === selectedEventId) ?? sorted[0] ?? null
   const relatedEvents = relatedChronicleEvents(sorted, selectedEvent)
   const linkedTargets = linkedChronicleTargets(selectedEvent ? [selectedEvent, ...relatedEvents] : [])
   return {
@@ -128,7 +141,7 @@ export function buildChronicleViewModel(
     selectedEvent,
     relatedEvents,
     linkedTargets,
-    summary: summarizeChronicleEvents(sorted),
+    summary: summarizeChronicleEvents(sorted, events.length),
   }
 }
 

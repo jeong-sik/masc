@@ -76,6 +76,25 @@ describe('chronicle model', () => {
     expect(summary.oldestTimestamp).toBe(planEvent.timestamp)
   })
 
+  it('sorts invalid timestamps deterministically after finite events', () => {
+    const invalidB = { ...keeperEvent, id: 'invalid-b', timestamp: Number.NaN }
+    const invalidA = { ...planEvent, id: 'invalid-a', timestamp: Number.POSITIVE_INFINITY }
+
+    expect(sortChronicleEvents([invalidB, gitEvent, invalidA]).map(event => event.id)).toEqual([
+      'git-1',
+      'invalid-a',
+      'invalid-b',
+    ])
+  })
+
+  it('preserves total count when the view is truncated', () => {
+    const model = buildChronicleViewModel([planEvent, gitEvent, keeperEvent], undefined, 2)
+
+    expect(model.events.map(event => event.id)).toEqual(['git-1', 'keeper-1'])
+    expect(model.summary.totalCount).toBe(3)
+    expect(model.summary.visibleCount).toBe(2)
+  })
+
   it('builds selected context with related events and linked targets', () => {
     const model = buildChronicleViewModel([planEvent, gitEvent, keeperEvent], 'keeper-1')
 

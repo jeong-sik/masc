@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useState } from 'preact/hooks'
 import {
   buildChronicleViewModel,
   chronicleLaneForEvent,
@@ -12,7 +12,7 @@ interface ChronicleNavigatorProps {
   selectedEventId?: string | null
   maxEvents?: number
   testId?: string
-  onSelectedEventChange?: (eventId: string) => void
+  onSelectedEventChange?: (eventId: string | null) => void
 }
 
 const LANE_TONE: Record<ChronicleLane, string> = {
@@ -55,8 +55,13 @@ export function ChronicleNavigator({
   testId,
   onSelectedEventChange,
 }: ChronicleNavigatorProps) {
-  const [internalSelectedId, setInternalSelectedId] = useState<string | null>(selectedEventId ?? null)
-  const effectiveSelectedId = selectedEventId ?? internalSelectedId
+  const [internalSelectedId, setInternalSelectedId] = useState<string | null | undefined>(
+    selectedEventId,
+  )
+  useEffect(() => {
+    if (selectedEventId !== undefined) setInternalSelectedId(selectedEventId)
+  }, [selectedEventId])
+  const effectiveSelectedId = selectedEventId !== undefined ? selectedEventId : internalSelectedId
   const model = useMemo(
     () => buildChronicleViewModel(events, effectiveSelectedId, maxEvents),
     [events, effectiveSelectedId, maxEvents],
@@ -66,7 +71,7 @@ export function ChronicleNavigator({
   const metadata = metadataEntries(selected)
 
   const selectEvent = (eventId: string) => {
-    setInternalSelectedId(eventId)
+    if (selectedEventId === undefined) setInternalSelectedId(eventId)
     onSelectedEventChange?.(eventId)
   }
 

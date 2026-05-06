@@ -84,4 +84,36 @@ describe('ChronicleNavigator', () => {
     expect(container.querySelector('[data-chronicle-navigator]')?.getAttribute('data-chronicle-selected-id')).toBe('plan-1')
     expect(container.textContent).toContain('3-panel navigator becomes the first P1 surface.')
   })
+
+  it('honors explicit null selection in controlled mode', async () => {
+    const container = document.createElement('div')
+    render(h(ChronicleNavigator, { events, selectedEventId: 'keeper-1' }), container)
+    expect(container.querySelector('[data-chronicle-navigator]')?.getAttribute('data-chronicle-selected-id')).toBe('keeper-1')
+
+    render(h(ChronicleNavigator, { events, selectedEventId: null }), container)
+    await Promise.resolve()
+
+    expect(container.querySelector('[data-chronicle-navigator]')?.getAttribute('data-chronicle-selected-id')).toBe('')
+    expect(container.textContent).toContain('No selection')
+  })
+
+  it('reports clicks without mutating controlled null selection', async () => {
+    const selected: Array<string | null> = []
+    const container = document.createElement('div')
+    render(
+      h(ChronicleNavigator, {
+        events,
+        selectedEventId: null,
+        onSelectedEventChange: eventId => selected.push(eventId),
+      }),
+      container,
+    )
+    const planButton = container.querySelector('[data-chronicle-event-id="plan-1"] button') as HTMLButtonElement
+
+    planButton.click()
+    await Promise.resolve()
+
+    expect(selected).toEqual(['plan-1'])
+    expect(container.querySelector('[data-chronicle-navigator]')?.getAttribute('data-chronicle-selected-id')).toBe('')
+  })
 })

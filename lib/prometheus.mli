@@ -502,6 +502,7 @@ val metric_llm_provider_cache_hits : string
 val metric_llm_provider_cache_misses : string
 val metric_llm_provider_requests_started : string
 val metric_llm_provider_errors : string
+val metric_llm_provider_errors_by_reason : string
 val metric_llm_provider_retries : string
 val metric_llm_provider_input_tokens : string
 val metric_llm_provider_output_tokens : string

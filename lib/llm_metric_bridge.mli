@@ -42,7 +42,7 @@ val emit_cache_miss : model_id:string -> unit
 
 (** Emit request lifecycle observations from OAS metrics callbacks. *)
 val emit_request_start : model_id:string -> unit
-val emit_error : model_id:string -> unit
+val emit_error : model_id:string -> error:string -> unit
 val emit_retry : provider:string -> model_id:string -> attempt:int -> unit
 val emit_token_usage :
   provider:string ->

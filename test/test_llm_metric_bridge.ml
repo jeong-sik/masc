@@ -28,6 +28,10 @@ let test_metric_names_stable () =
     "masc_llm_provider_errors_total"
     Prom.metric_llm_provider_errors;
   Alcotest.(check string)
+    "errors by reason metric"
+    "masc_llm_provider_errors_by_reason_total"
+    Prom.metric_llm_provider_errors_by_reason;
+  Alcotest.(check string)
     "retries metric"
     "masc_llm_provider_retries_total"
     Prom.metric_llm_provider_retries;
@@ -59,6 +63,12 @@ let test_sink_records_oas_callbacks () =
     metric Prom.metric_llm_provider_requests_started ~labels:model_labels
   in
   let before_error = metric Prom.metric_llm_provider_errors ~labels:model_labels in
+  let error_reason_labels =
+    [ ("model", model_id); ("error_reason", "unknown") ]
+  in
+  let before_error_reason =
+    metric Prom.metric_llm_provider_errors_by_reason ~labels:error_reason_labels
+  in
   let before_retry = metric Prom.metric_llm_provider_retries ~labels:retry_labels in
   let before_input =
     metric Prom.metric_llm_provider_input_tokens ~labels:provider_model_labels
@@ -85,6 +95,9 @@ let test_sink_records_oas_callbacks () =
   check_metric_delta "error +1"
     Prom.metric_llm_provider_errors
     ~labels:model_labels ~before:before_error ~delta:1.0;
+  check_metric_delta "error reason +1"
+    Prom.metric_llm_provider_errors_by_reason
+    ~labels:error_reason_labels ~before:before_error_reason ~delta:1.0;
   check_metric_delta "retry +1"
     Prom.metric_llm_provider_retries
     ~labels:retry_labels ~before:before_retry ~delta:1.0;
@@ -139,6 +152,30 @@ let test_request_latency_positive_ms_does_not_clamp () =
     Prom.metric_llm_provider_request_latency_clamped
     ~labels ~before ~delta:0.0
 
+let test_error_reason_labels_are_bounded () =
+  let model_id =
+    Printf.sprintf "bridge-error-reason-%d" (Unix.getpid ())
+  in
+  let reason_labels reason =
+    [ ("model", model_id); ("error_reason", reason) ]
+  in
+  let before_timeout =
+    metric Prom.metric_llm_provider_errors_by_reason
+      ~labels:(reason_labels "timeout")
+  in
+  let before_rate_limit =
+    metric Prom.metric_llm_provider_errors_by_reason
+      ~labels:(reason_labels "rate_limit")
+  in
+  Bridge.emit_error ~model_id ~error:"deadline exceeded after 30s";
+  Bridge.emit_error ~model_id ~error:"HTTP 429 rate limit exceeded";
+  check_metric_delta "timeout reason +1"
+    Prom.metric_llm_provider_errors_by_reason
+    ~labels:(reason_labels "timeout") ~before:before_timeout ~delta:1.0;
+  check_metric_delta "rate limit reason +1"
+    Prom.metric_llm_provider_errors_by_reason
+    ~labels:(reason_labels "rate_limit") ~before:before_rate_limit ~delta:1.0
+
 let () =
   Alcotest.run "llm_metric_bridge"
     [
@@ -152,5 +189,7 @@ let () =
             test_request_latency_clamps_zero_ms;
           Alcotest.test_case "positive request latency does not clamp" `Quick
             test_request_latency_positive_ms_does_not_clamp;
+          Alcotest.test_case "error reason labels are bounded" `Quick
+            test_error_reason_labels_are_bounded;
         ] );
     ]

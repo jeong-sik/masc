@@ -55,28 +55,6 @@ let route_evidence path =
 let keeper_meta_evidence =
   evidence_ref ~kind:"store" ~id:"keeper_meta" ~value:"Keeper_types.read_meta"
 
-let assoc_list field json =
-  match Yojson.Safe.Util.member field json with
-  | `List items -> items
-  | _ -> []
-
-let tool_stats_by_name (summary : Yojson.Safe.t) : (string, tool_stat) Hashtbl.t =
-  let table = Hashtbl.create 128 in
-  assoc_list "by_tool" summary
-  |> List.iter (fun row ->
-    match Safe_ops.json_string_opt "name" row with
-    | None -> ()
-    | Some name ->
-      let stat =
-        {
-          name;
-          calls = Safe_ops.json_int ~default:0 "calls" row;
-          success_pct = Safe_ops.json_float ~default:0.0 "success_pct" row;
-        }
-      in
-      Hashtbl.replace table name stat);
-  table
-
 let tool_stat_json ?failure_classes stat =
   let fields = [
     ("name", `String stat.name);
@@ -86,6 +64,9 @@ let tool_stat_json ?failure_classes stat =
   match failure_classes with
   | Some classes -> `Assoc (fields @ [("failure_classes", classes)])
   | None -> `Assoc fields
+
+let tool_stat_of_keeper_stat (stat : Failure.tool_keeper_stat) =
+  { name = stat.name; calls = stat.calls; success_pct = stat.success_pct }
 
 let uniq_sorted names =
   names
@@ -128,6 +109,11 @@ let count_meta snapshots =
   snapshots
   |> List.filter (fun snapshot -> Option.is_some snapshot.meta)
   |> List.length
+
+let snapshot_keeper_names snapshots =
+  snapshots
+  |> List.map (fun snapshot -> snapshot.keeper_name)
+  |> uniq_sorted
 
 let meta_feature_json
       ~id
@@ -415,17 +401,22 @@ let scheduled_proactive_feature ~config snapshots =
 
 let tool_feature_json
       ~success_threshold_pct
+      ~keeper_names
       failure_table
-      tool_stats
+      (tool_stats : (string, Failure.tool_keeper_stat) Hashtbl.t)
       (spec : Dashboard_keeper_feature_catalog.feature_spec)
   =
   let passing, weak, missing =
     spec.required_tools
     |> List.fold_left (fun (passing, weak, missing) tool_name ->
       match Hashtbl.find_opt tool_stats tool_name with
-      | Some stat when stat.calls > 0 && stat.success_pct >= success_threshold_pct ->
+      | Some (keeper_stat : Failure.tool_keeper_stat)
+        when keeper_stat.calls > 0
+             && keeper_stat.success_pct >= success_threshold_pct ->
+        let stat = tool_stat_of_keeper_stat keeper_stat in
         (stat :: passing, weak, missing)
-      | Some stat when stat.calls > 0 ->
+      | Some (keeper_stat : Failure.tool_keeper_stat) when keeper_stat.calls > 0 ->
+        let stat = tool_stat_of_keeper_stat keeper_stat in
         (passing, stat :: weak, missing)
       | _ -> (passing, weak, tool_name :: missing))
       ([], [], [])
@@ -463,8 +454,15 @@ let tool_feature_json
                 stat)
            weak) );
     ("missing_tools", json_string_list missing);
-    ("keeper_evidence", `Null);
-    ("evidence_refs", `List [route_evidence "/api/v1/dashboard/tool-quality"]);
+    ( "keeper_evidence",
+      Failure.keeper_evidence_json tool_stats
+        ~keeper_names ~required_tools:spec.required_tools );
+    ( "evidence_refs",
+      `List [
+        route_evidence "/api/v1/dashboard/tool-quality";
+        evidence_ref ~kind:"store" ~id:"keeper_tool_call_log"
+          ~value:"Keeper_tool_call_log.read_recent/read_window";
+      ] );
     ("next_action", `String spec.next_action);
   ]
 
@@ -493,9 +491,12 @@ let json
     clamp_float ~low:0.0 ~high:100.0 success_threshold_pct
   in
   let tool_summary = Dashboard_http_tool_quality.aggregate ~n ?window_hours () in
-  let tool_stats = tool_stats_by_name tool_summary in
-  let failure_table = Failure.by_tool ~n ?window_hours () in
   let snapshots = load_keeper_snapshots config in
+  let keeper_names = snapshot_keeper_names snapshots in
+  let tool_stats =
+    Failure.keeper_stats_by_tool ~n ?window_hours ~keeper_names ()
+  in
+  let failure_table = Failure.by_tool ~n ?window_hours ~keeper_names () in
   let features =
     [
       runtime_liveness_feature snapshots;
@@ -505,7 +506,8 @@ let json
       scheduled_proactive_feature ~config snapshots;
     ]
     @ List.map
-        (tool_feature_json ~success_threshold_pct failure_table tool_stats)
+        (tool_feature_json ~success_threshold_pct ~keeper_names failure_table
+           tool_stats)
         Dashboard_keeper_feature_catalog.tool_features
   in
   let statuses = List.map status_of_feature_json features in

@@ -116,6 +116,7 @@ code_refs:
   - operations safety view
 - `GET /api/v1/dashboard/keeper-feature-proof`
   - keeper autonomy feature proof gates, including 24h turn-span and web-search tool evidence
+  - tool gates count only calls from known keeper names and expose `keeper_evidence.provenance_scope=known_keeper_tool_call_log`, per-tool successful/failing keepers, sandbox/network modes, task IDs, and goal IDs
   - read-only CLI equivalent: `masc-keeper-feature-proof --base-path <runtime-root>`
 - `GET /api/v1/models/metrics`, `GET /api/v1/dashboard/keeper-costs`
   - runtime cost/latency view

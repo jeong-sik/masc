@@ -99,15 +99,27 @@ let persist_keeper
   | Ok () -> meta
   | Error err -> fail ("write_meta failed: " ^ err)
 
-let log_tool ?(success = true) tool_name =
+let log_tool
+      ?(keeper_name = "alpha")
+      ?sandbox_profile
+      ?network_mode
+      ?task_id
+      ?goal_ids
+      ?(success = true)
+      tool_name
+  =
   Keeper_tool_call_log.log_call
-    ~keeper_name:"alpha"
+    ~keeper_name
     ~tool_name
     ~input:(`Assoc [])
     ~output_text:
       (if success then "ok" else {|{"ok":false,"error":"fixture_failure"}|})
     ~success
     ~duration_ms:1.0
+    ?sandbox_profile
+    ?network_mode
+    ?task_id
+    ?goal_ids
     ()
 
 let write_decision_lines config keeper_name rows =
@@ -179,6 +191,20 @@ let weak_tool tool_name id json =
   |> List.find_opt (fun item ->
     Safe_ops.json_string_opt "name" item = Some tool_name)
 
+let keeper_evidence id json =
+  feature id json |> Yojson.Safe.Util.member "keeper_evidence"
+
+let json_string_values field json =
+  Yojson.Safe.Util.(json |> member field |> to_list)
+  |> List.filter_map Yojson.Safe.Util.to_string_option
+
+let keeper_evidence_tool tool_name id json =
+  keeper_evidence id json
+  |> Yojson.Safe.Util.member "per_tool"
+  |> Yojson.Safe.Util.to_list
+  |> List.find_opt (fun item ->
+    Safe_ops.json_string_opt "name" item = Some tool_name)
+
 let test_json_reports_feature_gaps () =
   with_store @@ fun config ->
   ignore
@@ -198,7 +224,8 @@ let test_json_reports_feature_gaps () =
       "keeper_board_vote";
       "masc_code_read";
     ];
-  log_tool ~success:false "masc_worktree_create";
+  log_tool ~success:false ~sandbox_profile:"docker" ~network_mode:"inherit"
+    ~task_id:"task-coding" ~goal_ids:["goal-coding"] "masc_worktree_create";
   let json =
     Dashboard_keeper_feature_proof.json
       ~config
@@ -219,6 +246,12 @@ let test_json_reports_feature_gaps () =
     (feature_status "persistent_24h_turn_exchange" json);
   check string "board tools are fully proved" "pass"
     (feature_status "board_tools" json);
+  check (list string) "board tool proof is keeper-originated"
+    ["alpha"]
+    (json_string_values "observed_keepers" (keeper_evidence "board_tools" json));
+  check (list string) "board tool proof exposes missing keeper provenance"
+    ["beta"]
+    (json_string_values "missing_keepers" (keeper_evidence "board_tools" json));
   check string "coding tools are partial/weak proof" "warn"
     (feature_status "coding_tools" json);
   check bool "retired governance tools are not required" false
@@ -236,7 +269,66 @@ let test_json_reports_feature_gaps () =
   check bool "weak tool includes failure class evidence" true
     (List.exists
        (fun row -> Safe_ops.json_string_opt "category" row = Some "fixture_failure")
-       worktree_failure_classes)
+       worktree_failure_classes);
+  let worktree_evidence =
+    match keeper_evidence_tool "masc_worktree_create" "coding_tools" json with
+    | Some row -> row
+    | None -> fail "missing worktree keeper evidence"
+  in
+  check (list string) "tool evidence records docker sandbox provenance"
+    ["docker"]
+    (json_string_values "sandbox_profiles" worktree_evidence);
+  check (list string) "tool evidence records network provenance"
+    ["inherit"]
+    (json_string_values "network_modes" worktree_evidence);
+  check (list string) "tool evidence records task provenance"
+    ["task-coding"]
+    (json_string_values "task_ids" worktree_evidence);
+  check (list string) "tool evidence records goal provenance"
+    ["goal-coding"]
+    (json_string_values "goal_ids" worktree_evidence)
+
+let test_operator_tool_calls_do_not_satisfy_keeper_tool_proof () =
+  with_store @@ fun config ->
+  ignore
+    (persist_keeper config ~name:"alpha" ~total_turns:3
+       ~autonomous_action_count:2 ~autonomous_tool_turn_count:2
+       ~board_reactive_turn_count:1 ~proactive_count_total:1);
+  List.iter
+    (log_tool ~keeper_name:"operator")
+    [
+      "keeper_time_now";
+      "keeper_context_status";
+      "keeper_memory_search";
+    ];
+  let json =
+    Dashboard_keeper_feature_proof.json
+      ~config
+      ~n:100
+      ~success_threshold_pct:80.0
+      ()
+  in
+  check string "non-keeper tool calls do not prove base tools" "fail"
+    (feature_status "base_tools" json);
+  check (list string) "base tools still missing from keeper proof"
+    [
+      "keeper_time_now";
+      "keeper_context_status";
+      "keeper_memory_search";
+    ]
+    (required_tools "base_tools" json
+     |> List.filter (fun tool ->
+       List.mem tool
+         (feature "base_tools" json
+          |> Yojson.Safe.Util.member "missing_tools"
+          |> Yojson.Safe.Util.to_list
+          |> List.filter_map Yojson.Safe.Util.to_string_option)));
+  check (list string) "operator is not counted as observed keeper"
+    []
+    (json_string_values "observed_keepers" (keeper_evidence "base_tools" json));
+  check (list string) "known keeper remains missing"
+    ["alpha"]
+    (json_string_values "missing_keepers" (keeper_evidence "base_tools" json))
 
 let test_decision_log_counts_as_scheduled_proof () =
   with_store @@ fun config ->
@@ -322,6 +414,8 @@ let () =
         [
           test_case "json reports feature gaps" `Quick
             test_json_reports_feature_gaps;
+          test_case "operator calls do not prove keeper tool use" `Quick
+            test_operator_tool_calls_do_not_satisfy_keeper_tool_proof;
           test_case "decision log counts as scheduled proof" `Quick
             test_decision_log_counts_as_scheduled_proof;
           test_case "decision log counts as 24h turn exchange proof" `Quick

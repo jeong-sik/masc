@@ -565,6 +565,7 @@
         test_keeper_turn_timeout_default_10456
         test_task_status_label_10421
         test_task_completion_path_10449
+        test_task_cache_invariant_13397
         test_filter_rejection_10474
         test_sandbox_inspect_trim_10488
         test_credential_alias_10440
@@ -767,6 +768,7 @@
         test_keeper_turn_timeout_default_10456
         test_task_status_label_10421
         test_task_completion_path_10449
+        test_task_cache_invariant_13397
         test_filter_rejection_10474
         test_sandbox_inspect_trim_10488
         test_credential_alias_10440

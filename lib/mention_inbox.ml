@@ -75,10 +75,25 @@ let inbox_path (config : Coord.config) : string =
 
 (** {1 JSONL I/O} *)
 
-let append_mention (config : Coord.config) (record : mention_record) : unit =
-  let path = inbox_path config in
-  let json = mention_record_to_json record in
-  Fs_compat.append_jsonl path json
+let append_mention ?task_id (config : Coord.config) (record : mention_record) : unit =
+  (* Fleet-wide invariant (PR-C): if the mention is associated with a terminal
+     task, skip the append and log the desync (issue #13397). *)
+  let skip =
+    match task_id with
+    | None -> false
+    | Some tid ->
+        (match Task_cache_invariant.fresh_task_status config ~task_id:tid with
+         | Some status when Task_cache_invariant.is_terminal status ->
+             Task_cache_invariant.clear_stale_agent_task config
+               ~agent_name:record.source_agent ~task_id:tid ~status
+               ~module_name:"mention_inbox.append_mention";
+             true
+         | _ -> false)
+  in
+  if not skip then (
+    let path = inbox_path config in
+    let json = mention_record_to_json record in
+    Fs_compat.append_jsonl path json)
 
 let load_all_mentions (config : Coord.config) : mention_record list =
   let path = inbox_path config in

@@ -64,14 +64,52 @@ let on_broadcast_mention : (string option -> unit) ref =
 let broadcast ?trace_context ?(msg_type = "broadcast")
     ?(task_cache_invariant_checked = false) config ~from_agent ~content =
   ensure_initialized config;
-  let content =
-    if task_cache_invariant_checked then content
-    else
-      Coord_task_cache_invariant.rewrite_broadcast_content
-        ~config
-        ~from_agent
-        ~module_name:"coord_broadcast"
-        ~content
+  (* Fleet-wide invariant (PR-B): if the broadcasting agent's current_task is
+     terminal in the backlog, replace the original broadcast with a single
+     cache_invalidated notice and clear the stale state (issue #13397).
+     Only applied to regular "broadcast" messages to avoid recursion. *)
+  let content, msg_type =
+    if task_cache_invariant_checked then (content, msg_type)
+    else if String.equal msg_type "broadcast" then
+      let agent_file =
+        Filename.concat (agents_dir config) (safe_filename from_agent ^ ".json")
+      in
+      if Sys.file_exists agent_file then
+        match agent_of_yojson (read_json config agent_file) with
+        | Ok agent -> (
+            match agent.current_task with
+            | Some task_id -> (
+                match Task_cache_invariant.fresh_task_status config ~task_id with
+                | Some status when Task_cache_invariant.is_terminal status ->
+                    Task_cache_invariant.clear_stale_agent_task config
+                      ~agent_name:from_agent ~task_id ~status
+                      ~module_name:"coord_broadcast";
+                    let inv_content =
+                      Printf.sprintf
+                        "[cache_invalidated] coord_broadcast: task %s is %s \
+                         — stale broadcast suppressed"
+                        task_id (Masc_domain.task_status_to_string status)
+                    in
+                    (inv_content, "cache_invalidated")
+                | _ ->
+                    ( Coord_task_cache_invariant.rewrite_broadcast_content
+                        ~config ~from_agent ~module_name:"coord_broadcast"
+                        ~content,
+                      msg_type ))
+            | None ->
+                ( Coord_task_cache_invariant.rewrite_broadcast_content
+                    ~config ~from_agent ~module_name:"coord_broadcast"
+                    ~content,
+                  msg_type ))
+        | Error _ ->
+            ( Coord_task_cache_invariant.rewrite_broadcast_content
+                ~config ~from_agent ~module_name:"coord_broadcast" ~content,
+              msg_type )
+      else
+        ( Coord_task_cache_invariant.rewrite_broadcast_content
+            ~config ~from_agent ~module_name:"coord_broadcast" ~content,
+          msg_type )
+    else (content, msg_type)
   in
   let seq = Coord_state.next_seq config in
   let mention = Mention.extract content in

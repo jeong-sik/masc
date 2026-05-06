@@ -64,6 +64,10 @@ let hints =
     ; call = "`masc_web_search` { query: \"<current-info query>\", limit: 5 }"
     ; description = "look up current public context before time-sensitive claims"
     }
+  ; { name = "masc_web_fetch"
+    ; call = "`masc_web_fetch` { url: \"<page-url>\", timeout: 15 }"
+    ; description = "fetch and read a web page before citing it"
+    }
   ; { name = "masc_worktree_create"
     ; call = "`masc_worktree_create` { task_id: \"<task-id>\", repo_name: \"masc-mcp\" }"
     ; description = "create a repo worktree before code edits"

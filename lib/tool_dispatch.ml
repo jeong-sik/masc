@@ -298,6 +298,7 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Tool_admin_update
     | Tool_help
     | Tool_stats
+    | Web_fetch
     | Web_search
     | Webrtc_answer
     | Webrtc_offer -> Some Mod_misc

@@ -302,6 +302,7 @@ module Masc = struct
     | Tool_revoke
     | Transition
     | Update_priority
+    | Web_fetch
     | Web_search
     | Who
     | Workflow_guide
@@ -411,6 +412,7 @@ module Masc = struct
     | Tool_revoke -> "masc_tool_revoke"
     | Transition -> "masc_transition"
     | Update_priority -> "masc_update_priority"
+    | Web_fetch -> "masc_web_fetch"
     | Web_search -> "masc_web_search"
     | Who -> "masc_who"
     | Workflow_guide -> "masc_workflow_guide"
@@ -520,6 +522,7 @@ module Masc = struct
     | "masc_tool_revoke" -> Some Tool_revoke
     | "masc_transition" -> Some Transition
     | "masc_update_priority" -> Some Update_priority
+    | "masc_web_fetch" -> Some Web_fetch
     | "masc_web_search" -> Some Web_search
     | "masc_who" -> Some Who
     | "masc_workflow_guide" -> Some Workflow_guide

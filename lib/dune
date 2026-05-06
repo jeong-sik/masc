@@ -165,6 +165,7 @@
   tool_misc_transport
   tool_misc_admin
   tool_misc_web_search
+  tool_misc_web_fetch
   oas_worker_cascade
   oas_worker_exec_agent
   oas_worker_exec

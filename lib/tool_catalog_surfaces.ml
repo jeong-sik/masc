@@ -177,7 +177,7 @@ let public_mcp_surface_tools =
     (* Agent discovery *)
     "masc_agents"; "masc_agent_card"; "masc_dashboard";
     (* Utility *)
-    "masc_tool_help"; "masc_web_search"; "masc_check";
+    "masc_tool_help"; "masc_web_search"; "masc_web_fetch"; "masc_check";
     (* HITL approval queue *)
     "masc_approval_pending";
     "masc_approval_get";
@@ -199,7 +199,7 @@ let spawned_agent_surface_tools =
     "masc_board_list"; "masc_board_post"; "masc_board_comment";
     "masc_board_vote"; "masc_board_get";
     "masc_board_curation_read"; "masc_board_curation_submit";
-    "masc_tool_help"; "masc_web_search";
+    "masc_tool_help"; "masc_web_search"; "masc_web_fetch";
     "masc_spawn";
     (* Phase 2: surface SSOT *)
     "masc_code_delete"; "masc_code_edit"; "masc_code_git";

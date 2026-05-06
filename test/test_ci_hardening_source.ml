@@ -1092,13 +1092,23 @@ let test_keeper_required_tool_contracts () =
   check bool "last-turn relaxation no longer bypasses required_tools" true
     (file_not_contains_pattern "lib/keeper/keeper_run_tools.ml"
        "let tool_choice =\n                 if computed_surface.is_last_turn\n                 then current_params.tool_choice\n                 else if computed_surface.required_tool_names <> []");
+  check bool "final-turn required tool prompt matches all-tools enforcement" true
+    (file_contains_pattern "lib/keeper/keeper_run_tools.ml"
+       "You MUST either use every");
+  check bool "final-turn required tool prompt does not allow one-tool partial success" true
+    (file_not_contains_pattern "lib/keeper/keeper_run_tools.ml"
+       "call at least one");
   check bool "docker PR lifecycle harness default matches runbook" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
        {|REQUIRED_TOOLS="${REQUIRED_TOOLS:-keeper_shell,keeper_bash,masc_code_git,keeper_pr_create,keeper_pr_review_comment}"|});
   check bool "runbook documents docker PR lifecycle required tool default" true
     (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-       "`keeper_shell`, `keeper_bash`, `masc_code_git`, `keeper_pr_create`, and")
+       "`keeper_shell`, `keeper_bash`, `masc_code_git`, `keeper_pr_create`, and");
+  check bool "docker PR lifecycle prompt accepts brokered route proof" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       "via=docker, route_via=docker, via=brokered, or route_via=brokered")
 
 let test_keeper_msg_timeout_contracts () =
   check bool "keeper msg schema exposes timeout_sec" true

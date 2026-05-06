@@ -423,7 +423,7 @@ Required proof lane:
 1. Confirm your runtime is sandbox_profile=docker before mutating.
 2. Create a unique proof branch named: keeper/$keeper-docker-pr-proof-$RUN_ID
 3. Make a minimal, non-product proof edit under docs/runtime-proof/keepers/$keeper-$RUN_ID.md.
-4. Commit and git push that branch. The tool result must show Docker execution evidence such as via=docker.
+4. Commit and git push that branch. The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
 5. Create a draft PR for that branch with keeper_pr_create or the native PR-create tool path. Do not mark ready, do not merge, do not add human-approved-ready.
 6. Use keeper_pr_review_read and keeper_pr_review_comment for review evidence. COMMENT is allowed on your proof PR. APPROVE is allowed only when the PR is a draft agent/keeper proof PR and the tool preflight permits it.
 7. Reply with one compact JSON object:

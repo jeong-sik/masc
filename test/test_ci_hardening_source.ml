@@ -428,6 +428,33 @@ let test_release_truth_contracts () =
   check bool "release workflow checks version truth" true
     (file_contains_pattern ".github/workflows/release.yml"
        "scripts/check-version-truth.sh");
+  check bool "main nightly checks version truth in doc truth step" true
+    (file_contains_nearby_line_with_patterns
+       ".github/workflows/main-nightly-health.yml"
+       ~anchor:"- name: Check doc truth"
+       ~patterns:["scripts/check-version-truth.sh"]
+       ~max_lines:4);
+  let nightly_pin =
+    file_pattern_position ".github/workflows/main-nightly-health.yml"
+      "uses: ./.github/actions/pin-ocaml-deps"
+  in
+  let nightly_install =
+    file_pattern_position ".github/workflows/main-nightly-health.yml"
+      "uses: ./.github/actions/install-ocaml-deps"
+  in
+  check bool "main nightly pins external deps before install" true
+    (match nightly_pin, nightly_install with
+     | Some pin, Some install -> pin < install
+     | _ -> false);
+  check bool "main nightly pins bisect test dependency override" true
+    (file_contains_nearby_line_with_patterns
+       ".github/workflows/main-nightly-health.yml"
+       ~anchor:"uses: ./.github/actions/pin-ocaml-deps"
+       ~patterns:["pin-flags:"; "--with-bisect"]
+       ~max_lines:4);
+  check bool "main nightly uses retrying dependency installer" true
+    (file_contains_pattern ".github/workflows/main-nightly-health.yml"
+       "uses: ./.github/actions/install-ocaml-deps");
   (* TODO: uncomment when ci_core fanout comment is added (#9419 follow-up) *)
   (* check bool "ci core fanout intentionally excludes tla" true
     (file_contains_pattern ".github/workflows/ci.yml"

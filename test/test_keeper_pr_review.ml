@@ -321,7 +321,7 @@ let test_reply_routes_through_docker_and_infers_repo () =
     (contains_substring log "run --rm");
   check bool "reply used gh api endpoint with inferred repo" true
     (contains_substring log
-       "gh api repos/jeong-sik/masc-mcp/pulls/comments/3192459689/replies");
+       "gh api repos/jeong-sik/masc-mcp/pulls/13510/comments/3192459689/replies");
   check bool "reply body passed to gh api" true
     (contains_substring log "docker reply evidence")
 

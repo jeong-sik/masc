@@ -292,8 +292,8 @@ let handle_keeper_pr_review_reply
       | Error msg -> error_json msg
       | Ok owner_repo ->
         let cmd = Printf.sprintf
-          "gh api repos/%s/pulls/comments/%d/replies -f body=%s 2>&1"
-          owner_repo comment_id
+          "gh api repos/%s/pulls/%d/comments/%d/replies -f body=%s 2>&1"
+          owner_repo pr_number comment_id
           (Filename.quote body) in
         let result =
           run_pr_review_shell ~config ~meta

@@ -703,25 +703,80 @@ let append (config : Coord.config) (receipt : t) =
    longer than the stale threshold. This is the path that catches the
    "KSM=Running but no live turn" failure mode where the heartbeat fiber is
    blocked on a long call and would otherwise never produce a receipt. *)
-let emit_stale_keeper_broadcast config
+let stale_kill_class_label = function
+  | Keeper_registry.Idle_turn _ -> "idle_turn"
+  | Keeper_registry.In_turn_hung _ -> "in_turn_hung"
+  | Keeper_registry.Noop_failure_loop _ -> "noop_failure_loop"
+
+let stale_terminal_reason_code = function
+  | Some (Keeper_registry.Provider_runtime_error { code; _ }) -> code
+  | Some (Keeper_registry.Tool_required_unsatisfied { code; _ }) -> code
+  | Some (Keeper_registry.Oas_timeout_budget_loop _) -> "oas_timeout_budget"
+  | Some (Keeper_registry.Stale_turn_timeout _) -> "stale_turn_timeout"
+  | Some (Keeper_registry.Stale_termination_storm _) ->
+      "stale_termination_storm"
+  | Some (Keeper_registry.Heartbeat_consecutive_failures _) ->
+      "heartbeat_failures"
+  | Some (Keeper_registry.Turn_consecutive_failures _) -> "turn_failures"
+  | Some (Keeper_registry.Ambiguous_partial_commit _) ->
+      "ambiguous_partial_commit"
+  | Some Keeper_registry.Fiber_unresolved -> "fiber_unresolved"
+  | Some (Keeper_registry.Exception _) -> "exception"
+  | None -> "stale_turn_timeout"
+
+let stale_broadcast_failure_cohort = function
+  | Some _ as reason -> Keeper_registry.failure_reason_cohort_key reason
+  | None -> "stale_turn_timeout"
+
+let stale_broadcast_kill_class = function
+  | Some (Keeper_registry.Stale_turn_timeout cls) ->
+      Some (stale_kill_class_label cls)
+  | _ -> None
+
+let stale_turn_bucket stale_seconds =
+  if stale_seconds < 30.0 then "stale_turn_lt_30s"
+  else if stale_seconds < 60.0 then "stale_turn_30s_to_60s"
+  else if stale_seconds < 300.0 then "stale_turn_1m_to_5m"
+  else if stale_seconds < 600.0 then "stale_turn_5m_to_10m"
+  else if stale_seconds < 1_800.0 then "stale_turn_10m_to_30m"
+  else "stale_turn_ge_30m"
+
+let stale_broadcast_payload
     ~keeper_name ~agent_name ~cascade_name ~trace_id ~generation
+    ~failure_reason
     ~stale_seconds ~last_turn_ts =
   let cascade_name_string = cascade_name_to_string cascade_name in
+  let failure_reason_text =
+    Option.map Keeper_registry.failure_reason_to_string failure_reason
+  in
+  let failure_reason_cohort = stale_broadcast_failure_cohort failure_reason in
+  `Assoc
+    [ "schema", `String "keeper.operator_broadcast_required.v1"
+    ; "keeper_name", `String keeper_name
+    ; "agent_name", `String agent_name
+    ; "cascade_name", `String cascade_name_string
+    ; "trace_id", `String trace_id
+    ; "generation", `Int generation
+    ; "disposition", `String "stalled"
+    ; "disposition_reason", `String failure_reason_cohort
+    ; "terminal_reason_code", `String (stale_terminal_reason_code failure_reason)
+    ; "failure_reason", string_opt_json failure_reason_text
+    ; "failure_reason_cohort", `String failure_reason_cohort
+    ; "stale_kill_class", string_opt_json (stale_broadcast_kill_class failure_reason)
+    ; "stale_turn_bucket", `String (stale_turn_bucket stale_seconds)
+    ; "stale_seconds", `Float stale_seconds
+    ; "last_turn_ts", `Float last_turn_ts
+    ; "source", `String "watchdog"
+    ]
+
+let emit_stale_keeper_broadcast config
+    ~keeper_name ~agent_name ~cascade_name ~trace_id ~generation
+    ~failure_reason ~stale_seconds ~last_turn_ts =
+  let cascade_name_string = cascade_name_to_string cascade_name in
   let payload =
-    `Assoc
-      [ "schema", `String "keeper.operator_broadcast_required.v1"
-      ; "keeper_name", `String keeper_name
-      ; "agent_name", `String agent_name
-      ; "cascade_name", `String cascade_name_string
-      ; "trace_id", `String trace_id
-      ; "generation", `Int generation
-      ; "disposition", `String "stalled"
-      ; "disposition_reason"
-      , `String (Printf.sprintf "stale_turn_%.0fs" stale_seconds)
-      ; "stale_seconds", `Float stale_seconds
-      ; "last_turn_ts", `Float last_turn_ts
-      ; "source", `String "watchdog"
-      ]
+    stale_broadcast_payload ~keeper_name ~agent_name
+      ~cascade_name ~trace_id ~generation ~stale_seconds ~last_turn_ts
+      ~failure_reason
   in
   let event =
     Activity_graph.emit config

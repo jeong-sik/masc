@@ -478,11 +478,42 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                || now -. !last_broadcast_ts > threshold
              in
              if stale && cooldown_ok then begin
+               let emit_watchdog_broadcast ~failure_reason ~stall_seconds =
+                 try
+                   Keeper_execution_receipt.emit_stale_keeper_broadcast
+                     ctx.config
+                     ~keeper_name:meta.name
+                     ~agent_name:meta.agent_name
+                     ~cascade_name:
+                       (Keeper_execution_receipt.cascade_name_of_string
+                          meta.cascade_name)
+                     ~trace_id:
+                       (Keeper_id.Trace_id.to_string
+                          entry.meta.runtime.trace_id)
+                     ~generation:entry.meta.runtime.generation
+                     ~failure_reason
+                     ~stale_seconds:stall_seconds
+                     ~last_turn_ts:last_turn;
+                   last_broadcast_ts := now
+                 with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | exn ->
+                   Prometheus.inc_counter
+                     Prometheus.metric_keeper_stale_broadcast_emit_failures
+                     ~labels:[("keeper", meta.name)]
+                     ();
+                   Log.Keeper.warn
+                     "%s: stale broadcast emit failed (restart still triggered): %s"
+                     meta.name (Printexc.to_string exn)
+               in
                match pending_oas_timeout_budget_count entry with
                | Some count when idle_stale ->
                  let stall_seconds = now -. last_turn in
+                 let failure_reason =
+                   Keeper_registry.Oas_timeout_budget_loop { count }
+                 in
                  Keeper_registry.set_failure_reason ~base_path meta.name
-                   (Some (Keeper_registry.Oas_timeout_budget_loop { count }));
+                   (Some failure_reason);
                  (* tla-lint: allow-mutation: fiber signal — stop the keeper
                     through the provider-timeout path, preserving the typed
                     root cause for supervisor auto-pause. *)
@@ -493,7 +524,9 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                    ();
                  Log.Keeper.error
                    "%s: watchdog terminating fiber (oas_timeout_budget unresolved after idle %.0fs; count=%d; preserving provider timeout root cause) [cascade=%s]"
-                   meta.name stall_seconds count meta.cascade_name
+                   meta.name stall_seconds count meta.cascade_name;
+                 emit_watchdog_broadcast ~failure_reason:(Some failure_reason)
+                   ~stall_seconds
                | _ ->
                (* #10940 follow-up: surface the most recent skip reasons
                   alongside [idle %.0fs] so operators can tell whether
@@ -551,9 +584,12 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                  if in_turn_stale then in_turn_age else now -. last_turn
                in
                let prior_failure_reason = entry.last_failure_reason in
+               let failure_reason =
+                 Keeper_registry.stale_watchdog_failure_reason
+                   ~prior:prior_failure_reason ~kill_class
+               in
                Keeper_registry.set_failure_reason ~base_path meta.name
-                 (Keeper_registry.stale_watchdog_failure_reason
-                    ~prior:prior_failure_reason ~kill_class);
+                 failure_reason;
                let force_released_slots =
                  if in_turn_stale || Option.is_some active_slot_holder_age then
                    Keeper_turn_slot.force_release_stale_holder
@@ -678,31 +714,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                    distinct_count batch_window_sec
                    (String.concat ", " batch) root_cause_label
                end;
-               (try
-                  Keeper_execution_receipt.emit_stale_keeper_broadcast
-                    ctx.config
-                    ~keeper_name:meta.name
-                    ~agent_name:meta.agent_name
-                    ~cascade_name:
-                      (Keeper_execution_receipt.cascade_name_of_string
-                         meta.cascade_name)
-                    ~trace_id:
-                      (Keeper_id.Trace_id.to_string
-                         entry.meta.runtime.trace_id)
-                    ~generation:entry.meta.runtime.generation
-                    ~stale_seconds:stall_seconds
-                    ~last_turn_ts:last_turn;
-                  last_broadcast_ts := now
-                with
-                | Eio.Cancel.Cancelled _ as e -> raise e
-                | exn ->
-                  Prometheus.inc_counter
-                    Prometheus.metric_keeper_stale_broadcast_emit_failures
-                    ~labels:[("keeper", meta.name)]
-                    ();
-                  Log.Keeper.warn
-                    "%s: stale broadcast emit failed (restart still triggered): %s"
-                    meta.name (Printexc.to_string exn))
+               emit_watchdog_broadcast ~failure_reason ~stall_seconds
              end
            | None ->
              Log.Keeper.warn "%s: watchdog: registry entry NOT FOUND" meta.name

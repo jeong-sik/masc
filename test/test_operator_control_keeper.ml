@@ -43,6 +43,21 @@ let read_file path =
   Fun.protect ~finally:(fun () -> close_in ic) @@ fun () ->
   really_input_string ic (in_channel_length ic)
 
+let process_status_to_string = function
+  | Unix.WEXITED code -> Printf.sprintf "exit %d" code
+  | Unix.WSIGNALED signal -> Printf.sprintf "signal %d" signal
+  | Unix.WSTOPPED signal -> Printf.sprintf "stopped %d" signal
+
+let run_git_exn repo args =
+  match
+    Process_eio.run_argv_with_status ~timeout_sec:5.0
+      ("git" :: "-C" :: repo :: args)
+  with
+  | Unix.WEXITED 0, out -> String.trim out
+  | status, out ->
+      Alcotest.failf "git -C %s %s failed (%s): %s" repo
+        (String.concat " " args) (process_status_to_string status) out
+
 let count_log_lines_with_prefix log prefix =
   log
   |> String.split_on_char '\n'
@@ -452,6 +467,123 @@ let test_keeper_sandbox_status_clarifies_visible_container_gap () =
            "only when you need a visible prewarmed container");
       Alcotest.(check bool) "recommendation mentions repo readiness" true
         (contains_substring recommendation "playground_repos"))
+
+let test_playground_repo_status_refreshes_cached_git_metadata () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "sandbox-git-status" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Inspect live git metadata");
+                ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      Keeper_keepalive.stop_keepalive keeper_name;
+      let meta = read_keeper_meta_exn config keeper_name in
+      let playground_abs =
+        Keeper_sandbox.host_root_abs_of_meta ~config meta
+      in
+      let repo_name = "live-repo" in
+      let repo_path =
+        Filename.concat playground_abs (Filename.concat "repos" repo_name)
+      in
+      ensure_dir repo_path;
+      ignore (run_git_exn repo_path [ "init"; "-q" ] : string);
+      ignore
+        (run_git_exn repo_path
+           [ "config"; "user.email"; "keeper-test@example.invalid" ]
+          : string);
+      ignore
+        (run_git_exn repo_path
+           [ "config"; "user.name"; "Keeper Status Test" ]
+          : string);
+      write_file (Filename.concat repo_path "README.md") "initial\n";
+      ignore (run_git_exn repo_path [ "add"; "README.md" ] : string);
+      ignore (run_git_exn repo_path [ "commit"; "-q"; "-m"; "initial" ] : string);
+      let live_branch =
+        run_git_exn repo_path [ "rev-parse"; "--abbrev-ref"; "HEAD" ]
+      in
+      let live_commit = run_git_exn repo_path [ "log"; "--oneline"; "-1" ] in
+      write_file
+        (Filename.concat playground_abs ".playground_state.json")
+        (Printf.sprintf
+           {|{"repos":[{"name":%S,"branch":"stale-branch","latest_commit":"stale-commit","shallow":true,"last_action":"clone"},{"name":"../outside","branch":"bad-cache"}],"last_updated":"1"}|}
+           repo_name);
+      let open Yojson.Safe.Util in
+      let status_repos =
+        Keeper_sandbox_control.playground_repos_json ~config ~meta
+        |> to_list
+      in
+      let repo =
+        match
+          List.find_opt
+            (fun repo ->
+              String.equal
+                (repo |> member "name" |> to_string)
+                repo_name)
+            status_repos
+        with
+        | Some repo -> repo
+        | None -> Alcotest.fail "live repo missing from playground status"
+      in
+      Alcotest.(check string) "repo path" "repos/live-repo"
+        (repo |> member "path" |> to_string);
+      Alcotest.(check string) "repo source" "git"
+        (repo |> member "source" |> to_string);
+      Alcotest.(check string) "branch refreshed from git" live_branch
+        (repo |> member "branch" |> to_string);
+      Alcotest.(check string) "commit refreshed from git" live_commit
+        (repo |> member "latest_commit" |> to_string);
+      Alcotest.(check bool) "shallow refreshed from git" false
+        (repo |> member "shallow" |> to_bool);
+      Alcotest.(check string) "cache context preserved" "clone"
+        (repo |> member "last_action" |> to_string);
+      Alcotest.(check bool) "status is observed live" true
+        (repo |> member "observed_at" |> to_string |> contains_substring "T");
+      Alcotest.(check bool) "unix observation timestamp is numeric" true
+        (match repo |> member "observed_at_unix" with
+         | `Float _ | `Int _ -> true
+         | _ -> false);
+      let invalid_repo =
+        List.find_opt
+          (fun repo ->
+            String.equal (repo |> member "name" |> to_string) "../outside")
+          status_repos
+      in
+      match invalid_repo with
+      | Some repo ->
+          let source = repo |> member "source" in
+          let path = repo |> member "path" in
+          Alcotest.(check bool) "invalid cached repo not git-enriched" true
+            (source = `Null && path = `Null)
+      | None -> ())
 
 let test_keeper_sandbox_status_fleet_includes_persisted_keeper () =
   Eio_main.run @@ fun env ->

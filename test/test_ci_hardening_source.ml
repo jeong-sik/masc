@@ -1095,10 +1095,10 @@ let test_keeper_required_tool_contracts () =
   check bool "docker PR lifecycle harness default matches runbook" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       {|REQUIRED_TOOLS="${REQUIRED_TOOLS:-keeper_bash,keeper_pr_create,keeper_pr_review_comment}"|});
+       {|REQUIRED_TOOLS="${REQUIRED_TOOLS:-keeper_shell,keeper_bash,masc_code_git,keeper_pr_create,keeper_pr_review_comment}"|});
   check bool "runbook documents docker PR lifecycle required tool default" true
     (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-       "`keeper_bash`, `keeper_pr_create`, and `keeper_pr_review_comment`")
+       "`keeper_shell`, `keeper_bash`, `masc_code_git`, `keeper_pr_create`, and")
 
 let test_board_flusher_start_retry_contracts () =
   check bool "board flusher start has bounded CAS retry count" true

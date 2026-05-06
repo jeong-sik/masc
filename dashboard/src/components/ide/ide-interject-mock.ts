@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
+import type { FunctionComponent } from 'preact'
 import { dispatchKeeperInterjectAction } from '../../keeper-actions'
 import { activeKeeperName } from '../../keeper-state'
 import {
@@ -9,8 +10,8 @@ import {
 } from './interject-store'
 
 // The input and button states flow through the same store/dispatch boundary
-// that live active-keeper wiring uses. Send remains disabled until the global
-// keeper selection signal resolves to a concrete keeper.
+// that live active-keeper wiring uses. Send remains disabled until a concrete
+// keeper resolves, preferring the route-scoped keeper over the global signal.
 
 async function dispatchInterject(request: InterjectDispatchRequest): Promise<void> {
   await dispatchKeeperInterjectAction({
@@ -20,18 +21,30 @@ async function dispatchInterject(request: InterjectDispatchRequest): Promise<voi
   })
 }
 
-export function IdeInterjectMock() {
-  const interjectStore = useMemo(() =>
+interface IdeInterjectMockProps {
+  readonly keeperName?: string | null
+}
+
+function resolveActiveKeeper(keeperName?: string | null): string {
+  const routeKeeper = keeperName?.trim()
+  return routeKeeper || activeKeeperName.value
+}
+
+export const IdeInterjectMock: FunctionComponent<IdeInterjectMockProps> = ({ keeperName = null }) => {
+  const [interjectStore] = useState(() =>
     createInterjectStore({
-      initialActiveKeeper: activeKeeperName.value,
+      initialActiveKeeper: resolveActiveKeeper(keeperName),
       dispatch: dispatchInterject,
-    }), [])
+    }))
   const [, forceRender] = useState(0)
 
   useEffect(() => interjectStore.subscribe(() => forceRender(tick => tick + 1)), [interjectStore])
   useEffect(() => activeKeeperName.subscribe(name => {
-    interjectStore.setActiveKeeper(name)
-  }), [interjectStore])
+    interjectStore.setActiveKeeper(keeperName?.trim() || name)
+  }), [interjectStore, keeperName])
+  useEffect(() => {
+    interjectStore.setActiveKeeper(resolveActiveKeeper(keeperName))
+  }, [interjectStore, keeperName])
 
   const snapshot = interjectStore.snapshot()
   const actions = interjectStore.actions()

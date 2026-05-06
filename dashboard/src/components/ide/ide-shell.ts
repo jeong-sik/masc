@@ -233,7 +233,7 @@ export function IdeShell() {
       ${terminalOpen
         ? html`<${KeeperShellDrawer} keeperName=${terminalKeeper} />`
         : null}
-      <${IdeInterjectMock} />
+      <${IdeInterjectMock} keeperName=${terminalKeeper} />
     </section>
   `
 }

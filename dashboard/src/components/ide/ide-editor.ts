@@ -27,7 +27,7 @@ import { KeeperBadge } from '../keeper-badge'
 
 // ── Types ─────────────────────────────────────────────────────────
 
-const IDE_LAYER_ORDER = ['time', 'parallel', 'tools', 'approve', 'notes', 'cascade', 'explode'] as const
+const IDE_LAYER_ORDER = ['time', 'parallel', 'tools', 'approve', 'notes', 'cascade', 'keeper-trace', 'explode'] as const
 type IdeLayerKind = (typeof IDE_LAYER_ORDER)[number]
 
 export type IdeEditorView = 'source' | 'split-diff' | 'unified' | 'blame'
@@ -677,6 +677,7 @@ const LAYER_LABEL: Record<IdeLayerKind, string> = {
   approve: 'Approve',
   notes: 'Notes',
   cascade: 'Cascade',
+  'keeper-trace': 'Trace',
   explode: 'EXPLODE',
 }
 
@@ -691,6 +692,7 @@ function layerSummary(kind: IdeLayerKind, latestEdit: number | null, keepers: Re
   if (kind === 'approve') return '0 approval'
   if (kind === 'notes') return '0 note'
   if (kind === 'cascade') return '0 hits'
+  if (kind === 'keeper-trace') return 'stitched trace'
   if (kind === 'explode') return 'exclusive ghost view'
   return ''
 }

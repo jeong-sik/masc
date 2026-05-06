@@ -66,8 +66,8 @@ class GoalLoopObserveMetricsValidatorTest(unittest.TestCase):
         report = load_current_report()
 
         self.assertEqual("PASS", report.status)
-        self.assertEqual(16, report.checked_signals)
-        self.assertEqual(16, report.passing_signals)
+        self.assertEqual(17, report.checked_signals)
+        self.assertEqual(17, report.passing_signals)
         self.assertEqual(0, report.failing_signals)
 
     def test_contract_pins_starvation_rate_signal(self) -> None:
@@ -75,8 +75,7 @@ class GoalLoopObserveMetricsValidatorTest(unittest.TestCase):
             str(CONTRACT_PATH)
         )
         signals = {
-            signal["signal_id"]: signal
-            for signal in contract["required_signals"]
+            signal["signal_id"]: signal for signal in contract["required_signals"]
         }
 
         starvation_rate = signals["starvation_rate"]
@@ -90,6 +89,34 @@ class GoalLoopObserveMetricsValidatorTest(unittest.TestCase):
         self.assertEqual(
             ["GoalLoopKeeperStarvationRateCritical"],
             starvation_rate["alert_names"],
+        )
+
+    def test_contract_pins_goal_attainment_signal(self) -> None:
+        contract = validate_goal_loop_observe_metrics.load_json_object(
+            str(CONTRACT_PATH)
+        )
+        signals = {
+            signal["signal_id"]: signal for signal in contract["required_signals"]
+        }
+
+        goal_attainment = signals["goal_attainment"]
+        self.assertEqual(
+            [
+                "masc_goal_attainment_pct",
+                "masc_goal_attainment_measured",
+            ],
+            goal_attainment["metric_names"],
+        )
+        self.assertEqual(
+            ["GoalLoopGoalAttainmentUnmeasuredOrInvalidWarning"],
+            goal_attainment["alert_names"],
+        )
+        self.assertEqual(
+            [
+                "masc_goal_attainment_pct",
+                "masc_goal_attainment_measured",
+            ],
+            goal_attainment["dashboard_query_fragments"],
         )
 
     def test_cli_require_complete_passes(self) -> None:

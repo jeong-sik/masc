@@ -30,6 +30,8 @@ groups:
           or absent(masc_pricing_catalog_miss_total)
           or absent(masc_dashboard_metric_all_zeros)
           or absent(masc_dashboard_snapshot_latency_seconds_bucket)
+          or absent(masc_goal_attainment_pct)
+          or absent(masc_goal_attainment_measured)
           or absent(masc_config_unknown_keys_ignored_total)
           or absent(masc_config_credential_archived_starvation_total)
           or absent(masc_governance_judge_unparseable_total)
@@ -231,6 +233,35 @@ groups:
           description: |
             Observe dashboards are stale enough that Orient decisions may
             run against delayed state.
+
+  - name: masc_goal_loop_observe_goals
+    interval: 30s
+    rules:
+      - alert: GoalLoopGoalAttainmentUnmeasuredOrInvalidWarning
+        expr: |
+          (
+            min by (goal_id) (masc_goal_attainment_measured) == 0
+          )
+          or
+          (
+            min by (goal_id) (masc_goal_attainment_pct) < 0
+          )
+          or
+          (
+            max by (goal_id) (masc_goal_attainment_pct) > 100
+          )
+        for: 10m
+        labels:
+          severity: warning
+          component: goal_loop
+          subsystem: observe
+        annotations:
+          summary: "Goal {{ $labels.goal_id }} attainment is unmeasured or invalid"
+          description: |
+            The goal loop dashboard exported a goal without a measured
+            attainment percentage, or with an out-of-range attainment
+            percentage. Treat 0% as unknown until
+            masc_goal_attainment_measured returns to 1 for this goal.
 
   - name: masc_goal_loop_observe_config
     interval: 30s

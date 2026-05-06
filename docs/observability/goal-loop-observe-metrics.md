@@ -33,6 +33,7 @@ now contract checked.
 | pricing catalog miss | `masc_pricing_catalog_miss_total` | `GoalLoopPricingCatalogMissCritical` |
 | dashboard all-zero metrics | `masc_dashboard_metric_all_zeros` | `GoalLoopDashboardMetricAllZerosWarning` |
 | dashboard snapshot latency | `masc_dashboard_snapshot_latency_seconds_bucket` | `GoalLoopDashboardSnapshotLatencyP99Warning` |
+| goal attainment | `masc_goal_attainment_pct`, `masc_goal_attainment_measured` | `GoalLoopGoalAttainmentUnmeasuredOrInvalidWarning` |
 | config unknown keys ignored | `masc_config_unknown_keys_ignored_total` | `GoalLoopConfigUnknownKeysIgnoredWarning` |
 | credential archived by starvation | `masc_config_credential_archived_starvation_total` | `GoalLoopCredentialArchivedStarvationCritical` |
 | governance judge unparseable | `masc_governance_judge_unparseable_total` | `GoalLoopGovernanceJudgeUnparseableWarning` |
@@ -57,8 +58,8 @@ Expected result:
 
 ```text
 GOAL LOOP Observe Metrics Contract: PASS
-checked_signals: 16
-passing_signals: 16
+checked_signals: 17
+passing_signals: 17
 failing_signals: 0
 ```
 
@@ -84,6 +85,7 @@ The contract uses bounded labels from the prompt:
 - `profile_name`
 - `model_id`
 - `file_path`
+- `goal_id`
 
 Counters should increment on the exact failure event. Gauges should hold
 the current runtime state. Histograms must expose Prometheus `_bucket`

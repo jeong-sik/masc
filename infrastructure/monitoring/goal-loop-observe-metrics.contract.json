@@ -143,6 +143,26 @@
       ]
     },
     {
+      "signal_id": "goal_attainment",
+      "metric_names": [
+        "masc_goal_attainment_pct",
+        "masc_goal_attainment_measured"
+      ],
+      "alert_names": [
+        "GoalLoopGoalAttainmentUnmeasuredOrInvalidWarning"
+      ],
+      "threshold_fragments": [
+        "min by (goal_id)",
+        "== 0",
+        "< 0",
+        "> 100"
+      ],
+      "dashboard_query_fragments": [
+        "masc_goal_attainment_pct",
+        "masc_goal_attainment_measured"
+      ]
+    },
+    {
       "signal_id": "config_unknown_keys_ignored",
       "metric_names": [
         "masc_config_unknown_keys_ignored_total"

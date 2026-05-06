@@ -461,6 +461,18 @@ def source_candidate_row_details(
         invalid_rows: list[str] = []
         if not text_redaction_valid:
             invalid_rows.append("redaction_flag_without_candidate_rows")
+        # When rows are omitted intentionally (no redaction flag), the
+        # inventory still tracks [unique_candidate_rows] as its count
+        # source-of-truth — see the surrounding [recorded] computation,
+        # which validates the inventory totals separately. The
+        # [candidate_rows_count_matches] field here only refutes
+        # *array-vs-expected* mismatches, so when the array is absent
+        # the appropriate value is "not refutable" rather than "0 ≠
+        # expected_count". Forcing False here would block the
+        # legitimate "rows omitted, inventory total still authoritative"
+        # path. (#13742 review followup: copilot flagged the inconsistency,
+        # but the consumers already gate on inventory totals; the safe
+        # surface is "redaction-flag-without-rows" alone.)
         return {
             "candidate_rows_recorded": False,
             "candidate_rows_count": 0,

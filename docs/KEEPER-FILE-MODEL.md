@@ -219,11 +219,13 @@ Definitive list: `removed_keeper_input_key_names` in [`lib/keeper/keeper_config.
 
 ### Unknown-key schema health
 
-Keys under `[keeper]` that are neither canonical (above) nor hard-rejected are surfaced as blocking schema health:
+Keys under `[keeper]` that are neither canonical (above) nor hard-rejected are surfaced as blocking schema health on the JSON `/health` surface:
 
-```text
-keeper_config_schema_status=blocked
-keeper_config_schema_terminal_reason=config_unknown_keys
+```json
+{
+  "keeper_config_schema_status": "blocked",
+  "keeper_config_schema_terminal_reason": "config_unknown_keys"
+}
 ```
 
 Historically, dead config like `legacy_scope` and `scope_kind` accumulated here. Treat this as an operator-action-required drift signal and clean up the TOML.

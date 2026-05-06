@@ -1281,6 +1281,36 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
             "source_paths_must_be_logical_prompt_corpus_paths", report["errors"]
         )
 
+    def test_validate_strict_row_corpus_cli_rejects_source_row_inventory(
+        self,
+    ) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(VALIDATE_STRICT_CORPUS_SCRIPT_PATH),
+                str(FIXTURE_DIR / "source-row-candidate-inventory.external-claim.json"),
+                "--audit-catalog",
+                str(FIXTURE_DIR / "audit-corpus.external-claim.json"),
+                "--require-valid",
+                "--format",
+                "json",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1)
+        report = json.loads(result.stdout)
+        self.assertFalse(report["validated"])
+        self.assertEqual(report["corpus_status"], "INCOMPLETE")
+        self.assertEqual(report["row_count"], 0)
+        self.assertIn("corpus_id_missing", report["errors"])
+        self.assertIn("findings_must_be_list", report["errors"])
+        self.assertIn("findings_count_mismatch", report["errors"])
+        self.assertIn("status_must_be_COMPLETE", report["errors"])
+
     def test_decide_prioritizes_p0_actions_from_orient_json(self) -> None:
         report = decide_goal_loop_findings.decide_orient(
             {

@@ -159,7 +159,10 @@ shape. It must report `strict_row_corpus: VALID rows=206 expected=206
 errors=0` before the corpus can be useful in the full Orient replay below.
 When `--audit-catalog` is supplied, every row source path must also match one
 of the catalog `external_sources`, and every row line ref must be within that
-source line count when the manifest records one.
+source line count when the manifest records one. The explicit source-row
+candidate inventory is not a strict corpus; if supplied to this command it must
+fail because it is `INCOMPLETE` and does not contain a top-level `findings`
+array.
 
 ```bash
 python3 scripts/orient_goal_loop_logs.py \

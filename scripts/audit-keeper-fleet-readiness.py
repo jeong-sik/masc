@@ -113,7 +113,7 @@ class KeeperAudit:
 
 
 def load_json(path: Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as handle:
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
         data = json.load(handle)
     if not isinstance(data, dict):
         raise ValueError(f"{path}: expected JSON object")

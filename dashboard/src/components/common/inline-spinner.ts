@@ -16,8 +16,19 @@
 
 import { html } from 'htm/preact'
 
-type InlineSpinnerSize = 'xs' | 'sm' | 'md'
-type InlineSpinnerTone = 'accent' | 'muted'
+export type InlineSpinnerSize = 'xs' | 'sm' | 'md'
+export type InlineSpinnerTone = 'accent' | 'muted'
+
+export interface InlineSpinnerSummary {
+  readonly size: InlineSpinnerSize
+  readonly tone: InlineSpinnerTone
+  readonly hasSemanticLabel: boolean
+  readonly hasCustomClass: boolean
+  readonly hasTestId: boolean
+  readonly ariaLabelLength: number
+  readonly classNameLength: number
+  readonly testIdLength: number
+}
 
 /** Pure: Tailwind size tokens for each variant. Exposed so a hot-path
     render (timeline rows, log tail, iterating progress lists) can
@@ -54,11 +65,42 @@ export function inlineSpinnerClasses(
   return parts.join(' ')
 }
 
-interface InlineSpinnerProps {
+export function normalizeInlineSpinnerAriaLabel(ariaLabel?: string): string | undefined {
+  const normalized = ariaLabel?.trim()
+  return normalized === undefined || normalized === '' ? undefined : normalized
+}
+
+export function summarizeInlineSpinner({
+  size = 'sm',
+  tone = 'accent',
+  className,
+  ariaLabel,
+  testId,
+}: {
+  size?: InlineSpinnerSize
+  tone?: InlineSpinnerTone
+  className?: string
+  ariaLabel?: string
+  testId?: string
+}): InlineSpinnerSummary {
+  const normalizedAriaLabel = normalizeInlineSpinnerAriaLabel(ariaLabel)
+  return {
+    size,
+    tone,
+    hasSemanticLabel: normalizedAriaLabel !== undefined,
+    hasCustomClass: className !== undefined && className !== '',
+    hasTestId: testId !== undefined && testId !== '',
+    ariaLabelLength: normalizedAriaLabel?.length ?? 0,
+    classNameLength: className?.length ?? 0,
+    testIdLength: testId?.length ?? 0,
+  }
+}
+
+export interface InlineSpinnerProps {
   size?: InlineSpinnerSize
   tone?: InlineSpinnerTone
   class?: string
-  /** Override the decorative default. Setting this flips to role=\"status\"
+  /** Override the decorative default. Setting a non-empty label flips to role=\"status\"
       (screen-reader announces the loading state) instead of
       aria-hidden. Use when the spinner is the ONLY indication of
       progress — otherwise a nearby text label already carries it. */
@@ -73,16 +115,29 @@ export function InlineSpinner({
   ariaLabel,
   testId,
 }: InlineSpinnerProps) {
+  const summary = summarizeInlineSpinner({
+    size,
+    tone,
+    className: cx,
+    ariaLabel,
+    testId,
+  })
+  const normalizedAriaLabel = normalizeInlineSpinnerAriaLabel(ariaLabel)
   const cls = inlineSpinnerClasses(size, tone, cx)
-  const semantic = ariaLabel !== undefined
   return html`<span
     class=${cls}
-    role=${semantic ? 'status' : undefined}
-    aria-label=${ariaLabel}
-    aria-hidden=${semantic ? undefined : 'true'}
+    role=${summary.hasSemanticLabel ? 'status' : undefined}
+    aria-label=${normalizedAriaLabel}
+    aria-hidden=${summary.hasSemanticLabel ? undefined : 'true'}
     data-inline-spinner
-    data-inline-spinner-size=${size}
-    data-inline-spinner-tone=${tone}
+    data-inline-spinner-size=${summary.size}
+    data-inline-spinner-tone=${summary.tone}
+    data-inline-spinner-has-semantic-label=${summary.hasSemanticLabel}
+    data-inline-spinner-has-custom-class=${summary.hasCustomClass}
+    data-inline-spinner-has-test-id=${summary.hasTestId}
+    data-inline-spinner-aria-label-length=${summary.ariaLabelLength}
+    data-inline-spinner-class-length=${summary.classNameLength}
+    data-inline-spinner-test-id-length=${summary.testIdLength}
     data-testid=${testId}
   ></span>`
 }

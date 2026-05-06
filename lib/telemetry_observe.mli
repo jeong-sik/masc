@@ -18,8 +18,9 @@ val observe_or_fail :
   ('a, string) result
 (** [observe_or_fail ~kind f] runs [f ()] and returns its [Ok]
     result.  On any exception other than [Eio.Cancel.Cancelled],
-    emits a structured warn log tagged with [kind] (and
-    [keeper_name] if supplied) and returns [Error msg].
+    increments [masc_telemetry_observe_failures_total{kind}], emits
+    a structured warn log tagged with [kind] (and [keeper_name] if
+    supplied), and returns [Error msg].
 
     [Cancelled] is re-raised so cooperative-cancel semantics are
     preserved — Step 5 (Cancelled swallow removal) depends on this. *)
@@ -44,6 +45,6 @@ val observe_or_default :
   'a
 (** [observe_or_default ~kind ~default f] runs [f ()] and returns
     its result, or [default] on exception while emitting a
-    structured log.  For call sites that genuinely need a
-    value-returning silent fall-back but want the failure surfaced
-    in observability. *)
+    structured log and incrementing the failure counter.  For call
+    sites that genuinely need a value-returning silent fall-back but
+    want the failure surfaced in observability. *)

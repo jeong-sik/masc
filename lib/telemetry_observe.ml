@@ -4,6 +4,8 @@ let observe_or_fail ~kind ?keeper_name f =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
       let msg = Printexc.to_string exn in
+      Prometheus.inc_counter Prometheus.metric_telemetry_observe_failures
+        ~labels:[("kind", kind)] ();
       Log.Backend.warn ?keeper_name
         "[telemetry_observe] kind=%s caught exception: %s"
         kind msg;

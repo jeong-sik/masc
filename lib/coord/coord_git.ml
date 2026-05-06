@@ -245,7 +245,7 @@ let create ~base_path ~agent_name ~task_id ~base_branch : string masc_result =
               if exit_code = 0 then
                 Ok
                   (Printf.sprintf
-                     "Worktree created:\n  Path: %s\n  Branch: %s%s\n\nNext: cd %s && work && gh pr create --draft"
+                     "Worktree created:\n  Path: %s\n  Branch: %s%s\n\nNext: cd %s && work, then use keeper_pr_create draft=true"
                      worktree_path branch_name note worktree_path)
               else Error (System (System_error.IoError (Printf.sprintf "Failed to create worktree from origin/%s." resolved_base))))
 

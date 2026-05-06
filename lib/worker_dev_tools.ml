@@ -525,7 +525,7 @@ let rec skip_git_global_options = function
     a sandboxed cwd by default, but explicit cwd overrides still need this
     guard. Redirect checkout/switch/branch mutations to an explicit worktree
     flow: create the worktree first, then use keeper_bash for git add/commit/
-    push and keeper_shell op=gh for the draft PR.
+    push and keeper_pr_create for the draft PR.
 
     Handles tab-separated tokens, global git options like [-C dir], and real
     branch mutation forms (create, rename, copy). Allows read-only listing. *)

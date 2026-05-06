@@ -151,7 +151,7 @@ let tools_for_gated_affordance = function
       "masc_transition" ]
   | Work_discovery ->
     [ "keeper_task_claim"; "masc_claim_next";
-      "keeper_board_post"; "masc_add_task";
+      "keeper_board_post"; "keeper_task_create"; "masc_add_task";
       "keeper_tasks_audit" ]
   | Inspect_worktree_delta ->
     [ "keeper_shell"; "keeper_bash"; "masc_code_git";
@@ -362,6 +362,7 @@ let tool_search_alias_entries =
   ; "keeper_task_submit_for_verification", "태스크 검증제출 리뷰요청 PR검토"
   ; "keeper_task_force_release", "태스크 강제해제 반환"
   ; "keeper_task_force_done", "태스크 강제완료"
+  ; "keeper_pr_create", "pr create pull request github draft 생성 풀리퀘스트 열기"
   ; "keeper_pr_review_read", "pr review pull request github diff comments reviews 읽기 검토"
   ; "keeper_pr_review_comment", "pr review pull request github comment approve request_changes 코멘트 승인 변경요청"
   ; "keeper_pr_review_reply", "pr review pull request github reply inline comment 답글 리뷰댓글"

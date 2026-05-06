@@ -337,18 +337,19 @@ let clear_agent_current_task_cache config ~task_id =
                | Ok agent when agent.current_task = Some task_id ->
                  let status =
                    match agent.status with
-                   | Inactive -> Inactive
-                   | Active | Busy | Listening -> Active
+                   | Masc_domain.Inactive -> Masc_domain.Inactive
+                   | Masc_domain.Active | Masc_domain.Busy | Masc_domain.Listening ->
+                     Masc_domain.Active
                  in
                  let updated =
                    {
                      agent with
                      status;
                      current_task = None;
-                     last_seen = now_iso ();
+                     last_seen = Masc_domain.now_iso ();
                    }
                  in
-                 write_json config path (agent_to_yojson updated);
+                 write_json config path (Masc_domain.agent_to_yojson updated);
                  log_event
                    config
                    (`Assoc
@@ -356,7 +357,7 @@ let clear_agent_current_task_cache config ~task_id =
                         ("type", `String "agent_current_task_cache_cleared");
                         ("agent", `String agent.name);
                         ("stale_task", `String task_id);
-                        ("ts", `String (now_iso ()));
+                        ("ts", `String (Masc_domain.now_iso ()));
                       ])
                | Ok _ -> ()
                | Error msg ->

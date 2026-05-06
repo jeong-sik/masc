@@ -1849,7 +1849,11 @@ let test_prompt_includes_operational_tool_guidance () =
   check bool "mentions worktree inspection guidance" true
     (contains_substring sys "masc_code_read");
   check bool "mentions server-managed heartbeat" true
-    (contains_substring sys "Heartbeat is server-managed")
+    (contains_substring sys "Heartbeat is server-managed");
+  check bool "mentions draft PR broker" true
+    (contains_substring sys "keeper_pr_create draft=true");
+  check bool "raw gh PR creation not documented" false
+    (contains_substring sys "open draft PRs after pushing")
 
 let test_prompt_includes_research_evidence_contract () =
   let sys, _user =
@@ -1877,7 +1881,9 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
     (contains_substring prompt "default coding workspace");
   check bool "git path documented via keeper_bash" true
     (contains_substring prompt "keeper_bash cmd='git status'");
-  check bool "gh pr create path documented" true
+  check bool "draft pr tool documented" true
+    (contains_substring prompt "keeper_pr_create");
+  check bool "gh pr create path not documented" false
     (contains_substring prompt "keeper_shell op=gh cmd='pr create --draft");
   check bool "legacy pr workflow removed from prompt" false
     (contains_substring prompt "keeper_pr_workflow")
@@ -7348,7 +7354,10 @@ let test_tools_for_gated_affordance_covers_each_variant () =
     "generic board affordance has no forced specific tool"
     []
     (Surface.preferred_tool_names_for_turn_affordances
-       [ "board_post_or_comment" ])
+       [ "board_post_or_comment" ]);
+  check bool "work discovery includes keeper-native task creation" true
+    (List.mem "keeper_task_create"
+       (Surface.tools_for_gated_affordance Surface.Work_discovery))
 
 let test_preferred_tool_choice_for_required_turn_claims_first () =
   let module Surface = Masc_mcp.Keeper_agent_tool_surface in

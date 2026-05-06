@@ -53,9 +53,9 @@ let make_meta ?(name = "alpha") () =
   | Ok meta -> meta
   | Error err -> fail ("meta_of_json failed: " ^ err)
 
-let persist_keeper
+let persist_keeper_with_proactive
       config
-      ?(proactive_enabled = true)
+      ~proactive_enabled
       ~name
       ~total_turns
       ~autonomous_action_count
@@ -99,6 +99,9 @@ let persist_keeper
   match KT.write_meta ~force:true config meta with
   | Ok () -> meta
   | Error err -> fail ("write_meta failed: " ^ err)
+
+let persist_keeper config =
+  persist_keeper_with_proactive config ~proactive_enabled:true
 
 let log_tool
       ?(keeper_name = "alpha")
@@ -535,9 +538,10 @@ let test_scheduled_proactive_evidence_uses_enabled_population () =
        ~autonomous_action_count:2 ~autonomous_tool_turn_count:2
        ~board_reactive_turn_count:1 ~proactive_count_total:1);
   ignore
-    (persist_keeper config ~proactive_enabled:false ~name:"beta" ~total_turns:2
-       ~autonomous_action_count:1 ~autonomous_tool_turn_count:1
-       ~board_reactive_turn_count:1 ~proactive_count_total:0);
+    (persist_keeper_with_proactive config ~proactive_enabled:false
+       ~name:"beta" ~total_turns:2 ~autonomous_action_count:1
+       ~autonomous_tool_turn_count:1 ~board_reactive_turn_count:1
+       ~proactive_count_total:0);
   let json =
     Dashboard_keeper_feature_proof.json
       ~config

@@ -437,6 +437,67 @@ let test_nested_runtime_detector_ignores_git_commit_message () =
     (Keeper_shell_docker.command_uses_nested_container_runtime
        "/usr/bin/docker run --rm alpine true")
 
+let test_docker_blocks_raw_gh_pr_create () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_docker_meta "pr-create-block" in
+  let playground =
+    Filename.concat base_path (playground_path_of meta.name)
+  in
+  ensure_dir playground;
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+           [ ("cmd", `String "gh pr create --draft --title proof")
+           ; ("cwd", `String playground)
+           ])
+      ()
+  in
+  match parse_error_field raw with
+  | Some err ->
+      Alcotest.(check string) "direct gh pr create blocked"
+        "gh_pr_create_requires_keeper_pr_create" err
+  | None ->
+      Alcotest.fail ("expected gh pr create error json, got: " ^ raw)
+
+let test_docker_blocks_chained_gh_pr_create () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_docker_meta "pr-create-chain-block" in
+  let playground =
+    Filename.concat base_path (playground_path_of meta.name)
+  in
+  ensure_dir playground;
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+           [ ( "cmd"
+             , `String
+                 "cd repos/masc-mcp && gh pr create --draft --title proof"
+             )
+           ; ("cwd", `String playground)
+           ])
+      ()
+  in
+  match parse_error_field raw with
+  | Some err ->
+      Alcotest.(check string) "chained gh pr create blocked"
+        "gh_pr_create_requires_keeper_pr_create" err
+  | None ->
+      Alcotest.fail ("expected chained gh pr create error json, got: " ^ raw)
+
 let test_docker_missing_seccomp_profile_fails_closed () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
@@ -757,6 +818,10 @@ let () =
         test_docker_blocks_docker_socket_reference;
       Alcotest.test_case "nested runtime detector ignores commit messages" `Quick
         test_nested_runtime_detector_ignores_git_commit_message;
+      Alcotest.test_case "docker blocks raw gh pr create" `Quick
+        test_docker_blocks_raw_gh_pr_create;
+      Alcotest.test_case "docker blocks chained gh pr create" `Quick
+        test_docker_blocks_chained_gh_pr_create;
       Alcotest.test_case "docker missing seccomp fails closed" `Quick
         test_docker_missing_seccomp_profile_fails_closed;
     ]);

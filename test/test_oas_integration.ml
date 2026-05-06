@@ -610,6 +610,54 @@ let test_agent_completed_includes_usage () =
          | _ -> "")
   | Some _ -> Alcotest.fail "expected assoc"
 
+let test_agent_completed_omits_usage_fields_when_success_has_no_usage () =
+  let open Agent_sdk in
+  let resp : Llm_provider.Types.api_response =
+    {
+      id = "msg-no-usage";
+      model = "test-model";
+      stop_reason = EndTurn;
+      content = [];
+      usage = None;
+      telemetry = None;
+    }
+  in
+  let evt =
+    Event_bus.mk_event ~correlation_id:"sess-no-usage" ~run_id:"run-no-usage"
+      (AgentCompleted
+         {
+           agent_name = "no-usage-agent";
+           task_id = "task-no-usage";
+           result = Ok resp;
+           elapsed = 0.25;
+         })
+  in
+  match Oas_event_bridge.native_event_to_json evt with
+  | None -> Alcotest.fail "expected Some for AgentCompleted without usage"
+  | Some (`Assoc fields) ->
+      let payload_fields =
+        match List.assoc_opt "payload" fields with
+        | Some (`Assoc p) -> p
+        | _ -> Alcotest.failf "expected payload assoc"
+      in
+      let absent name =
+        Option.is_none (List.assoc_opt name payload_fields)
+      in
+      Alcotest.(check bool) "success" true
+        (match List.assoc_opt "success" payload_fields with
+         | Some (`Bool v) -> v
+         | _ -> false);
+      Alcotest.(check bool) "usage_reported" false
+        (match List.assoc_opt "usage_reported" payload_fields with
+         | Some (`Bool v) -> v
+         | _ -> true);
+      Alcotest.(check bool) "input_tokens absent" true (absent "input_tokens");
+      Alcotest.(check bool) "output_tokens absent" true
+        (absent "output_tokens");
+      Alcotest.(check bool) "total_tokens absent" true (absent "total_tokens");
+      Alcotest.(check bool) "cost_usd absent" true (absent "cost_usd")
+  | Some _ -> Alcotest.fail "expected assoc"
+
 let test_agent_completed_no_usage_on_error () =
   let open Agent_sdk in
   let evt =
@@ -901,6 +949,9 @@ let () =
         test_oas_event_bridge_broadcast_retry_does_not_duplicate_append;
       Alcotest.test_case "agent_completed includes usage" `Quick
         test_agent_completed_includes_usage;
+      Alcotest.test_case "agent_completed success without usage omits usage fields"
+        `Quick
+        test_agent_completed_omits_usage_fields_when_success_has_no_usage;
       Alcotest.test_case "agent_completed no usage on error" `Quick
         test_agent_completed_no_usage_on_error;
       Alcotest.test_case "oas log bridge adds turn completed summary" `Quick

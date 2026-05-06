@@ -44,7 +44,12 @@ EXPECTED_SERVER_COMMIT="${EXPECTED_SERVER_COMMIT:-}"
 FORBID_GITHUB_IDENTITIES="${FORBID_GITHUB_IDENTITIES:-}"
 SERVER_HEALTH_URL="${SERVER_HEALTH_URL:-}"
 SERVER_COMMIT_ACTUAL=""
+SERVER_STARTED_AT_ACTUAL=""
+SERVER_INCARNATION_ACTUAL=""
 SERVER_HEALTH_CHECK_FILE=""
+SERVER_INCARNATION_LAST_ACTUAL=""
+SERVER_INCARNATION_LAST_REASON=""
+SERVER_INCARNATION_LAST_FILE=""
 
 usage() {
   cat <<'EOF'
@@ -220,32 +225,103 @@ server_health_url() {
 }
 
 assert_expected_server_commit() {
-  if [[ -z "$EXPECTED_SERVER_COMMIT" ]]; then
-    return 0
-  fi
-
-  local health_url health_file actual
-  health_url="$(server_health_url)"
+  local health_file fields actual started incarnation
   health_file="$RAW_DIR/server-health.json"
-  if ! curl -fsS --max-time 5 "$health_url" >"$health_file"; then
-    echo "failed to fetch server health for commit check: $health_url" >&2
+  if ! fields="$(capture_server_incarnation "$health_file")"; then
+    echo "failed to fetch server health for incarnation check: $(server_health_url)" >&2
     exit 1
+  fi
+  IFS=$'\t' read -r actual started incarnation <<<"$fields"
+  SERVER_COMMIT_ACTUAL="$actual"
+  SERVER_STARTED_AT_ACTUAL="$started"
+  SERVER_INCARNATION_ACTUAL="$incarnation"
+  SERVER_HEALTH_CHECK_FILE="$health_file"
+
+  if [[ -n "$EXPECTED_SERVER_COMMIT" \
+      && "$actual" != "$EXPECTED_SERVER_COMMIT" \
+      && "$actual" != "$EXPECTED_SERVER_COMMIT"* \
+      && "$EXPECTED_SERVER_COMMIT" != "$actual"* ]]; then
+    echo "server commit mismatch: expected=$EXPECTED_SERVER_COMMIT actual=$actual url=$(server_health_url)" >&2
+    exit 1
+  fi
+  log "server incarnation verified: commit=$actual started_at=${started:-unknown}"
+}
+
+capture_server_incarnation() {
+  # Exit codes:
+  #   0 - prints "$actual\t$started\t$incarnation"
+  #   1 - HTTP fetch failed (server_health_unavailable, transient)
+  #   2 - HTTP succeeded but build.commit was missing/empty
+  #       (server_health_missing_commit, distinct from "server down")
+  local health_file="$1"
+  local health_url actual started incarnation
+  health_url="$(server_health_url)"
+  if ! curl -fsS --max-time 5 "$health_url" >"$health_file"; then
+    return 1
   fi
 
   actual="$(jq -r '.build.commit // .build_commit // .commit // empty' "$health_file")"
-  SERVER_COMMIT_ACTUAL="$actual"
-  SERVER_HEALTH_CHECK_FILE="$health_file"
+  started="$(jq -r '.build.started_at // .started_at // .startup.started_at // empty' "$health_file")"
   if [[ -z "$actual" ]]; then
-    echo "server health did not expose build.commit: $health_url" >&2
-    exit 1
+    return 2
   fi
-  if [[ "$actual" != "$EXPECTED_SERVER_COMMIT" \
-      && "$actual" != "$EXPECTED_SERVER_COMMIT"* \
-      && "$EXPECTED_SERVER_COMMIT" != "$actual"* ]]; then
-    echo "server commit mismatch: expected=$EXPECTED_SERVER_COMMIT actual=$actual url=$health_url" >&2
-    exit 1
+  incarnation="$actual|$started"
+  printf '%s\t%s\t%s\n' "$actual" "$started" "$incarnation"
+}
+
+assert_server_incarnation_unchanged() {
+  # SERVER_INCARNATION_LAST_REASON is set to one of:
+  #   server_incarnation_changed   - real restart (caller must terminate
+  #                                  polling and record pending as lost)
+  #   server_health_unavailable    - transient HTTP failure (caller should
+  #                                  keep polling; the server may come back
+  #                                  without having restarted)
+  #   server_health_missing_commit - HTTP succeeded but build.commit empty
+  #                                  (poll-side data shape, not a restart)
+  # Capture exit status with rc=$? so callers can preserve the distinction
+  # between "transient" and "real restart" instead of collapsing both into
+  # server_health_unavailable.
+  [[ -n "$SERVER_INCARNATION_ACTUAL" ]] || return 0
+
+  local health_file fields rc actual started incarnation
+  health_file="$RAW_DIR/server-health-poll.json"
+  fields="$(capture_server_incarnation "$health_file")"
+  rc=$?
+  if [[ $rc -ne 0 ]]; then
+    case $rc in
+      2) SERVER_INCARNATION_LAST_REASON="server_health_missing_commit" ;;
+      *) SERVER_INCARNATION_LAST_REASON="server_health_unavailable" ;;
+    esac
+    SERVER_INCARNATION_LAST_FILE="$health_file"
+    SERVER_INCARNATION_LAST_ACTUAL=""
+    return 1
   fi
-  log "server commit verified: expected=$EXPECTED_SERVER_COMMIT actual=$actual"
+  IFS=$'\t' read -r actual started incarnation <<<"$fields"
+  SERVER_INCARNATION_LAST_FILE="$health_file"
+  SERVER_INCARNATION_LAST_ACTUAL="$incarnation"
+  if [[ "$incarnation" != "$SERVER_INCARNATION_ACTUAL" ]]; then
+    SERVER_INCARNATION_LAST_REASON="server_incarnation_changed"
+    return 1
+  fi
+  return 0
+}
+
+record_pending_server_incarnation_loss() {
+  local pending_file="$1"
+  local status="$2"
+  local raw_file="$3"
+  while IFS=$'\t' read -r request_id keeper; do
+    [[ -n "$request_id" ]] || continue
+    jq -nc \
+      --arg keeper "$keeper" \
+      --arg request_id "$request_id" \
+      --arg status "$status" \
+      --arg expected_incarnation "$SERVER_INCARNATION_ACTUAL" \
+      --arg actual_incarnation "$SERVER_INCARNATION_LAST_ACTUAL" \
+      --arg raw_file "$raw_file" \
+      '{keeper:$keeper, request_id:$request_id, status:$status, server_expected_incarnation:$expected_incarnation, server_actual_incarnation:$actual_incarnation, raw_file:$raw_file}' \
+      >>"$RESULTS_FILE"
+  done <"$pending_file"
 }
 
 load_mcp_token() {
@@ -718,11 +794,17 @@ Keeper: $keeper
 
 Goal: produce direct, auditable Docker-backed evidence for PR create, git push, PR review/comment, and PR APPROVE. Use native keeper tools where available; do not use host-local ambient GitHub credentials.
 
+Tool route rules:
+- Use keeper_shell or keeper_bash only for read-only inspection.
+- Do not run git commit, git push, or other mutating git commands through keeper_bash.
+- Use masc_code_git for git commit and git push so the runtime can attach Docker route evidence and avoid write_operation_gated shell denials.
+- Use keeper_pr_create and keeper_pr_review_comment for PR mutation/review actions.
+
 Required proof lane:
 1. Confirm your runtime is sandbox_profile=docker before mutating.
 2. Create a unique proof branch named: keeper/$keeper-docker-pr-proof-$RUN_ID
 3. Make a minimal, non-product proof edit under docs/runtime-proof/keepers/$keeper-$RUN_ID.md.
-4. Commit and git push that branch. The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
+4. Commit and git push that branch with masc_code_git. The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
 5. Create a draft PR for that branch with keeper_pr_create or the native PR-create tool path. Do not mark ready, do not merge, do not add human-approved-ready.
 6. Use keeper_pr_review_read and keeper_pr_review_comment for review evidence. COMMENT is allowed on your own proof PR. APPROVE must target the cross-keeper PR below, not your own PR.
 
@@ -826,6 +908,14 @@ poll_results() {
   jq -r '.request_id + "\t" + .keeper' "$REQUESTS_FILE" >"$pending_file"
 
   while [[ -s "$pending_file" && "$(date +%s)" -lt "$deadline" ]]; do
+    if ! assert_server_incarnation_unchanged; then
+      log "server incarnation changed while polling keeper results: expected=$SERVER_INCARNATION_ACTUAL actual=${SERVER_INCARNATION_LAST_ACTUAL:-unknown}"
+      record_pending_server_incarnation_loss "$pending_file" \
+        "$SERVER_INCARNATION_LAST_REASON" \
+        "$SERVER_INCARNATION_LAST_FILE"
+      : >"$pending_file"
+      break
+    fi
     local next_pending="$RUN_DIR/pending.next"
     : >"$next_pending"
     while IFS=$'\t' read -r request_id keeper; do
@@ -917,6 +1007,8 @@ write_summary() {
     --arg expected_server_commit "$EXPECTED_SERVER_COMMIT" \
     --arg forbid_github_identities "$FORBID_GITHUB_IDENTITIES" \
     --arg server_commit "$SERVER_COMMIT_ACTUAL" \
+    --arg server_started_at "$SERVER_STARTED_AT_ACTUAL" \
+    --arg server_incarnation "$SERVER_INCARNATION_ACTUAL" \
     --arg server_health_file "$SERVER_HEALTH_CHECK_FILE" \
     --arg review_targets_file "$REVIEW_TARGETS_FILE" \
     --arg github_identity_counts_file "$GITHUB_IDENTITY_COUNTS_FILE" \
@@ -936,6 +1028,8 @@ write_summary() {
       expected_server_commit:$expected_server_commit,
       forbid_github_identities:$forbid_github_identities,
       server_commit:$server_commit,
+      server_started_at:$server_started_at,
+      server_incarnation:$server_incarnation,
       server_health_file:$server_health_file,
       review_targets_file:$review_targets_file,
       github_identity_counts_file:$github_identity_counts_file,
@@ -976,7 +1070,9 @@ require_cmd jq
 require_cmd python3
 require_cmd curl
 
-assert_expected_server_commit
+if [[ "$MUTATE" == "1" || -n "$EXPECTED_SERVER_COMMIT" ]]; then
+  assert_expected_server_commit
+fi
 ensure_mcp_session_if_needed
 discover_keepers
 assert_github_identity_pool_for_mutate

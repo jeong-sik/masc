@@ -66,7 +66,7 @@ vi.mock('./common/time-ago', () => ({
   TimeAgo: ({ timestamp }: { timestamp?: string | null }) => h('span', null, timestamp),
 }))
 
-import { GitGraphPanel } from './git-graph-panel'
+import { buildGitGraphContextModel, compactGitGraphPath, GitGraphPanel } from './git-graph-panel'
 import { gitGraphResource, refreshGitGraph } from './git-graph-store'
 import type { GitGraphResponse } from '../api/git-graph'
 
@@ -124,6 +124,63 @@ describe('GitGraphPanel', () => {
     container.remove()
   })
 
+  it('builds compact checkout context from graph snapshot', () => {
+    const graph = makeGraph({
+      repos: [makeRepo({
+        current_branch: 'fix/git-context',
+        head: 'abcdef1234567890',
+        dirty: true,
+        branch_count: 4,
+        commit_count: 12,
+        worktree_count: 2,
+      })],
+      agents: [{
+        id: 'lane-1',
+        label: 'sangsu',
+        branch: 'fix/git-context',
+        worktree_path: '/workspace/masc-mcp/.worktrees/fix-git-context',
+        color: '#d4a14a',
+      }],
+      nodes: [{
+        id: 'branch-1',
+        kind: 'branch',
+        label: 'fix/git-context',
+        repo_id: 'repo-1',
+        agent_id: 'lane-1',
+        color: '#d4a14a',
+        status: 'current',
+        conflict: false,
+        sha: 'abcdef1234567890',
+        branch: 'fix/git-context',
+        detail: null,
+      }],
+      stats: { repo_count: 1, agent_count: 1, branch_count: 4, commit_count: 12, dirty_count: 1, conflict_count: 0 },
+    })
+
+    const model = buildGitGraphContextModel(graph, graph.repos[0]!)
+
+    expect(model.currentBranch).toBe('fix/git-context')
+    expect(model.head).toBe('abcdef1234')
+    expect(model.tone).toBe('dirty')
+    expect(model.statusLabel).toBe('1 dirty worktree')
+    expect(model.lanes[0]?.path).toBe('.worktrees/fix-git-context')
+
+    const fallbackDirtyModel = buildGitGraphContextModel(
+      makeGraph({
+        repos: [makeRepo({ dirty: true })],
+        stats: { repo_count: 1, agent_count: 0, branch_count: 0, commit_count: 0, dirty_count: 0, conflict_count: 0 },
+      }),
+      makeRepo({ dirty: true }),
+    )
+    expect(fallbackDirtyModel.statusLabel).toBe('1 dirty worktree')
+  })
+
+  it('compacts long worktree paths for lane labels', () => {
+    expect(compactGitGraphPath('/workspace/masc-mcp/.worktrees/fix-git-context')).toBe('.worktrees/fix-git-context')
+    expect(compactGitGraphPath('repo')).toBe('repo')
+    expect(compactGitGraphPath('')).toBe('workspace')
+  })
+
   it('renders loading state', () => {
     gitGraphResource.state.value = { data: null, loading: true, error: null }
     render(h(GitGraphPanel, null), container)
@@ -167,6 +224,9 @@ describe('GitGraphPanel', () => {
     expect(container.textContent).toContain('2')
     expect(container.textContent).toContain('Commits')
     expect(container.textContent).toContain('4')
+    expect(container.querySelector('[data-testid="git-graph-context-strip"]')).not.toBeNull()
+    expect(container.textContent).toContain('Current checkout')
+    expect(container.textContent).toContain('main')
   })
 
   it('renders repository selector from configured repositories', async () => {

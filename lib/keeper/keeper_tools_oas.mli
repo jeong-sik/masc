@@ -59,6 +59,14 @@ val transient_mutex_contention_tool_error :
 (** Max chars for the SSE error preview rendered to dashboards. *)
 val sse_error_preview_max_chars : int
 
+(** Extract safe, machine-checkable markers from tool input and normalized
+    output for keeper decision rows. This intentionally records only route /
+    lifecycle classes such as ["via=docker"], ["git push"],
+    ["gh pr create"], and ["event=APPROVE"], not raw command arguments or
+    tool output. *)
+val tool_exec_result_markers :
+  input:Yojson.Safe.t -> output:string -> string list
+
 (** Build the per-tool handler closure used by both internal and
     alias tool entries. The closure dispatches via
     [execute_keeper_tool_call_with_outcome] using [~name] as the

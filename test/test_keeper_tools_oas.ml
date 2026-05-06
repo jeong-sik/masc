@@ -541,6 +541,51 @@ let test_transient_mutex_contention_envelope () =
   check bool "backtrace available" true
     Yojson.Safe.Util.(member "backtrace_available" detail |> to_bool)
 
+let test_result_markers_capture_docker_approve () =
+  let output =
+    Keeper_tools_oas.normalize_tool_result ~success:true
+      {|{"ok":true,"via":"docker","event":"APPROVE"}|}
+  in
+  let markers =
+    Keeper_tools_oas.tool_exec_result_markers
+      ~input:(`Assoc [])
+      ~output
+  in
+  check bool "via marker" true (List.mem "via=docker" markers);
+  check bool "approve marker" true (List.mem "event=APPROVE" markers)
+
+let test_result_markers_keep_git_push_class_only () =
+  let output =
+    Keeper_tools_oas.normalize_tool_result ~success:true
+      {|{"ok":true,"via":"docker"}|}
+  in
+  let markers =
+    Keeper_tools_oas.tool_exec_result_markers
+      ~input:
+        (`Assoc
+          [
+            ("cmd", `String "git push origin feature/secret-proof");
+          ])
+      ~output
+  in
+  check bool "git push class marker" true (List.mem "git push" markers);
+  check bool "via marker" true (List.mem "via=docker" markers);
+  check bool "raw command not persisted as marker" false
+    (List.mem "git push origin feature/secret-proof" markers)
+
+let test_result_markers_capture_pr_create_operation () =
+  let output =
+    Keeper_tools_oas.normalize_tool_result ~success:true
+      {|{"ok":true,"via":"docker","operation":"pr_create"}|}
+  in
+  let markers =
+    Keeper_tools_oas.tool_exec_result_markers
+      ~input:(`Assoc [])
+      ~output
+  in
+  check bool "pr create marker" true (List.mem "gh pr create" markers);
+  check bool "via marker" true (List.mem "via=docker" markers)
+
 (* ── Tool_output_validation tests (memory cap) ──────────────── *)
 
 let test_cap_short_unchanged () =
@@ -596,6 +641,14 @@ let () =
       test_case "failure plain text wraps as error" `Quick test_normalize_failure_plain_text;
       test_case "EDEADLK envelope is recoverable" `Quick
         test_transient_mutex_contention_envelope;
+    ];
+    "result_markers", [
+      test_case "captures docker approve markers" `Quick
+        test_result_markers_capture_docker_approve;
+      test_case "keeps git push class only" `Quick
+        test_result_markers_keep_git_push_class_only;
+      test_case "captures pr create operation" `Quick
+        test_result_markers_capture_pr_create_operation;
     ];
     "research_profile", [
       test_case "has autoresearch tools" `Quick test_research_keeper_has_autoresearch_tools;

@@ -1,4 +1,29 @@
 {
+  "__meta": {
+    "purpose": "MASC GOAL LOOP Observe contract dashboard - imports into Grafana 10+ via File -> Import.",
+    "metrics": [
+      "masc_keeper_turn_completed_total{keeper_name}",
+      "masc_keeper_turn_scheduled_total{keeper_name}",
+      "masc_keeper_semaphore_wait_seconds_bucket{keeper_name,cascade_profile}",
+      "masc_keeper_alive_but_stuck_seconds{keeper_name}",
+      "masc_keeper_alive_but_stuck_threshold_seconds{keeper_name}",
+      "masc_keeper_zombie_loop_detected_total{keeper_name}",
+      "masc_provider_health_probe_skipped_total{provider_name,profile_name}",
+      "masc_provider_actual_health_status{provider_name}",
+      "masc_pricing_catalog_miss_total{model_id}",
+      "masc_dashboard_metric_all_zeros{keeper_name}",
+      "masc_dashboard_snapshot_latency_seconds_bucket",
+      "masc_config_unknown_keys_ignored_total{file_path}",
+      "masc_config_credential_archived_starvation_total{keeper_name}",
+      "masc_governance_judge_unparseable_total",
+      "masc_governance_lenient_json_fallback_hit_total",
+      "masc_persistence_utf8_repair_total",
+      "masc_write_meta_cas_retry_total{keeper_name}"
+    ],
+    "companion_alerts": "infrastructure/monitoring/goal-loop-observe-alerts.yml",
+    "companion_contract": "infrastructure/monitoring/goal-loop-observe-metrics.contract.json",
+    "companion_doc": "docs/observability/goal-loop-observe-metrics.md"
+  },
   "annotations": {
     "list": [
       {
@@ -61,7 +86,32 @@
           "custom": {},
           "unit": "s"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".* stuck ratio"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".* zombie loops"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ops"
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 8,
@@ -97,7 +147,8 @@
       },
       "fieldConfig": {
         "defaults": {
-          "custom": {}
+          "custom": {},
+          "unit": "short"
         },
         "overrides": []
       },
@@ -135,9 +186,23 @@
       },
       "fieldConfig": {
         "defaults": {
-          "custom": {}
+          "custom": {},
+          "unit": "short"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "snapshot p99"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 8,

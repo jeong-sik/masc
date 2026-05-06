@@ -45,12 +45,97 @@ def read_text(path: str) -> str:
 
 
 def alert_names(alert_text: str) -> set[str]:
-    names: set[str] = set()
-    for line in alert_text.splitlines():
-        match = re.match(r"\s*-\s*alert:\s*([A-Za-z0-9_:.-]+)\s*$", line)
-        if match:
-            names.add(match.group(1))
-    return names
+    return set(alert_exprs(alert_text))
+
+
+def alert_exprs(alert_text: str) -> dict[str, str]:
+    exprs: dict[str, str] = {}
+    current_alert: str | None = None
+    lines = alert_text.splitlines()
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        alert_match = re.match(r"\s*-\s*alert:\s*([A-Za-z0-9_:.-]+)\s*$", line)
+        if alert_match:
+            current_alert = alert_match.group(1)
+            exprs.setdefault(current_alert, "")
+            index += 1
+            continue
+
+        expr_match = re.match(r"^(\s*)expr:\s*(.*)\s*$", line)
+        if current_alert and expr_match:
+            expr_indent = len(expr_match.group(1))
+            expr_value = expr_match.group(2).strip()
+            if expr_value and expr_value != "|":
+                exprs[current_alert] = expr_value
+                index += 1
+                continue
+
+            block: list[str] = []
+            index += 1
+            while index < len(lines):
+                block_line = lines[index]
+                block_indent = len(block_line) - len(block_line.lstrip())
+                if block_line.strip() and block_indent <= expr_indent:
+                    break
+                block.append(block_line.strip())
+                index += 1
+            exprs[current_alert] = "\n".join(block)
+            continue
+
+        index += 1
+    return exprs
+
+
+def dashboard_exprs(dashboard_text: str) -> list[str]:
+    data = json.loads(dashboard_text)
+    if not isinstance(data, dict):
+        raise ValueError("dashboard JSON must be an object")
+    exprs: list[str] = []
+
+    def collect(value: Any) -> None:
+        if isinstance(value, dict):
+            expr = value.get("expr")
+            if isinstance(expr, str) and expr.strip():
+                exprs.append(expr)
+            for child in value.values():
+                collect(child)
+        elif isinstance(value, list):
+            for child in value:
+                collect(child)
+
+    collect(data)
+    return exprs
+
+
+def contains_expr_token(expr: str, token: str) -> bool:
+    if not token.strip():
+        return False
+    if re.fullmatch(r"[A-Za-z_:][A-Za-z0-9_:]*", token):
+        return (
+            re.search(rf"(?<![A-Za-z0-9_:]){re.escape(token)}(?![A-Za-z0-9_:])", expr)
+            is not None
+        )
+    return token in expr
+
+
+def any_expr_contains(exprs: list[str], token: str) -> bool:
+    return any(contains_expr_token(expr, token) for expr in exprs)
+
+
+def contract_schema_version(contract: dict[str, Any]) -> int:
+    version = contract.get("schema_version")
+    if not isinstance(version, int):
+        raise ValueError("contract.schema_version must be an integer")
+    if version != 1:
+        raise ValueError(f"unsupported contract.schema_version: {version}")
+    return version
+
+
+def required_alert_exprs(
+    required_alerts: list[str], alert_expr_map: dict[str, str]
+) -> list[str]:
+    return [alert_expr_map[name] for name in required_alerts if name in alert_expr_map]
 
 
 def as_string_list(value: Any) -> list[str]:
@@ -63,15 +148,21 @@ def required_signals(contract: dict[str, Any]) -> list[dict[str, Any]]:
     raw = contract.get("required_signals", [])
     if not isinstance(raw, list):
         raise ValueError("contract.required_signals must be a list")
-    return [item for item in raw if isinstance(item, dict)]
+    if not raw:
+        raise ValueError("contract.required_signals must not be empty")
+    signals: list[dict[str, Any]] = []
+    for index, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise ValueError(f"contract.required_signals[{index}] must be an object")
+        signals.append(item)
+    return signals
 
 
 def validate_signal(
     signal: dict[str, Any],
     *,
-    alerts: set[str],
-    alert_text: str,
-    dashboard_text: str,
+    alert_expr_map: dict[str, str],
+    dashboard_query_exprs: list[str],
 ) -> SignalCheck:
     signal_id = str(signal.get("signal_id", "unknown"))
     metric_names = as_string_list(signal.get("metric_names"))
@@ -80,13 +171,20 @@ def validate_signal(
     dashboard_fragments = as_string_list(
         signal.get("dashboard_query_fragments", metric_names)
     )
-    missing_alerts = [name for name in required_alerts if name not in alerts]
-    missing_alert_metrics = [name for name in metric_names if name not in alert_text]
+    required_exprs = required_alert_exprs(required_alerts, alert_expr_map)
+    missing_alerts = [name for name in required_alerts if name not in alert_expr_map]
+    missing_alert_metrics = [
+        name for name in metric_names if not any_expr_contains(required_exprs, name)
+    ]
     missing_dashboard_metrics = [
-        fragment for fragment in dashboard_fragments if fragment not in dashboard_text
+        fragment
+        for fragment in dashboard_fragments
+        if not any_expr_contains(dashboard_query_exprs, fragment)
     ]
     missing_threshold_fragments = [
-        fragment for fragment in threshold_fragments if fragment not in alert_text
+        fragment
+        for fragment in threshold_fragments
+        if not any_expr_contains(required_exprs, fragment)
     ]
     status = (
         "PASS"
@@ -112,20 +210,21 @@ def validate_contract(
     alert_text: str,
     dashboard_text: str,
 ) -> ValidationReport:
-    alerts = alert_names(alert_text)
+    schema_version = contract_schema_version(contract)
+    alert_expr_map = alert_exprs(alert_text)
+    dashboard_query_exprs = dashboard_exprs(dashboard_text)
     checks = [
         validate_signal(
             signal,
-            alerts=alerts,
-            alert_text=alert_text,
-            dashboard_text=dashboard_text,
+            alert_expr_map=alert_expr_map,
+            dashboard_query_exprs=dashboard_query_exprs,
         )
         for signal in required_signals(contract)
     ]
     passing = sum(1 for check in checks if check.status == "PASS")
     failing = len(checks) - passing
     return ValidationReport(
-        schema_version=1,
+        schema_version=schema_version,
         status="PASS" if failing == 0 else "FAIL",
         checked_signals=len(checks),
         passing_signals=passing,
@@ -179,11 +278,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
-    report = validate_contract(
-        load_json_object(args.contract_json),
-        alert_text=read_text(args.alerts_yml),
-        dashboard_text=read_text(args.dashboard_json),
-    )
+    try:
+        report = validate_contract(
+            load_json_object(args.contract_json),
+            alert_text=read_text(args.alerts_yml),
+            dashboard_text=read_text(args.dashboard_json),
+        )
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     if args.format == "json":
         print(report_to_json(report))
     else:

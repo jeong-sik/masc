@@ -13,6 +13,40 @@
 # zero-only instrumentation must be visible to operators.
 
 groups:
+  - name: masc_goal_loop_observe_contract
+    interval: 30s
+    rules:
+      - alert: GoalLoopObserveMetricAbsentCritical
+        expr: |
+          absent(masc_keeper_turn_completed_total)
+          or absent(masc_keeper_turn_scheduled_total)
+          or absent(masc_keeper_semaphore_wait_seconds_bucket)
+          or absent(masc_keeper_alive_but_stuck_seconds)
+          or absent(masc_keeper_alive_but_stuck_threshold_seconds)
+          or absent(masc_keeper_zombie_loop_detected_total)
+          or absent(masc_provider_health_probe_skipped_total)
+          or absent(masc_provider_actual_health_status)
+          or absent(masc_pricing_catalog_miss_total)
+          or absent(masc_dashboard_metric_all_zeros)
+          or absent(masc_dashboard_snapshot_latency_seconds_bucket)
+          or absent(masc_config_unknown_keys_ignored_total)
+          or absent(masc_config_credential_archived_starvation_total)
+          or absent(masc_governance_judge_unparseable_total)
+          or absent(masc_governance_lenient_json_fallback_hit_total)
+          or absent(masc_persistence_utf8_repair_total)
+          or absent(masc_write_meta_cas_retry_total)
+        for: 5m
+        labels:
+          severity: critical
+          component: goal_loop
+          subsystem: observe
+        annotations:
+          summary: "GOAL LOOP Observe contract metric is absent"
+          description: |
+            At least one metric required by the Observe exporter contract is
+            absent from Prometheus, so downstream alert expressions may be
+            silent even though instrumentation is missing.
+
   - name: masc_goal_loop_observe_keeper
     interval: 30s
     rules:

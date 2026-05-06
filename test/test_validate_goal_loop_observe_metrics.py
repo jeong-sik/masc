@@ -39,14 +39,23 @@ spec.loader.exec_module(validate_goal_loop_observe_metrics)
 
 def load_current_report(
     *,
+    contract: dict[str, object] | None = None,
     alert_text: str | None = None,
     dashboard_text: str | None = None,
 ) -> object:
     return validate_goal_loop_observe_metrics.validate_contract(
-        validate_goal_loop_observe_metrics.load_json_object(str(CONTRACT_PATH)),
-        alert_text=alert_text if alert_text is not None else ALERTS_PATH.read_text(),
+        contract
+        if contract is not None
+        else validate_goal_loop_observe_metrics.load_json_object(str(CONTRACT_PATH)),
+        alert_text=(
+            alert_text
+            if alert_text is not None
+            else ALERTS_PATH.read_text(encoding="utf-8")
+        ),
         dashboard_text=(
-            dashboard_text if dashboard_text is not None else DASHBOARD_PATH.read_text()
+            dashboard_text
+            if dashboard_text is not None
+            else DASHBOARD_PATH.read_text(encoding="utf-8")
         ),
     )
 
@@ -84,7 +93,7 @@ class GoalLoopObserveMetricsValidatorTest(unittest.TestCase):
         self.assertIn("GOAL LOOP Observe Metrics Contract: PASS", result.stdout)
 
     def test_missing_alert_name_fails(self) -> None:
-        alert_text = ALERTS_PATH.read_text().replace(
+        alert_text = ALERTS_PATH.read_text(encoding="utf-8").replace(
             "GoalLoopProviderHealthProbeSkippedWarning",
             "GoalLoopProviderHealthProbeSkippedMissing",
         )
@@ -104,7 +113,7 @@ class GoalLoopObserveMetricsValidatorTest(unittest.TestCase):
         )
 
     def test_missing_alert_metric_fails(self) -> None:
-        alert_text = ALERTS_PATH.read_text().replace(
+        alert_text = ALERTS_PATH.read_text(encoding="utf-8").replace(
             "masc_pricing_catalog_miss_total",
             "masc_pricing_catalog_missing_total",
         )
@@ -124,7 +133,7 @@ class GoalLoopObserveMetricsValidatorTest(unittest.TestCase):
         )
 
     def test_missing_dashboard_metric_fails(self) -> None:
-        dashboard_text = DASHBOARD_PATH.read_text().replace(
+        dashboard_text = DASHBOARD_PATH.read_text(encoding="utf-8").replace(
             "masc_write_meta_cas_retry_total",
             "masc_write_meta_cas_missing_total",
         )
@@ -147,10 +156,11 @@ class GoalLoopObserveMetricsValidatorTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             broken_alerts = Path(tmpdir) / "alerts.yml"
             broken_alerts.write_text(
-                ALERTS_PATH.read_text().replace(
+                ALERTS_PATH.read_text(encoding="utf-8").replace(
                     "masc_dashboard_metric_all_zeros",
                     "masc_dashboard_metric_missing",
-                )
+                ),
+                encoding="utf-8",
             )
 
             result = subprocess.run(
@@ -175,6 +185,135 @@ class GoalLoopObserveMetricsValidatorTest(unittest.TestCase):
 
         self.assertEqual(1, result.returncode)
         self.assertIn('"status": "FAIL"', result.stdout)
+
+    def test_rejects_empty_required_signals(self) -> None:
+        contract = {
+            "schema_version": 1,
+            "required_signals": [],
+        }
+
+        with self.assertRaisesRegex(ValueError, "must not be empty"):
+            load_current_report(contract=contract)
+
+    def test_rejects_non_object_required_signal(self) -> None:
+        contract = {
+            "schema_version": 1,
+            "required_signals": ["pricing_catalog_miss"],
+        }
+
+        with self.assertRaisesRegex(ValueError, r"required_signals\[0\]"):
+            load_current_report(contract=contract)
+
+    def test_report_reflects_contract_schema_version(self) -> None:
+        report = load_current_report()
+
+        self.assertEqual(1, report.schema_version)
+
+    def test_rejects_unsupported_schema_version(self) -> None:
+        contract = {
+            "schema_version": 2,
+            "required_signals": [
+                {
+                    "signal_id": "pricing_catalog_miss",
+                    "metric_names": ["masc_pricing_catalog_miss_total"],
+                    "alert_names": ["GoalLoopPricingCatalogMissCritical"],
+                }
+            ],
+        }
+
+        with self.assertRaisesRegex(ValueError, "unsupported"):
+            load_current_report(contract=contract)
+
+    def test_alert_metrics_are_checked_within_required_alert_exprs(self) -> None:
+        contract = {
+            "schema_version": 1,
+            "required_signals": [
+                {
+                    "signal_id": "pricing_catalog_miss",
+                    "metric_names": ["masc_pricing_catalog_miss_total"],
+                    "alert_names": ["GoalLoopPricingCatalogMissCritical"],
+                    "threshold_fragments": ["> 0"],
+                }
+            ],
+        }
+        alert_text = """
+groups:
+  - name: test
+    rules:
+      - alert: GoalLoopPricingCatalogMissCritical
+        expr: |
+          increase(masc_pricing_catalog_miss_total_shadow[5m]) > 0
+      - alert: OtherAlert
+        expr: |
+          increase(masc_pricing_catalog_miss_total[5m]) > 0
+"""
+        dashboard_text = """
+{
+  "panels": [
+    {
+      "targets": [
+        {"expr": "increase(masc_pricing_catalog_miss_total[5m])"}
+      ]
+    }
+  ]
+}
+"""
+
+        report = load_current_report(
+            contract=contract,
+            alert_text=alert_text,
+            dashboard_text=dashboard_text,
+        )
+
+        self.assertEqual("FAIL", report.status)
+        self.assertEqual(
+            ["masc_pricing_catalog_miss_total"],
+            report.signal_checks[0].missing_alert_metrics,
+        )
+
+    def test_dashboard_metrics_are_checked_from_target_exprs(self) -> None:
+        contract = {
+            "schema_version": 1,
+            "required_signals": [
+                {
+                    "signal_id": "pricing_catalog_miss",
+                    "metric_names": ["masc_pricing_catalog_miss_total"],
+                    "alert_names": ["GoalLoopPricingCatalogMissCritical"],
+                }
+            ],
+        }
+        alert_text = """
+groups:
+  - name: test
+    rules:
+      - alert: GoalLoopPricingCatalogMissCritical
+        expr: |
+          increase(masc_pricing_catalog_miss_total[5m]) > 0
+"""
+        dashboard_text = """
+{
+  "panels": [
+    {
+      "title": "masc_pricing_catalog_miss_total",
+      "targets": [
+        {"expr": "increase(masc_pricing_catalog_miss_total_shadow[5m])"}
+      ]
+    }
+  ]
+}
+"""
+
+        report = load_current_report(
+            contract=contract,
+            alert_text=alert_text,
+            dashboard_text=dashboard_text,
+        )
+
+        self.assertEqual("FAIL", report.status)
+        self.assertEqual(
+            ["masc_pricing_catalog_miss_total"],
+            report.signal_checks[0].missing_dashboard_metrics,
+        )
 
 
 if __name__ == "__main__":

@@ -728,9 +728,9 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     ]
 
     fleet_failures: list[str] = []
-    if len(config_paths) != args.expected_keepers:
+    if len(config_paths) < args.expected_keepers:
         fleet_failures.append(
-            f"expected_{args.expected_keepers}_configured_keepers_got_{len(config_paths)}"
+            f"minimum_{args.expected_keepers}_configured_keepers_got_{len(config_paths)}"
         )
     failed_keepers = [keeper for keeper in keepers if keeper.failures]
     ok = not fleet_failures and not failed_keepers
@@ -771,7 +771,7 @@ def print_text(report: dict[str, Any]) -> None:
     print(f"keeper fleet readiness: {status}")
     print(
         "base_path={base_path} configured={configured_keepers} "
-        "expected={expected_keepers} max_silence_hours={max_silence_hours}".format(
+        "minimum={expected_keepers} max_silence_hours={max_silence_hours}".format(
             **report
         )
     )
@@ -825,7 +825,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=str(Path.home() / "me"),
         help="MASC base path containing .masc (default: ~/me)",
     )
-    parser.add_argument("--expected-keepers", type=int, default=14)
+    parser.add_argument(
+        "--expected-keepers",
+        type=int,
+        default=14,
+        help="Minimum configured keeper count required for fleet readiness.",
+    )
     parser.add_argument("--max-silence-hours", type=float, default=2400.0)
     parser.add_argument(
         "--no-require-board-evidence",

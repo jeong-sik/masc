@@ -2,8 +2,10 @@ import importlib.util
 import json
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 SCRIPT_PATH = (
@@ -24,6 +26,73 @@ def load_audit_module():
 
 
 audit = load_audit_module()
+
+
+def audit_args(base_path: Path, expected_keepers: int):
+    return SimpleNamespace(
+        base_path=str(base_path),
+        expected_keepers=expected_keepers,
+        max_silence_hours=2400.0,
+        require_board_evidence=True,
+        require_pr_surface_evidence=False,
+        require_pr_review_evidence=False,
+        require_pr_create_evidence=False,
+        require_git_push_evidence=False,
+        require_pr_approve_evidence=False,
+        require_pr_lifecycle_evidence=False,
+        require_docker_pr_create_evidence=False,
+        require_docker_git_push_evidence=False,
+        require_docker_pr_approve_evidence=False,
+        require_docker_pr_lifecycle_evidence=False,
+    )
+
+
+def write_ready_keeper(root: Path, name: str) -> None:
+    config_dir = root / ".masc" / "config" / "keepers"
+    runtime_dir = root / ".masc" / "keepers"
+    credential_dir = root / ".masc" / "github-identities" / "anyang-keepers" / "gh"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    credential_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / f"{name}.toml").write_text(
+        "\n".join(
+            [
+                "[keeper]",
+                'sandbox_profile = "docker"',
+                'network_mode = "inherit"',
+                'tool_preset = "coding"',
+                'github_identity = "anyang-keepers"',
+                'git_identity_mode = "github_identity"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (runtime_dir / f"{name}.json").write_text(
+        json.dumps(
+            {
+                "sandbox_profile": "docker",
+                "network_mode": "inherit",
+                "tool_preset": "coding",
+                "github_identity": "anyang-keepers",
+                "git_identity_mode": "github_identity",
+                "last_turn_ts": time.time(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    (runtime_dir / f"{name}.decisions.jsonl").write_text(
+        json.dumps(
+            {
+                "ts_unix": time.time(),
+                "event": "tool_exec",
+                "tool": "keeper_board_post",
+                "ok": True,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 class AuditKeeperFleetReadinessTest(unittest.TestCase):
@@ -257,6 +326,30 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             },
         )
         self.assertEqual(docker_evidence, evidence)
+
+    def test_expected_keepers_is_minimum_not_exact_count(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ready_keeper(root, "alpha")
+            write_ready_keeper(root, "bravo")
+
+            report = audit.build_report(audit_args(root, expected_keepers=1))
+
+        self.assertTrue(report["ok"])
+        self.assertEqual(report["configured_keepers"], 2)
+        self.assertEqual(report["fleet_failures"], [])
+
+    def test_expected_keepers_fails_below_minimum(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ready_keeper(root, "alpha")
+
+            report = audit.build_report(audit_args(root, expected_keepers=2))
+
+        self.assertFalse(report["ok"])
+        self.assertEqual(
+            report["fleet_failures"], ["minimum_2_configured_keepers_got_1"]
+        )
 
 
 if __name__ == "__main__":

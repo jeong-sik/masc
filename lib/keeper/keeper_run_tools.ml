@@ -764,11 +764,6 @@ let prepare_agent_setup
     let per_call_turn = turn - start_turn_count in
     let is_last_turn = per_call_turn >= max_turns in
     let is_warning_zone = per_call_turn >= max_turns - 1 in
-    let tool_gate_requested =
-      required_tool_names <> []
-      || tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn
-           ~allowed_tool_names:all_allowed
-    in
     let all_allowed, tool_surface_fallback_used =
       if all_allowed = [] then
         let fallback_allowed = fallback_tool_surface ~turn in
@@ -787,6 +782,11 @@ let prepare_agent_setup
           all_allowed
       else
         all_allowed
+    in
+    let tool_gate_requested =
+      required_tool_names <> []
+      || tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn
+           ~allowed_tool_names:all_allowed
     in
     let all_allowed =
       if List.length all_allowed > max_tools then (

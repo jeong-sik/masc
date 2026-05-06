@@ -143,7 +143,9 @@
   260 broader source occurrences, duplicate checked 47-issue audit artifacts
   that do not contain the missing 206-row corpus, and an independent cascade
   completion report that keeps #13265 open because the corpus is not
-  replayable.
+  replayable. A design research note with aggregate 206/STILL_PRESENT claims
+  and a single `R-FATAL-1` example was also checked and does not contain the
+  missing row corpus.
 - [근거] `python3 test/test_goal_loop_completion_audit.py` checked at
   2026-05-06T09:59:29+09:00, confidence High: the completion audit now accepts
   an optional `--strict-row-corpus` artifact and validates it against the

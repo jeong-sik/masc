@@ -104,6 +104,13 @@
       "result": "CONFIRMS_CORPUS_GAP_OPEN",
       "sha256": "e7457705309b352f3b298e7b617faff614962c762fb35022eb8990bb38cbc36b",
       "note": "Independent cascade completion report lists GOAL LOOP audit corpus not replayable as #13265 Open, with 206-finding replay unavailable."
+    },
+    {
+      "artifact_name": "research/masc_dim10.md",
+      "artifact_kind": "markdown",
+      "result": "NOT_ROW_CORPUS",
+      "sha256": "f92b304c95d2e49ef1888c22665212e7e0b0cb1607f598665559f045ded89f01",
+      "note": "Goal-driven design note repeats aggregate 206 and STILL_PRESENT claims plus one R-FATAL-1 example, but does not provide the missing 206 itemized strict rows."
     }
   ],
   "broader_structured_id_triage": {

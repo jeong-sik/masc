@@ -395,7 +395,7 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
             "FULL_ROW_CORPUS_NOT_FOUND",
         )
         self.assertEqual(discovery_evidence["prompt_sources_checked"], 12)
-        self.assertEqual(discovery_evidence["candidate_artifacts_checked"], 6)
+        self.assertEqual(discovery_evidence["candidate_artifacts_checked"], 7)
         self.assertFalse(discovery_evidence["local_path_leaks"])
         self.assertTrue(discovery_evidence["source_catalog_id_matches"])
 

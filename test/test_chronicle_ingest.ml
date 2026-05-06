@@ -5,6 +5,7 @@
 open Alcotest
 
 module CI = Masc_mcp.Chronicle_ingest
+module CM = Masc_mcp.Chronicle_memory
 
 (* --- parse_git_log tests --- *)
 
@@ -191,6 +192,84 @@ let test_candidate_epoch_no_goal_uses_sha () =
   check bool "id starts with year" (String.length ep.CI.id > 4) true;
   check bool "id contains cluster" (String.contains ep.CI.id '-') true
 
+(* --- chronicle memory injection tests --- *)
+
+let sample_epoch : CI.candidate_epoch =
+  { id = "PK-999"
+  ; label = "ship chronicle memory adapter"
+  ; start_commit = "abcdef1234560000"
+  ; end_commit = "abcdef1234569999"
+  ; start_date = "2026-05-01"
+  ; end_date = "2026-05-02"
+  ; goal_ids = [ "PK-999"; "task-123" ]
+  ; file_paths = [ "lib/chronicle_memory.ml"; "test/test_chronicle_ingest.ml" ]
+  ; commit_count = 2
+  }
+
+let metadata_string key metadata =
+  match List.assoc_opt key metadata with
+  | Some (`String value) -> Some value
+  | _ -> None
+
+let metadata_list key metadata =
+  match List.assoc_opt key metadata with
+  | Some (`List values) ->
+      values
+      |> List.filter_map (function
+           | `String value -> Some value
+           | _ -> None)
+  | _ -> []
+
+let metadata_context_string key metadata =
+  match List.assoc_opt "context" metadata with
+  | Some (`Assoc fields) ->
+      (match List.assoc_opt key fields with
+       | Some (`String value) -> Some value
+       | _ -> None)
+  | _ -> None
+
+let test_chronicle_memory_episode_shape () =
+  let episode =
+    CM.episode_of_candidate ~timestamp:42.0 ~keeper_name:"sangsu" sample_epoch
+  in
+  check string "deterministic id"
+    "git-chronicle-PK-999-abcdef123456" episode.id;
+  check (float 0.001) "timestamp" 42.0 episode.timestamp;
+  check string "participant" "sangsu" (List.hd episode.participants);
+  check string "event type" "git_chronicle"
+    (Option.value ~default:""
+       (metadata_string "event_type" episode.metadata));
+  check string "source context" "git_chronicle"
+    (Option.value ~default:""
+       (metadata_context_string "source" episode.metadata));
+  check string "epoch id context" "PK-999"
+    (Option.value ~default:""
+       (metadata_context_string "epoch_id" episode.metadata));
+  check bool "goal ids metadata"
+    true
+    (List.mem "task-123" (metadata_list "goal_ids" episode.metadata));
+  let expected_summary =
+    "Git chronicle PK-999: ship chronicle memory adapter (2 commits; files: \
+     lib/chronicle_memory.ml, test/test_chronicle_ingest.ml)"
+  in
+  check string "summary includes structured commit count" expected_summary
+    episode.action
+
+let test_chronicle_memory_store_recall () =
+  let memory = Agent_sdk.Memory.create () in
+  let stored =
+    CM.store_candidate_epochs ~memory ~keeper_name:"sangsu" [ sample_epoch ]
+  in
+  check int "stored count" 1 stored;
+  let recalled = Agent_sdk.Memory.recall_episodes memory ~limit:10 () in
+  check int "recalled count" 1 (List.length recalled);
+  let episode = List.hd recalled in
+  check string "recalled id"
+    "git-chronicle-PK-999-abcdef123456" episode.id;
+  check string "recalled event type" "git_chronicle"
+    (Option.value ~default:""
+       (metadata_string "event_type" episode.metadata))
+
 let () =
   run "Chronicle_ingest" [
     ("parse_git_log", [
@@ -220,5 +299,9 @@ let () =
     ("candidate_epoch", [
       test_case "fields" `Quick test_candidate_epoch_fields;
       test_case "no-goal uses sha" `Quick test_candidate_epoch_no_goal_uses_sha;
+    ]);
+    ("chronicle_memory", [
+      test_case "episode shape" `Quick test_chronicle_memory_episode_shape;
+      test_case "store recall" `Quick test_chronicle_memory_store_recall;
     ]);
   ]

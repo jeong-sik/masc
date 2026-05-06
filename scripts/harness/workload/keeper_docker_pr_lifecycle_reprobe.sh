@@ -33,6 +33,7 @@ POLL_TIMEOUT_SEC="${POLL_TIMEOUT_SEC:-1200}"
 POLL_INTERVAL_SEC="${POLL_INTERVAL_SEC:-10}"
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 MCP_TOKEN="${MASC_MCP_TOKEN:-}"
+MCP_CLIENT_NAME="${MCP_CLIENT_NAME:-keeper-docker-pr-lifecycle-reprobe}"
 
 usage() {
   cat <<'EOF'
@@ -159,6 +160,101 @@ require_cmd() {
   fi
 }
 
+load_mcp_token() {
+  if [[ -n "$MCP_TOKEN" ]]; then
+    return 0
+  fi
+  local token_file="$BASE_PATH/.masc/auth/codex-mcp-client.token"
+  if [[ -f "$token_file" ]]; then
+    MCP_TOKEN="$(tr -d '\n' <"$token_file")"
+  fi
+}
+
+init_mcp_session() {
+  if [[ -n "${MCP_SESSION_ID:-}" ]]; then
+    return 0
+  fi
+
+  local headers_file body_file init_body session_id protocol_version
+  headers_file="$(mcp_mktemp_file "keeper-docker-reprobe-init" ".headers")"
+  body_file="$(mcp_mktemp_file "keeper-docker-reprobe-init" ".body")"
+  init_body="$(
+    jq -cn \
+      --arg client_name "$MCP_CLIENT_NAME" \
+      '{
+        jsonrpc:"2.0",
+        id:1,
+        method:"initialize",
+        params:{
+          protocolVersion:"2025-11-25",
+          clientInfo:{name:$client_name, version:"1.0"},
+          capabilities:{}
+        }
+      }'
+  )"
+
+  local -a cmd=(
+    curl -sS --max-time "$MSG_TIMEOUT_SEC"
+    -D "$headers_file"
+    -o "$body_file"
+    -X POST "$MCP_URL"
+    -H "Content-Type: application/json"
+    -H "Accept: application/json, text/event-stream"
+  )
+  if [[ -n "$MCP_TOKEN" ]]; then
+    cmd+=( -H "Authorization: Bearer $MCP_TOKEN" )
+  fi
+  cmd+=( --data-binary "$init_body" )
+
+  if ! "${cmd[@]}" >/dev/null; then
+    echo "failed to initialize MCP session at $MCP_URL" >&2
+    cat "$body_file" >&2 || true
+    rm -f "$headers_file" "$body_file"
+    exit 1
+  fi
+
+  session_id="$(
+    awk '
+      tolower($0) ~ /^mcp-session-id:/ {
+        sub(/^[^:]+:[[:space:]]*/, "", $0)
+        sub(/\r$/, "", $0)
+        print $0
+        exit
+      }' "$headers_file"
+  )"
+  protocol_version="$(
+    awk '
+      tolower($0) ~ /^mcp-protocol-version:/ {
+        sub(/^[^:]+:[[:space:]]*/, "", $0)
+        sub(/\r$/, "", $0)
+        print $0
+        exit
+      }' "$headers_file"
+  )"
+
+  if [[ -z "$session_id" ]]; then
+    echo "MCP initialize did not return Mcp-Session-Id" >&2
+    cat "$body_file" >&2 || true
+    rm -f "$headers_file" "$body_file"
+    exit 1
+  fi
+
+  MCP_SESSION_ID="$session_id"
+  export MCP_SESSION_ID
+  if [[ -n "$protocol_version" ]]; then
+    MCP_PROTOCOL_VERSION="$protocol_version"
+    export MCP_PROTOCOL_VERSION
+  fi
+  rm -f "$headers_file" "$body_file"
+}
+
+ensure_mcp_session_if_needed() {
+  if [[ -z "$KEEPER_NAMES" || "$MUTATE" == "1" || -n "$BOARD_POST_ID" ]]; then
+    load_mcp_token
+    init_mcp_session
+  fi
+}
+
 tool_call() {
   local id="$1"
   local tool_name="$2"
@@ -166,8 +262,9 @@ tool_call() {
   local timeout_sec="${4:-$MSG_TIMEOUT_SEC}"
   local saved_timeout="${HTTP_TIMEOUT_SEC:-}"
   HTTP_TIMEOUT_SEC="$timeout_sec"
-  local payload
-  payload="$(mcp_call_tool "$id" "$tool_name" "$args_json" "" "$MCP_TOKEN" "$MCP_URL")"
+  local json_id payload
+  json_id="$(jq -cn --arg value "$id" '$value')"
+  payload="$(mcp_call_tool "$json_id" "$tool_name" "$args_json" "${MCP_SESSION_ID:-}" "$MCP_TOKEN" "$MCP_URL")"
   HTTP_TIMEOUT_SEC="$saved_timeout"
   printf '%s' "$payload"
 }
@@ -186,7 +283,11 @@ discover_keepers() {
       | awk 'NF' >"$keeper_file"
   else
     log "discovering docker keepers via masc_keeper_list"
-    local payload text
+    local payload text runtime_names runtime_docker config_docker config_dir
+    runtime_names="$RUN_DIR/keepers.runtime.txt"
+    runtime_docker="$RUN_DIR/keepers.runtime-docker.txt"
+    config_docker="$RUN_DIR/keepers.config-docker.txt"
+    config_dir="$BASE_PATH/.masc/config/keepers"
     payload="$(tool_call "keeper-list-$RUN_ID" "masc_keeper_list" '{"detailed":true,"limit":100}' 30)"
     printf '%s' "$payload" >"$RAW_DIR/keeper-list.jsonrpc.json"
     mcp_require_tool_ok "$payload" "masc_keeper_list"
@@ -194,10 +295,68 @@ discover_keepers() {
     printf '%s' "$text" | jq '.' >"$RAW_DIR/keeper-list.json"
     printf '%s' "$text" \
       | jq -r '
-          .[]
+          def rows:
+            if type == "array" then .
+            elif ((.keepers? // null) | type) == "array" then .keepers
+            elif ((.items? // null) | type) == "array" then .items
+            elif ((.agents? // null) | type) == "array" then .agents
+            else [] end;
+          rows[]
+          | select(type == "object")
+          | .name
+          | select(type == "string" and length > 0)
+        ' >"$runtime_names"
+    printf '%s' "$text" \
+      | jq -r '
+          def rows:
+            if type == "array" then .
+            elif ((.keepers? // null) | type) == "array" then .keepers
+            elif ((.items? // null) | type) == "array" then .items
+            elif ((.agents? // null) | type) == "array" then .agents
+            else [] end;
+          rows[]
+          | select(type == "object")
           | select((.sandbox_profile // .config.sandbox_profile // .meta.sandbox_profile // "") == "docker")
           | .name
-        ' >"$keeper_file"
+          | select(type == "string" and length > 0)
+        ' >"$runtime_docker"
+
+    if [[ -d "$config_dir" ]]; then
+      python3 - "$config_dir" >"$config_docker" <<'PY'
+import pathlib
+import sys
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib  # type: ignore
+
+root = pathlib.Path(sys.argv[1])
+for path in sorted(root.glob("*.toml")):
+    try:
+        data = tomllib.loads(path.read_text())
+    except Exception:
+        continue
+    keeper = data.get("keeper")
+    if not isinstance(keeper, dict):
+        keeper = data
+    if keeper.get("sandbox_profile") == "docker":
+        name = keeper.get("name") or data.get("name") or path.stem
+        if isinstance(name, str) and name:
+            print(name)
+PY
+    else
+      : >"$config_docker"
+    fi
+
+    if [[ -s "$config_docker" ]]; then
+      awk 'NR == FNR { docker[$0] = 1; next } docker[$0]' "$config_docker" "$runtime_names" >"$keeper_file"
+    elif [[ -s "$runtime_docker" ]]; then
+      cp "$runtime_docker" "$keeper_file"
+    else
+      log "warning: runtime did not expose sandbox_profile and config docker list is empty; using all runtime keepers"
+      cp "$runtime_names" "$keeper_file"
+    fi
   fi
 
   if [[ "$MAX_KEEPERS" =~ ^[0-9]+$ ]] && [[ "$MAX_KEEPERS" -gt 0 ]]; then
@@ -428,6 +587,7 @@ require_cmd jq
 require_cmd python3
 require_cmd curl
 
+ensure_mcp_session_if_needed
 discover_keepers
 render_prompts
 

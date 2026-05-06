@@ -3,6 +3,7 @@ status: runbook
 last_verified: 2026-05-06
 code_refs:
   - scripts/harness_keeper_docker_pr_lifecycle_reprobe.sh
+  - scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh
   - scripts/audit-keeper-fleet-readiness.py
 ---
 
@@ -21,6 +22,11 @@ adds the operator action loop:
 
 Default mode is dry-run. It writes prompts and runs the read-only audit, but it
 does not ask keepers to create branches, push, create PRs, or approve reviews.
+When keeper names are not supplied, discovery initializes an MCP session, reads
+runtime keepers from `masc_keeper_list(detailed=true)`, and intersects them with
+`$BASE_PATH/.masc/config/keepers/*.toml` entries whose `sandbox_profile` is
+`docker`. `MASC_MCP_TOKEN` is used when set; otherwise the harness reads
+`$BASE_PATH/.masc/auth/codex-mcp-client.token` if it exists.
 
 ```bash
 ./scripts/harness_keeper_docker_pr_lifecycle_reprobe.sh

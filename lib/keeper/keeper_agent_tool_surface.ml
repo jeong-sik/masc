@@ -263,6 +263,24 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
        task_update, task_done, etc.). *)
     Agent_sdk.Types.Any
 
+let required_tool_names_for_turn ~(current_task_required_tool_names : string list)
+    ~(per_call_required_tool_names : string list) =
+  match per_call_required_tool_names with
+  | [] -> current_task_required_tool_names
+  | _ :: _ -> per_call_required_tool_names
+
+let preferred_tool_choice_for_required_tool_names
+    ~(required_tool_names : string list) ~(allowed_tool_names : string list) =
+  let visible_required =
+    required_tool_names
+    |> List.filter (fun name -> List.mem name allowed_tool_names)
+    |> Keeper_types.dedupe_keep_order
+  in
+  match visible_required with
+  | [ name ] -> Agent_sdk.Types.Tool name
+  | _ :: _ -> Agent_sdk.Types.Any
+  | [] -> Agent_sdk.Types.Auto
+
 let owned_active_task_id_for_meta =
   Keeper_current_task_reconcile.owned_active_task_id_for_meta
 

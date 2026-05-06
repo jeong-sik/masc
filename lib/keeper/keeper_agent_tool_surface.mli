@@ -120,6 +120,23 @@ val preferred_tool_choice_for_required_turn :
   allowed_tool_names:string list ->
   Agent_sdk.Types.tool_choice
 
+(** Per-call [masc_keeper_msg.required_tools] is an explicit operator/harness
+    contract for this turn. When present, it takes precedence over the keeper's
+    active task contract so stale task-specific required tools cannot hijack the
+    message. *)
+val required_tool_names_for_turn :
+  current_task_required_tool_names:string list ->
+  per_call_required_tool_names:string list ->
+  string list
+
+(** Pick the model-facing [tool_choice] for an explicit required-tool list. A
+    single visible required tool should be forced specifically; multiple visible
+    required tools use [Any] and are checked after execution. *)
+val preferred_tool_choice_for_required_tool_names :
+  required_tool_names:string list ->
+  allowed_tool_names:string list ->
+  Agent_sdk.Types.tool_choice
+
 (** Find the active task ID a keeper currently owns. *)
 val owned_active_task_id_for_meta :
   config:Coord.config ->

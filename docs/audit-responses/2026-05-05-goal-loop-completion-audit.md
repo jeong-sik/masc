@@ -164,7 +164,9 @@
   were 0 strict-corpus marker hits, and the two unreadable PDFs were not in
   Kimi/audit/goal/keeper/masc paths. A standalone spreadsheet sweep checked 24
   xlsx/xls files and found 0 marker hits; no spreadsheet paths matched
-  Kimi/audit/goal/keeper/masc.
+  Kimi/audit/goal/keeper/masc. A local MASC runtime sweep indexed 118,911
+  files and found 0 strict-corpus marker hits; the 20 corpus-named runtime
+  paths were ordinary repo script copies, not GOAL LOOP strict row artifacts.
 - [근거] `python3 test/test_goal_loop_completion_audit.py` checked at
   2026-05-06T09:59:29+09:00, confidence High: the completion audit now accepts
   an optional `--strict-row-corpus` artifact and validates it against the

@@ -238,6 +238,31 @@
         "goal-loop-206-audit-external-claim-2026-05-05"
       ],
       "note": "Standalone Downloads xlsx/xls files were searched by extracting XML where readable. Strict-corpus marker hits and near-miss hits were 0; none of the spreadsheet paths matched Kimi, audit, goal, keeper, or masc."
+    },
+    {
+      "artifact_name": "masc_runtime_strict_corpus_marker_sweep",
+      "artifact_kind": "runtime_marker_search_report",
+      "result": "NOT_ROW_CORPUS",
+      "observed_files_indexed": 118911,
+      "observed_corpus_named_paths": 20,
+      "observed_marker_hits": 0,
+      "excluded_path_classes": [
+        "git_metadata",
+        "node_modules",
+        "build_outputs",
+        "dist_outputs",
+        "virtualenvs",
+        "vendor_dirs"
+      ],
+      "markers_checked": [
+        "source_catalog_id",
+        "corpus_id",
+        "expected_findings_total",
+        "strict_row",
+        "strict-row",
+        "goal-loop-206-audit-external-claim-2026-05-05"
+      ],
+      "note": "Active local MASC runtime state was searched for exact strict-corpus markers. Corpus-named paths were ordinary repo script copies such as exec_corpus_report, not GOAL LOOP strict row corpus artifacts."
     }
   ],
   "broader_structured_id_triage": {

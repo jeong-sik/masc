@@ -446,6 +446,14 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
             spreadsheet_sweeps[0]["observed_relevant_path_files_checked"],
             0,
         )
+        runtime_sweeps = [
+            artifact
+            for artifact in discovery["candidate_artifacts_checked"]
+            if artifact["artifact_name"] == "masc_runtime_strict_corpus_marker_sweep"
+        ]
+        self.assertEqual(len(runtime_sweeps), 1)
+        self.assertEqual(runtime_sweeps[0]["observed_files_indexed"], 118911)
+        self.assertEqual(runtime_sweeps[0]["observed_marker_hits"], 0)
         workspace_sweeps = [
             artifact
             for artifact in discovery["candidate_artifacts_checked"]

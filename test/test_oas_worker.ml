@@ -3532,6 +3532,171 @@ let test_kimi_cli_rejects_invalid_tool_argument_json () =
   | Error _ -> Alcotest.fail "expected NetworkError for invalid tool arguments"
   | Ok _ -> Alcotest.fail "expected invalid tool arguments to fail parsing"
 
+let test_kimi_cli_treats_whitespace_tool_arguments_as_empty_json () =
+  let dir = temp_dir "kimi_cli_whitespace_tool_args" in
+  let fake_kimi_path = Filename.concat dir "fake-kimi" in
+  let whitespace_tool_line =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("role", `String "assistant");
+          ( "tool_calls",
+            `List
+              [
+                `Assoc
+                  [
+                    ("id", `String "call-empty");
+                    ( "function",
+                      `Assoc
+                        [
+                          ("name", `String "empty_tool");
+                          ("arguments", `String "  \n\t  ");
+                        ] );
+                  ];
+              ] );
+        ])
+  in
+  write_executable_file fake_kimi_path
+    ("#!/bin/sh\ncat <<'JSON'\n" ^ whitespace_tool_line ^ "\nJSON\n");
+  let config =
+    {
+      Oas_worker_exec.Kimi_cli_transport_local.default_config with
+      kimi_path = fake_kimi_path;
+    }
+  in
+  let req =
+    {
+      (mock_completion_request ()) with
+      config = make_kimi_cli_provider_cfg ();
+      messages =
+        [
+          {
+            Agent_sdk.Types.role = Agent_sdk.Types.User;
+            content = [ Agent_sdk.Types.Text "hello" ];
+            name = None;
+            tool_call_id = None;
+            metadata = [];
+          };
+        ];
+    }
+  in
+  Eio.Switch.run @@ fun sw ->
+  let transport =
+    Oas_worker_exec.Kimi_cli_transport_local.create ~sw
+      ~mgr:(require_test_proc_mgr ()) ~config
+  in
+  let { Llm_provider.Llm_transport.response; latency_ms = _ } =
+    transport.complete_sync req
+  in
+  match response with
+  | Ok
+      {
+        Agent_sdk.Types.content =
+          [ Agent_sdk.Types.ToolUse { name; input; _ } ];
+        _;
+      } ->
+      Alcotest.(check string) "tool name" "empty_tool" name;
+      Alcotest.(check string) "whitespace args become empty object" "{}"
+        (Yojson.Safe.to_string input)
+  | Ok _ -> Alcotest.fail "expected one tool use"
+  | Error _ -> Alcotest.fail "expected whitespace arguments to parse as {}"
+
+let test_kimi_cli_stream_rejects_invalid_tool_argument_json () =
+  let dir = temp_dir "kimi_cli_stream_bad_tool_args" in
+  let fake_kimi_path = Filename.concat dir "fake-kimi" in
+  let assistant_text text =
+    Yojson.Safe.to_string
+      (`Assoc [ ("role", `String "assistant"); ("content", `String text) ])
+  in
+  let invalid_tool_line =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("role", `String "assistant");
+          ( "tool_calls",
+            `List
+              [
+                `Assoc
+                  [
+                    ("id", `String "call-1");
+                    ( "function",
+                      `Assoc
+                        [
+                          ("name", `String "bad_tool");
+                          ("arguments", `String "{\"unterminated\"");
+                        ] );
+                  ];
+              ] );
+        ])
+  in
+  write_executable_file fake_kimi_path
+    (String.concat "\n"
+       [
+         "#!/bin/sh";
+         "cat <<'JSON'";
+         assistant_text "before";
+         invalid_tool_line;
+         assistant_text "after";
+         "JSON";
+       ]
+    ^ "\n");
+  let config =
+    {
+      Oas_worker_exec.Kimi_cli_transport_local.default_config with
+      kimi_path = fake_kimi_path;
+    }
+  in
+  let req =
+    {
+      (mock_completion_request ()) with
+      config = make_kimi_cli_provider_cfg ();
+      messages =
+        [
+          {
+            Agent_sdk.Types.role = Agent_sdk.Types.User;
+            content = [ Agent_sdk.Types.Text "hello" ];
+            name = None;
+            tool_call_id = None;
+            metadata = [];
+          };
+        ];
+    }
+  in
+  Eio.Switch.run @@ fun sw ->
+  let transport =
+    Oas_worker_exec.Kimi_cli_transport_local.create ~sw
+      ~mgr:(require_test_proc_mgr ()) ~config
+  in
+  let events = ref [] in
+  let response =
+    transport.complete_stream
+      ~on_event:(fun event -> events := event :: !events)
+      req
+  in
+  let text_deltas =
+    List.filter_map
+      (function
+        | Agent_sdk.Types.ContentBlockDelta
+            { delta = Agent_sdk.Types.TextDelta text; _ } ->
+            Some text
+        | _ -> None)
+      (List.rev !events)
+  in
+  Alcotest.(check bool) "pre-error text emitted" true
+    (List.mem "before" text_deltas);
+  Alcotest.(check bool) "post-error text suppressed" false
+    (List.mem "after" text_deltas);
+  match response with
+  | Error (Llm_provider.Http_client.NetworkError { message; kind }) ->
+      Alcotest.(check bool) "network kind is unknown" true
+        (kind = Llm_provider.Http_client.Unknown);
+      Alcotest.(check bool) "invalid arguments rejected" true
+        (contains_substring ~needle:"invalid kimi tool arguments JSON" message);
+      Alcotest.(check bool) "tool name included" true
+        (contains_substring ~needle:"bad_tool" message)
+  | Error _ -> Alcotest.fail "expected NetworkError for invalid tool arguments"
+  | Ok _ -> Alcotest.fail "expected invalid tool arguments to fail streaming"
+
 let test_kimi_cli_should_log_stderr_line_filters_resume_noise () =
   let should_log =
     Oas_worker_exec.Kimi_cli_transport_local.should_log_stderr_line
@@ -5425,6 +5590,10 @@ let () =
         test_kimi_cli_config_uses_oas_context_ssot;
       Alcotest.test_case "kimi invalid tool argument JSON is rejected" `Quick
         test_kimi_cli_rejects_invalid_tool_argument_json;
+      Alcotest.test_case "kimi whitespace tool arguments become empty JSON" `Quick
+        test_kimi_cli_treats_whitespace_tool_arguments_as_empty_json;
+      Alcotest.test_case "kimi stream invalid tool argument JSON is rejected" `Quick
+        test_kimi_cli_stream_rejects_invalid_tool_argument_json;
       Alcotest.test_case "kimi stderr resume noise is filtered" `Quick
         test_kimi_cli_should_log_stderr_line_filters_resume_noise;
       Alcotest.test_case "kimi error completion measures latency" `Quick

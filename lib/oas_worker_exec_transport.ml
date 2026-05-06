@@ -856,8 +856,11 @@ module Kimi_cli_transport_local = struct
   let json_of_argument_string = function
     | None | Some "" -> Ok (`Assoc [])
     | Some raw -> (
-        try Ok (Yojson.Safe.from_string raw) with
-        | Yojson.Json_error msg -> Error msg)
+        let raw = String.trim raw in
+        if raw = "" then Ok (`Assoc [])
+        else
+          try Ok (Yojson.Safe.from_string raw) with
+          | Yojson.Json_error msg -> Error msg)
 
   let blocks_of_message_content json =
     match json with
@@ -1318,15 +1321,19 @@ module Kimi_cli_transport_local = struct
                    { id = "kimi-print"; model = model_id; usage = None }))
           in
           let on_line line =
-            if String.trim line <> "" then (
-              seen_lines := line :: !seen_lines;
-              match blocks_of_output_line line with
-              | Error message -> parse_error := Some message
-              | Ok blocks ->
-                  if blocks <> [] then (
-                    ensure_started ();
-                    next_index :=
-                      emit_blocks ~on_event ~start_index:!next_index blocks))
+            match !parse_error with
+            | Some _ -> ()
+            | None ->
+                if String.trim line <> "" then (
+                  seen_lines := line :: !seen_lines;
+                  match blocks_of_output_line line with
+                  | Error message -> parse_error := Some message
+                  | Ok blocks ->
+                      if blocks <> [] then (
+                        ensure_started ();
+                        next_index :=
+                          emit_blocks ~on_event ~start_index:!next_index
+                            blocks))
           in
           match
             classify_cli_error

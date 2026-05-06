@@ -1058,14 +1058,27 @@ let first_some a b =
   | Some _ -> a
   | None -> b
 
-let output_json_opt output_text =
+let observe_output_parse_failure ~surface ~output_bytes =
+  Safe_ops.protect ~default:() (fun () ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_oas_hook_output_parse_failures
+        ~labels:[ ("surface", surface) ] ());
+  Safe_ops.protect ~default:() (fun () ->
+      Log.Keeper.warn
+        "keeper_hooks_oas output JSON parse failed: surface=%s output_bytes=%d"
+        surface output_bytes)
+
+let output_json_opt ~surface output_text =
   match
     Safe_ops.parse_json_safe
-      ~context:"Keeper_hooks_oas.pr_review_action_metric.output"
+      ~context:("Keeper_hooks_oas." ^ surface ^ ".output")
       output_text
   with
   | Ok json -> Some json
-  | Error _ -> None
+  | Error _ ->
+      observe_output_parse_failure ~surface
+        ~output_bytes:(String.length output_text);
+      None
 
 let normalized_route_via raw =
   let value = String.trim raw |> String.lowercase_ascii in
@@ -1124,7 +1137,7 @@ let pr_review_action_metric_event_of_tool_io
     ~(transport_success : bool) =
   match tool_name with
   | "keeper_pr_review_comment" ->
-      let output_json = output_json_opt output_text in
+      let output_json = output_json_opt ~surface:"pr_review_action" output_text in
       let route_via = Option.bind output_json route_via_of_json in
       let action =
         match output_json with
@@ -1157,7 +1170,7 @@ let pr_review_action_metric_event_of_tool_io
            })
         (Option.bind action normalize_pr_review_action)
   | "keeper_pr_review_reply" ->
-      let output_json = output_json_opt output_text in
+      let output_json = output_json_opt ~surface:"pr_review_action" output_text in
       let route_via = Option.bind output_json route_via_of_json in
       let success =
         output_success ~transport_success output_json
@@ -1286,7 +1299,7 @@ let pr_work_action_metric_events_of_tool_io
     ~(input : Yojson.Safe.t)
     ~(output_text : string)
     ~(transport_success : bool) =
-  let output_json = output_json_opt output_text in
+  let output_json = output_json_opt ~surface:"pr_work_action" output_text in
   let route_via = Option.bind output_json route_via_of_json in
   let success = output_success ~transport_success output_json in
   match tool_name with

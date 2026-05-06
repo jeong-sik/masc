@@ -15,7 +15,33 @@ import { ringFocusClasses } from './ring'
 
 const CHECKBOX_BASE = `w-4 h-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] cursor-pointer transition-colors hover:bg-[var(--color-bg-hover)] hover:border-[var(--color-border-strong)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })} accent-[var(--color-accent-fg)]`
 
-interface CheckboxProps {
+export type CheckboxCheckedState = 'unset' | 'true' | 'false'
+export type CheckboxA11yHook = 'aria-label' | 'aria-labelledby' | 'id' | 'none'
+
+export interface CheckboxSummary {
+  readonly checkedState: CheckboxCheckedState
+  readonly checked: boolean
+  readonly disabled: boolean
+  readonly hasCustomClass: boolean
+  readonly classNameLength: number
+  readonly hasId: boolean
+  readonly idLength: number
+  readonly hasName: boolean
+  readonly nameLength: number
+  readonly a11yHook: CheckboxA11yHook
+  readonly hasAriaLabel: boolean
+  readonly ariaLabelLength: number
+  readonly hasAriaLabelledby: boolean
+  readonly ariaLabelledbyLength: number
+  readonly hasValue: boolean
+  readonly valueLength: number
+  readonly hasTestId: boolean
+  readonly testIdLength: number
+  readonly hasOnChange: boolean
+  readonly hasOnClick: boolean
+}
+
+export interface CheckboxProps {
   checked?: boolean
   disabled?: boolean
   class?: string
@@ -45,6 +71,67 @@ interface CheckboxProps {
   onClick?: (e: Event) => void
 }
 
+function hasNonEmptyString(value: string | undefined): boolean {
+  return value !== undefined && value !== ''
+}
+
+function checkedState(checked: boolean | undefined): CheckboxCheckedState {
+  if (checked === undefined) return 'unset'
+  return checked ? 'true' : 'false'
+}
+
+function a11yHook({
+  id,
+  ariaLabel,
+  ariaLabelledby,
+}: {
+  id?: string
+  ariaLabel?: string
+  ariaLabelledby?: string
+}): CheckboxA11yHook {
+  if (hasNonEmptyString(ariaLabel)) return 'aria-label'
+  if (hasNonEmptyString(ariaLabelledby)) return 'aria-labelledby'
+  if (hasNonEmptyString(id)) return 'id'
+  return 'none'
+}
+
+export function summarizeCheckbox({
+  checked,
+  disabled,
+  class: cx,
+  id,
+  name,
+  ariaLabel,
+  ariaLabelledby,
+  value,
+  testId,
+  onChange,
+  onClick,
+}: CheckboxProps): CheckboxSummary {
+  return {
+    checkedState: checkedState(checked),
+    checked: checked === true,
+    disabled: disabled === true,
+    hasCustomClass: hasNonEmptyString(cx),
+    classNameLength: cx?.length ?? 0,
+    hasId: hasNonEmptyString(id),
+    idLength: id?.length ?? 0,
+    hasName: hasNonEmptyString(name),
+    nameLength: name?.length ?? 0,
+    a11yHook: a11yHook({ id, ariaLabel, ariaLabelledby }),
+    hasAriaLabel: hasNonEmptyString(ariaLabel),
+    ariaLabelLength: ariaLabel?.length ?? 0,
+    hasAriaLabelledby: hasNonEmptyString(ariaLabelledby),
+    ariaLabelledbyLength: ariaLabelledby?.length ?? 0,
+    hasValue: hasNonEmptyString(value),
+    valueLength: value?.length ?? 0,
+    hasTestId: hasNonEmptyString(testId),
+    testIdLength: testId?.length ?? 0,
+    hasOnChange: onChange !== undefined,
+    hasOnClick: onClick !== undefined,
+  }
+}
+
 export function Checkbox({
   checked,
   disabled,
@@ -58,6 +145,19 @@ export function Checkbox({
   onChange,
   onClick,
 }: CheckboxProps) {
+  const summary = summarizeCheckbox({
+    checked,
+    disabled,
+    class: cx,
+    id,
+    name,
+    ariaLabel,
+    ariaLabelledby,
+    value,
+    testId,
+    onChange,
+    onClick,
+  })
   const handleChange = (e: Event) => { onChange?.((e.target as HTMLInputElement).checked) }
   return html`
     <input
@@ -70,6 +170,27 @@ export function Checkbox({
       disabled=${disabled}
       aria-label=${ariaLabel}
       aria-labelledby=${ariaLabelledby}
+      data-checkbox
+      data-checkbox-checked-state=${summary.checkedState}
+      data-checkbox-checked=${summary.checked}
+      data-checkbox-disabled=${summary.disabled}
+      data-checkbox-has-custom-class=${summary.hasCustomClass}
+      data-checkbox-class-length=${summary.classNameLength}
+      data-checkbox-has-id=${summary.hasId}
+      data-checkbox-id-length=${summary.idLength}
+      data-checkbox-has-name=${summary.hasName}
+      data-checkbox-name-length=${summary.nameLength}
+      data-checkbox-a11y-hook=${summary.a11yHook}
+      data-checkbox-has-aria-label=${summary.hasAriaLabel}
+      data-checkbox-aria-label-length=${summary.ariaLabelLength}
+      data-checkbox-has-aria-labelledby=${summary.hasAriaLabelledby}
+      data-checkbox-aria-labelledby-length=${summary.ariaLabelledbyLength}
+      data-checkbox-has-value=${summary.hasValue}
+      data-checkbox-value-length=${summary.valueLength}
+      data-checkbox-has-test-id=${summary.hasTestId}
+      data-checkbox-test-id-length=${summary.testIdLength}
+      data-checkbox-has-change-handler=${summary.hasOnChange}
+      data-checkbox-has-click-handler=${summary.hasOnClick}
       data-testid=${testId}
       onChange=${handleChange}
       onClick=${onClick}

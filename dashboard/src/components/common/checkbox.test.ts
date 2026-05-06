@@ -2,11 +2,82 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
-import { Checkbox } from './checkbox'
+import { Checkbox, summarizeCheckbox } from './checkbox'
 
 const flushUi = async () => {
   for (let i = 0; i < 4; i++) await Promise.resolve()
 }
+
+describe('summarizeCheckbox', () => {
+  it('summarizes default checkbox state', () => {
+    expect(summarizeCheckbox({})).toEqual({
+      checkedState: 'unset',
+      checked: false,
+      disabled: false,
+      hasCustomClass: false,
+      classNameLength: 0,
+      hasId: false,
+      idLength: 0,
+      hasName: false,
+      nameLength: 0,
+      a11yHook: 'none',
+      hasAriaLabel: false,
+      ariaLabelLength: 0,
+      hasAriaLabelledby: false,
+      ariaLabelledbyLength: 0,
+      hasValue: false,
+      valueLength: 0,
+      hasTestId: false,
+      testIdLength: 0,
+      hasOnChange: false,
+      hasOnClick: false,
+    })
+  })
+
+  it('summarizes populated checkbox state', () => {
+    const onChange = vi.fn()
+    const onClick = vi.fn()
+    expect(summarizeCheckbox({
+      checked: true,
+      disabled: true,
+      class: 'extra-hook',
+      id: 'opt-in',
+      name: 'newsletter',
+      ariaLabel: 'Accept terms',
+      ariaLabelledby: 'tos-heading',
+      value: 'yes',
+      testId: 'optin-newsletter',
+      onChange,
+      onClick,
+    })).toEqual({
+      checkedState: 'true',
+      checked: true,
+      disabled: true,
+      hasCustomClass: true,
+      classNameLength: 10,
+      hasId: true,
+      idLength: 6,
+      hasName: true,
+      nameLength: 10,
+      a11yHook: 'aria-label',
+      hasAriaLabel: true,
+      ariaLabelLength: 12,
+      hasAriaLabelledby: true,
+      ariaLabelledbyLength: 11,
+      hasValue: true,
+      valueLength: 3,
+      hasTestId: true,
+      testIdLength: 16,
+      hasOnChange: true,
+      hasOnClick: true,
+    })
+  })
+
+  it('falls back to aria-labelledby and id as a11y hooks', () => {
+    expect(summarizeCheckbox({ ariaLabelledby: 'label-id' }).a11yHook).toBe('aria-labelledby')
+    expect(summarizeCheckbox({ id: 'field-id' }).a11yHook).toBe('id')
+  })
+})
 
 describe('Checkbox', () => {
   let container: HTMLElement
@@ -24,16 +95,33 @@ describe('Checkbox', () => {
     const cb = container.querySelector('input') as HTMLInputElement
     expect(cb).toBeTruthy()
     expect(cb.type).toBe('checkbox')
+    expect(cb.hasAttribute('data-checkbox')).toBe(true)
+    expect(cb.getAttribute('data-checkbox-checked-state')).toBe('unset')
+    expect(cb.getAttribute('data-checkbox-checked')).toBe('false')
+    expect(cb.getAttribute('data-checkbox-a11y-hook')).toBe('none')
   })
 
   it('checked=true renders a checked input', () => {
     render(html`<${Checkbox} checked=${true} />`, container)
-    expect((container.querySelector('input') as HTMLInputElement).checked).toBe(true)
+    const cb = container.querySelector('input') as HTMLInputElement
+    expect(cb.checked).toBe(true)
+    expect(cb.getAttribute('data-checkbox-checked-state')).toBe('true')
+    expect(cb.getAttribute('data-checkbox-checked')).toBe('true')
+  })
+
+  it('checked=false renders explicit false metadata', () => {
+    render(html`<${Checkbox} checked=${false} />`, container)
+    const cb = container.querySelector('input') as HTMLInputElement
+    expect(cb.checked).toBe(false)
+    expect(cb.getAttribute('data-checkbox-checked-state')).toBe('false')
+    expect(cb.getAttribute('data-checkbox-checked')).toBe('false')
   })
 
   it('disabled=true disables the input', () => {
     render(html`<${Checkbox} disabled=${true} />`, container)
-    expect((container.querySelector('input') as HTMLInputElement).disabled).toBe(true)
+    const cb = container.querySelector('input') as HTMLInputElement
+    expect(cb.disabled).toBe(true)
+    expect(cb.getAttribute('data-checkbox-disabled')).toBe('true')
   })
 
   it('forwards id so <label for> can resolve (accessibility contract)', () => {
@@ -43,6 +131,9 @@ describe('Checkbox', () => {
     render(html`<${Checkbox} id="opt-in" />`, container)
     const cb = container.querySelector('input') as HTMLInputElement
     expect(cb.id).toBe('opt-in')
+    expect(cb.getAttribute('data-checkbox-has-id')).toBe('true')
+    expect(cb.getAttribute('data-checkbox-id-length')).toBe('6')
+    expect(cb.getAttribute('data-checkbox-a11y-hook')).toBe('id')
 
     // End-to-end label association works:
     const label = document.createElement('label')
@@ -54,27 +145,44 @@ describe('Checkbox', () => {
 
   it('forwards name for FormData serialization', () => {
     render(html`<${Checkbox} name="newsletter" checked=${true} />`, container)
-    expect(container.querySelector('input')!.getAttribute('name')).toBe('newsletter')
+    const cb = container.querySelector('input')!
+    expect(cb.getAttribute('name')).toBe('newsletter')
+    expect(cb.getAttribute('data-checkbox-has-name')).toBe('true')
+    expect(cb.getAttribute('data-checkbox-name-length')).toBe('10')
   })
 
   it('forwards value — the string submitted when checked', () => {
     render(html`<${Checkbox} name="tier" value="pro" checked=${true} />`, container)
-    expect(container.querySelector('input')!.getAttribute('value')).toBe('pro')
+    const cb = container.querySelector('input')!
+    expect(cb.getAttribute('value')).toBe('pro')
+    expect(cb.getAttribute('data-checkbox-has-value')).toBe('true')
+    expect(cb.getAttribute('data-checkbox-value-length')).toBe('3')
   })
 
   it('aria-label is forwarded (accessible name without external <label>)', () => {
     render(html`<${Checkbox} ariaLabel="Accept terms" />`, container)
-    expect(container.querySelector('input')!.getAttribute('aria-label')).toBe('Accept terms')
+    const cb = container.querySelector('input')!
+    expect(cb.getAttribute('aria-label')).toBe('Accept terms')
+    expect(cb.getAttribute('data-checkbox-a11y-hook')).toBe('aria-label')
+    expect(cb.getAttribute('data-checkbox-has-aria-label')).toBe('true')
+    expect(cb.getAttribute('data-checkbox-aria-label-length')).toBe('12')
   })
 
   it('aria-labelledby is forwarded (external-id label reference)', () => {
     render(html`<${Checkbox} ariaLabelledby="tos-heading" />`, container)
-    expect(container.querySelector('input')!.getAttribute('aria-labelledby')).toBe('tos-heading')
+    const cb = container.querySelector('input')!
+    expect(cb.getAttribute('aria-labelledby')).toBe('tos-heading')
+    expect(cb.getAttribute('data-checkbox-a11y-hook')).toBe('aria-labelledby')
+    expect(cb.getAttribute('data-checkbox-has-aria-labelledby')).toBe('true')
+    expect(cb.getAttribute('data-checkbox-aria-labelledby-length')).toBe('11')
   })
 
   it('testId renders as data-testid (E2E stable hook)', () => {
     render(html`<${Checkbox} testId="optin-newsletter" />`, container)
-    expect(container.querySelector('input')!.getAttribute('data-testid')).toBe('optin-newsletter')
+    const cb = container.querySelector('input')!
+    expect(cb.getAttribute('data-testid')).toBe('optin-newsletter')
+    expect(cb.getAttribute('data-checkbox-has-test-id')).toBe('true')
+    expect(cb.getAttribute('data-checkbox-test-id-length')).toBe('16')
   })
 
   it('onChange fires with the new checked boolean when user toggles on', async () => {
@@ -86,6 +194,7 @@ describe('Checkbox', () => {
     await flushUi()
     expect(spy).toHaveBeenCalledOnce()
     expect(spy.mock.calls[0]![0]).toBe(true)
+    expect(cb.getAttribute('data-checkbox-has-change-handler')).toBe('true')
   })
 
   it('onChange fires with false when user toggles off', async () => {
@@ -113,6 +222,7 @@ describe('Checkbox', () => {
     expect(spy).toHaveBeenCalledOnce()
     const passed = spy.mock.calls[0]![0] as Event
     expect(passed.target).toBe(cb)
+    expect(cb.getAttribute('data-checkbox-has-click-handler')).toBe('true')
   })
 
   it('onClick does not block onChange — both fire independently', async () => {
@@ -130,7 +240,10 @@ describe('Checkbox', () => {
 
   it('extra `class` prop is appended to the base class string', () => {
     render(html`<${Checkbox} class="extra-hook" />`, container)
-    expect(container.querySelector('input')!.className).toContain('extra-hook')
+    const cb = container.querySelector('input')!
+    expect(cb.className).toContain('extra-hook')
+    expect(cb.getAttribute('data-checkbox-has-custom-class')).toBe('true')
+    expect(cb.getAttribute('data-checkbox-class-length')).toBe('10')
   })
 
   it('base classes are still present even when `class` extension is given', () => {

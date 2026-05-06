@@ -36,6 +36,7 @@ let cache_hit_metric = Prometheus.metric_llm_provider_cache_hits
 let cache_miss_metric = Prometheus.metric_llm_provider_cache_misses
 let request_start_metric = Prometheus.metric_llm_provider_requests_started
 let error_metric = Prometheus.metric_llm_provider_errors
+let error_by_reason_metric = Prometheus.metric_llm_provider_errors_by_reason
 let retry_metric = Prometheus.metric_llm_provider_retries
 let input_tokens_metric = Prometheus.metric_llm_provider_input_tokens
 let output_tokens_metric = Prometheus.metric_llm_provider_output_tokens
@@ -77,9 +78,33 @@ let emit_request_start ~model_id =
     ~labels:[("model", model_id)]
     ()
 
-let emit_error ~model_id =
+let error_reason_label error =
+  let lower = String.lowercase_ascii (String.trim error) in
+  let has needle = String_util.contains_substring lower needle in
+  if lower = "" then "unknown"
+  else if has "timeout" || has "timed out" || has "deadline" then "timeout"
+  else if has "cancel" then "cancelled"
+  else if has "429" || has "rate limit" || has "too many requests" then
+    "rate_limit"
+  else if has "quota" then "quota"
+  else if has "capacity" || has "overloaded" then "capacity"
+  else if has "401" || has "403" || has "unauthorized" || has "forbidden"
+          || has "auth" then "auth"
+  else if has "connection" || has "network" || has "dns" || has "socket"
+          || has "econn" then "network"
+  else if has "json" || has "parse" || has "unparseable" then "parse"
+  else if has "400" || has "invalid" || has "schema" || has "validation" then
+    "invalid_request"
+  else if has "500" || has "503" || has "provider" || has "internal server"
+  then "provider_error"
+  else "unknown"
+
+let emit_error ~model_id ~error =
   Prometheus.inc_counter error_metric
     ~labels:[("model", model_id)]
+    ();
+  Prometheus.inc_counter error_by_reason_metric
+    ~labels:[("model", model_id); ("error_reason", error_reason_label error)]
     ()
 
 let emit_retry ~provider ~model_id ~attempt =
@@ -180,7 +205,7 @@ let make_sink () : Llm_provider.Metrics.t =
     on_capability_drop =
       (fun ~model_id ~field ->
         emit_capability_drop ~model_id ~field);
-    on_error = (fun ~model_id ~error:_ -> emit_error ~model_id);
+    on_error = (fun ~model_id ~error -> emit_error ~model_id ~error);
     on_retry = emit_retry;
     on_token_usage = emit_token_usage;
   }

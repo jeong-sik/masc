@@ -929,6 +929,8 @@ let metric_llm_provider_cache_misses = "masc_llm_provider_cache_misses_total"
 let metric_llm_provider_requests_started =
   "masc_llm_provider_requests_started_total"
 let metric_llm_provider_errors = "masc_llm_provider_errors_total"
+let metric_llm_provider_errors_by_reason =
+  "masc_llm_provider_errors_by_reason_total"
 let metric_llm_provider_retries = "masc_llm_provider_retries_total"
 let metric_llm_provider_input_tokens = "masc_llm_provider_input_tokens_total"
 let metric_llm_provider_output_tokens = "masc_llm_provider_output_tokens_total"
@@ -1532,6 +1534,9 @@ let init () =
     Counter;
   add metric_llm_provider_errors
     "Total OAS LLM request errors, labeled by model"
+    Counter;
+  add metric_llm_provider_errors_by_reason
+    "Total OAS LLM request errors, labeled by model and bounded error_reason"
     Counter;
   add metric_llm_provider_request_latency_clamped
     "Total OAS LLM request latency observations clamped before histogram \

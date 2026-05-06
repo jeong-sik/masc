@@ -423,7 +423,7 @@ let cascade_metrics_for_candidates
       ~on_error:(fun ~model_id ~error ->
         ensure_terminal_attempt capture ~candidate_cfgs ~model_id
           ~latency_ms:None ~error:(Some error);
-        Llm_metric_bridge.emit_error ~model_id)
+        Llm_metric_bridge.emit_error ~model_id ~error)
       ~on_capability_drop:(fun ~model_id ~field ->
         (* The explicit cascade metrics object bypasses the global
            Llm_metric_bridge sink, so capability-drop telemetry must be

@@ -357,82 +357,89 @@ let handle_keeper_pr_review_comment
         (Printf.sprintf "event must be one of [%s]; got %S"
            (String.concat ", " valid_pr_review_event_strings) event_raw)
   | Some event ->
-    let preset_ok =
-      pr_review_mutation_preset_ok
-        (Keeper_types.tool_access_preset meta.tool_access)
-    in
-	    if not preset_ok then
-	      Yojson.Safe.to_string
-	        (`Assoc
-	          [ "ok", `Bool false
-	          ; "error", `String "preset_insufficient"
-	          ; "reason", `String
-	              (pr_review_mutation_preset_reason "keeper_pr_review_comment")
-	          ])
-	    else
-	      match effective_repo_slug ~config ~repo with
-	      | Error msg -> error_json msg
-	      | Ok repo_slug ->
-	      let repo_flag_arg = repo_flag repo_slug in
-      let approve_preflight_result =
-        match event with
-        | Approve ->
-            approve_preflight
-              ~config ~meta ~pr_number ~repo_slug ~repo_flag_arg
-            |> Result.map (fun json -> Some json)
-        | Comment | Request_changes -> Ok None
+      let preset_ok =
+        pr_review_mutation_preset_ok
+          (Keeper_types.tool_access_preset meta.tool_access)
       in
-      (match approve_preflight_result with
-       | Error preflight ->
-           let preflight_via =
-             match json_string_member "via" preflight with
-             | Some value -> value
-             | None -> "unknown"
-           in
-	           Log.Keeper.info
-	             "pr_review_comment: pr=%d event=%s keeper=%s approve_preflight=blocked"
-	             pr_number (pr_review_event_to_string event) meta.name;
-	           Yojson.Safe.to_string
-	             (`Assoc
-	                 ([ "ok", `Bool false
-	                  ; "error", `String "approve_event_blocked"
-	                  ; "pr_number", `Int pr_number
-	                  ; "repo", `String repo_slug
-	                  ; "preflight_via", `String preflight_via
-	                  ; "event", `String (pr_review_event_to_string event)
-	                  ; "keeper", `String meta.name
-	                  ; "preflight", preflight
-	                  ] @ route_fields meta))
-	       | Ok approve_preflight_json ->
-	           (* Use gh pr review to create a review *)
-	           let cmd = Printf.sprintf
-             "gh pr review %d%s --body %s %s 2>&1"
-             pr_number repo_flag_arg
-             (Filename.quote body)
-             (pr_review_event_to_gh_flag event) in
-           let result =
-             run_pr_review_shell ~config ~meta
-               ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Pr_review_post ())
-               ~cmd in
-           Log.Keeper.info "pr_review_comment: pr=%d event=%s keeper=%s ok=%b"
-             pr_number (pr_review_event_to_string event) meta.name
-             (status_ok result.status);
-	           Yojson.Safe.to_string
-	             (`Assoc
-	                 ([
-	                   "ok", `Bool (status_ok result.status)
-	                 ; "pr_number", `Int pr_number
-	                 ; "repo", `String repo_slug
-	                 ; "execution_via", `String result.via
-	                 ; "event", `String (pr_review_event_to_string event)
-	                 ; "output", `String result.output
-	                 ; "keeper", `String meta.name
-	                 ]
-	                  @ route_fields meta
-	                  @
-	                  match approve_preflight_json with
-	                  | Some json -> [ "preflight", json ]
-	                  | None -> [])))
+      if not preset_ok then
+        Yojson.Safe.to_string
+          (`Assoc
+            [ "ok", `Bool false
+            ; "error", `String "preset_insufficient"
+            ; "reason", `String
+                (pr_review_mutation_preset_reason "keeper_pr_review_comment")
+            ])
+      else
+        match effective_repo_slug ~config ~repo with
+        | Error msg -> error_json msg
+        | Ok repo_slug ->
+            let repo_flag_arg = repo_flag repo_slug in
+            let approve_preflight_result =
+              match event with
+              | Approve ->
+                  approve_preflight
+                    ~config ~meta ~pr_number ~repo_slug ~repo_flag_arg
+                  |> Result.map (fun json -> Some json)
+              | Comment | Request_changes -> Ok None
+            in
+            (match approve_preflight_result with
+             | Error preflight ->
+                 let preflight_via =
+                   match json_string_member "via" preflight with
+                   | Some value -> value
+                   | None -> "unknown"
+                 in
+                 Log.Keeper.info
+                   "pr_review_comment: pr=%d event=%s keeper=%s approve_preflight=blocked"
+                   pr_number (pr_review_event_to_string event) meta.name;
+                 Yojson.Safe.to_string
+                   (`Assoc
+                     ([ "ok", `Bool false
+                      ; "error", `String "approve_event_blocked"
+                      ; "pr_number", `Int pr_number
+                      ; "repo", `String repo_slug
+                      ; "preflight_via", `String preflight_via
+                      ; "event", `String (pr_review_event_to_string event)
+                      ; "keeper", `String meta.name
+                      ; "preflight", preflight
+                      ] @ route_fields meta))
+             | Ok approve_preflight_json ->
+                 (* Use gh pr review to create a review *)
+                 let cmd =
+                   Printf.sprintf
+                     "gh pr review %d%s --body %s %s 2>&1"
+                     pr_number repo_flag_arg
+                     (Filename.quote body)
+                     (pr_review_event_to_gh_flag event)
+                 in
+                 let result =
+                   run_pr_review_shell
+                     ~config
+                     ~meta
+                     ~timeout_sec:
+                       (Env_config_exec_timeout.timeout_sec
+                          ~caller:Pr_review_post ())
+                     ~cmd
+                 in
+                 Log.Keeper.info
+                   "pr_review_comment: pr=%d event=%s keeper=%s ok=%b"
+                   pr_number (pr_review_event_to_string event) meta.name
+                   (status_ok result.status);
+                 Yojson.Safe.to_string
+                   (`Assoc
+                     ([ "ok", `Bool (status_ok result.status)
+                      ; "pr_number", `Int pr_number
+                      ; "repo", `String repo_slug
+                      ; "execution_via", `String result.via
+                      ; "event", `String (pr_review_event_to_string event)
+                      ; "output", `String result.output
+                      ; "keeper", `String meta.name
+                      ]
+                      @ route_fields meta
+                      @
+                      match approve_preflight_json with
+                      | Some json -> [ "preflight", json ]
+                      | None -> [])))
 ;;
 
 let handle_keeper_pr_review_reply

@@ -6,6 +6,8 @@ import {
   EventStream,
   getVisibleStreamEvents,
   summarizeEventStream,
+  streamEventAttractionBand,
+  streamEventAttractionScore,
 } from './event-stream'
 
 const baseEvents = [
@@ -126,6 +128,8 @@ describe('EventStream', () => {
     expect(root.dataset.eventStreamTemporalSyncWindowMs).toBe('5000')
     expect(root.dataset.eventStreamTemporalSyncGroupCount).toBe('0')
     expect(root.dataset.eventStreamMaxTemporalSyncGroupSize).toBe('1')
+    expect(root.dataset.eventStreamHighAttractionCount).toBe('1')
+    expect(root.dataset.eventStreamMaxAttractionScore).toBe('0.90')
   })
 
   it('exposes event row metadata and datetime', () => {
@@ -179,6 +183,20 @@ describe('EventStream', () => {
     })
   })
 
+  it('scores gradient attraction by severity, recency, and sync grouping', () => {
+    const rows = buildTemporalSyncRows(getVisibleStreamEvents(baseEvents, 100), 65000)
+    const latestScore = streamEventAttractionScore(rows[0]!, 0, rows.length)
+    const neighborScore = streamEventAttractionScore(rows[1]!, 1, rows.length)
+    const olderScore = streamEventAttractionScore(rows[2]!, 2, rows.length)
+
+    expect(latestScore).toBe(1)
+    expect(neighborScore).toBe(0.69)
+    expect(olderScore).toBe(0.32)
+    expect(streamEventAttractionBand(latestScore)).toBe('high')
+    expect(streamEventAttractionBand(neighborScore)).toBe('medium')
+    expect(streamEventAttractionBand(olderScore)).toBe('low')
+  })
+
   it('renders temporal synchronization metadata and cue badges', () => {
     const container = document.createElement('div')
     render(h(EventStream, { events: baseEvents, temporalSyncWindowMs: 65000 }), container)
@@ -195,6 +213,21 @@ describe('EventStream', () => {
     expect(neighbor.dataset.streamEventSyncSize).toBe('2')
     expect(older.dataset.streamEventSyncSize).toBe('1')
     expect(container.textContent).toContain('sync 2')
+  })
+
+  it('renders gradient attraction metadata on event rows', () => {
+    const container = document.createElement('div')
+    render(h(EventStream, { events: baseEvents }), container)
+    const root = container.querySelector('[data-event-stream]') as HTMLElement
+    const latest = container.querySelector('[data-stream-event-id="e3"]') as HTMLElement
+    const middle = container.querySelector('[data-stream-event-id="e2"]') as HTMLElement
+    const older = container.querySelector('[data-stream-event-id="e1"]') as HTMLElement
+
+    expect(root.dataset.eventStreamHighAttractionCount).toBe('1')
+    expect(latest.dataset.streamEventAttractionScore).toBe('0.90')
+    expect(latest.dataset.streamEventAttractionBand).toBe('high')
+    expect(middle.dataset.streamEventAttractionBand).toBe('medium')
+    expect(older.dataset.streamEventAttractionBand).toBe('low')
   })
 
   it('treats maxItems zero as an empty visible window', () => {

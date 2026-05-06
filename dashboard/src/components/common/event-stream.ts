@@ -15,6 +15,7 @@ export interface StreamEvent {
 }
 
 export type EventStreamStatus = 'empty' | 'ok' | 'warning' | 'error'
+export type EventStreamAttractionBand = 'high' | 'medium' | 'low'
 
 export interface EventStreamSummary {
   totalCount: number
@@ -27,6 +28,8 @@ export interface EventStreamSummary {
   oldestVisibleTimestamp: number | null
   temporalSyncGroupCount: number
   maxTemporalSyncGroupSize: number
+  highAttractionCount: number
+  maxAttractionScore: number
   status: EventStreamStatus
 }
 
@@ -80,6 +83,41 @@ function finiteTimestamp(value: number): number | null {
 
 function normalizedSyncWindowMs(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value))
+}
+
+function roundedScore(value: number): number {
+  return Math.round(value * 100) / 100
+}
+
+function levelAttraction(level: StreamEvent['level']): number {
+  switch (level) {
+    case 'error':
+      return 1
+    case 'warn':
+      return 0.7
+    case 'info':
+      return 0.45
+  }
+}
+
+export function streamEventAttractionScore(
+  row: TemporalSyncStreamRow,
+  visibleIndex: number,
+  visibleCount: number,
+): number {
+  const recency = visibleCount <= 1 ? 1 : 1 - (visibleIndex / Math.max(1, visibleCount - 1))
+  const syncBonus = row.syncGroupSize > 1 ? 0.1 : 0
+  return roundedScore(clamp01((levelAttraction(row.event.level) * 0.7) + (recency * 0.2) + syncBonus))
+}
+
+export function streamEventAttractionBand(score: number): EventStreamAttractionBand {
+  if (score >= 0.8) return 'high'
+  if (score >= 0.55) return 'medium'
+  return 'low'
 }
 
 export function buildTemporalSyncRows(
@@ -147,6 +185,10 @@ export function summarizeEventStream(
       .filter(row => row.syncGroupSize > 1)
       .map(row => row.syncGroupId),
   )
+  const attractionScores = syncRows.map((row, index) =>
+    streamEventAttractionScore(row, index, syncRows.length),
+  )
+  const highAttractionCount = attractionScores.filter(score => streamEventAttractionBand(score) === 'high').length
   const status: EventStreamStatus =
     visible.length === 0
       ? 'empty'
@@ -167,8 +209,20 @@ export function summarizeEventStream(
     oldestVisibleTimestamp: visible[visible.length - 1]?.timestamp ?? null,
     temporalSyncGroupCount: syncedGroups.size,
     maxTemporalSyncGroupSize: syncRows.reduce((max, row) => Math.max(max, row.syncGroupSize), 0),
+    highAttractionCount,
+    maxAttractionScore: attractionScores.reduce((max, score) => Math.max(max, score), 0),
     status,
   }
+}
+
+function attractionRowClass(band: EventStreamAttractionBand, isSynced: boolean): string {
+  if (band === 'high') return 'border-[var(--color-accent)] bg-[var(--color-bg-elevated)]'
+  if (band === 'medium') {
+    return isSynced
+      ? 'border-[var(--color-accent)] bg-[var(--color-bg-elevated)]'
+      : 'border-[var(--color-border-strong)]'
+  }
+  return 'border-transparent opacity-80'
 }
 
 export function EventStream({
@@ -203,6 +257,8 @@ export function EventStream({
       data-event-stream-temporal-sync-window-ms=${normalizedSyncWindowMs(temporalSyncWindowMs)}
       data-event-stream-temporal-sync-group-count=${summary.temporalSyncGroupCount}
       data-event-stream-max-temporal-sync-group-size=${summary.maxTemporalSyncGroupSize}
+      data-event-stream-high-attraction-count=${summary.highAttractionCount}
+      data-event-stream-max-attraction-score=${summary.maxAttractionScore.toFixed(2)}
       data-testid=${testId}
     >
       <div
@@ -238,10 +294,12 @@ export function EventStream({
                 (row, index) => {
                   const e = row.event
                   const isSynced = row.syncGroupSize > 1
+                  const attractionScore = streamEventAttractionScore(row, index, syncRows.length)
+                  const attractionBand = streamEventAttractionBand(attractionScore)
                   return html`
                   <div
                     key=${e.id}
-                    class=${`flex min-w-0 items-start gap-2 rounded-[var(--r-1)] border-l-2 px-2 py-1 hover:bg-[var(--color-bg-hover)] ${isSynced ? 'border-[var(--color-accent)] bg-[var(--color-bg-elevated)]' : 'border-transparent'}`}
+                    class=${`flex min-w-0 items-start gap-2 rounded-[var(--r-1)] border-l-2 px-2 py-1 hover:bg-[var(--color-bg-hover)] ${attractionRowClass(attractionBand, isSynced)}`}
                     role="listitem"
                     data-stream-event-id=${e.id}
                     data-stream-event-level=${e.level}
@@ -251,6 +309,8 @@ export function EventStream({
                     data-stream-event-sync-group=${row.syncGroupId}
                     data-stream-event-sync-size=${row.syncGroupSize}
                     data-stream-event-sync-anchor=${row.syncAnchorTimestamp ?? ''}
+                    data-stream-event-attraction-score=${attractionScore.toFixed(2)}
+                    data-stream-event-attraction-band=${attractionBand}
                   >
                     <span
                       class="mt-0.5 inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full"

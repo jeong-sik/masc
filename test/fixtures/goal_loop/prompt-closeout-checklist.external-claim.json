@@ -123,15 +123,18 @@
       "prompt_requirement": "Linear autoboot warmup visibility",
       "artifact_refs": [
         "test/fixtures/goal_loop/audit-corpus.external-claim.json#NF-5",
-        "test/fixtures/goal_loop/orient.startup.json"
+        "test/fixtures/goal_loop/orient.startup.json",
+        "test/fixtures/goal_loop/autoboot-warmup-fairness.external-claim.json",
+        "lib/server/server_bootstrap_loops.ml#autoboot_proactive_warmup_sec",
+        "test/test_env_config_keeper_bootstrap_intervals.ml#test_autoboot_warmup_jitter_is_bounded_not_linear"
       ],
-      "status": "PARTIAL",
-      "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "Source claim is tracked, but no full row-level replay proves the warmup behavior is closed.",
-      "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13265",
-        "https://github.com/jeong-sik/masc-mcp/issues/13690",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      "status": "PASS",
+      "criterion_id": "autoboot_warmup_fairness_complete",
+      "gap": null,
+      "implementation_pr_refs": [
+        "https://github.com/jeong-sik/masc-mcp/pull/13119",
+        "https://github.com/jeong-sik/masc-mcp/pull/13156",
+        "https://github.com/jeong-sik/masc-mcp/pull/13167"
       ]
     },
     {

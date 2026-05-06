@@ -40,6 +40,23 @@ PROMPT_CHECKLIST_ISSUE_REF_RE = re.compile(
 PROMPT_CHECKLIST_PR_REF_RE = re.compile(
     r"^https://github\.com/jeong-sik/masc-mcp/pull/\d+$"
 )
+AUTOBOOT_WARMUP_FAIRNESS_ALGORITHM = "int32_djb2_bounded_jitter"
+AUTOBOOT_WARMUP_REQUIRED_KEEPERS = (
+    "analyst",
+    "executor",
+    "glm-coding-plan",
+    "issue_king",
+    "janitor",
+    "masc-improver",
+    "nick0cave",
+    "qa-king",
+    "ramarama",
+    "sangsu",
+    "scholar",
+    "taskmaster",
+    "velvet-hammer",
+    "verifier",
+)
 PROMPT_SOURCE_PATH_PREFIX = "prompt_corpus/GOAL_LOOP/"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_VERIFY_GATE_IDS = frozenset(
@@ -112,6 +129,10 @@ def as_int(value: Any) -> int:
     return value if isinstance(value, int) else 0
 
 
+def as_strict_int(value: Any) -> int | None:
+    return value if type(value) is int else None
+
+
 def as_nonempty_str(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
@@ -125,6 +146,13 @@ def string_list(value: Any) -> list[str]:
     return [
         stripped for item in value if (stripped := as_nonempty_str(item)) is not None
     ]
+
+
+def stable_keeper_name_hash(name: str) -> int:
+    acc = 5381
+    for byte in name.encode("utf-8"):
+        acc = ((acc << 5) + acc + byte) & 0x3FFF_FFFF
+    return acc
 
 
 def prompt_source_list(value: Any) -> tuple[list[str], dict[str, Any]]:
@@ -1159,6 +1187,245 @@ def verify_pipeline_evidence(
     }
 
 
+def autoboot_warmup_fairness_evidence(
+    audit_catalog: dict[str, Any],
+    warmup_fairness: dict[str, Any],
+) -> tuple[bool, dict[str, Any]]:
+    scheduler_raw = warmup_fairness.get("scheduler_decision")
+    scheduler = scheduler_raw if isinstance(scheduler_raw, dict) else {}
+    source_catalog_id = audit_catalog.get("catalog_id")
+    evidence_catalog_id = warmup_fairness.get("source_catalog_id")
+    base_warmup = as_strict_int(scheduler.get("base_warmup_sec"))
+    stagger_window = as_strict_int(scheduler.get("stagger_window_sec"))
+    max_delay = as_strict_int(scheduler.get("max_delay_sec"))
+    algorithm = as_nonempty_str(scheduler.get("algorithm"))
+    rows_raw = warmup_fairness.get("keeper_rows", [])
+    rows = rows_raw if isinstance(rows_raw, list) else []
+
+    invalid_reasons: list[str] = []
+
+    def require(condition: bool, reason: str) -> None:
+        if not condition:
+            invalid_reasons.append(reason)
+
+    require(warmup_fairness.get("schema_version") == 1, "schema_version")
+    require(warmup_fairness.get("status") == "PASS", "status")
+    require(
+        isinstance(source_catalog_id, str) and evidence_catalog_id == source_catalog_id,
+        "source_catalog_id",
+    )
+    require(
+        algorithm == AUTOBOOT_WARMUP_FAIRNESS_ALGORITHM,
+        "scheduler_decision.algorithm",
+    )
+    require(base_warmup is not None and base_warmup >= 0, "base_warmup_sec")
+    require(
+        stagger_window is not None and stagger_window >= 0,
+        "stagger_window_sec",
+    )
+    if base_warmup is not None and stagger_window is not None:
+        require(max_delay == base_warmup + stagger_window, "max_delay_sec")
+    else:
+        require(max_delay is not None, "max_delay_sec")
+    require(scheduler.get("position_independent") is True, "position_independent")
+
+    by_name: dict[str, dict[str, Any]] = {}
+    duplicate_keeper_names: set[str] = set()
+    row_errors: list[str] = []
+    warmups: list[int] = []
+    boot_positions: list[int] = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            row_errors.append(f"#{index}: not_object")
+            continue
+        keeper_name = as_nonempty_str(row.get("keeper_name"))
+        if keeper_name is None:
+            row_errors.append(f"#{index}: keeper_name")
+            continue
+        if keeper_name in by_name:
+            duplicate_keeper_names.add(keeper_name)
+        by_name[keeper_name] = row
+        name_hash = as_strict_int(row.get("name_hash"))
+        jitter_bucket = as_strict_int(row.get("jitter_bucket"))
+        warmup_sec = as_strict_int(row.get("warmup_sec"))
+        boot_position = as_strict_int(row.get("boot_position"))
+        if boot_position is not None:
+            boot_positions.append(boot_position)
+        if warmup_sec is not None:
+            warmups.append(warmup_sec)
+        if base_warmup is None or stagger_window is None or stagger_window < 0:
+            continue
+        expected_hash = stable_keeper_name_hash(keeper_name)
+        expected_jitter = (
+            0 if stagger_window == 0 else expected_hash % (stagger_window + 1)
+        )
+        expected_warmup = base_warmup + expected_jitter
+        if name_hash != expected_hash:
+            row_errors.append(f"{keeper_name}: name_hash")
+        if jitter_bucket != expected_jitter:
+            row_errors.append(f"{keeper_name}: jitter_bucket")
+        if warmup_sec != expected_warmup:
+            row_errors.append(f"{keeper_name}: warmup_sec")
+        if warmup_sec is None or max_delay is None:
+            row_errors.append(f"{keeper_name}: warmup_bound")
+        elif not (base_warmup <= warmup_sec <= max_delay):
+            row_errors.append(f"{keeper_name}: warmup_bound")
+        if row.get("within_bound") is not True:
+            row_errors.append(f"{keeper_name}: within_bound")
+
+    required_names = set(AUTOBOOT_WARMUP_REQUIRED_KEEPERS)
+    present_names = set(by_name)
+    missing_keeper_names = sorted(required_names - present_names)
+    unexpected_keeper_names = sorted(present_names - required_names)
+    require(not duplicate_keeper_names, "duplicate_keeper_names")
+    require(not missing_keeper_names, "missing_keeper_names")
+    require(not unexpected_keeper_names, "unexpected_keeper_names")
+    require(len(rows) == len(AUTOBOOT_WARMUP_REQUIRED_KEEPERS), "keeper_rows_total")
+    require(not row_errors, "keeper_rows")
+    require(
+        sorted(boot_positions) == list(range(len(AUTOBOOT_WARMUP_REQUIRED_KEEPERS))),
+        "boot_positions",
+    )
+
+    max_observed_warmup = max(warmups) if warmups else None
+    distinct_warmups = len(set(warmups))
+    if max_delay is not None:
+        require(
+            max_observed_warmup is not None and max_observed_warmup <= max_delay,
+            "max_observed_warmup_sec",
+        )
+    ordered_rows = [
+        row
+        for row in rows
+        if isinstance(row, dict) and as_strict_int(row.get("boot_position")) is not None
+    ]
+    ordered_rows.sort(key=lambda row: as_strict_int(row.get("boot_position")) or 0)
+    observed_by_position = [
+        as_strict_int(row.get("warmup_sec"))
+        for row in ordered_rows
+        if as_strict_int(row.get("warmup_sec")) is not None
+    ]
+    linear_sequence_detected = False
+    if (
+        base_warmup is not None
+        and stagger_window is not None
+        and len(observed_by_position) == len(AUTOBOOT_WARMUP_REQUIRED_KEEPERS)
+    ):
+        linear_sequence_detected = observed_by_position == [
+            base_warmup + (index * stagger_window)
+            for index in range(len(AUTOBOOT_WARMUP_REQUIRED_KEEPERS))
+        ]
+    require(not linear_sequence_detected, "linear_sequence_detected")
+
+    late_raw = warmup_fairness.get("late_keeper_check")
+    late = late_raw if isinstance(late_raw, dict) else {}
+    late_keeper_name = as_nonempty_str(late.get("keeper_name"))
+    late_row = by_name.get(late_keeper_name or "")
+    late_warmup = (
+        as_strict_int(late_row.get("warmup_sec"))
+        if isinstance(late_row, dict)
+        else None
+    )
+    claimed_linear_warmup = as_strict_int(late.get("claimed_linear_warmup_sec"))
+    expected_linear_warmup = (
+        base_warmup + 13 * stagger_window
+        if base_warmup is not None and stagger_window is not None
+        else None
+    )
+    require(late_keeper_name == "verifier", "late_keeper_check.keeper_name")
+    require(as_strict_int(late.get("boot_position")) == 13, "late_keeper_position")
+    require(
+        as_strict_int(late.get("warmup_sec")) == late_warmup,
+        "late_keeper_warmup_sec",
+    )
+    require(
+        expected_linear_warmup is not None
+        and claimed_linear_warmup == expected_linear_warmup,
+        "late_keeper_claimed_linear_warmup_sec",
+    )
+    if max_delay is not None:
+        require(
+            late_warmup is not None and late_warmup <= max_delay,
+            "late_keeper_bounded",
+        )
+    require(late.get("bounded_by_max_delay") is True, "bounded_by_max_delay")
+    require(late.get("not_position_delay") is True, "not_position_delay")
+
+    ordering_raw = warmup_fairness.get("ordering_replay")
+    ordering = ordering_raw if isinstance(ordering_raw, dict) else {}
+    require(ordering.get("status") == "PASS", "ordering_replay.status")
+    require(
+        ordering.get("forward_reverse_stable") is True,
+        "ordering_replay.forward_reverse_stable",
+    )
+    require(
+        as_strict_int(ordering.get("distinct_warmups_min")) is not None
+        and (as_strict_int(ordering.get("distinct_warmups_min")) or 0) >= 3,
+        "ordering_replay.distinct_warmups_min",
+    )
+    require(
+        as_nonempty_str(ordering.get("evidence_ref")) is not None,
+        "ordering_replay.evidence_ref",
+    )
+
+    turn_raw = warmup_fairness.get("post_warmup_turn_outcome")
+    turn = turn_raw if isinstance(turn_raw, dict) else {}
+    require(turn.get("status") == "PASS", "post_warmup_turn_outcome.status")
+    require(
+        turn.get("board_cursor_blocked_until_warmup") is True,
+        "post_warmup_turn_outcome.board_cursor_blocked_until_warmup",
+    )
+    require(
+        turn.get("turn_dispatch_receives_proactive_warmup_elapsed") is True,
+        "post_warmup_turn_outcome.turn_dispatch_receives_proactive_warmup_elapsed",
+    )
+    require(
+        as_nonempty_str(turn.get("evidence_ref")) is not None,
+        "post_warmup_turn_outcome.evidence_ref",
+    )
+
+    implementation_refs = [
+        item
+        for item in string_list(warmup_fairness.get("implementation_pr_refs"))
+        if PROMPT_CHECKLIST_PR_REF_RE.fullmatch(item) is not None
+    ]
+    require(len(implementation_refs) >= 3, "implementation_pr_refs")
+    local_path_leaks = contains_user_local_path(warmup_fairness)
+    require(not local_path_leaks, "local_path_leaks")
+
+    return not invalid_reasons, {
+        "evidence_id": warmup_fairness.get("evidence_id"),
+        "source_catalog_id": source_catalog_id,
+        "evidence_source_catalog_id": evidence_catalog_id,
+        "source_catalog_id_matches": evidence_catalog_id == source_catalog_id,
+        "schema_version": warmup_fairness.get("schema_version"),
+        "status": warmup_fairness.get("status"),
+        "algorithm": algorithm,
+        "base_warmup_sec": base_warmup,
+        "stagger_window_sec": stagger_window,
+        "max_delay_sec": max_delay,
+        "keeper_rows_total": len(rows),
+        "required_keeper_rows_total": len(AUTOBOOT_WARMUP_REQUIRED_KEEPERS),
+        "missing_keeper_names": missing_keeper_names,
+        "unexpected_keeper_names": unexpected_keeper_names,
+        "duplicate_keeper_names": sorted(duplicate_keeper_names),
+        "row_errors": row_errors,
+        "boot_positions": sorted(boot_positions),
+        "max_observed_warmup_sec": max_observed_warmup,
+        "distinct_warmups": distinct_warmups,
+        "linear_sequence_detected": linear_sequence_detected,
+        "late_keeper_name": late_keeper_name,
+        "late_keeper_warmup_sec": late_warmup,
+        "late_keeper_claimed_linear_warmup_sec": claimed_linear_warmup,
+        "ordering_replay_status": ordering.get("status"),
+        "post_warmup_turn_outcome_status": turn.get("status"),
+        "implementation_pr_refs_total": len(implementation_refs),
+        "local_path_leaks": local_path_leaks,
+        "invalid_reasons": invalid_reasons,
+        "recorded": not invalid_reasons,
+    }
+
+
 def build_completion_audit(
     status: dict[str, Any],
     *,
@@ -1168,6 +1435,7 @@ def build_completion_audit(
     prompt_closeout_checklist: dict[str, Any] | None = None,
     source_row_candidate_inventory: dict[str, Any] | None = None,
     verify_pipeline: dict[str, Any] | None = None,
+    autoboot_warmup_fairness: dict[str, Any] | None = None,
 ) -> CompletionAudit:
     audit_catalog = nested_dict(status, "phases", "orient", "summary", "audit_catalog")
     verify_summary = nested_dict(status, "phases", "verify", "summary")
@@ -1447,6 +1715,19 @@ def build_completion_audit(
             verify_evidence,
         ),
     ]
+    if autoboot_warmup_fairness is not None:
+        warmup_passed, warmup_evidence = autoboot_warmup_fairness_evidence(
+            audit_catalog,
+            autoboot_warmup_fairness,
+        )
+        criteria.append(
+            criterion(
+                "autoboot_warmup_fairness_complete",
+                warmup_passed,
+                "Autoboot warmup scheduling is bounded, order-independent, and verified for late keepers.",
+                warmup_evidence,
+            )
+        )
     if prompt_closeout_checklist is not None:
         checklist_passed, checklist_evidence = prompt_closeout_checklist_evidence(
             audit_catalog,
@@ -1586,6 +1867,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Optional GOAL LOOP Verify pipeline result JSON to require for closeout.",
     )
     parser.add_argument(
+        "--autoboot-warmup-fairness",
+        help="Optional bounded autoboot warmup fairness evidence JSON.",
+    )
+    parser.add_argument(
         "--require-complete",
         action="store_true",
         help="Exit non-zero unless every completion criterion passes.",
@@ -1607,6 +1892,7 @@ def main(argv: list[str] | None = None) -> int:
             args.source_row_candidate_inventory
         ),
         verify_pipeline=load_optional_json_file(args.verify_pipeline),
+        autoboot_warmup_fairness=load_optional_json_file(args.autoboot_warmup_fairness),
     )
     if args.format == "json":
         print(audit_to_json(audit))

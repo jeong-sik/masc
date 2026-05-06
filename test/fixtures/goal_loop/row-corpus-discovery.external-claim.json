@@ -437,6 +437,29 @@
         "goal-loop-206-audit-external-claim-2026-05-05"
       ],
       "note": "Claude project history, Gemini history, and local me memory were searched for exact GOAL LOOP strict-corpus markers with high-noise cache directories excluded. No exact corpus marker file was found."
+    },
+    {
+      "artifact_name": "downloads_discovery_cli_strict_corpus_validation_sweep",
+      "artifact_kind": "discovery_cli_validation_report",
+      "result": "NOT_ROW_CORPUS",
+      "observed_files_considered": 56367,
+      "observed_text_units_scanned": 46536,
+      "observed_marker_hits": 0,
+      "observed_candidate_corpora": 8,
+      "observed_validated_strict_corpora": 0,
+      "observed_invalid_candidate_classes": [
+        "cdal_sample_verdict_fixture",
+        "goal_loop_orient_startup_fixture"
+      ],
+      "markers_checked": [
+        "source_catalog_id",
+        "corpus_id",
+        "expected_findings_total",
+        "strict_row",
+        "strict-row",
+        "goal-loop-206-audit-external-claim-2026-05-05"
+      ],
+      "note": "The repo strict-row-corpus discovery CLI scanned Downloads text-like files and text-like archive members against the audit catalog. It found eight JSON objects with findings arrays, all unrelated fixtures rejected by strict-corpus validation, and zero valid 206-row corpora."
     }
   ],
   "broader_structured_id_triage": {

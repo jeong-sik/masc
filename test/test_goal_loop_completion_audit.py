@@ -407,6 +407,15 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertEqual(len(marker_sweeps), 1)
         self.assertEqual(marker_sweeps[0]["observed_archives_checked"], 43)
         self.assertEqual(marker_sweeps[0]["observed_marker_hits"], 0)
+        textlike_sweeps = [
+            artifact
+            for artifact in discovery["candidate_artifacts_checked"]
+            if artifact["artifact_name"]
+            == "downloads_textlike_strict_corpus_marker_sweep"
+        ]
+        self.assertEqual(len(textlike_sweeps), 1)
+        self.assertEqual(textlike_sweeps[0]["observed_files_checked"], 13031)
+        self.assertEqual(textlike_sweeps[0]["observed_marker_hits"], 0)
         workspace_sweeps = [
             artifact
             for artifact in discovery["candidate_artifacts_checked"]

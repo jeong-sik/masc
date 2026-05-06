@@ -156,7 +156,10 @@
   its goal-loop members. A broader filename-level sweep of 43 Downloads zip
   archives matching Kimi/audit/goal/keeper/masc found no `source_catalog_id`,
   `corpus_id`, `expected_findings_total`, strict-row marker, or GOAL LOOP
-  catalog-id marker in text-like archive members.
+  catalog-id marker in text-like archive members. A non-archive text-like
+  Downloads sweep also checked 13,031 files, including 10,848 files in
+  Kimi/audit/goal/keeper/masc paths, and found 0 strict-corpus marker hits; the
+  17 near-miss files carried only aggregate/examples or unrelated field names.
 - [근거] `python3 test/test_goal_loop_completion_audit.py` checked at
   2026-05-06T09:59:29+09:00, confidence High: the completion audit now accepts
   an optional `--strict-row-corpus` artifact and validates it against the

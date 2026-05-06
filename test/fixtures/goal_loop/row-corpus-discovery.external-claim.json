@@ -159,6 +159,24 @@
         "goal-loop-206-audit-external-claim-2026-05-05"
       ],
       "note": "Filename-level sweep of Downloads zip archives matching Kimi, audit, goal, keeper, or masc found no strict-corpus markers in text-like archive members."
+    },
+    {
+      "artifact_name": "downloads_textlike_strict_corpus_marker_sweep",
+      "artifact_kind": "filesystem_marker_search_report",
+      "result": "NOT_ROW_CORPUS",
+      "observed_files_checked": 13031,
+      "observed_relevant_path_files_checked": 10848,
+      "observed_marker_hits": 0,
+      "observed_near_miss_files": 17,
+      "markers_checked": [
+        "source_catalog_id",
+        "corpus_id",
+        "expected_findings_total",
+        "strict_row",
+        "strict-row",
+        "goal-loop-206-audit-external-claim-2026-05-05"
+      ],
+      "note": "Text-like non-archive Downloads files with md, txt, json, jsonl, csv, yaml, yml, ml, mli, js, ts, tsx, html, or css extensions were searched. Strict-corpus marker hits were 0; near-miss files only carried aggregate/examples or unrelated field names, not corpus contract markers."
     }
   ],
   "broader_structured_id_triage": {

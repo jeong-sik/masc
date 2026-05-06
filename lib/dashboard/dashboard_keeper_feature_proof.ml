@@ -18,10 +18,7 @@ type keeper_snapshot = {
   read_error : string option;
 }
 
-type scheduled_decision_stat = {
-  decision_count : int;
-  latest_ts : string option;
-}
+module Decision = Dashboard_keeper_decision_log_proof
 
 let status_to_string = function
   | Pass -> "pass"
@@ -128,46 +125,6 @@ let count_meta snapshots =
   |> List.filter (fun snapshot -> Option.is_some snapshot.meta)
   |> List.length
 
-let empty_scheduled_decision_stat = { decision_count = 0; latest_ts = None }
-
-let scheduled_decision_stats ~config keeper_name =
-  let path = Keeper_types.keeper_decision_log_path config keeper_name in
-  if not (Sys.file_exists path) then empty_scheduled_decision_stat
-  else
-    match Safe_ops.read_file_safe path with
-    | Error _ -> empty_scheduled_decision_stat
-    | Ok contents ->
-      contents
-      |> String.split_on_char '\n'
-      |> List.fold_left
-           (fun acc line ->
-              let line = String.trim line in
-              if line = "" then acc
-              else
-                match Yojson.Safe.from_string line with
-                | exception Yojson.Json_error _ -> acc
-                | json ->
-                  match Safe_ops.json_string_opt "channel" json with
-                  | Some "scheduled_autonomous" ->
-                    {
-                      decision_count = acc.decision_count + 1;
-                      latest_ts =
-                        (match Safe_ops.json_string_opt "ts" json with
-                         | Some ts when String.trim ts <> "" -> Some ts
-                         | _ -> acc.latest_ts);
-                    }
-                  | _ -> acc)
-           empty_scheduled_decision_stat
-
-let scheduled_decision_evidence_json stat =
-  `Assoc [
-    ("decision_count", `Int stat.decision_count);
-    ( "latest_ts",
-      match stat.latest_ts with
-      | Some ts -> `String ts
-      | None -> `Null );
-  ]
-
 let meta_feature_json
       ~id
       ~label
@@ -256,6 +213,84 @@ let runtime_liveness_feature snapshots =
     ~next_action:
       "Resume or repair keepers without persisted turns before claiming fleet-wide autonomy."
 
+let persistent_turn_exchange_feature ~config ~now snapshots =
+  let stats =
+    snapshots
+    |> List.map (fun snapshot ->
+      snapshot.keeper_name, Decision.turn_span_stats ~config snapshot.keeper_name)
+  in
+  let stat_for keeper_name =
+    match List.assoc_opt keeper_name stats with
+    | Some stat -> stat
+    | None -> Decision.turn_span_stats ~config keeper_name
+  in
+  let observed =
+    snapshots
+    |> List.filter_map (fun snapshot ->
+      if Decision.has_persistent_turn_span ~now (stat_for snapshot.keeper_name) then
+        Some snapshot.keeper_name
+      else None)
+    |> uniq_sorted
+  in
+  let missing =
+    snapshots
+    |> List.filter_map (fun snapshot ->
+      if Decision.has_persistent_turn_span ~now (stat_for snapshot.keeper_name) then
+        None
+      else Some snapshot.keeper_name)
+    |> uniq_sorted
+  in
+  let total = keeper_count snapshots in
+  let status =
+    if total = 0 || observed = [] then Fail
+    else if List.length observed = total then Pass
+    else Warn
+  in
+  let per_keeper =
+    snapshots
+    |> List.map (fun snapshot ->
+      Decision.turn_span_evidence_json ~now snapshot.keeper_name
+        (stat_for snapshot.keeper_name))
+  in
+  `Assoc [
+    ("id", `String "persistent_24h_turn_exchange");
+    ("label", `String "24h persistent turn exchange");
+    ("status", `String (status_to_string status));
+    ("summary",
+     `String
+       (Printf.sprintf
+          "%d/%d keepers have decision-log turn spans >= %.1fh and latest turn <= %.1fh old"
+          (List.length observed) total
+          Decision.persistent_turn_window_hours
+          Decision.recent_turn_max_age_hours));
+    ("required_tools", `List []);
+    ("passing_tools", `List []);
+    ("weak_tools", `List []);
+    ("missing_tools", `List []);
+    ("keeper_evidence",
+     `Assoc [
+       ("keeper_count", `Int total);
+       ("meta_count", `Int (count_meta snapshots));
+       ( "required_span_hours",
+         `Float Decision.persistent_turn_window_hours );
+       ( "max_latest_age_hours",
+         `Float Decision.recent_turn_max_age_hours );
+       ("observed_keepers", json_string_list observed);
+       ("missing_keepers", json_string_list missing);
+       ("read_errors", `List (keeper_read_errors snapshots));
+       ("per_keeper", `List per_keeper);
+     ]);
+    ( "evidence_refs",
+      `List [
+        evidence_ref ~kind:"store" ~id:"keeper_decision_log"
+          ~value:"Keeper_types.keeper_decision_log_path";
+        route_evidence "/api/v1/dashboard/execution";
+      ] );
+    ( "next_action",
+      `String
+        "Keep the runtime running until every keeper has decision-log turn evidence spanning at least 24h with a recent latest turn." );
+  ]
+
 let autonomous_tool_feature snapshots =
   meta_counter_feature snapshots
     ~id:"autonomous_tool_use"
@@ -285,11 +320,11 @@ let scheduled_proactive_feature ~config snapshots =
     snapshots
     |> List.map (fun snapshot ->
       snapshot.keeper_name,
-      scheduled_decision_stats ~config snapshot.keeper_name)
+      Decision.scheduled_stats ~config snapshot.keeper_name)
   in
   let decision_stat_for keeper_name =
     List.assoc_opt keeper_name decision_stats
-    |> Option.value ~default:empty_scheduled_decision_stat
+    |> Option.value ~default:Decision.empty_scheduled_stat
   in
   let enabled =
     snapshots
@@ -337,7 +372,7 @@ let scheduled_proactive_feature ~config snapshots =
       `Assoc [
         ("keeper", `String snapshot.keeper_name);
         ("meta_proactive_count_total", `Int meta_count);
-        ("decision_log", scheduled_decision_evidence_json stat);
+        ("decision_log", Decision.scheduled_evidence_json stat);
       ])
   in
   `Assoc [
@@ -433,7 +468,15 @@ let count_status needle statuses =
   |> List.filter (fun status -> status_rank status = status_rank needle)
   |> List.length
 
-let json ~config ?(n = 5000) ?window_hours ?(success_threshold_pct = 80.0) () =
+let json
+      ~config
+      ?(n = 5000)
+      ?window_hours
+      ?(success_threshold_pct = 80.0)
+      ?now
+      ()
+  =
+  let now = Option.value ~default:(Unix.gettimeofday ()) now in
   let success_threshold_pct =
     clamp_float ~low:0.0 ~high:100.0 success_threshold_pct
   in
@@ -443,6 +486,7 @@ let json ~config ?(n = 5000) ?window_hours ?(success_threshold_pct = 80.0) () =
   let features =
     [
       runtime_liveness_feature snapshots;
+      persistent_turn_exchange_feature ~config ~now snapshots;
       autonomous_tool_feature snapshots;
       board_reactive_feature snapshots;
       scheduled_proactive_feature ~config snapshots;

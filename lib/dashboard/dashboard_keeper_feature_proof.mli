@@ -9,9 +9,11 @@ val json :
   ?n:int ->
   ?window_hours:float ->
   ?success_threshold_pct:float ->
+  ?now:float ->
   unit ->
   Yojson.Safe.t
 (** Build the [/api/v1/dashboard/keeper-feature-proof] payload.
 
     [success_threshold_pct] is the minimum per-tool success percentage
-    needed for a required tool to count as passing. The default is 80.0. *)
+    needed for a required tool to count as passing. The default is 80.0.
+    [now] exists for deterministic tests; production callers omit it. *)

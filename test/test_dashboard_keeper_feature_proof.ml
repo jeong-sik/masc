@@ -110,17 +110,41 @@ let log_tool ?(success = true) tool_name =
     ~duration_ms:1.0
     ()
 
-let write_scheduled_decision config keeper_name =
+let write_decision_lines config keeper_name rows =
   let path = KT.keeper_decision_log_path config keeper_name in
   Fs_compat.mkdir_p (Filename.dirname path);
   Fs_compat.save_file path
-    (Yojson.Safe.to_string
-       (`Assoc [
-         ("ts", `String "2026-05-06T01:00:00Z");
-         ("channel", `String "scheduled_autonomous");
-         ("outcome", `String "success");
-       ])
-     ^ "\n")
+    (String.concat "\n" (List.map Yojson.Safe.to_string rows) ^ "\n")
+
+let write_scheduled_decision config keeper_name =
+  write_decision_lines config keeper_name
+    [
+      `Assoc [
+        ("ts", `String "2026-05-06T01:00:00Z");
+        ("channel", `String "scheduled_autonomous");
+        ("outcome", `String "success");
+      ];
+    ]
+
+let write_24h_turn_span config keeper_name ~now =
+  write_decision_lines config keeper_name
+    [
+      `Assoc [
+        ("ts_unix", `Float (now -. (25.0 *. 3600.0)));
+        ( "ts",
+          `String
+            (Masc_domain.iso8601_of_unix_seconds
+               (now -. (25.0 *. 3600.0))) );
+        ("channel", `String "reactive");
+        ("outcome", `String "success");
+      ];
+      `Assoc [
+        ("ts_unix", `Float (now -. 60.0));
+        ("ts", `String (Masc_domain.iso8601_of_unix_seconds (now -. 60.0)));
+        ("channel", `String "scheduled_autonomous");
+        ("outcome", `String "success");
+      ];
+    ]
 
 let feature id json =
   Yojson.Safe.Util.(json |> member "features" |> to_list)
@@ -184,6 +208,8 @@ let test_json_reports_feature_gaps () =
     (Safe_ops.json_int ~default:0 "gap_count" summary > 0);
   check string "scheduled proactive gap is visible" "warn"
     (feature_status "scheduled_proactive_autonomy" json);
+  check string "24h turn exchange requires decision log span" "fail"
+    (feature_status "persistent_24h_turn_exchange" json);
   check string "board tools are fully proved" "pass"
     (feature_status "board_tools" json);
   check string "coding tools are partial/weak proof" "warn"
@@ -225,6 +251,52 @@ let test_decision_log_counts_as_scheduled_proof () =
   in
   check int "both keepers observed" 2 (List.length observed)
 
+let test_persistent_24h_turn_exchange_counts_decision_span () =
+  with_store @@ fun config ->
+  let now = 1_777_000_000.0 in
+  ignore
+    (persist_keeper config ~name:"alpha" ~total_turns:5
+       ~autonomous_action_count:2 ~autonomous_tool_turn_count:2
+       ~board_reactive_turn_count:1 ~proactive_count_total:1);
+  ignore
+    (persist_keeper config ~name:"beta" ~total_turns:4
+       ~autonomous_action_count:1 ~autonomous_tool_turn_count:1
+       ~board_reactive_turn_count:1 ~proactive_count_total:1);
+  write_24h_turn_span config "alpha" ~now;
+  write_24h_turn_span config "beta" ~now;
+  let json =
+    Dashboard_keeper_feature_proof.json
+      ~config
+      ~n:100
+      ~success_threshold_pct:80.0
+      ~now
+      ()
+  in
+  let persistent = feature "persistent_24h_turn_exchange" json in
+  check string "24h decision span satisfies persistence proof" "pass"
+    (Safe_ops.json_string ~default:"missing" "status" persistent);
+  let observed =
+    Yojson.Safe.Util.(
+      persistent
+      |> member "keeper_evidence"
+      |> member "observed_keepers"
+      |> to_list)
+  in
+  check int "both keepers have 24h span" 2 (List.length observed);
+  let per_keeper =
+    Yojson.Safe.Util.(
+      persistent
+      |> member "keeper_evidence"
+      |> member "per_keeper"
+      |> to_list)
+  in
+  check bool "per-keeper span evidence is exposed" true
+    (List.for_all
+       (fun row ->
+          Safe_ops.json_float ~default:0.0 "span_hours" row >= 24.0
+          && Safe_ops.json_bool ~default:false "meets_24h_persistence" row)
+       per_keeper)
+
 let () =
   run "dashboard_keeper_feature_proof"
     [
@@ -234,5 +306,7 @@ let () =
             test_json_reports_feature_gaps;
           test_case "decision log counts as scheduled proof" `Quick
             test_decision_log_counts_as_scheduled_proof;
+          test_case "decision log counts as 24h turn exchange proof" `Quick
+            test_persistent_24h_turn_exchange_counts_decision_span;
         ] );
     ]

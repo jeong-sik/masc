@@ -115,7 +115,7 @@ code_refs:
 - `GET /api/v1/dashboard/safe-autonomy`
   - operations safety view
 - `GET /api/v1/dashboard/keeper-feature-proof`
-  - keeper autonomy feature proof gates
+  - keeper autonomy feature proof gates, including 24h turn-span and web-search tool evidence
   - read-only CLI equivalent: `masc-keeper-feature-proof --base-path <runtime-root>`
 - `GET /api/v1/models/metrics`, `GET /api/v1/dashboard/keeper-costs`
   - runtime cost/latency view

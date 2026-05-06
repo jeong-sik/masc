@@ -260,6 +260,48 @@ let with_env_vars vars f =
         saved)
     f
 
+let test_verify_state_rejects_graphql_auth_failure () =
+  with_temp_base_path (fun base ->
+      let bin_dir = Filename.concat base "bin" in
+      Unix.mkdir bin_dir 0o755;
+      let gh_path = Filename.concat bin_dir "gh" in
+      write_file gh_path
+        {|#!/bin/sh
+set -eu
+cmd1="${1:-}"
+cmd2="${2:-}"
+if [ "$cmd1" = "auth" ] && [ "$cmd2" = "status" ]; then
+  exit 0
+fi
+if [ "$cmd1" = "api" ] && [ "$cmd2" = "graphql" ]; then
+  exit 1
+fi
+exit 2
+|};
+      Unix.chmod gh_path 0o755;
+      let gh_config_dir = Filename.concat base "bundle-gh" in
+      Unix.mkdir gh_config_dir 0o700;
+      write_file (Filename.concat gh_config_dir "hosts.yml")
+        "github.com:\n\
+        \    user: keeper-A\n\
+        \    oauth_token: ghp_graphql_failure_canary\n\
+        \    git_protocol: https\n";
+      let path =
+        match Sys.getenv_opt "PATH" with
+        | None | Some "" -> bin_dir
+        | Some current -> bin_dir ^ ":" ^ current
+      in
+      with_env_vars [ ("PATH", path) ] (fun () ->
+          match Credential_materializer.verify_state ~gh_config_dir with
+          | Stale { reason } ->
+              Alcotest.(check bool)
+                "reason mentions graphql viewer"
+                true
+                (contains_substring reason "graphql viewer")
+          | other ->
+              Alcotest.failf "expected Stale, got %s"
+                (show_credential_state other)))
+
 let test_provision_rejects_empty_token () =
   match
     Credential_materializer.provision_via_with_token
@@ -321,6 +363,15 @@ if [ "$cmd1" = "auth" ] && [ "$cmd2" = "status" ]; then
   env | sort > "$GH_CONFIG_DIR/status.env"
   printf '%s\n' "$@" > "$GH_CONFIG_DIR/status.argv"
   if [ -s "$GH_CONFIG_DIR/hosts.yml" ]; then
+    exit 0
+  fi
+  exit 1
+fi
+if [ "$cmd1" = "api" ] && [ "$cmd2" = "graphql" ]; then
+  env | sort > "$GH_CONFIG_DIR/api.env"
+  printf '%s\n' "$@" > "$GH_CONFIG_DIR/api.argv"
+  if [ -s "$GH_CONFIG_DIR/hosts.yml" ]; then
+    printf '%s\n' 'keeper-A'
     exit 0
   fi
   exit 1
@@ -397,6 +448,8 @@ exit 2
         (read_file (Filename.concat gh_config_dir "login.env"));
       assert_clean_env "status env"
         (read_file (Filename.concat gh_config_dir "status.env"));
+      assert_clean_env "api env"
+        (read_file (Filename.concat gh_config_dir "api.env"));
       let hosts_yml =
         read_file (Filename.concat gh_config_dir "hosts.yml")
       in
@@ -637,6 +690,8 @@ let () =
           Alcotest.test_case
             "keyring-only hosts.yml without oauth_token is Stale" `Quick
             test_keyring_backed_bundle_without_oauth_token_is_stale;
+          Alcotest.test_case "GraphQL auth failure is Stale" `Quick
+            test_verify_state_rejects_graphql_auth_failure;
         ] );
       ( "ensure",
         [

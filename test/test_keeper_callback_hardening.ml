@@ -134,6 +134,7 @@ let test_documented_callback_label_vocabulary () =
       "on_error";
       "on_tool_error";
       "work_discovery_nudge";
+      "keeper_lifecycle_hook";
     ]
   in
   List.iter (fun label ->

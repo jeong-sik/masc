@@ -50,9 +50,11 @@ type hook = keeper_id:string -> event -> unit
     — calling twice with the same closure registers it twice. *)
 val register : hook -> unit
 
-(** Run every registered hook with the given event. Exceptions raised
-    from a hook are caught and logged via [Log.Server.warn]; the runner
-    always returns normally. *)
+(** Run every registered hook with the given event. Non-cancellation
+    exceptions raised from a hook are caught, counted via
+    [metric_keeper_lifecycle_callback_failures], and logged via
+    [Log.Server.warn]; [Eio.Cancel.Cancelled] is re-raised to preserve
+    cooperative cancellation. *)
 val run : keeper_id:string -> event -> unit
 
 (** Number of currently registered hooks. Useful for tests. *)

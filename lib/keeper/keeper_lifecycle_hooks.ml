@@ -34,7 +34,17 @@ let run ~keeper_id (ev : event) : unit =
   List.iter
     (fun h ->
       try h ~keeper_id ev
-      with exn ->
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_lifecycle_callback_failures
+          ~labels:
+            [
+              ("keeper", keeper_id);
+              ("callback", "keeper_lifecycle_hook");
+            ]
+          ();
         Log.Server.warn
           "[KeeperLifecycleHooks] hook raised on keeper_id=%s: %s"
           keeper_id (Printexc.to_string exn))

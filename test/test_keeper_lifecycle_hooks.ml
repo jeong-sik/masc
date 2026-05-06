@@ -9,9 +9,20 @@
 open Alcotest
 
 module H = Masc_mcp.Keeper_lifecycle_hooks
+module P = Masc_mcp.Prometheus
 module SM = Masc_mcp.Keeper_state_machine
 
 let setup () = H.reset_for_testing ()
+
+let lifecycle_hook_failure_count ~keeper =
+  P.metric_value_or_zero
+    P.metric_keeper_lifecycle_callback_failures
+    ~labels:
+      [
+        ("keeper", keeper);
+        ("callback", "keeper_lifecycle_hook");
+      ]
+    ()
 
 let test_register_increments_count () =
   setup ();
@@ -57,12 +68,30 @@ let test_run_passes_keeper_id_and_event () =
 
 let test_exception_in_hook_is_swallowed () =
   setup ();
+  let keeper = "keeper-lifecycle-hooks-test" in
   let after_count = ref 0 in
   H.register (fun ~keeper_id:_ _ -> failwith "boom");
   H.register (fun ~keeper_id:_ _ -> incr after_count);
+  let before = lifecycle_hook_failure_count ~keeper in
   (* Should not raise. *)
-  H.run ~keeper_id:"k" H.Tombstone_reaped;
-  check int "subsequent hook still ran" 1 !after_count
+  H.run ~keeper_id:keeper H.Tombstone_reaped;
+  let after = lifecycle_hook_failure_count ~keeper in
+  check int "subsequent hook still ran" 1 !after_count;
+  check (float 0.001) "hook failure metric increments" 1.0
+    (after -. before)
+
+let test_cancelled_in_hook_is_reraised () =
+  setup ();
+  H.register (fun ~keeper_id:_ _ ->
+    raise (Eio.Cancel.Cancelled (Failure "synthetic cancel")));
+  let raised =
+    try
+      H.run ~keeper_id:"cancel-keeper" H.Tombstone_reaped;
+      false
+    with
+    | Eio.Cancel.Cancelled _ -> true
+  in
+  check bool "cancelled re-raised" true raised
 
 let test_reset_for_testing_clears () =
   setup ();
@@ -79,6 +108,7 @@ let () =
       test_case "dispatches in order"        `Quick test_run_dispatches_in_order;
       test_case "passes keeper_id and event" `Quick test_run_passes_keeper_id_and_event;
       test_case "swallows exceptions"        `Quick test_exception_in_hook_is_swallowed;
+      test_case "re-raises cancellation"     `Quick test_cancelled_in_hook_is_reraised;
     ];
     "reset_for_testing", [ test_case "clears all" `Quick test_reset_for_testing_clears ];
   ]

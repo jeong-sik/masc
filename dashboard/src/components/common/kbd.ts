@@ -28,7 +28,15 @@
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 
-type KbdSize = 'sm' | 'md'
+export type KbdSize = 'sm' | 'md'
+
+export interface KbdSummary {
+  readonly size: KbdSize
+  readonly hasTitle: boolean
+  readonly hasCustomClass: boolean
+  readonly titleLength: number
+  readonly classNameLength: number
+}
 
 const BASE =
   'inline-flex items-center justify-center rounded-xs border border-b-2 font-mono text-center text-3xs ' +
@@ -47,7 +55,25 @@ export function kbdClasses(size: KbdSize = 'md', extra?: string): string {
     : `${BASE} ${sized} ${extra}`
 }
 
-interface KbdProps {
+export function summarizeKbd({
+  size = 'md',
+  className,
+  title,
+}: {
+  size?: KbdSize
+  className?: string
+  title?: string
+}): KbdSummary {
+  return {
+    size,
+    hasTitle: title !== undefined && title !== '',
+    hasCustomClass: className !== undefined && className !== '',
+    titleLength: title?.length ?? 0,
+    classNameLength: className?.length ?? 0,
+  }
+}
+
+export interface KbdProps {
   /** Key label — e.g. "⌘K", "?", "1", "Ctrl+P". Supports multi-char
       strings because the primitive deliberately doesn't parse chords;
       callers that want auto-split key chords should compose several
@@ -68,11 +94,16 @@ export function Kbd({
   title,
   testId,
 }: KbdProps) {
+  const summary = summarizeKbd({ size, className: cx, title })
   const cls = kbdClasses(size, cx)
   return html`<kbd
     class=${cls}
     data-kbd
-    data-kbd-size=${size}
+    data-kbd-size=${summary.size}
+    data-kbd-has-title=${summary.hasTitle}
+    data-kbd-has-custom-class=${summary.hasCustomClass}
+    data-kbd-title-length=${summary.titleLength}
+    data-kbd-class-length=${summary.classNameLength}
     title=${title}
     data-testid=${testId}
   >${children}</kbd>`

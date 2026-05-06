@@ -5,6 +5,7 @@
 // of the dashboard.
 
 import { html } from 'htm/preact'
+import { formatRelativeAgeMs, normalizeTimestampMs } from '../../lib/format-time'
 import { StatusDot } from './status-dot'
 
 export type PersistenceState = 'saved' | 'syncing' | 'conflict' | 'offline'
@@ -27,8 +28,6 @@ const CONFIG: Record<PersistenceState, PersistenceStateConfig> = {
 
 const FRESH_MS = 5 * 60 * 1000
 const RECENT_MS = 60 * 60 * 1000
-const UNIX_MS_THRESHOLD = 1_000_000_000_000
-const relativeFormatter = new Intl.RelativeTimeFormat('ko', { numeric: 'auto' })
 
 const FRESHNESS_LABEL: Record<PersistenceFreshness, string> = {
   fresh: '최신',
@@ -73,7 +72,7 @@ function timestampMs(value?: string | null): number | null {
 
 function normalizeUnixMs(value: number): number {
   if (!Number.isFinite(value)) return Date.now()
-  return value < UNIX_MS_THRESHOLD ? value * 1000 : value
+  return normalizeTimestampMs(value)
 }
 
 function nowMs(value: string | number | Date | undefined): number {
@@ -84,14 +83,6 @@ function nowMs(value: string | number | Date | undefined): number {
     return Number.isNaN(parsed) ? Date.now() : parsed
   }
   return Date.now()
-}
-
-function relativeTimeFromAgeMs(ageMs: number): string {
-  const deltaSec = Math.max(0, Math.round(ageMs / 1000))
-  if (deltaSec < 60) return relativeFormatter.format(-deltaSec, 'second')
-  if (deltaSec < 3600) return relativeFormatter.format(-Math.round(deltaSec / 60), 'minute')
-  if (deltaSec < 86400) return relativeFormatter.format(-Math.round(deltaSec / 3600), 'hour')
-  return relativeFormatter.format(-Math.round(deltaSec / 86400), 'day')
 }
 
 export function classifyPersistenceFreshness(
@@ -142,7 +133,7 @@ export function PersistenceStatus({
   const summary = summarizePersistenceStatus(status, lastSaved, now)
   const timeText =
     summary.lastSavedIso && summary.ageMs !== null
-      ? relativeTimeFromAgeMs(summary.ageMs)
+      ? formatRelativeAgeMs(summary.ageMs)
       : null
   const freshnessLabel = FRESHNESS_LABEL[summary.freshness]
 

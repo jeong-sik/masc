@@ -722,6 +722,7 @@ let stale_terminal_reason_code = function
   | Some (Keeper_registry.Turn_consecutive_failures _) -> "turn_failures"
   | Some (Keeper_registry.Ambiguous_partial_commit _) ->
       "ambiguous_partial_commit"
+  | Some (Keeper_registry.Stale_fleet_batch _) -> "stale_fleet_batch"
   | Some Keeper_registry.Fiber_unresolved -> "fiber_unresolved"
   | Some (Keeper_registry.Exception _) -> "exception"
   | None -> "stale_turn_timeout"

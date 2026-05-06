@@ -144,10 +144,23 @@ let fake_gh_echo_script =
    printf 'gh:%s\\n' \"$*\"\n\
    exit 0\n"
 
-let with_fake_gh f =
+let fake_gh_pr_create_504_then_view_script =
+  "#!/bin/sh\n\
+   if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"create\" ]; then\n\
+   \  printf 'pull request create failed: HTTP 504: 504 Gateway Timeout (https://api.github.com/graphql)\\n' >&2\n\
+   \  exit 1\n\
+   fi\n\
+   if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"view\" ]; then\n\
+   \  printf '{\"number\":13799,\"url\":\"https://github.com/jeong-sik/masc-mcp/pull/13799\",\"headRefName\":\"feature/recovered\",\"state\":\"OPEN\",\"isDraft\":true}\\n'\n\
+   \  exit 0\n\
+   fi\n\
+   printf 'unexpected gh invocation: %s\\n' \"$*\" >&2\n\
+   exit 2\n"
+
+let with_fake_gh_script script f =
   let dir = temp_dir () in
   let gh_path = Filename.concat dir "gh" in
-  write_file gh_path fake_gh_echo_script;
+  write_file gh_path script;
   Unix.chmod gh_path 0o755;
   let path =
     match Sys.getenv_opt "PATH" with
@@ -156,6 +169,8 @@ let with_fake_gh f =
   in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) @@ fun () ->
   with_env "PATH" path f
+
+let with_fake_gh f = with_fake_gh_script fake_gh_echo_script f
 
 let with_fake_docker f =
   let dir = temp_dir () in
@@ -202,6 +217,9 @@ let setup_docker_pr_tool f =
 
 let parse_string_field raw field =
   Yojson.Safe.from_string raw |> Json.member field |> Json.to_string_option
+
+let parse_bool_field raw field =
+  Yojson.Safe.from_string raw |> Json.member field |> Json.to_bool_option
 
 let test_pr_list_argv_uses_repo_state_limit_json () =
   check (list string) "argv"
@@ -327,6 +345,32 @@ let test_pr_create_hard_mode_routes_through_broker () =
     || contains_substring raw "gh:pr create");
   check bool "keeps draft flag" true (contains_substring raw "--draft")
 
+let test_pr_create_recovers_visible_pr_after_transient_504 () =
+  with_fake_gh_script fake_gh_pr_create_504_then_view_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_HARD_MODE" "true" @@ fun () ->
+  setup_docker_pr_tool @@ fun ~config ~meta ->
+  let raw =
+    K.handle_keeper_pr_create ~config ~meta
+      ~args:
+        (`Assoc
+          [
+            ("repo", `String "jeong-sik/masc-mcp");
+            ("title", `String "recovered draft PR");
+            ("body", `String "recovered draft PR body");
+            ("head", `String "feature/recovered");
+            ("cwd", `String "repos/masc-mcp");
+          ])
+  in
+  check (option bool) "recovered pr create ok" (Some true)
+    (parse_bool_field raw "ok");
+  check (option string) "recovery marker"
+    (Some "pr_create_transient_failure")
+    (parse_string_field raw "recovered_from_error");
+  check bool "keeps original 504 evidence" true
+    (contains_substring raw "HTTP 504");
+  check bool "returns recovered PR metadata" true
+    (contains_substring raw "https://github.com/jeong-sik/masc-mcp/pull/13799")
+
 (* Regression: any preset that grants the [github] group in
    config/tool_policy.toml must satisfy [mutation_preset_ok]. Without
    this, [keeper_pr_create] is visible in the keeper tool surface but
@@ -379,6 +423,8 @@ let () =
             test_pr_create_routes_through_docker;
           test_case "pr create hard mode routes through broker" `Quick
             test_pr_create_hard_mode_routes_through_broker;
+          test_case "pr create recovers visible PR after transient 504" `Quick
+            test_pr_create_recovers_visible_pr_after_transient_504;
         ] );
       ( "preset_gate",
         [

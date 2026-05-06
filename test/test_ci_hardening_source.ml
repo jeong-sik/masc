@@ -1141,10 +1141,10 @@ let test_keeper_required_tool_contracts () =
   check bool "docker PR lifecycle harness default matches runbook" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       {|REQUIRED_TOOLS="${REQUIRED_TOOLS:-keeper_shell,keeper_bash,masc_code_git,keeper_pr_create,keeper_pr_review_comment}"|});
+       {|REQUIRED_TOOLS="${REQUIRED_TOOLS:-keeper_shell,keeper_bash,keeper_pr_create,keeper_pr_review_comment}"|});
   check bool "runbook documents docker PR lifecycle required tool default" true
     (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-       "`keeper_shell`, `keeper_bash`, `masc_code_git`, `keeper_pr_create`, and");
+       "`keeper_shell`, `keeper_bash`, `keeper_pr_create`, and");
   check bool "docker PR lifecycle prompt accepts brokered route proof" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
@@ -1195,18 +1195,18 @@ let test_keeper_msg_timeout_contracts () =
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
        "server_incarnation_changed");
-  check bool "docker PR lifecycle prompt routes mutating git through masc_code_git" true
+  check bool "docker PR lifecycle prompt routes mutating git through docker bash" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       "Do not run git commit, git push, or other mutating git commands through keeper_bash");
-  check bool "docker PR lifecycle prompt names masc_code_git for push" true
+       "Use keeper_bash inside your Docker playground for proof-file creation and git add/commit/push");
+  check bool "docker PR lifecycle prompt names keeper_bash for push" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       "Commit and git push that branch with masc_code_git");
-  check bool "docker PR lifecycle prompt uses keeper_fs_edit for proof edit" true
+       "Commit and git push that branch with keeper_bash");
+  check bool "docker PR lifecycle prompt uses docker bash for proof edit" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       "with keeper_fs_edit");
+       "with keeper_bash from inside the Docker playground");
   check bool "docker PR lifecycle prompt forbids gh pr shell mutation" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
@@ -1312,6 +1312,11 @@ let test_keeper_pr_audit_contracts () =
        "pr_action_metric_paths"
      && file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
           "tool_call_paths");
+  check bool "keeper fleet audit recognizes route_evidence docker markers" true
+    (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
+       "route_evidence"
+     && file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
+          "route_evidence.via=docker");
   check bool "keeper fleet audit survives live invalid utf8 rows" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        {|errors="replace"|})

@@ -697,6 +697,18 @@ let rec add_routes ~sw ~clock router =
          let json = dashboard_planning_http_json ~config:state.Mcp_server.room_config in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/bootstrap" (fun request reqd ->
+       (* Cold-start bootstrap: routes to the shared SSOT
+          [dashboard_bootstrap_http_json] in [Server_dashboard_http] so
+          the HTTP/1.1 router and HTTP/2 gateway return identical
+          payloads.  Slice list, error contract, and per-slice
+          exception capture all live in the SSOT; this handler is
+          just the auth + transport wrapper. *)
+       with_public_read (fun state req reqd ->
+         let json = dashboard_bootstrap_http_json ~state ~sw ~clock req in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/goals" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = dashboard_goals_tree_http_json ~config:state.Mcp_server.room_config in

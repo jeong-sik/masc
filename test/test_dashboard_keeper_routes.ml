@@ -1261,6 +1261,33 @@ let test_execution_trust_route_surfaces_trust_summary_fields () =
      | _ -> false)
 ;;
 
+let test_dashboard_bootstrap_route_surfaces_cold_start_contract () =
+  with_seeded_server
+  @@ fun ~port ~config:_ ~admin_token:_ ~keeper_name:_ ->
+  let result =
+    run_curl_get ~port ~path:"/api/v1/dashboard/bootstrap" ()
+  in
+  require_status "bootstrap GET returns 200" 200 result;
+  let open Yojson.Safe.Util in
+  let json = Yojson.Safe.from_string result.body in
+  (match json |> member "served_at" with
+   | `String value when String.trim value <> "" -> ()
+   | _ -> fail ("bootstrap served_at missing: " ^ result.body));
+  check int "bootstrap milestone" 1 (json |> member "milestone" |> to_int);
+  List.iter
+    (fun key ->
+       match json |> member key with
+       | `Null -> failf "bootstrap missing slice %s: %s" key result.body
+       | _ -> ())
+    [ "shell"
+    ; "execution"
+    ; "planning"
+    ; "namespace_truth"
+    ; "goals"
+    ; "goal_loop_status"
+    ]
+;;
+
 let test_composite_routes_surface_latest_execution_receipt () =
   with_seeded_server
   @@ fun ~port ~config ~admin_token ~keeper_name ->
@@ -1654,6 +1681,10 @@ let () =
             "execution trust route surfaces trust summary fields"
             `Slow
             test_execution_trust_route_surfaces_trust_summary_fields
+        ; test_case
+            "dashboard bootstrap route surfaces cold-start contract"
+            `Slow
+            test_dashboard_bootstrap_route_surfaces_cold_start_contract
         ; test_case
             "composite routes surface latest execution receipt"
             `Slow

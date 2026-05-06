@@ -134,3 +134,22 @@ val operator_confirm_http_json :
   (Yojson.Safe.t, string) result
 
 val operator_error_json : string -> Yojson.Safe.t
+
+(** {1 Cold-start bootstrap aggregator}
+
+    Returns the snapshot of multiple dashboard slices in a single JSON
+    payload so the frontend cold start does not fan out into N
+    parallel HTTP calls.  Per-slice exceptions are captured and
+    surfaced as a JSON object under the slice key:
+    {"error":"slice_unavailable", "slice":"<name>"}.  A single
+    broken slice therefore does not 500 the whole bootstrap.
+
+    Single SSOT — both the HTTP/1.1 router and the HTTP/2 gateway
+    call this function so the payload shape and slice list cannot
+    drift between transports. *)
+val dashboard_bootstrap_http_json :
+  state:Mcp_server.server_state ->
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  Httpun.Request.t ->
+  Yojson.Safe.t

@@ -24,6 +24,18 @@ val observe_or_fail :
     [Cancelled] is re-raised so cooperative-cancel semantics are
     preserved — Step 5 (Cancelled swallow removal) depends on this. *)
 
+val observe_silent :
+  kind:string ->
+  (unit -> unit) ->
+  unit
+(** [observe_silent ~kind f] runs [f ()] and absorbs any exception
+    other than [Eio.Cancel.Cancelled] without emitting another log line.
+
+    Use only for caller contracts that must remain fully non-throwing
+    even when the logging/telemetry backend is the failing component.
+    The [kind] label is still required at call sites so silent usage
+    remains explicit in reviews. *)
+
 val observe_or_default :
   kind:string ->
   ?keeper_name:string ->

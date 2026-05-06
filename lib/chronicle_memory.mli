@@ -11,15 +11,22 @@ val episode_of_candidate :
 (** Convert a chronicle candidate epoch into an OAS episodic memory entry. *)
 
 val store_candidate_epoch :
+  ?timestamp:float ->
   memory:Agent_sdk.Memory.t ->
   keeper_name:string ->
   Chronicle_ingest.candidate_epoch ->
   unit
-(** Store one candidate epoch in [memory]. *)
+(** Store one candidate epoch in [memory].
+
+    [?timestamp] overrides the deterministic epoch-date timestamp. *)
 
 val store_candidate_epochs :
+  ?timestamp:float ->
   memory:Agent_sdk.Memory.t ->
   keeper_name:string ->
   Chronicle_ingest.candidate_epoch list ->
   int
-(** Store candidate epochs in [memory]. Returns the number of stored entries. *)
+(** Store candidate epochs in [memory]. Returns the number of stored entries.
+
+    [?timestamp] overrides the deterministic epoch-date timestamp for every
+    stored epoch. *)

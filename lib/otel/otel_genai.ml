@@ -30,6 +30,32 @@ module Attr_key = struct
   let tool_success = "tool.success"
   let tool_duration_ms = "tool.duration_ms"
 
+  let all_known =
+    [ gen_ai_operation_name
+    ; gen_ai_provider_name
+    ; gen_ai_agent_name
+    ; gen_ai_agent_id
+    ; gen_ai_conversation_id
+    ; gen_ai_tool_name
+    ; masc_gen_ai_keeper_name
+    ; masc_gen_ai_cascade_name
+    ; keeper_name
+    ; keeper_agent_name
+    ; keeper_cascade_name
+    ; keeper_trace_id
+    ; keeper_generation
+    ; keeper_max_context
+    ; keeper_max_turns
+    ; keeper_max_idle_turns
+    ; keeper_channel
+    ; keeper_is_retry
+    ; keeper_current_task_id
+    ; tool_name
+    ; tool_success
+    ; tool_duration_ms
+    ]
+  ;;
+
   let official_gen_ai =
     [ gen_ai_operation_name
     ; gen_ai_provider_name

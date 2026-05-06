@@ -64,6 +64,34 @@ let salience_of_candidate (epoch : Chronicle_ingest.candidate_epoch) =
   in
   min 0.95 (0.55 +. commit_signal +. goal_signal)
 
+let utc_midnight_of_yyyy_mm_dd raw =
+  try
+    Scanf.sscanf raw "%04d-%02d-%02d" (fun year month day ->
+        let tm =
+          {
+            Unix.tm_sec = 0;
+            tm_min = 0;
+            tm_hour = 0;
+            tm_mday = day;
+            tm_mon = month - 1;
+            tm_year = year - 1900;
+            tm_wday = 0;
+            tm_yday = 0;
+            tm_isdst = false;
+          }
+        in
+        let local_epoch, _ = Unix.mktime tm in
+        let utc_as_local, _ = Unix.mktime (Unix.gmtime local_epoch) in
+        let tz_offset = local_epoch -. utc_as_local in
+        Some (local_epoch +. tz_offset))
+  with Scanf.Scan_failure _ | Failure _ | End_of_file | Invalid_argument _ ->
+    None
+
+let default_timestamp_of_candidate epoch =
+  Option.value
+    (utc_midnight_of_yyyy_mm_dd epoch.Chronicle_ingest.end_date)
+    ~default:(Time_compat.now ())
+
 let episode_of_candidate ?timestamp ~keeper_name
     (epoch : Chronicle_ingest.candidate_epoch) : Agent_sdk.Memory.episode =
   let summary = summary_of_candidate epoch in
@@ -81,7 +109,7 @@ let episode_of_candidate ?timestamp ~keeper_name
     ]
   in
   { id = episode_id epoch
-  ; timestamp = Option.value timestamp ~default:(Time_compat.now ())
+  ; timestamp = Option.value timestamp ~default:(default_timestamp_of_candidate epoch)
   ; participants = [ keeper_name ]
   ; action = summary
   ; outcome = Agent_sdk.Memory.Neutral
@@ -98,10 +126,10 @@ let episode_of_candidate ?timestamp ~keeper_name
       ]
   }
 
-let store_candidate_epoch ~memory ~keeper_name epoch =
+let store_candidate_epoch ?timestamp ~memory ~keeper_name epoch =
   Agent_sdk.Memory.store_episode memory
-    (episode_of_candidate ~keeper_name epoch)
+    (episode_of_candidate ?timestamp ~keeper_name epoch)
 
-let store_candidate_epochs ~memory ~keeper_name epochs =
-  List.iter (store_candidate_epoch ~memory ~keeper_name) epochs;
+let store_candidate_epochs ?timestamp ~memory ~keeper_name epochs =
+  List.iter (store_candidate_epoch ?timestamp ~memory ~keeper_name) epochs;
   List.length epochs

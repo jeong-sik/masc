@@ -25,6 +25,7 @@ module Attr_key : sig
   val tool_name : string
   val tool_success : string
   val tool_duration_ms : string
+  val all_known : string list
   val official_gen_ai : string list
   val masc_extensions : string list
   val legacy : string list

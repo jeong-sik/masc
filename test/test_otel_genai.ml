@@ -142,6 +142,7 @@ let test_attr_key_registry_boundaries () =
 
 let test_attr_key_registry_full_coverage () =
   let module K = Lib.Otel_genai.Attr_key in
+  let unique keys = List.sort_uniq String.compare keys in
   let check_official key =
     check bool (key ^ " official") true (K.is_official_gen_ai key);
     check bool (key ^ " not masc extension") false (K.is_masc_extension key)
@@ -156,7 +157,17 @@ let test_attr_key_registry_full_coverage () =
   in
   List.iter check_official K.official_gen_ai;
   List.iter check_extension K.masc_extensions;
-  List.iter check_legacy K.legacy
+  List.iter check_legacy K.legacy;
+  let classified = K.official_gen_ai @ K.masc_extensions @ K.legacy in
+  check
+    (list string)
+    "all known keys are classified"
+    (unique K.all_known)
+    (unique classified);
+  check int "no duplicate classifications" (List.length classified)
+    (List.length (unique classified));
+  check int "no duplicate all_known keys" (List.length K.all_known)
+    (List.length (unique K.all_known))
 ;;
 
 let test_tool_execution_attrs () =
@@ -187,6 +198,7 @@ let test_dispatch_hook_emits_tool_span_payload () =
           let result : Lib.Tool_result.t =
             { success = true
             ; data = `String "ok"
+            ; legacy_message = "ok"
             ; tool_name = "keeper_shell"
             ; duration_ms = 123.4
             }

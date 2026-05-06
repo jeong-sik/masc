@@ -255,13 +255,27 @@ let test_chronicle_memory_episode_shape () =
   check string "summary includes structured commit count" expected_summary
     episode.action
 
+let test_chronicle_memory_default_timestamp_uses_epoch_end_date () =
+  let episode = CM.episode_of_candidate ~keeper_name:"sangsu" sample_epoch in
+  let tm = Unix.gmtime episode.timestamp in
+  check int "year" 2026 (tm.Unix.tm_year + 1900);
+  check int "month" 5 (tm.Unix.tm_mon + 1);
+  check int "day" 2 tm.Unix.tm_mday;
+  check int "hour" 0 tm.Unix.tm_hour;
+  check int "minute" 0 tm.Unix.tm_min
+
 let test_chronicle_memory_store_recall () =
   let memory = Agent_sdk.Memory.create () in
+  let expected =
+    CM.episode_of_candidate ~keeper_name:"sangsu" sample_epoch
+  in
   let stored =
     CM.store_candidate_epochs ~memory ~keeper_name:"sangsu" [ sample_epoch ]
   in
   check int "stored count" 1 stored;
-  let recalled = Agent_sdk.Memory.recall_episodes memory ~limit:10 () in
+  let recalled =
+    Agent_sdk.Memory.recall_episodes memory ~now:expected.timestamp ~limit:10 ()
+  in
   check int "recalled count" 1 (List.length recalled);
   let episode = List.hd recalled in
   check string "recalled id"
@@ -269,6 +283,15 @@ let test_chronicle_memory_store_recall () =
   check string "recalled event type" "git_chronicle"
     (Option.value ~default:""
        (metadata_string "event_type" episode.metadata))
+
+let test_chronicle_memory_store_timestamp_override () =
+  let memory = Agent_sdk.Memory.create () in
+  CM.store_candidate_epoch ~timestamp:84.0 ~memory ~keeper_name:"sangsu"
+    sample_epoch;
+  let episode =
+    Agent_sdk.Memory.recall_episodes memory ~now:84.0 ~limit:10 () |> List.hd
+  in
+  check (float 0.001) "stored timestamp override" 84.0 episode.timestamp
 
 let () =
   run "Chronicle_ingest" [
@@ -302,6 +325,10 @@ let () =
     ]);
     ("chronicle_memory", [
       test_case "episode shape" `Quick test_chronicle_memory_episode_shape;
+      test_case "default timestamp uses epoch end date" `Quick
+        test_chronicle_memory_default_timestamp_uses_epoch_end_date;
       test_case "store recall" `Quick test_chronicle_memory_store_recall;
+      test_case "store timestamp override" `Quick
+        test_chronicle_memory_store_timestamp_override;
     ]);
   ]

@@ -12,6 +12,43 @@
 
 const { useState: _stUseState, useEffect: _stUseEffect, useRef: _stUseRef, useMemo: _stUseMemo } = React;
 
+const STATUS_TRAY_DEFAULT_THRESHOLDS = Object.freeze({
+  failUrgent: 3,
+  cascadeInfo: 2,
+});
+
+function _statusTrayPositiveInt(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+function _statusTrayThresholds(D) {
+  const thresholds = (D && (
+    D.status_tray_thresholds ||
+    D.statusTrayThresholds ||
+    (D.thresholds && (D.thresholds.status_tray || D.thresholds.statusTray)) ||
+    {}
+  )) || {};
+  return {
+    failUrgent: _statusTrayPositiveInt(
+      thresholds.fail_urgent ||
+      thresholds.failUrgent ||
+      thresholds.fail_count ||
+      thresholds.failCount ||
+      thresholds.fails,
+      STATUS_TRAY_DEFAULT_THRESHOLDS.failUrgent
+    ),
+    cascadeInfo: _statusTrayPositiveInt(
+      thresholds.cascade_info ||
+      thresholds.cascadeInfo ||
+      thresholds.cascade_count ||
+      thresholds.cascadeCount ||
+      thresholds.cascades,
+      STATUS_TRAY_DEFAULT_THRESHOLDS.cascadeInfo
+    ),
+  };
+}
+
 function _useTrayPop() {
   const [open, setOpen] = _stUseState(null); // 'kpi' | 'life' | 'ticker' | 'keepers' | null
   const ref = _stUseRef(null);
@@ -65,9 +102,13 @@ function _statusCounts(D) {
 // Pick the dot to spotlight in the KPI slot. Only the urgent paths
 // have real meaning today; for the calm path we expose the raw event
 // count rather than a fabricated TPS number.
-function _kpiSpotlight(counts) {
-  if (counts.fails >= 3) return { l: "fails", v: counts.fails, t: "err", u: "", urgent: true };
-  if (counts.cascades >= 2) return { l: "cascade", v: counts.cascades, t: "info", u: "" };
+function _kpiSpotlight(counts, thresholds) {
+  if (counts.fails >= thresholds.failUrgent) {
+    return { l: "fails", v: counts.fails, t: "err", u: "", urgent: true };
+  }
+  if (counts.cascades >= thresholds.cascadeInfo) {
+    return { l: "cascade", v: counts.cascades, t: "info", u: "" };
+  }
   return { l: "events", v: counts.evCount, t: "brass", u: "" };
 }
 
@@ -77,7 +118,11 @@ function StatusTray() {
   const hidden = !!cs.trayHidden;
   const [open, setOpen, ref] = _useTrayPop();
   const counts = _stUseMemo(() => _statusCounts(D), [D.events, D.keepers]);
-  const spot = _kpiSpotlight(counts);
+  const thresholds = _stUseMemo(
+    () => _statusTrayThresholds(D),
+    [D.status_tray_thresholds, D.statusTrayThresholds, D.thresholds]
+  );
+  const spot = _kpiSpotlight(counts, thresholds);
   const events = counts.lastEvent;
   const evCount = counts.evCount;
   const keepers = D.keepers || [];

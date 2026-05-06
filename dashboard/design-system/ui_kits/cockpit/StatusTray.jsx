@@ -12,6 +12,43 @@
 
 const { useState: _stUseState, useEffect: _stUseEffect, useRef: _stUseRef } = React;
 
+const STATUS_TRAY_DEFAULT_THRESHOLDS = Object.freeze({
+  failUrgent: 3,
+  cascadeInfo: 2,
+});
+
+function _statusTrayPositiveInt(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+function _statusTrayThresholds(D) {
+  const thresholds = (D && (
+    D.status_tray_thresholds ||
+    D.statusTrayThresholds ||
+    (D.thresholds && (D.thresholds.status_tray || D.thresholds.statusTray)) ||
+    {}
+  )) || {};
+  return {
+    failUrgent: _statusTrayPositiveInt(
+      thresholds.fail_urgent ||
+      thresholds.failUrgent ||
+      thresholds.fail_count ||
+      thresholds.failCount ||
+      thresholds.fails,
+      STATUS_TRAY_DEFAULT_THRESHOLDS.failUrgent
+    ),
+    cascadeInfo: _statusTrayPositiveInt(
+      thresholds.cascade_info ||
+      thresholds.cascadeInfo ||
+      thresholds.cascade_count ||
+      thresholds.cascadeCount ||
+      thresholds.cascades,
+      STATUS_TRAY_DEFAULT_THRESHOLDS.cascadeInfo
+    ),
+  };
+}
+
 function _useTrayPop() {
   const [open, setOpen] = _stUseState(null); // 'kpi' | 'life' | 'ticker' | 'keepers' | null
   const ref = _stUseRef(null);
@@ -31,12 +68,16 @@ function _useTrayPop() {
   return [open, setOpen, ref];
 }
 
-function _kpiSpotlight(D) {
+function _kpiSpotlight(D, thresholds) {
   const evs = (D && D.events) || [];
   const fails = evs.filter(e => e.kind === "fail").length;
   const cascades = evs.filter(e => e.kind === "cascade").length;
-  if (fails >= 3) return { l: "Fails", v: fails, t: "err",  u: "/47", urgent: true };
-  if (cascades >= 2) return { l: "Cascade", v: cascades, t: "info", u: "@step" };
+  if (fails >= thresholds.failUrgent) {
+    return { l: "Fails", v: fails, t: "err",  u: "/47", urgent: true };
+  }
+  if (cascades >= thresholds.cascadeInfo) {
+    return { l: "Cascade", v: cascades, t: "info", u: "@step" };
+  }
   return { l: "tps", v: "1.24", t: "brass", u: "tps" };
 }
 
@@ -45,7 +86,8 @@ function StatusTray() {
   const [cs, setCs] = (window.useCockpitState ? window.useCockpitState() : [{trayHidden:false}, ()=>{}]);
   const hidden = !!cs.trayHidden;
   const [open, setOpen, ref] = _useTrayPop();
-  const spot = _kpiSpotlight(D);
+  const thresholds = _statusTrayThresholds(D);
+  const spot = _kpiSpotlight(D, thresholds);
   const events = (D.events || []).slice(-1)[0];
   const evCount = (D.events || []).length;
   const keepers = (D.keepers || []);

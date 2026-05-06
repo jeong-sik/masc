@@ -25,6 +25,11 @@ Interactive recreation of the MASC single-pane cockpit. One HTML, React-driven, 
 - `Chrome.jsx` — `Topbar` · `Ticker` · `KpiStrip` · `Lifeline` (top-of-screen surfaces)
 - `Panels.jsx` — `Sidebar` · `Swimlanes` · `Deck` · `Rail` · `Composer` · `StatusBar` (main work area)
 
+## Data knobs
+
+- `MASC_DATA.status_tray_thresholds.fail_urgent` controls when the status tray promotes failure events to urgent. Fallback: `3`.
+- `MASC_DATA.status_tray_thresholds.cascade_info` controls when cascade events become the KPI spotlight. Fallback: `2`.
+
 ## Notes
 
 - Surfaces are grouped into two JSX files (`Chrome.jsx` and `Panels.jsx`) rather than one file per surface — small, related components share a file to keep the module count low.

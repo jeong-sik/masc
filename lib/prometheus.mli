@@ -954,6 +954,10 @@ val metric_gc_compactions : string
 val metric_gc_promoted_words : string
 (** Cumulative words promoted from minor to major heap since program start. *)
 
+val metric_memory_usage_bytes : string
+(** Approximate live OCaml heap memory usage in bytes, derived from
+    [Gc.quick_stat.live_words] and [Sys.word_size]. *)
+
 val metric_keeper_stale_termination_total : string
 val metric_keeper_stale_termination_by_class : string
 val metric_keeper_oas_timeout_budget_watchdog_termination : string

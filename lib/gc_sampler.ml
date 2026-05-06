@@ -1,5 +1,7 @@
 (** GC stats sampler. Polls [Gc.quick_stat] every [interval] seconds and
-    exports six gauges via {!Prometheus}. See [.mli] for contract. *)
+    exports runtime heap gauges via {!Prometheus}. See [.mli] for contract. *)
+
+let word_size_bytes = float_of_int (Sys.word_size / 8)
 
 let sample_once () =
   let s = Gc.quick_stat () in
@@ -10,6 +12,8 @@ let sample_once () =
     (float_of_int s.heap_words);
   Prometheus.set_gauge Prometheus.metric_gc_live_words
     (float_of_int s.live_words);
+  Prometheus.set_gauge Prometheus.metric_memory_usage_bytes
+    (float_of_int s.live_words *. word_size_bytes);
   Prometheus.set_gauge Prometheus.metric_gc_compactions
     (float_of_int s.compactions)
 

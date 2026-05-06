@@ -899,6 +899,7 @@ let metric_gc_heap_words = "masc_gc_heap_words"
 let metric_gc_live_words = "masc_gc_live_words"
 let metric_gc_compactions = "masc_gc_compactions"
 let metric_gc_promoted_words = "masc_gc_promoted_words"
+let metric_memory_usage_bytes = "masc_memory_usage_bytes"
 
 let metric_sse_connections_active = "masc_sse_connections_active"
 let metric_sse_reconnects = "masc_sse_reconnects_total"
@@ -1328,6 +1329,9 @@ let init () =
   add metric_gc_promoted_words
     "Cumulative words promoted from minor to major heap since program \
      start (from Gc.quick_stat)" Gauge;
+  add metric_memory_usage_bytes
+    "Approximate live OCaml heap memory usage in bytes, derived from \
+     Gc.quick_stat live_words and Sys.word_size" Gauge;
   add metric_sse_connections_active "Active SSE connections" Gauge;
   add metric_sse_reconnects "Total SSE reconnects (same session reattached)" Counter;
   add metric_sse_idle_evictions "Total SSE clients evicted by idle reaper" Counter;

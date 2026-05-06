@@ -321,6 +321,15 @@ let test_build_identity_probe_metric_registered () =
        ("# TYPE " ^ Prometheus.metric_build_identity_probe_failures
         ^ " counter"))
 
+let test_memory_usage_metric_registered () =
+  let text = Prometheus.to_prometheus_text () in
+  check bool "has memory usage HELP" true
+    (text_has_literal text
+       ("# HELP " ^ Prometheus.metric_memory_usage_bytes ^ " "));
+  check bool "has memory usage TYPE" true
+    (text_has_literal text
+       ("# TYPE " ^ Prometheus.metric_memory_usage_bytes ^ " gauge"))
+
 let test_histogram_exported_as_summary () =
   let name = "test_hist_export_fmt" in
   Prometheus.register_histogram ~name ~help:"export format test" ();
@@ -500,6 +509,8 @@ let () =
         test_workspace_route_metric_registered;
       test_case "build identity probe metric registered" `Quick
         test_build_identity_probe_metric_registered;
+      test_case "memory usage metric registered" `Quick
+        test_memory_usage_metric_registered;
       test_case "histogram exported as summary with _sum/_count"
         `Quick test_histogram_exported_as_summary;
     ];

@@ -855,6 +855,7 @@ let metric_inference_queue_inflight = "masc_inference_queue_inflight"
 let metric_inference_queue_acquired = "masc_inference_queue_acquired_total"
 let metric_inference_queue_wait = "masc_inference_queue_wait_seconds"
 let metric_inference_queue_cancelled = "masc_inference_queue_cancelled_total"
+let metric_inference_queue_rejected = "masc_inference_queue_rejected_total"
 let metric_inference_queue_max_concurrent = "masc_inference_queue_max_concurrent"
 
 (* Agent health metrics — used in transport_metrics.ml. *)
@@ -1508,6 +1509,10 @@ let init () =
     "Total admission permits acquired" Counter;
   add metric_inference_queue_cancelled
     "Total admission waits cancelled by fiber cancellation" Counter;
+  add metric_inference_queue_rejected
+    "Total admission requests rejected before execution. Labels: \
+     surface=with_permit|try_with_permit, reason=host_resource_saturated"
+    Counter;
   register_histogram ~name:metric_inference_queue_wait
     ~help:"Time waiting in admission queue before exchanging for permit" ();
   (* LLM provider HTTP response counter — emitted by Llm_metric_bridge

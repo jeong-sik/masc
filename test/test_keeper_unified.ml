@@ -7629,6 +7629,31 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
        fail
          (Printf.sprintf "expected Any for multiple required tools, got %s"
             (Agent_sdk.Types.show_tool_choice other)));
+  (match
+     Surface.preferred_tool_choice_for_required_tool_names
+       ~required_tool_names:[ "keeper_tasks_audit" ]
+       ~allowed_tool_names:[ "keeper_tasks_audit"; "keeper_board_post" ]
+   with
+   | Agent_sdk.Types.Auto -> ()
+   | other ->
+       fail
+         (Printf.sprintf
+            "expected Auto for passive-only required tool, got %s"
+            (Agent_sdk.Types.show_tool_choice other)));
+  (match
+     Surface.preferred_tool_choice_for_required_tool_names
+       ~required_tool_names:[ "keeper_tasks_audit"; "keeper_board_post" ]
+       ~allowed_tool_names:[ "keeper_tasks_audit"; "keeper_board_post" ]
+   with
+   | Agent_sdk.Types.Tool name ->
+       check string "active required tool remains forced" "keeper_board_post"
+         name
+   | other ->
+       fail
+         (Printf.sprintf
+            "expected Tool keeper_board_post for mixed passive/active required \
+             tools, got %s"
+            (Agent_sdk.Types.show_tool_choice other)));
   (* Active task keeper retains the strict gate even without a
      specific applicable tool — the caller is expected to make
      progress via board_post, task_update, etc. *)

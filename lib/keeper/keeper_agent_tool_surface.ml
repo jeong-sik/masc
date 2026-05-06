@@ -280,7 +280,9 @@ let preferred_tool_choice_for_required_tool_names
     ~(required_tool_names : string list) ~(allowed_tool_names : string list) =
   let visible_required =
     required_tool_names
-    |> List.filter (fun name -> List.mem name allowed_tool_names)
+    |> List.filter (fun name ->
+      List.mem name allowed_tool_names
+      && Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name)
     |> Keeper_types.dedupe_keep_order
   in
   match visible_required with

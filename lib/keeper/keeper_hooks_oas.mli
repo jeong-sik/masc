@@ -224,6 +224,14 @@ val record_llm_tok_s_metrics :
   telemetry:Agent_sdk.Types.inference_telemetry option -> unit
 (** Record provider-reported tokens-per-second when telemetry exposes it. *)
 
+val record_llm_inference_latency_metric :
+  model:string ->
+  telemetry:Agent_sdk.Types.inference_telemetry option -> unit
+(** Record after-turn inference latency. [request_latency_ms <= 0] is counted
+    by [masc_after_turn_telemetry_zero_latency_total] and floored to 1ms in
+    [masc_llm_inference_duration_seconds] so a live hook does not leave the
+    latency histogram blank. *)
+
 val wall_tokens_per_second :
   usage_missing:bool ->
   output_tokens:int ->

@@ -543,6 +543,93 @@ let test_record_llm_tok_s_metrics_none_telemetry_is_noop () =
   check (float 0.001) "prompt count unchanged" 0.0
     (prompt_count_after -. prompt_count_before)
 
+let inference_latency_labels model = [("model", model)]
+
+let test_record_llm_inference_latency_metric_positive_observes () =
+  let model = "latency-positive-test-model" in
+  let labels = inference_latency_labels model in
+  let telemetry = make_telemetry ~request_latency_ms:42 () in
+  let sum_before, count_before =
+    histogram_snapshot Masc_mcp.Prometheus.metric_llm_inference_duration
+      ~labels
+  in
+  let hook_before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_after_turn_hook ~labels ()
+  in
+  Hooks.record_llm_inference_latency_metric ~model
+    ~telemetry:(Some telemetry);
+  let sum_after, count_after =
+    histogram_snapshot Masc_mcp.Prometheus.metric_llm_inference_duration
+      ~labels
+  in
+  let hook_after =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_after_turn_hook ~labels ()
+  in
+  check (float 0.0001) "latency sum +42ms" 0.042
+    (sum_after -. sum_before);
+  check (float 0.0001) "latency count +1" 1.0
+    (count_after -. count_before);
+  check (float 0.0001) "hook counter +1" 1.0
+    (hook_after -. hook_before)
+
+let test_record_llm_inference_latency_metric_zero_floors () =
+  let model = "latency-zero-test-model" in
+  let labels = inference_latency_labels model in
+  let telemetry = make_telemetry ~request_latency_ms:0 () in
+  let sum_before, count_before =
+    histogram_snapshot Masc_mcp.Prometheus.metric_llm_inference_duration
+      ~labels
+  in
+  let zero_before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_after_turn_telemetry_zero_latency
+      ~labels ()
+  in
+  Hooks.record_llm_inference_latency_metric ~model
+    ~telemetry:(Some telemetry);
+  let sum_after, count_after =
+    histogram_snapshot Masc_mcp.Prometheus.metric_llm_inference_duration
+      ~labels
+  in
+  let zero_after =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_after_turn_telemetry_zero_latency
+      ~labels ()
+  in
+  check (float 0.0001) "zero latency counter +1" 1.0
+    (zero_after -. zero_before);
+  check (float 0.0001) "latency sum floored to 1ms" 0.001
+    (sum_after -. sum_before);
+  check (float 0.0001) "latency count +1" 1.0
+    (count_after -. count_before)
+
+let test_record_llm_inference_latency_metric_none_counts_missing () =
+  let model = "latency-missing-test-model" in
+  let labels = inference_latency_labels model in
+  let _, count_before =
+    histogram_snapshot Masc_mcp.Prometheus.metric_llm_inference_duration
+      ~labels
+  in
+  let missing_before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_after_turn_telemetry_missing ~labels ()
+  in
+  Hooks.record_llm_inference_latency_metric ~model ~telemetry:None;
+  let _, count_after =
+    histogram_snapshot Masc_mcp.Prometheus.metric_llm_inference_duration
+      ~labels
+  in
+  let missing_after =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_after_turn_telemetry_missing ~labels ()
+  in
+  check (float 0.0001) "missing counter +1" 1.0
+    (missing_after -. missing_before);
+  check (float 0.0001) "latency histogram unchanged" 0.0
+    (count_after -. count_before)
+
 let slot json name = json |> member "slots" |> member name
 
 let string_list_field json key =
@@ -808,6 +895,14 @@ let () =
             test_record_llm_tok_s_metrics_zero_value_is_skipped
         ; test_case "telemetry=None is a safe no-op" `Quick
             test_record_llm_tok_s_metrics_none_telemetry_is_noop
+        ] )
+    ; ( "llm_inference_latency",
+        [ test_case "positive latency observes histogram" `Quick
+            test_record_llm_inference_latency_metric_positive_observes
+        ; test_case "zero latency increments counter and floors histogram" `Quick
+            test_record_llm_inference_latency_metric_zero_floors
+        ; test_case "missing telemetry increments missing counter" `Quick
+            test_record_llm_inference_latency_metric_none_counts_missing
         ] )
     ; ( "hook_introspection",
         [ test_case "reports current runtime slots" `Quick

@@ -969,13 +969,16 @@ let handle_board_curation_submit args =
     let health_score = get_float_opt args "health_score" in
     let health_components = curation_health_components_arg args in
     let provenance = provenance_arg args in
-    let snap =
-      Board_dispatch.submit_curation_snapshot
-        ~submitted_by ?model ?summary ~ordering ~highlights
-        ~tag_suggestions ~answer_matches ?health_score ~health_components
-        ~rationale ~provenance ()
-    in
-    (true, Yojson.Safe.to_string (Board_curation.snapshot_to_yojson snap))
+    try
+      let snap =
+        Board_dispatch.submit_curation_snapshot
+          ~submitted_by ?model ?summary ~ordering ~highlights
+          ~tag_suggestions ~answer_matches ?health_score ~health_components
+          ~rationale ~provenance ()
+      in
+      (true, Yojson.Safe.to_string (Board_curation.snapshot_to_yojson snap))
+    with
+    | Invalid_argument msg -> (false, msg)
 
 (** {1 Tool Definitions} *)
 

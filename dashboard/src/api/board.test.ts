@@ -554,8 +554,8 @@ describe('fetchBoardCuration', () => {
           submitted_by: 'keeper-curator',
           model: 'gpt-5',
           summary: 'Two active incidents need review.',
-          ordering: ['post-a', 'post-b'],
-          highlights: ['post-a'],
+          ordering: ['post-a', { id: 'not-coerced' }, 'post-b', 7, ' '],
+          highlights: ['post-a', { name: 'not-coerced' }, null],
           tag_suggestions: [
             { post_id: 'post-a', tags: ['incident', 'ops'], rationale: 'Incident thread' },
             { post_id: ' ', tags: ['ignored'], rationale: 'missing post id' },

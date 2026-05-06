@@ -603,6 +603,19 @@ let test_board_curation_submit_roundtrips_to_read () =
   Alcotest.(check bool) "raw submit requires submitted_by" false missing_ok;
   Alcotest.(check string) "missing submitted_by error" "submitted_by required"
     missing_body;
+  let invalid_score_ok, invalid_score_body =
+    dispatch "masc_board_curation_submit"
+      (make_args
+         [
+           ("submitted_by", `String "curator");
+           ("rationale", `String "score out of range");
+           ("health_score", `Float 1.5);
+         ])
+  in
+  Alcotest.(check bool) "raw submit rejects out-of-range health score" false
+    invalid_score_ok;
+  Alcotest.(check bool) "invalid score error mentions health_score" true
+    (contains_substring invalid_score_body "health_score");
   let ok, body =
     dispatch "masc_board_curation_submit"
       (make_args

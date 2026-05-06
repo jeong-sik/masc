@@ -462,14 +462,22 @@ function normalizeBoardHearth(raw: unknown): BoardHearth | null {
   }
 }
 
+function asStrictStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map(item => item.trim())
+    .filter(Boolean)
+}
+
 function normalizeBoardCurationSnapshot(raw: unknown): BoardCurationSnapshot | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id, '').trim()
   const generated_at = asNullableIsoTimestamp(raw.generated_at)
   const submitted_by = asString(raw.submitted_by, '').trim()
   if (!id || !generated_at || !submitted_by) return null
-  const ordering = Array.isArray(raw.ordering) ? raw.ordering.map(v => String(v)) : []
-  const highlights = Array.isArray(raw.highlights) ? raw.highlights.map(v => String(v)) : []
+  const ordering = asStrictStringArray(raw.ordering)
+  const highlights = asStrictStringArray(raw.highlights)
   const rationale = asString(raw.rationale, '')
   const model = asNullableString(raw.model)
   const healthScore = asNumber(raw.health_score)

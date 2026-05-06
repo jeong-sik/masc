@@ -13,7 +13,7 @@
 # ── Tool Groups ─────────────────────────────────────────────────────
 
 [groups.base]
-tools = ["keeper_time_now", "keeper_context_status", "keeper_memory_search", "keeper_tool_search"]
+tools = ["keeper_time_now", "keeper_context_status", "keeper_memory_search", "keeper_tool_search", "keeper_tools_list"]
 
 # Board tools split: core (frequent) vs extended (discoverable via tool_search).
 [groups.board_core]
@@ -31,7 +31,16 @@ tools = ["keeper_board_get", "keeper_board_post", "keeper_board_comment", "keepe
 tools = ["keeper_tasks_list", "keeper_task_claim", "keeper_task_done", "keeper_broadcast"]
 
 [groups.coordination]
-tools = ["keeper_tasks_list", "keeper_tasks_audit", "keeper_task_claim", "keeper_task_done", "keeper_broadcast"]
+tools = [
+  "keeper_tasks_list",
+  "keeper_tasks_audit",
+  "keeper_task_claim",
+  "keeper_task_done",
+  "keeper_task_submit_for_verification",
+  "keeper_task_force_release",
+  "keeper_task_create",
+  "keeper_broadcast",
+]
 
 [groups.shell]
 # keeper_bash: full bash with 3-layer deterministic guard
@@ -101,6 +110,8 @@ tools = [
   "masc_tasks", "masc_claim_next", "masc_transition", "masc_add_task",
   "masc_batch_add_tasks", "masc_agents", "masc_dashboard",
   "masc_agent_card", "masc_tool_help",
+  "masc_goal_list", "masc_coordination_fsm_snapshot",
+  "masc_task_history", "masc_plan_get", "masc_plan_get_task",
   "masc_join", "masc_leave", "masc_who", "masc_heartbeat",
   "masc_messages", "masc_broadcast",
 ]
@@ -219,6 +230,7 @@ masc_groups = ["essential", "dispatch", "code_observe", "coordination"]
 [presets.coding]
 groups = ["base", "board_core", "filesystem", "filesystem_write", "library", "shell", "coordination", "coding_shard", "coding", "github", "github_review"]
 masc_groups = ["essential", "coding"]
+masc_tools = ["masc_goal_list", "masc_coordination_fsm_snapshot"]
 
 # Step 9 (bloodflow restoration plan): the research preset is granted
 # delivery-oriented capabilities so analyst/scholar/verifier-tier keepers

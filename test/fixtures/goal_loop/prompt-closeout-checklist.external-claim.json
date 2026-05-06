@@ -295,11 +295,12 @@
       "artifact_refs": [
         "test/fixtures/goal_loop/verify.fail.json",
         "scripts/verify_goal_loop_logs.py",
+        "scripts/goal_loop_live_replay.py",
         "scripts/goal_loop_completion_audit.py"
       ],
       "status": "PARTIAL",
       "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "Branch semantics exist. Draft implementation PR #13657 adds the Verify pipeline gate contract, and draft PR #13507 adds the post-ACT live replay runner. Complete-corpus Verify remains blocked until those PRs are merged/live-replayed and the 206-row corpus exists.",
+      "gap": "Branch semantics and the post-ACT live replay runner are merged through #13507. Draft implementation PR #13657 still adds the explicit Verify pipeline gate contract. Complete-corpus Verify remains blocked until #13657 lands and the 206-row corpus exists.",
       "implementation_pr_refs": [
         "https://github.com/jeong-sik/masc-mcp/pull/13507",
         "https://github.com/jeong-sik/masc-mcp/pull/13657"

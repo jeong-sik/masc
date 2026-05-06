@@ -52,9 +52,13 @@ class MockWebSocket {
     this.sent.push(data)
   }
 
-  close(): void {
+  close(event: Partial<Pick<CloseEvent, 'code' | 'reason' | 'wasClean'>> = {}): void {
     this.readyState = MockWebSocket.CLOSED
-    this.onclose?.(new CloseEvent('close'))
+    this.onclose?.({
+      code: event.code ?? 1000,
+      reason: event.reason ?? '',
+      wasClean: event.wasClean ?? true,
+    } as CloseEvent)
   }
 
   open(): void {
@@ -449,6 +453,39 @@ describe('dashboard websocket route subscriptions', () => {
     socket.close()
 
     await expect(subscribePromise).rejects.toThrow('dashboard websocket closed')
+  })
+
+  it('surfaces close code and reason when the socket closes', async () => {
+    installWebSocketMocks()
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const socket = mockSockets[0]!
+    socket.open()
+    const hello = parseRpc(socket, 0)
+    socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    await flushPromises()
+
+    const initialSubscribe = parseRpc(socket, 1)
+    socket.receive({
+      jsonrpc: '2.0',
+      id: initialSubscribe.id,
+      result: { snapshot: { seq: 1, slices: {} } },
+    })
+    await flushPromises()
+
+    const subscribePromise = subscribeDashboardRoute({
+      tab: 'workspace',
+      params: { section: 'planning' },
+    })
+    expect(parseRpc(socket, 2).method).toBe('dashboard/subscribe')
+
+    socket.close({ code: 4001, reason: 'auth rejected', wasClean: false })
+
+    const closeMessage = 'dashboard websocket closed (code=4001, reason=auth rejected, wasClean=false)'
+    expect(dashboardWsConnected.value).toBe(false)
+    expect(dashboardWsReady.value).toBe(false)
+    expect(dashboardWsLastError.value).toBe(closeMessage)
+    await expect(subscribePromise).rejects.toThrow(closeMessage)
   })
 
   it('rejects in-flight subscribe RPCs when the server never responds', async () => {

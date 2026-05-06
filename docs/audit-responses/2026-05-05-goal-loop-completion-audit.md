@@ -396,13 +396,13 @@ GitHub issue tracking ref.
 | 2-1 `observe.yml` Prometheus/Grafana metrics | `observe_goal_loop_logs.py`, fixture metrics, audit response, Observe metric contract, alerts, Grafana dashboard, validator and tests | PASS for the required Observe metric/alert/dashboard contract coverage. |
 | 2-2 `observe_logs.py` pattern parser | `scripts/observe_goal_loop_logs.py`, `test/test_observe_goal_loop_logs.py` | PASS for deterministic parser coverage. |
 | 3-1 `orient.ml` audit comparison engine | `scripts/orient_goal_loop_logs.py`, `audit-corpus.external-claim.json`, `structured-id-triage.external-claim.json` | PARTIAL: engine and triage exist; only 19/206 strict rows are itemized. |
-| 3-2 Orient dashboard counts | `scripts/goal_loop_status.py`, `docs/examples/goal-loop-fixture.md` | PARTIAL: CLI JSON/text exists; operator dashboard panel is not wired. |
+| 3-2 Orient dashboard counts | `scripts/goal_loop_status.py`, `/api/v1/dashboard/goal-loop/status`, `GoalLoopPanel` tests | PASS for operator panel rendering audit catalog counts and missing-row blockers from runtime status JSON. |
 | 4-1 priority decision algorithm | `scripts/decide_goal_loop_findings.py`, `test/test_decide_goal_loop_findings.py` | PASS for fixture-based decision ranking. |
 | 4-2 weekly ACT priority queue | `act-map.startup.json`, `known-prs.startup.json`, `validate_goal_loop_act_map.py` | PARTIAL: reference integrity exists; SLA ownership workflow is not automatic. |
 | 5 ACT checklist/PR proof | linked PR references in `act-map.startup.json` plus ACT validation | PARTIAL: known ACTs are mapped; not every still-present row has a row-level ACT because 187 rows are missing. |
 | 6-1 `verify.yml` unit/regression/TLA/log/metric/orient gates | `scripts/verify_goal_loop_logs.py`, `goal_loop_completion_audit.py`, focused tests | PARTIAL: closeout verifier exists; TLA and production metric gates are not fully implemented. |
 | 6-2 Verify PASS/FAIL branch | `verify.fail.json`, post-ACT live Verify snapshot, completion audit criteria | PARTIAL: branch semantics exist; complete corpus Verify is blocked. |
-| 7 GOAL LOOP dashboard | `goal_loop_status.py` aggregate output | PARTIAL: CLI status exists; UI dashboard integration remains open. |
+| 7 GOAL LOOP dashboard | `/api/v1/dashboard/goal-loop/status`, Monitoring `GOAL LOOP` nav, `GoalLoopPanel` tests | PASS for read-refresh dashboard integration. Strict corpus and live SLO proof remain blocked in their own rows. |
 | 8 anti-stagnation rules | ACT reference guard and completion audit blocker | PARTIAL: reference integrity exists; SLA timers/escalation are not implemented. |
 | 9 expected convergence after week/month | completion audit and #13265 | BLOCKED: no measured convergence claim is valid without the strict corpus and live SLO proof. |
 | Full 206-row strict corpus | `row-corpus-discovery.external-claim.json`, `strict-row-corpus-contract.json`, `--strict-row-corpus` path | BLOCKED: 24 searches/inventories checked; `FULL_ROW_CORPUS_NOT_FOUND`, 19/206 strict rows, 187 strict rows missing. The source-doc explicit-row extractor finds only 132/206 candidate rows across 5 source files, with 7 checked prompt files yielding zero explicit candidates, and cannot close the strict corpus gap. Those 7 no-row files contain 897 unstructured requirement markers that remain non-corpus evidence. Candidate strict rows must also cite catalog external sources and line refs within catalog line counts. |
@@ -619,10 +619,14 @@ system health, next action, and counts.
   consistency findings.
 - `docs/examples/goal-loop-fixture.md` documents text and JSON status replay.
 
-**Status**: **PARTIAL**.
+**Status**: **PASS for dashboard integration**.
 
-The dashboard data shape exists as CLI JSON/text. It is not yet integrated into
-the operator dashboard as a real-time panel.
+The operator dashboard now exposes a Monitoring `GOAL LOOP` section wired
+through `/api/v1/dashboard/goal-loop/status`. The panel reads runtime
+`status.json`, shows phase summaries, audit catalog counts, strict-corpus
+blockers, next action, and Verify evidence, and pins those states in component
+tests. This is a read-refresh dashboard surface; strict corpus completion and
+live recovery SLO proof remain separate blockers above.
 
 ### 8. Anti-Stagnation
 
@@ -684,8 +688,8 @@ No convergence claim is valid yet. The only safe current statement is:
    runtime restarts, using `--post-act-verify`, accepted live-runtime
    `--evidence-kind`, concrete `--evidence-source`,
    `--evidence-window-start`, `--evidence-window-end`, and `--checked-at`.
-5. Wire `goal_loop_status.py` JSON into the operator dashboard only after the
-   fixture's critical state is preserved in UI tests.
+5. Keep the dashboard fixture's critical state pinned in UI tests when the
+   status schema changes.
 6. Add SLA state for anti-stagnation after ACT coverage is complete; otherwise
    timers will only escalate known missing work without changing recovery.
 

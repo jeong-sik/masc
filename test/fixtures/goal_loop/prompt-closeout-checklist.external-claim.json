@@ -210,17 +210,14 @@
       "prompt_requirement": "Orient dashboard counts",
       "artifact_refs": [
         "scripts/goal_loop_status.py",
-        "docs/examples/goal-loop-fixture.md"
+        "lib/dashboard/dashboard_goal_loop.ml#status_json",
+        "lib/server/server_routes_http_routes_dashboard.ml#/api/v1/dashboard/goal-loop/status",
+        "dashboard/src/components/goal-loop-panel.ts#function AuditCatalogBlock",
+        "dashboard/src/components/goal-loop-panel.test.ts#renders audit catalog values"
       ],
-      "status": "PARTIAL",
-      "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "CLI JSON/text exists. Draft implementation PR #13655 wires the operator dashboard panel, but it is not merged/live and the strict corpus remains incomplete.",
+      "status": "PASS",
       "implementation_pr_refs": [
         "https://github.com/jeong-sik/masc-mcp/pull/13655"
-      ],
-      "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13609",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
       ]
     },
     {
@@ -315,17 +312,16 @@
       "prompt_requirement": "Unified GOAL LOOP dashboard",
       "artifact_refs": [
         "scripts/goal_loop_status.py",
-        "docs/examples/goal-loop-fixture.md"
+        "lib/dashboard/dashboard_goal_loop.ml#status_json",
+        "lib/server/server_routes_http_routes_dashboard.ml#/api/v1/dashboard/goal-loop/status",
+        "dashboard/src/config/navigation.ts#goal-loop",
+        "dashboard/src/components/status.ts#LazyGoalLoopPanel",
+        "dashboard/src/components/goal-loop-panel.ts#export function GoalLoopPanel",
+        "dashboard/src/components/goal-loop-panel.test.ts#renders phase status"
       ],
-      "status": "PARTIAL",
-      "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "CLI status exists. Draft implementation PR #13655 wires the operator dashboard panel, but it is not merged/live and the strict corpus remains incomplete.",
+      "status": "PASS",
       "implementation_pr_refs": [
         "https://github.com/jeong-sik/masc-mcp/pull/13655"
-      ],
-      "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13609",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
       ]
     },
     {

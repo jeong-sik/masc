@@ -94,7 +94,7 @@
         "test/test_keeper_toml.ml"
       ],
       "status": "PASS",
-      "criterion_id": "post_act_verify_complete",
+      "criterion_id": "strict_row_level_catalog_complete",
       "gap": null,
       "implementation_pr_refs": [
         "https://github.com/jeong-sik/masc-mcp/pull/13138",

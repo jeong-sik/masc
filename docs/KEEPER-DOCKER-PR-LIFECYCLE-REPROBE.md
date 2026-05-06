@@ -65,6 +65,12 @@ branches before re-running. An empty file means no collisions; rows look like:
  "remote_head":false,"worktree_branch":false,
  "blocker":"branch_collision_preflight"}
 ```
+By default, mutation preflight also requires every selected keeper account to
+have upstream `WRITE`, `MAINTAIN`, or `ADMIN` permission for the target repo. For
+PUBLIC repositories, `--allow-fork-pr-for-readonly` permits `READ`/`TRIAGE`
+credential lanes to push their proof branch to the keeper account's fork and
+open the draft PR with `head=OWNER:BRANCH`; PR creation still goes through
+`keeper_pr_create`, not raw `gh pr create`.
 After collision evidence is clear, the review phase requires `keeper_pr_review_comment`.
 This avoids the old single-turn shape where one keeper could wait on another
 keeper's missing PR until the Agent.run timeout. The review prompt reserves

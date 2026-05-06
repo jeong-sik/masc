@@ -748,6 +748,47 @@ let test_runtime_surface_maps_heartbeat_failure_reason () =
   check bool "summary preserves count" true
     (has_substring summary "3 consecutive")
 
+let test_runtime_surface_maps_registry_failure_reason_blockers () =
+  let cases =
+    [
+      ( "turn-failures",
+        KR.Turn_consecutive_failures 4,
+        "turn_failures",
+        "4 consecutive" );
+      ( "fiber-unresolved",
+        KR.Fiber_unresolved,
+        "fiber_unresolved",
+        "did not resolve" );
+      ( "exception",
+        KR.Exception "forced boom",
+        "exception",
+        "forced boom" );
+    ]
+  in
+  List.iter
+    (fun (suffix, reason, expected_class, expected_summary_substring) ->
+       KR.clear ();
+       let meta = make_meta ~name:("runtime-" ^ suffix ^ "-test") () in
+       let config =
+         Coord.default_config
+           ("/tmp/test-keeper-exec-status-" ^ suffix)
+       in
+       ignore (KR.register ~base_path:config.base_path meta.name meta);
+       KR.set_failure_reason ~base_path:config.base_path meta.name
+         (Some reason);
+       let runtime = KSB.runtime_surface_json config meta in
+       let open Yojson.Safe.Util in
+       check string (suffix ^ " runtime blocker class") expected_class
+         (runtime |> member "runtime_blocker_class" |> to_string);
+       let summary =
+         runtime |> member "runtime_blocker_summary" |> to_string
+       in
+       check bool (suffix ^ " summary preserves root cause") true
+         (has_substring summary expected_summary_substring);
+       check bool (suffix ^ " runtime attention needed") true
+         (runtime |> member "needs_attention" |> to_bool))
+    cases
+
 let test_runtime_surface_exposes_social_model_resolution_fields () =
   KR.clear ();
   let base = make_meta ~name:"runtime-social-model-test" () in
@@ -939,6 +980,8 @@ let () =
             test_runtime_surface_maps_stale_termination_storm_failure_reason;
           test_case "runtime surface maps heartbeat failure reason" `Quick
             test_runtime_surface_maps_heartbeat_failure_reason;
+          test_case "runtime surface maps registry failure blockers" `Quick
+            test_runtime_surface_maps_registry_failure_reason_blockers;
           test_case "runtime surface exposes social model fields" `Quick
             test_runtime_surface_exposes_social_model_resolution_fields;
           test_case "runtime surface exposes model display labels" `Quick

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Keeper } from '../types'
+import type { Keeper, KeeperRuntimeBlockerClass } from '../types'
 import {
   keeperActivityDisplay,
   keeperDisplayModel,
@@ -183,6 +183,37 @@ describe('keeperRuntimeBlockerHint', () => {
       })),
     ).toBe('액션 가능한 신호에 필요한 keeper 도구 호출이 충족되지 않았습니다.')
   })
+
+  const registryBlockerHintCases: Array<[KeeperRuntimeBlockerClass, string]> = [
+    [
+      'stale_termination_storm',
+      'Stale watchdog 종료가 반복되어 restart 전에 원인 확인이 필요합니다.',
+    ],
+    [
+      'heartbeat_failures',
+      '하트비트 실패가 누적되어 keeper 생존 상태 확인이 필요합니다.',
+    ],
+    [
+      'turn_failures',
+      '턴 실패가 반복되어 최근 실행 오류 확인이 필요합니다.',
+    ],
+    [
+      'exception',
+      'Keeper 런타임 예외가 기록되어 로그와 최근 turn 상태 확인이 필요합니다.',
+    ],
+  ]
+
+  it.each(registryBlockerHintCases)(
+    'explains registry-derived blocker %s when no summary is available',
+    (blockerClass, expected) => {
+      expect(
+        keeperRuntimeBlockerHint(makeKeeper({
+          runtime_blocker_class: blockerClass,
+          runtime_blocker_summary: blockerClass,
+        })),
+      ).toBe(expected)
+    },
+  )
 })
 
 describe('keeperActivityDisplay', () => {

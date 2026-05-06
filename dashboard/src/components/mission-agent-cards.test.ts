@@ -121,11 +121,12 @@ describe('mission keeper runtime helpers', () => {
       name: 'stormed',
       status: 'idle',
       runtime_blocker_class: 'stale_termination_storm',
-      runtime_blocker_summary: 'stale_termination_storm',
+      runtime_blocker_summary:
+        'Stale watchdog terminated 8 keeper cycle(s) in the storm window; operator investigation is required before restart.',
     } as Keeper
 
     expect(keeperRuntimeHint(keeper)).toBe(
-      'Stale watchdog 종료가 반복되어 restart 전에 원인 확인이 필요합니다.',
+      'Stale watchdog terminated 8 keeper cycle(s) in the storm window; operator investigation is required before restart.',
     )
   })
 

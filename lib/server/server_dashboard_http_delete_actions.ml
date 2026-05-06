@@ -16,6 +16,18 @@ type keeper_purge_target =
   ; toml_path : string option
   }
 
+type agent_purge_cleanup_result =
+  { cleanup_agent_name : string
+  ; pending_confirms_removed : int
+  ; heartbeats_stopped : int
+  ; coord_leave_result : string
+  }
+
+type keeper_purge_cleanup_result =
+  { keeper_pending_confirms_removed : int
+  ; agent_cleanup_results : agent_purge_cleanup_result list
+  }
+
 let dedupe_keep_order items =
   let seen = Hashtbl.create (List.length items) in
   List.filter
@@ -157,22 +169,46 @@ let resolve_plain_agent_target config requested_name =
   |> List.find_opt (plain_agent_artifacts_exist config)
 ;;
 
+let agent_purge_cleanup_result_to_json
+    { cleanup_agent_name
+    ; pending_confirms_removed
+    ; heartbeats_stopped
+    ; coord_leave_result
+    } =
+  `Assoc
+    [ ("agent_name", `String cleanup_agent_name)
+    ; ("pending_confirms_removed", `Int pending_confirms_removed)
+    ; ("heartbeats_stopped", `Int heartbeats_stopped)
+    ; ("coord_leave_result", `String coord_leave_result)
+    ]
+;;
+
 let purge_agent_filesystem_artifacts config agent_names =
   agent_names
   |> dedupe_keep_order
-  |> List.iter (fun agent_name ->
-       ignore
-         (Operator_pending_confirm.remove_pending_confirms_by_target config
-            ~target_type:"agent" ~target_id:(Some agent_name));
-       ignore (Heartbeat.stop_by_agent ~agent_name);
-       ignore (Coord.leave config ~agent_name);
+  |> List.map (fun agent_name ->
+       let pending_confirms_removed =
+         Operator_pending_confirm.remove_pending_confirms_by_target config
+           ~target_type:"agent" ~target_id:(Some agent_name)
+       in
+       let heartbeats_stopped = Heartbeat.stop_by_agent ~agent_name in
+       let coord_leave_result = Coord.leave config ~agent_name in
+       Log.Misc.info
+         "[agent_purge] cleanup agent=%s pending_confirms_removed=%d heartbeats_stopped=%d coord_leave=%S"
+         agent_name pending_confirms_removed heartbeats_stopped
+         coord_leave_result;
        remove_path_if_exists ~context:"agent_purge"
          (agent_file_path config agent_name);
        remove_path_if_exists ~context:"agent_purge"
          (Metrics_store_eio.agent_metrics_dir config agent_name);
        Tool_shard.remove_agent_shards agent_name;
        credential_aliases agent_name
-       |> List.iter (Auth.delete_credential config.base_path))
+       |> List.iter (Auth.delete_credential config.base_path);
+       { cleanup_agent_name = agent_name
+       ; pending_confirms_removed
+       ; heartbeats_stopped
+       ; coord_leave_result
+       })
 ;;
 
 let purge_keeper_artifacts config requested_name
@@ -187,11 +223,17 @@ let purge_keeper_artifacts config requested_name
   cleanup_names
   |> List.iter (fun name ->
        Keeper_keepalive.stop_keepalive ~base_path:config.base_path name);
-  ignore
-    (Operator_pending_confirm.remove_pending_confirms_by_target config
-       ~target_type:"keeper" ~target_id:(Some keeper_name));
+  let keeper_pending_confirms_removed =
+    Operator_pending_confirm.remove_pending_confirms_by_target config
+      ~target_type:"keeper" ~target_id:(Some keeper_name)
+  in
+  Log.Misc.info
+    "[keeper_purge] cleanup keeper=%s pending_confirms_removed=%d"
+    keeper_name keeper_pending_confirms_removed;
   Keeper_registry.unregister ~base_path:config.base_path keeper_name;
-  purge_agent_filesystem_artifacts config [ agent_name; keeper_name ];
+  let agent_cleanup_results =
+    purge_agent_filesystem_artifacts config [ agent_name; keeper_name ]
+  in
   List.iter
     (remove_path_if_exists ~context:"keeper_purge")
     [
@@ -210,7 +252,8 @@ let purge_keeper_artifacts config requested_name
        remove_path_if_exists ~context:"keeper_purge"
          (Keeper_types.keeper_session_dir config keeper_trace_id))
     trace_id;
-  Option.iter (remove_path_if_exists ~context:"keeper_purge") toml_path
+  Option.iter (remove_path_if_exists ~context:"keeper_purge") toml_path;
+  { keeper_pending_confirms_removed; agent_cleanup_results }
 ;;
 
 let add_delete_action_routes router =
@@ -310,7 +353,9 @@ let add_delete_action_routes router =
                (match resolve_keeper_purge_target config requested_name with
                 | Some keeper_target ->
                   let toml_deleted = Option.is_some keeper_target.toml_path in
-                  purge_keeper_artifacts config requested_name keeper_target;
+                  let purge_result =
+                    purge_keeper_artifacts config requested_name keeper_target
+                  in
                   Http.Response.json ~compress:true ~request:req
                     (Yojson.Safe.to_string
                        (`Assoc
@@ -320,12 +365,22 @@ let add_delete_action_routes router =
                             ("agent_name", `String keeper_target.agent_name);
                             ("keeper_name", `String keeper_target.keeper_name);
                             ("removed_keeper_toml", `Bool toml_deleted);
+                            ( "keeper_pending_confirms_removed",
+                              `Int purge_result.keeper_pending_confirms_removed
+                            );
+                            ( "cleanup_results",
+                              `List
+                                (List.map agent_purge_cleanup_result_to_json
+                                   purge_result.agent_cleanup_results) );
                           ]))
                     reqd
                 | None -> (
                   match resolve_plain_agent_target config requested_name with
                   | Some agent_name ->
-                    purge_agent_filesystem_artifacts config [ requested_name; agent_name ];
+                    let cleanup_results =
+                      purge_agent_filesystem_artifacts config
+                        [ requested_name; agent_name ]
+                    in
                     Http.Response.json ~compress:true ~request:req
                       (Yojson.Safe.to_string
                          (`Assoc
@@ -333,6 +388,10 @@ let add_delete_action_routes router =
                               ("ok", `Bool true);
                               ("target_kind", `String "agent");
                               ("agent_name", `String agent_name);
+                              ( "cleanup_results",
+                                `List
+                                  (List.map agent_purge_cleanup_result_to_json
+                                     cleanup_results) );
                             ]))
                       reqd
                   | None ->

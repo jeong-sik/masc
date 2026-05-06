@@ -974,6 +974,20 @@ let test_agent_purge_route_removes_plain_agent_artifacts () =
   require_status "agent purge route returns 200" 200 purge_result;
   check bool "agent purge identifies plain agent" true
     (contains_substr {|"target_kind":"agent"|} purge_result.body);
+  let open Yojson.Safe.Util in
+  let purge_json = Yojson.Safe.from_string purge_result.body in
+  let cleanup_rows = purge_json |> member "cleanup_results" |> to_list in
+  let cleanup_row =
+    cleanup_rows
+    |> List.find (fun row ->
+         row |> member "agent_name" |> to_string = agent_name)
+  in
+  check int "agent purge reports pending confirms" 0
+    (cleanup_row |> member "pending_confirms_removed" |> to_int);
+  check int "agent purge reports stopped heartbeats" 0
+    (cleanup_row |> member "heartbeats_stopped" |> to_int);
+  check string "agent purge reports coord leave" (agent_name ^ " left the namespace")
+    (cleanup_row |> member "coord_leave_result" |> to_string);
   check bool "agent file removed" false
     (Sys.file_exists
        (Filename.concat (Masc_mcp.Coord.agents_dir config)

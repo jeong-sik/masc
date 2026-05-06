@@ -182,6 +182,12 @@ let test_repo_seed_uses_two_profiles_plus_routes () =
     (routes |> member "operator_judge" |> to_string);
   check string "rerank route" "tool_rerank"
     (routes |> member "llm_rerank" |> to_string);
+  check string "simple task route" "tier_small"
+    (routes |> member "simple_task" |> to_string);
+  check string "moderate task route" "tier_medium"
+    (routes |> member "moderate_task" |> to_string);
+  check string "complex task route" "big_three"
+    (routes |> member "complex_task" |> to_string);
   check bool "tool_rerank is system-only" false
     (rendered |> member "tool_rerank_keeper_assignable" |> to_bool)
 

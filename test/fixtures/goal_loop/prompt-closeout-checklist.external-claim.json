@@ -276,11 +276,12 @@
       "artifact_refs": [
         "scripts/verify_goal_loop_logs.py",
         "scripts/goal_loop_completion_audit.py",
+        "test/fixtures/goal_loop/live-post-act-verify.external-claim.json",
         "test/test_goal_loop_completion_audit.py"
       ],
       "status": "PARTIAL",
       "criterion_id": "post_act_verify_complete",
-      "gap": "Closeout verifier exists. Draft implementation PR #13657 adds explicit unit/regression/TLA/log/metric/orient gates, but it is not merged and still requires real production inputs for closeout.",
+      "gap": "Closeout verifier exists and live post-ACT log replay evidence is recorded. Draft implementation PR #13657 adds explicit unit/regression/TLA/log/metric/orient gates, but it is not merged and full metric/TLA gate inputs are still incomplete.",
       "implementation_pr_refs": [
         "https://github.com/jeong-sik/masc-mcp/pull/13657"
       ],

@@ -1108,8 +1108,8 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         )
         self.assertEqual(checklist_evidence["implementation_pr_refs_total"], 9)
         self.assertEqual(checklist_evidence["invalid_implementation_pr_refs"], [])
-        self.assertEqual(checklist_evidence["artifact_refs_total"], 102)
-        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 102)
+        self.assertEqual(checklist_evidence["artifact_refs_total"], 103)
+        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 103)
         self.assertEqual(checklist_evidence["artifact_ref_anchors_total"], 22)
         self.assertEqual(checklist_evidence["artifact_ref_anchors_resolved"], 22)
         self.assertTrue(checklist_evidence["artifact_refs_all_resolved"])
@@ -1368,8 +1368,8 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
         self.assertFalse(checklist_evidence["recorded"])
         self.assertFalse(checklist_evidence["artifact_refs_all_resolved"])
-        self.assertEqual(checklist_evidence["artifact_refs_total"], 99)
-        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 98)
+        self.assertEqual(checklist_evidence["artifact_refs_total"], 100)
+        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 99)
         self.assertEqual(
             checklist_evidence["missing_artifact_refs"],
             [
@@ -1403,8 +1403,8 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
         self.assertFalse(checklist_evidence["recorded"])
         self.assertFalse(checklist_evidence["artifact_refs_all_resolved"])
-        self.assertEqual(checklist_evidence["artifact_refs_total"], 98)
-        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 97)
+        self.assertEqual(checklist_evidence["artifact_refs_total"], 99)
+        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 98)
         self.assertEqual(checklist_evidence["artifact_ref_anchors_total"], 20)
         self.assertEqual(checklist_evidence["artifact_ref_anchors_resolved"], 19)
         self.assertEqual(

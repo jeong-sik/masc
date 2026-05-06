@@ -238,7 +238,8 @@
   --source-row-candidate-inventory
   test/fixtures/goal_loop/source-row-candidate-inventory.external-claim.json
   --require-complete --format text` checked at 2026-05-06T19:49:08+09:00,
-  confidence High: exits non-zero with three closeout blockers:
+  confidence High: exits non-zero with three closeout blockers on the
+  fixture Verify path:
   `strict_row_level_catalog_complete`, `post_act_verify_complete`, and
   `prompt_requirements_closeout_complete`. The strict row evidence directly
   records the source-row candidate inventory as 132/206 and validates the 5/7
@@ -269,17 +270,47 @@
   --source-row-candidate-inventory
   test/fixtures/goal_loop/source-row-candidate-inventory.external-claim.json
   --require-complete --format text` checked at 2026-05-06T19:49:08+09:00,
-  confidence High: exits non-zero with three closeout blockers:
+  confidence High: exits non-zero with three closeout blockers on the
+  fixture Verify path:
   `strict_row_level_catalog_complete`, `post_act_verify_complete`, and
   `prompt_requirements_closeout_complete`. The first blocker proves the real
   strict 206-row corpus is still missing. The second blocker preserves the
-  missing post-ACT live Verify evidence. The third blocker prevents the prompt
+  fixture/live Verify distinction while the replay still uses
+  `verify.fail.json`. The third blocker prevents the prompt
   objective from being marked complete while the recorded checklist still has
   12 `PARTIAL` and 2 `BLOCKED` prompt requirements. The
   `prompt_to_artifact_checklist_recorded` criterion remains `PASS`, with 21
   unique requirement IDs, 11 unique issue refs, and no missing or invalid
   tracking refs; recording the map is separate from satisfying every mapped
   prompt requirement.
+- [근거] `python3 scripts/goal_loop_live_replay.py --log
+  <MASC_BASE_PATH>/.masc/events/2026-05/06.jsonl --log
+  <MASC_BASE_PATH>/.masc/transition-audit/2026-05/06.jsonl
+  --duration-seconds 0 --artifact-dir
+  /private/tmp/goal-loop-live-post-act-full-20260506T1122Z --act-map
+  test/fixtures/goal_loop/act-map.startup.json --runtime-source
+  localhost:8935 --base-path <MASC_BASE_PATH> --loop-iteration
+  post-act-live-full-20260506T1122Z --fail-on verify --format text`
+  checked at 2026-05-06T20:20:09+09:00, confidence High: the merged
+  live-replay runner scanned 2,331 current runtime log lines, found 0 GOAL
+  LOOP signature matches, and emitted Verify `PASS` with
+  `post_act_verify=true`, `evidence_kind=live_runtime_logs`, explicit evidence
+  bounds, and `checked_at` metadata. The evidence summary is recorded in
+  `test/fixtures/goal_loop/live-post-act-verify.external-claim.json`.
+- [근거] `python3 scripts/goal_loop_completion_audit.py
+  /tmp/goal-loop-status-live-verify-combined.json --structured-id-triage
+  test/fixtures/goal_loop/structured-id-triage.external-claim.json
+  --row-corpus-discovery
+  test/fixtures/goal_loop/row-corpus-discovery.external-claim.json
+  --prompt-closeout-checklist
+  test/fixtures/goal_loop/prompt-closeout-checklist.external-claim.json
+  --source-row-candidate-inventory
+  test/fixtures/goal_loop/source-row-candidate-inventory.external-claim.json
+  --require-complete --format text` checked at 2026-05-06T20:20:09+09:00,
+  confidence High: exits non-zero with two closeout blockers:
+  `strict_row_level_catalog_complete` and
+  `prompt_requirements_closeout_complete`, while
+  `post_act_verify_complete` is `PASS` for the live replay input.
 - [근거] `gh issue view <issue> --repo jeong-sik/masc-mcp --json
   number,state,title,url,labels` for #13265, #13505, #13609, #13610, #13611,
   #13636, #13684, #13685, #13686, #13688, #13689, and #13690 checked at
@@ -707,7 +738,8 @@ Do not mark the GOAL LOOP objective complete while any of these are true:
   line-count identity manifest.
 - The aggregate reconciliation stops passing with
   `--require-consistency-resolved`.
-- Live runtime evidence is not re-collected after the ACT PRs are merged.
+- Live runtime evidence is not refreshed after later ACT PRs merge or the live
+  runtime restarts.
 - The latest Verify `PASS` for the relevant runtime window lacks
   `post_act_verify=true`, an accepted live-runtime `evidence_kind`, a concrete
   `evidence_source`, explicit evidence-window bounds, or `checked_at`.

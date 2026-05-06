@@ -33,9 +33,8 @@ let format_since_last_scheduled_autonomous = function
    honest actions of [specs/keeper-state-machine/KeeperHeartbeat.tla].
    Each helper is wrapped at the call site by
    [Keeper_fsm_guard_runtime.wrap_unit], so an [Assert_failure] from a
-   PPX-injected guard becomes a Prometheus counter increment by default
-   (counter mode) and a re-raise when [MASC_FSM_GUARD_ASSERT=1]
-   (assert mode for tests / CI). The bug-action [MissedWakeup] is
+   PPX-injected guard increments the Prometheus violation counter and
+   re-raises. The bug-action [MissedWakeup] is
    intentionally NOT instrumented — it is the failure mode these guards
    are designed to detect, not to enforce. *)
 

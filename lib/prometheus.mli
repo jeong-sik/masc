@@ -561,10 +561,10 @@ val metric_keeper_lifecycle_transitions : string
 
 (** Cycle 43 (Tier I3 follow-up to fsm_guard smoke at
     [keeper_turn_fsm.ml:118]): runtime [@@fsm_guard] assert violations
-    that the [Keeper_fsm_guard_runtime.wrap_unit] caught and recovered
-    from. Bumped by the wrap helper before swallowing
-    [Assert_failure] in counter mode (default), and also bumped before
-    re-raising in assert mode ([MASC_FSM_GUARD_ASSERT=1]).
+    observed by [Keeper_fsm_guard_runtime.wrap_unit]. Bumped by the
+    wrap helper before re-raising [Assert_failure]. FSM guard
+    violations are fail-closed; [MASC_FSM_GUARD_ASSERT=0] no longer
+    enables counter-only mode.
 
     Labels: [action, stage]. [action] is the spec-action name
     ([WakeupSignal], [HeartbeatTick], [TurnComplete],

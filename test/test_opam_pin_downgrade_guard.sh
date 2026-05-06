@@ -118,5 +118,33 @@ if [[ "$(cat "${FLOOR_FILE}")" != "${OAS_AGENT_SDK_MIN_VERSION}" ]]; then
 fi
 echo "ok case 4 - equal installed version permits normal pinning and records the floor"
 
+: > "${CALLS_FILE}"
+rm -f "${FLOOR_FILE}"
+if run_pin_script \
+  FAKE_AGENT_SDK_VERSION=999.999.999 \
+  AGENT_SDK_PIN_URL=git@local:agent-sdk-old.git \
+  bash "${PIN_SCRIPT}" >"${TMP}/case5.out" 2>"${TMP}/case5.err"; then
+  echo "FAIL case 5: AGENT_SDK_PIN_URL downgrade should still be rejected" >&2
+  exit 1
+fi
+assert_contains "${TMP}/case5.err" "refusing to downgrade installed agent_sdk 999.999.999"
+assert_contains "${TMP}/case5.err" "branch pin source: git@local:agent-sdk-old.git"
+assert_not_contains "${CALLS_FILE}" "pin add agent_sdk"
+echo "ok case 5 - AGENT_SDK_PIN_URL does not bypass downgrade protection"
+
+: > "${CALLS_FILE}"
+printf '999.999.999\n' > "${FLOOR_FILE}"
+run_pin_script \
+  FAKE_AGENT_SDK_VERSION=999.999.999 \
+  AGENT_SDK_PIN_URL=git@local:agent-sdk-old.git \
+  MASC_ALLOW_OAS_PIN_DOWNGRADE=1 \
+  bash "${PIN_SCRIPT}" >"${TMP}/case6.out" 2>"${TMP}/case6.err"
+assert_contains "${CALLS_FILE}" "pin add agent_sdk git@local:agent-sdk-old.git"
+if [[ "$(cat "${FLOOR_FILE}")" != "999.999.999" ]]; then
+  echo "FAIL case 6: AGENT_SDK_PIN_URL rollback override should not lower the recorded floor" >&2
+  exit 1
+fi
+echo "ok case 6 - explicit rollback override permits AGENT_SDK_PIN_URL without lowering the floor"
+
 echo ""
-echo "[opam-pin-downgrade-guard test] PASS - 4/4 cases"
+echo "[opam-pin-downgrade-guard test] PASS - 6/6 cases"

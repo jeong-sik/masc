@@ -118,8 +118,6 @@ installed_agent_sdk_version() {
 
 guard_agent_sdk_downgrade() {
   [[ "${MASC_ALLOW_OAS_PIN_DOWNGRADE:-0}" != "1" ]] || return 0
-  # Explicit overrides are operator-directed; do not second-guess them here.
-  [[ -z "${AGENT_SDK_PIN_URL:-}" ]] || return 0
 
   local recorded_floor
   if [[ -r "${agent_sdk_floor_path}" ]]; then

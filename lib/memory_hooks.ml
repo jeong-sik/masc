@@ -50,6 +50,42 @@ let render_memory_context
   | [] -> None
   | parts -> Some (String.concat "\n\n" parts)
 
+let before_turn_params_event_with_current_params event current_params =
+  match event with
+  | Agent_sdk.Hooks.BeforeTurnParams params ->
+      Agent_sdk.Hooks.BeforeTurnParams { params with current_params }
+  | _ -> event
+
+let compose_before_turn_params outer inner =
+  match outer, inner with
+  | None, None -> None
+  | Some _, None -> outer
+  | None, Some _ -> inner
+  | Some f_outer, Some f_inner ->
+      Some
+        (fun event ->
+          match f_outer event with
+          | Agent_sdk.Hooks.Continue -> f_inner event
+          | Agent_sdk.Hooks.AdjustParams params ->
+              let event' =
+                before_turn_params_event_with_current_params event params
+              in
+              (match f_inner event' with
+               | Agent_sdk.Hooks.Continue -> Agent_sdk.Hooks.AdjustParams params
+               | decision -> decision)
+          | decision -> decision)
+
+let compose_with_inner ~memory_hooks ~inner =
+  let composed =
+    Agent_sdk.Hooks.compose ~outer:memory_hooks ~inner
+  in
+  { composed with
+    before_turn_params =
+      compose_before_turn_params
+        memory_hooks.Agent_sdk.Hooks.before_turn_params
+        inner.Agent_sdk.Hooks.before_turn_params
+  }
+
 (** Create OAS hooks for hook-first memory injection.
 
     @param agent_name Keeper agent name (for procedure/episode lookup)
@@ -74,6 +110,7 @@ let make
     ?world_backend
     ?(episode_limit = 30)
     ?(procedure_limit = 10)
+    ?(flush_incremental = Memory_oas_bridge.flush_incremental)
     () : Agent_sdk.Hooks.hooks =
   { Agent_sdk.Hooks.empty with
 
@@ -99,13 +136,26 @@ let make
     after_turn = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.AfterTurn _ ->
-        let (ep, pr) =
-          Memory_oas_bridge.flush_incremental ~memory ~agent_name
-        in
-        if ep > 0 || pr > 0 then
-          Log.Keeper.debug
-            "memory_hooks: flush_incremental agent=%s episodes=%d procedures=%d"
-            agent_name ep pr;
+        (try
+           let (ep, pr) = flush_incremental ~memory ~agent_name in
+           if ep > 0 || pr > 0 then
+             Log.Keeper.debug
+               "memory_hooks: flush_incremental agent=%s episodes=%d procedures=%d"
+               agent_name ep pr
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_lifecycle_callback_failures
+               ~labels:
+                 [
+                   ("keeper", agent_name);
+                   ("callback", "memory_after_turn_flush");
+                 ]
+               ();
+             Log.Keeper.warn
+               "memory_hooks: flush_incremental failed agent=%s: %s"
+               agent_name (Printexc.to_string exn));
         Agent_sdk.Hooks.Continue
       | _ -> Agent_sdk.Hooks.Continue);
   }

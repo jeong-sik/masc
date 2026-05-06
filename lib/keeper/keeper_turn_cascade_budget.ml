@@ -291,15 +291,17 @@ let reclassify_oas_timeout_for_attempt
            })
   | _ -> err
 
+let attempt_watchdog_outer_turn_reserve_sec = 1.0
+
 let attempt_watchdog_timeout_sec
     ~(remaining_turn_budget_s : float)
     (timeout_budget : oas_timeout_budget_resolution) : float =
   let desired =
     timeout_budget.effective_timeout_sec +. oas_timeout_guard_sec
   in
-  let outer_margin_sec = 1.0 in
   let cap_before_outer_timeout =
-    Float.max 0.001 (remaining_turn_budget_s -. outer_margin_sec)
+    Float.max 0.001
+      (remaining_turn_budget_s -. attempt_watchdog_outer_turn_reserve_sec)
   in
   let floor =
     Float.min min_oas_timeout_budget_sec cap_before_outer_timeout

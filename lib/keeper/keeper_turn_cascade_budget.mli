@@ -111,10 +111,11 @@ val attempt_watchdog_timeout_sec :
 (** Wall-clock watchdog for a single cascade attempt.
 
     The watchdog fires after the OAS per-attempt budget plus the normal
-    finalization guard, but no later than one second before the enclosing
-    keeper turn wall-clock timeout. This keeps a hung provider attempt on the
-    structured [oas_timeout_budget] path, where degraded cascade rotation can
-    still run, instead of falling through to terminal [turn_timeout]. *)
+    finalization guard, while reserving a small outer-turn margin before the
+    enclosing keeper turn wall-clock timeout. This keeps a hung provider
+    attempt on the structured [oas_timeout_budget] path, where degraded cascade
+    rotation can still run, instead of falling through to terminal
+    [turn_timeout]. *)
 
 type degraded_retry_budget_decision =
   | No_degraded_retry

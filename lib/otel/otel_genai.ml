@@ -7,59 +7,56 @@
 type attr = string * [ `Bool of bool | `Int of int | `String of string ]
 
 module Attr_key = struct
-  let gen_ai_operation_name = "gen_ai.operation.name"
-  let gen_ai_provider_name = "gen_ai.provider.name"
-  let gen_ai_agent_name = "gen_ai.agent.name"
-  let gen_ai_agent_id = "gen_ai.agent.id"
-  let gen_ai_conversation_id = "gen_ai.conversation.id"
-  let gen_ai_tool_name = "gen_ai.tool.name"
-  let masc_gen_ai_keeper_name = "masc.gen_ai.keeper.name"
-  let masc_gen_ai_cascade_name = "masc.gen_ai.cascade.name"
-  let keeper_name = "keeper.name"
-  let keeper_agent_name = "keeper.agent_name"
-  let keeper_cascade_name = "keeper.cascade.name"
-  let keeper_trace_id = "keeper.trace_id"
-  let keeper_generation = "keeper.generation"
-  let keeper_max_context = "keeper.max_context"
-  let keeper_max_turns = "keeper.max_turns"
-  let keeper_max_idle_turns = "keeper.max_idle_turns"
-  let keeper_channel = "keeper.channel"
-  let keeper_is_retry = "keeper.is_retry"
-  let keeper_current_task_id = "keeper.current_task_id"
-  let tool_name = "tool.name"
-  let tool_success = "tool.success"
-  let tool_duration_ms = "tool.duration_ms"
-
   type boundary =
     | Official_gen_ai
     | Masc_extension
     | Legacy
 
-  let registry =
-    [ gen_ai_operation_name, Official_gen_ai
-    ; gen_ai_provider_name, Official_gen_ai
-    ; gen_ai_agent_name, Official_gen_ai
-    ; gen_ai_agent_id, Official_gen_ai
-    ; gen_ai_conversation_id, Official_gen_ai
-    ; gen_ai_tool_name, Official_gen_ai
-    ; masc_gen_ai_keeper_name, Masc_extension
-    ; masc_gen_ai_cascade_name, Masc_extension
-    ; keeper_name, Legacy
-    ; keeper_agent_name, Legacy
-    ; keeper_cascade_name, Legacy
-    ; keeper_trace_id, Legacy
-    ; keeper_generation, Legacy
-    ; keeper_max_context, Legacy
-    ; keeper_max_turns, Legacy
-    ; keeper_max_idle_turns, Legacy
-    ; keeper_channel, Legacy
-    ; keeper_is_retry, Legacy
-    ; keeper_current_task_id, Legacy
-    ; tool_name, Legacy
-    ; tool_success, Legacy
-    ; tool_duration_ms, Legacy
-    ]
+  let registry_ref = ref []
+
+  let register boundary key =
+    registry_ref := (key, boundary) :: !registry_ref;
+    key
   ;;
+
+  let gen_ai_operation_name =
+    register Official_gen_ai "gen_ai.operation.name"
+  ;;
+
+  let gen_ai_provider_name = register Official_gen_ai "gen_ai.provider.name"
+  let gen_ai_agent_name = register Official_gen_ai "gen_ai.agent.name"
+  let gen_ai_agent_id = register Official_gen_ai "gen_ai.agent.id"
+
+  let gen_ai_conversation_id =
+    register Official_gen_ai "gen_ai.conversation.id"
+  ;;
+
+  let gen_ai_tool_name = register Official_gen_ai "gen_ai.tool.name"
+
+  let masc_gen_ai_keeper_name =
+    register Masc_extension "masc.gen_ai.keeper.name"
+  ;;
+
+  let masc_gen_ai_cascade_name =
+    register Masc_extension "masc.gen_ai.cascade.name"
+  ;;
+
+  let keeper_name = register Legacy "keeper.name"
+  let keeper_agent_name = register Legacy "keeper.agent_name"
+  let keeper_cascade_name = register Legacy "keeper.cascade.name"
+  let keeper_trace_id = register Legacy "keeper.trace_id"
+  let keeper_generation = register Legacy "keeper.generation"
+  let keeper_max_context = register Legacy "keeper.max_context"
+  let keeper_max_turns = register Legacy "keeper.max_turns"
+  let keeper_max_idle_turns = register Legacy "keeper.max_idle_turns"
+  let keeper_channel = register Legacy "keeper.channel"
+  let keeper_is_retry = register Legacy "keeper.is_retry"
+  let keeper_current_task_id = register Legacy "keeper.current_task_id"
+  let tool_name = register Legacy "tool.name"
+  let tool_success = register Legacy "tool.success"
+  let tool_duration_ms = register Legacy "tool.duration_ms"
+
+  let registry = List.rev !registry_ref
 
   let keys_for boundary =
     registry

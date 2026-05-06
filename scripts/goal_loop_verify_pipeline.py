@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -494,20 +495,51 @@ def build_tla_gates(
     return gates
 
 
+def log_contract_template_command() -> list[str]:
+    parts = [
+        "python3",
+        "scripts/verify_goal_loop_logs.py",
+        "--mode",
+        "log-contract",
+        "--max-samples",
+        "0",
+    ]
+    for pattern in DEFAULT_MUST_CONTAIN:
+        parts.extend(["--must-contain", pattern])
+    for pattern in DEFAULT_MUST_NOT_CONTAIN:
+        parts.extend(["--must-not-contain", pattern])
+    parts.extend(
+        [
+            "${GOAL_LOOP_POST_ACT_LOG:?set GOAL_LOOP_POST_ACT_LOG to post-ACT production log path}",
+            "--format",
+            "json",
+        ]
+    )
+    return [
+        "sh",
+        "-c",
+        " ".join(
+            part if part.startswith("${") else shlex.quote(part) for part in parts
+        ),
+    ]
+
+
+def log_contract_json_command() -> list[str]:
+    return [
+        "sh",
+        "-c",
+        (
+            "jq '.status' "
+            '"${GOAL_LOOP_LOG_CONTRACT_JSON:?set GOAL_LOOP_LOG_CONTRACT_JSON to precomputed log-contract JSON}"'
+        ),
+    ]
+
+
 def build_log_gate(
     log_paths: list[str],
     *,
     log_contract_json: dict[str, Any] | None = None,
 ) -> VerifyGate:
-    command = [
-        "scripts/verify_goal_loop_logs.py",
-        "--mode",
-        "log-contract",
-        "--must-contain",
-        "...",
-        "--must-not-contain",
-        "...",
-    ]
     if log_contract_json is not None:
         status = log_contract_json.get("status")
         if status not in {"PASS", "FAIL"}:
@@ -517,7 +549,7 @@ def build_log_gate(
             "log_verification",
             status,
             "Post-ACT production log contract was evaluated from supplied report JSON.",
-            command=command,
+            command=log_contract_json_command(),
             reason=None if status == "PASS" else "log_contract_failed",
             evidence=log_contract_json,
         )
@@ -528,7 +560,7 @@ def build_log_gate(
             "log_verification",
             "BLOCKED",
             "Post-ACT production log contract was not evaluated.",
-            command=command,
+            command=log_contract_template_command(),
             reason="missing_post_act_logs",
             evidence={
                 "must_contain": list(DEFAULT_MUST_CONTAIN),
@@ -547,7 +579,7 @@ def build_log_gate(
         "log_verification",
         report.status,
         "Post-ACT production logs satisfy the required/forbidden pattern contract.",
-        command=command,
+        command=log_contract_template_command(),
         reason=None if report.status == "PASS" else "log_contract_failed",
         evidence=asdict(report),
     )

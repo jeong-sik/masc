@@ -236,6 +236,46 @@ class GoalLoopVerifyPipelineTest(unittest.TestCase):
             "log_contract_failed",
         )
 
+    def test_log_contract_commands_are_reproducible(self) -> None:
+        log_contract = json.loads(LIVE_LOG_CONTRACT_FIXTURE.read_text(encoding="utf-8"))
+        precomputed_report = goal_loop_verify_pipeline.build_pipeline_report(
+            repo_root=REPO_ROOT,
+            metrics_json=None,
+            tla_results=None,
+            log_paths=[],
+            log_contract_json=log_contract,
+            unit_tests_passed=False,
+            unit_tests_failed=False,
+        )
+        missing_logs_report = goal_loop_verify_pipeline.build_pipeline_report(
+            repo_root=REPO_ROOT,
+            metrics_json=None,
+            tla_results=None,
+            log_paths=[],
+            unit_tests_passed=False,
+            unit_tests_failed=False,
+        )
+
+        precomputed_command = " ".join(
+            {item.gate_id: item for item in precomputed_report.gates}[
+                "post_act_log_contract"
+            ].command
+            or []
+        )
+        missing_logs_command = " ".join(
+            {item.gate_id: item for item in missing_logs_report.gates}[
+                "post_act_log_contract"
+            ].command
+            or []
+        )
+        self.assertIn("GOAL_LOOP_LOG_CONTRACT_JSON", precomputed_command)
+        self.assertNotIn("...", precomputed_command)
+        self.assertIn("scripts/verify_goal_loop_logs.py", missing_logs_command)
+        self.assertIn("GOAL_LOOP_POST_ACT_LOG", missing_logs_command)
+        self.assertIn("recovery_strategy_executed", missing_logs_command)
+        self.assertIn("pricing_catalog_miss", missing_logs_command)
+        self.assertNotIn("...", missing_logs_command)
+
     def test_metric_gate_commands_reference_snapshot_metric_keys(self) -> None:
         report = goal_loop_verify_pipeline.build_pipeline_report(
             repo_root=REPO_ROOT,

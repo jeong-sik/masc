@@ -320,13 +320,9 @@
     {
       "category": "log_verification",
       "command": [
-        "scripts/verify_goal_loop_logs.py",
-        "--mode",
-        "log-contract",
-        "--must-contain",
-        "...",
-        "--must-not-contain",
-        "..."
+        "sh",
+        "-c",
+        "jq '.status' \"${GOAL_LOOP_LOG_CONTRACT_JSON:?set GOAL_LOOP_LOG_CONTRACT_JSON to precomputed log-contract JSON}\""
       ],
       "evidence": {
         "checked_at": "2026-05-07T00:58:47+09:00",

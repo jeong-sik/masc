@@ -62,6 +62,14 @@ let active_task_assignee = function
       Some assignee
   | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
 
+let assigned_task_ids ~matches_you tasks =
+  List.filter_map
+    (fun (task : Masc_domain.task) ->
+      match active_task_assignee task.task_status with
+      | Some assignee when matches_you assignee -> Some task.id
+      | Some _ | None -> None)
+    tasks
+
 let add_unique table key value =
   let values = Option.value (Hashtbl.find_opt table key) ~default:[] in
   if List.exists (String.equal value) values then ()

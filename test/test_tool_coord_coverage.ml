@@ -262,7 +262,7 @@ let () = test "dispatch_status_hides_awaiting_verification_current_task" (fun ()
     match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
     | Some { success; message = result } ->
         assert success;
-        assert_contains result (actual_name ^ " (you) -> active");
+        assert_contains result (actual_name ^ " (you) -> task-001");
         let agent_after =
           match Coord.read_json ctx.config agent_file |> Masc_domain.agent_of_yojson with
           | Ok agent -> agent
@@ -272,7 +272,7 @@ let () = test "dispatch_status_hides_awaiting_verification_current_task" (fun ()
         assert (agent_after.status = Masc_domain.Busy)
     | None -> failwith "dispatch returned None"))
 
-let () = test "dispatch_status_marks_stale_agent_current_task_label" (fun () ->
+let () = test "dispatch_status_hides_completed_agent_current_task_label" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
   let _ = Coord.add_task ctx.config ~title:"Completed elsewhere" ~priority:2 ~description:"" in
@@ -293,7 +293,8 @@ let () = test "dispatch_status_marks_stale_agent_current_task_label" (fun () ->
   | Some { success; message = result } ->
       assert success;
       assert_not_contains result (actual_name ^ " (you) -> task-001");
-      assert_contains result (actual_name ^ " (you) -> busy (stale:task-001)");
+      assert_contains result (actual_name ^ " (you) -> active");
+      assert_not_contains result "busy (stale:task-001)";
       assert_not_contains result "ignored-line";
       assert_contains result "Summary: active=0, done=1, cancelled=0, total=1"
   | None -> failwith "dispatch returned None"

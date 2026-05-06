@@ -69,6 +69,7 @@ class GoalLoopObserveMetricsValidatorTest(unittest.TestCase):
         self.assertEqual(18, report.checked_signals)
         self.assertEqual(18, report.passing_signals)
         self.assertEqual(0, report.failing_signals)
+        self.assertEqual([], report.missing_absent_metrics)
 
     def test_contract_pins_starvation_rate_signal(self) -> None:
         contract = validate_goal_loop_observe_metrics.load_json_object(
@@ -218,6 +219,38 @@ class GoalLoopObserveMetricsValidatorTest(unittest.TestCase):
         self.assertEqual(
             ["masc_write_meta_cas_retry_total"],
             failed["write_meta_cas_retry"].missing_dashboard_metrics,
+        )
+
+    def test_missing_absent_alert_metric_fails_contract(self) -> None:
+        alert_text = ALERTS_PATH.read_text(encoding="utf-8").replace(
+            "or absent(masc_goal_attainment_measured)",
+            "or absent(masc_goal_attainment_measured_shadow)",
+            1,
+        )
+
+        report = load_current_report(alert_text=alert_text)
+
+        self.assertEqual("FAIL", report.status)
+        self.assertEqual(18, report.passing_signals)
+        self.assertEqual(0, report.failing_signals)
+        self.assertEqual(
+            ["masc_goal_attainment_measured"],
+            report.missing_absent_metrics,
+        )
+
+    def test_missing_absent_alert_metric_is_reported_in_text(self) -> None:
+        alert_text = ALERTS_PATH.read_text(encoding="utf-8").replace(
+            "or absent(masc_memory_usage_bytes)",
+            "or absent(masc_memory_usage_bytes_shadow)",
+            1,
+        )
+
+        report = load_current_report(alert_text=alert_text)
+        text = validate_goal_loop_observe_metrics.report_to_text(report)
+
+        self.assertIn(
+            "missing_absent_metrics=masc_memory_usage_bytes",
+            text,
         )
 
     def test_cli_require_complete_fails_when_contract_broken(self) -> None:

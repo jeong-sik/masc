@@ -66,7 +66,10 @@ failing_signals: 0
 
 The script is intentionally stdlib-only. CI can run it without installing
 YAML tooling because it checks explicit alert names, metric names, and
-threshold fragments from the contract.
+threshold fragments from the contract. It also keeps the aggregate
+`GoalLoopObserveMetricAbsentCritical` rule in sync with every contract
+metric, so a metric cannot silently fall out of the absent-exporter safety
+net while its per-signal alert still passes.
 
 ## Apply
 

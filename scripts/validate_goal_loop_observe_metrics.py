@@ -12,6 +12,9 @@ from pathlib import Path
 from typing import Any
 
 
+ABSENT_ALERT_NAME = "GoalLoopObserveMetricAbsentCritical"
+
+
 @dataclass
 class SignalCheck:
     signal_id: str
@@ -29,6 +32,7 @@ class ValidationReport:
     checked_signals: int
     passing_signals: int
     failing_signals: int
+    missing_absent_metrics: list[str]
     signal_checks: list[SignalCheck]
 
 
@@ -159,6 +163,29 @@ def required_signals(contract: dict[str, Any]) -> list[dict[str, Any]]:
     return signals
 
 
+def required_metric_names(signals: list[dict[str, Any]]) -> list[str]:
+    seen: set[str] = set()
+    names: list[str] = []
+    for signal in signals:
+        for name in as_string_list(signal.get("metric_names")):
+            if name not in seen:
+                seen.add(name)
+                names.append(name)
+    return names
+
+
+def missing_absent_metrics(
+    metric_names: list[str],
+    alert_expr_map: dict[str, str],
+) -> list[str]:
+    absent_expr = alert_expr_map.get(ABSENT_ALERT_NAME, "")
+    return [
+        name
+        for name in metric_names
+        if not contains_expr_token(absent_expr, name)
+    ]
+
+
 def validate_signal(
     signal: dict[str, Any],
     *,
@@ -214,22 +241,28 @@ def validate_contract(
     schema_version = contract_schema_version(contract)
     alert_expr_map = alert_exprs(alert_text)
     dashboard_query_exprs = dashboard_exprs(dashboard_text)
+    signals = required_signals(contract)
     checks = [
         validate_signal(
             signal,
             alert_expr_map=alert_expr_map,
             dashboard_query_exprs=dashboard_query_exprs,
         )
-        for signal in required_signals(contract)
+        for signal in signals
     ]
     passing = sum(1 for check in checks if check.status == "PASS")
     failing = len(checks) - passing
+    absent_missing = missing_absent_metrics(
+        required_metric_names(signals),
+        alert_expr_map,
+    )
     return ValidationReport(
         schema_version=schema_version,
-        status="PASS" if failing == 0 else "FAIL",
+        status="PASS" if failing == 0 and not absent_missing else "FAIL",
         checked_signals=len(checks),
         passing_signals=passing,
         failing_signals=failing,
+        missing_absent_metrics=absent_missing,
         signal_checks=checks,
     )
 
@@ -245,6 +278,10 @@ def report_to_text(report: ValidationReport) -> str:
         f"passing_signals: {report.passing_signals}",
         f"failing_signals: {report.failing_signals}",
     ]
+    if report.missing_absent_metrics:
+        lines.append(
+            "missing_absent_metrics=" + ",".join(report.missing_absent_metrics)
+        )
     for check in report.signal_checks:
         lines.append(f"- {check.signal_id}: {check.status}")
         if check.status == "FAIL":

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  cascadeEventKey,
   cascadeInspectorRouteParams,
   isCascadeInspectorFocus,
 } from './cascade-inspector'
@@ -37,5 +38,20 @@ describe('cascadeInspectorRouteParams', () => {
       view: 'inspector',
       focus: 'compare',
     })
+  })
+})
+
+describe('cascadeEventKey', () => {
+  it('keeps tuple boundaries distinct', () => {
+    const base = {
+      strategy: 'fallback',
+      candidates_in: 4,
+      candidates_out: 2,
+      backoff_ms: 0,
+      kind: 'ordered' as const,
+    }
+
+    expect(cascadeEventKey({ ...base, ts: 1, cascade_name: '23', cycle: 4 }))
+      .not.toBe(cascadeEventKey({ ...base, ts: 12, cascade_name: '3', cycle: 4 }))
   })
 })

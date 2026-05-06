@@ -31,6 +31,10 @@ export function cascadeInspectorRouteParams(focus: CascadeInspectorChip): Record
     : { section: 'runtime', view: 'inspector', focus }
 }
 
+export function cascadeEventKey(event: CascadeStrategyTraceEvent): string {
+  return JSON.stringify([event.ts, event.cascade_name, event.cycle, event.kind])
+}
+
 function NumCell({ children }: { children: unknown }) {
   return html`<td class="px-3 py-2 text-right tabular-nums text-text-muted">${children}</td>`
 }
@@ -179,7 +183,7 @@ function StrategyTraceTable({ events }: { events: CascadeStrategyTraceEvent[] })
         </thead>
         <tbody class="divide-y divide-card-border/40">
           ${events.map(e => html`
-            <tr key=${e.ts + e.cascade_name + e.cycle} class="hover:bg-[var(--color-bg-surface)] transition-colors">
+            <tr key=${cascadeEventKey(e)} class="hover:bg-[var(--color-bg-surface)] transition-colors">
               <td class="px-3 py-2 text-text-body whitespace-nowrap">
                 <${TimeAgo} timestamp=${e.ts} />
               </td>
@@ -264,7 +268,7 @@ function CascadeDeepDivePanel({ events }: { events: CascadeStrategyTraceEvent[] 
       <div class="grid gap-2 md:grid-cols-2">
         ${visible.map(event => html`
           <${CascadeEventCard}
-            key=${event.ts + event.cascade_name + event.cycle + event.kind}
+            key=${cascadeEventKey(event)}
             event=${event}
             maxCandidates=${maxCandidates}
           />
@@ -404,6 +408,7 @@ export function CascadeInspector() {
   const names = cascadeNames.value
   const focus = activeCascadeFocus.value
   const events = latestEvents.value
+  const filteredTraceCount = filteredEvents.value.length
   const chips = [
     { key: 'all', label: '전체' },
     ...names.map(n => ({ key: n, label: n })),
@@ -424,7 +429,7 @@ export function CascadeInspector() {
           </div>
           <${CascadeFocusRail}
             focus=${focus}
-            traceCount=${traceEvents.value.length}
+            traceCount=${filteredTraceCount}
           />
         </div>
       </section>

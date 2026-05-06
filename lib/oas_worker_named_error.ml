@@ -583,6 +583,18 @@ let config_for_label
       temperature;
       max_idle_turns;
       stream_idle_timeout_s;
+      max_execution_time_s =
+        (* Mirror the cascade-driven activation at
+           [oas_worker_named.ml:389] so recovery-path [Agent.run]
+           calls also engage agent_sdk's [with_optional_timeout]
+           on hang instead of blocking until the whole-keeper
+           [turn_timeout]. Default 300 s, env override via
+           [MASC_KEEPER_OAS_TIMEOUT_SEC] (#10008 fm2 ignores the
+           [estimated_input_tokens] arg, so passing 0 is fine). *)
+        Some
+          (Keeper_runtime_resolved
+           .oas_timeout_for_estimated_input_tokens
+             ~estimated_input_tokens:0);
       guardrails;
       hooks;
       context_reducer;

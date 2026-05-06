@@ -128,13 +128,19 @@
 - [근거] `python3 scripts/goal_loop_completion_audit.py
   /tmp/goal-loop-status-live-post-act.json --structured-id-triage
   test/fixtures/goal_loop/structured-id-triage.external-claim.json
-  --require-complete --format text` checked at 2026-05-06T09:21:24+09:00,
+  --row-corpus-discovery
+  test/fixtures/goal_loop/row-corpus-discovery.external-claim.json
+  --require-complete --format text` checked at 2026-05-06T09:38:37+09:00,
   confidence High: exits non-zero with the single explicit blocker
   `strict_row_level_catalog_complete`, while preserving PASS evidence for
   source manifest coverage, source artifact validation, source identity,
   aggregate claim source verification, aggregate reconciliation, strict
   source/catalog ID sync, broader structured-ID ownership triage, and
-  post-ACT Verify.
+  post-ACT Verify. The row-corpus discovery manifest is attached as evidence
+  for the strict blocker; it records the 12 prompt documents checked, 19
+  strict itemized IDs, 187 missing rows, 72 broader uncataloged structured IDs,
+  260 broader source occurrences, and checked 47-issue audit artifacts that do
+  not contain the missing 206-row corpus.
 - [근거] `python3 scripts/observe_goal_loop_logs.py
   /Users/dancer/me/.masc/events/2026-05/06.jsonl
   /Users/dancer/me/.masc/transition-audit/2026-05/06.jsonl` plus
@@ -295,7 +301,9 @@ resolved documents, 1/1 aggregate reconciliation verified, 12/12 source
 identity checks verified against checked SHA-256 and line-count metadata, 91
 broader structured source IDs with 72 not in the strict audit catalog across 12
 uncataloged ID families and 260 source occurrences, 187 missing 206-itemized
-rows, and 9 itemized rows that are not evaluable from the startup log patterns.
+rows, row-corpus discovery evidence showing the checked 47-issue audit
+artifacts are not the missing 206-row corpus, and 9 itemized rows that are not
+evaluable from the startup log patterns.
 `goal_loop_completion_audit.py --require-complete` turns those facts into a
 closeout gate so the objective cannot be marked complete while those blockers
 remain.
@@ -431,7 +439,10 @@ No convergence claim is valid yet. The only safe current statement is:
    `--require-complete-catalog` still fails with 187 missing rows against the
    206 claim. The aggregate claims are now source-verified at 6/6 and
    reconciled at 1/1, so the remaining catalog gap is row-level completeness,
-   not whether the aggregate numbers appear in the supplied documents.
+   not whether the aggregate numbers appear in the supplied documents. The
+   checked row-corpus discovery manifest records that the known 47-issue audit
+   artifacts are not the missing corpus; it is evidence for the blocker, not a
+   substitute for the rows.
 2. Decide whether the source artifacts should be checked in under
    `prompt_corpus/GOAL_LOOP/...` or kept external. Local external validation
    passes via `<GOAL_LOOP_SOURCE_ROOT>` plus `--audit-source-strip-prefix`, and

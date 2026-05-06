@@ -19,6 +19,13 @@ TRIAGE_FIXTURE = (
     / "goal_loop"
     / "structured-id-triage.external-claim.json"
 )
+ROW_DISCOVERY_FIXTURE = (
+    REPO_ROOT
+    / "test"
+    / "fixtures"
+    / "goal_loop"
+    / "row-corpus-discovery.external-claim.json"
+)
 
 spec = importlib.util.spec_from_file_location("goal_loop_completion_audit", SCRIPT_PATH)
 assert spec is not None
@@ -182,6 +189,15 @@ def blocked_status() -> dict[str, object]:
     return status
 
 
+def strict_catalog_only_blocked_status() -> dict[str, object]:
+    status = json.loads(json.dumps(complete_status()))
+    audit_catalog = status["phases"]["orient"]["summary"]["audit_catalog"]
+    audit_catalog["status"] = "INCOMPLETE"
+    audit_catalog["itemized_findings_total"] = 19
+    audit_catalog["missing_itemized_findings"] = 187
+    return status
+
+
 class GoalLoopCompletionAuditTest(unittest.TestCase):
     def test_completion_audit_passes_when_all_criteria_pass(self) -> None:
         audit = goal_loop_completion_audit.build_completion_audit(complete_status())
@@ -296,6 +312,43 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
             12,
         )
 
+    def test_completion_audit_attaches_row_corpus_discovery_without_closing(
+        self,
+    ) -> None:
+        discovery = json.loads(ROW_DISCOVERY_FIXTURE.read_text(encoding="utf-8"))
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            row_corpus_discovery=discovery,
+        )
+
+        self.assertEqual(audit.status, "BLOCKED")
+        self.assertEqual(audit.blockers, ["strict_row_level_catalog_complete"])
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        discovery_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "row_corpus_discovery"
+        ]
+        self.assertTrue(discovery_evidence["recorded"])
+        self.assertEqual(
+            discovery_evidence["result"],
+            "FULL_ROW_CORPUS_NOT_FOUND",
+        )
+        self.assertEqual(discovery_evidence["prompt_sources_checked"], 12)
+        self.assertEqual(discovery_evidence["candidate_artifacts_checked"], 3)
+        self.assertFalse(discovery_evidence["local_path_leaks"])
+
+    def test_completion_audit_marks_missing_row_corpus_discovery(self) -> None:
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+        )
+
+        self.assertEqual(audit.status, "BLOCKED")
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        discovery_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "row_corpus_discovery"
+        ]
+        self.assertEqual(discovery_evidence["discovery_status"], "MISSING")
+        self.assertFalse(discovery_evidence["recorded"])
+
     def test_completion_audit_cli_can_fail_until_goal_is_closeable(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:
             status_path = Path(raw_dir) / "status.json"
@@ -307,6 +360,8 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
                     str(status_path),
                     "--structured-id-triage",
                     str(TRIAGE_FIXTURE),
+                    "--row-corpus-discovery",
+                    str(ROW_DISCOVERY_FIXTURE),
                     "--require-complete",
                 ],
                 text=True,
@@ -320,6 +375,11 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertEqual(payload["status"], "BLOCKED")
         self.assertIn("post_act_verify_complete", payload["blockers"])
         self.assertNotIn("broader_structured_ids_triaged", payload["blockers"])
+        by_id = {item["criterion_id"]: item for item in payload["criteria"]}
+        row_discovery = by_id["strict_row_level_catalog_complete"]["evidence"][
+            "row_corpus_discovery"
+        ]
+        self.assertTrue(row_discovery["recorded"])
 
 
 if __name__ == "__main__":

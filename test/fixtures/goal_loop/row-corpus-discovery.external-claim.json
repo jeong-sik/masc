@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "discovery_id": "goal-loop-row-corpus-discovery-2026-05-06",
+  "source_catalog_id": "goal-loop-206-audit-external-claim-2026-05-05",
+  "status": "RECORDED",
+  "result": "FULL_ROW_CORPUS_NOT_FOUND",
+  "scope_note": "Search evidence for the missing strict 206-row audit corpus. This records what was checked without inventing or checking in private prompt-source rows.",
+  "expected_findings_total": 206,
+  "strict_itemized_findings": 19,
+  "missing_itemized_findings": 187,
+  "checked_path_policy": "logical_paths_only_no_user_local_paths",
+  "prompt_sources_checked": [
+    "prompt_corpus/GOAL_LOOP/INTEGRATED_IMPROVEMENT_DESIGN.md",
+    "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+    "prompt_corpus/GOAL_LOOP/issues_analysis_done_vs_todo.md",
+    "prompt_corpus/GOAL_LOOP/live_incident_analysis.md",
+    "prompt_corpus/GOAL_LOOP/fundamental_roadmap.md",
+    "prompt_corpus/GOAL_LOOP/deep_audit_dashboard_heuristic.md",
+    "prompt_corpus/GOAL_LOOP/audit_derived_state.md",
+    "prompt_corpus/GOAL_LOOP/progress-evaluation.md",
+    "prompt_corpus/GOAL_LOOP/llm_compatibility.agent.final.md",
+    "prompt_corpus/GOAL_LOOP/masc_final_diagnosis.md",
+    "prompt_corpus/GOAL_LOOP/RUTHLESS_JUDGMENT.md",
+    "prompt_corpus/GOAL_LOOP/artifact_synthesis.md"
+  ],
+  "strict_catalog_itemized_ids": [
+    "R-FATAL-1",
+    "R-FATAL-5",
+    "CC-3",
+    "CD-1",
+    "CD-2",
+    "CD-5",
+    "CD-8",
+    "CD-10",
+    "CE-1",
+    "CE-3",
+    "CF-1",
+    "NF-1",
+    "NF-2",
+    "NF-3",
+    "NF-4",
+    "NF-5",
+    "NF-6",
+    "NF-7",
+    "NF-8"
+  ],
+  "candidate_artifacts_checked": [
+    {
+      "artifact_name": "masc_mcp_audit_complete.agent.final.zip",
+      "artifact_kind": "zip",
+      "result": "NOT_ROW_CORPUS",
+      "observed_issue_total": 47,
+      "contents": [
+        "masc_mcp_audit_complete.agent.final.md",
+        "roadmap_timeline.png",
+        "god_file_decomposition.png",
+        "readme_code_mismatch.png",
+        "fig_telemetry_gap.png"
+      ],
+      "note": "Archive contains a 47-issue audit report and images, not a 206-row strict finding corpus."
+    },
+    {
+      "artifact_name": "masc_mcp_audit_complete.agent.final.md",
+      "artifact_kind": "markdown",
+      "result": "NOT_ROW_CORPUS",
+      "observed_issue_total": 47,
+      "note": "Markdown report states a 47-issue total rather than the claimed 206-row GOAL LOOP corpus."
+    },
+    {
+      "artifact_name": "masc_mcp_audit_complete.agent.final.footnote.docx",
+      "artifact_kind": "docx",
+      "result": "NOT_ROW_CORPUS",
+      "observed_issue_total": 47,
+      "note": "Docx variant mirrors the 47-issue report shape and does not provide the missing strict rows."
+    }
+  ],
+  "broader_structured_id_triage": {
+    "uncataloged_ids_total": 72,
+    "uncataloged_occurrences": 260,
+    "families": [
+      "F",
+      "NEW",
+      "P-DASH",
+      "P-EIO",
+      "P-FSM",
+      "P-HARD",
+      "P-MUT",
+      "P-PROAC",
+      "P-PROV",
+      "P-STR",
+      "P-TURN",
+      "S"
+    ],
+    "disposition": "Covered by structured-id-triage.external-claim.json, not folded into the strict 206-row audit catalog."
+  },
+  "next_required_artifact": "A strict row-level corpus with 206 itemized findings, stable finding IDs, source references, severity, decision mapping, and replay expectations."
+}

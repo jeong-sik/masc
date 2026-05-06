@@ -201,6 +201,7 @@ python3 scripts/goal_loop_status.py \
 python3 scripts/goal_loop_completion_audit.py \
   /tmp/goal-loop-status-audit.json \
   --structured-id-triage test/fixtures/goal_loop/structured-id-triage.external-claim.json \
+  --row-corpus-discovery test/fixtures/goal_loop/row-corpus-discovery.external-claim.json \
   --require-complete \
   --format text
 ```
@@ -211,7 +212,10 @@ because the strict row-level catalog is incomplete and post-ACT Verify is still
 pending. The aggregate mismatch is resolved only while
 `aggregate_reconciliations: COMPLETE verified=1 failed=0` remains true. The
 broader structured-ID criterion passes only when the triage manifest covers
-every uncataloged family and expected occurrence count.
+every uncataloged family and expected occurrence count. The row-corpus
+discovery manifest records the unsuccessful search for a full 206-row strict
+corpus and attaches that evidence to `strict_row_level_catalog_complete`, but
+it does not satisfy the criterion.
 
 When the Verify input is replaced with a live post-ACT artifact that carries
 the required evidence-window metadata, `post_act_verify_complete` can pass.

@@ -80,6 +80,16 @@ def as_nonempty_str(value: Any) -> str | None:
     return stripped if stripped else None
 
 
+def contains_user_local_path(value: Any) -> bool:
+    if isinstance(value, str):
+        return "/Users/" in value
+    if isinstance(value, list):
+        return any(contains_user_local_path(item) for item in value)
+    if isinstance(value, dict):
+        return any(contains_user_local_path(item) for item in value.values())
+    return False
+
+
 def criterion(
     criterion_id: str,
     passed: bool,
@@ -196,10 +206,82 @@ def structured_triage_evidence(
     return passed, not passed, evidence
 
 
+def row_corpus_discovery_evidence(
+    row_catalog_evidence: dict[str, Any],
+    row_corpus_discovery: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if row_catalog_evidence["status"] == "COMPLETE":
+        return {"discovery_status": "NOT_REQUIRED", "recorded": False}
+    if row_corpus_discovery is None:
+        return {"discovery_status": "MISSING", "recorded": False}
+
+    sources_raw = row_corpus_discovery.get("prompt_sources_checked", [])
+    sources = sources_raw if isinstance(sources_raw, list) else []
+    artifacts_raw = row_corpus_discovery.get("candidate_artifacts_checked", [])
+    artifacts = artifacts_raw if isinstance(artifacts_raw, list) else []
+    strict_ids_raw = row_corpus_discovery.get("strict_catalog_itemized_ids", [])
+    strict_ids = strict_ids_raw if isinstance(strict_ids_raw, list) else []
+    broader_triage = row_corpus_discovery.get("broader_structured_id_triage")
+    broader_triage = broader_triage if isinstance(broader_triage, dict) else {}
+
+    expected_matches = (
+        row_corpus_discovery.get("expected_findings_total")
+        == row_catalog_evidence["expected_findings_total"]
+    )
+    itemized_matches = (
+        row_corpus_discovery.get("strict_itemized_findings")
+        == row_catalog_evidence["itemized_findings_total"]
+    )
+    missing_matches = (
+        row_corpus_discovery.get("missing_itemized_findings")
+        == row_catalog_evidence["missing_itemized_findings"]
+    )
+    strict_ids_match = len(strict_ids) == as_int(
+        row_catalog_evidence["itemized_findings_total"]
+    )
+    path_policy_valid = (
+        row_corpus_discovery.get("checked_path_policy")
+        == "logical_paths_only_no_user_local_paths"
+    )
+    local_path_leaks = contains_user_local_path(row_corpus_discovery)
+    recorded = (
+        row_corpus_discovery.get("status") == "RECORDED"
+        and row_corpus_discovery.get("result") == "FULL_ROW_CORPUS_NOT_FOUND"
+        and expected_matches
+        and itemized_matches
+        and missing_matches
+        and strict_ids_match
+        and path_policy_valid
+        and len(sources) >= 12
+        and len(artifacts) > 0
+        and not local_path_leaks
+    )
+    return {
+        "discovery_status": row_corpus_discovery.get("status"),
+        "discovery_id": row_corpus_discovery.get("discovery_id"),
+        "result": row_corpus_discovery.get("result"),
+        "recorded": recorded,
+        "expected_matches": expected_matches,
+        "itemized_matches": itemized_matches,
+        "missing_matches": missing_matches,
+        "strict_ids_match": strict_ids_match,
+        "path_policy_valid": path_policy_valid,
+        "prompt_sources_checked": len(sources),
+        "candidate_artifacts_checked": len(artifacts),
+        "broader_uncataloged_ids_total": broader_triage.get("uncataloged_ids_total"),
+        "broader_uncataloged_occurrences": broader_triage.get(
+            "uncataloged_occurrences"
+        ),
+        "local_path_leaks": local_path_leaks,
+        "next_required_artifact": row_corpus_discovery.get("next_required_artifact"),
+    }
+
+
 def build_completion_audit(
     status: dict[str, Any],
     *,
     structured_id_triage: dict[str, Any] | None = None,
+    row_corpus_discovery: dict[str, Any] | None = None,
 ) -> CompletionAudit:
     audit_catalog = nested_dict(status, "phases", "orient", "summary", "audit_catalog")
     verify_summary = nested_dict(status, "phases", "verify", "summary")
@@ -289,6 +371,10 @@ def build_completion_audit(
         "itemized_findings_total": audit_catalog.get("itemized_findings_total"),
         "missing_itemized_findings": audit_catalog.get("missing_itemized_findings"),
     }
+    row_catalog_evidence["row_corpus_discovery"] = row_corpus_discovery_evidence(
+        row_catalog_evidence,
+        row_corpus_discovery,
+    )
     row_catalog_passed = (
         row_catalog_evidence["status"] == "COMPLETE"
         and as_int(row_catalog_evidence["expected_findings_total"]) >= 206
@@ -475,6 +561,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Optional triage manifest for broader uncataloged structured IDs.",
     )
     parser.add_argument(
+        "--row-corpus-discovery",
+        help="Optional discovery manifest for unsuccessful 206-row corpus searches.",
+    )
+    parser.add_argument(
         "--require-complete",
         action="store_true",
         help="Exit non-zero unless every completion criterion passes.",
@@ -487,6 +577,7 @@ def main(argv: list[str] | None = None) -> int:
     audit = build_completion_audit(
         load_json_input(args.status_json),
         structured_id_triage=load_optional_json_file(args.structured_id_triage),
+        row_corpus_discovery=load_optional_json_file(args.row_corpus_discovery),
     )
     if args.format == "json":
         print(audit_to_json(audit))

@@ -169,6 +169,10 @@ def summarize_orient(orient: dict[str, Any] | None) -> PhaseStatus:
         source_artifacts = (
             source_artifacts_raw if isinstance(source_artifacts_raw, dict) else None
         )
+        strict_row_corpus_raw = audit_catalog.get("strict_row_corpus")
+        strict_row_corpus = (
+            strict_row_corpus_raw if isinstance(strict_row_corpus_raw, dict) else None
+        )
         audit_catalog_summary = {
             "status": audit_catalog.get("status", "unknown"),
             "expected_findings_total": audit_catalog.get("expected_findings_total"),
@@ -190,6 +194,19 @@ def summarize_orient(orient: dict[str, Any] | None) -> PhaseStatus:
             "consistency_findings_total": len(consistency_findings),
             "consistency_findings_open": len(open_consistency_findings),
         }
+        if strict_row_corpus is not None:
+            audit_catalog_summary["strict_row_corpus_provided"] = (
+                strict_row_corpus.get("provided") is True
+            )
+            audit_catalog_summary["strict_row_corpus_validated"] = (
+                strict_row_corpus.get("validated") is True
+            )
+            audit_catalog_summary["strict_row_corpus_row_count"] = (
+                strict_row_corpus.get("row_count")
+            )
+            audit_catalog_summary["strict_row_corpus_errors_total"] = (
+                strict_row_corpus.get("errors_total")
+            )
         if source_artifacts is not None:
             audit_catalog_summary["source_artifacts_status"] = source_artifacts.get(
                 "status",
@@ -211,8 +228,15 @@ def summarize_orient(orient: dict[str, Any] | None) -> PhaseStatus:
                 "source_itemized_id_status",
                 "unknown",
             )
+            audit_catalog_summary["source_itemized_id_basis"] = source_artifacts.get(
+                "source_itemized_id_basis",
+                "source_documents",
+            )
             audit_catalog_summary["source_itemized_finding_ids_total"] = (
                 source_artifacts.get("source_itemized_finding_ids_total")
+            )
+            audit_catalog_summary["source_document_itemized_finding_ids_total"] = (
+                source_artifacts.get("source_document_itemized_finding_ids_total")
             )
             audit_catalog_summary["catalog_itemized_finding_ids_total"] = (
                 source_artifacts.get("catalog_itemized_finding_ids_total")
@@ -274,6 +298,7 @@ def summarize_orient(orient: dict[str, Any] | None) -> PhaseStatus:
             or audit_catalog_summary["source_documents_status"] != "COMPLETE"
             or audit_catalog_summary["consistency_findings_open"] > 0
             or audit_catalog_summary.get("source_artifacts_status") != "COMPLETE"
+            or audit_catalog_summary.get("strict_row_corpus_validated") is False
         )
     status = (
         "critical"

@@ -319,6 +319,84 @@ class GoalLoopStatusTest(unittest.TestCase):
             ],
         )
 
+    def test_orient_audit_catalog_carries_strict_row_corpus_metadata(self) -> None:
+        report = goal_loop_status.build_status_report(
+            observe={
+                "files": ["server.log"],
+                "total_lines": 5,
+                "matched_lines": 0,
+                "patterns": {},
+            },
+            orient={
+                "summary": {
+                    "evidence_present": 0,
+                    "critical_present": 0,
+                    "findings_total": 206,
+                },
+                "findings": [],
+                "audit_catalog": {
+                    "status": "COMPLETE",
+                    "expected_findings_total": 206,
+                    "itemized_findings_total": 206,
+                    "missing_itemized_findings": 0,
+                    "source_documents_status": "COMPLETE",
+                    "source_documents_covered": 12,
+                    "source_documents_expected": 12,
+                    "strict_row_corpus": {
+                        "provided": True,
+                        "validated": True,
+                        "row_count": 206,
+                        "errors_total": 0,
+                    },
+                    "source_artifacts": {
+                        "status": "COMPLETE",
+                        "source_artifacts_total": 12,
+                        "source_artifacts_resolved": 12,
+                        "source_artifacts_missing": 0,
+                        "line_ref_errors": 0,
+                        "source_itemized_id_status": "COMPLETE",
+                        "source_itemized_id_basis": "strict_row_corpus",
+                        "source_itemized_finding_ids_total": 206,
+                        "source_document_itemized_finding_ids_total": 19,
+                        "catalog_itemized_finding_ids_total": 206,
+                        "source_ids_missing_from_catalog": 0,
+                        "catalog_ids_missing_from_source": 0,
+                        "source_structured_item_ids_total": 19,
+                        "source_structured_item_ids_uncataloged": 0,
+                        "source_structured_item_ids_uncataloged_occurrences": 0,
+                        "source_structured_item_id_families": [],
+                        "source_aggregate_claim_status": "COMPLETE",
+                        "source_aggregate_claim_sources_verified": 6,
+                        "source_aggregate_claim_sources_missing": 0,
+                        "source_aggregate_reconciliation_status": "COMPLETE",
+                        "source_aggregate_reconciliations_verified": 1,
+                        "source_aggregate_reconciliations_failed": 0,
+                        "source_identity_status": "COMPLETE",
+                        "source_identity_checks_verified": 12,
+                        "source_identity_checks_failed": 0,
+                    },
+                },
+            },
+            decide={"decisions_total": 0, "p0_count": 0, "decisions": []},
+            verify={"status": "PASS", "failing_findings": []},
+            generated_at="2026-05-05T10:00:00+00:00",
+        )
+
+        self.assertEqual(report.phases["orient"].status, "ok")
+        audit_catalog = report.phases["orient"].summary["audit_catalog"]
+        self.assertTrue(audit_catalog["strict_row_corpus_provided"])
+        self.assertTrue(audit_catalog["strict_row_corpus_validated"])
+        self.assertEqual(audit_catalog["strict_row_corpus_row_count"], 206)
+        self.assertEqual(audit_catalog["strict_row_corpus_errors_total"], 0)
+        self.assertEqual(
+            audit_catalog["source_itemized_id_basis"],
+            "strict_row_corpus",
+        )
+        self.assertEqual(
+            audit_catalog["source_document_itemized_finding_ids_total"],
+            19,
+        )
+
     def test_malformed_catalog_consistency_finding_counts_open(self) -> None:
         self.assertTrue(goal_loop_status.consistency_finding_is_open("bad"))
 

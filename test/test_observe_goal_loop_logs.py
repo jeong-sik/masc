@@ -83,6 +83,35 @@ def catalog_without_source_identity(catalog: dict[str, object]) -> dict[str, obj
     return stripped
 
 
+def synthetic_strict_row_corpus(row_count: int = 206) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "corpus_id": "synthetic-goal-loop-strict-row-corpus",
+        "source_catalog_id": "goal-loop-206-audit-external-claim-2026-05-05",
+        "status": "COMPLETE",
+        "expected_findings_total": 206,
+        "findings": [
+            {
+                "finding_id": f"ROW-{index + 1:03d}",
+                "title": f"synthetic strict row {index + 1}",
+                "severity": "warning",
+                "actionability": "actionable",
+                "decision_id": None,
+                "patterns": [],
+                "source": {
+                    "path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+                    "line_refs": [1],
+                },
+                "replay_expectation": {
+                    "phase": "orient",
+                    "expected_status": "critical",
+                },
+            }
+            for index in range(row_count)
+        ],
+    }
+
+
 def source_text_with_optional_ids(source_path: str, ids: list[str]) -> str:
     body = "source line\n" * 2000
     source_name = Path(source_path).name
@@ -434,6 +463,96 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         )
         self.assertEqual(source_artifacts["source_aggregate_reconciliations_failed"], 0)
         self.assertEqual(source_artifacts["source_identity_status"], "NOT_APPLICABLE")
+
+    def test_orient_can_ingest_valid_strict_row_corpus_as_catalog_basis(self) -> None:
+        scan = json_from_fixture("observe.startup.json")
+        catalog = orient_goal_loop_logs.load_audit_catalog_input(
+            str(FIXTURE_DIR / "audit-corpus.external-claim.json")
+        )
+        assert catalog is not None
+        catalog = catalog_without_source_identity(catalog)
+        external_sources = catalog["external_sources"]
+        assert isinstance(external_sources, list)
+        corpus = synthetic_strict_row_corpus()
+
+        with tempfile.TemporaryDirectory() as raw_dir:
+            root = Path(raw_dir)
+            for source in external_sources:
+                assert isinstance(source, dict)
+                source_path = source["path"]
+                assert isinstance(source_path, str)
+                (root / Path(source_path).name).write_text(
+                    source_text_with_optional_ids(source_path, []),
+                    encoding="utf-8",
+                )
+
+            report = orient_goal_loop_logs.orient_scan(
+                scan,
+                audit_catalog=catalog,
+                strict_row_corpus=corpus,
+                audit_source_root=root,
+                audit_source_strip_prefix="prompt_corpus/GOAL_LOOP",
+            )
+
+        self.assertIsNotNone(report.audit_catalog)
+        assert report.audit_catalog is not None
+        self.assertEqual(report.audit_catalog["status"], "COMPLETE")
+        self.assertEqual(report.audit_catalog["itemized_findings_total"], 206)
+        self.assertEqual(report.audit_catalog["missing_itemized_findings"], 0)
+        strict_summary = report.audit_catalog["strict_row_corpus"]
+        self.assertTrue(strict_summary["validated"])
+        self.assertEqual(strict_summary["row_count"], 206)
+        source_artifacts = report.audit_catalog["source_artifacts"]
+        self.assertEqual(source_artifacts["status"], "COMPLETE")
+        self.assertEqual(
+            source_artifacts["source_itemized_id_basis"],
+            "strict_row_corpus",
+        )
+        self.assertEqual(source_artifacts["source_itemized_finding_ids_total"], 206)
+        self.assertEqual(
+            source_artifacts["source_document_itemized_finding_ids_total"],
+            0,
+        )
+        self.assertEqual(source_artifacts["catalog_itemized_finding_ids_total"], 206)
+        self.assertEqual(source_artifacts["catalog_ids_missing_from_source"], 0)
+        self.assertEqual(report.summary["findings_total"], 206)
+
+    def test_orient_rejects_invalid_strict_row_corpus_without_completing_catalog(
+        self,
+    ) -> None:
+        scan = json_from_fixture("observe.startup.json")
+        catalog = orient_goal_loop_logs.load_audit_catalog_input(
+            str(FIXTURE_DIR / "audit-corpus.external-claim.json")
+        )
+        assert catalog is not None
+        corpus = synthetic_strict_row_corpus()
+        findings = corpus["findings"]
+        assert isinstance(findings, list)
+        first = findings[0]
+        second = findings[1]
+        third = findings[2]
+        assert isinstance(first, dict)
+        assert isinstance(second, dict)
+        assert isinstance(third, dict)
+        second["finding_id"] = first["finding_id"]
+        source = third["source"]
+        assert isinstance(source, dict)
+        source["path"] = "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md"
+
+        report = orient_goal_loop_logs.orient_scan(
+            scan,
+            audit_catalog=catalog,
+            strict_row_corpus=corpus,
+        )
+
+        self.assertIsNotNone(report.audit_catalog)
+        assert report.audit_catalog is not None
+        self.assertEqual(report.audit_catalog["status"], "INCOMPLETE")
+        self.assertEqual(report.audit_catalog["itemized_findings_total"], 19)
+        strict_summary = report.audit_catalog["strict_row_corpus"]
+        self.assertFalse(strict_summary["validated"])
+        self.assertIn("finding_ids_must_be_unique", strict_summary["errors"])
+        self.assertIn("contains_user_local_path", strict_summary["errors"])
 
     def test_orient_catalog_validates_source_identity_hash_and_line_count(self) -> None:
         content = "206건 감사 결과\nR-FATAL-1\n"
@@ -840,6 +959,49 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertIn(
             '"source_aggregate_reconciliation_status": "COMPLETE"',
             result.stdout,
+        )
+
+    def test_orient_cli_can_pass_complete_catalog_with_strict_row_corpus(self) -> None:
+        catalog = orient_goal_loop_logs.load_audit_catalog_input(
+            str(FIXTURE_DIR / "audit-corpus.external-claim.json")
+        )
+        assert catalog is not None
+
+        with tempfile.TemporaryDirectory() as raw_dir:
+            root = Path(raw_dir)
+            catalog_path = root / "catalog.json"
+            corpus_path = root / "strict-row-corpus.json"
+            catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+            corpus_path.write_text(
+                json.dumps(synthetic_strict_row_corpus()),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ORIENT_SCRIPT_PATH),
+                    str(FIXTURE_DIR / "observe.startup.json"),
+                    "--audit-catalog",
+                    str(catalog_path),
+                    "--strict-row-corpus",
+                    str(corpus_path),
+                    "--require-complete-catalog",
+                    "--format",
+                    "text",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            "audit_catalog: COMPLETE itemized=206 expected=206", result.stdout
+        )
+        self.assertIn(
+            "strict_row_corpus: validated=True rows=206 errors=0", result.stdout
         )
 
     def test_decide_prioritizes_p0_actions_from_orient_json(self) -> None:

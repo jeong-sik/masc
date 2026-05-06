@@ -23,6 +23,9 @@ SOURCE_STRUCTURED_ITEM_ID_RE = re.compile(
     r"\b(?:R-FATAL|CC|CD|CE|CF|NF|NEW|P-[A-Z]+)-[0-9]+\b|\b[SF][0-9]{2}\b"
 )
 SHA256_RE = re.compile(r"\A[0-9a-f]{64}\Z")
+STRICT_ROW_CORPUS_SOURCE_PREFIX = "prompt_corpus/GOAL_LOOP/"
+STRICT_ROW_CORPUS_SEVERITIES = {"critical", "warning", "info"}
+STRICT_ROW_CORPUS_ERROR_LIMIT = 20
 
 
 def structured_item_id_family(item_id: str) -> str:
@@ -177,6 +180,16 @@ def load_audit_catalog_input(path: str | None) -> dict[str, Any] | None:
     return data
 
 
+def load_strict_row_corpus_input(path: str | None) -> dict[str, Any] | None:
+    if path is None:
+        return None
+    with Path(path).open("r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    if not isinstance(data, dict):
+        raise ValueError("expected strict row corpus JSON object")
+    return data
+
+
 def load_json_input(path: str) -> dict[str, Any]:
     if path == "-":
         return load_json_handle(sys.stdin)
@@ -216,6 +229,197 @@ def consistency_finding_is_open(finding: Any) -> bool:
     if not isinstance(status, str):
         return True
     return status.upper() not in {"CLOSED", "COMPLETE", "DONE", "RESOLVED"}
+
+
+def row_label(index: int, raw: dict[str, Any]) -> str:
+    finding_id = raw.get("finding_id")
+    return (
+        finding_id if isinstance(finding_id, str) and finding_id else f"index:{index}"
+    )
+
+
+def validate_strict_row_corpus(
+    strict_row_corpus: dict[str, Any],
+    *,
+    catalog: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    errors: list[str] = []
+    duplicate_ids: list[str] = []
+    invalid_rows: list[str] = []
+    invalid_source_paths: list[str] = []
+    invalid_line_refs: list[str] = []
+    invalid_replay_expectations: list[str] = []
+
+    schema_version = strict_row_corpus.get("schema_version")
+    corpus_id = strict_row_corpus.get("corpus_id")
+    source_catalog_id = strict_row_corpus.get("source_catalog_id")
+    corpus_status = strict_row_corpus.get("status")
+    expected_total = strict_row_corpus.get("expected_findings_total")
+    findings_raw = strict_row_corpus.get("findings")
+    findings = findings_raw if isinstance(findings_raw, list) else []
+    catalog_id = catalog.get("catalog_id") if isinstance(catalog, dict) else None
+
+    if schema_version != 1:
+        errors.append("schema_version_must_be_1")
+    if not isinstance(corpus_id, str) or not corpus_id:
+        errors.append("corpus_id_missing")
+    if not isinstance(source_catalog_id, str) or not source_catalog_id:
+        errors.append("source_catalog_id_missing")
+    if isinstance(catalog_id, str) and source_catalog_id != catalog_id:
+        errors.append("source_catalog_id_mismatch")
+    if corpus_status != "COMPLETE":
+        errors.append("status_must_be_COMPLETE")
+    if catalog is not None and expected_total != catalog.get("expected_findings_total"):
+        errors.append("expected_findings_total_mismatch")
+    if not isinstance(findings_raw, list):
+        errors.append("findings_must_be_list")
+    if isinstance(expected_total, int) and len(findings) != expected_total:
+        errors.append("findings_count_mismatch")
+
+    seen_ids: set[str] = set()
+    for index, raw in enumerate(findings):
+        if not isinstance(raw, dict):
+            invalid_rows.append(f"index:{index}")
+            continue
+
+        label = row_label(index, raw)
+        finding_id = raw.get("finding_id")
+        title = raw.get("title")
+        severity = raw.get("severity")
+        actionability = raw.get("actionability")
+        decision_id = raw.get("decision_id")
+        patterns_raw = raw.get("patterns", [])
+        source = raw.get("source")
+        replay_expectation = raw.get("replay_expectation")
+
+        if not isinstance(finding_id, str) or not finding_id:
+            invalid_rows.append(label)
+        elif finding_id in seen_ids:
+            duplicate_ids.append(finding_id)
+        else:
+            seen_ids.add(finding_id)
+        if not isinstance(title, str) or not title:
+            invalid_rows.append(label)
+        if severity not in STRICT_ROW_CORPUS_SEVERITIES:
+            invalid_rows.append(label)
+        if not isinstance(actionability, str) or not actionability:
+            invalid_rows.append(label)
+        if decision_id is not None and not isinstance(decision_id, str):
+            invalid_rows.append(label)
+        if not isinstance(patterns_raw, list) or any(
+            not isinstance(item, str) for item in patterns_raw
+        ):
+            invalid_rows.append(label)
+
+        if not isinstance(source, dict):
+            invalid_source_paths.append(label)
+            invalid_line_refs.append(label)
+        else:
+            source_path = source.get("path")
+            line_refs = source.get("line_refs")
+            if not isinstance(source_path, str) or not source_path.startswith(
+                STRICT_ROW_CORPUS_SOURCE_PREFIX
+            ):
+                invalid_source_paths.append(label)
+            if (
+                not isinstance(line_refs, list)
+                or len(line_refs) == 0
+                or any(not isinstance(item, int) or item <= 0 for item in line_refs)
+            ):
+                invalid_line_refs.append(label)
+
+        if not isinstance(replay_expectation, dict):
+            invalid_replay_expectations.append(label)
+        else:
+            phase = replay_expectation.get("phase")
+            expected_status = replay_expectation.get("expected_status")
+            if (
+                not isinstance(phase, str)
+                or not phase
+                or not isinstance(expected_status, str)
+                or not expected_status
+            ):
+                invalid_replay_expectations.append(label)
+
+    if duplicate_ids:
+        errors.append("finding_ids_must_be_unique")
+    if invalid_rows:
+        errors.append("finding_rows_invalid")
+    if invalid_source_paths:
+        errors.append("source_paths_must_be_logical_prompt_corpus_paths")
+    if invalid_line_refs:
+        errors.append("source_line_refs_must_be_positive_ints")
+    if invalid_replay_expectations:
+        errors.append("replay_expectation_missing_or_invalid")
+
+    local_path_leaks = contains_user_local_path(strict_row_corpus)
+    if local_path_leaks:
+        errors.append("contains_user_local_path")
+
+    errors = sorted(set(errors))
+    return {
+        "corpus_status": corpus_status,
+        "corpus_id": corpus_id if isinstance(corpus_id, str) else None,
+        "source_catalog_id": source_catalog_id
+        if isinstance(source_catalog_id, str)
+        else None,
+        "provided": True,
+        "validated": not errors,
+        "errors_total": len(errors),
+        "errors": errors[:STRICT_ROW_CORPUS_ERROR_LIMIT],
+        "expected_findings_total": expected_total,
+        "row_count": len(findings),
+        "row_count_matches_expected": isinstance(expected_total, int)
+        and len(findings) == expected_total,
+        "unique_finding_ids": len(seen_ids),
+        "duplicate_finding_ids": sorted(set(duplicate_ids))[
+            :STRICT_ROW_CORPUS_ERROR_LIMIT
+        ],
+        "invalid_rows": sorted(set(invalid_rows))[:STRICT_ROW_CORPUS_ERROR_LIMIT],
+        "invalid_source_paths": sorted(set(invalid_source_paths))[
+            :STRICT_ROW_CORPUS_ERROR_LIMIT
+        ],
+        "invalid_line_refs": sorted(set(invalid_line_refs))[
+            :STRICT_ROW_CORPUS_ERROR_LIMIT
+        ],
+        "invalid_replay_expectations": sorted(set(invalid_replay_expectations))[
+            :STRICT_ROW_CORPUS_ERROR_LIMIT
+        ],
+        "path_policy_valid": not local_path_leaks and not invalid_source_paths,
+        "local_path_leaks": local_path_leaks,
+        "required_source_prefix": STRICT_ROW_CORPUS_SOURCE_PREFIX,
+    }
+
+
+def contains_user_local_path(value: Any) -> bool:
+    if isinstance(value, str):
+        return "/Users/" in value
+    if isinstance(value, list):
+        return any(contains_user_local_path(item) for item in value)
+    if isinstance(value, dict):
+        return any(contains_user_local_path(item) for item in value.values())
+    return False
+
+
+def catalog_with_strict_row_corpus(
+    catalog: dict[str, Any] | None,
+    strict_row_corpus: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if strict_row_corpus is None:
+        return catalog
+    merged = dict(catalog or {})
+    summary = validate_strict_row_corpus(strict_row_corpus, catalog=merged)
+    merged["strict_row_corpus"] = summary
+    if summary["validated"]:
+        findings_raw = strict_row_corpus.get("findings")
+        merged["findings"] = (
+            list(findings_raw) if isinstance(findings_raw, list) else []
+        )
+        expected_total = strict_row_corpus.get("expected_findings_total")
+        if isinstance(expected_total, int):
+            merged["expected_findings_total"] = expected_total
+        merged["source_status"] = "strict_row_corpus_complete"
+    return merged
 
 
 def valid_external_source(source: Any) -> dict[str, Any] | None:
@@ -322,6 +526,14 @@ def catalog_specs(catalog: dict[str, Any] | None) -> list[FindingSpec]:
 
 
 def merged_specs(catalog: dict[str, Any] | None) -> list[FindingSpec]:
+    strict_row_corpus = (
+        catalog.get("strict_row_corpus") if catalog is not None else None
+    )
+    if (
+        isinstance(strict_row_corpus, dict)
+        and strict_row_corpus.get("validated") is True
+    ):
+        return catalog_specs(catalog)
     merged: dict[str, FindingSpec] = {spec.finding_id: spec for spec in FINDINGS}
     ordered_ids = [spec.finding_id for spec in FINDINGS]
     for spec in catalog_specs(catalog):
@@ -617,6 +829,11 @@ def source_artifact_summary(
     source_structured_item_ids: set[str] = set()
     source_structured_item_occurrences: dict[str, list[dict[str, Any]]] = {}
     catalog_finding_ids = {spec.finding_id for spec in catalog_specs(catalog)}
+    strict_row_corpus_raw = catalog.get("strict_row_corpus")
+    strict_row_corpus = (
+        strict_row_corpus_raw if isinstance(strict_row_corpus_raw, dict) else {}
+    )
+    strict_row_corpus_validated = strict_row_corpus.get("validated") is True
     resolved_contents: dict[str, str] = {}
     source_identity_errors: list[dict[str, Any]] = []
     source_identity_checked_paths: set[str] = set()
@@ -718,7 +935,16 @@ def source_artifact_summary(
             )
 
     source_ids_missing_from_catalog = sorted(source_finding_ids - catalog_finding_ids)
-    catalog_ids_missing_from_source = sorted(catalog_finding_ids - source_finding_ids)
+    if strict_row_corpus_validated:
+        catalog_ids_missing_from_source: list[str] = []
+        source_itemized_finding_ids_total = len(catalog_finding_ids)
+        source_itemized_id_basis = "strict_row_corpus"
+    else:
+        catalog_ids_missing_from_source = sorted(
+            catalog_finding_ids - source_finding_ids
+        )
+        source_itemized_finding_ids_total = len(source_finding_ids)
+        source_itemized_id_basis = "source_documents"
     source_structured_ids_uncataloged = sorted(
         source_structured_item_ids - catalog_finding_ids
     )
@@ -779,7 +1005,9 @@ def source_artifact_summary(
         "source_artifacts_invalid_paths": len(invalid_paths),
         "line_ref_errors": len(line_ref_errors),
         "source_itemized_id_status": source_itemized_id_status,
-        "source_itemized_finding_ids_total": len(source_finding_ids),
+        "source_itemized_id_basis": source_itemized_id_basis,
+        "source_itemized_finding_ids_total": source_itemized_finding_ids_total,
+        "source_document_itemized_finding_ids_total": len(source_finding_ids),
         "catalog_itemized_finding_ids_total": len(catalog_finding_ids),
         "source_ids_missing_from_catalog": len(source_ids_missing_from_catalog),
         "catalog_ids_missing_from_source": len(catalog_ids_missing_from_source),
@@ -879,6 +1107,7 @@ def audit_catalog_summary(
         "consistency_findings": consistency_findings,
         "consistency_findings_total": len(consistency_findings),
         "consistency_findings_open": len(open_consistency_findings),
+        "strict_row_corpus": catalog.get("strict_row_corpus"),
     }
     artifacts = source_artifact_summary(
         catalog,
@@ -894,9 +1123,11 @@ def orient_scan(
     scan: dict[str, Any],
     *,
     audit_catalog: dict[str, Any] | None = None,
+    strict_row_corpus: dict[str, Any] | None = None,
     audit_source_root: Path | None = None,
     audit_source_strip_prefix: str | None = None,
 ) -> OrientReport:
+    audit_catalog = catalog_with_strict_row_corpus(audit_catalog, strict_row_corpus)
     patterns_raw = scan.get("patterns", {})
     patterns = patterns_raw if isinstance(patterns_raw, dict) else {}
     files_raw = scan.get("files", [])
@@ -987,6 +1218,14 @@ def report_to_text(report: OrientReport) -> str:
             f"covered={report.audit_catalog['source_documents_covered']} "
             f"expected={report.audit_catalog['source_documents_expected']}"
         )
+        strict_row_corpus = report.audit_catalog.get("strict_row_corpus")
+        if isinstance(strict_row_corpus, dict) and strict_row_corpus.get("provided"):
+            lines.append(
+                "strict_row_corpus: "
+                f"validated={strict_row_corpus['validated']} "
+                f"rows={strict_row_corpus['row_count']} "
+                f"errors={strict_row_corpus['errors_total']}"
+            )
         source_artifacts = report.audit_catalog.get("source_artifacts")
         if isinstance(source_artifacts, dict):
             lines.append(
@@ -995,7 +1234,8 @@ def report_to_text(report: OrientReport) -> str:
                 f"resolved={source_artifacts['source_artifacts_resolved']} "
                 f"missing={source_artifacts['source_artifacts_missing']} "
                 f"line_ref_errors={source_artifacts['line_ref_errors']} "
-                f"source_ids={source_artifacts['source_itemized_finding_ids_total']}"
+                f"source_ids={source_artifacts['source_itemized_finding_ids_total']} "
+                f"basis={source_artifacts['source_itemized_id_basis']}"
             )
             lines.append(
                 "aggregate_claim_sources: "
@@ -1093,6 +1333,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--strict-row-corpus",
+        help=(
+            "Optional strict row-level corpus JSON. When valid, its findings "
+            "replace audit-catalog findings for strict catalog completeness."
+        ),
+    )
+    parser.add_argument(
         "--audit-source-root",
         help=(
             "Optional root used to validate audit catalog source paths and "
@@ -1132,6 +1379,7 @@ def main(argv: list[str] | None = None) -> int:
     report = orient_scan(
         load_json_input(args.scan_json),
         audit_catalog=load_audit_catalog_input(args.audit_catalog),
+        strict_row_corpus=load_strict_row_corpus_input(args.strict_row_corpus),
         audit_source_root=Path(args.audit_source_root)
         if args.audit_source_root is not None
         else None,

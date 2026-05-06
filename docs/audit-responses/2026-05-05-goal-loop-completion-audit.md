@@ -152,6 +152,16 @@
   `BLOCKED` while Orient still reports only 19 itemized rows; invalid supplied
   corpora with duplicate IDs or `/Users/...` paths block
   `strict_row_level_catalog_complete`.
+- [근거] `python3 test/test_observe_goal_loop_logs.py` and
+  `python3 test/test_goal_loop_status.py` checked at 2026-05-06T10:15:47+09:00,
+  confidence High: Orient now accepts the same optional `--strict-row-corpus`
+  artifact and uses it as the strict catalog basis only after validation. A
+  valid synthetic 206-row corpus makes Orient report `audit_catalog=COMPLETE`
+  with 206 itemized rows, `source_itemized_id_basis=strict_row_corpus`, and
+  zero missing rows; invalid corpora keep the existing 19-row catalog
+  incomplete. Aggregate GOAL LOOP status carries the strict-row corpus metadata
+  so closeout evidence can distinguish source-document itemized IDs from a
+  complete row-corpus artifact.
 - [근거] `python3 scripts/observe_goal_loop_logs.py
   /Users/dancer/me/.masc/events/2026-05/06.jsonl
   /Users/dancer/me/.masc/transition-audit/2026-05/06.jsonl` plus
@@ -223,8 +233,8 @@ prove the full row-level aggregate from live production state; 187 rows remain
 missing from the 206-itemized corpus, the 214 claim has no row-level corpus,
 and several prompt claims remain evidence-absent in the fixture (`NF-5`,
 `NF-7`, `NF-8`, `R-FATAL-1`, `CF-1`). The required row-corpus shape is now
-machine-checkable via `--strict-row-corpus`, but that supplied artifact still
-must be replayed into Orient before the strict catalog criterion can pass.
+machine-checkable via `--strict-row-corpus`, and Orient now has a first-class
+path to ingest that artifact before the strict catalog criterion can pass.
 
 **Verification command**:
 

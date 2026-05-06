@@ -514,6 +514,16 @@ def build_completion_audit(
 
     id_sync_evidence = {
         "source_itemized_id_status": audit_catalog.get("source_itemized_id_status"),
+        "source_itemized_id_basis": audit_catalog.get("source_itemized_id_basis"),
+        "source_document_itemized_finding_ids_total": audit_catalog.get(
+            "source_document_itemized_finding_ids_total"
+        ),
+        "source_itemized_finding_ids_total": audit_catalog.get(
+            "source_itemized_finding_ids_total"
+        ),
+        "catalog_itemized_finding_ids_total": audit_catalog.get(
+            "catalog_itemized_finding_ids_total"
+        ),
         "source_ids_missing_from_catalog": audit_catalog.get(
             "source_ids_missing_from_catalog"
         ),
@@ -660,7 +670,7 @@ def build_completion_audit(
         criterion(
             "strict_source_catalog_id_sync",
             id_sync_passed,
-            "Strict source-extracted audit IDs match catalog finding IDs.",
+            "Strict source or row-corpus audit IDs match catalog finding IDs.",
             id_sync_evidence,
         ),
         criterion(

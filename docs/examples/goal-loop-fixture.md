@@ -127,6 +127,25 @@ Expected key fact: the checked fixture records
 passes for the resolved catalog. It will exit non-zero if the consistency
 finding is reopened.
 
+When the full 206-row strict corpus is available, feed it into Orient instead
+of using it only at closeout:
+
+```bash
+python3 scripts/orient_goal_loop_logs.py \
+  test/fixtures/goal_loop/observe.startup.json \
+  --audit-catalog test/fixtures/goal_loop/audit-corpus.external-claim.json \
+  --strict-row-corpus <STRICT_ROW_CORPUS_JSON> \
+  --require-complete-catalog \
+  --format text
+```
+
+Expected key fact: `--strict-row-corpus` validates the same contract described
+by `test/fixtures/goal_loop/strict-row-corpus-contract.json`. A valid corpus
+becomes the strict Orient catalog basis, so `audit_catalog` can report
+`COMPLETE itemized=206 expected=206`. Invalid corpora, including duplicate
+finding IDs or `/Users/...` source paths, do not replace the current 19-row
+catalog and keep `--require-complete-catalog` failing.
+
 Validate against a local external source root without checking the documents
 into the public repository:
 
@@ -207,7 +226,23 @@ python3 scripts/goal_loop_completion_audit.py \
 ```
 
 When a candidate 206-row corpus is available, pass it through the same closeout
-gate:
+path by first replaying it through Orient. This is the acceptance check that
+turns the supplied corpus from a shaped artifact into replay evidence:
+
+```bash
+python3 scripts/orient_goal_loop_logs.py \
+  test/fixtures/goal_loop/observe.startup.json \
+  --audit-catalog test/fixtures/goal_loop/audit-corpus.external-claim.json \
+  --strict-row-corpus <STRICT_ROW_CORPUS_JSON> \
+  --audit-source-root <GOAL_LOOP_SOURCE_ROOT> \
+  --audit-source-strip-prefix prompt_corpus/GOAL_LOOP \
+  --require-source-artifacts \
+  --require-consistency-resolved \
+  --require-complete-catalog \
+  > /tmp/goal-loop-orient-audit.json
+```
+
+Then run the same closeout gate:
 
 ```bash
 python3 scripts/goal_loop_completion_audit.py \
@@ -232,8 +267,9 @@ it does not satisfy the criterion. A supplied strict-row corpus is validated
 against `test/fixtures/goal_loop/strict-row-corpus-contract.json`: 206 unique
 rows, logical `prompt_corpus/GOAL_LOOP/...` source paths, positive line refs,
 severity/actionability, and replay expectations. A valid supplied corpus still
-does not close the blocker unless Orient also reports the strict row-level
-catalog as `COMPLETE` with 206 itemized findings and zero missing rows.
+does not close the blocker unless the status input was produced from Orient
+with the same corpus and reports the strict row-level catalog as `COMPLETE`
+with 206 itemized findings and zero missing rows.
 
 When the Verify input is replaced with a live post-ACT artifact that carries
 the required evidence-window metadata, `post_act_verify_complete` can pass.

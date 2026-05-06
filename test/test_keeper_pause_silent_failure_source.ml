@@ -170,7 +170,12 @@ let test_keeper_status_disposition_mirrors_runtime_trust () =
     (count_occurrences
        ~needle:"(\"disposition\", Json_util.string_opt_to_json disposition)"
        src
-     >= 1)
+    >= 1);
+  check bool "top-level attention overlays runtime_trust" true
+    (count_occurrences
+       ~needle:"attention_fields_with_runtime_trust attention_fields runtime_trust"
+       src
+    >= 1)
 
 let () =
   run "keeper_pause_silent_failure_source"

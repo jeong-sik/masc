@@ -79,6 +79,12 @@ let source_summary source_name = function
       | _ -> Alcotest.fail "expected sources")
   | _ -> Alcotest.fail "expected summary object"
 
+let source_read_failure_metric source site =
+  Prometheus.metric_value_or_zero
+    Prometheus.metric_telemetry_unified_source_read_failures
+    ~labels:[ ("source", source); ("site", site) ]
+    ()
+
 (* ── Source roundtrip ────────────────────────────── *)
 
 let test_source_roundtrip () =
@@ -842,7 +848,9 @@ let test_goal_event_source_and_summary () =
     (List.hd entries |> json_string_field "source");
   Alcotest.(check string) "newest event" "transition_completed"
     (List.hd entries |> json_string_field "event_type");
-  let summary = Telemetry_unified.summary_json ~base_path:dir ~masc_root:root () in
+  let summary =
+    Telemetry_unified.summary_json ~base_path:dir ~masc_root:root ()
+  in
   let goal_summary = source_summary "goal_event" summary in
   Alcotest.(check int) "goal event count" 2
     (json_int_field "entry_count" goal_summary);
@@ -894,6 +902,117 @@ let test_tool_call_io_missing_still_reports_missing () =
   Alcotest.(check string) "stale_reason names the missing store"
     "store_missing"
     (json_string_field "stale_reason" tool_summary)
+
+let test_fixed_source_bad_store_type_is_observed () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_bad_fixed_source" in
+  let root = masc_root dir in
+  Fs_compat.mkdir_p root;
+  let telemetry_path = Filename.concat root "telemetry" in
+  Fs_compat.append_file telemetry_path "not a directory\n";
+  let before = source_read_failure_metric "agent_event" "read_fixed_source_dir" in
+  let entries =
+    Telemetry_unified.read_unified ~base_path:dir ~masc_root:root
+      ~sources:[ Telemetry_unified.Agent_event ] ()
+  in
+  Alcotest.(check int) "bad store reads as empty" 0 (List.length entries);
+  Alcotest.(check (float 0.001)) "read failure counter increments"
+    (before +. 1.0)
+    (source_read_failure_metric "agent_event" "read_fixed_source_dir");
+  let summary = Telemetry_unified.summary_json ~base_path:dir ~masc_root:root () in
+  let agent_summary = source_summary "agent_event" summary in
+  Alcotest.(check string) "bad store is an error, not empty"
+    "error"
+    (json_string_field "health" agent_summary);
+  Alcotest.(check string) "stale reason is read failure"
+    "read_failed"
+    (json_string_field "stale_reason" agent_summary)
+
+let test_keeper_discovery_bad_root_is_observed () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_bad_keeper_root" in
+  let root = masc_root dir in
+  Fs_compat.mkdir_p root;
+  Fs_compat.append_file (Filename.concat root "keepers") "not a directory\n";
+  let before =
+    source_read_failure_metric "keeper_metric" "discover_keeper_metric_root"
+  in
+  let entries =
+    Telemetry_unified.read_unified ~base_path:dir ~masc_root:root
+      ~sources:[ Telemetry_unified.Keeper_metric ] ()
+  in
+  Alcotest.(check int) "bad keeper root reads as empty" 0 (List.length entries);
+  Alcotest.(check (float 0.001)) "discovery failure counter increments"
+    (before +. 1.0)
+    (source_read_failure_metric "keeper_metric" "discover_keeper_metric_root")
+
+let test_trajectory_parse_errors_are_aggregated_per_file () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_bad_trajectory_rows" in
+  let root = masc_root dir in
+  let trajectory_dir = Filename.concat root "trajectories/alice" in
+  Fs_compat.mkdir_p trajectory_dir;
+  let path = Filename.concat trajectory_dir "trace-bad.jsonl" in
+  Fs_compat.append_file path
+    (String.concat "\n"
+       [
+         "{not-json";
+         Yojson.Safe.to_string
+           (`Assoc
+              [
+                ("ts", `Float 2000.0);
+                ("tool_name", `String "keeper_bash");
+              ]);
+         "{still-not-json";
+         "";
+       ]);
+  let before =
+    source_read_failure_metric "trajectory_tool_call"
+      "read_trajectory_file_parse"
+  in
+  let entries =
+    Telemetry_unified.read_unified ~base_path:dir ~masc_root:root
+      ~sources:[ Telemetry_unified.Trajectory_tool_call ] ()
+  in
+  Alcotest.(check int) "valid trajectory row still read" 1
+    (List.length entries);
+  Alcotest.(check (float 0.001)) "parse failures counted once per file"
+    (before +. 1.0)
+    (source_read_failure_metric "trajectory_tool_call"
+       "read_trajectory_file_parse")
+
+let test_summary_bad_trajectory_root_observed_once () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_bad_trajectory_root" in
+  let root = masc_root dir in
+  Fs_compat.mkdir_p root;
+  Fs_compat.append_file (Filename.concat root "trajectories")
+    "not a directory\n";
+  let before_summary =
+    source_read_failure_metric "trajectory_tool_call"
+      "summary_trajectory_root"
+  in
+  let before_discover =
+    source_read_failure_metric "trajectory_tool_call"
+      "discover_trajectory_root"
+  in
+  let summary = Telemetry_unified.summary_json ~base_path:dir ~masc_root:root () in
+  let trajectory_summary = source_summary "trajectory_tool_call" summary in
+  Alcotest.(check string) "bad trajectory root is error"
+    "error"
+    (json_string_field "health" trajectory_summary);
+  Alcotest.(check (float 0.001)) "summary root counted once"
+    (before_summary +. 1.0)
+    (source_read_failure_metric "trajectory_tool_call"
+       "summary_trajectory_root");
+  Alcotest.(check (float 0.001)) "discovery root not double-counted"
+    before_discover
+    (source_read_failure_metric "trajectory_tool_call"
+       "discover_trajectory_root")
 
 let test_summary_surfaces_coverage_gaps () =
   Eio_main.run @@ fun env ->
@@ -1047,6 +1166,13 @@ let () =
             test_scope_filter_matches_runtime_contract_fields;
           Alcotest.test_case "goal events" `Quick
             test_goal_event_source_and_summary;
+          Alcotest.test_case "fixed source bad store type is observed" `Quick
+            test_fixed_source_bad_store_type_is_observed;
+          Alcotest.test_case "keeper discovery bad root is observed" `Quick
+            test_keeper_discovery_bad_root_is_observed;
+          Alcotest.test_case "trajectory parse failures are aggregated"
+            `Quick
+            test_trajectory_parse_errors_are_aggregated_per_file;
         ] );
       ( "summary",
         [
@@ -1065,6 +1191,8 @@ let () =
             test_goal_event_missing_reports_not_yet;
           Alcotest.test_case "tool_call_io missing stays missing" `Quick
             test_tool_call_io_missing_still_reports_missing;
+          Alcotest.test_case "bad trajectory root observed once" `Quick
+            test_summary_bad_trajectory_root_observed_once;
           Alcotest.test_case "counts all rows beyond recent cap" `Quick
             test_summary_counts_all_entries_beyond_recent_cap;
         ] );

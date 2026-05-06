@@ -61,6 +61,8 @@ let keeper_internal_tools =
     "keeper_board_vote";
     "keeper_board_stats";
     "keeper_board_search";
+    "keeper_board_curation_read";
+    "keeper_board_curation_submit";
     (* keeper_board_delete removed from default shard in #4309.
        Dispatch still accepts it for backward compat. *)
     "keeper_shell";
@@ -96,6 +98,8 @@ let keeper_internal_replacement = function
   | "keeper_board_vote" -> Some "masc_board_vote"
   | "keeper_board_stats" -> Some "masc_board_stats"
   | "keeper_board_search" -> Some "masc_board_search"
+  | "keeper_board_curation_read" -> Some "masc_board_curation_read"
+  | "keeper_board_curation_submit" -> Some "masc_board_curation_submit"
   | "keeper_voice_speak"
   | "keeper_voice_agent"
   | "keeper_voice_sessions"
@@ -157,6 +161,7 @@ let public_mcp_surface_tools =
     (* Board *)
     "masc_board_post"; "masc_board_list"; "masc_board_get";
     "masc_board_comment"; "masc_board_vote";
+    "masc_board_curation_read"; "masc_board_curation_submit";
     (* Agent discovery *)
     "masc_agents"; "masc_agent_card"; "masc_dashboard";
     (* Utility *)
@@ -180,6 +185,7 @@ let spawned_agent_surface_tools =
     "masc_worktree_create"; "masc_worktree_remove"; "masc_worktree_list";
     "masc_board_list"; "masc_board_post"; "masc_board_comment";
     "masc_board_vote"; "masc_board_get";
+    "masc_board_curation_read"; "masc_board_curation_submit";
     "masc_tool_help"; "masc_web_search";
     "masc_spawn";
     (* Phase 2: surface SSOT *)
@@ -199,6 +205,7 @@ let local_worker_surface_tools =
     "masc_goal_transition"; "masc_goal_verify"; "masc_coordination_fsm_snapshot";
     "masc_board_post"; "masc_board_list"; "masc_board_get";
     "masc_board_comment"; "masc_board_vote"; "masc_board_search";
+    "masc_board_curation_read"; "masc_board_curation_submit";
     "masc_code_search"; "masc_code_symbols"; "masc_code_read";
     "masc_worktree_create"; "masc_worktree_remove"; "masc_worktree_list";
     "masc_run_init"; "masc_run_plan"; "masc_run_log";

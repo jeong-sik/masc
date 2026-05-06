@@ -69,6 +69,7 @@ let core_discovery_tools =
       (* Board: core interaction *)
       Keeper Board_get; Keeper Board_post;
       Keeper Board_comment; Keeper Board_vote; Keeper Board_list;
+      Keeper Board_curation_read; Keeper Board_curation_submit;
       (* Shell + VCS *)
       Keeper Shell;
       Keeper Bash;
@@ -319,10 +320,12 @@ let reconcile_safe_tools =
     Tool_name.[
       Keeper Board_post; Keeper Board_comment;
       Keeper Board_vote; Keeper Board_comment_vote;
+      Keeper Board_curation_submit;
       Keeper Broadcast;
       Keeper Task_done;
       Masc Board_post; Masc Board_comment;
       Masc Board_vote; Masc Board_comment_vote;
+      Masc Board_curation_submit;
       Masc Broadcast;
     ]
 

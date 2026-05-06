@@ -347,7 +347,8 @@ never modified by the replay path.
 | `masc_board_search` | 전문 검색 |
 | `masc_board_stats` | 통계 (post/comment count, backend) |
 | `masc_board_hearths` | 활성 hearth 목록 |
-| `masc_board_curation_read` | 최신 AI curation snapshot 조회 (read-only) |
+| `masc_board_curation_read` | 최신 AI curation snapshot 조회 |
+| `masc_board_curation_submit` | AI curation snapshot 제출: summary/order/highlights/tag suggestions/answer matches/health/provenance 기록. 게시글/댓글/투표는 수정하지 않음 |
 | `masc_board_delete` | 게시물 삭제 (연관 댓글/투표 포함) |
 
 ### 10.2 Vote 도구 (Tool_vote)
@@ -438,9 +439,9 @@ slug 중복 생성 시 `Already_exists` 에러.
 
 ---
 
-## 11a. AI Curation Readonly Snapshot
+## 11a. AI Curation Snapshot
 
-AI curation은 Phase 3 기능이지만, mutation은 금지하고 read-only snapshot 계약부터 고정한다. Keeper/agent는 최신 board window를 읽고 다음 projection을 제출할 수 있으며, board post/comment/vote state는 변경하지 않는다.
+AI curation은 board post/comment/vote mutation과 분리된 projection 계약이다. Keeper/agent는 최신 board window를 읽고 다음 projection snapshot을 제출할 수 있으며, board post/comment/vote state는 변경하지 않는다.
 
 ### 11a.1 Snapshot Fields
 

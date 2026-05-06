@@ -446,6 +446,8 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
     | Tool_name.Keeper.Board_cleanup
     | Tool_name.Keeper.Board_comment
     | Tool_name.Keeper.Board_comment_vote
+    | Tool_name.Keeper.Board_curation_read
+    | Tool_name.Keeper.Board_curation_submit
     | Tool_name.Keeper.Board_delete
     | Tool_name.Keeper.Board_get
     | Tool_name.Keeper.Board_list

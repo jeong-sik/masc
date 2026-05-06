@@ -1,7 +1,7 @@
-(** Board_curation — AI curation readonly surface for the board.
+(** Board_curation — AI curation projection surface for the board.
 
     Implements the board AI curation contract described in the
-    board-ai-curation-readonly PR split.  Provides:
+    board AI curation PR split.  Provides:
 
     - A typed curation snapshot: AI-produced summary, ordering,
       highlighted post IDs, tag suggestions, question/answer matches,
@@ -12,7 +12,8 @@
     - Test-only [reset_for_test] for isolation.
 
     Design properties:
-    - Read-only surface: no board posts are mutated.
+    - Projection-only surface: snapshots may be submitted, but board posts,
+      comments, and votes are not mutated.
     - Operator-auditable: [provenance] is a free-form JSON blob that
       callers populate with model name, parameters, run metadata etc.
     - Crypto IDs: snapshot IDs carry a ["cu-"] prefix and are
@@ -21,7 +22,7 @@
       in-process.  Callers that need durable history should persist
       the JSON blob returned by {!snapshot_to_yojson}.
 
-    @since board-ai-curation-readonly *)
+    @since board-ai-curation *)
 
 (** {1 Types} *)
 

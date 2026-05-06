@@ -17,14 +17,14 @@ tools = ["keeper_time_now", "keeper_context_status", "keeper_memory_search", "ke
 
 # Board tools split: core (frequent) vs extended (discoverable via tool_search).
 [groups.board_core]
-tools = ["keeper_board_get", "keeper_board_post", "keeper_board_comment", "keeper_board_vote", "keeper_board_list"]
+tools = ["keeper_board_get", "keeper_board_post", "keeper_board_comment", "keeper_board_vote", "keeper_board_list", "keeper_board_curation_read", "keeper_board_curation_submit"]
 
 [groups.board_extended]
 tools = ["keeper_board_stats", "keeper_board_search"]
 
 # Full board group: backward compat alias.
 [groups.board]
-tools = ["keeper_board_get", "keeper_board_post", "keeper_board_comment", "keeper_board_vote", "keeper_board_list", "keeper_board_stats", "keeper_board_search"]
+tools = ["keeper_board_get", "keeper_board_post", "keeper_board_comment", "keeper_board_vote", "keeper_board_list", "keeper_board_curation_read", "keeper_board_curation_submit", "keeper_board_stats", "keeper_board_search"]
 
 # Coordination split: core (task lifecycle) vs extended (audit, force ops).
 [groups.coordination_core]
@@ -70,7 +70,7 @@ tools = ["masc_code_write", "masc_code_edit", "masc_code_delete", "masc_code_she
 # Tools allowed on the keeper's last turn (safety constraint).
 # On last turn, visible tools are intersected with this set.
 [groups.last_turn_safe]
-tools = ["keeper_board_post", "keeper_board_comment", "keeper_context_status", "extend_turns", "keeper_time_now", "keeper_tool_search", "keeper_broadcast", "keeper_task_done", "masc_web_search"]
+tools = ["keeper_board_post", "keeper_board_comment", "keeper_board_curation_submit", "keeper_context_status", "extend_turns", "keeper_time_now", "keeper_tool_search", "keeper_broadcast", "keeper_task_done", "masc_web_search"]
 
 # Optional tools that require explicit opt-in via also_allow.
 # Excluded from all presets by default; a keeper must list them in also_allow.

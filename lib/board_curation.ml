@@ -15,7 +15,7 @@ module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
 
-(** Board_curation — AI curation readonly surface for the board.
+(** Board_curation — AI curation projection surface for the board.
 
     See board_curation.mli for the full contract. *)
 

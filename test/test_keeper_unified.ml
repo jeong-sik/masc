@@ -7283,13 +7283,11 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
          ]
        ()
    with
-   | Agent_sdk.Types.Tool name ->
-       check string "board curation prefers submit tool"
-         "keeper_board_curation_submit" name
+   | Agent_sdk.Types.Any -> ()
    | other ->
        fail
          (Printf.sprintf
-            "expected Tool keeper_board_curation_submit, got %s"
+            "expected Any for board curation required turn, got %s"
             (Agent_sdk.Types.show_tool_choice other)));
   (match
      choose
@@ -7352,13 +7350,25 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
          [ "keeper_tasks_list"; "keeper_task_submit_for_verification" ]
        ()
    with
-   | Agent_sdk.Types.Tool name ->
-       check string "task verify prefers submit tool"
-         "keeper_task_submit_for_verification" name
+   | Agent_sdk.Types.Auto -> ()
    | other ->
        fail
          (Printf.sprintf
-            "expected Tool keeper_task_submit_for_verification, got %s"
+            "expected Auto for idle task verify turn, got %s"
+            (Agent_sdk.Types.show_tool_choice other)));
+  (match
+     choose
+       ~has_current_task:true
+       ~turn_affordances:[ "task_verify" ]
+       ~allowed_tool_names:
+         [ "keeper_tasks_list"; "keeper_task_submit_for_verification" ]
+       ()
+   with
+   | Agent_sdk.Types.Any -> ()
+   | other ->
+       fail
+         (Printf.sprintf
+            "expected Any for active task verify turn, got %s"
             (Agent_sdk.Types.show_tool_choice other)));
   (match choose ~allowed_tool_names:[ "keeper_board_post" ] () with
   | Agent_sdk.Types.Auto -> ()

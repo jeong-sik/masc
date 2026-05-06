@@ -48,11 +48,13 @@ describe('MessageRoomTimeline', () => {
 
     expect(screen.getByRole('heading', { name: 'Room timeline' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /#ops/ })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByLabelText('Target room: ops')).toBeInTheDocument()
     expect(await screen.findByText('ops first')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('tab', { name: /#review/ }))
 
     expect(screen.getByRole('tab', { name: /#review/ })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByLabelText('Target room: review')).toBeInTheDocument()
     expect(await screen.findByText(/review needed/)).toBeInTheDocument()
     expect(screen.getByText('@dashboard')).toBeInTheDocument()
   })

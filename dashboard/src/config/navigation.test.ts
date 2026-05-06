@@ -114,12 +114,13 @@ describe('monitoring navigation labels', () => {
     const sections = visibleSectionItemsForTab('monitoring')
     const ids = sections.map(item => item.id)
 
-    expect(ids).toEqual(['journey', 'agents', 'cognition', 'runtime', 'fleet-health'])
+    expect(ids).toEqual(['journey', 'agents', 'cognition', 'runtime', 'goal-loop', 'fleet-health'])
     expect(ids).toContain('journey')
     expect(ids).toContain('cognition')
     expect(ids).toContain('fleet-health')
     expect(ids).toContain('runtime')
     expect(ids).toContain('agents')
+    expect(ids).toContain('goal-loop')
     // Legacy sections removed in Phase 1
     expect(ids).not.toContain('live')
     expect(ids).not.toContain('observatory')
@@ -142,7 +143,8 @@ describe('monitoring navigation labels', () => {
     expect(sections[1]?.id).toBe('agents')
     expect(sections[2]?.id).toBe('cognition')
     expect(sections[3]?.id).toBe('runtime')
-    expect(sections[4]?.id).toBe('fleet-health')
+    expect(sections[4]?.id).toBe('goal-loop')
+    expect(sections[5]?.id).toBe('fleet-health')
   })
 
   it('keeps diagnostic monitoring routes available but hidden from the sidebar', () => {

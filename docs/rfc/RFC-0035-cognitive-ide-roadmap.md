@@ -70,9 +70,9 @@ further code is written.
 | 01 | Temporal Synchronization | dashboard | `dashboard/.../event-stream-temporal-sync*` | merged (#13779) |
 | 01 | **Semantic Gravity** (ranking, backend) | **lib** | `lib/cognitive_gravity.ml` | merged (PR-1, #13797) |
 | 01 | Semantic Gravity (dashboard renderer) | dashboard | `dashboard/src/components/common/event-stream*` | merged (#13800) |
-| 01 | Intentional Projection (backend) | lib | `lib/intentional_projection.ml` | in-flight (PR-2, #13821) |
+| 01 | Intentional Projection (backend) | lib | `lib/intentional_projection.ml` | merged (PR-2, #13821) |
 | 01 | Intentional Projection (dashboard renderer) | dashboard | `dashboard/src/components/common/event-stream*` | merged (#13800) |
-| 02 | Chronicle data model | lib + dashboard | `lib/chronicle_event.ml` (TBD), `dashboard/.../chronicle-navigator*` (#13823 read model) | partial (P1, dashboard read model only) |
+| 02 | Chronicle data model | lib + dashboard | `lib/chronicle_event.ml` (PR-4, in-flight), `dashboard/.../chronicle-navigator*` (#13823 read model, merged) | in-flight (PR-4 lib) |
 | 02 | Librarian RAG pipeline | lib + adapters | TBD; reuse `pgvector` infra | deferred (P1) |
 | 03 | Code-Plan Alignment metrics | lib | `lib/alignment_score*.ml` (TBD) | deferred (P2) |
 | 04 | Category-theoretic code analysis | lib + ppx | TBD | deferred (P3) |
@@ -142,9 +142,9 @@ PR-1 is mergeable only if all of the following hold:
 | PR | Topic | Confidence tier | Status |
 |----|-------|-----------------|--------|
 | PR-1 | `cognitive_gravity` ranker | P0 | merged (#13797) |
-| PR-2 | `intentional_projection` ranker | P0 | in-flight (#13821) |
-| PR-3 | bump 0.19.12 → 0.19.13 + this RFC refresh | chore | in-flight (this PR) |
-| PR-4 | `chronicle_event` data model | P1 | not started |
+| PR-2 | `intentional_projection` ranker | P0 | merged (#13821) |
+| PR-3 | bump 0.19.12 → 0.19.13 + this RFC refresh | chore | merged (#13841) |
+| PR-4 | `chronicle_event` data model | P1 | in-flight (this PR) |
 | PR-5 | Librarian retriever (lib only) | P1 | not started |
 | PR-6 | Alignment score metric backbone | P2 | not started |
 

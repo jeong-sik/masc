@@ -1333,8 +1333,6 @@ let sweep_and_recover (ctx : _ context) =
            | Keeper_state_machine.HandingOff | Keeper_state_machine.Draining
            | Keeper_state_machine.Restarting | Keeper_state_machine.Offline ->
                (match Eio.Promise.peek entry.done_p with
-                | None when entry.phase = Keeper_state_machine.Stopped ->
-                    to_unregister := entry :: !to_unregister
                 | None when watchdog_stop_pending entry ->
                     force_unresolved_watchdog_crash entry
                 | None -> ()  (* Alive — skip *)

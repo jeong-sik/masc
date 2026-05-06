@@ -267,6 +267,7 @@ let test_fresh_supervision_cohort_keepers_rereads_registry () =
     | _ -> fail "expected one cohort"
   in
   Reg.unregister ~base_path:bp "alpha";
+  Reg.unregister ~base_path:bp "bravo";
   ignore (Reg.register_offline ~base_path:bp "bravo" (make_meta "bravo"));
   let fresh = Sup.fresh_supervision_cohort_keepers ~base_path:bp cohort in
   check (list string) "removed entries omitted"

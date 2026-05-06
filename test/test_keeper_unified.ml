@@ -6498,6 +6498,27 @@ let test_tool_query_text_of_user_message_keeps_counted_headers () =
   check bool "keeps counted board activity header" true
     (contains_substring query "### Board Activity (1 new)")
 
+let test_scope_messages_prompt_caps_payload_not_count () =
+  let pending_scope_messages =
+    List.init 15 (fun i ->
+      ( Printf.sprintf "agent-%02d" i,
+        Printf.sprintf "message-%02d %s" i (String.make 220 'x') ))
+  in
+  let obs = { base_observation with pending_scope_messages } in
+  let _sys, user =
+    UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs ()
+  in
+  check bool "header keeps real scope message count" true
+    (contains_substring user "### Scope Messages (15 recent)");
+  check bool "older scope messages are summarized" true
+    (contains_substring user "omitted 3 older scope messages");
+  check bool "oldest omitted message absent" false
+    (contains_substring user "message-00");
+  check bool "newest retained message present" true
+    (contains_substring user "message-14");
+  check bool "long scope message preview capped" false
+    (contains_substring user (String.make 180 'x'))
+
 let test_social_model_silences_skip_only_turn () =
   let result =
     make_run_result
@@ -7869,6 +7890,8 @@ let () =
             test_tool_query_text_of_user_message_strips_continuity_noise;
           test_case "tool query keeps counted headers" `Quick
             test_tool_query_text_of_user_message_keeps_counted_headers;
+          test_case "scope messages cap prompt payload not count" `Quick
+            test_scope_messages_prompt_caps_payload_not_count;
           test_case "social model registry round trip" `Quick
             test_social_model_registry_round_trip;
           test_case "social model silences skip-only turn" `Quick

@@ -19,6 +19,22 @@ let format_mentions (mentions : (string * string) list) : string =
            (Keeper_types.short_preview ~max_len:200 content))
        mentions)
 
+let scope_message_prompt_limit = 12
+let scope_message_preview_len = 120
+
+let take_last_with_omitted limit items =
+  let len = List.length items in
+  if len <= limit then (items, 0)
+  else
+    let rec drop n xs =
+      if n <= 0 then xs
+      else
+        match xs with
+        | [] -> []
+        | _ :: rest -> drop (n - 1) rest
+    in
+    (drop (len - limit) items, len - limit)
+
 (** Format active goals into a prompt section. *)
 let format_goals (goal_ids : string list) : string =
   String.concat "\n"
@@ -26,13 +42,26 @@ let format_goals (goal_ids : string list) : string =
 
 let format_scope_messages
     (messages : (string * string) list) : string =
+  let shown_messages, omitted =
+    take_last_with_omitted scope_message_prompt_limit messages
+  in
+  let omitted_line =
+    if omitted <= 0 then []
+    else
+      [
+        Printf.sprintf
+          "- [omitted %d older scope messages; cursor still advances past the full batch]"
+          omitted;
+      ]
+  in
   String.concat "\n"
-    (List.map
-       (fun (from_agent, content) ->
-         Printf.sprintf "- %s: %s"
-           from_agent
-           (Keeper_types.short_preview ~max_len:200 content))
-       messages)
+    (omitted_line
+     @ List.map
+         (fun (from_agent, content) ->
+           Printf.sprintf "- %s: %s"
+             from_agent
+             (Keeper_types.short_preview ~max_len:scope_message_preview_len content))
+         shown_messages)
 
 let format_board_events
     (events : Keeper_world_observation.pending_board_event list) : string =

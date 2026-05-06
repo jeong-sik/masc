@@ -376,6 +376,40 @@ let is_oas_timeout_budget_error (err : Agent_sdk.Error.sdk_error) =
   | Some (Oas_worker_named.Oas_timeout_budget _) -> true
   | _ -> false
 
+let persist_message_cursor_updates ~config (meta : keeper_meta) updates =
+  let updated = Keeper_world_observation.apply_message_cursor_updates meta updates in
+  if updates = [] then updated
+  else
+    let merge ~latest ~caller:_ =
+      Keeper_world_observation.apply_message_cursor_updates latest updates
+    in
+    match write_meta_with_merge ~merge config updated with
+    | Ok () -> (
+        match read_meta config updated.name with
+        | Ok (Some latest) -> latest
+        | Ok None ->
+            Prometheus.inc_counter Prometheus.metric_keeper_meta_read_failures
+              ~labels:[("keeper", updated.name); ("site", "cursor_update_none_after_write")]
+              ();
+            Log.Keeper.warn
+              "read_meta returned None after message cursor update write for %s"
+              updated.name;
+            { updated with meta_version = updated.meta_version + 1 }
+        | Error e ->
+            Prometheus.inc_counter Prometheus.metric_keeper_meta_read_failures
+              ~labels:[("keeper", updated.name); ("site", "cursor_update_read_after_write")]
+              ();
+            Log.Keeper.warn
+              "read_meta failed after message cursor update write for %s: %s"
+              updated.name e;
+            { updated with meta_version = updated.meta_version + 1 })
+    | Error e ->
+        Prometheus.inc_counter Prometheus.metric_keeper_write_meta_failures
+          ~labels:[("keeper", updated.name); ("phase", "cursor_update")]
+          ();
+        Log.Keeper.warn "write_meta failed (message cursor update): %s" e;
+        updated
+
 let run_keepalive_unified_turn
       ~(ctx : _ context)
       ~(meta_after_triage : keeper_meta)
@@ -483,9 +517,6 @@ let run_keepalive_unified_turn
           ~config:ctx.config
           ~meta:meta_after_triage
       in
-      let has_message_signal =
-        obs.pending_mentions <> [] || obs.pending_scope_messages <> []
-      in
       let turn_decision =
         Keeper_world_observation.keeper_cycle_decision
           ~meta:meta_after_triage
@@ -499,9 +530,8 @@ let run_keepalive_unified_turn
         (not (Atomic.get stop))
         && turn_decision.should_run
       in
-      let meta_after_observe =
-        Keeper_world_observation.apply_message_cursor_updates
-          meta_after_triage
+      let meta_after_cursor_persist =
+        persist_message_cursor_updates ~config:ctx.config meta_after_triage
           obs.message_cursor_updates
       in
       let format_opt_int = function
@@ -598,18 +628,8 @@ let run_keepalive_unified_turn
           ~base_path:ctx.config.base_path
           ~keeper_name:meta_after_triage.name
       end;
-      if (not should_run_turn)
-         && (not has_message_signal)
-         && obs.message_cursor_updates <> []
-      then (
-        match write_meta ctx.config meta_after_observe with
-        | Ok () -> ()
-        | Error e ->
-            Prometheus.inc_counter Prometheus.metric_keeper_write_meta_failures
-              ~labels:[("keeper", meta_after_observe.name); ("phase", "cursor_update")] ();
-            Log.Keeper.warn "write_meta failed (message cursor update): %s" e);
       if Atomic.get stop
-      then meta_after_triage
+      then meta_after_cursor_persist
       else if should_run_turn
       then (
         (* Admission wait happens before [mark_turn_started], so the stale
@@ -644,13 +664,13 @@ let run_keepalive_unified_turn
           Keeper_turn_slot.with_keeper_turn_slot_control ~keeper_name:meta_after_triage.name
             ~channel:turn_decision.channel (fun ~semaphore_wait_ms ~slot_control ->
             match
-              with_in_turn_liveness_pulse ~ctx ~meta:meta_after_observe ~stop
+              with_in_turn_liveness_pulse ~ctx ~meta:meta_after_cursor_persist ~stop
                 (fun () ->
                   Keeper_unified_turn.run_keeper_cycle
                     ~config:ctx.config
-                    ~meta:meta_after_observe
+                    ~meta:meta_after_cursor_persist
                     ~observation:obs
-                    ~generation:meta_after_observe.runtime.generation
+                    ~generation:meta_after_cursor_persist.runtime.generation
                     ~channel:turn_decision.channel
                     ~semaphore_wait_ms:semaphore_wait_ms
                     ~turn_slot_control:slot_control
@@ -666,19 +686,19 @@ let run_keepalive_unified_turn
                  readers; escalate to ERROR only on the fatal-environment
                  branch, which is the real signal this layer owns. *)
               Log.Keeper.debug "%s: keeper cycle failed: %s"
-                meta_after_observe.name e_str;
+                meta_after_cursor_persist.name e_str;
               if String_util.contains_substring e_str "Eio switch not available"
                  || String_util.contains_substring e_str "Eio net not available"
               then begin
                 Log.Keeper.error
                   "%s: fatal environment error — promoting to Keeper_fiber_crash: %s"
-                  meta_after_observe.name e_str;
+                  meta_after_cursor_persist.name e_str;
                 Prometheus.inc_counter
                   Prometheus.metric_keeper_heartbeat_failures
-                  ~labels:[("keeper", meta_after_observe.name); ("phase", "fatal_environment")]
+                  ~labels:[("keeper", meta_after_cursor_persist.name); ("phase", "fatal_environment")]
                   ();
                 Keeper_registry.set_failure_reason
-                  ~base_path:ctx.config.base_path meta_after_observe.name
+                  ~base_path:ctx.config.base_path meta_after_cursor_persist.name
                   (Some (Keeper_registry.Exception
                     (Printf.sprintf "fatal environment error: %s" e_str)));
                 raise Keeper_registry.Keeper_fiber_crash
@@ -693,7 +713,7 @@ let run_keepalive_unified_turn
                  [sweep_and_recover] can clear it. *)
               if is_oas_timeout_budget_error err
               then begin
-                let keeper_name = meta_after_observe.name in
+                let keeper_name = meta_after_cursor_persist.name in
                 let prior_strikes =
                   prior_oas_timeout_budget_strikes
                     ~base_path:ctx.config.base_path
@@ -738,32 +758,32 @@ let run_keepalive_unified_turn
                     ] ()
                 end
               end;
-              (match read_meta ctx.config meta_after_observe.name with
+              (match read_meta ctx.config meta_after_cursor_persist.name with
                | Ok (Some latest) -> latest
                | Ok None ->
                  Log.Keeper.error "keeper:%s read_meta returned None after turn failure, using stale meta"
-                   meta_after_observe.name;
+                   meta_after_cursor_persist.name;
                  Prometheus.inc_counter
                    Prometheus.metric_keeper_meta_read_failures
-                   ~labels:[("keeper", meta_after_observe.name); ("site", "none_after_failure")]
+                   ~labels:[("keeper", meta_after_cursor_persist.name); ("site", "none_after_failure")]
                    ();
-                 meta_after_observe
+                 meta_after_cursor_persist
                | Error e ->
                  Log.Keeper.error "keeper:%s read_meta failed after turn failure (%s), using stale meta"
-                   meta_after_observe.name e;
+                   meta_after_cursor_persist.name e;
                  Prometheus.inc_counter
                    Prometheus.metric_keeper_meta_read_failures
-                   ~labels:[("keeper", meta_after_observe.name); ("site", "error_after_failure")]
+                   ~labels:[("keeper", meta_after_cursor_persist.name); ("site", "error_after_failure")]
                    ();
-                 meta_after_observe)
+                 meta_after_cursor_persist)
             | Ok updated ->
               (* PR-M: success clears the strike counter so a single
                  transient budget exhaustion does not trickle into the
                  next 4h-window's strike limit. *)
-              Keeper_turn_slot.reset_budget_exhaustion ~keeper_name:meta_after_observe.name;
+              Keeper_turn_slot.reset_budget_exhaustion ~keeper_name:meta_after_cursor_persist.name;
               clear_oas_timeout_budget_failure_reason
                 ~base_path:ctx.config.base_path
-                ~keeper_name:meta_after_observe.name;
+                ~keeper_name:meta_after_cursor_persist.name;
               updated)
         with
         | Ok meta -> meta
@@ -851,8 +871,8 @@ let run_keepalive_unified_turn
                 last_blocker_class = Some blocker_class;
               })
             meta_after_triage)
-      else if (not has_message_signal) && obs.message_cursor_updates <> [] then
-        meta_after_observe
+      else if obs.message_cursor_updates <> [] then
+        meta_after_cursor_persist
       else
         meta_after_triage
     with

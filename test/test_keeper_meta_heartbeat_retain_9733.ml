@@ -57,6 +57,18 @@ let make_meta ~name =
   | Ok m -> m
   | Error e -> fail ("meta_of_json failed: " ^ e)
 
+let read_meta_exn config name =
+  match Keeper_types.read_meta config name with
+  | Ok (Some meta) -> meta
+  | Ok None -> fail ("read_meta returned None for " ^ name)
+  | Error err -> fail ("read_meta failed: " ^ err)
+
+let room_cursor meta room_id =
+  meta.Keeper_types.last_seen_seq_by_room
+  |> List.find_map (fun (rid, seq) ->
+       if String.equal rid room_id then Some seq else None)
+  |> Option.value ~default:0
+
 (* The race we model:
 
    - cycle fiber reads meta at version N (joined_room_ids=[r1])
@@ -145,6 +157,79 @@ let test_no_race_writes_first_attempt () =
     in
     check string "goal landed" "test keeper" on_disk.goal)
 
+let test_message_cursor_updates_persist_before_turn () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_dir) (fun () ->
+    let config = Coord.default_config base_dir in
+    ignore (Coord.init config ~agent_name:(Some "operator"));
+    let name = "cursor-preturn" in
+    let seed =
+      let m = make_meta ~name in
+      {
+        m with
+        joined_room_ids = [ "default" ];
+        last_seen_seq_by_room = [ ("default", 0) ];
+      }
+    in
+    (match Keeper_types.write_meta ~force:true config seed with
+     | Ok () -> ()
+     | Error e -> fail ("seed write failed: " ^ e));
+    let before = read_meta_exn config name in
+    let returned =
+      Keeper_heartbeat_loop.persist_message_cursor_updates
+        ~config before [ ("default", 42) ]
+    in
+    let final = read_meta_exn config name in
+    check int "returned cursor advanced" 42 (room_cursor returned "default");
+    check int "disk cursor advanced before turn" 42 (room_cursor final "default");
+    check int "returned version follows disk" final.meta_version returned.meta_version;
+    check bool "version bumped" true (final.meta_version > before.meta_version))
+
+let test_message_cursor_updates_merge_after_cas_race () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_dir) (fun () ->
+    let config = Coord.default_config base_dir in
+    ignore (Coord.init config ~agent_name:(Some "operator"));
+    let name = "cursor-cas-race" in
+    let seed =
+      let m = make_meta ~name in
+      {
+        m with
+        joined_room_ids = [ "default" ];
+        last_seen_seq_by_room = [ ("default", 0) ];
+        goal = "seed";
+      }
+    in
+    (match Keeper_types.write_meta ~force:true config seed with
+     | Ok () -> ()
+     | Error e -> fail ("seed write failed: " ^ e));
+    let observer_view = read_meta_exn config name in
+    let racing_payload =
+      { observer_view with goal = "concurrent writer wins other fields" }
+    in
+    (match Keeper_types.write_meta config racing_payload with
+     | Ok () -> ()
+     | Error e -> fail ("racing write failed: " ^ e));
+    let returned =
+      Keeper_heartbeat_loop.persist_message_cursor_updates
+        ~config observer_view [ ("default", 99) ]
+    in
+    let final = read_meta_exn config name in
+    check string "concurrent field retained"
+      "concurrent writer wins other fields" final.goal;
+    check int "disk cursor advanced after CAS retry" 99
+      (room_cursor final "default");
+    check int "returned cursor advanced after CAS retry" 99
+      (room_cursor returned "default");
+    check bool "version moved past racing write" true
+      (final.meta_version > racing_payload.meta_version))
+
 let () =
   run "Keeper meta heartbeat-retain merge (#9733)"
     [
@@ -154,5 +239,9 @@ let () =
             test_caller_wins_cycle_disk_wins_heartbeat;
           test_case "no race: first attempt succeeds" `Quick
             test_no_race_writes_first_attempt;
+          test_case "message cursor persists before turn" `Quick
+            test_message_cursor_updates_persist_before_turn;
+          test_case "message cursor merge survives CAS race" `Quick
+            test_message_cursor_updates_merge_after_cas_race;
         ] );
     ]

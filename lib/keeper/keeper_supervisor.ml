@@ -98,15 +98,12 @@ let is_stale_paused_meta ~now ~paused_ttl_sec (meta : keeper_meta) =
 let paused_meta_requires_reconcile_recovery (meta : keeper_meta) =
   meta.paused
   && (match meta.runtime.last_blocker_class with
-      | Some Ambiguous_post_commit_timeout | Some Ambiguous_post_commit_failure ->
-          true
+      | Some cls -> blocker_class_continue_gate cls
       | None ->
           (match Keeper_status_bridge.blocker_class_of_string
                   meta.runtime.last_blocker with
-           | Some Ambiguous_post_commit_timeout
-           | Some Ambiguous_post_commit_failure -> true
-           | _ -> false)
-      | _ -> false)
+           | Some cls -> blocker_class_continue_gate cls
+           | None -> false))
 
 let committed_tools_of_ambiguous_blocker (blocker : string) =
   let trimmed = String.trim blocker in

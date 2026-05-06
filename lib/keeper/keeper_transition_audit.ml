@@ -274,11 +274,14 @@ let get_or_create_completed_turn_ring name =
 (* ================================================================ *)
 
 (** Path of the persistent transition log, configured via the
-    [MASC_KEEPER_TRANSITION_LOG] env var. When unset the sink is disabled
+    [MASC_KEEPER_TRANSITION_LOG] env var. When unset or empty the sink is disabled
     and only the in-memory ring is updated. Reading the env on each call
     keeps the surface tiny — one keeper transition per second is the
     upper bound, so the cost is negligible. *)
-let sink_path () = Sys.getenv_opt "MASC_KEEPER_TRANSITION_LOG"
+let sink_path () =
+  match Sys.getenv_opt "MASC_KEEPER_TRANSITION_LOG" with
+  | Some path when String.trim path <> "" -> Some path
+  | _ -> None
 
 let default_store_ref : Dated_jsonl.t option ref = ref None
 
@@ -307,30 +310,42 @@ let get_default_store () =
              (Printexc.to_string exn);
            None)
 
+let observe_append_failure ~site exn =
+  match exn with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_transition_audit_failures
+        ~labels:[("site", site)]
+        ();
+      Log.Keeper.warn "transition_audit %s failed: %s"
+        site (Printexc.to_string exn)
+
 (** Append a single jsonl line for the given transition. Wraps the record
     json with the keeper name so a single sink file can mux multiple
-    keepers. Any IO error is swallowed: the in-memory ring is the
-    authoritative trail for live dashboards, the sink is for restart
+    keepers. Any IO error is observed and suppressed: the in-memory ring is
+    the authoritative trail for live dashboards, the sink is for restart
     forensics only. *)
 let append_to_sink ~keeper_name (rec_ : transition_record) =
   match sink_path () with
   | None -> ()
   | Some path ->
-    Safe_ops.protect ~default:() (fun () ->
-       let line =
-         Yojson.Safe.to_string
-           (`Assoc [
-              "keeper", `String keeper_name;
-              "record", to_json rec_;
-            ])
-       in
-       let oc =
-         open_out_gen [ Open_wronly; Open_append; Open_creat ] 0o644 path
-       in
-       Fun.protect
-         ~finally:(fun () ->
-           close_out_noerr oc)
-         (fun () -> output_string oc (line ^ "\n")))
+      try
+        let line =
+          Yojson.Safe.to_string
+            (`Assoc [
+               "keeper", `String keeper_name;
+               "record", to_json rec_;
+             ])
+        in
+        let oc =
+          open_out_gen [ Open_wronly; Open_append; Open_creat ] 0o644 path
+        in
+        Fun.protect
+          ~finally:(fun () ->
+            close_out_noerr oc)
+          (fun () -> output_string oc (line ^ "\n"))
+      with exn -> observe_append_failure ~site:"sink_append" exn
 
 let append_to_default_store ~keeper_name (rec_ : transition_record) =
   match get_default_store () with
@@ -343,8 +358,8 @@ let append_to_default_store ~keeper_name (rec_ : transition_record) =
             "record", to_json rec_;
           ]
       in
-      Safe_ops.protect ~default:() (fun () ->
-          Dated_jsonl.append store json)
+      try Dated_jsonl.append store json
+      with exn -> observe_append_failure ~site:"default_transition_append" exn
 
 let append_completed_turn_to_default_store ~keeper_name
     (rec_ : completed_turn_record) =
@@ -358,8 +373,8 @@ let append_completed_turn_to_default_store ~keeper_name
             "completed_turn", completed_turn_to_json rec_;
           ]
       in
-      Safe_ops.protect ~default:() (fun () ->
-          Dated_jsonl.append store json)
+      try Dated_jsonl.append store json
+      with exn -> observe_append_failure ~site:"default_completed_append" exn
 
 let record_transition ~keeper_name (rec_ : transition_record) =
   let ring = get_or_create_ring keeper_name in
@@ -413,22 +428,23 @@ let record_completed_turn ~keeper_name (rec_ : completed_turn_record) =
   match sink_path () with
   | None -> append_completed_turn_to_default_store ~keeper_name rec_
   | Some path ->
-      Safe_ops.protect ~default:() (fun () ->
-          let line =
-            Yojson.Safe.to_string
-              (`Assoc
-                [
-                  "keeper", `String keeper_name;
-                  "completed_turn", completed_turn_to_json rec_;
-                ])
-          in
-          let oc =
-            open_out_gen [ Open_wronly; Open_append; Open_creat ] 0o644 path
-          in
-          Fun.protect
-            ~finally:(fun () ->
-              close_out_noerr oc)
-            (fun () -> output_string oc (line ^ "\n")))
+      try
+        let line =
+          Yojson.Safe.to_string
+            (`Assoc
+              [
+                "keeper", `String keeper_name;
+                "completed_turn", completed_turn_to_json rec_;
+              ])
+        in
+        let oc =
+          open_out_gen [ Open_wronly; Open_append; Open_creat ] 0o644 path
+        in
+        Fun.protect
+          ~finally:(fun () ->
+            close_out_noerr oc)
+          (fun () -> output_string oc (line ^ "\n"))
+      with exn -> observe_append_failure ~site:"sink_completed_append" exn
 
 let recent_completed_turns_from_store ~keeper_name ~limit =
   match sink_path (), get_default_store () with
@@ -473,4 +489,6 @@ module For_testing = struct
 
   let clear_completed_turn_ring ~keeper_name =
     Hashtbl.remove completed_turn_rings keeper_name
+
+  let observe_append_failure = observe_append_failure
 end

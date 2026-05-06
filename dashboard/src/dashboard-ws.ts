@@ -245,12 +245,22 @@ function formatCloseEventError(event: CloseEvent): string {
   return `dashboard websocket closed (${parts.join(', ')})`
 }
 
+// WebSocket reconnect uses an explicit 500ms base (half of the SSE
+// RECONNECT_BASE_MS) so transient socket churn recovers faster. Derive the
+// exp clamp from the configured cap so a future operator bump of
+// RECONNECT_MAX_MS actually grows the achievable backoff.
+const WS_RECONNECT_BASE_MS = 500
+const WS_RECONNECT_MAX_EXP = Math.max(
+  1,
+  Math.ceil(Math.log2(RECONNECT_MAX_MS / WS_RECONNECT_BASE_MS)),
+)
+
 function scheduleReconnect(): void {
   if (!shouldReconnect) return
   if (reconnectTimer) return
   reconnectAttempts += 1
-  const exp = Math.min(reconnectAttempts, 5)
-  const backoff = Math.min(RECONNECT_MAX_MS, 500 * Math.pow(2, exp))
+  const exp = Math.min(reconnectAttempts, WS_RECONNECT_MAX_EXP)
+  const backoff = Math.min(RECONNECT_MAX_MS, WS_RECONNECT_BASE_MS * Math.pow(2, exp))
   const jitter = Math.random() * RECONNECT_JITTER_MS
   const delay = backoff + jitter
   reconnectTimer = setTimeout(() => {

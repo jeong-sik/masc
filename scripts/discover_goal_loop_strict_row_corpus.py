@@ -4,9 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import bz2
+import gzip
 import json
+import lzma
 import os
 import sys
+import tarfile
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -45,6 +49,17 @@ TEXT_SUFFIXES = {
 }
 ZIP_TEXT_SUFFIXES = TEXT_SUFFIXES | {".xml"}
 ARCHIVE_SUFFIXES = {".docx", ".jar", ".ods", ".xlsx", ".zip"}
+TAR_TEXT_SUFFIXES = ZIP_TEXT_SUFFIXES
+COMPRESSED_TEXT_SUFFIXES = {".bz2", ".gz", ".xz"}
+TAR_SUFFIX_PATTERNS = {
+    (".tar",),
+    (".tar", ".bz2"),
+    (".tar", ".gz"),
+    (".tar", ".xz"),
+    (".tbz2",),
+    (".tgz",),
+    (".txz",),
+}
 
 
 def path_error(path: Path, exc: BaseException | str) -> dict[str, str]:
@@ -103,6 +118,49 @@ def read_text_file(path: Path, max_bytes: int) -> str | None:
         return data.decode("utf-8", errors="ignore")
 
 
+def bounded_decode(data: bytes, max_bytes: int) -> str:
+    if len(data) > max_bytes:
+        data = data[:max_bytes]
+    return data.decode("utf-8", errors="ignore")
+
+
+def suffix_tuple(path: Path) -> tuple[str, ...]:
+    return tuple(suffix.lower() for suffix in path.suffixes)
+
+
+def is_tar_archive(path: Path) -> bool:
+    suffixes = suffix_tuple(path)
+    return any(suffixes[-len(pattern) :] == pattern for pattern in TAR_SUFFIX_PATTERNS)
+
+
+def compressed_inner_suffix(path: Path) -> str | None:
+    suffixes = suffix_tuple(path)
+    if len(suffixes) < 2 or suffixes[-1] not in COMPRESSED_TEXT_SUFFIXES:
+        return None
+    if is_tar_archive(path):
+        return None
+    return suffixes[-2]
+
+
+def read_compressed_text_file(path: Path, max_bytes: int) -> str | None:
+    suffixes = suffix_tuple(path)
+    if not suffixes:
+        return None
+    opener = {
+        ".bz2": bz2.open,
+        ".gz": gzip.open,
+        ".xz": lzma.open,
+    }.get(suffixes[-1])
+    if opener is None:
+        return None
+    try:
+        with opener(path, "rb") as handle:
+            data = handle.read(max_bytes + 1)
+    except (EOFError, OSError, gzip.BadGzipFile, lzma.LZMAError):
+        return None
+    return bounded_decode(data, max_bytes=max_bytes)
+
+
 def zip_member_texts(path: Path, max_bytes: int) -> list[tuple[str, str]]:
     texts: list[tuple[str, str]] = []
     try:
@@ -123,6 +181,30 @@ def zip_member_texts(path: Path, max_bytes: int) -> list[tuple[str, str]]:
                 text = data.decode("utf-8", errors="ignore")
                 texts.append((member.filename, text))
     except (OSError, zipfile.BadZipFile):
+        return []
+    return texts
+
+
+def tar_member_texts(path: Path, max_bytes: int) -> list[tuple[str, str]]:
+    texts: list[tuple[str, str]] = []
+    try:
+        with tarfile.open(path, mode="r:*") as archive:
+            for member in archive.getmembers():
+                if not member.isfile():
+                    continue
+                suffix = Path(member.name).suffix.lower()
+                if suffix not in TAR_TEXT_SUFFIXES:
+                    continue
+                try:
+                    handle = archive.extractfile(member)
+                    if handle is None:
+                        continue
+                    with handle:
+                        data = handle.read(max_bytes + 1)
+                except (EOFError, OSError, tarfile.TarError):
+                    continue
+                texts.append((member.name, bounded_decode(data, max_bytes=max_bytes)))
+    except (EOFError, OSError, tarfile.TarError):
         return []
     return texts
 
@@ -186,6 +268,15 @@ def discover(
         units: list[tuple[str, str]] = []
         if suffix in TEXT_SUFFIXES:
             text = read_text_file(path, max_bytes=max_bytes)
+            if text is not None:
+                units.append((str(path), text))
+        elif is_tar_archive(path):
+            units.extend(
+                (f"{path}!/{member}", text)
+                for member, text in tar_member_texts(path, max_bytes=max_bytes)
+            )
+        elif compressed_inner_suffix(path) in TEXT_SUFFIXES:
+            text = read_compressed_text_file(path, max_bytes=max_bytes)
             if text is not None:
                 units.append((str(path), text))
         elif suffix in ARCHIVE_SUFFIXES:

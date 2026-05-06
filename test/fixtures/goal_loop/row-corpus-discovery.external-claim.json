@@ -479,6 +479,31 @@
         "goal-loop-206-audit-external-claim-2026-05-05"
       ],
       "note": "The repo strict-row-corpus discovery CLI scanned the 12 prompt-supplied source documents directly against the audit catalog. It found no strict-corpus markers, no JSON findings-array candidates, and zero valid 206-row corpora."
+    },
+    {
+      "artifact_name": "downloads_tar_gzip_compressed_strict_corpus_validation_sweep",
+      "artifact_kind": "discovery_cli_validation_report",
+      "result": "NOT_ROW_CORPUS",
+      "observed_files_considered": 5,
+      "observed_text_units_scanned": 24,
+      "observed_marker_hits": 0,
+      "observed_candidate_corpora": 0,
+      "observed_validated_strict_corpora": 0,
+      "observed_path_errors": 0,
+      "observed_file_classes": [
+        "tar_gzip_archive",
+        "tgz_archive",
+        "json_gzip_text"
+      ],
+      "markers_checked": [
+        "source_catalog_id",
+        "corpus_id",
+        "expected_findings_total",
+        "strict_row",
+        "strict-row",
+        "goal-loop-206-audit-external-claim-2026-05-05"
+      ],
+      "note": "The repo strict-row-corpus discovery CLI scanned the Downloads tar.gz/tgz/json.gz files not covered by the earlier zip/docx/pdf/spreadsheet/text sweeps. It found no strict-corpus markers, no JSON findings-array candidates, and zero valid 206-row corpora."
     }
   ],
   "broader_structured_id_triage": {

@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import importlib.util
+import gzip
 import json
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 import zipfile
@@ -206,6 +208,36 @@ class DiscoverGoalLoopStrictRowCorpusTest(unittest.TestCase):
             )
 
         self.assertEqual(texts, [("nested/marker.json", "strict_row")])
+
+    def test_tar_member_texts_reads_text_members(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            root = Path(raw_dir)
+            member_path = root / "marker.json"
+            member_path.write_bytes(b"strict_row" + (b"x" * 1024))
+            archive_path = root / "candidate.tar.gz"
+            with tarfile.open(archive_path, "w:gz") as archive:
+                archive.add(member_path, arcname="nested/marker.json")
+
+            texts = discover_goal_loop_strict_row_corpus.tar_member_texts(
+                archive_path,
+                max_bytes=10,
+            )
+
+        self.assertEqual(texts, [("nested/marker.json", "strict_row")])
+
+    def test_discover_reads_compressed_text_file(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            path = Path(raw_dir) / "marker.json.gz"
+            with gzip.open(path, "wb") as handle:
+                handle.write(b"strict_row" + (b"x" * 1024))
+
+            report = discover_goal_loop_strict_row_corpus.discover(
+                [path],
+                max_bytes=10,
+            )
+
+        self.assertEqual(report["text_units_scanned"], 1)
+        self.assertEqual(report["marker_hits_total"], 1)
 
 
 if __name__ == "__main__":

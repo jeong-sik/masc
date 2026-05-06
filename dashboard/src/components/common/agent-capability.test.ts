@@ -41,6 +41,19 @@ describe('toolConfig', () => {
       description: 'custom_tool 도구',
     })
   })
+
+  it('treats prototype keys as unknown tools', () => {
+    expect(toolConfig('__proto__')).toEqual({
+      glyph: 'TL',
+      label: '__proto__',
+      description: '__proto__ 도구',
+    })
+    expect(toolConfig('constructor')).toEqual({
+      glyph: 'TL',
+      label: 'constructor',
+      description: 'constructor 도구',
+    })
+  })
 })
 
 describe('summarizeAgentCapability', () => {
@@ -77,6 +90,14 @@ describe('summarizeAgentCapability', () => {
     expect(summary.hidden).toEqual(['shell'])
     expect(summary.extraCount).toBe(1)
     expect(summary.maxVisible).toBe(0)
+  })
+
+  it('does not mark inherited object keys as known', () => {
+    const summary = summarizeAgentCapability(['__proto__', 'constructor'])
+    expect(summary.visible).toEqual([
+      expect.objectContaining({ tool: '__proto__', glyph: 'TL', known: false }),
+      expect.objectContaining({ tool: 'constructor', glyph: 'TL', known: false }),
+    ])
   })
 })
 

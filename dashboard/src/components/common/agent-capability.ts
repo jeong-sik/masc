@@ -17,25 +17,28 @@ export interface ToolConfig {
   description: string
 }
 
-export const TOOL_CONFIG: Record<string, ToolConfig> = {
+const TOOL_CONFIG = Object.freeze({
   file_read: { glyph: 'RD', label: '파일 읽기', description: '로컬 파일 시스템 읽기' },
   file_write: { glyph: 'WR', label: '파일 쓰기', description: '로컬 파일 시스템 쓰기' },
   shell: { glyph: 'SH', label: '터미널', description: '셸 명령 실행' },
   web_search: { glyph: 'SR', label: '웹 검색', description: '인터넷 검색' },
   db_query: { glyph: 'DB', label: 'DB 쿼리', description: '데이터베이스 조회' },
   api_call: { glyph: 'API', label: 'API 호출', description: '외부 API 호출' },
+} satisfies Record<string, ToolConfig>)
+
+function hasToolConfig(tool: string): tool is keyof typeof TOOL_CONFIG {
+  return Object.prototype.hasOwnProperty.call(TOOL_CONFIG, tool)
 }
 
 /** Pure: lookup a tool's display config. Falls back to a generic
     representation for unknown tools so the UI never renders blank. */
 export function toolConfig(tool: string): ToolConfig {
-  return (
-    TOOL_CONFIG[tool] ?? {
-      glyph: 'TL',
-      label: tool,
-      description: `${tool} 도구`,
-    }
-  )
+  if (hasToolConfig(tool)) return TOOL_CONFIG[tool]
+  return {
+    glyph: 'TL',
+    label: tool,
+    description: `${tool} 도구`,
+  }
 }
 
 /** Pure: filter + deduplicate tool names, preserving order. */
@@ -90,7 +93,7 @@ export function summarizeAgentCapability(
       glyph: cfg.glyph,
       label: cfg.label,
       description: cfg.description,
-      known: Boolean(TOOL_CONFIG[tool]),
+      known: hasToolConfig(tool),
       index,
     }
   })
@@ -118,7 +121,7 @@ const BASE_BADGE =
   'inline-flex min-w-0 max-w-full items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-3xs text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-elevated)]'
 
 const GLYPH_BADGE =
-  'mr-1 inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)] px-1 font-mono text-[9px] font-semibold leading-none text-[var(--color-fg-accent)]'
+  'mr-1 inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)] px-1 font-mono text-[9px] font-semibold leading-none text-[var(--color-accent-fg)]'
 
 export function AgentCapability({
   tools,

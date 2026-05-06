@@ -195,13 +195,16 @@ let safe_get_agents (ctx : context) =
       Log.Coord.warn "get_agents_raw failed: %s" (Stdlib.Printexc.to_string exn);
       []
 
-let safe_reconcile_agent_current_tasks (ctx : context) backlog =
-  try Coord.reconcile_all_agent_current_tasks_with_backlog ctx.config backlog
+let safe_reconcile_agent_current_tasks (ctx : context) =
+  try
+    Coord.reconcile_all_agent_current_tasks_with_fresh_backlog
+      ~touch_last_seen:false ctx.config
   with
-  | Sys_error _ | Yojson.Json_error _ -> ()
+  | Sys_error _ | Yojson.Json_error _ -> Coord.read_backlog ctx.config
   | exn ->
       Log.Coord.warn "agent current_task reconcile failed: %s"
-        (Stdlib.Printexc.to_string exn)
+        (Stdlib.Printexc.to_string exn);
+      Coord.read_backlog ctx.config
 
 let safe_is_zombie_agent ~agent_name last_seen =
   try Coord.is_zombie_agent ~agent_name last_seen
@@ -327,8 +330,7 @@ let coordination_fsm_attention_items ctx =
 let status_summary_string (ctx : context) =
   Coord.ensure_initialized ctx.config;
   let state = Coord.read_state ctx.config in
-  let backlog = Coord.read_backlog ctx.config in
-  safe_reconcile_agent_current_tasks ctx backlog;
+  let backlog = safe_reconcile_agent_current_tasks ctx in
   let joined =
     try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name
     with Sys_error _ | Yojson.Json_error _ -> false

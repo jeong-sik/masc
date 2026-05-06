@@ -12,9 +12,10 @@ let status config =
   ensure_initialized config;
 
   let state = read_state config in
-  let backlog = read_backlog config in
-  Coord_task_schedule.reconcile_all_agent_current_tasks_with_backlog config
-    backlog;
+  let backlog =
+    Coord_task_schedule.reconcile_all_agent_current_tasks_with_fresh_backlog
+      ~touch_last_seen:false config
+  in
   let current_room = "default" in
   let max_agents_display = 40 in
   let max_active_tasks_display = 30 in

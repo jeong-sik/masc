@@ -78,6 +78,27 @@ let make_test_ctx () =
     { Masc_domain.default_auth_config with enabled = false; require_token = false };
   { Tool_coord.config; agent_name = "test-agent" }
 
+let agent_file ctx =
+  let agent_name = Coord.resolve_agent_name ctx.config ctx.agent_name in
+  Filename.concat (Coord.agents_dir ctx.config)
+    (Coord.safe_filename agent_name ^ ".json")
+
+let read_agent ctx =
+  match Types.agent_of_yojson (Coord.read_json ctx.config (agent_file ctx)) with
+  | Ok agent -> agent
+  | Error msg -> failwith ("agent decode failed: " ^ msg)
+
+let write_agent ctx agent =
+  Coord.write_json ctx.config (agent_file ctx)
+    (Types.agent_to_yojson agent)
+
+let seed_stale_current_task ctx =
+  let old_last_seen = "2000-01-01T00:00:00Z" in
+  let agent = read_agent ctx in
+  write_agent ctx
+    { agent with status = Busy; current_task = Some "task-missing"; last_seen = old_last_seen };
+  old_last_seen
+
 (* Test dispatch returns None for unknown tool *)
 let () = test "dispatch_unknown_tool" (fun () ->
   let ctx = make_test_ctx () in
@@ -104,6 +125,29 @@ let () = test "dispatch_status" (fun () ->
       assert (str_contains message "🧭 You:");
       assert (str_contains message "Suggested next:")
   | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_status_reconciles_current_task_without_touching_last_seen" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Coord.init ctx.config ~agent_name:(Some ctx.agent_name) in
+  let old_last_seen = seed_stale_current_task ctx in
+  match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+  | Some { success; _ } ->
+      assert success;
+      let agent = read_agent ctx in
+      assert (agent.current_task = None);
+      assert (agent.last_seen = old_last_seen)
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "coord_status_reconciles_current_task_without_touching_last_seen" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Coord.init ctx.config ~agent_name:(Some ctx.agent_name) in
+  let old_last_seen = seed_stale_current_task ctx in
+  ignore (Coord.status ctx.config);
+  let agent = read_agent ctx in
+  assert (agent.current_task = None);
+  assert (agent.last_seen = old_last_seen)
 )
 
 (* Test dispatch coordination FSM snapshot *)

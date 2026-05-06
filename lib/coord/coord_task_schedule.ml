@@ -276,20 +276,30 @@ let latest_receipt_blocks_required_tool_claim config ~agent_name ~required_tools
        || (tool_requirement = Some "required" && tools_used = []))
       && not required_tool_visible
 
-let agent_current_task_matches_backlog backlog ~agent_name task_id =
-  match
-    List.find_opt
-      (fun (task : Masc_domain.task) -> String.equal task.id task_id)
-      backlog.tasks
-  with
-  | Some task -> (
+let active_task_assignees_by_task_id backlog =
+  let table = Hashtbl.create (List.length backlog.tasks) in
+  List.iter
+    (fun (task : Masc_domain.task) ->
       match task.task_status with
       | Claimed { assignee; _ } | InProgress { assignee; _ } ->
-          String.equal assignee agent_name
-      | Todo | AwaitingVerification _ | Done _ | Cancelled _ -> false)
+          Hashtbl.replace table task.id assignee
+      | Todo | AwaitingVerification _ | Done _ | Cancelled _ -> ())
+    backlog.tasks;
+  table
+
+let agent_current_task_matches_assignments active_task_assignees ~agent_name
+    task_id =
+  match Hashtbl.find_opt active_task_assignees task_id with
+  | Some assignee -> String.equal assignee agent_name
   | None -> false
 
-let reconcile_agent_current_task_with_backlog config ~agent_name backlog =
+let agent_current_task_matches_backlog backlog ~agent_name task_id =
+  let active_task_assignees = active_task_assignees_by_task_id backlog in
+  agent_current_task_matches_assignments active_task_assignees ~agent_name
+    task_id
+
+let reconcile_agent_current_task_with_assignments config ?(touch_last_seen = true)
+    ~agent_name active_task_assignees =
   let agent_file =
     Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json")
   in
@@ -300,7 +310,8 @@ let reconcile_agent_current_task_with_backlog config ~agent_name backlog =
           match agent.current_task with
           | Some task_id
             when not
-                   (agent_current_task_matches_backlog backlog ~agent_name task_id)
+                   (agent_current_task_matches_assignments active_task_assignees
+                      ~agent_name task_id)
             ->
               let updated_status =
                 match agent.status with
@@ -312,7 +323,8 @@ let reconcile_agent_current_task_with_backlog config ~agent_name backlog =
                   agent with
                   status = updated_status;
                   current_task = None;
-                  last_seen = now_iso ();
+                  last_seen =
+                    (if touch_last_seen then now_iso () else agent.last_seen);
                 }
               in
               write_json config agent_file (agent_to_yojson updated);
@@ -326,24 +338,46 @@ let reconcile_agent_current_task_with_backlog config ~agent_name backlog =
       | Error msg ->
           Log.Misc.error "agent state reconcile failed: %s" msg)
 
-let reconcile_all_agent_current_tasks_with_backlog config backlog =
+let reconcile_agent_current_task_with_backlog config ?(touch_last_seen = true)
+    ~agent_name backlog =
+  let active_task_assignees = active_task_assignees_by_task_id backlog in
+  reconcile_agent_current_task_with_assignments config ~touch_last_seen
+    ~agent_name active_task_assignees
+
+let reconcile_all_agent_current_tasks_with_backlog config
+    ?(touch_last_seen = true) backlog =
   let agents_path = agents_dir config in
   try
-    if Sys.file_exists agents_path then
+    if Sys.file_exists agents_path then (
+      let active_task_assignees = active_task_assignees_by_task_id backlog in
       Sys.readdir agents_path
       |> Array.to_list
       |> List.filter (fun name -> Filename.check_suffix name ".json")
       |> List.iter (fun name ->
+           Coord_query.safe_yield ();
            let path = Filename.concat agents_path name in
            match read_agent_with_repair config path with
-           | Ok (agent : Masc_domain.agent) ->
-               reconcile_agent_current_task_with_backlog config
-                 ~agent_name:agent.name backlog
+           | Ok (agent : Masc_domain.agent) -> (
+               match agent.current_task with
+               | None -> ()
+               | Some _ ->
+                   reconcile_agent_current_task_with_assignments config
+                     ~touch_last_seen ~agent_name:agent.name
+                     active_task_assignees)
            | Error msg ->
-               Log.Misc.error "agent state reconcile failed for %s: %s" name msg)
+               Log.Misc.error "agent state reconcile failed for %s: %s" name msg))
   with
   | Sys_error msg ->
       Log.Misc.error "agent state reconcile scan failed: %s" msg
+
+let reconcile_all_agent_current_tasks_with_fresh_backlog
+    ?(touch_last_seen = true) config =
+  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+  with_file_lock config backlog_path (fun () ->
+    let backlog = read_backlog config in
+    reconcile_all_agent_current_tasks_with_backlog config ~touch_last_seen
+      backlog;
+    backlog)
 
 (** Claim next highest priority unclaimed task.
     Optional [exclude_task_ids] prevents re-claiming known bad tasks in the

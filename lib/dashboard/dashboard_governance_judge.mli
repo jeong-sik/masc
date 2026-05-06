@@ -66,6 +66,11 @@ type runtime_snapshot = {
   model_used : string option;
   keeper_name : string;
   last_error : string option;
+  compute_in_flight : int;
+  last_compute_duration_sec : float option;
+  last_compute_timeout_sec : float option;
+  last_compute_outcome : string option;
+  last_compute_reason : string option;
 }
 (** Snapshot of the daemon's externally-visible runtime
     state.  Constructed by {!runtime_status_at} under
@@ -87,6 +92,11 @@ type state = {
   mutable expires_at : string option;
   mutable model_used : string option;
   mutable last_error : string option;
+  mutable compute_in_flight : int;
+  mutable last_compute_duration_sec : float option;
+  mutable last_compute_timeout_sec : float option;
+  mutable last_compute_outcome : string option;
+  mutable last_compute_reason : string option;
   mutable last_disk_load_unix : float option;
   mutable judgments : (string, Yojson.Safe.t) Hashtbl.t;
 }
@@ -99,7 +109,10 @@ type state = {
     the mutable fields directly under {!with_lock} to
     seed cache state for individual scenarios.  The
     [judgments] table and [mutex] are exposed alongside
-    them for the same reason — every other reader goes
+    them for the same reason.  The compute telemetry fields
+    expose #11079 measurement state: current in-flight count,
+    last duration, resolved timeout budget, outcome, and
+    reason.  Every other reader goes
     through {!runtime_status} / {!fresh_judgments_json}. *)
 
 (** {1 Response-model classification} *)

@@ -413,6 +413,52 @@ let test_deterministic_prefilter_surfaces_pr_review_for_explicit_request () =
   Alcotest.(check bool) "pr review comment appears for explicit request"
     true (List.mem "keeper_pr_review_comment" selected)
 
+let test_tool_search_partition_returns_allowed_core_hits () =
+  let partition =
+    Keeper_run_tools.partition_tool_search_hits
+      ~core:
+        [ "keeper_tool_search";
+          "keeper_pr_review_read";
+          "keeper_pr_review_comment";
+        ]
+      ~core_always:["keeper_tool_search"]
+      ~allowed:["keeper_pr_review_read"; "keeper_pr_review_comment"]
+      ~retrieved:
+        [ "keeper_pr_review_read", 1.0;
+          "keeper_pr_review_comment", 0.9;
+        ]
+      ~max_results:10
+  in
+  Alcotest.(check (list string))
+    "allowed core hits are visible search results"
+    [ "keeper_pr_review_read"; "keeper_pr_review_comment" ]
+    (List.map fst partition.visible_core_hits);
+  Alcotest.(check (list string))
+    "core hits are not rediscovered"
+    [] (List.map fst partition.discoverable_hits);
+  Alcotest.(check int) "no policy filtering" 0 partition.filtered_by_policy
+
+let test_tool_search_partition_filters_policy_denied_core_hits () =
+  let partition =
+    Keeper_run_tools.partition_tool_search_hits
+      ~core:["keeper_pr_review_read"]
+      ~core_always:["keeper_tool_search"]
+      ~allowed:["keeper_board_post"]
+      ~retrieved:
+        [ "keeper_pr_review_read", 1.0;
+          "keeper_board_post", 0.8;
+        ]
+      ~max_results:10
+  in
+  Alcotest.(check (list string))
+    "policy-denied core hit is not exposed"
+    [] (List.map fst partition.visible_core_hits);
+  Alcotest.(check (list string))
+    "allowed non-core hit remains discoverable"
+    [ "keeper_board_post" ]
+    (List.map fst partition.discoverable_hits);
+  Alcotest.(check int) "one policy-filtered hit" 1 partition.filtered_by_policy
+
 let test_keeper_config_defaults () =
   (* Default: LLM rerank disabled *)
   Alcotest.(check bool) "llm_rerank disabled by default"
@@ -461,6 +507,10 @@ let () =
         test_deterministic_prefilter_hides_code_read_for_generic_file_read;
       Alcotest.test_case "deterministic prefilter surfaces pr review tools" `Quick
         test_deterministic_prefilter_surfaces_pr_review_for_explicit_request;
+      Alcotest.test_case "tool_search returns allowed core hits" `Quick
+        test_tool_search_partition_returns_allowed_core_hits;
+      Alcotest.test_case "tool_search filters denied core hits" `Quick
+        test_tool_search_partition_filters_policy_denied_core_hits;
     ];
     "keeper_config", [
       Alcotest.test_case "config defaults" `Quick

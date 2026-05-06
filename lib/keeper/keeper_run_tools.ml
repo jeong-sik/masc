@@ -55,6 +55,42 @@ let freeze (acc : hook_accumulator) : hook_outputs =
   ; out_receipt_tool_contract_result = acc.receipt_tool_contract_result
   }
 
+type tool_search_hit_partition =
+  { visible_core_hits : (string * float) list
+  ; discoverable_hits : (string * float) list
+  ; filtered_by_policy : int
+  }
+
+let partition_tool_search_hits ~core ~core_always ~allowed ~retrieved
+    ~max_results =
+  let allowed =
+    allowed |> Keeper_tool_alias.expand_universe
+  in
+  let allowed_set =
+    let tbl = Hashtbl.create (List.length allowed) in
+    List.iter (fun n -> Hashtbl.replace tbl n ()) allowed;
+    List.iter (fun n -> Hashtbl.replace tbl n ()) core_always;
+    tbl
+  in
+  let allowed_retrieved =
+    retrieved |> List.filter (fun (name, _) -> Hashtbl.mem allowed_set name)
+  in
+  let is_core name =
+    List.mem name core || List.mem name core_always
+  in
+  let visible_core_hits =
+    allowed_retrieved |> List.filter (fun (name, _) -> is_core name)
+  in
+  let discoverable_hits =
+    allowed_retrieved
+    |> List.filter (fun (name, _) -> not (is_core name))
+    |> List.filteri (fun i _ -> i < max_results)
+  in
+  { visible_core_hits
+  ; discoverable_hits
+  ; filtered_by_policy = List.length retrieved - List.length allowed_retrieved
+  }
+
 (** Agent setup produced by Step 7.
 
     Hook mutations flow through {!acc}, receipt refs are kept for
@@ -286,38 +322,20 @@ let prepare_agent_setup
    := fun ~query ~max_results ->
         let core = Keeper_exec_tools.effective_core_tools () in
         let retrieved = Agent_sdk.Tool_index.retrieve search_index query in
-        let allowed =
-          Keeper_exec_tools.keeper_allowed_tool_names meta
-          |> Keeper_tool_alias.expand_universe
-        in
-        let allowed_set =
-          let tbl = Hashtbl.create (List.length allowed) in
-          List.iter (fun n -> Hashtbl.replace tbl n ()) allowed;
-          List.iter
-            (fun n -> Hashtbl.replace tbl n ())
-            Keeper_tool_registry.core_always_tools;
-          tbl
-        in
-        let allowed_retrieved =
-          retrieved |> List.filter (fun (name, _) -> Hashtbl.mem allowed_set name)
+        let partition =
+          partition_tool_search_hits
+            ~core
+            ~core_always:Keeper_tool_registry.core_always_tools
+            ~allowed:(Keeper_exec_tools.keeper_allowed_tool_names meta)
+            ~retrieved
+            ~max_results
         in
         let raw_hit_count = List.length retrieved in
         let matched_core_names =
-          allowed_retrieved
-          |> List.filter_map (fun (name, _) ->
-            if List.mem name core || name = "keeper_tool_search" then Some name else None)
+          List.map fst partition.visible_core_hits
         in
-        let after_core_filter =
-          allowed_retrieved
-          |> List.filter (fun (name, _) ->
-            (not (List.mem name core)) && name <> "keeper_tool_search")
-        in
-        let new_discoveries =
-          after_core_filter |> List.filteri (fun i _ -> i < max_results)
-        in
-        let filtered_by_policy =
-          raw_hit_count - List.length allowed_retrieved
-        in
+        let new_discoveries = partition.discoverable_hits in
+        let filtered_by_policy = partition.filtered_by_policy in
         let discovered_names = List.map fst new_discoveries in
         Keeper_discovered_tools.add
           acc.discovered
@@ -361,9 +379,7 @@ let prepare_agent_setup
                  ]
         in
         let matched_core_results =
-          allowed_retrieved
-          |> List.filter (fun (name, _) ->
-               List.mem name matched_core_names)
+          partition.visible_core_hits
           |> List.map (result_json ~already_visible:true)
         in
         let discovery_results =

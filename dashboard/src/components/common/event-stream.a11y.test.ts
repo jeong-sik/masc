@@ -39,9 +39,12 @@ describe('EventStream a11y', () => {
 
   it('has log role with aria-live', () => {
     render(html`<${EventStream} events=${makeEvents()} />`, container)
-    const log = container.querySelector('[role="log"]')
+    const log = container.querySelector('[role="log"]') as HTMLElement
     expect(log).not.toBeNull()
     expect(log?.getAttribute('aria-live')).toBe('polite')
+    expect(log?.getAttribute('aria-label')).toContain('이벤트 스트림')
+    expect(log.dataset.eventStreamStatus).toBe('error')
+    expect(log.dataset.eventStreamVisibleCount).toBe('3')
   })
 
   it('renders event messages', () => {
@@ -55,5 +58,14 @@ describe('EventStream a11y', () => {
     render(html`<${EventStream} events=${makeEvents()} />`, container)
     expect(container.textContent).toContain('keeper')
     expect(container.textContent).toContain('monitor')
+  })
+
+  it('marks each visible event with level metadata', () => {
+    render(html`<${EventStream} events=${makeEvents()} maxItems=${2} />`, container)
+    const items = container.querySelectorAll('[data-stream-event-id]')
+    expect(items.length).toBe(2)
+    expect((items[0] as HTMLElement).dataset.streamEventLevel).toBe('error')
+    expect((items[1] as HTMLElement).dataset.streamEventLevel).toBe('warn')
+    expect(container.querySelector('time')?.getAttribute('datetime')).toBeTruthy()
   })
 })

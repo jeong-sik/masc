@@ -2,7 +2,77 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
-import { ErrorRecoverable, ErrorFatal } from './feedback-state'
+import {
+  EmptyState,
+  ErrorFatal,
+  ErrorRecoverable,
+  ErrorState,
+  LoadingState,
+  summarizeFeedbackState,
+} from './feedback-state'
+
+describe('summarizeFeedbackState', () => {
+  it('normalizes boolean state flags', () => {
+    expect(
+      summarizeFeedbackState('empty', {
+        compact: true,
+        icon: 'IN',
+        action: html`<button>act</button>`,
+      }),
+    ).toEqual({
+      kind: 'empty',
+      compact: true,
+      hasIcon: true,
+      hasAction: true,
+      hasDetail: false,
+    })
+  })
+})
+
+describe('FeedbackState base primitives', () => {
+  let container: HTMLElement
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+  afterEach(() => {
+    render(null, container)
+    document.body.removeChild(container)
+  })
+
+  it('publishes empty-state metadata', () => {
+    render(
+      html`<${EmptyState}
+        icon="IN"
+        message="No items"
+        compact=${true}
+        action=${html`<button>act</button>`}
+      />`,
+      container,
+    )
+    const state = container.querySelector('[data-feedback-state]')
+    expect(state?.getAttribute('data-feedback-kind')).toBe('empty')
+    expect(state?.getAttribute('data-feedback-compact')).toBe('true')
+    expect(state?.getAttribute('data-feedback-has-icon')).toBe('true')
+    expect(state?.getAttribute('data-feedback-has-action')).toBe('true')
+  })
+
+  it('publishes loading metadata and mono glyph', () => {
+    render(html`<${LoadingState}>Loading<//>`, container)
+    const state = container.querySelector('[data-feedback-state]')
+    expect(state?.getAttribute('data-feedback-kind')).toBe('loading')
+    expect(state?.getAttribute('data-feedback-has-icon')).toBe('true')
+    expect(container.querySelector('[data-feedback-icon]')?.textContent).toContain('LD')
+  })
+
+  it('publishes error metadata and mono glyph', () => {
+    render(html`<${ErrorState} message="bad" />`, container)
+    const state = container.querySelector('[data-feedback-state]')
+    expect(state?.getAttribute('data-feedback-kind')).toBe('error')
+    expect(state?.getAttribute('data-feedback-has-icon')).toBe('true')
+    expect(container.querySelector('[data-feedback-icon]')?.textContent).toContain('ER')
+  })
+})
 
 describe('ErrorRecoverable', () => {
   let container: HTMLElement
@@ -22,6 +92,8 @@ describe('ErrorRecoverable', () => {
     expect(section.getAttribute('role')).toBe('alert')
     expect(section.textContent).toContain('Cascade fallback exhausted')
     expect(section.textContent).toContain('복구 가능')
+    expect(section.getAttribute('data-feedback-kind')).toBe('recoverable')
+    expect(section.getAttribute('data-feedback-has-action')).toBe('false')
   })
 
   it('renders detail line when provided', () => {
@@ -33,6 +105,11 @@ describe('ErrorRecoverable', () => {
       container,
     )
     expect(container.textContent).toContain('2 fallback hops, timed out at 12.4s')
+    expect(
+      container
+        .querySelector('[data-feedback-state]')
+        ?.getAttribute('data-feedback-has-detail'),
+    ).toBe('true')
   })
 
   it('omits the retry button when onRetry is not supplied', () => {
@@ -46,6 +123,11 @@ describe('ErrorRecoverable', () => {
     const btn = container.querySelector('button')!
     expect(btn).toBeTruthy()
     expect(btn.textContent).toContain('다시 시도')
+    expect(
+      container
+        .querySelector('[data-feedback-state]')
+        ?.getAttribute('data-feedback-has-action'),
+    ).toBe('true')
     btn.click()
     expect(onRetry).toHaveBeenCalledTimes(1)
   })
@@ -80,6 +162,8 @@ describe('ErrorFatal', () => {
     expect(section.getAttribute('role')).toBe('alert')
     expect(section.textContent).toContain('Cockpit lost connection')
     expect(section.textContent).toContain('치명적')
+    expect(section.getAttribute('data-feedback-kind')).toBe('fatal')
+    expect(section.getAttribute('data-feedback-has-action')).toBe('false')
   })
 
   it('renders detail line when provided', () => {
@@ -91,6 +175,11 @@ describe('ErrorFatal', () => {
       container,
     )
     expect(container.textContent).toContain('Reconnect attempts: 3/3 exhausted')
+    expect(
+      container
+        .querySelector('[data-feedback-state]')
+        ?.getAttribute('data-feedback-has-detail'),
+    ).toBe('true')
   })
 
   it('omits the reload button when onReload is not supplied', () => {
@@ -104,6 +193,11 @@ describe('ErrorFatal', () => {
     const btn = container.querySelector('button')!
     expect(btn).toBeTruthy()
     expect(btn.textContent).toContain('다시 불러오기')
+    expect(
+      container
+        .querySelector('[data-feedback-state]')
+        ?.getAttribute('data-feedback-has-action'),
+    ).toBe('true')
     btn.click()
     expect(onReload).toHaveBeenCalledTimes(1)
   })

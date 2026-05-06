@@ -1986,6 +1986,11 @@ function normalizeRuntimeBlockerClass(value: unknown): KeeperConfig['runtime']['
     case 'turn_failures':
     case 'exception':
     case 'stale_fleet_batch':
+    case 'awaiting_operator':
+    case 'awaiting_sandbox_egress':
+    case 'supervisor_paused':
+    case 'synthetic_stall':
+    case 'self_imposed_idle':
       return blockerClass
     default:
       return null

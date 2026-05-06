@@ -347,6 +347,11 @@ export type KeeperRuntimeBlockerClass =
   | 'turn_failures'
   | 'exception'
   | 'stale_fleet_batch'
+  | 'awaiting_operator'
+  | 'awaiting_sandbox_egress'
+  | 'supervisor_paused'
+  | 'synthetic_stall'
+  | 'self_imposed_idle'
 
 export interface KeeperTrustLatestEvent {
   kind: string

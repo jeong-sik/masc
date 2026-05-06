@@ -81,6 +81,64 @@ let maybe_evict map =
 
 let now () = Time_compat.now ()
 
+type timeout_circuit = {
+  consecutive_timeouts : int;
+  opened_until : float;
+  last_timeout_at : float;
+}
+
+let timeout_circuit_threshold = 3
+let timeout_circuit_open_sec = 30.0
+let timeout_circuit_window_sec = 300.0
+let timeout_circuit_table : timeout_circuit SMap.t Atomic.t = Atomic.make SMap.empty
+
+let timeout_circuit_is_open key =
+  match SMap.find_opt key (Atomic.get timeout_circuit_table) with
+  | Some state when state.opened_until > now () -> true
+  | _ -> false
+
+let record_timeout_circuit key =
+  let ts = now () in
+  let opened =
+    atomic_update timeout_circuit_table (fun map ->
+      let previous = SMap.find_opt key map in
+      let consecutive_timeouts =
+        match previous with
+        | Some state
+          when ts -. state.last_timeout_at <= timeout_circuit_window_sec ->
+            state.consecutive_timeouts + 1
+        | _ -> 1
+      in
+      let was_open =
+        match previous with
+        | Some state when state.opened_until > ts -> true
+        | _ -> false
+      in
+      let opened_until =
+        if consecutive_timeouts >= timeout_circuit_threshold then
+          ts +. timeout_circuit_open_sec
+        else
+          0.0
+      in
+      ( consecutive_timeouts >= timeout_circuit_threshold && not was_open,
+        SMap.add key
+          { consecutive_timeouts; opened_until; last_timeout_at = ts }
+          map ))
+  in
+  if opened then
+    Log.Dashboard.warn
+      "cache: opening timeout circuit for %s after repeated no-stale timeouts"
+      key
+
+let clear_timeout_circuit key =
+  atomic_update timeout_circuit_table (fun map -> ((), SMap.remove key map))
+
+let clear_timeout_circuit_prefix prefix =
+  atomic_update timeout_circuit_table (fun map ->
+    ((), SMap.filter (fun key _ -> not (String.starts_with ~prefix key)) map))
+
+let clear_timeout_circuit_all () = Atomic.set timeout_circuit_table SMap.empty
+
 (** Default stale grace multiplier: stale data is served for [ttl * stale_factor]
     seconds after expiry while recomputation runs in the background.
     Reduced from 10x to 3x — the 10x factor was masking slow compute
@@ -394,8 +452,12 @@ let get_or_compute_simple key ~ttl compute =
        raise exn)
 
 let get_or_compute key ~ttl compute =
-  if Eio_guard.is_ready () then get_or_compute_eio key ~ttl compute
-  else get_or_compute_simple key ~ttl compute
+  let value =
+    if Eio_guard.is_ready () then get_or_compute_eio key ~ttl compute
+    else get_or_compute_simple key ~ttl compute
+  in
+  clear_timeout_circuit key;
+  value
 
 let peek key =
   let ts = now () in
@@ -405,13 +467,22 @@ let peek key =
   | Some (Computing { stale = Some stale_value; _ }) -> Some stale_value
   | _ -> None
 
-let timeout_error_json ?(waiting = false) key timeout_sec =
+let timeout_error_json ?timeout_kind ?(waiting = false) key timeout_sec =
+  let timeout_kind =
+    match timeout_kind with
+    | Some timeout_kind -> timeout_kind
+    | None -> if waiting then "waiter" else "owner"
+  in
   let message =
-    if waiting then
+    match timeout_kind with
+    | "circuit_open" ->
+      Printf.sprintf
+        "Dashboard %s is failing fast after repeated cache timeouts" key
+    | _ when waiting ->
       Printf.sprintf
         "Dashboard %s timed out after %.0fs waiting for an in-flight computation"
         key timeout_sec
-    else
+    | _ ->
       Printf.sprintf "Dashboard %s timed out after %.0fs" key timeout_sec
   in
   `Assoc
@@ -419,36 +490,44 @@ let timeout_error_json ?(waiting = false) key timeout_sec =
       ("error", `String "computation_timeout");
       ("message", `String message);
       ("generated_at", `String (Masc_domain.now_iso ()));
-      ("timeout_kind", `String (if waiting then "waiter" else "owner"));
+      ("timeout_kind", `String timeout_kind);
       ("timeout_sec", `Float timeout_sec);
       ("key", `String key);
     ]
 
 let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
-  try
-    if Eio_guard.is_ready () then
-      get_or_compute_eio ~wait_timeout_sec:timeout_sec key ~ttl (fun () ->
-        match
-          Eio.Time.with_timeout clock timeout_sec (fun () ->
-            Ok (compute ()))
-        with
-        | Ok value -> value
-        | Error `Timeout ->
-          Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key timeout_sec;
-          raise (Compute_timeout (key, false)))
-    else
-      get_or_compute_simple key ~ttl (fun () ->
-        match
-          Eio.Time.with_timeout clock timeout_sec (fun () ->
-            Ok (compute ()))
-        with
-        | Ok value -> value
-        | Error `Timeout ->
-          Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key timeout_sec;
-          raise (Compute_timeout (key, false)))
-  with
-  | Compute_timeout (key, waiting) ->
-      timeout_error_json ~waiting key timeout_sec
+  if Option.is_none (peek key) && timeout_circuit_is_open key then
+    timeout_error_json ~timeout_kind:"circuit_open" key timeout_sec
+  else
+    try
+      let value =
+        if Eio_guard.is_ready () then
+          get_or_compute_eio ~wait_timeout_sec:timeout_sec key ~ttl (fun () ->
+            match
+              Eio.Time.with_timeout clock timeout_sec (fun () ->
+                Ok (compute ()))
+            with
+            | Ok value -> value
+            | Error `Timeout ->
+              Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key timeout_sec;
+              raise (Compute_timeout (key, false)))
+        else
+          get_or_compute_simple key ~ttl (fun () ->
+            match
+              Eio.Time.with_timeout clock timeout_sec (fun () ->
+                Ok (compute ()))
+            with
+            | Ok value -> value
+            | Error `Timeout ->
+              Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key timeout_sec;
+              raise (Compute_timeout (key, false)))
+      in
+      clear_timeout_circuit key;
+      value
+    with
+    | Compute_timeout (key, waiting) ->
+        record_timeout_circuit key;
+        timeout_error_json ~waiting key timeout_sec
 
 let seed_stale_if_missing key ~stale_for value =
   let ts = now () in
@@ -458,17 +537,21 @@ let seed_stale_if_missing key ~stale_for value =
       | None ->
           ((), SMap.add key
             (Ready { value; expires_at = ts; stale_until = ts +. stale_for })
-            map))
+            map));
+  clear_timeout_circuit key
 
 let invalidate key =
-  atomic_update table (fun map -> ((), SMap.remove key map))
+  atomic_update table (fun map -> ((), SMap.remove key map));
+  clear_timeout_circuit key
 
 let invalidate_prefix prefix =
   atomic_update table (fun map ->
-    ((), SMap.filter (fun k _ -> not (String.starts_with ~prefix k)) map))
+    ((), SMap.filter (fun k _ -> not (String.starts_with ~prefix k)) map));
+  clear_timeout_circuit_prefix prefix
 
 let invalidate_all () =
-  Atomic.set table SMap.empty
+  Atomic.set table SMap.empty;
+  clear_timeout_circuit_all ()
 
 let stats () =
   let map = Atomic.get table in

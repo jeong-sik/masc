@@ -43,7 +43,9 @@ val get_or_compute_with_timeout :
 (** Like [get_or_compute] but wraps the compute function with an Eio timeout.
     On timeout in the stale-while-revalidate path, the stale value is
     preserved (not overwritten by error JSON).  On timeout with no stale
-    data, returns a timeout-error JSON without caching it. *)
+    data, returns a timeout-error JSON without caching it.  Repeated no-stale
+    timeouts for the same key open a short fail-fast circuit; fresh or stale
+    cache entries are still served normally. *)
 
 val seed_stale_if_missing :
   string -> stale_for:float -> Yojson.Safe.t -> unit

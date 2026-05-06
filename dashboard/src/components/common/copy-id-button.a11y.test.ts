@@ -25,6 +25,7 @@ describe('CopyIdButton a11y', () => {
     render(html`<${CopyIdButton} value="abc-123" />`, container)
     const btn = container.querySelector('button')!
     expect(btn.getAttribute('aria-label')).toBe('복사')
+    expect(btn.getAttribute('data-copy-id-state')).toBe('idle')
     expect(await axe(container)).toHaveNoViolations()
   })
 
@@ -32,6 +33,7 @@ describe('CopyIdButton a11y', () => {
     render(html`<${CopyIdButton} value="abc-123" label="Session ID" />`, container)
     const btn = container.querySelector('button')!
     expect(btn.getAttribute('aria-label')).toBe('Session ID 복사')
+    expect(btn.getAttribute('data-copy-id-has-label')).toBe('true')
     expect(await axe(container)).toHaveNoViolations()
   })
 
@@ -42,6 +44,7 @@ describe('CopyIdButton a11y', () => {
     )
     const btn = container.querySelector('button')!
     expect(btn.getAttribute('aria-label')).toBe('Copy session id')
+    expect(btn.getAttribute('data-copy-id-has-explicit-aria-label')).toBe('true')
     expect(await axe(container)).toHaveNoViolations()
   })
 })

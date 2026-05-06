@@ -21,6 +21,11 @@ let test_elapsed_duration_ms_rejects_non_finite () =
   check int "nan interval" 0
     (Keeper_timing.elapsed_duration_ms ~start_time:0.0 ~end_time:nan)
 
+let test_elapsed_duration_ms_clamps_overflow () =
+  check int "oversized finite interval" max_int
+    (Keeper_timing.elapsed_duration_ms ~start_time:0.0
+       ~end_time:(float_of_int max_int))
+
 let () =
   run "Keeper_timing"
     [
@@ -34,5 +39,7 @@ let () =
             test_elapsed_duration_ms_keeps_non_positive_zero;
           test_case "non-finite intervals stay zero" `Quick
             test_elapsed_duration_ms_rejects_non_finite;
+          test_case "oversized intervals clamp to max_int" `Quick
+            test_elapsed_duration_ms_clamps_overflow;
         ] );
     ]

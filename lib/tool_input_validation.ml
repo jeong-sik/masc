@@ -101,6 +101,7 @@ let register_pre_hook () =
           ("error", `String message);
           ("validation", `String "oas_tool_middleware");
         ];
+        legacy_message = message;
         tool_name = name;
         duration_ms = 0.0;
       })

@@ -138,6 +138,7 @@ let make_pre_hook ~config ~governance_level =
         Tool_dispatch.Reject {
           Tool_result.success = false;
           data = response;
+          legacy_message = Yojson.Safe.to_string response;
           tool_name = name;
           duration_ms = 0.0;
         }
@@ -159,6 +160,7 @@ let make_pre_hook ~config ~governance_level =
         Tool_dispatch.Reject {
           Tool_result.success = false;
           data = response;
+          legacy_message = Yojson.Safe.to_string response;
           tool_name = name;
           duration_ms = 0.0;
         }

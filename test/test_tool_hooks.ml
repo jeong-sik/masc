@@ -45,6 +45,7 @@ let test_pre_hook_short_circuits () =
     log_call "pre_block";
     Tool_dispatch.Reject { Tool_result.success = false;
            data = `String "blocked";
+           legacy_message = "blocked";
            tool_name = name;
            duration_ms = 0.0 });
   let token = match Tool_dispatch.mint_token ~name:"__hook_blocked" with Ok t -> t | Error e -> Alcotest.fail e in
@@ -74,6 +75,7 @@ let test_multiple_pre_hooks_first_wins () =
     log_call "pre2_block";
     Tool_dispatch.Reject { Tool_result.success = false;
            data = `String "denied";
+           legacy_message = "denied";
            tool_name = name;
            duration_ms = 0.0 });
   (* Third hook: should not run *)

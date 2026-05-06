@@ -249,6 +249,7 @@ def validate_strict_row_corpus(
     strict_row_corpus: dict[str, Any],
     *,
     catalog: dict[str, Any] | None = None,
+    require_catalog_sources: bool = True,
 ) -> dict[str, Any]:
     errors: list[str] = []
     duplicate_ids: list[str] = []
@@ -257,6 +258,10 @@ def validate_strict_row_corpus(
     invalid_source_path_values: list[dict[str, Any]] = []
     invalid_line_refs: list[str] = []
     invalid_line_ref_values: list[dict[str, Any]] = []
+    invalid_catalog_source_paths: list[str] = []
+    invalid_catalog_source_path_values: list[dict[str, Any]] = []
+    invalid_catalog_line_refs: list[str] = []
+    invalid_catalog_line_ref_values: list[dict[str, Any]] = []
     invalid_replay_expectations: list[str] = []
     invalid_replay_expectation_values: list[dict[str, Any]] = []
 
@@ -267,13 +272,40 @@ def validate_strict_row_corpus(
     expected_total = strict_row_corpus.get("expected_findings_total")
     findings_raw = strict_row_corpus.get("findings")
     findings = findings_raw if isinstance(findings_raw, list) else []
+    looks_like_source_row_candidate_inventory = (
+        strict_row_corpus.get("inventory_id")
+        == "goal-loop-explicit-source-row-candidates-v1"
+        or "candidate_rows" in strict_row_corpus
+        or "source_candidate_coverage" in strict_row_corpus
+    )
     catalog_id = catalog.get("catalog_id") if isinstance(catalog, dict) else None
     catalog_expected_total = (
         catalog.get("expected_findings_total") if isinstance(catalog, dict) else None
     )
+    catalog_sources_raw = (
+        catalog.get("external_sources") if isinstance(catalog, dict) else None
+    )
+    catalog_source_binding_required = catalog is not None and require_catalog_sources
+    catalog_sources_manifest_valid = catalog is None or (
+        isinstance(catalog_sources_raw, list) if require_catalog_sources else True
+    )
+    catalog_source_line_counts: dict[str, int | None] = {}
+    if isinstance(catalog_sources_raw, list):
+        for source_raw in catalog_sources_raw:
+            if not isinstance(source_raw, dict):
+                continue
+            source_path = source_raw.get("path")
+            if not isinstance(source_path, str) or not source_path:
+                continue
+            line_count = source_raw.get("line_count")
+            catalog_source_line_counts[source_path] = (
+                line_count if isinstance(line_count, int) and line_count >= 0 else None
+            )
 
     if schema_version != 1:
         errors.append("schema_version_must_be_1")
+    if looks_like_source_row_candidate_inventory:
+        errors.append("source_row_candidate_inventory_is_not_strict_corpus")
     if not isinstance(corpus_id, str) or not corpus_id:
         errors.append("corpus_id_missing")
     if not isinstance(source_catalog_id, str) or not source_catalog_id:
@@ -287,6 +319,8 @@ def validate_strict_row_corpus(
         and expected_total != catalog_expected_total
     ):
         errors.append("expected_findings_total_mismatch")
+    if not catalog_sources_manifest_valid:
+        errors.append("catalog_external_sources_must_be_list")
     if not isinstance(expected_total, int):
         errors.append("expected_findings_total_must_be_int")
     if not isinstance(findings_raw, list):
@@ -349,6 +383,9 @@ def validate_strict_row_corpus(
         else:
             source_path = source.get("path")
             line_refs = source.get("line_refs")
+            source_path_has_prefix = isinstance(
+                source_path, str
+            ) and source_path.startswith(STRICT_ROW_CORPUS_SOURCE_PREFIX)
             if not isinstance(source_path, str) or not source_path.startswith(
                 STRICT_ROW_CORPUS_SOURCE_PREFIX
             ):
@@ -358,6 +395,18 @@ def validate_strict_row_corpus(
                         "row": label,
                         "path": source_path,
                         "error": "invalid_source_path",
+                    }
+                )
+            elif (
+                catalog_source_binding_required
+                and source_path not in catalog_source_line_counts
+            ):
+                invalid_catalog_source_paths.append(label)
+                invalid_catalog_source_path_values.append(
+                    {
+                        "row": label,
+                        "path": source_path,
+                        "error": "source_path_not_in_catalog_external_sources",
                     }
                 )
             if (
@@ -373,6 +422,21 @@ def validate_strict_row_corpus(
                         "error": "invalid_line_refs",
                     }
                 )
+            elif source_path_has_prefix and source_path in catalog_source_line_counts:
+                line_count = catalog_source_line_counts[source_path]
+                if isinstance(line_count, int) and any(
+                    item > line_count for item in line_refs
+                ):
+                    invalid_catalog_line_refs.append(label)
+                    invalid_catalog_line_ref_values.append(
+                        {
+                            "row": label,
+                            "path": source_path,
+                            "line_refs": line_refs,
+                            "line_count": line_count,
+                            "error": "line_refs_exceed_catalog_line_count",
+                        }
+                    )
 
         if not isinstance(replay_expectation, dict):
             invalid_replay_expectations.append(label)
@@ -409,6 +473,10 @@ def validate_strict_row_corpus(
         errors.append("source_paths_must_be_logical_prompt_corpus_paths")
     if invalid_line_refs:
         errors.append("source_line_refs_must_be_positive_ints")
+    if invalid_catalog_source_paths:
+        errors.append("source_paths_must_match_catalog_external_sources")
+    if invalid_catalog_line_refs:
+        errors.append("source_line_refs_must_be_within_catalog_line_count")
     if invalid_replay_expectations:
         errors.append("replay_expectation_missing_or_invalid")
 
@@ -431,6 +499,9 @@ def validate_strict_row_corpus(
         "row_count": len(findings),
         "row_count_matches_expected": isinstance(expected_total, int)
         and len(findings) == expected_total,
+        "looks_like_source_row_candidate_inventory": (
+            looks_like_source_row_candidate_inventory
+        ),
         "unique_finding_ids": len(seen_ids),
         "duplicate_finding_ids": sorted(set(duplicate_ids))[
             :STRICT_ROW_CORPUS_ERROR_LIMIT
@@ -448,6 +519,18 @@ def validate_strict_row_corpus(
         "invalid_line_ref_values": invalid_line_ref_values[
             :STRICT_ROW_CORPUS_ERROR_LIMIT
         ],
+        "invalid_catalog_source_paths": sorted(set(invalid_catalog_source_paths))[
+            :STRICT_ROW_CORPUS_ERROR_LIMIT
+        ],
+        "invalid_catalog_source_path_values": invalid_catalog_source_path_values[
+            :STRICT_ROW_CORPUS_ERROR_LIMIT
+        ],
+        "invalid_catalog_line_refs": sorted(set(invalid_catalog_line_refs))[
+            :STRICT_ROW_CORPUS_ERROR_LIMIT
+        ],
+        "invalid_catalog_line_ref_values": invalid_catalog_line_ref_values[
+            :STRICT_ROW_CORPUS_ERROR_LIMIT
+        ],
         "invalid_replay_expectations": sorted(set(invalid_replay_expectations))[
             :STRICT_ROW_CORPUS_ERROR_LIMIT
         ],
@@ -455,6 +538,11 @@ def validate_strict_row_corpus(
             :STRICT_ROW_CORPUS_ERROR_LIMIT
         ],
         "path_policy_valid": not local_path_leaks and not invalid_source_paths,
+        "catalog_external_sources_total": len(catalog_source_line_counts),
+        "catalog_source_binding_required": catalog_source_binding_required,
+        "catalog_source_binding_valid": catalog_sources_manifest_valid
+        and not invalid_catalog_source_paths
+        and not invalid_catalog_line_refs,
         "local_path_leaks": local_path_leaks,
         "required_source_prefix": STRICT_ROW_CORPUS_SOURCE_PREFIX,
     }
@@ -477,7 +565,10 @@ def catalog_with_strict_row_corpus(
     if strict_row_corpus is None:
         return catalog
     merged = dict(catalog or {})
-    summary = validate_strict_row_corpus(strict_row_corpus, catalog=merged)
+    summary = validate_strict_row_corpus(
+        strict_row_corpus,
+        catalog=merged if catalog is not None else None,
+    )
     merged["strict_row_corpus"] = summary
     if summary["validated"]:
         findings_raw = strict_row_corpus.get("findings")

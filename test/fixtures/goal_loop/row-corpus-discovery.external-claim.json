@@ -119,6 +119,463 @@
       "sha256": "c41ad0b7e719e27f557e5b93e422048a64ccf993ba3ebdcc04e296452497ff28",
       "contents_summary": "46 markdown files including the 12 prompt documents and research notes",
       "note": "Archive search finds aggregate 206 claims, top finding examples, and ACT-title placeholders, but no source_catalog_id, strict-row schema, or 206 itemized finding rows."
+    },
+    {
+      "artifact_name": "workspace_tmp_goal_loop_catalog_mentions",
+      "artifact_kind": "runtime_search_report",
+      "result": "NOT_ROW_CORPUS",
+      "observed_files_checked": 16,
+      "observed_file_classes": [
+        "orient_snapshot",
+        "status_snapshot",
+        "pretty_printed_audit_catalog"
+      ],
+      "observed_candidate_row_counts": [
+        18,
+        19
+      ],
+      "note": "Workspace and temporary JSON artifacts mentioning goal-loop-206-audit-external-claim-2026-05-05 were checked. They were generated Orient/status/catalog snapshots, not a COMPLETE strict row corpus with 206 findings and a corpus_id."
+    },
+    {
+      "artifact_name": "Kimi_Agent_Keeper 사양.zip",
+      "artifact_kind": "zip",
+      "result": "NOT_ROW_CORPUS",
+      "sha256": "f23dfb6c89ea7f386ae99e24bbcb6d22800f78c383c550bbf9bc27a1ddf29fa4",
+      "contents_summary": "6,229 files including an older GOAL LOOP fixture/script snapshot",
+      "note": "Targeted scan of the goal_loop members finds fixture and script snapshots but no source_catalog_id, expected_findings_total, strict-row schema, or 206-row corpus artifact."
+    },
+    {
+      "artifact_name": "downloads_zip_strict_corpus_marker_sweep",
+      "artifact_kind": "archive_marker_search_report",
+      "result": "NOT_ROW_CORPUS",
+      "observed_archives_checked": 43,
+      "observed_marker_hits": 0,
+      "markers_checked": [
+        "source_catalog_id",
+        "corpus_id",
+        "expected_findings_total",
+        "strict_row",
+        "strict-row",
+        "goal-loop-206-audit-external-claim-2026-05-05"
+      ],
+      "note": "Filename-level sweep of Downloads zip archives matching Kimi, audit, goal, keeper, or masc found no strict-corpus markers in text-like archive members."
+    },
+    {
+      "artifact_name": "downloads_textlike_strict_corpus_marker_sweep",
+      "artifact_kind": "filesystem_marker_search_report",
+      "result": "NOT_ROW_CORPUS",
+      "observed_files_checked": 13031,
+      "observed_relevant_path_files_checked": 10848,
+      "observed_marker_hits": 0,
+      "observed_near_miss_files": 17,
+      "markers_checked": [
+        "source_catalog_id",
+        "corpus_id",
+        "expected_findings_total",
+        "strict_row",
+        "strict-row",
+        "goal-loop-206-audit-external-claim-2026-05-05"
+      ],
+      "note": "Text-like non-archive Downloads files with md, txt, json, jsonl, csv, yaml, yml, ml, mli, js, ts, tsx, html, or css extensions were searched. Strict-corpus marker hits were 0; near-miss files only carried aggregate/examples or unrelated field names, not corpus contract markers."
+    },
+    {
+      "artifact_name": "downloads_docx_strict_corpus_marker_sweep",
+      "artifact_kind": "docx_marker_search_report",
+      "result": "NOT_ROW_CORPUS",
+      "observed_files_checked": 43,
+      "observed_relevant_path_files_checked": 37,
+      "observed_marker_hits": 0,
+      "observed_near_miss_files": 0,
+      "observed_read_errors": 0,
+      "markers_checked": [
+        "source_catalog_id",
+        "corpus_id",
+        "expected_findings_total",
+        "strict_row",
+        "strict-row",
+        "goal-loop-206-audit-external-claim-2026-05-05"
+      ],
+      "note": "Standalone Downloads docx files were searched by extracting XML members. Strict-corpus marker hits and near-miss hits were 0."
+    },
+    {
+      "artifact_name": "downloads_pdf_strict_corpus_marker_sweep",
+      "artifact_kind": "pdf_marker_search_report",
+      "result": "NOT_ROW_CORPUS",
+      "observed_files_checked": 91,
+      "observed_readable_files_checked": 89,
+      "observed_relevant_path_files_checked": 1,
+      "observed_marker_hits": 0,
+      "observed_near_miss_files": 0,
+      "observed_read_errors": 2,
+      "observed_relevant_path_read_errors": 0,
+      "markers_checked": [
+        "source_catalog_id",
+        "corpus_id",
+        "expected_findings_total",
+        "strict_row",
+        "strict-row",
+        "goal-loop-206-audit-external-claim-2026-05-05"
+      ],
+      "note": "Standalone Downloads PDFs were searched with pdftotext where readable. Strict-corpus marker hits and near-miss hits were 0; the two unreadable PDFs were not in Kimi/audit/goal/keeper/masc paths."
+    },
+    {
+      "artifact_name": "downloads_spreadsheet_strict_corpus_marker_sweep",
+      "artifact_kind": "spreadsheet_marker_search_report",
+      "result": "NOT_ROW_CORPUS",
+      "observed_files_checked": 24,
+      "observed_readable_files_checked": 15,
+      "observed_relevant_path_files_checked": 0,
+      "observed_marker_hits": 0,
+      "observed_near_miss_files": 0,
+      "observed_read_errors": 9,
+      "observed_relevant_path_read_errors": 0,
+      "markers_checked": [
+        "source_catalog_id",
+        "corpus_id",
+        "expected_findings_total",
+        "strict_row",
+        "strict-row",
+        "goal-loop-206-audit-external-claim-2026-05-05"
+      ],
+      "note": "Standalone Downloads xlsx/xls files were searched by extracting XML where readable. Strict-corpus marker hits and near-miss hits were 0; none of the spreadsheet paths matched Kimi, audit, goal, keeper, or masc."
+    },
+    {
+      "artifact_name": "masc_runtime_strict_corpus_marker_sweep",
+      "artifact_kind": "runtime_marker_search_report",
+      "result": "NOT_ROW_CORPUS",
+      "observed_files_indexed": 118911,
+      "observed_corpus_named_paths": 20,
+      "observed_marker_hits": 0,
+      "excluded_path_classes": [
+        "git_metadata",
+        "node_modules",
+        "build_outputs",
+        "dist_outputs",
+        "virtualenvs",
+        "vendor_dirs"
+      ],
+      "markers_checked": [
+        "source_catalog_id",
+        "corpus_id",
+        "expected_findings_total",
+        "strict_row",
+        "strict-row",
+        "goal-loop-206-audit-external-claim-2026-05-05"
+      ],
+      "note": "Active local MASC runtime state was searched for exact strict-corpus markers. Corpus-named paths were ordinary repo script copies such as exec_corpus_report, not GOAL LOOP strict row corpus artifacts."
+    },
+    {
+      "artifact_name": "top_level_temp_strict_corpus_marker_sweep",
+      "artifact_kind": "temp_marker_search_report",
+      "result": "NOT_ROW_CORPUS",
+      "observed_files_checked": 2880,
+      "observed_marker_files": 37,
+      "observed_near_miss_files": 38,
+      "observed_marker_json_files": 16,
+      "observed_marker_markdown_files": 20,
+      "observed_marker_python_files": 1,
+      "observed_candidate_json_corpora": 0,
+      "observed_max_json_findings": 19,
+      "observed_read_errors": 0,
+      "locations_checked": [
+        "/tmp",
+        "/private/tmp"
+      ],
+      "markers_checked": [
+        "source_catalog_id",
+        "corpus_id",
+        "expected_findings_total",
+        "strict_row",
+        "strict-row",
+        "goal-loop-206-audit-external-claim-2026-05-05"
+      ],
+      "note": "Top-level temp files were searched for exact strict-corpus markers. Marker hits were PR/issue notes, helper scripts, and Orient/status/audit snapshots; no JSON file had a 206-row findings corpus, and the largest JSON finding set observed was 19."
+    },
+    {
+      "artifact_name": "github_remote_strict_corpus_marker_sweep",
+      "artifact_kind": "remote_marker_search_report",
+      "result": "NOT_ROW_CORPUS",
+      "issue_comment_search": {
+        "issue": "jeong-sik/masc-mcp#13265",
+        "result": "NO_STRICT_CORPUS_POINTER",
+        "note": "Issue body and comments record the blocker and negative searches but do not attach or link a strict 206-row corpus."
+      },
+      "pr_comment_search": {
+        "prs_checked": [
+          "jeong-sik/masc-mcp#13266",
+          "jeong-sik/masc-mcp#13577"
+        ],
+        "result": "NO_STRICT_CORPUS_POINTER",
+        "note": "PR comments contain verification and negative-evidence updates only; no strict corpus artifact or stable external corpus URL was found."
+      },
+      "issue_search": {
+        "query": "goal-loop-206-audit-external-claim-2026-05-05 repo:jeong-sik/masc-mcp",
+        "results_total": 1,
+        "matching_issue_numbers": [
+          13265
+        ],
+        "result": "ONLY_OPEN_TRACKING_ISSUE"
+      },
+      "remote_ref_search": {
+        "refs_source": "origin refs after git fetch --prune plus local tags",
+        "filename_matches": "Known goal_loop fixtures only: audit-corpus.external-claim.json, row-corpus-discovery.external-claim.json, strict-row-corpus-contract.json",
+        "exact_marker_hits_outside_known_paths": 0,
+        "excluded_known_paths": [
+          "test/fixtures/goal_loop/*",
+          "test/test_goal_loop_status.py",
+          "test/test_observe_goal_loop_logs.py",
+          "test/test_goal_loop_completion_audit.py",
+          "docs/audit-responses/*",
+          "scripts/goal_loop_completion_audit.py",
+          "scripts/orient_goal_loop_logs.py",
+          "scripts/validate_goal_loop_strict_row_corpus.py"
+        ],
+        "result": "NO_NEW_REMOTE_REF_CORPUS_MARKER"
+      },
+      "actions_artifact_search": {
+        "query_scope": "non-expired GitHub Actions artifacts whose artifact name matched goal, corpus, row, strict, 13265, 13266, or 1357, or whose head branch matched goal-loop, 13266, 13577, or corpus",
+        "metadata_matches": 1,
+        "downloaded_artifacts_checked": [
+          {
+            "artifact_id": 6137280397,
+            "artifact_name": "health-snapshot",
+            "head_branch": "feat/agent-ecosystem-corpus",
+            "head_sha": "ab1cfacbd210d98ed913a1049dffb38e222b9c89",
+            "downloaded_file": "health-snapshot.json",
+            "result": "NOT_ROW_CORPUS",
+            "note": "The artifact contains CI health counts only, not GOAL LOOP source_catalog_id, strict-row schema, or a 206-row findings array."
+          }
+        ],
+        "result": "NO_ACTIONS_ARTIFACT_CORPUS"
+      },
+      "release_asset_search": {
+        "release_count": 52,
+        "corpus_like_asset_names": 0,
+        "asset_name_markers_checked": [
+          "goal",
+          "corpus",
+          "strict",
+          "row",
+          "206",
+          "source_catalog_id",
+          "expected_findings_total"
+        ],
+        "result": "NO_RELEASE_ASSET_CORPUS",
+        "note": "GitHub release metadata was checked across 52 releases. Release assets were operational release evidence, binaries, logs, or endpoint snapshots; no asset name matched corpus-specific markers."
+      },
+      "repo_contents_search": {
+        "top_level_corpus_like_entries": [
+          "audits"
+        ],
+        "audits_entries_checked": [
+          "audits/local-exec-core-inventory.md"
+        ],
+        "result": "NO_REPO_CONTENTS_CORPUS",
+        "note": "The remote top-level contents API exposed audits as the only corpus/audit-like root. Its only matching file is a placeholder for exec-corpus capture, not GOAL LOOP strict-row data."
+      },
+      "markers_checked": [
+        "source_catalog_id",
+        "corpus_id",
+        "expected_findings_total",
+        "strict_row",
+        "strict-row",
+        "goal-loop-206-audit-external-claim-2026-05-05"
+      ],
+      "note": "Remote GitHub comments, issue search, fetched refs/tags, narrowly matching non-expired Actions artifacts, release assets, and top-level contents were checked. They produced only the existing open tracking issue, known fixture/test/doc/script markers, one unrelated health snapshot artifact, standard release assets, and an unrelated exec-corpus placeholder."
+    },
+    {
+      "artifact_name": "codex_local_history_strict_corpus_marker_sweep",
+      "artifact_kind": "local_history_marker_search_report",
+      "result": "NOT_ROW_CORPUS",
+      "observed_history_files_checked": 9,
+      "observed_session_files_checked": 8,
+      "observed_log_files_checked": 1,
+      "observed_exact_marker_files": 9,
+      "observed_independent_corpus_files": 0,
+      "observed_high_volume_session_files_reviewed": 2,
+      "observed_marker_contexts": [
+        "generated_fixture_diffs",
+        "completion_audit_status_snapshots",
+        "strict_row_contract_tests",
+        "pr_review_comments",
+        "negative_search_transcripts"
+      ],
+      "markers_checked": [
+        "source_catalog_id",
+        "corpus_id",
+        "expected_findings_total",
+        "strict_row",
+        "strict-row",
+        "goal-loop-206-audit-external-claim-2026-05-05"
+      ],
+      "note": "Local Codex session and TUI log history containing exact strict-corpus markers was reviewed by category. Hits were self-referential transcripts from #13266/#13577 tooling, generated fixtures, status snapshots, synthetic contract tests, review comments, and negative searches; no independent strict 206-row corpus artifact was present."
+    },
+    {
+      "artifact_name": "other_local_agent_history_exact_corpus_marker_sweep",
+      "artifact_kind": "local_history_marker_search_report",
+      "result": "NOT_ROW_CORPUS",
+      "observed_roots_checked": [
+        "claude_history",
+        "gemini_history",
+        "me_memory"
+      ],
+      "observed_exact_marker_files": 0,
+      "observed_independent_corpus_files": 0,
+      "excluded_path_classes": [
+        "session_env",
+        "paste_cache",
+        "cache",
+        "shell_snapshots",
+        "telemetry",
+        "todos",
+        "tasks"
+      ],
+      "markers_checked": [
+        "strict-row-corpus",
+        "strict row corpus",
+        "206-row strict",
+        "goal-loop-206-audit-external-claim-2026-05-05"
+      ],
+      "note": "Claude project history, Gemini history, and local me memory were searched for exact GOAL LOOP strict-corpus markers with high-noise cache directories excluded. No exact corpus marker file was found."
+    },
+    {
+      "artifact_name": "downloads_discovery_cli_strict_corpus_validation_sweep",
+      "artifact_kind": "discovery_cli_validation_report",
+      "result": "NOT_ROW_CORPUS",
+      "observed_files_considered": 56367,
+      "observed_text_units_scanned": 46536,
+      "observed_marker_hits": 0,
+      "observed_candidate_corpora": 8,
+      "observed_validated_strict_corpora": 0,
+      "observed_invalid_candidate_classes": [
+        "cdal_sample_verdict_fixture",
+        "goal_loop_orient_startup_fixture"
+      ],
+      "markers_checked": [
+        "source_catalog_id",
+        "corpus_id",
+        "expected_findings_total",
+        "strict_row",
+        "strict-row",
+        "goal-loop-206-audit-external-claim-2026-05-05"
+      ],
+      "note": "The repo strict-row-corpus discovery CLI scanned Downloads text-like files and text-like archive members against the audit catalog. It found eight JSON objects with findings arrays, all unrelated fixtures rejected by strict-corpus validation, and zero valid 206-row corpora."
+    },
+    {
+      "artifact_name": "prompt_source_docs_discovery_cli_strict_corpus_validation_sweep",
+      "artifact_kind": "discovery_cli_validation_report",
+      "result": "NOT_ROW_CORPUS",
+      "observed_files_considered": 12,
+      "observed_text_units_scanned": 12,
+      "observed_marker_hits": 0,
+      "observed_candidate_corpora": 0,
+      "observed_validated_strict_corpora": 0,
+      "markers_checked": [
+        "source_catalog_id",
+        "corpus_id",
+        "expected_findings_total",
+        "strict_row",
+        "strict-row",
+        "goal-loop-206-audit-external-claim-2026-05-05"
+      ],
+      "note": "The repo strict-row-corpus discovery CLI scanned the 12 prompt-supplied source documents directly against the audit catalog. It found no strict-corpus markers, no JSON findings-array candidates, and zero valid 206-row corpora."
+    },
+    {
+      "artifact_name": "downloads_tar_gzip_compressed_strict_corpus_validation_sweep",
+      "artifact_kind": "discovery_cli_validation_report",
+      "result": "NOT_ROW_CORPUS",
+      "observed_files_considered": 5,
+      "observed_text_units_scanned": 24,
+      "observed_marker_hits": 0,
+      "observed_candidate_corpora": 0,
+      "observed_validated_strict_corpora": 0,
+      "observed_path_errors": 0,
+      "observed_file_classes": [
+        "tar_gzip_archive",
+        "tgz_archive",
+        "json_gzip_text"
+      ],
+      "markers_checked": [
+        "source_catalog_id",
+        "corpus_id",
+        "expected_findings_total",
+        "strict_row",
+        "strict-row",
+        "goal-loop-206-audit-external-claim-2026-05-05"
+      ],
+      "note": "The repo strict-row-corpus discovery CLI scanned the Downloads tar.gz/tgz/json.gz files not covered by the earlier zip/docx/pdf/spreadsheet/text sweeps. It found no strict-corpus markers, no JSON findings-array candidates, and zero valid 206-row corpora."
+    },
+    {
+      "artifact_name": "prompt_source_docs_explicit_row_candidate_inventory",
+      "artifact_kind": "source_row_candidate_inventory",
+      "result": "INCOMPLETE_ROW_CANDIDATES_NOT_STRICT_CORPUS",
+      "observed_prompt_sources_checked": 12,
+      "observed_unique_candidate_rows": 132,
+      "observed_expected_findings_total": 206,
+      "observed_missing_candidate_rows": 74,
+      "observed_source_errors": 0,
+      "observed_sources_with_candidates": 5,
+      "observed_sources_without_candidates": 7,
+      "observed_candidates_by_file": [
+        {
+          "path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+          "unique_candidate_rows": 19
+        },
+        {
+          "path": "prompt_corpus/GOAL_LOOP/artifact_synthesis.md",
+          "unique_candidate_rows": 47
+        },
+        {
+          "path": "prompt_corpus/GOAL_LOOP/audit_derived_state.md",
+          "unique_candidate_rows": 29
+        },
+        {
+          "path": "prompt_corpus/GOAL_LOOP/deep_audit_dashboard_heuristic.md",
+          "unique_candidate_rows": 23
+        },
+        {
+          "path": "prompt_corpus/GOAL_LOOP/llm_compatibility.agent.final.md",
+          "unique_candidate_rows": 14
+        }
+      ],
+      "observed_zero_candidate_sources": [
+        "prompt_corpus/GOAL_LOOP/INTEGRATED_IMPROVEMENT_DESIGN.md",
+        "prompt_corpus/GOAL_LOOP/RUTHLESS_JUDGMENT.md",
+        "prompt_corpus/GOAL_LOOP/fundamental_roadmap.md",
+        "prompt_corpus/GOAL_LOOP/issues_analysis_done_vs_todo.md",
+        "prompt_corpus/GOAL_LOOP/live_incident_analysis.md",
+        "prompt_corpus/GOAL_LOOP/masc_final_diagnosis.md",
+        "prompt_corpus/GOAL_LOOP/progress-evaluation.md"
+      ],
+      "observed_candidates_by_rule": [
+        {
+          "rule": "audit_derived_numbered_heading",
+          "unique_candidate_rows": 29
+        },
+        {
+          "rule": "colon_finding_id_line",
+          "unique_candidate_rows": 8
+        },
+        {
+          "rule": "deep_audit_decimal_heading",
+          "unique_candidate_rows": 23
+        },
+        {
+          "rule": "generic_explicit_id_mention",
+          "unique_candidate_rows": 28
+        },
+        {
+          "rule": "markdown_table_id_row",
+          "unique_candidate_rows": 38
+        },
+        {
+          "rule": "ocaml_switch_finding_id",
+          "unique_candidate_rows": 6
+        }
+      ],
+      "extraction_policy": "Conservative explicit rows only: exact finding IDs, exact S/F anti-pattern IDs, markdown table ID rows, and numbered audit section headings in the two audit reports. Ranges and roadmap phase bullets are not expanded into invented rows.",
+      "command": "python3 scripts/extract_goal_loop_source_row_candidates.py <12 prompt source docs> --summary-only --require-complete --format text",
+      "note": "The repo source-row candidate extractor scanned the 12 prompt-supplied source documents. It found only 132 explicit row candidates across 5 source files, leaving 7 checked prompt files with zero explicit row candidates and at least 74 missing rows versus the required 206. The 7 no-row files still contain 897 unstructured headings, table rows, numbered items, and bullet items, with all 7 marker buckets tracked by #13265 and #13636, but these are non-corpus markers rather than stable strict finding rows. This is not a strict corpus because it lacks 206 complete replay rows and intentionally does not synthesize rows from ranges or roadmap bullets."
     }
   ],
   "broader_structured_id_triage": {

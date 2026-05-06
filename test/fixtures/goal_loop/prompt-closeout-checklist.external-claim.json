@@ -1,0 +1,382 @@
+{
+  "schema_version": 1,
+  "checklist_id": "goal-loop-prompt-closeout-checklist-2026-05-06",
+  "source_catalog_id": "goal-loop-206-audit-external-claim-2026-05-05",
+  "status": "RECORDED",
+  "scope_note": "Prompt-to-artifact closeout checklist for the 12 supplied GOAL LOOP source documents. PARTIAL and BLOCKED entries are intentionally not treated as complete.",
+  "prompt_sources_checked": [
+    "prompt_corpus/GOAL_LOOP/INTEGRATED_IMPROVEMENT_DESIGN.md",
+    "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+    "prompt_corpus/GOAL_LOOP/issues_analysis_done_vs_todo.md",
+    "prompt_corpus/GOAL_LOOP/live_incident_analysis.md",
+    "prompt_corpus/GOAL_LOOP/fundamental_roadmap.md",
+    "prompt_corpus/GOAL_LOOP/deep_audit_dashboard_heuristic.md",
+    "prompt_corpus/GOAL_LOOP/audit_derived_state.md",
+    "prompt_corpus/GOAL_LOOP/progress-evaluation.md",
+    "prompt_corpus/GOAL_LOOP/llm_compatibility.agent.final.md",
+    "prompt_corpus/GOAL_LOOP/masc_final_diagnosis.md",
+    "prompt_corpus/GOAL_LOOP/RUTHLESS_JUDGMENT.md",
+    "prompt_corpus/GOAL_LOOP/artifact_synthesis.md"
+  ],
+  "requirements": [
+    {
+      "requirement_id": "startup-provider-health-skipped",
+      "prompt_requirement": "Provider health skipped across providers/models",
+      "artifact_refs": [
+        "test/fixtures/goal_loop/observe.startup.json",
+        "test/fixtures/goal_loop/orient.startup.json",
+        "test/fixtures/goal_loop/audit-corpus.external-claim.json#NF-1"
+      ],
+      "status": "PARTIAL",
+      "criterion_id": "strict_row_level_catalog_complete",
+      "gap": "Startup signature is replayed, but the full 206-row strict corpus is absent.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13265",
+        "https://github.com/jeong-sik/masc-mcp/issues/13685",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
+    },
+    {
+      "requirement_id": "startup-credential-starvation",
+      "prompt_requirement": "Keeper credential starvation and archival",
+      "artifact_refs": [
+        "test/fixtures/goal_loop/observe.startup.json",
+        "test/fixtures/goal_loop/audit-corpus.external-claim.json#NF-2",
+        "test/fixtures/goal_loop/act-map.startup.json"
+      ],
+      "status": "PARTIAL",
+      "criterion_id": "strict_row_level_catalog_complete",
+      "gap": "Signature and ACT links exist, but full keeper recovery SLO proof is not recorded.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13684",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
+    },
+    {
+      "requirement_id": "startup-alive-but-stuck",
+      "prompt_requirement": "Alive-but-stuck supervisor recovery failure",
+      "artifact_refs": [
+        "test/fixtures/goal_loop/audit-corpus.external-claim.json#NF-3",
+        "test/fixtures/goal_loop/act-map.startup.json"
+      ],
+      "status": "PARTIAL",
+      "criterion_id": "strict_row_level_catalog_complete",
+      "gap": "Failure is modeled, but runtime recovery success across all keepers is not proven.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13686",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
+    },
+    {
+      "requirement_id": "startup-governance-fallback",
+      "prompt_requirement": "Governance unparseable or lenient fallback visibility",
+      "artifact_refs": [
+        "test/fixtures/goal_loop/audit-corpus.external-claim.json#NF-4",
+        "test/fixtures/goal_loop/act-map.startup.json"
+      ],
+      "status": "PARTIAL",
+      "criterion_id": "strict_row_level_catalog_complete",
+      "gap": "Visibility exists, but strict judge-output failure policy is incomplete.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13688",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
+    },
+    {
+      "requirement_id": "startup-unknown-toml-keys",
+      "prompt_requirement": "Keeper TOML unknown key handling",
+      "artifact_refs": [
+        "test/fixtures/goal_loop/audit-corpus.external-claim.json#NF-6",
+        "test/fixtures/goal_loop/act-map.startup.json"
+      ],
+      "status": "PARTIAL",
+      "criterion_id": "strict_row_level_catalog_complete",
+      "gap": "Health visibility exists, but strict schema rejection is not enforced.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13689",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
+    },
+    {
+      "requirement_id": "dashboard-metric-all-zero",
+      "prompt_requirement": "Dashboard metric all-zero detection",
+      "artifact_refs": [
+        "test/fixtures/goal_loop/observe.startup.json",
+        "test/fixtures/goal_loop/orient.startup.json",
+        "test/fixtures/goal_loop/audit-corpus.external-claim.json#CD-10",
+        "infrastructure/monitoring/goal-loop-observe-metrics.contract.json",
+        "infrastructure/monitoring/goal-loop-observe-alerts.yml",
+        "infrastructure/monitoring/grafana-goal-loop-observe-dashboard.json",
+        "docs/observability/goal-loop-observe-metrics.md",
+        "scripts/validate_goal_loop_observe_metrics.py",
+        "test/test_validate_goal_loop_observe_metrics.py"
+      ],
+      "status": "PASS",
+      "criterion_id": "post_act_verify_complete",
+      "gap": null,
+      "implementation_pr_refs": [
+        "https://github.com/jeong-sik/masc-mcp/pull/13630"
+      ]
+    },
+    {
+      "requirement_id": "linear-autoboot-warmup",
+      "prompt_requirement": "Linear autoboot warmup visibility",
+      "artifact_refs": [
+        "test/fixtures/goal_loop/audit-corpus.external-claim.json#NF-5",
+        "test/fixtures/goal_loop/orient.startup.json"
+      ],
+      "status": "PARTIAL",
+      "criterion_id": "strict_row_level_catalog_complete",
+      "gap": "Source claim is tracked, but no full row-level replay proves the warmup behavior is closed.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13265",
+        "https://github.com/jeong-sik/masc-mcp/issues/13690",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
+    },
+    {
+      "requirement_id": "goal-loop-phase-chain",
+      "prompt_requirement": "Observe -> Orient -> Decide -> Act -> Verify chain",
+      "artifact_refs": [
+        "scripts/observe_goal_loop_logs.py",
+        "scripts/orient_goal_loop_logs.py",
+        "scripts/decide_goal_loop_findings.py",
+        "scripts/verify_goal_loop_logs.py",
+        "scripts/goal_loop_status.py",
+        "scripts/goal_loop_scheduler.py",
+        "test/test_goal_loop_scheduler.py",
+        "docs/GOAL-LOOP-RUNTIME-SCHEDULER.md"
+      ],
+      "status": "PASS",
+      "criterion_id": "post_act_verify_complete",
+      "gap": null,
+      "implementation_pr_refs": [
+        "https://github.com/jeong-sik/masc-mcp/pull/13624"
+      ]
+    },
+    {
+      "requirement_id": "observe-prometheus-grafana-metrics",
+      "prompt_requirement": "Prometheus/Grafana Observe metrics",
+      "artifact_refs": [
+        "scripts/observe_goal_loop_logs.py",
+        "test/fixtures/goal_loop/observe.startup.json",
+        "docs/audit-responses/2026-05-05-goal-loop-completion-audit.md",
+        "infrastructure/monitoring/goal-loop-observe-metrics.contract.json",
+        "infrastructure/monitoring/goal-loop-observe-alerts.yml",
+        "infrastructure/monitoring/grafana-goal-loop-observe-dashboard.json",
+        "docs/observability/goal-loop-observe-metrics.md",
+        "scripts/validate_goal_loop_observe_metrics.py",
+        "test/test_validate_goal_loop_observe_metrics.py"
+      ],
+      "status": "PASS",
+      "criterion_id": "post_act_verify_complete",
+      "gap": null,
+      "implementation_pr_refs": [
+        "https://github.com/jeong-sik/masc-mcp/pull/13630"
+      ]
+    },
+    {
+      "requirement_id": "observe-log-parser",
+      "prompt_requirement": "Automated log-pattern parser",
+      "artifact_refs": [
+        "scripts/observe_goal_loop_logs.py",
+        "test/test_observe_goal_loop_logs.py"
+      ],
+      "status": "PASS",
+      "criterion_id": "post_act_verify_complete",
+      "gap": null
+    },
+    {
+      "requirement_id": "orient-audit-comparison",
+      "prompt_requirement": "Orient comparison between audit findings and runtime/code state",
+      "artifact_refs": [
+        "scripts/orient_goal_loop_logs.py",
+        "test/fixtures/goal_loop/audit-corpus.external-claim.json",
+        "test/fixtures/goal_loop/structured-id-triage.external-claim.json"
+      ],
+      "status": "PARTIAL",
+      "criterion_id": "strict_row_level_catalog_complete",
+      "gap": "Engine and triage exist, but only 19 of 206 strict rows are itemized.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13265",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
+    },
+    {
+      "requirement_id": "orient-dashboard-counts",
+      "prompt_requirement": "Orient dashboard counts",
+      "artifact_refs": [
+        "scripts/goal_loop_status.py",
+        "docs/examples/goal-loop-fixture.md"
+      ],
+      "status": "PARTIAL",
+      "criterion_id": "strict_row_level_catalog_complete",
+      "gap": "CLI JSON/text exists. Draft implementation PR #13655 wires the operator dashboard panel, but it is not merged/live and the strict corpus remains incomplete.",
+      "implementation_pr_refs": [
+        "https://github.com/jeong-sik/masc-mcp/pull/13655"
+      ],
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13609",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
+    },
+    {
+      "requirement_id": "decide-priority-algorithm",
+      "prompt_requirement": "Priority decision algorithm",
+      "artifact_refs": [
+        "scripts/decide_goal_loop_findings.py",
+        "test/test_decide_goal_loop_findings.py"
+      ],
+      "status": "PASS",
+      "criterion_id": "aggregate_consistency_resolved",
+      "gap": null
+    },
+    {
+      "requirement_id": "weekly-act-priority-queue",
+      "prompt_requirement": "Weekly ACT priority queue",
+      "artifact_refs": [
+        "test/fixtures/goal_loop/act-map.startup.json",
+        "test/fixtures/goal_loop/known-prs.startup.json",
+        "scripts/validate_goal_loop_act_map.py"
+      ],
+      "status": "PARTIAL",
+      "criterion_id": "strict_row_level_catalog_complete",
+      "gap": "Reference integrity exists. Draft implementation PR #13664 adds anti-stagnation SLA state, but ownership workflow and automatic queueing are not merged/live.",
+      "implementation_pr_refs": [
+        "https://github.com/jeong-sik/masc-mcp/pull/13664"
+      ],
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13611",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
+    },
+    {
+      "requirement_id": "act-pr-proof",
+      "prompt_requirement": "ACT checklist and PR proof",
+      "artifact_refs": [
+        "test/fixtures/goal_loop/act-map.startup.json",
+        "test/fixtures/goal_loop/known-prs.startup.json",
+        "scripts/validate_goal_loop_act_map.py"
+      ],
+      "status": "PARTIAL",
+      "criterion_id": "strict_row_level_catalog_complete",
+      "gap": "Known ACTs are mapped; not every still-present row can have ACT proof until the missing 187 rows exist.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13265",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
+    },
+    {
+      "requirement_id": "verify-closeout-gates",
+      "prompt_requirement": "Verify unit/regression/TLA/log/metric/orient gates",
+      "artifact_refs": [
+        "scripts/verify_goal_loop_logs.py",
+        "scripts/goal_loop_completion_audit.py",
+        "test/test_goal_loop_completion_audit.py"
+      ],
+      "status": "PARTIAL",
+      "criterion_id": "post_act_verify_complete",
+      "gap": "Closeout verifier exists. Draft implementation PR #13657 adds explicit unit/regression/TLA/log/metric/orient gates, but it is not merged and still requires real production inputs for closeout.",
+      "implementation_pr_refs": [
+        "https://github.com/jeong-sik/masc-mcp/pull/13657"
+      ],
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13610",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
+    },
+    {
+      "requirement_id": "verify-pass-fail-branch",
+      "prompt_requirement": "Verify PASS/FAIL branch semantics",
+      "artifact_refs": [
+        "test/fixtures/goal_loop/verify.fail.json",
+        "scripts/verify_goal_loop_logs.py",
+        "scripts/goal_loop_completion_audit.py"
+      ],
+      "status": "PARTIAL",
+      "criterion_id": "strict_row_level_catalog_complete",
+      "gap": "Branch semantics exist. Draft implementation PR #13657 adds the Verify pipeline gate contract, and draft PR #13507 adds the post-ACT live replay runner. Complete-corpus Verify remains blocked until those PRs are merged/live-replayed and the 206-row corpus exists.",
+      "implementation_pr_refs": [
+        "https://github.com/jeong-sik/masc-mcp/pull/13507",
+        "https://github.com/jeong-sik/masc-mcp/pull/13657"
+      ],
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13265",
+        "https://github.com/jeong-sik/masc-mcp/issues/13505",
+        "https://github.com/jeong-sik/masc-mcp/issues/13610",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
+    },
+    {
+      "requirement_id": "goal-loop-dashboard",
+      "prompt_requirement": "Unified GOAL LOOP dashboard",
+      "artifact_refs": [
+        "scripts/goal_loop_status.py",
+        "docs/examples/goal-loop-fixture.md"
+      ],
+      "status": "PARTIAL",
+      "criterion_id": "strict_row_level_catalog_complete",
+      "gap": "CLI status exists. Draft implementation PR #13655 wires the operator dashboard panel, but it is not merged/live and the strict corpus remains incomplete.",
+      "implementation_pr_refs": [
+        "https://github.com/jeong-sik/masc-mcp/pull/13655"
+      ],
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13609",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
+    },
+    {
+      "requirement_id": "anti-stagnation-rules",
+      "prompt_requirement": "Anti-stagnation SLA and escalation rules",
+      "artifact_refs": [
+        "scripts/validate_goal_loop_act_map.py",
+        "scripts/goal_loop_completion_audit.py"
+      ],
+      "status": "PARTIAL",
+      "criterion_id": "strict_row_level_catalog_complete",
+      "gap": "Reference integrity exists. Draft implementation PR #13664 adds SLA timers and escalation detection, but it is not merged/live and strict-corpus ACT coverage remains blocked.",
+      "implementation_pr_refs": [
+        "https://github.com/jeong-sik/masc-mcp/pull/13664"
+      ],
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13611",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
+    },
+    {
+      "requirement_id": "expected-convergence",
+      "prompt_requirement": "Week/month convergence claims",
+      "artifact_refs": [
+        "scripts/goal_loop_completion_audit.py",
+        "test/fixtures/goal_loop/row-corpus-discovery.external-claim.json"
+      ],
+      "status": "BLOCKED",
+      "criterion_id": "strict_row_level_catalog_complete",
+      "gap": "No measured convergence claim is valid without the strict corpus and live SLO proof.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13265",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
+    },
+    {
+      "requirement_id": "full-206-row-strict-corpus",
+      "prompt_requirement": "Full 206-row strict corpus",
+      "artifact_refs": [
+        "test/fixtures/goal_loop/row-corpus-discovery.external-claim.json",
+        "test/fixtures/goal_loop/strict-row-corpus-contract.json",
+        "scripts/discover_goal_loop_strict_row_corpus.py",
+        "scripts/extract_goal_loop_source_row_candidates.py",
+        "test/fixtures/goal_loop/source-row-candidate-inventory.external-claim.json"
+      ],
+      "status": "BLOCKED",
+      "criterion_id": "strict_row_level_catalog_complete",
+      "gap": "Discovery records FULL_ROW_CORPUS_NOT_FOUND with 19 of 206 strict rows itemized and 187 missing; the source-doc candidate extractor finds only 132 explicit row candidates across 5 source files, with 7 checked prompt files yielding zero explicit candidates. Those 7 files still contain 897 unstructured requirement markers tracked by #13265 and #13636, but they are not stable strict-corpus rows. Candidate corpora must also bind row source paths and line refs to the audit catalog external_sources. This is not the required 206-row strict corpus.",
+      "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13265",
+        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      ]
+    }
+  ],
+  "next_required_artifact": "A strict row-level corpus with 206 itemized findings, stable finding IDs, source references, severity, decision mapping, and replay expectations.",
+  "next_required_artifact_contract": "test/fixtures/goal_loop/strict-row-corpus-contract.json"
+}

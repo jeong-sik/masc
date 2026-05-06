@@ -132,9 +132,10 @@
   --row-corpus-discovery
   test/fixtures/goal_loop/row-corpus-discovery.external-claim.json
   --require-complete --format text` checked at 2026-05-06T09:38:37+09:00,
-  confidence High: exits non-zero with the single explicit blocker
-  `strict_row_level_catalog_complete`, while preserving PASS evidence for
-  source manifest coverage, source artifact validation, source identity,
+  confidence High: in this pre-checklist invocation, exits non-zero with the
+  single explicit blocker `strict_row_level_catalog_complete`, while preserving
+  PASS evidence for source manifest coverage, source artifact validation,
+  source identity,
   aggregate claim source verification, aggregate reconciliation, strict
   source/catalog ID sync, broader structured-ID ownership triage, and
   post-ACT Verify. The row-corpus discovery manifest is attached as evidence
@@ -147,16 +148,173 @@
   and a single `R-FATAL-1` example was also checked and does not contain the
   missing row corpus. The closest GOAL-loop export archive was checked as
   well; it contains the same prompt documents and research notes, with no
-  `source_catalog_id`, strict-row schema, or 206 itemized rows.
+  `source_catalog_id`, strict-row schema, or 206 itemized rows. A workspace/tmp
+  sweep checked 16 generated JSON artifacts mentioning the catalog id; those
+  were Orient/status/catalog snapshots with 18 or 19 rows, not a complete
+  strict 206-row corpus. A Kimi keeper spec archive with an older GOAL LOOP
+  fixture/script snapshot was also checked and has no `source_catalog_id`,
+  `expected_findings_total`, strict-row schema, or 206-row corpus artifact in
+  its goal-loop members. A broader filename-level sweep of 43 Downloads zip
+  archives matching Kimi/audit/goal/keeper/masc found no `source_catalog_id`,
+  `corpus_id`, `expected_findings_total`, strict-row marker, or GOAL LOOP
+  catalog-id marker in text-like archive members. A non-archive text-like
+  Downloads sweep also checked 13,031 files, including 10,848 files in
+  Kimi/audit/goal/keeper/masc paths, and found 0 strict-corpus marker hits; the
+  17 near-miss files carried only aggregate/examples or unrelated field names.
+  Standalone docx and PDF sweeps checked 43 docx files and 91 PDF files; there
+  were 0 strict-corpus marker hits, and the two unreadable PDFs were not in
+  Kimi/audit/goal/keeper/masc paths. A standalone spreadsheet sweep checked 24
+  xlsx/xls files and found 0 marker hits; no spreadsheet paths matched
+  Kimi/audit/goal/keeper/masc. A local MASC runtime sweep indexed 118,911
+  files and found 0 strict-corpus marker hits; the 20 corpus-named runtime
+  paths were ordinary repo script copies, not GOAL LOOP strict row artifacts.
+  A top-level temp sweep checked 2,880 files in `/tmp` and `/private/tmp`; it
+  found 37 marker files, all PR/issue notes, helper scripts, or
+  Orient/status/audit snapshots, with 0 candidate 206-row JSON corpora and a
+  maximum observed JSON finding count of 19.
+- [근거] `python3 scripts/discover_goal_loop_strict_row_corpus.py
+  <12 prompt source files> --audit-catalog
+  test/fixtures/goal_loop/audit-corpus.external-claim.json --require-found
+  --format text` checked at 2026-05-06T13:43:19+09:00, confidence High:
+  exits non-zero with
+  `validated=0 candidates=0 marker_hits=0 text_units=12 files=12`. This
+  source-doc-only result is recorded in
+  `test/fixtures/goal_loop/row-corpus-discovery.external-claim.json` as
+  `prompt_source_docs_discovery_cli_strict_corpus_validation_sweep`, so the
+  original 12 supplied files are now mapped directly to strict-corpus
+  discovery evidence.
+- [근거] `python3 scripts/extract_goal_loop_source_row_candidates.py
+  <12 prompt source files> --summary-only --require-complete --format text
+  --checked-at 2026-05-06
+  --no-row-tracking-issue-ref https://github.com/jeong-sik/masc-mcp/issues/13265
+  --no-row-tracking-issue-ref https://github.com/jeong-sik/masc-mcp/issues/13636`
+  checked at 2026-05-06T17:12:00+09:00, confidence High: exits non-zero with
+  `rows=132 expected=206 missing=74 sources=12 errors=0`. This conservative
+  extractor records only explicit IDs, explicit S/F anti-pattern rows,
+  markdown table ID rows, and numbered audit sections; it does not expand
+  ranges or roadmap phase bullets into invented rows. The result is recorded
+  in `test/fixtures/goal_loop/source-row-candidate-inventory.external-claim.json`
+  and mirrored in `test/fixtures/goal_loop/row-corpus-discovery.external-claim.json`
+  as `prompt_source_docs_explicit_row_candidate_inventory`; the inventory now
+  accounts for the prompt-source split explicitly, with 5 files contributing
+  candidates and 7 checked prompt files yielding zero explicit candidate rows.
+  Those 7 files are not empty: the inventory separately records 897
+  unstructured headings, table rows, numbered items, and bullet items that are
+  not stable strict-corpus rows and therefore cannot satisfy the 206-row gate.
+  All 7 no-row marker buckets carry tracking refs to #13265 and #13636. The
+  inventory also evaluates source currentness at `checked_at=2026-05-06`: it
+  records 7 future-dated claims, classifies future due dates and forecast dates
+  separately, and blocks currentness on 3 future-dated source snapshot/report
+  claims in `artifact_synthesis.md`, `audit_derived_state.md`, and
+  `progress-evaluation.md`.
+- [근거] `gh pr view 13577 --repo jeong-sik/masc-mcp --json
+  number,state,isDraft,mergeable,mergeStateStatus,labels,url`,
+  `gh issue view 13265 --repo jeong-sik/masc-mcp --json number,state,url`, and
+  `gh pr checks 13577 --repo jeong-sik/masc-mcp` checked at
+  2026-05-06T15:00:55+09:00, confidence High: #13577 is open, draft,
+  mergeable, and label-free; #13265 is open. Current red
+  checks are `CI Gate` and `Draft Auto-Merge Guard`; their logs identify the
+  missing verified human approval label `human-approved-ready` as the policy
+  blocker, while quick non-policy guards pass and heavy jobs are skipped under
+  the draft/policy gate.
+- [근거] `find /Users/dancer/Downloads -type f` for tar/gzip/sqlite-style
+  extensions and `python3 scripts/discover_goal_loop_strict_row_corpus.py
+  <5 uncovered tar.gz/tgz/json.gz files> --audit-catalog
+  test/fixtures/goal_loop/audit-corpus.external-claim.json --require-found
+  --format text` checked at 2026-05-06T13:43:19+09:00, confidence High:
+  the uncovered container sweep found 5 files
+  (`*.tgz`, `*.tar.gz`, and `*.json.gz`) and the updated discovery CLI scanned
+  24 text units with `validated=0 candidates=0 marker_hits=0 files=5
+  path_errors=0`. This result is recorded in
+  `test/fixtures/goal_loop/row-corpus-discovery.external-claim.json` as
+  `downloads_tar_gzip_compressed_strict_corpus_validation_sweep`.
+- [근거] `python3 scripts/goal_loop_completion_audit.py
+  /tmp/goal-loop-13266-b367-status-audit.json --structured-id-triage
+  test/fixtures/goal_loop/structured-id-triage.external-claim.json
+  --row-corpus-discovery
+  test/fixtures/goal_loop/row-corpus-discovery.external-claim.json
+  --prompt-closeout-checklist
+  test/fixtures/goal_loop/prompt-closeout-checklist.external-claim.json
+  --source-row-candidate-inventory
+  test/fixtures/goal_loop/source-row-candidate-inventory.external-claim.json
+  --require-complete --format text` checked at 2026-05-06T17:16:07+09:00,
+  confidence High: exits non-zero with two closeout blockers:
+  `strict_row_level_catalog_complete` and
+  `prompt_requirements_closeout_complete`. The strict row evidence directly
+  records the source-row candidate inventory as 132/206 and validates the 5/7
+  source-file coverage split with no unaccounted prompt source files. The 7
+  no-row files carry 897 unstructured requirement markers, but those markers
+  are tracked as non-corpus evidence and do not satisfy the strict row gate.
+  Completion-audit evidence validates all 7 no-row marker buckets have tracking
+  refs and reports 2 unique tracking issue refs (#13265 and #13636). The
+  source-row inventory currentness block is structurally validated too:
+  `future_date_claims_total=7`,
+  `blocking_future_date_claims_total=3`, and
+  `source_currentness_current=false`. The
+  checklist maps all 21 prompt requirements to concrete artifacts and blockers
+  across all 12 prompt source documents: 5 `PASS`, 14 `PARTIAL`, and 2
+  `BLOCKED` requirements, with all 16 non-PASS rows carrying valid GitHub issue
+  tracking refs. The prompt checklist also validates that all `artifact_refs`
+  resolve to repo-local files after optional `#...` anchors are stripped; user
+  local paths, path escapes, and missing artifact files make the checklist
+  unrecorded. Anchored refs must also resolve to anchor text present in the
+  target file.
+- [근거] `python3 scripts/goal_loop_completion_audit.py
+  /tmp/goal-loop-13266-b367-status-audit.json --structured-id-triage
+  test/fixtures/goal_loop/structured-id-triage.external-claim.json
+  --row-corpus-discovery
+  test/fixtures/goal_loop/row-corpus-discovery.external-claim.json
+  --prompt-closeout-checklist
+  test/fixtures/goal_loop/prompt-closeout-checklist.external-claim.json
+  --source-row-candidate-inventory
+  test/fixtures/goal_loop/source-row-candidate-inventory.external-claim.json
+  --require-complete --format text` checked at 2026-05-06T16:03:11+09:00,
+  confidence High: exits non-zero with two closeout blockers:
+  `strict_row_level_catalog_complete` and
+  `prompt_requirements_closeout_complete`. The first blocker proves the real
+  strict 206-row corpus is still missing. The second blocker prevents the
+  prompt objective from being marked complete while the recorded checklist
+  still has 14 `PARTIAL` and 2 `BLOCKED` prompt requirements. The
+  `prompt_to_artifact_checklist_recorded` criterion remains `PASS`, with 21
+  unique requirement IDs, 12 unique issue refs, and no missing or invalid
+  tracking refs; recording the map is separate from satisfying every mapped
+  prompt requirement.
+- [근거] `gh issue view <issue> --repo jeong-sik/masc-mcp --json
+  number,state,title,url,labels` for #13265, #13505, #13609, #13610, #13611,
+  #13636, #13684, #13685, #13686, #13688, #13689, and #13690 checked at
+  2026-05-06T17:25:00+09:00, confidence High: all 12 prompt-checklist
+  tracking issue refs resolve to open,
+  label-free GitHub issues.
 - [근거] `python3 test/test_goal_loop_completion_audit.py` checked at
-  2026-05-06T09:59:29+09:00, confidence High: the completion audit now accepts
-  an optional `--strict-row-corpus` artifact and validates it against the
-  checked contract in `test/fixtures/goal_loop/strict-row-corpus-contract.json`
-  without using that artifact as a proxy for completion. A synthetic valid
-  206-row corpus is recorded as `validated=true`, but the closeout remains
-  `BLOCKED` while Orient still reports only 19 itemized rows; invalid supplied
-  corpora with duplicate IDs or `/Users/...` paths block
-  `strict_row_level_catalog_complete`.
+  2026-05-06T16:03:11+09:00, confidence High: the completion audit accepts
+  optional `--strict-row-corpus` and `--source-row-candidate-inventory`
+  artifacts, validates catalog identity and internal totals, and still does not
+  use either artifact as a proxy for completion. A synthetic valid 206-row
+  corpus is recorded as `validated=true`, while the explicit source-row
+  inventory is recorded as 132/206 with the 5 source files that contain
+  candidates and 7 checked source files that do not. The same inventory now
+  proves that those 7 no-row files contain 897 unstructured requirement markers
+  rather than stable row IDs, and requires those marker buckets to carry valid
+  tracking issue refs; the closeout remains `BLOCKED` while Orient still
+  reports only 19 itemized rows. Invalid supplied
+  corpora or inconsistent source-row inventories block
+  `strict_row_level_catalog_complete`. The same test suite now verifies that a
+  recorded prompt checklist is not itself a completion proxy: the separate
+  `prompt_requirements_closeout_complete` criterion fails while any mapped
+  requirement remains `PARTIAL` or `BLOCKED`, passes only when every mapped
+  requirement is `PASS`, and rejects incomplete rows that lack valid GitHub
+  issue tracking refs. It also rejects prompt checklist rows whose
+  `artifact_refs` are missing, invalid, user-local, or not backed by repo-local
+  files, and rejects anchored refs whose anchor text is absent from the target
+  artifact.
+- [근거] `python3 test/test_observe_goal_loop_logs.py` checked at
+  2026-05-06T14:43:35+09:00, confidence High: the strict-row corpus validator
+  now binds row sources to the audit catalog external-source manifest when a
+  catalog is supplied. A candidate row whose logical `source.path` is not in
+  `external_sources` fails with
+  `source_paths_must_match_catalog_external_sources`, and a candidate row whose
+  `line_refs` exceed the catalog source `line_count` fails with
+  `source_line_refs_must_be_within_catalog_line_count`.
 - [근거] `python3 test/test_observe_goal_loop_logs.py` and
   `python3 test/test_goal_loop_status.py` checked at 2026-05-06T10:15:47+09:00,
   confidence High: Orient now accepts the same optional `--strict-row-corpus`
@@ -210,6 +368,44 @@
 | Slot forced reclaim + credential auto-recovery | **PARTIAL** | `D-EMERGENCY-1` now has linked ACT PRs in `act-map.startup.json`; the current post-ACT event/transition window verifies clean for strict GOAL LOOP signatures. |
 | Full 206-finding Orient engine | **NOT PROVEN** | Orient can now replay the external claim catalog, but the checked artifacts itemize only 19 of the claimed 206 findings. |
 | Full Verify pipeline | **PARTIAL** | `verify.fail.json` intentionally keeps the startup replay red; a separate live post-ACT event/transition replay now passes for the 19 strict itemized IDs. |
+
+## Prompt-to-Artifact Checklist
+
+This checklist is the closeout map from the prompt requirements to concrete
+repo or runtime evidence. A `PASS` here means the requirement has direct
+evidence; `PARTIAL` means a concrete artifact exists but does not cover the
+full prompt requirement; `BLOCKED` means the next required input is outside the
+current repo evidence. The machine-readable mirror is
+`test/fixtures/goal_loop/prompt-closeout-checklist.external-claim.json`, and
+`goal_loop_completion_audit.py --prompt-closeout-checklist` validates that it
+is catalog-bound, covers all 12 prompt sources, has no local path leaks, and
+keeps the strict corpus blocker explicit. The machine checklist mirrors all 21
+rows below and requires every `PARTIAL` or `BLOCKED` row to carry at least one
+GitHub issue tracking ref.
+
+| Prompt requirement | Concrete artifact or command | Status |
+|--------------------|------------------------------|--------|
+| 0-1 provider health skipped across providers/models | `observe.startup.json`, `orient.startup.json`, `NF-1` in `audit-corpus.external-claim.json` | PARTIAL: startup signature is replayed; full 55-model row corpus is absent. |
+| 0-2 keeper credential starvation/archival | `observe.startup.json`, `orient.startup.json`, `NF-2`, linked ACT map entries | PARTIAL: signature and ACT links exist; full keeper recovery SLO is not proven. |
+| 0-3 alive-but-stuck supervisor recovery failure | `NF-3`, #13123/#13126 references, post-ACT Verify metadata | PARTIAL: failure is modeled; runtime recovery success across all keepers is not proven. |
+| 0-4 governance unparseable/lenient fallback | `NF-4`, #13143 references | PARTIAL: visibility exists; strict judge-output failure policy is incomplete. |
+| 0-5 keeper TOML unknown keys | `NF-6`, #13138 references | PARTIAL: health visibility exists; strict schema rejection is not enforced. |
+| 0-6 dashboard metric all-zero | startup fixture, audit catalog examples, Observe metric contract, alerts, Grafana dashboard, validator and tests | PASS for all-zero Observe metric detection coverage. |
+| 0-7 linear autoboot warmup | `NF-5` source reference in catalog boundary | PARTIAL: source claim is tracked; no full row-level replay. |
+| 1 GOAL LOOP Observe -> Orient -> Decide -> Act -> Verify | `scripts/observe_goal_loop_logs.py`, `scripts/orient_goal_loop_logs.py`, `scripts/decide_goal_loop_findings.py`, `scripts/verify_goal_loop_logs.py`, `scripts/goal_loop_status.py`, `scripts/goal_loop_scheduler.py`, scheduler tests and runtime scheduler docs | PASS for scheduler cadence and Verify-fail Observe re-entry coverage. |
+| 2-1 `observe.yml` Prometheus/Grafana metrics | `observe_goal_loop_logs.py`, fixture metrics, audit response, Observe metric contract, alerts, Grafana dashboard, validator and tests | PASS for the required Observe metric/alert/dashboard contract coverage. |
+| 2-2 `observe_logs.py` pattern parser | `scripts/observe_goal_loop_logs.py`, `test/test_observe_goal_loop_logs.py` | PASS for deterministic parser coverage. |
+| 3-1 `orient.ml` audit comparison engine | `scripts/orient_goal_loop_logs.py`, `audit-corpus.external-claim.json`, `structured-id-triage.external-claim.json` | PARTIAL: engine and triage exist; only 19/206 strict rows are itemized. |
+| 3-2 Orient dashboard counts | `scripts/goal_loop_status.py`, `docs/examples/goal-loop-fixture.md` | PARTIAL: CLI JSON/text exists; operator dashboard panel is not wired. |
+| 4-1 priority decision algorithm | `scripts/decide_goal_loop_findings.py`, `test/test_decide_goal_loop_findings.py` | PASS for fixture-based decision ranking. |
+| 4-2 weekly ACT priority queue | `act-map.startup.json`, `known-prs.startup.json`, `validate_goal_loop_act_map.py` | PARTIAL: reference integrity exists; SLA ownership workflow is not automatic. |
+| 5 ACT checklist/PR proof | linked PR references in `act-map.startup.json` plus ACT validation | PARTIAL: known ACTs are mapped; not every still-present row has a row-level ACT because 187 rows are missing. |
+| 6-1 `verify.yml` unit/regression/TLA/log/metric/orient gates | `scripts/verify_goal_loop_logs.py`, `goal_loop_completion_audit.py`, focused tests | PARTIAL: closeout verifier exists; TLA and production metric gates are not fully implemented. |
+| 6-2 Verify PASS/FAIL branch | `verify.fail.json`, post-ACT live Verify snapshot, completion audit criteria | PARTIAL: branch semantics exist; complete corpus Verify is blocked. |
+| 7 GOAL LOOP dashboard | `goal_loop_status.py` aggregate output | PARTIAL: CLI status exists; UI dashboard integration remains open. |
+| 8 anti-stagnation rules | ACT reference guard and completion audit blocker | PARTIAL: reference integrity exists; SLA timers/escalation are not implemented. |
+| 9 expected convergence after week/month | completion audit and #13265 | BLOCKED: no measured convergence claim is valid without the strict corpus and live SLO proof. |
+| Full 206-row strict corpus | `row-corpus-discovery.external-claim.json`, `strict-row-corpus-contract.json`, `--strict-row-corpus` path | BLOCKED: 24 searches/inventories checked; `FULL_ROW_CORPUS_NOT_FOUND`, 19/206 strict rows, 187 strict rows missing. The source-doc explicit-row extractor finds only 132/206 candidate rows across 5 source files, with 7 checked prompt files yielding zero explicit candidates, and cannot close the strict corpus gap. Those 7 no-row files contain 897 unstructured requirement markers that remain non-corpus evidence. Candidate strict rows must also cite catalog external sources and line refs within catalog line counts. |
 
 ## Section-by-Section Audit
 
@@ -331,8 +527,9 @@ broader structured source IDs with 72 not in the strict audit catalog across 12
 uncataloged ID families and 260 source occurrences, 187 missing 206-itemized
 rows, row-corpus discovery evidence showing the checked 47-issue audit
 artifacts and duplicates are not the missing 206-row corpus, an independent
-report that confirms the #13265 replay gap remains open, and 9 itemized rows
-that are not evaluable from the startup log patterns.
+report that confirms the #13265 replay gap remains open, and a 43-archive
+Downloads marker sweep with zero strict-corpus marker hits. There are still 9
+itemized rows that are not evaluable from the startup log patterns.
 `goal_loop_completion_audit.py --require-complete` turns those facts into a
 closeout gate so the objective cannot be marked complete while those blockers
 remain.
@@ -471,7 +668,10 @@ No convergence claim is valid yet. The only safe current statement is:
    not whether the aggregate numbers appear in the supplied documents. The
    checked row-corpus discovery manifest records that the known 47-issue audit
    artifacts and duplicates are not the missing corpus, and that the cascade
-   completion report still lists #13265 as open; this is evidence for the
+   completion report still lists #13265 as open. It also records broader
+   Downloads, runtime, temp, GitHub, local-history, full Downloads CLI,
+   source-doc-only CLI, tar/gzip compressed-container discovery sweeps, and
+   a source-doc explicit-row candidate inventory; these are evidence for the
    blocker, not a substitute for the rows.
 2. Decide whether the source artifacts should be checked in under
    `prompt_corpus/GOAL_LOOP/...` or kept external. Local external validation

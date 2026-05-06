@@ -77,6 +77,13 @@ let line_block label value =
   if value = "" then ""
   else Printf.sprintf "%s: %s\n" label value
 
+let state_block_instruction_text =
+  "For non-direct keeper turns, end every response with a [STATE]...[/STATE] block unless a more specific turn-level output guard says continuity is runtime-managed:\n\
+   DONE: what you accomplished this cycle\n\
+   NEXT: what the next cycle should do\n\
+   Goal: current active goal\n\
+   Decisions: key decisions (semicolon-separated)"
+
 let autonomous_trigger_lines
     ~(decision : Keeper_world_observation.keeper_cycle_decision)
     ~(observation : Keeper_world_observation.world_observation) : string list =
@@ -230,13 +237,8 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
          CLAIM_SUBJECT: short concrete subject or task title\n\
          CLAIM_TASK_ID: task-123 (if applicable)\n\
          EVIDENCE_REFS: task:task-123, tool:keeper_task_done\n\
-         Only emit them for concrete claims you expect the system to audit.\n\
-         \n\
-         End every response with a [STATE]...[/STATE] block:\n\
-         DONE: what you accomplished this cycle\n\
-         NEXT: what the next cycle should do\n\
-         Goal: current active goal\n\
-         Decisions: key decisions (semicolon-separated)";
+         Only emit them for concrete claims you expect the system to audit.\n";
+        state_block_instruction_text;
       ]
   in
   let system_prompt =

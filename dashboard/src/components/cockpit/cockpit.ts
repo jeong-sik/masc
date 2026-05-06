@@ -6,6 +6,10 @@ import {
   type CockpitEntrypoint,
   type CockpitMode,
 } from '../../cockpit-entrypoints'
+import {
+  CognitiveDisclosure,
+  type CognitiveDisclosureItem,
+} from '../common/cognitive-disclosure'
 import { RouteLink } from '../common/route-link'
 import { WorldVisualizer } from '../world-visualizer'
 
@@ -46,6 +50,39 @@ const PLANE_META: Record<CockpitPlane, PlaneMeta> = {
     stat: 'code',
   },
 }
+
+const COCKPIT_COVERED_ROUTES = COCKPIT_ENTRYPOINTS.filter(entry => entry.coverage === 'covered').length
+const COCKPIT_PARTIAL_ROUTES = COCKPIT_ENTRYPOINTS.filter(entry => entry.coverage === 'partial').length
+const COCKPIT_BLOCKED_ROUTES = COCKPIT_ENTRYPOINTS.filter(entry => entry.coverage === 'backend-blocked').length
+
+const COCKPIT_DISCLOSURE_ITEMS: CognitiveDisclosureItem[] = [
+  {
+    level: 'perceive',
+    title: 'Route coverage',
+    summary: `${COCKPIT_ENTRYPOINTS.length} routes across ${PLANE_ORDER.length} planes`,
+    metric: `${COCKPIT_ENTRYPOINTS.length} routes`,
+    defaultOpen: true,
+    detail: html`
+      <span class="font-mono text-3xs text-ok">${COCKPIT_COVERED_ROUTES} covered</span>
+      <span class="mx-2 text-[var(--color-fg-disabled)]">/</span>
+      <span class="font-mono text-3xs text-warn">${COCKPIT_PARTIAL_ROUTES} partial</span>
+      <span class="mx-2 text-[var(--color-fg-disabled)]">/</span>
+      <span class="font-mono text-3xs text-[var(--color-fg-muted)]">${COCKPIT_BLOCKED_ROUTES} backend-blocked</span>
+    `,
+  },
+  {
+    level: 'comprehend',
+    title: 'Plane grouping',
+    summary: PLANE_ORDER.map(plane => PLANE_META[plane].label).join(', '),
+    metric: `${PLANE_ORDER.length} planes`,
+  },
+  {
+    level: 'project',
+    title: 'Route gaps',
+    summary: `${COCKPIT_BLOCKED_ROUTES} backend-blocked, ${COCKPIT_PARTIAL_ROUTES} partial`,
+    metric: `${COCKPIT_BLOCKED_ROUTES + COCKPIT_PARTIAL_ROUTES} gaps`,
+  },
+]
 
 function planeIcon(plane: CockpitPlane): ComponentChildren {
   switch (plane) {
@@ -191,6 +228,12 @@ export function Cockpit() {
                 </div>
               </div>
             </section>
+
+            <${CognitiveDisclosure}
+              title="Progressive Disclosure"
+              items=${COCKPIT_DISCLOSURE_ITEMS}
+              testId="cockpit-disclosure"
+            />
 
             ${PLANE_ORDER.map(plane => html`
               <${PlaneSection}

@@ -64,6 +64,20 @@ val supervision_cohorts :
 (** Sort and chunk registry entries into deterministic supervisor cohorts.
     [cohort_size <= 0] is coerced to 1. *)
 
+val fresh_supervision_cohort_keepers :
+  base_path:string ->
+  supervision_cohort ->
+  Keeper_registry.registry_entry list
+(** Re-read a cohort's keeper entries from the registry by name. Entries that
+    disappeared since the original sweep snapshot are omitted. *)
+
+val iter_supervision_cohorts :
+  ?yield_between:(unit -> unit) ->
+  supervision_cohort list ->
+  f:(supervision_cohort -> unit) ->
+  unit
+(** Iterate cohorts in order and yield only between cohort boundaries. *)
+
 val next_auto_resume_after_sec :
   initial_sec:float -> max_sec:float -> float option -> float option
 (** Compute the next auto-resume backoff delay after an auto-pause.  [None]

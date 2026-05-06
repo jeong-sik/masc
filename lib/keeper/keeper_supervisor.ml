@@ -59,6 +59,25 @@ let supervision_cohorts ?(cohort_size = supervision_cohort_size)
   in
   loop 0 [] sorted
 
+let fresh_supervision_cohort_keepers ~base_path
+    (cohort : supervision_cohort) =
+  List.filter_map
+    (fun (entry : Keeper_registry.registry_entry) ->
+      Keeper_registry.get ~base_path entry.name)
+    cohort.keepers
+
+let iter_supervision_cohorts ?(yield_between = Eio_guard.fair_yield)
+    cohorts ~f =
+  let rec loop = function
+    | [] -> ()
+    | [ cohort ] -> f cohort
+    | cohort :: rest ->
+        f cohort;
+        yield_between ();
+        loop rest
+  in
+  loop cohorts
+
 let should_cleanup_dead ~now ~dead_ttl_sec
     (entry : Keeper_registry.registry_entry) =
   match entry.phase, entry.dead_since_ts with
@@ -1288,14 +1307,16 @@ let sweep_and_recover (ctx : _ context) =
     end
   in
   (* 2-level supervision slice: process the flat registry through stable
-     8-keeper cohorts.  Today this gives the sweep an explicit boundary
-     and a cooperative yield between cohort groups; future work can hang
-     per-cohort restart budgets or fibers from the same helper.  The yield
-     meter still protects unusually large cohorts or non-default sizes. *)
+     8-keeper cohorts.  Each cohort re-reads its entries by name before
+     processing so earlier cohort actions cannot leave later cohorts walking
+     stale registry records.  The iterator yields between cohort groups; the
+     yield meter still protects unusually large cohorts or non-default sizes. *)
   let entry_cohorts = supervision_cohorts entries in
   let sweep_ym = Eio_guard.create_yield_meter () in
-  List.iter
-    (fun cohort ->
+  iter_supervision_cohorts entry_cohorts ~f:(fun cohort ->
+      let cohort_keepers =
+        fresh_supervision_cohort_keepers ~base_path cohort
+      in
       List.iter
         (fun (entry : Keeper_registry.registry_entry) ->
           (match entry.phase with
@@ -1322,9 +1343,7 @@ let sweep_and_recover (ctx : _ context) =
                 | Some (`Crashed msg) ->
                     queue_crashed_entry entry msg));
           Eio_guard.yield_step sweep_ym)
-        cohort.keepers;
-      Eio_guard.fair_yield ())
-    entry_cohorts;
+        cohort_keepers);
   List.iter (fun (entry : Keeper_registry.registry_entry) ->
     Keeper_registry.unregister ~base_path entry.name;
     (* K4c — restart-budget exhaustion: keeper is permanently

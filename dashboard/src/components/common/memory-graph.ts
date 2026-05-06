@@ -145,7 +145,7 @@ export function MemoryGraph({
           : null}
       </figcaption>
       <svg
-        role="img"
+        role=${onSelectNode ? 'group' : 'img'}
         aria-label=${graphAriaLabel(ariaLabel, summary)}
         viewBox="0 0 ${width} ${height}"
         class="w-full h-auto"
@@ -184,7 +184,7 @@ export function MemoryGraph({
             <g
               key=${node.id}
               transform="translate(${node.x}, ${node.y})"
-              class=${onSelectNode ? 'cursor-pointer outline-none' : ''}
+              class=${onSelectNode ? 'cursor-pointer' : ''}
               onClick=${() => onSelectNode?.(node.id)}
               onKeyDown=${(event: KeyboardEvent) => handleNodeKeyDown(event, node.id, onSelectNode)}
               role=${onSelectNode ? 'button' : undefined}

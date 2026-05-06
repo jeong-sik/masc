@@ -177,11 +177,14 @@ describe('MemoryGraph', () => {
       container,
     )
 
+    const svg = container.querySelector('svg')
+    expect(svg?.getAttribute('role')).toBe('group')
     const node = container.querySelector('[data-memory-graph-node="a"]')
     expect(node?.getAttribute('role')).toBe('button')
     expect(node?.getAttribute('tabindex')).toBe('0')
     expect(node?.getAttribute('aria-label')).toBe('Alpha, 1 connection')
     expect(node?.getAttribute('data-memory-graph-degree')).toBe('1')
+    expect(node?.getAttribute('class')).not.toContain('outline-none')
   })
 
   it('respects node colors', () => {

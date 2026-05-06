@@ -776,7 +776,13 @@ def tool_call_paths(base_path: Path) -> list[Path]:
     calls_dir = base_path / ".masc" / "tool_calls"
     if not calls_dir.exists():
         return []
-    return sorted(path for path in calls_dir.rglob("*.jsonl") if path.is_file())
+    candidates: list[tuple[int, str, Path]] = []
+    for path in calls_dir.rglob("*.jsonl"):
+        if not path.is_file():
+            continue
+        day_key = pr_action_metric_day_key(path)
+        candidates.append((day_key or -1, str(path), path))
+    return [path for _, _, path in sorted(candidates, reverse=True)]
 
 
 def scan_keeper_evidence(

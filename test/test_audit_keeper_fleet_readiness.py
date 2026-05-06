@@ -687,6 +687,102 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         )
         self.assertEqual(docker_evidence, evidence)
 
+    def test_scan_keeper_evidence_reads_newest_tool_calls_first(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            old_calls_dir = root / ".masc" / "tool_calls" / "2026-05"
+            new_calls_dir = root / ".masc" / "tool_calls" / "2026-06"
+            old_calls_dir.mkdir(parents=True)
+            new_calls_dir.mkdir(parents=True)
+
+            old_rows = [
+                {
+                    "ts": 10.0,
+                    "keeper": "alpha",
+                    "tool": "keeper_bash",
+                    "input": {"cmd": "git push -u origin keeper/old"},
+                    "output": json.dumps({"ok": True, "via": "docker"}),
+                    "success": True,
+                },
+                {
+                    "ts": 20.0,
+                    "keeper": "alpha",
+                    "tool": "keeper_shell",
+                    "input": {"op": "gh", "cmd": "pr create --draft"},
+                    "output": json.dumps({"ok": True, "via": "docker"}),
+                    "success": True,
+                },
+                {
+                    "ts": 30.0,
+                    "keeper": "alpha",
+                    "tool": "keeper_shell",
+                    "input": {"op": "gh", "cmd": "pr review 1 --approve"},
+                    "output": json.dumps(
+                        {
+                            "ok": True,
+                            "command": "gh pr review 1 --approve",
+                            "via": "docker",
+                        }
+                    ),
+                    "success": True,
+                },
+            ]
+            new_rows = [
+                {
+                    "ts": 70.0,
+                    "keeper": "alpha",
+                    "tool": "keeper_bash",
+                    "input": {"cmd": "git push -u origin keeper/new"},
+                    "output": json.dumps({"ok": True, "via": "docker"}),
+                    "success": True,
+                },
+                {
+                    "ts": 80.0,
+                    "keeper": "alpha",
+                    "tool": "keeper_shell",
+                    "input": {"op": "gh", "cmd": "pr create --draft"},
+                    "output": json.dumps({"ok": True, "via": "docker"}),
+                    "success": True,
+                },
+                {
+                    "ts": 90.0,
+                    "keeper": "alpha",
+                    "tool": "keeper_shell",
+                    "input": {"op": "gh", "cmd": "pr review 2 --approve"},
+                    "output": json.dumps(
+                        {
+                            "ok": True,
+                            "command": "gh pr review 2 --approve",
+                            "via": "docker",
+                        }
+                    ),
+                    "success": True,
+                },
+            ]
+            (old_calls_dir / "31.jsonl").write_text(
+                "".join(json.dumps(row) + "\n" for row in old_rows),
+                encoding="utf-8",
+            )
+            (new_calls_dir / "01.jsonl").write_text(
+                "".join(json.dumps(row) + "\n" for row in new_rows),
+                encoding="utf-8",
+            )
+
+            latest_ts, _tools, evidence, docker_evidence = audit.scan_keeper_evidence(
+                root, "alpha"
+            )
+
+        self.assertEqual(latest_ts, 90.0)
+        self.assertEqual(
+            evidence,
+            {
+                "git_push:keeper_bash",
+                "pr_create:keeper_shell",
+                "pr_approve:keeper_shell",
+            },
+        )
+        self.assertEqual(docker_evidence, evidence)
+
 
 if __name__ == "__main__":
     unittest.main()

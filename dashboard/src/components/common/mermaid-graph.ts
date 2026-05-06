@@ -1,18 +1,13 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { EmptyState } from './empty-state'
+import { loadMermaid, type MermaidApi } from './mermaid-loader'
 
-type MermaidApi = typeof import('mermaid')['default']
-
-let mermaidPromise: Promise<MermaidApi> | null = null
 let mermaidConfigured = false
 let mermaidRenderCount = 0
 
 async function getMermaid(): Promise<MermaidApi> {
-  if (!mermaidPromise) {
-    mermaidPromise = import('mermaid').then(module => module.default)
-  }
-  const mermaid = await mermaidPromise
+  const mermaid = await loadMermaid()
   if (mermaidConfigured) return mermaid
   mermaid.initialize({
     startOnLoad: false,

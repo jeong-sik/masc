@@ -389,11 +389,35 @@ let test_workspace_log_value_sanitizer_bounds_controlled_text () =
     W.For_testing.sanitize_log_value ~max_bytes:12
       "alpha\nbeta\radmin\ttrail-with-extra"
   in
+  Alcotest.(check bool) "within requested byte budget" true
+    (String.length sanitized <= 12);
   Alcotest.(check bool) "newlines removed" false (contains "\n" sanitized);
   Alcotest.(check bool) "carriage returns removed" false
     (contains "\r" sanitized);
   Alcotest.(check bool) "tabs removed" false (contains "\t" sanitized);
   Alcotest.(check bool) "bounded with suffix" true (contains "..." sanitized)
+
+let test_workspace_failure_observer_bounds_site_label () =
+  let raw_site = "unit\n" ^ String.make 100 'x' in
+  let site = W.For_testing.sanitize_log_value ~max_bytes:64 raw_site in
+  let labels = [("site", site)] in
+  let before =
+    P.metric_value_or_zero P.metric_workspace_route_failures ~labels ()
+  in
+  W.For_testing.observe_workspace_route_failure
+    ~site:raw_site
+    ~path:"/tmp/missing"
+    (Failure "synthetic workspace failure");
+  let after =
+    P.metric_value_or_zero P.metric_workspace_route_failures ~labels ()
+  in
+  Alcotest.(check bool) "site label has no newline" false
+    (contains "\n" site);
+  Alcotest.(check bool) "site label is bounded" true
+    (String.length site <= 64);
+  Alcotest.(check (float 0.0001))
+    "workspace route failure counted under sanitized site"
+    (before +. 1.0) after
 
 let test_workspace_failure_observer_reraises_cancelled () =
   let raised = ref false in
@@ -509,6 +533,8 @@ let () =
             test_workspace_failure_observer_increments_metric
         ; Alcotest.test_case "log sanitizer bounds controlled text" `Quick
             test_workspace_log_value_sanitizer_bounds_controlled_text
+        ; Alcotest.test_case "failure observer bounds site label" `Quick
+            test_workspace_failure_observer_bounds_site_label
         ; Alcotest.test_case "failure observer re-raises cancel" `Quick
             test_workspace_failure_observer_reraises_cancelled
         ] )

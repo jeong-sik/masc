@@ -14,7 +14,7 @@ let sanitize_log_value ?(max_bytes = 240) s =
         if code < 0x20 || code = 0x7f then '_' else c)
       s
   in
-  String_util.utf8_safe ~max_bytes:(max_bytes + 3) ~suffix:"..."
+  String_util.utf8_safe ~max_bytes ~suffix:"..."
     without_controls
   |> String_util.to_string
 
@@ -22,11 +22,12 @@ let observe_workspace_route_failure ~site ~path exn =
   match exn with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
+      let site = sanitize_log_value ~max_bytes:64 site in
       Prometheus.inc_counter Prometheus.metric_workspace_route_failures
         ~labels:[("site", site)]
         ();
       Log.Server.warn "workspace route %s failed path=%s err=%s"
-        (sanitize_log_value ~max_bytes:64 site)
+        site
         (sanitize_log_value ~max_bytes:180 path)
         (sanitize_log_value (Printexc.to_string exn))
 

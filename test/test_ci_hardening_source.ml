@@ -1160,6 +1160,13 @@ let test_keeper_required_tool_contracts () =
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
        "via=docker, route_via=docker, via=brokered, or route_via=brokered")
   ;
+  check bool "docker PR lifecycle branch matches worktree tool contract" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       {|printf 'keeper-%s-agent/%s' "$keeper" "$RUN_ID"|}
+     && file_contains_pattern
+          "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+          "`keeper-<keeper>-agent/<run_id>`");
   check bool "keeper msg schema documents required_tool_names alias" true
     (file_contains_pattern "lib/keeper/keeper_schema.ml"
        "required_tool_names")

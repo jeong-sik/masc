@@ -17,7 +17,7 @@ Autoresearch/research tools are enabled through keeper tool-surface configuratio
 such as preset selection, shard assignment, and tool access, not through a
 `soul_profile` value.
 
-## Tool Shards (keeper_model_tools: 26 tools total)
+## Tool Shards
 
 | Shard | Tools | Count | Removable |
 |-------|-------|-------|-----------|
@@ -27,20 +27,20 @@ such as preset selection, shard assignment, and tool access, not through a
 | **shell** | `keeper_shell` | 1 | Yes |
 | **library** | `keeper_library_{search,read}` | 2 | Yes |
 | **taskboard** | `keeper_tasks_{list,audit}`, `keeper_task_{force_release,force_done,claim,done}`, `keeper_broadcast` | 7 | Yes |
-| **governance** | `masc_{cases,case_status,ruling_status,governance_status,governance_feed,case_brief_submit,petition_submit}` | 7 | Yes |
 | **voice** | `keeper_voice_{speak,agent,sessions,session_start,session_end}` | 5 | Yes |
 | **weather** | `keeper_weather_note` | 1 | Yes |
 | **coding** | `keeper_{bash,github}`, `masc_{worktree_create,worktree_list,code_search,code_symbols,code_read}` | 7 | Yes |
 
 Notes:
 - `voice` and `weather` shards still exist, but they are no longer part of the default keeper surface.
+- The old governance petition/case tools were retired from the callable tool surface. Governance-style participation now uses board discussion/vote paths plus dashboard governance/audit read models.
 - `keeper_fs_edit` remains a legacy internal tool but is intentionally excluded from default keeper exposure.
 - `keeper_shell` is structured-only (`pwd`, `ls`, `cat`, `rg`, `find`, `head`, `tail`, `wc`, `tree`, `git_status`, `git_log`, `git_diff`, `git_worktree`, `git_clone`, `gh`). Raw command execution lives in `Bash`/`keeper_bash`.
 - Code mutation uses `masc_code_{write,edit,delete,shell,git}` in addition to the `coding` shard above.
 
 ## Tool Surface
 
-All keepers receive: base + board + fs + shell + library + taskboard + governance + coding shards.
+All keepers receive: base + board + fs + shell + library + taskboard + coding shards.
 Voice tools are added when `policy_voice_enabled = true`.
 `write_done = true` returns empty tool list (session terminated).
 
@@ -91,8 +91,8 @@ BoardActivity, IdleTimeout, MetricsAnomaly, StrategicReview.
 |----------|---------------|
 | 의견 내기 / 토론 참여 | `keeper_board_post`, `keeper_board_comment` |
 | 최신 정보 / 외부 자료 확인 | `masc_web_search` (also exposed to model clients as `WebSearch`) |
-| 찬성 / 반대 신호 | `keeper_board_vote`, `masc_case_brief_submit` (`stance = support|oppose|neutral`) |
-| 거버넌스 의견 제출 | `masc_petition_submit`, `masc_case_brief_submit`, `masc_case_status`, `masc_governance_feed` |
+| 찬성 / 반대 신호 | `keeper_board_vote` |
+| 거버넌스 의견 제출 | retired as keeper tools; use board discussion/vote paths and governance dashboard read models |
 | 코드 작성 / 수정 | `masc_worktree_create` -> `masc_code_write` / `masc_code_edit` / `masc_code_git` |
 | 테스트 실행 | `masc_code_shell` (worktree `cwd` required) |
 | GitHub PR / 이슈 작업 | `keeper_preflight_check`, `keeper_pr_list`, `keeper_pr_status`, `keeper_pr_create` (draft-only), plus `keeper_shell op=gh` when repo context is bound |

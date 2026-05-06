@@ -62,6 +62,15 @@ let tool_features =
         "Exercise library search/read from an autonomous keeper turn.";
     };
     {
+      id = "web_search_tools";
+      label = "Web search tools";
+      required_tools = [
+        "masc_web_search";
+      ];
+      next_action =
+        "Run a current-information keeper search and verify successful masc_web_search evidence.";
+    };
+    {
       id = "taskboard_tools";
       label = "Taskboard tools";
       required_tools = [
@@ -77,28 +86,27 @@ let tool_features =
         "Run a claim-to-verification task lifecycle and prove each taskboard tool succeeds.";
     };
     {
-      id = "governance_tools";
-      label = "Governance tools";
+      id = "approval_tools";
+      label = "Approval read tool";
       required_tools = [
-        "masc_governance_status";
-        "masc_governance_feed";
-        "masc_case_status";
-        "masc_case_brief_submit";
-        "masc_petition_submit";
+        "masc_approval_get";
       ];
       next_action =
-        "Run a governance petition/status/readback workflow and capture tool-call evidence.";
+        "Exercise approval readback through the current public keeper/MCP tool surface.";
     };
     {
-      id = "approval_tools";
-      label = "Approval tools";
+      id = "goal_tools";
+      label = "Goal and planning tools";
       required_tools = [
-        "masc_approval_pending";
-        "masc_approval_get";
-        "masc_approval_resolve";
+        "masc_goal_list";
+        "masc_goal_upsert";
+        "masc_goal_review";
+        "masc_goal_transition";
+        "masc_goal_verify";
+        "masc_coordination_fsm_snapshot";
       ];
       next_action =
-        "Create an approval request and prove pending/get/resolve paths through keeper tools.";
+        "Run a goal lifecycle and prove list/upsert/review/transition/verify paths.";
     };
     {
       id = "coding_tools";

@@ -138,6 +138,16 @@ let feature_status id json =
   |> Safe_ops.json_string_opt "status"
   |> Option.value ~default:"missing"
 
+let feature_ids json =
+  Yojson.Safe.Util.(json |> member "features" |> to_list)
+  |> List.filter_map (Safe_ops.json_string_opt "id")
+
+let required_tools id json =
+  feature id json
+  |> Yojson.Safe.Util.member "required_tools"
+  |> Yojson.Safe.Util.to_list
+  |> List.filter_map Yojson.Safe.Util.to_string_option
+
 let test_json_reports_feature_gaps () =
   with_store @@ fun config ->
   ignore
@@ -177,7 +187,12 @@ let test_json_reports_feature_gaps () =
   check string "board tools are fully proved" "pass"
     (feature_status "board_tools" json);
   check string "coding tools are partial/weak proof" "warn"
-    (feature_status "coding_tools" json)
+    (feature_status "coding_tools" json);
+  check bool "retired governance tools are not required" false
+    (List.mem "governance_tools" (feature_ids json));
+  check (list string) "approval proof follows current public surface"
+    [ "masc_approval_get" ]
+    (required_tools "approval_tools" json)
 
 let test_decision_log_counts_as_scheduled_proof () =
   with_store @@ fun config ->

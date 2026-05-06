@@ -829,6 +829,51 @@ let test_keeper_sandbox_credential_volume_contracts () =
     (file_contains_pattern "lib/keeper/host_config_provider.ml"
        {|let cred_root = "/tmp/keeper-creds"|})
 
+let test_keeper_docker_multikeeper_isolation_contracts () =
+  check bool "multi-keeper docker smoke script exists" true
+    (Sys.file_exists
+       (source_path "scripts/keeper-docker-multikeeper-isolation-smoke.sh"));
+  check bool "smoke mounts credential projection read-only" true
+    (file_contains_pattern
+       "scripts/keeper-docker-multikeeper-isolation-smoke.sh"
+       {|:/tmp/keeper-creds/.config/gh:ro|});
+  check bool "smoke probes credential projection write failure" true
+    (file_contains_pattern
+       "scripts/keeper-docker-multikeeper-isolation-smoke.sh"
+       "credential projection is writable");
+  check bool "smoke creates keeper credential sentinels" true
+    (file_contains_pattern
+       "scripts/keeper-docker-multikeeper-isolation-smoke.sh"
+       "keeper-a-gh-only"
+     && file_contains_pattern
+          "scripts/keeper-docker-multikeeper-isolation-smoke.sh"
+          "keeper-b-gh-only");
+  check bool "smoke rejects sibling credential sentinel" true
+    (file_contains_pattern
+       "scripts/keeper-docker-multikeeper-isolation-smoke.sh"
+       {|test ! -e "/tmp/keeper-creds/.config/gh/${OTHER_KEEPER}.txt"|});
+  check bool "smoke covers two keepers" true
+    (file_contains_pattern
+       "scripts/keeper-docker-multikeeper-isolation-smoke.sh"
+       "run_keeper keeper-a keeper-b"
+     && file_contains_pattern
+          "scripts/keeper-docker-multikeeper-isolation-smoke.sh"
+          "run_keeper keeper-b keeper-a");
+  check bool "unit test asserts selected keeper identity only" true
+    (file_contains_pattern "test/test_keeper_shell_docker_route.ml"
+       "test_git_creds_mounts_only_selected_keeper_identity");
+  check bool "unit test rejects sibling keeper credential mount" true
+    (file_contains_pattern "test/test_keeper_shell_docker_route.ml"
+       "sibling keeper bundle not mounted");
+  check bool "unit test rejects sibling keeper playground mount" true
+    (file_contains_pattern "test/test_keeper_shell_docker_route.ml"
+       "does not mount keeper B playground");
+  check bool "rootless and userns checks remain explicit" true
+    (file_contains_pattern "lib/keeper/keeper_sandbox_runtime.ml"
+       "sandbox runtime requires Docker rootless mode"
+     && file_contains_pattern "lib/keeper/keeper_sandbox_runtime.ml"
+          "sandbox runtime requires Docker userns support")
+
 let test_board_flusher_start_retry_contracts () =
   check bool "board flusher start has bounded CAS retry count" true
     (file_contains_pattern "lib/board_dispatch.ml"
@@ -1618,6 +1663,8 @@ let () =
              test_keeper_list_cache_atomic_contracts;
            test_case "keeper sandbox credential volume contracts" `Quick
              test_keeper_sandbox_credential_volume_contracts;
+           test_case "keeper docker multi-keeper isolation contracts" `Quick
+             test_keeper_docker_multikeeper_isolation_contracts;
            test_case "board flusher start retry contracts" `Quick
              test_board_flusher_start_retry_contracts;
            test_case "docker config storage contracts" `Quick

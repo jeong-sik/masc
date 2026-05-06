@@ -267,9 +267,11 @@ describe('EventStream', () => {
 
   it('scores semantic gravity from the current focus', () => {
     const score = streamEventSemanticGravityScore(baseEvents[0]!, ['agent-a', 'started'])
+    const phraseScore = streamEventSemanticGravityScore(baseEvents[0]!, 'agent-a started')
     const unrelated = streamEventSemanticGravityScore(baseEvents[2]!, ['agent-a', 'started'])
 
     expect(score).toBe(0.85)
+    expect(phraseScore).toBe(score)
     expect(unrelated).toBe(0)
   })
 
@@ -352,6 +354,13 @@ describe('EventStream', () => {
 
     expect(rows).toHaveLength(1)
     expect(rows[0]?.key).toBe('source:test')
+  })
+
+  it('scopes intentional projection summary to the visible event window', () => {
+    expect(summarizeEventStream(projectionEvents, 4, DEFAULT_TEMPORAL_SYNC_WINDOW_MS, 'editor')).toMatchObject({
+      intentProjectionCount: 2,
+      topIntentProjectionProbability: 0.5,
+    })
   })
 
   it('treats maxItems zero as an empty visible window', () => {

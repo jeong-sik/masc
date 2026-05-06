@@ -4530,6 +4530,17 @@ let required_tool_contract_violation_error () =
            "required tool contract unsatisfied: tool_choice requested tool use, but the model returned no ToolUse block";
        })
 
+let required_specific_tool_contract_violation_error () =
+  Agent_sdk.Error.Agent
+    (CompletionContractViolation
+       {
+         contract =
+           Agent_sdk.Completion_contract_id.Require_specific_tool
+             "keeper_pr_review_comment";
+         reason =
+           "required tool contract unsatisfied: tool_choice requested tool 'keeper_pr_review_comment', but the model returned no ToolUse block";
+       })
+
 let expect_degraded_retry label expected_cascade expected_reason = function
   | Some (retry : EC.degraded_retry) ->
       check string (label ^ " cascade") expected_cascade retry.next_cascade;
@@ -5622,6 +5633,11 @@ let test_required_tool_contract_violation_detected () =
   check bool "tool-choice contract violation detected" true
     (EC.is_required_tool_contract_violation err)
 
+let test_required_specific_tool_contract_violation_detected () =
+  let err = required_specific_tool_contract_violation_error () in
+  check bool "specific tool-choice contract violation detected" true
+    (EC.is_required_tool_contract_violation err)
+
 let test_required_tool_contract_violation_ignores_legacy_internal_error () =
   let err =
     Agent_sdk.Error.Internal
@@ -5646,6 +5662,14 @@ let test_should_cap_rotation_does_not_fire_on_first_attempt () =
 let test_should_cap_rotation_fires_after_one_rotation () =
   let err = required_tool_contract_violation_error () in
   check bool "cap fires when one rotation has already been attempted" true
+    (EC.should_cap_rotation_for_contract_violation
+       ~attempted_cascades:[ "strict_exec"; KC.default_cascade_name ]
+       ~fallback_not_yet_tried:false
+       err)
+
+let test_should_cap_rotation_fires_for_specific_tool_after_one_rotation () =
+  let err = required_specific_tool_contract_violation_error () in
+  check bool "cap fires for specific-tool contract after one rotation" true
     (EC.should_cap_rotation_for_contract_violation
        ~attempted_cascades:[ "strict_exec"; KC.default_cascade_name ]
        ~fallback_not_yet_tried:false
@@ -8420,12 +8444,16 @@ let () =
             test_auto_recoverable_turn_error_includes_wrapped_max_turns;
           test_case "required tool contract violation detected from structured error" `Quick
             test_required_tool_contract_violation_detected;
+          test_case "specific required tool contract violation detected from structured error" `Quick
+            test_required_specific_tool_contract_violation_detected;
           test_case "legacy internal contract violation is ignored" `Quick
             test_required_tool_contract_violation_ignores_legacy_internal_error;
           test_case "rotation cap does not fire before first rotation" `Quick
             test_should_cap_rotation_does_not_fire_on_first_attempt;
           test_case "rotation cap fires after one rotation" `Quick
             test_should_cap_rotation_fires_after_one_rotation;
+          test_case "rotation cap fires for specific tool after one rotation" `Quick
+            test_should_cap_rotation_fires_for_specific_tool_after_one_rotation;
           test_case "rotation cap suppressed while fallback available" `Quick
             test_should_cap_rotation_suppressed_while_fallback_available;
           test_case "rotation cap ignores non-contract-violation errors" `Quick

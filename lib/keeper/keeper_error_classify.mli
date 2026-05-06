@@ -20,8 +20,9 @@ val is_structural_oas_timeout_message : string -> bool
     of requiring manual reconcile. *)
 val is_server_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
 
-(** [true] when the provider/tooling violated a required tool-use contract
-    by returning text/no-op where a ToolUse block was required. *)
+(** [true] when the provider/tooling violated a required tool-use contract,
+    either for any ToolUse block or for one specific ToolUse block, by
+    returning text/no-op where that ToolUse block was required. *)
 val is_required_tool_contract_violation : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] when the keeper should preserve liveness and skip consecutive

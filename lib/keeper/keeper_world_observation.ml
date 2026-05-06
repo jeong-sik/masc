@@ -264,6 +264,7 @@ let claim_goal_scope_filter ?agent_tool_names ~(config : Coord.config)
     Keeper_runtime_contract.resolve_claim_goal_scope
       ?agent_tool_names
       ~allow_empty_goal_scope_fallback:false
+      ~allow_auto_goal_scope_fallback:true
       ~config
       ~meta
       ()

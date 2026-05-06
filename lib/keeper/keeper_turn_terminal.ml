@@ -115,7 +115,8 @@ let of_legacy_error_text raw_error =
     make ~source:"legacy_error_text" "oas_timeout_budget"
   else if contains_ci trimmed "Turn wall-clock timeout" then
     make ~source:"legacy_error_text" "turn_wall_clock_timeout"
-  else if contains_ci trimmed "require_tool_use" then
+  else if contains_ci trimmed "require_tool_use"
+          || contains_ci trimmed "require_specific_tool" then
     make ~source:"legacy_error_text" (contract_code_from_error_text trimmed)
   else
     make ~source:"legacy_error_text" "unknown_error"
@@ -134,7 +135,12 @@ let of_failure ?(post_commit_ambiguous = false) ?(tool_call_count = 0)
         (match err with
          | Agent_sdk.Error.Agent
              (Agent_sdk.Error.CompletionContractViolation
-                { contract = Agent_sdk.Completion_contract_id.Require_tool_use; _ }) ->
+                { contract = Agent_sdk.Completion_contract_id.Require_tool_use; _ })
+         | Agent_sdk.Error.Agent
+             (Agent_sdk.Error.CompletionContractViolation
+                { contract =
+                    Agent_sdk.Completion_contract_id.Require_specific_tool _;
+                  _ }) ->
              let code =
                if tool_call_count <= 0 then
                  contract_code_from_error_text raw_error

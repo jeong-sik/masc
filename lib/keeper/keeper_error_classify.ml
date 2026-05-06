@@ -91,8 +91,13 @@ let is_server_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
 
 let is_required_tool_contract_violation (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.CompletionContractViolation { contract; _ }) ->
-      contract = Agent_sdk.Completion_contract_id.Require_tool_use
+  | Agent_sdk.Error.Agent
+      (Agent_sdk.Error.CompletionContractViolation
+         { contract = Agent_sdk.Completion_contract_id.Require_tool_use; _ })
+  | Agent_sdk.Error.Agent
+      (Agent_sdk.Error.CompletionContractViolation
+         { contract = Agent_sdk.Completion_contract_id.Require_specific_tool _; _ }) ->
+      true
   | _ -> false
 
 let is_auto_recoverable_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =

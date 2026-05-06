@@ -19,6 +19,7 @@ type keeper_snapshot = {
 }
 
 module Decision = Dashboard_keeper_decision_log_proof
+module Failure = Dashboard_keeper_tool_failure_proof
 
 let status_to_string = function
   | Pass -> "pass"
@@ -76,12 +77,15 @@ let tool_stats_by_name (summary : Yojson.Safe.t) : (string, tool_stat) Hashtbl.t
       Hashtbl.replace table name stat);
   table
 
-let tool_stat_json stat =
-  `Assoc [
+let tool_stat_json ?failure_classes stat =
+  let fields = [
     ("name", `String stat.name);
     ("calls", `Int stat.calls);
     ("success_pct", `Float stat.success_pct);
-  ]
+  ] in
+  match failure_classes with
+  | Some classes -> `Assoc (fields @ [("failure_classes", classes)])
+  | None -> `Assoc fields
 
 let uniq_sorted names =
   names
@@ -411,6 +415,7 @@ let scheduled_proactive_feature ~config snapshots =
 
 let tool_feature_json
       ~success_threshold_pct
+      failure_table
       tool_stats
       (spec : Dashboard_keeper_feature_catalog.feature_spec)
   =
@@ -449,7 +454,14 @@ let tool_feature_json
           (List.length missing)));
     ("required_tools", json_string_list spec.required_tools);
     ("passing_tools", `List (List.map tool_stat_json passing));
-    ("weak_tools", `List (List.map tool_stat_json weak));
+    ( "weak_tools",
+      `List
+        (List.map
+           (fun stat ->
+              tool_stat_json
+                ~failure_classes:(Failure.classes_json failure_table stat.name)
+                stat)
+           weak) );
     ("missing_tools", json_string_list missing);
     ("keeper_evidence", `Null);
     ("evidence_refs", `List [route_evidence "/api/v1/dashboard/tool-quality"]);
@@ -482,6 +494,7 @@ let json
   in
   let tool_summary = Dashboard_http_tool_quality.aggregate ~n ?window_hours () in
   let tool_stats = tool_stats_by_name tool_summary in
+  let failure_table = Failure.by_tool ~n ?window_hours () in
   let snapshots = load_keeper_snapshots config in
   let features =
     [
@@ -492,7 +505,7 @@ let json
       scheduled_proactive_feature ~config snapshots;
     ]
     @ List.map
-        (tool_feature_json ~success_threshold_pct tool_stats)
+        (tool_feature_json ~success_threshold_pct failure_table tool_stats)
         Dashboard_keeper_feature_catalog.tool_features
   in
   let statuses = List.map status_of_feature_json features in

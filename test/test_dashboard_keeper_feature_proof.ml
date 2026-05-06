@@ -172,6 +172,13 @@ let required_tools id json =
   |> Yojson.Safe.Util.to_list
   |> List.filter_map Yojson.Safe.Util.to_string_option
 
+let weak_tool tool_name id json =
+  feature id json
+  |> Yojson.Safe.Util.member "weak_tools"
+  |> Yojson.Safe.Util.to_list
+  |> List.find_opt (fun item ->
+    Safe_ops.json_string_opt "name" item = Some tool_name)
+
 let test_json_reports_feature_gaps () =
   with_store @@ fun config ->
   ignore
@@ -218,7 +225,18 @@ let test_json_reports_feature_gaps () =
     (List.mem "governance_tools" (feature_ids json));
   check (list string) "approval proof follows current public surface"
     [ "masc_approval_get" ]
-    (required_tools "approval_tools" json)
+    (required_tools "approval_tools" json);
+  let worktree_failure_classes =
+    match weak_tool "masc_worktree_create" "coding_tools" json with
+    | Some row ->
+      Yojson.Safe.Util.(
+        row |> member "failure_classes" |> to_list)
+    | None -> []
+  in
+  check bool "weak tool includes failure class evidence" true
+    (List.exists
+       (fun row -> Safe_ops.json_string_opt "category" row = Some "fixture_failure")
+       worktree_failure_classes)
 
 let test_decision_log_counts_as_scheduled_proof () =
   with_store @@ fun config ->

@@ -741,6 +741,7 @@ val metric_fsm_guard_violation : string
     - [on_tool_executed]
     - [on_error]
     - [on_tool_error]
+    - [keeper_lifecycle_hook]
 
     Cardinality is bounded by fleet size times this callback vocabulary. *)
 val metric_keeper_lifecycle_callback_failures : string

@@ -223,6 +223,11 @@ let check_active_goal_scope_no_fallback json ~goal_id =
   check (option string) "fallback reason absent" None
     Yojson.Safe.Util.(scope |> member "fallback_reason" |> to_string_option)
 
+let write_keeper_meta_exn config meta =
+  match Keeper_types.write_meta ~force:true config meta with
+  | Ok () -> ()
+  | Error msg -> fail msg
+
 let with_registered_keeper config meta f =
   Keeper_registry.unregister ~base_path:config.Coord.base_path meta.Keeper_types.name;
   ignore
@@ -562,6 +567,60 @@ let test_claim_respects_active_goal_ids () =
         Yojson.Safe.Util.(
           json |> member "claimed_task" |> member "goal_id" |> to_string)
     | None -> fail "expected a claimed task")
+
+let test_claim_reloads_goal_scope_after_stale_observation () =
+  with_room (fun config ->
+    let observed_goal, _ =
+      match Goal_store.upsert_goal config ~title:"Observed scope" () with
+      | Ok payload -> payload
+      | Error msg -> fail msg
+    in
+    let current_goal, _ =
+      match Goal_store.upsert_goal config ~title:"Current scope" () with
+      | Ok payload -> payload
+      | Error msg -> fail msg
+    in
+    let stale_meta = make_goal_scoped_meta [ observed_goal.id ] in
+    let latest_meta = { stale_meta with active_goal_ids = [ current_goal.id ] } in
+    with_registered_keeper config stale_meta (fun () ->
+      write_keeper_meta_exn config stale_meta;
+      let _ =
+        Coord_task.add_task ~goal_id:observed_goal.id config
+          ~title:"Observed-scope task" ~priority:1 ~description:"old view"
+      in
+      let _ =
+        Coord_task.add_task ~goal_id:current_goal.id config
+          ~title:"Current-scope task" ~priority:5 ~description:"latest view"
+      in
+      let observed =
+        Keeper_world_observation.observe
+          ~allowed_tool_names:
+            (Some (Keeper_tool_policy.keeper_allowed_tool_names stale_meta))
+          ~pending_board_events:(Some [])
+          ~config
+          ~meta:stale_meta
+      in
+      check int "stale observation claimable count" 1
+        observed.claimable_task_count;
+      write_keeper_meta_exn config latest_meta;
+      let result = call_tool config stale_meta "keeper_task_claim" (`Assoc []) in
+      let json = parse_json result in
+      let scope = Yojson.Safe.Util.member "claim_scope" json in
+      check string "claim scope source" "latest_keeper_meta_at_claim"
+        Yojson.Safe.Util.(scope |> member "source" |> to_string);
+      check_effective_goal_ids "latest effective goal ids" scope
+        [ current_goal.id ];
+      check (list string) "latest active goal ids" [ current_goal.id ]
+        Yojson.Safe.Util.(
+          scope |> member "active_goal_ids" |> to_list |> List.map to_string);
+      check string "matched current goal" current_goal.id
+        Yojson.Safe.Util.(scope |> member "matched_goal_id" |> to_string);
+      check string "claimed current-scope task" "Current-scope task"
+        Yojson.Safe.Util.(
+          json |> member "claimed_task" |> member "title" |> to_string);
+      let stale_task = task_by_title config "Observed-scope task" in
+      check (option string) "stale observed task not claimed" None
+        (Masc_domain.task_assignee_of_status stale_task.task_status)))
 
 let test_claim_does_not_cross_goal_when_auto_goal_scope_empty () =
   with_room (fun config ->
@@ -1322,6 +1381,8 @@ let () =
         test_claim_prefers_oldest_same_priority_task;
       test_case "claim respects active_goal_ids" `Quick
         test_claim_respects_active_goal_ids;
+      test_case "claim reloads goal scope after stale observation" `Quick
+        test_claim_reloads_goal_scope_after_stale_observation;
       test_case "claim does not cross-goal when auto goal scope is empty" `Quick
         test_claim_does_not_cross_goal_when_auto_goal_scope_empty;
       test_case "claim does not cross-goal when persisted goal scope is empty"

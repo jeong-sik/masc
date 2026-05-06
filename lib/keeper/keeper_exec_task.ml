@@ -51,7 +51,8 @@ let parse_task_contract_arg args =
 ;;
 
 let active_goal_scope_json ~(meta : keeper_meta) ?matched_goal_id
-    ?excluded_count ?effective_mode ?effective_goal_ids ?fallback_reason () =
+    ?excluded_count ?effective_mode ?effective_goal_ids ?fallback_reason
+    ?(source = "caller_meta") () =
   let scoped = meta.active_goal_ids <> [] in
   let mode =
     match effective_mode with
@@ -73,6 +74,7 @@ let active_goal_scope_json ~(meta : keeper_meta) ?matched_goal_id
       ( "effective_goal_ids",
         `List (List.map (fun goal_id -> `String goal_id) effective_goal_ids)
       );
+      ("source", `String source);
       ("fallback_reason", Json_util.string_opt_to_json fallback_reason);
       ("matched_goal_id", Json_util.string_opt_to_json matched_goal_id);
     ]
@@ -127,6 +129,23 @@ let merge_current_task_id ~(latest : keeper_meta) ~(caller : keeper_meta) =
     current_task_id = caller.current_task_id;
     updated_at = caller.updated_at;
   }
+;;
+
+let claim_time_meta ~(config : Coord.config) ~(caller : keeper_meta) =
+  let from_registry () =
+    match Keeper_registry.get ~base_path:config.base_path caller.name with
+    | Some entry -> entry.meta, "registry_keeper_meta_at_claim"
+    | None -> caller, "caller_meta_fallback"
+  in
+  match read_meta config caller.name with
+  | Ok (Some latest) -> latest, "latest_keeper_meta_at_claim"
+  | Ok None -> from_registry ()
+  | Error msg ->
+    Log.Keeper.warn
+      "keeper:%s failed to read latest meta for claim scope; falling back: %s"
+      caller.name
+      msg;
+    from_registry ()
 ;;
 
 let sync_keeper_meta_current_task
@@ -271,6 +290,7 @@ let handle_keeper_task_tool
                     "goal_id", Json_util.string_opt_to_json goal_id;
                   ])))
   | "keeper_task_claim" ->
+    let meta, scope_source = claim_time_meta ~config ~caller:meta in
     let agent_tool_names = Keeper_tool_policy.keeper_allowed_tool_names meta in
     let claim_goal_scope =
       Keeper_runtime_contract.resolve_claim_goal_scope
@@ -327,7 +347,8 @@ let handle_keeper_task_tool
           ( active_goal_scope_json ~meta ?matched_goal_id
               ~effective_mode:claim_goal_scope.mode
               ~effective_goal_ids:claim_goal_scope.effective_goal_ids
-              ?fallback_reason:claim_goal_scope.fallback_reason ()
+              ?fallback_reason:claim_goal_scope.fallback_reason
+              ~source:scope_source ()
           , [
               ( "claim_observation",
                 Tool_task.build_claim_observation_payload
@@ -349,12 +370,14 @@ let handle_keeper_task_tool
           ( active_goal_scope_json ~meta ~excluded_count
               ~effective_mode:claim_goal_scope.mode
               ~effective_goal_ids:claim_goal_scope.effective_goal_ids
-              ?fallback_reason:claim_goal_scope.fallback_reason ()
+              ?fallback_reason:claim_goal_scope.fallback_reason
+              ~source:scope_source ()
           , [] )
       | Coord.Claim_next_no_unclaimed | Coord.Claim_next_error _ ->
           ( active_goal_scope_json ~meta ~effective_mode:claim_goal_scope.mode
               ~effective_goal_ids:claim_goal_scope.effective_goal_ids
-              ?fallback_reason:claim_goal_scope.fallback_reason ()
+              ?fallback_reason:claim_goal_scope.fallback_reason
+              ~source:scope_source ()
           , [] )
     in
     Yojson.Safe.to_string

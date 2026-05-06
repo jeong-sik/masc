@@ -1,10 +1,10 @@
 (** test_keeper_callback_hardening — verify PR-J counter semantics.
 
     Two new counters were added in PR-J:
-    1. [masc_keeper_lifecycle_callback_failures_total{callback}] —
-       bumped when a post-turn lifecycle callback raises. The two
-       wrappers ([Keeper_post_turn] and [Keeper_rollover]) each call
-       [Prometheus.inc_counter] in their except branch.
+    1. [masc_keeper_lifecycle_callback_failures_total{callback,...}] —
+       bumped when post-turn lifecycle callbacks or per-keeper OAS hook
+       side effects raise. Lifecycle wrappers emit [callback] only;
+       per-keeper hook sites also include [keeper].
     2. [masc_keeper_event_bus_drain_total{site,outcome}] — bumped on
        every drain, with [outcome=drained] when at least one event
        was pulled and [outcome=empty] otherwise.
@@ -40,6 +40,11 @@ let read_lifecycle_failure ~callback =
     P.metric_keeper_lifecycle_callback_failures
     ~labels:[("callback", callback)] ()
 
+let read_keeper_hook_failure ~keeper ~callback =
+  P.metric_value_or_zero
+    P.metric_keeper_lifecycle_callback_failures
+    ~labels:[("keeper", keeper); ("callback", callback)] ()
+
 let test_lifecycle_callback_label_isolation () =
   let cb_a = "on_compaction_started" in
   let cb_b = "on_handoff_started" in
@@ -55,6 +60,22 @@ let test_lifecycle_callback_label_isolation () =
   Alcotest.(check (float 0.0001))
     "callback B counter unchanged when only A bumped"
     b_before b_after
+
+let test_keeper_hook_label_shape_is_isolated () =
+  let keeper = "schema-test-keeper" in
+  let callback = "post_tool_log_write" in
+  let keeper_before = read_keeper_hook_failure ~keeper ~callback in
+  let lifecycle_before = read_lifecycle_failure ~callback in
+  P.inc_counter P.metric_keeper_lifecycle_callback_failures
+    ~labels:[("keeper", keeper); ("callback", callback)] ();
+  let keeper_after = read_keeper_hook_failure ~keeper ~callback in
+  let lifecycle_after = read_lifecycle_failure ~callback in
+  Alcotest.(check (float 0.0001))
+    "keeper hook label shape incremented"
+    (keeper_before +. 1.0) keeper_after;
+  Alcotest.(check (float 0.0001))
+    "callback-only lifecycle shape unchanged"
+    lifecycle_before lifecycle_after
 
 let read_drain ~site ~outcome =
   P.metric_value_or_zero
@@ -94,13 +115,26 @@ let test_drain_outcome_label_distinction () =
     empty_before empty_after
 
 (* ── Documented label vocabulary check ──────────────────────
-   The wrappers in keeper_post_turn.ml and keeper_rollover.ml use
-   exactly the two callback labels documented in prometheus.mli.
-   This test pins the contract so a future refactor that renames a
-   label without updating the docs is caught.  *)
+   The wrappers in keeper_post_turn.ml / keeper_rollover.ml and the
+   per-keeper hook sites in keeper_hooks_oas.ml must stay aligned with
+   prometheus.mli. This test pins the callback vocabulary so a future
+   refactor that renames a label without updating the docs is caught. *)
 
 let test_documented_callback_label_vocabulary () =
-  let documented_labels = ["on_compaction_started"; "on_handoff_started"] in
+  let documented_labels =
+    [
+      "on_compaction_started";
+      "on_handoff_started";
+      "gate_tool_call_log";
+      "after_turn_sse_broadcast";
+      "post_tool_log_write";
+      "pr_review_action_metrics_append";
+      "pr_work_action_metrics_append";
+      "on_tool_executed";
+      "on_error";
+      "on_tool_error";
+    ]
+  in
   List.iter (fun label ->
     P.inc_counter P.metric_keeper_lifecycle_callback_failures
       ~labels:[("callback", label)] ();
@@ -136,6 +170,8 @@ let () =
     "label isolation", [
       test_case "callback labels are isolated" `Quick
         test_lifecycle_callback_label_isolation;
+      test_case "keeper hook label shape is isolated" `Quick
+        test_keeper_hook_label_shape_is_isolated;
       test_case "drain site labels are isolated" `Quick
         test_drain_site_label_isolation;
       test_case "drain outcome labels are distinct" `Quick

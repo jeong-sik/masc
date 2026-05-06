@@ -607,14 +607,27 @@ val metric_keeper_lifecycle_transitions : string
     ≤ 224 series; fleet-bounded. *)
 val metric_fsm_guard_violation : string
 
-(** PR-J: post-turn lifecycle callbacks raised exceptions that were
-    silently swallowed before this counter existed. Labels: [callback]
-    with values:
+(** Keeper callback failures that would otherwise look like missing
+    lifecycle, SSE, tool-call-log, or action-metric rows. Labels:
+    [callback] plus optional [keeper] at per-keeper OAS hook sites.
+
+    Lifecycle-only labels:
     - [on_compaction_started] — fired from
       [Keeper_post_turn.apply_post_turn_lifecycle]
     - [on_handoff_started] — fired from
       [Keeper_rollover.maybe_rollover_oas_handoff]
-    Cardinality: ≤ 2 series, fleet-independent. *)
+
+    Per-keeper hook labels:
+    - [gate_tool_call_log]
+    - [after_turn_sse_broadcast]
+    - [post_tool_log_write]
+    - [pr_review_action_metrics_append]
+    - [pr_work_action_metrics_append]
+    - [on_tool_executed]
+    - [on_error]
+    - [on_tool_error]
+
+    Cardinality is bounded by fleet size times this callback vocabulary. *)
 val metric_keeper_lifecycle_callback_failures : string
 val metric_keeper_supervisor_cleanup_failures : string
 val metric_keeper_slot_force_released : string

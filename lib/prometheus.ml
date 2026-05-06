@@ -1699,6 +1699,15 @@ let init () =
      phase changes. Labeled by keeper, from_phase, and to_phase; deliberately \
      omits event/reason payloads to keep cardinality bounded."
     Counter;
+  add metric_keeper_lifecycle_callback_failures
+    "Total keeper callback failures that would otherwise hide lifecycle, SSE, \
+     tool-call-log, or action-metric gaps. Labels: callback plus optional \
+     keeper at per-keeper hook sites."
+    Counter;
+  add metric_keeper_event_bus_drain
+    "Total per-turn OAS event-bus drain helper runs. Labels: site and \
+     outcome=drained|empty."
+    Counter;
   add metric_keeper_restart_attempts
     "Total supervisor restart attempts for crashed keepers. Labeled by keeper."
     Counter;

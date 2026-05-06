@@ -12,6 +12,13 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "goal_loop_verify_pipeline.py"
+TLA_RESULTS_FIXTURE = (
+    REPO_ROOT
+    / "test"
+    / "fixtures"
+    / "goal_loop"
+    / "verify-pipeline-tla-results.external-claim.json"
+)
 
 spec = importlib.util.spec_from_file_location("goal_loop_verify_pipeline", SCRIPT_PATH)
 assert spec is not None
@@ -101,6 +108,32 @@ class GoalLoopVerifyPipelineTest(unittest.TestCase):
             self.assertEqual(by_id[gate_id].status, "PASS", gate_id)
         self.assertEqual(report.status, "BLOCKED")
         self.assertEqual(by_id["tla_prompt_spec_tierrouting"].status, "BLOCKED")
+
+    def test_prompt_tla_results_cover_required_specs(self) -> None:
+        tla_results = json.loads(TLA_RESULTS_FIXTURE.read_text(encoding="utf-8"))
+        report = goal_loop_verify_pipeline.build_pipeline_report(
+            repo_root=REPO_ROOT,
+            metrics_json=None,
+            tla_results=tla_results,
+            log_paths=[],
+            unit_tests_passed=False,
+            unit_tests_failed=False,
+        )
+
+        by_id = {item.gate_id: item for item in report.gates}
+        expected = {
+            "tla_prompt_spec_tierrouting": "specs/goal-loop/TierRouting.tla",
+            "tla_prompt_spec_validation": "specs/goal-loop/Validation.tla",
+            "tla_prompt_spec_liveness": "specs/goal-loop/Liveness.tla",
+        }
+        for gate_id, path in expected.items():
+            self.assertEqual(by_id[gate_id].status, "PASS", gate_id)
+            self.assertEqual(by_id[gate_id].evidence["resolved_path"], path)
+            self.assertEqual(by_id[gate_id].evidence["result_status"], "PASS")
+        self.assertEqual(report.status, "BLOCKED")
+        self.assertEqual(report.gates_passed, 3)
+        self.assertEqual(report.gates_blocked, 10)
+        self.assertEqual(report.gates_skipped, 1)
 
     def test_metric_gate_commands_reference_snapshot_metric_keys(self) -> None:
         report = goal_loop_verify_pipeline.build_pipeline_report(

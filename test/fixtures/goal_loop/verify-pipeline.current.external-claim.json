@@ -222,13 +222,13 @@
       ],
       "evidence": {
         "prompt_spec": "TierRouting.tla",
-        "resolved_path": null,
-        "result_status": null
+        "resolved_path": "specs/goal-loop/TierRouting.tla",
+        "result_status": "PASS"
       },
       "gate_id": "tla_prompt_spec_tierrouting",
-      "reason": "prompt_tla_spec_missing",
-      "status": "BLOCKED",
-      "summary": "Prompt TLA spec TierRouting.tla is not present in specs/."
+      "reason": null,
+      "status": "PASS",
+      "summary": "Prompt TLA spec TierRouting.tla TLC result is PASS."
     },
     {
       "category": "tla_check",
@@ -237,13 +237,13 @@
       ],
       "evidence": {
         "prompt_spec": "Validation.tla",
-        "resolved_path": null,
-        "result_status": null
+        "resolved_path": "specs/goal-loop/Validation.tla",
+        "result_status": "PASS"
       },
       "gate_id": "tla_prompt_spec_validation",
-      "reason": "prompt_tla_spec_missing",
-      "status": "BLOCKED",
-      "summary": "Prompt TLA spec Validation.tla is not present in specs/."
+      "reason": null,
+      "status": "PASS",
+      "summary": "Prompt TLA spec Validation.tla TLC result is PASS."
     },
     {
       "category": "tla_check",
@@ -252,13 +252,13 @@
       ],
       "evidence": {
         "prompt_spec": "Liveness.tla",
-        "resolved_path": null,
-        "result_status": null
+        "resolved_path": "specs/goal-loop/Liveness.tla",
+        "result_status": "PASS"
       },
       "gate_id": "tla_prompt_spec_liveness",
-      "reason": "prompt_tla_spec_missing",
-      "status": "BLOCKED",
-      "summary": "Prompt TLA spec Liveness.tla is not present in specs/."
+      "reason": null,
+      "status": "PASS",
+      "summary": "Prompt TLA spec Liveness.tla TLC result is PASS."
     },
     {
       "category": "log_verification",
@@ -292,9 +292,9 @@
       "summary": "Post-ACT production log contract was not evaluated."
     }
   ],
-  "gates_blocked": 13,
+  "gates_blocked": 10,
   "gates_failed": 0,
-  "gates_passed": 0,
+  "gates_passed": 3,
   "gates_skipped": 1,
   "gates_total": 14,
   "schema_version": 1,

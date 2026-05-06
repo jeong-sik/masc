@@ -37,6 +37,11 @@ The current prompt TLA spec names are intentionally checked by exact filename.
 If those specs are absent, the gate is `BLOCKED` with
 `reason: prompt_tla_spec_missing`; it is not silently satisfied by adjacent
 TLA assets.
+The prompt-level specs live under `specs/goal-loop/`:
+`TierRouting.tla`, `Validation.tla`, and `Liveness.tla`. TLC run evidence for
+the current fixture is recorded in
+`test/fixtures/goal_loop/verify-pipeline-tla-results.external-claim.json` and
+fed into the pipeline with `--tla-results-json`.
 
 ## Completion Audit
 

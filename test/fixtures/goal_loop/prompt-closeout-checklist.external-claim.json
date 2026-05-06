@@ -291,6 +291,13 @@
         "scripts/goal_loop_completion_audit.py",
         "test/fixtures/goal_loop/live-post-act-verify.external-claim.json",
         "test/fixtures/goal_loop/verify-pipeline.current.external-claim.json",
+        "test/fixtures/goal_loop/verify-pipeline-tla-results.external-claim.json",
+        "specs/goal-loop/TierRouting.tla",
+        "specs/goal-loop/TierRouting.cfg",
+        "specs/goal-loop/Validation.tla",
+        "specs/goal-loop/Validation.cfg",
+        "specs/goal-loop/Liveness.tla",
+        "specs/goal-loop/Liveness.cfg",
         "docs/observability/goal-loop-verify-pipeline.md",
         "test/test_goal_loop_verify_pipeline.py",
         "test/test_goal_loop_metrics_snapshot.py",
@@ -298,7 +305,7 @@
       ],
       "status": "PARTIAL",
       "criterion_id": "verify_pipeline_complete",
-      "gap": "Closeout verifier and the repo-owned Verify pipeline contract are merged, but the current pipeline fixture is BLOCKED/SKIPPED because production metrics, prompt TLA specs, unit-test run evidence, and post-ACT log-contract inputs are missing.",
+      "gap": "Closeout verifier, the repo-owned Verify pipeline contract, and the three prompt TLA specs now exist with TLC PASS evidence. The current pipeline fixture remains BLOCKED/SKIPPED because production metrics, unit-test run evidence, Orient recheck counts, and post-ACT log-contract inputs are missing.",
       "implementation_pr_refs": [
         "https://github.com/jeong-sik/masc-mcp/pull/13657"
       ],

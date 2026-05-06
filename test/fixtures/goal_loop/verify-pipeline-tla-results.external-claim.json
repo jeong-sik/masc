@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "result_id": "goal-loop-prompt-tla-results-2026-05-06",
+  "status": "PASS",
+  "tool": "tlc2.TLC",
+  "tool_version": "2026.04.06.192533",
+  "checked_at": "2026-05-06T23:27:04+09:00",
+  "specs": [
+    {
+      "spec": "TierRouting.tla",
+      "status": "PASS",
+      "path": "specs/goal-loop/TierRouting.tla",
+      "config": "specs/goal-loop/TierRouting.cfg",
+      "command": "java -XX:+UseParallelGC -Xmx2g -Dtlc2.TLC.stopAfter=180 -Dtlc2.TLC.ide=Github -cp /Users/dancer/.local/lib/tla/tla2tools-1.8.0.jar tlc2.TLC -workers auto -cleanup -config specs/goal-loop/TierRouting.cfg specs/goal-loop/TierRouting.tla",
+      "exit_code": 0,
+      "states_generated": 20,
+      "distinct_states": 14,
+      "depth": 4
+    },
+    {
+      "spec": "Validation.tla",
+      "status": "PASS",
+      "path": "specs/goal-loop/Validation.tla",
+      "config": "specs/goal-loop/Validation.cfg",
+      "command": "java -XX:+UseParallelGC -Xmx2g -Dtlc2.TLC.stopAfter=180 -Dtlc2.TLC.ide=Github -cp /Users/dancer/.local/lib/tla/tla2tools-1.8.0.jar tlc2.TLC -workers auto -cleanup -config specs/goal-loop/Validation.cfg specs/goal-loop/Validation.tla",
+      "exit_code": 0,
+      "states_generated": 1297,
+      "distinct_states": 486,
+      "depth": 7
+    },
+    {
+      "spec": "Liveness.tla",
+      "status": "PASS",
+      "path": "specs/goal-loop/Liveness.tla",
+      "config": "specs/goal-loop/Liveness.cfg",
+      "command": "java -XX:+UseParallelGC -Xmx2g -Dtlc2.TLC.stopAfter=180 -Dtlc2.TLC.ide=Github -cp /Users/dancer/.local/lib/tla/tla2tools-1.8.0.jar tlc2.TLC -workers 1 -cleanup -config specs/goal-loop/Liveness.cfg specs/goal-loop/Liveness.tla",
+      "exit_code": 0,
+      "states_generated": 11,
+      "distinct_states": 11,
+      "depth": 6
+    }
+  ]
+}

@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-05-05T14:52:32Z (HEAD: 9f878eba7c)
+Generated: 2026-05-06T14:29:39Z (HEAD: f28f89a58d)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -13,11 +13,11 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | Metric | Value |
 |--------|-------|
-| Total .tla files | 89 |
-| Manual specs | 89 |
+| Total .tla files | 92 |
+| Manual specs | 92 |
 | TTrace (auto-generated) | 0 |
-| Directories | 18 |
-| Total .cfg files | 179 |
+| Directories | 19 |
+| Total .cfg files | 182 |
 | Buggy .cfg (bug-model pair) | 87 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`). `source hash` is the tracked `.tla` blob fingerprint.
@@ -111,6 +111,14 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
 | ContractClosure.tla | ContractClosure | manual | 2 | 1 | clean={inv:TypeOK, inv:ClosureIntegrity, prop:VerdictUnblocksFsm} buggy={inv:ClosureIntegrity} | d4121bf6a81c |
+
+### specs/goal-loop (3 specs)
+
+| File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
+|------|--------|------|-----|-------|-------------------------|---------------|
+| Liveness.tla | Liveness | manual | 1 | 0 | clean={inv:Safety, prop:EventuallyTerminates} | 6c6dc62cf8ea |
+| TierRouting.tla | TierRouting | manual | 1 | 0 | clean={inv:Safety} | 562e191267c9 |
+| Validation.tla | Validation | manual | 1 | 0 | clean={inv:Safety} | 66c22fd1b6fe |
 
 ### specs/keeper-state-machine (29 specs)
 

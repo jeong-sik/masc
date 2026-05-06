@@ -491,6 +491,20 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         evidence = by_id["verify_pipeline_complete"].evidence
         self.assertIn("post_act_log_contract", evidence["missing_gate_ids"])
 
+    def test_completion_audit_rejects_verify_pipeline_count_mismatch(self) -> None:
+        pipeline = passing_verify_pipeline()
+        pipeline["gates_total"] = 1
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            complete_status(),
+            verify_pipeline=pipeline,
+        )
+
+        self.assertEqual(audit.status, "BLOCKED")
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        evidence = by_id["verify_pipeline_complete"].evidence
+        self.assertFalse(evidence["counts_match"])
+
     def test_completion_audit_consumes_embedded_verify_pipeline(self) -> None:
         status = complete_status()
         verify_summary = status["phases"]["verify"]["summary"]

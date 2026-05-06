@@ -565,7 +565,10 @@ def catalog_with_strict_row_corpus(
     if strict_row_corpus is None:
         return catalog
     merged = dict(catalog or {})
-    summary = validate_strict_row_corpus(strict_row_corpus, catalog=merged)
+    summary = validate_strict_row_corpus(
+        strict_row_corpus,
+        catalog=merged if catalog is not None else None,
+    )
     merged["strict_row_corpus"] = summary
     if summary["validated"]:
         findings_raw = strict_row_corpus.get("findings")

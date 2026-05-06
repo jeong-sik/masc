@@ -632,6 +632,18 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertNotIn("expected_findings_total_mismatch", report["errors"])
         self.assertFalse(report["catalog_source_binding_required"])
 
+    def test_catalog_with_strict_row_corpus_allows_standalone_corpus(self) -> None:
+        catalog = orient_goal_loop_logs.catalog_with_strict_row_corpus(
+            None,
+            synthetic_strict_row_corpus(),
+        )
+
+        assert catalog is not None
+        report = catalog["strict_row_corpus"]
+        self.assertTrue(report["validated"])
+        self.assertFalse(report["catalog_source_binding_required"])
+        self.assertTrue(report["catalog_source_binding_valid"])
+
     def test_strict_row_corpus_rejects_sources_when_catalog_manifest_is_empty(
         self,
     ) -> None:

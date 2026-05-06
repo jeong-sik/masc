@@ -177,6 +177,46 @@
         "goal-loop-206-audit-external-claim-2026-05-05"
       ],
       "note": "Text-like non-archive Downloads files with md, txt, json, jsonl, csv, yaml, yml, ml, mli, js, ts, tsx, html, or css extensions were searched. Strict-corpus marker hits were 0; near-miss files only carried aggregate/examples or unrelated field names, not corpus contract markers."
+    },
+    {
+      "artifact_name": "downloads_docx_strict_corpus_marker_sweep",
+      "artifact_kind": "docx_marker_search_report",
+      "result": "NOT_ROW_CORPUS",
+      "observed_files_checked": 43,
+      "observed_relevant_path_files_checked": 37,
+      "observed_marker_hits": 0,
+      "observed_near_miss_files": 0,
+      "observed_read_errors": 0,
+      "markers_checked": [
+        "source_catalog_id",
+        "corpus_id",
+        "expected_findings_total",
+        "strict_row",
+        "strict-row",
+        "goal-loop-206-audit-external-claim-2026-05-05"
+      ],
+      "note": "Standalone Downloads docx files were searched by extracting XML members. Strict-corpus marker hits and near-miss hits were 0."
+    },
+    {
+      "artifact_name": "downloads_pdf_strict_corpus_marker_sweep",
+      "artifact_kind": "pdf_marker_search_report",
+      "result": "NOT_ROW_CORPUS",
+      "observed_files_checked": 91,
+      "observed_readable_files_checked": 89,
+      "observed_relevant_path_files_checked": 1,
+      "observed_marker_hits": 0,
+      "observed_near_miss_files": 0,
+      "observed_read_errors": 2,
+      "observed_relevant_path_read_errors": 0,
+      "markers_checked": [
+        "source_catalog_id",
+        "corpus_id",
+        "expected_findings_total",
+        "strict_row",
+        "strict-row",
+        "goal-loop-206-audit-external-claim-2026-05-05"
+      ],
+      "note": "Standalone Downloads PDFs were searched with pdftotext where readable. Strict-corpus marker hits and near-miss hits were 0; the two unreadable PDFs were not in Kimi/audit/goal/keeper/masc paths."
     }
   ],
   "broader_structured_id_triage": {

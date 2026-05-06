@@ -416,6 +416,23 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertEqual(len(textlike_sweeps), 1)
         self.assertEqual(textlike_sweeps[0]["observed_files_checked"], 13031)
         self.assertEqual(textlike_sweeps[0]["observed_marker_hits"], 0)
+        docx_sweeps = [
+            artifact
+            for artifact in discovery["candidate_artifacts_checked"]
+            if artifact["artifact_name"] == "downloads_docx_strict_corpus_marker_sweep"
+        ]
+        self.assertEqual(len(docx_sweeps), 1)
+        self.assertEqual(docx_sweeps[0]["observed_files_checked"], 43)
+        self.assertEqual(docx_sweeps[0]["observed_marker_hits"], 0)
+        pdf_sweeps = [
+            artifact
+            for artifact in discovery["candidate_artifacts_checked"]
+            if artifact["artifact_name"] == "downloads_pdf_strict_corpus_marker_sweep"
+        ]
+        self.assertEqual(len(pdf_sweeps), 1)
+        self.assertEqual(pdf_sweeps[0]["observed_files_checked"], 91)
+        self.assertEqual(pdf_sweeps[0]["observed_marker_hits"], 0)
+        self.assertEqual(pdf_sweeps[0]["observed_relevant_path_read_errors"], 0)
         workspace_sweeps = [
             artifact
             for artifact in discovery["candidate_artifacts_checked"]

@@ -160,6 +160,9 @@
   Downloads sweep also checked 13,031 files, including 10,848 files in
   Kimi/audit/goal/keeper/masc paths, and found 0 strict-corpus marker hits; the
   17 near-miss files carried only aggregate/examples or unrelated field names.
+  Standalone docx and PDF sweeps checked 43 docx files and 91 PDF files; there
+  were 0 strict-corpus marker hits, and the two unreadable PDFs were not in
+  Kimi/audit/goal/keeper/masc paths.
 - [근거] `python3 test/test_goal_loop_completion_audit.py` checked at
   2026-05-06T09:59:29+09:00, confidence High: the completion audit now accepts
   an optional `--strict-row-corpus` artifact and validates it against the

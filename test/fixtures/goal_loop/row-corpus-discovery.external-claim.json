@@ -348,6 +348,31 @@
         ],
         "result": "NO_ACTIONS_ARTIFACT_CORPUS"
       },
+      "release_asset_search": {
+        "release_count": 52,
+        "corpus_like_asset_names": 0,
+        "asset_name_markers_checked": [
+          "goal",
+          "corpus",
+          "strict",
+          "row",
+          "206",
+          "source_catalog_id",
+          "expected_findings_total"
+        ],
+        "result": "NO_RELEASE_ASSET_CORPUS",
+        "note": "GitHub release metadata was checked across 52 releases. Release assets were operational release evidence, binaries, logs, or endpoint snapshots; no asset name matched corpus-specific markers."
+      },
+      "repo_contents_search": {
+        "top_level_corpus_like_entries": [
+          "audits"
+        ],
+        "audits_entries_checked": [
+          "audits/local-exec-core-inventory.md"
+        ],
+        "result": "NO_REPO_CONTENTS_CORPUS",
+        "note": "The remote top-level contents API exposed audits as the only corpus/audit-like root. Its only matching file is a placeholder for exec-corpus capture, not GOAL LOOP strict-row data."
+      },
       "markers_checked": [
         "source_catalog_id",
         "corpus_id",
@@ -356,7 +381,7 @@
         "strict-row",
         "goal-loop-206-audit-external-claim-2026-05-05"
       ],
-      "note": "Remote GitHub comments, issue search, fetched refs/tags, and narrowly matching non-expired Actions artifacts were checked. They produced only the existing open tracking issue, known fixture/test/doc/script markers, and one unrelated health snapshot artifact."
+      "note": "Remote GitHub comments, issue search, fetched refs/tags, narrowly matching non-expired Actions artifacts, release assets, and top-level contents were checked. They produced only the existing open tracking issue, known fixture/test/doc/script markers, one unrelated health snapshot artifact, standard release assets, and an unrelated exec-corpus placeholder."
     }
   ],
   "broader_structured_id_triage": {

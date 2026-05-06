@@ -489,6 +489,14 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
             ]["artifact_name"],
             "health-snapshot",
         )
+        self.assertEqual(
+            remote_sweeps[0]["release_asset_search"]["corpus_like_asset_names"],
+            0,
+        )
+        self.assertEqual(
+            remote_sweeps[0]["repo_contents_search"]["audits_entries_checked"],
+            ["audits/local-exec-core-inventory.md"],
+        )
         workspace_sweeps = [
             artifact
             for artifact in discovery["candidate_artifacts_checked"]

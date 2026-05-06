@@ -23,6 +23,16 @@ type config = {
   max_turns : int;
   max_idle_turns : int;
   stream_idle_timeout_s : float option;
+  max_execution_time_s : float option;
+      (** Wall-clock ceiling for one [Agent_sdk.Agent.run] / [run_stream]
+          call. When [Some s] AND a clock is available at the call site,
+          agent_sdk's [with_optional_timeout] returns
+          [Error (Api (Retry.Timeout {...}))] after [s] seconds — the
+          cascade FSM already maps [Retry.Timeout] to a fallback signal,
+          so this is the canonical knob to bound a hung [run_stream]
+          when a provider closes the connection without [end_turn].
+          Default [None] preserves the historical behaviour
+          (block indefinitely on stream-parser hang). *)
   max_tokens : int;
   max_input_tokens : int option;
   max_cost_usd : float option;
@@ -109,6 +119,7 @@ let default_config
     max_turns = 20;
     max_idle_turns = 3;
     stream_idle_timeout_s = None;
+    max_execution_time_s = None;
     max_tokens = Oas_worker_cascade.default_max_tokens;
     max_input_tokens = None;
     max_cost_usd = None;
@@ -180,6 +191,11 @@ let builder_without_approval
   let builder =
     match config.stream_idle_timeout_s with
     | Some timeout_s -> Agent_sdk.Builder.with_stream_idle_timeout timeout_s builder
+    | None -> builder
+  in
+  let builder =
+    match config.max_execution_time_s with
+    | Some s -> Agent_sdk.Builder.with_max_execution_time s builder
     | None -> builder
   in
   let builder =
@@ -359,6 +375,7 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t) :
       hooks = Option.value ~default:Agent_sdk.Hooks.empty config.hooks;
       max_idle_turns = config.max_idle_turns;
       stream_idle_timeout_s = config.stream_idle_timeout_s;
+      max_execution_time_s = config.max_execution_time_s;
       guardrails = guardrails_of_config config;
       context_reducer = config.context_reducer;
       context_injector = config.context_injector;

@@ -25,8 +25,8 @@
 | Source report final success claim | `/Users/dancer/Downloads/keeper_cascade_completion.agent.final.md:917-926` | 2026-05-06T01:12:41+09:00 | High | 직접 파일 read |
 | Research report date and topics | `/Users/dancer/Downloads/agent_architecture_research_report.md:1-4` | 2026-05-06T01:12:41+09:00 | High | 직접 파일 read |
 | Research report concrete proposals | `/Users/dancer/Downloads/agent_architecture_research_report.md:26-31,52-57,80-85,108-114,126-130` | 2026-05-06T01:12:41+09:00 | High | 직접 파일 read |
-| Qdrant recommendation exists in supplied reports | `rg -n "Qdrant\|qdrant" /Users/dancer/Downloads/*.md /Users/dancer/me/AGENTS.md docs/design/open-ended-generalist-agent-rfc.md` | 2026-05-06T01:12:41+09:00 | High | Report recommends Qdrant; repo/workspace policy rejects it |
-| Workspace Qdrant retirement policy | `/Users/dancer/me/AGENTS.md:15-17`; `docs/design/open-ended-generalist-agent-rfc.md:200` | 2026-05-06T01:12:41+09:00 | High | Supabase pgvector only |
+| Qdrant recommendation exists in supplied reports | `rg -n "Qdrant\|qdrant" /Users/dancer/Downloads/*.md docs/design/open-ended-generalist-agent-rfc.md` | 2026-05-06T01:12:41+09:00 | High | Report recommends Qdrant; repo-local policy rejects it |
+| Repo-local Qdrant retirement policy | `docs/design/open-ended-generalist-agent-rfc.md:199-200` | 2026-05-06T01:12:41+09:00 | High | Supabase pgvector remains the vector DB SSOT; no new Qdrant code, docs, or integration |
 | Current inspected HEAD | `git rev-parse --short=10 HEAD` -> `1c9350f540`; `git log -1 --format='%H %s'` | 2026-05-06T01:12:41+09:00 | High | Worktree `audit/keeper-cascade-research-0506` |
 | Current open issue and PR counts | `gh issue list --state open --limit 300 --json number --jq 'length'` -> 67; `gh pr list --state open --limit 100 --json number --jq 'length'` -> 22 | 2026-05-06T01:12:41+09:00 | High | Live GitHub |
 | Seven P0/P1 issues remain open | `gh issue view 12888 11929 11927 9798 10395 10710 10719 --json state,title` | 2026-05-06T01:12:41+09:00 | High | Live GitHub |
@@ -67,4 +67,4 @@
   - Does not adopt LiteLLM/Temporal/Mem0 without a fresh official-doc/current-cost verification pass.
 - 롤백 조건:
   - If any referenced GitHub issue/PR state changes, rerun the issue/PR commands and update the audit before using it as planning input.
-  - If Qdrant policy changes in `/Users/dancer/me/AGENTS.md`, revisit memory recommendations; until then, Supabase pgvector remains the only vector DB target.
+  - If the repo-local vector DB policy changes in `docs/design/open-ended-generalist-agent-rfc.md`, revisit memory recommendations; until then, Supabase pgvector remains the only vector DB target.

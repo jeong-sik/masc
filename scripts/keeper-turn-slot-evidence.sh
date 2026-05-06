@@ -20,7 +20,7 @@ WINDOW_MIN=1440
 MIN_NORMAL_SAMPLES=5
 
 usage() {
-  sed -n '2,12p' "$0"
+  sed -n '2,/^$/p' "$0"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -80,8 +80,8 @@ for f in "${files[@]}"; do
     jq -sr --argjson cutoff "$CUTOFF" '
       def n: (. // 0 | tonumber? // 0);
       def percentile($p):
-        if length == 0 then 0
-        else sort | .[(((length * $p + 99) / 100 | floor) - 1)]
+        if length == 0 then 0 else
+          sort | .[(length * $p / 100 | floor) | if . >= length then length-1 else . end]
         end;
       def tool_count:
         (.tool_call_count | n) as $top

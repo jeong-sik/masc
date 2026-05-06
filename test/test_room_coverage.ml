@@ -677,6 +677,45 @@ let test_release_cycles_do_not_create_auto_do_not_reclaim () =
       Alcotest.fail
         ("retryable task should remain claimable: " ^ Masc_domain.masc_error_to_string e))
 
+let test_release_cycle_15_creates_auto_hard_stop () =
+  with_test_env (fun config ->
+    let claude = find_agent_name_by_prefix config "claude" in
+    let _ =
+      Coord.add_task config ~title:"Oscillating task" ~priority:1 ~description:""
+    in
+    let backlog = Coord.read_backlog config in
+    let tasks =
+      List.map
+        (fun (t : Masc_domain.task) ->
+           if String.equal t.id "task-001"
+           then { t with cycle_count = 14; do_not_reclaim_reason = None }
+           else t)
+        backlog.tasks
+    in
+    write_tasks config tasks;
+    (match Coord.claim_task_r config ~agent_name:claude ~task_id:"task-001" () with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
+    (match Coord.release_task_r config ~agent_name:claude ~task_id:"task-001" () with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
+    let task = task_by_id config "task-001" in
+    Alcotest.(check int) "cycle count reaches hard-stop threshold" 15
+      task.cycle_count;
+    let reason =
+      match task.do_not_reclaim_reason with
+      | Some reason -> reason
+      | None -> Alcotest.fail "expected auto oscillation hard stop"
+    in
+    Alcotest.(check bool) "reason names oscillation" true
+      (str_contains reason "claim-release oscillation threshold");
+    match Coord.claim_task_r config ~agent_name:claude ~task_id:"task-001" () with
+    | Ok _ -> Alcotest.fail "oscillating task should be blocked from reclaim"
+    | Error e ->
+      let msg = Masc_domain.masc_error_to_string e in
+      Alcotest.(check bool) "claim error carries hard-stop reason" true
+        (str_contains msg "operator review required"))
+
 let test_claim_next_allows_failed_verification_repair () =
   with_test_env (fun config ->
     let claude = find_agent_name_by_prefix config "claude" in
@@ -1531,6 +1570,8 @@ let () =
         test_claim_next_prefers_unblocked_over_legacy_auto_cycle;
       Alcotest.test_case "release cycles do not create auto block" `Quick
         test_release_cycles_do_not_create_auto_do_not_reclaim;
+      Alcotest.test_case "cycle 15 release creates auto hard stop" `Quick
+        test_release_cycle_15_creates_auto_hard_stop;
       Alcotest.test_case "failed verification stays repair-claimable" `Quick
         test_claim_next_allows_failed_verification_repair;
     ];

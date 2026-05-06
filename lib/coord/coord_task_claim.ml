@@ -373,6 +373,16 @@ let release_should_block_reclaim handoff_context =
     (release_handoff_texts handoff_context)
 ;;
 
+let release_cycle_oscillation_hard_stop_threshold = 15
+
+let release_cycle_oscillation_hard_stop_reason ~next_cycle =
+  Printf.sprintf
+    "auto: claim-release oscillation threshold reached (cycle=%d >= %d) - \
+     operator review required before reclaim"
+    next_cycle
+    release_cycle_oscillation_hard_stop_threshold
+;;
+
 let derive_release_do_not_reclaim_reason (task : Masc_domain.task) handoff_context =
   match do_not_reclaim_reason_blocks_claim task.do_not_reclaim_reason with
   | Some _ as existing -> existing
@@ -386,5 +396,9 @@ let derive_release_do_not_reclaim_reason (task : Masc_domain.task) handoff_conte
     then
       Some
         (Option.value first_text ~default:"release hard-stop requested")
-    else None
+    else
+      let next_cycle = task.cycle_count + 1 in
+      if next_cycle >= release_cycle_oscillation_hard_stop_threshold
+      then Some (release_cycle_oscillation_hard_stop_reason ~next_cycle)
+      else None
 ;;

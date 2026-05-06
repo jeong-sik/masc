@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h } from 'preact'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
 import '@testing-library/jest-dom'
-import { TaskBacklog, resetTaskBacklogState } from './kanban-components'
+import { TaskBacklog, buildBacklogPressureRows, resetTaskBacklogState } from './kanban-components'
 import { executionError, executionLoaded, executionLoading, tasks } from '../../store'
 import { resetTaskSearch } from './goal-helpers'
 import type { Task } from '../../types'
@@ -38,12 +38,105 @@ describe('TaskBacklog', () => {
 
   afterEach(() => {
     cleanup()
+    vi.useRealTimers()
     tasks.value = []
     executionLoaded.value = false
     executionLoading.value = false
     executionError.value = null
     resetTaskSearch()
     resetTaskBacklogState()
+  })
+
+  it('summarizes unclaimed priority pressure by oldest task age', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-06T12:00:00Z'))
+    const criticalTodo: Task = {
+      id: 'task-critical',
+      title: 'Critical task',
+      status: 'todo',
+      priority: 1,
+      description: 'Needs prompt claim.',
+      created_at: '2026-05-06T10:00:00Z',
+    }
+    const newerCriticalTodo: Task = {
+      id: 'task-critical-newer',
+      title: 'Newer critical task',
+      status: 'todo',
+      priority: 1,
+      created_at: '2026-05-06T11:30:00Z',
+    }
+    const claimedCritical: Task = {
+      id: 'task-claimed',
+      title: 'Claimed critical task',
+      status: 'claimed',
+      priority: 1,
+      created_at: '2026-05-06T08:00:00Z',
+    }
+    tasks.value = [criticalTodo, newerCriticalTodo, claimedCritical]
+
+    render(h(TaskBacklog, {}))
+
+    const pressure = screen.getByLabelText('Backlog pressure')
+    const p1 = within(pressure).getByRole('button', { name: 'P1 backlog pressure: 2 unclaimed' })
+    expect(p1).toHaveTextContent('2h')
+    expect(p1).toHaveTextContent('breached 1h')
+    expect(within(pressure).getByRole('button', { name: 'P2 backlog pressure: 0 unclaimed' })).toBeDisabled()
+  })
+
+  it('builds pressure rows without counting claimed tasks', () => {
+    const rows = buildBacklogPressureRows([
+      {
+        id: 'todo-p2',
+        title: 'Todo P2',
+        status: 'todo',
+        priority: 2,
+        created_at: '2026-05-06T00:00:00Z',
+      },
+      {
+        id: 'assigned-todo-p2',
+        title: 'Assigned todo P2',
+        status: 'todo',
+        priority: 2,
+        assignee: 'keeper-alpha',
+        created_at: '2026-05-05T00:00:00Z',
+      },
+      {
+        id: 'blank-assignee-p2',
+        title: 'Blank assignee P2',
+        status: 'todo',
+        priority: 2,
+        assignee: ' ',
+        created_at: '2026-05-06T01:00:00Z',
+      },
+    ], Date.parse('2026-05-06T07:00:00Z'))
+
+    const p2 = rows.find(row => row.priority === 2)
+    expect(p2?.count).toBe(2)
+    expect(p2?.tone).toBe('warn')
+    expect(p2?.oldestTask?.id).toBe('todo-p2')
+  })
+
+  it('normalizes out-of-range priorities into P4 pressure', () => {
+    const rows = buildBacklogPressureRows([
+      {
+        id: 'todo-p0',
+        title: 'Todo P0',
+        status: 'todo',
+        priority: 0,
+        created_at: '2026-05-06T00:00:00Z',
+      },
+      {
+        id: 'todo-p5',
+        title: 'Todo P5',
+        status: 'todo',
+        priority: 5,
+        created_at: '2026-05-06T01:00:00Z',
+      },
+    ], Date.parse('2026-05-06T07:00:00Z'))
+
+    const p4 = rows.find(row => row.priority === 4)
+    expect(p4?.count).toBe(2)
+    expect(p4?.oldestTask?.id).toBe('todo-p0')
   })
 
   it('preserves expanded done pagination after clearing search', async () => {

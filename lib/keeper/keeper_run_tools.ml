@@ -1215,6 +1215,18 @@ let prepare_agent_setup
                in
                let ctx =
                  if computed_surface.is_last_turn
+                    && computed_surface.required_tool_names <> []
+                 then
+                   append_ctx
+                     ctx
+                     (Printf.sprintf
+                        "[REQUIRED TOOLS - FINAL TURN] This Agent.run call is on \
+                         its final turn, but this message has explicit \
+                         required_tools: %s. You MUST either call at least one \
+                         required tool now or return a concise blocker naming \
+                         the missing policy/tool/runtime condition."
+                        (String.concat ", " computed_surface.required_tool_names))
+                 else if computed_surface.is_last_turn
                  then
                    append_ctx
                      ctx
@@ -1273,11 +1285,11 @@ let prepare_agent_setup
                let all_allowed = computed_surface.all_allowed in
                let tool_filter = Agent_sdk.Guardrails.AllowList all_allowed in
                let tool_choice =
-                 if computed_surface.is_last_turn
-                 then current_params.tool_choice
-                 else if computed_surface.required_tool_names <> []
-                         && all_allowed <> []
+                 if computed_surface.required_tool_names <> []
+                    && all_allowed <> []
                  then Some Agent_sdk.Types.Any
+                 else if computed_surface.is_last_turn
+                 then current_params.tool_choice
                  else if computed_surface.tool_gate_requested && all_allowed <> []
                  then
                    Some

@@ -1076,6 +1076,30 @@ let test_keeper_docker_multikeeper_isolation_contracts () =
      && file_contains_pattern "lib/keeper/keeper_sandbox_runtime.ml"
           "sandbox runtime requires Docker userns support")
 
+let test_keeper_required_tool_contracts () =
+  let required_first =
+    file_pattern_position "lib/keeper/keeper_run_tools.ml"
+      "if computed_surface.required_tool_names <> []\n                    && all_allowed <> []\n                 then Some Agent_sdk.Types.Any"
+  in
+  let last_turn_after =
+    file_pattern_position "lib/keeper/keeper_run_tools.ml"
+      "else if computed_surface.is_last_turn\n                 then current_params.tool_choice"
+  in
+  check bool "required_tools force tool_choice before last-turn relaxation" true
+    (match required_first, last_turn_after with
+     | Some required_pos, Some last_turn_pos -> required_pos < last_turn_pos
+     | _ -> false);
+  check bool "last-turn relaxation no longer bypasses required_tools" true
+    (file_not_contains_pattern "lib/keeper/keeper_run_tools.ml"
+       "let tool_choice =\n                 if computed_surface.is_last_turn\n                 then current_params.tool_choice\n                 else if computed_surface.required_tool_names <> []");
+  check bool "docker PR lifecycle harness default matches runbook" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       {|REQUIRED_TOOLS="${REQUIRED_TOOLS:-keeper_bash,keeper_pr_create,keeper_pr_review_comment}"|});
+  check bool "runbook documents docker PR lifecycle required tool default" true
+    (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+       "`keeper_bash`, `keeper_pr_create`, and `keeper_pr_review_comment`")
+
 let test_board_flusher_start_retry_contracts () =
   check bool "board flusher start has bounded CAS retry count" true
     (file_contains_pattern "lib/board_dispatch.ml"
@@ -1898,6 +1922,8 @@ let () =
              test_keeper_sandbox_credential_volume_contracts;
            test_case "keeper docker multi-keeper isolation contracts" `Quick
              test_keeper_docker_multikeeper_isolation_contracts;
+           test_case "keeper required tool contracts" `Quick
+             test_keeper_required_tool_contracts;
            test_case "board flusher start retry contracts" `Quick
              test_board_flusher_start_retry_contracts;
            test_case "docker config storage contracts" `Quick

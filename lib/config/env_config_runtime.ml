@@ -508,13 +508,17 @@ module Tools = struct
 
   (** Default outer MCP tool-call timeout, clamped to [5, 300] seconds.
       Board writes have a separate timeout below so operators can tune
-      persistence stalls without raising every tool. *)
+      persistence stalls without raising every tool.
+      @category Timeouts
+      @ops_class operator *)
   let timeout_default_sec () =
     let v = get_int ~default:60 "MASC_TOOL_TIMEOUT_DEFAULT_SEC" in
     float_of_int (max 5 (min 300 v))
 
   (** Board write outer MCP tool-call timeout, clamped to [5, 300] seconds.
-      Default: 90 seconds (#10569). *)
+      Default: 90 seconds (#10569).
+      @category Timeouts
+      @ops_class operator *)
   let board_write_timeout_sec () =
     let v = get_int ~default:90 "MASC_TOOL_TIMEOUT_BOARD_SEC" in
     float_of_int (max 5 (min 300 v))

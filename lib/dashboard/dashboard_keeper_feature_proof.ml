@@ -320,10 +320,21 @@ let board_reactive_feature snapshots =
       "Post board events and confirm every active keeper records board-reactive turns."
 
 let timestamp_within_window ?window_hours ~now ts =
+  (* Reject zero/negative timestamps (sentinel/unset) and future timestamps
+     (clock skew or corrupted logs). Without the [ts <= now] guard, any
+     future timestamp would satisfy the recency check because [now -. ts]
+     would be negative and trivially [<= hours *. 3600.0]. *)
   ts > 0.0
+  && ts <= now
   &&
   match window_hours with
   | None -> true
+  | Some hours when hours <= 0.0 ->
+    (* Non-positive window is treated as "no recency check": flipping it
+       to a hard reject would silently disqualify all past evidence. The
+       top-level [json] helper clamps callers' inputs to a sane domain;
+       this keeps internal logic robust if a caller bypasses the boundary. *)
+    true
   | Some hours -> now -. ts <= hours *. 3600.0
 
 let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
@@ -570,6 +581,16 @@ let json
   let now = Option.value ~default:(Unix.gettimeofday ()) now in
   let success_threshold_pct =
     clamp_float ~low:0.0 ~high:100.0 success_threshold_pct
+  in
+  (* Normalize at the public boundary so feature helpers never see a
+     non-positive window. Callers passing [Some h] with [h <= 0.0] from
+     CLI/config are treated the same as [None] (no recency check)
+     instead of producing surprising "negative window rejects all"
+     semantics. *)
+  let window_hours =
+    match window_hours with
+    | Some h when h > 0.0 -> Some h
+    | Some _ | None -> None
   in
   let snapshots = load_keeper_snapshots config in
   let keeper_names = snapshot_keeper_names snapshots in

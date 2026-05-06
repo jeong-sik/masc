@@ -647,7 +647,10 @@ let test_scheduled_proactive_evidence_uses_enabled_population () =
 
 let test_scheduled_proactive_window_requires_recent_evidence () =
   with_store @@ fun config ->
-  let now = Unix.gettimeofday () in
+  (* Fixed [now] makes the regression deterministic across machines; the
+     other recency tests in this file (e.g. line 734) follow the same
+     1_777_000_000.0 epoch convention. *)
+  let now = 1_777_000_000.0 in
   ignore
     (persist_keeper_with_proactive
        ~proactive_last_ts:(now -. (49.0 *. 3600.0))
@@ -680,9 +683,50 @@ let test_scheduled_proactive_window_requires_recent_evidence () =
     ["alpha"]
     (json_string_values "missing_keepers" evidence)
 
+let test_scheduled_proactive_window_all_stale_is_fail () =
+  (* Regression for the [observed = []] -> Fail branch: when every
+     proactive-enabled keeper has only stale meta evidence and no recent
+     decision-log evidence, the feature must fail, not warn. *)
+  with_store @@ fun config ->
+  let now = 1_777_000_000.0 in
+  ignore
+    (persist_keeper_with_proactive
+       ~proactive_last_ts:(now -. (49.0 *. 3600.0))
+       config ~proactive_enabled:true
+       ~name:"alpha" ~total_turns:3 ~autonomous_action_count:2
+       ~autonomous_tool_turn_count:2 ~board_reactive_turn_count:1
+       ~proactive_count_total:1);
+  ignore
+    (persist_keeper_with_proactive
+       ~proactive_last_ts:(now -. (72.0 *. 3600.0))
+       config ~proactive_enabled:true
+       ~name:"gamma" ~total_turns:2 ~autonomous_action_count:1
+       ~autonomous_tool_turn_count:1 ~board_reactive_turn_count:0
+       ~proactive_count_total:1);
+  let json =
+    Dashboard_keeper_feature_proof.json
+      ~config
+      ~n:100
+      ~window_hours:24.0
+      ~success_threshold_pct:80.0
+      ~now
+      ()
+  in
+  let scheduled = feature "scheduled_proactive_autonomy" json in
+  let evidence = keeper_evidence "scheduled_proactive_autonomy" json in
+  check string "all-stale fleet hits Fail branch" "fail"
+    (Safe_ops.json_string ~default:"missing" "status" scheduled);
+  check (list string) "no observed keepers when all stale"
+    []
+    (json_string_values "observed_keepers" evidence);
+  check (list string) "all enabled keepers report missing"
+    ["alpha"; "gamma"]
+    (List.sort String.compare
+       (json_string_values "missing_keepers" evidence))
+
 let test_scheduled_proactive_meta_error_does_not_prove_success () =
   with_store @@ fun config ->
-  let now = Unix.gettimeofday () in
+  let now = 1_777_000_000.0 in
   ignore
     (persist_keeper_with_proactive
        ~proactive_last_ts:(now -. 60.0)
@@ -796,6 +840,8 @@ let () =
             test_scheduled_proactive_evidence_uses_enabled_population;
           test_case "scheduled proof window requires recent evidence" `Quick
             test_scheduled_proactive_window_requires_recent_evidence;
+          test_case "scheduled proof fails when fleet is fully stale" `Quick
+            test_scheduled_proactive_window_all_stale_is_fail;
           test_case "scheduled proof ignores recent meta error" `Quick
             test_scheduled_proactive_meta_error_does_not_prove_success;
           test_case "decision log counts as 24h turn exchange proof" `Quick

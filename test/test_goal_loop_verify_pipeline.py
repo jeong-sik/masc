@@ -264,6 +264,28 @@ class GoalLoopVerifyPipelineTest(unittest.TestCase):
                 "GOAL_LOOP_METRICS_JSON (--metrics-json)",
             )
 
+    def test_orient_recheck_commands_reference_repo_helper(self) -> None:
+        report = goal_loop_verify_pipeline.build_pipeline_report(
+            repo_root=REPO_ROOT,
+            metrics_json=passing_metrics(),
+            tla_results=None,
+            log_paths=[],
+            unit_tests_passed=True,
+            unit_tests_failed=False,
+        )
+
+        by_id = {item.gate_id: item for item in report.gates}
+        for gate_id in (
+            "orient_recheck_no_still_present",
+            "orient_recheck_no_new_finding",
+        ):
+            command = " ".join(by_id[gate_id].command or [])
+            metric_name = by_id[gate_id].evidence["metric_name"]
+            self.assertIn("scripts/goal_loop_orient_recheck_metrics.py", command)
+            self.assertIn("GOAL_LOOP_ORIENT_RECHECK_JSON", command)
+            self.assertIn(metric_name, command)
+            self.assertNotIn("orient.exe", command)
+
     def test_metric_gate_preserves_snapshot_value_provenance(self) -> None:
         report = goal_loop_verify_pipeline.build_pipeline_report(
             repo_root=REPO_ROOT,

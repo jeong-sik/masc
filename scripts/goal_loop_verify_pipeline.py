@@ -226,6 +226,19 @@ def metric_snapshot_command(metric_name: str) -> list[str]:
     ]
 
 
+def orient_recheck_metric_command(metric_name: str) -> list[str]:
+    return [
+        "sh",
+        "-c",
+        (
+            "python3 scripts/goal_loop_orient_recheck_metrics.py "
+            '"${GOAL_LOOP_ORIENT_RECHECK_JSON:?set GOAL_LOOP_ORIENT_RECHECK_JSON to Orient JSON report}" '
+            "--pretty | "
+            f"jq '.metrics.{metric_name}'"
+        ),
+    ]
+
+
 def admission_backpressure_gate(
     metrics: dict[str, Any] | None,
     *,
@@ -377,7 +390,7 @@ def build_metric_gates(metrics_json: dict[str, Any] | None) -> list[VerifyGate]:
             metric_name="orient_recheck_still_present",
             category="orient_recheck",
             predicate="== 0",
-            command=["dune", "exec", "orient.exe", "--", "--check-all"],
+            command=orient_recheck_metric_command("orient_recheck_still_present"),
             value_provenance=metric_value_provenance(
                 metrics_json, "orient_recheck_still_present"
             ),
@@ -388,7 +401,7 @@ def build_metric_gates(metrics_json: dict[str, Any] | None) -> list[VerifyGate]:
             metric_name="orient_recheck_new_finding",
             category="orient_recheck",
             predicate="== 0",
-            command=["dune", "exec", "orient.exe", "--", "--check-all"],
+            command=orient_recheck_metric_command("orient_recheck_new_finding"),
             value_provenance=metric_value_provenance(
                 metrics_json, "orient_recheck_new_finding"
             ),

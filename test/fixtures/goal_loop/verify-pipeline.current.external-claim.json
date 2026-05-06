@@ -196,11 +196,9 @@
     {
       "category": "orient_recheck",
       "command": [
-        "dune",
-        "exec",
-        "orient.exe",
-        "--",
-        "--check-all"
+        "sh",
+        "-c",
+        "python3 scripts/goal_loop_orient_recheck_metrics.py \"${GOAL_LOOP_ORIENT_RECHECK_JSON:?set GOAL_LOOP_ORIENT_RECHECK_JSON to Orient JSON report}\" --pretty | jq '.metrics.orient_recheck_still_present'"
       ],
       "evidence": {
         "metric_name": "orient_recheck_still_present",
@@ -236,11 +234,9 @@
     {
       "category": "orient_recheck",
       "command": [
-        "dune",
-        "exec",
-        "orient.exe",
-        "--",
-        "--check-all"
+        "sh",
+        "-c",
+        "python3 scripts/goal_loop_orient_recheck_metrics.py \"${GOAL_LOOP_ORIENT_RECHECK_JSON:?set GOAL_LOOP_ORIENT_RECHECK_JSON to Orient JSON report}\" --pretty | jq '.metrics.orient_recheck_new_finding'"
       ],
       "evidence": {
         "metric_name": "orient_recheck_new_finding",

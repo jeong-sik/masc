@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
 import type { FunctionComponent } from 'preact'
 import { dispatchKeeperInterjectAction } from '../../keeper-actions'
 import { activeKeeperName } from '../../keeper-state'
@@ -10,8 +10,8 @@ import {
 } from './interject-store'
 
 // The input and button states flow through the same store/dispatch boundary
-// that live active-keeper wiring uses. Send remains disabled until the global
-// keeper selection signal resolves to a concrete keeper.
+// that live active-keeper wiring uses. Send remains disabled until a concrete
+// keeper resolves, preferring the route-scoped keeper over the global signal.
 
 async function dispatchInterject(request: InterjectDispatchRequest): Promise<void> {
   await dispatchKeeperInterjectAction({
@@ -31,11 +31,11 @@ function resolveActiveKeeper(keeperName?: string | null): string {
 }
 
 export const IdeInterjectMock: FunctionComponent<IdeInterjectMockProps> = ({ keeperName = null }) => {
-  const interjectStore = useMemo(() =>
+  const [interjectStore] = useState(() =>
     createInterjectStore({
       initialActiveKeeper: resolveActiveKeeper(keeperName),
       dispatch: dispatchInterject,
-    }), [keeperName])
+    }))
   const [, forceRender] = useState(0)
 
   useEffect(() => interjectStore.subscribe(() => forceRender(tick => tick + 1)), [interjectStore])

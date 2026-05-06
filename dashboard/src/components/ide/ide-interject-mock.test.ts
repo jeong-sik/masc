@@ -72,4 +72,24 @@ describe('IdeInterjectMock', () => {
 
     expect(send.disabled).toBe(false)
   })
+
+  it('preserves typed message when the route keeper changes', async () => {
+    const container = document.createElement('div')
+    await act(async () => {
+      render(h(IdeInterjectMock, { keeperName: 'keeper-alpha' }), container)
+    })
+
+    const input = container.querySelector('input') as HTMLInputElement
+    await act(async () => {
+      input.value = 'keep this draft'
+      input.dispatchEvent(new InputEvent('input', { bubbles: true }))
+    })
+
+    await act(async () => {
+      render(h(IdeInterjectMock, { keeperName: 'keeper-beta' }), container)
+    })
+
+    expect(container.textContent).toContain('keeper-beta')
+    expect((container.querySelector('input') as HTMLInputElement).value).toBe('keep this draft')
+  })
 })

@@ -26,8 +26,9 @@ The keeper stale-watchdog has three stale-detection paths
 `active_turn_timeout_sec` is `max(turn_timeout_sec, threshold)`.
 Historically, this RFC assumed the design default was
 `Keeper_runtime_resolved.turn_timeout_sec () = 3600 s`; the current
-runtime default is 600 s because `keeper_runtime_resolved.ml:73-79`
-clamps the env-driven value to `[60, 600]`.
+runtime default is 600 s because
+`lib/keeper/keeper_runtime_resolved.ml:73-79` clamps the
+env-driven value to `[60, 600]`.
 `consecutive_noop_count` is updated only at turn end.
 
 Consequence: a turn that hangs in the middle — for example, an
@@ -55,12 +56,12 @@ progress" from "hung turn that will never complete".
 - Flat global lowering of `turn_timeout_sec` to a single value
   below the per-cascade design floor. Note the historical drift:
   this RFC was authored assuming `turn_timeout_sec () = 3600 s`,
-  but `keeper_runtime_resolved.ml:73-79` currently clamps the
-  env-driven value to `[60, 600]`. The desync is a code regression
-  resolved separately by per-cascade override (Step 2 of goal
-  `oas-bridge-stabilization`). What remains rejected is **flat
-  global reduction** that ignores the legitimate 27 B `900 s+`
-  floor (`lib/keeper/keeper_stale_watchdog.ml:405-418`).
+  but `lib/keeper/keeper_runtime_resolved.ml:73-79` currently
+  clamps the env-driven value to `[60, 600]`. The desync is a code
+  regression resolved separately by per-cascade override (Step 2 of
+  goal `oas-bridge-stabilization`). What remains rejected is
+  **flat global reduction** that ignores the legitimate 27 B
+  `900 s+` floor (`lib/keeper/keeper_stale_watchdog.ml:405-418`).
 - **Permitted (per-cascade override, added 2026-05-06)**: a cascade
   profile in `config/cascade.toml` may declare its own
   `turn_timeout_sec`. Checked-in remote/CLI profiles (`big_three`,

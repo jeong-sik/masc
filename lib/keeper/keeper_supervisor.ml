@@ -1462,7 +1462,14 @@ let sweep_and_recover (ctx : _ context) =
        restart_count=%d — operator action required"
       entry.name msg entry.restart_count
   ) !to_mark_dead;
-  List.iter (cleanup_dead_tombstone ctx) !to_cleanup_dead;
+  (* RFC-0036 Phase A.2: fire Tombstone_reaped after cleanup completes.
+     Hook is exception-safe; supervisor never observes failure. *)
+  List.iter (fun (entry : Keeper_registry.registry_entry) ->
+    cleanup_dead_tombstone ctx entry;
+    Keeper_lifecycle_hooks.run
+      ~keeper_id:entry.name
+      Keeper_lifecycle_hooks.Tombstone_reaped
+  ) !to_cleanup_dead;
   let active_count =
     Keeper_registry.all ~base_path ()
     |> active_supervision_keeper_count

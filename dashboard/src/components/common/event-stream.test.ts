@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
 import {
+  buildIntentProjectionRows,
   buildSemanticGravityRows,
   buildTemporalSyncRows,
   DEFAULT_TEMPORAL_SYNC_WINDOW_MS,
@@ -17,6 +18,15 @@ const baseEvents = [
   { id: 'e1', timestamp: new Date('2024-01-01T09:30:00').getTime(), level: 'info' as const, message: 'started', source: 'agent-a' },
   { id: 'e2', timestamp: new Date('2024-01-01T09:31:00').getTime(), level: 'warn' as const, message: 'slow', source: 'agent-b' },
   { id: 'e3', timestamp: new Date('2024-01-01T09:32:00').getTime(), level: 'error' as const, message: 'failed' },
+]
+
+const projectionEvents = [
+  { id: 'p1', timestamp: new Date('2024-01-01T10:00:00').getTime(), level: 'info' as const, message: 'edit app.ts', source: 'editor' },
+  { id: 'p2', timestamp: new Date('2024-01-01T10:01:00').getTime(), level: 'error' as const, message: 'test failed', source: 'test' },
+  { id: 'p3', timestamp: new Date('2024-01-01T10:02:00').getTime(), level: 'info' as const, message: 'edit app.ts', source: 'editor' },
+  { id: 'p4', timestamp: new Date('2024-01-01T10:03:00').getTime(), level: 'info' as const, message: 'test passed', source: 'test' },
+  { id: 'p5', timestamp: new Date('2024-01-01T10:04:00').getTime(), level: 'info' as const, message: 'edit app.ts', source: 'editor' },
+  { id: 'p6', timestamp: new Date('2024-01-01T10:05:00').getTime(), level: 'info' as const, message: 'update docs', source: 'docs' },
 ]
 
 describe('EventStream', () => {
@@ -292,6 +302,51 @@ describe('EventStream', () => {
     expect(items[0]?.getAttribute('data-stream-event-id')).toBe('e1')
     expect(focused.dataset.streamEventSemanticGravityScore).toBe('0.85')
     expect(focused.dataset.streamEventSemanticGravityRank).toBe('1')
+  })
+
+  it('projects likely next intent from focused event history', () => {
+    const rows = buildIntentProjectionRows(projectionEvents, 'editor')
+
+    expect(rows.map(row => row.key)).toEqual(['source:test', 'source:docs'])
+    expect(rows[0]).toMatchObject({
+      label: 'test',
+      targetKind: 'source',
+      probability: 0.67,
+      evidenceCount: 2,
+    })
+    expect(rows[1]).toMatchObject({
+      label: 'docs',
+      probability: 0.33,
+      evidenceCount: 1,
+    })
+    expect(summarizeEventStream(projectionEvents, 100, DEFAULT_TEMPORAL_SYNC_WINDOW_MS, 'editor')).toMatchObject({
+      intentProjectionCount: 2,
+      topIntentProjectionProbability: 0.67,
+    })
+  })
+
+  it('renders intentional projection metadata and suggestion chips', () => {
+    const container = document.createElement('div')
+    render(h(EventStream, { events: projectionEvents, semanticFocus: 'editor' }), container)
+    const root = container.querySelector('[data-event-stream]') as HTMLElement
+    const projections = container.querySelectorAll('[data-intent-projection-key]')
+    const top = projections[0] as HTMLElement
+
+    expect(root.dataset.eventStreamIntentProjectionCount).toBe('2')
+    expect(root.dataset.eventStreamTopIntentProjectionProbability).toBe('0.67')
+    expect(top.dataset.intentProjectionKey).toBe('source:test')
+    expect(top.dataset.intentProjectionTargetKind).toBe('source')
+    expect(top.dataset.intentProjectionProbability).toBe('0.67')
+    expect(top.dataset.intentProjectionEvidenceCount).toBe('2')
+    expect(container.textContent).toContain('test')
+    expect(container.textContent).toContain('67%')
+  })
+
+  it('limits intentional projections', () => {
+    const rows = buildIntentProjectionRows(projectionEvents, 'editor', 1)
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.key).toBe('source:test')
   })
 
   it('treats maxItems zero as an empty visible window', () => {

@@ -8,6 +8,7 @@ import {
   keeperActivityDisplay,
   keeperDisplayModel,
   keeperDisplayStatus,
+  keeperRuntimeBlockerLabel,
   keeperRuntimeBlockerHint,
 } from '../lib/keeper-runtime-display'
 import { signal } from '@preact/signals'
@@ -347,19 +348,7 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const toneClass = keeper.paused || socialFallbackActive || runtimeBlocker || blocker || hbStale
     ? 'border-[var(--warn-24)] bg-[var(--warn-8)]'
     : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'
-  const runtimeBlockerLabel = runtimeBlockerClass
-    ? {
-        ambiguous_post_commit_timeout: '커밋 후 응답 없음',
-        ambiguous_post_commit_failure: '커밋 후 실패',
-        autonomous_slot_wait_timeout: '자율 슬롯 대기 만료',
-        admission_queue_wait_timeout: '대기열 진입 만료',
-        turn_timeout_after_queue_wait: '대기 후 턴 만료',
-        oas_timeout_budget: 'OAS 응답 만료',
-        turn_timeout: '턴 응답 만료',
-        completion_contract_violation: '완료 계약 위반',
-        cascade_exhausted: '캐스케이드 소진',
-      }[runtimeBlockerClass]
-    : null
+  const runtimeBlockerLabel = keeperRuntimeBlockerLabel(runtimeBlockerClass)
   const trustToneClass =
     trustDisposition === 'Alert'
       ? 'bg-[var(--bad-soft)] text-[var(--color-status-err)]'

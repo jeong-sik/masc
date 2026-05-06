@@ -87,6 +87,7 @@ def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
         text=True,
     )
     temp_path = Path(temp_name)
+    replaced = False
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
@@ -94,14 +95,16 @@ def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         temp_path.replace(path)
+        replaced = True
     finally:
-        if temp_path.exists():
+        if not replaced and temp_path.exists():
             temp_path.unlink()
 
 
 def normalize_base_path(base_path: str | None) -> str | None:
-    """Expand ``~`` so every downstream consumer (artifact metadata,
-    evidence_source, dashboard status path) sees the same canonical form.
+    """Expand and resolve base path so every downstream consumer (artifact
+    metadata, evidence_source, dashboard status path) sees the same canonical
+    absolute form.
 
     Without this, ``--base-path ~/foo`` produced inconsistent artifacts:
     metadata.base_path / evidence_source kept the unexpanded ``~``, but
@@ -115,7 +118,7 @@ def normalize_base_path(base_path: str | None) -> str | None:
         # guard does not silently fall through and write
         # ./.masc/goal-loop/status.json relative to CWD.
         return None
-    return str(Path(stripped).expanduser())
+    return str(Path(stripped).expanduser().resolve(strict=False))
 
 
 def dashboard_status_path_for_base_path(base_path: str) -> Path:

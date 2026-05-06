@@ -64,16 +64,19 @@ class GoalLoopLiveReplayTest(unittest.TestCase):
             self.assertIs(verify_summary["post_act_verify"], True)
             self.assertEqual(verify_summary["evidence_kind"], "live_runtime_logs")
             self.assertIn("runtime_source=unit-test", verify_summary["evidence_source"])
-            self.assertIn("base_path=/tmp/masc", verify_summary["evidence_source"])
             self.assertIsInstance(verify_summary["evidence_window_start"], str)
             self.assertIsInstance(verify_summary["evidence_window_end"], str)
             self.assertIsInstance(verify_summary["checked_at"], str)
             self.assertEqual(verify_summary["violation_kinds"], [])
+            expected_base_path = goal_loop_live_replay.normalize_base_path("/tmp/masc")
             verify = read_json(artifact_dir / "verify.json")
             self.assertIs(verify["post_act_verify"], True)
             self.assertEqual(verify["evidence_kind"], "live_runtime_logs")
             self.assertIn("runtime_source=unit-test", verify["evidence_source"])
-            self.assertIn("base_path=/tmp/masc", verify["evidence_source"])
+            self.assertIn(
+                f"base_path={expected_base_path}", verify_summary["evidence_source"]
+            )
+            self.assertIn(f"base_path={expected_base_path}", verify["evidence_source"])
             self.assertIsInstance(verify["evidence_window_start"], str)
             self.assertIsInstance(verify["evidence_window_end"], str)
             self.assertIsInstance(verify["checked_at"], str)
@@ -133,7 +136,10 @@ class GoalLoopLiveReplayTest(unittest.TestCase):
                 publish_dashboard_status=True,
             )
 
-            dashboard_status_path = base_path / ".masc" / "goal-loop" / "status.json"
+            normalized_base_path = base_path.resolve(strict=False)
+            dashboard_status_path = (
+                normalized_base_path / ".masc" / "goal-loop" / "status.json"
+            )
             self.assertEqual(summary.dashboard_status_json, str(dashboard_status_path))
             self.assertTrue(dashboard_status_path.is_file())
             self.assertEqual(
@@ -171,7 +177,7 @@ class GoalLoopLiveReplayTest(unittest.TestCase):
                     publish_dashboard_status=True,
                 )
 
-            normalized_base_path = home / "runtime"
+            normalized_base_path = (home / "runtime").resolve(strict=False)
             dashboard_status_path = (
                 normalized_base_path / ".masc" / "goal-loop" / "status.json"
             )
@@ -224,6 +230,16 @@ class GoalLoopLiveReplayTest(unittest.TestCase):
                     publish_dashboard_status=True,
                 )
 
+    def test_normalize_base_path_resolves_absolute_segments(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            root = Path(raw_dir)
+            raw_path = root / "nested" / ".." / "runtime"
+
+            self.assertEqual(
+                goal_loop_live_replay.normalize_base_path(str(raw_path)),
+                str((root / "runtime").resolve(strict=False)),
+            )
+
     def test_write_json_atomic_ignores_predictable_temp_symlink(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:
             root = Path(raw_dir)
@@ -238,6 +254,49 @@ class GoalLoopLiveReplayTest(unittest.TestCase):
             self.assertEqual(victim.read_text(encoding="utf-8"), "do not clobber\n")
             self.assertEqual(read_json(target), {"ok": True})
             self.assertTrue(predictable_temp.is_symlink())
+
+    def test_write_json_atomic_keeps_recreated_temp_after_replace(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            root = Path(raw_dir)
+            target = root / "status.json"
+            temp_path = root / ".status.json.fixed.tmp"
+            original_replace = Path.replace
+
+            def fake_mkstemp(
+                *,
+                prefix: str,
+                suffix: str,
+                dir: Path,
+                text: bool,
+            ) -> tuple[int, str]:
+                self.assertTrue(prefix.startswith(".status.json."))
+                self.assertEqual(suffix, ".tmp")
+                self.assertEqual(Path(dir), root)
+                self.assertTrue(text)
+                fd = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                return fd, str(temp_path)
+
+            def replace_and_recreate(self: Path, target_path: Path) -> Path:
+                result = original_replace(self, target_path)
+                if self == temp_path:
+                    self.write_text("owned by another writer\n", encoding="utf-8")
+                return result
+
+            with (
+                mock.patch.object(
+                    goal_loop_live_replay.tempfile,
+                    "mkstemp",
+                    side_effect=fake_mkstemp,
+                ),
+                mock.patch.object(Path, "replace", replace_and_recreate),
+            ):
+                goal_loop_live_replay.write_json_atomic(target, {"ok": True})
+
+            self.assertEqual(read_json(target), {"ok": True})
+            self.assertEqual(
+                temp_path.read_text(encoding="utf-8"),
+                "owned by another writer\n",
+            )
 
     def test_capture_window_reads_from_start_after_truncation(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:
@@ -341,10 +400,13 @@ class GoalLoopLiveReplayTest(unittest.TestCase):
             verify_summary = status["phases"]["verify"]["summary"]
             self.assertIs(verify_summary["post_act_verify"], True)
             self.assertIn("runtime_source=cli-test", verify_summary["evidence_source"])
-            self.assertIn("base_path=/tmp/masc", verify_summary["evidence_source"])
+            expected_base_path = goal_loop_live_replay.normalize_base_path("/tmp/masc")
+            self.assertIn(
+                f"base_path={expected_base_path}", verify_summary["evidence_source"]
+            )
             verify = read_json(artifact_dir / "verify.json")
             self.assertIn("runtime_source=cli-test", verify["evidence_source"])
-            self.assertIn("base_path=/tmp/masc", verify["evidence_source"])
+            self.assertIn(f"base_path={expected_base_path}", verify["evidence_source"])
 
     def test_cli_publish_dashboard_status_writes_under_base_path(self) -> None:
         # Exercise --publish-dashboard-status end-to-end through the CLI so a

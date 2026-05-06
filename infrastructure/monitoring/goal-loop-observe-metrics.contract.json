@@ -1,0 +1,212 @@
+{
+  "schema_version": 1,
+  "contract_id": "masc-goal-loop-observe-metrics-v1",
+  "status": "exporter-contract",
+  "last_verified": "2026-05-06",
+  "description": "Machine-readable GOAL LOOP Observe metric coverage contract. Every required signal must be represented in Prometheus alerts and the Grafana Observe dashboard before the Observe phase is considered shipped.",
+  "required_signals": [
+    {
+      "signal_id": "keeper_turn_success_rate",
+      "metric_names": [
+        "masc_keeper_turn_completed_total",
+        "masc_keeper_turn_scheduled_total"
+      ],
+      "alert_names": [
+        "GoalLoopKeeperTurnSuccessRateCritical"
+      ],
+      "threshold_fragments": [
+        "[5m]",
+        "< 0.5"
+      ]
+    },
+    {
+      "signal_id": "keeper_semaphore_wait_p99",
+      "metric_names": [
+        "masc_keeper_semaphore_wait_seconds_bucket"
+      ],
+      "alert_names": [
+        "GoalLoopKeeperSemaphoreWaitP99Critical"
+      ],
+      "threshold_fragments": [
+        "histogram_quantile(",
+        "> 180"
+      ]
+    },
+    {
+      "signal_id": "keeper_alive_but_stuck",
+      "metric_names": [
+        "masc_keeper_alive_but_stuck_seconds",
+        "masc_keeper_alive_but_stuck_threshold_seconds"
+      ],
+      "alert_names": [
+        "GoalLoopKeeperAliveButStuckCritical"
+      ],
+      "threshold_fragments": [
+        "> 2"
+      ]
+    },
+    {
+      "signal_id": "keeper_zombie_loop",
+      "metric_names": [
+        "masc_keeper_zombie_loop_detected_total"
+      ],
+      "alert_names": [
+        "GoalLoopKeeperZombieLoopCritical"
+      ],
+      "threshold_fragments": [
+        "increase(",
+        "[5m]",
+        "> 0"
+      ]
+    },
+    {
+      "signal_id": "provider_health_probe_skipped",
+      "metric_names": [
+        "masc_provider_health_probe_skipped_total"
+      ],
+      "alert_names": [
+        "GoalLoopProviderHealthProbeSkippedWarning"
+      ],
+      "threshold_fragments": [
+        "increase(",
+        "[5m]",
+        "> 0"
+      ]
+    },
+    {
+      "signal_id": "provider_actual_health_status",
+      "metric_names": [
+        "masc_provider_actual_health_status"
+      ],
+      "alert_names": [
+        "GoalLoopProviderActualHealthUnhealthyCritical"
+      ],
+      "threshold_fragments": [
+        ">= 3"
+      ]
+    },
+    {
+      "signal_id": "pricing_catalog_miss",
+      "metric_names": [
+        "masc_pricing_catalog_miss_total"
+      ],
+      "alert_names": [
+        "GoalLoopPricingCatalogMissCritical"
+      ],
+      "threshold_fragments": [
+        "increase(",
+        "[5m]",
+        "> 0"
+      ]
+    },
+    {
+      "signal_id": "dashboard_metric_all_zeros",
+      "metric_names": [
+        "masc_dashboard_metric_all_zeros"
+      ],
+      "alert_names": [
+        "GoalLoopDashboardMetricAllZerosWarning"
+      ],
+      "threshold_fragments": [
+        "== 1"
+      ]
+    },
+    {
+      "signal_id": "dashboard_snapshot_latency_p99",
+      "metric_names": [
+        "masc_dashboard_snapshot_latency_seconds_bucket"
+      ],
+      "alert_names": [
+        "GoalLoopDashboardSnapshotLatencyP99Warning"
+      ],
+      "threshold_fragments": [
+        "histogram_quantile(",
+        "> 5"
+      ]
+    },
+    {
+      "signal_id": "config_unknown_keys_ignored",
+      "metric_names": [
+        "masc_config_unknown_keys_ignored_total"
+      ],
+      "alert_names": [
+        "GoalLoopConfigUnknownKeysIgnoredWarning"
+      ],
+      "threshold_fragments": [
+        "increase(",
+        "[5m]",
+        "> 0"
+      ]
+    },
+    {
+      "signal_id": "credential_archived_starvation",
+      "metric_names": [
+        "masc_config_credential_archived_starvation_total"
+      ],
+      "alert_names": [
+        "GoalLoopCredentialArchivedStarvationCritical"
+      ],
+      "threshold_fragments": [
+        "increase(",
+        "[5m]",
+        "> 0"
+      ]
+    },
+    {
+      "signal_id": "governance_judge_unparseable",
+      "metric_names": [
+        "masc_governance_judge_unparseable_total"
+      ],
+      "alert_names": [
+        "GoalLoopGovernanceJudgeUnparseableWarning"
+      ],
+      "threshold_fragments": [
+        "increase(",
+        "[5m]",
+        "> 0"
+      ]
+    },
+    {
+      "signal_id": "governance_lenient_json_fallback",
+      "metric_names": [
+        "masc_governance_lenient_json_fallback_hit_total"
+      ],
+      "alert_names": [
+        "GoalLoopGovernanceLenientJsonFallbackWarning"
+      ],
+      "threshold_fragments": [
+        "increase(",
+        "[5m]",
+        "> 0"
+      ]
+    },
+    {
+      "signal_id": "persistence_utf8_repair",
+      "metric_names": [
+        "masc_persistence_utf8_repair_total"
+      ],
+      "alert_names": [
+        "GoalLoopPersistenceUtf8RepairCritical"
+      ],
+      "threshold_fragments": [
+        "increase(",
+        "[5m]",
+        "> 0"
+      ]
+    },
+    {
+      "signal_id": "write_meta_cas_retry",
+      "metric_names": [
+        "masc_write_meta_cas_retry_total"
+      ],
+      "alert_names": [
+        "GoalLoopWriteMetaCasRetryWarning"
+      ],
+      "threshold_fragments": [
+        "increase(",
+        "[5m]",
+        "> 0"
+      ]
+    }
+  ]
+}

@@ -255,20 +255,54 @@ let test_chronicle_memory_episode_shape () =
   check string "summary includes structured commit count" expected_summary
     episode.action
 
+let test_chronicle_memory_default_timestamp_uses_epoch_end_date () =
+  let episode = CM.episode_of_candidate ~keeper_name:"sangsu" sample_epoch in
+  check (float 0.001) "end date midnight UTC" 1777680000.0 episode.timestamp
+
+let test_chronicle_memory_default_timestamp_falls_back_to_start_date () =
+  let epoch = { sample_epoch with end_date = "not-a-date" } in
+  let episode = CM.episode_of_candidate ~keeper_name:"sangsu" epoch in
+  check (float 0.001) "start date midnight UTC" 1777593600.0 episode.timestamp
+
+let test_chronicle_memory_default_timestamp_falls_back_to_zero () =
+  let epoch =
+    { sample_epoch with start_date = "not-a-date"; end_date = "not-a-date" }
+  in
+  let episode = CM.episode_of_candidate ~keeper_name:"sangsu" epoch in
+  check (float 0.001) "missing date fallback" 0.0 episode.timestamp
+
 let test_chronicle_memory_store_recall () =
   let memory = Agent_sdk.Memory.create () in
   let stored =
     CM.store_candidate_epochs ~memory ~keeper_name:"sangsu" [ sample_epoch ]
   in
   check int "stored count" 1 stored;
-  let recalled = Agent_sdk.Memory.recall_episodes memory ~limit:10 () in
+  let recalled =
+    Agent_sdk.Memory.recall_episodes memory ~now:1777680000.0 ~limit:10 ()
+  in
   check int "recalled count" 1 (List.length recalled);
   let episode = List.hd recalled in
   check string "recalled id"
     "git-chronicle-PK-999-abcdef123456" episode.id;
   check string "recalled event type" "git_chronicle"
     (Option.value ~default:""
-       (metadata_string "event_type" episode.metadata))
+       (metadata_string "event_type" episode.metadata));
+  check (float 0.001) "stored timestamp" 1777680000.0 episode.timestamp
+
+let test_chronicle_memory_store_accepts_explicit_timestamp () =
+  let memory = Agent_sdk.Memory.create () in
+  let stored =
+    CM.store_candidate_epochs
+      ~timestamp:99.0
+      ~memory
+      ~keeper_name:"sangsu"
+      [ sample_epoch ]
+  in
+  check int "stored count" 1 stored;
+  let recalled = Agent_sdk.Memory.recall_episodes memory ~now:99.0 ~limit:10 () in
+  match recalled with
+  | [ episode ] -> check (float 0.001) "explicit timestamp" 99.0 episode.timestamp
+  | _ -> fail "expected one recalled episode"
 
 let () =
   run "Chronicle_ingest" [
@@ -302,6 +336,14 @@ let () =
     ]);
     ("chronicle_memory", [
       test_case "episode shape" `Quick test_chronicle_memory_episode_shape;
+      test_case "default timestamp uses epoch end date" `Quick
+        test_chronicle_memory_default_timestamp_uses_epoch_end_date;
+      test_case "default timestamp falls back to start date" `Quick
+        test_chronicle_memory_default_timestamp_falls_back_to_start_date;
+      test_case "default timestamp falls back to zero" `Quick
+        test_chronicle_memory_default_timestamp_falls_back_to_zero;
       test_case "store recall" `Quick test_chronicle_memory_store_recall;
+      test_case "store accepts explicit timestamp" `Quick
+        test_chronicle_memory_store_accepts_explicit_timestamp;
     ]);
   ]

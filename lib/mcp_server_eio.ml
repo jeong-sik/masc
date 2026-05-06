@@ -86,6 +86,8 @@ let requires_join_tools_inline =
 let mcp_context_required_tools_inline =
   Tool_schemas_inline.schemas
   |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+  |> List.filter (fun name ->
+       not (Keeper_tool_policy.is_keeper_safe_inline_tool name))
 
 let () =
   (* [Keeper_exec_tools.keeper_read_only_tools] is the keeper SSOT.

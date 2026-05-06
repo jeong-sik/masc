@@ -46,6 +46,12 @@ let dispatch config name =
     ~tag:Tool_dispatch.Mod_control
     ~name ~args:(`Assoc [])
 
+let dispatch_inline config name =
+  Keeper_tag_dispatch.dispatch
+    ~config ~agent_name:"test-keeper"
+    ~tag:Tool_dispatch.Mod_inline
+    ~name ~args:(`Assoc [])
+
 (* masc_pause_status is read-only — should be allowed. *)
 let test_pause_status_allowed () =
   with_room (fun config ->
@@ -80,11 +86,39 @@ let test_resume_blocked () =
     | None ->
         fail "masc_resume returned None")
 
+let test_approval_pending_inline_allowed () =
+  with_room (fun config ->
+    match dispatch_inline config "masc_approval_pending" with
+    | Some (true, msg) ->
+        (match Yojson.Safe.from_string msg with
+         | `List _ -> ()
+         | _ -> fail "masc_approval_pending should return a JSON list")
+    | Some (false, msg) ->
+        fail (Printf.sprintf "masc_approval_pending should succeed: %s" msg)
+    | None ->
+        fail "masc_approval_pending returned None")
+
+let test_other_inline_blocked () =
+  with_room (fun config ->
+    match dispatch_inline config "masc_who" with
+    | Some (false, msg) ->
+        check bool "error mentions MCP context" true
+          (contains_substring msg "requires MCP session context")
+    | Some (true, _) ->
+        fail "masc_who should remain blocked in keeper context"
+    | None ->
+        fail "masc_who returned None")
+
 let () =
   Alcotest.run "Keeper_tag_dispatch" [
     "Mod_control gate", [
       test_case "masc_pause_status allowed" `Quick test_pause_status_allowed;
       test_case "masc_pause blocked" `Quick test_pause_blocked;
       test_case "masc_resume blocked" `Quick test_resume_blocked;
+    ];
+    "Mod_inline gate", [
+      test_case "masc_approval_pending allowed" `Quick
+        test_approval_pending_inline_allowed;
+      test_case "other inline tools blocked" `Quick test_other_inline_blocked;
     ];
   ]

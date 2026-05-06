@@ -759,6 +759,41 @@ let rec add_routes ~sw ~clock router =
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/keeper-feature-proof" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let n =
+           let raw = match Server_utils.query_param req "n" with
+             | Some s -> int_of_string_opt s |> Option.value ~default:5000
+             | None -> 5000
+           in
+           max 1 (min 50000 raw)
+         in
+         let window_hours =
+           match Server_utils.query_param req "window_hours" with
+           | Some s ->
+             (match float_of_string_opt s with
+              | Some value when Float.is_finite value ->
+                Some (max 0.1 (min 168.0 value))
+              | Some _ | None -> None)
+           | None -> None
+         in
+         let success_threshold_pct =
+           match Server_utils.query_param req "success_threshold_pct" with
+           | Some s ->
+             (match float_of_string_opt s with
+              | Some value when Float.is_finite value ->
+                Some (max 0.0 (min 100.0 value))
+              | Some _ | None -> None)
+           | None -> None
+         in
+         let config = state.Mcp_server.room_config in
+         let json =
+           Dashboard_keeper_feature_proof.json
+             ~config ~n ?window_hours ?success_threshold_pct ()
+         in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/transport-health" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = dashboard_transport_health_http_json ~state in

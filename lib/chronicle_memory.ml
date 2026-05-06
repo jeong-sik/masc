@@ -64,6 +64,19 @@ let salience_of_candidate (epoch : Chronicle_ingest.candidate_epoch) =
   in
   min 0.95 (0.55 +. commit_signal +. goal_signal)
 
+let unix_seconds_of_yyyy_mm_dd raw =
+  let raw = String.trim raw in
+  if String.length raw < 10 then None
+  else Masc_domain.parse_iso8601_opt (String.sub raw 0 10 ^ "T00:00:00Z")
+
+let default_timestamp_of_candidate (epoch : Chronicle_ingest.candidate_epoch) =
+  match unix_seconds_of_yyyy_mm_dd epoch.end_date with
+  | Some ts -> ts
+  | None ->
+      (match unix_seconds_of_yyyy_mm_dd epoch.start_date with
+       | Some ts -> ts
+       | None -> 0.0)
+
 let episode_of_candidate ?timestamp ~keeper_name
     (epoch : Chronicle_ingest.candidate_epoch) : Agent_sdk.Memory.episode =
   let summary = summary_of_candidate epoch in
@@ -81,7 +94,8 @@ let episode_of_candidate ?timestamp ~keeper_name
     ]
   in
   { id = episode_id epoch
-  ; timestamp = Option.value timestamp ~default:(Time_compat.now ())
+  ; timestamp =
+      Option.value timestamp ~default:(default_timestamp_of_candidate epoch)
   ; participants = [ keeper_name ]
   ; action = summary
   ; outcome = Agent_sdk.Memory.Neutral
@@ -98,10 +112,10 @@ let episode_of_candidate ?timestamp ~keeper_name
       ]
   }
 
-let store_candidate_epoch ~memory ~keeper_name epoch =
+let store_candidate_epoch ?timestamp ~memory ~keeper_name epoch =
   Agent_sdk.Memory.store_episode memory
-    (episode_of_candidate ~keeper_name epoch)
+    (episode_of_candidate ?timestamp ~keeper_name epoch)
 
-let store_candidate_epochs ~memory ~keeper_name epochs =
-  List.iter (store_candidate_epoch ~memory ~keeper_name) epochs;
+let store_candidate_epochs ?timestamp ~memory ~keeper_name epochs =
+  List.iter (store_candidate_epoch ?timestamp ~memory ~keeper_name) epochs;
   List.length epochs

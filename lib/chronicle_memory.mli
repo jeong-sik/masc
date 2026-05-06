@@ -3,6 +3,12 @@
 val episode_id : Chronicle_ingest.candidate_epoch -> string
 (** Deterministic episode id for a chronicle candidate epoch. *)
 
+val default_timestamp_of_candidate : Chronicle_ingest.candidate_epoch -> float
+(** Deterministic timestamp for a candidate epoch.
+
+    Uses [end_date] at 00:00:00 UTC, then [start_date], then [0.0] if neither
+    date is parseable. *)
+
 val episode_of_candidate :
   ?timestamp:float ->
   keeper_name:string ->
@@ -11,6 +17,7 @@ val episode_of_candidate :
 (** Convert a chronicle candidate epoch into an OAS episodic memory entry. *)
 
 val store_candidate_epoch :
+  ?timestamp:float ->
   memory:Agent_sdk.Memory.t ->
   keeper_name:string ->
   Chronicle_ingest.candidate_epoch ->
@@ -18,6 +25,7 @@ val store_candidate_epoch :
 (** Store one candidate epoch in [memory]. *)
 
 val store_candidate_epochs :
+  ?timestamp:float ->
   memory:Agent_sdk.Memory.t ->
   keeper_name:string ->
   Chronicle_ingest.candidate_epoch list ->

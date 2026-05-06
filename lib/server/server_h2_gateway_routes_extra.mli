@@ -11,10 +11,11 @@ val dispatch :
   httpun_request:Httpun.Request.t ->
   cors:(string * string) list ->
   path:string ->
+  config:Coord.config ->
   [ `GET | `POST | `DELETE | `OPTIONS | `PUT | `HEAD
   | `CONNECT | `TRACE | `Other of string ] ->
   bool
-(** [dispatch ~h2_reqd ~httpun_request ~cors ~path method_]
+(** [dispatch ~h2_reqd ~httpun_request ~cors ~path ~config method_]
     handles the following routes:
 
     {2 Voice config}

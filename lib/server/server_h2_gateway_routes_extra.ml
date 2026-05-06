@@ -6,7 +6,7 @@ open Server_h2_gateway_helpers
 
 (* Dispatch board, governance, voice, karma, and static asset routes.
    Returns [true] if the route was handled, [false] otherwise. *)
-let dispatch ~h2_reqd ~httpun_request ~cors ~path
+let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
     (httpun_meth : [ `GET | `POST | `DELETE | `OPTIONS | `PUT | `HEAD
                     | `CONNECT | `TRACE | `Other of string ]) =
   match httpun_meth, path with
@@ -56,13 +56,17 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path
           ~voter
       in
       let reactions_for = board_reactions_lookup reaction_rows in
+      let contributor_quality_for =
+        board_contributor_quality_lookup ~config ()
+      in
       let posts_json = List.map (fun (p : Board.post) ->
         let author = Board.Agent_id.to_string p.author in
         let post_id = Board.Post_id.to_string p.id in
         let current_vote = board_current_vote_for_post ~voter ~post_id in
         let reactions = reactions_for (Board.Reaction_post, post_id) in
+        let contributor_quality = contributor_quality_for author in
         board_post_dashboard_json ~blind_votes ?current_vote ~reactions
-          ~author_karma:(get_karma author) p
+          ?contributor_quality ~author_karma:(get_karma author) p
       ) paged in
       let json = `Assoc [
         ("posts", `List posts_json);
@@ -111,6 +115,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path
       in
       let (status, body) =
         board_post_detail_json ~include_moderation:false ~blind_votes ~voter
+          ~config:(Some config)
           ~response_format:format ~post_id
       in
       h2_respond_json h2_reqd body ~status ~extra_headers:cors;

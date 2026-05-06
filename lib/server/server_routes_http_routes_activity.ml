@@ -252,6 +252,10 @@ let add_routes ~sw ~clock router =
              ~voter
          in
          let reactions_for = board_reactions_lookup reaction_rows in
+         let contributor_quality_for =
+           board_contributor_quality_lookup
+             ~config:state.Mcp_server.room_config ()
+         in
          let posts_json =
            List.map
              (fun (p : Board.post) ->
@@ -259,8 +263,10 @@ let add_routes ~sw ~clock router =
                let post_id = Board.Post_id.to_string p.id in
                let current_vote = board_current_vote_for_post ~voter ~post_id in
                let reactions = reactions_for (Board.Reaction_post, post_id) in
+               let contributor_quality = contributor_quality_for author in
                board_post_dashboard_json ~include_moderation ~blind_votes
-                 ?current_vote ~reactions
+                 ?contributor_quality ~reactions
+                 ?current_vote
                  ~author_karma:(get_karma author) p)
              paged
          in
@@ -384,6 +390,7 @@ let add_routes ~sw ~clock router =
               in
               let (status, body) =
                 board_post_detail_json ~include_moderation ~blind_votes ~voter
+                  ~config:(Some state.Mcp_server.room_config)
                   ~response_format:format ~post_id
               in
               respond_json_with_cors ~status request reqd body)

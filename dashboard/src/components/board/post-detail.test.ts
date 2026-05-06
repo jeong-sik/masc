@@ -459,6 +459,11 @@ describe('PostDetail', () => {
       classification_reason: 'Direct board post without automation provenance.',
       report_count: 1,
       moderation_status: 'approved',
+      contributor_quality: {
+        score: 0.91,
+        band: 'excellent',
+        source: 'agent_reputation',
+      },
       comments: [],
     } as any
 
@@ -468,6 +473,7 @@ describe('PostDetail', () => {
     expect(screen.getByText(/Direct board post without automation provenance/)).toBeInTheDocument()
     expect(screen.getByText('직접')).toBeInTheDocument()
     expect(screen.getByLabelText('게시글 moderation 승인됨 1건')).toHaveTextContent('승인됨 1')
+    expect(screen.getByLabelText('기여자 품질 91점 · 우수')).toHaveTextContent('품질 91')
   })
 
   it('marks the current post vote as pressed', async () => {

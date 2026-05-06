@@ -4,7 +4,7 @@ import { timeBoardRequest } from '../board-metrics'
 import type {
   BoardActorIdentity, BoardPost, BoardComment, BoardReactionSummary,
   BoardReactionTargetType, BoardReactionToggleResult, BoardSortMode,
-  BoardVoteDirection, BoardModerationStatus,
+  BoardVoteDirection, BoardModerationStatus, BoardContributorQuality,
   BoardCurationSnapshot, BoardKarmaLedger, BoardKarmaLedgerEvent, BoardKarmaTotal,
   GovernanceContextRef,
   GovernanceDecisionItem, GovernanceExecutedRoute,
@@ -353,6 +353,24 @@ function normalizeBoardModerationStatus(raw: unknown): BoardModerationStatus {
   }
 }
 
+function normalizeBoardContributorQuality(raw: unknown): BoardContributorQuality | null {
+  if (!isRecord(raw)) return null
+  const score = asNumber(raw.score)
+  if (score === undefined) return null
+  return {
+    score,
+    band: asString(raw.band, '').trim() || undefined,
+    source: asString(raw.source, '').trim() || undefined,
+    completion_rate: asNumber(raw.completion_rate),
+    response_rate: asNumber(raw.response_rate),
+    board_posts: asNumber(raw.board_posts),
+    board_comments: asNumber(raw.board_comments),
+    accountability_score: asNumber(raw.accountability_score),
+    autonomy_level: asString(raw.autonomy_level, '').trim() || undefined,
+    thompson_confidence: asNumber(raw.thompson_confidence),
+  }
+}
+
 function normalizeBoardPost(raw: unknown): BoardPost | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id, '').trim()
@@ -433,6 +451,7 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
     hearth_count: asNumber(raw.hearth_count, 0),
     report_count: Math.max(0, Math.trunc(asNumber(raw.report_count, 0))),
     moderation_status: normalizeBoardModerationStatus(raw.moderation_status),
+    contributor_quality: normalizeBoardContributorQuality(raw.contributor_quality),
     ...(reactions !== undefined ? { reactions } : {}),
   }
 }

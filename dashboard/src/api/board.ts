@@ -682,6 +682,7 @@ export function normalizeSubBoard(raw: unknown): SubBoard | null {
     name,
     description: asString(raw.description, ''),
     owner: asString(raw.owner, ''),
+    members: asStringList(raw.members),
     access: normalizeSubBoardAccess(raw.access),
     created_at: asNullableIsoTimestamp(raw.created_at) ?? new Date(0).toISOString(),
     post_count: asInt(raw.post_count) ?? 0,
@@ -708,8 +709,11 @@ export function createSubBoard(
   name: string,
   description: string,
   access?: SubBoardAccess,
+  members: string[] = [],
 ): Promise<unknown> {
-  const body: Record<string, string> = { slug, name, description }
+  const body: Record<string, string | string[]> = { slug, name, description }
   if (access) body.access = access
+  const normalizedMembers = members.map(member => member.trim()).filter(Boolean)
+  if (normalizedMembers.length > 0) body.members = normalizedMembers
   return post('/api/v1/board/sub-boards', body)
 }

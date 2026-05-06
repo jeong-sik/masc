@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   derivePostTitle,
+  createSubBoard,
   createPost,
   fetchBoard,
   fetchBoardHearths,
@@ -16,6 +17,7 @@ import {
   normalizeGovernanceDecisionItem,
   normalizeGovernanceTimelineEvent,
   normalizeGovernanceJudgeSummary,
+  normalizeSubBoard,
 } from './board'
 
 afterEach(() => {
@@ -649,6 +651,51 @@ describe('createPost', () => {
       content: 'Body',
       author: 'dashboard-user',
       hearth: 'ops',
+    })
+  })
+})
+
+describe('SubBoard API helpers', () => {
+  it('normalizes sub-board members', () => {
+    expect(normalizeSubBoard({
+      id: 'sb-1',
+      slug: 'ops',
+      name: 'Ops',
+      owner: 'agent-owner',
+      members: [' agent-owner ', { name: 'agent-a' }, ''],
+      access: 'members_only',
+      created_at: 1_700_000_000,
+      post_count: 2,
+    })).toMatchObject({
+      id: 'sb-1',
+      slug: 'ops',
+      owner: 'agent-owner',
+      members: ['agent-owner', 'agent-a'],
+      access: 'members_only',
+      post_count: 2,
+    })
+  })
+
+  it('sends create-time members with the sub-board create request', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await createSubBoard('ops', 'Ops', 'Operations', 'members_only', [' agent-a ', '', 'agent-b'])
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/board/sub-boards')
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      slug: 'ops',
+      name: 'Ops',
+      description: 'Operations',
+      access: 'members_only',
+      members: ['agent-a', 'agent-b'],
     })
   })
 })

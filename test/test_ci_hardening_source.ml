@@ -2036,6 +2036,62 @@ let test_copilot_zero_diff_cleanup_contracts () =
     (file_not_contains_pattern "scripts/cleanup-copilot-zero-diff-prs.sh"
        "--delete-branch")
 
+(* Dashboard bootstrap (loop priority #7) — guard against:
+   1. SSOT [dashboard_bootstrap_http_json] removed/renamed
+   2. HTTP/1.1 route forgotten in [server_routes_http_routes_dashboard]
+   3. HTTP/2 dispatch forgotten in [server_h2_gateway]
+   4. Slice list drift (the SSOT must list all six slices)
+   5. Public-read error payload regressing to [Printexc.to_string]
+   The cross-transport SSOT exists precisely to prevent (4) — these
+   tests catch the surrounding wiring that the SSOT cannot enforce
+   on its own. *)
+let test_dashboard_bootstrap_contracts () =
+  check bool "bootstrap SSOT exported in dashboard http mli" true
+    (file_contains_pattern "lib/server/server_dashboard_http.mli"
+       "dashboard_bootstrap_http_json");
+  check bool "bootstrap SSOT defined in dashboard http ml" true
+    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+       "dashboard_bootstrap_http_json");
+  check bool "HTTP/1.1 router registers /api/v1/dashboard/bootstrap" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
+       "\"/api/v1/dashboard/bootstrap\"");
+  check bool "HTTP/1.1 route delegates to SSOT" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
+       "dashboard_bootstrap_http_json ~state ~sw ~clock");
+  check bool "HTTP/2 gateway dispatches /api/v1/dashboard/bootstrap" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "\"/api/v1/dashboard/bootstrap\"");
+  check bool "HTTP/2 gateway delegates to SSOT" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "dashboard_bootstrap_http_json ~state ~sw ~clock");
+  (* Slice list — the SSOT must list all six slices it bundles. *)
+  let slice_listed name =
+    file_contains_pattern "lib/server/server_dashboard_http.ml"
+      (Printf.sprintf "slice \"%s\"" name)
+  in
+  check bool "bootstrap bundles shell" true (slice_listed "shell");
+  check bool "bootstrap bundles execution" true (slice_listed "execution");
+  check bool "bootstrap bundles planning" true (slice_listed "planning");
+  check bool "bootstrap bundles namespace_truth" true
+    (slice_listed "namespace_truth");
+  check bool "bootstrap bundles goals" true (slice_listed "goals");
+  check bool "bootstrap bundles goal_loop_status" true
+    (slice_listed "goal_loop_status");
+  (* Public-read error sanitization — bootstrap must not surface raw
+     [Printexc.to_string exn] to the client.  The stable
+     {error: "slice_unavailable", slice: <name>} shape should be the
+     only error payload reaching the wire. *)
+  check bool "bootstrap returns sanitized error string" true
+    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+       "\"slice_unavailable\"");
+  check bool "bootstrap does not leak Printexc to client payload"
+    true
+    (* The server-side warn log still uses Printexc; what we forbid is
+       returning that text under the slice [error] key.  Detect by
+       absence of the leak pattern in the per-slice value construction. *)
+    (file_not_contains_pattern "lib/server/server_dashboard_http.ml"
+       "(\"error\", `String (Printexc.to_string exn))")
+
 let () =
   run "ci_hardening_source"
     [
@@ -2132,5 +2188,7 @@ let () =
              test_human_approval_environment_check_contracts;
            test_case "copilot zero-diff cleanup contracts (#12567)" `Quick
              test_copilot_zero_diff_cleanup_contracts;
+           test_case "dashboard bootstrap contracts (loop #7)" `Quick
+             test_dashboard_bootstrap_contracts;
          ]);
     ]

@@ -102,6 +102,7 @@ describe('DataFlowGraph', () => {
     )
     const path = container.querySelector('path') as SVGPathElement
     expect(path?.getAttribute('stroke')).toBe('#ff0000')
+    expect(path?.getAttribute('style') ?? '').not.toContain('stroke')
     expect(path?.getAttribute('data-flow-edge-source')).toBe('a')
     expect(path?.getAttribute('data-flow-edge-target')).toBe('b')
     expect(path?.getAttribute('data-flow-edge-value')).toBe('1')
@@ -150,5 +151,17 @@ describe('DataFlowGraph', () => {
     expect(summary.status).toBe('disconnected')
     expect(summary.validEdgeCount).toBe(0)
     expect(summary.maxValue).toBe(1)
+  })
+
+  it('summarizes large edge sets without spreading into Math.max', () => {
+    const manyEdges = Array.from({ length: 120_000 }, (_, index) => ({
+      source: 'a',
+      target: 'b',
+      value: index + 1,
+    }))
+    const summary = summarizeDataFlowGraph(nodes, manyEdges)
+
+    expect(summary.validEdgeCount).toBe(120_000)
+    expect(summary.maxValue).toBe(120_000)
   })
 })

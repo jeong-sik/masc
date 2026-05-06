@@ -68,7 +68,7 @@ export function summarizeDataFlowGraph(nodes: FlowNode[], edges: FlowEdge[]): Da
   const validEdgeCount = renderableEdges.length
   const missingEdgeCount = edges.length - validEdgeCount
   const totalValue = renderableEdges.reduce((sum, item) => sum + item.value, 0)
-  const maxValue = Math.max(...renderableEdges.map(item => item.value), 1)
+  const maxValue = renderableEdges.reduce((max, item) => Math.max(max, item.value), 1)
   const status: DataFlowGraphStatus =
     nodes.length === 0
       ? 'empty'
@@ -175,8 +175,7 @@ export function DataFlowGraph({ nodes, edges, onSelectNode, testId }: DataFlowGr
                 key=${`${e.source}-${e.target}`}
                 d="M${sx},${sy} C${cx1},${sy} ${cx2},${ty} ${tx},${ty}"
                 fill="none"
-                stroke=${e.color}
-                style=${{ stroke: e.color || 'var(--accent)' }}
+                stroke=${e.color || 'var(--accent)'}
                 stroke-width=${strokeW}
                 opacity="0.7"
                 data-flow-edge

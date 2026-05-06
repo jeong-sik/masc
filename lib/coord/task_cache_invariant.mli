@@ -2,7 +2,8 @@
 
     Any keeper module that maintains its own task-state cache MUST use
     [with_fresh_task_status] before emitting broadcasts, mentions, or
-    transitions tied to a specific task ID.
+    transitions tied to a specific task ID.  Callers that need finer control
+    can compose [fresh_task_status] and [is_terminal] directly.
 
     @since #13397 *)
 

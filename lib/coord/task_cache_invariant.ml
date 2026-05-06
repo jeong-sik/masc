@@ -1,8 +1,9 @@
 (** Task_cache_invariant — Fleet-wide guard against stale task-cache emissions.
 
     Any keeper module that maintains its own task-state cache MUST call
-    [with_fresh_task_status] (or use [is_stale_task]) before emitting
-    broadcasts, mentions, or transitions tied to a specific task ID.
+    [with_fresh_task_status] before emitting broadcasts, mentions, or
+    transitions tied to a specific task ID.  Callers that need finer control
+    can compose [fresh_task_status] + [is_terminal] directly.
 
     If the backlog reports the task as terminal (Done / Cancelled) while
     the caller's cache is still active the guard:

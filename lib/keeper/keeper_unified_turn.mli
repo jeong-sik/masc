@@ -219,6 +219,7 @@ val resolve_ollama_only_base_url :
     request is active or queued).  No cache / failed probe returns
     [false] (fail-open) so a flaky probe never starves the keeper. *)
 val is_ollama_saturated :
+  ?keeper_name:string ->
   ?capacity_lookup:(string -> Cascade_throttle.capacity_info option) ->
   string ->
   bool

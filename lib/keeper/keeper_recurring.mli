@@ -74,5 +74,13 @@ val reenable_due_tasks :
 (** Serialize a task to JSON. *)
 val task_to_json : recurring_task -> Yojson.Safe.t
 
+(** Re-enable disabled recurring tasks after a cooldown period (2x the
+    task interval).  Called by the supervisor sweep to prevent permanent
+    coordination signal loss when tasks are auto-disabled after
+    [max_failures] consecutive failures.
+
+    Returns the number of tasks re-enabled. *)
+val reenable_due_tasks : keeper_name:string -> now_ts:float -> int
+
 (** Clear all tasks.  For testing only. *)
 val clear : unit -> unit

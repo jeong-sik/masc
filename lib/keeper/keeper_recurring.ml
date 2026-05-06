@@ -117,11 +117,13 @@ let dispatch_due ~keeper_name ~now_ts ~dispatch =
       task.failure_count <- task.failure_count + 1;
       if task.max_failures > 0
          && task.failure_count >= task.max_failures
-      then task.enabled <- false
+      then begin
+        task.enabled <- false;
+        task.last_run_ts <- now_ts
+      end
   ) due_tasks;
   !count
 
-(* ================================================================ *)
 (* Re-enable                                                         *)
 (* ================================================================ *)
 

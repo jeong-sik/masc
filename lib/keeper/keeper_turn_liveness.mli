@@ -44,16 +44,27 @@ val resolve_ollama_only_base_url :
     structural: does not probe the network. *)
 
 val is_ollama_saturated :
+  ?keeper_name:string ->
   ?capacity_lookup:(string -> Cascade_throttle.capacity_info option) ->
   string ->
   bool
 (** Read the [Cascade_ollama_probe] cache and report whether the endpoint
     is saturated (no available slots while at least one request is active
     or queued). No cache / failed probe returns [false] (fail-open) so a
-    flaky probe never starves the keeper. *)
+    flaky probe never starves the keeper.
+
+    After [MASC_KEEPER_MAX_SATURATION_SKIPS] (default 6) consecutive
+    saturated checks for the same [keeper_name], returns [false] to force
+    a turn and break the noop_failure_loop death spiral. *)
 
 val saturation_skip_backoff_sec : float
 (** Backoff sleep applied after a saturation skip (seconds). *)
+
+module For_testing : sig
+  val max_consecutive_saturation_skips : int
+
+  val reset_saturation_skip_count : ?keeper_name:string -> unit -> unit
+end
 
 val saturation_skip_jitter_factor : float
 (** Jitter factor for saturation skip sleep. *)

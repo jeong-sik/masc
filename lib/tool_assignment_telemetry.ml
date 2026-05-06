@@ -170,12 +170,12 @@ let rng = Random.State.make_self_init ()
 let rng_mu = Eio.Mutex.create ()
 let with_rng f = Eio.Mutex.use_ro rng_mu (fun () -> f rng)
 
-let record_failure_metric ~site =
+let record_failure_metric ?(delta = 1.0) ~site () =
   Prometheus.inc_counter Prometheus.metric_tool_assignment_telemetry_failures
-    ~labels:[ ("site", site) ] ()
+    ~labels:[ ("site", site) ] ~delta ()
 
 let observe_failure ~site ~error =
-  record_failure_metric ~site;
+  record_failure_metric ~site ();
   Log.Telemetry.warn "tool_assignment_telemetry failure: site=%s error=%s"
     site error
 
@@ -194,9 +194,7 @@ let add_decode_failure acc error =
 
 let observe_decode_failures ~site acc =
   if acc.count > 0 then (
-    for _ = 1 to acc.count do
-      record_failure_metric ~site
-    done;
+    record_failure_metric ~site ~delta:(float_of_int acc.count) ();
     let first_error = Option.value ~default:"unknown" acc.first_error in
     Log.Telemetry.warn
       "tool_assignment_telemetry failures: site=%s count=%d first_error=%s"

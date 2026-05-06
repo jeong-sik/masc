@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useCallback, useMemo, useState } from 'preact/hooks'
-import { RefreshCw, Sparkles } from 'lucide-preact'
+import { RefreshCw, Sparkles, Trophy } from 'lucide-preact'
 import { ActionButton } from '../common/button'
 import { Card } from '../common/card'
 import { TimeAgo } from '../common/time-ago'
@@ -19,6 +19,7 @@ import { registerBoardHearthsRefresh } from '../../sse-store'
 import { boardLatencyMetrics, type BoardLatencyMetric } from '../../board-metrics'
 import { MessageRoomTimeline } from './message-room-timeline'
 import { BoardCurationPanel } from './board-curation-panel'
+import { BoardKarmaPanel } from './board-karma-panel'
 import { MentionInbox } from './mention-inbox'
 import { PostDetail } from './post-detail'
 import { ReactionBar } from './reaction-bar'
@@ -553,6 +554,18 @@ function BoardSummary() {
           큐레이션
         </span>
       <//>
+      <${ActionButton}
+        variant="ghost"
+        size="sm"
+        class="!px-2"
+        onClick=${() => navigate('workspace', { section: 'board', focus: 'karma' })}
+        ariaLabel="보드 카르마 열기"
+      >
+        <span class="inline-flex items-center gap-1">
+          <${Trophy} size=${12} aria-hidden="true" />
+          Karma
+        </span>
+      <//>
     </div>
   `
 }
@@ -798,6 +811,15 @@ export function BoardSurface() {
       <div>
         <${BoardSummary} />
         <${BoardCurationPanel} />
+      </div>
+    `
+  }
+
+  if (focus === 'karma') {
+    return html`
+      <div>
+        <${BoardSummary} />
+        <${BoardKarmaPanel} />
       </div>
     `
   }

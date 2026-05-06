@@ -61,6 +61,17 @@ let on_stop_count ~keeper ~stop_reason =
     ~labels:[ ("keeper", keeper); ("stop_reason", stop_reason) ]
     ()
 
+let on_idle_escalated_count ~keeper ~severity ~decision =
+  Masc_mcp.Prometheus.metric_value_or_zero
+    Masc_mcp.Prometheus.metric_keeper_oas_on_idle_escalated
+    ~labels:
+      [
+        ("keeper", keeper);
+        ("severity", severity);
+        ("decision", decision);
+      ]
+    ()
+
 let require_hook label = function
   | Some hook -> hook
   | None -> failf "expected active hook: %s" label
@@ -709,9 +720,9 @@ let test_hook_introspection_reports_current_runtime_slots () =
   check string "scope" "keeper_runtime_composite"
     (json |> member "scope" |> to_string);
   check int "slot_count" 14 (json |> member "slot_count" |> to_int);
-  check int "active slots" 10
+  check int "active slots" 11
     (json |> member "active_slot_count" |> to_int);
-  check int "inactive slots" 4
+  check int "inactive slots" 3
     (json |> member "inactive_slot_count" |> to_int);
   check bool "before_turn active" true
     (slot json "before_turn" |> member "active" |> to_bool);
@@ -747,8 +758,11 @@ let test_hook_introspection_reports_current_runtime_slots () =
   check_string_list_contains "on_stop records stop reason"
     "stop_reason_metric"
     (string_list_field (slot json "on_stop") "effects");
-  check bool "on_idle_escalated inactive" false
+  check bool "on_idle_escalated active" true
     (slot json "on_idle_escalated" |> member "active" |> to_bool);
+  check_string_list_contains "on_idle_escalated records metric"
+    "idle_escalation_metric"
+    (string_list_field (slot json "on_idle_escalated") "effects");
   check bool "pre_compact inactive" false
     (slot json "pre_compact" |> member "active" |> to_bool);
   check bool "post_compact inactive" false
@@ -818,6 +832,29 @@ let test_on_stop_hook_records_stop_reason_metric () =
   let unknown_after = on_stop_count ~keeper ~stop_reason:"unknown" in
   check (float 0.001) "unknown stop reason is bounded" 1.0
     (unknown_after -. unknown_before)
+
+let test_on_idle_escalated_hook_records_metric () =
+  let keeper = "callback-on-idle-escalated-keeper" in
+  let hooks = make_test_hooks keeper in
+  let hook = require_hook "on_idle_escalated" hooks.on_idle_escalated in
+  let before =
+    on_idle_escalated_count ~keeper ~severity:"final_warning"
+      ~decision:"nudge"
+  in
+  check_nudge "on_idle_escalated"
+    (hook
+       (Agent_sdk.Hooks.OnIdleEscalated
+          {
+            severity = Agent_sdk.Hooks.Idle_severity.Final_warning;
+            consecutive_idle_turns = 1;
+            tool_names = [ "keeper_bash" ];
+          }));
+  let after =
+    on_idle_escalated_count ~keeper ~severity:"final_warning"
+      ~decision:"nudge"
+  in
+  check (float 0.001) "on_idle_escalated counter increments" 1.0
+    (after -. before)
 
 let test_on_idle_hook_returns_runtime_nudge () =
   let hooks = make_test_hooks "callback-on-idle-keeper" in
@@ -1228,6 +1265,8 @@ let () =
             test_on_tool_error_hook_records_callback_failure_metric
         ; test_case "on_stop records stop reason metric" `Quick
             test_on_stop_hook_records_stop_reason_metric
+        ; test_case "on_idle_escalated records metric" `Quick
+            test_on_idle_escalated_hook_records_metric
         ; test_case "on_idle returns runtime nudge" `Quick
             test_on_idle_hook_returns_runtime_nudge
         ] )

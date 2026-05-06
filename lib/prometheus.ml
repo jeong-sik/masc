@@ -955,6 +955,8 @@ let metric_llm_prompt_tok_per_sec = "masc_llm_prompt_tok_per_sec"
 let metric_llm_decode_tok_per_sec = "masc_llm_decode_tok_per_sec"
 let metric_after_turn_hook = "masc_after_turn_hook_total"
 let metric_keeper_oas_on_stop = "masc_keeper_oas_on_stop_total"
+let metric_keeper_oas_on_idle_escalated =
+  "masc_keeper_oas_on_idle_escalated_total"
 let metric_after_turn_telemetry_missing =
   "masc_after_turn_telemetry_missing_total"
 let metric_after_turn_telemetry_zero_latency =
@@ -1388,6 +1390,9 @@ let init () =
   add metric_keeper_oas_on_stop
     "Times the keeper OnStop hook ran after an OAS response terminated. \
      Labels: keeper, stop_reason." Counter;
+  add metric_keeper_oas_on_idle_escalated
+    "Times the keeper OnIdleEscalated hook ran. Labels: keeper, severity, \
+     decision." Counter;
   add metric_after_turn_telemetry_missing
     "AfterTurn responses where response.telemetry was None." Counter;
   add metric_after_turn_telemetry_zero_latency

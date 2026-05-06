@@ -71,6 +71,20 @@ let stop_reason_to_label = function
   | Agent_sdk.Types.StopSequence -> "stop_sequence"
   | Agent_sdk.Types.Unknown _ -> "unknown"
 
+let idle_severity_to_label = function
+  | Agent_sdk.Hooks.Idle_severity.Nudge -> "nudge"
+  | Agent_sdk.Hooks.Idle_severity.Final_warning -> "final_warning"
+  | Agent_sdk.Hooks.Idle_severity.Skip -> "skip"
+
+let idle_decision_to_label = function
+  | Agent_sdk.Hooks.Continue -> "continue"
+  | Agent_sdk.Hooks.Skip -> "skip"
+  | Agent_sdk.Hooks.Nudge _ -> "nudge"
+  | Agent_sdk.Hooks.Override _ -> "override"
+  | Agent_sdk.Hooks.ApprovalRequired -> "approval_required"
+  | Agent_sdk.Hooks.AdjustParams _ -> "adjust_params"
+  | Agent_sdk.Hooks.ElicitInput _ -> "elicit_input"
+
 let render_pre_tool_gate_source_hint
     (event : Keeper_guards.gate_decision_event) =
   match event.source_path, event.source_line with
@@ -1046,6 +1060,24 @@ let on_idle_decision ~consecutive_idle_turns ~allowed_tools ~tool_names
   let skip_at = Env_config_keeper.KeeperKeepalive.idle_skip_threshold in
   on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
     ~allowed_tools ~tool_names
+
+let keeper_idle_decision ~meta_ref ~consecutive_idle_turns ~tool_names =
+  let allowed_tools =
+    Keeper_tool_policy.keeper_allowed_tool_names !meta_ref in
+  let decision =
+    on_idle_decision ~consecutive_idle_turns ~tool_names
+      ~allowed_tools in
+  let tools_str = match tool_names with
+    | [] -> "<none>" | names -> String.concat ", " names in
+  (match decision with
+   | Agent_sdk.Hooks.Skip ->
+     Log.Keeper.warn "keeper:%s idle_turns=%d repeated_tools=[%s] — requesting stop"
+       (!meta_ref).name consecutive_idle_turns tools_str
+   | Agent_sdk.Hooks.Nudge _ ->
+     Log.Keeper.info "keeper:%s idle_turns=%d tools=[%s] — nudging LLM via Nudge"
+       (!meta_ref).name consecutive_idle_turns tools_str
+   | _ -> ());
+  decision
 
 let recent_tool_streak_count ?(within_sec = 900.0) ~(tool_name : string)
     (entries : Yojson.Safe.t list) : int =
@@ -2250,21 +2282,24 @@ let make_hooks
     on_idle = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.OnIdle { consecutive_idle_turns; tool_names; _ } ->
-        let allowed_tools =
-          Keeper_tool_policy.keeper_allowed_tool_names !meta_ref in
+        keeper_idle_decision ~meta_ref ~consecutive_idle_turns ~tool_names
+      | _ -> Agent_sdk.Hooks.Continue);
+
+    on_idle_escalated = Some (fun event ->
+      match event with
+      | Agent_sdk.Hooks.OnIdleEscalated
+          { severity; consecutive_idle_turns; tool_names; _ } ->
         let decision =
-          on_idle_decision ~consecutive_idle_turns ~tool_names
-            ~allowed_tools in
-        let tools_str = match tool_names with
-          | [] -> "<none>" | names -> String.concat ", " names in
-        (match decision with
-         | Agent_sdk.Hooks.Skip ->
-           Log.Keeper.warn "keeper:%s idle_turns=%d repeated_tools=[%s] — requesting stop"
-             (!meta_ref).name consecutive_idle_turns tools_str
-         | Agent_sdk.Hooks.Nudge _ ->
-           Log.Keeper.info "keeper:%s idle_turns=%d tools=[%s] — nudging LLM via Nudge"
-             (!meta_ref).name consecutive_idle_turns tools_str
-         | _ -> ());
+          keeper_idle_decision ~meta_ref ~consecutive_idle_turns ~tool_names in
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_oas_on_idle_escalated
+          ~labels:
+            [
+              ("keeper", (!meta_ref).name);
+              ("severity", idle_severity_to_label severity);
+              ("decision", idle_decision_to_label decision);
+            ]
+          ();
         decision
       | _ -> Agent_sdk.Hooks.Continue);
 
@@ -2447,9 +2482,9 @@ let hook_introspection_json
         ~features:[ "repeated_tool_nudge"; "stay_silent_skip" ]
         "on_idle";
       slot
-        ~active:false
-        ~source:"not_registered"
-        ~reason:"keeper runtime uses legacy on_idle hook"
+        ~active:true
+        ~source:"keeper_hooks_oas"
+        ~effects:[ "idle_escalation_metric" ]
         "on_idle_escalated";
       slot
         ~active:true

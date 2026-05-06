@@ -146,6 +146,13 @@ describe('HumanInTheLoop', () => {
     const container = document.createElement('div')
     render(h(HumanInTheLoop, { request: baseRequest, onApprove: vi.fn(), onReject: vi.fn(), onModify: vi.fn(), testId: 'hitl-1' }), container)
     expect(container.querySelector('[data-testid="hitl-1"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="hitl-1-timer"]')).not.toBeNull()
+  })
+
+  it('omits timer testId when testId is absent', () => {
+    const container = document.createElement('div')
+    render(h(HumanInTheLoop, { request: baseRequest, onApprove: vi.fn(), onReject: vi.fn(), onModify: vi.fn() }), container)
+    expect(container.querySelector('[data-testid="undefined"]')).toBeNull()
   })
 
   it('renders low risk label', () => {

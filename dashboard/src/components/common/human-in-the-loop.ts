@@ -187,7 +187,7 @@ export function HumanInTheLoop({
         <span
           class="font-mono text-xs text-[var(--color-fg-secondary)]"
           aria-label="남은 시간 ${summary.countdown}"
-          data-testid="${testId ? `${testId}-timer` : undefined}"
+          data-testid=${testId ? `${testId}-timer` : undefined}
         >
           ${summary.countdown}
         </span>

@@ -6,6 +6,8 @@ module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_types = Masc_mcp.Keeper_types
 module Json = Yojson.Safe.Util
 
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
 let with_env key value f =
   let prior = Sys.getenv_opt key in
   Unix.putenv key value;
@@ -13,7 +15,7 @@ let with_env key value f =
     ~finally:(fun () ->
       match prior with
       | Some v -> Unix.putenv key v
-      | None -> Unix.putenv key "")
+      | None -> unsetenv key)
     f
 
 let temp_dir () =
@@ -137,6 +139,24 @@ let fake_docker_echo_script =
    printf 'stdout:%s\\n' \"$*\"\n\
    exit 0\n"
 
+let fake_gh_echo_script =
+  "#!/bin/sh\n\
+   printf 'gh:%s\\n' \"$*\"\n\
+   exit 0\n"
+
+let with_fake_gh f =
+  let dir = temp_dir () in
+  let gh_path = Filename.concat dir "gh" in
+  write_file gh_path fake_gh_echo_script;
+  Unix.chmod gh_path 0o755;
+  let path =
+    match Sys.getenv_opt "PATH" with
+    | Some prior when String.trim prior <> "" -> dir ^ ":" ^ prior
+    | _ -> dir
+  in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) @@ fun () ->
+  with_env "PATH" path f
+
 let with_fake_docker f =
   let dir = temp_dir () in
   let docker_path = Filename.concat dir "docker" in
@@ -248,6 +268,7 @@ let test_draft_request_rejects_ready_prs () =
        (`Assoc [ ("ready", `Bool true) ]))
 
 let test_pr_create_routes_through_docker () =
+  with_fake_gh @@ fun () ->
   with_fake_docker @@ fun () ->
   setup_docker_pr_tool @@ fun ~config ~meta ->
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
@@ -265,19 +286,46 @@ let test_pr_create_routes_through_docker () =
             ("cwd", `String "repos/masc-mcp");
           ])
   in
-  check (option string) "pr create via docker" (Some "docker")
-    (parse_string_field raw "via");
+  (match parse_string_field raw "via" with
+   | Some via -> check string "pr create via docker" "docker" via
+   | None -> Alcotest.failf "missing via in response: %s" raw);
   let log = read_file log_path in
   check bool "used docker run" true (contains_substring log "run --rm");
   check bool "uses gh pr create" true
-    (contains_substring log "gh pr create");
-  check bool "keeps draft flag" true (contains_substring log "--draft");
+    (contains_substring raw "gh"
+    && contains_substring raw "pr"
+    && contains_substring raw "create");
+  check bool "keeps draft flag" true (contains_substring raw "--draft");
   check bool "passes repo flag" true
-    (contains_substring log "-R"
-    && contains_substring log "jeong-sik/masc-mcp");
+    (contains_substring raw "-R"
+    && contains_substring raw "jeong-sik/masc-mcp");
   check bool "passes branch head" true
-    (contains_substring log "--head"
-    && contains_substring log "feature/docker-pr")
+    (contains_substring raw "--head"
+    && contains_substring raw "feature/docker-pr")
+
+let test_pr_create_hard_mode_routes_through_broker () =
+  with_fake_gh @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_HARD_MODE" "true" @@ fun () ->
+  setup_docker_pr_tool @@ fun ~config ~meta ->
+  let raw =
+    K.handle_keeper_pr_create ~config ~meta
+      ~args:
+        (`Assoc
+          [
+            ("repo", `String "jeong-sik/masc-mcp");
+            ("title", `String "brokered draft PR");
+            ("body", `String "brokered draft PR body");
+            ("base", `String "main");
+            ("head", `String "feature/brokered-pr");
+            ("cwd", `String "repos/masc-mcp");
+          ])
+  in
+  check (option string) "pr create via broker" (Some "brokered")
+    (parse_string_field raw "via");
+  check bool "uses host gh pr create" true
+    (contains_substring raw "gh:pr pr create"
+    || contains_substring raw "gh:pr create");
+  check bool "keeps draft flag" true (contains_substring raw "--draft")
 
 let () =
   run "keeper_github_pr"
@@ -297,5 +345,7 @@ let () =
         [
           test_case "pr create routes through docker" `Quick
             test_pr_create_routes_through_docker;
+          test_case "pr create hard mode routes through broker" `Quick
+            test_pr_create_hard_mode_routes_through_broker;
         ] );
     ]

@@ -4,6 +4,9 @@
 ; Keep sorted. Add new deps here, not in individual test stanzas.
 (library
  (name masc_test_deps)
+ (foreign_stubs
+  (language c)
+  (names test_env_stubs))
  (libraries
    (re_export agent_sdk)
    (re_export agent_sdk.base)

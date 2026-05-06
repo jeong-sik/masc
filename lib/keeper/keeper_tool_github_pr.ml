@@ -141,7 +141,15 @@ let quote_argv argv =
 
 let run_gh_argv ~(config : Coord.config) ~(meta : keeper_meta) ~env ~cwd
     ~timeout_sec argv =
-  if meta.sandbox_profile = Docker then
+  if
+    meta.sandbox_profile = Docker
+    && Env_config_keeper.KeeperSandbox.hard_mode ()
+  then
+    let status, output =
+      Process_eio.run_argv_with_status ~env ~cwd ~timeout_sec argv
+    in
+    { status; output; via = "brokered" }
+  else if meta.sandbox_profile = Docker then
     match
       Keeper_shell_shared.run_docker_shell_command_with_status
         ~config ~meta ~cwd ~timeout_sec ~cmd:(quote_argv argv)

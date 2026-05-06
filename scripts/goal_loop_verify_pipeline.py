@@ -139,6 +139,23 @@ def metric_value(metrics: dict[str, Any] | None, key: str) -> float | None:
     return None
 
 
+def metric_value_provenance(
+    metrics_json: dict[str, Any] | None, key: str
+) -> Any | None:
+    if metrics_json is None:
+        return None
+    metric_evidence = metrics_json.get("metric_evidence")
+    if isinstance(metric_evidence, dict) and key in metric_evidence:
+        return metric_evidence[key]
+    source = metrics_json.get("source")
+    if not isinstance(source, dict):
+        return None
+    manual_overrides = source.get("manual_overrides")
+    if not isinstance(manual_overrides, dict) or key not in manual_overrides:
+        return None
+    return {"kind": "manual_override", "detail": manual_overrides[key]}
+
+
 def metric_gate(
     metrics: dict[str, Any] | None,
     *,
@@ -147,6 +164,7 @@ def metric_gate(
     category: str,
     predicate: str,
     command: list[str],
+    value_provenance: Any | None = None,
 ) -> VerifyGate:
     value = metric_value(metrics, metric_name)
     evidence = {
@@ -157,6 +175,8 @@ def metric_gate(
         "value": value,
         "predicate": predicate,
     }
+    if value_provenance is not None:
+        evidence["value_provenance"] = value_provenance
     if metrics is None:
         return gate(
             gate_id,
@@ -206,7 +226,12 @@ def metric_snapshot_command(metric_name: str) -> list[str]:
     ]
 
 
-def admission_backpressure_gate(metrics: dict[str, Any] | None) -> VerifyGate:
+def admission_backpressure_gate(
+    metrics: dict[str, Any] | None,
+    *,
+    queue_depth_provenance: Any | None = None,
+    wait_ms_provenance: Any | None = None,
+) -> VerifyGate:
     queue_depth = metric_value(metrics, "admission_queue_depth")
     wait_ms = metric_value(metrics, "admission_queue_wait_ms")
     evidence = {
@@ -221,6 +246,13 @@ def admission_backpressure_gate(metrics: dict[str, Any] | None) -> VerifyGate:
         },
         "predicate": "admission_queue_depth > 0 || admission_queue_wait_ms > 0",
     }
+    value_provenance: dict[str, Any] = {}
+    if queue_depth_provenance is not None:
+        value_provenance["admission_queue_depth"] = queue_depth_provenance
+    if wait_ms_provenance is not None:
+        value_provenance["admission_queue_wait_ms"] = wait_ms_provenance
+    if value_provenance:
+        evidence["value_provenance"] = value_provenance
     command = [
         "sh",
         "-c",
@@ -271,6 +303,9 @@ def build_metric_gates(metrics_json: dict[str, Any] | None) -> list[VerifyGate]:
             category="metric_verification",
             predicate="> 0.95",
             command=metric_snapshot_command("keeper_turn_success_rate"),
+            value_provenance=metric_value_provenance(
+                metrics_json, "keeper_turn_success_rate"
+            ),
         ),
         metric_gate(
             metrics,
@@ -279,6 +314,9 @@ def build_metric_gates(metrics_json: dict[str, Any] | None) -> list[VerifyGate]:
             category="regression_metric",
             predicate="== 0",
             command=metric_snapshot_command("keeper_skipping_turn_rate_5m"),
+            value_provenance=metric_value_provenance(
+                metrics_json, "keeper_skipping_turn_rate_5m"
+            ),
         ),
         metric_gate(
             metrics,
@@ -287,6 +325,9 @@ def build_metric_gates(metrics_json: dict[str, Any] | None) -> list[VerifyGate]:
             category="regression_metric",
             predicate="== 0",
             command=metric_snapshot_command("pricing_catalog_miss_total"),
+            value_provenance=metric_value_provenance(
+                metrics_json, "pricing_catalog_miss_total"
+            ),
         ),
         metric_gate(
             metrics,
@@ -295,6 +336,9 @@ def build_metric_gates(metrics_json: dict[str, Any] | None) -> list[VerifyGate]:
             category="regression_metric",
             predicate="== 0",
             command=metric_snapshot_command("persistence_utf8_repair_total"),
+            value_provenance=metric_value_provenance(
+                metrics_json, "persistence_utf8_repair_total"
+            ),
         ),
         metric_gate(
             metrics,
@@ -303,8 +347,19 @@ def build_metric_gates(metrics_json: dict[str, Any] | None) -> list[VerifyGate]:
             category="regression_metric",
             predicate="> 0",
             command=metric_snapshot_command("recovery_strategy_executed_total_1h"),
+            value_provenance=metric_value_provenance(
+                metrics_json, "recovery_strategy_executed_total_1h"
+            ),
         ),
-        admission_backpressure_gate(metrics),
+        admission_backpressure_gate(
+            metrics,
+            queue_depth_provenance=metric_value_provenance(
+                metrics_json, "admission_queue_depth"
+            ),
+            wait_ms_provenance=metric_value_provenance(
+                metrics_json, "admission_queue_wait_ms"
+            ),
+        ),
         metric_gate(
             metrics,
             gate_id="dashboard_snapshot_latency_p99",
@@ -312,6 +367,9 @@ def build_metric_gates(metrics_json: dict[str, Any] | None) -> list[VerifyGate]:
             category="metric_verification",
             predicate="< 5.0",
             command=metric_snapshot_command("dashboard_snapshot_latency_p99"),
+            value_provenance=metric_value_provenance(
+                metrics_json, "dashboard_snapshot_latency_p99"
+            ),
         ),
         metric_gate(
             metrics,
@@ -320,6 +378,9 @@ def build_metric_gates(metrics_json: dict[str, Any] | None) -> list[VerifyGate]:
             category="orient_recheck",
             predicate="== 0",
             command=["dune", "exec", "orient.exe", "--", "--check-all"],
+            value_provenance=metric_value_provenance(
+                metrics_json, "orient_recheck_still_present"
+            ),
         ),
         metric_gate(
             metrics,
@@ -328,6 +389,9 @@ def build_metric_gates(metrics_json: dict[str, Any] | None) -> list[VerifyGate]:
             category="orient_recheck",
             predicate="== 0",
             command=["dune", "exec", "orient.exe", "--", "--check-all"],
+            value_provenance=metric_value_provenance(
+                metrics_json, "orient_recheck_new_finding"
+            ),
         ),
     ]
 

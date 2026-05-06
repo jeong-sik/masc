@@ -52,12 +52,28 @@
         "prometheus_sources": [
           "masc_keeper_semaphore_wait_timeout_total"
         ],
-        "value": null
+        "value": 0.0,
+        "value_provenance": {
+          "checked_at": "2026-05-07T00:58:27+09:00",
+          "checked_files": [
+            "<MASC_BASE_PATH>/.masc/logs/system_log_2026-05-06.jsonl"
+          ],
+          "kind": "redacted_log_window_absence",
+          "matching_lines": 0,
+          "metric_value_semantics": "matching log lines in the window; zero satisfies a zero-rate gate",
+          "pattern": "skipping turn.*semaphore wait",
+          "raw_log_lines_committed": false,
+          "script": "scripts/goal_loop_log_window_metric.py",
+          "window_end": "2026-05-06T15:58:05Z",
+          "window_lines": 817,
+          "window_seconds": 300.0,
+          "window_start": "2026-05-06T15:53:05Z"
+        }
       },
       "gate_id": "no_semaphore_skip",
-      "reason": "missing_metric",
-      "status": "BLOCKED",
-      "summary": "keeper_skipping_turn_rate_5m is absent from the production metric snapshot."
+      "reason": null,
+      "status": "PASS",
+      "summary": "keeper_skipping_turn_rate_5m == 0"
     },
     {
       "category": "regression_metric",
@@ -116,7 +132,13 @@
         "metric_source": "GOAL_LOOP_METRICS_JSON (--metrics-json)",
         "predicate": "> 0",
         "prometheus_sources": [],
-        "value": 0.0
+        "value": 0.0,
+        "value_provenance": {
+          "checked_at": "2026-05-07T00:58:47+09:00",
+          "kind": "redacted_log_contract_required_missing",
+          "pattern": "recovery_strategy_executed",
+          "raw_log_lines_committed": false
+        }
       },
       "gate_id": "recovery_executed",
       "reason": "predicate_failed",
@@ -272,11 +294,11 @@
         "..."
       ],
       "evidence": {
-        "checked_at": "2026-05-07T00:39:10+09:00",
+        "checked_at": "2026-05-07T00:58:47+09:00",
         "checked_files": [
           "<MASC_BASE_PATH>/.masc/logs/system_log_2026-05-06.jsonl"
         ],
-        "evidence_id": "goal-loop-live-log-contract-2026-05-07T003910+0900",
+        "evidence_id": "goal-loop-live-log-contract-2026-05-07T005847+0900",
         "forbidden_patterns": 6,
         "required_patterns": 3,
         "schema_version": 1,
@@ -286,7 +308,7 @@
           "raw_log_lines_committed": false
         },
         "status": "FAIL",
-        "total_lines": 117472,
+        "total_lines": 119837,
         "violations": [
           {
             "count": 14,
@@ -301,7 +323,7 @@
             "samples": []
           },
           {
-            "count": 114,
+            "count": 119,
             "kind": "forbidden_present",
             "pattern": "persistence UTF-8 repaired",
             "samples": []
@@ -350,9 +372,9 @@
       "summary": "Post-ACT production log contract was evaluated from supplied report JSON."
     }
   ],
-  "gates_blocked": 3,
+  "gates_blocked": 2,
   "gates_failed": 5,
-  "gates_passed": 5,
+  "gates_passed": 6,
   "gates_skipped": 1,
   "gates_total": 14,
   "schema_version": 1,

@@ -312,11 +312,15 @@
   test/fixtures/goal_loop/source-row-candidate-inventory.external-claim.json
   --verify-pipeline
   test/fixtures/goal_loop/verify-pipeline.current.external-claim.json
-  --require-complete --format text` checked at 2026-05-06T21:05:00+09:00,
+  --require-complete --format text` checked at 2026-05-07T01:04:19+09:00,
   confidence High: exits non-zero with three closeout blockers:
   `strict_row_level_catalog_complete`, `prompt_requirements_closeout_complete`,
   and `verify_pipeline_complete`, while
-  `post_act_verify_complete` is `PASS` for the live replay input.
+  `post_act_verify_complete` is `PASS` for the live replay input. The attached
+  Verify pipeline fixture reports 6 `PASS`, 5 `FAIL`, 2 `BLOCKED`, and 1
+  `SKIPPED` gate; `no_semaphore_skip` is `PASS` from
+  `value_provenance.kind=redacted_log_window_absence`, while both Orient
+  recheck gates remain `BLOCKED`.
 - [근거] `gh issue view <issue> --repo jeong-sik/masc-mcp --json
   number,state,title,url` for #13265, #13611, #13636, #13684,
   #13685, #13686, #13688, #13690, and #13795 checked at
@@ -417,7 +421,7 @@
 | Governance fallback visibility | **PARTIAL** | #13143 exposes fallback counters; strict judge-output failure policy is not complete. |
 | Slot forced reclaim + credential auto-recovery | **PARTIAL** | `D-EMERGENCY-1` now has linked ACT PRs in `act-map.startup.json`; the current post-ACT event/transition window verifies clean for strict GOAL LOOP signatures. |
 | Full 206-finding Orient engine | **NOT PROVEN** | Orient can now replay the external claim catalog, but the checked artifacts itemize only 19 of the claimed 206 findings. |
-| Full Verify pipeline | **PARTIAL** | Merged #13657 adds the repo-owned Verify pipeline contract. The current `verify-pipeline.current.external-claim.json` is now FAIL/BLOCKED/SKIPPED: live metrics fail keeper success rate, UTF-8 repair, recovery execution, and admission backpressure gates; the redacted live log-contract report fails; semaphore metrics, unit-test run evidence, and Orient recheck counts are still missing. |
+| Full Verify pipeline | **PARTIAL** | Merged #13657 adds the repo-owned Verify pipeline contract. The current `verify-pipeline.current.external-claim.json` is now FAIL/BLOCKED/SKIPPED: live metrics fail keeper success rate, UTF-8 repair, recovery execution, and admission backpressure gates; the redacted live log-contract report fails; unit-test run evidence and Orient recheck counts are still missing. The 5-minute semaphore gate now passes from redacted log-window absence evidence, not from a native Prometheus series. |
 
 ## Prompt-to-Artifact Checklist
 
@@ -450,7 +454,7 @@ GitHub issue tracking ref.
 | 4-1 priority decision algorithm | `scripts/decide_goal_loop_findings.py`, `test/test_decide_goal_loop_findings.py` | PASS for fixture-based decision ranking. |
 | 4-2 weekly ACT priority queue | `act-map.startup.json`, `known-prs.startup.json`, `validate_goal_loop_act_map.py` | PARTIAL: reference integrity exists; SLA ownership workflow is not automatic. |
 | 5 ACT checklist/PR proof | linked PR references in `act-map.startup.json` plus ACT validation | PARTIAL: known ACTs are mapped; not every still-present row has a row-level ACT because 187 rows are missing. |
-| 6-1 `verify.yml` unit/regression/TLA/log/metric/orient gates | `scripts/verify_goal_loop_logs.py`, `scripts/goal_loop_verify_pipeline.py`, `goal_loop_completion_audit.py`, `test/fixtures/goal_loop/verify-pipeline.current.external-claim.json`, `test/fixtures/goal_loop/verify-pipeline-live-metrics.external-claim.json`, `test/fixtures/goal_loop/verify-pipeline-live-log-contract.external-claim.json`, focused tests | PARTIAL: the gate contract is merged by #13657; the current pipeline result has 5 PASS, 5 FAIL, 3 BLOCKED, and 1 SKIPPED gate. |
+| 6-1 `verify.yml` unit/regression/TLA/log/metric/orient gates | `scripts/verify_goal_loop_logs.py`, `scripts/goal_loop_verify_pipeline.py`, `scripts/goal_loop_log_window_metric.py`, `goal_loop_completion_audit.py`, `test/fixtures/goal_loop/verify-pipeline.current.external-claim.json`, `test/fixtures/goal_loop/verify-pipeline-live-metrics.external-claim.json`, `test/fixtures/goal_loop/verify-pipeline-live-log-contract.external-claim.json`, focused tests | PARTIAL: the gate contract is merged by #13657; the current pipeline result has 6 PASS, 5 FAIL, 2 BLOCKED, and 1 SKIPPED gate. |
 | 6-2 Verify PASS/FAIL branch | `verify.fail.json`, post-ACT live Verify snapshot, completion audit criteria, `verify-pipeline.current.external-claim.json` | PARTIAL: branch semantics and the Verify pipeline contract exist; complete-corpus Verify is blocked by the missing 206-row corpus and the non-PASS pipeline result. |
 | 7 GOAL LOOP dashboard | `goal_loop_status.py` aggregate output plus `dashboard/src/api/goal-loop.ts`, `dashboard/src/components/goal-loop-panel.ts`, and `lib/server/server_routes_http_routes_dashboard.ml` | PASS: UI dashboard integration is merged by PR #13655. |
 | 8 anti-stagnation rules | ACT reference guard and completion audit blocker | PARTIAL: reference integrity exists; SLA timers/escalation are not implemented. |

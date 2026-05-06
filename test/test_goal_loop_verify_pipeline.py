@@ -44,6 +44,12 @@ spec.loader.exec_module(goal_loop_verify_pipeline)
 
 def passing_metrics() -> dict[str, object]:
     return {
+        "metric_evidence": {
+            "keeper_skipping_turn_rate_5m": {
+                "kind": "redacted_log_window_absence",
+                "window_seconds": 300,
+            }
+        },
         "metrics": {
             "keeper_turn_success_rate": 0.99,
             "keeper_skipping_turn_rate_5m": 0,
@@ -55,7 +61,7 @@ def passing_metrics() -> dict[str, object]:
             "dashboard_snapshot_latency_p99": 1.5,
             "orient_recheck_still_present": 0,
             "orient_recheck_new_finding": 0,
-        }
+        },
     }
 
 
@@ -163,17 +169,21 @@ class GoalLoopVerifyPipelineTest(unittest.TestCase):
 
         by_id = {item.gate_id: item for item in report.gates}
         self.assertEqual(report.status, "FAIL")
-        self.assertEqual(report.gates_passed, 5)
+        self.assertEqual(report.gates_passed, 6)
         self.assertEqual(report.gates_failed, 4)
-        self.assertEqual(report.gates_blocked, 4)
+        self.assertEqual(report.gates_blocked, 3)
         self.assertEqual(report.gates_skipped, 1)
         self.assertEqual(by_id["keeper_turn_success_rate_healthy"].status, "FAIL")
+        self.assertEqual(by_id["no_semaphore_skip"].status, "PASS")
+        self.assertEqual(
+            by_id["no_semaphore_skip"].evidence["value_provenance"]["kind"],
+            "redacted_log_window_absence",
+        )
         self.assertEqual(by_id["no_pricing_miss"].status, "PASS")
         self.assertEqual(by_id["no_utf8_repair"].status, "FAIL")
         self.assertEqual(by_id["recovery_executed"].status, "FAIL")
         self.assertEqual(by_id["admission_backpressure_observed"].status, "FAIL")
         self.assertEqual(by_id["dashboard_snapshot_latency_p99"].status, "PASS")
-        self.assertEqual(by_id["no_semaphore_skip"].reason, "missing_metric")
 
     def test_live_log_contract_fixture_records_current_failures(self) -> None:
         log_contract = json.loads(LIVE_LOG_CONTRACT_FIXTURE.read_text(encoding="utf-8"))
@@ -245,6 +255,25 @@ class GoalLoopVerifyPipelineTest(unittest.TestCase):
                 by_id[gate_id].evidence["metric_source"],
                 "GOAL_LOOP_METRICS_JSON (--metrics-json)",
             )
+
+    def test_metric_gate_preserves_snapshot_value_provenance(self) -> None:
+        report = goal_loop_verify_pipeline.build_pipeline_report(
+            repo_root=REPO_ROOT,
+            metrics_json=passing_metrics(),
+            tla_results=None,
+            log_paths=[],
+            unit_tests_passed=True,
+            unit_tests_failed=False,
+        )
+
+        by_id = {item.gate_id: item for item in report.gates}
+        self.assertEqual(
+            by_id["no_semaphore_skip"].evidence["value_provenance"],
+            {
+                "kind": "redacted_log_window_absence",
+                "window_seconds": 300,
+            },
+        )
 
     def test_required_gate_id_contract_is_exact(self) -> None:
         report = goal_loop_verify_pipeline.build_pipeline_report(

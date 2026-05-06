@@ -21,11 +21,17 @@ non-repo `prometheus` CLI.
 that JSON shape. It derives the keeper turn success rate, regression counters,
 admission queue values, and dashboard latency p99 from `/metrics` text, while
 requiring explicit `--set key=value` overrides for non-Prometheus evidence such
-as Orient recheck totals or recovery execution counts.
+as Orient recheck totals or recovery execution counts. When a live-only runtime
+signal is available as a redacted log window rather than a Prometheus family,
+`scripts/goal_loop_log_window_metric.py` emits a timestamp-bounded metric report
+that can be copied into the snapshot's `metric_evidence` map before the numeric
+override is supplied. The Verify gate then carries `value_provenance`, so a
+log-derived zero is visible as log-derived evidence rather than as a native
+Prometheus sample.
 The current live-derived metric fixture is
 `test/fixtures/goal_loop/verify-pipeline-live-metrics.external-claim.json`.
 It is intentionally not green: the fixture turns observed regressions into
-`FAIL` gates while leaving absent metric families as `BLOCKED`.
+`FAIL` gates while leaving absent Orient metric families as `BLOCKED`.
 The current redacted log-contract fixture is
 `test/fixtures/goal_loop/verify-pipeline-live-log-contract.external-claim.json`.
 It records only aggregate violation counts with `--max-samples 0`; raw runtime

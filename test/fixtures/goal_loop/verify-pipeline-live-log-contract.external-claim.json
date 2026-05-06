@@ -1,9 +1,9 @@
 {
-  "checked_at": "2026-05-07T00:39:10+09:00",
+  "checked_at": "2026-05-07T00:58:47+09:00",
   "checked_files": [
     "<MASC_BASE_PATH>/.masc/logs/system_log_2026-05-06.jsonl"
   ],
-  "evidence_id": "goal-loop-live-log-contract-2026-05-07T003910+0900",
+  "evidence_id": "goal-loop-live-log-contract-2026-05-07T005847+0900",
   "forbidden_patterns": 6,
   "required_patterns": 3,
   "schema_version": 1,
@@ -13,7 +13,7 @@
     "raw_log_lines_committed": false
   },
   "status": "FAIL",
-  "total_lines": 117472,
+  "total_lines": 119837,
   "violations": [
     {
       "count": 14,
@@ -28,7 +28,7 @@
       "samples": []
     },
     {
-      "count": 114,
+      "count": 119,
       "kind": "forbidden_present",
       "pattern": "persistence UTF-8 repaired",
       "samples": []

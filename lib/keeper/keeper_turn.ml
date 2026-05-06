@@ -222,7 +222,11 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
          (false, "" ^ e)
        | Ok () ->
          Progress.Tracker.step turn_tracker ~message:"Building turn prompt" ();
-         ignore (Cascade_runtime.refresh_local_discovery_if_possible effective_models);
+         (match Keeper_turn_helpers.ensure_local_discovery_ready effective_models with
+          | Error e ->
+            Progress.stop_tracking turn_task_id;
+            (false, "" ^ e)
+          | Ok () ->
          let max_cascade_context =
            let resolution =
              Keeper_exec_context.resolve_max_context_resolution
@@ -621,4 +625,4 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               in
               (true, Yojson.Safe.to_string reply_json)
 
-))))
+)))))

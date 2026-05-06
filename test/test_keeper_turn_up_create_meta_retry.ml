@@ -51,6 +51,32 @@ let write_meta_exn config meta =
   | Ok () -> ()
   | Error err -> fail ("write_meta failed: " ^ err)
 
+let source_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root -> root
+  | None -> Sys.getcwd ()
+
+let load_source rel =
+  let path = Filename.concat (source_root ()) rel in
+  if not (Sys.file_exists path) then
+    failwith (Printf.sprintf "source file not found: %s" path);
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> In_channel.input_all ic)
+
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0 then true
+  else
+    let rec loop idx =
+      idx + needle_len <= haystack_len
+      &&
+      (String.sub haystack idx needle_len = needle || loop (idx + 1))
+    in
+    loop 0
+
 let test_bootstrap_write_retries_and_preserves_heartbeat_fields () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -98,6 +124,19 @@ let test_bootstrap_write_retries_and_preserves_heartbeat_fields () =
       check bool "version advanced past heartbeat write" true
         (final.meta_version > heartbeat_write.meta_version))
 
+let test_create_keeper_observes_local_discovery_refresh_source () =
+  let src = load_source "lib/keeper/keeper_turn_up_create.ml" in
+  check bool "create path no longer discards local discovery refresh" false
+    (contains_substring
+       src
+       "ignore\n                (Cascade_runtime.refresh_local_discovery_if_possible");
+  check bool "create path uses local discovery helper" true
+    (contains_substring
+       src
+       "Keeper_turn_helpers.ensure_local_discovery_ready");
+  check bool "create path labels observable refresh failures" true
+    (contains_substring src "create_local_discovery_refresh")
+
 let () =
   run "keeper_turn_up_create bootstrap meta CAS retry"
     [
@@ -107,5 +146,12 @@ let () =
             "retries stale bootstrap write and keeps heartbeat fields"
             `Quick
             test_bootstrap_write_retries_and_preserves_heartbeat_fields;
+        ] );
+      ( "source_contracts",
+        [
+          test_case
+            "create_keeper observes local discovery refresh failures"
+            `Quick
+            test_create_keeper_observes_local_discovery_refresh_source;
         ] );
     ]

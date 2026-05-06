@@ -10,6 +10,8 @@
       silently absorbing it (cooperative-cancel preservation).
     - [observe_or_default] returns the success value on [Ok].
     - [observe_or_default] returns the [default] on exception.
+    - [observe_silent] absorbs ordinary exceptions without logging through
+      the same warning path and preserves [Eio.Cancel.Cancelled].
 
     The Cancelled re-raise check is the load-bearing one — Step 5 of
     the plan removes the [Fun.protect] catch-all at
@@ -83,6 +85,22 @@ let test_observe_or_default_reraises_cancelled () =
     "observe_or_default also re-raises Cancelled"
     true !raised
 
+let test_observe_silent_absorbs_exception () =
+  Telemetry_observe.observe_silent ~kind:"test_silent_err" (fun () ->
+      raise (Failure "silent boom"));
+  Alcotest.(check bool) "ordinary exception absorbed" true true
+
+let test_observe_silent_reraises_cancelled () =
+  let raised = ref false in
+  (try
+     Telemetry_observe.observe_silent ~kind:"test_silent_cancel" (fun () ->
+         raise (Eio.Cancel.Cancelled (Failure "synthetic-cancel")))
+   with
+  | Eio.Cancel.Cancelled _ -> raised := true);
+  Alcotest.(check bool)
+    "observe_silent also re-raises Cancelled"
+    true !raised
+
 let () =
   Alcotest.run "telemetry_observe"
     [
@@ -103,5 +121,12 @@ let () =
             test_observe_or_default_returns_default_on_exception;
           Alcotest.test_case "re-raises Eio.Cancel.Cancelled" `Quick
             test_observe_or_default_reraises_cancelled;
+        ] );
+      ( "observe_silent",
+        [
+          Alcotest.test_case "absorbs ordinary exception" `Quick
+            test_observe_silent_absorbs_exception;
+          Alcotest.test_case "re-raises Eio.Cancel.Cancelled" `Quick
+            test_observe_silent_reraises_cancelled;
         ] );
     ]

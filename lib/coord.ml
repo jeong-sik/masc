@@ -79,23 +79,20 @@ let warn_telemetry_drop ~event_family ~event_kind exn =
         ("exception", `String exn_str);
       ]
   in
-  (* Isolated observed side effects: the call sites that invoke this helper rely
-     on the "[Effect.Unhandled] is fully absorbed" contract — propagating a
-     normal exception out of the lifecycle hook would crash the caller. Each
-     observability side effect is wrapped separately so a failure in one (e.g.
-     [Log.emit] hitting a sink failure) does not skip the other (the counter
-     still increments and stays observable). [Telemetry_observe] also preserves
-     [Eio.Cancel.Cancelled], so cancellation is never hidden by this fallback.
-     (#13096 review, copilot P1; supersedes the single-try wrapping noted in
-     codex P2.) *)
-  Telemetry_observe.observe_or_default ~kind:"coord_telemetry_drop_log"
-    ~default:() (fun () ->
+  (* Isolated silent side effects: the call sites that invoke this helper rely
+     on the "[Effect.Unhandled] is fully absorbed" contract. Each observability
+     side effect is wrapped separately so a failure in one (e.g. [Log.emit]
+     hitting a sink failure) does not skip the other. This path intentionally
+     uses [observe_silent] instead of [observe_or_default] because warning about
+     a failed warning can re-enter the same failing log backend and break the
+     caller contract. [Eio.Cancel.Cancelled] is still preserved. (#13096 review,
+     copilot P1; supersedes the single-try wrapping noted in codex P2.) *)
+  Telemetry_observe.observe_silent ~kind:"coord_telemetry_drop_log" (fun () ->
       Log.emit Log.Warn ~module_name:"Coord" ~details
         (Printf.sprintf
            "telemetry/audit dropped (non-Eio context): %s/%s"
            event_family event_kind));
-  Telemetry_observe.observe_or_default ~kind:"coord_telemetry_drop_metric"
-    ~default:() (fun () ->
+  Telemetry_observe.observe_silent ~kind:"coord_telemetry_drop_metric" (fun () ->
       Prometheus.inc_counter Prometheus.metric_coord_telemetry_drop
         ~labels:
           [ ("event_family", event_family); ("event_kind", event_kind) ]

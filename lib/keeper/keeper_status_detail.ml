@@ -986,6 +986,9 @@ let handle_keeper_status ctx args : tool_result =
            Keeper_runtime_trust_snapshot.snapshot_json
              ~config:ctx.config ~meta:m
          in
+         let attention_fields =
+           attention_fields_with_runtime_trust attention_fields runtime_trust
+         in
          let disposition =
            json_string_opt_member runtime_trust "disposition"
          in

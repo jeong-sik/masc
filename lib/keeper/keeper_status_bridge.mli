@@ -57,6 +57,9 @@ val runtime_blocker_fields_json :
 val attention_fields_json :
   Coord_utils.config -> keeper_meta -> (string * Yojson.Safe.t) list
 
+val attention_fields_with_runtime_trust :
+  (string * Yojson.Safe.t) list -> Yojson.Safe.t -> (string * Yojson.Safe.t) list
+
 val social_model_resolution_fields_json :
   keeper_meta -> (string * Yojson.Safe.t) list
 

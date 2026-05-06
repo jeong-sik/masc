@@ -1020,6 +1020,9 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                 Keeper_runtime_trust_snapshot.snapshot_json
                   ~config ~meta:m
               in
+              let attention_fields =
+                attention_fields_with_runtime_trust attention_fields runtime_trust
+              in
               let detail_fields =
                 if compact then []
                 else [

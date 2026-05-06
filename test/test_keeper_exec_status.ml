@@ -119,6 +119,57 @@ let test_keeper_status_helpers_tolerate_null_status_json () =
   check string "null surface inputs fall back offline" "offline"
     (ES.keeper_surface_status ~agent_status:`Null ~diagnostic:`Null)
 
+let assoc_member key fields =
+  match List.assoc_opt key fields with
+  | Some value -> value
+  | None -> `Null
+
+let test_attention_fields_promote_runtime_trust_attention () =
+  let fields =
+    [
+      ("needs_attention", `Bool false);
+      ("attention_reason", `Null);
+      ("next_human_action", `Null);
+    ]
+  in
+  let trust =
+    `Assoc
+      [
+        ("needs_attention", `Bool true);
+        ("attention_reason", `String "required_tool_use_unsatisfied");
+        ("next_human_action", `String "inspect_runtime_trust");
+      ]
+  in
+  let merged = KSB.attention_fields_with_runtime_trust fields trust in
+  check bool "trust attention promoted" true
+    (assoc_member "needs_attention" merged = `Bool true);
+  check string "trust reason promoted" "required_tool_use_unsatisfied"
+    (Yojson.Safe.Util.to_string (assoc_member "attention_reason" merged));
+  check string "trust action promoted" "inspect_runtime_trust"
+    (Yojson.Safe.Util.to_string (assoc_member "next_human_action" merged))
+
+let test_attention_fields_keep_existing_attention_reason () =
+  let fields =
+    [
+      ("needs_attention", `Bool true);
+      ("attention_reason", `String "approval_pending");
+      ("next_human_action", `String "resolve_approval");
+    ]
+  in
+  let trust =
+    `Assoc
+      [
+        ("needs_attention", `Bool true);
+        ("attention_reason", `String "runtime_trust_pause");
+        ("next_human_action", `String "inspect_runtime_trust");
+      ]
+  in
+  let merged = KSB.attention_fields_with_runtime_trust fields trust in
+  check string "existing reason preserved" "approval_pending"
+    (Yojson.Safe.Util.to_string (assoc_member "attention_reason" merged));
+  check string "existing action preserved" "resolve_approval"
+    (Yojson.Safe.Util.to_string (assoc_member "next_human_action" merged))
+
 (* --- keeper_health_state tests (online/offline mismatch fix) --- *)
 
 let make_agent_status ?(exists = true) ?(status = "active")
@@ -788,6 +839,10 @@ let () =
             test_keeper_surface_status_maps_dead_to_inactive;
           test_case "status helpers tolerate null status json" `Quick
             test_keeper_status_helpers_tolerate_null_status_json;
+          test_case "attention fields promote runtime trust attention" `Quick
+            test_attention_fields_promote_runtime_trust_attention;
+          test_case "attention fields keep existing attention reason" `Quick
+            test_attention_fields_keep_existing_attention_reason;
           test_case "runtime surface derives slot wait timeout blocker" `Quick
             test_runtime_surface_derives_autonomous_slot_wait_timeout_from_meta;
           test_case "runtime surface derives cascade exhausted blocker" `Quick

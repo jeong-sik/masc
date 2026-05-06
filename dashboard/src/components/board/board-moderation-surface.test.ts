@@ -138,6 +138,38 @@ describe('BoardModerationSurface', () => {
     expect(fetchQueueMock).toHaveBeenCalledTimes(2)
   })
 
+  it('locks queue controls while a flag submission is in flight', async () => {
+    const queuedEntry = {
+      entry_id: 'flag-2',
+      target_kind: 'comment',
+      target_id: 'comment-2',
+      reporter: 'operator',
+      reason: 'harassment',
+      flagged_at: 1_779_000_100,
+      flagged_at_iso: '2026-05-17T06:41:40.000Z',
+      resolved: false,
+    } satisfies Awaited<ReturnType<typeof flagBoardModerationTarget>>
+    let resolveFlag: (() => void) | null = null
+    flagTargetMock.mockImplementationOnce(() => new Promise(resolve => {
+      resolveFlag = () => resolve(queuedEntry)
+    }))
+    render(h(BoardModerationSurface, null))
+
+    await screen.findByText('post-1')
+    fireEvent.change(screen.getByTestId('moderation-target-kind'), { target: { value: 'comment' } })
+    fireEvent.input(screen.getByTestId('moderation-target-id'), { target: { value: ' comment-2 ' } })
+    fireEvent.change(screen.getByTestId('moderation-reason'), { target: { value: 'harassment' } })
+    fireEvent.click(screen.getByTestId('moderation-flag-submit'))
+
+    await waitFor(() => expect(flagTargetMock).toHaveBeenCalledTimes(1))
+    expect(screen.getByTestId('moderation-filter')).toBeDisabled()
+    expect(screen.getByLabelText('Refresh moderation queue')).toBeDisabled()
+    const completeFlag = resolveFlag as (() => void) | null
+    expect(completeFlag).not.toBeNull()
+    completeFlag?.()
+    await waitFor(() => expect(fetchQueueMock).toHaveBeenCalledTimes(2))
+  })
+
   it('submits an action for an unresolved queue entry', async () => {
     render(h(BoardModerationSurface, null))
 
@@ -151,5 +183,38 @@ describe('BoardModerationSurface', () => {
       reason: 'spam',
     }))
     expect(fetchQueueMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('locks queue controls while a moderation action is in flight', async () => {
+    const actionResult = {
+      entry: {
+        audit_id: 'audit-1',
+        target_kind: 'post',
+        target_id: 'post-1',
+        actor: 'operator',
+        action: 'hide',
+        reason: 'spam',
+        note: null,
+        acted_at: 1_779_000_200,
+        acted_at_iso: '2026-05-17T06:43:20.000Z',
+      },
+      delete_warning: null,
+    } satisfies Awaited<ReturnType<typeof submitBoardModerationAction>>
+    let resolveAction: (() => void) | null = null
+    submitActionMock.mockImplementationOnce(() => new Promise(resolve => {
+      resolveAction = () => resolve(actionResult)
+    }))
+    render(h(BoardModerationSurface, null))
+
+    await screen.findByText('post-1')
+    fireEvent.click(screen.getByTestId('moderation-action-flag-1-hide'))
+
+    await waitFor(() => expect(submitActionMock).toHaveBeenCalledTimes(1))
+    expect(screen.getByTestId('moderation-filter')).toBeDisabled()
+    expect(screen.getByLabelText('Refresh moderation queue')).toBeDisabled()
+    const completeAction = resolveAction as (() => void) | null
+    expect(completeAction).not.toBeNull()
+    completeAction?.()
+    await waitFor(() => expect(fetchQueueMock).toHaveBeenCalledTimes(2))
   })
 })

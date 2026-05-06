@@ -180,6 +180,7 @@ export function BoardModerationSurface() {
 
   const openCount = useMemo(() => entries.filter(entry => !entry.resolved).length, [entries])
   const canSubmit = targetId.trim() !== '' && !submitting
+  const queueControlsDisabled = loading || submitting || busyAction !== null
 
   const submitFlag = async (event: Event) => {
     event.preventDefault()
@@ -244,14 +245,14 @@ export function BoardModerationSurface() {
             ariaLabel="Moderation queue filter"
             testId="moderation-filter"
             class="!w-32 !py-1 !text-xs"
-            disabled=${loading}
+            disabled=${queueControlsDisabled}
             onInput=${(value: string) => setFilter(value as QueueFilter)}
           />
           <${ActionButton}
             variant="ghost"
             size="sm"
             onClick=${() => { void load() }}
-            disabled=${loading}
+            disabled=${queueControlsDisabled}
             ariaLabel="Refresh moderation queue"
           >
             <span class="inline-flex items-center gap-1.5">

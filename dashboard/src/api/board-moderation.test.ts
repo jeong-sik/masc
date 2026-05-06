@@ -46,20 +46,39 @@ describe('board moderation api', () => {
     }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const controller = new AbortController()
-    controller.abort()
     const result = await fetchBoardModerationQueue({
       resolved: false,
-      signal: controller.signal,
+      signal: new AbortController().signal,
     })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/board/moderation/queue?resolved=false')
-    expect(((fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.signal as AbortSignal | undefined)?.aborted).toBe(true)
+    const fetchSignal = (fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.signal as AbortSignal | undefined
+    expect(fetchSignal).toBeInstanceOf(AbortSignal)
+    expect(fetchSignal?.aborted).toBe(false)
     expect(result.count).toBe(2)
     expect(result.entries).toHaveLength(1)
     expect(result.entries[0]?.entry_id).toBe('flag-1')
     expect(result.entries[0]?.flagged_at_iso).toBe('2026-05-17T06:40:00.000Z')
+  })
+
+  it('rejects when a queue fetch is aborted in flight', async () => {
+    const controller = new AbortController()
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_, reject) => {
+      const signal = init?.signal as AbortSignal | undefined
+      signal?.addEventListener(
+        'abort',
+        () => reject(new DOMException('aborted', 'AbortError')),
+        { once: true },
+      )
+      controller.abort()
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchBoardModerationQueue({ signal: controller.signal })).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('flags a target through the dashboard moderation route', async () => {

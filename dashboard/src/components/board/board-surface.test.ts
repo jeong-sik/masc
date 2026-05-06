@@ -2,9 +2,9 @@ import { h } from 'preact'
 import { cleanup, fireEvent, render, screen } from '@testing-library/preact'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { BoardSurface } from './board-surface'
-import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter } from '../../store'
+import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter, boardHasMore, boardLoadingMore } from '../../store'
 import { route } from '../../router'
-import { boardHearths, boardHearthsError, contentCategory, newPostHearth, newPostSubmitting, showNewPostForm } from './board-state'
+import { PAGE_SIZE, boardHearths, boardHearthsError, categoryVisibleLimits, contentCategory, newPostHearth, newPostSubmitting, showNewPostForm } from './board-state'
 import type { BoardPost } from '../../types'
 
 import '@testing-library/jest-dom'
@@ -143,8 +143,14 @@ describe('BoardSurface Component', () => {
         headers: { 'Content-Type': 'application/json' },
       }),
     ))
+    vi.stubGlobal('IntersectionObserver', class {
+      observe = vi.fn()
+      disconnect = vi.fn()
+    })
     boardPosts.value = []
     boardLoading.value = false
+    boardHasMore.value = false
+    boardLoadingMore.value = false
     boardSortMode.value = 'recent'
     boardExcludeSystem.value = true
     boardExcludeAutomation.value = false
@@ -156,6 +162,12 @@ describe('BoardSurface Component', () => {
     showNewPostForm.value = false
     newPostHearth.value = ''
     newPostSubmitting.value = false
+    categoryVisibleLimits.value = {
+      article: PAGE_SIZE,
+      review: PAGE_SIZE,
+      notice: PAGE_SIZE,
+      system: PAGE_SIZE,
+    }
     route.value = { params: {} } as any
   })
 
@@ -290,5 +302,45 @@ describe('BoardSurface Component', () => {
     render(h(BoardSurface, null))
 
     expect(screen.getByRole('button', { name: '취소' })).toBeDisabled()
+  })
+
+  it('uses shared cursor pagination for category expansion', () => {
+    boardPosts.value = Array.from({ length: PAGE_SIZE + 1 }, (_, index) => makePost({
+      id: `post-${index}`,
+      title: `기술 탐색: topic ${index}`,
+      body: 'exploration content here',
+      author: 'keeper',
+      post_kind: 'direct',
+    }))
+
+    render(h(BoardSurface, null))
+
+    const nav = screen.getByRole('navigation', { name: '글/분석 게시글 페이지' })
+    expect(nav).toBeInTheDocument()
+    expect(nav.textContent).toContain('표시')
+    fireEvent.click(screen.getByRole('button', { name: /더 보기/ }))
+
+    expect(categoryVisibleLimits.value.article).toBe(PAGE_SIZE * 2)
+  })
+
+  it('lets category pagination collapse an expanded category', () => {
+    categoryVisibleLimits.value = {
+      article: PAGE_SIZE * 2,
+      review: PAGE_SIZE,
+      notice: PAGE_SIZE,
+      system: PAGE_SIZE,
+    }
+    boardPosts.value = Array.from({ length: PAGE_SIZE * 2 + 1 }, (_, index) => makePost({
+      id: `post-${index}`,
+      title: `기술 탐색: topic ${index}`,
+      body: 'exploration content here',
+      author: 'keeper',
+      post_kind: 'direct',
+    }))
+
+    render(h(BoardSurface, null))
+    fireEvent.click(screen.getByRole('button', { name: '줄이기' }))
+
+    expect(categoryVisibleLimits.value.article).toBe(PAGE_SIZE)
   })
 })

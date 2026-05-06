@@ -127,8 +127,9 @@ describe('Pagination', () => {
 describe('CursorPagination', () => {
   it('renders cursor and labels', () => {
     const container = document.createElement('div')
-    render(h(CursorPagination, { cursor: 'evt-123' }), container)
+    render(h(CursorPagination, { cursor: 'evt-123', cursorLabel: 'window' }), container)
     expect(container.textContent).toContain('evt-123')
+    expect(container.textContent).toContain('window')
     expect(container.textContent).toContain('Older')
     expect(container.textContent).toContain('Newer')
   })

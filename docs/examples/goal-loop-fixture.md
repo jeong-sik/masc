@@ -255,6 +255,8 @@ python3 scripts/goal_loop_completion_audit.py \
   /tmp/goal-loop-status-audit.json \
   --structured-id-triage test/fixtures/goal_loop/structured-id-triage.external-claim.json \
   --row-corpus-discovery test/fixtures/goal_loop/row-corpus-discovery.external-claim.json \
+  --prompt-closeout-checklist test/fixtures/goal_loop/prompt-closeout-checklist.external-claim.json \
+  --source-row-candidate-inventory test/fixtures/goal_loop/source-row-candidate-inventory.external-claim.json \
   --require-complete \
   --format text
 ```
@@ -309,4 +311,8 @@ with 206 itemized findings and zero missing rows.
 When the Verify input is replaced with a live post-ACT artifact that carries
 the required evidence-window metadata, `post_act_verify_complete` can pass.
 The closeout audit must still remain `BLOCKED` until
-`strict_row_level_catalog_complete` passes for the full 206-row corpus.
+`strict_row_level_catalog_complete` passes for the full 206-row corpus and
+`prompt_requirements_closeout_complete` passes for every prompt-mapped
+requirement. The `prompt_to_artifact_checklist_recorded` criterion only proves
+that the prompt-to-artifact map is present; it is not a completion proxy while
+the checklist still contains `PARTIAL` or `BLOCKED` requirements.

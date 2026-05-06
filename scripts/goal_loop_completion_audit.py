@@ -899,12 +899,44 @@ def build_completion_audit(
             audit_catalog,
             prompt_closeout_checklist,
         )
+        checklist_status_counts = checklist_evidence.get("status_counts", {})
+        checklist_status_counts = (
+            checklist_status_counts if isinstance(checklist_status_counts, dict) else {}
+        )
+        requirements_total = as_int(checklist_evidence.get("requirements_total"))
+        prompt_requirements_passed = (
+            checklist_passed
+            and requirements_total > 0
+            and as_int(checklist_status_counts.get("PASS")) == requirements_total
+            and as_int(checklist_status_counts.get("PARTIAL")) == 0
+            and as_int(checklist_status_counts.get("BLOCKED")) == 0
+        )
         criteria.append(
             criterion(
                 "prompt_to_artifact_checklist_recorded",
                 checklist_passed,
                 "Prompt requirements are mapped to concrete artifacts and blockers.",
                 checklist_evidence,
+            )
+        )
+        criteria.append(
+            criterion(
+                "prompt_requirements_closeout_complete",
+                prompt_requirements_passed,
+                "Every prompt-mapped requirement is fully satisfied.",
+                {
+                    "checklist_id": checklist_evidence.get("checklist_id"),
+                    "checklist_recorded": checklist_passed,
+                    "requirements_total": requirements_total,
+                    "status_counts": checklist_status_counts,
+                    "incomplete_requirements": as_int(
+                        checklist_status_counts.get("PARTIAL")
+                    )
+                    + as_int(checklist_status_counts.get("BLOCKED")),
+                    "has_strict_corpus_blocker": checklist_evidence.get(
+                        "has_strict_corpus_blocker"
+                    ),
+                },
             )
         )
     blockers = [item.criterion_id for item in criteria if item.status == "FAIL"]

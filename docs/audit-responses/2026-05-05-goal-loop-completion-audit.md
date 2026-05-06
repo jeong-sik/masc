@@ -132,9 +132,10 @@
   --row-corpus-discovery
   test/fixtures/goal_loop/row-corpus-discovery.external-claim.json
   --require-complete --format text` checked at 2026-05-06T09:38:37+09:00,
-  confidence High: exits non-zero with the single explicit blocker
-  `strict_row_level_catalog_complete`, while preserving PASS evidence for
-  source manifest coverage, source artifact validation, source identity,
+  confidence High: in this pre-checklist invocation, exits non-zero with the
+  single explicit blocker `strict_row_level_catalog_complete`, while preserving
+  PASS evidence for source manifest coverage, source artifact validation,
+  source identity,
   aggregate claim source verification, aggregate reconciliation, strict
   source/catalog ID sync, broader structured-ID ownership triage, and
   post-ACT Verify. The row-corpus discovery manifest is attached as evidence
@@ -235,8 +236,26 @@
   across all 12 prompt source documents: 2 `PASS`, 11 `PARTIAL`, and 2 `BLOCKED`
   requirements, with the strict 206-row corpus explicitly bound to
   `strict_row_level_catalog_complete`.
+- [근거] `python3 scripts/goal_loop_completion_audit.py
+  /tmp/goal-loop-13266-b367-status-audit.json --structured-id-triage
+  test/fixtures/goal_loop/structured-id-triage.external-claim.json
+  --row-corpus-discovery
+  test/fixtures/goal_loop/row-corpus-discovery.external-claim.json
+  --prompt-closeout-checklist
+  test/fixtures/goal_loop/prompt-closeout-checklist.external-claim.json
+  --source-row-candidate-inventory
+  test/fixtures/goal_loop/source-row-candidate-inventory.external-claim.json
+  --require-complete --format text` checked at 2026-05-06T15:17:35+09:00,
+  confidence High: exits non-zero with two closeout blockers:
+  `strict_row_level_catalog_complete` and
+  `prompt_requirements_closeout_complete`. The first blocker proves the real
+  strict 206-row corpus is still missing. The second blocker prevents the
+  prompt objective from being marked complete while the recorded checklist
+  still has 11 `PARTIAL` and 2 `BLOCKED` prompt requirements. The
+  `prompt_to_artifact_checklist_recorded` criterion remains `PASS`; recording
+  the map is separate from satisfying every mapped prompt requirement.
 - [근거] `python3 test/test_goal_loop_completion_audit.py` checked at
-  2026-05-06T14:35:29+09:00, confidence High: the completion audit accepts
+  2026-05-06T15:17:35+09:00, confidence High: the completion audit accepts
   optional `--strict-row-corpus` and `--source-row-candidate-inventory`
   artifacts, validates catalog identity and internal totals, and still does not
   use either artifact as a proxy for completion. A synthetic valid 206-row
@@ -245,7 +264,11 @@
   candidates and 7 checked source files that do not; the closeout remains
   `BLOCKED` while Orient still reports only 19 itemized rows. Invalid supplied
   corpora or inconsistent source-row inventories block
-  `strict_row_level_catalog_complete`.
+  `strict_row_level_catalog_complete`. The same test suite now verifies that a
+  recorded prompt checklist is not itself a completion proxy: the separate
+  `prompt_requirements_closeout_complete` criterion fails while any mapped
+  requirement remains `PARTIAL` or `BLOCKED`, and passes only when every mapped
+  requirement is `PASS`.
 - [근거] `python3 test/test_observe_goal_loop_logs.py` checked at
   2026-05-06T14:43:35+09:00, confidence High: the strict-row corpus validator
   now binds row sources to the audit catalog external-source manifest when a

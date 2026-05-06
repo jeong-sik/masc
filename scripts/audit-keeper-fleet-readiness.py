@@ -957,7 +957,7 @@ def scan_keeper_board_posts(
     return latest_ts, board_post_evidence, product_evidence, design_evidence
 
 
-def tool_call_paths(base_path: Path) -> list[Path]:
+def global_tool_call_paths(base_path: Path) -> list[Path]:
     calls_dir = base_path / ".masc" / "tool_calls"
     if not calls_dir.exists():
         return []
@@ -1020,7 +1020,7 @@ def scan_keeper_evidence(
         complete_lifecycle_evidence(pr_lifecycle_evidence)
         and complete_lifecycle_evidence(docker_pr_lifecycle_evidence)
     ):
-        for calls in tool_call_paths(base_path):
+        for calls in global_tool_call_paths(base_path):
             for row in iter_jsonl(calls):
                 if row.get("keeper") != name:
                     continue

@@ -379,6 +379,18 @@ let metric_backend_mutex_acquire_sec =
 let metric_backend_mutex_held_sec =
   "masc_backend_mutex_held_sec"
 
+let backend_mutex_observers_installed = ref false
+
+let install_backend_mutex_observers () =
+  if not !backend_mutex_observers_installed then begin
+    Backend.FileSystem.set_mutex_observers
+      ~acquire:(fun ~op ~seconds ->
+        observe_histogram metric_backend_mutex_acquire_sec ~labels:[("op", op)] seconds)
+      ~held:(fun ~op ~seconds ->
+        observe_histogram metric_backend_mutex_held_sec ~labels:[("op", op)] seconds);
+    backend_mutex_observers_installed := true
+  end
+
 (* P-DASH-02: turn queue depth gauge.  Semaphore waiters are
    observable via [autonomous_waiter_snapshot_for_test] but were
    only emitted as a debug log line.  Surfacing as a gauge lets
@@ -2616,7 +2628,8 @@ let init () =
      gRPC Subscribe. Subset of grpc_events_delivered; the difference \
      between scanned-lines and replayed-events isolates wasted \
      scan cost."
-    Counter
+    Counter;
+  install_backend_mutex_observers ()
 
 let start_time = Time_compat.now ()
 

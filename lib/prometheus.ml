@@ -683,6 +683,8 @@ let metric_keeper_turn_error_after_tools =
   "masc_keeper_turn_error_after_tools_total"
 let metric_keeper_cascade_sync_failures =
   "masc_keeper_cascade_sync_failures_total"
+let metric_keeper_local_discovery_failures =
+  "masc_keeper_local_discovery_failures_total"
 let metric_keeper_thinking_persist_failures =
   "masc_keeper_thinking_persist_failures_total"
 let metric_keeper_checkpoint_failures =
@@ -1962,6 +1964,10 @@ let init () =
   add metric_keeper_cascade_sync_failures
     "Total cascade state synchronization failures (pause/resume/auto-pause). \
      Labeled by keeper and site."
+    Counter;
+  add metric_keeper_local_discovery_failures
+    "Total local discovery readiness failures observed during create/turn \
+     paths. Labeled by keeper and site."
     Counter;
   add metric_keeper_thinking_persist_failures
     "Total thinking content persistence failures in keeper_agent_run. \

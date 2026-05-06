@@ -630,6 +630,7 @@ let generate_compact ?(scope = All) (config : Coord_utils.config) : string =
         + (Prometheus.metric_total Prometheus.metric_keeper_turn_cleanup_failures |> int_of_float)
         + (Prometheus.metric_total Prometheus.metric_keeper_cleanup_tracking_failures |> int_of_float)
         + (Prometheus.metric_total Prometheus.metric_keeper_cascade_sync_failures |> int_of_float)
+        + (Prometheus.metric_total Prometheus.metric_keeper_local_discovery_failures |> int_of_float)
         + (Prometheus.metric_total Prometheus.metric_keeper_thinking_persist_failures |> int_of_float)
         + (Prometheus.metric_total Prometheus.metric_keeper_checkpoint_failures |> int_of_float)
         + (Prometheus.metric_total Prometheus.metric_keeper_memory_write_failures |> int_of_float)

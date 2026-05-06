@@ -51,6 +51,57 @@ let write_meta_exn config meta =
   | Ok () -> ()
   | Error err -> fail ("write_meta failed: " ^ err)
 
+let source_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root -> root
+  | None -> Sys.getcwd ()
+
+let load_source rel =
+  let path = Filename.concat (source_root ()) rel in
+  if not (Sys.file_exists path) then
+    failwith (Printf.sprintf "source file not found: %s" path);
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> In_channel.input_all ic)
+
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0 then true
+  else
+    let rec loop idx =
+      idx + needle_len <= haystack_len
+      &&
+      (String.sub haystack idx needle_len = needle || loop (idx + 1))
+    in
+    loop 0
+
+(* Whitespace-insensitive substring check: collapses every run of ASCII
+   whitespace in both the haystack and needle to a single space before
+   comparing. Used by source-contract assertions so OCamlformat
+   reflowing the offending pattern (e.g. moving an [ignore (...)]
+   onto one line vs. two) doesn't mask a regression. *)
+let contains_substring_ws_insensitive haystack needle =
+  let collapse s =
+    let buf = Buffer.create (String.length s) in
+    let in_ws = ref true in
+    String.iter
+      (fun c ->
+        match c with
+        | ' ' | '\t' | '\n' | '\r' ->
+            if not !in_ws then begin
+              Buffer.add_char buf ' ';
+              in_ws := true
+            end
+        | _ ->
+            Buffer.add_char buf c;
+            in_ws := false)
+      s;
+    Buffer.contents buf
+  in
+  contains_substring (collapse haystack) (collapse needle)
+
 let test_bootstrap_write_retries_and_preserves_heartbeat_fields () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -98,6 +149,24 @@ let test_bootstrap_write_retries_and_preserves_heartbeat_fields () =
       check bool "version advanced past heartbeat write" true
         (final.meta_version > heartbeat_write.meta_version))
 
+let test_create_keeper_observes_local_discovery_refresh_source () =
+  let src = load_source "lib/keeper/keeper_turn_up_create.ml" in
+  (* Use whitespace-insensitive match so OCamlformat's choice of
+     newlines/indent for the [ignore (...)] form does not silently
+     mask a regression. *)
+  check bool "create path no longer discards local discovery refresh" false
+    (contains_substring_ws_insensitive
+       src
+       "ignore (Cascade_runtime.refresh_local_discovery_if_possible");
+  check bool "create path uses local discovery helper" true
+    (contains_substring
+       src
+       "Keeper_turn_helpers.ensure_local_discovery_ready");
+  check bool "create path labels observable refresh failures" true
+    (contains_substring src "create_local_discovery_refresh");
+  check bool "create path uses dedicated local discovery metric" true
+    (contains_substring src "metric_keeper_local_discovery_failures")
+
 let () =
   run "keeper_turn_up_create bootstrap meta CAS retry"
     [
@@ -107,5 +176,12 @@ let () =
             "retries stale bootstrap write and keeps heartbeat fields"
             `Quick
             test_bootstrap_write_retries_and_preserves_heartbeat_fields;
+        ] );
+      ( "source_contracts",
+        [
+          test_case
+            "create_keeper observes local discovery refresh failures"
+            `Quick
+            test_create_keeper_observes_local_discovery_refresh_source;
         ] );
     ]

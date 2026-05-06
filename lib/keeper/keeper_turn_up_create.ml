@@ -309,9 +309,25 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                   (Keeper_cascade_profile.Runtime_name
                      Keeper_config.default_cascade_name)
               in
-              ignore
-                (Cascade_runtime.refresh_local_discovery_if_possible
-                   cascade_models);
+              (match
+                 Keeper_turn_helpers.ensure_local_discovery_ready
+                   cascade_models
+               with
+               | Ok () -> ()
+               | Error msg ->
+                   Log.Keeper.warn
+                     "create_keeper local discovery refresh incomplete for \
+                      name=%s: %s"
+                     p.name
+                     msg;
+                   Prometheus.inc_counter
+                     Prometheus.metric_keeper_local_discovery_failures
+                     ~labels:
+                       [
+                         ("keeper", p.name);
+                         ("site", "create_local_discovery_refresh");
+                       ]
+                     ());
               let primary_max_context =
                 match p.max_context_override_opt with
                 | Some v -> v

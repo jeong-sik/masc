@@ -6,11 +6,7 @@
 
 type status = Pass | Warn | Fail
 
-type tool_stat = {
-  name : string;
-  calls : int;
-  success_pct : float;
-}
+type tool_stat = { name : string; calls : int; success_pct : float }
 
 type keeper_snapshot = {
   keeper_name : string;
@@ -37,8 +33,7 @@ let overall_status statuses =
   else if List.exists (( = ) Warn) statuses then Warn
   else Pass
 
-let clamp_float ~low ~high value =
-  max low (min high value)
+let clamp_float ~low ~high value = max low (min high value)
 
 let json_string_list values =
   `List (List.map (fun value -> `String value) values)

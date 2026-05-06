@@ -401,8 +401,10 @@ let read_pid_file path =
       in
       let pid_line = input_line_opt ic in
       let pgid_line = input_line_opt ic in
-      let parse_int line =
-        line |> Option.map String.trim |> Option.bind int_of_string_opt
+      let parse_int = function
+        | None -> None
+        | Some line -> (
+            try Some (int_of_string (String.trim line)) with Failure _ -> None)
       in
       match parse_int pid_line, parse_int pgid_line with
       | Some pid, Some pgid -> Some (pid, pgid)

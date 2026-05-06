@@ -459,12 +459,15 @@ let attention_fields_with_runtime_trust attention_fields runtime_trust =
               | Some _ as value -> value
               | None -> Some "inspect_runtime_trust"))
     in
-    attention_fields
-    |> assoc_upsert "needs_attention" (`Bool true)
-    |> assoc_upsert "attention_reason"
-         (Json_util.string_opt_to_json attention_reason)
-    |> assoc_upsert "next_human_action"
-         (Json_util.string_opt_to_json next_human_action)
+    let attention_fields =
+      assoc_upsert attention_fields "needs_attention" (`Bool true)
+    in
+    let attention_fields =
+      assoc_upsert attention_fields "attention_reason"
+        (Json_util.string_opt_to_json attention_reason)
+    in
+    assoc_upsert attention_fields "next_human_action"
+      (Json_util.string_opt_to_json next_human_action)
 
 let trimmed_string_json value =
   let trimmed = String.trim value in

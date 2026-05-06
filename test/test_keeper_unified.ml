@@ -4564,6 +4564,21 @@ let test_degraded_rotation_after_recoverable_error_filters_required_catalog_dire
   expect_degraded_retry "required catalog classifier rotation"
     "big_three" "required_tool_contract_violation" degraded_retry
 
+let test_degraded_rotation_preserves_local_recovery_profile_hint_for_required_tool
+    () =
+  let degraded_retry =
+    EC.degraded_rotation_after_recoverable_error
+      ~rotation_cascades:[ "big_three"; "local_recovery" ]
+      ~fallback_hint:"local_recovery"
+      ~base_cascade:"tier_fast"
+      ~effective_cascade:"keeper_bound_safe"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
+      ~attempted_cascades:[ "tier_fast"; "keeper_bound_safe"; "big_three" ]
+      (required_tool_contract_violation_error ())
+  in
+  expect_degraded_retry "required local_recovery fallback profile"
+    "local_recovery" "required_tool_contract_violation" degraded_retry
+
 let test_degraded_rotation_after_recoverable_error_normalizes_catalog_directly () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
@@ -7879,6 +7894,10 @@ let () =
           test_case "classifier filters required-tool catalog rotation"
             `Quick
             test_degraded_rotation_after_recoverable_error_filters_required_catalog_directly;
+          test_case
+            "classifier preserves explicit local_recovery fallback profile"
+            `Quick
+            test_degraded_rotation_preserves_local_recovery_profile_hint_for_required_tool;
           test_case "classifier normalizes catalog rotation"
             `Quick
             test_degraded_rotation_after_recoverable_error_normalizes_catalog_directly;

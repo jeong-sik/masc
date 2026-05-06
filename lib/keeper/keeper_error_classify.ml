@@ -293,8 +293,15 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
 
 let normalized_cascade_name name =
   let trimmed = String.trim name in
+  let is_live_catalog_profile =
+    List.exists (String.equal trimmed) (Keeper_cascade_profile.catalog_names ())
+  in
+  (* Fallback candidates are concrete catalog profiles, not keeper-declared
+     logical routes.  Preserve live profile names like [local_recovery] so a
+     fallback_cascade does not collapse back to routes.phase_recovery. *)
   if
-    String.equal trimmed Keeper_config.local_only_cascade_name
+    is_live_catalog_profile
+    || String.equal trimmed Keeper_config.local_only_cascade_name
     || String.equal trimmed Keeper_config.local_recovery_cascade_name
     || String.equal trimmed Keeper_config.tool_use_strict_cascade_name
   then trimmed
@@ -302,19 +309,18 @@ let normalized_cascade_name name =
 
 let required_tool_rotation_candidate name =
   let normalized = normalized_cascade_name name in
-  let default_cascade = Keeper_config.default_cascade_name in
   let routed_local_only_is_distinct =
-    not (String.equal Keeper_config.local_only_cascade_name default_cascade)
-  in
-  let routed_local_recovery_is_distinct =
     not
-      (String.equal Keeper_config.local_recovery_cascade_name default_cascade)
+      (String.equal
+         Keeper_config.local_only_cascade_name
+         Keeper_config.default_cascade_name)
   in
+  (* Required-tool turns may still use [local_recovery] when the catalog
+     declares it as a tool-capable fallback profile; only the buffer/local-only
+     lane is filtered here. *)
   not
     ((routed_local_only_is_distinct
-      && String.equal normalized Keeper_config.local_only_cascade_name)
-     || (routed_local_recovery_is_distinct
-         && String.equal normalized Keeper_config.local_recovery_cascade_name))
+      && String.equal normalized Keeper_config.local_only_cascade_name))
 
 let legacy_degraded_rotation_candidates
     ~(base_cascade : string)

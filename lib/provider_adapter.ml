@@ -1473,6 +1473,9 @@ let provider_label_of_config (cfg : Llm_provider.Provider_config.t) =
   | Some adapter -> adapter.cascade_prefix
   | None -> provider_label_from_registry cfg
 
+let provider_health_key_of_config cfg =
+  provider_label_of_config cfg
+
 let display_provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
   display_provider_name (provider_label_of_config cfg)
 

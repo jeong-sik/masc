@@ -774,6 +774,18 @@ let weighted_shuffle
       in
       selected :: sorted_remaining
 
+(** Extract the provider-level health key for a "provider:model" string.
+    Circuit-breaker state is per provider, not per model id, so
+    ["claude_code:auto"] and ["claude_code:sonnet"] share a key while
+    ["claude_code:auto"] and ["gemini_cli:auto"] remain independent. *)
+let provider_key_of_model_string s =
+  match parse_model_string s with
+  | Some cfg -> Provider_adapter.provider_health_key_of_config cfg
+  | None -> (
+      match String.split_on_char ':' s with
+      | provider :: _rest when String.trim provider <> "" -> String.trim provider
+      | _ -> s)
+
 let order_weighted_entries
     ?(rand_int = weighted_random_int)
     ?rotation_scope
@@ -789,13 +801,7 @@ let order_weighted_entries
     let health = Cascade_health_tracker.global in
     let health_adjusted = List.map
         (fun (e : Cascade_config_loader.weighted_entry) ->
-           (* Extract model_id from "provider:model_id" to match the key
-              used by the cascade runtime (cfg.model_id; see
-              cascade_runtime.ml + cascade_strategy.ml). *)
-           let provider_key = match String.split_on_char ':' e.model with
-             | _ :: rest when rest <> [] -> String.concat ":" rest
-             | _ -> e.model
-           in
+           let provider_key = provider_key_of_model_string e.model in
            let ew = Cascade_health_tracker.effective_weight health
                ~provider_key ~config_weight:e.weight in
            { e with weight = ew })
@@ -873,13 +879,6 @@ type selection_trace = {
   candidates : candidate_info list;
   source : cascade_source;
 }
-
-(** Extract the provider_key the health tracker uses for a "provider:model"
-    string. Mirrors the derivation in {!order_weighted_entries}. *)
-let provider_key_of_model_string s =
-  match String.split_on_char ':' s with
-  | _ :: rest when rest <> [] -> String.concat ":" rest
-  | _ -> s
 
 let display_model_string s =
   match split_provider_model s with

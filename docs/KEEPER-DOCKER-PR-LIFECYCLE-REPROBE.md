@@ -127,6 +127,14 @@ Useful scoped runs:
   --mutate \
   --keeper-names sangsu,executor,verifier \
   --max-keepers 3
+
+./scripts/harness_keeper_docker_pr_lifecycle_reprobe.sh \
+  --mutate \
+  --phase review \
+  --review-resume \
+  --keeper-names sangsu,verifier \
+  --run-id keeper-docker-pr-lifecycle-fork-live-20260507-remat \
+  --run-dir /private/tmp/keeper-docker-pr-lifecycle-fork-live-20260507-remat
 ```
 
 The prompt requires keepers to stay on draft proof PRs:
@@ -143,3 +151,9 @@ operator evidence, but it is not completion unless the Docker lifecycle audit
 also passes for the expected fleet. The reprobe audit is run-id scoped, so stale
 PR lifecycle evidence from earlier keeper proof runs cannot satisfy a fresh
 run.
+
+Use `--phase review --review-resume` only after create proof PRs already exist
+for the run id and should be reviewed without creating another proof branch.
+The resume path intentionally still resolves target PRs keeper-side; if a target
+PR was closed or never existed, the review phase must report a blocker instead
+of manufacturing approve evidence.

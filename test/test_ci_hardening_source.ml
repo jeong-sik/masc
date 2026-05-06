@@ -1205,6 +1205,21 @@ let test_keeper_required_tool_contracts () =
           "skipping review phase because create phase did not produce complete success evidence"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
           "`create-readiness-failures.jsonl`");
+  check bool "docker PR lifecycle supports review-only resume" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       {|PHASE_MODE="${PHASE_MODE:-both}"|}
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          {|--phase create|review|both|}
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          {|--review-resume|}
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          {|if [[ "$REVIEW_RESUME" == "1" ]] || all_create_results_ready_for_review; then|}
+     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+          "`--phase review --review-resume`");
   check bool "keeper msg schema documents required_tool_names alias" true
     (file_contains_pattern "lib/keeper/keeper_schema.ml"
        "required_tool_names")

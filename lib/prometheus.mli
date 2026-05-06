@@ -382,6 +382,10 @@ val metric_telemetry_unified_source_read_failures : string
     [source] is {!Telemetry_unified.source_to_string}; [site] is a bounded
     read/discovery call-site vocabulary. *)
 
+val metric_tool_assignment_telemetry_failures : string
+(** Total tool-assignment telemetry decode/read failures. Labels:
+    [site] is a bounded read/warm-up call-site vocabulary. *)
+
 val metric_coord_telemetry_drop : string
 (** #10358 (c1): total times [lib/coord.ml]'s lifecycle hook caught
     [Stdlib.Effect.Unhandled] and dropped its Audit_log + Telemetry

@@ -335,6 +335,7 @@ class GoalLoopStatusTest(unittest.TestCase):
                 },
                 "findings": [],
                 "audit_catalog": {
+                    "catalog_id": "goal-loop-206-audit-external-claim-2026-05-05",
                     "status": "COMPLETE",
                     "expected_findings_total": 206,
                     "itemized_findings_total": 206,
@@ -384,6 +385,10 @@ class GoalLoopStatusTest(unittest.TestCase):
 
         self.assertEqual(report.phases["orient"].status, "ok")
         audit_catalog = report.phases["orient"].summary["audit_catalog"]
+        self.assertEqual(
+            audit_catalog["catalog_id"],
+            "goal-loop-206-audit-external-claim-2026-05-05",
+        )
         self.assertTrue(audit_catalog["strict_row_corpus_provided"])
         self.assertTrue(audit_catalog["strict_row_corpus_validated"])
         self.assertEqual(audit_catalog["strict_row_corpus_row_count"], 206)

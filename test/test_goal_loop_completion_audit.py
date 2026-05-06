@@ -44,6 +44,7 @@ def complete_status() -> dict[str, object]:
             "orient": {
                 "summary": {
                     "audit_catalog": {
+                        "catalog_id": "goal-loop-206-audit-external-claim-2026-05-05",
                         "status": "COMPLETE",
                         "expected_findings_total": 206,
                         "itemized_findings_total": 206,
@@ -401,6 +402,7 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         assert isinstance(second, dict)
         assert isinstance(third, dict)
         second["finding_id"] = first["finding_id"]
+        corpus["source_catalog_id"] = "wrong-catalog"
         source = third["source"]
         assert isinstance(source, dict)
         source["path"] = "/Users/dancer/Downloads/GOAL_LOOP_INTEGRATION.md"
@@ -418,6 +420,7 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         ]
         self.assertFalse(corpus_evidence["validated"])
         self.assertIn("finding_ids_must_be_unique", corpus_evidence["errors"])
+        self.assertIn("source_catalog_id_mismatch", corpus_evidence["errors"])
         self.assertIn("contains_user_local_path", corpus_evidence["errors"])
         self.assertIn(
             "source_paths_must_be_logical_prompt_corpus_paths",

@@ -174,6 +174,7 @@ def summarize_orient(orient: dict[str, Any] | None) -> PhaseStatus:
             strict_row_corpus_raw if isinstance(strict_row_corpus_raw, dict) else None
         )
         audit_catalog_summary = {
+            "catalog_id": audit_catalog.get("catalog_id"),
             "status": audit_catalog.get("status", "unknown"),
             "expected_findings_total": audit_catalog.get("expected_findings_total"),
             "itemized_findings_total": audit_catalog.get("itemized_findings_total"),

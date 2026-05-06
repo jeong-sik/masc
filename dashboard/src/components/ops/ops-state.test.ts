@@ -84,9 +84,11 @@ describe('ops-state', () => {
   })
 
   it('extracts structured state block keys', () => {
-    const message = '[STATE]\nGoal: ship\nPhase: review\nNext: watch CI\nBlocker: none\n[/STATE]'
-    expect(stateBlockKeys(message)).toEqual(['Goal', 'Phase', 'Next', 'Blocker'])
+    const message = '[STATE]\nGoal: ship\nPhase: review\nNEXT: watch CI\nBlocker: none\nOpenQuestions: risk?\nConstraints: no downtime\n[/STATE]'
+    expect(stateBlockKeys(message)).toEqual(['Goal', 'NEXT', 'OpenQuestions', 'Constraints'])
     expect(hasStateBlock(message)).toBe(true)
+    expect(hasStateBlock(STATE_BLOCK_TEMPLATE)).toBe(false)
+    expect(hasStateBlock('[STATE]\nPhase: review\nBlocker: none\n[/STATE]')).toBe(false)
     expect(hasStateBlock('Goal: ship')).toBe(false)
   })
 

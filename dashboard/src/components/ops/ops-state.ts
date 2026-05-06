@@ -22,11 +22,30 @@ export const hydratedWorkflowId = signal<string | null>(null)
 // 'namespace' = broadcast, 'keeper:{name}' = keeper_message
 export type QuickComposerMode = 'broadcast' | 'dm' | 'state'
 
-export const STATE_BLOCK_TEMPLATE = '[STATE]\nGoal: \nPhase: \nNext: \nBlocker: \n[/STATE]'
+export const STATE_BLOCK_TEMPLATE = [
+  '[STATE]',
+  'Goal: ',
+  'DONE: ',
+  'NEXT: ',
+  'Decisions: ',
+  'OpenQuestions: ',
+  'Constraints: ',
+  '[/STATE]',
+].join('\n')
 
 export const quickTarget = signal('namespace')
 export const quickMessage = signal('')
 export const quickComposerMode = signal<QuickComposerMode>('broadcast')
+
+const STATE_BLOCK_KEYS: Record<string, string> = {
+  constraints: 'Constraints',
+  decisions: 'Decisions',
+  done: 'DONE',
+  goal: 'Goal',
+  next: 'NEXT',
+  openquestions: 'OpenQuestions',
+  progress: 'Progress',
+}
 
 export function composerModeForFocus(focus?: string | null): QuickComposerMode | null {
   switch (focus?.trim().toLowerCase()) {
@@ -54,9 +73,12 @@ export function stateBlockKeys(message: string): string[] {
   const seen = new Set<string>()
   const keys: string[] = []
   for (const line of body.split(/\r?\n/)) {
-    const match = line.match(/^\s*([A-Za-z][A-Za-z0-9 _-]{0,31})\s*:/)
-    const key = match?.[1]?.trim()
-    if (!key || seen.has(key)) continue
+    const match = line.match(/^\s*([A-Za-z][A-Za-z0-9 _-]{0,31})\s*:\s*(.*)$/)
+    const rawKey = match?.[1]?.trim()
+    const value = match?.[2]?.trim()
+    const normalized = rawKey?.replace(/\s+/g, '').toLowerCase()
+    const key = normalized ? STATE_BLOCK_KEYS[normalized] : null
+    if (!key || !value || seen.has(key)) continue
     seen.add(key)
     keys.push(key)
   }

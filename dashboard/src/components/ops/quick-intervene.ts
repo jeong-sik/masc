@@ -1,7 +1,7 @@
 // QuickIntervene: operational composer for broadcast, keeper DM, and state blocks.
 
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { CARD_STANDARD } from '../common/card'
 import { ActionButton } from '../common/button'
 import { TextArea, TextInput } from '../common/input'
@@ -61,6 +61,17 @@ function mentionQueryFromMessage(message: string): string | null {
   return match?.[1] ?? null
 }
 
+function trailingMentionNameFromMessage(message: string): string | null {
+  const match = message.match(/(?:^|\s)@([A-Za-z0-9_.-]+)\s*$/)
+  return match?.[1] ?? null
+}
+
+function onlineKeeperNameForMention(onlineKeepers: OnlineKeeper[], mentionName: string | null): string | null {
+  if (!mentionName) return null
+  const normalized = mentionName.toLowerCase()
+  return onlineKeepers.find(keeper => keeper.name.toLowerCase() === normalized)?.name ?? null
+}
+
 function mentionCandidates(onlineKeepers: OnlineKeeper[], query: string | null, selectedKeeper: string | null): MentionCandidate[] {
   const normalizedQuery = query?.toLowerCase() ?? ''
   return onlineKeepers
@@ -103,9 +114,12 @@ function selectComposerMode(mode: QuickComposerMode, onlineKeepers: OnlineKeeper
   if (mode === 'state') quickMessage.value = ensureStateBlockDraft(quickMessage.value)
 }
 
-function parseComposerTarget(mode: QuickComposerMode): ComposerTarget | null {
+function parseComposerTarget(mode: QuickComposerMode, onlineKeepers: OnlineKeeper[]): ComposerTarget | null {
   if (mode === 'dm') {
-    const name = keeperNameFromTarget(quickTarget.value)
+    const typedMention = trailingMentionNameFromMessage(quickMessage.value)
+    const typedMentionTarget = onlineKeeperNameForMention(onlineKeepers, typedMention)
+    if (typedMention && !typedMentionTarget) return null
+    const name = typedMentionTarget ?? keeperNameFromTarget(quickTarget.value)
     return name
       ? { action_type: 'keeper_message', target_type: 'keeper', target_id: name, label: name }
       : null
@@ -113,12 +127,12 @@ function parseComposerTarget(mode: QuickComposerMode): ComposerTarget | null {
   return { action_type: 'broadcast', target_type: 'root', label: mode === 'state' ? 'State block' : 'All' }
 }
 
-async function submitQuickMessage() {
+async function submitQuickMessage(onlineKeepers: OnlineKeeper[]) {
   const message = quickMessage.value.trim()
   if (!message) return
   const mode = quickComposerMode.value
   if (mode === 'state' && !hasStateBlock(message)) return
-  const target = parseComposerTarget(mode)
+  const target = parseComposerTarget(mode, onlineKeepers)
   if (!target) return
 
   const result = await executeAction({
@@ -133,28 +147,36 @@ async function submitQuickMessage() {
 
 export function QuickIntervene() {
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const appliedRouteFocus = useRef<string | null>(null)
   const snapshot = operatorSnapshot.value
   const keepers = snapshot?.keepers ?? []
   const busy = operatorActionBusy.value
   const currentRoute = route.value
 
   const onlineKeepers = keepers.filter(k => normalizeStatus(k.status) !== 'offline')
-  const onlineKeeperKey = onlineKeepers.map(k => k.name).join('\u0000')
   const mode = quickComposerMode.value
   const stateKeys = mode === 'state' ? stateBlockKeys(quickMessage.value) : []
   const selectedKeeper = keeperNameFromTarget(quickTarget.value)
   const selectedKeeperOnline = !!selectedKeeper && onlineKeepers.some(k => k.name === selectedKeeper)
   const mentionQuery = mode === 'dm' ? mentionQueryFromMessage(quickMessage.value) : null
-  const mentionMatches = mode === 'dm' ? mentionCandidates(onlineKeepers, mentionQuery, selectedKeeper) : []
+  const trailingMention = mode === 'dm' ? trailingMentionNameFromMessage(quickMessage.value) : null
+  const trailingMentionTarget = mode === 'dm' ? onlineKeeperNameForMention(onlineKeepers, trailingMention) : null
+  const unresolvedTrailingMention = mode === 'dm' && !!trailingMention && !trailingMentionTarget
+  const effectiveKeeper = trailingMentionTarget ?? selectedKeeper
+  const effectiveKeeperOnline = !!trailingMentionTarget || selectedKeeperOnline
+  const mentionMatches = mode === 'dm' ? mentionCandidates(onlineKeepers, mentionQuery, effectiveKeeper) : []
   const sendDisabled = busy
     || quickMessage.value.trim() === ''
-    || (mode === 'dm' && !selectedKeeperOnline)
+    || (mode === 'dm' && (!effectiveKeeperOnline || unresolvedTrailingMention))
     || (mode === 'state' && !hasStateBlock(quickMessage.value))
 
   useEffect(() => {
-    const nextMode = composerModeForFocus(currentRoute.params.focus)
+    const focus = currentRoute.params.focus ?? null
+    if (focus === appliedRouteFocus.current) return
+    appliedRouteFocus.current = focus
+    const nextMode = composerModeForFocus(focus)
     if (nextMode) selectComposerMode(nextMode, onlineKeepers)
-  }, [currentRoute, onlineKeeperKey])
+  }, [currentRoute.params.focus])
 
   return html`
     <section class="${CARD_STANDARD} flex flex-col gap-3" aria-label="Quick intervention">
@@ -232,17 +254,17 @@ export function QuickIntervene() {
                         : html`<div class="px-2 py-2 text-xs text-[var(--color-fg-muted)]">No online keeper matches @${mentionQuery}</div>`}
                     </div>
                   `
-                : selectedKeeperOnline
+                  : effectiveKeeperOnline
                   ? html`
-                      <div class="flex flex-wrap items-center gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1 text-2xs text-[var(--color-fg-muted)]" aria-label=${`Will mention: @${selectedKeeper}`}>
+                      <div class="flex flex-wrap items-center gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1 text-2xs text-[var(--color-fg-muted)]" aria-label=${`Will mention: @${effectiveKeeper}`}>
                         <span>Will mention:</span>
                         <button
                           type="button"
                           class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 font-mono text-[var(--color-accent-fg)]"
-                          onClick=${() => { chooseMentionTarget(selectedKeeper) }}
+                          onClick=${() => { if (effectiveKeeper) chooseMentionTarget(effectiveKeeper) }}
                           disabled=${busy}
                         >
-                          @${selectedKeeper}
+                          @${effectiveKeeper}
                         </button>
                         <span class="ml-auto text-[var(--color-fg-muted)]">type @ to filter targets</span>
                       </div>
@@ -264,7 +286,7 @@ export function QuickIntervene() {
           ariaLabel=${mode === 'state' ? 'Structured state block message' : 'Quick intervention message'}
           onInput=${(e: Event) => { quickMessage.value = (e.target as HTMLTextAreaElement).value }}
           onKeyDown=${(e: KeyboardEvent) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') void submitQuickMessage()
+            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') void submitQuickMessage(onlineKeepers)
           }}
           disabled=${busy}
         />
@@ -290,7 +312,7 @@ export function QuickIntervene() {
           : null}
 
         <div class="flex justify-end">
-          <${ActionButton} variant="primary" size="lg" onClick=${() => { void submitQuickMessage() }} disabled=${sendDisabled}>
+          <${ActionButton} variant="primary" size="lg" onClick=${() => { void submitQuickMessage(onlineKeepers) }} disabled=${sendDisabled}>
             Send
           <//>
         </div>

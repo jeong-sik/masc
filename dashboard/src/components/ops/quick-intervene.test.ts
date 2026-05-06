@@ -150,8 +150,14 @@ describe('QuickIntervene', () => {
 
     expect(stateButton?.getAttribute('aria-pressed')).toBe('true')
     expect(editor?.value).toContain('[STATE]')
-    expect(container.textContent).toContain('Goal')
-    expect(container.textContent).toContain('Blocker')
+    expect(editor?.value).toContain('Goal:')
+    expect(editor?.value).toContain('DONE:')
+    expect(editor?.value).toContain('NEXT:')
+    expect(editor?.value).not.toContain('Blocker:')
+
+    const send = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.trim() === 'Send') as HTMLButtonElement | undefined
+    expect(send?.disabled).toBe(true)
   }, 15000)
 
   it('uses mention focus as keeper DM and sends to the first online keeper', async () => {
@@ -257,6 +263,109 @@ describe('QuickIntervene', () => {
     expect(container.querySelector('div[aria-label="Will mention: @nick0cave"]')).not.toBeNull()
   }, 15000)
 
+  it('sends to a typed exact keeper mention without requiring an autocomplete click', async () => {
+    const {
+      QuickIntervene,
+      operatorActionBusy,
+      operatorSnapshot,
+      quickComposerMode,
+      quickMessage,
+      quickTarget,
+      route,
+    } = await loadQuickIntervene()
+
+    operatorActionBusy.value = false
+    quickComposerMode.value = 'broadcast'
+    quickMessage.value = 'Please verify @nick0cave'
+    quickTarget.value = 'namespace'
+    route.value = { tab: 'command', params: { section: 'operations', view: 'ops', focus: 'mention' }, postId: null }
+    operatorSnapshot.value = {
+      root: { paused: false, namespace: 'default' },
+      sessions: [],
+      keepers: [
+        { name: 'keeper-a', status: 'online' },
+        { name: 'nick0cave', status: 'busy' },
+      ],
+      recent_messages: [],
+      pending_confirms: [],
+      available_actions: [],
+    } as unknown as OperatorSnapshot
+
+    await act(async () => { render(html`<${QuickIntervene} />`, container) })
+    await flushUi()
+
+    const target = container.querySelector('select[aria-label="Keeper message target"]') as HTMLSelectElement | null
+    const send = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.trim() === 'Send') as HTMLButtonElement | undefined
+
+    expect(target?.value).toBe('keeper:keeper-a')
+    expect(send?.disabled).toBe(false)
+
+    await act(async () => { send?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    await flushUi()
+
+    expect(dispatchOperatorActionMock).toHaveBeenCalledWith({
+      actor: 'dashboard',
+      action_type: 'keeper_message',
+      target_type: 'keeper',
+      target_id: 'nick0cave',
+      payload: { message: 'Please verify @nick0cave' },
+    })
+  }, 15000)
+
+  it('does not reapply command focus when the keeper roster refreshes', async () => {
+    const {
+      QuickIntervene,
+      operatorActionBusy,
+      operatorSnapshot,
+      quickComposerMode,
+      quickMessage,
+      quickTarget,
+      route,
+    } = await loadQuickIntervene()
+
+    operatorActionBusy.value = false
+    quickComposerMode.value = 'broadcast'
+    quickMessage.value = ''
+    quickTarget.value = 'namespace'
+    route.value = { tab: 'command', params: { section: 'operations', view: 'ops', focus: 'state' }, postId: null }
+    operatorSnapshot.value = {
+      root: { paused: false, namespace: 'default' },
+      sessions: [],
+      keepers: [{ name: 'keeper-a', status: 'online' }],
+      recent_messages: [],
+      pending_confirms: [],
+      available_actions: [],
+    } as unknown as OperatorSnapshot
+
+    await act(async () => { render(html`<${QuickIntervene} />`, container) })
+    await flushUi()
+
+    const broadcastButton = container.querySelector('button[aria-label="Broadcast mode"]') as HTMLButtonElement | null
+    await act(async () => { broadcastButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    quickMessage.value = 'manual broadcast'
+    await flushUi()
+
+    await act(async () => {
+      operatorSnapshot.value = {
+        root: { paused: false, namespace: 'default' },
+        sessions: [],
+        keepers: [
+          { name: 'keeper-a', status: 'online' },
+          { name: 'keeper-b', status: 'online' },
+        ],
+        recent_messages: [],
+        pending_confirms: [],
+        available_actions: [],
+      } as unknown as OperatorSnapshot
+    })
+    await flushUi()
+
+    expect(quickComposerMode.value).toBe('broadcast')
+    expect(quickMessage.value).toBe('manual broadcast')
+    expect(broadcastButton?.getAttribute('aria-pressed')).toBe('true')
+  }, 15000)
+
   it('disables keeper DM send when no keepers are online', async () => {
     const {
       QuickIntervene,
@@ -290,6 +399,42 @@ describe('QuickIntervene', () => {
       .find(button => button.textContent?.trim() === 'Send') as HTMLButtonElement | undefined
 
     expect(target?.disabled).toBe(true)
+    expect(send?.disabled).toBe(true)
+    expect(dispatchOperatorActionMock).not.toHaveBeenCalled()
+  }, 15000)
+
+  it('disables state sends when the block has no supported values', async () => {
+    const {
+      QuickIntervene,
+      operatorActionBusy,
+      operatorSnapshot,
+      quickComposerMode,
+      quickMessage,
+      quickTarget,
+      route,
+    } = await loadQuickIntervene()
+
+    operatorActionBusy.value = false
+    quickComposerMode.value = 'state'
+    quickMessage.value = '[STATE]\nPhase: review\nBlocker: none\n[/STATE]'
+    quickTarget.value = 'namespace'
+    route.value = { tab: 'command', params: { section: 'operations', view: 'ops' }, postId: null }
+    operatorSnapshot.value = {
+      root: { paused: false, namespace: 'default' },
+      sessions: [],
+      keepers: [{ name: 'keeper-a', status: 'online' }],
+      recent_messages: [],
+      pending_confirms: [],
+      available_actions: [],
+    } as unknown as OperatorSnapshot
+
+    await act(async () => { render(html`<${QuickIntervene} />`, container) })
+    await flushUi()
+
+    const send = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.trim() === 'Send') as HTMLButtonElement | undefined
+
+    expect(container.textContent).toContain('State block required')
     expect(send?.disabled).toBe(true)
     expect(dispatchOperatorActionMock).not.toHaveBeenCalled()
   }, 15000)

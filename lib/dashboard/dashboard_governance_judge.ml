@@ -692,18 +692,23 @@ let should_backoff ~sw ~net =
     false
 
 let mark_compute_start (st : state) =
-  let in_flight =
-    with_lock st (fun () ->
-        st.compute_in_flight <- st.compute_in_flight + 1;
-        st.compute_in_flight)
-  in
-  Prometheus.set_gauge governance_compute_in_flight_metric
-    (float_of_int in_flight);
-  in_flight
+  (* Publish the gauge inside the lock so concurrent refresh_once runs
+     can't interleave the read/write and end with a stale value
+     overwriting the freshest count. *)
+  with_lock st (fun () ->
+      st.compute_in_flight <- st.compute_in_flight + 1;
+      Prometheus.set_gauge governance_compute_in_flight_metric
+        (float_of_int st.compute_in_flight);
+      st.compute_in_flight)
 
 let mark_compute_finish (st : state) ~started_at ~outcome ~reason
     ~timeout_sec =
-  let duration_sec = Unix.gettimeofday () -. started_at in
+  (* Clamp the elapsed time to >= 0 so a backwards system clock
+     adjustment (NTP step, manual change) cannot inject a negative
+     duration into the histogram or the [last_compute_duration_sec]
+     dashboard surface. *)
+  let duration_sec = Float.max 0.0 (Unix.gettimeofday () -. started_at) in
+  let labels = [ ("outcome", outcome); ("reason", reason) ] in
   let in_flight =
     with_lock st (fun () ->
         st.compute_in_flight <- max 0 (st.compute_in_flight - 1);
@@ -711,11 +716,10 @@ let mark_compute_finish (st : state) ~started_at ~outcome ~reason
         st.last_compute_timeout_sec <- timeout_sec;
         st.last_compute_outcome <- Some outcome;
         st.last_compute_reason <- Some reason;
+        Prometheus.set_gauge governance_compute_in_flight_metric
+          (float_of_int st.compute_in_flight);
         st.compute_in_flight)
   in
-  let labels = [ ("outcome", outcome); ("reason", reason) ] in
-  Prometheus.set_gauge governance_compute_in_flight_metric
-    (float_of_int in_flight);
   Prometheus.inc_counter governance_compute_total_metric ~labels ();
   Prometheus.observe_histogram governance_compute_duration_metric
     ~labels duration_sec;

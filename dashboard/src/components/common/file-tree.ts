@@ -4,6 +4,7 @@
 // with git status badges.
 
 import { html } from 'htm/preact'
+import { StatusChip, type StatusChipTone } from './status-chip'
 
 export interface FileNode {
   id: string
@@ -21,73 +22,134 @@ interface FileTreeProps {
   testId?: string
 }
 
-function gitStatusColor(status?: string): string {
-  switch (status) {
-    case 'modified':
-      return 'var(--warn-10)'
-    case 'added':
-      return 'var(--ok-10)'
-    case 'deleted':
-      return 'var(--error-10)'
-    default:
-      return 'var(--color-fg-muted)'
+type GitStatus = NonNullable<FileNode['gitStatus']>
+
+export interface FileTreeRow {
+  readonly node: FileNode
+  readonly depth: number
+  readonly posInSet: number
+  readonly setSize: number
+}
+
+const GIT_STATUS_META: Record<
+  GitStatus,
+  { readonly label: string; readonly shortLabel: string; readonly tone: StatusChipTone }
+> = {
+  modified: { label: 'modified', shortLabel: 'M', tone: 'warn' },
+  added: { label: 'added', shortLabel: 'A', tone: 'ok' },
+  deleted: { label: 'deleted', shortLabel: 'D', tone: 'bad' },
+  untracked: { label: 'untracked', shortLabel: 'U', tone: 'neutral' },
+}
+
+export function visibleFileTreeRows(
+  nodes: ReadonlyArray<FileNode>,
+  expanded: ReadonlySet<string>,
+  depth: number = 0,
+): FileTreeRow[] {
+  const rows: FileTreeRow[] = []
+  const setSize = nodes.length
+  nodes.forEach((node, index) => {
+    rows.push({
+      node,
+      depth,
+      posInSet: index + 1,
+      setSize,
+    })
+    if (node.type === 'directory' && node.children && expanded.has(node.id)) {
+      rows.push(...visibleFileTreeRows(node.children, expanded, depth + 1))
+    }
+  })
+  return rows
+}
+
+function activateNode(
+  node: FileNode,
+  onSelect?: (node: FileNode) => void,
+  onToggle?: (id: string) => void,
+): void {
+  if (node.type === 'directory') onToggle?.(node.id)
+  else onSelect?.(node)
+}
+
+function handleTreeRowKeyDown(
+  e: KeyboardEvent,
+  node: FileNode,
+  expanded: ReadonlySet<string>,
+  onSelect?: (node: FileNode) => void,
+  onToggle?: (id: string) => void,
+): void {
+  switch (e.key) {
+    case 'Enter':
+    case ' ':
+      e.preventDefault()
+      activateNode(node, onSelect, onToggle)
+      break
+    case 'ArrowRight':
+      if (node.type === 'directory' && !expanded.has(node.id)) {
+        e.preventDefault()
+        onToggle?.(node.id)
+      }
+      break
+    case 'ArrowLeft':
+      if (node.type === 'directory' && expanded.has(node.id)) {
+        e.preventDefault()
+        onToggle?.(node.id)
+      }
+      break
   }
 }
 
-function renderNode(
-  node: FileNode,
-  depth: number,
-  expanded: Set<string>,
+function renderGitStatus(status: GitStatus) {
+  const meta = GIT_STATUS_META[status]
+  return html`
+    <span
+      class="ml-auto shrink-0"
+      data-file-tree-git-status=${status}
+      aria-label=${`${meta.label} git status`}
+      title=${`${meta.label} git status`}
+    >
+      <${StatusChip} tone=${meta.tone} uppercase=${false} class="font-mono">
+        ${meta.shortLabel}
+      </${StatusChip}>
+    </span>
+  `
+}
+
+function renderRow(
+  row: FileTreeRow,
+  expanded: ReadonlySet<string>,
   onSelect?: (node: FileNode) => void,
   onToggle?: (id: string) => void,
-): ReturnType<typeof html>[] {
+): ReturnType<typeof html> {
+  const { node, depth, posInSet, setSize } = row
   const isExpanded = expanded.has(node.id)
   const paddingLeft = `${depth * 16}px`
 
-  const row = html`
+  return html`
     <div
       key=${node.id}
-      class="flex cursor-pointer items-center rounded-[var(--r-1)] py-0.5 pr-2 hover:bg-[var(--color-bg-hover)]"
+      class="flex min-w-0 cursor-pointer items-center gap-1 rounded-[var(--r-1)] py-0.5 pr-2 hover:bg-[var(--color-bg-hover)]"
       style=${{ paddingLeft }}
-      onClick=${() =>
-        node.type === 'directory' ? onToggle?.(node.id) : onSelect?.(node)}
+      onClick=${() => activateNode(node, onSelect, onToggle)}
       role="treeitem"
       aria-expanded=${node.type === 'directory' ? isExpanded : undefined}
       aria-selected="false"
+      aria-level=${depth + 1}
+      aria-posinset=${posInSet}
+      aria-setsize=${setSize}
+      data-file-tree-row=${node.id}
+      data-file-tree-depth=${depth}
       tabindex="0"
-      onKeyDown=${(e: KeyboardEvent) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          node.type === 'directory' ? onToggle?.(node.id) : onSelect?.(node)
-        }
-      }}
+      onKeyDown=${(e: KeyboardEvent) =>
+        handleTreeRowKeyDown(e, node, expanded, onSelect, onToggle)}
     >
-      <span class="inline-block w-4 text-center text-[var(--color-fg-secondary)]" aria-hidden="true">
+      <span class="inline-block w-4 shrink-0 text-center text-[var(--color-fg-secondary)]" aria-hidden="true">
         ${node.type === 'directory' ? (isExpanded ? '▼' : '▶') : ' '}
       </span>
-      <span class="text-sm text-[var(--color-fg-primary)]">${node.name}</span>
-      ${node.gitStatus
-        ? html`
-            <span
-              class="ml-2 inline-block h-1.5 w-1.5 rounded-full"
-              style=${{ background: gitStatusColor(node.gitStatus) }}
-              title=${node.gitStatus}
-            ></span>
-          `
-        : null}
+      <span class="min-w-0 truncate text-sm text-[var(--color-fg-primary)]">${node.name}</span>
+      ${node.gitStatus ? renderGitStatus(node.gitStatus) : null}
     </div>
   `
-
-  const children: ReturnType<typeof html>[] = []
-  children.push(row)
-
-  if (node.type === 'directory' && node.children && isExpanded) {
-    for (const child of node.children) {
-      children.push(...renderNode(child, depth + 1, expanded, onSelect, onToggle))
-    }
-  }
-
-  return children
 }
 
 export function FileTree({
@@ -98,6 +160,7 @@ export function FileTree({
   testId,
 }: FileTreeProps) {
   const expanded = new Set(expandedIds)
+  const rows = visibleFileTreeRows(nodes, expanded)
 
   return html`
     <div
@@ -107,7 +170,7 @@ export function FileTree({
       role="tree"
       aria-label="파일 트리"
     >
-      ${nodes.flatMap(n => renderNode(n, 0, expanded, onSelect, onToggle))}
+      ${rows.map(row => renderRow(row, expanded, onSelect, onToggle))}
     </div>
   `
 }

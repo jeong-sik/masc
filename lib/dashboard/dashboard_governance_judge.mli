@@ -141,6 +141,25 @@ val resolve_governance_model_used :
     [unknown_provider] sentinel.  Returned tag is the
     classification that fired. *)
 
+type governance_response_parse_failure =
+  | Lenient_fallback of string
+  | Structural_error of string
+(** Failure class for governance judge response parsing.
+    [Lenient_fallback raw] means all deterministic JSON recovery
+    failed. [Structural_error reason] means JSON parsed but
+    violated the judge output contract. *)
+
+val parse_governance_response_for_testing :
+  raw_text:string ->
+  generated_at:string ->
+  expires_at:string ->
+  model_used:string ->
+  (Yojson.Safe.t list, governance_response_parse_failure) result
+(** Parses and validates a governance judge response without
+    mutating metrics or daemon state.  Exposed so regression
+    tests can prove malformed [guardrail_state] output fails
+    closed instead of silently producing a distorted judgment. *)
+
 (** {1 Daemon identity} *)
 
 val keeper_name : string

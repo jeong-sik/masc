@@ -1341,7 +1341,24 @@ let test_keeper_github_pr_tool_contracts () =
        "Credential_materializer.verify_state");
   check bool "keeper PR create is exposed by github group" true
     (file_contains_pattern "config/tool_policy.toml"
-       {|keeper_pr_create|})
+       {|keeper_pr_create|});
+  check bool "keeper core prompt routes PR review through native tool" true
+    (file_contains_pattern "config/prompts/keeper.core_behavior.md"
+       "PR REVIEW MUTATIONS"
+     && file_contains_pattern "config/prompts/keeper.core_behavior.md"
+          "keeper_pr_review_comment"
+     && file_contains_pattern "config/prompts/keeper.core_behavior.md"
+          {|event="REQUEST_CHANGES"|}
+     && file_contains_pattern "config/prompts/keeper.core_behavior.md"
+          {|event="APPROVE"|});
+  check bool "keeper core prompt no longer teaches raw gh review mutation" true
+    (file_not_contains_pattern "config/prompts/keeper.core_behavior.md"
+       {|gh pr review <n>|});
+  check bool "keeper review schema names non-comment review policy" true
+    (file_contains_pattern "lib/tool_shard.ml"
+       "Use REQUEST_CHANGES for actionable blockers"
+     && file_contains_pattern "lib/tool_shard.ml"
+          "use APPROVE only when the draft proof preflight permits it")
 
 let test_keeper_pr_audit_contracts () =
   check bool "keeper fleet audit has explicit PR-create flag" true

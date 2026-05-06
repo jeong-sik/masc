@@ -142,7 +142,12 @@ async function submitQuickMessage(onlineKeepers: OnlineKeeper[]) {
     payload: { message },
     successMessage: `Message sent to ${target.label}`,
   })
-  if (result) quickMessage.value = ''
+  if (result) {
+    if (target.target_type === 'keeper' && target.target_id) {
+      quickTarget.value = `keeper:${target.target_id}`
+    }
+    quickMessage.value = ''
+  }
 }
 
 export function QuickIntervene() {
@@ -154,6 +159,7 @@ export function QuickIntervene() {
   const currentRoute = route.value
 
   const onlineKeepers = keepers.filter(k => normalizeStatus(k.status) !== 'offline')
+  const onlineKeeperNames = onlineKeepers.map(keeper => keeper.name).join('\0')
   const mode = quickComposerMode.value
   const stateKeys = mode === 'state' ? stateBlockKeys(quickMessage.value) : []
   const selectedKeeper = keeperNameFromTarget(quickTarget.value)
@@ -172,11 +178,20 @@ export function QuickIntervene() {
 
   useEffect(() => {
     const focus = currentRoute.params.focus ?? null
-    if (focus === appliedRouteFocus.current) return
-    appliedRouteFocus.current = focus
     const nextMode = composerModeForFocus(focus)
+    if (!nextMode) {
+      appliedRouteFocus.current = focus
+      return
+    }
+    const focusChanged = focus !== appliedRouteFocus.current
+    const needsLoadedDmTarget = nextMode === 'dm'
+      && mode === 'dm'
+      && onlineKeepers.length > 0
+      && !selectedKeeperOnline
+    if (!focusChanged && !needsLoadedDmTarget) return
+    appliedRouteFocus.current = focus
     if (nextMode) selectComposerMode(nextMode, onlineKeepers)
-  }, [currentRoute.params.focus])
+  }, [currentRoute.params.focus, mode, onlineKeeperNames, selectedKeeperOnline])
 
   return html`
     <section class="${CARD_STANDARD} flex flex-col gap-3" aria-label="Quick intervention">
@@ -286,7 +301,11 @@ export function QuickIntervene() {
           ariaLabel=${mode === 'state' ? 'Structured state block message' : 'Quick intervention message'}
           onInput=${(e: Event) => { quickMessage.value = (e.target as HTMLTextAreaElement).value }}
           onKeyDown=${(e: KeyboardEvent) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') void submitQuickMessage(onlineKeepers)
+            const shouldSubmit = e.key === 'Enter'
+              && ((e.metaKey || e.ctrlKey) || (mode !== 'state' && !e.shiftKey && !e.altKey))
+            if (!shouldSubmit) return
+            e.preventDefault()
+            void submitQuickMessage(onlineKeepers)
           }}
           disabled=${busy}
         />

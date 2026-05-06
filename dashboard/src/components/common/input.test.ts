@@ -168,6 +168,15 @@ describe('TextArea', () => {
     expect(spy).toHaveBeenCalledOnce()
   })
 
+  it('onKeyDown fires on key events', async () => {
+    const spy = vi.fn()
+    render(html`<${TextArea} onKeyDown=${spy} />`, container)
+    const ta = container.querySelector('textarea') as HTMLTextAreaElement
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await flushUi()
+    expect(spy).toHaveBeenCalledOnce()
+  })
+
   it('inputRef.current points to the inner <textarea> after mount', () => {
     const ref: { current: HTMLTextAreaElement | null } = { current: null }
     render(html`<${TextArea} inputRef=${ref} />`, container)

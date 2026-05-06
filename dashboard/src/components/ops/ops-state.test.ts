@@ -92,6 +92,11 @@ describe('ops-state', () => {
     expect(hasStateBlock('Goal: ship')).toBe(false)
   })
 
+  it('rejects state labels the backend parser does not understand', () => {
+    const message = '[STATE]\nGoal : ship\nOpen Questions: risk?\nOpenQuestions: accepted\n[/STATE]'
+    expect(stateBlockKeys(message)).toEqual(['OpenQuestions'])
+  })
+
   it('appends the state template without duplicating an existing block', () => {
     expect(ensureStateBlockDraft('')).toBe(STATE_BLOCK_TEMPLATE)
     expect(ensureStateBlockDraft('Heads up')).toBe(`Heads up\n\n${STATE_BLOCK_TEMPLATE}`)

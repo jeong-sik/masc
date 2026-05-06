@@ -211,6 +211,61 @@ describe('QuickIntervene', () => {
     })
   }, 15000)
 
+  it('fills the mention focus DM target after keepers load', async () => {
+    const {
+      QuickIntervene,
+      operatorActionBusy,
+      operatorSnapshot,
+      quickComposerMode,
+      quickMessage,
+      quickTarget,
+      route,
+    } = await loadQuickIntervene()
+
+    operatorActionBusy.value = false
+    quickComposerMode.value = 'broadcast'
+    quickMessage.value = 'late keeper ping'
+    quickTarget.value = 'namespace'
+    route.value = { tab: 'command', params: { section: 'operations', view: 'ops', focus: 'mention' }, postId: null }
+    operatorSnapshot.value = {
+      root: { paused: false, namespace: 'default' },
+      sessions: [],
+      keepers: [],
+      recent_messages: [],
+      pending_confirms: [],
+      available_actions: [],
+    } as unknown as OperatorSnapshot
+
+    await act(async () => { render(html`<${QuickIntervene} />`, container) })
+    await flushUi()
+
+    expect(quickComposerMode.value).toBe('dm')
+    expect(quickTarget.value).toBe('')
+
+    await act(async () => {
+      operatorSnapshot.value = {
+        root: { paused: false, namespace: 'default' },
+        sessions: [],
+        keepers: [
+          { name: 'keeper-a', status: 'online' },
+          { name: 'keeper-b', status: 'busy' },
+        ],
+        recent_messages: [],
+        pending_confirms: [],
+        available_actions: [],
+      } as unknown as OperatorSnapshot
+    })
+    await flushUi()
+
+    const target = container.querySelector('select[aria-label="Keeper message target"]') as HTMLSelectElement | null
+    const send = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.trim() === 'Send') as HTMLButtonElement | undefined
+
+    expect(target?.value).toBe('keeper:keeper-a')
+    expect(quickTarget.value).toBe('keeper:keeper-a')
+    expect(send?.disabled).toBe(false)
+  }, 15000)
+
   it('filters mention autocomplete from @draft text and applies the selected keeper', async () => {
     const {
       QuickIntervene,
@@ -310,6 +365,70 @@ describe('QuickIntervene', () => {
       target_type: 'keeper',
       target_id: 'nick0cave',
       payload: { message: 'Please verify @nick0cave' },
+    })
+    expect(quickTarget.value).toBe('keeper:nick0cave')
+    expect(quickMessage.value).toBe('')
+  }, 15000)
+
+  it('submits broadcast and DM drafts on plain Enter', async () => {
+    const {
+      QuickIntervene,
+      operatorActionBusy,
+      operatorSnapshot,
+      quickComposerMode,
+      quickMessage,
+      quickTarget,
+      route,
+    } = await loadQuickIntervene()
+
+    operatorActionBusy.value = false
+    quickComposerMode.value = 'broadcast'
+    quickMessage.value = 'broadcast ping'
+    quickTarget.value = 'namespace'
+    route.value = { tab: 'command', params: { section: 'operations', view: 'ops' }, postId: null }
+    operatorSnapshot.value = {
+      root: { paused: false, namespace: 'default' },
+      sessions: [],
+      keepers: [{ name: 'keeper-a', status: 'online' }],
+      recent_messages: [],
+      pending_confirms: [],
+      available_actions: [],
+    } as unknown as OperatorSnapshot
+
+    await act(async () => { render(html`<${QuickIntervene} />`, container) })
+    await flushUi()
+
+    let editor = container.querySelector('textarea[name="quick_intervene_message"]') as HTMLTextAreaElement | null
+    await act(async () => {
+      editor?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    })
+    await flushUi()
+
+    expect(dispatchOperatorActionMock).toHaveBeenLastCalledWith({
+      actor: 'dashboard',
+      action_type: 'broadcast',
+      target_type: 'root',
+      target_id: undefined,
+      payload: { message: 'broadcast ping' },
+    })
+
+    quickComposerMode.value = 'dm'
+    quickTarget.value = 'keeper:keeper-a'
+    quickMessage.value = 'keeper ping'
+    await flushUi()
+
+    editor = container.querySelector('textarea[name="quick_intervene_message"]') as HTMLTextAreaElement | null
+    await act(async () => {
+      editor?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    })
+    await flushUi()
+
+    expect(dispatchOperatorActionMock).toHaveBeenLastCalledWith({
+      actor: 'dashboard',
+      action_type: 'keeper_message',
+      target_type: 'keeper',
+      target_id: 'keeper-a',
+      payload: { message: 'keeper ping' },
     })
   }, 15000)
 

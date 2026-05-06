@@ -295,6 +295,7 @@ let () = test "dispatch_status_hides_completed_stale_agent_current_task_label" (
       assert_not_contains result (actual_name ^ " (you) -> task-001");
       assert_contains result (actual_name ^ " (you) -> active");
       assert_not_contains result (actual_name ^ " (you) -> busy (stale:task-001)");
+      assert_not_contains result "busy (stale:task-001)";
       assert_not_contains result "ignored-line";
       assert_contains result "Summary: active=0, done=1, cancelled=0, total=1"
   | None -> failwith "dispatch returned None"

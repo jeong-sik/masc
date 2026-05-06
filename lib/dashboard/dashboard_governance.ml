@@ -23,6 +23,17 @@ let judge_json_of_runtime (runtime : Dashboard_governance_judge.runtime_snapshot
       ("model_used", string_option_json runtime.model_used);
       ("keeper_name", `String runtime.keeper_name);
       ("last_error", string_option_json runtime.last_error);
+      ("compute_in_flight", `Int runtime.compute_in_flight);
+      ( "last_compute_duration_sec",
+        option_to_yojson (fun value -> `Float value)
+          runtime.last_compute_duration_sec );
+      ( "last_compute_timeout_sec",
+        option_to_yojson (fun value -> `Float value)
+          runtime.last_compute_timeout_sec );
+      ( "last_compute_outcome",
+        string_option_json runtime.last_compute_outcome );
+      ( "last_compute_reason",
+        string_option_json runtime.last_compute_reason );
       ( "lenient_json_fallback",
         Judge_diagnostics.lenient_fallback_metrics_json ~judge_label:"Governance" );
     ]

@@ -122,6 +122,32 @@ let dispatch_due ~keeper_name ~now_ts ~dispatch =
   !count
 
 (* ================================================================ *)
+(* Re-enable                                                         *)
+(* ================================================================ *)
+
+(* Re-enable disabled recurring tasks for [keeper_name] whose
+   [last_run_ts] is older than [2 * interval_sec].  Without this,
+   tasks auto-disabled by [dispatch_due]'s [max_failures] guard
+   never return to [enabled = true] within the process lifetime,
+   permanently silencing the keeper's heartbeat broadcasts and
+   eventually triggering stale-kill cascades across dependent
+   keepers. *)
+let reenable_due_tasks ~keeper_name ~now_ts =
+  let count = ref 0 in
+  with_tasks_rw (fun () ->
+    Hashtbl.iter (fun _id task ->
+      if task.keeper_name = keeper_name && not task.enabled then begin
+        let cooldown = float_of_int task.interval_sec *. 2.0 in
+        if now_ts -. task.last_run_ts >= cooldown then begin
+          task.enabled <- true;
+          task.failure_count <- 0;
+          incr count
+        end
+      end
+    ) tasks);
+  !count
+
+(* ================================================================ *)
 (* Serialization                                                     *)
 (* ================================================================ *)
 

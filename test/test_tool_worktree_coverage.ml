@@ -451,10 +451,10 @@ let test_playground_repo_cache_preserves_concurrent_updates () =
   ensure_dir playground_dir;
   Eio.Fiber.both
     (fun () ->
-       Masc_mcp.Playground_repo_cache.update ~playground_dir
+       Playground_repo_cache.update ~playground_dir
          ~repo_name:"repo-a" ~repo_path ~action:"clone" ~shallow:false)
     (fun () ->
-       Masc_mcp.Playground_repo_cache.update ~playground_dir
+       Playground_repo_cache.update ~playground_dir
          ~repo_name:"repo-b" ~repo_path ~action:"fetch" ~shallow:false);
   let open Yojson.Safe.Util in
   let names =

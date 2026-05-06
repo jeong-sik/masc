@@ -131,7 +131,9 @@ installed_agent_sdk_version() {
 print_opam_lock_holder() {
   if command -v lsof >/dev/null 2>&1; then
     # Filter out our own PID and parent PID: by the time this runs we have
-    # already re-execed under flock/lockf and hold the lock ourselves.
+    # already re-execed under flock/lockf and hold the lock ourselves, so
+    # naive [lsof <lock>] would report this script as the "stale" holder
+    # and hide the actual upstream culprit.
     local self_pid="${BASHPID:-$$}"
     local parent_pid="${PPID:-0}"
     local holders
@@ -156,6 +158,8 @@ allow_agent_sdk_pin_downgrade() {
 
 guard_agent_sdk_downgrade() {
   [[ "${GITHUB_ACTIONS:-}" != "true" ]] || return 0
+  # Note: this intentionally does not return early for AGENT_SDK_PIN_URL.
+  # Any caller trying to lower the shared floor must opt in explicitly.
   allow_agent_sdk_pin_downgrade && return 0
 
   local recorded_floor

@@ -56,6 +56,11 @@ let test_failure_reason_to_string_oas_timeout_budget_loop () =
     "oas_timeout_budget_loop(count=3)"
     (failure_reason_to_string (Oas_timeout_budget_loop { count = 3 }))
 
+let test_failure_reason_to_string_stale_fleet_batch () =
+  r "Stale_fleet_batch includes distinct count"
+    "stale_fleet_batch(distinct_count=3)"
+    (failure_reason_to_string (Stale_fleet_batch { distinct_count = 3 }))
+
 let test_failure_reason_to_string_provider_runtime_error () =
   r "Provider_runtime_error includes terminal code"
     "provider_runtime_error(provider_error:kimi unicode crash)"
@@ -94,6 +99,11 @@ let test_oas_timeout_budget_loop_cohort_key () =
   r "Oas_timeout_budget_loop cohort_key" "oas_timeout_budget_loop"
     (failure_reason_cohort_key
        (Some (Oas_timeout_budget_loop { count = 3 })))
+
+let test_stale_fleet_batch_cohort_key () =
+  r "Stale_fleet_batch cohort_key" "stale_fleet_batch"
+    (failure_reason_cohort_key
+       (Some (Stale_fleet_batch { distinct_count = 3 })))
 
 let test_terminal_failure_cohort_keys () =
   r "Provider_runtime_error cohort_key" "provider_runtime_error"
@@ -193,6 +203,8 @@ let () =
             `Quick test_failure_reason_to_string_noop;
           Alcotest.test_case "Oas_timeout_budget_loop wraps" `Quick
             test_failure_reason_to_string_oas_timeout_budget_loop;
+          Alcotest.test_case "Stale_fleet_batch wraps" `Quick
+            test_failure_reason_to_string_stale_fleet_batch;
           Alcotest.test_case "Provider_runtime_error wraps" `Quick
             test_failure_reason_to_string_provider_runtime_error;
           Alcotest.test_case "Tool_required_unsatisfied wraps" `Quick
@@ -204,6 +216,8 @@ let () =
             `Quick test_cohort_key_collapses_subclasses;
           Alcotest.test_case "Oas_timeout_budget_loop cohort" `Quick
             test_oas_timeout_budget_loop_cohort_key;
+          Alcotest.test_case "Stale_fleet_batch cohort" `Quick
+            test_stale_fleet_batch_cohort_key;
           Alcotest.test_case "terminal failure cohorts" `Quick
             test_terminal_failure_cohort_keys;
         ] );

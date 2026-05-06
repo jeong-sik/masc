@@ -276,10 +276,11 @@ let () =
 
    Track recent terminations across all keepers in a small bounded
    window.  When the number of distinct keepers in the window
-   reaches the threshold we emit a fleet-tier ERROR and a Prometheus
-   counter labelled by the low-cardinality [batch_root_cause].  No
-   state-machine change: the per-keeper restart still proceeds.  The
-   point is to make the batch event visible at all. *)
+   reaches the threshold we emit a fleet-tier ERROR, a Prometheus
+   counter labelled by the low-cardinality [batch_root_cause], and
+   latch the affected keepers into [Stale_fleet_batch].  The supervisor
+   then pauses/backs off those keepers instead of restarting each one
+   into the same systemic failure mode. *)
 let batch_window_sec = Env_config_keeper.KeeperWatchdog.batch_window_sec
 let batch_threshold = Env_config_keeper.KeeperWatchdog.batch_threshold
 let batch_terminations : (string * float) list Atomic.t = Atomic.make []
@@ -297,6 +298,43 @@ let record_batch_termination keeper_name now : string list =
   in
   let entries = atomic_update () in
   List.sort_uniq compare (List.map fst entries)
+
+let reset_batch_terminations_for_test () =
+  Atomic.set batch_terminations []
+
+let record_batch_termination_for_test = record_batch_termination
+
+let latch_stale_fleet_batch_reasons ~base_path ~distinct_count keeper_names =
+  List.iter
+    (fun keeper_name ->
+       match Keeper_registry.get ~base_path keeper_name with
+       | None -> ()
+       | Some entry ->
+           (match entry.last_failure_reason with
+            | Some
+                ( Keeper_registry.Oas_timeout_budget_loop _
+                | Keeper_registry.Provider_runtime_error _
+                | Keeper_registry.Tool_required_unsatisfied _
+                | Keeper_registry.Ambiguous_partial_commit _
+                | Keeper_registry.Turn_consecutive_failures _
+                | Keeper_registry.Heartbeat_consecutive_failures _
+                | Keeper_registry.Stale_termination_storm _
+                | Keeper_registry.Exception _ ) ->
+                ()
+            | Some (Keeper_registry.Stale_fleet_batch { distinct_count = n })
+              when n >= distinct_count ->
+                ()
+            | Some (Keeper_registry.Stale_turn_timeout _)
+            | Some (Keeper_registry.Stale_fleet_batch _)
+            | Some Keeper_registry.Fiber_unresolved
+            | None ->
+                Keeper_registry.set_failure_reason ~base_path keeper_name
+                  (Some
+                     (Keeper_registry.Stale_fleet_batch { distinct_count }))))
+    keeper_names
+
+let latch_stale_fleet_batch_reasons_for_test =
+  latch_stale_fleet_batch_reasons
 
 let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
     (reg : Keeper_registry.registry_entry) =
@@ -593,6 +631,9 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                  let root_cause_label =
                    batch_root_cause_to_string root_cause
                  in
+                 let distinct_count = List.length batch in
+                 latch_stale_fleet_batch_reasons ~base_path ~distinct_count
+                   batch;
                  Prometheus.inc_counter
                    Prometheus.metric_keeper_stale_termination_batch
                    ~labels:[ ("root_cause", root_cause_label) ]
@@ -601,9 +642,10 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                    "FLEET BATCH TERMINATION: %d distinct keepers \
                     terminated in last %.0fs [%s] — systemic signal \
                     root_cause=%s.  \
-                    Per-keeper restarts will loop without operator \
-                    intervention.  See #10765, #10474, #10745."
-                   (List.length batch) batch_window_sec
+                    Affected keepers are latched for auto-pause/backoff \
+                    instead of independent restart.  See #10765, #10474, \
+                    #10745."
+                   distinct_count batch_window_sec
                    (String.concat ", " batch) root_cause_label
                end;
                (try

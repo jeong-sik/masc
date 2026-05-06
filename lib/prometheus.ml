@@ -643,6 +643,8 @@ let metric_keeper_self_preservation_universal =
   "masc_keeper_self_preservation_universal_total"
 let metric_keeper_stale_storm_paused =
   "masc_keeper_stale_storm_paused_total"
+let metric_keeper_stale_fleet_batch_paused =
+  "masc_keeper_stale_fleet_batch_paused_total"
 let metric_keeper_oas_timeout_budget_loop_paused =
   "masc_keeper_oas_timeout_budget_loop_paused_total"
 let metric_keeper_cycle_exceptions =
@@ -1852,6 +1854,10 @@ let init () =
   add metric_keeper_stale_storm_paused
     "Total keepers auto-paused due to stale termination storms. \
      Labeled by keeper."
+    Counter;
+  add metric_keeper_stale_fleet_batch_paused
+    "Total keepers auto-paused due to fleet-wide stale termination \
+     batches. Labeled by keeper."
     Counter;
   add metric_keeper_oas_timeout_budget_loop_paused
     "Total keepers auto-paused due to repeated OAS timeout budget \

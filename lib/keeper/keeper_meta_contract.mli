@@ -146,6 +146,7 @@ type blocker_class =
   | No_tool_capable_provider
   | Fiber_unresolved
   | Stale_turn_timeout
+  | Stale_fleet_batch
 
 val blocker_class_to_string : blocker_class -> string
 (** Canonical lowercase labels.  Pinned literals — operator

@@ -290,6 +290,7 @@ val metric_keeper_room_init_failures : string
 val metric_keeper_presence_sync_failures : string
 val metric_keeper_self_preservation_universal : string
 val metric_keeper_stale_storm_paused : string
+val metric_keeper_stale_fleet_batch_paused : string
 val metric_keeper_oas_timeout_budget_loop_paused : string
 val metric_keeper_cycle_exceptions : string
 val metric_keeper_snapshot_write_failures : string

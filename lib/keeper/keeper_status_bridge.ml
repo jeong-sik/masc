@@ -339,6 +339,14 @@ let runtime_blocker_surface_of_failure_reason
                 "OAS budget timeout repeated %d consecutive cycle(s); keeper was auto-paused before restart loop."
                 count)
            Oas_timeout_budget)
+  | Keeper_registry.Stale_fleet_batch { distinct_count } ->
+      Some
+        (runtime_blocker_surface_of_typed_class
+           ~summary:
+             (Printf.sprintf
+                "Stale watchdog terminated %d distinct keeper(s) inside the fleet batch window; keeper was auto-paused before restart loop."
+                distinct_count)
+           Stale_fleet_batch)
   | Keeper_registry.Provider_runtime_error { code; detail } ->
       Some
         {

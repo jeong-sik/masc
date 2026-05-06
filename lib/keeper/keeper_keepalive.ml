@@ -665,6 +665,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
         | Some { Keeper_registry.last_failure_reason =
                    Some ((Keeper_registry.Stale_turn_timeout _
                          | Keeper_registry.Stale_termination_storm _
+                         | Keeper_registry.Stale_fleet_batch _
                          | Keeper_registry.Oas_timeout_budget_loop _) as reason);
                  _ } ->
           record_crash reason

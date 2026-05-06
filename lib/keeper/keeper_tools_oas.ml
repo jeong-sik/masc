@@ -175,19 +175,28 @@ let json_string_field_opt key = function
       | _ -> None)
   | _ -> None
 
-let contains_ci text needle =
-  String_util.contains_substring
-    (String.lowercase_ascii text)
-    (String.lowercase_ascii needle)
+let strip_simple_quotes text =
+  let len = String.length text in
+  if len >= 2 then
+    match text.[0], text.[len - 1] with
+    | '\'', '\'' | '"', '"' -> String.sub text 1 (len - 2)
+    | _ -> text
+  else text
+
+let command_words command =
+  command
+  |> String.split_on_char ' '
+  |> List.filter_map (fun word ->
+         match String.trim word with
+         | "" -> None
+         | word -> Some (strip_simple_quotes word |> String.lowercase_ascii))
 
 let add_command_markers command markers =
-  let markers =
-    if contains_ci command "git push" then add_unique_marker "git push" markers
-    else markers
-  in
-  if contains_ci command "pr create" then
-    add_unique_marker "gh pr create" markers
-  else markers
+  match command_words command with
+  | "git" :: "push" :: _ -> add_unique_marker "git push" markers
+  | "gh" :: "pr" :: "create" :: _ ->
+      add_unique_marker "gh pr create" markers
+  | _ -> markers
 
 let add_action_marker action markers =
   match String.lowercase_ascii (String.trim action) with
@@ -204,16 +213,24 @@ let add_operation_marker operation markers =
   | "pr_create" -> add_unique_marker "gh pr create" markers
   | _ -> markers
 
-let add_via_marker via markers =
-  match String.trim via with
-  | "" -> markers
-  | value -> add_unique_marker ("via=" ^ value) markers
+let allowed_via_marker = function
+  | "brokered" | "docker" | "host" | "keeper" | "operator" | "system"
+  | "taskmaster" ->
+      true
+  | _ -> false
 
-let add_json_marker_fields json markers =
+let add_via_marker via markers =
+  let value = String.trim via |> String.lowercase_ascii in
+  if allowed_via_marker value then add_unique_marker ("via=" ^ value) markers
+  else markers
+
+let add_json_marker_fields ?(trusted_route_fields = true) json markers =
   let markers =
-    match json_string_field_opt "via" json with
-    | Some via -> add_via_marker via markers
-    | None -> markers
+    if trusted_route_fields then
+      match json_string_field_opt "via" json with
+      | Some via -> add_via_marker via markers
+      | None -> markers
+    else markers
   in
   let markers =
     match json_string_field_opt "cmd" json with
@@ -231,22 +248,28 @@ let add_json_marker_fields json markers =
     | None -> markers
   in
   let markers =
-    match json_string_field_opt "action" json with
-    | Some action -> add_action_marker action markers
-    | None -> markers
+    if trusted_route_fields then
+      match json_string_field_opt "action" json with
+      | Some action -> add_action_marker action markers
+      | None -> markers
+    else markers
   in
   let markers =
-    match json_string_field_opt "event" json with
-    | Some event -> add_event_marker event markers
-    | None -> markers
+    if trusted_route_fields then
+      match json_string_field_opt "event" json with
+      | Some event -> add_event_marker event markers
+      | None -> markers
+    else markers
   in
-  match json_string_field_opt "operation" json with
-  | Some operation -> add_operation_marker operation markers
-  | None -> markers
+  if trusted_route_fields then
+    match json_string_field_opt "operation" json with
+    | Some operation -> add_operation_marker operation markers
+    | None -> markers
+  else markers
 
 let tool_exec_result_markers ~(input : Yojson.Safe.t) ~(output : string)
     : string list =
-  let markers = add_json_marker_fields input [] in
+  let markers = add_json_marker_fields ~trusted_route_fields:false input [] in
   let markers =
     try
       let json = Yojson.Safe.from_string output in

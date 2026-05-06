@@ -48,8 +48,10 @@ the RFC should be marked superseded by #10421.
 
 - Changing `task_claim_next` preservation semantics — active work should remain
   protected while this RFC targets only proven residual oscillation.
-- Persisting cooldown state across server restarts (in-memory is enough for the
-  common case; `cycle_count` itself is already on-disk and survives restarts).
+- Persisting cooldown state across server restarts. Cooldown is a runtime-only
+  scheduler overlay; server restart clears cooldowns. Severe human escalation is
+  the only persisted mitigation state, because it requires explicit operator
+  review.
 
 ## Design
 
@@ -57,20 +59,22 @@ the RFC should be marked superseded by #10421.
 
 | Stage | Trigger | Action | Recovery |
 |-------|---------|--------|----------|
-| **Cooldown** | `cycle_count` reaches 10 (oscillation_major) | Set `task.cooldown_until = now() + COOLDOWN_SEC` (default 300s); claim attempts during cooldown are rejected with `TaskInCooldown` error | Auto-clear when `now() >= cooldown_until`; reset `cycle_count` to 0 on first claim after cooldown |
+| **Cooldown** | `cycle_count` reaches 10 (oscillation_major) | Record `cooldown_until = now() + COOLDOWN_SEC` in a runtime-only scheduler overlay keyed by `task_id`; claim attempts during cooldown are rejected with `TaskInCooldown` error | Auto-clear when `now() >= cooldown_until`; reset `cycle_count` to 0 on first claim after cooldown |
 | **Human escalation** | `cycle_count` reaches 20 (oscillation_severe) | Transition task to a new human-paused task status; emit `task_oscillation_human_escalation` JSONL event; broadcast to assignee + room | Manual: human reviews, resets, resumes via dashboard or `task_resume` action |
 
 ### Domain changes
 
-Add fields to `Masc_domain.task`:
+Do not add `cooldown_until`, `paused_for_human`, or `paused_at` as serialized
+task fields. Cooldown belongs to an in-memory scheduler overlay so restarts
+clear it by construction. Human escalation uses one persisted source of truth:
+the task status.
 
 ```ocaml
-type task = {
-  ...
-  cooldown_until : float option;  (* unix timestamp; None when not in cooldown *)
-  paused_for_human : bool;        (* true after oscillation_severe escalation *)
-  paused_at : string option;      (* ISO8601 timestamp of paused_human transition *)
-}
+module Task_cooldowns : sig
+  val set : task_id:string -> until:float -> unit
+  val get : task_id:string -> float option
+  val clear : task_id:string -> unit
+end
 ```
 
 Add a new task status variant as part of PR-1; it does not exist today:
@@ -103,13 +107,12 @@ gate the candidate filter:
 
 ```ocaml
 let task_is_in_cooldown ~now (t : Masc_domain.task) =
-  match t.cooldown_until with
+  match Task_cooldowns.get ~task_id:t.task_id with
   | Some until when until > now -> true
   | _ -> false
 
 let task_is_human_paused (t : Masc_domain.task) =
-  t.paused_for_human
-  || match t.task_status with PausedHuman _ -> true | _ -> false
+  match t.task_status with PausedHuman _ -> true | _ -> false
 
 (* In claim candidate filter *)
 let claimable t =
@@ -129,21 +132,15 @@ In `coord_task.ml`, after the existing oscillation WARN block (line 392-417):
   (* existing escalation WARN *)
 
   (* New: cooldown stamp at oscillation_major *)
-  let with_cooldown =
-    if cc >= 10 && Option.is_none task.cooldown_until then
-      Some { task with
-             cooldown_until = Some (now +. cooldown_sec ());
-             (* Do NOT reset cycle_count yet — preserve audit trail until cooldown expires *)
-           }
-    else None
-  in
+  if cc >= 10 && not (task_is_in_cooldown ~now task) then
+    Task_cooldowns.set
+      ~task_id:task.task_id
+      ~until:(now +. cooldown_sec ());
 
   (* New: human-paused status at oscillation_severe *)
   let with_paused =
-    if cc >= 20 && not task.paused_for_human then
+    if cc >= 20 && not (task_is_human_paused task) then
       Some { task with
-             paused_for_human = true;
-             paused_at = Some (Masc_domain.now_iso ());
              task_status = PausedHuman {
                assignee = task_assignee_of_status task.task_status;
                paused_at = Masc_domain.now_iso ();
@@ -178,8 +175,8 @@ operator config):
 
 | Recovery | Trigger | Path |
 |----------|---------|------|
-| Cooldown expires | Time-based | First `task_claim_next` after `now >= cooldown_until` clears `cooldown_until` and resets `cycle_count = 0`. Claim proceeds normally |
-| Human resume | Manual | New action `task_resume_after_human_escalation { task_id }` clears `paused_for_human`, transitions back to `Todo`, resets `cycle_count`. Requires admin/dashboard auth |
+| Cooldown expires | Time-based | First `task_claim_next` after `now >= cooldown_until` clears the runtime overlay entry and resets `cycle_count = 0`. Claim proceeds normally |
+| Human resume | Manual | New action `task_resume_after_human_escalation { task_id }` transitions from `PausedHuman` back to `Todo` and resets `cycle_count`. Requires admin/dashboard auth |
 
 ## Compatibility
 
@@ -187,8 +184,11 @@ operator config):
   `cycle_count`, which by definition has not been reached for non-oscillating
   tasks.
 - `task_claim_next` active-work preservation semantics (`#10421`) are preserved.
-- On-disk task JSON gains 3 optional fields, all `null` by default → backward-
-  compatible with existing fixtures and tests.
+- Cooldown adds no on-disk task JSON fields. Restart clears runtime cooldowns,
+  while `cycle_count` remains available for audit.
+- Human escalation adds one new serialized task-status value, `paused_human`.
+  PR-1 must update compatibility fixtures and unknown-status handling before any
+  production transition can emit it.
 
 ## Test plan
 
@@ -219,9 +219,9 @@ PR-1 is prerequisite for PR-2/PR-3; PR-4/PR-5 can land in parallel after PR-3.
    reset the moment cooldown expires (background sweep) or on the first successful
    claim afterward? The latter avoids a sweep loop but delays observability of
    "this task is healthy now".
-2. **Human-paused auto-resume**: Should `paused_for_human` auto-clear after a
-   long timeout (e.g. 24h with no further oscillation activity)? Or strictly
-   manual intervention?
+2. **Human-paused auto-resume**: Should `PausedHuman` auto-clear after a long
+   timeout (e.g. 24h with no further oscillation activity)? Or strictly manual
+   intervention?
 3. **Cross-keeper attribution**: When task-125 oscillates between `executor` and
    `scholar`, which agent gets attributed in the Prometheus counter? Consider
    labeling by the keeper that triggered the threshold crossing.

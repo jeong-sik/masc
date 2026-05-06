@@ -127,6 +127,22 @@ Expected key fact: the checked fixture records
 passes for the resolved catalog. It will exit non-zero if the consistency
 finding is reopened.
 
+When the full 206-row strict corpus path is unknown, discover likely candidates
+before validating one:
+
+```bash
+python3 scripts/discover_goal_loop_strict_row_corpus.py \
+  <SEARCH_ROOT_OR_ARTIFACT> \
+  --audit-catalog test/fixtures/goal_loop/audit-corpus.external-claim.json \
+  --require-found \
+  --format text
+```
+
+Expected key fact: this separates marker hits from validated strict corpora.
+`--require-found` exits non-zero unless at least one candidate passes the same
+strict corpus validator used by Orient. A positive result is still only an
+intake signal; feed the selected corpus into Orient next.
+
 When the full 206-row strict corpus is available, feed it into Orient instead
 of using it only at closeout:
 

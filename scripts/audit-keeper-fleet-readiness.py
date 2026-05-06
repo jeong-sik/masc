@@ -481,24 +481,68 @@ def decision_log_paths(base_path: Path, name: str) -> list[Path]:
     return [path for _, path in sorted(paths, key=lambda item: item[0])]
 
 
-def pr_action_metric_paths(base_path: Path, name: str) -> list[Path]:
+def day_key_from_unix(ts_unix: float) -> int:
+    return int(datetime.fromtimestamp(ts_unix).strftime("%Y%m%d"))
+
+
+def pr_action_metric_day_key(path: Path) -> int | None:
+    month = path.parent.name
+    day = path.stem
+    if (
+        len(month) == 7
+        and month[4] == "-"
+        and month[:4].isdigit()
+        and month[5:].isdigit()
+        and len(day) == 2
+        and day.isdigit()
+    ):
+        return int(f"{month[:4]}{month[5:]}{day}")
+    return None
+
+
+def pr_action_metric_paths(
+    base_path: Path, name: str, *, min_day_key: int | None = None
+) -> list[Path]:
     metrics_dir = base_path / ".masc" / "keepers" / name / "pr-action-metrics"
     if not metrics_dir.exists():
         return []
-    return sorted(
-        (path for path in metrics_dir.rglob("*.jsonl") if path.is_file()),
-        key=lambda path: path.relative_to(metrics_dir).as_posix(),
-        reverse=True,
+    candidates: list[tuple[int, str, Path]] = []
+    for path in metrics_dir.rglob("*.jsonl"):
+        if not path.is_file():
+            continue
+        day_key = pr_action_metric_day_key(path)
+        if min_day_key is not None and day_key is not None and day_key < min_day_key:
+            continue
+        candidates.append((day_key or -1, str(path), path))
+    return [path for _, _, path in sorted(candidates, reverse=True)]
+
+
+def complete_lifecycle_evidence(evidence: set[str]) -> bool:
+    return (
+        any(item.startswith("pr_create:") for item in evidence)
+        and any(item.startswith("git_push:") for item in evidence)
+        and any(item.startswith("pr_approve:") for item in evidence)
     )
 
 
 def scan_keeper_evidence(
-    base_path: Path, name: str
+    base_path: Path,
+    name: str,
+    *,
+    max_silence_hours: float | None = None,
+    now: float | None = None,
 ) -> tuple[float | None, set[str], set[str], set[str]]:
     latest_ts: float | None = None
     tools: set[str] = set()
     pr_lifecycle_evidence: set[str] = set()
     docker_pr_lifecycle_evidence: set[str] = set()
+    min_metric_ts: float | None = None
+    min_metric_day_key: int | None = None
+    if max_silence_hours is not None:
+        min_metric_ts = (time.time() if now is None else now) - (
+            max_silence_hours * 3600.0
+        )
+        min_metric_day_key = day_key_from_unix(min_metric_ts)
     for decisions in decision_log_paths(base_path, name):
         for row in iter_jsonl(decisions):
             ts = numeric_field(row, "ts_unix")
@@ -508,9 +552,13 @@ def scan_keeper_evidence(
             row_evidence, row_docker_evidence = pr_lifecycle_evidence_from_decision(row)
             pr_lifecycle_evidence.update(row_evidence)
             docker_pr_lifecycle_evidence.update(row_docker_evidence)
-    for metrics in pr_action_metric_paths(base_path, name):
+    for metrics in pr_action_metric_paths(
+        base_path, name, min_day_key=min_metric_day_key
+    ):
         for row in iter_jsonl(metrics):
             ts = numeric_field(row, "ts_unix")
+            if min_metric_ts is not None and ts is not None and ts < min_metric_ts:
+                continue
             if ts is not None:
                 latest_ts = ts if latest_ts is None else max(latest_ts, ts)
             tools.update(tools_from_action_metric(row))
@@ -519,6 +567,10 @@ def scan_keeper_evidence(
             )
             pr_lifecycle_evidence.update(row_evidence)
             docker_pr_lifecycle_evidence.update(row_docker_evidence)
+        if complete_lifecycle_evidence(
+            pr_lifecycle_evidence
+        ) and complete_lifecycle_evidence(docker_pr_lifecycle_evidence):
+            break
     return latest_ts, tools, pr_lifecycle_evidence, docker_pr_lifecycle_evidence
 
 
@@ -588,7 +640,7 @@ def audit_keeper(
         tools,
         pr_lifecycle_evidence,
         docker_pr_lifecycle_evidence,
-    ) = scan_keeper_evidence(base_path, name)
+    ) = scan_keeper_evidence(base_path, name, max_silence_hours=max_silence_hours)
     runtime_turn_ts = numeric_field(runtime, "last_turn_ts")
     updated_ts = iso_to_unix(string_field(runtime, "updated_at"))
     last_turn_ts = max(

@@ -365,6 +365,71 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         )
         self.assertEqual(docker_evidence, evidence)
 
+    def test_pr_action_metric_paths_are_newest_first_and_cutoff(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            metrics_dir = root / ".masc" / "keepers" / "alpha" / "pr-action-metrics"
+            old_path = metrics_dir / "2026-04" / "30.jsonl"
+            new_path = metrics_dir / "2026-05" / "06.jsonl"
+            mid_path = metrics_dir / "2026-05" / "05.jsonl"
+            for path in (old_path, new_path, mid_path):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("{}\n", encoding="utf-8")
+
+            paths = audit.pr_action_metric_paths(root, "alpha", min_day_key=20260501)
+
+        self.assertEqual(paths, [new_path, mid_path])
+
+    def test_scan_keeper_evidence_skips_old_pr_action_metric_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            metrics_dir = root / ".masc" / "keepers" / "alpha" / "pr-action-metrics"
+            old_dir = metrics_dir / "2026-05"
+            old_dir.mkdir(parents=True)
+            now = 1_778_064_000.0
+            old_ts = now - (48 * 3600.0)
+            recent_ts = now - 60.0
+            (old_dir / "04.jsonl").write_text(
+                json.dumps(
+                    {
+                        "ts_unix": old_ts,
+                        "metric_event": "keeper_pr_work_action",
+                        "tool_name": "masc_code_git",
+                        "pr_work_action": "GIT_PUSH",
+                        "pr_work_action_source": "masc_code_git",
+                        "pr_work_action_success": True,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (old_dir / "06.jsonl").write_text(
+                json.dumps(
+                    {
+                        "ts_unix": recent_ts,
+                        "metric_event": "keeper_pr_work_action",
+                        "tool_name": "keeper_shell",
+                        "pr_work_action": "PR_CREATE",
+                        "pr_work_action_source": "keeper_shell",
+                        "pr_work_action_success": True,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            latest_ts, tools, evidence, docker_evidence = audit.scan_keeper_evidence(
+                root,
+                "alpha",
+                max_silence_hours=24.0,
+                now=now,
+            )
+
+        self.assertEqual(latest_ts, recent_ts)
+        self.assertEqual(tools, {"keeper_shell"})
+        self.assertEqual(evidence, {"pr_create:keeper_shell"})
+        self.assertEqual(docker_evidence, set())
+
     def test_expected_keepers_is_minimum_not_exact_count(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

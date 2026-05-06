@@ -208,6 +208,7 @@
         test_keeper_state_machine_correspondence
         test_keeper_lifecycle_hooks
         test_keeper_subprocess_registry
+        test_keeper_bg_task_cleanup
         test_keeper_social_model_magentic_ledger_fsm
         test_keeper_overflow_recovery
         test_telemetry_unified
@@ -430,6 +431,7 @@
           test_keeper_state_machine_correspondence
           test_keeper_lifecycle_hooks
           test_keeper_subprocess_registry
+          test_keeper_bg_task_cleanup
           test_keeper_social_model_magentic_ledger_fsm
           test_keeper_overflow_recovery
           test_telemetry_unified

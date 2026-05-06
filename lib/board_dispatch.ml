@@ -636,15 +636,21 @@ let backend_name () =
 
 (* AI curation delegate — thin wrappers around Board_curation *)
 
-let submit_curation_snapshot ~submitted_by ?model ~ordering ~highlights
-    ~rationale ?(provenance = `Assoc []) () =
+let submit_curation_snapshot ~submitted_by ?model ?summary ~ordering ~highlights
+    ?(tag_suggestions = []) ?(answer_matches = []) ?health_score
+    ?(health_components = []) ~rationale ?(provenance = `Assoc []) () =
   let snap : Board_curation.curation_snapshot = {
     id = Board_curation.generate_id ();
     generated_at = Time_compat.now ();
     submitted_by;
     model;
+    summary;
     ordering;
     highlights;
+    tag_suggestions;
+    answer_matches;
+    health_score;
+    health_components;
     rationale;
     provenance;
   } in

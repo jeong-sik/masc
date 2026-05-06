@@ -1197,7 +1197,7 @@ Safety: never deletes posts with comments or votes unless filters are overridden
 (** All board tools *)
 let tool_board_curation_read : Masc_domain.tool_schema = {
   name = "masc_board_curation_read";
-  description = "Read the latest AI curation snapshot for the board: AI-produced post ordering, highlights, rationale, and operator-auditable provenance. Returns null when no snapshot has been submitted yet.";
+  description = "Read the latest AI curation snapshot for the board: TL;DR summary, post ordering, highlights, tag suggestions, answer matches, health score, rationale, and operator-auditable provenance. Returns null when no snapshot has been submitted yet.";
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc []);

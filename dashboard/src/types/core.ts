@@ -195,10 +195,35 @@ export interface BoardCurationSnapshot {
   generated_at: string
   submitted_by: string
   model?: string | null
+  summary?: string | null
   ordering: string[]
   highlights: string[]
+  tag_suggestions: BoardCurationTagSuggestion[]
+  answer_matches: BoardCurationAnswerMatch[]
+  health_score?: number | null
+  health_components: BoardCurationHealthComponent[]
   rationale: string
   provenance?: unknown
+}
+
+export interface BoardCurationTagSuggestion {
+  post_id: string
+  tags: string[]
+  rationale: string
+}
+
+export interface BoardCurationAnswerMatch {
+  question_post_id: string
+  answer_post_id: string
+  score: number
+  rationale: string
+}
+
+export interface BoardCurationHealthComponent {
+  name: string
+  score: number
+  weight: number
+  rationale: string
 }
 
 // --- SubBoard ---

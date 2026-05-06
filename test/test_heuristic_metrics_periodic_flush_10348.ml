@@ -1,6 +1,6 @@
 (** #10348: heuristic_metrics.jsonl was 0 bytes for 24 h+ despite three
     active emit sites because [record] only flushed when the in-memory
-    buffer reached [buffer_cap=64] or when [shutdown_hooks] ran.  The
+    buffer reached the configured buffer cap or when [shutdown_hooks] ran.  The
     keeper daemon never reaches either path quickly: post_verifier.verify
     is dead, drift_guard.verify_handoff fires only on handoffs, and
     keeper_alert_signal is env-gated.  These tests pin the time-based
@@ -45,7 +45,7 @@ let count_lines path =
       with End_of_file -> !n)
 
 (* Pre-fix behavior: with default 30 s interval and no shutdown,
-   a single [record] (well under buffer_cap=64) leaves the file empty.
+   a single [record] (well under the default buffer cap) leaves the file empty.
    Post-fix: setting interval to 0.0 flushes on every record. *)
 let test_periodic_flush_below_cap () =
   let base = tmp_base () in
@@ -85,6 +85,21 @@ let test_large_interval_still_batches () =
   HM.flush ();
   Alcotest.(check int) "explicit flush still works" 1 (count_lines path)
 
+let test_configured_buffer_cap_flushes () =
+  let base = tmp_base () in
+  HM.reset_for_test ();
+  HM.set_flush_interval_for_test 1e9;
+  HM.set_buffer_cap_for_test 3;
+  HM.init ~base_path:base;
+  HM.record (make_event ~site:"cap_1");
+  HM.record (make_event ~site:"cap_2");
+  let path = ledger_path base in
+  Alcotest.(check int) "below configured cap stays buffered" 0
+    (count_lines path);
+  HM.record (make_event ~site:"cap_3");
+  Alcotest.(check int) "configured cap flushes buffered rows" 3
+    (count_lines path)
+
 (* Audit regression: [record] before [init] used to leave data only in the
    volatile in-memory buffer, with no warning and no flush when [init] finally
    installed the store path.  Late init must make already-buffered rows durable. *)
@@ -110,6 +125,8 @@ let () =
         `Quick test_multiple_records_below_cap;
       Alcotest.test_case "large interval batches; explicit flush works"
         `Quick test_large_interval_still_batches;
+      Alcotest.test_case "configured buffer cap flushes"
+        `Quick test_configured_buffer_cap_flushes;
       Alcotest.test_case "late init flushes pre-init buffer"
         `Quick test_late_init_flushes_preinit_buffer;
     ];

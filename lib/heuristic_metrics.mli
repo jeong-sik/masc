@@ -72,7 +72,12 @@ val flush : unit -> unit
 val set_flush_interval_for_test : float -> unit
 (** Override the time-based flush interval (default 30 s).  Exposed for
     tests that need [record] to flush on every call without waiting for
-    [buffer_cap] (64) records or shutdown.  #10348. *)
+    the configured buffer cap or shutdown.  #10348. *)
+
+val set_buffer_cap_for_test : int -> unit
+(** Override the in-memory flush batch size.  Tests only.  Production
+    uses [Env_config_runtime.Heuristic_metrics.buffer_cap], backed by
+    [MASC_HEURISTIC_METRICS_BUFFER_CAP] and clamped to [1, 10000]. *)
 
 val reset_for_test : unit -> unit
 (** Clear the in-memory store reference, buffer and last-flush clock so

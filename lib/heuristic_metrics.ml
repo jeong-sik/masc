@@ -152,7 +152,11 @@ let mu = Stdlib.Mutex.create ()
 
 (** In-memory buffer to batch writes.  Flushed periodically or on [flush]. *)
 let buffer : Yojson.Safe.t Queue.t = Queue.create ()
-let buffer_cap = 64
+let default_buffer_cap () = Env_config_runtime.Heuristic_metrics.buffer_cap
+let buffer_cap_ref = ref (default_buffer_cap ())
+
+let buffer_cap () =
+  max 1 !buffer_cap_ref
 
 (* #10348: time-based flush so sub-cap emit rates produce visible ledger output.
    Without this, the file stays at 0 bytes for low-rate sites (drift_guard
@@ -165,6 +169,7 @@ let last_flush_ref = ref 0.0
 let uninitialized_record_warned_ref = ref false
 
 let set_flush_interval_for_test sec = flush_interval_sec_ref := sec
+let set_buffer_cap_for_test cap = buffer_cap_ref := max 1 cap
 
 (* #10348: tests need to re-[init] against fresh tmp paths.  Production
    code only calls [init] once at boot. *)
@@ -172,6 +177,7 @@ let reset_for_test () =
   Stdlib.Mutex.protect mu (fun () ->
     store_path_ref := None;
     uninitialized_record_warned_ref := false;
+    buffer_cap_ref := default_buffer_cap ();
     Queue.clear buffer;
     (* Initialize the clock to "now" rather than 0.0 so tests that pin a
        large flush interval can verify batching without the [now -.
@@ -314,7 +320,7 @@ let record (e : event) =
     Queue.add json buffer;
     let now = Unix.gettimeofday () in
     let elapsed = now -. !last_flush_ref in
-    if Queue.length buffer >= buffer_cap
+    if Queue.length buffer >= buffer_cap ()
        || elapsed >= !flush_interval_sec_ref
     then do_flush ())
 

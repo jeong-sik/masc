@@ -74,6 +74,20 @@ module Cache = struct
     get_int ~default:1000 "MASC_CACHE_MAX_ENTRIES"
 end
 
+(** {1 Heuristic Metrics} *)
+
+module Heuristic_metrics = struct
+  (** Maximum in-memory heuristic metric rows to batch before forcing a
+      JSONL flush.
+
+      @category Telemetry
+      @ops_class operator *)
+  let buffer_cap =
+    get_int ~default:64 "MASC_HEURISTIC_METRICS_BUFFER_CAP"
+    |> max 1
+    |> min 10_000
+end
+
 (** {1 Task Claim Configuration} *)
 
 module Claim = struct

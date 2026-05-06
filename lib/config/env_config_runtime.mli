@@ -53,6 +53,12 @@ module Cache : sig
   val max_entries : int
 end
 
+(** {1 Heuristic metrics} *)
+
+module Heuristic_metrics : sig
+  val buffer_cap : int
+end
+
 (** {1 Task claim} *)
 
 module Claim : sig

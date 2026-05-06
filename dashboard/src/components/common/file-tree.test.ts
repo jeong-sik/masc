@@ -22,6 +22,12 @@ describe('FileTree', () => {
     expect(container.querySelector('[role="tree"]')).not.toBeNull()
   })
 
+  it('applies a custom aria-label', () => {
+    const container = document.createElement('div')
+    render(h(FileTree, { nodes, 'aria-label': 'Workspace files' }), container)
+    expect(container.querySelector('[role="tree"]')?.getAttribute('aria-label')).toBe('Workspace files')
+  })
+
   it('renders treeitems when expanded', () => {
     const container = document.createElement('div')
     render(h(FileTree, { nodes, expandedIds: ['d1'] }), container)
@@ -66,15 +72,47 @@ describe('FileTree', () => {
     render(h(FileTree, { nodes, onToggle }), container)
 
     const dir = container.querySelector<HTMLElement>('[data-file-tree-row="d1"]')
-    dir?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
+    const rightEvent = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })
+    dir?.dispatchEvent(rightEvent)
     await new Promise((r) => setTimeout(r, 0))
+    expect(rightEvent.defaultPrevented).toBe(true)
     expect(onToggle).toHaveBeenCalledWith('d1')
 
     render(h(FileTree, { nodes, expandedIds: ['d1'], onToggle }), container)
     const expandedDir = container.querySelector<HTMLElement>('[data-file-tree-row="d1"]')
-    expandedDir?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }))
+    const leftEvent = new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true })
+    expandedDir?.dispatchEvent(leftEvent)
     await new Promise((r) => setTimeout(r, 0))
+    expect(leftEvent.defaultPrevented).toBe(true)
     expect(onToggle).toHaveBeenCalledTimes(2)
+  })
+
+  it('uses roving tabindex without hard-coded aria-selected', () => {
+    const container = document.createElement('div')
+    render(h(FileTree, { nodes, expandedIds: ['d1'] }), container)
+
+    const items = Array.from(container.querySelectorAll('[role="treeitem"]'))
+
+    expect(items.map(item => item.getAttribute('tabindex'))).toEqual(['0', '-1', '-1'])
+    expect(items.every(item => !item.hasAttribute('aria-selected'))).toBe(true)
+  })
+
+  it('moves focus to the first child when right arrow hits an expanded directory', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    render(h(FileTree, { nodes, expandedIds: ['d1'] }), container)
+
+    const dir = container.querySelector<HTMLElement>('[data-file-tree-row="d1"]')
+    const child = container.querySelector<HTMLElement>('[data-file-tree-row="f1"]')
+    dir?.focus()
+    const event = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })
+    dir?.dispatchEvent(event)
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(child)
+    expect(child?.getAttribute('tabindex')).toBe('0')
+    container.remove()
   })
 
   it('calls onSelect on file click', async () => {

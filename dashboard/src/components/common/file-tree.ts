@@ -4,6 +4,7 @@
 // with git status badges.
 
 import { html } from 'htm/preact'
+import { useState } from 'preact/hooks'
 import { StatusChip, type StatusChipTone } from './status-chip'
 
 export interface FileNode {
@@ -20,6 +21,7 @@ interface FileTreeProps {
   expandedIds?: string[]
   onToggle?: (id: string) => void
   testId?: string
+  'aria-label'?: string
 }
 
 type GitStatus = NonNullable<FileNode['gitStatus']>
@@ -73,11 +75,23 @@ function activateNode(
 
 function handleTreeRowKeyDown(
   e: KeyboardEvent,
-  node: FileNode,
+  row: FileTreeRow,
+  rowIndex: number,
+  rows: ReadonlyArray<FileTreeRow>,
   expanded: ReadonlySet<string>,
+  setActiveId: (id: string) => void,
   onSelect?: (node: FileNode) => void,
   onToggle?: (id: string) => void,
 ): void {
+  const node = row.node
+  const focusRow = (nextIndex: number) => {
+    const next = rows[nextIndex]
+    if (!next) return
+    setActiveId(next.node.id)
+    const root = (e.currentTarget as HTMLElement).closest('[data-file-tree]')
+    root?.querySelector<HTMLElement>(`[data-file-tree-index="${nextIndex}"]`)?.focus()
+  }
+
   switch (e.key) {
     case 'Enter':
     case ' ':
@@ -85,16 +99,40 @@ function handleTreeRowKeyDown(
       activateNode(node, onSelect, onToggle)
       break
     case 'ArrowRight':
-      if (node.type === 'directory' && !expanded.has(node.id)) {
-        e.preventDefault()
-        onToggle?.(node.id)
+      e.preventDefault()
+      if (node.type === 'directory') {
+        if (!expanded.has(node.id)) onToggle?.(node.id)
+        else if (rows[rowIndex + 1]?.depth === row.depth + 1) focusRow(rowIndex + 1)
       }
       break
     case 'ArrowLeft':
+      e.preventDefault()
       if (node.type === 'directory' && expanded.has(node.id)) {
-        e.preventDefault()
         onToggle?.(node.id)
+      } else {
+        const parentIndex = rows
+          .slice(0, rowIndex)
+          .map((candidate, index) => ({ candidate, index }))
+          .reverse()
+          .find(({ candidate }) => candidate.depth === row.depth - 1)?.index
+        if (parentIndex != null) focusRow(parentIndex)
       }
+      break
+    case 'ArrowDown':
+      e.preventDefault()
+      focusRow(Math.min(rowIndex + 1, rows.length - 1))
+      break
+    case 'ArrowUp':
+      e.preventDefault()
+      focusRow(Math.max(rowIndex - 1, 0))
+      break
+    case 'Home':
+      e.preventDefault()
+      focusRow(0)
+      break
+    case 'End':
+      e.preventDefault()
+      focusRow(rows.length - 1)
       break
   }
 }
@@ -117,12 +155,17 @@ function renderGitStatus(status: GitStatus) {
 
 function renderRow(
   row: FileTreeRow,
+  rowIndex: number,
+  activeId: string | null,
+  rows: ReadonlyArray<FileTreeRow>,
   expanded: ReadonlySet<string>,
+  setActiveId: (id: string) => void,
   onSelect?: (node: FileNode) => void,
   onToggle?: (id: string) => void,
 ): ReturnType<typeof html> {
   const { node, depth, posInSet, setSize } = row
   const isExpanded = expanded.has(node.id)
+  const isActive = node.id === activeId
   const paddingLeft = `${depth * 16}px`
 
   return html`
@@ -131,17 +174,18 @@ function renderRow(
       class="flex min-w-0 cursor-pointer items-center gap-1 rounded-[var(--r-1)] py-0.5 pr-2 hover:bg-[var(--color-bg-hover)]"
       style=${{ paddingLeft }}
       onClick=${() => activateNode(node, onSelect, onToggle)}
+      onFocus=${() => setActiveId(node.id)}
       role="treeitem"
       aria-expanded=${node.type === 'directory' ? isExpanded : undefined}
-      aria-selected="false"
       aria-level=${depth + 1}
       aria-posinset=${posInSet}
       aria-setsize=${setSize}
       data-file-tree-row=${node.id}
+      data-file-tree-index=${rowIndex}
       data-file-tree-depth=${depth}
-      tabindex="0"
+      tabindex=${isActive ? 0 : -1}
       onKeyDown=${(e: KeyboardEvent) =>
-        handleTreeRowKeyDown(e, node, expanded, onSelect, onToggle)}
+        handleTreeRowKeyDown(e, row, rowIndex, rows, expanded, setActiveId, onSelect, onToggle)}
     >
       <span class="inline-block w-4 shrink-0 text-center text-[var(--color-fg-secondary)]" aria-hidden="true">
         ${node.type === 'directory' ? (isExpanded ? '▼' : '▶') : ' '}
@@ -158,9 +202,14 @@ export function FileTree({
   expandedIds = [],
   onToggle,
   testId,
+  'aria-label': ariaLabel = '파일 트리',
 }: FileTreeProps) {
+  const [activeId, setActiveId] = useState<string | null>(null)
   const expanded = new Set(expandedIds)
   const rows = visibleFileTreeRows(nodes, expanded)
+  const visibleActiveId = rows.some(row => row.node.id === activeId)
+    ? activeId
+    : rows[0]?.node.id ?? null
 
   return html`
     <div
@@ -168,9 +217,10 @@ export function FileTree({
       data-file-tree
       data-testid=${testId}
       role="tree"
-      aria-label="파일 트리"
+      aria-label=${ariaLabel}
     >
-      ${rows.map(row => renderRow(row, expanded, onSelect, onToggle))}
+      ${rows.map((row, rowIndex) =>
+        renderRow(row, rowIndex, visibleActiveId, rows, expanded, setActiveId, onSelect, onToggle))}
     </div>
   `
 }

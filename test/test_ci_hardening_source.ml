@@ -2150,6 +2150,45 @@ let test_dashboard_bootstrap_contracts () =
     (file_not_contains_pattern "lib/server/server_dashboard_http.ml"
        "(\"error\", `String (Printexc.to_string exn))")
 
+(* RFC-0037 PR-1 — Board_attachment_meta carrier on post.meta_json.
+
+   These guards capture the contract that ties the carrier module to the
+   post type:
+   - the carrier module + .mli exist with the agreed surface
+   - Board_types.post still carries meta_json (the carrier's storage slot)
+   - the JSON key SSOT is "attachments"
+   - of_yojson returns a result type (total, no silent raises)
+   - id generator uses the "a-" prefix (RFC §6 Q2 default)
+
+   If any of these breaks, the carrier mechanism's load-bearing assumption
+   is gone and the next reader will silently get [] instead of a parse
+   error.  See loop iter 5 / 6 for the rationale. *)
+let test_board_attachment_meta_contracts () =
+  check bool "carrier mli exists with attach helper" true
+    (file_contains_pattern "lib/board_attachment_meta.mli"
+       "val attach_to_post_meta");
+  check bool "carrier mli exposes parse total" true
+    (file_contains_pattern "lib/board_attachment_meta.mli"
+       "val of_yojson : Yojson.Safe.t -> (t, error) result");
+  check bool "carrier mli exposes meta_json_key SSOT" true
+    (file_contains_pattern "lib/board_attachment_meta.mli"
+       "val meta_json_key : string");
+  check bool "carrier ml binds meta_json_key to \"attachments\"" true
+    (file_contains_pattern "lib/board_attachment_meta.ml"
+       "let meta_json_key = \"attachments\"");
+  check bool "carrier ml uses 'a-' id prefix (RFC-0037 Q2 default)" true
+    (file_contains_pattern "lib/board_attachment_meta.ml"
+       "Random_id.prefixed ~prefix:\"a-\"");
+  check bool "carrier kind union has all 4 variants" true
+    (file_contains_pattern "lib/board_attachment_meta.mli"
+       "| Image\n  | Video\n  | Youtube\n  | External_link");
+  check bool "Board_types.post still has meta_json carrier slot" true
+    (file_contains_pattern "lib/board_types/board_types.mli"
+       "meta_json : Yojson.Safe.t option");
+  check bool "carrier test registered in test/dune" true
+    (file_contains_pattern "test/dune"
+       "test_board_attachment_meta")
+
 let () =
   run "ci_hardening_source"
     [
@@ -2248,5 +2287,7 @@ let () =
              test_copilot_zero_diff_cleanup_contracts;
            test_case "dashboard bootstrap contracts (loop #7)" `Quick
              test_dashboard_bootstrap_contracts;
+           test_case "board attachment meta contracts (RFC-0037 PR-1)" `Quick
+             test_board_attachment_meta_contracts;
          ]);
     ]

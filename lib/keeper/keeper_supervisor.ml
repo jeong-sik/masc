@@ -27,6 +27,38 @@ let keep_last_n n item lst =
   if List.length full <= n then full
   else List.filteri (fun i _ -> i < n) full
 
+let supervision_cohort_size = 8
+
+type supervision_cohort = {
+  cohort_id : int;
+  keepers : Keeper_registry.registry_entry list;
+}
+
+let supervision_cohorts ?(cohort_size = supervision_cohort_size)
+    (entries : Keeper_registry.registry_entry list) =
+  let cohort_size = max 1 cohort_size in
+  let sorted =
+    List.sort
+      (fun (a : Keeper_registry.registry_entry)
+           (b : Keeper_registry.registry_entry) ->
+        String.compare a.name b.name)
+      entries
+  in
+  let rec take n acc rest =
+    match n, rest with
+    | 0, rest -> (List.rev acc, rest)
+    | _, [] -> (List.rev acc, [])
+    | n, entry :: rest -> take (n - 1) (entry :: acc) rest
+  in
+  let rec loop cohort_id acc remaining =
+    match remaining with
+    | [] -> List.rev acc
+    | _ ->
+        let keepers, rest = take cohort_size [] remaining in
+        loop (cohort_id + 1) ({ cohort_id; keepers } :: acc) rest
+  in
+  loop 0 [] sorted
+
 let should_cleanup_dead ~now ~dead_ttl_sec
     (entry : Keeper_registry.registry_entry) =
   match entry.phase, entry.dead_since_ts with
@@ -1244,36 +1276,44 @@ let sweep_and_recover (ctx : _ context) =
        | None -> ())
     end
   in
-  (* Yield meter: the entry scan is pure in-memory and may cover 64+
-     keepers; yield every ~1000 iterations to stay scheduler-fair. *)
+  (* 2-level supervision slice: process the flat registry through stable
+     8-keeper cohorts.  Today this gives the sweep an explicit boundary
+     and a cooperative yield between cohort groups; future work can hang
+     per-cohort restart budgets or fibers from the same helper.  The yield
+     meter still protects unusually large cohorts or non-default sizes. *)
+  let entry_cohorts = supervision_cohorts entries in
   let sweep_ym = Eio_guard.create_yield_meter () in
-  List.iter (fun (entry : Keeper_registry.registry_entry) ->
-    (match entry.phase with
-    | Keeper_state_machine.Dead | Keeper_state_machine.Zombie ->
-        (match entry.dead_since_ts with
-         | Some dead_since when now -. dead_since >= dead_ttl_sec ->
-             to_cleanup_dead := entry :: !to_cleanup_dead
-         | _ -> ())
-    | Keeper_state_machine.Stopped ->
-        to_unregister := entry :: !to_unregister
-    | Keeper_state_machine.Running | Keeper_state_machine.Paused
-    | Keeper_state_machine.Crashed
-    | Keeper_state_machine.Failing | Keeper_state_machine.Overflowed
-    | Keeper_state_machine.Compacting
-    | Keeper_state_machine.HandingOff | Keeper_state_machine.Draining
-    | Keeper_state_machine.Restarting | Keeper_state_machine.Offline ->
-      (match Eio.Promise.peek entry.done_p with
-      | None when entry.phase = Keeper_state_machine.Stopped ->
-          to_unregister := entry :: !to_unregister
-      | None when watchdog_stop_pending entry ->
-          force_unresolved_watchdog_crash entry
-      | None -> ()  (* Alive — skip *)
-      | Some `Stopped ->
-          to_unregister := entry :: !to_unregister
-      | Some (`Crashed msg) ->
-          queue_crashed_entry entry msg));
-    Eio_guard.yield_step sweep_ym
-  ) entries;
+  List.iter
+    (fun cohort ->
+      List.iter
+        (fun (entry : Keeper_registry.registry_entry) ->
+          (match entry.phase with
+           | Keeper_state_machine.Dead | Keeper_state_machine.Zombie ->
+               (match entry.dead_since_ts with
+                | Some dead_since when now -. dead_since >= dead_ttl_sec ->
+                    to_cleanup_dead := entry :: !to_cleanup_dead
+                | _ -> ())
+           | Keeper_state_machine.Stopped ->
+               to_unregister := entry :: !to_unregister
+           | Keeper_state_machine.Running | Keeper_state_machine.Paused
+           | Keeper_state_machine.Crashed | Keeper_state_machine.Failing
+           | Keeper_state_machine.Overflowed | Keeper_state_machine.Compacting
+           | Keeper_state_machine.HandingOff | Keeper_state_machine.Draining
+           | Keeper_state_machine.Restarting | Keeper_state_machine.Offline ->
+               (match Eio.Promise.peek entry.done_p with
+                | None when entry.phase = Keeper_state_machine.Stopped ->
+                    to_unregister := entry :: !to_unregister
+                | None when watchdog_stop_pending entry ->
+                    force_unresolved_watchdog_crash entry
+                | None -> ()  (* Alive — skip *)
+                | Some `Stopped ->
+                    to_unregister := entry :: !to_unregister
+                | Some (`Crashed msg) ->
+                    queue_crashed_entry entry msg));
+          Eio_guard.yield_step sweep_ym)
+        cohort.keepers;
+      Eio_guard.fair_yield ())
+    entry_cohorts;
   List.iter (fun (entry : Keeper_registry.registry_entry) ->
     Keeper_registry.unregister ~base_path entry.name;
     (* K4c — restart-budget exhaustion: keeper is permanently

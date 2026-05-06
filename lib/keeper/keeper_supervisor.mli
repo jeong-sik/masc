@@ -47,6 +47,23 @@ val backoff_delay : int -> float
 val keep_last_n : int -> 'a -> 'a list -> 'a list
 (** [keep_last_n n item lst] prepends [item] and keeps at most [n] entries. *)
 
+val supervision_cohort_size : int
+(** Target keeper count per supervisor cohort.  The first 2-level
+    supervision slice groups the 64-keeper fleet as 8 cohorts of 8. *)
+
+type supervision_cohort = {
+  cohort_id : int;
+  keepers : Keeper_registry.registry_entry list;
+}
+(** Deterministic keeper cohort used by the supervisor sweep. *)
+
+val supervision_cohorts :
+  ?cohort_size:int ->
+  Keeper_registry.registry_entry list ->
+  supervision_cohort list
+(** Sort and chunk registry entries into deterministic supervisor cohorts.
+    [cohort_size <= 0] is coerced to 1. *)
+
 val next_auto_resume_after_sec :
   initial_sec:float -> max_sec:float -> float option -> float option
 (** Compute the next auto-resume backoff delay after an auto-pause.  [None]

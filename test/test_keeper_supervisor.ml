@@ -194,6 +194,50 @@ let make_meta name =
   | Ok meta -> meta
   | Error err -> fail ("make_meta: " ^ err)
 
+let registered_entries names =
+  Reg.clear ();
+  List.map
+    (fun name -> Reg.register ~base_path:bp name (make_meta name))
+    names
+
+let test_supervision_cohorts_64_keepers_8x8 () =
+  let names =
+    List.init 64 (fun i -> Printf.sprintf "keeper-%02d" i)
+  in
+  let entries = registered_entries (List.rev names) in
+  let cohorts = Sup.supervision_cohorts entries in
+  check int "cohort count" 8 (List.length cohorts);
+  List.iteri
+    (fun i (cohort : Sup.supervision_cohort) ->
+      check int "cohort id" i cohort.cohort_id;
+      check int "cohort size" Sup.supervision_cohort_size
+        (List.length cohort.keepers))
+    cohorts;
+  let flattened =
+    cohorts
+    |> List.concat_map (fun (cohort : Sup.supervision_cohort) -> cohort.keepers)
+    |> List.map (fun (entry : Reg.registry_entry) -> entry.name)
+  in
+  check (list string) "all keepers exactly once in stable order"
+    names flattened
+
+let test_supervision_cohorts_custom_size_and_floor () =
+  let names = [ "delta"; "alpha"; "echo"; "bravo"; "charlie" ] in
+  let entries = registered_entries names in
+  let sizes =
+    Sup.supervision_cohorts ~cohort_size:2 entries
+    |> List.map (fun (cohort : Sup.supervision_cohort) ->
+           List.length cohort.keepers)
+  in
+  check (list int) "custom cohort sizes" [ 2; 2; 1 ] sizes;
+  let floored_sizes =
+    Sup.supervision_cohorts ~cohort_size:0 entries
+    |> List.map (fun (cohort : Sup.supervision_cohort) ->
+           List.length cohort.keepers)
+  in
+  check (list int) "non-positive cohort size coerces to one"
+    [ 1; 1; 1; 1; 1 ] floored_sizes
+
 let test_self_preservation_subset () =
   Eio_main.run @@ fun _env ->
   Reg.clear ();
@@ -1221,6 +1265,12 @@ let () =
     ];
     "keep_last_n_properties", [
       test_case "never exceeds limit" `Quick test_keep_last_n_never_exceeds;
+    ];
+    "supervision_cohorts", [
+      test_case "64 keepers form 8 cohorts of 8" `Quick
+        test_supervision_cohorts_64_keepers_8x8;
+      test_case "custom size and floor" `Quick
+        test_supervision_cohorts_custom_size_and_floor;
     ];
     "self_preservation_properties", [
       test_case "output subset of input" `Quick test_self_preservation_subset;

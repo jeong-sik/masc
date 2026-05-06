@@ -7,7 +7,8 @@
     Catches [Eio.Time.Timeout] and [Eio.Cancel.Cancelled] to perform functional rollback.
     [caller] (#10094) labels the Prometheus timeout counter so the
     operator can attribute timeouts to specific call sites; defaults
-    to ["unknown"] for backwards compatibility with legacy callers. *)
+    to ["unknown"] for backwards compatibility with legacy callers.
+    Raises [Invalid_argument] when [timeout_s] is not positive and finite. *)
 val run_safe :
   ?caller:string ->
   timeout_s:float ->

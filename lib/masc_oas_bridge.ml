@@ -16,6 +16,12 @@
     accepts a typed caller and pulls the configured budget from
     [Env_config_oas_bridge]. *)
 let run_safe ?(caller = "unknown") ~timeout_s fn =
+  if not (Float.is_finite timeout_s) || Float.compare timeout_s 0.0 <= 0 then
+    invalid_arg
+      (Printf.sprintf
+         "Masc_oas_bridge.run_safe: timeout_s must be positive and finite \
+          (got %.6g)"
+         timeout_s);
   let clock_opt =
     match Masc_eio_env.get_opt () with
     | Some { clock; _ } -> clock

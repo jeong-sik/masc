@@ -349,6 +349,9 @@ let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
     meta.Keeper_types.runtime.proactive_rt.count_total > 0
     && timestamp_within_window ?window_hours ~now
          meta.Keeper_types.runtime.proactive_rt.last_ts
+    && not
+         (meta.Keeper_types.runtime.proactive_rt.last_outcome
+          = Keeper_types.Proactive_error)
   in
   let has_recent_decision_evidence snapshot =
     match (decision_stat_for snapshot.keeper_name).latest_ts_unix with
@@ -399,11 +402,23 @@ let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
         | Some meta -> has_recent_meta_evidence meta
         | None -> false
       in
+      let meta_outcome =
+        match snapshot.meta with
+        | Some meta ->
+          Some
+            (Keeper_types.proactive_cycle_outcome_to_string
+               meta.Keeper_types.runtime.proactive_rt.last_outcome)
+        | None -> None
+      in
       `Assoc [
         ("keeper", `String snapshot.keeper_name);
         ("meta_proactive_count_total", `Int meta_count);
         ( "meta_last_proactive_ts",
           if meta_last_ts > 0.0 then `Float meta_last_ts else `Null );
+        ( "meta_last_proactive_outcome",
+          match meta_outcome with
+          | Some outcome -> `String outcome
+          | None -> `Null );
         ("meta_evidence_within_window", `Bool meta_recent);
         ("decision_log", Decision.scheduled_evidence_json stat);
       ])

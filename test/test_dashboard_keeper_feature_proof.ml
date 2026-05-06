@@ -65,6 +65,7 @@ let make_meta ?(name = "alpha") () =
 
 let persist_keeper_with_proactive
       ?proactive_last_ts
+      ?proactive_last_outcome
       config
       ~proactive_enabled
       ~name
@@ -99,9 +100,12 @@ let persist_keeper_with_proactive
                  | Some ts -> ts
                  | None -> if proactive_count_total > 0 then now else 0.0);
               last_outcome =
-                (if proactive_count_total > 0
-                 then KT.Proactive_tool_use
-                 else KT.Proactive_never_started);
+                (match proactive_last_outcome with
+                 | Some outcome -> outcome
+                 | None ->
+                   if proactive_count_total > 0
+                   then KT.Proactive_tool_use
+                   else KT.Proactive_never_started);
             };
           autonomous_action_count;
           autonomous_turn_count = autonomous_action_count;
@@ -676,6 +680,55 @@ let test_scheduled_proactive_window_requires_recent_evidence () =
     ["alpha"]
     (json_string_values "missing_keepers" evidence)
 
+let test_scheduled_proactive_meta_error_does_not_prove_success () =
+  with_store @@ fun config ->
+  let now = Unix.gettimeofday () in
+  ignore
+    (persist_keeper_with_proactive
+       ~proactive_last_ts:(now -. 60.0)
+       ~proactive_last_outcome:KT.Proactive_error
+       config ~proactive_enabled:true
+       ~name:"alpha" ~total_turns:3 ~autonomous_action_count:2
+       ~autonomous_tool_turn_count:2 ~board_reactive_turn_count:1
+       ~proactive_count_total:1);
+  ignore
+    (persist_keeper config ~name:"beta" ~total_turns:2
+       ~autonomous_action_count:1 ~autonomous_tool_turn_count:1
+       ~board_reactive_turn_count:1 ~proactive_count_total:0);
+  write_scheduled_decision_at config "beta" ~ts:(now -. 60.0);
+  let json =
+    Dashboard_keeper_feature_proof.json
+      ~config
+      ~n:100
+      ~window_hours:24.0
+      ~success_threshold_pct:80.0
+      ~now
+      ()
+  in
+  let scheduled = feature "scheduled_proactive_autonomy" json in
+  let evidence = keeper_evidence "scheduled_proactive_autonomy" json in
+  check string "recent failed meta evidence does not satisfy proof" "warn"
+    (Safe_ops.json_string ~default:"missing" "status" scheduled);
+  check (list string) "successful decision log proves beta only"
+    ["beta"]
+    (json_string_values "observed_keepers" evidence);
+  check (list string) "recent meta error alpha stays missing"
+    ["alpha"]
+    (json_string_values "missing_keepers" evidence);
+  let alpha_rows =
+    Yojson.Safe.Util.(
+      evidence |> member "per_keeper" |> to_list)
+    |> List.filter (fun row ->
+      Safe_ops.json_string ~default:"" "keeper" row = "alpha")
+  in
+  match alpha_rows with
+  | [ alpha ] ->
+    check string "meta outcome is reported" "error"
+      (Safe_ops.json_string ~default:"missing" "meta_last_proactive_outcome" alpha);
+    check bool "error outcome is not proof" false
+      (Safe_ops.json_bool ~default:true "meta_evidence_within_window" alpha)
+  | _ -> fail "expected one alpha per-keeper row"
+
 let test_persistent_24h_turn_exchange_counts_decision_span () =
   with_store @@ fun config ->
   let now = 1_777_000_000.0 in
@@ -743,6 +796,8 @@ let () =
             test_scheduled_proactive_evidence_uses_enabled_population;
           test_case "scheduled proof window requires recent evidence" `Quick
             test_scheduled_proactive_window_requires_recent_evidence;
+          test_case "scheduled proof ignores recent meta error" `Quick
+            test_scheduled_proactive_meta_error_does_not_prove_success;
           test_case "decision log counts as 24h turn exchange proof" `Quick
             test_persistent_24h_turn_exchange_counts_decision_span;
         ] );

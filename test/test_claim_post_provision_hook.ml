@@ -11,6 +11,12 @@ open Alcotest
 open Masc_mcp
 module CH = Coord_hooks
 
+let failure_metric_value ~site ~agent_name =
+  Prometheus.metric_value_or_zero
+    Prometheus.metric_coord_claim_post_provision_failures
+    ~labels:[ ("site", site); ("agent_name", agent_name) ]
+    ()
+
 let with_test_env f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -52,6 +58,7 @@ let test_hook_invoked_on_successful_claim () =
 
 let test_hook_failure_does_not_block_claim () =
   with_test_env @@ fun config ->
+  let before = failure_metric_value ~site:"claim_task" ~agent_name:"claude" in
   Atomic.set CH.claim_post_provision_fn (fun _ ~agent_name:_ ~task_id:_ ->
       raise (Failure "synthetic worktree provisioning failure"));
   let _ = Coord.add_task config ~title:"task-103 t2" ~priority:1 ~description:"" in
@@ -60,10 +67,33 @@ let test_hook_failure_does_not_block_claim () =
   with
   | Ok msg ->
     check bool "claim succeeded despite hook failure" true
-      (Astring.String.is_infix ~affix:"claimed" msg)
+      (Astring.String.is_infix ~affix:"claimed" msg);
+    check (float 0.001) "claim failure metric incremented"
+      (before +. 1.0)
+      (failure_metric_value ~site:"claim_task" ~agent_name:"claude")
   | Error e ->
     failf "claim must succeed even if hook raises; got: %s"
       (Masc_domain.show_masc_error e)
+
+let test_claim_next_hook_failure_is_observed () =
+  with_test_env @@ fun config ->
+  let before = failure_metric_value ~site:"claim_next" ~agent_name:"claude" in
+  Atomic.set CH.claim_post_provision_fn (fun _ ~agent_name:_ ~task_id:_ ->
+      raise (Failure "synthetic claim_next provisioning failure"));
+  let _ = Coord.add_task config ~title:"task-103 t-next" ~priority:1 ~description:"" in
+  match Coord.claim_next_r config ~agent_name:"claude" () with
+  | Coord.Claim_next_claimed { task_id; _ } ->
+    check string "claimed task" "task-001" task_id;
+    check (float 0.001) "claim_next failure metric incremented"
+      (before +. 1.0)
+      (failure_metric_value ~site:"claim_next" ~agent_name:"claude")
+  | Coord.Claim_next_no_unclaimed ->
+    fail "claim_next unexpectedly found no unclaimed task"
+  | Coord.Claim_next_no_eligible { excluded_count } ->
+    failf "claim_next unexpectedly found no eligible task; excluded=%d"
+      excluded_count
+  | Coord.Claim_next_error msg ->
+    failf "claim_next unexpectedly failed: %s" msg
 
 let test_hook_not_invoked_on_already_claimed () =
   with_test_env @@ fun config ->
@@ -89,6 +119,8 @@ let () =
             test_hook_invoked_on_successful_claim;
           test_case "does not block claim on hook failure" `Quick
             test_hook_failure_does_not_block_claim;
+          test_case "observes claim_next hook failure" `Quick
+            test_claim_next_hook_failure_is_observed;
           test_case "skips already-claimed repeat" `Quick
             test_hook_not_invoked_on_already_claimed;
         ] );

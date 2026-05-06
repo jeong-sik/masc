@@ -262,3 +262,24 @@ let task_auto_release_observed_fn
 let claim_post_provision_fn
   : (Coord_utils_backend_setup.config -> agent_name:string -> task_id:string -> unit) Atomic.t
   = Atomic.make (fun _ ~agent_name:_ ~task_id:_ -> ())
+
+let claim_post_provision_failed_fn
+  : (site:string ->
+     agent_name:string ->
+     task_id:string ->
+     error:string ->
+     unit) Atomic.t
+  = Atomic.make
+      (fun ~site:_ ~agent_name:_ ~task_id:_ ~error:_ -> ())
+
+let observe_claim_post_provision_failure ~site ~agent_name ~task_id exn =
+  let error = Printexc.to_string exn in
+  (try
+     (Atomic.get claim_post_provision_failed_fn)
+       ~site ~agent_name ~task_id ~error
+   with _ -> ());
+  (try
+     Log.RoomTask.warn
+       "claim_post_provision failed site=%s agent=%s task=%s err=%s"
+       site agent_name task_id error
+   with _ -> ())

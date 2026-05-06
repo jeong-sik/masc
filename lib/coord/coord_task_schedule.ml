@@ -717,7 +717,9 @@ let claim_next_r
                ~task_id:task.id
            with
            | Eio.Cancel.Cancelled _ as e -> raise e
-           | _ -> ());
+           | exn ->
+               Coord_hooks.observe_claim_post_provision_failure
+                 ~site:"claim_next" ~agent_name ~task_id:task.id exn);
 
           let message = match released_task_id with
             | Some rid ->

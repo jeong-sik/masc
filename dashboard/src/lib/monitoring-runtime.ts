@@ -28,7 +28,7 @@ export interface KeeperMonitoringSummary {
   hint: string | null
 }
 
-export interface MonitoringEvidence {
+interface MonitoringEvidence {
   phase: PhaseMeta | null
   stage: StageMeta | null
 }

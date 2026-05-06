@@ -266,8 +266,6 @@ export interface DashboardMissionBriefingResponse {
   last_error?: string | null
 }
 
-export type DashboardProofVerdict = 'proven' | 'partial' | 'insufficient' | string
-
 export interface DashboardProofWorkerRunEvidence {
   worker_run_id: string
   session_id?: string | null

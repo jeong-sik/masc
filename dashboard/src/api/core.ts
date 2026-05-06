@@ -203,7 +203,7 @@ export class ApiRequestError extends Error {
   }
 }
 
-export interface ApiErrorSummary {
+interface ApiErrorSummary {
   message: string
   status: number | null
   path: string | null

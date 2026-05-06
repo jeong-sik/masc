@@ -101,10 +101,10 @@ def criterion(
 ) -> CompletionCriterion:
     if passed:
         status = "PASS"
-    elif warning:
-        status = "WARN"
     else:
         status = "FAIL"
+    if warning and not passed:
+        evidence = {**evidence, "severity": "warning"}
     return CompletionCriterion(
         criterion_id=criterion_id,
         status=status,
@@ -575,9 +575,7 @@ def build_completion_audit(
             verify_evidence,
         ),
     ]
-    blockers = [
-        item.criterion_id for item in criteria if item.status in {"FAIL", "WARN"}
-    ]
+    blockers = [item.criterion_id for item in criteria if item.status == "FAIL"]
     status_text = "COMPLETE" if not blockers else "BLOCKED"
     return CompletionAudit(
         schema_version=1,

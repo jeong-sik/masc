@@ -251,7 +251,11 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         by_id = {item.criterion_id: item for item in audit.criteria}
         self.assertEqual(
             by_id["broader_structured_ids_triaged"].status,
-            "WARN",
+            "FAIL",
+        )
+        self.assertEqual(
+            by_id["broader_structured_ids_triaged"].evidence["severity"],
+            "warning",
         )
         self.assertEqual(
             by_id["strict_row_level_catalog_complete"].evidence[

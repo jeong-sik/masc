@@ -106,13 +106,19 @@ let fallback_targets (msg : Masc_domain.message) =
 let nudge_id (msg : Masc_domain.message) = Printf.sprintf "n-%09d" msg.seq
 
 let decode_message_entities content =
+  (* HTML entity decoding is the inverse of encoding, so [&amp;] must be
+     replaced FIRST. Coord.sanitize_message encodes [&] last (so it does
+     not double-encode existing entities); decoding has to reverse that
+     order or a literal "&quot;" round-tripped through sanitize as
+     "&amp;quot;" decodes to "\"" instead of restoring "&quot;". The
+     symmetric rule is: encode [&] last, decode [&] first. *)
   content
+  |> String_util.replace_substring ~needle:"&amp;" ~by:"&"
   |> String_util.replace_substring ~needle:"&quot;" ~by:"\""
   |> String_util.replace_substring ~needle:"&#x27;" ~by:"'"
   |> String_util.replace_substring ~needle:"&apos;" ~by:"'"
   |> String_util.replace_substring ~needle:"&lt;" ~by:"<"
   |> String_util.replace_substring ~needle:"&gt;" ~by:">"
-  |> String_util.replace_substring ~needle:"&amp;" ~by:"&"
 ;;
 
 let structured_entry_of_json ~(msg : Masc_domain.message) json =

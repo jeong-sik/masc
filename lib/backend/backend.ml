@@ -209,13 +209,13 @@ module FileSystem = struct
   (** Get value by key (auto-decompresses ZSTD if detected).
 
       Reads run lock-free: writers in this module go through a sibling
-      [.tmp-atomic] file and [Eio.Path.rename] into place (see [set]
-      below). Because POSIX rename is atomic, a concurrent reader either
-      observes the old inode or the new one — never a partial/truncated
-      payload. Holding [t.mutex] here would only serialise readers
-      against unrelated writers without buying any extra atomicity, and
-      would queue dashboard reads behind every keeper's compress+write
-      cycle. *)
+      [.tmp-atomic] file and [Eio.Path.rename] into place (see [set] and
+      [set_if_not_exists] below). Because POSIX rename is atomic, a
+      concurrent reader either observes the old inode or the new one —
+      never a partial/truncated payload. Holding [t.mutex] here would only
+      serialise readers against unrelated writers without buying any extra
+      atomicity, and would queue dashboard reads behind every keeper's
+      compress+write cycle. *)
   let get t key =
     match key_to_path t key with
     | Error e -> Error e
@@ -492,23 +492,46 @@ module FileSystem = struct
       match key_to_path t key with
       | Error e -> Error e
       | Ok path ->
+          let path_part =
+            String.map (function ':' -> '/' | c -> c) key
+          in
+          let tmp_path =
+            Eio.Path.(t.fs / (path_part ^ ".tmp-atomic"))
+          in
+          let cleanup_tmp () =
+            try Eio.Path.unlink tmp_path
+            with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn ->
+                Log.Backend.warn
+                  "backend atomic set_if_not_exists: unlink tmp failed: %s"
+                  (Printexc.to_string exn)
+          in
+          let publish_new () =
+            try
+              _ensure_parent_dir ~log_errors:true path;
+              Eio.Path.save ~create:(`Or_truncate 0o644) tmp_path compressed;
+              Eio.Path.rename tmp_path path;
+              ki_replace t key ();
+              Ok true
+            with
+            | Eio.Cancel.Cancelled _ as exn ->
+                cleanup_tmp ();
+                raise exn
+            | Eio.Io (Eio.Fs.E (Eio.Fs.Already_exists _), _) ->
+                cleanup_tmp ();
+                Error (AlreadyExists key)
+            | exn ->
+                cleanup_tmp ();
+                Error (IOError (Printexc.to_string exn))
+          in
           try
             (* Check if exists first *)
             match Eio.Path.kind ~follow:true path with
             | `Regular_file -> Error (AlreadyExists key)
-            | _ ->
-                _ensure_parent_dir ~log_errors:true path;
-                (* Write with exclusive create *)
-                Eio.Path.save ~create:(`Exclusive 0o644) path compressed;
-                ki_replace t key ();
-                Ok true
+            | _ -> publish_new ()
           with
-          | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
-              (* Parent doesn't exist, create it *)
-              _ensure_parent_dir path;
-              Eio.Path.save ~create:(`Exclusive 0o644) path compressed;
-              ki_replace t key ();
-              Ok true
+          | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) -> publish_new ()
           | Eio.Io (Eio.Fs.E (Eio.Fs.Already_exists _), _) ->
               Error (AlreadyExists key)
           | Eio.Cancel.Cancelled _ as exn -> raise exn

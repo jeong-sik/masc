@@ -40,4 +40,10 @@ module For_testing : sig
   val draft_request_allowed : Yojson.Safe.t -> bool
 
   val quote_argv : string list -> string
+
+  val mutation_preset_ok : Keeper_types.tool_preset option -> bool
+  (** Mirrors the runtime gate in [handle_keeper_pr_create]. Exposed so
+      regression tests can pin the visible/callable contract: any preset
+      that grants the [github] group in [config/tool_policy.toml] must
+      return [true] here. *)
 end

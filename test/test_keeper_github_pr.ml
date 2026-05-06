@@ -327,6 +327,38 @@ let test_pr_create_hard_mode_routes_through_broker () =
     || contains_substring raw "gh:pr create");
   check bool "keeps draft flag" true (contains_substring raw "--draft")
 
+(* Regression: any preset that grants the [github] group in
+   config/tool_policy.toml must satisfy [mutation_preset_ok]. Without
+   this, [keeper_pr_create] is visible in the keeper tool surface but
+   fails at dispatch with [preset_insufficient] — a contract drift
+   between the policy config and the runtime gate that previously
+   surfaced as opaque tool failures (e.g. analyst keeper Docker PR
+   lifecycle proofs returning [preset_insufficient] after the policy
+   config explicitly granted Research the github group via "Step 9
+   bloodflow restoration plan"). *)
+let test_mutation_preset_matches_visible_surface () =
+  let module KT = Keeper_types in
+  let allowed = [ KT.Research; KT.Coding; KT.Delivery; KT.Full ] in
+  let denied = [ KT.Minimal; KT.Social; KT.Messaging; KT.Dispatch ] in
+  List.iter
+    (fun preset ->
+      check bool
+        (Printf.sprintf "preset %s permits keeper_pr_create"
+           (KT.tool_preset_to_string preset))
+        true
+        (K.For_testing.mutation_preset_ok (Some preset)))
+    allowed;
+  List.iter
+    (fun preset ->
+      check bool
+        (Printf.sprintf "preset %s denies keeper_pr_create"
+           (KT.tool_preset_to_string preset))
+        false
+        (K.For_testing.mutation_preset_ok (Some preset)))
+    denied;
+  check bool "no preset denies keeper_pr_create" false
+    (K.For_testing.mutation_preset_ok None)
+
 let () =
   run "keeper_github_pr"
     [
@@ -347,5 +379,10 @@ let () =
             test_pr_create_routes_through_docker;
           test_case "pr create hard mode routes through broker" `Quick
             test_pr_create_hard_mode_routes_through_broker;
+        ] );
+      ( "preset_gate",
+        [
+          test_case "mutation preset matches policy surface" `Quick
+            test_mutation_preset_matches_visible_surface;
         ] );
     ]

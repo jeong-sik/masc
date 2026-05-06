@@ -54,21 +54,47 @@ let recent_tools_for_keeper ?(limit = 5) keeper_name : string list =
 
 (* ── end tracking ────────────────────────────────────────────── *)
 
-(** Build OAS Tool.t list from keeper's allowed tools.
+(* Build OAS Tool.t list from keeper's allowed tools.
 
-    Each tool delegates to [execute_keeper_tool_call] with the current
-    [ctx_snapshot] value. Tools that raise exceptions return error results
-    instead of crashing the agent loop.
+   Each tool delegates to [execute_keeper_tool_call] with the current
+   [ctx_snapshot] value. Tools that raise exceptions return error results
+   instead of crashing the agent loop.
 
-    @param config Coord configuration for tool dispatch
-    @param meta Keeper metadata (determines which tools are allowed)
-    @param ctx_snapshot Immutable snapshot of current working context *)
+   @param config Coord configuration for tool dispatch
+   @param meta Keeper metadata (determines which tools are allowed)
+   @param ctx_snapshot Immutable snapshot of current working context *)
 (** Repeated-failure guardrail: blocks a tool after [max_consecutive]
     consecutive failures with the same (tool_name, args_hash) key.
     Resets on success. Prevents infinite retry loops (e.g. keeper
     reading a non-existent file 400+ times). *)
 let max_consecutive_failures =
   Env_config.KeeperToolExec.max_consecutive_tool_failures
+
+type failure_counts =
+  {
+    table : (string, int) Hashtbl.t;
+    mutex : Mutex.t;
+  }
+
+let create_failure_counts () =
+  { table = Hashtbl.create 16; mutex = Mutex.create () }
+
+let failure_count_get counts key =
+  Mutex.protect counts.mutex (fun () ->
+      Option.value ~default:0 (Hashtbl.find_opt counts.table key))
+
+let failure_count_record_failure counts key =
+  Mutex.protect counts.mutex (fun () ->
+      let next =
+        match Hashtbl.find_opt counts.table key with
+        | Some n -> n + 1
+        | None -> 1
+      in
+      Hashtbl.replace counts.table key next;
+      next)
+
+let failure_count_reset counts key =
+  Mutex.protect counts.mutex (fun () -> Hashtbl.remove counts.table key)
 
 (** Normalize a raw tool result string into a consistent JSON envelope.
 
@@ -365,7 +391,7 @@ let make_keeper_tool_handler
     ?search_fn
     ?on_tool_called
     ?(translate_input = fun j -> j)
-    ~(failure_counts : (string, int) Hashtbl.t)
+    ~(failure_counts : failure_counts)
     ()
   : Yojson.Safe.t -> bool * string =
   let args_key input =
@@ -375,10 +401,7 @@ let make_keeper_tool_handler
   fun raw_input ->
     let input = translate_input raw_input in
     let key = args_key input in
-    let prior_fails =
-      (match Hashtbl.find_opt failure_counts key with
-        | Some n -> n | None -> 0)
-    in
+    let prior_fails = failure_count_get failure_counts key in
     if prior_fails >= max_consecutive_failures then begin
       Prometheus.inc_counter
         Prometheus.metric_keeper_tools_oas_failures
@@ -410,8 +433,7 @@ let make_keeper_tool_handler
           | `Success -> false
         in
         if is_failure then begin
-          let count = prior_fails + 1 in
-          Hashtbl.replace failure_counts key count;
+          let count = failure_count_record_failure failure_counts key in
           Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:name ~success:false;
           !Keeper_exec_tools.on_keeper_tool_call ~tool_name:name ~success:false ~duration_ms;
           (* Tool-call observability flows through the OAS Event_bus
@@ -456,7 +478,7 @@ let make_keeper_tool_handler
             ~original_bytes:(String.length normalized_error) ();
           (false, Tool_output_validation.cap normalized_error)
         end else begin
-          Hashtbl.remove failure_counts key;
+          failure_count_reset failure_counts key;
           Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:name ~success:true;
           !Keeper_exec_tools.on_keeper_tool_call ~tool_name:name ~success:true ~duration_ms;
           (* Tool-call observability via OAS Event_bus. See above. *)
@@ -571,9 +593,10 @@ let make_keeper_tool_handler
            warn so dashboards don't conflate transient EDEADLK with real
            tool errors. The #10682 EDEADLK backtrace logging stays so the
            underlying Stdlib.Mutex site can still be pinpointed. *)
-        let count = if is_edeadlk then prior_fails else prior_fails + 1 in
-        if not is_edeadlk then
-          Hashtbl.replace failure_counts key count;
+        let count =
+          if is_edeadlk then failure_count_get failure_counts key
+          else failure_count_record_failure failure_counts key
+        in
         Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:name ~success:false;
         !Keeper_exec_tools.on_keeper_tool_call ~tool_name:name ~success:false ~duration_ms;
         (* Tool-call observability via OAS Event_bus. See above. *)
@@ -699,8 +722,7 @@ let make_tool_bundle
       ~reason:"keeper tool bundle assembly"
       ()
   in
-  let failure_counts : (string, int) Hashtbl.t = Hashtbl.create 16 in
-  (* No mutex: Hashtbl ops are non-yielding, single domain. *)
+  let failure_counts = create_failure_counts () in
   (* Pass A: existing internal tools. Behavior unchanged from pre-A.2. *)
   let internal_tools =
     List.filter_map (fun (td : Masc_domain.tool_schema) ->

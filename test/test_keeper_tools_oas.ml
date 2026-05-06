@@ -115,23 +115,34 @@ let string_contains ~sub text =
   in
   sub_len = 0 || loop 0
 
+let rec rm_rf path =
+  match Unix.lstat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+  | stat ->
+      match stat.Unix.st_kind with
+      | Unix.S_DIR ->
+          Sys.readdir path
+          |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+          Unix.rmdir path
+      | _ -> Sys.remove path
+
 let test_tool_side_effect_failures_are_observed () =
   let meta = make_test_meta ~name:"test-keeper-side-effects" () in
   let ctx_snapshot = make_test_ctx () in
-  let dir =
-    Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "test_keeper_tools_side_effects_%d" (Random.int 100000))
-  in
-  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  let dir = Filename.temp_file "test_keeper_tools_side_effects_" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
   Fun.protect
-    ~finally:(fun () ->
-      (try Sys.readdir dir |> Array.iter (fun f ->
-        Sys.remove (Filename.concat dir f));
-        Unix.rmdir dir with _ -> ()))
+    ~finally:(fun () -> rm_rf dir)
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Coord.default_config dir in
+      let decision_path =
+        Keeper_types_support.keeper_decision_log_path config meta.name
+      in
+      Fs_compat.mkdir_p (Filename.dirname decision_path);
+      Unix.mkdir decision_path 0o755;
       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
       let tool = find_tool "keeper_fs_read" tools in
       let keeper_labels = [("keeper", meta.name)] in

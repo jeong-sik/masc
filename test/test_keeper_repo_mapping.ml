@@ -58,6 +58,13 @@ let rec ensure_dir path =
     Unix.mkdir path 0o755
   end
 
+let write_file path content =
+  ensure_dir (Filename.dirname path);
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
 let write_mapping ?credential_id base_path keeper_id repo_ids =
   let path = Filename.concat base_path ".masc/config/keeper_repo_mappings.toml" in
   let entries =
@@ -102,6 +109,23 @@ let write_repositories base_path repos =
   let content = String.concat "\n" (List.map repo_block repos) in
   let oc = open_out path in
   Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc content)
+
+let write_git_origin repo_root url =
+  let git_dir = Filename.concat repo_root ".git" in
+  ensure_dir git_dir;
+  let config_path = Filename.concat git_dir "config" in
+  let content =
+    Printf.sprintf "[remote \"origin\"]\n\turl = %s\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n" url
+  in
+  write_file config_path content
+
+let write_gitdir_origin repo_root ~gitdir_ref ~gitdir_path ~url =
+  write_file (Filename.concat repo_root ".git")
+    (Printf.sprintf "gitdir: %s\n" gitdir_ref);
+  write_file (Filename.concat gitdir_path "config")
+    (Printf.sprintf
+       "[remote \"origin\"]\n\turl = %s\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n"
+       url)
 
 let repo_under_base base_path id =
   let local_path = Filename.concat base_path ("repo-" ^ id) in
@@ -304,6 +328,141 @@ let test_validate_path_access_playground_repo_uses_url_basename () =
           Alcotest.fail
             ("expected playground repo path to resolve by repository URL basename, got: "
              ^ e))
+
+let test_validate_path_access_playground_unique_clone_uses_git_remote () =
+  with_temp_base_path (fun base_path ->
+      let root_repo =
+        { (sample_repo "me") with name = "me"; local_path = base_path }
+      in
+      let masc_repo =
+        { (sample_repo "masc") with
+          name = "masc";
+          url = "https://github.com/jeong-sik/masc-mcp.git";
+          local_path = Filename.concat base_path ".masc/repos/masc";
+        }
+      in
+      write_repositories base_path [ root_repo; masc_repo ];
+      write_mapping base_path "executor" [ "masc" ];
+      let repo_root =
+        Filename.concat base_path
+          ".masc/playground/docker/executor/repos/keeper-direct-clone-proof-0506"
+      in
+      let path = Filename.concat repo_root "docs/proof.md" in
+      ensure_dir (Filename.dirname path);
+      write_git_origin repo_root "https://github.com/jeong-sik/masc-mcp.git";
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
+          ~base_path ~path
+      with
+      | Ok () -> ()
+      | Error e ->
+          Alcotest.fail
+            ("expected unique playground clone to resolve by git remote, got: "
+             ^ e))
+
+let test_validate_path_access_playground_gitdir_relative_uses_git_remote () =
+  with_temp_base_path (fun base_path ->
+      let root_repo =
+        { (sample_repo "me") with name = "me"; local_path = base_path }
+      in
+      let masc_repo =
+        { (sample_repo "masc") with
+          name = "masc";
+          url = "https://github.com/jeong-sik/masc-mcp.git";
+          local_path = Filename.concat base_path ".masc/repos/masc";
+        }
+      in
+      write_repositories base_path [ root_repo; masc_repo ];
+      write_mapping base_path "executor" [ "masc" ];
+      let repos_root =
+        Filename.concat base_path ".masc/playground/docker/executor/repos"
+      in
+      let repo_root = Filename.concat repos_root "linked-worktree" in
+      let gitdir_path = Filename.concat repos_root "linked-worktree-gitdir" in
+      let path = Filename.concat repo_root "docs/proof.md" in
+      ensure_dir (Filename.dirname path);
+      write_gitdir_origin repo_root
+        ~gitdir_ref:"../linked-worktree-gitdir"
+        ~gitdir_path
+        ~url:"https://github.com/jeong-sik/masc-mcp.git";
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
+          ~base_path ~path
+      with
+      | Ok () -> ()
+      | Error e ->
+          Alcotest.fail
+            ("expected relative gitdir file to resolve by git remote, got: "
+             ^ e))
+
+let test_validate_path_access_playground_gitdir_absolute_under_sandbox_uses_git_remote () =
+  with_temp_base_path (fun base_path ->
+      let root_repo =
+        { (sample_repo "me") with name = "me"; local_path = base_path }
+      in
+      let masc_repo =
+        { (sample_repo "masc") with
+          name = "masc";
+          url = "https://github.com/jeong-sik/masc-mcp.git";
+          local_path = Filename.concat base_path ".masc/repos/masc";
+        }
+      in
+      write_repositories base_path [ root_repo; masc_repo ];
+      write_mapping base_path "executor" [ "masc" ];
+      let repos_root =
+        Filename.concat base_path ".masc/playground/docker/executor/repos"
+      in
+      let repo_root = Filename.concat repos_root "absolute-worktree" in
+      let gitdir_path = Filename.concat repos_root "absolute-worktree-gitdir" in
+      let path = Filename.concat repo_root "docs/proof.md" in
+      ensure_dir (Filename.dirname path);
+      write_gitdir_origin repo_root
+        ~gitdir_ref:gitdir_path
+        ~gitdir_path
+        ~url:"https://github.com/jeong-sik/masc-mcp.git";
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
+          ~base_path ~path
+      with
+      | Ok () -> ()
+      | Error e ->
+          Alcotest.fail
+            ("expected absolute in-sandbox gitdir file to resolve by git remote, got: "
+             ^ e))
+
+let test_validate_path_access_playground_gitdir_escape_denied () =
+  with_temp_base_path (fun base_path ->
+      let root_repo =
+        { (sample_repo "me") with name = "me"; local_path = base_path }
+      in
+      let masc_repo =
+        { (sample_repo "masc") with
+          name = "masc";
+          url = "https://github.com/jeong-sik/masc-mcp.git";
+          local_path = Filename.concat base_path ".masc/repos/masc";
+        }
+      in
+      write_repositories base_path [ root_repo; masc_repo ];
+      write_mapping base_path "executor" [ "masc" ];
+      let repos_root =
+        Filename.concat base_path ".masc/playground/docker/executor/repos"
+      in
+      let repo_root = Filename.concat repos_root "escaping-worktree" in
+      let outside_gitdir = Filename.concat base_path "outside-gitdir" in
+      let path = Filename.concat repo_root "docs/proof.md" in
+      ensure_dir (Filename.dirname path);
+      write_gitdir_origin repo_root
+        ~gitdir_ref:outside_gitdir
+        ~gitdir_path:outside_gitdir
+        ~url:"https://github.com/jeong-sik/masc-mcp.git";
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
+          ~base_path ~path
+      with
+      | Ok () -> Alcotest.fail "expected gitdir escape to be denied"
+      | Error msg ->
+          Alcotest.(check bool)
+            "mentions not allowed" true (contains_substring msg "not allowed"))
 
 let test_validate_path_access_playground_unknown_repo_denied () =
   with_temp_base_path (fun base_path ->
@@ -625,6 +784,14 @@ let () =
             test_validate_path_access_playground_repo_uses_registered_name;
           Alcotest.test_case "playground repo resolves repository URL basename" `Quick
             test_validate_path_access_playground_repo_uses_url_basename;
+          Alcotest.test_case "playground unique clone resolves git remote" `Quick
+            test_validate_path_access_playground_unique_clone_uses_git_remote;
+          Alcotest.test_case "playground relative gitdir resolves git remote" `Quick
+            test_validate_path_access_playground_gitdir_relative_uses_git_remote;
+          Alcotest.test_case "playground absolute in-sandbox gitdir resolves git remote" `Quick
+            test_validate_path_access_playground_gitdir_absolute_under_sandbox_uses_git_remote;
+          Alcotest.test_case "playground escaping gitdir is denied" `Quick
+            test_validate_path_access_playground_gitdir_escape_denied;
           Alcotest.test_case "playground unknown repo denied" `Quick
             test_validate_path_access_playground_unknown_repo_denied;
         ] );

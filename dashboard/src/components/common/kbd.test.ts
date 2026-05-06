@@ -73,14 +73,19 @@ describe('summarizeKbd (pure)', () => {
     })
   })
 
-  it('summarizes title and custom class metadata', () => {
-    expect(summarizeKbd({ size: 'sm', title: 'Search', className: 'ml-1' })).toEqual({
+  it('summarizes title and custom class metadata from KbdProps', () => {
+    expect(summarizeKbd({ size: 'sm', title: 'Search', class: 'ml-1' })).toEqual({
       size: 'sm',
       hasTitle: true,
       hasCustomClass: true,
       titleLength: 6,
       classNameLength: 4,
     })
+  })
+
+  it('keeps className as a fallback alias but lets class win', () => {
+    expect(summarizeKbd({ className: 'ml-1' }).classNameLength).toBe(4)
+    expect(summarizeKbd({ class: 'mr-22', className: 'ml-1' }).classNameLength).toBe(5)
   })
 })
 

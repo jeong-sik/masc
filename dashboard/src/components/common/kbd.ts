@@ -38,6 +38,25 @@ export interface KbdSummary {
   readonly classNameLength: number
 }
 
+export interface KbdProps {
+  /** Key label — e.g. "⌘K", "?", "1", "Ctrl+P". Supports multi-char
+      strings because the primitive deliberately doesn't parse chords;
+      callers that want auto-split key chords should compose several
+      <Kbd> with a "+" separator between them (GitHub convention). */
+  children?: ComponentChildren
+  size?: KbdSize
+  class?: string
+  /** HTML title attribute — hover tooltip. Matches the existing
+      `title="단축키 목록 (?)"` usage in fsm-hub.ts verbatim. */
+  title?: string
+  testId?: string
+}
+
+type KbdSummaryInput = Pick<KbdProps, 'size' | 'class' | 'title'> & {
+  /** Back-compat alias for older pure callers. `class` wins when both exist. */
+  className?: string
+}
+
 const BASE =
   'inline-flex items-center justify-center rounded-xs border border-b-2 font-mono text-center text-3xs ' +
   'border-[var(--color-border-strong)] bg-[var(--color-bg-elevated)]'
@@ -57,34 +76,18 @@ export function kbdClasses(size: KbdSize = 'md', extra?: string): string {
 
 export function summarizeKbd({
   size = 'md',
+  class: classProp,
   className,
   title,
-}: {
-  size?: KbdSize
-  className?: string
-  title?: string
-}): KbdSummary {
+}: KbdSummaryInput): KbdSummary {
+  const customClass = classProp ?? className
   return {
     size,
     hasTitle: title !== undefined && title !== '',
-    hasCustomClass: className !== undefined && className !== '',
+    hasCustomClass: customClass !== undefined && customClass !== '',
     titleLength: title?.length ?? 0,
-    classNameLength: className?.length ?? 0,
+    classNameLength: customClass?.length ?? 0,
   }
-}
-
-export interface KbdProps {
-  /** Key label — e.g. "⌘K", "?", "1", "Ctrl+P". Supports multi-char
-      strings because the primitive deliberately doesn't parse chords;
-      callers that want auto-split key chords should compose several
-      <Kbd> with a "+" separator between them (GitHub convention). */
-  children?: ComponentChildren
-  size?: KbdSize
-  class?: string
-  /** HTML title attribute — hover tooltip. Matches the existing
-      `title="단축키 목록 (?)"` usage in fsm-hub.ts verbatim. */
-  title?: string
-  testId?: string
 }
 
 export function Kbd({
@@ -94,7 +97,7 @@ export function Kbd({
   title,
   testId,
 }: KbdProps) {
-  const summary = summarizeKbd({ size, className: cx, title })
+  const summary = summarizeKbd({ size, class: cx, title })
   const cls = kbdClasses(size, cx)
   return html`<kbd
     class=${cls}

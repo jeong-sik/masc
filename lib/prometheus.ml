@@ -1077,6 +1077,8 @@ let metric_runtime_ollama_probe_generate_skips =
 let metric_process_timeout = "masc_process_timeout_total"
 let metric_bg_task_sidecar_failures =
   "masc_bg_task_sidecar_failures_total"
+let metric_build_identity_probe_failures =
+  "masc_build_identity_probe_failures_total"
 let metric_distributed_lock_acquire_failed =
   "masc_distributed_lock_acquire_failed_total"
 
@@ -2108,6 +2110,10 @@ let init () =
       inc_counter metric_bg_task_sidecar_failures
         ~labels:[("site", site)]
         ());
+  add metric_build_identity_probe_failures
+    "Total build identity git probe failures. \
+     Labeled by site=commit_ts_git_capture|commit_ts_git_status|commit_ts_parse."
+    Counter;
   add metric_distributed_lock_acquire_failed
     "Total distributed lock acquire exhaustions. Labeled by key and attempts. \
      A non-zero rate indicates lock contention exhausted the retry budget."

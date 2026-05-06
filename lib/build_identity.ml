@@ -39,7 +39,7 @@ let executable_dir () =
   in
   Filename.dirname path
 
-let git_capture_output ~repo_root args =
+let git_capture_output_result ~repo_root args =
   let argv = [ "git"; "-C"; repo_root ] @ args in
   let raw_source = String.concat " " (List.map Filename.quote argv) in
   match
@@ -50,8 +50,18 @@ let git_capture_output ~repo_root args =
       ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Build_identity ())
       argv
   with
-  | Unix.WEXITED 0, output -> Some output
-  | _ -> None
+  | Unix.WEXITED 0, output -> Ok output
+  | status, _ -> Error status
+
+let git_capture_output ~repo_root args =
+  match git_capture_output_result ~repo_root args with
+  | Ok output -> Some output
+  | Error _ -> None
+
+let string_of_process_status = function
+  | Unix.WEXITED code -> Printf.sprintf "exit %d" code
+  | Unix.WSIGNALED signal -> Printf.sprintf "signal %d" signal
+  | Unix.WSTOPPED signal -> Printf.sprintf "stopped %d" signal
 
 let git_probe_from_root repo_root =
   let output =
@@ -68,6 +78,17 @@ let git_probe_from_root repo_root =
         None
   in
   Option.bind output trim_to_option
+
+let observe_probe_failure ~site exn =
+  match exn with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Prometheus.inc_counter
+        Prometheus.metric_build_identity_probe_failures
+        ~labels:[("site", site)]
+        ();
+      Log.Identity.warn "build_identity %s failed: %s"
+        site (Printexc.to_string exn)
 
 (** Pick the ordered list of directories to probe for a git repo,
     executable_dir first so the binary's own source tree wins over
@@ -97,10 +118,31 @@ let probe_repo_root () =
     ~cwd:(Sys.getcwd ())
   |> List.find_map find_git_root
 
+let decimal_digits_only s =
+  String.length s > 0
+  && String.for_all (fun c -> c >= '0' && c <= '9') s
+
+(* 2100-01-01T00:00:00Z.  This keeps obviously corrupt/far-future git
+   output out of /health while leaving enough room for normal source history
+   and reproducible-build timestamps. *)
+let max_reasonable_commit_unix_ts = 4_102_444_800L
+
+let parse_commit_unix_ts_output raw =
+  match trim_to_option raw with
+  | None -> None
+  | Some s when not (decimal_digits_only s) -> None
+  | Some s -> (
+      match Int64.of_string_opt s with
+      | Some ts
+        when Int64.compare ts 0L >= 0
+             && Int64.compare ts max_reasonable_commit_unix_ts <= 0 ->
+          Some (Int64.to_float ts)
+      | _ -> None)
+
 (** Probe the unix timestamp of [commit] from the same git repo we
     resolved [commit] against.  Best-effort: returns [None] if [commit]
     is [None], the repo cannot be located, or git fails / output is
-    not a valid float.
+    not a sane integer Unix timestamp.
 
     Why we run this: a 2026-05-05 fleet-stuck recurrence boiled down
     to a deploy gap — the server kept running an 8-hour-old binary
@@ -113,29 +155,48 @@ let probe_commit_unix_ts commit_hash_opt =
   match commit_hash_opt with
   | None -> None
   | Some commit_hash ->
-    let candidates =
+    let repo_roots =
       pick_repo_candidates
         ~exe_dir:(executable_dir ())
         ~cwd:(Sys.getcwd ())
+      |> List.filter_map find_git_root
+      |> List.fold_left
+           (fun roots repo_root ->
+              if List.exists (String.equal repo_root) roots then roots
+              else repo_root :: roots)
+           []
+      |> List.rev
     in
-    let probe_one dir =
-      match find_git_root dir with
-      | None -> None
-      | Some repo_root ->
-        let raw_opt =
-          try
-            git_capture_output ~repo_root
+    let probe_one repo_root =
+      let raw_opt =
+        try
+          match
+            git_capture_output_result ~repo_root
               [ "log"; "-1"; "--format=%ct"; commit_hash ]
-          with _ -> None
-        in
-        (match raw_opt with
-         | None -> None
-         | Some raw ->
-           (match trim_to_option raw with
-            | None -> None
-            | Some s -> float_of_string_opt s))
+          with
+          | Ok raw -> Some raw
+          | Error status ->
+              observe_probe_failure ~site:"commit_ts_git_status"
+                (Failure
+                   (Printf.sprintf "git log failed with %s"
+                      (string_of_process_status status)));
+              None
+        with exn ->
+          observe_probe_failure ~site:"commit_ts_git_capture" exn;
+          None
+      in
+      match raw_opt with
+      | None -> None
+      | Some raw ->
+        (match parse_commit_unix_ts_output raw with
+         | Some ts -> Some ts
+         | None ->
+             observe_probe_failure ~site:"commit_ts_parse"
+               (Failure
+                  (Printf.sprintf "invalid commit timestamp output %S" raw));
+             None)
     in
-    List.find_map probe_one candidates
+    List.find_map probe_one repo_roots
 
 let resolve_commit ~env_value ~probe =
   match env_value with
@@ -179,5 +240,10 @@ let current () =
     started_at = started_at_iso;
     uptime_seconds = max 0 (int_of_float (now -. started_at_unix));
   }
+
+module For_testing = struct
+  let observe_probe_failure = observe_probe_failure
+  let probe_commit_unix_ts = probe_commit_unix_ts
+end
 
 (* [to_yojson] is generated by [ppx_deriving_yojson] from the type definition. *)

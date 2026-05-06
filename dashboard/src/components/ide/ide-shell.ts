@@ -197,7 +197,7 @@ export function IdeShell() {
           />
           <${IdeKeeperWorkPanel} keeperName=${terminalKeeper} />
           <${IdePersistencePanel} keeperName=${terminalKeeper} />
-          <${InspectorKeeperBDI} />
+          <${InspectorKeeperBDI} traceActive=${activeLayers.has('keeper-trace')} />
           <${IdeConversationRailMock} />
         </div>
         <div class="ide-plane-activity" style=${{ minHeight: 0 }}>

@@ -5,6 +5,7 @@ import { activeKeeperName } from '../../keeper-state'
 import { bridgeBdiSnapshotsToTrace } from './bdi-snapshot-trace-bridge'
 import { asBoolean, asNumber, asString, isRecord, toIsoTimestamp } from '../common/normalize'
 import { clearPins, headPinnedKeeper, pinKeeper } from './multi-keeper-pin-store'
+import { OverlayKeeperTrace } from './overlay-keeper-trace'
 
 export interface KeeperBdiTokenSpend {
   readonly ts_unix: number | null
@@ -167,17 +168,27 @@ function BdiRow({ label, value }: { readonly label: string, readonly value: stri
   `
 }
 
-export function InspectorKeeperBDI({ pollMs = 5000 }: { readonly pollMs?: number }) {
+export function InspectorKeeperBDI({
+  pollMs = 5000,
+  traceActive = false,
+}: {
+  readonly pollMs?: number
+  readonly traceActive?: boolean
+}) {
   const pin = useInspectorKeeperPin()
   const activeKeeper = useActiveKeeperName()
   const reducedMotion = useReducedMotion()
-  const keeperName = pin?.keeperName ?? activeKeeper
+  // Single trim point: fetch URL, header display, and OverlayKeeperTrace's
+  // keeperFilter all share the same string. Untrimmed sources (e.g. an
+  // activeKeeperName signal set without trimming) would otherwise let polling
+  // succeed for "scholar" while the overlay filter "  scholar  " misses the
+  // events the producer pushed under the trimmed keeper name.
+  const keeperName = (pin?.keeperName ?? activeKeeper).trim()
   const [snapshot, setSnapshot] = useState<KeeperBdiSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    const name = keeperName.trim()
-    if (!name) {
+    if (!keeperName) {
       setSnapshot(null)
       setError(null)
       return
@@ -187,7 +198,7 @@ export function InspectorKeeperBDI({ pollMs = 5000 }: { readonly pollMs?: number
     let timer: number | null = null
     const refresh = async () => {
       try {
-        const next = await fetchKeeperBdiSnapshot(name, controller.signal)
+        const next = await fetchKeeperBdiSnapshot(keeperName, controller.signal)
         if (controller.signal.aborted) return
         setSnapshot(next)
         setError(next ? null : 'snapshot unavailable')
@@ -281,6 +292,10 @@ export function InspectorKeeperBDI({ pollMs = 5000 }: { readonly pollMs?: number
           ? html`<span style=${{ color: lastTool.success === false ? 'var(--color-status-warn)' : 'var(--color-status-ok)' }}>${lastTool.semantic_outcome}</span>`
           : null}
       </div>
+
+      ${keeperName
+        ? html`<${OverlayKeeperTrace} active=${traceActive} keeperFilter=${keeperName} />`
+        : null}
     </section>
   `
 }

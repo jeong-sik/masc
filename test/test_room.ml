@@ -170,7 +170,9 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
     Coord.get_agents_raw config
     |> List.find_opt (fun (agent : Masc_domain.agent) ->
       String.equal agent.name agent_name)
-    |> Option.bind (fun agent -> agent.current_task)
+    |> (function
+        | Some (agent : Masc_domain.agent) -> agent.current_task
+        | None -> None)
   in
   let _ = Coord.init config ~agent_name:(Some "taskmaster") in
   let _ = Coord.add_task config ~title:"Terminal task" ~priority:1 ~description:"" in

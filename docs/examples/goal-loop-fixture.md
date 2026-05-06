@@ -157,6 +157,9 @@ python3 scripts/validate_goal_loop_strict_row_corpus.py \
 Expected key fact: this is a fast intake check for the candidate artifact
 shape. It must report `strict_row_corpus: VALID rows=206 expected=206
 errors=0` before the corpus can be useful in the full Orient replay below.
+When `--audit-catalog` is supplied, every row source path must also match one
+of the catalog `external_sources`, and every row line ref must be within that
+source line count when the manifest records one.
 
 ```bash
 python3 scripts/orient_goal_loop_logs.py \
@@ -294,6 +297,7 @@ corpus and attaches that evidence to `strict_row_level_catalog_complete`, but
 it does not satisfy the criterion. A supplied strict-row corpus is validated
 against `test/fixtures/goal_loop/strict-row-corpus-contract.json`: 206 unique
 rows, logical `prompt_corpus/GOAL_LOOP/...` source paths, positive line refs,
+catalog external-source binding, catalog line-count bounds when available,
 severity/actionability, and replay expectations. A valid supplied corpus still
 does not close the blocker unless the status input was produced from Orient
 with the same corpus and reports the strict row-level catalog as `COMPLETE`

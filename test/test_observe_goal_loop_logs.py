@@ -620,6 +620,52 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertTrue(report["validated"])
         self.assertNotIn("expected_findings_total_mismatch", report["errors"])
 
+    def test_strict_row_corpus_binds_sources_to_catalog_manifest(self) -> None:
+        catalog = orient_goal_loop_logs.load_audit_catalog_input(
+            str(FIXTURE_DIR / "audit-corpus.external-claim.json")
+        )
+        assert catalog is not None
+        corpus = synthetic_strict_row_corpus()
+        findings = corpus["findings"]
+        assert isinstance(findings, list)
+        unknown_source = findings[0]
+        out_of_bounds_source = findings[1]
+        assert isinstance(unknown_source, dict)
+        assert isinstance(out_of_bounds_source, dict)
+        unknown_source["source"] = {
+            "path": "prompt_corpus/GOAL_LOOP/not-in-manifest.md",
+            "line_refs": [1],
+        }
+        out_of_bounds_source["source"] = {
+            "path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+            "line_refs": [607],
+        }
+
+        report = orient_goal_loop_logs.validate_strict_row_corpus(
+            corpus,
+            catalog=catalog,
+        )
+
+        self.assertFalse(report["validated"])
+        self.assertIn(
+            "source_paths_must_match_catalog_external_sources",
+            report["errors"],
+        )
+        self.assertIn(
+            "source_line_refs_must_be_within_catalog_line_count",
+            report["errors"],
+        )
+        self.assertEqual(report["catalog_external_sources_total"], 12)
+        self.assertFalse(report["catalog_source_binding_valid"])
+        self.assertEqual(
+            report["invalid_catalog_source_path_values"][0]["path"],
+            "prompt_corpus/GOAL_LOOP/not-in-manifest.md",
+        )
+        self.assertEqual(
+            report["invalid_catalog_line_ref_values"][0]["line_count"],
+            606,
+        )
+
     def test_orient_catalog_validates_source_identity_hash_and_line_count(self) -> None:
         content = "206건 감사 결과\nR-FATAL-1\n"
         catalog = {

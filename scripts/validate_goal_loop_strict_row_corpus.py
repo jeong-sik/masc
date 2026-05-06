@@ -39,6 +39,16 @@ def report_to_text(report: dict[str, Any]) -> str:
         )
     if report["invalid_line_refs"]:
         lines.append("invalid_line_refs: " + ", ".join(report["invalid_line_refs"]))
+    if report.get("invalid_catalog_source_paths"):
+        lines.append(
+            "invalid_catalog_source_paths: "
+            + ", ".join(report["invalid_catalog_source_paths"])
+        )
+    if report.get("invalid_catalog_line_refs"):
+        lines.append(
+            "invalid_catalog_line_refs: "
+            + ", ".join(report["invalid_catalog_line_refs"])
+        )
     if report["invalid_replay_expectations"]:
         lines.append(
             "invalid_replay_expectations: "

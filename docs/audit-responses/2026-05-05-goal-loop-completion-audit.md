@@ -247,6 +247,14 @@
   `BLOCKED` while Orient still reports only 19 itemized rows. Invalid supplied
   corpora or inconsistent source-row inventories block
   `strict_row_level_catalog_complete`.
+- [근거] `python3 test/test_observe_goal_loop_logs.py` checked at
+  2026-05-06T14:43:35+09:00, confidence High: the strict-row corpus validator
+  now binds row sources to the audit catalog external-source manifest when a
+  catalog is supplied. A candidate row whose logical `source.path` is not in
+  `external_sources` fails with
+  `source_paths_must_match_catalog_external_sources`, and a candidate row whose
+  `line_refs` exceed the catalog source `line_count` fails with
+  `source_line_refs_must_be_within_catalog_line_count`.
 - [근거] `python3 test/test_observe_goal_loop_logs.py` and
   `python3 test/test_goal_loop_status.py` checked at 2026-05-06T10:15:47+09:00,
   confidence High: Orient now accepts the same optional `--strict-row-corpus`
@@ -335,7 +343,7 @@ keeps the strict corpus blocker explicit.
 | 7 GOAL LOOP dashboard | `goal_loop_status.py` aggregate output | PARTIAL: CLI status exists; UI dashboard integration remains open. |
 | 8 anti-stagnation rules | ACT reference guard and completion audit blocker | PARTIAL: reference integrity exists; SLA timers/escalation are not implemented. |
 | 9 expected convergence after week/month | completion audit and #13265 | BLOCKED: no measured convergence claim is valid without the strict corpus and live SLO proof. |
-| Full 206-row strict corpus | `row-corpus-discovery.external-claim.json`, `strict-row-corpus-contract.json`, `--strict-row-corpus` path | BLOCKED: 24 searches/inventories checked; `FULL_ROW_CORPUS_NOT_FOUND`, 19/206 strict rows, 187 strict rows missing. The source-doc explicit-row extractor finds only 132/206 candidate rows across 5 source files, with 7 checked prompt files yielding zero explicit candidates, and cannot close the strict corpus gap. |
+| Full 206-row strict corpus | `row-corpus-discovery.external-claim.json`, `strict-row-corpus-contract.json`, `--strict-row-corpus` path | BLOCKED: 24 searches/inventories checked; `FULL_ROW_CORPUS_NOT_FOUND`, 19/206 strict rows, 187 strict rows missing. The source-doc explicit-row extractor finds only 132/206 candidate rows across 5 source files, with 7 checked prompt files yielding zero explicit candidates, and cannot close the strict corpus gap. Candidate strict rows must also cite catalog external sources and line refs within catalog line counts. |
 
 ## Section-by-Section Audit
 

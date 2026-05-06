@@ -667,6 +667,7 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
             contract["source_path_prefix"],
             "prompt_corpus/GOAL_LOOP/",
         )
+        self.assertIn("catalog external_sources", contract["catalog_source_binding"])
 
     def test_completion_audit_cli_can_fail_until_goal_is_closeable(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:

@@ -6,6 +6,7 @@
   "expected_findings_total": 206,
   "path_policy": "logical_paths_only_no_user_local_paths",
   "source_path_prefix": "prompt_corpus/GOAL_LOOP/",
+  "catalog_source_binding": "When validating with an audit catalog, each row source.path must be present in catalog external_sources and each line_ref must be within that source line_count when line_count is available.",
   "accepted_severities": ["critical", "warning", "info"],
   "required_top_level_fields": [
     "schema_version",

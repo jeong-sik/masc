@@ -19,6 +19,13 @@ TLA_RESULTS_FIXTURE = (
     / "goal_loop"
     / "verify-pipeline-tla-results.external-claim.json"
 )
+LIVE_METRICS_FIXTURE = (
+    REPO_ROOT
+    / "test"
+    / "fixtures"
+    / "goal_loop"
+    / "verify-pipeline-live-metrics.external-claim.json"
+)
 
 spec = importlib.util.spec_from_file_location("goal_loop_verify_pipeline", SCRIPT_PATH)
 assert spec is not None
@@ -134,6 +141,30 @@ class GoalLoopVerifyPipelineTest(unittest.TestCase):
         self.assertEqual(report.gates_passed, 3)
         self.assertEqual(report.gates_blocked, 10)
         self.assertEqual(report.gates_skipped, 1)
+
+    def test_live_metric_fixture_records_current_failures(self) -> None:
+        metrics = json.loads(LIVE_METRICS_FIXTURE.read_text(encoding="utf-8"))
+        tla_results = json.loads(TLA_RESULTS_FIXTURE.read_text(encoding="utf-8"))
+        report = goal_loop_verify_pipeline.build_pipeline_report(
+            repo_root=REPO_ROOT,
+            metrics_json=metrics,
+            tla_results=tla_results,
+            log_paths=[],
+            unit_tests_passed=False,
+            unit_tests_failed=False,
+        )
+
+        by_id = {item.gate_id: item for item in report.gates}
+        self.assertEqual(report.status, "FAIL")
+        self.assertEqual(report.gates_passed, 3)
+        self.assertEqual(report.gates_failed, 4)
+        self.assertEqual(report.gates_blocked, 6)
+        self.assertEqual(report.gates_skipped, 1)
+        self.assertEqual(by_id["keeper_turn_success_rate_healthy"].status, "FAIL")
+        self.assertEqual(by_id["no_pricing_miss"].status, "FAIL")
+        self.assertEqual(by_id["admission_backpressure_observed"].status, "FAIL")
+        self.assertEqual(by_id["dashboard_snapshot_latency_p99"].status, "FAIL")
+        self.assertEqual(by_id["no_utf8_repair"].reason, "missing_metric")
 
     def test_metric_gate_commands_reference_snapshot_metric_keys(self) -> None:
         report = goal_loop_verify_pipeline.build_pipeline_report(

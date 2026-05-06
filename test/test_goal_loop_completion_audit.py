@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from unittest import mock
 from pathlib import Path
+from typing import Any, cast
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -65,6 +66,22 @@ goal_loop_completion_audit = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
 sys.modules[spec.name] = goal_loop_completion_audit
 spec.loader.exec_module(goal_loop_completion_audit)
+
+
+def phase_summary(status: dict[str, object], phase: str) -> dict[str, Any]:
+    phases = status["phases"]
+    assert isinstance(phases, dict)
+    phase_data = phases[phase]
+    assert isinstance(phase_data, dict)
+    summary = phase_data["summary"]
+    assert isinstance(summary, dict)
+    return cast(dict[str, Any], summary)
+
+
+def audit_catalog(status: dict[str, object]) -> dict[str, Any]:
+    catalog = phase_summary(status, "orient")["audit_catalog"]
+    assert isinstance(catalog, dict)
+    return cast(dict[str, Any], catalog)
 
 
 def complete_status() -> dict[str, object]:
@@ -355,10 +372,10 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
 
     def test_completion_audit_requires_verified_aggregate_reconciliation(self) -> None:
         status = complete_status()
-        audit_catalog = status["phases"]["orient"]["summary"]["audit_catalog"]
-        audit_catalog["source_aggregate_reconciliation_status"] = "INCOMPLETE"
-        audit_catalog["source_aggregate_reconciliations_verified"] = 0
-        audit_catalog["source_aggregate_reconciliations_failed"] = 1
+        catalog = audit_catalog(status)
+        catalog["source_aggregate_reconciliation_status"] = "INCOMPLETE"
+        catalog["source_aggregate_reconciliations_verified"] = 0
+        catalog["source_aggregate_reconciliations_failed"] = 1
 
         audit = goal_loop_completion_audit.build_completion_audit(status)
 
@@ -369,8 +386,8 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self,
     ) -> None:
         status = complete_status()
-        audit_catalog = status["phases"]["orient"]["summary"]["audit_catalog"]
-        audit_catalog["external_sources"] = [
+        catalog = audit_catalog(status)
+        catalog["external_sources"] = [
             {
                 "path": "prompt_corpus/GOAL_LOOP/artifact_synthesis.md",
                 "line_count": 500,
@@ -400,7 +417,7 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self,
     ) -> None:
         status = complete_status()
-        verify_summary = status["phases"]["verify"]["summary"]
+        verify_summary = phase_summary(status, "verify")
         for key in (
             "post_act_verify",
             "evidence_kind",
@@ -422,7 +439,7 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self,
     ) -> None:
         status = complete_status()
-        verify_summary = status["phases"]["verify"]["summary"]
+        verify_summary = phase_summary(status, "verify")
         verify_summary.pop("evidence_window_start")
 
         audit = goal_loop_completion_audit.build_completion_audit(status)
@@ -438,7 +455,7 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self,
     ) -> None:
         status = complete_status()
-        verify_summary = status["phases"]["verify"]["summary"]
+        verify_summary = phase_summary(status, "verify")
         verify_summary["evidence_kind"] = "fixture"
 
         audit = goal_loop_completion_audit.build_completion_audit(status)
@@ -521,7 +538,7 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
 
     def test_completion_audit_consumes_embedded_verify_pipeline(self) -> None:
         status = complete_status()
-        verify_summary = status["phases"]["verify"]["summary"]
+        verify_summary = phase_summary(status, "verify")
         verify_summary["verify_pipeline"] = blocked_verify_pipeline()
 
         audit = goal_loop_completion_audit.build_completion_audit(status)
@@ -529,7 +546,7 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertEqual(audit.status, "BLOCKED")
         self.assertIn("verify_pipeline_complete", audit.blockers)
 
-    def test_current_verify_pipeline_fixture_blocks_missing_inputs(self) -> None:
+    def test_current_verify_pipeline_fixture_records_live_metric_failures(self) -> None:
         pipeline = json.loads(VERIFY_PIPELINE_FIXTURE.read_text(encoding="utf-8"))
         audit = goal_loop_completion_audit.build_completion_audit(
             complete_status(),
@@ -540,12 +557,14 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertIn("verify_pipeline_complete", audit.blockers)
         by_id = {item.criterion_id: item for item in audit.criteria}
         evidence = by_id["verify_pipeline_complete"].evidence
-        self.assertEqual(evidence["pipeline_status"], "BLOCKED")
+        self.assertEqual(evidence["pipeline_status"], "FAIL")
         self.assertEqual(evidence["gates_total"], 14)
         self.assertEqual(evidence["gates_passed"], 3)
-        self.assertEqual(evidence["gates_blocked"], 10)
+        self.assertEqual(evidence["gates_failed"], 4)
+        self.assertEqual(evidence["gates_blocked"], 6)
         self.assertEqual(evidence["gates_skipped"], 1)
         self.assertEqual(evidence["missing_gate_ids"], [])
+        self.assertIn("keeper_turn_success_rate_healthy", evidence["non_pass_gate_ids"])
         self.assertIn("post_act_log_contract", evidence["non_pass_gate_ids"])
 
     def test_completion_audit_accepts_structured_id_triage_manifest(self) -> None:
@@ -670,7 +689,7 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self,
     ) -> None:
         status = strict_catalog_only_blocked_status()
-        audit_catalog = status["phases"]["orient"]["summary"]["audit_catalog"]
+        catalog = audit_catalog(status)
         fixture_catalog = json.loads(
             (
                 REPO_ROOT
@@ -680,7 +699,7 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
                 / "audit-corpus.external-claim.json"
             ).read_text(encoding="utf-8")
         )
-        audit_catalog["external_sources"] = fixture_catalog["external_sources"]
+        catalog["external_sources"] = fixture_catalog["external_sources"]
         corpus = synthetic_strict_row_corpus()
         findings = corpus["findings"]
         assert isinstance(findings, list)
@@ -1217,10 +1236,22 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         )
         self.assertEqual(checklist_evidence["implementation_pr_refs_total"], 11)
         self.assertEqual(checklist_evidence["invalid_implementation_pr_refs"], [])
+<<<<<<< HEAD
         self.assertEqual(checklist_evidence["artifact_refs_total"], 120)
         self.assertEqual(checklist_evidence["artifact_refs_resolved"], 120)
         self.assertEqual(checklist_evidence["artifact_ref_anchors_total"], 22)
         self.assertEqual(checklist_evidence["artifact_ref_anchors_resolved"], 22)
+||||||| parent of 992034c60e (docs(goal-loop): record live verify metric failures)
+        self.assertEqual(checklist_evidence["artifact_refs_total"], 109)
+        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 109)
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_total"], 11)
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_resolved"], 11)
+=======
+        self.assertEqual(checklist_evidence["artifact_refs_total"], 110)
+        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 110)
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_total"], 11)
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_resolved"], 11)
+>>>>>>> 992034c60e (docs(goal-loop): record live verify metric failures)
         self.assertTrue(checklist_evidence["artifact_refs_all_resolved"])
         self.assertEqual(checklist_evidence["missing_artifact_refs"], [])
         self.assertEqual(checklist_evidence["missing_artifact_ref_anchors"], [])
@@ -1477,8 +1508,16 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
         self.assertFalse(checklist_evidence["recorded"])
         self.assertFalse(checklist_evidence["artifact_refs_all_resolved"])
+<<<<<<< HEAD
         self.assertEqual(checklist_evidence["artifact_refs_total"], 117)
         self.assertEqual(checklist_evidence["artifact_refs_resolved"], 116)
+||||||| parent of 992034c60e (docs(goal-loop): record live verify metric failures)
+        self.assertEqual(checklist_evidence["artifact_refs_total"], 106)
+        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 105)
+=======
+        self.assertEqual(checklist_evidence["artifact_refs_total"], 107)
+        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 106)
+>>>>>>> 992034c60e (docs(goal-loop): record live verify metric failures)
         self.assertEqual(
             checklist_evidence["missing_artifact_refs"],
             [
@@ -1512,10 +1551,22 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
         self.assertFalse(checklist_evidence["recorded"])
         self.assertFalse(checklist_evidence["artifact_refs_all_resolved"])
+<<<<<<< HEAD
         self.assertEqual(checklist_evidence["artifact_refs_total"], 116)
         self.assertEqual(checklist_evidence["artifact_refs_resolved"], 115)
         self.assertEqual(checklist_evidence["artifact_ref_anchors_total"], 20)
         self.assertEqual(checklist_evidence["artifact_ref_anchors_resolved"], 19)
+||||||| parent of 992034c60e (docs(goal-loop): record live verify metric failures)
+        self.assertEqual(checklist_evidence["artifact_refs_total"], 105)
+        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 104)
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_total"], 9)
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_resolved"], 8)
+=======
+        self.assertEqual(checklist_evidence["artifact_refs_total"], 106)
+        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 105)
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_total"], 9)
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_resolved"], 8)
+>>>>>>> 992034c60e (docs(goal-loop): record live verify metric failures)
         self.assertEqual(
             checklist_evidence["missing_artifact_ref_anchors"],
             [

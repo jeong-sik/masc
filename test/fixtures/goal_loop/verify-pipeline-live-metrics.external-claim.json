@@ -1,0 +1,27 @@
+{
+  "checked_at": "2026-05-07T00:21:04+09:00",
+  "evidence_id": "goal-loop-live-metrics-2026-05-07T002104+0900",
+  "metrics": {
+    "admission_queue_depth": 0.0,
+    "admission_queue_wait_ms": 0.0,
+    "dashboard_snapshot_latency_p99": 27.19999999999999,
+    "keeper_turn_success_rate": 0.5384615384615384,
+    "pricing_catalog_miss_total": 6.0
+  },
+  "runtime": {
+    "effective_base_path": "<MASC_BASE_PATH>",
+    "effective_masc_root": "<MASC_BASE_PATH>/.masc",
+    "health_url": "http://127.0.0.1:8935/health",
+    "metrics_url": "http://127.0.0.1:8935/metrics",
+    "runtime_commit": "237d07f21d",
+    "runtime_version": "0.19.12",
+    "started_at": "2026-05-06T13:33:11Z",
+    "status": "ok"
+  },
+  "schema_version": 1,
+  "snapshot_kind": "goal_loop_verify_metrics",
+  "source": {
+    "command": "curl -sS -m 5 -H 'Authorization: Bearer <local-token>' http://127.0.0.1:8935/metrics -o <TEMP_DIR>/goal-loop-live-metrics.prom && python3 scripts/goal_loop_metrics_snapshot.py <TEMP_DIR>/goal-loop-live-metrics.prom --pretty",
+    "raw_prometheus_text_committed": false
+  }
+}

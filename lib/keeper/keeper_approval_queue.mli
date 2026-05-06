@@ -172,7 +172,6 @@ val read_recent_audit :
 
 module For_testing : sig
   val reset_audit_store : unit -> unit
-  val record_failure : keeper_name:string -> site:string -> exn -> unit
 end
 
 (** {1 Submit & await} *)

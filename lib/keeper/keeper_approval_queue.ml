@@ -535,16 +535,16 @@ let audit_approval_event ?base_path ~event_type ~id ~keeper_name ~tool_name
          | Some value -> [ ("auto_approved", `Bool value) ]
          | None -> []))
     in
-    (try
-       Eio.Mutex.use_rw ~protect:true audit_io_mu (fun () ->
-         Fs_compat.append_jsonl
-           (audit_today_path (Dated_jsonl.base_dir store))
-           json)
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-         record_queue_failure ~keeper_name ~site:"audit_append" ~id
-           ~event_type exn)
+    Eio.Mutex.use_rw ~protect:true audit_io_mu (fun () ->
+      try
+        Fs_compat.append_jsonl
+          (audit_today_path (Dated_jsonl.base_dir store))
+          json
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+          record_queue_failure ~keeper_name ~site:"audit_append" ~id
+            ~event_type exn)
 
 let audit_rule_event ?base_path ~event_type (rule : approval_rule) =
   audit_approval_event ?base_path ~event_type ~id:rule.id
@@ -584,9 +584,6 @@ module For_testing = struct
   let reset_audit_store () =
     Eio.Mutex.use_rw ~protect:true audit_stores_mu (fun () ->
       Hashtbl.clear audit_stores)
-
-  let record_failure ~keeper_name ~site exn =
-    record_queue_failure ~keeper_name ~site exn
 end
 
 let generate_id () =

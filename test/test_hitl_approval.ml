@@ -77,24 +77,46 @@ let audit_event_names ~base_path ~keeper_name =
          Yojson.Safe.Util.(json |> member "event" |> to_string))
 
 let test_approval_queue_failure_metric_labels_site () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let keeper_name = "approval-failure-observe-test" in
   let site = "audit_append" in
   let labels = [ ("keeper", keeper_name); ("site", site) ] in
+  let base_path = temp_dir () in
+  let audit_dir =
+    Filename.concat
+      (Filename.concat base_path ".masc")
+      "audit-approvals"
+  in
   let before =
     Masc_mcp.Prometheus.metric_value_or_zero
       Masc_mcp.Prometheus.metric_keeper_approval_queue_failures
       ~labels
       ()
   in
-  AQ.For_testing.record_failure ~keeper_name ~site (Failure "boom");
-  let after =
-    Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_keeper_approval_queue_failures
-      ~labels
-      ()
-  in
-  Alcotest.(check (float 0.0001)) "failure counter delta" 1.0
-    (after -. before)
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_audit_store ();
+      cleanup_dir base_path)
+    (fun () ->
+      AQ.For_testing.reset_audit_store ();
+      AQ.audit_approval_event ~base_path ~event_type:"warmup"
+        ~id:"audit-failure-warmup" ~keeper_name:(keeper_name ^ "-warmup")
+        ~tool_name:"keeper_shell" ~risk_level:AQ.Medium ();
+      cleanup_dir audit_dir;
+      let oc = open_out_bin audit_dir in
+      close_out oc;
+      AQ.audit_approval_event ~base_path ~event_type:"pending"
+        ~id:"audit-failure-path-test" ~keeper_name ~tool_name:"keeper_shell"
+        ~risk_level:AQ.Medium ();
+      let after =
+        Masc_mcp.Prometheus.metric_value_or_zero
+          Masc_mcp.Prometheus.metric_keeper_approval_queue_failures
+          ~labels
+          ()
+      in
+      Alcotest.(check (float 0.0001)) "failure counter delta" 1.0
+        (after -. before))
 
 let execute_approval_get args =
   Eio_main.run @@ fun env ->

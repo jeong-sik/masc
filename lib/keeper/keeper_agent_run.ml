@@ -557,8 +557,18 @@ let run_turn
        let tool_usage_after =
          Keeper_tool_disclosure.keeper_tool_usage_snapshot ~base_path:config.base_path ~keeper_name:meta.name
        in
-       let observed_tool_names =
+       let registry_observed_tool_names =
          Keeper_tool_disclosure.tool_usage_delta ~before:tool_usage_before ~after:tool_usage_after
+       in
+       let hook_observed_tool_names =
+         List.rev_map
+           (fun (detail : tool_call_detail) -> detail.tool_name)
+           acc.tool_calls
+       in
+       let observed_tool_names =
+         Keeper_tool_disclosure.merge_observed_tool_names
+           ~registry_observed_tool_names
+           ~hook_observed_tool_names
        in
        observed_tool_names_ref := observed_tool_names;
        let tool_names =

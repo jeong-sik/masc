@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vitest"
-import { isCostView, formatTokens } from "./cost-dashboard"
+import { isCostFocus, isCostView, formatTokens, viewModeForCostFocus } from "./cost-dashboard"
 
 describe("isCostView", () => {
   it.each([
@@ -19,6 +19,35 @@ describe("isCostView", () => {
     [undefined, false],
   ])("returns false for %s", (v, expected) => {
     expect(isCostView(v)).toBe(expected)
+  })
+})
+
+describe("isCostFocus", () => {
+  it.each([
+    ["agent", true],
+    ["matrix", true],
+    ["latency", true],
+  ])("returns true for %s", (v, expected) => {
+    expect(isCostFocus(v)).toBe(expected)
+  })
+
+  it.each([
+    ["cost", false],
+    ["unknown", false],
+    ["", false],
+    [undefined, false],
+  ])("returns false for %s", (v, expected) => {
+    expect(isCostFocus(v)).toBe(expected)
+  })
+})
+
+describe("viewModeForCostFocus", () => {
+  it("routes agent focus to keeper mode", () => {
+    expect(viewModeForCostFocus("agent")).toBe("keeper")
+  })
+
+  it.each(["matrix", "latency", null] as const)("routes %s focus to model mode", focus => {
+    expect(viewModeForCostFocus(focus)).toBe("model")
   })
 })
 

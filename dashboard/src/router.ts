@@ -211,8 +211,8 @@ export function hashForRoute(tab: TabId, params?: Record<string, string>): strin
 
 function toHash(r: RouteState): string {
   const path = r.tab
-  const paramEntries = Object.entries(r.params).filter(([key]) => {
-    if (key === 'tab') return false
+  const paramEntries = Object.entries(r.params).filter(([key, value]) => {
+    if (key === 'tab' && value === r.tab) return false
     return true
   })
   if (paramEntries.length === 0) return `#${path}`

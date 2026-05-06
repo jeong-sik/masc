@@ -81,7 +81,6 @@ describe('cockpit entrypoint registry', () => {
       params: { section: 'ide-shell', view: 'unified', focus: 'review' },
     })
   })
-
   it('routes the covered IDE search entrypoint directly to the find panel', () => {
     const entrypoint = COCKPIT_ENTRYPOINTS.find(entry => entry.aliases.includes('find'))
 
@@ -112,10 +111,9 @@ describe('cockpit entrypoint registry', () => {
       })
     }
   })
-
   it('marks IDE review entrypoints as covered review focus routes', () => {
     const byAlias = new Map(COCKPIT_ENTRYPOINTS.flatMap(entrypoint =>
-      entrypoint.aliases.map(alias => [alias, entrypoint] as const)
+      entrypoint.aliases.map(alias => [alias, entrypoint] as const),
     ))
 
     expect(byAlias.get('review')).toMatchObject({
@@ -143,6 +141,28 @@ describe('cockpit entrypoint registry', () => {
     expect(cockpitTargetForParams({ mode: 'Work', tab: 'acc-mtx' })).toEqual({
       tab: 'workspace',
       params: { section: 'planning', focus: 'accountability-matrix' },
+    })
+  })
+
+  it('marks cost cockpit entries as route-covered focus surfaces', () => {
+    const byAlias = new Map(COCKPIT_ENTRYPOINTS.flatMap(entrypoint =>
+      entrypoint.aliases.map(alias => [alias, entrypoint] as const),
+    ))
+
+    expect(byAlias.get('ct-agt')?.coverage).toBe('covered')
+    expect(byAlias.get('ct-mtx')?.coverage).toBe('covered')
+    expect(byAlias.get('ct-lat')?.coverage).toBe('covered')
+    expect(cockpitTargetForParams({ mode: 'Observe', tab: 'ct-agt' })).toEqual({
+      tab: 'monitoring',
+      params: { section: 'runtime', view: 'cost', focus: 'agent' },
+    })
+    expect(cockpitTargetForParams({ mode: 'Observe', tab: 'ct-mtx' })).toEqual({
+      tab: 'monitoring',
+      params: { section: 'runtime', view: 'cost', focus: 'matrix' },
+    })
+    expect(cockpitTargetForParams({ mode: 'Observe', tab: 'ct-lat' })).toEqual({
+      tab: 'monitoring',
+      params: { section: 'runtime', view: 'cost', focus: 'latency' },
     })
   })
 })

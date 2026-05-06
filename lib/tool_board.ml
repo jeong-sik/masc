@@ -893,6 +893,16 @@ let string_list_field fields key =
       | _ -> None)
   | _ -> []
 
+let trim_nonempty_string value =
+  let trimmed = String.trim value in
+  if String.equal trimmed "" then None else Some trimmed
+
+let string_opt_arg args key =
+  Option.bind (get_string_opt args key) trim_nonempty_string
+
+let string_list_arg args key =
+  get_string_list args key |> List.filter_map trim_nonempty_string
+
 let object_list_arg args key =
   match args with
   | `Assoc fields ->
@@ -909,9 +919,10 @@ let provenance_arg args =
   match args with
   | `Assoc fields ->
     (match assoc_field fields "provenance" with
-     | Some ((`Assoc _ | `List _ | `String _ | `Float _ | `Int _ | `Bool _ | `Null) as json) -> json
-     | _ -> `Assoc [])
-  | _ -> `Assoc []
+     | Some ((`Assoc _) as json) -> Ok json
+     | Some _ -> Error "provenance must be an object"
+     | _ -> Ok (`Assoc []))
+  | _ -> Ok (`Assoc [])
 
 let curation_tag_suggestions_arg args =
   object_list_arg args "tag_suggestions"
@@ -960,25 +971,27 @@ let handle_board_curation_submit args =
   else if String.equal rationale "" then
     (false, "rationale required")
   else
-    let model = get_string_opt args "model" in
-    let summary = get_string_opt args "summary" in
-    let ordering = get_string_list args "ordering" in
-    let highlights = get_string_list args "highlights" in
+    let model = string_opt_arg args "model" in
+    let summary = string_opt_arg args "summary" in
+    let ordering = string_list_arg args "ordering" in
+    let highlights = string_list_arg args "highlights" in
     let tag_suggestions = curation_tag_suggestions_arg args in
     let answer_matches = curation_answer_matches_arg args in
     let health_score = get_float_opt args "health_score" in
     let health_components = curation_health_components_arg args in
-    let provenance = provenance_arg args in
-    try
-      let snap =
-        Board_dispatch.submit_curation_snapshot
-          ~submitted_by ?model ?summary ~ordering ~highlights
-          ~tag_suggestions ~answer_matches ?health_score ~health_components
-          ~rationale ~provenance ()
-      in
-      (true, Yojson.Safe.to_string (Board_curation.snapshot_to_yojson snap))
-    with
-    | Invalid_argument msg -> (false, msg)
+    match provenance_arg args with
+    | Error msg -> (false, msg)
+    | Ok provenance ->
+      try
+        let snap =
+          Board_dispatch.submit_curation_snapshot
+            ~submitted_by ?model ?summary ~ordering ~highlights
+            ~tag_suggestions ~answer_matches ?health_score ~health_components
+            ~rationale ~provenance ()
+        in
+        (true, Yojson.Safe.to_string (Board_curation.snapshot_to_yojson snap))
+      with
+      | Invalid_argument msg -> (false, msg)
 
 (** {1 Tool Definitions} *)
 

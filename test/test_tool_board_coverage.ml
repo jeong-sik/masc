@@ -616,15 +616,28 @@ let test_board_curation_submit_roundtrips_to_read () =
     invalid_score_ok;
   Alcotest.(check bool) "invalid score error mentions health_score" true
     (contains_substring invalid_score_body "health_score");
+  let invalid_provenance_ok, invalid_provenance_body =
+    dispatch "masc_board_curation_submit"
+      (make_args
+         [
+           ("submitted_by", `String "curator");
+           ("rationale", `String "provenance shape");
+           ("provenance", `String "not-an-object");
+         ])
+  in
+  Alcotest.(check bool) "raw submit rejects non-object provenance" false
+    invalid_provenance_ok;
+  Alcotest.(check bool) "invalid provenance error mentions object" true
+    (contains_substring invalid_provenance_body "object");
   let ok, body =
     dispatch "masc_board_curation_submit"
       (make_args
          [
            ("submitted_by", `String "curator");
-           ("model", `String "test-model");
-           ("summary", `String "Board has one high-priority routing item.");
-           ("ordering", `List [ `String "p-7" ]);
-           ("highlights", `List [ `String "p-7" ]);
+           ("model", `String " test-model ");
+           ("summary", `String " Board has one high-priority routing item. ");
+           ("ordering", `List [ `String " p-7 "; `String " "; `String "" ]);
+           ("highlights", `List [ `String " p-7 "; `String " " ]);
            ("tag_suggestions",
             `List
               [
@@ -666,9 +679,15 @@ let test_board_curation_submit_roundtrips_to_read () =
   let submitted = Yojson.Safe.from_string body in
   Alcotest.(check string) "submitted_by persisted" "curator"
     Yojson.Safe.Util.(submitted |> member "submitted_by" |> to_string);
+  Alcotest.(check string) "model trimmed" "test-model"
+    Yojson.Safe.Util.(submitted |> member "model" |> to_string);
   Alcotest.(check string) "summary persisted"
     "Board has one high-priority routing item."
     Yojson.Safe.Util.(submitted |> member "summary" |> to_string);
+  Alcotest.(check (list string)) "ordering trims and drops blanks" [ "p-7" ]
+    Yojson.Safe.Util.(submitted |> member "ordering" |> to_list |> List.map to_string);
+  Alcotest.(check (list string)) "highlights trim and drop blanks" [ "p-7" ]
+    Yojson.Safe.Util.(submitted |> member "highlights" |> to_list |> List.map to_string);
   Alcotest.(check (float 0.0001)) "health score persisted" 0.65
     Yojson.Safe.Util.(submitted |> member "health_score" |> to_float);
   let read_ok, read_body = dispatch "masc_board_curation_read" (make_args []) in

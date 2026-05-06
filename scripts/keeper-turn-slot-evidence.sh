@@ -81,7 +81,7 @@ for f in "${files[@]}"; do
       def n: (. // 0 | tonumber? // 0);
       def percentile($p):
         if length == 0 then 0
-        else sort | .[((length - 1) * $p / 100 | floor)]
+        else sort | .[(((length * $p + 99) / 100 | floor) - 1)]
         end;
       def tool_count:
         (.tool_call_count | n) as $top
@@ -129,8 +129,10 @@ for f in "${files[@]}"; do
   phases="-"
   recent_phase_n=0
   all_phase_n=0
+  recent_retry_phase_n=0
+  all_retry_phase_n=0
   if [[ ${#receipt_files[@]} -gt 0 ]]; then
-    read -r phases recent_phase_n all_phase_n < <(
+    read -r phases recent_phase_n all_phase_n recent_retry_phase_n all_retry_phase_n < <(
       jq -sr --argjson cutoff "$CUTOFF" '
         def n: (. // 0 | tonumber? // 0);
         def ts:
@@ -151,9 +153,13 @@ for f in "${files[@]}"; do
         (.) as $all
         | ([ $all[] | select((ts) >= $cutoff) | phase_values ] | add // []) as $recent_phases
         | ([ $all[] | phase_values ] | add // []) as $all_phases
+        | ([ $recent_phases[] | select(. == "retry_scheduled") ] | length) as $recent_retry_phases
+        | ([ $all_phases[] | select(. == "retry_scheduled") ] | length) as $all_retry_phases
         | [ phase_summary($recent_phases),
             ($recent_phases | length),
-            ($all_phases | length) ]
+            ($all_phases | length),
+            $recent_retry_phases,
+            $all_retry_phases ]
         | @tsv
       ' "${receipt_files[@]}"
     )
@@ -161,10 +167,10 @@ for f in "${files[@]}"; do
 
   if [[ "$recent" -eq 0 ]]; then
     status="NO_RECENT_DECISIONS"
-  elif [[ "$recent_phase_n" -eq 0 && "$all_phase_n" -gt 0 ]]; then
-    status="STALE:slot_release_phase_outside_window"
-  elif [[ "$recent_phase_n" -eq 0 ]]; then
-    status="INSUFFICIENT:no_slot_release_phase"
+  elif [[ "$recent_retry_phase_n" -eq 0 && "$all_retry_phase_n" -gt 0 ]]; then
+    status="STALE:retry_scheduled_phase_outside_window"
+  elif [[ "$recent_retry_phase_n" -eq 0 ]]; then
+    status="INSUFFICIENT:no_retry_scheduled_phase"
   elif [[ "$normal_lat_n" -lt "$MIN_NORMAL_SAMPLES" ]]; then
     status="INSUFFICIENT:normal_latency_samples"
   else
@@ -187,7 +193,8 @@ echo "  PHASES       slot_release_at_phase values found in persisted receipts."
 echo "  NORMAL_*     successful tool-use rows with positive latency_ms."
 echo
 echo "Closure signal:"
-echo "  EVIDENCE_AVAILABLE means the selected window contains slot-release receipt"
-echo "  evidence and enough normal successful turns with latency samples."
+echo "  EVIDENCE_AVAILABLE means the selected window contains retry_scheduled"
+echo "  slot-release receipt evidence and enough normal successful turns with"
+echo "  latency samples."
 echo "  INSUFFICIENT means #12888 still needs a live forced-retry run or newer"
 echo "  persisted rows before it can be closed from runtime evidence."

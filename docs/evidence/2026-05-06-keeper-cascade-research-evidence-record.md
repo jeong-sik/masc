@@ -36,8 +36,8 @@
 | Current TLA+ inventory | `find specs -name '*.tla'` -> 90 files | 2026-05-06T01:12:41+09:00 | High | Direct repo scan |
 | `KeeperTurnSlot` and `CascadeResolver` specs exist | `ls specs/boundary/*CascadeResolver* specs/keeper-state-machine/*KeeperTurnSlot*` | 2026-05-06T01:12:41+09:00 | High | Direct repo scan |
 | TLA check wires both specs | `rg -n "KeeperTurnSlot|CascadeResolver" scripts/tla-check.sh` | 2026-05-06T01:12:41+09:00 | High | Direct repo scan |
-| #12888 evidence harness added | `scripts/keeper-turn-slot-evidence.sh` reads active keeper decision JSONL for wait/latency and execution receipts for `slot_release_at_phase` | 2026-05-06T12:12:10+09:00 | High | Does not force the live 174s reproducer |
-| #12888 live evidence remains partial | `scripts/keeper-turn-slot-evidence.sh --base-path /Users/dancer/me --window-min 1440 --min-normal-samples 1` -> some keepers report receipt-backed `retry_scheduled` evidence; others still report `INSUFFICIENT:no_slot_release_phase` | 2026-05-06T12:12:10+09:00 | High | Confirms issue should remain open until targeted forced-retry evidence is captured |
+| #12888 evidence harness added | `scripts/keeper-turn-slot-evidence.sh` reads active keeper decision JSONL for wait/latency and execution receipts for `slot_release_at_phase=retry_scheduled` | 2026-05-06T12:12:10+09:00 | High | Does not force the live 174s reproducer |
+| #12888 live evidence remains partial | `scripts/keeper-turn-slot-evidence.sh --base-path /Users/dancer/me --window-min 1440 --min-normal-samples 1` -> some keepers report receipt-backed `retry_scheduled` evidence; others still report `INSUFFICIENT:no_retry_scheduled_phase` | 2026-05-06T12:12:10+09:00 | High | Confirms issue should remain open until targeted forced-retry evidence is captured |
 | Live MASC runtime health | `curl -sS http://127.0.0.1:8935/health` -> commit `1feadb3c2d`, ready, 17 keepers, config error counts 0 | 2026-05-06T01:12:41+09:00 | Medium | Live process was behind inspected HEAD; not used as code-completion proof |
 
 ## 검증 (Verification)

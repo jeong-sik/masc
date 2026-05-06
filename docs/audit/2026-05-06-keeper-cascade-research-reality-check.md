@@ -127,13 +127,13 @@ $ scripts/keeper-turn-slot-evidence.sh --base-path /Users/dancer/me --window-min
 analyst          ... retry_scheduled:13 ... EVIDENCE_AVAILABLE
 executor         ... retry_scheduled:9  ... EVIDENCE_AVAILABLE
 ...
-verifier         ... -                  ... INSUFFICIENT:no_slot_release_phase
+verifier         ... -                  ... INSUFFICIENT:no_retry_scheduled_phase
 ```
 
 Recent normal latency samples exist, and several keepers now have receipt-backed
-`slot_release_at_phase` rows. Others still lack receipt phase evidence in the
-selected window, so #12888 still needs a targeted forced-retry run plus
-before/after p50/p99 evidence before closure.
+`slot_release_at_phase=retry_scheduled` rows. Others still lack retry-scheduled
+receipt phase evidence in the selected window, so #12888 still needs a targeted
+forced-retry run plus before/after p50/p99 evidence before closure.
 
 ## 4. Rejected or Adjusted Recommendations
 
@@ -167,7 +167,7 @@ This is the safest immediate step because #13299 already changed runtime behavio
 
 Run a forced #12888 retry reproducer on a runtime at or after #13299 and capture the harness output before and after the run. The issue should stay open until the output shows both:
 
-- `slot_release_at_phase` evidence in execution receipts for the selected window.
+- `slot_release_at_phase=retry_scheduled` evidence in execution receipts for the selected window.
 - Enough normal successful tool-use rows with positive `latency_ms` to compare p50/p99 latency.
 
 ### Follow-On Slices

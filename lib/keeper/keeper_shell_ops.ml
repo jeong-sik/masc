@@ -1156,6 +1156,22 @@ let handle_keeper_shell
                  ; "reversibility", `String rev_tag
                  ] @ route_fields @ extras))
         in
+        let dedicated_pr_tool_block ~error ~required_tool ~hint =
+          Prometheus.inc_counter
+            Prometheus.metric_keeper_shell_ops_failures
+            ~labels:[("keeper", meta.name)]
+            ();
+          Log.Keeper.warn
+            "keeper_shell op=gh dedicated PR tool required: keeper=%s cmd=%s tool=%s"
+            meta.name canonical_cmd_str required_tool;
+          gh_base ~ok:false ~cwd:"" ~command:(gh_cmd_display parsed_cmd)
+            [ "error", `String error
+            ; "reason", `String
+                "keeper_shell op=gh cannot bypass the dedicated PR workflow tools"
+            ; "required_tool", `String required_tool
+            ; "hint", `String hint
+            ]
+        in
         let run_gh_command ~display_command ~parsed_command ~cwd
             ~(ctx : Keeper_shell_gh_context.gh_repo_context option) =
           if reversibility = Worker_dev_tools.R1_Reversible then
@@ -1238,6 +1254,10 @@ let handle_keeper_shell
               in
               gh_base ~command:display_command ~ok ~cwd hinted_fields
         in
+        (match Keeper_gh_shared.dedicated_pr_tool_required canonical_cmd_str with
+         | Some (error, required_tool, hint) ->
+           dedicated_pr_tool_block ~error ~required_tool ~hint
+         | None ->
         (match reversibility with
          | Worker_dev_tools.R2_Irreversible ->
            let hint =
@@ -1341,7 +1361,7 @@ let handle_keeper_shell
                              ~parsed_command:cmd_to_run
                              ~cwd:ctx.worktree_cwd
                              ~ctx:(Some ctx)))
-           end))
+           end)))
   | _ ->
     Yojson.Safe.to_string
       (`Assoc

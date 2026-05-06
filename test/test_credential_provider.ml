@@ -72,6 +72,31 @@ let write_mapping base_path keeper_id repo_ids =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
 
+let with_config_dir_env config_dir f =
+  let key = "MASC_CONFIG_DIR" in
+  let old = Sys.getenv_opt key in
+  Unix.putenv key config_dir;
+  Masc_mcp.Config_dir_resolver.reset ();
+  Fun.protect
+    ~finally:(fun () ->
+      (match old with
+       | Some value -> Unix.putenv key value
+       | None -> Unix.putenv key "");
+      Masc_mcp.Config_dir_resolver.reset ())
+    f
+
+let write_keeper_identity_toml ~base_path ~keeper_name ~github_identity =
+  let keepers_dir = Filename.concat base_path ".masc/config/keepers" in
+  mkdir_p keepers_dir;
+  let path = Filename.concat keepers_dir (keeper_name ^ ".toml") in
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+      Printf.fprintf oc
+        "[keeper]\nname = %S\ngithub_identity = %S\ngit_identity_mode = \"github_identity\"\n"
+        keeper_name github_identity)
+
 let seed_credential ~base_path cred =
   match Credential_store.add ~base_path cred with
   | Ok _ -> ()
@@ -364,6 +389,52 @@ let test_resolve_credential_store_mounts_explicit_ssh_key () =
                       "/tmp/keeper-creds/.ssh/id_credential")
                binding.ro_mounts))
 
+let test_credential_store_mapping_conflicting_github_identity_fails_closed
+    () =
+  with_temp_base_path (fun base_path ->
+      let config = Masc_mcp.Coord.default_config base_path in
+      let config_dir = Filename.concat base_path ".masc/config" in
+      let keeper_name = "keeper-conflict" in
+      let declared_identity = "declared-reviewer" in
+      write_keeper_identity_toml ~base_path ~keeper_name
+        ~github_identity:declared_identity;
+      with_config_dir_env config_dir (fun () ->
+          let gh_config_dir =
+            Filename.concat base_path ".masc/github-identities/other/gh"
+          in
+          seed_credential ~base_path
+            (make_credential ~id:"other-credential" ~username:"other-user"
+               ~gh_config_dir ());
+          seed_repo ~base_path
+            (make_repo ~id:"repo-conflict"
+               ~credential_id:"other-credential");
+          write_mapping base_path keeper_name [ "repo-conflict" ];
+          match HCP.resolve ~config ~identity:keeper_name with
+          | Error (CP.Missing_bundle { identity; path }) ->
+              check string "identity" keeper_name identity;
+              check bool "mentions declared identity" true
+                (try
+                   ignore
+                     (Str.search_forward
+                        (Str.regexp_string declared_identity)
+                        path 0);
+                   true
+                 with Not_found -> false);
+              check bool "mentions mapped credential" true
+                (try
+                   ignore
+                     (Str.search_forward
+                        (Str.regexp_string "other-credential")
+                        path 0);
+                   true
+                 with Not_found -> false)
+          | Ok _ ->
+              fail
+                "conflicting credential-store mapping should fail closed \
+                 before materializing Docker credentials"
+          | Error other ->
+              failf "expected Missing_bundle, got %s" (CP.pp_error other)))
+
 (* --- 4. finalize / tear_down noop semantics --- *)
 
 let dummy_binding () : CP.binding =
@@ -562,6 +633,8 @@ let () =
         [
           test_case "explicit ssh key is mounted" `Quick
             test_resolve_credential_store_mounts_explicit_ssh_key;
+          test_case "conflicting keeper github_identity fails closed" `Quick
+            test_credential_store_mapping_conflicting_github_identity_fails_closed;
         ] );
       ( "lifecycle (PR-1 noop)",
         [

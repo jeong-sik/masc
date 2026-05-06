@@ -70,6 +70,36 @@ let effective_provider_attempt_timeout_s
   | None ->
       provider_default_attempt_timeout_s constraints
 
+let required_tool_names_for_no_tool_error ~runtime_mcp_policy ~tools =
+  let names =
+    match runtime_mcp_policy with
+    | Some policy
+      when policy.Llm_provider.Llm_transport.allowed_tool_names <> [] ->
+        policy.allowed_tool_names
+    | _ -> List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) tools
+  in
+  List.sort_uniq String.compare names
+
+let provider_rejections_for_no_tool_error
+    ~keeper_name ?runtime_mcp_policy ~tools
+    ~require_tool_choice_support ~require_tool_support provider_cfgs =
+  provider_cfgs
+  |> List.filter_map (fun provider_cfg ->
+       match
+         classify_filter_rejection ~keeper_name ?runtime_mcp_policy ~tools
+           ~require_tool_choice_support ~require_tool_support provider_cfg
+       with
+       | None -> None
+       | Some reason ->
+           Some
+             {
+               provider_label =
+                 Provider_tool_support.provider_debug_label provider_cfg;
+               provider_kind =
+                 Provider_tool_support.provider_kind_label provider_cfg;
+               reason = filter_rejection_reason_label reason;
+             })
+
 let apply_stream_idle_timeout_default = function
   | Some _ as v -> v
   | None -> Some Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec
@@ -195,6 +225,7 @@ let run_named
        Log.Misc.error "cascade %s: %s" cascade_name detail;
        Error (cascade_catalog_error_to_sdk_error detail)
    | Ok configured_labels, Ok candidate_cfgs ->
+  let original_candidate_cfgs = candidate_cfgs in
   let candidate_cfgs =
     filter_candidate_providers_for_tool_support
       ~keeper_name
@@ -271,11 +302,25 @@ let run_named
   in
   match candidate_cfgs with
   | [] ->
+      let required_tool_names =
+        required_tool_names_for_no_tool_error ~runtime_mcp_policy ~tools
+      in
+      let provider_rejections =
+        provider_rejections_for_no_tool_error
+          ~keeper_name ?runtime_mcp_policy ~tools
+          ~require_tool_choice_support ~require_tool_support
+          original_candidate_cfgs
+      in
       Error
         (sdk_error_of_masc_internal_error
            (if require_tool_choice_support then
               No_tool_capable_provider
-                { cascade_name = error_cascade_name; configured_labels }
+                {
+                  cascade_name = error_cascade_name;
+                  configured_labels;
+                  required_tool_names;
+                  provider_rejections;
+                }
             else
               Cascade_exhausted
                 {

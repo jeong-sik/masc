@@ -103,12 +103,72 @@ let test_no_tool_capable_provider_kind () =
          {
            cascade_name = typed_cascade_name cascade_name;
            configured_labels = [ "openai"; "anthropic" ];
+           required_tool_names = [];
+           provider_rejections = [];
          })
   in
   Alcotest.(check (float 0.0001))
     "no_tool_capable_provider{cascade_name=tool_required} counter +1"
     (before +. 1.0)
     (counter_for ~cascade_name kind)
+
+let contains_substring haystack needle =
+  let hay_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    if needle_len = 0 then true
+    else if idx + needle_len > hay_len then false
+    else if String.sub haystack idx needle_len = needle then true
+    else loop (idx + 1)
+  in
+  loop 0
+
+let test_no_tool_capable_provider_payload_names_tools_and_rejections () =
+  let payload =
+    OWN.No_tool_capable_provider
+      {
+        cascade_name = typed_cascade_name "tool_required";
+        configured_labels = [ "codex"; "kimi" ];
+        required_tool_names = [ "keeper_bash"; "masc_worktree_create" ];
+        provider_rejections =
+          [
+            {
+              OWN.provider_label = "codex_cli:codex";
+              provider_kind = "codex_cli";
+              reason = "codex_keeper_bound_actor_required";
+            };
+            {
+              OWN.provider_label = "kimi_cli:kimi";
+              provider_kind = "kimi_cli";
+              reason = "tool_lane_unsupported";
+            };
+          ];
+      }
+  in
+  let json = OWN.masc_internal_error_to_json payload in
+  let open Yojson.Safe.Util in
+  Alcotest.(check (list string))
+    "required tools serialized"
+    [ "keeper_bash"; "masc_worktree_create" ]
+    (json |> member "required_tool_names" |> to_list
+     |> List.map to_string);
+  Alcotest.(check string)
+    "first rejected provider serialized"
+    "codex_cli:codex"
+    (json |> member "provider_rejections" |> index 0
+     |> member "provider_label" |> to_string);
+  let err = OWN.sdk_error_of_masc_internal_error payload in
+  match OWN.classify_masc_internal_error err with
+  | Some parsed -> (
+      match OWN.summary_of_masc_internal_error parsed with
+      | Some summary ->
+          Alcotest.(check bool) "summary names missing worktree tool" true
+            (contains_substring summary "masc_worktree_create");
+          Alcotest.(check bool) "summary names rejected codex provider" true
+            (contains_substring summary
+               "codex_cli:codex:codex_keeper_bound_actor_required")
+      | None -> Alcotest.fail "expected no-tool summary")
+  | None -> Alcotest.fail "expected no-tool error round-trip"
 
 let test_accept_rejected_kind () =
   let kind = "accept_rejected" in
@@ -302,5 +362,12 @@ let () =
           Alcotest.test_case
             "non-cascade-aware variant uses unknown" `Quick
             test_non_cascade_aware_variant_uses_unknown;
+        ] );
+      ( "structured_payload_13344",
+        [
+          Alcotest.test_case
+            "no_tool_capable_provider names tools and rejected providers"
+            `Quick
+            test_no_tool_capable_provider_payload_names_tools_and_rejections;
         ] );
     ]

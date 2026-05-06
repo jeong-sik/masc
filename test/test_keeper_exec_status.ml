@@ -5,6 +5,7 @@ module KSB = Masc_mcp.Keeper_status_bridge
 module KR = Masc_mcp.Keeper_registry
 module KT = Masc_mcp.Keeper_types
 module Coord = Masc_mcp.Coord
+module OWN = Masc_mcp.Oas_worker_named
 
 let keeper_health_testable : KT.keeper_health Alcotest.testable =
   Alcotest.testable
@@ -42,6 +43,17 @@ let with_temp_base_path prefix f =
   Sys.remove path;
   Unix.mkdir path 0o700;
   Fun.protect ~finally:(fun () -> rm_rf path) (fun () -> f path)
+
+let has_substring haystack needle =
+  let hay_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    if needle_len = 0 then true
+    else if idx + needle_len > hay_len then false
+    else if String.sub haystack idx needle_len = needle then true
+    else loop (idx + 1)
+  in
+  loop 0
 
 let iso_of_seconds_ago age_s =
   let ts = Time_compat.now () -. age_s in
@@ -345,6 +357,58 @@ let test_runtime_surface_derives_cascade_exhausted_from_meta () =
   check bool "runtime blocker continue gate stays false"
     false
     (runtime |> member "runtime_blocker_continue_gate" |> to_bool)
+
+let test_runtime_surface_names_no_tool_provider_details () =
+  KR.clear ();
+  let payload =
+    OWN.No_tool_capable_provider
+      {
+        cascade_name = OWN.cascade_name_of_string "tool_required";
+        configured_labels = [ "codex"; "kimi" ];
+        required_tool_names = [ "keeper_bash"; "masc_worktree_create" ];
+        provider_rejections =
+          [
+            {
+              OWN.provider_label = "codex_cli:codex";
+              provider_kind = "codex_cli";
+              reason = "codex_keeper_bound_actor_required";
+            };
+          ];
+      }
+  in
+  let summary =
+    match OWN.summary_of_masc_internal_error payload with
+    | Some summary -> summary
+    | None -> fail "expected no-tool provider summary"
+  in
+  let base = make_meta ~name:"runtime-no-tool-provider-test" () in
+  let meta =
+    {
+      base with
+      runtime =
+        {
+          base.runtime with
+          last_blocker = summary;
+          last_blocker_class = Some KT.No_tool_capable_provider;
+        };
+    }
+  in
+  let config =
+    Coord.default_config "/tmp/test-keeper-exec-status-no-tool-provider"
+  in
+  let runtime = KSB.runtime_surface_json config meta in
+  let open Yojson.Safe.Util in
+  let surfaced_summary =
+    runtime |> member "runtime_blocker_summary" |> to_string
+  in
+  check string "runtime blocker class"
+    "no_tool_capable_provider"
+    (runtime |> member "runtime_blocker_class" |> to_string);
+  check bool "summary names required worktree tool" true
+    (has_substring surfaced_summary "masc_worktree_create");
+  check bool "summary names rejected provider and reason" true
+    (has_substring surfaced_summary
+       "codex_cli:codex:codex_keeper_bound_actor_required")
 
 let test_runtime_surface_routes_oas_timeout_to_timeout_action () =
   KR.clear ();
@@ -728,6 +792,8 @@ let () =
             test_runtime_surface_derives_autonomous_slot_wait_timeout_from_meta;
           test_case "runtime surface derives cascade exhausted blocker" `Quick
             test_runtime_surface_derives_cascade_exhausted_from_meta;
+          test_case "runtime surface names no-tool provider details" `Quick
+            test_runtime_surface_names_no_tool_provider_details;
           test_case "runtime surface routes OAS timeout to timeout action"
             `Quick
             test_runtime_surface_routes_oas_timeout_to_timeout_action;

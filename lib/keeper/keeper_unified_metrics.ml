@@ -1560,6 +1560,10 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
             Printf.sprintf
               "OAS budget timeout after %.1fs (%s, estimated input %d tokens, keeper hard cap %.1fs)"
               budget_sec source estimated_input_tokens keeper_turn_timeout_sec
+        | Some (Oas_worker_named.No_tool_capable_provider _ as err) -> (
+            match Oas_worker_named.summary_of_masc_internal_error err with
+            | Some summary -> summary
+            | None -> reason)
         | _ -> reason)
     | None -> reason
   in

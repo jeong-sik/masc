@@ -286,31 +286,37 @@ let prepare_agent_setup
    := fun ~query ~max_results ->
         let core = Keeper_exec_tools.effective_core_tools () in
         let retrieved = Agent_sdk.Tool_index.retrieve search_index query in
-        let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
+        let allowed =
+          Keeper_exec_tools.keeper_allowed_tool_names meta
+          |> Keeper_tool_alias.expand_universe
+        in
         let allowed_set =
           let tbl = Hashtbl.create (List.length allowed) in
           List.iter (fun n -> Hashtbl.replace tbl n ()) allowed;
+          List.iter
+            (fun n -> Hashtbl.replace tbl n ())
+            Keeper_tool_registry.core_always_tools;
           tbl
+        in
+        let allowed_retrieved =
+          retrieved |> List.filter (fun (name, _) -> Hashtbl.mem allowed_set name)
         in
         let raw_hit_count = List.length retrieved in
         let matched_core_names =
-          retrieved
+          allowed_retrieved
           |> List.filter_map (fun (name, _) ->
             if List.mem name core || name = "keeper_tool_search" then Some name else None)
         in
         let after_core_filter =
-          retrieved
+          allowed_retrieved
           |> List.filter (fun (name, _) ->
             (not (List.mem name core)) && name <> "keeper_tool_search")
         in
-        let after_policy_filter =
-          after_core_filter |> List.filter (fun (name, _) -> Hashtbl.mem allowed_set name)
-        in
         let new_discoveries =
-          after_policy_filter |> List.filteri (fun i _ -> i < max_results)
+          after_core_filter |> List.filteri (fun i _ -> i < max_results)
         in
         let filtered_by_policy =
-          List.length after_core_filter - List.length after_policy_filter
+          raw_hit_count - List.length allowed_retrieved
         in
         let discovered_names = List.map fst new_discoveries in
         Keeper_discovered_tools.add
@@ -318,9 +324,7 @@ let prepare_agent_setup
           ~turn:acc.current_turn
           ~names:discovered_names;
         let masc_schemas = !Keeper_exec_tools.masc_schemas_ref in
-        let results =
-          List.map
-            (fun (name, score) ->
+        let result_json ~already_visible (name, score) =
                let help_opt = Tool_help_registry.find_entry masc_schemas name in
                let desc =
                  match help_opt with
@@ -353,11 +357,23 @@ let prepare_agent_setup
                  ; "description", desc
                  ; "when_to_use", when_to_use
                  ; "input_schema", input_schema
-                 ])
+                 ; "already_visible", `Bool already_visible
+                 ]
+        in
+        let matched_core_results =
+          allowed_retrieved
+          |> List.filter (fun (name, _) ->
+               List.mem name matched_core_names)
+          |> List.map (result_json ~already_visible:true)
+        in
+        let discovery_results =
+          List.map
+            (result_json ~already_visible:false)
             new_discoveries
         in
+        let results = matched_core_results @ discovery_results in
         let hint =
-          match results, matched_core_names with
+          match discovery_results, matched_core_names with
           | [], [] when raw_hit_count = 0 ->
             "No tools match this query. Try different keywords (e.g., 'worktree', \
              'board', 'github')."

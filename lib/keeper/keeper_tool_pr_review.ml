@@ -297,7 +297,7 @@ let handle_keeper_pr_review_reply
           (Filename.quote body) in
         let result =
           run_pr_review_shell ~config ~meta
-            ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Pr_review ())
+            ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Pr_review_post ())
             ~cmd in
         Log.Keeper.info "pr_review_reply: pr=%d comment=%d keeper=%s ok=%b"
           pr_number comment_id meta.name (status_ok result.status);

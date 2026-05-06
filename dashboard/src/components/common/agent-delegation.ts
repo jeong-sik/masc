@@ -166,6 +166,16 @@ interface NodeViewProps {
   path: string
 }
 
+function delegationNodeKey(node: DelegationNode): string {
+  return [
+    node.agentId,
+    node.task,
+    node.status,
+    node.startedAt ?? '',
+    node.completedAt ?? '',
+  ].join(':')
+}
+
 function NodeView({ node, depth, path }: NodeViewProps) {
   const presenceStatus = statusToPresence(node.status)
   const elapsed = formatElapsed(node.startedAt, node.completedAt)
@@ -210,7 +220,12 @@ function NodeView({ node, depth, path }: NodeViewProps) {
         ? html`
             <div role="group">
               ${node.children?.map((child, childIndex) => html`
-                <${NodeView} node=${child} depth=${depth + 1} path=${`${path}.${childIndex}`} />
+                <${NodeView}
+                  key=${delegationNodeKey(child)}
+                  node=${child}
+                  depth=${depth + 1}
+                  path=${`${path}.${childIndex}`}
+                />
               `)}
             </div>
           `

@@ -42,6 +42,10 @@ vi.mock('../../api/repositories', () => ({
   }])),
 }))
 
+vi.mock('./ide-conversation-rail-mock', () => ({
+  IdeConversationRailMock: () => null,
+}))
+
 import { IdeShell } from './ide-shell'
 import { navigate, route } from '../../router'
 import { clearTraces, pushTrace } from './keeper-trace-store'
@@ -63,11 +67,48 @@ function ideCommandInput(container: HTMLElement): HTMLInputElement {
   return input
 }
 
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
+const dashboardFetchHandlers: ReadonlyArray<[
+  RegExp,
+  () => Response,
+]> = [
+  [/\/api\/v1\/workspace\/tree/, () => jsonResponse([])],
+  [/\/api\/v1\/workspace\/file/, () => jsonResponse({ ok: false, content: '' })],
+  [/\/api\/v1\/git\/blame/, () => jsonResponse([])],
+  [/\/api\/v1\/git\/diff/, () => jsonResponse({ unified: [] })],
+  [/\/state-diagram/, () => jsonResponse({
+    keeper: 'sangsu',
+    current_phase: 'observe',
+    memory_kind_usage: [],
+  })],
+  [/\/bdi-snapshot/, () => jsonResponse({
+    keeper: 'sangsu',
+    generated_at: '2026-05-06T00:00:00Z',
+    poll_interval_ms: 5000,
+    recent_token_spend: [],
+    source: 'test',
+  })],
+]
+
+function dashboardFetchMock(input: RequestInfo | URL): Promise<Response> {
+  const url = String(input)
+  const handler = dashboardFetchHandlers.find(([pattern]) => pattern.test(url))
+  if (!handler) throw new Error(`Unmocked fetch URL: ${url}`)
+  return Promise.resolve(handler[1]())
+}
+
 describe('IdeShell', () => {
   let container: HTMLDivElement
 
   beforeEach(() => {
     container = document.createElement('div')
+    vi.stubGlobal('fetch', vi.fn(dashboardFetchMock))
   })
 
   afterEach(() => {
@@ -76,6 +117,12 @@ describe('IdeShell', () => {
     window.location.hash = ''
     route.value = { tab: 'overview', params: {}, postId: null }
     clearTraces()
+  })
+
+  it('fails fast for unmocked dashboard fetch URLs', () => {
+    expect(() => dashboardFetchMock('/api/v1/dashboard/unexpected')).toThrow(
+      'Unmocked fetch URL: /api/v1/dashboard/unexpected',
+    )
   })
 
   it('hydrates layer buttons from the route layers param', () => {
@@ -137,6 +184,73 @@ describe('IdeShell', () => {
     expect(route.value.params.layers).toBe('explode')
   })
 
+  it('turns focus=review into a unified review workspace with review layers', () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'unified', focus: 'review' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    expect(container.querySelector('[data-testid="ide-review-focus"]')).not.toBeNull()
+    expect(container.querySelector('[aria-label="Unified diff preview"]')).not.toBeNull()
+    expect(buttonByText(container, 'Trace').getAttribute('aria-pressed')).toBe('true')
+    expect(buttonByText(container, 'Approve').getAttribute('aria-pressed')).toBe('true')
+    expect(buttonByText(container, 'Notes').getAttribute('aria-pressed')).toBe('true')
+    expect(buttonByText(container, 'Cascade').getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('lets explicit review-focus layers override the default review bundle', () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'unified', focus: 'review', layers: 'cascade' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    expect(container.querySelector('[data-testid="ide-review-focus"]')).not.toBeNull()
+    expect(buttonByText(container, 'Cascade').getAttribute('aria-pressed')).toBe('true')
+    expect(buttonByText(container, 'Trace').getAttribute('aria-pressed')).toBe('false')
+    expect(buttonByText(container, 'Approve').getAttribute('aria-pressed')).toBe('false')
+    expect(buttonByText(container, 'Notes').getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('persists an explicit empty review-focus layer override', () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'unified', focus: 'review' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+    fireEvent.click(buttonByText(container, 'Trace'))
+    fireEvent.click(buttonByText(container, 'Approve'))
+    fireEvent.click(buttonByText(container, 'Notes'))
+
+    expect(route.value.params.layers).toBe('none')
+    expect(container.querySelector('[data-testid="ide-review-focus"]')).not.toBeNull()
+    expect(buttonByText(container, 'Trace').getAttribute('aria-pressed')).toBe('false')
+    expect(buttonByText(container, 'Approve').getAttribute('aria-pressed')).toBe('false')
+    expect(buttonByText(container, 'Notes').getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('does not activate review focus outside the unified view', () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source', focus: 'review' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    expect(container.querySelector('[data-testid="ide-review-focus"]')).toBeNull()
+    expect(buttonByText(container, 'Trace').getAttribute('aria-pressed')).toBe('false')
+    expect(buttonByText(container, 'Approve').getAttribute('aria-pressed')).toBe('false')
+    expect(buttonByText(container, 'Notes').getAttribute('aria-pressed')).toBe('false')
+  })
+
   it('runs view commands from the IDE command bar', async () => {
     route.value = {
       tab: 'code',
@@ -152,6 +266,21 @@ describe('IdeShell', () => {
     fireEvent.keyDown(input, { key: 'Enter' })
 
     expect(route.value.params.view).toBe('unified')
+  })
+
+  it('clears review focus when switching away from unified review mode', () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'unified', focus: ' Review ' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+    fireEvent.click(buttonByText(container, 'SOURCE'))
+
+    expect(route.value.params.view).toBe('source')
+    expect(route.value.params.focus).toBeUndefined()
+    expect(route.value.params.layers).toBeUndefined()
   })
 
   it('runs layer commands from the IDE command bar', async () => {

@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import type { UnifiedDiffRow } from '../../api/workspace'
+import { StatusChip } from '../common/status-chip'
 
 // ── Shared diff types ─────────────────────────────────────────────
 
@@ -16,54 +17,32 @@ export interface SplitDiffRow {
   readonly after: SplitDiffCell | null
 }
 
+export interface DiffLineRange {
+  readonly start: number | null
+  readonly end: number | null
+}
+
+export interface DiffSummary {
+  readonly total: number
+  readonly additions: number
+  readonly deletions: number
+  readonly context: number
+  readonly changed: number
+  readonly oldRange: DiffLineRange
+  readonly newRange: DiffLineRange
+}
+
 // ── Unified diff view ─────────────────────────────────────────────
 
 export function UnifiedDiffView(rows: ReadonlyArray<UnifiedDiffRow>) {
-  return html`
-    <ol
-      aria-label="Unified diff preview"
-      style=${{
-        listStyle: 'none',
-        padding: 'var(--sp-2) 0',
-        margin: 0,
-        overflow: 'auto',
-        fontFamily: 'var(--font-mono)',
-        fontSize: 'var(--fs-13)',
-        lineHeight: 1.6,
-      }}
-    >
-      ${rows.map(row => html`
-        <li
-          style=${{
-            display: 'grid',
-            gridTemplateColumns: '32px 40px 40px minmax(0, 1fr)',
-            gap: 'var(--sp-2)',
-            alignItems: 'center',
-            padding: '0 var(--sp-3)',
-            background: diffBackground(row.kind),
-            color: row.kind === 'delete' ? 'var(--color-status-danger, var(--color-fg-secondary))' : 'var(--color-fg-secondary)',
-          }}
-        >
-          <span style=${{ color: diffMarkerColor(row.kind), textAlign: 'center' }}>${diffMarker(row.kind)}</span>
-          <span style=${{ color: 'var(--color-fg-disabled)', fontSize: 'var(--fs-11)', textAlign: 'right' }}>${row.oldLine ?? ''}</span>
-          <span style=${{ color: 'var(--color-fg-disabled)', fontSize: 'var(--fs-11)', textAlign: 'right' }}>${row.newLine ?? ''}</span>
-          <span style=${{ whiteSpace: 'pre', minWidth: 0 }}>${row.text}</span>
-        </li>
-      `)}
-    </ol>
-  `
-}
-
-// ── Split diff view ───────────────────────────────────────────────
-
-export function SplitDiffView(rows: ReadonlyArray<UnifiedDiffRow>) {
-  const splitRows: SplitDiffRow[] = buildSplitDiff(rows)
+  const summary = summarizeDiffRows(rows)
   return html`
     <div
-      aria-label="Split diff preview"
+      role="region"
+      aria-label="Unified diff preview"
       style=${{
         display: 'grid',
-        gridTemplateRows: 'auto 1fr',
+        gridTemplateRows: 'auto minmax(0, 1fr)',
         minHeight: 0,
         overflow: 'hidden',
         fontFamily: 'var(--font-mono)',
@@ -71,6 +50,129 @@ export function SplitDiffView(rows: ReadonlyArray<UnifiedDiffRow>) {
         lineHeight: 1.6,
       }}
     >
+      <${DiffSummaryStrip} summary=${summary} mode="Unified" />
+      ${summary.total === 0
+        ? DiffEmptyState('No diff rows for the selected file.')
+        : html`
+          <ol
+            aria-label="Unified diff rows"
+            style=${{
+              listStyle: 'none',
+              padding: 'var(--sp-2) 0',
+              margin: 0,
+              overflow: 'auto',
+            }}
+          >
+            ${rows.map(row => html`
+              <li
+                style=${{
+                  display: 'grid',
+                  gridTemplateColumns: '32px 40px 40px minmax(0, 1fr)',
+                  gap: 'var(--sp-2)',
+                  alignItems: 'start',
+                  padding: '0 var(--sp-3)',
+                  background: diffBackground(row.kind),
+                  color: row.kind === 'delete' ? 'var(--color-status-danger, var(--color-fg-secondary))' : 'var(--color-fg-secondary)',
+                }}
+              >
+                <span style=${{ color: diffMarkerColor(row.kind), textAlign: 'center' }}>${diffMarker(row.kind)}</span>
+                <span style=${{ color: 'var(--color-fg-disabled)', fontSize: 'var(--fs-11)', textAlign: 'right' }}>${row.oldLine ?? ''}</span>
+                <span style=${{ color: 'var(--color-fg-disabled)', fontSize: 'var(--fs-11)', textAlign: 'right' }}>${row.newLine ?? ''}</span>
+                <span style=${{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', minWidth: 0 }}>${row.text}</span>
+              </li>
+            `)}
+          </ol>
+        `}
+    </div>
+  `
+}
+
+// ── Diff summary strip ────────────────────────────────────────────
+
+function DiffSummaryStrip({
+  summary,
+  mode,
+}: {
+  readonly summary: DiffSummary
+  readonly mode: 'Unified' | 'Split'
+}) {
+  return html`
+    <div
+      role="status"
+      aria-label=${formatDiffSummaryAria(summary, mode)}
+      style=${{
+        display: 'flex',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: 'var(--sp-2)',
+        minWidth: 0,
+        padding: 'var(--sp-2) var(--sp-3)',
+        borderBottom: '1px solid var(--color-border-divider)',
+        background: 'var(--color-bg-surface)',
+        color: 'var(--color-fg-muted)',
+        font: 'var(--type-eyebrow)',
+      }}
+    >
+      <span style=${{ color: 'var(--color-fg-secondary)' }}>${mode} diff</span>
+      <span style=${{ color: 'var(--color-fg-disabled)' }}>${summary.changed} changed rows</span>
+      <span
+        style=${{
+          display: 'inline-flex',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: 'var(--sp-1)',
+          minWidth: 0,
+        }}
+      >
+        <${StatusChip} tone="ok" uppercase=${false}>+${summary.additions}</${StatusChip}>
+        <${StatusChip} tone="bad" uppercase=${false}>-${summary.deletions}</${StatusChip}>
+        <${StatusChip} tone="neutral" uppercase=${false}>${summary.context} context</${StatusChip}>
+        <${StatusChip} tone="info" uppercase=${false}>old ${formatDiffLineRange(summary.oldRange)} -> new ${formatDiffLineRange(summary.newRange)}</${StatusChip}>
+      </span>
+    </div>
+  `
+}
+
+function DiffEmptyState(label: string) {
+  return html`
+    <div
+      role="note"
+      style=${{
+        display: 'grid',
+        placeItems: 'center',
+        minHeight: '120px',
+        padding: 'var(--sp-4)',
+        color: 'var(--color-fg-muted)',
+        background: 'var(--color-bg-page)',
+        font: 'var(--type-body)',
+        fontSize: 'var(--fs-12)',
+        textAlign: 'center',
+      }}
+    >
+      ${label}
+    </div>
+  `
+}
+
+// ── Split diff view ───────────────────────────────────────────────
+
+export function SplitDiffView(rows: ReadonlyArray<UnifiedDiffRow>) {
+  const summary = summarizeDiffRows(rows)
+  const splitRows: SplitDiffRow[] = buildSplitDiff(rows)
+  return html`
+    <div
+      aria-label="Split diff preview"
+      style=${{
+        display: 'grid',
+        gridTemplateRows: 'auto auto minmax(0, 1fr)',
+        minHeight: 0,
+        overflow: 'hidden',
+        fontFamily: 'var(--font-mono)',
+        fontSize: 'var(--fs-13)',
+        lineHeight: 1.6,
+      }}
+    >
+      <${DiffSummaryStrip} summary=${summary} mode="Split" />
       <div
         style=${{
           display: 'grid',
@@ -85,17 +187,19 @@ export function SplitDiffView(rows: ReadonlyArray<UnifiedDiffRow>) {
         <span style=${{ padding: 'var(--sp-2) var(--sp-3)', borderLeft: '1px solid var(--color-border-divider)' }}>AFTER</span>
       </div>
       <div style=${{ overflow: 'auto' }}>
-        ${splitRows.map(row => html`
-          <div
-            style=${{
-              display: 'grid',
-              gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
-            }}
-          >
-            <${SplitDiffCellView} cell=${row.before} />
-            <${SplitDiffCellView} cell=${row.after} framed=${true} />
-          </div>
-        `)}
+        ${splitRows.length === 0
+          ? DiffEmptyState('No split diff rows for the selected file.')
+          : splitRows.map(row => html`
+            <div
+              style=${{
+                display: 'grid',
+                gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+              }}
+            >
+              <${SplitDiffCellView} cell=${row.before} />
+              <${SplitDiffCellView} cell=${row.after} framed=${true} />
+            </div>
+          `)}
       </div>
     </div>
   `
@@ -115,7 +219,7 @@ function SplitDiffCellView({
         display: 'grid',
         gridTemplateColumns: '40px 24px minmax(0, 1fr)',
         gap: 'var(--sp-2)',
-        alignItems: 'center',
+        alignItems: 'start',
         minHeight: '24px',
         padding: '0 var(--sp-3)',
         borderLeft: framed ? '1px solid var(--color-border-divider)' : undefined,
@@ -125,7 +229,7 @@ function SplitDiffCellView({
     >
       <span style=${{ color: 'var(--color-fg-disabled)', fontSize: 'var(--fs-11)', textAlign: 'right' }}>${cell?.line ?? ''}</span>
       <span style=${{ color: diffMarkerColor(kind), textAlign: 'center' }}>${cell ? diffMarker(kind) : ''}</span>
-      <span style=${{ whiteSpace: 'pre', minWidth: 0 }}>${cell?.text ?? ''}</span>
+      <span style=${{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', minWidth: 0 }}>${cell?.text ?? ''}</span>
     </div>
   `
 }
@@ -148,6 +252,60 @@ function diffMarkerColor(kind: string): string {
   if (kind === 'add') return 'var(--color-status-ok, var(--ok))'
   if (kind === 'delete') return 'var(--color-status-danger, var(--danger))'
   return 'var(--color-fg-disabled)'
+}
+
+// ── Summary helpers ───────────────────────────────────────────────
+
+export function summarizeDiffRows(rows: ReadonlyArray<UnifiedDiffRow>): DiffSummary {
+  let additions = 0
+  let deletions = 0
+  let context = 0
+  let oldStart: number | null = null
+  let oldEnd: number | null = null
+  let newStart: number | null = null
+  let newEnd: number | null = null
+
+  for (const row of rows) {
+    if (row.kind === 'add') {
+      additions += 1
+    } else if (row.kind === 'delete') {
+      deletions += 1
+    } else {
+      context += 1
+    }
+    if (row.oldLine != null) {
+      oldStart = oldStart == null ? row.oldLine : Math.min(oldStart, row.oldLine)
+      oldEnd = oldEnd == null ? row.oldLine : Math.max(oldEnd, row.oldLine)
+    }
+    if (row.newLine != null) {
+      newStart = newStart == null ? row.newLine : Math.min(newStart, row.newLine)
+      newEnd = newEnd == null ? row.newLine : Math.max(newEnd, row.newLine)
+    }
+  }
+
+  return {
+    total: rows.length,
+    additions,
+    deletions,
+    context,
+    changed: additions + deletions,
+    oldRange: { start: oldStart, end: oldEnd },
+    newRange: { start: newStart, end: newEnd },
+  }
+}
+
+export function formatDiffLineRange(range: DiffLineRange): string {
+  if (range.start == null || range.end == null) return 'n/a'
+  if (range.start === range.end) return `${range.start}`
+  return `${range.start}-${range.end}`
+}
+
+export function formatDiffSummaryAria(summary: DiffSummary, mode: 'Unified' | 'Split'): string {
+  return `${mode} diff summary: ${summary.additions} ${pluralize('addition', summary.additions)}, ${summary.deletions} ${pluralize('deletion', summary.deletions)}, ${summary.context} context ${pluralize('row', summary.context)}, old lines ${formatDiffLineRange(summary.oldRange)}, new lines ${formatDiffLineRange(summary.newRange)}`
+}
+
+function pluralize(noun: string, count: number): string {
+  return count === 1 ? noun : `${noun}s`
 }
 
 // ── Split diff builder ────────────────────────────────────────────

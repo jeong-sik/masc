@@ -57,4 +57,5 @@ val recent_completed_turns :
 module For_testing : sig
   val reset_state : unit -> unit
   val clear_completed_turn_ring : keeper_name:string -> unit
+  val observe_append_failure : site:string -> exn -> unit
 end

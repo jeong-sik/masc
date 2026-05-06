@@ -33,6 +33,7 @@
  dashboard_http_helpers
  dashboard_http_monitoring
  dashboard_http_keeper
+ dashboard_goal_loop
  dashboard_http_autoresearch
  dashboard_harness_health
  dashboard_worktree_status

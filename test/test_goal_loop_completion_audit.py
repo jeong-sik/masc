@@ -935,7 +935,7 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
             checklist_evidence["requirements_with_tracking_issue_refs"],
             16,
         )
-        self.assertEqual(checklist_evidence["tracking_issue_refs_total"], 6)
+        self.assertEqual(checklist_evidence["tracking_issue_refs_total"], 12)
         self.assertEqual(checklist_evidence["missing_tracking_issue_refs"], [])
         self.assertEqual(checklist_evidence["invalid_tracking_issue_refs"], [])
         self.assertEqual(

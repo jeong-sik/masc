@@ -32,6 +32,7 @@
       "gap": "Startup signature is replayed, but the full 206-row strict corpus is absent.",
       "tracking_issue_refs": [
         "https://github.com/jeong-sik/masc-mcp/issues/13265",
+        "https://github.com/jeong-sik/masc-mcp/issues/13685",
         "https://github.com/jeong-sik/masc-mcp/issues/13636"
       ]
     },
@@ -47,6 +48,7 @@
       "criterion_id": "strict_row_level_catalog_complete",
       "gap": "Signature and ACT links exist, but full keeper recovery SLO proof is not recorded.",
       "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13684",
         "https://github.com/jeong-sik/masc-mcp/issues/13636"
       ]
     },
@@ -61,6 +63,7 @@
       "criterion_id": "strict_row_level_catalog_complete",
       "gap": "Failure is modeled, but runtime recovery success across all keepers is not proven.",
       "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13686",
         "https://github.com/jeong-sik/masc-mcp/issues/13636"
       ]
     },
@@ -75,6 +78,7 @@
       "criterion_id": "strict_row_level_catalog_complete",
       "gap": "Visibility exists, but strict judge-output failure policy is incomplete.",
       "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13688",
         "https://github.com/jeong-sik/masc-mcp/issues/13636"
       ]
     },
@@ -89,6 +93,7 @@
       "criterion_id": "strict_row_level_catalog_complete",
       "gap": "Health visibility exists, but strict schema rejection is not enforced.",
       "tracking_issue_refs": [
+        "https://github.com/jeong-sik/masc-mcp/issues/13689",
         "https://github.com/jeong-sik/masc-mcp/issues/13636"
       ]
     },
@@ -125,6 +130,7 @@
       "gap": "Source claim is tracked, but no full row-level replay proves the warmup behavior is closed.",
       "tracking_issue_refs": [
         "https://github.com/jeong-sik/masc-mcp/issues/13265",
+        "https://github.com/jeong-sik/masc-mcp/issues/13690",
         "https://github.com/jeong-sik/masc-mcp/issues/13636"
       ]
     },

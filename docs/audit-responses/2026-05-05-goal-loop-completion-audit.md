@@ -276,13 +276,14 @@
   prompt objective from being marked complete while the recorded checklist
   still has 14 `PARTIAL` and 2 `BLOCKED` prompt requirements. The
   `prompt_to_artifact_checklist_recorded` criterion remains `PASS`, with 21
-  unique requirement IDs, 6 unique issue refs, and no missing or invalid
+  unique requirement IDs, 12 unique issue refs, and no missing or invalid
   tracking refs; recording the map is separate from satisfying every mapped
   prompt requirement.
 - [근거] `gh issue view <issue> --repo jeong-sik/masc-mcp --json
   number,state,title,url,labels` for #13265, #13505, #13609, #13610, #13611,
-  and #13636 checked at 2026-05-06T17:16:07+09:00, confidence
-  High: all six prompt-checklist tracking issue refs resolve to open,
+  #13636, #13684, #13685, #13686, #13688, #13689, and #13690 checked at
+  2026-05-06T17:25:00+09:00, confidence High: all 12 prompt-checklist
+  tracking issue refs resolve to open,
   label-free GitHub issues.
 - [근거] `python3 test/test_goal_loop_completion_audit.py` checked at
   2026-05-06T16:03:11+09:00, confidence High: the completion audit accepts

@@ -712,6 +712,49 @@ let test_board_curation_submit_roundtrips_to_read () =
     "Board has one high-priority routing item."
     Yojson.Safe.Util.(read_json |> member "summary" |> to_string)
 
+let inline_board_dispatch ~sw ~clock name args =
+  let state = Mcp_server.create_state ~base_path:_test_base_path in
+  Tool_inline_dispatch_extra.dispatch ~config:state.Mcp_server.room_config
+    ~agent_name:"inline-curator" ~arguments:args ~state ~sw ~clock ~name
+
+let require_inline_result ~sw ~clock name args =
+  match inline_board_dispatch ~sw ~clock name args with
+  | Some result -> result
+  | None -> Alcotest.failf "%s not routed by inline board dispatch" name
+
+let test_board_curation_inline_dispatch_routes_read_and_submit () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  Eio.Switch.run @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  let read_ok, read_body =
+    require_inline_result ~sw ~clock "masc_board_curation_read" (make_args [])
+  in
+  Alcotest.(check bool) "inline curation read ok" true read_ok;
+  Alcotest.(check string) "inline curation read empty" "null" read_body;
+  let submit_ok, submit_body =
+    require_inline_result ~sw ~clock "masc_board_curation_submit"
+      (make_args
+         [
+           ("submitted_by", `String "inline-curator");
+           ("summary", `String "Inline MCP curation route works.");
+           ("rationale", `String "Pin schema-to-dispatch curation routing");
+         ])
+  in
+  Alcotest.(check bool) "inline curation submit ok" true submit_ok;
+  let submitted = Yojson.Safe.from_string submit_body in
+  Alcotest.(check string) "inline submitted_by persisted" "inline-curator"
+    Yojson.Safe.Util.(submitted |> member "submitted_by" |> to_string);
+  let read2_ok, read2_body =
+    require_inline_result ~sw ~clock "masc_board_curation_read" (make_args [])
+  in
+  Alcotest.(check bool) "inline curation read after submit ok" true read2_ok;
+  Alcotest.(check string) "inline curation read after submit summary"
+    "Inline MCP curation route works."
+    Yojson.Safe.Util.(
+      Yojson.Safe.from_string read2_body |> member "summary" |> to_string)
+
 let test_post_create_accepts_automation_rejects_system () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1190,6 +1233,8 @@ let () =
             test_board_curation_read_empty_returns_json_null;
           Alcotest.test_case "curation submit roundtrips to read" `Quick
             test_board_curation_submit_roundtrips_to_read;
+          Alcotest.test_case "curation inline dispatch routes read and submit" `Quick
+            test_board_curation_inline_dispatch_routes_read_and_submit;
           Alcotest.test_case "accept automation reject system" `Quick
             test_post_create_accepts_automation_rejects_system;
           Alcotest.test_case "create empty content" `Quick test_post_create_empty_content;

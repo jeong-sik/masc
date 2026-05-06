@@ -72,11 +72,20 @@ let agent_status_icon ~is_zombie = function
   | Masc_domain.Listening -> "🎧"
   | Masc_domain.Inactive -> "⚫"
 
-let agent_focus_label ~is_zombie (agent : Masc_domain.agent) =
+let agent_focus_label ~is_zombie ~active_assigned_task_ids
+    (agent : Masc_domain.agent) =
   if is_zombie then "stale"
-  else option_or_dash agent.current_task |> function
-    | "-" -> Masc_domain.agent_status_to_string agent.status
-    | task -> task
+  else
+    match active_assigned_task_ids with
+    | task :: [] -> task
+    | task :: rest -> Printf.sprintf "%s (+%d)" task (List.length rest)
+    | [] -> (
+        match agent.current_task with
+        | Some task when not (String.equal (String.trim task) "") ->
+            Printf.sprintf "%s (stale:%s)"
+              (Masc_domain.agent_status_to_string agent.status)
+              task
+        | _ -> Masc_domain.agent_status_to_string agent.status)
 
 let task_id_list_label = function
   | [] -> "[]"
@@ -200,12 +209,20 @@ let status_summary_string
         (fun ((agent : Masc_domain.agent), is_zombie) ->
           Coord_query.safe_yield ();
           let icon = agent_status_icon ~is_zombie agent.status in
+          let matches_agent assignee =
+            String.equal assignee agent.name
+            || (String.equal agent.name actual_name
+               && String.equal assignee ctx.agent_name)
+          in
+          let active_assigned_task_ids =
+            assigned_task_ids ~matches_you:matches_agent active_tasks
+          in
           let you_marker =
             if String.equal agent.name actual_name then " (you)" else ""
           in
           Buffer.add_string buf
             (Printf.sprintf "  %s %s%s -> %s\n" icon agent.name you_marker
-               (agent_focus_label ~is_zombie agent)))
+               (agent_focus_label ~is_zombie ~active_assigned_task_ids agent)))
         shown_agents;
       if agent_count > max_agents_display then
         Buffer.add_string buf

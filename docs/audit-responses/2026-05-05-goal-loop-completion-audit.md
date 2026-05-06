@@ -147,7 +147,10 @@
   and a single `R-FATAL-1` example was also checked and does not contain the
   missing row corpus. The closest GOAL-loop export archive was checked as
   well; it contains the same prompt documents and research notes, with no
-  `source_catalog_id`, strict-row schema, or 206 itemized rows.
+  `source_catalog_id`, strict-row schema, or 206 itemized rows. A later
+  workspace/tmp sweep checked 16 generated JSON artifacts mentioning the
+  catalog id; those were Orient/status/catalog snapshots with 18 or 19 rows,
+  not a complete strict 206-row corpus.
 - [근거] `python3 test/test_goal_loop_completion_audit.py` checked at
   2026-05-06T09:59:29+09:00, confidence High: the completion audit now accepts
   an optional `--strict-row-corpus` artifact and validates it against the

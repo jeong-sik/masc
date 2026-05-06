@@ -435,30 +435,48 @@ let estimate_usage_cost_usd ~(model : string) (usage : Agent_sdk.Types.api_usage
 type cost_status =
   | Cost_reported_or_estimated
   | Cost_known_free
+  | Cost_known_unpriced_model
   | Cost_no_tokens
   | Cost_usage_missing
   | Cost_usage_untrusted
   | Cost_provider_unknown
+  | Cost_unresolved_model_alias
   | Cost_unpriced_model
 
 let cost_status_to_string = function
   | Cost_reported_or_estimated -> "priced"
   | Cost_known_free -> "known_free"
+  | Cost_known_unpriced_model -> "known_unpriced_model"
   | Cost_no_tokens -> "no_tokens"
   | Cost_usage_missing -> "usage_missing"
   | Cost_usage_untrusted -> "usage_untrusted"
   | Cost_provider_unknown -> "provider_unknown"
+  | Cost_unresolved_model_alias -> "unresolved_model_alias"
   | Cost_unpriced_model -> "unpriced_model"
 
 let cost_status_reason = function
   | Cost_reported_or_estimated ->
       "provider_reported_or_pricing_catalog_estimate"
   | Cost_known_free -> "known_structurally_unmetered_or_zero_price"
+  | Cost_known_unpriced_model -> "known_non_catalog_model"
   | Cost_no_tokens -> "no_billable_tokens"
   | Cost_usage_missing -> "usage_missing"
   | Cost_usage_untrusted -> "usage_untrusted"
   | Cost_provider_unknown -> "provider_unknown"
+  | Cost_unresolved_model_alias -> "model_alias_unresolved"
   | Cost_unpriced_model -> "pricing_catalog_miss"
+
+let pricing_model_leaf model =
+  let trimmed = String.trim model in
+  match String.rindex_opt trimmed ':' with
+  | None -> trimmed
+  | Some idx ->
+      String.sub trimmed (idx + 1) (String.length trimmed - idx - 1)
+
+let is_known_non_catalog_pricing_model model =
+  match pricing_model_leaf model with
+  | "gpt-5.3-codex-spark" -> true
+  | _ -> false
 
 let pricing_model_for_ledger ~model ~telemetry =
   match canonical_model_id_opt telemetry with
@@ -478,7 +496,8 @@ let model_resolution_source_for_ledger ~model ~pricing_model =
   else "raw"
 
 let pricing_catalog_status ~pricing_model =
-  if is_unresolved_pricing_label pricing_model then "miss"
+  if is_unresolved_pricing_label pricing_model then "alias_unresolved"
+  else if is_known_non_catalog_pricing_model pricing_model then "known_unpriced"
   else match Llm_provider.Pricing.pricing_for_model_opt pricing_model with
   | Some pricing
     when pricing.input_per_million = 0.0
@@ -501,7 +520,10 @@ let cost_status_for_event
   else if input_tokens <= 0 && output_tokens <= 0 then Cost_no_tokens
   else if structurally_unmetered_provider provider then Cost_known_free
   else if String.equal provider "unknown" then Cost_provider_unknown
-  else if is_unresolved_pricing_label pricing_model then Cost_unpriced_model
+  else if is_unresolved_pricing_label pricing_model then
+    Cost_unresolved_model_alias
+  else if is_known_non_catalog_pricing_model pricing_model then
+    Cost_known_unpriced_model
   else
     match Llm_provider.Pricing.pricing_for_model_opt pricing_model with
     | Some pricing
@@ -675,11 +697,11 @@ let () =
       "Total cost.jsonl emits where cost_usd ended up as 0.0 due to a \
        known classification path (vs an actually-zero call).  Labels: \
        source ∈ {missing_usage, untrusted_usage, unmetered_provider, \
-       pricing_catalog_miss, zero_token_call}.  A high \
-       [pricing_catalog_miss] rate is the hint to add upstream OAS \
-       pricing entries; a high [untrusted_usage] rate points at the \
-       trust classifier; a high [missing_usage] rate points at the \
-       provider adapter not surfacing usage.  See #10318."
+       unresolved_model_alias, known_unpriced_model, pricing_catalog_miss, \
+       zero_token_call}.  A high [pricing_catalog_miss] rate is the hint \
+       to add upstream OAS pricing entries; a high [untrusted_usage] rate \
+       points at the trust classifier; a high [missing_usage] rate points \
+       at the provider adapter not surfacing usage.  See #10318 and #13698."
     ()
 
 let classify_cost_usd_source ~usage_missing ~usage_trusted ~provider
@@ -688,7 +710,8 @@ let classify_cost_usd_source ~usage_missing ~usage_trusted ~provider
   else if not usage_trusted then "untrusted_usage"
   else if structurally_unmetered_provider provider then "unmetered_provider"
   else if cost_usd > 0.0 then "computed"
-  else if is_unresolved_pricing_label model then "pricing_catalog_miss"
+  else if is_unresolved_pricing_label model then "unresolved_model_alias"
+  else if is_known_non_catalog_pricing_model model then "known_unpriced_model"
   else
     match Llm_provider.Pricing.pricing_for_model_opt model with
     | None -> "pricing_catalog_miss"
@@ -773,7 +796,10 @@ let assemble_cost_event_payload
     | Cost_reported_or_estimated -> cost_usd
     | Cost_known_free | Cost_no_tokens -> 0.0
     | Cost_usage_missing | Cost_usage_untrusted -> 0.0
-    | Cost_provider_unknown | Cost_unpriced_model -> 0.0
+    | Cost_provider_unknown
+    | Cost_unresolved_model_alias
+    | Cost_known_unpriced_model
+    | Cost_unpriced_model -> 0.0
   in
   let cost_status_label = cost_status_to_string cost_status in
   let cost_status_reason_label = cost_status_reason cost_status in

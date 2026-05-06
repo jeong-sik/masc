@@ -154,10 +154,14 @@ type cost_status =
       (** Cost trusted: either reported by the provider or estimated from
           tokens against the pricing catalogue. *)
   | Cost_known_free       (** Provider runs locally / structurally unmetered. *)
+  | Cost_known_unpriced_model
+      (** Model is known but intentionally outside the pricing catalogue. *)
   | Cost_no_tokens        (** Usage carried zero tokens and no positive cost. *)
   | Cost_usage_missing    (** Provider returned no usage record. *)
   | Cost_usage_untrusted  (** Usage failed [classify_usage_trust]. *)
   | Cost_provider_unknown (** Provider could not be classified. *)
+  | Cost_unresolved_model_alias
+      (** Model label is an unresolved selector alias such as [auto]. *)
   | Cost_unpriced_model   (** Model has no entry in the pricing catalogue. *)
 (** Per-event cost-ledger verdict. *)
 
@@ -180,9 +184,9 @@ val model_resolution_source_for_ledger :
 
 val pricing_catalog_status : pricing_model:string -> string
 (** Catalogue lookup status for the resolved pricing model
-    (["hit_paid"] / ["hit_free"] / ["miss"]).  Unresolved aliases
-    such as ["auto"] remain misses so missing canonical telemetry is
-    visible in the ledger. *)
+    (["hit_paid"] / ["hit_free"] / ["known_unpriced"] / ["alias_unresolved"] /
+    ["miss"]).  Unresolved aliases such as ["auto"] remain visible in the
+    ledger without being conflated with genuine catalogue misses. *)
 
 val cost_status_for_event :
   provider:string ->

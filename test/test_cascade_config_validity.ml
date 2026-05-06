@@ -200,6 +200,38 @@ let test_unknown_provider_is_dropped () =
         true
         (List.length parsed < List.length strings))
 
+let test_committed_json_matches_toml_materializer () =
+  let path = cascade_path () in
+  let source =
+    Masc_mcp.Cascade_toml_materializer.source_info ~config_path:path
+  in
+  check string "repo cascade source kind" "toml"
+    (Masc_mcp.Cascade_toml_materializer.source_kind_to_string source.kind);
+  match source.kind with
+  | Masc_mcp.Cascade_toml_materializer.Json ->
+      fail "config/cascade.toml must remain the committed cascade SSOT"
+  | Masc_mcp.Cascade_toml_materializer.Toml -> (
+      match
+        Masc_mcp.Cascade_toml_materializer.render_toml_file_to_json_string
+          source.source_path
+      with
+      | Error msg -> fail ("cascade.toml failed to materialize: " ^ msg)
+      | Ok rendered_json ->
+          let ic = open_in source.json_path in
+          let committed_json =
+            Fun.protect
+              ~finally:(fun () -> close_in_noerr ic)
+              (fun () ->
+                let len = in_channel_length ic in
+                let buf = Bytes.create len in
+                really_input ic buf 0 len;
+                Bytes.to_string buf)
+          in
+          check bool
+            "committed cascade.json matches cascade.toml materialization"
+            true
+            (String.equal rendered_json committed_json))
+
 let with_temp_cascade_json body =
   let tmp = Filename.temp_file "cascade-strategy-" ".json" in
   Fun.protect
@@ -325,6 +357,10 @@ let () =
             "unknown provider dropped (meta-guard)"
             `Quick
             test_unknown_provider_is_dropped;
+          test_case
+            "committed json matches toml materializer"
+            `Quick
+            test_committed_json_matches_toml_materializer;
           test_case
             "priority_tier label tiers normalize to model ids"
             `Quick

@@ -106,9 +106,20 @@ val apply_self_preservation :
 val reset_self_preservation_escape_state_for_test : unit -> unit
 (** Reset the self-preservation probe state. Test-only. *)
 
+val active_supervision_keeper_count :
+  Keeper_registry.registry_entry list -> int
+(** Count currently active keepers for self-preservation denominators. *)
+
 val set_restart_launch_noop_for_test : bool -> unit
 (** Test-only: when enabled, restart bookkeeping still runs but the
     replacement heartbeat/watchdog fibers are not forked. *)
+
+val restart_launch_noop_enabled_for_test : unit -> bool
+(** Test-only: inspect the restart-launch noop flag. *)
+
+val with_restart_launch_noop_for_test : (unit -> 'a) -> 'a
+(** Test-only: scoped restart-launch noop override. Nested and overlapping
+    scopes restore the prior flag only after the outer scope exits. *)
 
 (** {1 Liveness Recovery} *)
 

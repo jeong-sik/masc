@@ -42,10 +42,7 @@ let contains_substring haystack needle =
   needle_len = 0 || loop 0
 
 let with_restart_launch_noop f =
-  Sup.set_restart_launch_noop_for_test true;
-  Fun.protect
-    ~finally:(fun () -> Sup.set_restart_launch_noop_for_test false)
-    f
+  Sup.with_restart_launch_noop_for_test f
 
 (* ── Pure tests: backoff_delay ──────────────────────────── *)
 
@@ -289,6 +286,39 @@ let test_fresh_supervision_cohort_keepers_rereads_registry () =
       check string "entry was re-read from registry" "offline"
         (KSM.phase_to_string entry.phase)
   | _ -> fail "expected one fresh entry"
+
+let test_restart_launch_noop_scope_restores_nested_state () =
+  let previous = Sup.restart_launch_noop_enabled_for_test () in
+  Fun.protect
+    ~finally:(fun () -> Sup.set_restart_launch_noop_for_test previous)
+    (fun () ->
+      Sup.set_restart_launch_noop_for_test false;
+      Sup.with_restart_launch_noop_for_test (fun () ->
+          check bool "outer enables noop" true
+            (Sup.restart_launch_noop_enabled_for_test ());
+          Sup.with_restart_launch_noop_for_test (fun () ->
+              check bool "inner keeps noop" true
+                (Sup.restart_launch_noop_enabled_for_test ()));
+          check bool "outer remains enabled" true
+            (Sup.restart_launch_noop_enabled_for_test ()));
+      check bool "restored false" false
+        (Sup.restart_launch_noop_enabled_for_test ());
+      Sup.set_restart_launch_noop_for_test true;
+      Sup.with_restart_launch_noop_for_test (fun () ->
+          check bool "preserves prior true in scope" true
+            (Sup.restart_launch_noop_enabled_for_test ()));
+      check bool "restored prior true" true
+        (Sup.restart_launch_noop_enabled_for_test ()))
+
+let test_active_supervision_keeper_count_uses_current_entries () =
+  let entries = registered_entries [ "alpha"; "bravo" ] in
+  check int "initial active count" 2
+    (Sup.active_supervision_keeper_count entries);
+  Reg.unregister ~base_path:bp "bravo";
+  ignore (Reg.register_offline ~base_path:bp "bravo" (make_meta "bravo"));
+  let fresh_entries = Reg.all ~base_path:bp () in
+  check int "fresh active count excludes offline" 1
+    (Sup.active_supervision_keeper_count fresh_entries)
 
 let test_self_preservation_subset () =
   Eio_main.run @@ fun _env ->
@@ -1448,6 +1478,10 @@ let () =
         test_supervision_cohorts_large_custom_size_yields_between_only;
       test_case "fresh cohort entries are re-read by name" `Quick
         test_fresh_supervision_cohort_keepers_rereads_registry;
+      test_case "restart launch noop scoped restore" `Quick
+        test_restart_launch_noop_scope_restores_nested_state;
+      test_case "active count uses current entries" `Quick
+        test_active_supervision_keeper_count_uses_current_entries;
     ];
     "self_preservation_properties", [
       test_case "output subset of input" `Quick test_self_preservation_subset;

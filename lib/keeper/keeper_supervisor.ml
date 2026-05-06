@@ -174,10 +174,55 @@ let fork_stale_watchdog = Keeper_stale_watchdog.fork_stale_watchdog
 
 (* ── Supervised fiber launch ─────────────────────────────── *)
 
-let restart_launch_noop_for_test = Atomic.make false
+type restart_launch_noop_state = {
+  enabled : bool;
+  scope_depth : int;
+  scope_previous : bool;
+}
+
+let restart_launch_noop_for_test =
+  Atomic.make { enabled = false; scope_depth = 0; scope_previous = false }
+
+let update_restart_launch_noop_state f =
+  let rec loop () =
+    let current = Atomic.get restart_launch_noop_for_test in
+    let next = f current in
+    if not (Atomic.compare_and_set restart_launch_noop_for_test current next) then
+      loop ()
+  in
+  loop ()
 
 let set_restart_launch_noop_for_test enabled =
-  Atomic.set restart_launch_noop_for_test enabled
+  update_restart_launch_noop_state (fun state -> { state with enabled })
+
+let restart_launch_noop_enabled_for_test () =
+  (Atomic.get restart_launch_noop_for_test).enabled
+
+let with_restart_launch_noop_for_test f =
+  let enter () =
+    update_restart_launch_noop_state (fun state ->
+        if state.scope_depth = 0 then
+          {
+            enabled = true;
+            scope_depth = 1;
+            scope_previous = state.enabled;
+          }
+        else { state with enabled = true; scope_depth = state.scope_depth + 1 })
+  in
+  let leave () =
+    update_restart_launch_noop_state (fun state ->
+        if state.scope_depth <= 1 then
+          {
+            enabled = state.scope_previous;
+            scope_depth = 0;
+            scope_previous = false;
+          }
+        else { state with scope_depth = state.scope_depth - 1 })
+  in
+  enter ();
+  Fun.protect
+    ~finally:leave
+    f
 
 let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
     (reg : Keeper_registry.registry_entry) =
@@ -195,7 +240,7 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
          Prometheus.metric_keeper_supervisor_cleanup_failures
          ~labels:[("keeper", meta.name); ("site", "fiber_start_rejected")]
          ());
-  if Atomic.get restart_launch_noop_for_test then ()
+  if restart_launch_noop_enabled_for_test () then ()
   else begin
   fork_stale_watchdog ctx meta reg;
   (* Task 137: Inject bootstrap signal to ensure at least one warm-up turn runs
@@ -864,6 +909,13 @@ let reset_self_preservation_escape_state_for_test () =
   sp_escape_state.last_dominant_cohort <- "";
   sp_escape_state.consecutive_suppressions <- 0
 
+let active_supervision_keeper_count entries =
+  List_util.count_if
+    (fun (e : Keeper_registry.registry_entry) ->
+      e.phase = Keeper_state_machine.Running
+      || e.phase = Keeper_state_machine.Crashed)
+    entries
+
 (** Self-preservation gate. Suppresses restarts when a dominant failure
     cohort exceeds ratio threshold AND minimum candidate count.
     Bounded minority [stale_turn_timeout] cohorts are allowed through so
@@ -1412,9 +1464,9 @@ let sweep_and_recover (ctx : _ context) =
   ) !to_mark_dead;
   List.iter (cleanup_dead_tombstone ctx) !to_cleanup_dead;
   let active_count =
-    List_util.count_if (fun (e : Keeper_registry.registry_entry) ->
-      e.phase = Keeper_state_machine.Running || e.phase = Keeper_state_machine.Crashed
-    ) entries in
+    Keeper_registry.all ~base_path ()
+    |> active_supervision_keeper_count
+  in
   let restart_list =
     let keepers_dir =
       Filename.concat (Coord.masc_root_dir ctx.config) "keepers" in

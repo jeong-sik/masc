@@ -229,7 +229,7 @@
   `test/fixtures/goal_loop/row-corpus-discovery.external-claim.json` as
   `downloads_tar_gzip_compressed_strict_corpus_validation_sweep`.
 - [근거] `python3 scripts/goal_loop_completion_audit.py
-  /tmp/goal-loop-13266-b367-status-audit.json --structured-id-triage
+  /tmp/goal-loop-status-current.json --structured-id-triage
   test/fixtures/goal_loop/structured-id-triage.external-claim.json
   --row-corpus-discovery
   test/fixtures/goal_loop/row-corpus-discovery.external-claim.json
@@ -237,9 +237,9 @@
   test/fixtures/goal_loop/prompt-closeout-checklist.external-claim.json
   --source-row-candidate-inventory
   test/fixtures/goal_loop/source-row-candidate-inventory.external-claim.json
-  --require-complete --format text` checked at 2026-05-06T17:16:07+09:00,
-  confidence High: exits non-zero with two closeout blockers:
-  `strict_row_level_catalog_complete` and
+  --require-complete --format text` checked at 2026-05-06T19:49:08+09:00,
+  confidence High: exits non-zero with three closeout blockers:
+  `strict_row_level_catalog_complete`, `post_act_verify_complete`, and
   `prompt_requirements_closeout_complete`. The strict row evidence directly
   records the source-row candidate inventory as 132/206 and validates the 5/7
   source-file coverage split with no unaccounted prompt source files. The 7
@@ -252,8 +252,8 @@
   `blocking_future_date_claims_total=3`, and
   `source_currentness_current=false`. The
   checklist maps all 21 prompt requirements to concrete artifacts and blockers
-  across all 12 prompt source documents: 5 `PASS`, 14 `PARTIAL`, and 2
-  `BLOCKED` requirements, with all 16 non-PASS rows carrying valid GitHub issue
+  across all 12 prompt source documents: 7 `PASS`, 12 `PARTIAL`, and 2
+  `BLOCKED` requirements, with all 14 non-PASS rows carrying valid GitHub issue
   tracking refs. The prompt checklist also validates that all `artifact_refs`
   resolve to repo-local files after optional `#...` anchors are stripped; user
   local paths, path escapes, and missing artifact files make the checklist
@@ -268,15 +268,16 @@
   test/fixtures/goal_loop/prompt-closeout-checklist.external-claim.json
   --source-row-candidate-inventory
   test/fixtures/goal_loop/source-row-candidate-inventory.external-claim.json
-  --require-complete --format text` checked at 2026-05-06T16:03:11+09:00,
-  confidence High: exits non-zero with two closeout blockers:
-  `strict_row_level_catalog_complete` and
+  --require-complete --format text` checked at 2026-05-06T19:49:08+09:00,
+  confidence High: exits non-zero with three closeout blockers:
+  `strict_row_level_catalog_complete`, `post_act_verify_complete`, and
   `prompt_requirements_closeout_complete`. The first blocker proves the real
-  strict 206-row corpus is still missing. The second blocker prevents the
-  prompt objective from being marked complete while the recorded checklist
-  still has 14 `PARTIAL` and 2 `BLOCKED` prompt requirements. The
+  strict 206-row corpus is still missing. The second blocker preserves the
+  missing post-ACT live Verify evidence. The third blocker prevents the prompt
+  objective from being marked complete while the recorded checklist still has
+  12 `PARTIAL` and 2 `BLOCKED` prompt requirements. The
   `prompt_to_artifact_checklist_recorded` criterion remains `PASS`, with 21
-  unique requirement IDs, 12 unique issue refs, and no missing or invalid
+  unique requirement IDs, 11 unique issue refs, and no missing or invalid
   tracking refs; recording the map is separate from satisfying every mapped
   prompt requirement.
 - [근거] `gh issue view <issue> --repo jeong-sik/masc-mcp --json
@@ -286,7 +287,7 @@
   tracking issue refs resolve to open,
   label-free GitHub issues.
 - [근거] `python3 test/test_goal_loop_completion_audit.py` checked at
-  2026-05-06T16:03:11+09:00, confidence High: the completion audit accepts
+  2026-05-06T19:49:08+09:00, confidence High: the completion audit accepts
   optional `--strict-row-corpus` and `--source-row-candidate-inventory`
   artifacts, validates catalog identity and internal totals, and still does not
   use either artifact as a proxy for completion. A synthetic valid 206-row
@@ -396,13 +397,13 @@ GitHub issue tracking ref.
 | 2-1 `observe.yml` Prometheus/Grafana metrics | `observe_goal_loop_logs.py`, fixture metrics, audit response, Observe metric contract, alerts, Grafana dashboard, validator and tests | PASS for the required Observe metric/alert/dashboard contract coverage. |
 | 2-2 `observe_logs.py` pattern parser | `scripts/observe_goal_loop_logs.py`, `test/test_observe_goal_loop_logs.py` | PASS for deterministic parser coverage. |
 | 3-1 `orient.ml` audit comparison engine | `scripts/orient_goal_loop_logs.py`, `audit-corpus.external-claim.json`, `structured-id-triage.external-claim.json` | PARTIAL: engine and triage exist; only 19/206 strict rows are itemized. |
-| 3-2 Orient dashboard counts | `scripts/goal_loop_status.py`, `docs/examples/goal-loop-fixture.md` | PARTIAL: CLI JSON/text exists; operator dashboard panel is not wired. |
+| 3-2 Orient dashboard counts | `scripts/goal_loop_status.py`, `dashboard/src/goal-loop-status.ts`, `dashboard/src/components/goal-loop-panel.ts`, `lib/dashboard/dashboard_goal_loop.ml` | PASS: CLI JSON/text and the operator dashboard panel are wired by merged PR #13655. |
 | 4-1 priority decision algorithm | `scripts/decide_goal_loop_findings.py`, `test/test_decide_goal_loop_findings.py` | PASS for fixture-based decision ranking. |
 | 4-2 weekly ACT priority queue | `act-map.startup.json`, `known-prs.startup.json`, `validate_goal_loop_act_map.py` | PARTIAL: reference integrity exists; SLA ownership workflow is not automatic. |
 | 5 ACT checklist/PR proof | linked PR references in `act-map.startup.json` plus ACT validation | PARTIAL: known ACTs are mapped; not every still-present row has a row-level ACT because 187 rows are missing. |
 | 6-1 `verify.yml` unit/regression/TLA/log/metric/orient gates | `scripts/verify_goal_loop_logs.py`, `goal_loop_completion_audit.py`, focused tests | PARTIAL: closeout verifier exists; TLA and production metric gates are not fully implemented. |
 | 6-2 Verify PASS/FAIL branch | `verify.fail.json`, post-ACT live Verify snapshot, completion audit criteria | PARTIAL: branch semantics exist; complete corpus Verify is blocked. |
-| 7 GOAL LOOP dashboard | `goal_loop_status.py` aggregate output | PARTIAL: CLI status exists; UI dashboard integration remains open. |
+| 7 GOAL LOOP dashboard | `goal_loop_status.py` aggregate output plus `dashboard/src/api/goal-loop.ts`, `dashboard/src/components/goal-loop-panel.ts`, and `lib/server/server_routes_http_routes_dashboard.ml` | PASS: UI dashboard integration is merged by PR #13655. |
 | 8 anti-stagnation rules | ACT reference guard and completion audit blocker | PARTIAL: reference integrity exists; SLA timers/escalation are not implemented. |
 | 9 expected convergence after week/month | completion audit and #13265 | BLOCKED: no measured convergence claim is valid without the strict corpus and live SLO proof. |
 | Full 206-row strict corpus | `row-corpus-discovery.external-claim.json`, `strict-row-corpus-contract.json`, `--strict-row-corpus` path | BLOCKED: 24 searches/inventories checked; `FULL_ROW_CORPUS_NOT_FOUND`, 19/206 strict rows, 187 strict rows missing. The source-doc explicit-row extractor finds only 132/206 candidate rows across 5 source files, with 7 checked prompt files yielding zero explicit candidates, and cannot close the strict corpus gap. Those 7 no-row files contain 897 unstructured requirement markers that remain non-corpus evidence. Candidate strict rows must also cite catalog external sources and line refs within catalog line counts. |
@@ -619,10 +620,16 @@ system health, next action, and counts.
   consistency findings.
 - `docs/examples/goal-loop-fixture.md` documents text and JSON status replay.
 
-**Status**: **PARTIAL**.
+**Status**: **PASS**.
 
-The dashboard data shape exists as CLI JSON/text. It is not yet integrated into
-the operator dashboard as a real-time panel.
+The dashboard data shape exists as CLI JSON/text and is integrated into the
+operator dashboard via #13655. [근거] `gh pr view 13655 --json
+state,mergedAt,mergeCommit,headRefOid` checked 2026-05-06: `state=MERGED`,
+`mergedAt=2026-05-06T10:27:03Z`, merge commit
+`969f97ce22a8487d89b80fe08c0d7602d46e10f5`; repo-local files
+`dashboard/src/goal-loop-status.ts`, `dashboard/src/components/goal-loop-panel.ts`,
+`lib/dashboard/dashboard_goal_loop.ml`, and
+`lib/server/server_routes_http_routes_dashboard.ml` are present. 신뢰도: High.
 
 ### 8. Anti-Stagnation
 
@@ -684,9 +691,7 @@ No convergence claim is valid yet. The only safe current statement is:
    runtime restarts, using `--post-act-verify`, accepted live-runtime
    `--evidence-kind`, concrete `--evidence-source`,
    `--evidence-window-start`, `--evidence-window-end`, and `--checked-at`.
-5. Wire `goal_loop_status.py` JSON into the operator dashboard only after the
-   fixture's critical state is preserved in UI tests.
-6. Add SLA state for anti-stagnation after ACT coverage is complete; otherwise
+5. Add SLA state for anti-stagnation after ACT coverage is complete; otherwise
    timers will only escalate known missing work without changing recovery.
 
 ## Do-Not-Close Rule

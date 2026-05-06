@@ -95,6 +95,12 @@ describe('mission keeper runtime helpers', () => {
     expect(keeperRuntimeBlockerLabel('no_tool_capable_provider')).toBe('도구 실행 Provider 없음')
     expect(keeperRuntimeBlockerLabel('fiber_unresolved')).toBe('Fiber 미해결')
     expect(keeperRuntimeBlockerLabel('stale_turn_timeout')).toBe('오래된 턴 만료')
+    expect(keeperRuntimeBlockerLabel('stale_termination_storm')).toBe('Stale 종료 폭주')
+    expect(keeperRuntimeBlockerLabel('heartbeat_failures')).toBe('하트비트 실패')
+    expect(keeperRuntimeBlockerLabel('turn_failures')).toBe('턴 실패 반복')
+    expect(keeperRuntimeBlockerLabel('provider_runtime_error')).toBe('Provider 런타임 오류')
+    expect(keeperRuntimeBlockerLabel('tool_required_unsatisfied')).toBe('필수 도구 미충족')
+    expect(keeperRuntimeBlockerLabel('exception')).toBe('런타임 예외')
   })
 
   it('turns raw backend blocker codes into operator-readable hints', () => {
@@ -107,6 +113,19 @@ describe('mission keeper runtime helpers', () => {
 
     expect(keeperRuntimeHint(keeper)).toBe(
       '요구 도구를 실행할 수 있는 provider가 없어 라우팅 또는 tool surface 확인이 필요합니다.',
+    )
+  })
+
+  it('turns registry failure blocker codes into operator-readable hints', () => {
+    const keeper = {
+      name: 'stormed',
+      status: 'idle',
+      runtime_blocker_class: 'stale_termination_storm',
+      runtime_blocker_summary: 'stale_termination_storm',
+    } as Keeper
+
+    expect(keeperRuntimeHint(keeper)).toBe(
+      'Stale watchdog 종료가 반복되어 restart 전에 원인 확인이 필요합니다.',
     )
   })
 

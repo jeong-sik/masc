@@ -242,6 +242,10 @@ const runtimeBlockerLabels = {
   tool_required_unsatisfied: '필수 도구 미충족',
   fiber_unresolved: 'Fiber 미해결',
   stale_turn_timeout: '오래된 턴 만료',
+  stale_termination_storm: 'Stale 종료 폭주',
+  heartbeat_failures: '하트비트 실패',
+  turn_failures: '턴 실패 반복',
+  exception: '런타임 예외',
 } satisfies Record<KeeperRuntimeBlockerClass, string>
 
 export function keeperRuntimeBlockerLabel(
@@ -298,6 +302,18 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
   }
   if (blockerClass === 'stale_turn_timeout') {
     return '오래된 턴 제한 시간이 만료되어 최신 실행 상태 확인이 필요합니다.'
+  }
+  if (blockerClass === 'stale_termination_storm') {
+    return 'Stale watchdog 종료가 반복되어 restart 전에 원인 확인이 필요합니다.'
+  }
+  if (blockerClass === 'heartbeat_failures') {
+    return '하트비트 실패가 누적되어 keeper 생존 상태 확인이 필요합니다.'
+  }
+  if (blockerClass === 'turn_failures') {
+    return '턴 실패가 반복되어 최근 실행 오류 확인이 필요합니다.'
+  }
+  if (blockerClass === 'exception') {
+    return 'Keeper 런타임 예외가 기록되어 로그와 최근 turn 상태 확인이 필요합니다.'
   }
   return null
 }

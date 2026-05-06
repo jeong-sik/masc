@@ -278,9 +278,59 @@ let runtime_blocker_surface_of_legacy_string reason cls =
   | _ ->
       runtime_blocker_surface_of_typed_class ~summary:reason cls
 
+let stale_kill_class_summary (kill_class : Keeper_registry.stale_kill_class) =
+  match kill_class with
+  | Keeper_registry.Idle_turn { stall_seconds } ->
+      Printf.sprintf
+        "idle_turn: no completed turn for %.0fs; stale watchdog stopped the keeper before restart."
+        stall_seconds
+  | Keeper_registry.In_turn_hung { active_seconds; timeout_threshold } ->
+      Printf.sprintf
+        "in_turn_hung: active turn ran for %.0fs past the %.0fs timeout; stale watchdog stopped the keeper."
+        active_seconds timeout_threshold
+  | Keeper_registry.Noop_failure_loop { noop_count } ->
+      Printf.sprintf
+        "noop_failure_loop: %d consecutive turn(s) produced no tool calls; stale watchdog stopped the keeper."
+        noop_count
+
 let runtime_blocker_surface_of_failure_reason
     (reason : Keeper_registry.failure_reason) =
   match reason with
+  | Keeper_registry.Heartbeat_consecutive_failures count ->
+      Some
+        {
+          blocker_class = "heartbeat_failures";
+          summary =
+            Printf.sprintf
+              "Heartbeat failed %d consecutive cycle(s); supervisor recovery is required."
+              count;
+          continue_gate = false;
+        }
+  | Keeper_registry.Turn_consecutive_failures count ->
+      Some
+        {
+          blocker_class = "turn_failures";
+          summary =
+            Printf.sprintf
+              "Keeper turn failed %d consecutive cycle(s); inspect the last runtime error before retry."
+              count;
+          continue_gate = false;
+        }
+  | Keeper_registry.Stale_turn_timeout kill_class ->
+      Some
+        (runtime_blocker_surface_of_typed_class
+           ~summary:(stale_kill_class_summary kill_class)
+           Stale_turn_timeout)
+  | Keeper_registry.Stale_termination_storm { count } ->
+      Some
+        {
+          blocker_class = "stale_termination_storm";
+          summary =
+            Printf.sprintf
+              "Stale watchdog terminated %d keeper cycle(s) in the storm window; operator investigation is required before restart."
+              count;
+          continue_gate = false;
+        }
   | Keeper_registry.Oas_timeout_budget_loop { count } ->
       Some
         (runtime_blocker_surface_of_typed_class
@@ -317,7 +367,19 @@ let runtime_blocker_surface_of_failure_reason
           summary = detail;
           continue_gate = true;
         }
-  | _ -> None
+  | Keeper_registry.Fiber_unresolved ->
+      Some
+        (runtime_blocker_surface_of_typed_class
+           ~summary:
+             "Keeper fiber did not resolve a terminal outcome; supervisor cleanup is required."
+           Fiber_unresolved)
+  | Keeper_registry.Exception detail ->
+      Some
+        {
+          blocker_class = "exception";
+          summary = Printf.sprintf "Keeper runtime exception: %s" detail;
+          continue_gate = false;
+        }
 
 let proactive_runtime_reason_is_current (meta : keeper_meta) =
   let proactive_ts = meta.runtime.proactive_rt.last_ts in

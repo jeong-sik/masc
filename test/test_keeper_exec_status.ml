@@ -686,6 +686,68 @@ let test_runtime_surface_suppresses_stale_proactive_timeout_reason () =
   check (option string) "stale proactive blocker class suppressed" None
     (runtime |> member "runtime_blocker_class" |> json_string_opt)
 
+let test_runtime_surface_maps_stale_watchdog_failure_reason () =
+  KR.clear ();
+  let meta = make_meta ~name:"runtime-stale-watchdog-test" () in
+  let config =
+    Coord.default_config "/tmp/test-keeper-exec-status-stale-watchdog"
+  in
+  ignore (KR.register ~base_path:config.base_path meta.name meta);
+  KR.set_failure_reason ~base_path:config.base_path meta.name
+    (Some
+       (KR.Stale_turn_timeout
+          (KR.In_turn_hung
+             { active_seconds = 720.0; timeout_threshold = 600.0 })));
+  let runtime = KSB.runtime_surface_json config meta in
+  let open Yojson.Safe.Util in
+  check string "runtime blocker class" "stale_turn_timeout"
+    (runtime |> member "runtime_blocker_class" |> to_string);
+  let summary = runtime |> member "runtime_blocker_summary" |> to_string in
+  check bool "summary preserves stale kill subclass" true
+    (has_substring summary "in_turn_hung");
+  check bool "runtime attention needed" true
+    (runtime |> member "needs_attention" |> to_bool);
+  check string "runtime next action" "inspect_runtime_blocker"
+    (runtime |> member "next_human_action" |> to_string)
+
+let test_runtime_surface_maps_stale_termination_storm_failure_reason () =
+  KR.clear ();
+  let meta = make_meta ~name:"runtime-stale-storm-test" () in
+  let config =
+    Coord.default_config "/tmp/test-keeper-exec-status-stale-storm"
+  in
+  ignore (KR.register ~base_path:config.base_path meta.name meta);
+  KR.set_failure_reason ~base_path:config.base_path meta.name
+    (Some (KR.Stale_termination_storm { count = 8 }));
+  let runtime = KSB.runtime_surface_json config meta in
+  let open Yojson.Safe.Util in
+  check string "runtime blocker class" "stale_termination_storm"
+    (runtime |> member "runtime_blocker_class" |> to_string);
+  let summary = runtime |> member "runtime_blocker_summary" |> to_string in
+  check bool "summary preserves storm count" true
+    (has_substring summary "8 keeper cycle");
+  check bool "runtime attention needed" true
+    (runtime |> member "needs_attention" |> to_bool);
+  check string "runtime attention reason" "runtime_blocked"
+    (runtime |> member "attention_reason" |> to_string)
+
+let test_runtime_surface_maps_heartbeat_failure_reason () =
+  KR.clear ();
+  let meta = make_meta ~name:"runtime-heartbeat-failure-test" () in
+  let config =
+    Coord.default_config "/tmp/test-keeper-exec-status-heartbeat-failure"
+  in
+  ignore (KR.register ~base_path:config.base_path meta.name meta);
+  KR.set_failure_reason ~base_path:config.base_path meta.name
+    (Some (KR.Heartbeat_consecutive_failures 3));
+  let runtime = KSB.runtime_surface_json config meta in
+  let open Yojson.Safe.Util in
+  check string "runtime blocker class" "heartbeat_failures"
+    (runtime |> member "runtime_blocker_class" |> to_string);
+  let summary = runtime |> member "runtime_blocker_summary" |> to_string in
+  check bool "summary preserves count" true
+    (has_substring summary "3 consecutive")
+
 let test_runtime_surface_exposes_social_model_resolution_fields () =
   KR.clear ();
   let base = make_meta ~name:"runtime-social-model-test" () in
@@ -869,6 +931,14 @@ let () =
           test_case "runtime surface suppresses stale proactive timeout blocker"
             `Quick
             test_runtime_surface_suppresses_stale_proactive_timeout_reason;
+          test_case "runtime surface maps stale watchdog failure reason"
+            `Quick
+            test_runtime_surface_maps_stale_watchdog_failure_reason;
+          test_case "runtime surface maps stale termination storm failure reason"
+            `Quick
+            test_runtime_surface_maps_stale_termination_storm_failure_reason;
+          test_case "runtime surface maps heartbeat failure reason" `Quick
+            test_runtime_surface_maps_heartbeat_failure_reason;
           test_case "runtime surface exposes social model fields" `Quick
             test_runtime_surface_exposes_social_model_resolution_fields;
           test_case "runtime surface exposes model display labels" `Quick

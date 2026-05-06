@@ -202,7 +202,9 @@ let load_tail_lines path ~max_lines =
 
 let append t json =
   let mutex = Atomic.get t.mutex in
-  Eio.Mutex.use_rw ~protect:false mutex (fun () ->
+  (* This exclusive lock serializes file appends without using ~protect:false,
+     so retry paths do not poison the shared mutex after IO failures. *)
+  Eio.Mutex.use_rw mutex (fun () ->
     let path = today_path t in
     Fs_compat.append_jsonl path json)
 

@@ -331,6 +331,19 @@ let rec add_routes ~sw ~clock router =
          in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/nudges" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let limit =
+           Server_utils.int_query_param req "limit" ~default:50
+           |> Server_utils.clamp ~min_v:1 ~max_v:200
+         in
+         let json =
+           Dashboard_operator_nudges.json
+             ~config:state.Mcp_server.room_config ~limit ()
+         in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/goal-loop/status" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json =

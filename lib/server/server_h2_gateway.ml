@@ -569,6 +569,19 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             in
             h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
 
+      | `GET, "/api/v1/dashboard/nudges" ->
+          with_server_state h2_reqd (fun state ->
+            let limit =
+              Server_utils.int_query_param httpun_request "limit" ~default:50
+              |> Server_utils.clamp ~min_v:1 ~max_v:200
+            in
+            let json =
+              Dashboard_operator_nudges.json
+                ~config:state.Mcp_server.room_config ~limit ()
+            in
+            h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+              ~extra_headers:cors)
+
       | `GET, "/api/v1/dashboard/config" ->
           let json = Env_config_introspect.to_json () in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors

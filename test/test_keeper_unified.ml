@@ -3641,6 +3641,43 @@ let test_append_decision_record_classifies_legacy_worktree_error () =
       check string "tool contract unknown for error path" "unknown"
         (json |> member "tool_contract" |> member "requirement" |> to_string))
 
+let test_append_decision_record_preserves_no_result_skipped_outcome () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      UM.append_decision_record
+        ~config
+        ~meta:minimal_meta
+        ~observation:base_observation
+        ~latency_ms:11
+        ~outcome:"skipped"
+        ~terminal_reason:(Masc_mcp.Keeper_turn_terminal.of_code "ollama_saturated")
+        ();
+      let json =
+        read_jsonl_line (Keeper_types.keeper_decision_log_path config minimal_meta.name)
+      in
+      let open Yojson.Safe.Util in
+      let telemetry = json |> member "telemetry" in
+      check string "top-level skipped outcome persisted" "skipped"
+        (json |> member "outcome" |> to_string);
+      check string "telemetry skipped outcome persisted" "skipped"
+        (telemetry |> member "outcome" |> to_string);
+      check string "skipped telemetry category" "skipped"
+        (telemetry |> member "error_category" |> to_string);
+      check string "skipped telemetry coverage stage" "pre_dispatch"
+        (telemetry |> member "coverage_stage" |> to_string);
+      check string "skipped telemetry coverage reason" "skipped_turn"
+        (telemetry |> member "coverage_reason" |> to_string);
+      check string "terminal code alias" "ollama_saturated"
+        (json |> member "terminal_reason_code" |> to_string);
+      check int "duration alias persisted" 11
+        (json |> member "duration_ms" |> to_int))
+
 let test_run_keeper_cycle_skips_non_executable_phase () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -3872,6 +3909,9 @@ let test_run_keeper_cycle_records_trajectory_source_contract () =
   check bool "saturation skip has durable terminal reason" true
     (source_file_contains "lib/keeper/keeper_unified_turn.ml"
        "~terminal_reason_code:\"ollama_saturated\"");
+  check bool "saturation skip is not recorded as error" true
+    (source_file_contains "lib/keeper/keeper_unified_turn.ml"
+       "~activity_kind:\"keeper.turn_skipped\"");
   check bool "livelock block has durable terminal reason" true
     (source_file_contains "lib/keeper/keeper_unified_turn.ml"
        "Printf.sprintf \"turn_livelock:%s\"")
@@ -7410,6 +7450,8 @@ let () =
 	            test_append_decision_record_nulls_unreported_usage;
 	          test_case "decision record classifies worktree blocker" `Quick
 	            test_append_decision_record_classifies_legacy_worktree_error;
+	          test_case "decision record preserves no-result skipped outcome" `Quick
+	            test_append_decision_record_preserves_no_result_skipped_outcome;
 	          test_case "social fields" `Quick
 	            test_metrics_persist_social_state_fields;
           test_case "failure response" `Quick test_metrics_failure_response;

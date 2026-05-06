@@ -346,6 +346,47 @@ let coverage_stage_of_result
   then None
   else Some "oas"
 
+let coverage_stage_of_no_result_outcome = function
+  | "skipped" | "cancelled" -> "pre_dispatch"
+  | _ -> "unknown"
+
+let coverage_reason_of_no_result_outcome = function
+  | "skipped" -> "skipped_turn"
+  | "cancelled" -> "cancelled_turn"
+  | "partial" -> "partial_turn"
+  | "error" -> "error_turn"
+  | _ -> "no_run_result"
+
+let error_category_of_no_result_outcome ~outcome ~error =
+  match outcome with
+  | "error" | "partial" -> (
+      match error with
+      | Some e when String.length e > 0 ->
+          let e_lower = String.lowercase_ascii e in
+          let starts_with prefix =
+            String.starts_with e_lower ~prefix
+          in
+          let contains needle =
+            string_contains_substring ~needle e_lower
+          in
+          (* starts_with checks first (more specific), then contains *)
+          if starts_with "invalid request" then "invalid_request"
+          else if starts_with "network error" then "network_error"
+          else if starts_with "internal error" then "internal_error"
+          else if starts_with "input to" then "input_budget_exceeded"
+          (* contains checks second (broader, order matters) *)
+          else if contains "turn outcome ambiguous" then "ambiguous_side_effect"
+          else if contains "connection_failure"
+                  || contains "connection refused" then "network_error"
+          else if contains "timeout" || contains "timed out" then "timeout"
+          else if contains "context length"
+                  || contains "token budget" then "input_budget_exceeded"
+          else "other"
+      | _ -> "unknown")
+  | "skipped" -> "skipped"
+  | "cancelled" -> "cancelled"
+  | _ -> "not_applicable"
+
 let has_visible_tool_signal (result : Keeper_agent_run.run_result) : bool =
   has_substantive_tool_calls result.tools_used
   || Option.is_some (visible_run_validation result)
@@ -956,45 +997,26 @@ let append_decision_record
                   | None -> `Null );
               ] @ usage_fields @ thinking_enabled_field @ inference_fields @ cascade_fields @ tool_surface_fields)
           | None ->
-              (* Partial telemetry for error turns: record what we know.
-                 Without this, 90%+ of turns have no telemetry at all. *)
+              (* Partial telemetry for turns without a run_result: record
+                 what we know without collapsing skipped/cancelled/partial
+                 outcomes into telemetry.outcome=error. *)
               let cascade_models =
                 Keeper_model_labels.configured_model_labels_of_meta meta
               in
               let error_category =
-                match error with
-                | Some e when String.length e > 0 ->
-                  let e_lower = String.lowercase_ascii e in
-                  let starts_with prefix =
-                    String.starts_with e_lower ~prefix
-                  in
-                  let contains needle =
-                    string_contains_substring ~needle e_lower
-                  in
-                  (* starts_with checks first (more specific), then contains *)
-                  if starts_with "invalid request" then "invalid_request"
-                  else if starts_with "network error" then "network_error"
-                  else if starts_with "internal error" then "internal_error"
-                  else if starts_with "input to" then "input_budget_exceeded"
-                  (* contains checks second (broader, order matters) *)
-                  else if contains "turn outcome ambiguous" then "ambiguous_side_effect"
-                  else if contains "connection_failure"
-                          || contains "connection refused" then "network_error"
-                  else if contains "timeout" || contains "timed out" then "timeout"
-                  else if contains "context length"
-                          || contains "token budget" then "input_budget_exceeded"
-                  else "other"
-                | _ -> "unknown"
+                error_category_of_no_result_outcome ~outcome ~error
               in
               `Assoc [
                 ("cascade_name", `String meta.cascade_name);
                 ("candidate_models", `List (List.map (fun s -> `String s) cascade_models));
                 ("error_category", `String error_category);
-                ("outcome", `String "error");
+                ("outcome", `String outcome);
                 ("usage_reported", `Bool false);
                 ("telemetry_reported", `Bool false);
-                ("coverage_stage", `String "unknown");
-                ("coverage_reason", `String "error_turn");
+                ( "coverage_stage",
+                  `String (coverage_stage_of_no_result_outcome outcome) );
+                ( "coverage_reason",
+                  `String (coverage_reason_of_no_result_outcome outcome) );
               ] );
       ]
       @ social_fields)

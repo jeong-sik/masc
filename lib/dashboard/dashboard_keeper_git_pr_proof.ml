@@ -11,7 +11,6 @@ type stage_acc =
   ; successful_keepers : (string, unit) Hashtbl.t
   ; failed_keepers : (string, unit) Hashtbl.t
   ; latest_ts : float option ref
-  ; sample_failure : string option ref
   }
 
 let stage_specs =
@@ -77,7 +76,6 @@ let input_text record =
 
 let record_success = Dashboard_keeper_tool_failure_proof.tool_success_of_record
 let output_text = Dashboard_keeper_tool_failure_proof.output_text
-let compact_text = Dashboard_keeper_tool_failure_proof.compact_text
 let read_records = Dashboard_keeper_tool_failure_proof.read_records
 let string_list_json values = `List (List.map (fun value -> `String value) values)
 
@@ -115,7 +113,6 @@ let new_stage spec =
   ; successful_keepers = Hashtbl.create 8
   ; failed_keepers = Hashtbl.create 8
   ; latest_ts = ref None
-  ; sample_failure = ref None
   }
 ;;
 
@@ -151,21 +148,9 @@ let stage_ids_for_record record =
   if
     docker
     && git_creds
-    && (String.equal tool "keeper_pr_create"
-        || contains_substring input "gh pr create"
-        || contains_substring input "pr create --draft")
+    && String.equal tool "keeper_pr_create"
   then stages := "pr_create" :: !stages;
   List.rev !stages
-;;
-
-let record_failure_sample record =
-  let output = output_text record in
-  let category =
-    Dashboard_http_tool_quality.classify_failure_output output
-    |> compact_text ~limit:120
-  in
-  let sample = compact_text output in
-  if String.trim sample = "" then category else Printf.sprintf "%s: %s" category sample
 ;;
 
 let add_record stages record stage_id =
@@ -179,9 +164,7 @@ let add_record stages record stage_id =
       add_set stage.successful_keepers keeper)
     else (
       incr stage.failures;
-      add_set stage.failed_keepers keeper;
-      if !(stage.sample_failure) = None
-      then stage.sample_failure := Some (record_failure_sample record));
+      add_set stage.failed_keepers keeper);
     Option.iter (update_latest stage.latest_ts) (float_field_opt record "ts")
   | _ -> ()
 ;;
@@ -204,10 +187,6 @@ let stage_json stage =
      ; "keepers", string_list_json (sorted_set stage.keepers)
      ; "successful_keepers", string_list_json (sorted_set stage.successful_keepers)
      ; "failed_keepers", string_list_json (sorted_set stage.failed_keepers)
-     ; ( "sample_failure"
-       , match !(stage.sample_failure) with
-         | Some sample -> `String sample
-         | None -> `Null )
      ]
      @ latest_fields)
 ;;

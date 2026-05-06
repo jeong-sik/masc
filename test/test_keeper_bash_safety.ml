@@ -508,6 +508,38 @@ let test_docker_blocks_chained_gh_pr_create () =
   | None ->
       Alcotest.fail ("expected chained gh pr create error json, got: " ^ raw)
 
+let test_docker_blocks_newline_gh_pr_create () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_docker_meta "pr-create-newline-block" in
+  let playground =
+    Filename.concat base_path (playground_path_of meta.name)
+  in
+  ensure_dir playground;
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+           [ ( "cmd"
+             , `String
+                 "echo ok\ngh pr create --draft --title proof"
+             )
+           ; ("cwd", `String playground)
+           ])
+      ()
+  in
+  match parse_error_field raw with
+  | Some err ->
+      Alcotest.(check string) "newline gh pr create blocked"
+        "gh_pr_create_requires_keeper_pr_create" err
+  | None ->
+      Alcotest.fail ("expected newline gh pr create error json, got: " ^ raw)
+
 let test_docker_blocks_env_wrapped_gh_pr_create () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
@@ -925,6 +957,8 @@ let () =
         test_docker_blocks_raw_gh_pr_create;
       Alcotest.test_case "docker blocks chained gh pr create" `Quick
         test_docker_blocks_chained_gh_pr_create;
+      Alcotest.test_case "docker blocks newline gh pr create" `Quick
+        test_docker_blocks_newline_gh_pr_create;
       Alcotest.test_case "docker blocks env-wrapped gh pr create" `Quick
         test_docker_blocks_env_wrapped_gh_pr_create;
       Alcotest.test_case "docker blocks command-wrapped gh pr create" `Quick

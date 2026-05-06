@@ -80,9 +80,9 @@ let shell_words_with_boundaries cmd =
         start_word_if_needed ();
         quote_state := Double_quote;
         loop (i + 1) acc
-      | No_quote, (' ' | '\t' | '\n' | '\r') ->
+      | No_quote, (' ' | '\t') ->
         loop (i + 1) (push_word acc)
-      | No_quote, (';' | '&' | '|') ->
+      | No_quote, ('\n' | '\r' | ';' | '&' | '|') ->
         let acc = push_word acc in
         at_command_start := true;
         loop (i + 1) acc
@@ -218,8 +218,6 @@ let handle_keeper_bash
   then
     error_json
       "MASC_KEEPER_SANDBOX_HARD_MODE requires sandbox_profile=docker"
-  else if cmd_contains_gh_pr_create cmd
-  then gh_pr_create_block ()
 
   else begin
     (* Tick 22: dark-launch shadow logger.  Runs

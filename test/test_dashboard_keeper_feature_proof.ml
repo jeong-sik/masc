@@ -18,6 +18,16 @@ let tmpdir prefix =
   Fs_compat.mkdir_p dir;
   dir
 
+let rec cleanup_dir path =
+  match Unix.lstat path with
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+    Array.iter
+      (fun name -> cleanup_dir (Filename.concat path name))
+      (Sys.readdir path);
+    Unix.rmdir path
+  | _ -> Unix.unlink path
+  | exception Unix.Unix_error _ -> ()
+
 let with_store f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -29,7 +39,7 @@ let with_store f =
   Fun.protect
     ~finally:(fun () ->
       Keeper_tool_call_log.reset_for_testing ();
-      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote base_dir))))
+      cleanup_dir base_dir)
     (fun () -> f config)
 
 let make_meta ?(name = "alpha") () =
@@ -223,6 +233,10 @@ let keeper_evidence id json =
 let json_string_values field json =
   Yojson.Safe.Util.(json |> member field |> to_list)
   |> List.filter_map Yojson.Safe.Util.to_string_option
+
+let json_has_field field = function
+  | `Assoc fields -> List.exists (fun (name, _) -> String.equal name field) fields
+  | _ -> false
 
 let keeper_evidence_tool tool_name id json =
   keeper_evidence id json
@@ -435,7 +449,7 @@ let test_docker_git_pr_workflow_reports_partial_chain () =
   log_docker_bash
     "git clone https://github.com/jeong-sik/masc-mcp.git /workspace/masc-mcp";
   log_docker_bash "git checkout -b fix/keeper-proof";
-  log_docker_bash "git commit -m keeper-proof";
+  log_docker_bash "git commit -m 'mention gh pr create'";
   log_docker_bash ~success:false "git push origin fix/keeper-proof";
   log_tool "keeper_pr_create";
   let json =
@@ -463,6 +477,11 @@ let test_docker_git_pr_workflow_reports_partial_chain () =
     | None -> 0
   in
   check int "push failure evidence is retained" 1 push_failures;
+  (match keeper_evidence_stage "push" json with
+   | Some row ->
+     check bool "public push stage omits raw failure sample" false
+       (json_has_field "sample_failure" row)
+   | None -> fail "missing push stage evidence");
   check bool "PR creation remains missing" false (stage_passed "pr_create");
   check (list string) "workflow evidence is keeper-originated"
     ["alpha"]

@@ -331,11 +331,50 @@ let read_file_opt path =
   try Some (In_channel.with_open_bin path In_channel.input_all)
   with Sys_error _ -> None
 
+let safe_file_exists path =
+  try Sys.file_exists path with Sys_error _ -> false
+
+let safe_is_directory path =
+  try Sys.is_directory path with Sys_error _ -> false
+
+let normalize_lexical_path path =
+  let absolute = String.starts_with ~prefix:"/" path in
+  let segments =
+    String.split_on_char '/' path
+    |> List.filter (fun segment ->
+         not (String.equal segment "" || String.equal segment "."))
+  in
+  let normalized =
+    List.fold_left
+      (fun acc segment ->
+        if String.equal segment ".." then
+          match acc with
+          | [] -> []
+          | _ :: rest -> rest
+        else
+          segment :: acc)
+      [] segments
+    |> List.rev
+  in
+  let body = String.concat "/" normalized in
+  if absolute then "/" ^ body else body
+
+let gitdir_config_path ~repo_root gitdir =
+  let gitdir =
+    if Filename.is_relative gitdir then Filename.concat repo_root gitdir
+    else gitdir
+  in
+  let repo_lane = Filename.dirname repo_root |> normalize_lexical_path in
+  let gitdir = normalize_lexical_path gitdir in
+  match relative_under ~root:repo_lane gitdir with
+  | None -> None
+  | Some _ -> Some (Filename.concat gitdir "config")
+
 let git_config_path_of_repo_root repo_root =
   let dot_git = Filename.concat repo_root ".git" in
-  if Sys.file_exists dot_git && Sys.is_directory dot_git then
+  if safe_file_exists dot_git && safe_is_directory dot_git then
     Some (Filename.concat dot_git "config")
-  else if Sys.file_exists dot_git then
+  else if safe_file_exists dot_git then
     match read_file_opt dot_git with
     | None -> None
     | Some content ->
@@ -348,12 +387,7 @@ let git_config_path_of_repo_root repo_root =
                  String.sub line 7 (String.length line - 7)
                  |> String.trim
                in
-               let gitdir =
-                 if Filename.is_relative gitdir then
-                   Filename.concat repo_root gitdir
-                 else gitdir
-               in
-               Some (Filename.concat gitdir "config")
+               gitdir_config_path ~repo_root gitdir
              else None)
   else
     None

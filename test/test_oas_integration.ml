@@ -581,8 +581,25 @@ let test_agent_completed_includes_usage () =
         | Some (`Int v) -> v
         | _ -> -1
       in
+      let string_field name =
+        match List.assoc_opt name payload_fields with
+        | Some (`String v) -> v
+        | _ -> ""
+      in
+      let bool_field name =
+        match List.assoc_opt name payload_fields with
+        | Some (`Bool v) -> v
+        | _ -> false
+      in
+      Alcotest.(check bool) "success" true (bool_field "success");
+      Alcotest.(check string) "result" "ok" (string_field "result");
+      Alcotest.(check string) "response_id" "msg-test" (string_field "response_id");
+      Alcotest.(check string) "model" "test-model" (string_field "model");
+      Alcotest.(check string) "stop_reason" "end_turn" (string_field "stop_reason");
+      Alcotest.(check bool) "usage_reported" true (bool_field "usage_reported");
       Alcotest.(check int) "input_tokens" 500 (int_field "input_tokens");
       Alcotest.(check int) "output_tokens" 150 (int_field "output_tokens");
+      Alcotest.(check int) "total_tokens" 650 (int_field "total_tokens");
       (match List.assoc_opt "cost_usd" payload_fields with
        | Some (`Float f) ->
            Alcotest.(check (float 0.001)) "cost_usd" 0.003 f
@@ -615,7 +632,24 @@ let test_agent_completed_no_usage_on_error () =
         | None -> Alcotest.fail "expected payload field"
       in
       Alcotest.(check bool) "no input_tokens on error" true
-        (Option.is_none (List.assoc_opt "input_tokens" payload_fields))
+        (Option.is_none (List.assoc_opt "input_tokens" payload_fields));
+      Alcotest.(check bool) "success" false
+        (match List.assoc_opt "success" payload_fields with
+         | Some (`Bool v) -> v
+         | _ -> true);
+      Alcotest.(check string) "result" "error"
+        (match List.assoc_opt "result" payload_fields with
+         | Some (`String v) -> v
+         | _ -> "");
+      Alcotest.(check bool) "usage_reported" false
+        (match List.assoc_opt "usage_reported" payload_fields with
+         | Some (`Bool v) -> v
+         | _ -> true);
+      (match List.assoc_opt "error" payload_fields with
+       | Some (`String value) ->
+           Alcotest.(check bool) "error includes message" true
+             (contains_substring value "test failure")
+       | _ -> Alcotest.fail "expected error string")
   | Some _ -> Alcotest.fail "expected assoc"
 
 let test_oas_log_bridge_turn_completed_summary () =

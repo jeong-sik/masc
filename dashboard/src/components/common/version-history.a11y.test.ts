@@ -80,6 +80,7 @@ describe('VersionHistory a11y', () => {
       container,
     )
     expect(container.textContent).toContain('현재')
+    expect(container.querySelector('[aria-current="step"]')?.getAttribute('data-version-snapshot-id')).toBe('snap-002-bbb')
   })
 
   it('shows rollback buttons for non-current snapshots when handler provided', () => {
@@ -103,7 +104,12 @@ describe('VersionHistory a11y', () => {
       />`,
       container,
     )
-    expect(container.querySelector('[role="list"]')).not.toBeNull()
+    const list = container.querySelector('[role="list"]')
+    const region = container.querySelector('[data-version-history]') as HTMLElement
+    expect(list).not.toBeNull()
+    expect(list?.getAttribute('aria-label')).toBe('버전 히스토리')
+    expect(region.getAttribute('aria-describedby')).toMatch(/version-history-summary/)
+    expect(region.dataset.versionHistoryStatus).toBe('current')
   })
 
   it('renders change counts', () => {
@@ -117,5 +123,33 @@ describe('VersionHistory a11y', () => {
     expect(container.textContent).toContain('+12')
     expect(container.textContent).toContain('~7')
     expect(container.textContent).toContain('-1')
+  })
+
+  it('exposes row metadata for assistive review', () => {
+    render(
+      html`<${VersionHistory}
+        snapshots=${makeSnapshots()}
+        currentId="snap-002-bbb"
+        onRollback=${() => {}}
+      />`,
+      container,
+    )
+    const first = container.querySelector('[data-version-snapshot-id="snap-001-aaa"]')
+    const current = container.querySelector('[data-version-snapshot-id="snap-002-bbb"]')
+    expect(first?.getAttribute('aria-label')).toContain('이전 버전')
+    expect(first?.getAttribute('data-version-snapshot-added')).toBe('12')
+    expect(current?.getAttribute('aria-label')).toContain('현재 버전')
+    expect(current?.getAttribute('data-version-snapshot-state')).toBe('current')
+  })
+
+  it('announces the empty state', () => {
+    render(
+      html`<${VersionHistory} snapshots=${[]} currentId="" />`,
+      container,
+    )
+    const root = container.querySelector('[data-version-history]') as HTMLElement
+    const status = container.querySelector('[role="status"]')
+    expect(root.dataset.versionHistoryStatus).toBe('empty')
+    expect(status?.textContent).toContain('스냅샷 없음')
   })
 })

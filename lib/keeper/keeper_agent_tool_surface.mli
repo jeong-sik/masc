@@ -104,6 +104,12 @@ val turn_affordances_require_tool_gate_with_allowed :
   -> string list
   -> bool
 
+(** On a required-action turn, trim the visible surface to tools that can make
+    progress when such tools exist. Passive status/read tools remain visible on
+    optional turns and on surfaces that have no actionable alternative. *)
+val tool_names_for_required_gate_surface :
+  tool_gate_requested:bool -> string list -> string list
+
 (** Whether the very first turn of a multi-turn slot should require
     a tool call. *)
 val should_require_tools_for_initial_turn :

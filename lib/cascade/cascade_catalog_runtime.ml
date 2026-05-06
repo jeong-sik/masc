@@ -199,15 +199,19 @@ let candidate_probe_skipped (candidate : candidate_runtime) reason =
     status = Probe_skipped reason;
   }
 
-let advisory_skip_reason =
-  "runtime provider health is advisory; bootstrap skips live probe"
+let local_probe_unavailable_reason =
+  "local provider health probe requires Eio runtime capabilities"
 
 let cloud_skip_reason =
   "cloud provider health is advisory; bootstrap probes local endpoints only"
 
 let profile_probes (profile_candidates : candidate_runtime list) =
   List.map
-    (fun candidate -> candidate_probe_skipped candidate advisory_skip_reason)
+    (fun candidate ->
+      if Llm_provider.Provider_config.is_local candidate.provider_cfg then
+        candidate_probe_error candidate local_probe_unavailable_reason
+      else
+        candidate_probe_skipped candidate cloud_skip_reason)
     profile_candidates
 
 let normalize_endpoint_url url =

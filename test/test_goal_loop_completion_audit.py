@@ -1091,15 +1091,15 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertTrue(checklist_evidence["has_strict_corpus_blocker"])
         self.assertFalse(checklist_evidence["local_path_leaks"])
         self.assertEqual(checklist_evidence["requirements_total"], 21)
-        self.assertEqual(checklist_evidence["status_counts"]["PASS"], 6)
-        self.assertEqual(checklist_evidence["status_counts"]["PARTIAL"], 13)
+        self.assertEqual(checklist_evidence["status_counts"]["PASS"], 7)
+        self.assertEqual(checklist_evidence["status_counts"]["PARTIAL"], 12)
         self.assertEqual(checklist_evidence["status_counts"]["BLOCKED"], 2)
-        self.assertEqual(checklist_evidence["non_pass_requirements"], 15)
+        self.assertEqual(checklist_evidence["non_pass_requirements"], 14)
         self.assertEqual(
             checklist_evidence["requirements_with_tracking_issue_refs"],
-            15,
+            14,
         )
-        self.assertEqual(checklist_evidence["tracking_issue_refs_total"], 11)
+        self.assertEqual(checklist_evidence["tracking_issue_refs_total"], 10)
         self.assertEqual(checklist_evidence["missing_tracking_issue_refs"], [])
         self.assertEqual(checklist_evidence["invalid_tracking_issue_refs"], [])
         self.assertEqual(
@@ -1108,10 +1108,10 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         )
         self.assertEqual(checklist_evidence["implementation_pr_refs_total"], 9)
         self.assertEqual(checklist_evidence["invalid_implementation_pr_refs"], [])
-        self.assertEqual(checklist_evidence["artifact_refs_total"], 75)
-        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 75)
-        self.assertEqual(checklist_evidence["artifact_ref_anchors_total"], 9)
-        self.assertEqual(checklist_evidence["artifact_ref_anchors_resolved"], 9)
+        self.assertEqual(checklist_evidence["artifact_refs_total"], 77)
+        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 77)
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_total"], 11)
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_resolved"], 11)
         self.assertTrue(checklist_evidence["artifact_refs_all_resolved"])
         self.assertEqual(checklist_evidence["missing_artifact_refs"], [])
         self.assertEqual(checklist_evidence["missing_artifact_ref_anchors"], [])
@@ -1128,11 +1128,11 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertEqual(warmup_evidence["max_observed_warmup_sec"], 74)
         closeout_evidence = by_id["prompt_requirements_closeout_complete"].evidence
         self.assertEqual(by_id["prompt_requirements_closeout_complete"].status, "FAIL")
-        self.assertEqual(closeout_evidence["incomplete_requirements"], 15)
-        self.assertEqual(closeout_evidence["non_pass_requirements"], 15)
+        self.assertEqual(closeout_evidence["incomplete_requirements"], 14)
+        self.assertEqual(closeout_evidence["non_pass_requirements"], 14)
         self.assertEqual(
             closeout_evidence["requirements_with_tracking_issue_refs"],
-            15,
+            14,
         )
         self.assertEqual(
             closeout_evidence["requirements_with_implementation_pr_refs"],
@@ -1286,7 +1286,11 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         checklist = json.loads(PROMPT_CHECKLIST_FIXTURE.read_text(encoding="utf-8"))
         requirements = checklist["requirements"]
         assert isinstance(requirements, list)
-        first = requirements[0]
+        first = next(
+            requirement
+            for requirement in requirements
+            if isinstance(requirement, dict) and requirement.get("status") == "PARTIAL"
+        )
         assert isinstance(first, dict)
         first.pop("tracking_issue_refs")
 
@@ -1631,7 +1635,7 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertEqual(prompt_checklist["status"], "PASS")
         prompt_closeout = by_id["prompt_requirements_closeout_complete"]
         self.assertEqual(prompt_closeout["status"], "FAIL")
-        self.assertEqual(prompt_closeout["evidence"]["incomplete_requirements"], 15)
+        self.assertEqual(prompt_closeout["evidence"]["incomplete_requirements"], 14)
         warmup_fairness = by_id["autoboot_warmup_fairness_complete"]
         self.assertEqual(warmup_fairness["status"], "PASS")
         self.assertEqual(warmup_fairness["evidence"]["late_keeper_warmup_sec"], 61)

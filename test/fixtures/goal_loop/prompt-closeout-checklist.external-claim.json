@@ -25,16 +25,13 @@
       "artifact_refs": [
         "test/fixtures/goal_loop/observe.startup.json",
         "test/fixtures/goal_loop/orient.startup.json",
-        "test/fixtures/goal_loop/audit-corpus.external-claim.json#NF-1"
+        "test/fixtures/goal_loop/audit-corpus.external-claim.json#NF-1",
+        "lib/cascade/cascade_catalog_runtime.ml#local_probe_unavailable_reason",
+        "test/test_cascade_catalog_runtime.ml#test_valid_catalog_records_probe_error_without_eio_caps"
       ],
-      "status": "PARTIAL",
-      "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "Startup signature is replayed, but the full 206-row strict corpus is absent.",
-      "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13265",
-        "https://github.com/jeong-sik/masc-mcp/issues/13685",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
-      ]
+      "status": "PASS",
+      "criterion_id": "post_act_verify_complete",
+      "gap": null
     },
     {
       "requirement_id": "startup-credential-starvation",

@@ -98,6 +98,7 @@ let test_default_has_base_tools () =
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has tools" true (List.length tools > 0);
   check bool "has keeper_time_now" true (has_tool "keeper_time_now" tools);
+  check bool "has keeper_tools_list" true (has_tool "keeper_tools_list" tools);
   check bool "has keeper_context_status" true (has_tool "keeper_context_status" tools)
 
 (* Governance tool schemas are no longer registered. *)
@@ -257,6 +258,24 @@ let test_coding_preset_has_coordination_tools () =
     (has_tool "keeper_tasks_list" tools);
   check bool "has keeper_task_claim" true
     (has_tool "keeper_task_claim" tools);
+  check bool "has keeper_task_submit_for_verification" true
+    (has_tool "keeper_task_submit_for_verification" tools);
+  check bool "has keeper_task_create" true
+    (has_tool "keeper_task_create" tools);
+  check bool "has keeper_task_force_release" true
+    (has_tool "keeper_task_force_release" tools);
+  check bool "has masc_goal_list" true
+    (has_tool "masc_goal_list" tools);
+  check bool "has masc_coordination_fsm_snapshot" true
+    (has_tool "masc_coordination_fsm_snapshot" tools);
+  check bool "does not grant masc_task_history" false
+    (has_tool "masc_task_history" tools);
+  check bool "does not grant masc_plan_get_task" false
+    (has_tool "masc_plan_get_task" tools);
+  check bool "does not grant masc_goal_upsert" false
+    (has_tool "masc_goal_upsert" tools);
+  check bool "does not grant masc_goal_verify" false
+    (has_tool "masc_goal_verify" tools);
   check bool "has keeper_broadcast" true
     (has_tool "keeper_broadcast" tools)
 

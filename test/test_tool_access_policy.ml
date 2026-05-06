@@ -625,6 +625,12 @@ let test_dispatch_preset_routes_pm_tools () =
   let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "dispatch includes goal list" true
     (List.mem "masc_goal_list" allowed);
+  check bool "dispatch includes task history" true
+    (List.mem "masc_task_history" allowed);
+  check bool "dispatch includes plan get" true
+    (List.mem "masc_plan_get" allowed);
+  check bool "dispatch includes plan get task" true
+    (List.mem "masc_plan_get_task" allowed);
   check bool "dispatch includes goal upsert" true
     (List.mem "masc_goal_upsert" allowed);
   check bool "dispatch includes keeper list" true
@@ -647,6 +653,46 @@ let test_dispatch_preset_routes_pm_tools () =
     (List.mem "masc_code_write" allowed);
   check bool "dispatch excludes code git" false
     (List.mem "masc_code_git" allowed)
+
+let test_coding_preset_routes_coordination_read_models () =
+  init_keeper_tool_registry ();
+  let base = make_gate_test_meta ~name:"test-coding-coordination-read" () in
+  let meta = { base with
+    tool_access = Preset { preset = Coding; also_allow = [] };
+    tool_denylist = [];
+  } in
+  let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  check bool "coding includes goal list read model" true
+    (List.mem "masc_goal_list" allowed);
+  check bool "coding includes FSM snapshot read model" true
+    (List.mem "masc_coordination_fsm_snapshot" allowed);
+  check bool "coding does not include goal upsert" false
+    (List.mem "masc_goal_upsert" allowed);
+  check bool "coding does not include goal verify" false
+    (List.mem "masc_goal_verify" allowed)
+
+let test_coordination_presets_route_plan_history_reads () =
+  init_keeper_tool_registry ();
+  List.iter
+    (fun (label, preset) ->
+      let base = make_gate_test_meta ~name:("test-" ^ label ^ "-coordination") () in
+      let meta =
+        {
+          base with
+          tool_access = Preset { preset; also_allow = [] };
+          tool_denylist = [];
+        }
+      in
+      let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
+      check bool (label ^ " includes task history") true
+        (List.mem "masc_task_history" allowed);
+      check bool (label ^ " includes plan get") true
+        (List.mem "masc_plan_get" allowed);
+      check bool (label ^ " includes plan get task") true
+        (List.mem "masc_plan_get_task" allowed);
+      check bool (label ^ " does not include goal upsert") false
+        (List.mem "masc_goal_upsert" allowed))
+    [ ("social", Social); ("messaging", Messaging) ]
 
 let test_preset_universe_superset_of_policy () =
   init_keeper_tool_registry ();
@@ -795,6 +841,10 @@ let () =
         [
           test_case "dispatch routes PM tools" `Quick
             test_dispatch_preset_routes_pm_tools;
+          test_case "coding routes coordination read models" `Quick
+            test_coding_preset_routes_coordination_read_models;
+          test_case "coordination presets route plan/history reads" `Quick
+            test_coordination_presets_route_plan_history_reads;
         ] );
       ( "inter_diff_composition",
         [

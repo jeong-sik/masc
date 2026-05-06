@@ -465,7 +465,38 @@ let emit_provider_error_metric ~cascade_name ~provider error =
       ]
     ()
 
+(* #13923 / #13933: when the agent_sdk [with_optional_timeout] wrapper
+   fires it produces a [Retry.Timeout] whose message starts with
+   "Agent execution exceeded max_execution_time_s". Distinguish that
+   from a transport-level provider timeout by substring so dashboards
+   can tell whether our per-OAS-call ceiling actually engaged versus
+   the upstream socket deadline. *)
+let timeout_source_label (err : Agent_sdk.Error.sdk_error) : string =
+  let is_max_execution_time =
+    match err with
+    | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout { message }) ->
+        String_util.contains_substring_ci message "max_execution_time_s"
+    | _ -> false
+  in
+  if is_max_execution_time then "max_execution_time" else "provider"
+
+let emit_oas_run_timeout_metric ~cascade_name ~provider err =
+  match err with
+  | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _) ->
+      let cascade_name = provider_label (cascade_name_to_string cascade_name) in
+      let provider = provider_label provider in
+      Prometheus.inc_counter Prometheus.metric_keeper_oas_run_timeout
+        ~labels:
+          [
+            ("cascade", cascade_name);
+            ("provider", provider);
+            ("source", timeout_source_label err);
+          ]
+        ()
+  | _ -> ()
+
 let emit_sdk_provider_error_metric ~cascade_name ~provider err =
+  emit_oas_run_timeout_metric ~cascade_name ~provider err;
   match sdk_error_to_provider_error ~provider err with
   | None -> None
   | Some provider_error ->

@@ -1093,6 +1093,23 @@ val metric_keeper_oas_timeout_budget_watchdog_termination : string
 val metric_keeper_stale_termination_threshold_breached : string
 val metric_keeper_stale_termination_batch : string
 val metric_keeper_stale_broadcast_emit_failures : string
+
+val metric_keeper_oas_run_timeout : string
+(** [masc_keeper_oas_run_timeout_total] counter incremented in the
+    cascade FSM each time an [Agent.run] / [run_stream] returns
+    [Llm_provider.Retry.Timeout]. The [source] label distinguishes the
+    timeout origin so dashboards can attribute hangs to root cause:
+
+    - [source="max_execution_time"] — agent_sdk's
+      [with_optional_timeout] fired because the per-OAS-call ceiling
+      ([max_execution_time_s], wired in PR #13923/#13933) was reached.
+      This is the canonical signal for cross-cascade fallback on hang.
+    - [source="provider"] — transport-level timeout from the upstream
+      provider (HTTP read deadline, gRPC deadline, etc.). The agent
+      did not have [max_execution_time_s] set, or the timeout fired
+      below the wrapper.
+
+    Labels: cascade, provider, source. *)
   (* Centralized metric constants for inline string replacement. *)
 val metric_keeper_tool_use_failure : string
 val metric_keeper_tool_not_allowed : string

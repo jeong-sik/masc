@@ -1295,6 +1295,8 @@ let metric_keeper_stale_termination_batch =
   "masc_keeper_stale_termination_batch_total"
 let metric_keeper_stale_broadcast_emit_failures =
   "masc_keeper_stale_broadcast_emit_failures"
+let metric_keeper_oas_run_timeout =
+  "masc_keeper_oas_run_timeout_total"
 
 
 (* Centralized metric constants for inline string replacement.
@@ -2516,6 +2518,12 @@ let init () =
     "Total fleet-wide batch termination events (multiple keepers terminated      within the batch window). Labels: root_cause." Counter;
   add metric_keeper_stale_broadcast_emit_failures
     "Total failures emitting stale keeper broadcast events. Labels: keeper." Counter;
+  add metric_keeper_oas_run_timeout
+    "Total Agent.run / run_stream invocations that returned Llm_provider.Retry.Timeout. \
+     Pairs with #13923 (max_execution_time wire) and #13933 (cascade activation): \
+     dashboards can attribute hangs to root cause via the source label \
+     (max_execution_time = our wrapper fired; provider = transport-level deadline). \
+     Labels: cascade, provider, source." Counter;
   add metric_keeper_tool_use_failure
     "Total keeper tool use failures during OAS hooks. Labels: keeper, tool." Counter;
   add metric_keeper_tool_not_allowed

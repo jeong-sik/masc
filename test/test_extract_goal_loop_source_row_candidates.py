@@ -200,6 +200,35 @@ class ExtractGoalLoopSourceRowCandidatesTest(unittest.TestCase):
             text_report,
         )
 
+    def test_inventory_can_redact_candidate_text(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            path = Path(raw_dir) / "GOAL_LOOP_INTEGRATION.md"
+            path.write_text(
+                "│  NF-1: provider_health_skipped_all_models       🔴🔴   │\n",
+                encoding="utf-8",
+            )
+
+            report = extract_goal_loop_source_row_candidates.inventory_sources(
+                [path],
+                expected_total=1,
+                redact_candidate_text=True,
+            )
+
+        self.assertTrue(report["candidate_text_redacted"])
+        row = report["candidate_rows"][0]
+        self.assertEqual(row["candidate_id"], "NF-1")
+        self.assertEqual(row["extraction_rule"], "colon_finding_id_line")
+        self.assertEqual(
+            row["source"],
+            {
+                "path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+                "line_refs": [1],
+            },
+        )
+        self.assertNotIn("title", row)
+        self.assertNotIn("snippet", row)
+        self.assertNotIn("severity_hint", row)
+
     def test_inventory_reports_utf8_decode_errors(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:
             path = Path(raw_dir) / "bad-source.md"

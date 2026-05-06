@@ -50,15 +50,16 @@ class Candidate:
     snippet: str
     severity_hint: str | None = None
 
-    def to_json(self) -> dict[str, Any]:
+    def to_json(self, *, redact_text: bool = False) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "candidate_id": self.candidate_id,
-            "title": self.title,
             "extraction_rule": self.extraction_rule,
             "source": {"path": self.source_path, "line_refs": [self.line_ref]},
-            "snippet": self.snippet,
         }
-        if self.severity_hint:
+        if not redact_text:
+            payload["title"] = self.title
+            payload["snippet"] = self.snippet
+        if self.severity_hint and not redact_text:
             payload["severity_hint"] = self.severity_hint
         return payload
 
@@ -339,6 +340,7 @@ def inventory_sources(
     no_row_tracking_issue_refs: list[str] | None = None,
     checked_at: date | None = None,
     include_candidates: bool = True,
+    redact_candidate_text: bool = False,
 ) -> dict[str, Any]:
     candidates_by_id: dict[str, Candidate] = {}
     source_errors: list[dict[str, str]] = []
@@ -526,7 +528,11 @@ def inventory_sources(
         ],
     }
     if include_candidates:
-        payload["candidate_rows"] = [candidate.to_json() for candidate in candidates]
+        payload["candidate_text_redacted"] = redact_candidate_text
+        payload["candidate_rows"] = [
+            candidate.to_json(redact_text=redact_candidate_text)
+            for candidate in candidates
+        ]
     return payload
 
 
@@ -640,6 +646,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Omit candidate_rows from JSON output.",
     )
     parser.add_argument(
+        "--redact-candidate-text",
+        action="store_true",
+        help=(
+            "When candidate_rows are included, omit source-derived titles, "
+            "snippets, and severity hints."
+        ),
+    )
+    parser.add_argument(
         "--checked-at",
         type=iso_date,
         help=(
@@ -671,6 +685,7 @@ def main(argv: list[str] | None = None) -> int:
         no_row_tracking_issue_refs=args.no_row_tracking_issue_ref,
         checked_at=args.checked_at,
         include_candidates=not args.summary_only,
+        redact_candidate_text=args.redact_candidate_text,
     )
     if args.format == "json":
         print(json.dumps(report, indent=2, sort_keys=True))

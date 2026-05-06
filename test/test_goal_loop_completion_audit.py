@@ -767,6 +767,17 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertTrue(inventory_evidence["incomplete_against_expected"])
         self.assertTrue(inventory_evidence["candidates_by_file_total_matches"])
         self.assertTrue(inventory_evidence["candidates_by_rule_total_matches"])
+        self.assertTrue(inventory_evidence["candidate_rows_recorded"])
+        self.assertEqual(inventory_evidence["candidate_rows_count"], 132)
+        self.assertTrue(inventory_evidence["candidate_rows_valid"])
+        self.assertTrue(inventory_evidence["candidate_rows_count_matches"])
+        self.assertTrue(inventory_evidence["candidate_row_ids_unique"])
+        self.assertTrue(inventory_evidence["candidate_row_paths_match_summary"])
+        self.assertTrue(inventory_evidence["candidate_row_rules_match_summary"])
+        self.assertTrue(inventory_evidence["candidate_text_redacted"])
+        self.assertTrue(inventory_evidence["candidate_text_redaction_valid"])
+        self.assertEqual(inventory_evidence["invalid_candidate_rows"], [])
+        self.assertEqual(inventory_evidence["duplicate_candidate_row_ids"], [])
         self.assertEqual(inventory_evidence["prompt_sources_checked"], 12)
         self.assertEqual(inventory_evidence["sources_with_candidates"], 5)
         self.assertEqual(inventory_evidence["sources_without_candidates"], 7)
@@ -828,6 +839,7 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         inventory["result"] = "EXPLICIT_SOURCE_ROWS_MATCH_EXPECTED"
         inventory["unique_candidate_rows"] = 206
         inventory["missing_candidate_rows"] = 0
+        inventory.pop("candidate_rows", None)
         by_file = inventory["candidates_by_file"]
         by_rule = inventory["candidates_by_rule"]
         assert isinstance(by_file, list)
@@ -957,6 +969,47 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertFalse(inventory_evidence["recorded"])
         self.assertFalse(inventory_evidence["candidates_by_file_total_matches"])
         self.assertTrue(inventory_evidence["candidates_by_rule_total_matches"])
+        self.assertFalse(inventory_evidence["candidate_row_paths_match_summary"])
+
+    def test_completion_audit_rejects_invalid_source_candidate_rows(self) -> None:
+        inventory = json.loads(
+            SOURCE_ROW_CANDIDATE_INVENTORY_FIXTURE.read_text(encoding="utf-8")
+        )
+        rows = inventory["candidate_rows"]
+        assert isinstance(rows, list)
+        first = rows[0]
+        assert isinstance(first, dict)
+        first["source"] = {
+            "path": "prompt_corpus/GOAL_LOOP/not-checked.md",
+            "line_refs": [0],
+        }
+        first["snippet"] = "unredacted private source text"
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            source_row_candidate_inventory=inventory,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        inventory_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "source_row_candidate_inventory"
+        ]
+        self.assertFalse(inventory_evidence["recorded"])
+        self.assertFalse(inventory_evidence["candidate_rows_valid"])
+        self.assertFalse(inventory_evidence["candidate_row_paths_match_summary"])
+        self.assertFalse(inventory_evidence["candidate_text_redaction_valid"])
+        self.assertIn(
+            "AUDIT-DERIVED-001: invalid_source_path",
+            inventory_evidence["invalid_candidate_rows"],
+        )
+        self.assertIn(
+            "AUDIT-DERIVED-001: invalid_line_refs",
+            inventory_evidence["invalid_candidate_rows"],
+        )
+        self.assertIn(
+            "AUDIT-DERIVED-001: unredacted_candidate_text",
+            inventory_evidence["invalid_candidate_rows"],
+        )
 
     def test_completion_audit_rejects_unaccounted_source_row_inventory(
         self,

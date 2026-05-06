@@ -246,6 +246,10 @@
   source-file coverage split with no unaccounted prompt source files. The 7
   no-row files carry 897 unstructured requirement markers, but those markers
   are tracked as non-corpus evidence and do not satisfy the strict row gate.
+  The source-row inventory now also carries a redacted `candidate_rows`
+  worklist for the 132 stable candidates: candidate ID, extraction rule,
+  logical source path, and line refs only, with source-derived titles/snippets
+  omitted.
   Completion-audit evidence validates all 7 no-row marker buckets have tracking
   refs and reports 2 unique tracking issue refs (#13265 and #13636). The
   source-row inventory currentness block is structurally validated too:
@@ -325,10 +329,13 @@
   corpus is recorded as `validated=true`, while the explicit source-row
   inventory is recorded as 132/206 with the 5 source files that contain
   candidates and 7 checked source files that do not. The same inventory now
-  proves that those 7 no-row files contain 897 unstructured requirement markers
-  rather than stable row IDs, and requires those marker buckets to carry valid
-  tracking issue refs; the closeout remains `BLOCKED` while Orient still
-  reports only 19 itemized rows. Invalid supplied
+  validates the optional redacted `candidate_rows` worklist: all 132 candidate
+  IDs are unique, all source paths are checked prompt sources, all line refs
+  are positive, and file/rule totals match the inventory summary without
+  storing source snippets. It also proves that those 7 no-row files contain 897
+  unstructured requirement markers rather than stable row IDs, and requires
+  those marker buckets to carry valid tracking issue refs; the closeout remains
+  `BLOCKED` while Orient still reports only 19 itemized rows. Invalid supplied
   corpora or inconsistent source-row inventories block
   `strict_row_level_catalog_complete`. The same test suite now verifies that a
   recorded prompt checklist is not itself a completion proxy: the separate

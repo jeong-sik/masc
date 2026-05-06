@@ -442,6 +442,122 @@ def sum_unique_candidate_rows(value: Any) -> int | None:
     return total
 
 
+def source_candidate_row_details(
+    *,
+    candidate_rows_raw: Any,
+    expected_count: Any,
+    prompt_sources: set[str],
+    expected_by_file: dict[str, int],
+    expected_by_rule: dict[str, int],
+    text_redacted: bool,
+) -> dict[str, Any]:
+    if candidate_rows_raw is None:
+        return {
+            "candidate_rows_recorded": False,
+            "candidate_rows_count": 0,
+            "candidate_rows_valid": True,
+            "candidate_rows_count_matches": True,
+            "candidate_row_ids_unique": True,
+            "candidate_row_paths_match_summary": True,
+            "candidate_row_rules_match_summary": True,
+            "candidate_text_redacted": text_redacted,
+            "candidate_text_redaction_valid": True,
+            "invalid_candidate_rows": [],
+            "duplicate_candidate_row_ids": [],
+        }
+    if not isinstance(candidate_rows_raw, list):
+        return {
+            "candidate_rows_recorded": False,
+            "candidate_rows_count": 0,
+            "candidate_rows_valid": False,
+            "candidate_rows_count_matches": False,
+            "candidate_row_ids_unique": False,
+            "candidate_row_paths_match_summary": False,
+            "candidate_row_rules_match_summary": False,
+            "candidate_text_redacted": text_redacted,
+            "candidate_text_redaction_valid": False,
+            "invalid_candidate_rows": ["candidate_rows_not_list"],
+            "duplicate_candidate_row_ids": [],
+        }
+
+    invalid_rows: list[str] = []
+    row_ids: list[str] = []
+    path_counts: dict[str, int] = {}
+    rule_counts: dict[str, int] = {}
+    text_redaction_valid = True
+    for index, item in enumerate(candidate_rows_raw):
+        label = f"row[{index}]"
+        if not isinstance(item, dict):
+            invalid_rows.append(f"{label}: not_object")
+            continue
+        candidate_id = as_nonempty_str(item.get("candidate_id"))
+        if candidate_id is None:
+            invalid_rows.append(f"{label}: missing_candidate_id")
+        else:
+            label = candidate_id
+            row_ids.append(candidate_id)
+        extraction_rule = as_nonempty_str(item.get("extraction_rule"))
+        if extraction_rule is None:
+            invalid_rows.append(f"{label}: missing_extraction_rule")
+        else:
+            rule_counts[extraction_rule] = rule_counts.get(extraction_rule, 0) + 1
+        source = item.get("source")
+        if not isinstance(source, dict):
+            invalid_rows.append(f"{label}: missing_source")
+        else:
+            source_path = as_nonempty_str(source.get("path"))
+            line_refs = source.get("line_refs")
+            if source_path is None or source_path not in prompt_sources:
+                invalid_rows.append(f"{label}: invalid_source_path")
+            else:
+                path_counts[source_path] = path_counts.get(source_path, 0) + 1
+            if (
+                not isinstance(line_refs, list)
+                or not line_refs
+                or not all(
+                    isinstance(line_ref, int) and line_ref > 0 for line_ref in line_refs
+                )
+            ):
+                invalid_rows.append(f"{label}: invalid_line_refs")
+        if text_redacted and any(
+            key in item for key in ("title", "snippet", "severity_hint")
+        ):
+            text_redaction_valid = False
+            invalid_rows.append(f"{label}: unredacted_candidate_text")
+
+    duplicate_ids = sorted(
+        {candidate_id for candidate_id in row_ids if row_ids.count(candidate_id) > 1}
+    )
+    candidate_rows_count = len(candidate_rows_raw)
+    candidate_rows_count_matches = (
+        isinstance(expected_count, int) and candidate_rows_count == expected_count
+    )
+    row_ids_unique = len(duplicate_ids) == 0 and len(row_ids) == candidate_rows_count
+    paths_match_summary = path_counts == expected_by_file
+    rules_match_summary = rule_counts == expected_by_rule
+    candidate_rows_valid = (
+        candidate_rows_count_matches
+        and row_ids_unique
+        and paths_match_summary
+        and rules_match_summary
+        and text_redaction_valid
+        and not invalid_rows
+    )
+    return {
+        "candidate_rows_recorded": True,
+        "candidate_rows_count": candidate_rows_count,
+        "candidate_rows_valid": candidate_rows_valid,
+        "candidate_rows_count_matches": candidate_rows_count_matches,
+        "candidate_row_ids_unique": row_ids_unique,
+        "candidate_row_paths_match_summary": paths_match_summary,
+        "candidate_row_rules_match_summary": rules_match_summary,
+        "candidate_text_redacted": text_redacted,
+        "candidate_text_redaction_valid": text_redaction_valid,
+        "invalid_candidate_rows": invalid_rows,
+        "duplicate_candidate_row_ids": duplicate_ids,
+    }
+
+
 def source_row_candidate_inventory_evidence(
     row_catalog_evidence: dict[str, Any],
     source_row_candidate_inventory: dict[str, Any] | None,
@@ -498,6 +614,10 @@ def source_row_candidate_inventory_evidence(
     candidates_by_file_raw = source_row_candidate_inventory.get("candidates_by_file")
     candidates_by_file = (
         candidates_by_file_raw if isinstance(candidates_by_file_raw, list) else []
+    )
+    candidates_by_rule_raw = source_row_candidate_inventory.get("candidates_by_rule")
+    candidates_by_rule = (
+        candidates_by_rule_raw if isinstance(candidates_by_rule_raw, list) else []
     )
     source_paths_with_candidates = {
         item.get("path")
@@ -722,6 +842,29 @@ def source_row_candidate_inventory_evidence(
         len(source_paths_with_candidates & source_paths_without_candidates) == 0
     )
     local_path_leaks = contains_user_local_path(source_row_candidate_inventory)
+    expected_by_file = {
+        item["path"]: item["unique_candidate_rows"]
+        for item in candidates_by_file
+        if isinstance(item, dict)
+        and isinstance(item.get("path"), str)
+        and isinstance(item.get("unique_candidate_rows"), int)
+    }
+    expected_by_rule = {
+        item["rule"]: item["unique_candidate_rows"]
+        for item in candidates_by_rule
+        if isinstance(item, dict)
+        and isinstance(item.get("rule"), str)
+        and isinstance(item.get("unique_candidate_rows"), int)
+    }
+    candidate_row_details = source_candidate_row_details(
+        candidate_rows_raw=source_row_candidate_inventory.get("candidate_rows"),
+        expected_count=candidate_rows,
+        prompt_sources=set(sources),
+        expected_by_file=expected_by_file,
+        expected_by_rule=expected_by_rule,
+        text_redacted=source_row_candidate_inventory.get("candidate_text_redacted")
+        is True,
+    )
     inventory_result_consistent = (
         source_row_candidate_inventory.get("status") == "INCOMPLETE"
         and source_row_candidate_inventory.get("result")
@@ -755,6 +898,7 @@ def source_row_candidate_inventory_evidence(
         and source_row_candidate_inventory.get("source_errors_total") == 0
         and len(source_errors) == 0
         and prompt_source_validation["prompt_sources_valid"]
+        and candidate_row_details["candidate_rows_valid"]
         and not local_path_leaks
     )
     return {
@@ -777,6 +921,7 @@ def source_row_candidate_inventory_evidence(
         "candidates_by_file_total_matches": candidates_by_file_total_matches,
         "candidates_by_rule_total": candidates_by_rule_total,
         "candidates_by_rule_total_matches": candidates_by_rule_total_matches,
+        **candidate_row_details,
         "prompt_sources_checked": len(sources),
         **prompt_source_validation,
         "sources_with_candidates": len(source_paths_with_candidates),

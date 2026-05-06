@@ -77,6 +77,31 @@ let contains_substring haystack needle =
     in
     loop 0
 
+(* Whitespace-insensitive substring check: collapses every run of ASCII
+   whitespace in both the haystack and needle to a single space before
+   comparing. Used by source-contract assertions so OCamlformat
+   reflowing the offending pattern (e.g. moving an [ignore (...)]
+   onto one line vs. two) doesn't mask a regression. *)
+let contains_substring_ws_insensitive haystack needle =
+  let collapse s =
+    let buf = Buffer.create (String.length s) in
+    let in_ws = ref true in
+    String.iter
+      (fun c ->
+        match c with
+        | ' ' | '\t' | '\n' | '\r' ->
+            if not !in_ws then begin
+              Buffer.add_char buf ' ';
+              in_ws := true
+            end
+        | _ ->
+            Buffer.add_char buf c;
+            in_ws := false)
+      s;
+    Buffer.contents buf
+  in
+  contains_substring (collapse haystack) (collapse needle)
+
 let test_bootstrap_write_retries_and_preserves_heartbeat_fields () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -126,16 +151,21 @@ let test_bootstrap_write_retries_and_preserves_heartbeat_fields () =
 
 let test_create_keeper_observes_local_discovery_refresh_source () =
   let src = load_source "lib/keeper/keeper_turn_up_create.ml" in
+  (* Use whitespace-insensitive match so OCamlformat's choice of
+     newlines/indent for the [ignore (...)] form does not silently
+     mask a regression. *)
   check bool "create path no longer discards local discovery refresh" false
-    (contains_substring
+    (contains_substring_ws_insensitive
        src
-       "ignore\n                (Cascade_runtime.refresh_local_discovery_if_possible");
+       "ignore (Cascade_runtime.refresh_local_discovery_if_possible");
   check bool "create path uses local discovery helper" true
     (contains_substring
        src
        "Keeper_turn_helpers.ensure_local_discovery_ready");
   check bool "create path labels observable refresh failures" true
-    (contains_substring src "create_local_discovery_refresh")
+    (contains_substring src "create_local_discovery_refresh");
+  check bool "create path uses dedicated local discovery metric" true
+    (contains_substring src "metric_keeper_local_discovery_failures")
 
 let () =
   run "keeper_turn_up_create bootstrap meta CAS retry"

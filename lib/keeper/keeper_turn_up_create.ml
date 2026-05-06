@@ -321,7 +321,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                      p.name
                      msg;
                    Prometheus.inc_counter
-                     Prometheus.metric_keeper_cascade_sync_failures
+                     Prometheus.metric_keeper_local_discovery_failures
                      ~labels:
                        [
                          ("keeper", p.name);

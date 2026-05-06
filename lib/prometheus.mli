@@ -305,6 +305,16 @@ val metric_keeper_turn_livelock_blocks : string
 val metric_keeper_turn_timeout_committed : string
 val metric_keeper_turn_error_after_tools : string
 val metric_keeper_cascade_sync_failures : string
+(** Cascade state synchronization failures: pause/resume/auto-pause paths
+    only. Local discovery refresh failures use
+    [metric_keeper_local_discovery_failures] so dashboards can attribute
+    distinct failure classes. *)
+
+val metric_keeper_local_discovery_failures : string
+(** Local discovery readiness failures observed during create/turn paths.
+    Separated from [metric_keeper_cascade_sync_failures] so dashboards do
+    not conflate cascade-state sync with discovery-refresh incompleteness. *)
+
 val metric_keeper_thinking_persist_failures : string
 val metric_keeper_checkpoint_failures : string
 val metric_keeper_memory_write_failures : string

@@ -93,18 +93,50 @@ describe('TaskBacklog', () => {
         created_at: '2026-05-06T00:00:00Z',
       },
       {
-        id: 'claimed-p2',
-        title: 'Claimed P2',
-        status: 'claimed',
+        id: 'assigned-todo-p2',
+        title: 'Assigned todo P2',
+        status: 'todo',
         priority: 2,
+        assignee: 'keeper-alpha',
         created_at: '2026-05-05T00:00:00Z',
+      },
+      {
+        id: 'blank-assignee-p2',
+        title: 'Blank assignee P2',
+        status: 'todo',
+        priority: 2,
+        assignee: ' ',
+        created_at: '2026-05-06T01:00:00Z',
       },
     ], Date.parse('2026-05-06T07:00:00Z'))
 
     const p2 = rows.find(row => row.priority === 2)
-    expect(p2?.count).toBe(1)
+    expect(p2?.count).toBe(2)
     expect(p2?.tone).toBe('warn')
     expect(p2?.oldestTask?.id).toBe('todo-p2')
+  })
+
+  it('normalizes out-of-range priorities into P4 pressure', () => {
+    const rows = buildBacklogPressureRows([
+      {
+        id: 'todo-p0',
+        title: 'Todo P0',
+        status: 'todo',
+        priority: 0,
+        created_at: '2026-05-06T00:00:00Z',
+      },
+      {
+        id: 'todo-p5',
+        title: 'Todo P5',
+        status: 'todo',
+        priority: 5,
+        created_at: '2026-05-06T01:00:00Z',
+      },
+    ], Date.parse('2026-05-06T07:00:00Z'))
+
+    const p4 = rows.find(row => row.priority === 4)
+    expect(p4?.count).toBe(2)
+    expect(p4?.oldestTask?.id).toBe('todo-p0')
   })
 
   it('preserves expanded done pagination after clearing search', async () => {

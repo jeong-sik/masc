@@ -91,10 +91,16 @@ function formatAgeMs(ageMs: number | null): string {
   return `${days}d`
 }
 
+function normalizePriority(priority: number | undefined): 1 | 2 | 3 | 4 {
+  return priority === 1 || priority === 2 || priority === 3 ? priority : 4
+}
+
 export function buildBacklogPressureRows(tasks: Task[], nowMs = Date.now()): BacklogPressureRow[] {
-  const todoTasks = tasks.filter(task => task.status === 'todo')
+  const todoTasks = tasks.filter(
+    task => task.status === 'todo' && String(task.assignee ?? '').trim() === '',
+  )
   return BACKLOG_PRESSURE_PRIORITIES.map(priority => {
-    const matching = todoTasks.filter(task => (task.priority ?? 4) === priority)
+    const matching = todoTasks.filter(task => normalizePriority(task.priority) === priority)
     const withAge = matching
       .map(task => {
         const createdAt = taskCreatedAtMs(task)

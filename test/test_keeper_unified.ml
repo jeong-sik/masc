@@ -1477,6 +1477,41 @@ let test_min_interval_fires_without_work_signal () =
            List.mem WO.Min_interval_elapsed (first :: rest)
        | WO.Skip _ -> false))
 
+let test_min_interval_turn_is_not_tagged_entropic () =
+  with_env "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC" "900" (fun () ->
+    Fun.protect ~finally:Random.self_init @@ fun () ->
+    Random.init 15;
+    let meta =
+      { minimal_meta with
+        proactive =
+          { enabled = true; idle_sec = 0; cooldown_sec = 600 };
+        runtime =
+          { minimal_meta.runtime with
+            proactive_rt =
+              { minimal_meta.runtime.proactive_rt with
+                last_ts = Time_compat.now () -. 1000.0;
+              };
+          };
+      }
+    in
+    let obs = { base_observation with idle_seconds = 0 } in
+    let decision =
+      WO.keeper_cycle_decision
+        ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+        ~meta obs
+    in
+    check bool "min interval elapsed fires turn" true decision.should_run;
+    check bool "Min_interval_elapsed reason emitted" true
+      (match decision.verdict with
+       | WO.Run { reasons = (first, rest) } ->
+           List.mem WO.Min_interval_elapsed (first :: rest)
+       | WO.Skip _ -> false);
+    check bool "Min_interval_elapsed is not tagged as entropic" false
+      (match decision.verdict with
+       | WO.Run { reasons = (first, rest) } ->
+           List.mem WO.Entropic_oscillation (first :: rest)
+       | WO.Skip _ -> false))
+
 let test_min_interval_does_not_fire_before_elapsed () =
   (* With since_last = 500s and min_interval = 900s, the keeper should
      NOT get a free housekeeping turn (no work signals present either). *)
@@ -7261,6 +7296,8 @@ let () =
             test_provider_cooldown_blocks_bootstrap_turn;
           test_case "min interval: fires without work signal after interval" `Quick
             test_min_interval_fires_without_work_signal;
+          test_case "min interval: not tagged entropic" `Quick
+            test_min_interval_turn_is_not_tagged_entropic;
           test_case "min interval: does not fire before elapsed" `Quick
             test_min_interval_does_not_fire_before_elapsed;
           test_case "min interval: never fires for bootstrap turn" `Quick

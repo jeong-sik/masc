@@ -1239,9 +1239,10 @@ let keeper_cycle_decision
            unclaimed work for idle_gate seconds even when the backlog signal
            is ready to fire. Ref: #7226 claim-first + idle_gate observation. *)
         let should_oscillate =
-          should_inject_entropic_oscillation
-            ~since_last_scheduled_autonomous
-            ~draw_percent:(Random.int 100)
+          (not min_interval_elapsed)
+          && should_inject_entropic_oscillation
+               ~since_last_scheduled_autonomous
+               ~draw_percent:(Random.int 100)
         in
         let should_run =
           is_bootstrap

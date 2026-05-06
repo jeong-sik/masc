@@ -459,6 +459,9 @@ let metric_tool_join_required_guard =
 let metric_keeper_semaphore_wait_timeout =
   "masc_keeper_semaphore_wait_timeout_total"
 
+let metric_keeper_turn_slot_bookkeeping_failures =
+  "masc_keeper_turn_slot_bookkeeping_failures_total"
+
 (* Goal-loop Observe contract: the Grafana p99 query consumes
    [masc_keeper_semaphore_wait_seconds_bucket] grouped by keeper and cascade.
    The generic [register_histogram] exporter currently exposes summaries, so
@@ -1512,6 +1515,11 @@ let init () =
   add metric_keeper_turn_queue_depth
     "Current keeper turn wait queue depth (labels: channel=autonomous_queue)"
     Gauge;
+  add metric_keeper_turn_slot_bookkeeping_failures
+    "Total keeper turn-slot release bookkeeping callbacks that could not \
+     complete while preserving semaphore release (labels: op, \
+     kind=cancelled|exception)"
+    Counter;
   register_histogram ~name:metric_keeper_semaphore_wait_seconds
     ~help:"Seconds spent waiting to acquire keeper turn semaphores \
            (labels: keeper_name, cascade_profile, channel)." ();

@@ -525,6 +525,12 @@ let run_after_acquire_flag_hook_for_test ~label ~keeper_name =
   | None -> ()
   | Some hook -> hook ~label ~keeper_name
 
+let observe_bookkeeping_failure ~op ~kind =
+  Prometheus.inc_counter
+    Prometheus.metric_keeper_turn_slot_bookkeeping_failures
+    ~labels:[ ("op", op); ("kind", kind) ]
+    ()
+
 (* Cancel-safe wrapper for bookkeeping calls that touch [Eio.Mutex.use_rw].
    Reached from [Fun.protect ~finally] in [with_keeper_turn_slot] when the
    keeper fiber is being cancelled.  If a mutex acquisition raises
@@ -539,8 +545,10 @@ let safe_bookkeeping ~op f =
     (* Bookkeeping (holder table / waiter queue / completion stamp) is
        advisory and self-healing; skipping under fiber cancellation is
        acceptable.  The semaphore release that follows must still run. *)
+    observe_bookkeeping_failure ~op ~kind:"cancelled";
     Log.Keeper.warn "release_keeper_turn_slot: %s skipped (Cancelled)" op
   | exn ->
+    observe_bookkeeping_failure ~op ~kind:"exception";
     Log.Keeper.warn "release_keeper_turn_slot: %s failed: %s"
       op (Printexc.to_string exn)
 
@@ -560,7 +568,17 @@ let release_recorded_holder
     Eio.Semaphore.release sem
   | Some acquisition_id ->
     let force_released =
-      try consume_force_release ~label ~keeper_name ~acquisition_id with exn ->
+      try consume_force_release ~label ~keeper_name ~acquisition_id with
+      | Eio.Cancel.Cancelled _ ->
+        observe_bookkeeping_failure
+          ~op:("drop_holder " ^ label) ~kind:"cancelled";
+        Log.Keeper.warn
+          "release_keeper_turn_slot: drop_holder %s skipped (Cancelled)"
+          label;
+        false
+      | exn ->
+        observe_bookkeeping_failure
+          ~op:("drop_holder " ^ label) ~kind:"exception";
         Log.Keeper.warn "release_keeper_turn_slot: drop_holder %s failed: %s"
           label (Printexc.to_string exn);
         false

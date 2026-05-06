@@ -68,7 +68,11 @@ val tool_timeout_sec_opt :
 (** Returns the timeout (seconds) the dispatcher should
     apply to the call, [None] for tools that opt out
     (e.g. [masc_keeper_msg], which gates on its own
-    [max_turns] / [max_cost_usd]).  Board write tools use
+    [max_turns] / [max_cost_usd]).  Every mutating board tool
+    (post/comment/vote/comment_vote/reaction plus admin
+    delete/cleanup, both [keeper_board_*] and [masc_board_*]
+    aliases — same set as [Tool_board.tool_required_permission]'s
+    [CanBroadcast]/[CanAdmin] classifications) uses
     [MASC_TOOL_TIMEOUT_BOARD_SEC] (default 90s) instead of
     [MASC_TOOL_TIMEOUT_DEFAULT_SEC] (default 60s) so operators can
     tune board persistence separately from every other tool.

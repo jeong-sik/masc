@@ -76,6 +76,21 @@ val caller_agent_name_from_arguments : Yojson.Safe.t -> string option
     for direct callers and old MCP clients.  Blank and ["unknown"]
     values are ignored. *)
 
+(** {1 Test hooks} *)
+
+module For_testing : sig
+  val cleanup_internal_keeper_runtime_resource :
+    during_exception:bool -> label:string -> (unit -> unit) -> unit
+  (** Runs one internal keeper runtime cleanup action.  Non-cancellation
+      cleanup failures are logged and suppressed; cancellation is propagated
+      only when cleanup is not running behind a primary exception. *)
+
+  val run_with_cleanup_preserving_primary :
+    cleanup:(during_exception:bool -> unit -> unit) -> (unit -> 'a) -> 'a
+  (** Runs [f] and then [cleanup].  If [f] raises, cleanup runs on the
+      exception path and the original exception/backtrace is re-raised. *)
+end
+
 (** {1 [tools/call] inner dispatcher} *)
 
 val execute_tool_eio :

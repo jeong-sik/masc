@@ -119,6 +119,33 @@ let direct_call_block_message name =
       "Tool '%s' is hidden from the default tool surface and not callable directly."
       name
 
+let cleanup_internal_keeper_runtime_resource ~during_exception ~label cleanup =
+  try cleanup () with
+  | Eio.Cancel.Cancelled _ as e when not during_exception -> raise e
+  | exn ->
+      Log.Mcp.warn
+        "internal keeper runtime %s cleanup failed%s: %s"
+        label
+        (if during_exception then " while preserving primary exception" else "")
+        (Printexc.to_string exn)
+
+let run_with_cleanup_preserving_primary ~cleanup f =
+  match f () with
+  | result ->
+      cleanup ~during_exception:false ();
+      result
+  | exception exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      cleanup ~during_exception:true ();
+      Printexc.raise_with_backtrace exn bt
+
+module For_testing = struct
+  let cleanup_internal_keeper_runtime_resource =
+    cleanup_internal_keeper_runtime_resource
+
+  let run_with_cleanup_preserving_primary = run_with_cleanup_preserving_primary
+end
+
 let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
     ?mcp_session_id ?auth_token ?(internal_keeper_runtime = false) state ~name
     ~arguments =
@@ -908,20 +935,24 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
                      ~default_network_override:Keeper_types.Network_inherit
                      ~config ~meta ())
             in
-            let cleanup () =
-              Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory;
-              Option.iter
-                Keeper_sandbox_factory.cleanup turn_sandbox_factory_git
+            let cleanup_one ~during_exception label = function
+              | None -> ()
+              | Some factory ->
+                  cleanup_internal_keeper_runtime_resource
+                    ~during_exception ~label
+                    (fun () -> Keeper_sandbox_factory.cleanup factory)
+            in
+            let cleanup ~during_exception () =
+              cleanup_one ~during_exception "sandbox" turn_sandbox_factory;
+              cleanup_one ~during_exception "git sandbox" turn_sandbox_factory_git
             in
             let exec_cache = Some (Masc_exec.Exec_cache.create ()) in
             let result =
-              Fun.protect
-                ~finally:cleanup
-                (fun () ->
-                  Keeper_exec_tools.execute_keeper_tool_call_with_outcome
-                    ~config ~meta ~ctx_work ?turn_sandbox_factory
-                    ?turn_sandbox_factory_git ~exec_cache ~name
-                    ~input:coerced_args ())
+              run_with_cleanup_preserving_primary ~cleanup (fun () ->
+                Keeper_exec_tools.execute_keeper_tool_call_with_outcome
+                  ~config ~meta ~ctx_work ?turn_sandbox_factory
+                  ?turn_sandbox_factory_git ~exec_cache ~name
+                  ~input:coerced_args ())
             in
             let success =
               match result.Keeper_exec_tools.outcome with

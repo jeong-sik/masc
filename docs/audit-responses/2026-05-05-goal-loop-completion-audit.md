@@ -171,6 +171,28 @@
   found 37 marker files, all PR/issue notes, helper scripts, or
   Orient/status/audit snapshots, with 0 candidate 206-row JSON corpora and a
   maximum observed JSON finding count of 19.
+- [근거] `python3 scripts/discover_goal_loop_strict_row_corpus.py
+  <12 prompt source files> --audit-catalog
+  test/fixtures/goal_loop/audit-corpus.external-claim.json --require-found
+  --format text` checked at 2026-05-06T13:43:19+09:00, confidence High:
+  exits non-zero with
+  `validated=0 candidates=0 marker_hits=0 text_units=12 files=12`. This
+  source-doc-only result is recorded in
+  `test/fixtures/goal_loop/row-corpus-discovery.external-claim.json` as
+  `prompt_source_docs_discovery_cli_strict_corpus_validation_sweep`, so the
+  original 12 supplied files are now mapped directly to strict-corpus
+  discovery evidence.
+- [근거] `gh pr view 13577 --repo jeong-sik/masc-mcp --json
+  number,state,isDraft,mergeable,mergeStateStatus,headRefOid,labels,url`,
+  `gh issue view 13265 --repo jeong-sik/masc-mcp --json number,state,url`, and
+  `gh pr checks 13577 --repo jeong-sik/masc-mcp` checked at
+  2026-05-06T13:43:19+09:00, confidence High: #13577 is open, draft,
+  mergeable, label-free, and at
+  `4ffc4cbf1afddc9e4e28933b95c3627a0ffed95a`; #13265 is open. Current red
+  checks are `CI Gate` and `Draft Auto-Merge Guard`; their logs identify the
+  missing verified human approval label `human-approved-ready` as the policy
+  blocker, while quick non-policy guards pass and heavy jobs are skipped under
+  the draft/policy gate.
 - [근거] `python3 test/test_goal_loop_completion_audit.py` checked at
   2026-05-06T09:59:29+09:00, confidence High: the completion audit now accepts
   an optional `--strict-row-corpus` artifact and validates it against the
@@ -495,8 +517,10 @@ No convergence claim is valid yet. The only safe current statement is:
    not whether the aggregate numbers appear in the supplied documents. The
    checked row-corpus discovery manifest records that the known 47-issue audit
    artifacts and duplicates are not the missing corpus, and that the cascade
-   completion report still lists #13265 as open; this is evidence for the
-   blocker, not a substitute for the rows.
+   completion report still lists #13265 as open. It also records broader
+   Downloads, runtime, temp, GitHub, local-history, full Downloads CLI, and
+   source-doc-only CLI discovery sweeps; these are evidence for the blocker,
+   not a substitute for the rows.
 2. Decide whether the source artifacts should be checked in under
    `prompt_corpus/GOAL_LOOP/...` or kept external. Local external validation
    passes via `<GOAL_LOOP_SOURCE_ROOT>` plus `--audit-source-strip-prefix`, and

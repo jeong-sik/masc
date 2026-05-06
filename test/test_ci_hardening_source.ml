@@ -1195,6 +1195,14 @@ let test_keeper_msg_timeout_contracts () =
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
        "Commit and git push that branch with masc_code_git");
+  check bool "docker PR lifecycle prompt uses keeper_fs_edit for proof edit" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       "with keeper_fs_edit");
+  check bool "docker PR lifecycle prompt forbids gh pr shell mutation" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       "Do not run gh pr create, gh pr review, or other mutating GitHub commands through keeper_shell or keeper_bash");
   check bool "runbook documents server incarnation restart classification" true
     (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
        "`server_incarnation_changed`");

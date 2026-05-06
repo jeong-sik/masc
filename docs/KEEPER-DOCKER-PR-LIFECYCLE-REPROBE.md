@@ -54,6 +54,9 @@ The prompt reserves `keeper_shell` and `keeper_bash` for read-only inspection.
 Mutating git operations must go through `masc_code_git`; otherwise the shell
 guard can correctly reject `git commit`/`git push` with `write_operation_gated`
 and the run will not produce Docker push evidence.
+Likewise, proof-file writes should use `keeper_fs_edit`, and PR create/review
+mutations should use `keeper_pr_create` / `keeper_pr_review_comment` rather
+than `gh pr ...` through shell tools.
 Override the CSV with `REQUIRED_TOOLS=...` for a narrower or broader proof
 lane.
 `MSG_TIMEOUT_SEC` only bounds the harness HTTP request to the MCP server.

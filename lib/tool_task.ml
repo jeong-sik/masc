@@ -901,6 +901,38 @@ and handle_transition ?agent_tool_names ctx args =
       | None -> action
     else action
   in
+  let caller_matches_assignee assignee =
+    String.equal assignee ctx.agent_name
+    || String.equal assignee
+         (try Coord.resolve_agent_name ctx.config ctx.agent_name
+          with
+          | Sys_error _ | Yojson.Json_error _ -> ctx.agent_name
+          | exn ->
+              Log.Task.warn "resolve_agent_name failed for verifier precheck %s: %s"
+                ctx.agent_name
+                (Stdlib.Printexc.to_string exn);
+              ctx.agent_name)
+  in
+  let self_verification_noop =
+    match action, task_opt with
+    | ( Masc_domain.Approve_verification | Masc_domain.Reject_verification ),
+      Some
+        {
+          Masc_domain.task_status =
+            Masc_domain.AwaitingVerification { assignee; verification_id; _ };
+          _;
+        }
+      when caller_matches_assignee assignee ->
+        Some
+          ( true,
+            Printf.sprintf
+              "No-op: task %s is awaiting verification %s from a different agent; current agent %s submitted it and cannot %s its own work. Ask another verifier, or stay silent until a different keeper handles verification."
+              task_id verification_id ctx.agent_name action_s )
+    | _ -> None
+  in
+  match self_verification_noop with
+  | Some response -> response
+  | None ->
   let default_time = Time_compat.now () -. 60.0 in
   let (started_at_actual, collaborators_from_task) = match task_opt with
     | Some t -> (match t.task_status with

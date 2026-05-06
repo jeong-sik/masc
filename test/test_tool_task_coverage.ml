@@ -131,6 +131,11 @@ let assert_task_awaiting_verification_by ctx agent_name =
       assert (verification_id <> "")
   | _ -> failwith "expected task to be awaiting verification"
 
+let awaiting_verification_id ctx =
+  match (only_task ctx).Masc_domain.task_status with
+  | Masc_domain.AwaitingVerification { verification_id; _ } -> verification_id
+  | _ -> failwith "expected task to be awaiting verification"
+
 (* Test dispatch returns None for unknown tool *)
 let () = test "dispatch_unknown_tool" (fun () ->
   let ctx = make_test_ctx () in
@@ -795,6 +800,60 @@ let () = test "handle_transition_done_on_awaiting_verification_is_explicit" (fun
     assert (not success);
     assert (str_contains result "awaiting verification");
     assert (str_contains result "approve or reject")))
+
+let () = test "handle_transition_self_verification_is_successful_noop" (fun () ->
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    let ctx = make_test_ctx () in
+    let _ =
+      Tool_task.handle_add_task ctx
+        (`Assoc
+          [
+            ("title", `String "Self verification task");
+            ( "contract",
+              `Assoc
+                [
+                  ("strict", `Bool true);
+                  ("completion_contract", `List [ `String "tests pass" ]);
+                ] );
+          ])
+    in
+    let _ = Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001" in
+    (match
+       Coord.transition_task_r ctx.config ~agent_name:"test-agent"
+         ~task_id:"task-001" ~action:Masc_domain.Submit_for_verification ()
+     with
+     | Ok _ -> ()
+     | Error e -> failwith (Masc_domain.masc_error_to_string e));
+    let verification_id = awaiting_verification_id ctx in
+    let reject_success, reject_result =
+      Tool_task.handle_transition ctx
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("action", `String "reject");
+            ("reason", `String "needs evidence");
+          ])
+    in
+    if not reject_success then failwith reject_result;
+    assert (str_contains reject_result "No-op");
+    assert (str_contains reject_result "different agent");
+    assert (not (str_contains reject_result "Self-rejection"));
+    assert (awaiting_verification_id ctx = verification_id);
+    let approve_success, approve_result =
+      Tool_task.handle_transition ctx
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("action", `String "approve");
+            ("notes", `String "looks good");
+          ])
+    in
+    if not approve_success then failwith approve_result;
+    assert (str_contains approve_result "No-op");
+    assert (str_contains approve_result "different agent");
+    assert (not (str_contains approve_result "Self-approval"));
+    assert (awaiting_verification_id ctx = verification_id)))
+
 let () = test "handle_claim_sets_planning_current_task" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Claim direct")]) in

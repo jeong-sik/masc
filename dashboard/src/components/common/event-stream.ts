@@ -48,6 +48,7 @@ export interface TemporalSyncStreamRow {
 }
 
 export interface SemanticGravityStreamRow extends TemporalSyncStreamRow {
+  originalVisibleIndex: number
   semanticGravityScore: number
   semanticGravityRank: number
 }
@@ -58,6 +59,14 @@ export interface IntentProjectionRow {
   targetKind: IntentProjectionTargetKind
   probability: number
   evidenceCount: number
+}
+
+interface EventStreamModel {
+  visible: StreamEvent[]
+  syncRows: TemporalSyncStreamRow[]
+  semanticRows: SemanticGravityStreamRow[]
+  intentProjections: IntentProjectionRow[]
+  summary: EventStreamSummary
 }
 
 interface EventStreamProps {
@@ -202,6 +211,7 @@ export function buildSemanticGravityRows(
 
   return ordered.map((item, index) => ({
     ...item.row,
+    originalVisibleIndex: item.originalIndex,
     semanticGravityScore: item.score,
     semanticGravityRank: index + 1,
   }))
@@ -330,17 +340,14 @@ export function buildTemporalSyncRows(
   return rows
 }
 
-export function summarizeEventStream(
-  events: StreamEvent[],
-  maxItems: number,
-  temporalSyncWindowMs = DEFAULT_TEMPORAL_SYNC_WINDOW_MS,
+function summarizeEventRows(
+  totalCount: number,
+  visible: StreamEvent[],
+  syncRows: TemporalSyncStreamRow[],
+  semanticRows: SemanticGravityStreamRow[],
+  intentProjections: IntentProjectionRow[],
   semanticFocus?: EventStreamSemanticFocus,
-  maxIntentProjections = 3,
 ): EventStreamSummary {
-  const visible = getVisibleStreamEvents(events, maxItems)
-  const syncRows = buildTemporalSyncRows(visible, temporalSyncWindowMs)
-  const semanticRows = buildSemanticGravityRows(syncRows, semanticFocus)
-  const intentProjections = buildIntentProjectionRows(events, semanticFocus, maxIntentProjections)
   const latestTimestamp = visible.length > 0 ? finiteTimestamp(visible[0]!.timestamp) : null
   const oldestVisibleTimestamp = visible.length > 0
     ? finiteTimestamp(visible[visible.length - 1]!.timestamp)
@@ -353,8 +360,8 @@ export function summarizeEventStream(
       .filter(row => row.syncGroupSize > 1)
       .map(row => row.syncGroupId),
   )
-  const attractionScores = semanticRows.map((row, index) =>
-    streamEventAttractionScore(row, index, semanticRows.length),
+  const attractionScores = semanticRows.map(row =>
+    streamEventAttractionScore(row, row.originalVisibleIndex, semanticRows.length),
   )
   const highAttractionCount = attractionScores.filter(score => streamEventAttractionBand(score) === 'high').length
   const semanticScores = semanticRows.map(row => row.semanticGravityScore)
@@ -369,9 +376,9 @@ export function summarizeEventStream(
           : 'ok'
 
   return {
-    totalCount: events.length,
+    totalCount,
     visibleCount: visible.length,
-    hiddenCount: Math.max(0, events.length - visible.length),
+    hiddenCount: Math.max(0, totalCount - visible.length),
     infoCount,
     warnCount,
     errorCount,
@@ -388,6 +395,49 @@ export function summarizeEventStream(
     topIntentProjectionProbability: intentProjections[0]?.probability ?? 0,
     status,
   }
+}
+
+function buildEventStreamModel(
+  events: StreamEvent[],
+  maxItems: number,
+  temporalSyncWindowMs = DEFAULT_TEMPORAL_SYNC_WINDOW_MS,
+  semanticFocus?: EventStreamSemanticFocus,
+  maxIntentProjections = 3,
+): EventStreamModel {
+  const visible = getVisibleStreamEvents(events, maxItems)
+  const syncRows = buildTemporalSyncRows(visible, temporalSyncWindowMs)
+  const semanticRows = buildSemanticGravityRows(syncRows, semanticFocus)
+  const intentProjections = buildIntentProjectionRows(events, semanticFocus, maxIntentProjections)
+  return {
+    visible,
+    syncRows,
+    semanticRows,
+    intentProjections,
+    summary: summarizeEventRows(
+      events.length,
+      visible,
+      syncRows,
+      semanticRows,
+      intentProjections,
+      semanticFocus,
+    ),
+  }
+}
+
+export function summarizeEventStream(
+  events: StreamEvent[],
+  maxItems: number,
+  temporalSyncWindowMs = DEFAULT_TEMPORAL_SYNC_WINDOW_MS,
+  semanticFocus?: EventStreamSemanticFocus,
+  maxIntentProjections = 3,
+): EventStreamSummary {
+  return buildEventStreamModel(
+    events,
+    maxItems,
+    temporalSyncWindowMs,
+    semanticFocus,
+    maxIntentProjections,
+  ).summary
 }
 
 function attractionRowClass(band: EventStreamAttractionBand, isSynced: boolean): string {
@@ -414,23 +464,11 @@ export function EventStream({
   maxIntentProjections = 3,
   testId,
 }: EventStreamProps) {
-  const visible = useMemo(() => getVisibleStreamEvents(events, maxItems), [events, maxItems])
-  const syncRows = useMemo(
-    () => buildTemporalSyncRows(visible, temporalSyncWindowMs),
-    [visible, temporalSyncWindowMs],
-  )
-  const semanticRows = useMemo(
-    () => buildSemanticGravityRows(syncRows, semanticFocus),
-    [syncRows, semanticFocus],
-  )
-  const intentProjections = useMemo(
-    () => buildIntentProjectionRows(events, semanticFocus, maxIntentProjections),
-    [events, semanticFocus, maxIntentProjections],
-  )
-  const summary = useMemo(
-    () => summarizeEventStream(events, maxItems, temporalSyncWindowMs, semanticFocus, maxIntentProjections),
+  const model = useMemo(
+    () => buildEventStreamModel(events, maxItems, temporalSyncWindowMs, semanticFocus, maxIntentProjections),
     [events, maxItems, temporalSyncWindowMs, semanticFocus, maxIntentProjections],
   )
+  const { visible, semanticRows, intentProjections, summary } = model
 
   return html`
     <div
@@ -510,11 +548,11 @@ export function EventStream({
           : html`
             <div class="space-y-1" role="list">
               ${semanticRows.map(
-                (row, index) => {
+                row => {
                   const e = row.event
                   const isSynced = row.syncGroupSize > 1
                   const eventTimestamp = finiteTimestamp(e.timestamp)
-                  const attractionScore = streamEventAttractionScore(row, index, semanticRows.length)
+                  const attractionScore = streamEventAttractionScore(row, row.originalVisibleIndex, semanticRows.length)
                   const attractionBand = streamEventAttractionBand(attractionScore)
                   return html`
                   <div
@@ -525,7 +563,7 @@ export function EventStream({
                     data-stream-event-level=${e.level}
                     data-stream-event-source=${e.source ?? ''}
                     data-stream-event-timestamp=${eventTimestamp ?? ''}
-                    data-stream-event-visible-index=${index}
+                    data-stream-event-visible-index=${row.originalVisibleIndex}
                     data-stream-event-sync-group=${row.syncGroupId}
                     data-stream-event-sync-size=${row.syncGroupSize}
                     data-stream-event-sync-anchor=${row.syncAnchorTimestamp ?? ''}

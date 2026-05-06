@@ -282,10 +282,12 @@ describe('EventStream', () => {
     expect(rows.map(row => row.event.id)).toEqual(['e1', 'e3', 'e2'])
     expect(rows[0]?.semanticGravityScore).toBe(0.85)
     expect(rows[0]?.semanticGravityRank).toBe(1)
+    expect(rows[0]?.originalVisibleIndex).toBe(2)
     expect(summarizeEventStream(baseEvents, 100, 5000, ['agent-a', 'started'])).toMatchObject({
       semanticGravityTermCount: 2,
       semanticGravityMatchCount: 1,
       maxSemanticGravityScore: 0.85,
+      maxAttractionScore: 0.9,
     })
   })
 
@@ -299,7 +301,10 @@ describe('EventStream', () => {
     expect(root.dataset.eventStreamSemanticGravityTermCount).toBe('2')
     expect(root.dataset.eventStreamSemanticGravityMatchCount).toBe('1')
     expect(root.dataset.eventStreamMaxSemanticGravityScore).toBe('0.85')
+    expect(root.dataset.eventStreamMaxAttractionScore).toBe('0.90')
     expect(items[0]?.getAttribute('data-stream-event-id')).toBe('e1')
+    expect(focused.dataset.streamEventVisibleIndex).toBe('2')
+    expect(focused.dataset.streamEventAttractionScore).toBe('0.32')
     expect(focused.dataset.streamEventSemanticGravityScore).toBe('0.85')
     expect(focused.dataset.streamEventSemanticGravityRank).toBe('1')
   })

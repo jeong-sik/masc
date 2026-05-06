@@ -2,9 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
 import {
+  buildTemporalSyncRows,
+  DEFAULT_TEMPORAL_SYNC_WINDOW_MS,
   EventStream,
   getVisibleStreamEvents,
   summarizeEventStream,
+  streamEventAttractionBand,
+  streamEventAttractionScore,
 } from './event-stream'
 
 const baseEvents = [
@@ -122,6 +126,11 @@ describe('EventStream', () => {
     expect(root.dataset.eventStreamWarnCount).toBe('1')
     expect(root.dataset.eventStreamErrorCount).toBe('1')
     expect(root.dataset.eventStreamLatestTimestamp).toBe(String(latest.timestamp))
+    expect(root.dataset.eventStreamTemporalSyncWindowMs).toBe(String(DEFAULT_TEMPORAL_SYNC_WINDOW_MS))
+    expect(root.dataset.eventStreamTemporalSyncGroupCount).toBe('0')
+    expect(root.dataset.eventStreamMaxTemporalSyncGroupSize).toBe('1')
+    expect(root.dataset.eventStreamHighAttractionCount).toBe('1')
+    expect(root.dataset.eventStreamMaxAttractionScore).toBe('0.90')
   })
 
   it('exposes event row metadata and datetime', () => {
@@ -159,6 +168,89 @@ describe('EventStream', () => {
       hiddenCount: 1,
       status: 'error',
     })
+  })
+
+  it('omits non-finite timestamps from summary and row metadata', () => {
+    const invalidEvents = [
+      { id: 'bad-1', timestamp: Number.NaN, level: 'info' as const, message: 'bad latest' },
+      { id: 'bad-2', timestamp: Number.POSITIVE_INFINITY, level: 'warn' as const, message: 'bad oldest' },
+    ]
+    const container = document.createElement('div')
+    render(h(EventStream, { events: invalidEvents }), container)
+    const root = container.querySelector('[data-event-stream]') as HTMLElement
+    const latest = container.querySelector('[data-stream-event-id="bad-2"]') as HTMLElement
+
+    expect(summarizeEventStream(invalidEvents, 100)).toMatchObject({
+      latestTimestamp: null,
+      oldestVisibleTimestamp: null,
+    })
+    expect(root.dataset.eventStreamLatestTimestamp).toBe('')
+    expect(root.dataset.eventStreamOldestVisibleTimestamp).toBe('')
+    expect(latest.dataset.streamEventTimestamp).toBe('')
+  })
+
+  it('groups visible events by anchor timestamp inside the temporal synchronization window', () => {
+    const rows = buildTemporalSyncRows(getVisibleStreamEvents(baseEvents, 100), 65000)
+
+    expect(rows.map(row => row.event.id)).toEqual(['e3', 'e2', 'e1'])
+    expect(rows[0]?.syncGroupId).toBe(rows[1]?.syncGroupId)
+    expect(rows[0]?.syncGroupSize).toBe(2)
+    expect(rows[1]?.syncGroupSize).toBe(2)
+    expect(rows[2]?.syncGroupSize).toBe(1)
+    expect(summarizeEventStream(baseEvents, 100, 65000)).toMatchObject({
+      temporalSyncGroupCount: 1,
+      maxTemporalSyncGroupSize: 2,
+    })
+  })
+
+  it('scores gradient attraction by severity, recency, and sync grouping', () => {
+    const rows = buildTemporalSyncRows(getVisibleStreamEvents(baseEvents, 100), 65000)
+    const latestScore = streamEventAttractionScore(rows[0]!, 0, rows.length)
+    const neighborScore = streamEventAttractionScore(rows[1]!, 1, rows.length)
+    const olderScore = streamEventAttractionScore(rows[2]!, 2, rows.length)
+
+    expect(latestScore).toBe(1)
+    expect(neighborScore).toBe(0.69)
+    expect(olderScore).toBe(0.32)
+    expect(streamEventAttractionBand(latestScore)).toBe('high')
+    expect(streamEventAttractionBand(neighborScore)).toBe('medium')
+    expect(streamEventAttractionBand(olderScore)).toBe('low')
+  })
+
+  it('renders temporal synchronization metadata and cue badges', () => {
+    const container = document.createElement('div')
+    render(h(EventStream, { events: baseEvents, temporalSyncWindowMs: 65000 }), container)
+    const root = container.querySelector('[data-event-stream]') as HTMLElement
+    const latest = container.querySelector('[data-stream-event-id="e3"]') as HTMLElement
+    const neighbor = container.querySelector('[data-stream-event-id="e2"]') as HTMLElement
+    const older = container.querySelector('[data-stream-event-id="e1"]') as HTMLElement
+
+    expect(root.dataset.eventStreamTemporalSyncWindowMs).toBe('65000')
+    expect(root.dataset.eventStreamTemporalSyncGroupCount).toBe('1')
+    expect(root.dataset.eventStreamMaxTemporalSyncGroupSize).toBe('2')
+    expect(latest.dataset.streamEventSyncGroup).toBe(neighbor.dataset.streamEventSyncGroup)
+    expect(latest.dataset.streamEventSyncSize).toBe('2')
+    expect(neighbor.dataset.streamEventSyncSize).toBe('2')
+    expect(older.dataset.streamEventSyncSize).toBe('1')
+    expect(container.textContent).toContain('sync 2')
+    const syncBadge = Array.from(container.querySelectorAll('span'))
+      .find(el => el.textContent === 'sync 2') as HTMLElement | undefined
+    expect(syncBadge?.getAttribute('aria-hidden')).toBe('true')
+  })
+
+  it('renders gradient attraction metadata on event rows', () => {
+    const container = document.createElement('div')
+    render(h(EventStream, { events: baseEvents }), container)
+    const root = container.querySelector('[data-event-stream]') as HTMLElement
+    const latest = container.querySelector('[data-stream-event-id="e3"]') as HTMLElement
+    const middle = container.querySelector('[data-stream-event-id="e2"]') as HTMLElement
+    const older = container.querySelector('[data-stream-event-id="e1"]') as HTMLElement
+
+    expect(root.dataset.eventStreamHighAttractionCount).toBe('1')
+    expect(latest.dataset.streamEventAttractionScore).toBe('0.90')
+    expect(latest.dataset.streamEventAttractionBand).toBe('high')
+    expect(middle.dataset.streamEventAttractionBand).toBe('medium')
+    expect(older.dataset.streamEventAttractionBand).toBe('low')
   })
 
   it('treats maxItems zero as an empty visible window', () => {

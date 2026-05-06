@@ -159,6 +159,14 @@ def repo_artifact_path(value: Any) -> str | None:
     return artifact_path
 
 
+def repo_artifact_anchor(value: Any) -> str | None:
+    artifact_ref = as_nonempty_str(value)
+    if artifact_ref is None or "#" not in artifact_ref:
+        return None
+    anchor = artifact_ref.split("#", 1)[1].strip()
+    return anchor or None
+
+
 def criterion(
     criterion_id: str,
     passed: bool,
@@ -710,7 +718,10 @@ def prompt_closeout_checklist_evidence(
     invalid_tracking_issue_refs: list[str] = []
     artifact_refs_total = 0
     artifact_refs_resolved = 0
+    artifact_ref_anchors_total = 0
+    artifact_ref_anchors_resolved = 0
     missing_artifact_refs: list[str] = []
+    missing_artifact_ref_anchors: list[str] = []
     invalid_artifact_refs: list[str] = []
     for index, requirement in enumerate(requirements):
         if not isinstance(requirement, dict):
@@ -743,7 +754,23 @@ def prompt_closeout_checklist_evidence(
                         f"{requirement_label}: invalid_artifact_ref"
                     )
                     continue
-                if (REPO_ROOT / artifact_path).is_file():
+                full_artifact_path = REPO_ROOT / artifact_path
+                if full_artifact_path.is_file():
+                    anchor = repo_artifact_anchor(artifact)
+                    if anchor is not None:
+                        artifact_ref_anchors_total += 1
+                        artifact_text = full_artifact_path.read_text(
+                            encoding="utf-8", errors="replace"
+                        )
+                        if anchor not in artifact_text:
+                            missing_artifact_ref_anchors.append(
+                                f"{requirement_label}: {artifact_path}#{anchor}"
+                            )
+                            invalid_requirements.append(
+                                f"{requirement_label}: missing_artifact_ref_anchor"
+                            )
+                            continue
+                        artifact_ref_anchors_resolved += 1
                     artifact_refs_resolved += 1
                 else:
                     missing_artifact_refs.append(
@@ -830,13 +857,17 @@ def prompt_closeout_checklist_evidence(
         "invalid_tracking_issue_refs": invalid_tracking_issue_refs,
         "artifact_refs_total": artifact_refs_total,
         "artifact_refs_resolved": artifact_refs_resolved,
+        "artifact_ref_anchors_total": artifact_ref_anchors_total,
+        "artifact_ref_anchors_resolved": artifact_ref_anchors_resolved,
         "artifact_refs_all_resolved": (
             artifact_refs_total > 0
             and artifact_refs_resolved == artifact_refs_total
             and not missing_artifact_refs
+            and not missing_artifact_ref_anchors
             and not invalid_artifact_refs
         ),
         "missing_artifact_refs": missing_artifact_refs,
+        "missing_artifact_ref_anchors": missing_artifact_ref_anchors,
         "invalid_artifact_refs": sorted(set(invalid_artifact_refs)),
         "invalid_requirements": invalid_requirements,
         "local_path_leaks": local_path_leaks,

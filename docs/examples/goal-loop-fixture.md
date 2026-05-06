@@ -327,3 +327,4 @@ tracking ref, so incomplete prompt coverage cannot be recorded without an
 owned follow-up. Checklist `artifact_refs` must resolve to repo-local files
 after optional `#...` anchors are stripped; absolute paths, parent-directory
 escapes, user-local paths, and missing files make the checklist unrecorded.
+When an anchor is present, the target file must contain the anchor text.

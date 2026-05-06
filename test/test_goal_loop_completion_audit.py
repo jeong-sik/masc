@@ -819,6 +819,12 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertEqual(checklist_evidence["tracking_issue_refs_total"], 8)
         self.assertEqual(checklist_evidence["missing_tracking_issue_refs"], [])
         self.assertEqual(checklist_evidence["invalid_tracking_issue_refs"], [])
+        self.assertEqual(
+            checklist_evidence["requirements_with_implementation_pr_refs"],
+            9,
+        )
+        self.assertEqual(checklist_evidence["implementation_pr_refs_total"], 5)
+        self.assertEqual(checklist_evidence["invalid_implementation_pr_refs"], [])
         self.assertEqual(checklist_evidence["artifact_refs_total"], 57)
         self.assertEqual(checklist_evidence["artifact_refs_resolved"], 57)
         self.assertEqual(checklist_evidence["artifact_ref_anchors_total"], 7)
@@ -835,6 +841,11 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
             closeout_evidence["requirements_with_tracking_issue_refs"],
             19,
         )
+        self.assertEqual(
+            closeout_evidence["requirements_with_implementation_pr_refs"],
+            9,
+        )
+        self.assertEqual(closeout_evidence["implementation_pr_refs_total"], 5)
         self.assertTrue(closeout_evidence["has_strict_corpus_blocker"])
 
     def test_completion_audit_rejects_invalid_closeout_prompt_sources(
@@ -943,6 +954,37 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         )
         self.assertIn(
             f"{first['requirement_id']}: missing_tracking_issue_refs",
+            checklist_evidence["invalid_requirements"],
+        )
+        self.assertEqual(by_id["prompt_requirements_closeout_complete"].status, "FAIL")
+
+    def test_completion_audit_rejects_invalid_prompt_implementation_pr_refs(
+        self,
+    ) -> None:
+        checklist = json.loads(PROMPT_CHECKLIST_FIXTURE.read_text(encoding="utf-8"))
+        requirements = checklist["requirements"]
+        assert isinstance(requirements, list)
+        first = requirements[0]
+        assert isinstance(first, dict)
+        first["implementation_pr_refs"] = [
+            "https://github.com/jeong-sik/masc-mcp/issues/13630",
+            "https://github.com/other/repo/pull/1",
+        ]
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            prompt_closeout_checklist=checklist,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
+        self.assertFalse(checklist_evidence["recorded"])
+        self.assertEqual(
+            checklist_evidence["invalid_implementation_pr_refs"],
+            [first["requirement_id"]],
+        )
+        self.assertIn(
+            f"{first['requirement_id']}: invalid_implementation_pr_refs",
             checklist_evidence["invalid_requirements"],
         )
         self.assertEqual(by_id["prompt_requirements_closeout_complete"].status, "FAIL")

@@ -102,7 +102,10 @@
       ],
       "status": "PARTIAL",
       "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "Prompt evidence is represented only in the partial catalog and startup replay, not the full 206-row strict corpus or production metric surface.",
+      "gap": "Prompt evidence is represented in the partial catalog and startup replay. Draft implementation PR #13630 adds the Observe metric contract, but the full 206-row strict corpus and merged production metric surface are still absent.",
+      "implementation_pr_refs": [
+        "https://github.com/jeong-sik/masc-mcp/pull/13630"
+      ],
       "tracking_issue_refs": [
         "https://github.com/jeong-sik/masc-mcp/issues/13265",
         "https://github.com/jeong-sik/masc-mcp/issues/13608",
@@ -136,7 +139,10 @@
       ],
       "status": "PARTIAL",
       "criterion_id": "post_act_verify_complete",
-      "gap": "Deterministic chain exists, but long-running scheduler cadence is not implemented.",
+      "gap": "Deterministic chain exists, and scheduler cadence landed in merged PR #13624. The prompt remains PARTIAL until the closeout branch is refreshed against that merge and post-ACT Verify proof is recorded.",
+      "implementation_pr_refs": [
+        "https://github.com/jeong-sik/masc-mcp/pull/13624"
+      ],
       "tracking_issue_refs": [
         "https://github.com/jeong-sik/masc-mcp/issues/13607",
         "https://github.com/jeong-sik/masc-mcp/issues/13636"
@@ -152,7 +158,10 @@
       ],
       "status": "PARTIAL",
       "criterion_id": "post_act_verify_complete",
-      "gap": "Deterministic log and metric replay exists, but Prometheus/Grafana runtime metric wiring is not shipped.",
+      "gap": "Deterministic log and metric replay exists. Draft implementation PR #13630 adds the Observe metric contract, but Prometheus/Grafana runtime metric wiring is not merged and replayed through Verify.",
+      "implementation_pr_refs": [
+        "https://github.com/jeong-sik/masc-mcp/pull/13630"
+      ],
       "tracking_issue_refs": [
         "https://github.com/jeong-sik/masc-mcp/issues/13608",
         "https://github.com/jeong-sik/masc-mcp/issues/13636"
@@ -194,7 +203,10 @@
       ],
       "status": "PARTIAL",
       "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "CLI JSON/text exists, but the operator dashboard panel is not wired.",
+      "gap": "CLI JSON/text exists. Draft implementation PR #13655 wires the operator dashboard panel, but it is not merged/live and the strict corpus remains incomplete.",
+      "implementation_pr_refs": [
+        "https://github.com/jeong-sik/masc-mcp/pull/13655"
+      ],
       "tracking_issue_refs": [
         "https://github.com/jeong-sik/masc-mcp/issues/13609",
         "https://github.com/jeong-sik/masc-mcp/issues/13636"
@@ -221,7 +233,10 @@
       ],
       "status": "PARTIAL",
       "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "Reference integrity exists, but SLA ownership workflow and automatic queueing are not implemented.",
+      "gap": "Reference integrity exists. Draft implementation PR #13664 adds anti-stagnation SLA state, but ownership workflow and automatic queueing are not merged/live.",
+      "implementation_pr_refs": [
+        "https://github.com/jeong-sik/masc-mcp/pull/13664"
+      ],
       "tracking_issue_refs": [
         "https://github.com/jeong-sik/masc-mcp/issues/13611",
         "https://github.com/jeong-sik/masc-mcp/issues/13636"
@@ -253,7 +268,10 @@
       ],
       "status": "PARTIAL",
       "criterion_id": "post_act_verify_complete",
-      "gap": "Closeout verifier exists; TLA and production metric gates are not fully implemented.",
+      "gap": "Closeout verifier exists. Draft implementation PR #13657 adds explicit unit/regression/TLA/log/metric/orient gates, but it is not merged and still requires real production inputs for closeout.",
+      "implementation_pr_refs": [
+        "https://github.com/jeong-sik/masc-mcp/pull/13657"
+      ],
       "tracking_issue_refs": [
         "https://github.com/jeong-sik/masc-mcp/issues/13610",
         "https://github.com/jeong-sik/masc-mcp/issues/13636"
@@ -269,7 +287,10 @@
       ],
       "status": "PARTIAL",
       "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "Branch semantics exist, but complete-corpus Verify is still blocked.",
+      "gap": "Branch semantics exist. Draft implementation PR #13657 adds the Verify pipeline gate contract, but complete-corpus Verify and post-ACT live replay remain blocked.",
+      "implementation_pr_refs": [
+        "https://github.com/jeong-sik/masc-mcp/pull/13657"
+      ],
       "tracking_issue_refs": [
         "https://github.com/jeong-sik/masc-mcp/issues/13265",
         "https://github.com/jeong-sik/masc-mcp/issues/13505",
@@ -286,7 +307,10 @@
       ],
       "status": "PARTIAL",
       "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "CLI status exists; operator dashboard panel is not wired.",
+      "gap": "CLI status exists. Draft implementation PR #13655 wires the operator dashboard panel, but it is not merged/live and the strict corpus remains incomplete.",
+      "implementation_pr_refs": [
+        "https://github.com/jeong-sik/masc-mcp/pull/13655"
+      ],
       "tracking_issue_refs": [
         "https://github.com/jeong-sik/masc-mcp/issues/13609",
         "https://github.com/jeong-sik/masc-mcp/issues/13636"
@@ -301,7 +325,10 @@
       ],
       "status": "PARTIAL",
       "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "Reference integrity exists; SLA timers and automatic escalation are not implemented.",
+      "gap": "Reference integrity exists. Draft implementation PR #13664 adds SLA timers and escalation detection, but it is not merged/live and strict-corpus ACT coverage remains blocked.",
+      "implementation_pr_refs": [
+        "https://github.com/jeong-sik/masc-mcp/pull/13664"
+      ],
       "tracking_issue_refs": [
         "https://github.com/jeong-sik/masc-mcp/issues/13611",
         "https://github.com/jeong-sik/masc-mcp/issues/13636"

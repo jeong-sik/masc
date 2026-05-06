@@ -454,6 +454,7 @@ let observed_affordances_of_observation
   let add affordance = affordances := affordance :: !affordances in
   if observation.pending_mentions <> [] then add "reply_in_room";
   if observation.pending_board_events <> [] then add "board_post_or_comment";
+  if List.length observation.pending_board_events >= 2 then add "board_curation";
   if observation.pending_scope_messages <> [] then add "message_sweep";
   if observation.claimable_task_count > 0 then add "task_claim";
   if observation.failed_task_count > 0 then add "task_audit";

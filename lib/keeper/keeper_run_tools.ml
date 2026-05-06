@@ -687,8 +687,14 @@ let prepare_agent_setup
       |> validate_allow_list ~turn
       |> Keeper_types.dedupe_keep_order
     in
+    let visible_affordance_tool_names =
+      preferred_tool_names_for_turn_affordances turn_affordances
+      |> validate_allow_list ~turn
+      |> Keeper_types.dedupe_keep_order
+    in
     let merged =
-      Keeper_types.dedupe_keep_order (merged @ visible_required_tool_names)
+      Keeper_types.dedupe_keep_order
+        (merged @ visible_required_tool_names @ visible_affordance_tool_names)
     in
     let selection_mode =
       if llm_rerank_enabled
@@ -752,9 +758,14 @@ let prepare_agent_setup
           max_tools;
         let required_turn_essential_tool_names =
           if required_tool_names <> [] then visible_required_tool_names
-          else if tool_gate_requested
-             && has_task_claim_affordance turn_affordances
-          then [ "keeper_task_claim" ]
+          else if tool_gate_requested then
+            let claim_tools =
+              if has_task_claim_affordance turn_affordances
+              then [ "keeper_task_claim" ]
+              else []
+            in
+            Keeper_types.dedupe_keep_order
+              (visible_affordance_tool_names @ claim_tools)
           else []
         in
         let essential_names =

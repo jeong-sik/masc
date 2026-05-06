@@ -377,6 +377,10 @@ val provider_label_of_config :
 val provider_health_key_of_config :
   Llm_provider.Provider_config.t -> string
 
+(** Stable model-level key for model-specific cascade health state. *)
+val provider_model_health_key_of_config :
+  Llm_provider.Provider_config.t -> string
+
 (** User-facing provider label for a provider config. *)
 val display_provider_name_of_config :
   Llm_provider.Provider_config.t -> string

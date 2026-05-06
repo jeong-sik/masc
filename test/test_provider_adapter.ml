@@ -379,6 +379,25 @@ let test_local_openai_compat_health_key_is_endpoint_scoped () =
     (Adapter.provider_health_key_of_config primary
      <> Adapter.provider_health_key_of_config fallback)
 
+let test_provider_model_health_key_is_model_scoped () =
+  let cfg label =
+    match Masc_mcp.Cascade_config.parse_model_string label with
+    | Some cfg -> cfg
+    | None -> fail ("expected model label to parse: " ^ label)
+  in
+  let glm_code = cfg "glm-coding:glm-5-code" in
+  let glm_51 = cfg "glm-coding:glm-5.1" in
+  check string "provider health key stays provider scoped" "glm-coding"
+    (Adapter.provider_health_key_of_config glm_code);
+  check string "model health key includes concrete model" "glm-coding:glm-5-code"
+    (Adapter.provider_model_health_key_of_config glm_code);
+  check bool "sibling models do not share model health key" true
+    (Adapter.provider_model_health_key_of_config glm_code
+     <> Adapter.provider_model_health_key_of_config glm_51);
+  check string "sibling models still share provider health key"
+    (Adapter.provider_health_key_of_config glm_code)
+    (Adapter.provider_health_key_of_config glm_51)
+
 let test_provider_of_model_label_uses_typed_boundaries () =
   check string "explicit prefix wins over coarse kind" "glm-coding"
     (Adapter.provider_of_model_label
@@ -469,6 +488,8 @@ let () =
             test_provider_health_key_is_provider_scoped;
           test_case "local openai compat health key is endpoint scoped" `Quick
             test_local_openai_compat_health_key_is_endpoint_scoped;
+          test_case "provider model health key is model scoped" `Quick
+            test_provider_model_health_key_is_model_scoped;
           test_case "provider model label uses typed boundaries" `Quick
             test_provider_of_model_label_uses_typed_boundaries;
           test_case "unmetered provider uses telemetry policy" `Quick

@@ -71,6 +71,10 @@ val sdk_error_is_terminal_provider_runtime_failure :
     immediate long cooldown lane instead of waiting for generic failure
     thresholding. *)
 
+val sdk_error_is_model_access_denied : Agent_sdk.Error.sdk_error -> bool
+(** [true] for deterministic model-access denials that should cool down the
+    concrete provider/model pair without poisoning sibling models. *)
+
 val sdk_error_is_hard_quota : Agent_sdk.Error.sdk_error -> bool
 (** [true] when the error represents a hard usage quota that will not
     recover within the cascade turn budget. *)

@@ -1,6 +1,18 @@
 # Changelog
 
 
+## [0.19.17] - 2026-05-07
+
+### Added
+- `lib/cognitive_mode.{ml,mli}`: backend OCaml mirror of the dashboard `CognitiveMode` enum and `CognitiveModeState` interface (`dashboard/src/cockpit-entrypoints.ts`). Master Report Dim01 P0 #2 backend. Four modes (Cockpit / Code / Split / Explode), load classification (Situational / Focused / Comparative / Exploratory), layout hint (all-panels / editor-first / side-by-side / graph-map), 9 transition signals (Master Report section 1.4 triggers), JSON codec with kebab-case layout values and string mode/load values matching the dashboard wire format. Pure OCaml. RFC-0035 PR-7.
+- `test/test_cognitive_mode.ml`: 15 alcotest cases covering mode round-trip, dashboard string-match invariant, of_string rejects unknown, load_of_mode mapping, layout_of_mode mapping, load+layout round-trip, state_of_mode consistency, transition rules per Master Report section 1.4, total mode/signal transition coverage, no invalid-edge fallback, mode JSON round-trip, state JSON round-trip, dashboard wire-format substring contract, and decode rejection for unknown mode/load/layout.
+
+### Changed
+- `docs/rfc/RFC-0035-cognitive-ide-roadmap.md`: PR-stack table extended - PR-7 (cognitive_mode FSM, Dim01 P0 #2 backend) marked in-flight.
+
+### Boundary
+- This module owns the mode taxonomy + load/layout classification + transition rules + JSON wire format. It does NOT own dashboard route targets (`tab` / `params`) or the `cockpitModes` mapping; those stay in TypeScript so a route change does not require a backend pin bump.
+
 ## [0.19.16] - 2026-05-07
 
 ### Added

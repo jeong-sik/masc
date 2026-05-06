@@ -13,6 +13,7 @@ import argparse
 import json
 import sys
 import time
+from collections import Counter
 from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -787,6 +788,18 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         fleet_failures.append(
             f"minimum_{args.expected_keepers}_configured_keepers_got_{len(config_paths)}"
         )
+    github_identity_counts = Counter(
+        keeper.github_identity for keeper in keepers if keeper.github_identity
+    )
+    requires_docker_approve = (
+        args.require_docker_pr_approve_evidence
+        or args.require_docker_pr_lifecycle_evidence
+    )
+    if requires_docker_approve and len(github_identity_counts) < 2:
+        fleet_failures.append(
+            "docker_pr_approve_identity_pool_insufficient"
+            f"_unique_github_identities_{len(github_identity_counts)}"
+        )
     failed_keepers = [keeper for keeper in keepers if keeper.failures]
     ok = not fleet_failures and not failed_keepers
     return {
@@ -796,6 +809,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         "expected_keepers": args.expected_keepers,
         "configured_keepers": len(config_paths),
         "max_silence_hours": args.max_silence_hours,
+        "github_identity_counts": dict(sorted(github_identity_counts.items())),
         "requirements": {
             "require_board_evidence": args.require_board_evidence,
             "require_pr_surface_evidence": args.require_pr_surface_evidence,

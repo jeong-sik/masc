@@ -47,10 +47,12 @@ def audit_args(base_path: Path, expected_keepers: int):
     )
 
 
-def write_ready_keeper(root: Path, name: str) -> None:
+def write_ready_keeper(
+    root: Path, name: str, *, github_identity: str = "anyang-keepers"
+) -> None:
     config_dir = root / ".masc" / "config" / "keepers"
     runtime_dir = root / ".masc" / "keepers"
-    credential_dir = root / ".masc" / "github-identities" / "anyang-keepers" / "gh"
+    credential_dir = root / ".masc" / "github-identities" / github_identity / "gh"
     config_dir.mkdir(parents=True, exist_ok=True)
     runtime_dir.mkdir(parents=True, exist_ok=True)
     credential_dir.mkdir(parents=True, exist_ok=True)
@@ -61,7 +63,7 @@ def write_ready_keeper(root: Path, name: str) -> None:
                 'sandbox_profile = "docker"',
                 'network_mode = "inherit"',
                 'tool_preset = "coding"',
-                'github_identity = "anyang-keepers"',
+                f'github_identity = "{github_identity}"',
                 'git_identity_mode = "github_identity"',
                 "",
             ]
@@ -74,7 +76,7 @@ def write_ready_keeper(root: Path, name: str) -> None:
                 "sandbox_profile": "docker",
                 "network_mode": "inherit",
                 "tool_preset": "coding",
-                "github_identity": "anyang-keepers",
+                "github_identity": github_identity,
                 "git_identity_mode": "github_identity",
                 "last_turn_ts": time.time(),
             }
@@ -452,6 +454,44 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertFalse(report["ok"])
         self.assertEqual(
             report["fleet_failures"], ["minimum_2_configured_keepers_got_1"]
+        )
+
+    def test_docker_pr_approve_requirement_fails_with_single_identity_pool(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ready_keeper(root, "alpha")
+            write_ready_keeper(root, "bravo")
+            args = audit_args(root, expected_keepers=2)
+            args.require_docker_pr_lifecycle_evidence = True
+
+            report = audit.build_report(args)
+
+        self.assertFalse(report["ok"])
+        self.assertEqual(report["github_identity_counts"], {"anyang-keepers": 2})
+        self.assertIn(
+            "docker_pr_approve_identity_pool_insufficient"
+            "_unique_github_identities_1",
+            report["fleet_failures"],
+        )
+
+    def test_docker_pr_approve_requirement_accepts_multiple_identity_pool(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ready_keeper(root, "alpha", github_identity="anyang-keepers")
+            write_ready_keeper(root, "bravo", github_identity="reviewer-keepers")
+            args = audit_args(root, expected_keepers=2)
+            args.require_docker_pr_approve_evidence = True
+
+            report = audit.build_report(args)
+
+        self.assertEqual(
+            report["github_identity_counts"],
+            {"anyang-keepers": 1, "reviewer-keepers": 1},
+        )
+        self.assertNotIn(
+            "docker_pr_approve_identity_pool_insufficient"
+            "_unique_github_identities_1",
+            report["fleet_failures"],
         )
 
 

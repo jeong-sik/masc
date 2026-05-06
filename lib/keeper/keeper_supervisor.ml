@@ -175,9 +175,32 @@ let fork_stale_watchdog = Keeper_stale_watchdog.fork_stale_watchdog
 (* ── Supervised fiber launch ─────────────────────────────── *)
 
 let restart_launch_noop_for_test = Atomic.make false
+let restart_launch_noop_scope_mu = Stdlib.Mutex.create ()
+let restart_launch_noop_scope_depth = ref 0
+let restart_launch_noop_scope_previous = ref false
 
 let set_restart_launch_noop_for_test enabled =
   Atomic.set restart_launch_noop_for_test enabled
+
+let restart_launch_noop_enabled_for_test () =
+  Atomic.get restart_launch_noop_for_test
+
+let with_restart_launch_noop_for_test f =
+  Stdlib.Mutex.lock restart_launch_noop_scope_mu;
+  if !restart_launch_noop_scope_depth = 0 then begin
+    restart_launch_noop_scope_previous := restart_launch_noop_enabled_for_test ();
+    set_restart_launch_noop_for_test true
+  end;
+  incr restart_launch_noop_scope_depth;
+  Stdlib.Mutex.unlock restart_launch_noop_scope_mu;
+  Fun.protect
+    ~finally:(fun () ->
+      Stdlib.Mutex.lock restart_launch_noop_scope_mu;
+      decr restart_launch_noop_scope_depth;
+      if !restart_launch_noop_scope_depth = 0 then
+        set_restart_launch_noop_for_test !restart_launch_noop_scope_previous;
+      Stdlib.Mutex.unlock restart_launch_noop_scope_mu)
+    f
 
 let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
     (reg : Keeper_registry.registry_entry) =
@@ -862,6 +885,13 @@ let reset_self_preservation_escape_state_for_test () =
   sp_escape_state.last_dominant_cohort <- "";
   sp_escape_state.consecutive_suppressions <- 0
 
+let active_supervision_keeper_count entries =
+  List_util.count_if
+    (fun (e : Keeper_registry.registry_entry) ->
+      e.phase = Keeper_state_machine.Running
+      || e.phase = Keeper_state_machine.Crashed)
+    entries
+
 (** Self-preservation gate. Suppresses restarts when a dominant failure
     cohort exceeds ratio threshold AND minimum candidate count.
     Bounded minority [stale_turn_timeout] cohorts are allowed through so
@@ -1385,9 +1415,9 @@ let sweep_and_recover (ctx : _ context) =
   ) !to_mark_dead;
   List.iter (cleanup_dead_tombstone ctx) !to_cleanup_dead;
   let active_count =
-    List_util.count_if (fun (e : Keeper_registry.registry_entry) ->
-      e.phase = Keeper_state_machine.Running || e.phase = Keeper_state_machine.Crashed
-    ) entries in
+    Keeper_registry.all ~base_path ()
+    |> active_supervision_keeper_count
+  in
   let restart_list =
     let keepers_dir =
       Filename.concat (Coord.masc_root_dir ctx.config) "keepers" in

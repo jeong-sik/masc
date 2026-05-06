@@ -80,7 +80,9 @@ def artifact_log_name(index: int, source: Path) -> str:
     return f"{index:02d}-{name}"
 
 
-def source_snapshots(paths: list[Path], *, tail_only: bool) -> dict[Path, SourceSnapshot]:
+def source_snapshots(
+    paths: list[Path], *, tail_only: bool
+) -> dict[Path, SourceSnapshot]:
     snapshots: dict[Path, SourceSnapshot] = {}
     for path in paths:
         stat = path.stat()

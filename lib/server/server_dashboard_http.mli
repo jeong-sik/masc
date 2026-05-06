@@ -140,9 +140,9 @@ val operator_error_json : string -> Yojson.Safe.t
     Returns the snapshot of multiple dashboard slices in a single JSON
     payload so the frontend cold start does not fan out into N
     parallel HTTP calls.  Per-slice exceptions are captured and
-    surfaced as [{"error":"slice_unavailable", "slice":"<name>"}]
-    under the slice key so a single broken slice does not 500 the
-    whole bootstrap.
+    surfaced as a JSON object under the slice key:
+    {"error":"slice_unavailable", "slice":"<name>"}.  A single
+    broken slice therefore does not 500 the whole bootstrap.
 
     Single SSOT — both the HTTP/1.1 router and the HTTP/2 gateway
     call this function so the payload shape and slice list cannot

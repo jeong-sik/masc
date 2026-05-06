@@ -164,6 +164,23 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             (server_state_error_json message)
             ~status:`Internal_server_error ~extra_headers:cors
     in
+    let h2_respond_auth_error h2_reqd err =
+      let status = http_status_of_auth_error err in
+      h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+    in
+    let with_h2_public_read h2_reqd f =
+      if http_auth_strict_enabled () && not (is_public_read_path path)
+      then
+        with_server_state h2_reqd (fun state ->
+          match
+            authorize_read_request
+              ~base_path:state.Mcp_server.room_config.base_path
+              httpun_request
+          with
+          | Ok () -> f state
+          | Error err -> h2_respond_auth_error h2_reqd err)
+      else with_server_state h2_reqd f
+    in
     let session_id_opt = get_session_id_any httpun_request in
     let h2_respond_dashboard_index () =
       let index_path = dashboard_index_path () in
@@ -641,7 +658,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           (* Same SSOT as the HTTP/1.1 router so the HTTP/2 client sees
              the identical payload shape, slice list, and error
              contract.  See [Server_dashboard_http.dashboard_bootstrap_http_json]. *)
-          with_server_state h2_reqd (fun state ->
+          with_h2_public_read h2_reqd (fun state ->
             let json =
               dashboard_bootstrap_http_json ~state ~sw ~clock httpun_request
             in

@@ -434,6 +434,44 @@ let test_dispatch_worktree_create_refreshes_playground_repo_cache () =
       check bool "cache commit uses live git metadata" true
         (contains "init" latest_commit)
 
+let test_playground_repo_cache_preserves_concurrent_updates () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  init_process_eio env;
+  run_ok ~cwd:base_path "git init -q -b main";
+  let repo_path =
+    setup_nested_repo_with_remote ~base_path
+      ~repo_rel:"workspace/yousleepwhen/masc-mcp"
+  in
+  let playground_dir =
+    Filename.concat base_path ".masc/playground/test-agent"
+  in
+  ensure_dir playground_dir;
+  Eio.Fiber.both
+    (fun () ->
+       Masc_mcp.Playground_repo_cache.update ~playground_dir
+         ~repo_name:"repo-a" ~repo_path ~action:"clone" ~shallow:false)
+    (fun () ->
+       Masc_mcp.Playground_repo_cache.update ~playground_dir
+         ~repo_name:"repo-b" ~repo_path ~action:"fetch" ~shallow:false);
+  let open Yojson.Safe.Util in
+  let names =
+    Yojson.Safe.from_file
+      (Filename.concat playground_dir ".playground_state.json")
+    |> member "repos"
+    |> to_list
+    |> List.filter_map (fun repo ->
+         match member "name" repo with
+         | `String name -> Some name
+         | _ -> None)
+    |> List.sort String.compare
+  in
+  check (list string) "concurrent cache updates preserved"
+    [ "repo-a"; "repo-b" ]
+    names
+
 let test_dispatch_worktree_create_auto_provisions_after_file_storm () =
   let base_path = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
@@ -879,6 +917,8 @@ let () =
         test_dispatch_worktree_create_auto_provisions_workspace_repo;
       test_case "worktree create refreshes playground repo cache" `Quick
         test_dispatch_worktree_create_refreshes_playground_repo_cache;
+      test_case "playground repo cache preserves concurrent updates" `Quick
+        test_playground_repo_cache_preserves_concurrent_updates;
       test_case "workspace repo auto-provisions after file storm" `Quick
         test_dispatch_worktree_create_auto_provisions_after_file_storm;
       test_case "workspace repo wins before hidden dir storm" `Quick

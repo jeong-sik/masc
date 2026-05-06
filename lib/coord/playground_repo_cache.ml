@@ -18,6 +18,12 @@ let git_meta repo_path args =
   Process_eio.run_argv_with_status ~timeout_sec:git_meta_timeout_sec
     ("git" :: "-C" :: repo_path :: args)
 
+let cache_update_mu = Stdlib.Mutex.create ()
+
+let with_cache_update_lock f =
+  Stdlib.Mutex.lock cache_update_mu;
+  Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock cache_update_mu) f
+
 let is_shallow_repo repo_path =
   try
     match git_meta repo_path [ "rev-parse"; "--is-shallow-repository" ] with
@@ -57,33 +63,34 @@ let update
           ("updated_at", `String ts);
         ]
     in
-    let cache_path = Filename.concat playground_dir ".playground_state.json" in
-    let existing =
-      try
-        let json = Yojson.Safe.from_file cache_path in
-        match Yojson.Safe.Util.member "repos" json with
-        | `List repos -> repos
-        | _ -> []
-      with Sys_error _ | Yojson.Json_error _ -> []
-    in
-    let updated =
-      entry
-      :: List.filter
-           (fun repo ->
-             match Yojson.Safe.Util.member "name" repo with
-             | `String name -> not (String.equal name repo_name)
-             | _ -> true)
-           existing
-    in
-    let json =
-      `Assoc [ ("repos", `List updated); ("last_updated", `String ts) ]
-    in
-    match
-      Fs_compat.save_file_atomic cache_path
-        (Yojson.Safe.pretty_to_string json ^ "\n")
-    with
-    | Ok () -> ()
-    | Error e -> Log.Misc.warn "playground cache save failed: %s" e
+    with_cache_update_lock (fun () ->
+      let cache_path = Filename.concat playground_dir ".playground_state.json" in
+      let existing =
+        try
+          let json = Yojson.Safe.from_file cache_path in
+          match Yojson.Safe.Util.member "repos" json with
+          | `List repos -> repos
+          | _ -> []
+        with Sys_error _ | Yojson.Json_error _ -> []
+      in
+      let updated =
+        entry
+        :: List.filter
+             (fun repo ->
+               match Yojson.Safe.Util.member "name" repo with
+               | `String name -> not (String.equal name repo_name)
+               | _ -> true)
+             existing
+      in
+      let json =
+        `Assoc [ ("repos", `List updated); ("last_updated", `String ts) ]
+      in
+      match
+        Fs_compat.save_file_atomic cache_path
+          (Yojson.Safe.pretty_to_string json ^ "\n")
+      with
+      | Ok () -> ()
+      | Error e -> Log.Misc.warn "playground cache save failed: %s" e)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->

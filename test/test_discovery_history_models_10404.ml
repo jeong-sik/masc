@@ -67,7 +67,7 @@ let text_has_literal text literal =
   Astring.String.is_infix ~affix:literal text
 
 let test_failure_observer_increments_metric () =
-  let labels = [("site", "unit_test")] in
+  let labels = [("site", "unknown")] in
   let before =
     P.metric_value_or_zero P.metric_discovery_history_failures ~labels ()
   in
@@ -80,6 +80,22 @@ let test_failure_observer_increments_metric () =
   in
   check (float 0.0001) "discovery history failure counted"
     (before +. 1.0)
+    after
+
+let test_failure_observer_bounds_metric_site_label () =
+  let labels = [("site", "arbitrary_unbounded_test_site")] in
+  let before =
+    P.metric_value_or_zero P.metric_discovery_history_failures ~labels ()
+  in
+  DH.For_testing.observe_failure
+    ~site:"arbitrary_unbounded_test_site"
+    ~base_path:"/tmp/masc-discovery-history"
+    (Failure "synthetic discovery history failure");
+  let after =
+    P.metric_value_or_zero P.metric_discovery_history_failures ~labels ()
+  in
+  check (float 0.0001) "raw arbitrary site label not emitted"
+    before
     after
 
 let test_failure_observer_reraises_cancelled () =
@@ -116,6 +132,8 @@ let () =
     ("failure_observer", [
         test_case "increments metric" `Quick
           test_failure_observer_increments_metric;
+        test_case "bounds metric site label" `Quick
+          test_failure_observer_bounds_metric_site_label;
         test_case "re-raises cancellation" `Quick
           test_failure_observer_reraises_cancelled;
         test_case "metric registered" `Quick

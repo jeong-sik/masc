@@ -45,4 +45,6 @@ val prune :
 
 module For_testing : sig
   val observe_failure : site:string -> base_path:string -> exn -> unit
+  (** White-box helper. [site] is canonicalized before metric emission and is
+      not part of the stable public API. *)
 end

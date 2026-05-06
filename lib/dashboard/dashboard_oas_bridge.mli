@@ -191,8 +191,9 @@ val summary_json : ?provider:string -> ?limit:int -> unit -> Yojson.Safe.t
     [GET /api/v1/dashboard/oas/telemetry/summary?provider=P&limit=N]. *)
 
 val clear : ?provider:string -> unit -> unit
-(** [clear ?provider ()] drops samples. With [provider] only that ring is
-    cleared. Without [provider] the entire table is reset.
+(** [clear ?provider ()] drops samples and provider-error counts. With
+    [provider] only that provider's ring/counts are cleared. Without
+    [provider] the entire telemetry table is reset.
 
     Intended for test fixtures and dashboard reset; do not call from
     production code. *)

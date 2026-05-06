@@ -148,4 +148,85 @@ describe('CostDashboard route-backed focus behavior', () => {
 
     expect(container.querySelector('[aria-label^="Latency histogram"]')).toBeNull()
   })
+
+  it('preserves cockpit context when selecting a cost focus chip', async () => {
+    const { route } = await import('../router')
+    const { CostDashboard } = await import('./cost-dashboard')
+    route.value = {
+      tab: 'monitoring',
+      params: {
+        section: 'runtime',
+        view: 'cost',
+        mode: 'Observe',
+        repo: 'viewer',
+        q: 'cost',
+      },
+      postId: null,
+    }
+
+    render(h(CostDashboard, { view: 'cost' }), container)
+    await waitFor(() => container.textContent?.includes('glm-5-air') ?? false, 'model metrics')
+
+    const latencyTab = Array.from(
+      container.querySelectorAll('[data-testid="cost-focus-rail"] [role="tab"]'),
+    ).find(tab => tab.textContent?.includes('지연 분포')) as HTMLButtonElement | undefined
+    latencyTab?.click()
+
+    expect(route.value.params).toMatchObject({
+      section: 'runtime',
+      view: 'cost',
+      focus: 'latency',
+      mode: 'Observe',
+      tab: 'ct-lat',
+      repo: 'viewer',
+      q: 'cost',
+    })
+    expect(window.location.hash).toContain('focus=latency')
+    expect(window.location.hash).toContain('mode=Observe')
+    expect(window.location.hash).toContain('tab=ct-lat')
+    await waitFor(
+      () => container.querySelector('[aria-label^="Latency histogram"]') != null,
+      'focused latency histogram',
+    )
+  })
+
+  it('preserves cockpit context when switching to keeper cost mode', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      '#monitoring?section=runtime&view=cost&mode=Observe&repo=viewer',
+    )
+    const { route } = await import('../router')
+    const { CostDashboard } = await import('./cost-dashboard')
+    route.value = {
+      tab: 'monitoring',
+      params: {
+        section: 'runtime',
+        view: 'cost',
+        mode: 'Observe',
+        repo: 'viewer',
+      },
+      postId: null,
+    }
+
+    render(h(CostDashboard, { view: 'cost' }), container)
+    await waitFor(() => container.textContent?.includes('glm-5-air') ?? false, 'model metrics')
+
+    const keeperButton = Array.from(container.querySelectorAll('button[role="radio"]'))
+      .find(button => button.textContent?.trim() === 'Keeper') as HTMLButtonElement | undefined
+    keeperButton?.click()
+
+    expect(route.value.params).toMatchObject({
+      section: 'runtime',
+      view: 'cost',
+      focus: 'agent',
+      mode: 'Observe',
+      tab: 'ct-agt',
+      repo: 'viewer',
+    })
+    expect(window.location.hash).toContain('focus=agent')
+    expect(window.location.hash).toContain('mode=Observe')
+    expect(window.location.hash).toContain('tab=ct-agt')
+    await waitFor(() => container.textContent?.includes('sangsu') ?? false, 'keeper metrics')
+  })
 })

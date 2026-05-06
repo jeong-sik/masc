@@ -126,6 +126,25 @@ describe('navigate', () => {
     expect(route.value.params.repo).toBe('viewer')
   })
 
+  it.each([
+    ['ct-agt', 'agent'],
+    ['ct-mtx', 'matrix'],
+    ['ct-lat', 'latency'],
+  ])('maps observe cost subtab %s without dropping context', (tab, focus) => {
+    window.location.hash = `#repo=viewer&mode=Observe&tab=${tab}&q=latency`
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
+
+    expect(route.value.tab).toBe('monitoring')
+    expect(route.value.params.section).toBe('runtime')
+    expect(route.value.params.view).toBe('cost')
+    expect(route.value.params.focus).toBe(focus)
+    expect(route.value.params.repo).toBe('viewer')
+    expect(route.value.params.mode).toBe('Observe')
+    expect(route.value.params.tab).toBe(tab)
+    expect(route.value.params.q).toBe('latency')
+    expect(window.location.hash).toContain(`tab=${tab}`)
+  })
+
   it('replaceRoute writes a canonical hash while preserving the current search params', () => {
     window.history.replaceState(null, '', '/dashboard?theme=paper#overview')
     replaceRoute('workspace', { section: 'planning', view: 'default' })

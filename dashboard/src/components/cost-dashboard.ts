@@ -123,8 +123,37 @@ const WINDOW_OPTIONS: Array<{ key: number; label: string }> = [
 
 const windowMinutes = signal<number>(60)
 
+const COST_FOCUS_COCKPIT_TABS: Record<CostFocus, string> = {
+  agent: 'ct-agt',
+  matrix: 'ct-mtx',
+  latency: 'ct-lat',
+}
+
+function costRouteParams(
+  updates: Record<string, string>,
+  options: { clearFocus?: boolean } = {},
+): Record<string, string> {
+  const params: Record<string, string> = {
+    ...route.value.params,
+    section: 'runtime',
+    view: 'cost',
+    ...updates,
+  }
+  const isObserveCockpit = params.mode?.toLowerCase() === 'observe'
+  const hasCostCockpitTab = Object.values(COST_FOCUS_COCKPIT_TABS).includes(params.tab ?? '')
+
+  if (options.clearFocus) {
+    delete params.focus
+    if (hasCostCockpitTab) delete params.tab
+  } else if (isCostFocus(params.focus) && (isObserveCockpit || hasCostCockpitTab)) {
+    params.tab = COST_FOCUS_COCKPIT_TABS[params.focus]
+  }
+
+  return params
+}
+
 function updateCostFocusParam(focus: CostFocus): void {
-  replaceRoute('monitoring', { section: 'runtime', view: 'cost', focus })
+  replaceRoute('monitoring', costRouteParams({ focus }))
 }
 
 function setCostViewMode(mode: ViewMode): void {
@@ -132,10 +161,11 @@ function setCostViewMode(mode: ViewMode): void {
   const currentMode = currentFocus ? viewModeForCostFocus(currentFocus) : viewMode.value
   if (currentMode === mode) return
 
+  const nextParams = mode === 'keeper'
+    ? costRouteParams({ focus: 'agent' })
+    : costRouteParams({}, { clearFocus: true })
   viewMode.value = mode
-  replaceRoute('monitoring', mode === 'keeper'
-    ? { section: 'runtime', view: 'cost', focus: 'agent' }
-    : { section: 'runtime', view: 'cost' })
+  replaceRoute('monitoring', nextParams)
   if (mode === 'model') {
     void loadModelMetrics(windowMinutes.value)
   } else {

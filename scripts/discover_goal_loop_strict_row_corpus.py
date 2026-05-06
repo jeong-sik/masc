@@ -58,7 +58,8 @@ def iter_paths(roots: list[Path]) -> list[Path]:
 
 def read_text_file(path: Path, max_bytes: int) -> str | None:
     try:
-        data = path.read_bytes()
+        with path.open("rb") as handle:
+            data = handle.read(max_bytes + 1)
     except OSError:
         return None
     if len(data) > max_bytes:
@@ -73,20 +74,21 @@ def zip_member_texts(path: Path, max_bytes: int) -> list[tuple[str, str]]:
     texts: list[tuple[str, str]] = []
     try:
         with zipfile.ZipFile(path) as archive:
-            for member in archive.namelist():
-                if member.endswith("/"):
+            for member in archive.infolist():
+                if member.is_dir():
                     continue
-                suffix = Path(member).suffix.lower()
+                suffix = Path(member.filename).suffix.lower()
                 if suffix not in ZIP_TEXT_SUFFIXES:
                     continue
                 try:
-                    data = archive.read(member)
+                    with archive.open(member) as handle:
+                        data = handle.read(max_bytes + 1)
                 except (KeyError, RuntimeError, OSError, zipfile.BadZipFile):
                     continue
                 if len(data) > max_bytes:
                     data = data[:max_bytes]
                 text = data.decode("utf-8", errors="ignore")
-                texts.append((member, text))
+                texts.append((member.filename, text))
     except (OSError, zipfile.BadZipFile):
         return []
     return texts

@@ -140,6 +140,31 @@ class DiscoverGoalLoopStrictRowCorpusTest(unittest.TestCase):
         self.assertEqual(payload["marker_hits_total"], 1)
         self.assertEqual(payload["validated_strict_corpora_total"], 0)
 
+    def test_read_text_file_reads_only_bounded_prefix(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            path = Path(raw_dir) / "large.json"
+            path.write_bytes(b"strict_row" + (b"x" * 1024))
+
+            text = discover_goal_loop_strict_row_corpus.read_text_file(
+                path,
+                max_bytes=10,
+            )
+
+        self.assertEqual(text, "strict_row")
+
+    def test_zip_member_texts_reads_only_bounded_prefix(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            archive_path = Path(raw_dir) / "candidate.zip"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("nested/marker.json", b"strict_row" + (b"x" * 1024))
+
+            texts = discover_goal_loop_strict_row_corpus.zip_member_texts(
+                archive_path,
+                max_bytes=10,
+            )
+
+        self.assertEqual(texts, [("nested/marker.json", "strict_row")])
+
 
 if __name__ == "__main__":
     unittest.main()

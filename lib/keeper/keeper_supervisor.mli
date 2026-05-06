@@ -92,6 +92,10 @@ val apply_self_preservation :
 val reset_self_preservation_escape_state_for_test : unit -> unit
 (** Reset the self-preservation probe state. Test-only. *)
 
+val set_restart_launch_noop_for_test : bool -> unit
+(** Test-only: when enabled, restart bookkeeping still runs but the
+    replacement heartbeat/watchdog fibers are not forked. *)
+
 (** {1 Liveness Recovery} *)
 
 val liveness_recovery_scan : 'a context -> unit

@@ -30,6 +30,12 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let with_restart_launch_noop f =
+  Sup.set_restart_launch_noop_for_test true;
+  Fun.protect
+    ~finally:(fun () -> Sup.set_restart_launch_noop_for_test false)
+    f
+
 (* ── Pure tests: backoff_delay ──────────────────────────── *)
 
 let test_backoff_delay_attempt_0 () =
@@ -451,6 +457,7 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
         (Reg.is_registered ~base_path:config.base_path meta.name))
 
 let test_restart_path_emits_attempt_and_started_outcome_metrics () =
+  with_restart_launch_noop @@ fun () ->
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->

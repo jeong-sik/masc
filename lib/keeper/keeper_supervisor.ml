@@ -158,6 +158,11 @@ let fork_stale_watchdog = Keeper_stale_watchdog.fork_stale_watchdog
 
 (* ── Supervised fiber launch ─────────────────────────────── *)
 
+let restart_launch_noop_for_test = Atomic.make false
+
+let set_restart_launch_noop_for_test enabled =
+  Atomic.set restart_launch_noop_for_test enabled
+
 let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
     (reg : Keeper_registry.registry_entry) =
   let base_path = ctx.config.base_path in
@@ -174,6 +179,8 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
          Prometheus.metric_keeper_supervisor_cleanup_failures
          ~labels:[("keeper", meta.name); ("site", "fiber_start_rejected")]
          ());
+  if Atomic.get restart_launch_noop_for_test then ()
+  else begin
   fork_stale_watchdog ctx meta reg;
   (* Task 137: Inject bootstrap signal to ensure at least one warm-up turn runs
      and break the initial proactive deadlock. *)
@@ -402,6 +409,7 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
           Log.Keeper.warn
             "%s: supervisor finally cleanup failed (suppressed to avoid Fun.Finally_raised): %s"
             meta.name (Printexc.to_string exn)))
+  end
 
 (* #10993: persona drift visibility.
 
@@ -1021,9 +1029,12 @@ let handle_crash_auto_pause (ctx : _ context)
            meta.auto_resume_after_sec
        in
        let blocker_text =
-         match blocker_class with
-         | Some cls -> blocker_class_to_string cls
-         | None -> reason_tag
+         let existing = String.trim meta.runtime.last_blocker in
+         if existing <> "" then existing
+         else
+           match blocker_class with
+           | Some cls -> blocker_class_to_string cls
+           | None -> reason_tag
        in
        (* Task-138 §"Max no-task-progress 30min = release claimed":
           when the supervisor pauses a keeper because the same blocker

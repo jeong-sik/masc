@@ -224,6 +224,21 @@ class GoalLoopLiveReplayTest(unittest.TestCase):
                     publish_dashboard_status=True,
                 )
 
+    def test_write_json_atomic_ignores_predictable_temp_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            root = Path(raw_dir)
+            target = root / "status.json"
+            victim = root / "victim.json"
+            predictable_temp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+            victim.write_text("do not clobber\n", encoding="utf-8")
+            predictable_temp.symlink_to(victim)
+
+            goal_loop_live_replay.write_json_atomic(target, {"ok": True})
+
+            self.assertEqual(victim.read_text(encoding="utf-8"), "do not clobber\n")
+            self.assertEqual(read_json(target), {"ok": True})
+            self.assertTrue(predictable_temp.is_symlink())
+
     def test_capture_window_reads_from_start_after_truncation(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:
             root = Path(raw_dir)

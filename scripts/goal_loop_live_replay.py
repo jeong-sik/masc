@@ -15,6 +15,7 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -79,9 +80,19 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+        text=True,
+    )
+    temp_path = Path(temp_name)
     try:
-        write_json(temp_path, payload)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
         temp_path.replace(path)
     finally:
         if temp_path.exists():
@@ -103,7 +114,7 @@ def normalize_base_path(base_path: str | None) -> str | None:
         # Whitespace-only is treated the same as missing so the publish-mode
         # guard does not silently fall through and write
         # ./.masc/goal-loop/status.json relative to CWD.
-        return ""
+        return None
     return str(Path(stripped).expanduser())
 
 
@@ -247,8 +258,6 @@ def replay_logs(
     # check so a base_path of "  " is treated as missing instead of writing
     # ./.masc/goal-loop/status.json relative to CWD.
     base_path = normalize_base_path(base_path)
-    if base_path is not None and not base_path.strip():
-        base_path = None
     if publish_dashboard_status and not base_path:
         raise ValueError("--publish-dashboard-status requires --base-path")
 

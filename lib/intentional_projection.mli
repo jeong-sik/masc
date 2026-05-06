@@ -10,14 +10,14 @@
     Like {!Cognitive_gravity} this module is intentionally pure: no I/O,
     no Eio, no global state. Sequences come from the caller (typically
     the dashboard or a keeper turn log); the model returns a fresh value
-    on every observation. See `docs/rfc/RFC-0035-cognitive-ide-roadmap.md`
-    (PR-2) for the integration plan. *)
+    on every observation. The RFC-0035 integration plan is tracked by the
+    PR series that introduces this module and its dashboard consumers. *)
 
 (** A single observed transition: action [prev] was followed by [next]. *)
-type transition = {
-  prev : string;
-  next : string;
-}
+type transition =
+  { prev : string
+  ; next : string
+  }
 
 (** Opaque bigram model. Build it with {!empty} and {!observe_pairs}; the
     only way to read it is via {!score} and {!rank}. *)
@@ -40,30 +40,37 @@ val total_after : model -> string -> int
 
 (** [score model ~smoothing ~prev ~candidates ~next] returns the smoothed
     conditional probability that [next] follows [prev], normalised over
-    the supplied [candidates] set.
+    the supplied unique [candidates] set. Observed transitions to actions
+    outside [candidates] are ignored, and [next] outside [candidates]
+    scores [0.0].
 
     With [smoothing = 0.0] the score reduces to the maximum-likelihood
     estimate, which is [0.0] for unseen [prev] or unseen [(prev, next)]
     pairs. With [smoothing > 0.0] every candidate receives at least
-    [smoothing / (smoothing * |candidates|)] mass, so the function never
-    returns [0.0] when [smoothing > 0.0] and [candidates] is non-empty.
+    [smoothing / (total_observations_among_candidates + smoothing *
+    |unique candidates|)] mass (which is [1.0 / |unique candidates|]
+    when the model has no observations for the supplied set), so the
+    function never returns [0.0] for a candidate when [smoothing > 0.0]
+    and [candidates] is non-empty.
 
-    The function returns [0.0] when [candidates] is empty. *)
-val score :
-  model ->
-  smoothing:float ->
-  prev:string ->
-  candidates:string list ->
-  next:string ->
-  float
+    The function returns [0.0] when [candidates] is empty. [smoothing]
+    must be finite and non-negative. *)
+val score
+  :  model
+  -> smoothing:float
+  -> prev:string
+  -> candidates:string list
+  -> next:string
+  -> float
 
-(** [rank model ~smoothing ~prev ~candidates] applies {!score} to every
-    candidate and returns them paired with their scores, sorted by
+(** [rank model ~smoothing ~prev ~candidates] deduplicates candidates while
+    preserving first-occurrence order, applies {!score} to each unique
+    candidate, and returns them paired with their scores, sorted by
     descending score. The sort is stable: candidates with equal scores
-    retain their input order. *)
-val rank :
-  model ->
-  smoothing:float ->
-  prev:string ->
-  candidates:string list ->
-  (string * float) list
+    retain their first-occurrence input order. *)
+val rank
+  :  model
+  -> smoothing:float
+  -> prev:string
+  -> candidates:string list
+  -> (string * float) list

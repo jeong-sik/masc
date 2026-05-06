@@ -10,6 +10,23 @@ val slot_holder_age_for_test :
     the oldest slot-holder age for [keeper_name] across turn, reactive,
     and autonomous holder tables. *)
 
+type batch_root_cause =
+  | Cascade_unhealthy
+  | Provider_auth
+  | Fd_exhaustion
+  | Mixed
+  | Unknown
+(** Low-cardinality root-cause label for fleet-wide stale termination
+    batches.  This is derived from already-latched keeper failure
+    reasons, so dashboards get a typed signal instead of parsing the
+    batch log line. *)
+
+val batch_root_cause_to_string : batch_root_cause -> string
+
+val classify_batch_root_cause_for_test :
+  Keeper_registry.failure_reason list -> batch_root_cause
+(** Test-only view of the batch root-cause classifier. *)
+
 val fork_stale_watchdog :
   'a context -> keeper_meta -> Keeper_registry.registry_entry -> unit
 (** Fork a stale-turn watchdog fiber for the given keeper.

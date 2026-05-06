@@ -10,6 +10,8 @@
 
 open Masc_mcp.Keeper_registry
 
+module SW = Masc_mcp.Keeper_stale_watchdog
+
 let r = Alcotest.(check string)
 
 let test_idle_turn_label () =
@@ -126,6 +128,50 @@ let test_stale_watchdog_uses_stale_reason_without_terminal_prior () =
         (failure_reason_to_string reason)
   | None -> Alcotest.fail "expected stale reason"
 
+let root_cause_label reasons =
+  reasons
+  |> SW.classify_batch_root_cause_for_test
+  |> SW.batch_root_cause_to_string
+
+let test_batch_root_cause_labels () =
+  r "cascade_unhealthy label" "cascade_unhealthy"
+    (SW.batch_root_cause_to_string SW.Cascade_unhealthy);
+  r "provider_auth label" "provider_auth"
+    (SW.batch_root_cause_to_string SW.Provider_auth);
+  r "fd_exhaustion label" "fd_exhaustion"
+    (SW.batch_root_cause_to_string SW.Fd_exhaustion);
+  r "mixed label" "mixed" (SW.batch_root_cause_to_string SW.Mixed);
+  r "unknown label" "unknown" (SW.batch_root_cause_to_string SW.Unknown)
+
+let test_batch_root_cause_provider_auth () =
+  r "provider auth" "provider_auth"
+    (root_cause_label
+       [
+         Provider_runtime_error
+           { code = "auth_error"; detail = "bad key rejected" };
+       ])
+
+let test_batch_root_cause_fd_exhaustion () =
+  r "fd exhaustion" "fd_exhaustion"
+    (root_cause_label [ Exception "too many open files (os error 24)" ])
+
+let test_batch_root_cause_cascade_unhealthy () =
+  r "cascade unhealthy" "cascade_unhealthy"
+    (root_cause_label [ Oas_timeout_budget_loop { count = 2 } ])
+
+let test_batch_root_cause_mixed () =
+  r "mixed" "mixed"
+    (root_cause_label
+       [
+         Provider_runtime_error
+           { code = "auth_error"; detail = "bad key rejected" };
+         Exception "too many open files";
+       ])
+
+let test_batch_root_cause_unknown () =
+  r "unknown" "unknown"
+    (root_cause_label [ Heartbeat_consecutive_failures 3 ])
+
 let () =
   Alcotest.run "stale_kill_class"
     [
@@ -167,5 +213,18 @@ let () =
             test_stale_watchdog_preserves_terminal_failure_reason;
           Alcotest.test_case "uses stale reason without terminal prior" `Quick
             test_stale_watchdog_uses_stale_reason_without_terminal_prior;
+        ] );
+      ( "batch_root_cause",
+        [
+          Alcotest.test_case "labels" `Quick test_batch_root_cause_labels;
+          Alcotest.test_case "provider auth" `Quick
+            test_batch_root_cause_provider_auth;
+          Alcotest.test_case "fd exhaustion" `Quick
+            test_batch_root_cause_fd_exhaustion;
+          Alcotest.test_case "cascade unhealthy" `Quick
+            test_batch_root_cause_cascade_unhealthy;
+          Alcotest.test_case "mixed" `Quick test_batch_root_cause_mixed;
+          Alcotest.test_case "unknown" `Quick
+            test_batch_root_cause_unknown;
         ] );
     ]

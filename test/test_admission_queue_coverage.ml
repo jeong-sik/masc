@@ -264,6 +264,51 @@ let test_try_with_permit_releases_inflight_gauge () =
     in
     check (float 0.1) "try_with_permit balanced" before after)
 
+let rejected_metric ~surface =
+  Masc_mcp.Prometheus.metric_value_or_zero
+    Masc_mcp.Prometheus.metric_inference_queue_rejected
+    ~labels:
+      [
+        ( "surface",
+          Masc_mcp.Admission_queue_metrics.rejection_surface_label surface );
+        ( "reason",
+          Masc_mcp.Admission_queue_metrics.rejection_reason_label
+            Masc_mcp.Admission_queue_metrics.Host_resource_saturated );
+      ]
+    ()
+
+let test_host_resource_rejection_increments_counter () =
+  Eio_main.run (fun _env ->
+    let surface = Masc_mcp.Admission_queue_metrics.With_permit in
+    let before = rejected_metric ~surface in
+    match
+      AQ.For_testing.check_host_resources
+        ~surface
+        ~keeper_name:"fd-saturated-test"
+        ~fd_count:90
+        ~threshold:100
+    with
+    | Ok () -> fail "expected host resource rejection"
+    | Error (`Host_resource_saturated _) ->
+        check (float 0.1) "rejection counter increments" (before +. 1.0)
+          (rejected_metric ~surface))
+
+let test_host_resource_ok_does_not_increment_counter () =
+  Eio_main.run (fun _env ->
+    let surface = Masc_mcp.Admission_queue_metrics.Try_with_permit in
+    let before = rejected_metric ~surface in
+    match
+      AQ.For_testing.check_host_resources
+        ~surface
+        ~keeper_name:"fd-ok-test"
+        ~fd_count:89
+        ~threshold:100
+    with
+    | Error _ -> fail "unexpected host resource rejection"
+    | Ok () ->
+        check (float 0.1) "rejection counter unchanged" before
+          (rejected_metric ~surface))
+
 (* ============================================================
    Runner
    ============================================================ *)
@@ -303,5 +348,9 @@ let () =
         test_with_permit_increments_acquired_counter;
       test_case "try_with_permit balances inflight gauge" `Quick
         test_try_with_permit_releases_inflight_gauge;
+      test_case "host resource rejection increments counter" `Quick
+        test_host_resource_rejection_increments_counter;
+      test_case "host resource ok does not increment counter" `Quick
+        test_host_resource_ok_does_not_increment_counter;
     ];
   ]

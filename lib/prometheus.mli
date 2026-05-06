@@ -920,6 +920,10 @@ val metric_inference_queue_inflight : string
 val metric_inference_queue_acquired : string
 val metric_inference_queue_wait : string
 val metric_inference_queue_cancelled : string
+val metric_inference_queue_rejected : string
+(** Total admission requests rejected before execution. Labels:
+    [surface=with_permit|try_with_permit] and
+    [reason=host_resource_saturated]. *)
 val metric_inference_queue_max_concurrent : string
 
 (** {1 Agent health metrics} *)

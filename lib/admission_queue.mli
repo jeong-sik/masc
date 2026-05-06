@@ -74,3 +74,16 @@ val max_concurrent : unit -> int
 
 val reset_for_test : max_slots:int -> unit
 (** Reset queue state for testing. Not for production use. *)
+
+module For_testing : sig
+  (** Test-only hooks. These are exposed for deterministic unit coverage and are
+      not part of the production API contract. *)
+
+  val check_host_resources :
+    surface:Admission_queue_metrics.rejection_surface ->
+    keeper_name:string ->
+    fd_count:int ->
+    threshold:int ->
+    (unit, [> `Host_resource_saturated of string ]) result
+  (** Deterministic host-resource check for threshold tests. *)
+end

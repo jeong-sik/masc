@@ -152,9 +152,11 @@ let format_fd_growth_hint ~keeper_name ~fd_count ~now =
           " [Δ%+d fd in %.0fs = %+.1f fd/min, %s; previous fd=%d at %.0fs ago]"
           dfd dt rate_per_min trend prev_fd dt)
 
-let check_host_resources ~keeper_name =
-  let fd_count = Prometheus.approximate_open_fd_count () in
-  let threshold = Prometheus.fd_warn_threshold in
+let observe_rejection ~surface ~reason =
+  Safe_ops.protect ~default:() (fun () ->
+      Admission_queue_metrics.on_reject ~surface ~reason)
+
+let check_host_resources_with ~surface ~keeper_name ~fd_count ~threshold =
   if fd_count >= threshold * 9 / 10 then begin
     (* #10745: include fd-growth rate inline so the leak signal does
        not require log scrubbing.  Monotonic positive trend across
@@ -170,12 +172,20 @@ let check_host_resources ~keeper_name =
         fd_count threshold hint
     in
     Log.Misc.warn "admission rejected for %s: %s" keeper_name msg;
+    observe_rejection ~surface ~reason:Admission_queue_metrics.Host_resource_saturated;
     Error (`Host_resource_saturated msg)
   end else
     Ok ()
 
+let check_host_resources ~surface ~keeper_name =
+  let fd_count = Prometheus.approximate_open_fd_count () in
+  let threshold = Prometheus.fd_warn_threshold in
+  check_host_resources_with ~surface ~keeper_name ~fd_count ~threshold
+
 let with_permit ?wait_timeout_sec:_ ~priority:_ ~keeper_name ~cascade_name f =
-  match check_host_resources ~keeper_name with
+  match
+    check_host_resources ~surface:Admission_queue_metrics.With_permit ~keeper_name
+  with
   | Error _ as e -> e
   | Ok () ->
       (* Passthrough: provider-level throttling belongs in OAS (cascade),
@@ -189,7 +199,11 @@ let with_permit ?wait_timeout_sec:_ ~priority:_ ~keeper_name ~cascade_name f =
       Ok (with_inflight_observation ~keeper_name ~cascade_name f)
 
 let try_with_permit ~priority:_ ~keeper_name ~cascade_name f =
-  match check_host_resources ~keeper_name with
+  match
+    check_host_resources
+      ~surface:Admission_queue_metrics.Try_with_permit
+      ~keeper_name
+  with
   | Error _ -> None
   | Ok () ->
       Some (with_inflight_observation ~keeper_name ~cascade_name f)
@@ -239,3 +253,8 @@ let reset_for_test ~max_slots =
     global.active <- 0;
     global.waiters <- []);
   Admission_queue_metrics.set_max_concurrent max_slots
+
+module For_testing = struct
+  let check_host_resources ~surface ~keeper_name ~fd_count ~threshold =
+    check_host_resources_with ~surface ~keeper_name ~fd_count ~threshold
+end

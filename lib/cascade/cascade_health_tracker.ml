@@ -636,6 +636,7 @@ type provider_info = {
   latency_samples : int;
   avg_confidence : float option;
   confidence_samples : int;
+  health_score : float;
 }
 
 (* Compute the [pct]-th percentile (0.0–1.0) of the populated portion of
@@ -684,6 +685,23 @@ let take_first_n n lst =
   in
   loop n [] lst
 
+(** Composite health score: success_rate * speed_score * cost_score.
+    - speed_score: p95 latency based. None = 1.0 (no penalty without data).
+    - cost_score: placeholder 1.0 (cost tracking not yet wired). *)
+let compute_health_score ~success_rate ~p95_latency_ms_opt ~cost_score_opt =
+  let speed_score =
+    match p95_latency_ms_opt with
+    | None -> 1.0
+    | Some p95 ->
+        if p95 <= 5000.0 then 1.0
+        else if p95 <= 15000.0 then 0.8
+        else if p95 <= 30000.0 then 0.6
+        else if p95 <= 60000.0 then 0.4
+        else 0.2
+  in
+  let cost_score = match cost_score_opt with None -> 1.0 | Some s -> s in
+  success_rate *. speed_score *. cost_score
+
 let build_info_locked ~now ~key state =
   let recent = prune_old_events now state.events in
   let total = List.length recent in
@@ -708,6 +726,11 @@ let build_info_locked ~now ~key state =
   let p50_latency_ms = percentile_locked state 0.50 in
   let p95_latency_ms = percentile_locked state 0.95 in
   let avg_confidence = avg_confidence_locked state in
+  let health_score =
+    compute_health_score ~success_rate:rate
+      ~p95_latency_ms_opt:p95_latency_ms
+      ~cost_score_opt:None
+  in
   {
     provider_key = key;
     success_rate = rate;
@@ -723,6 +746,7 @@ let build_info_locked ~now ~key state =
     latency_samples = state.latency_count;
     avg_confidence;
     confidence_samples = state.confidence_count;
+    health_score;
   }
 
 let provider_info t ~provider_key =

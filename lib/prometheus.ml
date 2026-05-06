@@ -2671,6 +2671,21 @@ let init () =
      between scanned-lines and replayed-events isolates wasted \
      scan cost."
     Counter;
+  (* RFC-0022 §9 attempt-liveness gate metrics.
+     These constants are referenced by cascade_attempt_liveness_observer.ml
+     but were not registered in init(), causing silent metric loss. *)
+  add metric_cascade_attempt_liveness_kill
+    "Counts would-be (Observe) and actual (Enforce) liveness kills \
+     broken down by failure class. Labels: [kind, mode, provider]."
+    Counter;
+  add metric_cascade_attempt_liveness_observed
+    "Per-attempt finalizer counter regardless of outcome (success | \
+     kill | wire_error). Useful for the kill-rate ratio."
+    Counter;
+  add metric_cascade_strategy_decisions
+    "Cascade strategy decisions by outcome." Counter;
+  add metric_cascade_capacity_events
+    "Cascade capacity events by type." Counter;
   install_backend_mutex_observers ()
 
 let start_time = Time_compat.now ()

@@ -587,6 +587,32 @@ let test_dispatch_unregistered () =
   in
   Alcotest.(check bool) "unregistered mint_token returns Error" true (Result.is_error result)
 
+let test_approval_pending_bridge_uses_keeper_safe_inline_dispatch () =
+  prime_keeper_bridge ();
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Coord.default_config dir in
+      let meta =
+        make_meta
+          ~tool_access:(Masc_mcp.Keeper_types.Custom [ "masc_approval_pending" ])
+          ()
+      in
+      let raw =
+        Masc_mcp.Keeper_exec_masc.handle_keeper_masc_tool
+          ~config
+          ~meta
+          ~name:"masc_approval_pending"
+          ~args:(`Assoc [])
+      in
+      match Yojson.Safe.from_string raw with
+      | `List _ -> ()
+      | _ ->
+        Alcotest.failf
+          "masc_approval_pending should return pending approval list, got: %s"
+          raw)
+
 let test_read_only_preflight_accepts_sandbox_relative_repo_path () =
   let dir = temp_dir () in
   Fun.protect
@@ -768,6 +794,8 @@ let () =
         [
           Alcotest.test_case "unregistered returns None" `Quick
             test_dispatch_unregistered;
+          Alcotest.test_case "approval pending uses keeper-safe inline dispatch"
+            `Quick test_approval_pending_bridge_uses_keeper_safe_inline_dispatch;
           Alcotest.test_case
             "read preflight accepts sandbox-relative repo path" `Quick
             test_read_only_preflight_accepts_sandbox_relative_repo_path;

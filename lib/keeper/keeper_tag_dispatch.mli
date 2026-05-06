@@ -16,8 +16,10 @@
     Returns:
     - [Some (true, msg)] on successful dispatch.
     - [Some (false, msg)] when the tool is blocked in keeper context
-      ([Mod_control] mutators, [Mod_inline], [Mod_compact], [Mod_keeper],
-      [Mod_operator]) or when the underlying dispatch reports failure.
+      ([Mod_control] mutators, most [Mod_inline] tools, [Mod_compact],
+      [Mod_keeper], [Mod_operator]) or when the underlying dispatch reports
+      failure. [masc_approval_pending] is the keeper-safe [Mod_inline]
+      exception.
     - [None] only if the selected module does not recognise [name] (does
       not happen when [tag] was obtained via [Tool_dispatch.lookup_tag]).
 

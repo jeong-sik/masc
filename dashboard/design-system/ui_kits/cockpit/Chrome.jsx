@@ -281,13 +281,13 @@ function kpiCollect(D) {
     note: stalledKeepers.length ? kpiList(stalledKeepers, keeperStallNote, "stalled") : "clear",
   };
 
-  let spot = { label: "Tokens/sec", value: tps.value, unit: tps.unit, tone: "brass", note: tps.note, urgent: false };
+  let spot = { key: "tps", label: "Tokens/sec", value: tps.value, unit: tps.unit, tone: "brass", note: tps.note, urgent: false };
   if (failureCount > 0) {
-    spot = { label: "Fails", value: failureValue, unit: failureUnit, tone: "err", note: failureNote, urgent: true };
+    spot = { key: "fails", label: "Fails", value: failureValue, unit: failureUnit, tone: "err", note: failureNote, urgent: true };
   } else if (stalledKeepers.length > 0) {
-    spot = { label: "Stalled", value: stalledKeepers.length, unit: "", tone: "stalled", note: stalledMetric.note, urgent: true };
+    spot = { key: "stalled", label: "Stalled", value: stalledKeepers.length, unit: "", tone: "stalled", note: stalledMetric.note, urgent: true };
   } else if (cascade.count > 0) {
-    spot = { label: "Cascade Hits", value: cascade.count, unit: "", tone: "info", note: cascade.note, urgent: true };
+    spot = { key: "cascade", label: "Cascade Hits", value: cascade.count, unit: "", tone: "info", note: cascade.note, urgent: true };
   }
 
   return {
@@ -300,15 +300,41 @@ function kpiCollect(D) {
     active: activeMetric,
     stalled: stalledMetric,
     goals: goalMetric,
-    metricCount: 8,
   };
 }
 
 // ============== KPI Strip ==============
+const VISIBLE_KPI_LIMIT = 5;
+
 function KpiStrip() {
   const [col, toggle] = (window.useCollapsed ? window.useCollapsed("kpi") : [false, () => {}]);
   const stats = kpiCollect(window.MASC_DATA || {});
   const spot = stats.spot;
+  const metricCells = [
+    { key: "tps", label: "Tokens/sec", metric: stats.tps, tone: "brass", className: stats.tps.live ? " live" : "" },
+    { key: "passRate", label: "Pass Rate", metric: stats.passRate, tone: "ok" },
+    { key: "fails", label: "Fails", metric: stats.fails, tone: "err" },
+    { key: "cascade", label: "Cascade Hits", metric: { value: stats.cascade.count, unit: "", note: stats.cascade.note }, tone: "info" },
+    { key: "active", label: "Active Keepers", metric: stats.active },
+    { key: "stalled", label: "Stalled", metric: stats.stalled, valueStyle: { color: "var(--stalled-fg)" } },
+    { key: "goals", label: "Goal Progress", metric: stats.goals },
+    { key: "prs", label: "Open PRs", metric: stats.prs },
+  ];
+  const visibleCells =
+    metricCells
+      .filter(cell => cell.key !== spot.key)
+      .slice(0, VISIBLE_KPI_LIMIT);
+  const visibleMetricCount = 1 + visibleCells.length;
+  const totalMetricCount = metricCells.length;
+  const renderMetricCell = (cell) => (
+    <div key={cell.key} className={"kpi-cell" + (cell.className || "")}>
+      <span className="kpi-l">{cell.label}</span>
+      <span className={"kpi-v" + (cell.tone ? " " + cell.tone : "")} style={cell.valueStyle || null}>
+        {cell.metric.value}{cell.metric.unit && <span className="u">{cell.metric.unit}</span>}
+      </span>
+      <span className="kpi-d">{cell.metric.note}</span>
+    </div>
+  );
   return (
     <div className={"kpi" + (col ? " wx-collapsed" : "")}>
       <div
@@ -329,7 +355,7 @@ function KpiStrip() {
         role="button"
         tabIndex={0}
         aria-expanded={!col}>
-        {col ? "▸ KPI · " + (spot.urgent ? "⚠ " + spot.label : stats.metricCount + " metrics") : "▾"}
+        {col ? "▸ KPI · " + (spot.urgent ? "⚠ " + spot.label : visibleMetricCount + "/" + totalMetricCount) : "▾"}
         {!col && (
           <a className="wx-popout"
              href="?widget=kpi"
@@ -344,46 +370,7 @@ function KpiStrip() {
         <span className={"kpi-v " + spot.tone}>{spot.value}{spot.unit && <span className="u">{spot.unit}</span>}</span>
         <span className="kpi-d">{spot.note}</span>
       </div>
-      <div className={"kpi-cell" + (stats.tps.live ? " live" : "")}>
-        <span className="kpi-l">Tokens/sec</span>
-        <span className="kpi-v brass">{stats.tps.value}{stats.tps.unit && <span className="u">{stats.tps.unit}</span>}</span>
-        <span className="kpi-d">{stats.tps.note}</span>
-      </div>
-      <div className="kpi-cell">
-        <span className="kpi-l">Pass Rate</span>
-        <span className="kpi-v ok">{stats.passRate.value}{stats.passRate.unit && <span className="u">{stats.passRate.unit}</span>}</span>
-        <span className="kpi-d">{stats.passRate.note}</span>
-      </div>
-      <div className="kpi-cell">
-        <span className="kpi-l">Fails</span>
-        <span className="kpi-v err">{stats.fails.value}{stats.fails.unit && <span className="u">{stats.fails.unit}</span>}</span>
-        <span className="kpi-d">{stats.fails.note}</span>
-      </div>
-      <div className="kpi-cell">
-        <span className="kpi-l">Cascade Hits</span>
-        <span className="kpi-v info">{stats.cascade.count}</span>
-        <span className="kpi-d">{stats.cascade.note}</span>
-      </div>
-      <div className="kpi-cell">
-        <span className="kpi-l">Open PRs</span>
-        <span className="kpi-v">{stats.prs.value}</span>
-        <span className="kpi-d">{stats.prs.note}</span>
-      </div>
-      <div className="kpi-cell">
-        <span className="kpi-l">Active Keepers</span>
-        <span className="kpi-v">{stats.active.value}{stats.active.unit && <span className="u">{stats.active.unit}</span>}</span>
-        <span className="kpi-d">{stats.active.note}</span>
-      </div>
-      <div className="kpi-cell">
-        <span className="kpi-l">Stalled</span>
-        <span className="kpi-v" style={{color:"var(--stalled-fg)"}}>{stats.stalled.value}</span>
-        <span className="kpi-d">{stats.stalled.note}</span>
-      </div>
-      <div className="kpi-cell">
-        <span className="kpi-l">Goal Progress</span>
-        <span className="kpi-v">{stats.goals.value}{stats.goals.unit && <span className="u">{stats.goals.unit}</span>}</span>
-        <span className="kpi-d">{stats.goals.note}</span>
-      </div>
+      {visibleCells.map(renderMetricCell)}
     </div>
   );
 }

@@ -708,6 +708,7 @@ button { font: inherit; }
   text-transform: uppercase; letter-spacing: .06em; white-space: nowrap;
 }
 .rail-nudge .ch.hint     { color: var(--color-accent-fg); border-color: var(--color-accent-fg-dim); }
+.rail-nudge .ch.suggest  { color: var(--warn-fg); border-color: var(--warn-border); }
 .rail-nudge .ch.approve  { color: var(--ok-fg); border-color: var(--ok-border); }
 .rail-nudge .ch.reject   { color: var(--err-fg); border-color: var(--err-border); }
 .rail-nudge .ch.redirect { color: var(--info-fg, var(--info)); border-color: var(--info); }

@@ -3463,6 +3463,75 @@ let test_kimi_cli_config_uses_oas_context_ssot () =
       Alcotest.(check int) "max_context_size from OAS capabilities SSOT"
         expected actual
 
+let test_kimi_cli_rejects_invalid_tool_argument_json () =
+  let dir = temp_dir "kimi_cli_bad_tool_args" in
+  let fake_kimi_path = Filename.concat dir "fake-kimi" in
+  let invalid_tool_line =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("role", `String "assistant");
+          ( "tool_calls",
+            `List
+              [
+                `Assoc
+                  [
+                    ("id", `String "call-1");
+                    ( "function",
+                      `Assoc
+                        [
+                          ("name", `String "bad_tool");
+                          ("arguments", `String "{\"unterminated\"");
+                        ] );
+                  ];
+              ] );
+        ])
+  in
+  let oc = open_out fake_kimi_path in
+  output_string oc ("#!/bin/sh\ncat <<'JSON'\n" ^ invalid_tool_line ^ "\nJSON\n");
+  close_out oc;
+  Unix.chmod fake_kimi_path 0o755;
+  let config =
+    {
+      Oas_worker_exec.Kimi_cli_transport_local.default_config with
+      kimi_path = fake_kimi_path;
+    }
+  in
+  let req =
+    {
+      (mock_completion_request ()) with
+      config = make_kimi_cli_provider_cfg ();
+      messages =
+        [
+          {
+            Agent_sdk.Types.role = Agent_sdk.Types.User;
+            content = [ Agent_sdk.Types.Text "hello" ];
+            name = None;
+            tool_call_id = None;
+            metadata = [];
+          };
+        ];
+    }
+  in
+  Eio.Switch.run @@ fun sw ->
+  let transport =
+    Oas_worker_exec.Kimi_cli_transport_local.create ~sw
+      ~mgr:(require_test_proc_mgr ()) ~config
+  in
+  let { Llm_provider.Llm_transport.response; latency_ms = _ } =
+    transport.complete_sync req
+  in
+  match response with
+  | Error (Llm_provider.Http_client.NetworkError { message; kind }) ->
+      Alcotest.(check bool) "network kind is unknown" true
+        (kind = Llm_provider.Http_client.Unknown);
+      Alcotest.(check bool) "invalid arguments rejected" true
+        (contains_substring ~needle:"invalid kimi tool arguments JSON" message);
+      Alcotest.(check bool) "tool name included" true
+        (contains_substring ~needle:"bad_tool" message)
+  | Error _ -> Alcotest.fail "expected NetworkError for invalid tool arguments"
+  | Ok _ -> Alcotest.fail "expected invalid tool arguments to fail parsing"
+
 let test_kimi_cli_should_log_stderr_line_filters_resume_noise () =
   let should_log =
     Oas_worker_exec.Kimi_cli_transport_local.should_log_stderr_line
@@ -5354,6 +5423,8 @@ let () =
         test_kimi_cli_model_for_provider_keeps_explicit_model;
       Alcotest.test_case "kimi config max context uses OAS SSOT" `Quick
         test_kimi_cli_config_uses_oas_context_ssot;
+      Alcotest.test_case "kimi invalid tool argument JSON is rejected" `Quick
+        test_kimi_cli_rejects_invalid_tool_argument_json;
       Alcotest.test_case "kimi stderr resume noise is filtered" `Quick
         test_kimi_cli_should_log_stderr_line_filters_resume_noise;
       Alcotest.test_case "kimi error completion measures latency" `Quick

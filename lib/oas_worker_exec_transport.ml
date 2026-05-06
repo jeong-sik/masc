@@ -854,9 +854,10 @@ module Kimi_cli_transport_local = struct
     !args
 
   let json_of_argument_string = function
-    | None | Some "" -> `Assoc []
+    | None | Some "" -> Ok (`Assoc [])
     | Some raw -> (
-        try Yojson.Safe.from_string raw with Yojson.Json_error _ -> `Assoc [])
+        try Ok (Yojson.Safe.from_string raw) with
+        | Yojson.Json_error msg -> Error msg)
 
   let blocks_of_message_content json =
     match json with
@@ -873,11 +874,26 @@ module Kimi_cli_transport_local = struct
       let fn = json |> member "function" in
       let id = Llm_provider.Cli_common_json.member_str "id" json in
       let name = Llm_provider.Cli_common_json.member_str "name" fn in
-      let args =
+      match
         fn |> member "arguments" |> to_string_option |> json_of_argument_string
-      in
-      Some (Agent_sdk.Types.ToolUse { id; name; input = args })
-    with Type_error _ -> None
+      with
+      | Ok args -> Ok (Some (Agent_sdk.Types.ToolUse { id; name; input = args }))
+      | Error msg ->
+          Error
+            (Printf.sprintf
+               "invalid kimi tool arguments JSON for tool %S: %s" name msg)
+    with Type_error _ -> Ok None
+
+  let tool_uses_of_json calls =
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | call :: rest -> (
+          match tool_use_of_json call with
+          | Ok (Some block) -> loop (block :: acc) rest
+          | Ok None -> loop acc rest
+          | Error _ as err -> err)
+    in
+    loop [] calls
 
   let tool_result_of_json json =
     let open Yojson.Safe.Util in
@@ -905,18 +921,18 @@ module Kimi_cli_transport_local = struct
       match json |> member "role" |> to_string_option with
       | Some "assistant" ->
           let content = blocks_of_message_content (json |> member "content") in
-          let tool_uses =
+          let tool_uses_result =
             match json |> member "tool_calls" with
-            | `List calls -> List.filter_map tool_use_of_json calls
-            | _ -> []
+            | `List calls -> tool_uses_of_json calls
+            | _ -> Ok []
           in
-          content @ tool_uses
+          Result.map (fun tool_uses -> content @ tool_uses) tool_uses_result
       | Some "tool" -> (
           match tool_result_of_json json with
-          | Some block -> [ block ]
-          | None -> [])
-      | _ -> []
-    with Yojson.Json_error _ | Type_error _ -> []
+          | Some block -> Ok [ block ]
+          | None -> Ok [])
+      | _ -> Ok []
+    with Yojson.Json_error _ | Type_error _ -> Ok []
 
   let response_id_of_lines lines =
     let open Yojson.Safe.Util in
@@ -946,12 +962,26 @@ module Kimi_cli_transport_local = struct
     List.find_map find_model lines |> Option.value ~default:model_id
 
   let parse_jsonl_result ~model_id lines =
-    let content = List.concat_map blocks_of_output_line lines in
-    if content = [] then
+    let content_result =
+      let rec loop acc = function
+        | [] -> Ok (List.concat (List.rev acc))
+        | line :: rest -> (
+            match blocks_of_output_line line with
+            | Ok blocks -> loop (blocks :: acc) rest
+            | Error _ as err -> err)
+      in
+      loop [] lines
+    in
+    match content_result with
+    | Error message ->
+        Error
+          (Llm_provider.Http_client.NetworkError
+             { message; kind = Unknown })
+    | Ok [] ->
       Error
         (Llm_provider.Http_client.NetworkError
            { message = "no messages parsed from kimi output"; kind = Unknown })
-    else
+    | Ok content ->
       Ok
         {
           Agent_sdk.Types.id = response_id_of_lines lines;
@@ -1279,6 +1309,7 @@ module Kimi_cli_transport_local = struct
           let seen_lines = ref [] in
           let next_index = ref 0 in
           let started = ref false in
+          let parse_error = ref None in
           let ensure_started () =
             if not !started then (
               started := true;
@@ -1289,11 +1320,13 @@ module Kimi_cli_transport_local = struct
           let on_line line =
             if String.trim line <> "" then (
               seen_lines := line :: !seen_lines;
-              let blocks = blocks_of_output_line line in
-              if blocks <> [] then (
-                ensure_started ();
-                next_index :=
-                  emit_blocks ~on_event ~start_index:!next_index blocks))
+              match blocks_of_output_line line with
+              | Error message -> parse_error := Some message
+              | Ok blocks ->
+                  if blocks <> [] then (
+                    ensure_started ();
+                    next_index :=
+                      emit_blocks ~on_event ~start_index:!next_index blocks))
           in
           match
             classify_cli_error
@@ -1305,18 +1338,27 @@ module Kimi_cli_transport_local = struct
           with
           | Error _ as err -> err
           | Ok _ -> (
-              match parse_jsonl_result ~model_id (List.rev !seen_lines) with
-              | Error _ as err -> err
-              | Ok resp as ok ->
-                  if !started then (
-                    on_event
-                      (Agent_sdk.Types.MessageDelta
-                         { stop_reason = Some resp.stop_reason; usage = resp.usage });
-                    on_event Agent_sdk.Types.MessageStop)
-                  else
-                    Llm_provider.Cli_common_synthetic_events.replay ~on_event
-                      resp;
-                  ok));
+              match !parse_error with
+              | Some message ->
+                  Error
+                    (Llm_provider.Http_client.NetworkError
+                       { message; kind = Unknown })
+              | None -> (
+                  match parse_jsonl_result ~model_id (List.rev !seen_lines) with
+                  | Error _ as err -> err
+                  | Ok resp as ok ->
+                      if !started then (
+                        on_event
+                          (Agent_sdk.Types.MessageDelta
+                             {
+                               stop_reason = Some resp.stop_reason;
+                               usage = resp.usage;
+                             });
+                        on_event Agent_sdk.Types.MessageStop)
+                      else
+                        Llm_provider.Cli_common_synthetic_events.replay ~on_event
+                          resp;
+                      ok)));
     }
 end
 

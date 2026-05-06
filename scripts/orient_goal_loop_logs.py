@@ -254,8 +254,11 @@ def validate_strict_row_corpus(
     duplicate_ids: list[str] = []
     invalid_rows: list[str] = []
     invalid_source_paths: list[str] = []
+    invalid_source_path_values: list[dict[str, Any]] = []
     invalid_line_refs: list[str] = []
+    invalid_line_ref_values: list[dict[str, Any]] = []
     invalid_replay_expectations: list[str] = []
+    invalid_replay_expectation_values: list[dict[str, Any]] = []
 
     schema_version = strict_row_corpus.get("schema_version")
     corpus_id = strict_row_corpus.get("corpus_id")
@@ -265,6 +268,9 @@ def validate_strict_row_corpus(
     findings_raw = strict_row_corpus.get("findings")
     findings = findings_raw if isinstance(findings_raw, list) else []
     catalog_id = catalog.get("catalog_id") if isinstance(catalog, dict) else None
+    catalog_expected_total = (
+        catalog.get("expected_findings_total") if isinstance(catalog, dict) else None
+    )
 
     if schema_version != 1:
         errors.append("schema_version_must_be_1")
@@ -276,7 +282,10 @@ def validate_strict_row_corpus(
         errors.append("source_catalog_id_mismatch")
     if corpus_status != "COMPLETE":
         errors.append("status_must_be_COMPLETE")
-    if catalog is not None and expected_total != catalog.get("expected_findings_total"):
+    if (
+        isinstance(catalog_expected_total, int)
+        and expected_total != catalog_expected_total
+    ):
         errors.append("expected_findings_total_mismatch")
     if not isinstance(expected_total, int):
         errors.append("expected_findings_total_must_be_int")
@@ -323,6 +332,20 @@ def validate_strict_row_corpus(
         if not isinstance(source, dict):
             invalid_source_paths.append(label)
             invalid_line_refs.append(label)
+            invalid_source_path_values.append(
+                {
+                    "row": label,
+                    "path": None,
+                    "error": "source_missing_or_not_object",
+                }
+            )
+            invalid_line_ref_values.append(
+                {
+                    "row": label,
+                    "line_refs": None,
+                    "error": "source_missing_or_not_object",
+                }
+            )
         else:
             source_path = source.get("path")
             line_refs = source.get("line_refs")
@@ -330,15 +353,36 @@ def validate_strict_row_corpus(
                 STRICT_ROW_CORPUS_SOURCE_PREFIX
             ):
                 invalid_source_paths.append(label)
+                invalid_source_path_values.append(
+                    {
+                        "row": label,
+                        "path": source_path,
+                        "error": "invalid_source_path",
+                    }
+                )
             if (
                 not isinstance(line_refs, list)
                 or len(line_refs) == 0
                 or any(not isinstance(item, int) or item <= 0 for item in line_refs)
             ):
                 invalid_line_refs.append(label)
+                invalid_line_ref_values.append(
+                    {
+                        "row": label,
+                        "line_refs": line_refs,
+                        "error": "invalid_line_refs",
+                    }
+                )
 
         if not isinstance(replay_expectation, dict):
             invalid_replay_expectations.append(label)
+            invalid_replay_expectation_values.append(
+                {
+                    "row": label,
+                    "replay_expectation": replay_expectation,
+                    "error": "missing_or_not_object",
+                }
+            )
         else:
             phase = replay_expectation.get("phase")
             expected_status = replay_expectation.get("expected_status")
@@ -349,6 +393,13 @@ def validate_strict_row_corpus(
                 or not expected_status
             ):
                 invalid_replay_expectations.append(label)
+                invalid_replay_expectation_values.append(
+                    {
+                        "row": label,
+                        "replay_expectation": replay_expectation,
+                        "error": "invalid_fields",
+                    }
+                )
 
     if duplicate_ids:
         errors.append("finding_ids_must_be_unique")
@@ -388,10 +439,19 @@ def validate_strict_row_corpus(
         "invalid_source_paths": sorted(set(invalid_source_paths))[
             :STRICT_ROW_CORPUS_ERROR_LIMIT
         ],
+        "invalid_source_path_values": invalid_source_path_values[
+            :STRICT_ROW_CORPUS_ERROR_LIMIT
+        ],
         "invalid_line_refs": sorted(set(invalid_line_refs))[
             :STRICT_ROW_CORPUS_ERROR_LIMIT
         ],
+        "invalid_line_ref_values": invalid_line_ref_values[
+            :STRICT_ROW_CORPUS_ERROR_LIMIT
+        ],
         "invalid_replay_expectations": sorted(set(invalid_replay_expectations))[
+            :STRICT_ROW_CORPUS_ERROR_LIMIT
+        ],
+        "invalid_replay_expectation_values": invalid_replay_expectation_values[
             :STRICT_ROW_CORPUS_ERROR_LIMIT
         ],
         "path_policy_valid": not local_path_leaks and not invalid_source_paths,

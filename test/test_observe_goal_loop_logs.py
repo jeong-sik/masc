@@ -551,13 +551,21 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         first = findings[0]
         second = findings[1]
         third = findings[2]
+        fourth = findings[3]
+        fifth = findings[4]
         assert isinstance(first, dict)
         assert isinstance(second, dict)
         assert isinstance(third, dict)
+        assert isinstance(fourth, dict)
+        assert isinstance(fifth, dict)
         second["finding_id"] = first["finding_id"]
         source = third["source"]
         assert isinstance(source, dict)
         source["path"] = "/home/example/Downloads/GOAL_LOOP_INTEGRATION.md"
+        fourth_source = fourth["source"]
+        assert isinstance(fourth_source, dict)
+        fourth_source["line_refs"] = [0, "bad"]
+        fifth["replay_expectation"] = {"phase": "", "expected_status": ""}
 
         report = orient_goal_loop_logs.orient_scan(
             scan,
@@ -573,6 +581,20 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertFalse(strict_summary["validated"])
         self.assertIn("finding_ids_must_be_unique", strict_summary["errors"])
         self.assertIn("contains_user_local_path", strict_summary["errors"])
+        self.assertEqual(
+            strict_summary["invalid_source_path_values"][0]["path"],
+            "/home/example/Downloads/GOAL_LOOP_INTEGRATION.md",
+        )
+        self.assertEqual(
+            strict_summary["invalid_line_ref_values"][0]["line_refs"],
+            [0, "bad"],
+        )
+        self.assertEqual(
+            strict_summary["invalid_replay_expectation_values"][0][
+                "replay_expectation"
+            ],
+            {"phase": "", "expected_status": ""},
+        )
 
     def test_strict_row_corpus_requires_integer_expected_total(self) -> None:
         missing = synthetic_strict_row_corpus()
@@ -588,6 +610,15 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
 
         self.assertFalse(string_report["validated"])
         self.assertIn("expected_findings_total_must_be_int", string_report["errors"])
+
+    def test_strict_row_corpus_can_validate_without_catalog_total(self) -> None:
+        report = orient_goal_loop_logs.validate_strict_row_corpus(
+            synthetic_strict_row_corpus(),
+            catalog={},
+        )
+
+        self.assertTrue(report["validated"])
+        self.assertNotIn("expected_findings_total_mismatch", report["errors"])
 
     def test_orient_catalog_validates_source_identity_hash_and_line_count(self) -> None:
         content = "206건 감사 결과\nR-FATAL-1\n"

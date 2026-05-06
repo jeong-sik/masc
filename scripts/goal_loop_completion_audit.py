@@ -116,6 +116,8 @@ def criterion(
 def structured_triage_evidence(
     structured_evidence: dict[str, Any],
     structured_id_triage: dict[str, Any] | None,
+    *,
+    source_catalog_id: Any,
 ) -> tuple[bool, bool, dict[str, Any]]:
     structured_uncataloged = as_int(
         structured_evidence["source_structured_item_ids_uncataloged"]
@@ -182,8 +184,15 @@ def structured_triage_evidence(
         else False
     )
     triage_status = structured_id_triage.get("status")
+    triage_catalog_id = structured_id_triage.get("source_catalog_id")
+    source_catalog_id_matches = (
+        isinstance(source_catalog_id, str)
+        and isinstance(triage_catalog_id, str)
+        and triage_catalog_id == source_catalog_id
+    )
     passed = (
         triage_status == "TRIAGED"
+        and source_catalog_id_matches
         and total_matches
         and occurrence_matches
         and not missing_families
@@ -194,6 +203,9 @@ def structured_triage_evidence(
     evidence = {
         "triage_status": triage_status,
         "triage_id": structured_id_triage.get("triage_id"),
+        "source_catalog_id": source_catalog_id,
+        "triage_source_catalog_id": triage_catalog_id,
+        "source_catalog_id_matches": source_catalog_id_matches,
         "triage_families_total": len(entries),
         "missing_families": missing_families,
         "extra_families": extra_families,
@@ -237,6 +249,13 @@ def row_corpus_discovery_evidence(
         row_corpus_discovery.get("missing_itemized_findings")
         == row_catalog_evidence["missing_itemized_findings"]
     )
+    discovery_catalog_id = row_corpus_discovery.get("source_catalog_id")
+    row_catalog_id = row_catalog_evidence.get("catalog_id")
+    source_catalog_id_matches = (
+        isinstance(row_catalog_id, str)
+        and isinstance(discovery_catalog_id, str)
+        and discovery_catalog_id == row_catalog_id
+    )
     strict_ids_match = len(strict_ids) == as_int(
         row_catalog_evidence["itemized_findings_total"]
     )
@@ -249,6 +268,7 @@ def row_corpus_discovery_evidence(
         row_corpus_discovery.get("status") == "RECORDED"
         and row_corpus_discovery.get("result") == "FULL_ROW_CORPUS_NOT_FOUND"
         and expected_matches
+        and source_catalog_id_matches
         and itemized_matches
         and missing_matches
         and strict_ids_match
@@ -263,6 +283,9 @@ def row_corpus_discovery_evidence(
         "result": row_corpus_discovery.get("result"),
         "recorded": recorded,
         "expected_matches": expected_matches,
+        "source_catalog_id": row_catalog_id,
+        "discovery_source_catalog_id": discovery_catalog_id,
+        "source_catalog_id_matches": source_catalog_id_matches,
         "itemized_matches": itemized_matches,
         "missing_matches": missing_matches,
         "strict_ids_match": strict_ids_match,
@@ -479,7 +502,11 @@ def build_completion_audit(
         ),
     }
     structured_passed, structured_warning, structured_triage = (
-        structured_triage_evidence(structured_evidence, structured_id_triage)
+        structured_triage_evidence(
+            structured_evidence,
+            structured_id_triage,
+            source_catalog_id=audit_catalog.get("catalog_id"),
+        )
     )
     structured_evidence["structured_id_triage"] = structured_triage
 

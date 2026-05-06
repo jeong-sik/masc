@@ -349,6 +349,30 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
             ],
             12,
         )
+        self.assertTrue(
+            by_id["broader_structured_ids_triaged"].evidence["structured_id_triage"][
+                "source_catalog_id_matches"
+            ]
+        )
+
+    def test_completion_audit_rejects_wrong_catalog_structured_id_triage(
+        self,
+    ) -> None:
+        triage = json.loads(TRIAGE_FIXTURE.read_text(encoding="utf-8"))
+        triage["source_catalog_id"] = "wrong-catalog"
+        audit = goal_loop_completion_audit.build_completion_audit(
+            blocked_status(),
+            structured_id_triage=triage,
+        )
+
+        self.assertEqual(audit.status, "BLOCKED")
+        self.assertIn("broader_structured_ids_triaged", audit.blockers)
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        triage_evidence = by_id["broader_structured_ids_triaged"].evidence[
+            "structured_id_triage"
+        ]
+        self.assertFalse(triage_evidence["source_catalog_id_matches"])
+        self.assertEqual(triage_evidence["triage_source_catalog_id"], "wrong-catalog")
 
     def test_completion_audit_attaches_row_corpus_discovery_without_closing(
         self,
@@ -373,6 +397,30 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertEqual(discovery_evidence["prompt_sources_checked"], 12)
         self.assertEqual(discovery_evidence["candidate_artifacts_checked"], 6)
         self.assertFalse(discovery_evidence["local_path_leaks"])
+        self.assertTrue(discovery_evidence["source_catalog_id_matches"])
+
+    def test_completion_audit_rejects_wrong_catalog_row_corpus_discovery(
+        self,
+    ) -> None:
+        discovery = json.loads(ROW_DISCOVERY_FIXTURE.read_text(encoding="utf-8"))
+        discovery["source_catalog_id"] = "wrong-catalog"
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            row_corpus_discovery=discovery,
+        )
+
+        self.assertEqual(audit.status, "BLOCKED")
+        self.assertEqual(audit.blockers, ["strict_row_level_catalog_complete"])
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        discovery_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "row_corpus_discovery"
+        ]
+        self.assertFalse(discovery_evidence["recorded"])
+        self.assertFalse(discovery_evidence["source_catalog_id_matches"])
+        self.assertEqual(
+            discovery_evidence["discovery_source_catalog_id"],
+            "wrong-catalog",
+        )
 
     def test_completion_audit_validates_supplied_strict_row_corpus_without_closing_stale_orient(
         self,

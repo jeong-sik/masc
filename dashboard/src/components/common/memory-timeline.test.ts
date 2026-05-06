@@ -56,6 +56,22 @@ describe('MemoryTimeline', () => {
     })
   })
 
+  it('marks tied hourly access types as mixed', () => {
+    const base = new Date()
+    base.setHours(10, 0, 0, 0)
+    const heatmap = buildMemoryTimelineHeatmap([
+      { timestamp: base.getTime(), memoryId: 'a', accessType: 'read' },
+      { timestamp: base.getTime() + 60000, memoryId: 'b', accessType: 'write' },
+    ])
+
+    expect(heatmap[10]).toMatchObject({
+      hour: 10,
+      count: 2,
+      dominantType: 'mixed',
+      typeCounts: { read: 1, write: 1, search: 0 },
+    })
+  })
+
   it('renders 24 bars', () => {
     const container = document.createElement('div')
     render(h(MemoryTimeline, { entries: [] }), container)
@@ -152,10 +168,31 @@ describe('MemoryTimeline', () => {
   it('labels empty hours as no access', () => {
     const container = document.createElement('div')
     render(h(MemoryTimeline, { entries: [] }), container)
-    const firstBar = container.querySelector('[data-memory-timeline-hour="0"]')
+    const firstBar = container.querySelector('[data-memory-timeline-hour="0"]') as HTMLElement
     expect(firstBar?.getAttribute('aria-label')).toBe('0시: 접근 없음')
     expect(firstBar?.getAttribute('title')).toBe('0시 — 접근 없음')
     expect(firstBar?.getAttribute('data-memory-timeline-dominant-type')).toBe('')
+    expect(firstBar?.style.background).toBe('var(--color-border-default)')
+  })
+
+  it('renders tied access buckets as mixed instead of forcing a winner', () => {
+    const container = document.createElement('div')
+    const t = new Date()
+    t.setHours(11, 0, 0, 0)
+    render(
+      h(MemoryTimeline, {
+        entries: [
+          { timestamp: t.getTime(), memoryId: 'a', accessType: 'read' },
+          { timestamp: t.getTime() + 60000, memoryId: 'b', accessType: 'write' },
+        ],
+      }),
+      container,
+    )
+    const bar = container.querySelector('[data-memory-timeline-hour="11"]') as HTMLElement
+    expect(bar?.getAttribute('data-memory-timeline-dominant-type')).toBe('mixed')
+    expect(bar?.getAttribute('aria-label')).toBe('11시: 2회, 접근 유형 동등, 고유 메모리 2개')
+    expect(bar?.getAttribute('title')).toBe('11시 — 2회 접근 · 접근 유형 동등 · 2개 메모리')
+    expect(bar?.style.background).toBe('var(--color-fg-muted)')
   })
 
   it('shows max count in legend', () => {

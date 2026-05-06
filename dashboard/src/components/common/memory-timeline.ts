@@ -8,6 +8,7 @@ import { html } from 'htm/preact'
 import { useMemo } from 'preact/hooks'
 
 export type MemoryAccessType = 'read' | 'write' | 'search'
+export type DominantMemoryAccessType = MemoryAccessType | 'mixed'
 
 export interface TimelineEntry {
   timestamp: number
@@ -19,7 +20,7 @@ export interface HourlyMemoryAccess {
   readonly hour: number
   readonly count: number
   readonly intensity: number
-  readonly dominantType: MemoryAccessType | null
+  readonly dominantType: DominantMemoryAccessType | null
   readonly uniqueMemoryCount: number
   readonly typeCounts: Record<MemoryAccessType, number>
 }
@@ -44,26 +45,15 @@ const ACCESS_TYPE_LABEL: Record<MemoryAccessType, string> = {
   search: '검색',
 }
 
-const ACCESS_TYPE_PRIORITY: Record<MemoryAccessType, number> = {
-  read: 1,
-  search: 2,
-  write: 3,
-}
-
 function emptyTypeCounts(): Record<MemoryAccessType, number> {
   return { read: 0, write: 0, search: 0 }
 }
 
-function dominantAccessType(typeCounts: Record<MemoryAccessType, number>): MemoryAccessType {
-  return ACCESS_TYPES.reduce<MemoryAccessType>((best, accessType) => {
-    const bestCount = typeCounts[best]
-    const nextCount = typeCounts[accessType]
-    if (nextCount > bestCount) return accessType
-    if (nextCount === bestCount && ACCESS_TYPE_PRIORITY[accessType] > ACCESS_TYPE_PRIORITY[best]) {
-      return accessType
-    }
-    return best
-  }, 'read')
+function dominantAccessType(typeCounts: Record<MemoryAccessType, number>): DominantMemoryAccessType | null {
+  const maxCount = Math.max(...ACCESS_TYPES.map(accessType => typeCounts[accessType]))
+  if (maxCount === 0) return null
+  const winners = ACCESS_TYPES.filter(accessType => typeCounts[accessType] === maxCount)
+  return winners.length === 1 ? (winners[0] ?? null) : 'mixed'
 }
 
 export function summarizeMemoryTimeline(entries: TimelineEntry[]): MemoryTimelineSummary {
@@ -122,18 +112,21 @@ export function buildMemoryTimelineHeatmap(entries: TimelineEntry[]): HourlyMemo
       hour,
       count,
       intensity: count / max,
-      dominantType: count > 0 ? dominantAccessType(typeCounts) : null,
+      dominantType: dominantAccessType(typeCounts),
       uniqueMemoryCount: bucket?.memoryIds.size ?? 0,
       typeCounts,
     }
   })
 }
 
-function accessTypeColor(accessType: MemoryAccessType): string {
+function accessTypeColor(accessType: DominantMemoryAccessType | null): string {
+  if (accessType === null) return 'var(--color-border-default)'
   return accessType === 'write'
     ? 'var(--warn-10)'
     : accessType === 'search'
       ? 'var(--color-accent)'
+      : accessType === 'mixed'
+        ? 'var(--color-fg-muted)'
       : 'var(--ok-10)'
 }
 
@@ -143,12 +136,14 @@ function formatPeakHour(summary: MemoryTimelineSummary): string {
 
 function formatHourTitle(hour: HourlyMemoryAccess): string {
   if (hour.count === 0 || !hour.dominantType) return `${hour.hour}시 — 접근 없음`
-  return `${hour.hour}시 — ${hour.count}회 접근 · ${ACCESS_TYPE_LABEL[hour.dominantType]} 우세 · ${hour.uniqueMemoryCount}개 메모리`
+  const typeLabel = hour.dominantType === 'mixed' ? '접근 유형 동등' : `${ACCESS_TYPE_LABEL[hour.dominantType]} 우세`
+  return `${hour.hour}시 — ${hour.count}회 접근 · ${typeLabel} · ${hour.uniqueMemoryCount}개 메모리`
 }
 
 function formatHourAriaLabel(hour: HourlyMemoryAccess): string {
   if (hour.count === 0 || !hour.dominantType) return `${hour.hour}시: 접근 없음`
-  return `${hour.hour}시: ${hour.count}회, ${ACCESS_TYPE_LABEL[hour.dominantType]} 우세, 고유 메모리 ${hour.uniqueMemoryCount}개`
+  const typeLabel = hour.dominantType === 'mixed' ? '접근 유형 동등' : `${ACCESS_TYPE_LABEL[hour.dominantType]} 우세`
+  return `${hour.hour}시: ${hour.count}회, ${typeLabel}, 고유 메모리 ${hour.uniqueMemoryCount}개`
 }
 
 export function MemoryTimeline({ entries, testId }: MemoryTimelineProps) {
@@ -181,7 +176,7 @@ export function MemoryTimeline({ entries, testId }: MemoryTimelineProps) {
               style=${{
                 opacity: 0.1 + h.intensity * 0.9,
                 height: `${20 + h.intensity * 80}%`,
-                background: accessTypeColor(h.dominantType ?? 'read'),
+                background: accessTypeColor(h.dominantType),
               }}
               title=${formatHourTitle(h)}
               role="graphics-symbol"

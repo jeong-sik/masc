@@ -54,7 +54,15 @@ success markers for the same run id: `docker_pr_create=true`,
 `docker_git_push=true`, `blocker=null`, the exact branch, and a PR URL. If a
 keeper returns an error or blocker, the harness writes
 `create-readiness-failures.jsonl` and skips review prompts instead of approving
-stale or partially-created PRs. The review phase requires
+stale or partially-created PRs. Per-keeper branch-collision evidence detected
+upfront by `assert_no_proof_branch_collisions_for_mutate` is written to
+`proof-branch-collisions.jsonl` (under the run dir) — one row per keeper with
+the offending branch ref(s) so operators can clean up stale local/remote
+branches before re-running. An empty file means no collisions; rows look like:
+```json
+{"keeper":"executor","branch":"keeper-executor-agent/<run_id>",
+ "kinds":["local","remote_tracking"]}
+``` The review phase requires
 `keeper_pr_review_comment`.
 This avoids the old single-turn shape where one keeper could wait on another
 keeper's missing PR until the Agent.run timeout. The review prompt reserves

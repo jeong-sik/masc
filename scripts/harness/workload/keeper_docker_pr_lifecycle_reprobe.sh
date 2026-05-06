@@ -1146,15 +1146,25 @@ poll_results() {
   fi
 }
 
+ere_escape() {
+  # Escape ERE metacharacters in a literal value before splicing it
+  # into a [grep -Eq] pattern. Without this, an operator-supplied
+  # --run-id like "post-act.live" or a branch name carrying a literal
+  # "+" would produce false matches/false failures.
+  printf '%s' "$1" | sed -e 's/[][\\^$.|?*+(){}]/\\&/g'
+}
+
 create_result_has_success_markers() {
   local keeper="$1"
   local text_file="$2"
-  local branch reply
+  local branch reply run_id_re branch_re
   branch="$(proof_branch_for_keeper "$keeper")"
+  run_id_re="$(ere_escape "$RUN_ID")"
+  branch_re="$(ere_escape "$branch")"
   reply="$(jq -r '.result.reply // .reply // empty' "$text_file" 2>/dev/null || true)"
 
-  printf '%s' "$reply" | grep -Eq '"run_id"[[:space:]]*:[[:space:]]*"'"$RUN_ID"'"' \
-    && printf '%s' "$reply" | grep -Eq '"branch"[[:space:]]*:[[:space:]]*"'"$branch"'"' \
+  printf '%s' "$reply" | grep -Eq '"run_id"[[:space:]]*:[[:space:]]*"'"$run_id_re"'"' \
+    && printf '%s' "$reply" | grep -Eq '"branch"[[:space:]]*:[[:space:]]*"'"$branch_re"'"' \
     && printf '%s' "$reply" | grep -Eq '"docker_pr_create"[[:space:]]*:[[:space:]]*true' \
     && printf '%s' "$reply" | grep -Eq '"docker_git_push"[[:space:]]*:[[:space:]]*true' \
     && printf '%s' "$reply" | grep -Eq '"blocker"[[:space:]]*:[[:space:]]*null' \
@@ -1323,6 +1333,12 @@ post_board_summary() {
 require_cmd jq
 require_cmd python3
 require_cmd curl
+# git is used by assert_no_proof_branch_collisions_for_mutate
+# (ls-remote/show-ref/worktree). Surface it up-front so a missing
+# git binary fails immediately at startup with a consistent
+# "required command not found" message rather than partway through
+# the run with a less obvious git-not-found error.
+require_cmd git
 
 if [[ "$MUTATE" == "1" || -n "$EXPECTED_SERVER_COMMIT" ]]; then
   assert_expected_server_commit

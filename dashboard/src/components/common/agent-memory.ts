@@ -67,9 +67,12 @@ export function groupByCluster(entries: MemoryEntry[]): Record<string, MemoryEnt
   return groups
 }
 
-export function summarizeAgentMemory(entries: MemoryEntry[]): AgentMemorySummary {
+export function summarizeAgentMemory(
+  entries: MemoryEntry[],
+  visibleShortTerm = getVisibleShortTermMemory(entries),
+): AgentMemorySummary {
   const shortTermCount = entries.filter(e => e.type === 'short_term').length
-  const visibleShortTermCount = getVisibleShortTermMemory(entries).length
+  const visibleShortTermCount = visibleShortTerm.length
   const longTerm = entries.filter(e => e.type === 'long_term')
   const clusters = groupByCluster(longTerm)
   const similarities = longTerm
@@ -93,17 +96,18 @@ export function summarizeAgentMemory(entries: MemoryEntry[]): AgentMemorySummary
     clusterCount: Object.keys(clusters).length,
     unclusteredCount: clusters['미분류']?.length ?? 0,
     maxSimilarity: similarities.length > 0 ? Math.max(...similarities) : null,
-    latestTimestamp: entries.reduce<number | null>(
-      (latest, entry) => latest == null || entry.timestamp > latest ? entry.timestamp : latest,
-      null,
-    ),
+    latestTimestamp: entries.reduce<number | null>((latest, entry) => {
+      const timestamp = Number(entry.timestamp)
+      if (!Number.isFinite(timestamp)) return latest
+      return latest == null || timestamp > latest ? timestamp : latest
+    }, null),
     status,
   }
 }
 
 export function AgentMemory({ entries, testId }: AgentMemoryProps) {
-  const summary = useMemo(() => summarizeAgentMemory(entries), [entries])
   const shortTerm = useMemo(() => getVisibleShortTermMemory(entries), [entries])
+  const summary = useMemo(() => summarizeAgentMemory(entries, shortTerm), [entries, shortTerm])
   const longTerm = useMemo(() => entries.filter(e => e.type === 'long_term'), [entries])
   const clusters = useMemo(() => groupByCluster(longTerm), [longTerm])
 

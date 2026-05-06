@@ -135,4 +135,14 @@ describe('AgentMemory', () => {
     expect(groupByCluster(entries.slice(2)).A?.length).toBe(2)
     expect(getVisibleShortTermMemory(entries).map(entry => entry.id)).toEqual(['e1', 'e2'])
   })
+
+  it('ignores invalid timestamps when summarizing latest memory', () => {
+    const summary = summarizeAgentMemory([
+      { id: 'bad', content: 'bad', type: 'long_term', timestamp: Number.NaN },
+      { id: 'ok', content: 'ok', type: 'short_term', timestamp: 42 },
+      { id: 'infinite', content: 'infinite', type: 'short_term', timestamp: Infinity },
+    ])
+
+    expect(summary.latestTimestamp).toBe(42)
+  })
 })

@@ -34,36 +34,37 @@ type caller =
   | Operator_judge
   | Unknown of string
 
-val caller_key : caller -> string
 (** Stable lowercase string identifier for [caller], used by
     Prometheus labels and env-var name construction. *)
+val caller_key : caller -> string
 
-val timeout_sec : caller:caller -> unit -> float
 (** Resolve the OAS bridge timeout (seconds) for [caller] using the
-    five-step lookup order documented above. *)
+    five-step lookup order documented above. Invalid env values, including
+    non-positive and non-finite floats, fall back to [global_default_sec]. *)
+val timeout_sec : caller:caller -> unit -> float
 
-val global_env_var : string
 (** [MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC] — env var consulted in
     step 4 of {!timeout_sec}'s lookup order. Exposed for tests
     (#9629 / #10094) that need to twiddle it via [Unix.putenv]. *)
+val global_env_var : string
 
-val per_caller_env_var : caller:caller -> string
 (** [MASC_OAS_BRIDGE_TIMEOUT_<CALLER>_SEC] — env var consulted in
     step 1 of {!timeout_sec}'s lookup order. Exposed for tests. *)
+val per_caller_env_var : caller:caller -> string
 
-val known_callers : unit -> caller list
 (** The typed-default caller table exposed for tests that want to
     walk every caller (e.g. assert that the legacy alias map covers
     them all). *)
+val known_callers : unit -> caller list
 
-val global_default_sec : float
 (** Hardcoded final fallback (seconds) — also reused as the typed
     default for worker-style callers ({!Auto_responder} /
     {!Dashboard_provider_runs}). Exposed so tests can pin the
     per-caller table without hardcoding the literal. *)
+val global_default_sec : float
 
-val dashboard_judge_default_sec : float
 (** Default timeout for advisory dashboard judge callers
     ({!Governance_judge} / {!Operator_judge}). Kept below the default
     judge refresh interval so a slow CLI-backed judge degrades instead
     of pinning the dashboard for minutes. *)
+val dashboard_judge_default_sec : float

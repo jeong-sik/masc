@@ -47,6 +47,41 @@ let test_accepts_positive_timeout_without_eio_env () =
      | Error err -> failwith (Agent_sdk.Error.to_string err))
 ;;
 
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some old -> Unix.putenv name old
+      | None -> Unix.putenv name "")
+    f
+;;
+
+let check_run_with_caller_uses_fallback_for_invalid_env ~name raw_value =
+  let caller = Env_config_oas_bridge.Auto_responder in
+  let env_name = Env_config_oas_bridge.per_caller_env_var ~caller in
+  with_env env_name raw_value (fun () ->
+    let called = ref false in
+    match
+      Masc_oas_bridge.run_with_caller ~caller (fun () ->
+        called := true;
+        Ok "ok")
+    with
+    | Ok "ok" -> Alcotest.(check bool) name true !called
+    | Ok other -> failwith ("unexpected result: " ^ other)
+    | Error err -> failwith (Agent_sdk.Error.to_string err))
+;;
+
+let test_run_with_caller_rejects_invalid_env_timeouts_at_boundary () =
+  check_run_with_caller_uses_fallback_for_invalid_env ~name:"zero env fallback" "0";
+  check_run_with_caller_uses_fallback_for_invalid_env ~name:"negative env fallback" "-1";
+  check_run_with_caller_uses_fallback_for_invalid_env ~name:"nan env fallback" "nan";
+  check_run_with_caller_uses_fallback_for_invalid_env
+    ~name:"infinite env fallback"
+    "infinity"
+;;
+
 let () =
   Alcotest.run
     "Masc_oas_bridge_timeout_guard"
@@ -63,6 +98,10 @@ let () =
             "accepts positive timeout without eio env"
             `Quick
             test_accepts_positive_timeout_without_eio_env
+        ; Alcotest.test_case
+            "run_with_caller falls back for invalid env timeouts"
+            `Quick
+            test_run_with_caller_rejects_invalid_env_timeouts_at_boundary
         ] )
     ]
 ;;

@@ -55,6 +55,12 @@ let lifecycle_callback_failure_count ~keeper ~callback =
     ~labels:[ ("keeper", keeper); ("callback", callback) ]
     ()
 
+let on_stop_count ~keeper ~stop_reason =
+  Masc_mcp.Prometheus.metric_value_or_zero
+    Masc_mcp.Prometheus.metric_keeper_oas_on_stop
+    ~labels:[ ("keeper", keeper); ("stop_reason", stop_reason) ]
+    ()
+
 let require_hook label = function
   | Some hook -> hook
   | None -> failf "expected active hook: %s" label
@@ -447,6 +453,16 @@ let make_telemetry
     provider_internal_action_count = None;
   }
 
+let make_response ?(stop_reason = Agent_sdk.Types.EndTurn) ?telemetry () =
+  {
+    Agent_sdk.Types.id = "response-test";
+    model = "test-model";
+    stop_reason;
+    content = [];
+    usage = None;
+    telemetry;
+  }
+
 let histogram_snapshot metric ~labels =
   let sum =
     Masc_mcp.Prometheus.metric_value_or_zero metric ~labels ()
@@ -693,9 +709,9 @@ let test_hook_introspection_reports_current_runtime_slots () =
   check string "scope" "keeper_runtime_composite"
     (json |> member "scope" |> to_string);
   check int "slot_count" 14 (json |> member "slot_count" |> to_int);
-  check int "active slots" 9
+  check int "active slots" 10
     (json |> member "active_slot_count" |> to_int);
-  check int "inactive slots" 5
+  check int "inactive slots" 4
     (json |> member "inactive_slot_count" |> to_int);
   check bool "before_turn active" true
     (slot json "before_turn" |> member "active" |> to_bool);
@@ -726,6 +742,11 @@ let test_hook_introspection_reports_current_runtime_slots () =
     "tool_use_failure_metric" failure_effects;
   check_string_list_not_contains "failure hook no stale heuristic label"
     "heuristic_metrics" failure_effects;
+  check bool "on_stop active" true
+    (slot json "on_stop" |> member "active" |> to_bool);
+  check_string_list_contains "on_stop records stop reason"
+    "stop_reason_metric"
+    (string_list_field (slot json "on_stop") "effects");
   check bool "on_idle_escalated inactive" false
     (slot json "on_idle_escalated" |> member "active" |> to_bool);
   check bool "pre_compact inactive" false
@@ -767,6 +788,36 @@ let test_on_tool_error_hook_records_callback_failure_metric () =
   in
   check (float 0.001) "on_tool_error counter increments" 1.0
     (after -. before)
+
+let test_on_stop_hook_records_stop_reason_metric () =
+  let keeper = "callback-on-stop-keeper" in
+  let hooks = make_test_hooks keeper in
+  let hook = require_hook "on_stop" hooks.on_stop in
+  let before = on_stop_count ~keeper ~stop_reason:"end_turn" in
+  check_continue "on_stop"
+    (hook
+       (Agent_sdk.Hooks.OnStop
+          {
+            reason = Agent_sdk.Types.EndTurn;
+            response = make_response ();
+          }));
+  let after = on_stop_count ~keeper ~stop_reason:"end_turn" in
+  check (float 0.001) "on_stop counter increments" 1.0
+    (after -. before);
+  let unknown_before = on_stop_count ~keeper ~stop_reason:"unknown" in
+  check_continue "on_stop unknown"
+    (hook
+       (Agent_sdk.Hooks.OnStop
+          {
+            reason = Agent_sdk.Types.Unknown "provider raw detail";
+            response =
+              make_response
+                ~stop_reason:(Agent_sdk.Types.Unknown "provider raw detail")
+                ();
+          }));
+  let unknown_after = on_stop_count ~keeper ~stop_reason:"unknown" in
+  check (float 0.001) "unknown stop reason is bounded" 1.0
+    (unknown_after -. unknown_before)
 
 let test_on_idle_hook_returns_runtime_nudge () =
   let hooks = make_test_hooks "callback-on-idle-keeper" in
@@ -1161,6 +1212,8 @@ let () =
             test_on_error_hook_records_callback_failure_metric
         ; test_case "on_tool_error records callback metric" `Quick
             test_on_tool_error_hook_records_callback_failure_metric
+        ; test_case "on_stop records stop reason metric" `Quick
+            test_on_stop_hook_records_stop_reason_metric
         ; test_case "on_idle returns runtime nudge" `Quick
             test_on_idle_hook_returns_runtime_nudge
         ] )

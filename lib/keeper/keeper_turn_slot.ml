@@ -204,8 +204,24 @@ let snapshot_holders ~label ~now =
    downstream; this counter is only a coarse fairness gate between fibers.
    The previous [max_v:16] ceiling was a typo-defence boilerplate, not an
    architectural ceiling, and starved fleets >16 keepers. Removed. *)
+let turn_concurrency_env_opt name =
+  if Env_config_core.running_under_test_executable () then None
+  else Env_config_core.raw_value_opt name
+
+let turn_concurrency_int_of_env_default name ~default ~min_v ~max_v =
+  match turn_concurrency_env_opt name with
+  | None -> default
+  | Some raw ->
+      let v =
+        Option.value ~default:default (int_of_string_opt (String.trim raw))
+      in
+      max min_v (min max_v v)
+
+let turn_concurrency_int_of_env_default_for_test =
+  turn_concurrency_int_of_env_default
+
 let autonomous_turn_limit =
-  Keeper_config.int_of_env_default
+  turn_concurrency_int_of_env_default
     "MASC_KEEPER_AUTONOMOUS_CONCURRENCY" ~default:16 ~min_v:1 ~max_v:max_int
 ;;
 
@@ -213,12 +229,12 @@ let () =
   Log.Keeper.info "autonomous_turn_concurrency=%d (env=%s)"
     autonomous_turn_limit
     (Option.value ~default:"<unset>"
-       (Env_config_core.raw_value_opt "MASC_KEEPER_AUTONOMOUS_CONCURRENCY"))
+       (turn_concurrency_env_opt "MASC_KEEPER_AUTONOMOUS_CONCURRENCY"))
 
 let autonomous_turn_semaphore = Eio.Semaphore.make autonomous_turn_limit
 
 let reactive_turn_limit =
-  Keeper_config.int_of_env_default
+  turn_concurrency_int_of_env_default
     "MASC_KEEPER_REACTIVE_CONCURRENCY" ~default:16 ~min_v:1 ~max_v:max_int
 ;;
 
@@ -226,7 +242,7 @@ let () =
   Log.Keeper.info "reactive_turn_concurrency=%d (env=%s)"
     reactive_turn_limit
     (Option.value ~default:"<unset>"
-       (Env_config_core.raw_value_opt "MASC_KEEPER_REACTIVE_CONCURRENCY"))
+       (turn_concurrency_env_opt "MASC_KEEPER_REACTIVE_CONCURRENCY"))
 
 let reactive_turn_semaphore = Eio.Semaphore.make reactive_turn_limit
 

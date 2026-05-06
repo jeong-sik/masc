@@ -150,6 +150,39 @@ let test_sanitize_inherited_test_env_opt_keeps_value_with_opt_in () =
   check (option string) "opt-in preserves config-path override"
     (Some "/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config") actual
 
+let test_inputs_from_env_honors_config_path_override_opt_in () =
+  with_temp_dir "config-dir-inputs-env-config" @@ fun root ->
+  let config = make_config_root root in
+  let personas = Filename.concat config "personas" in
+  with_env "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE" (Some "true") @@ fun () ->
+  with_env "MASC_CONFIG_DIR" (Some config) @@ fun () ->
+  with_env "MASC_PERSONAS_DIR" (Some personas) @@ fun () ->
+  let inputs = Lib.Config_dir_resolver.inputs_from_env () in
+  check (option string) "inputs preserve config env" (Some config)
+    inputs.env_config_dir;
+  check (option string) "inputs preserve personas env" (Some personas)
+    inputs.env_personas_dir;
+  let resolution = Lib.Config_dir_resolver.resolve_with inputs in
+  check string "root source" "env"
+    (Lib.Config_dir_resolver.source_to_string resolution.config_root.source);
+  check bool "personas env exists" true resolution.personas.exists
+
+let test_inputs_from_env_honors_base_path_override_opt_in () =
+  with_temp_dir "config-dir-inputs-env-base" @@ fun root ->
+  let base = Filename.concat root "base" in
+  let _config = make_config_root (Filename.concat base Common.masc_dirname) in
+  with_env "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE" (Some "true") @@ fun () ->
+  with_env "MASC_CONFIG_DIR" None @@ fun () ->
+  with_env "MASC_PERSONAS_DIR" None @@ fun () ->
+  with_env "MASC_BASE_PATH" (Some base) @@ fun () ->
+  with_env "MASC_BASE_PATH_INPUT" (Some base) @@ fun () ->
+  let inputs = Lib.Config_dir_resolver.inputs_from_env () in
+  check (option string) "inputs preserve base env" (Some base)
+    inputs.env_base_path;
+  let resolution = Lib.Config_dir_resolver.resolve_with inputs in
+  check string "root source" "local_masc"
+    (Lib.Config_dir_resolver.source_to_string resolution.config_root.source)
+
 let test_normalize_masc_base_path_input_canonicalizes_explicit_path () =
   let actual =
     Env_config_core.normalize_masc_base_path_input
@@ -218,6 +251,8 @@ let test_cwd_fallback_disabled_by_default () =
     (Lib.Config_dir_resolver.status_to_string resolution.status);
   check string "root source" "missing"
     (Lib.Config_dir_resolver.source_to_string resolution.config_root.source);
+  check bool "cascade hidden when repo fallback disabled"
+    false resolution.cascade.exists;
   check bool "warning mentions opt-in" true
     (List.exists
        (string_contains ~needle:"MASC_ALLOW_REPO_CONFIG_FALLBACK=true")
@@ -427,6 +462,10 @@ let () =
             test_sanitize_inherited_test_base_path_opt_keeps_process_temp_path;
           test_case "opt-in preserves config-path override" `Quick
             test_sanitize_inherited_test_env_opt_keeps_value_with_opt_in;
+          test_case "inputs_from_env honors config-path override opt-in" `Quick
+            test_inputs_from_env_honors_config_path_override_opt_in;
+          test_case "inputs_from_env honors base-path override opt-in" `Quick
+            test_inputs_from_env_honors_base_path_override_opt_in;
           test_case "canonicalizes explicit base path" `Quick
             test_normalize_masc_base_path_input_canonicalizes_explicit_path;
         ] );

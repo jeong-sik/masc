@@ -26,6 +26,11 @@ val turn_semaphore : Eio.Semaphore.t
 val autonomous_turn_semaphore : Eio.Semaphore.t
 val reactive_turn_semaphore : Eio.Semaphore.t
 
+(** Test-only: resolve a keeper turn concurrency env var through the same
+    test-executable isolation gate used at module initialization. *)
+val turn_concurrency_int_of_env_default_for_test :
+  string -> default:int -> min_v:int -> max_v:int -> int
+
 (** Wall-clock cap on [Eio.Semaphore.acquire] when waiting for a keeper
     turn slot. Derived from [MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC]. *)
 val semaphore_wait_timeout_sec : float

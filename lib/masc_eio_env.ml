@@ -16,6 +16,8 @@ let env : t option Atomic.t = Atomic.make None
 
 let init ~sw ~net ?clock () = Atomic.set env (Some { sw; net; clock })
 
+let reset_for_test () = Atomic.set env None
+
 let get () =
   match Atomic.get env with
   | Some e -> e

@@ -34,6 +34,9 @@ val init :
     startup but a re-init is permitted (used by the harness
     test suite). *)
 
+val reset_for_test : unit -> unit
+(** Clear the captured environment for direct test executable runs. *)
+
 val get : unit -> t
 (** Read the captured environment.
 

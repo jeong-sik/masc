@@ -339,6 +339,21 @@ let test_health_and_ci_runner_diagnostics () =
     (file_contains_pattern "scripts/health_snapshot.sh" "\"regressions\": ${regressions_json}");
   check bool "tests scrub inherited MASC_BASE_PATH overrides" true
     (file_contains_pattern "test/dune" "(MASC_BASE_PATH \"\")");
+  check bool "test_oas_worker pins direct-run MASC env" true
+    (file_contains_pattern "test/test_oas_worker.ml"
+       "let pin_direct_run_masc_env");
+  check bool "test_oas_worker clears captured Eio env before tests" true
+    (file_contains_pattern "test/test_oas_worker.ml"
+       "Masc_eio_env.reset_for_test ()");
+  check bool "test_oas_worker isolates legacy timeout test from liveness observer" true
+    (file_contains_pattern "test/test_oas_worker.ml"
+       "with_cascade_attempt_liveness \"off\"");
+  check bool "keeper turn concurrency ignores operator env in tests" true
+    (file_contains_pattern "lib/keeper/keeper_turn_slot.ml"
+       "Env_config_core.running_under_test_executable ()");
+  check bool "config resolver sanitizes inherited test base path" true
+    (file_contains_pattern "lib/config_dir_resolver.ml"
+       "env_base_path = current_env_base_path_opt ()");
   check bool "ci runner captures log file" true
     (file_contains_pattern "scripts/ci-run-tests.sh" "TEST_LOG_FILE=");
   check bool "ci runner prints failure markers" true

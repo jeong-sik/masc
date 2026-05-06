@@ -98,7 +98,7 @@ let query_pr_for_branch branch =
           ~actor:"dashboard/worktree_status"
           ~raw_source:(exec_gate_raw_source argv)
           ~summary:"dashboard_worktree_status gh pr list"
-          ~timeout_sec:10.0
+          ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Gh_shared ())
           argv
       in
       (* Output is a JSON array: [{"number":42,"state":"OPEN"}] or [] *)

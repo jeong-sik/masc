@@ -311,6 +311,57 @@ let test_runtime_timestamps_fallback_to_unix_values () =
       check string "judge expires_at falls back to unix" expires_at
         (judge |> member "expires_at" |> to_string))
 
+let test_dashboard_surfaces_compute_telemetry () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      with_test_fs env @@ fun () ->
+      let st = Lib.Dashboard_governance_judge.get_state dir in
+      let now = Unix.gettimeofday () in
+      Lib.Dashboard_governance_judge.with_lock st (fun () ->
+        st.compute_in_flight <- 2;
+        st.last_compute_duration_sec <- Some 12.5;
+        st.last_compute_timeout_sec <- Some 45.0;
+        st.last_compute_outcome <- Some "error";
+        st.last_compute_reason <- Some "timeout");
+      let status =
+        Lib.Dashboard_governance_judge.runtime_status_at ~now_ts:now dir
+      in
+      check int "runtime exposes compute in-flight" 2
+        status.compute_in_flight;
+      check (option string) "runtime exposes compute outcome" (Some "error")
+        status.last_compute_outcome;
+      check (option string) "runtime exposes compute reason" (Some "timeout")
+        status.last_compute_reason;
+      (match status.last_compute_duration_sec with
+       | Some duration ->
+         check (float 0.001) "runtime exposes compute duration" 12.5
+           duration
+       | None -> fail "expected compute duration");
+      (match status.last_compute_timeout_sec with
+       | Some timeout_sec ->
+         check (float 0.001) "runtime exposes timeout budget" 45.0
+           timeout_sec
+       | None -> fail "expected timeout budget");
+      let json =
+        Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20
+          ~offset:0 ~status_filter:None
+      in
+      let open Yojson.Safe.Util in
+      let judge = json |> member "judge" in
+      check int "dashboard exposes compute in-flight" 2
+        (judge |> member "compute_in_flight" |> to_int);
+      check (float 0.001) "dashboard exposes compute duration" 12.5
+        (judge |> member "last_compute_duration_sec" |> to_float);
+      check (float 0.001) "dashboard exposes timeout budget" 45.0
+        (judge |> member "last_compute_timeout_sec" |> to_float);
+      check string "dashboard exposes compute outcome" "error"
+        (judge |> member "last_compute_outcome" |> to_string);
+      check string "dashboard exposes compute reason" "timeout"
+        (judge |> member "last_compute_reason" |> to_string))
+
 let test_refresh_failure_keeps_fresh_cache_online () =
   let dir = test_dir () in
   Fun.protect
@@ -720,6 +771,8 @@ let () =
             test_empty_judgment_disk_scan_uses_cooldown;
           test_case "runtime timestamps fallback to unix values" `Quick
             test_runtime_timestamps_fallback_to_unix_values;
+          test_case "dashboard surfaces compute telemetry" `Quick
+            test_dashboard_surfaces_compute_telemetry;
           test_case "refresh failure keeps fresh cache online" `Quick
             test_refresh_failure_keeps_fresh_cache_online;
           test_case "refresh failure marks expired cache offline" `Quick

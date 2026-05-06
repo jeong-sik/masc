@@ -13,6 +13,11 @@ type runtime_snapshot = {
   model_used : string option;
   keeper_name : string;
   last_error : string option;
+  compute_in_flight : int;
+  last_compute_duration_sec : float option;
+  last_compute_timeout_sec : float option;
+  last_compute_outcome : string option;
+  last_compute_reason : string option;
 }
 
 type state = {
@@ -28,6 +33,11 @@ type state = {
   mutable expires_at : string option;
   mutable model_used : string option;
   mutable last_error : string option;
+  mutable compute_in_flight : int;
+  mutable last_compute_duration_sec : float option;
+  mutable last_compute_timeout_sec : float option;
+  mutable last_compute_outcome : string option;
+  mutable last_compute_reason : string option;
   mutable last_disk_load_unix : float option;
   mutable judgments : (string, Yojson.Safe.t) Hashtbl.t;
 }
@@ -41,6 +51,15 @@ type state = {
 let governance_response_model_empty_metric =
   "masc_governance_response_model_empty_total"
 
+let governance_compute_total_metric =
+  "masc_governance_judge_compute_total"
+
+let governance_compute_duration_metric =
+  "masc_governance_judge_compute_duration_seconds"
+
+let governance_compute_in_flight_metric =
+  "masc_governance_judge_compute_in_flight"
+
 let () =
   Prometheus.register_counter
     ~name:governance_response_model_empty_metric
@@ -48,6 +67,22 @@ let () =
       "Count of governance compute_judgments cycles where \
        [response.model] was empty.  Labels: \
        [source=telemetry_resolved | unknown_sentinel]."
+    ();
+  Prometheus.register_counter
+    ~name:governance_compute_total_metric
+    ~help:
+      "Count of governance judge compute_judgments attempts. Labels: \
+       [outcome=ok|error, reason=ok|timeout|error|cancelled]."
+    ();
+  Prometheus.register_histogram
+    ~name:governance_compute_duration_metric
+    ~help:
+      "Observed governance judge compute_judgments duration in seconds. \
+       Labels: [outcome=ok|error, reason=ok|timeout|error|cancelled]."
+    ();
+  Prometheus.register_gauge
+    ~name:governance_compute_in_flight_metric
+    ~help:"Current in-flight governance judge compute_judgments attempts."
     ()
 
 type governance_model_source =
@@ -143,6 +178,27 @@ let degraded_reason_of_error message =
   else
     "error"
 
+let timeout_sec_of_error message =
+  let marker = "timed out after " in
+  let lower = String.lowercase_ascii message in
+  match String_util.find_substring lower marker with
+  | None -> None
+  | Some marker_idx ->
+      let start = marker_idx + String.length marker in
+      let len = String.length lower in
+      let rec find_stop idx =
+        if idx >= len then idx
+        else
+          match lower.[idx] with
+          | '0' .. '9' | '.' -> find_stop (idx + 1)
+          | _ -> idx
+      in
+      let stop = find_stop start in
+      if stop <= start then None
+      else
+        String.sub lower start (stop - start)
+        |> float_of_string_opt
+
 let cached_judgments_still_fresh ~now_ts (st : state) =
   match st.expires_at_unix with
   | Some expires_at -> expires_at > now_ts
@@ -194,6 +250,11 @@ let get_state base_path =
             expires_at = None;
             model_used = None;
             last_error = None;
+            compute_in_flight = 0;
+            last_compute_duration_sec = None;
+            last_compute_timeout_sec = None;
+            last_compute_outcome = None;
+            last_compute_reason = None;
             last_disk_load_unix = None;
           judgments = Hashtbl.create 32;
         }
@@ -362,6 +423,11 @@ let runtime_status_at ~now_ts base_path =
         model_used = st.model_used;
         keeper_name;
         last_error = st.last_error;
+        compute_in_flight = st.compute_in_flight;
+        last_compute_duration_sec = st.last_compute_duration_sec;
+        last_compute_timeout_sec = st.last_compute_timeout_sec;
+        last_compute_outcome = st.last_compute_outcome;
+        last_compute_reason = st.last_compute_reason;
       })
 
 let runtime_status base_path =
@@ -625,6 +691,43 @@ let should_backoff ~sw ~net =
       (Printexc.to_string exn);
     false
 
+let mark_compute_start (st : state) =
+  let in_flight =
+    with_lock st (fun () ->
+        st.compute_in_flight <- st.compute_in_flight + 1;
+        st.compute_in_flight)
+  in
+  Prometheus.set_gauge governance_compute_in_flight_metric
+    (float_of_int in_flight);
+  in_flight
+
+let mark_compute_finish (st : state) ~started_at ~outcome ~reason
+    ~timeout_sec =
+  let duration_sec = Unix.gettimeofday () -. started_at in
+  let in_flight =
+    with_lock st (fun () ->
+        st.compute_in_flight <- max 0 (st.compute_in_flight - 1);
+        st.last_compute_duration_sec <- Some duration_sec;
+        st.last_compute_timeout_sec <- timeout_sec;
+        st.last_compute_outcome <- Some outcome;
+        st.last_compute_reason <- Some reason;
+        st.compute_in_flight)
+  in
+  let labels = [ ("outcome", outcome); ("reason", reason) ] in
+  Prometheus.set_gauge governance_compute_in_flight_metric
+    (float_of_int in_flight);
+  Prometheus.inc_counter governance_compute_total_metric ~labels ();
+  Prometheus.observe_histogram governance_compute_duration_metric
+    ~labels duration_sec;
+  Log.Governance.info
+    "refresh_once: compute_judgments telemetry outcome=%s reason=%s duration=%.3fs timeout_budget=%s in_flight_after=%d"
+    outcome reason duration_sec
+    (match timeout_sec with
+     | Some value -> Printf.sprintf "%.1fs" value
+     | None -> "unknown")
+    in_flight;
+  (duration_sec, in_flight)
+
 let refresh_once ~sw ~net
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.t)
@@ -667,8 +770,30 @@ let refresh_once ~sw ~net
         st.refreshing <- true;
         st.runtime_status <- status_refreshing;
         st.degraded_reason <- None);
-    match compute_judgments ~masc_tools ~dispatch ~build_facts with
+    let started_at = Unix.gettimeofday () in
+    let timeout_budget =
+      Some
+        (Env_config_oas_bridge.timeout_sec
+           ~caller:Env_config_oas_bridge.Governance_judge ())
+    in
+    ignore (mark_compute_start st);
+    let compute_result =
+      try compute_judgments ~masc_tools ~dispatch ~build_facts with
+      | Eio.Cancel.Cancelled _ as exn ->
+          ignore
+            (mark_compute_finish st ~started_at ~outcome:"error"
+               ~reason:"cancelled" ~timeout_sec:timeout_budget);
+          raise exn
+      | exn ->
+          Error
+            (Printf.sprintf "compute_judgments raised: %s"
+               (Printexc.to_string exn))
+    in
+    match compute_result with
     | Ok (model_used, generated_at, expires_at, judgments) ->
+        ignore
+          (mark_compute_finish st ~started_at ~outcome:"ok" ~reason:"ok"
+             ~timeout_sec:timeout_budget);
         if judgments = [] then
           Log.Governance.routine
             "refresh_once: ok model=%s judgments=%d"
@@ -694,9 +819,23 @@ let refresh_once ~sw ~net
               (fun json -> Hashtbl.replace st.judgments (judgment_key json) json)
               judgments)
     | Error message ->
+        let reason = degraded_reason_of_error message in
+        let timeout_sec =
+          match timeout_sec_of_error message with
+          | Some value -> Some value
+          | None -> timeout_budget
+        in
+        let duration_sec, in_flight =
+          mark_compute_finish st ~started_at ~outcome:"error" ~reason
+            ~timeout_sec
+        in
         Log.Governance.warn
-          "refresh_once: compute_judgments failed: %s"
-          message;
+          "refresh_once: compute_judgments failed: %s (duration=%.3fs timeout_budget=%s in_flight=%d)"
+          message duration_sec
+          (match timeout_sec with
+           | Some value -> Printf.sprintf "%.1fs" value
+           | None -> "unknown")
+          in_flight;
         with_lock st (fun () ->
             mark_refresh_failure ~now_ts:(Unix.gettimeofday ()) st ~message)
   end

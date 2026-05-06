@@ -169,7 +169,7 @@ describe('EventStream', () => {
     })
   })
 
-  it('groups adjacent visible events inside the temporal synchronization window', () => {
+  it('groups visible events by anchor timestamp inside the temporal synchronization window', () => {
     const rows = buildTemporalSyncRows(getVisibleStreamEvents(baseEvents, 100), 65000)
 
     expect(rows.map(row => row.event.id)).toEqual(['e3', 'e2', 'e1'])

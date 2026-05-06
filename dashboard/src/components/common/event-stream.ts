@@ -149,6 +149,9 @@ export function buildTemporalSyncRows(
 
   for (const event of events) {
     const eventTimestamp = finiteTimestamp(event.timestamp)
+    // Anchor-based grouping keeps each visible cluster bounded to the first
+    // event in that cluster, instead of letting a long adjacency chain stretch
+    // beyond the configured synchronization window.
     const canJoin =
       pending.length > 0
       && anchorTimestamp != null

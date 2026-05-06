@@ -252,8 +252,8 @@
   `blocking_future_date_claims_total=3`, and
   `source_currentness_current=false`. The
   checklist maps all 21 prompt requirements to concrete artifacts and blockers
-  across all 12 prompt source documents: 5 `PASS`, 14 `PARTIAL`, and 2
-  `BLOCKED` requirements, with all 16 non-PASS rows carrying valid GitHub issue
+  across all 12 prompt source documents: 7 `PASS`, 12 `PARTIAL`, and 2
+  `BLOCKED` requirements, with all 14 non-PASS rows carrying valid GitHub issue
   tracking refs. The prompt checklist also validates that all `artifact_refs`
   resolve to repo-local files after optional `#...` anchors are stripped; user
   local paths, path escapes, and missing artifact files make the checklist
@@ -274,17 +274,18 @@
   `prompt_requirements_closeout_complete`. The first blocker proves the real
   strict 206-row corpus is still missing. The second blocker prevents the
   prompt objective from being marked complete while the recorded checklist
-  still has 14 `PARTIAL` and 2 `BLOCKED` prompt requirements. The
+  still has 12 `PARTIAL` and 2 `BLOCKED` prompt requirements. The
   `prompt_to_artifact_checklist_recorded` criterion remains `PASS`, with 21
-  unique requirement IDs, 12 unique issue refs, and no missing or invalid
+  unique requirement IDs, 11 unique issue refs, and no missing or invalid
   tracking refs; recording the map is separate from satisfying every mapped
   prompt requirement.
 - [근거] `gh issue view <issue> --repo jeong-sik/masc-mcp --json
-  number,state,title,url,labels` for #13265, #13505, #13609, #13610, #13611,
-  #13636, #13684, #13685, #13686, #13688, #13689, and #13690 checked at
-  2026-05-06T17:25:00+09:00, confidence High: all 12 prompt-checklist
-  tracking issue refs resolve to open,
-  label-free GitHub issues.
+  number,state,title,url,labels` for #13265, #13505, #13610, #13611, #13636,
+  #13684, #13685, #13686, #13688, #13689, and #13690 checked at
+  2026-05-06T17:25:00+09:00, confidence High: all 11 prompt-checklist
+  tracking issue refs resolve to open, label-free GitHub issues. #13609
+  dropped from the list after the dashboard rows were promoted to `PASS`
+  in the same checklist update.
 - [근거] `python3 test/test_goal_loop_completion_audit.py` checked at
   2026-05-06T16:03:11+09:00, confidence High: the completion audit accepts
   optional `--strict-row-corpus` and `--source-row-candidate-inventory`

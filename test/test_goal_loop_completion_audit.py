@@ -1154,8 +1154,11 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         # index so the test stays correct under any harmless fixture
         # reordering.
         verifier_row = next(
-            (row for row in keeper_rows
-             if isinstance(row, dict) and row.get("keeper_name") == "verifier"),
+            (
+                row
+                for row in keeper_rows
+                if isinstance(row, dict) and row.get("keeper_name") == "verifier"
+            ),
             None,
         )
         assert verifier_row is not None, "fixture must contain a verifier row"

@@ -6,7 +6,8 @@
     |---------------------|--------|-----------------|
     | None / empty | none | [Unmaterialized] |
     | non-empty dir, missing on disk | none | [Unmaterialized] |
-    | exists + [gh auth status] = 0 | record verify timestamp | [Materialized {last_verified_at}] |
+    | exists + missing [hosts.yml] [oauth_token] | none | [Stale {reason}] |
+    | exists + [hosts.yml] [oauth_token] + [gh auth status] = 0 | record verify timestamp | [Materialized {last_verified_at}] |
     | exists + [gh auth status] != 0 | record reason | [Stale {reason}] |
 
     PR-B Slice 1 ships this **verify-only** path.  The two [oauth_method]
@@ -89,6 +90,34 @@ let gh_auth_status_ok ~gh_config_dir =
       | Unix.WEXITED 0 -> true
       | _ -> false)
 
+let hosts_yml_has_oauth_token ~gh_config_dir =
+  let path = Filename.concat gh_config_dir gh_hosts_yml in
+  if not (Sys.file_exists path) then false
+  else
+    try
+      let ic = open_in path in
+      Fun.protect
+        ~finally:(fun () -> close_in_noerr ic)
+        (fun () ->
+          let found = ref false in
+          (try
+             while not !found do
+               let line = input_line ic in
+               let trimmed = String.trim line in
+               let prefix = "oauth_token:" in
+               let plen = String.length prefix in
+               if String.length trimmed > plen
+                  && String.equal (String.sub trimmed 0 plen) prefix
+                  && String.trim
+                       (String.sub trimmed plen
+                          (String.length trimmed - plen))
+                     <> ""
+               then found := true
+             done
+           with End_of_file -> ());
+          !found)
+    with Sys_error _ -> false
+
 (** Compute the new state for [gh_config_dir] without writing anywhere.
     Pure with respect to credential records; reads filesystem + invokes
     [gh] subprocess. *)
@@ -97,6 +126,15 @@ let verify_state ~gh_config_dir : credential_state =
   else if not (Sys.file_exists gh_config_dir) then Unmaterialized
   else if not (Sys.is_directory gh_config_dir) then
     Stale { reason = "gh_config_dir is not a directory" }
+  else if not (hosts_yml_has_oauth_token ~gh_config_dir) then
+    Stale
+      {
+        reason =
+          "gh_config_dir has no hosts.yml oauth_token; keyring-backed \
+           GitHub auth cannot be projected into Docker. Re-materialize \
+           this identity with `gh auth login --with-token \
+           --insecure-storage` into the bundle.";
+      }
   else if gh_auth_status_ok ~gh_config_dir then
     Materialized { last_verified_at = now_unix_ms () }
   else

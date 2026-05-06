@@ -2,13 +2,14 @@
     {!Credential_materializer.verify_state} and {!ensure}.
 
     The [Materialized] outcome requires a real [gh] subprocess + a
-    populated bundle and is exercised by the end-to-end test added in
-    PR-B Slice 3.  Here we pin the three branches that do not depend on
-    [gh] being installed:
+    populated, Docker-projectable bundle and is exercised by the
+    end-to-end test added in PR-B Slice 3.  Here we pin the branches
+    that do not depend on [gh] being installed:
 
     1. [None] / empty / missing [gh_config_dir] -> [Unmaterialized].
     2. Path exists but is a file rather than a directory -> [Stale].
-    3. [ensure] mutates only the [state] field; every other field on the
+    3. Path exists but [hosts.yml] has no [oauth_token] -> [Stale].
+    4. [ensure] mutates only the [state] field; every other field on the
        input record is preserved verbatim. *)
 
 open Repo_manager_types
@@ -86,6 +87,43 @@ let test_path_is_file_is_stale () =
              with Not_found -> false)
       | other ->
           Alcotest.failf "expected Stale, got %s"
+            (show_credential_state other))
+
+let test_keyring_backed_bundle_without_oauth_token_is_stale () =
+  with_temp_base_path (fun base ->
+      let gh_config_dir = Filename.concat base "keyring_only_gh" in
+      Unix.mkdir gh_config_dir 0o700;
+      let hosts_yml = Filename.concat gh_config_dir "hosts.yml" in
+      let oc = open_out hosts_yml in
+      output_string oc
+        "github.com:\n\
+        \    git_protocol: https\n\
+        \    users:\n\
+        \        yousleepwhen:\n\
+        \    user: yousleepwhen\n";
+      close_out oc;
+      match
+        Credential_materializer.verify_state ~gh_config_dir
+      with
+      | Stale { reason } ->
+          Alcotest.(check bool)
+            "reason mentions missing oauth_token" true
+            (try
+               ignore
+                 (Str.search_forward
+                    (Str.regexp_string "oauth_token") reason 0);
+               true
+             with Not_found -> false);
+          Alcotest.(check bool)
+            "reason points at insecure-storage rematerialization" true
+            (try
+               ignore
+                 (Str.search_forward
+                    (Str.regexp_string "--insecure-storage") reason 0);
+               true
+             with Not_found -> false)
+      | other ->
+          Alcotest.failf "expected Stale for keyring-only bundle, got %s"
             (show_credential_state other))
 
 (* --- 3. ensure mutates only state, preserves other fields --- *)
@@ -596,6 +634,9 @@ let () =
             test_missing_path_is_unmaterialized;
           Alcotest.test_case "file (not dir) is Stale" `Quick
             test_path_is_file_is_stale;
+          Alcotest.test_case
+            "keyring-only hosts.yml without oauth_token is Stale" `Quick
+            test_keyring_backed_bundle_without_oauth_token_is_stale;
         ] );
       ( "ensure",
         [

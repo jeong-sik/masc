@@ -225,10 +225,17 @@ server_health_url() {
 }
 
 assert_expected_server_commit() {
-  local health_file fields actual started incarnation
+  local health_file fields rc actual started incarnation
   health_file="$RAW_DIR/server-health.json"
-  if ! fields="$(capture_server_incarnation "$health_file")"; then
-    echo "failed to fetch server health for incarnation check: $(server_health_url)" >&2
+  if fields="$(capture_server_incarnation "$health_file")"; then
+    :
+  else
+    rc=$?
+    if [[ $rc -eq 2 ]]; then
+      echo "server health missing build.commit for incarnation check: url=$(server_health_url) file=$health_file" >&2
+    else
+      echo "failed to fetch server health for incarnation check: url=$(server_health_url) file=$health_file" >&2
+    fi
     exit 1
   fi
   IFS=$'\t' read -r actual started incarnation <<<"$fields"
@@ -285,9 +292,10 @@ assert_server_incarnation_unchanged() {
 
   local health_file fields rc actual started incarnation
   health_file="$RAW_DIR/server-health-poll.json"
-  fields="$(capture_server_incarnation "$health_file")"
-  rc=$?
-  if [[ $rc -ne 0 ]]; then
+  if fields="$(capture_server_incarnation "$health_file")"; then
+    :
+  else
+    rc=$?
     case $rc in
       2) SERVER_INCARNATION_LAST_REASON="server_health_missing_commit" ;;
       *) SERVER_INCARNATION_LAST_REASON="server_health_unavailable" ;;

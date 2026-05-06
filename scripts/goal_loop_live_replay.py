@@ -88,6 +88,19 @@ def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
             temp_path.unlink()
 
 
+def normalize_base_path(base_path: str | None) -> str | None:
+    """Expand ``~`` so every downstream consumer (artifact metadata,
+    evidence_source, dashboard status path) sees the same canonical form.
+
+    Without this, ``--base-path ~/foo`` produced inconsistent artifacts:
+    metadata.base_path / evidence_source kept the unexpanded ``~``, but
+    dashboard_status_path_for_base_path expanded it for filesystem writes.
+    """
+    if base_path is None:
+        return None
+    return str(Path(base_path).expanduser())
+
+
 def dashboard_status_path_for_base_path(base_path: str) -> Path:
     return Path(base_path).expanduser() / ".masc" / "goal-loop" / "status.json"
 
@@ -460,7 +473,7 @@ def main(argv: list[str] | None = None) -> int:
         verify_policy=args.verify_policy,
         max_samples=args.max_samples,
         runtime_source=args.runtime_source,
-        base_path=args.base_path,
+        base_path=normalize_base_path(args.base_path),
         publish_dashboard_status=args.publish_dashboard_status,
     )
     if args.format == "json":

@@ -178,6 +178,121 @@ let duplicate_keys values =
   loop [] sorted |> sorted_unique
 ;;
 
+let string_starts_with ~prefix value =
+  let prefix_len = String.length prefix in
+  String.length value >= prefix_len
+  && String.equal (String.sub value 0 prefix_len) prefix
+;;
+
+let string_ends_with ~suffix value =
+  let value_len = String.length value in
+  let suffix_len = String.length suffix in
+  value_len >= suffix_len
+  && String.equal (String.sub value (value_len - suffix_len) suffix_len) suffix
+;;
+
+let read_file path =
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> really_input_string ic (in_channel_length ic))
+;;
+
+let repo_root () =
+  let has_otel_source path =
+    Sys.file_exists (Filename.concat path "lib/otel/otel_genai.ml")
+  in
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when has_otel_source root -> root
+  | _ ->
+      let rec ascend path =
+        if has_otel_source path
+        then path
+        else (
+          let parent = Filename.dirname path in
+          if String.equal parent path then path else ascend parent)
+      in
+      ascend (Sys.getcwd ())
+;;
+
+let source_path relative = Filename.concat (repo_root ()) relative
+
+let attr_key_mli_string_constant_names () =
+  read_file (source_path "lib/otel/otel_genai.mli")
+  |> String.split_on_char '\n'
+  |> List.filter_map (fun line ->
+    let line = String.trim line in
+    if string_starts_with ~prefix:"val " line
+       && string_ends_with ~suffix:" : string" line
+    then (
+      let rest = String.sub line 4 (String.length line - 4) in
+      match String.index_opt rest ' ' with
+      | Some idx -> Some (String.sub rest 0 idx)
+      | None -> None)
+    else None)
+  |> sorted_unique
+;;
+
+let let_binding_name_and_rhs line =
+  if string_starts_with ~prefix:"let " line
+  then (
+    let rest = String.sub line 4 (String.length line - 4) in
+    match String.index_opt rest '=' with
+    | Some idx ->
+        let name = String.sub rest 0 idx |> String.trim in
+        let rhs =
+          String.sub rest (idx + 1) (String.length rest - idx - 1) |> String.trim
+        in
+        Some (name, rhs)
+    | None -> None)
+  else None
+;;
+
+let rec next_nonempty_line = function
+  | [] -> ""
+  | line :: rest ->
+      let line = String.trim line in
+      if String.equal line "" then next_nonempty_line rest else line
+;;
+
+let registered_attr_key_constant_names () =
+  let lines =
+    read_file (source_path "lib/otel/otel_genai.ml") |> String.split_on_char '\n'
+  in
+  let rec loop acc = function
+    | [] -> sorted_unique acc
+    | line :: rest ->
+        let line = String.trim line in
+        (match let_binding_name_and_rhs line with
+         | Some (name, rhs)
+           when string_starts_with ~prefix:"register " rhs
+                || string_starts_with ~prefix:"register " (next_nonempty_line rest)
+           -> loop (name :: acc) rest
+         | _ -> loop acc rest)
+  in
+  loop [] lines
+;;
+
+let test_attr_key_exported_constants_are_registered () =
+  let module K = Lib.Otel_genai.Attr_key in
+  let exported_names = attr_key_mli_string_constant_names () in
+  let registered_exported_names =
+    registered_attr_key_constant_names ()
+    |> List.filter (fun name -> List.mem name exported_names)
+    |> sorted_unique
+  in
+  check
+    (list string)
+    "exported string constants use register helper"
+    exported_names
+    registered_exported_names;
+  check
+    int
+    "registered key count matches exported constants"
+    (List.length exported_names)
+    (List.length K.all_known)
+;;
+
 let test_attr_key_registry_has_no_orphans () =
   let module K = Lib.Otel_genai.Attr_key in
   let classified = K.official_gen_ai @ K.masc_extensions @ K.legacy in
@@ -273,6 +388,8 @@ let () =
             test_attr_key_registry_boundaries
         ; test_case "attr key registry full coverage" `Quick
             test_attr_key_registry_full_coverage
+        ; test_case "attr key exported constants are registered" `Quick
+            test_attr_key_exported_constants_are_registered
         ; test_case "attr key registry has no orphans" `Quick
             test_attr_key_registry_has_no_orphans
         ; test_case "tool execution attrs" `Quick test_tool_execution_attrs

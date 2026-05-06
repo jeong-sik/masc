@@ -77,6 +77,36 @@ describe('GoalLoopPanel', () => {
     expect(screen.getByTestId('goal-loop-next-action').textContent).toContain('D-EMERGENCY-2')
   })
 
+  it('renders audit catalog values even when the catalog is not blocked', () => {
+    const status = blockedStatus()
+    status.phases.orient.summary.audit_catalog = {
+      status: 'COMPLETE',
+      expected_findings_total: 206,
+      itemized_findings_total: 206,
+      missing_itemized_findings: 0,
+      strict_row_corpus_validated: true,
+    }
+
+    render(html`<${GoalLoopPanel} initialStatus=${status} />`)
+
+    const audit = screen.getByTestId('goal-loop-audit-catalog')
+    expect(audit.textContent).toContain('COMPLETE')
+    expect(audit.textContent).toContain('206')
+    expect(screen.getByTestId('goal-loop-corpus-missing').textContent).toContain('0')
+    expect(audit.textContent).toContain('true')
+  })
+
+  it('renders an explicit missing audit catalog state', () => {
+    const status = blockedStatus()
+    delete status.phases.orient.summary.audit_catalog
+
+    render(html`<${GoalLoopPanel} initialStatus=${status} />`)
+
+    const audit = screen.getByTestId('goal-loop-audit-catalog')
+    expect(audit.textContent).toContain('missing')
+    expect(screen.getByTestId('goal-loop-corpus-missing').textContent).toContain('n/a')
+  })
+
   it('renders startup fixture Verify evidence as distinct from live post-ACT evidence', () => {
     const status = blockedStatus()
     render(html`<${GoalLoopPanel} initialStatus=${status} />`)

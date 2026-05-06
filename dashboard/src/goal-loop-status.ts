@@ -52,9 +52,13 @@ export type VerifyEvidenceState =
   | 'missing'
   | 'unknown'
 
-function normalizeStatus(value: unknown): GoalLoopStatusLevel {
+export function normalizeGoalLoopStatusLevel(value: unknown): GoalLoopStatusLevel {
   const text = asString(value, 'unknown').toLowerCase()
-  if (text === 'ok' || text === 'warning' || text === 'critical') return text
+  if (text === 'ok' || text === 'pass' || text === 'complete') return 'ok'
+  if (text === 'warning' || text === 'partial' || text === 'pending' || text === 'missing') return 'warning'
+  if (text === 'critical' || text === 'fail' || text === 'failed' || text === 'blocked') return 'critical'
+  if (text === 'startup-fixture-failure') return 'critical'
+  if (text === 'post-act-live') return 'ok'
   return 'unknown'
 }
 
@@ -64,7 +68,7 @@ function normalizePhase(value: unknown): GoalLoopPhase {
   }
   const summary = value.summary
   return {
-    status: normalizeStatus(value.status),
+    status: normalizeGoalLoopStatusLevel(value.status),
     summary: isRecord(summary) ? summary : {},
   }
 }
@@ -111,7 +115,7 @@ export function normalizeGoalLoopStatus(raw: unknown): GoalLoopStatusResponse {
     schemaVersion: asInt(root.schema_version) ?? 1,
     generatedAt: asString(root.generated_at) ?? null,
     loopIteration: asString(root.loop_iteration, 'unknown'),
-    overallStatus: normalizeStatus(root.overall_status),
+    overallStatus: normalizeGoalLoopStatusLevel(root.overall_status),
     phases,
     nextAction: isRecord(root.next_action) ? root.next_action : null,
     systemHealthSignals: isRecord(root.system_health_signals) ? root.system_health_signals : {},

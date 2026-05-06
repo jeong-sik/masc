@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   deriveCorpusBlocker,
   normalizeGoalLoopStatus,
+  normalizeGoalLoopStatusLevel,
   verifyEvidenceLabel,
   verifyEvidenceState,
 } from './goal-loop-status'
@@ -62,6 +63,13 @@ describe('goal-loop-status contract', () => {
     expect(status.dashboardSource.path).toBe('/tmp/goal-loop-status.json')
     expect(status.phases.observe.status).toBe('critical')
     expect(status.phases.verify.summary.verify_status).toBe('FAIL')
+  })
+
+  it('maps blocker and evidence labels to semantic levels without full status normalization', () => {
+    expect(normalizeGoalLoopStatusLevel('BLOCKED')).toBe('critical')
+    expect(normalizeGoalLoopStatusLevel('startup-fixture-failure')).toBe('critical')
+    expect(normalizeGoalLoopStatusLevel('missing')).toBe('warning')
+    expect(normalizeGoalLoopStatusLevel('post-act-live')).toBe('ok')
   })
 
   it('derives the strict corpus blocker from audit catalog completeness', () => {

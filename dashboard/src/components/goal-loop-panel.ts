@@ -10,7 +10,7 @@ import {
   auditCatalogSummary,
   deriveCorpusBlocker,
   goalLoopStatusTone,
-  normalizeGoalLoopStatus,
+  normalizeGoalLoopStatusLevel,
   phaseLabel,
   phaseSummaryValue,
   verifyEvidenceLabel,
@@ -32,8 +32,9 @@ function displayValue(value: unknown): string {
 }
 
 function statusChip(status: string) {
+  const level = normalizeGoalLoopStatusLevel(status)
   return html`
-    <span class=${`inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 font-mono text-2xs font-semibold uppercase tracking-[var(--track-caps)] ${goalLoopStatusTone(normalizeGoalLoopStatus({ overall_status: status }).overallStatus)}`}>
+    <span class=${`inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 font-mono text-2xs font-semibold uppercase tracking-[var(--track-caps)] ${goalLoopStatusTone(level)}`}>
       ${status}
     </span>
   `
@@ -90,37 +91,41 @@ function PhaseBlock({
 function AuditCatalogBlock({ status }: { status: GoalLoopStatusResponse }) {
   const audit = auditCatalogSummary(status)
   const blocker = deriveCorpusBlocker(status)
-  if (!audit && !blocker) return null
+  const catalogStatus = audit?.status ?? (blocker ? 'BLOCKED' : 'missing')
+  const expectedFindingsTotal = audit?.expected_findings_total ?? blocker?.expectedFindingsTotal
+  const itemizedFindingsTotal = audit?.itemized_findings_total ?? blocker?.itemizedFindingsTotal
+  const missingItemizedFindings = audit?.missing_itemized_findings ?? blocker?.missingItemizedFindings
+  const strictRowCorpusValidated = audit?.strict_row_corpus_validated ?? blocker?.strictRowCorpusValidated
 
   return html`
     <${SectionCard}
       title="Audit Catalog"
-      right=${blocker ? statusChip(blocker.status) : null}
+      right=${statusChip(blocker?.status ?? displayValue(catalogStatus))}
       data-testid="goal-loop-audit-catalog"
     >
       <dl class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs max-[760px]:grid-cols-1">
         <div class="flex justify-between gap-3">
           <dt class="text-[var(--color-fg-muted)]">catalog status</dt>
-          <dd class="font-mono text-[var(--color-fg-secondary)]">${displayValue(audit?.status)}</dd>
+          <dd class="font-mono text-[var(--color-fg-secondary)]">${displayValue(catalogStatus)}</dd>
         </div>
         <div class="flex justify-between gap-3">
           <dt class="text-[var(--color-fg-muted)]">itemized findings</dt>
           <dd class="font-mono text-[var(--color-fg-secondary)]">
-            ${displayValue(blocker?.itemizedFindingsTotal)}
+            ${displayValue(itemizedFindingsTotal)}
             /
-            ${displayValue(blocker?.expectedFindingsTotal)}
+            ${displayValue(expectedFindingsTotal)}
           </dd>
         </div>
         <div class="flex justify-between gap-3">
           <dt class="text-[var(--color-fg-muted)]">missing rows</dt>
           <dd class="font-mono text-[var(--color-status-err)]" data-testid="goal-loop-corpus-missing">
-            ${displayValue(blocker?.missingItemizedFindings)}
+            ${displayValue(missingItemizedFindings)}
           </dd>
         </div>
         <div class="flex justify-between gap-3">
           <dt class="text-[var(--color-fg-muted)]">strict row corpus</dt>
           <dd class="font-mono text-[var(--color-fg-secondary)]">
-            ${displayValue(blocker?.strictRowCorpusValidated)}
+            ${displayValue(strictRowCorpusValidated)}
           </dd>
         </div>
       </dl>

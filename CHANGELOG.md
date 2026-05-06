@@ -1,6 +1,18 @@
 # Changelog
 
 
+## [0.19.19] - 2026-05-07
+
+### Added
+- `lib/chronicle_vector_index.{ml,mli}`: in-memory cosine-similarity index over chronicle events paired with caller-supplied embedding vectors. Master Report Dim02 P1 §2.4 vector embedder slice. Exposes `empty / add / add_event / to_list / len / dim`, vector math (`cosine_similarity`, `normalize`), and `search ~query ?limit` returning top-k events with similarity scores. Embedding production stays in caller (BGE-M3 / pgvector / OpenAI adapters), so this lib has no provider dependency. Pure OCaml, no Eio. RFC-0035 PR-9.
+- `test/test_chronicle_vector_index.ml`: 16 alcotest cases — empty store with/without dim, add infers/checks dim, dim mismatch rejected, embedding copied to isolate caller mutation, cosine math (orthogonal/identical/opposite/zero/dim mismatch), normalize (unit/zero), search (orders by similarity / respects limit / query dim mismatch raises / empty index / stable for ties).
+
+### Changed
+- `docs/rfc/RFC-0035-cognitive-ide-roadmap.md`: PR-stack table extended — PR-9 (`chronicle_vector_index`, Dim02 P1 vector embedder) marked in-flight.
+
+### Boundary
+- This module owns the in-memory store, dimension consistency check, cosine math, and top-k retrieval. Embedding production (BGE-M3, pgvector, OpenAI embeddings) stays in caller adapters — the lib accepts any `float array` and checks only dimensionality consistency, not provenance. Same boundary discipline as RFC-0035 PR-7 and PR-8.
+
 ## [0.19.18] - 2026-05-07
 
 ### Added

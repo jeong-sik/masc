@@ -565,6 +565,8 @@ let is_board_write_tool_name = function
   | "masc_board_comment"
   | "masc_board_vote"
   | "masc_board_comment_vote"
+  | "masc_board_delete"
+  | "masc_board_cleanup"
   | "masc_board_reaction"
   | "masc_board_curation_submit"
   | "masc_board_delete"

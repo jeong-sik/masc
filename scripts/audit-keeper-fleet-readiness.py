@@ -445,6 +445,7 @@ MARKER_OBJECT_FIELDS = (
     "evidence",
     "metadata",
     "route",
+    "route_evidence",
     "tool_metadata",
 )
 
@@ -556,6 +557,12 @@ def has_docker_execution_marker(row: dict[str, Any]) -> bool:
         "route.route_via=brokered",
         "route.via=docker",
         "route.via=brokered",
+        "route_evidence.execution_via=docker",
+        "route_evidence.execution_via=brokered",
+        "route_evidence.route_via=docker",
+        "route_evidence.route_via=brokered",
+        "route_evidence.via=docker",
+        "route_evidence.via=brokered",
         "route_via=docker",
         "route_via=brokered",
         "tool_metadata.execution_via=docker",
@@ -806,9 +813,9 @@ def pr_action_metric_paths(
     return [path for _, _, path in sorted(candidates, reverse=True)]
 
 
-def tool_call_paths(base_path: Path, name: str) -> list[Path]:
+def pr_creation_scan_paths(base_path: Path, name: str) -> list[Path]:
     root = base_path / ".masc"
-    paths = decision_log_paths(base_path, name)
+    paths: list[Path] = decision_log_paths(base_path, name)
     history = root / "keepers" / name / ".playground_pr_history.jsonl"
     if history.exists():
         paths.append(history)
@@ -823,15 +830,23 @@ def tool_call_paths(base_path: Path, name: str) -> list[Path]:
         paths.extend(
             sorted(path for path in trajectories.glob("*.jsonl") if path.is_file())
         )
+    calls_dir = root / "tool_calls"
+    if calls_dir.exists():
+        paths.extend(
+            sorted(path for path in calls_dir.rglob("*.jsonl") if path.is_file())
+        )
     return paths
 
 
 def scan_pr_creation_evidence(base_path: Path, name: str) -> PrCreationEvidence:
     refs: set[str] = set()
     sources: set[str] = set()
-    for path in tool_call_paths(base_path, name):
+    for path in pr_creation_scan_paths(base_path, name):
         for row in iter_jsonl(path):
             row = dict(row)
+            row_keeper = row.get("keeper") or row.get("keeper_name") or row.get("name")
+            if isinstance(row_keeper, str) and row_keeper != name:
+                continue
             row["_source_path"] = str(path)
             row_refs, row_sources = pr_evidence_from_row(row)
             refs.update(row_refs)

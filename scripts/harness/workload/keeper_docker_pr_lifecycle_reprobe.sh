@@ -36,7 +36,7 @@ KEEPER_TURN_TIMEOUT_SEC="${KEEPER_TURN_TIMEOUT_SEC:-900}"
 INIT_TIMEOUT_SEC="${INIT_TIMEOUT_SEC:-60}"
 POLL_TIMEOUT_SEC="${POLL_TIMEOUT_SEC:-1200}"
 POLL_INTERVAL_SEC="${POLL_INTERVAL_SEC:-10}"
-REQUIRED_TOOLS="${REQUIRED_TOOLS:-keeper_shell,keeper_bash,masc_code_git,keeper_pr_create,keeper_pr_review_comment}"
+REQUIRED_TOOLS="${REQUIRED_TOOLS:-keeper_shell,keeper_bash,keeper_pr_create,keeper_pr_review_comment}"
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 MCP_TOKEN="${MASC_MCP_TOKEN:-}"
 MCP_CLIENT_NAME="${MCP_CLIENT_NAME:-keeper-docker-pr-lifecycle-reprobe}"
@@ -803,18 +803,18 @@ Keeper: $keeper
 Goal: produce direct, auditable Docker-backed evidence for PR create, git push, PR review/comment, and PR APPROVE. Use native keeper tools where available; do not use host-local ambient GitHub credentials.
 
 Tool route rules:
-- Use keeper_shell or keeper_bash only for read-only inspection.
-- Do not run git commit, git push, or other mutating git commands through keeper_bash.
+- Use keeper_shell for read-only GitHub inspection.
+- Use keeper_bash inside your Docker playground for proof-file creation and git add/commit/push on the proof branch.
 - Do not run gh pr create, gh pr review, or other mutating GitHub commands through keeper_shell or keeper_bash.
-- Use keeper_fs_edit for the minimal proof-file edit inside the Docker playground; do not use approval-requiring host code-write paths for this proof file.
-- Use masc_code_git for git commit and git push so the runtime can attach Docker route evidence and avoid write_operation_gated shell denials.
+- Do not use approval-requiring host code-write paths such as masc_code_write for this proof file.
+- If keeper_bash rejects mutating git as policy-blocked, stop and report the exact blocker instead of switching to host-local credentials.
 - Use keeper_pr_create and keeper_pr_review_comment for PR mutation/review actions.
 
 Required proof lane:
 1. Confirm your runtime is sandbox_profile=docker before mutating.
 2. Create a unique proof branch named: keeper/$keeper-docker-pr-proof-$RUN_ID
-3. Make a minimal, non-product proof edit under docs/runtime-proof/keepers/$keeper-$RUN_ID.md with keeper_fs_edit.
-4. Commit and git push that branch with masc_code_git. The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
+3. Make a minimal, non-product proof edit under docs/runtime-proof/keepers/$keeper-$RUN_ID.md with keeper_bash from inside the Docker playground.
+4. Commit and git push that branch with keeper_bash. The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
 5. Create a draft PR for that branch with keeper_pr_create or the native PR-create tool path. Do not mark ready, do not merge, do not add human-approved-ready.
 6. Use keeper_pr_review_read and keeper_pr_review_comment for review evidence. COMMENT is allowed on your own proof PR. APPROVE must target the cross-keeper PR below, not your own PR.
 

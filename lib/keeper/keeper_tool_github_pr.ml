@@ -72,6 +72,12 @@ let build_pr_status_argv ~repo ~pr_number =
   |> with_repo_arg repo
   |> fun argv -> argv @ [ "--json"; pr_json_fields ^ ",body,files,reviews,comments" ]
 
+let build_pr_view_recovery_argv ~repo ~head =
+  let head = Option.map String.trim head |> Option.value ~default:"" in
+  (if head = "" then [ "gh"; "pr"; "view" ] else [ "gh"; "pr"; "view"; head ])
+  |> with_repo_arg repo
+  |> fun argv -> argv @ [ "--json"; pr_json_fields ^ ",body" ]
+
 let build_pr_create_argv ~repo ~title ~body ~base ~head =
   [ "gh"; "pr"; "create" ]
   |> with_repo_arg repo
@@ -140,6 +146,29 @@ let status_ok = function
   | Unix.WEXITED 0 -> true
   | _ -> false
 
+let contains_substring haystack needle =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  let rec loop idx =
+    if needle_len = 0 then true
+    else if idx + needle_len > haystack_len then false
+    else if String.sub haystack idx needle_len = needle then true
+    else loop (idx + 1)
+  in
+  loop 0
+
+let pr_create_failure_may_have_created_pr output =
+  let output = String.lowercase_ascii output in
+  List.exists
+    (contains_substring output)
+    [
+      "http 504";
+      "504 gateway timeout";
+      "gateway timeout";
+      "context deadline exceeded";
+      "i/o timeout";
+    ]
+
 type gh_exec_result =
   { status : Unix.process_status
   ; output : string
@@ -183,23 +212,25 @@ let sandbox_profile_string (meta : keeper_meta) =
   | Docker -> "docker"
   | Local -> "local"
 
-let output_json ~ok ~tool ~operation ~meta ~binding ~state ~cwd ~via ~output =
+let output_json ?(extra_fields = []) ~ok ~tool ~operation ~meta ~binding
+    ~state ~cwd ~via ~output () =
   Yojson.Safe.to_string
     (`Assoc
-      [
-        "ok", `Bool ok;
-        "tool", `String tool;
-        "operation", `String operation;
-        "keeper", `String meta.name;
-        "sandbox_profile", `String (sandbox_profile_string meta);
-        "via", `String via;
-        "route_via", `String via;
-        "credential", binding_json binding ~state;
-        "cwd", `String cwd;
-        "output", `String output;
-      ])
+      ([
+         "ok", `Bool ok;
+         "tool", `String tool;
+         "operation", `String operation;
+         "keeper", `String meta.name;
+         "sandbox_profile", `String (sandbox_profile_string meta);
+         "via", `String via;
+         "route_via", `String via;
+         "credential", binding_json binding ~state;
+         "cwd", `String cwd;
+         "output", `String output;
+       ]
+       @ extra_fields))
 
-let run_gh ~tool ~operation ~config ~meta ~args ~write argv =
+let run_gh ?recover_pr_create ~tool ~operation ~config ~meta ~args ~write argv =
   match scoped_credential_or_error ~config ~meta with
   | Error json -> Yojson.Safe.to_string json
   | Ok (binding, state, env) -> (
@@ -229,8 +260,35 @@ let run_gh ~tool ~operation ~config ~meta ~args ~write argv =
           let result =
             run_gh_argv ~config ~meta ~env ~cwd ~timeout_sec argv
           in
-          output_json ~ok:(status_ok result.status) ~tool ~operation ~meta
-            ~binding ~state ~cwd ~via:result.via ~output:result.output)
+          let result_ok = status_ok result.status in
+          let recovered =
+            match recover_pr_create with
+            | Some (repo, head)
+              when (not result_ok)
+                   && pr_create_failure_may_have_created_pr result.output ->
+                let recovery =
+                  run_gh_argv ~config ~meta ~env ~cwd ~timeout_sec
+                    (build_pr_view_recovery_argv ~repo ~head)
+                in
+                if status_ok recovery.status then Some recovery else None
+            | _ -> None
+          in
+          (match recovered with
+           | Some recovery ->
+               output_json ~ok:true ~tool ~operation ~meta ~binding ~state
+                 ~cwd ~via:recovery.via ~output:recovery.output
+                 ~extra_fields:
+                   [
+                     ( "recovered_from_error",
+                       `String "pr_create_transient_failure" );
+                     "original_ok", `Bool false;
+                     "original_output", `String result.output;
+                     "recovery_tool", `String "gh pr view";
+                   ]
+                 ()
+           | None ->
+               output_json ~ok:result_ok ~tool ~operation ~meta ~binding
+                 ~state ~cwd ~via:result.via ~output:result.output ()))
 
 let handle_keeper_pr_list ~(config : Coord.config) ~(meta : keeper_meta)
     ~(args : Yojson.Safe.t) =
@@ -275,14 +333,18 @@ let handle_keeper_pr_create ~(config : Coord.config) ~(meta : keeper_meta)
         ])
   else
     run_gh ~tool:"keeper_pr_create" ~operation:"pr_create" ~config ~meta
-      ~args ~write:true
+      ~args ~write:true ~recover_pr_create:(repo, head)
       (build_pr_create_argv ~repo ~title ~body ~base ~head)
 
 module For_testing = struct
   let build_pr_list_argv = build_pr_list_argv
   let build_pr_status_argv = build_pr_status_argv
+  let build_pr_view_recovery_argv = build_pr_view_recovery_argv
   let build_pr_create_argv = build_pr_create_argv
   let draft_request_allowed = draft_request_allowed
+  let pr_create_failure_may_have_created_pr =
+    pr_create_failure_may_have_created_pr
+
   let quote_argv = quote_argv
   let mutation_preset_ok = mutation_preset_ok
 end

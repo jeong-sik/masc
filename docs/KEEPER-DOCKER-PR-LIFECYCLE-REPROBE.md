@@ -46,17 +46,17 @@ status records pending requests as lost; the other two log a transient
 notice and the next poll iteration retries.
 When mutation is enabled, the harness sends `required_tools` with each
 `masc_keeper_msg` call. By default that one-turn contract requires
-`keeper_shell`, `keeper_bash`, `masc_code_git`, `keeper_pr_create`, and
+`keeper_shell`, `keeper_bash`, `keeper_pr_create`, and
 `keeper_pr_review_comment`, so the runtime records `tool_surface_mismatch` if
 those tools are not visible and `missing_required_tool_use` if the keeper
 replies without exercising them.
-The prompt reserves `keeper_shell` and `keeper_bash` for read-only inspection.
-Mutating git operations must go through `masc_code_git`; otherwise the shell
-guard can correctly reject `git commit`/`git push` with `write_operation_gated`
-and the run will not produce Docker push evidence.
-Likewise, proof-file writes should use `keeper_fs_edit`, and PR create/review
-mutations should use `keeper_pr_create` / `keeper_pr_review_comment` rather
-than `gh pr ...` through shell tools.
+The prompt reserves `keeper_shell` for read-only GitHub inspection.
+Proof-file creation and git add/commit/push should use `keeper_bash` from
+inside the Docker playground so the route evidence is tied to the keeper
+container path. If the shell guard rejects the git mutation, the keeper must
+stop and report that blocker instead of falling back to host-local credentials.
+PR create/review mutations should use `keeper_pr_create` /
+`keeper_pr_review_comment` rather than `gh pr ...` through shell tools.
 Override the CSV with `REQUIRED_TOOLS=...` for a narrower or broader proof
 lane.
 `MSG_TIMEOUT_SEC` only bounds the harness HTTP request to the MCP server.

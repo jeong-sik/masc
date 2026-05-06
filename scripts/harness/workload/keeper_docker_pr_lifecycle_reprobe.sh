@@ -1008,6 +1008,20 @@ proof_branch_for_keeper() {
   printf 'keeper-%s-agent/%s' "$keeper" "$RUN_ID"
 }
 
+proof_head_ref_for_keeper() {
+  local keeper="$1"
+  local branch account
+  branch="$(proof_branch_for_keeper "$keeper")"
+  if keeper_uses_fork_pr_route "$keeper"; then
+    account="$(github_account_for_keeper "$keeper")"
+    if [[ -n "$account" ]]; then
+      printf '%s:%s' "$account" "$branch"
+      return 0
+    fi
+  fi
+  printf '%s' "$branch"
+}
+
 github_account_for_keeper() {
   local keeper="$1"
   jq -r --arg keeper "$keeper" '.keeper_accounts[$keeper] // empty' "$GITHUB_IDENTITY_COUNTS_FILE"
@@ -1221,23 +1235,28 @@ prompt_for_keeper_review() {
   local keeper="$1"
   local review_target="${2:-}"
   local review_branch=""
+  local review_head_ref=""
   local review_target_json="null"
   local review_branch_json="null"
+  local review_head_ref_json="null"
   local review_instruction=""
   if [[ -n "$review_target" ]]; then
     review_branch="$(proof_branch_for_keeper "$review_target")"
+    review_head_ref="$(proof_head_ref_for_keeper "$review_target")"
     review_target_json="\"$review_target\""
     review_branch_json="\"$review_branch\""
+    review_head_ref_json="\"$review_head_ref\""
     review_instruction="$(cat <<EOF
 Cross-keeper approval target:
-- You must review and APPROVE the draft PR whose head branch is: $review_branch
+- You must review and APPROVE the draft PR whose head ref is: $review_head_ref
+- Bare target branch: $review_branch
 - This target belongs to keeper: $review_target
 - Do not approve your own PR or your own branch.
 - First use keeper_shell once to resolve the target PR number:
-  gh pr view $review_branch -R $REPO_SLUG --json number,url,isDraft,headRefName
+  gh pr view $review_head_ref -R $REPO_SLUG --json number,url,isDraft,headRefName
 - If that command reports no PR or cannot resolve the branch, do not wait in a loop. Reply with blocker="target_pr_missing" and the exact tool output.
 - If GitHub reports the target PR has the same author identity as your current credential and rejects approval as self-approval, stop and report blocker="github_self_approve_policy" with the exact tool output.
-- Once the PR number is known, call keeper_pr_review_comment with event="APPROVE" and a body that includes run_id=$RUN_ID, reviewer=$keeper, and target_branch=$review_branch.
+- Once the PR number is known, call keeper_pr_review_comment with event="APPROVE" and a body that includes run_id=$RUN_ID, reviewer=$keeper, target_branch=$review_branch, and target_head=$review_head_ref.
 EOF
 )"
   else
@@ -1273,6 +1292,7 @@ Reply with one compact JSON object:
      "keeper": "$keeper",
      "review_target_keeper": $review_target_json,
      "review_target_branch": $review_branch_json,
+     "review_target_head": $review_head_ref_json,
      "approved_pr_url": "...",
      "docker_pr_approve": true,
      "blocker": null
@@ -1303,7 +1323,12 @@ send_phase_prompts() {
   local required_tools_csv="$2"
   while IFS= read -r keeper; do
     [[ -n "$keeper" ]] || continue
-    local prompt args payload text request_id
+    local prompt args payload text request_id review_target review_target_head
+    review_target="$(review_target_for_keeper "$keeper")"
+    review_target_head=""
+    if [[ -n "$review_target" ]]; then
+      review_target_head="$(proof_head_ref_for_keeper "$review_target")"
+    fi
     prompt="$(cat "$PROMPT_DIR/$keeper-$phase.txt")"
     args="$(
       jq -cn \
@@ -1340,8 +1365,9 @@ send_phase_prompts() {
       --arg phase "$phase" \
       --arg request_id "$request_id" \
       --arg prompt_file "$PROMPT_DIR/$keeper-$phase.txt" \
-      --arg review_target "$(review_target_for_keeper "$keeper")" \
-      '{keeper:$keeper, phase:$phase, request_id:$request_id, prompt_file:$prompt_file, review_target:$review_target, status:"pending"}' \
+      --arg review_target "$review_target" \
+      --arg review_target_head "$review_target_head" \
+      '{keeper:$keeper, phase:$phase, request_id:$request_id, prompt_file:$prompt_file, review_target:$review_target, review_target_head:$review_target_head, status:"pending"}' \
       >>"$REQUESTS_FILE"
   done <"$RUN_DIR/keepers.txt"
 }

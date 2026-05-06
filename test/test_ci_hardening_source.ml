@@ -1220,6 +1220,18 @@ let test_keeper_required_tool_contracts () =
           {|if [[ "$REVIEW_RESUME" == "1" ]] || all_create_results_ready_for_review; then|}
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
           "`--phase review --review-resume`");
+  check bool "docker PR lifecycle review resolves fork head refs" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       "proof_head_ref_for_keeper"
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          {|gh pr view $review_head_ref -R $REPO_SLUG --json number,url,isDraft,headRefName|}
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          "review_target_head"
+     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+          "owner-qualified `OWNER:BRANCH` head ref");
   check bool "keeper msg schema documents required_tool_names alias" true
     (file_contains_pattern "lib/keeper/keeper_schema.ml"
        "required_tool_names")

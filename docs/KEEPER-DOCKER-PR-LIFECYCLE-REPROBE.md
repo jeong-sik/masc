@@ -71,6 +71,9 @@ PUBLIC repositories, `--allow-fork-pr-for-readonly` permits `READ`/`TRIAGE`
 credential lanes to push their proof branch to the keeper account's fork and
 open the draft PR with `head=OWNER:BRANCH`; PR creation still goes through
 `keeper_pr_create`, not raw `gh pr create`.
+The review phase also resolves fork-created target PRs with the same
+owner-qualified `OWNER:BRANCH` head ref so reviewers do not miss valid fork PRs
+by looking up only the bare branch name.
 After collision evidence is clear, the review phase requires `keeper_pr_review_comment`.
 This avoids the old single-turn shape where one keeper could wait on another
 keeper's missing PR until the Agent.run timeout. The review prompt reserves

@@ -54,6 +54,7 @@
         test_keeper_hooks_oas_provider
         test_keeper_hooks_oas_pricing
         test_keeper_hooks_oas_telemetry
+        test_masc_oas_bridge_timeout_guard
         test_agent_stress
         test_keeper_tool_use_failure_counter
         test_keeper_compaction_outcome_counter
@@ -270,6 +271,7 @@
           test_keeper_hooks_oas_provider
           test_keeper_hooks_oas_pricing
           test_keeper_hooks_oas_telemetry
+          test_masc_oas_bridge_timeout_guard
           test_agent_stress
           test_keeper_tool_use_failure_counter
           test_keeper_compaction_outcome_counter

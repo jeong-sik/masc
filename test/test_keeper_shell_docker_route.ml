@@ -166,19 +166,22 @@ let with_fake_docker script f =
 let with_tool_policy_config f =
   let project_root = Masc_test_deps.find_project_root () in
   let config_dir = Filename.concat project_root "config" in
+  with_env "MASC_CONFIG_DIR" config_dir @@ fun () ->
+  Masc_mcp.Config_dir_resolver.reset ();
   Tool_code_write.reset_policy_config_cache ();
   Masc_mcp.Keeper_tool_policy.reset_policy_config_for_test ();
-  (match
-     Masc_mcp.Keeper_tool_policy.init_policy_config ~base_path:project_root
-   with
-   | Ok () -> ()
-   | Error e -> Alcotest.failf "init_policy_config failed: %s" e);
-  with_env "MASC_CONFIG_DIR" config_dir @@ fun () ->
   Fun.protect
     ~finally:(fun () ->
       Tool_code_write.reset_policy_config_cache ();
-      Masc_mcp.Keeper_tool_policy.reset_policy_config_for_test ())
-    f
+      Masc_mcp.Keeper_tool_policy.reset_policy_config_for_test ();
+      Masc_mcp.Config_dir_resolver.reset ())
+    (fun () ->
+      (match
+         Masc_mcp.Keeper_tool_policy.init_policy_config ~base_path:project_root
+       with
+       | Ok () -> ()
+       | Error e -> Alcotest.failf "init_policy_config failed: %s" e);
+      f ())
 
 let with_config_dir config_dir f =
   let prior = Sys.getenv_opt "MASC_CONFIG_DIR" in

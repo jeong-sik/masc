@@ -187,6 +187,7 @@ let test_dispatch_hook_emits_tool_span_payload () =
           let result : Lib.Tool_result.t =
             { success = true
             ; data = `String "ok"
+            ; legacy_message = "ok"
             ; tool_name = "keeper_shell"
             ; duration_ms = 123.4
             }

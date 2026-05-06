@@ -65,4 +65,12 @@ describe('InlineSpinner a11y', () => {
     )
     expect(await axe(container)).toHaveNoViolations()
   })
+
+  it('standalone with ariaLabel passes axe', async () => {
+    render(
+      html`<${InlineSpinner} ariaLabel="Loading task state" />`,
+      container,
+    )
+    expect(await axe(container)).toHaveNoViolations()
+  })
 })

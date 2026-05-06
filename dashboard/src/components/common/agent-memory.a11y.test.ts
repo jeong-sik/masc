@@ -90,7 +90,10 @@ describe('AgentMemory a11y', () => {
   it('has list roles for memory sections', () => {
     render(html`<${AgentMemory} entries=${makeEntries()} />`, container)
     const lists = container.querySelectorAll('[role="list"]')
+    const root = container.querySelector('[data-agent-memory]') as HTMLElement
     expect(lists.length).toBe(2)
+    expect(root.dataset.agentMemoryStatus).toBe('mixed')
+    expect(root.getAttribute('aria-label')).toContain('에이전트 메모리')
   })
 
   it('renders short-term content in recency order', () => {
@@ -103,5 +106,19 @@ describe('AgentMemory a11y', () => {
     render(html`<${AgentMemory} entries=${makeEntries()} />`, container)
     expect(container.textContent).toContain('preferences')
     expect(container.textContent).toContain('schema')
+    const clusters = container.querySelectorAll('[data-memory-cluster]')
+    expect(clusters.length).toBe(2)
+    expect((clusters[0] as HTMLElement).dataset.memoryClusterCount).toBe('1')
+  })
+
+  it('exposes entry timestamps and empty section text', () => {
+    render(html`<${AgentMemory} entries=${[]} />`, container)
+    expect(container.textContent).toContain('단기 기억 없음')
+    expect(container.textContent).toContain('장기 기억 없음')
+
+    render(html`<${AgentMemory} entries=${makeEntries()} />`, container)
+    const firstShort = container.querySelector('[data-memory-entry-type="short_term"]') as HTMLElement
+    expect(firstShort.dataset.memoryEntryTimestamp).toBeTruthy()
+    expect(firstShort.querySelector('time')?.getAttribute('datetime')).toBeTruthy()
   })
 })

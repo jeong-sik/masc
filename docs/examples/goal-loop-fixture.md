@@ -127,6 +127,22 @@ Expected key fact: the checked fixture records
 passes for the resolved catalog. It will exit non-zero if the consistency
 finding is reopened.
 
+When the full 206-row strict corpus path is unknown, discover likely candidates
+before validating one:
+
+```bash
+python3 scripts/discover_goal_loop_strict_row_corpus.py \
+  <SEARCH_ROOT_OR_ARTIFACT> \
+  --audit-catalog test/fixtures/goal_loop/audit-corpus.external-claim.json \
+  --require-found \
+  --format text
+```
+
+Expected key fact: this separates marker hits from validated strict corpora.
+`--require-found` exits non-zero unless at least one candidate passes the same
+strict corpus validator used by Orient. A positive result is still only an
+intake signal; feed the selected corpus into Orient next.
+
 When the full 206-row strict corpus is available, feed it into Orient instead
 of using it only at closeout:
 
@@ -141,6 +157,24 @@ python3 scripts/validate_goal_loop_strict_row_corpus.py \
 Expected key fact: this is a fast intake check for the candidate artifact
 shape. It must report `strict_row_corpus: VALID rows=206 expected=206
 errors=0` before the corpus can be useful in the full Orient replay below.
+When `--audit-catalog` is supplied, every row source path must also match one
+of the catalog `external_sources`, and every row line ref must be within that
+source line count when the manifest records one. The explicit source-row
+candidate inventory is not a strict corpus; if supplied to this command it must
+fail with `source_row_candidate_inventory_is_not_strict_corpus` because it is
+`INCOMPLETE` and does not contain a top-level `findings` array. Its
+`sources_without_candidate_details` section can prove that no-row source files
+still contain unstructured requirement markers; those markers remain intake
+evidence only and must not be promoted to strict rows without stable row IDs,
+source refs, severity/actionability, and replay expectations. No-row marker
+buckets with nonzero marker counts must carry tracking issue refs so the
+remaining source-level prompt work is owned instead of silently parked. When
+the source inventory is regenerated from external prompt docs, pass
+`--checked-at <YYYY-MM-DD>` so future-dated report/generated snapshot claims
+are recorded separately from non-blocking future due dates or forecast dates.
+That currentness evidence is still not a strict corpus; it is a guardrail that
+prevents stale or impossible source snapshots from being treated as current
+Goal evidence.
 
 ```bash
 python3 scripts/orient_goal_loop_logs.py \
@@ -233,6 +267,8 @@ python3 scripts/goal_loop_completion_audit.py \
   /tmp/goal-loop-status-audit.json \
   --structured-id-triage test/fixtures/goal_loop/structured-id-triage.external-claim.json \
   --row-corpus-discovery test/fixtures/goal_loop/row-corpus-discovery.external-claim.json \
+  --prompt-closeout-checklist test/fixtures/goal_loop/prompt-closeout-checklist.external-claim.json \
+  --source-row-candidate-inventory test/fixtures/goal_loop/source-row-candidate-inventory.external-claim.json \
   --require-complete \
   --format text
 ```
@@ -275,15 +311,29 @@ broader structured-ID criterion passes only when the triage manifest covers
 every uncataloged family and expected occurrence count. The row-corpus
 discovery manifest records the unsuccessful search for a full 206-row strict
 corpus and attaches that evidence to `strict_row_level_catalog_complete`, but
-it does not satisfy the criterion. A supplied strict-row corpus is validated
-against `test/fixtures/goal_loop/strict-row-corpus-contract.json`: 206 unique
+it does not satisfy the criterion. The completion audit validates the supplied
+strict-row corpus against the shape it can prove from status input: 206 unique
 rows, logical `prompt_corpus/GOAL_LOOP/...` source paths, positive line refs,
-severity/actionability, and replay expectations. A valid supplied corpus still
-does not close the blocker unless the status input was produced from Orient
-with the same corpus and reports the strict row-level catalog as `COMPLETE`
-with 206 itemized findings and zero missing rows.
+severity/actionability, and replay expectations. Catalog external-source
+binding and catalog line-count bounds require the full audit catalog manifest,
+so they are enforced by the Orient replay or the standalone
+`validate_goal_loop_strict_row_corpus.py --audit-catalog` intake check above.
+A valid supplied corpus still does not close the blocker unless the status
+input was produced from Orient with the same corpus and reports the strict
+row-level catalog as `COMPLETE` with 206 itemized findings and zero missing
+rows.
 
 When the Verify input is replaced with a live post-ACT artifact that carries
 the required evidence-window metadata, `post_act_verify_complete` can pass.
 The closeout audit must still remain `BLOCKED` until
-`strict_row_level_catalog_complete` passes for the full 206-row corpus.
+`strict_row_level_catalog_complete` passes for the full 206-row corpus and
+`prompt_requirements_closeout_complete` passes for every prompt-mapped
+requirement. The `prompt_to_artifact_checklist_recorded` criterion only proves
+that the prompt-to-artifact map is present; it is not a completion proxy while
+the checklist still contains `PARTIAL` or `BLOCKED` requirements. Every
+non-PASS prompt checklist row must also include at least one valid GitHub issue
+tracking ref, so incomplete prompt coverage cannot be recorded without an
+owned follow-up. Checklist `artifact_refs` must resolve to repo-local files
+after optional `#...` anchors are stripped; absolute paths, parent-directory
+escapes, user-local paths, and missing files make the checklist unrecorded.
+When an anchor is present, the target file must contain the anchor text.

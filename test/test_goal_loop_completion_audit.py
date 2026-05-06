@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -25,6 +26,20 @@ ROW_DISCOVERY_FIXTURE = (
     / "fixtures"
     / "goal_loop"
     / "row-corpus-discovery.external-claim.json"
+)
+PROMPT_CHECKLIST_FIXTURE = (
+    REPO_ROOT
+    / "test"
+    / "fixtures"
+    / "goal_loop"
+    / "prompt-closeout-checklist.external-claim.json"
+)
+SOURCE_ROW_CANDIDATE_INVENTORY_FIXTURE = (
+    REPO_ROOT
+    / "test"
+    / "fixtures"
+    / "goal_loop"
+    / "source-row-candidate-inventory.external-claim.json"
 )
 STRICT_ROW_CORPUS_CONTRACT_FIXTURE = (
     REPO_ROOT / "test" / "fixtures" / "goal_loop" / "strict-row-corpus-contract.json"
@@ -233,6 +248,14 @@ def synthetic_strict_row_corpus(row_count: int = 206) -> dict[str, object]:
 
 
 class GoalLoopCompletionAuditTest(unittest.TestCase):
+    def test_string_list_strips_and_rejects_empty_entries(self) -> None:
+        self.assertEqual(
+            goal_loop_completion_audit.string_list(
+                [" prompt_corpus/GOAL_LOOP/a.md ", "", "   ", 42]
+            ),
+            ["prompt_corpus/GOAL_LOOP/a.md"],
+        )
+
     def test_completion_audit_passes_when_all_criteria_pass(self) -> None:
         audit = goal_loop_completion_audit.build_completion_audit(complete_status())
 
@@ -275,6 +298,37 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
 
         self.assertEqual(audit.status, "BLOCKED")
         self.assertIn("aggregate_consistency_resolved", audit.blockers)
+
+    def test_completion_audit_binds_strict_row_corpus_to_catalog_sources(
+        self,
+    ) -> None:
+        status = complete_status()
+        audit_catalog = status["phases"]["orient"]["summary"]["audit_catalog"]
+        audit_catalog["external_sources"] = [
+            {
+                "path": "prompt_corpus/GOAL_LOOP/artifact_synthesis.md",
+                "line_count": 500,
+            }
+        ]
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            status,
+            strict_row_corpus=synthetic_strict_row_corpus(),
+        )
+
+        self.assertEqual(audit.status, "BLOCKED")
+        self.assertIn("strict_row_level_catalog_complete", audit.blockers)
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        corpus_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "strict_row_corpus"
+        ]
+        self.assertFalse(corpus_evidence["validated"])
+        self.assertTrue(corpus_evidence["catalog_source_binding_required"])
+        self.assertFalse(corpus_evidence["catalog_source_binding_valid"])
+        self.assertIn(
+            "source_paths_must_match_catalog_external_sources",
+            corpus_evidence["errors"],
+        )
 
     def test_completion_audit_rejects_generic_verify_pass_without_post_act_metadata(
         self,
@@ -395,7 +449,15 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
             "FULL_ROW_CORPUS_NOT_FOUND",
         )
         self.assertEqual(discovery_evidence["prompt_sources_checked"], 12)
-        self.assertEqual(discovery_evidence["candidate_artifacts_checked"], 8)
+        self.assertEqual(
+            discovery_evidence["candidate_artifacts_checked"],
+            len(discovery["candidate_artifacts_checked"]),
+        )
+        self.assertTrue(discovery_evidence["expected_matches"])
+        self.assertTrue(discovery_evidence["itemized_matches"])
+        self.assertTrue(discovery_evidence["missing_matches"])
+        self.assertTrue(discovery_evidence["strict_ids_match"])
+        self.assertTrue(discovery_evidence["path_policy_valid"])
         self.assertFalse(discovery_evidence["local_path_leaks"])
         self.assertTrue(discovery_evidence["source_catalog_id_matches"])
 
@@ -440,6 +502,57 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertTrue(corpus_evidence["validated"])
         self.assertEqual(corpus_evidence["row_count"], 206)
         self.assertFalse(corpus_evidence["orient_itemized_matches_corpus"])
+
+    def test_completion_audit_binds_strict_row_corpus_to_orient_sources(
+        self,
+    ) -> None:
+        status = strict_catalog_only_blocked_status()
+        audit_catalog = status["phases"]["orient"]["summary"]["audit_catalog"]
+        fixture_catalog = json.loads(
+            (
+                REPO_ROOT
+                / "test"
+                / "fixtures"
+                / "goal_loop"
+                / "audit-corpus.external-claim.json"
+            ).read_text(encoding="utf-8")
+        )
+        audit_catalog["external_sources"] = fixture_catalog["external_sources"]
+        corpus = synthetic_strict_row_corpus()
+        findings = corpus["findings"]
+        assert isinstance(findings, list)
+        first = findings[0]
+        second = findings[1]
+        assert isinstance(first, dict)
+        assert isinstance(second, dict)
+        first["source"] = {
+            "path": "prompt_corpus/GOAL_LOOP/not-in-manifest.md",
+            "line_refs": [1],
+        }
+        second["source"] = {
+            "path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+            "line_refs": [607],
+        }
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            status,
+            strict_row_corpus=corpus,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        corpus_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "strict_row_corpus"
+        ]
+        self.assertFalse(corpus_evidence["validated"])
+        self.assertIn(
+            "source_paths_must_match_catalog_external_sources",
+            corpus_evidence["errors"],
+        )
+        self.assertIn(
+            "source_line_refs_must_be_within_catalog_line_count",
+            corpus_evidence["errors"],
+        )
+        self.assertFalse(corpus_evidence["catalog_source_binding_valid"])
 
     def test_completion_audit_rejects_invalid_supplied_strict_row_corpus(
         self,
@@ -492,6 +605,761 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertEqual(discovery_evidence["discovery_status"], "MISSING")
         self.assertFalse(discovery_evidence["recorded"])
 
+    def test_completion_audit_attaches_source_row_candidate_inventory(
+        self,
+    ) -> None:
+        inventory = json.loads(
+            SOURCE_ROW_CANDIDATE_INVENTORY_FIXTURE.read_text(encoding="utf-8")
+        )
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            source_row_candidate_inventory=inventory,
+        )
+
+        self.assertEqual(audit.status, "BLOCKED")
+        self.assertEqual(audit.blockers, ["strict_row_level_catalog_complete"])
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        inventory_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "source_row_candidate_inventory"
+        ]
+        self.assertTrue(inventory_evidence["recorded"])
+        self.assertEqual(inventory_evidence["unique_candidate_rows"], 132)
+        self.assertEqual(inventory_evidence["missing_candidate_rows"], 74)
+        self.assertTrue(inventory_evidence["expected_matches"])
+        self.assertTrue(inventory_evidence["missing_candidate_rows_matches"])
+        self.assertTrue(inventory_evidence["incomplete_against_expected"])
+        self.assertTrue(inventory_evidence["candidates_by_file_total_matches"])
+        self.assertTrue(inventory_evidence["candidates_by_rule_total_matches"])
+        self.assertEqual(inventory_evidence["prompt_sources_checked"], 12)
+        self.assertEqual(inventory_evidence["sources_with_candidates"], 5)
+        self.assertEqual(inventory_evidence["sources_without_candidates"], 7)
+        self.assertTrue(inventory_evidence["sources_accounted"])
+        self.assertEqual(inventory_evidence["sources_without_candidate_details"], 7)
+        self.assertTrue(inventory_evidence["no_candidate_details_accounted"])
+        self.assertEqual(
+            inventory_evidence["unstructured_markers_without_candidates"],
+            897,
+        )
+        self.assertEqual(
+            inventory_evidence["no_candidate_sources_with_tracking_issue_refs"],
+            7,
+        )
+        self.assertEqual(
+            inventory_evidence["no_candidate_tracking_issue_refs_total"],
+            2,
+        )
+        self.assertEqual(
+            inventory_evidence["missing_no_candidate_tracking_issue_refs"],
+            [],
+        )
+        self.assertEqual(
+            inventory_evidence["invalid_no_candidate_tracking_issue_refs"],
+            [],
+        )
+        self.assertTrue(inventory_evidence["source_count_matches"])
+        self.assertTrue(inventory_evidence["candidate_source_count_matches"])
+        self.assertTrue(inventory_evidence["zero_source_count_matches"])
+        self.assertTrue(inventory_evidence["unstructured_source_count_matches"])
+        self.assertTrue(inventory_evidence["unstructured_marker_count_matches"])
+        self.assertTrue(
+            inventory_evidence["no_candidate_tracking_source_count_matches"]
+        )
+        self.assertTrue(inventory_evidence["source_currentness_evaluated"])
+        self.assertEqual(
+            inventory_evidence["source_currentness_checked_at"],
+            "2026-05-06",
+        )
+        self.assertFalse(inventory_evidence["source_currentness_current"])
+        self.assertTrue(inventory_evidence["source_currentness_consistent"])
+        self.assertEqual(inventory_evidence["future_date_claims_total"], 7)
+        self.assertEqual(inventory_evidence["future_date_claims_count"], 7)
+        self.assertTrue(inventory_evidence["future_date_claims_total_matches"])
+        self.assertEqual(inventory_evidence["sources_with_future_date_claims_total"], 4)
+        self.assertTrue(inventory_evidence["future_date_sources_count_matches"])
+        self.assertTrue(inventory_evidence["future_date_sources_match"])
+        self.assertEqual(inventory_evidence["invalid_future_date_claims"], [])
+        self.assertTrue(inventory_evidence["no_candidate_source_overlap"])
+        self.assertFalse(inventory_evidence["local_path_leaks"])
+
+    def test_completion_audit_accepts_complete_source_row_candidate_inventory(
+        self,
+    ) -> None:
+        inventory = json.loads(
+            SOURCE_ROW_CANDIDATE_INVENTORY_FIXTURE.read_text(encoding="utf-8")
+        )
+        inventory["status"] = "COMPLETE"
+        inventory["result"] = "EXPLICIT_SOURCE_ROWS_MATCH_EXPECTED"
+        inventory["unique_candidate_rows"] = 206
+        inventory["missing_candidate_rows"] = 0
+        by_file = inventory["candidates_by_file"]
+        by_rule = inventory["candidates_by_rule"]
+        assert isinstance(by_file, list)
+        assert isinstance(by_rule, list)
+        first_file = by_file[0]
+        first_rule = by_rule[0]
+        assert isinstance(first_file, dict)
+        assert isinstance(first_rule, dict)
+        first_file["unique_candidate_rows"] += 74
+        first_rule["unique_candidate_rows"] += 74
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            source_row_candidate_inventory=inventory,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        inventory_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "source_row_candidate_inventory"
+        ]
+        self.assertTrue(inventory_evidence["recorded"])
+        self.assertTrue(inventory_evidence["complete_against_expected"])
+        self.assertTrue(inventory_evidence["inventory_result_consistent"])
+
+    def test_completion_audit_rejects_unhashable_source_inventory_paths(
+        self,
+    ) -> None:
+        inventory = json.loads(
+            SOURCE_ROW_CANDIDATE_INVENTORY_FIXTURE.read_text(encoding="utf-8")
+        )
+        sources = inventory["prompt_sources_checked"]
+        assert isinstance(sources, list)
+        sources.append(["not", "hashable"])
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            source_row_candidate_inventory=inventory,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        inventory_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "source_row_candidate_inventory"
+        ]
+        self.assertFalse(inventory_evidence["recorded"])
+        self.assertEqual(inventory_evidence["invalid_prompt_sources_checked"], 1)
+        self.assertTrue(inventory_evidence["sources_accounted"])
+
+    def test_completion_audit_rejects_invalid_source_inventory_paths(
+        self,
+    ) -> None:
+        inventory = json.loads(
+            SOURCE_ROW_CANDIDATE_INVENTORY_FIXTURE.read_text(encoding="utf-8")
+        )
+        sources = inventory["prompt_sources_checked"]
+        assert isinstance(sources, list)
+        duplicate_source = sources[0]
+        sources[1] = duplicate_source
+        sources[2] = "   "
+        sources[3] = "docs/not-a-goal-loop-source.md"
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            source_row_candidate_inventory=inventory,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        inventory_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "source_row_candidate_inventory"
+        ]
+        self.assertFalse(inventory_evidence["recorded"])
+        self.assertEqual(inventory_evidence["invalid_prompt_sources_checked"], 1)
+        self.assertEqual(
+            inventory_evidence["duplicate_prompt_sources_checked"],
+            [duplicate_source],
+        )
+        self.assertEqual(
+            inventory_evidence["invalid_prompt_source_prefixes"],
+            ["docs/not-a-goal-loop-source.md"],
+        )
+        self.assertFalse(inventory_evidence["prompt_sources_unique"])
+        self.assertFalse(inventory_evidence["prompt_sources_have_expected_prefix"])
+        self.assertFalse(inventory_evidence["prompt_sources_valid"])
+
+    def test_completion_audit_rejects_non_list_source_inventory_paths(
+        self,
+    ) -> None:
+        inventory = json.loads(
+            SOURCE_ROW_CANDIDATE_INVENTORY_FIXTURE.read_text(encoding="utf-8")
+        )
+        inventory["prompt_sources_checked"] = "prompt_corpus/GOAL_LOOP/not-a-list.md"
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            source_row_candidate_inventory=inventory,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        inventory_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "source_row_candidate_inventory"
+        ]
+        self.assertFalse(inventory_evidence["recorded"])
+        self.assertFalse(inventory_evidence["prompt_sources_is_list"])
+        self.assertEqual(inventory_evidence["invalid_prompt_sources_checked"], 1)
+        self.assertFalse(inventory_evidence["prompt_sources_valid"])
+
+    def test_completion_audit_rejects_inconsistent_source_row_candidate_inventory(
+        self,
+    ) -> None:
+        inventory = json.loads(
+            SOURCE_ROW_CANDIDATE_INVENTORY_FIXTURE.read_text(encoding="utf-8")
+        )
+        by_file = inventory["candidates_by_file"]
+        assert isinstance(by_file, list)
+        first = by_file[0]
+        assert isinstance(first, dict)
+        first["unique_candidate_rows"] = 1
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            source_row_candidate_inventory=inventory,
+        )
+
+        self.assertEqual(audit.status, "BLOCKED")
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        inventory_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "source_row_candidate_inventory"
+        ]
+        self.assertFalse(inventory_evidence["recorded"])
+        self.assertFalse(inventory_evidence["candidates_by_file_total_matches"])
+        self.assertTrue(inventory_evidence["candidates_by_rule_total_matches"])
+
+    def test_completion_audit_rejects_unaccounted_source_row_inventory(
+        self,
+    ) -> None:
+        inventory = json.loads(
+            SOURCE_ROW_CANDIDATE_INVENTORY_FIXTURE.read_text(encoding="utf-8")
+        )
+        sources_without_candidates = inventory["sources_without_candidates"]
+        assert isinstance(sources_without_candidates, list)
+        sources_without_candidates.pop()
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            source_row_candidate_inventory=inventory,
+        )
+
+        self.assertEqual(audit.status, "BLOCKED")
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        inventory_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "source_row_candidate_inventory"
+        ]
+        self.assertFalse(inventory_evidence["recorded"])
+        self.assertFalse(inventory_evidence["sources_accounted"])
+        self.assertFalse(inventory_evidence["no_candidate_details_accounted"])
+        self.assertFalse(inventory_evidence["zero_source_count_matches"])
+        self.assertTrue(inventory_evidence["source_count_matches"])
+
+    def test_completion_audit_rejects_untracked_no_candidate_source_markers(
+        self,
+    ) -> None:
+        inventory = json.loads(
+            SOURCE_ROW_CANDIDATE_INVENTORY_FIXTURE.read_text(encoding="utf-8")
+        )
+        details = inventory["sources_without_candidate_details"]
+        assert isinstance(details, list)
+        first = details[0]
+        assert isinstance(first, dict)
+        first.pop("tracking_issue_refs")
+        coverage = inventory["source_candidate_coverage"]
+        assert isinstance(coverage, dict)
+        coverage["no_candidate_sources_with_tracking_issue_refs"] -= 1
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            source_row_candidate_inventory=inventory,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        inventory_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "source_row_candidate_inventory"
+        ]
+        self.assertFalse(inventory_evidence["recorded"])
+        self.assertEqual(
+            inventory_evidence["missing_no_candidate_tracking_issue_refs"],
+            [first["path"]],
+        )
+        self.assertFalse(inventory_evidence["no_candidate_details_accounted"])
+        self.assertTrue(
+            inventory_evidence["no_candidate_tracking_source_count_matches"]
+        )
+
+    def test_completion_audit_rejects_inconsistent_source_currentness(
+        self,
+    ) -> None:
+        inventory = json.loads(
+            SOURCE_ROW_CANDIDATE_INVENTORY_FIXTURE.read_text(encoding="utf-8")
+        )
+        currentness = inventory["source_currentness"]
+        assert isinstance(currentness, dict)
+        currentness["future_date_claims_total"] = 0
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            source_row_candidate_inventory=inventory,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        inventory_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "source_row_candidate_inventory"
+        ]
+        self.assertFalse(inventory_evidence["recorded"])
+        self.assertFalse(inventory_evidence["source_currentness_consistent"])
+        self.assertFalse(inventory_evidence["future_date_claims_total_matches"])
+
+    def test_completion_audit_rejects_wrong_catalog_source_row_candidate_inventory(
+        self,
+    ) -> None:
+        inventory = json.loads(
+            SOURCE_ROW_CANDIDATE_INVENTORY_FIXTURE.read_text(encoding="utf-8")
+        )
+        inventory["source_catalog_id"] = "wrong-catalog"
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            source_row_candidate_inventory=inventory,
+        )
+
+        self.assertEqual(audit.status, "BLOCKED")
+        self.assertEqual(audit.blockers, ["strict_row_level_catalog_complete"])
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        inventory_evidence = by_id["strict_row_level_catalog_complete"].evidence[
+            "source_row_candidate_inventory"
+        ]
+        self.assertFalse(inventory_evidence["recorded"])
+        self.assertFalse(inventory_evidence["source_catalog_id_matches"])
+        self.assertEqual(
+            inventory_evidence["inventory_source_catalog_id"],
+            "wrong-catalog",
+        )
+
+    def test_completion_audit_attaches_prompt_closeout_checklist(self) -> None:
+        checklist = json.loads(PROMPT_CHECKLIST_FIXTURE.read_text(encoding="utf-8"))
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            prompt_closeout_checklist=checklist,
+        )
+
+        self.assertEqual(audit.status, "BLOCKED")
+        self.assertEqual(
+            audit.blockers,
+            [
+                "strict_row_level_catalog_complete",
+                "prompt_requirements_closeout_complete",
+            ],
+        )
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
+        self.assertTrue(checklist_evidence["recorded"])
+        self.assertEqual(checklist_evidence["prompt_sources_checked"], 12)
+        self.assertTrue(checklist_evidence["has_strict_corpus_blocker"])
+        self.assertFalse(checklist_evidence["local_path_leaks"])
+        self.assertEqual(checklist_evidence["requirements_total"], 21)
+        self.assertEqual(checklist_evidence["status_counts"]["PASS"], 5)
+        self.assertEqual(checklist_evidence["status_counts"]["PARTIAL"], 14)
+        self.assertEqual(checklist_evidence["status_counts"]["BLOCKED"], 2)
+        self.assertEqual(checklist_evidence["non_pass_requirements"], 16)
+        self.assertEqual(
+            checklist_evidence["requirements_with_tracking_issue_refs"],
+            16,
+        )
+        self.assertEqual(checklist_evidence["tracking_issue_refs_total"], 12)
+        self.assertEqual(checklist_evidence["missing_tracking_issue_refs"], [])
+        self.assertEqual(checklist_evidence["invalid_tracking_issue_refs"], [])
+        self.assertEqual(
+            checklist_evidence["requirements_with_implementation_pr_refs"],
+            9,
+        )
+        self.assertEqual(checklist_evidence["implementation_pr_refs_total"], 6)
+        self.assertEqual(checklist_evidence["invalid_implementation_pr_refs"], [])
+        self.assertEqual(checklist_evidence["artifact_refs_total"], 72)
+        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 72)
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_total"], 7)
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_resolved"], 7)
+        self.assertTrue(checklist_evidence["artifact_refs_all_resolved"])
+        self.assertEqual(checklist_evidence["missing_artifact_refs"], [])
+        self.assertEqual(checklist_evidence["missing_artifact_ref_anchors"], [])
+        self.assertEqual(checklist_evidence["invalid_artifact_refs"], [])
+        closeout_evidence = by_id["prompt_requirements_closeout_complete"].evidence
+        self.assertEqual(by_id["prompt_requirements_closeout_complete"].status, "FAIL")
+        self.assertEqual(closeout_evidence["incomplete_requirements"], 16)
+        self.assertEqual(closeout_evidence["non_pass_requirements"], 16)
+        self.assertEqual(
+            closeout_evidence["requirements_with_tracking_issue_refs"],
+            16,
+        )
+        self.assertEqual(
+            closeout_evidence["requirements_with_implementation_pr_refs"],
+            9,
+        )
+        self.assertEqual(closeout_evidence["implementation_pr_refs_total"], 6)
+        self.assertEqual(closeout_evidence["invalid_implementation_pr_refs"], [])
+        self.assertTrue(closeout_evidence["has_strict_corpus_blocker"])
+
+    def test_completion_audit_rejects_invalid_closeout_prompt_sources(
+        self,
+    ) -> None:
+        checklist = json.loads(PROMPT_CHECKLIST_FIXTURE.read_text(encoding="utf-8"))
+        sources = checklist["prompt_sources_checked"]
+        assert isinstance(sources, list)
+        duplicate_source = sources[0]
+        sources[1] = duplicate_source
+        sources[2] = ""
+        sources[3] = "docs/not-a-goal-loop-source.md"
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            prompt_closeout_checklist=checklist,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
+        self.assertFalse(checklist_evidence["recorded"])
+        self.assertEqual(checklist_evidence["invalid_prompt_sources_checked"], 1)
+        self.assertEqual(
+            checklist_evidence["duplicate_prompt_sources_checked"],
+            [duplicate_source],
+        )
+        self.assertEqual(
+            checklist_evidence["invalid_prompt_source_prefixes"],
+            ["docs/not-a-goal-loop-source.md"],
+        )
+        self.assertFalse(checklist_evidence["prompt_sources_unique"])
+        self.assertFalse(checklist_evidence["prompt_sources_have_expected_prefix"])
+        self.assertFalse(checklist_evidence["prompt_sources_valid"])
+
+    def test_completion_audit_rejects_non_list_closeout_prompt_sources(
+        self,
+    ) -> None:
+        checklist = json.loads(PROMPT_CHECKLIST_FIXTURE.read_text(encoding="utf-8"))
+        checklist["prompt_sources_checked"] = "prompt_corpus/GOAL_LOOP/not-a-list.md"
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            prompt_closeout_checklist=checklist,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
+        self.assertFalse(checklist_evidence["recorded"])
+        self.assertFalse(checklist_evidence["source_docs_complete"])
+        self.assertFalse(checklist_evidence["prompt_sources_is_list"])
+        self.assertEqual(checklist_evidence["invalid_prompt_sources_checked"], 1)
+        self.assertFalse(checklist_evidence["prompt_sources_valid"])
+
+    def test_completion_audit_accepts_prompt_checklist_without_strict_blocker(
+        self,
+    ) -> None:
+        checklist = json.loads(PROMPT_CHECKLIST_FIXTURE.read_text(encoding="utf-8"))
+        requirements = checklist["requirements"]
+        assert isinstance(requirements, list)
+        for requirement in requirements:
+            assert isinstance(requirement, dict)
+            requirement["status"] = "PASS"
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            prompt_closeout_checklist=checklist,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        checklist_criterion = by_id["prompt_to_artifact_checklist_recorded"]
+        self.assertEqual(checklist_criterion.status, "PASS")
+        self.assertFalse(checklist_criterion.evidence["has_strict_corpus_blocker"])
+        self.assertTrue(checklist_criterion.evidence["recorded"])
+        closeout_criterion = by_id["prompt_requirements_closeout_complete"]
+        self.assertEqual(closeout_criterion.status, "PASS")
+        self.assertEqual(closeout_criterion.evidence["incomplete_requirements"], 0)
+
+    def test_completion_audit_rejects_duplicate_prompt_requirement_ids(
+        self,
+    ) -> None:
+        checklist = json.loads(PROMPT_CHECKLIST_FIXTURE.read_text(encoding="utf-8"))
+        requirements = checklist["requirements"]
+        assert isinstance(requirements, list)
+        first = requirements[0]
+        second = requirements[1]
+        assert isinstance(first, dict)
+        assert isinstance(second, dict)
+        second["requirement_id"] = first["requirement_id"]
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            prompt_closeout_checklist=checklist,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
+        self.assertFalse(checklist_evidence["recorded"])
+        self.assertEqual(
+            checklist_evidence["duplicate_requirement_ids"],
+            [first["requirement_id"]],
+        )
+        self.assertEqual(by_id["prompt_requirements_closeout_complete"].status, "FAIL")
+
+    def test_completion_audit_rejects_untracked_incomplete_prompt_requirement(
+        self,
+    ) -> None:
+        checklist = json.loads(PROMPT_CHECKLIST_FIXTURE.read_text(encoding="utf-8"))
+        requirements = checklist["requirements"]
+        assert isinstance(requirements, list)
+        first = requirements[0]
+        assert isinstance(first, dict)
+        first.pop("tracking_issue_refs")
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            prompt_closeout_checklist=checklist,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
+        self.assertFalse(checklist_evidence["recorded"])
+        self.assertEqual(
+            checklist_evidence["missing_tracking_issue_refs"],
+            [first["requirement_id"]],
+        )
+        self.assertIn(
+            f"{first['requirement_id']}: missing_tracking_issue_refs",
+            checklist_evidence["invalid_requirements"],
+        )
+        self.assertEqual(by_id["prompt_requirements_closeout_complete"].status, "FAIL")
+
+    def test_completion_audit_rejects_invalid_prompt_implementation_pr_refs(
+        self,
+    ) -> None:
+        checklist = json.loads(PROMPT_CHECKLIST_FIXTURE.read_text(encoding="utf-8"))
+        requirements = checklist["requirements"]
+        assert isinstance(requirements, list)
+        first = requirements[0]
+        assert isinstance(first, dict)
+        first["implementation_pr_refs"] = [
+            "https://github.com/jeong-sik/masc-mcp/issues/13630",
+            "https://github.com/other/repo/pull/1",
+        ]
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            prompt_closeout_checklist=checklist,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
+        self.assertFalse(checklist_evidence["recorded"])
+        self.assertEqual(
+            checklist_evidence["invalid_implementation_pr_refs"],
+            [first["requirement_id"]],
+        )
+        self.assertIn(
+            f"{first['requirement_id']}: invalid_implementation_pr_refs",
+            checklist_evidence["invalid_requirements"],
+        )
+        closeout_criterion = by_id["prompt_requirements_closeout_complete"]
+        self.assertEqual(closeout_criterion.status, "FAIL")
+        self.assertEqual(
+            closeout_criterion.evidence["invalid_implementation_pr_refs"],
+            [first["requirement_id"]],
+        )
+
+    def test_completion_audit_rejects_missing_prompt_artifact_refs(self) -> None:
+        checklist = json.loads(PROMPT_CHECKLIST_FIXTURE.read_text(encoding="utf-8"))
+        requirements = checklist["requirements"]
+        assert isinstance(requirements, list)
+        first = requirements[0]
+        assert isinstance(first, dict)
+        first["artifact_refs"] = [
+            "test/fixtures/goal_loop/observe.startup.json",
+            "test/fixtures/goal_loop/missing.prompt-artifact.json#NF-1",
+        ]
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            prompt_closeout_checklist=checklist,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
+        self.assertFalse(checklist_evidence["recorded"])
+        self.assertFalse(checklist_evidence["artifact_refs_all_resolved"])
+        self.assertEqual(checklist_evidence["artifact_refs_total"], 71)
+        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 70)
+        self.assertEqual(
+            checklist_evidence["missing_artifact_refs"],
+            [
+                (
+                    f"{first['requirement_id']}: "
+                    "test/fixtures/goal_loop/missing.prompt-artifact.json"
+                )
+            ],
+        )
+        self.assertIn(
+            f"{first['requirement_id']}: missing_artifact_ref",
+            checklist_evidence["invalid_requirements"],
+        )
+
+    def test_completion_audit_rejects_missing_prompt_artifact_ref_anchors(self) -> None:
+        checklist = json.loads(PROMPT_CHECKLIST_FIXTURE.read_text(encoding="utf-8"))
+        requirements = checklist["requirements"]
+        assert isinstance(requirements, list)
+        first = requirements[0]
+        assert isinstance(first, dict)
+        first["artifact_refs"] = [
+            "test/fixtures/goal_loop/audit-corpus.external-claim.json#missing-anchor"
+        ]
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            prompt_closeout_checklist=checklist,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
+        self.assertFalse(checklist_evidence["recorded"])
+        self.assertFalse(checklist_evidence["artifact_refs_all_resolved"])
+        self.assertEqual(checklist_evidence["artifact_refs_total"], 70)
+        self.assertEqual(checklist_evidence["artifact_refs_resolved"], 69)
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_total"], 7)
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_resolved"], 6)
+        self.assertEqual(
+            checklist_evidence["missing_artifact_ref_anchors"],
+            [
+                (
+                    f"{first['requirement_id']}: "
+                    "test/fixtures/goal_loop/audit-corpus.external-claim.json"
+                    "#missing-anchor"
+                )
+            ],
+        )
+        self.assertIn(
+            f"{first['requirement_id']}: missing_artifact_ref_anchor",
+            checklist_evidence["invalid_requirements"],
+        )
+
+    def test_completion_audit_reports_prompt_artifact_ref_read_errors(self) -> None:
+        checklist = json.loads(PROMPT_CHECKLIST_FIXTURE.read_text(encoding="utf-8"))
+        requirements = checklist["requirements"]
+        assert isinstance(requirements, list)
+        first = requirements[0]
+        assert isinstance(first, dict)
+        first["artifact_refs"] = [
+            "test/fixtures/goal_loop/audit-corpus.external-claim.json#NF-1"
+        ]
+        original_read_text = goal_loop_completion_audit.Path.read_text
+        failed_once = False
+
+        def read_text_with_error(path: Path, *args: object, **kwargs: object) -> str:
+            nonlocal failed_once
+            if path.name == "audit-corpus.external-claim.json" and not failed_once:
+                failed_once = True
+                raise OSError("synthetic read failure")
+            return original_read_text(path, *args, **kwargs)
+
+        with mock.patch.object(
+            goal_loop_completion_audit.Path,
+            "read_text",
+            read_text_with_error,
+        ):
+            audit = goal_loop_completion_audit.build_completion_audit(
+                strict_catalog_only_blocked_status(),
+                prompt_closeout_checklist=checklist,
+            )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
+        self.assertFalse(checklist_evidence["recorded"])
+        self.assertFalse(checklist_evidence["artifact_refs_all_resolved"])
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_total"], 7)
+        self.assertEqual(checklist_evidence["artifact_ref_anchors_resolved"], 6)
+        self.assertEqual(
+            checklist_evidence["artifact_ref_read_errors"],
+            [
+                (
+                    f"{first['requirement_id']}: "
+                    "test/fixtures/goal_loop/audit-corpus.external-claim.json: "
+                    "OSError"
+                )
+            ],
+        )
+        self.assertIn(
+            f"{first['requirement_id']}: artifact_ref_read_error",
+            checklist_evidence["invalid_requirements"],
+        )
+
+    def test_completion_audit_rejects_invalid_prompt_artifact_refs(self) -> None:
+        checklist = json.loads(PROMPT_CHECKLIST_FIXTURE.read_text(encoding="utf-8"))
+        requirements = checklist["requirements"]
+        assert isinstance(requirements, list)
+        first = requirements[0]
+        assert isinstance(first, dict)
+        first["artifact_refs"] = [
+            "../outside.json",
+            "/Users/dancer/Downloads/private-goal-loop.json",
+        ]
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            prompt_closeout_checklist=checklist,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
+        self.assertFalse(checklist_evidence["recorded"])
+        self.assertFalse(checklist_evidence["artifact_refs_all_resolved"])
+        self.assertEqual(
+            checklist_evidence["invalid_artifact_refs"],
+            [first["requirement_id"]],
+        )
+        self.assertEqual(checklist_evidence["missing_artifact_refs"], [])
+        self.assertIn(
+            f"{first['requirement_id']}: invalid_artifact_ref",
+            checklist_evidence["invalid_requirements"],
+        )
+
+    def test_completion_audit_rejects_wrong_catalog_prompt_closeout_checklist(
+        self,
+    ) -> None:
+        checklist = json.loads(PROMPT_CHECKLIST_FIXTURE.read_text(encoding="utf-8"))
+        checklist["source_catalog_id"] = "wrong-catalog"
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            prompt_closeout_checklist=checklist,
+        )
+
+        self.assertEqual(audit.status, "BLOCKED")
+        self.assertIn("prompt_to_artifact_checklist_recorded", audit.blockers)
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
+        self.assertFalse(checklist_evidence["recorded"])
+        self.assertFalse(checklist_evidence["source_catalog_id_matches"])
+
+    def test_completion_audit_rejects_invalid_prompt_closeout_sources(
+        self,
+    ) -> None:
+        checklist = json.loads(PROMPT_CHECKLIST_FIXTURE.read_text(encoding="utf-8"))
+        sources = checklist["prompt_sources_checked"]
+        assert isinstance(sources, list)
+        duplicate_source = sources[0]
+        sources[1] = duplicate_source
+        sources[2] = ""
+        sources[3] = "docs/not-a-goal-loop-source.md"
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            strict_catalog_only_blocked_status(),
+            prompt_closeout_checklist=checklist,
+        )
+
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        checklist_evidence = by_id["prompt_to_artifact_checklist_recorded"].evidence
+        self.assertFalse(checklist_evidence["recorded"])
+        self.assertFalse(checklist_evidence["source_docs_complete"])
+        self.assertEqual(checklist_evidence["invalid_prompt_sources_checked"], 1)
+        self.assertEqual(
+            checklist_evidence["duplicate_prompt_sources_checked"],
+            [duplicate_source],
+        )
+        self.assertEqual(
+            checklist_evidence["invalid_prompt_source_prefixes"],
+            ["docs/not-a-goal-loop-source.md"],
+        )
+        self.assertFalse(checklist_evidence["prompt_sources_unique"])
+        self.assertFalse(checklist_evidence["prompt_sources_have_expected_prefix"])
+        self.assertFalse(checklist_evidence["prompt_sources_valid"])
+
     def test_strict_row_corpus_contract_fixture_is_json(self) -> None:
         contract = json.loads(STRICT_ROW_CORPUS_CONTRACT_FIXTURE.read_text())
 
@@ -501,6 +1369,7 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
             contract["source_path_prefix"],
             "prompt_corpus/GOAL_LOOP/",
         )
+        self.assertIn("catalog external_sources", contract["catalog_source_binding"])
 
     def test_completion_audit_cli_can_fail_until_goal_is_closeable(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:
@@ -522,6 +1391,10 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
                     str(ROW_DISCOVERY_FIXTURE),
                     "--strict-row-corpus",
                     str(corpus_path),
+                    "--prompt-closeout-checklist",
+                    str(PROMPT_CHECKLIST_FIXTURE),
+                    "--source-row-candidate-inventory",
+                    str(SOURCE_ROW_CANDIDATE_INVENTORY_FIXTURE),
                     "--require-complete",
                 ],
                 text=True,
@@ -540,11 +1413,28 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
             "row_corpus_discovery"
         ]
         self.assertTrue(row_discovery["recorded"])
+        source_inventory = by_id["strict_row_level_catalog_complete"]["evidence"][
+            "source_row_candidate_inventory"
+        ]
+        self.assertTrue(source_inventory["recorded"])
+        self.assertEqual(source_inventory["unique_candidate_rows"], 132)
+        self.assertTrue(source_inventory["source_currentness_evaluated"])
+        self.assertFalse(source_inventory["source_currentness_current"])
+        self.assertTrue(source_inventory["source_currentness_consistent"])
+        self.assertEqual(source_inventory["future_date_claims_total"], 7)
+        self.assertEqual(source_inventory["blocking_future_date_claims_total"], 3)
+        self.assertTrue(source_inventory["future_date_claims_total_matches"])
+        self.assertTrue(source_inventory["blocking_future_date_claims_total_matches"])
         strict_row_corpus = by_id["strict_row_level_catalog_complete"]["evidence"][
             "strict_row_corpus"
         ]
         self.assertTrue(strict_row_corpus["validated"])
         self.assertFalse(strict_row_corpus["orient_itemized_matches_corpus"])
+        prompt_checklist = by_id["prompt_to_artifact_checklist_recorded"]
+        self.assertEqual(prompt_checklist["status"], "PASS")
+        prompt_closeout = by_id["prompt_requirements_closeout_complete"]
+        self.assertEqual(prompt_closeout["status"], "FAIL")
+        self.assertEqual(prompt_closeout["evidence"]["incomplete_requirements"], 16)
 
 
 if __name__ == "__main__":

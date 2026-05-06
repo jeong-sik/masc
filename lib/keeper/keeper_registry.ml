@@ -521,6 +521,15 @@ let broadcast_composite_changed ~name ~ts_unix =
         "registry: broadcast_composite_changed name=%s failed: %s"
         name (Printexc.to_string exn)
 
+let record_phase_broadcast_failure ~name exn =
+  Prometheus.inc_counter
+    Prometheus.metric_keeper_sse_broadcast_failures
+    ~labels:[("keeper", name); ("site", "phase_changed")]
+    ();
+  Log.Keeper.warn
+    "registry: keeper_phase_changed broadcast failed name=%s err=%s"
+    name (Printexc.to_string exn)
+
 let completed_turn_outcome_of_observation
     (obs : turn_observation) : Keeper_transition_audit.completed_turn_outcome =
   (* P1 silent-failure fix: the previous wildcard `| _ -> Turn_failed`
@@ -1235,7 +1244,7 @@ let rec dispatch_event_with_audit
              ])
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
-        | _exn -> ());
+        | exn -> record_phase_broadcast_failure ~name exn);
        (* Update running count based on phase transition *)
        (match tr.prev_phase, tr.new_phase with
         | Running, phase when phase <> Running ->

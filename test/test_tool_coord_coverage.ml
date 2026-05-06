@@ -101,6 +101,20 @@ let seed_stale_current_task ctx =
     { agent with status = Busy; current_task = Some "task-missing"; last_seen = old_last_seen };
   old_last_seen
 
+let write_agent_state config agent_name f =
+  let agent_file =
+    Filename.concat (Coord.agents_dir config)
+      (Coord.safe_filename agent_name ^ ".json")
+  in
+  let agent =
+    match Coord.read_json config agent_file |> Masc_domain.agent_of_yojson with
+    | Ok agent -> agent
+    | Error msg -> failwith ("agent parse failed: " ^ msg)
+  in
+  Coord.write_json config agent_file (Masc_domain.agent_to_yojson (f agent))
+
+let actual_test_agent_name config = Coord.resolve_agent_name config "test-agent"
+
 (* Test dispatch returns None for unknown tool *)
 let () = test "dispatch_unknown_tool" (fun () ->
   let ctx = make_test_ctx () in
@@ -257,6 +271,51 @@ let () = test "dispatch_status_hides_awaiting_verification_current_task" (fun ()
         assert (agent_after.current_task = Some "task-001");
         assert (agent_after.status = Masc_domain.Busy)
     | None -> failwith "dispatch returned None"))
+
+let () = test "dispatch_status_marks_stale_agent_current_task_label" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
+  let _ = Coord.add_task ctx.config ~title:"Completed elsewhere" ~priority:2 ~description:"" in
+  ignore (Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
+  (match
+     Coord.transition_task_r ctx.config ~agent_name:"test-agent"
+       ~task_id:"task-001" ~action:Masc_domain.Done_action ~notes:"ok" ()
+   with
+  | Ok _ -> ()
+  | Error err -> failwith (Masc_domain.masc_error_to_string err));
+  let actual_name = actual_test_agent_name ctx.config in
+  write_agent_state ctx.config actual_name (fun agent ->
+      { agent with
+        status = Masc_domain.Busy;
+        current_task = Some " task-001\nignored-line "
+      });
+  match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+  | Some { success; message = result } ->
+      assert success;
+      assert_not_contains result (actual_name ^ " (you) -> task-001");
+      assert_contains result (actual_name ^ " (you) -> busy (stale:task-001)");
+      assert_not_contains result "ignored-line";
+      assert_contains result "Summary: active=0, done=1, cancelled=0, total=1"
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_status_players_prefer_live_board_assignment" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
+  ignore (Coord.add_task ctx.config ~title:"Live assignment" ~priority:2 ~description:"");
+  ignore (Coord.add_task ctx.config ~title:"Old registry focus" ~priority:2 ~description:"");
+  ignore (Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
+  let actual_name = actual_test_agent_name ctx.config in
+  write_agent_state ctx.config actual_name (fun agent ->
+      { agent with status = Masc_domain.Busy; current_task = Some "task-002" });
+  match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+  | Some { success; message = result } ->
+      assert success;
+      assert_contains result (actual_name ^ " (you) -> task-001");
+      assert_not_contains result (actual_name ^ " (you) -> task-002");
+      assert_not_contains result (actual_name ^ " (you) -> busy (stale:task-002)")
+  | None -> failwith "dispatch returned None"
+)
 
 (* Test dispatch reset without confirm *)
 let () = test "dispatch_reset_no_confirm" (fun () ->

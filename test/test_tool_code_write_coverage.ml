@@ -19,6 +19,14 @@ let msg_contains ~needle haystack =
   in
   nlen = 0 || loop 0
 
+let json_string_field key text =
+  match Yojson.Safe.from_string text with
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+     | Some (`String value) -> value
+     | _ -> fail ("missing JSON string field: " ^ key))
+  | _ -> fail "expected JSON object"
+
 let tool_code_write_policy_load_failure_metric () =
   Prometheus.metric_value_or_zero
     Prometheus.metric_keeper_tool_policy_failures
@@ -495,6 +503,30 @@ let fresh_base_path () =
   mkdir_p (Filename.concat dir ".masc/playground/agent-b/repos");
   dir
 
+let test_code_git_status_marks_docker_keeper_route () =
+  let base_path = fresh_base_path () in
+  let config = make_config base_path in
+  let keeper_dir = Filename.concat base_path ".masc/config/keepers" in
+  mkdir_p keeper_dir;
+  write_file
+    (Filename.concat keeper_dir "sangsu.toml")
+    "[keeper]\nsandbox_profile = \"docker\"\n";
+  let cwd = Filename.concat base_path ".masc/playground/sangsu/repos" in
+  mkdir_p cwd;
+  ignore (Sys.command (Printf.sprintf "git -C %s init -q" (Filename.quote cwd)));
+  let ctx =
+    { Tool_code_write.config;
+      agent_name = "keeper-sangsu-agent";
+    }
+  in
+  let args = `Assoc [ ("action", `String "status"); ("cwd", `String cwd) ] in
+  let (ok, msg) = dispatch_exn ctx ~name:"masc_code_git" ~args in
+  check bool "status ok" true ok;
+  check string "docker sandbox profile" "docker"
+    (json_string_field "sandbox_profile" msg);
+  check string "brokered via" "brokered" (json_string_field "via" msg);
+  check string "brokered route" "brokered" (json_string_field "route_via" msg)
+
 let test_writable_path_allows_own_playground () =
   let base_path = fresh_base_path () in
   let config = make_config base_path in
@@ -618,6 +650,8 @@ let () =
         test_code_git_force_push_blocked_before_cwd_validation;
       test_case "checkout dot blocked before cwd validation" `Quick
         test_code_git_checkout_dot_blocked_before_cwd_validation;
+      test_case "status marks docker keeper route" `Quick
+        test_code_git_status_marks_docker_keeper_route;
     ]);
     ("validate_code_shell_command", [
       test_case "allows pipe with allowlisted segments" `Quick

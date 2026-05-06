@@ -184,7 +184,7 @@ val unquote : string -> string
 
 val keeper_uses_docker_sandbox :
   config:Coord_utils.config -> agent_name:string -> bool
-(** [true] when the keeper's TOML has [docker_sandbox = true]. *)
+(** [true] when the keeper's TOML has [sandbox_profile = "docker"]. *)
 
 val repos_dir_of_keeper : Coord_utils.config -> string -> string
 (** Per-keeper sandbox repo directory:

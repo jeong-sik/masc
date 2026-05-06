@@ -653,7 +653,9 @@ let test_masc_keeper_msg_schema () =
           Alcotest.(check bool) "omits new_mid_goal" false
             (List.mem_assoc "new_mid_goal" props);
           Alcotest.(check bool) "omits new_long_goal" false
-            (List.mem_assoc "new_long_goal" props)
+            (List.mem_assoc "new_long_goal" props);
+          Alcotest.(check bool) "has required_tools" true
+            (List.mem_assoc "required_tools" props)
       | None -> Alcotest.fail "masc_keeper_msg missing properties"
 
 let test_masc_keeper_repair_schema () =

@@ -69,3 +69,11 @@ val claim_post_provision_fn : (Coord_utils_backend_setup.config ->
             agent_name:string ->
             task_id:string -> unit)
            Atomic.t
+val claim_post_provision_failed_fn :
+  (site:string ->
+   agent_name:string ->
+   task_id:string ->
+   error:string ->
+   unit) Atomic.t
+val observe_claim_post_provision_failure :
+  site:string -> agent_name:string -> task_id:string -> exn -> unit

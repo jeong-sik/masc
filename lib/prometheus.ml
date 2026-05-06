@@ -698,6 +698,8 @@ let metric_keeper_observation_query_failures =
   "masc_keeper_observation_query_failures_total"
 let metric_persistence_read_drops =
   "masc_persistence_read_drops_total"
+let metric_discovery_history_failures =
+  "masc_discovery_history_failures_total"
 
 (* #10097: codex_cli provider cannot carry keeper-bound runtime MCP
    tools that need request-scoped auth headers.  Every time
@@ -724,6 +726,9 @@ let metric_telemetry_coverage_gap =
 let metric_telemetry_unified_source_read_failures =
   "masc_telemetry_unified_source_read_failures_total"
 
+let metric_tool_assignment_telemetry_failures =
+  "masc_tool_assignment_telemetry_failures_total"
+
 (* #10358 (c1): observability for the silent [Effect.Unhandled] catch-all
    in [lib/coord.ml] [observe_agent_lifecycle] / [observe_task_transition_event] /
    [Keeper_accountability.record_task_transition].  Those three try/with
@@ -743,6 +748,8 @@ let metric_telemetry_unified_source_read_failures =
    most 19 (3 + 8 + 8). *)
 let metric_coord_telemetry_drop =
   "masc_coord_telemetry_drop_total"
+let metric_coord_claim_post_provision_failures =
+  "masc_coord_claim_post_provision_failures_total"
 
 (* #10094: per-caller counter for [Masc_oas_bridge.run_safe]
    timeouts.  The [caller] string supplied at the run_safe entry
@@ -868,6 +875,7 @@ let metric_after_turn_telemetry_zero_latency =
 let metric_tasks = "masc_tasks_total"
 let metric_errors = "masc_errors_total"
 let metric_error_events = "masc_error_events_total"
+let metric_workspace_route_failures = "masc_workspace_route_failures_total"
 let metric_active_agents = "masc_active_agents"
 let metric_pending_tasks = "masc_pending_tasks"
 let metric_uptime_seconds = "masc_uptime_seconds"
@@ -901,6 +909,8 @@ let metric_tool_call_duration = "masc_tool_call_duration_seconds"
 let metric_llm_provider_http_status = "masc_llm_provider_http_status_total"
 let metric_llm_provider_request_latency =
   "masc_llm_provider_request_latency_seconds"
+let metric_llm_provider_request_latency_clamped =
+  "masc_llm_provider_request_latency_clamped_total"
 let metric_llm_provider_capability_drops =
   "masc_llm_provider_capability_drops_total"
 let metric_llm_provider_cache_hits = "masc_llm_provider_cache_hits_total"
@@ -1038,6 +1048,8 @@ let metric_keeper_passive_loop_detected_total =
   "masc_keeper_passive_loop_detected_total"
 let metric_keeper_required_tool_loop_detected_total =
   "masc_keeper_required_tool_loop_detected_total"
+let metric_keeper_required_tool_gate_suppressed_total =
+  "masc_keeper_required_tool_gate_suppressed_total"
 
 (* Task-138: Minimum proactive cadence — observability gauges that pair
    with the [keeper_passive_loop_detector] streak counter so operators
@@ -1283,6 +1295,9 @@ let init () =
   add metric_errors "Total errors" Counter;
   add metric_error_events
     "Error events by type (parsing, missing_config, etc.)" Counter;
+  add metric_workspace_route_failures
+    "Total workspace route filesystem/git/read exceptions, labeled by site"
+    Counter;
   add metric_active_agents "Currently active agents" Gauge;
   add metric_pending_tasks "Tasks waiting to be claimed" Gauge;
   add metric_uptime_seconds "Server uptime in seconds" Gauge;
@@ -1492,6 +1507,10 @@ let init () =
     Counter;
   add metric_llm_provider_errors
     "Total OAS LLM request errors, labeled by model"
+    Counter;
+  add metric_llm_provider_request_latency_clamped
+    "Total OAS LLM request latency observations clamped before histogram \
+     emission, labeled by model and reason"
     Counter;
   add metric_llm_provider_retries
     "Total OAS LLM retries, labeled by provider, model, and attempt"
@@ -1722,6 +1741,11 @@ let init () =
      actionable required-tool failures before making execution/completion \
      progress. Labeled by keeper and kind."
     Counter;
+  add metric_keeper_required_tool_gate_suppressed_total
+    "#13631 Total Require_tool_use gate suppressions caused by actionable \
+     affordances whose visible keeper tool surface contains no \
+     contract-satisfying tool. Labeled by affordance."
+    Counter;
   add metric_keeper_consecutive_idle
     "Task-138 Current consecutive-idle streak (passive-only turns) per \
      keeper.  Resets to 0 on the next execution/completion turn.  Labeled \
@@ -1846,7 +1870,8 @@ let init () =
      by keeper."
     Counter;
   add metric_keeper_sse_broadcast_failures
-    "Total in-turn heartbeat SSE broadcast failures. Labeled by keeper."
+    "Total keeper SSE broadcast failures. Labeled by keeper and site \
+     when available."
     Counter;
   add metric_keeper_room_heartbeat_failures
     "Total room heartbeat failures (consecutive, leads to crash). \
@@ -1944,6 +1969,10 @@ let init () =
   add metric_persistence_read_drops
     "Total persisted read-model entries dropped during filesystem scans, \
      labeled by surface and reason"
+    Counter;
+  add metric_discovery_history_failures
+    "Total discovery history JSONL persistence/read/prune failures, \
+     labeled by site"
     Counter;
   add metric_oas_sse_relay_retries
     "Total OAS SSE relay retry attempts, labeled by failed stage"
@@ -2121,6 +2150,12 @@ let init () =
      site=<bounded read/discovery call-site>. Any positive rate means the \
      dashboard fan-in returned partial data instead of a true empty source."
     Counter;
+  add metric_tool_assignment_telemetry_failures
+    "Total tool assignment telemetry decode/read failures. Labels: \
+     site=read_recent_decode|read_recent_exception|warm_up_decode|\
+     warm_up_exception. Any positive rate means tool assignment lifecycle \
+     rows were dropped from the reconstructed read model."
+    Counter;
   add metric_coord_telemetry_drop
     "Total times a Coord lifecycle/transition hook dropped its Audit_log \
      + Telemetry emit because the dispatch happened outside an Eio \
@@ -2133,6 +2168,11 @@ let init () =
      series (3 + 8 + 8). Non-zero rate means a production path is \
      firing the lifecycle outside an Eio context; before this counter \
      the drop was silent (#10358 attrition root cause)."
+    Counter;
+  add metric_coord_claim_post_provision_failures
+    "Total best-effort claim post-provision hook failures. Labels: site \
+     (claim_task | claim_next) and agent_name. Task IDs are logged but \
+     not labeled to keep series cardinality bounded."
     Counter;
   add metric_auth_credential_ambiguous_lookup
     "Total runtime credential lookups where N>=2 credentials share the \
@@ -2246,7 +2286,7 @@ let init () =
   add metric_keeper_stale_termination_threshold_breached
     "Total stale termination threshold breaches triggering auto-pause.      Labels: keeper." Counter;
   add metric_keeper_stale_termination_batch
-    "Total fleet-wide batch termination events (multiple keepers terminated      within the batch window)." Counter;
+    "Total fleet-wide batch termination events (multiple keepers terminated      within the batch window). Labels: root_cause." Counter;
   add metric_keeper_stale_broadcast_emit_failures
     "Total failures emitting stale keeper broadcast events. Labels: keeper." Counter;
   add metric_keeper_tool_use_failure

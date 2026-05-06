@@ -188,6 +188,13 @@ let run_named
   let error_cascade_name = cascade_name_of_string cascade_name in
   let runtime_cascade_name = Keeper_cascade_profile.Runtime_name cascade_name in
   let runtime_mcp_policy = runtime_mcp_policy_for_tools ~keeper_name tools in
+  (* Keeper-internal tools cannot degrade to a text-only CLI palette: the
+     model would see no callable schema and emit misleading diagnostics. *)
+  let require_tool_support =
+    require_tool_support
+    || keeper_internal_tools_require_materialized_runtime_surface
+         ~keeper_name tools
+  in
   let configured_labels_result, candidate_cfgs_result, secondary_resolver =
     match model_strings with
     | Some ms when ms <> [] ->
@@ -198,6 +205,7 @@ let run_named
       ( Ok ms,
         Ok
           (resolve_providers_from_model_strings ?provider_filter
+             ?runtime_mcp_policy
              ~require_tool_choice_support ~require_tool_support ms),
         None )
     | _ ->

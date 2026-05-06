@@ -34,6 +34,16 @@ describe('MemoryGraph a11y', () => {
     expect(await axe(container)).toHaveNoViolations()
   })
 
+  it('renders accessibly with selectable nodes', async () => {
+    const { nodes, edges } = makeData()
+    render(
+      html`<${MemoryGraph} nodes=${nodes} edges=${edges} onSelectNode=${vi.fn()} />`,
+      container,
+    )
+    expect(container.querySelector('svg')?.getAttribute('role')).toBe('group')
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
   it('renders accessibly when empty', async () => {
     render(html`<${MemoryGraph} nodes=${[]} edges=${[]} />`, container)
     expect(await axe(container)).toHaveNoViolations()

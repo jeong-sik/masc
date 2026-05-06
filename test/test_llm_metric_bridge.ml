@@ -38,7 +38,11 @@ let test_metric_names_stable () =
   Alcotest.(check string)
     "output tokens metric"
     "masc_llm_provider_output_tokens_total"
-    Prom.metric_llm_provider_output_tokens
+    Prom.metric_llm_provider_output_tokens;
+  Alcotest.(check string)
+    "request latency clamped metric"
+    "masc_llm_provider_request_latency_clamped_total"
+    Prom.metric_llm_provider_request_latency_clamped
 
 let test_sink_records_oas_callbacks () =
   let sink : Llm_provider.Metrics.t = Bridge.make_sink () in
@@ -91,6 +95,50 @@ let test_sink_records_oas_callbacks () =
     Prom.metric_llm_provider_output_tokens
     ~labels:provider_model_labels ~before:before_output ~delta:23.0
 
+let test_request_latency_clamps_zero_ms () =
+  let model_id =
+    Printf.sprintf "bridge-latency-zero-%d" (Unix.getpid ())
+  in
+  let labels = [ ("model", model_id) ] in
+  let before_sum =
+    metric Prom.metric_llm_provider_request_latency ~labels
+  in
+  let before_count =
+    metric (Prom.metric_llm_provider_request_latency ^ "_count") ~labels
+  in
+  let clamped_labels =
+    [ ("model", model_id); ("reason", "non_positive_latency_ms") ]
+  in
+  let before_clamped =
+    metric Prom.metric_llm_provider_request_latency_clamped
+      ~labels:clamped_labels
+  in
+  Bridge.emit_request_latency ~model_id ~latency_ms:0;
+  check_metric_delta "latency sum floors to 1ms"
+    Prom.metric_llm_provider_request_latency
+    ~labels ~before:before_sum ~delta:0.001;
+  check_metric_delta "latency count +1"
+    (Prom.metric_llm_provider_request_latency ^ "_count")
+    ~labels ~before:before_count ~delta:1.0;
+  check_metric_delta "latency clamp +1"
+    Prom.metric_llm_provider_request_latency_clamped
+    ~labels:clamped_labels ~before:before_clamped ~delta:1.0
+
+let test_request_latency_positive_ms_does_not_clamp () =
+  let model_id =
+    Printf.sprintf "bridge-latency-positive-%d" (Unix.getpid ())
+  in
+  let labels =
+    [ ("model", model_id); ("reason", "non_positive_latency_ms") ]
+  in
+  let before =
+    metric Prom.metric_llm_provider_request_latency_clamped ~labels
+  in
+  Bridge.emit_request_latency ~model_id ~latency_ms:42;
+  check_metric_delta "positive latency avoids clamp counter"
+    Prom.metric_llm_provider_request_latency_clamped
+    ~labels ~before ~delta:0.0
+
 let () =
   Alcotest.run "llm_metric_bridge"
     [
@@ -100,5 +148,9 @@ let () =
             test_metric_names_stable;
           Alcotest.test_case "sink records OAS callbacks" `Quick
             test_sink_records_oas_callbacks;
+          Alcotest.test_case "request latency floors zero ms" `Quick
+            test_request_latency_clamps_zero_ms;
+          Alcotest.test_case "positive request latency does not clamp" `Quick
+            test_request_latency_positive_ms_does_not_clamp;
         ] );
     ]

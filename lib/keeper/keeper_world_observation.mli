@@ -265,6 +265,17 @@ val effective_proactive_cooldown :
 val provider_cooldown_remaining_sec_for_cascade :
   cascade_name:Keeper_cascade_profile.runtime_name -> int option
 
+val entropic_oscillation_interval_sec : int
+(** Minimum scheduled-autonomous silence before entropy injection can wake a
+    keeper. *)
+
+val entropic_oscillation_probability_percent : int
+(** Percent chance sampled after the interval gate has elapsed. *)
+
+val should_inject_entropic_oscillation :
+  since_last_scheduled_autonomous:int -> draw_percent:int -> bool
+(** Deterministic policy predicate for the stochastic entropy wakeup. *)
+
 val keeper_cycle_decision :
   ?provider_cooldown_remaining_sec:
     (cascade_name:Keeper_cascade_profile.runtime_name -> int option) ->

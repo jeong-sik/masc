@@ -796,6 +796,43 @@ let test_observe_collects_scope_messages_for_room_signal_keepers () =
       check bool "scope messages collected" true
         (List.length obs.pending_scope_messages >= 1))
 
+let test_observe_damps_keeper_scope_chatter_but_keeps_direct_mentions () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Unix.putenv "MASC_BASE_PATH" base_dir;
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      ignore
+        (Masc_mcp.Coord.broadcast config
+           ~from_agent:"keeper-ramarama-agent"
+           ~content:"general keeper room update");
+      ignore
+        (Masc_mcp.Coord.broadcast config
+           ~from_agent:"keeper-ramarama-agent"
+           ~content:"@test-keeper please inspect this");
+      ignore
+        (Masc_mcp.Coord.broadcast config ~from_agent:"operator"
+           ~content:"general operator room update");
+      let meta = { room_signal_meta with joined_room_ids = [ "default" ] } in
+      let obs =
+        WO.observe ~allowed_tool_names:None
+          ~pending_board_events:(Some [])
+          ~config ~meta
+      in
+      check int "keeper direct mention collected" 1
+        (List.length obs.pending_mentions);
+      check int "only operator scope collected" 1
+        (List.length obs.pending_scope_messages);
+      match obs.pending_scope_messages with
+      | [ (author, content) ] ->
+          check string "scope author" "operator" author;
+          check string "scope content" "general operator room update" content
+      | _ -> fail "expected one operator scope message")
+
 let test_scheduled_turn_uses_cooldown_only () =
   let meta =
     { minimal_meta with
@@ -1475,6 +1512,41 @@ let test_min_interval_fires_without_work_signal () =
       (match decision.verdict with
        | WO.Run { reasons = (first, rest) } ->
            List.mem WO.Min_interval_elapsed (first :: rest)
+       | WO.Skip _ -> false))
+
+let test_min_interval_turn_is_not_tagged_entropic () =
+  with_env "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC" "900" (fun () ->
+    Fun.protect ~finally:Random.self_init @@ fun () ->
+    Random.init 15;
+    let meta =
+      { minimal_meta with
+        proactive =
+          { enabled = true; idle_sec = 0; cooldown_sec = 600 };
+        runtime =
+          { minimal_meta.runtime with
+            proactive_rt =
+              { minimal_meta.runtime.proactive_rt with
+                last_ts = Time_compat.now () -. 1000.0;
+              };
+          };
+      }
+    in
+    let obs = { base_observation with idle_seconds = 0 } in
+    let decision =
+      WO.keeper_cycle_decision
+        ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+        ~meta obs
+    in
+    check bool "min interval elapsed fires turn" true decision.should_run;
+    check bool "Min_interval_elapsed reason emitted" true
+      (match decision.verdict with
+       | WO.Run { reasons = (first, rest) } ->
+           List.mem WO.Min_interval_elapsed (first :: rest)
+       | WO.Skip _ -> false);
+    check bool "Min_interval_elapsed is not tagged as entropic" false
+      (match decision.verdict with
+       | WO.Run { reasons = (first, rest) } ->
+           List.mem WO.Entropic_oscillation (first :: rest)
        | WO.Skip _ -> false))
 
 let test_min_interval_does_not_fire_before_elapsed () =
@@ -7087,6 +7159,16 @@ let test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool () =
        ~tools:[ "masc_claim_next" ]
        [ "task_claim"; "task_audit"; "board_post_or_comment" ]);
   check bool
+    "task_audit with only passive audit/list tools -> gate suppressed" false
+    (gate ~tools:[ "keeper_tasks_audit"; "keeper_tasks_list" ]
+       [ "task_audit" ]);
+  check bool
+    "task_verify with only passive task list -> gate suppressed" false
+    (gate ~tools:[ "keeper_tasks_list" ] [ "task_verify" ]);
+  check bool
+    "task_verify with submit tool -> gate fires" true
+    (gate ~tools:[ "keeper_task_submit_for_verification" ] [ "task_verify" ]);
+  check bool
     "all gated affordances missing tools -> gate suppressed" false
     (gate
        ~tools:[ "keeper_context_status"; "keeper_time_now" ]
@@ -7096,6 +7178,34 @@ let test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool () =
   check bool
     "unknown affordance string is ignored" false
     (gate ~tools:[ "keeper_task_claim" ] [ "totally_unknown_affordance" ])
+
+let test_turn_affordance_gate_suppression_metric () =
+  let metric affordance =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_keeper_required_tool_gate_suppressed_total
+      ~labels:[ ("affordance", affordance) ]
+      ()
+  in
+  let gate ~tools affordances =
+    KAR.turn_affordances_require_tool_gate_with_allowed
+      ~record_suppression_metric:true ~allowed_tool_names:tools affordances
+  in
+  let verify_before = metric "task_verify" in
+  let unknown_before = metric "totally_unknown_affordance" in
+  check bool "passive task_verify list tool suppresses gate" false
+    (gate ~tools:[ "keeper_tasks_list" ] [ "task_verify" ]);
+  check (float 0.0) "task_verify suppression increments metric"
+    (verify_before +. 1.0)
+    (metric "task_verify");
+  check (float 0.0) "unknown affordance does not create metric label"
+    unknown_before
+    (metric "totally_unknown_affordance");
+  let claim_before = metric "task_claim" in
+  check bool "claim tool present keeps gate active" true
+    (gate ~tools:[ "keeper_task_claim" ] [ "task_claim" ]);
+  check (float 0.0) "successful gate does not increment suppression metric"
+    claim_before
+    (metric "task_claim")
 
 let test_tools_for_gated_affordance_covers_each_variant () =
   (* Compile-time exhaustiveness already ensures every variant is
@@ -7204,11 +7314,11 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
        ~allowed_tool_names:[ "keeper_tasks_audit"; "keeper_board_post" ]
        ()
    with
-   | Agent_sdk.Types.Tool name ->
-       check string "task audit prefers audit tool" "keeper_tasks_audit" name
+   | Agent_sdk.Types.Auto -> ()
    | other ->
        fail
-         (Printf.sprintf "expected Tool keeper_tasks_audit, got %s"
+         (Printf.sprintf
+            "expected Auto for task audit with passive audit tool, got %s"
             (Agent_sdk.Types.show_tool_choice other)));
   (match
      choose
@@ -7229,11 +7339,26 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
        ~allowed_tool_names:[ "keeper_tasks_list"; "keeper_board_post" ]
        ()
    with
-   | Agent_sdk.Types.Tool name ->
-       check string "task verify prefers task list" "keeper_tasks_list" name
+   | Agent_sdk.Types.Auto -> ()
    | other ->
        fail
-         (Printf.sprintf "expected Tool keeper_tasks_list, got %s"
+         (Printf.sprintf
+            "expected Auto for task verify with passive task list, got %s"
+            (Agent_sdk.Types.show_tool_choice other)));
+  (match
+     choose
+       ~turn_affordances:[ "task_verify" ]
+       ~allowed_tool_names:
+         [ "keeper_tasks_list"; "keeper_task_submit_for_verification" ]
+       ()
+   with
+   | Agent_sdk.Types.Tool name ->
+       check string "task verify prefers submit tool"
+         "keeper_task_submit_for_verification" name
+   | other ->
+       fail
+         (Printf.sprintf
+            "expected Tool keeper_task_submit_for_verification, got %s"
             (Agent_sdk.Types.show_tool_choice other)));
   (match choose ~allowed_tool_names:[ "keeper_board_post" ] () with
   | Agent_sdk.Types.Auto -> ()
@@ -7453,6 +7578,8 @@ let () =
             test_observe_ignores_scope_messages_without_room_signal_opt_in;
           test_case "room-signal keepers collect scope messages" `Quick
             test_observe_collects_scope_messages_for_room_signal_keepers;
+          test_case "room-signal keepers damp keeper scope chatter" `Quick
+            test_observe_damps_keeper_scope_chatter_but_keeps_direct_mentions;
           test_case "scheduled turn uses cooldown only when work exists" `Quick
             test_scheduled_turn_uses_cooldown_only;
           test_case "scheduled turn skips without structured work signal" `Quick
@@ -7513,6 +7640,8 @@ let () =
             test_provider_cooldown_blocks_bootstrap_turn;
           test_case "min interval: fires without work signal after interval" `Quick
             test_min_interval_fires_without_work_signal;
+          test_case "min interval: not tagged entropic" `Quick
+            test_min_interval_turn_is_not_tagged_entropic;
           test_case "min interval: does not fire before elapsed" `Quick
             test_min_interval_does_not_fire_before_elapsed;
           test_case "min interval: never fires for bootstrap turn" `Quick
@@ -8131,6 +8260,8 @@ let () =
           test_case "affordance gate filters by allowed_tool_names"
             `Quick
             test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool;
+          test_case "affordance gate suppression emits metric" `Quick
+            test_turn_affordance_gate_suppression_metric;
           test_case "tools_for_gated_affordance non-empty for every variant"
             `Quick test_tools_for_gated_affordance_covers_each_variant;
         ] );

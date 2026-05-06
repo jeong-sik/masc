@@ -4,6 +4,47 @@ import solid from 'vite-plugin-solid'
 import tailwindcss from '@tailwindcss/vite'
 import { visualizer } from 'rollup-plugin-visualizer'
 
+function normalizeModuleId(id: string): string {
+  return id.replace(/\\/g, '/')
+}
+
+function chunkByPackage(id: string, packageNames: string[]): boolean {
+  return packageNames.some(packageName =>
+    id.includes(`/node_modules/${packageName}/`),
+  )
+}
+
+const heavyMermaidDependencyChunks: Array<{ packages: string[]; chunk: string }> = [
+  {
+    packages: ['cytoscape'],
+    chunk: 'cytoscape',
+  },
+  {
+    packages: ['cytoscape-cose-bilkent', 'cose-base', 'layout-base'],
+    chunk: 'mermaid-cose-layout',
+  },
+  {
+    packages: ['@mermaid-js/parser'],
+    chunk: 'mermaid-parser',
+  },
+  {
+    packages: ['langium'],
+    chunk: 'mermaid-parser-langium',
+  },
+  {
+    packages: ['chevrotain', 'chevrotain-allstar', '@chevrotain/regexp-to-ast'],
+    chunk: 'mermaid-parser-chevrotain',
+  },
+  {
+    packages: [
+      'vscode-jsonrpc',
+      'vscode-languageserver-protocol',
+      'vscode-languageserver-types',
+    ],
+    chunk: 'mermaid-parser-vscode-lsp',
+  },
+]
+
 export default defineConfig(({ command }) => {
   const proxyTarget = process.env.MASC_DASHBOARD_PROXY_TARGET
   if (command === 'serve' && !proxyTarget) {
@@ -53,9 +94,27 @@ export default defineConfig(({ command }) => {
       sourcemap: 'hidden',
       rollupOptions: {
         output: {
-          manualChunks: {
-            vendor: ['preact', 'preact/hooks', 'htm', '@preact/signals'],
-            solid: ['solid-js', 'solid-js/store', 'solid-js/web'],
+          manualChunks(id) {
+            const normalizedId = normalizeModuleId(id)
+            for (const { packages, chunk } of heavyMermaidDependencyChunks) {
+              if (chunkByPackage(normalizedId, packages)) return chunk
+            }
+            if (normalizedId.includes('/node_modules/mermaid/dist/chunks/mermaid.core/')) {
+              const filename = normalizedId
+                .slice(normalizedId.lastIndexOf('/') + 1)
+                .replace(/\.mjs$/, '')
+              return `mermaid-${filename}`
+            }
+            if (normalizedId.includes('/node_modules/mermaid/dist/mermaid.core.mjs')) {
+              return 'mermaid-core'
+            }
+            if (chunkByPackage(normalizedId, ['preact', 'htm', '@preact/signals'])) {
+              return 'vendor'
+            }
+            if (chunkByPackage(normalizedId, ['solid-js'])) {
+              return 'solid'
+            }
+            return undefined
           },
         },
       },

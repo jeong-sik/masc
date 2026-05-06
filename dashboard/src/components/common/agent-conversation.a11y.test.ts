@@ -36,7 +36,11 @@ describe('AgentConversation a11y', () => {
   it('has feed role', () => {
     render(html`<${AgentConversation} messages=${makeMessages()} />`, container)
     const feed = container.querySelector('[role="feed"]')
+    const root = container.querySelector('[data-agent-conversation]') as HTMLElement
     expect(feed).not.toBeNull()
+    expect(feed?.getAttribute('aria-label')).toContain('메시지 4개')
+    expect(root.dataset.agentConversationStatus).toBe('linear')
+    expect(root.dataset.agentConversationMessageCount).toBe('4')
   })
 
   it('renders user message with align class', () => {
@@ -65,6 +69,8 @@ describe('AgentConversation a11y', () => {
       container,
     )
     expect(container.textContent).toContain('feat/auth')
+    const article = container.querySelector('[data-message-id="b1"]') as HTMLElement
+    expect(article.dataset.messageBranchLabel).toBe('feat/auth')
   })
 
   it('calls onSelectMessage when clicked', () => {
@@ -90,5 +96,19 @@ describe('AgentConversation a11y', () => {
     )
     const article = container.querySelector('article')
     expect(article?.classList.contains('items-center')).toBe(true)
+  })
+
+  it('marks orphaned branches in metadata', () => {
+    render(
+      html`<${AgentConversation}
+        messages=${[{ id: 'o1', role: 'agent', content: 'Missing parent', timestamp: Date.now(), parentId: 'missing' }]}
+      />`,
+      container,
+    )
+    const root = container.querySelector('[data-agent-conversation]') as HTMLElement
+    const article = container.querySelector('[data-message-id="o1"]') as HTMLElement
+    expect(root.dataset.agentConversationStatus).toBe('orphaned')
+    expect(root.dataset.agentConversationOrphanCount).toBe('1')
+    expect(article.dataset.messageOrphan).toBe('true')
   })
 })

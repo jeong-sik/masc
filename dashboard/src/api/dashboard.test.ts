@@ -863,6 +863,8 @@ describe('fetchKeeperConfig', () => {
         fiber_health: 'healthy',
         presence_keepalive: 'true',
         presence_keepalive_sec: '30',
+        runtime_blocker_class: 'stale_termination_storm',
+        runtime_blocker_summary: 'Stale watchdog terminated 3 keeper cycles.',
         runtime_blocker_continue_gate: 'false',
       },
       runtime_trust: {
@@ -961,6 +963,8 @@ describe('fetchKeeperConfig', () => {
     expect(result.sources.cascade_runtime_json_editable).toBe(false)
     expect(result.metrics.total_cost_usd).toBe(0.12)
     expect(result.runtime.presence_keepalive_sec).toBe(30)
+    expect(result.runtime.runtime_blocker_class).toBe('stale_termination_storm')
+    expect(result.runtime.runtime_blocker_summary).toBe('Stale watchdog terminated 3 keeper cycles.')
     expect(result.active_goal_ids).toEqual(['goal-runtime'])
     expect(result.coordination.active_goal_ids).toEqual(['goal-runtime'])
     expect(result.coordination.active_goals[0]?.title).toBe('Ship runtime clarity')

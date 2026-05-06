@@ -12,6 +12,7 @@ open Alcotest
 
 module Memory_oas_bridge = Masc_mcp.Memory_oas_bridge
 module Memory_hooks = Masc_mcp.Memory_hooks
+module P = Masc_mcp.Prometheus
 
 let test_base_path = Filename.temp_dir "masc_memory_hooks_base" ""
 let () = Unix.putenv "MASC_BASE_PATH" test_base_path
@@ -170,6 +171,70 @@ let test_hook_injects_world_memory () =
    | _ -> fail "unexpected hook decision");
   (try Sys.rmdir tmp_dir with _ -> ())
 
+let test_compose_preserves_inner_before_turn_params () =
+  let tmp_dir = Filename.temp_dir "masc_test_mh" "" in
+  let config = make_test_config ~base_path:tmp_dir in
+  let memory = Agent_sdk.Memory.create () in
+  ignore
+    (Agent_sdk.Memory.store
+       memory
+       ~tier:Agent_sdk.Memory.Long_term
+       "world:compose"
+       (`Assoc [ "content", `String "Memory context must survive composition." ]));
+  let memory_hooks =
+    Memory_hooks.make
+      ~agent_name:"test_compose"
+      ~config
+      ~memory
+      ()
+  in
+  let inner_seen = ref false in
+  let inner_hooks =
+    { Agent_sdk.Hooks.empty with
+      before_turn_params =
+        Some
+          (function
+            | Agent_sdk.Hooks.BeforeTurnParams { current_params; _ } ->
+                inner_seen := true;
+                let extra =
+                  match current_params.extra_system_context with
+                  | None -> Some "[keeper params]"
+                  | Some existing -> Some (existing ^ "\n\n[keeper params]")
+                in
+                Agent_sdk.Hooks.AdjustParams
+                  { current_params with
+                    extra_system_context = extra;
+                    tool_choice = Some Agent_sdk.Types.Auto;
+                  }
+            | _ -> Agent_sdk.Hooks.Continue)
+    }
+  in
+  let hooks =
+    Memory_hooks.compose_with_inner ~memory_hooks ~inner:inner_hooks
+  in
+  let event = make_before_turn_params_event ~turn:1 () in
+  let decision =
+    match hooks.before_turn_params with
+    | Some f -> f event
+    | None -> fail "before_turn_params hook should be Some"
+  in
+  check bool "inner hook ran" true !inner_seen;
+  (match decision with
+   | Agent_sdk.Hooks.AdjustParams params ->
+     (match params.extra_system_context with
+      | Some ctx ->
+        check bool "world memory preserved" true
+          (contains_text ~needle:"world:compose" ctx);
+        check bool "inner context appended" true
+          (contains_text ~needle:"[keeper params]" ctx)
+      | None -> fail "expected composed extra_system_context");
+     check bool "inner tool choice preserved" true
+       (match params.tool_choice with
+        | Some Agent_sdk.Types.Auto -> true
+        | _ -> false)
+   | _ -> fail "expected AdjustParams from composed hooks");
+  (try Sys.rmdir tmp_dir with _ -> ())
+
 let test_after_turn_hook_returns_continue () =
   let tmp_dir = Filename.temp_dir "masc_test_mh" "" in
   let config = make_test_config ~base_path:tmp_dir in
@@ -197,6 +262,65 @@ let test_after_turn_hook_returns_continue () =
   in
   check bool "after_turn returns Continue" true
     (match decision with Agent_sdk.Hooks.Continue -> true | _ -> false);
+  (try Sys.rmdir tmp_dir with _ -> ())
+
+let test_after_turn_flush_failure_still_continues () =
+  let tmp_dir = Filename.temp_dir "masc_test_mh" "" in
+  let config = make_test_config ~base_path:tmp_dir in
+  let memory = Memory_oas_bridge.create_memory ~agent_name:"test_after_fail" () in
+  let labels =
+    [("callback", "memory_after_turn_flush")]
+  in
+  let before =
+    P.metric_value_or_zero P.metric_keeper_lifecycle_callback_failures
+      ~labels ()
+  in
+  let memory_hooks =
+    Memory_hooks.make
+      ~agent_name:"test_after_fail"
+      ~config
+      ~memory
+      ~flush_incremental:(fun ~memory:_ ~agent_name:_ ->
+        raise (Failure "synthetic flush failure"))
+      ()
+  in
+  let inner_seen = ref false in
+  let inner_hooks =
+    { Agent_sdk.Hooks.empty with
+      after_turn =
+        Some
+          (fun _ ->
+             inner_seen := true;
+             Agent_sdk.Hooks.Continue)
+    }
+  in
+  let hooks =
+    Memory_hooks.compose_with_inner ~memory_hooks ~inner:inner_hooks
+  in
+  let event = Agent_sdk.Hooks.AfterTurn {
+    turn = 1;
+    response = {
+      Agent_sdk.Types.id = "r1";
+      model = "test";
+      stop_reason = Agent_sdk.Types.EndTurn;
+      content = [];
+      usage = None;
+      telemetry = None;
+    };
+  } in
+  let decision =
+    match hooks.after_turn with
+    | Some f -> f event
+    | None -> fail "after_turn hook should be Some"
+  in
+  check bool "after_turn returns Continue" true
+    (match decision with Agent_sdk.Hooks.Continue -> true | _ -> false);
+  check bool "inner after_turn still ran" true !inner_seen;
+  let after =
+    P.metric_value_or_zero P.metric_keeper_lifecycle_callback_failures
+      ~labels ()
+  in
+  check (float 0.0001) "flush failure counted" (before +. 1.0) after;
   (try Sys.rmdir tmp_dir with _ -> ())
 
 (* ── Flush idempotency test ────────────────────────────────── *)
@@ -244,7 +368,11 @@ let () =
       test_case "returns Continue when no memory" `Quick test_hook_returns_continue_when_no_memory;
       test_case "preserves existing context" `Quick test_hook_preserves_existing_context;
       test_case "injects world memory" `Quick test_hook_injects_world_memory;
+      test_case "composition preserves inner before_turn_params" `Quick
+        test_compose_preserves_inner_before_turn_params;
       test_case "after_turn returns Continue" `Quick test_after_turn_hook_returns_continue;
+      test_case "after_turn flush failure still continues" `Quick
+        test_after_turn_flush_failure_still_continues;
     ];
     "hook_structure", [
       test_case "hook slots populated correctly" `Quick test_hook_slots_populated;

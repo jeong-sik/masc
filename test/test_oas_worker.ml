@@ -2500,6 +2500,40 @@ let test_filter_candidate_providers_for_tool_support_keeps_header_capable_cli_fo
     [ "claude_code:auto"; "kimi_cli:kimi-for-coding" ]
     (List.map Provider_tool_support.provider_debug_label filtered)
 
+let test_keeper_internal_tools_force_materialized_runtime_surface () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  with_env "MASC_MCP_TOKEN" "" @@ fun () ->
+  let tools = [ make_named_noop_tool "keeper_pr_review_comment" ] in
+  let require_tool_support =
+    Masc_mcp.Oas_worker_named.keeper_internal_tools_require_materialized_runtime_surface
+      ~keeper_name:"issue_king" tools
+  in
+  Alcotest.(check bool)
+    "keeper PR-review tools require a materialized runtime surface"
+    true require_tool_support;
+  let runtime_mcp_policy =
+    Masc_mcp.Oas_worker_named.runtime_mcp_policy_for_tools
+      ~keeper_name:"issue_king" tools
+  in
+  let filtered =
+    Masc_mcp.Oas_worker_named.filter_candidate_providers_for_tool_support
+      ~keeper_name:"issue_king"
+      ?runtime_mcp_policy
+      ~tools
+      ~require_tool_choice_support:false
+      ~require_tool_support
+      ~label:"tier_fast"
+      [
+        make_gemini_cli_provider_cfg ~model_id:"gemini-3-flash-preview" ();
+        make_glm_provider_cfg ~model_id:"glm-5-turbo" ();
+      ]
+  in
+  Alcotest.(check (list string))
+    "text-only CLI path is removed before it can drop keeper PR-review tools"
+    [ "glm:glm-5-turbo" ]
+    (List.map Provider_tool_support.provider_debug_label filtered)
+
 let test_filter_candidate_providers_for_tool_support_secondary_preserves_priority_slot
     () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
@@ -4770,6 +4804,10 @@ let () =
         "provider-normalized filter keeps header-capable keeper-internal lanes"
         `Quick
         test_filter_candidate_providers_for_tool_support_keeps_header_capable_cli_for_keeper_internal_tools;
+      Alcotest.test_case
+        "keeper PR-review tools force a materialized runtime surface"
+        `Quick
+        test_keeper_internal_tools_force_materialized_runtime_surface;
       Alcotest.test_case
         "provider-normalized secondary preserves primary priority slot"
         `Quick

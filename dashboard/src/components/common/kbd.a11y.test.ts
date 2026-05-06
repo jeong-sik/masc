@@ -24,6 +24,9 @@ describe('Kbd a11y', () => {
 
   it('single-key default md size passes axe', async () => {
     render(html`<p>Press <${Kbd}>?<//></p>`, container)
+    const kbd = container.querySelector('[data-kbd]')!
+    expect(kbd.getAttribute('data-kbd-size')).toBe('md')
+    expect(kbd.getAttribute('data-kbd-has-title')).toBe('false')
     expect(await axe(container)).toHaveNoViolations()
   })
 
@@ -32,6 +35,7 @@ describe('Kbd a11y', () => {
       html`<p>Press <${Kbd} size="sm">/<//> to focus search</p>`,
       container,
     )
+    expect(container.querySelector('[data-kbd]')!.getAttribute('data-kbd-size')).toBe('sm')
     expect(await axe(container)).toHaveNoViolations()
   })
 
@@ -50,6 +54,14 @@ describe('Kbd a11y', () => {
       </button>`,
       container,
     )
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it('title metadata passes axe', async () => {
+    render(html`<p>Open <${Kbd} title="Open command palette">⌘K<//></p>`, container)
+    const kbd = container.querySelector('[data-kbd]')!
+    expect(kbd.getAttribute('data-kbd-has-title')).toBe('true')
+    expect(kbd.getAttribute('data-kbd-title-length')).toBe('20')
     expect(await axe(container)).toHaveNoViolations()
   })
 })

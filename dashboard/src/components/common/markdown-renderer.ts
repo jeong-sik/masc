@@ -9,28 +9,20 @@ import { useRef, useEffect, useMemo } from 'preact/hooks'
 import { Marked } from 'marked'
 import DOMPurify from 'dompurify'
 
-import type MermaidDefault from 'mermaid'
 import { highlightCodeHtml } from './shiki-highlighter'
+import { loadMermaid, type MermaidApi } from './mermaid-loader'
 
 // ── Lazy mermaid loader ──────────────────────────────────────
-type MermaidApi = typeof MermaidDefault
-
-function importMermaid(): Promise<MermaidApi> {
-  return import('mermaid').then(module => module.default)
-}
-let mermaidPromise: Promise<MermaidApi> | null = null
 let mermaidConfigured = false
 let mermaidRenderCount = 0
 
 function getMermaid(): Promise<MermaidApi> {
-  const promise = mermaidPromise ?? (mermaidPromise = importMermaid())
-  return promise.then(mermaid => {
+  return loadMermaid().then(mermaid => {
     if (mermaidConfigured) return mermaid
     mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict', suppressErrorRendering: true })
     mermaidConfigured = true
     return mermaid
   }).catch((err) => {
-    mermaidPromise = null
     mermaidConfigured = false
     throw err
   })

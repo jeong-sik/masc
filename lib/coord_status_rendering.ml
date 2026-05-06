@@ -26,6 +26,11 @@ let option_or_dash = function
   | Some value when not (String.equal (String.trim value) "") -> value
   | _ -> "-"
 
+let first_line text =
+  match String.index_opt text '\n' with
+  | Some i -> String.sub text 0 i
+  | None -> text
+
 let take_items limit items =
   let rec loop remaining acc = function
     | _ when remaining <= 0 -> List.rev acc
@@ -57,13 +62,45 @@ let active_task_assignee = function
       Some assignee
   | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
 
-let assigned_task_ids ~matches_you tasks =
-  List.filter_map
+let add_unique table key value =
+  let values = Option.value (Hashtbl.find_opt table key) ~default:[] in
+  if List.exists (String.equal value) values then ()
+  else Hashtbl.replace table key (value :: values)
+
+let active_assigned_task_ids_lookup
+    ~(actual_name : string)
+    ~(ctx_agent_name : string)
+    ~(agents_with_state : (Masc_domain.agent * bool) list)
+    ~(active_tasks : Masc_domain.task list) =
+  let assignee_to_agents = Hashtbl.create (List.length agents_with_state * 2) in
+  List.iter
+    (fun ((agent : Masc_domain.agent), _) ->
+      add_unique assignee_to_agents agent.name agent.name;
+      if String.equal agent.name actual_name then
+        add_unique assignee_to_agents ctx_agent_name agent.name)
+    agents_with_state;
+  let task_ids_by_agent = Hashtbl.create (List.length agents_with_state) in
+  List.iter
     (fun (task : Masc_domain.task) ->
       match active_task_assignee task.task_status with
-      | Some assignee when matches_you assignee -> Some task.id
-      | Some _ | None -> None)
-    tasks
+      | None -> ()
+      | Some assignee ->
+          let agents =
+            Option.value (Hashtbl.find_opt assignee_to_agents assignee)
+              ~default:[]
+          in
+          List.iter
+            (fun agent_name ->
+              let task_ids =
+                Option.value (Hashtbl.find_opt task_ids_by_agent agent_name)
+                  ~default:[]
+              in
+              Hashtbl.replace task_ids_by_agent agent_name (task.id :: task_ids))
+            agents)
+    active_tasks;
+  fun agent_name ->
+    Option.value (Hashtbl.find_opt task_ids_by_agent agent_name) ~default:[]
+    |> List.rev
 
 let agent_status_icon ~is_zombie = function
   | _ when is_zombie -> "💀"
@@ -72,20 +109,28 @@ let agent_status_icon ~is_zombie = function
   | Masc_domain.Listening -> "🎧"
   | Masc_domain.Inactive -> "⚫"
 
-let agent_focus_label ~is_zombie (agent : Masc_domain.agent) =
+let agent_focus_label ~is_zombie ~active_assigned_task_ids
+    (agent : Masc_domain.agent) =
   if is_zombie then "stale"
-  else option_or_dash agent.current_task |> function
-    | "-" -> Masc_domain.agent_status_to_string agent.status
-    | task -> task
+  else
+    match active_assigned_task_ids with
+    | task :: [] -> task
+    | task :: rest -> Printf.sprintf "%s (+%d)" task (List.length rest)
+    | [] -> (
+        match agent.current_task with
+        | Some raw_task ->
+            let task = raw_task |> String.trim |> first_line in
+            if String.equal task "" then
+              Masc_domain.agent_status_to_string agent.status
+            else
+              Printf.sprintf "%s (stale:%s)"
+                (Masc_domain.agent_status_to_string agent.status)
+                task
+        | _ -> Masc_domain.agent_status_to_string agent.status)
 
 let task_id_list_label = function
   | [] -> "[]"
   | ids -> "[" ^ String.concat "," ids ^ "]"
-
-let first_line text =
-  match String.index_opt text '\n' with
-  | Some i -> String.sub text 0 i
-  | None -> text
 
 let deliverable_claims_completion ~task_id deliverable =
   let normalized =
@@ -196,16 +241,26 @@ let status_summary_string
   | [] ->
       Buffer.add_string buf "  (no agents)\n"
   | _ ->
+      let active_assigned_task_ids_for_agent =
+        active_assigned_task_ids_lookup
+          ~actual_name
+          ~ctx_agent_name:ctx.agent_name
+          ~agents_with_state:shown_agents
+          ~active_tasks
+      in
       List.iter
         (fun ((agent : Masc_domain.agent), is_zombie) ->
           Coord_query.safe_yield ();
           let icon = agent_status_icon ~is_zombie agent.status in
+          let active_assigned_task_ids =
+            active_assigned_task_ids_for_agent agent.name
+          in
           let you_marker =
             if String.equal agent.name actual_name then " (you)" else ""
           in
           Buffer.add_string buf
             (Printf.sprintf "  %s %s%s -> %s\n" icon agent.name you_marker
-               (agent_focus_label ~is_zombie agent)))
+               (agent_focus_label ~is_zombie ~active_assigned_task_ids agent)))
         shown_agents;
       if agent_count > max_agents_display then
         Buffer.add_string buf

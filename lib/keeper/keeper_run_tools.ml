@@ -138,6 +138,7 @@ let prepare_agent_setup
       ~(cascade_name : Keeper_cascade_profile.runtime_name)
       ~(is_retry : bool)
       ~(turn_affordances : string list)
+      ~(required_tool_names : string list)
       ~(config_root : string)
       ~(cascade_config_path : string option)
       ~(gemini_mcp_disabled : bool)
@@ -549,7 +550,8 @@ let prepare_agent_setup
     in
     validate_allow_list ~turn (fallback_floor_tool_names @ repo_probe)
   in
-  let tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn =
+  let tool_gate_requested_for_turn
+      ~current_tool_choice ~is_last_turn ~allowed_tool_names =
     let caller_requires_tools =
       match current_tool_choice with
       | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) -> true
@@ -557,7 +559,9 @@ let prepare_agent_setup
     in
     max_turns > 1
     && not is_last_turn
-    && (caller_requires_tools || turn_affordances_require_tool_gate turn_affordances)
+    && (caller_requires_tools
+        || turn_affordances_require_tool_gate_with_allowed
+             ~record_suppression_metric:true ~allowed_tool_names turn_affordances)
   in
   let compute_tool_surface ~turn ~messages ~current_tool_choice ~decay_discovered
       : computed_tool_surface =
@@ -712,7 +716,7 @@ let prepare_agent_setup
 
     in
     let required_tool_names =
-      current_task_required_tools ()
+      current_task_required_tools () @ required_tool_names
       |> Keeper_types.dedupe_keep_order
     in
     let visible_required_tool_names =
@@ -761,10 +765,6 @@ let prepare_agent_setup
     let per_call_turn = turn - start_turn_count in
     let is_last_turn = per_call_turn >= max_turns in
     let is_warning_zone = per_call_turn >= max_turns - 1 in
-    let tool_gate_requested =
-      required_tool_names <> []
-      || tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn
-    in
     let all_allowed, tool_surface_fallback_used =
       if all_allowed = [] then
         let fallback_allowed = fallback_tool_surface ~turn in
@@ -783,6 +783,11 @@ let prepare_agent_setup
           all_allowed
       else
         all_allowed
+    in
+    let tool_gate_requested =
+      required_tool_names <> []
+      || tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn
+           ~allowed_tool_names:all_allowed
     in
     let all_allowed =
       if List.length all_allowed > max_tools then (
@@ -1214,6 +1219,18 @@ let prepare_agent_setup
                in
                let ctx =
                  if computed_surface.is_last_turn
+                    && computed_surface.required_tool_names <> []
+                 then
+                   append_ctx
+                     ctx
+                     (Printf.sprintf
+                        "[REQUIRED TOOLS - FINAL TURN] This Agent.run call is on \
+                         its final turn, but this message has explicit \
+                                 required_tools: %s. You MUST either use every \
+                                 required tool now or return a concise blocker naming \
+                         the missing policy/tool/runtime condition."
+                        (String.concat ", " computed_surface.required_tool_names))
+                 else if computed_surface.is_last_turn
                  then
                    append_ctx
                      ctx
@@ -1272,7 +1289,10 @@ let prepare_agent_setup
                let all_allowed = computed_surface.all_allowed in
                let tool_filter = Agent_sdk.Guardrails.AllowList all_allowed in
                let tool_choice =
-                 if computed_surface.is_last_turn
+                 if computed_surface.required_tool_names <> []
+                    && all_allowed <> []
+                 then Some Agent_sdk.Types.Any
+                 else if computed_surface.is_last_turn
                  then current_params.tool_choice
                  else if computed_surface.tool_gate_requested && all_allowed <> []
                  then
@@ -1429,7 +1449,7 @@ let prepare_agent_setup
         ~episode_limit:30
         ~procedure_limit:10 ()
     in
-    Agent_sdk.Hooks.compose ~outer:mem_hooks ~inner:hooks
+    Memory_hooks.compose_with_inner ~memory_hooks:mem_hooks ~inner:hooks
   in
   (* Tier K4b/K4c: install the tool-emission PostToolUse hook so
      tagged tool results flow into this keeper's own accumulator

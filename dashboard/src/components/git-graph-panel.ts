@@ -7,11 +7,153 @@ import { TimeAgo } from './common/time-ago'
 import { GitGraphView } from './git-graph-view'
 import { StatTile } from './common/stat-tile'
 import { fetchRepositoriesList, type Repository } from '../api/repositories'
+import type { GitGraphResponse } from '../api/git-graph'
 import {
   cancelGitGraphRefresh,
   gitGraphResource,
   refreshGitGraph,
 } from './git-graph-store'
+
+type GitGraphContextTone = 'clean' | 'dirty' | 'conflict'
+
+export interface GitGraphContextLane {
+  readonly id: string
+  readonly label: string
+  readonly branch: string
+  readonly path: string
+  readonly color: string
+}
+
+export interface GitGraphContextModel {
+  readonly currentBranch: string
+  readonly head: string
+  readonly tone: GitGraphContextTone
+  readonly statusLabel: string
+  readonly branchCount: number
+  readonly commitCount: number
+  readonly worktreeCount: number
+  readonly dirtyCount: number
+  readonly conflictCount: number
+  readonly lanes: ReadonlyArray<GitGraphContextLane>
+}
+
+function shortRef(value: string | null): string {
+  if (!value) return 'unknown'
+  return value.length > 10 ? value.slice(0, 10) : value
+}
+
+export function compactGitGraphPath(path: string): string {
+  const normalized = path.replace(/\\/g, '/')
+  const parts = normalized.split('/').filter(Boolean)
+  if (parts.length <= 2) return normalized || 'workspace'
+  return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`
+}
+
+export function buildGitGraphContextModel(
+  graph: GitGraphResponse,
+  repo: GitGraphResponse['repos'][number],
+): GitGraphContextModel {
+  const repoNodes = graph.nodes.filter(node => node.repo_id === repo.id)
+  const repoAgentIds = new Set(repoNodes.map(node => node.agent_id).filter((id): id is string => Boolean(id)))
+  const conflictCount = repo.conflict_count
+  const dirtyCount = repo.dirty ? 1 : 0
+  const dirtyStatusCount = dirtyCount > 0 ? dirtyCount : 1
+  const tone: GitGraphContextTone =
+    conflictCount > 0 ? 'conflict'
+      : dirtyCount > 0 ? 'dirty'
+        : 'clean'
+
+  const statusLabel =
+    tone === 'conflict' ? `${conflictCount} conflict${conflictCount === 1 ? '' : 's'}`
+      : tone === 'dirty' ? `${dirtyStatusCount} dirty worktree${dirtyStatusCount === 1 ? '' : 's'}`
+        : 'clean'
+
+  return {
+    currentBranch: repo.current_branch ?? 'detached',
+    head: shortRef(repo.head),
+    tone,
+    statusLabel,
+    branchCount: repo.branch_count,
+    commitCount: repo.commit_count,
+    worktreeCount: repo.worktree_count,
+    dirtyCount,
+    conflictCount,
+    lanes: graph.agents
+      .filter(agent => repoAgentIds.size === 0 || repoAgentIds.has(agent.id))
+      .slice(0, 4)
+      .map(agent => ({
+        id: agent.id,
+        label: agent.label,
+        branch: agent.branch ?? 'detached',
+        path: compactGitGraphPath(agent.worktree_path),
+        color: agent.color,
+      })),
+  }
+}
+
+function toneClasses(tone: GitGraphContextTone): string {
+  if (tone === 'conflict') return 'border-[var(--bad-30)] bg-[var(--bad-12)] text-[var(--bad-light)]'
+  if (tone === 'dirty') return 'border-[var(--warn-20)] bg-[var(--warn-soft)] text-[var(--warn-bright)]'
+  return 'border-[var(--ok-20)] bg-[var(--ok-soft)] text-[var(--ok-bright)]'
+}
+
+function GitGraphContextStrip({ model }: { readonly model: GitGraphContextModel }) {
+  return html`
+    <div class="grid gap-3 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]" data-testid="git-graph-context-strip">
+      <div class="min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div class="min-w-0">
+            <div class="text-2xs font-semibold uppercase tracking-[var(--track-section)] text-[var(--color-fg-muted)]">
+              Current checkout
+            </div>
+            <div class="mt-1 min-w-0 font-mono text-sm font-semibold text-[var(--color-fg-primary)] [overflow-wrap:anywhere]">
+              ${model.currentBranch}
+            </div>
+          </div>
+          <span class=${`inline-flex shrink-0 items-center rounded-full border px-2 py-1 text-2xs font-semibold uppercase tracking-[var(--track-section)] ${toneClasses(model.tone)}`}>
+            ${model.statusLabel}
+          </span>
+        </div>
+        <div class="mt-3 grid gap-2 text-2xs text-[var(--color-fg-muted)] sm:grid-cols-3">
+          <div>
+            <span class="block uppercase tracking-[var(--track-section)]">HEAD</span>
+            <span class="font-mono text-[var(--color-fg-secondary)]">${model.head}</span>
+          </div>
+          <div>
+            <span class="block uppercase tracking-[var(--track-section)]">Branches</span>
+            <span class="font-mono text-[var(--color-fg-secondary)]">${model.branchCount}</span>
+          </div>
+          <div>
+            <span class="block uppercase tracking-[var(--track-section)]">Commits</span>
+            <span class="font-mono text-[var(--color-fg-secondary)]">${model.commitCount}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+        <div class="flex items-center justify-between gap-3">
+          <div class="text-2xs font-semibold uppercase tracking-[var(--track-section)] text-[var(--color-fg-muted)]">
+            Worktree lanes
+          </div>
+          <span class="font-mono text-2xs text-[var(--color-fg-secondary)]">${model.worktreeCount}</span>
+        </div>
+        <div class="mt-2 grid gap-2">
+          ${model.lanes.length > 0 ? model.lanes.map(lane => html`
+            <div key=${lane.id} class="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1 rounded-[var(--r-0)] border border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)] px-2 py-1.5 text-xs sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,12rem)]">
+              <span class="h-2 w-2 rounded-full" style=${{ background: lane.color }} aria-hidden="true" />
+              <span class="min-w-0 font-mono text-[var(--color-fg-primary)] [overflow-wrap:anywhere]">${lane.branch}</span>
+              <span class="col-start-2 min-w-0 text-left text-2xs text-[var(--color-fg-muted)] [overflow-wrap:anywhere] sm:col-start-auto sm:text-right">${lane.path}</span>
+            </div>
+          `) : html`
+            <div class="rounded-[var(--r-0)] border border-dashed border-[var(--color-border-subtle)] px-2 py-2 text-xs text-[var(--color-fg-muted)]">
+              No active worktree lanes in this snapshot.
+            </div>
+          `}
+        </div>
+      </div>
+    </div>
+  `
+}
 
 export function GitGraphPanel() {
   const state = gitGraphResource.state.value
@@ -70,7 +212,8 @@ export function GitGraphPanel() {
     `
   }
 
-  const repo = graph.repos[0]
+  const repo = graph.repos[0]!
+  const context = buildGitGraphContextModel(graph, repo)
 
   return html`
     <section class="grid gap-4" data-testid="git-graph-panel">
@@ -158,6 +301,8 @@ export function GitGraphPanel() {
           delta=${graph.stats.conflict_count > 0 ? { direction: 'down' as const, text: '해결 필요' } : undefined}
         />
       </div>
+
+      <${GitGraphContextStrip} model=${context} />
 
       ${graph.warnings.length > 0 ? html`
         <div class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-soft)] px-3 py-2 text-sm text-[var(--warn-bright)]">

@@ -5,6 +5,7 @@ import { activeKeeperName } from '../../keeper-state'
 import { bridgeBdiSnapshotsToTrace } from './bdi-snapshot-trace-bridge'
 import { asBoolean, asNumber, asString, isRecord, toIsoTimestamp } from '../common/normalize'
 import { clearPins, headPinnedKeeper, pinKeeper } from './multi-keeper-pin-store'
+import { OverlayKeeperTrace } from './overlay-keeper-trace'
 
 export interface KeeperBdiTokenSpend {
   readonly ts_unix: number | null
@@ -167,7 +168,13 @@ function BdiRow({ label, value }: { readonly label: string, readonly value: stri
   `
 }
 
-export function InspectorKeeperBDI({ pollMs = 5000 }: { readonly pollMs?: number }) {
+export function InspectorKeeperBDI({
+  pollMs = 5000,
+  traceActive = false,
+}: {
+  readonly pollMs?: number
+  readonly traceActive?: boolean
+}) {
   const pin = useInspectorKeeperPin()
   const activeKeeper = useActiveKeeperName()
   const reducedMotion = useReducedMotion()
@@ -281,6 +288,8 @@ export function InspectorKeeperBDI({ pollMs = 5000 }: { readonly pollMs?: number
           ? html`<span style=${{ color: lastTool.success === false ? 'var(--color-status-warn)' : 'var(--color-status-ok)' }}>${lastTool.semantic_outcome}</span>`
           : null}
       </div>
+
+      <${OverlayKeeperTrace} active=${traceActive} keeperFilter=${keeperName} />
     </section>
   `
 }

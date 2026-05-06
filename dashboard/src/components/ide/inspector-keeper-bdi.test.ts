@@ -9,6 +9,7 @@ import {
   pinInspectorKeeper,
 } from './inspector-keeper-bdi'
 import { clearPins } from './multi-keeper-pin-store'
+import { clearTraces, pushTrace } from './keeper-trace-store'
 
 const snapshot = {
   keeper: 'scholar',
@@ -53,6 +54,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
   activeKeeperName.value = ''
   clearPins()
+  clearTraces()
   void inspectorKeeperPin.value
 })
 
@@ -106,6 +108,69 @@ describe('InspectorKeeperBDI', () => {
     })
 
     expect(container.textContent).toContain('scholar')
+
+    render(null, container)
+  })
+
+  it('mounts the keeper-trace overlay scoped to this keeper when traceActive is true', async () => {
+    pushTrace({
+      id: 'inspector-trace-self',
+      tsMs: Date.parse('2026-05-06T01:00:00Z'),
+      keeperName: 'scholar',
+      source: 'bdi-snapshot',
+      intention: 'inspect selected line',
+    })
+    pushTrace({
+      id: 'inspector-trace-other',
+      tsMs: Date.parse('2026-05-06T01:00:00Z'),
+      keeperName: 'tech_glutton',
+      source: 'bdi-snapshot',
+      intention: 'should not appear',
+    })
+
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(snapshot)))
+    vi.stubGlobal('fetch', fetchMock)
+    pinInspectorKeeper('scholar', 42)
+
+    const container = createContainer()
+    render(html`<${InspectorKeeperBDI} pollMs=${60_000} traceActive=${true} />`, container)
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/v1/keepers/scholar/bdi-snapshot', expect.any(Object))
+    })
+
+    const overlay = container.querySelector('[data-overlay="keeper-trace"]')
+    expect(overlay).not.toBeNull()
+
+    const scholarBucket = overlay?.querySelector('[data-keeper="scholar"]')
+    expect(scholarBucket).not.toBeNull()
+
+    const otherBucket = overlay?.querySelector('[data-keeper="tech_glutton"]')
+    expect(otherBucket).toBeNull()
+
+    render(null, container)
+  })
+
+  it('does not render the keeper-trace overlay when traceActive is false (default)', async () => {
+    pushTrace({
+      id: 'inspector-trace-default-off',
+      tsMs: Date.parse('2026-05-06T01:00:00Z'),
+      keeperName: 'scholar',
+      source: 'bdi-snapshot',
+      intention: 'inspect selected line',
+    })
+
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(snapshot)))
+    vi.stubGlobal('fetch', fetchMock)
+    pinInspectorKeeper('scholar', 42)
+
+    const container = createContainer()
+    render(html`<${InspectorKeeperBDI} pollMs=${60_000} />`, container)
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/v1/keepers/scholar/bdi-snapshot', expect.any(Object))
+    })
+
+    const overlay = container.querySelector('[data-overlay="keeper-trace"]')
+    expect(overlay).toBeNull()
 
     render(null, container)
   })

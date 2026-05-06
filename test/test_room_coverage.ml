@@ -333,6 +333,48 @@ let test_claim_next_reconciles_stale_agent_current_task () =
     | _ -> Alcotest.fail "expected no_unclaimed after stale reconcile"
   )
 
+let test_status_reconciles_stale_agent_current_task () =
+  with_env "MASC_VERIFICATION_FSM_ENABLED" "true" (fun () ->
+    with_test_env (fun config ->
+      let agent_name =
+        match Coord.get_agents_raw config with
+        | [ agent ] -> agent.Masc_domain.name
+        | _ -> Alcotest.fail "expected exactly one joined agent"
+      in
+      let _ =
+        Coord.add_task config ~title:"Awaiting verifier" ~priority:1
+          ~description:""
+      in
+      let _ = Coord.claim_task config ~agent_name ~task_id:"task-001" in
+      (match
+         Coord.transition_task_r config ~agent_name ~task_id:"task-001"
+           ~action:Masc_domain.Submit_for_verification ()
+       with
+      | Ok _ -> ()
+      | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
+      let agent_file =
+        Filename.concat (Coord.agents_dir config)
+          (Coord.safe_filename agent_name ^ ".json")
+      in
+      let stale_agent =
+        match Coord.read_json config agent_file |> Masc_domain.agent_of_yojson with
+        | Ok agent ->
+            { agent with status = Masc_domain.Busy; current_task = Some "task-001" }
+        | Error msg -> Alcotest.fail ("agent parse failed: " ^ msg)
+      in
+      Coord.write_json config agent_file (Masc_domain.agent_to_yojson stale_agent);
+      ignore (Coord.status config);
+      let agent_after =
+        match Coord.read_json config agent_file |> Masc_domain.agent_of_yojson with
+        | Ok agent -> agent
+        | Error msg -> Alcotest.fail ("agent parse failed after status: " ^ msg)
+      in
+      Alcotest.(check (option string))
+        "stale current_task cleared on status" None agent_after.current_task;
+      Alcotest.(check string)
+        "status reset to active on status" "active"
+        (Masc_domain.agent_status_to_string agent_after.status)))
+
 (* ============================================================ *)
 (* #10421: claim_next existing-task preservation                 *)
 (* ============================================================ *)
@@ -1446,6 +1488,12 @@ let () =
       Alcotest.test_case "empty list" `Quick test_batch_add_empty_list;
       Alcotest.test_case "single task" `Quick test_batch_add_single_task;
       Alcotest.test_case "preserves priorities" `Quick test_batch_add_preserves_priorities;
+    ];
+
+    (* === Status === *)
+    "status", [
+      Alcotest.test_case "reconciles stale current_task on read" `Quick
+        test_status_reconciles_stale_agent_current_task;
     ];
 
     (* === Claim Next === *)

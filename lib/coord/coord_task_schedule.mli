@@ -67,6 +67,9 @@ val agent_current_task_matches_backlog :
 val reconcile_agent_current_task_with_backlog :
   config -> agent_name:string -> Masc_domain.backlog -> unit
 
+val reconcile_all_agent_current_tasks_with_backlog :
+  config -> Masc_domain.backlog -> unit
+
 val claim_next_r :
   config ->
   agent_name:string ->

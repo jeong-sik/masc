@@ -284,10 +284,9 @@ let agent_current_task_matches_backlog backlog ~agent_name task_id =
   with
   | Some task -> (
       match task.task_status with
-      | Claimed { assignee; _ } | InProgress { assignee; _ }
-      | AwaitingVerification { assignee; _ } ->
+      | Claimed { assignee; _ } | InProgress { assignee; _ } ->
           String.equal assignee agent_name
-      | Todo | Done _ | Cancelled _ -> false)
+      | Todo | AwaitingVerification _ | Done _ | Cancelled _ -> false)
   | None -> false
 
 let reconcile_agent_current_task_with_backlog config ~agent_name backlog =
@@ -326,6 +325,25 @@ let reconcile_agent_current_task_with_backlog config ~agent_name backlog =
           | Some _ | None -> ())
       | Error msg ->
           Log.Misc.error "agent state reconcile failed: %s" msg)
+
+let reconcile_all_agent_current_tasks_with_backlog config backlog =
+  let agents_path = agents_dir config in
+  try
+    if Sys.file_exists agents_path then
+      Sys.readdir agents_path
+      |> Array.to_list
+      |> List.filter (fun name -> Filename.check_suffix name ".json")
+      |> List.iter (fun name ->
+           let path = Filename.concat agents_path name in
+           match read_agent_with_repair config path with
+           | Ok (agent : Masc_domain.agent) ->
+               reconcile_agent_current_task_with_backlog config
+                 ~agent_name:agent.name backlog
+           | Error msg ->
+               Log.Misc.error "agent state reconcile failed for %s: %s" name msg)
+  with
+  | Sys_error msg ->
+      Log.Misc.error "agent state reconcile scan failed: %s" msg
 
 (** Claim next highest priority unclaimed task.
     Optional [exclude_task_ids] prevents re-claiming known bad tasks in the

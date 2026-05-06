@@ -129,11 +129,21 @@ const COST_FOCUS_COCKPIT_TABS: Record<CostFocus, string> = {
   latency: 'ct-lat',
 }
 
+function currentHashParams(): Record<string, string> {
+  const [, query = ''] = window.location.hash.split('?')
+  const params: Record<string, string> = {}
+  new URLSearchParams(query).forEach((value, key) => {
+    params[key] = value
+  })
+  return params
+}
+
 function costRouteParams(
   updates: Record<string, string>,
   options: { clearFocus?: boolean } = {},
 ): Record<string, string> {
   const params: Record<string, string> = {
+    ...currentHashParams(),
     ...route.value.params,
     section: 'runtime',
     view: 'cost',

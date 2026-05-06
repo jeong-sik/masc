@@ -25,7 +25,25 @@ set -euo pipefail
 
 case "$1" in
   list)
-    printf 'agent_sdk %s\n' "${FAKE_AGENT_SDK_VERSION:-0.0.0}"
+    if [[ "${FAKE_OPAM_LIST_FAIL:-0}" == "1" ]]; then
+      echo "fake opam list failure" >&2
+      exit 42
+    fi
+    if [[ -n "${FAKE_AGENT_SDK_LIST_OUTPUT+x}" ]]; then
+      printf '%b' "${FAKE_AGENT_SDK_LIST_OUTPUT}"
+    else
+      printf 'agent_sdk %s\n' "${FAKE_AGENT_SDK_VERSION:-0.0.0}"
+    fi
+    ;;
+  show)
+    shift
+    if [[ "${1:-}" == "agent_sdk" && "${2:-}" == "--field=version" ]]; then
+      [[ "${FAKE_OPAM_SHOW_FAIL:-0}" == "1" ]] && exit 43
+      printf '%s\n' "${FAKE_OPAM_SHOW_VERSION:-${FAKE_AGENT_SDK_VERSION:-0.0.0}}"
+      exit 0
+    fi
+    echo "unexpected fake opam show command: $*" >&2
+    exit 2
     ;;
   pin)
     shift
@@ -37,6 +55,7 @@ case "$1" in
     exit 2
     ;;
   install)
+    shift
     printf 'install %s\n' "$*" >> "${OPAM_FAKE_CALLS:?}"
     ;;
   *)
@@ -146,5 +165,33 @@ if [[ "$(cat "${FLOOR_FILE}")" != "999.999.999" ]]; then
 fi
 echo "ok case 6 - explicit rollback override permits AGENT_SDK_PIN_URL without lowering the floor"
 
+case7_err="${TMP}/case7.err"
+: > "${CALLS_FILE}"
+rm -f "${FLOOR_FILE}"
+if run_pin_script \
+  FAKE_OPAM_LIST_FAIL=1 \
+  FAKE_OPAM_SHOW_VERSION=999.999.999 \
+  bash "${PIN_SCRIPT}" >"${TMP}/case7.out" 2>"${case7_err}"; then
+  echo "FAIL case 7: opam list inspection failure should fail closed" >&2
+  exit 1
+fi
+assert_contains "${case7_err}" "failed to inspect installed agent_sdk via opam list"
+assert_contains "${case7_err}" "refusing to mutate agent_sdk pin because installed version could not be determined"
+assert_not_contains "${CALLS_FILE}" "pin add agent_sdk"
+echo "ok case 7 - opam inspection failure fails closed"
+
+: > "${CALLS_FILE}"
+rm -f "${FLOOR_FILE}"
+if run_pin_script \
+  FAKE_AGENT_SDK_LIST_OUTPUT=$'other_pkg 1.0.0\n' \
+  FAKE_OPAM_SHOW_VERSION=999.999.999 \
+  bash "${PIN_SCRIPT}" >"${TMP}/case8.out" 2>"${TMP}/case8.err"; then
+  echo "FAIL case 8: opam show fallback should still block a newer installed version" >&2
+  exit 1
+fi
+assert_contains "${TMP}/case8.err" "refusing to downgrade installed agent_sdk 999.999.999"
+assert_not_contains "${CALLS_FILE}" "pin add agent_sdk"
+echo "ok case 8 - opam show fallback preserves installed-version protection"
+
 echo ""
-echo "[opam-pin-downgrade-guard test] PASS - 6/6 cases"
+echo "[opam-pin-downgrade-guard test] PASS - 8/8 cases"

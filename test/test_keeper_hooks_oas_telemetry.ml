@@ -320,6 +320,16 @@ let test_tool_execution_summary_derives_provider_and_outcome () =
   check string "outcome" "error" summary.outcome;
   check (float 0.001) "duration" 12.5 summary.duration_ms
 
+let test_trajectory_duration_ms_preserves_positive_sub_ms () =
+  check int "positive sub-ms" 1 (Hooks.trajectory_duration_ms 0.4);
+  check int "rounded positive" 13 (Hooks.trajectory_duration_ms 12.5)
+
+let test_trajectory_duration_ms_rejects_zero_and_non_finite () =
+  check int "zero" 0 (Hooks.trajectory_duration_ms 0.0);
+  check int "negative" 0 (Hooks.trajectory_duration_ms (-0.1));
+  check int "nan" 0 (Hooks.trajectory_duration_ms nan);
+  check int "infinity" 0 (Hooks.trajectory_duration_ms infinity)
+
 let test_record_keeper_tool_duration_metric_tracks_labels () =
   let summary =
     Hooks.tool_execution_summary
@@ -782,6 +792,10 @@ let () =
     ; ( "tool_telemetry",
         [ test_case "tool execution summary derives provider and outcome" `Quick
             test_tool_execution_summary_derives_provider_and_outcome
+        ; test_case "trajectory duration keeps positive sub-ms values" `Quick
+            test_trajectory_duration_ms_preserves_positive_sub_ms
+        ; test_case "trajectory duration rejects non-positive values" `Quick
+            test_trajectory_duration_ms_rejects_zero_and_non_finite
         ; test_case "keeper tool duration metric tracks labels" `Quick
             test_record_keeper_tool_duration_metric_tracks_labels
         ] )

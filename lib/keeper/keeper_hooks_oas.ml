@@ -103,6 +103,11 @@ let pre_tool_gate_error (event : Keeper_guards.gate_decision_event) =
   Printf.sprintf "%s:%s: %s"
     decision event.reason_code event.reason_text
 
+let trajectory_duration_ms duration_ms =
+  if (not (Float.is_finite duration_ms)) || Float.compare duration_ms 0.0 <= 0
+  then 0
+  else max 1 (int_of_float (Float.round duration_ms))
+
 let record_pre_tool_gate_attempt
     ~(meta_ref : Keeper_types.keeper_meta ref)
     ~(tool_call_count_ref : int ref)
@@ -175,7 +180,7 @@ let record_pre_tool_gate_attempt
           args_json = Yojson.Safe.to_string safe_input;
           gate_decision = Trajectory.Reject error;
           result = Some output_text;
-          duration_ms = int_of_float (Float.round duration_ms);
+          duration_ms = trajectory_duration_ms duration_ms;
           error = Some error;
           cost_usd = 0.0;
         }
@@ -1800,7 +1805,7 @@ let make_hooks
                args_json = Yojson.Safe.to_string safe_input;
                gate_decision = Trajectory.Pass;
                result = Some safe_output;
-               duration_ms = int_of_float (Float.round duration_ms);
+               duration_ms = trajectory_duration_ms duration_ms;
                error = (if outcome = "ok" then None else Some safe_output);
                cost_usd = Trajectory.tool_cost_estimate tool_name;
              }

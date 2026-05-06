@@ -1185,6 +1185,7 @@
 (include stanzas/test_oas_bridge_timeout_ssot_10094.inc)
 (include stanzas/test_oas_timeout_budget_strike.inc)
 (include stanzas/test_oas_worker.inc)
+(include stanzas/test_oas_worker_exec_close_cancel_source.inc)
 (include stanzas/test_oas_worker_exec_checkpoint.inc)
 (include stanzas/test_openapi_api_e2e.inc)
 (include stanzas/test_operator_control.inc)

@@ -106,6 +106,22 @@ let with_env name value f =
       | None -> Unix.putenv name "")
     f
 
+let with_cascade_attempt_liveness mode f =
+  let env = "MASC_CASCADE_ATTEMPT_LIVENESS" in
+  let previous = Sys.getenv_opt env in
+  Cascade_attempt_liveness_config.reset_cache_for_test ();
+  Unix.putenv env mode;
+  Fun.protect
+    ~finally:(fun () ->
+      (match previous with
+       | Some value -> Unix.putenv env value
+       | None -> Unix.putenv env "");
+      Cascade_attempt_liveness_config.reset_cache_for_test ())
+    f
+
+let flush_cascade_actor () =
+  ignore (Oas_worker_cascade.cascade_metrics_json () : Yojson.Safe.t)
+
 let with_temp_masc_base_path prefix f =
   let base = temp_dir prefix in
   let previous = Sys.getenv_opt "MASC_BASE_PATH" in
@@ -160,10 +176,15 @@ let with_temp_masc_config cascade_json f =
       cleanup_dir base)
     f
 
-let openai_text_response ?(id = "chatcmpl-1") text =
+let openai_text_response ?(id = "chatcmpl-1") ?(model = "mock") text =
   Printf.sprintf
-    {|{"id":"%s","object":"chat.completion","model":"mock","choices":[{"index":0,"message":{"role":"assistant","content":"%s"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}|}
-    id text
+    {|{"id":"%s","object":"chat.completion","model":"%s","choices":[{"index":0,"message":{"role":"assistant","content":"%s"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}|}
+    id model text
+
+let openai_null_content_response ?(id = "chatcmpl-null") () =
+  Printf.sprintf
+    {|{"id":"%s","object":"chat.completion","model":"mock","choices":[{"index":0,"message":{"role":"assistant","content":null},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":0,"total_tokens":10}}|}
+    id
 
 let escape_json_string s =
   let buf = Buffer.create (String.length s) in
@@ -236,6 +257,23 @@ let start_counting_mock ~sw ~net ~port response =
   ( Printf.sprintf "http://127.0.0.1:%d" port,
     (fun () -> Atomic.get calls),
     (fun () -> Atomic.set calls 0) )
+
+let start_capture_mock ~sw ~net ~port response =
+  let bodies = Atomic.make [] in
+  let handler _conn _req body =
+    let request_body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    Atomic.set bodies (request_body :: Atomic.get bodies);
+    Cohttp_eio.Server.respond_string ~status:`OK ~body:response ()
+  in
+  let socket =
+    Eio.Net.listen net ~sw ~backlog:8 ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+  in
+  let server = Cohttp_eio.Server.make ~callback:handler () in
+  Eio.Fiber.fork ~sw (fun () ->
+      Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+  ( Printf.sprintf "http://127.0.0.1:%d" port,
+    fun () -> List.rev (Atomic.get bodies) )
 
 let start_delayed_mock ~sw ~net ~clock ~port ~delay_s response =
   let handler _conn _req body =
@@ -1077,6 +1115,7 @@ let test_default_config_preserves_custom_local_request_path () =
       "custom local OpenAI-compatible provider should stay OpenAICompat"
 
 let test_run_named_per_provider_timeout_uses_clock_fallback_and_exempts_last_provider () =
+  with_cascade_attempt_liveness "off" @@ fun () ->
   Alcotest.(check bool) "test requires no global Masc_eio_env"
     true
     (Option.is_none (Masc_eio_env.get_opt ()));
@@ -1148,11 +1187,13 @@ let test_run_named_per_provider_timeout_uses_clock_fallback_and_exempts_last_pro
         Alcotest.(check string) "last provider succeeds without timeout"
           "last provider survived timeout"
           (response_text result.response);
+        flush_cascade_actor ();
         Eio.Switch.fail sw Exit
     | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
   with Exit -> ()
 
 let test_run_named_skips_cooldown_primary_and_falls_back () =
+  with_cascade_attempt_liveness "off" @@ fun () ->
   try
     Eio.Switch.run @@ fun sw ->
     let primary_port =
@@ -1270,6 +1311,107 @@ let test_run_named_skips_cooldown_primary_and_falls_back () =
                "fallback success is reflected in health tracker"
                true
                (info.success_rate > 0.0));
+        flush_cascade_actor ();
+        Eio.Switch.fail sw Exit
+    | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
+  with Exit -> ()
+
+let test_run_named_default_accept_allows_empty_content () =
+  with_cascade_attempt_liveness "off" @@ fun () ->
+  try
+    with_temp_masc_base_path "empty_content_probe_base" @@ fun _ ->
+    Eio.Switch.run @@ fun sw ->
+    let port = match find_free_port () with Some port -> port | None -> Alcotest.skip () in
+    let provider_url =
+      try
+        start_multi_mock ~sw ~net:(require_test_net ()) ~port
+          [ openai_null_content_response () ]
+      with
+      | Unix.Unix_error (Unix.EPERM, "bind", _)
+      | Unix.Unix_error (Unix.EACCES, "bind", _) ->
+          Alcotest.skip ()
+    in
+    with_temp_masc_config
+      (Printf.sprintf
+         {|{"empty_content_probe_models":["custom:empty-content@%s"]}|}
+         provider_url)
+    @@ fun () ->
+    match
+      Oas_worker_named.run_named
+        ~cascade_name:"empty_content_probe"
+        ~goal:"return empty content"
+        ~system_prompt:"system"
+        ~sw
+        ~net:(require_test_net ())
+        ()
+    with
+    | Ok result ->
+        Alcotest.(check string) "empty content accepted" ""
+          (response_text result.response);
+        flush_cascade_actor ();
+        Eio.Switch.fail sw Exit
+    | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
+  with Exit -> ()
+
+let test_run_named_accept_rejected_does_not_replay_rejected_checkpoint () =
+  with_cascade_attempt_liveness "off" @@ fun () ->
+  try
+    with_temp_masc_base_path "accept_replay_probe_base" @@ fun _ ->
+    Eio.Switch.run @@ fun sw ->
+    let first_port =
+      match find_free_port () with Some port -> port | None -> Alcotest.skip ()
+    in
+    let second_port =
+      match find_free_port () with Some port -> port | None -> Alcotest.skip ()
+    in
+    let rejected_text = "rejected checkpoint seed" in
+    let first_url, first_bodies =
+      try
+        start_capture_mock ~sw ~net:(require_test_net ()) ~port:first_port
+          (openai_text_response rejected_text)
+      with
+      | Unix.Unix_error (Unix.EPERM, "bind", _)
+      | Unix.Unix_error (Unix.EACCES, "bind", _) ->
+          Alcotest.skip ()
+    in
+    let second_url, second_bodies =
+      try
+        start_capture_mock ~sw ~net:(require_test_net ()) ~port:second_port
+          (openai_text_response ~model:"fallback" "fallback accepted")
+      with
+      | Unix.Unix_error (Unix.EPERM, "bind", _)
+      | Unix.Unix_error (Unix.EACCES, "bind", _) ->
+          Alcotest.skip ()
+    in
+    with_temp_masc_config
+      (Printf.sprintf
+         {|{"accept_replay_probe_models":["custom:rejecting@%s","custom:fallback@%s"]}|}
+         first_url second_url)
+    @@ fun () ->
+    match
+      Oas_worker_named.run_named
+        ~cascade_name:"accept_replay_probe"
+        ~goal:"fallback without rejected checkpoint replay"
+        ~system_prompt:"system"
+        ~sw
+        ~net:(require_test_net ())
+        ~accept:(fun response -> response.Agent_sdk.Types.model = "fallback")
+        ()
+    with
+    | Ok result ->
+        Alcotest.(check string) "fallback response accepted"
+          "fallback" result.response.Agent_sdk.Types.model;
+        Alcotest.(check bool) "first provider called" true
+          (List.length (first_bodies ()) > 0);
+        let second_bodies = second_bodies () in
+        Alcotest.(check bool) "fallback provider called" true
+          (List.length second_bodies > 0);
+        Alcotest.(check bool) "rejected response not replayed to fallback"
+          false
+          (List.exists
+             (contains_substring ~needle:rejected_text)
+             second_bodies);
+        flush_cascade_actor ();
         Eio.Switch.fail sw Exit
     | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
   with Exit -> ()
@@ -4612,6 +4754,7 @@ let test_enrich_idle_detail_picks_last_tool () =
     broken, [try_provider] would attempt port 1, get a connection-refused
     error, and the cascade would fail — surfacing the regression immediately. *)
 let test_run_named_circuit_breaker_skips_open_provider () =
+  with_cascade_attempt_liveness "off" @@ fun () ->
   let primary_key = "cb_open_primary" in
   let fallback_key = "cb_healthy_fallback" in
   (* 1. Seed the global health tracker: 3 consecutive failures → OPEN. *)
@@ -4678,6 +4821,7 @@ let test_run_named_circuit_breaker_skips_open_provider () =
          in
          Alcotest.(check bool) "fallback success_rate > 0 after run_named"
            true (rate > 0.0);
+         flush_cascade_actor ();
          Eio.Switch.fail sw Exit
      | Error err ->
          Alcotest.failf
@@ -4799,6 +4943,10 @@ let () =
         test_run_named_per_provider_timeout_uses_clock_fallback_and_exempts_last_provider;
       Alcotest.test_case "open circuit primary falls back without request" `Quick
         test_run_named_skips_cooldown_primary_and_falls_back;
+      Alcotest.test_case "run_named default accepts empty content" `Quick
+        test_run_named_default_accept_allows_empty_content;
+      Alcotest.test_case "accept-rejected fallback skips rejected checkpoint" `Quick
+        test_run_named_accept_rejected_does_not_replay_rejected_checkpoint;
     ];
     "resume_config", [
       Alcotest.test_case "checkpoint model wins" `Quick

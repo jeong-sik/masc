@@ -249,7 +249,7 @@ let with_eio_backend f =
   let fs = Eio.Stdenv.fs env in
   let dir =
     Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "backend-mutex-metrics-%d-%0.f" (Unix.getpid ())
+      (Printf.sprintf "backend-mutex-metrics-%d-%.0f" (Unix.getpid ())
          (Unix.gettimeofday () *. 1000000.))
   in
   Unix.mkdir dir 0o755;

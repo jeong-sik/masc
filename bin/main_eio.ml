@@ -394,8 +394,8 @@ let dispatch_route ~routes ~request ~path reqd =
       let format = Option.value ~default:"nested" (query_param request "format") in
       let voter = board_voter_query request in
       let (status, body) =
-        board_post_detail_json ~include_moderation:false ~voter
-          ~response_format:format ~post_id
+        board_post_detail_json ~include_moderation:false ~blind_votes:false
+          ~voter ~response_format:format ~post_id
       in
       Http.Response.json ~status body reqd
   | _ -> Http.Router.dispatch routes request reqd

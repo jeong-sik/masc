@@ -762,7 +762,7 @@ let test_audit_runs_json_projects_o1_shape () =
     (fun base_path ->
        let audit_dir =
          Filename.concat
-           (Masc_mcp.Coord_utils.masc_dir_from_base_path ~base_path)
+           (Coord_utils.masc_dir_from_base_path ~base_path)
            "cascade_audit"
        in
        let store = Dated_jsonl.create ~base_dir:audit_dir () in

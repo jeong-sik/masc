@@ -32,6 +32,7 @@ groups:
           or absent(masc_dashboard_snapshot_latency_seconds_bucket)
           or absent(masc_goal_attainment_pct)
           or absent(masc_goal_attainment_measured)
+          or absent(masc_memory_usage_bytes)
           or absent(masc_config_unknown_keys_ignored_total)
           or absent(masc_config_credential_archived_starvation_total)
           or absent(masc_governance_judge_unparseable_total)
@@ -262,6 +263,24 @@ groups:
             attainment percentage, or with an out-of-range attainment
             percentage. Treat 0% as unknown until
             masc_goal_attainment_measured returns to 1 for this goal.
+
+  - name: masc_goal_loop_observe_runtime
+    interval: 30s
+    rules:
+      - alert: GoalLoopMemoryUsageInvalidWarning
+        expr: |
+          masc_memory_usage_bytes <= 0
+        for: 10m
+        labels:
+          severity: warning
+          component: goal_loop
+          subsystem: observe
+        annotations:
+          summary: "Runtime memory usage metric is zero or invalid"
+          description: |
+            The Phase 0 memory_usage signal is present but not carrying
+            a positive sampled value. Check the GC sampler path before
+            treating memory pressure as healthy.
 
   - name: masc_goal_loop_observe_config
     interval: 30s

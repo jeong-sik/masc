@@ -16,6 +16,7 @@
       "masc_dashboard_snapshot_latency_seconds_bucket",
       "masc_goal_attainment_pct{goal_id}",
       "masc_goal_attainment_measured{goal_id}",
+      "masc_memory_usage_bytes",
       "masc_config_unknown_keys_ignored_total{file_path}",
       "masc_config_credential_archived_starvation_total{keeper_name}",
       "masc_governance_judge_unparseable_total",
@@ -355,6 +356,35 @@
         }
       ],
       "title": "Goal Attainment",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "id": 8,
+      "targets": [
+        {
+          "expr": "masc_memory_usage_bytes",
+          "legendFormat": "live OCaml heap",
+          "refId": "A"
+        }
+      ],
+      "title": "Runtime Memory Usage",
       "type": "timeseries"
     }
   ],

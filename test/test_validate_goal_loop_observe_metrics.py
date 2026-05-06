@@ -66,8 +66,8 @@ class GoalLoopObserveMetricsValidatorTest(unittest.TestCase):
         report = load_current_report()
 
         self.assertEqual("PASS", report.status)
-        self.assertEqual(17, report.checked_signals)
-        self.assertEqual(17, report.passing_signals)
+        self.assertEqual(18, report.checked_signals)
+        self.assertEqual(18, report.passing_signals)
         self.assertEqual(0, report.failing_signals)
 
     def test_contract_pins_starvation_rate_signal(self) -> None:
@@ -117,6 +117,24 @@ class GoalLoopObserveMetricsValidatorTest(unittest.TestCase):
                 "masc_goal_attainment_measured",
             ],
             goal_attainment["dashboard_query_fragments"],
+        )
+
+    def test_contract_pins_memory_usage_signal(self) -> None:
+        contract = validate_goal_loop_observe_metrics.load_json_object(
+            str(CONTRACT_PATH)
+        )
+        signals = {
+            signal["signal_id"]: signal for signal in contract["required_signals"]
+        }
+
+        memory_usage = signals["memory_usage"]
+        self.assertEqual(
+            ["masc_memory_usage_bytes"],
+            memory_usage["metric_names"],
+        )
+        self.assertEqual(
+            ["GoalLoopMemoryUsageInvalidWarning"],
+            memory_usage["alert_names"],
         )
 
     def test_cli_require_complete_passes(self) -> None:

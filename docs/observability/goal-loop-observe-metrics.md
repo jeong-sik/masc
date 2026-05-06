@@ -34,6 +34,7 @@ now contract checked.
 | dashboard all-zero metrics | `masc_dashboard_metric_all_zeros` | `GoalLoopDashboardMetricAllZerosWarning` |
 | dashboard snapshot latency | `masc_dashboard_snapshot_latency_seconds_bucket` | `GoalLoopDashboardSnapshotLatencyP99Warning` |
 | goal attainment | `masc_goal_attainment_pct`, `masc_goal_attainment_measured` | `GoalLoopGoalAttainmentUnmeasuredOrInvalidWarning` |
+| memory usage | `masc_memory_usage_bytes` | `GoalLoopMemoryUsageInvalidWarning` |
 | config unknown keys ignored | `masc_config_unknown_keys_ignored_total` | `GoalLoopConfigUnknownKeysIgnoredWarning` |
 | credential archived by starvation | `masc_config_credential_archived_starvation_total` | `GoalLoopCredentialArchivedStarvationCritical` |
 | governance judge unparseable | `masc_governance_judge_unparseable_total` | `GoalLoopGovernanceJudgeUnparseableWarning` |
@@ -58,8 +59,8 @@ Expected result:
 
 ```text
 GOAL LOOP Observe Metrics Contract: PASS
-checked_signals: 17
-passing_signals: 17
+checked_signals: 18
+passing_signals: 18
 failing_signals: 0
 ```
 

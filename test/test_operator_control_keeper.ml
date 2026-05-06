@@ -343,6 +343,92 @@ let test_keeper_sandbox_status_exposes_local_summary () =
                   "repos/sandbox-repo")
            status_repos))
 
+let test_keeper_sandbox_status_clarifies_visible_container_gap () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "sandbox-docker-visible-gap" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Inspect visible Docker container gap");
+                ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      update_keeper_sandbox_mode config keeper_name
+        ~sandbox_profile:Keeper_types.Docker
+        ~network_mode:Keeper_types.Network_inherit;
+      Keeper_status_detail.invalidate_status_cache_for keeper_name;
+      let state_dir = Filename.concat base_dir "fake-docker" in
+      let state_file = Filename.concat state_dir "containers.tsv" in
+      let log_path = Filename.concat state_dir "docker.log" in
+      ensure_dir state_dir;
+      with_fake_docker fake_docker_managed_sandbox_script @@ fun () ->
+      with_env "KEEPER_DOCKER_STATE_FILE" state_file @@ fun () ->
+      with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+      with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+      let ok, body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_sandbox_status"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("include_preflight", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "sandbox status ok" true ok;
+      let open Yojson.Safe.Util in
+      let sandbox_json =
+        parse_json_exn body |> Yojson.Safe.Util.member "sandbox"
+      in
+      Alcotest.(check string) "effective mode"
+        "oneshot_or_managed_inherit"
+        (sandbox_json |> member "effective_mode" |> to_string);
+      Alcotest.(check int) "no visible containers" 0
+        (sandbox_json |> member "container_count" |> to_int);
+      let why_no_container =
+        sandbox_json |> member "why_no_container" |> to_string
+      in
+      Alcotest.(check bool) "reason says visible managed container" true
+        (contains_substring why_no_container
+           "no visible managed sandbox container");
+      Alcotest.(check bool) "reason says one-shot still mounts playground" true
+        (contains_substring why_no_container
+           "still mount the keeper playground");
+      let recommendation =
+        sandbox_json |> member "recommendation" |> to_string
+      in
+      Alcotest.(check bool) "recommendation scopes prewarm" true
+        (contains_substring recommendation
+           "only when you need a visible prewarmed container");
+      Alcotest.(check bool) "recommendation mentions repo readiness" true
+        (contains_substring recommendation "playground_repos"))
+
 let test_keeper_sandbox_status_fleet_includes_persisted_keeper () =
   Eio_main.run @@ fun env ->
   ensure_fs env;

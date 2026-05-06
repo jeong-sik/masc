@@ -606,6 +606,35 @@ let record_llm_tok_s_metrics
        Prometheus.metric_llm_decode_tok_per_sec ~labels v
    | _ -> ())
 
+(** Emit the after-turn wall-clock latency histogram.  A zero/negative
+    [request_latency_ms] is still a telemetry quality problem, so the
+    zero-latency counter remains the alertable signal; the histogram receives
+    a 1ms floor to avoid "hook ran but latency count stayed zero" dashboards. *)
+let record_llm_inference_latency_metric
+    ~(model : string)
+    ~(telemetry : Agent_sdk.Types.inference_telemetry option)
+  : unit =
+  let labels = [("model", model)] in
+  Prometheus.inc_counter Prometheus.metric_after_turn_hook ~labels ();
+  match telemetry with
+  | Some t ->
+    let observed_latency_ms =
+      if t.request_latency_ms > 0 then t.request_latency_ms
+      else (
+        Prometheus.inc_counter
+          Prometheus.metric_after_turn_telemetry_zero_latency
+          ~labels ();
+        1)
+    in
+    Prometheus.observe_histogram
+      Prometheus.metric_llm_inference_duration
+      ~labels
+      (Float.of_int observed_latency_ms /. 1000.0)
+  | None ->
+    Prometheus.inc_counter
+      Prometheus.metric_after_turn_telemetry_missing
+      ~labels ()
+
 let wall_tokens_per_second
     ~(usage_missing : bool)
     ~(output_tokens : int)
@@ -1573,27 +1602,11 @@ let make_hooks
                ~delta:(Float.of_int cr) ()
          | Some _ | None -> ());
         (* Inference latency histogram for /metrics endpoint.
-           Split observations into three buckets so we can tell "metric is
-           silent because no telemetry" apart from "metric is silent because
-           the hook isn't running". Without this split a histogram sum/count
-           of 0 is ambiguous between the two. *)
-        Prometheus.inc_counter
-          Prometheus.metric_after_turn_hook
-          ~labels:[("model", model)] ();
-        (match response.telemetry with
-         | Some t when t.request_latency_ms > 0 ->
-           Prometheus.observe_histogram
-             "masc_llm_inference_duration_seconds"
-             ~labels:[("model", model)]
-             (Float.of_int t.request_latency_ms /. 1000.0)
-         | Some _ ->
-           Prometheus.inc_counter
-             Prometheus.metric_after_turn_telemetry_zero_latency
-             ~labels:[("model", model)] ()
-         | None ->
-           Prometheus.inc_counter
-             Prometheus.metric_after_turn_telemetry_missing
-             ~labels:[("model", model)] ());
+           Missing telemetry stays a separate counter; zero/negative latency
+           increments the zero-latency counter and observes a 1ms floor so the
+           histogram still proves the hook ran. *)
+        record_llm_inference_latency_metric ~model
+          ~telemetry:response.telemetry;
         let fmt_tok_s = function
           | Some v -> Printf.sprintf "%.1f" v
           | None -> "-"

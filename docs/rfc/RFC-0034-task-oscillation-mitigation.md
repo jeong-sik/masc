@@ -18,10 +18,12 @@ sustained claim/release loops on multiple tasks within ~90 seconds:
 `task-125` (Base Purge Phase 4) cycles between `executor` and `scholar` 10 times
 within 5 minutes. `task-150`, `task-185`, `task-151` show the same pattern.
 
-The detection is real (#10421 wired observability — JSONL event, WARN, Prometheus
-counter). The action surface is not: `coord_task.ml:390` explicitly states
-"Pure observation: does not block the release." Cycle thresholds at 5/10/20 fire
-WARN once per crossing and let the loop continue.
+The detection is real, but the current implementation is narrower than the
+initial audit assumed: `coord_task.ml` emits WARN lines at the 5/10/20 threshold
+crossings, and its own comment keeps Prometheus/JSONL as follow-up work rather
+than an existing surface. The action surface is still observation-only:
+`coord_task.ml:390` explicitly states "Pure observation: does not block the
+release." Cycle thresholds fire once per crossing and let the loop continue.
 
 ### Current semantics boundary
 
@@ -42,7 +44,9 @@ the RFC should be marked superseded by #10421.
 1. **Stop sustained release/reclaim churn** when current traces prove it still
    exists after #10421's claim-preservation behavior.
 2. **Escalate to human** when automated mitigation has been exhausted.
-3. **Preserve observability** wired in #10421 (counters, JSONL events).
+3. **Extend observability without overstating current behavior**: preserve the
+   existing WARN surface and add JSONL/Prometheus wiring in the implementation
+   phase.
 
 ## Non-Goals
 
@@ -60,7 +64,7 @@ the RFC should be marked superseded by #10421.
 | Stage | Trigger | Action | Recovery |
 |-------|---------|--------|----------|
 | **Cooldown** | `cycle_count` reaches 10 (oscillation_major) | Record `cooldown_until = now() + COOLDOWN_SEC` in a runtime-only scheduler overlay keyed by `task_id`; claim attempts during cooldown are rejected with `TaskInCooldown` error | Auto-clear when `now() >= cooldown_until`; reset `cycle_count` to 0 on first claim after cooldown |
-| **Human escalation** | `cycle_count` reaches 20 (oscillation_severe) | Transition task to a new human-paused task status; emit `task_oscillation_human_escalation` JSONL event; broadcast to assignee + room | Manual: human reviews, resets, resumes via dashboard or `task_resume` action |
+| **Human escalation** | `cycle_count` reaches 20 (oscillation_severe) | Transition task to a new human-paused task status; emit `task_oscillation_human_escalation` JSONL event; broadcast to assignee + room | Manual: human reviews, resets, resumes via dashboard or `task_resume_after_human_escalation` action |
 
 ### Domain changes
 

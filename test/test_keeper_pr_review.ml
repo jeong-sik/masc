@@ -301,6 +301,16 @@ let test_read_routes_docker_and_injects_repo_flag () =
   check (option string) "read exposes credential identity"
     (Some "root")
     (parse_nested_string_field raw "credential" "effective_github_identity");
+  check bool "read omits credential state to avoid duplicate gh auth status"
+    true
+    (parse_field raw "credential"
+     |> Json.member "credential_state"
+     |> (=) `Null);
+  check bool "read attestation omits credential state"
+    true
+    (parse_field raw "identity_attestation"
+     |> Json.member "credential_state"
+     |> (=) `Null);
   let log = read_file log_path in
   check bool "read used docker run" true
     (contains_substring log "run --rm");

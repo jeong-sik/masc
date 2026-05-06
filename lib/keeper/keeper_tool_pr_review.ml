@@ -66,19 +66,7 @@ let route_fields ?via (meta : keeper_meta) =
         "route_via", `String route_via;
       ]
 
-let credential_state_json = function
-  | Repo_manager_types.Unmaterialized ->
-      `Assoc [ "state", `String "unmaterialized" ]
-  | Repo_manager_types.Materialized { last_verified_at } ->
-      `Assoc
-        [
-          "state", `String "materialized";
-          "last_verified_at", `Intlit (Int64.to_string last_verified_at);
-        ]
-  | Repo_manager_types.Stale { reason } ->
-      `Assoc [ "state", `String "stale"; "reason", `String reason ]
-
-let binding_json (binding : Keeper_gh_env.keeper_binding) ~state =
+let binding_json (binding : Keeper_gh_env.keeper_binding) =
   `Assoc
     [
       "effective_github_identity", `String binding.effective_github_identity;
@@ -86,7 +74,6 @@ let binding_json (binding : Keeper_gh_env.keeper_binding) ~state =
         `String
           (Keeper_gh_env.credential_scope_to_string binding.credential_scope) );
       "git_identity_mode", `String binding.git_identity_mode;
-      "credential_state", credential_state_json state;
     ]
 
 let identity_attestation_fields ~(config : Coord.config) (meta : keeper_meta) =
@@ -113,11 +100,7 @@ let identity_attestation_fields ~(config : Coord.config) (meta : keeper_meta) =
                ]) );
       ]
   | Ok binding ->
-      let state =
-        Credential_materializer.verify_state
-          ~gh_config_dir:binding.gh_config_dir
-      in
-      let credential = binding_json binding ~state in
+      let credential = binding_json binding in
       [
         "credential", credential;
         ( "identity_attestation",
@@ -132,7 +115,6 @@ let identity_attestation_fields ~(config : Coord.config) (meta : keeper_meta) =
                      (Keeper_gh_env.credential_scope_to_string
                         binding.credential_scope) );
                  "git_identity_mode", `String binding.git_identity_mode;
-                 "credential_state", credential_state_json state;
                ]) );
       ]
 

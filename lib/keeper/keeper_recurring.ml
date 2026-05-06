@@ -122,6 +122,28 @@ let dispatch_due ~keeper_name ~now_ts ~dispatch =
   !count
 
 (* ================================================================ *)
+(* Re-enable cooldown                                                *)
+(* ================================================================ *)
+
+(** Re-enable tasks that have been disabled due to max_failures
+    after a cooldown period (2x the task interval).  Called by the
+    supervisor sweep to prevent permanent coordination signal loss. *)
+let reenable_due_tasks ~keeper_name ~now_ts =
+  let reenabled = ref 0 in
+  with_tasks_rw (fun () ->
+    Hashtbl.iter (fun _id task ->
+      if task.keeper_name = keeper_name && not task.enabled then begin
+        let cooldown = float_of_int task.interval_sec *. 2.0 in
+        if now_ts -. task.last_run_ts >= cooldown then begin
+          task.enabled <- true;
+          task.failure_count <- 0;
+          incr reenabled
+        end
+      end
+    ) tasks);
+  !reenabled
+
+(* ================================================================ *)
 (* Serialization                                                     *)
 (* ================================================================ *)
 

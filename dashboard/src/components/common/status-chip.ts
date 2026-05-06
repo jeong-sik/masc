@@ -49,6 +49,20 @@ export type StatusChipTone =
   | 'select'
   | ''
 
+export type StatusChipContentSource = 'children' | 'label' | 'empty'
+
+export interface StatusChipSummary {
+  readonly tone: string
+  readonly isSemanticTone: boolean
+  readonly contentSource: StatusChipContentSource
+  readonly uppercase: boolean
+  readonly hasCustomClass: boolean
+  readonly hasTestId: boolean
+  readonly labelLength: number
+  readonly classNameLength: number
+  readonly testIdLength: number
+}
+
 const BASE_SHAPE =
   'inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-3xs'
 const UPPERCASE_CLASS = 'uppercase tracking-wider'
@@ -151,7 +165,45 @@ export function statusChipClasses(
   return parts.join(' ')
 }
 
-interface StatusChipProps {
+function hasChildrenContent(children: ComponentChildren | undefined): boolean {
+  return children !== undefined && children !== null
+}
+
+export function summarizeStatusChip({
+  label,
+  tone = '',
+  className,
+  uppercase = true,
+  children,
+  testId,
+}: {
+  label?: string
+  tone?: string
+  className?: string
+  uppercase?: boolean
+  children?: ComponentChildren
+  testId?: string
+}): StatusChipSummary {
+  const contentSource = hasChildrenContent(children)
+    ? 'children'
+    : label !== undefined
+      ? 'label'
+      : 'empty'
+
+  return {
+    tone,
+    isSemanticTone: isSemanticTone(tone),
+    contentSource,
+    uppercase,
+    hasCustomClass: className !== undefined && className !== '',
+    hasTestId: testId !== undefined && testId !== '',
+    labelLength: label?.length ?? 0,
+    classNameLength: className?.length ?? 0,
+    testIdLength: testId?.length ?? 0,
+  }
+}
+
+export interface StatusChipProps {
   /** Legacy API — plain text label. Prefer `children` for new
       call sites. When both are set, `children` wins. */
   label?: string
@@ -177,13 +229,28 @@ export function StatusChip({
   children,
   testId,
 }: StatusChipProps) {
+  const summary = summarizeStatusChip({
+    label,
+    tone,
+    className: cx,
+    uppercase,
+    children,
+    testId,
+  })
   const cls = statusChipClasses(tone, cx, uppercase)
-  const content = children ?? label ?? ''
+  const content = summary.contentSource === 'children' ? children : label ?? ''
   return html`<span
     class=${cls}
     data-status-chip
-    data-status-chip-tone=${tone}
-    data-status-chip-uppercase=${uppercase ? 'true' : 'false'}
+    data-status-chip-tone=${summary.tone}
+    data-status-chip-is-semantic-tone=${summary.isSemanticTone}
+    data-status-chip-content-source=${summary.contentSource}
+    data-status-chip-uppercase=${summary.uppercase ? 'true' : 'false'}
+    data-status-chip-has-custom-class=${summary.hasCustomClass}
+    data-status-chip-has-test-id=${summary.hasTestId}
+    data-status-chip-label-length=${summary.labelLength}
+    data-status-chip-class-length=${summary.classNameLength}
+    data-status-chip-test-id-length=${summary.testIdLength}
     data-testid=${testId}
   >${content}</span>`
 }

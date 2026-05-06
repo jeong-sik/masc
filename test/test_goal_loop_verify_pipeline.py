@@ -130,6 +130,32 @@ class GoalLoopVerifyPipelineTest(unittest.TestCase):
                 "GOAL_LOOP_METRICS_JSON (--metrics-json)",
             )
 
+    def test_required_gate_id_contract_is_exact(self) -> None:
+        report = goal_loop_verify_pipeline.build_pipeline_report(
+            repo_root=REPO_ROOT,
+            metrics_json=passing_metrics(),
+            tla_results=None,
+            log_paths=[],
+            unit_tests_passed=True,
+            unit_tests_failed=False,
+        )
+
+        self.assertEqual(
+            [item.gate_id for item in report.gates],
+            list(goal_loop_verify_pipeline.REQUIRED_VERIFY_GATE_IDS),
+        )
+
+    def test_prometheus_sources_cover_metric_backed_snapshot_keys(self) -> None:
+        sources = goal_loop_verify_pipeline.PROMETHEUS_METRIC_SOURCES
+        self.assertEqual(
+            sources["persistence_utf8_repair_total"],
+            ["masc_persistence_utf8_repair_total"],
+        )
+        self.assertEqual(
+            sources["dashboard_snapshot_latency_p99"],
+            ["masc_dashboard_snapshot_latency_seconds_bucket"],
+        )
+
     def test_tla_results_accept_top_level_spec_keys(self) -> None:
         self.assertEqual(
             goal_loop_verify_pipeline.tla_result_for(
@@ -190,6 +216,46 @@ class GoalLoopVerifyPipelineTest(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["status"], "BLOCKED")
         self.assertGreater(payload["gates_blocked"], 0)
+
+    def test_emitted_gate_ids_match_required_contract(self) -> None:
+        # Real build path emits exactly the REQUIRED_VERIFY_GATE_IDS set
+        # — no missing, extra, or duplicate gate IDs.
+        with tempfile.TemporaryDirectory() as raw_dir:
+            repo_root = Path(raw_dir)
+            repo_root.joinpath("specs").mkdir()
+            report = goal_loop_verify_pipeline.build_pipeline_report(
+                repo_root=repo_root,
+                metrics_json=None,
+                tla_results=None,
+                log_paths=[],
+                unit_tests_passed=False,
+                unit_tests_failed=False,
+            )
+        emitted = sorted(item.gate_id for item in report.gates)
+        required = sorted(goal_loop_verify_pipeline.REQUIRED_VERIFY_GATE_IDS)
+        self.assertEqual(emitted, required)
+
+    def test_gate_id_contract_assertion_catches_drift(self) -> None:
+        # Contract assertion raises when emitted gate IDs drift from
+        # REQUIRED_VERIFY_GATE_IDS, so future edits cannot silently
+        # rename/drop/duplicate a gate without surfacing it here.
+        VerifyGate = goal_loop_verify_pipeline.VerifyGate
+        bogus = [
+            VerifyGate(
+                gate_id="not_a_required_id",
+                category="x",
+                status="PASS",
+                summary="",
+                command=None,
+                reason=None,
+                evidence={},
+            )
+        ]
+        with self.assertRaises(AssertionError) as ctx:
+            goal_loop_verify_pipeline._assert_emitted_gate_ids_match_required(bogus)
+        message = str(ctx.exception)
+        self.assertIn("missing=", message)
+        self.assertIn("extra=", message)
 
 
 if __name__ == "__main__":

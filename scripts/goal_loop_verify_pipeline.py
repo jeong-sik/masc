@@ -42,6 +42,10 @@ PROMETHEUS_METRIC_SOURCES = {
     "keeper_turn_success_rate": ["masc_keeper_turns_total"],
     "keeper_skipping_turn_rate_5m": ["masc_keeper_semaphore_wait_timeout_total"],
     "pricing_catalog_miss_total": ["masc_pricing_catalog_miss_total"],
+    "persistence_utf8_repair_total": ["masc_persistence_utf8_repair_total"],
+    "dashboard_snapshot_latency_p99": [
+        "masc_dashboard_snapshot_latency_seconds_bucket"
+    ],
     "admission_queue_depth": ["masc_inference_queue_depth"],
     "admission_queue_wait_ms": ["masc_inference_queue_wait_seconds"],
 }
@@ -495,6 +499,38 @@ def build_unit_gate(unit_tests_passed: bool, unit_tests_failed: bool) -> VerifyG
     )
 
 
+def _assert_emitted_gate_ids_match_required(gates: list[VerifyGate]) -> None:
+    """Refuse to build a pipeline report whose gate IDs drift from the
+    declared contract in ``REQUIRED_VERIFY_GATE_IDS``.
+
+    Without this check, a future edit to gate construction (renaming,
+    accidental duplication, dropped gate) could silently change the
+    pipeline contract: callers that key off specific gate_ids would
+    fail downstream instead of at the script boundary. Raising here
+    surfaces the drift at the producing site.
+    """
+    emitted = [gate.gate_id for gate in gates]
+    counts: dict[str, int] = {}
+    for gate_id in emitted:
+        counts[gate_id] = counts.get(gate_id, 0) + 1
+    duplicates = sorted(gate_id for gate_id, freq in counts.items() if freq > 1)
+    required = set(REQUIRED_VERIFY_GATE_IDS)
+    emitted_set = set(emitted)
+    missing = sorted(required - emitted_set)
+    extra = sorted(emitted_set - required)
+    problems: list[str] = []
+    if missing:
+        problems.append(f"missing={missing}")
+    if extra:
+        problems.append(f"extra={extra}")
+    if duplicates:
+        problems.append(f"duplicates={duplicates}")
+    if problems:
+        raise AssertionError(
+            "Verify pipeline gate-id contract drift: " + "; ".join(problems)
+        )
+
+
 def build_pipeline_report(
     *,
     repo_root: Path,
@@ -510,6 +546,7 @@ def build_pipeline_report(
         *build_tla_gates(repo_root=repo_root, tla_results=tla_results),
         build_log_gate(log_paths),
     ]
+    _assert_emitted_gate_ids_match_required(gates)
     counts = {
         status: sum(1 for item in gates if item.status == status)
         for status in (

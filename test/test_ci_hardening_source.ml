@@ -1311,7 +1311,9 @@ let test_keeper_pr_audit_contracts () =
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        "pr_action_metric_paths"
      && file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
-          "tool_call_paths");
+          "pr_creation_scan_paths"
+     && file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
+          {|root / "tool_calls"|});
   check bool "keeper fleet audit recognizes route_evidence docker markers" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        "route_evidence"

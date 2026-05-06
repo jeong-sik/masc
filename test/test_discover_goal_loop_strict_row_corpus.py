@@ -247,8 +247,8 @@ class DiscoverGoalLoopStrictRowCorpusTest(unittest.TestCase):
                 return io.BytesIO(b"strict_row")
 
         original_open = discover_goal_loop_strict_row_corpus.tarfile.open
-        discover_goal_loop_strict_row_corpus.tarfile.open = (
-            lambda *args, **kwargs: IterOnlyArchive()
+        discover_goal_loop_strict_row_corpus.tarfile.open = lambda *args, **kwargs: (
+            IterOnlyArchive()
         )
         try:
             texts = discover_goal_loop_strict_row_corpus.tar_member_texts(

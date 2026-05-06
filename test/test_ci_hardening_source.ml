@@ -1183,6 +1183,14 @@ let test_keeper_msg_timeout_contracts () =
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
        "assert_server_incarnation_unchanged");
+  check bool "docker PR lifecycle harness captures incarnation failures under set -e" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       {|if fields="$(capture_server_incarnation "$health_file")"; then|});
+  check bool "docker PR lifecycle harness reports missing commit separately" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       "server health missing build.commit for incarnation check");
   check bool "docker PR lifecycle harness records restart-lost requests" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"

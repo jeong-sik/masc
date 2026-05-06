@@ -122,6 +122,9 @@ let decimal_digits_only s =
   String.length s > 0
   && String.for_all (fun c -> c >= '0' && c <= '9') s
 
+(* 2100-01-01T00:00:00Z.  This keeps obviously corrupt/far-future git
+   output out of /health while leaving enough room for normal source history
+   and reproducible-build timestamps. *)
 let max_reasonable_commit_unix_ts = 4_102_444_800L
 
 let parse_commit_unix_ts_output raw =

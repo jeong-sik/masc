@@ -532,6 +532,54 @@ let test_claim_falls_back_when_scoped_task_is_verification_blocked () =
         Yojson.Safe.Util.(scope |> member "matched_goal_id" |> to_string)
     | None -> fail "expected fallback to claim product task")
 
+let test_claim_no_eligible_after_fallback_reports_scope_truth () =
+  with_room (fun config ->
+    let scoped_goal, _ =
+      match Goal_store.upsert_goal config ~title:"Scoped keeper goal" () with
+      | Ok payload -> payload
+      | Error msg -> fail msg
+    in
+    let product_goal, _ =
+      match Goal_store.upsert_goal config ~title:"Product goal" () with
+      | Ok payload -> payload
+      | Error msg -> fail msg
+    in
+    let meta =
+      { (make_meta_with_tools [ "keeper_task_claim"; "keeper_tasks_list" ]) with
+        active_goal_ids = [ scoped_goal.id ];
+      }
+    in
+    let _ =
+      Coord_task.add_task
+        ~contract:(contract_requiring_tools [ "keeper_bash" ])
+        ~goal_id:scoped_goal.id
+        config
+        ~title:"Scoped task needing bash"
+        ~priority:1
+        ~description:"requires shell execution"
+    in
+    let _ =
+      Coord_task.add_task
+        ~contract:(contract_requiring_tools [ "keeper_fs_edit" ])
+        ~goal_id:product_goal.id
+        config
+        ~title:"Fallback task also missing tools"
+        ~priority:2
+        ~description:"also requires unavailable write access"
+    in
+    let result = call_tool config meta "keeper_task_claim" (`Assoc []) in
+    let json = parse_json result in
+    let message = Yojson.Safe.Util.(json |> member "result" |> to_string) in
+    let scope = Yojson.Safe.Util.member "claim_scope" json in
+    check string "claim scope mode" "empty_goal_scope_fallback_all_tasks"
+      Yojson.Safe.Util.(scope |> member "mode" |> to_string);
+    check bool "message names fallback search" true
+      (contains_substring message "fallback to all tasks");
+    check bool "message stops scope-lock diagnosis" true
+      (contains_substring message "Stop scope-lock diagnosis");
+    check bool "message avoids stale active scope" false
+      (contains_substring message "within active_goal_ids"))
+
 let test_claim_skips_required_tools_without_access () =
   with_room (fun config ->
     let meta = make_meta_with_tools [ "keeper_task_claim"; "keeper_tasks_list" ] in
@@ -1001,6 +1049,8 @@ let () =
         test_claim_falls_back_when_scoped_task_requires_missing_tool;
       test_case "claim falls back when scoped task is verification blocked" `Quick
         test_claim_falls_back_when_scoped_task_is_verification_blocked;
+      test_case "claim no eligible after fallback reports scope truth" `Quick
+        test_claim_no_eligible_after_fallback_reports_scope_truth;
       test_case "claim skips tasks requiring missing tools" `Quick
         test_claim_skips_required_tools_without_access;
       test_case "claim allows tasks requiring available tools" `Quick

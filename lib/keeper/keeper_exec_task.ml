@@ -85,6 +85,36 @@ let active_goal_scope_json ~(meta : keeper_meta) ?matched_goal_id
   `Assoc fields
 ;;
 
+let claim_scope_context_suffix ~(meta : keeper_meta) claim_goal_scope =
+  match claim_goal_scope.Keeper_runtime_contract.mode with
+  | "active_goal_ids" ->
+    (match meta.active_goal_ids with
+     | [] -> " in active goal scope"
+     | goal_ids ->
+       Printf.sprintf
+         " within active_goal_ids=[%s]"
+         (String.concat ", " goal_ids))
+  | "all_tasks" -> " across all tasks"
+  | "auto_goal_fallback_all_tasks" -> " after auto-goal fallback to all tasks"
+  | "empty_goal_scope_fallback_all_tasks" ->
+    " after active-goal fallback to all tasks"
+  | mode -> Printf.sprintf " in claim_scope.mode=%s" mode
+;;
+
+let no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count =
+  match claim_goal_scope.Keeper_runtime_contract.fallback_reason with
+  | Some _ ->
+    Printf.sprintf
+      "ACTION: Stop scope-lock diagnosis; claim_scope.mode=%s already searched all \
+       tasks; resolve blockers/excluded=%d."
+      claim_goal_scope.Keeper_runtime_contract.mode
+      excluded_count
+  | None ->
+    Printf.sprintf
+      "ACTION: Stop task-checking — blocked/excluded=%d."
+      excluded_count
+;;
+
 let find_task_goal_id config task_id =
   Coord.get_tasks_raw config
   |> List.find_map (fun (task : Masc_domain.task) ->
@@ -284,17 +314,10 @@ let handle_keeper_task_tool
           else message
       | Coord.Claim_next_no_unclaimed -> "No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
       | Coord.Claim_next_no_eligible { excluded_count; _ } ->
-        let scope_suffix =
-          match meta.active_goal_ids with
-          | [] -> ""
-          | goal_ids ->
-              Printf.sprintf
-                " within active_goal_ids=[%s]"
-                (String.concat ", " goal_ids)
-        in
         Printf.sprintf
-          "No eligible tasks%s. ACTION: Stop task-checking — blocked/excluded=%d."
-          scope_suffix excluded_count
+          "No eligible tasks%s. %s"
+          (claim_scope_context_suffix ~meta claim_goal_scope)
+          (no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count)
       | Coord.Claim_next_error e -> Printf.sprintf "Error: %s" e
     in
     let claim_scope, claimed_task_fields =

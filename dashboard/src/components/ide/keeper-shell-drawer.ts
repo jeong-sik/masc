@@ -4,6 +4,7 @@ import {
   streamKeeperShell,
   type KeeperShellStreamEvent,
 } from '../../api/keeper-shell'
+import { StatusChip, type StatusChipTone } from '../common/status-chip'
 import { Terminal, type TerminalLine } from '../common/terminal'
 
 const MAX_TERMINAL_LINES = 5000
@@ -15,6 +16,17 @@ interface ShellLine {
 
 interface KeeperShellDrawerProps {
   keeperName: string
+}
+
+type KeeperShellStatus = 'idle' | 'streaming' | 'closed' | 'error'
+
+export interface KeeperShellSummary {
+  readonly total: number
+  readonly stdout: number
+  readonly stderr: number
+  readonly meta: number
+  readonly droppedBytes: number
+  readonly lastStream: ShellLine['stream'] | null
 }
 
 function splitChunkLines(chunk: string): string[] {
@@ -56,6 +68,29 @@ function appendLines(current: ShellLine[], next: ShellLine[]): ShellLine[] {
   return [...current, ...next].slice(-MAX_TERMINAL_LINES)
 }
 
+export function summarizeShellLines(lines: ReadonlyArray<ShellLine>): KeeperShellSummary {
+  let stdout = 0
+  let stderr = 0
+  let meta = 0
+  let droppedBytes = 0
+  for (const line of lines) {
+    if (line.stream === 'stdout') stdout += 1
+    else if (line.stream === 'stderr') stderr += 1
+    else meta += 1
+
+    const dropped = /^dropped\s+(\d+)\s+older bytes$/.exec(line.text)
+    if (dropped) droppedBytes += Number(dropped[1])
+  }
+  return {
+    total: lines.length,
+    stdout,
+    stderr,
+    meta,
+    droppedBytes,
+    lastStream: lines[lines.length - 1]?.stream ?? null,
+  }
+}
+
 function toTerminalLine(line: ShellLine): TerminalLine {
   switch (line.stream) {
     case 'stderr':
@@ -67,13 +102,52 @@ function toTerminalLine(line: ShellLine): TerminalLine {
   }
 }
 
+function statusTone(status: KeeperShellStatus): StatusChipTone {
+  if (status === 'streaming') return 'info'
+  if (status === 'closed') return 'neutral'
+  if (status === 'error') return 'bad'
+  return 'neutral'
+}
+
+function shellSummaryLabel(summary: KeeperShellSummary, status: KeeperShellStatus): string {
+  const last = summary.lastStream ?? 'none'
+  const dropped = summary.droppedBytes > 0 ? `, ${summary.droppedBytes} dropped bytes` : ''
+  return `Keeper shell ${status}: ${summary.total} lines, ${summary.stdout} stdout, ${summary.stderr} stderr, ${summary.meta} meta, last ${last}${dropped}`
+}
+
+function KeeperShellSummaryStrip({
+  summary,
+  status,
+}: {
+  readonly summary: KeeperShellSummary
+  readonly status: KeeperShellStatus
+}) {
+  return html`
+    <div
+      role="status"
+      aria-label=${shellSummaryLabel(summary, status)}
+      data-testid="keeper-shell-summary"
+      class="flex min-w-0 flex-wrap items-center gap-1.5 text-[var(--color-fg-muted)]"
+    >
+      <${StatusChip} tone="neutral" uppercase=${false}>${summary.total} lines</${StatusChip}>
+      <${StatusChip} tone="ok" uppercase=${false}>stdout ${summary.stdout}</${StatusChip}>
+      <${StatusChip} tone=${summary.stderr > 0 ? 'bad' : 'neutral'} uppercase=${false}>stderr ${summary.stderr}</${StatusChip}>
+      <${StatusChip} tone="neutral" uppercase=${false}>meta ${summary.meta}</${StatusChip}>
+      ${summary.droppedBytes > 0
+        ? html`<${StatusChip} tone="warn" uppercase=${false}>dropped ${summary.droppedBytes}B</${StatusChip}>`
+        : null}
+    </div>
+  `
+}
+
 export function KeeperShellDrawer({ keeperName }: KeeperShellDrawerProps) {
   const keeper = keeperName.trim()
   const [lines, setLines] = useState<ShellLine[]>([])
-  const [status, setStatus] = useState<'idle' | 'streaming' | 'closed' | 'error'>('idle')
+  const [status, setStatus] = useState<KeeperShellStatus>('idle')
   const [taskId, setTaskId] = useState<string | null>(null)
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const terminalLines = useMemo(() => lines.map(toTerminalLine), [lines])
+  const summary = useMemo(() => summarizeShellLines(lines), [lines])
 
   const prefersReducedMotion = useMemo(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
@@ -131,14 +205,17 @@ export function KeeperShellDrawer({ keeperName }: KeeperShellDrawerProps) {
       aria-label="Keeper shell drawer"
     >
       <div
-        class="flex items-center gap-2 border-b border-solid border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1.5 font-mono text-2xs"
+        class="flex min-w-0 flex-wrap items-center gap-2 border-b border-solid border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1.5 font-mono text-2xs"
       >
         <span class="text-[var(--color-fg-secondary)]">TERMINAL</span>
         <span class="text-[var(--color-fg-muted)]">${keeper || 'none'}</span>
         ${taskId
           ? html`<span class="truncate text-[var(--color-fg-disabled)]">${taskId}</span>`
           : null}
-        <span class="ml-auto text-[var(--color-fg-muted)]">${status}</span>
+        <${StatusChip} tone=${statusTone(status)} uppercase=${false} class="font-mono">${status}</${StatusChip}>
+        <div class="ml-auto min-w-0">
+          <${KeeperShellSummaryStrip} summary=${summary} status=${status} />
+        </div>
       </div>
       <${Terminal}
         lines=${terminalLines}

@@ -46,17 +46,25 @@ let pr_review_mutation_preset_ok = function
 let pr_review_mutation_preset_reason tool_name =
   Printf.sprintf "%s requires research, delivery, coding, or full preset" tool_name
 
-let route_fields (meta : keeper_meta) =
-  let sandbox_profile, route_via =
-    match meta.sandbox_profile with
-    | Docker -> "docker", "brokered"
-    | Local -> "local", "host"
+let sandbox_profile_string (meta : keeper_meta) =
+  match meta.sandbox_profile with
+  | Docker -> "docker"
+  | Local -> "local"
+
+let route_fields ?via (meta : keeper_meta) =
+  let fields =
+    [
+      "sandbox_profile", `String (sandbox_profile_string meta);
+    ]
   in
-  [
-    "sandbox_profile", `String sandbox_profile;
-    "via", `String route_via;
-    "route_via", `String route_via;
-  ]
+  match via with
+  | None -> fields
+  | Some route_via ->
+      fields @
+      [
+        "via", `String route_via;
+        "route_via", `String route_via;
+      ]
 
 (* Both "pr_number" and "number" are accepted for schema-drift compat. *)
 let pr_number_of_args args =
@@ -322,7 +330,7 @@ let handle_keeper_pr_review_read
              ; "repo", `String repo_slug
              ; "execution_via", `String meta_result.via
              ; "hint", `String "PR may have been closed/deleted or the number is wrong. Use keeper_pr_list (or `gh pr list`) to see open PRs before retrying."
-             ] @ route_fields meta))
+             ] @ route_fields ~via:meta_result.via meta))
     else
       Yojson.Safe.to_string
         (`Assoc
@@ -334,7 +342,7 @@ let handle_keeper_pr_review_read
              ; "diff", `String diff_result.output
              ; "diff_truncated", `Bool diff_truncated
              ; "diff_status", `Bool (status_ok diff_result.status)
-             ] @ route_fields meta))
+             ] @ route_fields ~via:meta_result.via meta))
 ;;
 
 let handle_keeper_pr_review_comment
@@ -402,7 +410,7 @@ let handle_keeper_pr_review_comment
                       ; "event", `String (pr_review_event_to_string event)
                       ; "keeper", `String meta.name
                       ; "preflight", preflight
-                      ] @ route_fields meta))
+                      ] @ route_fields ~via:preflight_via meta))
              | Ok approve_preflight_json ->
                  (* Use gh pr review to create a review *)
                  let cmd =
@@ -435,7 +443,7 @@ let handle_keeper_pr_review_comment
                       ; "output", `String result.output
                       ; "keeper", `String meta.name
                       ]
-                      @ route_fields meta
+                      @ route_fields ~via:result.via meta
                       @
                       match approve_preflight_json with
                       | Some json -> [ "preflight", json ]
@@ -493,5 +501,5 @@ let handle_keeper_pr_review_reply
                ; "comment_id", `Int comment_id
                ; "output", `String result.output
                ; "keeper", `String meta.name
-               ] @ route_fields meta))
+               ] @ route_fields ~via:result.via meta))
 ;;

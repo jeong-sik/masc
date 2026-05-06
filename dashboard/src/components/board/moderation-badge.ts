@@ -80,7 +80,13 @@ export function ModerationBadge({
     <span
       class=${`inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${toneClass(statusTone(normalizedStatus))}`}
       aria-label=${`${targetLabel} moderation ${label}${normalizedCount > 0 ? ` ${normalizedCount}건` : ''}`}
-      title=${`${label}${normalizedCount > 0 ? ` · 신고 ${normalizedCount}건` : ''}`}
+      title=${
+        normalizedCount > 0
+          ? (label === '신고'
+              ? `신고 ${normalizedCount}건`
+              : `${label} · 신고 ${normalizedCount}건`)
+          : label
+      }
     >
       ${label}${countLabel}
     </span>

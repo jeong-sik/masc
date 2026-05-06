@@ -119,18 +119,21 @@ This means the reports' TLA+ recommendations should start by extending existing 
 
 This is good operational evidence, but it is not enough to close #12888 because the live process was behind inspected `main` (`1c9350f540`) and no forced timeout reproducer was run.
 
-The companion harness confirms the same gap from persisted decision logs:
+The companion harness now joins decision logs with execution receipts:
 
 ```console
 $ scripts/keeper-turn-slot-evidence.sh --base-path /Users/dancer/me --window-min 1440 --min-normal-samples 1
 ...
-analyst          ... INSUFFICIENT:no_slot_release_phase
-executor         ... INSUFFICIENT:no_slot_release_phase
+analyst          ... retry_scheduled:13 ... EVIDENCE_AVAILABLE
+executor         ... retry_scheduled:9  ... EVIDENCE_AVAILABLE
 ...
-verifier         ... INSUFFICIENT:no_slot_release_phase
+verifier         ... -                  ... INSUFFICIENT:no_slot_release_phase
 ```
 
-Recent normal latency samples exist, but the selected window has no persisted `slot_release_at_phase` rows.
+Recent normal latency samples exist, and several keepers now have receipt-backed
+`slot_release_at_phase` rows. Others still lack receipt phase evidence in the
+selected window, so #12888 still needs a targeted forced-retry run plus
+before/after p50/p99 evidence before closure.
 
 ## 4. Rejected or Adjusted Recommendations
 
@@ -151,8 +154,9 @@ This audit adds `scripts/keeper-turn-slot-evidence.sh` as the #12888 closure evi
 - Inputs:
   - active `$BASE_PATH/.masc/keepers/*.decisions.jsonl`
   - `semaphore_wait_ms`
-  - persisted receipt rows with `slot_release_at_phase`
-  - normal successful tool-use keeper latency samples
+  - persisted `$BASE_PATH/.masc/keepers/<keeper>/execution-receipts/**/*.jsonl`
+    rows with `slot_release_at_phase`
+  - normal successful tool-use keeper rows with positive `latency_ms`
 - Outputs:
   - summary table: slot waits, release phase counts, p50/p99 normal turn latency
   - explicit "not enough data" status when live reproducer has not been run
@@ -163,8 +167,8 @@ This is the safest immediate step because #13299 already changed runtime behavio
 
 Run a forced #12888 retry reproducer on a runtime at or after #13299 and capture the harness output before and after the run. The issue should stay open until the output shows both:
 
-- `slot_release_at_phase` evidence in the selected window.
-- Enough normal successful tool-use samples to compare p50/p99 latency.
+- `slot_release_at_phase` evidence in execution receipts for the selected window.
+- Enough normal successful tool-use rows with positive `latency_ms` to compare p50/p99 latency.
 
 ### Follow-On Slices
 

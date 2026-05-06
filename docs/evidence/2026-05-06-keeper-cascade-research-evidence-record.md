@@ -36,8 +36,8 @@
 | Current TLA+ inventory | `find specs -name '*.tla'` -> 90 files | 2026-05-06T01:12:41+09:00 | High | Direct repo scan |
 | `KeeperTurnSlot` and `CascadeResolver` specs exist | `ls specs/boundary/*CascadeResolver* specs/keeper-state-machine/*KeeperTurnSlot*` | 2026-05-06T01:12:41+09:00 | High | Direct repo scan |
 | TLA check wires both specs | `rg -n "KeeperTurnSlot|CascadeResolver" scripts/tla-check.sh` | 2026-05-06T01:12:41+09:00 | High | Direct repo scan |
-| #12888 evidence harness added | `scripts/keeper-turn-slot-evidence.sh` reads active keeper decision JSONL and emits slot wait, release phase, and normal latency status | 2026-05-06T01:19:58+09:00 | High | Does not force the live 174s reproducer |
-| #12888 live decision-log evidence still incomplete | `scripts/keeper-turn-slot-evidence.sh --base-path /Users/dancer/me --window-min 1440 --min-normal-samples 1` -> recent keeper rows have normal latency samples but no `slot_release_at_phase` rows | 2026-05-06T01:19:58+09:00 | High | Confirms issue should remain open until forced retry evidence is captured |
+| #12888 evidence harness added | `scripts/keeper-turn-slot-evidence.sh` reads active keeper decision JSONL for wait/latency and execution receipts for `slot_release_at_phase` | 2026-05-06T12:12:10+09:00 | High | Does not force the live 174s reproducer |
+| #12888 live evidence remains partial | `scripts/keeper-turn-slot-evidence.sh --base-path /Users/dancer/me --window-min 1440 --min-normal-samples 1` -> some keepers report receipt-backed `retry_scheduled` evidence; others still report `INSUFFICIENT:no_slot_release_phase` | 2026-05-06T12:12:10+09:00 | High | Confirms issue should remain open until targeted forced-retry evidence is captured |
 | Live MASC runtime health | `curl -sS http://127.0.0.1:8935/health` -> commit `1feadb3c2d`, ready, 17 keepers, config error counts 0 | 2026-05-06T01:12:41+09:00 | Medium | Live process was behind inspected HEAD; not used as code-completion proof |
 
 ## 검증 (Verification)
@@ -45,7 +45,7 @@
 - 1차: supplied report files were read directly with `sed`, `nl`, `rg`, and `wc -l`.
 - 2차: current repo state was measured from a dedicated worktree at `1c9350f540`.
 - 3차: current GitHub issue/PR states were fetched with `gh issue view`, `gh issue list`, `gh pr view`, and `gh pr list`.
-- 4차: #12888 evidence harness was added, passed `bash -n`, and reported `INSUFFICIENT:no_slot_release_phase` against current live decision logs.
+- 4차: #12888 evidence harness was added, passed `bash -n`, and now joins decision logs with execution receipts; current live evidence is partial, not closure-ready.
 - 재현 결과: success for report-to-current-state audit. No implementation claim was accepted from the reports without current repo/GitHub evidence.
 
 ## 불확실성 (Uncertainty)
@@ -55,7 +55,7 @@
 - 추가 확인 필요: Before any external integration PR, refresh official docs and create a separate evidence record for that exact tool/version/API.
 
 - External tool claims in the 2025-06 research report were not refreshed from official docs. They are not used as implementation authority.
-- #12888 remains open because the live forced-timeout reproducer and p50/p99 normal-turn regression evidence were not run in this audit.
+- #12888 remains open because the targeted live forced-timeout reproducer and before/after p50/p99 normal-turn regression evidence were not run in this audit.
 - Live runtime was healthy but behind the inspected `main` HEAD, so it is useful operational context, not a replacement for repo tests.
 
 ## 적용범위 (Scope)

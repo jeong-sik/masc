@@ -68,16 +68,16 @@ echo "  window_min: $WINDOW_MIN"
 echo "  min_normal_samples: $MIN_NORMAL_SAMPLES"
 echo
 
-printf '%-16s %6s %6s %6s %10s %10s %9s %9s %9s %7s %7s %7s %-36s %8s %10s %10s %s\n' \
-  KEEPER TOTAL RECENT WAIT_N WAIT_P95 WAIT_MAX LAT_P50 LAT_P99 LAT_MAX LONG174 LONG600 RETRY_N PHASES_RECENT NORMAL_N NORMAL_P50 NORMAL_P99 STATUS
+printf '%-16s %6s %6s %6s %10s %10s %9s %9s %9s %7s %7s %7s %-36s %12s %10s %10s %s\n' \
+  KEEPER TOTAL RECENT WAIT_N WAIT_P95 WAIT_MAX LAT_P50 LAT_P99 LAT_MAX LONG174 LONG600 RETRY_N PHASES_RECENT NORMAL_LAT_N NORMAL_P50 NORMAL_P99 STATUS
 printf '%s\n' "-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------"
 
 for f in "${files[@]}"; do
   [[ -f "$f" ]] || continue
   name="$(basename "$f" .decisions.jsonl)"
 
-  read -r total recent wait_n wait_p95 wait_max lat_p50 lat_p99 lat_max long174 long600 retry_n phases normal_n normal_p50 normal_p99 status < <(
-    jq -sr --argjson cutoff "$CUTOFF" --argjson min_normal "$MIN_NORMAL_SAMPLES" '
+  read -r total recent wait_n wait_p95 wait_max lat_p50 lat_p99 lat_max long174 long600 retry_n normal_lat_n normal_p50 normal_p99 < <(
+    jq -sr --argjson cutoff "$CUTOFF" '
       def n: (. // 0 | tonumber? // 0);
       def percentile($p):
         if length == 0 then 0
@@ -90,16 +90,6 @@ for f in "${files[@]}"; do
       def is_normal_success:
         (.outcome == "success")
         and ((tool_count > 0) or (turn_mode == "tool_use"));
-      def phase_values:
-        [ .. | objects | (.slot_release_at_phase? // empty)
-          | select(type == "string" and length > 0) ];
-      def phase_summary($values):
-        if ($values | length) == 0 then "-"
-        else
-          ($values | sort | group_by(.)
-           | map(.[0] + ":" + (length | tostring))
-           | join(","))
-        end;
 
       (.) as $all
       | ([ $all[] | select((.ts_unix // 0 | tonumber? // 0) >= $cutoff) ]) as $recent
@@ -108,8 +98,6 @@ for f in "${files[@]}"; do
       | ([ $recent[] | select(is_normal_success) ]) as $normal
       | ([ $normal[] | (.latency_ms | n) | select(. > 0) ]) as $normal_latencies
       | ([ $recent[] | select((.degraded_retry_applied == true) or (.degraded_retry_cascade != null)) ]) as $retries
-      | ([ $recent[] | phase_values ] | add // []) as $recent_phases
-      | ([ $all[] | phase_values ] | add // []) as $all_phases
       | [
           ($all | length),
           ($recent | length),
@@ -122,25 +110,71 @@ for f in "${files[@]}"; do
           ([ $latencies[] | select(. >= 174000) ] | length),
           ([ $latencies[] | select(. >= 600000) ] | length),
           ($retries | length),
-          phase_summary($recent_phases),
-          ($normal | length),
+          ($normal_latencies | length),
           (($normal_latencies | percentile(50)) / 1000),
-          (($normal_latencies | percentile(99)) / 1000),
-          (if ($recent | length) == 0 then "NO_RECENT_DECISIONS"
-           elif ($recent_phases | length) == 0 and ($all_phases | length) > 0 then "STALE:slot_release_phase_outside_window"
-           elif ($recent_phases | length) == 0 then "INSUFFICIENT:no_slot_release_phase"
-           elif ($normal | length) < $min_normal then "INSUFFICIENT:normal_turn_samples"
-           else "EVIDENCE_AVAILABLE"
-           end)
+          (($normal_latencies | percentile(99)) / 1000)
         ]
       | @tsv
     ' "$f"
   )
 
-  printf '%-16s %6s %6s %6s %10s %10s %9.1f %9.1f %9.1f %7s %7s %7s %-36s %8s %10.1f %10.1f %s\n' \
+  receipt_files=()
+  receipt_dir="$KEEPERS_DIR/$name/execution-receipts"
+  if [[ -d "$receipt_dir" ]]; then
+    while IFS= read -r line; do receipt_files+=("$line"); done < <(
+      find "$receipt_dir" -type f -name '*.jsonl' | sort
+    )
+  fi
+
+  phases="-"
+  recent_phase_n=0
+  all_phase_n=0
+  if [[ ${#receipt_files[@]} -gt 0 ]]; then
+    read -r phases recent_phase_n all_phase_n < <(
+      jq -sr --argjson cutoff "$CUTOFF" '
+        def n: (. // 0 | tonumber? // 0);
+        def ts:
+          if has("ts_unix") and (.ts_unix != null) then (.ts_unix | n)
+          else ((try (.recorded_at | fromdateiso8601) catch 0) | n)
+          end;
+        def phase_values:
+          [ .. | objects | (.slot_release_at_phase? // empty)
+            | select(type == "string" and length > 0) ];
+        def phase_summary($values):
+          if ($values | length) == 0 then "-"
+          else
+            ($values | sort | group_by(.)
+             | map(.[0] + ":" + (length | tostring))
+             | join(","))
+          end;
+
+        (.) as $all
+        | ([ $all[] | select((ts) >= $cutoff) | phase_values ] | add // []) as $recent_phases
+        | ([ $all[] | phase_values ] | add // []) as $all_phases
+        | [ phase_summary($recent_phases),
+            ($recent_phases | length),
+            ($all_phases | length) ]
+        | @tsv
+      ' "${receipt_files[@]}"
+    )
+  fi
+
+  if [[ "$recent" -eq 0 ]]; then
+    status="NO_RECENT_DECISIONS"
+  elif [[ "$recent_phase_n" -eq 0 && "$all_phase_n" -gt 0 ]]; then
+    status="STALE:slot_release_phase_outside_window"
+  elif [[ "$recent_phase_n" -eq 0 ]]; then
+    status="INSUFFICIENT:no_slot_release_phase"
+  elif [[ "$normal_lat_n" -lt "$MIN_NORMAL_SAMPLES" ]]; then
+    status="INSUFFICIENT:normal_latency_samples"
+  else
+    status="EVIDENCE_AVAILABLE"
+  fi
+
+  printf '%-16s %6s %6s %6s %10s %10s %9.1f %9.1f %9.1f %7s %7s %7s %-36s %12s %10.1f %10.1f %s\n' \
     "$name" "$total" "$recent" "$wait_n" "$wait_p95" "$wait_max" \
     "$lat_p50" "$lat_p99" "$lat_max" "$long174" "$long600" \
-    "$retry_n" "$phases" "$normal_n" "$normal_p50" "$normal_p99" "$status"
+    "$retry_n" "$phases" "$normal_lat_n" "$normal_p50" "$normal_p99" "$status"
 done
 
 echo
@@ -150,10 +184,10 @@ echo "  LAT_*        keeper turn latency seconds in the selected window."
 echo "  LONG174/600  turns at or above 174s / 600s latency."
 echo "  RETRY_N      decisions with degraded retry evidence."
 echo "  PHASES       slot_release_at_phase values found in persisted receipts."
-echo "  NORMAL_*     successful tool-use turns used for normal-turn latency evidence."
+echo "  NORMAL_*     successful tool-use rows with positive latency_ms."
 echo
 echo "Closure signal:"
 echo "  EVIDENCE_AVAILABLE means the selected window contains slot-release receipt"
-echo "  evidence and enough normal successful turns for latency comparison."
+echo "  evidence and enough normal successful turns with latency samples."
 echo "  INSUFFICIENT means #12888 still needs a live forced-retry run or newer"
 echo "  persisted rows before it can be closed from runtime evidence."

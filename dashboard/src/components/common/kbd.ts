@@ -28,7 +28,34 @@
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 
-type KbdSize = 'sm' | 'md'
+export type KbdSize = 'sm' | 'md'
+
+export interface KbdSummary {
+  readonly size: KbdSize
+  readonly hasTitle: boolean
+  readonly hasCustomClass: boolean
+  readonly titleLength: number
+  readonly classNameLength: number
+}
+
+export interface KbdProps {
+  /** Key label — e.g. "⌘K", "?", "1", "Ctrl+P". Supports multi-char
+      strings because the primitive deliberately doesn't parse chords;
+      callers that want auto-split key chords should compose several
+      <Kbd> with a "+" separator between them (GitHub convention). */
+  children?: ComponentChildren
+  size?: KbdSize
+  class?: string
+  /** HTML title attribute — hover tooltip. Matches the existing
+      `title="단축키 목록 (?)"` usage in fsm-hub.ts verbatim. */
+  title?: string
+  testId?: string
+}
+
+type KbdSummaryInput = Pick<KbdProps, 'size' | 'class' | 'title'> & {
+  /** Back-compat alias for older pure callers. `class` wins when both exist. */
+  className?: string
+}
 
 const BASE =
   'inline-flex items-center justify-center rounded-xs border border-b-2 font-mono text-center text-3xs ' +
@@ -47,18 +74,20 @@ export function kbdClasses(size: KbdSize = 'md', extra?: string): string {
     : `${BASE} ${sized} ${extra}`
 }
 
-interface KbdProps {
-  /** Key label — e.g. "⌘K", "?", "1", "Ctrl+P". Supports multi-char
-      strings because the primitive deliberately doesn't parse chords;
-      callers that want auto-split key chords should compose several
-      <Kbd> with a "+" separator between them (GitHub convention). */
-  children?: ComponentChildren
-  size?: KbdSize
-  class?: string
-  /** HTML title attribute — hover tooltip. Matches the existing
-      `title="단축키 목록 (?)"` usage in fsm-hub.ts verbatim. */
-  title?: string
-  testId?: string
+export function summarizeKbd({
+  size = 'md',
+  class: classProp,
+  className,
+  title,
+}: KbdSummaryInput): KbdSummary {
+  const customClass = classProp ?? className
+  return {
+    size,
+    hasTitle: title !== undefined && title !== '',
+    hasCustomClass: customClass !== undefined && customClass !== '',
+    titleLength: title?.length ?? 0,
+    classNameLength: customClass?.length ?? 0,
+  }
 }
 
 export function Kbd({
@@ -68,11 +97,16 @@ export function Kbd({
   title,
   testId,
 }: KbdProps) {
+  const summary = summarizeKbd({ size, class: cx, title })
   const cls = kbdClasses(size, cx)
   return html`<kbd
     class=${cls}
     data-kbd
-    data-kbd-size=${size}
+    data-kbd-size=${summary.size}
+    data-kbd-has-title=${summary.hasTitle}
+    data-kbd-has-custom-class=${summary.hasCustomClass}
+    data-kbd-title-length=${summary.titleLength}
+    data-kbd-class-length=${summary.classNameLength}
     title=${title}
     data-testid=${testId}
   >${children}</kbd>`

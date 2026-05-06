@@ -370,7 +370,47 @@ let test_nested_runtime_detector_ignores_git_commit_message () =
     "docker after command separator is still blocked"
     true
     (Keeper_shell_docker.command_uses_nested_container_runtime
-       "git status && docker run --rm alpine true")
+       "git status && docker run --rm alpine true");
+  Alcotest.(check bool)
+    "quoted docker command word is still blocked"
+    true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "\"docker\" run --rm alpine true");
+  Alcotest.(check bool)
+    "partially quoted docker command word is still blocked"
+    true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "do\"cker\" run --rm alpine true");
+  Alcotest.(check bool)
+    "env option wrapper still exposes docker command"
+    true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "env -i docker run --rm alpine true");
+  Alcotest.(check bool)
+    "env terminator still exposes docker command"
+    true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "env -- docker run --rm alpine true");
+  Alcotest.(check bool)
+    "env value option does not treat its argument as command"
+    false
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "env -u docker git commit -m Docker-sandbox-proof");
+  Alcotest.(check bool)
+    "env split-string wrapper still exposes docker command"
+    true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "env -S 'docker run --rm alpine true'");
+  Alcotest.(check bool)
+    "env inline split-string wrapper still exposes docker command"
+    true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "env --split-string='docker run --rm alpine true'");
+  Alcotest.(check bool)
+    "env split-string assignment without runtime remains allowed"
+    false
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "env -S 'FOO=docker git commit -m Docker-sandbox-proof'")
 
 let test_docker_missing_seccomp_profile_fails_closed () =
   with_eio_fs @@ fun () ->

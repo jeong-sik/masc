@@ -202,27 +202,68 @@ let shell_assignment_like word =
       in
       String.for_all ok_char (String.sub word 0 idx)
 
+let env_option_takes_arg = function
+  | "-u" | "--unset" | "-c" | "--chdir" -> true
+  | _ -> false
+
+let env_option_like word =
+  String.length word > 0 && word.[0] = '-'
+
+let env_split_string_inline_value word =
+  let prefix = "--split-string=" in
+  if String.starts_with ~prefix word then
+    Some
+      (String.sub word (String.length prefix)
+         (String.length word - String.length prefix))
+  else
+    None
+
 let command_word_mentions_nested_runtime cmd =
-  let rec scan expect_command in_env = function
+  let rec scan expect_command in_env skip_env_arg = function
     | [] -> false
-    | Guard_separator :: rest -> scan true false rest
-    | Guard_word (word, quoted) :: rest ->
-        if expect_command then
-          if (not quoted) && List.mem word nested_container_runtime_tokens then
-            true
-          else if (not quoted) && (word = "sudo" || word = "command" || word = "time")
-          then
-            scan true false rest
-          else if (not quoted) && word = "env" then
-            scan true true rest
-          else if in_env && (not quoted) && shell_assignment_like word then
-            scan true true rest
+    | Guard_separator :: rest -> scan true false false rest
+    | Guard_word (word, _) :: rest ->
+        if not expect_command then scan false false false rest
+        else if in_env then scan_env_word word skip_env_arg rest
+        else scan_command_word word rest
+  and scan_command_word word rest =
+    if List.mem word nested_container_runtime_tokens then
+      true
+    else if word = "sudo" || word = "command" || word = "time" then
+      scan true false false rest
+    else if word = "env" then
+      scan true true false rest
+    else if shell_assignment_like word then
+      scan true false false rest
+    else
+      scan false false false rest
+  and scan_env_word word skip_env_arg rest =
+    if skip_env_arg then
+      scan true true false rest
+    else if word = "--" then
+      scan true false false rest
+    else if word = "-s" || word = "--split-string" then
+      match rest with
+      | Guard_word (split_arg, _) :: tail ->
+          nested_in_split_arg split_arg || scan true true false tail
+      | _ -> false
+    else
+      match env_split_string_inline_value word with
+      | Some split_arg ->
+          nested_in_split_arg split_arg || scan true true false rest
+      | None ->
+          if shell_assignment_like word then
+            scan true true false rest
+          else if env_option_takes_arg word then
+            scan true true true rest
+          else if env_option_like word then
+            scan true true false rest
           else
-            scan false false rest
-        else
-          scan false false rest
+            scan_command_word word rest
+  and nested_in_split_arg split_arg =
+    scan true false false (shell_guard_tokens split_arg)
   in
-  scan true false (shell_guard_tokens cmd)
+  scan true false false (shell_guard_tokens cmd)
 
 let command_uses_nested_container_runtime cmd =
   let lowered_cmd = String.lowercase_ascii cmd in

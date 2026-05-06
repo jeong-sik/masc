@@ -4948,6 +4948,28 @@ let test_prompt_includes_board_activity_section () =
        with Not_found -> false
      in found)
 
+let test_prompt_marks_board_curation_due_for_multi_event_window () =
+  let second_board_event =
+    {
+      sample_board_event with
+      post_id = "board-post-2";
+      title = "Answer candidate";
+      preview = "This may answer the earlier thread.";
+    }
+  in
+  let obs =
+    { base_observation with
+      pending_board_events = [ sample_board_event; second_board_event ]
+    }
+  in
+  let _sys, user =
+    UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs ()
+  in
+  check bool "marks curation due" true
+    (contains_substring user "Curation due");
+  check bool "names curation submit tool" true
+    (contains_substring user "keeper_board_curation_submit")
+
 let test_prompt_prefers_silence_guidance () =
   let sys, _user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:base_observation () in
   check bool "mentions speech act header" true
@@ -7355,6 +7377,8 @@ let () =
           test_case "includes mentions" `Quick test_prompt_includes_mentions_section;
           test_case "includes board activity" `Quick
             test_prompt_includes_board_activity_section;
+          test_case "marks board curation due" `Quick
+            test_prompt_marks_board_curation_due_for_multi_event_window;
           test_case "includes goals" `Quick test_prompt_includes_goals_section;
           test_case "includes context ratio" `Quick test_prompt_includes_context_ratio;
           test_case "includes idle" `Quick test_prompt_includes_idle;

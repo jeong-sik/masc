@@ -325,7 +325,7 @@ function KpiStrip() {
       .filter(cell => cell.key !== spot.key)
       .slice(0, VISIBLE_KPI_LIMIT);
   const visibleMetricCount = 1 + visibleCells.length;
-  const totalMetricCount = 1 + metricCells.length;
+  const totalMetricCount = metricCells.length;
   const renderMetricCell = (cell) => (
     <div key={cell.key} className={"kpi-cell" + (cell.className || "")}>
       <span className="kpi-l">{cell.label}</span>

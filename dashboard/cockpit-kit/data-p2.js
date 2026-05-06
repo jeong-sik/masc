@@ -19,7 +19,7 @@ window.MASC_P2 = (function () {
   // Each nudge: WHO (op), WHEN, WHAT (channel), and WHO got pinged.
   const nudges = [
     { id:"n-014", at:"16:28:11Z", channel:"hint",     to:["sangsu"],          body:"L187 drift, 한 번만 확인 부탁",                            ack:false },
-    { id:"n-013b",at:"16:20:36Z", channel:"suggest",  to:["qa-king"],         body:"flake 재현 로그를 붙이고 retry window 고정",               ack:false },
+    { id:"n-013b", at:"16:20:36Z", channel:"suggest",  to:["qa-king"],         body:"flake 재현 로그를 붙이고 retry window 고정",               ack:false },
     { id:"n-013", at:"16:14:02Z", channel:"approve",  to:["nick0cave"],       body:"PR #9712 backport approve",                                ack:true  },
     { id:"n-012", at:"15:51:27Z", channel:"reject",   to:["qa-king"],         body:"flake re-run 거부 — 실 실패로 처리",                       ack:true  },
     { id:"n-011", at:"15:32:00Z", channel:"redirect", to:["rama","scholar"],  body:"cascade regression 보지 말고 ar-93ff2489 우선",            ack:true  },

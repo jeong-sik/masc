@@ -99,6 +99,17 @@ let turn_affordance_of_string = function
   | "inspect_worktree_delta" -> Some Inspect_worktree_delta
   | _ -> None
 
+let turn_affordance_to_string = function
+  | Board_curation -> "board_curation"
+  | Board_post_or_comment -> "board_post_or_comment"
+  | Message_sweep -> "message_sweep"
+  | Reply_in_room -> "reply_in_room"
+  | Task_claim -> "task_claim"
+  | Task_audit -> "task_audit"
+  | Task_verify -> "task_verify"
+  | Work_discovery -> "work_discovery"
+  | Inspect_worktree_delta -> "inspect_worktree_delta"
+
 let should_tool_gate_affordance = function
   | Board_curation
   | Board_post_or_comment
@@ -168,19 +179,31 @@ let preferred_tool_names_for_turn_affordances turn_affordances =
    them whenever the board lists unclaimed tasks, leading to repeated
    [Failure_run_error] turns the keeper cannot resolve. *)
 let turn_affordances_require_tool_gate_with_allowed
+    ?(record_suppression_metric = false)
     ~(allowed_tool_names : string list) turn_affordances : bool =
   let has_matching_tool affordance =
     List.exists
-      (fun tool -> List.mem tool allowed_tool_names)
+      (fun tool ->
+         List.mem tool allowed_tool_names
+         && Keeper_tool_disclosure.tool_name_can_satisfy_required_contract tool)
       (tools_for_gated_affordance affordance)
   in
-  List.exists
-    (function
-      | Some affordance ->
-        should_tool_gate_affordance affordance
-        && has_matching_tool affordance
-      | None -> false)
-    (List.map turn_affordance_of_string turn_affordances)
+  let gated_affordances =
+    turn_affordances
+    |> List.filter_map turn_affordance_of_string
+    |> List.filter should_tool_gate_affordance
+  in
+  let gate_requested = List.exists has_matching_tool gated_affordances in
+  if record_suppression_metric && not gate_requested then
+    List.iter
+      (fun affordance ->
+         if not (has_matching_tool affordance) then
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_required_tool_gate_suppressed_total
+             ~labels:[ ("affordance", turn_affordance_to_string affordance) ]
+             ())
+      gated_affordances;
+  gate_requested
 
 let should_require_tools_for_initial_turn ~(max_turns : int)
     ~(turn_affordances : string list) =
@@ -202,19 +225,26 @@ let has_task_claim_affordance = has_turn_affordance Task_claim
 
 let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
     ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
+  let progress_tool_available name =
+    List.mem name allowed_tool_names
+    && Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name
+  in
   if has_turn_affordance Board_curation turn_affordances
-     && List.mem "keeper_board_curation_submit" allowed_tool_names
+     && progress_tool_available "keeper_board_curation_submit"
   then Agent_sdk.Types.Tool "keeper_board_curation_submit"
   else if (not has_current_task)
      && has_task_claim_affordance turn_affordances
-     && List.mem "keeper_task_claim" allowed_tool_names
+     && progress_tool_available "keeper_task_claim"
   then Agent_sdk.Types.Tool "keeper_task_claim"
   else if has_turn_affordance Task_audit turn_affordances
-          && List.mem "keeper_tasks_audit" allowed_tool_names
+          && progress_tool_available "keeper_tasks_audit"
   then Agent_sdk.Types.Tool "keeper_tasks_audit"
   else if has_turn_affordance Task_verify turn_affordances
-          && List.mem "keeper_tasks_list" allowed_tool_names
-  then Agent_sdk.Types.Tool "keeper_tasks_list"
+          && progress_tool_available "keeper_task_submit_for_verification"
+  then Agent_sdk.Types.Tool "keeper_task_submit_for_verification"
+  else if has_turn_affordance Task_verify turn_affordances
+          && progress_tool_available "keeper_task_done"
+  then Agent_sdk.Types.Tool "keeper_task_done"
   else if not has_current_task then
     (* #10008: no active task and no applicable specific claim tool
        to force.  Fall back to [Auto] instead of [Any] so the model

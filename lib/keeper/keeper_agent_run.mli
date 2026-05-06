@@ -141,7 +141,10 @@ val preferred_tool_choice_for_required_turn :
     preset facing unclaimed tasks) aren't forced into unwinnable
     contract violations. *)
 val turn_affordances_require_tool_gate_with_allowed :
-  allowed_tool_names:string list -> string list -> bool
+     ?record_suppression_metric:bool
+  -> allowed_tool_names:string list
+  -> string list
+  -> bool
 
 (** Canonical model label for MASC status/metrics surfaces.
     Prefers the final cascade attempt label when available, then the

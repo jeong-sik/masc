@@ -346,6 +346,11 @@ val metric_keeper_required_tool_loop_detected_total : string
     actionable required-tool failures before making execution/completion
     progress.  Incremented once per loop episode. Labels: [keeper, kind]. *)
 
+val metric_keeper_required_tool_gate_suppressed_total : string
+(** #13631 Total Require_tool_use gate suppressions caused by actionable
+    affordances whose visible keeper tool surface contains no
+    contract-satisfying tool. Labels: [affordance]. *)
+
 val metric_keeper_consecutive_idle : string
 (** Task-138 Current consecutive-idle streak (passive-only turns) per
     keeper.  Resets to 0 on the next execution/completion turn.  Pairs

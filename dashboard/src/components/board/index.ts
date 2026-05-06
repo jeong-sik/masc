@@ -1,4 +1,5 @@
 export { BoardSurface } from './board-surface'
+export { SubBoardSurface } from './sub-board-surface'
 export * from './board-state'
 export {
   CommentThread,

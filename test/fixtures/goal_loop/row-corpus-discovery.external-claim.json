@@ -119,6 +119,14 @@
       "sha256": "c41ad0b7e719e27f557e5b93e422048a64ccf993ba3ebdcc04e296452497ff28",
       "contents_summary": "46 markdown files including the 12 prompt documents and research notes",
       "note": "Archive search finds aggregate 206 claims, top finding examples, and ACT-title placeholders, but no source_catalog_id, strict-row schema, or 206 itemized finding rows."
+    },
+    {
+      "artifact_name": "Kimi_Agent_Keeper 사양.zip",
+      "artifact_kind": "zip",
+      "result": "NOT_ROW_CORPUS",
+      "sha256": "f23dfb6c89ea7f386ae99e24bbcb6d22800f78c383c550bbf9bc27a1ddf29fa4",
+      "contents_summary": "6,229 files including an older GOAL LOOP fixture/script snapshot",
+      "note": "Targeted scan of the goal_loop members finds fixture and script snapshots but no source_catalog_id, expected_findings_total, strict-row schema, or 206-row corpus artifact."
     }
   ],
   "broader_structured_id_triage": {

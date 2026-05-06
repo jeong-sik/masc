@@ -61,7 +61,7 @@ let test_eval_criteria_carries_metadata () =
   check
     (list string)
     "invariants"
-    [ "all_keeper_states_telemetryzed"
+    [ "all_keeper_states_telemetry_emitted"
     ; "operator_nudge_response_5s"
     ; "cascade_hits_visible_realtime"
     ]
@@ -84,8 +84,23 @@ let test_risk_contract_projection_is_deterministic () =
   check
     (option string)
     "review requirement"
-    (Some "supervisor_review")
+    None
     first.runtime_constraints.review_requirement
+;;
+
+let test_risk_contract_ids_are_pinned () =
+  let ids =
+    Catalog.all
+    |> List.map (fun spec -> Agent_sdk.Risk_contract.contract_id (Catalog.to_risk_contract spec))
+  in
+  check
+    (list string)
+    "contract IDs frozen"
+    [ "md5:49075d5b129328dece2801643272d7c9"
+    ; "md5:2c09e6f101e138b52fdb86c9fde6ac4f"
+    ; "md5:71b3d1fc918d95ebd6362152e5e3eeea"
+    ]
+    ids
 ;;
 
 let () =
@@ -100,6 +115,7 @@ let () =
             "risk contract projection deterministic"
             `Quick
             test_risk_contract_projection_is_deterministic
+        ; test_case "risk contract IDs are pinned" `Quick test_risk_contract_ids_are_pinned
         ] )
     ]
 ;;

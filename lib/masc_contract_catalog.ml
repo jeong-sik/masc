@@ -20,7 +20,7 @@ let cascade_critical =
   ; requested_execution_mode = Agent_sdk.Execution_mode.Execute
   ; risk_class = Agent_sdk.Risk_class.Critical
   ; allowed_mutations = [ "cascade_route"; "provider_fallback"; "telemetry_emit" ]
-  ; review_requirement = Some "operator_approval"
+  ; review_requirement = None
   }
 ;;
 
@@ -36,7 +36,7 @@ let keeper_lifecycle =
   ; risk_class = Agent_sdk.Risk_class.High
   ; allowed_mutations =
       [ "keeper_lifecycle_update"; "supervisor_restart"; "telemetry_emit" ]
-  ; review_requirement = Some "supervisor_review"
+  ; review_requirement = None
   }
 ;;
 
@@ -44,7 +44,7 @@ let dashboard_telemetry =
   { name = "masc-dashboard-telemetry"
   ; description = "대시보드 텔레메트리 계약"
   ; invariants =
-      [ "all_keeper_states_telemetryzed"
+      [ "all_keeper_states_telemetry_emitted"
       ; "operator_nudge_response_5s"
       ; "cascade_hits_visible_realtime"
       ]

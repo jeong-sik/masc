@@ -82,8 +82,6 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     try:
         corpus = load_strict_row_corpus_input(args.strict_row_corpus)
-        if corpus is None:
-            raise ValueError("strict row corpus path is required")
         catalog = load_audit_catalog_input(args.audit_catalog)
         report = validate_strict_row_corpus(corpus, catalog=catalog)
     except (OSError, json.JSONDecodeError, ValueError) as exc:

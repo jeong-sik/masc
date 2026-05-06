@@ -111,11 +111,8 @@ proceed_with_compaction ()
  with
  | Eio.Cancel.Cancelled _ as e -> raise e
  | exn ->
-     Prometheus.inc_counter
-       Prometheus.metric_keeper_lifecycle_callback_failures
-       ~labels:[("callback", "on_compaction_started")] ();
-     Log.Keeper.warn "callback on_compaction_started raised: %s"
-       (Printexc.to_string exn));
+     Keeper_callback_failure.record ~base_dir ~meta
+       ~callback:"on_compaction_started" exn);
 proceed_with_compaction ()
 ```
 

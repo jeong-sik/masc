@@ -217,6 +217,27 @@
         "goal-loop-206-audit-external-claim-2026-05-05"
       ],
       "note": "Standalone Downloads PDFs were searched with pdftotext where readable. Strict-corpus marker hits and near-miss hits were 0; the two unreadable PDFs were not in Kimi/audit/goal/keeper/masc paths."
+    },
+    {
+      "artifact_name": "downloads_spreadsheet_strict_corpus_marker_sweep",
+      "artifact_kind": "spreadsheet_marker_search_report",
+      "result": "NOT_ROW_CORPUS",
+      "observed_files_checked": 24,
+      "observed_readable_files_checked": 15,
+      "observed_relevant_path_files_checked": 0,
+      "observed_marker_hits": 0,
+      "observed_near_miss_files": 0,
+      "observed_read_errors": 9,
+      "observed_relevant_path_read_errors": 0,
+      "markers_checked": [
+        "source_catalog_id",
+        "corpus_id",
+        "expected_findings_total",
+        "strict_row",
+        "strict-row",
+        "goal-loop-206-audit-external-claim-2026-05-05"
+      ],
+      "note": "Standalone Downloads xlsx/xls files were searched by extracting XML where readable. Strict-corpus marker hits and near-miss hits were 0; none of the spreadsheet paths matched Kimi, audit, goal, keeper, or masc."
     }
   ],
   "broader_structured_id_triage": {

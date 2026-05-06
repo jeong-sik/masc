@@ -187,11 +187,12 @@
       "artifact_refs": [
         "test/fixtures/goal_loop/row-corpus-discovery.external-claim.json",
         "test/fixtures/goal_loop/strict-row-corpus-contract.json",
-        "scripts/discover_goal_loop_strict_row_corpus.py"
+        "scripts/discover_goal_loop_strict_row_corpus.py",
+        "scripts/extract_goal_loop_source_row_candidates.py"
       ],
       "status": "BLOCKED",
       "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "Discovery records FULL_ROW_CORPUS_NOT_FOUND with 19 of 206 rows itemized and 187 missing."
+      "gap": "Discovery records FULL_ROW_CORPUS_NOT_FOUND with 19 of 206 strict rows itemized and 187 missing; the source-doc candidate extractor finds only 132 explicit row candidates, not the required 206."
     }
   ],
   "next_required_artifact": "A strict row-level corpus with 206 itemized findings, stable finding IDs, source references, severity, decision mapping, and replay expectations.",

@@ -182,6 +182,15 @@
   `prompt_source_docs_discovery_cli_strict_corpus_validation_sweep`, so the
   original 12 supplied files are now mapped directly to strict-corpus
   discovery evidence.
+- [근거] `python3 scripts/extract_goal_loop_source_row_candidates.py
+  <12 prompt source files> --summary-only --require-complete --format text`
+  checked at 2026-05-06T14:14:24+09:00, confidence High: exits non-zero with
+  `rows=132 expected=206 missing=74 sources=12 errors=0`. This conservative
+  extractor records only explicit IDs, explicit S/F anti-pattern rows,
+  markdown table ID rows, and numbered audit sections; it does not expand
+  ranges or roadmap phase bullets into invented rows. The result is recorded
+  in `test/fixtures/goal_loop/row-corpus-discovery.external-claim.json` as
+  `prompt_source_docs_explicit_row_candidate_inventory`.
 - [근거] `gh pr view 13577 --repo jeong-sik/masc-mcp --json
   number,state,isDraft,mergeable,mergeStateStatus,headRefOid,labels,url`,
   `gh issue view 13265 --repo jeong-sik/masc-mcp --json number,state,url`, and
@@ -316,7 +325,7 @@ keeps the strict corpus blocker explicit.
 | 7 GOAL LOOP dashboard | `goal_loop_status.py` aggregate output | PARTIAL: CLI status exists; UI dashboard integration remains open. |
 | 8 anti-stagnation rules | ACT reference guard and completion audit blocker | PARTIAL: reference integrity exists; SLA timers/escalation are not implemented. |
 | 9 expected convergence after week/month | completion audit and #13265 | BLOCKED: no measured convergence claim is valid without the strict corpus and live SLO proof. |
-| Full 206-row strict corpus | `row-corpus-discovery.external-claim.json`, `strict-row-corpus-contract.json`, `--strict-row-corpus` path | BLOCKED: 23 searches checked; `FULL_ROW_CORPUS_NOT_FOUND`, 19/206 rows, 187 missing. |
+| Full 206-row strict corpus | `row-corpus-discovery.external-claim.json`, `strict-row-corpus-contract.json`, `--strict-row-corpus` path | BLOCKED: 24 searches/inventories checked; `FULL_ROW_CORPUS_NOT_FOUND`, 19/206 strict rows, 187 strict rows missing. The source-doc explicit-row extractor finds only 132/206 candidate rows and cannot close the strict corpus gap. |
 
 ## Section-by-Section Audit
 
@@ -581,8 +590,9 @@ No convergence claim is valid yet. The only safe current statement is:
    artifacts and duplicates are not the missing corpus, and that the cascade
    completion report still lists #13265 as open. It also records broader
    Downloads, runtime, temp, GitHub, local-history, full Downloads CLI,
-   source-doc-only CLI, and tar/gzip compressed-container discovery sweeps;
-   these are evidence for the blocker, not a substitute for the rows.
+   source-doc-only CLI, tar/gzip compressed-container discovery sweeps, and
+   a source-doc explicit-row candidate inventory; these are evidence for the
+   blocker, not a substitute for the rows.
 2. Decide whether the source artifacts should be checked in under
    `prompt_corpus/GOAL_LOOP/...` or kept external. Local external validation
    passes via `<GOAL_LOOP_SOURCE_ROOT>` plus `--audit-source-strip-prefix`, and

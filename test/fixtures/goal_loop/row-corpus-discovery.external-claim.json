@@ -504,6 +504,67 @@
         "goal-loop-206-audit-external-claim-2026-05-05"
       ],
       "note": "The repo strict-row-corpus discovery CLI scanned the Downloads tar.gz/tgz/json.gz files not covered by the earlier zip/docx/pdf/spreadsheet/text sweeps. It found no strict-corpus markers, no JSON findings-array candidates, and zero valid 206-row corpora."
+    },
+    {
+      "artifact_name": "prompt_source_docs_explicit_row_candidate_inventory",
+      "artifact_kind": "source_row_candidate_inventory",
+      "result": "INCOMPLETE_ROW_CANDIDATES_NOT_STRICT_CORPUS",
+      "observed_prompt_sources_checked": 12,
+      "observed_unique_candidate_rows": 132,
+      "observed_expected_findings_total": 206,
+      "observed_missing_candidate_rows": 74,
+      "observed_source_errors": 0,
+      "observed_candidates_by_file": [
+        {
+          "path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md",
+          "unique_candidate_rows": 19
+        },
+        {
+          "path": "prompt_corpus/GOAL_LOOP/artifact_synthesis.md",
+          "unique_candidate_rows": 47
+        },
+        {
+          "path": "prompt_corpus/GOAL_LOOP/audit_derived_state.md",
+          "unique_candidate_rows": 29
+        },
+        {
+          "path": "prompt_corpus/GOAL_LOOP/deep_audit_dashboard_heuristic.md",
+          "unique_candidate_rows": 23
+        },
+        {
+          "path": "prompt_corpus/GOAL_LOOP/llm_compatibility.agent.final.md",
+          "unique_candidate_rows": 14
+        }
+      ],
+      "observed_candidates_by_rule": [
+        {
+          "rule": "audit_derived_numbered_heading",
+          "unique_candidate_rows": 29
+        },
+        {
+          "rule": "colon_finding_id_line",
+          "unique_candidate_rows": 8
+        },
+        {
+          "rule": "deep_audit_decimal_heading",
+          "unique_candidate_rows": 23
+        },
+        {
+          "rule": "generic_explicit_id_mention",
+          "unique_candidate_rows": 28
+        },
+        {
+          "rule": "markdown_table_id_row",
+          "unique_candidate_rows": 38
+        },
+        {
+          "rule": "ocaml_switch_finding_id",
+          "unique_candidate_rows": 6
+        }
+      ],
+      "extraction_policy": "Conservative explicit rows only: exact finding IDs, exact S/F anti-pattern IDs, markdown table ID rows, and numbered audit section headings in the two audit reports. Ranges and roadmap phase bullets are not expanded into invented rows.",
+      "command": "python3 scripts/extract_goal_loop_source_row_candidates.py <12 prompt source docs> --summary-only --require-complete --format text",
+      "note": "The repo source-row candidate extractor scanned the 12 prompt-supplied source documents. It found only 132 explicit row candidates, leaving at least 74 missing rows versus the required 206. This is not a strict corpus because it lacks 206 complete replay rows and intentionally does not synthesize rows from ranges or roadmap bullets."
     }
   ],
   "broader_structured_id_triage": {

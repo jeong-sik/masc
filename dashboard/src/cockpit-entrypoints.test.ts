@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  COGNITIVE_MODE_ORDER,
+  COGNITIVE_MODE_STATES,
+  COGNITIVE_MODE_TARGETS,
   COCKPIT_ENTRYPOINTS,
   COCKPIT_MODE_TARGETS,
+  cognitiveModeForCockpitMode,
+  cognitiveModeForRoute,
   cockpitTargetForParams,
+  normalizeCognitiveMode,
   normalizeCockpitEntrypoint,
 } from './cockpit-entrypoints'
 import { sectionItemsForTab } from './config/navigation'
@@ -24,7 +30,50 @@ describe('cockpit entrypoint registry', () => {
       'code',
       'split',
       'terminal',
+      'explode',
     ])
+  })
+
+  it('keeps the four cognitive modes explicit and route-backed', () => {
+    expect(COGNITIVE_MODE_ORDER).toEqual(['cockpit', 'code', 'split', 'explode'])
+    expect(Object.keys(COGNITIVE_MODE_TARGETS)).toEqual(COGNITIVE_MODE_ORDER)
+    expect(COGNITIVE_MODE_STATES.cockpit).toMatchObject({
+      load: 'situational',
+      layout: 'all-panels',
+      target: { tab: 'overview' },
+    })
+    expect(COGNITIVE_MODE_STATES.code).toMatchObject({
+      load: 'focused',
+      layout: 'editor-first',
+      target: { tab: 'code', params: { section: 'ide-shell', view: 'source' } },
+    })
+    expect(COGNITIVE_MODE_STATES.split).toMatchObject({
+      load: 'comparative',
+      layout: 'side-by-side',
+      target: { tab: 'code', params: { section: 'ide-shell', view: 'split-diff' } },
+    })
+    expect(COGNITIVE_MODE_STATES.explode).toMatchObject({
+      load: 'exploratory',
+      layout: 'graph-map',
+      target: { tab: 'workspace', params: { section: 'repositories', view: 'graph' } },
+    })
+  })
+
+  it('normalizes cognitive mode aliases from cockpit routes', () => {
+    expect(normalizeCognitiveMode(' CODE ')).toBe('code')
+    expect(cognitiveModeForCockpitMode('Work')).toBe('cockpit')
+    expect(cognitiveModeForCockpitMode('terminal')).toBe('code')
+    expect(cognitiveModeForCockpitMode('split')).toBe('split')
+    expect(cognitiveModeForCockpitMode('EXPLODE')).toBe('explode')
+    expect(cognitiveModeForCockpitMode('unknown')).toBeNull()
+  })
+
+  it('infers cognitive mode from canonical route state', () => {
+    expect(cognitiveModeForRoute('overview')).toBe('cockpit')
+    expect(cognitiveModeForRoute('code', { section: 'ide-shell', view: 'source' })).toBe('code')
+    expect(cognitiveModeForRoute('code', { section: 'ide-shell', view: 'split-diff' })).toBe('split')
+    expect(cognitiveModeForRoute('workspace', { section: 'repositories', view: 'graph' })).toBe('explode')
+    expect(cognitiveModeForRoute('workspace', { mode: 'observe' })).toBe('cockpit')
   })
 
   it('normalizes human tab labels and prototype ids to stable aliases', () => {
@@ -50,6 +99,10 @@ describe('cockpit entrypoint registry', () => {
     expect(cockpitTargetForParams({ mode: 'IDE', tab: 'split-diff' })).toEqual({
       tab: 'code',
       params: { section: 'ide-shell', view: 'split-diff' },
+    })
+    expect(cockpitTargetForParams({ mode: 'EXPLODE' })).toEqual({
+      tab: 'workspace',
+      params: { section: 'repositories', view: 'graph' },
     })
     expect(cockpitTargetForParams({ mode: 'Cognition', tab: 'dc-str' })).toEqual({
       tab: 'monitoring',

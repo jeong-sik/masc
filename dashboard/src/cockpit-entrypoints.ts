@@ -11,6 +11,9 @@ export type CockpitMode =
   | 'code'
   | 'split'
   | 'terminal'
+  | 'explode'
+
+export type CognitiveMode = 'cockpit' | 'code' | 'split' | 'explode'
 
 export interface CockpitRouteTarget {
   tab: TabId
@@ -24,17 +27,77 @@ export interface CockpitEntrypoint {
   coverage: 'covered' | 'partial' | 'backend-blocked'
 }
 
-export const COCKPIT_MODE_TARGETS: Record<CockpitMode, CockpitRouteTarget> = {
-  dashboard: { tab: 'overview' },
+export interface CognitiveModeState {
+  mode: CognitiveMode
+  label: string
+  load: 'situational' | 'focused' | 'comparative' | 'exploratory'
+  layout: 'all-panels' | 'editor-first' | 'side-by-side' | 'graph-map'
+  target: CockpitRouteTarget
+  cockpitModes: readonly CockpitMode[]
+}
+
+export const COGNITIVE_MODE_ORDER: CognitiveMode[] = ['cockpit', 'code', 'split', 'explode']
+
+export const COGNITIVE_MODE_TARGETS: Record<CognitiveMode, CockpitRouteTarget> = {
   cockpit: { tab: 'overview' },
+  code: { tab: 'code', params: { section: 'ide-shell', view: 'source' } },
+  split: { tab: 'code', params: { section: 'ide-shell', view: 'split-diff' } },
+  explode: { tab: 'workspace', params: { section: 'repositories', view: 'graph' } },
+}
+
+export const COGNITIVE_MODE_STATES: Record<CognitiveMode, CognitiveModeState> = {
+  cockpit: {
+    mode: 'cockpit',
+    label: 'Cockpit',
+    load: 'situational',
+    layout: 'all-panels',
+    target: COGNITIVE_MODE_TARGETS.cockpit,
+    cockpitModes: ['dashboard', 'cockpit', 'work', 'comms', 'observe', 'cognition'],
+  },
+  code: {
+    mode: 'code',
+    label: 'Code',
+    load: 'focused',
+    layout: 'editor-first',
+    target: COGNITIVE_MODE_TARGETS.code,
+    cockpitModes: ['ide', 'code', 'terminal'],
+  },
+  split: {
+    mode: 'split',
+    label: 'Split',
+    load: 'comparative',
+    layout: 'side-by-side',
+    target: COGNITIVE_MODE_TARGETS.split,
+    cockpitModes: ['split'],
+  },
+  explode: {
+    mode: 'explode',
+    label: 'Explode',
+    load: 'exploratory',
+    layout: 'graph-map',
+    target: COGNITIVE_MODE_TARGETS.explode,
+    cockpitModes: ['explode'],
+  },
+}
+
+const COCKPIT_MODE_TO_COGNITIVE_MODE = new Map<CockpitMode, CognitiveMode>(
+  COGNITIVE_MODE_ORDER.flatMap(mode =>
+    COGNITIVE_MODE_STATES[mode].cockpitModes.map(cockpitMode => [cockpitMode, mode] as const),
+  ),
+)
+
+export const COCKPIT_MODE_TARGETS: Record<CockpitMode, CockpitRouteTarget> = {
+  dashboard: COGNITIVE_MODE_TARGETS.cockpit,
+  cockpit: COGNITIVE_MODE_TARGETS.cockpit,
   work: { tab: 'workspace', params: { section: 'planning' } },
   comms: { tab: 'workspace', params: { section: 'board' } },
   observe: { tab: 'monitoring', params: { section: 'runtime' } },
   cognition: { tab: 'monitoring', params: { section: 'cognition' } },
-  ide: { tab: 'code', params: { section: 'ide-shell', view: 'source' } },
-  code: { tab: 'code', params: { section: 'ide-shell', view: 'source' } },
-  split: { tab: 'code', params: { section: 'ide-shell', view: 'split-diff' } },
+  ide: COGNITIVE_MODE_TARGETS.code,
+  code: COGNITIVE_MODE_TARGETS.code,
+  split: COGNITIVE_MODE_TARGETS.split,
   terminal: { tab: 'code', params: { section: 'ide-shell', view: 'source', terminal: 'open' } },
+  explode: COGNITIVE_MODE_TARGETS.explode,
 }
 
 export const COCKPIT_ENTRYPOINTS: CockpitEntrypoint[] = [
@@ -110,6 +173,38 @@ export function normalizeCockpitMode(input: string | null | undefined): CockpitM
   return Object.prototype.hasOwnProperty.call(COCKPIT_MODE_TARGETS, normalized)
     ? normalized as CockpitMode
     : null
+}
+
+export function normalizeCognitiveMode(input: string | null | undefined): CognitiveMode | null {
+  const normalized = input?.trim().toLowerCase()
+  if (!normalized) return null
+  return Object.prototype.hasOwnProperty.call(COGNITIVE_MODE_TARGETS, normalized)
+    ? normalized as CognitiveMode
+    : null
+}
+
+export function cognitiveModeForCockpitMode(
+  input: CockpitMode | string | null | undefined,
+): CognitiveMode | null {
+  const cockpitMode = normalizeCockpitMode(input)
+  if (cockpitMode) return COCKPIT_MODE_TO_COGNITIVE_MODE.get(cockpitMode) ?? null
+  return normalizeCognitiveMode(input)
+}
+
+export function cognitiveModeForRoute(
+  tab: TabId,
+  params: Record<string, string> = {},
+): CognitiveMode {
+  const explicitMode = cognitiveModeForCockpitMode(params.mode ?? params.plane)
+  if (explicitMode) return explicitMode
+
+  if (tab === 'code') {
+    return params.view === 'split-diff' ? 'split' : 'code'
+  }
+  if (tab === 'workspace' && params.section === 'repositories' && params.view === 'graph') {
+    return 'explode'
+  }
+  return 'cockpit'
 }
 
 export function normalizeCockpitEntrypoint(input: string): string {

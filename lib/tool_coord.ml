@@ -421,12 +421,7 @@ let status_summary_string (ctx : context) =
     String.equal assignee ctx.agent_name || String.equal assignee actual_name
   in
   let assigned_task_ids =
-    List.filter_map
-      (fun (task : Masc_domain.task) ->
-        match Coord_status_rendering.active_task_assignee task.task_status with
-        | Some assignee when matches_you assignee -> Some task.id
-        | Some _ | None -> None)
-      active_tasks
+    Coord_status_rendering.assigned_task_ids ~matches_you active_tasks
   in
   let binding =
     resolve_current_binding ~assigned_task_ids ~planning_current:current_task

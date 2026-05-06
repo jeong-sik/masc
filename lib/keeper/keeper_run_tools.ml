@@ -1222,8 +1222,8 @@ let prepare_agent_setup
                      (Printf.sprintf
                         "[REQUIRED TOOLS - FINAL TURN] This Agent.run call is on \
                          its final turn, but this message has explicit \
-	                         required_tools: %s. You MUST either use every \
-	                         required tool now or return a concise blocker naming \
+                                 required_tools: %s. You MUST either use every \
+                                 required tool now or return a concise blocker naming \
                          the missing policy/tool/runtime condition."
                         (String.concat ", " computed_surface.required_tool_names))
                  else if computed_surface.is_last_turn

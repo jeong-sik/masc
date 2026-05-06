@@ -300,6 +300,24 @@ describe('IdeShell', () => {
     expect(route.value.params.layers).toBe('cascade')
   })
 
+  it('runs the rails command from the IDE command bar', async () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+    const input = ideCommandInput(container)
+    input.value = 'rails'
+    fireEvent.input(input)
+    await waitFor(() => expect(container.querySelector('[role="listbox"]')).not.toBeNull())
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(route.value.params.rails).toBe('hidden')
+    expect(buttonByText(container, 'Rails').getAttribute('aria-pressed')).toBe('true')
+  })
+
   it('opens the terminal route from the IDE command bar', async () => {
     route.value = {
       tab: 'code',
@@ -368,6 +386,39 @@ describe('IdeShell', () => {
     expect(container.textContent).toContain('BRANCH GRAPH')
     await waitFor(() => expect(container.textContent).toContain('masc-mcp'))
     expect(container.textContent).toContain('main')
+  })
+
+  it('hydrates collapsed IDE rails from the route', () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'split-diff', rails: 'hidden' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    expect(container.querySelector('.ide-plane-shell')?.getAttribute('data-rails-collapsed')).toBe('true')
+    expect(container.querySelector('.ide-plane-conversation')).toBeNull()
+    expect(container.querySelector('.ide-plane-activity')).toBeNull()
+    expect(buttonByText(container, 'Rails').getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('toggles IDE rails through the toolbar and persists the route param', () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    const railsButton = buttonByText(container, 'Rails')
+    expect(railsButton.getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(railsButton)
+    expect(route.value.params.rails).toBe('hidden')
+    expect(container.querySelector('.ide-plane-shell')?.getAttribute('data-rails-collapsed')).toBe('true')
+    fireEvent.click(buttonByText(container, 'Rails'))
+    expect(route.value.params.rails).toBeUndefined()
   })
 
   it('hydrates cascade layer button from the ?layers=cascade URL param', () => {

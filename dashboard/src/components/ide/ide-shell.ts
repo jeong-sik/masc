@@ -82,6 +82,20 @@ function paramsWithLayers(
   return next
 }
 
+function paramsWithRails(
+  params: Record<string, string>,
+  view: ViewTab,
+  collapsed: boolean,
+): Record<string, string> {
+  const next: Record<string, string> = { ...params, section: 'ide-shell', view }
+  if (collapsed) {
+    next.rails = 'hidden'
+  } else {
+    delete next.rails
+  }
+  return next
+}
+
 export function IdeShell() {
   const coordinator = useMemo(() => createIdeDataCoordinator(), [])
 
@@ -96,6 +110,7 @@ export function IdeShell() {
     || Boolean(route.value.params.keeper?.trim())
   const findOpen = route.value.params.find === 'open'
   const terminalKeeper = keeperFromRoute()
+  const railsCollapsed = route.value.params.rails === 'hidden'
 
   useEffect(() => {
     const next = viewFromRoute(route.value.params.view)
@@ -114,6 +129,10 @@ export function IdeShell() {
 
   const handleLayersChange = (nextLayers: ReadonlySet<string>) => {
     navigate('code', paramsWithLayers(route.value.params, activeView, nextLayers))
+  }
+
+  const handleRailsToggle = () => {
+    navigate('code', paramsWithRails(route.value.params, activeView, !railsCollapsed))
   }
 
   const handleTerminalOpen = () => {
@@ -152,6 +171,7 @@ export function IdeShell() {
       role="region"
       aria-label="Code IDE shell"
       data-terminal-open=${terminalOpen ? 'true' : 'false'}
+      data-rails-collapsed=${railsCollapsed ? 'true' : 'false'}
     >
       <header
         class="ide-plane-statusbar"
@@ -170,6 +190,8 @@ export function IdeShell() {
         activeLayers=${activeLayers}
         onViewChange=${handleViewChange}
         onLayersChange=${handleLayersChange}
+        railsCollapsed=${railsCollapsed}
+        onRailsToggle=${handleRailsToggle}
         onTerminalOpen=${handleTerminalOpen}
         onFindOpen=${handleFindOpen}
       />
@@ -208,27 +230,35 @@ export function IdeShell() {
           />
           <${OverlayKeeperTrace} active=${activeLayers.has('keeper-trace')} />
         </div>
-        <div
-          class="ide-plane-conversation"
-          style=${{
-            display: 'grid',
-            gridTemplateRows: 'auto auto auto auto 1fr',
-            minHeight: 0,
-            overflow: 'auto',
-          }}
-        >
-          <${IdeBranchContextPanel}
-            activeRepositoryId=${coordinator.activeRepositoryId}
-            subscribeActiveRepositoryId=${coordinator.subscribeActiveRepositoryId}
-          />
-          <${IdeKeeperWorkPanel} keeperName=${terminalKeeper} />
-          <${IdePersistencePanel} keeperName=${terminalKeeper} />
-          <${InspectorKeeperBDI} traceActive=${activeLayers.has('keeper-trace')} />
-          <${IdeConversationRailMock} />
-        </div>
-        <div class="ide-plane-activity" style=${{ minHeight: 0 }}>
-          <${IdeActivityMock} />
-        </div>
+        ${railsCollapsed
+          ? null
+          : html`
+            <div
+              class="ide-plane-conversation"
+              style=${{
+                display: 'grid',
+                gridTemplateRows: 'auto auto auto auto 1fr',
+                minHeight: 0,
+                overflow: 'auto',
+              }}
+            >
+              <${IdeBranchContextPanel}
+                activeRepositoryId=${coordinator.activeRepositoryId}
+                subscribeActiveRepositoryId=${coordinator.subscribeActiveRepositoryId}
+              />
+              <${IdeKeeperWorkPanel} keeperName=${terminalKeeper} />
+              <${IdePersistencePanel} keeperName=${terminalKeeper} />
+              <${InspectorKeeperBDI} traceActive=${activeLayers.has('keeper-trace')} />
+              <${IdeConversationRailMock} />
+            </div>
+          `}
+        ${railsCollapsed
+          ? null
+          : html`
+            <div class="ide-plane-activity" style=${{ minHeight: 0 }}>
+              <${IdeActivityMock} />
+            </div>
+          `}
       </div>
       ${terminalOpen
         ? html`<${KeeperShellDrawer} keeperName=${terminalKeeper} />`

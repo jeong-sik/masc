@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
-import { navigate } from '../../router'
+import { navigate, route } from '../../router'
 import { requestConfirm } from './confirm-dialog'
 import { runGarbageCollection, cleanupZombies } from '../flow-control/flow-control-state'
 import { missionSnapshot, missionAgentBriefs, missionKeeperBriefs } from '../../mission-signals'
@@ -105,6 +105,21 @@ export function CommandPalette() {
         handler: () => navigate('logs')
       },
       {
+        id: 'ide-toggle-rails',
+        title: route.value.params.rails === 'hidden' ? 'IDE rails 보이기' : 'IDE rails 숨기기',
+        section: 'IDE',
+        keywords: 'code ide rails layout conversation activity toggle',
+        handler: () => {
+          const next: Record<string, string> = { ...route.value.params, section: 'ide-shell' }
+          if (next.rails === 'hidden') {
+            delete next.rails
+          } else {
+            next.rails = 'hidden'
+          }
+          navigate('code', next)
+        }
+      },
+      {
         id: 'action-gc',
         title: '유지보수: GC (Garbage Collection) 실행',
         section: 'System Ops',
@@ -158,7 +173,7 @@ export function CommandPalette() {
 
     ref.current.data = [...baseActions, ...agentActions, ...keeperActions, ...sessionActions]
 
-  }, [ready, missionSnapshot.value, missionAgentBriefs.value, missionKeeperBriefs.value])
+  }, [ready, route.value, missionSnapshot.value, missionAgentBriefs.value, missionKeeperBriefs.value])
 
   if (!ready) return null
 

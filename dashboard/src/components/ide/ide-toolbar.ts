@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo } from 'preact/hooks'
+import { PanelRightClose, PanelRightOpen } from 'lucide-preact'
 import {
   createLayeredOverlay,
   type OverlayLayer,
@@ -47,6 +48,8 @@ interface IdeToolbarProps {
   readonly activeLayers: ReadonlySet<string>
   readonly onViewChange: (id: ViewTab) => void
   readonly onLayersChange: (active: ReadonlySet<string>) => void
+  readonly railsCollapsed?: boolean
+  readonly onRailsToggle?: () => void
   readonly onTerminalOpen?: () => void
   readonly onFindOpen?: () => void
 }
@@ -56,6 +59,8 @@ export function IdeToolbar({
   activeLayers,
   onViewChange,
   onLayersChange,
+  railsCollapsed = false,
+  onRailsToggle,
   onTerminalOpen,
   onFindOpen,
 }: IdeToolbarProps) {
@@ -88,6 +93,14 @@ export function IdeToolbar({
       keywords: `toggle ${layer.kind} ${layer.description}`,
       handler: () => handleLayerToggle(layer.kind),
     })),
+    ...(onRailsToggle
+      ? [{
+          id: 'rail-toggle',
+          title: railsCollapsed ? 'Show IDE rails' : 'Hide IDE rails',
+          keywords: 'rails inspector activity conversation layout wide center',
+          handler: onRailsToggle,
+        }]
+      : []),
     ...(onTerminalOpen
       ? [{
           id: 'terminal-open',
@@ -111,7 +124,8 @@ export function IdeToolbar({
       role="toolbar"
       aria-label="IDE editor toolbar"
       data-testid="ide-toolbar"
-      class="ide-toolbar grid min-w-0 grid-cols-1 items-center gap-2 border-b border-[var(--color-border-divider)] bg-[var(--color-bg-surface)] px-3 py-2 lg:grid-cols-[minmax(0,max-content)_minmax(12rem,16rem)_minmax(0,1fr)]"
+      class="ide-toolbar"
+      data-has-rails=${onRailsToggle ? 'true' : 'false'}
     >
       <div
         class="ide-toolbar-tabs flex min-w-0 gap-1.5 overflow-x-auto pb-0.5"
@@ -143,6 +157,36 @@ export function IdeToolbar({
         className="min-w-0"
         inputClassName="h-7 w-full rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 font-mono text-2xs text-[var(--color-fg-primary)] outline-none transition-colors placeholder:text-[var(--color-fg-disabled)] focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)]"
       />
+      ${onRailsToggle ? html`
+        <button
+          type="button"
+          aria-pressed=${railsCollapsed ? 'true' : 'false'}
+          onClick=${onRailsToggle}
+          title=${railsCollapsed ? 'Show IDE rails' : 'Hide IDE rails'}
+          style=${{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 'var(--sp-1)',
+            minWidth: '4rem',
+            height: '26px',
+            padding: '2px 8px',
+            background: railsCollapsed ? 'var(--color-bg-elevated)' : 'transparent',
+            color: railsCollapsed ? 'var(--color-accent-fg)' : 'var(--color-fg-secondary)',
+            border: '1px solid',
+            borderColor: railsCollapsed ? 'var(--color-accent-fg)' : 'var(--color-border-default)',
+            borderRadius: 'var(--r-1)',
+            font: 'var(--type-body)',
+            cursor: 'pointer',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          ${railsCollapsed
+            ? html`<${PanelRightOpen} size=${13} aria-hidden="true" />`
+            : html`<${PanelRightClose} size=${13} aria-hidden="true" />`}
+          <span>Rails</span>
+        </button>
+      ` : null}
       <div
         aria-label="Layers (multi-select)"
         data-testid="ide-toolbar-layers"

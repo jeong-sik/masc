@@ -8,13 +8,14 @@ const navigate = vi.fn()
 const requestConfirm = vi.fn()
 const runGarbageCollection = vi.fn().mockResolvedValue(undefined)
 const cleanupZombies = vi.fn().mockResolvedValue(undefined)
+const route = signal<any>({ tab: 'code', params: { section: 'ide-shell' }, postId: null })
 const missionSnapshot = signal<any>(null)
 const missionAgentBriefs = signal<any[]>([])
 const missionKeeperBriefs = signal<any[]>([])
 
 async function loadPalette() {
   vi.resetModules()
-  vi.doMock('../../router', () => ({ navigate }))
+  vi.doMock('../../router', () => ({ navigate, route }))
   vi.doMock('./confirm-dialog', () => ({ requestConfirm }))
   vi.doMock('../flow-control/flow-control-state', () => ({
     cleanupZombies,
@@ -37,6 +38,7 @@ describe('CommandPalette', () => {
     missionSnapshot.value = null
     missionAgentBriefs.value = []
     missionKeeperBriefs.value = []
+    route.value = { tab: 'code', params: { section: 'ide-shell' }, postId: null }
   })
 
   afterEach(() => {
@@ -74,6 +76,36 @@ describe('CommandPalette', () => {
     overview?.handler()
 
     expect(navigate).toHaveBeenCalledWith('overview')
+  })
+
+  it('registers a global IDE rails toggle command', async () => {
+    const { CommandPalette } = await loadPalette()
+
+    render(html`<${CommandPalette} />`, container)
+    await waitFor(() => {
+      const palette = container.querySelector('ninja-keys') as (HTMLElement & {
+        data?: Array<{ id: string; title: string; handler: () => void }>
+      }) | null
+      expect(palette?.data?.some((item) => item.id === 'ide-toggle-rails')).toBe(true)
+    })
+
+    const palette = container.querySelector('ninja-keys') as (HTMLElement & {
+      data?: Array<{ id: string; title: string; handler: () => void }>
+    }) | null
+
+    const toggle = palette?.data?.find((item) => item.id === 'ide-toggle-rails')
+    expect(toggle?.title).toContain('숨기기')
+    toggle?.handler()
+    expect(navigate).toHaveBeenCalledWith('code', { section: 'ide-shell', rails: 'hidden' })
+
+    route.value = { tab: 'code', params: { section: 'ide-shell', rails: 'hidden' }, postId: null }
+    render(html`<${CommandPalette} />`, container)
+    await waitFor(() => {
+      const updated = container.querySelector('ninja-keys') as (HTMLElement & {
+        data?: Array<{ id: string; title: string; handler: () => void }>
+      }) | null
+      expect(updated?.data?.find((item) => item.id === 'ide-toggle-rails')?.title).toContain('보이기')
+    })
   })
 
   it('runs maintenance actions only after confirmation', async () => {

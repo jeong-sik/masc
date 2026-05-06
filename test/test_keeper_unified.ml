@@ -4336,6 +4336,7 @@ let test_keeper_msg_async_failure_surface () =
       KR.clear ();
       cleanup_dir base_dir)
     (fun () ->
+      with_test_runtime_roots base_dir @@ fun () ->
       let keeper_name = "msg-preflight" in
       let config = Masc_mcp.Coord.default_config base_dir in
       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "operator"));

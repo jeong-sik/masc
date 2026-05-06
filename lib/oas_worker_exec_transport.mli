@@ -14,6 +14,14 @@ type cli_transport_overrides = {
   claude_permission_mode : string option;
   claude_max_turns : int option;
   gemini_yolo : bool option;
+  cli_subprocess_idle_sec : float option;
+      (** When [Some s], the CLI subprocess is aborted via SIGINT if no
+          stdout line arrives within [s] seconds.  Currently honoured
+          only by [Kimi_cli_transport_local], which calls
+          [Cli_common_subprocess.run_stream_lines] directly.  Other CLI
+          transports route through agent_sdk [Transport_*_cli.create]
+          configs that do not yet expose [stdout_idle_timeout_s]; an
+          OAS upstream change is needed to honour this field there. *)
 }
 
 (** Hard cap for Claude Code's internal agent loop.  MASC may run a keeper
@@ -249,6 +257,13 @@ module Kimi_cli_transport_local : sig
     mcp_config_json : string list;
     extra_env : (string * string) list;
     cancel : unit Eio.Promise.t option;
+    stdout_idle_timeout_s : float option;
+        (** When [Some s], the kimi subprocess is aborted via SIGINT if no
+            stdout line arrives within [s] seconds.  Forwarded to
+            [Llm_provider.Cli_common_subprocess.run_stream_lines] together
+            with the process clock obtained from [Process_eio.get_clock].
+            Defaults to [None] (no idle bound; rely on the outer keeper
+            turn timeout). *)
   }
 
   val default_config : config

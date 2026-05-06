@@ -571,6 +571,20 @@ module KeeperKeepalive = struct
       (Float.min 600.0
          (get_float ~default:120.0 "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"))
 
+  (** Stdout-idle timeout for CLI subprocess transports (Kimi CLI today;
+      Claude Code / Gemini CLI / Codex CLI need an OAS upstream change to
+      expose [stdout_idle_timeout_s] in their transport configs).
+      The CLI subprocess is aborted via SIGINT if no stdout line arrives
+      within this many seconds. Read fresh per-turn via
+      {!Keeper_runtime_resolved.cli_subprocess_idle_sec}.
+      Env: [MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC]. Default: 120. Range: [10, 600].
+      @category Timeouts
+      @ops_class operator *)
+  let cli_subprocess_idle_sec =
+    Float.max 10.0
+      (Float.min 600.0
+         (get_float ~default:120.0 "MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC"))
+
   (** Consecutive idle tool repetitions before on_idle hook issues Skip.
       Below this: graduated Nudge messages.
       With tool_choice=Any, the model always calls tools, so idle

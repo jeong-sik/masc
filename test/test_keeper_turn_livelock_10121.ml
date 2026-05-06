@@ -47,6 +47,10 @@ let starts_for ~keeper =
   Prom.metric_value_or_zero Prom.metric_keeper_turn_starts
     ~labels:[ ("keeper", keeper) ] ()
 
+let scheduled_for ~keeper =
+  Prom.metric_value_or_zero Prom.metric_keeper_turn_scheduled
+    ~labels:[ ("keeper_name", keeper) ] ()
+
 let reattempts_for ~keeper =
   Prom.metric_value_or_zero Prom.metric_keeper_turn_reattempts
     ~labels:[ ("keeper", keeper) ] ()
@@ -65,12 +69,16 @@ let test_fresh_first_start () =
   L.reset_for_tests ();
   let keeper = "test-keeper-fresh-10121" in
   let before_starts = starts_for ~keeper in
+  let before_scheduled = scheduled_for ~keeper in
   let before_reattempts = reattempts_for ~keeper in
   let outcome = L.record_turn_start ~keeper ~turn_id:1 in
   Alcotest.(check bool) "outcome is Fresh" true (outcome = L.Fresh);
   Alcotest.(check (float 0.0001))
     "starts +1"
     (before_starts +. 1.0) (starts_for ~keeper);
+  Alcotest.(check (float 0.0001))
+    "scheduled +1"
+    (before_scheduled +. 1.0) (scheduled_for ~keeper);
   Alcotest.(check (float 0.0001))
     "reattempts unchanged"
     before_reattempts (reattempts_for ~keeper)

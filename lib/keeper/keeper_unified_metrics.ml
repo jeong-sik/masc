@@ -1380,6 +1380,10 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
     ~resolved_model_id
     ~cascade_profile
     ~latency_ms;
+  Prometheus.inc_counter
+    Prometheus.metric_keeper_turn_completed
+    ~labels:[("keeper_name", meta.name)]
+    ();
   let snapshot =
     `Assoc
       [

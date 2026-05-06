@@ -233,6 +233,10 @@ let metric_keeper_usage_anomalies =
   "masc_keeper_usage_anomalies_total"
 let metric_keeper_total_cost_usd =
   "masc_keeper_total_cost_usd"
+let metric_keeper_turn_scheduled =
+  "masc_keeper_turn_scheduled_total"
+let metric_keeper_turn_completed =
+  "masc_keeper_turn_completed_total"
 
 (** #10530: keeper required-tool-contract violations (passive-only or
     text-only turns rejected by the keeper agent loop).
@@ -248,6 +252,10 @@ let metric_keeper_contract_violations =
     Labels: keeper. *)
 let metric_keeper_alive_but_stuck =
   "masc_keeper_alive_but_stuck_total"
+let metric_keeper_alive_but_stuck_seconds =
+  "masc_keeper_alive_but_stuck_seconds"
+let metric_keeper_alive_but_stuck_threshold_seconds =
+  "masc_keeper_alive_but_stuck_threshold_seconds"
 
 (** #12838 follow-up: supervisor recovery requests emitted after an
     alive-but-stuck detection.  Each increment means the supervisor set
@@ -2101,6 +2109,13 @@ let init () =
   add metric_keeper_turns
     "Total keeper turns by outcome (labels: keeper_name, outcome=success|failure|budget_exhausted|mutation_boundary)"
     Counter;
+  add metric_keeper_turn_scheduled
+    "Total keeper turns accepted for dispatch by keeper_name."
+    Counter;
+  add metric_keeper_turn_completed
+    "Total keeper turns that completed and emitted a metrics snapshot by \
+     keeper_name."
+    Counter;
   add metric_keeper_input_tokens
     "Cumulative input tokens per keeper turn (labels: keeper_name, model)"
     Counter;
@@ -2135,6 +2150,13 @@ let init () =
      keepalive-running, but proactive_rt.last_ts has been frozen while \
      autonomous turns kept advancing. Labels: keeper."
     Counter;
+  add metric_keeper_alive_but_stuck_seconds
+    "Current alive-but-stuck elapsed seconds by keeper_name. Set to 0 when \
+     the keeper is not currently detected as alive-but-stuck."
+    Gauge;
+  add metric_keeper_alive_but_stuck_threshold_seconds
+    "Current alive-but-stuck detector threshold seconds by keeper_name."
+    Gauge;
   add metric_keeper_alive_but_stuck_recovery
     "Bounded recovery wakeups queued by alive_but_stuck_scan. \
      Labels: keeper, outcome."

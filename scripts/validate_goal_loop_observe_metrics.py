@@ -57,8 +57,9 @@ def alert_exprs(alert_text: str) -> dict[str, str]:
         line = lines[index]
         alert_match = re.match(r"\s*-\s*alert:\s*([A-Za-z0-9_:.-]+)\s*$", line)
         if alert_match:
-            current_alert = alert_match.group(1)
-            exprs.setdefault(current_alert, "")
+            alert_name = alert_match.group(1)
+            current_alert = alert_name
+            exprs.setdefault(alert_name, "")
             index += 1
             continue
 

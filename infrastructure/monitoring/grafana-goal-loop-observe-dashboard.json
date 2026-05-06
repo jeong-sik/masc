@@ -5,6 +5,7 @@
       "masc_keeper_turn_completed_total{keeper_name}",
       "masc_keeper_turn_scheduled_total{keeper_name}",
       "masc_keeper_semaphore_wait_seconds_bucket{keeper_name,cascade_profile}",
+      "masc_keeper_semaphore_wait_timeout_total{keeper,channel}",
       "masc_keeper_alive_but_stuck_seconds{keeper_name}",
       "masc_keeper_alive_but_stuck_threshold_seconds{keeper_name}",
       "masc_keeper_zombie_loop_detected_total{keeper_name}",
@@ -71,9 +72,14 @@
           "expr": "sum by (keeper_name) (rate(masc_keeper_turn_completed_total[5m])) / clamp_min(sum by (keeper_name) (rate(masc_keeper_turn_scheduled_total[5m])), 0.001)",
           "legendFormat": "{{keeper_name}}",
           "refId": "A"
+        },
+        {
+          "expr": "sum(increase(masc_keeper_semaphore_wait_timeout_total[5m])) / clamp_min(sum(increase(masc_keeper_turn_scheduled_total[5m])), 1)",
+          "legendFormat": "fleet starvation rate",
+          "refId": "B"
         }
       ],
-      "title": "Keeper Turn Success Rate",
+      "title": "Keeper Turn Rates",
       "type": "timeseries"
     },
     {

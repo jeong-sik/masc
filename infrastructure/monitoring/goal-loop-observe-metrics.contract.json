@@ -33,6 +33,24 @@
       ]
     },
     {
+      "signal_id": "starvation_rate",
+      "metric_names": [
+        "masc_keeper_semaphore_wait_timeout_total",
+        "masc_keeper_turn_scheduled_total"
+      ],
+      "alert_names": [
+        "GoalLoopKeeperStarvationRateCritical"
+      ],
+      "threshold_fragments": [
+        "[5m]",
+        "> 0.05"
+      ],
+      "dashboard_query_fragments": [
+        "masc_keeper_semaphore_wait_timeout_total",
+        "masc_keeper_turn_scheduled_total"
+      ]
+    },
+    {
       "signal_id": "keeper_alive_but_stuck",
       "metric_names": [
         "masc_keeper_alive_but_stuck_seconds",

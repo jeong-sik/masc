@@ -21,6 +21,7 @@ groups:
           absent(masc_keeper_turn_completed_total)
           or absent(masc_keeper_turn_scheduled_total)
           or absent(masc_keeper_semaphore_wait_seconds_bucket)
+          or absent(masc_keeper_semaphore_wait_timeout_total)
           or absent(masc_keeper_alive_but_stuck_seconds)
           or absent(masc_keeper_alive_but_stuck_threshold_seconds)
           or absent(masc_keeper_zombie_loop_detected_total)
@@ -90,6 +91,25 @@ groups:
           description: |
             Bounded semaphore acquisition is no longer bounded in practice.
             Check turn slot holder state and fallback ladder activation.
+
+      - alert: GoalLoopKeeperStarvationRateCritical
+        expr: |
+          (
+            sum(increase(masc_keeper_semaphore_wait_timeout_total[5m]))
+            /
+            clamp_min(sum(increase(masc_keeper_turn_scheduled_total[5m])), 1)
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          component: goal_loop
+          subsystem: observe
+        annotations:
+          summary: "Fleet keeper starvation rate > 5%"
+          description: |
+            More than 5% of scheduled keeper turns are ending in
+            semaphore-wait timeouts. This converts the Phase 0
+            starvation-rate requirement into an alertable fleet ratio.
 
       - alert: GoalLoopKeeperAliveButStuckCritical
         expr: |

@@ -88,8 +88,8 @@ let turn_reason_to_string = function
   | Task_backlog _ -> "task_backlog"
   | Task_reactive_cooldown_elapsed -> "task_reactive_cooldown_elapsed"
   | Never_started -> "never_started"
-  | Min_interval_elapsed
-  | Entropic_oscillation -> "min_interval_elapsed"
+  | Min_interval_elapsed -> "min_interval_elapsed"
+  | Entropic_oscillation -> "entropic_oscillation"
 
 let skip_reason_to_string = function
   | Keeper_paused -> "keeper_paused"
@@ -1099,6 +1099,15 @@ let provider_cooldown_remaining_sec_for_cascade
           | [] -> Some 0
           | first :: rest -> Some (List.fold_left min first rest)
 
+let entropic_oscillation_interval_sec = 600
+
+let entropic_oscillation_probability_percent = 5
+
+let should_inject_entropic_oscillation
+    ~since_last_scheduled_autonomous ~draw_percent =
+  since_last_scheduled_autonomous >= entropic_oscillation_interval_sec
+  && draw_percent >= 0
+  && draw_percent < entropic_oscillation_probability_percent
 
 let keeper_cycle_decision
     ?(provider_cooldown_remaining_sec =
@@ -1229,10 +1238,10 @@ let keeper_cycle_decision
            on top defeats its purpose. Without this bypass, keepers ignore
            unclaimed work for idle_gate seconds even when the backlog signal
            is ready to fire. Ref: #7226 claim-first + idle_gate observation. *)
-        let entropic_oscillation_interval = 600 in
         let should_oscillate =
-          since_last_scheduled_autonomous >= entropic_oscillation_interval
-          && (Random.int 100 < 5)
+          should_inject_entropic_oscillation
+            ~since_last_scheduled_autonomous
+            ~draw_percent:(Random.int 100)
         in
         let should_run =
           is_bootstrap

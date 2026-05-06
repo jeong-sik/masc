@@ -24,6 +24,7 @@ type cli_transport_overrides =
   claude_permission_mode : string option;
   claude_max_turns : int option;
   gemini_yolo : bool option;
+  cli_subprocess_idle_sec : float option;
 }
 
 type config =

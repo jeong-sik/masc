@@ -11,6 +11,15 @@ type cli_transport_overrides = {
   claude_permission_mode : string option;
   claude_max_turns : int option;
   gemini_yolo : bool option;
+  cli_subprocess_idle_sec : float option;
+  (* When [Some s], the CLI subprocess is aborted via SIGINT if no
+     stdout line arrives within [s] seconds. Currently honoured only
+     by [Kimi_cli_transport_local], which calls
+     [Cli_common_subprocess.run_stream_lines] directly. The other CLI
+     transports (claude_code, gemini_cli, codex_cli) route through
+     agent_sdk [Transport_*_cli.create] whose configs do not yet
+     expose [stdout_idle_timeout_s]; an OAS upstream change is needed
+     to honour this field there. *)
 }
 
 let claude_code_max_turns_hard_cap = 30
@@ -774,6 +783,7 @@ module Kimi_cli_transport_local = struct
     mcp_config_json : string list;
     extra_env : (string * string) list;
     cancel : unit Eio.Promise.t option;
+    stdout_idle_timeout_s : float option;
   }
 
   let default_config =
@@ -785,6 +795,7 @@ module Kimi_cli_transport_local = struct
       mcp_config_json = [];
       extra_env = [];
       cancel = None;
+      stdout_idle_timeout_s = None;
     }
 
   (* Kimi CLI imports [setproctitle] on macOS before processing the
@@ -1261,9 +1272,19 @@ module Kimi_cli_transport_local = struct
           let on_line line =
             if String.trim line <> "" then seen_lines := line :: !seen_lines
           in
+          let stdout_idle_timeout_s = config.stdout_idle_timeout_s in
+          let clock_opt =
+            match stdout_idle_timeout_s with
+            | None -> None
+            | Some _ -> (
+                match Process_eio.get_clock () with
+                | Ok c -> Some c
+                | Error _ -> None)
+          in
           let run_result, measured_latency_ms =
             Inference_utils.timed (fun () ->
                 Llm_provider.Cli_common_subprocess.run_stream_lines ~sw ~mgr
+                  ?clock:clock_opt ?stdout_idle_timeout_s
                   ~name:"kimi" ~cwd:config.cwd ~extra_env:config.extra_env
                   ~on_stderr_line
                   ?stdin_content:(stdin_for_prompt prompt)
@@ -1335,9 +1356,19 @@ module Kimi_cli_transport_local = struct
                           emit_blocks ~on_event ~start_index:!next_index
                             blocks))
           in
+          let stdout_idle_timeout_s = config.stdout_idle_timeout_s in
+          let clock_opt =
+            match stdout_idle_timeout_s with
+            | None -> None
+            | Some _ -> (
+                match Process_eio.get_clock () with
+                | Ok c -> Some c
+                | Error _ -> None)
+          in
           match
             classify_cli_error
               (Llm_provider.Cli_common_subprocess.run_stream_lines ~sw ~mgr
+                 ?clock:clock_opt ?stdout_idle_timeout_s
                  ~name:"kimi" ~cwd:config.cwd ~extra_env:config.extra_env
                  ~on_stderr_line
                  ?stdin_content:(stdin_for_prompt prompt)
@@ -1488,6 +1519,7 @@ let non_http_transport_of_provider
                   claude_permission_mode = None;
                   claude_max_turns = None;
                   gemini_yolo = None;
+                  cli_subprocess_idle_sec = None;
                 }
               cli_transport_overrides
           in
@@ -1525,6 +1557,7 @@ let non_http_transport_of_provider
                   claude_permission_mode = None;
                   claude_max_turns = None;
                   gemini_yolo = None;
+                  cli_subprocess_idle_sec = None;
                 }
               cli_transport_overrides
           in
@@ -1548,6 +1581,10 @@ let non_http_transport_of_provider
           let cwd =
             Option.bind cli_transport_overrides (fun overrides -> overrides.cwd)
           in
+          let stdout_idle_timeout_s =
+            Option.bind cli_transport_overrides (fun overrides ->
+              overrides.cli_subprocess_idle_sec)
+          in
           let mcp_config_json =
             kimi_cli_runtime_mcp_jsons ~base:[] runtime_mcp_policy
           in
@@ -1562,6 +1599,7 @@ let non_http_transport_of_provider
               config_json;
               mcp_config_json;
               extra_env;
+              stdout_idle_timeout_s;
             }
           in
           Ok

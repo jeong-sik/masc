@@ -56,9 +56,12 @@ type cli_transport_overrides =
   claude_permission_mode : string option;
   claude_max_turns : int option;
   gemini_yolo : bool option;
+  cli_subprocess_idle_sec : float option;
 }
-(** Per-call overrides threaded into the local CLI
-    transports (Claude Code, Gemini CLI, Kimi CLI). *)
+(** Per-call overrides threaded into the local CLI transports
+    (Claude Code, Gemini CLI, Kimi CLI).
+    [cli_subprocess_idle_sec] is currently honoured only by Kimi CLI;
+    see {!Oas_worker_exec_transport.cli_transport_overrides}. *)
 
 (** {1 Config} *)
 

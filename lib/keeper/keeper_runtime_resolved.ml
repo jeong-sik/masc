@@ -90,6 +90,21 @@ let stream_idle_timeout_sec_live () =
     (Float.min 600.0
        (get_float ~default:120.0 "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"))
 
+(* Per-call CLI subprocess idle timeout. Read fresh each turn rather than
+   frozen at server boot — the value sits outside the keepalive budget
+   contract enforced by the [t] snapshot. Range [10, 600] mirrors
+   [stream_idle_timeout_sec_live] but allows lower floors for CLI
+   transports that should fail faster than HTTP streaming providers.
+
+   SSOT: must match Env_config_keeper.KeeperKeepalive.cli_subprocess_idle_sec
+   (same default 120, same range [10, 600]). *)
+let cli_subprocess_idle_sec_live () =
+  Float.max 10.0
+    (Float.min 600.0
+       (get_float ~default:120.0 "MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC"))
+
+let cli_subprocess_idle_sec = cli_subprocess_idle_sec_live
+
 let oas_timeout_override_sec_live ~turn_timeout_sec =
   match Env_config_core.raw_value_opt "MASC_KEEPER_OAS_TIMEOUT_SEC" with
   | Some raw ->

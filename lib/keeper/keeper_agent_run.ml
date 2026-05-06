@@ -272,11 +272,18 @@ let run_turn
     (* OAS [stream_idle_timeout_s] bounds inter-line idle on HTTP streams
        (Anthropic/OpenAI/Gemini/GLM/Ollama). The deadline resets after each
        successful line, so this is gap detection, not total run cap.
-       (CLI subprocess transports ignore it; bounded separately by OAS
-       cli_common_subprocess idle.) Default 120s catches real network/stream
-       hangs while preserving legitimate reasoning pauses + provider
-       keepalives. If the total OAS timeout is shorter, the idle gap is
-       clamped to that total cap so the nested timeout envelope is explicit. *)
+
+       CLI subprocess transports use a separate envelope:
+       [cli_subprocess_idle_sec], wired into [cli_transport_overrides]
+       below and forwarded to [Cli_common_subprocess.run_stream_lines]
+       via [stdout_idle_timeout_s] (Kimi CLI today; Claude Code / Gemini
+       CLI / Codex CLI need an OAS upstream change to expose the same
+       parameter in their transport configs).
+
+       Default 120 s catches real network/stream hangs while preserving
+       legitimate reasoning pauses + provider keepalives. If the total
+       OAS timeout is shorter, the idle gap is clamped to that total cap
+       so the nested timeout envelope is explicit. *)
     let stream_idle_timeout_s =
       Some
         (Keeper_runtime_resolved.stream_idle_timeout_for_total_timeout
@@ -315,6 +322,9 @@ let run_turn
               ~base_path:config.base_path
               ~agent_name:meta.agent_name
       in
+      let cli_subprocess_idle_sec =
+        Some (Keeper_runtime_resolved.cli_subprocess_idle_sec ())
+      in
       Some
         ({
           cwd = Some keeper_sandbox_root;
@@ -327,6 +337,7 @@ let run_turn
              | Some mode ->
                Some (String.equal (String.lowercase_ascii mode) "yolo")
              | None -> None);
+          cli_subprocess_idle_sec;
         } : Oas_worker.cli_transport_overrides)
     in
     (* Phase 0: wake-time payload telemetry (Option C baseline).

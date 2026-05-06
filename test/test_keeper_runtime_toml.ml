@@ -516,6 +516,37 @@ let test_resolved_runtime_prefers_env_over_toml () =
     "env"
     (Keeper_runtime_resolved.source_to_string runtime.turn_timeout_sec.source)
 
+let test_resolved_cli_subprocess_idle_default_120s () =
+  with_clean_boot_overrides @@ fun () ->
+  Keeper_runtime_resolved.init ();
+  check (float 0.0001) "cli_subprocess_idle default 120s"
+    120.0 (Keeper_runtime_resolved.cli_subprocess_idle_sec ())
+
+let test_resolved_cli_subprocess_idle_clamps_low () =
+  with_clean_boot_overrides @@ fun () ->
+  with_env "MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC" (Some "1") @@ fun () ->
+  Keeper_runtime_resolved.init ();
+  check (float 0.0001) "cli_subprocess_idle clamps to 10s floor"
+    10.0 (Keeper_runtime_resolved.cli_subprocess_idle_sec ())
+
+let test_resolved_cli_subprocess_idle_clamps_high () =
+  with_clean_boot_overrides @@ fun () ->
+  with_env "MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC" (Some "9999") @@ fun () ->
+  Keeper_runtime_resolved.init ();
+  check (float 0.0001) "cli_subprocess_idle clamps to 600s ceiling"
+    600.0 (Keeper_runtime_resolved.cli_subprocess_idle_sec ())
+
+let test_resolved_cli_subprocess_idle_from_toml () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  write_toml base_path "[turn]\ncli_subprocess_idle_sec = 45\n";
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Error msg -> failf "unexpected error: %s" msg
+   | Ok _ -> ());
+  Keeper_runtime_resolved.init ();
+  check (float 0.0001) "cli_subprocess_idle from toml"
+    45.0 (Keeper_runtime_resolved.cli_subprocess_idle_sec ())
+
 let () =
   run "keeper_runtime_toml"
     [ ( "resolve_overrides"
@@ -543,5 +574,9 @@ let () =
         ; test_case "resolved stream idle timeout defaults and clamps to total" `Quick test_resolved_stream_idle_timeout_defaults_and_clamps_to_total
         ; test_case "resolved stream idle timeout uses toml" `Quick test_resolved_stream_idle_timeout_uses_toml
         ; test_case "resolved runtime prefers env over toml" `Quick test_resolved_runtime_prefers_env_over_toml
+        ; test_case "cli subprocess idle default 120s" `Quick test_resolved_cli_subprocess_idle_default_120s
+        ; test_case "cli subprocess idle from toml" `Quick test_resolved_cli_subprocess_idle_from_toml
+        ; test_case "cli subprocess idle clamps to 10s floor" `Quick test_resolved_cli_subprocess_idle_clamps_low
+        ; test_case "cli subprocess idle clamps to 600s ceiling" `Quick test_resolved_cli_subprocess_idle_clamps_high
         ] )
     ]

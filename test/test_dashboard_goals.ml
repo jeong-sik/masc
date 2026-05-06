@@ -178,6 +178,25 @@ let append_keeper_decision_with_null_telemetry
         ("telemetry", `Null);
       ])
 
+let append_keeper_decision_terminal_reason
+    (config : Coord.config) (meta : Keeper_types.keeper_meta) =
+  Fs_compat.append_jsonl
+    (Keeper_types.keeper_decision_log_path config meta.name)
+    (`Assoc
+      [
+        ("ts_unix", `Float (Unix.gettimeofday ()));
+        ("turn_id", `Int 11);
+        ( "terminal_reason",
+          `Assoc
+            [
+              ("code", `String "decision_specific_terminal_reason");
+              ("source", `String "decision_log");
+              ("severity", `String "warn");
+              ("summary", `String "decision terminal reason is more specific");
+              ("next_action", `String "follow_decision_terminal_reason");
+            ] );
+      ])
+
 let root_node json =
   match json |> member "tree" |> to_list with
   | node :: _ -> node
@@ -963,6 +982,61 @@ let test_goal_detail_promotes_newer_runtime_blocker_over_stale_receipt () =
         "runtime_blocker"
         (runtime_trust |> member "latest_causal_event" |> member "kind" |> to_string)
 
+let test_goal_detail_keeps_decision_terminal_reason_over_newer_blocker () =
+  with_room @@ fun config ->
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Prefer decision reason" () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  let meta =
+    make_keeper_meta ~name:"decision-over-blocker-keeper" ~goal_id:goal.id
+  in
+  (match Keeper_types.write_meta ~force:true config meta with
+   | Ok () -> ()
+   | Error err -> fail ("write_meta failed: " ^ err));
+  append_keeper_receipt config meta;
+  append_keeper_decision_terminal_reason config meta;
+  let blocked_meta =
+    {
+      meta with
+      runtime =
+        {
+          meta.runtime with
+          usage =
+            {
+              meta.runtime.usage with
+              total_turns = meta.runtime.usage.total_turns + 1;
+              last_turn_ts = Unix.gettimeofday () +. 60.0;
+            };
+          last_blocker =
+            "Internal error: [masc_oas_error] {\"kind\":\"oas_timeout_budget\"}";
+          last_blocker_class = Some Keeper_types.Oas_timeout_budget;
+        };
+    }
+  in
+  (match Keeper_types.write_meta ~force:true config blocked_meta with
+   | Ok () -> ()
+   | Error err -> fail ("write_meta failed: " ^ err));
+  match Dashboard_goals.goal_detail_json ~config ~goal_id:goal.id with
+  | Error msg -> fail msg
+  | Ok json ->
+      let linked_keeper =
+        match json |> member "linked_keepers" |> to_list with
+        | keeper :: _ -> keeper
+        | [] -> fail "expected linked keeper detail"
+      in
+      let terminal_reason =
+        linked_keeper
+        |> member "runtime_trust"
+        |> member "latest_terminal_reason"
+      in
+      check string "decision terminal reason keeps precedence"
+        "decision_specific_terminal_reason"
+        (terminal_reason |> member "code" |> to_string);
+      check string "decision source retained" "decision_log"
+        (terminal_reason |> member "source" |> to_string)
+
 let test_goal_detail_derives_attention_from_receipt_disposition () =
   with_room @@ fun config ->
   let goal, _kind =
@@ -1062,6 +1136,10 @@ let () =
             "goal detail promotes newer runtime blocker over stale receipt"
             `Quick
             test_goal_detail_promotes_newer_runtime_blocker_over_stale_receipt;
+          test_case
+            "goal detail keeps decision terminal reason over newer blocker"
+            `Quick
+            test_goal_detail_keeps_decision_terminal_reason_over_newer_blocker;
           test_case
             "goal detail derives attention from receipt disposition"
             `Quick

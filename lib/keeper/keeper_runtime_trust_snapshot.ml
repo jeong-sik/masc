@@ -190,6 +190,11 @@ let receipt_ended_at_unix receipt =
       if ts > 0.0 then Some ts else None
   | None -> None
 
+(* Receipt timestamps are serialized with lower precision than runtime
+   last-turn observations, so a tiny tolerance avoids treating same-turn
+   observations as newer blockers because of formatting jitter. *)
+let runtime_blocker_receipt_timestamp_epsilon_sec = 0.001
+
 let runtime_blocker_supersedes_receipt ~meta ~runtime_blocker_fields
     latest_receipt =
   match assoc_string_opt "runtime_blocker_class" runtime_blocker_fields with
@@ -199,7 +204,9 @@ let runtime_blocker_supersedes_receipt ~meta ~runtime_blocker_fields
       | None -> true
       | Some receipt -> (
           match receipt_ended_at_unix receipt with
-          | Some receipt_ts -> meta.runtime.usage.last_turn_ts > receipt_ts +. 0.001
+          | Some receipt_ts ->
+              meta.runtime.usage.last_turn_ts
+              > receipt_ts +. runtime_blocker_receipt_timestamp_epsilon_sec
           | None -> meta.runtime.usage.last_turn_ts > 0.0))
 
 let current_receipt_for_runtime_state ~meta ~runtime_blocker_fields
@@ -219,13 +226,13 @@ let runtime_blocker_timeline_ts ~meta ~runtime_blocker_fields latest_receipt =
 
 let latest_terminal_reason_opt ~meta ~runtime_blocker_fields ~latest_decision
     ~latest_receipt =
-  if runtime_blocker_supersedes_receipt ~meta ~runtime_blocker_fields
-       latest_receipt
-  then terminal_reason_from_runtime_blocker_fields runtime_blocker_fields
-  else
-    match Option.bind latest_decision terminal_reason_from_decision with
-    | Some _ as value -> value
-    | None -> Option.bind latest_receipt terminal_reason_from_receipt
+  match Option.bind latest_decision terminal_reason_from_decision with
+  | Some _ as value -> value
+  | None ->
+      if runtime_blocker_supersedes_receipt ~meta ~runtime_blocker_fields
+           latest_receipt
+      then terminal_reason_from_runtime_blocker_fields runtime_blocker_fields
+      else Option.bind latest_receipt terminal_reason_from_receipt
 
 let severity_of_approval_event event decision =
   match event with

@@ -97,6 +97,71 @@ class GoalLoopSchedulerTest(unittest.TestCase):
         self.assertEqual(due[0].name, "observe")
         self.assertEqual(due[0].reason, "verify_failed_reenter_observe")
 
+    def test_verify_fail_makes_loop_sleep_immediate(self) -> None:
+        now = datetime(2026, 5, 6, 0, 0, 0, tzinfo=timezone.utc)
+        configs = goal_loop_scheduler.phase_configs(no_command_config())
+        state = goal_loop_scheduler.normalize_state({}, configs, now)
+        state["phases"]["observe"]["last_started_at"] = iso(now - timedelta(seconds=1))
+        state["phases"]["verify"]["last_status"] = "FAIL"
+        state["phases"]["verify"]["last_completed_at"] = iso(now)
+
+        self.assertEqual(goal_loop_scheduler.seconds_until_next_due(state, now), 1)
+
+    def test_malformed_success_output_is_error(self) -> None:
+        self.assertEqual(
+            goal_loop_scheduler.infer_output_status("not json", "verify", 0),
+            "ERROR",
+        )
+        self.assertEqual(
+            goal_loop_scheduler.infer_output_status("[]", "verify", 0),
+            "ERROR",
+        )
+
+    def test_run_phase_uses_injected_tick_time(self) -> None:
+        now = datetime(2026, 5, 6, 0, 0, 0, tzinfo=timezone.utc)
+        config = goal_loop_scheduler.PhaseConfig(
+            name="observe",
+            cadence_seconds=5,
+            command=[
+                sys.executable,
+                "-c",
+                "import json; print(json.dumps({'status': 'PASS'}))",
+            ],
+        )
+        due = goal_loop_scheduler.DuePhase(
+            name="observe",
+            reason="never_run",
+            cadence_seconds=5,
+            next_due_at=iso(now),
+            lateness_seconds=0,
+        )
+
+        execution = goal_loop_scheduler.run_phase(config, due, now)
+
+        self.assertEqual(execution.started_at, iso(now))
+        self.assertGreaterEqual(
+            goal_loop_scheduler.parse_time(execution.completed_at),
+            now,
+        )
+
+    def test_tick_increments_loop_iteration(self) -> None:
+        now = datetime(2026, 5, 6, 0, 0, 0, tzinfo=timezone.utc)
+        first = goal_loop_scheduler.scheduler_tick(
+            config=no_command_config(),
+            state={},
+            now=now,
+            dry_run=True,
+        )
+        second = goal_loop_scheduler.scheduler_tick(
+            config=no_command_config(),
+            state=first,
+            now=now + timedelta(seconds=1),
+            dry_run=True,
+        )
+
+        self.assertEqual(first["loop_iteration"], "1")
+        self.assertEqual(second["loop_iteration"], "2")
+
     def test_tick_records_command_failure_as_critical_state(self) -> None:
         now = datetime(2026, 5, 6, 0, 0, 0, tzinfo=timezone.utc)
         config = {

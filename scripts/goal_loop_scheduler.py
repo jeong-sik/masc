@@ -189,6 +189,14 @@ def normalize_state(
     return normalized
 
 
+def increment_loop_iteration(value: Any) -> str:
+    if isinstance(value, int) and value >= 0:
+        return str(value + 1)
+    if isinstance(value, str) and value.isdigit():
+        return str(int(value) + 1)
+    return "1"
+
+
 def next_due_at(
     phase_state: dict[str, Any], cadence_seconds: int, now: datetime
 ) -> datetime:
@@ -257,9 +265,9 @@ def infer_output_status(stdout: str, phase: str, exit_code: int) -> str:
     try:
         parsed = json.loads(stdout)
     except json.JSONDecodeError:
-        return "PASS"
+        return "ERROR"
     if not isinstance(parsed, dict):
-        return "PASS"
+        return "ERROR"
     status = parsed.get("status")
     if isinstance(status, str) and status.strip():
         return status.strip().upper()
@@ -283,7 +291,8 @@ def run_phase(config: PhaseConfig, due: DuePhase, now: datetime) -> PhaseExecuti
             output_path=config.output_path,
             error="phase command is not configured",
         )
-    started = datetime.now(timezone.utc)
+    started = now
+    started_monotonic = time.monotonic()
     try:
         completed = subprocess.run(
             config.command,
@@ -292,7 +301,8 @@ def run_phase(config: PhaseConfig, due: DuePhase, now: datetime) -> PhaseExecuti
             text=True,
             timeout=config.timeout_seconds,
         )
-        ended = datetime.now(timezone.utc)
+        duration = round(time.monotonic() - started_monotonic, 3)
+        ended = started + timedelta(seconds=duration)
         stdout = completed.stdout
         if config.output_path is not None:
             Path(config.output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -304,20 +314,21 @@ def run_phase(config: PhaseConfig, due: DuePhase, now: datetime) -> PhaseExecuti
             status=status,
             started_at=iso_utc(started),
             completed_at=iso_utc(ended),
-            duration_seconds=round((ended - started).total_seconds(), 3),
+            duration_seconds=duration,
             exit_code=completed.returncode,
             reason=due.reason,
             output_path=config.output_path,
             error=error,
         )
     except subprocess.TimeoutExpired as error:
-        ended = datetime.now(timezone.utc)
+        duration = round(time.monotonic() - started_monotonic, 3)
+        ended = started + timedelta(seconds=duration)
         return PhaseExecution(
             phase=config.name,
             status="ERROR",
             started_at=iso_utc(started),
             completed_at=iso_utc(ended),
-            duration_seconds=round((ended - started).total_seconds(), 3),
+            duration_seconds=duration,
             exit_code=None,
             reason=due.reason,
             output_path=config.output_path,
@@ -390,6 +401,7 @@ def scheduler_tick(
 ) -> dict[str, Any]:
     configs = phase_configs(config)
     next_state = normalize_state(state, configs, now)
+    next_state["loop_iteration"] = increment_loop_iteration(state.get("loop_iteration"))
     due = select_due_phases(next_state, configs, now)
     next_state["due_phases"] = [asdict(item) for item in due]
     events = next_state["events"]
@@ -414,6 +426,8 @@ def scheduler_tick(
 
 
 def seconds_until_next_due(state: dict[str, Any], now: datetime) -> int:
+    if verify_failure_requires_observe(state):
+        return 1
     phases = state.get("phases", {})
     if not isinstance(phases, dict):
         return DEFAULT_CADENCES["observe"]

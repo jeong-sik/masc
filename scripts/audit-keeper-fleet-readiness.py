@@ -243,59 +243,96 @@ def tool_succeeded_in_row(row: dict[str, Any], tool_name: str) -> bool:
     return False
 
 
-def serialized_row(row: dict[str, Any]) -> str:
-    return json.dumps(row, ensure_ascii=False, sort_keys=True).lower()
+MARKER_LIST_FIELDS = (
+    "audit_markers",
+    "evidence_markers",
+    "lifecycle_markers",
+    "route_markers",
+)
+MARKER_OBJECT_FIELDS = (
+    "audit",
+    "evidence",
+    "metadata",
+    "route",
+    "tool_metadata",
+)
 
 
-def has_git_push_marker(text: str) -> bool:
-    return any(
-        marker in text
-        for marker in (
-            '"action": "push"',
-            '\\"action\\": \\"push\\"',
-            "'action': 'push'",
-            "git push",
-        )
-    )
+def normalized_marker(value: Any) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value.strip().lower()
+    return None
 
 
-def has_gh_pr_create_marker(text: str) -> bool:
-    if "pr create" not in text:
-        return False
-    return any(
-        marker in text
-        for marker in (
-            '"op": "gh"',
-            '\\"op\\": \\"gh\\"',
-            "op=gh",
-            "gh pr create",
-        )
-    )
+def structured_markers(row: dict[str, Any]) -> set[str]:
+    markers: set[str] = set()
+
+    def add_value(value: Any) -> None:
+        marker = normalized_marker(value)
+        if marker is not None:
+            markers.add(marker)
+
+    for key in MARKER_LIST_FIELDS:
+        value = row.get(key)
+        if isinstance(value, list):
+            for item in value:
+                add_value(item)
+        else:
+            add_value(value)
+
+    for key in MARKER_OBJECT_FIELDS:
+        value = row.get(key)
+        if isinstance(value, dict):
+            for marker_key in MARKER_LIST_FIELDS:
+                nested = value.get(marker_key)
+                if isinstance(nested, list):
+                    for item in nested:
+                        add_value(item)
+                else:
+                    add_value(nested)
+            for scalar_key in ("action", "event", "op", "sandbox_profile", "via"):
+                add_value(value.get(scalar_key))
+
+    for key in (
+        "action",
+        "execution_via",
+        "op",
+        "review_event",
+        "route_via",
+        "sandbox_profile",
+        "tool_action",
+        "via",
+    ):
+        add_value(row.get(key))
+
+    return markers
 
 
-def has_pr_approve_marker(text: str) -> bool:
-    return any(
-        marker in text
-        for marker in (
-            '"event": "approve"',
-            '\\"event\\": \\"approve\\"',
-            "'event': 'approve'",
-            "event=approve",
-        )
-    )
+def marker_matches(markers: set[str], *needles: str) -> bool:
+    for marker in markers:
+        if any(marker == needle or marker.startswith(f"{needle}:") for needle in needles):
+            return True
+    return False
 
 
-def has_docker_execution_marker(text: str) -> bool:
-    return any(
-        marker in text
-        for marker in (
-            '"via": "docker"',
-            '"via":"docker"',
-            '\\"via\\": \\"docker\\"',
-            '\\"via\\":\\"docker\\"',
-            "via=docker",
-        )
-    )
+def has_git_push_marker(row: dict[str, Any]) -> bool:
+    markers = structured_markers(row)
+    return marker_matches(markers, "git_push", "action=push") or "push" in markers
+
+
+def has_gh_pr_create_marker(row: dict[str, Any]) -> bool:
+    markers = structured_markers(row)
+    return marker_matches(markers, "pr_create", "gh_pr_create")
+
+
+def has_pr_approve_marker(row: dict[str, Any]) -> bool:
+    markers = structured_markers(row)
+    return marker_matches(markers, "pr_approve", "approve") or "approve" in markers
+
+
+def has_docker_execution_marker(row: dict[str, Any]) -> bool:
+    markers = structured_markers(row)
+    return marker_matches(markers, "docker", "via=docker") or "docker" in markers
 
 
 def pr_lifecycle_evidence_from_decision(
@@ -303,19 +340,12 @@ def pr_lifecycle_evidence_from_decision(
 ) -> tuple[set[str], set[str]]:
     evidence: set[str] = set()
     docker_evidence: set[str] = set()
-    text_cache: str | None = None
     docker_routed_cache: bool | None = None
-
-    def row_text() -> str:
-        nonlocal text_cache
-        if text_cache is None:
-            text_cache = serialized_row(row)
-        return text_cache
 
     def docker_routed() -> bool:
         nonlocal docker_routed_cache
         if docker_routed_cache is None:
-            docker_routed_cache = has_docker_execution_marker(row_text())
+            docker_routed_cache = has_docker_execution_marker(row)
         return docker_routed_cache
 
     def add(item: str) -> None:
@@ -327,45 +357,58 @@ def pr_lifecycle_evidence_from_decision(
         add("pr_create:keeper_pr_create")
     if any(
         tool_succeeded_in_row(row, tool) for tool in GIT_PUSH_TOOLS
-    ) and has_git_push_marker(row_text()):
+    ) and has_git_push_marker(row):
         add("git_push:masc_code_git")
     if (
         row.get("event") == "tool_exec"
         and row.get("tool") in SHELL_TOOLS
         and row_success(row)
-        and has_gh_pr_create_marker(row_text())
+        and has_gh_pr_create_marker(row)
     ):
         add(f"pr_create:{row['tool']}:gh_pr_create")
     if (
         row.get("event") == "tool_exec"
         and row.get("tool") in SHELL_TOOLS
         and row_success(row)
-        and has_git_push_marker(row_text())
+        and has_git_push_marker(row)
     ):
         add(f"git_push:{row['tool']}:git_push")
-    if tool_succeeded_in_row(row, "keeper_pr_review_comment") and has_pr_approve_marker(
-        row_text()
-    ):
+    if tool_succeeded_in_row(row, "keeper_pr_review_comment") and has_pr_approve_marker(row):
         add("pr_approve:keeper_pr_review_comment")
     return evidence, docker_evidence
+
+
+def decision_log_paths(base_path: Path, name: str) -> list[Path]:
+    log_dir = base_path / ".masc" / "keepers"
+    base_name = f"{name}.decisions.jsonl"
+    if not log_dir.exists():
+        return []
+    paths: list[tuple[int, Path]] = []
+    for path in log_dir.glob(f"{base_name}*"):
+        suffix = path.name[len(base_name):]
+        if suffix == "":
+            paths.append((0, path))
+        elif suffix.startswith(".") and suffix[1:].isdigit():
+            paths.append((int(suffix[1:]), path))
+    return [path for _, path in sorted(paths, key=lambda item: item[0])]
 
 
 def scan_keeper_evidence(
     base_path: Path, name: str
 ) -> tuple[float | None, set[str], set[str], set[str]]:
-    decisions = base_path / ".masc" / "keepers" / f"{name}.decisions.jsonl"
     latest_ts: float | None = None
     tools: set[str] = set()
     pr_lifecycle_evidence: set[str] = set()
     docker_pr_lifecycle_evidence: set[str] = set()
-    for row in iter_jsonl(decisions):
-        ts = numeric_field(row, "ts_unix")
-        if ts is not None:
-            latest_ts = ts if latest_ts is None else max(latest_ts, ts)
-        tools.update(tools_from_decision(row))
-        row_evidence, row_docker_evidence = pr_lifecycle_evidence_from_decision(row)
-        pr_lifecycle_evidence.update(row_evidence)
-        docker_pr_lifecycle_evidence.update(row_docker_evidence)
+    for decisions in decision_log_paths(base_path, name):
+        for row in iter_jsonl(decisions):
+            ts = numeric_field(row, "ts_unix")
+            if ts is not None:
+                latest_ts = ts if latest_ts is None else max(latest_ts, ts)
+            tools.update(tools_from_decision(row))
+            row_evidence, row_docker_evidence = pr_lifecycle_evidence_from_decision(row)
+            pr_lifecycle_evidence.update(row_evidence)
+            docker_pr_lifecycle_evidence.update(row_docker_evidence)
     return latest_ts, tools, pr_lifecycle_evidence, docker_pr_lifecycle_evidence
 
 

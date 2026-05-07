@@ -87,6 +87,12 @@ val set_sse_queue_snapshot :
 val set_sse_external_subscribers : int -> unit
 (** Sets [masc_sse_external_subscribers] gauge. *)
 
+val inc_sse_client_evicted : unit -> unit
+(** Increments [masc_sse_client_evictions_total] when {!Sse.register}
+    drops the oldest client because [max_clients] was reached.  Paired
+    with the [Evicting oldest client] log line so operators can see
+    eviction storms in metrics. *)
+
 (** {1 gRPC metrics} *)
 
 val set_grpc_active_streams : int -> unit

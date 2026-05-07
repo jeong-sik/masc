@@ -78,6 +78,9 @@ let set_sse_queue_snapshot ~avg_depth ~max_depth ~hot_sessions =
 let set_sse_external_subscribers count =
   Prometheus.set_gauge Prometheus.metric_sse_external_subscribers (float_of_int count)
 
+let inc_sse_client_evicted () =
+  Prometheus.inc_counter Prometheus.metric_sse_client_evictions ()
+
 (** {1 gRPC Metrics} *)
 
 let set_grpc_active_streams count =

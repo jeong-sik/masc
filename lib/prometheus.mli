@@ -1002,6 +1002,7 @@ val metric_sse_stream_queue_depth : string
 val metric_sse_queue_depth_avg : string
 val metric_sse_queue_depth_max : string
 val metric_sse_external_subscribers : string
+val metric_sse_client_evictions : string
 val metric_grpc_active_streams : string
 val metric_grpc_heartbeat_latency : string
 val metric_grpc_subscribers : string

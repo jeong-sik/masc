@@ -24,6 +24,38 @@ let runtime_warning_ctx_ratio =
 let live_keeper_cascade_name (raw : string) =
   Keeper_cascade_profile.resolve_live raw
 
+let dashboard_keeper_recent_alerts_surface = "dashboard_keeper_recent_alerts"
+
+let report_dashboard_keeper_recent_alert_drop ~reason ~path ~detail =
+  Safe_ops.report_persistence_read_drop
+    ~on_drop:(fun () ->
+      Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+        ~labels:[("surface", dashboard_keeper_recent_alerts_surface); ("reason", reason)]
+        ())
+    ~surface:dashboard_keeper_recent_alerts_surface
+    ~reason
+    ~path
+    ~detail
+
+let parse_recent_alert_line ~path line =
+  match Yojson.Safe.from_string line with
+  | `Assoc _ as json -> Some json
+  | _ ->
+      report_dashboard_keeper_recent_alert_drop
+        ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+        ~path
+        ~detail:"expected JSON object row";
+      None
+  | exception (Eio.Cancel.Cancelled _ as exn) ->
+      let bt = Printexc.get_raw_backtrace () in
+      Printexc.raise_with_backtrace exn bt
+  | exception Yojson.Json_error detail ->
+      report_dashboard_keeper_recent_alert_drop
+        ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+        ~path
+        ~detail;
+      None
+
 (** Compute keeper health score (0-100). Pure function.
     Inputs: restart_count, max_restarts, recent_crash_count,
             is_dead, context_ratio (0.0-1.0). *)
@@ -1290,9 +1322,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
     let lines =
       Keeper_memory.read_file_tail_lines alerts_path ~max_bytes:50000 ~max_lines:10
     in
-    List.filter_map (fun line ->
-      try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None
-    ) lines
+    List.filter_map (parse_recent_alert_line ~path:alerts_path) lines
   in
   `Assoc [
     ("keepers", `List summaries);

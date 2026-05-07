@@ -1119,6 +1119,7 @@
 (include stanzas/test_dashboard_feature_health.inc)
 (include stanzas/test_dashboard_goals.inc)
 (include stanzas/test_dashboard_governance_metrics.inc)
+(include stanzas/test_dashboard_keeper_alerts_read_drop.inc)
 (include stanzas/test_dashboard_keeper_metrics_10286.inc)
 (include stanzas/test_dashboard_keeper_routes.inc)
 (include stanzas/test_dashboard_tla_specs.inc)

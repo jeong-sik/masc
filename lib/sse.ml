@@ -72,12 +72,8 @@ let stream_capacity =
   let default = 256 in
   let lower = 8 and upper = 1024 in
   let clamp n = max lower (min upper n) in
-  match Sys.getenv_opt "MASC_SSE_STREAM_CAPACITY" with
-  | None -> default
-  | Some raw ->
-    (match int_of_string_opt (String.trim raw) with
-     | Some n -> clamp n
-     | None -> default)
+  clamp
+    (Env_config_core.get_int ~default "MASC_SSE_STREAM_CAPACITY")
 
 (** SSE client state.
     [event_stream] is the per-session mailbox.  [broadcast] pushes here;

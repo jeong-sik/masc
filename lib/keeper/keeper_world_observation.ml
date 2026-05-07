@@ -261,12 +261,8 @@ let backlog_updated_since_last_scheduled_autonomous
 let claim_goal_scope_filter ?agent_tool_names ~(config : Coord.config)
     ~(meta : keeper_meta) () =
   let scope =
-    Keeper_runtime_contract.resolve_claim_goal_scope
-      ?agent_tool_names
-      ~allow_empty_goal_scope_fallback:false
-      ~config
-      ~meta
-      ()
+    Keeper_runtime_contract.resolve_observation_claim_goal_scope
+      ?agent_tool_names ~config ~meta ()
   in
   scope.task_filter
 

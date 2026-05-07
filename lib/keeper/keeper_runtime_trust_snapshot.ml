@@ -190,10 +190,11 @@ let receipt_ended_at_unix receipt =
       if ts > 0.0 then Some ts else None
   | None -> None
 
-(* Receipt timestamps are serialized with lower precision than runtime
-   last-turn observations, so a tiny tolerance avoids treating same-turn
-   observations as newer blockers because of formatting jitter. *)
-let runtime_blocker_receipt_timestamp_epsilon_sec = 0.001
+(* Receipt timestamps are serialized as whole-second ISO strings, while runtime
+   last-turn observations keep fractional seconds.  A same-second receipt must
+   still be allowed to explain the blocker; otherwise the runtime blocker
+   silently overrides its operator disposition. *)
+let runtime_blocker_receipt_timestamp_epsilon_sec = 1.0
 
 let runtime_blocker_supersedes_receipt ~meta ~runtime_blocker_fields
     latest_receipt =

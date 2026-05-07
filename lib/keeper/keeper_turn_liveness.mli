@@ -66,3 +66,27 @@ val turn_livelock_max_attempts : unit -> int
 
 val turn_livelock_stuck_after_sec : unit -> float
 (** Configurable livelock detection stuck threshold (seconds). *)
+
+val max_consecutive_saturation_skips : unit -> int
+(** Upper bound on consecutive saturation skips per keeper (env
+    [MASC_MAX_CONSECUTIVE_SATURATION_SKIPS], default 5, floored at
+    1).  When a keeper exceeds this count its next dispatch escapes
+    the saturation pre-skip path so a stuck or stale probe cannot
+    starve the keeper indefinitely. *)
+
+val saturation_skip_count_get : keeper_name:string -> int
+(** Current consecutive-skip count for [keeper_name].  Returns 0 when
+    the keeper has no recorded skips. *)
+
+val saturation_skip_count_inc : keeper_name:string -> int
+(** Increment and return the new consecutive-skip count for
+    [keeper_name].  Caller decides whether to act on the new count
+    (compare against {!max_consecutive_saturation_skips}). *)
+
+val saturation_skip_count_reset : keeper_name:string -> unit
+(** Reset [keeper_name]'s consecutive-skip count to zero.  Called on
+    every non-skip path (probe reports unsaturated, non-ollama
+    cascade, force-dispatch escape). *)
+
+val saturation_skip_count_clear_all : unit -> unit
+(** Test helper: clear all per-keeper consecutive-skip counters. *)

@@ -6639,6 +6639,12 @@ let satisfies_required_tool name input =
   Result.is_ok
     (KTD.required_tool_satisfaction (required_tool_call name input))
 
+let satisfies_explicit_required_tool ~required_tool_names name input =
+  Result.is_ok
+    (KTD.required_tool_satisfaction_for_required_names
+       ~required_tool_names
+       (required_tool_call name input))
+
 let test_required_tool_satisfaction_rejects_passive_tools () =
   check bool "masc_status is passive" false
     (satisfies_required_tool "masc_status" (`Assoc []));
@@ -6671,6 +6677,22 @@ let test_required_tool_satisfaction_accepts_mutating_tools () =
             ("op", `String "gh");
             ("cmd", `String "pr comment 123 --body ok");
           ]))
+
+let test_explicit_required_tool_satisfaction_accepts_named_passive_tool () =
+  check bool "generic masc_web_search remains passive" false
+    (satisfies_required_tool "masc_web_search" (`Assoc []));
+  check bool "explicit masc_web_search satisfies required contract" true
+    (satisfies_explicit_required_tool
+       ~required_tool_names:[ "masc_web_search" ]
+       "masc_web_search" (`Assoc []));
+  check bool "explicit required list canonicalizes WebSearch alias" true
+    (satisfies_explicit_required_tool
+       ~required_tool_names:[ "masc_web_search" ]
+       "WebSearch" (`Assoc []));
+  check bool "unlisted passive tool still rejected" false
+    (satisfies_explicit_required_tool
+       ~required_tool_names:[ "keeper_bash" ]
+       "masc_web_search" (`Assoc []))
 
 let test_tool_usage_delta_uses_registry_counts () =
   let before =
@@ -7544,6 +7566,7 @@ let test_required_gate_surface_removes_passive_distractions () =
     [ "keeper_task_claim"; "keeper_board_post" ]
     (Surface.tool_names_for_required_gate_surface
        ~tool_gate_requested:true
+       ~required_tool_names:[]
        [ "keeper_tasks_list"; "keeper_task_claim"; "keeper_stay_silent";
          "keeper_board_post"; "masc_status" ]);
   check (list string)
@@ -7551,13 +7574,22 @@ let test_required_gate_surface_removes_passive_distractions () =
     [ "keeper_tasks_list"; "keeper_board_post" ]
     (Surface.tool_names_for_required_gate_surface
        ~tool_gate_requested:false
+       ~required_tool_names:[]
        [ "keeper_tasks_list"; "keeper_board_post" ]);
   check (list string)
     "passive-only surface remains unchanged when no action exists"
     [ "keeper_tasks_list"; "masc_status" ]
     (Surface.tool_names_for_required_gate_surface
        ~tool_gate_requested:true
-       [ "keeper_tasks_list"; "masc_status" ])
+       ~required_tool_names:[]
+       [ "keeper_tasks_list"; "masc_status" ]);
+  check (list string)
+    "explicit read-only required tool survives required gate"
+    [ "masc_web_search"; "keeper_board_post" ]
+    (Surface.tool_names_for_required_gate_surface
+       ~tool_gate_requested:true
+       ~required_tool_names:[ "masc_web_search" ]
+       [ "keeper_tasks_list"; "masc_web_search"; "keeper_board_post" ])
 
 let test_tools_for_gated_affordance_covers_each_variant () =
   (* Compile-time exhaustiveness already ensures every variant is
@@ -7831,11 +7863,13 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
        ~required_tool_names:[ "keeper_tasks_audit" ]
        ~allowed_tool_names:[ "keeper_tasks_audit"; "keeper_board_post" ]
    with
-   | Agent_sdk.Types.Auto -> ()
+   | Agent_sdk.Types.Tool name ->
+       check string "explicit passive required tool is forced"
+         "keeper_tasks_audit" name
    | other ->
        fail
          (Printf.sprintf
-            "expected Auto for passive-only required tool, got %s"
+            "expected Tool keeper_tasks_audit for passive-only explicit required tool, got %s"
             (Agent_sdk.Types.show_tool_choice other)));
   (match
      Surface.preferred_tool_choice_for_required_tool_names
@@ -8356,6 +8390,10 @@ let () =
             test_required_tool_satisfaction_rejects_passive_tools;
           test_case "required tool predicate accepts mutating tools" `Quick
             test_required_tool_satisfaction_accepts_mutating_tools;
+          test_case
+            "explicit required tool predicate accepts named passive tool"
+            `Quick
+            test_explicit_required_tool_satisfaction_accepts_named_passive_tool;
           test_case "tool usage delta uses registry counts" `Quick
             test_tool_usage_delta_uses_registry_counts;
           test_case "tool usage delta ignores removed tools" `Quick

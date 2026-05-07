@@ -106,9 +106,17 @@ val turn_affordances_require_tool_gate_with_allowed :
 
 (** On a required-action turn, trim the visible surface to tools that can make
     progress when such tools exist. Passive status/read tools remain visible on
-    optional turns and on surfaces that have no actionable alternative. *)
+    optional turns and on surfaces that have no actionable alternative.
+
+    Explicit [required_tool_names] are preserved even when they are read-only:
+    operator/harness calls such as [masc_keeper_msg.required_tools =
+    ["masc_web_search"]] are a direct evidence contract, not a generic
+    actionable-world-signal gate. *)
 val tool_names_for_required_gate_surface :
-  tool_gate_requested:bool -> string list -> string list
+  tool_gate_requested:bool ->
+  required_tool_names:string list ->
+  string list ->
+  string list
 
 (** Whether the very first turn of a multi-turn slot should require
     a tool call. *)

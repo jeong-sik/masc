@@ -725,6 +725,7 @@ let prepare_agent_setup
       required_tool_names_for_turn
         ~current_task_required_tool_names:(current_task_required_tools ())
         ~per_call_required_tool_names:required_tool_names
+      |> List.map Keeper_tool_disclosure.canonical_tool_name
       |> Keeper_types.dedupe_keep_order
     in
     let required_tool_names =
@@ -810,7 +811,8 @@ let prepare_agent_setup
            ~allowed_tool_names:all_allowed
     in
     let all_allowed =
-      tool_names_for_required_gate_surface ~tool_gate_requested all_allowed
+      tool_names_for_required_gate_surface
+        ~tool_gate_requested ~required_tool_names all_allowed
     in
     let all_allowed =
       if List.length all_allowed > max_tools then (

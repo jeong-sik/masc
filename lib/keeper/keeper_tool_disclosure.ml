@@ -303,6 +303,20 @@ let required_tool_satisfaction
            "tool '%s' is read-only/passive and cannot satisfy a required-tool contract"
            tool_name)
 
+let required_tool_satisfaction_for_required_names
+      ~(required_tool_names : string list)
+      (call : Agent_sdk.Completion_contract.tool_call)
+  : (unit, string) result
+  =
+  let required_tool_names =
+    required_tool_names
+    |> List.map canonical_tool_name
+    |> Keeper_types.dedupe_keep_order
+  in
+  let tool_name = canonical_tool_name call.name in
+  if List.mem tool_name required_tool_names then Ok ()
+  else required_tool_satisfaction call
+
 let classify_tool_progress name =
   let name = canonical_tool_name name in
   if is_completion_tool_name name

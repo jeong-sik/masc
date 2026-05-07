@@ -207,19 +207,31 @@ let turn_affordances_require_tool_gate_with_allowed
 
 let tool_names_for_required_gate_surface
     ~(tool_gate_requested : bool)
+    ~(required_tool_names : string list)
     (tool_names : string list) : string list =
   let is_stay_silent name =
     match Tool_name.of_string name with
     | Some (Tool_name.Keeper Tool_name.Keeper.Stay_silent) -> true
     | _ -> false
   in
+  let canonical_required_tool_names =
+    required_tool_names
+    |> List.map Keeper_tool_disclosure.canonical_tool_name
+    |> Keeper_types.dedupe_keep_order
+  in
+  let is_explicit_required_tool_name name =
+    List.mem
+      (Keeper_tool_disclosure.canonical_tool_name name)
+      canonical_required_tool_names
+  in
   if not tool_gate_requested then tool_names
   else
     let actionable =
       tool_names
       |> List.filter (fun name ->
-        Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name
-        && not (is_stay_silent name))
+        is_explicit_required_tool_name name
+        || (Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name
+            && not (is_stay_silent name)))
       |> Keeper_types.dedupe_keep_order
     in
     match actionable with
@@ -301,9 +313,11 @@ let preferred_tool_choice_for_required_tool_names
     ~(required_tool_names : string list) ~(allowed_tool_names : string list) =
   let visible_required =
     required_tool_names
-    |> List.filter (fun name ->
-      List.mem name allowed_tool_names
-      && Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name)
+    |> List.filter_map (fun name ->
+      let canonical = Keeper_tool_disclosure.canonical_tool_name name in
+      if List.mem canonical allowed_tool_names then Some canonical
+      else if List.mem name allowed_tool_names then Some name
+      else None)
     |> Keeper_types.dedupe_keep_order
   in
   match visible_required with

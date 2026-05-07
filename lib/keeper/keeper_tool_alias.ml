@@ -19,6 +19,7 @@ let aliases : (string * string) list =
     "Grep", "keeper_shell";   (* op=rg routed at dispatch layer, Phase A.4 *)
     "Read", "keeper_fs_read";
     "Shell", "keeper_bash";   (* LLM occasionally hallucinates "Shell" for bash *)
+    "WebFetch", "masc_web_fetch";
     "WebSearch", "masc_web_search";
     "Write", "keeper_fs_edit"; (* create-vs-update collapsed at dispatch layer *)
   ]
@@ -35,6 +36,7 @@ let oas_dual_register : (string * string) list =
     "Edit", "keeper_fs_edit";
     "Grep", "keeper_shell";
     "Read", "keeper_fs_read";
+    "WebFetch", "masc_web_fetch";
     "WebSearch", "masc_web_search";
     "Write", "keeper_fs_edit";
   ]
@@ -43,7 +45,7 @@ let oas_dual_register : (string * string) list =
    check should not nuke a turn solely because these appeared — instead a
    teaching tool_result tells the LLM what surface to use. RFC-0006 §3.1. *)
 let hallucinated_builtins =
-  [ "Agent"; "Skill"; "WebFetch"; "TodoWrite"; "NotebookEdit" ]
+  [ "Agent"; "Skill"; "TodoWrite"; "NotebookEdit" ]
 
 let public_to_internal_tbl =
   let t = Hashtbl.create (List.length aliases) in
@@ -259,6 +261,17 @@ let grep_public_schema =
          schema parity.";
     ]
 
+(* Anthropic Code "WebFetch" schema. Maps directly to masc_web_fetch;
+   the payload already uses url/timeout. *)
+let web_fetch_public_schema =
+  object_schema ~required:[ "url" ]
+    [
+      property "url" "string"
+        "URL to fetch (http or https only).";
+      property "timeout" "integer"
+        "Request timeout in seconds (default 15, max 60).";
+    ]
+
 (* Anthropic Code "WebSearch" schema. Maps directly to masc_web_search;
    the payload already uses query/limit. *)
 let web_search_public_schema =
@@ -275,6 +288,7 @@ let public_input_schema = function
   | "Edit" -> Some edit_public_schema
   | "Grep" -> Some grep_public_schema
   | "Read" -> Some read_public_schema
+  | "WebFetch" -> Some web_fetch_public_schema
   | "WebSearch" -> Some web_search_public_schema
   | "Write" -> Some write_public_schema
   | _ -> None
@@ -393,6 +407,7 @@ let translate_input ~public input =
   | "Edit" -> translate_edit_input input
   | "Grep" -> translate_grep_input input
   | "Read" -> translate_read_input input
+  | "WebFetch" -> input
   | "WebSearch" -> input
   | "Write" -> translate_write_input input
   | _ -> input

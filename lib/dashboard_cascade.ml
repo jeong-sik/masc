@@ -444,6 +444,8 @@ let zero_provider_info (key : string) : Health.provider_info =
   ; latency_samples = 0
   ; avg_confidence = None
   ; confidence_samples = 0
+  ; avg_cost_usd = None
+  ; cost_samples = 0
   ; health_score = 1.0
   }
 

@@ -455,9 +455,19 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                                    let profile =
                                      mcp_eio_profile_of_transport_profile profile
                                    in
+                                   let body_with_agent =
+                                     Server_mcp_transport_http.body_with_canonical_http_actor
+                                       ~base_path ~auth_token httpun_request body_str
+                                   in
+                                   let internal_keeper_runtime =
+                                     Server_auth.is_verified_internal_keeper_request
+                                       ~base_path httpun_request
+                                   in
                                    let response_json =
                                      Mcp_eio.handle_request ~clock ~sw ~profile
-                                       ~mcp_session_id:session_id ?auth_token state body_str
+                                       ~mcp_session_id:session_id ?auth_token
+                                       ~internal_keeper_runtime state
+                                       body_with_agent
                                    in
                                    (match protocol_version_from_body body_str with
                                    | Some v -> remember_protocol_version session_id v

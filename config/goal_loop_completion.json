@@ -1,0 +1,50 @@
+{
+  "autoboot_warmup": {
+    "fairness_algorithm": "int32_djb2_bounded_jitter",
+    "required_keepers": [
+      "analyst",
+      "executor",
+      "glm-coding-plan",
+      "issue_king",
+      "janitor",
+      "masc-improver",
+      "nick0cave",
+      "qa-king",
+      "ramarama",
+      "sangsu",
+      "scholar",
+      "taskmaster",
+      "velvet-hammer",
+      "verifier"
+    ]
+  },
+  "verify_gates": {
+    "required_ids": [
+      "unit_tests",
+      "keeper_turn_success_rate_healthy",
+      "no_semaphore_skip",
+      "no_pricing_miss",
+      "no_utf8_repair",
+      "recovery_executed",
+      "admission_backpressure_observed",
+      "dashboard_snapshot_latency_p99",
+      "orient_recheck_no_still_present",
+      "orient_recheck_no_new_finding",
+      "tla_prompt_spec_tierrouting",
+      "tla_prompt_spec_validation",
+      "tla_prompt_spec_liveness",
+      "post_act_log_contract"
+    ]
+  },
+  "evidence": {
+    "post_act_kinds": [
+      "live_runtime_http",
+      "live_runtime_logs",
+      "live_runtime_status"
+    ]
+  },
+  "prompt_checklist": {
+    "statuses": ["PASS", "PARTIAL", "BLOCKED"],
+    "source_path_prefix": "prompt_corpus/GOAL_LOOP/"
+  }
+}

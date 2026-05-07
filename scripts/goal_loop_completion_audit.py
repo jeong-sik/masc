@@ -29,55 +29,23 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution path
     )
 
 
-POST_ACT_EVIDENCE_KINDS = {
-    "live_runtime_http",
-    "live_runtime_logs",
-    "live_runtime_status",
-}
-PROMPT_CHECKLIST_STATUSES = {"PASS", "PARTIAL", "BLOCKED"}
+REPO_ROOT = Path(__file__).resolve().parents[1]
+_CFG = json.loads(
+    (REPO_ROOT / "config" / "goal_loop_completion.json").read_text(encoding="utf-8")
+)
+
+POST_ACT_EVIDENCE_KINDS = set(_CFG["evidence"]["post_act_kinds"])
+PROMPT_CHECKLIST_STATUSES = set(_CFG["prompt_checklist"]["statuses"])
 PROMPT_CHECKLIST_ISSUE_REF_RE = re.compile(
     r"^https://github\.com/jeong-sik/masc-mcp/issues/\d+$"
 )
 PROMPT_CHECKLIST_PR_REF_RE = re.compile(
     r"^https://github\.com/jeong-sik/masc-mcp/pull/\d+$"
 )
-AUTOBOOT_WARMUP_FAIRNESS_ALGORITHM = "int32_djb2_bounded_jitter"
-AUTOBOOT_WARMUP_REQUIRED_KEEPERS = (
-    "analyst",
-    "executor",
-    "glm-coding-plan",
-    "issue_king",
-    "janitor",
-    "masc-improver",
-    "nick0cave",
-    "qa-king",
-    "ramarama",
-    "sangsu",
-    "scholar",
-    "taskmaster",
-    "velvet-hammer",
-    "verifier",
-)
-PROMPT_SOURCE_PATH_PREFIX = "prompt_corpus/GOAL_LOOP/"
-REPO_ROOT = Path(__file__).resolve().parents[1]
-REQUIRED_VERIFY_GATE_IDS = frozenset(
-    {
-        "unit_tests",
-        "keeper_turn_success_rate_healthy",
-        "no_semaphore_skip",
-        "no_pricing_miss",
-        "no_utf8_repair",
-        "recovery_executed",
-        "admission_backpressure_observed",
-        "dashboard_snapshot_latency_p99",
-        "orient_recheck_no_still_present",
-        "orient_recheck_no_new_finding",
-        "tla_prompt_spec_tierrouting",
-        "tla_prompt_spec_validation",
-        "tla_prompt_spec_liveness",
-        "post_act_log_contract",
-    }
-)
+AUTOBOOT_WARMUP_FAIRNESS_ALGORITHM = _CFG["autoboot_warmup"]["fairness_algorithm"]
+AUTOBOOT_WARMUP_REQUIRED_KEEPERS = tuple(_CFG["autoboot_warmup"]["required_keepers"])
+PROMPT_SOURCE_PATH_PREFIX = _CFG["prompt_checklist"]["source_path_prefix"]
+REQUIRED_VERIFY_GATE_IDS = frozenset(_CFG["verify_gates"]["required_ids"])
 
 
 @dataclass(frozen=True)

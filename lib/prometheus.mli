@@ -1072,6 +1072,15 @@ val metric_grpc_backlog_replay_events_replayed : string
     on a gRPC Subscribe RPC. The gap between scanned-lines and
     replayed-events isolates wasted scan cost. *)
 
+val metric_http_accepts : string
+(** Primary HTTP listener accepted TCP connections. Labels: [mode]. *)
+
+val metric_http_accept_errors : string
+(** Primary HTTP listener accept-loop errors. Labels: [mode]. *)
+
+val metric_http_active_connections : string
+(** Primary HTTP listener active accepted connections. *)
+
 (** {1 Admission queue metrics} *)
 
 val metric_inference_queue_depth : string

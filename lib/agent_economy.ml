@@ -188,6 +188,13 @@ let append_transaction base_path (txn : transaction) : (unit, string) Result.t =
     Error (Printf.sprintf "[agent_economy] ledger write failed: %s"
              (Stdlib.Printexc.to_string e))
 
+let persistence_surface = "agent_economy"
+
+let record_persistence_read_drop ~reason () =
+  Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+    ~labels:[("surface", persistence_surface); ("reason", reason)]
+    ()
+
 (** {1 Balance Cache} *)
 
 (* In-memory balance cache: (base_path, agent_name) -> current balance.
@@ -207,7 +214,10 @@ let load_balances_from_ledger base_path =
     let path = ledger_path base_path in
     if Sys.file_exists path then begin
       match Safe_ops.read_file_safe path with
-      | Error e -> Log.Misc.warn "economy ledger read failed for %s: %s" path e
+      | Error e ->
+        Log.Misc.warn "economy ledger read failed for %s: %s" path e;
+        record_persistence_read_drop
+          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error ()
       | Ok content ->
         String.split_on_char '\n' content
         |> List.iter (fun line ->
@@ -219,9 +229,13 @@ let load_balances_from_ledger base_path =
               | Some txn ->
                 with_economy_rw (fun () ->
                   Hashtbl.replace balance_cache (base_path, txn.agent_name) txn.balance_after)
-              | None -> ()
+              | None ->
+                record_persistence_read_drop
+                  ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload ()
             with Yojson.Json_error msg ->
-              Log.Misc.warn "agent_economy: skipping malformed ledger entry: %s" msg)
+              Log.Misc.warn "agent_economy: skipping malformed ledger entry: %s" msg;
+              record_persistence_read_drop
+                ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error ())
     end;
     with_economy_rw (fun () -> Hashtbl.replace loaded_paths base_path true)
   end
@@ -240,6 +254,8 @@ let list_transactions ~base_path =
     match Safe_ops.read_file_safe path with
     | Error e ->
       Log.Misc.warn "economy ledger read failed for %s: %s" path e;
+      record_persistence_read_drop
+        ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error ();
       []
     | Ok content ->
       content
@@ -248,10 +264,18 @@ let list_transactions ~base_path =
         let trimmed = String.trim line in
         if String.equal trimmed "" then None
         else
-          try transaction_of_json (Yojson.Safe.from_string trimmed)
+          try
+            match transaction_of_json (Yojson.Safe.from_string trimmed) with
+            | Some txn -> Some txn
+            | None ->
+              record_persistence_read_drop
+                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload ();
+              None
           with Yojson.Json_error msg ->
             Log.Misc.warn
               "agent_economy: skipping malformed ledger entry: %s" msg;
+            record_persistence_read_drop
+              ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error ();
             None)
 
 (** {1 Reputation Integration} *)

@@ -8,6 +8,8 @@
 (* Workaround: stale opam-installed masc_mcp shadows the local library's
    wrapper module. Use direct module alias instead of open Masc_mcp. *)
 module Agent_economy = Masc_mcp__Agent_economy
+module Prometheus = Masc_mcp.Prometheus
+module Safe_ops = Safe_ops
 
 let () = Mirage_crypto_rng_unix.use_default ()
 
@@ -55,6 +57,55 @@ let with_economy_enabled f =
 (** Reset balance cache between tests *)
 let reset_cache () =
   Agent_economy.reset_cache ()
+
+let ensure_ledger_dir base_path =
+  let masc = Filename.concat base_path Common.masc_dirname in
+  if not (Sys.file_exists masc) then Unix.mkdir masc 0o755;
+  let economy = Filename.concat masc "economy" in
+  if not (Sys.file_exists economy) then Unix.mkdir economy 0o755;
+  economy
+
+let ledger_path base_path =
+  Filename.concat (ensure_ledger_dir base_path) "ledger.jsonl"
+
+let persistence_drop_value reason =
+  Prometheus.metric_value_or_zero Prometheus.metric_persistence_read_drops
+    ~labels:[("surface", "agent_economy"); ("reason", reason)]
+    ()
+
+let write_ledger_with_drops base_path =
+  let valid : Agent_economy.transaction =
+    {
+      id = "txn-valid";
+      agent_name = "ledger-agent";
+      kind = Earn_task_done;
+      amount = 2.5;
+      balance_after = 7.5;
+      reason = "valid row";
+      counterparty = "system";
+      metadata = `Assoc [("goal_id", `String "goal-valid")];
+      timestamp = 10.0;
+    }
+  in
+  let lines =
+    [
+      Yojson.Safe.to_string (Agent_economy.transaction_to_json valid);
+      "{not-json";
+      Yojson.Safe.to_string
+        (`Assoc
+          [
+            ("id", `String "txn-invalid");
+            ("agent_name", `String "ledger-agent");
+            ("kind", `String "unknown_kind");
+          ]);
+    ]
+  in
+  let oc = open_out (ledger_path base_path) in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+      output_string oc (String.concat "\n" lines);
+      output_char oc '\n')
 
 (** {1 Configuration Tests} *)
 
@@ -251,6 +302,46 @@ let test_list_transactions () =
         (first.metadata |> member "goal_id" |> to_string)));
   rm_rf dir
 
+let test_list_transactions_records_ledger_drop_metrics () =
+  let dir = fresh_tmpdir () in
+  reset_cache ();
+  let entry_error = Safe_ops.persistence_read_drop_reason_entry_load_error in
+  let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+  let before_entry_error = persistence_drop_value entry_error in
+  let before_invalid_payload = persistence_drop_value invalid_payload in
+  write_ledger_with_drops dir;
+  let txns = Agent_economy.list_transactions ~base_path:dir in
+  Alcotest.(check int) "only valid transaction survives" 1 (List.length txns);
+  Alcotest.(check string) "valid transaction id" "txn-valid" (List.hd txns).id;
+  let after_entry_error = persistence_drop_value entry_error in
+  let after_invalid_payload = persistence_drop_value invalid_payload in
+  Alcotest.(check (float 0.001)) "malformed row increments entry error" 1.0
+    (after_entry_error -. before_entry_error);
+  Alcotest.(check (float 0.001)) "invalid row increments invalid payload" 1.0
+    (after_invalid_payload -. before_invalid_payload);
+  rm_rf dir
+
+let test_balance_reload_records_ledger_drop_metrics () =
+  let dir = fresh_tmpdir () in
+  reset_cache ();
+  write_ledger_with_drops dir;
+  reset_cache ();
+  let entry_error = Safe_ops.persistence_read_drop_reason_entry_load_error in
+  let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+  let before_entry_error = persistence_drop_value entry_error in
+  let before_invalid_payload = persistence_drop_value invalid_payload in
+  let balance =
+    Agent_economy.get_balance ~base_path:dir ~agent_name:"ledger-agent"
+  in
+  Alcotest.(check (float 0.001)) "valid ledger balance survives" 7.5 balance;
+  let after_entry_error = persistence_drop_value entry_error in
+  let after_invalid_payload = persistence_drop_value invalid_payload in
+  Alcotest.(check (float 0.001)) "malformed row increments entry error" 1.0
+    (after_entry_error -. before_entry_error);
+  Alcotest.(check (float 0.001)) "invalid row increments invalid payload" 1.0
+    (after_invalid_payload -. before_invalid_payload);
+  rm_rf dir
+
 (** {1 Reputation Multiplier Tests} *)
 
 let test_reward_multiplier_range () =
@@ -354,6 +445,10 @@ let () =
       Alcotest.test_case "ledger persistence" `Quick test_ledger_persistence;
       Alcotest.test_case "ledger file created" `Quick test_ledger_file_created;
       Alcotest.test_case "list transactions" `Quick test_list_transactions;
+      Alcotest.test_case "list transaction drop metrics" `Quick
+        test_list_transactions_records_ledger_drop_metrics;
+      Alcotest.test_case "balance reload drop metrics" `Quick
+        test_balance_reload_records_ledger_drop_metrics;
     ]);
     ("reputation", [
       Alcotest.test_case "multiplier range" `Quick test_reward_multiplier_range;

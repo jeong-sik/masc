@@ -177,7 +177,13 @@ let test_dashboard_shell_http_json_includes_paths () =
      | _ -> (
          match runtime_resolution |> member "warnings" with
          | `List _ -> true
-         | _ -> false))
+         | _ -> false));
+  let diagnostics = json |> member "projection_diagnostics" in
+  check string "shell timing trace finished" "finished"
+    (diagnostics |> member "projection_timing_status" |> to_string);
+  check bool "shell timing top populated" true
+    ((diagnostics |> member "projection_timing_top" |> to_list |> List.length)
+     > 0)
 
 let test_dashboard_shell_http_json_prefers_preserved_base_path_input () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -250,6 +256,48 @@ let test_dashboard_shell_http_json_prefers_last_good_while_prewarming () =
         (json |> member "status" |> member "project" |> to_string);
       check int "last-good counts reused" 7
         (json |> member "counts" |> member "agents" |> to_int))
+
+let test_dashboard_shell_timeout_fallback_reports_timing_context () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let original_warmed = Atomic.get Lib.Server_dashboard_http._shell_warmed in
+  let original_warming = Atomic.get Lib.Server_dashboard_http._shell_warming in
+  let original_last_good = Atomic.get Lib.Server_dashboard_http._last_good_shell in
+  Fun.protect
+    ~finally:(fun () ->
+      Lib.Dashboard_cache.invalidate_all ();
+      Atomic.set Lib.Server_dashboard_http._shell_warmed original_warmed;
+      Atomic.set Lib.Server_dashboard_http._shell_warming original_warming;
+      Atomic.set Lib.Server_dashboard_http._last_good_shell original_last_good)
+    (fun () ->
+      Lib.Dashboard_cache.invalidate_all ();
+      Atomic.set Lib.Server_dashboard_http._shell_warmed true;
+      Atomic.set Lib.Server_dashboard_http._shell_warming false;
+      Atomic.set Lib.Server_dashboard_http._last_good_shell (`Assoc []);
+      let cache_key =
+        Lib.Server_dashboard_http_core.dashboard_shell_cache_key config
+      in
+      ignore
+        (Lib.Dashboard_cache.get_or_compute cache_key ~ttl:15.0 (fun () ->
+             `Assoc
+               [
+                 ("error", `String "computation_timeout");
+                 ("key", `String cache_key);
+               ]));
+      let json = Lib.Server_dashboard_http_core.dashboard_shell_http_json config in
+      let open Yojson.Safe.Util in
+      let diagnostics = json |> member "projection_diagnostics" in
+      check string "timeout fallback cache state" "timeout_fallback"
+        (diagnostics |> member "cache_state" |> to_string);
+      check string "timeout fallback source" "bootstrap"
+        (diagnostics |> member "fallback_source" |> to_string);
+      check string "timeout cache key surfaced" cache_key
+        (diagnostics |> member "timeout_cache_key" |> to_string);
+      check (float 0.001) "full shell timeout surfaced" 16.0
+        (diagnostics |> member "timeout_sec" |> to_float);
+      check string "timing absence is explicit" "none"
+        (diagnostics |> member "projection_timing_status" |> to_string);
+      check int "timing top is empty without an active trace" 0
+        (diagnostics |> member "projection_timing_top" |> to_list |> List.length))
 
 let test_dashboard_planning_http_json_includes_coordination_fsm () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -437,6 +485,8 @@ let () =
             test_dashboard_shell_http_json_uses_bootstrap_payload_while_prewarming;
           test_case "shell reuses last good payload while prewarming" `Quick
             test_dashboard_shell_http_json_prefers_last_good_while_prewarming;
+          test_case "shell timeout fallback reports timing context" `Quick
+            test_dashboard_shell_timeout_fallback_reports_timing_context;
           test_case "planning payload includes coordination FSM" `Quick
             test_dashboard_planning_http_json_includes_coordination_fsm;
           test_case "credential monitoring surfaces archive counter" `Quick

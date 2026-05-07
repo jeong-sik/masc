@@ -107,20 +107,44 @@ let reputation_of_json (json : Yojson.Safe.t) : agent_reputation option =
 
 (** {1 JSONL Helpers} *)
 
+let persistence_surface = "agent_reputation"
+
+let observe_jsonl_drop ~reason ~delta =
+  Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+    ~labels:[("surface", persistence_surface); ("reason", reason)]
+    ~delta
+    ()
+
+let report_jsonl_drop ~reason ~path ~detail ~delta =
+  Safe_ops.report_persistence_read_drop
+    ~on_drop:(fun () -> observe_jsonl_drop ~reason ~delta)
+    ~surface:persistence_surface
+    ~reason
+    ~path
+    ~detail
+
 (** Load a JSONL file, filter out malformed lines. *)
 let load_jsonl_safe (path : string) : Yojson.Safe.t list =
   if not (Sys.file_exists path) then []
   else
-    match Safe_ops.read_file_safe path with
-    | Error msg ->
-        Log.Misc.warn "agent_reputation: failed to read %s: %s" path msg;
+    try
+      let rows, malformed = Fs_compat.load_jsonl_diagnostics path in
+      if malformed > 0 then
+        report_jsonl_drop
+          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+          ~path
+          ~detail:(Printf.sprintf "%d malformed JSONL line(s)" malformed)
+          ~delta:(Float.of_int malformed);
+      rows
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+        report_jsonl_drop
+          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+          ~path
+          ~detail:(Printexc.to_string exn)
+          ~delta:1.0;
         []
-    | Ok content ->
-      String.split_on_char '\n' content
-      |> List.filter (fun line -> String.length (String.trim line) > 0)
-      |> List.filter_map (fun line ->
-          try Some (Yojson.Safe.from_string line)
-          with Yojson.Json_error _ -> None)
 
 (** {1 Task Counting from Coord State} *)
 

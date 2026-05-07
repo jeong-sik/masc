@@ -3,6 +3,33 @@
 open Alcotest
 open Masc_mcp
 
+let persistence_counter reason =
+  Prometheus.metric_value_or_zero Prometheus.metric_persistence_read_drops
+    ~labels:[("surface", "agent_reputation"); ("reason", reason)]
+    ()
+
+let with_temp_config f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = Filename.temp_file "test_agent_reputation_" "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  let rec cleanup path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then (
+        Array.iter
+          (fun name -> cleanup (Filename.concat path name))
+          (Sys.readdir path);
+        Unix.rmdir path)
+      else Unix.unlink path
+  in
+  Fun.protect
+    ~finally:(fun () -> try cleanup dir with _ -> ())
+    (fun () ->
+      let config = Coord.default_config dir in
+      ignore (Coord.init config ~agent_name:(Some "tester"));
+      f config)
+
 (* ── Reputation_autonomy tests ────────────────────────────────────── *)
 
 let test_autonomy_string_round_trip () =
@@ -151,6 +178,36 @@ let test_compute_accountability_score_penalty () =
   in
   check (float 0.0001) "fully penalized → 0.0" 0.0 penalized
 
+let test_reputation_jsonl_drop_metric () =
+  with_temp_config @@ fun config ->
+  let posts_path =
+    Filename.concat (Coord.masc_dir config) "board_posts.jsonl"
+  in
+  Fs_compat.save_file posts_path
+    (String.concat "\n"
+       [
+         "{not-json";
+         Yojson.Safe.to_string
+           (`Assoc
+             [
+               ("id", `String "post-1");
+               ("author", `String "rep-agent");
+               ("title", `String "valid");
+             ]);
+       ]
+     ^ "\n");
+  let before =
+    persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error
+  in
+  let rep = Agent_reputation.compute_reputation config ~agent_name:"rep-agent" in
+  check int "valid post still counted" 1 rep.board_posts;
+  check
+    (float 0.1)
+    "malformed board JSONL increments persistence drop metric"
+    1.0
+    (persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error
+     -. before)
+
 let () =
   run "Reputation_multi_dim"
     [ ( "autonomy",
@@ -182,5 +239,7 @@ let () =
             test_compute_overall_score_pure
         ; test_case "full accountability penalty → 0.0" `Quick
             test_compute_accountability_score_penalty
+        ; test_case "jsonl drops increment metric" `Quick
+            test_reputation_jsonl_drop_metric
         ] )
     ]

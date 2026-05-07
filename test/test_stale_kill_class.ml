@@ -182,6 +182,42 @@ let test_batch_root_cause_unknown () =
   r "unknown" "unknown"
     (root_cause_label [ Heartbeat_consecutive_failures 3 ])
 
+let test_noop_failure_loop_ignores_persisted_count_before_current_turn () =
+  Alcotest.(check bool)
+    "persisted noop count alone does not kill a freshly restarted fiber"
+    false
+    (SW.should_trigger_noop_failure_loop_for_test
+       ~noop_count:3
+       ~noop_threshold:3
+       ~started_at:200.0
+       ~last_completed_turn_ended_at:None);
+  Alcotest.(check bool)
+    "previous-lifecycle completed turn does not satisfy current fiber"
+    false
+    (SW.should_trigger_noop_failure_loop_for_test
+       ~noop_count:3
+       ~noop_threshold:3
+       ~started_at:200.0
+       ~last_completed_turn_ended_at:(Some 199.0))
+
+let test_noop_failure_loop_triggers_after_current_turn () =
+  Alcotest.(check bool)
+    "current-fiber completed turn plus threshold triggers"
+    true
+    (SW.should_trigger_noop_failure_loop_for_test
+       ~noop_count:3
+       ~noop_threshold:3
+       ~started_at:200.0
+       ~last_completed_turn_ended_at:(Some 201.0));
+  Alcotest.(check bool)
+    "below threshold still does not trigger"
+    false
+    (SW.should_trigger_noop_failure_loop_for_test
+       ~noop_count:2
+       ~noop_threshold:3
+       ~started_at:200.0
+       ~last_completed_turn_ended_at:(Some 201.0))
+
 let () =
   Alcotest.run "stale_kill_class"
     [
@@ -240,5 +276,12 @@ let () =
           Alcotest.test_case "mixed" `Quick test_batch_root_cause_mixed;
           Alcotest.test_case "unknown" `Quick
             test_batch_root_cause_unknown;
+        ] );
+      ( "noop_failure_loop_gate",
+        [
+          Alcotest.test_case "ignores persisted count before current turn" `Quick
+            test_noop_failure_loop_ignores_persisted_count_before_current_turn;
+          Alcotest.test_case "triggers after current turn" `Quick
+            test_noop_failure_loop_triggers_after_current_turn;
         ] );
     ]

@@ -35,9 +35,30 @@ let ring_mu = Eio.Mutex.create ()
 let ring : rejection_event list ref = ref []
 (** Most recent first; truncated to [max_ring_size]. *)
 
-(** Record a tool-skip event. Called from [Keeper_hooks_oas.broadcast_tool_skipped]
-    so the in-memory ring stays in sync with the SSE event stream. *)
-let record_tool_skipped ~keeper_name ~tool_name ~reason_code =
+let record_failure_callback_label =
+  "dashboard_governance_tool_skipped_record"
+
+let record_tool_skipped_failure exn =
+  Prometheus.inc_counter
+    Prometheus.metric_keeper_lifecycle_callback_failures
+    ~labels:[ ("callback", record_failure_callback_label) ]
+    ();
+  Log.Dashboard.warn
+    "dashboard governance metrics failed to record tool skip: %s"
+    (Printexc.to_string exn)
+
+let append_rejection_event event =
+  Eio.Mutex.use_rw ~protect:true ring_mu (fun () ->
+    let next = event :: !ring in
+    let truncated =
+      if List.length next > max_ring_size
+      then List.filteri (fun i _ -> i < max_ring_size) next
+      else next
+    in
+    ring := truncated)
+
+let record_tool_skipped_with_append ~append
+    ~keeper_name ~tool_name ~reason_code =
   let event = {
     ts = Unix.gettimeofday ();
     tool_name;
@@ -45,17 +66,19 @@ let record_tool_skipped ~keeper_name ~tool_name ~reason_code =
     keeper_name;
   } in
   try
-    Eio.Mutex.use_rw ~protect:true ring_mu (fun () ->
-      let next = event :: !ring in
-      let truncated =
-        if List.length next > max_ring_size
-        then List.filteri (fun i _ -> i < max_ring_size) next
-        else next
-      in
-      ring := truncated)
+    append event
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> ()
+  | exn -> record_tool_skipped_failure exn
+
+(** Record a tool-skip event. Called from [Keeper_hooks_oas.broadcast_tool_skipped]
+    so the in-memory ring stays in sync with the SSE event stream. *)
+let record_tool_skipped ~keeper_name ~tool_name ~reason_code =
+  record_tool_skipped_with_append
+    ~append:append_rejection_event
+    ~keeper_name
+    ~tool_name
+    ~reason_code
 
 (** Reset the ring. Test-only helper — exposed because the alcotest cases
     need to start from a clean state regardless of test order. *)
@@ -69,6 +92,14 @@ let snapshot_ring () =
 let inject_for_testing ~keeper_name ~tool_name ~reason_code ~ts =
   let event = { ts; tool_name; reason_code; keeper_name } in
   ring := event :: !ring
+
+let record_tool_skipped_with_append_for_testing
+    ~append ~keeper_name ~tool_name ~reason_code =
+  record_tool_skipped_with_append
+    ~append:(fun _event -> append ())
+    ~keeper_name
+    ~tool_name
+    ~reason_code
 
 (** Aggregate [(tool_name, reason_code) -> count] over the supplied window.
     [now_ts] is injectable for testing.  Returns a deterministic ordering:

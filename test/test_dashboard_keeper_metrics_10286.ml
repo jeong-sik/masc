@@ -2,6 +2,7 @@ open Alcotest
 
 module Metrics = Masc_mcp.Dashboard_http_keeper_metrics
 module Detail = Masc_mcp.Dashboard_http_keeper_detail
+module Prom = Masc_mcp.Prometheus
 
 let metric ?(channel = "turn") tools =
   `Assoc
@@ -66,6 +67,17 @@ let summary_bool field summary =
   match Yojson.Safe.Util.(summary |> member field) with
   | `Bool value -> value
   | other -> failf "expected bool field %s, got %s" field (Yojson.Safe.to_string other)
+
+let persistence_read_drop_total ~surface ~reason =
+  Prom.metric_value_or_zero Prom.metric_persistence_read_drops
+    ~labels:[("surface", surface); ("reason", reason)]
+    ()
+
+let check_persistence_read_drop_delta ~surface ~reason ~before ~delta =
+  check (float 0.0001)
+    (Printf.sprintf "%s/%s persistence read drops" surface reason)
+    (before +. float_of_int delta)
+    (persistence_read_drop_total ~surface ~reason)
 
 let test_contains_ci_preserves_literal_ascii_semantics () =
   check bool "ascii case-insensitive hit" true
@@ -246,6 +258,33 @@ let test_24h_context_ignores_sparse_tool_events () =
   | other ->
       failf "expected one 24h bucket, got %s" (Yojson.Safe.to_string other)
 
+let test_24h_context_counts_malformed_metric_rows () =
+  let surface = "dashboard_keeper_metrics_24h" in
+  let entry_reason = "entry_load_error" in
+  let invalid_reason = "invalid_payload" in
+  let before_entry =
+    persistence_read_drop_total ~surface ~reason:entry_reason
+  in
+  let before_invalid =
+    persistence_read_drop_total ~surface ~reason:invalid_reason
+  in
+  let _rows, summary =
+    Metrics.keeper_metrics_24h_json
+      ~metrics_lines:
+        [
+          json_line (context_snapshot ~context_ratio:0.75 ());
+          "[]";
+          "{not-json";
+        ]
+      ~now_ts:100.0
+  in
+  check int "valid sample preserved" 1
+    (summary_int "sample_points" summary);
+  check_persistence_read_drop_delta ~surface ~reason:entry_reason
+    ~before:before_entry ~delta:1;
+  check_persistence_read_drop_delta ~surface ~reason:invalid_reason
+    ~before:before_invalid ~delta:1
+
 let test_context_snapshot_classifier_rejects_sparse_tool_events () =
   check bool "context row qualifies" true
     (Metrics.metrics_row_has_context_snapshot (context_snapshot ()));
@@ -303,6 +342,8 @@ let () =
             test_metrics_window_action_rows_drive_observed_pr_work;
           test_case "24h context ignores sparse tool events" `Quick
             test_24h_context_ignores_sparse_tool_events;
+          test_case "24h context counts malformed rows" `Quick
+            test_24h_context_counts_malformed_metric_rows;
           test_case "classifies sparse tool events" `Quick
             test_context_snapshot_classifier_rejects_sparse_tool_events;
           test_case "series ignores sparse tool events" `Quick

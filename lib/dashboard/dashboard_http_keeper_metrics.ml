@@ -245,6 +245,21 @@ let metrics_row_has_context_snapshot (j : Yojson.Safe.t) : bool =
   && has_int (member "context_max" j)
   && has_int (member "message_count" j)
 
+let keeper_metrics_24h_persistence_surface = "dashboard_keeper_metrics_24h"
+
+let report_keeper_metrics_24h_drop ~reason ~detail =
+  Safe_ops.report_persistence_read_drop
+    ~on_drop:(fun () ->
+      Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+        ~labels:
+          [ ("surface", keeper_metrics_24h_persistence_surface); ("reason", reason) ]
+        ())
+    ~surface:keeper_metrics_24h_persistence_surface
+    ~reason
+    ~path:"<keeper_metrics_lines>"
+    ~detail
+;;
+
 let keeper_metrics_24h_json
     ~(metrics_lines : string list)
     ~(now_ts : float) : Yojson.Safe.t * Yojson.Safe.t =
@@ -258,7 +273,15 @@ let keeper_metrics_24h_json
   List.iter
     (fun line ->
       try
-        let j = Yojson.Safe.from_string line in
+        let j =
+          match Yojson.Safe.from_string line with
+          | `Assoc _ as json -> json
+          | _ ->
+              report_keeper_metrics_24h_drop
+                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~detail:"keeper metrics row is not a JSON object";
+              raise Exit
+        in
         let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
         if ts_unix >= start_ts && ts_unix <= (now_ts +. 60.0)
            && metrics_row_has_context_snapshot j
@@ -292,7 +315,23 @@ let keeper_metrics_24h_json
             end
           end
         end
-      with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Server.info "keeper log parse: %s" (Printexc.to_string exn))
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | Exit -> ()
+      | Yojson.Json_error detail ->
+          report_keeper_metrics_24h_drop
+            ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+            ~detail
+      | Yojson.Safe.Util.Type_error (detail, _) ->
+          report_keeper_metrics_24h_drop
+            ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+            ~detail
+      | exn ->
+          let detail = Printexc.to_string exn in
+          report_keeper_metrics_24h_drop
+            ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+            ~detail;
+          Log.Server.info "keeper log parse: %s" detail)
     lines;
   let rows =
     buckets

@@ -1157,7 +1157,7 @@ let bare_ollama_migration_message () =
 
 let is_bare_ollama_label label =
   let normalized = normalize_label label in
-  String.equal normalized "ollama"
+  String.equal normalized cn_ollama
   && Env_config_runtime.Ollama.default_model = ""
 
 let explicit_llama_model_id_result () =

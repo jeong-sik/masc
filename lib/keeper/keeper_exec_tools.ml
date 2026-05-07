@@ -16,16 +16,44 @@ let has_mutating_side_effect_with_input ~(tool_name : string)
     ~(input : Yojson.Safe.t) : bool =
   not (Keeper_tool_registry.is_read_only_with_input ~tool_name ~input)
 
-let on_keeper_tool_call
-  : (tool_name:string -> success:bool -> duration_ms:int -> unit) ref
-  =
-  ref (fun ~tool_name:_ ~success:_ ~duration_ms:_ -> ())
+type keeper_tool_call_recorder =
+  tool_name:string -> success:bool -> duration_ms:int -> unit
 
-let tool_search_fn
-  : (query:string -> max_results:int -> Yojson.Safe.t) ref
-  =
-  ref (fun ~query:_ ~max_results:_ ->
-    `Assoc [ ("results", `List []) ])
+let default_keeper_tool_call_recorder
+    ~tool_name:_ ~success:_ ~duration_ms:_ =
+  ()
+
+let keeper_tool_call_recorder_mutex = Stdlib.Mutex.create ()
+let keeper_tool_call_recorder = ref default_keeper_tool_call_recorder
+
+let set_on_keeper_tool_call (f : keeper_tool_call_recorder) =
+  Stdlib.Mutex.protect keeper_tool_call_recorder_mutex (fun () ->
+    keeper_tool_call_recorder := f)
+
+let record_keeper_tool_call ~tool_name ~success ~duration_ms =
+  let f =
+    Stdlib.Mutex.protect keeper_tool_call_recorder_mutex (fun () ->
+      !keeper_tool_call_recorder)
+  in
+  f ~tool_name ~success ~duration_ms
+
+type tool_searcher = query:string -> max_results:int -> Yojson.Safe.t
+
+let default_tool_searcher ~query:_ ~max_results:_ =
+  `Assoc [ ("results", `List []) ]
+
+let tool_searcher_mutex = Stdlib.Mutex.create ()
+let tool_searcher = ref default_tool_searcher
+
+let set_tool_search_fn (f : tool_searcher) =
+  Stdlib.Mutex.protect tool_searcher_mutex (fun () ->
+    tool_searcher := f)
+
+let search_tools ~query ~max_results =
+  let f =
+    Stdlib.Mutex.protect tool_searcher_mutex (fun () -> !tool_searcher)
+  in
+  f ~query ~max_results
 
 type tool_result_payload =
   | Structured_success
@@ -217,7 +245,7 @@ let execute_keeper_tool_call_with_outcome
       else
         let fn = match search_fn with
           | Some f -> f
-          | None -> !tool_search_fn
+          | None -> search_tools
         in
         success_tool_result (Yojson.Safe.to_string (fn ~query ~max_results))
     | "keeper_stay_silent" ->

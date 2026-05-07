@@ -96,16 +96,27 @@ val init_policy_config : base_path:string -> (unit, string) result
     and blocked at execution time by the pre_tool_use hook. *)
 val is_keeper_denied : string -> bool
 
-(** Callback for recording keeper-internal tool calls.
-    Set at server initialization to avoid Config dependency cycle. *)
-val on_keeper_tool_call :
-  (tool_name:string -> success:bool -> duration_ms:int -> unit) ref
+type keeper_tool_call_recorder =
+  tool_name:string -> success:bool -> duration_ms:int -> unit
 
-(** Callback for keeper_tool_search BM25 search.
-    Process-global fallback; prefer passing [~search_fn] to
-    [execute_keeper_tool_call] for session-scoped, race-free search. *)
-val tool_search_fn :
-  (query:string -> max_results:int -> Yojson.Safe.t) ref
+(** Set the keeper-internal tool-call recorder.
+    The setter is process-global because server initialization wires around
+    the Config dependency cycle; calls are mutex-protected so runtime readers
+    do not dereference a publicly mutable ref. *)
+val set_on_keeper_tool_call : keeper_tool_call_recorder -> unit
+
+(** Record a keeper-internal tool call through the configured recorder. *)
+val record_keeper_tool_call : keeper_tool_call_recorder
+
+type tool_searcher = query:string -> max_results:int -> Yojson.Safe.t
+
+(** Set the fallback BM25 searcher for [keeper_tool_search].
+    Prefer passing [~search_fn] to [execute_keeper_tool_call] for
+    session-scoped search. *)
+val set_tool_search_fn : tool_searcher -> unit
+
+(** Invoke the fallback BM25 searcher for [keeper_tool_search]. *)
+val search_tools : tool_searcher
 
 (** Classification of a keeper tool result payload for circuit-breaker
     bookkeeping.

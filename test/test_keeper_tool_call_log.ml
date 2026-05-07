@@ -57,6 +57,30 @@ let with_tmp_corrupt_tool_call_store f =
       ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir))))
     (fun () -> f ~dir ~masc_root)
 
+let persistence_read_drop_total ~surface ~reason =
+  Prometheus.metric_value_or_zero Prometheus.metric_persistence_read_drops
+    ~labels:[("surface", surface); ("reason", reason)]
+    ()
+
+let check_persistence_read_drop_delta ~surface ~reason ~before ~delta =
+  Alcotest.(check (float 0.0001))
+    (Printf.sprintf "%s/%s persistence read drops" surface reason)
+    (before +. float_of_int delta)
+    (persistence_read_drop_total ~surface ~reason)
+
+let today_tool_call_jsonl_path dir =
+  let tm = Unix.gmtime (Unix.gettimeofday ()) in
+  let month =
+    Printf.sprintf "%04d-%02d" (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1)
+  in
+  let day = Printf.sprintf "%02d.jsonl" tm.Unix.tm_mday in
+  Filename.concat (Filename.concat (Filename.concat dir ".masc/tool_calls") month) day
+
+let save_today_tool_call_lines dir lines =
+  let path = today_tool_call_jsonl_path dir in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Fs_compat.save_file path (String.concat "\n" lines ^ "\n")
+
 (* ── read_recent edge cases ─────────────────────────── *)
 
 let test_read_recent_n_zero () =
@@ -93,6 +117,45 @@ let test_read_recent_keeper_filter () =
     Alcotest.(check int) "alice gets 1 entry" 1 (List.length alice_entries);
     Alcotest.(check int) "bob gets 1 entry" 1 (List.length bob_entries);
     Alcotest.(check int) "all gets 2 entries" 2 (List.length all_entries))
+
+let test_read_latest_counts_malformed_tail_rows () =
+  with_tmp_log_dir (fun dir ->
+    let surface = "keeper_tool_call_log_latest" in
+    let entry_error = Safe_ops.persistence_read_drop_reason_entry_load_error in
+    let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+    let entry_before =
+      persistence_read_drop_total ~surface ~reason:entry_error
+    in
+    let invalid_before =
+      persistence_read_drop_total ~surface ~reason:invalid_payload
+    in
+    let valid =
+      `Assoc
+        [ ("keeper", `String "k")
+        ; ("tool", `String "masc_status")
+        ; ("success", `Bool true)
+        ]
+      |> Yojson.Safe.to_string
+    in
+    save_today_tool_call_lines dir [ valid; "[1]"; "{not-json" ];
+    let latest = Keeper_tool_call_log.read_latest ~keeper_name:"k" () in
+    (match latest with
+     | Some json ->
+         Alcotest.(check (option string))
+           "latest valid keeper preserved"
+           (Some "k")
+           (Safe_ops.json_string_opt "keeper" json)
+     | None -> Alcotest.fail "expected latest valid keeper row");
+    check_persistence_read_drop_delta
+      ~surface
+      ~reason:entry_error
+      ~before:entry_before
+      ~delta:1;
+    check_persistence_read_drop_delta
+      ~surface
+      ~reason:invalid_payload
+      ~before:invalid_before
+      ~delta:1)
 
 (* ── Redaction: denied tools are skipped ────────────── *)
 
@@ -796,6 +859,8 @@ let () =
         [ eio_test "n=0 returns []" test_read_recent_n_zero
         ; eio_test "n<0 returns []" test_read_recent_n_negative
         ; eio_test "keeper filter" test_read_recent_keeper_filter
+        ; eio_test "read_latest counts malformed tail rows"
+            test_read_latest_counts_malformed_tail_rows
         ] )
     ; ( "redaction",
         [ eio_test "denied tool not logged" test_denied_tool_not_logged

@@ -14,6 +14,38 @@
 
 let max_output_len = 4000
 
+let latest_read_drop_surface = "keeper_tool_call_log_latest"
+
+let report_latest_read_drop ~reason ~path ~detail =
+  Safe_ops.report_persistence_read_drop
+    ~on_drop:(fun () ->
+      Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+        ~labels:[("surface", latest_read_drop_surface); ("reason", reason)]
+        ())
+    ~surface:latest_read_drop_surface
+    ~reason
+    ~path
+    ~detail
+
+let latest_json_line_opt ~path line =
+  match Yojson.Safe.from_string line with
+  | `Assoc _ as json -> Some json
+  | _ ->
+      report_latest_read_drop
+        ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+        ~path
+        ~detail:"expected JSON object row";
+      None
+  | exception (Eio.Cancel.Cancelled _ as exn) ->
+      let bt = Printexc.get_raw_backtrace () in
+      Printexc.raise_with_backtrace exn bt
+  | exception Yojson.Json_error detail ->
+      report_latest_read_drop
+        ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+        ~path
+        ~detail;
+      None
+
 (** Pre-truncation info, keyed by keeper name.
     Set by the tool handler wrapper (keeper_tools_oas), consumed by the
     OAS on_tool_result hook (keeper_hooks_oas).  Per-keeper isolation
@@ -901,12 +933,13 @@ let read_latest ?keeper_name () : Yojson.Safe.t option =
         | Some _ -> 16
       in
       let raw_lines = Dated_jsonl.read_recent_lines store scan_limit in
+      let path = Dated_jsonl.base_dir store in
       let rec loop = function
         | [] -> None
         | line :: rest -> (
-            match Yojson.Safe.from_string line with
-            | exception Yojson.Json_error _ -> loop rest
-            | json ->
+            match latest_json_line_opt ~path line with
+            | None -> loop rest
+            | Some json ->
                 let dominated =
                   match keeper_name with
                   | None -> true

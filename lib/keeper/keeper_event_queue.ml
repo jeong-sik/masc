@@ -56,6 +56,7 @@ type stimulus_class =
   | Board_signal
   | Bootstrap
   | Alive_but_stuck_recovery
+  | Stale_watchdog_idle_recovery
   | Unsupported of string
 
 let classify (s : stimulus) : stimulus_class =
@@ -68,6 +69,8 @@ let classify (s : stimulus) : stimulus_class =
   if String.equal s.payload "Keeper bootstrap signal" then Bootstrap
   else if has_prefix "{\"source\":\"alive_but_stuck_recovery\"" then
     Alive_but_stuck_recovery
+  else if has_prefix "{\"source\":\"stale_watchdog_idle_recovery\"" then
+    Stale_watchdog_idle_recovery
   (* Board signals carry JSON with "source":"board_signal". Lightweight
      prefix check avoids a full Yojson parse in the data layer. *)
   else if has_prefix "{\"source\":\"board_signal\"" then Board_signal

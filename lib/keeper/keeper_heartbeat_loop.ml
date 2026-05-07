@@ -451,6 +451,8 @@ let run_keepalive_unified_turn
               | Board_signal -> "board_signal"
               | Bootstrap -> "bootstrap"
               | Alive_but_stuck_recovery -> "alive_but_stuck_recovery"
+              | Stale_watchdog_idle_recovery ->
+                  "stale_watchdog_idle_recovery"
               | Unsupported _ -> "unsupported"
             in
             Prometheus.inc_counter
@@ -481,6 +483,11 @@ let run_keepalive_unified_turn
                     signal worth alerting on. *)
                  Log.Keeper.info
                    "turn entry: alive-but-stuck recovery stimulus consumed post_id=%s (keeper=%s)"
+                   stim.post_id meta_after_triage.name;
+                 None
+             | Stale_watchdog_idle_recovery ->
+                 Log.Keeper.info
+                   "turn entry: stale-watchdog idle recovery stimulus consumed post_id=%s (keeper=%s)"
                    stim.post_id meta_after_triage.name;
                  None
              | Unsupported prefix ->

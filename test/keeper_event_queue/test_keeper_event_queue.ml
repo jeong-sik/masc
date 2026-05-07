@@ -121,6 +121,15 @@ let test_classify_alive_but_stuck_recovery () =
   | Alive_but_stuck_recovery -> ()
   | _ -> assert false
 
+let test_classify_stale_watchdog_idle_recovery () =
+  let s =
+    make_stim "stale-watchdog-idle:k"
+      "{\"source\":\"stale_watchdog_idle_recovery\",\"keeper\":\"k\"}"
+  in
+  match classify s with
+  | Stale_watchdog_idle_recovery -> ()
+  | _ -> assert false
+
 let () =
   test_empty ();
   test_enqueue_dequeue_fifo ();
@@ -132,4 +141,5 @@ let () =
   test_queue_overrides_policy ();
   test_dequeue_only_consumes_enqueued ();
   test_classify_alive_but_stuck_recovery ();
+  test_classify_stale_watchdog_idle_recovery ();
   print_endline "Keeper_event_queue: all tests passed"

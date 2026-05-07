@@ -182,6 +182,82 @@ let test_batch_root_cause_unknown () =
   r "unknown" "unknown"
     (root_cause_label [ Heartbeat_consecutive_failures 3 ])
 
+let stale_action ?(now = 1_000.0) ?(last_turn = 600.0)
+    ?(last_idle_wakeup_ts = 0.0) ?(idle_stale = false)
+    ?(in_turn_stale = false) ?(in_turn_age = 0.0) ?(failure_loop = false)
+    ?(noop_count = 0) () =
+  SW.classify_stale_watchdog_action_for_test
+    ~now
+    ~threshold:300.0
+    ~active_turn_timeout_sec:3_600.0
+    ~last_turn
+    ~idle_stale
+    ~in_turn_stale
+    ~in_turn_age
+    ~failure_loop
+    ~noop_count
+    ~last_idle_wakeup_ts
+
+let test_stale_watchdog_action_wakes_idle_first () =
+  match stale_action ~idle_stale:true () with
+  | SW.Request_idle_recovery { stall_seconds } ->
+      Alcotest.(check (float 0.001)) "stall seconds" 400.0 stall_seconds
+  | SW.No_action -> Alcotest.fail "expected idle recovery wakeup"
+  | SW.Terminate _ -> Alcotest.fail "idle stale must wake before terminating"
+
+let test_stale_watchdog_action_suppresses_recent_idle_wake () =
+  match stale_action ~idle_stale:true ~last_idle_wakeup_ts:900.0 () with
+  | SW.No_action -> ()
+  | SW.Request_idle_recovery _ ->
+      Alcotest.fail "expected recent idle wake to be suppressed"
+  | SW.Terminate _ ->
+      Alcotest.fail "expected recent idle wake to suppress termination"
+
+let test_stale_watchdog_action_terminates_idle_after_wake_timeout () =
+  match
+    stale_action ~now:5_000.0 ~last_turn:4_600.0 ~idle_stale:true
+      ~last_idle_wakeup_ts:1_000.0 ()
+  with
+  | SW.Terminate (Idle_turn { stall_seconds }) ->
+      Alcotest.(check (float 0.001)) "stall seconds" 400.0 stall_seconds
+  | SW.Terminate _ -> Alcotest.fail "expected idle-turn termination"
+  | SW.No_action -> Alcotest.fail "expected idle wake timeout termination"
+  | SW.Request_idle_recovery _ ->
+      Alcotest.fail "expected idle wake timeout to terminate"
+
+let test_stale_watchdog_action_terminates_active_turn_hang () =
+  match stale_action ~in_turn_stale:true ~in_turn_age:4_000.0 () with
+  | SW.Terminate (In_turn_hung { active_seconds; timeout_threshold }) ->
+      Alcotest.(check (float 0.001)) "active seconds" 4_000.0 active_seconds;
+      Alcotest.(check (float 0.001)) "timeout" 3_600.0 timeout_threshold
+  | _ -> Alcotest.fail "expected active-turn hang termination"
+
+let test_stale_watchdog_action_terminates_noop_loop () =
+  match stale_action ~failure_loop:true ~noop_count:4 () with
+  | SW.Terminate (Noop_failure_loop { noop_count }) ->
+      Alcotest.(check int) "noop count" 4 noop_count
+  | _ -> Alcotest.fail "expected no-op loop termination"
+
+let test_noop_failure_loop_requires_current_generation_turn () =
+  let before_first_turn =
+    SW.current_generation_noop_failure_loop_for_test
+      ~noop_count:3 ~noop_threshold:3 ~last_turn:900.0 ~started_at:1_000.0
+  in
+  let after_first_turn =
+    SW.current_generation_noop_failure_loop_for_test
+      ~noop_count:3 ~noop_threshold:3 ~last_turn:1_001.0 ~started_at:1_000.0
+  in
+  let below_threshold =
+    SW.current_generation_noop_failure_loop_for_test
+      ~noop_count:2 ~noop_threshold:3 ~last_turn:1_001.0 ~started_at:1_000.0
+  in
+  Alcotest.(check bool)
+    "persisted pre-start noop count is not fatal" false before_first_turn;
+  Alcotest.(check bool)
+    "current-generation noop count is fatal" true after_first_turn;
+  Alcotest.(check bool)
+    "below threshold is not fatal" false below_threshold
+
 let () =
   Alcotest.run "stale_kill_class"
     [
@@ -240,5 +316,20 @@ let () =
           Alcotest.test_case "mixed" `Quick test_batch_root_cause_mixed;
           Alcotest.test_case "unknown" `Quick
             test_batch_root_cause_unknown;
+        ] );
+      ( "stale_watchdog_action",
+        [
+          Alcotest.test_case "idle wake first" `Quick
+            test_stale_watchdog_action_wakes_idle_first;
+          Alcotest.test_case "recent idle wake suppresses termination" `Quick
+            test_stale_watchdog_action_suppresses_recent_idle_wake;
+          Alcotest.test_case "idle wake timeout terminates" `Quick
+            test_stale_watchdog_action_terminates_idle_after_wake_timeout;
+          Alcotest.test_case "active turn hang terminates" `Quick
+            test_stale_watchdog_action_terminates_active_turn_hang;
+          Alcotest.test_case "noop loop terminates" `Quick
+            test_stale_watchdog_action_terminates_noop_loop;
+          Alcotest.test_case "noop loop requires current generation turn"
+            `Quick test_noop_failure_loop_requires_current_generation_turn;
         ] );
     ]

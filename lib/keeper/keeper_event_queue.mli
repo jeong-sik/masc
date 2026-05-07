@@ -64,6 +64,8 @@ type stimulus_class =
   | Bootstrap      (** Plain string "Keeper bootstrap signal" *)
   | Alive_but_stuck_recovery
       (** JSON payload with {"source":"alive_but_stuck_recovery", ...} *)
+  | Stale_watchdog_idle_recovery
+      (** JSON payload with {"source":"stale_watchdog_idle_recovery", ...} *)
   | Unsupported of string  (** Unrecognized: payload prefix (max 40 chars) for audit *)
 
 val classify : stimulus -> stimulus_class

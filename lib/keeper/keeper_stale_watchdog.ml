@@ -8,7 +8,9 @@
     1. [Idle_turn]: [last_turn_ts] older than the idle threshold while
        the keeper phase is [Running] but no [current_turn_observation]
        is recorded, with no recent keepalive skip verdict proving the
-       fiber is still evaluating work.
+       fiber is still evaluating work. This class terminates only after
+       wake-first idle recovery has been ignored for the active-turn timeout
+       budget.
     2. [In_turn_hung]: a turn started ([current_turn_observation = Some])
        and ran past [timeout_threshold] seconds — covers the
        "Orphaned Streaming" pattern (executor FSM analysis §4 I2:
@@ -18,8 +20,12 @@
        watchdog threshold — catches keepers in LLM timeout loops where
        [last_turn_ts] stays fresh because each failed turn updates it.
 
-    On detection, sets [fiber_stop] and emits a stale broadcast so the
-    supervisor's [sweep_and_recover] can restart the keeper.
+    Idle stalls are wake-first: the watchdog enqueues a recovery stimulus and
+    wakes the heartbeat fiber before considering termination. In-turn hangs
+    and no-op failure loops still set [fiber_stop] and emit a stale broadcast
+    so the supervisor's [sweep_and_recover] can restart the keeper. An idle
+    stall only escalates to termination if it ignores a watchdog wake for the
+    active-turn timeout budget.
 
     @since PR #10670 — extracted from Keeper_supervisor. *)
 
@@ -50,7 +56,9 @@
 
    Spec semantics modelled (TLA+ -> OCaml):
      phase = StaleRunning      reached when this watchdog detects a
-                               stall (idle or failure-loop) and sets
+                               terminating stall (in-turn hang, no-op
+                               failure-loop, or idle stall that ignored
+                               the wake-first recovery path) and sets
                                fiber_stop.
      OperatorBroadcast emit    line 287 below calls
                                Keeper_execution_receipt.emit_stale_keeper_broadcast
@@ -120,6 +128,64 @@ let stale_kill_class_label (cls : Keeper_registry.stale_kill_class) : string =
   | Idle_turn _ -> "idle_turn"
   | In_turn_hung _ -> "in_turn_hung"
   | Noop_failure_loop _ -> "noop_failure_loop"
+
+type stale_watchdog_action =
+  | No_action
+  | Request_idle_recovery of { stall_seconds : float }
+  | Terminate of Keeper_registry.stale_kill_class
+
+let classify_stale_watchdog_action ~now ~threshold:_ ~active_turn_timeout_sec
+    ~last_turn ~idle_stale ~in_turn_stale ~in_turn_age ~failure_loop
+    ~noop_count ~last_idle_wakeup_ts =
+  if in_turn_stale then
+    Terminate
+      (Keeper_registry.In_turn_hung
+         { active_seconds = in_turn_age; timeout_threshold = active_turn_timeout_sec })
+  else if failure_loop then
+    Terminate (Keeper_registry.Noop_failure_loop { noop_count })
+  else if idle_stale then
+    let stall_seconds = now -. last_turn in
+    if last_idle_wakeup_ts <= 0.0 then
+      Request_idle_recovery { stall_seconds }
+    else if now -. last_idle_wakeup_ts > active_turn_timeout_sec then
+      Terminate (Keeper_registry.Idle_turn { stall_seconds })
+    else
+      No_action
+  else
+    No_action
+
+let classify_stale_watchdog_action_for_test =
+  classify_stale_watchdog_action
+
+let current_generation_noop_failure_loop ~noop_count ~noop_threshold
+    ~last_turn ~started_at =
+  noop_count >= noop_threshold && last_turn >= started_at
+
+let current_generation_noop_failure_loop_for_test =
+  current_generation_noop_failure_loop
+
+let stale_watchdog_idle_recovery_stimulus ~now ~stall_seconds ~threshold
+    ~last_turn ~(meta : keeper_meta) : Keeper_event_queue.stimulus =
+  let payload =
+    `Assoc [
+      "source", `String "stale_watchdog_idle_recovery";
+      "keeper", `String meta.name;
+      "stall_seconds", `Float stall_seconds;
+      "threshold_seconds", `Float threshold;
+      "last_turn_ts", `Float last_turn;
+      "message",
+      `String
+        "stale watchdog detected an idle keeper; run a recovery cycle before considering termination";
+    ]
+    |> Yojson.Safe.to_string
+  in
+  {
+    Keeper_event_queue.post_id =
+      Printf.sprintf "stale-watchdog-idle:%s:%.0f" meta.name last_turn;
+    urgency = Keeper_event_queue.Immediate;
+    arrived_at = now;
+    payload;
+  }
 
 type batch_root_cause =
   | Cascade_unhealthy
@@ -382,6 +448,8 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
     Env_config_keeper.KeeperWatchdog.grace_period_sec
   in
   let last_broadcast_ts = ref 0.0 in
+  let last_idle_wakeup_ts = ref 0.0 in
+  let last_idle_wakeup_last_turn = ref 0.0 in
   let request_watchdog_stop () =
     (* tla-lint: allow-mutation: fiber signal — stale watchdog asks the
        heartbeat fiber to exit and wakes it if it is in interruptible sleep. *)
@@ -460,17 +528,50 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
              let noop_count =
                entry.meta.runtime.proactive_rt.consecutive_noop_count
              in
-             let failure_loop = noop_count >= noop_threshold () in
+             (* [consecutive_noop_count] is persisted in keeper meta so the
+                scheduler can apply backoff across process restarts.  Do not
+                reuse that persisted value as an immediate watchdog kill
+                signal for a fresh fiber: the new generation must first
+                complete a turn, otherwise a keeper can crash-loop on boot
+                with [noop_failure_loop(noop=N)]. *)
+             let noop_current_generation =
+               current_generation_noop_failure_loop
+                 ~noop_count
+                 ~noop_threshold:(noop_threshold ())
+                 ~last_turn
+                 ~started_at:entry.started_at
+             in
+             let failure_loop = noop_current_generation in
              let stale = idle_stale || in_turn_stale || failure_loop in
+             if
+               (not idle_stale)
+               || not (Float.equal last_turn !last_idle_wakeup_last_turn)
+             then begin
+               last_idle_wakeup_ts := 0.0;
+               last_idle_wakeup_last_turn := 0.0
+             end;
+             let watchdog_action =
+               classify_stale_watchdog_action ~now ~threshold
+                 ~active_turn_timeout_sec ~last_turn ~idle_stale
+                 ~in_turn_stale ~in_turn_age ~failure_loop ~noop_count
+                 ~last_idle_wakeup_ts:!last_idle_wakeup_ts
+             in
+             let action_label =
+               match watchdog_action with
+               | No_action -> "none"
+               | Request_idle_recovery _ -> "idle_recovery_wakeup"
+               | Terminate kill_class ->
+                   "terminate:" ^ stale_kill_class_label kill_class
+             in
              (* The tick line is a sampled state snapshot. Stale termination
                 and broadcasts below remain ERROR, so INFO does not need every
                 intermediate heartbeat/noop snapshot. *)
              let log_line =
                Printf.sprintf
-                 "%s: watchdog tick noop=%d idle_stale=%b idle_skip_suppressed=%b in_turn_stale=%b in_turn_age=%.0f failure_loop=%b stale=%b last_turn=%.0f fiber_age=%.0f grace_rem=%.0f"
-                 meta.name noop_count idle_stale idle_skip_suppressed
-                 in_turn_stale in_turn_age failure_loop stale last_turn
-                 fiber_age grace_remaining
+                 "%s: watchdog tick noop=%d noop_current_generation=%b idle_stale=%b idle_skip_suppressed=%b in_turn_stale=%b in_turn_age=%.0f failure_loop=%b stale=%b action=%s last_turn=%.0f fiber_age=%.0f grace_rem=%.0f"
+                 meta.name noop_count noop_current_generation idle_stale
+                 idle_skip_suppressed in_turn_stale in_turn_age failure_loop
+                 stale action_label last_turn fiber_age grace_remaining
              in
              Log.Keeper.routine "%s" log_line;
              let cooldown_ok =
@@ -527,7 +628,22 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                    meta.name stall_seconds count meta.cascade_name;
                  emit_watchdog_broadcast ~failure_reason:(Some failure_reason)
                    ~stall_seconds
-               | _ ->
+               | _ -> (
+               match watchdog_action with
+               | Request_idle_recovery { stall_seconds } ->
+                 let stimulus =
+                   stale_watchdog_idle_recovery_stimulus ~now
+                     ~stall_seconds ~threshold ~last_turn ~meta
+                 in
+                 Keeper_registry.enqueue_event ~base_path meta.name stimulus;
+                 Keeper_registry.wakeup ~base_path meta.name;
+                 last_idle_wakeup_ts := now;
+                 last_idle_wakeup_last_turn := last_turn;
+                 Log.Keeper.warn
+                   "%s: stale watchdog requested idle recovery wakeup (idle %.0fs threshold %.0fs; not terminating) [cascade=%s]"
+                   meta.name stall_seconds threshold meta.cascade_name
+               | No_action -> ()
+               | Terminate kill_class ->
                (* #10940 follow-up: surface the most recent skip reasons
                   alongside [idle %.0fs] so operators can tell whether
                   the kill targeted a *stuck* fiber or a *deliberately
@@ -558,17 +674,6 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                   actions, so they need different typed labels.  The
                   surrounding [reason_desc] log line still embeds the
                   same human-readable text via [stale_kill_class_to_string]. *)
-               let kill_class : Keeper_registry.stale_kill_class =
-                 if in_turn_stale then
-                   In_turn_hung
-                     { active_seconds = in_turn_age;
-                       timeout_threshold = active_turn_timeout_sec;
-                     }
-                 else if idle_stale then
-                   Idle_turn { stall_seconds = now -. last_turn }
-                 else
-                   Noop_failure_loop { noop_count }
-               in
                let reason_desc =
                  match kill_class with
                  | Idle_turn { stall_seconds } ->
@@ -716,7 +821,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                    distinct_count batch_window_sec
                    (String.concat ", " batch) root_cause_label
                end;
-               emit_watchdog_broadcast ~failure_reason ~stall_seconds
+               emit_watchdog_broadcast ~failure_reason ~stall_seconds)
              end
            | None ->
              Log.Keeper.warn "%s: watchdog: registry entry NOT FOUND" meta.name

@@ -14,7 +14,8 @@ let () =
         | Bootstrap -> "Bootstrap"
         | Unsupported s -> "Unsupported("^s^")"
         | Board_signal -> "Board_signal"
-        | Alive_but_stuck_recovery -> "Alive_but_stuck_recovery")));
+        | Alive_but_stuck_recovery -> "Alive_but_stuck_recovery"
+        | Stale_watchdog_idle_recovery -> "Stale_watchdog_idle_recovery")));
 
   let live_comment_payload =
     {|{"source":"board_signal","kind":"comment","post_id":"p2","author":"alice","title":"Long board event","content":"this mirrors the long live payload that used to miss the prefix check","hearth":null,"wake_reason":"scope_message"}|}
@@ -30,7 +31,8 @@ let () =
         | Bootstrap -> "Bootstrap"
         | Unsupported s -> "Unsupported("^s^")"
         | Board_signal -> "Board_signal"
-        | Alive_but_stuck_recovery -> "Alive_but_stuck_recovery")));
+        | Alive_but_stuck_recovery -> "Alive_but_stuck_recovery"
+        | Stale_watchdog_idle_recovery -> "Stale_watchdog_idle_recovery")));
 
   (* --- classify: bootstrap --- *)
   let bootstrap_stim = {
@@ -45,7 +47,8 @@ let () =
         | Board_signal -> "Board_signal"
         | Unsupported s -> "Unsupported("^s^")"
         | Bootstrap -> "Bootstrap"
-        | Alive_but_stuck_recovery -> "Alive_but_stuck_recovery")));
+        | Alive_but_stuck_recovery -> "Alive_but_stuck_recovery"
+        | Stale_watchdog_idle_recovery -> "Stale_watchdog_idle_recovery")));
 
   (* --- classify: unsupported --- *)
   let unknown_stim = {
@@ -79,7 +82,17 @@ let () =
         | Board_signal -> "Board_signal"
         | Bootstrap -> "Bootstrap"
         | Unsupported _ -> "Unsupported"
-        | Alive_but_stuck_recovery -> "Alive_but_stuck_recovery")));
+        | Alive_but_stuck_recovery -> "Alive_but_stuck_recovery"
+        | Stale_watchdog_idle_recovery -> "Stale_watchdog_idle_recovery")));
+
+  (* --- classify: stale watchdog idle recovery --- *)
+  let idle_recovery_stim = {
+    post_id = "stale-watchdog-idle:k"; urgency = Immediate; arrived_at = 0.0;
+    payload = {|{"source":"stale_watchdog_idle_recovery","keeper":"k"}|};
+  } in
+  (match classify idle_recovery_stim with
+   | Stale_watchdog_idle_recovery -> ()
+   | _ -> Alcotest.fail "expected Stale_watchdog_idle_recovery");
 
   (* --- queue operations preserved --- *)
   let q = empty in

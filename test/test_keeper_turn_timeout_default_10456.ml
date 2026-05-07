@@ -12,8 +12,8 @@
     The audit hard-ceiling pass later lowered the SSOT default to 600 so the
     keeper turn envelope cannot hide long OAS provider stalls.
 
-    This test pins the SSOT and source-level literal so silent
-    re-divergence shows up as a test failure. *)
+    This test pins the SSOT, source-level literal, and generated env snapshot
+    so silent re-divergence shows up as a test failure. *)
 
 open Alcotest
 
@@ -38,11 +38,32 @@ let resolver_source_path =
   | Some p -> Some p
   | None -> None
 
+let snapshot_source_path =
+  let candidates =
+    [
+      "lib/config/env_config_snapshot.ml";
+      "../lib/config/env_config_snapshot.ml";
+      "../../lib/config/env_config_snapshot.ml";
+    ]
+  in
+  match List.find_opt Sys.file_exists candidates with
+  | Some p -> Some p
+  | None -> None
+
 let read_file path =
   let ic = open_in path in
   Fun.protect
     ~finally:(fun () -> close_in_noerr ic)
     (fun () -> really_input_string ic (in_channel_length ic))
+
+let contains s sub =
+  let n = String.length s and m = String.length sub in
+  let rec loop i =
+    if i + m > n then false
+    else if String.sub s i m = sub then true
+    else loop (i + 1)
+  in
+  loop 0
 
 let test_resolver_default_matches_ssot () =
   match resolver_source_path with
@@ -59,15 +80,6 @@ let test_resolver_default_matches_ssot () =
       let canonical_pattern =
         "~default:600.0 \"MASC_KEEPER_TURN_TIMEOUT_SEC\""
       in
-      let contains s sub =
-        let n = String.length s and m = String.length sub in
-        let rec loop i =
-          if i + m > n then false
-          else if String.sub s i m = sub then true
-          else loop (i + 1)
-        in
-        loop 0
-      in
       let has_stale = contains body stale_pattern in
       let has_stale_3600 = contains body stale_3600_pattern in
       let has_canonical = contains body canonical_pattern in
@@ -83,17 +95,34 @@ let test_resolver_upper_matches_ssot () =
       (* The resolver must keep the same 600s hard ceiling as
          Env_config_keeper.KeeperKeepalive.turn_timeout_sec. *)
       let canonical_upper = "Float.min 600.0" in
-      let contains s sub =
-        let n = String.length s and m = String.length sub in
-        let rec loop i =
-          if i + m > n then false
-          else if String.sub s i m = sub then true
-          else loop (i + 1)
-        in
-        loop 0
-      in
       check bool "canonical 600 upper bound in resolver" true
         (contains body canonical_upper)
+
+let test_snapshot_default_matches_ssot () =
+  match snapshot_source_path with
+  | None -> skip ()
+  | Some p ->
+      let body = read_file p in
+      let stale_default =
+        "entry ~default:\"3600.0\" \"MASC_KEEPER_TURN_TIMEOUT_SEC\""
+      in
+      let stale_range =
+        "Wall-clock timeout for a single unified turn (clamped 60-7200 seconds)"
+      in
+      let canonical_default =
+        "entry ~default:\"600.0\" \"MASC_KEEPER_TURN_TIMEOUT_SEC\""
+      in
+      let canonical_range =
+        "Wall-clock timeout for a single unified turn (clamped 60-600 seconds)"
+      in
+      check bool "no stale 3600 default in env snapshot" false
+        (contains body stale_default);
+      check bool "no stale 7200 range in env snapshot" false
+        (contains body stale_range);
+      check bool "canonical 600 default in env snapshot" true
+        (contains body canonical_default);
+      check bool "canonical 60-600 range in env snapshot" true
+        (contains body canonical_range)
 
 let () =
   run "keeper_turn_timeout_default_10456"
@@ -109,5 +138,10 @@ let () =
             `Quick test_resolver_default_matches_ssot;
           test_case "resolver upper bound literal matches SSOT (600)" `Quick
             test_resolver_upper_matches_ssot;
+        ] );
+      ( "snapshot-drift-gate",
+        [
+          test_case "env config snapshot matches keeper turn timeout SSOT"
+            `Quick test_snapshot_default_matches_ssot;
         ] );
     ]

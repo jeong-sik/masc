@@ -409,13 +409,14 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                 latency=278s.  The previous code looked only at
                 [last_turn_ts] and could fire while a turn was actively
                 running, killing the keeper mid-LLM-call.  Active turns
-                get a separate (larger) threshold so legitimately slow
-                turns aren't mistaken for hangs.  Use
-                [Keeper_runtime_resolved.turn_timeout_sec] as the ceiling
-                so the watchdog never kills a turn still within its
-                configured budget (default 3600s, range [60, 7200]).
-                Previous 600s hardcoded minimum caused fleet-wide
-                termination when local models take 900s+ turns. *)
+                get a separate threshold so legitimately slow turns aren't
+                mistaken for hangs.  Use
+                [Keeper_runtime_resolved.turn_timeout_sec] as the
+                active-turn floor so the watchdog never kills a turn still
+                within its configured budget (default 600s, range [60, 600]).
+                [stale_threshold_sec] may be larger, and the [Float.max]
+                below preserves that deployer patience for watchdog-only
+                stale detection. *)
              let active_turn_timeout_sec =
                let turn_timeout = Keeper_runtime_resolved.turn_timeout_sec () in
                Float.max turn_timeout threshold

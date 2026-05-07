@@ -54,6 +54,21 @@ let write_json path json =
 let write_file path content =
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
 
+let write_lines path lines =
+  Fs_compat.mkdir_p (Filename.dirname path);
+  write_file path (String.concat "\n" lines ^ "\n")
+
+let persistence_read_drop_total ~surface ~reason =
+  Prometheus.metric_value_or_zero Prometheus.metric_persistence_read_drops
+    ~labels:[("surface", surface); ("reason", reason)]
+    ()
+
+let check_persistence_read_drop_delta ~surface ~reason ~before ~delta =
+  check (float 0.0001)
+    (Printf.sprintf "%s/%s persistence read drops" surface reason)
+    (before +. float_of_int delta)
+    (persistence_read_drop_total ~surface ~reason)
+
 let write_keeper_toml_exn ?autoboot_enabled config ~name =
   let keepers_dir =
     Filename.concat (Coord.masc_root_dir config) "config/keepers"
@@ -297,6 +312,65 @@ let test_bootable_keeper_names_skip_autoboot_disabled_meta () =
       let names = Keeper_runtime.bootable_keeper_names config in
       check bool "autoboot disabled sangsu excluded from bootable list" false
         (List.mem "sangsu" names))
+
+let test_keeper_status_list_counts_malformed_skill_route_rows () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  with_clean_base_path_env @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Config_dir_resolver.reset ();
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      write_keeper_toml_exn config ~name:"sangsu";
+      write_keeper_meta_exn config ~name:"sangsu" ~trace_id:"trace-sangsu";
+      let surface = "keeper_status_skill_route" in
+      let entry_error = Safe_ops.persistence_read_drop_reason_entry_load_error in
+      let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+      let entry_before =
+        persistence_read_drop_total ~surface ~reason:entry_error
+      in
+      let invalid_before =
+        persistence_read_drop_total ~surface ~reason:invalid_payload
+      in
+      write_lines
+        (Keeper_types.keeper_metrics_path config "sangsu")
+        [
+          {|{"skill_primary":"ocaml","skill_reason":"fixture"}|};
+          "[1]";
+          "{not-json";
+        ];
+      let ctx = keeper_ctx env sw config "operator" in
+      let ok, body =
+        Keeper_status.handle_keeper_list ctx
+          (`Assoc [ ("limit", `Int 10); ("detailed", `Bool true) ])
+      in
+      check bool "keeper status list ok" true ok;
+      let json = parse_json_exn body in
+      let row =
+        Yojson.Safe.Util.(json |> member "keepers" |> to_list)
+        |> List.find_opt (fun row ->
+             Yojson.Safe.Util.(row |> member "name" |> to_string) = "sangsu")
+      in
+      let row = match row with Some row -> row | None -> fail "missing sangsu" in
+      check string "valid skill route preserved" "ocaml"
+        Yojson.Safe.Util.(row |> member "skill_route" |> member "primary" |> to_string);
+      check_persistence_read_drop_delta
+        ~surface
+        ~reason:entry_error
+        ~before:entry_before
+        ~delta:1;
+      check_persistence_read_drop_delta
+        ~surface
+        ~reason:invalid_payload
+        ~before:invalid_before
+        ~delta:1)
 
 let test_declarative_autoboot_disabled_skips_boot_without_meta () =
   Eio_main.run @@ fun env ->
@@ -735,6 +809,8 @@ let () =
             test_keeper_listing_ignores_sidecar_json_files;
           test_case "bootable list skips autoboot-disabled meta" `Quick
             test_bootable_keeper_names_skip_autoboot_disabled_meta;
+          test_case "keeper status list counts malformed skill route metrics"
+            `Quick test_keeper_status_list_counts_malformed_skill_route_rows;
           test_case "declarative autoboot-disabled keeper skips boot without meta"
             `Quick test_declarative_autoboot_disabled_skips_boot_without_meta;
           test_case "autoboot policy resyncs from declarative TOML" `Quick

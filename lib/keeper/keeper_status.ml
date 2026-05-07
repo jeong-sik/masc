@@ -12,6 +12,38 @@ type tool_result = Keeper_types.tool_result
 
 include Keeper_status_bridge
 
+let keeper_status_skill_route_surface = "keeper_status_skill_route"
+
+let report_keeper_status_skill_route_drop ~reason ~path ~detail =
+  Safe_ops.report_persistence_read_drop
+    ~on_drop:(fun () ->
+      Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+        ~labels:[("surface", keeper_status_skill_route_surface); ("reason", reason)]
+        ())
+    ~surface:keeper_status_skill_route_surface
+    ~reason
+    ~path
+    ~detail
+
+let parse_skill_route_metrics_line ~path line =
+  match Yojson.Safe.from_string line with
+  | `Assoc _ as json -> Some json
+  | _ ->
+      report_keeper_status_skill_route_drop
+        ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+        ~path
+        ~detail:"expected JSON object row";
+      None
+  | exception (Eio.Cancel.Cancelled _ as exn) ->
+      let bt = Printexc.get_raw_backtrace () in
+      Printexc.raise_with_backtrace exn bt
+  | exception Yojson.Json_error detail ->
+      report_keeper_status_skill_route_drop
+        ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+        ~path
+        ~detail;
+      None
+
 (* Re-export handle_keeper_status from the detail module *)
 let handle_keeper_status = Keeper_status_detail.handle_keeper_status
 
@@ -77,12 +109,12 @@ let handle_keeper_list ctx args : tool_result =
             let rec find_latest = function
               | [] -> None
               | line :: tl ->
-                  (try
-                     let j = Yojson.Safe.from_string line in
-                     match Safe_ops.json_string_opt "skill_primary" j with
-                     | Some primary when String.trim primary <> "" -> Some j
-                     | _ -> find_latest tl
-                   with Yojson.Json_error _ -> find_latest tl)
+                  (match parse_skill_route_metrics_line ~path:metrics_path line with
+                   | Some j -> (
+                       match Safe_ops.json_string_opt "skill_primary" j with
+                       | Some primary when String.trim primary <> "" -> Some j
+                       | _ -> find_latest tl)
+                   | None -> find_latest tl)
             in
             find_latest (List.rev metrics_window_lines)
           in

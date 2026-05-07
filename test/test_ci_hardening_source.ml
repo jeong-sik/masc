@@ -1204,9 +1204,20 @@ let test_keeper_required_tool_contracts () =
           "create_success_markers_missing"
      && file_contains_pattern
           "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          "create_durable_evidence_has_success_markers"
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          {|--harness-run-dir "$RUN_DIR"|}
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          "create-readiness-audit.json"
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
           "skipping review phase because create phase did not produce complete success evidence"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-          "`create-readiness-failures.jsonl`");
+          "`create-readiness-failures.jsonl`"
+     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+          "`create-readiness-audit.json`");
   check bool "docker PR lifecycle supports review-only resume" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"

@@ -20,6 +20,7 @@ REVIEW_TARGETS_FILE="$RUN_DIR/review-targets.jsonl"
 GITHUB_IDENTITY_COUNTS_FILE="$RUN_DIR/github-identity-counts.json"
 PROOF_BRANCH_COLLISIONS_FILE="$RUN_DIR/proof-branch-collisions.jsonl"
 CREATE_READINESS_FAILURES_FILE="$RUN_DIR/create-readiness-failures.jsonl"
+CREATE_READINESS_AUDIT_FILE="$RUN_DIR/create-readiness-audit.json"
 SUMMARY_FILE="$RUN_DIR/summary.json"
 AUDIT_FILE="$RUN_DIR/audit-docker-pr-lifecycle.json"
 AUDIT_STATUS_RESULT=0
@@ -190,6 +191,7 @@ while [[ $# -gt 0 ]]; do
         GITHUB_IDENTITY_COUNTS_FILE="$RUN_DIR/github-identity-counts.json"
         PROOF_BRANCH_COLLISIONS_FILE="$RUN_DIR/proof-branch-collisions.jsonl"
         CREATE_READINESS_FAILURES_FILE="$RUN_DIR/create-readiness-failures.jsonl"
+        CREATE_READINESS_AUDIT_FILE="$RUN_DIR/create-readiness-audit.json"
         SUMMARY_FILE="$RUN_DIR/summary.json"
         AUDIT_FILE="$RUN_DIR/audit-docker-pr-lifecycle.json"
       fi
@@ -207,6 +209,7 @@ while [[ $# -gt 0 ]]; do
       GITHUB_IDENTITY_COUNTS_FILE="$RUN_DIR/github-identity-counts.json"
       PROOF_BRANCH_COLLISIONS_FILE="$RUN_DIR/proof-branch-collisions.jsonl"
       CREATE_READINESS_FAILURES_FILE="$RUN_DIR/create-readiness-failures.jsonl"
+      CREATE_READINESS_AUDIT_FILE="$RUN_DIR/create-readiness-audit.json"
       SUMMARY_FILE="$RUN_DIR/summary.json"
       AUDIT_FILE="$RUN_DIR/audit-docker-pr-lifecycle.json"
       shift 2
@@ -242,6 +245,7 @@ mkdir -p "$RUN_DIR" "$RAW_DIR" "$PROMPT_DIR"
 : >"$REVIEW_TARGETS_FILE"
 : >"$PROOF_BRANCH_COLLISIONS_FILE"
 : >"$CREATE_READINESS_FAILURES_FILE"
+: >"$CREATE_READINESS_AUDIT_FILE"
 
 log() {
   printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2
@@ -1492,8 +1496,39 @@ create_result_has_success_markers() {
     && printf '%s' "$reply" | grep -Eq 'https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]+'
 }
 
+run_create_readiness_audit() {
+  local tmp_file
+  tmp_file="$CREATE_READINESS_AUDIT_FILE.tmp"
+  if ! scripts/audit-keeper-fleet-readiness.py \
+      --base-path "$BASE_PATH" \
+      --expected-keepers 0 \
+      --max-silence-hours "$MAX_SILENCE_HOURS" \
+      --no-require-board-evidence \
+      --require-docker-pr-create-evidence \
+      --require-docker-git-push-evidence \
+      --evidence-run-id "$RUN_ID" \
+      --harness-run-dir "$RUN_DIR" \
+      --json >"$tmp_file"; then
+    :
+  fi
+  mv "$tmp_file" "$CREATE_READINESS_AUDIT_FILE"
+}
+
+create_durable_evidence_has_success_markers() {
+  local keeper="$1"
+  [[ -s "$CREATE_READINESS_AUDIT_FILE" ]] || return 1
+  jq -e --arg keeper "$keeper" '
+    (.keepers // [])[]
+    | select(.name == $keeper)
+    | (.docker_pr_create_action == true)
+      and (.docker_git_push_action == true)
+      and ((.pr_url_evidence == true) or (.pr_created_evidence == true))
+  ' "$CREATE_READINESS_AUDIT_FILE" >/dev/null
+}
+
 all_create_results_ready_for_review() {
   : >"$CREATE_READINESS_FAILURES_FILE"
+  run_create_readiness_audit
 
   local keeper status text_file
   while IFS= read -r keeper; do
@@ -1512,18 +1547,30 @@ all_create_results_ready_for_review() {
     )"
 
     if [[ -z "$status" || -z "$text_file" ]]; then
+      if create_durable_evidence_has_success_markers "$keeper"; then
+        log "create readiness accepted durable tool evidence for $keeper with missing result row"
+        continue
+      fi
       jq -nc --arg keeper "$keeper" \
         '{keeper:$keeper, blocker:"create_result_missing"}' \
         >>"$CREATE_READINESS_FAILURES_FILE"
       continue
     fi
     if [[ "$status" != "done" && "$status" != "completed" && "$status" != "complete" ]]; then
+      if create_durable_evidence_has_success_markers "$keeper"; then
+        log "create readiness accepted durable tool evidence for $keeper despite status=$status"
+        continue
+      fi
       jq -nc --arg keeper "$keeper" --arg status "$status" \
         '{keeper:$keeper, status:$status, blocker:"create_status_not_success"}' \
         >>"$CREATE_READINESS_FAILURES_FILE"
       continue
     fi
     if ! create_result_has_success_markers "$keeper" "$text_file"; then
+      if create_durable_evidence_has_success_markers "$keeper"; then
+        log "create readiness accepted durable tool evidence for $keeper despite missing reply markers"
+        continue
+      fi
       jq -nc --arg keeper "$keeper" --arg status "$status" --arg text_file "$text_file" \
         '{keeper:$keeper, status:$status, text_file:$text_file, blocker:"create_success_markers_missing"}' \
         >>"$CREATE_READINESS_FAILURES_FILE"

@@ -67,6 +67,13 @@ branches before re-running. An empty file means no collisions; rows look like:
  "remote_head":false,"worktree_branch":false,
  "blocker":"branch_collision_preflight"}
 ```
+The create-readiness gate also writes `create-readiness-audit.json` from a
+run-scoped durable evidence audit. If a keeper successfully executed
+Docker-backed `git push` and `keeper_pr_create` for the current run but the
+final Agent.run reply timed out before emitting the compact JSON, that durable
+tool evidence is accepted for review readiness. This keeps the gate
+evidence-first without letting stale run ids or self-reported replies advance
+the review phase.
 By default, mutation preflight also requires every selected keeper account to
 have upstream `WRITE`, `MAINTAIN`, or `ADMIN` permission for the target repo. For
 PUBLIC repositories, `--allow-fork-pr-for-readonly` permits `READ`/`TRIAGE`

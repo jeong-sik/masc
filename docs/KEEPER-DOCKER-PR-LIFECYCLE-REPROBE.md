@@ -74,13 +74,14 @@ open the draft PR with `head=OWNER:BRANCH`; PR creation still goes through
 The review phase also resolves fork-created target PRs with the same
 owner-qualified `OWNER:BRANCH` head ref so reviewers do not miss valid fork PRs
 by looking up only the bare branch name.
-After collision evidence is clear, the review phase requires `keeper_pr_review_comment`.
+After collision evidence is clear, the review phase requires `keeper_shell` and
+`keeper_pr_review_comment`, in that order. The first required tool allows the
+prompted read-only PR lookup to satisfy the provider's first-tool contract; the
+second required tool keeps approval mandatory.
 This avoids the old single-turn shape where one keeper could wait on another
 keeper's missing PR until the Agent.run timeout. The review prompt reserves
-`keeper_shell` for read-only GitHub inspection, but does not put it in
-`required_tools` because passive read-only tools cannot satisfy the runtime
-required-tool predicate. Keepers are instructed to report `target_pr_missing`
-after one failed branch lookup instead of polling in a loop.
+`keeper_shell` for read-only GitHub inspection. Keepers are instructed to report
+`target_pr_missing` after one failed branch lookup instead of polling in a loop.
 Keepers must create/use the exact run-scoped branch produced by
 `masc_worktree_create task_id=<run_id>`:
 `keeper-<keeper>-agent/<run_id>`. They must write the proof file

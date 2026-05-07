@@ -183,7 +183,10 @@ let () = test "dispatch_coordination_fsm_snapshot" (fun () ->
       assert (json |> member "mode" |> to_string = "advisory");
       assert (json |> member "summary" |> member "products" |> to_int >= 0);
       assert (json |> member "summary" |> member "evidence" |> to_int >= 0);
-      assert (json |> member "truncation" |> member "product_limit" |> to_int > 0)
+      assert (json |> member "truncation" |> member "product_limit" |> to_int > 0);
+      assert (json |> member "truncation" |> member "global_evidence_limit" |> to_int > 0);
+      assert (
+        json |> member "truncation" |> member "response_shape" |> to_string = "bounded")
   | None -> failwith "dispatch returned None"
 )
 

@@ -560,11 +560,13 @@ let read_recent_telemetry config =
     []
 ;;
 
-let tool_post_limit = 200
-let tool_telemetry_limit = 500
-let tool_product_limit = 120
-let tool_violation_limit = 120
-let tool_evidence_per_product_limit = 8
+let tool_post_limit = 80
+let tool_telemetry_limit = 120
+let tool_product_limit = 80
+let tool_violation_limit = 80
+let tool_product_violation_limit = 3
+let tool_evidence_per_product_limit = 3
+let tool_global_evidence_limit = 80
 
 let read_tool_telemetry config =
   try
@@ -689,6 +691,65 @@ let cap_tool_snapshot (snapshot : Coordination_product.snapshot) =
   ({ Coordination_product.products = products; violations } : Coordination_product.snapshot)
 ;;
 
+let tool_product_to_yojson product =
+  let violations =
+    Coordination_product.check_invariants product
+    |> take tool_product_violation_limit
+    |> List.map Coordination_product.violation_to_yojson
+  in
+  `Assoc
+    [ "refs", Coordination_product.ids_to_yojson product.ids
+    ; ( "goal"
+      , match product.goal with
+        | Some phase -> Goal_phase.to_yojson phase
+        | None -> `Null )
+    ; "task", `String (Coordination_product.task_phase_to_string product.task)
+    ; "board", `String (Coordination_product.board_phase_to_string product.board)
+    ; "reward", `String (Coordination_product.reward_phase_to_string product.reward)
+    ; "task_counts", Coordination_product.task_counts_to_yojson product.task_counts
+    ; "facts", Coordination_product.facts_to_yojson product.facts
+    ; "evidence", `List (List.map Coordination_product.evidence_to_yojson product.evidence)
+    ; "violations", `List violations
+    ]
+;;
+
+let tool_snapshot_to_yojson ~(original : Coordination_product.snapshot)
+      ~(capped : Coordination_product.snapshot) =
+  let original_evidence_count =
+    List.fold_left
+      (fun total (product : Coordination_product.product) ->
+        total + List.length product.evidence)
+      0
+      original.products
+  in
+  let severity = severity_counts original in
+  let returned_evidence =
+    capped.products
+    |> List.concat_map (fun (product : Coordination_product.product) -> product.evidence)
+    |> take tool_global_evidence_limit
+  in
+  `Assoc
+    [ "schema_version", `Int Coordination_product.schema_version_current
+    ; "mode", `String (Coordination_product.snapshot_mode_to_string Coordination_product.Advisory)
+    ; ( "summary"
+      , `Assoc
+          [ "products", `Int (List.length original.products)
+          ; "violations", `Int (List.length original.violations)
+          ; "evidence", `Int original_evidence_count
+          ; ( "severity_counts"
+            , `Assoc
+                [ "info", `Int severity.info
+                ; "warn", `Int severity.warn
+                ; "error", `Int severity.error
+                ] )
+          ] )
+    ; "products", `List (List.map tool_product_to_yojson capped.products)
+    ; "evidence", `List (List.map Coordination_product.evidence_to_yojson returned_evidence)
+    ; ( "violations"
+      , `List (List.map Coordination_product.violation_to_yojson capped.violations) )
+    ]
+;;
+
 let assoc_append key value = function
   | `Assoc fields -> `Assoc (fields @ [ key, value ])
   | json -> json
@@ -704,8 +765,11 @@ let tool_truncation_json ~(original : Coordination_product.snapshot)
     ; "product_limit", `Int tool_product_limit
     ; "violation_limit", `Int tool_violation_limit
     ; "evidence_per_product_limit", `Int tool_evidence_per_product_limit
+    ; "global_evidence_limit", `Int tool_global_evidence_limit
+    ; "product_violation_limit", `Int tool_product_violation_limit
     ; "post_read_limit", `Int tool_post_limit
     ; "telemetry_read_limit", `Int tool_telemetry_limit
+    ; "response_shape", `String "bounded"
     ]
 ;;
 
@@ -713,7 +777,7 @@ let safe_build_tool_yojson config =
   try
     let original = build_for_tool config in
     let capped = cap_tool_snapshot original in
-    Coordination_product.snapshot_to_yojson capped
+    tool_snapshot_to_yojson ~original ~capped
     |> assoc_append "truncation" (tool_truncation_json ~original ~capped)
   with
   | exn ->
@@ -731,7 +795,10 @@ let safe_build_tool_yojson config =
             ; "product_limit", `Int tool_product_limit
             ; "violation_limit", `Int tool_violation_limit
             ; "evidence_per_product_limit", `Int tool_evidence_per_product_limit
+            ; "global_evidence_limit", `Int tool_global_evidence_limit
+            ; "product_violation_limit", `Int tool_product_violation_limit
             ; "post_read_limit", `Int tool_post_limit
             ; "telemetry_read_limit", `Int tool_telemetry_limit
+            ; "response_shape", `String "bounded"
             ])
 ;;

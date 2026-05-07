@@ -4492,6 +4492,45 @@ let test_is_ollama_saturated_ignores_zero_available_when_idle () =
     (UT.is_ollama_saturated
        ~capacity_lookup:(fun _ -> Some info) url)
 
+let test_saturation_skip_count_starts_at_zero () =
+  UT.saturation_skip_count_clear_all ();
+  check int "fresh keeper has zero skip count" 0
+    (UT.saturation_skip_count_get ~keeper_name:"fresh_keeper")
+
+let test_saturation_skip_count_inc_returns_new_value () =
+  UT.saturation_skip_count_clear_all ();
+  let n1 = UT.saturation_skip_count_inc ~keeper_name:"k_inc" in
+  let n2 = UT.saturation_skip_count_inc ~keeper_name:"k_inc" in
+  let n3 = UT.saturation_skip_count_inc ~keeper_name:"k_inc" in
+  check int "first inc returns 1" 1 n1;
+  check int "second inc returns 2" 2 n2;
+  check int "third inc returns 3" 3 n3;
+  check int "get matches last inc" 3
+    (UT.saturation_skip_count_get ~keeper_name:"k_inc")
+
+let test_saturation_skip_count_reset_zeros_one_keeper () =
+  UT.saturation_skip_count_clear_all ();
+  let _ = UT.saturation_skip_count_inc ~keeper_name:"k_a" in
+  let _ = UT.saturation_skip_count_inc ~keeper_name:"k_b" in
+  let _ = UT.saturation_skip_count_inc ~keeper_name:"k_b" in
+  UT.saturation_skip_count_reset ~keeper_name:"k_a";
+  check int "reset target zeroed" 0
+    (UT.saturation_skip_count_get ~keeper_name:"k_a");
+  check int "untouched keeper preserved" 2
+    (UT.saturation_skip_count_get ~keeper_name:"k_b")
+
+let test_saturation_skip_cap_default_is_at_least_one () =
+  (* The cap is floored at 1 even if the env var is set to 0 or
+     negative — a cap of 0 would force-dispatch every cycle. *)
+  let prev = try Some (Sys.getenv "MASC_MAX_CONSECUTIVE_SATURATION_SKIPS")
+             with Not_found -> None in
+  Unix.putenv "MASC_MAX_CONSECUTIVE_SATURATION_SKIPS" "0";
+  let cap = UT.max_consecutive_saturation_skips () in
+  (match prev with
+   | Some v -> Unix.putenv "MASC_MAX_CONSECUTIVE_SATURATION_SKIPS" v
+   | None -> Unix.putenv "MASC_MAX_CONSECUTIVE_SATURATION_SKIPS" "");
+  check bool "cap floored at 1 even with env=0" true (cap >= 1)
+
 let wrapped_claude_limit_error () =
   Agent_sdk.Error.Api
     (NetworkError
@@ -8606,6 +8645,14 @@ let () =
             test_is_ollama_saturated_returns_true_when_full_with_queue;
           test_case "PR-B: zero available without traffic is fail-open" `Quick
             test_is_ollama_saturated_ignores_zero_available_when_idle;
+          test_case "PR-B follow-up: fresh keeper has zero skip count" `Quick
+            test_saturation_skip_count_starts_at_zero;
+          test_case "PR-B follow-up: inc returns monotonic counts" `Quick
+            test_saturation_skip_count_inc_returns_new_value;
+          test_case "PR-B follow-up: reset zeros one keeper only" `Quick
+            test_saturation_skip_count_reset_zeros_one_keeper;
+          test_case "PR-B follow-up: cap floored at 1" `Quick
+            test_saturation_skip_cap_default_is_at_least_one;
           test_case "hard quota degraded retry uses local_recovery" `Quick
             test_degraded_retry_after_recoverable_error_uses_local_recovery_for_hard_quota;
           test_case "resumable session degraded retry uses local_recovery"

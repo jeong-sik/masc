@@ -175,3 +175,60 @@ let turn_livelock_stuck_after_sec () =
   Float.max 1.0
     (Env_config_core.get_float ~default:1800.0
        "MASC_KEEPER_TURN_LIVELOCK_STUCK_AFTER_SEC")
+
+(* PR-B follow-up: bound consecutive saturation skips per keeper.
+
+   Pre-existing PR-B logic skips a turn whenever the ollama probe
+   cache reports saturation, with a 5s jittered backoff.  Without an
+   upper bound, a stuck or stale probe (e.g. /api/ps handler hung
+   behind a model load) can produce indefinite consecutive skips —
+   the keeper makes no progress, the watchdog stays unaware (each
+   skip records as a soft "skipped" terminal observation rather than
+   a FAILED→DEAD escalation), and a saturated cache poisons
+   subsequent cycles.
+
+   The cap is intentionally a per-keeper count rather than a global
+   one: different keepers race the same probe cache, and cross-talk
+   between keepers should not consume each other's skip budget.
+
+   Reset rule: any non-skip path clears the counter.  A single
+   successful probe (saturated → false) wipes the history, matching
+   the documented fail-open invariant. *)
+
+let saturation_skip_counts : (string, int) Hashtbl.t = Hashtbl.create 32
+
+let saturation_skip_counts_mutex = Eio.Mutex.create ()
+
+let max_consecutive_saturation_skips_default = 5
+
+let max_consecutive_saturation_skips_env =
+  "MASC_MAX_CONSECUTIVE_SATURATION_SKIPS"
+
+let max_consecutive_saturation_skips () =
+  Int.max 1
+    (Env_config_core.get_int
+       ~default:max_consecutive_saturation_skips_default
+       max_consecutive_saturation_skips_env)
+
+let saturation_skip_count_get ~keeper_name =
+  Eio.Mutex.use_ro saturation_skip_counts_mutex (fun () ->
+    Option.value ~default:0
+      (Hashtbl.find_opt saturation_skip_counts keeper_name))
+
+let saturation_skip_count_inc ~keeper_name =
+  Eio.Mutex.use_rw ~protect:false saturation_skip_counts_mutex (fun () ->
+    let cur =
+      Option.value ~default:0
+        (Hashtbl.find_opt saturation_skip_counts keeper_name)
+    in
+    let next = cur + 1 in
+    Hashtbl.replace saturation_skip_counts keeper_name next;
+    next)
+
+let saturation_skip_count_reset ~keeper_name =
+  Eio.Mutex.use_rw ~protect:false saturation_skip_counts_mutex (fun () ->
+    Hashtbl.remove saturation_skip_counts keeper_name)
+
+let saturation_skip_count_clear_all () =
+  Eio.Mutex.use_rw ~protect:false saturation_skip_counts_mutex (fun () ->
+    Hashtbl.clear saturation_skip_counts)

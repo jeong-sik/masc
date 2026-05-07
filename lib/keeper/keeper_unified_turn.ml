@@ -331,10 +331,28 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           Keeper_coordination.effective_model_labels_for_turn meta_for_check
         in
         match resolve_ollama_only_base_url labels with
-        | None -> None
+        | None ->
+            saturation_skip_count_reset ~keeper_name:meta.name;
+            None
         | Some base_url ->
-            if not (is_ollama_saturated base_url) then None
+            if not (is_ollama_saturated base_url) then begin
+              saturation_skip_count_reset ~keeper_name:meta.name;
+              None
+            end
             else
+              let next_count =
+                saturation_skip_count_inc ~keeper_name:meta.name
+              in
+              let cap = max_consecutive_saturation_skips () in
+              if next_count > cap then begin
+                Log.Keeper.warn
+                  ~keeper_name:meta.name ~turn_id:keeper_turn_id
+                  "%s: saturation skip cap reached (count=%d cap=%d) \
+                   \xe2\x80\x94 force-dispatching despite saturated probe"
+                  meta.name next_count cap;
+                saturation_skip_count_reset ~keeper_name:meta.name;
+                None
+              end else
               let info = Cascade_ollama_probe.cached_capacity base_url in
               let queue_len =
                 match info with
@@ -349,9 +367,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               Log.Keeper.info
                 ~keeper_name:meta.name ~turn_id:keeper_turn_id
                 "%s: ollama saturated for keeper=%s cascade=%s queue=%d \
-                 available=%d \xe2\x80\x94 skipping turn"
+                 available=%d skip_count=%d/%d \xe2\x80\x94 skipping turn"
                 meta.name meta.name effective_cascade_name queue_len
-                available;
+                available next_count cap;
               record_pre_dispatch_terminal_observation
                 ~config
                 ~meta

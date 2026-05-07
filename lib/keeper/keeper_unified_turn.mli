@@ -223,6 +223,27 @@ val is_ollama_saturated :
   string ->
   bool
 
+(** Upper bound on consecutive saturation skips per keeper (env
+    [MASC_MAX_CONSECUTIVE_SATURATION_SKIPS], default 5, floored at
+    1).  When a keeper exceeds this count its next dispatch escapes
+    the saturation pre-skip path so a stuck or stale probe cannot
+    starve the keeper indefinitely. *)
+val max_consecutive_saturation_skips : unit -> int
+
+(** Current consecutive-skip count for [keeper_name].  Returns 0 when
+    the keeper has no recorded skips. *)
+val saturation_skip_count_get : keeper_name:string -> int
+
+(** Increment and return the new consecutive-skip count for
+    [keeper_name]. *)
+val saturation_skip_count_inc : keeper_name:string -> int
+
+(** Reset [keeper_name]'s consecutive-skip count to zero. *)
+val saturation_skip_count_reset : keeper_name:string -> unit
+
+(** Test helper: clear all per-keeper consecutive-skip counters. *)
+val saturation_skip_count_clear_all : unit -> unit
+
 (** Pure merge step for runtime-owned fail-open rotation candidates. The
     active path feeds this from the live cascade catalog: catalog order is
     preserved while retaining only reserved recovery profiles and

@@ -76,37 +76,39 @@ let summarize_ws_close_payload bytes ~received_len ~declared_len =
       received_len declared_len partial
 
 let log_ws_client_close_payload ~session_id ~declared_len payload =
-  let log_once =
-    let logged = ref false in
+  (* Terminal action for a single close-payload handling: log once + close
+     payload once.  Every reachable leaf of the read state machine (early
+     reject, on_eof, on_read completion, schedule re-entry on full buffer,
+     exception) routes through here so the payload is never logged twice
+     and never leaked. *)
+  let finish =
+    let finished = ref false in
     fun summary ->
-      if not !logged then begin
-        logged := true;
+      if not !finished then begin
+        finished := true;
         Log.Server.debug "[ws-standalone] session %s client close (%s)"
-          session_id summary
+          session_id summary;
+        Ws.Payload.close payload
       end
   in
-  if declared_len <= 0 then begin
-    log_once "code=none received_len=0 declared_len=0";
-    Ws.Payload.close payload
-  end
-  else if declared_len > max_ws_close_payload_len then begin
-    log_once
+  if declared_len <= 0 then
+    finish "code=none received_len=0 declared_len=0"
+  else if declared_len > max_ws_close_payload_len then
+    finish
       (Printf.sprintf "payload_len=%d exceeds_control_frame_limit"
-         declared_len);
-    Ws.Payload.close payload
-  end
+         declared_len)
   else
     let buffer = Bytes.create declared_len in
     let offset = ref 0 in
     let rec schedule () =
       if !offset >= declared_len then
-        log_once
+        finish
           (summarize_ws_close_payload buffer ~received_len:!offset
              ~declared_len)
       else
         Ws.Payload.schedule_read payload
           ~on_eof:(fun () ->
-            log_once
+            finish
               (summarize_ws_close_payload buffer ~received_len:!offset
                  ~declared_len))
           ~on_read:(fun bs ~off ~len:chunk_len ->
@@ -116,7 +118,7 @@ let log_ws_client_close_payload ~session_id ~declared_len payload =
               ~dst_off:!offset ~len:copy_len;
             offset := !offset + copy_len;
             if !offset >= declared_len then
-              log_once
+              finish
                 (summarize_ws_close_payload buffer ~received_len:!offset
                    ~declared_len)
             else
@@ -125,10 +127,9 @@ let log_ws_client_close_payload ~session_id ~declared_len payload =
     try schedule () with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-        log_once
+        finish
           (Printf.sprintf "payload_read_error=%s declared_len=%d"
-             (Printexc.to_string exn) declared_len);
-        Ws.Payload.close payload
+             (Printexc.to_string exn) declared_len)
 
 let standalone_ws_eof_summary = function
   | None -> "error=none"

@@ -953,6 +953,12 @@ let metric_llm_inference_duration = "masc_llm_inference_duration_seconds"
    the backend does not emit timings (Anthropic/Gemini). *)
 let metric_llm_prompt_tok_per_sec = "masc_llm_prompt_tok_per_sec"
 let metric_llm_decode_tok_per_sec = "masc_llm_decode_tok_per_sec"
+(* Cascade attempt-liveness streaming histograms.
+   Filled by cascade_attempt_liveness_observer via the recorder injected
+   into L.step.  TTFT = time from request start to first non-Done chunk;
+   TBT = inter-chunk gap during streaming. *)
+let metric_cascade_ttfb_seconds = "masc_cascade_ttfb_seconds"
+let metric_cascade_inter_chunk_seconds = "masc_cascade_inter_chunk_seconds"
 let metric_after_turn_hook = "masc_after_turn_hook_total"
 let metric_keeper_oas_on_stop = "masc_keeper_oas_on_stop_total"
 let metric_keeper_oas_on_idle_escalated =
@@ -2694,6 +2700,14 @@ let init () =
     "Cascade strategy decisions by outcome." Counter;
   add metric_cascade_capacity_events
     "Cascade capacity events by type." Counter;
+  add metric_cascade_ttfb_seconds
+    "Time from cascade attempt start to first non-Done chunk (TTFT). \
+     Labels: [cascade, provider]."
+    Histogram;
+  add metric_cascade_inter_chunk_seconds
+    "Inter-chunk gap during streaming (TBT). \
+     Labels: [cascade, provider]."
+    Histogram;
   install_backend_mutex_observers ()
 
 let start_time = Time_compat.now ()

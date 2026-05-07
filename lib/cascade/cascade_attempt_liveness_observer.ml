@@ -128,6 +128,18 @@ let react_to_output (t : t) (output : L.output) : unit =
 
 let now_seconds () = Time_compat.now ()
 
+let prometheus_recorder (t : t) : L.recorder =
+  let labels = [ ("cascade", t.cascade_label); ("provider", t.provider_label) ] in
+  {
+    L.record_ttft = (fun seconds ->
+        Prometheus.observe_histogram Prometheus.metric_cascade_ttfb_seconds
+          ~labels seconds);
+    record_inter_chunk = (fun seconds ->
+        Prometheus.observe_histogram Prometheus.metric_cascade_inter_chunk_seconds
+          ~labels seconds);
+    record_liveness_outcome = (fun _ -> ());
+  }
+
 let step_with_event (t : t) (evt : Agent_sdk.Types.sse_event) : unit =
   if L.is_terminal !(t.state) then ()
   else
@@ -143,7 +155,9 @@ let step_with_event (t : t) (evt : Agent_sdk.Types.sse_event) : unit =
     match liveness_event with
     | None -> ()
     | Some le ->
-        let new_state, output = L.step t.budget !(t.state) le in
+        let new_state, output =
+          L.step ~recorder:(prometheus_recorder t) t.budget !(t.state) le
+        in
         t.state := new_state;
         react_to_output t output
 
@@ -207,7 +221,8 @@ let start_tick_fiber (t : t) ~(sw : Eio.Switch.t)
               else begin
                 let now = now_seconds () in
                 let new_state, output =
-                  L.step t.budget !(t.state) (L.Tick now)
+                  L.step ~recorder:(prometheus_recorder t)
+                    t.budget !(t.state) (L.Tick now)
                 in
                 t.state := new_state;
                 (try react_to_output t output

@@ -629,6 +629,14 @@ val metric_cascade_attempt_liveness_observed : string
     kill | wire_error}. The kill-rate is
     [kill_total / observed_total]. *)
 
+val metric_cascade_ttfb_seconds : string
+(** Histogram: time from cascade attempt start to first non-Done chunk (TTFT).
+    Labels: [cascade], [provider]. *)
+
+val metric_cascade_inter_chunk_seconds : string
+(** Histogram: inter-chunk gap during streaming (TBT).
+    Labels: [cascade], [provider]. *)
+
 
 val metric_cascade_server_error_skip_total : string
 (** #12797 Total cascade label-ranking skips triggered by recent server-error

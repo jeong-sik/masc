@@ -525,6 +525,10 @@ val metric_oas_inference_prompt_tok_per_sec : string
     [decode_ms] plus [completion_tokens]. Labels: [model_bucket] only. *)
 val metric_oas_inference_decode_tok_per_sec : string
 
+(** Histogram populated from [AgentCompleted] [usage.cost_usd].
+    Labels: [model_bucket] only. *)
+val metric_oas_inference_cost_usd : string
+
 val metric_mcp_tool_schema_count : string
 val metric_mcp_tool_schema_tokens_approx : string
 

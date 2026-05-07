@@ -118,6 +118,13 @@ let observe_inference_telemetry ~provider ~model ~prompt_tokens
   observe_inference_rate Prometheus.metric_oas_inference_decode_tok_per_sec
     ~model_bucket decode_tok_s
 
+let observe_inference_cost ~model_bucket = function
+  | Some cost when positive_finite cost ->
+      Prometheus.observe_histogram Prometheus.metric_oas_inference_cost_usd
+        ~labels:[ ("model_bucket", model_bucket) ]
+        cost
+  | _ -> ()
+
 let stop_reason_to_wire = function
   | Agent_sdk.Types.EndTurn -> "end_turn"
   | Agent_sdk.Types.StopToolUse -> "tool_use"
@@ -589,6 +596,18 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
       in
       Some (wrap ~event_type:"agent_started" ~payload ~agent_name ~task_id ())
   | Agent_sdk.Event_bus.AgentCompleted { agent_name; task_id; elapsed; result } ->
+      (match result with
+       | Ok (response : Agent_sdk.Types.api_response) ->
+           let model_bucket =
+             inference_model_bucket ~provider:"" ~model:response.model
+           in
+           let cost_usd =
+             match response.usage with
+             | Some usage -> usage.cost_usd
+             | None -> None
+           in
+           observe_inference_cost ~model_bucket cost_usd
+       | Error _ -> ());
       let payload =
         `Assoc
           ([

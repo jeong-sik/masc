@@ -862,6 +862,8 @@ let metric_oas_inference_prompt_tok_per_sec =
   "masc_oas_inference_prompt_tok_per_sec"
 let metric_oas_inference_decode_tok_per_sec =
   "masc_oas_inference_decode_tok_per_sec"
+let metric_oas_inference_cost_usd =
+  "masc_oas_inference_cost_usd"
 
 (* MCP tool schema budget (set once at boot from mcp_server_eio.ml
    via [set_tool_schema_stats]). *)
@@ -1415,6 +1417,9 @@ let init () =
   add metric_oas_inference_decode_tok_per_sec
     "OAS InferenceTelemetry decode throughput histogram for events suppressed \
      from SSE. Labelled only by bounded model_bucket." Histogram;
+  add metric_oas_inference_cost_usd
+    "OAS AgentCompleted cost_usd histogram. Labelled by bounded model_bucket; \
+     enables per-model cost distribution (P50/P99) and total spend tracking." Histogram;
   add metric_tasks "Total tasks processed" Counter;
   add metric_errors "Total errors" Counter;
   add metric_error_events

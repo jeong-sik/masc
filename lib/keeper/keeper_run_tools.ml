@@ -344,7 +344,7 @@ let prepare_agent_setup
           acc.discovered
           ~turn:acc.current_turn
           ~names:discovered_names;
-        let masc_schemas = !Keeper_exec_tools.masc_schemas_ref in
+        let masc_schemas = Keeper_exec_tools.masc_schemas_snapshot () in
         let result_json ~already_visible (name, score) =
                let help_opt = Tool_help_registry.find_entry masc_schemas name in
                let desc =

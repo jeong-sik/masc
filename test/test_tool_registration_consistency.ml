@@ -280,6 +280,23 @@ let test_tool_registration_check_does_not_depend_on_injected_masc_schemas () =
           Alcotest.(check (list string))
             "no masc orphan_toml without injected schemas" [] masc_orphans)
 
+let test_judge_tool_schema_names_resolve () =
+  let requested =
+    [ "masc_status"; "masc_tasks"; "masc_agents"; "masc_agent_card";
+      "masc_board_list" ]
+  in
+  match Agent_tool_surfaces.local_worker_tool_schemas ~names:requested () with
+  | Error msg ->
+      Alcotest.failf "judge tool names must resolve: %s" msg
+  | Ok schemas ->
+      let names =
+        schemas
+        |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+        |> List.sort String.compare
+      in
+      let expected = List.sort String.compare requested in
+      Alcotest.(check (list string)) "judge tool schemas" expected names
+
 (* ── Test 3: No duplicate tool names in schemas ──────────────── *)
 
 let test_no_duplicate_schemas () =
@@ -382,6 +399,8 @@ let () =
             "tool registration check does not depend on injected masc schemas"
             `Quick
             test_tool_registration_check_does_not_depend_on_injected_masc_schemas;
+          Alcotest.test_case "judge tool schema names resolve" `Quick
+            test_judge_tool_schema_names_resolve;
           Alcotest.test_case
             "admin-dispatched keeper tools not flagged as orphan_toml (#7696)"
             `Quick

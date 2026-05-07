@@ -582,7 +582,16 @@ let test_oas_pin_source_contracts () =
        "MASC_OPAM_LOCK_HELD=1");
   check bool "external opam pin script shares the opam lock path" true
     (file_contains_pattern "scripts/opam-pin-external-deps.sh"
-       "MASC_OPAM_LOCK_PATH:-/tmp/me-opam-switch.lock")
+       "MASC_OPAM_LOCK_PATH:-/tmp/me-opam-switch.lock");
+  check bool "external opam pin script blocks stale worktree downgrades" true
+    (file_contains_pattern "scripts/opam-pin-external-deps.sh"
+       "refusing to downgrade shared agent_sdk pin");
+  check bool "external opam pin script exposes downgrade override" true
+    (file_contains_pattern "scripts/opam-pin-external-deps.sh"
+       "MASC_ALLOW_AGENT_SDK_PIN_DOWNGRADE");
+  check bool "external opam pin script reports lock holder evidence" true
+    (file_contains_pattern "scripts/opam-pin-external-deps.sh"
+       "print_opam_lock_holder")
 
 let test_doc_truth_guard_contracts () =
   check bool "doc truth script protects spec index front door wording" true

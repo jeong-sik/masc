@@ -101,6 +101,44 @@ let test_load_anchors_resolution_to_base_path_over_cwd_candidate () =
            "expected config load to use base_path=%s instead of cwd=%s: %s"
            source_root fake_build_root msg)
 
+let test_load_normalizes_legacy_fs_tool_names () =
+  with_temp_dir "tool-policy-legacy-tools" @@ fun root ->
+  let config_dir = Filename.concat root "config" in
+  mkdir_p config_dir;
+  write_file
+    (Filename.concat config_dir "tool_policy.toml")
+    {|
+[groups.legacy]
+tools = ["keeper_fs_write", "keeper_fs_delete", "keeper_fs_edit"]
+
+[masc.legacy]
+tools = ["keeper_fs_write", "keeper_fs_delete", "masc_status"]
+
+[presets.legacy]
+groups = ["legacy"]
+masc_groups = ["legacy"]
+masc_tools = ["keeper_fs_write", "keeper_fs_delete", "masc_status"]
+|};
+  match KTPC.load ~base_path:root with
+  | Error msg -> fail ("expected legacy policy config to load: " ^ msg)
+  | Ok cfg ->
+      let assert_no_legacy label tools =
+        check bool (label ^ " drops keeper_fs_write") false
+          (List.mem "keeper_fs_write" tools);
+        check bool (label ^ " drops keeper_fs_delete") false
+          (List.mem "keeper_fs_delete" tools);
+        check bool (label ^ " keeps canonical fs_edit") true
+          (List.mem "keeper_fs_edit" tools)
+      in
+      (match KTPC.resolve_group cfg "legacy" with
+      | Some tools -> assert_no_legacy "group" tools
+      | None -> fail "legacy group missing");
+      assert_no_legacy "masc groups" (KTPC.all_masc_tools cfg);
+      (match KTPC.resolve_preset cfg "legacy" () with
+      | Some (KTPC.Subset tools) -> assert_no_legacy "preset" tools
+      | Some KTPC.All_candidates -> fail "legacy preset should be explicit subset"
+      | None -> fail "legacy preset missing")
+
 (* ── preset_can_satisfy tests ───────────────────────────────── *)
 
 let load_config () =
@@ -182,6 +220,8 @@ let () =
             test_load_honors_masc_config_dir_override;
           test_case "anchors resolution to base_path over cwd candidate" `Quick
             test_load_anchors_resolution_to_base_path_over_cwd_candidate;
+          test_case "normalizes legacy fs tool names" `Quick
+            test_load_normalizes_legacy_fs_tool_names;
         ] );
       ( "preset_can_satisfy",
         [

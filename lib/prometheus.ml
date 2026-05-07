@@ -865,6 +865,17 @@ let metric_oas_inference_decode_tok_per_sec =
 let metric_oas_inference_cost_usd =
   "masc_oas_inference_cost_usd"
 
+(* Cascade provider health score — composite of success_rate * speed_score *
+   cost_score.  Set (not observed) because it is a point-in-time snapshot,
+   not a distribution. *)
+let metric_cascade_provider_health_score =
+  "masc_cascade_provider_health_score"
+
+(* Context overflow ratio — set each time ContextOverflowImminent fires.
+   Ratio is estimated_tokens / limit_tokens in [0.0, 1.0+]. *)
+let metric_oas_context_overflow_ratio =
+  "masc_oas_context_overflow_ratio"
+
 (* MCP tool schema budget (set once at boot from mcp_server_eio.ml
    via [set_tool_schema_stats]). *)
 let metric_mcp_tool_schema_count = "masc_mcp_tool_schema_count"
@@ -2713,6 +2724,15 @@ let init () =
     "Inter-chunk gap during streaming (TBT). \
      Labels: [cascade, provider]."
     Histogram;
+  add metric_cascade_provider_health_score
+    "Composite health score per cascade provider. \
+     success_rate * speed_score * cost_score in [0.0, 1.0]. \
+     Labels: [provider_key]."
+    Gauge;
+  add metric_oas_context_overflow_ratio
+    "Context overflow ratio (estimated_tokens / limit_tokens) when \
+     ContextOverflowImminent fires. Labels: [agent_name]."
+    Gauge;
   install_backend_mutex_observers ()
 
 let start_time = Time_compat.now ()

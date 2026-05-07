@@ -641,6 +641,15 @@ val metric_cascade_inter_chunk_seconds : string
 (** Histogram: inter-chunk gap during streaming (TBT).
     Labels: [cascade], [provider]. *)
 
+val metric_cascade_provider_health_score : string
+(** Gauge: composite health score per cascade provider.
+    [success_rate * speed_score * cost_score] in [0.0, 1.0].
+    Labels: [provider_key]. *)
+
+val metric_oas_context_overflow_ratio : string
+(** Gauge: context overflow ratio [estimated_tokens / limit_tokens] when
+    [ContextOverflowImminent] fires.  Labels: [agent_name]. *)
+
 
 val metric_cascade_server_error_skip_total : string
 (** #12797 Total cascade label-ranking skips triggered by recent server-error

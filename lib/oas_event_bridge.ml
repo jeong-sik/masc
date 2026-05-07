@@ -726,6 +726,9 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          overflow (no compact_started/compacted within grace
          window) is observable via metric + warn log, rather
          than silently burning out on oas_timeout_budget. *)
+      Prometheus.set_gauge Prometheus.metric_oas_context_overflow_ratio
+        ~labels:[ ("agent_name", agent_name) ]
+        ratio;
       Context_overflow_action_tracker.record_imminent
         ~keeper_name:agent_name
         ~ts:(Time_compat.now ());

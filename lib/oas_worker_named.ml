@@ -342,7 +342,7 @@ let run_named
       in
       Error
         (sdk_error_of_masc_internal_error
-           (if require_tool_choice_support then
+           (if require_tool_choice_support || require_tool_support then
               No_tool_capable_provider
                 {
                   cascade_name = error_cascade_name;

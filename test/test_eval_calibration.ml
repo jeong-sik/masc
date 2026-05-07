@@ -408,12 +408,27 @@ let test_on_harness_verdict_exception_safe () =
   Cal.set_store_for_testing ~base_dir:dir;
   let req = make_req () in
   let result = make_result () in
+  let metric_labels =
+    [ ("kind", "eval_calibration_harness_verdict_callback") ]
+  in
+  let before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_telemetry_observe_failures
+      ~labels:metric_labels
+      ()
+  in
   Cal.record_verdict ~task_id:"exc-1" ~req ~result
     ~on_harness_verdict:(fun _hv -> failwith "boom") ();
   let store = Cal.get_store () in
   let records = Dated_jsonl.read_recent store 10 in
   check bool "record persisted despite callback failure" true
     (List.length records >= 1);
+  check (float 0.0001) "callback failure counted"
+    (before +. 1.0)
+    (Masc_mcp.Prometheus.metric_value_or_zero
+       Masc_mcp.Prometheus.metric_telemetry_observe_failures
+       ~labels:metric_labels
+       ());
   Cal.reset_store_for_testing ()
 
 (* ================================================================ *)

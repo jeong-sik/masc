@@ -220,10 +220,16 @@ let record_verdict
   Dated_jsonl.append (get_store ()) (verdict_record_to_json record);
   match on_harness_verdict with
   | Some cb ->
-    (try cb (to_harness_verdict record)
-     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-       Log.Harness.warn "[eval_calibration] on_harness_verdict callback failed: %s"
-         (Printexc.to_string exn))
+    (match
+       Telemetry_observe.observe_or_fail
+         ~kind:"eval_calibration_harness_verdict_callback"
+         (fun () -> cb (to_harness_verdict record))
+     with
+     | Ok () -> ()
+     | Error msg ->
+       Log.Harness.warn
+         "[eval_calibration] on_harness_verdict callback failed: %s"
+         msg)
   | None -> ()
 
 let record_human_label

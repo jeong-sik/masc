@@ -70,7 +70,7 @@ let tool_schemas_for_profile ?(include_hidden = false)
         let keeper_internal_schemas =
           if not include_keeper_internal then []
           else
-            Tool_shard.keeper_model_tools
+            Tool_shard.all_keeper_tool_schemas
             |> List.filter (fun (schema : Masc_domain.tool_schema) ->
                    Tool_catalog.is_on_surface Tool_catalog.Keeper_internal
                      schema.name

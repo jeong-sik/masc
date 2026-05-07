@@ -28,6 +28,7 @@ type t =
   | AliveButStuckThresholdSeconds
   | AliveButStuckRecoveryRequests
   | AliveButStuckRecovery
+  | AliveButStuckRecoveryExhausted
   | MetricEmitDropped
   | ContextMaxObserved
   | TurnStarts
@@ -223,6 +224,7 @@ let to_string = function
   | AliveButStuckThresholdSeconds -> "masc_keeper_alive_but_stuck_threshold_seconds"
   | AliveButStuckRecoveryRequests -> "masc_keeper_alive_but_stuck_recovery_requests_total"
   | AliveButStuckRecovery -> "masc_keeper_alive_but_stuck_recovery_total"
+  | AliveButStuckRecoveryExhausted -> "masc_keeper_alive_but_stuck_recovery_exhausted_total"
   | MetricEmitDropped -> "masc_keeper_metric_emit_dropped_total"
   | ContextMaxObserved -> "masc_keeper_context_max_observed_total"
   | TurnStarts -> "masc_keeper_turn_starts_total"
@@ -417,6 +419,8 @@ let metric_keeper_alive_but_stuck_seconds = "masc_keeper_alive_but_stuck_seconds
 let metric_keeper_alive_but_stuck_threshold_seconds = "masc_keeper_alive_but_stuck_threshold_seconds"
 let metric_keeper_alive_but_stuck_recovery_requests = "masc_keeper_alive_but_stuck_recovery_requests_total"
 let metric_keeper_alive_but_stuck_recovery = "masc_keeper_alive_but_stuck_recovery_total"
+let metric_keeper_alive_but_stuck_recovery_exhausted =
+  "masc_keeper_alive_but_stuck_recovery_exhausted_total"
 let metric_keeper_metric_emit_dropped = "masc_keeper_metric_emit_dropped_total"
 let metric_keeper_context_max_observed = "masc_keeper_context_max_observed_total"
 let metric_keeper_turn_starts = "masc_keeper_turn_starts_total"

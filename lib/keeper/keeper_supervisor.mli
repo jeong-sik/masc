@@ -206,3 +206,6 @@ val request_alive_but_stuck_recovery_for_test :
 
 val alive_but_stuck_reset_for_test : unit -> unit
 (** Test-only: clear the alive-but-stuck dedup table. *)
+
+val alive_but_stuck_reset_recovery_attempts_for_test : unit -> unit
+(** Test-only: clear the alive-but-stuck recovery attempt counter. *)

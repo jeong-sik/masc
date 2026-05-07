@@ -1950,6 +1950,16 @@ let alive_but_stuck_last_alert : (string, float) Hashtbl.t =
 
 let alive_but_stuck_last_alert_mu = Eio.Mutex.create ()
 
+(* Recovery attempt cap per keeper.  Prevents infinite
+   alive-but-stuck restart loops when the root condition does not
+   resolve.  Counter resets when the keeper is no longer stuck. *)
+let alive_but_stuck_recovery_attempts : (string, int) Hashtbl.t =
+  Hashtbl.create 16
+
+let alive_but_stuck_recovery_attempts_mu = Eio.Mutex.create ()
+
+let alive_but_stuck_recovery_max_attempts = 5
+
 let alive_but_stuck_should_emit ~now ~dedup_ttl_sec name =
   Eio.Mutex.use_rw ~protect:false alive_but_stuck_last_alert_mu (fun () ->
     match Hashtbl.find_opt alive_but_stuck_last_alert name with
@@ -2019,7 +2029,118 @@ let alive_but_stuck_reset_for_test () =
   Eio.Mutex.use_rw ~protect:false alive_but_stuck_last_alert_mu (fun () ->
     Hashtbl.clear alive_but_stuck_last_alert)
 
-let request_alive_but_stuck_recovery ~base_path ~elapsed
+(** Test-only: clear the recovery attempt counter so exhaustion tests
+    start from zero. *)
+let alive_but_stuck_reset_recovery_attempts_for_test () =
+  Eio.Mutex.use_rw ~protect:false alive_but_stuck_recovery_attempts_mu
+    (fun () -> Hashtbl.clear alive_but_stuck_recovery_attempts)
+
+let request_alive_but_stuck_recovery ~ctx ~base_path ~elapsed
+    (entry : Keeper_registry.registry_entry) =
+  let attempts =
+    Eio.Mutex.use_rw ~protect:false alive_but_stuck_recovery_attempts_mu
+      (fun () ->
+         match Hashtbl.find_opt alive_but_stuck_recovery_attempts entry.name with
+         | Some n -> n
+         | None -> 0)
+  in
+  if attempts >= alive_but_stuck_recovery_max_attempts then begin
+    let current_entry =
+      Keeper_registry.get ~base_path entry.name |> Option.value ~default:entry
+    in
+    let prior_str =
+      Option.map Keeper_registry.failure_reason_to_string
+        current_entry.last_failure_reason
+      |> Option.value ~default:"none"
+    in
+    Log.Keeper.error
+      "%s: ALIVE-BUT-STUCK RECOVERY EXHAUSTED (%d/%d attempts). \
+       Pausing keeper; operator action required. \
+       (elapsed=%.0fs, prior_reason=%s)"
+      entry.name attempts alive_but_stuck_recovery_max_attempts
+      elapsed prior_str;
+    handle_crash_auto_pause ctx entry
+      ~reason_tag:"alive_but_stuck_exhausted"
+      ~metric_name:Keeper_metrics.metric_keeper_alive_but_stuck_recovery_exhausted
+      ~lifecycle_detail:
+        (Printf.sprintf "alive_but_stuck_exhausted attempts=%d" attempts)
+      ~blocker_class:(Some Turn_timeout)
+      ~log_message:
+        (Printf.sprintf
+           "ALIVE-BUT-STUCK RECOVERY EXHAUSTED (%d/%d attempts). \
+            The keeper has been repeatedly flagged as stuck and restarted \
+            without resolving the underlying condition. Pausing with \
+            exponential auto-resume back-off. Operator may investigate \
+            why proactive_rt.last_ts is not advancing."
+           attempts alive_but_stuck_recovery_max_attempts)
+  end else begin
+    let kill_class =
+      Keeper_registry.Idle_turn { stall_seconds = elapsed }
+    in
+    let current_entry =
+      Keeper_registry.get ~base_path entry.name |> Option.value ~default:entry
+    in
+    (* PR #13106 review: must NOT route through
+       [stale_watchdog_failure_reason], which preserves prior reasons
+       like [Turn_consecutive_failures] / [Exception] / etc.  Those
+       reasons are not in the [watchdog_stop_pending] restart set
+       ([Stale_turn_timeout | Stale_termination_storm |
+       Stale_fleet_batch | Oas_timeout_budget_loop]), so preserving them would set
+       [fiber_stop = true] and then the supervisor's next sweep would
+       skip [force_unresolved_watchdog_crash] — the fiber goes dormant
+       instead of being restarted, defeating the entire recovery.
+
+       Force the watchdog cohort to [Stale_turn_timeout kill_class] so
+       [watchdog_stop_pending] / [record_loop_exit] both treat this as
+       a watchdog stop.  The prior reason is captured in the log line
+       for postmortem.
+
+       Idempotent: if the keeper is already in a watchdog cohort
+       ([Stale_turn_timeout] / [Stale_termination_storm] /
+       [Stale_fleet_batch] / [Oas_timeout_budget_loop]), preserve it so we don't churn the
+       [stall_seconds] field on every poll. *)
+    let prior_str =
+      Option.map Keeper_registry.failure_reason_to_string
+        current_entry.last_failure_reason
+      |> Option.value ~default:"none"
+    in
+    let reason =
+      match current_entry.last_failure_reason with
+      | Some
+          ( Keeper_registry.Stale_turn_timeout _
+          | Keeper_registry.Stale_termination_storm _
+          | Keeper_registry.Stale_fleet_batch _
+          | Keeper_registry.Oas_timeout_budget_loop _ ) as kept ->
+          kept
+      | _ -> Some (Keeper_registry.Stale_turn_timeout kill_class)
+    in
+    Keeper_registry.set_failure_reason ~base_path entry.name reason;
+    (* tla-lint: allow-mutation: fiber signal — alive-but-stuck recovery asks
+       the heartbeat fiber to exit and wakes it if it is in interruptible sleep.
+       The next supervisor sweep will route this through the existing
+       force_unresolved_watchdog_crash path if the fiber does not resolve on
+       its own. *)
+    Atomic.set entry.fiber_stop true;
+    Atomic.set entry.fiber_wakeup true;
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_alive_but_stuck_recovery_requests
+      ~labels:[("keeper", entry.name)]
+      ();
+    Log.Keeper.error
+      "%s: alive-but-stuck recovery requested (elapsed=%.0fs, prior_reason=%s, \
+       failure_reason=%s)"
+      entry.name elapsed prior_str
+      (Option.map Keeper_registry.failure_reason_to_string reason
+       |> Option.value ~default:"unknown");
+    Eio.Mutex.use_rw ~protect:false alive_but_stuck_recovery_attempts_mu
+      (fun () ->
+         Hashtbl.replace alive_but_stuck_recovery_attempts entry.name
+           (attempts + 1))
+  end
+
+(* Test-only: pre-cap signature so existing tests do not need ctx.
+   The exhaustion path is covered by the scan-level tests. *)
+let request_alive_but_stuck_recovery_for_test ~base_path ~elapsed
     (entry : Keeper_registry.registry_entry) =
   let kill_class =
     Keeper_registry.Idle_turn { stall_seconds = elapsed }
@@ -2027,25 +2148,6 @@ let request_alive_but_stuck_recovery ~base_path ~elapsed
   let current_entry =
     Keeper_registry.get ~base_path entry.name |> Option.value ~default:entry
   in
-  (* PR #13106 review: must NOT route through
-     [stale_watchdog_failure_reason], which preserves prior reasons
-     like [Turn_consecutive_failures] / [Exception] / etc.  Those
-     reasons are not in the [watchdog_stop_pending] restart set
-     ([Stale_turn_timeout | Stale_termination_storm |
-     Stale_fleet_batch | Oas_timeout_budget_loop]), so preserving them would set
-     [fiber_stop = true] and then the supervisor's next sweep would
-     skip [force_unresolved_watchdog_crash] — the fiber goes dormant
-     instead of being restarted, defeating the entire recovery.
-
-     Force the watchdog cohort to [Stale_turn_timeout kill_class] so
-     [watchdog_stop_pending] / [record_loop_exit] both treat this as
-     a watchdog stop.  The prior reason is captured in the log line
-     for postmortem.
-
-     Idempotent: if the keeper is already in a watchdog cohort
-     ([Stale_turn_timeout] / [Stale_termination_storm] /
-     [Stale_fleet_batch] / [Oas_timeout_budget_loop]), preserve it so we don't churn the
-     [stall_seconds] field on every poll. *)
   let prior_str =
     Option.map Keeper_registry.failure_reason_to_string
       current_entry.last_failure_reason
@@ -2062,11 +2164,6 @@ let request_alive_but_stuck_recovery ~base_path ~elapsed
     | _ -> Some (Keeper_registry.Stale_turn_timeout kill_class)
   in
   Keeper_registry.set_failure_reason ~base_path entry.name reason;
-  (* tla-lint: allow-mutation: fiber signal — alive-but-stuck recovery asks
-     the heartbeat fiber to exit and wakes it if it is in interruptible sleep.
-     The next supervisor sweep will route this through the existing
-     force_unresolved_watchdog_crash path if the fiber does not resolve on
-     its own. *)
   Atomic.set entry.fiber_stop true;
   Atomic.set entry.fiber_wakeup true;
   Prometheus.inc_counter
@@ -2079,9 +2176,6 @@ let request_alive_but_stuck_recovery ~base_path ~elapsed
     entry.name elapsed prior_str
     (Option.map Keeper_registry.failure_reason_to_string reason
      |> Option.value ~default:"unknown")
-
-let request_alive_but_stuck_recovery_for_test =
-  request_alive_but_stuck_recovery
 
 let alive_but_stuck_scan (ctx : _ context) =
   if not Env_config.KeeperSupervisor.alive_but_stuck_enabled then ()
@@ -2108,31 +2202,34 @@ let alive_but_stuck_scan (ctx : _ context) =
       in
       set_alive_but_stuck_gauges ~entry ~threshold ~elapsed;
       (match elapsed with
-      | None -> ()
+      | None ->
+          Eio.Mutex.use_rw ~protect:false alive_but_stuck_recovery_attempts_mu
+            (fun () ->
+               Hashtbl.remove alive_but_stuck_recovery_attempts entry.name)
       | Some elapsed ->
-        if alive_but_stuck_should_emit ~now ~dedup_ttl_sec entry.name then begin
-          let recovery =
-            queue_alive_but_stuck_recovery ~base_path ~now ~elapsed
-              ~threshold entry
-          in
-          Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_alive_but_stuck
-            ~labels:[("keeper", entry.name)]
-            ();
-          Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_alive_but_stuck_recovery
-            ~labels:[("keeper", entry.name); ("outcome", recovery)]
-            ();
-          Log.Keeper.warn
-            "%s: alive-but-stuck detected (elapsed=%.0fs, threshold=%.0fs, \
-             autonomous_turns=%d, proactive_count_total=%d, recovery=%s)"
-            entry.name elapsed threshold
-            entry.meta.runtime.autonomous_turn_count
-            entry.meta.runtime.proactive_rt.count_total
-            recovery;
-          if String.equal recovery "queued" then
-            request_alive_but_stuck_recovery ~base_path ~elapsed entry
-        end);
+          if alive_but_stuck_should_emit ~now ~dedup_ttl_sec entry.name then begin
+            let recovery =
+              queue_alive_but_stuck_recovery ~base_path ~now ~elapsed
+                ~threshold entry
+            in
+            Prometheus.inc_counter
+              Keeper_metrics.metric_keeper_alive_but_stuck
+              ~labels:[("keeper", entry.name)]
+              ();
+            Prometheus.inc_counter
+              Keeper_metrics.metric_keeper_alive_but_stuck_recovery
+              ~labels:[("keeper", entry.name); ("outcome", recovery)]
+              ();
+            Log.Keeper.warn
+              "%s: alive-but-stuck detected (elapsed=%.0fs, threshold=%.0fs, \
+               autonomous_turns=%d, proactive_count_total=%d, recovery=%s)"
+              entry.name elapsed threshold
+              entry.meta.runtime.autonomous_turn_count
+              entry.meta.runtime.proactive_rt.count_total
+              recovery;
+            if String.equal recovery "queued" then
+              request_alive_but_stuck_recovery ~ctx ~base_path ~elapsed entry
+          end);
       Eio_guard.yield_step abs_ym
     ) entries
   end

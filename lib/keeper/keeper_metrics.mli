@@ -20,6 +20,7 @@ type t =
   | AliveButStuckThresholdSeconds
   | AliveButStuckRecoveryRequests
   | AliveButStuckRecovery
+  | AliveButStuckRecoveryExhausted
   | MetricEmitDropped
   | ContextMaxObserved
   | TurnStarts
@@ -212,6 +213,7 @@ val metric_keeper_alive_but_stuck_seconds : string
 val metric_keeper_alive_but_stuck_threshold_seconds : string
 val metric_keeper_alive_but_stuck_recovery_requests : string
 val metric_keeper_alive_but_stuck_recovery : string
+val metric_keeper_alive_but_stuck_recovery_exhausted : string
 val metric_keeper_metric_emit_dropped : string
 val metric_keeper_context_max_observed : string
 val metric_keeper_turn_starts : string

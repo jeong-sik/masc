@@ -110,6 +110,10 @@ val metric_keeper_alive_but_stuck_recovery_requests : string
     [Keeper_supervisor.alive_but_stuck_scan]. Labels: keeper, outcome. *)
 val metric_keeper_alive_but_stuck_recovery : string
 
+(** #14113 follow-up: keepers auto-paused after alive-but-stuck recovery
+    attempts exceeded the cap.  Labels: keeper. *)
+val metric_keeper_alive_but_stuck_recovery_exhausted : string
+
 val metric_keeper_metric_emit_dropped : string
 val metric_keeper_context_max_observed : string
 (** #9953: bucketed counter for observed [context_max] values.

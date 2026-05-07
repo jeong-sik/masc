@@ -2153,5 +2153,66 @@ let () =
                   fail
                     "expected Stale_turn_timeout (Idle_turn ...) to be \
                      preserved unchanged")));
+        test_case "recovery exhaustion pauses after 5 attempts" `Quick
+          (fun () ->
+            let name = "abs-exhaustion" in
+            let base = make_meta name in
+            let meta =
+              { base with
+                proactive = { base.proactive with cooldown_sec = 60 };
+                runtime = {
+                  base.runtime with
+                  autonomous_turn_count = 10;
+                  proactive_rt = {
+                    base.runtime.proactive_rt with
+                    last_ts = 1.0;
+                  };
+                };
+              }
+            in
+            Sup.alive_but_stuck_reset_for_test ();
+            Sup.alive_but_stuck_reset_recovery_attempts_for_test ();
+            Eio_main.run (fun env ->
+            Eio.Switch.run (fun sw ->
+              let base_dir = Filename.temp_file "exhaustion-" "" in
+              Sys.remove base_dir;
+              let config = Masc_mcp.Coord.default_config base_dir in
+              ignore (Masc_mcp.Coord.init config
+                        ~agent_name:(Some "supervisor"));
+              ignore (Reg.register ~base_path:config.base_path name meta);
+              ignore (KT.write_meta config meta);
+              ignore (Reg.dispatch_event ~base_path:config.base_path name
+                        KSM.Fiber_started);
+              Reg.set_started_at_for_test ~base_path:config.base_path name 1.0;
+              let ctx : _ KT.context =
+                { config; agent_name = "supervisor"; sw;
+                  clock = Eio.Stdenv.clock env;
+                  proc_mgr = Some (Eio.Stdenv.process_mgr env);
+                  net = Some (Eio.Stdenv.net env); }
+              in
+              (* 5 recoveries within cap — each followed by dedup reset
+                 and fiber signal clear so the next scan still triggers. *)
+              for _i = 1 to 5 do
+                Sup.alive_but_stuck_scan ctx;
+                Sup.alive_but_stuck_reset_for_test ();
+                (match Reg.get ~base_path:config.base_path name with
+                 | None -> ()
+                 | Some e ->
+                     Atomic.set e.Reg.fiber_stop false;
+                     Atomic.set e.Reg.fiber_wakeup false);
+              done;
+              (match Reg.get ~base_path:config.base_path name with
+               | None -> fail "expected registered keeper"
+               | Some e ->
+                   check bool "not paused after 5th recovery" false
+                     e.Reg.meta.paused);
+              (* 6th scan crosses the cap and triggers exhaustion pause. *)
+              Sup.alive_but_stuck_scan ctx;
+              (match Reg.get ~base_path:config.base_path name with
+               | None -> fail "expected registered keeper"
+               | Some e ->
+                   check bool "paused after exhaustion" true
+                     e.Reg.meta.paused);
+            )));
       ]);
   ]

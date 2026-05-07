@@ -243,6 +243,13 @@ let observe_histogram name ?(labels=[]) value =
 (** #12838 follow-up: bounded recovery wakeups queued by
     [alive_but_stuck_scan].  Labels: keeper, outcome. *)
 
+(** #14113 follow-up: keepers whose alive-but-stuck recovery attempts
+    exceeded the cap and were auto-paused.  Each increment means the
+    supervisor gave up on automatic restart and escalated to operator
+    intervention.  Labels: keeper. *)
+let metric_keeper_alive_but_stuck_recovery_exhausted =
+  Keeper_metrics.metric_keeper_alive_but_stuck_recovery_exhausted
+
 (* #10047: [append_metrics_snapshot] failures in [keeper_turn.ml] and
    [keeper_unified_turn.ml] used to be log-only, masking state/metric
    divergence. Surface as a counter so dashboards can alert on silent
@@ -1635,6 +1642,11 @@ let init () =
     "#12838 Total alive-but-stuck recovery requests. Each increment means \
      the supervisor requested a supervised keeper restart by setting \
      failure_reason plus fiber_stop/fiber_wakeup. Labeled by keeper."
+    Counter;
+  add metric_keeper_alive_but_stuck_recovery_exhausted
+    "#14113 Total alive-but-stuck recovery exhaustion events. Each increment \
+     means the supervisor auto-paused a keeper after repeated recovery \
+     failures. Labeled by keeper."
     Counter;
   add metric_cascade_server_error_skip_total
     "#12797 Total cascade label-ranking skips triggered by recent server \

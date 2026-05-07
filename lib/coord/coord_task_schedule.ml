@@ -775,6 +775,26 @@ let release_stale_claims config ~ttl_seconds =
           `Float (max 0.0 (now_f -. ts))
         in
         let stale_tasks = ref [] in
+        (* RFC-0034.d: clear assignee's [current_task] mirror when we
+           release a stale Claimed/InProgress task.  Best-effort — agent
+           file lock is a different file/identity from the backlog lock,
+           and on failure we keep the backlog mutation (the source of
+           truth) and only log the agent-side miss.  Eio.Cancel.Cancelled
+           is re-raised to match surrounding cancel semantics. *)
+        let clear_assignee_current_task ~assignee ~task_id =
+          try
+            Coord_task.update_local_agent_state config ~agent_name:assignee
+              (fun agent ->
+                if agent.current_task = Some task_id
+                then { agent with current_task = None }
+                else agent)
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+              Log.Orchestrator.warn
+                "[stale-claims] agent state clear failed for %s task=%s: %s"
+                assignee task_id (Printexc.to_string exn)
+        in
         let updated_tasks = List.map (fun (task : task) ->
           match task.task_status with
           | Claimed { assignee; claimed_at } ->
@@ -788,6 +808,7 @@ let release_stale_claims config ~ttl_seconds =
                   ("age_s", age_seconds_json ts);
                   ("ts", `String now_str);
                 ]);
+                clear_assignee_current_task ~assignee ~task_id:task.id;
                 { task with
                   task_status = Todo;
                   worktree = None;
@@ -804,6 +825,7 @@ let release_stale_claims config ~ttl_seconds =
                   ("age_s", age_seconds_json ts);
                   ("ts", `String now_str);
                 ]);
+                clear_assignee_current_task ~assignee ~task_id:task.id;
                 { task with
                   task_status = Todo;
                   worktree = None;

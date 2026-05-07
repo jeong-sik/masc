@@ -900,6 +900,7 @@ let metric_sse_stream_queue_depth = "masc_sse_stream_queue_depth"
 let metric_sse_queue_depth_avg = "masc_sse_queue_depth_avg"
 let metric_sse_queue_depth_max = "masc_sse_queue_depth_max"
 let metric_sse_external_subscribers = "masc_sse_external_subscribers_total"
+let metric_sse_client_evictions = "masc_sse_client_evictions_total"
 let metric_grpc_active_streams = "masc_grpc_active_streams_total"
 let metric_grpc_heartbeat_latency = "masc_grpc_heartbeat_latency_seconds"
 let metric_grpc_subscribers = "masc_grpc_subscribers_total"
@@ -2540,6 +2541,14 @@ let init () =
     "Maximum SSE event queue depth across live sessions" Gauge;
   add metric_sse_external_subscribers
     "Active non-SSE subscribers bridged from the SSE fanout path" Gauge;
+  add metric_sse_client_evictions
+    "SSE clients evicted from the registry because [max_clients] was \
+     reached and a new client connected.  Pairs with the [Evicting \
+     oldest client] log line so operators can see eviction storms in \
+     metrics without scraping logs.  A non-zero rate is the early \
+     warning that broadcast fan-out is keeping mailboxes full faster \
+     than slow consumers can drain."
+    Counter;
 
   (* The keeper turn / cascade / persistence-failure metrics
      (turn_livelock_blocks .. session_cleanup_failures, plus

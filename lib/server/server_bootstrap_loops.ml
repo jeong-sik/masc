@@ -117,7 +117,6 @@ let iteri_with_fair_yield f xs =
 let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
     (state : Mcp_server.server_state) =
   Progress.set_sse_callback Sse.broadcast;
-  Sse.set_clock clock;
   (* Wire stop_keeper hook so zombie GC can terminate keeper fibers *)
   Atomic.set Coord_hooks.stop_keeper_fn Keeper_keepalive.stop_keepalive;
   (* task-103: auto-provision a per-task sandbox worktree on successful

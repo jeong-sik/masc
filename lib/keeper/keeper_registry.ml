@@ -146,8 +146,7 @@ let stale_watchdog_failure_reason ~prior ~kill_class =
       ( Stale_termination_storm _
       | Stale_fleet_batch _
       | Stale_turn_timeout _
-      | Fiber_unresolved ) as prior ->
-      prior
+      | Fiber_unresolved )
   | None ->
       Some (Stale_turn_timeout kill_class)
 

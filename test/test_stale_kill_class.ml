@@ -138,6 +138,42 @@ let test_stale_watchdog_uses_stale_reason_without_terminal_prior () =
         (failure_reason_to_string reason)
   | None -> Alcotest.fail "expected stale reason"
 
+let test_stale_watchdog_replaces_prior_stale_timeout () =
+  let prior =
+    Stale_turn_timeout (Idle_turn { stall_seconds = 7_777.0 })
+  in
+  let kill_class =
+    In_turn_hung { active_seconds = 720.0; timeout_threshold = 600.0 }
+  in
+  match stale_watchdog_failure_reason ~prior:(Some prior) ~kill_class with
+  | Some reason ->
+      r "replaces stale timeout with current kill class"
+        "stale_turn_timeout(in_turn_hung(active=720s threshold=600s))"
+        (failure_reason_to_string reason)
+  | None -> Alcotest.fail "expected stale reason"
+
+let test_stale_watchdog_replaces_prior_storm_label () =
+  let prior = Stale_termination_storm { count = 13 } in
+  let kill_class = Noop_failure_loop { noop_count = 4 } in
+  match stale_watchdog_failure_reason ~prior:(Some prior) ~kill_class with
+  | Some reason ->
+      r "replaces old storm with current kill class"
+        "stale_turn_timeout(noop_failure_loop(noop=4))"
+        (failure_reason_to_string reason)
+  | None -> Alcotest.fail "expected stale reason"
+
+let test_stale_watchdog_replaces_prior_fleet_batch_label () =
+  let prior = Stale_fleet_batch { distinct_count = 8 } in
+  let kill_class =
+    In_turn_hung { active_seconds = 720.0; timeout_threshold = 600.0 }
+  in
+  match stale_watchdog_failure_reason ~prior:(Some prior) ~kill_class with
+  | Some reason ->
+      r "replaces old fleet batch with current kill class"
+        "stale_turn_timeout(in_turn_hung(active=720s threshold=600s))"
+        (failure_reason_to_string reason)
+  | None -> Alcotest.fail "expected stale reason"
+
 let root_cause_label reasons =
   reasons
   |> SW.classify_batch_root_cause_for_test
@@ -227,6 +263,12 @@ let () =
             test_stale_watchdog_preserves_terminal_failure_reason;
           Alcotest.test_case "uses stale reason without terminal prior" `Quick
             test_stale_watchdog_uses_stale_reason_without_terminal_prior;
+          Alcotest.test_case "replaces prior stale timeout" `Quick
+            test_stale_watchdog_replaces_prior_stale_timeout;
+          Alcotest.test_case "replaces prior storm label" `Quick
+            test_stale_watchdog_replaces_prior_storm_label;
+          Alcotest.test_case "replaces prior fleet batch label" `Quick
+            test_stale_watchdog_replaces_prior_fleet_batch_label;
         ] );
       ( "batch_root_cause",
         [

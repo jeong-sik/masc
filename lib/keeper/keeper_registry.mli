@@ -100,7 +100,9 @@ val failure_reason_cohort_key : failure_reason option -> string
 val stale_watchdog_failure_reason :
   prior:failure_reason option -> kill_class:stale_kill_class -> failure_reason option
 (** Preserve authoritative terminal failure reasons when the stale watchdog
-    fires after a failed turn. *)
+    fires after a failed turn, but do not carry stale-watchdog cohort labels
+    across fresh watchdog kills. Storm/fleet labels are relatched only by the
+    current threshold or batch detector. *)
 
 (** Pure control-flow signal for immediate fiber termination (RFC-0002).
     Carries no state — failure reason must be pre-stored via

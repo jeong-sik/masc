@@ -66,6 +66,7 @@
         test_response_model_empty_10083
         test_heuristic_theatre_audit
         test_keeper_proactive_skip_counter
+        test_keeper_skip_log_dedup
         test_oas_error_kind_counter
         test_board_author_identity_10297
         test_fsm_drift_counter
@@ -291,6 +292,7 @@
           test_response_model_empty_10083
           test_heuristic_theatre_audit
           test_keeper_proactive_skip_counter
+          test_keeper_skip_log_dedup
           test_oas_error_kind_counter
           test_board_author_identity_10297
           test_fsm_drift_counter

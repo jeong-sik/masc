@@ -635,6 +635,26 @@ type history_line_action =
   | Move_internal
   | Drop_line
 
+type history_line_parse_error = {
+  reason : string;
+  detail : string;
+}
+
+let history_migration_persistence_surface = "keeper_context_history_migration"
+
+let report_history_migration_drop ~path { reason; detail } =
+  Safe_ops.report_persistence_read_drop
+    ~on_drop:(fun () ->
+      Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+        ~labels:
+          [ ("surface", history_migration_persistence_surface); ("reason", reason) ]
+        ())
+    ~surface:history_migration_persistence_surface
+    ~reason
+    ~path
+    ~detail
+;;
+
 let classify_history_entry ~(source : string) ~(content : string) :
     history_line_action =
   (* World-state headings can appear in user-authored long-term memory.
@@ -645,18 +665,48 @@ let classify_history_entry ~(source : string) ~(content : string) :
     Move_internal
   else Keep_main
 
-let classify_history_jsonl_line (line : string) : history_line_action option =
+let classify_history_jsonl_line_result
+    (line : string) : (history_line_action, history_line_parse_error) result =
   try
-    let json = Yojson.Safe.from_string line in
-    let source =
-      Yojson.Safe.Util.(json |> member "source" |> to_string_option)
-      |> Option.value ~default:""
-      |> String.trim
-    in
-    let content = String.trim (text_of_history_jsonl_json json) in
-    Some (classify_history_entry ~source ~content)
+    match Yojson.Safe.from_string line with
+    | `Assoc _ as json ->
+        let source =
+          Yojson.Safe.Util.(json |> member "source" |> to_string_option)
+          |> Option.value ~default:""
+          |> String.trim
+        in
+        let content = String.trim (text_of_history_jsonl_json json) in
+        Ok (classify_history_entry ~source ~content)
+    | _ ->
+        Error
+          {
+            reason = Safe_ops.persistence_read_drop_reason_invalid_payload;
+            detail = "history row is not a JSON object";
+          }
   with
-  | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
+  | Yojson.Json_error detail ->
+      Error
+        {
+          reason = Safe_ops.persistence_read_drop_reason_entry_load_error;
+          detail;
+        }
+  | Yojson.Safe.Util.Type_error (detail, _) ->
+      Error
+        {
+          reason = Safe_ops.persistence_read_drop_reason_invalid_payload;
+          detail;
+        }
+  | exn ->
+      Error
+        {
+          reason = Safe_ops.persistence_read_drop_reason_invalid_payload;
+          detail = Printexc.to_string exn;
+        }
+
+let classify_history_jsonl_line (line : string) : history_line_action option =
+  match classify_history_jsonl_line_result line with
+  | Ok action -> Some action
+  | Error _ -> None
 
 let render_jsonl_lines (lines : string list) : string =
   match lines with
@@ -693,14 +743,15 @@ let migrate_session_history_logs
     let kept_rev, moved_rev, dropped_main, malformed_main =
       List.fold_left
         (fun (kept_rev, moved_rev, dropped_lines, malformed_lines) line ->
-           match classify_history_jsonl_line line with
-           | Some Keep_main ->
+           match classify_history_jsonl_line_result line with
+           | Ok Keep_main ->
                (line :: kept_rev, moved_rev, dropped_lines, malformed_lines)
-           | Some Move_internal ->
+           | Ok Move_internal ->
                (kept_rev, line :: moved_rev, dropped_lines, malformed_lines)
-           | Some Drop_line ->
+           | Ok Drop_line ->
                (kept_rev, moved_rev, dropped_lines + 1, malformed_lines)
-           | None ->
+           | Error error ->
+               report_history_migration_drop ~path:main_path error;
                (line :: kept_rev, moved_rev, dropped_lines, malformed_lines + 1))
         ([], [], 0, 0)
         main_lines
@@ -710,10 +761,12 @@ let migrate_session_history_logs
     let internal_kept_rev, dropped_internal, malformed_internal =
       List.fold_left
         (fun (kept_rev, dropped_lines, malformed_lines) line ->
-           match classify_history_jsonl_line line with
-           | Some Drop_line -> (kept_rev, dropped_lines + 1, malformed_lines)
-           | Some _ -> (line :: kept_rev, dropped_lines, malformed_lines)
-           | None -> (line :: kept_rev, dropped_lines, malformed_lines + 1))
+           match classify_history_jsonl_line_result line with
+           | Ok Drop_line -> (kept_rev, dropped_lines + 1, malformed_lines)
+           | Ok _ -> (line :: kept_rev, dropped_lines, malformed_lines)
+           | Error error ->
+               report_history_migration_drop ~path:internal_path error;
+               (line :: kept_rev, dropped_lines, malformed_lines + 1))
         ([], 0, 0)
         existing_internal
     in

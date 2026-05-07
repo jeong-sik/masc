@@ -11,7 +11,42 @@
        inlining the full [Yojson.Safe.to_string] output. *)
 
 module C = Masc_mcp.Keeper_context_core
+module P = Masc_mcp.Prometheus
 module T = Agent_sdk.Types
+
+let temp_dir prefix =
+  let dir = Filename.temp_file prefix "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then (
+        Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
+        Unix.rmdir path)
+      else
+        Unix.unlink path
+  in
+  try rm dir with _ -> ()
+
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let persistence_read_drop_total ~surface ~reason =
+  P.metric_value_or_zero P.metric_persistence_read_drops
+    ~labels:[ ("surface", surface); ("reason", reason) ]
+    ()
+
+let check_persistence_read_drop_delta ~surface ~reason ~before ~delta =
+  Alcotest.(check (float 0.0001))
+    (Printf.sprintf "%s/%s persistence read drops" surface reason)
+    (before +. float_of_int delta)
+    (persistence_read_drop_total ~surface ~reason)
 
 (* --- message_to_json: no flat [content] field --- *)
 
@@ -217,6 +252,44 @@ let test_roundtrip_text_preserved () =
   Alcotest.(check string) "text preserved"
     (text_of original) (text_of reparsed)
 
+let test_migrate_session_history_logs_counts_malformed_rows () =
+  let dir = temp_dir "keeper_context_history_migration" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let history_path = Filename.concat dir "history.jsonl" in
+      let internal_path = Filename.concat dir "history.internal.jsonl" in
+      write_file history_path
+        (String.concat "\n"
+           [
+             {|{"role":"user","content":"real conversation"}|};
+             "[]";
+             "{not-json";
+           ]
+         ^ "\n");
+      write_file internal_path
+        (String.concat "\n"
+           [
+             {|{"role":"assistant","source":"internal_assistant","content":"ok"}|};
+             "42";
+           ]
+         ^ "\n");
+      let surface = "keeper_context_history_migration" in
+      let entry_reason = "entry_load_error" in
+      let invalid_reason = "invalid_payload" in
+      let before_entry =
+        persistence_read_drop_total ~surface ~reason:entry_reason
+      in
+      let before_invalid =
+        persistence_read_drop_total ~surface ~reason:invalid_reason
+      in
+      let stats = C.migrate_session_history_logs ~session_dir:dir in
+      Alcotest.(check int) "malformed lines counted" 3 stats.malformed_lines;
+      check_persistence_read_drop_delta ~surface ~reason:entry_reason
+        ~before:before_entry ~delta:1;
+      check_persistence_read_drop_delta ~surface ~reason:invalid_reason
+        ~before:before_invalid ~delta:2)
+
 let () =
   Alcotest.run "keeper_context_core_dedup"
     [
@@ -257,5 +330,10 @@ let () =
             test_tool_result_large_json_elided;
           Alcotest.test_case "no content no json" `Quick
             test_tool_result_no_content_no_json;
+        ] );
+      ( "history_migration",
+        [
+          Alcotest.test_case "counts malformed persisted rows" `Quick
+            test_migrate_session_history_logs_counts_malformed_rows;
         ] );
     ]

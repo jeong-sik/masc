@@ -475,6 +475,24 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(evidence, set())
         self.assertEqual(docker_evidence, set())
 
+    def test_pr_creation_evidence_reads_route_evidence_pr_url(self):
+        row = {
+            "_source_path": "tool_calls.jsonl",
+            "tool": "keeper_pr_create",
+            "success": True,
+            "route_evidence": {
+                "pr_url": "https://github.com/acme/repo/pull/42\n",
+                "via": "docker",
+            },
+        }
+
+        refs, sources = audit.pr_evidence_from_row(row)
+
+        self.assertEqual(
+            refs, {"keeper_pr_create", "https://github.com/acme/repo/pull/42"}
+        )
+        self.assertEqual(sources, {"tool_calls.jsonl"})
+
     def test_scan_keeper_evidence_reads_rotated_decision_logs(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1175,6 +1193,112 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(tools, {"keeper_bash", "keeper_pr_create"})
         self.assertEqual(
             evidence, {"git_push:keeper_bash", "pr_create:keeper_pr_create"}
+        )
+        self.assertEqual(docker_evidence, evidence)
+
+    def test_scan_keeper_evidence_correlates_redacted_tool_calls_by_trace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            calls_dir = root / ".masc" / "tool_calls" / "2026-05"
+            metrics_dir = root / ".masc" / "keepers" / "alpha" / "metrics" / "2026-05"
+            calls_dir.mkdir(parents=True)
+            metrics_dir.mkdir(parents=True)
+            run_id = "keeper-docker-pr-lifecycle-14031-smoke-20260507-codex1"
+            trace_id = "trace-current-run"
+            metric_rows = [
+                {
+                    "ts_unix": 45.0,
+                    "name": "alpha",
+                    "trace_id": trace_id,
+                    "continuity_summary": (
+                        "Goal: Docker PR lifecycle proof create-phase "
+                        "for run 14031-codex1"
+                    ),
+                }
+            ]
+            call_rows = [
+                {
+                    "ts": 50.0,
+                    "keeper": "alpha",
+                    "tool": "keeper_bash",
+                    "trace_id": "trace-other-run",
+                    "session_id": "trace-other-run",
+                    "input": {"cmd": "git push -u origin [REDACTED]"},
+                    "output": json.dumps({"ok": True, "via": "docker"}),
+                    "success": True,
+                },
+                {
+                    "ts": 55.0,
+                    "keeper": "alpha",
+                    "tool": "keeper_shell",
+                    "trace_id": "trace-other-run",
+                    "session_id": "trace-other-run",
+                    "input": {"op": "gh", "cmd": "pr review 99 --approve"},
+                    "output": json.dumps(
+                        {
+                            "ok": True,
+                            "command": "gh pr review 99 --approve",
+                            "via": "docker",
+                        }
+                    ),
+                    "success": True,
+                },
+                {
+                    "ts": 60.0,
+                    "keeper": "alpha",
+                    "tool": "keeper_bash",
+                    "trace_id": trace_id,
+                    "session_id": trace_id,
+                    "input": {"cmd": "git push -u origin [REDACTED]"},
+                    "output": json.dumps({"ok": True, "via": "docker"}),
+                    "success": True,
+                },
+                {
+                    "ts": 70.0,
+                    "keeper": "alpha",
+                    "tool": "keeper_pr_create",
+                    "runtime_contract": {
+                        "trace_id": trace_id,
+                        "session_id": trace_id,
+                    },
+                    "input": {"title": "proof"},
+                    "output": json.dumps(
+                        {
+                            "ok": True,
+                            "pr_url": "https://github.com/acme/repo/pull/42",
+                            "via": "docker",
+                        }
+                    ),
+                    "success": True,
+                },
+                {
+                    "ts": 80.0,
+                    "keeper": "beta",
+                    "tool": "keeper_pr_create",
+                    "trace_id": trace_id,
+                    "input": {"title": "wrong keeper"},
+                    "output": json.dumps({"ok": True, "via": "docker"}),
+                    "success": True,
+                },
+            ]
+            (metrics_dir / "07.jsonl").write_text(
+                "".join(json.dumps(row) + "\n" for row in metric_rows),
+                encoding="utf-8",
+            )
+            (calls_dir / "07.jsonl").write_text(
+                "".join(json.dumps(row) + "\n" for row in call_rows),
+                encoding="utf-8",
+            )
+
+            latest_ts, tools, evidence, docker_evidence = audit.scan_keeper_evidence(
+                root, "alpha", evidence_run_id=run_id
+            )
+
+        self.assertEqual(latest_ts, 70.0)
+        self.assertEqual(tools, {"keeper_bash", "keeper_shell", "keeper_pr_create"})
+        self.assertEqual(
+            evidence,
+            {"git_push:keeper_bash", "pr_create:keeper_pr_create"},
         )
         self.assertEqual(docker_evidence, evidence)
 

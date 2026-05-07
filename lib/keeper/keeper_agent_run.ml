@@ -79,6 +79,7 @@ let run_turn
       ()
   : (run_result, Agent_sdk.Error.sdk_error) result
   =
+  let user_message = Keeper_run_prompt.sanitize_user_message user_message in
   Masc_runtime_events.emit_turn_start ();
   (* Cancel-safe cleanup (#9747): stdlib [Fun.protect] wraps finally
      exceptions in [Fun.Finally_raised], masking the outer

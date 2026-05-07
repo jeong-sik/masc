@@ -297,12 +297,16 @@ let claim_post_provision_failed_fn
 
 let observe_claim_post_provision_failure ~site ~agent_name ~task_id exn =
   let error = Printexc.to_string exn in
-  (try
-     (Atomic.get claim_post_provision_failed_fn)
-       ~site ~agent_name ~task_id ~error
-   with _ -> ());
-  (try
-     Log.RoomTask.warn
-       "claim_post_provision failed site=%s agent=%s task=%s err=%s"
-       site agent_name task_id error
-   with _ -> ())
+  (* This is the failure-observation path; we suppress secondary
+     exceptions from the callback and log so the original [exn] is
+     not masked by an instrumentation failure.  [Safe_ops.protect]
+     re-raises [Eio.Cancel.Cancelled] so a cancel racing with the
+     surrounding fiber still propagates instead of being silently
+     swallowed by [with _ -> ()]. *)
+  Safe_ops.protect ~default:() (fun () ->
+    (Atomic.get claim_post_provision_failed_fn)
+      ~site ~agent_name ~task_id ~error);
+  Safe_ops.protect ~default:() (fun () ->
+    Log.RoomTask.warn
+      "claim_post_provision failed site=%s agent=%s task=%s err=%s"
+      site agent_name task_id error)

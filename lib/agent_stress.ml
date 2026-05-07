@@ -256,6 +256,13 @@ let mu = Stdlib.Mutex.create ()
 let buffer : Yojson.Safe.t Queue.t = Queue.create ()
 let buffer_cap = 64
 
+let persistence_surface = "agent_stress"
+
+let record_persistence_read_drop ~reason () =
+  Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+    ~labels:[("surface", persistence_surface); ("reason", reason)]
+    ()
+
 let ensure_dir path =
   let dir = Filename.dirname path in
   if not (Sys.file_exists dir) then
@@ -318,6 +325,8 @@ let recent n =
       match Safe_ops.read_file_safe path with
       | Error msg ->
           Log.Misc.warn "[AgentStress] recent read_file_safe failed: %s" msg;
+          record_persistence_read_drop
+            ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error ();
           []
       | Ok content ->
         let lines =
@@ -336,4 +345,6 @@ let recent n =
           try Some (Yojson.Safe.from_string line)
           with Yojson.Json_error msg ->
             Log.warn ~ctx:"agent_stress" "dropping malformed line: %s" msg;
+            record_persistence_read_drop
+              ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error ();
             None)

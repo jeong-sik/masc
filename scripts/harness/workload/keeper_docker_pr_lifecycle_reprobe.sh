@@ -40,7 +40,7 @@ POLL_TIMEOUT_SEC="${POLL_TIMEOUT_SEC:-1200}"
 POLL_INTERVAL_SEC="${POLL_INTERVAL_SEC:-10}"
 LIFECYCLE_MUTATION_MODE="split"
 REQUIRED_TOOLS_LEGACY="${REQUIRED_TOOLS:-}"
-CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_bash,keeper_pr_create}}"
+CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-masc_web_search,keeper_bash,keeper_pr_create}}"
 REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_pr_review_comment}}"
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 MCP_TOKEN="${MASC_MCP_TOKEN:-}"
@@ -1108,7 +1108,7 @@ prompt_for_keeper_create() {
     head_ref="$account:$branch"
     git_route_rule="- You may use keeper_bash for gh repo fork / git remote setup only to prepare your own fork branch for this proof. Do not run gh pr create, gh pr review, or other PR mutations through keeper_shell or keeper_bash."
     push_step="$(cat <<EOF
-4. Commit and push exactly branch $branch with keeper_bash using the fork PR route because your upstream repo permission is $permission:
+5. Commit and push exactly branch $branch with keeper_bash using the fork PR route because your upstream repo permission is $permission:
    - Confirm your GitHub account login is $account.
    - Ensure the fork $account/${REPO_SLUG#*/} exists. If needed, run gh repo fork $REPO_SLUG --remote=false from keeper_bash; if GitHub blocks fork creation, stop and report blocker="fork_create_blocked" with the exact output.
    - Add or update a remote named keeper-fork pointing at https://github.com/$account/${REPO_SLUG#*/}.git in the returned proof worktree.
@@ -1117,7 +1117,7 @@ prompt_for_keeper_create() {
 EOF
 )"
     pr_step="$(cat <<EOF
-5. Create a draft PR from your fork branch with keeper_pr_create. The call must include
+6. Create a draft PR from your fork branch with keeper_pr_create. The call must include
    repo="$REPO_SLUG", head="$head_ref", base="main", draft=true, and cwd set to
    the returned proof worktree path. Do not leave head/base empty and do not use
    the base repo path if the proof branch lives in a separate worktree. Do not
@@ -1128,11 +1128,11 @@ EOF
     head_ref="$branch"
     git_route_rule="- Do not run gh pr create, gh pr review, or other mutating GitHub commands through keeper_shell or keeper_bash."
     push_step="$(cat <<EOF
-4. Commit and git push exactly branch $branch with keeper_bash. The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
+5. Commit and git push exactly branch $branch with keeper_bash. The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
 EOF
 )"
     pr_step="$(cat <<EOF
-5. Create a draft PR for that branch with keeper_pr_create. The call must include
+6. Create a draft PR for that branch with keeper_pr_create. The call must include
    repo="$REPO_SLUG", head="$head_ref", base="main", draft=true, and cwd set to
    the returned proof worktree path. Do not leave head/base empty and do not use
    the base repo path if the proof branch lives in a separate worktree. Do not
@@ -1161,8 +1161,12 @@ $git_route_rule
 - Use keeper_pr_create for PR creation.
 
 Required create lane:
-1. Confirm your runtime is sandbox_profile=docker before mutating.
-2. Create a unique proof worktree/branch for exactly this run id:
+1. Use masc_web_search once for current external context before mutating. The
+   query should be about GitHub draft PR creation or GitHub CLI draft PR
+   behavior. Do not search for secrets, credentials, bearer tokens, or private
+   repository content.
+2. Confirm your runtime is sandbox_profile=docker before mutating.
+3. Create a unique proof worktree/branch for exactly this run id:
    - branch: $branch
    - preferred tool: masc_worktree_create with task_id=$RUN_ID
    - use the returned worktree path for every later keeper_bash git/file command.
@@ -1170,10 +1174,10 @@ Required create lane:
    - Do not reuse any branch, worktree, or proof file from another run id.
    - Do not remove this run's worktree during the proof attempt. If Git says
      the branch/worktree already exists, stop and report blocker="branch_collision".
-3. Make a minimal, non-product proof edit under docs/runtime-proof/keepers/$keeper-$RUN_ID.md with keeper_bash from inside the Docker playground. The file content must include run_id=$RUN_ID and branch=$branch.
+4. Make a minimal, non-product proof edit under docs/runtime-proof/keepers/$keeper-$RUN_ID.md with keeper_bash from inside the Docker playground. The file content must include run_id=$RUN_ID and branch=$branch.
 $push_step
 $pr_step
-6. Reply with one compact JSON object:
+7. Reply with one compact JSON object:
    {
      "run_id": "$RUN_ID",
      "phase": "create",
@@ -1181,6 +1185,7 @@ $pr_step
      "branch": "$branch",
      "head": "$head_ref",
      "pr_url": "...",
+     "web_search": true,
      "docker_pr_create": true,
      "docker_git_push": true,
      "blocker": null
@@ -1195,7 +1200,7 @@ Safety rules:
 
 This prompt is sent with create-phase masc_keeper_msg.required_tools so the
 runtime records tool_surface_mismatch or missing_required_tool_use when
-keeper_bash/keeper_pr_create are not visible or not used.
+masc_web_search/keeper_bash/keeper_pr_create are not visible or not used.
 EOF
 }
 
@@ -1496,6 +1501,7 @@ run_audit() {
     --expected-keepers "$EXPECTED_KEEPERS"
     --require-docker-pr-lifecycle-evidence
     --evidence-run-id "$RUN_ID"
+    --harness-run-dir "$RUN_DIR"
     --json
   )
   if [[ -n "$FORBID_GITHUB_IDENTITIES" ]]; then

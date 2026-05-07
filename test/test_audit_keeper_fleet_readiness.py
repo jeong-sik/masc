@@ -34,6 +34,7 @@ def audit_args(base_path: Path, expected_keepers: int):
         expected_keepers=expected_keepers,
         max_silence_hours=2400.0,
         require_board_evidence=True,
+        require_web_search_evidence=False,
         require_product_evidence=False,
         require_design_evidence=False,
         require_pr_surface_evidence=False,
@@ -49,6 +50,7 @@ def audit_args(base_path: Path, expected_keepers: int):
         require_docker_pr_approve_evidence=False,
         require_docker_pr_lifecycle_evidence=False,
         evidence_run_id=None,
+        harness_run_dir=None,
         forbid_github_identity=[],
     )
 
@@ -144,6 +146,13 @@ def write_board_post(
     board_path = root / ".masc" / "board_posts.jsonl"
     board_path.parent.mkdir(parents=True, exist_ok=True)
     with board_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row) + "\n")
+
+
+def append_decision(root: Path, keeper: str, row: dict) -> None:
+    decisions_path = root / ".masc" / "keepers" / f"{keeper}.decisions.jsonl"
+    decisions_path.parent.mkdir(parents=True, exist_ok=True)
+    with decisions_path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(row) + "\n")
 
 
@@ -1069,6 +1078,106 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         )
         self.assertEqual(docker_evidence, evidence)
 
+    def test_load_harness_evidence_windows_reads_result_timestamps(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            raw_dir = run_dir / "raw"
+            raw_dir.mkdir()
+            text_file = raw_dir / "result-create-alpha-request-1.text"
+            text_file.write_text(
+                json.dumps(
+                    {
+                        "request_id": "request-1",
+                        "keeper_name": "alpha",
+                        "status": "done",
+                        "submitted_at": 100.0,
+                        "completed_at": 120.0,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (run_dir / "results.jsonl").write_text(
+                json.dumps(
+                    {
+                        "keeper": "alpha",
+                        "phase": "create",
+                        "request_id": "request-1",
+                        "status": "done",
+                        "text_file": str(text_file),
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            windows = audit.load_harness_evidence_windows(str(run_dir))
+
+        self.assertEqual(windows, {"alpha": [(95.0, 125.0, "create")]})
+
+    def test_scan_keeper_evidence_uses_harness_window_when_run_id_redacted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            calls_dir = root / ".masc" / "tool_calls" / "2026-05"
+            calls_dir.mkdir(parents=True)
+            rows = [
+                {
+                    "ts": 40.0,
+                    "keeper": "alpha",
+                    "tool": "keeper_bash",
+                    "input": {"cmd": "git push -u origin [REDACTED]"},
+                    "output": json.dumps({"ok": True, "via": "docker"}),
+                    "success": True,
+                },
+                {
+                    "ts": 60.0,
+                    "keeper": "alpha",
+                    "tool": "keeper_bash",
+                    "input": {"cmd": "git push -u origin [REDACTED]"},
+                    "output": json.dumps({"ok": True, "via": "docker"}),
+                    "success": True,
+                },
+                {
+                    "ts": 65.0,
+                    "keeper": "alpha",
+                    "tool": "keeper_pr_create",
+                    "input": {
+                        "repo": "acme/repo",
+                        "head": "[REDACTED]",
+                        "body": "run_id: [REDACTED]",
+                    },
+                    "output": json.dumps(
+                        {
+                            "ok": True,
+                            "tool": "keeper_pr_create",
+                            "operation": "pr_create",
+                            "via": "docker",
+                            "route_via": "docker",
+                        }
+                    ),
+                    "success": True,
+                    "route_evidence": {"via": "docker"},
+                },
+            ]
+            (calls_dir / "06.jsonl").write_text(
+                "".join(json.dumps(row) + "\n" for row in rows),
+                encoding="utf-8",
+            )
+
+            latest_ts, tools, evidence, docker_evidence = audit.scan_keeper_evidence(
+                root,
+                "alpha",
+                evidence_run_id="current-run",
+                evidence_run_pr_numbers=set(),
+                evidence_windows=[(55.0, 70.0, "create")],
+            )
+
+        self.assertEqual(latest_ts, 65.0)
+        self.assertEqual(tools, {"keeper_bash", "keeper_pr_create"})
+        self.assertEqual(
+            evidence, {"git_push:keeper_bash", "pr_create:keeper_pr_create"}
+        )
+        self.assertEqual(docker_evidence, evidence)
+
     def test_scan_keeper_evidence_reads_newest_tool_calls_first(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1164,6 +1273,156 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             },
         )
         self.assertEqual(docker_evidence, evidence)
+
+    def test_web_search_evidence_counts_successful_decision_tool(self):
+        row = {
+            "ts_unix": 100.0,
+            "event": "tool_exec",
+            "tool": "masc_web_search",
+            "ok": True,
+            "args": {"query": "MASC keeper web search proof"},
+        }
+
+        evidence = audit.web_search_evidence_from_decision(row, "alpha.decisions.jsonl")
+
+        self.assertEqual(
+            evidence,
+            {
+                "web_search:masc_web_search:"
+                "query=MASC keeper web search proof:"
+                "ts=100:"
+                "source=alpha.decisions.jsonl"
+            },
+        )
+
+    def test_web_search_evidence_rejects_failed_decision_tool(self):
+        row = {
+            "ts_unix": 100.0,
+            "event": "tool_exec",
+            "tool": "masc_web_search",
+            "ok": False,
+            "args": {"query": "MASC keeper web search proof"},
+        }
+
+        evidence = audit.web_search_evidence_from_decision(row, "alpha.decisions.jsonl")
+
+        self.assertEqual(evidence, set())
+
+    def test_web_search_evidence_counts_successful_global_tool_call(self):
+        row = {
+            "ts": 110.0,
+            "keeper": "alpha",
+            "tool": "WebSearch",
+            "input": {"query": "latest MASC MCP keeper proof"},
+            "output": json.dumps({"ok": True}),
+            "success": True,
+        }
+
+        evidence = audit.web_search_evidence_from_tool_call(row, "06.jsonl")
+
+        self.assertEqual(
+            evidence,
+            {
+                "web_search:WebSearch:"
+                "query=latest MASC MCP keeper proof:"
+                "ts=110:"
+                "source=06.jsonl"
+            },
+        )
+
+    def test_scan_keeper_web_search_evidence_filters_keeper_not_run_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            calls_dir = root / ".masc" / "tool_calls" / "2026-05"
+            calls_dir.mkdir(parents=True)
+            rows = [
+                {
+                    "ts": 80.0,
+                    "keeper": "alpha",
+                    "tool": "masc_web_search",
+                    "input": {"query": "keeper proof old-run"},
+                    "output": json.dumps({"ok": True}),
+                    "success": True,
+                },
+                {
+                    "ts": 90.0,
+                    "keeper": "alpha",
+                    "tool": "masc_web_search",
+                    "input": {"query": "keeper proof current-run"},
+                    "output": json.dumps({"ok": True}),
+                    "success": True,
+                },
+                {
+                    "ts": 95.0,
+                    "keeper": "beta",
+                    "tool": "masc_web_search",
+                    "input": {"query": "keeper proof current-run"},
+                    "output": json.dumps({"ok": True}),
+                    "success": True,
+                },
+            ]
+            (calls_dir / "06.jsonl").write_text(
+                "".join(json.dumps(row) + "\n" for row in rows),
+                encoding="utf-8",
+            )
+
+            latest_ts, evidence = audit.scan_keeper_web_search_evidence(
+                root, "alpha", evidence_run_id="current-run"
+            )
+
+        self.assertEqual(latest_ts, 90.0)
+        self.assertEqual(
+            evidence,
+            {
+                "web_search:masc_web_search:"
+                "query=keeper proof old-run:"
+                "ts=80:"
+                "source=06.jsonl",
+                "web_search:masc_web_search:"
+                "query=keeper proof current-run:"
+                "ts=90:"
+                "source=06.jsonl",
+            },
+        )
+
+    def test_require_web_search_evidence_fails_without_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ready_keeper(root, "alpha")
+            args = audit_args(root, expected_keepers=1)
+            args.require_web_search_evidence = True
+
+            report = audit.build_report(args)
+
+        self.assertFalse(report["ok"])
+        keeper = report["keepers"][0]
+        self.assertFalse(keeper["web_search_action"])
+        self.assertIn("web_search_evidence_missing", keeper["failures"])
+
+    def test_require_web_search_evidence_passes_with_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ready_keeper(root, "alpha")
+            append_decision(
+                root,
+                "alpha",
+                {
+                    "ts_unix": time.time(),
+                    "event": "tool_exec",
+                    "tool": "masc_web_search",
+                    "ok": True,
+                    "args": {"query": "MASC keeper web search proof"},
+                },
+            )
+            args = audit_args(root, expected_keepers=1)
+            args.require_web_search_evidence = True
+
+            report = audit.build_report(args)
+
+        self.assertTrue(report["ok"])
+        keeper = report["keepers"][0]
+        self.assertTrue(keeper["web_search_action"])
+        self.assertEqual(len(keeper["web_search_evidence"]), 1)
 
 
 if __name__ == "__main__":

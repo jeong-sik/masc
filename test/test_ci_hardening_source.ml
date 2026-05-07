@@ -1161,7 +1161,7 @@ let test_keeper_required_tool_contracts () =
        {|REQUIRED_TOOLS_LEGACY="${REQUIRED_TOOLS:-}"|}
      && file_contains_pattern
           "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          {|CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_bash,keeper_pr_create}}"|}
+          {|CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-masc_web_search,keeper_bash,keeper_pr_create}}"|}
      && file_contains_pattern
           "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
           {|REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_pr_review_comment}}"|});
@@ -1169,7 +1169,7 @@ let test_keeper_required_tool_contracts () =
     (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
        "The create phase"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-          "requires `keeper_bash` and `keeper_pr_create`"
+          "requires `masc_web_search`, `keeper_bash`, and `keeper_pr_create`"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
           "the review phase requires `keeper_pr_review_comment`");
   check bool "docker PR lifecycle prompt accepts brokered route proof" true
@@ -1394,8 +1394,12 @@ let test_keeper_pr_audit_contracts () =
   check bool "keeper fleet audit can scope lifecycle evidence by run id" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        "--evidence-run-id"
+     && file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
+          "load_harness_evidence_windows"
      && file_contains_pattern "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          "--evidence-run-id \"$RUN_ID\"");
+          "--evidence-run-id \"$RUN_ID\""
+     && file_contains_pattern "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          "--harness-run-dir \"$RUN_DIR\"");
   check bool "keeper fleet audit survives live invalid utf8 rows" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        {|errors="replace"|})

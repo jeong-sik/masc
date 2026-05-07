@@ -45,7 +45,9 @@ but lacked `build.commit`, also treated as transient). Only the first
 status records pending requests as lost; the other two log a transient
 notice and the next poll iteration retries.
 When mutation is enabled, the harness sends two sequential phases. The create phase
-requires `keeper_bash` and `keeper_pr_create`. Before it sends any mutation
+requires `masc_web_search`, `keeper_bash`, and `keeper_pr_create`, so each
+fresh proof run captures current-information behavior as well as Docker git/PR
+mutation evidence. Before it sends any mutation
 prompt, the harness checks the run-scoped proof branches and fails closed with
 `branch_collision_preflight` if a local branch, remote-tracking branch, remote
 head, or local worktree already exists for the selected `--run-id`. After the

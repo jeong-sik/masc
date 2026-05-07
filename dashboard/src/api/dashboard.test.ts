@@ -998,6 +998,11 @@ describe('fetchKeeperConfig', () => {
       ['tool_required_unsatisfied', '필수 도구 미충족'],
       ['fiber_unresolved', 'Fiber 미해결'],
       ['stale_turn_timeout', '오래된 턴 만료'],
+      ['awaiting_operator', '운영자 조치 대기'],
+      ['awaiting_sandbox_egress', '샌드박스 egress 대기'],
+      ['supervisor_paused', 'Supervisor 일시정지'],
+      ['synthetic_stall', '합성 상태 정체'],
+      ['self_imposed_idle', '자체 대기'],
     ] as const
 
     for (const [blockerClass, label] of cases) {

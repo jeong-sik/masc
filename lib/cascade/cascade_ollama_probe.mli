@@ -62,10 +62,14 @@ val try_probe :
   string ->
   Cascade_throttle.capacity_info option
 (** [try_probe ~sw ~net url] issues [GET <url>/api/ps] with a short
-    timeout (default [0.5] seconds), parses the JSON body, and
-    updates the cache.  Returns the freshly-recorded
-    [capacity_info] on success; returns [None] (and does not touch
-    the cache) on timeout, non-200, or parse failure.
+    timeout, parses the JSON body, and updates the cache.  Returns
+    the freshly-recorded [capacity_info] on success; returns [None]
+    (and does not touch the cache) on timeout, non-200, or parse
+    failure.
+
+    Default [timeout_s] is read from [MASC_OLLAMA_PROBE_TIMEOUT_SEC]
+    on every call (range [0.05, 30.0], literal fallback [0.5]).
+    Pass an explicit [?timeout_s] argument to override per-call.
 
     Caller is responsible for picking [url]s that look like ollama
     (use {!is_ollama_url}); calling on a non-ollama URL will fail

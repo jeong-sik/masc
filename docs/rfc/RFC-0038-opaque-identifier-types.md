@@ -159,14 +159,16 @@ type-safety without forcing exhaustiveness.
 
 | Phase | Scope | LOC | Status |
 |-------|-------|-----|--------|
-| A | route through `Provider_adapter.cn_*` SSOT (no new module) | ~30 | DONE — companion PR #14111 |
-| B | introduce `Provider_id.t = private string`, migrate call sites | ~150 | OPEN — needs separate sign-off |
-| C | `Cascade_id.t`, `Model_id.t` + migration | ~300 | DEFERRED — needs review of Phase B outcome |
+| A | route through `Provider_adapter.cn_*` SSOT (no new module) | ~30 | DONE — merged in #14116 |
+| B.1 | introduce `Provider_id.t = private string` module + 1 migrated consumer | ~200 | DONE — this PR |
+| B.2 | migrate remaining `Provider_adapter.cn_*` consumers to `Provider_id` | ~50-100 | OPEN — mechanical follow-up |
+| B.3 | change `Provider_adapter.cn_* : string` → `Provider_id.t` | breaks 25+ sites | OPEN — needs separate sign-off |
+| C | `Cascade_id.t`, `Model_id.t` + migration | ~300 | DEFERRED |
 
-Phase A ships immediately to remove the most acute drift. Phase B is
-the actual type-safety win and requires a separate review because it
-introduces a new module convention and breaks every consumer of
-`cn_*` (fixable by mechanical rename).
+Phase B is split into three sub-phases for risk control:
+- **B.1** (this PR): add the new module + opaque type + ssot drift guard tests + 1 migrated consumer (`dashboard_provider_runs`). No breaking change. Delivers the typed surface for new code.
+- **B.2**: mechanical migration of 4 remaining real consumers (the 2 in `dashboard_provider_runs` are done in B.1; the others are `cascade_config`, `keeper_status_detail`, `provider_adapter` internal — all already routed through `cn_*` after Phase A).
+- **B.3**: type signature change — `cn_* : string` becomes `cn_* : Provider_id.t`. Breaks `canonical_name = cn_ollama;` style record assignments; must be migrated to `Provider_id.to_string cn_ollama` or by changing `canonical_name : Provider_id.t`. ~25 sites affected.
 
 ## 6. Validation
 

@@ -166,7 +166,8 @@ let model_id_of_label label =
 
 let catalog_models_for_provider provider =
   match Provider_adapter.resolve_direct_adapter provider with
-  | Some { canonical_name; _ } when String.equal canonical_name Provider_adapter.cn_llama -> []
+  | Some { canonical_name; _ }
+    when Provider_id.matches_string Provider_id.llama canonical_name -> []
   | Some _ -> (
       match Provider_adapter.auto_models_for_provider provider with
       | Some models -> models
@@ -175,7 +176,8 @@ let catalog_models_for_provider provider =
 
 let default_model_for_provider provider =
   match Provider_adapter.resolve_direct_adapter provider with
-  | Some { canonical_name; _ } when String.equal canonical_name Provider_adapter.cn_llama -> (
+  | Some { canonical_name; _ }
+    when Provider_id.matches_string Provider_id.llama canonical_name -> (
       match Provider_adapter.explicit_llama_model_id_result () with
       | Ok model_id -> trim_nonempty model_id
       | Error _ -> None)

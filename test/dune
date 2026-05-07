@@ -1239,6 +1239,7 @@
 (include stanzas/test_phase2_self_preservation.inc)
 (include stanzas/test_pr_open_script.inc)
 (include stanzas/test_process_eio_default_timeout.inc)
+(include stanzas/test_provider_id.inc)
 (include stanzas/test_provider_kind_resolution.inc)
 (include stanzas/test_release_train_guard_script.inc)
 (include stanzas/test_reqd_invalid_state_swallow.inc)

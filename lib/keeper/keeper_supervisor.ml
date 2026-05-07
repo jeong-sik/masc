@@ -1592,58 +1592,69 @@ let sweep_and_recover (ctx : _ context) =
                                  && not (paused_meta_requires_reconcile_recovery meta)
                                  && not (Keeper_approval_queue.has_pending_for_keeper
                                            ~keeper_name:meta.name) ->
-               let resume_after_sec =
-                 Option.value ~default:0.0 meta.auto_resume_after_sec in
-               let paused_ts =
-                 Coord_resilience.Time.parse_iso8601_opt meta.updated_at
-                 |> Option.value ~default:0.0
-               in
-               if paused_ts > 0.0 && now -. paused_ts >= resume_after_sec then begin
-                 (* Resume: clear [paused] flag but retain [auto_resume_after_sec]
-                    so the doubled delay is ready for the next auto-pause.  It
-                    will be reset to [None] on a successful turn completion. *)
-                 let resumed_meta =
-                   { meta with
-                     paused = false;
-                     updated_at = now_iso ();
-                     runtime =
-                       { meta.runtime with
-                         last_blocker = "";
-                         last_blocker_class = None;
-                       };
-                   }
+               if not (Keeper_health_probe.is_healthy
+                         ~keeper_name:meta.cascade_name) then begin
+                 Log.Keeper.info
+                   "%s: auto-resume blocked; cascade %s is unhealthy"
+                   name meta.cascade_name;
+                 Prometheus.inc_counter
+                   Prometheus.metric_keeper_auto_resume_blocked_total
+                   ~labels:[("keeper", name); ("cascade", meta.cascade_name)]
+                   ()
+               end else begin
+                 let resume_after_sec =
+                   Option.value ~default:0.0 meta.auto_resume_after_sec in
+                 let paused_ts =
+                   Coord_resilience.Time.parse_iso8601_opt meta.updated_at
+                   |> Option.value ~default:0.0
                  in
-                 (match
-                    write_meta_with_merge
-                      ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-                      ctx.config resumed_meta
-                  with
-                  | Ok () ->
-                      publish_lifecycle
-                        ~event:(Keeper_lifecycle_events.Custom_event
-                                  { verb = Keeper_lifecycle_events.Auto_resumed;
-                                    phase = None })
-                        name
-                        (Printf.sprintf "auto_resume backoff=%.0fs" resume_after_sec) ();
-                      Prometheus.inc_counter
-                        Prometheus.metric_keeper_auto_resumed_total
-                        ~labels:[("keeper", name)]
-                        ();
-                      Log.Keeper.info
-                        "%s: auto-resumed after %.0fs backoff (next backoff=%.0fs if \
-                         re-paused; resets to initial on successful turn)"
-                        name resume_after_sec
-                        (Float.min
-                           (Env_config.KeeperSupervisor.auto_resume_max_sec)
-                           (resume_after_sec *. 2.0))
-                  | Error err ->
-                      Prometheus.inc_counter
-                        Prometheus.metric_keeper_write_meta_failures
-                        ~labels:[("keeper", name); ("phase", "auto_resume")]
-                        ();
-                      Log.Keeper.warn
-                        "%s: auto-resume meta write failed: %s"
-                        name err)
+                 if paused_ts > 0.0 && now -. paused_ts >= resume_after_sec then begin
+                   (* Resume: clear [paused] flag but retain [auto_resume_after_sec]
+                      so the doubled delay is ready for the next auto-pause.  It
+                      will be reset to [None] on a successful turn completion. *)
+                   let resumed_meta =
+                     { meta with
+                       paused = false;
+                       updated_at = now_iso ();
+                       runtime =
+                         { meta.runtime with
+                           last_blocker = "";
+                           last_blocker_class = None;
+                         };
+                     }
+                   in
+                   (match
+                      write_meta_with_merge
+                        ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+                        ctx.config resumed_meta
+                    with
+                    | Ok () ->
+                        publish_lifecycle
+                          ~event:(Keeper_lifecycle_events.Custom_event
+                                    { verb = Keeper_lifecycle_events.Auto_resumed;
+                                      phase = None })
+                          name
+                          (Printf.sprintf "auto_resume backoff=%.0fs" resume_after_sec) ();
+                        Prometheus.inc_counter
+                          Prometheus.metric_keeper_auto_resumed_total
+                          ~labels:[("keeper", name)]
+                          ();
+                        Log.Keeper.info
+                          "%s: auto-resumed after %.0fs backoff (next backoff=%.0fs if \
+                           re-paused; resets to initial on successful turn)"
+                          name resume_after_sec
+                          (Float.min
+                             (Env_config.KeeperSupervisor.auto_resume_max_sec)
+                             (resume_after_sec *. 2.0))
+                    | Error err ->
+                        Prometheus.inc_counter
+                          Prometheus.metric_keeper_write_meta_failures
+                          ~labels:[("keeper", name); ("phase", "auto_resume")]
+                          ();
+                        Log.Keeper.warn
+                          "%s: auto-resume meta write failed: %s"
+                          name err)
+                 end
                end
            | _ -> ());
          Eio_guard.yield_step sweep_names_ym);

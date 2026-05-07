@@ -817,6 +817,13 @@ val metric_keeper_auto_resumed_total : string
     intervention.  A sustained zero rate while [auto_resume_after_sec] is
     set in meta files indicates a sweep or meta-write regression. *)
 
+val metric_keeper_auto_resume_blocked_total : string
+(** Total keepers whose auto-resume was blocked in
+    [Keeper_supervisor.sweep_and_recover] because the cascade health probe
+    reported unhealthy (failure ratio >= threshold).  Labeled by [keeper]
+    and [cascade].  A positive rate means the health gate is protecting
+    the fleet from resuming into a still-failing cascade. *)
+
 val metric_keeper_skip_idle_wake_resumed : string
 
 (** RFC-0020 Rule 2 evidence — incremented every time

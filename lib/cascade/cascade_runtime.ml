@@ -18,20 +18,29 @@ let provider_name_of_label (label : string) : string option =
 
 (* Cascades whose attempts must be filtered to local providers only.
 
-   Explicit allowlist canonicalized against the cascade catalog.  The
-   prior substring scan on ["local"] was retired because it
-   false-positived hypothetical names like ["localhost_special"] and
-   false-negatived semantically local cascades that do not embed
-   ["local"] in the name (e.g. ["pure_ollama"]).
+   Comma-separated allowlist from [MASC_LOCAL_ONLY_CASCADES] env var,
+   canonicalized against the cascade catalog.  The prior substring scan
+   on ["local"] was retired because it false-positived hypothetical names
+   like ["localhost_special"] and false-negatived semantically local
+   cascades that do not embed ["local"] in the name (e.g. ["pure_ollama"]).
 
-   Production today defines only [local_recovery] in [config/cascade.toml]
-   so behavior is preserved.  The catalog-derived implementation —
+   Default ["local_recovery"] preserves production behavior defined in
+   [config/cascade.toml].  The catalog-derived implementation —
    "is_local iff every entry in [{name}_models] resolves to a provider
    for which [Provider_adapter.is_local_provider] is true" — is the
    right long-term fix; tracked as an RFC-0027 follow-up because it
    needs [Cascade_config_loader] to surface the per-cascade model list
    on [catalog_entry]. *)
-let local_only_cascades = [ "local_recovery" ]
+let local_only_cascades =
+  let raw =
+    Env_config_core.get_string ~default:"local_recovery"
+      "MASC_LOCAL_ONLY_CASCADES"
+  in
+  if String.trim raw = "" then []
+  else
+    String.split_on_char ',' raw
+    |> List.map String.trim
+    |> List.filter (fun s -> s <> "")
 
 let is_local_only_cascade name =
   let canonical =

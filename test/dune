@@ -80,6 +80,7 @@
         test_keeper_timing
         test_keeper_memory
         test_keeper_chat_store
+        test_keeper_runtime_trust_snapshot
         test_keeper_accountability
         test_reputation_ledger_v2
         test_reputation_multi_dim
@@ -306,6 +307,7 @@
           test_keeper_timing
           test_keeper_memory
           test_keeper_chat_store
+          test_keeper_runtime_trust_snapshot
           test_keeper_accountability
           test_reputation_ledger_v2
           test_reputation_multi_dim

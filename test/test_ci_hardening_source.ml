@@ -1394,8 +1394,12 @@ let test_keeper_pr_audit_contracts () =
   check bool "keeper fleet audit can scope lifecycle evidence by run id" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        "--evidence-run-id"
+     && file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
+          "load_harness_evidence_windows"
      && file_contains_pattern "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          "--evidence-run-id \"$RUN_ID\"");
+          "--evidence-run-id \"$RUN_ID\""
+     && file_contains_pattern "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          "--harness-run-dir \"$RUN_DIR\"");
   check bool "keeper fleet audit survives live invalid utf8 rows" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        {|errors="replace"|})

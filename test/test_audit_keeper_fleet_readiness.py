@@ -50,6 +50,7 @@ def audit_args(base_path: Path, expected_keepers: int):
         require_docker_pr_approve_evidence=False,
         require_docker_pr_lifecycle_evidence=False,
         evidence_run_id=None,
+        harness_run_dir=None,
         forbid_github_identity=[],
     )
 
@@ -1074,6 +1075,106 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                 "pr_approve:keeper_pr_review_comment",
                 "pr_create:keeper_pr_create",
             },
+        )
+        self.assertEqual(docker_evidence, evidence)
+
+    def test_load_harness_evidence_windows_reads_result_timestamps(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            raw_dir = run_dir / "raw"
+            raw_dir.mkdir()
+            text_file = raw_dir / "result-create-alpha-request-1.text"
+            text_file.write_text(
+                json.dumps(
+                    {
+                        "request_id": "request-1",
+                        "keeper_name": "alpha",
+                        "status": "done",
+                        "submitted_at": 100.0,
+                        "completed_at": 120.0,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (run_dir / "results.jsonl").write_text(
+                json.dumps(
+                    {
+                        "keeper": "alpha",
+                        "phase": "create",
+                        "request_id": "request-1",
+                        "status": "done",
+                        "text_file": str(text_file),
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            windows = audit.load_harness_evidence_windows(str(run_dir))
+
+        self.assertEqual(windows, {"alpha": [(95.0, 125.0, "create")]})
+
+    def test_scan_keeper_evidence_uses_harness_window_when_run_id_redacted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            calls_dir = root / ".masc" / "tool_calls" / "2026-05"
+            calls_dir.mkdir(parents=True)
+            rows = [
+                {
+                    "ts": 40.0,
+                    "keeper": "alpha",
+                    "tool": "keeper_bash",
+                    "input": {"cmd": "git push -u origin [REDACTED]"},
+                    "output": json.dumps({"ok": True, "via": "docker"}),
+                    "success": True,
+                },
+                {
+                    "ts": 60.0,
+                    "keeper": "alpha",
+                    "tool": "keeper_bash",
+                    "input": {"cmd": "git push -u origin [REDACTED]"},
+                    "output": json.dumps({"ok": True, "via": "docker"}),
+                    "success": True,
+                },
+                {
+                    "ts": 65.0,
+                    "keeper": "alpha",
+                    "tool": "keeper_pr_create",
+                    "input": {
+                        "repo": "acme/repo",
+                        "head": "[REDACTED]",
+                        "body": "run_id: [REDACTED]",
+                    },
+                    "output": json.dumps(
+                        {
+                            "ok": True,
+                            "tool": "keeper_pr_create",
+                            "operation": "pr_create",
+                            "via": "docker",
+                            "route_via": "docker",
+                        }
+                    ),
+                    "success": True,
+                    "route_evidence": {"via": "docker"},
+                },
+            ]
+            (calls_dir / "06.jsonl").write_text(
+                "".join(json.dumps(row) + "\n" for row in rows),
+                encoding="utf-8",
+            )
+
+            latest_ts, tools, evidence, docker_evidence = audit.scan_keeper_evidence(
+                root,
+                "alpha",
+                evidence_run_id="current-run",
+                evidence_run_pr_numbers=set(),
+                evidence_windows=[(55.0, 70.0, "create")],
+            )
+
+        self.assertEqual(latest_ts, 65.0)
+        self.assertEqual(tools, {"keeper_bash", "keeper_pr_create"})
+        self.assertEqual(
+            evidence, {"git_push:keeper_bash", "pr_create:keeper_pr_create"}
         )
         self.assertEqual(docker_evidence, evidence)
 

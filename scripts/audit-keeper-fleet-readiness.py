@@ -152,6 +152,9 @@ class PrCreationEvidence:
         return any(ref.startswith("https://github.com/") for ref in self.refs)
 
 
+EvidenceWindow = tuple[float, float, str]
+
+
 def load_json(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8", errors="replace") as handle:
         data = json.load(handle)
@@ -443,6 +446,68 @@ def row_matches_evidence_run(
     if not evidence_run_id or not evidence_run_pr_numbers:
         return False
     return bool(pr_numbers_from_row(row) & evidence_run_pr_numbers)
+
+
+def row_timestamp(row: dict[str, Any]) -> float | None:
+    return numeric_field(row, "ts_unix") or numeric_field(row, "ts")
+
+
+def row_within_evidence_windows(
+    row: dict[str, Any], evidence_windows: list[EvidenceWindow] | None
+) -> bool:
+    if not evidence_windows:
+        return False
+    ts = row_timestamp(row)
+    if ts is None:
+        return False
+    return any(start <= ts <= end for start, end, _phase in evidence_windows)
+
+
+def row_matches_evidence_scope(
+    row: dict[str, Any],
+    evidence_run_id: str | None,
+    evidence_run_pr_numbers: set[int] | None,
+    evidence_windows: list[EvidenceWindow] | None,
+) -> bool:
+    return row_matches_evidence_run(
+        row, evidence_run_id, evidence_run_pr_numbers
+    ) or row_within_evidence_windows(row, evidence_windows)
+
+
+def load_harness_evidence_windows(
+    harness_run_dir: str | None,
+) -> dict[str, list[EvidenceWindow]]:
+    if not harness_run_dir:
+        return {}
+    run_dir = Path(harness_run_dir).expanduser()
+    results_path = run_dir / "results.jsonl"
+    if not results_path.is_file():
+        return {}
+
+    windows: dict[str, list[EvidenceWindow]] = {}
+    for row in iter_jsonl(results_path):
+        keeper = string_field(row, "keeper")
+        phase = string_field(row, "phase") or "unknown"
+        text_file_raw = row.get("text_file")
+        if not keeper or not isinstance(text_file_raw, str) or not text_file_raw:
+            continue
+        text_path = Path(text_file_raw).expanduser()
+        if not text_path.is_absolute():
+            text_path = run_dir / text_path
+        if not text_path.is_file():
+            continue
+        try:
+            result = load_json(text_path)
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        submitted_at = numeric_field(result, "submitted_at")
+        completed_at = numeric_field(result, "completed_at")
+        if submitted_at is None or completed_at is None:
+            continue
+        start = min(submitted_at, completed_at)
+        end = max(submitted_at, completed_at)
+        windows.setdefault(keeper, []).append((max(0.0, start - 5.0), end + 5.0, phase))
+    return windows
 
 
 def add_pr_refs_from_structured_output(
@@ -1207,6 +1272,7 @@ def scan_keeper_evidence(
     max_silence_hours: float | None = None,
     evidence_run_id: str | None = None,
     evidence_run_pr_numbers: set[int] | None = None,
+    evidence_windows: list[EvidenceWindow] | None = None,
     now: float | None = None,
 ) -> tuple[float | None, set[str], set[str], set[str]]:
     latest_ts: float | None = None
@@ -1226,7 +1292,9 @@ def scan_keeper_evidence(
             if ts is not None:
                 latest_ts = ts if latest_ts is None else max(latest_ts, ts)
             tools.update(tools_from_decision(row))
-            if row_matches_evidence_run(row, evidence_run_id, evidence_run_pr_numbers):
+            if row_matches_evidence_scope(
+                row, evidence_run_id, evidence_run_pr_numbers, evidence_windows
+            ):
                 row_evidence, row_docker_evidence = pr_lifecycle_evidence_from_decision(
                     row
                 )
@@ -1242,7 +1310,9 @@ def scan_keeper_evidence(
             if ts is not None:
                 latest_ts = ts if latest_ts is None else max(latest_ts, ts)
             tools.update(tools_from_action_metric(row))
-            if row_matches_evidence_run(row, evidence_run_id, evidence_run_pr_numbers):
+            if row_matches_evidence_scope(
+                row, evidence_run_id, evidence_run_pr_numbers, evidence_windows
+            ):
                 row_evidence, row_docker_evidence = (
                     pr_lifecycle_evidence_from_action_metric(row)
                 )
@@ -1268,8 +1338,8 @@ def scan_keeper_evidence(
                 tool = row.get("tool")
                 if isinstance(tool, str):
                     tools.add(tool)
-                if row_matches_evidence_run(
-                    row, evidence_run_id, evidence_run_pr_numbers
+                if row_matches_evidence_scope(
+                    row, evidence_run_id, evidence_run_pr_numbers, evidence_windows
                 ):
                     row_evidence, row_docker_evidence = (
                         pr_lifecycle_evidence_from_tool_call(row)
@@ -1351,6 +1421,7 @@ def audit_keeper(
     require_docker_pr_approve_evidence: bool,
     evidence_run_id: str | None,
     evidence_run_pr_numbers: set[int] | None,
+    evidence_windows: list[EvidenceWindow] | None = None,
     forbidden_github_identities: set[str] | None = None,
 ) -> KeeperAudit:
     name = config_path.stem
@@ -1421,6 +1492,7 @@ def audit_keeper(
         max_silence_hours=max_silence_hours,
         evidence_run_id=evidence_run_id,
         evidence_run_pr_numbers=evidence_run_pr_numbers,
+        evidence_windows=evidence_windows,
     )
     pr_creation_evidence = scan_pr_creation_evidence(base_path, name)
     web_search_ts, web_search_evidence = scan_keeper_web_search_evidence(
@@ -1581,6 +1653,9 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     if not config_dir.is_dir():
         raise SystemExit(f"keeper config dir not found: {config_dir}")
 
+    evidence_windows_by_keeper = load_harness_evidence_windows(
+        getattr(args, "harness_run_dir", None)
+    )
     config_paths = sorted(
         path for path in config_dir.glob("*.toml") if path.name != "base.toml"
     )
@@ -1623,6 +1698,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             ),
             evidence_run_id=args.evidence_run_id,
             evidence_run_pr_numbers=evidence_run_pr_numbers,
+            evidence_windows=evidence_windows_by_keeper.get(path.stem),
             forbidden_github_identities=set(args.forbid_github_identity or []),
         )
         for path in config_paths
@@ -1703,6 +1779,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             ),
             "evidence_run_id": args.evidence_run_id,
             "evidence_run_pr_numbers": sorted(evidence_run_pr_numbers),
+            "harness_run_dir": getattr(args, "harness_run_dir", None),
         },
         "fleet_failures": fleet_failures,
         "failed_keepers": [keeper.name for keeper in failed_keepers],
@@ -1912,6 +1989,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             "When set, count PR lifecycle evidence only from rows that mention "
             "this run id. This prevents older proof runs from satisfying a "
             "fresh lifecycle reprobe."
+        ),
+    )
+    parser.add_argument(
+        "--harness-run-dir",
+        default=None,
+        help=(
+            "Optional keeper lifecycle harness artifact directory. When set, "
+            "the audit also treats each keeper message request's submitted_at "
+            "to completed_at window as run-scoped evidence, covering telemetry "
+            "rows whose branch/run id was redacted before persistence."
         ),
     )
     parser.add_argument("--json", action="store_true", help="Emit JSON report.")

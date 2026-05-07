@@ -1496,6 +1496,7 @@ run_audit() {
     --expected-keepers "$EXPECTED_KEEPERS"
     --require-docker-pr-lifecycle-evidence
     --evidence-run-id "$RUN_ID"
+    --harness-run-dir "$RUN_DIR"
     --json
   )
   if [[ -n "$FORBID_GITHUB_IDENTITIES" ]]; then

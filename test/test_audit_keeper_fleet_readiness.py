@@ -958,6 +958,117 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         )
         self.assertEqual(docker_evidence, evidence)
 
+    def test_run_id_filter_counts_redacted_approval_by_correlated_pr_number(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            alpha_metrics_dir = (
+                root / ".masc" / "keepers" / "alpha" / "pr-action-metrics" / "2026-05"
+            )
+            bravo_metrics_dir = (
+                root / ".masc" / "keepers" / "bravo" / "pr-action-metrics" / "2026-05"
+            )
+            alpha_metrics_dir.mkdir(parents=True)
+            bravo_metrics_dir.mkdir(parents=True)
+            current_run = "current-run"
+            (alpha_metrics_dir / "06.jsonl").write_text(
+                "".join(
+                    json.dumps(row) + "\n"
+                    for row in [
+                        {
+                            "ts_unix": 10.0,
+                            "metric_event": "keeper_pr_work_action",
+                            "tool_name": "keeper_bash",
+                            "pr_work_action": "GIT_PUSH",
+                            "pr_work_action_source": "keeper_bash",
+                            "pr_work_action_success": True,
+                            "pr_work_command": "git push origin alpha-old-run",
+                            "route_via": "docker",
+                        },
+                        {
+                            "ts_unix": 20.0,
+                            "metric_event": "keeper_pr_work_action",
+                            "tool_name": "keeper_bash",
+                            "pr_work_action": "GIT_PUSH",
+                            "pr_work_action_source": "keeper_bash",
+                            "pr_work_action_success": True,
+                            "pr_work_command": f"git push origin alpha-{current_run}",
+                            "route_via": "docker",
+                        },
+                        {
+                            "ts_unix": 30.0,
+                            "metric_event": "keeper_pr_work_action",
+                            "tool_name": "keeper_pr_create",
+                            "pr_work_action": "PR_CREATE",
+                            "pr_work_action_source": "keeper_pr_create",
+                            "pr_work_action_success": True,
+                            "pr_work_ref": f"keeper-alpha/{current_run}",
+                            "pr_url": "https://github.com/acme/repo/pull/100",
+                            "route_via": "docker",
+                        },
+                        {
+                            "ts_unix": 40.0,
+                            "metric_event": "keeper_pr_review_action",
+                            "tool_name": "keeper_pr_review_comment",
+                            "pr_review_action": "APPROVE",
+                            "pr_review_action_success": True,
+                            "pr_number": 999,
+                            "route_via": "docker",
+                        },
+                        {
+                            "ts_unix": 50.0,
+                            "metric_event": "keeper_pr_review_action",
+                            "tool_name": "keeper_pr_review_comment",
+                            "pr_review_action": "APPROVE",
+                            "pr_review_action_success": True,
+                            "pr_number": 101,
+                            "route_via": "docker",
+                        },
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (bravo_metrics_dir / "06.jsonl").write_text(
+                json.dumps(
+                    {
+                        "ts_unix": 25.0,
+                        "metric_event": "keeper_pr_work_action",
+                        "tool_name": "keeper_pr_create",
+                        "pr_work_action": "PR_CREATE",
+                        "pr_work_action_source": "keeper_pr_create",
+                        "pr_work_action_success": True,
+                        "pr_work_ref": f"keeper-bravo/{current_run}",
+                        "pr_url": "https://github.com/acme/repo/pull/101",
+                        "route_via": "docker",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            run_pr_numbers = audit.collect_evidence_run_pr_numbers(root, current_run)
+            latest_ts, tools, evidence, docker_evidence = audit.scan_keeper_evidence(
+                root,
+                "alpha",
+                evidence_run_id=current_run,
+                evidence_run_pr_numbers=run_pr_numbers,
+            )
+
+        self.assertEqual(run_pr_numbers, {100, 101})
+        self.assertEqual(latest_ts, 50.0)
+        self.assertEqual(
+            tools,
+            {"keeper_bash", "keeper_pr_create", "keeper_pr_review_comment"},
+        )
+        self.assertEqual(
+            evidence,
+            {
+                "git_push:keeper_bash",
+                "pr_approve:keeper_pr_review_comment",
+                "pr_create:keeper_pr_create",
+            },
+        )
+        self.assertEqual(docker_evidence, evidence)
+
     def test_scan_keeper_evidence_reads_newest_tool_calls_first(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -100,6 +100,41 @@ let cooldown_sec =
     ~default:30.0
     ()
 
+(** RFC-0037 §4.5: local providers (ollama, llama.cpp, etc.) get a
+    more generous failure budget than remote APIs.  Local probes are
+    flaky by nature (process startup, model load latency, transient
+    /api/ps stalls) but recover within seconds — locking them out for
+    the full [cooldown_sec] window denies the keeper a viable provider
+    when the remote alternatives are also failing.
+
+    Defaults: 5 consecutive failures (vs remote 3), 10s cooldown (vs
+    remote 30s).  Both are env-tunable and floored at 1 / 1.0
+    respectively to prevent zero-value misconfiguration from disabling
+    cooldown entirely.
+
+    Provider classification uses {!Provider_adapter.is_local_provider},
+    the same primitive cascade_runtime already consumes — no new
+    classifier introduced. *)
+let local_cooldown_threshold =
+  Int.max 1
+    (read_int_setting
+       ~primary:"MASC_LOCAL_COOLDOWN_THRESHOLD"
+       ~default:5
+       ())
+
+let local_cooldown_sec =
+  Float.max 1.0
+    (read_float_setting
+       ~primary:"MASC_LOCAL_COOLDOWN_SEC"
+       ~default:10.0
+       ())
+
+let cooldown_config_for ~provider_key =
+  if Provider_adapter.is_local_provider provider_key then
+    (local_cooldown_threshold, local_cooldown_sec)
+  else
+    (cooldown_threshold, cooldown_sec)
+
 (** Cooldown duration for provider calls classified as hard-quota exhaustion
     (account balance depleted, monthly quota reached, resource exhausted).
     Unlike transient 429s, hard-quota errors will not recover within a short
@@ -495,12 +530,13 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
          [provider_info] can count Rejected separately for dashboards. *)
       state.consecutive_failures <- state.consecutive_failures + 1;
       bump_failure_fp ();
-      if state.consecutive_failures >= cooldown_threshold then begin
-        let new_until = now +. cooldown_sec in
+      let (threshold, cooldown_dur) = cooldown_config_for ~provider_key in
+      if state.consecutive_failures >= threshold then begin
+        let new_until = now +. cooldown_dur in
         if new_until > state.cooldown_until then begin
           state.cooldown_until <- new_until;
           Prometheus.observe_histogram Prometheus.metric_keeper_provider_block_duration_sec
-            ~labels:[("provider", provider_key)] cooldown_sec
+            ~labels:[("provider", provider_key)] cooldown_dur
         end
       end
     | Soft_rate_limited ->

@@ -50,6 +50,19 @@ type memory_match = {
   score: float;
 }
 
+let memory_bank_persistence_surface = "keeper_exec_memory_bank"
+
+let report_memory_bank_read_drop ~path ~reason ~detail =
+  Safe_ops.report_persistence_read_drop
+    ~on_drop:(fun () ->
+      Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+        ~labels:[("surface", memory_bank_persistence_surface); ("reason", reason)]
+        ())
+    ~surface:memory_bank_persistence_surface
+    ~reason
+    ~path
+    ~detail
+
 let search_memory_bank
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -62,36 +75,63 @@ let search_memory_bank
   let parsed =
     lines
     |> List.filter_map (fun line ->
-         try
-           let j = Yojson.Safe.from_string line in
-           let kind = Safe_ops.json_string ~default:"" "kind" j |> String.trim in
-           let horizon =
-             Keeper_memory_policy.memory_horizon_of_json ~kind j
-           in
-           let source =
-             Safe_ops.json_string ~default:"" "source" j
-             |> String.trim
-           in
-           let text = Safe_ops.json_string ~default:"" "text" j |> String.trim in
-           let priority = Safe_ops.json_int ~default:0 "priority" j in
-           let generation = Safe_ops.json_int ~default:0 "generation" j in
-           let turn = Safe_ops.json_int ~default:0 "turn" j in
-           let ts = Safe_ops.json_string ~default:"" "ts" j in
-           let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
-           if kind = "" || text = "" then None
-           else
-             Some {
-               kind;
-               horizon;
-               source = if source = "" then None else Some source;
-               text;
-               priority;
-               generation;
-               turn;
-               ts;
-               score = ts_unix;
-             }
-         with Yojson.Json_error _ -> None)
+         match Yojson.Safe.from_string line with
+         | exception Yojson.Json_error detail ->
+             report_memory_bank_read_drop
+               ~path
+               ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+               ~detail;
+             None
+         | `Assoc _ as j -> (
+             try
+               let kind =
+                 Safe_ops.json_string ~default:"" "kind" j |> String.trim
+               in
+               let horizon =
+                 Keeper_memory_policy.memory_horizon_of_json ~kind j
+               in
+               let source =
+                 Safe_ops.json_string ~default:"" "source" j
+                 |> String.trim
+               in
+               let text =
+                 Safe_ops.json_string ~default:"" "text" j |> String.trim
+               in
+               let priority = Safe_ops.json_int ~default:0 "priority" j in
+               let generation = Safe_ops.json_int ~default:0 "generation" j in
+               let turn = Safe_ops.json_int ~default:0 "turn" j in
+               let ts = Safe_ops.json_string ~default:"" "ts" j in
+               let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
+               if kind = "" || text = "" then (
+                 report_memory_bank_read_drop
+                   ~path
+                   ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                   ~detail:"memory bank row is missing required kind or text";
+                 None)
+               else
+                 Some {
+                   kind;
+                   horizon;
+                   source = if source = "" then None else Some source;
+                   text;
+                   priority;
+                   generation;
+                   turn;
+                   ts;
+                   score = ts_unix;
+                 }
+             with Yojson.Safe.Util.Type_error (detail, _) ->
+               report_memory_bank_read_drop
+                 ~path
+                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                 ~detail;
+               None)
+         | _ ->
+             report_memory_bank_read_drop
+               ~path
+               ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+               ~detail:"memory bank row is not a JSON object";
+             None)
   in
   let total_candidates = List.length parsed in
   (* Structured filter: kind (deterministic) *)

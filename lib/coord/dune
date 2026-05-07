@@ -36,6 +36,7 @@
   playground_repo_cache
   coord_worktree
   mention
+  mention_dedup
   coord_resilience
   heartbeat
   nickname)

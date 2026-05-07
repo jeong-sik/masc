@@ -1182,6 +1182,11 @@ val metric_keeper_post_turn_wirein_failures : string
 val metric_keeper_recurring_failures : string
 val metric_keeper_turn_cleanup_failures : string
 
+(** RFC-0040: sender-side mention dedup decision counter.
+    Labels: [outcome] with values
+    [skipped|passed|no_target|bypassed]. *)
+val metric_mention_dedup_decisions_total : string
+
 (** {1 Process monitoring} *)
 
 val approximate_open_fd_count : unit -> int

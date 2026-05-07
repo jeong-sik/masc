@@ -1396,6 +1396,12 @@ let metric_keeper_recurring_failures =
 let metric_keeper_turn_cleanup_failures =
   "masc_keeper_turn_cleanup_failures_total"
 
+(* RFC-0040: sender-side mention dedup decision counter.  Labels:
+   [outcome] in [skipped|passed|no_target|bypassed].  Wired from
+   [lib/coord.ml] via [Coord_hooks.mention_dedup_decision_fn]. *)
+let metric_mention_dedup_decisions_total =
+  "masc_mention_dedup_decisions_total"
+
 (** {1 Built-in Metrics} *)
 
 let init () =
@@ -2648,6 +2654,8 @@ let init () =
     "Recurring task execution/dispatch failures. Labels: task, phase." Counter;
   add metric_keeper_turn_cleanup_failures
     "Turn cleanup failures (unsubscribe event_bus, mark_turn_finished). Labels: keeper, site." Counter;
+  add metric_mention_dedup_decisions_total
+    "RFC-0040 sender-side mention dedup decisions. Labels: outcome={skipped|passed|no_target|bypassed}." Counter;
   add metric_grpc_active_streams "Active gRPC bidirectional streams" Gauge;
   register_histogram ~name:metric_grpc_heartbeat_latency
     ~help:"gRPC heartbeat round-trip latency" ();

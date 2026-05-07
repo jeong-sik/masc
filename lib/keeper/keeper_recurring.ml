@@ -86,6 +86,12 @@ let list_all () =
   with_tasks_ro (fun () ->
     Hashtbl.fold (fun _id task acc -> task :: acc) tasks [])
 
+let record_failure ~task ~phase =
+  Prometheus.inc_counter
+    Prometheus.metric_keeper_recurring_failures
+    ~labels:[("task", task.id); ("phase", phase)]
+    ()
+
 (* ================================================================ *)
 (* Dispatch                                                          *)
 (* ================================================================ *)
@@ -117,7 +123,10 @@ let dispatch_due ~keeper_name ~now_ts ~dispatch =
       task.failure_count <- task.failure_count + 1;
       if task.max_failures > 0
          && task.failure_count >= task.max_failures
-      then task.enabled <- false
+      then begin
+        task.enabled <- false;
+        record_failure ~task ~phase:"auto_disable"
+      end
   ) due_tasks;
   !count
 

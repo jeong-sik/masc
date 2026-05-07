@@ -1294,13 +1294,14 @@ module Kimi_cli_transport_local = struct
           | Error _ as err ->
               {
                 Llm_provider.Llm_transport.response = classify_cli_error err;
-                latency_ms = measured_latency_ms;
+                latency_ms = Some measured_latency_ms;
               }
           | Ok { latency_ms; _ } ->
               let response =
                 parse_jsonl_result ~model_id (List.rev !seen_lines)
               in
-              { Llm_provider.Llm_transport.response; latency_ms });
+              { Llm_provider.Llm_transport.response;
+                latency_ms = Some latency_ms });
       complete_stream =
         (fun ~on_event (req : Llm_provider.Llm_transport.completion_request) ->
           warn_external_tools_once warned req.tools;

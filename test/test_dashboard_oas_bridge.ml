@@ -53,7 +53,7 @@ let make_usage ?cost ?(cache_creation = 0) ?(cache_read = 0) ~input
     cost_usd = cost;
   }
 
-let make_telemetry ?timings ?(request_latency_ms = 0) ()
+let make_telemetry ?timings ?(request_latency_ms = None) ()
     : Agent_sdk.Types.inference_telemetry =
   {
     system_fingerprint = None;
@@ -340,7 +340,7 @@ let test_sample_of_response_uses_usage_and_native_telemetry () =
       cache_n = Some 7;
     }
   in
-  let telemetry = make_telemetry ~timings ~request_latency_ms:620 () in
+  let telemetry = make_telemetry ~timings ~request_latency_ms:(Some 620) () in
   let response = make_response ~usage ~telemetry ~model:"gpt-4" () in
   let sample =
     DOB.sample_of_response ~provider_id:"openai_compat" ~model_id:"gpt-4"
@@ -363,7 +363,7 @@ let test_sample_of_response_uses_usage_and_native_telemetry () =
 
 let test_sample_of_response_derives_wall_throughput () =
   let usage = make_usage ~input:100 ~output:50 () in
-  let telemetry = make_telemetry ~request_latency_ms:250 () in
+  let telemetry = make_telemetry ~request_latency_ms:(Some 250) () in
   let response = make_response ~usage ~telemetry ~model:"ollama:qwen" () in
   let sample =
     DOB.sample_of_response ~provider_id:"ollama" ~model_id:"ollama:qwen"
@@ -387,7 +387,7 @@ let test_sample_of_response_derives_duration_from_timing_components () =
       cache_n = None;
     }
   in
-  let telemetry = make_telemetry ~timings ~request_latency_ms:0 () in
+  let telemetry = make_telemetry ~timings ~request_latency_ms:(Some 0) () in
   let response = make_response ~usage ~telemetry ~model:"ollama:qwen" () in
   let sample =
     DOB.sample_of_response ~provider_id:"ollama" ~model_id:"ollama:qwen"
@@ -407,7 +407,7 @@ let test_sample_of_response_derives_duration_from_timing_components () =
 let test_record_response_records_missing_usage_as_unknown_sample () =
   setup ();
   let response =
-    make_response ~telemetry:(make_telemetry ~request_latency_ms:33 ())
+    make_response ~telemetry:(make_telemetry ~request_latency_ms:(Some 33) ())
       ~model:"kimi-for-coding" ()
   in
   DOB.record_response ~provider_id:"kimi_cli" ~model_id:"kimi-for-coding"
@@ -489,7 +489,7 @@ let test_serialization_ms_defaults_to_zero () =
 let test_record_response_serialization_ms_round_trips () =
   setup ();
   let response =
-    make_response ~telemetry:(make_telemetry ~request_latency_ms:100 ()) ()
+    make_response ~telemetry:(make_telemetry ~request_latency_ms:(Some 100) ()) ()
   in
   DOB.record_response ~provider_id:"anthropic" ~model_id:"claude"
     ~serialization_ms:3.14 ~status:DOB.Success response;

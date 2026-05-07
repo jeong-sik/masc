@@ -29,6 +29,18 @@ let all_vote_directions = [ Up; Down ]
 let valid_vote_direction_strings =
   List.map vote_direction_to_string all_vote_directions
 
+let post_meta_json_persistence_surface = "board_post_meta_json"
+
+let record_post_meta_json_read_drop () =
+  Prometheus.inc_counter
+    Prometheus.metric_persistence_read_drops
+    ~labels:
+      [
+        ("surface", post_meta_json_persistence_surface);
+        ("reason", Safe_ops.persistence_read_drop_reason_invalid_payload);
+      ]
+    ()
+
 (* Sound partial parser — case-insensitive, trims whitespace, accepts
    empty as default Up for back-compat with [tool_board.ml] which
    defaults to "up" when the field is missing. *)
@@ -369,7 +381,11 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
       | Some (`Assoc _ as meta) -> Some meta
       | Some _ | None ->
         (match Safe_ops.json_string_opt "meta_json" json with
-         | Some raw -> (try Some (Yojson.Safe.from_string raw) with Yojson.Json_error _ -> None)
+         | Some raw -> (
+           try Some (Yojson.Safe.from_string raw)
+           with Yojson.Json_error _ ->
+             record_post_meta_json_read_drop ();
+             None)
          | None -> None)
     in
     (match Post_id.of_string id_str, Agent_id.of_string author_str, visibility_of_string vis_str with

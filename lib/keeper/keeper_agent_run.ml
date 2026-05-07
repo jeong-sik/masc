@@ -267,9 +267,19 @@ let run_turn
     let require_tool_choice_support =
       initial_tool_surface.tool_requirement = Required
     in
+    let actionable_observation_requires_tool_support =
+      match world_observation with
+      | None -> false
+      | Some observation ->
+          observation
+          |> Keeper_contract_classifier.of_keeper_world_observation
+          |> Keeper_contract_classifier.requires_tool_support_for_allowed_tools
+               ~allowed_tool_names:all_tool_names
+    in
     let require_tool_support =
-      initial_tool_surface.tool_requirement = Required
-      && tools <> []
+      tools <> []
+      && (initial_tool_surface.tool_requirement = Required
+          || actionable_observation_requires_tool_support)
     in
     let timeout_s =
       match oas_timeout_s with

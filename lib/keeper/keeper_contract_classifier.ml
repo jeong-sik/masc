@@ -86,3 +86,8 @@ let classify_actionable_signal_with_allowed_tools =
 let is_actionable = function
   | No_actionable_signal -> false
   | Has_unclaimed_tasks | Has_board_activity | Has_discovered_work -> true
+
+let requires_tool_support_for_allowed_tools ~(allowed_tool_names : string list) o =
+  o
+  |> classify_actionable_signal_for_tools ~allowed_tool_names
+  |> is_actionable

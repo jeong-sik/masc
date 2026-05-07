@@ -78,6 +78,14 @@ val classify_actionable_signal_for_tools :
 val classify_actionable_signal_with_allowed_tools :
   allowed_tool_names:string list -> world_observation -> actionable_signal
 
+(** [requires_tool_support_for_allowed_tools ~allowed_tool_names o] is true
+    when [o] carries an actionable signal that can be satisfied by at least
+    one tool in [allowed_tool_names]. Use this before provider routing so the
+    same structured signal that later enforces the completion contract also
+    selects a provider capable of exposing keeper tools. *)
+val requires_tool_support_for_allowed_tools :
+  allowed_tool_names:string list -> world_observation -> bool
+
 (** [is_actionable s] is [false] iff [s = No_actionable_signal].
     Provided so callers comparing the structured signal against the
     legacy boolean can do so without a manual pattern match. *)

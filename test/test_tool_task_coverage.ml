@@ -1545,6 +1545,221 @@ let () = test "claim_next_filters_out_cancelled_tasks" (fun () ->
   | None -> failwith (Printf.sprintf "Expected no tasks available, got: %s" msg)
 )
 
+(* ===========================================================================
+   RFC-0034.v2: per-goal cap propagation across all task creation entrypoints.
+   See [docs/rfc/RFC-0034-cap-all-callers.md].
+
+   The keeper-side regression for [keeper_task_create] (#13981) lives in
+   [test_keeper_task_dispatch.ml:test_create_rejects_fourth_open_task_for_goal].
+   The 4 tests below cover the remaining 4 entrypoints. Three of them
+   currently invoke [Coord_task.add_task] without a [goal_id], so the
+   cap is by definition a no-op for them — the regression they pin is
+   that the [reject_if] hook is wired and that orphan tasks pass.
+   [masc_add_task] is the only entrypoint of the four that actually
+   carries a [goal_id] today, so it is the one that exercises the
+   rejection path end-to-end. *)
+
+(* RFC-0034.v2 Test 1: masc_add_task (Tool_task.handle_add_task) — the
+   only orchestrating entrypoint that already accepts goal_id. *)
+let () = test "rfc_0034_v2_masc_add_task_caps_per_goal" (fun () ->
+  let ctx = make_test_ctx () in
+  let goal, _ =
+    match Goal_store.upsert_goal ctx.config ~title:"RFC-0034 cap goal" () with
+    | Ok payload -> payload
+    | Error msg -> failwith msg
+  in
+  for i = 1 to 3 do
+    let success, msg =
+      Tool_task.handle_add_task ctx
+        (`Assoc
+          [
+            ("title", `String (Printf.sprintf "Goal task %d" i));
+            ("description", `String "desc");
+            ("priority", `Int 3);
+            ("goal_id", `String goal.id);
+          ])
+    in
+    if not success
+    then
+      failwith
+        (Printf.sprintf
+           "expected goal-bound add_task #%d to succeed, got: %s"
+           i
+           msg)
+  done;
+  let _success, message =
+    Tool_task.handle_add_task ctx
+      (`Assoc
+        [
+          ("title", `String "Fourth goal task — should be rejected");
+          ("description", `String "desc");
+          ("priority", `Int 3);
+          ("goal_id", `String goal.id);
+        ])
+  in
+  (* [Coord_task_create.add_task] returns the rejection as an
+     ["Error: <msg>"] string, mirroring the existing dedup-rejection
+     surface, so [handle_add_task] still returns [(true, "Error: ...")].
+     The cap is enforced at persistence time — pin both the message
+     content and the persisted backlog size. *)
+  if not (str_starts_with ~prefix:"Error:" message)
+  then
+    failwith
+      (Printf.sprintf
+         "expected fourth task to be rejected with an \"Error:\" message, got: %s"
+         message);
+  if not (str_contains message "goal_task_limit_exceeded")
+  then
+    failwith
+      (Printf.sprintf
+         "expected rejection message to mention goal_task_limit_exceeded, got: %s"
+         message);
+  let backlog = Coord.read_backlog ctx.config in
+  if List.length backlog.tasks <> 3
+  then
+    failwith
+      (Printf.sprintf
+         "expected exactly 3 persisted tasks (4th rejected), got %d"
+         (List.length backlog.tasks)))
+
+(* RFC-0034.v2 Test 2: Task_dispatch.add_task — orphan-only path today.
+   Pins that the [reject_if] guard is wired AND non-blocking for orphan
+   tasks even when the same goal is at the cap. *)
+let () = test "rfc_0034_v2_task_dispatch_orphan_bypasses_cap" (fun () ->
+  let ctx = make_test_ctx () in
+  let goal, _ =
+    match Goal_store.upsert_goal ctx.config ~title:"RFC-0034 dispatch goal" () with
+    | Ok payload -> payload
+    | Error msg -> failwith msg
+  in
+  for i = 1 to 3 do
+    ignore
+      (Coord_task.add_task
+         ~goal_id:goal.id
+         ctx.config
+         ~title:(Printf.sprintf "Goal-bound task %d" i)
+         ~priority:3
+         ~description:"desc")
+  done;
+  match
+    Task_dispatch.add_task ctx.config
+      ~title:"Orphan dispatch task"
+      ~priority:3
+      ~description:"unbound"
+  with
+  | Ok msg when str_starts_with ~prefix:"Added " msg -> ()
+  | Ok msg ->
+      failwith
+        (Printf.sprintf
+           "task_dispatch orphan path should add (no goal_id), got: %s"
+           msg)
+  | Error err ->
+      failwith
+        (Printf.sprintf
+           "task_dispatch orphan path returned Error: %s"
+           (Masc_error.to_string err)))
+
+(* RFC-0034.v2 Test 3: Tool_inline_dispatch_coord — verified through
+   direct Coord_task.add_task with the same [reject_if] hook the
+   inline dispatcher wires. Confirms the [rejection_for_add_task ?goal_id:None]
+   call shape compiles AND is non-blocking for orphan tasks. *)
+let () = test "rfc_0034_v2_inline_dispatch_orphan_bypasses_cap" (fun () ->
+  let ctx = make_test_ctx () in
+  let goal, _ =
+    match Goal_store.upsert_goal ctx.config ~title:"RFC-0034 inline goal" () with
+    | Ok payload -> payload
+    | Error msg -> failwith msg
+  in
+  for i = 1 to 3 do
+    ignore
+      (Coord_task.add_task
+         ~goal_id:goal.id
+         ctx.config
+         ~title:(Printf.sprintf "Pre-existing goal task %d" i)
+         ~priority:3
+         ~description:"desc")
+  done;
+  let result =
+    Coord_task.add_task
+      ~reject_if:(Coord_task_capacity.rejection_for_add_task ?goal_id:None)
+      ctx.config
+      ~title:"Inline-dispatched orphan task"
+      ~priority:3
+      ~description:""
+  in
+  if not (str_starts_with ~prefix:"Added " result)
+  then
+    failwith
+      (Printf.sprintf
+         "inline-dispatch orphan path should add, got: %s"
+         result))
+
+(* RFC-0034.v2 Test 4: operator_control task_inject — same shape as
+   inline dispatch. Pins that the orphan-task call site does not
+   regress to a rejection. *)
+let () = test "rfc_0034_v2_operator_task_inject_orphan_bypasses_cap" (fun () ->
+  let ctx = make_test_ctx () in
+  let goal, _ =
+    match Goal_store.upsert_goal ctx.config ~title:"RFC-0034 operator goal" () with
+    | Ok payload -> payload
+    | Error msg -> failwith msg
+  in
+  for i = 1 to 3 do
+    ignore
+      (Coord_task.add_task
+         ~goal_id:goal.id
+         ctx.config
+         ~title:(Printf.sprintf "Operator goal task %d" i)
+         ~priority:3
+         ~description:"desc")
+  done;
+  let result =
+    Coord.add_task
+      ~reject_if:(Coord_task_capacity.rejection_for_add_task ?goal_id:None)
+      ctx.config
+      ~title:"Operator-injected orphan"
+      ~priority:2
+      ~description:"Injected by operator control plane"
+  in
+  if not (str_starts_with ~prefix:"Added " result)
+  then
+    failwith
+      (Printf.sprintf
+         "operator task_inject orphan path should add, got: %s"
+         result))
+
+(* RFC-0034.v2 unit-level: capacity check helper on a goal-bound
+   backlog. Pins the [check] / [rejection_for_add_task] semantics that
+   all 4 entrypoints inherit. *)
+let () = test "rfc_0034_v2_capacity_check_returns_some_at_limit" (fun () ->
+  let ctx = make_test_ctx () in
+  let goal, _ =
+    match Goal_store.upsert_goal ctx.config ~title:"RFC-0034 unit goal" () with
+    | Ok payload -> payload
+    | Error msg -> failwith msg
+  in
+  for i = 1 to 3 do
+    ignore
+      (Coord_task.add_task
+         ~goal_id:goal.id
+         ctx.config
+         ~title:(Printf.sprintf "Unit-level goal task %d" i)
+         ~priority:3
+         ~description:"desc")
+  done;
+  let backlog = Coord.read_backlog ctx.config in
+  (match Coord_task_capacity.check ?goal_id:None backlog with
+   | None -> ()
+   | Some _ ->
+       failwith "orphan check (goal_id=None) should be a no-op");
+  (match Coord_task_capacity.check ~goal_id:goal.id backlog with
+   | Some err ->
+       assert (err.open_task_count = 3);
+       assert (err.limit = Coord_task_capacity.default_goal_open_limit);
+       assert (str_contains err.message "goal_task_limit_exceeded")
+   | None ->
+       failwith "expected capacity_error at the per-goal limit"))
+
 let () =
   Alcotest.run "Tool_task"
     [

@@ -50,68 +50,11 @@ let parse_task_contract_arg args =
   | _ -> Error "contract must be an object when provided"
 ;;
 
-let keeper_task_create_goal_open_limit = 3
-
-type goal_task_capacity_error = {
-  goal_id : string;
-  open_task_count : int;
-  limit : int;
-  message : string;
-}
-
-let open_task_count_for_goal (backlog : Masc_domain.backlog) ~goal_id =
-  List.fold_left
-    (fun count (task : Masc_domain.task) ->
-       if
-         (not (Masc_domain.task_status_is_terminal task.task_status))
-         && Convergence.task_matches_goal ~goal_id task
-       then count + 1
-       else count)
-    0
-    backlog.tasks
-;;
-
-let goal_task_capacity_error (backlog : Masc_domain.backlog) ~goal_id =
-  let open_task_count = open_task_count_for_goal backlog ~goal_id in
-  let limit = keeper_task_create_goal_open_limit in
-  if open_task_count < limit
-  then None
-  else
-    let message =
-      Printf.sprintf
-        "goal_task_limit_exceeded: goal_id=%s already has %d open linked tasks \
-         (limit=%d). ACTION: claim or finish existing tasks for this goal before \
-         creating more."
-        goal_id
-        open_task_count
-        limit
-    in
-    Some { goal_id; open_task_count; limit; message }
-;;
-
-let task_create_capacity_error_json error =
-  error_json
-    ~fields:
-      [
-        "ok", `Bool false;
-        "error_kind", `String "goal_task_limit_exceeded";
-        "goal_id", `String error.goal_id;
-        "open_task_count", `Int error.open_task_count;
-        "limit", `Int error.limit;
-        ( "action",
-          `String
-            "claim_or_finish_existing_goal_tasks_before_creating_more" );
-      ]
-    error.message
-;;
-
-let task_create_goal_capacity_rejection ?goal_id backlog =
-  match goal_id with
-  | None -> None
-  | Some goal_id ->
-    goal_task_capacity_error backlog ~goal_id
-    |> Option.map (fun error -> error.message)
-;;
+(* RFC-0034.v2: per-goal task creation cap moved to
+   [Coord_task_capacity] so all 5 task creation entrypoints share the
+   same guard. Pre-RFC-0034.v2, these helpers (and the constant
+   [keeper_task_create_goal_open_limit]) lived here as introduced by
+   #13981. *)
 
 let active_goal_scope_json ~(meta : keeper_meta) ?matched_goal_id
     ?excluded_count ?effective_mode ?effective_goal_ids ?fallback_reason () =
@@ -323,20 +266,17 @@ let handle_keeper_task_tool
            | Error message -> error_json message
            | Ok contract ->
               let capacity_error =
-                match goal_id with
-                | None -> None
-                | Some goal_id ->
-                  let backlog = Coord.read_backlog config in
-                  goal_task_capacity_error backlog ~goal_id
+                let backlog = Coord.read_backlog config in
+                Coord_task_capacity.check ?goal_id backlog
               in
               (match capacity_error with
-               | Some error -> task_create_capacity_error_json error
+               | Some error -> Coord_task_capacity.error_to_json_string error
                | None ->
               let result =
                 Coord_task.add_task
                   ?contract
                   ?goal_id
-                  ~reject_if:(task_create_goal_capacity_rejection ?goal_id)
+                  ~reject_if:(Coord_task_capacity.rejection_for_add_task ?goal_id)
                   config
                   ~title
                   ~priority

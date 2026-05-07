@@ -100,7 +100,14 @@ let handle_start (ctx : context) : tool_result option =
              "masc_start complete (project scope set + joined as %s). No task created — use masc_add_task to create one."
              agent_name)
       else begin
-        let add_result = Coord_task.add_task active_config ~title:task_title ~priority:3 ~description:"" in
+        (* RFC-0034.v2: per-goal cap guard. masc_start does not pass a
+           [goal_id], so the guard is a no-op for orphan tasks. Wired so
+           a future goal-aware variant inherits the cap automatically. *)
+        let add_result =
+          Coord_task.add_task
+            ~reject_if:(Coord_task_capacity.rejection_for_add_task ?goal_id:None)
+            active_config ~title:task_title ~priority:3 ~description:""
+        in
         (* Extract task ID from result like "Added task-001: title" *)
         let task_id =
           try

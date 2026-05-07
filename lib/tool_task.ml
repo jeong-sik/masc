@@ -481,8 +481,13 @@ let handle_add_task ctx args =
     match contract_result with
     | Error error -> (false, error)
     | Ok contract ->
+        (* RFC-0034.v2: per-goal cap via [reject_if]. Add_task surfaces a
+           rejection as "Error: <msg>" string, kept consistent with the
+           pre-existing dedup rejection path. With [goal_id = None] the
+           guard is a no-op. *)
         ( true,
           Coord.add_task ?contract ?goal_id
+            ~reject_if:(Coord_task_capacity.rejection_for_add_task ?goal_id)
             ~created_by:ctx.agent_name ctx.config ~title:trimmed_title
             ~priority ~description )
 

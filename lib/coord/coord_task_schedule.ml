@@ -404,7 +404,7 @@ let claim_next_r
   ensure_initialized config;
 
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-  with_file_lock config backlog_path (fun () ->
+  let claim_under_lock () =
     try
       match read_backlog_r config with
       | Error msg -> Claim_next_error msg
@@ -741,7 +741,10 @@ let claim_next_r
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e ->
       Claim_next_error (Printexc.to_string e)
-  )
+  in
+  match with_file_lock_r config backlog_path claim_under_lock with
+  | Ok result -> result
+  | Error err -> Claim_next_error (Masc_domain.masc_error_to_string err)
 
 (** Claim next highest priority unclaimed task (legacy string API). *)
 let claim_next config ~agent_name =

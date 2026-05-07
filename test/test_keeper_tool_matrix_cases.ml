@@ -240,6 +240,9 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
   | "keeper_board_get" ->
       `Assoc [ ("post_id", `String (Generic.ensure_board_post fixture.generic)) ]
   | "keeper_board_list" -> `Assoc [ ("limit", `Int 5) ]
+  | "keeper_board_curation_read" -> `Assoc []
+  | "keeper_board_curation_submit" ->
+      `Assoc [ ("rationale", `String "tool matrix curation") ]
   | "keeper_board_comment" ->
       `Assoc
         [
@@ -264,7 +267,7 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
           ("content", `String "matrix write\n");
           ("mode", `String "overwrite");
         ]
-  | "keeper_shell" -> `Assoc [ ("op", `String "git_status") ]
+  | "keeper_shell" -> `Assoc [ ("op", `String "pwd") ]
   | "keeper_bash" ->
       `Assoc [ ("cmd", `String "pwd"); ("timeout_sec", `Float 5.0) ]
   | "keeper_bash_output" ->
@@ -415,6 +418,9 @@ let extra_guard_fragments_for_name = function
   | "masc_get_metrics" -> [ "no metrics found" ]
   | "masc_library_promote" -> [ "no candidate matching" ]
   | "masc_portal_send" -> [ "no portal open" ]
+  | "masc_keeper_list" | "masc_keeper_msg" | "masc_keeper_msg_result"
+  | "masc_keeper_status" ->
+      [ "keeper management tool"; "use MCP client" ]
   | "masc_worktree_remove" -> [ "worktree not found" ]
   | _ -> []
 

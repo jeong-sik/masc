@@ -953,6 +953,26 @@ let test_pr_review_action_metric_observes_invalid_output_json () =
   check (float 0.001) "parse failure counted" (before +. 1.0)
     (hook_output_parse_failures "pr_review_action")
 
+let test_pr_review_action_metric_extracts_fenced_output_json () =
+  let before = hook_output_parse_failures "pr_review_action" in
+  let event =
+    pr_review_event
+      ~tool_name:"keeper_pr_review_comment"
+      ~input:(`Assoc [ ("number", `Int 71); ("event", `String "comment") ])
+      ~output_text:
+        "Review submitted.\n\
+         ```json\n\
+         {\"ok\":true,\"pr_number\":71,\"event\":\"APPROVE\",\"via\":\"docker\"}\n\
+         ```\n"
+      ()
+    |> require_pr_review_event "fenced output json"
+  in
+  check string "action from fenced output" "APPROVE" event.action;
+  check (option int) "pr number" (Some 71) event.pr_number;
+  check (option string) "route via" (Some "docker") event.route_via;
+  check (float 0.001) "parse failure not counted" before
+    (hook_output_parse_failures "pr_review_action")
+
 let test_pr_review_action_metric_extracts_keeper_shell_approve () =
   let event =
     pr_review_event
@@ -1010,6 +1030,39 @@ let test_pr_work_action_metric_observes_invalid_output_json () =
   check (list string) "actions fallback from input" [ "GIT_PUSH" ]
     (work_actions events);
   check (float 0.001) "parse failure counted" (before +. 1.0)
+    (hook_output_parse_failures "pr_work_action")
+
+let test_pr_work_action_metric_extracts_embedded_output_json () =
+  let before = hook_output_parse_failures "pr_work_action" in
+  let events =
+    pr_work_events
+      ~tool_name:"keeper_pr_create"
+      ~input:
+        (`Assoc
+          [
+            ("title", `String "proof");
+            ("head", `String "proof/embedded-json");
+          ])
+      ~output_text:
+        "Created draft PR successfully:\n\
+         {\"ok\":true,\"tool\":\"keeper_pr_create\",\"operation\":\"pr_create\",\
+         \"via\":\"brokered\",\"result\":{\"output\":\"https://github.com/acme/repo/pull/43\\n\"}}\n\
+         Done."
+      ()
+  in
+  check (list string) "pr create action" [ "PR_CREATE" ]
+    (work_actions events);
+  (match events with
+   | [ event ] ->
+       check string "source" "keeper_pr_create" event.work_source;
+       check (option string) "head ref" (Some "proof/embedded-json")
+         event.work_ref;
+       check (option string) "pr url"
+         (Some "https://github.com/acme/repo/pull/43")
+         event.pr_url;
+       check (option string) "route via" (Some "brokered") event.route_via
+   | _ -> failf "expected one keeper_pr_create event");
+  check (float 0.001) "parse failure not counted" before
     (hook_output_parse_failures "pr_work_action")
 
 let test_pr_work_action_metric_extracts_gh_pr_create () =
@@ -1279,6 +1332,8 @@ let () =
             test_pr_review_action_metric_extracts_reply
         ; test_case "observes invalid output JSON" `Quick
             test_pr_review_action_metric_observes_invalid_output_json
+        ; test_case "extracts fenced output JSON" `Quick
+            test_pr_review_action_metric_extracts_fenced_output_json
         ; test_case "extracts keeper_shell approve" `Quick
             test_pr_review_action_metric_extracts_keeper_shell_approve
         ] )
@@ -1287,6 +1342,8 @@ let () =
             test_pr_work_action_metric_extracts_masc_code_git_push
         ; test_case "observes invalid output JSON" `Quick
             test_pr_work_action_metric_observes_invalid_output_json
+        ; test_case "extracts embedded output JSON" `Quick
+            test_pr_work_action_metric_extracts_embedded_output_json
         ; test_case "extracts keeper_shell gh pr create" `Quick
             test_pr_work_action_metric_extracts_gh_pr_create
         ; test_case "extracts quoted output gh pr create" `Quick

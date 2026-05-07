@@ -76,6 +76,10 @@ DESIGN_DOMAIN_MARKERS = {
 PR_URL_RE = re.compile(
     r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]+"
 )
+PR_URL_NUMBER_RE = re.compile(
+    r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/([0-9]+)"
+)
+PR_NUMBER_TOKEN_RE = re.compile(r"\bPR#([0-9]+)\b", re.IGNORECASE)
 PR_CREATED_NUMBER_RE = re.compile(
     r"\b(?:created|opened|published)\s+(?:a\s+)?(?:github\s+)?"
     r"(?:draft\s+)?PR\s*#([0-9]+)\b",
@@ -379,6 +383,60 @@ def row_mentions_evidence_run_id(
     except (TypeError, ValueError):
         haystack = str(row)
     return evidence_run_id.lower() in haystack.lower()
+
+
+def pr_numbers_from_text(text: str) -> set[int]:
+    numbers: set[int] = set()
+    for match in PR_URL_NUMBER_RE.findall(text):
+        numbers.add(int(match))
+    for match in PR_NUMBER_TOKEN_RE.findall(text):
+        numbers.add(int(match))
+    return numbers
+
+
+def pr_numbers_from_row(row: dict[str, Any]) -> set[int]:
+    numbers: set[int] = set()
+
+    def add_number(value: Any) -> None:
+        if isinstance(value, bool):
+            return
+        if isinstance(value, int) and value > 0:
+            numbers.add(value)
+        elif isinstance(value, str) and value.strip().isdigit():
+            numbers.add(int(value.strip()))
+
+    def walk(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                if key in {"pr_number", "pull_request_number"}:
+                    add_number(nested)
+                elif key in {"pr_url", "pull_request_url", "url", "html_url"}:
+                    if isinstance(nested, str):
+                        numbers.update(pr_numbers_from_text(nested))
+                elif key in {"output", "body"} and isinstance(nested, str):
+                    numbers.update(pr_numbers_from_text(nested))
+                else:
+                    walk(nested)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+        elif isinstance(value, str):
+            numbers.update(pr_numbers_from_text(value))
+
+    walk(row)
+    return numbers
+
+
+def row_matches_evidence_run(
+    row: dict[str, Any],
+    evidence_run_id: str | None,
+    evidence_run_pr_numbers: set[int] | None,
+) -> bool:
+    if row_mentions_evidence_run_id(row, evidence_run_id):
+        return True
+    if not evidence_run_id or not evidence_run_pr_numbers:
+        return False
+    return bool(pr_numbers_from_row(row) & evidence_run_pr_numbers)
 
 
 def add_pr_refs_from_structured_output(
@@ -1012,12 +1070,44 @@ def global_tool_call_paths(base_path: Path) -> list[Path]:
     return [path for _, _, path in sorted(candidates, reverse=True)]
 
 
+def collect_evidence_run_pr_numbers(
+    base_path: Path,
+    evidence_run_id: str | None,
+) -> set[int]:
+    if not evidence_run_id:
+        return set()
+    numbers: set[int] = set()
+
+    for decisions in (base_path / ".masc" / "keepers").glob("*.decisions.jsonl*"):
+        if not decisions.is_file():
+            continue
+        for row in iter_jsonl(decisions):
+            if row_mentions_evidence_run_id(row, evidence_run_id):
+                numbers.update(pr_numbers_from_row(row))
+
+    metric_root = base_path / ".masc" / "keepers"
+    for metrics in metric_root.glob("*/pr-action-metrics/*/*.jsonl"):
+        if not metrics.is_file():
+            continue
+        for row in iter_jsonl(metrics):
+            if row_mentions_evidence_run_id(row, evidence_run_id):
+                numbers.update(pr_numbers_from_row(row))
+
+    for calls in global_tool_call_paths(base_path):
+        for row in iter_jsonl(calls):
+            if row_mentions_evidence_run_id(row, evidence_run_id):
+                numbers.update(pr_numbers_from_row(row))
+
+    return numbers
+
+
 def scan_keeper_evidence(
     base_path: Path,
     name: str,
     *,
     max_silence_hours: float | None = None,
     evidence_run_id: str | None = None,
+    evidence_run_pr_numbers: set[int] | None = None,
     now: float | None = None,
 ) -> tuple[float | None, set[str], set[str], set[str]]:
     latest_ts: float | None = None
@@ -1037,9 +1127,9 @@ def scan_keeper_evidence(
             if ts is not None:
                 latest_ts = ts if latest_ts is None else max(latest_ts, ts)
             tools.update(tools_from_decision(row))
-            if row_mentions_evidence_run_id(row, evidence_run_id):
-                row_evidence, row_docker_evidence = (
-                    pr_lifecycle_evidence_from_decision(row)
+            if row_matches_evidence_run(row, evidence_run_id, evidence_run_pr_numbers):
+                row_evidence, row_docker_evidence = pr_lifecycle_evidence_from_decision(
+                    row
                 )
                 pr_lifecycle_evidence.update(row_evidence)
                 docker_pr_lifecycle_evidence.update(row_docker_evidence)
@@ -1053,7 +1143,7 @@ def scan_keeper_evidence(
             if ts is not None:
                 latest_ts = ts if latest_ts is None else max(latest_ts, ts)
             tools.update(tools_from_action_metric(row))
-            if row_mentions_evidence_run_id(row, evidence_run_id):
+            if row_matches_evidence_run(row, evidence_run_id, evidence_run_pr_numbers):
                 row_evidence, row_docker_evidence = (
                     pr_lifecycle_evidence_from_action_metric(row)
                 )
@@ -1079,7 +1169,9 @@ def scan_keeper_evidence(
                 tool = row.get("tool")
                 if isinstance(tool, str):
                     tools.add(tool)
-                if row_mentions_evidence_run_id(row, evidence_run_id):
+                if row_matches_evidence_run(
+                    row, evidence_run_id, evidence_run_pr_numbers
+                ):
                     row_evidence, row_docker_evidence = (
                         pr_lifecycle_evidence_from_tool_call(row)
                     )
@@ -1111,6 +1203,7 @@ def audit_keeper(
     require_docker_git_push_evidence: bool,
     require_docker_pr_approve_evidence: bool,
     evidence_run_id: str | None,
+    evidence_run_pr_numbers: set[int] | None,
     forbidden_github_identities: set[str] | None = None,
 ) -> KeeperAudit:
     name = config_path.stem
@@ -1180,6 +1273,7 @@ def audit_keeper(
         name,
         max_silence_hours=max_silence_hours,
         evidence_run_id=evidence_run_id,
+        evidence_run_pr_numbers=evidence_run_pr_numbers,
     )
     pr_creation_evidence = scan_pr_creation_evidence(base_path, name)
     (
@@ -1326,6 +1420,9 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     config_paths = sorted(
         path for path in config_dir.glob("*.toml") if path.name != "base.toml"
     )
+    evidence_run_pr_numbers = collect_evidence_run_pr_numbers(
+        base_path, args.evidence_run_id
+    )
     keepers = [
         audit_keeper(
             base_path=base_path,
@@ -1360,6 +1457,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
                 or args.require_docker_pr_lifecycle_evidence
             ),
             evidence_run_id=args.evidence_run_id,
+            evidence_run_pr_numbers=evidence_run_pr_numbers,
             forbidden_github_identities=set(args.forbid_github_identity or []),
         )
         for path in config_paths
@@ -1374,9 +1472,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         keeper.github_identity for keeper in keepers if keeper.github_identity
     )
     github_account_counts = Counter(
-        keeper.github_account_login
-        for keeper in keepers
-        if keeper.github_account_login
+        keeper.github_account_login for keeper in keepers if keeper.github_account_login
     )
     requires_docker_approve = (
         args.require_docker_pr_approve_evidence
@@ -1440,6 +1536,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
                 args.require_docker_pr_lifecycle_evidence
             ),
             "evidence_run_id": args.evidence_run_id,
+            "evidence_run_pr_numbers": sorted(evidence_run_pr_numbers),
         },
         "fleet_failures": fleet_failures,
         "failed_keepers": [keeper.name for keeper in failed_keepers],

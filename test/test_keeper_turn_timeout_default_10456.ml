@@ -1,5 +1,5 @@
 (** #10456/#10716 — pin {!Env_config_keeper.KeeperKeepalive.turn_timeout_sec}
-    SSOT default (600) and the source literal in
+    SSOT default (600) and opt-in ceiling (900) source literals in
     {!Keeper_runtime_resolved.turn_timeout_sec_live}.
 
     Original pre-fix drift was:
@@ -10,7 +10,9 @@
     #10388 cascade ollama timeout walls.
 
     The audit hard-ceiling pass later lowered the SSOT default to 600 so the
-    keeper turn envelope cannot hide long OAS provider stalls.
+    keeper turn envelope cannot hide long OAS provider stalls. RFC-0012/0022
+    then lifted only the opt-in hard ceiling to 900 so local-LLM cascades can
+    opt in without changing the checked-in remote default.
 
     This test pins the SSOT, source-level literal, and generated env snapshot
     so silent re-divergence shows up as a test failure. *)
@@ -92,10 +94,11 @@ let test_resolver_upper_matches_ssot () =
   | None -> skip ()
   | Some p ->
       let body = read_file p in
-      (* The resolver must keep the same 600s hard ceiling as
-         Env_config_keeper.KeeperKeepalive.turn_timeout_sec. *)
-      let canonical_upper = "Float.min 600.0" in
-      check bool "canonical 600 upper bound in resolver" true
+      (* The resolver must keep the same 900s opt-in hard ceiling as
+         Env_config_keeper.KeeperKeepalive.timeout_hard_ceiling_sec while
+         preserving the 600s default checked above. *)
+      let canonical_upper = "Float.min 900.0" in
+      check bool "canonical 900 upper bound in resolver" true
         (contains body canonical_upper)
 
 let test_snapshot_default_matches_ssot () =
@@ -113,7 +116,7 @@ let test_snapshot_default_matches_ssot () =
         "entry ~default:\"600.0\" \"MASC_KEEPER_TURN_TIMEOUT_SEC\""
       in
       let canonical_range =
-        "Wall-clock timeout for a single unified turn (clamped 60-600 seconds)"
+        "Wall-clock timeout for a single unified turn (clamped 60-900 seconds)"
       in
       check bool "no stale 3600 default in env snapshot" false
         (contains body stale_default);
@@ -121,7 +124,7 @@ let test_snapshot_default_matches_ssot () =
         (contains body stale_range);
       check bool "canonical 600 default in env snapshot" true
         (contains body canonical_default);
-      check bool "canonical 60-600 range in env snapshot" true
+      check bool "canonical 60-900 range in env snapshot" true
         (contains body canonical_range)
 
 let () =
@@ -136,7 +139,7 @@ let () =
         [
           test_case "resolver default literal matches SSOT (no 1200 drift)"
             `Quick test_resolver_default_matches_ssot;
-          test_case "resolver upper bound literal matches SSOT (600)" `Quick
+          test_case "resolver upper bound literal matches SSOT (900)" `Quick
             test_resolver_upper_matches_ssot;
         ] );
       ( "snapshot-drift-gate",

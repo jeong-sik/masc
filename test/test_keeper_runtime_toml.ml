@@ -547,6 +547,59 @@ let test_resolved_cli_subprocess_idle_from_toml () =
   check (float 0.0001) "cli_subprocess_idle from toml"
     45.0 (Keeper_runtime_resolved.cli_subprocess_idle_sec ())
 
+(* Step 2 (PR #13861 / RFC-0012/0022): the hard ceiling for
+   turn_timeout_sec is lifted from 600 s to 900 s so cascades that
+   legitimately run 27 B local-LLM turns can opt in via env override.
+   The default stays at 600 s so existing remote cascades keep their
+   budget unchanged. *)
+
+let test_resolved_turn_timeout_default_stays_600s () =
+  with_clean_boot_overrides @@ fun () ->
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check (float 0.0001) "turn_timeout default 600s post-lift"
+    600.0 runtime.turn_timeout_sec.value
+
+let test_resolved_turn_timeout_accepts_900s_env_override () =
+  with_clean_boot_overrides @@ fun () ->
+  with_env "MASC_KEEPER_TURN_TIMEOUT_SEC" (Some "900") @@ fun () ->
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check (float 0.0001) "env override of 900s passes new ceiling"
+    900.0 runtime.turn_timeout_sec.value
+
+let test_resolved_turn_timeout_clamps_above_900s () =
+  with_clean_boot_overrides @@ fun () ->
+  with_env "MASC_KEEPER_TURN_TIMEOUT_SEC" (Some "1800") @@ fun () ->
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check (float 0.0001) "1800s env input clamps to new 900s ceiling"
+    900.0 runtime.turn_timeout_sec.value
+
+(* #10388 budget invariant guard: with the lifted 900s ceiling, even
+   the maximum permitted turn timeout must still leave room for an
+   admission wait (default 180s) plus a minimum useful run (30s). The
+   plan-level invariant is
+     [turn_timeout - oas_guard >= admission_wait + min_useful_run]
+   with [oas_guard = 30] (#10388 origin), [admission_wait = 180] and
+   [min_useful_run = 30]. The test fails if a future change shrinks
+   the ceiling below 240s (180 + 30 + 30) or expands the admission
+   wait default past the budget. *)
+let test_budget_invariant_at_minimum_turn_timeout () =
+  with_clean_boot_overrides @@ fun () ->
+  with_env "MASC_KEEPER_TURN_TIMEOUT_SEC" (Some "240") @@ fun () ->
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  let oas_guard = 30.0 in
+  let min_useful_run = 30.0 in
+  let admission_wait = runtime.admission_wait_timeout_sec.value in
+  let turn_timeout = runtime.turn_timeout_sec.value in
+  let budget_remaining =
+    turn_timeout -. oas_guard -. admission_wait -. min_useful_run
+  in
+  check bool "budget invariant holds at 240s lower bound"
+    true (budget_remaining >= 0.0)
+
 let () =
   run "keeper_runtime_toml"
     [ ( "resolve_overrides"
@@ -578,5 +631,9 @@ let () =
         ; test_case "cli subprocess idle from toml" `Quick test_resolved_cli_subprocess_idle_from_toml
         ; test_case "cli subprocess idle clamps to 10s floor" `Quick test_resolved_cli_subprocess_idle_clamps_low
         ; test_case "cli subprocess idle clamps to 600s ceiling" `Quick test_resolved_cli_subprocess_idle_clamps_high
+        ; test_case "turn_timeout default stays 600s post-lift" `Quick test_resolved_turn_timeout_default_stays_600s
+        ; test_case "turn_timeout accepts 900s env override" `Quick test_resolved_turn_timeout_accepts_900s_env_override
+        ; test_case "turn_timeout clamps above 900s ceiling" `Quick test_resolved_turn_timeout_clamps_above_900s
+        ; test_case "#10388 budget invariant holds at 240s minimum" `Quick test_budget_invariant_at_minimum_turn_timeout
         ] )
     ]

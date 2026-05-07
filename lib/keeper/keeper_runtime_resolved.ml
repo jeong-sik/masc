@@ -72,10 +72,12 @@ let autonomous_max_idle_turns_live () =
 
 let turn_timeout_sec_live () =
   (* SSOT: must match Env_config_keeper.KeeperKeepalive.turn_timeout_sec
-     (range [60, timeout_hard_ceiling_sec], default 600). Drift here was
-     the mathematical root of #10388 (1200 - 30 oas_guard = 1170s budget). *)
+     (range [60, timeout_hard_ceiling_sec=900], default 600). Drift here
+     was the mathematical root of #10388 (1200 - 30 oas_guard = 1170 s
+     budget). The 900 s ceiling was lifted from 600 in PR #13861 along
+     with the RFC-0012/0022 permission for per-cascade overrides. *)
   Float.max 60.0
-    (Float.min 600.0
+    (Float.min 900.0
        (get_float ~default:600.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
 
 let oas_timeout_default_sec = 300.0

@@ -883,6 +883,18 @@ let write_memory_bank config name lines =
   let path = Keeper_types.keeper_memory_bank_path config name in
   write_lines path lines
 
+let persistence_read_drop_total ~surface ~reason =
+  Masc_mcp.Prometheus.metric_value_or_zero
+    Masc_mcp.Prometheus.metric_persistence_read_drops
+    ~labels:[("surface", surface); ("reason", reason)]
+    ()
+
+let check_persistence_read_drop_delta ~surface ~reason ~before ~delta =
+  check (float 0.0001)
+    (Printf.sprintf "%s/%s read drops" surface reason)
+    (before +. float_of_int delta)
+    (persistence_read_drop_total ~surface ~reason)
+
 let memory_note ?horizon ?source ~kind ~text ~priority ~generation ~turn ~ts_unix () =
   let extra_fields =
     (match horizon with
@@ -1036,6 +1048,45 @@ let test_memory_search_bank_empty () =
     check bool "no_match is true" true no_match;
     let match_count = Yojson.Safe.Util.(json |> member "match_count" |> to_int) in
     check int "match_count is 0" 0 match_count)
+
+let test_memory_search_bank_counts_read_drops () =
+  let surface = "keeper_exec_memory_bank" in
+  let entry_reason = "entry_load_error" in
+  let invalid_reason = "invalid_payload" in
+  let before_entry =
+    persistence_read_drop_total ~surface ~reason:entry_reason
+  in
+  let before_invalid =
+    persistence_read_drop_total ~surface ~reason:invalid_reason
+  in
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir_r dir) (fun () ->
+    let config = make_test_room_config dir in
+    let keeper_name = "drop-metric-keeper" in
+    let meta = keeper_meta ~name:keeper_name ~mention_targets:[keeper_name] () in
+    write_memory_bank config keeper_name [
+      memory_note ~kind:"decision" ~text:"needle survives malformed rows"
+        ~priority:80 ~generation:1 ~turn:1 ~ts_unix:1000.0 ();
+      "{not-json";
+      "[]";
+      {|{"kind":"decision","priority":1}|};
+    ];
+    let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
+    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work ~exec_cache:None
+      ~name:"keeper_memory_search"
+      ~input:(`Assoc [ ("query", `String "needle") ])
+      () in
+    let json = Yojson.Safe.from_string result in
+    let match_count = Yojson.Safe.Util.(json |> member "match_count" |> to_int) in
+    let total_candidates =
+      Yojson.Safe.Util.(json |> member "total_candidates" |> to_int)
+    in
+    check int "valid memory row still matches" 1 match_count;
+    check int "only valid rows become candidates" 1 total_candidates);
+  check_persistence_read_drop_delta ~surface ~reason:entry_reason
+    ~before:before_entry ~delta:1;
+  check_persistence_read_drop_delta ~surface ~reason:invalid_reason
+    ~before:before_invalid ~delta:2
 
 let test_memory_search_decision_log_failure_is_observable () =
   let dir = test_tmpdir () in
@@ -1559,6 +1610,8 @@ let () =
             test_memory_search_bank_prefers_long_term_over_stale_short_term;
           test_case "empty bank returns no_match" `Quick
             test_memory_search_bank_empty;
+          test_case "malformed bank rows count read drops" `Quick
+            test_memory_search_bank_counts_read_drops;
           test_case "decision log append failure is observable" `Quick
             test_memory_search_decision_log_failure_is_observable;
           test_case "no matching query returns no_match" `Quick

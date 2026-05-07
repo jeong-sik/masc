@@ -1,6 +1,18 @@
 # Changelog
 
 
+## [0.19.18] - 2026-05-07
+
+### Added
+- `lib/cognitive_disclosure.{ml,mli}`: backend OCaml mirror of the dashboard `CognitiveDisclosure*` types (`dashboard/src/components/common/cognitive-disclosure.ts`). Master Report Dim01 P0 #1 - 3-tier cognitive model (L1 Perceive / L2 Comprehend / L3 Project). Schema for an emit stream of disclosure items + a `summarize` invariant that classifies the stream as `complete` only when every level has at least one item. JSON codec uses `defaultOpen` (camelCase) and `byLevel` / `openDefaultLevel` to match the dashboard wire format. Pure OCaml. RFC-0035 PR-8.
+- `test/test_cognitive_disclosure.ml`: 16 alcotest cases covering level round-trip, dashboard string-match invariant, `level_index/label/caption` mapping, `summarize` empty/single-level/all-levels/first-defaultOpen, `items_at_level` order preservation, item JSON round-trip with all 6 fields, optional-fields-absent-when-None, decode rejects missing required and unknown level, summary wire-format substring contract, well-formed accepts/rejects.
+
+### Boundary
+- This module owns level taxonomy, item record, summarize function, and JSON wire format. It does NOT own dashboard rendering or label/caption strings (label/caption helpers exist for telemetry parity but are not the SSOT). Same boundary as RFC-0035 PR-7 cognitive_mode.
+
+### Changed
+- `docs/rfc/RFC-0035-cognitive-ide-roadmap.md`: PR-stack table extended - PR-8 (cognitive_disclosure, Dim01 P0 #1 backend) marked in-flight.
+
 ## [0.19.17] - 2026-05-07
 
 ### Added
@@ -31,7 +43,6 @@
 
 ### Changed
 - `docs/rfc/RFC-0035-cognitive-ide-roadmap.md`: PR-stack table marks PR-5 in-flight (this PR). PR-4 still in-flight pending merge.
-
 ## [0.19.14] - 2026-05-07
 
 ### Added

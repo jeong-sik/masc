@@ -10,6 +10,8 @@ RUN sudo apt-get update \
 
 RUN opam exec -- bash -lc "scripts/opam-pin-external-deps.sh && opam install . --deps-only -y && dune build @install"
 
+# debian:12-slim for worker — single-binary, lighter base sufficient.
+# Main Dockerfile uses ubuntu:24.04 for broader runtime libs (full server).
 FROM debian:12-slim AS runtime
 
 USER root

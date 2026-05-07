@@ -53,6 +53,9 @@ val persist_error_count : unit -> int
     swallowed during JSONL append / rotate; consumed by the
     operator dashboard for at-a-glance health. *)
 
+val record_persist_error : where:string -> string -> unit
+(** Record and log a board persistence failure. *)
+
 (** {1 Configuration} *)
 
 val flush_interval_sec : float

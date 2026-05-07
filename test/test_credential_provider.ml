@@ -12,9 +12,10 @@
     1. [Credential_provider.pp_error] formats every variant.  Mostly
        a regression guard: if a future PR adds a fifth error case
        and forgets [pp_error], the [exhaustive] assertion catches it.
-    2. [Host_config_provider.For_testing.mount_if_present] returns
-       [[]] for empty / missing host paths and a single-element
-       [ro_mount] when the path exists.
+    2. [Host_config_provider.For_testing.compose_ro_mounts_result]
+       fails closed when the selected GH config mount is empty/missing.
+       [mount_if_present] stays a pure optional-mount helper for
+       sibling gitconfig/ssh paths.
     3. [For_testing.compose_env] emits only container-local path/env
        keys for the selected identity bundle plus non-interactive git
        guards.  Ambient operator GitHub credentials stay outside this
@@ -27,6 +28,7 @@ open Alcotest
 
 module CP = Masc_mcp.Credential_provider
 module HCP = Masc_mcp.Host_config_provider
+module KGE = Masc_mcp.Keeper_gh_env
 open Repo_manager_types
 
 let mkdir_p path =
@@ -135,6 +137,16 @@ let make_repo ~id ~credential_id : repository =
     updated_at = Int64.zero;
   }
 
+let make_keeper_binding ~bundle_root ~gh_config_dir : KGE.keeper_binding =
+  {
+    KGE.github_identity = Some "test-gh";
+    effective_github_identity = "test-gh";
+    credential_scope = KGE.Keeper_identity;
+    git_identity_mode = "github_identity";
+    bundle_root;
+    gh_config_dir;
+  }
+
 (* --- 1. pp_error covers every variant --- *)
 
 let test_pp_error_all_variants () =
@@ -156,37 +168,78 @@ let test_pp_error_all_variants () =
          && String.sub rendered 0 (String.length prefix) = prefix))
     cases
 
-(* --- 2. mount_if_present skip rules --- *)
+(* --- 2. required GH mount fail-closed rules --- *)
 
-(* β7 fail-closed: [resolve] returns Error when ALL credential host paths
-   are empty or missing.  [resolve] itself requires a Coord.config, so
-   unit-testing it directly needs the integration test suite
-   ([test_keeper_shell_docker_route]).  What we can pin here is the
-   precondition: three mount_if_present calls with empty/missing hosts
-   produce an empty mount list, and the error format is correct. *)
-let test_fail_closed_all_credential_paths_empty () =
-  let gh_creds = "" and gitconfig = "" and ssh_dir = "" in
-  let ro_mounts =
-    HCP.For_testing.mount_if_present ~host:gh_creds
-      ~container:"/tmp/keeper-creds/.config/gh"
-    @ HCP.For_testing.mount_if_present ~host:gitconfig
-        ~container:"/tmp/keeper-creds/.gitconfig"
-    @ HCP.For_testing.mount_if_present ~host:ssh_dir
-        ~container:"/tmp/keeper-creds/.ssh"
+let test_required_gh_mount_empty_path_fails_closed () =
+  let kb = make_keeper_binding ~bundle_root:"" ~gh_config_dir:"" in
+  match HCP.For_testing.compose_ro_mounts_result kb with
+  | Ok mounts ->
+      failf "empty required gh_config_dir should fail, got %d mounts"
+        (List.length mounts)
+  | Error reason ->
+      check bool "mentions required mount" true
+        (try
+           ignore
+             (Str.search_forward
+                (Str.regexp_string "required credential mount gh_creds")
+                reason 0);
+           true
+         with Not_found -> false);
+      check bool "mentions empty host path" true
+        (try
+           ignore
+             (Str.search_forward (Str.regexp_string "empty host path")
+                reason 0);
+           true
+         with Not_found -> false)
+
+let test_required_gh_mount_missing_path_fails_closed () =
+  let missing_path =
+    Filename.concat (Filename.get_temp_dir_name ())
+      "nonexistent-host-path-rfc0008-pr1"
   in
-  check int "all-empty paths -> empty mounts" 0 (List.length ro_mounts);
-  let err =
-    CP.Missing_bundle
-      { identity = "test-keeper"; path = "all credential host paths empty or missing" }
+  let kb =
+    make_keeper_binding ~bundle_root:(Filename.dirname missing_path)
+      ~gh_config_dir:missing_path
   in
-  let rendered = CP.pp_error err in
-  check bool "error rendered with identity"
-    true
-    (String.length rendered > 0);
-  check bool "error mentions credential paths"
-    true
-    (try ignore (Str.search_forward (Str.regexp "credential") rendered 0); true
-     with Not_found -> false)
+  match HCP.For_testing.compose_ro_mounts_result kb with
+  | Ok mounts ->
+      failf "missing required gh_config_dir should fail, got %d mounts"
+        (List.length mounts)
+  | Error reason ->
+      check bool "mentions missing host path" true
+        (try
+           ignore
+             (Str.search_forward (Str.regexp_string "host path is missing")
+                reason 0);
+           true
+         with Not_found -> false);
+      check bool "does not leak raw host path" false
+        (try
+           ignore (Str.search_forward (Str.regexp_string missing_path) reason 0);
+           true
+         with Not_found -> false)
+
+let test_required_gh_mount_allows_absent_optional_siblings () =
+  with_temp_base_path (fun base_path ->
+      let bundle_root =
+        Filename.concat base_path ".masc/github-identities/test-gh"
+      in
+      let gh_config_dir = Filename.concat bundle_root "gh" in
+      mkdir_p gh_config_dir;
+      let kb = make_keeper_binding ~bundle_root ~gh_config_dir in
+      match HCP.For_testing.compose_ro_mounts_result kb with
+      | Error reason ->
+          failf "existing required gh_config_dir should mount: %s" reason
+      | Ok mounts ->
+          check int "only required gh mount" 1 (List.length mounts);
+          match mounts with
+          | [ mount ] ->
+              check string "host preserved" gh_config_dir mount.CP.host;
+              check string "container"
+                (Filename.concat HCP.cred_root ".config/gh")
+                mount.CP.container
+          | _ -> fail "expected exactly one mount")
 
 let test_mount_if_present_empty_host () =
   let r = HCP.For_testing.mount_if_present ~host:"" ~container:"/x" in
@@ -610,8 +663,12 @@ let () =
         ( "errors",
         [
           test_case "pp_error covers all variants" `Quick test_pp_error_all_variants;
-          test_case "fail-closed: all-empty paths produce Missing_bundle" `Quick
-            test_fail_closed_all_credential_paths_empty;
+          test_case "empty required gh mount fails closed" `Quick
+            test_required_gh_mount_empty_path_fails_closed;
+          test_case "missing required gh mount fails closed" `Quick
+            test_required_gh_mount_missing_path_fails_closed;
+          test_case "absent optional siblings are allowed" `Quick
+            test_required_gh_mount_allows_absent_optional_siblings;
         ] );
       ( "mount_if_present",
         [

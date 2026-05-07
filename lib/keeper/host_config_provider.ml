@@ -9,20 +9,16 @@ let mount_if_present ~host ~container : Credential_provider.ro_mount list =
   else if not (Sys.file_exists host) then []
   else [ { host; container } ]
 
-(* ── Skipped credential mount warn dedup ───────────────────────
+(* ── Skipped credential mount warnings ─────────────────────────
 
    [mount_if_present] silently drops mounts whose host path is empty
-   or missing.  For the selected GH config bundle this would make a
-   keeper git/gh dispatch fail later with an opaque CLI error, so the
-   composition layer emits a single diagnostic and [resolve] fail-closes
-   when no credential mount remains.
+   or missing.  The selected GH config bundle is a required credential
+   mount, so the composition layer reports that absence as an explicit
+   error before docker dispatch.
 
-   Fires at [compose_ro_mounts] (one observation point per keeper
+   Fires at [compose_ro_mounts_result] (one observation point per keeper
    sandbox launch), not inside [mount_if_present] which is exposed
    via [For_testing] and must stay pure. *)
-let mount_skip_warn_emitted : (string, unit) Hashtbl.t = Hashtbl.create 16
-let mount_skip_warn_mu = Eio.Mutex.create ()
-
 type mount_attempt = {
   label : string;
   host : string;
@@ -45,47 +41,36 @@ let warn_mount_skips_if_any ~keeper_name (attempts : mount_attempt list) =
   in
   if skipped = [] then ()
   else begin
-    let should_emit =
-      Eio.Mutex.use_rw ~protect:true mount_skip_warn_mu (fun () ->
-        if Hashtbl.mem mount_skip_warn_emitted keeper_name then false
-        else begin
-          Hashtbl.add mount_skip_warn_emitted keeper_name ();
-          true
-        end)
-    in
-    if should_emit then begin
-      List.iter
-        (fun a ->
-          let reason =
-            match a.status with
-            | `Empty -> "empty"
-            | `Not_found -> "not_found"
-            | `Mounted -> "mounted"
-          in
-          Prometheus.inc_counter
-            "masc_keeper_credential_mount_skipped_total"
-            ~labels:[ ("keeper", keeper_name); ("mount", a.label);
-                      ("reason", reason) ]
-            ())
-        skipped;
-      let pp_skip a =
-        let r = match a.status with
+    List.iter
+      (fun a ->
+        let reason =
+          match a.status with
           | `Empty -> "empty"
           | `Not_found -> "not_found"
           | `Mounted -> "mounted"
         in
-        Printf.sprintf "%s=%s(%s)" a.label
-          (if a.host = "" then "<empty>" else a.host) r
+        Prometheus.inc_counter
+          "masc_keeper_credential_mount_skipped_total"
+          ~labels:[ ("keeper", keeper_name); ("mount", a.label);
+                    ("reason", reason) ]
+          ())
+      skipped;
+    let pp_skip a =
+      let r = match a.status with
+        | `Empty -> "empty"
+        | `Not_found -> "not_found"
+        | `Mounted -> "mounted"
       in
-      Log.Keeper.warn
-        "%s: sandbox credential mount(s) skipped — keeper inside docker \
-         will be missing the corresponding host credential.  Skipped: \
-         [%s].  Resolution: install the selected root/keeper GitHub \
-         identity bundle under $base_path/.masc/github-identities.  See \
-         [host_config_provider.ml compose_ro_mounts]."
-        keeper_name
-        (String.concat "; " (List.map pp_skip skipped))
-    end
+      Printf.sprintf "%s(%s)" a.label r
+    in
+    Log.Keeper.warn
+      "%s: sandbox credential mount(s) skipped; keeper docker dispatch \
+       will fail before credentials are projected. Skipped: [%s]. \
+       Resolution: materialize the selected root/keeper GitHub identity \
+       bundle under $base_path/.masc/github-identities. See \
+       [host_config_provider.ml compose_ro_mounts_result]."
+      keeper_name
+      (String.concat "; " (List.map pp_skip skipped))
   end
 
 (* Env composition for the selected identity bundle inside the docker
@@ -117,7 +102,22 @@ let compose_env ?ssh_key_container ~git_author_name ~git_author_email () =
   @ ssh_env
   @ Env_git_noninteractive.env
 
-let compose_ro_mounts ?keeper_name (kb : Keeper_gh_env.keeper_binding) =
+let required_mount_result (attempt : mount_attempt) ~container =
+  match attempt.status with
+  | `Mounted -> Ok Credential_provider.{ host = attempt.host; container }
+  | `Empty ->
+      Error
+        (Printf.sprintf
+           "required credential mount %s has an empty host path"
+           attempt.label)
+  | `Not_found ->
+      Error
+        (Printf.sprintf
+           "required credential mount %s host path is missing"
+           attempt.label)
+
+let compose_ro_mounts_result ?keeper_name
+    (kb : Keeper_gh_env.keeper_binding) =
   let gh_creds = kb.gh_config_dir in
   let identity_gitconfig = Filename.concat kb.bundle_root "gitconfig" in
   let identity_ssh_dir = Filename.concat kb.bundle_root "ssh" in
@@ -129,18 +129,23 @@ let compose_ro_mounts ?keeper_name (kb : Keeper_gh_env.keeper_binding) =
       identity_ssh_dir
     else ""
   in
-  let attempts = [
-    classify_mount_attempt ~label:"gh_creds" ~host:gh_creds;
-  ] in
+  let gh_attempt = classify_mount_attempt ~label:"gh_creds" ~host:gh_creds in
+  let attempts = [ gh_attempt ] in
   Option.iter
     (fun name -> warn_mount_skips_if_any ~keeper_name:name attempts)
     keeper_name;
-  mount_if_present ~host:gh_creds
-    ~container:(Filename.concat cred_root ".config/gh")
-  @ mount_if_present ~host:gitconfig
-      ~container:(Filename.concat cred_root ".gitconfig")
-  @ mount_if_present ~host:ssh_dir
-      ~container:(Filename.concat cred_root ".ssh")
+  match
+    required_mount_result gh_attempt
+      ~container:(Filename.concat cred_root ".config/gh")
+  with
+  | Error _ as err -> err
+  | Ok gh_mount ->
+      Ok
+        (gh_mount
+         :: (mount_if_present ~host:gitconfig
+               ~container:(Filename.concat cred_root ".gitconfig")
+            @ mount_if_present ~host:ssh_dir
+                ~container:(Filename.concat cred_root ".ssh")))
 
 let resolve_git_identity (kb : Keeper_gh_env.keeper_binding) ~keeper_name =
   match kb.github_identity, kb.git_identity_mode with
@@ -168,7 +173,7 @@ let metadata_of_binding (kb : Keeper_gh_env.keeper_binding) =
    (#12304).  When a keeper has a [Keeper_repo_mapping] entry that
    resolves to exactly one [Credential_store] credential we synthesise
    a [Keeper_gh_env.keeper_binding] from that credential and reuse the
-   existing [compose_env]/[compose_ro_mounts] flow verbatim, preserving
+   existing [compose_env]/[compose_ro_mounts_result] flow verbatim, preserving
    every fail-closed semantics and warning the legacy path already
    carries.  Keepers with no mapping fall through to [legacy_resolve]
    exactly as before.
@@ -195,31 +200,23 @@ let bind_from_keeper_binding ?ssh_key_path ~keeper_name
   let env =
     compose_env ?ssh_key_container ~git_author_name ~git_author_email ()
   in
-  let ro_mounts =
-    compose_ro_mounts ~keeper_name kb
-    @
-    match ssh_key_path with
-    | None -> []
-    | Some host ->
-        [
-          Credential_provider.
-            { host; container = explicit_ssh_key_container_path };
-        ]
-  in
-  (* β7 fail-closed: resolve is called only when git_creds_enabled
-     (caller at keeper_shell_docker.ml:398-400).  If ALL credential
-     host paths are empty or missing, ro_mounts will be [].  Returning
-     Ok with empty mounts lets the keeper start in Docker with no
-     credential files — gh/git commands then fail with confusing 401
-     or "permission denied" errors.  Return Error so the caller
-     reports the real cause at sandbox creation time. *)
-  if ro_mounts = [] then
-    Error
-      (Credential_provider.Missing_bundle
-         { identity = keeper_name
-         ; path = "all credential host paths empty or missing"
-         })
-  else
+  match compose_ro_mounts_result ~keeper_name kb with
+  | Error reason ->
+      Error
+        (Credential_provider.Missing_bundle
+           { identity = keeper_name; path = reason })
+  | Ok bundle_mounts ->
+    let ro_mounts =
+      bundle_mounts
+      @
+      match ssh_key_path with
+      | None -> []
+      | Some host ->
+          [
+            Credential_provider.
+              { host; container = explicit_ssh_key_container_path };
+          ]
+    in
     (* #12685: credential preflight — verify the bundle is actually
        materialized before handing it to the sandbox.  Directory
        presence alone is insufficient: a stale or corrupt hosts.yml
@@ -278,9 +275,8 @@ let legacy_resolve ~config ~keeper_name =
    matches the existing host bundle layout
    (<base>/.masc/github-identities/<id>/gh) but tolerates operator-set
    custom paths — sibling files (gitconfig, ssh) that happen to live next
-   to [gh_config_dir] are picked up by [compose_ro_mounts] via
-   [mount_if_present]; absent siblings are silently skipped, just as in
-   the legacy path. *)
+   to [gh_config_dir] are picked up by [compose_ro_mounts_result] via
+   [mount_if_present]; absent siblings are optional. *)
 let binding_of_credential (cred : Repo_manager_types.credential)
     : (Keeper_gh_env.keeper_binding, string) result =
   match cred.gh_config_dir with
@@ -460,4 +456,5 @@ module For_testing = struct
     compose_env ?ssh_key_container ~git_author_name ~git_author_email ()
 
   let mount_if_present = mount_if_present
+  let compose_ro_mounts_result = compose_ro_mounts_result
 end

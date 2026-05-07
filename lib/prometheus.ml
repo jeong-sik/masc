@@ -2894,7 +2894,7 @@ let to_prometheus_text () =
     else
     match ms with
     | [] -> ()
-    | _ :: _ ->
+    | (head_metric :: _) as ms ->
       (* Pick HELP deterministically from the unlabeled parent row that
          [register_histogram] created at startup; without this, the
          exported HELP becomes nondeterministically either the real
@@ -2919,9 +2919,8 @@ let to_prometheus_text () =
            | Some m -> m.help
            | None -> name)
       in
-      let m = List.hd ms in
       Printf.bprintf buf "# HELP %s %s\n" name chosen_help;
-      (match m.metric_type with
+      (match head_metric.metric_type with
        | Histogram ->
          (* No bucket distribution is tracked, so emit as summary
             (sum + count) which is the closest valid Prometheus type. *)
@@ -2942,7 +2941,8 @@ let to_prometheus_text () =
          ) ms
        | _ ->
          Buffer.add_string buf
-           (Printf.sprintf "# TYPE %s %s\n" name (type_to_string m.metric_type));
+           (Printf.sprintf "# TYPE %s %s\n" name
+              (type_to_string head_metric.metric_type));
          List.iter (fun (metric : metric) ->
            Printf.bprintf buf "%s%s %g\n"
              metric.name (labels_to_string metric.labels) metric.value

@@ -1330,7 +1330,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             },
         )
 
-    def test_scan_keeper_web_search_evidence_filters_keeper_and_run_id(self):
+    def test_scan_keeper_web_search_evidence_filters_keeper_not_run_id(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             calls_dir = root / ".masc" / "tool_calls" / "2026-05"
@@ -1375,9 +1375,13 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             evidence,
             {
                 "web_search:masc_web_search:"
+                "query=keeper proof old-run:"
+                "ts=80:"
+                "source=06.jsonl",
+                "web_search:masc_web_search:"
                 "query=keeper proof current-run:"
                 "ts=90:"
-                "source=06.jsonl"
+                "source=06.jsonl",
             },
         )
 

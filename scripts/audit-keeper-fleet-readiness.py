@@ -1361,6 +1361,9 @@ def scan_keeper_web_search_evidence(
     evidence_run_id: str | None = None,
     now: float | None = None,
 ) -> tuple[float | None, set[str]]:
+    # ``evidence_run_id`` scopes PR lifecycle proof only. Web search proof is a
+    # separate behavioral signal and should remain visible when a lifecycle
+    # reprobe asks for fresh PR evidence.
     latest_ts: float | None = None
     evidence: set[str] = set()
     min_ts: float | None = None
@@ -1382,8 +1385,6 @@ def scan_keeper_web_search_evidence(
             if not fresh_enough(row):
                 continue
             observe_ts(row)
-            if not row_mentions_evidence_run_id(row, evidence_run_id):
-                continue
             evidence.update(web_search_evidence_from_decision(row, str(decisions)))
 
     for calls in global_tool_call_paths(base_path):
@@ -1393,8 +1394,6 @@ def scan_keeper_web_search_evidence(
             if not fresh_enough(row):
                 continue
             observe_ts(row)
-            if not row_mentions_evidence_run_id(row, evidence_run_id):
-                continue
             evidence.update(web_search_evidence_from_tool_call(row, str(calls)))
 
     return latest_ts, evidence

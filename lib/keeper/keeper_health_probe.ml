@@ -68,7 +68,10 @@ let run_once ~base_path =
     results
 
 let rec probe_loop ~base_path ~interval_sec () =
-  run_once ~base_path;
+  (* Cancel-aware: Safe_ops.protect re-raises Eio.Cancel.Cancelled and swallows
+     other exceptions so a transient registry I/O failure cannot kill the fiber
+     and freeze [is_healthy] at [false] forever. *)
+  Safe_ops.protect ~default:() (fun () -> run_once ~base_path);
   Eio_unix.sleep interval_sec;
   probe_loop ~base_path ~interval_sec ()
 

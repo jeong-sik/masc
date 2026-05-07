@@ -35,8 +35,10 @@ type world_observation = {
           processed. Mirrors the count rendered after
           ["### Board Activity"]. *)
   has_discovered_work_section : bool;
-      (** True iff the prompt build emitted a
-          ["## Discovered Work (auto, Ns interval)"] section. *)
+      (** True iff the prompt carries concrete discovered-work payload that
+          should satisfy the weakest actionable-signal tier. A timer-only
+          work-discovery nudge is intentionally excluded; concrete tasks,
+          board activity, and worktree deltas have their own signals. *)
 }
 
 (** Project the full keeper heartbeat observation into the compact contract

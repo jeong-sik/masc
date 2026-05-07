@@ -111,6 +111,7 @@ let turn_affordance_to_string = function
   | Inspect_worktree_delta -> "inspect_worktree_delta"
 
 let should_tool_gate_affordance = function
+  | Work_discovery -> false
   | Board_curation
   | Board_post_or_comment
   | Message_sweep
@@ -118,7 +119,6 @@ let should_tool_gate_affordance = function
   | Task_claim
   | Task_audit
   | Task_verify
-  | Work_discovery
   | Inspect_worktree_delta -> true
 
 let turn_affordances_require_tool_gate turn_affordances =
@@ -131,8 +131,10 @@ let turn_affordances_require_tool_gate turn_affordances =
 (* Affordance -> minimum viable tools that can satisfy that affordance.
    The list is intentionally narrow ("at least one of these is enough").
    Keepers without any matching tool cannot satisfy a [Require_tool_use]
-   contract for that affordance and must be allowed to respond with
-   text instead. *)
+   contract for that affordance and must be allowed to respond with text
+   instead. [Work_discovery] remains listed for routing/search guidance, but it
+   does not hard-gate by itself; the concrete signals inside a discovery turn
+   (claimable tasks, board activity, worktree delta) own the strict contract. *)
 let tools_for_gated_affordance = function
   | Board_curation -> [ "keeper_board_curation_submit" ]
   | Board_post_or_comment ->
@@ -345,6 +347,13 @@ let preferred_tool_choice_for_required_tool_names
     |> Keeper_types.dedupe_keep_order
   in
   match visible_required with
+  | [ name ] when
+      not (Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name) ->
+    (* Passive/read-only tools do not suffer the mutating-tool raw-name
+       satisfaction ambiguity described below. When an operator explicitly
+       requires one passive tool, exact tool_choice keeps the model from
+       satisfying the turn with an unrelated write. *)
+    Agent_sdk.Types.Tool name
   | _ :: _ ->
     (* Use the provider-level "some tool is required" contract here, even
        for a single explicit required tool. Runtime MCP transports may return

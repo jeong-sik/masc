@@ -275,6 +275,28 @@ let sanitize_dashboard_actor_name raw =
     value;
   Buffer.contents buf
 
+let dashboard_actor_fallback_warn_seen : (string, float) Hashtbl.t =
+  Hashtbl.create 32
+
+let dashboard_actor_fallback_warn_seen_mutex = Mutex.create ()
+
+let dashboard_actor_fallback_warn_restate_sec = 3600.0
+
+let dashboard_actor_fallback_should_warn ~key =
+  let now = Unix.gettimeofday () in
+  Mutex.lock dashboard_actor_fallback_warn_seen_mutex;
+  Fun.protect
+    ~finally:(fun () -> Mutex.unlock dashboard_actor_fallback_warn_seen_mutex)
+    (fun () ->
+      let should_warn =
+        match Hashtbl.find_opt dashboard_actor_fallback_warn_seen key with
+        | None -> true
+        | Some last -> now -. last >= dashboard_actor_fallback_warn_restate_sec
+      in
+      if should_warn then
+        Hashtbl.replace dashboard_actor_fallback_warn_seen key now;
+      should_warn)
+
 let dashboard_actor_for_request ~base_path request =
   match auth_token_from_request request with
   | Some token -> (
@@ -295,11 +317,27 @@ let dashboard_actor_for_request ~base_path request =
           (* PR-I: surface the silent fallback. Token did not resolve to any
              agent, so we drop to the request actor hint (header / query
              param), masking identity drift in the HTTP transport. *)
-          Log.Auth.warn
-            "[silent:dashboard_actor_fallback] outcome=none token_hash_prefix=%s \
-             — bearer token resolved to no agent, falling back to request \
-             actor hint"
-            token_hash_prefix;
+          let hint =
+            match request_actor_hint request with
+            | Some s -> s
+            | None -> "<none>"
+          in
+          let log_key =
+            String.concat "|"
+              [ "none"; token_hash_prefix; hint ]
+          in
+          if dashboard_actor_fallback_should_warn ~key:log_key then
+            Log.Auth.warn
+              "[silent:dashboard_actor_fallback] outcome=none \
+               token_hash_prefix=%s actor_hint=%s — bearer token resolved \
+               to no agent, falling back to request actor hint; repeated \
+               identical fallbacks demoted to DEBUG for %.0fs"
+              token_hash_prefix hint dashboard_actor_fallback_warn_restate_sec
+          else
+            Log.Auth.debug
+              "[silent:dashboard_actor_fallback] repeated outcome=none \
+               token_hash_prefix=%s actor_hint=%s"
+              token_hash_prefix hint;
           Prometheus.inc_counter
             Prometheus.metric_silent_dashboard_actor_fallback
             ~labels:[ ("outcome", "none") ]
@@ -337,11 +375,23 @@ let dashboard_actor_for_request ~base_path request =
                the next dashboard load."
             else ""
           in
-          Log.Auth.warn
-            "[silent:dashboard_actor_fallback] outcome=error \
-             token_hash_prefix=%s err_kind=%s actor_hint=%s err=%s — falling \
-             back to request actor hint.%s"
-            token_hash_prefix err_kind hint err_str extra_hint;
+          let log_key =
+            String.concat "|"
+              [ "error"; err_kind; token_hash_prefix; hint ]
+          in
+          if dashboard_actor_fallback_should_warn ~key:log_key then
+            Log.Auth.warn
+              "[silent:dashboard_actor_fallback] outcome=error \
+               token_hash_prefix=%s err_kind=%s actor_hint=%s err=%s — falling \
+               back to request actor hint.%s Repeated identical fallbacks \
+               demoted to DEBUG for %.0fs"
+              token_hash_prefix err_kind hint err_str extra_hint
+              dashboard_actor_fallback_warn_restate_sec
+          else
+            Log.Auth.debug
+              "[silent:dashboard_actor_fallback] repeated outcome=error \
+               token_hash_prefix=%s err_kind=%s actor_hint=%s"
+              token_hash_prefix err_kind hint;
           Prometheus.inc_counter
             Prometheus.metric_silent_dashboard_actor_fallback
             ~labels:[ ("outcome", "error"); ("err_kind", err_kind) ]

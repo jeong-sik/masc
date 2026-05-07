@@ -957,6 +957,61 @@ let test_dashboard_actor_invalid_token_fallback_is_counted () =
       in
       check bool "counter increments" true (after > before))
 
+let latest_log_seq_opt () =
+  match Log.Ring.recent ~limit:1 () with
+  | (entry : Log.Ring.entry) :: _ -> Some entry.seq
+  | [] -> None
+
+let recent_dashboard_actor_fallback_warns ?since_seq () =
+  Log.Ring.recent ~limit:50 ~module_filter:"Auth" ?since_seq ()
+  |> List.filter (fun (entry : Log.Ring.entry) ->
+       String.equal entry.level "WARN"
+       && Astring.String.is_infix
+            ~affix:"[silent:dashboard_actor_fallback] outcome=error"
+            entry.message)
+
+let test_dashboard_actor_invalid_token_fallback_warn_is_deduped () =
+  let module SA = Masc_mcp.Server_auth in
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
+      let invalid_token = "definitely-invalid-token-dedupe-9786" in
+      let before =
+        Prometheus.metric_value_or_zero
+          Prometheus.metric_silent_dashboard_actor_fallback
+          ~labels:[ ("outcome", "error"); ("err_kind", "token_mismatch") ]
+          ()
+      in
+      let before_seq = latest_log_seq_opt () in
+      let headers =
+        Httpun.Headers.of_list
+          [
+            ("authorization", "Bearer " ^ invalid_token);
+            ("x-masc-agent", "dashboard-admin");
+          ]
+      in
+      let request = Httpun.Request.create ~headers `GET "/dashboard" in
+      check (option string) "first call falls back to actor hint"
+        (Some "dashboard-admin")
+        (SA.dashboard_actor_for_request ~base_path:dir request);
+      check (option string) "second call still falls back to actor hint"
+        (Some "dashboard-admin")
+        (SA.dashboard_actor_for_request ~base_path:dir request);
+      let warnings =
+        recent_dashboard_actor_fallback_warns ?since_seq:before_seq ()
+      in
+      let after =
+        Prometheus.metric_value_or_zero
+          Prometheus.metric_silent_dashboard_actor_fallback
+          ~labels:[ ("outcome", "error"); ("err_kind", "token_mismatch") ]
+          ()
+      in
+      check int "identical fallback emits one WARN" 1 (List.length warnings);
+      check bool "counter still records both fallbacks" true
+        (after >= before +. 2.0))
+
 let test_resolve_agent_name_rejects_invalid_token () =
   let module SA = Masc_mcp.Server_auth in
   let dir = setup_test_room () in
@@ -1200,6 +1255,8 @@ let () =
         test_sanitized_dashboard_actor_for_request_uses_token_owner;
       test_case "dashboard actor invalid token fallback is counted" `Quick
         test_dashboard_actor_invalid_token_fallback_is_counted;
+      test_case "dashboard actor invalid token fallback WARN is deduped" `Quick
+        test_dashboard_actor_invalid_token_fallback_warn_is_deduped;
       test_case "invalid token fails" `Quick
         test_resolve_agent_name_rejects_invalid_token;
       test_case "read request uses token owner" `Quick

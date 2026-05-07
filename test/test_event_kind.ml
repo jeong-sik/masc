@@ -99,4 +99,32 @@ let () =
         exit 1
       end)
     Event_kind.Board.all;
+  (* Relevance family: broadcast temporal decay schema labels. *)
+  List.iter
+    (fun v ->
+      let s = Event_kind.Relevance.to_string v in
+      match Event_kind.Relevance.of_string s with
+      | Some v' when v' = v -> ()
+      | Some _ ->
+          Printf.eprintf
+            "event_kind Relevance roundtrip mismatch for %s\n%!" s;
+          exit 1
+      | None ->
+          Printf.eprintf
+            "event_kind Relevance of_string returned None for %s\n%!" s;
+          exit 1)
+    Event_kind.Relevance.all;
+  (match Event_kind.Relevance.of_string "meduim" with
+   | Some _ ->
+       prerr_endline "event_kind Relevance.of_string accepted a typo";
+       exit 1
+   | None -> ());
+  let relevance_names =
+    List.map Event_kind.Relevance.to_string Event_kind.Relevance.all
+  in
+  let unique_relevance_names = List.sort_uniq String.compare relevance_names in
+  if List.length relevance_names <> List.length unique_relevance_names then begin
+    prerr_endline "event_kind Relevance contains duplicate wire labels";
+    exit 1
+  end;
   print_endline "test_event_kind: OK"

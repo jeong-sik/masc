@@ -550,6 +550,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
   Eio.Fiber.all
     (List.mapi
        (fun idx name () ->
+         Eio.Switch.run @@ fun keeper_sw ->
          (* Two-phase timing so we can distinguish semaphore contention
             from per-keeper I/O cost when dashboard snapshots stall.
             Emits [keepers_json:NAME wait=… work=…] only when either
@@ -559,15 +560,13 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
          Eio.Semaphore.acquire _keeper_sem;
          let t_work_start = Time_compat.now () in
          let wait_ms = (t_work_start -. t_wait_start) *. 1000.0 in
-         Fun.protect
-           ~finally:(fun () ->
-             Eio.Semaphore.release _keeper_sem;
-             let work_ms = (Time_compat.now () -. t_work_start) *. 1000.0 in
-             if work_ms > 500.0 || wait_ms > 500.0 then
-               Log.Dashboard.info
-                 "[keepers_json:%s] wait=%.0fms work=%.0fms" name wait_ms
-                 work_ms)
-           (fun () ->
+         Eio.Switch.on_release keeper_sw (fun () ->
+           Eio.Semaphore.release _keeper_sem;
+           let work_ms = (Time_compat.now () -. t_work_start) *. 1000.0 in
+           if work_ms > 500.0 || wait_ms > 500.0 then
+             Log.Dashboard.info
+               "[keepers_json:%s] wait=%.0fms work=%.0fms" name wait_ms
+               work_ms);
          (* Per-sub-op timing for #8822: attribute ~3100ms snapshot cost.
             Threshold 300ms — lower than outer 500ms for more data. *)
          let dt_meta = ref 0.0 in
@@ -991,7 +990,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Log.Dashboard.error "keepers_json fiber error (%s): %s"
                name (Printexc.to_string exn);
-             None)))
+             None))
        names);
   let rows = Array.to_list results |> List.filter_map Fun.id in
   `Assoc [ ("count", `Int (List.length rows)); ("items", `List rows) ]

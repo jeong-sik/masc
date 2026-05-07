@@ -506,6 +506,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
            let terminal_reason_code =
              Printf.sprintf "turn_livelock:%s" reason_string
            in
+           let error_message =
+             Printf.sprintf "keeper turn livelock blocked: %s"
+               reason_string
+           in
            Log.Keeper.error
              ~keeper_name:meta.name ~turn_id:keeper_turn_id
              "%s: keeper turn livelock guard blocked dispatch turn=%d: %s"
@@ -529,6 +533,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
              ~terminal_reason_code
              ~activity_kind:"keeper.turn_blocked"
              ~trajectory_outcome:(Trajectory.Gated terminal_reason_code)
+             ~error_kind:
+               (Keeper_execution_receipt.error_kind_of_string
+                  "turn_livelock_blocked")
+             ~error_message
              ~keeper_turn_id
              ();
            Keeper_turn_fsm.emit_transition
@@ -537,7 +545,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
              (Keeper_turn_fsm.Failed
                 (Keeper_turn_fsm.Failure_turn_livelock_blocked
                    { reason = reason_string }));
-           Ok meta
+           Error (Agent_sdk.Error.Internal error_message)
        | Keeper_turn_livelock.Started _ ->
       Keeper_turn_fsm.emit_transition
         ~keeper_name:meta.name ~turn_id:keeper_turn_id

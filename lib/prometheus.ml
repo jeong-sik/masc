@@ -1138,6 +1138,13 @@ let metric_keeper_dead_total = "masc_keeper_dead_total"
    [auto_resume_after_sec] means the sweep is not firing or the meta write
    is failing. Labels: keeper. *)
 let metric_keeper_auto_resumed_total = "masc_keeper_auto_resumed_total"
+(* Phase-3.5 health-gate block: incremented when the supervisor skips
+   auto-resume because the keeper's cascade is unhealthy (failure ratio
+   >= threshold).  Labels: keeper, cascade.  A positive rate means the
+   health probe is actively protecting the fleet from resuming into a
+   still-failing cascade. *)
+let metric_keeper_auto_resume_blocked_total =
+  "masc_keeper_auto_resume_blocked_total"
 (* Positive signal for the Skip_idle + Woken gate-promotion path added
    by #12271. Increments every time run_smart_heartbeat_gate observes
    that an external wakeup_keeper call cut a Skip_idle backoff sleep
@@ -1868,6 +1875,12 @@ let init () =
     "Total keepers auto-resumed by the self-healing circuit breaker after \
      the back-off timer elapsed. Labeled by keeper. A positive rate means \
      the system is self-healing from transient provider outages."
+    Counter;
+  add metric_keeper_auto_resume_blocked_total
+    "Total keepers whose auto-resume was blocked because the cascade health \
+     probe reported unhealthy. Labeled by keeper and cascade. A positive rate \
+     means the health gate is protecting the fleet from resuming into a \
+     still-failing cascade."
     Counter;
   add metric_keeper_supervisor_cleanup_failures
     "Total supervisor finally-cleanup failures suppressed to avoid \

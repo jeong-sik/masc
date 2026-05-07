@@ -1673,6 +1673,14 @@ let test_transport_route_contracts () =
     (file_contains_pattern "lib/server/server_mcp_transport_http.ml"
        {|Option.is_none existing_agent
                     && Option.is_none existing_legacy_agent|});
+  check bool "h2 mcp post injects canonical http actor" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "body_with_canonical_http_actor");
+  check bool "h2 mcp post forwards internal keeper runtime" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "is_verified_internal_keeper_request"
+    && file_contains_pattern "lib/server/server_h2_gateway.ml"
+         "~internal_keeper_runtime state");
   check bool "common http deps prefer runtime captured in server_state" true
     (file_contains_pattern "lib/server/server_routes_http_common.ml"
        "state.Mcp_server.sw");

@@ -5,6 +5,9 @@ type t = {
   commit : string option [@default None];
   commit_unix_ts : float option [@default None];
   commit_age_seconds : int option [@default None];
+  executable_path : string [@default ""];
+  executable_dir : string [@default ""];
+  repo_root : string option [@default None];
   started_at : string;
   uptime_seconds : int;
 } [@@deriving yojson { strict = false }]
@@ -27,7 +30,7 @@ let rec find_git_root dir =
     let parent = Filename.dirname dir in
     if String.equal parent dir then None else find_git_root parent
 
-let executable_dir () =
+let executable_path () =
   let argv0 =
     if Array.length Sys.argv > 0 then Sys.argv.(0) else Sys.getcwd ()
   in
@@ -37,7 +40,10 @@ let executable_dir () =
     else
       argv0
   in
-  Filename.dirname path
+  try Unix.realpath path with _ -> path
+
+let executable_dir () =
+  Filename.dirname (executable_path ())
 
 let git_capture_output_result ~repo_root args =
   let argv = [ "git"; "-C"; repo_root ] @ args in
@@ -208,6 +214,8 @@ let resolve_commit ~env_value ~probe =
 
 let started_at_unix = Unix.gettimeofday ()
 let started_at_iso = iso8601_of_unix started_at_unix
+let resolved_executable_path = executable_path ()
+let resolved_executable_dir = Filename.dirname resolved_executable_path
 
 (** Commit hash — eagerly resolved at startup.
     Not using [Eio.Lazy] because this is called from tests without Eio context.
@@ -237,6 +245,9 @@ let current () =
     commit;
     commit_unix_ts;
     commit_age_seconds;
+    executable_path = resolved_executable_path;
+    executable_dir = resolved_executable_dir;
+    repo_root = resolved_repo_root;
     started_at = started_at_iso;
     uptime_seconds = max 0 (int_of_float (now -. started_at_unix));
   }

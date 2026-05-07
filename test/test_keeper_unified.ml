@@ -7701,6 +7701,26 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
     (Surface.required_tool_names_for_turn
        ~current_task_required_tool_names:[ "keeper_board_curation_submit" ]
        ~per_call_required_tool_names:[ "keeper_board_post" ]);
+  let product_design_required_tools =
+    Surface.required_tool_names_for_turn
+      ~current_task_required_tool_names:[ "keeper_board_curation_submit" ]
+      ~per_call_required_tool_names:[ "keeper_board_post" ]
+  in
+  (match
+     Surface.preferred_tool_choice_for_required_tool_names
+       ~required_tool_names:product_design_required_tools
+       ~allowed_tool_names:
+         [ "keeper_board_curation_submit"; "keeper_board_post" ]
+   with
+   | Agent_sdk.Types.Tool name ->
+       check string
+         "product/design per-call board post is not hijacked by stale curation"
+         "keeper_board_post" name
+   | other ->
+       fail
+         (Printf.sprintf
+            "expected Tool keeper_board_post for product/design reprobe, got %s"
+            (Agent_sdk.Types.show_tool_choice other)));
   check (list string)
     "active task required tools remain when no per-call requirement exists"
     [ "keeper_board_curation_submit" ]
@@ -7773,6 +7793,22 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
            "expected Any for active-task keeper (must make \
             progress), got %s"
            (Agent_sdk.Types.show_tool_choice other))
+
+let test_direct_keeper_msg_timeout_overrides_meta_per_provider_timeout () =
+  let meta =
+    { (make_meta "product-design-timeout") with
+      per_provider_timeout_s = Some 300.0;
+    }
+  in
+  check (option (float 0.001))
+    "explicit direct-message timeout wins over stale per-provider timeout"
+    (Some 900.0)
+    (KAR.per_provider_timeout_for_turn ~meta ~oas_timeout_s:900.0
+       ~timeout_s:900.0 ());
+  check (option (float 0.001))
+    "profile per-provider timeout still applies without explicit override"
+    (Some 300.0)
+    (KAR.per_provider_timeout_for_turn ~meta ~timeout_s:900.0 ())
 
 (* ---------- render_inline_skip_reason tests ---------- *)
 
@@ -8667,6 +8703,9 @@ let () =
             test_should_require_tools_for_initial_turn_covers_actionable_affordances;
           test_case "task backlog required turn prefers claim tool choice"
             `Quick test_preferred_tool_choice_for_required_turn_claims_first;
+          test_case "direct keeper msg timeout overrides stale per-provider timeout"
+            `Quick
+            test_direct_keeper_msg_timeout_overrides_meta_per_provider_timeout;
           test_case "affordance gate filters by allowed_tool_names"
             `Quick
             test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool;

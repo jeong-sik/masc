@@ -208,6 +208,19 @@ val adaptive_thinking_budget :
   -> intent:Keeper_turn_intent.t option
   -> int option
 
+(** Resolve the per-provider OAS timeout for this keeper turn.
+
+    Explicit [masc_keeper_msg.timeout_sec] / [oas_timeout_s] wins over
+    persisted keeper [per_provider_timeout_s] because the direct caller is
+    intentionally setting the budget for this run. Without that precedence,
+    a stale 300s keeper profile can silently defeat a one-off 900s reprobe. *)
+val per_provider_timeout_for_turn :
+     meta:Keeper_types.keeper_meta
+  -> ?oas_timeout_s:float
+  -> timeout_s:float
+  -> unit
+  -> float option
+
 (** {1 Turn execution} *)
 
 (** Run a single keeper turn.

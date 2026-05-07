@@ -1,10 +1,4 @@
-(** Pool router — maps keepers to pools and handles pool-level fallback.
-
-    Implements the Bulkhead pattern: each keeper is assigned to a
-    primary pool.  When the primary pool is fully in cooldown, the
-    router falls through to lower tiers (Tier1 → Tier2 → Emergency).
-
-    @since Phase 1 — Resilience Architecture *)
+(** Pool router — DEPRECATED, no call sites.  See {!Cascade_pool_router} body. *)
 
 type t
 

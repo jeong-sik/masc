@@ -62,12 +62,17 @@ function _statusCounts(D) {
   };
 }
 
+// Alert thresholds for the KPI spotlight. Configurable via MASC_DATA so
+// operators can tune without a rebuild.
+const FAIL_URGENT_THRESHOLD = (window.MASC_DATA && window.MASC_DATA.failUrgentThreshold) || 3;
+const CASCADE_ALERT_THRESHOLD = (window.MASC_DATA && window.MASC_DATA.cascadeAlertThreshold) || 2;
+
 // Pick the dot to spotlight in the KPI slot. Only the urgent paths
 // have real meaning today; for the calm path we expose the raw event
 // count rather than a fabricated TPS number.
 function _kpiSpotlight(counts) {
-  if (counts.fails >= 3) return { l: "fails", v: counts.fails, t: "err", u: "", urgent: true };
-  if (counts.cascades >= 2) return { l: "cascade", v: counts.cascades, t: "info", u: "" };
+  if (counts.fails >= FAIL_URGENT_THRESHOLD) return { l: "fails", v: counts.fails, t: "err", u: "", urgent: true };
+  if (counts.cascades >= CASCADE_ALERT_THRESHOLD) return { l: "cascade", v: counts.cascades, t: "info", u: "" };
   return { l: "events", v: counts.evCount, t: "brass", u: "" };
 }
 

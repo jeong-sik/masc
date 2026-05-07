@@ -1,3 +1,13 @@
+(** Cascade_pool_router — DEPRECATED, unused by any call site.
+
+    Provider routing has moved to {!Cascade_routes} / {!Cascade_catalog_runtime}.
+    The tier-based pool model with hardcoded [provider_keys] was an early design
+    that conflated admission with rate-limiting; see feedback memory
+    [semaphore_tier_is_architectural_anti_pattern].
+
+    This module is retained only for compilation compatibility.  Do not add new
+    references.  Remove in a future cleanup sweep.  *)
+
 type t = {
   pools : Cascade_pool.t list;
   keeper_pool_map : (string, Cascade_pool.pool_id) Hashtbl.t;

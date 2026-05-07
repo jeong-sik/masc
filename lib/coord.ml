@@ -317,6 +317,16 @@ let () =
   Atomic.set Coord_hooks.task_auto_release_observed_fn
     record_task_auto_release
 
+let record_persistence_read_drop ~surface ~reason =
+  Prometheus.inc_counter
+    Prometheus.metric_persistence_read_drops
+    ~labels:[ ("surface", surface); ("reason", reason) ]
+    ()
+
+let () =
+  Atomic.set Coord_hooks.persistence_read_drop_fn
+    record_persistence_read_drop
+
 let clear_agent_current_task_cache config ~task_id =
   let agents_path = agents_dir config in
   if path_exists config agents_path then

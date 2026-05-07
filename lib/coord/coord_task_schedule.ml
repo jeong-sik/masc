@@ -146,6 +146,19 @@ let directory_exists path =
 let directory_entries path =
   try Sys.readdir path |> Array.to_list with Sys_error _ -> []
 
+let receipt_persistence_surface = "coord_task_schedule_receipt"
+
+let report_receipt_read_drop ~reason ~path ~detail =
+  Safe_ops.report_persistence_read_drop
+    ~on_drop:(fun () ->
+      (Atomic.get Coord_hooks.persistence_read_drop_fn)
+        ~surface:receipt_persistence_surface
+        ~reason)
+    ~surface:receipt_persistence_surface
+    ~reason
+    ~path
+    ~detail
+
 let jsonl_files_under base_dir =
   if not (directory_exists base_dir) then []
   else
@@ -174,7 +187,12 @@ let last_nonempty_line path =
          loop None)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | Sys_error _ -> None
+  | Sys_error detail ->
+      report_receipt_read_drop
+        ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+        ~path
+        ~detail;
+      None
 
 let latest_json_in_receipt_dir base_dir =
   jsonl_files_under base_dir
@@ -184,7 +202,12 @@ let latest_json_in_receipt_dir base_dir =
        | None -> None
        | Some line -> (
            try Some (Yojson.Safe.from_string line)
-           with Yojson.Json_error _ -> None))
+           with Yojson.Json_error detail ->
+             report_receipt_read_drop
+               ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+               ~path
+               ~detail;
+             None))
 
 let json_member_path path json =
   List.fold_left

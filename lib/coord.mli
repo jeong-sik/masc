@@ -95,3 +95,11 @@ val record_distributed_lock_acquire_failed :
     {!Coord_hooks.distributed_lock_acquire_failed_fn} so
     [Coord_utils_ops] can fire the metric without taking a
     direct [Prometheus] dependency. *)
+
+(** {1 Coord persistence read-drop observability} *)
+
+val record_persistence_read_drop : surface:string -> reason:string -> unit
+(** Increment [masc_persistence_read_drops_total] for coord-owned read-model
+    drops.  Production coord modules fire this through
+    {!Coord_hooks.persistence_read_drop_fn} to keep [masc_coord] below the
+    Prometheus layer. *)

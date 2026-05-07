@@ -241,6 +241,13 @@ let task_auto_release_observed_fn
   : (agent_name:string -> from_status:string -> unit) Atomic.t
   = Atomic.make (fun ~agent_name:_ ~from_status:_ -> ())
 
+(** Persistence read-drop observability for coord-owned read models.
+    Coord sub-modules call this instead of depending on Prometheus directly;
+    [lib/coord.ml] wires the bounded [surface]/[reason] labels at startup. *)
+let persistence_read_drop_fn
+  : (surface:string -> reason:string -> unit) Atomic.t
+  = Atomic.make (fun ~surface:_ ~reason:_ -> ())
+
 (** #13460: stale task-state cache emission observability.
     Coord sub-modules fire this when they replace a stale active-task
     broadcast/mention with a cache invalidation message. [lib/coord.ml]

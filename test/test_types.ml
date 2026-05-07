@@ -3,6 +3,48 @@ open Types
 
 (** Tests for Types module *)
 
+let rec remove_tree path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Sys.remove path
+
+let rec mkdir_p dir =
+  if dir = "" || dir = "." || dir = "/" then ()
+  else if Sys.file_exists dir then ()
+  else begin
+    mkdir_p (Filename.dirname dir);
+    Unix.mkdir dir 0o755
+  end
+
+let temp_dir prefix =
+  let path =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "%s-%d-%d" prefix (Unix.getpid ()) (Random.bits ()))
+  in
+  Unix.mkdir path 0o755;
+  path
+
+let write_file path content =
+  mkdir_p (Filename.dirname path);
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let coord_receipt_drop_value reason =
+  Masc_mcp.Prometheus.metric_value_or_zero
+    Masc_mcp.Prometheus.metric_persistence_read_drops
+    ~labels:
+      [
+        ("surface", "coord_task_schedule_receipt");
+        ("reason", reason);
+      ]
+    ()
+
 let test_agent_status_roundtrip () =
   let statuses = [Active; Busy; Listening; Inactive] in
   List.iter (fun status ->
@@ -100,6 +142,40 @@ let test_strict_parser_unchanged () =
   match task_action_of_string "claimed" with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "strict parser must reject aliases; lenient owns aliases"
+
+let test_latest_receipt_malformed_json_records_drop () =
+  let previous_hook = Atomic.get Coord_hooks.persistence_read_drop_fn in
+  Atomic.set Coord_hooks.persistence_read_drop_fn
+    Masc_mcp.Coord.record_persistence_read_drop;
+  let base_dir = temp_dir "coord-receipt-drop" in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Coord_hooks.persistence_read_drop_fn previous_hook;
+      try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let month_dir = Filename.concat base_dir "2026-05" in
+      let bad_path = Filename.concat month_dir "z-bad.jsonl" in
+      let good_path = Filename.concat month_dir "a-good.jsonl" in
+      let reason = Safe_ops.persistence_read_drop_reason_entry_load_error in
+      let before = coord_receipt_drop_value reason in
+      write_file bad_path "{not-json\n";
+      write_file good_path
+        (Yojson.Safe.to_string
+           (`Assoc
+             [
+               ("id", `String "receipt-ok");
+               ("recorded_at", `String "2026-05-07T00:00:00Z");
+             ])
+        ^ "\n");
+      match Coord_task_schedule.latest_json_in_receipt_dir base_dir with
+      | Some json ->
+          Alcotest.(check (option string)) "falls back to valid receipt"
+            (Some "receipt-ok")
+            Yojson.Safe.Util.(member "id" json |> to_string_option);
+          Alcotest.(check (float 0.001)) "malformed receipt increments drop"
+            1.0
+            (coord_receipt_drop_value reason -. before)
+      | None -> Alcotest.fail "expected valid fallback receipt")
 
 (* Issue #8372: schema enums for [agent_status] used to be hand-rolled.
    The witness function ensures every variant produces a string that
@@ -1199,6 +1275,10 @@ let () =
         Alcotest.(check bool) "Cancelled -> NOT claim pool" false
           (S.task_is_claim_pool_candidate
              (dummy_task (Masc_domain.Cancelled { cancelled_by = "a"; cancelled_at = "t"; reason = None }))));
+    ];
+    "coord_receipt_read_drops", [
+      Alcotest.test_case "malformed latest receipt increments drop metric" `Quick
+        test_latest_receipt_malformed_json_records_drop;
     ];
     "publish_phase_lifecycle_ssot", [
       (* Issue #8572: phase-bearing publish_lifecycle calls used to pass

@@ -576,37 +576,17 @@ let run_keepalive_unified_turn
               Log.Keeper.debug
           | _ -> Log.Keeper.info
         in
-        let emit_skip_log =
-          let is_stable_skip =
-            List.for_all
-              (fun r ->
-                 String.equal r "keeper_paused"
-                 || String.equal r "approval_pending"
-                 || String.equal r "scheduled_autonomous_disabled")
-              verdict_strs
-          in
-          if is_stable_skip
-          then
-            Keeper_skip_log_dedup.should_emit
-              ~keeper_name:meta_after_triage.name
-              ~reasons:verdict_strs
-              ~now:(Time_compat.now ())
-              ~ttl_sec:600.0
-          else
-            true
-        in
-        if emit_skip_log then
-          log_not_scheduled
-            "keepalive turn not scheduled for %s: should_run=%b channel=%s reasons=[%s] idle=%ds since_last=%s idle_gate=%s cooldown=%s task_cooldown=%s"
-            meta_after_triage.name
-            turn_decision.should_run channel_str
-            (String.concat "," verdict_strs)
-            obs.idle_seconds
-            (Keeper_keepalive_signal.format_since_last_scheduled_autonomous
-               turn_decision.since_last_scheduled_autonomous)
-            (format_opt_int turn_decision.idle_gate_sec)
-            (format_opt_int turn_decision.effective_cooldown)
-            (format_opt_int turn_decision.task_reactive_cooldown));
+        log_not_scheduled
+          "keepalive turn not scheduled for %s: should_run=%b channel=%s reasons=[%s] idle=%ds since_last=%s idle_gate=%s cooldown=%s task_cooldown=%s"
+          meta_after_triage.name
+          turn_decision.should_run channel_str
+          (String.concat "," verdict_strs)
+          obs.idle_seconds
+          (Keeper_keepalive_signal.format_since_last_scheduled_autonomous
+             turn_decision.since_last_scheduled_autonomous)
+          (format_opt_int turn_decision.idle_gate_sec)
+          (format_opt_int turn_decision.effective_cooldown)
+          (format_opt_int turn_decision.task_reactive_cooldown));
       if should_run_turn
       then
         Log.Keeper.info

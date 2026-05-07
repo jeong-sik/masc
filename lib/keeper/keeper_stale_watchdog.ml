@@ -121,6 +121,19 @@ let stale_kill_class_label (cls : Keeper_registry.stale_kill_class) : string =
   | In_turn_hung _ -> "in_turn_hung"
   | Noop_failure_loop _ -> "noop_failure_loop"
 
+let should_trigger_noop_failure_loop
+    ~noop_count
+    ~noop_threshold
+    ~started_at
+    ~last_completed_turn_ended_at =
+  noop_count >= noop_threshold
+  && (match last_completed_turn_ended_at with
+      | Some ended_at -> ended_at >= started_at
+      | None -> false)
+
+let should_trigger_noop_failure_loop_for_test =
+  should_trigger_noop_failure_loop
+
 type batch_root_cause =
   | Cascade_unhealthy
   | Provider_auth
@@ -461,7 +474,21 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
              let noop_count =
                entry.meta.runtime.proactive_rt.consecutive_noop_count
              in
-             let failure_loop = noop_count >= noop_threshold () in
+             let last_completed_turn_ended_at =
+               match entry.last_completed_turn with
+               | Some
+                   ({ ct_ended_at; _ }
+                    : Keeper_registry.completed_turn_observation) ->
+                 Some ct_ended_at
+               | None -> None
+             in
+             let failure_loop =
+               should_trigger_noop_failure_loop
+                 ~noop_count
+                 ~noop_threshold:(noop_threshold ())
+                 ~started_at:entry.started_at
+                 ~last_completed_turn_ended_at
+             in
              let stale = idle_stale || in_turn_stale || failure_loop in
              (* The tick line is a sampled state snapshot. Stale termination
                 and broadcasts below remain ERROR, so INFO does not need every

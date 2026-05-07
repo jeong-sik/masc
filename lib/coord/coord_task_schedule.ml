@@ -764,7 +764,7 @@ let claim_next config ~agent_name =
 let release_stale_claims config ~ttl_seconds =
   ensure_initialized config;
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-  with_file_lock config backlog_path (fun () ->
+  let release_under_lock () =
     match read_backlog_r config with
     | Error msg ->
         Log.Orchestrator.error
@@ -842,4 +842,11 @@ let release_stale_claims config ~ttl_seconds =
           write_backlog config updated_backlog
         end;
         List.rev !stale_tasks
-  )
+  in
+  match with_file_lock_r config backlog_path release_under_lock with
+  | Ok released -> released
+  | Error err ->
+      Log.Orchestrator.warn
+        "[stale-claims] skipping backlog mutation due to lock failure: %s"
+        (Masc_domain.masc_error_to_string err);
+      []

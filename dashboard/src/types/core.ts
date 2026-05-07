@@ -120,6 +120,19 @@ type BoardPostMeta = Record<string, unknown> & {
 export type BoardVoteDirection = 'up' | 'down'
 export type BoardModerationStatus = 'none' | 'flagged' | 'approved' | 'removed' | 'hidden' | 'warned'
 
+export interface BoardContributorQuality {
+  score: number
+  band?: 'low' | 'watch' | 'strong' | 'excellent' | string
+  source?: string
+  completion_rate?: number
+  response_rate?: number
+  board_posts?: number
+  board_comments?: number
+  accountability_score?: number
+  autonomy_level?: string
+  thompson_confidence?: number
+}
+
 export interface BoardActorIdentity {
   kind: 'keeper' | 'agent'
   id: string
@@ -157,6 +170,7 @@ export interface BoardPost {
   hearth_count?: number
   report_count?: number
   moderation_status?: BoardModerationStatus
+  contributor_quality?: BoardContributorQuality | null
   reactions?: BoardReactionSummary[]
 }
 

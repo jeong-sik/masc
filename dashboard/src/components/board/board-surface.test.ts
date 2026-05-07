@@ -273,6 +273,26 @@ describe('BoardSurface Component', () => {
     expect(screen.getByLabelText('점수 투표 후 공개')).toHaveTextContent('투표 후 공개')
   })
 
+  it('renders contributor quality badges on post cards', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'post-quality',
+        title: 'Quality signal',
+        body: 'content',
+        author: 'ani1999',
+        contributor_quality: {
+          score: 0.72,
+          band: 'strong',
+          source: 'agent_reputation',
+        },
+      }),
+    ]
+
+    render(h(BoardSurface, null))
+
+    expect(screen.getByLabelText('기여자 품질 72점 · 강함')).toHaveTextContent('품질 72')
+  })
+
   it('routes the mention inbox focus to the message surface', () => {
     route.value = { params: { focus: 'mention-inbox' } } as any
     messages.value = [{ id: 'm-1', from: 'sojin', content: '@dashboard needs review' }]

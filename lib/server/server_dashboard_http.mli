@@ -47,6 +47,7 @@ val approval_resolve_http_error_to_string :
 (** {1 Board / memory / governance HTTP entries} *)
 
 val dashboard_board_json :
+  ?config:Coord.config ->
   ?hearth:string ->
   ?author_filter:string ->
   ?sort_by:Board_dispatch.sort_order ->
@@ -60,7 +61,7 @@ val dashboard_board_json :
   Yojson.Safe.t
 
 val dashboard_memory_http_json :
-  Httpun.Request.t -> Yojson.Safe.t
+  ?config:Coord.config -> Httpun.Request.t -> Yojson.Safe.t
 
 val dashboard_memory_subsystems_include_entries :
   Httpun.Request.t -> bool

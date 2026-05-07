@@ -213,6 +213,59 @@ let board_moderation_fields ~include_moderation ~target_kind ~target_id =
       ("moderation_status", `String summary.Board_moderation.moderation_status);
     ]
 
+let board_contributor_quality_band score =
+  if score >= 0.85 then "excellent"
+  else if score >= 0.65 then "strong"
+  else if score >= 0.35 then "watch"
+  else "low"
+
+let board_contributor_quality_json
+    (rep : Agent_reputation.agent_reputation) : Yojson.Safe.t =
+  `Assoc
+    [
+      ("score", `Float rep.overall_score);
+      ("band", `String (board_contributor_quality_band rep.overall_score));
+      ("source", `String "agent_reputation");
+      ("completion_rate", `Float rep.completion_rate);
+      ("response_rate", `Float rep.response_rate);
+      ("board_posts", `Int rep.board_posts);
+      ("board_comments", `Int rep.board_comments);
+      ("accountability_score", `Float rep.accountability_score);
+      ("autonomy_level", `String rep.autonomy_level);
+      ("thompson_confidence", `Float rep.thompson_confidence);
+    ]
+
+let board_contributor_quality_lookup ?config () =
+  match config with
+  | None -> fun _author -> None
+  | Some config ->
+      let cache = Hashtbl.create 16 in
+      fun author ->
+        match Hashtbl.find_opt cache author with
+        | Some value -> value
+        | None ->
+            let value =
+              try
+                let rep =
+                  Agent_reputation.compute_reputation config
+                    ~agent_name:author
+                in
+                Some (board_contributor_quality_json rep)
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
+                  Log.Server.warn
+                    "board contributor quality failed for %s: %s" author
+                    (Printexc.to_string exn);
+                  None
+            in
+            Hashtbl.replace cache author value;
+            value
+
+let board_contributor_quality_fields = function
+  | None -> []
+  | Some quality -> [ ("contributor_quality", quality) ]
+
 let board_comment_dashboard_json ?(include_moderation = false)
     ?(blind_votes = false) ?current_vote ?reactions (c : Board.comment) :
     Yojson.Safe.t =
@@ -244,7 +297,8 @@ let board_comment_dashboard_json ?(include_moderation = false)
   | other -> other
 
 let board_post_dashboard_json ?(include_moderation = false)
-    ?(blind_votes = false) ?current_vote ?reactions ~author_karma
+    ?(blind_votes = false) ?contributor_quality ?current_vote ?reactions
+    ~author_karma
     (p : Board.post) : Yojson.Safe.t =
   let author = Board.Agent_id.to_string p.author in
   let post_id = Board.Post_id.to_string p.id in
@@ -288,6 +342,7 @@ let board_post_dashboard_json ?(include_moderation = false)
       @ board_moderation_fields ~include_moderation
           ~target_kind:Board_moderation.Target_post
           ~target_id:post_id
+      @ board_contributor_quality_fields contributor_quality
       @ board_vote_blind_fields ~blind_active
       @ board_vote_state_fields current_vote
       @ board_reaction_fields reactions )

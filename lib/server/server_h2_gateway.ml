@@ -975,7 +975,15 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
       (* ═══════════════════════════════════════════════════════════════════════
          Delegated route groups
          ═══════════════════════════════════════════════════════════════════════ *)
-      | _ when Server_h2_gateway_routes_extra.dispatch ~h2_reqd ~httpun_request ~cors ~path httpun_meth -> ()
+      | _
+        when Server_h2_gateway_routes_extra.dispatch ~h2_reqd ~httpun_request
+               ~cors ~path
+               ~config:
+                 (Option.map
+                    (fun state -> state.Mcp_server.room_config)
+                    !server_state)
+               httpun_meth ->
+          ()
 
       (* ─────────────────────────────────────────────────────────────────────
          Fallback

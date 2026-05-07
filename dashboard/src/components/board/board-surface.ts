@@ -29,6 +29,9 @@ import {
   boardActorAvatarKey,
   boardActorDisplayName,
   boardActorTitle,
+  contributorQualityBadgeClass,
+  contributorQualityBandLabel,
+  contributorQualityPercent,
   navigateToAuthor,
   stripInlineMarkdown,
 } from '../../lib/board-utils'
@@ -580,6 +583,11 @@ function PostCard({ post }: { post: BoardPost }) {
   const authorLabel = boardActorDisplayName(post.author, post.author_identity)
   const authorAvatarKey = boardActorAvatarKey(post.author, post.author_identity)
   const authorTitle = boardActorTitle(post.author, post.author_identity)
+  const qualityPercent = contributorQualityPercent(post.contributor_quality)
+  const qualityBand = contributorQualityBandLabel(post.contributor_quality)
+  const qualityTitle = qualityPercent === null
+    ? undefined
+    : `기여자 품질 ${qualityPercent}점 · ${qualityBand}`
   const upvoteActive = post.current_vote === 'up'
   const downvoteActive = post.current_vote === 'down'
   const voteScoreLabel = post.vote_blind ? '투표 후 공개' : String(post.votes ?? 0)
@@ -704,6 +712,13 @@ function PostCard({ post }: { post: BoardPost }) {
 
           <!-- Category badges -->
           <span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${categoryBadgeColor(cat)}">${categoryLabel(cat)}</span>
+          ${qualityPercent !== null ? html`
+            <span
+              class=${`inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${contributorQualityBadgeClass(post.contributor_quality)}`}
+              aria-label=${qualityTitle}
+              title=${qualityTitle}
+            >품질 ${qualityPercent}</span>
+          ` : null}
           ${post.hearth ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
           ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
           <${ModerationBadge} status=${post.moderation_status} reportCount=${post.report_count} targetLabel="게시글" />

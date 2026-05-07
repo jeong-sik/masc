@@ -190,6 +190,18 @@ let test_ci_sync_and_asset_contracts () =
   check bool "ci gate aggregates live PR gate" true
     (file_contains_pattern ".github/workflows/ci.yml"
        "PR_LIVE_GATE_RESULT");
+  check bool "meta guards verify main branch protection drift" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "bash scripts/ci/check-main-branch-protection.sh");
+  check bool "branch protection drift check exists" true
+    (file_contains_pattern "scripts/ci/check-main-branch-protection.sh"
+       "enforce_admins.enabled");
+  check bool "branch protection drift check requires draft guard context" true
+    (file_contains_pattern "scripts/ci/check-main-branch-protection.sh"
+       "Draft Auto-Merge Guard");
+  check bool "branch protection drift check requires CI gate context" true
+    (file_contains_pattern "scripts/ci/check-main-branch-protection.sh"
+       "CI Gate");
   check bool "heavy CI no longer trusts stale draft payload" true
     (file_not_contains_pattern ".github/workflows/ci.yml"
        "github.event.pull_request.draft == false");

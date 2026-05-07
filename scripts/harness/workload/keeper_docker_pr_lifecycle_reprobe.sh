@@ -20,6 +20,7 @@ REVIEW_TARGETS_FILE="$RUN_DIR/review-targets.jsonl"
 GITHUB_IDENTITY_COUNTS_FILE="$RUN_DIR/github-identity-counts.json"
 PROOF_BRANCH_COLLISIONS_FILE="$RUN_DIR/proof-branch-collisions.jsonl"
 CREATE_READINESS_FAILURES_FILE="$RUN_DIR/create-readiness-failures.jsonl"
+GITHUB_EGRESS_PREFLIGHT_FILE="$RUN_DIR/github-egress-preflight.jsonl"
 SUMMARY_FILE="$RUN_DIR/summary.json"
 AUDIT_FILE="$RUN_DIR/audit-docker-pr-lifecycle.json"
 AUDIT_STATUS_RESULT=0
@@ -50,6 +51,7 @@ MCP_CLIENT_NAME="${MCP_CLIENT_NAME:-keeper-docker-pr-lifecycle-reprobe}"
 EXPECTED_SERVER_COMMIT="${EXPECTED_SERVER_COMMIT:-}"
 FORBID_GITHUB_IDENTITIES="${FORBID_GITHUB_IDENTITIES:-}"
 ALLOW_FORK_PR_FOR_READONLY="${ALLOW_FORK_PR_FOR_READONLY:-0}"
+SEED_GITHUB_EGRESS="${SEED_GITHUB_EGRESS:-0}"
 SERVER_HEALTH_URL="${SERVER_HEALTH_URL:-}"
 SERVER_COMMIT_ACTUAL=""
 SERVER_STARTED_AT_ACTUAL=""
@@ -87,6 +89,9 @@ Options:
                            Permit PUBLIC repo READ/TRIAGE credentials to satisfy
                            create proof by pushing to their own fork and opening
                            a draft PR with head OWNER:BRANCH.
+  --seed-github-egress     When a fork-route keeper lacks GitHub egress policy,
+                           add github.com and *.github.com to its Docker
+                           egress.json before sending mutate prompts.
   --server-health-url URL  Health endpoint for commit verification.
   --board-post-id ID       Post a final board comment to this thread.
   --run-id ID              Stable run id for prompts and artifacts.
@@ -116,6 +121,7 @@ Environment:
   FORBID_GITHUB_IDENTITIES Optional CSV of forbidden keeper GitHub identities.
   ALLOW_FORK_PR_FOR_READONLY=1
                            Same as --allow-fork-pr-for-readonly.
+  SEED_GITHUB_EGRESS=1     Same as --seed-github-egress.
 EOF
 }
 
@@ -169,6 +175,10 @@ while [[ $# -gt 0 ]]; do
       ALLOW_FORK_PR_FOR_READONLY=1
       shift
       ;;
+    --seed-github-egress)
+      SEED_GITHUB_EGRESS=1
+      shift
+      ;;
     --server-health-url)
       SERVER_HEALTH_URL="$2"
       shift 2
@@ -190,6 +200,7 @@ while [[ $# -gt 0 ]]; do
         GITHUB_IDENTITY_COUNTS_FILE="$RUN_DIR/github-identity-counts.json"
         PROOF_BRANCH_COLLISIONS_FILE="$RUN_DIR/proof-branch-collisions.jsonl"
         CREATE_READINESS_FAILURES_FILE="$RUN_DIR/create-readiness-failures.jsonl"
+        GITHUB_EGRESS_PREFLIGHT_FILE="$RUN_DIR/github-egress-preflight.jsonl"
         SUMMARY_FILE="$RUN_DIR/summary.json"
         AUDIT_FILE="$RUN_DIR/audit-docker-pr-lifecycle.json"
       fi
@@ -207,6 +218,7 @@ while [[ $# -gt 0 ]]; do
       GITHUB_IDENTITY_COUNTS_FILE="$RUN_DIR/github-identity-counts.json"
       PROOF_BRANCH_COLLISIONS_FILE="$RUN_DIR/proof-branch-collisions.jsonl"
       CREATE_READINESS_FAILURES_FILE="$RUN_DIR/create-readiness-failures.jsonl"
+      GITHUB_EGRESS_PREFLIGHT_FILE="$RUN_DIR/github-egress-preflight.jsonl"
       SUMMARY_FILE="$RUN_DIR/summary.json"
       AUDIT_FILE="$RUN_DIR/audit-docker-pr-lifecycle.json"
       shift 2
@@ -242,6 +254,7 @@ mkdir -p "$RUN_DIR" "$RAW_DIR" "$PROMPT_DIR"
 : >"$REVIEW_TARGETS_FILE"
 : >"$PROOF_BRANCH_COLLISIONS_FILE"
 : >"$CREATE_READINESS_FAILURES_FILE"
+: >"$GITHUB_EGRESS_PREFLIGHT_FILE"
 
 log() {
   printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2
@@ -1047,6 +1060,119 @@ keeper_uses_fork_pr_route() {
     && ( "$permission" == "READ" || "$permission" == "TRIAGE" ) ]]
 }
 
+assert_github_egress_for_fork_routes() {
+  [[ "$MUTATE" == "1" ]] || return 0
+  [[ "$ALLOW_FORK_PR_FOR_READONLY" == "1" ]] || return 0
+
+  local status=0
+  set +e
+  python3 - "$BASE_PATH" "$RUN_DIR/keepers.txt" "$GITHUB_IDENTITY_COUNTS_FILE" \
+    "$SEED_GITHUB_EGRESS" "$GITHUB_EGRESS_PREFLIGHT_FILE" <<'PY'
+import json
+import pathlib
+import sys
+
+base_path = pathlib.Path(sys.argv[1]).expanduser()
+keepers_file = pathlib.Path(sys.argv[2])
+identity_counts_file = pathlib.Path(sys.argv[3])
+seed = sys.argv[4] == "1"
+out_file = pathlib.Path(sys.argv[5])
+
+
+def safe_filename(name):
+    parts = []
+    for ch in name.lower():
+        if ch.isalnum() or ch in "._-":
+            parts.append(ch)
+        else:
+            parts.append(f"_{ord(ch):02x}")
+    return "".join(parts)
+
+
+def load_domains(path):
+    if not path.is_file():
+        return [], "missing"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return [], f"unreadable:{type(exc).__name__}"
+    if not isinstance(payload, list):
+        return [], "not_json_list"
+    domains = [str(item).strip().lower() for item in payload if isinstance(item, str)]
+    domains = [domain for domain in domains if domain]
+    return domains, None
+
+
+def github_allowed(domains):
+    normalized = {domain.lower() for domain in domains}
+    return "github.com" in normalized or "*.github.com" in normalized
+
+
+payload = json.loads(identity_counts_file.read_text(encoding="utf-8"))
+permissions = payload.get("keeper_repo_permissions")
+if not isinstance(permissions, dict):
+    permissions = {}
+visibilities = payload.get("keeper_repo_visibilities")
+if not isinstance(visibilities, dict):
+    visibilities = {}
+
+keepers = [line.strip() for line in keepers_file.read_text().splitlines() if line.strip()]
+records = []
+failed = False
+for keeper in keepers:
+    permission = permissions.get(keeper)
+    visibility = visibilities.get(keeper)
+    uses_fork_route = permission in {"READ", "TRIAGE"} and visibility == "PUBLIC"
+    if not uses_fork_route:
+        continue
+    policy_path = (
+        base_path
+        / ".masc"
+        / "playground"
+        / "docker"
+        / safe_filename(keeper)
+        / "egress.json"
+    )
+    domains, load_error = load_domains(policy_path)
+    if github_allowed(domains):
+        status = "ok"
+    elif seed:
+        policy_path.parent.mkdir(parents=True, exist_ok=True)
+        merged = sorted(set(domains + ["github.com", "*.github.com"]))
+        policy_path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
+        domains = merged
+        status = "seeded"
+    else:
+        failed = True
+        status = "missing_github_egress"
+    records.append(
+        {
+            "keeper": keeper,
+            "permission": permission,
+            "visibility": visibility,
+            "egress_policy_path": str(policy_path),
+            "load_error": load_error,
+            "status": status,
+            "allowed": domains,
+        }
+    )
+
+out_file.write_text(
+    "".join(json.dumps(record, sort_keys=True) + "\n" for record in records),
+    encoding="utf-8",
+)
+sys.exit(1 if failed else 0)
+PY
+  status=$?
+  set -e
+  if [[ "$status" -ne 0 ]]; then
+    echo "fork PR route requires GitHub egress policy for READ/TRIAGE keepers" >&2
+    echo "rerun with --seed-github-egress only for an isolated proof base, or seed the listed egress.json files manually" >&2
+    cat "$GITHUB_EGRESS_PREFLIGHT_FILE" >&2 || true
+    exit "$status"
+  fi
+}
+
 assert_no_proof_branch_collisions_for_mutate() {
   [[ "$MUTATE" == "1" ]] || return 0
 
@@ -1586,6 +1712,7 @@ write_summary() {
     --arg expected_server_commit "$EXPECTED_SERVER_COMMIT" \
     --arg forbid_github_identities "$FORBID_GITHUB_IDENTITIES" \
     --arg allow_fork_pr_for_readonly "$ALLOW_FORK_PR_FOR_READONLY" \
+    --arg seed_github_egress "$SEED_GITHUB_EGRESS" \
     --arg server_commit "$SERVER_COMMIT_ACTUAL" \
     --arg server_started_at "$SERVER_STARTED_AT_ACTUAL" \
     --arg server_incarnation "$SERVER_INCARNATION_ACTUAL" \
@@ -1594,6 +1721,7 @@ write_summary() {
     --arg github_identity_counts_file "$GITHUB_IDENTITY_COUNTS_FILE" \
     --arg proof_branch_collisions_file "$PROOF_BRANCH_COLLISIONS_FILE" \
     --arg create_readiness_failures_file "$CREATE_READINESS_FAILURES_FILE" \
+    --arg github_egress_preflight_file "$GITHUB_EGRESS_PREFLIGHT_FILE" \
     --argjson mutate "$MUTATE" \
     --argjson keeper_count "$keeper_count" \
     --argjson request_count "$request_count" \
@@ -1613,6 +1741,7 @@ write_summary() {
       expected_server_commit:$expected_server_commit,
       forbid_github_identities:$forbid_github_identities,
       allow_fork_pr_for_readonly:$allow_fork_pr_for_readonly,
+      seed_github_egress:$seed_github_egress,
       server_commit:$server_commit,
       server_started_at:$server_started_at,
       server_incarnation:$server_incarnation,
@@ -1621,6 +1750,7 @@ write_summary() {
       github_identity_counts_file:$github_identity_counts_file,
       proof_branch_collisions_file:$proof_branch_collisions_file,
       create_readiness_failures_file:$create_readiness_failures_file,
+      github_egress_preflight_file:$github_egress_preflight_file,
       mutate:$mutate,
       keeper_count:$keeper_count,
       request_count:$request_count,
@@ -1678,6 +1808,7 @@ fi
 ensure_mcp_session_if_needed
 discover_keepers
 assert_github_identity_pool_for_mutate
+assert_github_egress_for_fork_routes
 build_review_targets
 render_prompts
 if [[ "$PHASE_MODE" != "review" ]]; then

@@ -1262,6 +1262,7 @@
 (include stanzas/test_transport_bridge_seal.inc)
 (include stanzas/test_work_as_heartbeat.inc)
 (include stanzas/test_worker_safety_gates.inc)
+(include stanzas/test_ws_standalone_close_payload.inc)
 
 (test
  (name test_dashboard_yjs)

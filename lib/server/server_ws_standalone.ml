@@ -40,11 +40,35 @@ let max_ws_close_reason_log_len = 96
 
 let max_ws_close_payload_len = 125
 
+let utf8_codepoint_width first_byte =
+  let byte = Char.code first_byte in
+  if byte land 0x80 = 0 then
+    1
+  else if byte land 0xE0 = 0xC0 then
+    2
+  else if byte land 0xF0 = 0xE0 then
+    3
+  else if byte land 0xF8 = 0xF0 then
+    4
+  else
+    1
+
 let truncate_ws_close_reason reason =
   if String.length reason <= max_ws_close_reason_log_len then
     reason
-  else
-    String.sub reason 0 max_ws_close_reason_log_len ^ "...<truncated>"
+  else begin
+    let rec boundary idx =
+      if idx >= String.length reason || idx >= max_ws_close_reason_log_len then
+        idx
+      else
+        let next_idx = idx + utf8_codepoint_width reason.[idx] in
+        if next_idx > max_ws_close_reason_log_len then
+          idx
+        else
+          boundary next_idx
+    in
+    String.sub reason 0 (boundary 0) ^ "...<truncated>"
+  end
 
 let summarize_ws_close_payload bytes ~received_len ~declared_len =
   if received_len = 0 then
@@ -75,6 +99,54 @@ let summarize_ws_close_payload bytes ~received_len ~declared_len =
     Printf.sprintf "code=%d %s received_len=%d declared_len=%d%s" code reason
       received_len declared_len partial
 
+let immediate_ws_close_payload_summary ~declared_len =
+  if declared_len <= 0 then
+    Some (Printf.sprintf "code=none received_len=0 declared_len=%d" declared_len)
+  else if declared_len > max_ws_close_payload_len then
+    Some
+      (Printf.sprintf "payload_len=%d exceeds_control_frame_limit"
+         declared_len)
+  else
+    None
+
+type ws_close_payload_chunk_plan =
+  | Reject_empty_chunk of string
+  | Copy_then_finish of { copy_len : int; next_offset : int }
+  | Copy_then_continue of { copy_len : int; next_offset : int }
+
+let plan_ws_close_payload_chunk ~offset ~declared_len ~chunk_len =
+  if chunk_len <= 0 then
+    Reject_empty_chunk
+      (Printf.sprintf "payload_read_empty_chunk received_len=%d declared_len=%d"
+         offset declared_len)
+  else
+    let remaining = max 0 (declared_len - offset) in
+    let copy_len = min chunk_len remaining in
+    let next_offset = offset + copy_len in
+    if next_offset >= declared_len then
+      Copy_then_finish { copy_len; next_offset }
+    else
+      Copy_then_continue { copy_len; next_offset }
+
+module For_testing = struct
+  let max_ws_close_reason_log_len = max_ws_close_reason_log_len
+
+  let max_ws_close_payload_len = max_ws_close_payload_len
+
+  let truncate_ws_close_reason = truncate_ws_close_reason
+
+  let summarize_ws_close_payload = summarize_ws_close_payload
+
+  let immediate_ws_close_payload_summary = immediate_ws_close_payload_summary
+
+  type nonrec ws_close_payload_chunk_plan = ws_close_payload_chunk_plan =
+    | Reject_empty_chunk of string
+    | Copy_then_finish of { copy_len : int; next_offset : int }
+    | Copy_then_continue of { copy_len : int; next_offset : int }
+
+  let plan_ws_close_payload_chunk = plan_ws_close_payload_chunk
+end
+
 let log_ws_client_close_payload ~session_id ~declared_len payload =
   (* Terminal action for a single close-payload handling: log once + close
      payload once.  Every reachable leaf of the read state machine (early
@@ -91,13 +163,9 @@ let log_ws_client_close_payload ~session_id ~declared_len payload =
         Ws.Payload.close payload
       end
   in
-  if declared_len <= 0 then
-    finish "code=none received_len=0 declared_len=0"
-  else if declared_len > max_ws_close_payload_len then
-    finish
-      (Printf.sprintf "payload_len=%d exceeds_control_frame_limit"
-         declared_len)
-  else
+  match immediate_ws_close_payload_summary ~declared_len with
+  | Some summary -> finish summary
+  | None ->
     let buffer = Bytes.create declared_len in
     let offset = ref 0 in
     let rec schedule () =
@@ -112,17 +180,23 @@ let log_ws_client_close_payload ~session_id ~declared_len payload =
               (summarize_ws_close_payload buffer ~received_len:!offset
                  ~declared_len))
           ~on_read:(fun bs ~off ~len:chunk_len ->
-            let remaining = declared_len - !offset in
-            let copy_len = min chunk_len remaining in
-            Bigstringaf.blit_to_bytes bs ~src_off:off buffer
-              ~dst_off:!offset ~len:copy_len;
-            offset := !offset + copy_len;
-            if !offset >= declared_len then
-              finish
-                (summarize_ws_close_payload buffer ~received_len:!offset
-                   ~declared_len)
-            else
-              schedule ())
+            match
+              plan_ws_close_payload_chunk ~offset:!offset ~declared_len
+                ~chunk_len
+            with
+            | Reject_empty_chunk summary -> finish summary
+            | Copy_then_finish { copy_len; next_offset } ->
+                Bigstringaf.blit_to_bytes bs ~src_off:off buffer
+                  ~dst_off:!offset ~len:copy_len;
+                offset := next_offset;
+                finish
+                  (summarize_ws_close_payload buffer ~received_len:!offset
+                     ~declared_len)
+            | Copy_then_continue { copy_len; next_offset } ->
+                Bigstringaf.blit_to_bytes bs ~src_off:off buffer
+                  ~dst_off:!offset ~len:copy_len;
+                offset := next_offset;
+                schedule ())
     in
     try schedule () with
     | Eio.Cancel.Cancelled _ as e -> raise e

@@ -1805,7 +1805,9 @@ let test_http_cancel_response_contracts () =
     && file_contains_pattern "lib/server/server_ws_standalone.ml"
          {|standalone_ws_eof_summary|}
     && file_contains_pattern "lib/server/server_ws_standalone.ml"
-         {|declared_len|})
+         {|declared_len|}
+    && file_contains_pattern "lib/server/server_ws_standalone.ml"
+         {|chunk_len <= 0|})
 
 let test_worktree_list_contracts () =
   check bool "worktree list stays read-only" true

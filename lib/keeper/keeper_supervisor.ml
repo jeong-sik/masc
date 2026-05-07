@@ -1467,6 +1467,8 @@ let sweep_and_recover (ctx : _ context) =
   List.iter (fun (entry : Keeper_registry.registry_entry) ->
     cleanup_dead_tombstone ctx entry;
     Keeper_lifecycle_hooks.run
+      ~base_dir:(Coord.masc_root_dir ctx.config)
+      ~meta:entry.meta
       ~keeper_id:entry.name
       Keeper_lifecycle_hooks.Tombstone_reaped
   ) !to_cleanup_dead;

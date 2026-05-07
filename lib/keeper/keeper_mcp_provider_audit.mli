@@ -35,6 +35,12 @@ val auto_construct_active_by_default : result -> bool
     as "true" because they have no MCP client and therefore need no
     construct path. *)
 
+val auto_construct_effectively_active :
+  ?env_lookup:(string -> string option) -> result -> bool
+(** True iff the provider has an active construct path after applying
+    the current env override.  Invalid env values fall back to the
+    documented default. *)
+
 val format_log_line : result -> string
 (** Grep-friendly tag:
     [[mcp_audit:active|no_construct_path|http_api]]. *)

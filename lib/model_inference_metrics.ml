@@ -662,6 +662,41 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option =
 
 (* ── Read decisions.jsonl files ─────────────────────────── *)
 
+let model_inference_decisions_surface = "model_inference_decisions"
+let model_inference_costs_surface = "model_inference_costs"
+
+let report_jsonl_read_drop ~surface ~reason ~path ~detail =
+  Safe_ops.report_persistence_read_drop
+    ~on_drop:(fun () ->
+      Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+        ~labels:[("surface", surface); ("reason", reason)]
+        ())
+    ~surface
+    ~reason
+    ~path
+    ~detail
+
+let jsonl_assoc_row_opt ~surface ~path line =
+  match Yojson.Safe.from_string line with
+  | `Assoc _ as json -> Some json
+  | _ ->
+      report_jsonl_read_drop
+        ~surface
+        ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+        ~path
+        ~detail:"expected JSON object row";
+      None
+  | exception (Eio.Cancel.Cancelled _ as exn) ->
+      let bt = Printexc.get_raw_backtrace () in
+      Printexc.raise_with_backtrace exn bt
+  | exception Yojson.Json_error detail ->
+      report_jsonl_read_drop
+        ~surface
+        ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+        ~path
+        ~detail;
+      None
+
 let read_all_decisions ~base_path ~since_unix : raw_entry list =
   let keeper_dir =
     Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers"
@@ -683,15 +718,17 @@ let read_all_decisions ~base_path ~since_unix : raw_entry list =
              while true do
                let line = input_line ic in
                if String.length line > 2 then
-                 match Yojson.Safe.from_string line with
-                 | json ->
+                 match
+                   jsonl_assoc_row_opt
+                     ~surface:model_inference_decisions_surface
+                     ~path
+                     line
+                 with
+                 | Some json ->
                    (match parse_telemetry_entry json ~since_unix with
                     | Some e -> entries := e :: !entries
                     | None -> ())
-                 | exception (Eio.Cancel.Cancelled _ as exn) ->
-                   let bt = Printexc.get_raw_backtrace () in
-                   Printexc.raise_with_backtrace exn bt
-                 | exception Yojson.Json_error _ -> ()
+                 | None -> ()
              done
            with End_of_file -> ());
           !entries
@@ -700,7 +737,13 @@ let read_all_decisions ~base_path ~since_unix : raw_entry list =
       | Eio.Cancel.Cancelled _ as exn ->
         let bt = Printexc.get_raw_backtrace () in
         Printexc.raise_with_backtrace exn bt
-      | _ -> []
+      | exn ->
+        report_jsonl_read_drop
+          ~surface:model_inference_decisions_surface
+          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+          ~path
+          ~detail:(Printexc.to_string exn);
+        []
     ) files
 
 let read_cost_entries ~base_path ~since_unix : raw_entry list =
@@ -717,15 +760,17 @@ let read_cost_entries ~base_path ~since_unix : raw_entry list =
            while true do
              let line = input_line ic in
              if String.length line > 2 then
-               match Yojson.Safe.from_string line with
-               | json ->
+               match
+                 jsonl_assoc_row_opt
+                   ~surface:model_inference_costs_surface
+                   ~path
+                   line
+               with
+               | Some json ->
                  (match parse_cost_entry json ~since_unix with
                   | Some e -> entries := e :: !entries
                   | None -> ())
-               | exception (Eio.Cancel.Cancelled _ as exn) ->
-                 let bt = Printexc.get_raw_backtrace () in
-                 Printexc.raise_with_backtrace exn bt
-               | exception Yojson.Json_error _ -> ()
+               | None -> ()
            done
          with End_of_file -> ());
         !entries)
@@ -733,7 +778,13 @@ let read_cost_entries ~base_path ~since_unix : raw_entry list =
     | Eio.Cancel.Cancelled _ as exn ->
         let bt = Printexc.get_raw_backtrace () in
         Printexc.raise_with_backtrace exn bt
-    | _ -> []
+    | exn ->
+        report_jsonl_read_drop
+          ~surface:model_inference_costs_surface
+          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+          ~path
+          ~detail:(Printexc.to_string exn);
+        []
 
 let same_int_opt a b =
   match a, b with

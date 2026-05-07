@@ -1,6 +1,8 @@
 (** Tests for Model_inference_metrics — per-model aggregate inference stats. *)
 
 module M = Masc_mcp.Model_inference_metrics
+module P = Masc_mcp.Prometheus
+module SO = Safe_ops
 
 open Alcotest
 
@@ -43,6 +45,15 @@ let write_decisions path entries =
     ) entries
   )
 
+let write_raw_lines path lines =
+  let oc = open_out path in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    List.iter (fun line ->
+      output_string oc line;
+      output_char oc '\n'
+    ) lines
+  )
+
 let iso_of_unix ts =
   let tm = Unix.gmtime ts in
   Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
@@ -66,6 +77,28 @@ let write_costs base entries =
       output_char oc '\n'
     ) entries
   )
+
+let write_raw_cost_lines base lines =
+  let masc_dir = Filename.concat base ".masc" in
+  let rec mkdir_p dir =
+    if not (Sys.file_exists dir) then begin
+      mkdir_p (Filename.dirname dir);
+      Unix.mkdir dir 0o755
+    end
+  in
+  mkdir_p masc_dir;
+  write_raw_lines (Filename.concat masc_dir "costs.jsonl") lines
+
+let persistence_read_drop_total ~surface ~reason =
+  P.metric_value_or_zero P.metric_persistence_read_drops
+    ~labels:[("surface", surface); ("reason", reason)]
+    ()
+
+let check_persistence_read_drop_delta ~surface ~reason ~before ~delta =
+  check (float 0.0001)
+    (Printf.sprintf "%s/%s persistence read drops" surface reason)
+    (before +. float_of_int delta)
+    (persistence_read_drop_total ~surface ~reason)
 
 let now_unix () = Unix.gettimeofday ()
 
@@ -642,6 +675,68 @@ let test_costs_jsonl_dedupes_matching_decision_sample () =
     check (option (float 0.001)) "decision tok/sec preserved"
       (Some 100.0) s.avg_tok_per_sec)
 
+let test_jsonl_read_drops_count_malformed_rows () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "malformed" in
+    let ts = now_unix () in
+    let entry_error = SO.persistence_read_drop_reason_entry_load_error in
+    let invalid_payload = SO.persistence_read_drop_reason_invalid_payload in
+    let decisions_surface = "model_inference_decisions" in
+    let costs_surface = "model_inference_costs" in
+    let decisions_entry_before =
+      persistence_read_drop_total
+        ~surface:decisions_surface
+        ~reason:entry_error
+    in
+    let decisions_invalid_before =
+      persistence_read_drop_total
+        ~surface:decisions_surface
+        ~reason:invalid_payload
+    in
+    let costs_entry_before =
+      persistence_read_drop_total
+        ~surface:costs_surface
+        ~reason:entry_error
+    in
+    let costs_invalid_before =
+      persistence_read_drop_total
+        ~surface:costs_surface
+        ~reason:invalid_payload
+    in
+    write_raw_lines path [
+      Yojson.Safe.to_string (success_entry ~model:"decision-model" ~ts ());
+      "[1]";
+      "{not-json";
+    ];
+    write_raw_cost_lines base [
+      Yojson.Safe.to_string (cost_entry ~model:"cost-model" ~ts ());
+      "123";
+      "{bad-json";
+    ];
+    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    check int "valid rows preserved" 2 agg.total_entries;
+    check_persistence_read_drop_delta
+      ~surface:decisions_surface
+      ~reason:entry_error
+      ~before:decisions_entry_before
+      ~delta:1;
+    check_persistence_read_drop_delta
+      ~surface:decisions_surface
+      ~reason:invalid_payload
+      ~before:decisions_invalid_before
+      ~delta:1;
+    check_persistence_read_drop_delta
+      ~surface:costs_surface
+      ~reason:entry_error
+      ~before:costs_entry_before
+      ~delta:1;
+    check_persistence_read_drop_delta
+      ~surface:costs_surface
+      ~reason:invalid_payload
+      ~before:costs_invalid_before
+      ~delta:1)
+
 let test_cost_latency_json_composes_axes_and_percentiles () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
@@ -1100,6 +1195,8 @@ let () =
       test_case "costs.jsonl backfills wall tok/sec" `Quick test_costs_jsonl_backfills_wall_tok_per_sec;
       test_case "costs.jsonl zero latency stays missing" `Quick test_costs_jsonl_zero_latency_is_missing;
       test_case "costs.jsonl dedupes matching decision sample" `Quick test_costs_jsonl_dedupes_matching_decision_sample;
+      test_case "jsonl read drops count malformed rows" `Quick
+        test_jsonl_read_drops_count_malformed_rows;
       test_case "cost latency json composes axes and percentiles" `Quick test_cost_latency_json_composes_axes_and_percentiles;
       test_case "cost latency json preserves missing latency nulls" `Quick test_cost_latency_json_preserves_missing_latency_as_null;
       test_case "json roundtrip" `Quick test_json_roundtrip;

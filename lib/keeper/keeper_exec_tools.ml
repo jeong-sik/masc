@@ -40,6 +40,7 @@ let record_keeper_tool_call ~tool_name ~success ~duration_ms =
 let search_char c =
   match c with
   | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> c
+  | _ when Char.code c > 127 -> c
   | _ -> ' '
 
 let normalize_search_text text =

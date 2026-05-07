@@ -728,17 +728,22 @@ let oas_timeout_budget_strike_limit = 3
 
 module Budget_strike_map = Map.Make (String)
 
-let budget_exhaustions : int Budget_strike_map.t Atomic.t =
-  Atomic.make Budget_strike_map.empty
+(* Stdlib.Mutex: this ledger is updated from keeper Eio fibers and from
+   non-Eio unit tests. The critical section is pure map replacement and
+   cannot yield, so a plain mutex avoids the previous CAS retry loop without
+   introducing Eio-context requirements. *)
+let budget_exhaustions_mutex = Stdlib.Mutex.create ()
+let budget_exhaustions : int Budget_strike_map.t ref =
+  ref Budget_strike_map.empty
 
 let update_budget_exhaustions f =
-  let rec loop () =
-    let current = Atomic.get budget_exhaustions in
-    let next, result = f current in
-    if Atomic.compare_and_set budget_exhaustions current next then result
-    else loop ()
-  in
-  loop ()
+  Stdlib.Mutex.lock budget_exhaustions_mutex;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock budget_exhaustions_mutex)
+    (fun () ->
+      let next, result = f !budget_exhaustions in
+      budget_exhaustions := next;
+      result)
 
 let bump_budget_exhaustion_seeded ~keeper_name ~prior_strikes : int =
   let prior_strikes = max 0 prior_strikes in
@@ -758,8 +763,12 @@ let reset_budget_exhaustion ~keeper_name : unit =
     (Budget_strike_map.remove keeper_name current, ()))
 
 let peek_budget_exhaustion_for_test ~keeper_name : int =
-  Budget_strike_map.find_opt keeper_name (Atomic.get budget_exhaustions)
-  |> Option.value ~default:0
+  update_budget_exhaustions (fun current ->
+    let strikes =
+      Budget_strike_map.find_opt keeper_name current
+      |> Option.value ~default:0
+    in
+    (current, strikes))
 
 let set_budget_exhaustion_for_test ~keeper_name ~strikes : unit =
   if strikes <= 0 then reset_budget_exhaustion ~keeper_name

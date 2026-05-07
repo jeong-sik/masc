@@ -18,15 +18,11 @@ let provider_name_of_label (label : string) : string option =
 
 let is_local_only_cascade name =
   let lc = name |> Keeper_cascade_profile.canonicalize |> String.lowercase_ascii in
-  let pattern = "local" in
-  let plen = String.length pattern in
-  let slen = String.length lc in
-  let rec loop i =
-    if i > slen - plen then false
-    else if String.sub lc i plen = pattern then true
-    else loop (i + 1)
-  in
-  loop 0
+  match lc with
+  | "local" | "local_only" | "ollama" | "ollama_local"
+  | "llama_cpp" | "llama.cpp" | "local_runtime" -> true
+  | s when String.starts_with ~prefix:"local_" s -> true
+  | _ -> false
 
 let is_local_label label =
   match provider_name_of_label label with

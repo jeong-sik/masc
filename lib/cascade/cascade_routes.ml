@@ -40,8 +40,14 @@ type route_spec = {
    "big_three".  Cross-module drift is guarded by
    [test_cascade_routes_bigthree_ssot.ml].  Direct reference to
    [Keeper_cascade_profile] is impossible from here because that module
-   already depends on this one (see [keeper_cascade_profile.ml:31]). *)
-let keeper_default_last_resort_profile = "big_three"
+   already depends on this one (see [keeper_cascade_profile.ml:31]).
+
+   Override via [MASC_KEEPER_LAST_RESORT_PROFILE] env var when the
+   default cascade profile is renamed or replaced. *)
+let keeper_default_last_resort_profile =
+  Env_config_core.get_string
+    ~default:"big_three"
+    "MASC_KEEPER_LAST_RESORT_PROFILE"
 
 let keeper_route use key aliases =
   {

@@ -1401,8 +1401,8 @@ def scan_keeper_evidence(
             if row_matches_evidence_scope(
                 row, evidence_run_id, evidence_run_pr_numbers, evidence_windows
             ):
-                row_evidence, row_docker_evidence = pr_lifecycle_evidence_from_decision(
-                    row
+                row_evidence, row_docker_evidence = (
+                    pr_lifecycle_evidence_from_decision(row)
                 )
                 pr_lifecycle_evidence.update(row_evidence)
                 docker_pr_lifecycle_evidence.update(row_docker_evidence)

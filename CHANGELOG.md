@@ -1,6 +1,15 @@
 # Changelog
 
 
+## [0.19.15] - 2026-05-07
+
+### Added
+- `lib/chronicle_librarian.{ml,mli}`: in-memory chronicle-event store with keyword-search retrieval — Master Report Dim02 P1 §2.4 Librarian Agent first slice. Reuses `Cognitive_gravity.rank` for ordering, no new ranking primitive. Exposes `empty / add / of_list / to_list / len`, three filter helpers (`filter_by_event_type / filter_by_session / filter_by_time_range`), and a deterministic tokeniser. Pure OCaml, no Eio, no I/O. Vector embedder + Responder + Proactive Summary deferred to PR-6+. RFC-0035 PR-5.
+- `test/test_chronicle_librarian.ml`: 11 alcotest cases (tokenise basic, search empty/single/relevance/limit/recency-default/recency-explicit, filter event_type/session/time_range, add insertion order).
+
+### Changed
+- `docs/rfc/RFC-0035-cognitive-ide-roadmap.md`: PR-stack table marks PR-5 in-flight (this PR). PR-4 still in-flight pending merge.
+
 ## [0.19.14] - 2026-05-07
 
 ### Added

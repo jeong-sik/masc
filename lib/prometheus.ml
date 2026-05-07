@@ -901,6 +901,9 @@ let metric_sse_queue_depth_avg = "masc_sse_queue_depth_avg"
 let metric_sse_queue_depth_max = "masc_sse_queue_depth_max"
 let metric_sse_external_subscribers = "masc_sse_external_subscribers_total"
 let metric_sse_client_evictions = "masc_sse_client_evictions_total"
+let metric_coord_broadcast_duration = "masc_coord_broadcast_duration_seconds"
+let metric_file_lock_retries = "masc_file_lock_retries_total"
+let metric_file_lock_acquire_duration = "masc_file_lock_acquire_seconds"
 let metric_grpc_active_streams = "masc_grpc_active_streams_total"
 let metric_grpc_heartbeat_latency = "masc_grpc_heartbeat_latency_seconds"
 let metric_grpc_subscribers = "masc_grpc_subscribers_total"
@@ -2549,6 +2552,15 @@ let init () =
      warning that broadcast fan-out is keeping mailboxes full faster \
      than slow consumers can drain."
     Counter;
+  register_histogram ~name:metric_coord_broadcast_duration
+    ~help:"Coord_broadcast.broadcast latency (next_seq + agent.json read + msg.json write + activity emit + on_broadcast_mention). Pairs with masc_sse_broadcast_duration_seconds. Labels: msg_type."
+    ();
+  add metric_file_lock_retries
+    "F_TLOCK retries before [acquire_flock_retry*] returned. Pairs with masc_file_lock_acquire_seconds. Labels: caller."
+    Counter;
+  register_histogram ~name:metric_file_lock_acquire_duration
+    ~help:"acquire_flock_retry* wall-clock excluding openfile. Labels: caller, outcome (acquired|timeout)."
+    ();
 
   (* The keeper turn / cascade / persistence-failure metrics
      (turn_livelock_blocks .. session_cleanup_failures, plus

@@ -63,6 +63,13 @@ let on_broadcast_mention : (string option -> unit) ref =
 
 let broadcast ?trace_context ?(msg_type = "broadcast")
     ?(task_cache_invariant_checked = false) config ~from_agent ~content =
+  let started_at = Time_compat.now () in
+  let observe final_msg_type =
+    let elapsed_s = Float.max 0.0 (Time_compat.now () -. started_at) in
+    try (Atomic.get Coord_hooks.coord_broadcast_observed_fn)
+          ~msg_type:final_msg_type ~elapsed_s
+    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()
+  in
   ensure_initialized config;
   (* Fleet-wide invariant (PR-B): if the broadcasting agent's current_task is
      terminal in the backlog, replace the original broadcast with a single
@@ -146,4 +153,5 @@ let broadcast ?trace_context ?(msg_type = "broadcast")
    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
      Log.Misc.warn "on_broadcast_mention callback failed: %s"
        (Printexc.to_string exn));
+  observe safe_msg_type;
   Printf.sprintf "\xF0\x9F\x93\xA2 [%s] %s" safe_agent safe_content

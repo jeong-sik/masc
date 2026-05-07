@@ -62,7 +62,7 @@ let make_telemetry ?canonical_model_id () : Agent_sdk.Types.inference_telemetry 
     timings = None;
     reasoning_tokens = None;
     reasoning_tokens_estimated = false;
-    request_latency_ms = 0;
+    request_latency_ms = Some 0;
     peak_memory_gb = None;
     provider_kind = None;
     reasoning_effort = None;

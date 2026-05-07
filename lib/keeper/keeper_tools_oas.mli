@@ -77,11 +77,13 @@ val tool_exec_result_markers :
 (** Build the per-tool handler closure used by both internal and
     alias tool entries. The closure dispatches via
     [execute_keeper_tool_call_with_outcome] using [~name] as the
-    INTERNAL tool name (telemetry SSOT). [?translate_input]
-    reshapes incoming JSON from a public alias schema to the
-    internal payload (identity by default). *)
+    INTERNAL tool name (telemetry SSOT). [~input_schema] is the
+    internal tool schema used for pre-execution validation after
+    [?translate_input] reshapes incoming JSON from a public alias
+    schema to the internal payload (identity by default). *)
 val make_keeper_tool_handler :
   name:string ->
+  input_schema:Yojson.Safe.t ->
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   ctx_snapshot:Keeper_types.working_context ->

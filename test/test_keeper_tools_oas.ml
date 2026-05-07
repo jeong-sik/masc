@@ -314,6 +314,35 @@ let test_error_json_is_returned_as_tool_error () =
             (Option.is_some (Safe_ops.json_string_opt "path" detail))
       | Ok _ -> fail "missing file should be surfaced as tool error")
 
+let test_oas_handler_rejects_missing_required_args () =
+  let meta = make_test_meta () in
+  let ctx_snapshot = make_test_ctx () in
+  let dir = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "test_keeper_tools_validate_%d" (Random.int 100000)) in
+  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fun.protect
+    ~finally:(fun () ->
+      (try Sys.readdir dir |> Array.iter (fun f ->
+        Sys.remove (Filename.concat dir f));
+        Unix.rmdir dir with _ -> ()))
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Coord.default_config dir in
+      let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
+      let tool = find_tool "keeper_fs_read" tools in
+      match Tool.execute tool (`Assoc []) with
+      | Error { Agent_sdk.Types.message; _ } ->
+          let json = Yojson.Safe.from_string message in
+          check bool "ok is false" false
+            (Yojson.Safe.Util.(member "ok" json |> to_bool));
+          check bool "error mentions missing path" true
+            (string_contains ~sub:"path" message);
+          let detail = Yojson.Safe.Util.member "detail" json in
+          check string "validation source" "oas_tool_middleware"
+            Yojson.Safe.Util.(detail |> member "validation" |> to_string)
+      | Ok _ -> fail "missing required path should be rejected by OAS validation")
+
 let latest_log_seq () =
   match Mlog.Ring.recent ~limit:1 () with
   | (entry : Mlog.Ring.entry) :: _ -> entry.seq
@@ -856,6 +885,8 @@ let () =
       test_case "valid schemas" `Quick test_tools_have_valid_schemas;
       test_case "count matches allowed" `Quick test_tool_count_matches_allowed;
       test_case "error json becomes tool error" `Quick test_error_json_is_returned_as_tool_error;
+      test_case "missing required args rejected before keeper exec" `Quick
+        test_oas_handler_rejects_missing_required_args;
       test_case "error result logs at error level" `Quick
         test_error_result_logs_at_error_level;
       test_case "missing file error includes suggestions" `Quick

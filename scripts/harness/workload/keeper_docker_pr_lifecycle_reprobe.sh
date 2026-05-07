@@ -43,7 +43,7 @@ PHASE_MODE="${PHASE_MODE:-both}"
 REVIEW_RESUME="${REVIEW_RESUME:-0}"
 REQUIRED_TOOLS_LEGACY="${REQUIRED_TOOLS:-}"
 CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-masc_web_search,keeper_bash,keeper_pr_create}}"
-REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_pr_review_comment}}"
+REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_shell,keeper_pr_review_comment}}"
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 MCP_TOKEN="${MASC_MCP_TOKEN:-}"
 MCP_CLIENT_NAME="${MCP_CLIENT_NAME:-keeper-docker-pr-lifecycle-reprobe}"
@@ -1309,9 +1309,9 @@ Safety rules:
 - If a tool is missing or policy-blocked, stop and reply with blocker plus exact structured tool output.
 
 This prompt is sent with review-phase masc_keeper_msg.required_tools so the
-runtime records tool_surface_mismatch or missing_required_tool_use when
-keeper_pr_review_comment is not visible or not used. keeper_shell is read-only
-inspection and intentionally not part of the required-tool contract.
+runtime records tool_surface_mismatch or missing_required_tool_use when the
+read-only keeper_shell lookup or keeper_pr_review_comment approval is not
+visible or not used.
 EOF
 }
 

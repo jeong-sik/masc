@@ -290,6 +290,11 @@ let str_contains haystack needle =
     !found
   end
 
+let activity_persistence_counter reason =
+  Prometheus.metric_value_or_zero Prometheus.metric_persistence_read_drops
+    ~labels:[("surface", "activity_feed"); ("reason", reason)]
+    ()
+
 let test_recent_activity_skips_malformed_jsonl_lines () =
   with_temp_dir "activity-feed-jsonl" @@ fun base_path ->
   let config = Coord.default_config base_path in
@@ -310,7 +315,18 @@ let test_recent_activity_skips_malformed_jsonl_lines () =
              ]);
          "not-json";
        ] ^ "\n");
+  let before =
+    activity_persistence_counter
+      Safe_ops.persistence_read_drop_reason_entry_load_error
+  in
   let items = Activity_feed.recent_activity config ~limit:10 () in
+  check
+    (float 0.1)
+    "malformed jsonl increments persistence drop metric"
+    1.0
+    (activity_persistence_counter
+       Safe_ops.persistence_read_drop_reason_entry_load_error
+     -. before);
   check int "valid board post survives" 1 (List.length items);
   match items with
   | [item] ->

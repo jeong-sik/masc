@@ -47,12 +47,23 @@ let warn_read_failure ~kind ~path msg =
 let warn_parse_failure ~kind ~path ~line_no msg =
   Log.Feed.warn "%s parse failed for %s line %d: %s" kind path line_no msg
 
+let persistence_surface = "activity_feed"
+
+let record_persistence_drop ~reason ~delta =
+  Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+    ~labels:[("surface", persistence_surface); ("reason", reason)]
+    ~delta
+    ()
+
 let load_jsonl_safe ?(kind = "jsonl") (path : string) : Yojson.Safe.t list =
   if not (Fs_compat.file_exists path) then []
   else
     match Safe_ops.read_file_safe path with
     | Error msg ->
         warn_read_failure ~kind ~path msg;
+        record_persistence_drop
+          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+          ~delta:1.0;
         []
     | Ok content ->
         content
@@ -65,6 +76,9 @@ let load_jsonl_safe ?(kind = "jsonl") (path : string) : Yojson.Safe.t list =
                  try Some (Yojson.Safe.from_string trimmed)
                  with Yojson.Json_error msg ->
                    warn_parse_failure ~kind ~path ~line_no msg;
+                   record_persistence_drop
+                     ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+                     ~delta:1.0;
                    None)
 
 (** Fallback timestamp used when a source record has no parseable

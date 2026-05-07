@@ -444,6 +444,7 @@ let zero_provider_info (key : string) : Health.provider_info =
   ; latency_samples = 0
   ; avg_confidence = None
   ; confidence_samples = 0
+  ; health_score = 1.0
   }
 
 (** [provider_entry_to_json ~declared info] serialises a provider_info

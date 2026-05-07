@@ -304,6 +304,10 @@ type provider_info = {
   (** Number of confidence samples currently retained.  [0] iff
       [avg_confidence] is [None].  Bounded by {!confidence_ring_size}.
       @since 0.183.0 *)
+  health_score : float;
+  (** Composite health score (0.0–1.0) combining success_rate,
+      speed_score (from p95 latency), and cost_score.
+      @since 0.190.0 *)
 }
 
 (** Structured info for a single provider. Returns [None] if untracked.

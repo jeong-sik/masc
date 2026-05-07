@@ -162,6 +162,88 @@ let inc_grpc_backlog_replay_events_replayed ?(delta=1) () =
       Prometheus.metric_grpc_backlog_replay_events_replayed
       ~delta:(float_of_int delta) ()
 
+(** {1 Primary HTTP listener state} *)
+
+let http_listener_mode_runtime : string Atomic.t = Atomic.make "unknown"
+let http_listener_status : string Atomic.t = Atomic.make "not_started"
+let http_active_connections : int Atomic.t = Atomic.make 0
+let http_last_accept_unix : float option Atomic.t = Atomic.make None
+let http_last_accept_error : string option Atomic.t = Atomic.make None
+
+let set_http_connection_gauge value =
+  Prometheus.set_gauge Prometheus.metric_http_active_connections
+    (float_of_int (max 0 value))
+
+let record_http_listener_started ~mode =
+  Atomic.set http_listener_mode_runtime mode;
+  Atomic.set http_listener_status "listening";
+  set_http_connection_gauge (Atomic.get http_active_connections)
+
+let record_http_listener_stopped ~mode =
+  Atomic.set http_listener_mode_runtime mode;
+  Atomic.set http_listener_status "stopped";
+  set_http_connection_gauge (Atomic.get http_active_connections)
+
+let record_http_accept ~mode =
+  Atomic.set http_listener_mode_runtime mode;
+  Atomic.set http_listener_status "listening";
+  Atomic.set http_last_accept_unix (Some (Unix.gettimeofday ()));
+  Atomic.set http_last_accept_error None;
+  Prometheus.inc_counter Prometheus.metric_http_accepts
+    ~labels:[ ("mode", mode) ] ();
+  let active = Atomic.fetch_and_add http_active_connections 1 + 1 in
+  set_http_connection_gauge active
+
+let rec dec_http_active_connections () =
+  let before = Atomic.get http_active_connections in
+  let after = max 0 (before - 1) in
+  if Atomic.compare_and_set http_active_connections before after then
+    after
+  else
+    dec_http_active_connections ()
+
+let record_http_connection_closed ~mode =
+  Atomic.set http_listener_mode_runtime mode;
+  let active = dec_http_active_connections () in
+  set_http_connection_gauge active
+
+let record_http_accept_error ~mode ~error =
+  Atomic.set http_listener_mode_runtime mode;
+  Atomic.set http_listener_status "accept_error";
+  Atomic.set http_last_accept_error (Some error);
+  Prometheus.inc_counter Prometheus.metric_http_accept_errors
+    ~labels:[ ("mode", mode) ] ()
+
+let json_float_option = function
+  | Some value -> `Float value
+  | None -> `Null
+
+let json_string_option = function
+  | Some value -> `String value
+  | None -> `Null
+
+let http_listener_json ?now () =
+  let now = match now with Some value -> value | None -> Unix.gettimeofday () in
+  let last_accept_unix = Atomic.get http_last_accept_unix in
+  let last_accept_age_seconds =
+    Option.map (fun ts -> max 0.0 (now -. ts)) last_accept_unix
+  in
+  `Assoc
+    [
+      ("mode", `String (Atomic.get http_listener_mode_runtime));
+      ("status", `String (Atomic.get http_listener_status));
+      ("active_connections", `Int (Atomic.get http_active_connections));
+      ( "accepted_total",
+        `Int (int_of_float (Prometheus.metric_total Prometheus.metric_http_accepts)) );
+      ( "accept_errors_total",
+        `Int
+          (int_of_float
+             (Prometheus.metric_total Prometheus.metric_http_accept_errors)) );
+      ("last_accept_unix", json_float_option last_accept_unix);
+      ("last_accept_age_seconds", json_float_option last_accept_age_seconds);
+      ("last_error", json_string_option (Atomic.get http_last_accept_error));
+    ]
+
 (** {1 Environment-derived Transport Config} *)
 
 let grpc_runtime_listening : bool Atomic.t = Atomic.make false
@@ -514,6 +596,7 @@ let transport_health_json ~config =
       ("supports_post", `Bool true);
       ("supports_sse_upgrade", `Bool true);
       ("supports_delete", `Bool true);
+      ("listener", http_listener_json ());
     ]);
     ("http2", `Assoc [
       ("listener_mode", `String listener_mode);

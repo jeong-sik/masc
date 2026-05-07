@@ -947,6 +947,9 @@ let metric_grpc_backlog_replay_lines_scanned =
   "masc_grpc_backlog_replay_lines_scanned_total"
 let metric_grpc_backlog_replay_events_replayed =
   "masc_grpc_backlog_replay_events_replayed_total"
+let metric_http_accepts = "masc_http_accepts_total"
+let metric_http_accept_errors = "masc_http_accept_errors_total"
+let metric_http_active_connections = "masc_http_active_connections"
 
 (* Admission queue metrics — used in admission_queue_metrics.ml. *)
 let metric_inference_queue_depth = "masc_inference_queue_depth"
@@ -2670,6 +2673,18 @@ let init () =
   add metric_ws_bytes_cache_misses
     "WS raw-SSE-forward Bytes cache misses (fresh allocation required)"
     Counter;
+  add metric_http_accepts
+    "TCP connections accepted by the primary HTTP listener. Labels: mode \
+     (h1|h2|auto)."
+    Counter;
+  add metric_http_accept_errors
+    "Primary HTTP listener accept-loop errors. Labels: mode (h1|h2|auto). \
+     A non-zero rate means fresh control-plane connections may be blocked \
+     even while existing dashboard/SSE sessions remain established."
+    Counter;
+  add metric_http_active_connections
+    "Currently active primary HTTP connections accepted by the listener."
+    Gauge;
   register_histogram ~name:metric_dashboard_execution_render_phase_sec
     ~help:
       "Dashboard execution render phase latency in seconds. Labels: \

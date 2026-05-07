@@ -1764,6 +1764,15 @@ legacy_scope = "removed"
   let request = Httpun.Request.create `GET "/health" in
   let json = Runtime.make_health_json request in
   let open Yojson.Safe.Util in
+  let listener = json |> member "http_listener" in
+  check bool "health exposes http listener diagnostics" true
+    (match listener with `Assoc _ -> true | _ -> false);
+  check bool "health listener status is surfaced" true
+    (match listener |> member "status" with `String _ -> true | _ -> false);
+  check bool "health listener active connections surfaced" true
+    (match listener |> member "active_connections" with
+    | `Int _ -> true
+    | _ -> false);
   check int "unknown key count" 1
     (json |> member "keeper_config_unknown_key_count" |> to_int);
   check string "schema status" "blocked"

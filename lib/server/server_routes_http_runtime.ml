@@ -201,6 +201,7 @@ let make_health_json ?(listener = "http/1.1") request =
             `List (List.map (fun v -> `String v) mcp_protocol_versions) );
         ] );
     ("transport", transport_json request);
+    ("http_listener", Transport_metrics.http_listener_json ());
     ("paths", Server_base_path_diagnostics.to_yojson (health_path_diagnostics ()));
     ("uptime", `String uptime_str);
     ("sse_clients", `Int (Sse.client_count ()));

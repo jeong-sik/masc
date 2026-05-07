@@ -232,6 +232,9 @@ let tokens_per_sec_json ~tokens ~latency_ms =
   if tokens <= 0 || latency_ms <= 0 then `Null
   else `Float ((float_of_int tokens *. 1000.0) /. float_of_int latency_ms)
 
+let last_latency_ms_json latency_ms =
+  if latency_ms <= 0 then `Null else `Int latency_ms
+
 let json_string_list_member key json =
   match Yojson.Safe.Util.member key json with
   | `List items ->
@@ -1154,7 +1157,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                 ("output_tokens", `Int m.runtime.usage.last_output_tokens);
                 ("total_tokens", `Int m.runtime.usage.last_total_tokens);
               ]);
-              ("last_latency_ms", `Int m.runtime.usage.last_latency_ms);
+              ("last_latency_ms", last_latency_ms_json m.runtime.usage.last_latency_ms);
               ("compaction_count", `Int m.runtime.compaction_rt.count);
               ("last_compaction_saved_tokens", `Int last_compaction_saved_tokens);
               ("compaction_profile", `String m.compaction.profile);
@@ -1702,7 +1705,7 @@ let keeper_config_json (config : Coord.config) (name : string)
           ("last_input_tokens", `Int m.runtime.usage.last_input_tokens);
           ("last_output_tokens", `Int m.runtime.usage.last_output_tokens);
           ("last_total_tokens", `Int m.runtime.usage.last_total_tokens);
-          ("last_latency_ms", `Int m.runtime.usage.last_latency_ms);
+          ("last_latency_ms", last_latency_ms_json m.runtime.usage.last_latency_ms);
           ( "last_total_tokens_per_sec",
             tokens_per_sec_json ~tokens:m.runtime.usage.last_total_tokens
               ~latency_ms:m.runtime.usage.last_latency_ms );

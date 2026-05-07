@@ -36,6 +36,104 @@ let is_enabled () =
     classify_write_failure-recognised error. *)
 let heartbeat_interval_s = 30.0
 
+let max_ws_close_reason_log_len = 96
+
+let max_ws_close_payload_len = 125
+
+let truncate_ws_close_reason reason =
+  if String.length reason <= max_ws_close_reason_log_len then
+    reason
+  else
+    String.sub reason 0 max_ws_close_reason_log_len ^ "...<truncated>"
+
+let summarize_ws_close_payload bytes ~received_len ~declared_len =
+  if received_len = 0 then
+    Printf.sprintf "code=none received_len=0 declared_len=%d" declared_len
+  else if received_len = 1 then
+    Printf.sprintf "malformed_close_payload received_len=1 declared_len=%d"
+      declared_len
+  else
+    let code =
+      (Char.code (Bytes.get bytes 0) lsl 8) lor Char.code (Bytes.get bytes 1)
+    in
+    let reason_len = received_len - 2 in
+    let reason =
+      if reason_len = 0 then
+        "reason=<empty>"
+      else
+        let reason =
+          Bytes.sub_string bytes 2 reason_len |> truncate_ws_close_reason
+        in
+        Printf.sprintf "reason=%S" reason
+    in
+    let partial =
+      if received_len = declared_len then
+        ""
+      else
+        " partial=true"
+    in
+    Printf.sprintf "code=%d %s received_len=%d declared_len=%d%s" code reason
+      received_len declared_len partial
+
+let log_ws_client_close_payload ~session_id ~declared_len payload =
+  let log_once =
+    let logged = ref false in
+    fun summary ->
+      if not !logged then begin
+        logged := true;
+        Log.Server.debug "[ws-standalone] session %s client close (%s)"
+          session_id summary
+      end
+  in
+  if declared_len <= 0 then begin
+    log_once "code=none received_len=0 declared_len=0";
+    Ws.Payload.close payload
+  end
+  else if declared_len > max_ws_close_payload_len then begin
+    log_once
+      (Printf.sprintf "payload_len=%d exceeds_control_frame_limit"
+         declared_len);
+    Ws.Payload.close payload
+  end
+  else
+    let buffer = Bytes.create declared_len in
+    let offset = ref 0 in
+    let rec schedule () =
+      if !offset >= declared_len then
+        log_once
+          (summarize_ws_close_payload buffer ~received_len:!offset
+             ~declared_len)
+      else
+        Ws.Payload.schedule_read payload
+          ~on_eof:(fun () ->
+            log_once
+              (summarize_ws_close_payload buffer ~received_len:!offset
+                 ~declared_len))
+          ~on_read:(fun bs ~off ~len:chunk_len ->
+            let remaining = declared_len - !offset in
+            let copy_len = min chunk_len remaining in
+            Bigstringaf.blit_to_bytes bs ~src_off:off buffer
+              ~dst_off:!offset ~len:copy_len;
+            offset := !offset + copy_len;
+            if !offset >= declared_len then
+              log_once
+                (summarize_ws_close_payload buffer ~received_len:!offset
+                   ~declared_len)
+            else
+              schedule ())
+    in
+    try schedule () with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+        log_once
+          (Printf.sprintf "payload_read_error=%s declared_len=%d"
+             (Printexc.to_string exn) declared_len);
+        Ws.Payload.close payload
+
+let standalone_ws_eof_summary = function
+  | None -> "error=none"
+  | Some (`Exn exn) -> Printf.sprintf "error=%s" (Printexc.to_string exn)
+
 (** WebSocket handler factory.
 
     For each accepted connection, httpun-ws-eio calls this with the
@@ -63,8 +161,12 @@ let make_websocket_handler ~sw ~clock ~on_message _client_addr
          && not
               (Server_mcp_transport_ws.send_dashboard_or_raw_sse session
                  sse_event)
-      then
-        Server_mcp_transport_ws.cleanup_session session_id)
+      then begin
+        Log.Server.debug
+          "[ws-standalone] session %s sse-forward send failed; cleaning up"
+          session_id;
+        Server_mcp_transport_ws.cleanup_session session_id
+      end)
     ();
   (* Heartbeat fiber: emit a protocol-level ping every
      [heartbeat_interval_s] to keep NAT/proxy mappings warm and surface
@@ -86,12 +188,13 @@ let make_websocket_handler ~sw ~clock ~on_message _client_addr
              with
              | Some _ ->
                  Log.Server.debug
-                   "[ws-standalone] heartbeat skipped (writer closed during \
-                    cancel race)"
+                   "[ws-standalone] session %s heartbeat skipped (writer \
+                    closed during cancel race)"
+                   session_id
              | None ->
                  Log.Server.warn
-                   "[ws-standalone] heartbeat send_ping failed: %s"
-                   (Printexc.to_string exn)));
+                   "[ws-standalone] session %s heartbeat send_ping failed: %s"
+                   session_id (Printexc.to_string exn)));
         if !send_failed then begin
           (* If send_ping failed while [session.closed]/[Wsd.is_closed]
              still read false, the loop would otherwise spin emitting
@@ -146,12 +249,14 @@ let make_websocket_handler ~sw ~clock ~on_message _client_addr
                        (Printexc.to_string exn)));
         Ws.Payload.close payload
       | `Connection_close ->
+        log_ws_client_close_payload ~session_id ~declared_len:len payload;
         Server_mcp_transport_ws.cleanup_session session_id;
-        Ws.Payload.close payload
       | `Pong | `Other _ ->
         Ws.Payload.close payload
     );
-    eof = (fun ?error:_ () ->
+    eof = (fun ?error () ->
+      Log.Server.debug "[ws-standalone] session %s eof (%s)" session_id
+        (standalone_ws_eof_summary error);
       Server_mcp_transport_ws.cleanup_session session_id)
   }
 

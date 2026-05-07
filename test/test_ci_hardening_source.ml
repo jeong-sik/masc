@@ -1794,7 +1794,18 @@ let test_http_cancel_response_contracts () =
     && file_contains_pattern "lib/server/server_ws_standalone.ml"
          {|send_pong skipped|}
     && file_contains_pattern "lib/server/server_ws_standalone.ml"
-         {|WS standalone handler closed before write completed|})
+         {|WS standalone handler closed before write completed|});
+  check bool "standalone ws close diagnostics classify cleanup causes" true
+    (file_contains_pattern "lib/server/server_ws_standalone.ml"
+       {|log_ws_client_close_payload|}
+    && file_contains_pattern "lib/server/server_ws_standalone.ml"
+         {|client close|}
+    && file_contains_pattern "lib/server/server_ws_standalone.ml"
+         {|sse-forward send failed; cleaning up|}
+    && file_contains_pattern "lib/server/server_ws_standalone.ml"
+         {|standalone_ws_eof_summary|}
+    && file_contains_pattern "lib/server/server_ws_standalone.ml"
+         {|declared_len|})
 
 let test_worktree_list_contracts () =
   check bool "worktree list stays read-only" true

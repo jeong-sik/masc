@@ -330,6 +330,12 @@ let test_review_blocker_metrics_registered () =
     check bool (metric ^ " TYPE") true
       (text_has_literal text ("# TYPE " ^ metric ^ " counter"))
   in
+  let check_histogram_registered metric =
+    check bool (metric ^ " HELP") true
+      (text_has_literal text ("# HELP " ^ metric ^ " "));
+    check bool (metric ^ " TYPE") true
+      (text_has_literal text ("# TYPE " ^ metric ^ " summary"))
+  in
   check_registered Prometheus.metric_tool_join_required_guard;
   check_registered Prometheus.metric_timeout_policy_overshoot;
   check_registered Prometheus.metric_auth_credential_token_duplicate;
@@ -343,6 +349,10 @@ let test_review_blocker_metrics_registered () =
   check_registered Prometheus.metric_coord_telemetry_drop;
   check_registered Prometheus.metric_coord_claim_post_provision_failures;
   check_registered Prometheus.metric_keeper_lifecycle_callback_failures;
+  check_registered Prometheus.metric_memory_pipeline_flushes;
+  check_registered Prometheus.metric_memory_pipeline_flush_records;
+  check_histogram_registered
+    Prometheus.metric_memory_pipeline_flush_duration_seconds;
   check_registered Prometheus.metric_keeper_oas_on_stop;
   check_registered Prometheus.metric_keeper_oas_on_idle_escalated;
   check_registered Prometheus.metric_keeper_event_bus_drain

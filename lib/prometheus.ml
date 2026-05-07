@@ -1063,6 +1063,12 @@ let metric_keeper_lifecycle_transitions =
 let metric_fsm_guard_violation = "masc_fsm_guard_violation_total"
 let metric_keeper_lifecycle_callback_failures =
   "masc_keeper_lifecycle_callback_failures_total"
+let metric_memory_pipeline_flushes =
+  "masc_memory_pipeline_flushes_total"
+let metric_memory_pipeline_flush_records =
+  "masc_memory_pipeline_flush_records_total"
+let metric_memory_pipeline_flush_duration_seconds =
+  "masc_memory_pipeline_flush_duration_seconds"
 let metric_keeper_event_bus_drain = "masc_keeper_event_bus_drain_total"
 let metric_keeper_supervisor_cleanup_failures =
   "masc_keeper_supervisor_cleanup_failures_total"
@@ -1860,6 +1866,19 @@ let init () =
      tool-call-log, or action-metric gaps. Labels: callback plus optional \
      keeper at per-keeper hook sites."
     Counter;
+  add metric_memory_pipeline_flushes
+    "Total memory AfterTurn flush attempts. A success with zero records proves \
+     the pipeline ran but had no episodic/procedural deltas; an error surfaces \
+     a hidden hook failure. Labels: agent_name, outcome=success|error."
+    Counter;
+  add metric_memory_pipeline_flush_records
+    "Total memory records persisted by the AfterTurn bridge. Labels: \
+     agent_name, tier=episodic|procedural."
+    Counter;
+  add metric_memory_pipeline_flush_duration_seconds
+    "Wall-clock seconds spent in the memory AfterTurn flush bridge. Labels: \
+     agent_name, outcome=success|error."
+    Histogram;
   add metric_keeper_event_bus_drain
     "Total per-turn OAS event-bus drain helper runs. Labels: site and \
      outcome=drained|empty."

@@ -180,12 +180,13 @@ let test_applies_turn_execution_overrides () =
      llm_rerank_cascade = \"tool_rerank_fast\"\n\
      temperature = 0.65\n\
      max_output_tokens = 8192\n\
-     stream_idle_timeout_sec = 90\n"
+     stream_idle_timeout_sec = 90\n\
+     oas_timeout_budget_strike_limit = 5\n"
   in
   let count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
-  check int "applied 7" 7 count;
+  check int "applied 8" 8 count;
   check (option string) "tool cost ceiling"
     (Some "1.25")
     (List.assoc_opt "MASC_KEEPER_TOOL_COST_MAX_USD" overrides);
@@ -206,7 +207,12 @@ let test_applies_turn_execution_overrides () =
     (List.assoc_opt "MASC_KEEPER_UNIFIED_MAX_TOKENS" overrides);
   check (option string) "stream idle timeout"
     (Some "90")
-    (List.assoc_opt "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" overrides)
+    (List.assoc_opt "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" overrides);
+  check (option string) "oas timeout budget strike limit"
+    (Some "5")
+    (List.assoc_opt
+       "MASC_KEEPER_OAS_TIMEOUT_BUDGET_STRIKE_LIMIT"
+       overrides)
 
 let test_applies_proactive_min_interval_override () =
   let doc = parse_or_fail "[proactive]\nmin_interval_sec = 1234\n" in

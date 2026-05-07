@@ -124,7 +124,7 @@ also preempts TOML. Example: `MASC_KEEPER_AUTOBOT_MAX` preempts
 Legacy compatibility names that are no longer read by the unified turn path
 are intentionally excluded from this TOML surface.
 
-**Sections** (80 knobs total):
+**Sections** (81 knobs total):
 
 | Section | Count | Key examples |
 | --- | --- | --- |
@@ -132,7 +132,7 @@ are intentionally excluded from this TOML surface.
 | `[autonomous]` | 6 | `max_turns_per_call`, `semaphore_wait_timeout_sec`, `concurrency` |
 | `[reactive]` | 3 | `max_turns_per_call`, `concurrency`, `max_idle_turns` |
 | `[heartbeat]` | 10 | `interval_sec`, `max_silence_sec`, `smart_heartbeat`, `board_generic_wakeup_limit` |
-| `[turn]` | 18 | `timeout_sec`, `stream_idle_timeout_sec`, `tool_cost_max_usd`, `temperature` |
+| `[turn]` | 19 | `timeout_sec`, `stream_idle_timeout_sec`, `tool_cost_max_usd`, `oas_timeout_budget_strike_limit` |
 | `[watchdog]` | 4 | `stale_sec`, `grace_sec`, `noop_threshold` |
 | `[supervisor]` | 4 | `max_restarts`, `backoff_base_sec`, `backoff_max_sec` |
 | `[lifecycle]` | 4 | `self_preservation_ratio`, `dead_ttl_sec` |
@@ -166,6 +166,7 @@ stream_idle_timeout_sec = 120
 tool_cost_max_usd = 1.25
 max_tools_per_turn = 64
 llm_rerank = true
+oas_timeout_budget_strike_limit = 3
 
 [watchdog]
 stale_sec = 600

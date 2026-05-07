@@ -723,8 +723,23 @@ let reset_autonomous_completion_for_test () : unit =
    any successful turn (see [Ok updated] branch). On first bump after a
    process restart, callers may seed it from the persisted
    [Oas_timeout_budget_loop] failure reason so restart cannot erase a
-   partially observed loop. *)
-let oas_timeout_budget_strike_limit = 3
+   partially observed loop.
+
+   Env: [MASC_KEEPER_OAS_TIMEOUT_BUDGET_STRIKE_LIMIT]. Default 3. Min 1.
+   Max 100 keeps the operator knob usable without turning an auto-pause
+   safety guard into an effectively disabled loop. *)
+let oas_timeout_budget_strike_limit_int_of_env_default =
+  Keeper_config.int_of_env_default
+
+let oas_timeout_budget_strike_limit_int_of_env_default_for_test =
+  oas_timeout_budget_strike_limit_int_of_env_default
+
+let oas_timeout_budget_strike_limit =
+  oas_timeout_budget_strike_limit_int_of_env_default
+    "MASC_KEEPER_OAS_TIMEOUT_BUDGET_STRIKE_LIMIT"
+    ~default:3
+    ~min_v:1
+    ~max_v:100
 
 module Budget_strike_map = Map.Make (String)
 

@@ -165,6 +165,11 @@ val set_after_acquire_flag_hook_for_test :
     restart or another process update. *)
 val oas_timeout_budget_strike_limit : int
 
+(** Test-only parser/clamp hook for
+    [MASC_KEEPER_OAS_TIMEOUT_BUDGET_STRIKE_LIMIT]. *)
+val oas_timeout_budget_strike_limit_int_of_env_default_for_test :
+  string -> default:int -> min_v:int -> max_v:int -> int
+
 val bump_budget_exhaustion_seeded :
   keeper_name:string -> prior_strikes:int -> int
 val bump_budget_exhaustion : keeper_name:string -> int

@@ -1,6 +1,17 @@
 open Masc_mcp
 
 module KK = Keeper_keepalive
+module KTS = Keeper_turn_slot
+
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some prior -> Unix.putenv name prior
+      | None -> Unix.putenv name "")
+    f
 
 let with_reset keeper f =
   KK.reset_budget_exhaustion ~keeper_name:keeper;
@@ -59,6 +70,24 @@ let test_concurrent_bumps_do_not_lose_updates () =
       (workers * bumps_per_worker)
       (KK.peek_budget_exhaustion_for_test ~keeper_name:keeper))
 
+let strike_limit_from_env_for_test () =
+  KTS.oas_timeout_budget_strike_limit_int_of_env_default_for_test
+    "MASC_KEEPER_OAS_TIMEOUT_BUDGET_STRIKE_LIMIT"
+    ~default:3
+    ~min_v:1
+    ~max_v:100
+
+let test_strike_limit_env_clamps () =
+  with_env "MASC_KEEPER_OAS_TIMEOUT_BUDGET_STRIKE_LIMIT" "0" (fun () ->
+    Alcotest.(check int) "low clamp" 1
+      (strike_limit_from_env_for_test ()));
+  with_env "MASC_KEEPER_OAS_TIMEOUT_BUDGET_STRIKE_LIMIT" "250" (fun () ->
+    Alcotest.(check int) "high clamp" 100
+      (strike_limit_from_env_for_test ()));
+  with_env "MASC_KEEPER_OAS_TIMEOUT_BUDGET_STRIKE_LIMIT" "7" (fun () ->
+    Alcotest.(check int) "operator value" 7
+      (strike_limit_from_env_for_test ()))
+
 let () =
   Alcotest.run "oas_timeout_budget_strike"
   [
@@ -73,5 +102,7 @@ let () =
         Alcotest.test_case "reset clears" `Quick test_reset_clears;
         Alcotest.test_case "concurrent bumps do not lose updates" `Quick
           test_concurrent_bumps_do_not_lose_updates;
+        Alcotest.test_case "strike limit env clamps" `Quick
+          test_strike_limit_env_clamps;
       ] );
   ]

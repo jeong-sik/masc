@@ -187,6 +187,49 @@ let transient_mutex_contention_tool_error
         ] );
     ])
 
+let current_keeper_model (meta : Keeper_types.keeper_meta) =
+  let m = meta.runtime.usage.last_model_used in
+  if m = "" then meta.cascade_name else m
+
+let persist_tool_call_io_from_handler
+    ~(meta : Keeper_types.keeper_meta)
+    ~(tool_name : string)
+    ~(input : Yojson.Safe.t)
+    ~(output_text : string)
+    ~(success : bool)
+    ~(duration_ms : float)
+    ?result_bytes
+    ?truncated_to
+    () =
+  try
+    Keeper_tool_call_log.log_call
+      ~keeper_name:meta.name
+      ~tool_name
+      ~input
+      ~output_text
+      ~success
+      ~duration_ms
+      ~model:(current_keeper_model meta)
+      ?result_bytes
+      ?truncated_to
+      ();
+    Keeper_tool_call_log.remember_handler_logged
+      ~keeper_name:meta.name
+      ~tool_name
+      ~output_text
+      ~success
+      ()
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_lifecycle_callback_failures
+        ~labels:[ ("keeper", meta.name); ("callback", "handler_tool_log_write") ]
+        ();
+      Log.Keeper.warn
+        "keeper:%s tool=%s handler-side tool_call log failed: %s"
+        meta.name tool_name (Printexc.to_string exn)
+
 (** Max chars for SSE error preview. Short enough for dashboard display,
     long enough to include the actionable portion of the error. *)
 let sse_error_preview_max_chars = 300
@@ -412,7 +455,17 @@ let make_keeper_tool_handler
       let msg = Printf.sprintf
         "This tool has failed %d times in a row with the same arguments. Try a different approach or different arguments."
         prior_fails in
-      (false, normalize_tool_result ~success:false msg)
+      let output_text = normalize_tool_result ~success:false msg in
+      persist_tool_call_io_from_handler
+        ~meta
+        ~tool_name:name
+        ~input
+        ~output_text
+        ~success:false
+        ~duration_ms:0.0
+        ~result_bytes:(String.length output_text)
+        ();
+      (false, output_text)
     end else
       let t0 = Time_compat.now () in
       try
@@ -477,7 +530,17 @@ let make_keeper_tool_handler
           Keeper_tool_call_log.set_truncation_info
             ~keeper_name:meta.name
             ~original_bytes:(String.length normalized_error) ();
-          (false, Tool_output_validation.cap normalized_error)
+          let output_text = Tool_output_validation.cap normalized_error in
+          persist_tool_call_io_from_handler
+            ~meta
+            ~tool_name:name
+            ~input
+            ~output_text
+            ~success:false
+            ~duration_ms:(Float.of_int duration_ms)
+            ~result_bytes:(String.length normalized_error)
+            ();
+          (false, output_text)
         end else begin
           failure_count_reset failure_counts key;
           Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:name ~success:true;
@@ -561,6 +624,17 @@ let make_keeper_tool_handler
             ~original_bytes:original_len
             ?truncated_to:(if was_truncated
               then Some (String.length truncated_result) else None) ();
+          persist_tool_call_io_from_handler
+            ~meta
+            ~tool_name:name
+            ~input
+            ~output_text:truncated_result
+            ~success:true
+            ~duration_ms:(Float.of_int duration_ms)
+            ~result_bytes:original_len
+            ?truncated_to:(if was_truncated
+              then Some (String.length truncated_result) else None)
+            ();
           (true, truncated_result)
         end
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
@@ -666,7 +740,17 @@ let make_keeper_tool_handler
         Keeper_tool_call_log.set_truncation_info
           ~keeper_name:meta.name
           ~original_bytes:(String.length normalized_exn) ();
-        (false, Tool_output_validation.cap normalized_exn)
+        let output_text = Tool_output_validation.cap normalized_exn in
+        persist_tool_call_io_from_handler
+          ~meta
+          ~tool_name:name
+          ~input
+          ~output_text
+          ~success:false
+          ~duration_ms:(Float.of_int duration_ms)
+          ~result_bytes:(String.length normalized_exn)
+          ();
+        (false, output_text)
 
 let make_tool_bundle
     ~(config : Coord.config)

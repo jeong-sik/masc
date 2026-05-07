@@ -337,6 +337,18 @@ let () =
   Atomic.set Coord_hooks.coord_broadcast_observed_fn
     record_coord_broadcast
 
+(* RFC-0040: route Mention_dedup decision counts to Prometheus.
+   Default no-op in [Coord_hooks] is replaced at startup so the
+   coord layer keeps zero static dep on Prometheus. *)
+let record_mention_dedup_decision ~outcome =
+  Prometheus.inc_counter
+    Prometheus.metric_mention_dedup_decisions_total
+    ~labels:[ ("outcome", outcome) ] ()
+
+let () =
+  Atomic.set Coord_hooks.mention_dedup_decision_fn
+    record_mention_dedup_decision
+
 let record_file_lock_attempt ~caller ~retries ~elapsed_s ~outcome =
   if retries > 0 then
     Prometheus.inc_counter Prometheus.metric_file_lock_retries

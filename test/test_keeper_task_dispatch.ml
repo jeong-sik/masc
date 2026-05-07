@@ -1323,12 +1323,26 @@ let test_tool_search_whitespace_query_returns_error () =
 let test_tool_search_returns_results_list () =
   with_room (fun config ->
     let meta = make_test_meta () in
-    (* With no custom search_fn, the global default returns {results:[]} *)
+    (* With no custom search_fn, the global default must still be truthful:
+       search the static keeper schema universe instead of claiming no tools
+       match. Normal keeper turns pass a richer session-scoped BM25 search_fn. *)
     let result = call_tool config meta "keeper_tool_search"
-      (`Assoc [ ("query", `String "filesystem read write") ]) in
+      (`Assoc [ ("query", `String "filesystem read file") ]) in
     let json = parse_json result in
     match Yojson.Safe.Util.member "results" json with
-    | `List _ -> () (* results field present *)
+    | `List results ->
+      check bool "default search returns static fallback hits" true
+        (List.length results > 0);
+      let names =
+        List.filter_map
+          (fun hit ->
+             match Yojson.Safe.Util.member "name" hit with
+             | `String name -> Some name
+             | _ -> None)
+          results
+      in
+      check bool "keeper_fs_read discoverable by default" true
+        (List.mem "keeper_fs_read" names)
     | _ -> fail "expected results list in response")
 
 let test_tool_search_max_results_clamped_to_10 () =

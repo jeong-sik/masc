@@ -3,6 +3,7 @@
 module Spawn = Masc_mcp.Spawn
 module Agent_tool_surfaces = Masc_mcp.Agent_tool_surfaces
 module Keeper_deliberation = Masc_mcp.Keeper_deliberation
+module Prometheus = Masc_mcp.Prometheus
 
 (* New modules may not be visible via Masc_mcp wrapper in large libraries
    due to dune's incremental wrapper compilation. Use internal names. *)
@@ -89,6 +90,75 @@ let test_team_context_prompt_section () =
     (contains_s section "Found bug");
   Alcotest.(check bool) "contains workers" true
     (contains_s section "worker-1")
+
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Sys.remove path
+
+let temp_base_path prefix =
+  Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "%s-%d-%d" prefix (Unix.getpid ()) (Random.bits ()))
+
+let write_file path content =
+  let rec mkdir_p dir =
+    if dir = "" || dir = "." || dir = "/" then ()
+    else if Sys.file_exists dir then ()
+    else begin
+      mkdir_p (Filename.dirname dir);
+      Unix.mkdir dir 0o755
+    end
+  in
+  mkdir_p (Filename.dirname path);
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let team_context_drop_value reason =
+  Prometheus.metric_value_or_zero Prometheus.metric_persistence_read_drops
+    ~labels:[("surface", "team_context_findings"); ("reason", reason)]
+    ()
+
+let test_team_context_load_findings_records_drop_metrics () =
+  let base_path = temp_base_path "test-team-context-drops" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let path =
+        Filename.concat
+          (Filename.concat base_path Common.masc_dirname)
+          "shared_findings.jsonl"
+      in
+      let entry_error = Safe_ops.persistence_read_drop_reason_entry_load_error in
+      let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+      let before_entry_error = team_context_drop_value entry_error in
+      let before_invalid_payload = team_context_drop_value invalid_payload in
+      write_file path
+        (String.concat "\n"
+           [
+             Yojson.Safe.to_string
+               (`Assoc
+                 [
+                   ("worker", `String "w1");
+                   ("finding", `String "valid finding");
+                 ]);
+             "{not-json";
+             Yojson.Safe.to_string (`Assoc [("worker", `String "w2")]);
+           ]
+        ^ "\n");
+      let findings = Team_context.load_findings ~base_path in
+      Alcotest.(check int) "valid finding survives" 1 (List.length findings);
+      Alcotest.(check bool) "valid finding content" true
+        (List.exists (fun f -> contains_s f "valid finding") findings);
+      Alcotest.(check (float 0.001)) "malformed json increments entry error"
+        1.0 (team_context_drop_value entry_error -. before_entry_error);
+      Alcotest.(check (float 0.001)) "missing finding increments invalid payload"
+        1.0 (team_context_drop_value invalid_payload -. before_invalid_payload))
 
 (* ── Phase 4: Prompt Composer ─────────────────────────────────── *)
 
@@ -268,6 +338,8 @@ let () =
           Alcotest.test_case "empty context" `Quick test_team_context_empty;
           Alcotest.test_case "prompt section" `Quick
             test_team_context_prompt_section;
+          Alcotest.test_case "load findings drop metrics" `Quick
+            test_team_context_load_findings_records_drop_metrics;
         ] );
       ( "phase4_prompt_composer",
         [

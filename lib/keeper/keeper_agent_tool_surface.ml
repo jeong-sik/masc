@@ -297,6 +297,30 @@ let required_tool_names_for_turn ~(current_task_required_tool_names : string lis
   | [] -> current_task_required_tool_names
   | _ :: _ -> per_call_required_tool_names
 
+let outstanding_required_tool_names ~(required_tool_names : string list)
+    ~(satisfied_tool_names : string list) =
+  let satisfied =
+    satisfied_tool_names
+    |> List.map Keeper_tool_disclosure.canonical_tool_name
+    |> Keeper_types.dedupe_keep_order
+  in
+  required_tool_names
+  |> List.filter (fun name ->
+    let canonical = Keeper_tool_disclosure.canonical_tool_name name in
+    not (List.mem canonical satisfied))
+  |> Keeper_types.dedupe_keep_order
+
+let satisfied_required_tool_names_of_outcomes
+    (calls : (string * string) list) =
+  calls
+  |> List.filter_map (fun (tool_name, outcome) ->
+    if String.equal outcome "ok"
+       && Keeper_tool_disclosure.tool_name_can_satisfy_required_contract
+            tool_name
+    then Some tool_name
+    else None)
+  |> Keeper_types.dedupe_keep_order
+
 let preferred_tool_choice_for_required_tool_names
     ~(required_tool_names : string list) ~(allowed_tool_names : string list) =
   let visible_required =

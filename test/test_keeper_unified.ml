@@ -7727,6 +7727,35 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
     (Surface.required_tool_names_for_turn
        ~current_task_required_tool_names:[ "keeper_board_curation_submit" ]
        ~per_call_required_tool_names:[]);
+  check (list string)
+    "satisfied per-call required tool is not forced again"
+    []
+    (Surface.outstanding_required_tool_names
+       ~required_tool_names:[ "keeper_pr_review_comment" ]
+       ~satisfied_tool_names:[ "keeper_pr_review_comment" ]);
+  check (list string)
+    "unsatisfied required tool remains outstanding"
+    [ "keeper_board_post" ]
+    (Surface.outstanding_required_tool_names
+       ~required_tool_names:
+         [ "keeper_pr_review_comment"; "keeper_board_post" ]
+       ~satisfied_tool_names:[ "keeper_pr_review_comment" ]);
+  check (list string)
+    "failed required tool call remains outstanding"
+    [ "keeper_pr_review_comment" ]
+    (Surface.outstanding_required_tool_names
+       ~required_tool_names:[ "keeper_pr_review_comment" ]
+       ~satisfied_tool_names:
+         (Surface.satisfied_required_tool_names_of_outcomes
+            [ "keeper_pr_review_comment", "error" ]));
+  check (list string)
+    "successful required tool call is satisfied"
+    []
+    (Surface.outstanding_required_tool_names
+       ~required_tool_names:[ "keeper_pr_review_comment" ]
+       ~satisfied_tool_names:
+         (Surface.satisfied_required_tool_names_of_outcomes
+            [ "keeper_pr_review_comment", "ok" ]));
   (match
      Surface.preferred_tool_choice_for_required_tool_names
        ~required_tool_names:[ "keeper_board_post" ]

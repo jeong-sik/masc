@@ -16,17 +16,28 @@ let provider_name_of_label (label : string) : string option =
       if idx = 0 then None
       else Some (String.sub label 0 idx |> String.trim |> String.lowercase_ascii)
 
+(* Cascades whose attempts must be filtered to local providers only.
+
+   Explicit allowlist canonicalized against the cascade catalog.  The
+   prior substring scan on ["local"] was retired because it
+   false-positived hypothetical names like ["localhost_special"] and
+   false-negatived semantically local cascades that do not embed
+   ["local"] in the name (e.g. ["pure_ollama"]).
+
+   Production today defines only [local_recovery] in [config/cascade.toml]
+   so behavior is preserved.  The catalog-derived implementation —
+   "is_local iff every entry in [{name}_models] resolves to a provider
+   for which [Provider_adapter.is_local_provider] is true" — is the
+   right long-term fix; tracked as an RFC-0027 follow-up because it
+   needs [Cascade_config_loader] to surface the per-cascade model list
+   on [catalog_entry]. *)
+let local_only_cascades = [ "local_recovery" ]
+
 let is_local_only_cascade name =
-  let lc = name |> Keeper_cascade_profile.canonicalize |> String.lowercase_ascii in
-  let pattern = "local" in
-  let plen = String.length pattern in
-  let slen = String.length lc in
-  let rec loop i =
-    if i > slen - plen then false
-    else if String.sub lc i plen = pattern then true
-    else loop (i + 1)
+  let canonical =
+    name |> Keeper_cascade_profile.canonicalize |> String.lowercase_ascii
   in
-  loop 0
+  List.mem canonical local_only_cascades
 
 let is_local_label label =
   match provider_name_of_label label with

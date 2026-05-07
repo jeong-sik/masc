@@ -201,7 +201,9 @@ let make_sink () : Llm_provider.Metrics.t =
         emit_http_status ~provider ~model_id ~status);
     on_request_end =
       (fun ~model_id ~latency_ms ->
-        emit_request_latency ~model_id ~latency_ms);
+        match latency_ms with
+        | Some latency_ms -> emit_request_latency ~model_id ~latency_ms
+        | None -> ());
     on_capability_drop =
       (fun ~model_id ~field ->
         emit_capability_drop ~model_id ~field);

@@ -963,7 +963,7 @@ let append_decision_record
                     [
                       ("system_fingerprint", match t.system_fingerprint with Some s -> `String s | None -> `Null);
                       ("reasoning_tokens", match t.reasoning_tokens with Some n -> `Int n | None -> `Null);
-                      ("request_latency_ms", `Int t.request_latency_ms);
+                      ("request_latency_ms", match t.request_latency_ms with Some n -> `Int n | None -> `Null);
                     ] @ timings_fields
                 | None -> []
               in

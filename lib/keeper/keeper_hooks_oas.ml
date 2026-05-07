@@ -662,12 +662,13 @@ let record_llm_inference_latency_metric
   match telemetry with
   | Some t ->
     let observed_latency_ms =
-      if t.request_latency_ms > 0 then t.request_latency_ms
-      else (
-        Prometheus.inc_counter
-          Prometheus.metric_after_turn_telemetry_zero_latency
-          ~labels ();
-        1)
+      match t.request_latency_ms with
+      | Some latency_ms when latency_ms > 0 -> latency_ms
+      | _ ->
+          Prometheus.inc_counter
+            Prometheus.metric_after_turn_telemetry_zero_latency
+            ~labels ();
+          1
     in
     Prometheus.observe_histogram
       Prometheus.metric_llm_inference_duration
@@ -684,11 +685,13 @@ let wall_tokens_per_second
     ~(telemetry : Agent_sdk.Types.inference_telemetry option)
   : float option =
   match telemetry with
-  | Some t when not usage_missing && output_tokens > 0
-                && t.request_latency_ms > 0 ->
+  | Some t when not usage_missing && output_tokens > 0 -> (
+      match t.request_latency_ms with
+      | Some request_latency_ms when request_latency_ms > 0 ->
       Some
         (Float.of_int output_tokens
-         /. (Float.of_int t.request_latency_ms /. 1000.0))
+         /. (Float.of_int request_latency_ms /. 1000.0))
+      | _ -> None)
   | _ -> None
 
 (** #10318: classify why [cost_usd] ended up as it did so the
@@ -845,7 +848,9 @@ let assemble_cost_event_payload
          | None -> [])
       @ float_field "peak_memory_gb" t.peak_memory_gb
       @ int_field "request_latency_ms"
-          (if t.request_latency_ms > 0 then Some t.request_latency_ms else None)
+          (match t.request_latency_ms with
+           | Some latency_ms when latency_ms > 0 -> Some latency_ms
+           | _ -> None)
     | None -> []
   in
   let wall_tok_s_fields =
@@ -2070,7 +2075,7 @@ let make_hooks
         in
         let latency_ms =
           match response.telemetry with
-          | Some t -> t.request_latency_ms
+          | Some t -> Option.value ~default:0 t.request_latency_ms
           | None -> 0
         in
         let wall_tok_s_opt =

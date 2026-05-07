@@ -161,9 +161,11 @@ let duration_from_response ?total_duration_ms
   in
   match total_duration_ms, response.telemetry with
   | Some ms, _ when ms > 0.0 -> ms
-  | _, Some telemetry when telemetry.request_latency_ms > 0 ->
-      Float.of_int telemetry.request_latency_ms
   | _, Some telemetry -> duration_from_timings telemetry.timings
+      |> fun timings_ms ->
+      (match telemetry.request_latency_ms with
+       | Some ms when ms > 0 -> Float.of_int ms
+       | _ -> timings_ms)
   | _ -> 0.0
 
 let ttfb_from_response (response : Agent_sdk.Types.api_response) =

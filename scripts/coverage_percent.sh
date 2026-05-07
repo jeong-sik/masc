@@ -4,6 +4,23 @@ set -euo pipefail
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 coverage_dir="${COVERAGE_DIR:-$root_dir/_coverage}"
 reuse_existing=false
+fail_under=""
+
+usage() {
+  cat <<'EOF'
+usage: scripts/coverage_percent.sh [--reuse-existing] [--fail-under PERCENT]
+
+Print the bisect_ppx line coverage percentage.
+
+Options:
+  --reuse-existing       Read COVERAGE_DIR without running tests again.
+  --fail-under PERCENT   Exit non-zero if measured coverage is below PERCENT.
+EOF
+}
+
+is_number() {
+  awk -v value="$1" 'BEGIN { exit (value ~ /^[0-9]+([.][0-9]+)?$/ ? 0 : 1) }'
+}
 
 require_bisect_reporter() {
   if ! command -v opam >/dev/null 2>&1; then
@@ -24,16 +41,30 @@ EOF
   fi
 }
 
-for arg in "$@"; do
-  case "$arg" in
+while [ "$#" -gt 0 ]; do
+  case "$1" in
     --reuse-existing)
       reuse_existing=true
       ;;
+    --fail-under)
+      shift
+      if [ "$#" -eq 0 ] || ! is_number "$1"; then
+        echo "--fail-under requires a numeric percentage" >&2
+        exit 2
+      fi
+      fail_under="$1"
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
     *)
-      echo "unknown argument: $arg" >&2
+      echo "unknown argument: $1" >&2
+      usage >&2
       exit 2
       ;;
   esac
+  shift
 done
 
 require_bisect_reporter
@@ -64,3 +95,11 @@ if [ -z "$percent" ]; then
 fi
 
 printf '%s\n' "$percent"
+
+if [ -n "$fail_under" ]; then
+  if ! awk -v percent="$percent" -v threshold="$fail_under" \
+    'BEGIN { exit (percent + 0 >= threshold + 0 ? 0 : 1) }'; then
+    echo "coverage ${percent}% is below required ${fail_under}%" >&2
+    exit 1
+  fi
+fi

@@ -128,6 +128,31 @@ TraceStep ==
     \/ TraceNext
     \/ TerminalStutter
 
+\* ── Bug Model: DerivePhase Mismatch ────────────────────────
+\* Models a regression where recorded_phase diverges from DerivePhase.
+\* SHOULD violate DerivePhaseAgreement.
+
+BugDerivePhaseMismatch ==
+    /\ trace_idx < TraceLength
+    /\ trace_idx' = trace_idx + 1
+    /\ recorded_phase' = "Running"  \* BUG: hardcoded wrong phase
+    /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
+                    context_within_budget, context_handoff_needed,
+                    compaction_active, handoff_active, operator_paused,
+                    stop_requested, restart_budget_remaining, backoff_elapsed,
+                    guardrail_triggered, drain_complete,
+                    context_overflow, compact_retry_exhausted,
+                    restart_count>>
+
+TraceStepBuggy ==
+    \/ TraceNext
+    \/ TerminalStutter
+    \/ BugDerivePhaseMismatch
+
+TraceSpecBuggy == TraceInit /\ [][TraceStepBuggy]_vars
+
+DerivePhaseAgreementMustHold == DerivePhaseAgreement
+
 TraceSpec == TraceInit /\ [][TraceStep]_vars
 
 \* ── Safety Invariants ────────────────────────────────────

@@ -297,6 +297,30 @@ let required_tool_names_for_turn ~(current_task_required_tool_names : string lis
   | [] -> current_task_required_tool_names
   | _ :: _ -> per_call_required_tool_names
 
+let outstanding_required_tool_names ~(required_tool_names : string list)
+    ~(satisfied_tool_names : string list) =
+  let satisfied =
+    satisfied_tool_names
+    |> List.map Keeper_tool_disclosure.canonical_tool_name
+    |> Keeper_types.dedupe_keep_order
+  in
+  required_tool_names
+  |> List.filter (fun name ->
+    let canonical = Keeper_tool_disclosure.canonical_tool_name name in
+    not (List.mem canonical satisfied))
+  |> Keeper_types.dedupe_keep_order
+
+let satisfied_required_tool_names_of_outcomes
+    (calls : (string * string) list) =
+  calls
+  |> List.filter_map (fun (tool_name, outcome) ->
+    if String.equal outcome "ok"
+       && Keeper_tool_disclosure.tool_name_can_satisfy_required_contract
+            tool_name
+    then Some tool_name
+    else None)
+  |> Keeper_types.dedupe_keep_order
+
 let preferred_tool_choice_for_required_tool_names
     ~(required_tool_names : string list) ~(allowed_tool_names : string list) =
   let visible_required =
@@ -307,8 +331,14 @@ let preferred_tool_choice_for_required_tool_names
     |> Keeper_types.dedupe_keep_order
   in
   match visible_required with
-  | [ name ] -> Agent_sdk.Types.Tool name
-  | _ :: _ -> Agent_sdk.Types.Any
+  | _ :: _ ->
+    (* Use the provider-level "some tool is required" contract here, even
+       for a single explicit required tool. Runtime MCP transports may return
+       names such as [mcp__masc__keeper_pr_create]; OAS exact-tool contracts
+       compare raw names before MASC can canonicalize them, so exact Tool(name)
+       can reject a correct call. MASC still validates the specific required
+       names after execution via [outstanding_required_tool_names]. *)
+    Agent_sdk.Types.Any
   | [] -> Agent_sdk.Types.Auto
 
 let owned_active_task_id_for_meta =

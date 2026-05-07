@@ -135,9 +135,21 @@ val required_tool_names_for_turn :
   per_call_required_tool_names:string list ->
   string list
 
-(** Pick the model-facing [tool_choice] for an explicit required-tool list. A
-    single visible required tool should be forced specifically; multiple visible
-    required tools use [Any] and are checked after execution. *)
+(** Remove required tools that have already been satisfied in the current
+    Agent.run. This keeps a multi-turn keeper message from forcing the same
+    specific tool again after the successful tool call has already happened. *)
+val outstanding_required_tool_names :
+  required_tool_names:string list -> satisfied_tool_names:string list -> string list
+
+(** Extract successfully satisfied required-contract tools from observed
+    [(tool_name, outcome)] pairs. Failed or passive calls stay outstanding. *)
+val satisfied_required_tool_names_of_outcomes :
+  (string * string) list -> string list
+
+(** Pick the model-facing [tool_choice] for an explicit required-tool list.
+    Visible required tools use [Any] so OAS enforces tool use without
+    exact-name matching before MASC canonicalizes MCP-prefixed tool names. The
+    specific required names are checked after execution. *)
 val preferred_tool_choice_for_required_tool_names :
   required_tool_names:string list ->
   allowed_tool_names:string list ->

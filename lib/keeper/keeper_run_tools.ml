@@ -563,6 +563,12 @@ let prepare_agent_setup
         || turn_affordances_require_tool_gate_with_allowed
              ~record_suppression_metric:true ~allowed_tool_names turn_affordances)
   in
+  let satisfied_required_tool_names () =
+    acc.tool_calls
+    |> List.map (fun (detail : tool_call_detail) ->
+      detail.tool_name, detail.outcome)
+    |> satisfied_required_tool_names_of_outcomes
+  in
   let compute_tool_surface ~turn ~messages ~current_tool_choice ~decay_discovered
       : computed_tool_surface =
     let last_user_text =
@@ -715,11 +721,23 @@ let prepare_agent_setup
         ~discovered
 
     in
-    let required_tool_names =
+    let required_tool_names_raw =
       required_tool_names_for_turn
         ~current_task_required_tool_names:(current_task_required_tools ())
         ~per_call_required_tool_names:required_tool_names
       |> Keeper_types.dedupe_keep_order
+    in
+    let required_tool_names =
+      outstanding_required_tool_names
+        ~required_tool_names:required_tool_names_raw
+        ~satisfied_tool_names:(satisfied_required_tool_names ())
+    in
+    let current_tool_choice =
+      match current_tool_choice with
+      | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _)
+        when required_tool_names_raw <> [] && required_tool_names = [] ->
+        None
+      | _ -> current_tool_choice
     in
     let visible_required_tool_names =
       required_tool_names
@@ -1260,6 +1278,17 @@ let prepare_agent_setup
                          with keeper_task_done or keeper_task_submit_for_verification."
                         computed_surface.per_call_turn
                         computed_surface.per_call_max_turns)
+                 else if computed_surface.required_tool_names <> []
+                 then
+                   append_ctx
+                     ctx
+                     (Printf.sprintf
+                        "[REQUIRED TOOLS] This Agent.run call has explicit \
+                         required_tools: %s. You MUST use these exact runtime \
+                         tools before answering in natural language. Do not \
+                         substitute a shell command or status read for a \
+                         listed required tool."
+                        (String.concat ", " computed_surface.required_tool_names))
                  else if is_retry
                  then
                    append_ctx

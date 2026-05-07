@@ -2333,6 +2333,8 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
        "keeper_shell op=gh` derives repo context from the active task worktree/current_task_id");
   check bool "unknown tool guard names server-managed public lifecycle tools" true
     (contains_substring (Guidance.render_unknown_tool_guard ()) "masc_heartbeat");
+  check bool "unknown tool guard warns against public board alias" true
+    (contains_substring (Guidance.render_unknown_tool_guard ()) "masc_board_list");
   check bool "keeper_shell schema documents gh claim prerequisite" true
     (source_file_contains "lib/tool_shard.ml"
        "Requires an active claimed task/current_task_id");
@@ -7496,6 +7498,28 @@ let test_turn_affordance_gate_suppression_metric () =
     claim_before
     (metric "task_claim")
 
+let test_required_gate_surface_removes_passive_distractions () =
+  let module Surface = Masc_mcp.Keeper_agent_tool_surface in
+  check (list string)
+    "required gate keeps actionable tools only"
+    [ "keeper_task_claim"; "keeper_board_post" ]
+    (Surface.tool_names_for_required_gate_surface
+       ~tool_gate_requested:true
+       [ "keeper_tasks_list"; "keeper_task_claim"; "keeper_stay_silent";
+         "keeper_board_post"; "masc_status" ]);
+  check (list string)
+    "optional turn keeps passive tools visible"
+    [ "keeper_tasks_list"; "keeper_board_post" ]
+    (Surface.tool_names_for_required_gate_surface
+       ~tool_gate_requested:false
+       [ "keeper_tasks_list"; "keeper_board_post" ]);
+  check (list string)
+    "passive-only surface remains unchanged when no action exists"
+    [ "keeper_tasks_list"; "masc_status" ]
+    (Surface.tool_names_for_required_gate_surface
+       ~tool_gate_requested:true
+       [ "keeper_tasks_list"; "masc_status" ])
+
 let test_tools_for_gated_affordance_covers_each_variant () =
   (* Compile-time exhaustiveness already ensures every variant is
      handled; this asserts the runtime mapping is non-empty so a
@@ -8648,6 +8672,8 @@ let () =
             test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool;
           test_case "affordance gate suppression emits metric" `Quick
             test_turn_affordance_gate_suppression_metric;
+          test_case "required gate surface removes passive distractions" `Quick
+            test_required_gate_surface_removes_passive_distractions;
           test_case "tools_for_gated_affordance non-empty for every variant"
             `Quick test_tools_for_gated_affordance_covers_each_variant;
         ] );

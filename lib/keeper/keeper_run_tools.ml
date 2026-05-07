@@ -792,6 +792,9 @@ let prepare_agent_setup
            ~allowed_tool_names:all_allowed
     in
     let all_allowed =
+      tool_names_for_required_gate_surface ~tool_gate_requested all_allowed
+    in
+    let all_allowed =
       if List.length all_allowed > max_tools then (
         Log.Keeper.info
           "context overflow guard: %d tools > max %d, truncating"

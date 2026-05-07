@@ -205,6 +205,27 @@ let turn_affordances_require_tool_gate_with_allowed
       gated_affordances;
   gate_requested
 
+let tool_names_for_required_gate_surface
+    ~(tool_gate_requested : bool)
+    (tool_names : string list) : string list =
+  let is_stay_silent name =
+    match Tool_name.of_string name with
+    | Some (Tool_name.Keeper Tool_name.Keeper.Stay_silent) -> true
+    | _ -> false
+  in
+  if not tool_gate_requested then tool_names
+  else
+    let actionable =
+      tool_names
+      |> List.filter (fun name ->
+        Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name
+        && not (is_stay_silent name))
+      |> Keeper_types.dedupe_keep_order
+    in
+    match actionable with
+    | [] -> tool_names
+    | _ :: _ -> actionable
+
 let should_require_tools_for_initial_turn ~(max_turns : int)
     ~(turn_affordances : string list) =
   let initial_per_call_turn = 1 in

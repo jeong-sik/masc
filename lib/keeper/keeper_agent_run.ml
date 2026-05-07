@@ -12,6 +12,19 @@ include Keeper_agent_checkpoint_hygiene
 
 (* Post-turn telemetry logging — extracted to Keeper_turn_telemetry (#5732) *)
 
+let per_provider_timeout_for_turn
+    ~(meta : Keeper_types.keeper_meta)
+    ?oas_timeout_s
+    ~(timeout_s : float)
+    ()
+  =
+  match oas_timeout_s with
+  | Some _ as explicit_timeout -> explicit_timeout
+  | None ->
+      (match meta.per_provider_timeout_s with
+       | Some _ as configured -> configured
+       | None -> Some timeout_s)
+
 (** Run a single keeper turn via OAS Agent.run().
 
     Loads checkpoint, creates working context with the base keeper system
@@ -265,9 +278,7 @@ let run_turn
             ~estimated_input_tokens
     in
     let per_provider_timeout_s =
-      match meta.per_provider_timeout_s with
-      | Some _ as configured -> configured
-      | None -> Some timeout_s
+      per_provider_timeout_for_turn ~meta ?oas_timeout_s ~timeout_s ()
     in
     (* OAS [stream_idle_timeout_s] bounds inter-line idle on HTTP streams
        (Anthropic/OpenAI/Gemini/GLM/Ollama). The deadline resets after each

@@ -844,7 +844,8 @@ let assemble_cost_event_payload
            @ float_field "hw_decode_tokens_per_second" tm.predicted_per_second
          | None -> [])
       @ float_field "peak_memory_gb" t.peak_memory_gb
-      @ [("request_latency_ms", `Int t.request_latency_ms)]
+      @ int_field "request_latency_ms"
+          (if t.request_latency_ms > 0 then Some t.request_latency_ms else None)
     | None -> []
   in
   let wall_tok_s_fields =

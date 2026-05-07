@@ -160,7 +160,9 @@ let test_emit_cost_event_uses_typed_provider_kind_for_bare_model () =
     ~telemetry ();
   let json = read_jsonl_line (Filename.concat root "costs.jsonl") in
   check string "provider from provider_kind" "kimi_cli"
-    (json |> member "provider" |> to_string)
+    (json |> member "provider" |> to_string);
+  check bool "zero latency is omitted" true
+    (match json |> member "request_latency_ms" with `Null -> true | _ -> false)
 
 let test_emit_cost_event_writes_wall_tok_s_without_provider_timings () =
   let root = temp_dir () in

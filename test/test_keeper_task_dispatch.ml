@@ -975,6 +975,95 @@ let test_create_rejects_unknown_goal_id () =
     check bool "error mentions unknown goal" true
       (contains_substring error "unknown goal_id"))
 
+let test_create_rejects_fourth_open_task_for_goal () =
+  with_room (fun config ->
+    let goal, _ =
+      match Goal_store.upsert_goal config ~title:"Scoped capacity goal" () with
+      | Ok payload -> payload
+      | Error msg -> fail msg
+    in
+    let meta = make_goal_scoped_meta [ goal.id ] in
+    for i = 1 to 3 do
+      ignore
+        (Coord_task.add_task
+           ~goal_id:goal.id
+           config
+           ~title:(Printf.sprintf "Existing goal task %d" i)
+           ~priority:3
+           ~description:"desc")
+    done;
+    let result =
+      call_tool config meta "keeper_task_create"
+        (`Assoc
+          [
+            ("title", `String "Fourth goal task");
+            ("description", `String "desc");
+          ])
+    in
+    let json = parse_json result in
+    check string "error kind" "goal_task_limit_exceeded"
+      (Yojson.Safe.Util.member "error_kind" json |> Yojson.Safe.Util.to_string);
+    check string "response goal_id" goal.id
+      (Yojson.Safe.Util.member "goal_id" json |> Yojson.Safe.Util.to_string);
+    check int "open task count" 3
+      (Yojson.Safe.Util.member "open_task_count" json |> Yojson.Safe.Util.to_int);
+    check int "limit" 3
+      (Yojson.Safe.Util.member "limit" json |> Yojson.Safe.Util.to_int);
+    check int "no task added" 3 (List.length (Coord.get_tasks_raw config)))
+
+let mark_first_task_done config ~agent_name =
+  let backlog = Coord.read_backlog config in
+  let tasks =
+    match backlog.tasks with
+    | first :: rest ->
+      {
+        first with
+        task_status =
+          Masc_domain.Done
+            {
+              assignee = agent_name;
+              completed_at = Masc_domain.now_iso ();
+              notes = Some "done";
+            };
+      }
+      :: rest
+    | [] -> fail "expected task to mark done"
+  in
+  Coord.write_backlog config { backlog with tasks; version = backlog.version + 1 }
+
+let test_create_goal_limit_ignores_terminal_tasks () =
+  with_room (fun config ->
+    let goal, _ =
+      match Goal_store.upsert_goal config ~title:"Scoped terminal goal" () with
+      | Ok payload -> payload
+      | Error msg -> fail msg
+    in
+    let meta = make_goal_scoped_meta [ goal.id ] in
+    for i = 1 to 3 do
+      ignore
+        (Coord_task.add_task
+           ~goal_id:goal.id
+           config
+           ~title:(Printf.sprintf "Maybe terminal task %d" i)
+           ~priority:3
+           ~description:"desc")
+    done;
+    mark_first_task_done config ~agent_name:meta.agent_name;
+    let result =
+      call_tool config meta "keeper_task_create"
+        (`Assoc
+          [
+            ("title", `String "Replacement goal task");
+            ("description", `String "desc");
+          ])
+    in
+    let json = parse_json result in
+    check bool "create ok" true
+      (Yojson.Safe.Util.member "ok" json |> Yojson.Safe.Util.to_bool);
+    check string "response goal_id" goal.id
+      (Yojson.Safe.Util.member "goal_id" json |> Yojson.Safe.Util.to_string);
+    check int "task added" 4 (List.length (Coord.get_tasks_raw config)))
+
 (* --- keeper_task_done tests --- *)
 
 let test_done_with_empty_task_id () =
@@ -1353,6 +1442,10 @@ let () =
         test_create_requires_goal_id_for_multiple_active_goals;
       test_case "create rejects unknown goal_id" `Quick
         test_create_rejects_unknown_goal_id;
+      test_case "create rejects fourth open task for goal" `Quick
+        test_create_rejects_fourth_open_task_for_goal;
+      test_case "create goal limit ignores terminal tasks" `Quick
+        test_create_goal_limit_ignores_terminal_tasks;
     ];
     "done", [
       test_case "empty task_id returns error" `Quick test_done_with_empty_task_id;

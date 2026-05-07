@@ -3,6 +3,7 @@
  (name masc_mcp)
  (public_name masc_mcp)
 (private_modules
+ prometheus_metric_names
  dashboard_http_keeper_metrics
  dashboard_http_keeper_detail
  dashboard_http_tool_quality

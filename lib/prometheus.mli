@@ -747,6 +747,9 @@ val metric_fsm_guard_violation : string
 
     Cardinality is bounded by fleet size times this callback vocabulary. *)
 val metric_keeper_lifecycle_callback_failures : string
+val metric_memory_pipeline_flushes : string
+val metric_memory_pipeline_flush_records : string
+val metric_memory_pipeline_flush_duration_seconds : string
 val metric_keeper_supervisor_cleanup_failures : string
 val metric_keeper_slot_force_released : string
 val metric_keeper_stale_watchdog_tick_failures : string

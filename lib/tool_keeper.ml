@@ -465,6 +465,7 @@ let handle_keeper_msg ctx args : tool_result =
   | Ok name ->
       let resolved_args = with_keeper_name args name in
       let request_id = Keeper_msg_async.submit ~sw:ctx.sw
+        ~base_path:ctx.config.base_path
         ~keeper_name:name
         ~f:(fun () ->
           let ok, body = Turn.handle_keeper_msg ctx resolved_args in
@@ -482,12 +483,12 @@ let handle_keeper_msg ctx args : tool_result =
       ] in
       (true, Yojson.Safe.to_string json)
 
-let handle_keeper_msg_result _ctx args : tool_result =
+let handle_keeper_msg_result ctx args : tool_result =
   let request_id = get_string args "request_id" "" in
   if String.equal request_id "" then
     (false, {|{"error":"request_id is required"}|})
   else
-    match Keeper_msg_async.poll request_id with
+    match Keeper_msg_async.poll ~base_path:ctx.config.base_path request_id with
     | None ->
       (false, Printf.sprintf {|{"error":"request_id not found","request_id":"%s"}|} request_id)
     | Some entry ->

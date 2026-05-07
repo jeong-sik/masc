@@ -2,23 +2,30 @@
 
     Background fibers run [keeper_msg] turns. MCP tool returns
     immediately with a [request_id]; clients poll via
-    [masc_keeper_msg_result] for completion. Entries auto-expire
-    after [max_age_sec] (1h) to prevent memory leaks. *)
+    [masc_keeper_msg_result] for completion. Completed entries auto-expire
+    from memory after [max_age_sec] (1h), while accepted request records are
+    persisted under the active [.masc] root for recovery diagnostics. Terminal
+    disk records follow the same age-based cleanup policy. *)
 
 (** {1 Types} *)
 
 type request_status =
   | Queued
   | Running
-  | Done of { ok : bool; body : string }
+  | Lost of { reason : string }
+  | Done of
+      { ok : bool
+      ; body : string
+      }
 
-type entry = {
-  request_id : string;
-  keeper_name : string;
-  status : request_status;
-  submitted_at : float;
-  completed_at : float option;
-}
+type entry =
+  { request_id : string
+  ; keeper_name : string
+  ; base_path : string
+  ; status : request_status
+  ; submitted_at : float
+  ; completed_at : float option
+  }
 
 (** {1 Submit and poll} *)
 
@@ -26,15 +33,18 @@ type entry = {
     [sw] that runs [f] and stores the result. Returns the fresh
     [request_id] synchronously. Cancellation of [sw] cancels the
     fiber. *)
-val submit :
-  sw:Eio.Switch.t ->
-  f:(unit -> Keeper_types.tool_result) ->
-  keeper_name:string ->
-  string
+val submit
+  :  sw:Eio.Switch.t
+  -> base_path:string
+  -> f:(unit -> Keeper_types.tool_result)
+  -> keeper_name:string
+  -> string
 
-(** [poll request_id] returns the current entry, or [None] when the
-    id is unknown or has expired. *)
-val poll : string -> entry option
+(** [poll ?base_path request_id] returns the current entry, or [None] when the
+    id was never seen. If [base_path] is supplied and a persisted non-terminal
+    request exists without an in-memory worker, it is returned as [Lost] and the
+    terminal lost state is persisted. *)
+val poll : ?base_path:string -> string -> entry option
 
 (** [list_for_keeper ~keeper_name] returns all entries for a keeper
     sorted most-recent-first. *)
@@ -48,3 +58,10 @@ val status_to_string : request_status -> string
     [submitted_at], and — depending on state — [completed_at] /
     [elapsed_sec] / [ok] + [result]. *)
 val entry_to_json : entry -> Yojson.Safe.t
+
+module For_testing : sig
+  val forget : string -> unit
+  val clear : unit -> unit
+  val record_path : base_path:string -> request_id:string -> string option
+  val gc_stale_disk : base_path:string -> int
+end

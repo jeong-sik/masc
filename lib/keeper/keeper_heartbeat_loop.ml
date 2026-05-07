@@ -939,6 +939,16 @@ let dispatch_recurring_keepalive
       ~(now_ts : float)
   : int
   =
+  (* Recover from transient broadcast failures that previously
+     auto-disabled tasks via [dispatch_due]'s [max_failures] guard.
+     Without this call the keeper's heartbeat broadcasts stay silent
+     for the lifetime of the process, eventually triggering stale-kill
+     cascades.  See lib/keeper/keeper_recurring.ml for the cooldown rule. *)
+  let _reenabled =
+    Keeper_recurring.reenable_due_tasks
+      ~keeper_name:meta_after_proactive.name
+      ~now_ts
+  in
   try
     Keeper_recurring.dispatch_due
       ~keeper_name:meta_after_proactive.name

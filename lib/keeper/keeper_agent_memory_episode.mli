@@ -5,7 +5,8 @@
 
 (** Emit an [episode.flush] activity payload via [Coord_hooks.activity_emit_fn].
     No-op if both [episodes] and [procedures] are zero. Logs and counts
-    non-cancel exceptions; re-raises [Eio.Cancel.Cancelled]. *)
+    non-cancel exceptions, records a telemetry coverage-gap row, and
+    re-raises [Eio.Cancel.Cancelled]. *)
 val emit_flush_activity :
   config:Coord_utils.config ->
   keeper_name:string ->

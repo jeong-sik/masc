@@ -570,23 +570,50 @@ let run_keepalive_unified_turn
           ~base_path:ctx.config.base_path
           meta_after_triage.name
           ~reasons:verdict_strs;
+        let paused_info =
+          if meta_after_triage.paused
+          then
+            let blocker_str =
+              let trimmed =
+                String.trim meta_after_triage.runtime.last_blocker
+              in
+              if String.equal trimmed "" then "unknown" else trimmed
+            in
+            let paused_since_sec =
+              match
+                Coord_resilience.Time.parse_iso8601_opt
+                  meta_after_triage.updated_at
+              with
+              | Some ts ->
+                int_of_float (max 0.0 (Time_compat.now () -. ts))
+              | None -> -1
+            in
+            Printf.sprintf " blocker=%s paused_since=%ds"
+              blocker_str paused_since_sec
+          else ""
+        in
         let log_not_scheduled =
           match turn_decision.verdict with
-          | Keeper_world_observation.Skip { reasons = (Keeper_world_observation.Scheduled_autonomous_disabled, []) } ->
-              Log.Keeper.debug
+          | Keeper_world_observation.Skip
+              { reasons =
+                  (Keeper_world_observation.Scheduled_autonomous_disabled, [])
+              } ->
+            Log.Keeper.debug
           | _ -> Log.Keeper.info
         in
         log_not_scheduled
-          "keepalive turn not scheduled for %s: should_run=%b channel=%s reasons=[%s] idle=%ds since_last=%s idle_gate=%s cooldown=%s task_cooldown=%s"
-          meta_after_triage.name
-          turn_decision.should_run channel_str
+          "keepalive turn not scheduled for %s: should_run=%b channel=%s \
+           reasons=[%s] idle=%ds since_last=%s idle_gate=%s cooldown=%s \
+           task_cooldown=%s%s"
+          meta_after_triage.name turn_decision.should_run channel_str
           (String.concat "," verdict_strs)
           obs.idle_seconds
           (Keeper_keepalive_signal.format_since_last_scheduled_autonomous
              turn_decision.since_last_scheduled_autonomous)
           (format_opt_int turn_decision.idle_gate_sec)
           (format_opt_int turn_decision.effective_cooldown)
-          (format_opt_int turn_decision.task_reactive_cooldown));
+          (format_opt_int turn_decision.task_reactive_cooldown)
+          paused_info);
       if should_run_turn
       then
         Log.Keeper.info

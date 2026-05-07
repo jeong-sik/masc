@@ -10,8 +10,14 @@
 *)
 
 open Alcotest
+open Masc_mcp
 
 module Mention = Mention
+module Coord = Coord
+module Fs_compat = Fs_compat
+module Mention_inbox = Mention_inbox
+module Prometheus = Prometheus
+module Safe_ops = Safe_ops
 
 (* ============================================================
    mode_to_string Tests
@@ -253,6 +259,61 @@ let test_spawnable_agents_list () =
   check bool "does not contain bare ollama" false (List.mem "ollama" names)
 
 (* ============================================================
+   Mention_inbox JSONL Drop Tests
+   ============================================================ *)
+
+let with_temp_base prefix f =
+  let dir = Filename.temp_file prefix "" in
+  Sys.remove dir;
+  Fs_compat.mkdir_p dir;
+  f dir
+
+let persistence_drop_value reason =
+  Prometheus.metric_value_or_zero Prometheus.metric_persistence_read_drops
+    ~labels:[("surface", "mention_inbox"); ("reason", reason)]
+    ()
+
+let test_mention_inbox_jsonl_drops_increment_counter () =
+  with_temp_base "mention-inbox-drops" @@ fun base_path ->
+  let config = Coord.default_config base_path in
+  Fs_compat.mkdir_p (Coord.masc_dir config);
+  let record : Mention_inbox.mention_record =
+    {
+      id = "m-valid";
+      target_agent = "target";
+      source_agent = "source";
+      source_kind = "room_message";
+      source_id = "room-1";
+      content_preview = "@target hello";
+      created_at = 2.0;
+      read_at = 0.0;
+    }
+  in
+  let entry_error = Safe_ops.persistence_read_drop_reason_entry_load_error in
+  let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+  let before_entry_error = persistence_drop_value entry_error in
+  let before_invalid_payload = persistence_drop_value invalid_payload in
+  let content =
+    String.concat "\n"
+      [
+        Yojson.Safe.to_string (Mention_inbox.mention_record_to_json record);
+        "{not-json";
+        Yojson.Safe.to_string (`Assoc [("id", `String "m-invalid")]);
+      ]
+    ^ "\n"
+  in
+  Fs_compat.save_file (Mention_inbox.inbox_path config) content;
+  let mentions = Mention_inbox.read_mentions config ~target_agent:"target" ~limit:10 in
+  check int "valid mention survives" 1 (List.length mentions);
+  check string "valid mention id" "m-valid" (List.hd mentions).id;
+  let after_entry_error = persistence_drop_value entry_error in
+  let after_invalid_payload = persistence_drop_value invalid_payload in
+  check (float 0.001) "malformed JSONL increments entry load error" 1.0
+    (after_entry_error -. before_entry_error);
+  check (float 0.001) "invalid mention payload increments invalid payload" 1.0
+    (after_invalid_payload -. before_invalid_payload)
+
+(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -319,5 +380,9 @@ let () =
     ];
     "spawnable_agents", [
       test_case "list" `Quick test_spawnable_agents_list;
+    ];
+    "mention_inbox", [
+      test_case "jsonl drop counters" `Quick
+        test_mention_inbox_jsonl_drops_increment_counter;
     ];
   ]

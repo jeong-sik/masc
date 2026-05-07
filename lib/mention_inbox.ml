@@ -75,6 +75,13 @@ let inbox_path (config : Coord.config) : string =
 
 (** {1 JSONL I/O} *)
 
+let persistence_surface = "mention_inbox"
+
+let record_persistence_read_drop ~reason ?(delta = 1.0) () =
+  Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+    ~labels:[("surface", persistence_surface); ("reason", reason)]
+    ~delta ()
+
 let append_mention ?task_id (config : Coord.config) (record : mention_record) : unit =
   (* Fleet-wide invariant (PR-C): if the mention is associated with a terminal
      task, skip the append and log the desync (issue #13397). *)
@@ -102,6 +109,8 @@ let load_all_mentions (config : Coord.config) : mention_record list =
     match Safe_ops.read_file_safe path with
     | Error msg ->
         Log.Misc.warn "mention_inbox: failed to read %s: %s" path msg;
+        record_persistence_read_drop
+          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error ();
         []
     | Ok content ->
       String.split_on_char '\n' content
@@ -109,8 +118,16 @@ let load_all_mentions (config : Coord.config) : mention_record list =
       |> List.filter_map (fun line ->
           try
             let json = Yojson.Safe.from_string line in
-            mention_record_of_json json
-          with Yojson.Json_error _ -> None)
+            match mention_record_of_json json with
+            | Some record -> Some record
+            | None ->
+                record_persistence_read_drop
+                  ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload ();
+                None
+          with Yojson.Json_error _ ->
+            record_persistence_read_drop
+              ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error ();
+            None)
 
 let read_mentions (config : Coord.config) ~(target_agent : string) ~(limit : int)
     : mention_record list =

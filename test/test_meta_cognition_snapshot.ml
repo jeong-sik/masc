@@ -254,6 +254,23 @@ let test_parse_summary_preserves_refs_and_secondary_signals () =
         [ "comment:c-1"; "post:p-root" ]
         (interpretation.evidence_refs |> List.sort String.compare)
 
+let test_snapshot_jsonl_load_failure_increments_drop_metric () =
+  with_ctx @@ fun ctx ->
+  let posts_path =
+    Filename.concat (Coord.masc_dir ctx.config) "board_posts.jsonl"
+  in
+  Fs_compat.save_file posts_path "{not-json\n";
+  let before =
+    persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error
+  in
+  let json = Meta_cognition.snapshot_json ~limit:5 ctx.config in
+  let open Yojson.Safe.Util in
+  Alcotest.(check int) "snapshot falls back to empty beliefs" 0
+    (json |> member "beliefs" |> to_list |> List.length);
+  Alcotest.(check (float 0.1)) "jsonl load failure increments entry_load_error" 1.0
+    (persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error
+     -. before)
+
 let test_snapshot_governance_cases_skip_bad_entries_with_metric () =
   with_ctx @@ fun ctx ->
   let cases_dir = Filename.concat (Coord.masc_dir ctx.config) "governance_v2/cases" in
@@ -302,6 +319,8 @@ let () =
             test_snapshot_marks_contested_belief;
           Alcotest.test_case "parses summary refs and secondary signals" `Quick
             test_parse_summary_preserves_refs_and_secondary_signals;
+          Alcotest.test_case "jsonl load failures increment drop metric" `Quick
+            test_snapshot_jsonl_load_failure_increments_drop_metric;
           Alcotest.test_case "governance cases skip bad entries with metric"
             `Quick test_snapshot_governance_cases_skip_bad_entries_with_metric;
         ] );

@@ -14,15 +14,43 @@ open Meta_cognition_types
 (* Data loading                                                     *)
 (* ================================================================ *)
 
+let persistence_surface = "meta_cognition_snapshot"
+
+let observe_drop ~reason ~delta =
+  Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+    ~labels:[("surface", persistence_surface); ("reason", reason)]
+    ~delta
+    ()
+
+let report_drop ?(delta = 1.0) ~reason ~path ~detail () =
+  Safe_ops.report_persistence_read_drop
+    ~on_drop:(fun () -> observe_drop ~reason ~delta)
+    ~surface:persistence_surface
+    ~reason
+    ~path
+    ~detail
+
 let load_jsonl_safe path =
   if not (Sys.file_exists path) then []
   else
-    try Fs_compat.load_jsonl path
+    try
+      let rows, malformed = Fs_compat.load_jsonl_diagnostics path in
+      if malformed > 0 then
+        report_drop
+          ~delta:(float_of_int malformed)
+          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+          ~path
+          ~detail:(Printf.sprintf "%d malformed JSONL line(s)" malformed)
+          ();
+      rows
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-        Log.Pages.warn "load_jsonl_safe: failed to load %s: %s"
-          path (Printexc.to_string exn);
+        report_drop
+          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+          ~path
+          ~detail:(Printexc.to_string exn)
+          ();
         []
 
 let load_board_posts config =
@@ -40,26 +68,17 @@ let load_board_vote_count config =
   List.length (load_jsonl_safe path)
 
 let load_governance_cases config =
-  let surface = "meta_cognition_snapshot" in
-  let observe_drop ~reason =
-    Prometheus.inc_counter Prometheus.metric_persistence_read_drops
-      ~labels:[("surface", surface); ("reason", reason)] ()
-  in
-  let report_drop ~reason ~path ~detail =
-    Safe_ops.report_persistence_read_drop
-      ~on_drop:(fun () -> observe_drop ~reason)
-      ~surface
-      ~reason
-      ~path
-      ~detail
-  in
   let dir = Filename.concat (Coord.masc_dir config) "governance_v2/cases" in
   if not (Sys.file_exists dir) then
     []
   else
     match Safe_ops.list_dir_safe dir with
     | Error detail ->
-      report_drop ~reason:Safe_ops.persistence_read_drop_reason_list_dir_error ~path:dir ~detail;
+      report_drop
+        ~reason:Safe_ops.persistence_read_drop_reason_list_dir_error
+        ~path:dir
+        ~detail
+        ();
       []
     | Ok names ->
         names
@@ -71,8 +90,10 @@ let load_governance_cases config =
                match
                  Safe_ops.result_to_option_logged
                    ~on_drop:(fun () ->
-                     observe_drop ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error)
-                   ~surface
+                     observe_drop
+                       ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+                       ~delta:1.0)
+                   ~surface:persistence_surface
                    ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
                    ~path
                    (Safe_ops.read_json_file_safe path)
@@ -84,7 +105,8 @@ let load_governance_cases config =
                      report_drop
                        ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
                        ~path
-                       ~detail:"missing required id";
+                       ~detail:"missing required id"
+                       ();
                      None
                    ) else
                      let title = Safe_ops.json_string ~default:"" "title" json in

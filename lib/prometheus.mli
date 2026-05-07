@@ -650,6 +650,10 @@ val metric_oas_context_overflow_ratio : string
 (** Gauge: context overflow ratio [estimated_tokens / limit_tokens] when
     [ContextOverflowImminent] fires.  Labels: [agent_name]. *)
 
+val metric_oas_context_compaction_total : string
+(** Counter: total context compaction actions from OAS event bus.
+    Labels: [agent_name, trigger]. *)
+
 
 val metric_cascade_server_error_skip_total : string
 (** #12797 Total cascade label-ranking skips triggered by recent server-error

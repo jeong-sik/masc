@@ -876,6 +876,11 @@ let metric_cascade_provider_health_score =
 let metric_oas_context_overflow_ratio =
   "masc_oas_context_overflow_ratio"
 
+(* OAS-level context compaction counter — incremented each time
+   ContextCompactStarted fires from the event bus. *)
+let metric_oas_context_compaction_total =
+  "masc_oas_context_compaction_total"
+
 (* MCP tool schema budget (set once at boot from mcp_server_eio.ml
    via [set_tool_schema_stats]). *)
 let metric_mcp_tool_schema_count = "masc_mcp_tool_schema_count"
@@ -2733,6 +2738,10 @@ let init () =
     "Context overflow ratio (estimated_tokens / limit_tokens) when \
      ContextOverflowImminent fires. Labels: [agent_name]."
     Gauge;
+  add metric_oas_context_compaction_total
+    "Total context compaction actions triggered by OAS event bus. \
+     Labels: [agent_name, trigger]."
+    Counter;
   install_backend_mutex_observers ()
 
 let start_time = Time_compat.now ()

@@ -746,6 +746,8 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
       (* #9935: compaction started — clears pending imminent
          and fires action-taken counter. *)
       Context_overflow_action_tracker.record_action ~keeper_name:agent_name;
+      Prometheus.inc_counter Prometheus.metric_oas_context_compaction_total
+        ~labels:[ ("agent_name", agent_name); ("trigger", trigger) ] ();
       let payload =
         `Assoc [
           ("agent_name", `String agent_name);

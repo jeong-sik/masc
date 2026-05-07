@@ -7454,7 +7454,7 @@ let test_should_require_tools_for_initial_turn_matches_first_turn_gate () =
   check bool "pending verification requires an action tool" true
     (KAR.should_require_tools_for_initial_turn ~max_turns:3
        ~turn_affordances:[ "task_verify" ]);
-  check bool "work discovery requires an action tool" true
+  check bool "timer-only work discovery stays optional" false
     (KAR.should_require_tools_for_initial_turn ~max_turns:3
        ~turn_affordances:[ "work_discovery" ]);
   check bool "worktree delta inspection requires an action tool" true
@@ -7520,6 +7520,14 @@ let test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool () =
   check bool
     "task_verify with submit tool -> gate fires" true
     (gate ~tools:[ "keeper_task_submit_for_verification" ] [ "task_verify" ]);
+  check bool
+    "timer-only work_discovery does not hard-gate even with progress tools"
+    false
+    (gate ~tools:[ "keeper_board_post"; "keeper_task_create" ]
+       [ "work_discovery" ]);
+  check bool
+    "work_discovery can accompany another concrete gated affordance" true
+    (gate ~tools:[ "keeper_task_claim" ] [ "work_discovery"; "task_claim" ]);
   check bool
     "all gated affordances missing tools -> gate suppressed" false
     (gate
@@ -8873,14 +8881,23 @@ let () =
               in
               check bool "task_verify present without meta" true
                 (List.mem "task_verify" affordances));
-          test_case "affordance: work discovery requires action" `Quick
+          test_case "affordance: work discovery nudge is not a hard contract"
+            `Quick
             (fun () ->
               let obs = { base_observation with work_discovery_due = true } in
               let affordances =
                 UM.observed_affordances_of_observation obs
               in
               check bool "work_discovery present" true
-                (List.mem "work_discovery" affordances));
+                (List.mem "work_discovery" affordances);
+              let contract_obs =
+                Masc_mcp.Keeper_contract_classifier.of_keeper_world_observation
+                  obs
+              in
+              check bool "timer-only discovery is not actionable" false
+                (Masc_mcp.Keeper_contract_classifier.is_actionable
+                   (Masc_mcp.Keeper_contract_classifier.classify_actionable_signal
+                      contract_obs)));
           test_case "affordance: board curation requires multi-event window"
             `Quick
             (fun () ->

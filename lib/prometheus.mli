@@ -218,6 +218,11 @@ val metric_keeper_semaphore_wait_timeout : string
     Labels: [keeper, channel] with channel in
     [autonomous_queue_head | autonomous | turn]. *)
 
+val metric_keeper_turn_slot_bookkeeping_failures : string
+(** Counter for cancellation-safe keeper turn-slot release bookkeeping
+    callbacks that could not complete. Labels: [op, kind] with
+    kind in [cancelled | exception]. *)
+
 val metric_keeper_semaphore_wait_seconds : string
 (** Cumulative keeper turn-slot semaphore wait seconds. Labels:
     [keeper_name, cascade_profile, channel]. *)

@@ -103,28 +103,32 @@ without a compile-time event:
 The `providers` field is data, not a new variant — it parameterizes the
 existing `Big_three` execution path with a different provider set.
 
-### 4.3 Harness — auto-discovery fallback (H)
+### 4.3 Harness — partial-Eio-context diagnostic (H) — IMPLEMENTED
 
-`cascade_runtime.refresh_local_discovery_if_possible` (lib/cascade/cascade_runtime.ml:65-85)
-currently silent-skips when either `Eio_context.get_switch_opt` or
-`get_net_opt` returns None. Replace silent skip with two-tier behavior:
+**Scope revision (2026-05-07)**: Original proposal was register-fallback,
+but `Llm_provider.Provider_registry`'s public API on masc-mcp's downstream
+requires both `~sw` and `~net` to probe — there is no register-without-probe
+entry point exposed. Realistic surgical change is **visibility**: turn
+silent skip into a one-shot WARN that tells the operator which half of
+the context is missing and where to fix it.
 
 ```ocaml
 match sw, net with
 | Some sw, Some net ->
     (* existing path: full discovery *)
 | _ ->
-    Log.warn "Local discovery: Eio context partial (sw=%b net=%b); \
-              registering default Ollama URL only" (Option.is_some sw) (Option.is_some net);
-    Provider_registry.register_default_local_endpoint
-      ~kind:Llm_provider.Provider_config.Ollama
-      ~base_url:Masc_network_defaults.default_ollama_url
-      ();
-    false  (* unchanged return: caller knows full discovery did not run *)
+    warn_partial_eio_context_once
+      ~sw_some:(Option.is_some sw) ~net_some:(Option.is_some net);
+    false
 ```
 
-The fallback registers exactly one endpoint — the default — and emits a
-WARN line so operators are not left guessing.
+`Atomic.exchange` flag prevents heartbeat-loop log spam.
+
+Implemented in PR #14110.
+
+For the larger fallback-registration goal (register endpoint without
+probe), a follow-up RFC against the agent_sdk Provider_registry surface
+is required — out of scope for this RFC.
 
 ### 4.4 Harness — URL classification with explicit-set priority (H)
 
@@ -180,12 +184,12 @@ Per RFC-0032, every new env knob must enter the catalog. This RFC adds:
 
 ### Phase 1 — Harness fixes (no SSOT change, no RFC gate beyond this one)
 
-| PR | Scope | Tag | Estimate |
-|----|-------|-----|----------|
+| PR | Scope | Tag | Status |
+|----|-------|-----|--------|
 | §4.6 | saturation skip cap | H | DONE — PR #14100 |
-| §4.3 | Eio_context fallback | H | ~30 LOC, single file |
-| §4.4 | URL classification with `?explicit_provider` | H | ~25 LOC + caller updates |
-| §4.5 | local cooldown policy | H | ~30 LOC, `cascade_health_tracker.ml` |
+| §4.3 | partial Eio_context diagnostic | H | DONE — PR #14110 (scope revised, see §4.3) |
+| §4.5 | local cooldown policy | H | DONE — PR #14109 |
+| §4.4 | URL classification with `?explicit_provider` | H | OPEN — narrow gap (non-default port deployments only) |
 
 Phase 1 PRs reference this RFC in their body and may merge independently.
 

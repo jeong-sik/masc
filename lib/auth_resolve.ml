@@ -86,7 +86,7 @@ let resolve ~base_path ~keeper_id ~provider_kind
                 (Api_key_env_unset { var_name = "MASC_INTERNAL_MCP_TOKEN" })
         else Error (Token_hash_missing { path = hash_path })
   else
-    match Llm_provider.Provider_kind.default_api_key_env provider_kind with
+    match Provider_kind_resolver.env_var_for_kind provider_kind with
     | None -> (
         match provider_kind with
         | PK.Codex_cli ->

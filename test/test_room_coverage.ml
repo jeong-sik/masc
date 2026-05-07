@@ -865,6 +865,32 @@ let test_transition_release () =
     | Error _ -> Alcotest.fail "Expected Ok"
   )
 
+let test_transition_release_keeper_transport_alias () =
+  with_test_env (fun config ->
+    let _ = Coord.add_task config ~title:"Test" ~priority:1 ~description:"" in
+    let _ = Coord.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    match
+      Coord.release_task_r config ~agent_name:"keeper-claude-agent"
+        ~task_id:"task-001" ()
+    with
+    | Ok msg ->
+        Alcotest.(check bool) "release via keeper transport alias" true
+          (str_contains msg "todo")
+    | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e))
+
+let test_transition_release_generated_nickname_alias () =
+  with_test_env (fun config ->
+    let _ = Coord.add_task config ~title:"Test" ~priority:1 ~description:"" in
+    let _ = Coord.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    match
+      Coord.release_task_r config ~agent_name:"claude-happy-shark"
+        ~task_id:"task-001" ()
+    with
+    | Ok msg ->
+        Alcotest.(check bool) "release via generated nickname alias" true
+          (str_contains msg "todo")
+    | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e))
+
 let test_transition_release_todo_noop () =
   with_test_env (fun config ->
     let _ = Coord.add_task config ~title:"Test" ~priority:1 ~description:"" in
@@ -1597,6 +1623,10 @@ let () =
       Alcotest.test_case "claim" `Quick test_transition_claim;
       Alcotest.test_case "start" `Quick test_transition_start;
       Alcotest.test_case "release" `Quick test_transition_release;
+      Alcotest.test_case "release accepts keeper transport alias" `Quick
+        test_transition_release_keeper_transport_alias;
+      Alcotest.test_case "release accepts generated nickname alias" `Quick
+        test_transition_release_generated_nickname_alias;
       Alcotest.test_case "release todo no-op" `Quick
         test_transition_release_todo_noop;
       Alcotest.test_case "invalid" `Quick test_transition_invalid;

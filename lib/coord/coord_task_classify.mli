@@ -91,6 +91,16 @@ val working_agents : config -> string list
 
 val resolve_agent_name_strict : config -> string -> string
 
+val task_identity_key : config -> string -> string
+(** Stable ownership key for task-assignee comparisons. It collapses keeper
+    transport aliases such as [keeper-nick0cave-agent] and dictionary-generated
+    nicknames such as [nick0cave-happy-shark] to the keeper name, while leaving
+    structured non-keeper identities untouched. *)
+
+val same_task_actor : config -> string -> string -> bool
+(** [same_task_actor config a b] is true when [a] and [b] name the same logical
+    task owner after applying {!task_identity_key}. *)
+
 val normalize_execution_links : Masc_domain.task_execution_links -> Masc_domain.task_execution_links
 
 val normalize_task_contract : Masc_domain.task_contract -> Masc_domain.task_contract

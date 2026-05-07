@@ -101,6 +101,7 @@ let transition_task_r
               ~verification_timeout_seconds:
                 (Env_config_runtime.Verification.timeout_deadline_seconds ())
               ~new_verification_id:(fun () -> Random_id.prefixed ~prefix:"vrf-" ~bytes:16)
+              ~same_agent:(same_task_actor config agent_name)
               ~agent_name
               ~task_id
               ~task_status:task.task_status
@@ -126,7 +127,8 @@ let transition_task_r
           | Error Coord_task_lifecycle.Invalid_transition ->
             let assignee_hint =
               match task_assignee_of_status task.task_status with
-              | Some a when a <> agent_name -> Printf.sprintf ", current_assignee=%s" a
+              | Some a when not (same_task_actor config a agent_name) ->
+                Printf.sprintf ", current_assignee=%s" a
               | _ -> ""
             in
             (* Issue #7646: ownership-mismatch dominates; only show
@@ -146,7 +148,7 @@ let transition_task_r
             let remediation =
               let own_assignee =
                 match task_assignee_of_status task.task_status with
-                | Some a when a = agent_name -> true
+                | Some a when same_task_actor config a agent_name -> true
                 | _ -> false
               in
               match task.task_status, action with

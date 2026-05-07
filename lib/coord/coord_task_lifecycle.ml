@@ -36,6 +36,7 @@ let decide
       ~verification_enabled
       ~verification_timeout_seconds
       ~new_verification_id
+      ~same_agent
       ~agent_name
       ~task_id
       ~task_status
@@ -45,7 +46,6 @@ let decide
       ~notes
       ~reason
   =
-  let same_agent assignee = String.equal assignee agent_name in
   match action, task_status with
   (* ── Claim ────────────────────────────────────── *)
   | Masc_domain.Claim, Masc_domain.Todo ->

@@ -137,6 +137,33 @@ let resolve_agent_name_strict config agent_name =
   else normalized
 ;;
 
+let keeper_transport_alias_key name =
+  let prefix = "keeper-" in
+  let suffix = "-agent" in
+  let prefix_len = String.length prefix in
+  let suffix_len = String.length suffix in
+  let len = String.length name in
+  if len > prefix_len + suffix_len
+     && String.starts_with ~prefix name
+     && String.ends_with ~suffix name
+  then Some (String.sub name prefix_len (len - prefix_len - suffix_len))
+  else None
+;;
+
+let task_identity_key config name =
+  let resolved = resolve_agent_name_strict config name in
+  match keeper_transport_alias_key resolved with
+  | Some keeper -> keeper
+  | None ->
+    if Nickname.is_dictionary_generated_nickname resolved
+    then Option.value (Nickname.extract_agent_type resolved) ~default:resolved
+    else resolved
+;;
+
+let same_task_actor config left right =
+  String.equal (task_identity_key config left) (task_identity_key config right)
+;;
+
 let normalize_execution_links (links : Masc_domain.task_execution_links) =
   { operation_id = trim_opt links.operation_id
   ; session_id = trim_opt links.session_id

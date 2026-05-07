@@ -278,8 +278,7 @@ let expect_assoc ~where = function
   | `Assoc fields -> Ok fields
   | _ -> Error (Printf.sprintf "%s: expected JSON object" where)
 
-let find_field fields name =
-  try Some (List.assoc name fields) with Not_found -> None
+let find_field fields name = List.assoc_opt name fields
 
 let require_string fields name =
   match find_field fields name with

@@ -104,17 +104,11 @@ let auto_construct_active_by_default (r : result) =
   | No_auto_construct_path _ -> false
   | Not_applicable_http_api -> true (* HTTP API providers don't need it *)
 
-let bool_of_env_value raw =
-  match String.trim raw |> String.lowercase_ascii with
-  | "1" | "true" | "yes" | "y" | "on" -> Some true
-  | "0" | "false" | "no" | "n" | "off" -> Some false
-  | _ -> None
-
 let auto_construct_effectively_active ?(env_lookup = Sys.getenv_opt)
     (r : result) =
   match r.construct with
   | Auto_construct_active { env_flag; default_when_unset; _ } -> (
-      match Option.bind (env_lookup env_flag) bool_of_env_value with
+      match Option.bind (env_lookup env_flag) Keeper_config.bool_of_string with
       | Some enabled -> enabled
       | None -> default_when_unset)
   | No_auto_construct_path _ -> false

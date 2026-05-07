@@ -203,6 +203,21 @@ let confidence_ring_size =
           raw;
         100
 
+let cost_ring_size =
+  match Sys.getenv_opt "MASC_CASCADE_COST_RING_SIZE" with
+  | None -> 100
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if trimmed = "" then 100
+    else
+      match Safe_ops.int_of_string_safe trimmed with
+      | Some n -> n
+      | None ->
+        Log.Misc.warn
+          "Invalid int for MASC_CASCADE_COST_RING_SIZE=%S, using default 100"
+          raw;
+        100
+
 
 (* ── Types ────────────────────────────────────── *)
 
@@ -267,6 +282,12 @@ type provider_state = {
   mutable confidence_ring: float array option;
   mutable confidence_count: int;
   mutable confidence_cursor: int;
+  (* Cost ring buffer for per-request inference cost (USD).  Mirrors the
+     latency ring pattern: lazy allocation, drop-oldest, bounded by
+     [cost_ring_size].  Values are non-negative USD amounts. *)
+  mutable cost_ring: float array option;
+  mutable cost_count: int;
+  mutable cost_cursor: int;
 }
 
 type t = {
@@ -328,6 +349,9 @@ let get_or_create_state t key =
       confidence_ring = None;
       confidence_count = 0;
       confidence_cursor = 0;
+      cost_ring = None;
+      cost_count = 0;
+      cost_cursor = 0;
     } in
     Hashtbl.replace t.providers key s;
     s
@@ -377,6 +401,24 @@ let push_confidence state conf =
       state.confidence_count <- state.confidence_count + 1
   end
 
+let push_cost state cost =
+  if cost_ring_size <= 0 then ()
+  else if not (Float.is_finite cost) || cost < 0.0 then ()
+  else begin
+    let ring =
+      match state.cost_ring with
+      | Some r -> r
+      | None ->
+        let r = Array.make cost_ring_size 0.0 in
+        state.cost_ring <- Some r;
+        r
+    in
+    ring.(state.cost_cursor) <- cost;
+    state.cost_cursor <- (state.cost_cursor + 1) mod cost_ring_size;
+    if state.cost_count < cost_ring_size then
+      state.cost_count <- state.cost_count + 1
+  end
+
 (* Build a stable fingerprint from caller-provided classification.
    Format: "kind|hash8(reason)" — kind defaults to "unclassified",
    hash suffix is omitted when reason is absent or empty.  Hash is
@@ -417,7 +459,7 @@ let prune_old_events now events =
   List.filter (fun e -> e.time >= cutoff) events
 
 let record t ~provider_key ~outcome ?error_kind ?error_reason
-    ?retry_after_s ?latency_ms ?confidence ~now () =
+    ?retry_after_s ?latency_ms ?confidence ?cost_usd ~now () =
   with_lock t (fun () ->
     let state = get_or_create_state t provider_key in
     let event = { time = now; outcome } in
@@ -440,6 +482,9 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
        | None -> ());
       (match confidence with
        | Some c -> push_confidence state c
+       | None -> ());
+      (match cost_usd with
+       | Some c -> push_cost state c
        | None -> ())
     | Failure | Rejected ->
       (* Rejected responses indicate unusable output (gate reject, empty
@@ -514,8 +559,8 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
           ~labels:[("provider", provider_key)] terminal_failure_cooldown_sec
       end)
 
-let record_success t ~provider_key ?latency_ms ?confidence () =
-  record t ~provider_key ~outcome:Success ?latency_ms ?confidence
+let record_success t ~provider_key ?latency_ms ?confidence ?cost_usd () =
+  record t ~provider_key ~outcome:Success ?latency_ms ?confidence ?cost_usd
     ~now:(Unix.gettimeofday ()) ()
 
 let record_failure t ~provider_key ?error_kind ?error_reason () =
@@ -636,6 +681,8 @@ type provider_info = {
   latency_samples : int;
   avg_confidence : float option;
   confidence_samples : int;
+  avg_cost_usd : float option;
+  cost_samples : int;
   health_score : float;
 }
 
@@ -676,6 +723,37 @@ let avg_confidence_locked state =
     let sum = ref 0.0 in
     for i = 0 to n - 1 do sum := !sum +. ring.(i) done;
     Some (!sum /. float_of_int n)
+
+(* Average of populated cost ring values.  [None] when no samples. *)
+let avg_cost_locked state =
+  match state.cost_ring with
+  | None -> None
+  | Some ring when state.cost_count = 0 -> ignore ring; None
+  | Some ring ->
+    let n = state.cost_count in
+    let sum = ref 0.0 in
+    for i = 0 to n - 1 do sum := !sum +. ring.(i) done;
+    Some (!sum /. float_of_int n)
+
+(* Derive a cost score in [0.2, 1.0] from the average cost ring.
+   Lower average cost = higher score.  Banded thresholds:
+     avg < $0.01  → 1.0  (cheap)
+     avg < $0.05  → 0.8
+     avg < $0.10  → 0.6
+     avg < $0.25  → 0.4
+     otherwise    → 0.2  (expensive)
+   Returns [None] when no cost samples exist so the caller defaults to 1.0. *)
+let cost_score_of_avg = function
+  | None -> None
+  | Some avg ->
+    let score =
+      if avg < 0.01 then 1.0
+      else if avg < 0.05 then 0.8
+      else if avg < 0.10 then 0.6
+      else if avg < 0.25 then 0.4
+      else 0.2
+    in
+    Some score
 
 let take_first_n n lst =
   let rec loop k acc = function
@@ -726,11 +804,16 @@ let build_info_locked ~now ~key state =
   let p50_latency_ms = percentile_locked state 0.50 in
   let p95_latency_ms = percentile_locked state 0.95 in
   let avg_confidence = avg_confidence_locked state in
+  let avg_cost_usd = avg_cost_locked state in
+  let cost_score_opt = cost_score_of_avg avg_cost_usd in
   let health_score =
     compute_health_score ~success_rate:rate
       ~p95_latency_ms_opt:p95_latency_ms
-      ~cost_score_opt:None
+      ~cost_score_opt
   in
+  Prometheus.set_gauge Prometheus.metric_cascade_provider_health_score
+    ~labels:[ ("provider_key", key) ]
+    health_score;
   {
     provider_key = key;
     success_rate = rate;
@@ -746,6 +829,8 @@ let build_info_locked ~now ~key state =
     latency_samples = state.latency_count;
     avg_confidence;
     confidence_samples = state.confidence_count;
+    avg_cost_usd;
+    cost_samples = state.cost_count;
     health_score;
   }
 

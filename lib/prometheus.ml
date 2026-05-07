@@ -862,6 +862,24 @@ let metric_oas_inference_prompt_tok_per_sec =
   "masc_oas_inference_prompt_tok_per_sec"
 let metric_oas_inference_decode_tok_per_sec =
   "masc_oas_inference_decode_tok_per_sec"
+let metric_oas_inference_cost_usd =
+  "masc_oas_inference_cost_usd"
+
+(* Cascade provider health score — composite of success_rate * speed_score *
+   cost_score.  Set (not observed) because it is a point-in-time snapshot,
+   not a distribution. *)
+let metric_cascade_provider_health_score =
+  "masc_cascade_provider_health_score"
+
+(* Context overflow ratio — set each time ContextOverflowImminent fires.
+   Ratio is estimated_tokens / limit_tokens in [0.0, 1.0+]. *)
+let metric_oas_context_overflow_ratio =
+  "masc_oas_context_overflow_ratio"
+
+(* OAS-level context compaction counter — incremented each time
+   ContextCompactStarted fires from the event bus. *)
+let metric_oas_context_compaction_total =
+  "masc_oas_context_compaction_total"
 
 (* MCP tool schema budget (set once at boot from mcp_server_eio.ml
    via [set_tool_schema_stats]). *)
@@ -953,6 +971,12 @@ let metric_llm_inference_duration = "masc_llm_inference_duration_seconds"
    the backend does not emit timings (Anthropic/Gemini). *)
 let metric_llm_prompt_tok_per_sec = "masc_llm_prompt_tok_per_sec"
 let metric_llm_decode_tok_per_sec = "masc_llm_decode_tok_per_sec"
+(* Cascade attempt-liveness streaming histograms.
+   Filled by cascade_attempt_liveness_observer via the recorder injected
+   into L.step.  TTFT = time from request start to first non-Done chunk;
+   TBT = inter-chunk gap during streaming. *)
+let metric_cascade_ttfb_seconds = "masc_cascade_ttfb_seconds"
+let metric_cascade_inter_chunk_seconds = "masc_cascade_inter_chunk_seconds"
 let metric_after_turn_hook = "masc_after_turn_hook_total"
 let metric_keeper_oas_on_stop = "masc_keeper_oas_on_stop_total"
 let metric_keeper_oas_on_idle_escalated =
@@ -1415,6 +1439,9 @@ let init () =
   add metric_oas_inference_decode_tok_per_sec
     "OAS InferenceTelemetry decode throughput histogram for events suppressed \
      from SSE. Labelled only by bounded model_bucket." Histogram;
+  add metric_oas_inference_cost_usd
+    "OAS AgentCompleted cost_usd histogram. Labelled by bounded model_bucket; \
+     enables per-model cost distribution (P50/P99) and total spend tracking." Histogram;
   add metric_tasks "Total tasks processed" Counter;
   add metric_errors "Total errors" Counter;
   add metric_error_events
@@ -2713,6 +2740,27 @@ let init () =
     "Cascade strategy decisions by outcome." Counter;
   add metric_cascade_capacity_events
     "Cascade capacity events by type." Counter;
+  add metric_cascade_ttfb_seconds
+    "Time from cascade attempt start to first non-Done chunk (TTFT). \
+     Labels: [cascade, provider]."
+    Histogram;
+  add metric_cascade_inter_chunk_seconds
+    "Inter-chunk gap during streaming (TBT). \
+     Labels: [cascade, provider]."
+    Histogram;
+  add metric_cascade_provider_health_score
+    "Composite health score per cascade provider. \
+     success_rate * speed_score * cost_score in [0.0, 1.0]. \
+     Labels: [provider_key]."
+    Gauge;
+  add metric_oas_context_overflow_ratio
+    "Context overflow ratio (estimated_tokens / limit_tokens) when \
+     ContextOverflowImminent fires. Labels: [agent_name]."
+    Gauge;
+  add metric_oas_context_compaction_total
+    "Total context compaction actions triggered by OAS event bus. \
+     Labels: [agent_name, trigger]."
+    Counter;
   install_backend_mutex_observers ()
 
 let start_time = Time_compat.now ()

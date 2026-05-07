@@ -525,6 +525,10 @@ val metric_oas_inference_prompt_tok_per_sec : string
     [decode_ms] plus [completion_tokens]. Labels: [model_bucket] only. *)
 val metric_oas_inference_decode_tok_per_sec : string
 
+(** Histogram populated from [AgentCompleted] [usage.cost_usd].
+    Labels: [model_bucket] only. *)
+val metric_oas_inference_cost_usd : string
+
 val metric_mcp_tool_schema_count : string
 val metric_mcp_tool_schema_tokens_approx : string
 
@@ -628,6 +632,27 @@ val metric_cascade_attempt_liveness_observed : string
     outcome. Labels: [cascade], [provider], [outcome] ∈ {success |
     kill | wire_error}. The kill-rate is
     [kill_total / observed_total]. *)
+
+val metric_cascade_ttfb_seconds : string
+(** Histogram: time from cascade attempt start to first non-Done chunk (TTFT).
+    Labels: [cascade], [provider]. *)
+
+val metric_cascade_inter_chunk_seconds : string
+(** Histogram: inter-chunk gap during streaming (TBT).
+    Labels: [cascade], [provider]. *)
+
+val metric_cascade_provider_health_score : string
+(** Gauge: composite health score per cascade provider.
+    [success_rate * speed_score * cost_score] in [0.0, 1.0].
+    Labels: [provider_key]. *)
+
+val metric_oas_context_overflow_ratio : string
+(** Gauge: context overflow ratio [estimated_tokens / limit_tokens] when
+    [ContextOverflowImminent] fires.  Labels: [agent_name]. *)
+
+val metric_oas_context_compaction_total : string
+(** Counter: total context compaction actions from OAS event bus.
+    Labels: [agent_name, trigger]. *)
 
 
 val metric_cascade_server_error_skip_total : string

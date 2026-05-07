@@ -73,13 +73,17 @@ PUBLIC repositories, `--allow-fork-pr-for-readonly` permits `READ`/`TRIAGE`
 credential lanes to push their proof branch to the keeper account's fork and
 open the draft PR with `head=OWNER:BRANCH`; PR creation still goes through
 `keeper_pr_create`, not raw `gh pr create`.
-After collision evidence is clear, the review phase requires `keeper_pr_review_comment`.
+The review phase also resolves fork-created target PRs with the same
+owner-qualified `OWNER:BRANCH` head ref so reviewers do not miss valid fork PRs
+by looking up only the bare branch name.
+After collision evidence is clear, the review phase requires `keeper_shell` and
+`keeper_pr_review_comment`, in that order. The first required tool allows the
+prompted read-only PR lookup to satisfy the provider's first-tool contract; the
+second required tool keeps approval mandatory.
 This avoids the old single-turn shape where one keeper could wait on another
 keeper's missing PR until the Agent.run timeout. The review prompt reserves
-`keeper_shell` for read-only GitHub inspection, but does not put it in
-`required_tools` because passive read-only tools cannot satisfy the runtime
-required-tool predicate. Keepers are instructed to report `target_pr_missing`
-after one failed branch lookup instead of polling in a loop.
+`keeper_shell` for read-only GitHub inspection. Keepers are instructed to report
+`target_pr_missing` after one failed branch lookup instead of polling in a loop.
 Keepers must create/use the exact run-scoped branch produced by
 `masc_worktree_create task_id=<run_id>`:
 `keeper-<keeper>-agent/<run_id>`. They must write the proof file
@@ -129,6 +133,14 @@ Useful scoped runs:
   --mutate \
   --keeper-names sangsu,executor,verifier \
   --max-keepers 3
+
+./scripts/harness_keeper_docker_pr_lifecycle_reprobe.sh \
+  --mutate \
+  --phase review \
+  --review-resume \
+  --keeper-names sangsu,verifier \
+  --run-id keeper-docker-pr-lifecycle-fork-live-20260507-remat \
+  --run-dir /private/tmp/keeper-docker-pr-lifecycle-fork-live-20260507-remat
 ```
 
 The prompt requires keepers to stay on draft proof PRs:
@@ -145,3 +157,9 @@ operator evidence, but it is not completion unless the Docker lifecycle audit
 also passes for the expected fleet. The reprobe audit is run-id scoped, so stale
 PR lifecycle evidence from earlier keeper proof runs cannot satisfy a fresh
 run.
+
+Use `--phase review --review-resume` only after create proof PRs already exist
+for the run id and should be reviewed without creating another proof branch.
+The resume path intentionally still resolves target PRs keeper-side; if a target
+PR was closed or never existed, the review phase must report a blocker instead
+of manufacturing approve evidence.

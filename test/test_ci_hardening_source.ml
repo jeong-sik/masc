@@ -1164,14 +1164,16 @@ let test_keeper_required_tool_contracts () =
           {|CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-masc_web_search,keeper_bash,keeper_pr_create}}"|}
      && file_contains_pattern
           "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          {|REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_pr_review_comment}}"|});
+          {|REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_shell,keeper_pr_review_comment}}"|});
   check bool "runbook documents docker PR lifecycle split phases" true
     (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
        "The create phase"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
           "requires `masc_web_search`, `keeper_bash`, and `keeper_pr_create`"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-          "the review phase requires `keeper_pr_review_comment`");
+          "the review phase requires `keeper_shell` and"
+     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+          "second required tool keeps approval mandatory");
   check bool "docker PR lifecycle prompt accepts brokered route proof" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
@@ -1205,6 +1207,33 @@ let test_keeper_required_tool_contracts () =
           "skipping review phase because create phase did not produce complete success evidence"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
           "`create-readiness-failures.jsonl`");
+  check bool "docker PR lifecycle supports review-only resume" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       {|PHASE_MODE="${PHASE_MODE:-both}"|}
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          {|--phase create|review|both|}
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          {|--review-resume|}
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          {|if [[ "$REVIEW_RESUME" == "1" ]] || all_create_results_ready_for_review; then|}
+     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+          "`--phase review --review-resume`");
+  check bool "docker PR lifecycle review resolves fork head refs" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       "proof_head_ref_for_keeper"
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          {|gh pr view $review_head_ref -R $REPO_SLUG --json number,url,isDraft,headRefName|}
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          "review_target_head"
+     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+          "owner-qualified `OWNER:BRANCH` head ref");
   check bool "keeper msg schema documents required_tool_names alias" true
     (file_contains_pattern "lib/keeper/keeper_schema.ml"
        "required_tool_names")

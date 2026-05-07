@@ -39,9 +39,11 @@ INIT_TIMEOUT_SEC="${INIT_TIMEOUT_SEC:-60}"
 POLL_TIMEOUT_SEC="${POLL_TIMEOUT_SEC:-1200}"
 POLL_INTERVAL_SEC="${POLL_INTERVAL_SEC:-10}"
 LIFECYCLE_MUTATION_MODE="split"
+PHASE_MODE="${PHASE_MODE:-both}"
+REVIEW_RESUME="${REVIEW_RESUME:-0}"
 REQUIRED_TOOLS_LEGACY="${REQUIRED_TOOLS:-}"
 CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-masc_web_search,keeper_bash,keeper_pr_create}}"
-REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_pr_review_comment}}"
+REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_shell,keeper_pr_review_comment}}"
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 MCP_TOKEN="${MASC_MCP_TOKEN:-}"
 MCP_CLIENT_NAME="${MCP_CLIENT_NAME:-keeper-docker-pr-lifecycle-reprobe}"
@@ -89,6 +91,11 @@ Options:
   --board-post-id ID       Post a final board comment to this thread.
   --run-id ID              Stable run id for prompts and artifacts.
   --run-dir PATH           Artifact directory.
+  --phase create|review|both
+                           Which lifecycle phase to mutate (default: both).
+  --review-resume          With --phase review, send review prompts even when
+                           create result readiness is incomplete. Keeper-side
+                           target PR resolution still decides success/failure.
   -h, --help               Show this help.
 
 Environment:
@@ -102,6 +109,9 @@ Environment:
   CREATE_REQUIRED_TOOLS    CSV required_tools for split create phase.
   REVIEW_REQUIRED_TOOLS    CSV required_tools for split review phase.
   RUN_AUDIT=0              Skip final audit.
+  PHASE_MODE=create|review|both
+                           Same as --phase.
+  REVIEW_RESUME=1          Same as --review-resume.
   EXPECTED_SERVER_COMMIT   Optional expected /health build.commit prefix.
   FORBID_GITHUB_IDENTITIES Optional CSV of forbidden keeper GitHub identities.
   ALLOW_FORK_PR_FOR_READONLY=1
@@ -200,6 +210,14 @@ while [[ $# -gt 0 ]]; do
       SUMMARY_FILE="$RUN_DIR/summary.json"
       AUDIT_FILE="$RUN_DIR/audit-docker-pr-lifecycle.json"
       shift 2
+      ;;
+    --phase)
+      PHASE_MODE="$2"
+      shift 2
+      ;;
+    --review-resume)
+      REVIEW_RESUME=1
+      shift
       ;;
     -h|--help)
       usage
@@ -990,6 +1008,20 @@ proof_branch_for_keeper() {
   printf 'keeper-%s-agent/%s' "$keeper" "$RUN_ID"
 }
 
+proof_head_ref_for_keeper() {
+  local keeper="$1"
+  local branch account
+  branch="$(proof_branch_for_keeper "$keeper")"
+  if keeper_uses_fork_pr_route "$keeper"; then
+    account="$(github_account_for_keeper "$keeper")"
+    if [[ -n "$account" ]]; then
+      printf '%s:%s' "$account" "$branch"
+      return 0
+    fi
+  fi
+  printf '%s' "$branch"
+}
+
 github_account_for_keeper() {
   local keeper="$1"
   jq -r --arg keeper "$keeper" '.keeper_accounts[$keeper] // empty' "$GITHUB_IDENTITY_COUNTS_FILE"
@@ -1208,23 +1240,28 @@ prompt_for_keeper_review() {
   local keeper="$1"
   local review_target="${2:-}"
   local review_branch=""
+  local review_head_ref=""
   local review_target_json="null"
   local review_branch_json="null"
+  local review_head_ref_json="null"
   local review_instruction=""
   if [[ -n "$review_target" ]]; then
     review_branch="$(proof_branch_for_keeper "$review_target")"
+    review_head_ref="$(proof_head_ref_for_keeper "$review_target")"
     review_target_json="\"$review_target\""
     review_branch_json="\"$review_branch\""
+    review_head_ref_json="\"$review_head_ref\""
     review_instruction="$(cat <<EOF
 Cross-keeper approval target:
-- You must review and APPROVE the draft PR whose head branch is: $review_branch
+- You must review and APPROVE the draft PR whose head ref is: $review_head_ref
+- Bare target branch: $review_branch
 - This target belongs to keeper: $review_target
 - Do not approve your own PR or your own branch.
 - First use keeper_shell once to resolve the target PR number:
-  gh pr view $review_branch -R $REPO_SLUG --json number,url,isDraft,headRefName
+  gh pr view $review_head_ref -R $REPO_SLUG --json number,url,isDraft,headRefName
 - If that command reports no PR or cannot resolve the branch, do not wait in a loop. Reply with blocker="target_pr_missing" and the exact tool output.
 - If GitHub reports the target PR has the same author identity as your current credential and rejects approval as self-approval, stop and report blocker="github_self_approve_policy" with the exact tool output.
-- Once the PR number is known, call keeper_pr_review_comment with event="APPROVE" and a body that includes run_id=$RUN_ID, reviewer=$keeper, and target_branch=$review_branch.
+- Once the PR number is known, call keeper_pr_review_comment with event="APPROVE" and a body that includes run_id=$RUN_ID, reviewer=$keeper, target_branch=$review_branch, and target_head=$review_head_ref.
 EOF
 )"
   else
@@ -1260,6 +1297,7 @@ Reply with one compact JSON object:
      "keeper": "$keeper",
      "review_target_keeper": $review_target_json,
      "review_target_branch": $review_branch_json,
+     "review_target_head": $review_head_ref_json,
      "approved_pr_url": "...",
      "docker_pr_approve": true,
      "blocker": null
@@ -1271,9 +1309,9 @@ Safety rules:
 - If a tool is missing or policy-blocked, stop and reply with blocker plus exact structured tool output.
 
 This prompt is sent with review-phase masc_keeper_msg.required_tools so the
-runtime records tool_surface_mismatch or missing_required_tool_use when
-keeper_pr_review_comment is not visible or not used. keeper_shell is read-only
-inspection and intentionally not part of the required-tool contract.
+runtime records tool_surface_mismatch or missing_required_tool_use when the
+read-only keeper_shell lookup or keeper_pr_review_comment approval is not
+visible or not used.
 EOF
 }
 
@@ -1290,7 +1328,12 @@ send_phase_prompts() {
   local required_tools_csv="$2"
   while IFS= read -r keeper; do
     [[ -n "$keeper" ]] || continue
-    local prompt args payload text request_id
+    local prompt args payload text request_id review_target review_target_head
+    review_target="$(review_target_for_keeper "$keeper")"
+    review_target_head=""
+    if [[ -n "$review_target" ]]; then
+      review_target_head="$(proof_head_ref_for_keeper "$review_target")"
+    fi
     prompt="$(cat "$PROMPT_DIR/$keeper-$phase.txt")"
     args="$(
       jq -cn \
@@ -1327,8 +1370,9 @@ send_phase_prompts() {
       --arg phase "$phase" \
       --arg request_id "$request_id" \
       --arg prompt_file "$PROMPT_DIR/$keeper-$phase.txt" \
-      --arg review_target "$(review_target_for_keeper "$keeper")" \
-      '{keeper:$keeper, phase:$phase, request_id:$request_id, prompt_file:$prompt_file, review_target:$review_target, status:"pending"}' \
+      --arg review_target "$review_target" \
+      --arg review_target_head "$review_target_head" \
+      '{keeper:$keeper, phase:$phase, request_id:$request_id, prompt_file:$prompt_file, review_target:$review_target, review_target_head:$review_target_head, status:"pending"}' \
       >>"$REQUESTS_FILE"
   done <"$RUN_DIR/keepers.txt"
 }
@@ -1620,6 +1664,14 @@ require_cmd curl
 # the run with a less obvious git-not-found error.
 require_cmd git
 
+case "$PHASE_MODE" in
+  create|review|both) ;;
+  *)
+    echo "invalid --phase: $PHASE_MODE (expected create, review, or both)" >&2
+    exit 2
+    ;;
+esac
+
 if [[ "$MUTATE" == "1" || -n "$EXPECTED_SERVER_COMMIT" ]]; then
   assert_expected_server_commit
 fi
@@ -1628,7 +1680,9 @@ discover_keepers
 assert_github_identity_pool_for_mutate
 build_review_targets
 render_prompts
-assert_no_proof_branch_collisions_for_mutate
+if [[ "$PHASE_MODE" != "review" ]]; then
+  assert_no_proof_branch_collisions_for_mutate
+fi
 
 if [[ "$MUTATE" == "1" ]]; then
   # Share one POLL_TIMEOUT_SEC budget across both phases so the overall
@@ -1636,14 +1690,30 @@ if [[ "$MUTATE" == "1" ]]; then
   # silently doubling when create + review each compute their own
   # deadline (PR #13842 review).
   export MUTATE_POLL_DEADLINE_TS=$(( $(date +%s) + POLL_TIMEOUT_SEC ))
-  send_phase_prompts "create" "$CREATE_REQUIRED_TOOLS"
-  poll_results "create"
-  if all_create_results_ready_for_review; then
-    send_phase_prompts "review" "$REVIEW_REQUIRED_TOOLS"
-    poll_results "review"
-  else
-    log "skipping review phase because create phase did not produce complete success evidence"
-  fi
+  case "$PHASE_MODE" in
+    create)
+      send_phase_prompts "create" "$CREATE_REQUIRED_TOOLS"
+      poll_results "create"
+      ;;
+    review)
+      if [[ "$REVIEW_RESUME" == "1" ]] || all_create_results_ready_for_review; then
+        send_phase_prompts "review" "$REVIEW_REQUIRED_TOOLS"
+        poll_results "review"
+      else
+        log "skipping review phase because create phase did not produce complete success evidence"
+      fi
+      ;;
+    both)
+      send_phase_prompts "create" "$CREATE_REQUIRED_TOOLS"
+      poll_results "create"
+      if all_create_results_ready_for_review; then
+        send_phase_prompts "review" "$REVIEW_REQUIRED_TOOLS"
+        poll_results "review"
+      else
+        log "skipping review phase because create phase did not produce complete success evidence"
+      fi
+      ;;
+  esac
   unset MUTATE_POLL_DEADLINE_TS
 else
   log "dry-run mode: prompts rendered under $PROMPT_DIR; no keeper messages sent"

@@ -366,6 +366,16 @@ def pr_ref_texts_from_structured_output(row: dict[str, Any]) -> list[str]:
             texts.append(f"PR#{value}")
         elif isinstance(value, str) and value.strip().isdigit():
             texts.append(f"PR#{value.strip()}")
+    route_evidence = dict_field(row, "route_evidence")
+    if route_evidence is not None:
+        for key in ("pr_url", "pull_request_url", "url", "html_url"):
+            texts.append(text_field(route_evidence, key))
+        for key in ("pr_number", "number"):
+            value = route_evidence.get(key)
+            if isinstance(value, int) and value > 0:
+                texts.append(f"PR#{value}")
+            elif isinstance(value, str) and value.strip().isdigit():
+                texts.append(f"PR#{value.strip()}")
     return [text for text in texts if text]
 
 
@@ -391,7 +401,32 @@ def row_mentions_evidence_run_id(
         haystack = json.dumps(row, ensure_ascii=False, sort_keys=True)
     except (TypeError, ValueError):
         haystack = str(row)
-    return evidence_run_id.lower() in haystack.lower()
+    haystack = haystack.lower()
+    return any(alias in haystack for alias in evidence_run_id_aliases(evidence_run_id))
+
+
+def evidence_run_id_aliases(evidence_run_id: str) -> set[str]:
+    raw = evidence_run_id.strip().lower()
+    aliases = {raw}
+    parts = [part for part in re.split(r"[^a-z0-9]+", raw) if part]
+    date_index = next(
+        (
+            index
+            for index, part in enumerate(parts)
+            if re.fullmatch(r"20[0-9]{6}", part)
+        ),
+        None,
+    )
+    if date_index is not None and date_index > 0 and date_index + 1 < len(parts):
+        suffix = "-".join(parts[date_index + 1 :])
+        prefix = parts[:date_index]
+        aliases.add("-".join(prefix + [suffix]))
+        for index in range(len(prefix) - 1, -1, -1):
+            if any(char.isdigit() for char in prefix[index]):
+                aliases.add("-".join([prefix[index], suffix]))
+                aliases.add("-".join(prefix[index:] + [suffix]))
+                break
+    return {alias for alias in aliases if len(alias) >= 8}
 
 
 def pr_numbers_from_text(text: str) -> set[int]:
@@ -1062,6 +1097,70 @@ def pr_action_metric_paths(
     return [path for _, _, path in sorted(candidates, reverse=True)]
 
 
+def keeper_run_correlation_paths(
+    base_path: Path, name: str, *, min_day_key: int | None = None
+) -> list[Path]:
+    root = base_path / ".masc" / "keepers" / name
+    paths = decision_log_paths(base_path, name)
+    for subdir in ("metrics", "pr-action-metrics", "execution-receipts"):
+        base = root / subdir
+        if not base.is_dir():
+            continue
+        for path in sorted(path for path in base.rglob("*.jsonl") if path.is_file()):
+            day_key = pr_action_metric_day_key(path)
+            if (
+                min_day_key is not None
+                and day_key is not None
+                and day_key < min_day_key
+            ):
+                continue
+            paths.append(path)
+    return paths
+
+
+def trace_session_ids_from_row(row: dict[str, Any]) -> set[str]:
+    ids: set[str] = set()
+
+    def add(value: Any) -> None:
+        if isinstance(value, str) and value.strip():
+            ids.add(value.strip())
+
+    for container in (
+        row,
+        dict_field(row, "runtime_contract"),
+        dict_field(row, "route_evidence"),
+        dict_field(row, "action_radius"),
+    ):
+        if container is None:
+            continue
+        add(container.get("trace_id"))
+        add(container.get("session_id"))
+    return ids
+
+
+def collect_run_correlation_ids(
+    base_path: Path,
+    name: str,
+    *,
+    evidence_run_id: str | None,
+    min_metric_ts: float | None,
+    min_metric_day_key: int | None,
+) -> set[str]:
+    if not evidence_run_id:
+        return set()
+    ids: set[str] = set()
+    for path in keeper_run_correlation_paths(
+        base_path, name, min_day_key=min_metric_day_key
+    ):
+        for row in iter_jsonl(path):
+            ts = numeric_field(row, "ts_unix") or numeric_field(row, "ts")
+            if min_metric_ts is not None and ts is not None and ts < min_metric_ts:
+                continue
+            if row_mentions_evidence_run_id(row, evidence_run_id):
+                ids.update(trace_session_ids_from_row(row))
+    return ids
+
+
 def pr_creation_scan_paths(base_path: Path, name: str) -> list[Path]:
     root = base_path / ".masc"
     paths: list[Path] = decision_log_paths(base_path, name)
@@ -1286,6 +1385,13 @@ def scan_keeper_evidence(
             max_silence_hours * 3600.0
         )
         min_metric_day_key = day_key_from_unix(min_metric_ts)
+    run_correlation_ids = collect_run_correlation_ids(
+        base_path,
+        name,
+        evidence_run_id=evidence_run_id,
+        min_metric_ts=min_metric_ts,
+        min_metric_day_key=min_metric_day_key,
+    )
     for decisions in decision_log_paths(base_path, name):
         for row in iter_jsonl(decisions):
             ts = numeric_field(row, "ts_unix")
@@ -1338,9 +1444,13 @@ def scan_keeper_evidence(
                 tool = row.get("tool")
                 if isinstance(tool, str):
                     tools.add(tool)
-                if row_matches_evidence_scope(
+                scope_matches = row_matches_evidence_scope(
                     row, evidence_run_id, evidence_run_pr_numbers, evidence_windows
-                ):
+                )
+                trace_matches = run_correlation_ids.intersection(
+                    trace_session_ids_from_row(row)
+                )
+                if scope_matches or trace_matches:
                     row_evidence, row_docker_evidence = (
                         pr_lifecycle_evidence_from_tool_call(row)
                     )

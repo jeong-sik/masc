@@ -1,11 +1,13 @@
 open Alcotest
 
 module ES = Masc_mcp.Keeper_exec_status
+module Metrics = Masc_mcp.Keeper_exec_status_metrics
 module KSB = Masc_mcp.Keeper_status_bridge
 module KR = Masc_mcp.Keeper_registry
 module KT = Masc_mcp.Keeper_types
 module Coord = Masc_mcp.Coord
 module OWN = Masc_mcp.Oas_worker_named
+module Prom = Masc_mcp.Prometheus
 
 let keeper_health_testable : KT.keeper_health Alcotest.testable =
   Alcotest.testable
@@ -123,6 +125,134 @@ let assoc_member key fields =
   match List.assoc_opt key fields with
   | Some value -> value
   | None -> `Null
+
+let write_lines path lines =
+  KT.mkdir_p (Filename.dirname path);
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+      List.iter
+        (fun line ->
+          output_string oc line;
+          output_char oc '\n')
+        lines)
+
+let persistence_read_drop_total ~surface ~reason =
+  Prom.metric_value_or_zero Prom.metric_persistence_read_drops
+    ~labels:[("surface", surface); ("reason", reason)]
+    ()
+
+let check_persistence_drop_delta ~surface ~reason ~before ~delta =
+  Alcotest.(check (float 0.0001))
+    (Printf.sprintf "%s/%s persistence drops" surface reason)
+    (before +. float_of_int delta)
+    (persistence_read_drop_total ~surface ~reason)
+
+let test_metrics_summary_counts_parse_drops () =
+  let surface = "keeper_exec_status_metrics" in
+  let entry_reason = "entry_load_error" in
+  let invalid_reason = "invalid_payload" in
+  let before_entry =
+    persistence_read_drop_total ~surface ~reason:entry_reason
+  in
+  let before_invalid =
+    persistence_read_drop_total ~surface ~reason:invalid_reason
+  in
+  let summary =
+    Metrics.summarize_metrics_lines
+      [
+        {|{"channel":"turn","ts_unix":1.0,"trace_id":"trace-ok"}|};
+        "{not-json";
+        "[]";
+      ]
+      ~default_generation:0
+  in
+  let summary_json = Metrics.metrics_summary_to_json summary in
+  let sample_points =
+    match assoc_member "sample_points" (Yojson.Safe.Util.to_assoc summary_json) with
+    | `Int value -> value
+    | other ->
+        Alcotest.failf "unexpected sample_points JSON: %s"
+          (Yojson.Safe.to_string other)
+  in
+  check int "only valid object rows are summarized" 1 sample_points;
+  check_persistence_drop_delta ~surface ~reason:entry_reason
+    ~before:before_entry ~delta:1;
+  check_persistence_drop_delta ~surface ~reason:invalid_reason
+    ~before:before_invalid ~delta:1
+
+let test_tool_audit_counts_decision_log_parse_drops () =
+  let surface = "keeper_exec_status_decision_log" in
+  let entry_reason = "entry_load_error" in
+  let invalid_reason = "invalid_payload" in
+  let before_entry =
+    persistence_read_drop_total ~surface ~reason:entry_reason
+  in
+  let before_invalid =
+    persistence_read_drop_total ~surface ~reason:invalid_reason
+  in
+  with_temp_base_path "test-keeper-exec-status-decision-drops" (fun base_path ->
+      let config = Coord.default_config base_path in
+      let keeper_name = "keeper-tool-audit-decisions" in
+      write_lines
+        (KT.keeper_decision_log_path config keeper_name)
+        [
+          {|{"ts":"2026-05-07T00:00:00Z","tools_used":["masc_task_status"],"tool_call_count":1}|};
+          "[]";
+          "{not-json";
+        ];
+      match
+        Metrics.latest_tool_audit_snapshot_from_files config ~keeper_name
+      with
+      | None -> Alcotest.fail "expected decision log tool audit snapshot"
+      | Some snapshot ->
+          check (list string) "decision tools" ["masc_task_status"]
+            snapshot.latest_tool_names;
+          check (option int) "decision tool count" (Some 1)
+            snapshot.latest_tool_call_count;
+          check (option string) "decision source" (Some "keeper_decision_log")
+            snapshot.tool_audit_source);
+  check_persistence_drop_delta ~surface ~reason:entry_reason
+    ~before:before_entry ~delta:1;
+  check_persistence_drop_delta ~surface ~reason:invalid_reason
+    ~before:before_invalid ~delta:1
+
+let test_tool_audit_counts_metrics_parse_drops () =
+  let surface = "keeper_exec_status_keeper_metrics" in
+  let entry_reason = "entry_load_error" in
+  let invalid_reason = "invalid_payload" in
+  let before_entry =
+    persistence_read_drop_total ~surface ~reason:entry_reason
+  in
+  let before_invalid =
+    persistence_read_drop_total ~surface ~reason:invalid_reason
+  in
+  with_temp_base_path "test-keeper-exec-status-metrics-drops" (fun base_path ->
+      let config = Coord.default_config base_path in
+      let keeper_name = "keeper-tool-audit-metrics" in
+      write_lines
+        (KT.keeper_metrics_path config keeper_name)
+        [
+          {|{"ts":"2026-05-07T00:00:00Z","tools_used":["masc_board_post"],"tool_call_count":1}|};
+          "[]";
+          "{not-json";
+        ];
+      match
+        Metrics.latest_tool_audit_snapshot_from_files config ~keeper_name
+      with
+      | None -> Alcotest.fail "expected metrics tool audit snapshot"
+      | Some snapshot ->
+          check (list string) "metrics tools" ["masc_board_post"]
+            snapshot.latest_tool_names;
+          check (option int) "metrics tool count" (Some 1)
+            snapshot.latest_tool_call_count;
+          check (option string) "metrics source" (Some "keeper_metrics")
+            snapshot.tool_audit_source);
+  check_persistence_drop_delta ~surface ~reason:entry_reason
+    ~before:before_entry ~delta:1;
+  check_persistence_drop_delta ~surface ~reason:invalid_reason
+    ~before:before_invalid ~delta:1
 
 let test_attention_fields_promote_runtime_trust_attention () =
   let fields =
@@ -905,6 +1035,15 @@ let () =
             test_parser_roundtrip_all_constructors;
           test_case "rejects unknown wire strings" `Quick
             test_parser_rejects_unknown;
+        ] );
+      ( "metrics_read_drops",
+        [
+          test_case "metrics summary counts malformed rows" `Quick
+            test_metrics_summary_counts_parse_drops;
+          test_case "decision log tool audit counts malformed rows" `Quick
+            test_tool_audit_counts_decision_log_parse_drops;
+          test_case "metrics tool audit counts malformed rows" `Quick
+            test_tool_audit_counts_metrics_parse_drops;
         ] );
       ( "health_state",
         [

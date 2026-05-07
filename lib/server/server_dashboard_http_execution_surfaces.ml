@@ -112,13 +112,38 @@ let _execution_cache =
     release) routed through [observe_task_transition].
     Best-effort: never raises — cache staleness must not break
     the mutation path. *)
+let record_invalidation_failure ~callback ~message exn =
+  Prometheus.inc_counter
+    Prometheus.metric_keeper_lifecycle_callback_failures
+    ~labels:[ ("callback", callback) ]
+    ();
+  Log.Dashboard.error "%s: %s" message (Printexc.to_string exn)
+
+let invalidate_execution_cache_with_hooks_for_testing
+    ~invalidate_execution_surface
+    ~invalidate_light_cache
+    () =
+  (try invalidate_execution_surface () with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+       record_invalidation_failure
+         ~callback:"execution_surface_cache_invalidate"
+         ~message:"Failed to invalidate execution surface cache"
+         exn);
+  (try invalidate_light_cache () with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+       record_invalidation_failure
+         ~callback:"dashboard_execution_light_cache_invalidate"
+         ~message:"Failed to invalidate dashboard execution cache"
+         exn)
+
 let invalidate_execution_cache () =
-  (try invalidate_cached_surface _execution_cache with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-     Log.Dashboard.error "Failed to invalidate execution surface cache: %s"
-       (Printexc.to_string exn));
-  (try Dashboard_cache.invalidate "execution:default:light" with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-     Log.Dashboard.error "Failed to invalidate dashboard execution cache: %s"
-       (Printexc.to_string exn))
+  invalidate_execution_cache_with_hooks_for_testing
+    ~invalidate_execution_surface:(fun () -> invalidate_cached_surface _execution_cache)
+    ~invalidate_light_cache:(fun () ->
+      Dashboard_cache.invalidate "execution:default:light")
+    ()
 
 (** Bypass the proactive warm-up guard so tests that call
     [dashboard_namespace_truth_http_json] get the full response instead of

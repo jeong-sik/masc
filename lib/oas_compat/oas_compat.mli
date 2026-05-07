@@ -145,7 +145,7 @@ module Metrics : sig
     ?on_cache_hit:(model_id:string -> unit) ->
     ?on_cache_miss:(model_id:string -> unit) ->
     ?on_request_start:(model_id:string -> unit) ->
-    ?on_request_end:(model_id:string -> latency_ms:int -> unit) ->
+    ?on_request_end:(model_id:string -> latency_ms:int option -> unit) ->
     ?on_error:(model_id:string -> error:string -> unit) ->
     ?on_http_status:(provider:string -> model_id:string -> status:int -> unit) ->
     ?on_capability_drop:(model_id:string -> field:string -> unit) ->

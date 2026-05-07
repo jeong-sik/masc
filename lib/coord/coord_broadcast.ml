@@ -135,6 +135,8 @@ let broadcast ?trace_context ?(msg_type = "broadcast")
     mention;
     timestamp = now_iso ();
     trace_context;
+    expires_at = None;
+    relevance = Event_kind.Relevance.(to_string Medium);
   } in
   let msg_file =
     Filename.concat (messages_dir config)

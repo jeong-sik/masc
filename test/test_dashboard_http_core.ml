@@ -468,6 +468,30 @@ let test_verifier_of_request_canonicalizes_token_owner () =
       check string "verification verifier canonicalized to token owner"
         "operator:codex" verifier
 
+let test_dashboard_message_json_surfaces_temporal_decay_fields () =
+  let message : Types.message =
+    {
+      seq = 7;
+      from_agent = "operator";
+      msg_type = "broadcast";
+      content = "hello";
+      mention = None;
+      timestamp = "2026-05-07T00:00:00Z";
+      trace_context = Some "traceparent";
+      expires_at = Some 1_714_067_200.0;
+      relevance = "critical";
+    }
+  in
+  let json = Lib.Server_dashboard_http_core.dashboard_message_json message in
+  let open Yojson.Safe.Util in
+  check string "type" "broadcast" (json |> member "type" |> to_string);
+  check string "trace_context" "traceparent"
+    (json |> member "trace_context" |> to_string);
+  check (float 0.001) "expires_at" 1_714_067_200.0
+    (json |> member "expires_at" |> to_float);
+  check string "relevance" "critical"
+    (json |> member "relevance" |> to_string)
+
 let () =
   run "dashboard_http_core"
     [
@@ -501,5 +525,7 @@ let () =
             test_execution_actor_for_request_canonicalizes_token_owner;
           test_case "verification verifier canonicalizes token owner" `Quick
             test_verifier_of_request_canonicalizes_token_owner;
+          test_case "message JSON exposes temporal decay fields" `Quick
+            test_dashboard_message_json_surfaces_temporal_decay_fields;
         ] );
     ]

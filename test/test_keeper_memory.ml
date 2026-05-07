@@ -34,6 +34,8 @@ let room_message content =
     content;
     mention = None;
     timestamp = "2026-03-12T00:00:00Z"; trace_context = None;
+    expires_at = None;
+    relevance = "medium";
   }
 
 let test_any_mentioned_exact_target () =

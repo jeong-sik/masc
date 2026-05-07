@@ -752,8 +752,13 @@ let dashboard_message_json (message : Masc_domain.message) =
   `Assoc
     [
       ("from", `String message.from_agent);
+      ("type", `String message.msg_type);
       ("content", `String message.content);
+      ("mention", Json_util.string_opt_to_json message.mention);
       ("timestamp", `String message.timestamp);
+      ("trace_context", Json_util.string_opt_to_json message.trace_context);
+      ("expires_at", Json_util.float_opt_to_json message.expires_at);
+      ("relevance", `String message.relevance);
       ("seq", `Int message.seq);
     ]
 

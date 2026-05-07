@@ -103,31 +103,31 @@ the categorization roadmap. Newly-added typed getters in
 | Env var | Kind | Line | Doc |
 |---|---|---|---|
 | `MASC_ALERT_DEDUP_WINDOW_SEC` | typed:float | 349 | Alert dedup window, clamped to >= 5s. Default: 60. |
-| `MASC_CASCADE_ATTEMPT_LIVENESS` | typed:string | 972 |  |
-| `MASC_COMPACT_ANCHOR_BOOST` | typed:float | 722 |  |
-| `MASC_COMPACT_DROP_THRESHOLD` | typed:float | 723 |  |
-| `MASC_COMPACT_DYN_FOCUSED_RATIO` | typed:float | 729 |  |
-| `MASC_COMPACT_DYN_MULTI_AGENT_RATIO` | typed:float | 728 |  |
-| `MASC_COMPACT_KEEP_RECENT` | typed:int | 724 |  |
-| `MASC_COMPACT_LARGE_CLOUD_FLOOR` | typed:int | 731 |  |
-| `MASC_COMPACT_ROLE_ASSISTANT` | typed:float | 717 |  |
-| `MASC_COMPACT_ROLE_SYSTEM` | typed:float | 714 | {1 Context Compaction (OAS)} |
-| `MASC_COMPACT_ROLE_TOOL` | typed:float | 715 | {1 Context Compaction (OAS)} |
-| `MASC_COMPACT_ROLE_USER` | typed:float | 716 |  |
-| `MASC_COMPACT_SMALL_LOCAL_FLOOR` | typed:int | 730 |  |
-| `MASC_COMPACT_TOOL_ABSENT` | typed:float | 720 |  |
-| `MASC_COMPACT_TOOL_PRESENT` | typed:float | 719 |  |
-| `MASC_COMPACT_TOOL_PRUNE_LIMIT` | typed:int | 726 |  |
-| `MASC_COMPACT_W_RECENCY` | typed:float | 710 | {1 Context Compaction (OAS)} |
-| `MASC_COMPACT_W_ROLE` | typed:float | 711 | {1 Context Compaction (OAS)} |
-| `MASC_COMPACT_W_TOOL` | typed:float | 712 | {1 Context Compaction (OAS)} |
-| `MASC_CONTEXT_RATIO_HARD_CAP` | typed:float | 705 | {1 Context Ratio Hard Cap} Absolute ceiling for compaction ratio_gate and handoff threshold after multiplier adjustme... |
-| `MASC_DASHBOARD_HEALTH_CTX_CRITICAL` | typed:float | 832 |  |
-| `MASC_DASHBOARD_HEALTH_CTX_WARN` | typed:float | 833 |  |
-| `MASC_DASHBOARD_HEALTH_PENALTY_CRITICAL` | typed:float | 834 |  |
-| `MASC_DASHBOARD_HEALTH_PENALTY_WARN` | typed:float | 835 |  |
-| `MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO` | typed:float | 836 |  |
-| `MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC` | typed:float | 475 |  |
+| `MASC_CASCADE_ATTEMPT_LIVENESS` | typed:string | 986 |  |
+| `MASC_COMPACT_ANCHOR_BOOST` | typed:float | 736 |  |
+| `MASC_COMPACT_DROP_THRESHOLD` | typed:float | 737 |  |
+| `MASC_COMPACT_DYN_FOCUSED_RATIO` | typed:float | 743 |  |
+| `MASC_COMPACT_DYN_MULTI_AGENT_RATIO` | typed:float | 742 |  |
+| `MASC_COMPACT_KEEP_RECENT` | typed:int | 738 |  |
+| `MASC_COMPACT_LARGE_CLOUD_FLOOR` | typed:int | 745 |  |
+| `MASC_COMPACT_ROLE_ASSISTANT` | typed:float | 731 |  |
+| `MASC_COMPACT_ROLE_SYSTEM` | typed:float | 728 | {1 Context Compaction (OAS)} |
+| `MASC_COMPACT_ROLE_TOOL` | typed:float | 729 | {1 Context Compaction (OAS)} |
+| `MASC_COMPACT_ROLE_USER` | typed:float | 730 |  |
+| `MASC_COMPACT_SMALL_LOCAL_FLOOR` | typed:int | 744 |  |
+| `MASC_COMPACT_TOOL_ABSENT` | typed:float | 734 |  |
+| `MASC_COMPACT_TOOL_PRESENT` | typed:float | 733 |  |
+| `MASC_COMPACT_TOOL_PRUNE_LIMIT` | typed:int | 740 |  |
+| `MASC_COMPACT_W_RECENCY` | typed:float | 724 | {1 Context Compaction (OAS)} |
+| `MASC_COMPACT_W_ROLE` | typed:float | 725 | {1 Context Compaction (OAS)} |
+| `MASC_COMPACT_W_TOOL` | typed:float | 726 | {1 Context Compaction (OAS)} |
+| `MASC_CONTEXT_RATIO_HARD_CAP` | typed:float | 719 | {1 Context Ratio Hard Cap} Absolute ceiling for compaction ratio_gate and handoff threshold after multiplier adjustme... |
+| `MASC_DASHBOARD_HEALTH_CTX_CRITICAL` | typed:float | 846 |  |
+| `MASC_DASHBOARD_HEALTH_CTX_WARN` | typed:float | 847 |  |
+| `MASC_DASHBOARD_HEALTH_PENALTY_CRITICAL` | typed:float | 848 |  |
+| `MASC_DASHBOARD_HEALTH_PENALTY_WARN` | typed:float | 849 |  |
+| `MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO` | typed:float | 850 |  |
+| `MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC` | typed:float | 487 |  |
 | `MASC_KEEPER_ALERT_BOARD_AUTHOR` | typed:string | 115 |  |
 | `MASC_KEEPER_ALERT_BOARD_ENABLED` | feature_flag | 112 | Board fanout configuration |
 | `MASC_KEEPER_ALERT_BOARD_HEARTH` | typed:string | 118 |  |
@@ -151,11 +151,11 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_ALIVE_BUT_STUCK_STALL_FLOOR_SEC` | typed:float | 252 |  |
 | `MASC_KEEPER_ALIVE_BUT_STUCK_STALL_MULTIPLIER` | typed:int | 244 | Multiplier on the keeper's own [proactive.cooldown_sec] before a stalled keeper is flagged.  Default: 10 (10 cooldown... |
 | `MASC_KEEPER_AUTONOMOUS_QUEUE_POLL_SEC` | typed:float | 298 |  |
-| `MASC_KEEPER_AUTONOMOUS_SLOT_WAIT_TIMEOUT_SEC` | typed:float | 484 |  |
+| `MASC_KEEPER_AUTONOMOUS_SLOT_WAIT_TIMEOUT_SEC` | typed:float | 496 |  |
 | `MASC_KEEPER_AUTO_RESUME_INITIAL_SEC` | typed:float | 193 | Initial auto-resume backoff delay after an auto-pause (seconds). On every successive auto-pause the delay doubles, ca... |
 | `MASC_KEEPER_AUTO_RESUME_MAX_SEC` | typed:float | 197 | Maximum auto-resume backoff delay (seconds).  Default: 86400 (24 hours). |
-| `MASC_KEEPER_BATCH_THRESHOLD` | typed:int | 656 | Number of distinct keepers terminating within [batch_window_sec] before emitting a fleet batch alert. Default: 3. |
-| `MASC_KEEPER_BATCH_WINDOW_SEC` | typed:float | 651 | Fleet batch-termination detection window in seconds. Default: 30. |
+| `MASC_KEEPER_BATCH_THRESHOLD` | typed:int | 670 | Number of distinct keepers terminating within [batch_window_sec] before emitting a fleet batch alert. Default: 3. |
+| `MASC_KEEPER_BATCH_WINDOW_SEC` | typed:float | 665 | Fleet batch-termination detection window in seconds. Default: 30. |
 | `MASC_KEEPER_BOARD_DEBOUNCE_SEC` | typed:float | 408 |  |
 | `MASC_KEEPER_BOOTSTRAP_ENABLED` | feature_flag | 21 | Enable startup keeper bootstrap scan |
 | `MASC_KEEPER_BOOTSTRAP_LAZY_STARTUP_POLL_INTERVAL_SEC` | typed:float | 48 |  |
@@ -164,41 +164,41 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_BOOTSTRAP_MAX_SCAN` | typed:int | 30 | Max keeper meta files to scan during bootstrap |
 | `MASC_KEEPER_BOOTSTRAP_POST_STARTUP_SETTLE_SEC` | typed:float | 72 |  |
 | `MASC_KEEPER_BOOTSTRAP_STALE_TURN_SEC` | typed:float | 26 |  |
-| `MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST` | string_literal | 884 | Comma-separated provider kind allowlist for every keeper cascade call. Values are OAS [Provider_config.string_of_prov... |
-| `MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC` | typed:float | 584 |  |
+| `MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST` | string_literal | 898 | Comma-separated provider kind allowlist for every keeper cascade call. Values are OAS [Provider_config.string_of_prov... |
+| `MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC` | typed:float | 598 |  |
 | `MASC_KEEPER_CRASH_PERSIST_DRAIN_INTERVAL_SEC` | typed:float | 286 |  |
 | `MASC_KEEPER_DEAD_TTL_SEC` | typed:float | 181 | Dead tombstone TTL: seconds before Dead entries are cleaned up |
 | `MASC_KEEPER_DEBUG` | feature_flag | 305 | Enable keeper debug logging. Default: false. |
-| `MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC` | typed:float | 948 |  |
+| `MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC` | typed:float | 962 |  |
 | `MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD` | typed:float | 311 | Daily budget for keeper deliberation (USD). Default: 0.10. Re-readable within the process. Live operator control shou... |
-| `MASC_KEEPER_DOCKER_CONTAINER` | typed:string | 757 | Docker container name for keeper playground execution. Env: [MASC_KEEPER_DOCKER_CONTAINER]. Default: "keeper-playgrou... |
-| `MASC_KEEPER_DOCKER_PLAYGROUND_ROOT` | typed:string | 767 |  |
-| `MASC_KEEPER_DOCKER_READ` | typed:bool | 828 | Legacy RFC-0006 Phase B-2 flag. Docker read routing now follows [sandbox_profile=docker] unconditionally. This getter... |
-| `MASC_KEEPER_ESCALATION_THRESHOLD` | typed:int | 646 | Number of stale terminations within [termination_window_sec] before escalating to [Stale_termination_storm]. Default: 5. |
-| `MASC_KEEPER_GRPC_MAX_RECONNECT` | typed:int | 665 | Maximum gRPC reconnect attempts before stopping the heartbeat fiber. Default: 5. Range: [1, 20]. |
-| `MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC` | typed:float | 671 |  |
+| `MASC_KEEPER_DOCKER_CONTAINER` | typed:string | 771 | Docker container name for keeper playground execution. Env: [MASC_KEEPER_DOCKER_CONTAINER]. Default: "keeper-playgrou... |
+| `MASC_KEEPER_DOCKER_PLAYGROUND_ROOT` | typed:string | 781 |  |
+| `MASC_KEEPER_DOCKER_READ` | typed:bool | 842 | Legacy RFC-0006 Phase B-2 flag. Docker read routing now follows [sandbox_profile=docker] unconditionally. This getter... |
+| `MASC_KEEPER_ESCALATION_THRESHOLD` | typed:int | 660 | Number of stale terminations within [termination_window_sec] before escalating to [Stale_termination_storm]. Default: 5. |
+| `MASC_KEEPER_GRPC_MAX_RECONNECT` | typed:int | 679 | Maximum gRPC reconnect attempts before stopping the heartbeat fiber. Default: 5. Range: [1, 20]. |
+| `MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC` | typed:float | 685 |  |
 | `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC` | typed:int | 354 | Shared: keepalive interval, read early so WorkAsHeartbeat can reference it. |
 | `MASC_KEEPER_HEARTBEAT_JITTER_FACTOR` | typed:float | 421 |  |
-| `MASC_KEEPER_IDLE_SKIP_THRESHOLD` | typed:int | 593 | Consecutive idle tool repetitions before on_idle hook issues Skip. Below this: graduated Nudge messages. With tool_ch... |
+| `MASC_KEEPER_IDLE_SKIP_THRESHOLD` | typed:int | 607 | Consecutive idle tool repetitions before on_idle hook issues Skip. Below this: graduated Nudge messages. With tool_ch... |
 | `MASC_KEEPER_LIVENESS_RECOVERY_BACKOFF_BASE_SEC` | typed:float | 214 | Base backoff delay (seconds) between liveness recovery attempts per keeper. Exponential: attempt 0 = base, 1 = 2*base... |
 | `MASC_KEEPER_LIVENESS_RECOVERY_BACKOFF_MAX_SEC` | typed:float | 219 | Maximum backoff delay cap (seconds) for liveness recovery. Default: 3600 (1 hour). |
 | `MASC_KEEPER_LIVENESS_RECOVERY_ENABLED` | typed:bool | 202 | Liveness Recovery Supervisor (#12801): enable auto-recovery of Dead keepers whose root cause has cleared.  Set to fal... |
 | `MASC_KEEPER_LIVENESS_RECOVERY_MAX_ATTEMPTS` | typed:int | 224 | Maximum total liveness recovery attempts per keeper before giving up permanently.  Default: 5. |
 | `MASC_KEEPER_LIVENESS_RECOVERY_MIN_DEAD_SEC` | typed:float | 208 | Minimum time (seconds) a keeper must have been Dead before a liveness recovery attempt is made.  Allows transient roo... |
 | `MASC_KEEPER_MAX_CONSECUTIVE_HB_FAILURES` | typed:int | 395 | Maximum consecutive heartbeat failures before raising Keeper_fiber_crash (structured crash via dispatch_event). Defau... |
-| `MASC_KEEPER_MAX_CONSECUTIVE_TOOL_FAILURES` | typed:int | 695 | Maximum consecutive failures for the same (tool_name, args_hash) before blocking further attempts. Prevents infinite ... |
+| `MASC_KEEPER_MAX_CONSECUTIVE_TOOL_FAILURES` | typed:int | 709 | Maximum consecutive failures for the same (tool_name, args_hash) before blocking further attempts. Prevents infinite ... |
 | `MASC_KEEPER_MAX_CONSECUTIVE_TURN_FAILURES` | typed:int | 401 | Maximum consecutive unified turn failures before marking keeper as crashed. Covers LLM timeout, rate limit, and other... |
 | `MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS` | typed:int | 435 | Max idle turns for scheduled autonomous keeper turns. With tool_choice=Any and max_turns=50, keepers have room to exp... |
 | `MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE` | typed:int | 441 | Max idle turns for reactive (board/mention triggered) keeper turns. Reactive turns have an explicit trigger — more ... |
 | `MASC_KEEPER_MAX_SILENCE_SEC` | typed:float | 369 | Maximum seconds since last successful room heartbeat before presence sync is required again. Floor = keepalive interv... |
-| `MASC_KEEPER_MAX_TRANSIENT_RETRIES` | typed:int | 909 | Maximum outer-loop retries after the initial attempt. Total attempts = 1 initial + max_transient_retries. Env: [MASC_... |
+| `MASC_KEEPER_MAX_TRANSIENT_RETRIES` | typed:int | 923 | Maximum outer-loop retries after the initial attempt. Total attempts = 1 initial + max_transient_retries. Env: [MASC_... |
 | `MASC_KEEPER_METRICS_MAX_BYTES` | typed:int | 80 | Maximum metrics file size in bytes before rotation (default: 10MB) |
 | `MASC_KEEPER_METRICS_MAX_ROTATED` | typed:int | 84 | Number of rotated files to keep (default: 1, i.e. .1 only) |
-| `MASC_KEEPER_OAS_MAX_TURNS_PER_CALL` | typed:int | 518 | Maximum turns per single OAS Agent.run call. Keeper resumes via checkpoint in the next keepalive cycle when {!Oas_wor... |
-| `MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS` | typed:int | 538 |  |
-| `MASC_KEEPER_OAS_TIMEOUT_SEC` | string_literal | 500 | Per-call timeout in seconds for a single OAS Agent.run execution. Guards against indefinite LLM response waits within... |
+| `MASC_KEEPER_OAS_MAX_TURNS_PER_CALL` | typed:int | 530 | Maximum turns per single OAS Agent.run call. Keeper resumes via checkpoint in the next keepalive cycle when {!Oas_wor... |
+| `MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS` | typed:int | 550 |  |
+| `MASC_KEEPER_OAS_TIMEOUT_SEC` | string_literal | 512 | Per-call timeout in seconds for a single OAS Agent.run execution. Guards against indefinite LLM response waits within... |
 | `MASC_KEEPER_PAUSED_CLEANUP_TTL_SEC` | typed:float | 186 | Paused keeper file TTL: seconds before stale paused keeper meta files are removed from disk. Default: 86400 (24 hours). |
-| `MASC_KEEPER_PROACTIVE_MAX_ATTEMPTS` | typed:int | 680 | Maximum proactive generation attempts before falling back. Default: 3. Range: [1, 10]. |
+| `MASC_KEEPER_PROACTIVE_MAX_ATTEMPTS` | typed:int | 694 | Maximum proactive generation attempts before falling back. Default: 3. Range: [1, 10]. |
 | `MASC_KEEPER_REDUCER_CAP_TOKENS` | typed:int | 333 | Max message tokens retained by {!Agent_sdk.Context_reducer.cap_message_tokens} in the keeper run reducer pipeline.  D... |
 | `MASC_KEEPER_REDUCER_KEEP_RECENT` | typed:int | 341 | Recent messages kept verbatim by {!Agent_sdk.Context_reducer.cap_message_tokens}.  Default: 3. Range: [1, 20]. Env: [... |
 | `MASC_KEEPER_SELF_PRESERVATION_MIN_CANDIDATES` | typed:int | 177 | Self-preservation: minimum crashed candidates to trigger |
@@ -206,23 +206,23 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_SLEEP_CHUNK_SEC` | typed:float | 415 |  |
 | `MASC_KEEPER_SMART_HEARTBEAT` | feature_flag | 379 | Master switch for adaptive heartbeat scheduling in the keepalive loop. When true, Heartbeat_smart.should_emit gates p... |
 | `MASC_KEEPER_SNAPSHOT_SEC` | typed:int | 315 | Keeper keepalive snapshot interval, clamped to [15, 3600]. Default: 300. |
-| `MASC_KEEPER_STAGE_TIMING_RING_SIZE` | typed:int | 685 | Stage timing ring buffer size for Phase 0 profiling. Default: 100. Range: [10, 1000]. |
-| `MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC` | typed:float | 572 |  |
+| `MASC_KEEPER_STAGE_TIMING_RING_SIZE` | typed:int | 699 | Stage timing ring buffer size for Phase 0 profiling. Default: 100. Range: [10, 1000]. |
+| `MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC` | typed:float | 584 |  |
 | `MASC_KEEPER_SUPERVISOR_BACKOFF_BASE_S` | typed:float | 160 | Base delay for exponential backoff between restarts (seconds) |
 | `MASC_KEEPER_SUPERVISOR_BACKOFF_MAX_S` | typed:float | 164 | Maximum backoff delay cap (seconds) |
 | `MASC_KEEPER_SUPERVISOR_MAX_RESTARTS` | typed:int | 156 | Maximum restart attempts before declaring a keeper dead |
 | `MASC_KEEPER_SUPERVISOR_SWEEP_SEC` | typed:float | 168 | Interval between supervisor sweep runs (seconds) |
-| `MASC_KEEPER_SYMMETRIC_SANDBOX` | typed:bool | 820 | Legacy RFC-0006 Phase B-1 flag. Read-side containment now follows [sandbox_profile=docker] unconditionally. This gett... |
-| `MASC_KEEPER_TERMINATION_WINDOW_SEC` | typed:float | 641 | Sliding window for stale-termination escalation tracking. Default: 21600 (6 hours). |
-| `MASC_KEEPER_TRANSIENT_BACKOFF_BASE_SEC` | typed:float | 914 | Base delay (seconds) for exponential backoff. Delay at attempt [n] is [base * 2^(n-1)]. Env: [MASC_KEEPER_TRANSIENT_B... |
-| `MASC_KEEPER_TRANSIENT_BACKOFF_CAP_SEC` | typed:float | 918 | Hard cap on backoff delay (seconds). Env: [MASC_KEEPER_TRANSIENT_BACKOFF_CAP_SEC].  Default: 4.0. |
-| `MASC_KEEPER_TURN_TIMEOUT_SEC` | typed:float | 459 |  |
-| `MASC_KEEPER_WATCHDOG_GRACE_SEC` | typed:float | 636 | Grace period after fiber start before idle-stale detection activates. Prevents false positives on server restart when... |
-| `MASC_KEEPER_WATCHDOG_NOOP_THRESHOLD` | typed:int | 628 | Consecutive noop turns before considering the keeper stuck in a failure loop. Must be >= 2. Default: 3. |
-| `MASC_KEEPER_WATCHDOG_POLL_SEC` | typed:float | 623 | Watchdog poll interval in seconds. Must be >= 5. Default: 30. |
-| `MASC_KEEPER_WATCHDOG_STALE_SEC` | typed:float | 613 | Seconds since last turn before a Running keeper is considered idle-stale. Must be >= 60. Default: 300 (5 minutes). In... |
+| `MASC_KEEPER_SYMMETRIC_SANDBOX` | typed:bool | 834 | Legacy RFC-0006 Phase B-1 flag. Read-side containment now follows [sandbox_profile=docker] unconditionally. This gett... |
+| `MASC_KEEPER_TERMINATION_WINDOW_SEC` | typed:float | 655 | Sliding window for stale-termination escalation tracking. Default: 21600 (6 hours). |
+| `MASC_KEEPER_TRANSIENT_BACKOFF_BASE_SEC` | typed:float | 928 | Base delay (seconds) for exponential backoff. Delay at attempt [n] is [base * 2^(n-1)]. Env: [MASC_KEEPER_TRANSIENT_B... |
+| `MASC_KEEPER_TRANSIENT_BACKOFF_CAP_SEC` | typed:float | 932 | Hard cap on backoff delay (seconds). Env: [MASC_KEEPER_TRANSIENT_BACKOFF_CAP_SEC].  Default: 4.0. |
+| `MASC_KEEPER_TURN_TIMEOUT_SEC` | typed:float | 471 |  |
+| `MASC_KEEPER_WATCHDOG_GRACE_SEC` | typed:float | 650 | Grace period after fiber start before idle-stale detection activates. Prevents false positives on server restart when... |
+| `MASC_KEEPER_WATCHDOG_NOOP_THRESHOLD` | typed:int | 642 | Consecutive noop turns before considering the keeper stuck in a failure loop. Must be >= 2. Default: 3. |
+| `MASC_KEEPER_WATCHDOG_POLL_SEC` | typed:float | 637 | Watchdog poll interval in seconds. Must be >= 5. Default: 30. |
+| `MASC_KEEPER_WATCHDOG_STALE_SEC` | typed:float | 627 | Seconds since last turn before a Running keeper is considered idle-stale. Must be >= 60. Default: 300 (5 minutes). In... |
 | `MASC_KEEPER_WORK_AS_HEARTBEAT` | feature_flag | 363 | Master switch. When true, successful Coord.heartbeat after a unified turn counts as presence proof, allowing the next... |
-| `MASC_PAYLOAD_TELEMETRY` | typed:bool | 854 | Master switch for wake-payload measurement. Default off so the hot path is untouched until a baseline sweep is explic... |
+| `MASC_PAYLOAD_TELEMETRY` | typed:bool | 868 | Master switch for wake-payload measurement. Default off so the hot path is untouched until a baseline sweep is explic... |
 
 ## Env_config_oas_bridge (3 knobs)
 

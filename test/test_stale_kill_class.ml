@@ -218,6 +218,20 @@ let test_noop_failure_loop_triggers_after_current_turn () =
        ~started_at:200.0
        ~last_completed_turn_ended_at:(Some 201.0))
 
+let test_noop_failure_loop_boundary_equal_timestamps () =
+  (* The gate uses [ended_at >= started_at] (inclusive).  A turn whose
+     [ct_ended_at] is exactly the fiber's [started_at] still counts as a
+     completed turn under the current fiber — covers the boundary the
+     other tests step over with [199.0]/[201.0]. *)
+  Alcotest.(check bool)
+    "ended_at = started_at satisfies the inclusive bound"
+    true
+    (SW.should_trigger_noop_failure_loop_for_test
+       ~noop_count:3
+       ~noop_threshold:3
+       ~started_at:200.0
+       ~last_completed_turn_ended_at:(Some 200.0))
+
 let () =
   Alcotest.run "stale_kill_class"
     [
@@ -283,5 +297,7 @@ let () =
             test_noop_failure_loop_ignores_persisted_count_before_current_turn;
           Alcotest.test_case "triggers after current turn" `Quick
             test_noop_failure_loop_triggers_after_current_turn;
+          Alcotest.test_case "boundary equal timestamps" `Quick
+            test_noop_failure_loop_boundary_equal_timestamps;
         ] );
     ]

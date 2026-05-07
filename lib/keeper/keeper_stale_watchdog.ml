@@ -127,10 +127,9 @@ let should_trigger_noop_failure_loop
     ~started_at
     ~last_completed_turn_ended_at =
   noop_count >= noop_threshold
-  &&
-  match last_completed_turn_ended_at with
-  | Some ended_at -> ended_at >= started_at
-  | None -> false
+  && (match last_completed_turn_ended_at with
+      | Some ended_at -> ended_at >= started_at
+      | None -> false)
 
 let should_trigger_noop_failure_loop_for_test =
   should_trigger_noop_failure_loop

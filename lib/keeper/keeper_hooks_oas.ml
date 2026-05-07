@@ -1138,6 +1138,109 @@ let observe_output_parse_failure ~surface ~output_bytes =
         "keeper_hooks_oas output JSON parse failed: surface=%s output_bytes=%d"
         surface output_bytes)
 
+let find_substring_from text ~needle ~start =
+  let text_len = String.length text in
+  let needle_len = String.length needle in
+  let rec loop i =
+    if needle_len = 0 then Some i
+    else if i + needle_len > text_len then None
+    else if String.sub text i needle_len = needle then Some i
+    else loop (i + 1)
+  in
+  loop start
+
+let strip_fence_language block =
+  let block = String.trim block in
+  match String.index_opt block '\n' with
+  | None -> block
+  | Some first_line_end ->
+      let first_line =
+        String.sub block 0 first_line_end
+        |> String.trim
+        |> String.lowercase_ascii
+      in
+      let rest =
+        String.sub block (first_line_end + 1)
+          (String.length block - first_line_end - 1)
+        |> String.trim
+      in
+      if first_line = "json" || first_line = "jsonc" then rest else block
+
+let fenced_json_candidates text =
+  let fence = "```" in
+  let rec loop start acc =
+    match find_substring_from text ~needle:fence ~start with
+    | None -> List.rev acc
+    | Some open_at ->
+        let content_start = open_at + String.length fence in
+        (match find_substring_from text ~needle:fence ~start:content_start with
+         | None -> List.rev acc
+         | Some close_at ->
+             let raw =
+               String.sub text content_start (close_at - content_start)
+               |> strip_fence_language
+             in
+             let acc = if raw = "" then acc else raw :: acc in
+             loop (close_at + String.length fence) acc)
+  in
+  loop 0 []
+
+let json_close_for_open = function
+  | '{' -> Some '}'
+  | '[' -> Some ']'
+  | _ -> None
+
+let balanced_json_candidates text =
+  let len = String.length text in
+  let rec finish_candidate i in_string escaped stack =
+    if i >= len then None
+    else
+      let ch = text.[i] in
+      if in_string then
+        if escaped then finish_candidate (i + 1) true false stack
+        else
+          match ch with
+          | '\\' -> finish_candidate (i + 1) true true stack
+          | '"' -> finish_candidate (i + 1) false false stack
+          | _ -> finish_candidate (i + 1) true false stack
+      else
+        match ch with
+        | '"' -> finish_candidate (i + 1) true false stack
+        | '{' | '[' ->
+            (match json_close_for_open ch with
+             | None -> finish_candidate (i + 1) false false stack
+             | Some close ->
+                 finish_candidate (i + 1) false false (close :: stack))
+        | '}' | ']' ->
+            (match stack with
+             | close :: rest when close = ch ->
+                 if rest = [] then Some i
+                 else finish_candidate (i + 1) false false rest
+             | _ -> None)
+        | _ -> finish_candidate (i + 1) false false stack
+  in
+  let rec loop i acc =
+    if i >= len then List.rev acc
+    else
+      match json_close_for_open text.[i] with
+      | None -> loop (i + 1) acc
+      | Some expected ->
+          (match finish_candidate (i + 1) false false [ expected ] with
+           | None -> loop (i + 1) acc
+           | Some close_at ->
+               let candidate =
+                 String.sub text i (close_at - i + 1)
+                 |> String.trim
+               in
+               loop (close_at + 1) (candidate :: acc))
+  in
+  loop 0 []
+
+let parse_json_candidate ~surface candidate =
+  Safe_ops.parse_json_safe
+    ~context:("Keeper_hooks_oas." ^ surface ^ ".output.embedded")
+    candidate
+
 let output_json_opt ~surface output_text =
   match
     Safe_ops.parse_json_safe
@@ -1146,9 +1249,22 @@ let output_json_opt ~surface output_text =
   with
   | Ok json -> Some json
   | Error _ ->
-      observe_output_parse_failure ~surface
-        ~output_bytes:(String.length output_text);
-      None
+      let candidates =
+        fenced_json_candidates output_text @ balanced_json_candidates output_text
+      in
+      (match
+         List.find_map
+           (fun candidate ->
+              match parse_json_candidate ~surface candidate with
+              | Ok json -> Some json
+              | Error _ -> None)
+           candidates
+       with
+       | Some json -> Some json
+       | None ->
+           observe_output_parse_failure ~surface
+             ~output_bytes:(String.length output_text);
+           None)
 
 let normalized_route_via raw =
   let value = String.trim raw |> String.lowercase_ascii in

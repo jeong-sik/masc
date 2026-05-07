@@ -82,6 +82,17 @@ let append_jsonl path json =
       output_string oc (Yojson.Safe.to_string json);
       output_char oc '\n')
 
+let append_raw_line path line =
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let oc =
+    open_out_gen [ Open_creat; Open_text; Open_append ] 0o644 path
+  in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+      output_string oc line;
+      output_char oc '\n')
+
 let append_accountability_event base_dir ~created_at json =
   let month = String.sub created_at 0 7 in
   let day = String.sub created_at 8 2 in
@@ -139,6 +150,17 @@ let append_decision_log_event config keeper_name json =
   let path = Keeper_types.keeper_decision_log_path config keeper_name in
   Fs_compat.mkdir_p (Filename.dirname path);
   append_jsonl path json
+
+let persistence_read_drop_total ~surface ~reason =
+  Prometheus.metric_value_or_zero Prometheus.metric_persistence_read_drops
+    ~labels:[("surface", surface); ("reason", reason)]
+    ()
+
+let check_persistence_read_drop_delta ~surface ~reason ~before ~delta =
+  check (float 0.0001)
+    (Printf.sprintf "%s/%s read drops" surface reason)
+    (before +. float_of_int delta)
+    (persistence_read_drop_total ~surface ~reason)
 
 let test_same_turn_evidence_marks_claim_supported () =
   with_room (fun config ->
@@ -464,6 +486,41 @@ let test_recent_decision_without_claim_exposes_coverage_gap () =
         (int_member "decision_signal_count" summary);
       check int "claim count" 0
         (int_member "accountability_claim_count" summary))
+
+let test_recent_decision_parse_failure_counts_read_drop () =
+  let surface = "keeper_accountability_decision_log" in
+  let entry_reason = "entry_load_error" in
+  let invalid_reason = "invalid_payload" in
+  let before_entry =
+    persistence_read_drop_total ~surface ~reason:entry_reason
+  in
+  let before_invalid =
+    persistence_read_drop_total ~surface ~reason:invalid_reason
+  in
+  with_room ~agent_name:"keeper-sangsu-agent" (fun config ->
+      let now = Unix.gettimeofday () in
+      append_decision_log_event config "sangsu"
+        (`Assoc
+           [
+             ("id", `String "decision-active-with-malformed-neighbors");
+             ("ts", `String (iso_of_unix now));
+             ("ts_unix", `Float now);
+             ("keeper_name", `String "sangsu");
+             ("agent_name", `String "keeper-sangsu-agent");
+           ]);
+      let path = Keeper_types.keeper_decision_log_path config "sangsu" in
+      append_raw_line path "{not-json";
+      append_raw_line path "[]";
+      let summary =
+        Keeper_accountability.accountability_summary_json config
+          ~keeper_name:"sangsu" ~agent_name:"keeper-sangsu-agent"
+      in
+      check int "valid decision still counts" 1
+        (int_member "decision_signal_count" summary));
+  check_persistence_read_drop_delta ~surface ~reason:entry_reason
+    ~before:before_entry ~delta:1;
+  check_persistence_read_drop_delta ~surface ~reason:invalid_reason
+    ~before:before_invalid ~delta:1
 
 let test_unmapped_alias_exposes_no_history_source () =
   with_room ~agent_name:"orphan-eager-viper" (fun config ->
@@ -821,6 +878,8 @@ let () =
             `Quick test_task_transition_resolution_rows_include_identity;
           test_case "recent decision without claim exposes coverage gap"
             `Quick test_recent_decision_without_claim_exposes_coverage_gap;
+          test_case "malformed decision log rows count read drops"
+            `Quick test_recent_decision_parse_failure_counts_read_drop;
           test_case "unmapped alias exposes no-history source" `Quick
             test_unmapped_alias_exposes_no_history_source;
           test_case "claim tool exposes routing warning for high risk keeper"

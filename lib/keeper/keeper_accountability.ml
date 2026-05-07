@@ -343,6 +343,19 @@ let keeper_decision_log_path (config : Coord_query.config) name =
   in
   Filename.concat keepers_dir (name ^ ".decisions.jsonl")
 
+let decision_log_persistence_surface = "keeper_accountability_decision_log"
+
+let report_decision_log_read_drop ~path ~reason ~detail =
+  Safe_ops.report_persistence_read_drop
+    ~on_drop:(fun () ->
+      Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+        ~labels:[("surface", decision_log_persistence_surface); ("reason", reason)]
+        ())
+    ~surface:decision_log_persistence_surface
+    ~reason
+    ~path
+    ~detail
+
 let read_file_tail_lines path ~max_bytes ~max_lines =
   if max_lines <= 0 || not (Sys.file_exists path) || Sys.is_directory path then
     []
@@ -374,17 +387,29 @@ let read_file_tail_lines path ~max_bytes ~max_lines =
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | _ -> []
 
+let decision_ts_unix_of_line ~path line =
+  match Yojson.Safe.from_string line with
+  | exception Yojson.Json_error detail ->
+      report_decision_log_read_drop
+        ~path
+        ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+        ~detail;
+      None
+  | `Assoc _ as json -> decision_ts_unix_opt json
+  | _ ->
+      report_decision_log_read_drop
+        ~path
+        ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+        ~detail:"decision log row is not a JSON object";
+      None
+
 let recent_decision_timestamps config ~keeper_name ~now =
   let cutoff = now -. (float_of_int summary_window_days *. 86400.0) in
   candidate_decision_keeper_names keeper_name
   |> List.concat_map (fun candidate ->
          let path = keeper_decision_log_path config candidate in
-         read_file_tail_lines path ~max_bytes:500000 ~max_lines:128)
-  |> List.filter_map (fun line ->
-         try Yojson.Safe.from_string line |> decision_ts_unix_opt
-         with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | Yojson.Json_error _ -> None)
+         read_file_tail_lines path ~max_bytes:500000 ~max_lines:128
+         |> List.filter_map (decision_ts_unix_of_line ~path))
   |> List.filter (fun ts -> ts >= cutoff && ts <= now +. 60.0)
 
 let decision_activity_for_keeper config ~keeper_name ~now =

@@ -146,9 +146,10 @@ val outstanding_required_tool_names :
 val satisfied_required_tool_names_of_outcomes :
   (string * string) list -> string list
 
-(** Pick the model-facing [tool_choice] for an explicit required-tool list. A
-    single visible required tool should be forced specifically; multiple visible
-    required tools use [Any] and are checked after execution. *)
+(** Pick the model-facing [tool_choice] for an explicit required-tool list.
+    Visible required tools use [Any] so OAS enforces tool use without
+    exact-name matching before MASC canonicalizes MCP-prefixed tool names. The
+    specific required names are checked after execution. *)
 val preferred_tool_choice_for_required_tool_names :
   required_tool_names:string list ->
   allowed_tool_names:string list ->

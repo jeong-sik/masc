@@ -7712,14 +7712,11 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
        ~allowed_tool_names:
          [ "keeper_board_curation_submit"; "keeper_board_post" ]
    with
-   | Agent_sdk.Types.Tool name ->
-       check string
-         "product/design per-call board post is not hijacked by stale curation"
-         "keeper_board_post" name
+   | Agent_sdk.Types.Any -> ()
    | other ->
        fail
          (Printf.sprintf
-            "expected Tool keeper_board_post for product/design reprobe, got %s"
+            "expected Any for product/design reprobe required tool, got %s"
             (Agent_sdk.Types.show_tool_choice other)));
   check (list string)
     "active task required tools remain when no per-call requirement exists"
@@ -7762,12 +7759,21 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
        ~allowed_tool_names:
          [ "keeper_board_curation_submit"; "keeper_board_post" ]
    with
-   | Agent_sdk.Types.Tool name ->
-       check string "single per-call required tool is forced"
-         "keeper_board_post" name
+   | Agent_sdk.Types.Any -> ()
+   | other ->
+       fail (Printf.sprintf "expected Any for single required tool, got %s"
+               (Agent_sdk.Types.show_tool_choice other)));
+  (match
+     Surface.preferred_tool_choice_for_required_tool_names
+       ~required_tool_names:[ "keeper_pr_create" ]
+       ~allowed_tool_names:[ "keeper_pr_create"; "keeper_bash" ]
+   with
+   | Agent_sdk.Types.Any -> ()
    | other ->
        fail
-         (Printf.sprintf "expected Tool keeper_board_post, got %s"
+         (Printf.sprintf
+            "expected Any for keeper_pr_create to avoid raw require_specific_tool \
+             MCP-prefix mismatches, got %s"
             (Agent_sdk.Types.show_tool_choice other)));
   (match
      Surface.preferred_tool_choice_for_required_tool_names
@@ -7797,13 +7803,11 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
        ~required_tool_names:[ "keeper_tasks_audit"; "keeper_board_post" ]
        ~allowed_tool_names:[ "keeper_tasks_audit"; "keeper_board_post" ]
    with
-   | Agent_sdk.Types.Tool name ->
-       check string "active required tool remains forced" "keeper_board_post"
-         name
+   | Agent_sdk.Types.Any -> ()
    | other ->
        fail
          (Printf.sprintf
-            "expected Tool keeper_board_post for mixed passive/active required \
+            "expected Any for mixed passive/active required \
              tools, got %s"
             (Agent_sdk.Types.show_tool_choice other)));
   (* Active task keeper retains the strict gate even without a

@@ -331,8 +331,14 @@ let preferred_tool_choice_for_required_tool_names
     |> Keeper_types.dedupe_keep_order
   in
   match visible_required with
-  | [ name ] -> Agent_sdk.Types.Tool name
-  | _ :: _ -> Agent_sdk.Types.Any
+  | _ :: _ ->
+    (* Use the provider-level "some tool is required" contract here, even
+       for a single explicit required tool. Runtime MCP transports may return
+       names such as [mcp__masc__keeper_pr_create]; OAS exact-tool contracts
+       compare raw names before MASC can canonicalize them, so exact Tool(name)
+       can reject a correct call. MASC still validates the specific required
+       names after execution via [outstanding_required_tool_names]. *)
+    Agent_sdk.Types.Any
   | [] -> Agent_sdk.Types.Auto
 
 let owned_active_task_id_for_meta =

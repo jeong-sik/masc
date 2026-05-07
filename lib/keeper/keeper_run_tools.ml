@@ -1278,6 +1278,17 @@ let prepare_agent_setup
                          with keeper_task_done or keeper_task_submit_for_verification."
                         computed_surface.per_call_turn
                         computed_surface.per_call_max_turns)
+                 else if computed_surface.required_tool_names <> []
+                 then
+                   append_ctx
+                     ctx
+                     (Printf.sprintf
+                        "[REQUIRED TOOLS] This Agent.run call has explicit \
+                         required_tools: %s. You MUST use these exact runtime \
+                         tools before answering in natural language. Do not \
+                         substitute a shell command or status read for a \
+                         listed required tool."
+                        (String.concat ", " computed_surface.required_tool_names))
                  else if is_retry
                  then
                    append_ctx

@@ -425,6 +425,7 @@ let append_tool_exec_decision_log ~config ~keeper_name ~site entry =
     [{cmd,timeout_sec}]). Identity by default. *)
 let make_keeper_tool_handler
     ~(name : string)
+    ~(input_schema : Yojson.Safe.t)
     ~(config : Coord.config)
     ~(meta : Keeper_types.keeper_meta)
     ~(ctx_snapshot : Keeper_types.working_context)
@@ -443,6 +444,48 @@ let make_keeper_tool_handler
   in
   fun raw_input ->
     let input = translate_input raw_input in
+    match Tool_input_validation.validate_args ~schema:input_schema ~name ~args:input () with
+    | Error validation_result ->
+      let raw_result = Yojson.Safe.to_string validation_result.data in
+      let output_text = normalize_tool_result ~success:false raw_result in
+      let duration_ms = 0 in
+      let ts = Time_compat.now () in
+      let error_text = Tool_result.message validation_result in
+      Keeper_registry.record_tool_use ~base_path:config.base_path meta.name
+        ~tool_name:name ~success:false;
+      Keeper_exec_tools.record_keeper_tool_call
+        ~tool_name:name ~success:false ~duration_ms;
+      ignore (Tool_dispatch.run_post_hooks validation_result);
+      broadcast_keeper_tool_call_event
+        ~keeper_name:meta.name ~tool_name:name ~duration_ms
+        ~success:false ~error_text ~site:"input_validation" ~ts ();
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_tools_oas_failures
+        ~labels:[("tool", name); ("site", "input_validation")]
+        ();
+      append_tool_exec_decision_log ~config ~keeper_name:meta.name
+        ~site:"input_validation"
+        (`Assoc [
+          "ts_unix", `Float ts;
+          "event", `String "tool_exec";
+          "keeper_name", `String meta.name;
+          "tool", `String name;
+          "duration_ms", `Int duration_ms;
+          "result_bytes", `Int (String.length output_text);
+          "ok", `Bool false;
+          "error", `String error_text;
+        ]);
+      persist_tool_call_io_from_handler
+        ~meta
+        ~tool_name:name
+        ~input
+        ~output_text
+        ~success:false
+        ~duration_ms:0.0
+        ~result_bytes:(String.length output_text)
+        ();
+      (false, output_text)
+    | Ok input ->
     let key = args_key input in
     let prior_fails = failure_count_get failure_counts key in
     if prior_fails >= max_consecutive_failures then begin
@@ -814,7 +857,8 @@ let make_tool_bundle
   let internal_tools =
     List.filter_map (fun (td : Masc_domain.tool_schema) ->
       if List.mem td.name universe_names then
-        let h = make_keeper_tool_handler ~name:td.name ~config ~meta ~ctx_snapshot
+        let h = make_keeper_tool_handler ~name:td.name
+              ~input_schema:td.input_schema ~config ~meta ~ctx_snapshot
               ?turn_sandbox_factory
               ?turn_sandbox_factory_git
               ~exec_cache
@@ -862,7 +906,8 @@ let make_tool_bundle
             | _ -> internal_def.description
           in
           let h =
-            make_keeper_tool_handler ~name:internal ~config ~meta ~ctx_snapshot
+            make_keeper_tool_handler ~name:internal
+               ~input_schema:internal_def.input_schema ~config ~meta ~ctx_snapshot
                ?turn_sandbox_factory
                ?turn_sandbox_factory_git
                ~exec_cache

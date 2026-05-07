@@ -3,7 +3,7 @@
 
     Replaces inline string-label matching at:
     - [lib/server/server_auth.ml] dashboard_actor_fallback warn/counter
-    - [lib/mcp_server_eio_execute.ml] silent_auth_token_error_kind (follow-up)
+    - [lib/mcp_server_eio_execute.ml] silent_auth_token_error_kind
 
     The string labels are stable contract for prometheus dashboards and
     must round-trip through [to_string] / [of_string]. The variant is

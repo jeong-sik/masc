@@ -79,11 +79,8 @@ let is_transient_agent_name name =
   is_ephemeral_agent_name name
   || Nickname.is_dictionary_generated_nickname name
 
-let silent_auth_token_error_kind = function
-  | Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _) -> "token_mismatch"
-  | Masc_domain.Auth (Masc_domain.Auth_error.TokenExpired _) -> "token_expired"
-  | Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized _) -> "unauthorized"
-  | _ -> "other"
+let silent_auth_token_error_kind err =
+  Auth_error_kind.to_string (Auth_error_kind.classify err)
 
 let should_read_legacy_persisted_agent_name ~has_explicit_agent_name ~agent_name =
   (not has_explicit_agent_name) && is_ephemeral_agent_name agent_name

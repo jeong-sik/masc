@@ -61,6 +61,7 @@ val gate_decision_is_rejection : gate_decision -> bool
 (** Telemetry payload reported to the gate observer. *)
 type gate_decision_event =
   { stage : string
+  ; keeper_name : string
   ; decision : gate_decision
   ; reason_code : string
   ; reason_text : string
@@ -77,7 +78,10 @@ type gate_decision_event =
 val ignore_gate_decision : gate_decision_event -> unit
 
 (** Invoke [on_gate_decision] with [event]; logs and swallows
-    non-cancel exceptions. *)
+    non-cancel exceptions.  Observer-failure warnings include
+    [keeper=<name>] so log readers can attribute failures by keeper;
+    dashboard/microlog integrations should use metric labels or event
+    payloads instead of parsing this warning line. *)
 val notify_gate_decision :
   (gate_decision_event -> unit) -> gate_decision_event -> unit
 

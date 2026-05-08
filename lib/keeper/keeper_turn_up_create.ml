@@ -455,6 +455,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         cascade_name = (match p.profile_defaults.cascade_name with
           | Some name -> name
           | None -> Keeper_config.default_cascade_name);
+        cascade_ref = None;
         (* Empty = "use cascade_name". Injecting any default here would silently
            override the keeper's declared cascade_name in oas_worker_named. *)
         models = Option.value ~default:[] p.profile_defaults.models;

@@ -91,6 +91,48 @@ val observe : keeper_id:string -> Keeper_admission_glue.outcome
     No log line per call (heartbeat already prints one INFO/skip per
     turn; doubling the volume is noise). *)
 
+(** {1 Live admission decision (Phase A1) } *)
+
+type live_result =
+  | Live_dispatch of {
+      candidate : Keeper_admission_policy.candidate;
+      drift : Keeper_admission_router.drift_record;
+      bucket : Keeper_provider_token_bucket.t;
+    }
+  (** Token acquired.  Caller runs the cycle and must call
+      [release_bucket] when done. *)
+  | Live_wait
+  (** Enqueued in WFQ overflow; next heartbeat will retry. *)
+  | Live_surface of Keeper_admission_router.surface_reason
+  (** Misconfiguration — operator-visible event. *)
+  | Live_legacy
+  (** Flag off or no policy — fall through to legacy semaphore. *)
+
+val decide_live : keeper_id:string -> live_result
+(** Live admission decision.  Gated by [MASC_ADMISSION_USE_NEW]:
+
+    - [Legacy_path] -> [Live_legacy]
+    - [Dispatch] -> [Live_dispatch] (token consumed)
+    - [Wait] -> [Live_wait] (enqueued in WFQ)
+    - [Surface] -> [Live_surface]
+
+    Side effects: bucket token decrement on Dispatch, WFQ enqueue on
+    Wait, Prometheus counter increment for all paths. *)
+
+val release_bucket : Keeper_provider_token_bucket.t -> unit
+(** Return a token to its bucket.  Call after turn completion. *)
+
+val live_result_label : live_result -> string
+(** String label for metrics: "dispatch", "wait", "surface", "legacy". *)
+
+(** {1 WFQ observability } *)
+
+val wfq_depth : unit -> int
+(** Current number of keepers waiting in the WFQ overflow queue. *)
+
+val wfq_snapshot : unit -> Keeper_wfq_overflow.entry list
+(** Read-only copy of the WFQ queue contents. *)
+
 (** {1 Test seam} *)
 
 val reset_for_test : unit -> unit

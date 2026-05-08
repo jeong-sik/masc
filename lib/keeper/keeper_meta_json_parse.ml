@@ -484,14 +484,28 @@ let parse_keeper_state
      masc_oas_error_max_chars and falls through to the narrative
      budget for plain text. Symmetric with the write side in
      Keeper_social_model_types.cap_social_state. *)
+  (* New format: last_blocker is a structured object (blocker_info_to_json
+     output) or `Null.  Legacy format had two fields: last_blocker:string
+     and last_blocker_class:string|null.  We accept both shapes for one-shot
+     read migration; the next write upgrades to the new format. *)
   let last_blocker =
-    Keeper_social_model_types.cap_blocker
-      (Safe_ops.json_string ~default:"" "last_blocker" json)
-  in
-  let last_blocker_class =
-    match Safe_ops.json_string_opt "last_blocker_class" json with
-    | Some raw -> blocker_class_of_serialized_string raw
-    | None -> None
+    let raw_field = Yojson.Safe.Util.member "last_blocker" json in
+    match raw_field with
+    | `Null -> None
+    | `Assoc _ -> blocker_info_of_json raw_field
+    | `String legacy_text ->
+      let detail =
+        Keeper_social_model_types.cap_blocker (String.trim legacy_text)
+      in
+      let klass_from_pair =
+        match Safe_ops.json_string_opt "last_blocker_class" json with
+        | Some raw -> blocker_class_of_serialized_string raw
+        | None -> None
+      in
+      (match klass_from_pair with
+       | Some klass -> Some { klass; detail }
+       | None -> None)
+    | _ -> None
   in
   let last_need = cap_loaded (Safe_ops.json_string ~default:"" "last_need" json) in
   let ps_paused = Safe_ops.json_bool ~default:false "paused" json in
@@ -538,7 +552,6 @@ let parse_keeper_state
       ; last_active_desire
       ; last_current_intention
       ; last_blocker
-      ; last_blocker_class
       ; last_need
       }
   }
@@ -582,8 +595,17 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ; mid_goal = identity.pk_mid_goal
                    ; long_goal = identity.pk_long_goal
                    ; social_model = identity.pk_social_model
-                   ; cascade_name = identity.pk_cascade_name
-                   ; cascade_ref = identity.pk_cascade_ref
+                   ; cascade_ref =
+                       (match identity.pk_cascade_ref with
+                        | Some _ as ref_ -> ref_
+                        | None ->
+                            (* RFC-0041: derive cascade_ref from legacy
+                               cascade_name string when persisted JSON
+                               predates the field. *)
+                            Some Cascade_ref.{
+                              group = identity.pk_cascade_name;
+                              item = None;
+                            })
                    ; models = identity.pk_models
                    ; will = identity.pk_will
                    ; needs = identity.pk_needs

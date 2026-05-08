@@ -464,6 +464,9 @@ let handle_keeper_msg ctx args : tool_result =
   | Error err -> (false, err)
   | Ok name ->
       let resolved_args = with_keeper_name args name in
+      (match Turn.preflight_keeper_msg ctx resolved_args with
+      | Error err -> (false, err)
+      | Ok () ->
       let request_id = Keeper_msg_async.submit ~sw:ctx.sw
         ~base_path:ctx.config.base_path
         ~keeper_name:name
@@ -481,7 +484,7 @@ let handle_keeper_msg ctx args : tool_result =
         ("status", `String "queued");
         ("message", `String "Keeper turn submitted. Poll with keeper_msg_result.");
       ] in
-      (true, Yojson.Safe.to_string json)
+      (true, Yojson.Safe.to_string json))
 
 let handle_keeper_msg_result ctx args : tool_result =
   let request_id = get_string args "request_id" "" in

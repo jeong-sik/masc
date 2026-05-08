@@ -184,7 +184,6 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   Restarting: '재시작 중',
   Dead: '종료됨',
   Zombie: '좀비',
-  Stable: '안정',
 }
 
 /** Resolve display name: Korean label for UI, raw value preserved in tooltips. */

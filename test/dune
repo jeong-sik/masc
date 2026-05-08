@@ -64,6 +64,7 @@
         test_keeper_hooks_oas_pricing
         test_keeper_hooks_oas_telemetry
         test_masc_oas_bridge_timeout_guard
+        test_keeper_llm_bridge
         test_agent_stress
         test_keeper_tool_use_failure_counter
         test_keeper_compaction_outcome_counter
@@ -302,6 +303,7 @@
           test_keeper_hooks_oas_pricing
           test_keeper_hooks_oas_telemetry
           test_masc_oas_bridge_timeout_guard
+          test_keeper_llm_bridge
           test_agent_stress
           test_keeper_tool_use_failure_counter
           test_keeper_compaction_outcome_counter
@@ -1126,7 +1128,6 @@
 (include stanzas/test_cascade_kimi_max_context_ssot.inc)
 (include stanzas/test_cascade_model_resolve.inc)
 (include stanzas/test_cascade_ollama_probe.inc)
-(include stanzas/test_cascade_routes_bigthree_ssot.inc)
 (include stanzas/test_cascade_runtime.inc)
 (include stanzas/test_cascade_strategy.inc)
 (include stanzas/test_cascade_trust_persist.inc)
@@ -1234,6 +1235,7 @@
 (include stanzas/test_keeper_tool_matrix.inc)
 (include stanzas/test_keeper_tool_policy_paths.inc)
 (include stanzas/test_keeper_turn_fsm_tla_parity.inc)
+(include stanzas/test_keeper_unified_tool_event_order_source.inc)
 (include stanzas/test_keeper_turn_livelock_10121.inc)
 (include stanzas/test_keeper_turn_helpers_side_effect_metric.inc)
 (include stanzas/test_keeper_turn_slot_force_release.inc)

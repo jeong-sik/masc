@@ -257,7 +257,7 @@ let empty_response_model_metric =
 let alias_response_model_metric =
   Prometheus.metric_after_turn_response_model_alias
 
-let unknown_model_sentinel = "unknown_provider"
+let unknown_model_sentinel = Provider_adapter.cn_unknown_provider
 
 let zero_usage : Agent_sdk.Types.api_usage =
   {

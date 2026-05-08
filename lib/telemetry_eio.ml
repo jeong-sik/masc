@@ -169,8 +169,9 @@ let read_all_events_from_path (file : string) : event_record list =
                    ~path:file ~detail:msg;
                  None
            with Yojson.Json_error msg ->
-             report_telemetry_drop ~reason:"json_syntax_error" ~path:file
-               ~detail:msg;
+             report_telemetry_drop
+               ~reason:Safe_ops.persistence_read_drop_reason_json_syntax_error
+               ~path:file ~detail:msg;
              None)
 
 let event_to_json event =

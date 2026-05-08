@@ -480,7 +480,10 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
             {
               base.runtime with
               last_blocker =
-                "turn outcome ambiguous after committed mutating tool call(s): [keeper_board_cleanup]; retry disabled to avoid duplicate mutation; original_error=Completion contract [require_tool_use] violated";
+                Some
+                  (KT.blocker_info_of_class
+                     ~detail:"turn outcome ambiguous after committed mutating tool call(s): [keeper_board_cleanup]; retry disabled to avoid duplicate mutation; original_error=Completion contract [require_tool_use] violated"
+                     KT.Ambiguous_post_commit_timeout);
             };
         }
       in
@@ -529,7 +532,8 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
         | Error err -> fail err
       in
       check bool "paused cleared after approval" false resumed_meta.paused;
-      check string "blocker cleared after approval" "" resumed_meta.runtime.last_blocker;
+      check bool "blocker cleared after approval" true
+        (Option.is_none resumed_meta.runtime.last_blocker);
       check bool "keeper registered after approval" true
         (Reg.is_registered ~base_path:config.base_path meta.name))
 
@@ -932,8 +936,13 @@ let test_stale_fleet_batch_pause_skips_restart () =
        | Ok (Some m) ->
            check bool "meta.paused = true after fleet batch pause"
              true m.paused;
+           let blocker_detail =
+             match m.runtime.last_blocker with
+             | Some b -> b.detail
+             | None -> ""
+           in
            check string "last_blocker records fleet batch"
-             "stale_fleet_batch" m.runtime.last_blocker
+             "stale_fleet_batch" blocker_detail
        | Ok None -> fail "meta missing after fleet batch pause"
        | Error err -> fail ("read_meta failed: " ^ err));
       check bool "registry entry unregistered after fleet batch pause"
@@ -985,9 +994,13 @@ let test_stale_fleet_batch_latch_marks_batch_members () =
       (match KT.read_meta config "batch-provider" with
        | Ok (Some m) ->
            check bool "provider root cause remains in blocker text" true
-             (contains_substring m.runtime.last_blocker "provider_runtime_error");
+             (match m.runtime.last_blocker with
+              | Some b -> contains_substring b.detail "provider_runtime_error"
+              | None -> false);
            check bool "provider blocker class is fleet batch" true
-             (m.runtime.last_blocker_class = Some KT.Stale_fleet_batch)
+             (match m.runtime.last_blocker with
+              | Some b -> b.klass = KT.Stale_fleet_batch
+              | None -> false)
        | Ok None -> fail "batch-provider meta missing"
        | Error err -> fail ("read_meta failed: " ^ err)))
 
@@ -1095,7 +1108,10 @@ let test_unresolved_watchdog_stopped_budget_loop_is_reaped () =
            check bool "meta.paused = true after unresolved watchdog stop"
              true m.paused;
            check bool "budget loop blocker class preserved"
-             true (m.runtime.last_blocker_class = Some KT.Oas_timeout_budget)
+             true
+             (match m.runtime.last_blocker with
+              | Some b -> b.klass = KT.Oas_timeout_budget
+              | None -> false)
        | Ok None -> fail "meta missing after unresolved watchdog stop"
        | Error err -> fail ("read_meta failed: " ^ err));
       check bool "unresolved watchdog-stopped entry reaped"
@@ -1475,7 +1491,16 @@ let test_persisted_blocker_survives_unregister () =
       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
       let name = "auto-pause-blocker-keeper" in
       let meta = make_meta name in
-      let meta = { meta with runtime = { meta.runtime with last_blocker = "test-blocker"; last_blocker_class = Some KT.Turn_timeout } } in
+      let meta =
+        {
+          meta with
+          runtime =
+            {
+              meta.runtime with
+              last_blocker = Some (KT.blocker_info_of_class ~detail:"test-blocker" KT.Turn_timeout);
+            };
+        }
+      in
       (match KT.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
@@ -1493,8 +1518,11 @@ let test_persisted_blocker_survives_unregister () =
       (* Check if blocker is persisted *)
       (match KT.read_meta config name with
        | Ok (Some m) ->
-           check string "meta.runtime.last_blocker" "test-blocker" m.runtime.last_blocker;
-           check bool "meta.runtime.last_blocker_class" true (m.runtime.last_blocker_class = Some KT.Turn_timeout)
+           (match m.runtime.last_blocker with
+            | Some b ->
+                check string "meta.runtime.last_blocker" "test-blocker" b.detail;
+                check bool "meta.runtime.last_blocker_class" true (b.klass = KT.Turn_timeout)
+            | None -> fail "expected blocker after storm pause");
        | Ok None -> fail "meta missing after storm pause"
        | Error err -> fail ("read_meta failed: " ^ err));
       
@@ -1504,8 +1532,11 @@ let test_persisted_blocker_survives_unregister () =
       (* Read again and verify *)
       (match KT.read_meta config name with
        | Ok (Some m) ->
-           check string "meta.runtime.last_blocker after unregister" "test-blocker" m.runtime.last_blocker;
-           check bool "meta.runtime.last_blocker_class after unregister" true (m.runtime.last_blocker_class = Some KT.Turn_timeout)
+           (match m.runtime.last_blocker with
+            | Some b ->
+                check string "meta.runtime.last_blocker after unregister" "test-blocker" b.detail;
+                check bool "meta.runtime.last_blocker_class after unregister" true (b.klass = KT.Turn_timeout)
+            | None -> fail "expected blocker after unregister")
        | Ok None -> fail "meta missing after unregister"
        | Error err -> fail ("read_meta failed: " ^ err)))
 

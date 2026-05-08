@@ -121,10 +121,9 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "last_social_transition_reason", `String rt.last_social_transition_reason
     ; "last_active_desire", `String rt.last_active_desire
     ; "last_current_intention", `String rt.last_current_intention
-    ; "last_blocker", `String rt.last_blocker
-    ; ( "last_blocker_class"
-      , match rt.last_blocker_class with
-        | Some bc -> `String (blocker_class_to_string bc)
+    ; ( "last_blocker"
+      , match rt.last_blocker with
+        | Some info -> blocker_info_to_json info
         | None -> `Null )
     ; "last_need", `String rt.last_need
     ; "paused", `Bool m.paused
@@ -244,7 +243,6 @@ let fallback_canonical_keeper_meta_key_names =
   ; "last_active_desire"
   ; "last_current_intention"
   ; "last_blocker"
-  ; "last_blocker_class"
   ; "last_need"
   ; "paused"
   ; "auto_resume_after_sec"
@@ -293,13 +291,24 @@ let canonical_keeper_meta_key_names =
     fallback_canonical_keeper_meta_key_names
 ;;
 
+(* Keys that the writer no longer emits but legacy on-disk JSON may
+   still carry.  The reader handles them (one-shot migration); we
+   suppress the unknown-keys warning so legacy reads stay quiet on
+   the way to first re-write. *)
+let deprecated_keeper_meta_key_names =
+  [ "last_blocker_class"
+  ]
+
 let warn_unknown_keeper_meta_keys ~path (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields ->
     let unknown =
       fields
       |> List.filter_map (fun (key, _) ->
-        if List.mem key canonical_keeper_meta_key_names then None else Some key)
+        if List.mem key canonical_keeper_meta_key_names
+           || List.mem key deprecated_keeper_meta_key_names
+        then None
+        else Some key)
       |> dedupe_keep_order
     in
     (match unknown with

@@ -260,7 +260,11 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
          cascade resolution uses the item's group. *)
       let meta =
         match selected_item with
-        | Some (group, _item) -> { meta with cascade_name = group }
+        | Some (group, item) ->
+            let cascade_ref =
+              Some Cascade_ref.{ group; item = Some item.id }
+            in
+            { meta with cascade_ref }
         | None -> meta
       in
       let effective_cascade_name =
@@ -278,7 +282,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         in
         Prometheus.inc_counter Keeper_metrics.metric_keeper_fsm_edge_transitions
           ~labels:[("edge", "ksm_to_kcl_routing")] ();
-        let routed_meta = { meta with cascade_name = routing.effective_cascade } in
+        let routed_meta = set_cascade_name routing.effective_cascade meta in
         let routed_labels =
           Keeper_model_labels.configured_model_labels_of_meta routed_meta
         in
@@ -348,7 +352,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
          starves the keeper. *)
       let saturation_skip_meta =
         let meta_for_check =
-          { meta with cascade_name = effective_cascade_name }
+          set_cascade_name effective_cascade_name meta
         in
         let labels =
           Keeper_coordination.effective_model_labels_for_turn meta_for_check
@@ -436,7 +440,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       let build_cascade_execution ~(cascade_name : KCP.runtime_name) :
           (cascade_execution, Agent_sdk.Error.sdk_error) result =
         let cascade_name_string = KCP.runtime_name_to_string cascade_name in
-        let meta_for_cascade = { meta with cascade_name = cascade_name_string } in
+        let meta_for_cascade = set_cascade_name cascade_name_string meta in
         let model_labels =
           Keeper_coordination.effective_model_labels_for_turn meta_for_cascade
         in
@@ -658,8 +662,45 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       let pending_tool_inputs : (string, Yojson.Safe.t Queue.t) Hashtbl.t =
         Hashtbl.create 8
       in
+      let tool_event_order_violation = ref None in
       let with_turn_event_bus_lock f =
         Eio.Mutex.use_rw ~protect:true turn_event_bus_mu f
+      in
+      let input_sensitive_mutation_tool tool_name =
+        match Tool_name.of_string tool_name with
+        | Some (Keeper Shell)
+        | Some (Masc Code_git) ->
+            true
+        | _ -> false
+      in
+      let mark_mutating_tool_committed tool_name =
+        if not (List.mem tool_name !mutating_tools_committed) then
+          mutating_tools_committed :=
+            tool_name :: !mutating_tools_committed
+      in
+      let record_tool_event_order_violation ~tool_name =
+        let detail =
+          Printf.sprintf
+            "ToolCompleted without matching ToolCalled for tool=%s"
+            tool_name
+        in
+        tool_event_order_violation := Some detail;
+        Log.Keeper.warn
+          "keeper:%s %s; treating tool as post-commit until retry safety can reconcile event order"
+          meta.name detail;
+        if
+          Keeper_exec_tools.has_mutating_side_effect tool_name
+          || input_sensitive_mutation_tool tool_name
+        then
+          mark_mutating_tool_committed tool_name
+      in
+      let tool_event_order_violation_error () =
+        Option.map
+          (fun detail ->
+            Agent_sdk.Error.Internal
+              (Printf.sprintf "keeper:%s event bus order violation: %s"
+                 meta.name detail))
+          !tool_event_order_violation
       in
       let push_pending_input tool_name input =
         let q =
@@ -691,27 +732,18 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   match input_opt with
                   | Some i -> i
                   | None ->
-                      (* P2 silent-failure fix: pop_pending_input returns
-                         None either when there's no queue for this tool
-                         name, or when the queue is empty.  Either case
-                         means a ToolCompleted arrived without a matching
-                         ToolCalled — likely a race or an OAS event-bus
-                         ordering bug.  Falling back to `Null` lets
-                         downstream `has_mutating_side_effect_with_input`
-                         continue, but it can undercount mutations.
-                         Logging surfaces the mismatch so it can be
-                         diagnosed instead of silently skewing audit data. *)
-                      Log.Keeper.debug
-                        "keeper:%s tool=%s ToolCompleted without matching ToolCalled — using Null input"
-                        meta.name tool_name;
-                      `Null
+                      record_tool_event_order_violation ~tool_name;
+                      `Assoc
+                        [
+                          ( "event_order_violation",
+                            `String "missing_tool_called" );
+                        ]
                 in
                 if
                   Keeper_exec_tools.has_mutating_side_effect_with_input
                     ~tool_name ~input
                 then
-                  mutating_tools_committed :=
-                    tool_name :: !mutating_tools_committed
+                  mark_mutating_tool_committed tool_name
             | Agent_sdk.Event_bus.ToolCompleted
                 { tool_name; output = Error _; _ } ->
                 (* Failed tool: drop the matching pending input. *)
@@ -1203,6 +1235,15 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                     ~timeout_budget:!attempt_timeout_budget err
                 in
                 let _ = drain_turn_event_bus ~site:"reconcile_pre_check" () in
+                match tool_event_order_violation_error () with
+                | Some order_err ->
+                  Log.Keeper.error
+                    "%s: event-bus order violation after provider error; aborting retry path to avoid replaying an unpaired tool completion (original_error=%s)"
+                    meta.name
+                    (short_preview (Agent_sdk.Error.to_string err));
+                  mark_terminal_error order_err;
+                  Error order_err
+                | None ->
                 let committed_tools = committed_mutating_tools_snapshot () in
                 if committed_tools <> []
                    && Keeper_tool_registry.all_tools_reconcile_safe
@@ -1661,6 +1702,16 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               ~labels:[("keeper", meta.name)]
               ();
             let _ = drain_turn_event_bus ~site:"error_path_drain" () in
+            (match tool_event_order_violation_error () with
+             | Some order_err ->
+               Log.Keeper.error
+                 "%s: event-bus order violation during timeout path; treating turn as failed before retry/reconcile decisions"
+                 meta.name;
+               Keeper_registry.set_turn_phase
+                 ~base_path:config.base_path meta.name
+                 Keeper_registry.Turn_finalizing;
+               Error order_err
+             | None ->
             let committed_tools = committed_mutating_tools_snapshot () in
             if committed_tools <> []
                && Keeper_tool_registry.all_tools_reconcile_safe
@@ -1732,7 +1783,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 (Keeper_turn_driver.sdk_error_of_masc_internal_error
                    (Keeper_turn_driver.Turn_timeout
                       { elapsed_sec = timeout_sec }))
-            end))
+            end)))
         with
         | result -> cleanup (); result
         | exception e ->

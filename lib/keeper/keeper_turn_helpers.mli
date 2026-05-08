@@ -87,3 +87,10 @@ val ensure_local_discovery_ready :
   (unit, string) result
 (** Ensure local-provider discovery is refreshed before a turn when the
     selected labels depend on runtime discovery. *)
+
+module For_testing : sig
+  val with_local_discovery_refresh :
+    (string list -> bool) -> (unit -> 'a) -> 'a
+  (** Install a scoped refresh override and force the discovery branch for
+      deterministic preflight tests. *)
+end

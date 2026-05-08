@@ -299,7 +299,7 @@ val recover_latest_checkpoint_for_overflow_retry :
 
 (** {1 Trace and Board Utilities} *)
 
-val generate_trace_id : unit -> string
+val generate_trace_id : ?now:float -> unit -> string
 
 val keeper_board_write_tool_names : string list
 

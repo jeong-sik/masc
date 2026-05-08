@@ -50,6 +50,29 @@ type cascade_ref = {
   item : string option;
 }
 
+(** Logical use cases for cascade routing.  Moved here from [Cascade_routes]
+    to break the circular dependency with [Keeper_cascade_profile]. *)
+type logical_use =
+  | Keeper_turn
+  | Phase_recovery
+  | Phase_buffer
+  | Tool_required
+  | Governance_judge
+  | Operator_judge
+  | Cross_verifier
+  | Verifier
+  | Autoresearch
+  | Adversarial_reviewer
+  | Auto_responder
+  | Routing
+  | Openai_compat
+  | Persona_generation
+  | Provider_benchmark
+  | Simple_task
+  | Moderate_task
+  | Complex_task
+  | Tool_rerank_use
+
 (* ------------------------------------------------------------------ *)
 (* JSON serialization helpers                                         *)
 (* ------------------------------------------------------------------ *)

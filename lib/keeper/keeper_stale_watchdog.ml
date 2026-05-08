@@ -337,8 +337,9 @@ let stamp_stale_fleet_batch_meta ~config ~keeper_name ~distinct_count
       { entry.meta with
         runtime =
           { entry.meta.runtime with
-            last_blocker = blocker;
-            last_blocker_class = Some Stale_fleet_batch;
+            last_blocker =
+              Some (blocker_info_of_class
+                      ~detail:blocker Stale_fleet_batch);
           };
       }
     in

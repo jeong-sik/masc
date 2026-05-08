@@ -7,6 +7,7 @@ let select_item_for_turn
     ~(cascade_profile : cascade_profile)
     ~(health_cache : Keeper_health_probe.health_status)
     ~(last_used_item : string option)
+    ~(cascade_ref : cascade_ref option)
     : (string * cascade_item, [> `No_available_item ]) result =
   let rec try_group group_name visited =
     if List.mem group_name visited then
@@ -46,8 +47,26 @@ let select_item_for_turn
                    Error `No_available_item)
   in
   let start_group =
-    match cascade_profile.groups with
-    | first :: _ -> first.name
-    | [] -> cascade_profile.name
+    match cascade_ref with
+    | Some ref_ when not (String.equal ref_.group "") ->
+        ref_.group
+    | _ ->
+        match cascade_profile.groups with
+        | first :: _ -> first.name
+        | [] -> cascade_profile.name
   in
-  try_group start_group []
+  (* If cascade_ref pins a specific item, try it directly first. *)
+  match cascade_ref with
+  | Some { item = Some item_id; _ } -> (
+      match find_group cascade_profile start_group with
+      | None -> try_group start_group []
+      | Some group -> (
+          match find_item group item_id with
+          | Some item ->
+              if Keeper_health_probe.is_item_healthy ~keeper_name ~item_id then
+                Ok (start_group, item)
+              else
+                try_group start_group []
+          | None -> try_group start_group []))
+  | _ ->
+      try_group start_group []

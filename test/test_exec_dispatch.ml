@@ -164,9 +164,9 @@ let () =
   assert (result.stdout = "mock_stdout");
   assert (result.stderr = "mock_stderr");
   (* Verify the kind discriminator is surfaced correctly. *)
-  (match Masc_exec.Sandbox_target.kind docker_sandbox with
+  (match docker_sandbox with
    | Masc_exec.Sandbox_target.Host -> assert false
-   | Masc_exec.Sandbox_target.Docker { image } ->
+   | Masc_exec.Sandbox_target.Docker { image; _ } ->
        assert (image = "test-image"))
 
 (* --- dispatch_simple exception from runner is caught --- *)

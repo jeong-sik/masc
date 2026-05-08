@@ -452,12 +452,15 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         long_goal;
 
         social_model;
-        cascade_name = (match p.profile_defaults.cascade_name with
-          | Some name -> name
-          | None -> Keeper_config.default_cascade_name);
-        cascade_ref = None;
-        (* Empty = "use cascade_name". Injecting any default here would silently
-           override the keeper's declared cascade_name in oas_worker_named. *)
+        cascade_ref =
+          Some Cascade_ref.{
+            group = (match p.profile_defaults.cascade_name with
+              | Some name -> name
+              | None -> Keeper_config.default_cascade_name);
+            item = None;
+          };
+        (* RFC-0041 (post-step-4): cascade_ref is the SSOT; the legacy
+           cascade_name field was removed from keeper_meta. *)
         models = Option.value ~default:[] p.profile_defaults.models;
         will;
         needs;
@@ -570,8 +573,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           last_social_transition_reason = "";
           last_active_desire = "";
           last_current_intention = "";
-          last_blocker = "";
-          last_blocker_class = None;
+          last_blocker = None;
           last_need = "";
         };
       keeper_id = None;

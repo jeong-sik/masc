@@ -147,7 +147,7 @@ let append_keeper_receipt ?(outcome = "ok")
       network_mode = Keeper_types.network_mode_to_string meta.network_mode;
       approval_profile = Some "trusted_local";
       approval_profile_derived = false;
-      cascade_name = Keeper_cascade_profile.Runtime_name meta.cascade_name;
+      cascade_name = Keeper_cascade_profile.Runtime_name (Keeper_types.cascade_name_of_meta meta);
       cascade_selected_model = Some "openai:gpt-5.4";
       cascade_attempt_count = 1;
       cascade_fallback_applied = false;
@@ -910,8 +910,9 @@ let test_goal_detail_does_not_promote_synthetic_blocker_over_receipt () =
       runtime =
         {
           base.runtime with
-          last_blocker = "turn timed out";
-          last_blocker_class = Some Keeper_types.Turn_timeout;
+          last_blocker =
+            Some (Keeper_types.blocker_info_of_class
+                    ~detail:"turn timed out" Keeper_types.Turn_timeout);
         };
     }
   in
@@ -969,8 +970,9 @@ let test_goal_detail_promotes_newer_runtime_blocker_over_stale_receipt () =
               last_turn_ts = Unix.gettimeofday () +. 60.0;
             };
           last_blocker =
-            "Internal error: [masc_oas_error] {\"kind\":\"oas_timeout_budget\"}";
-          last_blocker_class = Some Keeper_types.Oas_timeout_budget;
+            Some (Keeper_types.blocker_info_of_class
+                    ~detail:"Internal error: [masc_oas_error] {\"kind\":\"oas_timeout_budget\"}"
+                    Keeper_types.Oas_timeout_budget);
         };
     }
   in
@@ -1035,8 +1037,9 @@ let test_goal_detail_keeps_decision_terminal_reason_over_newer_blocker () =
               last_turn_ts = Unix.gettimeofday () +. 60.0;
             };
           last_blocker =
-            "Internal error: [masc_oas_error] {\"kind\":\"oas_timeout_budget\"}";
-          last_blocker_class = Some Keeper_types.Oas_timeout_budget;
+            Some (Keeper_types.blocker_info_of_class
+                    ~detail:"Internal error: [masc_oas_error] {\"kind\":\"oas_timeout_budget\"}"
+                    Keeper_types.Oas_timeout_budget);
         };
     }
   in

@@ -485,7 +485,26 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
     | Tool_name.Keeper.Library_search
     | Tool_name.Keeper.Memory_search ->
       "memory"
-    | _ -> "core"
+    | Tool_name.Keeper.Broadcast
+    | Tool_name.Keeper.Handoff ->
+      "coordination"
+    | Tool_name.Keeper.Pr_create
+    | Tool_name.Keeper.Pr_list
+    | Tool_name.Keeper.Pr_review_comment
+    | Tool_name.Keeper.Pr_review_read
+    | Tool_name.Keeper.Pr_review_reply
+    | Tool_name.Keeper.Pr_status ->
+      "vcs"
+    | Tool_name.Keeper.Code_read ->
+      "fs"
+    | Tool_name.Keeper.Context_status
+    | Tool_name.Keeper.Discovery
+    | Tool_name.Keeper.Preflight_check
+    | Tool_name.Keeper.Stay_silent
+    | Tool_name.Keeper.Time_now
+    | Tool_name.Keeper.Tool_search
+    | Tool_name.Keeper.Tools_list ->
+      "meta"
   in
   let categorize n =
     match Tool_name.of_string n with

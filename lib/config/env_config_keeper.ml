@@ -660,14 +660,14 @@ module KeeperWatchdog = struct
     max 1 (get_int ~default:5 "MASC_KEEPER_ESCALATION_THRESHOLD")
 
   (** Fleet batch-termination detection window in seconds.
-      Default: 30. *)
+      Default: 60. *)
   let batch_window_sec =
-    Float.max 1.0 (get_float ~default:30.0 "MASC_KEEPER_BATCH_WINDOW_SEC")
+    Float.max 1.0 (get_float ~default:60.0 "MASC_KEEPER_BATCH_WINDOW_SEC")
 
   (** Number of distinct keepers terminating within [batch_window_sec] before
-      emitting a fleet batch alert. Default: 3. *)
+      emitting a fleet batch alert. Default: 5. *)
   let batch_threshold =
-    max 1 (get_int ~default:3 "MASC_KEEPER_BATCH_THRESHOLD")
+    max 1 (get_int ~default:5 "MASC_KEEPER_BATCH_THRESHOLD")
 end
 
 (** {1 gRPC Heartbeat Reconnect} *)
@@ -955,10 +955,19 @@ module KeeperRetryBackoff = struct
       it up — the catalog only scans lib/config/env_config_*.ml.
 
       Env: [MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC].
-      Default: 60.0. *)
+      Default: 180.0.
+      @category Timeouts
+      @ops_class operator
+
+      Calibrated to match [Cascade_attempt_liveness.local_27b.ttft_max]
+      (180 s) so that slow-but-honest Ollama 27B/70B streams are not
+      denied a degraded retry solely because their first-token latency
+      exceeds the old 60 s floor.  Cloud providers rarely need retries
+      at all; when they do, 180 s is still well within reasonable
+      tail latency. *)
   let degraded_retry_slot_phase_budget_sec =
     Float.max 5.0
-      (get_float ~default:60.0
+      (get_float ~default:180.0
          "MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC")
 end
 

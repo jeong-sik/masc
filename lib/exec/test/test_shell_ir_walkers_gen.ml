@@ -83,7 +83,7 @@ let simple_eq (a : Shell_ir.simple) (b : Shell_ir.simple) : bool =
   && a.env = b.env
   && a.cwd = b.cwd
   && a.redirects = b.redirects
-  && Sandbox_target.kind a.sandbox = Sandbox_target.kind b.sandbox
+  && a.sandbox = b.sandbox
 
 let pp_simple ppf (s : Shell_ir.simple) =
   Format.fprintf

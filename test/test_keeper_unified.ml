@@ -18,6 +18,7 @@ module KP = Masc_mcp.Keeper_state_machine
 module KD = Masc_mcp.Keeper_deliberation
 module AE = Masc_mcp.Agent_economy
 module KC = Masc_mcp.Keeper_config
+module KTH = Masc_mcp.Keeper_turn_helpers
 module HK = Masc_mcp.Keeper_hooks_oas
 module KG = Masc_mcp.Keeper_guards
 module OMR = Masc_mcp.Cascade_runtime
@@ -1005,8 +1006,7 @@ let test_provider_cooldown_blocks_scheduled_turn_when_work_is_ready () =
 
 let test_provider_cooldown_keeps_scheduled_turn_open_when_fail_open_exists () =
   let meta =
-    { minimal_meta with
-      cascade_name = "tool_rerank";
+    { (Masc_mcp.Keeper_types.set_cascade_name "tool_rerank" minimal_meta) with
       current_task_id =
         (match Masc_mcp.Keeper_id.Task_id.of_string "task-789" with
          | Ok value -> Some value
@@ -1492,8 +1492,9 @@ let test_bootstrap_turn_emits_scheduled_autonomous_channel () =
 
 let test_provider_cooldown_blocks_bootstrap_turn () =
   let meta =
-    { minimal_meta with
-      cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
+    { (Masc_mcp.Keeper_types.set_cascade_name
+         Masc_mcp.Keeper_config.default_cascade_name
+         minimal_meta) with
       proactive =
         { enabled = true; idle_sec = 300; cooldown_sec = 1800 };
       runtime =
@@ -1661,8 +1662,9 @@ let test_min_interval_never_fires_for_bootstrap () =
 let test_provider_cooldown_blocks_min_interval_turn () =
   with_env "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC" "900" (fun () ->
     let meta =
-      { minimal_meta with
-        cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
+      { (Masc_mcp.Keeper_types.set_cascade_name
+           Masc_mcp.Keeper_config.default_cascade_name
+           minimal_meta) with
         proactive =
           { enabled = true; idle_sec = 0; cooldown_sec = 600 };
         runtime =
@@ -4152,7 +4154,7 @@ let test_streaming_cancel_records_supervisor_stop_when_fiber_stop_set () =
         ~run_generation:meta.runtime.generation
         ~cascade_name:
           (Masc_mcp.Keeper_execution_receipt.cascade_name_of_string
-             meta.cascade_name)
+             (Masc_mcp.Keeper_types.cascade_name_of_meta meta))
         ~keeper_turn_id:meta.runtime.usage.total_turns
         ();
       let supervisor_request_after =
@@ -4353,7 +4355,10 @@ let test_run_keeper_cycle_surfaces_side_effect_failures_source_contract () =
        "ensure_local_discovery_ready model_labels");
   check bool "manual keeper_msg discovery helper guards keeper setup" true
     (source_file_contains "lib/keeper/keeper_turn.ml"
-       "ensure_local_discovery_ready effective_models")
+       "ensure_local_discovery_ready effective_models");
+  check bool "manual keeper_msg async facade preflights before submit" true
+    (source_file_contains "lib/tool_keeper.ml"
+       "Turn.preflight_keeper_msg ctx resolved_args")
 
 let test_sync_keeper_paused_state_surfaces_write_failure_without_mutating_registry () =
   let base_dir = temp_dir () in
@@ -4399,6 +4404,55 @@ let test_ensure_local_discovery_ready_surfaces_refresh_failure () =
       check int "refresh called once" 1 !refresh_calls;
       check bool "error includes label" true
         (contains_substring msg "llama:auto")
+
+let test_keeper_msg_async_failure_surface () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      with_test_runtime_roots base_dir @@ fun () ->
+      let keeper_name = "msg-preflight" in
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "operator"));
+      let meta = make_meta keeper_name in
+      (match Masc_mcp.Keeper_types.write_meta ~force:true config meta with
+      | Ok () -> ()
+      | Error err -> fail ("write_meta failed: " ^ err));
+      let ctx : _ Masc_mcp.Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      KTH.For_testing.with_local_discovery_refresh
+        (fun _labels -> false)
+        (fun () ->
+          match
+            Masc_mcp.Tool_keeper.dispatch ctx ~name:"masc_keeper_msg"
+              ~args:
+                (`Assoc
+                   [
+                     ("name", `String keeper_name);
+                     ("message", `String "check discovery failure");
+                   ])
+          with
+          | Some (false, err) ->
+              if not
+                   (contains_substring err "local discovery refresh required"
+                    && contains_substring err "refresh failed")
+              then fail ("unexpected synchronous error: " ^ err)
+          | Some (true, body) ->
+              fail ("expected synchronous failure, got queued body: " ^ body)
+          | None -> fail "masc_keeper_msg dispatch missing"))
 
 let provider_config_of_label label =
   match Masc_mcp.Cascade_config.parse_model_string label with
@@ -5213,7 +5267,7 @@ let test_metrics_persist_social_state_fields () =
         updated.runtime.last_speech_act;
       check string "transition reason tracked" "headers:explicit_social_headers"
         updated.runtime.last_social_transition_reason;
-      check string "no blocker tracked" "" updated.runtime.last_blocker;
+      check bool "no blocker tracked" true (Option.is_none updated.runtime.last_blocker);
       check string "no need tracked" "" updated.runtime.last_need)
 
 let test_metrics_failure_response () =
@@ -5307,15 +5361,19 @@ let test_metrics_failure_response_redacts_resumable_cli_session_detail () =
   check string "last preview is redacted"
     canonical_detail
     updated.runtime.proactive_rt.last_preview;
-  check string "last blocker is redacted"
-    canonical_detail
-    updated.runtime.last_blocker;
+  let blocker_detail =
+    match updated.runtime.last_blocker with
+    | Some b -> b.detail
+    | None -> ""
+  in
+  check string "last blocker is redacted" canonical_detail blocker_detail;
   check bool "raw resume hint removed from last blocker" false
-    (contains_substring updated.runtime.last_blocker "To resume this session:");
+    (contains_substring blocker_detail "To resume this session:");
   check bool "raw session token removed from last reason" false
     (contains_substring updated.runtime.proactive_rt.last_reason "kimi -r");
-  match updated.runtime.last_blocker_class with
-  | Some (Keeper_types.Cascade_exhausted (Keeper_types.Other_detail detail)) ->
+  match updated.runtime.last_blocker with
+  | Some { klass = Keeper_types.Cascade_exhausted (Keeper_types.Other_detail detail); _ }
+    ->
       check string "blocker class detail preserved as canonical detail"
         canonical_detail detail
   | _ -> fail "expected resumable CLI session blocker class"
@@ -7136,7 +7194,11 @@ let test_social_model_previous_state_of_meta_restores_runtime_fields () =
           last_social_transition_reason = "headers:explicit_social_headers";
           last_active_desire = "seek_help";
           last_current_intention = "recover_tool_route";
-          last_blocker = "tool route unavailable";
+          last_blocker =
+            Some
+              (Keeper_types.blocker_info_of_class
+                 ~detail:"tool route unavailable"
+                 Keeper_types.No_tool_capable_provider);
           last_need = "operator guidance";
         };
     }
@@ -7358,7 +7420,11 @@ let test_social_model_previous_state_of_meta_falls_back_for_unknown_model () =
           last_speech_act = "request_help";
           last_active_desire = "seek_help";
           last_current_intention = "recover_tool_route";
-          last_blocker = "tool route unavailable";
+          last_blocker =
+            Some
+              (Keeper_types.blocker_info_of_class
+                 ~detail:"tool route unavailable"
+                 Keeper_types.No_tool_capable_provider);
           last_need = "operator guidance";
         };
     }
@@ -8772,6 +8838,8 @@ let () =
             test_sync_keeper_paused_state_surfaces_write_failure_without_mutating_registry;
           test_case "local discovery guard surfaces refresh failure" `Quick
             test_ensure_local_discovery_ready_surfaces_refresh_failure;
+          test_case "async keeper_msg preflight surfaces discovery failure" `Quick
+            test_keeper_msg_async_failure_surface;
           test_case "local_only liveness decision keeps non-local route" `Quick
             test_decide_local_only_liveness_keeps_non_local_effective;
           test_case "local_only liveness decision keeps explicit local base"

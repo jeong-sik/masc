@@ -377,6 +377,7 @@ let read_json_file_logged ~label path : Yojson.Safe.t option =
 let persistence_read_drop_reason_list_dir_error = "list_dir_error"
 let persistence_read_drop_reason_entry_load_error = "entry_load_error"
 let persistence_read_drop_reason_invalid_payload = "invalid_payload"
+let persistence_read_drop_reason_json_syntax_error = "json_syntax_error"
 
 let report_persistence_read_drop ~on_drop ~surface ~reason ~path ~detail =
   Log.Misc.warn "[%s] persistence read drop (%s) path=%s: %s"

@@ -1656,9 +1656,10 @@ let sweep_and_recover (ctx : _ context) =
                                  && not (paused_meta_requires_reconcile_recovery meta)
                                  && not (Keeper_approval_queue.has_pending_for_keeper
                                            ~keeper_name:meta.name) ->
+               let cascade_name = Keeper_types.cascade_name_of_meta meta in
                let cascade_status =
                  Keeper_health_probe.get_cascade_status
-                   ~cascade_name:meta.cascade_name
+                   ~cascade_name
                in
                (* Three-valued admission:
                     Unhealthy   — block, the probe saw restart pressure.
@@ -1676,11 +1677,11 @@ let sweep_and_recover (ctx : _ context) =
                 | Keeper_health_probe.Unhealthy reason ->
                     Log.Keeper.info
                       "%s: auto-resume blocked; cascade %s is unhealthy (%s)"
-                      name meta.cascade_name reason;
+                      name cascade_name reason;
                     Prometheus.inc_counter
                       Keeper_metrics.metric_keeper_auto_resume_blocked_total
                       ~labels:[("keeper", name);
-                               ("cascade", meta.cascade_name)]
+                               ("cascade", cascade_name)]
                       ()
                 | Keeper_health_probe.Unknown
                 | Keeper_health_probe.Healthy ->

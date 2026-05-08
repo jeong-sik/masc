@@ -579,7 +579,7 @@ let handle_keeper_status ctx args : tool_result =
                |> List.find_opt (function
                     | `Assoc fields ->
                         List.assoc_opt "cascade_name" fields
-                        = Some (`String m.cascade_name)
+                        = Some (`String (cascade_name_of_meta m))
                     | _ -> false)
                |> Option.value ~default:`Null
            | _ -> `Null
@@ -982,7 +982,7 @@ let handle_keeper_status ctx args : tool_result =
            latest_metrics_json ~metrics_store ~metrics_path ~tail_bytes
          in
          let model_observability =
-           model_observability_json ~current_cascade_name:m.cascade_name
+           model_observability_json ~current_cascade_name:(cascade_name_of_meta m)
              ~configured_labels:models
              ~active_model ~runtime_blocker_fields latest_metrics
          in

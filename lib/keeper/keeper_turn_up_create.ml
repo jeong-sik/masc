@@ -654,7 +654,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("needs", `String meta.needs);
           ("desires", `String meta.desires);
           ("instructions", `String meta.instructions);
-          ("cascade_name", `String meta.cascade_name);
+          ("cascade_name", `String (cascade_name_of_meta meta));
           ("voice_enabled", `Bool meta.voice_enabled);
           ("voice_channel", `String meta.voice_channel);
           ("voice_agent_id", `String meta.voice_agent_id);

@@ -645,7 +645,7 @@ let run_turn
            Keeper_metrics.metric_keeper_contract_violations
            ~labels:[("keeper_name", meta.name); ("kind", "tool_surface_violation"); ("signal", "unexpected_tool_names")]
            ();
-         Log.Keeper.error "keeper:%s cascade=%s %s" meta.name meta.cascade_name reason;
+         Log.Keeper.error "keeper:%s cascade=%s %s" meta.name (Keeper_types.cascade_name_of_meta meta) reason;
          Error (Agent_sdk.Error.Internal reason)
        else (
          let should_log_unexpected_tool_partial =
@@ -936,7 +936,7 @@ let run_turn
                 | Error e ->
                   Log.Keeper.error
                     "keeper:%s cascade=%s OAS checkpoint save failed: %s"
-                    meta.name meta.cascade_name e;
+                    meta.name (Keeper_types.cascade_name_of_meta meta) e;
                   Prometheus.inc_counter
                     Keeper_metrics.metric_keeper_checkpoint_failures
                     ~labels:[("keeper", meta.name); ("site", "save")]
@@ -948,7 +948,7 @@ let run_turn
              | None ->
                Log.Keeper.error
                  "keeper:%s cascade=%s missing OAS checkpoint after run"
-                 meta.name meta.cascade_name;
+                 meta.name (Keeper_types.cascade_name_of_meta meta);
                  Prometheus.inc_counter
                    Keeper_metrics.metric_keeper_checkpoint_failures
                    ~labels:[("keeper", meta.name); ("site", "missing")]
@@ -1117,7 +1117,7 @@ let run_turn
                   ~labels:[("keeper", meta.name); ("site", "compaction")]
                   ();
                 Log.Keeper.warn "keeper:%s cascade=%s compaction failed: %s" meta.name
-                  meta.cascade_name (Printexc.to_string exn));
+                  (Keeper_types.cascade_name_of_meta meta) (Printexc.to_string exn));
            (* Post-turn quality metrics — goal alignment + memory recall.
              Logged to decisions.jsonl for feedback loop analysis. *)
            (try

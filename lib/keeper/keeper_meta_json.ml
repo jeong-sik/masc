@@ -37,7 +37,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
      ; "mid_goal", `String m.mid_goal
      ; "long_goal", `String m.long_goal
      ; "social_model", `String m.social_model
-     ; "cascade_name", `String m.cascade_name
+     ; "cascade_name", `String (cascade_name_of_meta m)
      ; (match m.cascade_ref with
         | Some ref -> "cascade_ref", Cascade_ref.cascade_ref_to_json ref
         | None -> "cascade_ref", `Null)

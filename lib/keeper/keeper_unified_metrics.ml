@@ -563,7 +563,7 @@ let provider_context_json ~(meta : keeper_meta)
               observation.selected_model,
               observation.candidate_models )
         | None ->
-            ( meta.cascade_name,
+            ( (cascade_name_of_meta meta),
               Some (Keeper_agent_run.surface_model_used r),
               [] )
       in
@@ -576,7 +576,7 @@ let provider_context_json ~(meta : keeper_meta)
         ]
   | None ->
       `Assoc
-        [ ("cascade_name", `String meta.cascade_name)
+        [ ("cascade_name", `String (cascade_name_of_meta meta))
         ; ("selected_model", `Null)
         ; ( "candidate_models",
             `List
@@ -1022,7 +1022,7 @@ let append_decision_record
                 error_category_of_no_result_outcome ~outcome ~error
               in
               `Assoc [
-                ("cascade_name", `String meta.cascade_name);
+                ("cascade_name", `String (cascade_name_of_meta meta));
                 ("candidate_models", `List (List.map (fun s -> `String s) cascade_models));
                 ( "error_category",
                   match error_category with
@@ -1384,7 +1384,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
     | Some observation ->
       Keeper_cascade_profile.runtime_name_to_string
         observation.Cascade_legacy_runner.cascade_name
-    | None -> meta.cascade_name
+    | None -> (cascade_name_of_meta meta)
   in
   (* #9933: same latency bucket, split by provider/model/cascade.
      This keeps the existing keeper-only counter stable while making

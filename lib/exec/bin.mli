@@ -19,8 +19,27 @@ type risk_class =
         the fallback for names that the registry does not know. *)
   ]
 
+type kind =
+  [ `Git
+  | `Docker
+  | `Curl
+  | `Ssh
+  | `Other_audited
+  | `Safe_bin
+  | `Privileged_bin
+  ]
+(** Finer-grained classification for typed dispatch.  Callers that
+    used to switch on [Bin.to_string bin = "git"] should switch on
+    [Bin.kind bin] instead so a new audited bin forces a compile
+    error in every dispatch site.
+
+    The shape mirrors {!risk_class} 1:1 — [`Safe_bin] for [`Safe],
+    [`Privileged_bin] for [`Privileged], and the audited names fan
+    out into [`Git | `Docker | `Curl | `Ssh | `Other_audited]. *)
+
 val of_string : string -> (t, unknown) result
 val risk_class : t -> risk_class
+val kind : t -> kind
 val to_string : t -> string
 (** Intended only for the exec gate's final spawn path and for error
     messages.  Policy code must stay on the typed value. *)

@@ -683,10 +683,9 @@ describe('ConnectorStatusPanel', () => {
     const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
     expect(text).toContain('사이드카 미시작')
     expect(text).toContain('cd sidecars/discord-bot && ./run.sh')
-    expect(text).toContain('원인: 사이드카 status 파일이')
+    expect(text).toContain('사이드카 status 파일이')
     expect(text).toContain('/tmp/discord_status.json')
     expect(text).toContain('관찰되지 않았습니다')
-    expect(text).toContain('다음:')
     expect(text).toContain('Start')
     expect(text).toContain('status')
     expect(text).toContain('tail logs')

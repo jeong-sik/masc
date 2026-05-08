@@ -68,7 +68,7 @@ import {
   loadKeeperConfig,
   resetKeeperConfig,
 } from './keeper-config-panel'
-import { PipelineStageBar } from './keeper-pipeline-stage'
+import { FsmHub } from './fsm-hub'
 import { KeeperConditionsDivergent } from './keeper-conditions-divergent'
 import { KeeperStateDiagramPanel } from './keeper-state-diagram'
 import { KeeperMemoryTierPanel } from './keeper-memory-tier-panel'
@@ -1013,7 +1013,8 @@ export function KeeperDetailPage() {
             eyebrow="상태 개요"
             title="운영 상태 개요"
           >
-        <${PipelineStageBar} stage=${keeper.pipeline_stage} />
+        ${'' /* RFC-0046: 6-axis composite snapshot (KSM/KTC/KDP/KCL/KMC/breaker) — SSOT for keeper FSM state */}
+        <${FsmHub} mode="detail" selectedName=${keeper.name} />
         <${CollapsibleSection} title="Phase State Machine">
           <${KeeperStateDiagramPanel} keeperName=${keeper.name} currentPhase=${keeper.phase} />
         <//>

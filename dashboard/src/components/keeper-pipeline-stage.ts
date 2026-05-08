@@ -14,60 +14,14 @@ const STAGES: { key: PipelineStage; label: string }[] = [
   { key: 'scheduled_autonomous', label: 'auto' },
 ]
 
-const STAGE_ORDER: Record<string, number> = Object.fromEntries(
-  STAGES.map((s, i) => [s.key, i]),
-)
-
-/**
- * Full horizontal pipeline stage indicator.
- * Shows all stages as dots connected by lines. The current stage is highlighted.
- */
-export function PipelineStageBar({ stage }: { stage?: PipelineStage | null }) {
-  const current = stage ?? 'offline'
-  const currentIdx = STAGE_ORDER[current] ?? -1
-
-  if (current === 'offline' || currentIdx === -1) {
-    return html`
-      <div class="flex items-center py-1.5">
-        <div class="pipeline-stage-node active stage-${current}">
-          <span class="pipeline-stage-dot transition-colors duration-[var(--t-slow)]"></span>
-          <span class="pipeline-stage-label">${current}</span>
-        </div>
-      </div>
-    `
-  }
-
-  return html`
-    <div class="flex items-center py-1.5">
-      ${STAGES.map((s, i) => {
-        const isActive = s.key === current
-        const isPassed = i < currentIdx
-        const nodeClass = [
-          'pipeline-stage-node',
-          isActive ? 'active' : '',
-          isPassed ? 'passed' : '',
-          isActive ? `stage-${s.key}` : '',
-        ]
-          .filter(Boolean)
-          .join(' ')
-
-        return html`
-          ${i > 0 ? html`<span class="pipeline-stage-connector"></span>` : null}
-          <div class=${nodeClass}>
-            <span class="pipeline-stage-dot transition-colors duration-[var(--t-slow)]"></span>
-            ${isActive
-              ? html`<span class="pipeline-stage-label">${s.label}</span>`
-              : null}
-          </div>
-        `
-      })}
-    </div>
-  `
-}
-
 /**
  * Compact badge variant for roster cards.
  * Shows only the current stage as a small pill.
+ *
+ * Note: A wider `PipelineStageBar` once lived here. RFC-0046 removed
+ * its sole caller (keeper detail) in favour of the FsmHub composite
+ * snapshot; the badge survives because agent-monitor / fleet roster
+ * still need a one-axis stage hint outside the FSM hub.
  */
 export function PipelineStageBadge({
   stage,

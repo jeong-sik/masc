@@ -137,6 +137,21 @@ val check_phase_derivation_agreement :
     [Keeper_invariant_check.DerivePhaseAgreement]: the recorded registry
     phase must equal [Keeper_state_machine.derive_phase conditions]. *)
 
+(** Minimal state extracted from {!Keeper_registry.registry_entry} for
+    the [EventPriorityMonotone] invariant. Separating this type allows
+    QCheck property tests to exercise the predicate without constructing
+    a full registry entry (~20 fields). *)
+type event_priority_state = {
+  ep_measurement_bind_count : int;
+  ep_has_measurement : bool;
+  ep_has_pending_measurement : bool;
+}
+
+(** Pure predicate for TLA+ I4 [EventPriorityMonotone]
+    (KeeperCompositeLifecycle.tla:374): at most one measurement binding
+    per turn, and a live measurement excludes a pending one. *)
+val check_event_priority_monotone_pure : event_priority_state -> bool
+
 (** Frozen outcome of the most recently completed turn (RFC-0003
     Phase 2). Surfaces terminal data ([Done]/[Guard_ok]/...) without
     polluting the live sub-FSM fields. [None] until the first turn

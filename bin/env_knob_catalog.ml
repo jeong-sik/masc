@@ -25,6 +25,8 @@ let typed_get_re =
 
 let feature_flag_re = Str.regexp "Feature_flag_registry\\.get_bool"
 let entry_env_re = Str.regexp "entry_env_overridable[ \t]+~env_var:"
+let category_re = Str.regexp "@category[ \t]+\\([A-Za-z_]+\\)"
+let ops_class_re = Str.regexp "@ops_class[ \t]+\\([A-Za-z_]+\\)"
 
 type kind = Typed_get of string | Feature_flag | Entry_env | String_lit
 
@@ -40,6 +42,8 @@ type entry = {
   env_var : string;
   kind : kind;
   doc : string option;
+  category : string option;
+  ops_class : string option;
 }
 
 let read_lines path =
@@ -61,9 +65,18 @@ let ends_with s suffix =
   let ls = String.length s and lp = String.length suffix in
   ls >= lp && String.sub s (ls - lp) lp = suffix
 
+let contains_sub s needle =
+  let ls = String.length s and ln = String.length needle in
+  let rec loop idx =
+    idx + ln <= ls
+    && (String.sub s idx ln = needle || loop (idx + 1))
+  in
+  ln = 0 || loop 0
+
 (* Collect the nearest preceding [(** ... *)] doc block, walking past
-   intervening binding lines (e.g. [let foo =], match heads). Looks back
-   up to 6 non-blank lines so we tolerate the common shape:
+   intervening binding/expression lines (e.g. [let foo =], match heads,
+   [Float.min ...]). Looks back
+   up to 8 non-blank lines so we tolerate the common shape:
 
        (** doc *)
        let foo =
@@ -82,7 +95,8 @@ let doc_above arr target_idx =
               || starts_with line "(* " || starts_with line "in"
               || starts_with line "|" || starts_with line "match "
               || starts_with line "with " || starts_with line "module "
-              || ends_with line "=" then
+              || ends_with line "=" || not (contains_sub line "\"MASC_")
+            then
         find_doc_end (idx - 1) (steps + 1)
       else None
   in
@@ -127,6 +141,12 @@ let try_search re line =
     true
   with Not_found -> false
 
+let search_group re line =
+  try
+    let _ = Str.search_forward re line 0 in
+    Some (Str.matched_group 1 line)
+  with Not_found | Invalid_argument _ -> None
+
 let classify_line line =
   if try_search feature_flag_re line then Some Feature_flag
   else if try_search entry_env_re line then Some Entry_env
@@ -134,6 +154,10 @@ let classify_line line =
     let tag = try Str.matched_group 1 line with Not_found | Invalid_argument _ -> "?" in
     Some (Typed_get tag)
   else None
+
+let classification_of_doc = function
+  | None -> (None, None)
+  | Some doc -> (search_group category_re doc, search_group ops_class_re doc)
 
 let scan_file path =
   let lines = read_lines path in
@@ -163,6 +187,7 @@ let scan_file path =
             try_classify 0
           in
           let doc = doc_above arr i in
+          let category, ops_class = classification_of_doc doc in
           acc :=
             {
               file = path;
@@ -170,6 +195,8 @@ let scan_file path =
               env_var;
               kind;
               doc;
+              category;
+              ops_class;
             }
             :: !acc;
           pos := next_pos
@@ -198,6 +225,13 @@ let module_of_path path =
   let name = Filename.remove_extension base in
   String.capitalize_ascii name
 
+let is_typed = function Typed_get _ -> true | _ -> false
+
+let classified e =
+  match e.kind with
+  | Typed_get _ -> Option.is_some e.category && Option.is_some e.ops_class
+  | Feature_flag | Entry_env | String_lit -> false
+
 (* Group entries by env_var keeping the first (highest-precedence) site
    so the catalog has one row per knob instead of one row per reference. *)
 let dedupe entries =
@@ -210,6 +244,8 @@ let dedupe entries =
         | existing
           when (match existing.kind with String_lit -> true | _ -> false)
                && (match e.kind with String_lit -> false | _ -> true) ->
+            Hashtbl.replace tbl e.env_var e
+        | existing when (not (classified existing)) && classified e ->
             Hashtbl.replace tbl e.env_var e
         | _ -> ())
     entries;
@@ -231,6 +267,34 @@ let truncate_doc s =
   let s = String.trim s in
   if String.length s <= 120 then s
   else String.sub s 0 117 ^ "..."
+
+let category_for_table e =
+  match (e.kind, e.category) with
+  | Typed_get _, Some category -> category
+  | Typed_get _, None -> "unclassified"
+  | (Feature_flag | Entry_env | String_lit), Some category -> category
+  | (Feature_flag | Entry_env | String_lit), None -> "n/a"
+
+let ops_class_for_table e =
+  match (e.kind, e.ops_class) with
+  | Typed_get _, Some ops_class -> ops_class
+  | Typed_get _, None -> "unclassified"
+  | (Feature_flag | Entry_env | String_lit), Some ops_class -> ops_class
+  | (Feature_flag | Entry_env | String_lit), None -> "n/a"
+
+let count_by predicate entries =
+  List.fold_left (fun acc e -> if predicate e then acc + 1 else acc) 0 entries
+
+let typed_classification_counts entries =
+  let typed = List.filter (fun e -> is_typed e.kind) entries in
+  let classified_count = count_by classified typed in
+  let operator_count =
+    count_by (fun e -> match e.ops_class with Some "operator" -> true | _ -> false) typed
+  in
+  let algorithm_count =
+    count_by (fun e -> match e.ops_class with Some "algorithm" -> true | _ -> false) typed
+  in
+  (List.length typed, classified_count, operator_count, algorithm_count)
 
 let render entries =
   let buf = Buffer.create 65536 in
@@ -265,23 +329,39 @@ let render entries =
   Buffer.add_string buf
     (Printf.sprintf "**Total**: %d unique knobs across %d modules.\n\n"
        (List.length entries) (List.length modules));
+  let typed_total, typed_classified, operator_count, algorithm_count =
+    typed_classification_counts entries
+  in
+  Buffer.add_string buf
+    (Printf.sprintf
+       "**Typed getter classification**: %d/%d tagged (`operator`: %d, \
+        `algorithm`: %d, `unclassified`: %d).\n\n"
+       typed_classified typed_total operator_count algorithm_count
+       (typed_total - typed_classified));
   List.iter
     (fun m ->
       let module_entries =
         Hashtbl.find by_module m |> List.sort (fun a b -> compare a.env_var b.env_var)
       in
+      let module_typed, module_classified, _, _ =
+        typed_classification_counts module_entries
+      in
       Buffer.add_string buf
-        (Printf.sprintf "## %s (%d knobs)\n\n" m (List.length module_entries));
+        (Printf.sprintf
+           "## %s (%d knobs; typed classification %d/%d)\n\n" m
+           (List.length module_entries) module_classified module_typed);
       Buffer.add_string buf
-        "| Env var | Kind | Line | Doc |\n|---|---|---|---|\n";
+        "| Env var | Kind | Category | Ops class | Line | Doc |\n\
+         |---|---|---|---|---|---|\n";
       List.iter
         (fun e ->
           let doc =
             match e.doc with Some d -> truncate_doc d |> escape_md | None -> ""
           in
           Buffer.add_string buf
-            (Printf.sprintf "| `%s` | %s | %d | %s |\n" e.env_var
-               (kind_to_string e.kind) e.line doc))
+            (Printf.sprintf "| `%s` | %s | %s | %s | %d | %s |\n" e.env_var
+               (kind_to_string e.kind) (category_for_table e)
+               (ops_class_for_table e) e.line doc))
         module_entries;
       Buffer.add_char buf '\n')
     modules;

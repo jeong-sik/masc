@@ -709,22 +709,22 @@ let validate_decision_transition ~from ~to_ =
          (* from Decision_undecided *)
          | (Decision_undecided, Decision_undecided) -> true
          | (Decision_undecided, Decision_guard_ok) -> true  (* via set_turn_decision_stage *)
-         | (Decision_undecided, Decision_gate_rejected) -> true  (* bypassed: mark_turn_gate_rejected_by_name *)
+         | (Decision_undecided, Decision_gate_rejected) -> true  (* via mark_turn_gate_rejected_by_name *)
          | (Decision_undecided, Decision_tool_policy_selected) -> true  (* via set_turn_decision_stage *)
          (* from Decision_guard_ok *)
          | (Decision_guard_ok, Decision_undecided) -> false  (* new turn init is reset, not transition *)
          | (Decision_guard_ok, Decision_guard_ok) -> true
-         | (Decision_guard_ok, Decision_gate_rejected) -> true  (* bypassed: mark_turn_gate_rejected_by_name *)
+         | (Decision_guard_ok, Decision_gate_rejected) -> true  (* via mark_turn_gate_rejected_by_name *)
          | (Decision_guard_ok, Decision_tool_policy_selected) -> true  (* via set_turn_decision_stage *)
-         (* from Decision_gate_rejected — terminal *)
-         | (Decision_gate_rejected, Decision_undecided) -> false  (* terminal; new turn is reset *)
-         | (Decision_gate_rejected, Decision_guard_ok) -> false  (* terminal; retry via prepare_turn_retry_after_compaction (bypassed) *)
+         (* from Decision_gate_rejected *)
+         | (Decision_gate_rejected, Decision_undecided) -> false  (* new turn init is reset, not transition *)
+         | (Decision_gate_rejected, Decision_guard_ok) -> true  (* via prepare_turn_retry_after_compaction *)
          | (Decision_gate_rejected, Decision_gate_rejected) -> true
-         | (Decision_gate_rejected, Decision_tool_policy_selected) -> false  (* terminal *)
+         | (Decision_gate_rejected, Decision_tool_policy_selected) -> false  (* not valid within a single turn *)
          (* from Decision_tool_policy_selected *)
          | (Decision_tool_policy_selected, Decision_undecided) -> false  (* new turn init is reset, not transition *)
-         | (Decision_tool_policy_selected, Decision_guard_ok) -> false  (* retry via prepare_turn_retry_after_compaction (bypassed) *)
-         | (Decision_tool_policy_selected, Decision_gate_rejected) -> true  (* bypassed: mark_turn_gate_rejected_by_name *)
+         | (Decision_tool_policy_selected, Decision_guard_ok) -> true  (* via prepare_turn_retry_after_compaction *)
+         | (Decision_tool_policy_selected, Decision_gate_rejected) -> true  (* via mark_turn_gate_rejected_by_name *)
          | (Decision_tool_policy_selected, Decision_tool_policy_selected) -> true
        ))
 
@@ -742,28 +742,28 @@ let validate_cascade_transition ~from ~to_ =
          | (Cascade_idle, Cascade_done) -> false
          | (Cascade_idle, Cascade_exhausted) -> false
          (* from Cascade_selecting *)
-         | (Cascade_selecting, Cascade_idle) -> false  (* new turn init is reset *)
+         | (Cascade_selecting, Cascade_idle) -> true  (* via prepare_turn_retry_after_compaction *)
          | (Cascade_selecting, Cascade_selecting) -> true
          | (Cascade_selecting, Cascade_trying) -> true  (* via set_turn_cascade_state *)
          | (Cascade_selecting, Cascade_done) -> false
          | (Cascade_selecting, Cascade_exhausted) -> false
          (* from Cascade_trying *)
-         | (Cascade_trying, Cascade_idle) -> false  (* retry via prepare_turn_retry_after_compaction (bypassed) *)
+         | (Cascade_trying, Cascade_idle) -> true  (* via prepare_turn_retry_after_compaction *)
          | (Cascade_trying, Cascade_selecting) -> true  (* via set_turn_cascade_state: retry re-entry *)
          | (Cascade_trying, Cascade_trying) -> true
          | (Cascade_trying, Cascade_done) -> true  (* via set_turn_cascade_state *)
          | (Cascade_trying, Cascade_exhausted) -> true  (* via set_turn_cascade_state *)
-         (* from Cascade_done — terminal *)
-         | (Cascade_done, Cascade_idle) -> false  (* terminal; new turn is reset *)
-         | (Cascade_done, Cascade_selecting) -> false  (* terminal *)
-         | (Cascade_done, Cascade_trying) -> false  (* terminal *)
+         (* from Cascade_done *)
+         | (Cascade_done, Cascade_idle) -> true  (* via prepare_turn_retry_after_compaction *)
+         | (Cascade_done, Cascade_selecting) -> true  (* via prepare_turn_retry_after_compaction *)
+         | (Cascade_done, Cascade_trying) -> true  (* via prepare_turn_retry_after_compaction *)
          | (Cascade_done, Cascade_done) -> true
-         | (Cascade_done, Cascade_exhausted) -> false  (* terminal *)
-         (* from Cascade_exhausted — terminal *)
-         | (Cascade_exhausted, Cascade_idle) -> false  (* terminal; new turn is reset *)
-         | (Cascade_exhausted, Cascade_selecting) -> false  (* terminal *)
-         | (Cascade_exhausted, Cascade_trying) -> false  (* terminal *)
-         | (Cascade_exhausted, Cascade_done) -> false  (* terminal *)
+         | (Cascade_done, Cascade_exhausted) -> false  (* not valid within a single turn *)
+         (* from Cascade_exhausted *)
+         | (Cascade_exhausted, Cascade_idle) -> true  (* via prepare_turn_retry_after_compaction *)
+         | (Cascade_exhausted, Cascade_selecting) -> true  (* via prepare_turn_retry_after_compaction *)
+         | (Cascade_exhausted, Cascade_trying) -> true  (* via prepare_turn_retry_after_compaction *)
+         | (Cascade_exhausted, Cascade_done) -> false  (* not valid within a single turn *)
          | (Cascade_exhausted, Cascade_exhausted) -> true
        ))
 
@@ -785,24 +785,24 @@ let validate_turn_phase_transition ~from ~to_ =
          | (Turn_prompting, Turn_prompting) -> true
          | (Turn_prompting, Turn_executing) -> true  (* via set_turn_phase *)
          | (Turn_prompting, Turn_compacting) -> false
-         | (Turn_prompting, Turn_finalizing) -> true  (* via set_turn_phase / bypassed: mark_turn_gate_rejected_by_name *)
+         | (Turn_prompting, Turn_finalizing) -> true  (* via set_turn_phase / via mark_turn_gate_rejected_by_name *)
          (* from Turn_executing *)
          | (Turn_executing, Turn_idle) -> false  (* new turn init is reset, not transition *)
-         | (Turn_executing, Turn_prompting) -> false
+         | (Turn_executing, Turn_prompting) -> true  (* via set_turn_cascade_state: retry selecting *)
          | (Turn_executing, Turn_executing) -> true
          | (Turn_executing, Turn_compacting) -> true  (* via set_turn_phase: retry plan *)
-         | (Turn_executing, Turn_finalizing) -> true  (* via set_turn_phase / bypassed: mark_turn_gate_rejected_by_name *)
+         | (Turn_executing, Turn_finalizing) -> true  (* via set_turn_phase / via mark_turn_gate_rejected_by_name *)
          (* from Turn_compacting *)
          | (Turn_compacting, Turn_idle) -> false  (* new turn init is reset, not transition *)
-         | (Turn_compacting, Turn_prompting) -> false  (* was via set_turn_phase; now bypassed: prepare_turn_retry_after_compaction *)
+         | (Turn_compacting, Turn_prompting) -> true  (* via prepare_turn_retry_after_compaction *)
          | (Turn_compacting, Turn_executing) -> false
          | (Turn_compacting, Turn_compacting) -> true
          | (Turn_compacting, Turn_finalizing) -> true  (* via set_turn_phase: compaction failure *)
          (* from Turn_finalizing *)
-         | (Turn_finalizing, Turn_idle) -> false  (* terminal; new turn is reset *)
-         | (Turn_finalizing, Turn_prompting) -> false  (* terminal; new turn is reset *)
-         | (Turn_finalizing, Turn_executing) -> false  (* terminal *)
-         | (Turn_finalizing, Turn_compacting) -> false  (* terminal *)
+         | (Turn_finalizing, Turn_idle) -> false  (* new turn is reset *)
+         | (Turn_finalizing, Turn_prompting) -> false  (* new turn is reset *)
+         | (Turn_finalizing, Turn_executing) -> false
+         | (Turn_finalizing, Turn_compacting) -> false
          | (Turn_finalizing, Turn_finalizing) -> true
        ))
 
@@ -821,12 +821,14 @@ let set_turn_cascade_state ~base_path name cascade_state =
   let now = Time_compat.now () in
   update_entry ~base_path name (fun e ->
     update_current_turn e (fun obs ->
+      let new_turn_phase = turn_phase_of_cascade_state cascade_state in
       validate_cascade_transition ~from:obs.cascade_state ~to_:cascade_state;
+      validate_turn_phase_transition ~from:obs.turn_phase ~to_:new_turn_phase;
       changed := true;
       {
         obs with
         cascade_state;
-        turn_phase = turn_phase_of_cascade_state cascade_state;
+        turn_phase = new_turn_phase;
       }));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 
@@ -854,6 +856,9 @@ let prepare_turn_retry_after_compaction ~base_path name =
   let now = Time_compat.now () in
   update_entry ~base_path name (fun e ->
     update_current_turn e (fun obs ->
+      validate_decision_transition ~from:obs.decision_stage ~to_:Decision_guard_ok;
+      validate_cascade_transition ~from:obs.cascade_state ~to_:Cascade_idle;
+      validate_turn_phase_transition ~from:obs.turn_phase ~to_:Turn_prompting;
       changed := true;
       {
         obs with
@@ -880,6 +885,8 @@ let mark_turn_gate_rejected_by_name name =
       let now = Time_compat.now () in
       update_entry ~base_path:entry.base_path name (fun e ->
         update_current_turn e (fun obs ->
+          validate_decision_transition ~from:obs.decision_stage ~to_:Decision_gate_rejected;
+          validate_turn_phase_transition ~from:obs.turn_phase ~to_:Turn_finalizing;
           changed := true;
           {
             obs with
@@ -993,7 +1000,8 @@ let get_turn_failures ~base_path name =
 let is_running ~base_path name =
   match get ~base_path name with
   | Some { phase = Running; _ } -> true
-  | _ -> false
+  | Some _ -> false
+  | None -> false
 
 (** True if the keeper has ANY registry entry (regardless of state).
     Used by reconcile to avoid re-launching Crashed/Dead keepers. *)

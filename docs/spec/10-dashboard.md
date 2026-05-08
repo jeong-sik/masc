@@ -254,7 +254,7 @@ type attention_item = {
 **400 LOC.** 주기적으로 governance factual snapshot을 LLM에 보내고 judgment를 생성하는 daemon fiber.
 
 - `start`: `Eio.Fiber.fork_daemon`으로 시작. `MASC_DASHBOARD_GOVERNANCE_JUDGE_INTERVAL_SEC` (기본 60초) 간격으로 반복
-- `refresh_once`: `Keeper_turn_driver.run_named_with_masc_tools`로 `"governance_judge"` cascade 호출 -> judgment 파싱 -> `Dated_jsonl` store에 append
+- `refresh_once`: `Keeper_turn_driver_wrappers.run_named_with_masc_tools`로 `"governance_judge"` cascade 호출 -> judgment 파싱 -> `Dated_jsonl` store에 append
 - **date-split store**: `.masc/governance/judgments/YYYY-MM/DD.jsonl` (legacy 단일 파일 fallback 지원)
 - `compute_judgments`: factual JSON을 prompt로 변환하고 LLM 호출. 결과에서 item별 judgment를 파싱하여 반환
 - **allowed_tool whitelist**: recommended_action의 resolved_tool은 5개 도구만 허용 (`masc_governance_status`, `masc_execution_orders`, `masc_execute_dry_run`, `masc_execute`, `masc_operator_confirm`)

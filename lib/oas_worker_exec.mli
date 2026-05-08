@@ -13,7 +13,7 @@
     pinned at this boundary.
 
     All model-selection and cascade logic lives in
-    {!Oas_worker_cascade} and {!Oas_worker_named}.
+    {!Cascade_legacy_runner} and {!Oas_worker_named}.
 
     Internal helpers stay private at this boundary
     ([lowercase_enum_case_name],
@@ -136,7 +136,7 @@ type run_result = {
   trace_ref : Agent_sdk.Raw_trace.run_ref option;
   run_validation : Agent_sdk.Raw_trace.run_validation option;
   proof : Masc_mcp_cdal_runtime.Cdal_proof.t option;
-  cascade_observation : Oas_worker_cascade.cascade_observation option;
+  cascade_observation : Cascade_legacy_runner.cascade_observation option;
   stop_reason : stop_reason;
 }
 

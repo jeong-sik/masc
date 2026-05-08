@@ -451,9 +451,9 @@ let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
       system_prompt = Some system_prompt;
       max_tokens = Some (local_worker_max_tokens ());
       max_turns;
-      temperature = Some Oas_worker_cascade.worker_temperature;
-      top_p = Some Oas_worker_cascade.worker_top_p;
-      top_k = Some Oas_worker_cascade.worker_top_k;
+      temperature = Some Cascade_legacy_runner.worker_temperature;
+      top_p = Some Cascade_legacy_runner.worker_top_p;
+      top_k = Some Cascade_legacy_runner.worker_top_k;
       (* min_p is effectively disabled (0.0) and some cloud providers
          reject the field itself even when the value is a no-op. *)
       min_p = None;
@@ -467,7 +467,7 @@ let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
     | None ->
         { Agent_sdk.Guardrails.tool_filter =
             Agent_sdk.Guardrails.AllowList (oas_tool_names tools);
-          max_tool_calls_per_turn = Some Oas_worker_cascade.worker_max_tool_calls_per_turn;
+          max_tool_calls_per_turn = Some Cascade_legacy_runner.worker_max_tool_calls_per_turn;
         }
   in
   let options =

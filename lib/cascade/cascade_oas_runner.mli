@@ -1,4 +1,4 @@
-(** Oas_worker_named_cascade — Eio context, cascade resolution, runtime MCP policy.
+(** Cascade_oas_runner — Eio context, cascade resolution, runtime MCP policy.
 
     Extracted from oas_worker_named.ml (God file decomposition).
     Provides cascade profile defaults, Eio context validation,

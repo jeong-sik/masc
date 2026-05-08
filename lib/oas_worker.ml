@@ -3,7 +3,7 @@
     Facade module: re-exports sub-modules for backward compatibility.
 
     Implementation split into:
-    - {!Oas_worker_cascade} — cascade metrics types, observation, recording
+    - {!Cascade_legacy_runner} — cascade metrics types, observation, recording
     - {!Oas_worker_exec} — config, build, run, run_with_masc_tools
     - {!Oas_worker_named} — run_named, run_model_by_label, convenience wrappers
 
@@ -12,5 +12,5 @@
 (* Oas_worker_exec defines [module Oas = Agent_sdk]; include it first
    so the alias is available for the .mli contract. *)
 include Oas_worker_exec
-include Oas_worker_cascade
+include Cascade_legacy_runner
 include Oas_worker_named

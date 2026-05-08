@@ -166,12 +166,10 @@
   tool_misc_admin
   tool_misc_web_search
   tool_misc_web_fetch
-  oas_worker_cascade
   oas_worker_exec_agent
   oas_worker_exec
   oas_worker_exec_checkpoint
   oas_worker_named
-  oas_worker_named_cascade
   meta_cognition_types
   meta_cognition_rules
   meta_cognition_snapshot

@@ -159,7 +159,7 @@ let resolve_kimi_api_key_env_name ~cascade_name =
        | Some env_name -> env_name
        | None -> fallback_env)
   in
-  match Oas_worker_named_cascade.default_config_path () with
+  match Cascade_oas_runner.default_config_path () with
   | Some config_path ->
     let overrides =
       Cascade_config.resolve_api_key_env ~config_path ~name:cascade_name

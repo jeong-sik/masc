@@ -5,13 +5,13 @@
     with optional MASC tool bridging variants.
 
     The facade [include]s the three sub-modules:
-    - {!Oas_worker_named_cascade} — Eio context, cascade resolution, runtime MCP policy
+    - {!Cascade_oas_runner} — Eio context, cascade resolution, runtime MCP policy
     - {!Cascade_error_classify} — masc_internal_error type, error conversion, codex CLI preflight
     - {!Cascade_attempt_fsm} — SDK error to FSM outcome, session/resumption analysis
 
     @since God file decomposition — extracted from oas_worker.ml *)
 
-include module type of Oas_worker_named_cascade
+include module type of Cascade_oas_runner
 include module type of Cascade_error_classify
 include module type of Cascade_attempt_fsm
 

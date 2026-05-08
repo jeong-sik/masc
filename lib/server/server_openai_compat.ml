@@ -138,9 +138,9 @@ let handle_chat_completions ~config ~sw ~clock (body : string)
       | None -> `List []
     in
     let max_tokens = Safe_ops.json_int
-      ~default:Oas_worker_cascade.default_max_tokens "max_tokens" json in
+      ~default:Cascade_legacy_runner.default_max_tokens "max_tokens" json in
     let temperature = Safe_ops.json_float
-      ~default:Oas_worker_cascade.default_temperature "temperature" json in
+      ~default:Cascade_legacy_runner.default_temperature "temperature" json in
     if model = "" then
       (`Bad_request,
        error_response ~status:"invalid_request_error"

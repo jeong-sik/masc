@@ -829,7 +829,7 @@ Follow-up to v0.18.1 ProviderTerminal rescue. This release collects a wave of ke
 - `keeper`: cap cascade rotation at 1 for `required_tool_contract_violation` so a single proactive contract miss can't cycle through every provider (#10851).
 - `coord/task`: emit warn when a task crosses the 5-cycle oscillation threshold so operators see escalation candidates (#10719, #10920).
 - `server/autoboot`: per-task boot guard so a single hung lazy task can't block keeper boot — restore_sessions now degrades gracefully instead of hanging the boot pipeline (#10857).
-- `boot`: start `Oas_worker_cascade` actor consumer fiber that was dropped in a refactor and left the cascade actor without a reader (#10895).
+- `boot`: start `Cascade_legacy_runner` actor consumer fiber that was dropped in a refactor and left the cascade actor without a reader (#10895).
 - `cascade-filter`: per-provider rejection diagnostics for #10681 so cascade-skip reasons are visible per provider, not aggregate (#10852).
 - `keeper-shell-docker`: detect `gh --repo X api Y` LLM-hallucinated form and self-correct (108 events / day pre-fix, #10855, #10900).
 - `keeper-shell-docker`: replace `List.hd` with pattern match (Health ratchet, #10905).

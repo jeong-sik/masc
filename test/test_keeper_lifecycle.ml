@@ -388,7 +388,7 @@ let test_compaction_callback_failure_records_coverage_gap () =
       let labels = [ ("callback", "on_compaction_started") ] in
       let before =
         P.metric_value_or_zero
-          P.metric_keeper_lifecycle_callback_failures
+          Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
           ~labels
           ()
       in
@@ -410,7 +410,7 @@ let test_compaction_callback_failure_records_coverage_gap () =
       check (float 0.0001) "callback failure metric increments"
         (before +. 1.0)
         (P.metric_value_or_zero
-           P.metric_keeper_lifecycle_callback_failures
+           Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
            ~labels
            ());
       match TCG.read_recent ~masc_root:base_dir ~n:1 with
@@ -609,7 +609,7 @@ let test_handoff_callback_failure_records_coverage_gap () =
       let labels = [ ("callback", "on_handoff_started") ] in
       let before =
         P.metric_value_or_zero
-          P.metric_keeper_lifecycle_callback_failures
+          Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
           ~labels
           ()
       in
@@ -632,7 +632,7 @@ let test_handoff_callback_failure_records_coverage_gap () =
       check (float 0.0001) "handoff callback failure metric increments"
         (before +. 1.0)
         (P.metric_value_or_zero
-           P.metric_keeper_lifecycle_callback_failures
+           Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
            ~labels
            ());
       match TCG.read_recent ~masc_root:base_dir ~n:1 with

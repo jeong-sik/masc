@@ -2351,6 +2351,31 @@ let init () =
     "Recurring task execution/dispatch failures. Labels: task, phase." Counter;
   add Keeper_metrics.metric_keeper_turn_cleanup_failures
     "Turn cleanup failures (unsubscribe event_bus, mark_turn_finished). Labels: keeper, site." Counter;
+  (* === Keeper metrics previously unregistered in init() ===
+     These were auto-registered on first inc_counter call with no HELP text.
+     Explicit registration adds proper documentation. *)
+  add Keeper_metrics.metric_keeper_fsm_edge_transitions
+    "Keeper FSM edge transitions across lifecycle states. Labels: edge." Counter;
+  add Keeper_metrics.metric_keeper_invariant_violations
+    "Keeper composite lifecycle invariant violations. Labels: keeper, invariant." Counter;
+  add Keeper_metrics.metric_keeper_metric_emit_dropped
+    "Keeper metric emit attempts dropped (buffer full / unregistered). Labels: keeper, reason." Counter;
+  add Keeper_metrics.metric_keeper_oas_timeout_budget_strike
+    "OAS timeout budget strikes (consecutive timeouts before escalation). Labels: keeper." Counter;
+  add Keeper_metrics.metric_keeper_path_rejection
+    "Keeper path rejections (sandbox escape / outside roots). Labels: kind." Counter;
+  add Keeper_metrics.metric_keeper_provider_cooldown_remaining_sec
+    "Provider cooldown remaining seconds. Labels: keeper, provider." Gauge;
+  add Keeper_metrics.metric_keeper_provider_cooldown_skip
+    "Provider cooldown skips (fallback cascade used while cooling). Labels: keeper, provider." Counter;
+  add Keeper_metrics.metric_keeper_require_tool_use_violations
+    "Tool contract require_tool_use violations. Labels: keeper, contract_status." Counter;
+  add Keeper_metrics.metric_keeper_semaphore_wait_seconds_bucket
+    "Keeper turn semaphore wait duration buckets (le label)." Counter;
+  add Keeper_metrics.metric_keeper_semaphore_wait_timeout
+    "Keeper turn semaphore wait timeouts. Labels: keeper, channel." Counter;
+  add Keeper_metrics.metric_keeper_turn_fsm_transitions
+    "Keeper turn FSM state transitions. Labels: keeper, from, to." Counter;
   add metric_mention_dedup_decisions_total
     "RFC-0040 sender-side mention dedup decisions. Labels: outcome={skipped|passed|no_target|bypassed}." Counter;
   add metric_grpc_active_streams "Active gRPC bidirectional streams" Gauge;

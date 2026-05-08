@@ -48,7 +48,7 @@ let make_keeper_meta ~name ~trace_id =
 
 let lifecycle_hook_failure_count ~keeper =
   P.metric_value_or_zero
-    P.metric_keeper_lifecycle_callback_failures
+    Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
     ~labels:
       [
         ("keeper", keeper);

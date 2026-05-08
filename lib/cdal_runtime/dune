@@ -19,17 +19,31 @@
 ; @rfc RFC-OAS-011 (CDAL Migration to masc-mcp)
 ; @phase MM-2-leaves — B1 batch (execution_mode, effect_evidence, guardrail_llm)
 
+; The parent [lib/dune] uses [(include_subdirs unqualified)] which would
+; otherwise absorb every .ml under lib/ into the main [masc_mcp] library
+; and forbid declaring our own [(library)] stanza.  Marking this directory
+; with [(include_subdirs no)] opts out of the parent's traversal so this
+; sub-library compiles as a separate unit, mirroring sibling sub-libs
+; (lib/activity_graph, lib/embedded_config, lib/mcp_session, ...).
+(include_subdirs no)
+
 (library
  (name masc_mcp_cdal_runtime)
  (public_name masc_mcp.cdal_runtime)
  (libraries
   agent_sdk.base
+  ; agent_sdk (full) is needed for Guardrails_async, referenced from
+  ; guardrail_llm.{ml,mli}.  The dune-package places guardrails_async
+  ; in the wrapped [agent_sdk] library, not under agent_sdk.base.
+  agent_sdk
   yojson
   ppx_deriving_yojson.runtime)
  ; Mirror agent_sdk's flag so migrated modules' `open Types` /
  ; `open Result_syntax` resolve against Agent_sdk_base, matching their
- ; original OAS compilation context.
+ ; original OAS compilation context.  Also open the wrapped [Agent_sdk]
+ ; namespace so unqualified references such as [Guardrails_async] in
+ ; [guardrail_llm.{ml,mli}] resolve to [Agent_sdk.Guardrails_async].
  (flags
-  (:standard -open Agent_sdk_base))
+  (:standard -open Agent_sdk_base -open Agent_sdk))
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_inline_test ppx_let)))

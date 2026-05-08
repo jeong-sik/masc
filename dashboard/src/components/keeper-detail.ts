@@ -1016,11 +1016,11 @@ export function KeeperDetailPage() {
         ${'' /* RFC-0046: 6-axis composite snapshot (KSM/KTC/KDP/KCL/KMC/breaker) — SSOT for keeper FSM state */}
         <${FsmHub} mode="detail" selectedName=${keeper.name} />
         <${CollapsibleSection} title="Phase State Machine">
-          <${KeeperStateDiagramPanel} keeperName=${keeper.name} currentPhase=${keeper.phase} />
+          <${KeeperStateDiagramPanel} keeperName=${keeper.name} />
         <//>
 
         <${CollapsibleSection} title="Memory Tier & Compaction">
-          <${KeeperMemoryTierPanel} keeperName=${keeper.name} currentPhase=${keeper.phase} />
+          <${KeeperMemoryTierPanel} keeperName=${keeper.name} />
         <//>
 
         ${'' /* ── Divergent conditions (amber banner; renders only when phase lags observed signals) ── */}

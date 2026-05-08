@@ -21,11 +21,9 @@ const REFRESH_MS = 30_000
 
 interface KeeperMemoryTierPanelProps {
   keeperName: string
-  currentPhase?: string | null
   /** RFC-0046: parent-supplied composite snapshot. When provided,
-   *  this panel skips its own /composite fetch and reads from the
-   *  shared SSOT (FsmHub). currentPhase remains as compat fallback
-   *  for one cycle and will be removed in RFC-0046 Step 5. */
+   *  this panel reads the SSOT from the shared FsmHub fetch instead
+   *  of issuing its own /composite call. */
   snapshot?: KeeperCompositeSnapshot | null
 }
 
@@ -73,7 +71,6 @@ export function filterMemoryKindUsage(
  */
 export function KeeperMemoryTierPanel({
   keeperName,
-  currentPhase,
   snapshot: externalSnapshot,
 }: KeeperMemoryTierPanelProps) {
   const [usage, setUsage] = useState<MemoryKindUsageEntry[] | null>(null)
@@ -156,7 +153,7 @@ export function KeeperMemoryTierPanel({
     () => filterMemoryKindUsage(usage, query, filter),
     [usage, query, filter],
   )
-  const phase = snapshot?.phase ?? currentPhase ?? null
+  const phase = snapshot?.phase ?? null
   const isCompacting = phase === 'Compacting' || phase === 'compacting'
   const compactionStage = snapshot?.compaction.stage ?? (isCompacting ? 'compacting' : 'accumulating')
   const compactionSpec = buildCompactionSpec(compactionStage, phase)

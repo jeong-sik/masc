@@ -156,12 +156,12 @@ let test_tool_side_effect_failures_are_observed () =
       let keeper_labels = [("keeper", meta.name)] in
       let sse_before =
         Prometheus.metric_value_or_zero
-          Prometheus.metric_keeper_sse_broadcast_failures
+          Masc_mcp.Keeper_metrics.metric_keeper_sse_broadcast_failures
           ~labels:keeper_labels ()
       in
       let decision_before =
         Prometheus.metric_value_or_zero
-          Prometheus.metric_keeper_decision_audit_flush_failures
+          Masc_mcp.Keeper_metrics.metric_keeper_decision_audit_flush_failures
           ~labels:keeper_labels ()
       in
       let original_hook = Atomic.get Sse.buffer_commit_test_hook in
@@ -179,12 +179,12 @@ let test_tool_side_effect_failures_are_observed () =
       check (float 0.001) "SSE failure metric incremented"
         (sse_before +. 1.0)
         (Prometheus.metric_value_or_zero
-           Prometheus.metric_keeper_sse_broadcast_failures
+           Masc_mcp.Keeper_metrics.metric_keeper_sse_broadcast_failures
            ~labels:keeper_labels ());
       check (float 0.001) "decision-log failure metric incremented"
         (decision_before +. 1.0)
         (Prometheus.metric_value_or_zero
-           Prometheus.metric_keeper_decision_audit_flush_failures
+           Masc_mcp.Keeper_metrics.metric_keeper_decision_audit_flush_failures
            ~labels:keeper_labels ()))
 
 let test_handler_persists_tool_call_io_without_post_hook () =

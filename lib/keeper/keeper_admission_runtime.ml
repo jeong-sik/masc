@@ -150,7 +150,7 @@ let observe ~keeper_id =
       ~buckets:bucket_lookup
   in
   Prometheus.inc_counter
-    Prometheus.metric_keeper_admission_shadow_outcome
+    Keeper_metrics.metric_keeper_admission_shadow_outcome
     ~labels:[("keeper", keeper_id); ("outcome", outcome_label outcome)] ();
   outcome
 

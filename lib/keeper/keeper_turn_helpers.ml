@@ -46,6 +46,17 @@ let string_contains_substring_ci ~(needle : string) (haystack : string) : bool =
       ~needle:(String.lowercase_ascii needle)
     (String.lowercase_ascii haystack)
 
+let side_effect_metric_label side_effect =
+  let trimmed = String.trim side_effect in
+  let normalized =
+    String.map
+      (function
+        | ' ' | ':' | '/' -> '_'
+        | c -> c)
+      trimmed
+  in
+  if String.equal normalized "" then "unknown" else normalized
+
 let report_keeper_cycle_side_effect_issue
     ~(config : Coord.config)
     ~(keeper_name : string)
@@ -56,6 +67,13 @@ let report_keeper_cycle_side_effect_issue
     Printf.sprintf "keeper cycle %s failed: %s" side_effect detail
   in
   Keeper_registry.record_error ~base_path:config.base_path keeper_name message;
+  Prometheus.inc_counter
+    Keeper_metrics.metric_keeper_dispatch_event_failures
+    ~labels:[
+      ("keeper", keeper_name);
+      ("site", side_effect_metric_label side_effect);
+    ]
+    ();
   match severity with
   | `Warn -> Log.Keeper.warn "%s: %s" keeper_name message
   | `Error -> Log.Keeper.error "%s: %s" keeper_name message
@@ -122,7 +140,7 @@ let record_execution_receipt_gap
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_write_meta_failures
+        Keeper_metrics.metric_keeper_write_meta_failures
         ~labels:[("keeper", meta.name); ("phase", "receipt_coverage_gap")]
         ();
       Log.Keeper.warn
@@ -264,7 +282,7 @@ let record_pre_dispatch_terminal_observation
    | exn ->
       let error = Printexc.to_string exn in
       Prometheus.inc_counter
-        Prometheus.metric_keeper_write_meta_failures
+        Keeper_metrics.metric_keeper_write_meta_failures
         ~labels:[("keeper", meta.name); ("phase", "receipt_append")]
         ();
       Log.Keeper.warn

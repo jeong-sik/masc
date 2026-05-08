@@ -935,7 +935,7 @@ let test_patch_keeper_dependent_caches_tolerates_null_agent () =
 
 let callback_metric_value callback =
   Lib.Prometheus.metric_value_or_zero
-    Lib.Prometheus.metric_keeper_lifecycle_callback_failures
+    Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
     ~labels:[ ("callback", callback) ]
     ()
 

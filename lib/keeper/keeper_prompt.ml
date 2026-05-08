@@ -50,7 +50,7 @@ let ensure_critical_prompt_anchors prompt =
   | [] -> prompt
   | missing ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_prompt_failures
+        Keeper_metrics.metric_keeper_prompt_failures
         ~labels:[("prompt", "critical_prompt_anchors")]
         ();
       Log.Keeper.warn
@@ -109,7 +109,7 @@ let render_world_prompt ~git_clone_policy_loaded ~allowed_orgs ~denied_repos :
   | Ok rendered -> rendered
   | Error msg ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_prompt_failures
+        Keeper_metrics.metric_keeper_prompt_failures
         ~labels:[("prompt", Keeper_prompt_names.world)]
         ();
       Log.Keeper.warn
@@ -123,7 +123,7 @@ let behavior_prompt_block name =
   | Some content -> String.trim content
   | None ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_prompt_failures
+        Keeper_metrics.metric_keeper_prompt_failures
         ~labels:[("prompt", "behavior/" ^ name)]
         ();
       Log.Keeper.warn
@@ -138,7 +138,7 @@ let behavior_prompt_block name =
 
 let missing_personality_field field =
   Prometheus.inc_counter
-    Prometheus.metric_keeper_prompt_failures
+    Keeper_metrics.metric_keeper_prompt_failures
     ~labels:[("prompt", "personality/" ^ field)]
     ();
   Log.Keeper.warn

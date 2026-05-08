@@ -373,7 +373,7 @@ let preset_allowlist preset =
   with_policy_config_or ~accessor:("preset_allowlist." ^ name) ~default:[]
     ~on_none:(fun () ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_tool_policy_failures
+        Keeper_metrics.metric_keeper_tool_policy_failures
         ~labels:[("site", "policy_config_not_loaded"); ("preset", name)]
         ();
       Log.Keeper.error
@@ -500,10 +500,32 @@ let keeper_default_model_tools (_meta : keeper_meta) : Masc_domain.tool_schema l
     In Failing phase the keeper must retain a guaranteed floor of tools
     regardless of preset, deny-list, or policy config.  The floor is
     determined solely by shard removability (structural, not policy). *)
+(** Essential MASC tools always available in Failing recovery,
+    on top of [removable=false] shard floor. Mirrors [masc.essential]
+    in tool_policy.toml. Sync regression: any drift here vs the toml
+    group is caught by [test_failing_minimum_essential.ml].
+
+    Rationale (board P1, 9 keepers × 0 claimable masc_web_search):
+    a Failing keeper still needs to check coordination state, look up
+    information for recovery, and defer to operator approval. Removing
+    these from the recovery floor caused task contracts that require
+    [masc_web_search] to become unclaimable when any keeper entered
+    decision_layer >= 2. *)
+let essential_masc_minimum_names : string list = [
+  "masc_status";
+  "masc_web_search";
+  "masc_web_fetch";
+  "masc_approval_pending";
+]
+
 let failing_minimum_tool_names () : string list =
-  Tool_shard.recovery_minimum_shard_names ()
-  |> Tool_shard.tools_of_shards
-  |> List.map (fun (t : Masc_domain.tool_schema) -> t.Masc_domain.name)
+  let shard_floor =
+    Tool_shard.recovery_minimum_shard_names ()
+    |> Tool_shard.tools_of_shards
+    |> List.map (fun (t : Masc_domain.tool_schema) -> t.Masc_domain.name)
+  in
+  shard_floor @ essential_masc_minimum_names
+  |> List.sort_uniq String.compare
 
 let keeper_allowed_tool_names ?(write_done = false)
     ?(phase = Keeper_state_machine.Running) (meta : keeper_meta) :

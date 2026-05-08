@@ -68,7 +68,7 @@ let with_clean_env f =
 
 let counter_value labels =
   Prometheus.metric_value_or_zero
-    Prometheus.metric_keeper_path_rejection
+    Masc_mcp.Keeper_metrics.metric_keeper_path_rejection
     ~labels ()
 
 let assert_no_roots_leak msg err =

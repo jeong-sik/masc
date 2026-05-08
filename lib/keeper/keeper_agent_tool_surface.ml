@@ -201,7 +201,7 @@ let turn_affordances_require_tool_gate_with_allowed
       (fun affordance ->
          if not (has_matching_tool affordance) then
            Prometheus.inc_counter
-             Prometheus.metric_keeper_required_tool_gate_suppressed_total
+             Keeper_metrics.metric_keeper_required_tool_gate_suppressed_total
              ~labels:[ ("affordance", turn_affordance_to_string affordance) ]
              ())
       gated_affordances;

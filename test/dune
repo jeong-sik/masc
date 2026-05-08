@@ -60,6 +60,7 @@
         test_agent_stress
         test_keeper_tool_use_failure_counter
         test_keeper_compaction_outcome_counter
+        test_keeper_sub_fsm_guards
         test_keeper_usage_trust_counter
         test_llm_metric_bridge
         test_cost_usd_source_attribution_10318
@@ -443,6 +444,7 @@
           test_keeper_state_machine
           test_keeper_state_machine_correspondence
           test_keeper_lifecycle_hooks
+          test_keeper_sub_fsm_guards
           test_keeper_subprocess_registry
           test_keeper_social_model_magentic_ledger_fsm
           test_keeper_overflow_recovery
@@ -491,11 +493,11 @@
  (names test_pbt_mention test_pbt_validation test_pbt_text_processing test_pbt_context_overflow
         test_keeper_state_machine_pbt test_telemetry_eio_pbt
         test_metrics_store_eio_pbt test_prompt_registry_pbt
-        test_keeper_fsm_joints)
+        test_keeper_fsm_joints test_clean_only_bug_mirrors)
  (modules test_pbt_mention test_pbt_validation test_pbt_text_processing test_pbt_context_overflow
           test_keeper_state_machine_pbt test_telemetry_eio_pbt
           test_metrics_store_eio_pbt test_prompt_registry_pbt
-          test_keeper_fsm_joints)
+          test_keeper_fsm_joints test_clean_only_bug_mirrors)
  (libraries masc_test_deps))
 
 ; Focused single-module tests
@@ -1207,11 +1209,13 @@
 (include stanzas/test_keeper_supervisor_observability_10125.inc)
 (include stanzas/test_keeper_supervisor_write_meta_source.inc)
 (include stanzas/test_keeper_supervisor_finally_cancel_swallow.inc)
+(include stanzas/test_failing_minimum_essential.inc)
 (include stanzas/test_keeper_tool_emission_hook.inc)
 (include stanzas/test_keeper_tool_matrix.inc)
 (include stanzas/test_keeper_tool_policy_paths.inc)
 (include stanzas/test_keeper_turn_fsm_tla_parity.inc)
 (include stanzas/test_keeper_turn_livelock_10121.inc)
+(include stanzas/test_keeper_turn_helpers_side_effect_metric.inc)
 (include stanzas/test_keeper_turn_slot_force_release.inc)
 (include stanzas/test_keeper_turn_slot_holders.inc)
 (include stanzas/test_keeper_turn_slot_release_cancel_safe.inc)

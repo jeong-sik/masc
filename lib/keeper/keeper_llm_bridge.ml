@@ -65,7 +65,7 @@ let run_with_timeout_and_fallback ~timeout_s fn =
       Timeout_policy.overshoot_warn ~deadline ~actual_wall_s:wall ()
     in
     Prometheus.inc_counter
-      Prometheus.metric_keeper_llm_bridge_failures
+      Keeper_metrics.metric_keeper_llm_bridge_failures
       ~labels:[("site", "timeout")]
       ();
     Log.Keeper.warn
@@ -101,24 +101,24 @@ let run_with_timeout_and_fallback ~timeout_s fn =
       | _ -> Printexc.to_string inner_exn
     in
     Prometheus.inc_counter
-      Prometheus.metric_keeper_llm_bridge_failures
+      Keeper_metrics.metric_keeper_llm_bridge_failures
       ~labels:[("site", "cancelled")]
       ();
     Log.Keeper.warn
       "keeper_llm_bridge: OAS execution cancelled after %.1fs bucket=%s inner=%s (re-raising; OAS context rollback only; external tool side effects are not reverted)"
       wall bucket inner_str;
-    Prometheus.inc_counter Prometheus.metric_keeper_oas_cancel
+    Prometheus.inc_counter Keeper_metrics.metric_keeper_oas_cancel
       ~labels:[ ("bucket", bucket) ]
       ();
     Printexc.raise_with_backtrace exn bt
   | exn ->
     (* TLA+: HandleError -> Rollback context *)
     let bt = Printexc.get_backtrace () in
-    Prometheus.inc_counter Prometheus.metric_keeper_oas_execution_errors
+    Prometheus.inc_counter Keeper_metrics.metric_keeper_oas_execution_errors
       ~labels:[("channel", "oas_bridge")]
       ();
     Prometheus.inc_counter
-      Prometheus.metric_keeper_llm_bridge_failures
+      Keeper_metrics.metric_keeper_llm_bridge_failures
       ~labels:[("site", "execution_error")]
       ();
     Log.Keeper.error "keeper_llm_bridge: OAS execution error: %s\n%s" (Printexc.to_string exn) bt;

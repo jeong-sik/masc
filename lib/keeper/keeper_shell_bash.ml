@@ -194,7 +194,7 @@ let handle_keeper_bash
   in
   let gh_pr_create_block () =
     Prometheus.inc_counter
-      Prometheus.metric_keeper_shell_bash_failures
+      Keeper_metrics.metric_keeper_shell_bash_failures
       ~labels:[("keeper", meta.name); ("site", "gh_pr_create")]
       ();
     Log.Keeper.warn
@@ -390,7 +390,7 @@ let handle_keeper_bash
     if Worker_dev_tools.is_destructive_bash_operation cmd
     then (
       Prometheus.inc_counter
-        Prometheus.metric_keeper_shell_bash_failures
+        Keeper_metrics.metric_keeper_shell_bash_failures
         ~labels:[("keeper", meta.name); ("site", "destructive")]
         ();
       Log.Keeper.warn "keeper_bash DESTRUCTIVE blocked: %s (keeper=%s)" cmd_for_log meta.name;
@@ -428,7 +428,7 @@ let handle_keeper_bash
             && Keeper_shell_shared.cmd_targets_gh cmd
     then (
       Prometheus.inc_counter
-        Prometheus.metric_keeper_shell_bash_failures
+        Keeper_metrics.metric_keeper_shell_bash_failures
         ~labels:[("keeper", meta.name); ("site", "hard_mode")]
         ();
       Log.Keeper.warn
@@ -558,7 +558,7 @@ let handle_keeper_bash
         meta.name cwd cmd_for_log detected_tool
         (network_mode_to_string base_network_mode);
       Prometheus.inc_counter
-        Prometheus.metric_keeper_bash_network_upgrade
+        Keeper_metrics.metric_keeper_bash_network_upgrade
         ~labels:[ ("keeper", meta.name); ("detected_tool", detected_tool) ]
         ();
       Keeper_shell_shared.run_docker_with_git_bash
@@ -592,7 +592,7 @@ let handle_keeper_bash
         in_playground
         (Env_config_keeper.KeeperSandbox.hard_mode ());
       Prometheus.inc_counter
-        Prometheus.metric_keeper_bash_local_execution
+        Keeper_metrics.metric_keeper_bash_local_execution
         ~labels:[ ("keeper", meta.name); ("reason", local_reason) ]
         ();
       (* Local execution path: full validation applies *)
@@ -604,7 +604,7 @@ let handle_keeper_bash
       | Error reason ->
         let reason_str = Worker_dev_tools.block_reason_to_string reason in
         Prometheus.inc_counter
-          Prometheus.metric_keeper_shell_bash_failures
+          Keeper_metrics.metric_keeper_shell_bash_failures
           ~labels:[("site", "generic_blocked")]
           ();
         Log.Keeper.warn "keeper_bash blocked: %s (cmd=%s)" reason_str cmd_for_log;

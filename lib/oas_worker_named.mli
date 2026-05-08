@@ -76,7 +76,7 @@ val run_named :
   ?proof_ref:Masc_mcp_cdal_runtime.Cdal_proof.t option ref ->
   ?contract:Masc_mcp_cdal_runtime.Risk_contract.t ->
   ?transport:Masc_grpc_transport.t ->
-  ?cli_transport_overrides:Oas_worker_exec.cli_transport_overrides ->
+  ?cli_transport_overrides:Cascade_runner.cli_transport_overrides ->
   ?allowed_paths:string list ->
   ?checkpoint_sidecar:Yojson.Safe.t ->
   ?cache_system_prompt:bool ->
@@ -89,7 +89,7 @@ val run_named :
   ?enable_thinking:bool ->
   ?approval:Agent_sdk.Hooks.approval_callback ->
   ?exit_condition:(int -> bool) ->
-  ?exit_condition_result:(int -> Oas_worker_exec.stop_reason * string option) ->
+  ?exit_condition_result:(int -> Cascade_runner.stop_reason * string option) ->
   ?summarizer:(Agent_sdk.Types.message list -> string) ->
   ?oas_checkpoint:Agent_sdk.Checkpoint.t ->
   ?event_bus:Agent_sdk.Event_bus.t ->
@@ -97,7 +97,7 @@ val run_named :
   ?net:Eio_context.eio_net ->
   ?per_provider_timeout_s:float ->
   unit ->
-  (Oas_worker_exec.run_result, Agent_sdk.Error.sdk_error) result
+  (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result
 (** Run a single [Agent.run] call with MASC-driven cascade model fallback.
     MASC drives the cascade FSM directly: resolves cascade providers,
     tries each with OAS, and uses [Cascade_fsm.decide] on failure.
@@ -132,7 +132,7 @@ val run_model_by_label :
   ?sw:Eio.Switch.t ->
   ?net:Eio_context.eio_net ->
   unit ->
-  (Oas_worker_exec.run_result, Agent_sdk.Error.sdk_error) result
+  (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result
 (** Run a single [Agent.run] using a model label string
     (e.g. ["llama:qwen3.5"]).  Validates the label before execution. *)
 
@@ -170,7 +170,7 @@ val run_named_with_masc_tools :
   ?sw:Eio.Switch.t ->
   ?net:Eio_context.eio_net ->
   unit ->
-  (Oas_worker_exec.run_result, Agent_sdk.Error.sdk_error) result
+  (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result
 (** [run_named] variant that bridges MASC tool schemas into OAS tools
     via {!Tool_bridge.oas_tool_of_masc}. *)
 
@@ -200,7 +200,7 @@ val run_model_with_masc_tools :
   ?sw:Eio.Switch.t ->
   ?net:Eio_context.eio_net ->
   unit ->
-  (Oas_worker_exec.run_result, Agent_sdk.Error.sdk_error) result
+  (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result
 (** [run_model_by_label] variant that bridges MASC tool schemas into OAS tools. *)
 
 module For_testing : sig

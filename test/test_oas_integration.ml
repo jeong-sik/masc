@@ -122,7 +122,7 @@ let test_oas_worker_failed_lifecycle_includes_error () =
   let bus = Event_bus.create () in
   Masc_event_bus.set bus;
   let sub = Event_bus.subscribe bus in
-  Oas_worker_exec.publish_lifecycle bus
+  Cascade_runner.publish_lifecycle bus
     ~name:"worker-a"
     ~event:"failed"
     ~detail:"session=session-1"

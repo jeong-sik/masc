@@ -565,7 +565,7 @@ let test_default_model_strings_unknown () =
 let test_default_model_strings_local_only () =
   let models = Oas_worker.default_model_strings ~cascade_name:"local_only" in
   let is_local label =
-    match Oas_model_resolve.provider_name_of_label label with
+    match Cascade_runtime.provider_name_of_label label with
     | Some pname -> Provider_adapter.is_local_provider pname
     | None -> false
   in
@@ -1126,7 +1126,7 @@ let test_sdk_error_to_cascade_outcome_cascades_resumable_cli_session () =
     "kimi exited with code 1: \nTo resume this session: kimi -r 5de0f199-6bd7-4509-bfa6-3308e0ebd97f"
   in
   let detail =
-    Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail_of_text
+    Cascade_runner.Kimi_cli_transport_local.resumable_session_detail_of_text
       raw_message
   in
   let sdk_error =
@@ -1278,7 +1278,7 @@ let test_default_config_preserves_custom_local_request_path () =
       ()
   in
   let config =
-    Oas_worker_exec.default_config
+    Cascade_runner.default_config
       ~name:"custom-local-path"
       ~provider_cfg
       ~system_prompt:"system"
@@ -1717,14 +1717,14 @@ let test_resume_model_id_falls_back_to_meta_model () =
 
 let test_oas_worker_exec_build_defaults_without_retry_policy () =
   let config =
-    Oas_worker_exec.default_config
+    Cascade_runner.default_config
       ~name:"oas-worker-default"
       ~provider_cfg:(make_local_provider_cfg ())
       ~system_prompt:"system"
       ~tools:[ make_noop_tool () ]
   in
   Eio.Switch.run @@ fun sw ->
-  match Oas_worker_exec.build ~sw ~net:(require_test_net ()) ~config with
+  match Cascade_runner.build ~sw ~net:(require_test_net ()) ~config with
   | Ok agent ->
       let policy = (Agent_sdk.Agent.options agent).tool_retry_policy in
       Alcotest.(check bool) "default leaves retry disabled" true
@@ -1734,7 +1734,7 @@ let test_oas_worker_exec_build_defaults_without_retry_policy () =
 
 let test_oas_worker_exec_build_applies_retry_policy () =
   let base_config =
-    Oas_worker_exec.default_config
+    Cascade_runner.default_config
       ~name:"oas-worker-retry"
       ~provider_cfg:(make_local_provider_cfg ())
       ~system_prompt:"system"
@@ -1745,7 +1745,7 @@ let test_oas_worker_exec_build_applies_retry_policy () =
       tool_retry_policy = Some Agent_sdk.Tool_retry_policy.default_internal }
   in
   Eio.Switch.run @@ fun sw ->
-  match Oas_worker_exec.build ~sw ~net:(require_test_net ()) ~config with
+  match Cascade_runner.build ~sw ~net:(require_test_net ()) ~config with
   | Ok agent ->
       let policy = (Agent_sdk.Agent.options agent).tool_retry_policy in
       check_policy_matches_default_internal "exec build opt-in" policy;
@@ -1754,7 +1754,7 @@ let test_oas_worker_exec_build_applies_retry_policy () =
 
 let test_oas_worker_exec_build_applies_stream_idle_timeout () =
   let base_config =
-    Oas_worker_exec.default_config
+    Cascade_runner.default_config
       ~name:"oas-worker-stream-idle"
       ~provider_cfg:(make_local_provider_cfg ())
       ~system_prompt:"system"
@@ -1762,7 +1762,7 @@ let test_oas_worker_exec_build_applies_stream_idle_timeout () =
   in
   let config = { base_config with stream_idle_timeout_s = Some 12.5 } in
   Eio.Switch.run @@ fun sw ->
-  match Oas_worker_exec.build ~sw ~net:(require_test_net ()) ~config with
+  match Cascade_runner.build ~sw ~net:(require_test_net ()) ~config with
   | Ok agent ->
       let timeout_s = (Agent_sdk.Agent.options agent).stream_idle_timeout_s in
       Alcotest.(check (option (float 0.0001)))
@@ -1787,14 +1787,14 @@ let test_apply_stream_idle_timeout_default_injects_keepalive_default () =
 
 let test_oas_worker_exec_build_default_priority_unset () =
   let config =
-    Oas_worker_exec.default_config
+    Cascade_runner.default_config
       ~name:"oas-worker-default-priority"
       ~provider_cfg:(make_local_provider_cfg ())
       ~system_prompt:"system"
       ~tools:[ make_noop_tool () ]
   in
   Eio.Switch.run @@ fun sw ->
-  match Oas_worker_exec.build ~sw ~net:(require_test_net ()) ~config with
+  match Cascade_runner.build ~sw ~net:(require_test_net ()) ~config with
   | Ok agent ->
       let priority = (Agent_sdk.Agent.state agent).config.priority in
       Alcotest.(check bool) "default priority remains unset" true
@@ -1804,7 +1804,7 @@ let test_oas_worker_exec_build_default_priority_unset () =
 
 let test_oas_worker_exec_build_applies_priority () =
   let base_config =
-    Oas_worker_exec.default_config
+    Cascade_runner.default_config
       ~name:"oas-worker-priority"
       ~provider_cfg:(make_local_provider_cfg ())
       ~system_prompt:"system"
@@ -1815,7 +1815,7 @@ let test_oas_worker_exec_build_applies_priority () =
       priority = Some Llm_provider.Request_priority.Proactive }
   in
   Eio.Switch.run @@ fun sw ->
-  match Oas_worker_exec.build ~sw ~net:(require_test_net ()) ~config with
+  match Cascade_runner.build ~sw ~net:(require_test_net ()) ~config with
   | Ok agent ->
       let priority = (Agent_sdk.Agent.state agent).config.priority in
       Alcotest.(check bool) "priority propagated to agent config" true
@@ -1833,14 +1833,14 @@ let test_oas_worker_exec_build_supports_kimi_direct () =
       ~base_url:"https://api.kimi.com/coding" ()
   in
   let config =
-    Oas_worker_exec.default_config
+    Cascade_runner.default_config
       ~name:"oas-worker-kimi-direct"
       ~provider_cfg
       ~system_prompt:"system"
       ~tools:[ make_noop_tool () ]
   in
   Eio.Switch.run @@ fun sw ->
-  match Oas_worker_exec.build ~sw ~net:(require_test_net ()) ~config with
+  match Cascade_runner.build ~sw ~net:(require_test_net ()) ~config with
   | Ok agent -> Agent_sdk.Agent.close agent
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
@@ -1852,7 +1852,7 @@ let test_oas_worker_exec_build_supports_kimi_cli () =
       ~base_url:"" ()
   in
   let config =
-    Oas_worker_exec.default_config
+    Cascade_runner.default_config
       ~name:"oas-worker-kimi-cli"
       ~provider_cfg
       ~system_prompt:"system"
@@ -1860,7 +1860,7 @@ let test_oas_worker_exec_build_supports_kimi_cli () =
   in
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  match Oas_worker_exec.build ~sw ~net:(require_test_net ()) ~config with
+  match Cascade_runner.build ~sw ~net:(require_test_net ()) ~config with
   | Ok agent -> Agent_sdk.Agent.close agent
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
@@ -1880,7 +1880,7 @@ let test_resume_propagates_approval () =
       Agent_sdk.Hooks.Approve
   in
   let base_config =
-    Oas_worker_exec.default_config
+    Cascade_runner.default_config
       ~name:"resume-approval"
       ~provider_cfg:(make_local_provider_cfg ())
       ~system_prompt:"system"
@@ -1890,7 +1890,7 @@ let test_resume_propagates_approval () =
   let checkpoint = make_checkpoint () in
   Eio.Switch.run @@ fun sw ->
   match
-    Oas_worker_exec.resume_from_checkpoint
+    Cascade_runner.resume_from_checkpoint
       ~sw ~net:(require_test_net ()) ~config ~checkpoint
   with
   | Ok agent ->
@@ -1908,7 +1908,7 @@ let test_resume_propagates_approval () =
 
 let test_resume_propagates_slot_id () =
   let base_config =
-    Oas_worker_exec.default_config
+    Cascade_runner.default_config
       ~name:"resume-slot-id"
       ~provider_cfg:(make_local_provider_cfg ())
       ~system_prompt:"system"
@@ -1918,7 +1918,7 @@ let test_resume_propagates_slot_id () =
   let checkpoint = make_checkpoint () in
   Eio.Switch.run @@ fun sw ->
   match
-    Oas_worker_exec.resume_from_checkpoint
+    Cascade_runner.resume_from_checkpoint
       ~sw ~net:(require_test_net ()) ~config ~checkpoint
   with
   | Ok agent ->
@@ -1934,7 +1934,7 @@ let test_resume_propagates_summarizer () =
     "summary"
   in
   let base_config =
-    Oas_worker_exec.default_config
+    Cascade_runner.default_config
       ~name:"resume-summarizer"
       ~provider_cfg:(make_local_provider_cfg ())
       ~system_prompt:"system"
@@ -1944,7 +1944,7 @@ let test_resume_propagates_summarizer () =
   let checkpoint = make_checkpoint () in
   Eio.Switch.run @@ fun sw ->
   match
-    Oas_worker_exec.resume_from_checkpoint
+    Cascade_runner.resume_from_checkpoint
       ~sw ~net:(require_test_net ()) ~config ~checkpoint
   with
   | Ok agent ->
@@ -1961,7 +1961,7 @@ let test_resume_propagates_summarizer () =
 
 let test_resume_propagates_stream_idle_timeout () =
   let base_config =
-    Oas_worker_exec.default_config
+    Cascade_runner.default_config
       ~name:"resume-stream-idle"
       ~provider_cfg:(make_local_provider_cfg ())
       ~system_prompt:"system"
@@ -1971,7 +1971,7 @@ let test_resume_propagates_stream_idle_timeout () =
   let checkpoint = make_checkpoint () in
   Eio.Switch.run @@ fun sw ->
   match
-    Oas_worker_exec.resume_from_checkpoint
+    Cascade_runner.resume_from_checkpoint
       ~sw ~net:(require_test_net ()) ~config ~checkpoint
   with
   | Ok agent ->
@@ -1984,7 +1984,7 @@ let test_resume_propagates_stream_idle_timeout () =
 
 let test_resume_propagates_priority () =
   let base_config =
-    Oas_worker_exec.default_config
+    Cascade_runner.default_config
       ~name:"resume-priority"
       ~provider_cfg:(make_local_provider_cfg ())
       ~system_prompt:"system"
@@ -1996,7 +1996,7 @@ let test_resume_propagates_priority () =
   let checkpoint = make_checkpoint () in
   Eio.Switch.run @@ fun sw ->
   match
-    Oas_worker_exec.resume_from_checkpoint
+    Cascade_runner.resume_from_checkpoint
       ~sw ~net:(require_test_net ()) ~config ~checkpoint
   with
   | Ok agent ->
@@ -2009,12 +2009,12 @@ let test_resume_propagates_priority () =
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 
 let test_resolve_provider_of_label_rejects_invalid_explicit_label () =
-  match Oas_worker_exec.resolve_provider_config_of_label "not-a-model-label" with
+  match Cascade_runner.resolve_provider_config_of_label "not-a-model-label" with
   | Ok _ ->
       Alcotest.fail
         "expected invalid explicit model label to be rejected without fallback"
   | Error err ->
-      let msg = Oas_worker_exec.label_resolution_error_to_string err in
+      let msg = Cascade_runner.label_resolution_error_to_string err in
       Alcotest.(check bool) "mentions invalid model label" true
         (contains_substring ~needle:"invalid model label" msg);
       Alcotest.(check bool) "mentions rejected label" true
@@ -2104,7 +2104,7 @@ let test_make_per_call_switch_transport_releases_cli_fd_resources () =
     ~minimum:32
     leaking_delta;
   let wrapped =
-    Oas_worker_exec.make_per_call_switch_transport leaking_test_transport_factory
+    Cascade_runner.make_per_call_switch_transport leaking_test_transport_factory
   in
   let before = Prometheus.approximate_open_fd_count () in
   for _ = 1 to 32 do
@@ -2158,7 +2158,7 @@ let test_classify_masc_internal_error_roundtrip () =
       (Oas_worker_named.Resumable_cli_session
          {
            cascade_name = internal_cascade_name "kimi_cli_keeper";
-           detail = Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail;
+           detail = Cascade_runner.Kimi_cli_transport_local.resumable_session_detail;
            exit_code = Some 75;
          })
   in
@@ -2167,7 +2167,7 @@ let test_classify_masc_internal_error_roundtrip () =
       Alcotest.(check string) "resumable cascade" "kimi_cli_keeper"
         (internal_cascade_name_to_string cascade_name);
       Alcotest.(check string) "resumable detail redacted"
-        Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail
+        Cascade_runner.Kimi_cli_transport_local.resumable_session_detail
         detail;
       Alcotest.(check bool) "resumable detail hides raw resume hint" false
         (contains_substring ~needle:"To resume this session:" detail);
@@ -2248,8 +2248,8 @@ let test_cascade_provider_labels_keep_glm_and_glm_coding_distinct () =
 let test_provider_effective_max_turns_clamps_claude_code () =
   Alcotest.(check int)
     "claude_code max_turns hard cap"
-    Oas_worker_exec.claude_code_max_turns_hard_cap
-    (Oas_worker_exec.provider_effective_max_turns
+    Cascade_runner.claude_code_max_turns_hard_cap
+    (Cascade_runner.provider_effective_max_turns
        Llm_provider.Provider_config.Claude_code
        39)
 
@@ -2257,7 +2257,7 @@ let test_provider_effective_max_turns_keeps_ollama_budget () =
   Alcotest.(check int)
     "ollama has no provider max_turns cap"
     39
-    (Oas_worker_exec.provider_effective_max_turns
+    (Cascade_runner.provider_effective_max_turns
        Llm_provider.Provider_config.Ollama
        39)
 
@@ -2336,7 +2336,7 @@ let test_resolve_tool_lane_for_codex_cli_public_tools_uses_runtime_mcp_policy ()
     [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_tasks" ]
   in
   match
-    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+    Cascade_runner.resolve_tool_lane_for_oas_tools
       ~provider_cfg:(make_codex_cli_provider_cfg ())
       ~tools ()
   with
@@ -2375,7 +2375,7 @@ let test_resolve_tool_lane_for_codex_cli_public_tools_with_agent_name_keeps_iden
     [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_tasks" ]
   in
   match
-    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+    Cascade_runner.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
       ~provider_cfg:(make_codex_cli_provider_cfg ())
       ~tools ()
@@ -2413,7 +2413,7 @@ let test_resolve_tool_lane_for_codex_cli_keeper_bound_public_tools_omits_bound_t
     [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_claim_next" ]
   in
   match
-    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+    Cascade_runner.resolve_tool_lane_for_oas_tools
       ~tool_requirement:`Optional
       ~agent_name:"keeper-sangsu-agent"
       ~provider_cfg:(make_codex_cli_provider_cfg ())
@@ -2457,7 +2457,7 @@ let test_resolve_tool_lane_for_codex_cli_keeper_bound_public_tools_with_per_keep
     [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_claim_next" ]
   in
   match
-    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+    Cascade_runner.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
       ~provider_cfg:(make_codex_cli_provider_cfg ())
       ~tools ()
@@ -2494,7 +2494,7 @@ let test_resolve_tool_lane_for_kimi_cli_public_tools_uses_runtime_mcp_policy () 
     [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_tasks" ]
   in
   match
-    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+    Cascade_runner.resolve_tool_lane_for_oas_tools
       ~provider_cfg:(make_kimi_cli_provider_cfg ())
       ~tools ()
   with
@@ -2520,7 +2520,7 @@ let test_resolve_tool_lane_for_kimi_cli_public_tools_with_agent_name_keeps_runti
     [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_tasks" ]
   in
   match
-    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+    Cascade_runner.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
       ~provider_cfg:(make_kimi_cli_provider_cfg ())
       ~tools ()
@@ -2549,7 +2549,7 @@ let test_resolve_tool_lane_for_claude_code_keeper_internal_tools_uses_runtime_mc
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   match
-    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+    Cascade_runner.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
       ~provider_cfg:(make_claude_code_provider_cfg ())
       ~tools ()
@@ -2583,7 +2583,7 @@ let test_resolve_tool_lane_for_kimi_cli_keeper_internal_tools_uses_runtime_mcp_p
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   match
-    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+    Cascade_runner.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
       ~provider_cfg:(make_kimi_cli_provider_cfg ())
       ~tools ()
@@ -2608,7 +2608,7 @@ let test_resolve_tool_lane_for_kimi_cli_mixed_tools_keeps_public_runtime_subset 
     ]
   in
   match
-    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+    Cascade_runner.resolve_tool_lane_for_oas_tools
       ~provider_cfg:(make_kimi_cli_provider_cfg ())
       ~tools ()
   with
@@ -2628,7 +2628,7 @@ let test_resolve_tool_lane_for_openai_public_tools_keeps_inline_tools () =
     [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_tasks" ]
   in
   match
-    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+    Cascade_runner.resolve_tool_lane_for_oas_tools
       ~provider_cfg:(make_openai_compat_provider_cfg ())
       ~tools ()
   with
@@ -2642,7 +2642,7 @@ let test_resolve_tool_lane_for_openai_public_tools_keeps_inline_tools () =
 let test_resolve_tool_lane_for_codex_cli_internal_tools_rejects () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   match
-    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+    Cascade_runner.resolve_tool_lane_for_oas_tools
       ~provider_cfg:(make_codex_cli_provider_cfg ())
       ~tools:[ make_named_noop_tool "keeper_board_get" ] ()
   with
@@ -2659,7 +2659,7 @@ let test_resolve_tool_lane_for_codex_cli_keeper_internal_tools_with_agent_reject
   with_env "MASC_MCP_TOKEN" "" @@ fun () ->
   with_temp_masc_base_path "codex-internal-no-token" @@ fun _base_path ->
   match
-    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+    Cascade_runner.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
       ~provider_cfg:(make_codex_cli_provider_cfg ())
       ~tools:[ make_named_noop_tool "keeper_bash" ] ()
@@ -2680,7 +2680,7 @@ let test_resolve_tool_lane_for_codex_cli_keeper_internal_tools_with_agent_and_pe
   let base_path = Sys.getenv "MASC_BASE_PATH" in
   seed_raw_token base_path "keeper-sangsu-agent" "keeper-bearer-abc";
   match
-    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+    Cascade_runner.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
       ~provider_cfg:(make_codex_cli_provider_cfg ())
       ~tools:[ make_named_noop_tool "keeper_bash" ] ()
@@ -2711,7 +2711,7 @@ let test_resolve_tool_lane_for_codex_cli_keeper_internal_tools_with_agent_and_pe
 let test_resolve_tool_lane_for_kimi_cli_internal_tools_rejects () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   match
-    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+    Cascade_runner.resolve_tool_lane_for_oas_tools
       ~provider_cfg:(make_kimi_cli_provider_cfg ())
       ~tools:[ make_named_noop_tool "keeper_board_get" ] ()
   with
@@ -2725,7 +2725,7 @@ let test_resolve_tool_lane_for_kimi_cli_internal_tools_rejects () =
 let test_resolve_tool_lane_for_codex_cli_internal_tools_optional_drops_tools () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   match
-    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+    Cascade_runner.resolve_tool_lane_for_oas_tools
       ~tool_requirement:`Optional
       ~provider_cfg:(make_codex_cli_provider_cfg ())
       ~tools:[ make_named_noop_tool "keeper_board_get" ] ()
@@ -2741,7 +2741,7 @@ let test_filter_candidate_providers_for_tool_support_normalizes_codex_headers ()
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   with_env "MASC_MCP_TOKEN" "shared-codex-token" @@ fun () ->
   let runtime_mcp_policy =
-    Oas_worker_exec.public_mcp_runtime_policy_of_tool_names
+    Cascade_runner.public_mcp_runtime_policy_of_tool_names
       ~agent_name:"keeper-sangsu-agent" [ "masc_status" ]
   in
   let filtered =
@@ -2764,7 +2764,7 @@ let test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_boun
   with_env "MASC_MCP_TOKEN" "" @@ fun () ->
   with_temp_masc_base_path "codex-filter-no-token" @@ fun _base_path ->
   let runtime_mcp_policy =
-    Oas_worker_exec.public_mcp_runtime_policy_of_tool_names
+    Cascade_runner.public_mcp_runtime_policy_of_tool_names
       ~agent_name:"keeper-sangsu-agent" [ "masc_status"; "masc_claim_next" ]
   in
   let codex_provider = make_codex_cli_provider_cfg () in
@@ -2835,7 +2835,7 @@ let test_filter_candidate_providers_for_tool_support_keeps_codex_with_per_keeper
   let base_path = Sys.getenv "MASC_BASE_PATH" in
   seed_raw_token base_path "keeper-sangsu-agent" "keeper-raw-token";
   let runtime_mcp_policy =
-    Oas_worker_exec.public_mcp_runtime_policy_of_tool_names
+    Cascade_runner.public_mcp_runtime_policy_of_tool_names
       ~agent_name:"keeper-sangsu-agent" [ "masc_status"; "masc_claim_next" ]
   in
   let filtered =
@@ -3067,7 +3067,7 @@ let test_classify_filter_rejection_codex_keeper_bound_actor () =
   with_env "MASC_MCP_TOKEN" "" @@ fun () ->
   with_temp_masc_base_path "codex-classify-no-token" @@ fun _base_path ->
   let runtime_mcp_policy =
-    Oas_worker_exec.public_mcp_runtime_policy_of_tool_names
+    Cascade_runner.public_mcp_runtime_policy_of_tool_names
       ~agent_name:"keeper-sangsu-agent" [ "masc_status"; "masc_claim_next" ]
   in
   (match runtime_mcp_policy with
@@ -3075,7 +3075,7 @@ let test_classify_filter_rejection_codex_keeper_bound_actor () =
        Alcotest.(check (list string)) "runtime policy keeps requested tools"
          [ "masc_status"; "masc_claim_next" ] policy.allowed_tool_names;
        Alcotest.(check bool) "masc_claim_next requires actor binding" true
-         (Oas_worker_exec.runtime_mcp_tool_requires_bound_actor "masc_claim_next")
+         (Cascade_runner.runtime_mcp_tool_requires_bound_actor "masc_claim_next")
    | None -> Alcotest.fail "expected public MCP runtime policy");
   let reason =
     Masc_mcp.Oas_worker_named.classify_filter_rejection
@@ -3123,7 +3123,7 @@ let test_classify_filter_rejection_passes_when_provider_supported () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   with_env "MASC_MCP_TOKEN" "shared-codex-token" @@ fun () ->
   let runtime_mcp_policy =
-    Oas_worker_exec.public_mcp_runtime_policy_of_tool_names
+    Cascade_runner.public_mcp_runtime_policy_of_tool_names
       ~agent_name:"keeper-sangsu-agent" [ "masc_status" ]
   in
   let reason =
@@ -3159,7 +3159,7 @@ let test_kimi_mcp_config_json_of_policy_filters_to_allowed_servers () =
       disable_builtin_tools = true;
     }
   in
-  match Oas_worker_exec.kimi_mcp_config_json_of_policy policy with
+  match Cascade_runner.kimi_mcp_config_json_of_policy policy with
   | None -> Alcotest.fail "expected kimi runtime MCP config JSON"
   | Some raw_json ->
       let open Yojson.Safe.Util in
@@ -3206,7 +3206,7 @@ let test_runtime_mcp_policy_with_masc_agent_name_upserts_header () =
     }
   in
   let updated =
-    Oas_worker_exec.runtime_mcp_policy_with_masc_agent_name
+    Cascade_runner.runtime_mcp_policy_with_masc_agent_name
       ~agent_name:"keeper-sangsu-agent" policy
   in
   let find_http_headers name =
@@ -3249,7 +3249,7 @@ let test_runtime_mcp_policy_with_masc_agent_name_prefers_internal_keeper_token (
         }
       in
       let updated =
-        Oas_worker_exec.runtime_mcp_policy_with_masc_agent_name
+        Cascade_runner.runtime_mcp_policy_with_masc_agent_name
           ~agent_name:"keeper-sangsu-agent" policy
       in
       match updated.servers with
@@ -3267,7 +3267,7 @@ let test_public_mcp_runtime_policy_binds_keeper_internal_headers () =
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
   with_env "MASC_MCP_TOKEN" "ambient-bearer-token" @@ fun () ->
   match
-    Oas_worker_exec.public_mcp_runtime_policy_of_tool_names
+    Cascade_runner.public_mcp_runtime_policy_of_tool_names
       ~agent_name:"keeper-sangsu-agent" [ "masc_status" ]
   with
   | Some policy -> (
@@ -3324,14 +3324,14 @@ let test_runtime_mcp_policy_for_provider_codex_cli_preserves_identity_header () 
   in
   let codex_headers =
     find_masc_headers
-      (Oas_worker_exec.runtime_mcp_policy_for_provider
+      (Cascade_runner.runtime_mcp_policy_for_provider
          ~provider_cfg:(make_codex_cli_provider_cfg ())
          ~agent_name:"keeper-sangsu-agent"
          (Some policy))
   in
   let openai_headers =
     find_masc_headers
-      (Oas_worker_exec.runtime_mcp_policy_for_provider
+      (Cascade_runner.runtime_mcp_policy_for_provider
          ~provider_cfg:(make_openai_compat_provider_cfg ())
          ~agent_name:"keeper-sangsu-agent"
          (Some policy))
@@ -3387,7 +3387,7 @@ let test_runtime_mcp_policy_for_provider_codex_cli_no_agent_strips_all () =
   in
   let result =
     find_masc_headers
-      (Oas_worker_exec.runtime_mcp_policy_for_provider
+      (Cascade_runner.runtime_mcp_policy_for_provider
          ~provider_cfg:(make_codex_cli_provider_cfg ())
          ~agent_name:""
          (Some policy))
@@ -3414,7 +3414,7 @@ let test_kimi_cli_runtime_mcp_jsons_include_request_policy () =
     }
   in
   let merged =
-    Oas_worker_exec.kimi_cli_runtime_mcp_jsons ~base:[] (Some policy)
+    Cascade_runner.kimi_cli_runtime_mcp_jsons ~base:[] (Some policy)
   in
   Alcotest.(check int) "request policy contributes one kimi mcp config" 1
     (List.length merged);
@@ -3439,11 +3439,11 @@ let test_kimi_cli_build_args_include_runtime_mcp_config () =
     }
   in
   let mcp_config_json =
-    Oas_worker_exec.kimi_cli_runtime_mcp_jsons ~base:[] (Some policy)
+    Cascade_runner.kimi_cli_runtime_mcp_jsons ~base:[] (Some policy)
   in
   let argv =
-    Oas_worker_exec.Kimi_cli_transport_local.build_args
-      ~config:Oas_worker_exec.Kimi_cli_transport_local.default_config
+    Cascade_runner.Kimi_cli_transport_local.build_args
+      ~config:Cascade_runner.Kimi_cli_transport_local.default_config
       ~req_config:(make_kimi_cli_provider_cfg ())
       ~mcp_config_json
       ~prompt:"hello"
@@ -3458,8 +3458,8 @@ let test_kimi_cli_build_args_include_runtime_mcp_config () =
 let test_kimi_cli_build_args_uses_stdin_for_large_prompt () =
   let long_prompt = String.make (20 * 1024) 'x' in
   let argv =
-    Oas_worker_exec.Kimi_cli_transport_local.build_args
-      ~config:Oas_worker_exec.Kimi_cli_transport_local.default_config
+    Cascade_runner.Kimi_cli_transport_local.build_args
+      ~config:Cascade_runner.Kimi_cli_transport_local.default_config
       ~req_config:(make_kimi_cli_provider_cfg ())
       ~mcp_config_json:[] ~prompt:long_prompt
   in
@@ -3471,8 +3471,8 @@ let test_kimi_cli_build_args_uses_stdin_for_large_prompt () =
 let test_kimi_cli_build_args_uses_stdin_for_non_ascii_prompt () =
   let prompt = "한글 prompt" in
   let argv =
-    Oas_worker_exec.Kimi_cli_transport_local.build_args
-      ~config:Oas_worker_exec.Kimi_cli_transport_local.default_config
+    Cascade_runner.Kimi_cli_transport_local.build_args
+      ~config:Cascade_runner.Kimi_cli_transport_local.default_config
       ~req_config:(make_kimi_cli_provider_cfg ())
       ~mcp_config_json:[] ~prompt
   in
@@ -3484,8 +3484,8 @@ let test_kimi_cli_build_args_uses_stdin_for_non_ascii_prompt () =
 let test_kimi_cli_build_args_sanitizes_broken_utf8_prompt () =
   let prompt = "prefix\x80suffix" in
   let argv =
-    Oas_worker_exec.Kimi_cli_transport_local.build_args
-      ~config:Oas_worker_exec.Kimi_cli_transport_local.default_config
+    Cascade_runner.Kimi_cli_transport_local.build_args
+      ~config:Cascade_runner.Kimi_cli_transport_local.default_config
       ~req_config:(make_kimi_cli_provider_cfg ())
       ~mcp_config_json:[] ~prompt
   in
@@ -3498,7 +3498,7 @@ let test_kimi_cli_model_for_provider_keeps_transport_default_on_auto () =
   let provider_cfg = make_kimi_cli_provider_cfg () in
   Alcotest.(check (option string)) "auto uses transport default"
     Llm_provider.Transport_kimi_cli.default_config.model
-    (Oas_worker_exec.kimi_cli_model_for_provider provider_cfg)
+    (Cascade_runner.kimi_cli_model_for_provider provider_cfg)
 
 let test_kimi_cli_model_for_provider_keeps_explicit_model () =
   let provider_cfg =
@@ -3509,7 +3509,7 @@ let test_kimi_cli_model_for_provider_keeps_explicit_model () =
   in
   Alcotest.(check (option string)) "explicit model preserved"
     (Some "kimi-k2.5")
-    (Oas_worker_exec.kimi_cli_model_for_provider provider_cfg)
+    (Cascade_runner.kimi_cli_model_for_provider provider_cfg)
 
 let test_kimi_cli_config_uses_oas_context_ssot () =
   let model_id = "kimi-for-coding" in
@@ -3520,7 +3520,7 @@ let test_kimi_cli_config_uses_oas_context_ssot () =
       ~base_url:""
       ~api_key:"test-key" ()
   in
-  match Oas_worker_exec.kimi_cli_config_json_for_provider provider_cfg with
+  match Cascade_runner.kimi_cli_config_json_for_provider provider_cfg with
   | None -> Alcotest.fail "expected kimi_cli config json"
   | Some raw ->
       let json = _parse_json raw in
@@ -3563,7 +3563,7 @@ let test_kimi_cli_rejects_invalid_tool_argument_json () =
   Unix.chmod fake_kimi_path 0o755;
   let config =
     {
-      Oas_worker_exec.Kimi_cli_transport_local.default_config with
+      Cascade_runner.Kimi_cli_transport_local.default_config with
       kimi_path = fake_kimi_path;
     }
   in
@@ -3585,7 +3585,7 @@ let test_kimi_cli_rejects_invalid_tool_argument_json () =
   in
   Eio.Switch.run @@ fun sw ->
   let transport =
-    Oas_worker_exec.Kimi_cli_transport_local.create ~sw
+    Cascade_runner.Kimi_cli_transport_local.create ~sw
       ~mgr:(require_test_proc_mgr ()) ~config
   in
   let { Llm_provider.Llm_transport.response; latency_ms = _ } =
@@ -3630,7 +3630,7 @@ let test_kimi_cli_treats_whitespace_tool_arguments_as_empty_json () =
     ("#!/bin/sh\ncat <<'JSON'\n" ^ whitespace_tool_line ^ "\nJSON\n");
   let config =
     {
-      Oas_worker_exec.Kimi_cli_transport_local.default_config with
+      Cascade_runner.Kimi_cli_transport_local.default_config with
       kimi_path = fake_kimi_path;
     }
   in
@@ -3652,7 +3652,7 @@ let test_kimi_cli_treats_whitespace_tool_arguments_as_empty_json () =
   in
   Eio.Switch.run @@ fun sw ->
   let transport =
-    Oas_worker_exec.Kimi_cli_transport_local.create ~sw
+    Cascade_runner.Kimi_cli_transport_local.create ~sw
       ~mgr:(require_test_proc_mgr ()) ~config
   in
   let { Llm_provider.Llm_transport.response; latency_ms = _ } =
@@ -3712,7 +3712,7 @@ let test_kimi_cli_stream_rejects_invalid_tool_argument_json () =
     ^ "\n");
   let config =
     {
-      Oas_worker_exec.Kimi_cli_transport_local.default_config with
+      Cascade_runner.Kimi_cli_transport_local.default_config with
       kimi_path = fake_kimi_path;
     }
   in
@@ -3734,7 +3734,7 @@ let test_kimi_cli_stream_rejects_invalid_tool_argument_json () =
   in
   Eio.Switch.run @@ fun sw ->
   let transport =
-    Oas_worker_exec.Kimi_cli_transport_local.create ~sw
+    Cascade_runner.Kimi_cli_transport_local.create ~sw
       ~mgr:(require_test_proc_mgr ()) ~config
   in
   let events = ref [] in
@@ -3769,7 +3769,7 @@ let test_kimi_cli_stream_rejects_invalid_tool_argument_json () =
 
 let test_kimi_cli_should_log_stderr_line_filters_resume_noise () =
   let should_log =
-    Oas_worker_exec.Kimi_cli_transport_local.should_log_stderr_line
+    Cascade_runner.Kimi_cli_transport_local.should_log_stderr_line
   in
   Alcotest.(check bool) "blank stderr line suppressed" false (should_log "");
   Alcotest.(check bool) "whitespace stderr line suppressed" false
@@ -3790,7 +3790,7 @@ let test_kimi_cli_error_completion_uses_measured_latency () =
     "#!/bin/sh\nsleep 0.05\nprintf '%s\\n' 'simulated failure' >&2\nexit 7\n";
   let config =
     {
-      Oas_worker_exec.Kimi_cli_transport_local.default_config with
+      Cascade_runner.Kimi_cli_transport_local.default_config with
       kimi_path = fake_kimi_path;
     }
   in
@@ -3812,7 +3812,7 @@ let test_kimi_cli_error_completion_uses_measured_latency () =
   in
   Eio.Switch.run @@ fun sw ->
   let transport =
-    Oas_worker_exec.Kimi_cli_transport_local.create ~sw
+    Cascade_runner.Kimi_cli_transport_local.create ~sw
       ~mgr:(require_test_proc_mgr ()) ~config
   in
   let { Llm_provider.Llm_transport.response; latency_ms } =
@@ -3831,11 +3831,11 @@ let test_kimi_cli_classify_cli_error_redacts_resumable_session_detail () =
     "kimi exited with code 75: \nTo resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc"
   in
   let canonical_detail =
-    Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail_of_text
+    Cascade_runner.Kimi_cli_transport_local.resumable_session_detail_of_text
       raw_message
   in
   match
-    Oas_worker_exec.Kimi_cli_transport_local.classify_cli_error
+    Cascade_runner.Kimi_cli_transport_local.classify_cli_error
       (Error
          (Llm_provider.Http_client.NetworkError
             {
@@ -3856,17 +3856,17 @@ let test_kimi_cli_classify_cli_error_treats_exit_1_resume_hint_as_resumable () =
     "kimi exited with code 1: \nTo resume this session: kimi -r 5de0f199-6bd7-4509-bfa6-3308e0ebd97f"
   in
   let canonical_detail =
-    Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail_of_text
+    Cascade_runner.Kimi_cli_transport_local.resumable_session_detail_of_text
       raw_message
   in
   Alcotest.(check bool) "exit 1 resume hint is resumable" true
-    (Oas_worker_exec.Kimi_cli_transport_local.text_looks_like_resumable_session
+    (Cascade_runner.Kimi_cli_transport_local.text_looks_like_resumable_session
        raw_message);
   Alcotest.(check (option int)) "exit code preserved" (Some 1)
-    (Oas_worker_exec.Kimi_cli_transport_local.resumable_session_exit_code_of_text
+    (Cascade_runner.Kimi_cli_transport_local.resumable_session_exit_code_of_text
        raw_message);
   match
-    Oas_worker_exec.Kimi_cli_transport_local.classify_cli_error
+    Cascade_runner.Kimi_cli_transport_local.classify_cli_error
       (Error
          (Llm_provider.Http_client.NetworkError
             {
@@ -3889,7 +3889,7 @@ let test_kimi_cli_resumable_invalid_request_reclassifies_as_structured () =
     "kimi exited with code 1: \nTo resume this session: kimi -r 5de0f199-6bd7-4509-bfa6-3308e0ebd97f"
   in
   let detail =
-    Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail_of_text
+    Cascade_runner.Kimi_cli_transport_local.resumable_session_detail_of_text
       raw_message
   in
   let sdk_error =
@@ -3916,10 +3916,10 @@ let test_kimi_cli_classify_cli_error_keeps_exit_1_with_error_as_reject () =
     "kimi exited with code 1: \nAuthentication failed\nTo resume this session: kimi -r ff37febe"
   in
   Alcotest.(check bool) "exit 1 with real stderr is not resumable" false
-    (Oas_worker_exec.Kimi_cli_transport_local.text_looks_like_resumable_session
+    (Cascade_runner.Kimi_cli_transport_local.text_looks_like_resumable_session
        raw_message);
   match
-    Oas_worker_exec.Kimi_cli_transport_local.classify_cli_error
+    Cascade_runner.Kimi_cli_transport_local.classify_cli_error
       (Error
          (Llm_provider.Http_client.NetworkError
             {
@@ -3942,7 +3942,7 @@ let test_kimi_cli_classify_cli_error_labels_process_title_unicode_crash () =
      UnicodeDecodeError: 'utf-8' codec can't decode byte 0xef"
   in
   match
-    Oas_worker_exec.Kimi_cli_transport_local.classify_cli_error
+    Cascade_runner.Kimi_cli_transport_local.classify_cli_error
       (Error
          (Llm_provider.Http_client.NetworkError
             {
@@ -3990,7 +3990,7 @@ let test_sdk_error_terminal_provider_runtime_detects_jsonrpc_sse_parse_storm () 
 let test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
   let provider_cfg = make_codex_cli_provider_cfg () in
   let config =
-    Oas_worker_exec.default_config
+    Cascade_runner.default_config
       ~name:"codex-preflight"
       ~provider_cfg
       ~system_prompt:"system"
@@ -4011,7 +4011,7 @@ let test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
 let test_codex_cli_prompt_preflight_scales_retry_limit_for_argv_only_overflow () =
   let provider_cfg = make_codex_cli_provider_cfg ~model_id:"gpt-4.1" () in
   let config =
-    Oas_worker_exec.default_config
+    Cascade_runner.default_config
       ~name:"codex-preflight"
       ~provider_cfg
       ~system_prompt:"system"
@@ -4342,7 +4342,7 @@ let test_oas_worker_exec_run_exit_condition_result_returns_partial_success () =
     in
     let noop_tool = make_noop_tool () in
     let base_config =
-      Oas_worker_exec.default_config
+      Cascade_runner.default_config
         ~name:"oas-worker-exit-condition"
         ~provider_cfg:
           (Llm_provider.Provider_config.make
@@ -4360,14 +4360,14 @@ let test_oas_worker_exec_run_exit_condition_result_returns_partial_success () =
         exit_condition_result =
           Some
             (fun turn ->
-              ( Oas_worker_exec.MutationBoundaryReached
+              ( Cascade_runner.MutationBoundaryReached
                   { turns_used = turn; tool_name = Some "keeper_shell" },
                 Some
                   "[mutation boundary reached after committed tool: keeper_shell]" ));
       }
     in
     match
-      Oas_worker_exec.run
+      Cascade_runner.run
         ~sw
         ~net:(require_test_net ())
         ~config
@@ -4378,7 +4378,7 @@ let test_oas_worker_exec_run_exit_condition_result_returns_partial_success () =
         Alcotest.(check bool) "checkpoint present" true
           (Option.is_some result.checkpoint);
         (match result.stop_reason with
-         | Oas_worker_exec.MutationBoundaryReached { turns_used; tool_name } ->
+         | Cascade_runner.MutationBoundaryReached { turns_used; tool_name } ->
              Alcotest.(check int) "boundary turn count" 1 turns_used;
              Alcotest.(check (option string)) "boundary tool"
                (Some "keeper_shell") tool_name
@@ -5208,7 +5208,7 @@ let make_assistant_tool_use_msg name : Agent_sdk.Types.message =
 let test_enrich_idle_detail_with_tool () =
   let detail = "Idle detected after 3 identical turns" in
   let messages = [ make_assistant_tool_use_msg "my_tool" ] in
-  let result = Oas_worker_exec.enrich_idle_detail detail messages in
+  let result = Cascade_runner.enrich_idle_detail detail messages in
   Alcotest.(check bool) "contains original prefix" true
     (String.starts_with ~prefix:detail result);
   Alcotest.(check bool) "appends tool name" true
@@ -5222,20 +5222,20 @@ let test_enrich_idle_detail_no_tool () =
         content = [ Agent_sdk.Types.Text "hello" ];
         name = None; tool_call_id = None; metadata = [] } ]
   in
-  let result = Oas_worker_exec.enrich_idle_detail detail messages in
+  let result = Cascade_runner.enrich_idle_detail detail messages in
   Alcotest.(check string) "unchanged when no tool" detail result
 
 (** Idle error with empty message list: detail should be unchanged. *)
 let test_enrich_idle_detail_empty_messages () =
   let detail = "Idle detected: no progress" in
-  let result = Oas_worker_exec.enrich_idle_detail detail [] in
+  let result = Cascade_runner.enrich_idle_detail detail [] in
   Alcotest.(check string) "unchanged with empty messages" detail result
 
 (** Non-idle error: detail must not be modified at all. *)
 let test_enrich_idle_detail_non_idle_error () =
   let detail = "Rate limit exceeded" in
   let messages = [ make_assistant_tool_use_msg "some_tool" ] in
-  let result = Oas_worker_exec.enrich_idle_detail detail messages in
+  let result = Cascade_runner.enrich_idle_detail detail messages in
   Alcotest.(check string) "non-idle error unchanged" detail result
 
 (** Last tool in message list wins when multiple assistant messages are present. *)
@@ -5246,7 +5246,7 @@ let test_enrich_idle_detail_picks_last_tool () =
     ; make_assistant_tool_use_msg "last_tool" ]
   in
   let expected = detail ^ " (tool: last_tool)" in
-  let result = Oas_worker_exec.enrich_idle_detail detail messages in
+  let result = Cascade_runner.enrich_idle_detail detail messages in
   Alcotest.(check string) "exact string with last tool" expected result
 
 (* ================================================================ *)

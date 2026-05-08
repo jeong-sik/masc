@@ -1,4 +1,4 @@
-(** Oas_worker_exec — Config, build, and run for OAS agent execution.
+(** Cascade_runner — Config, build, and run for OAS agent execution.
 
     Contains the [config] type, [build], [run], and [run_with_masc_tools]
     functions. All model-selection and cascade logic lives in

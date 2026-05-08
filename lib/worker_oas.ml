@@ -30,7 +30,7 @@ let oas_model_of_effective_model (model_id : string) : string =
 (* ================================================================ *)
 
 let proof_result_status_to_string =
-  Oas_worker_exec.proof_result_status_to_string
+  Cascade_runner.proof_result_status_to_string
 
 let worker_max_turns_cap = 20
 

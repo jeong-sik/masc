@@ -2,7 +2,7 @@
 
     Keeps provider label resolution, runtime MCP lane selection, and per-call
     CLI transport construction separate from the build/run orchestration in
-    {!Oas_worker_exec}. *)
+    {!Cascade_runner}. *)
 
 (** Per-call overrides forwarded to CLI transports.  Each field is consulted
     only by the matching provider kind; missing fields fall back to the
@@ -247,7 +247,7 @@ val non_http_transport_of_provider :
   (Llm_provider.Llm_transport.t option, Agent_sdk.Error.sdk_error) result
 
 (** kimi_cli print-mode transport.  Re-exported via [module type of] from
-    {!Oas_worker_exec.Kimi_cli_transport_local}. *)
+    {!Cascade_runner.Kimi_cli_transport_local}. *)
 module Kimi_cli_transport_local : sig
   type config = {
     kimi_path : string;

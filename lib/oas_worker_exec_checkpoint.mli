@@ -1,5 +1,5 @@
 (** Oas_worker_exec_checkpoint — lifecycle, checkpoint, and
-    idle-detail helpers extracted from {!Oas_worker_exec}.
+    idle-detail helpers extracted from {!Cascade_runner}.
 
     Keeps side-effecting run helpers separate from the main
     build / resume / run orchestration so the orchestration
@@ -8,7 +8,7 @@
     No internal helpers are hidden; the .mli pins each entry
     point's contract so a future refactor of the OAS Agent
     surface (Provider / Checkpoint / Types renames) fails here
-    instead of at every call site in {!Oas_worker_exec}. *)
+    instead of at every call site in {!Cascade_runner}. *)
 
 val publish_lifecycle :
   Agent_sdk.Event_bus.t ->

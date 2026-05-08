@@ -54,7 +54,7 @@ type stop_reason =
   | TurnBudgetExhausted of { turns_used : int; limit : int }
   | MutationBoundaryReached of { turns_used : int; tool_name : string option }
 
-type cli_transport_overrides = Oas_worker_exec.cli_transport_overrides = {
+type cli_transport_overrides = Cascade_runner.cli_transport_overrides = {
   cwd : string option;
   claude_mcp_config : string option;
   claude_allowed_tools : string list option;

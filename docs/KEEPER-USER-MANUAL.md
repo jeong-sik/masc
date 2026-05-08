@@ -934,7 +934,7 @@ dir-local 실행에서 shared keeper 상태가 보이지 않는 것은 정상이
 
 ### 8.4 모델 실행
 
-모델 선택은 resolved config root의 `cascade.json`이 유일한 권위다. Keeper 설정에 모델 필드를 직접 지정하지 않는다. `cascade_name` (기본 `"keeper_unified"`)이 cascade를 지정하고 `Oas_model_resolve`가 실행 모델을 결정한다.
+모델 선택은 resolved config root의 `cascade.json`이 유일한 권위다. Keeper 설정에 모델 필드를 직접 지정하지 않는다. `cascade_name` (기본 `"keeper_unified"`)이 cascade를 지정하고 `Cascade_runtime`가 실행 모델을 결정한다.
 
 ---
 

@@ -576,14 +576,14 @@ let config_for_label
     ?contract
     ?approval
     ~(description : string option)
-    () : (Oas_worker_exec.config, Agent_sdk.Error.sdk_error) result =
+    () : (Cascade_runner.config, Agent_sdk.Error.sdk_error) result =
   let* provider =
-    Oas_worker_exec.resolve_provider_config_of_label model_label
-    |> Result.map_error Oas_worker_exec.label_resolution_error_to_sdk_error
+    Cascade_runner.resolve_provider_config_of_label model_label
+    |> Result.map_error Cascade_runner.label_resolution_error_to_sdk_error
   in
   Ok
     {
-      (Oas_worker_exec.default_config ~name ~provider_cfg:provider
+      (Cascade_runner.default_config ~name ~provider_cfg:provider
          ~system_prompt ~tools)
       with
       max_turns;
@@ -628,7 +628,7 @@ let codex_cli_prompt_bytes_to_token_limit ~prompt_bytes ~prompt_tokens =
         (of_int prompt_bytes)
       |> to_int)
 
-let codex_cli_prompt_preflight ~(config : Oas_worker_exec.config) ~(goal : string)
+let codex_cli_prompt_preflight ~(config : Cascade_runner.config) ~(goal : string)
     : codex_cli_prompt_preflight option =
   match config.provider_cfg.kind with
   | Llm_provider.Provider_config.Codex_cli ->
@@ -721,7 +721,7 @@ let codex_cli_preflight_error ~(scope : string)
          limit = preflight.retry_limit_tokens;
        })
 
-let with_codex_cli_preflight ~(scope : string) ~(config : Oas_worker_exec.config)
+let with_codex_cli_preflight ~(scope : string) ~(config : Cascade_runner.config)
     ~(goal : string) (run : unit -> ('a, Agent_sdk.Error.sdk_error) result)
     : ('a, Agent_sdk.Error.sdk_error) result =
   match codex_cli_prompt_preflight ~config ~goal with

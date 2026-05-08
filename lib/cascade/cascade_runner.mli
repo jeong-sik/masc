@@ -1,10 +1,10 @@
-(** Oas_worker_exec — config, build, and run entry points
+(** Cascade_runner — config, build, and run entry points
     for OAS agent execution.
 
     Thin facade over {!Oas_worker_exec_agent},
     {!Cascade_transport}, and
     {!Oas_worker_exec_checkpoint}.  External callers reach
-    the entry points via [Oas_worker_exec.X]; the heavy
+    the entry points via [Cascade_runner.X]; the heavy
     transport machinery (CLI / MCP wire formats, runtime
     policy projections) is implemented in
     {!Cascade_transport} and re-exposed here for

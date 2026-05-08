@@ -43,10 +43,10 @@ let string_contains_substring_ci ~(needle : string) (haystack : string) : bool =
 
 let cdal_mode_violations_ref_suffix = "evidence/mode_violations.json"
 
-let cdal_raw_evidence_ref_count (proof : Agent_sdk.Cdal_proof.t) : int =
+let cdal_raw_evidence_ref_count (proof : Masc_mcp_cdal_runtime.Cdal_proof.t) : int =
   List.length proof.raw_evidence_refs
 
-let cdal_violation_ref_count (proof : Agent_sdk.Cdal_proof.t) : int =
+let cdal_violation_ref_count (proof : Masc_mcp_cdal_runtime.Cdal_proof.t) : int =
   proof.raw_evidence_refs
   |> List.filter (String.ends_with ~suffix:cdal_mode_violations_ref_suffix)
   |> List.length
@@ -847,9 +847,9 @@ let append_decision_record
           | Some { proof = Some p; _ } ->
               `Assoc
                 [
-                  ("run_id", `String p.Agent_sdk.Cdal_proof.run_id);
+                  ("run_id", `String p.Masc_mcp_cdal_runtime.Cdal_proof.run_id);
                   ( "result_status",
-                    Agent_sdk.Cdal_proof.result_status_to_yojson p.result_status );
+                    Masc_mcp_cdal_runtime.Cdal_proof.result_status_to_yojson p.result_status );
                   ("tool_trace_count", `Int (List.length p.tool_trace_refs));
                 ]
           | _ -> `Null );
@@ -1496,11 +1496,11 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
          match result.proof with
          | Some p ->
            `Assoc [
-             ("run_id", `String p.Agent_sdk.Cdal_proof.run_id);
+             ("run_id", `String p.Masc_mcp_cdal_runtime.Cdal_proof.run_id);
              ("effective_mode",
-              Agent_sdk.Execution_mode.to_yojson p.effective_execution_mode);
+              Masc_mcp_cdal_runtime.Execution_mode.to_yojson p.effective_execution_mode);
              ("result_status",
-              Agent_sdk.Cdal_proof.result_status_to_yojson p.result_status);
+              Masc_mcp_cdal_runtime.Cdal_proof.result_status_to_yojson p.result_status);
              ("violation_count",
               `Int (cdal_violation_ref_count p));
              ("raw_evidence_ref_count",

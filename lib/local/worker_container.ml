@@ -502,7 +502,7 @@ let materialize_direct_evidence ~base_path ~worker_name
       in
       let options =
         {
-          Agent_sdk.Direct_evidence.session_root =
+          Masc_mcp_cdal_runtime.Direct_evidence.session_root =
             Some (oas_trace_session_root ~base_path);
           session_id;
           goal = prompt;
@@ -519,7 +519,7 @@ let materialize_direct_evidence ~base_path ~worker_name
           workdir = Some workspace_path;
         }
       in
-      match Agent_sdk.Direct_evidence.persist ~agent ~raw_trace ~options () with
+      match Masc_mcp_cdal_runtime.Direct_evidence.persist ~agent ~raw_trace ~options () with
       | Ok _ -> ()
       | Error err ->
           Log.LocalWorker.error

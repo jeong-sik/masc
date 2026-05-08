@@ -16,7 +16,7 @@ type run_result = {
   session_id : string;
   raw_trace_run : Agent_sdk.Raw_trace.run_ref option;
   api_response : Agent_sdk.Types.api_response option;
-  proof : Agent_sdk.Cdal_proof.t option;
+  proof : Masc_mcp_cdal_runtime.Cdal_proof.t option;
 }
 
 type worker_container_state =

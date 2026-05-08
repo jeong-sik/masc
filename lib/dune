@@ -238,6 +238,7 @@
    agent_sdk
    agent_sdk.base
    agent_sdk.llm_provider
+   masc_mcp.cdal_runtime
    masc_mcp.oas_compat
 
    uri

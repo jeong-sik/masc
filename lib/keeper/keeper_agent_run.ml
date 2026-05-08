@@ -964,7 +964,7 @@ let run_turn
            (match result.proof with
             | Some p ->
               Keeper_turn_telemetry.log_keeper_proof ~keeper_name:meta.name p;
-              let store = Agent_sdk.Proof_store.default_config in
+              let store = Masc_mcp_cdal_runtime.Proof_store.default_config in
               let outcome = Cdal_eval_v1.evaluate ~store p in
               let verdict = Cdal_eval_v1.verdict_of_outcome outcome in
 	              let task_subject =

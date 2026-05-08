@@ -59,7 +59,7 @@ type config =
   tool_retry_policy : Agent_sdk.Tool_retry_policy.t option;
   required_tool_satisfaction :
     Agent_sdk.Completion_contract.required_tool_satisfaction;
-  contract : Agent_sdk.Risk_contract.t option;
+  contract : Masc_mcp_cdal_runtime.Risk_contract.t option;
   enable_thinking : bool option;
   transport : Masc_grpc_transport.t;
   allowed_paths : string list;
@@ -90,7 +90,7 @@ type run_result = {
   turns : int;
   trace_ref : Agent_sdk.Raw_trace.run_ref option;
   run_validation : Agent_sdk.Raw_trace.run_validation option;
-  proof : Agent_sdk.Cdal_proof.t option;
+  proof : Masc_mcp_cdal_runtime.Cdal_proof.t option;
   cascade_observation : Oas_worker_cascade.cascade_observation option;
   stop_reason : stop_reason;
 }
@@ -105,7 +105,7 @@ let lowercase_enum_case_name raw =
   String.lowercase_ascii raw
 
 let proof_result_status_to_string status =
-  Agent_sdk.Cdal_proof.show_result_status status |> lowercase_enum_case_name
+  Masc_mcp_cdal_runtime.Cdal_proof.show_result_status status |> lowercase_enum_case_name
 
 (* ================================================================ *)
 (* Internal: resolve provider                                        *)
@@ -370,8 +370,8 @@ let run
     ?(on_yield : (unit -> unit) option)
     ?(on_resume : (unit -> unit) option)
     ?(agent_ref : Agent_sdk.Agent.t option ref option)
-    ?(proof_ref : Agent_sdk.Cdal_proof.t option ref option)
-    ?(contract : Agent_sdk.Risk_contract.t option)
+    ?(proof_ref : Masc_mcp_cdal_runtime.Cdal_proof.t option ref option)
+    ?(contract : Masc_mcp_cdal_runtime.Risk_contract.t option)
     (goal : string)
   : (run_result, Agent_sdk.Error.sdk_error) result =
   let session_id = match config.session_id with
@@ -420,7 +420,7 @@ let run
   (try
     let result, proof = match effective_contract with
       | Some c ->
-        let cr = Agent_sdk.Contract_runner.run ~sw ~contract:c agent goal in
+        let cr = Masc_mcp_cdal_runtime.Contract_runner.run ~sw ~contract:c agent goal in
         (cr.response, Some cr.proof)
       | None ->
         (* Pass the process-level Eio clock when available so agent_sdk's

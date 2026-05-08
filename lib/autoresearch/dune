@@ -21,4 +21,5 @@
    masc_process
    masc_mcp.masc_exec
    agent_sdk
+   masc_mcp.cdal_runtime
    eio))

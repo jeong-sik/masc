@@ -206,7 +206,10 @@ let run_gh_argv ~(config : Coord.config) ~(meta : keeper_meta) ~env ~cwd
     && Env_config_keeper.KeeperSandbox.hard_mode ()
   then
     let status, output =
-      Process_eio.run_argv_with_status ~env ~cwd ~timeout_sec argv
+      Masc_exec.Exec_gate.run_argv_with_status ~actor:"Coord_git"
+        ~raw_source:(quote_argv argv)
+        ~summary:"keeper tool gh brokered"
+        ~env ~cwd ~timeout_sec argv
     in
     { status; output; via = "brokered" }
   else if meta.sandbox_profile = Docker then
@@ -224,7 +227,10 @@ let run_gh_argv ~(config : Coord.config) ~(meta : keeper_meta) ~env ~cwd
         { status = Unix.WEXITED 1; output = msg; via = "docker" }
   else
     let status, output =
-      Process_eio.run_argv_with_status ~env ~cwd ~timeout_sec argv
+      Masc_exec.Exec_gate.run_argv_with_status ~actor:"Coord_git"
+        ~raw_source:(quote_argv argv)
+        ~summary:"keeper tool gh host"
+        ~env ~cwd ~timeout_sec argv
     in
     { status; output; via = "host" }
 

@@ -1,6 +1,7 @@
 type candidate_probe_status =
   | Probe_ok
   | Probe_skipped of string
+  | Probe_not_applicable of string
   | Probe_error of string
 
 let probe_timeout_sec = 5.0
@@ -199,11 +200,21 @@ let candidate_probe_skipped (candidate : candidate_runtime) reason =
     status = Probe_skipped reason;
   }
 
+let candidate_probe_not_applicable (candidate : candidate_runtime) reason =
+  {
+    model_string = candidate.model_string;
+    provider_kind = provider_kind_string candidate.provider_cfg;
+    model_id = candidate.provider_cfg.model_id;
+    base_url = candidate.provider_cfg.base_url;
+    status = Probe_not_applicable reason;
+  }
+
 let local_probe_unavailable_reason =
   "local provider health probe requires Eio runtime capabilities"
 
-let cloud_skip_reason =
-  "cloud provider health is advisory; bootstrap probes local endpoints only"
+let cloud_probe_not_applicable_reason =
+  "cloud provider live health is not an auth-free bootstrap probe; \
+   credential/config validation is handled before execution"
 
 let profile_probes (profile_candidates : candidate_runtime list) =
   List.map
@@ -211,7 +222,8 @@ let profile_probes (profile_candidates : candidate_runtime list) =
       if Llm_provider.Provider_config.is_local candidate.provider_cfg then
         candidate_probe_error candidate local_probe_unavailable_reason
       else
-        candidate_probe_skipped candidate cloud_skip_reason)
+        candidate_probe_not_applicable candidate
+          cloud_probe_not_applicable_reason)
     profile_candidates
 
 let normalize_endpoint_url url =
@@ -236,7 +248,8 @@ let profile_probes_from_statuses statuses profile_candidates =
   List.map
     (fun (candidate : candidate_runtime) ->
       if not (Llm_provider.Provider_config.is_local candidate.provider_cfg) then
-        candidate_probe_skipped candidate cloud_skip_reason
+        candidate_probe_not_applicable candidate
+          cloud_probe_not_applicable_reason
       else
         match endpoint_status_for_candidate statuses candidate with
         | Some status when status.healthy -> candidate_probe_ok candidate
@@ -282,6 +295,7 @@ let attach_probe_results ?sw ?net (profiles : profile_snapshot list) =
 
 let probe_health_value = function
   | Probe_skipped _ -> 0.0
+  | Probe_not_applicable _ -> 0.0
   | Probe_ok -> 1.0
   | Probe_error _ -> 3.0
 
@@ -300,7 +314,7 @@ let record_probe_metrics (profiles : profile_snapshot list) =
                      ("profile_name", profile.name);
                    ]
                  ()
-           | Probe_ok | Probe_error _ -> ());
+           | Probe_not_applicable _ | Probe_ok | Probe_error _ -> ());
           Prometheus.set_gauge
             Prometheus.metric_provider_actual_health_status
             ~labels:
@@ -324,12 +338,13 @@ let candidate_probe_to_yojson (probe : candidate_probe) =
         match probe.status with
         | Probe_ok -> `String "ok"
         | Probe_skipped _ -> `String "skipped"
-        | Probe_error message ->
-            `String "error" );
+        | Probe_not_applicable _ -> `String "not_applicable"
+        | Probe_error _ -> `String "error" );
       ( "error",
         match probe.status with
         | Probe_ok -> `Null
         | Probe_skipped message -> `String message
+        | Probe_not_applicable message -> `String message
         | Probe_error message -> `String message );
     ]
 

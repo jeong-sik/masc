@@ -76,20 +76,20 @@ let now_unix () = Time_compat.now ()
 
 let record_started_metrics ~keeper outcome =
   Prometheus.inc_counter
-    Prometheus.metric_keeper_turn_starts
+    Keeper_metrics.metric_keeper_turn_starts
     ~labels:[ ("keeper", keeper) ] ();
   Prometheus.inc_counter
-    Prometheus.metric_keeper_turn_scheduled
+    Keeper_metrics.metric_keeper_turn_scheduled
     ~labels:[ ("keeper_name", keeper) ] ();
   (match outcome with
    | Fresh -> ()
    | Reattempt _ ->
      Prometheus.inc_counter
-       Prometheus.metric_keeper_turn_reattempts
+       Keeper_metrics.metric_keeper_turn_reattempts
        ~labels:[ ("keeper", keeper) ] ()
    | Regression _ ->
      Prometheus.inc_counter
-       Prometheus.metric_keeper_turn_regressions
+       Keeper_metrics.metric_keeper_turn_regressions
        ~labels:[ ("keeper", keeper) ] ());
   outcome
 
@@ -173,7 +173,7 @@ let guard_and_record_turn_start ?(now = now_unix) ~(keeper : string)
    | Started started -> ignore (record_started_metrics ~keeper started)
    | Blocked reason ->
      Prometheus.inc_counter
-       Prometheus.metric_keeper_turn_livelock_blocks
+       Keeper_metrics.metric_keeper_turn_livelock_blocks
        ~labels:[ ("keeper", keeper); ("reason", gate_reason_kind reason) ] ());
   outcome
 

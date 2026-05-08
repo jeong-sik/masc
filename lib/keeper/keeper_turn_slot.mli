@@ -137,7 +137,7 @@ val fairness_delay_sec_at : now:float -> keeper_name:string -> float
     [reactive_turn_semaphore]).
 
     Side effects: [Eio.Semaphore.release] on each held semaphore plus
-    [Prometheus.metric_keeper_slot_force_released]. A late-returning
+    [Keeper_metrics.metric_keeper_slot_force_released]. A late-returning
     fiber may double-release; Eio counting semaphores tolerate this
     bounded over-release.
 

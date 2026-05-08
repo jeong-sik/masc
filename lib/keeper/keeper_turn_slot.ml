@@ -363,7 +363,7 @@ let autonomous_queue_depth_labels = [ ("channel", "autonomous_queue") ]
 
 let record_autonomous_queue_depth depth =
   Prometheus.set_gauge
-    Prometheus.metric_keeper_turn_queue_depth
+    Keeper_metrics.metric_keeper_turn_queue_depth
     ~labels:autonomous_queue_depth_labels
     (float_of_int depth)
 
@@ -527,7 +527,7 @@ let run_after_acquire_flag_hook_for_test ~label ~keeper_name =
 
 let observe_bookkeeping_failure ~op ~kind =
   Prometheus.inc_counter
-    Prometheus.metric_keeper_turn_slot_bookkeeping_failures
+    Keeper_metrics.metric_keeper_turn_slot_bookkeeping_failures
     ~labels:[ ("op", op); ("kind", kind) ]
     ()
 
@@ -700,7 +700,7 @@ let force_release_holder_for ~keeper_name : (string * float) list =
         Eio.Semaphore.release sem;
         released_with_age := (label, age) :: !released_with_age;
         Prometheus.inc_counter
-          Prometheus.metric_keeper_slot_force_released
+          Keeper_metrics.metric_keeper_slot_force_released
           ~labels:[("keeper", keeper_name); ("label", label)]
           ();
         Log.Keeper.error
@@ -882,7 +882,7 @@ let rec wait_for_autonomous_queue_head ~(keeper_name : string) ~(ticket : int)
          operators can detect chronic slot starvation without
          scraping the WARN log. *)
       Prometheus.inc_counter
-        Prometheus.metric_keeper_semaphore_wait_timeout
+        Keeper_metrics.metric_keeper_semaphore_wait_timeout
         ~labels:[ ("keeper", keeper_name);
                   ("channel", "autonomous_queue_head") ]
         ();
@@ -914,12 +914,12 @@ let observe_semaphore_wait_seconds ~keeper_name ~cascade_profile ~channel second
       ("channel", channel) ]
   in
   Prometheus.observe_histogram
-    Prometheus.metric_keeper_semaphore_wait_seconds
+    Keeper_metrics.metric_keeper_semaphore_wait_seconds
     ~labels
     seconds;
   let inc_bucket le =
     Prometheus.inc_counter
-      Prometheus.metric_keeper_semaphore_wait_seconds_bucket
+      Keeper_metrics.metric_keeper_semaphore_wait_seconds_bucket
       ~labels:(labels @ [ ("le", le) ])
       ()
   in
@@ -987,7 +987,7 @@ let with_keeper_turn_slot_control ?(cascade_profile = "unknown") ~keeper_name
            operators can attribute slot starvation to autonomous
            vs turn semaphore pressure. *)
         Prometheus.inc_counter
-          Prometheus.metric_keeper_semaphore_wait_timeout
+          Keeper_metrics.metric_keeper_semaphore_wait_timeout
           ~labels:[ ("keeper", keeper_name);
                     ("channel", label) ]
           ();
@@ -1017,7 +1017,7 @@ let with_keeper_turn_slot_control ?(cascade_profile = "unknown") ~keeper_name
           "semaphore_wait: no Eio clock available and %s semaphore has no permits; failing closed instead of waiting unboundedly"
           label;
         Prometheus.inc_counter
-          Prometheus.metric_keeper_semaphore_wait_timeout
+          Keeper_metrics.metric_keeper_semaphore_wait_timeout
           ~labels:[ ("keeper", keeper_name);
                     ("channel", label) ]
           ();
@@ -1035,7 +1035,7 @@ let with_keeper_turn_slot_control ?(cascade_profile = "unknown") ~keeper_name
       (Eio.Semaphore.get_value autonomous_turn_semaphore)
       (Eio.Semaphore.get_value turn_semaphore)
       queue_depth;
-    Prometheus.set_gauge Prometheus.metric_keeper_turn_queue_depth
+    Prometheus.set_gauge Keeper_metrics.metric_keeper_turn_queue_depth
       ~labels:[("keeper", keeper_name); ("channel", channel_label)]
       (float_of_int queue_depth)
   in

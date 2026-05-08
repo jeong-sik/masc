@@ -774,14 +774,36 @@ let validate_turn_phase_transition ~from ~to_ =
     (fun () ->
        assert (
          match (from, to_) with
-         | (Turn_idle, Turn_prompting) -> true
-         | (Turn_prompting, Turn_executing) -> true
-         | (Turn_prompting, Turn_finalizing) -> true
-         | (Turn_executing, Turn_compacting) -> true
-         | (Turn_executing, Turn_finalizing) -> true
-         | (Turn_compacting, Turn_prompting) -> true
-         | (old, new_) when old = new_ -> true
-         | _ -> false
+         (* from Turn_idle *)
+         | (Turn_idle, Turn_idle) -> true
+         | (Turn_idle, Turn_prompting) -> true  (* via turn init / prepare_turn_retry_after_compaction (bypassed) *)
+         | (Turn_idle, Turn_executing) -> false
+         | (Turn_idle, Turn_compacting) -> false
+         | (Turn_idle, Turn_finalizing) -> false
+         (* from Turn_prompting *)
+         | (Turn_prompting, Turn_idle) -> false  (* new turn init is reset, not transition *)
+         | (Turn_prompting, Turn_prompting) -> true
+         | (Turn_prompting, Turn_executing) -> true  (* via set_turn_phase *)
+         | (Turn_prompting, Turn_compacting) -> false
+         | (Turn_prompting, Turn_finalizing) -> true  (* via set_turn_phase / bypassed: mark_turn_gate_rejected_by_name *)
+         (* from Turn_executing *)
+         | (Turn_executing, Turn_idle) -> false  (* new turn init is reset, not transition *)
+         | (Turn_executing, Turn_prompting) -> false
+         | (Turn_executing, Turn_executing) -> true
+         | (Turn_executing, Turn_compacting) -> true  (* via set_turn_phase: retry plan *)
+         | (Turn_executing, Turn_finalizing) -> true  (* via set_turn_phase / bypassed: mark_turn_gate_rejected_by_name *)
+         (* from Turn_compacting *)
+         | (Turn_compacting, Turn_idle) -> false  (* new turn init is reset, not transition *)
+         | (Turn_compacting, Turn_prompting) -> false  (* was via set_turn_phase; now bypassed: prepare_turn_retry_after_compaction *)
+         | (Turn_compacting, Turn_executing) -> false
+         | (Turn_compacting, Turn_compacting) -> true
+         | (Turn_compacting, Turn_finalizing) -> true  (* via set_turn_phase: compaction failure *)
+         (* from Turn_finalizing *)
+         | (Turn_finalizing, Turn_idle) -> false  (* terminal; new turn is reset *)
+         | (Turn_finalizing, Turn_prompting) -> false  (* terminal; new turn is reset *)
+         | (Turn_finalizing, Turn_executing) -> false  (* terminal *)
+         | (Turn_finalizing, Turn_compacting) -> false  (* terminal *)
+         | (Turn_finalizing, Turn_finalizing) -> true
        ))
 
 let set_turn_decision_stage ~base_path name decision_stage =

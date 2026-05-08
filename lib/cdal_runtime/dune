@@ -1,0 +1,30 @@
+; RFC-OAS-011 MM-1 — Skeleton dune sublibrary for OAS CDAL runtime migration.
+;
+; This sublibrary will host the agent-runtime side of CDAL (Cdal_proof,
+; Mode_enforcer, Risk_contract, Execution_mode, Proof_capture, Audit, ...)
+; once MM-2 leaf-first migration begins. It is intentionally separated from
+; masc-mcp's existing CDAL Phase 1A evaluators (lib/cdal_*.ml + lib/cdal/)
+; because the two layers have different responsibilities:
+;
+;   masc_mcp (本体, lib/cdal_*.ml + lib/cdal/) — CDAL Phase 1A evaluator:
+;     consumer-side judge, verdict_gate, labeling, adversarial_eval.
+;
+;   masc_mcp.cdal_runtime (this) — CDAL runtime/producer:
+;     proof capture middleware, mode enforcement, risk contract typing.
+;
+; Dependencies are intentionally minimal: only OAS's *core* (agent_sdk.base
+; for Tool/Hooks/Types) plus Yojson for serialization. NO dependency on the
+; masc_mcp main library — the producer side must remain reusable independently.
+;
+; @rfc RFC-OAS-011 (CDAL Migration to masc-mcp)
+; @phase MM-1 — empty skeleton; modules arrive in MM-2 leaf-first batches
+
+(library
+ (name masc_mcp_cdal_runtime)
+ (public_name masc_mcp.cdal_runtime)
+ (libraries
+  agent_sdk.base
+  yojson
+  ppx_deriving_yojson.runtime)
+ (preprocess
+  (pps ppx_deriving_yojson ppx_deriving.show ppx_inline_test ppx_let)))

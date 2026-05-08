@@ -36,6 +36,14 @@ jobs:
       - name: Run lint
         run: bash scripts/lint/no-fabricated-telemetry.sh
 
+  no-oas-prefix-in-lib:
+    name: No oas_* prefix in masc-mcp lib/ (RFC-0047)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run lint
+        run: bash scripts/lint/no-oas-prefix-in-lib.sh
+
   godfile-size-regression:
     name: Godfile size
     runs-on: ubuntu-latest

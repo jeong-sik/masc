@@ -1488,10 +1488,17 @@ let keeper_bdi_snapshot_json (config : Coord.config) (name : string)
       let belief =
         match metric_field "belief_summary" with
         | Some value -> Some value
-        | None -> (
-            match nonempty_string_opt m.runtime.last_blocker with
-            | Some blocker -> Some ("blocked: " ^ blocker)
-            | None -> None)
+        | None ->
+            (match m.runtime.last_blocker with
+             | Some info ->
+                 let trimmed = String.trim info.detail in
+                 let label =
+                   if trimmed = "" then
+                     Keeper_types.blocker_class_to_string info.klass
+                   else trimmed
+                 in
+                 Some ("blocked: " ^ label)
+             | None -> None)
       in
       let desire =
         match metric_field "active_desire" with

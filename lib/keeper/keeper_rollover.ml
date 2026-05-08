@@ -198,7 +198,10 @@ let maybe_rollover_oas_handoff
           ~ratio
           ~handoff_threshold:base_meta.handoff_threshold
           ~last_outcome:base_meta.runtime.proactive_rt.last_outcome
-          ~last_blocker:base_meta.runtime.last_blocker
+          ~last_blocker:
+            (match base_meta.runtime.last_blocker with
+             | Some info -> info.detail
+             | None -> "")
           ~current_turn_overflow_blocker
           ()
       in

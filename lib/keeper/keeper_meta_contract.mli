@@ -185,6 +185,35 @@ val blocker_class_of_serialized_string :
     {!Keeper_meta_json_parse} to decode persisted blocker
     state. *)
 
+(** {1 Unified blocker_info} *)
+
+type blocker_info = {
+  klass : blocker_class;
+  detail : string;
+}
+(** Authoritative blocker representation: a typed [blocker_class]
+    paired with optional free-form [detail] (UI / Prometheus label).
+    Replaces the deprecated [last_blocker: string] +
+    [last_blocker_class: blocker_class option] pair so substring
+    classification (the [blocker_class_of_string] workaround) is
+    no longer load-bearing.  When there is no blocker, the runtime
+    state holds [None]; when there is a blocker, [klass] is always
+    populated and [detail] may be ["" ]. *)
+
+val blocker_info_of_class : ?detail:string -> blocker_class -> blocker_info
+(** [blocker_info_of_class ?detail klass] constructs a [blocker_info]
+    for [klass].  [detail] defaults to [""]. *)
+
+val blocker_info_to_json : blocker_info -> Yojson.Safe.t
+(** Round-trippable JSON encoding.  [Cascade_exhausted reason] uses
+    a structured object so the inner [cascade_exhaustion_reason] is
+    preserved across read/write cycles. *)
+
+val blocker_info_of_json : Yojson.Safe.t -> blocker_info option
+(** Parses the JSON shape emitted by {!blocker_info_to_json}.
+    Returns [None] for [`Null] or any value whose [klass] field is
+    absent / not recognisable. *)
+
 (** {1 Agent runtime state record} *)
 
 type agent_runtime_state = {
@@ -209,8 +238,7 @@ type agent_runtime_state = {
   last_social_transition_reason : string;
   last_active_desire : string;
   last_current_intention : string;
-  last_blocker : string;
-  last_blocker_class : blocker_class option;
+  last_blocker : blocker_info option;
   last_need : string;
 }
 

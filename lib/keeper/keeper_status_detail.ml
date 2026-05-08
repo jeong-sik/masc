@@ -1160,9 +1160,9 @@ let handle_keeper_status ctx args : tool_result =
                then `Null
                else `String m.runtime.last_social_transition_reason);
              ("last_blocker",
-               if String.trim m.runtime.last_blocker = ""
-               then `Null
-               else `String m.runtime.last_blocker);
+               match m.runtime.last_blocker with
+               | Some info -> Keeper_types.blocker_info_to_json info
+               | None -> `Null);
              ("last_need",
                if String.trim m.runtime.last_need = ""
                then `Null

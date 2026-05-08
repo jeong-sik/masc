@@ -111,13 +111,9 @@ let is_stale_paused_meta ~now ~paused_ttl_sec (meta : keeper_meta) =
 
 let paused_meta_requires_reconcile_recovery (meta : keeper_meta) =
   meta.paused
-  && (match meta.runtime.last_blocker_class with
-      | Some cls -> blocker_class_continue_gate cls
-      | None ->
-          (match Keeper_status_bridge.blocker_class_of_string
-                  meta.runtime.last_blocker with
-           | Some cls -> blocker_class_continue_gate cls
-           | None -> false))
+  && (match meta.runtime.last_blocker with
+      | Some info -> blocker_class_continue_gate info.klass
+      | None -> false)
 
 let committed_tools_of_ambiguous_blocker (blocker : string) =
   let trimmed = String.trim blocker in
@@ -412,8 +408,8 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
               Keeper_registry.set_failure_reason ~base_path meta.name
                 (Some Keeper_registry.Fiber_unresolved);
               (* 2026-05-05 fleet-stuck cycle: keeper meta runtime
-                 [last_blocker]/[last_blocker_class] stayed null for 5+ hours
-                 while supervisor self-preservation suppressed restarts under
+                 [last_blocker] stayed null for 5+ hours while supervisor
+                 self-preservation suppressed restarts under
                  [cohort=fiber_unresolved].  The diagnosis was buried in the
                  crash registry but invisible on the per-keeper meta surface
                  dashboards read.  Stamp the same cohort onto runtime so
@@ -426,8 +422,9 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
                    { entry.meta with
                      runtime =
                        { entry.meta.runtime with
-                         last_blocker = "fiber_unresolved";
-                         last_blocker_class = Some Fiber_unresolved;
+                         last_blocker =
+                           Some (blocker_info_of_class
+                                   ~detail:"fiber_unresolved" Fiber_unresolved);
                        };
                    }
                  in
@@ -606,8 +603,7 @@ let resume_keeper_after_reconcile_gate (ctx : _ context) (meta : keeper_meta) =
       runtime =
         {
           latest_meta.runtime with
-          last_blocker = "";
-          last_blocker_class = None;
+          last_blocker = None;
         };
     }
   in
@@ -660,24 +656,22 @@ let resume_keeper_after_reconcile_gate (ctx : _ context) (meta : keeper_meta) =
   | None -> supervise_keepalive ~proactive_warmup_sec:0 ctx resumed_meta
 
 let restore_reconcile_continue_gate (ctx : _ context) (meta : keeper_meta) =
-  let blocker = String.trim meta.runtime.last_blocker in
-  let committed_tools = committed_tools_of_ambiguous_blocker blocker in
+  let blocker_detail, blocker_klass =
+    match meta.runtime.last_blocker with
+    | Some info -> String.trim info.detail, Some info.klass
+    | None -> "", None
+  in
+  let committed_tools = committed_tools_of_ambiguous_blocker blocker_detail in
   let failure_reason =
-    match meta.runtime.last_blocker_class with
+    match blocker_klass with
     | Some Ambiguous_post_commit_timeout ->
         "ambiguous_partial_commit(post_commit_timeout)"
     | Some Ambiguous_post_commit_failure ->
         "ambiguous_partial_commit(post_commit_failure)"
-    | None ->
-        (match Keeper_status_bridge.blocker_class_of_string blocker with
-         | Some Ambiguous_post_commit_timeout ->
-             "ambiguous_partial_commit(post_commit_timeout)"
-         | Some Ambiguous_post_commit_failure ->
-             "ambiguous_partial_commit(post_commit_failure)"
-         | Some _ -> "ambiguous_partial_commit(post_commit_failure)"
-         | None -> "ambiguous_partial_commit(post_commit_failure)")
-    | Some _ -> "ambiguous_partial_commit(post_commit_failure)"
+    | Some _ | None ->
+        "ambiguous_partial_commit(post_commit_failure)"
   in
+  let blocker = blocker_detail in
   let input =
     `Assoc
       [
@@ -1112,12 +1106,25 @@ let handle_crash_auto_pause (ctx : _ context)
            meta.auto_resume_after_sec
        in
        let blocker_text =
-         let existing = String.trim meta.runtime.last_blocker in
+         let existing =
+           match meta.runtime.last_blocker with
+           | Some info -> String.trim info.detail
+           | None -> ""
+         in
          if existing <> "" then existing
          else
            match blocker_class with
            | Some cls -> blocker_class_to_string cls
            | None -> reason_tag
+       in
+       let blocker_info_opt =
+         match blocker_class with
+         | Some klass -> Some (blocker_info_of_class ~detail:blocker_text klass)
+         | None ->
+           (* No typed class available — preserve pre-existing typed
+              info if any, otherwise drop the slot.  We refuse to
+              silently fabricate a klass from [reason_tag]. *)
+           meta.runtime.last_blocker
        in
        (* Task-138 §"Max no-task-progress 30min = release claimed":
           when the supervisor pauses a keeper because the same blocker
@@ -1127,14 +1134,13 @@ let handle_crash_auto_pause (ctx : _ context)
           up while this keeper sits in [paused=true] back-off.
 
           Without this release the diagnostic state is "executor.json:
-          current_task_id=task-147, paused=true, last_blocker_class=
+          current_task_id=task-147, paused=true, last_blocker.klass=
           oas_timeout_budget" — task is stuck forever because (a) this
           keeper cannot run while paused and (b) other keepers see the
           claim and skip.  The released task ID is not separately audited
-          here; [last_blocker_class] + [last_blocker] in [runtime] already
-          carry the pause reason, and Prometheus
-          [keeper_paused_total] is incremented below.
-          Discovered 2026-05-05 fleet-stuck. *)
+          here; [last_blocker] in [runtime] already carries the pause
+          reason, and Prometheus [keeper_paused_total] is incremented
+          below.  Discovered 2026-05-05 fleet-stuck. *)
        (match
           write_meta_with_merge
             ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
@@ -1146,8 +1152,7 @@ let handle_crash_auto_pause (ctx : _ context)
               current_task_id = None;
               runtime =
                 { meta.runtime with
-                  last_blocker = blocker_text;
-                  last_blocker_class = blocker_class;
+                  last_blocker = blocker_info_opt;
                 };
             }
         with
@@ -1369,8 +1374,8 @@ let sweep_and_recover (ctx : _ context) =
             { current.meta with
               runtime =
                 { current.meta.runtime with
-                  last_blocker = msg;
-                  last_blocker_class = Some bc;
+                  last_blocker =
+                    Some (blocker_info_of_class ~detail:msg bc);
                 };
             }
           in
@@ -1702,8 +1707,7 @@ let sweep_and_recover (ctx : _ context) =
                        updated_at = now_iso ();
                        runtime =
                          { meta.runtime with
-                           last_blocker = "";
-                           last_blocker_class = None;
+                           last_blocker = None;
                          };
                      }
                    in
@@ -1894,8 +1898,7 @@ let liveness_recovery_scan (ctx : _ context) =
                      updated_at = now_iso ();
                      runtime =
                        { meta.runtime with
-                         last_blocker = "";
-                         last_blocker_class = None;
+                         last_blocker = None;
                        };
                    }
                  in

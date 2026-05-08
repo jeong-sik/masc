@@ -148,8 +148,12 @@ type usage_metrics = {
 
 (** {1 Agent runtime state} *)
 
-(** Structured blocker classification — replaces string-based error matching. *)
-type cascade_exhaustion_reason =
+(** Structured blocker classification — replaces string-based error matching.
+    These are re-exports of the canonical types from [Keeper_meta_contract];
+    the [=] type equations make sure values flow without coercion across the
+    facade boundary (so callers may freely mix [Keeper_types.blocker_class]
+    and [Keeper_meta_contract.blocker_class]). *)
+type cascade_exhaustion_reason = Keeper_meta_contract.cascade_exhaustion_reason =
   | Connection_refused
   | No_providers_available
   | All_providers_failed
@@ -157,7 +161,7 @@ type cascade_exhaustion_reason =
   | Max_turns_exceeded
   | Other_detail of string
 
-type blocker_class =
+type blocker_class = Keeper_meta_contract.blocker_class =
   | Cascade_exhausted of cascade_exhaustion_reason
   | Ambiguous_post_commit_timeout
   | Ambiguous_post_commit_failure
@@ -179,6 +183,21 @@ val cascade_exhaustion_summary : cascade_exhaustion_reason -> string
 val blocker_class_continue_gate : blocker_class -> bool
 val cascade_exhaustion_reason_to_json : cascade_exhaustion_reason -> Yojson.Safe.t
 val cascade_exhaustion_reason_of_json : Yojson.Safe.t -> cascade_exhaustion_reason option
+
+(** Authoritative blocker representation: typed [klass] + free-form
+    [detail].  Replaces the historic [last_blocker: string] +
+    [last_blocker_class: blocker_class option] pair so substring
+    classification is no longer load-bearing.  Re-exported via type
+    equation from [Keeper_meta_contract] so values flow without
+    coercion across the facade boundary. *)
+type blocker_info = Keeper_meta_contract.blocker_info = {
+  klass : blocker_class;
+  detail : string;
+}
+
+val blocker_info_of_class : ?detail:string -> blocker_class -> blocker_info
+val blocker_info_to_json : blocker_info -> Yojson.Safe.t
+val blocker_info_of_json : Yojson.Safe.t -> blocker_info option
 
 type agent_runtime_state = {
   usage: usage_metrics;
@@ -202,8 +221,7 @@ type agent_runtime_state = {
   last_social_transition_reason: string;
   last_active_desire: string;
   last_current_intention: string;
-  last_blocker: string;
-  last_blocker_class: blocker_class option;
+  last_blocker: blocker_info option;
   last_need: string;
 }
 

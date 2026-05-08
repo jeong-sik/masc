@@ -22,6 +22,7 @@ include Coord_broadcast
    dashboards. *)
 let drift_variant_label = function
   | Coord_task_lifecycle.Claimed_to_done_skip -> "claimed_to_done_skip"
+;;
 
 (* #10449: classify a task's contract surface so the completion-path
    metric can split bypass-rate by creation-side data presence.
@@ -29,8 +30,7 @@ let drift_variant_label = function
 let classify_contract_state (contract : Masc_domain.task_contract option) =
   match contract with
   | None -> "no_contract"
-  | Some c when c.completion_contract = [] && c.required_evidence = [] ->
-    "empty_contract"
+  | Some c when c.completion_contract = [] && c.required_evidence = [] -> "empty_contract"
   | Some _ -> "with_contract"
 ;;
 
@@ -42,14 +42,14 @@ let classify_contract_state (contract : Masc_domain.task_contract option) =
    and consensual claimed→done jumps, so the [force] flag is the
    only distinguisher. *)
 let classify_completion_path
-    ~(action : Masc_domain.task_action)
-    ~(drift : Coord_task_lifecycle.drift option)
-    ~(force : bool) =
+      ~(action : Masc_domain.task_action)
+      ~(drift : Coord_task_lifecycle.drift option)
+      ~(force : bool)
+  =
   match action, drift, force with
   | Masc_domain.Approve_verification, _, _ -> "via_verification"
   | _, _, true -> "forced_done"
-  | _, Some Coord_task_lifecycle.Claimed_to_done_skip, false ->
-    "claimed_to_done_skip"
+  | _, Some Coord_task_lifecycle.Claimed_to_done_skip, false -> "claimed_to_done_skip"
   | _, None, false -> "in_progress_to_done"
 ;;
 
@@ -143,9 +143,10 @@ let keeper_transport_alias_key name =
   let prefix_len = String.length prefix in
   let suffix_len = String.length suffix in
   let len = String.length name in
-  if len > prefix_len + suffix_len
-     && String.starts_with ~prefix name
-     && String.ends_with ~suffix name
+  if
+    len > prefix_len + suffix_len
+    && String.starts_with ~prefix name
+    && String.ends_with ~suffix name
   then Some (String.sub name prefix_len (len - prefix_len - suffix_len))
   else None
 ;;
@@ -201,8 +202,7 @@ let task_required_tools (task : Masc_domain.task) =
 
 let missing_required_tools ~allowed required =
   List.filter
-    (fun required_name ->
-       not (List.exists (String.equal required_name) allowed))
+    (fun required_name -> not (List.exists (String.equal required_name) allowed))
     required
 ;;
 
@@ -211,43 +211,42 @@ let required_tool_claim_guard config ~agent_name ?agent_tool_names task =
   match required_tools, agent_tool_names with
   | [], _ -> Ok ()
   | _ :: _, None ->
-    log_event config
+    log_event
+      config
       (`Assoc
-         [ "type", `String "task_claim_required_tools_unknown_surface"
-         ; "agent", `String agent_name
-         ; "task", `String task.id
-         ; ( "required_tools",
-             `List (List.map (fun name -> `String name) required_tools) )
-         ; "ts", `String (now_iso ())
-         ]);
+          [ "type", `String "task_claim_required_tools_unknown_surface"
+          ; "agent", `String agent_name
+          ; "task", `String task.id
+          ; "required_tools", `List (List.map (fun name -> `String name) required_tools)
+          ; "ts", `String (now_iso ())
+          ]);
     Ok ()
   | _ :: _, Some allowed ->
     let missing = missing_required_tools ~allowed required_tools in
-    if missing = [] then Ok ()
+    if missing = []
+    then Ok ()
     else (
-      log_event config
+      log_event
+        config
         (`Assoc
-           [ "type", `String "task_claim_required_tools_blocked"
-           ; "agent", `String agent_name
-           ; "task", `String task.id
-           ; ( "required_tools",
-               `List (List.map (fun name -> `String name) required_tools) )
-           ; ( "missing_tools",
-               `List (List.map (fun name -> `String name) missing) )
-           ; "ts", `String (now_iso ())
-           ]);
+            [ "type", `String "task_claim_required_tools_blocked"
+            ; "agent", `String agent_name
+            ; "task", `String task.id
+            ; "required_tools", `List (List.map (fun name -> `String name) required_tools)
+            ; "missing_tools", `List (List.map (fun name -> `String name) missing)
+            ; "ts", `String (now_iso ())
+            ]);
       Error
-        (Masc_domain.Task (Masc_domain.Task_error.InvalidState
-           (Printf.sprintf
-              "Task %s requires tool(s) unavailable to %s: %s"
-              task.id
-              agent_name
-              (String.concat ", " missing)))))
+        (Masc_domain.Task
+           (Masc_domain.Task_error.InvalidState
+              (Printf.sprintf
+                 "Task %s requires tool(s) unavailable to %s: %s"
+                 task.id
+                 agent_name
+                 (String.concat ", " missing)))))
 ;;
 
-let default_verification_evidence_refs =
-  [ "completion_notes"; "pr_url_or_artifact_ref" ]
-;;
+let default_verification_evidence_refs = [ "completion_notes"; "pr_url_or_artifact_ref" ]
 
 let first_line text =
   match String.index_opt text '\n' with
@@ -256,8 +255,7 @@ let first_line text =
 ;;
 
 let truncate ~max_len text =
-  if String.length text <= max_len then text
-  else String.sub text 0 max_len ^ "..."
+  if String.length text <= max_len then text else String.sub text 0 max_len ^ "..."
 ;;
 
 let default_completion_contract_text ~title ~description =
@@ -266,7 +264,8 @@ let default_completion_contract_text ~title ~description =
   if description = ""
   then Printf.sprintf "Task scope satisfied: %s" title
   else
-    truncate ~max_len:220
+    truncate
+      ~max_len:220
       (Printf.sprintf "Task scope satisfied: %s - %s" title description)
 ;;
 
@@ -387,8 +386,11 @@ let task_assignee_of_status = Masc_domain.task_assignee_of_status
     require [MASC_VERIFICATION_FSM_ENABLED=true] but are listed
     unconditionally so the hint stays accurate when the flag is on; the
     flag-off case still rejects them and produces a more specific error. *)
-let valid_next_actions_for_status : Masc_domain.task_status -> Masc_domain.task_action list = function
-  | Masc_domain.Todo -> [ Masc_domain.Claim; Masc_domain.Cancel; Masc_domain.Submit_pr_evidence ]
+let valid_next_actions_for_status
+  : Masc_domain.task_status -> Masc_domain.task_action list
+  = function
+  | Masc_domain.Todo ->
+    [ Masc_domain.Claim; Masc_domain.Cancel; Masc_domain.Submit_pr_evidence ]
   | Masc_domain.Claimed _ ->
     [ Masc_domain.Start
     ; Masc_domain.Done_action
@@ -397,7 +399,11 @@ let valid_next_actions_for_status : Masc_domain.task_status -> Masc_domain.task_
     ; Masc_domain.Cancel
     ]
   | Masc_domain.InProgress _ ->
-    [ Masc_domain.Done_action; Masc_domain.Submit_for_verification; Masc_domain.Release; Masc_domain.Cancel ]
+    [ Masc_domain.Done_action
+    ; Masc_domain.Submit_for_verification
+    ; Masc_domain.Release
+    ; Masc_domain.Cancel
+    ]
   | Masc_domain.AwaitingVerification _ ->
     [ Masc_domain.Approve_verification; Masc_domain.Reject_verification ]
   | Masc_domain.Done _ | Masc_domain.Cancelled _ -> [] (* terminal *)
@@ -415,10 +421,14 @@ let next_actions_hint status =
 let task_started_at_unix status =
   let default_time = Time_compat.now () in
   match status with
-  | Masc_domain.Claimed { claimed_at; _ } -> Masc_domain.parse_iso8601 ~default_time claimed_at
-  | Masc_domain.InProgress { started_at; _ } -> Masc_domain.parse_iso8601 ~default_time started_at
-  | Masc_domain.Todo | Masc_domain.AwaitingVerification _ | Masc_domain.Done _ | Masc_domain.Cancelled _ ->
-    default_time
+  | Masc_domain.Claimed { claimed_at; _ } ->
+    Masc_domain.parse_iso8601 ~default_time claimed_at
+  | Masc_domain.InProgress { started_at; _ } ->
+    Masc_domain.parse_iso8601 ~default_time started_at
+  | Masc_domain.Todo
+  | Masc_domain.AwaitingVerification _
+  | Masc_domain.Done _
+  | Masc_domain.Cancelled _ -> default_time
 ;;
 
 let task_transition_details

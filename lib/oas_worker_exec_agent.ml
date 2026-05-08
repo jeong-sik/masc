@@ -2,7 +2,7 @@
 
     This module owns the shared [config] surface plus the pure/defaulted
     preparation logic used by both [build] and [resume_from_checkpoint].
-    [Oas_worker_exec] remains the public facade and still performs the
+    [Cascade_runner] remains the public facade and still performs the
     approval wiring and final [build_safe] / [Agent.resume] calls. *)
 
 type stop_reason =

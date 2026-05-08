@@ -1,7 +1,7 @@
 (** Oas_worker_exec_checkpoint — Lifecycle, checkpoint, and idle-detail helpers.
 
     Keeps side-effecting run helpers separate from the main build/resume/run
-    orchestration in {!Oas_worker_exec}. *)
+    orchestration in {!Cascade_runner}. *)
 
 let publish_lifecycle _bus ~name ~event ~detail ?error ?session_id ?status () =
   match Masc_event_bus.get () with

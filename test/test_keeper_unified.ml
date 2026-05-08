@@ -20,7 +20,7 @@ module AE = Masc_mcp.Agent_economy
 module KC = Masc_mcp.Keeper_config
 module HK = Masc_mcp.Keeper_hooks_oas
 module KG = Masc_mcp.Keeper_guards
-module OMR = Masc_mcp.Oas_model_resolve
+module OMR = Masc_mcp.Cascade_runtime
 module AQ = Masc_mcp.Keeper_approval_queue
 module Keeper_types = Masc_mcp.Keeper_types
 
@@ -5278,7 +5278,7 @@ let test_metrics_failure_response_redacts_resumable_cli_session_detail () =
     "kimi exited with code 75: \nTo resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc"
   in
   let canonical_detail =
-    Masc_mcp.Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail
+    Masc_mcp.Cascade_runner.Kimi_cli_transport_local.resumable_session_detail
   in
   let sdk_error =
     Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
@@ -5856,7 +5856,7 @@ let test_auto_recoverable_turn_error_includes_resumable_cli_session_error () =
          {
            cascade_name = oas_error_cascade_name "kimi_cli_keeper";
            detail =
-             Masc_mcp.Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail;
+             Masc_mcp.Cascade_runner.Kimi_cli_transport_local.resumable_session_detail;
            exit_code = Some 75;
          })
   in
@@ -5870,7 +5870,7 @@ let test_cascade_exhausted_error_includes_resumable_cli_session_error () =
          {
            cascade_name = oas_error_cascade_name "kimi_cli_keeper";
            detail =
-             Masc_mcp.Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail;
+             Masc_mcp.Cascade_runner.Kimi_cli_transport_local.resumable_session_detail;
            exit_code = Some 75;
          })
   in

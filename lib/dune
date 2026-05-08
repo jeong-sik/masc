@@ -167,7 +167,6 @@
   tool_misc_web_search
   tool_misc_web_fetch
   oas_worker_exec_agent
-  oas_worker_exec
   oas_worker_exec_checkpoint
   oas_worker_named
   meta_cognition_types

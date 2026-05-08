@@ -81,75 +81,83 @@ type token_snapshot =
 
 (* ── Tool classification registry ────────────────────────────────── *)
 
-(** Default tool-name -> effect-class mappings. Data, not inline code. *)
-let default_tool_entries : (string * tool_effect_class) list =
+(** Default tool-id -> effect-class mappings. RFC-0005 §3.1 — keys are
+    [Tool_id.t] poly-variant constructors so that adding a new built-in
+    tool requires extending [Tool_id] and the compiler then flags every
+    site that needs to acknowledge it. The runtime registry below stays
+    string-keyed because plugin tools register at runtime by name. *)
+let default_tool_entries : (Tool_id.t * tool_effect_class) list =
   [ (* ── Read-only tools ─────────────────────────────────────── *)
     (* File & code navigation *)
-    "read", Read_only
-  ; "glob", Read_only
-  ; "grep", Read_only
-  ; "search", Read_only
-  ; "list_dir", Read_only
-  ; "find_file", Read_only
-  ; "read_file", Read_only
-  ; "find_symbol", Read_only
-  ; "get_symbols_overview", Read_only
-  ; "find_referencing_symbols", Read_only
-  ; "search_for_pattern", Read_only
+    `Read, Read_only
+  ; `Glob, Read_only
+  ; `Grep, Read_only
+  ; `Search, Read_only
+  ; `List_dir, Read_only
+  ; `Find_file, Read_only
+  ; `Read_file, Read_only
+  ; `Find_symbol, Read_only
+  ; `Get_symbols_overview, Read_only
+  ; `Find_referencing_symbols, Read_only
+  ; `Search_for_pattern, Read_only
   ; (* Notebook *)
-    "notebook_read", Read_only
+    `Notebook_read, Read_only
   ; (* Browser observation *)
-    "read_console_messages", Read_only
-  ; "read_network_requests", Read_only
-  ; "get_page_text", Read_only
-  ; "read_page", Read_only
-  ; "tabs_context_mcp", Read_only
+    `Read_console_messages, Read_only
+  ; `Read_network_requests, Read_only
+  ; `Get_page_text, Read_only
+  ; `Read_page, Read_only
+  ; `Tabs_context_mcp, Read_only
   ; (* Task queries *)
-    "task_list", Read_only
-  ; "task_get", Read_only
-  ; "task_output", Read_only
+    `Task_list, Read_only
+  ; `Task_get, Read_only
+  ; `Task_output, Read_only
   ; (* ── Local-mutation tools ────────────────────────────────── *)
     (* File editing *)
-    "write", Local_mutation
-  ; "edit", Local_mutation
-  ; "create_text_file", Local_mutation
-  ; "replace_content", Local_mutation
-  ; "rename_symbol", Local_mutation
-  ; "insert_after_symbol", Local_mutation
-  ; "insert_before_symbol", Local_mutation
-  ; "replace_symbol_body", Local_mutation
-  ; "notebook_edit", Local_mutation
+    `Write, Local_mutation
+  ; `Edit, Local_mutation
+  ; `Create_text_file, Local_mutation
+  ; `Replace_content, Local_mutation
+  ; `Rename_symbol, Local_mutation
+  ; `Insert_after_symbol, Local_mutation
+  ; `Insert_before_symbol, Local_mutation
+  ; `Replace_symbol_body, Local_mutation
+  ; `Notebook_edit, Local_mutation
   ; (* Task & team management *)
-    "task_create", Local_mutation
-  ; "task_update", Local_mutation
-  ; "task_stop", Local_mutation
-  ; "team_create", Local_mutation
-  ; "team_delete", Local_mutation
+    `Task_create, Local_mutation
+  ; `Task_update, Local_mutation
+  ; `Task_stop, Local_mutation
+  ; `Team_create, Local_mutation
+  ; `Team_delete, Local_mutation
   ; (* ── External-effect tools ───────────────────────────────── *)
     (* HITL *)
-    "ask_user_question", External_effect
+    `Ask_user_question, External_effect
   ; (* Web & research *)
-    "web_fetch", External_effect
-  ; "web_search", External_effect
+    `Web_fetch, External_effect
+  ; `Web_search, External_effect
   ; (* Browser interaction *)
-    "navigate", External_effect
-  ; "computer", External_effect
-  ; "find", External_effect
-  ; "form_input", External_effect
-  ; "javascript_tool", External_effect
-  ; "tabs_create_mcp", External_effect
-  ; "upload_image", External_effect
+    `Navigate, External_effect
+  ; `Computer, External_effect
+  ; `Find, External_effect
+  ; `Form_input, External_effect
+  ; `Javascript_tool, External_effect
+  ; `Tabs_create_mcp, External_effect
+  ; `Upload_image, External_effect
   ; (* ── Shell-dynamic tools (require input analysis at runtime) *)
-    "bash", Shell_dynamic
-  ; "execute_shell_command", Shell_dynamic
+    `Bash, Shell_dynamic
+  ; `Execute_shell_command, Shell_dynamic
   ]
 ;;
 
 (** Global mutable registry seeded from [default_tool_entries].
-    Supports runtime extension via [register_tool_class]. *)
+    Supports runtime extension via [register_tool_class].
+    Keys are wire-format strings so plugin tools registered by name
+    interoperate transparently with the typed defaults. *)
 let tool_registry : (string, tool_effect_class) Hashtbl.t =
   let tbl = Hashtbl.create (List.length default_tool_entries) in
-  List.iter (fun (name, cls) -> Hashtbl.replace tbl name cls) default_tool_entries;
+  List.iter
+    (fun (id, cls) -> Hashtbl.replace tbl (Tool_id.to_string id) cls)
+    default_tool_entries;
   tbl
 ;;
 

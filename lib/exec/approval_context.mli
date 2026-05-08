@@ -11,11 +11,11 @@
     Approval_config but only after we can point at a real consumer. *)
 
 type t = {
-  actor : string;
-  (** Human-readable identifier for who is triggering the exec.  "keeper/alpha"
-      for the alpha keeper, "worker/foo" for a named worker, "operator" for
-      a direct operator action.  Not a security principal — that stays with
-      the token/session on the transport layer. *)
+  actor : Agent_id.t;
+  (** Typed agent identity for who is triggering the exec.  [`Coord_git] for
+      the git coordinator, [`System_task_sandbox] for the sandbox runner,
+      etc.  Not a security principal — that stays with the token/session on
+      the transport layer. *)
 
   session_id : string;
   (** Opaque session id threaded from the transport.  The approval queue
@@ -33,7 +33,7 @@ type t = {
 }
 
 val make :
-  actor:string ->
+  actor:Agent_id.t ->
   session_id:string ->
   worktree_root:string ->
   now:float ->

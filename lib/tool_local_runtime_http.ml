@@ -63,7 +63,7 @@ let http_get_text_with_status_with_headers ?(timeout_sec = default_timeout_sec) 
   in
   let status, body =
     Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:"tool/local_runtime"
+      ~actor:(Masc_exec.Agent_id.of_string "tool/local_runtime")
       ~raw_source:(String.concat " " (List.map Filename.quote argv))
       ~summary:"tool local runtime http get"
       ~timeout_sec:(Stdlib.Float.of_int (max 1 timeout_sec))
@@ -112,7 +112,7 @@ let http_post_json_text_with_status_with_headers ~timeout_sec ?(headers = []) ~u
   in
   let status, body =
     Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:"tool/local_runtime"
+      ~actor:(Masc_exec.Agent_id.of_string "tool/local_runtime")
       ~raw_source:(String.concat " " (List.map Filename.quote argv))
       ~summary:"tool local runtime http post"
       ~timeout_sec:(Stdlib.Float.of_int (max 1 timeout_sec))

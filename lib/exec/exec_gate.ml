@@ -128,7 +128,7 @@ let record_decision ~actor ~raw_source ~summary ~mode ~verdict ~argv ?env ?cwd (
   | Off -> ()
   | Parallel | Enforced ->
     Exec_tap.record_gate_decision
-      ~actor
+      ~actor:(Agent_id.to_string actor)
       ~raw_source
       ~summary
       ~gate_mode:

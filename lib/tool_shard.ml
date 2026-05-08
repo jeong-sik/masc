@@ -164,6 +164,39 @@ Use source='history' for raw user messages, source='all' for both.";
       ("required", `List [`String "query"]);
     ];
   };
+  (* RFC-0035 P4: explicit memory write surface.
+     Symmetric to keeper_memory_search; promotes a structured note
+     (kind/title/content) into the memory bank, queryable on later
+     turns. long_term kind is reserved for tool-result emission and
+     is rejected here. *)
+  {
+    name = "keeper_memory_write";
+    description = "Promote a structured decision/question/goal/etc into the memory bank, \
+queryable on later turns by keeper_memory_search. \
+Use when board discussion converges to a fact worth crystallizing, or to record a \
+constraint, open question, next step, or progress note. \
+Subject to per-kind cap (typically 2) and total cap (12); oldest may be dropped. \
+'long_term' kind is reserved for tool-result emission and is not callable here.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("kind", `Assoc [
+          ("type", `String "string");
+          ("enum", `List (List.map (fun s -> `String s) memory_kind_enum_strings));
+          ("description", `String "Memory kind. One of goal/progress/next/decision/open_question/constraints. long_term not supported.");
+        ]);
+        ("title", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Short hook (≤120 chars). Optional; may be empty.");
+        ]);
+        ("content", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Body. Required, must be non-empty. For decisions/constraints, lead with the rule then **Why** and **How to apply** lines.");
+        ]);
+      ]);
+      ("required", `List [`String "kind"; `String "content"]);
+    ];
+  };
   (* Tool self-introspection — lets the keeper enumerate its own capabilities *)
   {
     name = "keeper_tools_list";

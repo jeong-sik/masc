@@ -467,3 +467,129 @@ let keeper_context_status_json
 ;;
 
 (* --- Memory bank search (structured notes from [STATE] blocks) --- *)
+
+(* --- Explicit memory write (RFC-0035 P4 surface) ----------------- *)
+
+(** Maps memory_kind enum to the corresponding [keeper_state_snapshot]
+    field. Returns a snapshot with only that field populated.  Mirrors
+    the field-to-kind mapping in
+    [Keeper_memory_bank.memory_candidates_from_snapshot]:
+      goal          -> snapshot.goal (option)
+      progress      -> snapshot.progress (option)
+      next          -> snapshot.next_items (list)
+      decision      -> snapshot.decisions (list)
+      open_question -> snapshot.open_questions (list)
+      constraints   -> snapshot.constraints (list)
+    [long_term] is intentionally not supported via explicit write; it is
+    produced from tool-result emission only.  See RFC-0035 §3 (P4). *)
+let single_field_snapshot_for_kind ~(kind : string) ~(text : string)
+  : Keeper_memory_policy.keeper_state_snapshot option =
+  let empty = Keeper_memory_policy.empty_keeper_state_snapshot in
+  match kind with
+  | "goal"          -> Some { empty with goal = Some text }
+  | "progress"      -> Some { empty with progress = Some text }
+  | "next"          -> Some { empty with next_items = [text] }
+  | "decision"      -> Some { empty with decisions = [text] }
+  | "open_question" -> Some { empty with open_questions = [text] }
+  | "constraints"   -> Some { empty with constraints = [text] }
+  | _               -> None
+
+let keeper_memory_write_max_title_chars = 120
+
+(** Pure validation result for a [keeper_memory_write] call. Splitting
+    this from the persistence step lets tests pin the error_kind
+    taxonomy without constructing a [Coord.config]. *)
+type memory_write_validation =
+  | Memory_write_ok of {
+      kind : string;
+      body : string;
+      snapshot : Keeper_memory_policy.keeper_state_snapshot;
+    }
+  | Memory_write_invalid of {
+      error_kind : string;
+      extras : (string * Yojson.Safe.t) list;
+    }
+
+let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation =
+  let kind = Safe_ops.json_string ~default:"" "kind" args |> String.trim in
+  let title = Safe_ops.json_string ~default:"" "title" args |> String.trim in
+  let content = Safe_ops.json_string ~default:"" "content" args |> String.trim in
+  if not (List.mem kind Keeper_memory_policy.valid_memory_kind_strings) then
+    Memory_write_invalid {
+      error_kind = "invalid_memory_kind";
+      extras = [
+        ("provided_kind", `String kind);
+        ( "supported_kinds",
+          `List
+            (List.map
+               (fun k -> `String k)
+               Keeper_memory_policy.valid_memory_kind_strings) );
+      ];
+    }
+  else if String.length title > keeper_memory_write_max_title_chars then
+    Memory_write_invalid {
+      error_kind = "title_too_long";
+      extras = [
+        ("max_chars", `Int keeper_memory_write_max_title_chars);
+        ("title_chars", `Int (String.length title));
+      ];
+    }
+  else if content = "" then
+    Memory_write_invalid { error_kind = "content_empty"; extras = [] }
+  else if kind = "long_term" then
+    Memory_write_invalid {
+      error_kind = "long_term_via_explicit_write_not_yet_supported";
+      extras = [];
+    }
+  else
+    let body =
+      if title = "" then content
+      else Printf.sprintf "**%s** %s" title content
+    in
+    match single_field_snapshot_for_kind ~kind ~text:body with
+    | None ->
+        (* Defensive — validation above should have caught this. *)
+        Memory_write_invalid {
+          error_kind = "invalid_memory_kind";
+          extras = [ ("provided_kind", `String kind) ];
+        }
+    | Some snapshot -> Memory_write_ok { kind; body; snapshot }
+
+let keeper_memory_write_json
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+      ~(args : Yojson.Safe.t) : string =
+  let respond ~ok ~error_kind extras =
+    Yojson.Safe.to_string
+      (`Assoc
+        ([
+          ("ok", `Bool ok);
+          ("error_kind", `String error_kind);
+        ] @ extras))
+  in
+  match validate_memory_write_args args with
+  | Memory_write_invalid { error_kind; extras } ->
+      respond ~ok:false ~error_kind extras
+  | Memory_write_ok { kind; body = _; snapshot } ->
+      let rows_written, kinds_written =
+        Keeper_memory_bank.append_memory_notes_from_reply
+          config meta
+          ~snapshot
+          ~turn:0
+          ~reply:""
+          ()
+      in
+      if rows_written = 0 then
+        respond ~ok:false ~error_kind:"rows_dropped_by_cap"
+          [ ("kind", `String kind);
+            ("hint",
+              `String
+                "per-kind or total cap reached; older entries take \
+                 precedence until rotation lands.") ]
+      else
+        respond ~ok:true ~error_kind:""
+          [ ("rows_written", `Int rows_written);
+            ("kinds_written",
+              `List (List.map (fun k -> `String k) kinds_written));
+            ("kind", `String kind) ]
+;;

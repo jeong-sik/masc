@@ -31,6 +31,7 @@ module Keeper : sig
     | Library_read
     | Library_search
     | Memory_search
+    | Memory_write
     | Pr_create
     | Pr_list
     | Pr_review_comment

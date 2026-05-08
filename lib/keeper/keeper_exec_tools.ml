@@ -386,6 +386,9 @@ let execute_keeper_tool_call_with_outcome
     | "keeper_memory_search" ->
       success_tool_result
         (Keeper_exec_memory.keeper_memory_search_json ~config ~meta ~ctx_work ~args)
+    | "keeper_memory_write" ->
+      success_tool_result
+        (Keeper_exec_memory.keeper_memory_write_json ~config ~meta ~args)
     | "keeper_library_search" ->
       let ok, msg =
         Tool_library.handle_search Tool_library.{ agent_name = meta.name } args

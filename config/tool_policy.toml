@@ -13,7 +13,7 @@
 # ── Tool Groups ─────────────────────────────────────────────────────
 
 [groups.base]
-tools = ["keeper_time_now", "keeper_context_status", "keeper_memory_search", "keeper_tool_search", "keeper_tools_list"]
+tools = ["keeper_time_now", "keeper_context_status", "keeper_memory_search", "keeper_memory_write", "keeper_tool_search", "keeper_tools_list"]
 
 # Board tools split: core (frequent) vs extended (discoverable via tool_search).
 [groups.board_core]

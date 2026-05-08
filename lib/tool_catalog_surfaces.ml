@@ -40,6 +40,7 @@ let keeper_internal_tools =
     "keeper_fs_read";
     "keeper_fs_edit";
     "keeper_memory_search";
+    "keeper_memory_write";
     "keeper_library_search";
     "keeper_library_read";
     "keeper_time_now";

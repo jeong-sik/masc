@@ -46,6 +46,7 @@ module Keeper = struct
     | Library_read
     | Library_search
     | Memory_search
+    | Memory_write
     | Pr_create
     | Pr_list
     | Pr_review_comment
@@ -99,6 +100,7 @@ module Keeper = struct
     | Library_read -> "keeper_library_read"
     | Library_search -> "keeper_library_search"
     | Memory_search -> "keeper_memory_search"
+    | Memory_write -> "keeper_memory_write"
     | Pr_create -> "keeper_pr_create"
     | Pr_list -> "keeper_pr_list"
     | Pr_review_comment -> "keeper_pr_review_comment"
@@ -152,6 +154,7 @@ module Keeper = struct
     | "keeper_library_read" -> Some Library_read
     | "keeper_library_search" -> Some Library_search
     | "keeper_memory_search" -> Some Memory_search
+    | "keeper_memory_write" -> Some Memory_write
     | "keeper_pr_create" -> Some Pr_create
     | "keeper_pr_list" -> Some Pr_list
     | "keeper_pr_review_comment" -> Some Pr_review_comment

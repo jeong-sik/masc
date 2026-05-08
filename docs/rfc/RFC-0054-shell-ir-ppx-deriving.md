@@ -1,8 +1,8 @@
 # RFC-0054 — `[@@deriving shell_ir]` PPX for Typed Capability Substrate Phase 2
 
-Status: Draft
+Status: Draft · PR-1 attempted 2026-05-09 · blocked on §5.3.1 empirical finding
 Author: jeong-sik (with Claude Opus 4.7)
-Date: 2026-05-09
+Date: 2026-05-09 (drafted) · 2026-05-09 (PR-1 amendment with empirical evidence)
 Supersedes: —
 Related: RFC-0005 §3.2 (Phase 2 PPX, listed but unsourced),
 progress_report.md 2026-05-09 §3.2
@@ -232,6 +232,56 @@ ppxlib version requires a specific Ast_helper invocation), PR-1 falls
 back to scope-A: emit `to_simple_explicit` with manual type
 annotations and document the workaround. The deriver still ships;
 just doesn't claim universal type abstraction in PR-1.
+
+#### 5.3.1 Empirical finding (RFC-0054 PR-1 attempt, 2026-05-09)
+
+The `Ast_builder.Default` path *does* hit a non-trivial OCaml 5.4
+interaction. PR-1 attempted the natural generalisation
+(`pexp_newtype` × N nested + `ptyp_poly` over N univ vars +
+`pexp_constraint` or `ppat_constraint`-typed argument) under three
+naming conventions:
+
+1. Same names for universal & locally-abstract (`'a, a`) — works for
+   N=1 (Tier I8) but raises `variable 'a is reserved for the local
+   type a` at N≥2.
+2. Disjoint names (`'a, pa`) — bypasses the reserved-name error but
+   the GADT match still narrows: `This pattern matches values of
+   type (string, unit) edge but a pattern was expected which
+   matches values of type (unit, string) edge`.
+3. Argument-pattern annotation (`fun (arg : (pa, pb) edge) -> match
+   arg with …`) — same narrowing failure.
+
+The decisive observation: dumping the failing AST back to source
+text via `ocamlfind ocamlc -dsource -i` produces OCaml that compiles
+and runs cleanly when fed to `ocaml` directly. So the generated
+*text* is valid; the *AST node tree* `Ast_builder.Default`
+constructs contains some metadata divergent from what the parser
+produces for the same source — and that divergence triggers GADT
+narrowing during the typechecker pass.
+
+`test/ppx_tla/test_typed_param.ml` (added by PR-1, **not registered
+in the dune file**) carries the failing 2-param and 4-param GADT
+cases as commented-out evidence + the diagnosis above. It serves as
+a regression marker: when Tier I8b lands, the file's
+`[@@deriving tla]` blocks should compile and the file gets
+registered in dune.
+
+#### 5.3.2 Fallback paths (one of these, separate PR)
+
+- **Source-template approach.** Use `Ppxlib.Parse.expression` on a
+  hand-written template string with type-name + constructor-list
+  placeholders. Brittle (escaping, hygiene) but guaranteed to match
+  what the parser produces.
+- **ppxlib-internals approach.** Investigate Astlib / Migrate
+  transforms to discover which Parsetree node attribute the source
+  path attaches that the Ast_builder path omits. Requires deep
+  ppxlib knowledge.
+
+Until one of those lands, `[@@deriving tla]` continues to raise the
+existing "not yet supported" error for non-phantom N-param GADT
+existentials. `shell_ir_typed.ml`'s hand-written walkers stay. PR-2
+through PR-5 of this RFC are blocked on this fallback being
+selected and implemented.
 
 ### 5.4 Fail-closed preservation
 

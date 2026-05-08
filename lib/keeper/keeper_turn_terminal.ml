@@ -1,26 +1,29 @@
-(** Structured terminal-reason surface for keeper turn ledgers. *)
+(** Structured terminal-reason surface for keeper turn ledgers.
 
-type severity =
+    RFC-0047 PR-3:
+    - [code: string] field removed; [disposition] is the SSOT.
+    - [severity_of_code / summary_of_code / next_action_of_code]
+      substring classifiers deleted; severity / summary / next_action
+      are now derived via exhaustive matches on
+      [Keeper_turn_disposition.t].
+    - [normalize_code] retained as a producer-side string preprocessor
+      until producers are themselves typed (out of scope for this RFC). *)
+
+type severity = Keeper_turn_disposition.severity =
   | Ok
   | Warn
   | Bad
   | Unknown_bad
 
 type t =
-  { code : string
-  ; disposition : Keeper_turn_disposition.t
-    (** RFC-0047 PR-2: typed operator-facing disposition. Always
-          equals [Keeper_turn_disposition.of_wire code] after the
-          producer-side [normalize_code]; this PR does not change
-          producers, so the field is derived. PR-3 will swap
-          [severity / summary / next_action] derivation to use
-          [disposition] directly (exhaustive match, no substring
-          classifier) and remove the [code: string] field. *)
+  { disposition : Keeper_turn_disposition.t
   ; source : string
   ; severity : severity
   ; summary : string
   ; next_action : string option
   }
+
+let code t = Keeper_turn_disposition.to_wire t.disposition
 
 let severity_to_string = function
   | Ok -> "ok"
@@ -29,51 +32,11 @@ let severity_to_string = function
   | Unknown_bad -> "bad"
 ;;
 
-let severity_of_code = function
-  | "success" -> Ok
-  | "external_cancel"
-  | "oas_timeout_budget"
-  | "turn_wall_clock_timeout"
-  | "gh_repo_context_missing_worktree" -> Warn
-  | "required_tool_use_no_tool_call"
-  | "required_tool_use_unsatisfied"
-  | "post_commit_ambiguous"
-  | "provider_error"
-  | "unknown_error" -> Bad
-  | code when String.starts_with ~prefix:"api_error_" code -> Bad
-  | _unknown -> Unknown_bad
-;;
-
-let summary_of_code = function
-  | "success" -> "turn completed"
-  | "required_tool_use_no_tool_call" ->
-    "required keeper tool use was requested, but the model returned no keeper tool call"
-  | "required_tool_use_unsatisfied" ->
-    "required keeper tool use was requested, but the tool contract was not satisfied"
-  | "gh_repo_context_missing_worktree" ->
-    "GitHub command blocked because the active task has no linked worktree"
-  | "oas_timeout_budget" ->
-    "OAS call was skipped or failed because the turn timeout budget was exhausted"
-  | "turn_wall_clock_timeout" -> "keeper turn hit the wall-clock timeout"
-  | "external_cancel" -> "keeper turn was cancelled before completion"
-  | "post_commit_ambiguous" ->
-    "provider failed after a mutating tool may have committed side effects"
-  | "provider_error" -> "provider or cascade failed"
-  | "unknown_error" -> "keeper turn failed without a classified terminal reason"
-  | code -> Printf.sprintf "keeper turn ended with %s" code
-;;
-
-let next_action_of_code = function
-  | "required_tool_use_no_tool_call" | "required_tool_use_unsatisfied" ->
-    Some "inspect_provider_tool_contract"
-  | "gh_repo_context_missing_worktree" -> Some "create_or_link_worktree"
-  | "oas_timeout_budget" | "turn_wall_clock_timeout" -> Some "inspect_timeout_budget"
-  | "external_cancel" -> Some "rerun_if_still_relevant"
-  | "post_commit_ambiguous" -> Some "reconcile_partial_commit"
-  | "provider_error" | "unknown_error" -> Some "inspect_latest_error"
-  | _ -> None
-;;
-
+(* Producer-side legacy-string preprocessor. Three legacy puns map to
+   their canonical app-layer codes before [Keeper_turn_disposition.of_wire]
+   is consulted. PR-2.5 / a follow-up RFC retires these by typing the
+   producers themselves; PR-3 keeps the table because every consumer of
+   the resulting disposition is now exhaustive on the typed value. *)
 let normalize_code = function
   | "completed" -> "success"
   | "completion_contract_violation:require_tool_use" -> "required_tool_use_unsatisfied"
@@ -82,15 +45,22 @@ let normalize_code = function
 ;;
 
 let make ?(source = "typed") ?summary ?next_action code =
-  let code = normalize_code code in
-  let disposition = Keeper_turn_disposition.of_wire code in
-  let summary = Option.value ~default:(summary_of_code code) summary in
+  let normalised = normalize_code code in
+  let disposition = Keeper_turn_disposition.of_wire normalised in
+  let summary =
+    Option.value ~default:(Keeper_turn_disposition.summary disposition) summary
+  in
   let next_action =
     match next_action with
     | Some _ as value -> value
-    | None -> next_action_of_code code
+    | None -> Keeper_turn_disposition.next_action disposition
   in
-  { code; disposition; source; severity = severity_of_code code; summary; next_action }
+  { disposition
+  ; source
+  ; severity = Keeper_turn_disposition.severity disposition
+  ; summary
+  ; next_action
+  }
 ;;
 
 let success () = make ~source:"turn_result" "success"
@@ -120,6 +90,18 @@ let of_legacy_error_text raw_error =
   else make ~source:"legacy_error_text" "unknown_error"
 ;;
 
+(* The fallback was previously detected via [String.equal fallback.code
+   "unknown_error"]. Now we match on the typed disposition: only the
+   empty-raw [Unknown { raw_error = "" }] case (produced by
+   [of_legacy_error_text ""]) opts into the SDK-error-derived code. Any
+   other [of_legacy_error_text] result has classified the error and
+   should be returned as-is. *)
+let is_unknown_empty (reason : t) =
+  match reason.disposition with
+  | Keeper_turn_disposition.Unknown { raw_error = "" } -> true
+  | _ -> false
+;;
+
 let of_failure ?(post_commit_ambiguous = false) ?(tool_call_count = 0) ~raw_error err =
   if post_commit_ambiguous
   then make ~source:"typed_error" "post_commit_ambiguous"
@@ -142,7 +124,7 @@ let of_failure ?(post_commit_ambiguous = false) ?(tool_call_count = 0) ~raw_erro
          make ~source:"typed_error" code
        | _ ->
          let fallback = of_legacy_error_text raw_error in
-         if String.equal fallback.code "unknown_error"
+         if is_unknown_empty fallback
          then
            make
              ~source:"typed_error"
@@ -157,7 +139,7 @@ let of_code ?source ?summary ?next_action code =
 
 let to_json reason =
   `Assoc
-    [ "code", `String reason.code
+    [ "code", `String (code reason)
     ; "source", `String reason.source
     ; "severity", `String (severity_to_string reason.severity)
     ; "summary", `String reason.summary

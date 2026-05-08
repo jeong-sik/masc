@@ -53,12 +53,6 @@ let summary = function
     "required keeper tool use was requested, but the tool contract was not satisfied"
   | Post_commit_ambiguous ->
     "provider failed after a mutating tool may have committed side effects"
-  | Provider_error (Code.Provider_runtime_error "provider_error") ->
-    (* Legacy producer alias: pre-RFC [normalize_code "api_error_timeout"]
-       collapsed to the literal string "provider_error", which got the
-       specific summary below. PR-2/PR-3 retire that producer-side
-       normalize; this arm preserves byte-compat until then. *)
-    "provider or cascade failed"
   | Provider_error code -> Printf.sprintf "keeper turn ended with %s" (Code.to_wire code)
   | Unknown { raw_error = "" } ->
     "keeper turn failed without a classified terminal reason"

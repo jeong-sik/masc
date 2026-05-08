@@ -12,7 +12,7 @@ module T = Masc_mcp.Keeper_turn_terminal
 module D = Masc_mcp.Keeper_turn_disposition
 
 let check_invariant label (t : T.t) =
-  let expected = D.of_wire t.code in
+  let expected = D.of_wire (T.code t) in
   Alcotest.(check bool)
     (Printf.sprintf "%s: disposition derived from code" label)
     true

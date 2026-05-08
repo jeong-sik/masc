@@ -956,6 +956,8 @@ module KeeperRetryBackoff = struct
 
       Env: [MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC].
       Default: 180.0.
+      @category Timeouts
+      @ops_class operator
 
       Calibrated to match [Cascade_attempt_liveness.local_27b.ttft_max]
       (180 s) so that slow-but-honest Ollama 27B/70B streams are not

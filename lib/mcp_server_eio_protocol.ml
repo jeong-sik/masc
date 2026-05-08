@@ -695,7 +695,7 @@ let handle_request
                    | Eio.Cancel.Cancelled _ as exn -> raise exn
                    | exn ->
                        let err = Printexc.to_string exn in
-                       Log.Mcp.error "Request handling failed: %s" err;
+                       Log.Mcp.error "Request handling failed: method=%s: %s" method_ err;
                        make_error ~id (-32603) (Printf.sprintf "Internal error: %s" err))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn

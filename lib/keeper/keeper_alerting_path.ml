@@ -405,13 +405,13 @@ let resolve_keeper_read_path ~(config : Coord.config)
              Prometheus.inc_counter Prometheus.metric_keeper_path_rejection
                ~labels:[ ("kind", "not_found_relative") ] ();
              Error
-               (Printf.sprintf "path_not_found_under_allowed_roots: %s" raw)
+               (Printf.sprintf "path_not_found_under_allowed_roots: %s (this path is outside your allowed playground; check your_playground for available files)" raw)
          | Error e -> Error e)
       else begin
         Prometheus.inc_counter Prometheus.metric_keeper_path_rejection
           ~labels:[ ("kind", "out_of_roots") ] ();
         Error
-          (Printf.sprintf "path_not_found_under_allowed_roots: %s"
+          (Printf.sprintf "path_not_found_under_allowed_roots: %s (this path is outside your allowed playground)"
              raw)
       end
 

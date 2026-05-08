@@ -205,7 +205,7 @@ jobs:
             build=true
           fi
 
-          if has_match '^(bin/|lib/|test/|proto/|config/|dune-project$|dune-workspace$|.*\.opam$|scripts/install\.sh$|scripts/check-eio-conventions\.sh$|scripts/check-feature-flag-consistency\.sh$|scripts/check-toml-syntax\.sh$|scripts/validate-prompt-paths\.sh$|scripts/check-boundary-guard\.sh$|scripts/check-boundary-guard-mli-pairs\.sh$|scripts/check-ssot\.sh$|scripts/gen-grpc-descriptors\.sh$|scripts/lint/no-unknown-permissive-default\.sh$|scripts/lint/no-unknown-permissive-default\.allowlist$|scripts/lint/yojson-option-default\.py$|scripts/lint/yojson-option-default\.allowlist$|scripts/lint/no-docstring-escape-quote\.sh$|scripts/lint/no-hardcoded-colors-dashboard\.sh$|scripts/lint/no-hardcoded-colors-dashboard\.allowlist$|scripts/ci/|scripts/check-variants\.sh$|dashboard/src/)'; then
+          if has_match '^(bin/|lib/|test/|proto/|config/|dune-project$|dune-workspace$|.*\.opam$|scripts/install\.sh$|scripts/check-eio-conventions\.sh$|scripts/check-feature-flag-consistency\.sh$|scripts/check-toml-syntax\.sh$|scripts/validate-prompt-paths\.sh$|scripts/check-boundary-guard\.sh$|scripts/check-boundary-guard-mli-pairs\.sh$|scripts/check-ssot\.sh$|scripts/gen-grpc-descriptors\.sh$|scripts/lint/no-unknown-permissive-default\.sh$|scripts/lint/no-unknown-permissive-default\.allowlist$|scripts/lint/yojson-option-default\.py$|scripts/lint/yojson-option-default\.allowlist$|scripts/lint/no-docstring-escape-quote\.sh$|scripts/lint/no-hardcoded-colors-dashboard\.sh$|scripts/lint/no-hardcoded-colors-dashboard\.allowlist$|scripts/lint/no-explainer-prose-dashboard\.sh$|scripts/lint/no-explainer-prose-dashboard\.allowlist$|scripts/ci/|scripts/check-variants\.sh$|dashboard/src/)'; then
             lint=true
           fi
 
@@ -782,6 +782,9 @@ jobs:
 
       - name: Run dashboard hardcoded-color lint
         run: bash scripts/lint/no-hardcoded-colors-dashboard.sh
+
+      - name: Run dashboard explainer-prose lint
+        run: bash scripts/lint/no-explainer-prose-dashboard.sh
 
       - name: Setup OCaml toolchain
         uses: ./.github/actions/setup-ocaml-toolchain

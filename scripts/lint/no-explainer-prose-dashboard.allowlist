@@ -1,0 +1,12 @@
+# Allowlist for scripts/lint/no-explainer-prose-dashboard.sh
+#
+# Format: one entry per line, "path:line" — line-anchored.  When the
+# surrounding code shifts, update the line number in the same PR.  Comment
+# lines start with #.
+#
+# Currently empty: the cleanup track #14219 → #14304 brought every dashboard
+# surface to zero violations before this gate landed.
+#
+# To add an entry, run the lint locally first to confirm the line you want
+# to allow is actually flagged, then paste path:line below with a one-line
+# rationale comment immediately above.

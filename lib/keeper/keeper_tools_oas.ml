@@ -514,10 +514,6 @@ let make_keeper_tool_handler
         meta.name
         ~tool_name:name
         ~success:false;
-      Keeper_exec_tools.record_keeper_tool_call
-        ~tool_name:name
-        ~success:false
-        ~duration_ms;
       ignore (Tool_dispatch.run_post_hooks validation_result);
       broadcast_keeper_tool_call_event
         ~keeper_name:meta.name

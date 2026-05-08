@@ -78,29 +78,32 @@ split shape, and a *one-line ownership justification*.
 
 ### 4.1 In scope (clear ownership boundary)
 
-#### `connector-status.ts` (1689 → ~4 × ~300 + shared 200)
+> **Amendment 2026-05-09 (post-PR-1 verification)**: the `connector-status.ts`
+> proposal originally listed below was **removed** after caller-context grep
+> in PR #14270 review showed it fails §3 criterion 1. See §4.2 for its current
+> classification. Only `cost-dashboard.ts` remains in this section.
 
-**Boundary**: per-connector. Slack, Discord, iMessage, Telegram each
-have distinct sidecar commands, accent colors, channel icons,
-authentication shapes, and runbooks.
+#### ~~`connector-status.ts` (1689 → ~4 × ~300 + shared 200)~~ — withdrawn 2026-05-09
 
-```
-dashboard/src/components/connectors/
-  connector-types.ts        # shared interfaces (AccentColor, SidecarCommand)
-  slack.ts                  # ~300 LoC
-  discord.ts                # ~300 LoC
-  imessage.ts               # ~300 LoC
-  telegram.ts               # ~300 LoC
-  index.ts                  # re-export glue, picker render
-```
+The original proposal claimed "the current file is a flat `switch` over
+four mutually-exclusive cases." Direct read of the file (1689 LoC, 0 of
+`switch (connectorId)` or `connectorId === '<id>'` branches) shows the
+implementation is **one shared render pipeline parameterized by
+`connectorId: string`**, not four cases. The four connectors appear only
+as data rows in three lookup tables (`SIDECAR_DIRS`, `CONNECTOR_ACCENT_RGB`,
+`CHANNEL_ICONS`) totalling ~30 LoC.
 
-**Justification**: each connector has its own subsection in the dashboard,
-its own backend sidecar process, and its own failure modes. The current
-file is a flat `switch` over four mutually-exclusive cases.
+Splitting per-connector would extract those 30 LoC and leave ~1650 LoC
+of shared render logic in `connector-status.ts` — exactly the §2
+anti-pattern (mechanical line-count split with no ownership distribution).
+The proposal was based on a research summary that counted *data rows*
+rather than verifying *implementation structure*; this RFC must not
+reproduce the `prometheus.ml` cap-fix pattern that issue #14166 was
+rejected for.
 
-**Risk**: minor. None of the four connectors share mutable state.
-Picker render lives in `index.ts` and consumes the per-connector
-exports.
+Reclassified to §4.2 (out of scope). If `connector-status.ts` later
+acquires real per-connector branching (e.g., a connector-specific OAuth
+flow component), it becomes a candidate at that point — not before.
 
 #### `cost-dashboard.ts` (1442 → 3 × ~400-500)
 
@@ -127,6 +130,13 @@ import cycle.
 The following large files are **not** decomposed in this RFC because
 they fail criterion 1 (plurality of distinct domains):
 
+- **`connector-status.ts` (1689)** — *Reclassified 2026-05-09 (was §4.1).*
+  Verified by direct read after the original §4.1 listing: zero
+  per-connector branches in 1689 LoC; all four connectors share a single
+  render pipeline keyed by `connectorId: string`. Per-connector data is
+  three lookup tables × 4 rows ≈ 30 LoC out of 1689. Splitting would
+  move 30 LoC and leave 1650 LoC in place — exactly the §2 cap-fix
+  anti-pattern.
 - **`cascade-config-panel.ts` (1386)** — single render of a single
   domain (cascade config editor). Split would fragment the visual tree.
 - **`goal-tree.ts` (1390 — referenced in research)** — single component
@@ -142,7 +152,8 @@ they fail criterion 1 (plurality of distinct domains):
   would not reduce reader load.
 
 If one of these later grows a *new* second domain (e.g., keeper-detail
-gains its own settings sub-page), it becomes a candidate at that point —
+gains its own settings sub-page, or `connector-status` adds a
+connector-specific OAuth flow), it becomes a candidate at that point —
 not before.
 
 ### 4.3 Deferred (need refactor first)
@@ -163,9 +174,16 @@ not before.
 Each split is its own PR. No batched super-refactor.
 
 ```
-PR-1   connector-status.ts   → 5 files     (this RFC's smallest delta)
-PR-2   cost-dashboard.ts     → 4 files     (depends on no other PR)
+PR-1 (executed) cost-dashboard.ts  → 4 files  (was PR-2; promoted after
+                                              connector-status withdrawal)
+                                              merged 2026-05-08 (PR #14270)
 ```
+
+The original sequencing listed `connector-status.ts` as PR-1 and
+`cost-dashboard.ts` as PR-2. After the §4.1 amendment removed
+`connector-status.ts`, the cost split was the only remaining candidate
+and shipped first. No further splits are queued under this RFC; new
+candidates require a §3 audit + an amendment.
 
 Each PR must:
 
@@ -285,3 +303,30 @@ criteria, that's an amendment to this RFC, not a new RFC.
 - Dashboard component file moves driven by *visual* design refresh:
   separate design RFC (post-IA).
 - Any backend OCaml file split: separate RFC; this is dashboard-only.
+
+## 11. Amendment log
+
+### 2026-05-09 — `connector-status.ts` withdrawn from §4.1
+
+**Trigger**: PR-1 implementation (which was supposed to split
+`connector-status.ts`) opened the file and verified §3 criterion 1
+*before* writing any code. Verification result: 0 of `switch
+(connectorId)` or `connectorId === '<id>'` branches in 1689 LoC.
+
+**Root cause of the original mis-listing**: the §4.1 entry was sourced
+from a research summary that counted *export count* and *data-row
+plurality* (4 connectors × 3 lookup tables = "looks plural") without
+grepping for *implementation branching* (the actual ownership signal).
+The same trap as memory `feedback_self_audit_grep_only_false_positive_trap`
+— rg-only audit suffers stale categorization.
+
+**Process change applied to §3 criteria**: criterion 1 ("Plurality of
+distinct domains") now means **branching plurality** in the
+implementation, not data-row plurality in lookup tables. Future
+candidate audits must include `rg "switch \(\$ID\)|\$ID === '"
+<file>` as a verification step before listing in §4.1.
+
+**Outcome**: PR-1 pivoted to `cost-dashboard.ts` mid-flight (merged as
+#14270). RFC-0050 now has one in-scope candidate (already done) and
+six §4.2 entries. Closes the RFC for in-scope work; new candidates
+require an amendment.

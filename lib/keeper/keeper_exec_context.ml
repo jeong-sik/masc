@@ -194,6 +194,17 @@ let dispatch_keeper_phase_event ~(config : Coord.config) ~keeper_name event =
    profile or hand off". *)
 let compaction_outcome_metric = "masc_keeper_compaction_outcome_total"
 
+let () =
+  Prometheus.register_counter
+    ~name:compaction_outcome_metric
+    ~help:
+      "Total Compaction_completed dispatches classified by token \
+       savings. Labels: keeper, outcome (ok = saved_tokens > 0, \
+       noop = before == after or after > before). Rising noop \
+       rate is the operational signal for \"reducer has nothing \
+       to strip, switch profile or hand off\" (#9988)."
+    ()
+
 (* Observability-only: bump the outcome counter and log the warn
    when saved_tokens <= 0.  Split from [dispatch_compaction_completed]
    so unit tests can verify classification without needing a full

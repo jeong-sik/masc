@@ -295,6 +295,30 @@ let masc_oas_error_total_metric = "masc_oas_error_total"
 
 let cross_cascade_fallback_metric = "masc_cross_cascade_fallback_total"
 
+let () =
+  Prometheus.register_counter
+    ~name:masc_oas_error_total_metric
+    ~help:
+      "Total MASC-internal errors emitted as Agent_sdk.Error.Internal \
+       payloads, classified by structured error kind. Labels: \
+       kind (cascade_exhausted | resumable_cli_session | \
+       no_tool_capable_provider | accept_rejected | \
+       admission_queue_timeout | admission_queue_rejected | \
+       turn_timeout | oas_timeout_budget | ambiguous_post_commit), \
+       cascade_name (originating cascade or \"unknown\" for \
+       cascade-less variants)."
+    ();
+  Prometheus.register_counter
+    ~name:cross_cascade_fallback_metric
+    ~help:
+      "Total times a keeper turn could not find a tool-capable \
+       provider in its own cascade and was driven by an upper layer \
+       to a different cascade. Labels: from_cascade (cascade the \
+       keeper was configured for), to_cascade (cascade that \
+       supplied the working provider), provider (debug label of \
+       the resolved provider)."
+    ()
+
 let kind_of_masc_internal_error = function
   | Cascade_exhausted _ -> "cascade_exhausted"
   | Resumable_cli_session _ -> "resumable_cli_session"

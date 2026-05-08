@@ -8,10 +8,13 @@
     web_search) and optional [<title>] / [<meta name="description">]
     extraction. *)
 
+val default_timeout_sec : int
+(** Default timeout for HTTP fetch operations (seconds). *)
+
 val handle : Yojson.Safe.t -> bool * string
 (** [handle args] handles [masc_web_fetch] tool dispatch.
     Required: [url] (string, http/https only).
-    Optional: [timeout] (int, clamped to [\[1, 60\]], default 15).
+    Optional: [timeout] (int, clamped to [\[1, 60\]], default {!default_timeout_sec}).
 
     Returns [(true, json)] with fields:
     - [url]: the requested URL

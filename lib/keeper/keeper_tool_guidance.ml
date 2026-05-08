@@ -65,7 +65,10 @@ let hints =
     ; description = "look up current public context before time-sensitive claims"
     }
   ; { name = "masc_web_fetch"
-    ; call = "`masc_web_fetch` { url: \"<page-url>\", timeout: 15 }"
+    ; call =
+        Printf.sprintf
+          "`masc_web_fetch` { url: \"<page-url>\", timeout: %d }"
+          Tool_misc_web_fetch.default_timeout_sec
     ; description = "fetch and read a web page before citing it"
     }
   ; { name = "masc_worktree_create"

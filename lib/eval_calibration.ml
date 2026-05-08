@@ -45,17 +45,12 @@ let verdict_to_string = function
   | Anti_rationalization.Reject reason -> "reject:" ^ reason
 
 let verdict_of_string raw =
-  if String.equal raw "approve" then
-    Some Anti_rationalization.Approve
-  else if String.equal raw "reject" then
-    Some (Anti_rationalization.Reject "")
-  else if String.starts_with ~prefix:"reject:" raw then
-    let prefix_len = String.length "reject:" in
-    Some
-      (Anti_rationalization.Reject
-         (String.sub raw prefix_len (String.length raw - prefix_len)))
-  else
-    None
+  match String.split_on_char ':' raw with
+  | ["approve"] -> Some Anti_rationalization.Approve
+  | ["reject"] -> Some (Anti_rationalization.Reject "")
+  | "reject" :: reason_parts ->
+      Some (Anti_rationalization.Reject (String.concat ":" reason_parts))
+  | _ -> None
 
 let label_verdict_of_verdict = function
   | Anti_rationalization.Approve -> Approve_label

@@ -21,7 +21,6 @@ let () = Mirage_crypto_rng_unix.use_default ()
 (* Test Helpers                                                  *)
 (* ============================================================ *)
 
-<<<<<<< HEAD
 (** Check for success emoji *)
 let contains_check result =
   String.length result >= 3 && String.sub result 0 3 = "\xE2\x9C\x85" (* ✅ *)
@@ -42,25 +41,6 @@ let _contains_cancel result =
   String.length result >= 4 && String.sub result 0 4 = "\xF0\x9F\x9A\xAB" (* 🚫 *)
 ;;
 
-||||||| parent of be7b3c468c (test(room): accept semantic coord results)
-(** Check for success emoji *)
-let contains_check result =
-  String.length result >= 3 && String.sub result 0 3 = "\xE2\x9C\x85"  (* ✅ *)
-
-(** Check for warning emoji *)
-let contains_warning result =
-  String.length result >= 3 && String.sub result 0 3 = "\xE2\x9A\xA0"  (* ⚠ *)
-
-(** Check for error emoji *)
-let contains_error result =
-  String.length result >= 3 && String.sub result 0 3 = "\xE2\x9D\x8C"  (* ❌ *)
-
-(** Check for cancel emoji *)
-let _contains_cancel result =
-  String.length result >= 4 && String.sub result 0 4 = "\xF0\x9F\x9A\xAB"  (* 🚫 *)
-
-=======
->>>>>>> be7b3c468c (test(room): accept semantic coord results)
 (** Substring check helper *)
 let str_contains s substring =
   let len_s = String.length s in

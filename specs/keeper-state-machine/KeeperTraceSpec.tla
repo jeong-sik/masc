@@ -6,17 +6,18 @@ EXTENDS Naturals
 
 PhaseNames ==
     {"Offline", "Running", "Failing", "Overflowed", "Compacting", "HandingOff",
-     "Draining", "Paused", "Stopped", "Crashed", "Restarting", "Dead"}
+     "Draining", "Paused", "Stopped", "Crashed", "Restarting", "Dead", "Zombie"}
 
 CanTransition(from, to) ==
     CASE from = "Stopped" -> FALSE
       [] from = "Dead" -> FALSE
+      [] from = "Zombie" -> FALSE
       [] from = "Offline" -> to \in {"Running", "Stopped", "Draining"}
       [] from = "Running" -> to \in {"Failing", "Overflowed", "Compacting",
                                      "HandingOff", "Draining", "Paused",
                                      "Stopped", "Crashed"}
       [] from = "Failing" -> to \in {"Running", "Overflowed", "Crashed",
-                                     "Draining", "Paused"}
+                                     "Draining", "Paused", "Zombie"}
       [] from = "Overflowed" -> to \in {"Running", "Compacting", "Paused",
                                         "Draining", "Crashed"}
       [] from = "Compacting" -> to \in {"Running", "Overflowed", "Failing",
@@ -60,6 +61,7 @@ DerivePhase ==
     IF stop_requested /\ drain_complete
        /\ ~compaction_active /\ ~handoff_active THEN "Stopped"
     ELSE IF launch_pending /\ ~fiber_alive THEN "Offline"
+    ELSE IF recorded_phase = "Zombie" THEN "Zombie"
     ELSE IF ~fiber_alive /\ ~restart_budget_remaining THEN "Dead"
     ELSE IF ~fiber_alive /\ restart_budget_remaining /\ backoff_elapsed THEN "Restarting"
     ELSE IF ~fiber_alive /\ restart_budget_remaining THEN "Crashed"

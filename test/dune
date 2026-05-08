@@ -60,6 +60,7 @@
         test_agent_stress
         test_keeper_tool_use_failure_counter
         test_keeper_compaction_outcome_counter
+        test_keeper_sub_fsm_guards
         test_keeper_usage_trust_counter
         test_llm_metric_bridge
         test_cost_usd_source_attribution_10318
@@ -443,6 +444,7 @@
           test_keeper_state_machine
           test_keeper_state_machine_correspondence
           test_keeper_lifecycle_hooks
+          test_keeper_sub_fsm_guards
           test_keeper_subprocess_registry
           test_keeper_social_model_magentic_ledger_fsm
           test_keeper_overflow_recovery

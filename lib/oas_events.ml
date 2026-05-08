@@ -23,7 +23,7 @@
    publishing Custom("masc:...") onto OAS's shared bus. *)
 let masc_publish event =
   match Masc_event_bus.get () with
-  | Some mb -> Oas_bus_instrument.publish mb event
+  | Some mb -> Agent_sdk_metrics_bridge.publish mb event
   | None -> ()
 
 (** Publish a broadcast event to the shared Event_bus. *)

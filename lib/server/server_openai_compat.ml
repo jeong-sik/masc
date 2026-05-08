@@ -120,7 +120,7 @@ let route_cascade ~message ~system_prompt ~max_tokens ~temperature
     )
   with
   | Ok result ->
-    Ok (Oas_response.text_of_response result.response)
+    Ok (Agent_sdk_response.text_of_response result.response)
   | Error err ->
     Error (Agent_sdk.Error.to_string err)
 

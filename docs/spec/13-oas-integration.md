@@ -285,7 +285,7 @@ val tool_result : ?is_error:bool -> tool_use_id:string -> content:string
   -> unit -> Agent_sdk.Types.message
 ```
 
-### 7.2 Oas_response
+### 7.2 Agent_sdk_response
 
 `oas_response.ml`은 OAS 응답 읽기 헬퍼:
 

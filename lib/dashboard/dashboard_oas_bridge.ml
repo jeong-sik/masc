@@ -210,7 +210,7 @@ let throughput_from_response ~(usage : Agent_sdk.Types.api_usage option)
 let sample_of_response ~provider_id ~model_id ?total_duration_ms
     ?(serialization_ms = 0.0) ?(retry_count = 0) ~status
     (response : Agent_sdk.Types.api_response) =
-  let usage = Oas_response.usage response in
+  let usage = Agent_sdk_response.usage response in
   let total_duration_ms =
     duration_from_response ?total_duration_ms response
   in

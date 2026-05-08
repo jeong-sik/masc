@@ -218,7 +218,7 @@ let compute_judgments
         (* See dashboard_governance_judge.ml for rationale: LLMs frequently
            wrap JSON in ```json … ``` markdown fences. Lenient_json strips
            fences and applies other deterministic recovery transforms. *)
-        let raw_text = Oas_response.text_of_response response in
+        let raw_text = Agent_sdk_response.text_of_response response in
         match Llm_provider.Lenient_json.parse raw_text with
         | `Assoc [("raw", `String raw)] ->
             (* #9774: include a preview so the failure diagnostic doesn't

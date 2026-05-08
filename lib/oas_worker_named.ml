@@ -164,7 +164,7 @@ let run_named
     ?max_input_tokens
     ?max_cost_usd
     ?wait_timeout_sec
-    ?(accept = fun (_ : Oas_response.api_response) -> true)
+    ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?guardrails
     ?hooks
     ?context_reducer
@@ -1267,7 +1267,7 @@ let run_model_by_label
     ?max_input_tokens
     ?max_cost_usd
     ?wait_timeout_sec
-    ?(accept = fun (_ : Oas_response.api_response) -> true)
+    ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?guardrails
     ?hooks
     ?context_reducer

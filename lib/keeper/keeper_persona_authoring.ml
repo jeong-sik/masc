@@ -976,7 +976,7 @@ let handle_persona_generate ctx args =
                     "persona generation failed: %s"
                     (Agent_sdk.Error.to_string err)) )
            | Ok result ->
-             let raw_text = Oas_response.text_of_response result.Oas_worker.response in
+             let raw_text = Agent_sdk_response.text_of_response result.Oas_worker.response in
              (try
                 let parsed = Llm_provider.Lenient_json.parse raw_text in
                 let handle = parsed_handle_payload fallback_handle parsed in

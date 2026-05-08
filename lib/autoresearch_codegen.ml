@@ -162,4 +162,4 @@ let generate_code_change ~goal ~baseline ~lower_is_better ~history ~insights
     )
   with
   | Error e -> Result.error (Printf.sprintf "MODEL call failed: %s" (Agent_sdk.Error.to_string e))
-  | Ok result -> parse_model_code_response (Oas_response.text_of_response result.Oas_worker.response)
+  | Ok result -> parse_model_code_response (Agent_sdk_response.text_of_response result.Oas_worker.response)

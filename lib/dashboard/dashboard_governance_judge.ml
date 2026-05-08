@@ -665,7 +665,7 @@ let compute_judgments
   | Ok result -> (
       let response = result.Oas_worker.response in
       try
-        let raw_text = Oas_response.text_of_response response in
+        let raw_text = Agent_sdk_response.text_of_response response in
         let generated_at = now_iso () in
         let expires_at = iso_of_unix (Unix.gettimeofday () +. cache_ttl_sec ()) in
         (* #9880 facet 4: 17% of yesterday's judgment records had

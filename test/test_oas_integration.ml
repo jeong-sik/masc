@@ -812,7 +812,7 @@ let test_agent_failed_preserves_agent_structured_error () =
     (json_int_field "limit" detail_fields)
 
 let test_oas_log_bridge_turn_completed_summary () =
-  Oas_log_bridge.install ();
+  Agent_sdk_log_bridge.install ();
   let before_seq =
     match Masc_log.Ring.recent ~module_filter:"oas:agent" ~limit:1 () with
     | [] -> None

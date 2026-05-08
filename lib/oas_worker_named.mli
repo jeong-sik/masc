@@ -61,7 +61,7 @@ val run_named :
   ?max_input_tokens:int ->
   ?max_cost_usd:float ->
   ?wait_timeout_sec:float ->
-  ?accept:(Oas_response.api_response -> bool) ->
+  ?accept:(Agent_sdk_response.api_response -> bool) ->
   ?guardrails:Agent_sdk.Guardrails.t ->
   ?hooks:Agent_sdk.Hooks.hooks ->
   ?context_reducer:Agent_sdk.Context_reducer.t ->
@@ -118,7 +118,7 @@ val run_model_by_label :
   ?max_input_tokens:int ->
   ?max_cost_usd:float ->
   ?wait_timeout_sec:float ->
-  ?accept:(Oas_response.api_response -> bool) ->
+  ?accept:(Agent_sdk_response.api_response -> bool) ->
   ?guardrails:Agent_sdk.Guardrails.t ->
   ?hooks:Agent_sdk.Hooks.hooks ->
   ?context_reducer:Agent_sdk.Context_reducer.t ->

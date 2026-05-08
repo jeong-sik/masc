@@ -164,8 +164,8 @@ let cascade_name_for_agent_type _agent_type =
     Permissive by default: any non-empty content with any stop_reason is valid.
     Invariant: API errors are caught upstream by Oas_worker.run_named returning Error;
     the accept callback only receives responses where the API call succeeded. *)
-let model_response_is_valid (resp : Oas_response.api_response) =
-  let text = String.trim (Oas_response.text_of_response resp) in
+let model_response_is_valid (resp : Agent_sdk_response.api_response) =
+  let text = String.trim (Agent_sdk_response.text_of_response resp) in
   String.length text > 0
   && (match resp.stop_reason with
       | Agent_sdk.Types.EndTurn | Agent_sdk.Types.MaxTokens
@@ -187,7 +187,7 @@ let call_model_direct_sync ~agent_type ~prompt =
     with
     | Ok result ->
         let resp = result.Oas_worker.response in
-        let text = Oas_response.text_of_response resp in
+        let text = Agent_sdk_response.text_of_response resp in
         debug_log
           (Printf.sprintf "MODEL_USED %s for agent_type=%s"
              resp.model agent_type);

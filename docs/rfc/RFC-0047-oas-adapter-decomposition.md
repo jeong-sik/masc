@@ -211,17 +211,31 @@ Build-green hard gate at every PR.
   reference against which each subsequent phase verifies "no caller
   surface drift".
 
-### Phase 2 — Clean 4 rename (`oas_*` → `agent_sdk_*`)
+### Phase 2 — Clean 3 rename (`oas_*` → `agent_sdk_*`)
 
-- Files: `oas_worker.ml`, `oas_response.ml`, `oas_log_bridge.ml`,
-  `oas_bus_instrument.ml`. All 4 already have zero cross-domain refs;
-  they are pure SDK adapters.
-- Action: `git mv` + caller import update. Use a codemod script
-  (`scripts/rfc-0047-phase-2-rename.sh`) to update all 49 caller files
-  in one atomic commit.
-- Risk: low. ~200 LOC churn, mechanical.
+**Scope correction (during Phase 2 PR, 2026-05-08).** The original RFC
+listed 4 files. Inspection found `lib/oas_worker.ml` is structurally a
+**facade** — `include Oas_worker_exec`, `include Oas_worker_cascade`,
+`include Oas_worker_named` — over three modules that are NOT clean
+(Phase 3 / Phase 4 targets). Renaming the facade alone produces an
+`Agent_sdk_call` module that still re-exports `Oas_worker_named.run_named`,
+i.e. the lie moves but does not disappear. `oas_worker.ml` is deferred
+to Phase 4, when its dependents are dissolved.
+
+- Files in scope (3): `oas_response.ml`, `oas_log_bridge.ml`,
+  `oas_bus_instrument.ml`. All 3 are self-contained — zero cross-domain
+  refs, no `include Oas_*`, only `Agent_sdk.*` external use.
+- Renames:
+  - `lib/oas_response.ml`(+`.mli`) → `lib/agent_sdk_response.ml`(+`.mli`)
+  - `lib/oas_log_bridge.ml`(+`.mli`) → `lib/agent_sdk_log_bridge.ml`(+`.mli`)
+  - `lib/oas_bus_instrument.ml`(+`.mli`) → `lib/agent_sdk_metrics_bridge.ml`(+`.mli`)
+- Action: `git mv` + caller updates across ~41 references
+  (`Agent_sdk_response` 21 + `Agent_sdk_metrics_bridge` 19 + `Agent_sdk_log_bridge` 1).
+- Risk: low. Mechanical rename, no behavior change.
 - Verification: `dune build`, `dune runtest`, partial-match warning
-  count unchanged.
+  count unchanged. Inventory baseline regenerated in same PR — 3 modules
+  drop from `lib/oas_*` enumeration; their refs disappear from the
+  caller inventory.
 
 ### Phase 3 — Cascade extraction (7 files → `lib/cascade/`)
 

@@ -312,7 +312,7 @@ let emit_gate_event
        (match source_line with Some line -> `Int line | None -> `Null));
     ] in
     (try
-      Oas_bus_instrument.publish bus
+      Agent_sdk_metrics_bridge.publish bus
         (Agent_sdk.Event_bus.mk_event
            (Agent_sdk.Event_bus.Custom ("masc.keeper_gate", payload)))
     with

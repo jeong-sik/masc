@@ -2068,18 +2068,18 @@ let init () =
     "Estimated OAS Event_bus per-subscriber stream depth, labeled by \
      subscriber_purpose. Indirect measure: publishes_matching_filter - \
      events_drained, tracked MASC-side for subscriptions created via \
-     Oas_bus_instrument. OAS uses bounded Eio.Stream (default 256); values \
+     Agent_sdk_metrics_bridge. OAS uses bounded Eio.Stream (default 256); values \
      approaching this cap indicate impending publish blocking."
     Gauge;
   add metric_oas_bus_publish_block_seconds
     "Cumulative seconds spent inside Agent_sdk.Event_bus.publish when routed \
-     through Oas_bus_instrument.publish. A sustained ramp indicates a \
+     through Agent_sdk_metrics_bridge.publish. A sustained ramp indicates a \
      subscriber drain loop has fallen behind and publishers are blocking \
      on Eio.Stream.add."
     Counter;
   add metric_oas_bus_publish
     "Total Agent_sdk.Event_bus.publish calls routed through \
-     Oas_bus_instrument.publish."
+     Agent_sdk_metrics_bridge.publish."
     Counter;
   add metric_runtime_ollama_probe_generate_skips
     "Total Ollama runtime probes that intentionally skipped /api/generate. \

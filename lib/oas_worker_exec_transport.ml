@@ -326,7 +326,12 @@ let authorization_header_from_policy
     (function
       | Llm_provider.Llm_transport.Http_server { name = "masc"; headers; _ } ->
           List.find_opt is_authorization_header headers
-      | _ -> None)
+      (* Only the [Http_server] entry whose [name = "masc"] carries the
+         per-request Authorization header. Other named [Http_server]s and
+         [Stdio_server]s contribute no auth header on this lane. New
+         transport variants must re-decide explicitly. *)
+      | Llm_provider.Llm_transport.Http_server _
+      | Llm_provider.Llm_transport.Stdio_server _ -> None)
     policy.servers
 
 let per_keeper_authorization_header ~agent_name =

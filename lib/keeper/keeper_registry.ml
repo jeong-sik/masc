@@ -720,7 +720,7 @@ let validate_decision_transition ~from ~to_ =
          | (Decision_gate_rejected, Decision_undecided) -> false  (* new turn init is reset, not transition *)
          | (Decision_gate_rejected, Decision_guard_ok) -> true  (* via prepare_turn_retry_after_compaction *)
          | (Decision_gate_rejected, Decision_gate_rejected) -> true
-         | (Decision_gate_rejected, Decision_tool_policy_selected) -> false  (* not valid within a single turn *)
+         | (Decision_gate_rejected, Decision_tool_policy_selected) -> true  (* via prepare_agent_setup on retry after gate rejection *)
          (* from Decision_tool_policy_selected *)
          | (Decision_tool_policy_selected, Decision_undecided) -> false  (* new turn init is reset, not transition *)
          | (Decision_tool_policy_selected, Decision_guard_ok) -> true  (* via prepare_turn_retry_after_compaction *)

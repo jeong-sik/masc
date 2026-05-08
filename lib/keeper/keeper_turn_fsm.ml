@@ -294,12 +294,13 @@ let observe_phase_dwell ~keeper_name ~from_label =
   | Some prev_at ->
     let now = Unix.gettimeofday () in
     let dwell = Float.max 0.0 (now -. prev_at) in
-    (try
-       Prometheus.observe_histogram
-         Prometheus.metric_keeper_turn_phase_duration
-         ~labels:[ ("keeper", keeper_name); ("from", from_label) ]
-         dwell
-     with _ -> ())
+    (* Cancel-aware: bare [try ... with _ -> ()] would swallow
+       [Eio.Cancel.Cancelled] and break switch teardown. *)
+    Safe_ops.protect ~default:() (fun () ->
+      Prometheus.observe_histogram
+        Prometheus.metric_keeper_turn_phase_duration
+        ~labels:[ ("keeper", keeper_name); ("from", from_label) ]
+        dwell)
 
 let emit_transition ?ctx ~keeper_name ~turn_id ?prev state =
   let prev_label =

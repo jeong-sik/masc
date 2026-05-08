@@ -2243,8 +2243,9 @@ let init () =
      Labeled by kind."
     Counter;
   add metric_keeper_dispatch_event_failures
-    "Total keeper state machine dispatch_event failures in supervisor. \
-     Labeled by event type."
+    "Total keeper state-machine dispatch and keeper cycle side-effect \
+     failures. Labels include keeper plus site, event, or reason depending \
+     on the emitting path."
     Counter;
   add metric_keeper_directive_failures
     "Total gRPC directive routing failures — target agent not in registry \

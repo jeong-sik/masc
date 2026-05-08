@@ -678,7 +678,7 @@ let emit_operator_broadcast config (receipt : t) ~disposition ~reason =
       ~payload
       ()
   in
-  Log.Keeper.info
+  Log.Keeper.error
     "%s: operator_broadcast_required emitted disposition=%s reason=%s seq=%d"
     receipt.keeper_name disposition reason event.seq
 

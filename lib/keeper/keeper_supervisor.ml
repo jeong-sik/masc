@@ -386,6 +386,14 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
            already fired on the body's happy/error paths. *)
         try
           Keeper_registry.cleanup_tracking ~base_path meta.name;
+          (* #14187 follow-up: a keeper that crashed after exhausting its
+             turn-livelock budget would restart into the same turn_id
+             (because blocked turns do not increment total_turns).  The
+             in-memory livelock state then immediately re-blocked the
+             fresh restart, making recovery impossible.  Clear the
+             per-keeper livelock bookkeeping during cleanup so the next
+             restart starts with a fresh counter. *)
+          Keeper_turn_livelock.reset_keeper_livelock ~keeper:meta.name;
           if not !resolved then begin
             if Shutdown.is_shutting_down_global () then begin
               Log.Keeper.warn "%s: fiber unresolved during shutdown (not a crash)" meta.name;

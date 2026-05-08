@@ -86,68 +86,17 @@ type token_snapshot =
     tool requires extending [Tool_id] and the compiler then flags every
     site that needs to acknowledge it. The runtime registry below stays
     string-keyed because plugin tools register at runtime by name. *)
-let default_tool_entries : (Tool_id.t * tool_effect_class) list =
-  [ (* ── Read-only tools ─────────────────────────────────────── *)
-    (* File & code navigation *)
-    `Read, Read_only
-  ; `Glob, Read_only
-  ; `Grep, Read_only
-  ; `Search, Read_only
-  ; `List_dir, Read_only
-  ; `Find_file, Read_only
-  ; `Read_file, Read_only
-  ; `Find_symbol, Read_only
-  ; `Get_symbols_overview, Read_only
-  ; `Find_referencing_symbols, Read_only
-  ; `Search_for_pattern, Read_only
-  ; (* Notebook *)
-    `Notebook_read, Read_only
-  ; (* Browser observation *)
-    `Read_console_messages, Read_only
-  ; `Read_network_requests, Read_only
-  ; `Get_page_text, Read_only
-  ; `Read_page, Read_only
-  ; `Tabs_context_mcp, Read_only
-  ; (* Task queries *)
-    `Task_list, Read_only
-  ; `Task_get, Read_only
-  ; `Task_output, Read_only
-  ; (* ── Local-mutation tools ────────────────────────────────── *)
-    (* File editing *)
-    `Write, Local_mutation
-  ; `Edit, Local_mutation
-  ; `Create_text_file, Local_mutation
-  ; `Replace_content, Local_mutation
-  ; `Rename_symbol, Local_mutation
-  ; `Insert_after_symbol, Local_mutation
-  ; `Insert_before_symbol, Local_mutation
-  ; `Replace_symbol_body, Local_mutation
-  ; `Notebook_edit, Local_mutation
-  ; (* Task & team management *)
-    `Task_create, Local_mutation
-  ; `Task_update, Local_mutation
-  ; `Task_stop, Local_mutation
-  ; `Team_create, Local_mutation
-  ; `Team_delete, Local_mutation
-  ; (* ── External-effect tools ───────────────────────────────── *)
-    (* HITL *)
-    `Ask_user_question, External_effect
-  ; (* Web & research *)
-    `Web_fetch, External_effect
-  ; `Web_search, External_effect
-  ; (* Browser interaction *)
-    `Navigate, External_effect
-  ; `Computer, External_effect
-  ; `Find, External_effect
-  ; `Form_input, External_effect
-  ; `Javascript_tool, External_effect
-  ; `Tabs_create_mcp, External_effect
-  ; `Upload_image, External_effect
-  ; (* ── Shell-dynamic tools (require input analysis at runtime) *)
-    `Bash, Shell_dynamic
-  ; `Execute_shell_command, Shell_dynamic
-  ]
-;;
+(* RFC-OAS-012: emptied. Hardcoded consumer-side tool names (Claude Code /
+   Serena / claude-in-chrome MCP / Team_*) were a layering violation —
+   masc_mcp.cdal_runtime is a generic governance framework and should not
+   pre-classify particular consumer tool catalogues. Consumers now register
+   their tools via [register_tool_class] or supply [Tool.descriptor.mutation_class]
+   at construction; classify_tool returns External_effect (fail-closed) for
+   anything not registered. The 46 hardcoded entries that lived here were
+   originally the closest-to-OAS surface and were migrated verbatim from
+   OAS in MM-2; their cleanup was the original intent of RFC-OAS-009 v1
+   and is finished here, post-migration. *)
+let default_tool_entries : (Tool_id.t * tool_effect_class) list = []
 
 (** Global mutable registry seeded from [default_tool_entries].
     Supports runtime extension via [register_tool_class].
@@ -543,64 +492,23 @@ let hooks st =
 (* ── Inline tests ──────────────────────────────────────────────── *)
 [@@@coverage off]
 
-let%test "builtin_descriptor returns Some for read-only tools" =
-  match builtin_descriptor "read" with
-  | Some d ->
-    d.mutation_class = Some "read_only"
-    && d.concurrency_class = Some Tool.Parallel_read
-    && d.permission = Some Tool.ReadOnly
-  | None -> false
-;;
-
-let%test "builtin_descriptor returns Some for mutation tools" =
-  match builtin_descriptor "edit" with
-  | Some d ->
-    d.mutation_class = Some "local_mutation"
-    && d.concurrency_class = Some Tool.Sequential_workspace
-    && d.permission = Some Tool.Write
-  | None -> false
-;;
-
-let%test "builtin_descriptor returns Some for external tools" =
-  match builtin_descriptor "web_fetch" with
-  | Some d ->
-    d.mutation_class = Some "external_effect"
-    && d.concurrency_class = Some Tool.Exclusive_external
-    && d.permission = Some Tool.Destructive
-  | None -> false
-;;
-
-let%test "builtin_descriptor returns Some for ask_user_question" =
-  match builtin_descriptor "ask_user_question" with
-  | Some d -> d.concurrency_class = Some Tool.Exclusive_external
-  | None -> false
-;;
-
-let%test "builtin_descriptor returns Some for task tools" =
-  match builtin_descriptor "task_list" with
-  | Some d -> d.concurrency_class = Some Tool.Parallel_read
-  | None -> false
-;;
-
-let%test "builtin_descriptor returns Some for task_create" =
-  match builtin_descriptor "task_create" with
-  | Some d -> d.concurrency_class = Some Tool.Sequential_workspace
-  | None -> false
-;;
-
-let%test "builtin_descriptor returns Some for shell tools" =
-  match builtin_descriptor "bash" with
-  | Some d -> d.mutation_class = Some "external_effect" && d.shell <> None
-  | None -> false
-;;
-
-let%test "builtin_descriptor returns None for unknown tools" =
-  builtin_descriptor "nonexistent_tool_xyz" = None
-;;
+(* RFC-OAS-012: removed 8 builtin_descriptor inline tests that pinned
+   the 46 hardcoded consumer tool names ("read"/"edit"/"web_fetch"/
+   "ask_user_question"/"task_list"/"task_create"/"bash"/"nonexistent")
+   into the boundary classifier. With default_tool_entries now empty,
+   builtin_descriptor returns None for every name — the tests had no
+   ground truth left and were the inverse statement of the layering
+   violation RFC-OAS-009 v1 set out to fix. *)
 
 let%test "register_tool_class extends registry" =
   register_tool_class "my_custom_tool" Read_only;
   match builtin_descriptor "my_custom_tool" with
   | Some d -> d.mutation_class = Some "read_only"
   | None -> false
+;;
+
+let%test "builtin_descriptor returns None for unregistered tools" =
+  (* Empty default_tool_entries means every name without an explicit
+     register_tool_class call returns None. Fail-closed by design. *)
+  builtin_descriptor "nonexistent_tool_xyz" = None
 ;;

@@ -199,7 +199,9 @@ let test_phase_turn_alignment_strengthening () =
    requires measurement_captured=true. The bug sets selecting while
    measurement is still unbound (analogous to no tool policy selected). *)
 let test_bug_selecting_without_tool_policy_caught () =
-  let post_bug_cascade : Obs.cascade_state = Cascade_selecting in
+  let post_bug_cascade : Masc_mcp.Keeper_registry.packed_cascade_state =
+    Masc_mcp.Keeper_registry.Packed Cascade_selecting
+  in
   let measured = false in
   let i2 = Obs.check_no_cascade_before_measurement
              ~cascade_state:post_bug_cascade
@@ -218,7 +220,9 @@ let test_bug_selecting_without_tool_policy_caught () =
    OCaml mirror: same predicate as BugSelectingWithoutToolPolicy — selecting
    with no measurement captured. *)
 let test_bug_select_without_measurement_caught () =
-  let post_bug_cascade : Obs.cascade_state = Cascade_selecting in
+  let post_bug_cascade : Masc_mcp.Keeper_registry.packed_cascade_state =
+    Masc_mcp.Keeper_registry.Packed Cascade_selecting
+  in
   let measured = false in
   let i2 = Obs.check_no_cascade_before_measurement
              ~cascade_state:post_bug_cascade
@@ -274,7 +278,9 @@ let test_bug_compaction_clears_overflow_caught () =
      DerivePhase would project Overflowed (context_overflow=true, compaction=false).
      The invariant says CompactionCompleted must clear overflow flags. *)
   let post_bug_phase : SM.phase = SM.Overflowed in
-  let post_bug_kmc : Obs.compaction_stage = Compaction_accumulating in
+  let post_bug_kmc : Masc_mcp.Keeper_registry.packed_compaction_stage =
+    Masc_mcp.Keeper_registry.Packed Compaction_accumulating
+  in
   let i3 = Obs.check_compaction_atomicity post_bug_phase post_bug_kmc in
   Alcotest.(check bool)
     "BuggyCompactionCompleted → phase=Overflowed + kmc=accumulating (I3 holds)"
@@ -286,7 +292,9 @@ let test_bug_compaction_clears_overflow_caught () =
      but the BUG is that compaction completed without clearing the flag.
      This is an action-property violation best caught at the event level. *)
   let post_bug_phase_bad : SM.phase = SM.Compacting in
-  let post_bug_kmc_bad : Obs.compaction_stage = Compaction_accumulating in
+  let post_bug_kmc_bad : Masc_mcp.Keeper_registry.packed_compaction_stage =
+    Masc_mcp.Keeper_registry.Packed Compaction_accumulating
+  in
   let i3_violated =
     Obs.check_compaction_atomicity post_bug_phase_bad post_bug_kmc_bad
   in

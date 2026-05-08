@@ -1801,7 +1801,14 @@ let test_runtime_trust_snapshot_reads_terminal_reason_code_alias () =
         (List.exists
            (fun event ->
              event |> member "kind" |> to_string = "terminal_reason"
-             && event |> member "summary" |> to_string = "provider or cascade failed")
+             (* RFC-0047 PR-3 (#14271) removed the legacy
+                "provider_error" alias special-case in
+                [Keeper_turn_disposition.summary]; the wire string
+                "provider_error" now decodes to
+                [Unknown { raw_error = "provider_error" }] whose
+                summary is "keeper turn ended with provider_error". *)
+             && event |> member "summary" |> to_string
+                = "keeper turn ended with provider_error")
            timeline))
 
 let test_prompt_contains_identity () =

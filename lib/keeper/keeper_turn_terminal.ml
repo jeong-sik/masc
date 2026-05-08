@@ -121,16 +121,18 @@ let of_failure ?(post_commit_ambiguous = false) ?(tool_call_count = 0) ~raw_erro
        | _ ->
          let fallback = of_legacy_error_text raw_error in
          if is_unknown_empty fallback
-         then (
-           (* RFC-0047 follow-up: emit typed [Provider_error (Sdk_error _)]
-              directly so [registry_failure_reason_of_terminal_reason] can
-              match exhaustively on disposition without a substring guard
-              for "api_error_*" wires. *)
-           let wire = Keeper_agent_error.terminal_reason_code_of_sdk_error err in
+         then
+           (* RFC-0047 follow-up: emit typed [Provider_error] directly via
+              [Keeper_agent_error.terminal_reason_code_of_sdk_error_typed]
+              so [registry_failure_reason_of_terminal_reason] can match
+              exhaustively on disposition without a substring guard for
+              "api_error_*" wires. The typed bridge encapsulates the
+              [Sdk_error _] wrapping; the consumer no longer touches a
+              raw wire string. *)
            of_disposition
              ~source:"typed_error"
              (Keeper_turn_disposition.Provider_error
-                (Keeper_turn_terminal_code.Sdk_error wire)))
+                (Keeper_agent_error.terminal_reason_code_of_sdk_error_typed err))
          else fallback))
 ;;
 

@@ -17,7 +17,7 @@ let test_permissive_default_auto_safe () =
 let test_empty_uses_strict_defaults () =
   let cfg = Approval_config.empty in
   assert (cfg.per_agent = []);
-  let o = Approval_config.lookup cfg ~actor:"anybody" in
+  let o = Approval_config.lookup cfg ~actor:`Other_agent in
   assert (o = Approval_config.strict_default)
 
 let test_lookup_matches_registered_agent () =
@@ -25,13 +25,13 @@ let test_lookup_matches_registered_agent () =
     {
       defaults = Approval_config.strict_default;
       per_agent = [
-        ("keeper/alpha", Approval_config.permissive_default);
+        (`Coord_git, Approval_config.permissive_default);
       ];
     }
   in
-  let alpha = Approval_config.lookup cfg ~actor:"keeper/alpha" in
+  let alpha = Approval_config.lookup cfg ~actor:`Coord_git in
   assert (alpha = Approval_config.permissive_default);
-  let other = Approval_config.lookup cfg ~actor:"keeper/beta" in
+  let other = Approval_config.lookup cfg ~actor:`Other_agent in
   assert (other = Approval_config.strict_default)
 
 let () =

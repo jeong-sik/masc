@@ -564,7 +564,7 @@ let handle_keeper_shell
                      ]))
           | None ->
             let st, out =
-              Masc_exec.Exec_gate.run_argv_with_status ~actor:"Keeper_shell"
+              Masc_exec.Exec_gate.run_argv_with_status ~actor:`Keeper_shell
                 ~raw_source:(String.concat " " argv)
                 ~summary:"keeper shell op"
                 ~timeout_sec:Keeper_shell_shared.read_timeout_sec argv
@@ -945,14 +945,14 @@ let handle_keeper_shell
            match Keeper_gh_env.keeper_process_env config ~keeper_name:meta.name with
            | Error err -> (Unix.WEXITED 127, err)
            | Ok env ->
-               Masc_exec.Exec_gate.run_argv_with_status ~actor:"Coord_git"
+               Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
                  ~raw_source:(String.concat " " argv)
                  ~summary:"keeper brokered git command"
                  ?env ~cwd ~timeout_sec argv
          in
          let normalize_existing_origin_to_https clone_path =
            match
-             Masc_exec.Exec_gate.run_argv_with_status ~actor:"Coord_git"
+             Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
                ~raw_source:("git -C " ^ clone_path ^ " remote get-url origin")
                ~summary:"keeper git remote get-url"
                ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Git_meta ())
@@ -964,7 +964,7 @@ let handle_keeper_shell
              if String.equal origin normalized then None
              else
                (match
-                  Masc_exec.Exec_gate.run_argv_with_status ~actor:"Coord_git"
+                  Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
                     ~raw_source:("git -C " ^ clone_path ^ " remote set-url origin " ^ normalized)
                     ~summary:"keeper git remote set-url"
                     ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Git_meta ())
@@ -1018,7 +1018,7 @@ let handle_keeper_shell
                     | Ok result -> (result.status, result.output)
                     | Error msg -> (Unix.WEXITED 127, msg)
                   else
-                    Masc_exec.Exec_gate.run_argv_with_status ~actor:"Coord_git"
+                    Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
                       ~raw_source:("git -C " ^ clone_path ^ " pull --ff-only")
                       ~summary:"keeper git pull"
                       ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ())
@@ -1072,7 +1072,7 @@ let handle_keeper_shell
                | Ok result -> (result.status, result.output)
                | Error msg -> (Unix.WEXITED 127, msg)
              else
-               Masc_exec.Exec_gate.run_argv_with_status ~actor:"Coord_git"
+               Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
                  ~raw_source:("git clone " ^ String.concat " " depth_args ^ " " ^ clone_url ^ " " ^ clone_path)
                  ~summary:"keeper git clone"
                  ~timeout_sec:(Keeper_tool_policy.clone_timeout_sec ())
@@ -1225,7 +1225,7 @@ let handle_keeper_shell
                    let gh_argv =
                      "gh" :: Keeper_gh_shared.gh_simple_command_argv parsed_command
                    in
-                   Ok (Masc_exec.Exec_gate.run_argv_with_status ~actor:"Keeper_shell"
+                   Ok (Masc_exec.Exec_gate.run_argv_with_status ~actor:`Keeper_shell
                          ~raw_source:(String.concat " " gh_argv)
                          ~summary:"keeper gh command"
                          ?env ~cwd ~timeout_sec gh_argv))

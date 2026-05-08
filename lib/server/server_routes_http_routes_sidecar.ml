@@ -777,7 +777,7 @@ let handle_stop state request reqd =
                   (`Assoc [ ("ok", `Bool false); ("error", `String msg) ])
             | Ok desired ->
                 let (_status, stdout) =
-                  Masc_exec.Exec_gate.run_argv_with_status ~actor:"System_spawn" ~raw_source:(script ^ " stop") ~summary:"sidecar stop script"
+                  Masc_exec.Exec_gate.run_argv_with_status ~actor:`System_spawn ~raw_source:(script ^ " stop") ~summary:"sidecar stop script"
                     ~timeout_sec:Env_config_runtime.Sidecar.control_command_timeout_sec
                     [ script; "stop" ]
                 in
@@ -833,7 +833,7 @@ let handle_logs state request reqd =
            ])
       else
         let (_status, stdout) =
-          Masc_exec.Exec_gate.run_argv_with_status ~actor:"System_runtime_info" ~raw_source:("tail -n " ^ string_of_int lines ^ " " ^ path) ~summary:"tail sidecar logs"
+          Masc_exec.Exec_gate.run_argv_with_status ~actor:`System_runtime_info ~raw_source:("tail -n " ^ string_of_int lines ^ " " ^ path) ~summary:"tail sidecar logs"
             ~timeout_sec:Env_config_runtime.Sidecar.control_command_timeout_sec
             [ "tail"; "-n"; string_of_int lines; path ]
         in
@@ -881,7 +881,7 @@ let fetch_schema ?base_path id =
        | Ok sidecar_dir ->
            let argv = python_argv_for sidecar_dir in
            let (status, stdout) =
-             Masc_exec.Exec_gate.run_argv_with_status ~actor:"System_spawn" ~raw_source:(String.concat " " argv) ~summary:"python schema dump"
+             Masc_exec.Exec_gate.run_argv_with_status ~actor:`System_spawn ~raw_source:(String.concat " " argv) ~summary:"python schema dump"
                ~timeout_sec:Env_config_runtime.Sidecar.schema_generation_timeout_sec
                ~cwd:sidecar_dir argv
            in

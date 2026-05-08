@@ -87,7 +87,7 @@ let test_typed_safe_enforced_blocks () =
   with_env "MASC_EXEC_GATE" (Some "enforced") (fun () ->
     let status, out =
       Exec_gate.run_argv_with_status
-        ~actor:"unknown/strict"
+        ~actor:`Other_agent
         ~raw_source:"ls"
         ~summary:"typed ls"
         ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Test ())
@@ -100,7 +100,7 @@ let test_typed_audited_internal_allows () =
   with_env "MASC_EXEC_GATE" (Some "enforced") (fun () ->
     let status, out =
       Exec_gate.run_argv_with_status
-        ~actor:"coord/git"
+        ~actor:`Coord_git
         ~raw_source:"git status"
         ~summary:"typed git status"
         ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Test ())
@@ -113,7 +113,7 @@ let test_typed_safe_parallel_records_shadow_and_executes () =
     with_env "MASC_EXEC_GATE" (Some "parallel") (fun () ->
       let out =
         Exec_gate.run_argv
-          ~actor:"unknown/strict"
+          ~actor:`Other_agent
           ~raw_source:"ls"
           ~summary:"typed ls"
           ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Test ())

@@ -93,7 +93,7 @@ let run_argv_with_status_retry_eintr ~timeout_sec argv =
   let rec loop attempts_left =
     let st, out =
       Masc_exec.Exec_gate.run_argv_with_status
-        ~actor:"System_task_sandbox"
+        ~actor:`System_task_sandbox
         ~raw_source:(String.concat " " argv)
         ~summary:"keeper turn sandbox command"
         ~env:(Unix.environment ())
@@ -113,7 +113,7 @@ let run_argv_with_stdin_and_status_retry_eintr ~timeout_sec ~stdin_content argv 
   let rec loop attempts_left =
     let st, out =
       Masc_exec.Exec_gate.run_argv_with_stdin_and_status
-        ~actor:"System_task_sandbox"
+        ~actor:`System_task_sandbox
         ~raw_source:(String.concat " " argv)
         ~summary:"keeper turn sandbox stdin command"
         ~env:(Unix.environment ())

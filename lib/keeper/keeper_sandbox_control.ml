@@ -196,7 +196,7 @@ let start_managed_container
                   in
                   let st, out =
                     Masc_exec.Exec_gate.run_argv_with_status
-                      ~actor:"System_task_sandbox"
+                      ~actor:`System_task_sandbox
                       ~raw_source:(String.concat " " argv)
                       ~summary:"keeper sandbox control exec"
                       ~env:(Unix.environment ())
@@ -292,7 +292,7 @@ let git_string_opt repo_path args =
   try
     let argv = "git" :: "-C" :: repo_path :: args in
     let status, out =
-      Masc_exec.Exec_gate.run_argv_with_status ~actor:"Coord_git"
+      Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
         ~raw_source:(String.concat " " argv)
         ~summary:"keeper sandbox git metadata"
         ~timeout_sec:git_metadata_timeout_sec

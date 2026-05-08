@@ -346,7 +346,7 @@ let run_argv_with_status_retry_eintr ?cwd ~timeout_sec argv =
   let max_eintr_retries = 8 in
   let rec loop attempts_left =
     let result =
-      Masc_exec.Exec_gate.run_argv_with_status ~actor:"Keeper_shell"
+      Masc_exec.Exec_gate.run_argv_with_status ~actor:`Keeper_shell
         ~raw_source:(String.concat " " argv)
         ~summary:"keeper shell command" ?cwd ~timeout_sec argv
     in

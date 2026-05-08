@@ -1280,8 +1280,12 @@ let run_turn
     let terminal_reason_code =
       match turn_result with
       | Ok _ ->
+        (* RFC-0047 PR-4: emit canonical "success" wire directly. Pre-PR-4
+           this defaulted to "completed", which [Keeper_turn_terminal.normalize_code]
+           remapped to "success" before disposition lookup. The producer-side
+           default is now the canonical wire; the normalize step is gone. *)
         Option.value
-          ~default:"completed"
+          ~default:"success"
           !receipt_stop_reason_ref
       | Error err ->
         terminal_reason_code_of_sdk_error err

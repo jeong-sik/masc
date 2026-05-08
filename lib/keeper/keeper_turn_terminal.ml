@@ -32,21 +32,8 @@ let severity_to_string = function
   | Unknown_bad -> "bad"
 ;;
 
-(* Producer-side legacy-string preprocessor. Three legacy puns map to
-   their canonical app-layer codes before [Keeper_turn_disposition.of_wire]
-   is consulted. PR-2.5 / a follow-up RFC retires these by typing the
-   producers themselves; PR-3 keeps the table because every consumer of
-   the resulting disposition is now exhaustive on the typed value. *)
-let normalize_code = function
-  | "completed" -> "success"
-  | "completion_contract_violation:require_tool_use" -> "required_tool_use_unsatisfied"
-  | "api_error_timeout" -> "provider_error"
-  | code -> code
-;;
-
 let make ?(source = "typed") ?summary ?next_action code =
-  let normalised = normalize_code code in
-  let disposition = Keeper_turn_disposition.of_wire normalised in
+  let disposition = Keeper_turn_disposition.of_wire code in
   let summary =
     Option.value ~default:(Keeper_turn_disposition.summary disposition) summary
   in

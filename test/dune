@@ -1244,6 +1244,7 @@
 (include stanzas/test_oas_worker_exec_cancel_cleanup.inc)
 (include stanzas/test_oas_worker_exec_checkpoint.inc)
 (include stanzas/test_openapi_api_e2e.inc)
+(include stanzas/test_masc_oas_bridge_cancel_boundary.inc)
 (include stanzas/test_operator_control.inc)
 (include stanzas/test_operator_mcp_e2e.inc)
 (include stanzas/test_otel_genai.inc)

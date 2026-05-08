@@ -368,19 +368,26 @@ let reaction_of_yojson (json : Yojson.Safe.t) : reaction option =
 
 (** {1 Rewrite Helpers} *)
 
-let rewrite_posts store =
+let posts_jsonl_unlocked store =
+  let buf = Buffer.create 4096 in
+  Hashtbl.iter (fun _ (pst : post) ->
+    Buffer.add_string buf (Yojson.Safe.to_string (post_to_yojson pst));
+    Buffer.add_char buf '\n'
+  ) store.posts;
+  Buffer.contents buf
+
+let save_posts_jsonl content =
   try
     ensure_masc_dir ();
     let path = persist_path () in
-    let buf = Buffer.create 4096 in
-    Hashtbl.iter (fun _ (pst : post) ->
-      Buffer.add_string buf (Yojson.Safe.to_string (post_to_yojson pst));
-      Buffer.add_char buf '\n'
-    ) store.posts;
-    (match Fs_compat.save_file_atomic path (Buffer.contents buf) with
+    (match Fs_compat.save_file_atomic path content with
      | Ok () -> ()
      | Error msg -> record_persist_error ~where:"rewrite_posts" msg)
   with Sys_error msg -> record_persist_error ~where:"rewrite_posts" msg
+
+let rewrite_posts store =
+  let content = with_lock store (fun () -> posts_jsonl_unlocked store) in
+  with_persist_lock store (fun () -> save_posts_jsonl content)
 
 let rewrite_comments store =
   try
@@ -647,56 +654,63 @@ let get_post_and_comments store ~post_id
 
 let reclassify_posts store ?(limit = 5200) ?(dry_run = true) () =
   maybe_sweep store;
-  with_lock store (fun () ->
-    let scan_limit = max 0 (min limit 5200) in
-    let json_string name json =
-      match Yojson.Safe.Util.member name json with
-      | `String value when not (String.equal (String.trim value) "") -> Some value
-      | _ -> None
-    in
-    let json_float name json =
-      match Yojson.Safe.Util.member name json with
-      | `Float value -> Some value
-      | `Int value -> Some (Stdlib.Float.of_int value)
-      | _ -> None
-    in
-    let persisted_candidates =
-      let now = Time_compat.now () in
-      let path = persist_path () in
-      if Fs_compat.file_exists path then
-        Fs_compat.load_jsonl path
-        |> List.filter_map (fun json ->
-               match json_string "id" json, json_string "author" json with
-               | Some id, Some author -> (
-                   match Option.bind (json_string "visibility" json) visibility_of_string with
-                   | Some visibility ->
-                       let expires_at =
-                         json_float "expires_at" json |> Option.value ~default:0.0
+  let scan_limit = max 0 (min limit 5200) in
+  let json_string name json =
+    match Yojson.Safe.Util.member name json with
+    | `String value when not (String.equal (String.trim value) "") -> Some value
+    | _ -> None
+  in
+  let json_float name json =
+    match Yojson.Safe.Util.member name json with
+    | `Float value -> Some value
+    | `Int value -> Some (Stdlib.Float.of_int value)
+    | _ -> None
+  in
+  let persisted_candidates =
+    let now = Time_compat.now () in
+    let path = persist_path () in
+    if Fs_compat.file_exists path then
+      Fs_compat.load_jsonl path
+      |> List.filter_map (fun json ->
+             match json_string "id" json, json_string "author" json with
+             | Some id, Some author -> (
+                 match Option.bind (json_string "visibility" json) visibility_of_string with
+                 | Some visibility ->
+                     let expires_at =
+                       json_float "expires_at" json |> Option.value ~default:0.0
+                     in
+                     if Stdlib.Float.compare expires_at 0.0 > 0 && Stdlib.Float.compare expires_at now <= 0 then None
+                     else
+                       let stored_kind =
+                         Option.bind (json_string "post_kind" json) post_kind_of_string
                        in
-                       if Stdlib.Float.compare expires_at 0.0 > 0 && Stdlib.Float.compare expires_at now <= 0 then None
-                       else
-                         let stored_kind =
-                           Option.bind (json_string "post_kind" json) post_kind_of_string
-                         in
-                         let hearth = json_string "hearth" json in
-                         let meta_json =
-                           match Yojson.Safe.Util.member "meta" json with
-                           | `Assoc _ as meta -> Some meta
-                           | _ -> None
-                         in
-                         let created_at =
-                           json_float "created_at" json |> Option.value ~default:0.0
-                         in
-                         let canonical_kind =
-                           legacy_migrate_post_kind ~author ~meta_json ~visibility
-                             ~expires_at ~hearth
-                         in
-                         Some (id, created_at, stored_kind, canonical_kind)
-                   | None -> None)
-               | _ -> None)
-      else []
-    in
-    let total = List.length persisted_candidates in
+                       let hearth = json_string "hearth" json in
+                       let meta_json =
+                         match Yojson.Safe.Util.member "meta" json with
+                         | `Assoc _ as meta -> Some meta
+                         | _ -> None
+                       in
+                       let created_at =
+                         json_float "created_at" json |> Option.value ~default:0.0
+                       in
+                       let canonical_kind =
+                         legacy_migrate_post_kind ~author ~meta_json ~visibility
+                           ~expires_at ~hearth
+                       in
+                       Some (id, created_at, stored_kind, canonical_kind)
+                 | None -> None)
+             | _ -> None)
+    else []
+  in
+  let total = List.length persisted_candidates in
+  let selected_candidates =
+    persisted_candidates
+    |> List.sort (fun (_, created_a, _, _) (_, created_b, _, _) ->
+           Stdlib.Float.compare created_b created_a)
+    |> List.filteri (fun idx _ -> idx < scan_limit)
+  in
+  let report, post_snapshot =
+    with_lock store (fun () ->
     let scanned = ref 0 in
     let changed = ref 0 in
     let unchanged = ref 0 in
@@ -705,10 +719,7 @@ let reclassify_posts store ?(limit = 5200) ?(dry_run = true) () =
       if List.length !changed_post_ids < 20 then
         changed_post_ids := id :: !changed_post_ids
     in
-    persisted_candidates
-    |> List.sort (fun (_, created_a, _, _) (_, created_b, _, _) ->
-           Stdlib.Float.compare created_b created_a)
-    |> List.filteri (fun idx _ -> idx < scan_limit)
+    selected_candidates
     |> List.iter (fun (post_id, _, stored_kind, canonical_kind) ->
            Stdlib.incr scanned;
            if Option.equal (=) stored_kind (Some canonical_kind) then
@@ -723,14 +734,17 @@ let reclassify_posts store ?(limit = 5200) ?(dry_run = true) () =
                      { post with post_kind = canonical_kind }
                | None -> ()
            end);
-    if not dry_run && !changed > 0 then begin
-      invalidate_post_caches store;
-      rewrite_posts store;
-      store.dirty_posts <- false;
-      Hashtbl.clear store.dirty_post_ids;
-      store.last_flush <- Time_compat.now ()
-    end;
-    {
+    let post_snapshot =
+      if not dry_run && !changed > 0 then begin
+        invalidate_post_caches store;
+        store.dirty_posts <- false;
+        Hashtbl.clear store.dirty_post_ids;
+        store.last_flush <- Time_compat.now ();
+        Some (posts_jsonl_unlocked store)
+      end
+      else None
+    in
+    ({
       backend = "jsonl";
       dry_run;
       scanned = !scanned;
@@ -739,7 +753,12 @@ let reclassify_posts store ?(limit = 5200) ?(dry_run = true) () =
       skipped = max 0 (total - !scanned);
       apply_failures = 0;
       changed_post_ids = List.rev !changed_post_ids;
-    })
+    }, post_snapshot))
+  in
+  (match post_snapshot with
+   | Some content -> with_persist_lock store (fun () -> save_posts_jsonl content)
+   | None -> ());
+  report
 
 let list_posts store ?(visibility_filter=None) ?hearth ?(limit=50) () : post list =
   maybe_sweep store;

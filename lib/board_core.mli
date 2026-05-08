@@ -144,8 +144,10 @@ val append_comment : comment -> unit
 
 val rewrite_posts : store -> unit
 (** Atomically rewrites {!persist_path} from
-    [store.posts].  Used by {!Board_votes} after batch vote
-    application to flush the in-memory state to disk. *)
+    [store.posts].  The implementation snapshots under [store.mutex]
+    and performs disk I/O under the persist lock after releasing the
+    state lock; callers must not invoke it while already holding
+    [store.mutex]. *)
 
 val rewrite_comments : store -> unit
 (** Atomically rewrites {!comments_path} from

@@ -362,7 +362,7 @@ let handle_code_search ctx args =
     in
     let cmd = "rg" :: rg_args in
 
-    match Process_eio.run_argv_with_status ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ()) cmd with
+    match Masc_exec.Exec_gate.run_argv_with_status ~actor:"Tool_local_runtime" ~raw_source:(String.concat " " cmd) ~summary:"rg search in workspace" ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ()) cmd with
     | Unix.WEXITED 0, output ->
         (* Parse rg JSON output *)
         let lines = String.split_on_char '\n' output in

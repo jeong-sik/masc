@@ -1260,6 +1260,15 @@ let sweep_and_recover (ctx : _ context) =
   let max_restarts = Runtime_params.get Governance_registry.keeper_supervisor_max_restarts in
   let dead_ttl_sec = Runtime_params.get Governance_registry.keeper_dead_ttl_sec in
   let base_path = ctx.config.base_path in
+  (* Refresh the cascade health cache before Phase 3.5 reads it.  Without this
+     call the cache stayed cold (PR #14146 introduced the cache and
+     [Phase 3.5] guard but never wired a writer), so [is_healthy] returned
+     [false] for every cascade and silently disabled auto-resume across the
+     fleet.  [run_once] is a registry scan — bounded, no I/O — so running it
+     inline on every 30 s sweep is cheap.  [Safe_ops.protect] keeps a
+     transient registry exception from killing the sweep. *)
+  Safe_ops.protect ~default:() (fun () ->
+    Keeper_health_probe.run_once ~base_path);
   (* Phase 2: sweep order — restart/unregister FIRST, reconcile LAST.
      This prevents reconcile from re-launching keepers that sweep is about
      to process (defense-in-depth alongside is_registered check). *)
@@ -1650,16 +1659,35 @@ let sweep_and_recover (ctx : _ context) =
                                  && not (paused_meta_requires_reconcile_recovery meta)
                                  && not (Keeper_approval_queue.has_pending_for_keeper
                                            ~keeper_name:meta.name) ->
-               if not (Keeper_health_probe.is_healthy
-                         ~keeper_name:meta.cascade_name) then begin
-                 Log.Keeper.info
-                   "%s: auto-resume blocked; cascade %s is unhealthy"
-                   name meta.cascade_name;
-                 Prometheus.inc_counter
-                   Keeper_metrics.metric_keeper_auto_resume_blocked_total
-                   ~labels:[("keeper", name); ("cascade", meta.cascade_name)]
-                   ()
-               end else begin
+               let cascade_status =
+                 Keeper_health_probe.get_cascade_status
+                   ~cascade_name:meta.cascade_name
+               in
+               (* Three-valued admission:
+                    Unhealthy   — block, the probe saw restart pressure.
+                    Healthy     — proceed with timer check.
+                    Unknown     — proceed with timer check.  No probe data
+                                  yet (e.g. all keepers in the cascade
+                                  paused so the registry has no entries
+                                  to score).  Defaulting to "block" here
+                                  is the bug PR #14146 shipped: it turned
+                                  the boot-time race window into a
+                                  permanent lockout.  See instructions/
+                                  software-development.md anti-pattern
+                                  "Unknown -> Permissive Default". *)
+               (match cascade_status with
+                | Keeper_health_probe.Unhealthy reason ->
+                    Log.Keeper.info
+                      "%s: auto-resume blocked; cascade %s is unhealthy (%s)"
+                      name meta.cascade_name reason;
+                    Prometheus.inc_counter
+                      Keeper_metrics.metric_keeper_auto_resume_blocked_total
+                      ~labels:[("keeper", name);
+                               ("cascade", meta.cascade_name)]
+                      ()
+                | Keeper_health_probe.Unknown
+                | Keeper_health_probe.Healthy ->
+                  begin
                  let resume_after_sec =
                    Option.value ~default:0.0 meta.auto_resume_after_sec in
                  let paused_ts =
@@ -1713,7 +1741,7 @@ let sweep_and_recover (ctx : _ context) =
                           "%s: auto-resume meta write failed: %s"
                           name err)
                  end
-               end
+                  end)
            | _ -> ());
          Eio_guard.yield_step sweep_names_ym);
   (* Phase 4: reconcile LAST — only orphaned durable keepers *)

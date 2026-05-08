@@ -293,6 +293,43 @@ let api_key_env_json ~path value =
       in
       loop [] fields
 
+(* Generic Otoml -> Yojson conversion used for namespaces that the
+   materializer should pass through verbatim instead of treating as a
+   cascade profile.  Currently used for the [admission] namespace
+   introduced by RFC-0026 PR-B (#12926, #1089).
+
+   Without this, every [admission.<keeper>] sub-table breaks the
+   materializer (treated as a profile, sub-table keys rejected as
+   "unknown field"), which fails cascade.json materialization and
+   takes down every keeper that resolves a cascade through cascade.toml
+   — not just the keepers with admission blocks.  The error is a
+   single fleet-wide regression, so the materializer needs to know
+   about the admission namespace explicitly. *)
+let rec otoml_to_yojson (value : Otoml.t) : Yojson.Safe.t =
+  match value with
+  | Otoml.TomlString s -> `String s
+  | Otoml.TomlInteger n -> `Int n
+  | Otoml.TomlFloat f -> `Float f
+  | Otoml.TomlBoolean b -> `Bool b
+  | Otoml.TomlOffsetDateTime s
+  | Otoml.TomlLocalDateTime s
+  | Otoml.TomlLocalDate s
+  | Otoml.TomlLocalTime s -> `String s
+  | Otoml.TomlArray items ->
+      `List (List.map otoml_to_yojson items)
+  | Otoml.TomlTable fields ->
+      `Assoc
+        (List.map
+           (fun (k, v) -> (k, otoml_to_yojson v))
+           fields)
+  | Otoml.TomlInlineTable fields ->
+      `Assoc
+        (List.map
+           (fun (k, v) -> (k, otoml_to_yojson v))
+           fields)
+  | Otoml.TomlTableArray items ->
+      `List (List.map otoml_to_yojson items)
+
 let routes_json ~path value =
   match table_fields ~path value with
   | Error _ as err -> err
@@ -397,9 +434,20 @@ let profile_field_json ~profile_name ~field_name field_value =
       | Ok value ->
           Ok [ (profile_name ^ "_keep_alive", `String value) ]
       | Error _ as err -> err)
+  | "groups" -> (
+      (* RFC-0041 hierarchical group/item profile format. Each element is an
+         inline table describing a [Cascade_ref.cascade_group]. The array is
+         materialized as [<profile>_groups] in JSON so the loader can use
+         [Cascade_ref.cascade_group_of_json] for parsing. *)
+      match field_value with
+      | Otoml.TomlArray items ->
+          Ok [ (profile_name ^ "_groups", `List (List.map otoml_to_yojson items)) ]
+      | _ ->
+          errorf "expected %s to be an array of group tables, found %s"
+            profile_path (toml_type_name field_value))
   | other ->
       errorf
-        "unknown field %S in profile %s; allowed fields are comment, models, temperature, max_tokens, strategy, max_cycles, backoff_base_ms, backoff_cap_ms, ollama_max_concurrent, cli_max_concurrent, tiers, sticky_ttl_ms, latency_baseline_ms, rate_limit_recency_window_s, rate_limit_decay_base, rate_limit_skip_after, server_error_recency_window_s, server_error_decay_base, server_error_skip_after, keeper_assignable, fallback_cascade, required_capability_profile, api_key_env, keep_alive, num_ctx, timeout_sec"
+        "unknown field %S in profile %s; allowed fields are comment, models, temperature, max_tokens, strategy, max_cycles, backoff_base_ms, backoff_cap_ms, ollama_max_concurrent, cli_max_concurrent, tiers, sticky_ttl_ms, latency_baseline_ms, rate_limit_recency_window_s, rate_limit_decay_base, rate_limit_skip_after, server_error_recency_window_s, server_error_decay_base, server_error_skip_after, keeper_assignable, fallback_cascade, required_capability_profile, api_key_env, keep_alive, num_ctx, timeout_sec, groups"
         other profile_name
 
 let profile_table_json_fields ~profile_name value =
@@ -414,43 +462,6 @@ let profile_table_json_fields ~profile_name value =
             | Error _ as err -> err)
       in
       loop [] fields
-
-(* Generic Otoml -> Yojson conversion used for namespaces that the
-   materializer should pass through verbatim instead of treating as a
-   cascade profile.  Currently used for the [admission] namespace
-   introduced by RFC-0026 PR-B (#12926, #1089).
-
-   Without this, every [admission.<keeper>] sub-table breaks the
-   materializer (treated as a profile, sub-table keys rejected as
-   "unknown field"), which fails cascade.json materialization and
-   takes down every keeper that resolves a cascade through cascade.toml
-   — not just the keepers with admission blocks.  The error is a
-   single fleet-wide regression, so the materializer needs to know
-   about the admission namespace explicitly. *)
-let rec otoml_to_yojson (value : Otoml.t) : Yojson.Safe.t =
-  match value with
-  | Otoml.TomlString s -> `String s
-  | Otoml.TomlInteger n -> `Int n
-  | Otoml.TomlFloat f -> `Float f
-  | Otoml.TomlBoolean b -> `Bool b
-  | Otoml.TomlOffsetDateTime s
-  | Otoml.TomlLocalDateTime s
-  | Otoml.TomlLocalDate s
-  | Otoml.TomlLocalTime s -> `String s
-  | Otoml.TomlArray items ->
-      `List (List.map otoml_to_yojson items)
-  | Otoml.TomlTable fields ->
-      `Assoc
-        (List.map
-           (fun (k, v) -> (k, otoml_to_yojson v))
-           fields)
-  | Otoml.TomlInlineTable fields ->
-      `Assoc
-        (List.map
-           (fun (k, v) -> (k, otoml_to_yojson v))
-           fields)
-  | Otoml.TomlTableArray items ->
-      `List (List.map otoml_to_yojson items)
 
 let render_toml_to_yojson toml =
   match table_fields ~path:"<root>" toml with

@@ -32,8 +32,7 @@ let severity_to_string = function
   | Unknown_bad -> "bad"
 ;;
 
-let make ?(source = "typed") ?summary ?next_action code =
-  let disposition = Keeper_turn_disposition.of_wire code in
+let make_from_disposition ?(source = "typed") ?summary ?next_action disposition =
   let summary =
     Option.value ~default:(Keeper_turn_disposition.summary disposition) summary
   in
@@ -48,6 +47,16 @@ let make ?(source = "typed") ?summary ?next_action code =
   ; summary
   ; next_action
   }
+;;
+
+let make ?(source = "typed") ?summary ?next_action code =
+  let disposition = Keeper_turn_disposition.of_wire code in
+  make_from_disposition ~source ?summary ?next_action disposition
+;;
+
+let of_disposition ?source ?summary ?next_action disposition =
+  let source = Option.value ~default:"typed" source in
+  make_from_disposition ~source ?summary ?next_action disposition
 ;;
 
 let success () = make ~source:"turn_result" "success"
@@ -112,10 +121,16 @@ let of_failure ?(post_commit_ambiguous = false) ?(tool_call_count = 0) ~raw_erro
        | _ ->
          let fallback = of_legacy_error_text raw_error in
          if is_unknown_empty fallback
-         then
-           make
+         then (
+           (* RFC-0047 follow-up: emit typed [Provider_error (Sdk_error _)]
+              directly so [registry_failure_reason_of_terminal_reason] can
+              match exhaustively on disposition without a substring guard
+              for "api_error_*" wires. *)
+           let wire = Keeper_agent_error.terminal_reason_code_of_sdk_error err in
+           of_disposition
              ~source:"typed_error"
-             (Keeper_agent_error.terminal_reason_code_of_sdk_error err)
+             (Keeper_turn_disposition.Provider_error
+                (Keeper_turn_terminal_code.Sdk_error wire)))
          else fallback))
 ;;
 

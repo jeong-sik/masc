@@ -131,11 +131,14 @@ let () =
     main_src
     "Re-raise cancellation so Eio structured concurrency propagates cleanly";
 
-  (* Anchor M3: defence-in-depth guard on the error fallback. *)
+  (* Anchor M3: defence-in-depth guard on the error fallback. The
+     [safe_reqd_respond] doc comment must keep the "guards" anchor so a
+     future refactor that drops the wrapper is forced to update this
+     test rather than silently re-introducing the cycle9 race. *)
   assert_contains
     ~label:"M3: defence-in-depth guard on error fallback"
     main_src
-    "guards against any future refactoring that bypasses safe_respond";
+    "safe_reqd_respond reqd response body] guards all direct";
 
   (* ---- lib/server/server_mcp_transport_http_respond.ml ------------------ *)
   let mcp_respond_src =
@@ -222,10 +225,13 @@ let () =
     ws_src
     "try Ws.Wsd.send_pong wsd";
 
-  (* Anchor W2: closed wsd race comment is present. *)
+  (* Anchor W2: writer-closed-during-cancel race comment is present
+     (the wsd-race incident reference travels with the [send_pong]
+     wrapper, so a future refactor that drops the comment is forced
+     to update this anchor). *)
   assert_contains
-    ~label:"W2: closed wsd race comment"
+    ~label:"W2: writer closed during cancel race comment"
     ws_src
-    "closed wsd race";
+    "writer closed during cancel race";
 
   print_endline "test_reqd_invalid_state_swallow: OK"

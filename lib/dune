@@ -37,6 +37,10 @@
  server_dashboard_http_cache
  dashboard_http_helpers
  dashboard_http_monitoring
+ prometheus_metric_names
+ prometheus_metric_names_keeper
+ prometheus_metric_names_runtime
+ prometheus_metric_names_control
  dashboard_http_keeper
  dashboard_goal_loop
  dashboard_http_autoresearch

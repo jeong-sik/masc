@@ -59,6 +59,7 @@ let rollout_config : Approval_config.t =
         (`Tool_local_runtime, internal_observer_overlay);
         (`Tool_local_runtime_bench, internal_observer_overlay);
         (`Tool_autoresearch_cycle, internal_git_admin_overlay);
+        (`Keeper_shell, internal_observer_overlay);
       ];
   }
 

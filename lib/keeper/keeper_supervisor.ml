@@ -174,7 +174,7 @@ let publish_lifecycle
   Keeper_lifecycle_audit.record ~keeper_name ~event_name ~phase ~detail;
   match Keeper_keepalive.get_bus () with
   | Some bus ->
-      Oas_events.publish_keeper_lifecycle bus ~event ~keeper_name ~detail ()
+      Cascade_events.publish_keeper_lifecycle bus ~event ~keeper_name ~detail ()
   | None -> ()
 
 (** Phase-event helper: the wire event name IS the phase name. *)
@@ -1526,7 +1526,7 @@ let sweep_and_recover (ctx : _ context) =
     in
     (match Keeper_keepalive.get_bus () with
      | Some bus ->
-         Oas_events.publish_keeper_dead bus
+         Cascade_events.publish_keeper_dead bus
            ~keeper_name:entry.name
            ~reason:msg
            ~restart_count:entry.restart_count

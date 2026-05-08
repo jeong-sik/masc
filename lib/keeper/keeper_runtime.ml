@@ -560,7 +560,7 @@ let ensure_keeper_meta config name =
       | Ok () -> Ok updated
       | Error e ->
         Prometheus.inc_counter
-          Prometheus.metric_keeper_write_meta_failures
+          Keeper_metrics.metric_keeper_write_meta_failures
           ~labels:[("keeper", updated.name); ("phase", "ensure_meta_resync")]
           ();
         Log.Keeper.warn "ensure_keeper_meta: write_meta re-sync failed: %s" e;
@@ -737,7 +737,7 @@ let start_supervisor_sweep ctx =
           (try Keeper_supervisor.sweep_and_recover ctx
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Prometheus.inc_counter
-               Prometheus.metric_keeper_supervisor_sweep_failures
+               Keeper_metrics.metric_keeper_supervisor_sweep_failures
                ~labels:[("origin", "keeper_runtime")]
                ();
              Log.Keeper.error "supervisor sweep failed: %s"
@@ -748,7 +748,7 @@ let start_supervisor_sweep ctx =
           (try Keeper_supervisor.liveness_recovery_scan ctx
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Prometheus.inc_counter
-               Prometheus.metric_keeper_supervisor_sweep_failures
+               Keeper_metrics.metric_keeper_supervisor_sweep_failures
                ~labels:[("origin", "liveness_recovery")]
                ();
              Log.Keeper.error "liveness recovery scan failed: %s"
@@ -761,7 +761,7 @@ let start_supervisor_sweep ctx =
           (try Keeper_supervisor.alive_but_stuck_scan ctx
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Prometheus.inc_counter
-               Prometheus.metric_keeper_supervisor_sweep_failures
+               Keeper_metrics.metric_keeper_supervisor_sweep_failures
                ~labels:[("origin", "alive_but_stuck")]
                ();
              Log.Keeper.error "alive-but-stuck scan failed: %s"
@@ -788,7 +788,7 @@ let start_supervisor_sweep ctx =
               | _ -> ())
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Prometheus.inc_counter
-               Prometheus.metric_keeper_toml_reconcile_sweep_failures
+               Keeper_metrics.metric_keeper_toml_reconcile_sweep_failures
                ~labels:[("origin", "keeper_runtime")]
                ();
              Log.Keeper.error "TOML reconcile sweep failed: %s"
@@ -797,7 +797,7 @@ let start_supervisor_sweep ctx =
              completed beat.  Stale gauge (now - last > 2 × interval)
              tells operators the sweep stopped. *)
           Prometheus.set_gauge
-            Prometheus.metric_keeper_supervisor_last_sweep_unixtime
+            Keeper_metrics.metric_keeper_supervisor_last_sweep_unixtime
             ~labels:[ ("base_path", base_path) ]
             (Unix.gettimeofday ());
           Ok ()
@@ -820,14 +820,14 @@ let start_supervisor_sweep ctx =
        After a server restart, if this stays at 0 the supervisor
        never came up — operators alert on absence of advancement. *)
     Prometheus.inc_counter
-      Prometheus.metric_keeper_supervisor_sweep_starts
+      Keeper_metrics.metric_keeper_supervisor_sweep_starts
       ~labels:[ ("base_path", base_path) ]
       ();
     (* Initialize the liveness gauge to "now" so dashboards do not
        start at unixtime=0 (which would look infinitely stale).  The
        on_beat will overwrite this on every subsequent sweep. *)
     Prometheus.set_gauge
-      Prometheus.metric_keeper_supervisor_last_sweep_unixtime
+      Keeper_metrics.metric_keeper_supervisor_last_sweep_unixtime
       ~labels:[ ("base_path", base_path) ]
       (Unix.gettimeofday ());
     Log.Keeper.info "keeper supervisor sweep started (interval %.0fs)" sweep_sec
@@ -841,7 +841,7 @@ let start_supervisor_sweep ctx =
 let supervisor_sweep_age_seconds ~(base_path : string) : float option =
   match
     Prometheus.get_metric_value
-      Prometheus.metric_keeper_supervisor_last_sweep_unixtime
+      Keeper_metrics.metric_keeper_supervisor_last_sweep_unixtime
       ~labels:[ ("base_path", base_path) ]
       ()
   with

@@ -378,7 +378,7 @@ let resolve_keeper_read_path ~(config : Coord.config)
         if allowed_norms = [] then [root_norm] else allowed_norms
       in
       let reject_outside_sandbox () =
-        Prometheus.inc_counter Prometheus.metric_keeper_path_rejection
+        Prometheus.inc_counter Keeper_metrics.metric_keeper_path_rejection
           ~labels:[ ("kind", "out_of_roots") ] ();
         Error
           (format_path_rejection ~raw ~resolved:target_norm ~allowed_norms)
@@ -402,13 +402,13 @@ let resolve_keeper_read_path ~(config : Coord.config)
                 drifts (turn 433 evidence), the roots can
                 belong to a sibling sandbox, leaking its
                 directory layout to the wrong keeper. *)
-             Prometheus.inc_counter Prometheus.metric_keeper_path_rejection
+             Prometheus.inc_counter Keeper_metrics.metric_keeper_path_rejection
                ~labels:[ ("kind", "not_found_relative") ] ();
              Error
                (Printf.sprintf "path_not_found_under_allowed_roots: %s" raw)
          | Error e -> Error e)
       else begin
-        Prometheus.inc_counter Prometheus.metric_keeper_path_rejection
+        Prometheus.inc_counter Keeper_metrics.metric_keeper_path_rejection
           ~labels:[ ("kind", "out_of_roots") ] ();
         Error
           (Printf.sprintf "path_not_found_under_allowed_roots: %s"

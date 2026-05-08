@@ -131,7 +131,7 @@ let approval_decision_to_string = function
 
 let record_queue_failure ~keeper_name ~site ?(id = "-") ?(event_type = "-") exn =
   Prometheus.inc_counter
-    Prometheus.metric_keeper_approval_queue_failures
+    Keeper_metrics.metric_keeper_approval_queue_failures
     ~labels:[ ("keeper", keeper_name); ("site", site) ]
     ();
   Log.Keeper.warn
@@ -376,7 +376,7 @@ let upsert_rule ?base_path ~keeper_name ~tool_name ~input ~risk_level
          | Ok () -> ()
          | Error msg ->
            Prometheus.inc_counter
-             Prometheus.metric_keeper_approval_queue_failures
+             Keeper_metrics.metric_keeper_approval_queue_failures
              ~labels:[("keeper", keeper_name); ("site", "upsert_rule_save")]
              ();
            Log.Keeper.warn "upsert_rule: save failed: %s" msg);
@@ -432,7 +432,7 @@ let find_matching_rule ?base_path ~keeper_name ~tool_name ~input ~risk_level
          | Ok () -> ()
          | Error msg ->
            Prometheus.inc_counter
-             Prometheus.metric_keeper_approval_queue_failures
+             Keeper_metrics.metric_keeper_approval_queue_failures
              ~labels:[("keeper", keeper_name); ("site", "matching_rule_save")]
              ();
            Log.Keeper.warn "find_matching_rule: save failed: %s" msg);
@@ -481,7 +481,7 @@ let get_audit_store ?base_path () =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_approval_queue_failures
+        Keeper_metrics.metric_keeper_approval_queue_failures
         ~labels:[("keeper", "aggregate"); ("site", "audit_store_create")]
         ();
       Log.Keeper.warn "approval_queue: audit store creation failed: %s"
@@ -767,7 +767,7 @@ let resolve_entry ?base_path (entry : pending_approval) (decision : decision) =
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
         Prometheus.inc_counter
-          Prometheus.metric_keeper_approval_queue_failures
+          Keeper_metrics.metric_keeper_approval_queue_failures
           ~labels:[("keeper", entry.keeper_name); ("site", "resolution_callback")]
           ();
         Log.Keeper.warn
@@ -977,7 +977,7 @@ let remember_rule_for_entry ?base_path ?created_by (entry : pending_approval) =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_approval_queue_failures
+        Keeper_metrics.metric_keeper_approval_queue_failures
         ~labels:[("keeper", entry.keeper_name); ("site", "remember_rule")]
         ();
       Log.Keeper.warn
@@ -1105,7 +1105,7 @@ let expire_stale ~max_wait_s =
     let reason = Printf.sprintf
       "approval timed out after %.0fs" (now -. entry.requested_at) in
     Prometheus.inc_counter
-      Prometheus.metric_keeper_approval_queue_failures
+      Keeper_metrics.metric_keeper_approval_queue_failures
       ~labels:[("keeper", entry.keeper_name); ("site", "approval_expired")]
       ();
     Log.Keeper.warn "HITL_APPROVAL_EXPIRED: id=%s keeper=%s tool=%s"
@@ -1130,7 +1130,7 @@ let expire_stale ~max_wait_s =
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
           Prometheus.inc_counter
-            Prometheus.metric_keeper_approval_queue_failures
+            Keeper_metrics.metric_keeper_approval_queue_failures
             ~labels:[("keeper", entry.keeper_name); ("site", "expire_callback")]
             ();
           Log.Keeper.warn

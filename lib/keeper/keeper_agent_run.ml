@@ -106,7 +106,7 @@ let run_turn
     | Eio.Cancel.Cancelled _ -> ()
     | e ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_dispatch_event_failures
+        Keeper_metrics.metric_keeper_dispatch_event_failures
         ~labels:[("keeper", meta.name); ("site", "emit_turn_end")]
         ();
       Log.Keeper.warn
@@ -181,7 +181,7 @@ let run_turn
     | e ->
       let backtrace = Printexc.get_backtrace () in
       Prometheus.inc_counter
-        Prometheus.metric_keeper_dispatch_event_failures
+        Keeper_metrics.metric_keeper_dispatch_event_failures
         ~labels:[("keeper", meta.name); ("site", "tool_cleanup")]
         ();
       Log.Keeper.warn
@@ -538,7 +538,7 @@ let run_turn
                      meta.name
                      (Printexc.to_string exn);
                    Prometheus.inc_counter
-                     Prometheus.metric_keeper_thinking_persist_failures
+                     Keeper_metrics.metric_keeper_thinking_persist_failures
                      ~labels:[("keeper", meta.name)]
                      ());
               | Agent_sdk.Types.RedactedThinking _ ->
@@ -565,7 +565,7 @@ let run_turn
                      meta.name
                      (Printexc.to_string exn);
                    Prometheus.inc_counter
-                     Prometheus.metric_keeper_thinking_persist_failures
+                     Keeper_metrics.metric_keeper_thinking_persist_failures
                      ~labels:[("keeper", meta.name)]
                      ())
               | _ -> ())
@@ -642,7 +642,7 @@ let run_turn
          in
          acc.receipt_tool_contract_result <- "violated";
          Prometheus.inc_counter
-           Prometheus.metric_keeper_contract_violations
+           Keeper_metrics.metric_keeper_contract_violations
            ~labels:[("keeper_name", meta.name); ("kind", "tool_surface_violation"); ("signal", "unexpected_tool_names")]
            ();
          Log.Keeper.error "keeper:%s cascade=%s %s" meta.name meta.cascade_name reason;
@@ -655,7 +655,7 @@ let run_turn
          in
          if unexpected_tool_names <> [] then
            Prometheus.inc_counter
-             Prometheus.metric_keeper_unexpected_tool_partial_tolerance
+             Keeper_metrics.metric_keeper_unexpected_tool_partial_tolerance
              ~labels:
                [
                  ("keeper_name", meta.name);
@@ -810,7 +810,7 @@ let run_turn
                  signal_label
                  reason;
                Prometheus.inc_counter
-                 Prometheus.metric_keeper_contract_violations
+                 Keeper_metrics.metric_keeper_contract_violations
                  ~labels:[ ("keeper_name", meta.name); ("kind", "passive");
                            ("signal", signal_label) ]
                  ();
@@ -845,7 +845,7 @@ let run_turn
                  (List.length actual_keeper_tool_names)
                  contract_str signal_label reason;
                Prometheus.inc_counter
-                 Prometheus.metric_keeper_contract_violations
+                 Keeper_metrics.metric_keeper_contract_violations
                  ~labels:[ ("keeper_name", meta.name); ("kind", "text_only");
                            ("signal", signal_label) ]
                  ();
@@ -938,7 +938,7 @@ let run_turn
                     "keeper:%s cascade=%s OAS checkpoint save failed: %s"
                     meta.name meta.cascade_name e;
                   Prometheus.inc_counter
-                    Prometheus.metric_keeper_checkpoint_failures
+                    Keeper_metrics.metric_keeper_checkpoint_failures
                     ~labels:[("keeper", meta.name); ("site", "save")]
                     ();
                   Error
@@ -950,7 +950,7 @@ let run_turn
                  "keeper:%s cascade=%s missing OAS checkpoint after run"
                  meta.name meta.cascade_name;
                  Prometheus.inc_counter
-                   Prometheus.metric_keeper_checkpoint_failures
+                   Keeper_metrics.metric_keeper_checkpoint_failures
                    ~labels:[("keeper", meta.name); ("site", "missing")]
                    ();
                Error
@@ -984,7 +984,7 @@ let run_turn
                 | Eio.Cancel.Cancelled _ as e -> raise e
                 | exn ->
                   Prometheus.inc_counter
-                    Prometheus.metric_keeper_dispatch_event_failures
+                    Keeper_metrics.metric_keeper_dispatch_event_failures
                     ~labels:[("keeper", meta.name); ("site", "activity_emit")]
                     ();
                   Log.Keeper.warn
@@ -1016,7 +1016,7 @@ let run_turn
               (match outcome with
                | Cdal_eval_v1.Load_failure (err, _) ->
                  Prometheus.inc_counter
-                   Prometheus.metric_keeper_dispatch_event_failures
+                   Keeper_metrics.metric_keeper_dispatch_event_failures
                    ~labels:[("keeper", meta.name); ("site", "cdal_load")]
                    ();
                  Log.Keeper.warn
@@ -1084,7 +1084,7 @@ let run_turn
                 meta.name
                 (Printexc.to_string exn);
               Prometheus.inc_counter
-                Prometheus.metric_keeper_memory_write_failures
+                Keeper_metrics.metric_keeper_memory_write_failures
                 ~labels:[("keeper", meta.name)]
                 ());
            (* Episodic memory: create an episode from [STATE] after
@@ -1113,7 +1113,7 @@ let run_turn
             | Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
                 Prometheus.inc_counter
-                  Prometheus.metric_keeper_dispatch_event_failures
+                  Keeper_metrics.metric_keeper_dispatch_event_failures
                   ~labels:[("keeper", meta.name); ("site", "compaction")]
                   ();
                 Log.Keeper.warn "keeper:%s cascade=%s compaction failed: %s" meta.name
@@ -1147,7 +1147,7 @@ let run_turn
                     | Eio.Cancel.Cancelled _ as e -> raise e
                     | exn ->
                       Prometheus.inc_counter
-                        Prometheus.metric_keeper_dispatch_event_failures
+                        Keeper_metrics.metric_keeper_dispatch_event_failures
                         ~labels:[("keeper", meta.name); ("site", "memory_recall")]
                         ();
                       Log.Keeper.warn
@@ -1200,7 +1200,7 @@ let run_turn
             | Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
               Prometheus.inc_counter
-                Prometheus.metric_keeper_dispatch_event_failures
+                Keeper_metrics.metric_keeper_dispatch_event_failures
                 ~labels:[("keeper", meta.name); ("site", "post_turn_eval")]
                 ();
               Log.Keeper.warn
@@ -1377,7 +1377,7 @@ let run_turn
       | exn ->
         let err_msg = Printexc.to_string exn in
         Prometheus.inc_counter
-          Prometheus.metric_keeper_dispatch_event_failures
+          Keeper_metrics.metric_keeper_dispatch_event_failures
           ~labels:[("keeper", meta.name); ("site", "receipt_append")]
           ();
         Log.Keeper.warn
@@ -1403,7 +1403,7 @@ let run_turn
          | Eio.Cancel.Cancelled _ as e -> raise e
          | gap_exn ->
            Prometheus.inc_counter
-             Prometheus.metric_keeper_dispatch_event_failures
+             Keeper_metrics.metric_keeper_dispatch_event_failures
              ~labels:[("keeper", meta.name); ("site", "coverage_gap_append")]
              ();
            Log.Keeper.warn

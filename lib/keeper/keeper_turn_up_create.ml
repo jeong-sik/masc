@@ -120,7 +120,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     with
     | Error err ->
         Prometheus.inc_counter
-          Prometheus.metric_keeper_lifecycle_dispatch_rejections
+          Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
           ~labels:[("keeper", p.name); ("event", "create_sandbox_validation")]
           ();
         Log.Keeper.warn "create_keeper failed sandbox validation for %s: %s"
@@ -133,7 +133,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         with
         | Error err ->
             Prometheus.inc_counter
-              Prometheus.metric_keeper_lifecycle_dispatch_rejections
+              Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
               ~labels:[("keeper", p.name); ("event", "create_sandbox_preflight")]
               ();
             Log.Keeper.warn "create_keeper failed sandbox preflight for %s: %s"
@@ -146,7 +146,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             let active_keepers = Keeper_registry.count_running () in
             if max_active_keepers > 0 && active_keepers >= max_active_keepers then begin
               Prometheus.inc_counter
-                Prometheus.metric_keeper_lifecycle_dispatch_rejections
+                Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
                 ~labels:[("keeper", p.name); ("event", "create_max_active_reached")]
                 ();
               Log.Keeper.warn
@@ -321,7 +321,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                      p.name
                      msg;
                    Prometheus.inc_counter
-                     Prometheus.metric_keeper_local_discovery_failures
+                     Keeper_metrics.metric_keeper_local_discovery_failures
                      ~labels:
                        [
                          ("keeper", p.name);
@@ -343,7 +343,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
               match Keeper_id.Trace_id.of_string trace_id with
               | Error err ->
                   Prometheus.inc_counter
-                    Prometheus.metric_keeper_lifecycle_dispatch_rejections
+                    Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
                     ~labels:[("keeper", p.name); ("event", "create_invalid_trace_id")]
                     ();
                   Log.Keeper.error
@@ -371,7 +371,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                         "create_keeper sandbox bundle init raised: keeper=%s exn=%s"
                         p.name (Printexc.to_string exn);
                       Prometheus.inc_counter
-                        Prometheus.metric_keeper_lifecycle_dispatch_rejections
+                        Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
                         ~labels:[("keeper", p.name);
                                  ("event", "sandbox_bundle_init_raised")]
                         ();
@@ -383,7 +383,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                         "create_keeper sandbox bundle path missing post-init: keeper=%s path=%s"
                         p.name bp;
                       Prometheus.inc_counter
-                        Prometheus.metric_keeper_lifecycle_dispatch_rejections
+                        Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
                         ~labels:[("keeper", p.name);
                                  ("event", "sandbox_bundle_missing_post_init")]
                         ()
@@ -596,7 +596,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       match init_save_result with
       | Error e ->
         Prometheus.inc_counter
-          Prometheus.metric_keeper_checkpoint_failures
+          Keeper_metrics.metric_keeper_checkpoint_failures
           ~labels:[("keeper", p.name); ("site", "create_initial_save")]
           ();
         Log.Keeper.error
@@ -608,7 +608,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
       match write_initial_meta ctx.config meta with
       | Error e ->
-        Prometheus.inc_counter Prometheus.metric_keeper_write_meta_failures
+        Prometheus.inc_counter Keeper_metrics.metric_keeper_write_meta_failures
           ~labels:[("keeper", p.name); ("phase", "create_keeper")] ();
         Log.Keeper.error "create_keeper failed: write_meta error for name=%s: %s" p.name e;
         Progress.stop_tracking task_id;
@@ -623,7 +623,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
              Log.Keeper.debug "create_keeper: credential ensured for %s" agent_name
          | Error err ->
              Prometheus.inc_counter
-               Prometheus.metric_keeper_lifecycle_dispatch_rejections
+               Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
                ~labels:[("keeper", agent_name); ("event", "create_credential_ensure")]
                ();
              Log.Keeper.warn "create_keeper: credential ensure failed for %s: %s"

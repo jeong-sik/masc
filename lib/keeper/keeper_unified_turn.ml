@@ -253,7 +253,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         let routing = Keeper_cascade_routing.select_cascade
           ~base_cascade:meta.cascade_name ~phase
         in
-        Prometheus.inc_counter Prometheus.metric_keeper_fsm_edge_transitions
+        Prometheus.inc_counter Keeper_metrics.metric_keeper_fsm_edge_transitions
           ~labels:[("edge", "ksm_to_kcl_routing")] ();
         let routed_meta = { meta with cascade_name = routing.effective_cascade } in
         let routed_labels =
@@ -280,7 +280,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         with
         | Some remaining_sec ->
             Prometheus.set_gauge
-              Prometheus.metric_keeper_provider_cooldown_remaining_sec
+              Keeper_metrics.metric_keeper_provider_cooldown_remaining_sec
               ~labels:[
                 ("keeper", meta.name);
                 ("cascade", effective_cascade_name);
@@ -297,7 +297,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                    "%s: cascade %s provider cooldown pending (%ds); fail-opening to %s"
                    meta.name effective_cascade_name remaining_sec fallback_cascade;
                  Prometheus.inc_counter
-                   Prometheus.metric_keeper_provider_cooldown_skip
+                   Keeper_metrics.metric_keeper_provider_cooldown_skip
                    ~labels:[
                      ("keeper", meta.name);
                      ("from_cascade", effective_cascade_name);
@@ -308,7 +308,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
              | _ -> effective_cascade_name)
         | None ->
             Prometheus.set_gauge
-              Prometheus.metric_keeper_provider_cooldown_remaining_sec
+              Keeper_metrics.metric_keeper_provider_cooldown_remaining_sec
               ~labels:[
                 ("keeper", meta.name);
                 ("cascade", effective_cascade_name);
@@ -391,7 +391,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                       { base = effective_cascade_name;
                         resolved = Some "ollama_saturated" }));
               Prometheus.inc_counter
-                Prometheus.metric_keeper_ollama_saturation_skip
+                Keeper_metrics.metric_keeper_ollama_saturation_skip
                 ~labels:[ ("keeper", meta.name);
                           ("cascade", effective_cascade_name) ]
                 ();
@@ -516,7 +516,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
              meta.name turn_id
              reason_string;
            Prometheus.inc_counter
-             Prometheus.metric_keeper_turn_livelock_blocks
+             Keeper_metrics.metric_keeper_turn_livelock_blocks
              ~labels:[("keeper", meta.name)]
              ();
            record_pre_dispatch_terminal_observation
@@ -710,7 +710,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             | _ -> []
           in
           let outcome = if events = [] then "empty" else "drained" in
-          Prometheus.inc_counter Prometheus.metric_keeper_event_bus_drain
+          Prometheus.inc_counter Keeper_metrics.metric_keeper_event_bus_drain
             ~labels:[("site", site); ("outcome", outcome)] ();
           process_tool_events_for_side_effects events;
           let summary = summarize_turn_event_bus events in
@@ -738,7 +738,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                       "%s: keeper_turn event-bus drain failed: %s"
                       meta.name (Printexc.to_string exn);
                     Prometheus.inc_counter
-                      Prometheus.metric_keeper_event_bus_drain
+                      Keeper_metrics.metric_keeper_event_bus_drain
                       ~labels:[("site", "background_poll"); ("outcome", "exception")]
                       ();
                   (* 2026-04-20: 0.25s → 0.05s.  OAS publishes a burst
@@ -795,7 +795,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             | Ok () -> ()
             | Error err ->
                 Prometheus.inc_counter
-                  Prometheus.metric_keeper_write_meta_failures
+                  Keeper_metrics.metric_keeper_write_meta_failures
                   ~labels:
                     [("keeper", entry.meta.name); ("phase", "turn_start")]
                   ();
@@ -860,7 +860,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                "%s: unsubscribe_event_bus in turn cleanup raised: %s"
                meta.name (Printexc.to_string e);
              Prometheus.inc_counter
-               Prometheus.metric_keeper_turn_cleanup_failures
+               Keeper_metrics.metric_keeper_turn_cleanup_failures
                ~labels:[("keeper", meta.name); ("site", "unsubscribe_event_bus")]
                ());
           (try
@@ -873,7 +873,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                "%s: mark_turn_finished in turn cleanup raised: %s"
                meta.name (Printexc.to_string e);
              Prometheus.inc_counter
-               Prometheus.metric_keeper_turn_cleanup_failures
+               Keeper_metrics.metric_keeper_turn_cleanup_failures
                ~labels:[("keeper", meta.name); ("site", "mark_turn_finished")]
                ());
         in
@@ -1038,7 +1038,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   ~base_path:config.base_path meta.name
                   Keeper_registry.Cascade_exhausted;
                 Prometheus.inc_counter
-                  Prometheus.metric_keeper_fsm_edge_transitions
+                  Keeper_metrics.metric_keeper_fsm_edge_transitions
                   ~labels:[("edge", "kcl_to_ktc_exhaustion")] ();
                 (* Cycle 52 narrative: cascade exhaustion is a silent
                    failure on dashboards reading only Turn_failed.  The
@@ -1054,7 +1054,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   meta.name (Agent_sdk.Error.to_string err) attempt
                   (String.concat ", " attempted_cascades);
                 Prometheus.inc_counter
-                  Prometheus.metric_keeper_oas_execution_errors
+                  Keeper_metrics.metric_keeper_oas_execution_errors
                   ~labels:[("keeper", meta.name); ("phase", "cascade_exhausted")]
                   ()
               end
@@ -1067,7 +1067,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                    distinguish exhaustion from transient failure without
                    re-parsing Turn_finalizing reason fields. *)
                 Prometheus.inc_counter
-                  Prometheus.metric_keeper_oas_execution_errors
+                  Keeper_metrics.metric_keeper_oas_execution_errors
                   ~labels:[("keeper", meta.name); ("phase", "terminal_non_exhaustion")]
                   ();
                 Log.Keeper.warn
@@ -1135,9 +1135,22 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               | Some timeout_budget ->
                   attempt_timeout_budget := Some timeout_budget;
                   last_timeout_budget := Some timeout_budget;
-                  Keeper_registry.set_turn_cascade_state
-                    ~base_path:config.base_path meta.name
-                    Keeper_registry.Cascade_trying;
+                  (* Cascade_trying marking moved into the disclosure
+                     hook in [Keeper_run_tools] (BeforeTurnParams) so
+                     that the spec-mandated atomic group
+                     [SelectToolPolicy(idle->selecting) ->
+                     CascadeTrying(selecting->trying)] is materialised
+                     at the only call site that asserts
+                     [decision_stage = Decision_tool_policy_selected].
+
+                     The previous direct [Cascade_idle -> Cascade_trying]
+                     jump from this site bypassed [Cascade_selecting]
+                     and tripped
+                     [Keeper_registry.validate_cascade_transition]
+                     after PR #14153 introduced the runtime invariant
+                     (assertion at keeper_registry.ml:721). Spec
+                     reference: [KeeperCascadeLifecycle.tla]
+                     [KeeperTurnCycle.tla]. *)
                   let attempt_watchdog_s =
                     attempt_watchdog_timeout_sec
                       ~remaining_turn_budget_s:(remaining_turn_budget_s ())
@@ -1193,7 +1206,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                     (String.concat ", " committed_tools)
                     err_preview;
                   Prometheus.inc_counter
-                    Prometheus.metric_keeper_turn_error_after_tools
+                    Keeper_metrics.metric_keeper_turn_error_after_tools
                     ~labels:[("keeper", meta.name); ("reason", reason)]
                     ();
                   mark_terminal_error err;
@@ -1222,7 +1235,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   let err_preview = short_preview (Agent_sdk.Error.to_string err) in
                   if EC.is_transient_network_error err then begin
                     Prometheus.inc_counter
-                      Prometheus.metric_keeper_post_turn_wirein_failures
+                      Keeper_metrics.metric_keeper_post_turn_wirein_failures
                       ~labels:[("keeper", meta.name); ("site", "post_commit_transient")]
                       ();
                     Log.Keeper.error
@@ -1237,7 +1250,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                       (String.concat ", " committed_tools)
                       err_preview;
                   Prometheus.inc_counter
-                    Prometheus.metric_keeper_turn_error_after_tools
+                    Keeper_metrics.metric_keeper_turn_error_after_tools
                     ~labels:[("keeper", meta.name)]
                     ();
                   mark_terminal_error reclassified;
@@ -1501,7 +1514,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                         attempt (EC.max_transient_retries ()) delay
                         (short_preview (Agent_sdk.Error.to_string err));
                       Prometheus.inc_counter
-                        Prometheus.metric_keeper_oas_execution_errors
+                        Keeper_metrics.metric_keeper_oas_execution_errors
                         ~labels:[("keeper", meta.name); ("phase", "recoverable_cascade_transient")]
                         ();
                       Eio.Time.sleep clock delay;
@@ -1540,7 +1553,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                           ~keeper_name:meta.name
                           Keeper_state_machine.Compaction_started;
                         Prometheus.inc_counter
-                          Prometheus.metric_keeper_fsm_edge_transitions
+                          Keeper_metrics.metric_keeper_fsm_edge_transitions
                           ~labels:[("edge", "kmc_to_ksm_compact_completed")] ();
                         dispatch_keeper_phase_event
                           ~config
@@ -1621,7 +1634,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             in
             Log.Keeper.error "%s: %s" meta.name msg;
             Prometheus.inc_counter
-              Prometheus.metric_keeper_turn_timeout_committed
+              Keeper_metrics.metric_keeper_turn_timeout_committed
               ~labels:[("keeper", meta.name)]
               ();
             let _ = drain_turn_event_bus ~site:"error_path_drain" () in
@@ -1643,7 +1656,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 (String.concat ", " committed_tools)
                 msg;
               Prometheus.inc_counter
-                Prometheus.metric_keeper_turn_timeout_committed
+                Keeper_metrics.metric_keeper_turn_timeout_committed
                 ~labels:[("keeper", meta.name)]
                 ();
               Keeper_registry.set_turn_phase
@@ -1681,7 +1694,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 meta.name
                 (String.concat ", " committed_tools);
               Prometheus.inc_counter
-                Prometheus.metric_keeper_turn_timeout_committed
+                Keeper_metrics.metric_keeper_turn_timeout_committed
                 ~labels:[("keeper", meta.name)]
                 ();
               Keeper_registry.set_turn_phase
@@ -1733,11 +1746,11 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           (match Oas_worker_named.classify_masc_internal_error err with
            | Some (Oas_worker_named.Oas_timeout_budget _) ->
                Prometheus.inc_counter
-                 Prometheus.metric_keeper_oas_timeout_classifications
+                 Keeper_metrics.metric_keeper_oas_timeout_classifications
                  ~labels:[("classification", "structural_budget")] ()
            | Some (Oas_worker_named.Turn_timeout _) ->
                Prometheus.inc_counter
-                 Prometheus.metric_keeper_oas_timeout_classifications
+                 Keeper_metrics.metric_keeper_oas_timeout_classifications
                  ~labels:[("classification", "turn_wall_clock")] ()
            | _ -> (
                match err with
@@ -1749,13 +1762,13 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                  else "other_timeout"
                in
                Prometheus.inc_counter
-                 Prometheus.metric_keeper_oas_timeout_classifications
+                 Keeper_metrics.metric_keeper_oas_timeout_classifications
                  ~labels:[("classification", classification)] ()
                | _ -> ()));
           let is_server_parse_rejection = EC.is_server_rejected_parse_error err in
           let is_auto_recoverable = EC.is_auto_recoverable_turn_error err in
           let is_ambiguous_partial = EC.is_ambiguous_side_effect_error err in
-          Prometheus.inc_counter Prometheus.metric_keeper_turns
+          Prometheus.inc_counter Keeper_metrics.metric_keeper_turns
             ~labels:[("keeper_name", meta.name); ("outcome", "failure")] ();
           Keeper_turn_fsm.emit_transition
             ~keeper_name:meta.name ~turn_id:keeper_turn_id
@@ -1784,7 +1797,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
              else "")
             (short_preview e_str);
           Prometheus.inc_counter
-            Prometheus.metric_keeper_oas_execution_errors
+            Keeper_metrics.metric_keeper_oas_execution_errors
             ~labels:[("keeper", meta.name); ("phase", "cycle_failed")]
             ();
           let social_state, social_transition_reason =
@@ -1845,7 +1858,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                       ~error_detail:e_str
                   in
                   Prometheus.inc_counter
-                    Prometheus.metric_keeper_turn_error_after_tools
+                    Keeper_metrics.metric_keeper_turn_error_after_tools
                     ~labels:[("keeper", meta.name); ("reason", "ambiguous_partial")]
                     ();
                   Log.Keeper.warn
@@ -1866,7 +1879,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   in
                   Log.Keeper.error "%s" (Agent_sdk.Error.to_string combined_err);
                   Prometheus.inc_counter
-                    Prometheus.metric_keeper_cascade_sync_failures
+                    Keeper_metrics.metric_keeper_cascade_sync_failures
                     ~labels:[("keeper", meta.name); ("site", "ambiguous_partial_pause")]
                     ();
                   (combined_err, updated_meta)
@@ -1921,7 +1934,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
            | Ok () -> ()
            | Error msg ->
                Prometheus.inc_counter
-                 Prometheus.metric_keeper_write_meta_failures
+                 Keeper_metrics.metric_keeper_write_meta_failures
                  ~labels:
                    [ ("keeper", updated_meta.name);
                      ("phase",
@@ -1937,7 +1950,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                  Log.Keeper.error
                    "write_meta failed after unified turn failure: %s" msg);
                  Prometheus.inc_counter
-                   Prometheus.metric_keeper_write_meta_cycle_failures
+                   Keeper_metrics.metric_keeper_write_meta_cycle_failures
                    ~labels:[("keeper", meta.name); ("site", "turn_failure")]
                    ();
           if is_ambiguous_partial then begin
@@ -2085,7 +2098,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                      (persistent failure remains on the crash path)"
                     meta.name auto_pause_kind sync_err;
                   Prometheus.inc_counter
-                    Prometheus.metric_keeper_cascade_sync_failures
+                    Keeper_metrics.metric_keeper_cascade_sync_failures
                     ~labels:
                       [ ("keeper", meta.name);
                         ( "site",
@@ -2098,7 +2111,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           in
           if count >= threshold && not auto_pause_succeeded then begin
             Prometheus.inc_counter
-              Prometheus.metric_keeper_oas_execution_errors
+              Keeper_metrics.metric_keeper_oas_execution_errors
               ~labels:[("keeper", meta.name); ("phase", "persistent_escalation")]
               ();
             Log.Keeper.error
@@ -2278,7 +2291,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                  else "scheduled_autonomous"
                in
                Prometheus.inc_counter
-                 Prometheus.metric_keeper_metric_emit_dropped
+                 Keeper_metrics.metric_keeper_metric_emit_dropped
                  ~labels:[
                    ("keeper", updated_meta.Keeper_types.name);
                    ("channel", channel);
@@ -2288,7 +2301,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                  "write metrics snapshot failed after keeper cycle: %s"
                  (Printexc.to_string exn);
                Prometheus.inc_counter
-                 Prometheus.metric_keeper_turn_metrics_snapshot_failures
+                 Keeper_metrics.metric_keeper_turn_metrics_snapshot_failures
                  ~labels:[("keeper", meta.name); ("site", "post_cycle")]
                  ());
           let turn_mode = Keeper_unified_metrics.turn_mode_of_result result in
@@ -2436,13 +2449,13 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             | Oas_worker.TurnBudgetExhausted _ -> "budget_exhausted"
             | Oas_worker.MutationBoundaryReached _ -> "mutation_boundary"
           in
-          Prometheus.inc_counter Prometheus.metric_keeper_turns
+          Prometheus.inc_counter Keeper_metrics.metric_keeper_turns
             ~labels:[("keeper_name", updated_meta.name); ("outcome", outcome_label)] ();
           if usage_trusted then begin
-            Prometheus.inc_counter Prometheus.metric_keeper_input_tokens
+            Prometheus.inc_counter Keeper_metrics.metric_keeper_input_tokens
               ~labels:[("keeper_name", updated_meta.name); ("model", model_used)]
               ~delta:(float_of_int result.usage.input_tokens) ();
-            Prometheus.inc_counter Prometheus.metric_keeper_output_tokens
+            Prometheus.inc_counter Keeper_metrics.metric_keeper_output_tokens
               ~labels:[("keeper_name", updated_meta.name); ("model", model_used)]
               ~delta:(float_of_int result.usage.output_tokens) ();
             (* #7469 Step 1: emit prompt-cache usage so Anthropic/Bedrock
@@ -2453,11 +2466,11 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                here would fail to compile instead of silently creating a
                dead series. *)
             (if result.usage.cache_creation_input_tokens > 0 then
-               Prometheus.inc_counter Prometheus.metric_keeper_cache_creation_tokens
+               Prometheus.inc_counter Keeper_metrics.metric_keeper_cache_creation_tokens
                  ~labels:[("keeper_name", updated_meta.name); ("model", model_used)]
                  ~delta:(float_of_int result.usage.cache_creation_input_tokens) ());
             (if result.usage.cache_read_input_tokens > 0 then
-               Prometheus.inc_counter Prometheus.metric_keeper_cache_read_tokens
+               Prometheus.inc_counter Keeper_metrics.metric_keeper_cache_read_tokens
                  ~labels:[("keeper_name", updated_meta.name); ("model", model_used)]
                  ~delta:(float_of_int result.usage.cache_read_input_tokens) ())
           end else begin
@@ -2469,7 +2482,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             List.iter
               (fun reason ->
                  Prometheus.inc_counter
-                   Prometheus.metric_keeper_usage_anomalies
+                   Keeper_metrics.metric_keeper_usage_anomalies
                    ~labels:
                      [
                        ("keeper_name", updated_meta.name);
@@ -2519,7 +2532,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
            | Ok () -> ()
            | Error msg ->
                Prometheus.inc_counter
-                 Prometheus.metric_keeper_write_meta_failures
+                 Keeper_metrics.metric_keeper_write_meta_failures
                  ~labels:
                    [ ("keeper", updated_meta.name);
                      ("phase",
@@ -2535,7 +2548,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                  Log.Keeper.error
                    "write_meta failed after keeper cycle: %s" msg);
                    Prometheus.inc_counter
-                     Prometheus.metric_keeper_write_meta_cycle_failures
+                     Keeper_metrics.metric_keeper_write_meta_cycle_failures
                      ~labels:[("keeper", meta.name); ("site", "keeper_cycle")]
                      ();
           (* 8. Handle stop reason *)

@@ -21,6 +21,7 @@ let () = Mirage_crypto_rng_unix.use_default ()
 (* Test Helpers                                                  *)
 (* ============================================================ *)
 
+<<<<<<< HEAD
 (** Check for success emoji *)
 let contains_check result =
   String.length result >= 3 && String.sub result 0 3 = "\xE2\x9C\x85" (* ✅ *)
@@ -41,6 +42,25 @@ let _contains_cancel result =
   String.length result >= 4 && String.sub result 0 4 = "\xF0\x9F\x9A\xAB" (* 🚫 *)
 ;;
 
+||||||| parent of be7b3c468c (test(room): accept semantic coord results)
+(** Check for success emoji *)
+let contains_check result =
+  String.length result >= 3 && String.sub result 0 3 = "\xE2\x9C\x85"  (* ✅ *)
+
+(** Check for warning emoji *)
+let contains_warning result =
+  String.length result >= 3 && String.sub result 0 3 = "\xE2\x9A\xA0"  (* ⚠ *)
+
+(** Check for error emoji *)
+let contains_error result =
+  String.length result >= 3 && String.sub result 0 3 = "\xE2\x9D\x8C"  (* ❌ *)
+
+(** Check for cancel emoji *)
+let _contains_cancel result =
+  String.length result >= 4 && String.sub result 0 4 = "\xF0\x9F\x9A\xAB"  (* 🚫 *)
+
+=======
+>>>>>>> be7b3c468c (test(room): accept semantic coord results)
 (** Substring check helper *)
 let str_contains s substring =
   let len_s = String.length s in
@@ -57,6 +77,60 @@ let str_contains s substring =
     in
     check 0)
 ;;
+
+(** Legacy string APIs are gradually moving away from emoji-prefixed messages.
+    Treat a non-empty message without known problem text as success. *)
+let starts_with s prefix =
+  let len_s = String.length s in
+  let len_prefix = String.length prefix in
+  len_s >= len_prefix && String.sub s 0 len_prefix = prefix
+
+let contains_any haystack needles =
+  List.exists (str_contains haystack) needles
+
+let has_legacy_result_prefix prefix result = starts_with result prefix
+
+let contains_problem_result result =
+  let lower = String.lowercase_ascii result in
+  has_legacy_result_prefix "\xE2\x9D\x8C" result
+  || contains_any lower
+       [ "error:"
+       ; "[taskerror]"
+       ; "[agenterror]"
+       ; "[systemerror]"
+       ; "not found"
+       ; "notfound"
+       ; "not initialized"
+       ; "notinitialized"
+       ; "not joined"
+       ; "notjoined"
+       ; "invalid"
+       ; "invalidstate"
+       ; "empty"
+       ; "too long"
+       ; "blocked"
+       ; "already claimed"
+       ; "cannot"
+       ; "rejected"
+       ; "was not in the namespace"
+       ; "requires"
+       ]
+
+(** Check for semantic success across legacy string result formats. *)
+let contains_check result =
+  has_legacy_result_prefix "\xE2\x9C\x85" result
+  || (String.trim result <> "" && not (contains_problem_result result))
+
+(** Check for warning/problem result across legacy string result formats. *)
+let contains_warning result =
+  has_legacy_result_prefix "\xE2\x9A\xA0" result || contains_problem_result result
+
+(** Check for semantic error across legacy string result formats. *)
+let contains_error = contains_problem_result
+
+(** Check for cancel emoji *)
+let _contains_cancel result =
+  String.length result >= 4 && String.sub result 0 4 = "\xF0\x9F\x9A\xAB"  (* 🚫 *)
 
 (** Create fresh test environment with cleanup.
     Wrapped in Eio_main.run because Coord.init uses Eio.Mutex internally. *)

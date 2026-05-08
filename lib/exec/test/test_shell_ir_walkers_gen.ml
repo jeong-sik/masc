@@ -72,6 +72,44 @@ let test_sandbox_parallel_equivalence () =
         (hand = gen))
     all_wrapped
 
+(* PR-4: gen_to_simple parallel equivalence. The hand-written
+   [Shell_ir_typed.to_simple] takes the unwrapped command directly,
+   so the test unwraps each [W (...)] and feeds both walkers the
+   same input. Equality is structural — each [Shell_ir.simple] field
+   must match: bin, args, env, cwd, redirects, sandbox. *)
+let simple_eq (a : Shell_ir.simple) (b : Shell_ir.simple) : bool =
+  Bin.to_string a.bin = Bin.to_string b.bin
+  && a.args = b.args
+  && a.env = b.env
+  && a.cwd = b.cwd
+  && a.redirects = b.redirects
+  && Sandbox_target.kind a.sandbox = Sandbox_target.kind b.sandbox
+
+let pp_simple ppf (s : Shell_ir.simple) =
+  Format.fprintf
+    ppf
+    "{ bin=%s; args=%d; env=%d; cwd=%s; redirects=%d }"
+    (Bin.to_string s.bin)
+    (List.length s.args)
+    (List.length s.env)
+    (match s.cwd with None -> "None" | Some _ -> "Some _")
+    (List.length s.redirects)
+
+let test_to_simple_parallel_equivalence () =
+  List.iter
+    (fun (Shell_ir_typed.W cmd as w) ->
+      let hand = Shell_ir_typed.to_simple cmd in
+      let gen = Shell_ir_typed_walkers_gen.gen_to_simple cmd in
+      let _ = w in
+      if not (simple_eq hand gen) then
+        Alcotest.failf
+          "to_simple drift: hand=%a gen=%a"
+          pp_simple
+          hand
+          pp_simple
+          gen)
+    all_wrapped
+
 let test_constructor_count () =
   (* Baseline: 9 constructors as of 2026-05-09. If this fails, either
      a constructor was added to shell_ir_typed.ml without updating the
@@ -113,6 +151,10 @@ let () =
             "sandbox: hand-written = generated"
             `Quick
             test_sandbox_parallel_equivalence
+        ; Alcotest.test_case
+            "to_simple: hand-written = generated"
+            `Quick
+            test_to_simple_parallel_equivalence
         ] )
     ; ( "spec_invariants"
       , [ Alcotest.test_case

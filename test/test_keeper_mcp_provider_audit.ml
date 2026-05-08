@@ -32,13 +32,14 @@ let test_codex_cli_active_default_false () =
         "default false (operator must opt in)" false default_when_unset
   | _ -> Alcotest.fail "codex_cli must be Auto_construct_active"
 
-let test_gemini_cli_no_construct_path () =
+let test_gemini_cli_active_default_true () =
   let r = Audit.lookup "gemini_cli" in
   match r.construct with
-  | Audit.No_auto_construct_path _ -> ()
-  | _ ->
-      Alcotest.fail
-        "gemini_cli has no enable path; only OAS_GEMINI_NO_MCP disable flag"
+  | Audit.Auto_construct_active { env_flag; default_when_unset; _ } ->
+      Alcotest.(check string)
+        "env flag" "OAS_GEMINI_ALLOWED_MCP" env_flag;
+      Alcotest.(check bool) "default true" true default_when_unset
+  | _ -> Alcotest.fail "gemini_cli must be Auto_construct_active"
 
 let test_glm_is_http_api () =
   let r = Audit.lookup "glm" in
@@ -89,9 +90,9 @@ let test_active_default_codex_false () =
     "codex_cli default-off — Leak 12 root cause" false
     (Audit.auto_construct_active_by_default (Audit.lookup "codex_cli"))
 
-let test_active_default_gemini_false () =
+let test_active_default_gemini_true () =
   Alcotest.(check bool)
-    "gemini_cli has no construct path" false
+    "gemini_cli default-on" true
     (Audit.auto_construct_active_by_default (Audit.lookup "gemini_cli"))
 
 let test_active_default_glm_true () =
@@ -102,6 +103,29 @@ let test_active_default_glm_true () =
     "glm is HTTP API, considered satisfied" true
     (Audit.auto_construct_active_by_default (Audit.lookup "glm"))
 
+let env_lookup pairs key = List.assoc_opt key pairs
+
+let test_effective_codex_uses_enabled_env () =
+  Alcotest.(check bool)
+    "codex_cli env override enables default-off construct path" true
+    (Audit.auto_construct_effectively_active
+       ~env_lookup:(env_lookup [ ("MASC_SYNC_CODEX_MCP_CONFIG", "1") ])
+       (Audit.lookup "codex_cli"))
+
+let test_effective_codex_false_env_stays_inactive () =
+  Alcotest.(check bool)
+    "codex_cli explicit false keeps construct path inactive" false
+    (Audit.auto_construct_effectively_active
+       ~env_lookup:(env_lookup [ ("MASC_SYNC_CODEX_MCP_CONFIG", "false") ])
+       (Audit.lookup "codex_cli"))
+
+let test_effective_invalid_env_falls_back_to_default () =
+  Alcotest.(check bool)
+    "invalid codex env falls back to default false" false
+    (Audit.auto_construct_effectively_active
+       ~env_lookup:(env_lookup [ ("MASC_SYNC_CODEX_MCP_CONFIG", "maybe") ])
+       (Audit.lookup "codex_cli"))
+
 (* ── audit_providers + partition ─────────────────────────────── *)
 
 let test_audit_providers_partitions_correctly () =
@@ -111,8 +135,9 @@ let test_audit_providers_partitions_correctly () =
   let results = Audit.audit_providers providers in
   Alcotest.(check int) "5 providers in" 5 (List.length results);
   let active, no_path, http_api = Audit.partition results in
-  Alcotest.(check int) "2 active (claude+codex)" 2 (List.length active);
-  Alcotest.(check int) "1 no construct path (gemini)" 1 (List.length no_path);
+  Alcotest.(check int) "3 active (claude+codex+gemini)" 3
+    (List.length active);
+  Alcotest.(check int) "0 no construct path" 0 (List.length no_path);
   Alcotest.(check int) "2 http api (glm+ollama)" 2 (List.length http_api)
 
 (* ── log line tags ───────────────────────────────────────────── *)
@@ -127,8 +152,8 @@ let test_format_log_tags () =
     (starts_with "[mcp_audit:active]"
        (Audit.format_log_line (Audit.lookup "claude_code")));
   Alcotest.(check bool)
-    "no_construct_path tag" true
-    (starts_with "[mcp_audit:no_construct_path]"
+    "gemini active tag" true
+    (starts_with "[mcp_audit:active]"
        (Audit.format_log_line (Audit.lookup "gemini_cli")));
   Alcotest.(check bool)
     "http_api tag" true
@@ -146,8 +171,8 @@ let () =
             test_kimi_cli_aliases_to_claude_path;
           Alcotest.test_case "codex_cli default false" `Quick
             test_codex_cli_active_default_false;
-          Alcotest.test_case "gemini_cli no construct path" `Quick
-            test_gemini_cli_no_construct_path;
+          Alcotest.test_case "gemini_cli default true" `Quick
+            test_gemini_cli_active_default_true;
           Alcotest.test_case "glm is HTTP API" `Quick test_glm_is_http_api;
           Alcotest.test_case "ollama is HTTP API" `Quick
             test_ollama_is_http_api;
@@ -160,10 +185,19 @@ let () =
             test_active_default_claude_true;
           Alcotest.test_case "codex default-off (Leak 12 root)" `Quick
             test_active_default_codex_false;
-          Alcotest.test_case "gemini no path => false" `Quick
-            test_active_default_gemini_false;
+          Alcotest.test_case "gemini default-on" `Quick
+            test_active_default_gemini_true;
           Alcotest.test_case "glm http_api => true" `Quick
             test_active_default_glm_true;
+        ] );
+      ( "auto_construct_effective_env semantics",
+        [
+          Alcotest.test_case "codex env true => active" `Quick
+            test_effective_codex_uses_enabled_env;
+          Alcotest.test_case "codex env false => inactive" `Quick
+            test_effective_codex_false_env_stays_inactive;
+          Alcotest.test_case "invalid env falls back" `Quick
+            test_effective_invalid_env_falls_back_to_default;
         ] );
       ( "aggregation",
         [

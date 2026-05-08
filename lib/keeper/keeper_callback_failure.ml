@@ -12,7 +12,7 @@ let record ~(base_dir : string) ~(meta : Keeper_types.keeper_meta)
   | _ ->
     let error = Printexc.to_string exn in
     Prometheus.inc_counter
-      Prometheus.metric_keeper_lifecycle_callback_failures
+      Keeper_metrics.metric_keeper_lifecycle_callback_failures
       ~labels:[("callback", callback)] ();
     Log.Keeper.warn "keeper:%s lifecycle callback %s raised: %s"
       meta.name callback error;

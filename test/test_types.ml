@@ -50,13 +50,36 @@ let test_message_roundtrip () =
     mention = Some "gemini";
     timestamp = "2024-01-01T00:00:00Z";
     trace_context = None;
+    expires_at = Some 1704067200.0;
+    relevance = "high";
   } in
   let json = message_to_yojson msg in
   match message_of_yojson json with
   | Ok parsed ->
       Alcotest.(check int) "seq" 1 parsed.seq;
       Alcotest.(check string) "from" "claude" parsed.from_agent;
-      Alcotest.(check (option string)) "mention" (Some "gemini") parsed.mention
+      Alcotest.(check (option string)) "mention" (Some "gemini") parsed.mention;
+      Alcotest.(check (option (float 0.001))) "expires_at"
+        (Some 1704067200.0) parsed.expires_at;
+      Alcotest.(check string) "relevance" "high" parsed.relevance
+  | Error e -> Alcotest.fail e
+
+let test_message_temporal_decay_defaults () =
+  let json =
+    `Assoc [
+      ("seq", `Int 2);
+      ("from", `String "gemini");
+      ("type", `String "broadcast");
+      ("content", `String "status ping");
+      ("timestamp", `String "2024-01-01T00:00:00Z");
+    ]
+  in
+  match message_of_yojson json with
+  | Ok parsed ->
+      Alcotest.(check (option (float 0.001))) "expires_at default" None
+        parsed.expires_at;
+      Alcotest.(check string) "relevance default" "medium"
+        parsed.relevance
   | Error e -> Alcotest.fail e
 
 let test_parse_iso8601_epoch_utc () =
@@ -288,6 +311,8 @@ let () =
     ];
     "message", [
       Alcotest.test_case "roundtrip" `Quick test_message_roundtrip;
+      Alcotest.test_case "temporal decay defaults" `Quick
+        test_message_temporal_decay_defaults;
     ];
     "timestamp", [
       Alcotest.test_case "parse utc epoch" `Quick test_parse_iso8601_epoch_utc;

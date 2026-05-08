@@ -77,6 +77,46 @@ let collect_table_names (doc : Keeper_toml_loader.toml_doc) ~(prefix : string) :
       None)
   |> List.sort_uniq String.compare
 
+let normalize_tool_names ~scope tools =
+  let alias_notes = ref [] in
+  let dropped_notes = ref [] in
+  let rec add seen acc = function
+    | [] -> List.rev acc
+    | raw :: rest ->
+        let raw = String.trim raw in
+        if String.equal raw "" then
+          add seen acc rest
+        else
+          let resolved =
+            match raw with
+            | "keeper_fs_write" ->
+                alias_notes := "keeper_fs_write -> keeper_fs_edit" :: !alias_notes;
+                Some "keeper_fs_edit"
+            | "keeper_fs_delete" ->
+                dropped_notes :=
+                  "keeper_fs_delete removed; use keeper_fs_edit patch/write or masc_code_delete"
+                  :: !dropped_notes;
+                None
+            | name -> Some name
+          in
+          match resolved with
+          | None -> add seen acc rest
+          | Some name when List.mem name seen -> add seen acc rest
+          | Some name -> add (name :: seen) (name :: acc) rest
+  in
+  let normalized = add [] [] tools in
+  (match List.rev !alias_notes with
+  | [] -> ()
+  | notes ->
+      Log.Keeper.info "tool_policy_config: normalized legacy tool name(s) in %s: %s"
+        scope (String.concat ", " notes));
+  (match List.rev !dropped_notes with
+  | [] -> ()
+  | notes ->
+      Log.Keeper.info "tool_policy_config: dropped removed legacy tool name(s) in %s: %s"
+        scope (String.concat ", " notes));
+  normalized
+
 (* ── Loading ──────────────────────────────────────────────────────── *)
 
 let parse_groups (doc : Keeper_toml_loader.toml_doc) : ((string, group_source) Hashtbl.t, string) result =
@@ -94,6 +134,7 @@ let parse_groups (doc : Keeper_toml_loader.toml_doc) : ((string, group_source) H
         Hashtbl.replace tbl name (Shard_ref shard_name);
         None
       | None, _ :: _ ->
+        let tools = normalize_tool_names ~scope:("groups." ^ name ^ ".tools") tools in
         Hashtbl.replace tbl name (Static tools);
         None
       | None, [] ->
@@ -111,6 +152,7 @@ let parse_masc_groups (doc : Keeper_toml_loader.toml_doc) : (string, string list
   List.iter (fun name ->
     let tools = toml_string_list_at doc "masc" (name ^ ".tools") in
     if tools <> [] then
+      let tools = normalize_tool_names ~scope:("masc." ^ name ^ ".tools") tools in
       Hashtbl.replace tbl name tools
   ) names;
   tbl
@@ -123,7 +165,10 @@ let parse_presets
   List.iter (fun name ->
     let groups = toml_string_list_at doc "presets" (name ^ ".groups") in
     let masc_groups = toml_string_list_at doc "presets" (name ^ ".masc_groups") in
-    let masc_tools = toml_string_list_at doc "presets" (name ^ ".masc_tools") in
+    let masc_tools =
+      toml_string_list_at doc "presets" (name ^ ".masc_tools")
+      |> normalize_tool_names ~scope:("presets." ^ name ^ ".masc_tools")
+    in
     let all_candidates =
       Option.value ~default:false
         (toml_bool_at doc "presets" (name ^ ".all_candidates"))

@@ -147,10 +147,23 @@ val keeper_default_model_tools : keeper_meta -> Masc_domain.tool_schema list
     Whitelist: [.masc/playground/], [.masc/decision_audit/], [.worktrees/]. *)
 val is_masc_write_allowed : string -> bool
 
-(** Recovery minimum tool names: non-removable shards only.
+(** Recovery minimum tool names: non-removable shards UNION essential MASC tools.
     Guaranteed non-empty (TLA+ ToolSetNeverEmpty).
-    Phase B2: used in Failing phase as recovery floor. *)
+    Phase B2: used in Failing phase as recovery floor.
+
+    Two layers:
+    - Shard floor: [removable=false] shards (currently [base] = local core).
+    - Essential MASC: coordination + web lookup so a Failing keeper can
+      check coordination state, look up information for recovery, and
+      defer to operator approval. Mirrors [masc.essential] in
+      [config/tool_policy.toml]. Sync regression in
+      [test_failing_minimum_essential]. *)
 val failing_minimum_tool_names : unit -> string list
+
+(** Essential MASC tool names included in Failing recovery floor.
+    SSOT: [config/tool_policy.toml] [masc.essential]. Exposed for
+    sync regression test. *)
+val essential_masc_minimum_names : string list
 
 (** Policy-filtered allowed tool names.
     Returns empty list when [write_done] is true.

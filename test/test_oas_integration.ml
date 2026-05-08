@@ -255,7 +255,6 @@ let test_oas_event_bridge_persists_native_events () =
     (fun () ->
       let config = Coord.default_config dir in
       let bus = Event_bus.create () in
-      Sse.set_clock (Eio.Stdenv.clock env);
       try
         Eio.Switch.run (fun sw ->
             Oas_event_bridge.start_with_interval ~drain_interval_s:0.1
@@ -308,7 +307,6 @@ let test_oas_event_bridge_broadcasts_lifecycle_to_observers () =
       let config = Coord.default_config dir in
       let bus = Event_bus.create () in
       Masc_event_bus.set bus;
-      Masc_mcp.Sse.set_clock (Eio.Stdenv.clock env);
       try
         Eio.Switch.run (fun sw ->
             ignore (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Observer
@@ -347,7 +345,6 @@ let test_oas_event_bridge_retries_append_failure_then_recovers () =
     (fun () ->
       let config = relay_test_config broken_root in
       let bus = Event_bus.create () in
-      Masc_mcp.Sse.set_clock (Eio.Stdenv.clock env);
       try
         Eio.Switch.run (fun sw ->
             ignore (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Observer
@@ -392,7 +389,6 @@ let test_oas_event_bridge_drop_marker_on_exhausted_append_failure () =
     (fun () ->
       let config = relay_test_config broken_root in
       let bus = Event_bus.create () in
-      Masc_mcp.Sse.set_clock (Eio.Stdenv.clock env);
       try
         Eio.Switch.run (fun sw ->
             ignore (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Observer
@@ -864,7 +860,6 @@ let test_oas_event_bridge_logs_turn_completed_with_agent_name () =
         | [] -> None
         | entry :: _ -> Some entry.seq
       in
-      Sse.set_clock (Eio.Stdenv.clock env);
       try
         Eio.Switch.run (fun sw ->
           Oas_event_bridge.start ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
@@ -926,7 +921,6 @@ let test_oas_event_bridge_logs_tool_completed_with_agent_name () =
         | [] -> None
         | entry :: _ -> Some entry.seq
       in
-      Sse.set_clock (Eio.Stdenv.clock env);
       try
         Eio.Switch.run (fun sw ->
           Oas_event_bridge.start ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;

@@ -731,6 +731,19 @@ let disposition_fields_json ~(config : Coord.config) ~(meta : keeper_meta) :
       ("disposition_reason", `String disposition_reason);
     ]
 
+let decision_log_persistence_surface = "keeper_runtime_trust_decision_log"
+
+let report_decision_log_read_drop ~reason ~path ~detail =
+  Safe_ops.report_persistence_read_drop
+    ~on_drop:(fun () ->
+      Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+        ~labels:[("surface", decision_log_persistence_surface); ("reason", reason)]
+        ())
+    ~surface:decision_log_persistence_surface
+    ~reason
+    ~path
+    ~detail
+
 let latest_decision_json ~(config : Coord.config) ~(keeper_name : string) :
     Yojson.Safe.t option =
   let path = Keeper_types.keeper_decision_log_path config keeper_name in
@@ -740,9 +753,19 @@ let latest_decision_json ~(config : Coord.config) ~(keeper_name : string) :
     |> List.rev
     |> List.find_map (fun line ->
            match Yojson.Safe.from_string line with
-           | exception Yojson.Json_error _ -> None
+           | exception Yojson.Json_error detail ->
+               report_decision_log_read_drop
+                 ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+                 ~path
+                 ~detail;
+               None
            | (`Assoc _ as json) -> Some json
-           | _ -> None)
+           | _ ->
+               report_decision_log_read_drop
+                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                 ~path
+                 ~detail:"decision log row is not a JSON object";
+               None)
 
 let latest_tool_call_json ~(keeper_name : string) =
   Keeper_tool_call_log.read_latest ~keeper_name ()

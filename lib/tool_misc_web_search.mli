@@ -128,6 +128,15 @@ val parse_bing_search_json : string -> (string * string * string) list
 (** Parse Bing Search API JSON response from
     [{ "webPages": { "value": \[{name, url, snippet}, ...\] } }]. *)
 
+(** {1 HTML cleaning} *)
+
+val clean_search_text : string -> string
+(** [clean_search_text html] strips HTML tags, CDATA sections, decodes
+    common HTML entities, and normalizes whitespace.  Reusable for any
+    HTML snippet — not limited to search result cleaning.  Exposed so
+    [Tool_misc_web_fetch] can share the same pipeline without
+    duplicating regexes and entity tables. *)
+
 (** {1 Tool dispatch + simulation} *)
 
 val handle : Yojson.Safe.t -> bool * string

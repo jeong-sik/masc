@@ -53,3 +53,12 @@ val resolve : string -> resolution
     only need the kind and not the split model id. *)
 val kind_of_spec :
   string -> Llm_provider.Provider_config.provider_kind option
+
+(** [env_var_for_kind kind] returns the conventional environment variable
+    name that holds the API key for [kind], delegating to OAS's
+    {!Llm_provider.Provider_kind.default_api_key_env}. Centralizing this
+    lookup here keeps direct {!Llm_provider.Provider_kind} usage out of
+    keeper / auth call sites and gives masc-mcp a single hook for future
+    overrides (e.g. provider aliases, env-var customization). *)
+val env_var_for_kind :
+  Llm_provider.Provider_config.provider_kind -> string option

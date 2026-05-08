@@ -20,6 +20,7 @@ REVIEW_TARGETS_FILE="$RUN_DIR/review-targets.jsonl"
 GITHUB_IDENTITY_COUNTS_FILE="$RUN_DIR/github-identity-counts.json"
 PROOF_BRANCH_COLLISIONS_FILE="$RUN_DIR/proof-branch-collisions.jsonl"
 CREATE_READINESS_FAILURES_FILE="$RUN_DIR/create-readiness-failures.jsonl"
+GITHUB_EGRESS_PREFLIGHT_FILE="$RUN_DIR/github-egress-preflight.jsonl"
 SUMMARY_FILE="$RUN_DIR/summary.json"
 AUDIT_FILE="$RUN_DIR/audit-docker-pr-lifecycle.json"
 AUDIT_STATUS_RESULT=0
@@ -39,15 +40,18 @@ INIT_TIMEOUT_SEC="${INIT_TIMEOUT_SEC:-60}"
 POLL_TIMEOUT_SEC="${POLL_TIMEOUT_SEC:-1200}"
 POLL_INTERVAL_SEC="${POLL_INTERVAL_SEC:-10}"
 LIFECYCLE_MUTATION_MODE="split"
+PHASE_MODE="${PHASE_MODE:-both}"
+REVIEW_RESUME="${REVIEW_RESUME:-0}"
 REQUIRED_TOOLS_LEGACY="${REQUIRED_TOOLS:-}"
-CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_bash,keeper_pr_create}}"
-REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_pr_review_comment}}"
+CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-masc_web_search,keeper_bash,keeper_pr_create}}"
+REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_shell,keeper_pr_review_comment}}"
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 MCP_TOKEN="${MASC_MCP_TOKEN:-}"
 MCP_CLIENT_NAME="${MCP_CLIENT_NAME:-keeper-docker-pr-lifecycle-reprobe}"
 EXPECTED_SERVER_COMMIT="${EXPECTED_SERVER_COMMIT:-}"
 FORBID_GITHUB_IDENTITIES="${FORBID_GITHUB_IDENTITIES:-}"
 ALLOW_FORK_PR_FOR_READONLY="${ALLOW_FORK_PR_FOR_READONLY:-0}"
+SEED_GITHUB_EGRESS="${SEED_GITHUB_EGRESS:-0}"
 SERVER_HEALTH_URL="${SERVER_HEALTH_URL:-}"
 SERVER_COMMIT_ACTUAL=""
 SERVER_STARTED_AT_ACTUAL=""
@@ -85,10 +89,18 @@ Options:
                            Permit PUBLIC repo READ/TRIAGE credentials to satisfy
                            create proof by pushing to their own fork and opening
                            a draft PR with head OWNER:BRANCH.
+  --seed-github-egress     When a fork-route keeper lacks GitHub egress policy,
+                           add github.com and *.github.com to its Docker
+                           egress.json before sending mutate prompts.
   --server-health-url URL  Health endpoint for commit verification.
   --board-post-id ID       Post a final board comment to this thread.
   --run-id ID              Stable run id for prompts and artifacts.
   --run-dir PATH           Artifact directory.
+  --phase create|review|both
+                           Which lifecycle phase to mutate (default: both).
+  --review-resume          With --phase review, send review prompts even when
+                           create result readiness is incomplete. Keeper-side
+                           target PR resolution still decides success/failure.
   -h, --help               Show this help.
 
 Environment:
@@ -102,10 +114,14 @@ Environment:
   CREATE_REQUIRED_TOOLS    CSV required_tools for split create phase.
   REVIEW_REQUIRED_TOOLS    CSV required_tools for split review phase.
   RUN_AUDIT=0              Skip final audit.
+  PHASE_MODE=create|review|both
+                           Same as --phase.
+  REVIEW_RESUME=1          Same as --review-resume.
   EXPECTED_SERVER_COMMIT   Optional expected /health build.commit prefix.
   FORBID_GITHUB_IDENTITIES Optional CSV of forbidden keeper GitHub identities.
   ALLOW_FORK_PR_FOR_READONLY=1
                            Same as --allow-fork-pr-for-readonly.
+  SEED_GITHUB_EGRESS=1     Same as --seed-github-egress.
 EOF
 }
 
@@ -159,6 +175,10 @@ while [[ $# -gt 0 ]]; do
       ALLOW_FORK_PR_FOR_READONLY=1
       shift
       ;;
+    --seed-github-egress)
+      SEED_GITHUB_EGRESS=1
+      shift
+      ;;
     --server-health-url)
       SERVER_HEALTH_URL="$2"
       shift 2
@@ -180,6 +200,7 @@ while [[ $# -gt 0 ]]; do
         GITHUB_IDENTITY_COUNTS_FILE="$RUN_DIR/github-identity-counts.json"
         PROOF_BRANCH_COLLISIONS_FILE="$RUN_DIR/proof-branch-collisions.jsonl"
         CREATE_READINESS_FAILURES_FILE="$RUN_DIR/create-readiness-failures.jsonl"
+        GITHUB_EGRESS_PREFLIGHT_FILE="$RUN_DIR/github-egress-preflight.jsonl"
         SUMMARY_FILE="$RUN_DIR/summary.json"
         AUDIT_FILE="$RUN_DIR/audit-docker-pr-lifecycle.json"
       fi
@@ -197,9 +218,18 @@ while [[ $# -gt 0 ]]; do
       GITHUB_IDENTITY_COUNTS_FILE="$RUN_DIR/github-identity-counts.json"
       PROOF_BRANCH_COLLISIONS_FILE="$RUN_DIR/proof-branch-collisions.jsonl"
       CREATE_READINESS_FAILURES_FILE="$RUN_DIR/create-readiness-failures.jsonl"
+      GITHUB_EGRESS_PREFLIGHT_FILE="$RUN_DIR/github-egress-preflight.jsonl"
       SUMMARY_FILE="$RUN_DIR/summary.json"
       AUDIT_FILE="$RUN_DIR/audit-docker-pr-lifecycle.json"
       shift 2
+      ;;
+    --phase)
+      PHASE_MODE="$2"
+      shift 2
+      ;;
+    --review-resume)
+      REVIEW_RESUME=1
+      shift
       ;;
     -h|--help)
       usage
@@ -224,6 +254,7 @@ mkdir -p "$RUN_DIR" "$RAW_DIR" "$PROMPT_DIR"
 : >"$REVIEW_TARGETS_FILE"
 : >"$PROOF_BRANCH_COLLISIONS_FILE"
 : >"$CREATE_READINESS_FAILURES_FILE"
+: >"$GITHUB_EGRESS_PREFLIGHT_FILE"
 
 log() {
   printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2
@@ -990,6 +1021,20 @@ proof_branch_for_keeper() {
   printf 'keeper-%s-agent/%s' "$keeper" "$RUN_ID"
 }
 
+proof_head_ref_for_keeper() {
+  local keeper="$1"
+  local branch account
+  branch="$(proof_branch_for_keeper "$keeper")"
+  if keeper_uses_fork_pr_route "$keeper"; then
+    account="$(github_account_for_keeper "$keeper")"
+    if [[ -n "$account" ]]; then
+      printf '%s:%s' "$account" "$branch"
+      return 0
+    fi
+  fi
+  printf '%s' "$branch"
+}
+
 github_account_for_keeper() {
   local keeper="$1"
   jq -r --arg keeper "$keeper" '.keeper_accounts[$keeper] // empty' "$GITHUB_IDENTITY_COUNTS_FILE"
@@ -1013,6 +1058,119 @@ keeper_uses_fork_pr_route() {
   [[ "$ALLOW_FORK_PR_FOR_READONLY" == "1" \
     && "$visibility" == "PUBLIC" \
     && ( "$permission" == "READ" || "$permission" == "TRIAGE" ) ]]
+}
+
+assert_github_egress_for_fork_routes() {
+  [[ "$MUTATE" == "1" ]] || return 0
+  [[ "$ALLOW_FORK_PR_FOR_READONLY" == "1" ]] || return 0
+
+  local status=0
+  set +e
+  python3 - "$BASE_PATH" "$RUN_DIR/keepers.txt" "$GITHUB_IDENTITY_COUNTS_FILE" \
+    "$SEED_GITHUB_EGRESS" "$GITHUB_EGRESS_PREFLIGHT_FILE" <<'PY'
+import json
+import pathlib
+import sys
+
+base_path = pathlib.Path(sys.argv[1]).expanduser()
+keepers_file = pathlib.Path(sys.argv[2])
+identity_counts_file = pathlib.Path(sys.argv[3])
+seed = sys.argv[4] == "1"
+out_file = pathlib.Path(sys.argv[5])
+
+
+def safe_filename(name):
+    parts = []
+    for ch in name.lower():
+        if ch.isalnum() or ch in "._-":
+            parts.append(ch)
+        else:
+            parts.append(f"_{ord(ch):02x}")
+    return "".join(parts)
+
+
+def load_domains(path):
+    if not path.is_file():
+        return [], "missing"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return [], f"unreadable:{type(exc).__name__}"
+    if not isinstance(payload, list):
+        return [], "not_json_list"
+    domains = [str(item).strip().lower() for item in payload if isinstance(item, str)]
+    domains = [domain for domain in domains if domain]
+    return domains, None
+
+
+def github_allowed(domains):
+    normalized = {domain.lower() for domain in domains}
+    return "github.com" in normalized or "*.github.com" in normalized
+
+
+payload = json.loads(identity_counts_file.read_text(encoding="utf-8"))
+permissions = payload.get("keeper_repo_permissions")
+if not isinstance(permissions, dict):
+    permissions = {}
+visibilities = payload.get("keeper_repo_visibilities")
+if not isinstance(visibilities, dict):
+    visibilities = {}
+
+keepers = [line.strip() for line in keepers_file.read_text().splitlines() if line.strip()]
+records = []
+failed = False
+for keeper in keepers:
+    permission = permissions.get(keeper)
+    visibility = visibilities.get(keeper)
+    uses_fork_route = permission in {"READ", "TRIAGE"} and visibility == "PUBLIC"
+    if not uses_fork_route:
+        continue
+    policy_path = (
+        base_path
+        / ".masc"
+        / "playground"
+        / "docker"
+        / safe_filename(keeper)
+        / "egress.json"
+    )
+    domains, load_error = load_domains(policy_path)
+    if github_allowed(domains):
+        status = "ok"
+    elif seed:
+        policy_path.parent.mkdir(parents=True, exist_ok=True)
+        merged = sorted(set(domains + ["github.com", "*.github.com"]))
+        policy_path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
+        domains = merged
+        status = "seeded"
+    else:
+        failed = True
+        status = "missing_github_egress"
+    records.append(
+        {
+            "keeper": keeper,
+            "permission": permission,
+            "visibility": visibility,
+            "egress_policy_path": str(policy_path),
+            "load_error": load_error,
+            "status": status,
+            "allowed": domains,
+        }
+    )
+
+out_file.write_text(
+    "".join(json.dumps(record, sort_keys=True) + "\n" for record in records),
+    encoding="utf-8",
+)
+sys.exit(1 if failed else 0)
+PY
+  status=$?
+  set -e
+  if [[ "$status" -ne 0 ]]; then
+    echo "fork PR route requires GitHub egress policy for READ/TRIAGE keepers" >&2
+    echo "rerun with --seed-github-egress only for an isolated proof base, or seed the listed egress.json files manually" >&2
+    cat "$GITHUB_EGRESS_PREFLIGHT_FILE" >&2 || true
+    exit "$status"
+  fi
 }
 
 assert_no_proof_branch_collisions_for_mutate() {
@@ -1108,7 +1266,7 @@ prompt_for_keeper_create() {
     head_ref="$account:$branch"
     git_route_rule="- You may use keeper_bash for gh repo fork / git remote setup only to prepare your own fork branch for this proof. Do not run gh pr create, gh pr review, or other PR mutations through keeper_shell or keeper_bash."
     push_step="$(cat <<EOF
-4. Commit and push exactly branch $branch with keeper_bash using the fork PR route because your upstream repo permission is $permission:
+5. Commit and push exactly branch $branch with keeper_bash using the fork PR route because your upstream repo permission is $permission:
    - Confirm your GitHub account login is $account.
    - Ensure the fork $account/${REPO_SLUG#*/} exists. If needed, run gh repo fork $REPO_SLUG --remote=false from keeper_bash; if GitHub blocks fork creation, stop and report blocker="fork_create_blocked" with the exact output.
    - Add or update a remote named keeper-fork pointing at https://github.com/$account/${REPO_SLUG#*/}.git in the returned proof worktree.
@@ -1117,7 +1275,7 @@ prompt_for_keeper_create() {
 EOF
 )"
     pr_step="$(cat <<EOF
-5. Create a draft PR from your fork branch with keeper_pr_create. The call must include
+6. Create a draft PR from your fork branch with keeper_pr_create. The call must include
    repo="$REPO_SLUG", head="$head_ref", base="main", draft=true, and cwd set to
    the returned proof worktree path. Do not leave head/base empty and do not use
    the base repo path if the proof branch lives in a separate worktree. Do not
@@ -1128,11 +1286,11 @@ EOF
     head_ref="$branch"
     git_route_rule="- Do not run gh pr create, gh pr review, or other mutating GitHub commands through keeper_shell or keeper_bash."
     push_step="$(cat <<EOF
-4. Commit and git push exactly branch $branch with keeper_bash. The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
+5. Commit and git push exactly branch $branch with keeper_bash. The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
 EOF
 )"
     pr_step="$(cat <<EOF
-5. Create a draft PR for that branch with keeper_pr_create. The call must include
+6. Create a draft PR for that branch with keeper_pr_create. The call must include
    repo="$REPO_SLUG", head="$head_ref", base="main", draft=true, and cwd set to
    the returned proof worktree path. Do not leave head/base empty and do not use
    the base repo path if the proof branch lives in a separate worktree. Do not
@@ -1161,8 +1319,12 @@ $git_route_rule
 - Use keeper_pr_create for PR creation.
 
 Required create lane:
-1. Confirm your runtime is sandbox_profile=docker before mutating.
-2. Create a unique proof worktree/branch for exactly this run id:
+1. Use masc_web_search once for current external context before mutating. The
+   query should be about GitHub draft PR creation or GitHub CLI draft PR
+   behavior. Do not search for secrets, credentials, bearer tokens, or private
+   repository content.
+2. Confirm your runtime is sandbox_profile=docker before mutating.
+3. Create a unique proof worktree/branch for exactly this run id:
    - branch: $branch
    - preferred tool: masc_worktree_create with task_id=$RUN_ID
    - use the returned worktree path for every later keeper_bash git/file command.
@@ -1170,10 +1332,10 @@ Required create lane:
    - Do not reuse any branch, worktree, or proof file from another run id.
    - Do not remove this run's worktree during the proof attempt. If Git says
      the branch/worktree already exists, stop and report blocker="branch_collision".
-3. Make a minimal, non-product proof edit under docs/runtime-proof/keepers/$keeper-$RUN_ID.md with keeper_bash from inside the Docker playground. The file content must include run_id=$RUN_ID and branch=$branch.
+4. Make a minimal, non-product proof edit under docs/runtime-proof/keepers/$keeper-$RUN_ID.md with keeper_bash from inside the Docker playground. The file content must include run_id=$RUN_ID and branch=$branch.
 $push_step
 $pr_step
-6. Reply with one compact JSON object:
+7. Reply with one compact JSON object:
    {
      "run_id": "$RUN_ID",
      "phase": "create",
@@ -1181,6 +1343,7 @@ $pr_step
      "branch": "$branch",
      "head": "$head_ref",
      "pr_url": "...",
+     "web_search": true,
      "docker_pr_create": true,
      "docker_git_push": true,
      "blocker": null
@@ -1195,7 +1358,7 @@ Safety rules:
 
 This prompt is sent with create-phase masc_keeper_msg.required_tools so the
 runtime records tool_surface_mismatch or missing_required_tool_use when
-keeper_bash/keeper_pr_create are not visible or not used.
+masc_web_search/keeper_bash/keeper_pr_create are not visible or not used.
 EOF
 }
 
@@ -1203,23 +1366,28 @@ prompt_for_keeper_review() {
   local keeper="$1"
   local review_target="${2:-}"
   local review_branch=""
+  local review_head_ref=""
   local review_target_json="null"
   local review_branch_json="null"
+  local review_head_ref_json="null"
   local review_instruction=""
   if [[ -n "$review_target" ]]; then
     review_branch="$(proof_branch_for_keeper "$review_target")"
+    review_head_ref="$(proof_head_ref_for_keeper "$review_target")"
     review_target_json="\"$review_target\""
     review_branch_json="\"$review_branch\""
+    review_head_ref_json="\"$review_head_ref\""
     review_instruction="$(cat <<EOF
 Cross-keeper approval target:
-- You must review and APPROVE the draft PR whose head branch is: $review_branch
+- You must review and APPROVE the draft PR whose head ref is: $review_head_ref
+- Bare target branch: $review_branch
 - This target belongs to keeper: $review_target
 - Do not approve your own PR or your own branch.
 - First use keeper_shell once to resolve the target PR number:
-  gh pr view $review_branch -R $REPO_SLUG --json number,url,isDraft,headRefName
+  gh pr view $review_head_ref -R $REPO_SLUG --json number,url,isDraft,headRefName
 - If that command reports no PR or cannot resolve the branch, do not wait in a loop. Reply with blocker="target_pr_missing" and the exact tool output.
 - If GitHub reports the target PR has the same author identity as your current credential and rejects approval as self-approval, stop and report blocker="github_self_approve_policy" with the exact tool output.
-- Once the PR number is known, call keeper_pr_review_comment with event="APPROVE" and a body that includes run_id=$RUN_ID, reviewer=$keeper, and target_branch=$review_branch.
+- Once the PR number is known, call keeper_pr_review_comment with event="APPROVE" and a body that includes run_id=$RUN_ID, reviewer=$keeper, target_branch=$review_branch, and target_head=$review_head_ref.
 EOF
 )"
   else
@@ -1255,6 +1423,7 @@ Reply with one compact JSON object:
      "keeper": "$keeper",
      "review_target_keeper": $review_target_json,
      "review_target_branch": $review_branch_json,
+     "review_target_head": $review_head_ref_json,
      "approved_pr_url": "...",
      "docker_pr_approve": true,
      "blocker": null
@@ -1266,9 +1435,9 @@ Safety rules:
 - If a tool is missing or policy-blocked, stop and reply with blocker plus exact structured tool output.
 
 This prompt is sent with review-phase masc_keeper_msg.required_tools so the
-runtime records tool_surface_mismatch or missing_required_tool_use when
-keeper_pr_review_comment is not visible or not used. keeper_shell is read-only
-inspection and intentionally not part of the required-tool contract.
+runtime records tool_surface_mismatch or missing_required_tool_use when the
+read-only keeper_shell lookup or keeper_pr_review_comment approval is not
+visible or not used.
 EOF
 }
 
@@ -1285,7 +1454,12 @@ send_phase_prompts() {
   local required_tools_csv="$2"
   while IFS= read -r keeper; do
     [[ -n "$keeper" ]] || continue
-    local prompt args payload text request_id
+    local prompt args payload text request_id review_target review_target_head
+    review_target="$(review_target_for_keeper "$keeper")"
+    review_target_head=""
+    if [[ -n "$review_target" ]]; then
+      review_target_head="$(proof_head_ref_for_keeper "$review_target")"
+    fi
     prompt="$(cat "$PROMPT_DIR/$keeper-$phase.txt")"
     args="$(
       jq -cn \
@@ -1322,8 +1496,9 @@ send_phase_prompts() {
       --arg phase "$phase" \
       --arg request_id "$request_id" \
       --arg prompt_file "$PROMPT_DIR/$keeper-$phase.txt" \
-      --arg review_target "$(review_target_for_keeper "$keeper")" \
-      '{keeper:$keeper, phase:$phase, request_id:$request_id, prompt_file:$prompt_file, review_target:$review_target, status:"pending"}' \
+      --arg review_target "$review_target" \
+      --arg review_target_head "$review_target_head" \
+      '{keeper:$keeper, phase:$phase, request_id:$request_id, prompt_file:$prompt_file, review_target:$review_target, review_target_head:$review_target_head, status:"pending"}' \
       >>"$REQUESTS_FILE"
   done <"$RUN_DIR/keepers.txt"
 }
@@ -1496,6 +1671,7 @@ run_audit() {
     --expected-keepers "$EXPECTED_KEEPERS"
     --require-docker-pr-lifecycle-evidence
     --evidence-run-id "$RUN_ID"
+    --harness-run-dir "$RUN_DIR"
     --json
   )
   if [[ -n "$FORBID_GITHUB_IDENTITIES" ]]; then
@@ -1536,6 +1712,7 @@ write_summary() {
     --arg expected_server_commit "$EXPECTED_SERVER_COMMIT" \
     --arg forbid_github_identities "$FORBID_GITHUB_IDENTITIES" \
     --arg allow_fork_pr_for_readonly "$ALLOW_FORK_PR_FOR_READONLY" \
+    --arg seed_github_egress "$SEED_GITHUB_EGRESS" \
     --arg server_commit "$SERVER_COMMIT_ACTUAL" \
     --arg server_started_at "$SERVER_STARTED_AT_ACTUAL" \
     --arg server_incarnation "$SERVER_INCARNATION_ACTUAL" \
@@ -1544,6 +1721,7 @@ write_summary() {
     --arg github_identity_counts_file "$GITHUB_IDENTITY_COUNTS_FILE" \
     --arg proof_branch_collisions_file "$PROOF_BRANCH_COLLISIONS_FILE" \
     --arg create_readiness_failures_file "$CREATE_READINESS_FAILURES_FILE" \
+    --arg github_egress_preflight_file "$GITHUB_EGRESS_PREFLIGHT_FILE" \
     --argjson mutate "$MUTATE" \
     --argjson keeper_count "$keeper_count" \
     --argjson request_count "$request_count" \
@@ -1563,6 +1741,7 @@ write_summary() {
       expected_server_commit:$expected_server_commit,
       forbid_github_identities:$forbid_github_identities,
       allow_fork_pr_for_readonly:$allow_fork_pr_for_readonly,
+      seed_github_egress:$seed_github_egress,
       server_commit:$server_commit,
       server_started_at:$server_started_at,
       server_incarnation:$server_incarnation,
@@ -1571,6 +1750,7 @@ write_summary() {
       github_identity_counts_file:$github_identity_counts_file,
       proof_branch_collisions_file:$proof_branch_collisions_file,
       create_readiness_failures_file:$create_readiness_failures_file,
+      github_egress_preflight_file:$github_egress_preflight_file,
       mutate:$mutate,
       keeper_count:$keeper_count,
       request_count:$request_count,
@@ -1614,15 +1794,26 @@ require_cmd curl
 # the run with a less obvious git-not-found error.
 require_cmd git
 
+case "$PHASE_MODE" in
+  create|review|both) ;;
+  *)
+    echo "invalid --phase: $PHASE_MODE (expected create, review, or both)" >&2
+    exit 2
+    ;;
+esac
+
 if [[ "$MUTATE" == "1" || -n "$EXPECTED_SERVER_COMMIT" ]]; then
   assert_expected_server_commit
 fi
 ensure_mcp_session_if_needed
 discover_keepers
 assert_github_identity_pool_for_mutate
+assert_github_egress_for_fork_routes
 build_review_targets
 render_prompts
-assert_no_proof_branch_collisions_for_mutate
+if [[ "$PHASE_MODE" != "review" ]]; then
+  assert_no_proof_branch_collisions_for_mutate
+fi
 
 if [[ "$MUTATE" == "1" ]]; then
   # Share one POLL_TIMEOUT_SEC budget across both phases so the overall
@@ -1630,14 +1821,30 @@ if [[ "$MUTATE" == "1" ]]; then
   # silently doubling when create + review each compute their own
   # deadline (PR #13842 review).
   export MUTATE_POLL_DEADLINE_TS=$(( $(date +%s) + POLL_TIMEOUT_SEC ))
-  send_phase_prompts "create" "$CREATE_REQUIRED_TOOLS"
-  poll_results "create"
-  if all_create_results_ready_for_review; then
-    send_phase_prompts "review" "$REVIEW_REQUIRED_TOOLS"
-    poll_results "review"
-  else
-    log "skipping review phase because create phase did not produce complete success evidence"
-  fi
+  case "$PHASE_MODE" in
+    create)
+      send_phase_prompts "create" "$CREATE_REQUIRED_TOOLS"
+      poll_results "create"
+      ;;
+    review)
+      if [[ "$REVIEW_RESUME" == "1" ]] || all_create_results_ready_for_review; then
+        send_phase_prompts "review" "$REVIEW_REQUIRED_TOOLS"
+        poll_results "review"
+      else
+        log "skipping review phase because create phase did not produce complete success evidence"
+      fi
+      ;;
+    both)
+      send_phase_prompts "create" "$CREATE_REQUIRED_TOOLS"
+      poll_results "create"
+      if all_create_results_ready_for_review; then
+        send_phase_prompts "review" "$REVIEW_REQUIRED_TOOLS"
+        poll_results "review"
+      else
+        log "skipping review phase because create phase did not produce complete success evidence"
+      fi
+      ;;
+  esac
   unset MUTATE_POLL_DEADLINE_TS
 else
   log "dry-run mode: prompts rendered under $PROMPT_DIR; no keeper messages sent"

@@ -210,8 +210,19 @@ let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
        | Some wanted ->
            List.filter (fun (schema : Masc_domain.tool_schema) ->
              List.mem schema.name wanted))
-    |> List.sort (fun (a : Masc_domain.tool_schema) (b : Masc_domain.tool_schema) ->
-           String.compare a.name b.name)
+    |> List.sort
+         (fun (a : Masc_domain.tool_schema) (b : Masc_domain.tool_schema) ->
+           let rank (schema : Masc_domain.tool_schema) =
+             if
+               include_keeper_internal
+               && Tool_catalog.is_on_surface Tool_catalog.Keeper_internal
+                    schema.name
+             then 0
+             else 1
+           in
+           match Int.compare (rank a) (rank b) with
+           | 0 -> String.compare a.name b.name
+           | order -> order)
   in
   (match agent_id with
    | Some aid ->

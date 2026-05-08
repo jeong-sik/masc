@@ -22,6 +22,10 @@ let max_output_len = 4000
     sequential so set→consume ordering is guaranteed. *)
 let pending_truncation : (string, int * int option) Hashtbl.t = Hashtbl.create 8
 
+let handler_logged_mutex = Stdlib.Mutex.create ()
+let handler_logged_recent : (string, float) Hashtbl.t = Hashtbl.create 32
+let handler_logged_ttl_sec = 300.0
+
 type turn_context = {
   agent_name: string option;
   lane: string option;
@@ -75,6 +79,42 @@ let empty_turn_context = {
 }
 
 let pending_turn_context : (string, turn_context) Hashtbl.t = Hashtbl.create 8
+
+let handler_logged_key ~keeper_name ~tool_name ~output_text ~success =
+  let canonical_tool_name =
+    match Keeper_tool_alias.to_internal tool_name with
+    | Some internal -> internal
+    | None -> tool_name
+  in
+  Printf.sprintf "%s\000%s\000%b\000%d"
+    keeper_name canonical_tool_name success (Hashtbl.hash output_text)
+
+let remember_handler_logged ~keeper_name ~tool_name ~output_text ~success () =
+  let key = handler_logged_key ~keeper_name ~tool_name ~output_text ~success in
+  let now = Time_compat.now () in
+  Stdlib.Mutex.protect handler_logged_mutex (fun () ->
+      let stale =
+        Hashtbl.fold
+          (fun key ts acc ->
+            if now -. ts > handler_logged_ttl_sec then key :: acc else acc)
+          handler_logged_recent
+          []
+      in
+      List.iter (Hashtbl.remove handler_logged_recent) stale;
+      Hashtbl.replace handler_logged_recent key now)
+
+let consume_handler_logged ~keeper_name ~tool_name ~output_text ~success () =
+  let key = handler_logged_key ~keeper_name ~tool_name ~output_text ~success in
+  let now = Time_compat.now () in
+  Stdlib.Mutex.protect handler_logged_mutex (fun () ->
+      match Hashtbl.find_opt handler_logged_recent key with
+      | Some ts when now -. ts <= handler_logged_ttl_sec ->
+          Hashtbl.remove handler_logged_recent key;
+          true
+      | Some _ ->
+          Hashtbl.remove handler_logged_recent key;
+          false
+      | None -> false)
 
 let set_truncation_info ~keeper_name ~original_bytes ?truncated_to () =
   Hashtbl.replace pending_truncation keeper_name (original_bytes, truncated_to)
@@ -374,7 +414,9 @@ let reset_for_testing () =
   store_ref := None;
   configured_store_ref := None;
   Hashtbl.reset pending_truncation;
-  Hashtbl.reset pending_turn_context
+  Hashtbl.reset pending_turn_context;
+  Stdlib.Mutex.protect handler_logged_mutex (fun () ->
+      Hashtbl.reset handler_logged_recent)
 
 let store_dir () =
   match !store_ref with

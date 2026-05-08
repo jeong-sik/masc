@@ -54,11 +54,26 @@ type broadcast_target =
 let max_clients = 200
 
 (** Per-client event stream capacity.
+
     Must be > 0 to avoid synchronous rendez-vous semantics
-    (Eio.Stream.create 0 blocks add until a matching take).
-    64 events at 3-10s intervals covers 3-10 minutes of buffering.
-    A client that falls this far behind should reconnect. *)
-let stream_capacity = 64
+    ([Eio.Stream.create 0] blocks add until a matching take).
+
+    Read from [MASC_SSE_STREAM_CAPACITY] (catalog: clamped 8-1024,
+    default 256).  256 events at 3-10s intervals covers 13-43 minutes of
+    buffering.  A client that falls this far behind should reconnect.
+    Cap exists because broadcast fan-out at 64+ keepers + multiple
+    dashboard tabs accumulates faster than slow consumers can drain;
+    the default is sized so silent eviction does not coincide with the
+    operator's keeper count.
+
+    The catalog entry in [Env_config_snapshot.sse_entries] documents the
+    same clamp range; keep them in sync. *)
+let stream_capacity =
+  let default = 256 in
+  let lower = 8 and upper = 1024 in
+  let clamp n = max lower (min upper n) in
+  clamp
+    (Env_config_core.get_int ~default "MASC_SSE_STREAM_CAPACITY")
 
 (** SSE client state.
     [event_stream] is the per-session mailbox.  [broadcast] pushes here;
@@ -408,6 +423,7 @@ let register ?(kind = Coordinator) session_id ~last_event_id =
   in
   (match evicted with
    | Some sid ->
+       Transport_metrics.inc_sse_client_evicted ();
        Log.Server.info "Evicting oldest client %s (at cap %d)" sid max_clients
    | None ->
        ());
@@ -487,17 +503,6 @@ let update_last_event_id session_id event_id =
       Atomic.set client.last_event_id event_id;
       mark_seen client
   | None -> ()
-
-(** Eio clock ref for per-client push timeout.
-    Set during startup via [set_clock]. Without a clock, push has no timeout. *)
-let clock_ref : float Eio.Time.clock_ty Eio.Resource.t option ref = ref None
-
-let set_clock (clock : float Eio.Time.clock_ty Eio.Resource.t) =
-  clock_ref := Some clock
-
-(** Per-client push timeout (seconds).
-    5s is generous for a local TCP write; slow clients beyond this are dropped. *)
-let push_timeout_s = 5.0
 
 let client_matches_target target ~jsonrpc_payload (client : client) =
   match target with

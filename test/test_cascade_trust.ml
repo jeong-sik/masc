@@ -32,6 +32,8 @@ let info ?(success_rate = 1.0) ?(consecutive_failures = 0)
     latency_samples = 0;
     avg_confidence = None;
     confidence_samples = 0;
+    avg_cost_usd = None;
+    cost_samples = 0;
     health_score = 1.0;
   }
 

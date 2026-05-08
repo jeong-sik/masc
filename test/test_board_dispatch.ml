@@ -927,6 +927,34 @@ let test_sub_board_delete () =
             | Ok _ -> Alcotest.fail "expected not found after delete"
             | Error e -> Alcotest.fail (Board.show_board_error e))))
 
+let sub_board_slugs_from_disk () =
+  let path = Board.sub_boards_path () in
+  if not (Fs_compat.file_exists path) then []
+  else
+    Fs_compat.load_jsonl path
+    |> List.filter_map (fun json ->
+           match Yojson.Safe.Util.member "slug" json with
+           | `String slug -> Some slug
+           | _ -> None)
+
+let test_sub_board_create_delete_persisted_snapshot () =
+  let created =
+    Board_dispatch.create_sub_board ~slug:"persisted-team" ~name:"Persisted"
+      ~description:"" ~owner:"agent-1" ()
+  in
+  let id =
+    match created with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok sb -> Board.Sub_board_id.to_string sb.Board.id
+  in
+  Alcotest.(check bool) "created slug persisted" true
+    (List.exists (String.equal "persisted-team") (sub_board_slugs_from_disk ()));
+  (match Board_dispatch.delete_sub_board ~sub_board_id:id with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok () -> ());
+  Alcotest.(check bool) "deleted slug removed from persisted snapshot" false
+    (List.exists (String.equal "persisted-team") (sub_board_slugs_from_disk ()))
+
 let test_sub_board_access_default_open () =
   (match Board_dispatch.create_sub_board ~slug:"open-board" ~name:"Open"
            ~description:"" ~owner:"agent-1" () with
@@ -1099,6 +1127,8 @@ let () =
       Alcotest.test_case "list" `Quick (with_eio test_sub_board_list);
       Alcotest.test_case "slug conflict" `Quick (with_eio test_sub_board_slug_conflict);
       Alcotest.test_case "delete" `Quick (with_eio test_sub_board_delete);
+      Alcotest.test_case "persisted create/delete snapshot" `Quick
+        (with_eio test_sub_board_create_delete_persisted_snapshot);
       Alcotest.test_case "default access open" `Quick (with_eio test_sub_board_access_default_open);
       Alcotest.test_case "members include owner" `Quick (with_eio test_sub_board_members_include_owner);
       Alcotest.test_case "members-only post policy" `Quick (with_eio test_sub_board_members_only_post_policy);

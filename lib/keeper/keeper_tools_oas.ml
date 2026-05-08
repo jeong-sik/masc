@@ -187,6 +187,49 @@ let transient_mutex_contention_tool_error
         ] );
     ])
 
+let current_keeper_model (meta : Keeper_types.keeper_meta) =
+  let m = meta.runtime.usage.last_model_used in
+  if m = "" then meta.cascade_name else m
+
+let persist_tool_call_io_from_handler
+    ~(meta : Keeper_types.keeper_meta)
+    ~(tool_name : string)
+    ~(input : Yojson.Safe.t)
+    ~(output_text : string)
+    ~(success : bool)
+    ~(duration_ms : float)
+    ?result_bytes
+    ?truncated_to
+    () =
+  try
+    Keeper_tool_call_log.log_call
+      ~keeper_name:meta.name
+      ~tool_name
+      ~input
+      ~output_text
+      ~success
+      ~duration_ms
+      ~model:(current_keeper_model meta)
+      ?result_bytes
+      ?truncated_to
+      ();
+    Keeper_tool_call_log.remember_handler_logged
+      ~keeper_name:meta.name
+      ~tool_name
+      ~output_text
+      ~success
+      ()
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Prometheus.inc_counter
+        Keeper_metrics.metric_keeper_lifecycle_callback_failures
+        ~labels:[ ("keeper", meta.name); ("callback", "handler_tool_log_write") ]
+        ();
+      Log.Keeper.warn
+        "keeper:%s tool=%s handler-side tool_call log failed: %s"
+        meta.name tool_name (Printexc.to_string exn)
+
 (** Max chars for SSE error preview. Short enough for dashboard display,
     long enough to include the actionable portion of the error. *)
 let sse_error_preview_max_chars = 300
@@ -340,7 +383,7 @@ let broadcast_keeper_tool_call_event ~keeper_name ~tool_name ~duration_ms
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_sse_broadcast_failures
+        Keeper_metrics.metric_keeper_sse_broadcast_failures
         ~labels:[("keeper", keeper_name)]
         ();
       Log.Keeper.warn
@@ -357,7 +400,7 @@ let append_tool_exec_decision_log ~config ~keeper_name ~site entry =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_decision_audit_flush_failures
+        Keeper_metrics.metric_keeper_decision_audit_flush_failures
         ~labels:[("keeper", keeper_name)]
         ();
       Log.Keeper.warn
@@ -382,6 +425,7 @@ let append_tool_exec_decision_log ~config ~keeper_name ~site entry =
     [{cmd,timeout_sec}]). Identity by default. *)
 let make_keeper_tool_handler
     ~(name : string)
+    ~(input_schema : Yojson.Safe.t)
     ~(config : Coord.config)
     ~(meta : Keeper_types.keeper_meta)
     ~(ctx_snapshot : Keeper_types.working_context)
@@ -400,11 +444,53 @@ let make_keeper_tool_handler
   in
   fun raw_input ->
     let input = translate_input raw_input in
+    match Tool_input_validation.validate_args ~schema:input_schema ~name ~args:input () with
+    | Error validation_result ->
+      let raw_result = Yojson.Safe.to_string validation_result.data in
+      let output_text = normalize_tool_result ~success:false raw_result in
+      let duration_ms = 0 in
+      let ts = Time_compat.now () in
+      let error_text = Tool_result.message validation_result in
+      Keeper_registry.record_tool_use ~base_path:config.base_path meta.name
+        ~tool_name:name ~success:false;
+      Keeper_exec_tools.record_keeper_tool_call
+        ~tool_name:name ~success:false ~duration_ms;
+      ignore (Tool_dispatch.run_post_hooks validation_result);
+      broadcast_keeper_tool_call_event
+        ~keeper_name:meta.name ~tool_name:name ~duration_ms
+        ~success:false ~error_text ~site:"input_validation" ~ts ();
+      Prometheus.inc_counter
+        Keeper_metrics.metric_keeper_tools_oas_failures
+        ~labels:[("tool", name); ("site", "input_validation")]
+        ();
+      append_tool_exec_decision_log ~config ~keeper_name:meta.name
+        ~site:"input_validation"
+        (`Assoc [
+          "ts_unix", `Float ts;
+          "event", `String "tool_exec";
+          "keeper_name", `String meta.name;
+          "tool", `String name;
+          "duration_ms", `Int duration_ms;
+          "result_bytes", `Int (String.length output_text);
+          "ok", `Bool false;
+          "error", `String error_text;
+        ]);
+      persist_tool_call_io_from_handler
+        ~meta
+        ~tool_name:name
+        ~input
+        ~output_text
+        ~success:false
+        ~duration_ms:0.0
+        ~result_bytes:(String.length output_text)
+        ();
+      (false, output_text)
+    | Ok input ->
     let key = args_key input in
     let prior_fails = failure_count_get failure_counts key in
     if prior_fails >= max_consecutive_failures then begin
       Prometheus.inc_counter
-        Prometheus.metric_keeper_tools_oas_failures
+        Keeper_metrics.metric_keeper_tools_oas_failures
         ~labels:[("tool", name); ("site", "blocked")]
         ();
       Log.Keeper.warn "tool %s blocked after %d consecutive failures (same args)"
@@ -412,7 +498,17 @@ let make_keeper_tool_handler
       let msg = Printf.sprintf
         "This tool has failed %d times in a row with the same arguments. Try a different approach or different arguments."
         prior_fails in
-      (false, normalize_tool_result ~success:false msg)
+      let output_text = normalize_tool_result ~success:false msg in
+      persist_tool_call_io_from_handler
+        ~meta
+        ~tool_name:name
+        ~input
+        ~output_text
+        ~success:false
+        ~duration_ms:0.0
+        ~result_bytes:(String.length output_text)
+        ();
+      (false, output_text)
     end else
       let t0 = Time_compat.now () in
       try
@@ -453,7 +549,7 @@ let make_keeper_tool_handler
             ~keeper_name:meta.name ~tool_name:name ~duration_ms
             ~success:false ~error_text:detail ~site:"error_result" ~ts ();
           Prometheus.inc_counter
-            Prometheus.metric_keeper_tools_oas_failures
+            Keeper_metrics.metric_keeper_tools_oas_failures
             ~labels:[("tool", name); ("site", "error_result")]
             ();
           Log.Keeper.error
@@ -477,7 +573,17 @@ let make_keeper_tool_handler
           Keeper_tool_call_log.set_truncation_info
             ~keeper_name:meta.name
             ~original_bytes:(String.length normalized_error) ();
-          (false, Tool_output_validation.cap normalized_error)
+          let output_text = Tool_output_validation.cap normalized_error in
+          persist_tool_call_io_from_handler
+            ~meta
+            ~tool_name:name
+            ~input
+            ~output_text
+            ~success:false
+            ~duration_ms:(Float.of_int duration_ms)
+            ~result_bytes:(String.length normalized_error)
+            ();
+          (false, output_text)
         end else begin
           failure_count_reset failure_counts key;
           Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:name ~success:true;
@@ -561,6 +667,17 @@ let make_keeper_tool_handler
             ~original_bytes:original_len
             ?truncated_to:(if was_truncated
               then Some (String.length truncated_result) else None) ();
+          persist_tool_call_io_from_handler
+            ~meta
+            ~tool_name:name
+            ~input
+            ~output_text:truncated_result
+            ~success:true
+            ~duration_ms:(Float.of_int duration_ms)
+            ~result_bytes:original_len
+            ?truncated_to:(if was_truncated
+              then Some (String.length truncated_result) else None)
+            ();
           (true, truncated_result)
         end
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
@@ -626,7 +743,7 @@ let make_keeper_tool_handler
               (Printexc.to_string exn)
         in
         Prometheus.inc_counter
-          Prometheus.metric_keeper_tools_oas_failures
+          Keeper_metrics.metric_keeper_tools_oas_failures
           ~labels:[("tool", name); ("site", "exception")]
           ();
         if is_edeadlk then Log.Keeper.warn "%s" msg
@@ -666,7 +783,17 @@ let make_keeper_tool_handler
         Keeper_tool_call_log.set_truncation_info
           ~keeper_name:meta.name
           ~original_bytes:(String.length normalized_exn) ();
-        (false, Tool_output_validation.cap normalized_exn)
+        let output_text = Tool_output_validation.cap normalized_exn in
+        persist_tool_call_io_from_handler
+          ~meta
+          ~tool_name:name
+          ~input
+          ~output_text
+          ~success:false
+          ~duration_ms:(Float.of_int duration_ms)
+          ~result_bytes:(String.length normalized_exn)
+          ();
+        (false, output_text)
 
 let make_tool_bundle
     ~(config : Coord.config)
@@ -730,7 +857,8 @@ let make_tool_bundle
   let internal_tools =
     List.filter_map (fun (td : Masc_domain.tool_schema) ->
       if List.mem td.name universe_names then
-        let h = make_keeper_tool_handler ~name:td.name ~config ~meta ~ctx_snapshot
+        let h = make_keeper_tool_handler ~name:td.name
+              ~input_schema:td.input_schema ~config ~meta ~ctx_snapshot
               ?turn_sandbox_factory
               ?turn_sandbox_factory_git
               ~exec_cache
@@ -778,7 +906,8 @@ let make_tool_bundle
             | _ -> internal_def.description
           in
           let h =
-            make_keeper_tool_handler ~name:internal ~config ~meta ~ctx_snapshot
+            make_keeper_tool_handler ~name:internal
+               ~input_schema:internal_def.input_schema ~config ~meta ~ctx_snapshot
                ?turn_sandbox_factory
                ?turn_sandbox_factory_git
                ~exec_cache

@@ -342,10 +342,27 @@ let all_tools_reconcile_safe (names : string list) : bool =
 
 (* ── Dynamic schema injection (masc_* tools) ──────────────────── *)
 
-let masc_schemas_ref : Masc_domain.tool_schema list ref = ref []
+let masc_schemas_mutex = Stdlib.Mutex.create ()
+let masc_schemas_state : Masc_domain.tool_schema list ref = ref []
+
+let set_masc_schemas (schemas : Masc_domain.tool_schema list) =
+  Stdlib.Mutex.protect masc_schemas_mutex (fun () ->
+    masc_schemas_state := schemas)
+
+let masc_schemas_snapshot () =
+  Stdlib.Mutex.protect masc_schemas_mutex (fun () ->
+    !masc_schemas_state)
+
+let with_masc_schemas_for_test schemas f =
+  let previous = masc_schemas_snapshot () in
+  Fun.protect
+    ~finally:(fun () -> set_masc_schemas previous)
+    (fun () ->
+      set_masc_schemas schemas;
+      f ())
 
 let injected_masc_tool_names () =
-  !masc_schemas_ref
+  masc_schemas_snapshot ()
   |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
 
 (* ── keeper_tool_search schema ───────────────────────────────── *)

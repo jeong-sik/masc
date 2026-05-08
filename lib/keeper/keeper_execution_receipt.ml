@@ -239,7 +239,7 @@ let string_contains_ci haystack needle =
    case below ([match outcome_kind_of_string ...] catch-all). *)
 let () =
   Prometheus.register_counter
-    ~name:Prometheus.metric_keeper_receipt_unmapped_disposition
+    ~name:Keeper_metrics.metric_keeper_receipt_unmapped_disposition
     ~help:
       "Total receipts whose (outcome, cascade_outcome) tuple did not \
        match any branch of operator_disposition and fell through to \
@@ -322,6 +322,13 @@ let operator_disposition (receipt : t) =
        [tool_required_unsatisfied] branch below. *)
     ("pause_human", "tool_required_unsatisfied")
   else if
+    String.starts_with ~prefix:"turn_livelock:" terminal_reason
+    ||
+    (match error_kind with
+     | Some "turn_livelock_blocked" -> true
+     | Some _ | None -> false)
+  then ("pause_human", "turn_livelock_blocked")
+  else if
     receipt.tool_surface.tool_requirement = Required
     && (List.mem tool_contract_result
           [
@@ -363,9 +370,9 @@ let operator_disposition (receipt : t) =
       ("pass", "healthy")
     | _ ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_receipt_unmapped_disposition ();
+        Keeper_metrics.metric_keeper_receipt_unmapped_disposition ();
       Prometheus.inc_counter
-        Prometheus.metric_keeper_execution_receipt_failures
+        Keeper_metrics.metric_keeper_execution_receipt_failures
         ~labels:[("keeper", receipt.keeper_name); ("site", "unmapped_disposition")]
         ();
       Log.Keeper.warn
@@ -671,7 +678,7 @@ let emit_operator_broadcast config (receipt : t) ~disposition ~reason =
       ~payload
       ()
   in
-  Log.Keeper.info
+  Log.Keeper.error
     "%s: operator_broadcast_required emitted disposition=%s reason=%s seq=%d"
     receipt.keeper_name disposition reason event.seq
 
@@ -690,7 +697,7 @@ let append (config : Coord.config) (receipt : t) =
          has already persisted the receipt; the broadcast failure is its
          own diagnostic that watchdogs/log alerts will pick up. *)
       Prometheus.inc_counter
-        Prometheus.metric_keeper_execution_receipt_failures
+        Keeper_metrics.metric_keeper_execution_receipt_failures
         ~labels:[("keeper", receipt.keeper_name); ("site", "emit_failed")]
         ();
       Log.Keeper.error
@@ -787,7 +794,7 @@ let emit_stale_keeper_broadcast config
       ()
   in
   Prometheus.inc_counter
-    Prometheus.metric_keeper_execution_receipt_failures
+    Keeper_metrics.metric_keeper_execution_receipt_failures
     ~labels:[("keeper", keeper_name); ("site", "stale_broadcast")]
     ();
   Log.Keeper.error

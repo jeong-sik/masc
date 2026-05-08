@@ -87,7 +87,7 @@ let test_canonicalize_observed_with_telemetry_records_public_masc () =
   in
   let before =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_keeper_tool_alias_canonicalizations
+      Masc_mcp.Keeper_metrics.metric_keeper_tool_alias_canonicalizations
       ~labels ()
   in
   let canonical =
@@ -95,7 +95,7 @@ let test_canonicalize_observed_with_telemetry_records_public_masc () =
   in
   let after =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_keeper_tool_alias_canonicalizations
+      Masc_mcp.Keeper_metrics.metric_keeper_tool_alias_canonicalizations
       ~labels ()
   in
   Alcotest.(check (list string)) "public MASC tool canonicalized"
@@ -110,8 +110,8 @@ let test_hallucinated_builtins () =
     true (Alias.is_hallucinated_builtin "Agent");
   Alcotest.(check bool) "WebSearch is NOT hallucinated (has cognate)"
     false (Alias.is_hallucinated_builtin "WebSearch");
-  Alcotest.(check bool) "WebFetch is hallucinated"
-    true (Alias.is_hallucinated_builtin "WebFetch");
+  Alcotest.(check bool) "WebFetch is NOT hallucinated (has cognate)"
+    false (Alias.is_hallucinated_builtin "WebFetch");
   Alcotest.(check bool) "Bash is NOT hallucinated (has cognate)"
     false (Alias.is_hallucinated_builtin "Bash");
   Alcotest.(check bool) "keeper_bash is NOT hallucinated"
@@ -128,7 +128,7 @@ let test_no_overlap_alias_and_hallucinated () =
 
 let test_alias_table_is_stable () =
   let pairs = Alias.all_aliases () in
-  Alcotest.(check int) "seven canonical aliases" 7 (List.length pairs);
+  Alcotest.(check int) "eight canonical aliases" 8 (List.length pairs);
   (* Round-trip: every alias should round-trip via to_internal then to_public,
      except where collapse happens (Write -> keeper_fs_edit -> Edit). *)
   List.iter
@@ -146,7 +146,7 @@ let test_alias_table_is_stable () =
     must NOT produce any unexpected names. *)
 let allowed_keeper_surface =
   [ "keeper_bash"; "keeper_fs_read"; "keeper_fs_edit"; "keeper_shell";
-    "keeper_board_post"; "masc_web_search"; "extend_turns" ]
+    "keeper_board_post"; "masc_web_search"; "masc_web_fetch"; "extend_turns" ]
 
 let test_pure_alias_turn_no_longer_unexpected () =
   let observed = [ "Bash" ] in
@@ -209,8 +209,8 @@ let yojson_field name j =
 let test_oas_dual_register_subset () =
   let pairs = Alias.oas_dual_register_aliases () in
   let names = List.map fst pairs in
-  Alcotest.(check (list string)) "dual-reg covers shell/fs/search aliases"
-    [ "Bash"; "Edit"; "Grep"; "Read"; "WebSearch"; "Write" ] names;
+  Alcotest.(check (list string)) "dual-reg covers shell/fs/search/fetch aliases"
+    [ "Bash"; "Edit"; "Grep"; "Read"; "WebFetch"; "WebSearch"; "Write" ] names;
   (* Every entry must also appear in the full alias table. *)
   let full = List.map fst (Alias.all_aliases ()) in
   List.iter

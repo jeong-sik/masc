@@ -50,6 +50,12 @@ let parse_task_contract_arg args =
   | _ -> Error "contract must be an object when provided"
 ;;
 
+(* RFC-0034.v2: per-goal task creation cap moved to
+   [Coord_task_capacity] so all 5 task creation entrypoints share the
+   same guard. Pre-RFC-0034.v2, these helpers (and the constant
+   [keeper_task_create_goal_open_limit]) lived here as introduced by
+   #13981. *)
+
 let active_goal_scope_json ~(meta : keeper_meta) ?matched_goal_id
     ?excluded_count ?effective_mode ?effective_goal_ids ?fallback_reason () =
   let scoped = meta.active_goal_ids <> [] in
@@ -150,7 +156,7 @@ let sync_keeper_meta_current_task
      | Ok () -> ()
      | Error msg ->
        Prometheus.inc_counter
-         Prometheus.metric_keeper_write_meta_failures
+         Keeper_metrics.metric_keeper_write_meta_failures
          ~labels:[("keeper", meta.name); ("phase", "claim_task_id")]
          ();
        Log.Keeper.warn
@@ -259,8 +265,21 @@ let handle_keeper_task_tool
           (match parse_task_contract_arg args with
            | Error message -> error_json message
            | Ok contract ->
+              let capacity_error =
+                let backlog = Coord.read_backlog config in
+                Coord_task_capacity.check ?goal_id backlog
+              in
+              (match capacity_error with
+               | Some error -> Coord_task_capacity.error_to_json_string error
+               | None ->
               let result =
-                Coord_task.add_task ?contract ?goal_id config ~title ~priority
+                Coord_task.add_task
+                  ?contract
+                  ?goal_id
+                  ~reject_if:(Coord_task_capacity.rejection_for_add_task ?goal_id)
+                  config
+                  ~title
+                  ~priority
                   ~description
               in
               Yojson.Safe.to_string
@@ -269,7 +288,7 @@ let handle_keeper_task_tool
                     "ok", `Bool true;
                     "result", `String result;
                     "goal_id", Json_util.string_opt_to_json goal_id;
-                  ])))
+                  ]))))
   | "keeper_task_claim" ->
     let agent_tool_names = Keeper_tool_policy.keeper_allowed_tool_names meta in
     let claim_goal_scope =

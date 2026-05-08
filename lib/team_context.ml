@@ -36,6 +36,13 @@ let findings_path ~base_path =
     (Coord_utils.masc_dir_from_base_path ~base_path)
     "shared_findings.jsonl"
 
+let persistence_surface = "team_context_findings"
+
+let record_persistence_read_drop ~reason () =
+  Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+    ~labels:[("surface", persistence_surface); ("reason", reason)]
+    ()
+
 let add_finding ~base_path ~worker_name ~finding =
   let path = findings_path ~base_path in
   let dir = Filename.dirname path in
@@ -70,10 +77,19 @@ let load_findings ~base_path : string list =
                           |> Option.value ~default:"" in
             if finding <> "" then
               Some (Printf.sprintf "[%s] %s" worker finding)
-            else None
-          with Yojson.Json_error _ -> None
+            else (
+              record_persistence_read_drop
+                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload ();
+              None)
+          with Yojson.Json_error _ ->
+            record_persistence_read_drop
+              ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error ();
+            None
       ) lines
-    with Sys_error _ -> []
+    with Sys_error _ ->
+      record_persistence_read_drop
+        ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error ();
+      []
 
 let build ~base_path =
   let shared_findings = load_findings ~base_path in

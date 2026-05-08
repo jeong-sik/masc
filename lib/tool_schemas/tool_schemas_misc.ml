@@ -203,6 +203,31 @@ Uses configured web-search providers with structured fallback behavior and retur
     ];
   };
   {
+    name = "masc_web_fetch";
+    description = "Fetch a web page by URL and return cleaned text content. \
+Read-only helper for reading selected sources after web search before citing them. \
+Strips HTML tags, decodes entities, normalizes whitespace, and optionally extracts \
+<title> and <meta name=\"description\">. Returns structured JSON with the cleaned text.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("url", `Assoc [
+          ("type", `String "string");
+          ("description", `String "URL to fetch (http or https only)");
+        ]);
+        ("timeout", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Request timeout in seconds (default 15, max 60)");
+          ("default", `Int 15);
+          ("minimum", `Int 1);
+          ("maximum", `Int 60);
+        ]);
+      ]);
+      ("required", `List [`String "url"]);
+      ("additionalProperties", `Bool false);
+    ];
+  };
+  {
     name = "masc_tool_admin_snapshot";
     description = "Return a unified admin snapshot of tool inventory, auth/RBAC, and command-plane surfaces.";
     input_schema = `Assoc [

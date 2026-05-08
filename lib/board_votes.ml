@@ -29,6 +29,18 @@ let all_vote_directions = [ Up; Down ]
 let valid_vote_direction_strings =
   List.map vote_direction_to_string all_vote_directions
 
+let post_meta_json_persistence_surface = "board_post_meta_json"
+
+let record_post_meta_json_read_drop () =
+  Prometheus.inc_counter
+    Prometheus.metric_persistence_read_drops
+    ~labels:
+      [
+        ("surface", post_meta_json_persistence_surface);
+        ("reason", Safe_ops.persistence_read_drop_reason_invalid_payload);
+      ]
+    ()
+
 (* Sound partial parser — case-insensitive, trims whitespace, accepts
    empty as default Up for back-compat with [tool_board.ml] which
    defaults to "up" when the field is missing. *)
@@ -369,7 +381,11 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
       | Some (`Assoc _ as meta) -> Some meta
       | Some _ | None ->
         (match Safe_ops.json_string_opt "meta_json" json with
-         | Some raw -> (try Some (Yojson.Safe.from_string raw) with Yojson.Json_error _ -> None)
+         | Some raw -> (
+           try Some (Yojson.Safe.from_string raw)
+           with Yojson.Json_error _ ->
+             record_post_meta_json_read_drop ();
+             None)
          | None -> None)
     in
     (match Post_id.of_string id_str, Agent_id.of_string author_str, visibility_of_string vis_str with
@@ -703,63 +719,107 @@ let set_thread_id store ~post_id ~thread_id : (unit, board_error) Result.t =
             Ok ()
       )
 
+let posts_jsonl_snapshot store =
+  let buf = Buffer.create 4096 in
+  Hashtbl.iter (fun _ (pst : post) ->
+    Buffer.add_string buf (Yojson.Safe.to_string (post_to_yojson pst));
+    Buffer.add_char buf '\n'
+  ) store.posts;
+  Buffer.contents buf
+
+let comments_jsonl_snapshot store =
+  let buf = Buffer.create 4096 in
+  Hashtbl.iter (fun _ (cmt : comment) ->
+    Buffer.add_string buf (Yojson.Safe.to_string (comment_to_yojson cmt));
+    Buffer.add_char buf '\n'
+  ) store.comments;
+  Buffer.contents buf
+
+let reactions_jsonl_snapshot store =
+  let buf = Buffer.create 4096 in
+  Hashtbl.iter
+    (fun _ (reaction : reaction) ->
+       Buffer.add_string buf (Yojson.Safe.to_string (reaction_to_yojson reaction));
+       Buffer.add_char buf '\n')
+    store.reactions;
+  Buffer.contents buf
+
+let save_jsonl_snapshot ~where ~path content =
+  try
+    ensure_masc_dir ();
+    match Fs_compat.save_file_atomic path content with
+    | Ok () -> ()
+    | Error msg -> record_persist_error ~where msg
+  with Sys_error msg -> record_persist_error ~where msg
+
 let delete_post store ~post_id : (unit, board_error) Result.t =
   match Post_id.of_string post_id with
   | Error e -> Error e
   | Ok pid ->
-      with_lock store (fun () ->
-        let post_key = Post_id.to_string pid in
-        match Hashtbl.find_opt store.posts post_key with
-        | None -> Error (Post_not_found post_id)
-        | Some _ ->
-            let comment_ids =
-              Hashtbl.fold
-                (fun key (c : comment) acc ->
-                  if String.equal (Post_id.to_string c.post_id) post_key then key :: acc else acc)
-                store.comments []
-            in
-            Hashtbl.remove store.posts post_key;
-            Hashtbl.remove store.comments_by_post post_key;
-            List.iter (fun comment_key -> Hashtbl.remove store.comments comment_key) comment_ids;
-            let vote_keys =
-              Hashtbl.fold
-                (fun key _ acc ->
-                  if String.starts_with ~prefix:("post:" ^ post_key ^ ":") key
-                     || List.exists
-                          (fun comment_key ->
-                            String.starts_with ~prefix:("comment:" ^ comment_key ^ ":") key)
-                          comment_ids
-                  then key :: acc
-                  else acc)
-                store.vote_log []
-            in
-            let reaction_keys =
-              Hashtbl.fold
-                (fun key (reaction : reaction) acc ->
-                  if
-                    ((=) reaction.target_type Reaction_post
-                     && String.equal reaction.target_id post_key)
-                    || ((=) reaction.target_type Reaction_comment
-                        && List.exists (String.equal reaction.target_id)
-                             comment_ids)
-                  then key :: acc
-                  else acc)
-                store.reactions []
-            in
-            List.iter (fun key -> Hashtbl.remove store.vote_log key) vote_keys;
-            List.iter (fun key -> Hashtbl.remove store.reactions key) reaction_keys;
-            store.post_count := max 0 (!(store.post_count) - 1);
-            invalidate_post_caches store;
-            invalidate_comment_caches store;
-            rewrite_posts store;
-            rewrite_comments store;
-            rewrite_vote_log store;
-            rewrite_reactions_unlocked store;
-            store.dirty_posts <- false;
-            store.dirty_comments <- false;
-            Hashtbl.clear store.dirty_post_ids;
-            Hashtbl.clear store.dirty_comment_ids;
-            store.last_flush <- Time_compat.now ();
+      with_persist_lock store (fun () ->
+        let snapshot =
+          with_lock store (fun () ->
+            let post_key = Post_id.to_string pid in
+            match Hashtbl.find_opt store.posts post_key with
+            | None -> Error (Post_not_found post_id)
+            | Some _ ->
+                let comment_ids =
+                  Hashtbl.fold
+                    (fun key (c : comment) acc ->
+                      if String.equal (Post_id.to_string c.post_id) post_key then key :: acc else acc)
+                    store.comments []
+                in
+                Hashtbl.remove store.posts post_key;
+                Hashtbl.remove store.comments_by_post post_key;
+                List.iter (fun comment_key -> Hashtbl.remove store.comments comment_key) comment_ids;
+                let vote_keys =
+                  Hashtbl.fold
+                    (fun key _ acc ->
+                      if String.starts_with ~prefix:("post:" ^ post_key ^ ":") key
+                         || List.exists
+                              (fun comment_key ->
+                                String.starts_with ~prefix:("comment:" ^ comment_key ^ ":") key)
+                              comment_ids
+                      then key :: acc
+                      else acc)
+                    store.vote_log []
+                in
+                let reaction_keys =
+                  Hashtbl.fold
+                    (fun key (reaction : reaction) acc ->
+                      if
+                        ((=) reaction.target_type Reaction_post
+                         && String.equal reaction.target_id post_key)
+                        || ((=) reaction.target_type Reaction_comment
+                            && List.exists (String.equal reaction.target_id)
+                                 comment_ids)
+                      then key :: acc
+                      else acc)
+                    store.reactions []
+                in
+                List.iter (fun key -> Hashtbl.remove store.vote_log key) vote_keys;
+                List.iter (fun key -> Hashtbl.remove store.reactions key) reaction_keys;
+                store.post_count := max 0 (!(store.post_count) - 1);
+                invalidate_post_caches store;
+                invalidate_comment_caches store;
+                store.dirty_posts <- false;
+                store.dirty_comments <- false;
+                Hashtbl.clear store.dirty_post_ids;
+                Hashtbl.clear store.dirty_comment_ids;
+                store.last_flush <- Time_compat.now ();
+                Ok
+                  ( posts_jsonl_snapshot store
+                  , comments_jsonl_snapshot store
+                  , vote_log_jsonl store
+                  , reactions_jsonl_snapshot store ))
+        in
+        match snapshot with
+        | Error _ as e -> e
+        | Ok (posts_jsonl, comments_jsonl, votes_jsonl, reactions_jsonl) ->
+            save_jsonl_snapshot ~where:"rewrite_posts" ~path:(persist_path ()) posts_jsonl;
+            save_jsonl_snapshot ~where:"rewrite_comments" ~path:(comments_path ()) comments_jsonl;
+            save_vote_log_jsonl votes_jsonl;
+            save_jsonl_snapshot ~where:"rewrite_reactions" ~path:(reactions_path ()) reactions_jsonl;
             Ok ())
 
 (** {1 Global Store}

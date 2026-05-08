@@ -252,6 +252,13 @@ let save_profile ~base_path (profile : behavioral_profile) =
   let json = profile_json profile in
   Fs_compat.save_file path (Yojson.Safe.pretty_to_string json)
 
+let persistence_surface = "governance_anomaly_profile"
+
+let record_persistence_read_drop ~reason () =
+  Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+    ~labels:[("surface", persistence_surface); ("reason", reason)]
+    ()
+
 let load_profile ~base_path ~agent_id =
   let path = profile_path base_path agent_id in
   if not (Sys.file_exists path) then None
@@ -259,8 +266,15 @@ let load_profile ~base_path ~agent_id =
     match Safe_ops.read_file_safe path with
     | Error msg ->
         Log.Misc.warn "governance_anomaly: failed to read profile %s: %s" path msg;
+        record_persistence_read_drop
+          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error ();
         None
     | Ok content -> (
+        let invalid_payload () =
+          record_persistence_read_drop
+            ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload ();
+          None
+        in
         try
           let json = Yojson.Safe.from_string content in
           match json with
@@ -340,13 +354,18 @@ let load_profile ~base_path ~agent_id =
                           hourly_dist;
                           updated_at;
                         }
-                  | _ -> None)
-              | _ -> None)
-          | _ -> None
+                  | _ -> invalid_payload ())
+              | _ -> invalid_payload ())
+          | _ -> invalid_payload ()
         with
-        | Yojson.Json_error _ -> None
+        | Yojson.Json_error _ ->
+            record_persistence_read_drop
+              ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error ();
+            None
         | exn ->
             Log.Governance.warn "load_profile parse error: %s" (Printexc.to_string exn);
+            record_persistence_read_drop
+              ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload ();
             None)
 
 (* ── Deviation detection ──────────────────────────────────── *)

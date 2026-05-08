@@ -128,7 +128,7 @@ let record_context_max_observation
     ~(resolved_model_id : string)
     ~(context_max : int) : unit =
   Prometheus.inc_counter
-    Prometheus.metric_keeper_context_max_observed
+    Keeper_metrics.metric_keeper_context_max_observed
     ~labels:[
       ("keeper", keeper);
       ("model_used", model_used);
@@ -176,7 +176,7 @@ let record_turn_latency_bucket
     ~(latency_ms : int) : unit =
   let bucket = turn_latency_bucket latency_ms in
   Prometheus.inc_counter
-    Prometheus.metric_keeper_turn_latency_bucket
+    Keeper_metrics.metric_keeper_turn_latency_bucket
     ~labels:[ ("keeper", keeper); ("bucket", bucket) ]
     ();
   let threshold = long_turn_warn_threshold_ms () in
@@ -206,7 +206,7 @@ let record_turn_latency_by_model_bucket
   let resolved_model_id = label_or_unknown resolved_model_id in
   let cascade_profile = label_or_unknown cascade_profile in
   Prometheus.inc_counter
-    Prometheus.metric_keeper_turn_latency_by_model_bucket
+    Keeper_metrics.metric_keeper_turn_latency_by_model_bucket
     ~labels:
       [ ("keeper", label_or_unknown keeper)
       ; ("channel", label_or_unknown channel)
@@ -249,8 +249,8 @@ let usage_trust_json_fields = Keeper_usage_trust.json_fields
    classify sites (append_metrics_snapshot, keeper_turn) serialize
    the trust into the JSONL ledger but do not bump the counter, so
    the counter rate equals the per-turn rate rather than 2–3×. *)
-let usage_trust_outcome_metric = Prometheus.metric_keeper_usage_trust
-let usage_anomaly_reason_metric = Prometheus.metric_keeper_usage_anomaly_reason
+let usage_trust_outcome_metric = Keeper_metrics.metric_keeper_usage_trust
+let usage_anomaly_reason_metric = Keeper_metrics.metric_keeper_usage_anomaly_reason
 
 let keeper_total_cost_usd_help =
   "Accumulated trusted USD cost per keeper (labels: keeper_name)"
@@ -276,18 +276,18 @@ let record_usage_trust ~keeper_name ~(trust : usage_trust) =
 let record_keeper_total_cost_usd ~keeper_name ~total_cost_usd =
   let labels = [ ("keeper_name", keeper_name) ] in
   Prometheus.register_gauge
-    ~name:Prometheus.metric_keeper_total_cost_usd
+    ~name:Keeper_metrics.metric_keeper_total_cost_usd
     ~help:keeper_total_cost_usd_help
     ~labels
     ();
   Prometheus.set_gauge
-    Prometheus.metric_keeper_total_cost_usd
+    Keeper_metrics.metric_keeper_total_cost_usd
     ~labels
     total_cost_usd
 
 let record_keeper_idle_seconds ~keeper_name ~idle_seconds =
   Prometheus.set_gauge
-    Prometheus.metric_keeper_idle_seconds
+    Keeper_metrics.metric_keeper_idle_seconds
     ~labels:[ ("keeper_name", keeper_name) ]
     (float_of_int (max 0 idle_seconds))
 
@@ -963,7 +963,7 @@ let append_decision_record
                     [
                       ("system_fingerprint", match t.system_fingerprint with Some s -> `String s | None -> `Null);
                       ("reasoning_tokens", match t.reasoning_tokens with Some n -> `Int n | None -> `Null);
-                      ("request_latency_ms", `Int t.request_latency_ms);
+                      ("request_latency_ms", match t.request_latency_ms with Some n -> `Int n | None -> `Null);
                     ] @ timings_fields
                 | None -> []
               in
@@ -1044,7 +1044,7 @@ let append_decision_record
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_decision_audit_flush_failures
+        Keeper_metrics.metric_keeper_decision_audit_flush_failures
         ~labels:[("keeper", meta.name)]
         ();
       Log.Keeper.warn "append decision record failed for %s: %s"
@@ -1141,7 +1141,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
       then "noop"
       else "tool_called"
     in
-    Prometheus.inc_counter Prometheus.metric_keeper_proactive_outcome
+    Prometheus.inc_counter Keeper_metrics.metric_keeper_proactive_outcome
       ~labels:[ ("keeper", meta.name); ("outcome", outcome) ]
       ()
   end;
@@ -1390,7 +1390,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
     ~cascade_profile
     ~latency_ms;
   Prometheus.inc_counter
-    Prometheus.metric_keeper_turn_completed
+    Keeper_metrics.metric_keeper_turn_completed
     ~labels:[("keeper_name", meta.name)]
     ();
   let snapshot =
@@ -1524,7 +1524,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
      when compaction.before_tokens > 0
        && compaction.before_tokens = compaction.after_tokens ->
        Prometheus.inc_counter
-         Prometheus.metric_keeper_compaction_noop
+         Keeper_metrics.metric_keeper_compaction_noop
          ~labels:[ ("keeper", meta.name); ("trigger", trigger) ]
          ()
    | _ -> ())
@@ -1559,7 +1559,7 @@ let broadcast_lifecycle_events ~(name : string)
      | exn ->
          Log.Keeper.error "compaction SSE broadcast failed: %s"
            (Printexc.to_string exn);
-         Prometheus.inc_counter Prometheus.metric_keeper_metrics_sse_failures ~labels:[("kind", "compaction")] ());
+         Prometheus.inc_counter Keeper_metrics.metric_keeper_metrics_sse_failures ~labels:[("kind", "compaction")] ());
   match handoff_json with
   | Some ((`Assoc _ as handoff)) ->
       let from_generation =
@@ -1587,7 +1587,7 @@ let broadcast_lifecycle_events ~(name : string)
       | exn ->
           Log.Keeper.error "handoff SSE broadcast failed: %s"
             (Printexc.to_string exn);
-          Prometheus.inc_counter Prometheus.metric_keeper_metrics_sse_failures ~labels:[("kind", "handoff")] ())
+          Prometheus.inc_counter Keeper_metrics.metric_keeper_metrics_sse_failures ~labels:[("kind", "handoff")] ())
   | _ -> ()
 
 let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
@@ -1653,7 +1653,7 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
               Oas_worker_named.cascade_name_to_string cascade_name
             in
             Prometheus.inc_counter
-              Prometheus.metric_keeper_no_tool_provider
+              Keeper_metrics.metric_keeper_no_tool_provider
               ~labels:
                 [ ("keeper", meta.name)
                 ; ("cascade", cascade_name)
@@ -1662,7 +1662,7 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
         | _ -> ())
    | None -> ());
   if is_scheduled_autonomous_cycle then
-    Prometheus.inc_counter Prometheus.metric_keeper_proactive_outcome
+    Prometheus.inc_counter Keeper_metrics.metric_keeper_proactive_outcome
       ~labels:[ ("keeper", meta.name); ("outcome", "error") ]
       ();
   let preview =

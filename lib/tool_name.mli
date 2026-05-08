@@ -157,6 +157,7 @@ module Masc : sig
     | Tool_revoke
     | Transition
     | Update_priority
+    | Web_fetch
     | Web_search
     | Who
     | Workflow_guide

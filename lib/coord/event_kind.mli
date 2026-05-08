@@ -65,3 +65,18 @@ module Board : sig
   val of_string : string -> t option
   val all : t list
 end
+
+module Relevance : sig
+  type t =
+    | Critical
+    | High
+    | Medium
+    | Low
+    | Stale
+
+  val to_string : t -> string
+  (** Canonical broadcast relevance label (e.g. [medium]). *)
+
+  val of_string : string -> t option
+  val all : t list
+end

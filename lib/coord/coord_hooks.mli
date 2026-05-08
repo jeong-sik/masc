@@ -65,6 +65,23 @@ val task_completion_path_observed_fn : (path:string -> contract_state:string -> 
            Atomic.t
 val task_auto_release_observed_fn :
   (agent_name:string -> from_status:string -> unit) Atomic.t
+
+(** Fires once per [Coord_broadcast.broadcast] return, with the wall-clock
+    duration of the broadcast body (next_seq + agent.json read +
+    msg.json write + activity emit + on_broadcast_mention).  Wired at
+    startup ([lib/coord.ml]) to a Prometheus histogram
+    [masc_coord_broadcast_duration_seconds] labelled by [msg_type] so
+    operators can compare regular broadcasts against
+    [cache_invalidated] / mention follow-ups. *)
+val coord_broadcast_observed_fn :
+  (msg_type:string -> elapsed_s:float -> unit) Atomic.t
+
+(** RFC-0040: sender-side mention dedup decision counter.
+    Wired at startup ([lib/coord.ml]) to
+    [masc_mention_dedup_decisions_total{outcome}].
+    Outcome vocabulary: [skipped|passed|no_target|bypassed]. *)
+val mention_dedup_decision_fn :
+  (outcome:string -> unit) Atomic.t
 val cache_desync_cleared_fn :
   (Coord_utils_backend_setup.config ->
    module_name:string -> task_id:string -> status:string -> unit) Atomic.t

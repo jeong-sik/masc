@@ -84,6 +84,12 @@ val confidence_ring_size : int
     [MASC_CASCADE_CONFIDENCE_RING_SIZE].  Values [<= 0] disable
     confidence tracking. *)
 
+val cost_ring_size : int
+(** Number of recent per-request cost samples retained per provider.
+    Mirrors {!latency_ring_size} semantics: ring buffer, drop-oldest,
+    lazy allocation.  Default 100, env [MASC_CASCADE_COST_RING_SIZE].
+    Values [<= 0] disable cost tracking.  @since 0.191.0 *)
+
 
 (** Opaque health tracker state. *)
 type t
@@ -113,6 +119,7 @@ val record_success :
   provider_key:string ->
   ?latency_ms:float ->
   ?confidence:float ->
+  ?cost_usd:float ->
   unit ->
   unit
 
@@ -304,6 +311,16 @@ type provider_info = {
   (** Number of confidence samples currently retained.  [0] iff
       [avg_confidence] is [None].  Bounded by {!confidence_ring_size}.
       @since 0.183.0 *)
+  avg_cost_usd : float option;
+  (** Mean of recent per-request cost samples from the per-provider cost
+      ring.  [None] when no cost data has been recorded.  Used as input
+      to the composite health score's cost component — providers with
+      lower average cost score higher.
+      @since 0.191.0 *)
+  cost_samples : int;
+  (** Number of cost samples currently retained.  [0] iff
+      [avg_cost_usd] is [None].  Bounded by {!cost_ring_size}.
+      @since 0.191.0 *)
   health_score : float;
   (** Composite health score (0.0–1.0) combining success_rate,
       speed_score (from p95 latency), and cost_score.

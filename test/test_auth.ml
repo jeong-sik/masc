@@ -1087,6 +1087,10 @@ let () =
         test_ensure_keeper_credential_uses_per_keeper_token;
       test_case "ensure_keeper_credential reuses uuid" `Quick
         test_ensure_keeper_credential_reuses_uuid;
+      test_case
+        "ensure_keeper_credential reuses persisted raw token when env mismatched"
+        `Quick
+        test_ensure_keeper_credential_reuses_persisted_raw_token_when_env_mismatched;
       test_case "ensure_keeper_credential archives dual-identity bare" `Quick
         test_ensure_keeper_credential_archives_dual_identity_bare;
       test_case "ensure_keeper_credential archives redirect stub bare" `Quick

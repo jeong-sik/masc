@@ -23,6 +23,7 @@
   coord_query
   coord_status
   coord_task
+  coord_task_capacity
   coord_task_classify
   coord_task_cache_invariant
   task_cache_invariant
@@ -36,6 +37,7 @@
   playground_repo_cache
   coord_worktree
   mention
+  mention_dedup
   coord_resilience
   heartbeat
   nickname)

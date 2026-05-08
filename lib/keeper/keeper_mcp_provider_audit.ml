@@ -104,6 +104,16 @@ let auto_construct_active_by_default (r : result) =
   | No_auto_construct_path _ -> false
   | Not_applicable_http_api -> true (* HTTP API providers don't need it *)
 
+let auto_construct_effectively_active ?(env_lookup = Sys.getenv_opt)
+    (r : result) =
+  match r.construct with
+  | Auto_construct_active { env_flag; default_when_unset; _ } -> (
+      match Option.bind (env_lookup env_flag) Keeper_config.bool_of_string with
+      | Some enabled -> enabled
+      | None -> default_when_unset)
+  | No_auto_construct_path _ -> false
+  | Not_applicable_http_api -> true (* HTTP API providers don't need it *)
+
 let format_log_line (r : result) =
   match r.construct with
   | Auto_construct_active { env_flag; default_when_unset; module_name } ->

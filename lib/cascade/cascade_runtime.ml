@@ -62,6 +62,26 @@ let labels_require_local_discovery (labels : string list) : bool =
       | None -> false)
     labels
 
+(* RFC-0037 §4.3: surface partial Eio_context as a loud, warn-once
+   diagnostic instead of a silent skip.  The Provider_registry public
+   API on this module's downstream (Llm_provider) requires both [sw]
+   and [net] to probe — there is no register-without-probe path — so
+   we cannot register a fallback endpoint here.  What we *can* do is
+   tell the operator exactly why local discovery did not run, so they
+   can fix their bootstrap (typically: ensure [Eio_context] is
+   populated before the first cascade attempt that requires
+   discovery). *)
+let local_discovery_warned = Atomic.make false
+
+let warn_partial_eio_context_once ~sw_some ~net_some =
+  if not (Atomic.exchange local_discovery_warned true) then
+    Log.warn ~ctx:"CascadeRuntime"
+      "Local discovery skipped: Eio_context partial (sw=%b net=%b). \
+       Local providers (ollama, llama.cpp) will not be auto-discovered. \
+       Ensure Eio_context.set_switch and set_net run before the first \
+       cascade attempt that requires local discovery. (RFC-0037 §4.3)"
+      sw_some net_some
+
 let refresh_local_discovery_if_possible ?sw ?net (labels : string list) : bool =
   if not (labels_require_local_discovery labels) then false
   else
@@ -95,7 +115,11 @@ let refresh_local_discovery_if_possible ?sw ?net (labels : string list) : bool =
                "local runtime discovery refresh failed: %s"
                (Printexc.to_string exn);
              false)
-    | _ -> false
+    | _ ->
+        warn_partial_eio_context_once
+          ~sw_some:(Option.is_some sw)
+          ~net_some:(Option.is_some net);
+        false
 
 let context_floor = 4_096
 

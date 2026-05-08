@@ -6,6 +6,7 @@ module KAR = Masc_mcp.Keeper_agent_run
 module KMP = Masc_mcp.Keeper_memory_policy
 module KT = Masc_mcp.Keeper_types
 module KR = Masc_mcp.Keeper_registry
+module KHB = Masc_mcp.Keeper_heartbeat_snapshot
 module KHS = Masc_mcp.Keeper_keepalive_signal
 module KST = Masc_mcp.Keeper_state_machine
 module KCB = Masc_mcp.Keeper_turn_cascade_budget
@@ -31,6 +32,29 @@ let cleanup_dir dir =
         Unix.unlink path
   in
   try rm dir with _ -> ()
+
+let write_lines path lines =
+  KT.mkdir_p (Filename.dirname path);
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+      List.iter
+        (fun line ->
+          output_string oc line;
+          output_char oc '\n')
+        lines)
+
+let persistence_read_drop_total ~surface ~reason =
+  P.metric_value_or_zero P.metric_persistence_read_drops
+    ~labels:[("surface", surface); ("reason", reason)]
+    ()
+
+let check_persistence_read_drop_delta ~surface ~reason ~before ~delta =
+  check (float 0.0001)
+    (Printf.sprintf "%s/%s persistence read drops" surface reason)
+    (before +. float_of_int delta)
+    (persistence_read_drop_total ~surface ~reason)
 
 let with_env key value f =
   let prev = Sys.getenv_opt key in
@@ -364,7 +388,7 @@ let test_compaction_callback_failure_records_coverage_gap () =
       let labels = [ ("callback", "on_compaction_started") ] in
       let before =
         P.metric_value_or_zero
-          P.metric_keeper_lifecycle_callback_failures
+          Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
           ~labels
           ()
       in
@@ -386,7 +410,7 @@ let test_compaction_callback_failure_records_coverage_gap () =
       check (float 0.0001) "callback failure metric increments"
         (before +. 1.0)
         (P.metric_value_or_zero
-           P.metric_keeper_lifecycle_callback_failures
+           Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
            ~labels
            ());
       match TCG.read_recent ~masc_root:base_dir ~n:1 with
@@ -585,7 +609,7 @@ let test_handoff_callback_failure_records_coverage_gap () =
       let labels = [ ("callback", "on_handoff_started") ] in
       let before =
         P.metric_value_or_zero
-          P.metric_keeper_lifecycle_callback_failures
+          Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
           ~labels
           ()
       in
@@ -608,7 +632,7 @@ let test_handoff_callback_failure_records_coverage_gap () =
       check (float 0.0001) "handoff callback failure metric increments"
         (before +. 1.0)
         (P.metric_value_or_zero
-           P.metric_keeper_lifecycle_callback_failures
+           Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
            ~labels
            ());
       match TCG.read_recent ~masc_root:base_dir ~n:1 with
@@ -2234,7 +2258,7 @@ let test_compact_if_needed_records_saved_tokens_metric () =
   let labels = [ ("keeper", meta.name) ] in
   let before_metric =
     Masc_mcp.Prometheus.get_metric_value
-      Masc_mcp.Prometheus.metric_keeper_compaction_saved_tokens
+      Masc_mcp.Keeper_metrics.metric_keeper_compaction_saved_tokens
       ~labels
       ()
     |> Option.value ~default:0.0
@@ -2244,7 +2268,7 @@ let test_compact_if_needed_records_saved_tokens_metric () =
   in
   let after_metric =
     Masc_mcp.Prometheus.get_metric_value
-      Masc_mcp.Prometheus.metric_keeper_compaction_saved_tokens
+      Masc_mcp.Keeper_metrics.metric_keeper_compaction_saved_tokens
       ~labels
       ()
     |> Option.value ~default:0.0
@@ -2500,7 +2524,7 @@ let test_dispatch_keeper_phase_event_rejection_increments_metric () =
       in
       let before =
         Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Prometheus.metric_keeper_lifecycle_dispatch_rejections
+          Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -2510,7 +2534,7 @@ let test_dispatch_keeper_phase_event_rejection_increments_metric () =
         KST.Compaction_started;
       let after =
         Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Prometheus.metric_keeper_lifecycle_dispatch_rejections
+          Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -2543,7 +2567,7 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
       in
       let before =
         Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Prometheus.metric_keeper_dispatch_event_failures
+          Masc_mcp.Keeper_metrics.metric_keeper_dispatch_event_failures
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -2553,12 +2577,73 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
         KST.Compaction_started;
       let after =
         Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Prometheus.metric_keeper_dispatch_event_failures
+          Masc_mcp.Keeper_metrics.metric_keeper_dispatch_event_failures
           ~labels ()
         |> Option.value ~default:0.0
       in
       check bool "keepalive registry rejection metric increments" true
         (after > before))
+
+let test_heartbeat_history_fallback_counts_malformed_rows () =
+  let base_dir = temp_dir "keeper_lifecycle_heartbeat_history_drops" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      KR.clear ();
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:None);
+      let meta =
+        make_keeper_meta
+          ~name:"keeper-heartbeat-history-drop"
+          ~trace_id:"trace-heartbeat-history-drop"
+          ()
+      in
+      ignore (KR.register ~base_path:config.base_path meta.name meta);
+      let trace_id =
+        Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id
+      in
+      let history_path = KT.keeper_history_path config trace_id in
+      write_lines history_path
+        [
+          {|{"role":"user","content":"keep continuity","source":"user"}|};
+          "[]";
+          "{not-json";
+        ];
+      let surface = "keeper_heartbeat_history" in
+      let entry_reason = "entry_load_error" in
+      let invalid_reason = "invalid_payload" in
+      let before_entry =
+        persistence_read_drop_total ~surface ~reason:entry_reason
+      in
+      let before_invalid =
+        persistence_read_drop_total ~surface ~reason:invalid_reason
+      in
+      let ctx : _ KT.context =
+        {
+          config;
+          agent_name = "test-operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      KHB.write_heartbeat_snapshot
+        ~ctx
+        ~meta_current:meta
+        ~now_ts:(Time_compat.now ())
+        ~consecutive_hb_failures:0
+        ~timing_ring:[||]
+        ~timing_filled:0;
+      check_persistence_read_drop_delta ~surface ~reason:entry_reason
+        ~before:before_entry ~delta:1;
+      check_persistence_read_drop_delta ~surface ~reason:invalid_reason
+        ~before:before_invalid ~delta:1)
 
 let () =
   run "keeper_lifecycle"
@@ -2678,5 +2763,7 @@ let () =
             test_dispatch_keeper_phase_event_rejection_increments_metric;
           test_case "keepalive event rejection increments metric" `Quick
             test_keepalive_dispatch_event_rejection_increments_metric;
+          test_case "heartbeat history fallback counts malformed rows" `Quick
+            test_heartbeat_history_fallback_counts_malformed_rows;
         ] );
     ]

@@ -19,7 +19,7 @@ let default_config = {
     Env_config_core.get_string
       ~default:Masc_network_defaults.masc_http_default_host
       "MASC_HTTP_HOST";
-  max_connections = Env_config_core.get_int ~default:128 "MASC_HTTP_MAX_CONNECTIONS";
+  max_connections = Env_config_core.get_int ~default:512 "MASC_HTTP_MAX_CONNECTIONS";
 }
 
 (** HTTP request handler type *)

@@ -100,7 +100,9 @@ val failure_reason_cohort_key : failure_reason option -> string
 val stale_watchdog_failure_reason :
   prior:failure_reason option -> kill_class:stale_kill_class -> failure_reason option
 (** Preserve authoritative terminal failure reasons when the stale watchdog
-    fires after a failed turn. *)
+    fires after a failed turn, but do not carry stale-watchdog cohort labels
+    across fresh watchdog kills. Storm/fleet labels are relatched only by the
+    current threshold or batch detector. *)
 
 (** Pure control-flow signal for immediate fiber termination (RFC-0002).
     Carries no state — failure reason must be pre-stored via
@@ -108,29 +110,33 @@ val stale_watchdog_failure_reason :
 exception Keeper_fiber_crash
 
 type turn_phase =
-  | Turn_idle
-  | Turn_prompting
-  | Turn_executing
-  | Turn_compacting
-  | Turn_finalizing
+  | Turn_idle [@tla.idle]
+  | Turn_prompting [@tla.active]
+  | Turn_executing [@tla.active]
+  | Turn_compacting [@tla.active]
+  | Turn_finalizing [@tla.active]
+[@@deriving tla]
 
 type decision_stage =
-  | Decision_undecided
-  | Decision_guard_ok
-  | Decision_gate_rejected
-  | Decision_tool_policy_selected
+  | Decision_undecided [@tla.idle]
+  | Decision_guard_ok [@tla.active]
+  | Decision_gate_rejected [@tla.terminal]
+  | Decision_tool_policy_selected [@tla.active]
+[@@deriving tla]
 
 type cascade_state =
-  | Cascade_idle
-  | Cascade_selecting
-  | Cascade_trying
-  | Cascade_done
-  | Cascade_exhausted
+  | Cascade_idle [@tla.idle]
+  | Cascade_selecting [@tla.active]
+  | Cascade_trying [@tla.active]
+  | Cascade_done [@tla.terminal]
+  | Cascade_exhausted [@tla.terminal]
+[@@deriving tla]
 
 type compaction_stage =
-  | Compaction_accumulating
-  | Compaction_compacting
-  | Compaction_done
+  | Compaction_accumulating [@tla.idle]
+  | Compaction_compacting [@tla.active]
+  | Compaction_done [@tla.terminal]
+[@@deriving tla]
 
 type turn_measurement = {
   tm_captured_at : float;
@@ -328,6 +334,22 @@ val set_turn_cascade_state :
 (** Update the live turn's phase directly. No-op if idle. *)
 val set_turn_phase :
   base_path:string -> string -> turn_phase -> unit
+
+(** Runtime transition guards for the 4 sub-FSM axes.
+    Each validates a (from, to) pair against the TLA+ transition matrix.
+    Invalid transitions raise [Assert_failure] and bump
+    [Prometheus.metric_fsm_guard_violation]. *)
+val validate_turn_phase_transition :
+  from:turn_phase -> to_:turn_phase -> unit
+
+val validate_decision_transition :
+  from:decision_stage -> to_:decision_stage -> unit
+
+val validate_cascade_transition :
+  from:cascade_state -> to_:cascade_state -> unit
+
+val validate_compaction_transition :
+  from:compaction_stage -> to_:compaction_stage -> unit
 
 (** Record the surface model selected for the current turn. No-op if idle. *)
 val set_turn_selected_model :

@@ -26,8 +26,9 @@ val record_tool_skipped :
   keeper_name:string -> tool_name:string -> reason_code:string -> unit
 (** Record a tool-skip event into the bounded ring. Safe to call from
     cancellable Eio fibers — internal cancellation is re-raised, all
-    other exceptions are swallowed so SSE broadcast can never fail
-    because of metrics bookkeeping. *)
+    other exceptions are reported via
+    {!Keeper_metrics.metric_keeper_lifecycle_callback_failures} and logged
+    without failing the SSE broadcast path. *)
 
 val approval_queue_summary : unit -> approval_summary
 (** Read the current approval queue and produce depth + wait-time
@@ -54,6 +55,16 @@ val inject_for_testing :
 (** Push a synthetic skip event into the ring without going through
     the production [record_tool_skipped] path so tests can backdate
     [ts] for window-boundary assertions. *)
+
+val record_tool_skipped_with_append_for_testing :
+  append:(unit -> unit) ->
+  keeper_name:string ->
+  tool_name:string ->
+  reason_code:string ->
+  unit
+(** Run the production exception-handling path with an injected append
+    callback so tests can prove metrics/log visibility without relying
+    on an actual mutex failure. *)
 
 val tool_rejection_counts :
   ?now_ts:float ->

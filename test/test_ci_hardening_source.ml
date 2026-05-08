@@ -190,6 +190,18 @@ let test_ci_sync_and_asset_contracts () =
   check bool "ci gate aggregates live PR gate" true
     (file_contains_pattern ".github/workflows/ci.yml"
        "PR_LIVE_GATE_RESULT");
+  check bool "meta guards verify main branch protection drift" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "bash scripts/ci/check-main-branch-protection.sh");
+  check bool "branch protection drift check exists" true
+    (file_contains_pattern "scripts/ci/check-main-branch-protection.sh"
+       "enforce_admins.enabled");
+  check bool "branch protection drift check requires draft guard context" true
+    (file_contains_pattern "scripts/ci/check-main-branch-protection.sh"
+       "Draft Auto-Merge Guard");
+  check bool "branch protection drift check requires CI gate context" true
+    (file_contains_pattern "scripts/ci/check-main-branch-protection.sh"
+       "CI Gate");
   check bool "heavy CI no longer trusts stale draft payload" true
     (file_not_contains_pattern ".github/workflows/ci.yml"
        "github.event.pull_request.draft == false");
@@ -1161,17 +1173,19 @@ let test_keeper_required_tool_contracts () =
        {|REQUIRED_TOOLS_LEGACY="${REQUIRED_TOOLS:-}"|}
      && file_contains_pattern
           "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          {|CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_bash,keeper_pr_create}}"|}
+          {|CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-masc_web_search,keeper_bash,keeper_pr_create}}"|}
      && file_contains_pattern
           "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          {|REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_pr_review_comment}}"|});
+          {|REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_shell,keeper_pr_review_comment}}"|});
   check bool "runbook documents docker PR lifecycle split phases" true
     (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
        "The create phase"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-          "requires `keeper_bash` and `keeper_pr_create`"
+          "requires `masc_web_search`, `keeper_bash`, and `keeper_pr_create`"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-          "the review phase requires `keeper_pr_review_comment`");
+          "the review phase requires `keeper_shell` and"
+     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+          "second required tool keeps approval mandatory");
   check bool "docker PR lifecycle prompt accepts brokered route proof" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
@@ -1205,6 +1219,33 @@ let test_keeper_required_tool_contracts () =
           "skipping review phase because create phase did not produce complete success evidence"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
           "`create-readiness-failures.jsonl`");
+  check bool "docker PR lifecycle supports review-only resume" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       {|PHASE_MODE="${PHASE_MODE:-both}"|}
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          {|--phase create|review|both|}
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          {|--review-resume|}
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          {|if [[ "$REVIEW_RESUME" == "1" ]] || all_create_results_ready_for_review; then|}
+     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+          "`--phase review --review-resume`");
+  check bool "docker PR lifecycle review resolves fork head refs" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       "proof_head_ref_for_keeper"
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          {|gh pr view $review_head_ref -R $REPO_SLUG --json number,url,isDraft,headRefName|}
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          "review_target_head"
+     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+          "owner-qualified `OWNER:BRANCH` head ref");
   check bool "keeper msg schema documents required_tool_names alias" true
     (file_contains_pattern "lib/keeper/keeper_schema.ml"
        "required_tool_names")
@@ -1394,8 +1435,12 @@ let test_keeper_pr_audit_contracts () =
   check bool "keeper fleet audit can scope lifecycle evidence by run id" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        "--evidence-run-id"
+     && file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
+          "load_harness_evidence_windows"
      && file_contains_pattern "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          "--evidence-run-id \"$RUN_ID\"");
+          "--evidence-run-id \"$RUN_ID\""
+     && file_contains_pattern "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          "--harness-run-dir \"$RUN_DIR\"");
   check bool "keeper fleet audit survives live invalid utf8 rows" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        {|errors="replace"|})
@@ -1682,6 +1727,14 @@ let test_transport_route_contracts () =
     (file_contains_pattern "lib/server/server_mcp_transport_http.ml"
        {|Option.is_none existing_agent
                     && Option.is_none existing_legacy_agent|});
+  check bool "h2 mcp post injects canonical http actor" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "body_with_canonical_http_actor");
+  check bool "h2 mcp post forwards internal keeper runtime" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "is_verified_internal_keeper_request"
+    && file_contains_pattern "lib/server/server_h2_gateway.ml"
+         "~internal_keeper_runtime state");
   check bool "common http deps prefer runtime captured in server_state" true
     (file_contains_pattern "lib/server/server_routes_http_common.ml"
        "state.Mcp_server.sw");
@@ -1753,7 +1806,20 @@ let test_http_cancel_response_contracts () =
     && file_contains_pattern "lib/server/server_ws_standalone.ml"
          {|send_pong skipped|}
     && file_contains_pattern "lib/server/server_ws_standalone.ml"
-         {|WS standalone handler closed before write completed|})
+         {|WS standalone handler closed before write completed|});
+  check bool "standalone ws close diagnostics classify cleanup causes" true
+    (file_contains_pattern "lib/server/server_ws_standalone.ml"
+       {|log_ws_client_close_payload|}
+    && file_contains_pattern "lib/server/server_ws_standalone.ml"
+         {|client close|}
+    && file_contains_pattern "lib/server/server_ws_standalone.ml"
+         {|sse-forward send failed; cleaning up|}
+    && file_contains_pattern "lib/server/server_ws_standalone.ml"
+         {|standalone_ws_eof_summary|}
+    && file_contains_pattern "lib/server/server_ws_standalone.ml"
+         {|declared_len|}
+    && file_contains_pattern "lib/server/server_ws_standalone.ml"
+         {|chunk_len <= 0|})
 
 let test_worktree_list_contracts () =
   check bool "worktree list stays read-only" true

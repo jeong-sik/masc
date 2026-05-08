@@ -290,14 +290,29 @@ let check_no_cascade_before_measurement
   | Cascade_selecting | Cascade_trying | Cascade_done | Cascade_exhausted ->
       measurement_captured
 
+type event_priority_state = {
+  ep_measurement_bind_count : int;
+  ep_has_measurement : bool;
+  ep_has_pending_measurement : bool;
+}
+
+let check_event_priority_monotone_pure
+    (state : event_priority_state)
+    : bool =
+  state.ep_measurement_bind_count <= 1
+  && not (state.ep_has_measurement && state.ep_has_pending_measurement)
+
 let check_event_priority_monotone
     (entry : Keeper_registry.registry_entry)
     : bool =
   match entry.current_turn_observation with
   | None -> true
   | Some obs ->
-      obs.measurement_bind_count <= 1
-      && not (Option.is_some obs.measurement && Option.is_some entry.pending_turn_measurement)
+      check_event_priority_monotone_pure {
+        ep_measurement_bind_count = obs.measurement_bind_count;
+        ep_has_measurement = Option.is_some obs.measurement;
+        ep_has_pending_measurement = Option.is_some entry.pending_turn_measurement;
+      }
 
 let check_phase_derivation_agreement
     (entry : Keeper_registry.registry_entry)

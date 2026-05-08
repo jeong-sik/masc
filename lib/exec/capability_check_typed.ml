@@ -17,14 +17,23 @@
 let arg s = Shell_ir.Lit s
 
 let args_of_flags flags =
-  List.map (function
-    | `Long -> arg "-l"
-    | `All -> arg "-a"
-    | `Human -> arg "-h") flags
+  List.map
+    (function
+      | `Long -> arg "-l"
+      | `All -> arg "-a"
+      | `Human -> arg "-h")
+    flags
+;;
 
 let of_command = function
   | Shell_ir_typed.W (Ls { path; flags }) ->
-    let args = args_of_flags flags @ (match path with None -> [] | Some p -> [arg p]) in
+    let args =
+      args_of_flags flags
+      @
+      match path with
+      | None -> []
+      | Some p -> [ arg p ]
+    in
     [ Capability.Exec_bin (Bin.of_known Bin.Ls, args) ]
   | Shell_ir_typed.W (Cat { path }) ->
     [ Capability.Exec_bin (Bin.of_known Bin.Cat, [ arg path ]) ]
@@ -80,3 +89,4 @@ let of_command = function
     let args = List.map arg target_argv in
     [ Capability.Exec_bin (Bin.of_known Bin.Sudo, args) ]
   | Shell_ir_typed.W (Generic s) -> Capability_check.of_simple s
+;;

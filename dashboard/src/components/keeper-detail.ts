@@ -1101,7 +1101,6 @@ export function KeeperDetailPage() {
           >
             <${KeeperCommsPanel} keeper=${keeper} />
             <${PanelCard} title="세션 활동 로그">
-              <div class="text-2xs text-[var(--color-fg-muted)] mb-3">현재 세션의 도구 호출, 태스크 완료, 메시지 등 이벤트 기록</div>
               <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} keeperStatus=${keeper.status} keeperGeneration=${keeper.generation} />
             <//>
           <//>
@@ -1134,7 +1133,6 @@ export function KeeperDetailPage() {
               </div>
             <//>
             <${CollapsibleSection} title="품질 시그널 (고급 지표)">
-              <div class="mt-3 text-2xs text-[var(--color-fg-muted)] mb-3">폴백 비율, 정렬 품질, 자율 행동 비율 등 metrics_window 기반 런타임 품질 지표</div>
               <${RuntimeSignals} keeper=${keeper} />
             <//>
           </${KeeperDetailSection}>

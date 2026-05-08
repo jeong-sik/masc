@@ -510,6 +510,22 @@ val metric_cascade_provider_health_score : string
     [success_rate * speed_score * cost_score] in [0.0, 1.0].
     Labels: [provider_key]. *)
 
+val metric_cascade_decisions : string
+(** Counter: cascade routing decisions emitted by [Cascade_fsm.decide].
+    Labels: [decision] in [accept|accept_on_exhaustion|try_next|exhausted]. *)
+
+val metric_cascade_fallbacks : string
+(** Counter: cascade fallback transitions ([Try_next] outcomes).
+    Labels: [reason] in [call_err|slot_full|accept_rejected|health_filter]. *)
+
+val metric_cascade_providers_exhausted : string
+(** Counter: terminal exhaustion events emitted when a cascade has no
+    further provider candidates. *)
+
+val metric_cascade_routing_phase_overrides : string
+(** Counter: cascade routing phase overrides applied during decision.
+    Labels: [phase], [from_cascade], [to_cascade]. *)
+
 val metric_oas_context_overflow_ratio : string
 (** Gauge: context overflow ratio [estimated_tokens / limit_tokens] when
     [ContextOverflowImminent] fires.  Labels: [agent_name]. *)

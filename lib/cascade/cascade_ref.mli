@@ -82,3 +82,26 @@ val find_item : cascade_group -> string -> cascade_item option
     [Random] returns items unchanged; randomization is applied at
     selection time. *)
 val order_items : traversal_strategy -> cascade_item list -> cascade_item list
+
+(** {1 Logical use routing} *)
+
+type logical_use =
+  | Keeper_turn
+  | Phase_recovery
+  | Phase_buffer
+  | Tool_required
+  | Governance_judge
+  | Operator_judge
+  | Cross_verifier
+  | Verifier
+  | Autoresearch
+  | Adversarial_reviewer
+  | Auto_responder
+  | Routing
+  | Openai_compat
+  | Persona_generation
+  | Provider_benchmark
+  | Simple_task
+  | Moderate_task
+  | Complex_task
+  | Tool_rerank_use

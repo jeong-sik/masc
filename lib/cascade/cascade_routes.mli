@@ -5,7 +5,7 @@
     This keeps profiles as configuration data instead of scattering profile
     literals through runtime call sites. *)
 
-type logical_use =
+type logical_use = Cascade_ref.logical_use =
   | Keeper_turn
   | Phase_recovery
   | Phase_buffer

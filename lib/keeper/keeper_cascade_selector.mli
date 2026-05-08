@@ -21,6 +21,7 @@ val select_item_for_turn :
   cascade_profile:Cascade_ref.cascade_profile ->
   health_cache:Keeper_health_probe.health_status ->
   last_used_item:string option ->
+  cascade_ref:Cascade_ref.cascade_ref option ->
   (string * Cascade_ref.cascade_item, [> `No_available_item ]) result
 (** Returns [(group_name, item)] so callers can route subsequent
     [meta.cascade_name] to the correct group.  PR #14266 originally

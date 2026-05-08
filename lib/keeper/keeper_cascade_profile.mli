@@ -43,7 +43,7 @@ val default : t
 val default_name : string
 (** [default_name = to_string default = "big_three"]. *)
 
-type logical_use =
+type logical_use = Cascade_ref.logical_use =
   | Keeper_turn
   | Phase_recovery
   | Phase_buffer

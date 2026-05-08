@@ -22,9 +22,11 @@
 type turn_phase = Keeper_registry.turn_phase =
   | Turn_idle
   | Turn_prompting
+  | Turn_routing
   | Turn_executing
   | Turn_compacting
   | Turn_finalizing
+  | Turn_exhausted
 
 val all_turn_phases : turn_phase list
 

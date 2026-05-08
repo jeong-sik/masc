@@ -10,17 +10,39 @@ module Obs = Masc_mcp.Keeper_composite_observer
 
 let test_valid_turn_phase_transitions () =
   let cases =
-    [ Turn_idle, Turn_prompting
+    [ (* from Turn_idle *)
+      Turn_idle, Turn_idle
+    ; Turn_idle, Turn_prompting
+      (* from Turn_prompting *)
+    ; Turn_prompting, Turn_prompting
+    ; Turn_prompting, Turn_routing
     ; Turn_prompting, Turn_executing
     ; Turn_prompting, Turn_finalizing
+      (* from Turn_routing *)
+    ; Turn_routing, Turn_prompting
+    ; Turn_routing, Turn_routing
+    ; Turn_routing, Turn_executing
+      (* from Turn_executing *)
+    ; Turn_executing, Turn_prompting
+    ; Turn_executing, Turn_routing
+    ; Turn_executing, Turn_executing
     ; Turn_executing, Turn_compacting
     ; Turn_executing, Turn_finalizing
+    ; Turn_executing, Turn_exhausted
+      (* from Turn_compacting *)
     ; Turn_compacting, Turn_prompting
-    ; Turn_idle, Turn_idle
-    ; Turn_prompting, Turn_prompting
-    ; Turn_executing, Turn_executing
     ; Turn_compacting, Turn_compacting
+    ; Turn_compacting, Turn_finalizing
+      (* from Turn_finalizing *)
+    ; Turn_finalizing, Turn_prompting
+    ; Turn_finalizing, Turn_routing
+    ; Turn_finalizing, Turn_executing
     ; Turn_finalizing, Turn_finalizing
+      (* from Turn_exhausted *)
+    ; Turn_exhausted, Turn_prompting
+    ; Turn_exhausted, Turn_routing
+    ; Turn_exhausted, Turn_executing
+    ; Turn_exhausted, Turn_exhausted
     ]
   in
   List.iter
@@ -37,18 +59,36 @@ let test_valid_turn_phase_transitions () =
 
 let test_invalid_turn_phase_transitions () =
   let cases =
-    [ Turn_idle, Turn_executing
+    [ (* from Turn_idle *)
+      Turn_idle, Turn_routing
+    ; Turn_idle, Turn_executing
     ; Turn_idle, Turn_compacting
     ; Turn_idle, Turn_finalizing
+    ; Turn_idle, Turn_exhausted
+      (* from Turn_prompting *)
     ; Turn_prompting, Turn_idle
     ; Turn_prompting, Turn_compacting
+    ; Turn_prompting, Turn_exhausted
+      (* from Turn_routing *)
+    ; Turn_routing, Turn_idle
+    ; Turn_routing, Turn_compacting
+    ; Turn_routing, Turn_finalizing
+    ; Turn_routing, Turn_exhausted
+      (* from Turn_executing *)
     ; Turn_executing, Turn_idle
-    ; Turn_executing, Turn_prompting
+      (* from Turn_compacting *)
     ; Turn_compacting, Turn_idle
+    ; Turn_compacting, Turn_routing
     ; Turn_compacting, Turn_executing
-    ; Turn_compacting, Turn_finalizing
+    ; Turn_compacting, Turn_exhausted
+      (* from Turn_finalizing *)
     ; Turn_finalizing, Turn_idle
-    ; Turn_finalizing, Turn_prompting
+    ; Turn_finalizing, Turn_compacting
+    ; Turn_finalizing, Turn_exhausted
+      (* from Turn_exhausted *)
+    ; Turn_exhausted, Turn_idle
+    ; Turn_exhausted, Turn_compacting
+    ; Turn_exhausted, Turn_finalizing
     ]
   in
   List.iter
@@ -69,12 +109,22 @@ let test_invalid_turn_phase_transitions () =
 
 let test_valid_decision_transitions () =
   let cases =
-    [ Decision_undecided, Decision_guard_ok
+    [ (* from Decision_undecided *)
+      Decision_undecided, Decision_undecided
+    ; Decision_undecided, Decision_guard_ok
     ; Decision_undecided, Decision_gate_rejected
-    ; Decision_guard_ok, Decision_tool_policy_selected
-    ; Decision_undecided, Decision_undecided
+    ; Decision_undecided, Decision_tool_policy_selected
+      (* from Decision_guard_ok *)
     ; Decision_guard_ok, Decision_guard_ok
+    ; Decision_guard_ok, Decision_gate_rejected
+    ; Decision_guard_ok, Decision_tool_policy_selected
+      (* from Decision_gate_rejected *)
+    ; Decision_gate_rejected, Decision_guard_ok
     ; Decision_gate_rejected, Decision_gate_rejected
+    ; Decision_gate_rejected, Decision_tool_policy_selected
+      (* from Decision_tool_policy_selected *)
+    ; Decision_tool_policy_selected, Decision_guard_ok
+    ; Decision_tool_policy_selected, Decision_gate_rejected
     ; Decision_tool_policy_selected, Decision_tool_policy_selected
     ]
   in
@@ -92,13 +142,10 @@ let test_valid_decision_transitions () =
 
 let test_invalid_decision_transitions () =
   let cases =
-    [ Decision_undecided, Decision_tool_policy_selected
-    ; Decision_guard_ok, Decision_undecided
-    ; Decision_guard_ok, Decision_gate_rejected
+    [ (* Only _ -> undecided is invalid (reset, not transition) *)
+      Decision_guard_ok, Decision_undecided
     ; Decision_gate_rejected, Decision_undecided
-    ; Decision_gate_rejected, Decision_guard_ok
     ; Decision_tool_policy_selected, Decision_undecided
-    ; Decision_tool_policy_selected, Decision_guard_ok
     ]
   in
   List.iter
@@ -119,15 +166,28 @@ let test_invalid_decision_transitions () =
 
 let test_valid_cascade_transitions () =
   let cases =
-    [ Cascade_idle, Cascade_selecting
+    [ (* from Cascade_idle *)
+      Cascade_idle, Cascade_idle
+    ; Cascade_idle, Cascade_selecting
+      (* from Cascade_selecting *)
+    ; Cascade_selecting, Cascade_idle
+    ; Cascade_selecting, Cascade_selecting
     ; Cascade_selecting, Cascade_trying
+      (* from Cascade_trying *)
+    ; Cascade_trying, Cascade_idle
+    ; Cascade_trying, Cascade_selecting
+    ; Cascade_trying, Cascade_trying
     ; Cascade_trying, Cascade_done
     ; Cascade_trying, Cascade_exhausted
-    ; Cascade_trying, Cascade_selecting
-    ; Cascade_idle, Cascade_idle
-    ; Cascade_selecting, Cascade_selecting
-    ; Cascade_trying, Cascade_trying
+      (* from Cascade_done *)
+    ; Cascade_done, Cascade_idle
+    ; Cascade_done, Cascade_selecting
+    ; Cascade_done, Cascade_trying
     ; Cascade_done, Cascade_done
+      (* from Cascade_exhausted *)
+    ; Cascade_exhausted, Cascade_idle
+    ; Cascade_exhausted, Cascade_selecting
+    ; Cascade_exhausted, Cascade_trying
     ; Cascade_exhausted, Cascade_exhausted
     ]
   in
@@ -145,7 +205,8 @@ let test_valid_cascade_transitions () =
 
 let test_invalid_cascade_transitions () =
   let cases =
-    [ Cascade_idle, Cascade_trying
+    [ (* from Cascade_idle *)
+      Cascade_idle, Cascade_trying
         (* Regression: pre-fix [Keeper_unified_turn.retry_loop] line
            1138 era marked Cascade_trying immediately after budget
            resolution, jumping past Cascade_selecting.  The fix moves
@@ -154,12 +215,13 @@ let test_invalid_cascade_transitions () =
            direct jump. *)
     ; Cascade_idle, Cascade_done
     ; Cascade_idle, Cascade_exhausted
+      (* from Cascade_selecting *)
     ; Cascade_selecting, Cascade_done
     ; Cascade_selecting, Cascade_exhausted
-    ; Cascade_done, Cascade_idle
-    ; Cascade_done, Cascade_selecting
-    ; Cascade_exhausted, Cascade_idle
-    ; Cascade_exhausted, Cascade_selecting
+      (* from Cascade_done *)
+    ; Cascade_done, Cascade_exhausted
+      (* from Cascade_exhausted *)
+    ; Cascade_exhausted, Cascade_done
     ]
   in
   List.iter

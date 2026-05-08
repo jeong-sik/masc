@@ -495,11 +495,13 @@
  (names test_pbt_mention test_pbt_validation test_pbt_text_processing test_pbt_context_overflow
         test_keeper_state_machine_pbt test_telemetry_eio_pbt
         test_metrics_store_eio_pbt test_prompt_registry_pbt
-        test_keeper_fsm_joints test_clean_only_bug_mirrors)
+        test_keeper_fsm_joints test_clean_only_bug_mirrors
+        test_keeper_phase_drift_contract)
  (modules test_pbt_mention test_pbt_validation test_pbt_text_processing test_pbt_context_overflow
           test_keeper_state_machine_pbt test_telemetry_eio_pbt
           test_metrics_store_eio_pbt test_prompt_registry_pbt
-          test_keeper_fsm_joints test_clean_only_bug_mirrors)
+          test_keeper_fsm_joints test_clean_only_bug_mirrors
+          test_keeper_phase_drift_contract)
  (libraries masc_test_deps))
 
 ; Focused single-module tests

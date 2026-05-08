@@ -960,7 +960,14 @@ let run_named
              if sdk_error_is_hard_quota sdk_err then
                let last_err = match outcome with
                  | Cascade_fsm.Call_err e -> Some e
-                 | _ -> None
+                 (* Non-error provider outcomes carry no http_error to surface
+                    as the terminal cause when forcing Exhausted on hard
+                    quota.  Enumerated explicitly so a future addition to
+                    [Cascade_fsm.provider_outcome] is flagged at compile time
+                    instead of silently mapping to [None]. *)
+                 | Cascade_fsm.Call_ok _
+                 | Cascade_fsm.Accept_rejected _
+                 | Cascade_fsm.Slot_full -> None
                in
                Cascade_fsm.Exhausted { last_err }
              else
@@ -1028,7 +1035,14 @@ let run_named
               Log.Misc.error "cascade %s exhausted: all tiers failed (last model=%s, error=%s)"
                 cascade_name provider_cfg.model_id (Agent_sdk.Error.to_string sdk_err);
               Error sdk_err
-            | _ -> Error sdk_err)
+            (* [Accept] / [Accept_on_exhaustion] are reachable only from
+               [Cascade_fsm.Call_ok] / [Accept_rejected] outcomes, but this
+               branch handles a [Call_err] outcome so the FSM cannot return
+               them here.  Surface the original sdk_err and let the caller
+               see the unexpected mapping rather than silently absorbing a
+               new decision variant added to [Cascade_fsm.decision]. *)
+            | Cascade_fsm.Accept _
+            | Cascade_fsm.Accept_on_exhaustion _ -> Error sdk_err)
          | None ->
            (* Non-API error (agent, config, etc.) — not cascadeable *)
            let observation =

@@ -83,7 +83,21 @@ let should_cleanup_dead ~now ~dead_ttl_sec
   match entry.phase, entry.dead_since_ts with
   | Keeper_state_machine.Dead, Some dead_since ->
       now -. dead_since >= dead_ttl_sec
-  | _ -> false
+  (* Dead but no [dead_since_ts] yet — first observation will set it. *)
+  | Keeper_state_machine.Dead, None -> false
+  (* Non-Dead phases never trigger Dead cleanup, regardless of timestamp. *)
+  | (Keeper_state_machine.Offline
+    | Keeper_state_machine.Running
+    | Keeper_state_machine.Failing
+    | Keeper_state_machine.Overflowed
+    | Keeper_state_machine.Compacting
+    | Keeper_state_machine.HandingOff
+    | Keeper_state_machine.Draining
+    | Keeper_state_machine.Paused
+    | Keeper_state_machine.Stopped
+    | Keeper_state_machine.Crashed
+    | Keeper_state_machine.Restarting
+    | Keeper_state_machine.Zombie), _ -> false
 
 (** Check if a paused keeper meta file on disk is stale enough to remove. *)
 let is_stale_paused_meta ~now ~paused_ttl_sec (meta : keeper_meta) =
@@ -284,7 +298,15 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
                  | Some (Keeper_registry.Stale_termination_storm _)
                  | Some (Keeper_registry.Stale_fleet_batch _)
                  | Some (Keeper_registry.Oas_timeout_budget_loop _) -> true
-                 | _ -> false)
+                 (* Other failure reasons are not stale-watchdog signals. *)
+                 | Some (Keeper_registry.Heartbeat_consecutive_failures _)
+                 | Some (Keeper_registry.Turn_consecutive_failures _)
+                 | Some (Keeper_registry.Provider_runtime_error _)
+                 | Some (Keeper_registry.Tool_required_unsatisfied _)
+                 | Some (Keeper_registry.Ambiguous_partial_commit _)
+                 | Some Keeper_registry.Fiber_unresolved
+                 | Some (Keeper_registry.Exception _)
+                 | None -> false)
              | None -> false
            in
            if watchdog_triggered then begin
@@ -1273,7 +1295,19 @@ let sweep_and_recover (ctx : _ context) =
            burns another multi-minute budget, so pause instead. *)
         handle_oas_timeout_budget_pause ctx entry ~count;
         to_unregister := entry :: !to_unregister
-    | _ ->
+    (* All other failure reasons (and missing reason) fall through to the
+       standard restart-budget path: restart up to [max_restarts], then mark
+       Dead.  Any new [failure_reason] variant that warrants pause-instead-of-
+       restart must be added explicitly; the compiler will enforce it. *)
+    | Some (Keeper_registry.Heartbeat_consecutive_failures _)
+    | Some (Keeper_registry.Turn_consecutive_failures _)
+    | Some (Keeper_registry.Stale_turn_timeout _)
+    | Some (Keeper_registry.Provider_runtime_error _)
+    | Some (Keeper_registry.Tool_required_unsatisfied _)
+    | Some (Keeper_registry.Ambiguous_partial_commit _)
+    | Some Keeper_registry.Fiber_unresolved
+    | Some (Keeper_registry.Exception _)
+    | None ->
         if entry.restart_count >= max_restarts then
           to_mark_dead := (entry, msg) :: !to_mark_dead
         else begin
@@ -1290,7 +1324,15 @@ let sweep_and_recover (ctx : _ context) =
     | Some (Keeper_registry.Stale_termination_storm _)
     | Some (Keeper_registry.Stale_fleet_batch _)
     | Some (Keeper_registry.Oas_timeout_budget_loop _) -> true
-    | _ -> false
+    (* Other failure reasons are not stale-watchdog signals. *)
+    | Some (Keeper_registry.Heartbeat_consecutive_failures _)
+    | Some (Keeper_registry.Turn_consecutive_failures _)
+    | Some (Keeper_registry.Provider_runtime_error _)
+    | Some (Keeper_registry.Tool_required_unsatisfied _)
+    | Some (Keeper_registry.Ambiguous_partial_commit _)
+    | Some Keeper_registry.Fiber_unresolved
+    | Some (Keeper_registry.Exception _)
+    | None -> false
   in
   let force_unresolved_watchdog_crash (entry : Keeper_registry.registry_entry) =
     let msg =
@@ -1316,7 +1358,15 @@ let sweep_and_recover (ctx : _ context) =
       | Some (Keeper_registry.Stale_turn_timeout _)
       | Some (Keeper_registry.Stale_termination_storm _) ->
         Some Stale_turn_timeout
-      | _ -> None
+      (* Non-watchdog failure reasons do not seed a watchdog blocker_class. *)
+      | Some (Keeper_registry.Heartbeat_consecutive_failures _)
+      | Some (Keeper_registry.Turn_consecutive_failures _)
+      | Some (Keeper_registry.Provider_runtime_error _)
+      | Some (Keeper_registry.Tool_required_unsatisfied _)
+      | Some (Keeper_registry.Ambiguous_partial_commit _)
+      | Some Keeper_registry.Fiber_unresolved
+      | Some (Keeper_registry.Exception _)
+      | None -> None
     in
     (match stamp_cohort with
      | None -> ()
@@ -2067,7 +2117,17 @@ let request_alive_but_stuck_recovery ~base_path ~elapsed
         | Keeper_registry.Stale_fleet_batch _
         | Keeper_registry.Oas_timeout_budget_loop _ ) as kept ->
         kept
-    | _ -> Some (Keeper_registry.Stale_turn_timeout kill_class)
+    (* Non-stale failure reasons (and no prior reason) are overwritten with
+       a fresh [Stale_turn_timeout] carrying the current kill class.  Any new
+       [failure_reason] variant must be classified explicitly here. *)
+    | Some (Keeper_registry.Heartbeat_consecutive_failures _)
+    | Some (Keeper_registry.Turn_consecutive_failures _)
+    | Some (Keeper_registry.Provider_runtime_error _)
+    | Some (Keeper_registry.Tool_required_unsatisfied _)
+    | Some (Keeper_registry.Ambiguous_partial_commit _)
+    | Some Keeper_registry.Fiber_unresolved
+    | Some (Keeper_registry.Exception _)
+    | None -> Some (Keeper_registry.Stale_turn_timeout kill_class)
   in
   Keeper_registry.set_failure_reason ~base_path entry.name reason;
   (* tla-lint: allow-mutation: fiber signal — alive-but-stuck recovery asks

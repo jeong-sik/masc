@@ -57,8 +57,8 @@ val decide :
 val decide_and_record :
   cascade_name:string ->
   accept_on_exhaustion:bool ->
-  is_last:bool -
-  provider_outcome -
+  is_last:bool ->
+  provider_outcome ->
   decision
 (** Observable wrapper around [decide]. Emits Prometheus counters for
     cascade decisions, fallbacks, and exhaustion events before returning

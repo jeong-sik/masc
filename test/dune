@@ -1130,6 +1130,7 @@
 (include stanzas/test_cascade_ollama_probe.inc)
 (include stanzas/test_cascade_runtime.inc)
 (include stanzas/test_cascade_strategy.inc)
+(include stanzas/test_cascade_hierarchical_routing.inc)
 (include stanzas/test_cascade_trust_persist.inc)
 (include stanzas/test_audit_keeper_fleet_readiness.inc)
 (include stanzas/test_cdal_ledger_health_10115.inc)

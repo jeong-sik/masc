@@ -364,19 +364,55 @@ let make_tool_tracking_hooks ?gate_config ?context () =
                     | None -> Agent_sdk.Hooks.Continue)
                  else
                    Agent_sdk.Hooks.Continue)
-            | _ -> Agent_sdk.Hooks.Continue);
+            | Agent_sdk.Hooks.BeforeTurn _
+            | Agent_sdk.Hooks.BeforeTurnParams _
+            | Agent_sdk.Hooks.AfterTurn _
+            | Agent_sdk.Hooks.PostToolUse _
+            | Agent_sdk.Hooks.PostToolUseFailure _
+            | Agent_sdk.Hooks.OnStop _
+            | Agent_sdk.Hooks.OnIdle _
+            | Agent_sdk.Hooks.OnIdleEscalated _
+            | Agent_sdk.Hooks.OnError _
+            | Agent_sdk.Hooks.OnToolError _
+            | Agent_sdk.Hooks.PreCompact _
+            | Agent_sdk.Hooks.PostCompact _
+            | Agent_sdk.Hooks.OnContextCompacted _ -> Agent_sdk.Hooks.Continue);
       on_error = Some (function
         | Agent_sdk.Hooks.OnError { detail; context = err_ctx } ->
           Log.LocalWorker.warn "worker on_error: %s (context: %s)"
             detail err_ctx;
           Agent_sdk.Hooks.Continue
-        | _ -> Agent_sdk.Hooks.Continue);
+        | Agent_sdk.Hooks.BeforeTurn _
+        | Agent_sdk.Hooks.BeforeTurnParams _
+        | Agent_sdk.Hooks.AfterTurn _
+        | Agent_sdk.Hooks.PreToolUse _
+        | Agent_sdk.Hooks.PostToolUse _
+        | Agent_sdk.Hooks.PostToolUseFailure _
+        | Agent_sdk.Hooks.OnStop _
+        | Agent_sdk.Hooks.OnIdle _
+        | Agent_sdk.Hooks.OnIdleEscalated _
+        | Agent_sdk.Hooks.OnToolError _
+        | Agent_sdk.Hooks.PreCompact _
+        | Agent_sdk.Hooks.PostCompact _
+        | Agent_sdk.Hooks.OnContextCompacted _ -> Agent_sdk.Hooks.Continue);
       on_tool_error = Some (function
         | Agent_sdk.Hooks.OnToolError { tool_name; error } ->
           Log.LocalWorker.warn "worker tool_error: %s — %s"
             tool_name error;
           Agent_sdk.Hooks.Continue
-        | _ -> Agent_sdk.Hooks.Continue);
+        | Agent_sdk.Hooks.BeforeTurn _
+        | Agent_sdk.Hooks.BeforeTurnParams _
+        | Agent_sdk.Hooks.AfterTurn _
+        | Agent_sdk.Hooks.PreToolUse _
+        | Agent_sdk.Hooks.PostToolUse _
+        | Agent_sdk.Hooks.PostToolUseFailure _
+        | Agent_sdk.Hooks.OnStop _
+        | Agent_sdk.Hooks.OnIdle _
+        | Agent_sdk.Hooks.OnIdleEscalated _
+        | Agent_sdk.Hooks.OnError _
+        | Agent_sdk.Hooks.PreCompact _
+        | Agent_sdk.Hooks.PostCompact _
+        | Agent_sdk.Hooks.OnContextCompacted _ -> Agent_sdk.Hooks.Continue);
     }
   in
   let hooks = match context with
@@ -395,7 +431,19 @@ let make_tool_tracking_hooks ?gate_config ?context () =
                    in
                    Agent_sdk.Hooks.AdjustParams { current_params with
                      extra_system_context = Some ctx_str })
-              | _ -> Agent_sdk.Hooks.Continue);
+              | Agent_sdk.Hooks.BeforeTurn _
+              | Agent_sdk.Hooks.AfterTurn _
+              | Agent_sdk.Hooks.PreToolUse _
+              | Agent_sdk.Hooks.PostToolUse _
+              | Agent_sdk.Hooks.PostToolUseFailure _
+              | Agent_sdk.Hooks.OnStop _
+              | Agent_sdk.Hooks.OnIdle _
+              | Agent_sdk.Hooks.OnIdleEscalated _
+              | Agent_sdk.Hooks.OnError _
+              | Agent_sdk.Hooks.OnToolError _
+              | Agent_sdk.Hooks.PreCompact _
+              | Agent_sdk.Hooks.PostCompact _
+              | Agent_sdk.Hooks.OnContextCompacted _ -> Agent_sdk.Hooks.Continue);
         }
       in
       Agent_sdk.Hooks.compose ~outer:temporal ~inner:tracking
@@ -615,7 +663,13 @@ and run_existing_worker_agent
             response.content
             |> List.filter_map (function
                  | Agent_sdk.Types.Text text -> Some text
-                 | _ -> None)
+                 | Agent_sdk.Types.Thinking _
+                 | Agent_sdk.Types.RedactedThinking _
+                 | Agent_sdk.Types.ToolUse _
+                 | Agent_sdk.Types.ToolResult _
+                 | Agent_sdk.Types.Image _
+                 | Agent_sdk.Types.Document _
+                 | Agent_sdk.Types.Audio _ -> None)
             |> String.concat "\n"
           in
           let* () =

@@ -236,6 +236,7 @@
         test_lockfree_atomic
         test_telemetry_observe
         test_keeper_typed_labels
+        test_shell_ir_typed_review_followup
         test_auth_resolve_labels
         test_keeper_classifier_helper
         test_persona_tool_reachability
@@ -475,6 +476,7 @@
           test_lockfree_atomic
           test_telemetry_observe
           test_keeper_typed_labels
+          test_shell_ir_typed_review_followup
           test_auth_resolve_labels
           test_keeper_classifier_helper
           test_persona_tool_reachability

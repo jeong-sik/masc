@@ -1426,6 +1426,25 @@ let prepare_agent_setup
                 Keeper_registry.set_turn_cascade_state
                   ~base_path:config.base_path meta.name
                   Keeper_registry.Cascade_selecting;
+                (* Spec atomic group: SelectToolPolicy(idle->selecting)
+                   is immediately followed by CascadeTrying(selecting->
+                   trying).  Both transitions are materialised inside
+                   the disclosure hook because the spec invariant
+                   [SelectingRequiresToolPolicy] requires
+                   [decision_stage = Decision_tool_policy_selected],
+                   which is only set at this site.  Pre-PR #14153 the
+                   Cascade_trying marking lived inside
+                   [Keeper_unified_turn.retry_loop] (line 1138 era),
+                   producing an [idle -> trying] jump that bypassed
+                   selecting; the move here closes that gap by keeping
+                   the two transitions adjacent.  On retry attempts
+                   the prior cascade state is [Cascade_trying]; the
+                   re-entry sequence becomes [trying -> selecting ->
+                   trying] which is admitted by
+                   [validate_cascade_transition]. *)
+                Keeper_registry.set_turn_cascade_state
+                  ~base_path:config.base_path meta.name
+                  Keeper_registry.Cascade_trying;
                 let disclosure_json =
                   `Assoc
                     [ "ts_unix", `Float now

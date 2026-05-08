@@ -1135,9 +1135,22 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               | Some timeout_budget ->
                   attempt_timeout_budget := Some timeout_budget;
                   last_timeout_budget := Some timeout_budget;
-                  Keeper_registry.set_turn_cascade_state
-                    ~base_path:config.base_path meta.name
-                    Keeper_registry.Cascade_trying;
+                  (* Cascade_trying marking moved into the disclosure
+                     hook in [Keeper_run_tools] (BeforeTurnParams) so
+                     that the spec-mandated atomic group
+                     [SelectToolPolicy(idle->selecting) ->
+                     CascadeTrying(selecting->trying)] is materialised
+                     at the only call site that asserts
+                     [decision_stage = Decision_tool_policy_selected].
+
+                     The previous direct [Cascade_idle -> Cascade_trying]
+                     jump from this site bypassed [Cascade_selecting]
+                     and tripped
+                     [Keeper_registry.validate_cascade_transition]
+                     after PR #14153 introduced the runtime invariant
+                     (assertion at keeper_registry.ml:721). Spec
+                     reference: [KeeperCascadeLifecycle.tla]
+                     [KeeperTurnCycle.tla]. *)
                   let attempt_watchdog_s =
                     attempt_watchdog_timeout_sec
                       ~remaining_turn_budget_s:(remaining_turn_budget_s ())

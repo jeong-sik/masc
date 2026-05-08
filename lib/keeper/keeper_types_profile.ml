@@ -46,8 +46,7 @@ let sandbox_profile_to_string = function
 
 let reserved_cascade_names =
   List.sort_uniq String.compare
-    (Keeper_cascade_profile.known_cascades
-     @ phase_routing_cascade_names
+    (phase_routing_cascade_names
      @ [ tool_use_strict_cascade_name ])
 
 (** Parse a sandbox profile string. Canonical values are ["local"] and

@@ -924,6 +924,10 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
     () => (data ? tallyInvariantViolations(data.snapshots) : null),
     [data],
   )
+  // Backend emits this Prometheus counter (`metric_fsm_guard_violation`)
+  // as a fleet-wide total duplicated onto every snapshot — see
+  // keeper_composite_observer.ml:452. Reading [0] is intentional;
+  // summing across snapshots would multiply the count by fleet size.
   const fsmGuardViolationsTotal = useMemo(
     () => (data ? (data.snapshots[0]?.fsm_guard_violations ?? 0) : 0),
     [data],

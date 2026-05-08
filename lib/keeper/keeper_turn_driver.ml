@@ -258,270 +258,69 @@ let run_named
     Option.value priority ~default:Llm_provider.Request_priority.Proactive
   in
   (* MASC-driven cascade FSM: try each provider, decide on failure.
-     Mid-turn resume: when a provider fails after completing some turns,
-     the next provider resumes from the failed agent's checkpoint instead
-     of restarting from scratch.
-
-     Immutable checkpoint threading: try_provider returns both the result
-     and the agent's checkpoint (if progress was made). try_cascade
-     threads this checkpoint to the next provider without mutable state. *)
-  let try_provider ?resume_checkpoint ?per_provider_timeout_s (provider_cfg : Llm_provider.Provider_config.t) =
-    let liveness_mode = Cascade_attempt_liveness_config.current_mode () in
-    let config_result =
-      Cascade_runner.resolve_tool_lane_for_oas_tools
-        ?agent_name:(keeper_agent_name_opt keeper_name)
-        ~tool_requirement:
-          (if require_tool_choice_support || require_tool_support
-           then `Required
-           else `Optional)
-        ~provider_cfg ~tools ()
-      |> Result.map
-           (fun (effective_tools, runtime_mcp_policy) ->
-             let runtime_mcp_policy =
-               match runtime_mcp_policy, String.trim keeper_name with
-               | Some policy, keeper_name when keeper_name <> "" ->
-                   Cascade_runner.runtime_mcp_policy_for_provider
-                     ~provider_cfg
-                     ~agent_name:(Keeper_types.keeper_agent_name keeper_name)
-                     (Some policy)
-                | _ -> runtime_mcp_policy
-             in
-             {
-               (Cascade_runner.default_config ~name ~provider_cfg
-                  ~system_prompt ~tools:effective_tools)
-               with
-                 priority;
-                 max_turns;
-                 max_tokens;
-                 max_input_tokens;
-                 max_cost_usd;
-                 stream_idle_timeout_s =
-                   (match liveness_mode with
-                    | Cascade_attempt_liveness_config.Enforce -> None
-                    | _ ->
-                        let budget_wall =
-                          (Cascade_attempt_liveness_config.budget_for_label
-                             provider_cfg.model_id)
-                            .Cascade_attempt_liveness.attempt_wall_max
-                        in
-                        (match per_provider_timeout_s with
-                         | Some timeout_s -> Some (Float.max timeout_s budget_wall)
-                         | None ->
-                             Some
-                               (Float.max budget_wall
-                                  (Option.value
-                                     ~default:
-                                       Env_config_keeper.KeeperKeepalive
-                                       .stream_idle_timeout_sec
-                                     stream_idle_timeout_s))));
-                 max_execution_time_s =
-                   (* Bound a single OAS call (one [Agent.run]/[run_stream])
-                      so a hung provider falls into [Retry.Timeout] instead
-                      of blocking until the whole-keeper [turn_timeout].
-                      Scale = per-OAS-call (default 300 s, env override via
-                      [MASC_KEEPER_OAS_TIMEOUT_SEC]); the input-token arg
-                      is currently ignored by the resolver (#10008 fm2). *)
-                   Some
-                     (Keeper_runtime_resolved
-                      .oas_timeout_for_estimated_input_tokens
-                        ~estimated_input_tokens:0);
-                 temperature;
-                 max_idle_turns;
-                 guardrails;
-                 hooks;
-                 context_reducer;
-                 memory;
-                 tool_retry_policy;
-                 required_tool_satisfaction;
-                 description =
-                   Some
-                     (Printf.sprintf "cascade:%s/%s" cascade_name
-                        provider_cfg.model_id);
-                 transport = transport_resolved;
-                 allowed_paths;
-                 checkpoint_sidecar;
-                 session_id;
-                 cache_system_prompt;
-                 compact_ratio;
-                 contract;
-                 checkpoint_dir;
-                 context_injector;
-                 context;
-                 slot_id;
-                 enable_thinking;
-                 event_bus;
-                 approval;
-                 exit_condition;
-                 exit_condition_result;
-                 summarizer;
-                 initial_messages;
-                 raw_trace;
-                 yield_on_tool;
-                 runtime_mcp_policy;
-                 cli_transport_overrides;
-             })
-    in
-    let local_agent_ref : Agent_sdk.Agent.t option ref = ref None in
-    match config_result with
-    | Error err ->
-      (Error err, None)
-    | Ok config ->
-      (* RFC-0022 PR-2 §4 — attempt-liveness observer.
-
-         Mode is captured once per attempt. Off short-circuits before
-         observer construction so the wrapper is bit-identical to the
-         baseline. Observe and Enforce wrap on_event, start a tick fiber
-         under the provider-attempt switch, and finalize the per-attempt
-         outcome counter when the run returns. Enforce additionally calls
-         [Eio.Switch.fail] on the first Outcome to tear down only the current
-         [Cascade_runner.run] attempt; the outer keeper/cascade switch must
-         stay alive so the FSM can fall through to the next provider. *)
-      let liveness_mode = Cascade_attempt_liveness_config.current_mode () in
-      let liveness_observer_opt =
-        match liveness_mode with
-        | Cascade_attempt_liveness_config.Off -> None
-        | Cascade_attempt_liveness_config.Observe
-        | Cascade_attempt_liveness_config.Enforce ->
-            let budget =
-              Cascade_attempt_liveness_config.budget_for_label
-                provider_cfg.model_id
-            in
-            let obs =
-              Cascade_attempt_liveness_observer.create
-                ~mode:liveness_mode ~budget ~cascade_label:cascade_name
-                ~provider_label:provider_cfg.model_id
-                ~started_at:(Time_compat.now ())
-            in
-            Some obs
-      in
-      let finalize_liveness () =
-        match liveness_observer_opt with
-        | None -> ()
-        | Some obs -> Cascade_attempt_liveness_observer.finalize obs
-      in
-      let liveness_timeout_error failure =
-        let kind = Cascade_attempt_liveness.failure_kind_label failure in
-        Agent_sdk.Error.Api
-          (Timeout
-             {
-               message =
-                 Printf.sprintf
-                   "Cascade attempt liveness guard killed provider %s/%s: %s"
-                   cascade_name provider_cfg.model_id kind;
-             })
-      in
-      let with_liveness_attempt f =
-        let run_attempt () =
-          try
-            Eio.Switch.run (fun attempt_sw ->
-                (match liveness_observer_opt with
-                 | Some obs ->
-                     Cascade_attempt_liveness_observer.register_attempt_switch
-                       obs ~sw:attempt_sw
-                 | None -> ());
-                (match liveness_observer_opt, Eio_context.get_clock_opt () with
-                 | Some obs, Some clock ->
-                     Cascade_attempt_liveness_observer.start_tick_fiber obs
-                       ~sw:attempt_sw ~clock
-                 | Some _, None ->
-                     (* No clock available — wrapper still emits counters
-                        via on_event but TTFT/wall checks won't fire. *)
-                     ()
-                 | None, _ -> ());
-                let liveness_on_event =
-                  match liveness_observer_opt with
-                  | None -> on_event
-                  | Some obs ->
-                      Cascade_attempt_liveness_observer.wrap_on_event obs
-                        on_event
-                in
-                f ~attempt_sw ~liveness_on_event)
-          with
-          | Cascade_attempt_liveness_observer.Liveness_kill failure ->
-              Error (liveness_timeout_error failure)
-          | Eio.Cancel.Cancelled _ as e -> raise e
-        in
-        match run_attempt () with
-        | result ->
-            finalize_liveness ();
-            result
-        | exception exn ->
-            let bt = Printexc.get_raw_backtrace () in
-            finalize_liveness ();
-            Printexc.raise_with_backtrace exn bt
-      in
-      match
-        with_codex_cli_preflight
-          ~scope:(Printf.sprintf "cascade:%s/%s" cascade_name provider_cfg.model_id)
-          ~config ~goal
-          (fun () ->
-            let result =
-              with_liveness_attempt
-                (fun ~attempt_sw ~liveness_on_event ->
-                   let effective_checkpoint = match resume_checkpoint with
-                     | Some _ -> resume_checkpoint
-                     | None -> oas_checkpoint
-                   in
-                   let run_fn () =
-                     Cascade_runner.run ~sw:attempt_sw ~net ~config
-                       ?oas_checkpoint:effective_checkpoint
-                       ?on_event:liveness_on_event
-                       ?on_yield ?on_resume ~agent_ref:local_agent_ref ?proof_ref
-                       ?contract goal
-                   in
-                   (* RFC-0022 §1 (in-attempt liveness layer): see
-                      [Cascade_attempt_liveness_config.outer_wall_for_attempt]
-                      for the rule. The legacy [per_provider_timeout_s] is
-                      clipped to the profile's wall budget so slow-but-honest
-                      streams (local Ollama 27B / 70B+) are not pre-empted
-                      before the observer would consider them stalled. *)
-                   let outer_wall_for_provider =
-                     Cascade_attempt_liveness_config.outer_wall_for_attempt
-                       ~mode:liveness_mode
-                       ~observer_attached:(Option.is_some liveness_observer_opt)
-                       ~per_provider_timeout_s
-                       ~provider_label:provider_cfg.model_id
-                   in
-                   match outer_wall_for_provider with
-                   | None -> run_fn ()
-                   | Some t ->
-                       let clock_opt =
-                         match Masc_eio_env.get_opt () with
-                         | Some env -> (
-                             match env.clock with
-                             | Some _ as clock_opt -> clock_opt
-                             | None -> Eio_context.get_clock_opt ())
-                         | None -> Eio_context.get_clock_opt ()
-                       in
-                       (match clock_opt with
-                        | Some clock ->
-                            (try Eio.Time.with_timeout_exn clock t run_fn
-                             with Eio.Time.Timeout ->
-                               Log.Misc.info
-                                 "[cascade-fallback] cascade %s: provider %s per-provider timeout after %.1fs, falling back"
-                                 cascade_name provider_cfg.model_id t;
-                               Error (Agent_sdk.Error.Api (Timeout { message = Printf.sprintf "Per-provider timeout after %.1fs" t })))
-                        | None -> run_fn ()))
-            in
-            Ok result)
-    with
-    | Error err ->
-      finalize_liveness ();
-      (Error err, None)
-    | Ok result ->
-      finalize_liveness ();
-      let result =
-        Result.map_error
-          (enrich_sdk_error ~cascade_name:error_cascade_name ~provider_cfg)
-          result
-      in
-      (* Extract checkpoint from the agent even when no turn completed.
-         A zero-turn agent still carries built context, initial messages,
-         and sidecar state needed by cancel-before-start recovery. *)
-      let checkpoint_after =
-        checkpoint_after_attempt ?agent_ref !local_agent_ref
-      in
-      (result, checkpoint_after)
+     Extracted to [Keeper_turn_driver_try_provider.run_try_provider] via
+     explicit [try_provider_ctx] record (RFC-0051 PR-3a). *)
+  let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx = {
+    cascade_name;
+    error_cascade_name;
+    keeper_name;
+    name;
+    goal;
+    require_tool_choice_support;
+    require_tool_support;
+    priority;
+    session_id;
+    system_prompt;
+    tools;
+    initial_messages;
+    max_turns;
+    max_idle_turns;
+    stream_idle_timeout_s;
+    temperature;
+    max_tokens;
+    max_input_tokens;
+    max_cost_usd;
+    guardrails;
+    hooks;
+    context_reducer;
+    memory;
+    tool_retry_policy;
+    required_tool_satisfaction;
+    raw_trace;
+    transport_resolved;
+    cli_transport_overrides;
+    runtime_mcp_policy;
+    allowed_paths;
+    checkpoint_sidecar;
+    cache_system_prompt;
+    yield_on_tool;
+    compact_ratio;
+    checkpoint_dir;
+    context_injector;
+    context;
+    slot_id;
+    enable_thinking;
+    approval;
+    exit_condition;
+    exit_condition_result;
+    summarizer;
+    oas_checkpoint;
+    contract;
+    sw;
+    net;
+    on_event;
+    on_yield;
+    on_resume;
+    agent_ref;
+    proof_ref;
+    event_bus;
+  } in
+  let try_provider ?resume_checkpoint ?per_provider_timeout_s provider_cfg =
+    Keeper_turn_driver_try_provider.run_try_provider
+      try_provider_ctx
+      ?resume_checkpoint
+      ?per_provider_timeout_s
+      provider_cfg
   in
   let rec try_cascade
       ?(on_success = fun ~provider_key:_ -> ())

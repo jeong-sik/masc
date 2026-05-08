@@ -444,7 +444,7 @@ let execute_single_agent_run ~sw ~net ~run_id ~provider ~model ~prompt =
           match
             Masc_oas_bridge.run_with_caller
               ~caller:Env_config_oas_bridge.Dashboard_provider_runs (fun () ->
-              Oas_worker.run_model_by_label ~model_label:label ~goal:prompt
+              Keeper_turn_driver.run_model_by_label ~model_label:label ~goal:prompt
                 ~system_prompt:(run_system_prompt provider)
                 ~max_turns:4
                 ~max_tokens:(Cascade_inference.resolve_max_tokens

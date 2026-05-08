@@ -2586,7 +2586,7 @@ let test_metrics_surface_model_prefers_successful_cascade_label () =
       ~model:"qwen3.5:27b-nvfp4" ~input_tok:100 ~output_tok:50
       ~cascade_observation:
         {
-          Masc_mcp.Oas_worker.cascade_name =
+          Masc_mcp.Cascade_legacy_runner.cascade_name =
             Masc_mcp.Keeper_cascade_profile.Runtime_name
               Masc_mcp.Keeper_config.default_cascade_name;
           strategy = Some "round_robin";
@@ -2602,7 +2602,7 @@ let test_metrics_surface_model_prefers_successful_cascade_label () =
           attempts =
             [
               {
-                Masc_mcp.Oas_worker.attempt_index = 0;
+                Masc_mcp.Cascade_legacy_runner.attempt_index = 0;
                 model_id = "qwen3.5-35b-a3b-ud-q8-xl";
                 model_label = Some "llama:qwen3.5-35b-a3b-ud-q8-xl";
                 latency_ms = None;
@@ -2650,7 +2650,7 @@ let test_metrics_resolved_model_id_prefers_last_attempt_id () =
       ~model:"claude-opus-4-6" ~input_tok:100 ~output_tok:50
       ~cascade_observation:
         {
-          Masc_mcp.Oas_worker.cascade_name =
+          Masc_mcp.Cascade_legacy_runner.cascade_name =
             Masc_mcp.Keeper_cascade_profile.Runtime_name
               Masc_mcp.Keeper_config.default_cascade_name;
           strategy = Some "round_robin";
@@ -2666,7 +2666,7 @@ let test_metrics_resolved_model_id_prefers_last_attempt_id () =
           attempts =
             [
               {
-                Masc_mcp.Oas_worker.attempt_index = 0;
+                Masc_mcp.Cascade_legacy_runner.attempt_index = 0;
                 model_id = "claude-sonnet-4-6";
                 model_label = Some "claude_code:auto";
                 latency_ms = None;
@@ -3060,7 +3060,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
           cascade_observation =
             Some
               {
-                Masc_mcp.Oas_worker.cascade_name =
+                Masc_mcp.Cascade_legacy_runner.cascade_name =
                   Masc_mcp.Keeper_cascade_profile.Runtime_name
                     Masc_mcp.Keeper_config.default_cascade_name;
                 strategy = Some "round_robin";
@@ -3079,7 +3079,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
                 attempts =
                   [
                     {
-                      Masc_mcp.Oas_worker.attempt_index = 0;
+                      Masc_mcp.Cascade_legacy_runner.attempt_index = 0;
                       model_id = "qwen3.5-35b-a3b-ud-q8-xl";
                       model_label = Some "llama:qwen3.5-35b-a3b-ud-q8-xl";
                       latency_ms = None;

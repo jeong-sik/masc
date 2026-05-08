@@ -368,7 +368,7 @@ SSOT rules:
 PreToolUse event
   -> should_skip? (read-only 패턴 매칭)
     -> Yes: Pass (MODEL 호출 없음)
-    -> No: build_prompt -> Oas_worker.run_named(cascade="verifier")
+    -> No: build_prompt -> Keeper_turn_driver.run_named(cascade="verifier")
       -> parse_verdict (PASS/WARN/FAIL)
 ```
 

@@ -4350,6 +4350,10 @@ let test_run_keeper_cycle_surfaces_side_effect_failures_source_contract () =
   check bool "activity graph emit is not silently ignored" false
     (source_file_contains "lib/keeper/keeper_unified_turn.ml"
        "ignore (Activity_graph.emit config");
+  let null_fallback_text = "using " ^ "Null input" in
+  check bool "unmatched ToolCompleted does not fall back to Null input" false
+    (source_file_contains "lib/keeper/keeper_unified_turn.ml"
+       null_fallback_text);
   check bool "discovery helper guards keeper setup" true
     (source_file_contains "lib/keeper/keeper_unified_turn.ml"
        "ensure_local_discovery_ready model_labels");
@@ -5670,6 +5674,116 @@ let test_post_commit_failure_kind_marks_non_timeouts_as_failures () =
   check string "failure kind" "post_commit_failure"
     (KR.ambiguous_partial_commit_kind_to_string
        (EC.post_commit_failure_kind_of_error auth_error))
+
+let tool_event_ok_result : Agent_sdk.Types.tool_result =
+  Ok { Agent_sdk.Types.content = "ok" }
+
+let tool_event_error_result : Agent_sdk.Types.tool_result =
+  Error
+    {
+      Agent_sdk.Types.message = "tool failed";
+      recoverable = false;
+      error_class = None;
+    }
+
+let mk_tool_event payload =
+  Agent_sdk.Event_bus.mk_event ~run_id:"run-tool-event-pairing" payload
+
+let test_turn_tool_event_tracker_pairs_called_across_drains () =
+  let tracker = UT.create_turn_tool_event_tracker () in
+  let keeper_name = "tool-event-pairing-keeper" in
+  UT.record_turn_tool_events
+    ~keeper_name
+    tracker
+    [
+      mk_tool_event
+        (Agent_sdk.Event_bus.ToolCalled
+           {
+             agent_name = keeper_name;
+             tool_name = "keeper_fs_edit";
+             input =
+               `Assoc
+                 [
+                   ("path", `String "/tmp/keeper-note.md");
+                   ("content", `String "updated");
+                 ];
+           });
+    ];
+  check (option string) "no error after pending call" None
+    (Option.map Agent_sdk.Error.to_string
+       (UT.turn_tool_event_integrity_error tracker));
+  UT.record_turn_tool_events
+    ~keeper_name
+    tracker
+    [
+      mk_tool_event
+        (Agent_sdk.Event_bus.ToolCompleted
+           {
+             agent_name = keeper_name;
+             tool_name = "keeper_fs_edit";
+             output = tool_event_ok_result;
+           });
+    ];
+  check (option string) "paired completion has no integrity error" None
+    (Option.map Agent_sdk.Error.to_string
+       (UT.turn_tool_event_integrity_error tracker));
+  check (list string) "paired mutating tool committed"
+    [ "keeper_fs_edit" ]
+    (UT.committed_mutating_tools_from_events tracker)
+
+let test_turn_tool_event_tracker_rejects_completed_without_called () =
+  let tracker = UT.create_turn_tool_event_tracker () in
+  let keeper_name = "tool-event-integrity-keeper" in
+  UT.record_turn_tool_events
+    ~keeper_name
+    tracker
+    [
+      mk_tool_event
+        (Agent_sdk.Event_bus.ToolCompleted
+           {
+             agent_name = keeper_name;
+             tool_name = "keeper_fs_edit";
+             output = tool_event_ok_result;
+           });
+    ];
+  match UT.turn_tool_event_integrity_error tracker with
+  | None -> fail "expected unmatched ToolCompleted integrity error"
+  | Some err ->
+      let rendered = Agent_sdk.Error.to_string err in
+      check bool "error names missing ToolCalled" true
+        (contains_substring rendered "without matching ToolCalled");
+      check bool "mutating mismatch becomes ambiguous partial" true
+        (EC.is_ambiguous_side_effect_error err);
+      check (list string) "unmatched mutating tool committed"
+        [ "keeper_fs_edit" ]
+        (UT.committed_mutating_tools_from_events tracker)
+
+let test_turn_tool_event_tracker_rejects_failed_completed_without_commit () =
+  let tracker = UT.create_turn_tool_event_tracker () in
+  let keeper_name = "tool-event-failed-integrity-keeper" in
+  UT.record_turn_tool_events
+    ~keeper_name
+    tracker
+    [
+      mk_tool_event
+        (Agent_sdk.Event_bus.ToolCompleted
+           {
+             agent_name = keeper_name;
+             tool_name = "keeper_fs_edit";
+             output = tool_event_error_result;
+           });
+    ];
+  match UT.turn_tool_event_integrity_error tracker with
+  | None -> fail "expected unmatched failed ToolCompleted integrity error"
+  | Some err ->
+      let rendered = Agent_sdk.Error.to_string err in
+      check bool "error names missing ToolCalled" true
+        (contains_substring rendered "without matching ToolCalled");
+      check bool "failed mismatch is not ambiguous partial" false
+        (EC.is_ambiguous_side_effect_error err);
+      check (list string) "failed unmatched tool not committed"
+        []
+        (UT.committed_mutating_tools_from_events tracker)
 
 let test_server_rejected_parse_error_ollama_closing_brace () =
   let err =
@@ -8688,6 +8802,12 @@ let () =
             test_post_commit_failure_kind_marks_timeouts;
           test_case "non-timeout classified as post-commit failure" `Quick
             test_post_commit_failure_kind_marks_non_timeouts_as_failures;
+          test_case "tool events pair across drains" `Quick
+            test_turn_tool_event_tracker_pairs_called_across_drains;
+          test_case "ToolCompleted requires prior ToolCalled" `Quick
+            test_turn_tool_event_tracker_rejects_completed_without_called;
+          test_case "failed ToolCompleted does not claim commit" `Quick
+            test_turn_tool_event_tracker_rejects_failed_completed_without_commit;
           test_case "ollama closing brace detected as server parse error" `Quick
             test_server_rejected_parse_error_ollama_closing_brace;
           test_case "unterminated JSON detected as server parse error" `Quick

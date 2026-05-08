@@ -55,7 +55,7 @@ let set_tool_search_fn (f : tool_searcher) =
 | `tool_searcher` ref | 168 | global mutable ref |
 | `set_tool_search_fn` | 170 | **정의되었으나 코드베이스 전체에서 0회 호출** |
 
-→ setter는 존재하지만 아묏도 호출하지 않는다. 실제 데이터 흐름은 `~search_fn` optional parameter를 통해 전달됨. global ref는 **죽은 패턴**.
+→ setter는 존재하지만 아묏도 호출하지 않는다. 실제 데이터 흐름은 `~search_fn` optional parameter를 통해 전달됨. global ref는 **죽은 패턴**. `lib/keeper/keeper_exec_tools.ml:170`에서 정의만 되고 호출되지 않음.
 
 #### B.2 이미 존재하는 session-local pattern (canonical example)
 

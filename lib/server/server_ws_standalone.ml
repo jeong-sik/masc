@@ -316,8 +316,8 @@ let make_websocket_handler ~sw ~clock ~on_message _client_addr
                  with
                  | Some _ ->
                      Log.Server.debug
-                       "[ws-standalone] send_pong skipped (writer closed during \
-                        cancel race)"
+                       "[ws-standalone] send_pong skipped \
+                        (writer closed during cancel race)"
                  | None ->
                      Log.Server.warn
                        "[ws-standalone] send_pong failed: %s"

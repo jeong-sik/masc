@@ -118,6 +118,108 @@ let sdk_error_of_retry_slot_reacquire_timeout
              holder_summary;
        })
 
+type turn_tool_event_tracker = {
+  pending_tool_inputs : (string, Yojson.Safe.t Queue.t) Hashtbl.t;
+  mutable mutating_tools_committed : string list;
+  mutable integrity_error : Agent_sdk.Error.sdk_error option;
+}
+
+let create_turn_tool_event_tracker () =
+  {
+    pending_tool_inputs = Hashtbl.create 8;
+    mutating_tools_committed = [];
+    integrity_error = None;
+  }
+
+let turn_tool_event_integrity_error tracker = tracker.integrity_error
+
+let committed_mutating_tools_from_events tracker =
+  EC.committed_mutating_tools tracker.mutating_tools_committed
+
+let push_turn_tool_input tracker tool_name input =
+  let q =
+    match Hashtbl.find_opt tracker.pending_tool_inputs tool_name with
+    | Some q -> q
+    | None ->
+        let q = Queue.create () in
+        Hashtbl.add tracker.pending_tool_inputs tool_name q;
+        q
+  in
+  Queue.add input q
+
+let pop_turn_tool_input tracker tool_name =
+  match Hashtbl.find_opt tracker.pending_tool_inputs tool_name with
+  | Some q when not (Queue.is_empty q) -> Some (Queue.pop q)
+  | _ -> None
+
+let record_unmatched_tool_completed tracker ~keeper_name ~tool_name ~outcome
+    ~tool_committed =
+  let message =
+    Printf.sprintf
+      "%s: keeper turn event-bus integrity error: ToolCompleted(%s) for \
+       tool=%s arrived without matching ToolCalled"
+      keeper_name
+      outcome
+      tool_name
+  in
+  Log.Keeper.error "%s" message;
+  let mutating_tool_committed =
+    tool_committed && Keeper_exec_tools.has_mutating_side_effect tool_name
+  in
+  if mutating_tool_committed then
+    tracker.mutating_tools_committed <-
+      tool_name :: tracker.mutating_tools_committed;
+  match tracker.integrity_error with
+  | Some _ -> ()
+  | None ->
+      let base_error = Agent_sdk.Error.Internal message in
+      let error =
+        if mutating_tool_committed then
+          EC.reclassify_error_after_side_effect
+            ~tool_names:[ tool_name ]
+            base_error
+        else
+          base_error
+      in
+      tracker.integrity_error <- Some error
+
+let record_turn_tool_events
+    ?(has_mutating_side_effect_with_input =
+      Keeper_exec_tools.has_mutating_side_effect_with_input)
+    ~(keeper_name : string)
+    (tracker : turn_tool_event_tracker)
+    (events : Agent_sdk.Event_bus.event list) : unit =
+  List.iter
+    (fun (evt : Agent_sdk.Event_bus.event) ->
+      match evt.payload with
+      | Agent_sdk.Event_bus.ToolCalled { tool_name; input; _ } ->
+          push_turn_tool_input tracker tool_name input
+      | Agent_sdk.Event_bus.ToolCompleted { tool_name; output = Ok _; _ } -> (
+          match pop_turn_tool_input tracker tool_name with
+          | Some input ->
+              if has_mutating_side_effect_with_input ~tool_name ~input then
+                tracker.mutating_tools_committed <-
+                  tool_name :: tracker.mutating_tools_committed
+          | None ->
+              record_unmatched_tool_completed
+                tracker
+                ~keeper_name
+                ~tool_name
+                ~outcome:"ok"
+                ~tool_committed:true )
+      | Agent_sdk.Event_bus.ToolCompleted { tool_name; output = Error _; _ } -> (
+          match pop_turn_tool_input tracker tool_name with
+          | Some _ -> ()
+          | None ->
+              record_unmatched_tool_completed
+                tracker
+                ~keeper_name
+                ~tool_name
+                ~outcome:"error"
+                ~tool_committed:false )
+      | _ -> ())
+    events
+
 let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(generation : int)
@@ -628,7 +730,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
          Uses the OAS Event_bus (ToolCalled + ToolCompleted) rather than
          MASC-side observers. The per-turn subscription is scoped by
          [filter_agent meta.name], so no cross-keeper contamination. *)
-      let mutating_tools_committed = ref [] in
+      let tool_event_tracker = create_turn_tool_event_tracker () in
       let post_commit_failure_reason = ref None in
       let paused_meta_override = ref None in
       let current_turn_overflow_blocker = ref None in
@@ -657,99 +759,14 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         | None -> None
       in
       let turn_event_bus = ref empty_turn_event_bus_summary in
-      (* Per-tool-name queue of pending inputs from ToolCalled events.
-         ToolCompleted pops the oldest input for that tool_name. *)
-      let pending_tool_inputs : (string, Yojson.Safe.t Queue.t) Hashtbl.t =
-        Hashtbl.create 8
-      in
-      let tool_event_order_violation = ref None in
       let with_turn_event_bus_lock f =
         Eio.Mutex.use_rw ~protect:true turn_event_bus_mu f
       in
-      let input_sensitive_mutation_tool tool_name =
-        match Tool_name.of_string tool_name with
-        | Some (Keeper Shell)
-        | Some (Masc Code_git) ->
-            true
-        | _ -> false
-      in
-      let mark_mutating_tool_committed tool_name =
-        if not (List.mem tool_name !mutating_tools_committed) then
-          mutating_tools_committed :=
-            tool_name :: !mutating_tools_committed
-      in
-      let record_tool_event_order_violation ~tool_name =
-        let detail =
-          Printf.sprintf
-            "ToolCompleted without matching ToolCalled for tool=%s"
-            tool_name
-        in
-        tool_event_order_violation := Some detail;
-        Log.Keeper.warn
-          "keeper:%s %s; treating tool as post-commit until retry safety can reconcile event order"
-          meta.name detail;
-        if
-          Keeper_exec_tools.has_mutating_side_effect tool_name
-          || input_sensitive_mutation_tool tool_name
-        then
-          mark_mutating_tool_committed tool_name
-      in
-      let tool_event_order_violation_error () =
-        Option.map
-          (fun detail ->
-            Agent_sdk.Error.Internal
-              (Printf.sprintf "keeper:%s event bus order violation: %s"
-                 meta.name detail))
-          !tool_event_order_violation
-      in
-      let push_pending_input tool_name input =
-        let q =
-          match Hashtbl.find_opt pending_tool_inputs tool_name with
-          | Some q -> q
-          | None ->
-              let q = Queue.create () in
-              Hashtbl.add pending_tool_inputs tool_name q;
-              q
-        in
-        Queue.add input q
-      in
-      let pop_pending_input tool_name =
-        match Hashtbl.find_opt pending_tool_inputs tool_name with
-        | Some q when not (Queue.is_empty q) -> Some (Queue.pop q)
-        | _ -> None
-      in
       let process_tool_events_for_side_effects
           (events : Agent_sdk.Event_bus.event list) : unit =
-        List.iter
-          (fun (evt : Agent_sdk.Event_bus.event) ->
-            match evt.payload with
-            | Agent_sdk.Event_bus.ToolCalled { tool_name; input; _ } ->
-                push_pending_input tool_name input
-            | Agent_sdk.Event_bus.ToolCompleted
-                { tool_name; output = Ok _; _ } ->
-                let input_opt = pop_pending_input tool_name in
-                let input =
-                  match input_opt with
-                  | Some i -> i
-                  | None ->
-                      record_tool_event_order_violation ~tool_name;
-                      `Assoc
-                        [
-                          ( "event_order_violation",
-                            `String "missing_tool_called" );
-                        ]
-                in
-                if
-                  Keeper_exec_tools.has_mutating_side_effect_with_input
-                    ~tool_name ~input
-                then
-                  mark_mutating_tool_committed tool_name
-            | Agent_sdk.Event_bus.ToolCompleted
-                { tool_name; output = Error _; _ } ->
-                (* Failed tool: drop the matching pending input. *)
-                let _ = pop_pending_input tool_name in
-                ignore tool_name
-            | _ -> ())
+        record_turn_tool_events
+          ~keeper_name:meta.name
+          tool_event_tracker
           events
       in
       (* PR-J: [?site] labels the call-site so PromQL can attribute
@@ -775,7 +792,11 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       in
       let committed_mutating_tools_snapshot () =
         with_turn_event_bus_lock (fun () ->
-          EC.committed_mutating_tools !mutating_tools_committed)
+          committed_mutating_tools_from_events tool_event_tracker)
+      in
+      let event_bus_integrity_error_snapshot () =
+        with_turn_event_bus_lock (fun () ->
+          turn_tool_event_integrity_error tool_event_tracker)
       in
       let start_background_turn_event_bus_drain ~clock =
         match event_bus_sub, Eio_context.get_switch_opt () with
@@ -1235,15 +1256,11 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                     ~timeout_budget:!attempt_timeout_budget err
                 in
                 let _ = drain_turn_event_bus ~site:"reconcile_pre_check" () in
-                match tool_event_order_violation_error () with
-                | Some order_err ->
-                  Log.Keeper.error
-                    "%s: event-bus order violation after provider error; aborting retry path to avoid replaying an unpaired tool completion (original_error=%s)"
-                    meta.name
-                    (short_preview (Agent_sdk.Error.to_string err));
-                  mark_terminal_error order_err;
-                  Error order_err
-                | None ->
+                let err =
+                  match event_bus_integrity_error_snapshot () with
+                  | Some integrity_err -> integrity_err
+                  | None -> err
+                in
                 let committed_tools = committed_mutating_tools_snapshot () in
                 if committed_tools <> []
                    && Keeper_tool_registry.all_tools_reconcile_safe
@@ -1707,9 +1724,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                Log.Keeper.error
                  "%s: event-bus order violation during timeout path; treating turn as failed before retry/reconcile decisions"
                  meta.name;
-               Keeper_registry.set_turn_phase
-                 ~base_path:config.base_path meta.name
-                 (Keeper_registry.turn_phase_to_witness Keeper_registry.Turn_finalizing);
+                Keeper_registry.set_turn_phase
+                  ~base_path:config.base_path meta.name
+                  Keeper_registry.(Packed Turn_finalizing);
                Error order_err
              | None ->
             let committed_tools = committed_mutating_tools_snapshot () in
@@ -1798,6 +1815,11 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
              ~base_path:config.base_path meta.name
              correlation_id
        | None -> ());
+      let run_result =
+        match event_bus_integrity_error_snapshot () with
+        | Some integrity_err -> Error integrity_err
+        | None -> run_result
+      in
       let degraded_retry_info = !degraded_retry_info in
       let degraded_retry_applied = Option.is_some degraded_retry_info in
       let degraded_retry_cascade =

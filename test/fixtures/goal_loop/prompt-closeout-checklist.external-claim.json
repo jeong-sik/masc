@@ -72,14 +72,20 @@
       "prompt_requirement": "Governance unparseable or lenient fallback visibility",
       "artifact_refs": [
         "test/fixtures/goal_loop/audit-corpus.external-claim.json#NF-4",
-        "test/fixtures/goal_loop/act-map.startup.json"
+        "test/fixtures/goal_loop/act-map.startup.json",
+        "infrastructure/monitoring/goal-loop-observe-metrics.contract.json#governance_judge_unparseable",
+        "infrastructure/monitoring/goal-loop-observe-alerts.yml#GoalLoopGovernanceJudgeUnparseableWarning",
+        "lib/dashboard/dashboard_governance_judge.ml#parse_required_guardrail_state",
+        "lib/dashboard/judge_diagnostics.ml#metric_governance_judge_unparseable",
+        "test/test_dashboard_governance.ml#test_parse_governance_response_requires_guardrail_state",
+        "test/test_dashboard_governance.ml#test_refresh_failure_marks_judge_output_invalid",
+        "test/test_judge_diagnostics.ml#test_record_unparseable_response_increments_unparseable_only"
       ],
-      "status": "PARTIAL",
-      "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "Visibility exists, but strict judge-output failure policy is incomplete.",
-      "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13688",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      "status": "PASS",
+      "criterion_id": "startup_policy_fail_closed",
+      "gap": null,
+      "implementation_pr_refs": [
+        "https://github.com/jeong-sik/masc-mcp/pull/13801"
       ]
     },
     {
@@ -87,14 +93,20 @@
       "prompt_requirement": "Keeper TOML unknown key handling",
       "artifact_refs": [
         "test/fixtures/goal_loop/audit-corpus.external-claim.json#NF-6",
-        "test/fixtures/goal_loop/act-map.startup.json"
+        "test/fixtures/goal_loop/act-map.startup.json",
+        "infrastructure/monitoring/goal-loop-observe-metrics.contract.json#config_unknown_keys_ignored",
+        "infrastructure/monitoring/goal-loop-observe-alerts.yml#GoalLoopConfigUnknownKeysIgnoredWarning",
+        "lib/server/server_routes_http_runtime.ml#keeper_config_schema_status",
+        "lib/server/server_routes_http_runtime.ml#keeper_config_schema_blocking",
+        "lib/keeper/keeper_types_profile.ml#config_unknown_keys",
+        "test/test_keeper_toml.ml#test_health_json_surfaces_keeper_toml_unknown_keys",
+        "test/test_keeper_toml.ml#test_persona_authoring_rejects_unknown_keeper_fields"
       ],
-      "status": "PARTIAL",
-      "criterion_id": "strict_row_level_catalog_complete",
-      "gap": "Health visibility exists, but strict schema rejection is not enforced.",
-      "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13689",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+      "status": "PASS",
+      "criterion_id": "startup_policy_fail_closed",
+      "gap": null,
+      "implementation_pr_refs": [
+        "https://github.com/jeong-sik/masc-mcp/pull/13719"
       ]
     },
     {

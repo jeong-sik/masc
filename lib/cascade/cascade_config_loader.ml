@@ -790,6 +790,25 @@ let cascade_item_of_weighted_entry (entry : weighted_entry)
       }
   | None -> None
 
+(** Load a [Cascade_ref.cascade_profile] from the hierarchical
+    [{name}_groups] format in cascade.json.  Each object in the array
+    is parsed through [Cascade_ref.cascade_group_of_json].
+
+    Returns [None] when the key is absent or no groups parse
+    successfully. *)
+let load_cascade_profile_hierarchical ~(config_path : string) ~(name : string)
+    : Cascade_ref.cascade_profile option =
+  match load_json config_path with
+  | Error _ -> None
+  | Ok json ->
+      let open Yojson.Safe.Util in
+      match json |> member (name ^ "_groups") with
+      | `List arr ->
+          let groups = List.filter_map Cascade_ref.cascade_group_of_json arr in
+          if groups = [] then None
+          else Some { Cascade_ref.name; groups }
+      | _ -> None
+
 (** Load a [Cascade_ref.cascade_profile] from the legacy cascade.json
     format.  Each profile section becomes a single-group profile;
     [models] become [cascade_item]s and [fallback_cascade] becomes
@@ -798,7 +817,7 @@ let cascade_item_of_weighted_entry (entry : weighted_entry)
     Returns [None] when the profile has no parsable model entries.
     This is the bridge between the existing flat cascade.json format
     and the RFC-0041 hierarchical profile model. *)
-let load_cascade_profile ~(config_path : string) ~(name : string)
+let load_cascade_profile_legacy ~(config_path : string) ~(name : string)
     : Cascade_ref.cascade_profile option =
   let items =
     load_profile_weighted ~config_path ~name
@@ -823,3 +842,16 @@ let load_cascade_profile ~(config_path : string) ~(name : string)
         fallback_group;
       }];
     }
+
+(** Load a [Cascade_ref.cascade_profile] from cascade.json.
+
+    Tries the hierarchical [{name}_groups] format first (RFC-0041).
+    Falls back to the legacy flat [{name}_models] format for backward
+    compatibility.
+
+    Returns [None] when neither format yields a valid profile. *)
+let load_cascade_profile ~(config_path : string) ~(name : string)
+    : Cascade_ref.cascade_profile option =
+  match load_cascade_profile_hierarchical ~config_path ~name with
+  | Some profile -> Some profile
+  | None -> load_cascade_profile_legacy ~config_path ~name

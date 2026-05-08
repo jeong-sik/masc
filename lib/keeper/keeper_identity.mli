@@ -1,7 +1,11 @@
 (** Keeper_identity — Trace ID generation, git identity, and keeper-name
     normalization for keeper operations. *)
 
-val generate_trace_id : unit -> string
+val generate_trace_id : ?now:float -> unit -> string
+(** Generate a unique trace ID from an epoch timestamp and monotonic counter.
+    [~now] defaults to [Time_compat.now ()] — pass an explicit value in tests
+    for deterministic output.  The counter guarantees uniqueness even when
+    [now] is pinned to the same value across consecutive calls. *)
 val keeper_git_author : keeper_name:string -> string
 val keeper_git_email : keeper_name:string -> string
 val git_env_for_keeper : keeper_name:string -> string array

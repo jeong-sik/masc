@@ -40,7 +40,7 @@ let push acc (json : Yojson.Safe.t) : unit =
   | None -> ()
   | Some name ->
     Prometheus.inc_counter
-      Prometheus.metric_keeper_tool_emission_pushes
+      Keeper_metrics.metric_keeper_tool_emission_pushes
       ~labels:[ ("keeper", name) ]
       ()
 
@@ -127,7 +127,7 @@ let registry_mutex : Stdlib.Mutex.t = Stdlib.Mutex.create ()
 let emit_registry_size_gauge_holding_lock () : unit =
   let n = Hashtbl.length registry in
   Prometheus.set_gauge
-    Prometheus.metric_keeper_tool_emission_registry_size
+    Keeper_metrics.metric_keeper_tool_emission_registry_size
     ~labels:[]
     (float_of_int n)
 

@@ -561,12 +561,12 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
       let outcome_labels = [ ("keeper", name); ("outcome", "started") ] in
       let attempts_before =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_restart_attempts
+          Masc_mcp.Keeper_metrics.metric_keeper_restart_attempts
           ~labels:attempt_labels ()
       in
       let outcomes_before =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_restart_outcomes
+          Masc_mcp.Keeper_metrics.metric_keeper_restart_outcomes
           ~labels:outcome_labels ()
       in
       let ctx : _ KT.context =
@@ -583,12 +583,12 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
       check (float 0.001) "restart attempt metric incremented"
         (attempts_before +. 1.0)
         (Masc_mcp.Prometheus.metric_value_or_zero
-           Masc_mcp.Prometheus.metric_keeper_restart_attempts
+           Masc_mcp.Keeper_metrics.metric_keeper_restart_attempts
            ~labels:attempt_labels ());
       check (float 0.001) "restart started outcome metric incremented"
         (outcomes_before +. 1.0)
         (Masc_mcp.Prometheus.metric_value_or_zero
-           Masc_mcp.Prometheus.metric_keeper_restart_outcomes
+           Masc_mcp.Keeper_metrics.metric_keeper_restart_outcomes
            ~labels:outcome_labels ());
       match Reg.get ~base_path:config.base_path name with
       | None -> fail "expected restarted keeper in registry"
@@ -620,12 +620,12 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
       in
       let attempts_before =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_restart_attempts
+          Masc_mcp.Keeper_metrics.metric_keeper_restart_attempts
           ~labels:attempt_labels ()
       in
       let outcomes_before =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_restart_outcomes
+          Masc_mcp.Keeper_metrics.metric_keeper_restart_outcomes
           ~labels:outcome_labels ()
       in
       let ctx : _ KT.context =
@@ -642,12 +642,12 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
       check (float 0.001) "restart attempt metric incremented"
         (attempts_before +. 1.0)
         (Masc_mcp.Prometheus.metric_value_or_zero
-           Masc_mcp.Prometheus.metric_keeper_restart_attempts
+           Masc_mcp.Keeper_metrics.metric_keeper_restart_attempts
            ~labels:attempt_labels ());
       check (float 0.001) "missing-meta outcome metric incremented"
         (outcomes_before +. 1.0)
         (Masc_mcp.Prometheus.metric_value_or_zero
-           Masc_mcp.Prometheus.metric_keeper_restart_outcomes
+           Masc_mcp.Keeper_metrics.metric_keeper_restart_outcomes
            ~labels:outcome_labels ());
       check bool "keeper unregistered after missing meta" false
         (Reg.is_registered ~base_path:config.base_path name))
@@ -691,7 +691,7 @@ let test_max_restarts_exhaustion_emits_dead_alert () =
         ~restart_count:max_restarts ~last_restart_ts:0.0 ~crash_log:[];
       let baseline =
         Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Prometheus.metric_keeper_dead_total
+          Masc_mcp.Keeper_metrics.metric_keeper_dead_total
       in
       let ctx : _ KT.context =
         {
@@ -706,7 +706,7 @@ let test_max_restarts_exhaustion_emits_dead_alert () =
       Sup.sweep_and_recover ctx;
       let after =
         Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Prometheus.metric_keeper_dead_total
+          Masc_mcp.Keeper_metrics.metric_keeper_dead_total
       in
       check (float 0.001) "metric_keeper_dead_total incremented by 1"
         (baseline +. 1.0) after;
@@ -834,7 +834,7 @@ let test_stale_storm_pause_skips_restart () =
       in
       let baseline_dead =
         Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Prometheus.metric_keeper_dead_total
+          Masc_mcp.Keeper_metrics.metric_keeper_dead_total
       in
       let ctx : _ KT.context =
         {
@@ -852,7 +852,7 @@ let test_stale_storm_pause_skips_restart () =
       in
       let after_dead =
         Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Prometheus.metric_keeper_dead_total
+          Masc_mcp.Keeper_metrics.metric_keeper_dead_total
       in
       check (float 0.001) "stale_storm_paused counter incremented by 1"
         (baseline_pause +. 1.0) after_pause;
@@ -903,7 +903,7 @@ let test_stale_fleet_batch_pause_skips_restart () =
       in
       let baseline_dead =
         Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Prometheus.metric_keeper_dead_total
+          Masc_mcp.Keeper_metrics.metric_keeper_dead_total
       in
       let ctx : _ KT.context =
         {
@@ -922,7 +922,7 @@ let test_stale_fleet_batch_pause_skips_restart () =
       in
       let after_dead =
         Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Prometheus.metric_keeper_dead_total
+          Masc_mcp.Keeper_metrics.metric_keeper_dead_total
       in
       check (float 0.001) "stale_fleet_batch_paused counter incremented by 1"
         (baseline_pause +. 1.0) after_pause;
@@ -1021,7 +1021,7 @@ let test_oas_timeout_budget_loop_pause_skips_restart () =
       in
       let baseline_dead =
         Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Prometheus.metric_keeper_dead_total
+          Masc_mcp.Keeper_metrics.metric_keeper_dead_total
       in
       let ctx : _ KT.context =
         {
@@ -1040,7 +1040,7 @@ let test_oas_timeout_budget_loop_pause_skips_restart () =
       in
       let after_dead =
         Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Prometheus.metric_keeper_dead_total
+          Masc_mcp.Keeper_metrics.metric_keeper_dead_total
       in
       check (float 0.001) "oas_timeout_budget_loop counter incremented by 1"
         (baseline_pause +. 1.0) after_pause;
@@ -1312,7 +1312,7 @@ let test_sweep_auto_resumes_after_backoff () =
        | Error err -> fail err);
       let baseline_auto_resume =
         Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Prometheus.metric_keeper_auto_resumed_total
+          Masc_mcp.Keeper_metrics.metric_keeper_auto_resumed_total
       in
       let ctx : _ KT.context =
         {
@@ -1337,7 +1337,7 @@ let test_sweep_auto_resumes_after_backoff () =
        | Error err -> fail ("read_meta failed: " ^ err));
       let after_auto_resume =
         Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Prometheus.metric_keeper_auto_resumed_total
+          Masc_mcp.Keeper_metrics.metric_keeper_auto_resumed_total
       in
       check (float 0.001) "metric_keeper_auto_resumed_total incremented by 1"
         (baseline_auto_resume +. 1.0) after_auto_resume)
@@ -1377,7 +1377,7 @@ let test_operator_pause_not_auto_resumed () =
        | Error err -> fail err);
       let baseline_auto_resume =
         Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Prometheus.metric_keeper_auto_resumed_total
+          Masc_mcp.Keeper_metrics.metric_keeper_auto_resumed_total
       in
       let ctx : _ KT.context =
         {
@@ -1399,7 +1399,7 @@ let test_operator_pause_not_auto_resumed () =
        | Error err -> fail ("read_meta failed: " ^ err));
       let after_auto_resume =
         Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Prometheus.metric_keeper_auto_resumed_total
+          Masc_mcp.Keeper_metrics.metric_keeper_auto_resumed_total
       in
       check (float 0.001) "metric_keeper_auto_resumed_total NOT incremented"
         baseline_auto_resume after_auto_resume)
@@ -1899,13 +1899,13 @@ let () =
                 let labels = [("keeper_name", name)] in
                 let stuck_seconds =
                   Masc_mcp.Prometheus.metric_value_or_zero
-                    Masc_mcp.Prometheus.metric_keeper_alive_but_stuck_seconds
+                    Masc_mcp.Keeper_metrics.metric_keeper_alive_but_stuck_seconds
                     ~labels
                     ()
                 in
                 let threshold_seconds =
                   Masc_mcp.Prometheus.metric_value_or_zero
-                    Masc_mcp.Prometheus.metric_keeper_alive_but_stuck_threshold_seconds
+                    Masc_mcp.Keeper_metrics.metric_keeper_alive_but_stuck_threshold_seconds
                     ~labels
                     ()
                 in
@@ -2060,7 +2060,7 @@ let () =
             let entry = Reg.register ~base_path:bp name (make_meta name) in
             let before =
               Masc_mcp.Prometheus.metric_value_or_zero
-                Masc_mcp.Prometheus.metric_keeper_alive_but_stuck_recovery_requests
+                Masc_mcp.Keeper_metrics.metric_keeper_alive_but_stuck_recovery_requests
                 ~labels:[("keeper", name)]
                 ()
             in
@@ -2076,7 +2076,7 @@ let () =
                  (Reg.failure_reason_cohort_key updated.Reg.last_failure_reason));
             let after =
               Masc_mcp.Prometheus.metric_value_or_zero
-                Masc_mcp.Prometheus.metric_keeper_alive_but_stuck_recovery_requests
+                Masc_mcp.Keeper_metrics.metric_keeper_alive_but_stuck_recovery_requests
                 ~labels:[("keeper", name)]
                 ()
             in

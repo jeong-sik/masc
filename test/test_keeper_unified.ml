@@ -2562,7 +2562,7 @@ let test_metrics_idle_seconds_gauge_records_observation () =
   check (option (float 0.001)) "success idle seconds gauge"
     (Some (float_of_int idle_seconds))
     (Masc_mcp.Prometheus.get_metric_value
-       Masc_mcp.Prometheus.metric_keeper_idle_seconds
+       Masc_mcp.Keeper_metrics.metric_keeper_idle_seconds
        ~labels:[ ("keeper_name", minimal_meta.name) ]
        ());
   let failure_idle_seconds = idle_seconds + 1 in
@@ -2575,7 +2575,7 @@ let test_metrics_idle_seconds_gauge_records_observation () =
   check (option (float 0.001)) "failure idle seconds gauge"
     (Some (float_of_int failure_idle_seconds))
     (Masc_mcp.Prometheus.get_metric_value
-       Masc_mcp.Prometheus.metric_keeper_idle_seconds
+       Masc_mcp.Keeper_metrics.metric_keeper_idle_seconds
        ~labels:[ ("keeper_name", minimal_meta.name) ]
        ())
 
@@ -3114,7 +3114,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
       in
       let completed_before =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_turn_completed
+          Masc_mcp.Keeper_metrics.metric_keeper_turn_completed
           ~labels:[("keeper_name", minimal_meta.name)]
           ()
       in
@@ -3148,7 +3148,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
         ();
       let completed_after =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_turn_completed
+          Masc_mcp.Keeper_metrics.metric_keeper_turn_completed
           ~labels:[("keeper_name", minimal_meta.name)]
           ()
       in
@@ -3539,7 +3539,7 @@ let test_record_keeper_total_cost_metric () =
   UM.record_keeper_total_cost_usd ~keeper_name ~total_cost_usd:0.042;
   check (option (float 0.0001)) "keeper total cost gauge" (Some 0.042)
     (Masc_mcp.Prometheus.get_metric_value
-       Masc_mcp.Prometheus.metric_keeper_total_cost_usd
+       Masc_mcp.Keeper_metrics.metric_keeper_total_cost_usd
        ~labels:[ ("keeper_name", keeper_name) ]
        ())
 
@@ -3939,13 +3939,13 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
       in
       let phase_skip_before =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+          Masc_mcp.Keeper_metrics.metric_keeper_turn_fsm_transitions
           ~labels:phase_skip_labels
           ()
       in
       let legacy_phase_cancel_before =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+          Masc_mcp.Keeper_metrics.metric_keeper_turn_fsm_transitions
           ~labels:legacy_phase_cancel_labels
           ()
       in
@@ -3964,13 +3964,13 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
       | Ok updated ->
           let phase_skip_after =
             Masc_mcp.Prometheus.metric_value_or_zero
-              Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+              Masc_mcp.Keeper_metrics.metric_keeper_turn_fsm_transitions
               ~labels:phase_skip_labels
               ()
           in
           let legacy_phase_cancel_after =
             Masc_mcp.Prometheus.metric_value_or_zero
-              Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+              Masc_mcp.Keeper_metrics.metric_keeper_turn_fsm_transitions
               ~labels:legacy_phase_cancel_labels
               ()
           in
@@ -4129,13 +4129,13 @@ let test_streaming_cancel_records_supervisor_stop_when_fiber_stop_set () =
       in
       let supervisor_request_before =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+          Masc_mcp.Keeper_metrics.metric_keeper_turn_fsm_transitions
           ~labels:supervisor_request_labels
           ()
       in
       let honor_stop_before =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+          Masc_mcp.Keeper_metrics.metric_keeper_turn_fsm_transitions
           ~labels:honor_stop_labels
           ()
       in
@@ -4150,13 +4150,13 @@ let test_streaming_cancel_records_supervisor_stop_when_fiber_stop_set () =
         ();
       let supervisor_request_after =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+          Masc_mcp.Keeper_metrics.metric_keeper_turn_fsm_transitions
           ~labels:supervisor_request_labels
           ()
       in
       let honor_stop_after =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+          Masc_mcp.Keeper_metrics.metric_keeper_turn_fsm_transitions
           ~labels:honor_stop_labels
           ()
       in
@@ -7611,7 +7611,7 @@ let test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool () =
 let test_turn_affordance_gate_suppression_metric () =
   let metric affordance =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_keeper_required_tool_gate_suppressed_total
+      Masc_mcp.Keeper_metrics.metric_keeper_required_tool_gate_suppressed_total
       ~labels:[ ("affordance", affordance) ]
       ()
   in

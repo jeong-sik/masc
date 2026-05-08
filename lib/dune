@@ -34,6 +34,7 @@
  keeper_meta_json
  keeper_types_support
  keeper_meta_store
+
  server_dashboard_http_cache
  dashboard_http_helpers
  dashboard_http_monitoring
@@ -60,7 +61,6 @@
  server_mcp_transport_http_agui
   keeper_tool_registry
   keeper_tool_policy_config
-  keeper_tool_policy
   keeper_discovered_tools
   keeper_tool_affinity
   keeper_exec_shared

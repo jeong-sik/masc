@@ -88,7 +88,7 @@ let list_all () =
 
 let record_failure ~task ~phase =
   Prometheus.inc_counter
-    Prometheus.metric_keeper_recurring_failures
+    Keeper_metrics.metric_keeper_recurring_failures
     ~labels:[("task", task.id); ("phase", phase)]
     ()
 

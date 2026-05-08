@@ -175,7 +175,7 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
                          "error"
                        end)))
       in
-      Prometheus.inc_counter Prometheus.metric_keeper_claim_auto_provision
+      Prometheus.inc_counter Keeper_metrics.metric_keeper_claim_auto_provision
         ~labels:[ ("outcome", outcome); ("agent_name", agent_name) ]
         ());
   (* Shared Agent_sdk Event_bus used as the runtime transport between subsystems. *)

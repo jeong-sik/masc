@@ -941,7 +941,7 @@ let run_docker_hardened_bash
       (match turn_sandbox_runtime with
        | Some _ ->
          Prometheus.inc_counter
-           Prometheus.metric_keeper_docker_runtime_discarded
+           Keeper_metrics.metric_keeper_docker_runtime_discarded
            ~labels:[ ("keeper", meta.name); ("reason", "network_mode_mismatch") ]
            ()
        | None -> ());

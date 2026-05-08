@@ -73,3 +73,9 @@ val seconds_since_first_attempt : keeper:string -> float option
 (** Reset the in-memory state.  Intended for unit tests; the live
     server resets state implicitly on process restart. *)
 val reset_for_tests : unit -> unit
+
+(** Remove the attempt state for a single keeper.  Called by the
+    supervisor when a keeper fiber is cleaned up after a crash so
+    that the next restart begins with a fresh counter rather than
+    inheriting the previous stuck turn's exhaustion. *)
+val reset_keeper_livelock : keeper:string -> unit

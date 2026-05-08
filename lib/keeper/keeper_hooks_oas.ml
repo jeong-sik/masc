@@ -157,7 +157,7 @@ let record_pre_tool_gate_attempt
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
        Prometheus.inc_counter
-         Prometheus.metric_keeper_lifecycle_callback_failures
+         Keeper_metrics.metric_keeper_lifecycle_callback_failures
          ~labels:[("keeper", keeper_name); ("callback", "gate_tool_call_log")]
          ();
        Log.Keeper.warn
@@ -234,7 +234,7 @@ let record_pre_tool_gate_attempt
    labels let dashboards and #9880 governance judgments distinguish
    which keeper-tool pairs are actually failing instead of reading a
    single undifferentiated marker. *)
-let tool_use_failure_metric = Prometheus.metric_keeper_tool_use_failure
+let tool_use_failure_metric = Keeper_metrics.metric_keeper_tool_use_failure
 
 let record_tool_use_failure ~keeper_name ~tool_name =
   Prometheus.inc_counter tool_use_failure_metric
@@ -383,7 +383,7 @@ let record_usage_anomaly_metrics ~keeper_name ~model usage_trust =
     List.iter
       (fun reason ->
          Prometheus.inc_counter
-           Prometheus.metric_keeper_usage_anomalies
+           Keeper_metrics.metric_keeper_usage_anomalies
            ~labels:
              [
                ("keeper_name", keeper_name);
@@ -597,7 +597,7 @@ let record_keeper_tool_duration_metric
     (summary : tool_execution_summary)
   : unit =
   Prometheus.observe_histogram
-    Prometheus.metric_keeper_tool_call_duration
+    Keeper_metrics.metric_keeper_tool_call_duration
     ~labels:
       [ "keeper", keeper_name
       ; "provider", summary.provider
@@ -961,7 +961,7 @@ let emit_cost_event
    with Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
         Prometheus.inc_counter
-          Prometheus.metric_keeper_metric_emit_dropped
+          Keeper_metrics.metric_keeper_metric_emit_dropped
           ~labels:[("keeper", agent_name); ("site", "cost_event_write")]
           ();
         Log.Keeper.error "emit_cost_event: failed to write %s: %s"
@@ -1136,7 +1136,7 @@ let first_some a b =
 let observe_output_parse_failure ~surface ~output_bytes =
   Safe_ops.protect ~default:() (fun () ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_oas_hook_output_parse_failures
+        Keeper_metrics.metric_keeper_oas_hook_output_parse_failures
         ~labels:[ ("surface", surface) ] ());
   Safe_ops.protect ~default:() (fun () ->
       Log.Keeper.warn
@@ -2141,7 +2141,7 @@ let make_hooks
                 bypass that counter.  Logging here makes the loss visible
                 at the producer site. *)
              Prometheus.inc_counter
-               Prometheus.metric_keeper_lifecycle_callback_failures
+               Keeper_metrics.metric_keeper_lifecycle_callback_failures
                ~labels:[("keeper", meta.name); ("callback", "after_turn_sse_broadcast")]
                ();
              Log.Keeper.warn
@@ -2250,7 +2250,7 @@ let make_hooks
                   downstream replay / debugging tools with gaps that look
                   identical to "no tool calls in this turn." *)
                Prometheus.inc_counter
-                 Prometheus.metric_keeper_lifecycle_callback_failures
+                 Keeper_metrics.metric_keeper_lifecycle_callback_failures
                  ~labels:[("keeper", (!meta_ref).name); ("callback", "post_tool_log_write")]
                  ();
                Log.Keeper.warn
@@ -2271,7 +2271,7 @@ let make_hooks
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
              Prometheus.inc_counter
-               Prometheus.metric_keeper_lifecycle_callback_failures
+               Keeper_metrics.metric_keeper_lifecycle_callback_failures
                ~labels:
                  [
                    ("keeper", (!meta_ref).name);
@@ -2296,7 +2296,7 @@ let make_hooks
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
              Prometheus.inc_counter
-               Prometheus.metric_keeper_lifecycle_callback_failures
+               Keeper_metrics.metric_keeper_lifecycle_callback_failures
                ~labels:
                  [
                    ("keeper", (!meta_ref).name);
@@ -2381,7 +2381,7 @@ let make_hooks
          with Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
               Prometheus.inc_counter
-                Prometheus.metric_keeper_lifecycle_callback_failures
+                Keeper_metrics.metric_keeper_lifecycle_callback_failures
                 ~labels:[("keeper", (!meta_ref).name); ("callback", "on_tool_executed")]
                 ();
               Log.Keeper.error "keeper:%s on_tool_executed callback failed for %s: %s"
@@ -2400,7 +2400,7 @@ let make_hooks
     on_stop = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.OnStop { reason; _ } ->
-        Prometheus.inc_counter Prometheus.metric_keeper_oas_on_stop
+        Prometheus.inc_counter Keeper_metrics.metric_keeper_oas_on_stop
           ~labels:
             [
               ("keeper", (!meta_ref).name);
@@ -2423,7 +2423,7 @@ let make_hooks
         let decision =
           keeper_idle_decision ~meta_ref ~consecutive_idle_turns ~tool_names in
         Prometheus.inc_counter
-          Prometheus.metric_keeper_oas_on_idle_escalated
+          Keeper_metrics.metric_keeper_oas_on_idle_escalated
           ~labels:
             [
               ("keeper", (!meta_ref).name);
@@ -2437,7 +2437,7 @@ let make_hooks
     on_error = Some (function
       | Agent_sdk.Hooks.OnError { detail; context = err_ctx } ->
         Prometheus.inc_counter
-          Prometheus.metric_keeper_lifecycle_callback_failures
+          Keeper_metrics.metric_keeper_lifecycle_callback_failures
           ~labels:[("keeper", (!meta_ref).name); ("callback", "on_error")]
           ();
         Log.Keeper.error "keeper:%s on_error: %s (context: %s)"
@@ -2448,7 +2448,7 @@ let make_hooks
     on_tool_error = Some (function
       | Agent_sdk.Hooks.OnToolError { tool_name; error } ->
         Prometheus.inc_counter
-          Prometheus.metric_keeper_lifecycle_callback_failures
+          Keeper_metrics.metric_keeper_lifecycle_callback_failures
           ~labels:[("keeper", (!meta_ref).name); ("callback", "on_tool_error")]
           ();
         Log.Keeper.error "keeper:%s tool_error: %s — %s"

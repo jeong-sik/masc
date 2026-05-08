@@ -71,7 +71,7 @@ let test_record_failure_is_metric_visible () =
   in
   let before =
     P.metric_value_or_zero
-      P.metric_keeper_lifecycle_callback_failures
+      Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
       ~labels
       ()
   in
@@ -82,7 +82,7 @@ let test_record_failure_is_metric_visible () =
     ~reason_code:"policy";
   let after =
     P.metric_value_or_zero
-      P.metric_keeper_lifecycle_callback_failures
+      Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
       ~labels
       ()
   in

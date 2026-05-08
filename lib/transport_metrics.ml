@@ -449,7 +449,7 @@ let transport_health_json ~config =
   let lifecycle_dispatch_rejections =
     int_of_float
       (Prometheus.metric_total
-         Prometheus.metric_keeper_lifecycle_dispatch_rejections)
+         Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections)
   in
   let ws_delivery_metrics = ws_delivery_metric_names in
   let ws_sessions = int_of_float (v Prometheus.metric_ws_sessions ()) in

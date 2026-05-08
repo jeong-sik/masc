@@ -204,6 +204,70 @@ let cascade_exhaustion_reason_of_json = function
   | _ -> None
 ;;
 
+(* ── Unified blocker_info: typed klass + free-form detail ───────
+   Replaces the historic [last_blocker: string] +
+   [last_blocker_class: blocker_class option] pair.  The string-only
+   field was used by [blocker_class_of_string] (substring classifier)
+   to recover a typed class — exactly the workaround pattern called
+   out in CLAUDE.md "워크어라운드 거부 기준 #2 String/Substring
+   분류기 보강".  Making [blocker_class] the only authoritative class
+   eliminates that recovery path; [detail] carries free-form context
+   for UI / Prometheus labels (no classification semantics). *)
+type blocker_info = {
+  klass : blocker_class;
+  detail : string;
+}
+
+let blocker_info_of_class ?(detail = "") klass = { klass; detail }
+
+let blocker_info_to_json (info : blocker_info) : Yojson.Safe.t =
+  let klass_payload = match info.klass with
+    | Cascade_exhausted reason ->
+      `Assoc [ "name", `String "cascade_exhausted"
+             ; "reason", cascade_exhaustion_reason_to_json reason
+             ]
+    | _ -> `String (blocker_class_to_string info.klass)
+  in
+  `Assoc
+    [ "klass", klass_payload
+    ; "detail", `String info.detail
+    ]
+;;
+
+let blocker_info_of_json (json : Yojson.Safe.t) : blocker_info option =
+  match json with
+  | `Null -> None
+  | `Assoc fields ->
+    let klass =
+      match List.assoc_opt "klass" fields with
+      | Some (`String s) -> blocker_class_of_serialized_string s
+      | Some (`Assoc kfields) ->
+        (match List.assoc_opt "name" kfields with
+         | Some (`String "cascade_exhausted") ->
+           let reason =
+             match List.assoc_opt "reason" kfields with
+             | Some r ->
+               (match cascade_exhaustion_reason_of_json r with
+                | Some r -> r
+                | None -> Other_detail "cascade_exhausted")
+             | None -> Other_detail "cascade_exhausted"
+           in
+           Some (Cascade_exhausted reason)
+         | Some (`String s) -> blocker_class_of_serialized_string s
+         | _ -> None)
+      | _ -> None
+    in
+    (match klass with
+     | None -> None
+     | Some klass ->
+       let detail = match List.assoc_opt "detail" fields with
+         | Some (`String s) -> s
+         | _ -> ""
+       in
+       Some { klass; detail })
+  | _ -> None
+;;
+
 type usage_metrics =
   { total_turns : int
   ; total_input_tokens : int

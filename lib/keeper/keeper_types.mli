@@ -180,6 +180,19 @@ val blocker_class_continue_gate : blocker_class -> bool
 val cascade_exhaustion_reason_to_json : cascade_exhaustion_reason -> Yojson.Safe.t
 val cascade_exhaustion_reason_of_json : Yojson.Safe.t -> cascade_exhaustion_reason option
 
+(** Authoritative blocker representation: typed [klass] + free-form
+    [detail].  Replaces the historic [last_blocker: string] +
+    [last_blocker_class: blocker_class option] pair so substring
+    classification is no longer load-bearing. *)
+type blocker_info = {
+  klass : blocker_class;
+  detail : string;
+}
+
+val blocker_info_of_class : ?detail:string -> blocker_class -> blocker_info
+val blocker_info_to_json : blocker_info -> Yojson.Safe.t
+val blocker_info_of_json : Yojson.Safe.t -> blocker_info option
+
 type agent_runtime_state = {
   usage: usage_metrics;
   compaction_rt: compaction_runtime;

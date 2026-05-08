@@ -40,7 +40,7 @@ val get_worker_run
   -> raw_trace:Raw_trace.t
   -> options:options
   -> unit
-  -> (Sessions.worker_run, Error.sdk_error) result
+  -> (Sessions_types.worker_run, Error.sdk_error) result
 
 (** Persist evidence and return a proof bundle. *)
 val get_proof_bundle
@@ -48,7 +48,7 @@ val get_proof_bundle
   -> raw_trace:Raw_trace.t
   -> options:options
   -> unit
-  -> (Sessions.proof_bundle, Error.sdk_error) result
+  -> (Sessions_types.proof_bundle, Error.sdk_error) result
 
 (** Generate a conformance report from an agent run. *)
 val get_conformance
@@ -73,4 +73,4 @@ val persist
   -> raw_trace:Raw_trace.t
   -> options:options
   -> unit
-  -> (Sessions.proof_bundle, Error.sdk_error) result
+  -> (Sessions_types.proof_bundle, Error.sdk_error) result

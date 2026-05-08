@@ -52,7 +52,7 @@ type evidence_bundle =
   ; missing_files : (string * string) list
   }
 
-type raw_trace_manifest = Sessions.raw_trace_manifest
+type raw_trace_manifest = Sessions_types.raw_trace_manifest
 
 let now () = Unix.gettimeofday ()
 
@@ -591,7 +591,7 @@ let build_raw_trace_manifest
    ; raw_trace_summaries
    ; raw_trace_validations
    }
-   : Sessions.raw_trace_manifest)
+   : Sessions_types.raw_trace_manifest)
 ;;
 
 let evidence_bundle_to_json (bundle : evidence_bundle) =
@@ -619,5 +619,5 @@ let evidence_bundle_to_json (bundle : evidence_bundle) =
 ;;
 
 let raw_trace_manifest_to_json (manifest : raw_trace_manifest) =
-  Sessions.raw_trace_manifest_to_yojson manifest
+  Sessions_types.raw_trace_manifest_to_yojson manifest
 ;;

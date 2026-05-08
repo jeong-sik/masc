@@ -1,10 +1,13 @@
-(** Typed tool identifier for the CDAL runtime's built-in classification
-    table (RFC-0005 Phase 1 §3.1 follow-up).
+(** Typed tool identifier for the CDAL runtime (RFC-0005 Phase 1 §3.1
+    follow-up).
 
-    Each constructor is a tool that ships with masc-mcp's default
-    classification in [Mode_enforcer.default_tool_entries]. Adding a new
-    built-in tool requires extending this variant — the compiler then
-    flags every site that needs to acknowledge the new entry.
+    Each constructor names a tool the CDAL runtime can recognise without
+    a string lookup. [Mode_enforcer.default_tool_entries] used to seed
+    classifications for these names but was emptied by RFC-OAS-012 — the
+    Variant is kept because future register-side APIs may take
+    [Tool_id.t] for compile-time exhaustiveness, and because a closed
+    Variant remains the cheapest way to ensure the registry never silently
+    diverges from a known catalogue.
 
     Public APIs of [Mode_enforcer] (e.g. [classify_tool],
     [register_tool_class]) remain string-typed because plugin tools

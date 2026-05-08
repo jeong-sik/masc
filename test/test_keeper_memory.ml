@@ -1100,7 +1100,7 @@ let test_memory_search_decision_log_failure_is_observable () =
     let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
     let before =
       Masc_mcp.Prometheus.metric_value_or_zero
-        Masc_mcp.Prometheus.metric_keeper_decision_audit_flush_failures
+        Masc_mcp.Keeper_metrics.metric_keeper_decision_audit_flush_failures
         ~labels:[("keeper", keeper_name)]
         ()
     in
@@ -1110,7 +1110,7 @@ let test_memory_search_decision_log_failure_is_observable () =
       () in
     let after =
       Masc_mcp.Prometheus.metric_value_or_zero
-        Masc_mcp.Prometheus.metric_keeper_decision_audit_flush_failures
+        Masc_mcp.Keeper_metrics.metric_keeper_decision_audit_flush_failures
         ~labels:[("keeper", keeper_name)]
         ()
     in
@@ -1346,7 +1346,7 @@ let test_cap_dropped_by_total () =
 
 let memory_metric_value ~keeper ~source ~outcome =
   Masc_mcp.Prometheus.metric_value_or_zero
-    Masc_mcp.Prometheus.metric_keeper_memory_consolidations
+    Masc_mcp.Keeper_metrics.metric_keeper_memory_consolidations
     ~labels:[("keeper", keeper); ("source", source); ("outcome", outcome)]
     ()
 

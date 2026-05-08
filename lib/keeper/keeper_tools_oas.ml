@@ -223,7 +223,7 @@ let persist_tool_call_io_from_handler
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_lifecycle_callback_failures
+        Keeper_metrics.metric_keeper_lifecycle_callback_failures
         ~labels:[ ("keeper", meta.name); ("callback", "handler_tool_log_write") ]
         ();
       Log.Keeper.warn
@@ -383,7 +383,7 @@ let broadcast_keeper_tool_call_event ~keeper_name ~tool_name ~duration_ms
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_sse_broadcast_failures
+        Keeper_metrics.metric_keeper_sse_broadcast_failures
         ~labels:[("keeper", keeper_name)]
         ();
       Log.Keeper.warn
@@ -400,7 +400,7 @@ let append_tool_exec_decision_log ~config ~keeper_name ~site entry =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_decision_audit_flush_failures
+        Keeper_metrics.metric_keeper_decision_audit_flush_failures
         ~labels:[("keeper", keeper_name)]
         ();
       Log.Keeper.warn
@@ -460,7 +460,7 @@ let make_keeper_tool_handler
         ~keeper_name:meta.name ~tool_name:name ~duration_ms
         ~success:false ~error_text ~site:"input_validation" ~ts ();
       Prometheus.inc_counter
-        Prometheus.metric_keeper_tools_oas_failures
+        Keeper_metrics.metric_keeper_tools_oas_failures
         ~labels:[("tool", name); ("site", "input_validation")]
         ();
       append_tool_exec_decision_log ~config ~keeper_name:meta.name
@@ -490,7 +490,7 @@ let make_keeper_tool_handler
     let prior_fails = failure_count_get failure_counts key in
     if prior_fails >= max_consecutive_failures then begin
       Prometheus.inc_counter
-        Prometheus.metric_keeper_tools_oas_failures
+        Keeper_metrics.metric_keeper_tools_oas_failures
         ~labels:[("tool", name); ("site", "blocked")]
         ();
       Log.Keeper.warn "tool %s blocked after %d consecutive failures (same args)"
@@ -549,7 +549,7 @@ let make_keeper_tool_handler
             ~keeper_name:meta.name ~tool_name:name ~duration_ms
             ~success:false ~error_text:detail ~site:"error_result" ~ts ();
           Prometheus.inc_counter
-            Prometheus.metric_keeper_tools_oas_failures
+            Keeper_metrics.metric_keeper_tools_oas_failures
             ~labels:[("tool", name); ("site", "error_result")]
             ();
           Log.Keeper.error
@@ -743,7 +743,7 @@ let make_keeper_tool_handler
               (Printexc.to_string exn)
         in
         Prometheus.inc_counter
-          Prometheus.metric_keeper_tools_oas_failures
+          Keeper_metrics.metric_keeper_tools_oas_failures
           ~labels:[("tool", name); ("site", "exception")]
           ();
         if is_edeadlk then Log.Keeper.warn "%s" msg

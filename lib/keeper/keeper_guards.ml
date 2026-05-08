@@ -146,7 +146,7 @@ let broadcast_tool_skipped ~keeper_name ~tool_name ~reason_code =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_guards_failures
+        Keeper_metrics.metric_keeper_guards_failures
         ~labels:[("keeper", keeper_name); ("site", "sse_broadcast")]
         ();
       Log.Keeper.warn
@@ -209,7 +209,7 @@ let notify_gate_decision on_gate_decision (event : gate_decision_event) =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_guards_failures
+        Keeper_metrics.metric_keeper_guards_failures
         ~labels:[("keeper", event.keeper_name); ("site", "gate_observer")]
         ();
       Log.Keeper.warn
@@ -254,7 +254,7 @@ let notify_gate_decision on_gate_decision (event : gate_decision_event) =
     - [reason]   ∈ guard reason_code strings (finite, defined by guards)
     - [decision] ∈ {override, approval_required} *)
 let gate_rejected_terminal_metric =
-  Prometheus.metric_keeper_turn_gate_rejected_terminal
+  Keeper_metrics.metric_keeper_turn_gate_rejected_terminal
 
 let () =
   Prometheus.register_counter
@@ -319,7 +319,7 @@ let emit_gate_event
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_guards_failures
+        Keeper_metrics.metric_keeper_guards_failures
         ~labels:[("keeper", agent_name); ("site", "event_emit")]
         ();
       Log.Keeper.warn
@@ -453,7 +453,7 @@ let streak_guard
         in
         let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
         Prometheus.inc_counter
-          Prometheus.metric_keeper_guards_failures
+          Keeper_metrics.metric_keeper_guards_failures
           ~labels:[("keeper", keeper_name); ("site", "streak_gate")]
           ();
         Log.Keeper.warn
@@ -494,7 +494,7 @@ let deny_guard
         let reason_text = "tool is on the keeper deny list" in
         let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
         Prometheus.inc_counter
-          Prometheus.metric_keeper_guards_failures
+          Keeper_metrics.metric_keeper_guards_failures
           ~labels:[("keeper", keeper_name); ("site", "deny_list")]
           ();
         Log.Keeper.warn "keeper:%s deny list: blocked %s"
@@ -539,7 +539,7 @@ let cost_guard
          in
          let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
          Prometheus.inc_counter
-           Prometheus.metric_keeper_guards_failures
+           Keeper_metrics.metric_keeper_guards_failures
            ~labels:[("keeper", keeper_name); ("site", "cost_gate")]
            ();
          Log.Keeper.warn
@@ -589,7 +589,7 @@ let destructive_guard
            in
            let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
            Prometheus.inc_counter
-             Prometheus.metric_keeper_guards_failures
+             Keeper_metrics.metric_keeper_guards_failures
              ~labels:[("keeper", keeper_name); ("site", "destructive_guard")]
              ();
            Log.Keeper.warn

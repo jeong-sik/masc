@@ -89,7 +89,7 @@ let repair_keeper (config : Coord.config) (name : string) : (repair_action, stri
           (match Keeper_types.write_meta config updated with
            | Error e ->
                Prometheus.inc_counter
-                 Prometheus.metric_keeper_write_meta_failures
+                 Keeper_metrics.metric_keeper_write_meta_failures
                  ~labels:[("keeper", name); ("phase", "goal_repair")]
                  ();
                Error (Printf.sprintf "write_meta failed: %s" e)

@@ -39,13 +39,13 @@ module Prom = Masc_mcp.Prometheus
 
 let starts_for ~base_path =
   Prom.metric_value_or_zero
-    Prom.metric_keeper_supervisor_sweep_starts
+    Masc_mcp.Keeper_metrics.metric_keeper_supervisor_sweep_starts
     ~labels:[ ("base_path", base_path) ]
     ()
 
 let last_sweep_for ~base_path =
   Prom.get_metric_value
-    Prom.metric_keeper_supervisor_last_sweep_unixtime
+    Masc_mcp.Keeper_metrics.metric_keeper_supervisor_last_sweep_unixtime
     ~labels:[ ("base_path", base_path) ]
     ()
 
@@ -55,8 +55,8 @@ let last_sweep_for ~base_path =
    if either name is missing the whole #10125 dashboard
    becomes invisible on a fresh install. *)
 let test_metrics_registered () =
-  let _ = Prom.metric_total Prom.metric_keeper_supervisor_sweep_starts in
-  let _ = Prom.metric_total Prom.metric_keeper_supervisor_last_sweep_unixtime in
+  let _ = Prom.metric_total Masc_mcp.Keeper_metrics.metric_keeper_supervisor_sweep_starts in
+  let _ = Prom.metric_total Masc_mcp.Keeper_metrics.metric_keeper_supervisor_last_sweep_unixtime in
   Alcotest.(check pass) "both supervisor metrics are registered" () ()
 
 (* Helper returns [None] before the sweep gauge is set in
@@ -82,7 +82,7 @@ let test_age_helper_returns_none_before_first_sweep () =
 let test_age_helper_advances_after_gauge_set () =
   let base_path = "/tmp/test-supervisor-obs-advances-10125" in
   Prom.set_gauge
-    Prom.metric_keeper_supervisor_last_sweep_unixtime
+    Masc_mcp.Keeper_metrics.metric_keeper_supervisor_last_sweep_unixtime
     ~labels:[ ("base_path", base_path) ]
     (Unix.gettimeofday ());
   match R.supervisor_sweep_age_seconds ~base_path with
@@ -100,7 +100,7 @@ let test_age_helper_reports_stale_when_gauge_old () =
   let base_path = "/tmp/test-supervisor-obs-stale-10125" in
   let stale_ts = Unix.gettimeofday () -. 3600.0 in
   Prom.set_gauge
-    Prom.metric_keeper_supervisor_last_sweep_unixtime
+    Masc_mcp.Keeper_metrics.metric_keeper_supervisor_last_sweep_unixtime
     ~labels:[ ("base_path", base_path) ]
     stale_ts;
   match R.supervisor_sweep_age_seconds ~base_path with
@@ -118,11 +118,11 @@ let test_counter_per_base_path_isolation () =
   let b = "/tmp/test-supervisor-obs-iso-B-10125" in
   let before_b = starts_for ~base_path:b in
   Prom.inc_counter
-    Prom.metric_keeper_supervisor_sweep_starts
+    Masc_mcp.Keeper_metrics.metric_keeper_supervisor_sweep_starts
     ~labels:[ ("base_path", a) ]
     ();
   Prom.inc_counter
-    Prom.metric_keeper_supervisor_sweep_starts
+    Masc_mcp.Keeper_metrics.metric_keeper_supervisor_sweep_starts
     ~labels:[ ("base_path", a) ]
     ();
   Alcotest.(check (float 0.0001))
@@ -140,11 +140,11 @@ let test_counter_per_base_path_isolation () =
 let test_prometheus_text_export_includes_metrics () =
   let base_path = "/tmp/test-supervisor-obs-export-10125" in
   Prom.inc_counter
-    Prom.metric_keeper_supervisor_sweep_starts
+    Masc_mcp.Keeper_metrics.metric_keeper_supervisor_sweep_starts
     ~labels:[ ("base_path", base_path) ]
     ();
   Prom.set_gauge
-    Prom.metric_keeper_supervisor_last_sweep_unixtime
+    Masc_mcp.Keeper_metrics.metric_keeper_supervisor_last_sweep_unixtime
     ~labels:[ ("base_path", base_path) ]
     (Unix.gettimeofday ());
   let text = Prom.to_prometheus_text () in
@@ -159,10 +159,10 @@ let test_prometheus_text_export_includes_metrics () =
   in
   Alcotest.(check bool)
     "counter name appears in export"
-    true (contains text Prom.metric_keeper_supervisor_sweep_starts);
+    true (contains text Masc_mcp.Keeper_metrics.metric_keeper_supervisor_sweep_starts);
   Alcotest.(check bool)
     "gauge name appears in export"
-    true (contains text Prom.metric_keeper_supervisor_last_sweep_unixtime);
+    true (contains text Masc_mcp.Keeper_metrics.metric_keeper_supervisor_last_sweep_unixtime);
   Alcotest.(check bool)
     "base_path label appears for export"
     true (contains text "base_path=")

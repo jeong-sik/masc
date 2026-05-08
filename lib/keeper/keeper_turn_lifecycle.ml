@@ -50,7 +50,7 @@ let handle_keeper_down ctx args : tool_result =
            | Ok () -> ()
            | Error err ->
                Prometheus.inc_counter
-                 Prometheus.metric_keeper_write_meta_failures
+                 Keeper_metrics.metric_keeper_write_meta_failures
                  ~labels:[("keeper", name);
                           ("phase",
                            if Keeper_meta_store.is_version_conflict_error err
@@ -80,7 +80,7 @@ let handle_keeper_down ctx args : tool_result =
           let dir = Filename.concat (session_base_dir ctx.config) (Keeper_id.Trace_id.to_string m.runtime.trace_id) in
           try rm_rf dir with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
             Prometheus.inc_counter
-              Prometheus.metric_keeper_session_cleanup_failures
+              Keeper_metrics.metric_keeper_session_cleanup_failures
               ();
             Log.Keeper.error "session dir cleanup failed: %s"
               (Printexc.to_string exn)));

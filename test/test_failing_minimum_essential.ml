@@ -1,7 +1,7 @@
 (** Failing recovery floor includes essential MASC tools.
 
     Resolves board P1 (research, 2026-05-07): "9 keepers × 0 claimable
-    masc_web_search". Root cause was [Keeper_tool_policy.failing_minimum_tool_names]
+    masc_web_search". Root cause was [Masc_mcp.Keeper_tool_policy.failing_minimum_tool_names]
     returning only the [removable=false] shard floor (base shard's 9 local tools),
     so any task contract requiring [masc_web_search] became unclaimable when
     a keeper entered decision_layer >= 2.
@@ -49,7 +49,7 @@ let test_nonempty () =
 
 let test_essential_masc_ssot_matches_toml () =
   (* Mirrors [masc.essential] in config/tool_policy.toml. If toml drifts,
-     update [Keeper_tool_policy.essential_masc_minimum_names] to match. *)
+     update [Masc_mcp.Keeper_tool_policy.essential_masc_minimum_names] to match. *)
   let expected = [
     "masc_status";
     "masc_web_search";

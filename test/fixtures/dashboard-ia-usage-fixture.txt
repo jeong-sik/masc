@@ -1,0 +1,23 @@
+# HELP dashboard_surface_open_total Top-level dashboard surface opens (RFC-0049). Aggregate, no PII.
+# TYPE dashboard_surface_open_total counter
+dashboard_surface_open_total{surface="overview"} 142
+dashboard_surface_open_total{surface="monitoring"} 87
+dashboard_surface_open_total{surface="workspace"} 53
+dashboard_surface_open_total{surface="cockpit"} 41
+dashboard_surface_open_total{surface="lab"} 12
+dashboard_surface_open_total{surface="logs"} 3
+# HELP dashboard_section_open_total Section-level opens within a dashboard surface (RFC-0049).
+# TYPE dashboard_section_open_total counter
+dashboard_section_open_total{surface="monitoring",section="journey",redirected_from="none"} 67
+dashboard_section_open_total{surface="monitoring",section="agents",redirected_from="none"} 14
+dashboard_section_open_total{surface="monitoring",section="cognition",redirected_from="none"} 4
+dashboard_section_open_total{surface="monitoring",section="goal-loop",redirected_from="none"} 2
+dashboard_section_open_total{surface="monitoring",section="fleet-health",redirected_from="none"} 8
+dashboard_section_open_total{surface="workspace",section="board",redirected_from="none"} 24
+dashboard_section_open_total{surface="workspace",section="repositories",redirected_from="none"} 17
+dashboard_section_open_total{surface="workspace",section="repositories",redirected_from="monitoring:git-graph"} 9
+dashboard_section_open_total{surface="command",section="operations",redirected_from="none"} 11
+dashboard_section_open_total{surface="command",section="operations",redirected_from="command:governance"} 6
+dashboard_section_open_total{surface="command",section="operations",redirected_from="monitoring:safe-autonomy"} 2
+dashboard_section_open_total{surface="lab",section="tools",redirected_from="none"} 7
+dashboard_section_open_total{surface="lab",section="harness",redirected_from="none"} 1

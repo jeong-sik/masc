@@ -1,153 +1,254 @@
 #!/usr/bin/env bash
-# RFC-0049 PR-2 / RFC-0048 PR-C input: scrape dashboard nav telemetry
-# counters from masc-mcp's /metrics endpoint and emit a Markdown report
-# ranking surfaces and sections by open count.
+# RFC-0049 PR-2 — Dashboard IA usage report.
 #
-# The counters are cumulative since the last masc-mcp restart, not
-# windowed — this script does not pretend to do PromQL rate(). The
-# `--since` flag is accepted but only printed in the report header so
-# the operator knows what window the snapshot is meant to represent.
-# Real time-windowed analysis belongs in Grafana / Prometheus server,
-# not here.
-#
-# RFC-0048 §4.2 threshold proposal (placeholder, subject to data):
-#   - section < 5 opens / week  → mark hidden=true
-#   - section stayed hidden 7d with zero redirect target hits → delete
-#   - section > 40% of surface's opens → promote to default
-#   - two sections both < 20 opens / week, > 60% operator overlap →
-#     merge (operator overlap is not measurable from these counters;
-#     ad-hoc proposal)
+# Scrapes the MASC server's Prometheus /metrics endpoint and produces a
+# Markdown report ranking dashboard surfaces and sections by open count.
+# Splits direct opens from redirect-driven opens (the redirected_from=none
+# vs everything-else distinction RFC-0048 §4.4 needs for deletion thresholds).
 #
 # Usage:
-#   scripts/dashboard-ia-usage.sh [--since=DURATION] [--metrics-url=URL]
+#   scripts/dashboard-ia-usage.sh                          # default endpoint, full ranking
+#   scripts/dashboard-ia-usage.sh --endpoint URL           # override server
+#   scripts/dashboard-ia-usage.sh --metrics-url URL        # alias for --endpoint
+#   scripts/dashboard-ia-usage.sh --output FILE            # write to file
+#   scripts/dashboard-ia-usage.sh --threshold N            # flag rows below N as candidates
+#   scripts/dashboard-ia-usage.sh --since DURATION         # window label in report header (e.g. 7d)
+#   scripts/dashboard-ia-usage.sh --token TOKEN            # Bearer token for auth
 #
-#   --since=DURATION    Free-form label printed in report header (e.g. 7d).
-#                       Default: "since-restart" — counters are cumulative,
-#                       not windowed.
-#   --metrics-url=URL   /metrics endpoint. Default: env MASC_METRICS_URL
-#                       or http://127.0.0.1:8935/metrics.
-#   --token=TOKEN       Bearer token for the metrics endpoint when it
-#                       requires auth. Default: env MASC_METRICS_TOKEN
-#                       (unset → no Authorization header sent).
+# Exit codes:
+#   0  report produced
+#   1  CLI / network error
+#   2  no relevant counters present (server has no traffic yet)
+#
+# Environment variables (CLI flags take precedence):
+#   MASC_METRICS_ENDPOINT   endpoint URL (takes priority over MASC_METRICS_URL)
+#   MASC_METRICS_URL        endpoint URL alias (back-compat; lower priority)
+#   MASC_METRICS_TOKEN      Bearer token (same as --token)
+#
+# Notes:
+#   - Counters are cumulative since process start. The "--since" label is
+#     printed in the report header but does NOT perform windowed queries;
+#     real time-windowed analysis via PromQL is deferred to PR-2.5.
+#   - Compatible with bash 3.2 (macOS default) and bash 4+. All aggregation
+#     happens inside awk so no associative arrays in shell.
 
 set -euo pipefail
 
-since="since-restart"
-metrics_url="${MASC_METRICS_URL:-http://127.0.0.1:8935/metrics}"
-token="${MASC_METRICS_TOKEN:-}"
+SCRIPT_NAME="$(basename "$0")"
+ENDPOINT="${MASC_METRICS_ENDPOINT:-${MASC_METRICS_URL:-http://127.0.0.1:8935/metrics}}"
+OUTPUT=""
+HIDE_THRESHOLD=5
+SINCE="since-restart"
+TOKEN="${MASC_METRICS_TOKEN:-}"
 
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --since=*) since="${1#--since=}" ;;
-    --metrics-url=*) metrics_url="${1#--metrics-url=}" ;;
-    --token=*) token="${1#--token=}" ;;
-    -h|--help)
-      sed -n '2,35p' "$0"
-      exit 0
-      ;;
-    *) echo "unknown arg: $1" >&2; exit 2 ;;
-  esac
-  shift
-done
-
-curl_args=(-fsS --max-time 5)
-if [ -n "$token" ]; then
-  curl_args+=(-H "Authorization: Bearer $token")
-fi
-
-scrape="$(curl "${curl_args[@]}" "$metrics_url")" || {
-  echo "error: failed to scrape $metrics_url (set --token or MASC_METRICS_TOKEN if 401)" >&2
-  exit 1
+usage() {
+  sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
+  exit "${1:-0}"
 }
 
-# Surface counters: dashboard_surface_open_total{surface="<id>"} <count>
-surface_lines="$(printf '%s\n' "$scrape" \
-  | awk '/^dashboard_surface_open_total\{/' \
-  | sed -E 's/dashboard_surface_open_total\{surface="([^"]+)"\} ([0-9.eE+-]+)/\1\t\2/' \
-  | sort -t$'\t' -k2,2 -nr)"
+while (($#)); do
+  case "$1" in
+    --endpoint)
+      ENDPOINT="$2"; shift 2 ;;
+    --endpoint=*)
+      ENDPOINT="${1#*=}"; shift ;;
+    --metrics-url)
+      ENDPOINT="$2"; shift 2 ;;
+    --metrics-url=*)
+      ENDPOINT="${1#*=}"; shift ;;
+    --output)
+      OUTPUT="$2"; shift 2 ;;
+    --output=*)
+      OUTPUT="${1#*=}"; shift ;;
+    --threshold)
+      HIDE_THRESHOLD="$2"; shift 2 ;;
+    --threshold=*)
+      HIDE_THRESHOLD="${1#*=}"; shift ;;
+    --since)
+      SINCE="$2"; shift 2 ;;
+    --since=*)
+      SINCE="${1#*=}"; shift ;;
+    --token)
+      TOKEN="$2"; shift 2 ;;
+    --token=*)
+      TOKEN="${1#*=}"; shift ;;
+    -h|--help)
+      usage 0 ;;
+    *)
+      echo "$SCRIPT_NAME: unknown argument: $1" >&2
+      usage 1 ;;
+  esac
+done
 
-# Section counters: dashboard_section_open_total{surface="<id>",section="<id>",redirected_from="<key>"} <count>
-section_raw="$(printf '%s\n' "$scrape" \
-  | awk '/^dashboard_section_open_total\{/' \
-  | sed -E 's/dashboard_section_open_total\{surface="([^"]+)",section="([^"]+)",redirected_from="([^"]+)"\} ([0-9.eE+-]+)/\1\t\2\t\3\t\4/')"
-
-# Aggregate by (surface, section) ignoring redirected_from for the
-# top-line ranking; keep the redirected_from breakdown separate so the
-# threshold reader can distinguish bookmark-driven hits from organic
-# navigation (RFC-0048 §4.4 + §5.3).
-section_lines="$(printf '%s\n' "$section_raw" \
-  | awk -F'\t' 'NF==4 { key=$1"\t"$2; sum[key]+=$4 } END { for (k in sum) printf "%s\t%s\n", k, sum[k] }' \
-  | sort -t$'\t' -k3,3 -nr)"
-
-redirect_lines="$(printf '%s\n' "$section_raw" \
-  | awk -F'\t' 'NF==4 && $3 != "none" { printf "%s\t%s\t%s\t%s\n", $3, $1, $2, $4 }' \
-  | sort -t$'\t' -k4,4 -nr)"
-
-now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-
-cat <<EOF
-# Dashboard IA Usage Report
-
-- Generated: $now
-- Window label: $since (counters are cumulative since last restart)
-- Source: $metrics_url
-
-## Surface opens
-
-| Surface | Opens |
-|---|---:|
-EOF
-
-if [ -z "$surface_lines" ]; then
-  echo "| _(no data — counters not yet incremented)_ | — |"
-else
-  printf '%s\n' "$surface_lines" | awk -F'\t' '{ printf "| %s | %s |\n", $1, $2 }'
+if ! command -v curl >/dev/null 2>&1; then
+  echo "$SCRIPT_NAME: curl is required" >&2
+  exit 1
 fi
 
-cat <<EOF
-
-## Section opens (aggregated across redirected_from)
-
-| Surface | Section | Opens |
-|---|---|---:|
-EOF
-
-if [ -z "$section_lines" ]; then
-  echo "| _(no data)_ | — | — |"
-else
-  printf '%s\n' "$section_lines" | awk -F'\t' '{ printf "| %s | %s | %s |\n", $1, $2, $3 }'
+curl_args=(--silent --show-error --max-time 10 --fail)
+if [[ -n "$TOKEN" ]]; then
+  curl_args+=(-H "Authorization: Bearer $TOKEN")
 fi
 
-cat <<EOF
+tmp_metrics="$(mktemp -t masc-metrics.XXXXXX)"
+report="$(mktemp -t masc-ia-report.XXXXXX)"
+trap 'rm -f "$tmp_metrics" "$report"' EXIT
 
-## Redirect-driven hits (RFC-0048 §4.4 deletion threshold input)
-
-\`redirected_from\` distinguishes bookmark / external-link hits from
-organic in-app navigation. Sections kept alive solely by these hits
-are deletion candidates after the soak window.
-
-| Original key | Resolved surface | Resolved section | Hits |
-|---|---|---|---:|
-EOF
-
-if [ -z "$redirect_lines" ]; then
-  echo "| _(no redirected traffic)_ | — | — | — |"
-else
-  printf '%s\n' "$redirect_lines" | awk -F'\t' '{ printf "| %s | %s | %s | %s |\n", $1, $2, $3, $4 }'
+if ! curl "${curl_args[@]}" "$ENDPOINT" >"$tmp_metrics" 2>/dev/null; then
+  echo "$SCRIPT_NAME: failed to fetch $ENDPOINT" >&2
+  exit 1
 fi
 
-cat <<EOF
+generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-## Threshold readout (RFC-0048 §4.2)
+awk -v endpoint="$ENDPOINT" \
+    -v generated_at="$generated_at" \
+    -v threshold="$HIDE_THRESHOLD" \
+    -v since="$SINCE" '
+  function extract_label(line, name,    pattern, start, len) {
+    pattern = name "=\"[^\"]*\""
+    if (match(line, pattern) == 0) return ""
+    start = RSTART + length(name) + 2
+    len = RLENGTH - length(name) - 3
+    return substr(line, start, len)
+  }
 
-> Placeholders — revise once a full week of data is observed.
+  /^dashboard_surface_open_total\{/ {
+    surface = extract_label($0, "surface")
+    if (surface == "") next
+    n = split($0, parts, /[ \t]+/)
+    val = parts[n] + 0
+    surface_total[surface] += int(val + 0.5)
+    surface_present = 1
+    next
+  }
 
-- **Mark \`hidden: true\`**: sections with < 5 opens for the window.
-- **Delete component + redirect**: section was hidden for 7d AND its
-  redirect target shows zero hits in the redirect table above.
-- **Promote to default**: a section accounts for > 40% of its
-  surface's opens.
-- **Merge candidates**: two sections under the same surface, each
-  < 20 opens, with > 60% operator overlap (overlap not measurable
-  from these counters — file an ad-hoc proposal).
-EOF
+  /^dashboard_section_open_total\{/ {
+    surface = extract_label($0, "surface")
+    section = extract_label($0, "section")
+    redirected = extract_label($0, "redirected_from")
+    if (redirected == "") redirected = "none"
+    if (surface == "" || section == "") next
+    n = split($0, parts, /[ \t]+/)
+    val = parts[n] + 0
+    val_int = int(val + 0.5)
+    key = surface "/" section
+    section_total[key] += val_int
+    if (redirected == "none") {
+      section_direct[key] += val_int
+    } else {
+      rkey = surface "/" section "/" redirected
+      section_redirected[rkey] += val_int
+    }
+    section_seen[key] = 1
+    section_present = 1
+    next
+  }
+
+  END {
+    if (!surface_present && !section_present) exit 2
+
+    print "# Dashboard IA usage report"
+    print ""
+    printf "_Source: `%s`_  \n", endpoint
+    printf "_Generated: %s_  \n", generated_at
+    printf "_Window: %s (counters are cumulative since last restart)_  \n", since
+    printf "_Hide threshold (RFC-0048 §4.2): `< %d` opens_\n", threshold
+    print ""
+
+    print "## Surfaces (top-level)"
+    print ""
+    print "| Surface | Opens |"
+    print "|---|---:|"
+    n = 0
+    for (s in surface_total) {
+      n++
+      surf_keys[n] = s
+      surf_vals[n] = surface_total[s]
+    }
+    sort_desc(surf_keys, surf_vals, n)
+    for (i = 1; i <= n; i++) {
+      printf "| %s | %d |\n", surf_keys[i], surf_vals[i]
+    }
+    print ""
+
+    print "## Sections (direct opens)"
+    print ""
+    print "| Surface | Section | Direct opens | Total (incl. redirects) | Below threshold? |"
+    print "|---|---|---:|---:|:---:|"
+    m = 0
+    for (k in section_seen) {
+      m++
+      sec_keys[m] = k
+      sec_totals[m] = section_total[k] + 0
+    }
+    sort_desc(sec_keys, sec_totals, m)
+    for (i = 1; i <= m; i++) {
+      key = sec_keys[i]
+      split(key, sp, "/")
+      surface = sp[1]
+      section = sp[2]
+      direct = section_direct[key] + 0
+      total = section_total[key] + 0
+      flag = ""
+      if (direct < threshold) flag = "⚠️ candidate"
+      printf "| %s | %s | %d | %d | %s |\n", surface, section, direct, total, flag
+    }
+    print ""
+
+    print "## Redirect provenance"
+    print ""
+    print "| Surface | Section | Redirected from | Opens |"
+    print "|---|---|---|---:|"
+    r = 0
+    for (rk in section_redirected) {
+      r++
+      red_keys[r] = rk
+      red_vals[r] = section_redirected[rk]
+    }
+    sort_desc(red_keys, red_vals, r)
+    if (r == 0) {
+      print "| _(none)_ | | | |"
+    } else {
+      for (i = 1; i <= r; i++) {
+        split(red_keys[i], sp, "/")
+        printf "| %s | %s | %s | %d |\n", sp[1], sp[2], sp[3], red_vals[i]
+      }
+    }
+    print ""
+
+    print "## Notes"
+    print ""
+    print "- **Direct opens** (`redirected_from=none`) are the deletion-threshold metric per RFC-0048 §4.4."
+    print "- A section with high **Total** but low **Direct** is alive only because of legacy bookmarks; the redirect can stay, the section component can be deleted."
+    print "- Counters are cumulative since process start. Range queries (`--since=7d`) require Prometheus + PR-2.5."
+  }
+
+  function sort_desc(keys, vals, n,    i, j, tk, tv) {
+    for (i = 2; i <= n; i++) {
+      tk = keys[i]; tv = vals[i]
+      j = i - 1
+      while (j >= 1 && vals[j] < tv) {
+        keys[j+1] = keys[j]; vals[j+1] = vals[j]
+        j--
+      }
+      keys[j+1] = tk; vals[j+1] = tv
+    }
+  }
+' "$tmp_metrics" >"$report" && awk_exit=0 || awk_exit=$?
+
+if [[ $awk_exit -eq 2 ]]; then
+  echo "$SCRIPT_NAME: no dashboard_*_open_total counters present at $ENDPOINT" >&2
+  echo "  (server has not seen any dashboard navigation since start, or PR-1 is not deployed)" >&2
+  exit 2
+elif [[ $awk_exit -ne 0 ]]; then
+  echo "$SCRIPT_NAME: awk failed (exit $awk_exit)" >&2
+  exit 1
+fi
+
+if [[ -n "$OUTPUT" ]]; then
+  cp "$report" "$OUTPUT"
+  echo "$SCRIPT_NAME: wrote $OUTPUT" >&2
+else
+  cat "$report"
+fi

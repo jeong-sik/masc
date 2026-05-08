@@ -17,7 +17,7 @@
 open Masc_mcp
 
 let counter_total () =
-  Prometheus.metric_total Prometheus.metric_keeper_meta_json_failures
+  Prometheus.metric_total Keeper_metrics.metric_keeper_meta_json_failures
 
 let canonical_only_meta_json () =
   (* Build an `Assoc whose every key is in [canonical_keeper_meta_key_names].
@@ -75,12 +75,12 @@ let test_progress_updated_line_failure_is_observable () =
     Keeper_types.mkdir_p progress_path;
     let before =
       Prometheus.metric_total
-        Prometheus.metric_keeper_progress_updated_line_failures
+        Keeper_metrics.metric_keeper_progress_updated_line_failures
     in
     Keeper_meta_store.refresh_progress_updated_line config keeper_name;
     let after =
       Prometheus.metric_total
-        Prometheus.metric_keeper_progress_updated_line_failures
+        Keeper_metrics.metric_keeper_progress_updated_line_failures
     in
     Alcotest.(check bool)
       "progress Updated-line refresh failure increments counter"

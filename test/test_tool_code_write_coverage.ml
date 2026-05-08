@@ -29,7 +29,7 @@ let json_string_field key text =
 
 let tool_code_write_policy_load_failure_metric () =
   Prometheus.metric_value_or_zero
-    Prometheus.metric_keeper_tool_policy_failures
+    Keeper_metrics.metric_keeper_tool_policy_failures
     ~labels:[("site", "tool_code_write_load_failed"); ("preset", "n/a")]
     ()
 

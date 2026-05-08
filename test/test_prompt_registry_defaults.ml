@@ -286,7 +286,7 @@ let () =
               let labels = [ ("prompt", "override_restore") ] in
               let before =
                 Lib.Prometheus.metric_value_or_zero
-                  Lib.Prometheus.metric_keeper_prompt_failures
+                  Lib.Keeper_metrics.metric_keeper_prompt_failures
                   ~labels
                   ()
               in
@@ -299,7 +299,7 @@ let () =
               check (float 0.0001) "restore rejection counted"
                 (before +. 1.0)
                 (Lib.Prometheus.metric_value_or_zero
-                   Lib.Prometheus.metric_keeper_prompt_failures
+                   Lib.Keeper_metrics.metric_keeper_prompt_failures
                    ~labels
                    ());
               check string "invalid override not applied"

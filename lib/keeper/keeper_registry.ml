@@ -1040,7 +1040,7 @@ let validate_turn_phase_transition ~from ~to_ =
          | Packed Turn_compacting, Packed Turn_executing -> false
          | Packed Turn_compacting, Packed Turn_compacting -> true
          | Packed Turn_compacting, Packed Turn_finalizing -> true  (* via set_turn_phase: compaction failure *)
-         | Packed Turn_compacting, Packed Turn_exhausted -> false
+         | Packed Turn_compacting, Packed Turn_exhausted -> true  (* via set_turn_cascade_state: Cascade_exhausted on terminal error *)
          (* from Turn_finalizing *)
          | Packed Turn_finalizing, Packed Turn_idle -> false  (* new turn is reset *)
          | Packed Turn_finalizing, Packed Turn_prompting -> true  (* via set_turn_cascade_state: degraded retry Cascade_idle *)
@@ -1048,7 +1048,7 @@ let validate_turn_phase_transition ~from ~to_ =
          | Packed Turn_finalizing, Packed Turn_executing -> true  (* via set_turn_cascade_state: degraded retry Cascade_trying *)
          | Packed Turn_finalizing, Packed Turn_compacting -> false
          | Packed Turn_finalizing, Packed Turn_finalizing -> true
-         | Packed Turn_finalizing, Packed Turn_exhausted -> false
+         | Packed Turn_finalizing, Packed Turn_exhausted -> true  (* via set_turn_cascade_state: Cascade_exhausted on terminal error *)
          (* from Turn_exhausted *)
          | Packed Turn_exhausted, Packed Turn_idle -> false  (* new turn is reset *)
          | Packed Turn_exhausted, Packed Turn_prompting -> true  (* via prepare_turn_retry_after_compaction: Cascade_idle *)

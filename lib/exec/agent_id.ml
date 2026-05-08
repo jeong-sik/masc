@@ -20,6 +20,7 @@ type t =
   | `Tool_local_runtime
   | `Tool_local_runtime_bench
   | `Tool_autoresearch_cycle
+  | `Keeper_shell
   | `Other_agent
   ]
 
@@ -45,6 +46,7 @@ let of_string = function
   | "tool/local_runtime" -> `Tool_local_runtime
   | "tool/local_runtime_bench" -> `Tool_local_runtime_bench
   | "tool/autoresearch_cycle" -> `Tool_autoresearch_cycle
+  | "keeper/shell" -> `Keeper_shell
   | _ -> `Other_agent
 
 let to_string = function
@@ -69,4 +71,5 @@ let to_string = function
   | `Tool_local_runtime -> "tool/local_runtime"
   | `Tool_local_runtime_bench -> "tool/local_runtime_bench"
   | `Tool_autoresearch_cycle -> "tool/autoresearch_cycle"
+  | `Keeper_shell -> "keeper/shell"
   | `Other_agent -> "other"

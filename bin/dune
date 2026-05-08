@@ -96,10 +96,21 @@
  (package masc_mcp)
  (libraries masc_mcp yojson unix eio_main eio masc_core masc_types fs_compat time_compat masc_log masc_coord masc_backend masc_process masc_eio_context fmt str mirage-crypto-rng.unix httpun cohttp cohttp-eio masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider ))
 
-; RFC-0054 POC — codegen-based walker generator. Stdlib-only, no
-; ppxlib dep. Output is a .ml file consumed by test/poc_shell_ir/.
+; RFC-0054 POC — kept as historical regression marker. Same generator
+; logic as bin/gen_shell_ir_walkers.ml below, but on a synthetic
+; 3-constructor GADT. test/poc_shell_ir/ proves the codegen approach
+; works on the same 4-parameter shape that broke under ppxlib in
+; PR-1 / PR-1b.
 (executable
  (name poc_shell_ir_gen)
  (modules poc_shell_ir_gen))
+
+; RFC-0054 PR-3 — production codegen for lib/exec/shell_ir_typed.ml.
+; Hardcoded 9-constructor spec mirrors shell_ir_typed.{ml,mli} order.
+; Stdlib-only — no ppxlib, no AST manipulation. Output goes through
+; lib/exec/dune (rule ...) to shell_ir_typed_walkers_gen.ml.
+(executable
+ (name gen_shell_ir_walkers)
+ (modules gen_shell_ir_walkers))
 
 ; Executable for MASC MCP

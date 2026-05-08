@@ -18,6 +18,7 @@ module KP = Masc_mcp.Keeper_state_machine
 module KD = Masc_mcp.Keeper_deliberation
 module AE = Masc_mcp.Agent_economy
 module KC = Masc_mcp.Keeper_config
+module KTH = Masc_mcp.Keeper_turn_helpers
 module HK = Masc_mcp.Keeper_hooks_oas
 module KG = Masc_mcp.Keeper_guards
 module OMR = Masc_mcp.Cascade_runtime
@@ -4354,7 +4355,10 @@ let test_run_keeper_cycle_surfaces_side_effect_failures_source_contract () =
        "ensure_local_discovery_ready model_labels");
   check bool "manual keeper_msg discovery helper guards keeper setup" true
     (source_file_contains "lib/keeper/keeper_turn.ml"
-       "ensure_local_discovery_ready effective_models")
+       "ensure_local_discovery_ready effective_models");
+  check bool "manual keeper_msg async facade preflights before submit" true
+    (source_file_contains "lib/tool_keeper.ml"
+       "Turn.preflight_keeper_msg ctx resolved_args")
 
 let test_sync_keeper_paused_state_surfaces_write_failure_without_mutating_registry () =
   let base_dir = temp_dir () in
@@ -4400,6 +4404,55 @@ let test_ensure_local_discovery_ready_surfaces_refresh_failure () =
       check int "refresh called once" 1 !refresh_calls;
       check bool "error includes label" true
         (contains_substring msg "llama:auto")
+
+let test_keeper_msg_async_failure_surface () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      with_test_runtime_roots base_dir @@ fun () ->
+      let keeper_name = "msg-preflight" in
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "operator"));
+      let meta = make_meta keeper_name in
+      (match Masc_mcp.Keeper_types.write_meta ~force:true config meta with
+      | Ok () -> ()
+      | Error err -> fail ("write_meta failed: " ^ err));
+      let ctx : _ Masc_mcp.Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      KTH.For_testing.with_local_discovery_refresh
+        (fun _labels -> false)
+        (fun () ->
+          match
+            Masc_mcp.Tool_keeper.dispatch ctx ~name:"masc_keeper_msg"
+              ~args:
+                (`Assoc
+                   [
+                     ("name", `String keeper_name);
+                     ("message", `String "check discovery failure");
+                   ])
+          with
+          | Some (false, err) ->
+              if not
+                   (contains_substring err "local discovery refresh required"
+                    && contains_substring err "refresh failed")
+              then fail ("unexpected synchronous error: " ^ err)
+          | Some (true, body) ->
+              fail ("expected synchronous failure, got queued body: " ^ body)
+          | None -> fail "masc_keeper_msg dispatch missing"))
 
 let provider_config_of_label label =
   match Masc_mcp.Cascade_config.parse_model_string label with
@@ -8785,6 +8838,8 @@ let () =
             test_sync_keeper_paused_state_surfaces_write_failure_without_mutating_registry;
           test_case "local discovery guard surfaces refresh failure" `Quick
             test_ensure_local_discovery_ready_surfaces_refresh_failure;
+          test_case "async keeper_msg preflight surfaces discovery failure" `Quick
+            test_keeper_msg_async_failure_surface;
           test_case "local_only liveness decision keeps non-local route" `Quick
             test_decide_local_only_liveness_keeps_non_local_effective;
           test_case "local_only liveness decision keeps explicit local base"

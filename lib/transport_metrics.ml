@@ -81,6 +81,16 @@ let set_sse_external_subscribers count =
 let inc_sse_client_evicted () =
   Prometheus.inc_counter Prometheus.metric_sse_client_evictions ()
 
+let inc_sse_idle_evicted () =
+  Prometheus.inc_counter Prometheus.metric_sse_idle_evictions ()
+
+let inc_sse_reject ~reason =
+  Prometheus.inc_counter Prometheus.metric_sse_rejects
+    ~labels:[("reason", reason)] ()
+
+let inc_sse_reconnect () =
+  Prometheus.inc_counter Prometheus.metric_sse_reconnects ()
+
 (** {1 gRPC Metrics} *)
 
 let set_grpc_active_streams count =

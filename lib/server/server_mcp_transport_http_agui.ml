@@ -61,6 +61,8 @@ let handle_ag_ui_events ~deps request reqd =
         ~reason ~retry_after_s reqd
   | Ok () ->
       stop_sse_session_preserve_guard session_id;
+      if Option.is_some last_event_id then
+        Transport_metrics.inc_sse_reconnect ();
       let headers =
         Httpun.Headers.of_list
           (sse_stream_headers ~deps session_id protocol_version origin)

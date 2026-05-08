@@ -48,7 +48,7 @@ let shell_ir_typed_spec : ctor list =
       let args =
         match path with None -> flag_args | Some p -> flag_args @ [ p ]
       in
-      { Shell_ir.bin = Result.get_ok (Bin.of_string "ls")
+      { Shell_ir.bin = Bin.of_known Bin.Ls
       ; args = List.map (fun s -> Shell_ir.Lit s) args
       ; env = []
       ; cwd = None
@@ -63,7 +63,7 @@ let shell_ir_typed_spec : ctor list =
     ; sandbox = "`Host"
     ; to_simple_body =
         {|
-      { Shell_ir.bin = Result.get_ok (Bin.of_string "cat")
+      { Shell_ir.bin = Bin.of_known Bin.Cat
       ; args = [ Shell_ir.Lit path ]
       ; env = []
       ; cwd = None
@@ -84,7 +84,7 @@ let shell_ir_typed_spec : ctor list =
         @ [ pattern ]
         @ (match path with None -> [] | Some p -> [ p ])
       in
-      { Shell_ir.bin = Result.get_ok (Bin.of_string "rg")
+      { Shell_ir.bin = Bin.of_known Bin.Rg
       ; args = List.map (fun s -> Shell_ir.Lit s) args
       ; env = []
       ; cwd = None
@@ -100,7 +100,7 @@ let shell_ir_typed_spec : ctor list =
     ; to_simple_body =
         {|
       let args = if short then [ "-s" ] else [] in
-      { Shell_ir.bin = Result.get_ok (Bin.of_string "git")
+      { Shell_ir.bin = Bin.of_known Bin.Git
       ; args = List.map (fun s -> Shell_ir.Lit s) ("status" :: args)
       ; env = []
       ; cwd = None
@@ -120,7 +120,7 @@ let shell_ir_typed_spec : ctor list =
         @ (match branch with None -> [] | Some b -> [ "-b"; b ])
         @ [ repo ]
       in
-      { Shell_ir.bin = Result.get_ok (Bin.of_string "git")
+      { Shell_ir.bin = Bin.of_known Bin.Git
       ; args = List.map (fun s -> Shell_ir.Lit s) ("clone" :: args)
       ; env = []
       ; cwd = None
@@ -150,7 +150,7 @@ let shell_ir_typed_spec : ctor list =
       in
       let body_args = match body with None -> [] | Some d -> [ "-d"; d ] in
       let args = method_args @ header_args @ body_args @ [ url ] in
-      { Shell_ir.bin = Result.get_ok (Bin.of_string "curl")
+      { Shell_ir.bin = Bin.of_known Bin.Curl
       ; args = List.map (fun s -> Shell_ir.Lit s) args
       ; env = []
       ; cwd = None
@@ -169,7 +169,7 @@ let shell_ir_typed_spec : ctor list =
         (if recursive then [ "-r" ] else [])
         @ (if force then [ "-f" ] else [])
       in
-      { Shell_ir.bin = Result.get_ok (Bin.of_string "rm")
+      { Shell_ir.bin = Bin.of_known Bin.Rm
       ; args = List.map (fun s -> Shell_ir.Lit s) (flag_args @ paths)
       ; env = []
       ; cwd = None
@@ -184,7 +184,7 @@ let shell_ir_typed_spec : ctor list =
     ; sandbox = "`Host"
     ; to_simple_body =
         {|
-      { Shell_ir.bin = Result.get_ok (Bin.of_string "sudo")
+      { Shell_ir.bin = Bin.of_known Bin.Sudo
       ; args = List.map (fun s -> Shell_ir.Lit s) target_argv
       ; env = []
       ; cwd = None

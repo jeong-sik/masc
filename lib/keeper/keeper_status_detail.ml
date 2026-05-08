@@ -186,6 +186,8 @@ let latest_metrics_json ~metrics_store ~metrics_path ~tail_bytes =
       | json :: _ -> Some json
       | [] -> None)
 
+type provider_scope = Local | Unknown | Non_local
+
 let provider_scope_of_model_label model_label =
   let prefix =
     Option.bind (Option.bind model_label nonempty_trimmed) (fun label ->
@@ -197,12 +199,12 @@ let provider_scope_of_model_label model_label =
         | _ -> None)
   in
   match prefix with
-  | None -> "unknown"
+  | None -> Unknown
   | Some name
     when String.equal name Provider_adapter.cn_llama
       || String.equal name Provider_adapter.cn_ollama ->
-      "local"
-  | Some _ -> "non_local"
+      Local
+  | Some _ -> Non_local
 
 let single_string_or_none values =
   match List.sort_uniq String.compare values with
@@ -219,28 +221,41 @@ let lightweight_runtime_contract_json ~selected_model ~runtime_blocker_class =
   let proof_note =
     "Lightweight status only. Use masc_runtime_verify for proof."
   in
-  if provider_scope <> "local" then
-    `Assoc
-      [
-        ("source", `String "none");
-        ("verified", `Bool false);
-        ("provider_scope", `String provider_scope);
-        ("provider_reachable", `Null);
-        ("healthy_runtime_count", `Null);
-        ("actual_model_id", `Null);
-        ("actual_slots", `Null);
-        ("actual_ctx", `Null);
-        ("chat_completion_compatible", `Null);
-        ("runtime_blocker", Json_util.string_opt_to_json runtime_blocker_class);
-        ( "note",
-          `String
-            (if provider_scope = "non_local" then
-               "Selected model is not a local llama/ollama runtime. "
-               ^ proof_note
-             else
-               "Selected model is unknown. " ^ proof_note) );
-      ]
-  else
+  match provider_scope with
+  | Unknown ->
+      `Assoc
+        [
+          ("source", `String "none");
+          ("verified", `Bool false);
+          ("provider_scope", `String "unknown");
+          ("provider_reachable", `Null);
+          ("healthy_runtime_count", `Null);
+          ("actual_model_id", `Null);
+          ("actual_slots", `Null);
+          ("actual_ctx", `Null);
+          ("chat_completion_compatible", `Null);
+          ("runtime_blocker", Json_util.string_opt_to_json runtime_blocker_class);
+          ("note", `String ("Selected model is unknown. " ^ proof_note));
+        ]
+  | Non_local ->
+      `Assoc
+        [
+          ("source", `String "none");
+          ("verified", `Bool false);
+          ("provider_scope", `String "non_local");
+          ("provider_reachable", `Null);
+          ("healthy_runtime_count", `Null);
+          ("actual_model_id", `Null);
+          ("actual_slots", `Null);
+          ("actual_ctx", `Null);
+          ("chat_completion_compatible", `Null);
+          ("runtime_blocker", Json_util.string_opt_to_json runtime_blocker_class);
+          ("note",
+           `String
+             ("Selected model is not a local llama/ollama runtime. "
+              ^ proof_note));
+        ]
+  | Local ->
     let endpoints_opt =
       try Some (Discovery_cache.get_cached_or_refresh ())
       with

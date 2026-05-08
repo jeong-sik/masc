@@ -70,7 +70,29 @@ let handle_gc ctx args =
   (true, gc_result ^ decision_note)
 
 let handle_cleanup_zombies ctx _args =
-  (true, Coord.cleanup_zombies ctx.config)
+  let result = Coord.cleanup_zombies ctx.config in
+  let msg =
+    match result with
+    | Coord.No_agents_dir -> "No agents directory"
+    | Coord.No_zombies -> "No zombie agents found"
+    | Coord.Cleaned { count; names; released_tasks; skipped } ->
+        let task_note =
+          if released_tasks = 0 then ""
+          else Printf.sprintf ", released %d orphan task(s)" released_tasks
+        in
+        if skipped > 0 then
+          Printf.sprintf
+            "Cleaned %d/%d zombie(s): %s%s (%d skipped due to errors)"
+            count
+            (count + skipped)
+            (String.concat ", " names)
+            task_note
+            skipped
+        else
+          Printf.sprintf "Cleaned up %d zombie agent(s): %s%s"
+            count (String.concat ", " names) task_note
+  in
+  (true, msg)
 
 let handle_tool_stats _ctx args =
   let top_n = max 1 (min 100 (get_int args "top_n" 20)) in

@@ -1,7 +1,7 @@
 // Agent detail worker brief — execution worker status panel
 
 import { html } from 'htm/preact'
-import { Card } from './common/card'
+import { CollapsibleSection } from './common/collapsible'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
 import { CopyIdButton } from './common/copy-id-button'
@@ -21,7 +21,7 @@ export function AgentWorkerBrief({ agentName }: { agentName: string }) {
   if (!worker) return null
 
   return html`
-    <${Card} title="워커 상태">
+    <${CollapsibleSection} title="워커 상태" mountWhenOpen=${true}>
       <div class="flex flex-col gap-1.5">
         <${WorkerInfoRow}>
           <${DetailLabel}>상태</${DetailLabel}>

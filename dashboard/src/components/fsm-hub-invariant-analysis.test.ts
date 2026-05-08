@@ -417,4 +417,22 @@ describe('deriveOperationalInsight', () => {
     )
     expect(insight.nextStep).toContain('idle')
   })
+
+  it('gives correct nextStep for routing turn', () => {
+    const insight = deriveOperationalInsight(
+      makeSnapshot({ turn_phase: 'routing' }),
+      noObservations,
+      now,
+    )
+    expect(insight.nextStep).toContain('cascade routing')
+  })
+
+  it('gives correct nextStep for exhausted turn', () => {
+    const insight = deriveOperationalInsight(
+      makeSnapshot({ turn_phase: 'exhausted' }),
+      noObservations,
+      now,
+    )
+    expect(insight.nextStep).toContain('소진')
+  })
 })

@@ -643,7 +643,18 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
         (match event with
          | Operator_stop { remove_meta } ->
            Printf.sprintf "remove_meta=%b" remove_meta
-         | _ -> "drain_complete") ]
+         | Drain_complete -> "drain_complete"
+         | Heartbeat_ok | Heartbeat_failed _ | Turn_succeeded | Turn_failed _
+         | Context_measured _ | Compaction_started | Compaction_completed _
+         | Compaction_failed _ | Context_overflow_detected _
+         | Compact_retry_exhausted | Handoff_started | Handoff_completed _
+         | Handoff_failed _ | Operator_pause | Operator_resume
+         | Stop_requested | Fiber_started | Fiber_terminated _
+         | Supervisor_restart_attempt _ | Restart_budget_exhausted
+         | Credential_archived | Zombie_timeout | Guardrail_stop _
+         | Terminal_failure_detected _ | Auto_compact_triggered
+         | Operator_compact_requested | Operator_clear_requested _ ->
+           event_to_string event) ]
   | Crashed, Restarting ->
     [ lifecycle "restarting" "backoff elapsed" ]
   | Restarting, Running ->
@@ -662,7 +673,17 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
              | None -> ""
            in
            Printf.sprintf "tokens=%d%s" r.token_count lim
-         | _ -> event_to_string event) ]
+         | Compact_retry_exhausted | Heartbeat_ok | Heartbeat_failed _
+         | Turn_succeeded | Turn_failed _ | Context_measured _
+         | Compaction_started | Compaction_completed _ | Compaction_failed _
+         | Handoff_started | Handoff_completed _ | Handoff_failed _
+         | Operator_pause | Operator_resume | Operator_stop _
+         | Stop_requested | Drain_complete | Fiber_started | Fiber_terminated _
+         | Supervisor_restart_attempt _ | Restart_budget_exhausted
+         | Credential_archived | Zombie_timeout | Guardrail_stop _
+         | Terminal_failure_detected _ | Auto_compact_triggered
+         | Operator_compact_requested | Operator_clear_requested _ ->
+           event_to_string event) ]
   | _, Failing ->
     [ lifecycle "failing" (event_to_string event) ]
   | Failing, Running ->
@@ -681,7 +702,19 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
       | Context_overflow_detected _
       | Compact_retry_exhausted -> "auto-compact retry exhausted"
       | Operator_pause -> "operator request"
-      | _ -> "operator request"
+      | Heartbeat_ok | Heartbeat_failed _ | Turn_succeeded | Turn_failed _
+      | Context_measured _ | Compaction_started | Compaction_completed _
+      | Compaction_failed _ | Handoff_started | Handoff_completed _
+      | Handoff_failed _ | Operator_resume | Operator_stop _
+      | Stop_requested | Drain_complete | Fiber_started | Fiber_terminated _
+      | Supervisor_restart_attempt _ | Restart_budget_exhausted
+      | Credential_archived | Zombie_timeout | Guardrail_stop _
+      | Terminal_failure_detected _ | Auto_compact_triggered
+      | Operator_compact_requested | Operator_clear_requested _ ->
+        (* These events should not normally trigger a Paused transition,
+           but if they do, label generically rather than mis-attributing
+           to "operator request". *)
+        event_to_string event
     in
     [ lifecycle "paused" detail ]
   | Paused, Running ->
@@ -697,7 +730,19 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
       | Operator_resume -> "operator request"
       | Compaction_completed _ -> "auto-compact recovered"
       | Fiber_terminated _ -> "fiber recovered"
-      | _ -> "operator request"
+      | Heartbeat_ok | Heartbeat_failed _ | Turn_succeeded | Turn_failed _
+      | Context_measured _ | Compaction_started | Compaction_failed _
+      | Handoff_started | Handoff_completed _ | Handoff_failed _
+      | Operator_stop _ | Operator_pause | Stop_requested | Drain_complete
+      | Fiber_started | Supervisor_restart_attempt _
+      | Restart_budget_exhausted | Credential_archived | Zombie_timeout
+      | Guardrail_stop _ | Terminal_failure_detected _
+      | Auto_compact_triggered | Operator_compact_requested
+      | Context_overflow_detected _ | Compact_retry_exhausted
+      | Operator_clear_requested _ ->
+        (* These events should not normally trigger a Paused→Running
+           transition; label generically via [event_to_string]. *)
+        event_to_string event
     in
     [ lifecycle "resumed" detail ]
   | _ -> []
@@ -947,9 +992,10 @@ let phase_to_mermaid ~(current : phase) : string =
   (match current with
    | Stopped | Dead | Zombie ->
      p "    class %s terminal\n" (phase_to_mermaid_id current)
-   | Failing | Overflowed | Compacting | HandingOff | Draining | Restarting ->
+   | Failing | Overflowed | Compacting | HandingOff | Draining | Restarting
+   | Crashed ->
      p "    class %s buffer\n" (phase_to_mermaid_id current)
-   | _ ->
+   | Running | Offline | Paused ->
      p "    class %s active\n" (phase_to_mermaid_id current));
   Buffer.contents b
 

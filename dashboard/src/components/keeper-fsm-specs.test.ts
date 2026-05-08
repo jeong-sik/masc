@@ -33,10 +33,10 @@ describe('buildCompositeFsmSpec', () => {
     expect(ids).toContain('Stable')
   })
 
-  it('creates KTC cluster with 5 child states', () => {
+  it('creates KTC cluster with 7 child states', () => {
     const spec = buildCompositeFsmSpec(defaultParams)
     const ktcChildren = spec.nodes.filter(n => n.parent === 'KTC')
-    expect(ktcChildren).toHaveLength(5)
+    expect(ktcChildren).toHaveLength(7)
   })
 
   it('creates KDP cluster with 4 child states', () => {
@@ -57,9 +57,9 @@ describe('buildCompositeFsmSpec', () => {
     expect(kmcChildren).toHaveLength(3)
   })
 
-  it('total node count = 5 parents + 24 children = 29', () => {
+  it('total node count = 5 parents + 26 children = 31', () => {
     const spec = buildCompositeFsmSpec(defaultParams)
-    expect(spec.nodes).toHaveLength(29)
+    expect(spec.nodes).toHaveLength(31)
   })
 
   it('returns empty edges by design', () => {

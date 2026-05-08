@@ -57,7 +57,7 @@ val compact_if_needed :
 (** {1 Trace and Model} *)
 
 (** Generate unique trace ID for a keeper turn. *)
-val generate_trace_id : unit -> string
+val generate_trace_id : ?now:float -> unit -> string
 
 (** Resolve effective model labels for a turn. *)
 val effective_model_labels_for_turn : keeper_meta -> string list

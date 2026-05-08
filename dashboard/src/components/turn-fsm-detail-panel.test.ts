@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { render } from "preact"
 import { html } from "htm/preact"
 import {
-  isExactTurnProjection,
   terminalTone,
   TurnFsmDetailPanel,
   turnFsmChipTone,
@@ -77,22 +76,6 @@ describe("terminalTone", () => {
   })
 })
 
-describe("isExactTurnProjection", () => {
-  it.each([
-    ["idle", "idle", true],
-    ["AWAITING_TOOL", "awaiting_tool", true],
-    ["awaiting_tool", "awaiting_tool_result", true],
-    ["  awaiting_tool  ", "awaiting_tool_result", true],
-    ["done", "done", true],
-    ["done", "idle", false],
-    ["awaiting_tool", "awaiting_tool", true],
-    ["unknown", null, false],
-    ["", "idle", false],
-  ])("isExactTurnProjection(%s, %s) → %s", (raw, projected, expected) => {
-    expect(isExactTurnProjection(raw, projected)).toBe(expected)
-  })
-})
-
 describe("TurnFsmDetailPanel", () => {
   let container: HTMLElement
 
@@ -108,7 +91,7 @@ describe("TurnFsmDetailPanel", () => {
 
   it("renders turn state and receipt badges through StatusChip", () => {
     const snapshot = keeperCompositeSnapshot({
-      turn_phase: "awaiting_tool",
+      turn_phase: "executing",
       execution: {
         latest_receipt_present: true,
         recorded_at: "2026-05-01T16:00:00Z",
@@ -130,9 +113,7 @@ describe("TurnFsmDetailPanel", () => {
 
     const chips = [...container.querySelectorAll("[data-status-chip]")]
     expect(chips.map(chip => chip.textContent?.trim())).toEqual(expect.arrayContaining([
-      "awaiting_tool_result",
-      "KTC awaiting_tool",
-      "TLA awaiting_tool",
+      "실행 중",
       "receipt failed",
       "reason tool_contract",
       "tool violated",
@@ -140,7 +121,6 @@ describe("TurnFsmDetailPanel", () => {
     ]))
     expect(chips.map(chip => chip.getAttribute("data-status-chip-tone"))).toEqual(expect.arrayContaining([
       "info",
-      "neutral",
       "bad",
     ]))
     expect(chips.every(chip => chip.getAttribute("data-status-chip-uppercase") === "false")).toBe(true)

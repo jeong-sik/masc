@@ -62,28 +62,31 @@ let pp_phase = Alcotest.testable
    The .ml implementation is symmetric: also forbids Turn_compacting
    under any phase other than Compacting. We mirror that stronger predicate. *)
 let expected_phase_turn_alignment (phase : SM.phase)
-                                  (tp    : Obs.turn_phase) : bool =
+                                  (tp    : Masc_mcp.Keeper_registry.packed_turn_phase) : bool =
   match phase, tp with
-  | SM.Compacting, Turn_compacting -> true
-  | SM.Compacting, _               -> false
-  | _,             Turn_compacting -> false
+  | SM.Compacting, Packed Turn_compacting -> true
+  | SM.Compacting, _                      -> false
+  | _,             Packed Turn_compacting -> false
   | _ -> true
 
 (* I3: TLA+ KeeperCompositeLifecycle.tla:368
    (kmc_compaction = "compacting") <=> (phase = "Compacting") *)
 let expected_compaction_atomicity (phase : SM.phase)
-                                  (kmc   : Obs.compaction_stage) : bool =
-  (kmc = Obs.Compaction_compacting) = (phase = SM.Compacting)
+                                  (kmc   : Masc_mcp.Keeper_registry.packed_compaction_stage) : bool =
+  match kmc with
+  | Packed Compaction_compacting -> (phase = SM.Compacting)
+  | Packed Compaction_accumulating | Packed Compaction_done ->
+      not (phase = SM.Compacting)
 
 (* I2: TLA+ KeeperCompositeLifecycle.tla:361
    (cascade in {selecting, trying, done, exhausted}) =>
      (shared_measurement /= 0) *)
 let expected_no_cascade_before_measurement
-    ~(cascade : Obs.cascade_state) ~(measured : bool) : bool =
+    ~(cascade : Masc_mcp.Keeper_registry.packed_cascade_state) ~(measured : bool) : bool =
   match cascade with
-  | Cascade_idle -> true
-  | Cascade_selecting | Cascade_trying
-  | Cascade_done | Cascade_exhausted -> measured
+  | Packed Cascade_idle -> true
+  | Packed Cascade_selecting | Packed Cascade_trying
+  | Packed Cascade_done | Packed Cascade_exhausted -> measured
 
 let test_phase_turn_alignment_table () =
   List.iter (fun phase ->
@@ -145,7 +148,7 @@ let test_no_cascade_before_measurement_table () =
    Post-bug state: cascade jumps to selecting with measurement_captured = false.
    Invariant violated: NoCascadeBeforeMeasurement (I2). *)
 let test_bug_cascade_before_measurement_caught () =
-  let post_bug_cascade : Obs.cascade_state = Cascade_selecting in
+  let post_bug_cascade : Masc_mcp.Keeper_registry.packed_cascade_state = Packed Cascade_selecting in
   let measured = false in
   let i2 = Obs.check_no_cascade_before_measurement
              ~cascade_state:post_bug_cascade
@@ -165,14 +168,14 @@ let test_bug_cascade_before_measurement_caught () =
    alone (turn_phase is unconstrained), so we only assert I3. *)
 let test_bug_compaction_desync_caught () =
   let post_bug_phase : SM.phase = SM.Running in
-  let post_bug_kmc : Obs.compaction_stage = Compaction_compacting in
+  let post_bug_kmc : Masc_mcp.Keeper_registry.packed_compaction_stage = Packed Compaction_compacting in
   let i3 = Obs.check_compaction_atomicity post_bug_phase post_bug_kmc in
   Alcotest.(check bool)
     "BugCompactionDesync → I3 CompactionAtomicity violated"
     false i3;
   (* And the symmetric formulation — Compacting with kmc != compacting
      also violates I3 (TLA+ says "<=>"). Test both arms once. *)
-  let mirror = Obs.check_compaction_atomicity SM.Compacting Compaction_accumulating in
+  let mirror = Obs.check_compaction_atomicity SM.Compacting (Packed Compaction_accumulating) in
   Alcotest.(check bool)
     "I3 is biconditional: phase=Compacting + kmc!=compacting also violates"
     false mirror
@@ -182,7 +185,7 @@ let test_bug_compaction_desync_caught () =
    one-way implication; the strengthening prevents observer drift where a
    live turn enters compaction while the parent is still Running. *)
 let test_phase_turn_alignment_strengthening () =
-  let actual = Obs.check_phase_turn_alignment SM.Running Turn_compacting in
+  let actual = Obs.check_phase_turn_alignment SM.Running (Masc_mcp.Keeper_registry.Packed Turn_compacting) in
   Alcotest.(check bool)
     "Running × Turn_compacting must be flagged (.ml strengthening)"
     false actual
@@ -196,7 +199,9 @@ let test_phase_turn_alignment_strengthening () =
    requires measurement_captured=true. The bug sets selecting while
    measurement is still unbound (analogous to no tool policy selected). *)
 let test_bug_selecting_without_tool_policy_caught () =
-  let post_bug_cascade : Obs.cascade_state = Cascade_selecting in
+  let post_bug_cascade : Masc_mcp.Keeper_registry.packed_cascade_state =
+    Masc_mcp.Keeper_registry.Packed Cascade_selecting
+  in
   let measured = false in
   let i2 = Obs.check_no_cascade_before_measurement
              ~cascade_state:post_bug_cascade
@@ -215,7 +220,9 @@ let test_bug_selecting_without_tool_policy_caught () =
    OCaml mirror: same predicate as BugSelectingWithoutToolPolicy — selecting
    with no measurement captured. *)
 let test_bug_select_without_measurement_caught () =
-  let post_bug_cascade : Obs.cascade_state = Cascade_selecting in
+  let post_bug_cascade : Masc_mcp.Keeper_registry.packed_cascade_state =
+    Masc_mcp.Keeper_registry.Packed Cascade_selecting
+  in
   let measured = false in
   let i2 = Obs.check_no_cascade_before_measurement
              ~cascade_state:post_bug_cascade
@@ -271,7 +278,9 @@ let test_bug_compaction_clears_overflow_caught () =
      DerivePhase would project Overflowed (context_overflow=true, compaction=false).
      The invariant says CompactionCompleted must clear overflow flags. *)
   let post_bug_phase : SM.phase = SM.Overflowed in
-  let post_bug_kmc : Obs.compaction_stage = Compaction_accumulating in
+  let post_bug_kmc : Masc_mcp.Keeper_registry.packed_compaction_stage =
+    Masc_mcp.Keeper_registry.Packed Compaction_accumulating
+  in
   let i3 = Obs.check_compaction_atomicity post_bug_phase post_bug_kmc in
   Alcotest.(check bool)
     "BuggyCompactionCompleted → phase=Overflowed + kmc=accumulating (I3 holds)"
@@ -283,7 +292,9 @@ let test_bug_compaction_clears_overflow_caught () =
      but the BUG is that compaction completed without clearing the flag.
      This is an action-property violation best caught at the event level. *)
   let post_bug_phase_bad : SM.phase = SM.Compacting in
-  let post_bug_kmc_bad : Obs.compaction_stage = Compaction_accumulating in
+  let post_bug_kmc_bad : Masc_mcp.Keeper_registry.packed_compaction_stage =
+    Masc_mcp.Keeper_registry.Packed Compaction_accumulating
+  in
   let i3_violated =
     Obs.check_compaction_atomicity post_bug_phase_bad post_bug_kmc_bad
   in
@@ -348,7 +359,7 @@ let test_ksm_kmc_join_auto_compact_triggers_compacting () =
          at this instant. The contract: while the registry has
          compaction_active=true, the runtime publishes Compaction_compacting.
          The two together must satisfy I3. *)
-      let i3 = Obs.check_compaction_atomicity r.new_phase Obs.Compaction_compacting in
+      let i3 = Obs.check_compaction_atomicity r.new_phase (Packed Compaction_compacting) in
       Alcotest.(check bool)
         "post-Auto_compact_triggered (Compacting, Compaction_compacting) ⇒ I3 holds"
         true i3;
@@ -356,7 +367,7 @@ let test_ksm_kmc_join_auto_compact_triggers_compacting () =
          an Accumulating KMC report would be a desync — the predicate
          must reject it. *)
       let i3_violated =
-        Obs.check_compaction_atomicity r.new_phase Obs.Compaction_accumulating
+        Obs.check_compaction_atomicity r.new_phase (Packed Compaction_accumulating)
       in
       Alcotest.(check bool)
         "Compacting × Compaction_accumulating violates I3 (drift detector)"
@@ -433,7 +444,7 @@ let prop_predicates_pure =
     ~count:500
     (QCheck.quad arb_phase arb_turn arb_cascade arb_compaction)
     (fun (ksm, turn, cascade, kmc) ->
-      let measured = (cascade <> Obs.Cascade_idle) in
+      let measured = (cascade <> (Masc_mcp.Keeper_registry.Packed Masc_mcp.Keeper_registry.Cascade_idle)) in
       let i1a = Obs.check_phase_turn_alignment ksm turn in
       let i1b = Obs.check_phase_turn_alignment ksm turn in
       let i2a = Obs.check_no_cascade_before_measurement
@@ -461,7 +472,7 @@ let prop_predicates_match_spec =
       Obs.check_compaction_atomicity ksm kmc
         = expected_compaction_atomicity ksm kmc
       &&
-      let measured = (cascade <> Obs.Cascade_idle) in
+      let measured = (cascade <> (Masc_mcp.Keeper_registry.Packed Masc_mcp.Keeper_registry.Cascade_idle)) in
       Obs.check_no_cascade_before_measurement
           ~cascade_state:cascade ~measurement_captured:measured
         = expected_no_cascade_before_measurement ~cascade ~measured)

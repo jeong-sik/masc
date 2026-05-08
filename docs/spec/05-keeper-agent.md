@@ -274,7 +274,7 @@ Triage -> BudgetCheck -> (ModelDeliberation | DeterministicBaseline) -> Execute 
 2. `load_context_from_checkpoint`로 세션/컨텍스트 복원
 3. `build_keeper_system_prompt` + `build_turn_prompt` callback으로 프롬프트 구성
 4. `make_tools` (keeper tool bridge) + `make_hooks` (safety gates) 생성
-5. `Oas_worker.run_named` -> OAS `Agent.run` loop (tool calls -> hooks -> response)
+5. `Keeper_turn_driver.run_named` -> OAS `Agent.run` loop (tool calls -> hooks -> response)
 6. `persist_message` (assistant 응답 영속화)
 7. 결과 반환: `run_result { response_text, model_used, turn_count, tool_calls_made, usage, tools_used }`
 

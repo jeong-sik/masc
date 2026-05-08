@@ -50,6 +50,19 @@ val tokens_available : t -> float
 val provider : t -> provider_id
 (** The provider tag passed to [create]. *)
 
+val release : t -> unit
+(** Return one token to the bucket.  Non-blocking; clamps at capacity.
+    Callers MUST pair every [try_acquire] that returned [true] with
+    exactly one [release] when the work completes. *)
+
+type refill_callback = unit -> unit
+
+val add_on_refill : t -> refill_callback -> unit
+(** Register a callback to be invoked when a refill event moves the
+    bucket from [< 1.0] to [>= 1.0] tokens.  This signals that a
+    previously throttled provider now has dispatchable capacity.
+    Multiple callbacks are supported (LIFO order).  Thread-safe. *)
+
 val refilled :
   current_tokens:float ->
   capacity:int ->

@@ -80,7 +80,7 @@ type wake_payload_event = {
   has_compact_happened : bool;
 }
 (** Wake-time payload observation captured once per
-    keeper turn (just before [Oas_worker.run_named]
+    keeper turn (just before [Keeper_turn_driver.run_named]
     fires).  [approx_body_bytes] is a MASC-side estimate;
     expect the real HTTP body to be ~1.3–1.5× this.
     Reached as a type by [keeper_agent_run]. *)

@@ -97,7 +97,7 @@ let oas_record ?(level = Agent_sdk.Log.Info) ~module_name ~message fields =
 
 let test_oas_bridge_interpolates_placeholder_messages () =
   let rendered =
-    Masc_mcp.Oas_log_bridge.render_record_message
+    Masc_mcp.Agent_sdk_log_bridge.render_record_message
       (oas_record
          ~module_name:"agent_tools"
          ~message:"tool %s: correction_pipeline fixed %d field(s)"
@@ -110,7 +110,7 @@ let test_oas_bridge_interpolates_placeholder_messages () =
 
 let test_oas_bridge_normalizes_generic_correction_messages () =
   let rendered =
-    Masc_mcp.Oas_log_bridge.render_record_message
+    Masc_mcp.Agent_sdk_log_bridge.render_record_message
       (oas_record
          ~module_name:"agent_tools"
          ~message:"correction_pipeline fixed tool input fields"
@@ -123,7 +123,7 @@ let test_oas_bridge_normalizes_generic_correction_messages () =
 
 let test_oas_bridge_promotes_mcp_server_failures_to_error () =
   let level =
-    Masc_mcp.Oas_log_bridge.effective_level
+    Masc_mcp.Agent_sdk_log_bridge.effective_level
       (oas_record
          ~level:Agent_sdk.Log.Warn
          ~module_name:"agent_config"
@@ -136,7 +136,7 @@ let test_oas_bridge_promotes_mcp_server_failures_to_error () =
 
 let test_oas_bridge_promotes_context_injector_failures_to_error () =
   let level =
-    Masc_mcp.Oas_log_bridge.effective_level
+    Masc_mcp.Agent_sdk_log_bridge.effective_level
       (oas_record
          ~level:Agent_sdk.Log.Warn
          ~module_name:"agent_turn"
@@ -149,7 +149,7 @@ let test_oas_bridge_promotes_context_injector_failures_to_error () =
 
 let test_oas_bridge_promotes_missing_approval_callback_to_error () =
   let level =
-    Masc_mcp.Oas_log_bridge.effective_level
+    Masc_mcp.Agent_sdk_log_bridge.effective_level
       (oas_record
          ~level:Agent_sdk.Log.Warn
          ~module_name:"agent_tools"

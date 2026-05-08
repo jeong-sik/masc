@@ -188,7 +188,7 @@ let runtime_mcp_keeper_log_context_of_entry
   let model =
     let last_model_used = String.trim entry.meta.runtime.usage.last_model_used in
     if last_model_used <> "" then last_model_used
-    else String.trim entry.meta.cascade_name
+    else String.trim (Keeper_types.cascade_name_of_meta entry.meta)
   in
   let session_id =
     match json_nonempty_string_opt "session_id" arguments with
@@ -251,7 +251,7 @@ let runtime_mcp_keeper_log_context_of_entry
     visible_tool_count = Some (List.length allowed_tool_names);
     required_tools = Some required_tools;
     missing_required_tools = Some missing_required_tools;
-    cascade_profile = Some entry.meta.cascade_name;
+    cascade_profile = Some (Keeper_types.cascade_name_of_meta entry.meta);
   }
 
 let runtime_mcp_keeper_error_preview message =

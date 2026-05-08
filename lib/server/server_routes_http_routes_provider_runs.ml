@@ -20,8 +20,13 @@ let o5_agent_board_inputs (config : Coord.config) =
        match Keeper_types.read_meta config name with
        | Ok (Some meta) ->
            let blocked_on =
-             let value = String.trim meta.runtime.last_blocker in
-             if value = "" then None else Some value
+             match meta.runtime.last_blocker with
+             | Some info ->
+               let value = String.trim info.detail in
+               if value = "" then
+                 Some (Keeper_types.blocker_class_to_string info.klass)
+               else Some value
+             | None -> None
            in
            Some {
              Agent_stress.agent = meta.name;

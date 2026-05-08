@@ -152,6 +152,7 @@ let telemetry_usage_missing_runtime_reported =
 
 let cn_llama = "llama"
 let cn_ollama = "ollama"
+let cn_unknown_provider = "unknown_provider"
 let cn_claude = "claude"
 let cn_codex = "codex"
 let cn_gemini = "gemini"

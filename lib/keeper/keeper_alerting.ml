@@ -310,7 +310,10 @@ let post_keeper_alert_slack
       webhook;
     ] in
     let (status, out) =
-      Process_eio.run_argv_with_stdin_and_status
+      Masc_exec.Exec_gate.run_argv_with_stdin_and_status
+        ~actor:"System_notify"
+        ~raw_source:(String.concat " " argv)
+        ~summary:"keeper alert slack webhook"
         ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Alerting ())
         ~stdin_content:payload
         argv
@@ -357,7 +360,10 @@ let slack_api_post_json
     url;
   ] in
   let (status, out) =
-    Process_eio.run_argv_with_stdin_and_status
+    Masc_exec.Exec_gate.run_argv_with_stdin_and_status
+      ~actor:"System_notify"
+      ~raw_source:(String.concat " " argv)
+      ~summary:"keeper alert slack api post"
       ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Alerting ())
       ~stdin_content:body
       argv
@@ -446,7 +452,10 @@ let post_keeper_alert_github
     @ List.concat_map (fun label -> [ "--label"; label ]) labels
     in
     let (status, out) =
-      Process_eio.run_argv_with_status
+      Masc_exec.Exec_gate.run_argv_with_status
+        ~actor:"Coord_git"
+        ~raw_source:(String.concat " " args)
+        ~summary:"keeper alert gh issue create"
         ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Alerting ())
         args
     in

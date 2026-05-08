@@ -995,12 +995,7 @@ function ConnectorLivePanel({
                   </div>
                 </div>
                 <div class="text-2xs text-[var(--color-status-warn)]/80">
-                  <div>
-                    <${BoldLabel}>원인: </${BoldLabel}> 사이드카 status 파일이 <${Tk}>${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}<//> 에서 관찰되지 않았습니다.
-                  </div>
-                  <div class="mt-1">
-                    <${BoldLabel}>다음: </${BoldLabel}> <strong>Start</strong> 버튼으로 백엔드를 통해 실행하거나, 아래 명령을 복사해 터미널에서 실행하세요. 오프라인이 지속되면 <strong>status</strong> 와 <strong>tail logs</strong> 를 사용하세요.
-                  </div>
+                  사이드카 status 파일이 <${Tk}>${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}<//> 에서 관찰되지 않았습니다.
                 </div>
                 <div class="mt-2 grid grid-cols-1 gap-1.5">
                   <${CopyableCode}
@@ -1407,24 +1402,24 @@ function EventRow({ event }: { event: GateEventInfo }) {
 
 function DisclosurePanel({
   title,
-  subtitle,
+  badge,
   children,
   testId,
 }: {
   title: string
-  subtitle: string
+  badge?: ComponentChildren
   children: ComponentChildren
   testId: string
 }) {
   return html`
-    <details class="mb-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]" data-testid=${testId}>
+    <details class="group mb-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]" data-testid=${testId}>
       <summary class="cursor-pointer list-none px-3 py-2.5">
         <div class="flex items-center justify-between gap-3">
-          <div>
-            <div class="text-2xs font-semibold uppercase tracking-4 text-[var(--color-fg-primary)]">${title}</div>
-            <div class="mt-1 text-2xs text-[var(--color-fg-disabled)]">${subtitle}</div>
+          <div class="text-2xs font-semibold uppercase tracking-4 text-[var(--color-fg-primary)]">${title}</div>
+          <div class="flex items-center gap-2 text-2xs text-[var(--color-fg-disabled)]">
+            ${badge ?? null}
+            <span aria-hidden="true" class="transition-transform group-open:rotate-180">▾</span>
           </div>
-          <span class="text-2xs text-[var(--color-fg-disabled)]">펴기</span>
         </div>
       </summary>
       <div class="border-t border-[var(--color-border-default)] px-3 py-3">
@@ -1441,23 +1436,25 @@ function GateAnalyticsSection({
   gate: GateStatusData | null
   gateError: string | null
 }) {
-  let subtitle = '메시지, 에러, 최근 이벤트와 room binding을 필요할 때만 펼쳐 봅니다.'
+  let badge: ComponentChildren = null
   if (gateError) {
-    subtitle = `Gate metrics unavailable: ${gateError}`
+    badge = html`<span class="text-[var(--color-status-err)]">메트릭 없음</span>`
   } else if (gate === null) {
-    subtitle = 'Gate-observed traffic is not available yet.'
+    badge = html`<span>관찰된 트래픽 없음</span>`
+  } else {
+    badge = html`<span>메시지 ${gate.total_messages} · 오류 ${gate.total_errors}</span>`
   }
 
   return html`
     <${DisclosurePanel}
       title="게이트 분석"
-      subtitle=${subtitle}
+      badge=${badge}
       testId="connector-gate-analytics"
     >
       ${gate === null
         ? html`
             <div class="rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] px-3 py-4 text-xs text-[var(--color-fg-disabled)]">
-              게이트가 광고하는 connector runtime 은 보이지만, 게이트가 관찰한 트래픽 은 아직 없습니다.
+              connector runtime은 등록됐으나 게이트가 관찰한 트래픽은 아직 없습니다.
             </div>
           `
         : html`
@@ -1591,20 +1588,13 @@ export function ConnectorStatusPanel() {
 
   return html`
     <div class="contain-content">
-      <div class="mb-3 flex items-start justify-between gap-3">
-        <div>
-          <h3 class="text-sm font-semibold text-[var(--color-fg-primary)]">${filterId ? CONNECTOR_DISPLAY_NAMES[filterId as KnownConnectorId] ?? '커넥터' : '커넥터'}</h3>
-          <div class="mt-1 text-2xs text-[var(--color-fg-disabled)]">
-            ${filterId
-              ? `${CONNECTOR_DISPLAY_NAMES[filterId as KnownConnectorId] ?? filterId} sidecar의 라이브 상태와 keeper 바인딩.`
-              : '4종 채널 sidecar overview 카드에서 커넥터를 고르면 아래 상세 패널이 교체됩니다.'}
-          </div>
-        </div>
+      <div class="mb-3 flex items-center justify-between gap-3">
+        <h3 class="text-sm font-semibold text-[var(--color-fg-primary)]">${filterId ? CONNECTOR_DISPLAY_NAMES[filterId as KnownConnectorId] ?? '커넥터' : '커넥터'}</h3>
         ${filterId
           ? html`
               <div class="text-right text-3xs uppercase tracking-5 text-[var(--color-fg-disabled)]">
                 <div>${d ? `success ${d.success_rate_pct}%` : `${visibleConnectors.length} connector${visibleConnectors.length !== 1 ? 's' : ''}`}</div>
-                <div>${d ? `uptime ${formatUptime(d.uptime_seconds)}` : 'gate metrics unavailable'}</div>
+                <div>${d ? `uptime ${formatUptime(d.uptime_seconds)}` : '게이트 메트릭 없음'}</div>
               </div>
             `
           : null}
@@ -1630,11 +1620,7 @@ export function ConnectorStatusPanel() {
               data-testid="connector-detail-panel"
             >
               <div class="mb-3 flex items-center justify-between gap-3 text-2xs">
-                <div>
-                  <span class="font-semibold text-[var(--color-fg-primary)]">${CONNECTOR_DISPLAY_NAMES[focusedConnectorId]}</span>
-                  <span class="ml-2 text-[var(--color-fg-disabled)]">선택한 커넥터의 상세와 액션만 보여줍니다.</span>
-                </div>
-                <${MutedSpan}>overview 카드에서 전환</${MutedSpan}>
+                <span class="font-semibold text-[var(--color-fg-primary)]">${CONNECTOR_DISPLAY_NAMES[focusedConnectorId]}</span>
               </div>
               <${ConnectorLivePanel}
                 connector=${focusedConnector}
@@ -1665,7 +1651,7 @@ export function ConnectorStatusPanel() {
         ? html`
             <${DisclosurePanel}
               title="키퍼 매트릭스"
-              subtitle="cross-connector binding 현황은 필요할 때만 펼쳐 봅니다."
+              badge=${html`<span>키퍼 ${snapshot.keepers.length}</span>`}
               testId="connector-matrix-disclosure"
             >
               <${ConnectorKeeperMatrix} matrix=${deriveMatrix(allConnectors, snapshot.keepers)} />

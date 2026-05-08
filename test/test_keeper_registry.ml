@@ -1357,9 +1357,9 @@ let drive_turn_to_finalizing keeper_name =
   R.mark_turn_started ~base_path:bp keeper_name;
   R.set_turn_decision_stage
     ~base_path:bp keeper_name R.Decision_tool_policy_selected;
-  R.set_turn_cascade_state ~base_path:bp keeper_name R.Cascade_selecting;
-  R.set_turn_cascade_state ~base_path:bp keeper_name R.Cascade_trying;
-  R.set_turn_cascade_state ~base_path:bp keeper_name R.Cascade_done
+  R.set_turn_cascade_state ~base_path:bp keeper_name (R.Packed R.Cascade_selecting);
+  R.set_turn_cascade_state ~base_path:bp keeper_name (R.Packed R.Cascade_trying);
+  R.set_turn_cascade_state ~base_path:bp keeper_name (R.Packed R.Cascade_done)
 
 let test_mark_sdk_turn_started_resets_after_finalizing () =
   R.clear ();
@@ -1374,11 +1374,11 @@ let test_mark_sdk_turn_started_resets_after_finalizing () =
      | None -> fail "observation cleared by mark_sdk_turn_started"
      | Some obs ->
        check bool "turn_phase reset to Turn_prompting" true
-         (obs.R.turn_phase = R.Turn_prompting);
+         (obs.R.turn_phase = R.Packed R.Turn_prompting);
        check bool "cascade_state reset to Cascade_idle" true
-         (obs.R.cascade_state = R.Cascade_idle);
+         (obs.R.cascade_state = R.Packed R.Cascade_idle);
        check bool "decision_stage reset to Decision_undecided" true
-         (obs.R.decision_stage = R.Decision_undecided))
+         (obs.R.decision_stage = R.Packed R.Decision_undecided))
 
 let test_mark_sdk_turn_started_preserves_keeper_scope () =
   R.clear ();
@@ -1427,12 +1427,12 @@ let test_two_sdk_turn_boundaries_no_assert () =
   R.mark_sdk_turn_started ~base_path:bp keeper_name;
   R.set_turn_decision_stage
     ~base_path:bp keeper_name R.Decision_tool_policy_selected;
-  R.set_turn_cascade_state ~base_path:bp keeper_name R.Cascade_selecting;
+  R.set_turn_cascade_state ~base_path:bp keeper_name (R.Packed R.Cascade_selecting);
   match R.get ~base_path:bp keeper_name with
   | Some { current_turn_observation = Some obs; _ } ->
-    check bool "second SDK turn lands in Cascade_selecting / Turn_prompting" true
-      (obs.R.cascade_state = R.Cascade_selecting
-       && obs.R.turn_phase = R.Turn_prompting)
+    check bool "second SDK turn lands in Cascade_selecting / Turn_routing" true
+      (obs.R.cascade_state = R.Packed R.Cascade_selecting
+       && obs.R.turn_phase = R.Packed R.Turn_routing)
   | _ -> fail "obs missing after second SDK boundary"
 
 let test_effective_keepalive_meta_prefers_disk_when_present () =

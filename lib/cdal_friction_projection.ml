@@ -44,13 +44,13 @@ let effects_suffix = "evidence/effects.json"
 let review_warning_suffix = "evidence/review_warning.json"
 
 (** Find the first raw_evidence_ref that ends with mode_violations.json. *)
-let find_violations_ref (proof : Agent_sdk.Cdal_proof.t) : string option =
+let find_violations_ref (proof : Masc_mcp_cdal_runtime.Cdal_proof.t) : string option =
   List.find_opt
     (fun ref_ -> String.ends_with ~suffix:mode_violations_suffix ref_)
     proof.raw_evidence_refs
 
 (** Find the first raw_evidence_ref that ends with effects.json. *)
-let find_effects_ref (proof : Agent_sdk.Cdal_proof.t) : string option =
+let find_effects_ref (proof : Masc_mcp_cdal_runtime.Cdal_proof.t) : string option =
   List.find_opt
     (fun ref_ -> String.ends_with ~suffix:effects_suffix ref_)
     proof.raw_evidence_refs
@@ -60,7 +60,7 @@ let key_of_violation (v : Violation_record.t) : blocked_attempt_key =
   {
     tool_name = v.tool_name;
     violation_kind = Violation_record.violation_kind_to_string v.violation_kind;
-    effective_mode = Agent_sdk.Execution_mode.to_string v.effective_mode;
+    effective_mode = Masc_mcp_cdal_runtime.Execution_mode.to_string v.effective_mode;
   }
 
 (** Compare two keys for stable sorting. *)
@@ -152,8 +152,8 @@ let source_path_gap : Cdal_types.completeness_gap =
 
 let source_path_tripwire = "source_path_evidence:mode_enforcer"
 
-let effects_have_source_path ~(store : Agent_sdk.Proof_store.config)
-    (proof : Agent_sdk.Cdal_proof.t) : bool =
+let effects_have_source_path ~(store : Masc_mcp_cdal_runtime.Proof_store.config)
+    (proof : Masc_mcp_cdal_runtime.Cdal_proof.t) : bool =
   match find_effects_ref proof with
   | None -> false
   | Some ref_ ->
@@ -164,8 +164,8 @@ let effects_have_source_path ~(store : Agent_sdk.Proof_store.config)
       | Error _ -> false
       | Ok events -> Effect_evidence.any_source_path_present events
 
-let source_path_gaps_for_run ~(store : Agent_sdk.Proof_store.config)
-    ~(blocked_attempt_count : int) (proof : Agent_sdk.Cdal_proof.t)
+let source_path_gaps_for_run ~(store : Masc_mcp_cdal_runtime.Proof_store.config)
+    ~(blocked_attempt_count : int) (proof : Masc_mcp_cdal_runtime.Cdal_proof.t)
     : Cdal_types.completeness_gap list =
   if blocked_attempt_count = 0 || effects_have_source_path ~store proof then []
   else [ source_path_gap ]
@@ -175,10 +175,10 @@ let source_path_gaps_for_run ~(store : Agent_sdk.Proof_store.config)
 (* ================================================================ *)
 
 let project_single_run
-    ~(store : Agent_sdk.Proof_store.config)
+    ~(store : Masc_mcp_cdal_runtime.Proof_store.config)
     ?(completeness_gaps : Cdal_types.completeness_gap list = [])
     ?(tripwire_threshold = 3)
-    (proof : Agent_sdk.Cdal_proof.t)
+    (proof : Masc_mcp_cdal_runtime.Cdal_proof.t)
     : friction_projection option =
   let groups, blocked_attempt_count =
     match find_violations_ref proof with
@@ -288,8 +288,8 @@ let merge_groups (all_groups : blocked_attempt_group list list)
   |> List.sort (fun a b -> compare_key a.key b.key)
 
 let project_single_run_groups
-    ~(store : Agent_sdk.Proof_store.config)
-    (proof : Agent_sdk.Cdal_proof.t)
+    ~(store : Masc_mcp_cdal_runtime.Proof_store.config)
+    (proof : Masc_mcp_cdal_runtime.Cdal_proof.t)
     : blocked_attempt_group list * int =
   match find_violations_ref proof with
   | None -> ([], 0)
@@ -306,11 +306,11 @@ let project_single_run_groups
         (g, c)
 
 let project_window
-    ~(store : Agent_sdk.Proof_store.config)
+    ~(store : Masc_mcp_cdal_runtime.Proof_store.config)
     ~(window : run_window)
     ?(completeness_gaps : Cdal_types.completeness_gap list = [])
     ?(tripwire_threshold = 3)
-    (proofs : Agent_sdk.Cdal_proof.t list)
+    (proofs : Masc_mcp_cdal_runtime.Cdal_proof.t list)
     : friction_projection option =
   match window, proofs with
   | Single_run, [proof] ->
@@ -350,7 +350,7 @@ let project_window
     in
     if blocked_attempt_count = 0 && gap_groups = [] then None
     else
-      let run_ids = List.map (fun (p : Agent_sdk.Cdal_proof.t) -> p.run_id) proofs in
+      let run_ids = List.map (fun (p : Masc_mcp_cdal_runtime.Cdal_proof.t) -> p.run_id) proofs in
       Some {
         window = window_to_string window;
         based_on_run_ids = run_ids;

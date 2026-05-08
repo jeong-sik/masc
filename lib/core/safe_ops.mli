@@ -93,8 +93,23 @@ val read_json_file_logged : label:string -> string -> Yojson.Safe.t option
     Returns [Some json] on success, [None] on failure with a warning log. *)
 
 val persistence_read_drop_reason_list_dir_error : string
+(** Failure listing a directory that backs a persistence surface. *)
+
 val persistence_read_drop_reason_entry_load_error : string
+(** Failure loading an entry's bytes (file IO error) or, when the loader
+    combines IO + parse in a single result, either of those failures.
+    Use the more specific {!persistence_read_drop_reason_json_syntax_error}
+    when IO and JSON parse are split into separate code paths. *)
+
 val persistence_read_drop_reason_invalid_payload : string
+(** Entry parsed successfully but failed schema/structural validation
+    (e.g. record-of-yojson [Error _], required field missing). *)
+
+val persistence_read_drop_reason_json_syntax_error : string
+(** [Yojson.Json_error] raised while parsing a single line/value.  Use
+    this when the load step is logically split from the parse step
+    (typical of JSONL surfaces) so the metric distinguishes "file
+    unreadable" from "lines malformed". *)
 
 val report_persistence_read_drop :
   on_drop:(unit -> unit) ->

@@ -28,6 +28,9 @@
  (names test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_dashboard_oas_bridge test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_auth_doctor test_auth_error_kind test_auth_login test_audit_log test_governance_anomaly test_http_negotiation
         test_keeper_turn_terminal_code_byte_compat
         test_keeper_sdk_error_typed_bridge
+        test_read_drop_reason
+        test_keeper_turn_disposition
+        test_keeper_turn_terminal_disposition_field
         test_attempt_state
         test_sse test_graphql_api
         test_graphql_endpoint
@@ -40,6 +43,8 @@
         test_dashboard_branches
         test_dashboard_perf
         test_dashboard_tool_host_events
+        test_dashboard_nav_event
+        test_cdal_tool_id
         test_tool_assignment_telemetry
         test_dashboard_link_preview
         test_gate_keeper_backend
@@ -59,6 +64,7 @@
         test_keeper_hooks_oas_pricing
         test_keeper_hooks_oas_telemetry
         test_masc_oas_bridge_timeout_guard
+        test_keeper_llm_bridge
         test_agent_stress
         test_keeper_tool_use_failure_counter
         test_keeper_compaction_outcome_counter
@@ -232,6 +238,7 @@
         test_lockfree_atomic
         test_telemetry_observe
         test_keeper_typed_labels
+        test_shell_ir_typed_review_followup
         test_auth_resolve_labels
         test_keeper_classifier_helper
         test_persona_tool_reachability
@@ -260,6 +267,9 @@
  (modules test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_dashboard_oas_bridge test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_auth_doctor test_auth_error_kind test_auth_login test_audit_log test_governance_anomaly test_http_negotiation
           test_keeper_turn_terminal_code_byte_compat
           test_keeper_sdk_error_typed_bridge
+          test_read_drop_reason
+          test_keeper_turn_disposition
+          test_keeper_turn_terminal_disposition_field
           test_attempt_state
           test_sse test_graphql_api
           test_graphql_endpoint
@@ -272,6 +282,8 @@
           test_dashboard_branches
           test_dashboard_perf
           test_dashboard_tool_host_events
+          test_dashboard_nav_event
+          test_cdal_tool_id
           test_tool_assignment_telemetry
           test_dashboard_link_preview
           test_gate_keeper_backend
@@ -291,6 +303,7 @@
           test_keeper_hooks_oas_pricing
           test_keeper_hooks_oas_telemetry
           test_masc_oas_bridge_timeout_guard
+          test_keeper_llm_bridge
           test_agent_stress
           test_keeper_tool_use_failure_counter
           test_keeper_compaction_outcome_counter
@@ -467,6 +480,7 @@
           test_lockfree_atomic
           test_telemetry_observe
           test_keeper_typed_labels
+          test_shell_ir_typed_review_followup
           test_auth_resolve_labels
           test_keeper_classifier_helper
           test_persona_tool_reachability
@@ -1114,7 +1128,6 @@
 (include stanzas/test_cascade_kimi_max_context_ssot.inc)
 (include stanzas/test_cascade_model_resolve.inc)
 (include stanzas/test_cascade_ollama_probe.inc)
-(include stanzas/test_cascade_routes_bigthree_ssot.inc)
 (include stanzas/test_cascade_runtime.inc)
 (include stanzas/test_cascade_strategy.inc)
 (include stanzas/test_cascade_trust_persist.inc)
@@ -1222,6 +1235,7 @@
 (include stanzas/test_keeper_tool_matrix.inc)
 (include stanzas/test_keeper_tool_policy_paths.inc)
 (include stanzas/test_keeper_turn_fsm_tla_parity.inc)
+(include stanzas/test_keeper_unified_tool_event_order_source.inc)
 (include stanzas/test_keeper_turn_livelock_10121.inc)
 (include stanzas/test_keeper_turn_helpers_side_effect_metric.inc)
 (include stanzas/test_keeper_turn_slot_force_release.inc)

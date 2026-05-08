@@ -1,34 +1,32 @@
 (** Cross-module SSOT drift guard.
 
-    [Cascade_routes.keeper_default_last_resort_profile] must agree with
-    [Keeper_cascade_profile.default_name] at all times.  These two strings
-    cannot reference a single SSOT directly because [Keeper_cascade_profile]
-    already depends on [Cascade_routes] (cycle prevention), so this test is
-    the guard that catches drift.
+    [Keeper_cascade_profile.default_name] must agree with
+    [Cascade_defaults.keeper_fallback_profile], the canonical SSOT.
 
-    If you change either constant and this test breaks, change BOTH. *)
+    The former circular dependency ([Keeper_cascade_profile] depends on
+    [Cascade_routes]) prevented a single shared constant.  [Cascade_defaults]
+    breaks the cycle by living in [lib/cascade/] with no upward deps.
+
+    If you change the literal and this test breaks, change ALL THREE. *)
 
 open Masc_mcp
 
+let ssot = Cascade_defaults.keeper_fallback_profile
+
 let test_drift () =
   Alcotest.(check string)
-    "Cascade_routes.keeper_default_last_resort_profile = \
-     Keeper_cascade_profile.default_name"
+    "Keeper_cascade_profile.default_name = ssot"
+    ssot
     Keeper_cascade_profile.default_name
-    Cascade_routes.keeper_default_last_resort_profile
 
 let test_value_is_big_three () =
-  (* Belt-and-braces: pin both ends to the literal so a stealth rename of
-     either module's constant doesn't slip through with both sides
+  (* Belt-and-braces: pin the canonical string so a stealth rename of
+     any module's constant doesn't slip through with all sides
      drifting in sync. *)
   Alcotest.(check string)
-    "Cascade_routes side"
+    "ssot literal"
     "big_three"
-    Cascade_routes.keeper_default_last_resort_profile;
-  Alcotest.(check string)
-    "Keeper_cascade_profile side"
-    "big_three"
-    Keeper_cascade_profile.default_name
+    ssot
 
 let () =
   let case name f = Alcotest.test_case name `Quick f in

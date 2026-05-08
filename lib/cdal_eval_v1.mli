@@ -14,8 +14,8 @@ type eval_outcome =
 
 (** Run the full evaluation pipeline: load bundle, judge, compute friction. *)
 val evaluate :
-  store:Agent_sdk.Proof_store.config ->
-  Agent_sdk.Cdal_proof.t ->
+  store:Masc_mcp_cdal_runtime.Proof_store.config ->
+  Masc_mcp_cdal_runtime.Cdal_proof.t ->
   eval_outcome
 
 (** Extract the verdict from either outcome branch. *)

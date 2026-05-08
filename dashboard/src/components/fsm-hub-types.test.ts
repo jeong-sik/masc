@@ -73,7 +73,7 @@ describe('extractLaneValue', () => {
 
   it('handles all valid turn values', () => {
     const turns: KeeperCompositeSnapshot['turn_phase'][] = [
-      'idle', 'prompting', 'executing', 'compacting', 'finalizing',
+      'idle', 'prompting', 'routing', 'executing', 'compacting', 'finalizing', 'exhausted',
     ]
     for (const turn of turns) {
       expect(extractLaneValue(snapshot({ turn_phase: turn }), 'turn')).toBe(turn)

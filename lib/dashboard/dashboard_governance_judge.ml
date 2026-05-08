@@ -655,7 +655,7 @@ let compute_judgments
       ~caller:Env_config_oas_bridge.Governance_judge (fun () ->
       let factual_json = build_facts () in
       let prompt = prompt_for_facts factual_json in
-      Oas_worker.run_named_with_masc_tools ~cascade_name
+      Keeper_turn_driver_wrappers.run_named_with_masc_tools ~cascade_name
         ~goal:prompt ~masc_tools ~dispatch ~max_turns:3
         ~approval:Approval_callbacks.auto_approve
         ()
@@ -663,9 +663,9 @@ let compute_judgments
   with
   | Error err -> Error (Agent_sdk.Error.to_string err)
   | Ok result -> (
-      let response = result.Oas_worker.response in
+      let response = result.Cascade_runner.response in
       try
-        let raw_text = Oas_response.text_of_response response in
+        let raw_text = Agent_sdk_response.text_of_response response in
         let generated_at = now_iso () in
         let expires_at = iso_of_unix (Unix.gettimeofday () +. cache_ttl_sec ()) in
         (* #9880 facet 4: 17% of yesterday's judgment records had

@@ -264,8 +264,8 @@ let restore_original_content ~workdir ~target_file ~original_content ~sync_index
     Log.Autoresearch.warn "failed to restore %s: %s" target_file err
 
 let diff_guard_summary report =
-  report.Agent_sdk.Autonomy_diff_guard.issues
-  |> List.map Agent_sdk.Autonomy_diff_guard.show_issue
+  report.Masc_mcp_cdal_runtime.Autonomy_diff_guard.issues
+  |> List.map Masc_mcp_cdal_runtime.Autonomy_diff_guard.show_issue
   |> String.concat "; "
 
 (** Run one experiment cycle: the real Karpathy loop turn.
@@ -434,13 +434,13 @@ let handle_cycle (ctx : Tool_autoresearch_context.t) args =
                    ]
                | Ok patch ->
                  let report =
-                   Agent_sdk.Autonomy_diff_guard.validate_patch
+                   Masc_mcp_cdal_runtime.Autonomy_diff_guard.validate_patch
                      ~allowed_paths:[ target_file ]
                      patch
                  in
                  if List.exists
                       (function
-                        | Agent_sdk.Autonomy_diff_guard.Empty_patch -> true
+                        | Masc_mcp_cdal_runtime.Autonomy_diff_guard.Empty_patch -> true
                         | _ -> false)
                       report.issues
                  then (

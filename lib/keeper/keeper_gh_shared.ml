@@ -213,11 +213,14 @@ let fetch_entity_numbers ~(config : Coord.config) ~(repo_slug : string) ~(kind :
       (Filename.quote (jq_filter kind))
   in
   let scoped = Keeper_gh_env.with_env config raw in
-  let shell = Printf.sprintf "%s 2>/dev/null" scoped in
+  let argv = [ "/bin/zsh"; "-lc"; Printf.sprintf "%s 2>/dev/null" scoped ] in
   match
-    Process_eio.run_argv_with_status
+    Masc_exec.Exec_gate.run_argv_with_status
+      ~actor:"Coord_git"
+      ~raw_source:(String.concat " " argv)
+      ~summary:"keeper gh cache fetch"
       ~timeout_sec:(Keeper_tool_policy.gh_cache_fetch_timeout_sec ())
-      [ "/bin/zsh"; "-lc"; shell ]
+      argv
   with
   | Unix.WEXITED 0, out -> Some (parse_numbers_from_jq_output out)
   | _ ->
@@ -705,21 +708,29 @@ let repo_slug_of_worktree_gitfile ~worktree_cwd =
   | None -> None
 
 let repo_slug_of_git_command ~cwd =
+  let argv = [ "git"; "remote"; "get-url"; "origin" ] in
   match
-    Process_eio.run_argv_with_status
+    Masc_exec.Exec_gate.run_argv_with_status
+      ~actor:"Coord_git"
+      ~raw_source:(String.concat " " argv)
+      ~summary:"keeper gh repo slug from git"
       ~cwd
       ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Git_meta ())
-      [ "git"; "remote"; "get-url"; "origin" ]
+      argv
   with
   | Unix.WEXITED 0, url -> repo_slug_of_remote_url url
   | _ -> None
 
 let origin_url_of_git_command ~cwd =
+  let argv = [ "git"; "remote"; "get-url"; "origin" ] in
   match
-    Process_eio.run_argv_with_status
+    Masc_exec.Exec_gate.run_argv_with_status
+      ~actor:"Coord_git"
+      ~raw_source:(String.concat " " argv)
+      ~summary:"keeper gh origin url from git"
       ~cwd
       ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Git_meta ())
-      [ "git"; "remote"; "get-url"; "origin" ]
+      argv
   with
   | Unix.WEXITED 0, url ->
     let url = String.trim url in

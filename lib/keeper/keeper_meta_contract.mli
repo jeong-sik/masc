@@ -140,6 +140,8 @@ type blocker_class =
   | Autonomous_slot_wait_timeout
   | Admission_queue_wait_timeout
   | Turn_timeout_after_queue_wait
+  | Admission_wait_wfq
+  | Admission_surface
   | Oas_timeout_budget
   | Turn_timeout
   | Completion_contract_violation
@@ -183,6 +185,35 @@ val blocker_class_of_serialized_string :
     {!Keeper_meta_json_parse} to decode persisted blocker
     state. *)
 
+(** {1 Unified blocker_info} *)
+
+type blocker_info = {
+  klass : blocker_class;
+  detail : string;
+}
+(** Authoritative blocker representation: a typed [blocker_class]
+    paired with optional free-form [detail] (UI / Prometheus label).
+    Replaces the deprecated [last_blocker: string] +
+    [last_blocker_class: blocker_class option] pair so substring
+    classification (the [blocker_class_of_string] workaround) is
+    no longer load-bearing.  When there is no blocker, the runtime
+    state holds [None]; when there is a blocker, [klass] is always
+    populated and [detail] may be ["" ]. *)
+
+val blocker_info_of_class : ?detail:string -> blocker_class -> blocker_info
+(** [blocker_info_of_class ?detail klass] constructs a [blocker_info]
+    for [klass].  [detail] defaults to [""]. *)
+
+val blocker_info_to_json : blocker_info -> Yojson.Safe.t
+(** Round-trippable JSON encoding.  [Cascade_exhausted reason] uses
+    a structured object so the inner [cascade_exhaustion_reason] is
+    preserved across read/write cycles. *)
+
+val blocker_info_of_json : Yojson.Safe.t -> blocker_info option
+(** Parses the JSON shape emitted by {!blocker_info_to_json}.
+    Returns [None] for [`Null] or any value whose [klass] field is
+    absent / not recognisable. *)
+
 (** {1 Agent runtime state record} *)
 
 type agent_runtime_state = {
@@ -207,8 +238,7 @@ type agent_runtime_state = {
   last_social_transition_reason : string;
   last_active_desire : string;
   last_current_intention : string;
-  last_blocker : string;
-  last_blocker_class : blocker_class option;
+  last_blocker : blocker_info option;
   last_need : string;
 }
 
@@ -224,8 +254,8 @@ type keeper_meta = {
   mid_goal : string;
   long_goal : string;
   social_model : string;
-  cascade_name : string;
   models : string list;
+  cascade_ref : Cascade_ref.cascade_ref option;
   will : string;
   needs : string;
   desires : string;
@@ -286,6 +316,36 @@ type keeper_meta = {
   oas_env : (string * string) list;
   meta_version : int;
 }
+
+(** {1 Cascade name derivation} *)
+
+val cascade_name_of_meta : keeper_meta -> string
+(** [cascade_name_of_meta m] is the canonical cascade name for the keeper.
+
+    Resolution order (RFC-0041 transition phase):
+    1. If [m.cascade_ref] is [Some] and [.group] is non-empty, return [.group].
+    2. Otherwise return [m.cascade_name].
+
+    During the migration phase both fields coexist and may diverge if a
+    caller writes only one. New code MUST set [cascade_ref] when changing
+    routing — read sites should use this helper instead of touching
+    [m.cascade_name] directly. The plain [m.cascade_name] field will be
+    removed once all read sites migrate. *)
+
+val set_cascade_name : string -> keeper_meta -> keeper_meta
+(** [set_cascade_name name m] returns a meta where both [cascade_name]
+    and [cascade_ref] are pinned to [name]. The cascade_ref takes the
+    form [{ group = name; item = None }] so the group's traversal
+    strategy decides item selection at routing time.
+
+    Use this helper for every write that intends to change the keeper's
+    cascade routing target. Direct record updates of only [cascade_name]
+    are deprecated and produce drift — [cascade_name_of_meta] would then
+    return the stale [cascade_ref.group] instead of the new value.
+
+    For record-literal initialization (full keeper_meta construction)
+    callers must still set both fields explicitly; this helper applies
+    only to update-style writes ([{ m with ... }]). *)
 
 (** {1 Outcome <-> string} *)
 

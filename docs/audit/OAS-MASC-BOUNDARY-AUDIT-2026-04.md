@@ -93,7 +93,7 @@ Routes OAS structured logs into the MASC log sink with provider/model labels. Sy
 
 `oas_worker.ml` (95 references) is the largest single MASC-side OAS user. Its sub-modules (`oas_worker_exec`, `oas_worker_exec_agent`, `oas_worker_exec_checkpoint`, `oas_worker_exec_transport`, `oas_worker_named*`, `oas_worker_cascade`) are an *agent-runtime translation layer* between OAS `Agent.run` semantics and MASC's keeper turn loop.
 
-The sprawl is justified by the surface area of `Oas.Agent.run` (cascade fallback, named-error variants, transport pluggability), but it is **not a single boundary** — it is a fan-out. A future reader cannot answer "where does MASC call OAS?" with a single file. Suggest follow-up: a `lib/oas_worker/dune` sub-library + a single re-export module (`Oas_worker.t`) so Layer C consumers see one symbol.
+The sprawl is justified by the surface area of `Oas.Agent.run` (cascade fallback, named-error variants, transport pluggability), but it is **not a single boundary** — it is a fan-out. A future reader cannot answer "where does MASC call OAS?" with a single file. Suggest follow-up: a `lib/oas_worker/dune` sub-library + a single re-export module (`Keeper_turn_driver.t`) so Layer C consumers see one symbol.
 
 #### 4.2.5 `lib/keeper/keeper_hooks_oas`, `lib/keeper/keeper_tools_oas` — hook factories — GOOD
 

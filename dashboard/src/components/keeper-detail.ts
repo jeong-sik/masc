@@ -20,12 +20,15 @@ import { currentDashboardActor, runOperatorAction } from '../api'
 import {
   bootKeeper,
   clearKeeper,
+  fetchKeeperComposite,
   fetchKeeperTransitions,
+  type KeeperCompositeSnapshot,
   pauseKeeper,
   resumeKeeper,
   shutdownKeeper,
   wakeKeeper,
 } from '../api/keeper'
+import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { TimeAgo } from './common/time-ago'
 import { Checkbox } from './common/checkbox'
 import { TextArea } from './common/input'
@@ -68,7 +71,7 @@ import {
   loadKeeperConfig,
   resetKeeperConfig,
 } from './keeper-config-panel'
-import { PipelineStageBar } from './keeper-pipeline-stage'
+import { FsmHub } from './fsm-hub'
 import { KeeperConditionsDivergent } from './keeper-conditions-divergent'
 import { KeeperStateDiagramPanel } from './keeper-state-diagram'
 import { KeeperMemoryTierPanel } from './keeper-memory-tier-panel'
@@ -828,6 +831,42 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
 
 // ── Main Detail Page ─────────────────────────────────────
 
+/**
+ * RFC-0046 §7 follow-up #1: single composite snapshot fetch shared
+ * across the detail surface. Before this hook KeeperStateDiagramPanel
+ * and KeeperMemoryTierPanel each issued their own /composite call;
+ * now keeper-detail owns the fetch and threads the snapshot down via
+ * the snapshot prop introduced in PR #14226.
+ *
+ * FsmHub still has its own polling/reducer loop — see RFC §7 for the
+ * remaining dedup work. This hook handles only the two derived panels.
+ */
+const COMPOSITE_REFRESH_MS = 30_000
+
+function useKeeperComposite(keeperName: string): KeeperCompositeSnapshot | null {
+  const [snapshot, setSnapshot] = useState<KeeperCompositeSnapshot | null>(null)
+  useEffect(() => {
+    const controller = new AbortController()
+    let cancelled = false
+    const refresh = async () => {
+      try {
+        const result = await fetchKeeperComposite(keeperName, { signal: controller.signal })
+        if (!cancelled && !controller.signal.aborted) setSnapshot(result)
+      } catch {
+        // best-effort polling — leave the previous snapshot in place
+      }
+    }
+    void refresh()
+    const cleanup = setupVisibleAutoRefresh(refresh, COMPOSITE_REFRESH_MS)
+    return () => {
+      cancelled = true
+      controller.abort()
+      cleanup()
+    }
+  }, [keeperName])
+  return snapshot
+}
+
 export function KeeperDetailPage() {
   const keeperName =
     route.value.tab === 'monitoring' && route.value.params.section === 'agents'
@@ -860,6 +899,9 @@ export function KeeperDetailPage() {
   // the header KeeperPhaseAndStage to render "현재 phase에 머문 시간" without
   // requiring a new backend field — derivation is plan-approved trade-off.
   const [phaseEnteredAtSec, setPhaseEnteredAtSec] = useState<number | null>(null)
+  // RFC-0046 §7 #1: single composite snapshot shared with the two
+  // derived panels (state-diagram + memory-tier).
+  const compositeSnapshot = useKeeperComposite(keeper.name)
   const prevKeeperRef = useRef(keeper.name)
   if (prevKeeperRef.current !== keeper.name) {
     prevKeeperRef.current = keeper.name
@@ -1013,13 +1055,19 @@ export function KeeperDetailPage() {
             eyebrow="상태 개요"
             title="운영 상태 개요"
           >
-        <${PipelineStageBar} stage=${keeper.pipeline_stage} />
+        ${'' /* RFC-0046: 6-axis composite snapshot (KSM/KTC/KDP/KCL/KMC/breaker) — SSOT for keeper FSM state */}
+        ${'' /* RFC-0046 §7 #2: share useKeeperComposite with FsmHub to dedup the /composite poll */}
+        <${FsmHub}
+          mode="detail"
+          selectedName=${keeper.name}
+          externalSnapshot=${compositeSnapshot}
+        />
         <${CollapsibleSection} title="Phase State Machine">
-          <${KeeperStateDiagramPanel} keeperName=${keeper.name} currentPhase=${keeper.phase} />
+          <${KeeperStateDiagramPanel} keeperName=${keeper.name} snapshot=${compositeSnapshot} />
         <//>
 
         <${CollapsibleSection} title="Memory Tier & Compaction">
-          <${KeeperMemoryTierPanel} keeperName=${keeper.name} currentPhase=${keeper.phase} />
+          <${KeeperMemoryTierPanel} keeperName=${keeper.name} snapshot=${compositeSnapshot} />
         <//>
 
         ${'' /* ── Divergent conditions (amber banner; renders only when phase lags observed signals) ── */}
@@ -1096,6 +1144,7 @@ export function KeeperDetailPage() {
             id="keeper-comms"
             eyebrow="대화 & 세션"
             title="대화 / 활동 흐름"
+            defaultCollapsed=${true}
           >
             <${KeeperCommsPanel} keeper=${keeper} />
             <${PanelCard} title="세션 활동 로그">
@@ -1107,6 +1156,7 @@ export function KeeperDetailPage() {
             id="keeper-runtime"
             eyebrow="런타임 진단"
             title="진단 / 운영"
+            defaultCollapsed=${true}
           >
             <${KeeperToolTelemetry} keeperName=${keeper.name} />
             <${KeeperEvalQualityPanel} keeperName=${keeper.name} />
@@ -1138,6 +1188,7 @@ export function KeeperDetailPage() {
             id="keeper-identity"
             eyebrow="신원 & 계보"
             title="정체성 / 세대"
+            defaultCollapsed=${true}
           >
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <${PanelCard} title="프로필">
@@ -1203,6 +1254,7 @@ export function KeeperDetailPage() {
             id="keeper-config"
             eyebrow="설정"
             title="설정 / 작업 방식"
+            defaultCollapsed=${true}
           >
             <${TurnBudgetSection} keeper=${keeper} />
             <${CollapsibleSection} title="허용 도구">
@@ -1222,6 +1274,7 @@ export function KeeperDetailPage() {
             id="keeper-debug"
             eyebrow="디버그"
             title="디버그"
+            defaultCollapsed=${true}
           >
             <details class="mt-0">
           <summary class="cursor-pointer py-3 px-4 text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] list-none select-none rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] hover:bg-[var(--color-bg-hover)] transition-colors flex items-center gap-2">

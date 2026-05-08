@@ -319,16 +319,29 @@ let record_pre_dispatch_terminal_observation
         ~side_effect:(activity_kind ^ " emit")
         (Printexc.to_string exn))
 
+let local_discovery_refresh_for_test :
+    (string list -> bool) option Atomic.t =
+  Atomic.make None
+
 let ensure_local_discovery_ready
     ?refresh
     (labels : string list) : (unit, string) result =
+  let refresh_for_test = Atomic.get local_discovery_refresh_for_test in
   let refresh =
     match refresh with
     | Some f -> f
-    | None -> fun labels ->
-        Cascade_runtime.refresh_local_discovery_if_possible labels
+    | None ->
+        (match refresh_for_test with
+        | Some f -> f
+        | None -> fun labels ->
+            Cascade_runtime.refresh_local_discovery_if_possible labels)
   in
-  if not (Cascade_runtime.labels_require_local_discovery labels)
+  let should_refresh =
+    match refresh_for_test with
+    | Some _ -> true
+    | None -> Cascade_runtime.labels_require_local_discovery labels
+  in
+  if not should_refresh
   then Ok ()
   else
     try
@@ -347,3 +360,13 @@ let ensure_local_discovery_ready
              "local discovery refresh raised for labels [%s]: %s"
              (String.concat ", " labels)
              (Printexc.to_string exn))
+
+module For_testing = struct
+  let with_local_discovery_refresh refresh f =
+    let previous = Atomic.get local_discovery_refresh_for_test in
+    Atomic.set local_discovery_refresh_for_test (Some refresh);
+    Fun.protect
+      ~finally:(fun () ->
+        Atomic.set local_discovery_refresh_for_test previous)
+      f
+end

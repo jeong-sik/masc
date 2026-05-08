@@ -351,13 +351,13 @@ let test_outcomes_rollup_counts_gate_rejected_from_completed_turns () =
   Reg.set_turn_decision_stage
     ~base_path:config.base_path keeper_name Reg.Decision_tool_policy_selected;
   Reg.set_turn_cascade_state
-    ~base_path:config.base_path keeper_name Reg.Cascade_done;
+    ~base_path:config.base_path keeper_name (Reg.Packed Reg.Cascade_done);
   Reg.mark_turn_finished ~base_path:config.base_path keeper_name;
   Reg.mark_turn_started ~base_path:config.base_path keeper_name;
   Reg.set_turn_decision_stage
     ~base_path:config.base_path keeper_name Reg.Decision_tool_policy_selected;
   Reg.set_turn_cascade_state
-    ~base_path:config.base_path keeper_name Reg.Cascade_exhausted;
+    ~base_path:config.base_path keeper_name (Reg.Packed Reg.Cascade_exhausted);
   Reg.mark_turn_finished ~base_path:config.base_path keeper_name;
   let outcomes =
     Masc_mcp.Dashboard_http_keeper.compute_outcomes_rollup

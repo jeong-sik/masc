@@ -144,7 +144,21 @@ let receipt_outcome_kind_of_sdk_error = function
   | Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded _) -> `Cancelled
   | Agent_sdk.Error.Agent (Agent_sdk.Error.IdleDetected _) -> `Cancelled
   | Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet _) -> `Cancelled
-  | _ -> `Error
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.TokenBudgetExceeded _) -> `Error
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.CostBudgetExceeded _) -> `Error
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.UnrecognizedStopReason _) -> `Error
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.ToolRetryExhausted _) -> `Error
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.CompletionContractViolation _) -> `Error
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.GuardrailViolation _) -> `Error
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.TripwireViolation _) -> `Error
+  | Agent_sdk.Error.Api _ -> `Error
+  | Agent_sdk.Error.Mcp _ -> `Error
+  | Agent_sdk.Error.Config _ -> `Error
+  | Agent_sdk.Error.Serialization _ -> `Error
+  | Agent_sdk.Error.Io _ -> `Error
+  | Agent_sdk.Error.Orchestration _ -> `Error
+  | Agent_sdk.Error.A2a _ -> `Error
+  | Agent_sdk.Error.Internal _ -> `Error
 ;;
 
 let checkpoint_persistence_error ~keeper_name ~detail =
@@ -156,7 +170,7 @@ let checkpoint_persistence_error ~keeper_name ~detail =
 ;;
 
 let cascade_outcome_of_observation = function
-  | Some (obs : Oas_worker.cascade_observation) when obs.fallback_applied ->
+  | Some (obs : Cascade_legacy_runner.cascade_observation) when obs.fallback_applied ->
     "passed_to_next_model"
   | Some _ -> "completed"
   | None -> "not_observed"

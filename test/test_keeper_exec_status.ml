@@ -8,7 +8,7 @@ module KT = Masc_mcp.Keeper_types
 module KMP = Masc_mcp.Keeper_memory_policy
 module KTS = Masc_mcp.Keeper_types_support
 module Coord = Masc_mcp.Coord
-module OWN = Masc_mcp.Oas_worker_named
+module OWN = Masc_mcp.Keeper_turn_driver
 module Prom = Masc_mcp.Prometheus
 
 let keeper_health_testable : KT.keeper_health Alcotest.testable =
@@ -495,7 +495,9 @@ let test_runtime_surface_derives_autonomous_slot_wait_timeout_from_meta () =
       runtime =
         {
           base.runtime with
-          last_blocker = reason;
+          last_blocker =
+            Some (KT.blocker_info_of_class ~detail:reason
+                    KT.Autonomous_slot_wait_timeout);
         };
     }
   in
@@ -525,7 +527,9 @@ let test_runtime_surface_derives_cascade_exhausted_from_meta () =
       runtime =
         {
           base.runtime with
-          last_blocker = reason;
+          last_blocker =
+            Some (KT.blocker_info_of_class ~detail:reason
+                    (KT.Cascade_exhausted KT.Connection_refused));
         };
     }
   in
@@ -574,8 +578,9 @@ let test_runtime_surface_names_no_tool_provider_details () =
       runtime =
         {
           base.runtime with
-          last_blocker = summary;
-          last_blocker_class = Some KT.No_tool_capable_provider;
+          last_blocker =
+            Some (KT.blocker_info_of_class ~detail:summary
+                    KT.No_tool_capable_provider);
         };
     }
   in
@@ -607,8 +612,10 @@ let test_runtime_surface_routes_oas_timeout_to_timeout_action () =
             {
               base.runtime with
               last_blocker =
-                "OAS budget timeout fired before the keeper hard timeout.";
-              last_blocker_class = Some KT.Oas_timeout_budget;
+                Some
+                  (KT.blocker_info_of_class
+                     ~detail:"OAS budget timeout fired before the keeper hard timeout."
+                     KT.Oas_timeout_budget);
             };
         }
       in
@@ -641,8 +648,10 @@ let test_runtime_surface_routes_paused_timeout_to_paused_action () =
             {
               base.runtime with
               last_blocker =
-                "OAS budget timeout fired before the keeper hard timeout.";
-              last_blocker_class = Some KT.Oas_timeout_budget;
+                Some
+                  (KT.blocker_info_of_class
+                     ~detail:"OAS budget timeout fired before the keeper hard timeout."
+                     KT.Oas_timeout_budget);
             };
         }
       in
@@ -666,7 +675,7 @@ let test_runtime_surface_exposes_redacted_resumable_cli_session_blocker () =
   KR.clear ();
   let base = make_meta ~name:"runtime-resumable-cli-session-test" () in
   let reason =
-    Masc_mcp.Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail
+    Masc_mcp.Cascade_runner.Kimi_cli_transport_local.resumable_session_detail
   in
   let meta =
     {
@@ -674,9 +683,9 @@ let test_runtime_surface_exposes_redacted_resumable_cli_session_blocker () =
       runtime =
         {
           base.runtime with
-          last_blocker = reason;
-          last_blocker_class =
-            Some (KT.Cascade_exhausted (KT.Other_detail reason));
+          last_blocker =
+            Some (KT.blocker_info_of_class ~detail:reason
+                    (KT.Cascade_exhausted (KT.Other_detail reason)));
         };
     }
   in
@@ -754,7 +763,9 @@ let test_runtime_surface_derives_continue_gate_from_persisted_ambiguous_blocker 
       runtime =
         {
           base.runtime with
-          last_blocker = reason;
+          last_blocker =
+            Some (KT.blocker_info_of_class ~detail:reason
+                    KT.Ambiguous_post_commit_timeout);
         };
     }
   in
@@ -1005,8 +1016,10 @@ let test_runtime_surface_prefers_typed_blocker_over_progress_narrative () =
       runtime =
         {
           base.runtime with
-          last_blocker = "turn wall-clock timeout exceeded";
-          last_blocker_class = Some KT.Turn_timeout;
+          last_blocker =
+            Some (KT.blocker_info_of_class
+                    ~detail:"turn wall-clock timeout exceeded"
+                    KT.Turn_timeout);
         };
     }
   in
@@ -1030,7 +1043,7 @@ let test_runtime_surface_exposes_social_model_resolution_fields () =
             Masc_mcp.Keeper_social_model.speech_act_to_string
               Masc_mcp.Keeper_social_model.Stay_silent;
           last_social_transition_reason = "tool_only:stay_silent";
-          last_blocker = "waiting_for_delta";
+          last_blocker = None;
           last_need = "";
         };
     }

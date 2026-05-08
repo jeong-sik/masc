@@ -113,6 +113,11 @@
   keeper_agent_result
   keeper_agent_error
   keeper_agent_memory_episode
+  keeper_agent_context
+  keeper_oas_checkpoint
+  keeper_turn_driver
+  keeper_turn_driver_helpers
+  keeper_turn_driver_wrappers
   keeper_exec_context
   keeper_guards
   keeper_turn_setup
@@ -166,15 +171,6 @@
   tool_misc_admin
   tool_misc_web_search
   tool_misc_web_fetch
-  oas_worker_cascade
-  oas_worker_exec_agent
-  oas_worker_exec
-  oas_worker_exec_checkpoint
-  oas_worker_exec_transport
-  oas_worker_named
-  oas_worker_named_cascade
-  oas_worker_named_error
-  oas_worker_named_fsm
   meta_cognition_types
   meta_cognition_rules
   meta_cognition_snapshot
@@ -238,6 +234,7 @@
    agent_sdk
    agent_sdk.base
    agent_sdk.llm_provider
+   masc_mcp.cdal_runtime
    masc_mcp.oas_compat
 
    uri

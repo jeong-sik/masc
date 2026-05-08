@@ -148,7 +148,7 @@ type t =
   ; ended_at : string
   }
 
-val stop_reason_to_string : Oas_worker.stop_reason -> string
+val stop_reason_to_string : Cascade_runner.stop_reason -> string
 val sandbox_kind_of_meta : Keeper_types.keeper_meta -> string
 val to_json : t -> Yojson.Safe.t
 

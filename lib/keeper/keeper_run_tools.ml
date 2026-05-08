@@ -110,7 +110,7 @@ type agent_setup =
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : string option ref
-  ; receipt_cascade_observation_ref : Oas_worker.cascade_observation option ref
+  ; receipt_cascade_observation_ref : Cascade_legacy_runner.cascade_observation option ref
   ; receipt_response_text_present_ref : bool ref
   ; reported_tool_names_ref : string list ref
   ; observed_tool_names_ref : string list ref
@@ -474,7 +474,7 @@ let prepare_agent_setup
   let receipt_turn_count_ref : int option ref = ref None in
   let receipt_model_used_ref : string option ref = ref None in
   let receipt_stop_reason_ref : string option ref = ref None in
-  let receipt_cascade_observation_ref : Oas_worker.cascade_observation option ref =
+  let receipt_cascade_observation_ref : Cascade_legacy_runner.cascade_observation option ref =
     ref None
   in
   let receipt_response_text_present_ref = ref false in
@@ -1436,7 +1436,7 @@ let prepare_agent_setup
                   Keeper_registry.Decision_tool_policy_selected;
                 Keeper_registry.set_turn_cascade_state
                   ~base_path:config.base_path meta.name
-                  Keeper_registry.Cascade_selecting;
+                  (Keeper_registry.Packed Keeper_registry.Cascade_selecting : Keeper_registry.packed_cascade_state);
                 (* Spec atomic group: SelectToolPolicy(idle->selecting)
                    is immediately followed by CascadeTrying(selecting->
                    trying).  Both transitions are materialised inside
@@ -1455,7 +1455,7 @@ let prepare_agent_setup
                    [validate_cascade_transition]. *)
                 Keeper_registry.set_turn_cascade_state
                   ~base_path:config.base_path meta.name
-                  Keeper_registry.Cascade_trying;
+                  (Keeper_registry.Packed Keeper_registry.Cascade_trying : Keeper_registry.packed_cascade_state);
                 let disclosure_json =
                   `Assoc
                     [ "ts_unix", `Float now

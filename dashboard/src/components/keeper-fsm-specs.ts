@@ -15,77 +15,65 @@ import type { FsmGraphSpec, FsmNode, FsmEdge } from './common/cytoscape-fsm'
 // sub-FSMs is captured by the invariants panel, not the graph edges.
 
 interface CompositeFsmParams {
-  phase: string            // KSM — Running | Failing | Overflowed | Compacting | HandingOff | Draining | Stable
-  turnPhase: string        // KTC — idle | prompting | executing | compacting | finalizing
+  phase: string            // KSM — offline | running | failing | overflowed | compacting | handing_off | draining | paused | stopped | crashed | restarting | dead | zombie
+  turnPhase: string        // KTC — idle | prompting | routing | executing | compacting | finalizing | exhausted
   decisionStage: string    // KDP — undecided | guard_ok | gate_rejected | tool_policy_selected
   cascadeState: string     // KCL — idle | selecting | trying | done | exhausted
   compactionStage: string  // KMC — accumulating | compacting | done
 }
 
 const KSM_STATES = [
-  'Running', 'Failing', 'Overflowed', 'Compacting', 'HandingOff', 'Draining', 'Stable',
+  'offline', 'running', 'failing', 'overflowed', 'compacting',
+  'handing_off', 'draining', 'paused', 'stopped', 'crashed',
+  'restarting', 'dead', 'zombie',
 ]
-const KTC_STATES = ['idle', 'prompting', 'executing', 'compacting', 'finalizing']
+const KTC_STATES = ['idle', 'prompting', 'routing', 'executing', 'compacting', 'finalizing', 'exhausted']
 const KDP_STATES = ['undecided', 'guard_ok', 'gate_rejected', 'tool_policy_selected']
 const KCL_STATES = ['idle', 'selecting', 'trying', 'done', 'exhausted']
 const KMC_STATES = ['accumulating', 'compacting', 'done']
 
 export const TURN_FSM_STATES = [
   'idle',
-  'phase_gating',
-  'cascade_routing',
-  'awaiting_provider',
-  'streaming',
-  'awaiting_tool_result',
-  'completing',
-  'done',
-  'failed',
-  'cancelled',
+  'prompting',
+  'routing',
+  'executing',
+  'compacting',
+  'finalizing',
+  'exhausted',
 ] as const
 
 export type KeeperTurnFsmState = (typeof TURN_FSM_STATES)[number]
 
 const TURN_FSM_TLA_SYMBOLS: Record<KeeperTurnFsmState, string> = {
   idle: 'idle',
-  phase_gating: 'phase_gating',
-  cascade_routing: 'cascade_routing',
-  awaiting_provider: 'awaiting_provider',
-  streaming: 'streaming',
-  awaiting_tool_result: 'awaiting_tool',
-  completing: 'completing',
-  done: 'done',
-  failed: 'failed',
-  cancelled: 'cancelled',
-}
-
-const LEGACY_TURN_PHASE_MAP: Record<string, KeeperTurnFsmState> = {
-  idle: 'idle',
-  prompting: 'phase_gating',
-  executing: 'streaming',
-  compacting: 'completing',
-  finalizing: 'completing',
-  awaiting_tool: 'awaiting_tool_result',
+  prompting: 'prompting',
+  routing: 'routing',
+  executing: 'executing',
+  compacting: 'compacting',
+  finalizing: 'finalizing',
+  exhausted: 'exhausted',
 }
 
 const TURN_FSM_EDGES: FsmEdge[] = [
-  { source: 'idle', target: 'phase_gating', label: 'StartTurn' },
-  { source: 'phase_gating', target: 'done', label: 'PhaseGateSkip', type: 'recovery' },
-  { source: 'phase_gating', target: 'cascade_routing', label: 'PhaseGateOk' },
-  { source: 'cascade_routing', target: 'awaiting_provider', label: 'CascadeRouted', type: 'cascade' },
-  { source: 'cascade_routing', target: 'failed', label: 'CascadeUnavailable', type: 'error' },
-  { source: 'awaiting_provider', target: 'streaming', label: 'ProviderResponded' },
-  { source: 'awaiting_provider', target: 'cancelled', label: 'ProviderTimeout', type: 'error' },
-  { source: 'streaming', target: 'awaiting_tool_result', label: 'StreamYieldsTool', type: 'cascade' },
-  { source: 'awaiting_tool_result', target: 'streaming', label: 'ToolReturned', type: 'recovery' },
-  { source: 'streaming', target: 'completing', label: 'StreamComplete' },
-  { source: 'completing', target: 'done', label: 'ContractOk', type: 'recovery' },
-  { source: 'completing', target: 'failed', label: 'ContractViolation', type: 'error' },
-  { source: 'completing', target: 'failed', label: 'ReceiptLost', type: 'error' },
-  { source: 'phase_gating', target: 'cancelled', label: 'HonorStopSignal', type: 'error' },
-  { source: 'cascade_routing', target: 'cancelled', label: 'HonorStopSignal', type: 'error' },
-  { source: 'streaming', target: 'cancelled', label: 'HonorStopSignal', type: 'error' },
-  { source: 'awaiting_tool_result', target: 'cancelled', label: 'HonorStopSignal', type: 'error' },
-  { source: 'completing', target: 'cancelled', label: 'HonorStopSignal', type: 'error' },
+  { source: 'idle', target: 'prompting', label: 'StartTurn' },
+  { source: 'prompting', target: 'routing', label: 'RouteOk' },
+  { source: 'prompting', target: 'executing', label: 'SkipRouting' },
+  { source: 'prompting', target: 'finalizing', label: 'SkipExecution' },
+  { source: 'routing', target: 'executing', label: 'CascadeRouted', type: 'cascade' },
+  { source: 'routing', target: 'prompting', label: 'Retry' },
+  { source: 'executing', target: 'compacting', label: 'CompactionGate' },
+  { source: 'executing', target: 'finalizing', label: 'Complete' },
+  { source: 'executing', target: 'exhausted', label: 'Exhausted', type: 'error' },
+  { source: 'executing', target: 'routing', label: 'Retry' },
+  { source: 'executing', target: 'prompting', label: 'Retry' },
+  { source: 'compacting', target: 'finalizing', label: 'CompactionDone', type: 'recovery' },
+  { source: 'compacting', target: 'prompting', label: 'CompactionRetry' },
+  { source: 'finalizing', target: 'prompting', label: 'NextTurn' },
+  { source: 'finalizing', target: 'routing', label: 'NextTurnSkip' },
+  { source: 'finalizing', target: 'executing', label: 'NextTurnDirect' },
+  { source: 'exhausted', target: 'prompting', label: 'RetryAfterExhausted' },
+  { source: 'exhausted', target: 'routing', label: 'RetryAfterExhausted' },
+  { source: 'exhausted', target: 'executing', label: 'RetryAfterExhausted' },
 ]
 
 function nodeType(stateId: string, activeId: string, tone: 'active' | 'warn' | 'err'): FsmNode['type'] {
@@ -115,12 +103,18 @@ function clusterNodes(
 
 export function buildCompositeFsmSpec(params: CompositeFsmParams): FsmGraphSpec {
   const ksmTone: 'active' | 'warn' | 'err' =
-    params.phase === 'Failing'
+    (params.phase === 'failing'
+      || params.phase === 'stopped'
+      || params.phase === 'crashed'
+      || params.phase === 'dead'
+      || params.phase === 'zombie')
       ? 'err'
-      : params.phase === 'Overflowed'
-        || params.phase === 'Compacting'
-        || params.phase === 'HandingOff'
-        || params.phase === 'Draining'
+      : (params.phase === 'overflowed'
+        || params.phase === 'compacting'
+        || params.phase === 'handing_off'
+        || params.phase === 'draining'
+        || params.phase === 'paused'
+        || params.phase === 'restarting')
         ? 'warn'
         : 'active'
   const nodes: FsmNode[] = [
@@ -155,7 +149,7 @@ export function buildCompactionSpec(
   const tone: 'active' | 'warn' | 'err' =
     activeStage === 'compacting'
       ? 'warn'
-      : normalizedPhase === 'Overflowed' || normalizedPhase === 'Failing'
+      : normalizedPhase === 'overflowed' || normalizedPhase === 'failing'
         ? 'err'
         : 'active'
 
@@ -183,7 +177,7 @@ export function normalizeTurnFsmState(turnPhase: string | null | undefined): Kee
   if ((TURN_FSM_STATES as readonly string[]).includes(normalized)) {
     return normalized as KeeperTurnFsmState
   }
-  return LEGACY_TURN_PHASE_MAP[normalized] ?? null
+  return null
 }
 
 export function turnFsmTlaSymbol(state: KeeperTurnFsmState): string {
@@ -192,19 +186,13 @@ export function turnFsmTlaSymbol(state: KeeperTurnFsmState): string {
 
 function turnNodeType(state: KeeperTurnFsmState, activeState: KeeperTurnFsmState | null): FsmNode['type'] {
   if (state === activeState) {
-    if (state === 'failed') return 'err'
-    if (state === 'cancelled') return 'warn'
-    if (state === 'done') return 'ok'
+    if (state === 'exhausted') return 'err'
     return 'active'
   }
 
   switch (state) {
-    case 'done':
-      return 'ok'
-    case 'failed':
+    case 'exhausted':
       return 'err'
-    case 'cancelled':
-      return 'warn'
     default:
       return 'state'
   }

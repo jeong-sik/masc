@@ -1,5 +1,9 @@
 (** See {!Keeper_cascade_profile} interface for rationale. *)
 
+(** See {!Keeper_cascade_profile} interface for rationale. *)
+
+open Cascade_ref
+
 (** SSOT variant for the 1+1 cascade model.
 
     One keeper-assignable bootstrap profile ({!Big_three}) and one system-only
@@ -28,7 +32,7 @@ let known_cascades = List.map to_string all
 let default = Big_three
 let default_name = to_string default
 
-type logical_use = Cascade_routes.logical_use =
+type logical_use = Cascade_ref.logical_use =
   | Keeper_turn
   | Phase_recovery
   | Phase_buffer

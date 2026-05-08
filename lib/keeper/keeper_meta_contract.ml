@@ -90,6 +90,13 @@ type blocker_class =
   | Autonomous_slot_wait_timeout
   | Admission_queue_wait_timeout
   | Turn_timeout_after_queue_wait
+  | Admission_wait_wfq
+    (** RFC-0026 Phase A1: keeper was enqueued in the WFQ overflow
+        queue because all above-floor candidates were throttled.
+        Will retry on next heartbeat tick when refill wakes it. *)
+  | Admission_surface
+    (** RFC-0026 Phase A1: admission router could not find any usable
+        provider (misconfiguration or all candidates below min_tier). *)
   | Oas_timeout_budget
   | Turn_timeout
   | Completion_contract_violation
@@ -126,6 +133,8 @@ let blocker_class_to_string = function
   | Autonomous_slot_wait_timeout -> "autonomous_slot_wait_timeout"
   | Admission_queue_wait_timeout -> "admission_queue_wait_timeout"
   | Turn_timeout_after_queue_wait -> "turn_timeout_after_queue_wait"
+  | Admission_wait_wfq -> "admission_wait_wfq"
+  | Admission_surface -> "admission_surface"
   | Oas_timeout_budget -> "oas_timeout_budget"
   | Turn_timeout -> "turn_timeout"
   | Completion_contract_violation -> "completion_contract_violation"
@@ -142,6 +151,8 @@ let blocker_class_of_serialized_string = function
   | "autonomous_slot_wait_timeout" -> Some Autonomous_slot_wait_timeout
   | "admission_queue_wait_timeout" -> Some Admission_queue_wait_timeout
   | "turn_timeout_after_queue_wait" -> Some Turn_timeout_after_queue_wait
+  | "admission_wait_wfq" -> Some Admission_wait_wfq
+  | "admission_surface" -> Some Admission_surface
   | "oas_timeout_budget" -> Some Oas_timeout_budget
   | "turn_timeout" -> Some Turn_timeout
   | "completion_contract_violation" -> Some Completion_contract_violation
@@ -193,6 +204,70 @@ let cascade_exhaustion_reason_of_json = function
   | _ -> None
 ;;
 
+(* ── Unified blocker_info: typed klass + free-form detail ───────
+   Replaces the historic [last_blocker: string] +
+   [last_blocker_class: blocker_class option] pair.  The string-only
+   field was used by [blocker_class_of_string] (substring classifier)
+   to recover a typed class — exactly the workaround pattern called
+   out in CLAUDE.md "워크어라운드 거부 기준 #2 String/Substring
+   분류기 보강".  Making [blocker_class] the only authoritative class
+   eliminates that recovery path; [detail] carries free-form context
+   for UI / Prometheus labels (no classification semantics). *)
+type blocker_info = {
+  klass : blocker_class;
+  detail : string;
+}
+
+let blocker_info_of_class ?(detail = "") klass = { klass; detail }
+
+let blocker_info_to_json (info : blocker_info) : Yojson.Safe.t =
+  let klass_payload = match info.klass with
+    | Cascade_exhausted reason ->
+      `Assoc [ "name", `String "cascade_exhausted"
+             ; "reason", cascade_exhaustion_reason_to_json reason
+             ]
+    | _ -> `String (blocker_class_to_string info.klass)
+  in
+  `Assoc
+    [ "klass", klass_payload
+    ; "detail", `String info.detail
+    ]
+;;
+
+let blocker_info_of_json (json : Yojson.Safe.t) : blocker_info option =
+  match json with
+  | `Null -> None
+  | `Assoc fields ->
+    let klass =
+      match List.assoc_opt "klass" fields with
+      | Some (`String s) -> blocker_class_of_serialized_string s
+      | Some (`Assoc kfields) ->
+        (match List.assoc_opt "name" kfields with
+         | Some (`String "cascade_exhausted") ->
+           let reason =
+             match List.assoc_opt "reason" kfields with
+             | Some r ->
+               (match cascade_exhaustion_reason_of_json r with
+                | Some r -> r
+                | None -> Other_detail "cascade_exhausted")
+             | None -> Other_detail "cascade_exhausted"
+           in
+           Some (Cascade_exhausted reason)
+         | Some (`String s) -> blocker_class_of_serialized_string s
+         | _ -> None)
+      | _ -> None
+    in
+    (match klass with
+     | None -> None
+     | Some klass ->
+       let detail = match List.assoc_opt "detail" fields with
+         | Some (`String s) -> s
+         | _ -> ""
+       in
+       Some { klass; detail })
+  | _ -> None
+;;
+
 type usage_metrics =
   { total_turns : int
   ; total_input_tokens : int
@@ -229,8 +304,7 @@ type agent_runtime_state =
   ; last_social_transition_reason : string
   ; last_active_desire : string
   ; last_current_intention : string
-  ; last_blocker : string
-  ; last_blocker_class : blocker_class option
+  ; last_blocker : blocker_info option
   ; last_need : string
   }
 
@@ -244,8 +318,8 @@ type keeper_meta =
   ; mid_goal : string
   ; long_goal : string
   ; social_model : string
-  ; cascade_name : string
   ; models : string list
+  ; cascade_ref : Cascade_ref.cascade_ref option
   ; will : string
   ; needs : string
   ; desires : string
@@ -309,6 +383,20 @@ type keeper_meta =
   ; oas_env : (string * string) list
   ; meta_version : int
   }
+
+let cascade_name_of_meta (m : keeper_meta) : string =
+  match m.cascade_ref with
+  | Some ref_ when not (String.equal ref_.Cascade_ref.group "") ->
+    ref_.Cascade_ref.group
+  | _ -> Keeper_config.default_cascade_name
+;;
+
+let set_cascade_name (name : string) (m : keeper_meta) : keeper_meta =
+  let cascade_ref =
+    Some Cascade_ref.{ group = name; item = None }
+  in
+  { m with cascade_ref }
+;;
 
 let proactive_cycle_outcome_to_string = function
   | Proactive_never_started -> "never_started"

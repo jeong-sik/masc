@@ -568,13 +568,13 @@ let review
     (match
        Masc_oas_bridge.run_with_caller
          ~caller:Env_config_oas_bridge.Anti_rationalization (fun () ->
-         Oas_worker.run_named_with_masc_tools
+         Keeper_turn_driver_wrappers.run_named_with_masc_tools
            ~cascade_name:evaluator_cascade
            ~goal:prompt
            ~masc_tools:[report_review_verdict_schema]
            ~dispatch
            ~max_turns:1
-           ~temperature:Oas_worker_cascade.deterministic_temperature
+           ~temperature:Cascade_legacy_runner.deterministic_temperature
            ~max_tokens:200
            ~approval:Approval_callbacks.auto_approve
            ?sw
@@ -588,7 +588,7 @@ let review
            (v, Structured_tool, None)
          | None ->
            (* LLM responded with text — lenient fallback *)
-           let text = Oas_response.text_of_response result.response in
+           let text = Agent_sdk_response.text_of_response result.response in
            Log.Task.info "[anti-rationalization] verdict via text fallback";
            (match parse_verdict text with
             | Ok v -> (v, Llm_text_fallback, None)
@@ -639,8 +639,8 @@ let review
           by liveness — the operator must fix the cascade definition
           before the safety net can do useful work. *)
        let cascade_permanently_dead =
-         match Oas_worker_named.classify_masc_internal_error err with
-         | Some (Oas_worker_named.No_tool_capable_provider _) -> true
+         match Keeper_turn_driver.classify_masc_internal_error err with
+         | Some (Keeper_turn_driver.No_tool_capable_provider _) -> true
          | _ -> false
        in
        let mode = Env_config.AntiRationalization.fail_mode in

@@ -72,7 +72,6 @@ let test_glm_coding_auto_models_default_order () =
   with_clean_env (fun () ->
     check (list string) "glm-coding:auto expands to coding-plan order"
       [
-        "glm-5-code";
         "glm-5.1";
         "glm-5";
         "glm-5-turbo";

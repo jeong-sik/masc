@@ -290,3 +290,14 @@ type strategy_config = {
 
 val resolve_strategy_config :
   config_path:string -> name:string -> strategy_config
+
+(** {1 RFC-0041 cascade_profile bridge} *)
+
+(** Load a [Cascade_ref.cascade_profile] from the legacy cascade.json
+    format.  Each profile section becomes a single-group profile;
+    [models] become [cascade_item]s and [fallback_cascade] becomes
+    [fallback_group].
+
+    Returns [None] when the profile has no parsable model entries. *)
+val load_cascade_profile :
+  config_path:string -> name:string -> Cascade_ref.cascade_profile option

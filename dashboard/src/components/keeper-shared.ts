@@ -230,11 +230,11 @@ export function KeeperDiagnosticSummary({
           : null}
         ${busy ? html`<${DiagChip} label="refreshing" />` : null}
       </div>
-      <div class="text-xs text-[var(--color-fg-primary)] leading-relaxed">
-        ${diagnostic?.continuity_summary
-          ?? diagnostic?.summary
-          ?? '자동 판단 필드는 기본으로 채우지 않습니다. 필요할 때만 상태를 불러오세요.'}
-      </div>
+      ${diagnostic?.continuity_summary || diagnostic?.summary
+        ? html`<div class="text-xs text-[var(--color-fg-primary)] leading-relaxed">
+            ${diagnostic.continuity_summary ?? diagnostic.summary}
+          </div>`
+        : null}
       <div class="text-xs text-[var(--color-fg-primary)] leading-relaxed mt-1">
         응답: ${diagnostic?.last_reply_status ?? '미조회'}
         ${diagnostic?.last_reply_at ? html` -- ${formatTime(diagnostic.last_reply_at)}` : null}
@@ -324,9 +324,6 @@ export function KeeperConversationPanel({
               <span class=${`inline-flex items-center rounded-[var(--r-0)] border px-2.5 py-1 text-3xs font-medium uppercase tracking-2 ${conversationStateClass(sending, hydrating)}`}>
                 ${conversationStateLabel(sending, hydrating)}
               </span>
-            </div>
-            <div class="mt-1 text-sm leading-loose text-[var(--color-fg-secondary)]">
-              Keeper 상세 안에서 직접 대화와 내부 메시지를 함께 봅니다. 필요하면 토글로 내부 프롬프트와 tool chatter를 숨길 수 있습니다.
             </div>
           </div>
           <div class="flex flex-wrap items-center gap-2">

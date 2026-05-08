@@ -3,6 +3,10 @@
 let no_policy : Keeper_admission_glue.policy_lookup = fun _ -> None
 let no_bucket : Keeper_admission_router.bucket_lookup = fun _ -> None
 
+(* WFQ overflow queue for keepers that got [Wait] decisions.
+   Shared across all keepers; heartbeat loop enqueues / wake hook dequeues. *)
+let wfq_queue : Keeper_wfq_overflow.t = Keeper_wfq_overflow.create ()
+
 (* Use [Atomic.t] for callback refs, matching the convention in
    [Coord_hooks] (lib/coord/coord_hooks.ml).  Plain [ref] is not safe
    across domains in OCaml 5; the Atomic primitives provide the
@@ -27,18 +31,33 @@ let init_state = ref Idle
 let set_policy_lookup f = Atomic.set policy_lookup_ref f
 let set_bucket_lookup f = Atomic.set bucket_lookup_ref f
 
-(* Lazy per-provider bucket table.  PR-E-1.8 will replace the
-   hard-coded defaults with per-provider rate config sourced from
-   cascade.toml.  For PR-E-1.6+1.7 we just want every provider name
-   referenced by an [admission.<keeper>].candidates entry to map to a
-   non-empty bucket so [Keeper_admission_router.schedule] can return
-   [Dispatch] / [Wait] in the shadow counter — same shape it will
-   take in PR-E-1.8 once rates are real. *)
+(* Per-provider rate config.  PR-E-1.8 reads from cascade config;
+   falls back to hard-coded defaults when no config is present. *)
 let default_bucket_capacity = 10
 let default_bucket_refill_rate = 1.0
 let now () = Unix.gettimeofday ()
 
-let make_lazy_bucket_lookup () =
+(* Attempt to read per-provider rate config from cascade.json.
+   Returns (capacity, refill_rate) or None if not found. *)
+let read_provider_rate_config ~provider json =
+  let open Yojson.Safe.Util in
+  try
+    let rates = member "admission" json |> member "provider_rates" in
+    let provider_obj = member provider rates in
+    let capacity =
+      member "capacity" provider_obj |> to_int_option
+      |> Option.value ~default:default_bucket_capacity
+    in
+    let refill_rate =
+      member "refill_rate" provider_obj |> to_float_option
+      |> Option.value ~default:default_bucket_refill_rate
+    in
+    Some (capacity, refill_rate)
+  with _ -> None
+
+(* Build a lazy bucket lookup that reads per-provider rates from
+   cascade.json when available. *)
+let make_lazy_bucket_lookup ~cascade_json_opt () =
   let table : (string, Keeper_provider_token_bucket.t) Hashtbl.t =
     Hashtbl.create 16
   in
@@ -48,13 +67,69 @@ let make_lazy_bucket_lookup () =
       match Hashtbl.find_opt table provider with
       | Some b -> Some b
       | None ->
+          let capacity, refill_rate =
+            match cascade_json_opt with
+            | Some json ->
+                (match read_provider_rate_config ~provider json with
+                 | Some (c, r) -> (c, r)
+                 | None -> (default_bucket_capacity, default_bucket_refill_rate))
+            | None -> (default_bucket_capacity, default_bucket_refill_rate)
+          in
           let b =
             Keeper_provider_token_bucket.create
               ~provider
-              ~capacity:default_bucket_capacity
-              ~refill_rate:default_bucket_refill_rate
+              ~capacity
+              ~refill_rate
               ~now
           in
+          (* Register WFQ wake hook: when this provider's bucket refills
+             from < 1.0 to >= 1.0, try to wake one waiting keeper. *)
+          Keeper_provider_token_bucket.add_on_refill b (fun () ->
+            match Keeper_wfq_overflow.wake_one wfq_queue with
+            | None -> ()
+            | Some _entry ->
+                (* Woken keeper will be reconsidered on its next heartbeat
+                   tick; we do NOT synchronously dispatch here to avoid
+                   nested admission decisions inside the refill callback. *)
+                ());
+          Hashtbl.add table provider b;
+          Some b)
+
+let make_lazy_bucket_lookup ~cascade_json_opt () =
+  let table : (string, Keeper_provider_token_bucket.t) Hashtbl.t =
+    Hashtbl.create 16
+  in
+  let table_mutex = Stdlib.Mutex.create () in
+  fun provider ->
+    Stdlib.Mutex.protect table_mutex (fun () ->
+      match Hashtbl.find_opt table provider with
+      | Some b -> Some b
+      | None ->
+          let capacity, refill_rate =
+            match cascade_json_opt with
+            | Some json ->
+                (match read_provider_rate_config ~provider json with
+                 | Some (c, r) -> (c, r)
+                 | None -> (default_bucket_capacity, default_bucket_refill_rate))
+            | None -> (default_bucket_capacity, default_bucket_refill_rate)
+          in
+          let b =
+            Keeper_provider_token_bucket.create
+              ~provider
+              ~capacity
+              ~refill_rate
+              ~now
+          in
+          (* Register WFQ wake hook: when this provider's bucket refills
+             from < 1.0 to >= 1.0, try to wake one waiting keeper. *)
+          Keeper_provider_token_bucket.add_on_refill b (fun () ->
+            match Keeper_wfq_overflow.wake_one wfq_queue with
+            | None -> ()
+            | Some _entry ->
+                (* Woken keeper will be reconsidered on its next heartbeat
+                   tick; we do NOT synchronously dispatch here to avoid
+                   nested admission decisions inside the refill callback. *)
+                ());
           Hashtbl.add table provider b;
           Some b)
 
@@ -118,7 +193,7 @@ let init_once_from_base_path ~base_path =
            never observe Done with the default [no_policy]. *)
         set_policy_lookup (fun id ->
           Keeper_admission_registry.lookup registry id);
-        set_bucket_lookup (make_lazy_bucket_lookup ());
+        set_bucket_lookup (make_lazy_bucket_lookup ~cascade_json_opt:(Some json) ());
         mark_init_done ();
         Log.Keeper.info
           "RFC-0026 PR-E-1.6: admission runtime initialised \
@@ -153,6 +228,77 @@ let observe ~keeper_id =
     Keeper_metrics.metric_keeper_admission_shadow_outcome
     ~labels:[("keeper", keeper_id); ("outcome", outcome_label outcome)] ();
   outcome
+
+(** Live admission decision (Phase A1).  Consumes tokens on Dispatch,
+    enqueues on Wait, surfaces on Surface, falls through to legacy on
+    Legacy_path.
+
+    Returns the decision + the acquired bucket (if Dispatch) so the
+    caller can release it after the turn completes. *)
+type live_result =
+  | Live_dispatch of {
+      candidate : Keeper_admission_policy.candidate;
+      drift : Keeper_admission_router.drift_record;
+      bucket : Keeper_provider_token_bucket.t;
+    }
+  | Live_wait
+  | Live_surface of Keeper_admission_router.surface_reason
+  | Live_legacy
+
+let live_result_label = function
+  | Live_dispatch _ -> "dispatch"
+  | Live_wait -> "wait"
+  | Live_surface _ -> "surface"
+  | Live_legacy -> "legacy"
+
+let decide_live ~keeper_id =
+  let outcome =
+    Keeper_admission_glue.decide
+      ~keeper_id
+      ~policies:policy_lookup
+      ~buckets:bucket_lookup
+  in
+  Prometheus.inc_counter
+    Keeper_metrics.metric_keeper_admission_shadow_outcome
+    ~labels:[("keeper", keeper_id); ("outcome", outcome_label outcome)] ();
+  match outcome with
+  | Keeper_admission_glue.Legacy_path -> Live_legacy
+  | Keeper_admission_glue.New_admission decision ->
+      (match decision with
+       | Keeper_admission_router.Dispatch { candidate; drift } ->
+           (* Look up the bucket again to return it for release. *)
+           (match bucket_lookup candidate.Keeper_admission_policy.provider with
+            | Some bucket -> Live_dispatch { candidate; drift; bucket }
+            | None ->
+                (* Should not happen: decide already acquired from this
+                   bucket.  Fall back to legacy for safety. *)
+                Log.Keeper.warn
+                  "%s: admission dispatch bucket disappeared after acquire; \
+                   falling back to legacy"
+                  keeper_id;
+                Live_legacy)
+       | Keeper_admission_router.Wait ->
+           (* Enqueue in WFQ overflow for wake on refill. *)
+           let policy_opt = policy_lookup keeper_id in
+           let weight =
+             match policy_opt with
+             | Some p -> Keeper_admission_policy.weight p
+             | None -> 1
+           in
+           Keeper_wfq_overflow.enqueue wfq_queue
+             { keeper_id; weight; enqueued_at = now () };
+           Live_wait
+       | Keeper_admission_router.Surface reason -> Live_surface reason)
+
+(** Release a bucket token after turn completion.  Idempotent — safe
+    to call even if the token was never acquired (e.g. after exception
+    paths that short-circuit before dispatch). *)
+let release_bucket bucket =
+  Keeper_provider_token_bucket.release bucket
+
+let wfq_depth () = Keeper_wfq_overflow.depth wfq_queue
+
+let wfq_snapshot () = Keeper_wfq_overflow.snapshot wfq_queue
 
 let reset_for_test () =
   Stdlib.Mutex.protect init_mutex (fun () ->

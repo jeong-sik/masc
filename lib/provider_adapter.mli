@@ -122,6 +122,7 @@ type auth_detail = {
 
 val cn_llama : string
 val cn_ollama : string
+val cn_unknown_provider : string
 val cn_claude : string
 val cn_codex : string
 val cn_gemini : string

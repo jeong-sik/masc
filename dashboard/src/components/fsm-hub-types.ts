@@ -139,22 +139,23 @@ export const LANE_LABELS: Record<LaneKey, string> = {
 /** Korean display names for raw FSM state values.
     Replaces English internals in PipelineStep and Swimlane. */
 export const STATE_DISPLAY_NAMES: Record<string, string> = {
-  // KTC
-  idle: '대기',
+  // KTC (unique keys — shared keys like idle/exhausted moved below)
   prompting: '프롬프트 구성',
+  routing: '라우팅',
   executing: '실행 중',
-  compacting: '압축 중',
   finalizing: '마무리',
   // KDP
   undecided: '대기',
   guard_ok: '가드 통과',
   gate_rejected: '게이트 거부',
   tool_policy_selected: '도구 목록 적용',
-  // KCL
+  // KCL + shared keys (idle, exhausted, compacting, done)
+  idle: '대기',
   selecting: '선택 중',
   trying: '시도 중',
   done: '완료',
   exhausted: '소진',
+  compacting: '압축 중',
   // KMC
   accumulating: '수집 중',
   // KSM
@@ -169,6 +170,7 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   crashed: '비정상 종료',
   restarting: '재시작 중',
   dead: '종료됨',
+  zombie: '좀비',
   Running: '가동 중',
   Overflowed: '컨텍스트 초과',
   Compacting: '압축 중',
@@ -179,7 +181,9 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   Paused: '일시 중지',
   Stopped: '정지',
   Draining: '종료 준비',
-  Stable: '안정',
+  Restarting: '재시작 중',
+  Dead: '종료됨',
+  Zombie: '좀비',
 }
 
 /** Resolve display name: Korean label for UI, raw value preserved in tooltips. */

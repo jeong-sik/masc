@@ -9,18 +9,40 @@ module Obs = Masc_mcp.Keeper_composite_observer
 (* ── KTC: turn_phase ─────────────────────────────────────── *)
 
 let test_valid_turn_phase_transitions () =
-  let cases =
-    [ Turn_idle, Turn_prompting
-    ; Turn_prompting, Turn_executing
-    ; Turn_prompting, Turn_finalizing
-    ; Turn_executing, Turn_compacting
-    ; Turn_executing, Turn_finalizing
-    ; Turn_compacting, Turn_prompting
-    ; Turn_idle, Turn_idle
-    ; Turn_prompting, Turn_prompting
-    ; Turn_executing, Turn_executing
-    ; Turn_compacting, Turn_compacting
-    ; Turn_finalizing, Turn_finalizing
+  let cases : (packed_turn_phase * packed_turn_phase) list =
+    [ (* from Turn_idle *)
+      Packed Turn_idle, Packed Turn_idle
+    ; Packed Turn_idle, Packed Turn_prompting
+      (* from Turn_prompting *)
+    ; Packed Turn_prompting, Packed Turn_prompting
+    ; Packed Turn_prompting, Packed Turn_routing
+    ; Packed Turn_prompting, Packed Turn_executing
+    ; Packed Turn_prompting, Packed Turn_finalizing
+      (* from Turn_routing *)
+    ; Packed Turn_routing, Packed Turn_prompting
+    ; Packed Turn_routing, Packed Turn_routing
+    ; Packed Turn_routing, Packed Turn_executing
+      (* from Turn_executing *)
+    ; Packed Turn_executing, Packed Turn_prompting
+    ; Packed Turn_executing, Packed Turn_routing
+    ; Packed Turn_executing, Packed Turn_executing
+    ; Packed Turn_executing, Packed Turn_compacting
+    ; Packed Turn_executing, Packed Turn_finalizing
+    ; Packed Turn_executing, Packed Turn_exhausted
+      (* from Turn_compacting *)
+    ; Packed Turn_compacting, Packed Turn_prompting
+    ; Packed Turn_compacting, Packed Turn_compacting
+    ; Packed Turn_compacting, Packed Turn_finalizing
+      (* from Turn_finalizing *)
+    ; Packed Turn_finalizing, Packed Turn_prompting
+    ; Packed Turn_finalizing, Packed Turn_routing
+    ; Packed Turn_finalizing, Packed Turn_executing
+    ; Packed Turn_finalizing, Packed Turn_finalizing
+      (* from Turn_exhausted *)
+    ; Packed Turn_exhausted, Packed Turn_prompting
+    ; Packed Turn_exhausted, Packed Turn_routing
+    ; Packed Turn_exhausted, Packed Turn_executing
+    ; Packed Turn_exhausted, Packed Turn_exhausted
     ]
   in
   List.iter
@@ -36,19 +58,37 @@ let test_valid_turn_phase_transitions () =
 ;;
 
 let test_invalid_turn_phase_transitions () =
-  let cases =
-    [ Turn_idle, Turn_executing
-    ; Turn_idle, Turn_compacting
-    ; Turn_idle, Turn_finalizing
-    ; Turn_prompting, Turn_idle
-    ; Turn_prompting, Turn_compacting
-    ; Turn_executing, Turn_idle
-    ; Turn_executing, Turn_prompting
-    ; Turn_compacting, Turn_idle
-    ; Turn_compacting, Turn_executing
-    ; Turn_compacting, Turn_finalizing
-    ; Turn_finalizing, Turn_idle
-    ; Turn_finalizing, Turn_prompting
+  let cases : (packed_turn_phase * packed_turn_phase) list =
+    [ (* from Turn_idle *)
+      Packed Turn_idle, Packed Turn_routing
+    ; Packed Turn_idle, Packed Turn_executing
+    ; Packed Turn_idle, Packed Turn_compacting
+    ; Packed Turn_idle, Packed Turn_finalizing
+    ; Packed Turn_idle, Packed Turn_exhausted
+      (* from Turn_prompting *)
+    ; Packed Turn_prompting, Packed Turn_idle
+    ; Packed Turn_prompting, Packed Turn_compacting
+    ; Packed Turn_prompting, Packed Turn_exhausted
+      (* from Turn_routing *)
+    ; Packed Turn_routing, Packed Turn_idle
+    ; Packed Turn_routing, Packed Turn_compacting
+    ; Packed Turn_routing, Packed Turn_finalizing
+    ; Packed Turn_routing, Packed Turn_exhausted
+      (* from Turn_executing *)
+    ; Packed Turn_executing, Packed Turn_idle
+      (* from Turn_compacting *)
+    ; Packed Turn_compacting, Packed Turn_idle
+    ; Packed Turn_compacting, Packed Turn_routing
+    ; Packed Turn_compacting, Packed Turn_executing
+    ; Packed Turn_compacting, Packed Turn_exhausted
+      (* from Turn_finalizing *)
+    ; Packed Turn_finalizing, Packed Turn_idle
+    ; Packed Turn_finalizing, Packed Turn_compacting
+    ; Packed Turn_finalizing, Packed Turn_exhausted
+      (* from Turn_exhausted *)
+    ; Packed Turn_exhausted, Packed Turn_idle
+    ; Packed Turn_exhausted, Packed Turn_compacting
+    ; Packed Turn_exhausted, Packed Turn_finalizing
     ]
   in
   List.iter
@@ -68,13 +108,23 @@ let test_invalid_turn_phase_transitions () =
 (* ── KDP: decision_stage ────────────────────────────────── *)
 
 let test_valid_decision_transitions () =
-  let cases =
-    [ Decision_undecided, Decision_guard_ok
+  let cases : (decision_stage * decision_stage) list =
+    [ (* from Decision_undecided *)
+      Decision_undecided, Decision_undecided
+    ; Decision_undecided, Decision_guard_ok
     ; Decision_undecided, Decision_gate_rejected
-    ; Decision_guard_ok, Decision_tool_policy_selected
-    ; Decision_undecided, Decision_undecided
+    ; Decision_undecided, Decision_tool_policy_selected
+      (* from Decision_guard_ok *)
     ; Decision_guard_ok, Decision_guard_ok
+    ; Decision_guard_ok, Decision_gate_rejected
+    ; Decision_guard_ok, Decision_tool_policy_selected
+      (* from Decision_gate_rejected *)
+    ; Decision_gate_rejected, Decision_guard_ok
     ; Decision_gate_rejected, Decision_gate_rejected
+    ; Decision_gate_rejected, Decision_tool_policy_selected
+      (* from Decision_tool_policy_selected *)
+    ; Decision_tool_policy_selected, Decision_guard_ok
+    ; Decision_tool_policy_selected, Decision_gate_rejected
     ; Decision_tool_policy_selected, Decision_tool_policy_selected
     ]
   in
@@ -85,20 +135,17 @@ let test_valid_decision_transitions () =
          Alcotest.fail
            (Printf.sprintf
               "valid decision %s -> %s rejected"
-              (Obs.decision_stage_to_string from)
-              (Obs.decision_stage_to_string to_)))
+              (Obs.decision_stage_to_string (stage_to_witness from))
+              (Obs.decision_stage_to_string (stage_to_witness to_))))
     cases
 ;;
 
 let test_invalid_decision_transitions () =
-  let cases =
-    [ Decision_undecided, Decision_tool_policy_selected
-    ; Decision_guard_ok, Decision_undecided
-    ; Decision_guard_ok, Decision_gate_rejected
+  let cases : (decision_stage * decision_stage) list =
+    [ (* Only _ -> undecided is invalid (reset, not transition) *)
+      Decision_guard_ok, Decision_undecided
     ; Decision_gate_rejected, Decision_undecided
-    ; Decision_gate_rejected, Decision_guard_ok
     ; Decision_tool_policy_selected, Decision_undecided
-    ; Decision_tool_policy_selected, Decision_guard_ok
     ]
   in
   List.iter
@@ -108,8 +155,8 @@ let test_invalid_decision_transitions () =
          Alcotest.fail
            (Printf.sprintf
               "invalid decision %s -> %s should raise"
-              (Obs.decision_stage_to_string from)
-              (Obs.decision_stage_to_string to_))
+              (Obs.decision_stage_to_string (stage_to_witness from))
+              (Obs.decision_stage_to_string (stage_to_witness to_)))
        with
        | Assert_failure _ -> ())
     cases
@@ -118,17 +165,30 @@ let test_invalid_decision_transitions () =
 (* ── KCL: cascade_state ─────────────────────────────────── *)
 
 let test_valid_cascade_transitions () =
-  let cases =
-    [ Cascade_idle, Cascade_selecting
-    ; Cascade_selecting, Cascade_trying
-    ; Cascade_trying, Cascade_done
-    ; Cascade_trying, Cascade_exhausted
-    ; Cascade_trying, Cascade_selecting
-    ; Cascade_idle, Cascade_idle
-    ; Cascade_selecting, Cascade_selecting
-    ; Cascade_trying, Cascade_trying
-    ; Cascade_done, Cascade_done
-    ; Cascade_exhausted, Cascade_exhausted
+  let cases : (packed_cascade_state * packed_cascade_state) list =
+    [ (* from Cascade_idle *)
+      Packed Cascade_idle, Packed Cascade_idle
+    ; Packed Cascade_idle, Packed Cascade_selecting
+      (* from Cascade_selecting *)
+    ; Packed Cascade_selecting, Packed Cascade_idle
+    ; Packed Cascade_selecting, Packed Cascade_selecting
+    ; Packed Cascade_selecting, Packed Cascade_trying
+      (* from Cascade_trying *)
+    ; Packed Cascade_trying, Packed Cascade_idle
+    ; Packed Cascade_trying, Packed Cascade_selecting
+    ; Packed Cascade_trying, Packed Cascade_trying
+    ; Packed Cascade_trying, Packed Cascade_done
+    ; Packed Cascade_trying, Packed Cascade_exhausted
+      (* from Cascade_done *)
+    ; Packed Cascade_done, Packed Cascade_idle
+    ; Packed Cascade_done, Packed Cascade_selecting
+    ; Packed Cascade_done, Packed Cascade_trying
+    ; Packed Cascade_done, Packed Cascade_done
+      (* from Cascade_exhausted *)
+    ; Packed Cascade_exhausted, Packed Cascade_idle
+    ; Packed Cascade_exhausted, Packed Cascade_selecting
+    ; Packed Cascade_exhausted, Packed Cascade_trying
+    ; Packed Cascade_exhausted, Packed Cascade_exhausted
     ]
   in
   List.iter
@@ -144,22 +204,24 @@ let test_valid_cascade_transitions () =
 ;;
 
 let test_invalid_cascade_transitions () =
-  let cases =
-    [ Cascade_idle, Cascade_trying
+  let cases : (packed_cascade_state * packed_cascade_state) list =
+    [ (* from Cascade_idle *)
+      Packed Cascade_idle, Packed Cascade_trying
         (* Regression: pre-fix [Keeper_unified_turn.retry_loop] line
            1138 era marked Cascade_trying immediately after budget
            resolution, jumping past Cascade_selecting.  The fix moves
            the trying mark into the disclosure hook so the matrix
            below keeps rejecting any future re-introduction of the
            direct jump. *)
-    ; Cascade_idle, Cascade_done
-    ; Cascade_idle, Cascade_exhausted
-    ; Cascade_selecting, Cascade_done
-    ; Cascade_selecting, Cascade_exhausted
-    ; Cascade_done, Cascade_idle
-    ; Cascade_done, Cascade_selecting
-    ; Cascade_exhausted, Cascade_idle
-    ; Cascade_exhausted, Cascade_selecting
+    ; Packed Cascade_idle, Packed Cascade_done
+    ; Packed Cascade_idle, Packed Cascade_exhausted
+      (* from Cascade_selecting *)
+    ; Packed Cascade_selecting, Packed Cascade_done
+    ; Packed Cascade_selecting, Packed Cascade_exhausted
+      (* from Cascade_done *)
+    ; Packed Cascade_done, Packed Cascade_exhausted
+      (* from Cascade_exhausted *)
+    ; Packed Cascade_exhausted, Packed Cascade_done
     ]
   in
   List.iter
@@ -208,9 +270,9 @@ let walk_cascade_sequence label seq =
 let test_first_turn_attempt_sequence () =
   walk_cascade_sequence
     "first-turn attempt"
-    [ Cascade_idle, Cascade_selecting
-    ; Cascade_selecting, Cascade_trying
-    ; Cascade_trying, Cascade_done
+    [ Packed Cascade_idle, Packed Cascade_selecting
+    ; Packed Cascade_selecting, Packed Cascade_trying
+    ; Packed Cascade_trying, Packed Cascade_done
     ]
 ;;
 
@@ -220,24 +282,24 @@ let test_retry_attempt_sequence () =
      attempt may fail and end at [exhausted]. *)
   walk_cascade_sequence
     "retry attempt"
-    [ Cascade_idle, Cascade_selecting
-    ; Cascade_selecting, Cascade_trying
-    ; Cascade_trying, Cascade_selecting
-    ; Cascade_selecting, Cascade_trying
-    ; Cascade_trying, Cascade_exhausted
+    [ Packed Cascade_idle, Packed Cascade_selecting
+    ; Packed Cascade_selecting, Packed Cascade_trying
+    ; Packed Cascade_trying, Packed Cascade_selecting
+    ; Packed Cascade_selecting, Packed Cascade_trying
+    ; Packed Cascade_trying, Packed Cascade_exhausted
     ]
 ;;
 
 (* ── KMC: compaction_stage ──────────────────────────────── *)
 
 let test_valid_compaction_transitions () =
-  let cases =
-    [ Compaction_accumulating, Compaction_compacting
-    ; Compaction_compacting, Compaction_done
-    ; Compaction_compacting, Compaction_accumulating
-    ; Compaction_accumulating, Compaction_accumulating
-    ; Compaction_compacting, Compaction_compacting
-    ; Compaction_done, Compaction_done
+  let cases : (packed_compaction_stage * packed_compaction_stage) list =
+    [ Packed Compaction_accumulating, Packed Compaction_compacting
+    ; Packed Compaction_compacting, Packed Compaction_done
+    ; Packed Compaction_compacting, Packed Compaction_accumulating
+    ; Packed Compaction_accumulating, Packed Compaction_accumulating
+    ; Packed Compaction_compacting, Packed Compaction_compacting
+    ; Packed Compaction_done, Packed Compaction_done
     ]
   in
   List.iter
@@ -253,10 +315,10 @@ let test_valid_compaction_transitions () =
 ;;
 
 let test_invalid_compaction_transitions () =
-  let cases =
-    [ Compaction_accumulating, Compaction_done
-    ; Compaction_done, Compaction_accumulating
-    ; Compaction_done, Compaction_compacting
+  let cases : (packed_compaction_stage * packed_compaction_stage) list =
+    [ Packed Compaction_accumulating, Packed Compaction_done
+    ; Packed Compaction_done, Packed Compaction_accumulating
+    ; Packed Compaction_done, Packed Compaction_compacting
     ]
   in
   List.iter

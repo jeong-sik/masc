@@ -581,7 +581,7 @@ let test_force_release_marker_ttl_bounds_unfinalized_fibers () =
   KK.clear_force_released_markers_for_test ();
   let marked_at = 1_000.0 in
   KK.add_force_released_marker_for_test
-    ~label:"turn"
+    ~label:KTS.Turn_pool
     ~keeper_name:"diag-orphan-marker"
     ~acquisition_id:42
     ~marked_at;

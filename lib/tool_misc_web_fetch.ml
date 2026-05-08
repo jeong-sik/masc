@@ -17,6 +17,8 @@ module Float = Stdlib.Float
 
 open Tool_args
 
+let default_timeout_sec = 15
+
 (** JSON response helpers — same pattern as Tool_misc_web_search *)
 let json_error message =
   Yojson.Safe.to_string
@@ -182,7 +184,7 @@ let fetch_impl ~url ~timeout_sec =
 
 let handle args =
   let url = get_string args "url" "" in
-  let timeout = max 1 (min 60 (get_int args "timeout" 15)) in
+  let timeout = max 1 (min 60 (get_int args "timeout" default_timeout_sec)) in
   if not (valid_url url) then
     (false, json_error "url must be a valid http or https URL")
   else

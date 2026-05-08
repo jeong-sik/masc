@@ -29,14 +29,14 @@ let test_cascade_contract_shape () =
     bool
     "critical risk"
     true
-    (Agent_sdk.Risk_class.equal spec.risk_class Agent_sdk.Risk_class.Critical);
+    (Masc_mcp_cdal_runtime.Risk_class.equal spec.risk_class Masc_mcp_cdal_runtime.Risk_class.Critical);
   check
     bool
     "execute mode"
     true
-    (Agent_sdk.Execution_mode.equal
+    (Masc_mcp_cdal_runtime.Execution_mode.equal
        spec.requested_execution_mode
-       Agent_sdk.Execution_mode.Execute)
+       Masc_mcp_cdal_runtime.Execution_mode.Execute)
 ;;
 
 let test_find_by_name () =
@@ -47,7 +47,7 @@ let test_find_by_name () =
       bool
       "high risk"
       true
-      (Agent_sdk.Risk_class.equal spec.risk_class Agent_sdk.Risk_class.High)
+      (Masc_mcp_cdal_runtime.Risk_class.equal spec.risk_class Masc_mcp_cdal_runtime.Risk_class.High)
   | None -> fail "expected keeper lifecycle contract"
 ;;
 
@@ -74,8 +74,8 @@ let test_risk_contract_projection_is_deterministic () =
   check
     string
     "contract id deterministic"
-    (Agent_sdk.Risk_contract.contract_id first)
-    (Agent_sdk.Risk_contract.contract_id second);
+    (Masc_mcp_cdal_runtime.Risk_contract.contract_id first)
+    (Masc_mcp_cdal_runtime.Risk_contract.contract_id second);
   check
     (list string)
     "allowed mutations"
@@ -91,7 +91,7 @@ let test_risk_contract_projection_is_deterministic () =
 let test_risk_contract_ids_are_pinned () =
   let ids =
     Catalog.all
-    |> List.map (fun spec -> Agent_sdk.Risk_contract.contract_id (Catalog.to_risk_contract spec))
+    |> List.map (fun spec -> Masc_mcp_cdal_runtime.Risk_contract.contract_id (Catalog.to_risk_contract spec))
   in
   check
     (list string)

@@ -43,10 +43,10 @@ let string_contains_substring_ci ~(needle : string) (haystack : string) : bool =
 
 let cdal_mode_violations_ref_suffix = "evidence/mode_violations.json"
 
-let cdal_raw_evidence_ref_count (proof : Agent_sdk.Cdal_proof.t) : int =
+let cdal_raw_evidence_ref_count (proof : Masc_mcp_cdal_runtime.Cdal_proof.t) : int =
   List.length proof.raw_evidence_refs
 
-let cdal_violation_ref_count (proof : Agent_sdk.Cdal_proof.t) : int =
+let cdal_violation_ref_count (proof : Masc_mcp_cdal_runtime.Cdal_proof.t) : int =
   proof.raw_evidence_refs
   |> List.filter (String.ends_with ~suffix:cdal_mode_violations_ref_suffix)
   |> List.length
@@ -563,7 +563,7 @@ let provider_context_json ~(meta : keeper_meta)
               observation.selected_model,
               observation.candidate_models )
         | None ->
-            ( meta.cascade_name,
+            ( (cascade_name_of_meta meta),
               Some (Keeper_agent_run.surface_model_used r),
               [] )
       in
@@ -576,7 +576,7 @@ let provider_context_json ~(meta : keeper_meta)
         ]
   | None ->
       `Assoc
-        [ ("cascade_name", `String meta.cascade_name)
+        [ ("cascade_name", `String (cascade_name_of_meta meta))
         ; ("selected_model", `Null)
         ; ( "candidate_models",
             `List
@@ -734,7 +734,7 @@ let append_decision_record
         | _, Some err -> Keeper_turn_terminal.of_legacy_error_text err
         | _ -> Keeper_turn_terminal.of_code "unknown_error")
   in
-  let terminal_reason_code = terminal_reason.Keeper_turn_terminal.code in
+  let terminal_reason_code = Keeper_turn_terminal.code terminal_reason in
   let json =
     `Assoc
       ([
@@ -847,9 +847,9 @@ let append_decision_record
           | Some { proof = Some p; _ } ->
               `Assoc
                 [
-                  ("run_id", `String p.Agent_sdk.Cdal_proof.run_id);
+                  ("run_id", `String p.Masc_mcp_cdal_runtime.Cdal_proof.run_id);
                   ( "result_status",
-                    Agent_sdk.Cdal_proof.result_status_to_yojson p.result_status );
+                    Masc_mcp_cdal_runtime.Cdal_proof.result_status_to_yojson p.result_status );
                   ("tool_trace_count", `Int (List.length p.tool_trace_refs));
                 ]
           | _ -> `Null );
@@ -928,10 +928,10 @@ let append_decision_record
               in
                 let stop_reason_str =
                   match r.stop_reason with
-                  | Oas_worker.Completed -> "completed"
-                  | Oas_worker.TurnBudgetExhausted { turns_used; limit } ->
+                  | Cascade_runner.Completed -> "completed"
+                  | Cascade_runner.TurnBudgetExhausted { turns_used; limit } ->
                       Printf.sprintf "turn_budget_exhausted(%d/%d)" turns_used limit
-                  | Oas_worker.MutationBoundaryReached { turns_used; tool_name } ->
+                  | Cascade_runner.MutationBoundaryReached { turns_used; tool_name } ->
                       (match tool_name with
                        | Some tool ->
                            Printf.sprintf "mutation_boundary(%d:%s)" turns_used tool
@@ -1022,7 +1022,7 @@ let append_decision_record
                 error_category_of_no_result_outcome ~outcome ~error
               in
               `Assoc [
-                ("cascade_name", `String meta.cascade_name);
+                ("cascade_name", `String (cascade_name_of_meta meta));
                 ("candidate_models", `List (List.map (fun s -> `String s) cascade_models));
                 ( "error_category",
                   match error_category with
@@ -1293,8 +1293,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
          dashboard into showing BLOCKED status.  The social model's
          blocker field is a protocol-level signal; runtime last_blocker
          tracks whether the keeper can make progress. *)
-      last_blocker = "";
-      last_blocker_class = None;
+      last_blocker = None;
       last_need = Option.value ~default:"" social_state.need;
     };
   } in
@@ -1383,8 +1382,8 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
     match result.cascade_observation with
     | Some observation ->
       Keeper_cascade_profile.runtime_name_to_string
-        observation.Oas_worker.cascade_name
-    | None -> meta.cascade_name
+        observation.Cascade_legacy_runner.cascade_name
+    | None -> (cascade_name_of_meta meta)
   in
   (* #9933: same latency bucket, split by provider/model/cascade.
      This keeps the existing keeper-only counter stable while making
@@ -1468,7 +1467,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
           | None -> `Null );
         ("cascade",
          match result.cascade_observation with
-         | Some observation -> Oas_worker.cascade_observation_to_json observation
+         | Some observation -> Cascade_legacy_runner.cascade_observation_to_json observation
          | None -> `Null);
         ("snapshot_source", `String snapshot_source);
         ("memory_check", memory_check_default_json ());
@@ -1496,11 +1495,11 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
          match result.proof with
          | Some p ->
            `Assoc [
-             ("run_id", `String p.Agent_sdk.Cdal_proof.run_id);
+             ("run_id", `String p.Masc_mcp_cdal_runtime.Cdal_proof.run_id);
              ("effective_mode",
-              Agent_sdk.Execution_mode.to_yojson p.effective_execution_mode);
+              Masc_mcp_cdal_runtime.Execution_mode.to_yojson p.effective_execution_mode);
              ("result_status",
-              Agent_sdk.Cdal_proof.result_status_to_yojson p.result_status);
+              Masc_mcp_cdal_runtime.Cdal_proof.result_status_to_yojson p.result_status);
              ("violation_count",
               `Int (cdal_violation_ref_count p));
              ("raw_evidence_ref_count",
@@ -1615,18 +1614,18 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
   let public_reason =
     match sdk_error with
     | Some err -> (
-        match Oas_worker_named.classify_masc_internal_error err with
-        | Some (Oas_worker_named.Resumable_cli_session { detail; _ }) ->
+        match Keeper_turn_driver.classify_masc_internal_error err with
+        | Some (Keeper_turn_driver.Resumable_cli_session { detail; _ }) ->
             let trimmed = String.trim detail in
             if trimmed = "" then reason else trimmed
         | Some
-            (Oas_worker_named.Oas_timeout_budget
+            (Keeper_turn_driver.Oas_timeout_budget
                _ as err) ->
             Option.value
               ~default:reason
-              (Oas_worker_named.summary_of_masc_internal_error err)
-        | Some (Oas_worker_named.No_tool_capable_provider _ as err) -> (
-            match Oas_worker_named.summary_of_masc_internal_error err with
+              (Keeper_turn_driver.summary_of_masc_internal_error err)
+        | Some (Keeper_turn_driver.No_tool_capable_provider _ as err) -> (
+            match Keeper_turn_driver.summary_of_masc_internal_error err with
             | Some summary -> summary
             | None -> reason)
         | _ -> reason)
@@ -1637,14 +1636,14 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
     &&
     match sdk_error with
     | Some err -> (
-        match Oas_worker_named.classify_masc_internal_error err with
+        match Keeper_turn_driver.classify_masc_internal_error err with
         | Some
-            (Oas_worker_named.Oas_timeout_budget _
-            | Oas_worker_named.Turn_timeout _
-            | Oas_worker_named.Admission_queue_timeout _
-            | Oas_worker_named.Admission_queue_rejected _
-            | Oas_worker_named.Resumable_cli_session _
-            | Oas_worker_named.No_tool_capable_provider _) ->
+            (Keeper_turn_driver.Oas_timeout_budget _
+            | Keeper_turn_driver.Turn_timeout _
+            | Keeper_turn_driver.Admission_queue_timeout _
+            | Keeper_turn_driver.Admission_queue_rejected _
+            | Keeper_turn_driver.Resumable_cli_session _
+            | Keeper_turn_driver.No_tool_capable_provider _) ->
             true
         | Some _ | None -> false)
     | None -> false
@@ -1653,11 +1652,11 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
      cycle outcomes so Grafana can surface fleet-wide health ratios. *)
   (match sdk_error with
    | Some err ->
-       (match Oas_worker_named.classify_masc_internal_error err with
-        | Some (Oas_worker_named.No_tool_capable_provider
+       (match Keeper_turn_driver.classify_masc_internal_error err with
+        | Some (Keeper_turn_driver.No_tool_capable_provider
 	                  { cascade_name; _ }) ->
             let cascade_name =
-              Oas_worker_named.cascade_name_to_string cascade_name
+              Keeper_turn_driver.cascade_name_to_string cascade_name
             in
             Prometheus.inc_counter
               Keeper_metrics.metric_keeper_no_tool_provider
@@ -1734,14 +1733,26 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
              Option.value ~default:"" state.current_intention
          | None -> meta.runtime.last_current_intention);
       last_blocker =
-        (match social_state with
-         | Some (state : Social.social_state) ->
-             Option.value ~default:"" state.blocker
-         | None -> short_preview public_reason);
-      last_blocker_class =
+        (* Merge: typed klass from sdk_error becomes authoritative;
+           detail picks up the social-state blocker text or a public-
+           reason preview as observability context.  When the SDK
+           error carries no typed mapping we refuse to fabricate a
+           class — the previous string-only stamp is the substring
+           anti-pattern this refactor closes (CLAUDE.md
+           "워크어라운드 거부 기준 #2"). *)
         (match sdk_error with
          | Some err ->
-             Keeper_status_bridge.blocker_class_of_sdk_error err
+             (match Keeper_status_bridge.blocker_class_of_sdk_error err with
+              | Some klass ->
+                  let detail =
+                    match social_state with
+                    | Some (state : Social.social_state) ->
+                        Option.value ~default:"" state.blocker
+                    | None -> short_preview public_reason
+                  in
+                  Some (Keeper_meta_contract.blocker_info_of_class
+                          ~detail klass)
+              | None -> None)
          | None -> None);
       last_need =
         (match social_state with

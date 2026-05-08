@@ -30,7 +30,7 @@ let oas_model_of_effective_model (model_id : string) : string =
 (* ================================================================ *)
 
 let proof_result_status_to_string =
-  Oas_worker_exec.proof_result_status_to_string
+  Cascade_runner.proof_result_status_to_string
 
 let worker_max_turns_cap = 20
 
@@ -57,9 +57,9 @@ let agent_config_of_worker_meta
     system_prompt = Some system_prompt;
     max_tokens = Some max_tokens;
     max_turns = effective_max_turns meta;
-    temperature = Some Oas_worker_cascade.worker_temperature;
-    top_p = Some Oas_worker_cascade.worker_top_p;
-    top_k = Some Oas_worker_cascade.worker_top_k;
+    temperature = Some Cascade_legacy_runner.worker_temperature;
+    top_p = Some Cascade_legacy_runner.worker_top_p;
+    top_k = Some Cascade_legacy_runner.worker_top_k;
     (* min_p intentionally omitted: the constant is 0.0 (no-op) and some
        cloud providers (Groq, GLM) reject the field itself with
        "Invalid request: property 'min_p' is unsupported". OAS capability
@@ -162,7 +162,7 @@ let build_agent
     | None ->
         {
           Agent_sdk.Guardrails.tool_filter = AllowList tool_names;
-          max_tool_calls_per_turn = Some Oas_worker_cascade.worker_max_tool_calls_per_turn;
+          max_tool_calls_per_turn = Some Cascade_legacy_runner.worker_max_tool_calls_per_turn;
         }
   in
   let builder =
@@ -171,9 +171,9 @@ let build_agent
     |> Agent_sdk.Builder.with_system_prompt system_prompt
     |> (fun b -> match config.max_tokens with Some n -> Agent_sdk.Builder.with_max_tokens n b | None -> b)
     |> Agent_sdk.Builder.with_max_turns config.max_turns
-    |> Agent_sdk.Builder.with_temperature Oas_worker_cascade.worker_temperature
-    |> Agent_sdk.Builder.with_top_p Oas_worker_cascade.worker_top_p
-    |> Agent_sdk.Builder.with_top_k Oas_worker_cascade.worker_top_k
+    |> Agent_sdk.Builder.with_temperature Cascade_legacy_runner.worker_temperature
+    |> Agent_sdk.Builder.with_top_p Cascade_legacy_runner.worker_top_p
+    |> Agent_sdk.Builder.with_top_k Cascade_legacy_runner.worker_top_k
     (* with_min_p intentionally omitted — see agent_config_of_worker_meta
        above for the reason. The worker_min_p constant is 0.0 (a no-op)
        and cloud providers (Groq, GLM) reject the field itself. *)
@@ -628,7 +628,7 @@ and run_existing_worker_agent
     (fun () ->
       let result, proof = match contract with
         | Some c ->
-          let cr = Agent_sdk.Contract_runner.run ~sw ~contract:c agent prompt in
+          let cr = Masc_mcp_cdal_runtime.Contract_runner.run ~sw ~contract:c agent prompt in
           (cr.response, Some cr.proof)
         | None ->
           (Agent_sdk.Agent.run ~sw agent prompt, None)
@@ -678,10 +678,10 @@ and run_existing_worker_agent
               ~status:"ok" ~output
               ?raw_trace_run
               ?evidence_session_id
-              ?proof_run_id:(Option.map (fun p -> p.Agent_sdk.Cdal_proof.run_id) proof)
+              ?proof_run_id:(Option.map (fun p -> p.Masc_mcp_cdal_runtime.Cdal_proof.run_id) proof)
               ?proof_result_status:
                 (Option.map
-                   (fun p -> proof_result_status_to_string p.Agent_sdk.Cdal_proof.result_status)
+                   (fun p -> proof_result_status_to_string p.Masc_mcp_cdal_runtime.Cdal_proof.result_status)
                    proof)
               ()
           in
@@ -718,10 +718,10 @@ and run_existing_worker_agent
               ~status:"error" ~output:detail ~error:detail
               ?raw_trace_run
               ?evidence_session_id
-              ?proof_run_id:(Option.map (fun p -> p.Agent_sdk.Cdal_proof.run_id) proof)
+              ?proof_run_id:(Option.map (fun p -> p.Masc_mcp_cdal_runtime.Cdal_proof.run_id) proof)
               ?proof_result_status:
                 (Option.map
-                   (fun p -> proof_result_status_to_string p.Agent_sdk.Cdal_proof.result_status)
+                   (fun p -> proof_result_status_to_string p.Masc_mcp_cdal_runtime.Cdal_proof.result_status)
                    proof)
               ()
           in

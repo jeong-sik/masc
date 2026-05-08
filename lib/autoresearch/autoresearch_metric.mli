@@ -1,6 +1,6 @@
 (** Autoresearch_metric — Metric measurement and retry logic.
 
-    Runs a shell command ([metric_fn]) via [Agent_sdk.Autonomy_exec]
+    Runs a shell command ([metric_fn]) via [Masc_mcp_cdal_runtime.Autonomy_exec]
     (argv-only execution, no shell interpreter) and parses either a
     strict metric-contract tag or the last non-empty stdout line as a
     float score. Supports retry on transient errors (timeout,
@@ -37,7 +37,7 @@ val validate_metric_fn : string -> (string, string) result
 (** {1 Execution} *)
 
 (** [run_metric_argv ~workdir ~timeout_s argv] executes [argv] under
-    [Agent_sdk.Autonomy_exec.run] and returns
+    [Masc_mcp_cdal_runtime.Autonomy_exec.run] and returns
     [(stdout, elapsed_ms)] on exit code 0, or an [Error] describing the
     failure (including clock unavailability, non-zero exit, timeout,
     signal). *)

@@ -139,8 +139,8 @@ let safe_respond_with_string reqd response body =
       | Some msg ->
           Log.Http.warn
             "[http-eio] respond_with_string skipped (reqd already in \
-             error-handling state; classifier match — 2026-05-05 OAS \
-             cancellation race): %s" msg
+             error-handling state; classifier match — \
+             2026-05-05 OAS cancellation race): %s" msg
       | None ->
           Log.Http.warn
             "[http-eio] respond_with_string unexpected exception: %s"

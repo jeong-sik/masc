@@ -180,10 +180,14 @@ let run_pr_review_shell ~(config : Coord.config) ~(meta : keeper_meta)
     let host_cmd =
       Printf.sprintf "cd %s && %s" (Filename.quote root) cmd
     in
+    let argv = [ "/bin/zsh"; "-lc"; host_cmd ] in
     let status, output =
-      Process_eio.run_argv_with_status
+      Masc_exec.Exec_gate.run_argv_with_status
+        ~actor:"Keeper_shell"
+        ~raw_source:(String.concat " " argv)
+        ~summary:"keeper tool pr review host"
         ~timeout_sec
-        [ "/bin/zsh"; "-lc"; host_cmd ]
+        argv
     in
     { status; output; via = "host" }
 

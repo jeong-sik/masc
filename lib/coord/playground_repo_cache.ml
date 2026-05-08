@@ -15,7 +15,7 @@ let env_float name default =
 let git_meta_timeout_sec = env_float "MASC_KEEPER_GIT_META_TIMEOUT_SEC" 5.0
 
 let git_meta repo_path args =
-  Process_eio.run_argv_with_status ~timeout_sec:git_meta_timeout_sec
+  Masc_exec.Exec_gate.run_argv_with_status ~actor:"Coord_git" ~raw_source:("git -C " ^ repo_path ^ " " ^ String.concat " " args) ~summary:"git metadata query" ~timeout_sec:git_meta_timeout_sec
     ("git" :: "-C" :: repo_path :: args)
 
 let cache_update_mu = Stdlib.Mutex.create ()

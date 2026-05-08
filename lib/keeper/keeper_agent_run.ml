@@ -34,7 +34,7 @@ let per_provider_timeout_for_turn
 
     After the callback returns the final system prompt, appends the user
     message, builds OAS tools + hooks, and delegates to
-    [Oas_worker.run_named] which internally calls Agent.run().
+    [Keeper_turn_driver.run_named] which internally calls Agent.run().
 
     @param config Coord configuration
     @param meta Keeper metadata
@@ -360,7 +360,7 @@ let run_turn
                Some (String.equal (String.lowercase_ascii mode) "yolo")
              | None -> None);
           cli_subprocess_idle_sec;
-        } : Oas_worker.cli_transport_overrides)
+        } : Cascade_runner.cli_transport_overrides)
     in
     (* Phase 0: wake-time payload telemetry (Option C baseline).
        Entire block is dead code when MASC_PAYLOAD_TELEMETRY is unset.
@@ -414,7 +414,7 @@ let run_turn
       | None ->
       match
        Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s (fun () ->
-         Oas_worker.run_named
+         Keeper_turn_driver.run_named
            ~cascade_name:cascade_name_string
            ~keeper_name:meta.name
            ~model_strings:meta.models
@@ -645,7 +645,7 @@ let run_turn
            Keeper_metrics.metric_keeper_contract_violations
            ~labels:[("keeper_name", meta.name); ("kind", "tool_surface_violation"); ("signal", "unexpected_tool_names")]
            ();
-         Log.Keeper.error "keeper:%s cascade=%s %s" meta.name meta.cascade_name reason;
+         Log.Keeper.error "keeper:%s cascade=%s %s" meta.name (Keeper_types.cascade_name_of_meta meta) reason;
          Error (Agent_sdk.Error.Internal reason)
        else (
          let should_log_unexpected_tool_partial =
@@ -854,9 +854,9 @@ let run_turn
          let finalize_response_text raw_response_text =
            let stop_reason_str =
              match result.stop_reason with
-             | Oas_worker.Completed -> "completed"
-             | Oas_worker.TurnBudgetExhausted _ -> "budget_exhausted"
-             | Oas_worker.MutationBoundaryReached { tool_name; _ } ->
+             | Cascade_runner.Completed -> "completed"
+             | Cascade_runner.TurnBudgetExhausted _ -> "budget_exhausted"
+             | Cascade_runner.MutationBoundaryReached { tool_name; _ } ->
                  (match tool_name with
                   | Some tool -> Printf.sprintf "mutation_boundary(%s)" tool
                   | None -> "mutation_boundary")
@@ -936,7 +936,7 @@ let run_turn
                 | Error e ->
                   Log.Keeper.error
                     "keeper:%s cascade=%s OAS checkpoint save failed: %s"
-                    meta.name meta.cascade_name e;
+                    meta.name (Keeper_types.cascade_name_of_meta meta) e;
                   Prometheus.inc_counter
                     Keeper_metrics.metric_keeper_checkpoint_failures
                     ~labels:[("keeper", meta.name); ("site", "save")]
@@ -948,7 +948,7 @@ let run_turn
              | None ->
                Log.Keeper.error
                  "keeper:%s cascade=%s missing OAS checkpoint after run"
-                 meta.name meta.cascade_name;
+                 meta.name (Keeper_types.cascade_name_of_meta meta);
                  Prometheus.inc_counter
                    Keeper_metrics.metric_keeper_checkpoint_failures
                    ~labels:[("keeper", meta.name); ("site", "missing")]
@@ -964,7 +964,7 @@ let run_turn
            (match result.proof with
             | Some p ->
               Keeper_turn_telemetry.log_keeper_proof ~keeper_name:meta.name p;
-              let store = Agent_sdk.Proof_store.default_config in
+              let store = Masc_mcp_cdal_runtime.Proof_store.default_config in
               let outcome = Cdal_eval_v1.evaluate ~store p in
               let verdict = Cdal_eval_v1.verdict_of_outcome outcome in
 	              let task_subject =
@@ -1117,7 +1117,7 @@ let run_turn
                   ~labels:[("keeper", meta.name); ("site", "compaction")]
                   ();
                 Log.Keeper.warn "keeper:%s cascade=%s compaction failed: %s" meta.name
-                  meta.cascade_name (Printexc.to_string exn));
+                  (Keeper_types.cascade_name_of_meta meta) (Printexc.to_string exn));
            (* Post-turn quality metrics — goal alignment + memory recall.
              Logged to decisions.jsonl for feedback loop analysis. *)
            (try
@@ -1280,8 +1280,12 @@ let run_turn
     let terminal_reason_code =
       match turn_result with
       | Ok _ ->
+        (* RFC-0047 PR-4: emit canonical "success" wire directly. Pre-PR-4
+           this defaulted to "completed", which [Keeper_turn_terminal.normalize_code]
+           remapped to "success" before disposition lookup. The producer-side
+           default is now the canonical wire; the normalize step is gone. *)
         Option.value
-          ~default:"completed"
+          ~default:"success"
           !receipt_stop_reason_ref
       | Error err ->
         terminal_reason_code_of_sdk_error err

@@ -7,7 +7,7 @@
     "how long were Circuit_breaker_cycling retries in the last hour?".
 
     This module captures the decision outcome of every cycle iteration
-    of {!Oas_worker_named.try_cascade} as a ring event, so the dashboard
+    of {!Keeper_turn_driver.try_cascade} as a ring event, so the dashboard
     can surface recent runtime behaviour alongside the TLA+-verified
     strategy kind.
 

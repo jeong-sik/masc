@@ -572,4 +572,4 @@ dir-local local-dev에서는 `.masc/`가 target 디렉토리 내부를 가리키
 
 ### 12.6 모델 실행
 
-모델 선택은 `cascade.json`이 유일한 권위다. keeper_meta의 `cascade_name` (기본 `"keeper_unified"`)이 cascade를 지정하고, `Oas_model_resolve`가 실행 모델을 결정한다. keeper 설정에 모델 필드를 직접 지정하지 않는다.
+모델 선택은 `cascade.json`이 유일한 권위다. keeper_meta의 `cascade_name` (기본 `"keeper_unified"`)이 cascade를 지정하고, `Cascade_runtime`가 실행 모델을 결정한다. keeper 설정에 모델 필드를 직접 지정하지 않는다.

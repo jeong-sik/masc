@@ -111,36 +111,15 @@ let is_stale_paused_meta ~now ~paused_ttl_sec (meta : keeper_meta) =
 
 let paused_meta_requires_reconcile_recovery (meta : keeper_meta) =
   meta.paused
-  && (match meta.runtime.last_blocker_class with
-      | Some cls -> blocker_class_continue_gate cls
-      | None ->
-          (match Keeper_status_bridge.blocker_class_of_string
-                  meta.runtime.last_blocker with
-           | Some cls -> blocker_class_continue_gate cls
-           | None -> false))
+  && (match meta.runtime.last_blocker with
+      | Some info -> blocker_class_continue_gate info.klass
+      | None -> false)
 
 let committed_tools_of_ambiguous_blocker (blocker : string) =
   let trimmed = String.trim blocker in
-  (* Try structured JSON extraction first (new masc_internal_error format) *)
-  if String.starts_with ~prefix:"[masc_oas_error]" trimmed then
-    let payload =
-      String.sub trimmed
-        (String.length "[masc_oas_error]")
-        (String.length trimmed - String.length "[masc_oas_error]")
-    in
-    (try
-       match Yojson.Safe.from_string payload with
-       | `Assoc fields ->
-           (match List.assoc_opt "tools" fields with
-            | Some (`List values) ->
-                values
-                |> List.filter_map (function
-                     | `String value -> Some value
-                     | _ -> None)
-            | _ -> [])
-       | _ -> []
-     with Yojson.Json_error _ -> [])
-  else
+  match Cascade_error_classify.classify_masc_internal_error_of_string trimmed with
+  | Some (Cascade_error_classify.Ambiguous_post_commit { tools; _ }) -> tools
+  | _ ->
     (* Legacy: extract from bracket notation "prefix: [tool1, tool2]; ..." *)
     match String.index_opt trimmed '[' with
     | None -> []
@@ -174,7 +153,7 @@ let publish_lifecycle
   Keeper_lifecycle_audit.record ~keeper_name ~event_name ~phase ~detail;
   match Keeper_keepalive.get_bus () with
   | Some bus ->
-      Oas_events.publish_keeper_lifecycle bus ~event ~keeper_name ~detail ()
+      Cascade_events.publish_keeper_lifecycle bus ~event ~keeper_name ~detail ()
   | None -> ()
 
 (** Phase-event helper: the wire event name IS the phase name. *)
@@ -429,8 +408,8 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
               Keeper_registry.set_failure_reason ~base_path meta.name
                 (Some Keeper_registry.Fiber_unresolved);
               (* 2026-05-05 fleet-stuck cycle: keeper meta runtime
-                 [last_blocker]/[last_blocker_class] stayed null for 5+ hours
-                 while supervisor self-preservation suppressed restarts under
+                 [last_blocker] stayed null for 5+ hours while supervisor
+                 self-preservation suppressed restarts under
                  [cohort=fiber_unresolved].  The diagnosis was buried in the
                  crash registry but invisible on the per-keeper meta surface
                  dashboards read.  Stamp the same cohort onto runtime so
@@ -443,8 +422,9 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
                    { entry.meta with
                      runtime =
                        { entry.meta.runtime with
-                         last_blocker = "fiber_unresolved";
-                         last_blocker_class = Some Fiber_unresolved;
+                         last_blocker =
+                           Some (blocker_info_of_class
+                                   ~detail:"fiber_unresolved" Fiber_unresolved);
                        };
                    }
                  in
@@ -623,8 +603,7 @@ let resume_keeper_after_reconcile_gate (ctx : _ context) (meta : keeper_meta) =
       runtime =
         {
           latest_meta.runtime with
-          last_blocker = "";
-          last_blocker_class = None;
+          last_blocker = None;
         };
     }
   in
@@ -677,24 +656,22 @@ let resume_keeper_after_reconcile_gate (ctx : _ context) (meta : keeper_meta) =
   | None -> supervise_keepalive ~proactive_warmup_sec:0 ctx resumed_meta
 
 let restore_reconcile_continue_gate (ctx : _ context) (meta : keeper_meta) =
-  let blocker = String.trim meta.runtime.last_blocker in
-  let committed_tools = committed_tools_of_ambiguous_blocker blocker in
+  let blocker_detail, blocker_klass =
+    match meta.runtime.last_blocker with
+    | Some info -> String.trim info.detail, Some info.klass
+    | None -> "", None
+  in
+  let committed_tools = committed_tools_of_ambiguous_blocker blocker_detail in
   let failure_reason =
-    match meta.runtime.last_blocker_class with
+    match blocker_klass with
     | Some Ambiguous_post_commit_timeout ->
         "ambiguous_partial_commit(post_commit_timeout)"
     | Some Ambiguous_post_commit_failure ->
         "ambiguous_partial_commit(post_commit_failure)"
-    | None ->
-        (match Keeper_status_bridge.blocker_class_of_string blocker with
-         | Some Ambiguous_post_commit_timeout ->
-             "ambiguous_partial_commit(post_commit_timeout)"
-         | Some Ambiguous_post_commit_failure ->
-             "ambiguous_partial_commit(post_commit_failure)"
-         | Some _ -> "ambiguous_partial_commit(post_commit_failure)"
-         | None -> "ambiguous_partial_commit(post_commit_failure)")
-    | Some _ -> "ambiguous_partial_commit(post_commit_failure)"
+    | Some _ | None ->
+        "ambiguous_partial_commit(post_commit_failure)"
   in
+  let blocker = blocker_detail in
   let input =
     `Assoc
       [
@@ -1129,12 +1106,25 @@ let handle_crash_auto_pause (ctx : _ context)
            meta.auto_resume_after_sec
        in
        let blocker_text =
-         let existing = String.trim meta.runtime.last_blocker in
+         let existing =
+           match meta.runtime.last_blocker with
+           | Some info -> String.trim info.detail
+           | None -> ""
+         in
          if existing <> "" then existing
          else
            match blocker_class with
            | Some cls -> blocker_class_to_string cls
            | None -> reason_tag
+       in
+       let blocker_info_opt =
+         match blocker_class with
+         | Some klass -> Some (blocker_info_of_class ~detail:blocker_text klass)
+         | None ->
+           (* No typed class available — preserve pre-existing typed
+              info if any, otherwise drop the slot.  We refuse to
+              silently fabricate a klass from [reason_tag]. *)
+           meta.runtime.last_blocker
        in
        (* Task-138 §"Max no-task-progress 30min = release claimed":
           when the supervisor pauses a keeper because the same blocker
@@ -1144,14 +1134,13 @@ let handle_crash_auto_pause (ctx : _ context)
           up while this keeper sits in [paused=true] back-off.
 
           Without this release the diagnostic state is "executor.json:
-          current_task_id=task-147, paused=true, last_blocker_class=
+          current_task_id=task-147, paused=true, last_blocker.klass=
           oas_timeout_budget" — task is stuck forever because (a) this
           keeper cannot run while paused and (b) other keepers see the
           claim and skip.  The released task ID is not separately audited
-          here; [last_blocker_class] + [last_blocker] in [runtime] already
-          carry the pause reason, and Prometheus
-          [keeper_paused_total] is incremented below.
-          Discovered 2026-05-05 fleet-stuck. *)
+          here; [last_blocker] in [runtime] already carries the pause
+          reason, and Prometheus [keeper_paused_total] is incremented
+          below.  Discovered 2026-05-05 fleet-stuck. *)
        (match
           write_meta_with_merge
             ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
@@ -1163,8 +1152,7 @@ let handle_crash_auto_pause (ctx : _ context)
               current_task_id = None;
               runtime =
                 { meta.runtime with
-                  last_blocker = blocker_text;
-                  last_blocker_class = blocker_class;
+                  last_blocker = blocker_info_opt;
                 };
             }
         with
@@ -1260,6 +1248,15 @@ let sweep_and_recover (ctx : _ context) =
   let max_restarts = Runtime_params.get Governance_registry.keeper_supervisor_max_restarts in
   let dead_ttl_sec = Runtime_params.get Governance_registry.keeper_dead_ttl_sec in
   let base_path = ctx.config.base_path in
+  (* Refresh the cascade health cache before Phase 3.5 reads it.  Without this
+     call the cache stayed cold (PR #14146 introduced the cache and
+     [Phase 3.5] guard but never wired a writer), so [is_healthy] returned
+     [false] for every cascade and silently disabled auto-resume across the
+     fleet.  [run_once] is a registry scan — bounded, no I/O — so running it
+     inline on every 30 s sweep is cheap.  [Safe_ops.protect] keeps a
+     transient registry exception from killing the sweep. *)
+  Safe_ops.protect ~default:() (fun () ->
+    Keeper_health_probe.run_once ~base_path);
   (* Phase 2: sweep order — restart/unregister FIRST, reconcile LAST.
      This prevents reconcile from re-launching keepers that sweep is about
      to process (defense-in-depth alongside is_registered check). *)
@@ -1377,8 +1374,8 @@ let sweep_and_recover (ctx : _ context) =
             { current.meta with
               runtime =
                 { current.meta.runtime with
-                  last_blocker = msg;
-                  last_blocker_class = Some bc;
+                  last_blocker =
+                    Some (blocker_info_of_class ~detail:msg bc);
                 };
             }
           in
@@ -1487,6 +1484,20 @@ let sweep_and_recover (ctx : _ context) =
     Keeper_registry.dispatch_event_unit ~base_path entry.name
       Keeper_state_machine.Restart_budget_exhausted;
     Keeper_registry.mark_dead ~base_path entry.name ~at:now;
+    (* Task release: Dead keepers cannot make progress on claimed tasks.
+       Without this release, current_task_id stays claimed forever —
+       the task is invisible to peers while this keeper is permanently
+       stopped.  Mirrors handle_crash_auto_pause (line 1163). *)
+    (match entry.meta.current_task_id with
+     | Some _ ->
+         (match read_meta ctx.config entry.name with
+          | Ok (Some meta) ->
+              ignore (write_meta_with_merge
+                ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+                ctx.config
+                { meta with current_task_id = None })
+          | _ -> ())
+     | None -> ());
     let detail =
       Printf.sprintf "restart budget exhausted (%d), last: %s"
         max_restarts msg
@@ -1503,7 +1514,7 @@ let sweep_and_recover (ctx : _ context) =
     in
     (match Keeper_keepalive.get_bus () with
      | Some bus ->
-         Oas_events.publish_keeper_dead bus
+         Cascade_events.publish_keeper_dead bus
            ~keeper_name:entry.name
            ~reason:msg
            ~restart_count:entry.restart_count
@@ -1650,16 +1661,36 @@ let sweep_and_recover (ctx : _ context) =
                                  && not (paused_meta_requires_reconcile_recovery meta)
                                  && not (Keeper_approval_queue.has_pending_for_keeper
                                            ~keeper_name:meta.name) ->
-               if not (Keeper_health_probe.is_healthy
-                         ~keeper_name:meta.cascade_name) then begin
-                 Log.Keeper.info
-                   "%s: auto-resume blocked; cascade %s is unhealthy"
-                   name meta.cascade_name;
-                 Prometheus.inc_counter
-                   Keeper_metrics.metric_keeper_auto_resume_blocked_total
-                   ~labels:[("keeper", name); ("cascade", meta.cascade_name)]
-                   ()
-               end else begin
+               let cascade_name = Keeper_types.cascade_name_of_meta meta in
+               let cascade_status =
+                 Keeper_health_probe.get_cascade_status
+                   ~cascade_name
+               in
+               (* Three-valued admission:
+                    Unhealthy   — block, the probe saw restart pressure.
+                    Healthy     — proceed with timer check.
+                    Unknown     — proceed with timer check.  No probe data
+                                  yet (e.g. all keepers in the cascade
+                                  paused so the registry has no entries
+                                  to score).  Defaulting to "block" here
+                                  is the bug PR #14146 shipped: it turned
+                                  the boot-time race window into a
+                                  permanent lockout.  See instructions/
+                                  software-development.md anti-pattern
+                                  "Unknown -> Permissive Default". *)
+               (match cascade_status with
+                | Keeper_health_probe.Unhealthy reason ->
+                    Log.Keeper.info
+                      "%s: auto-resume blocked; cascade %s is unhealthy (%s)"
+                      name cascade_name reason;
+                    Prometheus.inc_counter
+                      Keeper_metrics.metric_keeper_auto_resume_blocked_total
+                      ~labels:[("keeper", name);
+                               ("cascade", cascade_name)]
+                      ()
+                | Keeper_health_probe.Unknown
+                | Keeper_health_probe.Healthy ->
+                  begin
                  let resume_after_sec =
                    Option.value ~default:0.0 meta.auto_resume_after_sec in
                  let paused_ts =
@@ -1676,8 +1707,7 @@ let sweep_and_recover (ctx : _ context) =
                        updated_at = now_iso ();
                        runtime =
                          { meta.runtime with
-                           last_blocker = "";
-                           last_blocker_class = None;
+                           last_blocker = None;
                          };
                      }
                    in
@@ -1713,7 +1743,7 @@ let sweep_and_recover (ctx : _ context) =
                           "%s: auto-resume meta write failed: %s"
                           name err)
                  end
-               end
+                  end)
            | _ -> ());
          Eio_guard.yield_step sweep_names_ym);
   (* Phase 4: reconcile LAST — only orphaned durable keepers *)
@@ -1868,8 +1898,7 @@ let liveness_recovery_scan (ctx : _ context) =
                      updated_at = now_iso ();
                      runtime =
                        { meta.runtime with
-                         last_blocker = "";
-                         last_blocker_class = None;
+                         last_blocker = None;
                        };
                    }
                  in

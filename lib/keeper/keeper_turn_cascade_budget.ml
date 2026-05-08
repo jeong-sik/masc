@@ -306,8 +306,8 @@ let degraded_retry_slot_phase_available ~(time_spent_in_turn_s : float) : bool =
 
 let degraded_retry_bypasses_slot_phase_guard
     (err : Agent_sdk.Error.sdk_error) : bool =
-  match Oas_worker_named.classify_masc_internal_error err with
-  | Some (Oas_worker_named.Oas_timeout_budget _) -> true
+  match Keeper_turn_driver.classify_masc_internal_error err with
+  | Some (Keeper_turn_driver.Oas_timeout_budget _) -> true
   | _ -> false
 
 let reclassify_oas_timeout_for_attempt
@@ -316,8 +316,8 @@ let reclassify_oas_timeout_for_attempt
   match err, timeout_budget with
   | Agent_sdk.Error.Api (Timeout { message }), Some timeout_budget
     when EC.is_structural_oas_timeout_message message ->
-      Oas_worker_named.sdk_error_of_masc_internal_error
-        (Oas_worker_named.Oas_timeout_budget
+      Keeper_turn_driver.sdk_error_of_masc_internal_error
+        (Keeper_turn_driver.Oas_timeout_budget
            {
              budget_sec = timeout_budget.effective_timeout_sec;
              keeper_turn_timeout_sec =

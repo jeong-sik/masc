@@ -764,3 +764,62 @@ let resolve_strategy_config ~config_path ~name =
       server_error_skip_after =
         read_int_field json (name ^ "_server_error_skip_after");
     }
+
+(* ── RFC-0041: cascade_profile loader ──────────────────────────────── *)
+
+(** Split a "provider:model" string into (provider, model).
+    Returns [None] when the separator is missing. *)
+let provider_model_of_string (s : string) : (string * string) option =
+  match String.split_on_char ':' s with
+  | [provider; model] -> Some (provider, model)
+  | _ -> None
+
+(** Convert a [weighted_entry] (from legacy cascade.json) into a
+    [Cascade_ref.cascade_item].  [timeout_ms] defaults to 30000;
+    [priority] uses the entry's [weight]. *)
+let cascade_item_of_weighted_entry (entry : weighted_entry)
+    : Cascade_ref.cascade_item option =
+  match provider_model_of_string entry.model with
+  | Some (provider, model) ->
+      Some {
+        Cascade_ref.id = entry.model;
+        provider;
+        model;
+        timeout_ms = 30000;
+        priority = entry.weight;
+      }
+  | None -> None
+
+(** Load a [Cascade_ref.cascade_profile] from the legacy cascade.json
+    format.  Each profile section becomes a single-group profile;
+    [models] become [cascade_item]s and [fallback_cascade] becomes
+    [fallback_group].
+
+    Returns [None] when the profile has no parsable model entries.
+    This is the bridge between the existing flat cascade.json format
+    and the RFC-0041 hierarchical profile model. *)
+let load_cascade_profile ~(config_path : string) ~(name : string)
+    : Cascade_ref.cascade_profile option =
+  let items =
+    load_profile_weighted ~config_path ~name
+    |> List.filter_map cascade_item_of_weighted_entry
+  in
+  if items = [] then None
+  else
+    let fallback_group =
+      match load_catalog ~config_path with
+      | Ok entries ->
+          (match List.find_opt (fun e -> String.equal e.name name) entries with
+           | Some entry -> entry.fallback_cascade
+           | None -> None)
+      | Error _ -> None
+    in
+    Some {
+      Cascade_ref.name;
+      groups = [{
+        Cascade_ref.name;
+        items;
+        strategy = Priority;
+        fallback_group;
+      }];
+    }

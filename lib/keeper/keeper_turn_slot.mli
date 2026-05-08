@@ -1,5 +1,12 @@
 exception Semaphore_wait_timeout of float
 
+type slot_pool =
+  | Turn_pool
+  | Autonomous_pool
+  | Reactive_pool
+
+val slot_pool_to_string : slot_pool -> string
+
 type semaphore_wait_phase =
   | Autonomous_queue_head
   | Autonomous_slot
@@ -87,7 +94,7 @@ val force_released_marker_count_for_test : unit -> int
 (** Test-only: inject a marker without touching semaphores, so marker-retention
     behavior can be exercised without creating a double-release path. *)
 val add_force_released_marker_for_test :
-  label:string ->
+  label:slot_pool ->
   keeper_name:string ->
   acquisition_id:int ->
   marked_at:float ->

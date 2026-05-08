@@ -893,6 +893,7 @@ let cleanup_stale ?(max_age_s=1800.0) () =
   (* Remove under lock, one by one *)
   List.iter (fun (sid, last_seen) ->
     Log.Server.info "idle evict: %s (idle %.0fs)" sid (now -. last_seen);
+    Transport_metrics.inc_sse_idle_evicted ();
     unregister sid
   ) stale;
   List.map fst stale

@@ -1,7 +1,8 @@
 # RFC-0005: Typed Capability Substrate for Local Exec Core
 
-**Status**: Draft
-**Date**: 2026-04-17
+**Status**: Phase 1 closed (S1-S4 + Tool_id) · Phase 2-4 open
+**Date**: 2026-04-17 (drafted) · 2026-05-09 (Phase 1 closeout)
+**Implementation tracking**: see [Implementation Status](#implementation-status) below
 **Scope**: `lib/exec/` (신규 internal sub-library), `lib/process/`, 87 Process_eio / Unix.* exec 사이트, `Tool_dispatch` handler 시그니처, `Keeper_approval_queue` source 필드 확장
 **One sentence**: LLM이 emit하는 bash 입력을 OCaml 5 typed IR (`Bin`/`Path_scope`/`Shell_ir`/`Capability`/`Verdict`)로 강제 변환하고, capability extraction → approval policy → 중앙 executor를 거쳐 문자열 substring 방어에서 **타입 수준 fail-closed 증명**으로 이동하는 8-11주 리팩터링.
 
@@ -631,3 +632,83 @@ T0 tap (5 cal days) ─┐
 - MCP Spec 2025-11-25 (consent는 host/client 책임)
 - Morbig SLE 2018 (Menhir POSIX shell subset 가능성 증명)
 - memory/feedback `empirical-before-design`, `tla-spec-audit-outcome-trichotomy`, `no-invented-abstractions`, `consider-base-library`, `no-lifecycle-invasion-from-masc`, `no-derived-tag-when-existing-identifier-suffices`
+
+## Implementation Status
+
+> Added 2026-05-09. RFC-0005's original phase breakdown (§A0-§A6) was
+> the *target* state. The actual landed work groups into S1-S4 + Tool_id
+> (Phase 1) and the GADT pipeline (Phase 2 partial). This section
+> records what shipped vs what remains, anchored to merged PRs.
+
+### Phase 1 — Typed dispatch keys (CLOSED 2026-05-09)
+
+The original §A0/§A1/§A2 mention typed IR for `Bin.t`, `Path_scope.t`,
+`Shell_ir.t`, etc. Phase 1 implemented the **dispatch-key** subset
+that the dependent typing analysis surfaced as the highest-leverage
+points (S1-S4). Plus a follow-up that closed `mode_enforcer.ml`'s
+default classification table.
+
+| Item | What | PR | Status |
+|---|---|---|---|
+| S1 | `Bin.kind` typed dispatch (replaces `String.equal "git" …` etc.) | [#14216](https://github.com/jeong-sik/masc-mcp/pull/14216) | ✅ MERGED 2026-05-08 |
+| S2 | `Agent_id.t` poly variant for approval-config keys | [#14227](https://github.com/jeong-sik/masc-mcp/pull/14227) | ✅ MERGED 2026-05-08 |
+| S3 | `exec_gate` rollout keys typed (per-agent overlay table) | [#14227](https://github.com/jeong-sik/masc-mcp/pull/14227) | ✅ MERGED 2026-05-08 |
+| S4 | `Capability_check` `Bin.kind` pattern matching (replaces string compare) | [#14216](https://github.com/jeong-sik/masc-mcp/pull/14216) | ✅ MERGED 2026-05-08 |
+| §3.1 | `Tool_id.t` typed key for `Mode_enforcer.default_tool_entries` (46 known + `Other_tool of string` fallback) | [#14282](https://github.com/jeong-sik/masc-mcp/pull/14282) | ✅ MERGED 2026-05-09 |
+
+Compile-time enforcement now catches: unknown bin in `Capability_check`,
+typo in approval-config rollout keys, typo in `default_tool_entries`
+table. Plugin tools entering at runtime via
+`Mode_enforcer.register_tool_class : string -> ...` continue to work —
+the typing surface is internal-only by design.
+
+### Phase 2 — GADT Shell IR + walkers (PARTIAL — pipeline live, PPX deferred)
+
+| Item | What | PR | Status |
+|---|---|---|---|
+| §A0/§A1 | `Shell_ir_typed` GADT (`('i,'o,'r,'s) command`, 9 ctors + `Generic` fail-closed catch-all) | [#14240](https://github.com/jeong-sik/masc-mcp/pull/14240) | ✅ MERGED 2026-05-08 |
+| §A2 | `Capability_check_typed` GADT walker | [#14240](https://github.com/jeong-sik/masc-mcp/pull/14240) | ✅ MERGED 2026-05-08 |
+| §A2 | `Risk_classifier_typed` GADT classification | [#14240](https://github.com/jeong-sik/masc-mcp/pull/14240) | ✅ MERGED 2026-05-08 |
+| §A2 | `Approval_policy_typed` GADT → existing `Approval_policy` bridge | [#14240](https://github.com/jeong-sik/masc-mcp/pull/14240) | ✅ MERGED 2026-05-08 |
+| §A3 | `exec_gate.verdict_for_argv` consumes `Capability_check_typed.of_command` (parallel to legacy untyped path) | [#14258](https://github.com/jeong-sik/masc-mcp/pull/14258) | ✅ MERGED 2026-05-09 |
+| — | PPX `[@@deriving shell_ir]` (auto-generate `to_simple` / `of_simple` / `risk` / `sandbox` from GADT decl) | — | 🔄 OPEN |
+| — | PPX `[@@deriving tool]` (auto-generate JSON schema for tool descriptors from variant) | — | 🔄 OPEN |
+| — | `mode_enforcer.ml` → `tool_effect.ml` rename + scope refinement | — | 🔄 OPEN |
+
+The GADT pipeline is *parallel* to the existing untyped path:
+`Capability_check.of_simple` (legacy) and `Capability_check_typed.of_command`
+(GADT) both feed into `Approval_policy.decide`. Cutover from legacy to
+typed-only is part of §A4 — not yet started; both paths must remain in
+sync until then.
+
+### Phase 3-4 — Wide migration + supporting infra (NOT STARTED)
+
+These are progress_report.md §3.3 items, all multi-week scope:
+
+- §A4 cutover: 87 `Process_eio.run_argv*` / `Unix.create_process` sites
+  to typed dispatch
+- 61-tool migration into a single GADT registry
+- Multi-provider JSON Schema auto-generation (depends on `[@@deriving tool]` PPX)
+- Dashboard telemetry typed surface/section IDs (depends on RFC-0048 IA settling)
+- FSM/TLA+ spec updates for typed IR
+- 64 Keeper Fiber stability verification under typed dispatch
+
+### Drift detection
+
+- `lib/exec/test/test_approval_config.ml` — Agent_id.t round-trip
+- `lib/exec/test/test_exec_gate_runtime.ml` — GADT dispatch 3 scenarios
+- `lib/exec/test/test_shell_ir_typed.ml` — risk/sandbox GADT assertion
+- `test/test_cdal_tool_id.ml` — Tool_id.t 46-constructor baseline + `Other_tool` fallback + uniqueness
+
+If any of those break, Phase 1 has regressed. Add new typed items by
+extending the relevant variant and re-running the test suite — the
+compiler will flag every site that needs to acknowledge.
+
+### Sources for this status section
+
+- progress_report.md (2026-05-09, external snapshot)
+- Direct verification: each cited PR opened in GitHub, each cited
+  module read at origin/main @ ab39d69080 before this update.
+
+When a future PR adds Phase 2 PPX or starts Phase 3 cutover, append
+a row to the relevant table above with the merge date and PR link.

@@ -59,7 +59,7 @@ let dispatch_simple (s : Shell_ir.simple) =
       let raw_source = String.concat " " argv in
       (match
          Exec_gate.run_argv_with_status_split
-           ~actor:"Tool_local_runtime"
+           ~actor:`Tool_local_runtime
            ~raw_source
            ~summary:"exec dispatch simple"
            ~timeout_sec ~env ?cwd argv
@@ -97,7 +97,7 @@ let rec dispatch_pipeline stages =
             (match
                let raw_source = String.concat " " argv in
                Exec_gate.run_argv_with_stdin_and_status_split
-                 ~actor:"Tool_local_runtime"
+                 ~actor:`Tool_local_runtime
                  ~raw_source
                  ~summary:"exec dispatch pipeline stage"
                  ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Dispatch ()) ~env
@@ -116,7 +116,7 @@ let rec dispatch_pipeline stages =
             (match
                let raw_source = String.concat " " argv in
                Exec_gate.run_argv_with_stdin_and_status_split
-                 ~actor:"Tool_local_runtime"
+                 ~actor:`Tool_local_runtime
                  ~raw_source
                  ~summary:"exec dispatch pipeline stage"
                  ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Dispatch ()) ~env

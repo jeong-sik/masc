@@ -38,7 +38,7 @@ let docker_info_security_options ~timeout_sec =
   in
   let st, out =
     Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:"System_task_sandbox"
+      ~actor:`System_task_sandbox
       ~raw_source:(String.concat " " argv)
       ~summary:"keeper sandbox docker info"
       ~env:(Unix.environment ())
@@ -499,7 +499,7 @@ let inspect_cleanup_container ~container_id ~timeout_sec =
   in
   let st, out =
     Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:"System_task_sandbox"
+      ~actor:`System_task_sandbox
       ~raw_source:(String.concat " " argv)
       ~summary:"keeper sandbox docker inspect cleanup"
       ~env:(Unix.environment ())
@@ -525,7 +525,7 @@ let remove_cleanup_container ~container_id ~timeout_sec =
   let argv = docker_command_argv () @ [ "rm"; "-f"; container_id ] in
   let st, out =
     Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:"System_task_sandbox"
+      ~actor:`System_task_sandbox
       ~raw_source:(String.concat " " argv)
       ~summary:"keeper sandbox docker rm cleanup"
       ~env:(Unix.environment ())
@@ -564,7 +564,7 @@ let cleanup_stale_containers ?(now = Unix.gettimeofday ())
     in
     let st, out =
       Masc_exec.Exec_gate.run_argv_with_status
-        ~actor:"System_task_sandbox"
+        ~actor:`System_task_sandbox
         ~raw_source:(String.concat " " argv)
         ~summary:"keeper sandbox docker ps cleanup"
         ~env:(Unix.environment ())
@@ -637,7 +637,7 @@ let list_container_ids ?keeper_name ?container_kind ~base_path ~timeout_sec () =
     in
     let st, out =
       Masc_exec.Exec_gate.run_argv_with_status
-        ~actor:"System_task_sandbox"
+        ~actor:`System_task_sandbox
         ~raw_source:(String.concat " " argv)
         ~summary:"keeper sandbox docker ps list"
         ~env:(Unix.environment ())
@@ -683,7 +683,7 @@ let list_containers ?keeper_name ?container_kind ~base_path ~timeout_sec () =
       in
       let st, out =
         Masc_exec.Exec_gate.run_argv_with_status
-          ~actor:"System_task_sandbox"
+          ~actor:`System_task_sandbox
           ~raw_source:(String.concat " " argv)
           ~summary:"keeper sandbox docker inspect live"
           ~env:(Unix.environment ())
@@ -780,7 +780,7 @@ let docker_image_present ~image ~timeout_sec =
     let argv = docker_command_argv () @ [ "image"; "inspect"; image ] in
     let st, out =
       Masc_exec.Exec_gate.run_argv_with_status
-        ~actor:"System_task_sandbox"
+        ~actor:`System_task_sandbox
         ~raw_source:(String.concat " " argv)
         ~summary:"keeper sandbox docker image inspect"
         ~env:(Unix.environment ())
@@ -822,7 +822,7 @@ let docker_image_required_commands ~image ~timeout_sec =
   in
   let st, out =
     Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:"System_task_sandbox"
+      ~actor:`System_task_sandbox
       ~raw_source:(String.concat " " argv)
       ~summary:"keeper sandbox docker run required commands"
       ~env:(Unix.environment ())

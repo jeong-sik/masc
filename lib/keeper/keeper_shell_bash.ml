@@ -758,7 +758,7 @@ let handle_keeper_bash
                        | None ->
                          let t0 = Unix.gettimeofday () in
                          let st, out =
-                           Masc_exec.Exec_gate.run_argv_with_status ~actor:"Keeper_shell"
+                           Masc_exec.Exec_gate.run_argv_with_status ~actor:`Keeper_shell
                              ~raw_source:(String.concat " " argv_merged)
                              ~summary:"keeper bash command"
                              ~cwd ~timeout_sec argv_merged
@@ -808,7 +808,7 @@ let handle_keeper_bash
                     | None ->
                    let t0 = Unix.gettimeofday () in
                    let st, out =
-                     Masc_exec.Exec_gate.run_argv_with_status ~actor:"Keeper_shell"
+                     Masc_exec.Exec_gate.run_argv_with_status ~actor:`Keeper_shell
                        ~raw_source:(String.concat " " argv_merged)
                        ~summary:"keeper bash command"
                        ~cwd ~timeout_sec argv_merged

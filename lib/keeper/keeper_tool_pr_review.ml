@@ -183,7 +183,7 @@ let run_pr_review_shell ~(config : Coord.config) ~(meta : keeper_meta)
     let argv = [ "/bin/zsh"; "-lc"; host_cmd ] in
     let status, output =
       Masc_exec.Exec_gate.run_argv_with_status
-        ~actor:"Keeper_shell"
+        ~actor:`Keeper_shell
         ~raw_source:(String.concat " " argv)
         ~summary:"keeper tool pr review host"
         ~timeout_sec

@@ -22,7 +22,7 @@ let run_git ~timeout_sec ~clone_path args =
   let argv = [ "git"; "-C"; clone_path; "--no-optional-locks" ] @ args in
   let status, output =
     Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:"Coord_git"
+      ~actor:`Coord_git
       ~raw_source:(String.concat " " argv)
       ~summary:"keeper repo readiness git probe"
       ~timeout_sec argv

@@ -790,7 +790,7 @@ let run_docker_shell_command_with_status
       (try
          let status, output =
            Fun.protect ~finally:restore_gitdirs @@ fun () ->
-           Masc_exec.Exec_gate.run_argv_with_status ~actor:"Keeper_shell"
+           Masc_exec.Exec_gate.run_argv_with_status ~actor:`Keeper_shell
              ~raw_source:(String.concat " " argv)
              ~summary:"keeper docker command"
              ~env:(Unix.environment ())

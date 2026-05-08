@@ -1724,9 +1724,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                Log.Keeper.error
                  "%s: event-bus order violation during timeout path; treating turn as failed before retry/reconcile decisions"
                  meta.name;
-               Keeper_registry.set_turn_phase
-                 ~base_path:config.base_path meta.name
-                 Keeper_registry.(Packed Turn_finalizing);
+                Keeper_registry.set_turn_phase
+                  ~base_path:config.base_path meta.name
+                  Keeper_registry.(Packed Turn_finalizing);
                Error order_err
              | None ->
             let committed_tools = committed_mutating_tools_snapshot () in

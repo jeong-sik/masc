@@ -126,7 +126,7 @@ let run_gh_auth_status ~gh_config_dir =
   try
     let env = gh_process_env_for_config_dir gh_config_dir in
     Ok
-      (Masc_exec.Exec_gate.run_argv_with_status ~actor:"Coord_git" ~raw_source:"gh auth status --hostname github.com" ~summary:"gh auth status check" ~env
+      (Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git ~raw_source:"gh auth status --hostname github.com" ~summary:"gh auth status check" ~env
          [ "gh"; "auth"; "status"; "--hostname"; "github.com" ])
   with
   | Unix.Unix_error (Unix.ENOENT, _, _) ->

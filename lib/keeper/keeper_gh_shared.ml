@@ -216,7 +216,7 @@ let fetch_entity_numbers ~(config : Coord.config) ~(repo_slug : string) ~(kind :
   let argv = [ "/bin/zsh"; "-lc"; Printf.sprintf "%s 2>/dev/null" scoped ] in
   match
     Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:"Coord_git"
+      ~actor:`Coord_git
       ~raw_source:(String.concat " " argv)
       ~summary:"keeper gh cache fetch"
       ~timeout_sec:(Keeper_tool_policy.gh_cache_fetch_timeout_sec ())
@@ -711,7 +711,7 @@ let repo_slug_of_git_command ~cwd =
   let argv = [ "git"; "remote"; "get-url"; "origin" ] in
   match
     Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:"Coord_git"
+      ~actor:`Coord_git
       ~raw_source:(String.concat " " argv)
       ~summary:"keeper gh repo slug from git"
       ~cwd
@@ -725,7 +725,7 @@ let origin_url_of_git_command ~cwd =
   let argv = [ "git"; "remote"; "get-url"; "origin" ] in
   match
     Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:"Coord_git"
+      ~actor:`Coord_git
       ~raw_source:(String.concat " " argv)
       ~summary:"keeper gh origin url from git"
       ~cwd

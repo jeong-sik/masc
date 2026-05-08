@@ -266,6 +266,7 @@ let run_named
      and the agent's checkpoint (if progress was made). try_cascade
      threads this checkpoint to the next provider without mutable state. *)
   let try_provider ?resume_checkpoint ?per_provider_timeout_s (provider_cfg : Llm_provider.Provider_config.t) =
+    let liveness_mode = Cascade_attempt_liveness_config.current_mode () in
     let config_result =
       Cascade_runner.resolve_tool_lane_for_oas_tools
         ?agent_name:(keeper_agent_name_opt keeper_name)
@@ -295,15 +296,24 @@ let run_named
                  max_input_tokens;
                  max_cost_usd;
                  stream_idle_timeout_s =
-                   (match per_provider_timeout_s with
-                    | Some _ as timeout_s -> timeout_s
-                    | None ->
-                        Some
-                          (Option.value
-                             ~default:
-                               Env_config_keeper.KeeperKeepalive
-                               .stream_idle_timeout_sec
-                             stream_idle_timeout_s));
+                   (match liveness_mode with
+                    | Cascade_attempt_liveness_config.Enforce -> None
+                    | _ ->
+                        let budget_wall =
+                          (Cascade_attempt_liveness_config.budget_for_label
+                             provider_cfg.model_id)
+                            .Cascade_attempt_liveness.attempt_wall_max
+                        in
+                        (match per_provider_timeout_s with
+                         | Some timeout_s -> Some (Float.max timeout_s budget_wall)
+                         | None ->
+                             Some
+                               (Float.max budget_wall
+                                  (Option.value
+                                     ~default:
+                                       Env_config_keeper.KeeperKeepalive
+                                       .stream_idle_timeout_sec
+                                     stream_idle_timeout_s))));
                  max_execution_time_s =
                    (* Bound a single OAS call (one [Agent.run]/[run_stream])
                       so a hung provider falls into [Retry.Timeout] instead

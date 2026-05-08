@@ -13,6 +13,49 @@ let test_bin_safe () =
       assert (Bin.to_string b = "ls")
   | Error _ -> assert false
 
+let test_bin_of_known () =
+  let ls = Bin.of_known Bin.Ls in
+  assert (Bin.risk_class ls = `Safe);
+  assert (Bin.kind ls = `Safe_bin);
+  assert (Bin.to_string ls = "ls");
+  assert (Bin.known ls = Some Bin.Ls);
+  let git = Bin.of_known Bin.Git in
+  assert (Bin.risk_class git = `Audited);
+  assert (Bin.kind git = `Git);
+  assert (Bin.known git = Some Bin.Git);
+  let sudo = Bin.of_known Bin.Sudo in
+  assert (Bin.risk_class sudo = `Privileged);
+  assert (Bin.kind sudo = `Privileged_bin);
+  assert (Bin.known sudo = Some Bin.Sudo)
+
+let test_bin_name_of_known () =
+  assert (Bin.name_of_known Bin.Ls = "ls");
+  assert (Bin.name_of_known Bin.Git = "git");
+  assert (Bin.name_of_known Bin.Curl = "curl");
+  assert (Bin.name_of_known Bin.Rm = "rm");
+  assert (Bin.name_of_known Bin.Sudo = "sudo")
+
+let test_bin_risk_of_known () =
+  assert (Bin.risk_of_known Bin.Ls = `Safe);
+  assert (Bin.risk_of_known Bin.Rg = `Safe);
+  assert (Bin.risk_of_known Bin.Git = `Audited);
+  assert (Bin.risk_of_known Bin.Docker = `Audited);
+  assert (Bin.risk_of_known Bin.Sudo = `Privileged);
+  assert (Bin.risk_of_known Bin.Rm = `Privileged)
+
+let test_bin_known_roundtrip () =
+  match Bin.of_string "git" with
+  | Ok b ->
+    (match Bin.known b with
+     | Some k -> assert (Bin.name_of_known k = "git")
+     | None -> assert false)
+  | Error _ -> assert false
+
+let test_bin_unknown_has_no_known () =
+  match Bin.of_string "wibble" with
+  | Ok b -> assert (Bin.known b = None)
+  | Error _ -> assert false
+
 let test_bin_unknown_is_privileged () =
   match Bin.of_string "wibble" with
   | Ok b -> assert (Bin.risk_class b = `Privileged)
@@ -134,6 +177,11 @@ let test_verdict_four_way () =
 
 let () =
   test_bin_safe ();
+  test_bin_of_known ();
+  test_bin_name_of_known ();
+  test_bin_risk_of_known ();
+  test_bin_known_roundtrip ();
+  test_bin_unknown_has_no_known ();
   test_bin_unknown_is_privileged ();
   test_bin_empty_rejected ();
   test_git_op_destructive_detection ();

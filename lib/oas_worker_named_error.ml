@@ -265,7 +265,17 @@ let summary_of_masc_internal_error = function
            "OAS timeout budget exhausted; phase=%s; source=%s; budget=%.1fs; remaining=%s; min_required=%.1fs; estimated_input_tokens=%d; keeper_turn_timeout=%.1fs"
            phase source budget_sec remaining min_required_sec
            estimated_input_tokens keeper_turn_timeout_sec)
-  | _ -> None
+  (* Variants without a custom long-form summary: callers fall back to
+     [kind_of_masc_internal_error] / the JSON payload.  Enumerated
+     explicitly so adding a new [masc_internal_error] variant forces
+     a decision on whether it deserves a long-form summary string. *)
+  | Cascade_exhausted _
+  | Resumable_cli_session _
+  | Accept_rejected _
+  | Admission_queue_timeout _
+  | Admission_queue_rejected _
+  | Turn_timeout _
+  | Ambiguous_post_commit _ -> None
 
 (* #9933: classify emitted [masc_oas_error] payloads by kind so
    dashboards and Grafana alerts can watch the fleet-wide rate per
@@ -683,7 +693,16 @@ let codex_cli_prompt_preflight ~(config : Oas_worker_exec.config) ~(goal : strin
           hits_argv_limit;
           hits_context_window;
         }
-  | _ -> None
+  (* Other provider kinds: argv-limit + context-window preflight only
+     applies to the [codex exec] subprocess transport (it serialises the
+     full prompt onto a single argv vector).  Other transports either
+     stream over HTTP (no argv limit) or have their own preflight in
+     their adapter — return [None] here so the caller skips preflight
+     wrapping.  Enumerated explicitly so adding a new
+     [Llm_provider.Provider_config.provider_kind] forces a decision on
+     whether it needs codex-style prompt preflight. *)
+  | Anthropic | Kimi | OpenAI_compat | Ollama | Gemini | Glm
+  | DashScope | Claude_code | Gemini_cli | Kimi_cli -> None
 
 let codex_cli_preflight_error ~(scope : string)
     ~(provider_cfg : Llm_provider.Provider_config.t)

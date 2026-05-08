@@ -328,26 +328,49 @@ export function KeeperDetailSection({
   id,
   eyebrow,
   title,
+  defaultCollapsed = false,
   children,
 }: {
   id: KeeperDetailSectionId
   eyebrow: string
   title: string
+  /** When true, the section body starts collapsed and the operator
+   *  expands it by clicking the header. Defaults to expanded so the
+   *  long-standing always-open behaviour is preserved for callers
+   *  that do not opt in. Quick-jump links via [scrollToKeeperDetailSection]
+   *  still resolve to the header anchor regardless of the body state. */
+  defaultCollapsed?: boolean
   children: ComponentChildren
 }) {
+  const [collapsed, setCollapsed] = useState(defaultCollapsed)
+  const bodyId = `${id}-body`
   return html`
     <section
       id=${id}
       class="scroll-mt-24 rounded-[var(--r-6)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)]"
       aria-label=${title}
     >
-      <div class="border-b border-[var(--color-border-default)] px-5 py-4 sm:px-6">
-        <div class="text-3xs font-semibold uppercase tracking-[var(--track-brand)] text-[var(--color-fg-muted)]">${eyebrow}</div>
-        <h3 class="m-0 mt-1 text-lg font-semibold text-[var(--color-fg-primary)]">${title}</h3>
-      </div>
-      <div class="flex flex-col gap-4 px-5 py-5 sm:px-6">
-        ${children}
-      </div>
+      <button
+        type="button"
+        class="flex w-full items-center justify-between gap-3 border-b border-[var(--color-border-default)] px-5 py-4 text-left transition-colors hover:bg-[var(--color-bg-hover)] sm:px-6"
+        aria-expanded=${!collapsed}
+        aria-controls=${bodyId}
+        onClick=${() => setCollapsed((c: boolean) => !c)}
+      >
+        <div class="min-w-0">
+          <div class="text-3xs font-semibold uppercase tracking-[var(--track-brand)] text-[var(--color-fg-muted)]">${eyebrow}</div>
+          <h3 class="m-0 mt-1 text-lg font-semibold text-[var(--color-fg-primary)]">${title}</h3>
+        </div>
+        <span
+          aria-hidden="true"
+          class=${`shrink-0 text-[var(--color-fg-muted)] transition-transform duration-[var(--t-med)] ${collapsed ? '' : 'rotate-180'}`}
+        >▾</span>
+      </button>
+      ${collapsed ? null : html`
+        <div id=${bodyId} class="flex flex-col gap-4 px-5 py-5 sm:px-6">
+          ${children}
+        </div>
+      `}
     </section>
   `
 }

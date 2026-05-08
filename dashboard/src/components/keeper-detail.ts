@@ -1144,6 +1144,7 @@ export function KeeperDetailPage() {
             id="keeper-comms"
             eyebrow="대화 & 세션"
             title="대화 / 활동 흐름"
+            defaultCollapsed=${true}
           >
             <${KeeperCommsPanel} keeper=${keeper} />
             <${PanelCard} title="세션 활동 로그">
@@ -1155,6 +1156,7 @@ export function KeeperDetailPage() {
             id="keeper-runtime"
             eyebrow="런타임 진단"
             title="진단 / 운영"
+            defaultCollapsed=${true}
           >
             <${KeeperToolTelemetry} keeperName=${keeper.name} />
             <${KeeperEvalQualityPanel} keeperName=${keeper.name} />
@@ -1186,6 +1188,7 @@ export function KeeperDetailPage() {
             id="keeper-identity"
             eyebrow="신원 & 계보"
             title="정체성 / 세대"
+            defaultCollapsed=${true}
           >
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <${PanelCard} title="프로필">
@@ -1251,6 +1254,7 @@ export function KeeperDetailPage() {
             id="keeper-config"
             eyebrow="설정"
             title="설정 / 작업 방식"
+            defaultCollapsed=${true}
           >
             <${TurnBudgetSection} keeper=${keeper} />
             <${CollapsibleSection} title="허용 도구">
@@ -1270,6 +1274,7 @@ export function KeeperDetailPage() {
             id="keeper-debug"
             eyebrow="디버그"
             title="디버그"
+            defaultCollapsed=${true}
           >
             <details class="mt-0">
           <summary class="cursor-pointer py-3 px-4 text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] list-none select-none rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] hover:bg-[var(--color-bg-hover)] transition-colors flex items-center gap-2">

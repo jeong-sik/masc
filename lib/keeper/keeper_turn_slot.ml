@@ -6,6 +6,19 @@
 
 open Keeper_types
 
+(** The three semaphore pools that gate keeper turn admission.
+    Closed sum type: adding a new pool requires updating every match site,
+    which the compiler enforces exhaustively. *)
+type slot_pool =
+  | Turn_pool
+  | Autonomous_pool
+  | Reactive_pool
+
+let slot_pool_to_string = function
+  | Turn_pool -> "turn"
+  | Autonomous_pool -> "autonomous"
+  | Reactive_pool -> "reactive"
+
 exception Semaphore_wait_timeout of float
 
 type semaphore_wait_phase =
@@ -82,7 +95,7 @@ let turn_semaphore = Eio.Semaphore.make keeper_turn_throttle_limit
    force-release marker when the predecessor never reaches its finalizer.
    Cardinality is bounded by the deployment's keeper count (typically <50). *)
 type holder_key = {
-  holder_label : string;
+  holder_label : slot_pool;
   holder_keeper_name : string;
   holder_acquisition_id : int;
 }
@@ -152,7 +165,7 @@ let mark_holder_force_released ~label ~keeper_name =
     let keys =
       Hashtbl.fold
         (fun key _ acc ->
-           if String.equal key.holder_label label
+           if key.holder_label = label
               && String.equal key.holder_keeper_name keeper_name
            then key :: acc
            else acc)
@@ -190,7 +203,7 @@ let snapshot_holders ~label ~now =
   with_holder_lock (fun () ->
     Hashtbl.fold
       (fun key ts acc ->
-        if String.equal key.holder_label label
+        if key.holder_label = label
         then (key.holder_keeper_name, now -. ts) :: acc
         else acc)
       holder_table [])
@@ -255,9 +268,9 @@ let autonomous_turn_semaphore_value_for_test () =
 let reactive_turn_semaphore_value_for_test () =
   Eio.Semaphore.get_value reactive_turn_semaphore
 
-let turn_slot_holders ~now = snapshot_holders ~label:"turn" ~now
-let autonomous_slot_holders ~now = snapshot_holders ~label:"autonomous" ~now
-let reactive_slot_holders ~now = snapshot_holders ~label:"reactive" ~now
+let turn_slot_holders ~now = snapshot_holders ~label:Turn_pool ~now
+let autonomous_slot_holders ~now = snapshot_holders ~label:Autonomous_pool ~now
+let reactive_slot_holders ~now = snapshot_holders ~label:Reactive_pool ~now
 
 let force_release_stale_holder ~keeper_name =
   let released = ref [] in
@@ -265,12 +278,12 @@ let force_release_stale_holder ~keeper_name =
     let release_count = mark_holder_force_released ~label ~keeper_name in
     for _ = 1 to release_count do
       Eio.Semaphore.release sem;
-      released := label :: !released
+      released := slot_pool_to_string label :: !released
     done
   in
-  release_if_held ~label:"turn" turn_semaphore;
-  release_if_held ~label:"autonomous" autonomous_turn_semaphore;
-  release_if_held ~label:"reactive" reactive_turn_semaphore;
+  release_if_held ~label:Turn_pool turn_semaphore;
+  release_if_held ~label:Autonomous_pool autonomous_turn_semaphore;
+  release_if_held ~label:Reactive_pool reactive_turn_semaphore;
   List.rev !released
 
 let format_slot_holders ?(limit = 5) holders =
@@ -313,10 +326,9 @@ let snapshot_all_holders ~now =
       (fun key ts (turn, auto, reactive) ->
         let held = now -. ts in
         match key.holder_label with
-        | "turn" -> ((key.holder_keeper_name, held) :: turn, auto, reactive)
-        | "autonomous" -> (turn, (key.holder_keeper_name, held) :: auto, reactive)
-        | "reactive" -> (turn, auto, (key.holder_keeper_name, held) :: reactive)
-        | _ -> (turn, auto, reactive))
+        | Turn_pool -> ((key.holder_keeper_name, held) :: turn, auto, reactive)
+        | Autonomous_pool -> (turn, (key.holder_keeper_name, held) :: auto, reactive)
+        | Reactive_pool -> (turn, auto, (key.holder_keeper_name, held) :: reactive))
       holder_table ([], [], []))
   |> fun (t, a, r) ->
   let by_held = List.sort (fun (_, x) (_, y) -> compare y x) in
@@ -614,12 +626,13 @@ let release_recorded_holder
     ~label
     ~acquisition_id
     sem =
+  let label_str = slot_pool_to_string label in
   match acquisition_id with
   | None ->
     Log.Keeper.warn
       "release_keeper_turn_slot: %s holder for %s missing acquisition id; \
        releasing semaphore defensively"
-      label keeper_name;
+      label_str keeper_name;
     before_release ();
     Eio.Semaphore.release sem
   | Some acquisition_id ->
@@ -627,22 +640,22 @@ let release_recorded_holder
       try consume_force_release ~label ~keeper_name ~acquisition_id with
       | Eio.Cancel.Cancelled _ ->
         observe_bookkeeping_failure
-          ~op:("drop_holder " ^ label) ~kind:"cancelled";
+          ~op:("drop_holder " ^ label_str) ~kind:"cancelled";
         Log.Keeper.warn
           "release_keeper_turn_slot: drop_holder %s skipped (Cancelled)"
-          label;
+          label_str;
         false
       | exn ->
         observe_bookkeeping_failure
-          ~op:("drop_holder " ^ label) ~kind:"exception";
+          ~op:("drop_holder " ^ label_str) ~kind:"exception";
         Log.Keeper.warn "release_keeper_turn_slot: drop_holder %s failed: %s"
-          label (Printexc.to_string exn);
+          label_str (Printexc.to_string exn);
         false
     in
     if force_released then
       Log.Keeper.warn
         "release_keeper_turn_slot: %s holder for %s was already force-released"
-        label keeper_name
+        label_str keeper_name
     else begin
       before_release ();
       Eio.Semaphore.release sem
@@ -661,14 +674,14 @@ let release_keeper_turn_slot_impl
      semaphores account for separate quotas, so release order does not affect
      permit ownership. *)
   if !(state.acquired_turn) then begin
-    release_recorded_holder ~keeper_name ~label:"turn"
+    release_recorded_holder ~keeper_name ~label:Turn_pool
       ~acquisition_id:!(state.turn_acquisition_id)
       turn_semaphore;
     state.acquired_turn := false;
     state.turn_acquisition_id := None
   end;
   if !(state.acquired_autonomous) then begin
-    release_recorded_holder ~keeper_name ~label:"autonomous"
+    release_recorded_holder ~keeper_name ~label:Autonomous_pool
       ~acquisition_id:!(state.autonomous_acquisition_id)
       ~before_release:(fun () ->
         (* Stamp completion time only for normal completion, before releasing
@@ -683,7 +696,7 @@ let release_keeper_turn_slot_impl
     state.autonomous_acquisition_id := None
   end;
   if !(state.acquired_reactive) then begin
-    release_recorded_holder ~keeper_name ~label:"reactive"
+    release_recorded_holder ~keeper_name ~label:Reactive_pool
       ~acquisition_id:!(state.reactive_acquisition_id)
       reactive_turn_semaphore;
     state.acquired_reactive := false;
@@ -737,7 +750,7 @@ let force_release_holder_for ~keeper_name : (string * float) list =
         let matching =
           Hashtbl.fold
             (fun key acquired_at acc ->
-               if String.equal key.holder_label label
+               if key.holder_label = label
                   && String.equal key.holder_keeper_name keeper_name
                then (key, acquired_at) :: acc
                else acc)
@@ -750,24 +763,25 @@ let force_release_holder_for ~keeper_name : (string * float) list =
           matching;
         matching)
     in
+    let label_str = slot_pool_to_string label in
     List.iter
       (fun (_key, acquired_at) ->
         let age = now -. acquired_at in
         Eio.Semaphore.release sem;
-        released_with_age := (label, age) :: !released_with_age;
+        released_with_age := (label_str, age) :: !released_with_age;
         Prometheus.inc_counter
           Keeper_metrics.metric_keeper_slot_force_released
-          ~labels:[("keeper", keeper_name); ("label", label)]
+          ~labels:[("keeper", keeper_name); ("label", label_str)]
           ();
         Log.Keeper.error
           "%s: force-released %s slot held for %.0fs (zombie fiber, \
            likely stuck in LLM subprocess)"
-          keeper_name label age)
+          keeper_name label_str age)
       snapshots
   in
-  try_release ~label:"reactive" ~sem:reactive_turn_semaphore;
-  try_release ~label:"autonomous" ~sem:autonomous_turn_semaphore;
-  try_release ~label:"turn" ~sem:turn_semaphore;
+  try_release ~label:Reactive_pool ~sem:reactive_turn_semaphore;
+  try_release ~label:Autonomous_pool ~sem:autonomous_turn_semaphore;
+  try_release ~label:Turn_pool ~sem:turn_semaphore;
   !released_with_age
 
 let reset_autonomous_completion_for_test () : unit =
@@ -1017,6 +1031,7 @@ let with_keeper_turn_slot_control ?(cascade_profile = "unknown") ~keeper_name
      cancel-race handling. *)
   let slot_state = make_keeper_turn_slot_state () in
   let acquire_bounded ~label ~phase sem =
+    let label_str = slot_pool_to_string label in
     match Eio_context.get_clock_opt () with
     | Some clock ->
       (try
@@ -1045,7 +1060,7 @@ let with_keeper_turn_slot_control ?(cascade_profile = "unknown") ~keeper_name
         Log.Keeper.routine
           "semaphore_wait: %s semaphore wait exceeded %.0fs \
            (channel=%s, holders=%s), skipping turn"
-          label semaphore_wait_timeout_sec
+          label_str semaphore_wait_timeout_sec
           channel_label holder_summary;
         (* #9771: per-keeper × per-acquire-channel counter so
            operators can attribute slot starvation to autonomous
@@ -1053,7 +1068,7 @@ let with_keeper_turn_slot_control ?(cascade_profile = "unknown") ~keeper_name
         Prometheus.inc_counter
           Keeper_metrics.metric_keeper_semaphore_wait_timeout
           ~labels:[ ("keeper", keeper_name);
-                    ("channel", label) ]
+                    ("channel", label_str) ]
           ();
         Error
           (`Semaphore_wait_timeout
@@ -1068,7 +1083,7 @@ let with_keeper_turn_slot_control ?(cascade_profile = "unknown") ~keeper_name
       if Eio.Semaphore.get_value sem > 0 then begin
         Log.Keeper.warn
           "semaphore_wait: no Eio clock available — %s acquire is immediate only (environment drift?)"
-          label;
+          label_str;
         Eio.Semaphore.acquire sem;
         (* Cancel-race fix: see comment in the with-clock branch above.
            record_holder is the caller's responsibility, after flag set. *)
@@ -1079,11 +1094,11 @@ let with_keeper_turn_slot_control ?(cascade_profile = "unknown") ~keeper_name
         in
         Log.Keeper.warn
           "semaphore_wait: no Eio clock available and %s semaphore has no permits; failing closed instead of waiting unboundedly"
-          label;
+          label_str;
         Prometheus.inc_counter
           Keeper_metrics.metric_keeper_semaphore_wait_timeout
           ~labels:[ ("keeper", keeper_name);
-                    ("channel", label) ]
+                    ("channel", label_str) ]
           ();
         Error
           (`Semaphore_wait_timeout
@@ -1132,7 +1147,7 @@ let with_keeper_turn_slot_control ?(cascade_profile = "unknown") ~keeper_name
           | Ok () ->
             match
               acquire_bounded
-                ~label:"autonomous"
+                ~label:Autonomous_pool
                 ~phase:Autonomous_slot
                 autonomous_turn_semaphore
             with
@@ -1148,9 +1163,9 @@ let with_keeper_turn_slot_control ?(cascade_profile = "unknown") ~keeper_name
                  calls drop_holder (no-op when no entry exists). *)
               slot_state.acquired_autonomous := true;
               run_after_acquire_flag_hook_for_test
-                ~label:"autonomous" ~keeper_name;
+                ~label:(slot_pool_to_string Autonomous_pool) ~keeper_name;
               let acquisition_id =
-                record_holder ~label:"autonomous" ~keeper_name
+                record_holder ~label:Autonomous_pool ~keeper_name
                   ~acquired_at:(Time_compat.now ())
               in
               slot_state.autonomous_acquisition_id := Some acquisition_id;
@@ -1168,7 +1183,7 @@ let with_keeper_turn_slot_control ?(cascade_profile = "unknown") ~keeper_name
           else
             match
               acquire_bounded
-                ~label:"reactive"
+                ~label:Reactive_pool
                 ~phase:Reactive_slot
                 reactive_turn_semaphore
             with
@@ -1177,9 +1192,9 @@ let with_keeper_turn_slot_control ?(cascade_profile = "unknown") ~keeper_name
               (* Cancel-race fix: flag THEN record_holder. *)
               slot_state.acquired_reactive := true;
               run_after_acquire_flag_hook_for_test
-                ~label:"reactive" ~keeper_name;
+                ~label:(slot_pool_to_string Reactive_pool) ~keeper_name;
               let acquisition_id =
-                record_holder ~label:"reactive" ~keeper_name
+                record_holder ~label:Reactive_pool ~keeper_name
                   ~acquired_at:(Time_compat.now ())
               in
               slot_state.reactive_acquisition_id := Some acquisition_id;
@@ -1188,15 +1203,15 @@ let with_keeper_turn_slot_control ?(cascade_profile = "unknown") ~keeper_name
         match reactive_result with
         | Error _ as e -> e
         | Ok () ->
-        match acquire_bounded ~label:"turn" ~phase:Turn_slot turn_semaphore with
+        match acquire_bounded ~label:Turn_pool ~phase:Turn_slot turn_semaphore with
         | Error _ as e -> e
         | Ok () ->
           (* Cancel-race fix: flag THEN record_holder. *)
           slot_state.acquired_turn := true;
           run_after_acquire_flag_hook_for_test
-            ~label:"turn" ~keeper_name;
+            ~label:(slot_pool_to_string Turn_pool) ~keeper_name;
           let acquisition_id =
-            record_holder ~label:"turn" ~keeper_name
+            record_holder ~label:Turn_pool ~keeper_name
               ~acquired_at:(Time_compat.now ())
           in
               slot_state.turn_acquisition_id := Some acquisition_id;

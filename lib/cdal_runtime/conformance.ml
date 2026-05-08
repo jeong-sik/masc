@@ -71,7 +71,8 @@ let lifecycle_monotonic (worker : Sessions_types.worker_run) =
 ;;
 
 let worker_ids worker_runs =
-  worker_runs |> List.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
+  worker_runs
+  |> List.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
 ;;
 
 let raw_run_ids raw_runs =
@@ -107,11 +108,14 @@ let check bundle =
     | [] -> None
   in
   let expected_latest_validated =
-    latest_by (fun (worker : Sessions_types.worker_run) -> worker.validated) bundle.worker_runs
+    latest_by
+      (fun (worker : Sessions_types.worker_run) -> worker.validated)
+      bundle.worker_runs
   in
   let expected_latest_accepted =
     latest_by
-      (fun (worker : Sessions_types.worker_run) -> worker.status = Sessions_types.Accepted)
+      (fun (worker : Sessions_types.worker_run) ->
+         worker.status = Sessions_types.Accepted)
       bundle.worker_runs
   in
   let expected_latest_ready =
@@ -126,7 +130,8 @@ let check bundle =
   in
   let expected_latest_completed =
     latest_by
-      (fun (worker : Sessions_types.worker_run) -> worker.status = Sessions_types.Completed)
+      (fun (worker : Sessions_types.worker_run) ->
+         worker.status = Sessions_types.Completed)
       bundle.worker_runs
   in
   let expected_latest_failed =
@@ -210,10 +215,12 @@ let check bundle =
           (Printf.sprintf
              "bundle=%s expected=%s"
              (bundle.latest_accepted_worker_run
-              |> Option.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
+              |> Option.map (fun (worker : Sessions_types.worker_run) ->
+                worker.worker_run_id)
               |> Option.value ~default:"")
              (expected_latest_accepted
-              |> Option.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
+              |> Option.map (fun (worker : Sessions_types.worker_run) ->
+                worker.worker_run_id)
               |> Option.value ~default:""))
     }
   ; { code = "latest_ready_inconsistent"
@@ -230,10 +237,12 @@ let check bundle =
           (Printf.sprintf
              "bundle=%s expected=%s"
              (bundle.latest_ready_worker_run
-              |> Option.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
+              |> Option.map (fun (worker : Sessions_types.worker_run) ->
+                worker.worker_run_id)
               |> Option.value ~default:"")
              (expected_latest_ready
-              |> Option.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
+              |> Option.map (fun (worker : Sessions_types.worker_run) ->
+                worker.worker_run_id)
               |> Option.value ~default:""))
     }
   ; { code = "latest_running_inconsistent"
@@ -250,10 +259,12 @@ let check bundle =
           (Printf.sprintf
              "bundle=%s expected=%s"
              (bundle.latest_running_worker_run
-              |> Option.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
+              |> Option.map (fun (worker : Sessions_types.worker_run) ->
+                worker.worker_run_id)
               |> Option.value ~default:"")
              (expected_latest_running
-              |> Option.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
+              |> Option.map (fun (worker : Sessions_types.worker_run) ->
+                worker.worker_run_id)
               |> Option.value ~default:""))
     }
   ; { code = "latest_worker_inconsistent"
@@ -270,10 +281,12 @@ let check bundle =
           (Printf.sprintf
              "bundle=%s expected=%s"
              (bundle.latest_worker_run
-              |> Option.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
+              |> Option.map (fun (worker : Sessions_types.worker_run) ->
+                worker.worker_run_id)
               |> Option.value ~default:"")
              (expected_latest_worker
-              |> Option.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
+              |> Option.map (fun (worker : Sessions_types.worker_run) ->
+                worker.worker_run_id)
               |> Option.value ~default:""))
     }
   ; { code = "latest_completed_inconsistent"
@@ -290,10 +303,12 @@ let check bundle =
           (Printf.sprintf
              "bundle=%s expected=%s"
              (bundle.latest_completed_worker_run
-              |> Option.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
+              |> Option.map (fun (worker : Sessions_types.worker_run) ->
+                worker.worker_run_id)
               |> Option.value ~default:"")
              (expected_latest_completed
-              |> Option.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
+              |> Option.map (fun (worker : Sessions_types.worker_run) ->
+                worker.worker_run_id)
               |> Option.value ~default:""))
     }
   ; { code = "latest_validated_inconsistent"
@@ -310,10 +325,12 @@ let check bundle =
           (Printf.sprintf
              "bundle=%s expected=%s"
              (bundle.latest_validated_worker_run
-              |> Option.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
+              |> Option.map (fun (worker : Sessions_types.worker_run) ->
+                worker.worker_run_id)
               |> Option.value ~default:"")
              (expected_latest_validated
-              |> Option.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
+              |> Option.map (fun (worker : Sessions_types.worker_run) ->
+                worker.worker_run_id)
               |> Option.value ~default:""))
     }
   ; { code = "latest_failed_inconsistent"
@@ -330,10 +347,12 @@ let check bundle =
           (Printf.sprintf
              "bundle=%s expected=%s"
              (bundle.latest_failed_worker_run
-              |> Option.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
+              |> Option.map (fun (worker : Sessions_types.worker_run) ->
+                worker.worker_run_id)
               |> Option.value ~default:"")
              (expected_latest_failed
-              |> Option.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
+              |> Option.map (fun (worker : Sessions_types.worker_run) ->
+                worker.worker_run_id)
               |> Option.value ~default:""))
     }
   ; { code = "trace_capabilities_inconsistent"
@@ -452,7 +471,8 @@ let report bundle =
             (fun (worker : Sessions_types.worker_run) -> worker_status_name worker.status)
             latest_worker
       ; latest_worker_role =
-          Option.bind latest_worker (fun (worker : Sessions_types.worker_run) -> worker.role)
+          Option.bind latest_worker (fun (worker : Sessions_types.worker_run) ->
+            worker.role)
       ; latest_worker_aliases =
           Option.bind latest_worker (fun (worker : Sessions_types.worker_run) ->
             Some worker.aliases)
@@ -477,7 +497,10 @@ let report bundle =
           Option.bind latest_worker (fun (worker : Sessions_types.worker_run) ->
             worker.resolved_model)
       ; hook_event_count =
-          List.fold_left (fun acc item -> acc + item.Sessions_types.count) 0 bundle.hook_summary
+          List.fold_left
+            (fun acc item -> acc + item.Sessions_types.count)
+            0
+            bundle.hook_summary
       ; tool_catalog_count = List.length bundle.tool_catalog
       ; trace_capabilities = bundle.trace_capabilities
       }
@@ -596,7 +619,10 @@ let%test "latest_by returns last matching element" =
 
 let%test "latest_by returns None when no match" =
   let w1 = make_worker ~status:Sessions_types.Running () in
-  latest_by (fun (w : Sessions_types.worker_run) -> w.status = Sessions_types.Failed) [ w1 ] = None
+  latest_by
+    (fun (w : Sessions_types.worker_run) -> w.status = Sessions_types.Failed)
+    [ w1 ]
+  = None
 ;;
 
 let%test "latest_by empty list" = latest_by (fun _ -> true) [] = None

@@ -82,6 +82,7 @@ type t =
   | TransitionAuditFailures
   | ExecutionReceiptFailures
   | LlmBridgeFailures
+  | SessionCleanupFailures
   | ShellBashFailures
   | RolloverFailures
   | LifecycleDispatchRejections

@@ -90,6 +90,7 @@ type t =
   | TransitionAuditFailures
   | ExecutionReceiptFailures
   | LlmBridgeFailures
+  | SessionCleanupFailures
   | ShellBashFailures
   | RolloverFailures
   | LifecycleDispatchRejections
@@ -284,6 +285,7 @@ let to_string = function
   | TransitionAuditFailures -> "masc_keeper_transition_audit_failures_total"
   | ExecutionReceiptFailures -> "masc_keeper_execution_receipt_failures_total"
   | LlmBridgeFailures -> "masc_keeper_llm_bridge_failures_total"
+  | SessionCleanupFailures -> "masc_keeper_session_cleanup_failures_total"
   | ShellBashFailures -> "masc_keeper_shell_bash_failures_total"
   | RolloverFailures -> "masc_keeper_rollover_failures_total"
   | LifecycleDispatchRejections -> "masc_keeper_lifecycle_dispatch_rejections_total"

@@ -1,7 +1,7 @@
 // Agent detail journal stream — real-time activity stream filtered by agent
 
 import { html } from 'htm/preact'
-import { Card } from './common/card'
+import { CollapsibleSection } from './common/collapsible'
 import { EmptyState } from './common/empty-state'
 import { TimeAgo } from './common/time-ago'
 import { agentJournalEntries, journalKindIcon } from './agent-detail-state'
@@ -10,9 +10,12 @@ import type { JournalEntry } from '../types'
 
 export function AgentJournalStream({ agentName }: { agentName: string }) {
   const entries = agentJournalEntries(agentName)
+  const title = entries.length > 0
+    ? `실시간 활동 스트림 (${entries.length})`
+    : '실시간 활동 스트림'
 
   return html`
-    <${Card} title="실시간 활동 스트림">
+    <${CollapsibleSection} title=${title} mountWhenOpen=${true}>
       ${entries.length === 0
         ? html`<${EmptyState} message="아직 활동 기록이 없습니다" compact />`
         : html`

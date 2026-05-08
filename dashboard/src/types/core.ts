@@ -837,6 +837,7 @@ export interface Keeper {
   last_model_used_label?: string | null
   next_model_hint?: string | null
   cascade_name?: string | null
+  cascade_ref?: CascadeRef | null
   cascade_canonical?: string | null
   selected_cascade_canonical?: string | null
   status: string
@@ -1117,6 +1118,7 @@ interface KeeperConfigExecution {
   verify: boolean
   selected_cascade_name: string
   selected_cascade_canonical: string
+  cascade_ref?: CascadeRef | null
 }
 
 interface KeeperConfigCompaction {
@@ -1131,6 +1133,11 @@ interface KeeperConfigProactive {
   enabled: boolean
   idle_sec: number
   cooldown_sec: number
+}
+
+export interface CascadeRef {
+  group: string
+  item: string | null
 }
 
 export type KeeperFeatureStatus = 'wired' | 'source_only' | 'unwired'

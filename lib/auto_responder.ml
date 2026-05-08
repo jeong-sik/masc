@@ -135,7 +135,7 @@ let run_cli_agent ~agent_type ~prompt =
     debug_log (Printf.sprintf "SPAWN argv=%s" (String.concat " " (List.map Filename.quote argv)));
     let (status, output) =
       Masc_exec.Exec_gate.run_argv_with_stdin_and_status
-        ~actor:"system/auto_responder"
+        ~actor:(Masc_exec.Agent_id.of_string "system/auto_responder")
         ~raw_source
         ~summary:"auto responder cli spawn"
         ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Auto_responder ())

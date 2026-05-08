@@ -36,7 +36,7 @@ let run_git_capture_lines_once ~workdir args =
     let raw_source = String.concat " " (List.map Filename.quote argv) in
     match
       Masc_exec.Exec_gate.run_argv_with_status
-        ~actor:"system/worktree_live_context"
+        ~actor:(Masc_exec.Agent_id.of_string "system/worktree_live_context")
         ~raw_source
         ~summary:"worktree live context git capture"
         ~timeout_sec:(git_status_timeout_sec ())

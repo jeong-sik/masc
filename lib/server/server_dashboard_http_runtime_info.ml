@@ -148,7 +148,7 @@ let git_rev_parse_short_probe dir =
       let raw_source = String.concat " " (List.map Filename.quote argv) in
       match
         Masc_exec.Exec_gate.run_argv_with_status
-          ~actor:"system/runtime_info"
+          ~actor:(Masc_exec.Agent_id.of_string "system/runtime_info")
           ~raw_source
           ~summary:"dashboard runtime git probe"
           ~timeout_sec:git_rev_parse_short_probe_timeout_sec

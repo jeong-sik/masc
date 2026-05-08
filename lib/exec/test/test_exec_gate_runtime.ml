@@ -28,7 +28,7 @@ let test_enforced_strict_safe_blocks () =
   with_env "MASC_EXEC_GATE" (Some "enforced") (fun () ->
     let status, out =
       Exec_gate.run_argv_with_status
-        ~actor:"unknown/strict"
+        ~actor:`Other_agent
         ~raw_source:"pwd"
         ~summary:"strict pwd"
         ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Test ())
@@ -42,7 +42,7 @@ let test_parallel_records_shadow_and_executes () =
     with_env "MASC_EXEC_GATE" (Some "parallel") (fun () ->
       let out =
         Exec_gate.run_argv
-          ~actor:"unknown/strict"
+          ~actor:`Other_agent
           ~raw_source:"pwd"
           ~summary:"strict pwd"
           ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Test ())
@@ -60,7 +60,7 @@ let test_enforced_internal_audited_allows () =
   with_env "MASC_EXEC_GATE" (Some "enforced") (fun () ->
     let status, out =
       Exec_gate.run_argv_with_status
-        ~actor:"coord/git"
+        ~actor:`Coord_git
         ~raw_source:"git --version"
         ~summary:"coord git version"
         ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Test ())
@@ -73,7 +73,7 @@ let test_enforced_internal_stdin_allows () =
   with_env "MASC_EXEC_GATE" (Some "enforced") (fun () ->
     let status, out =
       Exec_gate.run_argv_with_stdin_and_status
-        ~actor:"system/task_sandbox"
+        ~actor:`System_task_sandbox
         ~raw_source:"cat"
         ~summary:"stdin cat"
         ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Test ())

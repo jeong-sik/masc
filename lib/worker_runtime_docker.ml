@@ -28,7 +28,7 @@ let run_process_with_timeout ?stdin_content ~clock_opt:_ ~timeout_sec ~prog:_ ~a
     match stdin_content with
     | Some content ->
         Masc_exec.Exec_gate.run_argv_with_stdin_and_status_split
-          ~actor:"system/worker_runtime_docker"
+          ~actor:(Masc_exec.Agent_id.of_string "system/worker_runtime_docker")
           ~raw_source
           ~summary:"worker runtime docker subprocess"
           ~timeout_sec:(float_of_int timeout_sec)
@@ -37,7 +37,7 @@ let run_process_with_timeout ?stdin_content ~clock_opt:_ ~timeout_sec ~prog:_ ~a
           argv
     | None ->
         Masc_exec.Exec_gate.run_argv_with_status_split
-          ~actor:"system/worker_runtime_docker"
+          ~actor:(Masc_exec.Agent_id.of_string "system/worker_runtime_docker")
           ~raw_source
           ~summary:"worker runtime docker subprocess"
           ~timeout_sec:(float_of_int timeout_sec)

@@ -21,7 +21,7 @@ let exec_gate_raw_source argv =
 let git_lines ~cwd args =
   let argv = ["git"; "-C"; cwd] @ args in
   Masc_exec.Exec_gate.run_argv
-    ~actor:"system/task_sandbox"
+    ~actor:(Masc_exec.Agent_id.of_string "system/task_sandbox")
     ~raw_source:(exec_gate_raw_source argv)
     ~summary:"task_sandbox git"
     ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Task_sandbox_git ())
@@ -34,7 +34,7 @@ let git_exit ~cwd args =
   let argv = ["git"; "-C"; cwd] @ args in
   match
     Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:"system/task_sandbox"
+      ~actor:(Masc_exec.Agent_id.of_string "system/task_sandbox")
       ~raw_source:(exec_gate_raw_source argv)
       ~summary:"task_sandbox git"
       ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Task_sandbox_git ())

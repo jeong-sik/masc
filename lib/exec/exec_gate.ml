@@ -127,7 +127,7 @@ let record_decision ~actor ~raw_source ~summary ~mode ~verdict ~argv ?env ?cwd (
   | Off -> ()
   | Parallel | Enforced ->
     Exec_tap.record_gate_decision
-      ~actor
+      ~actor:(Agent_id.to_string actor)
       ~raw_source
       ~summary
       ~gate_mode:
@@ -150,7 +150,7 @@ let verdict_for_argv ~actor ~raw_source ~summary ~argv ?env ?cwd () =
     Error (`Denied Verdict.Parse_failed)
   | Ok simple ->
     let caps = Capability_check.of_simple simple in
-    let overlay = Approval_config.lookup rollout_config ~actor:(Agent_id.of_string actor) in
+    let overlay = Approval_config.lookup rollout_config ~actor in
     let policy : Approval_policy.t = { raw_source; summary } in
     let verdict = Approval_policy.decide policy ~overlay ~caps ~simple in
     Ok verdict

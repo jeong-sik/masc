@@ -223,7 +223,7 @@ let git_diff_patch ~workdir =
   in
   let status, output =
     Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:"tool/autoresearch_cycle"
+      ~actor:(Masc_exec.Agent_id.of_string "tool/autoresearch_cycle")
       ~raw_source:(String.concat " " (List.map Filename.quote argv))
       ~summary:"autoresearch cycle git diff"
       ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:(Unknown "misc") ())
@@ -241,7 +241,7 @@ let sync_target_file_to_index ~workdir ~target_file =
   let argv = [ "git"; "-C"; workdir; "add"; "--"; target_file ] in
   let status, output =
     Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:"tool/autoresearch_cycle"
+      ~actor:(Masc_exec.Agent_id.of_string "tool/autoresearch_cycle")
       ~raw_source:(String.concat " " (List.map Filename.quote argv))
       ~summary:"autoresearch cycle git add"
       ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:(Unknown "misc") ())

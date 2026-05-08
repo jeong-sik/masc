@@ -61,7 +61,7 @@ let run_git ~cwd ?(env = []) args : (string list, string) result =
   let raw_source = String.concat " " (List.map Filename.quote argv) in
   let status, stdout, stderr =
     Masc_exec.Exec_gate.run_argv_with_status_split
-      ~actor:"repo-manager/git" ~raw_source ~summary:"repo manager git"
+      ~actor:(Masc_exec.Agent_id.of_string "repo-manager/git") ~raw_source ~summary:"repo manager git"
       ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Repo_manager_git ()) ~env:envp argv
   in
   match status with

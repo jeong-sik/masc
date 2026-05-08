@@ -17,7 +17,7 @@
 ; masc_mcp main library — the producer side must remain reusable independently.
 ;
 ; @rfc RFC-OAS-011 (CDAL Migration to masc-mcp)
-; @phase MM-1 — empty skeleton; modules arrive in MM-2 leaf-first batches
+; @phase MM-2-leaves — B1 batch (execution_mode, effect_evidence, guardrail_llm)
 
 (library
  (name masc_mcp_cdal_runtime)
@@ -26,5 +26,10 @@
   agent_sdk.base
   yojson
   ppx_deriving_yojson.runtime)
+ ; Mirror agent_sdk's flag so migrated modules' `open Types` /
+ ; `open Result_syntax` resolve against Agent_sdk_base, matching their
+ ; original OAS compilation context.
+ (flags
+  (:standard -open Agent_sdk_base))
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_inline_test ppx_let)))

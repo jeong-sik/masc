@@ -39,6 +39,14 @@ let state : (string, attempt_state) Hashtbl.t = Hashtbl.create 16
 let reset_for_tests () =
   Eio.Mutex.use_rw ~protect:true mu (fun () -> Hashtbl.clear state)
 
+(** Remove the attempt state for a single keeper.  Called by the
+    supervisor when a keeper fiber is cleaned up after a crash so
+    that the next restart begins with a fresh counter rather than
+    inheriting the previous stuck turn's exhaustion. *)
+let reset_keeper_livelock ~(keeper : string) : unit =
+  Eio.Mutex.use_rw ~protect:true mu (fun () ->
+    Hashtbl.remove state keeper)
+
 (** [start_outcome] records what happened on a [record_turn_start]
     call.  Returned so callers (tests, future gating logic) don't
     have to re-derive the classification from external data. *)

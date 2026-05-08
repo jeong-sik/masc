@@ -660,14 +660,14 @@ module KeeperWatchdog = struct
     max 1 (get_int ~default:5 "MASC_KEEPER_ESCALATION_THRESHOLD")
 
   (** Fleet batch-termination detection window in seconds.
-      Default: 30. *)
+      Default: 60. *)
   let batch_window_sec =
-    Float.max 1.0 (get_float ~default:30.0 "MASC_KEEPER_BATCH_WINDOW_SEC")
+    Float.max 1.0 (get_float ~default:60.0 "MASC_KEEPER_BATCH_WINDOW_SEC")
 
   (** Number of distinct keepers terminating within [batch_window_sec] before
-      emitting a fleet batch alert. Default: 3. *)
+      emitting a fleet batch alert. Default: 5. *)
   let batch_threshold =
-    max 1 (get_int ~default:3 "MASC_KEEPER_BATCH_THRESHOLD")
+    max 1 (get_int ~default:5 "MASC_KEEPER_BATCH_THRESHOLD")
 end
 
 (** {1 gRPC Heartbeat Reconnect} *)

@@ -928,10 +928,10 @@ let append_decision_record
               in
                 let stop_reason_str =
                   match r.stop_reason with
-                  | Oas_worker.Completed -> "completed"
-                  | Oas_worker.TurnBudgetExhausted { turns_used; limit } ->
+                  | Cascade_runner.Completed -> "completed"
+                  | Cascade_runner.TurnBudgetExhausted { turns_used; limit } ->
                       Printf.sprintf "turn_budget_exhausted(%d/%d)" turns_used limit
-                  | Oas_worker.MutationBoundaryReached { turns_used; tool_name } ->
+                  | Cascade_runner.MutationBoundaryReached { turns_used; tool_name } ->
                       (match tool_name with
                        | Some tool ->
                            Printf.sprintf "mutation_boundary(%d:%s)" turns_used tool

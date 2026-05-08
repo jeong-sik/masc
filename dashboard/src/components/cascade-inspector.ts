@@ -423,9 +423,6 @@ export function CascadeInspector() {
             <h3 class="mt-2 text-[22px] font-semibold tracking-[-0.02em] text-text-strong">
               전략 추적 · 프로바이더 건강도
             </h3>
-            <p class="mt-2 text-sm leading-relaxed text-text-muted">
-              cascade 의사결정 이력과 프로바이더 상태를 한 화면에서 봅니다.
-            </p>
           </div>
           <${CascadeFocusRail}
             focus=${focus}

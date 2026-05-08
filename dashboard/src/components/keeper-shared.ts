@@ -325,9 +325,6 @@ export function KeeperConversationPanel({
                 ${conversationStateLabel(sending, hydrating)}
               </span>
             </div>
-            <div class="mt-1 text-sm leading-loose text-[var(--color-fg-secondary)]">
-              Keeper 상세 안에서 직접 대화와 내부 메시지를 함께 봅니다. 필요하면 토글로 내부 프롬프트와 tool chatter를 숨길 수 있습니다.
-            </div>
           </div>
           <div class="flex flex-wrap items-center gap-2">
             <${GhostButton} onClick=${toggleMetadata} ariaExpanded=${showMetadata}>

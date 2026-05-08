@@ -621,9 +621,6 @@ export function KeeperReactivityMonitor({ defaultView }: { defaultView?: Reactiv
       <div class="flex items-center justify-between">
         <div class="flex flex-col gap-0.5">
           <h3 class="text-sm font-semibold text-[var(--color-fg-secondary)]">키퍼 반응성 모니터</h3>
-          <p class="text-2xs text-[var(--color-fg-muted)]">
-            phase 전환, 자동 일시정지, 프로액티브 스킵 이유, stale 종료 패턴을 한 곳에서 봅니다
-          </p>
         </div>
         ${isNonLifecycle ? html`
           <div class="flex items-center gap-2">

@@ -75,15 +75,26 @@ Three observations from `lib/keeper/`:
    "structured" by its file header is a record-of-strings. `severity` is the only
    typed field.
 
-4. **Free-form emit sites bypass the typed source**: 8 sites currently stamp
-   `terminal_reason_code` as a string literal independent of `failure_reason`:
+4. **Free-form emit / stamp sites bypass the typed source**: at least **18
+   call sites** stamp a `terminal_reason_code` string or build a
+   `Keeper_turn_terminal.t` from a free-form code, independent of
+   `failure_reason`:
 
-   | File | Line(s) | Source |
-   |------|---------|--------|
-   | `lib/keeper/keeper_unified_turn.ml` | 65, 216, 464, 506 | turn-orchestration emits |
-   | `lib/dashboard/dashboard_http_keeper.ml` | 2107, 2208 | dashboard re-stamps |
-   | `lib/keeper/keeper_unified_metrics.ml` | 737 | metrics extracts |
-   | `lib/keeper/keeper_agent_run.ml` | 1280 | run-loop emit |
+   | File | Line(s) | Pattern |
+   |------|---------|---------|
+   | `lib/keeper/keeper_unified_turn.ml` | 65, 216, 464, 506 | `let terminal_reason_code = ...` (turn orchestration) |
+   | `lib/dashboard/dashboard_http_keeper.ml` | 2107, 2208 | dashboard re-stamps from receipt JSON |
+   | `lib/keeper/keeper_unified_metrics.ml` | 734, 735, 737 | `Keeper_turn_terminal.of_legacy_error_text`, `of_code "unknown_error"`, `terminal_reason.code` extract |
+   | `lib/keeper/keeper_agent_run.ml` | 1280 | run-loop terminal-reason emit |
+   | `lib/keeper/keeper_agent_error.ml` | 77, 120 | `agent_error_terminal_reason_code : Agent_sdk.Error.sdk_error -> string` (typed → string flatten) |
+   | `lib/keeper/keeper_runtime_trust_snapshot.ml` | 119, 152, 155, 158, 184 | `Keeper_turn_terminal.of_code ~source:"decision_log" \| "execution_receipt" \| "runtime_blocker" code` (5 stamp sites) |
+
+   `lib/keeper/keeper_turn_terminal.ml:109` defines `of_legacy_error_text` —
+   one of two `... -> Keeper_turn_terminal.t` constructors that take a
+   free-form string (the other is `of_code`). PR-3 / PR-4 must touch every
+   one of the call sites above; the inventory underestimate in this RFC's
+   first draft was the source of an earlier "8 site" claim that the
+   reviewer flagged.
 
    Each is free to mint a new prefix (`turn_livelock:...`, `completion_contract_violation:...`)
    without any check that a downstream reader recognises it.
@@ -126,68 +137,72 @@ WARN logs.
 
 ### 3.1 New module — `Keeper_turn_terminal_code`
 
+The closed sum is intentionally **flat** (no nested sub-kind sums) at PR-1
+to mirror the wire format that already exists in
+`Keeper_execution_receipt.stale_terminal_reason_code`, so PR-2/3 can swap
+calls one-for-one without changing what dashboards or `bin/masc-trace`
+consumers see. Nested kinds (`Turn_livelock of livelock_kind`,
+`Provider_kind` variants, etc.) are deliberately *deferred* — they are
+candidate refinements once the flat type lands and emit/reader sites are
+fully migrated; the intermediate shape would force PR-3 to invent a wire
+encoding that does not exist today.
+
 ```ocaml
-(* lib/keeper/keeper_turn_terminal_code.mli *)
-
-(** Closed sum type for the terminal code carried by
-    [Keeper_turn_terminal.t]. Adding a new variant here is a compile
-    obligation for every match site — see [match_obligations] in
-    docs/rfc/RFC-0042 for the full reader inventory. *)
-
-type livelock_kind =
-  | Stuck_age_exceeded
-  | Tool_required_unsatisfied
-  | Idle_no_progress
-
-type stale_kind =
-  | In_turn_hung
-  | Idle_turn
-  | Noop_failure_loop
-
-type contract_subclause =
-  | Require_tool_use
-  | Tool_surface_mismatch
-  | No_tool_capable_provider
-  | Other of string  (** for forward compatibility; see §5.2 *)
-
-type provider_kind =
-  | Runtime_error of string
-  | Authentication_failed
-  | Quota_exhausted
+(* lib/keeper/keeper_turn_terminal_code.mli — actual signature filed in
+   PR #14182 (PR-1) *)
 
 type t =
   | Healthy
-  | Cancelled
-  | Skipped
-  | Turn_livelock of livelock_kind
-  | Stale_turn_timeout of stale_kind
-  | Provider_runtime_error of provider_kind
-  | Completion_contract_violation of contract_subclause
-  | Tool_required_unsatisfied of contract_subclause
-  | Oas_timeout_budget
+  | Stale_turn_timeout_idle
+      (** Keeper_registry.Stale_turn_timeout (Idle_turn _) *)
+  | Stale_turn_timeout_in_turn
+      (** Keeper_registry.Stale_turn_timeout (In_turn_hung _) *)
+  | Stale_turn_timeout_noop
+      (** Keeper_registry.Stale_turn_timeout (Noop_failure_loop _) *)
+  | Stale_termination_storm
   | Stale_fleet_batch
+  | Oas_timeout_budget
   | Heartbeat_failures
   | Turn_failures
-  | Ambiguous_partial_commit
+  | Provider_runtime_error of string
+      (** payload = original Keeper_registry.Provider_runtime_error.code *)
+  | Tool_required_unsatisfied of string
+      (** payload = original Keeper_registry.Tool_required_unsatisfied.code *)
+  | Ambiguous_partial_commit_post_commit_timeout
+  | Ambiguous_partial_commit_post_commit_failure
   | Fiber_unresolved
-  | Exception_unhandled of { kind : string }
+  | Exception_unhandled of string
+      (** payload = exception message *)
 
 val to_wire : t -> string
-(** One-way serialiser. The wire string is stable across releases.
-    Format: top-level constructor in snake_case, sub-kind appended
-    with ":" — e.g. [Turn_livelock Stuck_age_exceeded] →
-    "turn_livelock:stuck_age_exceeded". *)
+(** Stable wire format, byte-for-byte compatible with strings emitted today
+    by [Keeper_execution_receipt.stale_terminal_reason_code]. The two
+    [Stale_turn_timeout_*] variants and the two [Ambiguous_partial_commit_*]
+    variants intentionally collapse to a single wire string each
+    (["stale_turn_timeout"], ["ambiguous_partial_commit"]) to preserve
+    existing cohort keys. *)
 
 val of_wire : string -> t option
-(** Lossy reverse for migration. Returns [None] for unknown wire codes
-    so the caller can decide between [Other] fallback and
-    Prometheus-counter-and-fail. Removed in §5.4. *)
+(** Best-effort reverse. Returns [None] for unknown wire codes (so the
+    caller cannot silently mis-classify a [Provider_runtime_error] code
+    that happens to share a literal with another constructor). Lossy
+    where the wire string lost the sub-class — see PR #14182's [.ml] for
+    the canonical sub-class chosen for each lossy wire. Removed in §5.4. *)
 
 val of_failure_reason : Keeper_registry.failure_reason -> t
-(** Single canonical bridge from the existing typed source. Replaces
-    [Keeper_execution_receipt.stale_terminal_reason_code] on its
-    callers. *)
+(** Canonical bridge from [Keeper_registry.failure_reason] (11 constructors).
+    Exhaustive: adding a new constructor in [Keeper_registry] is a compile
+    error here. Replaces [Keeper_execution_receipt.stale_terminal_reason_code]
+    in PR-2. *)
 ```
+
+**Refinement opportunities deferred to follow-up RFCs (not PR-2/3/4)**:
+
+| Idea | Why not now |
+|------|-------------|
+| `Turn_livelock of livelock_kind` (nested sum) | "turn_livelock:" prefix exists in current emits but not in `Keeper_registry.failure_reason`; introducing it requires defining the sub-kinds explicitly and updating every emit site at the same time as PR-3. Out of scope; track as RFC-XXXX-livelock-typed once the flat type lands. |
+| `Provider_runtime_error of provider_kind` | Same: would require parsing today's free-form `code` strings into a closed sub-sum, which is a separate analysis pass over production traces. |
+| `contract_subclause` enumeration | "completion_contract_violation:" sub-clauses are decided at the contract layer; should live in a contract-layer RFC, not in the terminal-code RFC. |
 
 ### 3.2 Field swap in `Keeper_turn_terminal.t`
 
@@ -224,15 +239,17 @@ no future site can emit a new prefix without first declaring a constructor.
 
 ## 4. Migration plan (4 PRs)
 
-| PR | Title | Files (estimate) | LOC | Compile? | Wire stable? |
-|----|-------|------------------|-----|----------|--------------|
-| **PR-1** | introduce `Keeper_turn_terminal_code` (inert) | new .ml/.mli + 1 test | ~250 | ✅ | yes (no callers) |
-| **PR-2** | convert typed bridges (`stale_*`, `agent_error_*`) to return new type | 4 files | ~150 | ✅ | yes |
-| **PR-3** | swap `Keeper_turn_terminal.t.code` field type; update emit sites | 8 emit + .mli | ~250 | ✅ | yes (`to_json` adapter) |
-| **PR-4** | convert reader sites to `match`; deprecate `of_wire` for new variants; drop `String.starts_with` | 3 readers | ~100 | ✅ | yes |
+| PR | Title | Files | LOC (estimate) | Compile? | Wire stable? |
+|----|-------|-------|----------------|----------|--------------|
+| **PR-1** | introduce `Keeper_turn_terminal_code` (inert, flat sum) | 2 신규 (.ml/.mli) + 1 round-trip test | ~250 | ✅ | yes (no callers) |
+| **PR-2** | typed bridge migration: `stale_terminal_reason_code` / `agent_error_terminal_reason_code` → return `Keeper_turn_terminal_code.t` | `keeper_execution_receipt.ml`, `keeper_agent_error.ml`, 그리고 직접 caller 들 | ~150 | ✅ | yes |
+| **PR-3** | swap `Keeper_turn_terminal.t.code` field: `string` → `t`; update **all 18 emit/stamp sites** (cf. §1.2 expanded inventory) | `keeper_turn_terminal.{ml,mli}` + 18 emit/stamp sites + JSON adapter | ~400 | ✅ | yes (`to_json` adapter writes wire string) |
+| **PR-4** | reader migration: 3+ readers (`keeper_execution_receipt.ml:327-329`, `keeper_passive_loop_detector.ml:34`, plus any new ones found in PR-3 base) `String.starts_with ~prefix` → exhaustive `match`; deprecate `of_wire` | 3+ readers + thin `of_wire` shim removal | ~150 | ✅ | yes |
 
-**Total estimate**: 12-15 files, ~700-800 LOC, four compilable steps. Each step ships
-independently; mid-sequence revert is safe.
+**Total**: 18-20 files (revised upward from "12-15" — the original estimate
+was anchored to the 8-site emit count corrected in §1.2), ~950 LOC across
+four compilable steps. Each step ships independently; mid-sequence revert
+is safe.
 
 ### 4.1 Test plan
 
@@ -249,14 +266,17 @@ independently; mid-sequence revert is safe.
 
 ## 5. Trade-offs & open questions
 
-### 5.1 Wire-format `Other of string` escape hatch
+### 5.1 Wire-format escape hatch (deferred)
 
-`contract_subclause.Other of string` (and similar) gives forward compatibility for
-data inflowing from older receipts. It is a *deserialisation* concession; *new
-emits* should always pick a named constructor.
+The original draft of this RFC proposed an `Other of string` constructor on
+`contract_subclause` for forward compatibility with unknown wire codes.
+Once the type was flattened (§3.1) the need disappeared: `of_wire` returning
+`None` plays the same role at the deserialisation boundary, and there is no
+sub-sum that needs an `Other` arm.
 
-The risk is the escape hatch becoming a permanent string-prefix backdoor. Mitigation:
-PR-4 lints `_ (Other _)` constructions in emit sites and fails the build.
+If a future RFC reintroduces nested sub-kinds (e.g. `Turn_livelock of
+livelock_kind`), it will face this trade-off again — the escape hatch is
+documented here so it is not rediscovered as an open question.
 
 ### 5.2 Cost of variant explosion
 

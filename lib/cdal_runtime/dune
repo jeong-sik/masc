@@ -41,6 +41,16 @@
   ; resolves the [Unix] module without requiring the consumer to open
   ; it.
   unix
+  ; eio + eio.unix are needed by guardrails_async.mli, guardrail_tripwire.ml,
+  ; autonomy_exec.{ml,mli}, contract_runner.mli (added by PR #14264
+  ; RFC-OAS-011 MM-2-top B5).  These modules have async fiber-based
+  ; signatures (Eio.*) and call Eio_unix.* helpers.
+  eio
+  eio.unix
+  ; eio_main needed by autonomy_exec.ml (Eio_main.run for async runtime entry).
+  eio_main
+  ; agent_sdk.llm_provider is needed by contract_runner.ml (Llm_provider.*).
+  agent_sdk.llm_provider
   yojson
   ppx_deriving_yojson.runtime)
  ; Mirror agent_sdk's flag so migrated modules' `open Types` /
@@ -48,7 +58,16 @@
  ; original OAS compilation context.  Also open the wrapped [Agent_sdk]
  ; namespace so unqualified references such as [Guardrails_async] in
  ; [guardrail_llm.{ml,mli}] resolve to [Agent_sdk.Guardrails_async].
+ ; XXX -open Agent_sdk__ accesses agent_sdk's internal wrapper module
+ ; (no .mli, so all submodule aliases are visible — including
+ ; [Sessions_types], which is referenced by sessions_proof.mli but
+ ; deliberately not re-exported in agent_sdk.mli).  This is an
+ ; internal-API workaround for PR #14264 RFC-OAS-011 MM-2-top B5;
+ ; it should be replaced by either (a) re-exporting [Sessions_types]
+ ; in [agent_sdk.mli] upstream, or (b) qualifying the cdal_runtime
+ ; references to use [Agent_sdk.Sessions]/[Agent_sdk.Sessions_store].
+ ; Using [Agent_sdk__] is fragile across dune wrapper-name changes.
  (flags
-  (:standard -open Agent_sdk_base -open Agent_sdk))
+  (:standard -open Agent_sdk_base -open Agent_sdk -open Agent_sdk__))
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_inline_test ppx_let)))

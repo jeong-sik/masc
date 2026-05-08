@@ -280,6 +280,27 @@ Next ==
     \/ RetryAfterCompaction
     \/ FinishTurn
 
+\* ── Bug Model: Selecting Without Tool Policy ───────────────
+\* Models a regression where cascade_state jumps to "selecting"
+\* without decision_stage being "tool_policy_selected".
+\* SHOULD violate SelectingRequiresToolPolicy.
+
+BugSelectingWithoutToolPolicy ==
+    /\ turn_live
+    /\ turn_phase = "prompting"
+    /\ decision_stage = "guard_ok"  \* BUG: not tool_policy_selected
+    /\ cascade_state' = "selecting"
+    /\ UNCHANGED <<turn_live, turn_phase, decision_stage,
+                    measurement_bound, selected_model_bound>>
+
+NextBuggy ==
+    \/ Next
+    \/ BugSelectingWithoutToolPolicy
+
+SpecBuggy == Init /\ [][NextBuggy]_vars /\ WF_vars(FinishTurn)
+
+SelectingRequiresToolPolicyMustHold == SelectingRequiresToolPolicy
+
 Spec ==
     Init /\ [][Next]_vars /\ WF_vars(FinishTurn)
 

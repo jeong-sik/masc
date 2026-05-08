@@ -156,29 +156,33 @@ let stale_watchdog_failure_reason ~prior ~kill_class =
 exception Keeper_fiber_crash
 
 type turn_phase =
-  | Turn_idle
-  | Turn_prompting
-  | Turn_executing
-  | Turn_compacting
-  | Turn_finalizing
+  | Turn_idle [@tla.idle]
+  | Turn_prompting [@tla.active]
+  | Turn_executing [@tla.active]
+  | Turn_compacting [@tla.active]
+  | Turn_finalizing [@tla.active]
+[@@deriving tla]
 
 type decision_stage =
-  | Decision_undecided
-  | Decision_guard_ok
-  | Decision_gate_rejected
-  | Decision_tool_policy_selected
+  | Decision_undecided [@tla.idle]
+  | Decision_guard_ok [@tla.active]
+  | Decision_gate_rejected [@tla.terminal]
+  | Decision_tool_policy_selected [@tla.active]
+[@@deriving tla]
 
 type cascade_state =
-  | Cascade_idle
-  | Cascade_selecting
-  | Cascade_trying
-  | Cascade_done
-  | Cascade_exhausted
+  | Cascade_idle [@tla.idle]
+  | Cascade_selecting [@tla.active]
+  | Cascade_trying [@tla.active]
+  | Cascade_done [@tla.terminal]
+  | Cascade_exhausted [@tla.terminal]
+[@@deriving tla]
 
 type compaction_stage =
-  | Compaction_accumulating
-  | Compaction_compacting
-  | Compaction_done
+  | Compaction_accumulating [@tla.idle]
+  | Compaction_compacting [@tla.active]
+  | Compaction_done [@tla.terminal]
+[@@deriving tla]
 
 type turn_measurement = {
   tm_captured_at : float;
@@ -695,11 +699,59 @@ let mark_turn_measurement ~base_path name =
     | _ -> e);
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 
+let validate_decision_transition ~from ~to_ =
+  Keeper_fsm_guard_runtime.wrap_unit
+    ~action:"decision_transition"
+    ~stage:"guard"
+    (fun () ->
+       assert (
+         match (from, to_) with
+         | (Decision_undecided, Decision_guard_ok) -> true
+         | (Decision_undecided, Decision_gate_rejected) -> true
+         | (Decision_guard_ok, Decision_tool_policy_selected) -> true
+         | (old, new_) when old = new_ -> true
+         | _ -> false
+       ))
+
+let validate_cascade_transition ~from ~to_ =
+  Keeper_fsm_guard_runtime.wrap_unit
+    ~action:"cascade_transition"
+    ~stage:"guard"
+    (fun () ->
+       assert (
+         match (from, to_) with
+         | (Cascade_idle, Cascade_selecting) -> true
+         | (Cascade_selecting, Cascade_trying) -> true
+         | (Cascade_trying, Cascade_done) -> true
+         | (Cascade_trying, Cascade_exhausted) -> true
+         | (Cascade_trying, Cascade_selecting) -> true
+         | (old, new_) when old = new_ -> true
+         | _ -> false
+       ))
+
+let validate_turn_phase_transition ~from ~to_ =
+  Keeper_fsm_guard_runtime.wrap_unit
+    ~action:"turn_phase_transition"
+    ~stage:"guard"
+    (fun () ->
+       assert (
+         match (from, to_) with
+         | (Turn_idle, Turn_prompting) -> true
+         | (Turn_prompting, Turn_executing) -> true
+         | (Turn_prompting, Turn_finalizing) -> true
+         | (Turn_executing, Turn_compacting) -> true
+         | (Turn_executing, Turn_finalizing) -> true
+         | (Turn_compacting, Turn_prompting) -> true
+         | (old, new_) when old = new_ -> true
+         | _ -> false
+       ))
+
 let set_turn_decision_stage ~base_path name decision_stage =
   let changed = ref false in
   let now = Time_compat.now () in
   update_entry ~base_path name (fun e ->
     update_current_turn e (fun obs ->
+      validate_decision_transition ~from:obs.decision_stage ~to_:decision_stage;
       changed := true;
       { obs with decision_stage }));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
@@ -709,6 +761,7 @@ let set_turn_cascade_state ~base_path name cascade_state =
   let now = Time_compat.now () in
   update_entry ~base_path name (fun e ->
     update_current_turn e (fun obs ->
+      validate_cascade_transition ~from:obs.cascade_state ~to_:cascade_state;
       changed := true;
       {
         obs with
@@ -722,6 +775,7 @@ let set_turn_phase ~base_path name turn_phase =
   let now = Time_compat.now () in
   update_entry ~base_path name (fun e ->
     update_current_turn e (fun obs ->
+      validate_turn_phase_transition ~from:obs.turn_phase ~to_:turn_phase;
       changed := true;
       { obs with turn_phase }));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
@@ -1253,7 +1307,7 @@ let pending_measurement_after_event now entry event =
     }
   | _ -> entry.pending_turn_measurement
 
-let compaction_stage_after_event entry event =
+let compaction_stage_of_event entry event =
   match event with
   | Keeper_state_machine.Compaction_started
   | Keeper_state_machine.Auto_compact_triggered
@@ -1262,6 +1316,26 @@ let compaction_stage_after_event entry event =
   | Keeper_state_machine.Compaction_completed _ -> Compaction_done
   | Keeper_state_machine.Compaction_failed _ -> Compaction_accumulating
   | _ -> entry.compaction_stage
+
+let validate_compaction_transition ~from ~to_ =
+  Keeper_fsm_guard_runtime.wrap_unit
+    ~action:"compaction_transition"
+    ~stage:"guard"
+    (fun () ->
+       assert (
+         match (from, to_) with
+         | (Compaction_accumulating, Compaction_compacting) -> true
+         | (Compaction_compacting, Compaction_done) -> true
+         | (Compaction_compacting, Compaction_accumulating) -> true
+         | (old, new_) when old = new_ -> true
+         | _ -> false
+       ))
+
+let compaction_stage_after_event entry event =
+  let old_stage = entry.compaction_stage in
+  let new_stage = compaction_stage_of_event entry event in
+  validate_compaction_transition ~from:old_stage ~to_:new_stage;
+  new_stage
 
 (** Registry mutation is still non-yielding (StringMap lookup + put,
     Atomic.set). Entry actions run only after [put_entry], so any

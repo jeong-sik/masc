@@ -54,13 +54,31 @@ let dispatch_simple (s : Shell_ir.simple) =
     | None -> None
     | Some scope -> Some (Path_scope.raw scope)
   in
-  match s.sandbox.runner ~argv ~env ~cwd ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Dispatch ()) with
-  | exception exn ->
-      { status = Unix.WEXITED 1;
-        stdout = "";
-        stderr = Printexc.to_string exn }
-  | (status, stdout, stderr) ->
-      { status; stdout; stderr }
+  let timeout_sec = Env_config_exec_timeout.timeout_sec ~caller:Dispatch () in
+  match s.sandbox.kind with
+  | Host ->
+      let raw_source = String.concat " " argv in
+      (match
+         Exec_gate.run_argv_with_status_split
+           ~actor:"Tool_local_runtime"
+           ~raw_source
+           ~summary:"exec dispatch simple"
+           ~timeout_sec ~env ?cwd argv
+       with
+       | exception exn ->
+           { status = Unix.WEXITED 1;
+             stdout = "";
+             stderr = Printexc.to_string exn }
+       | (status, stdout, stderr) ->
+           { status; stdout; stderr })
+  | Docker _ ->
+      (match s.sandbox.runner ~argv ~env ~cwd ~timeout_sec with
+       | exception exn ->
+           { status = Unix.WEXITED 1;
+             stdout = "";
+             stderr = Printexc.to_string exn }
+       | (status, stdout, stderr) ->
+           { status; stdout; stderr })
 
 (* --- pipeline + entry point (mutually recursive) --- *)
 
@@ -78,7 +96,11 @@ let rec dispatch_pipeline stages =
             let argv = bin :: List.map resolve_arg s.args in
             let env = resolve_env s.env in
             (match
-               Process_eio.run_argv_with_stdin_and_status_split
+               let raw_source = String.concat " " argv in
+               Exec_gate.run_argv_with_stdin_and_status_split
+                 ~actor:"Tool_local_runtime"
+                 ~raw_source
+                 ~summary:"exec dispatch pipeline stage"
                  ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Dispatch ()) ~env
                  ~stdin_content:prev_stdout argv
              with
@@ -93,7 +115,11 @@ let rec dispatch_pipeline stages =
             let argv = bin :: List.map resolve_arg s.args in
             let env = resolve_env s.env in
             (match
-               Process_eio.run_argv_with_stdin_and_status_split
+               let raw_source = String.concat " " argv in
+               Exec_gate.run_argv_with_stdin_and_status_split
+                 ~actor:"Tool_local_runtime"
+                 ~raw_source
+                 ~summary:"exec dispatch pipeline stage"
                  ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Dispatch ()) ~env
                  ~stdin_content:prev_stdout argv
              with

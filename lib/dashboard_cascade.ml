@@ -235,6 +235,24 @@ let config_json () =
     | Eio.Cancel.Cancelled _ as e -> raise e
     | _ -> []
   in
+  let active_names =
+    List.fold_left (fun acc (e : Keeper_registry.registry_entry) -> StringSet.add e.name acc) StringSet.empty keeper_entries
+  in
+  let offline_keepers_json =
+    try
+      Config_dir_resolver.keepers_dir ()
+      |> Keeper_types_profile.discover_keepers_toml
+      |> List.filter_map (fun (name, doc) ->
+             if StringSet.mem name active_names then None
+             else
+               let cascade_name =
+                 match doc.Keeper_types_profile.cascade_name with
+                 | Some c -> c
+                 | None -> "default"
+               in
+               Some (`Assoc (keeper_profile_fields ~keeper:name ~cascade_name)))
+    with _ -> []
+  in
   let profiles =
     match Cascade_catalog_runtime.known_profile_names () with
     | Ok names ->
@@ -279,7 +297,7 @@ let config_json () =
     @ validation_summary_json ?config_path ()
     @ [
         ("profiles", `List profiles);
-        ("keeper_profiles", `List (List.map keeper_profile_json keeper_entries));
+        ("keeper_profiles", `List (List.map keeper_profile_json keeper_entries @ offline_keepers_json));
       ]
   in
   `Assoc fields

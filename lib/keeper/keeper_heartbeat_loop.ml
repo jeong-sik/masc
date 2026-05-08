@@ -417,7 +417,7 @@ let persist_message_cursor_updates ~config (meta : keeper_meta) updates =
 let run_keeper_cycle_with_slot ~ctx ~meta_after_cursor_persist ~stop ~obs
     ~(turn_decision : Keeper_world_observation.keeper_cycle_decision)
     ~shared_context ~semaphore_wait_ms ~slot_control
-    ?selected_item =
+    ?selected_item () =
   match
     with_in_turn_liveness_pulse ~ctx ~meta:meta_after_cursor_persist ~stop
       (fun () ->
@@ -887,7 +887,7 @@ let run_keepalive_unified_turn
                  ~cascade_profile:profile
                  ~health_cache:Keeper_health_probe.Healthy
                  ~last_used_item:None with
-               | Ok item -> Some item
+               | Ok pair -> Some pair
                | Error `No_available_item -> None)
           | None -> None
         in
@@ -930,7 +930,7 @@ let run_keepalive_unified_turn
                 ~channel:turn_decision.channel (fun ~semaphore_wait_ms ~slot_control ->
                 run_keeper_cycle_with_slot ~ctx ~meta_after_cursor_persist ~stop ~obs
                   ~turn_decision ~shared_context ~semaphore_wait_ms ~slot_control
-                  ?selected_item:selected_item_opt)
+                  ?selected_item:selected_item_opt ())
             with
             | Ok meta -> meta
             | Error (`Semaphore_wait_timeout timeout) ->

@@ -1383,7 +1383,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
     match result.cascade_observation with
     | Some observation ->
       Keeper_cascade_profile.runtime_name_to_string
-        observation.Oas_worker.cascade_name
+        observation.Cascade_legacy_runner.cascade_name
     | None -> meta.cascade_name
   in
   (* #9933: same latency bucket, split by provider/model/cascade.
@@ -1468,7 +1468,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
           | None -> `Null );
         ("cascade",
          match result.cascade_observation with
-         | Some observation -> Oas_worker.cascade_observation_to_json observation
+         | Some observation -> Cascade_legacy_runner.cascade_observation_to_json observation
          | None -> `Null);
         ("snapshot_source", `String snapshot_source);
         ("memory_check", memory_check_default_json ());

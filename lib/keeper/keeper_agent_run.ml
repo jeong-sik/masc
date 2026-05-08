@@ -34,7 +34,7 @@ let per_provider_timeout_for_turn
 
     After the callback returns the final system prompt, appends the user
     message, builds OAS tools + hooks, and delegates to
-    [Oas_worker.run_named] which internally calls Agent.run().
+    [Keeper_turn_driver.run_named] which internally calls Agent.run().
 
     @param config Coord configuration
     @param meta Keeper metadata
@@ -360,7 +360,7 @@ let run_turn
                Some (String.equal (String.lowercase_ascii mode) "yolo")
              | None -> None);
           cli_subprocess_idle_sec;
-        } : Oas_worker.cli_transport_overrides)
+        } : Cascade_runner.cli_transport_overrides)
     in
     (* Phase 0: wake-time payload telemetry (Option C baseline).
        Entire block is dead code when MASC_PAYLOAD_TELEMETRY is unset.
@@ -414,7 +414,7 @@ let run_turn
       | None ->
       match
        Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s (fun () ->
-         Oas_worker.run_named
+         Keeper_turn_driver.run_named
            ~cascade_name:cascade_name_string
            ~keeper_name:meta.name
            ~model_strings:meta.models

@@ -209,9 +209,9 @@ let test_build_response_prompt_long_content () =
   check bool "handles long content" true (String.length prompt > 1000)
 
 let test_auto_responder_uses_shared_model_runtime () =
-  check bool "uses Oas_worker.run_named" true
+  check bool "uses Keeper_turn_driver.run_named" true
     (file_contains_pattern "lib/auto_responder.ml"
-       {|Oas_worker.run_named ~cascade_name|});
+       {|Keeper_turn_driver.run_named ~cascade_name|});
   check bool "no direct run_prompt_cascade" false
     (file_contains_pattern "lib/auto_responder.ml" "Llm_orchestration.run_prompt_cascade");
   check bool "legacy Llm_direct dispatch removed"

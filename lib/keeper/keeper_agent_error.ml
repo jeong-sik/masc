@@ -156,7 +156,7 @@ let checkpoint_persistence_error ~keeper_name ~detail =
 ;;
 
 let cascade_outcome_of_observation = function
-  | Some (obs : Oas_worker.cascade_observation) when obs.fallback_applied ->
+  | Some (obs : Cascade_legacy_runner.cascade_observation) when obs.fallback_applied ->
     "passed_to_next_model"
   | Some _ -> "completed"
   | None -> "not_observed"

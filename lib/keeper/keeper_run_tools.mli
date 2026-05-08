@@ -82,7 +82,7 @@ type agent_setup =
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : string option ref
-  ; receipt_cascade_observation_ref : Oas_worker.cascade_observation option ref
+  ; receipt_cascade_observation_ref : Cascade_legacy_runner.cascade_observation option ref
   ; receipt_response_text_present_ref : bool ref
   ; reported_tool_names_ref : string list ref
   ; observed_tool_names_ref : string list ref

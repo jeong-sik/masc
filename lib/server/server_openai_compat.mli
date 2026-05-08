@@ -51,7 +51,7 @@ val handle_chat_completions :
     | Condition | Route |
     |---|---|
     | [model] starts with [keeper:] (length > 7) | {!Keeper_turn.handle_keeper_msg} |
-    | otherwise | {!Oas_worker.run_named} with [routes.openai_compat] |
+    | otherwise | {!Keeper_turn_driver.run_named} with [routes.openai_compat] |
 
     The [keeper:] prefix length check (`> 7`) is intentional: an
     empty keeper name (`model = "keeper:"`) falls through to the

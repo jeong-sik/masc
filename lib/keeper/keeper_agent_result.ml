@@ -32,7 +32,7 @@ type run_result =
   ; model_used : string
   ; prompt_metrics : prompt_metrics
   ; ctx_composition : ctx_composition_metrics
-  ; cascade_observation : Oas_worker.cascade_observation option
+  ; cascade_observation : Cascade_legacy_runner.cascade_observation option
   ; turn_count : int
   ; tool_calls_made : int
   ; usage : Agent_sdk.Types.api_usage
@@ -43,7 +43,7 @@ type run_result =
   ; proof : Masc_mcp_cdal_runtime.Cdal_proof.t option
   ; trace_ref : Agent_sdk.Raw_trace.run_ref option
   ; run_validation : Agent_sdk.Raw_trace.run_validation option
-  ; stop_reason : Oas_worker.stop_reason
+  ; stop_reason : Cascade_runner.stop_reason
   ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
   ; tool_surface : tool_surface_metrics
   }
@@ -53,12 +53,12 @@ let nonempty_trimmed raw =
   if trimmed = "" then None else Some trimmed
 
 let surface_model_used (result : run_result) : string =
-  let attempt_surface_model (attempt : Oas_worker.cascade_attempt) =
+  let attempt_surface_model (attempt : Cascade_legacy_runner.cascade_attempt) =
     match Option.bind attempt.model_label nonempty_trimmed with
     | Some label -> Some label
     | None -> nonempty_trimmed attempt.model_id
   in
-  let observation_surface_model (obs : Oas_worker.cascade_observation) =
+  let observation_surface_model (obs : Cascade_legacy_runner.cascade_observation) =
     match
       obs.attempts
       |> List.rev
@@ -81,10 +81,10 @@ let surface_resolved_model_id (result : run_result) : string =
      that actually ran. Falls back to selected/primary observation fields
      when attempts are unavailable, then to the raw provider-reported
      [model_used]. See #9953. *)
-  let attempt_resolved_id (attempt : Oas_worker.cascade_attempt) =
+  let attempt_resolved_id (attempt : Cascade_legacy_runner.cascade_attempt) =
     nonempty_trimmed attempt.model_id
   in
-  let observation_resolved_id (obs : Oas_worker.cascade_observation) =
+  let observation_resolved_id (obs : Cascade_legacy_runner.cascade_observation) =
     match
       obs.attempts
       |> List.rev

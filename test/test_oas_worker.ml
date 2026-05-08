@@ -551,19 +551,19 @@ let test_sse_error_event_ignored () =
 (* ================================================================ *)
 
 let test_default_model_strings_keeper () =
-  let models = Oas_worker.default_model_strings ~cascade_name:"keeper_turn" in
+  let models = Keeper_turn_driver.default_model_strings ~cascade_name:"keeper_turn" in
   Alcotest.(check bool) "keeper_turn has models" true (models <> [])
 
 let test_default_model_strings_heartbeat () =
-  let models = Oas_worker.default_model_strings ~cascade_name:"heartbeat_action" in
+  let models = Keeper_turn_driver.default_model_strings ~cascade_name:"heartbeat_action" in
   Alcotest.(check bool) "heartbeat has models" true (models <> [])
 
 let test_default_model_strings_unknown () =
-  let models = Oas_worker.default_model_strings ~cascade_name:"nonexistent_cascade_xyz" in
+  let models = Keeper_turn_driver.default_model_strings ~cascade_name:"nonexistent_cascade_xyz" in
   Alcotest.(check bool) "unknown cascade has fallback" true (models <> [])
 
 let test_default_model_strings_local_only () =
-  let models = Oas_worker.default_model_strings ~cascade_name:"local_only" in
+  let models = Keeper_turn_driver.default_model_strings ~cascade_name:"local_only" in
   let is_local label =
     match Cascade_runtime.provider_name_of_label label with
     | Some pname -> Provider_adapter.is_local_provider pname
@@ -616,7 +616,7 @@ let test_default_config_path () =
       Cascade_catalog_runtime.reset_cache_for_tests ();
       cleanup_dir base)
     (fun () ->
-      match Oas_worker.default_config_path () with
+      match Keeper_turn_driver.default_config_path () with
       | Some path ->
         Alcotest.(check bool) "non-empty path" true (String.length path > 0);
         Alcotest.(check bool) "path contains separator" true
@@ -633,7 +633,7 @@ let test_cascade_names_produce_models () =
     "briefing"; "routing_judge";
   ] in
   List.iter (fun name ->
-    let models = Oas_worker.default_model_strings ~cascade_name:name in
+    let models = Keeper_turn_driver.default_model_strings ~cascade_name:name in
     Alcotest.(check bool) (name ^ " has models") true (models <> [])
   ) cascades
 
@@ -658,7 +658,7 @@ let test_cascade_inference_normalizes_keeper_aliases () =
     canonical.max_tokens legacy_removed.max_tokens
 
 let test_cascade_observation_json_includes_fallback_fields () =
-  let observation : Oas_worker.cascade_observation =
+  let observation : Cascade_legacy_runner.cascade_observation =
     {
       cascade_name =
         Masc_mcp.Keeper_cascade_profile.Runtime_name
@@ -703,7 +703,7 @@ let test_cascade_observation_json_includes_fallback_fields () =
       attempt_details_source = "oas_metrics_callbacks";
     }
   in
-  let json = Oas_worker.cascade_observation_to_json observation in
+  let json = Cascade_legacy_runner.cascade_observation_to_json observation in
   Alcotest.(check string) "cascade name preserved" Masc_mcp.Keeper_config.default_cascade_name
     Yojson.Safe.Util.(json |> member "cascade_name" |> to_string);
   Alcotest.(check bool) "fallback applied preserved" true
@@ -748,7 +748,7 @@ let test_cascade_metrics_concurrent_recording () =
                done));
       match
         find_cascade_metric_entry "concurrent-cascade"
-          (Oas_worker.cascade_metrics_json ())
+          (Cascade_legacy_runner.cascade_metrics_json ())
       with
       | None -> Alcotest.fail "expected concurrent-cascade metrics"
       | Some entry ->
@@ -791,14 +791,14 @@ let test_cascade_metrics_evicts_lowest_call_key () =
           ~outcome:`Success
           ()
       done;
-      let before = Yojson.Safe.Util.to_list (Oas_worker.cascade_metrics_json ()) in
+      let before = Yojson.Safe.Util.to_list (Cascade_legacy_runner.cascade_metrics_json ()) in
       Alcotest.(check int) "table capped before admit" 256 (List.length before);
       Masc_mcp.Cascade_legacy_runner.record_cascade
         ~cascade_name:(internal_cascade_name "new-key")
         ~observation:None
         ~outcome:`Success
         ();
-      let after_json = Oas_worker.cascade_metrics_json () in
+      let after_json = Cascade_legacy_runner.cascade_metrics_json () in
       let after = Yojson.Safe.Util.to_list after_json in
       Alcotest.(check int) "table stays capped" 256 (List.length after);
       Alcotest.(check bool) "victim evicted" true
@@ -879,7 +879,7 @@ let test_cascade_audit_persists_observation () =
         ~observation:(Some observation)
         ~outcome:`Failure
         ();
-      ignore (Oas_worker.cascade_metrics_json ());
+      ignore (Cascade_legacy_runner.cascade_metrics_json ());
       let store =
         Dated_jsonl.create
           ~base_dir:(Filename.concat base ".masc/cascade_audit")
@@ -2022,7 +2022,7 @@ let test_resolve_provider_of_label_rejects_invalid_explicit_label () =
 
 let test_run_model_with_masc_tools_rejects_invalid_explicit_label () =
   match
-    Oas_worker.run_model_with_masc_tools
+    Keeper_turn_driver.run_model_with_masc_tools
       ~model_label:"not-a-model-label"
       ~goal:"test goal"
       ~masc_tools:[]

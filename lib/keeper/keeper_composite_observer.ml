@@ -306,8 +306,10 @@ let check_phase_turn_alignment
       (phase = Keeper_state_machine.Compacting)
   | Keeper_registry.Packed Turn_idle
   | Keeper_registry.Packed Turn_prompting
+  | Keeper_registry.Packed Turn_routing
   | Keeper_registry.Packed Turn_executing
-  | Keeper_registry.Packed Turn_finalizing ->
+  | Keeper_registry.Packed Turn_finalizing
+  | Keeper_registry.Packed Turn_exhausted ->
       not (phase = Keeper_state_machine.Compacting)
 
 let check_compaction_atomicity

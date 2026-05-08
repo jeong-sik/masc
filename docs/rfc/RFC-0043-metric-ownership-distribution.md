@@ -102,7 +102,9 @@ Owner 분산이 안 되어 있어 다음 두 비용이 영구 발생:
 
 ## 3. Design
 
-### 3.1 도메인 분포 (오늘 측정, prefix 기준)
+### 3.1 도메인 분포 — 두 축 측정 (2026-05-08, base `7aa64dbc0e`)
+
+#### A. Definition site (`lib/prometheus.ml` 의 `let metric_<domain>_*` 상수)
 
 ```
 keeper:    187 metrics (50.3%)
@@ -127,17 +129,45 @@ cache:       3
 ... (lower)
 ```
 
-`keeper_*` 단독으로 절반 — `lib/keeper/keeper_metrics.ml` 신설이 가장 큰 단일
-이전. 나머지 도메인은 5-15 metric 단위라 작음.
+#### B. Use site (`Prometheus.metric_<domain>_*` reference, 다른 모듈에서)
+
+`rg -o 'Prometheus\.metric_[a-z_]+' lib/ -t ml | sed 's/Prometheus\.metric_//' | awk -F_ '{print $1}' | sort | uniq -c | sort -rn`:
+
+```
+keeper:    480 references  (in lib/keeper/)
+transport:  68
+dashboard:  65 + 67 (lib/dashboard.ml + lib/dashboard/)
+server:     24
+cascade:    16
+llm:        13
+tool:       12
+oas:        11
+... (lower)
+
+총 use site:  772 references across 140 files
+inc_counter call sites: 449
+```
+
+**Definition (372) ↔ Use (772) 비율 ≈ 1:2** — 각 metric 평균 2 곳에서 사용. 마이그
+범위는 *use site 까지*: caller 변경 (PR-5) 이 정의 이전 (PR-2~4) 보다 LOC 변경량
+큼. RFC §4 의 PR-5 LOC 추정 정정 필요 (§4 표 참조).
+
+`keeper_*` 단독으로 정의의 절반, use 의 60%. `lib/keeper/keeper_metrics.ml` 신설이
+가장 큰 단일 이전. 나머지 도메인은 5-15 metric 단위라 작음.
 
 ### 3.2 새 모듈 패턴
 
+현재 `lib/prometheus.ml` 의 metric 상수는 plain `string` (예:
+`let metric_keeper_turns = "masc_keeper_turns_total"`) — smart constructor /
+abstract `metric_name` 타입 없음. 본 RFC 는 그 패턴을 그대로 유지하고 *위치만*
+이전한다.
+
 ```ocaml
 (* lib/keeper/keeper_metrics.mli *)
-val metric_turn_total              : Prometheus.metric_name
-val metric_turn_failed             : Prometheus.metric_name
-val metric_receipt_unmapped_disposition : Prometheus.metric_name
-... (187개)
+val metric_turn_total : string
+val metric_turn_failed : string
+val metric_receipt_unmapped_disposition : string
+(* ... 187개 *)
 
 val register_all : unit -> unit
 (** Idempotent. Called once during keeper subsystem init. *)
@@ -145,20 +175,30 @@ val register_all : unit -> unit
 
 ```ocaml
 (* lib/keeper/keeper_metrics.ml *)
-let metric_turn_total =
-  Prometheus.metric_name_unsafe "masc_keeper_turn_total"
-let metric_turn_failed =
-  Prometheus.metric_name_unsafe "masc_keeper_turn_failed"
-...
+let metric_turn_total = "masc_keeper_turn_total"
+let metric_turn_failed = "masc_keeper_turn_failed"
+(* ... *)
 
 let register_all () =
   Prometheus.register_counter
     ~name:metric_turn_total
     ~help:"Total keeper turns initiated"
-    ~labels:["keeper"; "cascade"]
+    ~labels:[("keeper", ""); ("cascade", "")]
     ();
-  ...
+  (* ... *)
+;;
 ```
+
+**API 매개변수 정합성** (실제 [`lib/prometheus.mli`](../../lib/prometheus.mli) 시그니처 기준):
+
+| API | 시그니처 |
+|-----|---------|
+| `register_counter` | `~name:string -> ~help:string -> ?labels:label list -> unit -> unit` |
+| `inc_counter`      | `~name:string -> ?labels -> unit -> unit` |
+| `label`            | `string * string` |
+
+본 RFC 는 새 abstract 타입 (예: `metric_name`) 을 *도입하지 않는다*. 그건
+별도의 type-discipline RFC 후보 — 본 RFC 의 scope 는 *소유권 이전* 만.
 
 ### 3.3 prometheus.ml 잔여 contents
 
@@ -200,26 +240,48 @@ let register_all_metrics () =
 
 ## 4. Migration plan (5 PRs)
 
-| PR | Title | Files (estimate) | LOC delta | Compile-clean? |
-|----|-------|------------------|-----------|----------------|
-| **PR-1** | introduce empty domain modules + `register_all` no-op | ~10 신규 | +200 | ✅ |
-| **PR-2** | move 187 `metric_keeper_*` 상수 to `Keeper_metrics`; `Prometheus` 에 alias 유지 | 1 (prometheus.ml 큰 감소) + 1 신규 + N (call site는 alias 사용) | -1500 / +700 (net -800) | ✅ |
-| **PR-3** | move sse/oas/llm/ws/cascade (~70 metrics) to 5 domain modules; alias 유지 | 5 신규 + 1 prometheus.ml | -300 / +300 (net 0, but prometheus.ml -300) | ✅ |
-| **PR-4** | move 나머지 (~115 metrics) | 10+ 신규 + 1 prometheus.ml | -700 / +500 | ✅ |
-| **PR-5** | call site 마이그 (Prometheus alias → 도메인 module 직접) + alias 제거 | ~50 caller files + 1 prometheus.ml | net 0, alias drop | ✅ |
+| PR | Title | Files | LOC delta (추정 vs 측정) | godfile? |
+|----|-------|-------|--------------------------|----------|
+| **PR-1** | introduce empty domain modules + `register_all` no-op | ~10 신규 (.ml/.mli pair × 5 도메인) | +200 (추정, 빈 모듈) | – |
+| **PR-2** | 187 `metric_keeper_*` 상수 → `Keeper_metrics`; `Prometheus` 에 alias 유지 | 1 prometheus.ml (-) + 1 신규 (+) | prometheus.ml: 187 const × ~3 LOC 평균 = ~-560 *측정 base*; new module: ~600; alias: ~190 → net new module ~+800, prometheus net ~-560+190(alias)=−370 | ✅ **3059 → ~2700, cap 통과** |
+| **PR-3** | sse/oas/llm/ws/cascade (~70 metrics) → 5 도메인 모듈; alias 유지 | 5 신규 + 1 prometheus.ml | prometheus.ml: −210; new modules: +210; alias: +70 | – |
+| **PR-4** | 나머지 (~115 metrics) | 10+ 신규 + 1 prometheus.ml | prometheus.ml: −345; new modules: +345; alias: +115 | – |
+| **PR-5** | call site 마이그 (`Prometheus.metric_*` → `<Domain>_metrics.metric_*`) + alias 제거 | **140 caller files (use site 측정)** + 1 prometheus.ml | use site rename ~772; prometheus alias drop ~−372 | – |
 
-PR-2 만에 godfile cap 자연 해소 (3059 → ~1500). 나머지 PR 은 *cleanup*.
+**LOC 추정 근거**:
+- prometheus.ml 내 metric 상수 영역 line 211-1429 (~1218 LOC, RFC body §1.2 의
+  PR #14166 본문 인용) ÷ 365 상수 ≈ 평균 3.3 LOC/const (주석 포함).
+- PR-5 caller 변경량은 use site 770+ × 1줄 sed = ~770 LOC 변경. 실제 수치는
+  PR-5 시작 전 `git diff --stat` 시뮬레이션으로 재측정 필요.
+
+**자연 해소 시점**: PR-2 시점에 prometheus.ml 약 −370 LOC → 3059 → ~2690.
+godfile cap (3000) 은 PR-2 단독으로 통과. PR-3/4 가 추가로 prometheus.ml 을
+−555 더 줄여서 최종 ~2135 LOC 예상. 모든 추정은 *기대치*; PR-2 base에서
+재측정 필요.
 
 ### 4.1 Test plan
 
-- **PR-1**: `register_all` no-op 호출 후 metric registry empty 확인 (golden test)
-- **PR-2**: `/metrics` endpoint output diff = 0 (PR 전후 byte-equal)
-- **PR-3, PR-4**: 동일 (`/metrics` byte-equal 유지)
-- **PR-5**: caller 마이그 후 build clean + `/metrics` byte-equal
+- **PR-1**: `register_all` no-op 호출 후 metric registry size 변화 0 (golden
+  test). 빈 모듈만 도입.
+- **PR-2**: `/metrics` HTTP endpoint output **byte-for-byte stable** (PR 전후
+  diff 0).
+- **PR-3, PR-4**: 동일 (`/metrics` byte-equal 유지).
+- **PR-5**: caller 마이그 후 build clean + `/metrics` byte-equal.
 
-`/metrics` byte-equal 보장 수단:
-1. `bin/cdal_label.ml` 또는 별도 test 가 `/metrics` 를 호출, sorted output dump
-2. PR 전후 dump diff 0
+#### `/metrics` byte-equal 검증 수단
+
+1. **현재 collect 함수**: `lib/prometheus.ml` 의 collect/expose API
+   (`get_metric_value`, `metric_value_or_zero`, `metric_total`)
+   가 출력하는 wire format. Prometheus exposition format 표준 (도메인 sort,
+   label sort) 을 자체 구현하는지, 아니면 Prometheus client lib 위임인지는
+   PR-2 전 측정 필요 (`rg 'expose|/metrics' lib/prometheus.ml lib/server/`).
+2. **기준 dump**: PR-2 base 에서 서버 부팅 → `curl /metrics > before.txt`,
+   sort label keys, save.
+3. **diff 검증**: PR-2 변경 후 동일 절차 → `diff before.txt after.txt` 가
+   비어있어야 함.
+4. **포맷 안정**: label key 가 `HashMap` 순서로 emit 되면 byte-equal 못 잡음.
+   PR-2 시작 전 emit 순서가 결정적인지 확인 (소스 코드 또는 client lib spec).
+   non-deterministic 이면 *sorted-label diff* 로 완화.
 
 ## 5. Trade-offs & open questions
 
@@ -232,9 +294,26 @@ init 비용 분산. 현재 prometheus.ml 의 register 는 *file load 시점 side
 
 ### 5.2 Cyclic dependency 위험
 
-도메인 모듈이 `Prometheus` 를 의존하는 건 OK (leaf). 그러나 `Keeper_metrics`
-가 `Keeper_unified_turn` 같은 도메인 코드를 의존하면 cycle. 따라서
-`*_metrics.ml` 은 *metric name 상수 + register* 만, 도메인 로직 reference 0.
+의존성 방향:
+
+```
+<Domain>_metrics.ml  →  Prometheus  (leaf)
+<Domain> 도메인 코드 (예: keeper_unified_turn)
+   ─→ <Domain>_metrics  (use site, 새 경로)
+   ─→ Prometheus        (inc_counter, 변경 X)
+```
+
+**검증해야 할 것**: `<Domain>_metrics.ml` 이 register 시점에 도메인 코드
+reference 가 *전혀 없어야* leaf 유지. 본 RFC 는 `<Domain>_metrics.ml` 의
+contents 를 `(상수 정의) + (register_counter / register_gauge / register_histogram
+호출)` 두 가지로 한정. 도메인 코드 import 0.
+
+label value (예: keeper 이름) 는 *register 시점이 아니라 inc 시점* 에 주입되므로
+register_all 가 도메인 의존하지 않음. 이 invariant 는 PR-2 시작 전
+`rg '\bopen Keeper_' new_keeper_metrics.ml` = 0 등으로 검증.
+
+`lib/dune` 의 `include_subdirs unqualified` 와 단일 `masc_mcp` library 구조 덕에
+sub-library 분리도 불필요. 모듈 간 import 만 검증.
 
 ### 5.3 Metric 이름 prefix
 

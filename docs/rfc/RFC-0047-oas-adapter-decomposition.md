@@ -191,12 +191,25 @@ Build-green hard gate at every PR.
 ### Phase 1 — RFC + caller inventory freeze (this PR)
 
 - Land this RFC.
-- Generate machine-readable caller index:
-  `scripts/oas-adapter-caller-inventory.sh` produces
-  `docs/rfc/RFC-0047-caller-inventory.txt` (504 references, file:line
-  format) and `docs/rfc/RFC-0047-module-graph.dot`.
-- No code change. Establishes the baseline against which each subsequent
-  phase verifies "no caller surface drift".
+- Inventory script: `scripts/rfc-0047-oas-adapter-inventory.sh`.
+  - Default mode regenerates `docs/rfc/RFC-0047-caller-inventory.txt`
+    and `docs/rfc/RFC-0047-module-graph.dot`.
+  - `--check` mode exits non-zero if regenerated output drifts from
+    committed baseline. Used by Phase 2-7 PRs as a CI gate.
+- Phase 1 baseline (frozen 2026-05-08):
+  - **810 inventory entries** (781 code references + 15 doc/markdown +
+    14 cross-RFC).
+  - Top callers (code): `test/test_oas_worker.ml` (223), `lib/keeper/keeper_error_classify.ml` (82),
+    `lib/oas_worker_exec.ml` (44), `test/test_keeper_unified.ml` (40),
+    `lib/oas_worker_named.ml` (40 — intra-family coupling).
+  - Most-referenced module: `Oas_worker_named` (131 external refs)
+    confirms the Phase 4 hotspot.
+  - Module graph: 25 cross-domain edges. `oas_worker_named → Cascade_*`
+    weighs 77 (largest single edge), `oas_worker_exec → Dashboard_*`
+    weighs 8 (push-style violation per Phase 5).
+- No code change beyond script + baseline files. Establishes the
+  reference against which each subsequent phase verifies "no caller
+  surface drift".
 
 ### Phase 2 — Clean 4 rename (`oas_*` → `agent_sdk_*`)
 

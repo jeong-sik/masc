@@ -68,7 +68,7 @@ let report_keeper_cycle_side_effect_issue
   in
   Keeper_registry.record_error ~base_path:config.base_path keeper_name message;
   Prometheus.inc_counter
-    Prometheus.metric_keeper_dispatch_event_failures
+    Keeper_metrics.metric_keeper_dispatch_event_failures
     ~labels:[
       ("keeper", keeper_name);
       ("site", side_effect_metric_label side_effect);
@@ -140,7 +140,7 @@ let record_execution_receipt_gap
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_write_meta_failures
+        Keeper_metrics.metric_keeper_write_meta_failures
         ~labels:[("keeper", meta.name); ("phase", "receipt_coverage_gap")]
         ();
       Log.Keeper.warn
@@ -282,7 +282,7 @@ let record_pre_dispatch_terminal_observation
    | exn ->
       let error = Printexc.to_string exn in
       Prometheus.inc_counter
-        Prometheus.metric_keeper_write_meta_failures
+        Keeper_metrics.metric_keeper_write_meta_failures
         ~labels:[("keeper", meta.name); ("phase", "receipt_append")]
         ();
       Log.Keeper.warn

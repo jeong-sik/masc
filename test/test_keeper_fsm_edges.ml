@@ -26,7 +26,7 @@
 module P = Masc_mcp.Prometheus
 
 let edge_label = "ksm_to_kcl_routing"
-let counter_name = P.metric_keeper_fsm_edge_transitions
+let counter_name = Masc_mcp.Keeper_metrics.metric_keeper_fsm_edge_transitions
 
 let read_edge_count edge =
   P.metric_value_or_zero counter_name ~labels:[("edge", edge)] ()

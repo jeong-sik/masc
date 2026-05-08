@@ -335,7 +335,7 @@ let read_backlog_counts ~allowed_tool_names ~(config : Coord.config)
   | Eio.Cancel.Cancelled _ as e -> raise e
   | ex ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_observation_query_failures
+        Keeper_metrics.metric_keeper_observation_query_failures
         ~labels:[("operation", "read_backlog_counts")]
         ();
       Log.Keeper.warn "read_backlog_counts failed: %s" (Printexc.to_string ex);
@@ -348,7 +348,7 @@ let count_active_agents ~(config : Coord.config) : int =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | ex ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_observation_query_failures
+        Keeper_metrics.metric_keeper_observation_query_failures
         ~labels:[("operation", "count_active_agents")]
         ();
       Log.Keeper.warn "count_active_agents failed: %s" (Printexc.to_string ex);
@@ -864,7 +864,7 @@ let collect_board_events_with_cursor_policy ~advance_cursor ~(base_path : string
       | None ->
         if final_events <> [] then begin
           Prometheus.inc_counter
-            Prometheus.metric_keeper_observation_query_failures
+            Keeper_metrics.metric_keeper_observation_query_failures
             ~labels:[("operation", "cursor_stale")]
             ();
           Log.Keeper.warn
@@ -876,7 +876,7 @@ let collect_board_events_with_cursor_policy ~advance_cursor ~(base_path : string
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Prometheus.inc_counter
-      Prometheus.metric_keeper_observation_query_failures
+      Keeper_metrics.metric_keeper_observation_query_failures
       ~labels:[("operation", "board_events")]
       ();
     Log.Keeper.warn "board event collection failed: %s"
@@ -1327,7 +1327,7 @@ let keeper_cycle_decision
                    Defensive: log warning and fall through to skip so that
                    should_run (derived below) stays consistent with verdict. *)
                 Prometheus.inc_counter
-                  Prometheus.metric_keeper_observation_query_failures
+                  Keeper_metrics.metric_keeper_observation_query_failures
                   ~labels:[("operation", "empty_run_reasons")]
                   ();
                 Log.Keeper.warn

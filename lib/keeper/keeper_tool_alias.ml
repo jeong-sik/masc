@@ -128,7 +128,7 @@ let canonicalize_observed_with_telemetry names =
       (match alias_kind with
        | Some kind when not (String.equal n canonical) ->
            Prometheus.inc_counter
-             Prometheus.metric_keeper_tool_alias_canonicalizations
+             Keeper_metrics.metric_keeper_tool_alias_canonicalizations
              ~labels:
                [
                  ("alias_kind", kind);

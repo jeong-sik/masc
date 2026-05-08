@@ -9,7 +9,7 @@
 
    PR-3 added [gen_risk] / [gen_sandbox] for parallel verification.
    PR-4 adds [gen_to_simple] (typed → untyped). The hand-written
-   [Shell_ir_typed.to_simple] stays in place; the golden test
+   [Shell_ir_typed_types.to_simple] stays in place; the golden test
    [test_shell_ir_walkers_gen.ml] asserts byte-for-byte equivalence
    across all 9 constructors. PR-5 retires the hand-written walkers. *)
 
@@ -221,13 +221,13 @@ let emit_header buf =
 let emit_risk buf spec =
   Buffer.add_string
     buf
-    "let gen_risk : Shell_ir_typed.wrapped -> Shell_ir_typed.risk = function\n";
+    "let gen_risk : Shell_ir_typed_types.wrapped -> Shell_ir_typed_types.risk = function\n";
   List.iter
     (fun c ->
        Buffer.add_string
          buf
          (Printf.sprintf
-            "  | Shell_ir_typed.W (Shell_ir_typed.%s) -> %s\n"
+            "  | Shell_ir_typed_types.W (Shell_ir_typed_types.%s) -> %s\n"
             c.anon_pattern
             c.risk))
     spec;
@@ -237,13 +237,14 @@ let emit_risk buf spec =
 let emit_sandbox buf spec =
   Buffer.add_string
     buf
-    "let gen_sandbox : Shell_ir_typed.wrapped -> Shell_ir_typed.sandbox = function\n";
+    "let gen_sandbox : Shell_ir_typed_types.wrapped -> Shell_ir_typed_types.sandbox = \
+     function\n";
   List.iter
     (fun c ->
        Buffer.add_string
          buf
          (Printf.sprintf
-            "  | Shell_ir_typed.W (Shell_ir_typed.%s) -> %s\n"
+            "  | Shell_ir_typed_types.W (Shell_ir_typed_types.%s) -> %s\n"
             c.anon_pattern
             c.sandbox))
     spec;
@@ -254,13 +255,16 @@ let emit_to_simple buf spec =
   Buffer.add_string
     buf
     "let gen_to_simple\n\
-    \  : type i o r s. (i, o, r, s) Shell_ir_typed.command -> Shell_ir.simple\n\
+    \  : type i o r s. (i, o, r, s) Shell_ir_typed_types.command -> Shell_ir.simple\n\
     \  = function\n";
   List.iter
     (fun c ->
        Buffer.add_string
          buf
-         (Printf.sprintf "  | Shell_ir_typed.%s ->%s\n" c.bind_pattern c.to_simple_body))
+         (Printf.sprintf
+            "  | Shell_ir_typed_types.%s ->%s\n"
+            c.bind_pattern
+            c.to_simple_body))
     spec;
   Buffer.add_string buf "\n"
 ;;

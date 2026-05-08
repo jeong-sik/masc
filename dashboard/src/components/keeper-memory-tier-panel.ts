@@ -87,9 +87,16 @@ export function KeeperMemoryTierPanel({
     setError(null)
 
     const refresh = async () => {
+      // RFC-0046 §7 #1: skip composite fetch when parent supplies it.
+      // `undefined` = standalone caller (legacy fallback); `null` =
+      // parent is still loading, wait rather than dual-fetch.
+      const compositePromise: Promise<KeeperCompositeSnapshot | null> = externalSnapshot !== undefined
+        ? Promise.resolve(externalSnapshot)
+        : fetchKeeperComposite(keeperName, { signal: controller.signal })
+
       Promise.allSettled([
         fetchKeeperStateDiagram(keeperName, { signal: controller.signal }),
-        fetchKeeperComposite(keeperName, { signal: controller.signal }),
+        compositePromise,
       ])
         .then(([usageResult, compositeResult]) => {
           if (controller.signal.aborted) return

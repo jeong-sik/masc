@@ -20,12 +20,15 @@ import { currentDashboardActor, runOperatorAction } from '../api'
 import {
   bootKeeper,
   clearKeeper,
+  fetchKeeperComposite,
   fetchKeeperTransitions,
+  type KeeperCompositeSnapshot,
   pauseKeeper,
   resumeKeeper,
   shutdownKeeper,
   wakeKeeper,
 } from '../api/keeper'
+import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { TimeAgo } from './common/time-ago'
 import { Checkbox } from './common/checkbox'
 import { TextArea } from './common/input'
@@ -828,6 +831,42 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
 
 // ── Main Detail Page ─────────────────────────────────────
 
+/**
+ * RFC-0046 §7 follow-up #1: single composite snapshot fetch shared
+ * across the detail surface. Before this hook KeeperStateDiagramPanel
+ * and KeeperMemoryTierPanel each issued their own /composite call;
+ * now keeper-detail owns the fetch and threads the snapshot down via
+ * the snapshot prop introduced in PR #14226.
+ *
+ * FsmHub still has its own polling/reducer loop — see RFC §7 for the
+ * remaining dedup work. This hook handles only the two derived panels.
+ */
+const COMPOSITE_REFRESH_MS = 30_000
+
+function useKeeperComposite(keeperName: string): KeeperCompositeSnapshot | null {
+  const [snapshot, setSnapshot] = useState<KeeperCompositeSnapshot | null>(null)
+  useEffect(() => {
+    const controller = new AbortController()
+    let cancelled = false
+    const refresh = async () => {
+      try {
+        const result = await fetchKeeperComposite(keeperName, { signal: controller.signal })
+        if (!cancelled && !controller.signal.aborted) setSnapshot(result)
+      } catch {
+        // best-effort polling — leave the previous snapshot in place
+      }
+    }
+    void refresh()
+    const cleanup = setupVisibleAutoRefresh(refresh, COMPOSITE_REFRESH_MS)
+    return () => {
+      cancelled = true
+      controller.abort()
+      cleanup()
+    }
+  }, [keeperName])
+  return snapshot
+}
+
 export function KeeperDetailPage() {
   const keeperName =
     route.value.tab === 'monitoring' && route.value.params.section === 'agents'
@@ -860,6 +899,9 @@ export function KeeperDetailPage() {
   // the header KeeperPhaseAndStage to render "현재 phase에 머문 시간" without
   // requiring a new backend field — derivation is plan-approved trade-off.
   const [phaseEnteredAtSec, setPhaseEnteredAtSec] = useState<number | null>(null)
+  // RFC-0046 §7 #1: single composite snapshot shared with the two
+  // derived panels (state-diagram + memory-tier).
+  const compositeSnapshot = useKeeperComposite(keeper.name)
   const prevKeeperRef = useRef(keeper.name)
   if (prevKeeperRef.current !== keeper.name) {
     prevKeeperRef.current = keeper.name
@@ -1016,11 +1058,11 @@ export function KeeperDetailPage() {
         ${'' /* RFC-0046: 6-axis composite snapshot (KSM/KTC/KDP/KCL/KMC/breaker) — SSOT for keeper FSM state */}
         <${FsmHub} mode="detail" selectedName=${keeper.name} />
         <${CollapsibleSection} title="Phase State Machine">
-          <${KeeperStateDiagramPanel} keeperName=${keeper.name} />
+          <${KeeperStateDiagramPanel} keeperName=${keeper.name} snapshot=${compositeSnapshot} />
         <//>
 
         <${CollapsibleSection} title="Memory Tier & Compaction">
-          <${KeeperMemoryTierPanel} keeperName=${keeper.name} />
+          <${KeeperMemoryTierPanel} keeperName=${keeper.name} snapshot=${compositeSnapshot} />
         <//>
 
         ${'' /* ── Divergent conditions (amber banner; renders only when phase lags observed signals) ── */}

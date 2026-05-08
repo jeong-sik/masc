@@ -1,4 +1,4 @@
-(** Oas_worker_exec_checkpoint — lifecycle, checkpoint, and
+(** Keeper_oas_checkpoint — lifecycle, checkpoint, and
     idle-detail helpers extracted from {!Cascade_runner}.
 
     Keeps side-effecting run helpers separate from the main

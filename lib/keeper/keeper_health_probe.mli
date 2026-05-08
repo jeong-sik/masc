@@ -23,14 +23,11 @@ val is_item_healthy : keeper_name:string -> item_id:string -> bool
 
 (** [set_item_health ~keeper_name ~item_id status] updates the cache
     for a specific keeper+item pair. *)
-val set_item_health :
-  keeper_name:string -> item_id:string ->
-  health_status -> unit
+val set_item_health : keeper_name:string -> item_id:string -> health_status -> unit
 
 (** [record_item_result ~keeper_name ~item_id ~success] updates health
     state based on turn outcome. Success -> Healthy, Failure -> Unhealthy. *)
-val record_item_result :
-  keeper_name:string -> item_id:string -> success:bool -> unit
+val record_item_result : keeper_name:string -> item_id:string -> success:bool -> unit
 
 (** {1 Backward-compatible per-keeper health (deprecated)} *)
 
@@ -49,8 +46,7 @@ val set_health : keeper_name:string -> health_status -> unit
     the failure ratio for each active cascade.  Returns a list of
     (cascade_name, is_healthy) pairs.  This function performs I/O and
     should be called from the probe fiber, not the supervisor sweep. *)
-val check_cascade_health :
-  base_path:string -> (string * bool) list
+val check_cascade_health : base_path:string -> (string * bool) list
 
 (** [get_cascade_status ~cascade_name] returns the cached cascade-level
     [health_status] written by [run_once]/[set_health].  Unlike
@@ -80,5 +76,4 @@ val run_once : base_path:string -> unit
     cancelled.  Currently unused — the supervisor calls [run_once]
     inline.  Retained for future use when a faster cadence than the
     30 s sweep is needed. *)
-val start_probe :
-  sw:Eio.Switch.t -> base_path:string -> interval_sec:float -> unit
+val start_probe : sw:Eio.Switch.t -> base_path:string -> interval_sec:float -> unit

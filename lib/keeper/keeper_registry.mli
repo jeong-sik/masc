@@ -317,6 +317,30 @@ val set_last_correlation_id : base_path:string -> string -> string -> unit
     Must be paired with [mark_turn_finished] (or [mark_turn_failed]). *)
 val mark_turn_started : base_path:string -> string -> unit
 
+(** Mark the beginning of an SDK turn within an existing keeper turn.
+
+    The Agent SDK [run_loop] iterates N SDK turns inside a single MASC
+    keeper-turn window. Each SDK turn fires [before_turn_params] which
+    leads to [prepare_agent_setup] writing
+    [Cascade_selecting]/[Decision_tool_policy_selected]/[Turn_prompting].
+    Without this boundary signal, the second-and-later SDK turn writes
+    transition from the previous SDK turn's terminal phase
+    ([Turn_finalizing] after [Cascade_done]/[Cascade_exhausted]), which
+    [validate_turn_phase_transition] rejects with [Assert_failure].
+
+    This function resets the in-turn FSM fields ([turn_phase],
+    [cascade_state], [decision_stage]) on the existing observation, the
+    same way [mark_turn_started] bypasses the validator with a fresh
+    install. [turn_id], [started_at], [selected_model], [measurement],
+    and [measurement_bind_count] are preserved across SDK turns inside
+    one keeper turn (they are keeper-turn-scoped, not SDK-turn-scoped).
+
+    No-op when [current_turn_observation = None] (defensive: should not
+    happen in normal flow because [mark_turn_started] runs first).
+
+    See RFC-0045 (SDK turn boundary alignment with MASC keeper FSM). *)
+val mark_sdk_turn_started : base_path:string -> string -> unit
+
 (** Attach the most recent [Context_measured] snapshot to the live turn.
     No-op if no turn is active or no pending measurement exists. *)
 val mark_turn_measurement : base_path:string -> string -> unit

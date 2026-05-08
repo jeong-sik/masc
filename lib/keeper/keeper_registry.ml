@@ -679,6 +679,37 @@ let mark_turn_started ~base_path name =
     });
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 
+(* RFC-0045: SDK-turn boundary reset.  Resets in-turn FSM fields without
+   touching keeper-turn-scoped data ([turn_id], [started_at],
+   [selected_model], [measurement], [measurement_bind_count]).  Bypasses
+   validators the same way [mark_turn_started] does — by installing a new
+   observation directly.
+
+   No-op when the observation is already in the post-reset shape (first
+   SDK turn after [mark_turn_started]) so the dashboard composite
+   broadcast doesn't fire spuriously every SDK turn. *)
+let mark_sdk_turn_started ~base_path name =
+  let changed = ref false in
+  let now = Time_compat.now () in
+  update_entry ~base_path name (fun e ->
+    match e.current_turn_observation with
+    | None -> e
+    | Some obs ->
+      if obs.turn_phase = Turn_prompting
+         && obs.cascade_state = Cascade_idle
+         && obs.decision_stage = Decision_undecided
+      then e
+      else (
+        changed := true;
+        let new_obs = {
+          obs with
+          turn_phase = Turn_prompting;
+          cascade_state = Cascade_idle;
+          decision_stage = Decision_undecided;
+        } in
+        { e with current_turn_observation = Some new_obs }));
+  if !changed then broadcast_composite_changed ~name ~ts_unix:now
+
 let mark_turn_measurement ~base_path name =
   let changed = ref false in
   let now = Time_compat.now () in

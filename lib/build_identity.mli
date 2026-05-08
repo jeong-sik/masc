@@ -19,6 +19,14 @@ type t = {
         are available, [None] otherwise.  Recomputed on every
         [current ()] call so the value tracks wall clock as the
         process keeps running on a stale binary. *)
+  executable_path : string;
+    (** Absolute best-effort path to the running executable.  Exposed on
+        [/health] so operators can distinguish a root-lane binary from a
+        worktree binary. *)
+  executable_dir : string;
+    (** Directory containing [executable_path]. *)
+  repo_root : string option;
+    (** Git root resolved from the executable path first, then cwd. *)
   started_at : string;
   uptime_seconds : int;
 }

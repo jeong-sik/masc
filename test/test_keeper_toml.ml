@@ -1805,6 +1805,19 @@ legacy_scope = "removed"
   check (float 0.0001) "health scan does not increment warning metric"
     before_unknown_metric (unknown_metric ())
 
+let test_health_json_build_exposes_runtime_binary_identity () =
+  with_config_dir @@ fun _config_dir ->
+  let request = Httpun.Request.create `GET "/health" in
+  let json = Runtime.make_health_json request in
+  let open Yojson.Safe.Util in
+  let build = json |> member "build" in
+  check bool "build executable path populated" true
+    (String.length (build |> member "executable_path" |> to_string) > 0);
+  check bool "build executable dir populated" true
+    (String.length (build |> member "executable_dir" |> to_string) > 0);
+  check bool "build repo_root field present" true
+    (match build |> member "repo_root" with `Null | `String _ -> true | _ -> false)
+
 let test_unknown_toml_warning_key_normalizes_unknown_order () =
   let path =
     Printf.sprintf "/tmp/keeper-warning-order-%06x.toml" (Random.bits ())
@@ -1963,6 +1976,8 @@ let () =
             test_keeper_toml_unknown_keys_in_dir_reports_files;
           test_case "health JSON surfaces unknown keys" `Quick
             test_health_json_surfaces_keeper_toml_unknown_keys;
+          test_case "health JSON build exposes runtime binary identity" `Quick
+            test_health_json_build_exposes_runtime_binary_identity;
           test_case "unknown TOML warning key normalizes order" `Quick
             test_unknown_toml_warning_key_normalizes_unknown_order;
           test_case "unknown TOML warning key uses full path not basename" `Quick

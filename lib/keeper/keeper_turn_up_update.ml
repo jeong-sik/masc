@@ -30,12 +30,9 @@ let resolve_active_goal_ids config p old_ids =
              (String.concat ", " missing))
 
 let blocker_requires_continue_gate (old : keeper_meta) =
-  match old.runtime.last_blocker_class with
-  | Some cls -> blocker_class_continue_gate cls
-  | None -> (
-      match Keeper_status_bridge.blocker_class_of_string old.runtime.last_blocker with
-      | Some cls -> blocker_class_continue_gate cls
-      | None -> false)
+  match old.runtime.last_blocker with
+  | Some info -> blocker_class_continue_gate info.klass
+  | None -> false
 
 let paused_state_requires_approval (old : keeper_meta) =
   Keeper_approval_queue.has_pending_for_keeper ~keeper_name:old.name
@@ -211,10 +208,10 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     old.paused && not (paused_state_requires_approval old)
   in
   if resume_paused_keeper then (
-    let blocker_class =
-      old.runtime.last_blocker_class
-      |> Option.map blocker_class_to_string
-      |> Option.value ~default:"none"
+    let blocker_class, blocker_detail =
+      match old.runtime.last_blocker with
+      | Some info -> blocker_class_to_string info.klass, info.detail
+      | None -> "none", ""
     in
     let auto_resume_after_sec =
       old.auto_resume_after_sec
@@ -223,8 +220,8 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     in
     Log.Keeper.warn
       "update_keeper resumed paused keeper %s; clearing \
-       auto_resume_after_sec=%s last_blocker_class=%s last_blocker=%S"
-      old.name auto_resume_after_sec blocker_class old.runtime.last_blocker);
+       auto_resume_after_sec=%s last_blocker.klass=%s last_blocker.detail=%S"
+      old.name auto_resume_after_sec blocker_class blocker_detail);
   if old.paused && not resume_paused_keeper then
     Log.Keeper.warn
       "update_keeper kept %s paused because an approval/reconcile gate is pending"
@@ -276,8 +273,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
       (if resume_paused_keeper then
          {
            old.runtime with
-           last_blocker = "";
-           last_blocker_class = None;
+           last_blocker = None;
          }
        else old.runtime);
     voice_enabled =

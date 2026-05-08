@@ -238,8 +238,7 @@ type agent_runtime_state = {
   last_social_transition_reason : string;
   last_active_desire : string;
   last_current_intention : string;
-  last_blocker : string;
-  last_blocker_class : blocker_class option;
+  last_blocker : blocker_info option;
   last_need : string;
 }
 

@@ -219,29 +219,26 @@ let destructive_tool_or_op ~tool_name ~input =
 let runtime_auto_approval_blocked = function
   | None -> false
   | Some (meta : Keeper_types.keeper_meta) ->
-      let continue_gate =
-        match meta.runtime.last_blocker_class with
-        | Some blocker_class ->
-            Keeper_types.blocker_class_continue_gate blocker_class
-        | None -> false
-      in
-      let blocker_class =
-        Option.map Keeper_types.blocker_class_to_string
-          meta.runtime.last_blocker_class
-      in
-      let blocker_summary = nonempty_trimmed meta.runtime.last_blocker in
-      continue_gate
-      ||
-      match blocker_class with
-      | Some "completion_contract_violation"
-      | Some "cascade_exhausted" ->
-          true
-      | _ ->
-          (match blocker_summary with
-          | Some summary ->
-              String_util.contains_substring_ci summary "manual block"
-              || String_util.contains_substring_ci summary "sandbox"
-          | None -> false)
+      (match meta.runtime.last_blocker with
+       | None -> false
+       | Some info ->
+         let continue_gate =
+           Keeper_types.blocker_class_continue_gate info.klass
+         in
+         let typed_blocked =
+           match info.klass with
+           | Keeper_types.Completion_contract_violation
+           | Keeper_types.Cascade_exhausted _ -> true
+           | _ -> false
+         in
+         let detail_blocked =
+           match nonempty_trimmed info.detail with
+           | Some summary ->
+               String_util.contains_substring_ci summary "manual block"
+               || String_util.contains_substring_ci summary "sandbox"
+           | None -> false
+         in
+         continue_gate || typed_blocked || detail_blocked)
 
 let auto_approval_forbidden ~tool_name ~input ~risk meta =
   risk = Critical

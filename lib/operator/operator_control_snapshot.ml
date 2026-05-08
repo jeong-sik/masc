@@ -952,10 +952,10 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                          string_option_to_json
                            (let value = String.trim meta.runtime.proactive_rt.last_preview in
                             if value = "" then None else Some value));
-                       ("last_blocker",
-                         string_option_to_json
-                           (let value = String.trim meta.runtime.last_blocker in
-                            if value = "" then None else Some value));
+                       ( "last_blocker"
+                       , match meta.runtime.last_blocker with
+                         | Some info -> Keeper_types.blocker_info_to_json info
+                         | None -> `Null );
                        ("updated_at", `String meta.updated_at);
                        ("created_at", `String meta.created_at);
                        ("recent_activity",

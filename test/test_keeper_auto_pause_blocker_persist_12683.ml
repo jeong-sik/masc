@@ -66,8 +66,9 @@ let test_meta_json_roundtrip_with_auto_pause_blocker () =
     paused = true;
     auto_resume_after_sec = Some 3600.0;
     runtime = { meta.runtime with
-      last_blocker = blocker_text;
-      last_blocker_class = Some KT.Oas_timeout_budget;
+      last_blocker =
+        Some (KT.blocker_info_of_class
+                ~detail:blocker_text KT.Oas_timeout_budget);
     };
   } in
   let json = KT.meta_to_json paused_meta in
@@ -78,10 +79,13 @@ let test_meta_json_roundtrip_with_auto_pause_blocker () =
   check bool "paused" true reparsed.paused;
   check (option (float 0.1)) "auto_resume_after_sec"
     (Some 3600.0) reparsed.auto_resume_after_sec;
-  check string "last_blocker preserved"
-    blocker_text reparsed.runtime.last_blocker;
-  check bool "last_blocker_class is Some"
-    true (Option.is_some reparsed.runtime.last_blocker_class)
+  (match reparsed.runtime.last_blocker with
+   | Some info ->
+     check string "last_blocker.detail preserved" blocker_text info.detail;
+     (match info.klass with
+      | KT.Oas_timeout_budget -> ()
+      | _ -> fail "blocker klass not Oas_timeout_budget after roundtrip")
+   | None -> fail "last_blocker should be Some after roundtrip")
 
 let test_meta_json_roundtrip_with_stale_storm_blocker () =
   let base_json = `Assoc [
@@ -101,8 +105,9 @@ let test_meta_json_roundtrip_with_stale_storm_blocker () =
     paused = true;
     auto_resume_after_sec = Some 7200.0;
     runtime = { meta.runtime with
-      last_blocker = blocker_text;
-      last_blocker_class = Some KT.Turn_timeout;
+      last_blocker =
+        Some (KT.blocker_info_of_class
+                ~detail:blocker_text KT.Turn_timeout);
     };
   } in
   let json = KT.meta_to_json paused_meta in
@@ -110,10 +115,13 @@ let test_meta_json_roundtrip_with_stale_storm_blocker () =
     | Ok m -> m
     | Error err -> fail ("roundtrip: " ^ err)
   in
-  check string "last_blocker"
-    blocker_text reparsed.runtime.last_blocker;
-  check bool "last_blocker_class is Some"
-    true (Option.is_some reparsed.runtime.last_blocker_class)
+  (match reparsed.runtime.last_blocker with
+   | Some info ->
+     check string "last_blocker.detail" blocker_text info.detail;
+     (match info.klass with
+      | KT.Turn_timeout -> ()
+      | _ -> fail "blocker klass not Turn_timeout after roundtrip")
+   | None -> fail "last_blocker should be Some after roundtrip")
 
 let () =
   run "keeper_auto_pause_blocker_persist_12683"

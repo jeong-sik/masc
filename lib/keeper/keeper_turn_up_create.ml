@@ -570,8 +570,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           last_social_transition_reason = "";
           last_active_desire = "";
           last_current_intention = "";
-          last_blocker = "";
-          last_blocker_class = None;
+          last_blocker = None;
           last_need = "";
         };
       keeper_id = None;

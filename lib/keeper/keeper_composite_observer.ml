@@ -387,7 +387,7 @@ let compute_invariants
 let bump_invariant_violations ~(keeper_name : string) (inv : invariants_check) =
   let bump key satisfied =
     if not satisfied then
-      Prometheus.inc_counter Prometheus.metric_keeper_invariant_violations
+      Prometheus.inc_counter Keeper_metrics.metric_keeper_invariant_violations
         ~labels:[
           ("keeper", keeper_name);
           ("invariant", invariant_key_to_string key);

@@ -383,12 +383,12 @@ let update_entry ~base_path name f =
     | None ->
         let count, breached = record_orphan_drop ~base_path name in
         Prometheus.inc_counter
-          Prometheus.metric_keeper_registry_update_dropped
+          Keeper_metrics.metric_keeper_registry_update_dropped
           ~labels:[("name", name)]
           ();
         if breached then begin
           Prometheus.inc_counter
-            Prometheus.metric_keeper_registry_orphan_threshold_breached
+            Keeper_metrics.metric_keeper_registry_orphan_threshold_breached
             ~labels:[("name", name)]
             ();
           Log.Keeper.error
@@ -420,7 +420,7 @@ let register_with_state ~base_path name meta
   (match StringMap.find_opt key (Atomic.get registry) with
    | Some entry when entry.phase = Running ->
        Prometheus.inc_counter
-        Prometheus.metric_keeper_lifecycle_dispatch_rejections
+        Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
         ~labels:[("keeper", name); ("event", "register_overwrite_running")]
         ();
       Log.Keeper.warn "registry: overwriting running keeper during register name=%s" name;
@@ -540,7 +540,7 @@ let () =
 
 let mark_dead ~base_path name ~at =
   Prometheus.inc_counter
-    Prometheus.metric_keeper_lifecycle_transitions
+    Keeper_metrics.metric_keeper_lifecycle_transitions
     ~labels:[("keeper", name); ("from_phase", "direct"); ("to_phase", "Dead")]
     ();
   Log.Keeper.error "registry: marking keeper dead name=%s at=%.0f" name at;
@@ -610,7 +610,7 @@ let broadcast_composite_changed ~name ~ts_unix =
          Sse.broadcast itself bypass that counter.  Logging here
          makes the exception visible at the call site. *)
       Prometheus.inc_counter
-        Prometheus.metric_keeper_lifecycle_dispatch_rejections
+        Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
         ~labels:[("keeper", name); ("event", "broadcast_composite_failed")]
         ();
       Log.Keeper.warn
@@ -619,7 +619,7 @@ let broadcast_composite_changed ~name ~ts_unix =
 
 let record_phase_broadcast_failure ~name exn =
   Prometheus.inc_counter
-    Prometheus.metric_keeper_sse_broadcast_failures
+    Keeper_metrics.metric_keeper_sse_broadcast_failures
     ~labels:[("keeper", name); ("site", "phase_changed")]
     ();
   Log.Keeper.warn
@@ -1147,7 +1147,7 @@ let flush_tool_usage ~base_path name =
        Fs_compat.mkdir_p (Filename.dirname path);
        Fs_compat.save_file path (Yojson.Safe.to_string json ^ "\n")
      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-       Prometheus.inc_counter Prometheus.metric_keeper_tool_usage_flush_failures
+       Prometheus.inc_counter Keeper_metrics.metric_keeper_tool_usage_flush_failures
          ~labels:[("keeper", name)]
          ();
        Log.Keeper.error "flush_tool_usage %s: %s" name (Printexc.to_string exn))
@@ -1193,7 +1193,7 @@ let restore_tool_usage ~base_path name =
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
            Prometheus.inc_counter
-          Prometheus.metric_keeper_checkpoint_failures
+          Keeper_metrics.metric_keeper_checkpoint_failures
           ~labels:[("keeper", name); ("site", "restore_tool_usage")]
           ();
        Log.Keeper.warn "restore_tool_usage %s: %s" name (Printexc.to_string exn))
@@ -1232,7 +1232,7 @@ let followup_event_of_entry_action
   : Keeper_state_machine.event option =
   match phase, action with
   | Keeper_state_machine.Overflowed, Start_compaction ->
-      Prometheus.inc_counter Prometheus.metric_keeper_fsm_edge_transitions
+      Prometheus.inc_counter Keeper_metrics.metric_keeper_fsm_edge_transitions
         ~labels:[("edge", "ksm_to_kmc_compact_trigger")] ();
       Some Keeper_state_machine.Auto_compact_triggered
   | _ ->
@@ -1240,7 +1240,7 @@ let followup_event_of_entry_action
 
 let record_followup_dispatch_rejection event =
   Prometheus.inc_counter
-    Prometheus.metric_keeper_lifecycle_dispatch_rejections
+    Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
     ~labels:[ ("event", Keeper_state_machine.event_to_string event) ]
     ()
 
@@ -1348,7 +1348,7 @@ let rec dispatch_event_with_audit
         | phase, Running when phase <> Running ->
           Atomic.incr running_count_atomic
         | _ -> ());
-       Prometheus.inc_counter Prometheus.metric_keeper_lifecycle_transitions
+       Prometheus.inc_counter Keeper_metrics.metric_keeper_lifecycle_transitions
          ~labels:[
            ("keeper", name);
            ("from_phase", Keeper_state_machine.phase_to_string tr.prev_phase);
@@ -1435,7 +1435,7 @@ let rec dispatch_event_with_audit
        Ok tr
      | Error e ->
        Prometheus.inc_counter
-         Prometheus.metric_keeper_lifecycle_dispatch_rejections
+         Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
          ~labels:[("event", Keeper_state_machine.event_to_string event)]
          ();
        Log.Keeper.warn "registry: dispatch_event rejected name=%s error=%s"
@@ -1455,7 +1455,7 @@ let dispatch_event_and_log ~base_path name event =
       | Keeper_state_machine.Invalid_transition _ -> "invalid_transition"
     in
     Prometheus.inc_counter
-      Prometheus.metric_keeper_dispatch_event_failures
+      Keeper_metrics.metric_keeper_dispatch_event_failures
       ~labels:[("keeper", name); ("reason", reason_label)]
       ();
     Error e
@@ -1476,7 +1476,7 @@ let dispatch_event_with_audit_and_log ~base_path ?snapshot ?events_fired ?select
       | Keeper_state_machine.Invalid_transition _ -> "invalid_transition"
     in
     Prometheus.inc_counter
-      Prometheus.metric_keeper_dispatch_event_failures
+      Keeper_metrics.metric_keeper_dispatch_event_failures
       ~labels:[("keeper", name); ("reason", reason_label)]
       ();
     Error e

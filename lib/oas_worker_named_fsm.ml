@@ -485,7 +485,7 @@ let emit_oas_run_timeout_metric ~cascade_name ~provider err =
   | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _) ->
       let cascade_name = provider_label (cascade_name_to_string cascade_name) in
       let provider = provider_label provider in
-      Prometheus.inc_counter Prometheus.metric_keeper_oas_run_timeout
+      Prometheus.inc_counter Keeper_metrics.metric_keeper_oas_run_timeout
         ~labels:
           [
             ("cascade", cascade_name);

@@ -40,7 +40,7 @@ let record_failure_callback_label =
 
 let record_tool_skipped_failure exn =
   Prometheus.inc_counter
-    Prometheus.metric_keeper_lifecycle_callback_failures
+    Keeper_metrics.metric_keeper_lifecycle_callback_failures
     ~labels:[ ("callback", record_failure_callback_label) ]
     ();
   Log.Dashboard.warn

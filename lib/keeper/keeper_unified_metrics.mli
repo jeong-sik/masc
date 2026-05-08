@@ -114,7 +114,7 @@ val record_context_max_observation :
     Prometheus cardinality stays at [keeper × 5].
 
     [record_turn_latency_bucket] increments
-    {!Prometheus.metric_keeper_turn_latency_bucket} on the matching
+    {!Keeper_metrics.metric_keeper_turn_latency_bucket} on the matching
     bucket and emits a [Log.Keeper.warn] line when [latency_ms]
     crosses {!long_turn_warn_threshold_ms}.  Threshold reads
     [MASC_KEEPER_LONG_TURN_WARN_MS] (ms, default

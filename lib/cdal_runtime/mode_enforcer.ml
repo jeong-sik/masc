@@ -87,7 +87,7 @@ type token_snapshot =
     site that needs to acknowledge it. The runtime registry below stays
     string-keyed because plugin tools register at runtime by name. *)
 (* RFC-OAS-012: emptied. Hardcoded consumer-side tool names (Claude Code /
-   Serena / claude-in-chrome MCP / Team_* ) were a layering violation —
+   Serena / claude-in-chrome MCP / Team_X ) were a layering violation —
    masc_mcp.cdal_runtime is a generic governance framework and should not
    pre-classify particular consumer tool catalogues. Consumers now register
    their tools via [register_tool_class] or supply [Tool.descriptor.mutation_class]

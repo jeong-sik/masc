@@ -136,9 +136,9 @@ let broadcast ?trace_context ?(msg_type = "broadcast")
             Mention_dedup.should_skip ~from_agent ~target ~content_hash
               ~now:(Time_compat.now ())
         | _ ->
-            (try (Atomic.get Coord_hooks.mention_dedup_decision_fn)
-                   ~outcome:(if bypass_dedup then "bypassed" else "no_target")
-             with _ -> ());
+            Safe_ops.protect ~default:() (fun () ->
+              (Atomic.get Coord_hooks.mention_dedup_decision_fn)
+                ~outcome:(if bypass_dedup then "bypassed" else "no_target"));
             false)
   in
   if dedup_skipped then begin
@@ -152,9 +152,9 @@ let broadcast ?trace_context ?(msg_type = "broadcast")
   end else
   let () =
     if bypass_dedup then
-      try (Atomic.get Coord_hooks.mention_dedup_decision_fn)
-            ~outcome:"bypassed"
-      with _ -> ()
+      Safe_ops.protect ~default:() (fun () ->
+        (Atomic.get Coord_hooks.mention_dedup_decision_fn)
+          ~outcome:"bypassed")
   in
   let seq = Coord_state.next_seq config in
   let mention = pre_extract_mention in

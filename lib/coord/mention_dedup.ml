@@ -14,8 +14,11 @@ let table : (string * string * string, float) Hashtbl.t = Hashtbl.create 256
 let mu : Mutex.t = Mutex.create ()
 
 let inc_outcome outcome =
-  try (Atomic.get Coord_hooks.mention_dedup_decision_fn) ~outcome
-  with _ -> ()
+  (* [Safe_ops.protect] re-raises [Eio.Cancel.Cancelled] so a cancel
+     racing with the surrounding fiber still propagates instead of
+     being silently swallowed by the previous [with _ -> ()] catch. *)
+  Safe_ops.protect ~default:() (fun () ->
+    (Atomic.get Coord_hooks.mention_dedup_decision_fn) ~outcome)
 
 let content_topic_hash content =
   let normalized = String.lowercase_ascii (String.trim content) in

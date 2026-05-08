@@ -1,8 +1,8 @@
 # RFC-0054 — `[@@deriving shell_ir]` PPX for Typed Capability Substrate Phase 2
 
-Status: Draft · PR-1 attempted 2026-05-09 · blocked on §5.3.1 empirical finding
+Status: Draft · PR-1 + PR-1b attempted 2026-05-09 · blocked (5/5 approaches fail) · candidate for CLOSED-WONTFIX
 Author: jeong-sik (with Claude Opus 4.7)
-Date: 2026-05-09 (drafted) · 2026-05-09 (PR-1 amendment with empirical evidence)
+Date: 2026-05-09 (drafted) · 2026-05-09 (§5.3.1 + §5.3.3 empirical evidence amendments)
 Supersedes: —
 Related: RFC-0005 §3.2 (Phase 2 PPX, listed but unsourced),
 progress_report.md 2026-05-09 §3.2
@@ -282,6 +282,48 @@ existing "not yet supported" error for non-phantom N-param GADT
 existentials. `shell_ir_typed.ml`'s hand-written walkers stay. PR-2
 through PR-5 of this RFC are blocked on this fallback being
 selected and implemented.
+
+#### 5.3.3 Source-template approaches also fail (PR-1b attempt, 2026-05-09)
+
+§5.3.2 listed source-template via `Ppxlib.Parse.*` as the cheap
+fallback path. PR-1b attempted three variants of this approach. All
+three produced an AST whose dumped source compiles cleanly under
+`ocaml` directly, yet fails the typechecker when consumed as the
+ppxlib-emitted AST. The empirical trail extends to **five total
+failed approaches**:
+
+| # | Approach | Result |
+|---|---|---|
+| 1 | `Ast_builder` + same names (`'a` & `a`) | reserved-name error at N≥2 |
+| 2 | `Ast_builder` + disjoint names (`'a` & `pa`) | GADT narrowing |
+| 3 | `Ast_builder` + arg-pattern annotation | GADT narrowing |
+| 4 | `Parse.expression` body, wrapped in `value_binding` | GADT narrowing |
+| 5 | `Parse.implementation` of full `let f : type a b. T = function …` | GADT narrowing |
+
+The decisive evidence persists: every attempted output, when
+extracted via `ocamlfind ocamlc -dsource -i` and fed back to `ocaml`
+as source, compiles and runs. Yet the original AST consistently
+fails. The bug is in some Parsetree node attribute that *every*
+ppxlib emission path attaches and the parser path omits — even
+though `Parse.implementation` IS the parser path. There must be a
+later transformation (possibly the ppxlib driver's `Astlib.Migrate`
+between OCaml versions) that reintroduces the divergence.
+
+Conclusion: this is not solvable by source synthesis alone. The
+remaining viable path is `ppxlib-internals` (RFC §5.3.2's second
+option) — direct investigation of which Parsetree attribute is
+diverging, requiring deep ppxlib + OCaml typechecker knowledge.
+
+PR-1b's deriver code is therefore **not shipped**. PR-2 through
+PR-5 of this RFC remain blocked. `shell_ir_typed.ml`'s
+hand-written walkers stay indefinitely until either a ppxlib
+expert resolves the divergence or OCaml's GADT inference is
+extended in a way that accepts the AST ppxlib produces.
+
+The pragmatic implication: **`[@@deriving shell_ir]` may not be
+achievable with the current ppxlib + OCaml 5.4 stack**. RFC-0054 may
+need to be marked CLOSED-WONTFIX rather than DEFERRED. That decision
+deserves an RFC-0054 amendment of its own.
 
 ### 5.4 Fail-closed preservation
 

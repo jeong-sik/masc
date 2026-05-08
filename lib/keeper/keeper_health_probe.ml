@@ -91,14 +91,34 @@ let get_cascade_status ~cascade_name =
 (* Cascade health check                                               *)
 (* ------------------------------------------------------------------ *)
 
+(** [is_terminal_unhealthy phase] returns true only for phases that
+    represent unrecoverable or immediately-actionable failure.
+    Dead / Zombie / Crashed are terminal unhealthy states.
+    All other phases (including Restarting — a keeper mid-recovery)
+    are treated as healthy for cascade ratio purposes.
+
+    Extracted as a named function so tests can exercise the
+    exhaustive match directly, and so the compiler catches omissions
+    when a new phase variant is added. *)
+let is_terminal_unhealthy (phase : Keeper_state_machine.phase) =
+  match phase with
+  | Dead | Zombie | Crashed -> true
+  | Offline | Running | Failing | Overflowed | Compacting
+  | HandingOff | Draining | Paused | Stopped | Restarting -> false
+
 (** Compute failure ratio per cascade from registry entries.
     Returns (cascade_name, is_healthy) where healthy means
-    failure_ratio < 0.10.  The threshold is hard-coded as a stub;
-    production tuning will replace it with a configurable value.
+    failure_ratio < 0.10.
 
-    Note: this still operates at cascade granularity for the background
-    probe. Per-item health is updated via [record_item_result] after
-    each turn. *)
+    A keeper is counted as "failed" only when its phase is a terminal
+    unhealthy state (Dead, Zombie, or Crashed).  Past restarts
+    (restart_count > 0) do NOT count — a restarted keeper that is now
+    Running is healthy.  Prior to this fix, restart_count was used as
+    the proxy, causing permanent cascade pollution after any single
+    restart since restart_count is monotonic and never resets.
+
+    Per-item health is updated via [record_item_result] after each
+    turn. *)
 let check_cascade_health ~base_path =
   let entries = Keeper_registry.all ~base_path () in
   let by_cascade = Hashtbl.create 8 in
@@ -110,7 +130,7 @@ let check_cascade_health ~base_path =
          | Some pair -> pair
          | None -> 0, 0
        in
-       let failed' = if entry.restart_count > 0 then failed + 1 else failed in
+       let failed' = if is_terminal_unhealthy entry.phase then failed + 1 else failed in
        Hashtbl.replace by_cascade cascade (total + 1, failed'))
     entries;
   Hashtbl.fold

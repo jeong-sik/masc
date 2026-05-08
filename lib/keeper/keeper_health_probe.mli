@@ -40,12 +40,24 @@ val is_healthy : keeper_name:string -> bool
     per-cascade key. Kept for the background probe fiber. *)
 val set_health : keeper_name:string -> health_status -> unit
 
+(** {1 Phase-based health predicate} *)
+
+(** [is_terminal_unhealthy phase] returns true only for terminal
+    unhealthy phases (Dead, Zombie, Crashed).  All other phases
+    including Restarting are treated as healthy for cascade ratio
+    purposes.  Exhaustive match ensures compiler catches omissions
+    when new phase variants are added. *)
+val is_terminal_unhealthy : Keeper_state_machine.phase -> bool
+
 (** {1 Cascade health scan} *)
 
 (** [check_cascade_health ~base_path] scans the registry and computes
     the failure ratio for each active cascade.  Returns a list of
-    (cascade_name, is_healthy) pairs.  This function performs I/O and
-    should be called from the probe fiber, not the supervisor sweep. *)
+    (cascade_name, is_healthy) pairs.  A keeper is counted as failed
+    only when its phase is Dead, Zombie, or Crashed — not based on
+    restart_count, which is monotonic and would cause permanent
+    cascade pollution.  This function performs I/O and should be
+    called from the probe fiber, not the supervisor sweep. *)
 val check_cascade_health : base_path:string -> (string * bool) list
 
 (** [get_cascade_status ~cascade_name] returns the cached cascade-level

@@ -1,6 +1,8 @@
 (** See {!Cascade_routes} interface. *)
 
-type logical_use =
+open Cascade_ref
+
+type logical_use = Cascade_ref.logical_use =
   | Keeper_turn
   | Phase_recovery
   | Phase_buffer

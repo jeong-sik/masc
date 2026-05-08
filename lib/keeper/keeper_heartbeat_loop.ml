@@ -885,6 +885,7 @@ let run_keepalive_unified_turn
               (match Keeper_cascade_selector.select_item_for_turn
                  ~keeper_name:meta_after_triage.name
                  ~cascade_profile:profile
+                 ~cascade_ref:meta_after_triage.cascade_ref
                  ~health_cache:Keeper_health_probe.Healthy
                  ~last_used_item:None with
                | Ok pair -> Some pair

@@ -260,7 +260,11 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
          cascade resolution uses the item's group. *)
       let meta =
         match selected_item with
-        | Some (group, _item) -> set_cascade_name group meta
+        | Some (group, item) ->
+            let cascade_ref =
+              Some Cascade_ref.{ group; item = Some item.id }
+            in
+            { meta with cascade_ref }
         | None -> meta
       in
       let effective_cascade_name =

@@ -2072,7 +2072,7 @@ let leaking_test_transport_factory ~sw : Llm_provider.Llm_transport.t =
     complete_sync =
       (fun _req ->
         leak_one_pipe ();
-        { Llm_provider.Llm_transport.response; latency_ms = 0 });
+        { Llm_provider.Llm_transport.response; latency_ms = None });
     complete_stream =
       (fun ~on_event:_ _req ->
         leak_one_pipe ();
@@ -3819,7 +3819,7 @@ let test_kimi_cli_error_completion_uses_measured_latency () =
     transport.complete_sync req
   in
   Alcotest.(check bool) "failed subprocess latency is measured" true
-    (latency_ms > 0);
+    (match latency_ms with Some n -> n > 0 | None -> false);
   match response with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "expected fake kimi subprocess to fail"

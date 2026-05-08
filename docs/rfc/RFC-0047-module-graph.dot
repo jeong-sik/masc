@@ -6,12 +6,9 @@ digraph rfc_0047 {
   edge [fontname="Helvetica", fontsize=10];
 
   // OAS adapter family
-  "oas_bus_instrument" [style=filled, fillcolor="#fce4ec"];
   "oas_event_bridge" [style=filled, fillcolor="#fce4ec"];
   "oas_events" [style=filled, fillcolor="#fce4ec"];
-  "oas_log_bridge" [style=filled, fillcolor="#fce4ec"];
   "oas_model_resolve" [style=filled, fillcolor="#fce4ec"];
-  "oas_response" [style=filled, fillcolor="#fce4ec"];
   "oas_worker_cascade" [style=filled, fillcolor="#fce4ec"];
   "oas_worker_exec_agent" [style=filled, fillcolor="#fce4ec"];
   "oas_worker_exec_checkpoint" [style=filled, fillcolor="#fce4ec"];

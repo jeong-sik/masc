@@ -11,7 +11,7 @@ let publish_lifecycle _bus ~name ~event ~detail ?error ?session_id ?status () =
         | Some value when String.trim value <> "" -> [ (key, `String value) ]
         | _ -> []
       in
-      Oas_bus_instrument.publish mb
+      Agent_sdk_metrics_bridge.publish mb
         (Agent_sdk.Event_bus.mk_event
            (Custom
               ( Printf.sprintf "masc.oas_worker.%s" event,

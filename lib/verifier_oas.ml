@@ -132,7 +132,7 @@ let verify (req : verification_request) : (verdict, string) result =
          Ok v
        | None ->
          (* LLM responded with text instead of tool call — lenient fallback *)
-         let text = Oas_response.text_of_response result.response in
+         let text = Agent_sdk_response.text_of_response result.response in
          Log.Verifier.info "verdict via text fallback (model did not call report_verdict)";
          (match parse_verdict text with
           | Ok verdict -> Ok verdict

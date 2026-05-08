@@ -1,4 +1,4 @@
-(** Tests for [Oas_bus_instrument].
+(** Tests for [Agent_sdk_metrics_bridge].
 
     Covers:
     - [subscribe] registers purpose, [unsubscribe] removes it.
@@ -13,7 +13,7 @@
 
 open Alcotest
 
-module I = Masc_mcp.Oas_bus_instrument
+module I = Masc_mcp.Agent_sdk_metrics_bridge
 
 let mk_bus () = Agent_sdk.Event_bus.create ()
 

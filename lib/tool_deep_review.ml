@@ -138,7 +138,7 @@ let handle_deep_review (config : Coord.config) args : bool * string =
           )
         with
         | Ok result ->
-            let text = Oas_response.text_of_response result.response in
+            let text = Agent_sdk_response.text_of_response result.response in
             let verdict =
               if String.equal (String.trim (String.uppercase_ascii text)) "NO_ISSUES_FOUND"
               then "no_issues"

@@ -1163,13 +1163,13 @@ let start_impl ~interval_s ~sw ~clock ~(config : Coord.config) ~bus =
          ())
   in
   let sub =
-    Oas_bus_instrument.subscribe
+    Agent_sdk_metrics_bridge.subscribe
       ~purpose:"sse_bridge"
       ~filter:Agent_sdk.Event_bus.accept_all
       bus
   in
   Eio.Switch.on_release sw (fun () ->
-    Oas_bus_instrument.unsubscribe bus sub);
+    Agent_sdk_metrics_bridge.unsubscribe bus sub);
   let pending = ref [] in
   update_relay_queue_depth !pending;
   Eio.Fiber.fork ~sw (fun () ->
@@ -1177,7 +1177,7 @@ let start_impl ~interval_s ~sw ~clock ~(config : Coord.config) ~bus =
       (try
          pending := process_pending ~store_ref:store [] !pending;
          if should_drain_subscription !pending then begin
-           let events = Oas_bus_instrument.drain sub in
+           let events = Agent_sdk_metrics_bridge.drain sub in
            pending := prepare_pending_events events;
            pending := process_pending ~store_ref:store [] !pending
          end;

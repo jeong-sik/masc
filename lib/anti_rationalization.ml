@@ -588,7 +588,7 @@ let review
            (v, Structured_tool, None)
          | None ->
            (* LLM responded with text — lenient fallback *)
-           let text = Oas_response.text_of_response result.response in
+           let text = Agent_sdk_response.text_of_response result.response in
            Log.Task.info "[anti-rationalization] verdict via text fallback";
            (match parse_verdict text with
             | Ok v -> (v, Llm_text_fallback, None)

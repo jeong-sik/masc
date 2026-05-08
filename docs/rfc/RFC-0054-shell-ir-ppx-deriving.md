@@ -1,8 +1,8 @@
 # RFC-0054 — `[@@deriving shell_ir]` PPX for Typed Capability Substrate Phase 2
 
-Status: Draft · PR-1 + PR-1b attempted 2026-05-09 · blocked (5/5 approaches fail) · candidate for CLOSED-WONTFIX
+Status: Draft · PPX track CLOSED 2026-05-09 (5/5 approaches fail) · codegen track ACTIVE (POC PASSED, see §6.1)
 Author: jeong-sik (with Claude Opus 4.7)
-Date: 2026-05-09 (drafted) · 2026-05-09 (§5.3.1 + §5.3.3 empirical evidence amendments)
+Date: 2026-05-09 (drafted) · 2026-05-09 (§5.3.1 + §5.3.3 + §6.1 amendments)
 Supersedes: —
 Related: RFC-0005 §3.2 (Phase 2 PPX, listed but unsourced),
 progress_report.md 2026-05-09 §3.2
@@ -370,6 +370,132 @@ RFC-0054 closes when **all five** hold:
 If any future PR re-introduces hand-written walker code adjacent to
 `[@@deriving shell_ir]`, that PR is an RFC-0054 amendment. Same
 discipline as RFC-0050 §6.
+
+## 6.1 Codegen track (replaces PPX track)
+
+> Added 2026-05-09 after PR-1 (#14305) and PR-1b (#14313) confirmed
+> 5/5 PPX approaches fail under OCaml 5.4 + ppxlib 0.36. The codegen
+> track replaces the deriver design entirely.
+
+### 6.1.1 Paradigm shift
+
+PPX is *runtime AST manipulation* — ppxlib constructs Parsetree nodes
+during the build, OCaml typechecker consumes them. This pipeline
+contains a metadata divergence (RFC-0054 §5.3.1) that breaks GADT
+inference for non-phantom N-parameter existentials.
+
+The codegen track sidesteps the entire pipeline:
+
+1. A small standalone OCaml program (`bin/poc_shell_ir_gen.ml` for
+   the POC; `bin/gen_shell_ir_walkers.ml` in the eventual
+   production form) holds a per-constructor spec as a plain data
+   structure.
+2. The program emits **OCaml source text** to stdout.
+3. A `dune (rule ...)` runs the program at build time and writes the
+   output as a regular `.ml` file.
+4. The standard parser handles the generated `.ml` exactly like any
+   hand-written file. No ppxlib in the chain. No AST-vs-source
+   divergence is even possible.
+
+### 6.1.2 POC evidence (this PR)
+
+`bin/poc_shell_ir_gen.ml` + `test/poc_shell_ir/` constitute a full
+working POC on the **same 4-parameter GADT shape** that broke under
+PPX in PR-1 / PR-1b:
+
+```ocaml
+type (_, _, _, _) command =
+  | C_ls : { path : string option }
+      -> (unit, string, [ `Safe ], [ `Host ]) command
+  | C_git_status : { short : bool }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | C_rm : { path : string }
+      -> (unit, unit, [ `Privileged ], [ `Host ]) command
+```
+
+Generated walkers (verified output):
+
+```ocaml
+let risk
+  : type i o r s. (i, o, r, s) Synthetic_command.command
+    -> [ `Safe | `Audited | `Privileged ]
+  = function
+  | Synthetic_command.C_ls _ -> `Safe
+  | Synthetic_command.C_git_status _ -> `Audited
+  | Synthetic_command.C_rm _ -> `Privileged
+```
+
+Test suite at `test/poc_shell_ir/test_synthetic_walkers.ml` asserts
+per-constructor `risk` and `sandbox` correctness, plus the constructor-
+name list. Result:
+
+```
+$ dune runtest test/poc_shell_ir/
+RFC-0054 POC: codegen walkers OK
+exit 0
+```
+
+**Same shape that produced 5 GADT-narrowing errors under ppxlib now
+typechecks and runs cleanly.** The codegen approach is empirically
+proven on the exact failure case.
+
+### 6.1.3 Production trajectory (revised PR sequence)
+
+The original §4.5 PR sequence is replaced. New sequence:
+
+```
+PR-2 (this PR is POC, not yet PR-2)
+       Promote bin/poc_shell_ir_gen → bin/gen_shell_ir_walkers
+       (production name) and ingest the real shell_ir_typed.ml
+       constructor list. Drop the POC test directory; keep the
+       generator and add a real (rule ...) under lib/exec/dune.
+
+PR-3   Generator emits `to_simple` (typed → untyped). Each
+       constructor's spec carries its argv assembly recipe (e.g.
+       `Ls { path; flags } -> { bin = "ls"; args = … }`). Golden-file
+       test asserts byte-for-byte equivalence vs the existing hand-
+       written `to_simple` in shell_ir_typed.ml.
+
+PR-4   Generator emits `of_simple` (reverse direction, hardest).
+       Generic catch-all preserved by construction — the spec's
+       fall-through case is `W (Generic simple)`. Round-trip
+       property test: forall c, of_simple (to_simple c) ≡ W c.
+
+PR-5   shell_ir_typed.ml's hand-written walkers deleted. Type decl
+       + dune (rule ...) is all that remains. Bypass switch (env
+       var that selects hand-written vs generated) removed once
+       golden tests stay green for one release.
+```
+
+Each PR remains:
+- Mechanical-only diff at the consumer site (no semantic change).
+- Generator output diffable; spec changes only when constructors do.
+- Fail-closed preservation (§5.4) verified per PR via the regression
+  test `risk (W (Generic _)) = `Privileged`.
+
+### 6.1.4 Trade-offs vs PPX
+
+| Axis | PPX (`[@@deriving]`) | Codegen (`(rule ...)`) |
+|---|---|---|
+| Locality of declaration | Annotation next to type | Spec in a separate generator file |
+| Build complexity | One `(preprocess (pps …))` line | One `(rule ...)` per consumer |
+| Debuggability of output | Can't easily inspect generated AST | `cat <generated>.ml` |
+| Empirical reliability | 5/5 fail under OCaml 5.4 / ppxlib 0.36 | POC PASSED |
+| Locking to OCaml version | Sensitive to ppxlib internals | Plain OCaml source — only the parser version matters |
+| User ergonomics | "Add an annotation" | "Run the generator + register in dune" |
+
+The first two rows favour PPX in principle. The remaining four favour
+codegen — especially "empirical reliability" which is the bar the PPX
+track failed.
+
+### 6.1.5 Why not retry PPX later
+
+Memory `feedback_workaround_rejection_bar` discipline: shipping
+parallel PPX + codegen tracks would accumulate complexity for no
+reader benefit. Once codegen lands, RFC-0054 marks the PPX track
+**CLOSED-WONTFIX** definitively. A future RFC may revisit if OCaml
+or ppxlib materially changes the AST-vs-source semantics, but that
+is its own RFC.
 
 ## 7. Open questions
 

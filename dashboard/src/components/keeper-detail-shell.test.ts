@@ -16,13 +16,12 @@ describe('KeeperDetailSection', () => {
     container.remove()
   })
 
-  it('renders eyebrow, title, description, and children', () => {
+  it('renders eyebrow, title, and children', () => {
     render(
       html`<${KeeperDetailSection}
         id="keeper-summary"
         eyebrow="OVERVIEW"
         title="Status Overview"
-        description="Summary of keeper state."
       >
         <div data-testid="child">Child</div>
       <//>`,
@@ -31,7 +30,6 @@ describe('KeeperDetailSection', () => {
 
     expect(container.textContent).toContain('OVERVIEW')
     expect(container.textContent).toContain('Status Overview')
-    expect(container.textContent).toContain('Summary of keeper state.')
     expect(container.querySelector('[data-testid="child"]')).not.toBeNull()
   })
 
@@ -41,7 +39,6 @@ describe('KeeperDetailSection', () => {
         id="keeper-debug"
         eyebrow="DEBUG"
         title="Debug"
-        description="Debug info."
       >
         <span>content</span>
       <//>`,
@@ -59,7 +56,6 @@ describe('KeeperDetailSection', () => {
         id="keeper-config"
         eyebrow="CONFIG"
         title="Configuration"
-        description="Config details."
       >
         <div>inner</div>
       <//>`,

@@ -1012,7 +1012,6 @@ export function KeeperDetailPage() {
             id="keeper-summary"
             eyebrow="상태 개요"
             title="운영 상태 개요"
-            description="상태 기계, 메모리 티어, KPI, 추론/컨텍스트 계측을 먼저 훑어 keeper의 현재 건강도를 빠르게 판단합니다."
           >
         <${PipelineStageBar} stage=${keeper.pipeline_stage} />
         <${CollapsibleSection} title="Phase State Machine">
@@ -1097,7 +1096,6 @@ export function KeeperDetailPage() {
             id="keeper-comms"
             eyebrow="대화 & 세션"
             title="대화 / 활동 흐름"
-            description="운영자가 keeper와 바로 대화하고, 같은 화면에서 세션 이벤트를 대조할 수 있도록 묶었습니다."
           >
             <${KeeperCommsPanel} keeper=${keeper} />
             <${PanelCard} title="세션 활동 로그">
@@ -1110,7 +1108,6 @@ export function KeeperDetailPage() {
             id="keeper-runtime"
             eyebrow="런타임 진단"
             title="진단 / 운영"
-            description="eval, supervisor, 복구 액션, tool audit, 품질 시그널을 한 군데로 모아 원인 파악과 개입을 빠르게 합니다."
           >
             <${KeeperToolTelemetry} keeperName=${keeper.name} />
             <${KeeperEvalQualityPanel} keeperName=${keeper.name} />
@@ -1143,7 +1140,6 @@ export function KeeperDetailPage() {
             id="keeper-identity"
             eyebrow="신원 & 계보"
             title="정체성 / 세대"
-            description="프로필, 관계, 장비, generation lineage, checkpoints를 하나의 맥락으로 보고 continuity를 해석합니다."
           >
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <${PanelCard} title="프로필">
@@ -1209,7 +1205,6 @@ export function KeeperDetailPage() {
             id="keeper-config"
             eyebrow="설정"
             title="설정 / 작업 방식"
-            description="분산되어 있던 허용 도구 목록, 작업 budget, playground repo, keeper config를 한 섹션으로 모았습니다."
           >
             <${TurnBudgetSection} keeper=${keeper} />
             <${CollapsibleSection} title="허용 도구">
@@ -1229,7 +1224,6 @@ export function KeeperDetailPage() {
             id="keeper-debug"
             eyebrow="디버그"
             title="디버그"
-            description="운영 중에는 덜 자주 보지만, 문제를 깊게 파고들 때 필요한 raw surface를 마지막에 모았습니다."
           >
             <details class="mt-0">
           <summary class="cursor-pointer py-3 px-4 text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] list-none select-none rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] hover:bg-[var(--color-bg-hover)] transition-colors flex items-center gap-2">

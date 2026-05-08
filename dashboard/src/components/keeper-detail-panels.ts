@@ -319,29 +319,17 @@ function OutcomesLedger({ keeper, outcomes }: {
 }
 
 // ── KPI Grid ─────────────────────────────────────────────
-//
 // 4-section layout mirrors the keeper's 3-layer state model
-// (Events → Phase+Conditions → Counters) projected onto the four
-// questions an operator asks when opening the modal:
-//   1) "얼마나 오래 살았나?"       → identity      (세대/턴/인계)
-//   2) "지금 위험한가?"             → memory       (컨텍스트/토큰/압축 + 운영 건강도)
-//   3) "스스로 돌고 있나?"          → autonomy     (자율 턴/행동 비율)
-//   4) "무엇을 해냈고 실패했나?"   → outcomes     (backed by KeeperOutcomes)
-//
-// Each section is a rounded-[var(--r-1)] card with a ko-language question-header.
-// PR 5 will expand the outcomes section with the full Success/Failure
-// Ledger, Validator pass-rate grouping, and Resilience Profile.
+// (Events → Phase+Conditions → Counters): identity / memory / autonomy / outcomes.
 
-function KpiSection({ title, question, children }: {
+function KpiSection({ title, children }: {
   title: string
-  question: string
   children: unknown
 }) {
   return html`
     <section class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3" aria-label=${title}>
-      <header class="mb-2 flex items-baseline justify-between gap-2">
+      <header class="mb-2">
         <h3 class="text-2xs font-semibold tracking-[var(--track-caps)] uppercase text-[var(--color-fg-muted)]">${title}</h3>
-        <span class="text-3xs text-[var(--color-fg-disabled)] truncate">${question}</span>
       </header>
       ${children}
     </section>
@@ -374,7 +362,7 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
 
   return html`
     <div class="flex flex-col gap-3 mb-5">
-      <${KpiSection} title="정체성" question="얼마나 오래 살았나?">
+      <${KpiSection} title="정체성">
         <div class="grid grid-cols-3 gap-2">
           <${StatTile}
             label="세대"
@@ -391,7 +379,7 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
         </div>
       <//>
 
-      <${KpiSection} title="메모리 압력" question="지금 위험한가?">
+      <${KpiSection} title="메모리 압력">
         <div class="flex flex-col gap-3">
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <${StatTile}
@@ -442,7 +430,7 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
         </div>
       <//>
 
-      <${KpiSection} title="자율성 패턴" question="스스로 돌고 있나?">
+      <${KpiSection} title="자율성 패턴">
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
           <${StatTile}
             label="자율 턴"
@@ -463,7 +451,7 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
         </div>
       <//>
 
-      <${KpiSection} title="결과" question="무엇을 해냈고 실패했고 검증을 통과했나?">
+      <${KpiSection} title="결과">
         ${outcomes ? html`<${OutcomesLedger} keeper=${keeper} outcomes=${outcomes} />` : html`
           <div class="text-2xs text-[var(--color-fg-disabled)] leading-snug">
             outcomes 집계를 불러오는 중이거나, 이 키퍼는 아직 관찰된 전이가 없습니다.

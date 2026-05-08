@@ -250,25 +250,32 @@ let of_simple (s : Shell_ir.simple) : wrapped =
     | None -> generic ()
     | Some lit_argv ->
       let parsed : wrapped option =
-        match Bin.kind s.Shell_ir.bin with
-        | `Safe_bin ->
-          (match Bin.to_string s.Shell_ir.bin with
-           | "ls" -> parse_ls lit_argv
-           | "cat" -> parse_cat lit_argv
-           | "rg" -> parse_rg lit_argv
-           | _ -> None)
-        | `Git ->
+        match Bin.known s.Shell_ir.bin with
+        | Some Bin.Ls -> parse_ls lit_argv
+        | Some Bin.Cat -> parse_cat lit_argv
+        | Some Bin.Rg -> parse_rg lit_argv
+        | Some Bin.Git ->
           (match lit_argv with
            | "status" :: rest -> parse_git_status rest
            | "clone" :: rest -> parse_git_clone rest
            | _ -> None)
-        | `Curl -> parse_curl lit_argv
-        | `Privileged_bin ->
-          (match Bin.to_string s.Shell_ir.bin with
-           | "rm" -> parse_rm lit_argv
-           | "sudo" -> parse_sudo lit_argv
-           | _ -> None)
-        | `Docker | `Ssh | `Other_audited -> None
+        | Some Bin.Curl -> parse_curl lit_argv
+        | Some Bin.Rm -> parse_rm lit_argv
+        | Some Bin.Sudo -> parse_sudo lit_argv
+        | Some (Bin.Pwd | Bin.Echo | Bin.Head | Bin.Tail | Bin.Grep
+              | Bin.Find | Bin.Which | Bin.Test | Bin.Basename | Bin.Dirname
+              | Bin.Stat | Bin.Du | Bin.Df | Bin.Sort | Bin.Uniq | Bin.Wc
+              | Bin.Cut | Bin.Tr | Bin.Date | Bin.Env | Bin.Printenv
+              | Bin.Hostname | Bin.Whoami | Bin.Uname | Bin.Ps | Bin.Tty
+              | Bin.Docker | Bin.Wget | Bin.Ssh | Bin.Scp | Bin.Tar
+              | Bin.Rsync | Bin.Make | Bin.Cmake | Bin.Npm | Bin.Yarn
+              | Bin.Pnpm | Bin.Pip | Bin.Opam | Bin.Cargo | Bin.Gh
+              | Bin.Glab | Bin.Terminal_notifier | Bin.Osascript | Bin.Play
+              | Bin.Rec | Bin.Ffplay | Bin.Mpg123 | Bin.Open | Bin.Claude
+              | Bin.Gemini | Bin.Codex | Bin.Su | Bin.Chmod | Bin.Chown
+              | Bin.Dd | Bin.Mkfs) ->
+          None
+        | None -> None
       in
       match parsed with
       | Some w -> w
@@ -289,14 +296,14 @@ let to_simple : type i o r s. (i, o, r, s) command -> Shell_ir.simple =
         | `Human -> "-h") flags
     in
     let args = match path with None -> flag_args | Some p -> flag_args @ [p] in
-    { Shell_ir.bin = Result.get_ok (Bin.of_string "ls");
+    { Shell_ir.bin = Bin.of_known Bin.Ls;
       args = List.map arg_of_string args;
       env = [];
       cwd = None;
       redirects = [];
       sandbox = Sandbox_target.host () }
   | Cat { path } ->
-    { Shell_ir.bin = Result.get_ok (Bin.of_string "cat");
+    { Shell_ir.bin = Bin.of_known Bin.Cat;
       args = [arg_of_string path];
       env = []; cwd = None; redirects = [];
       sandbox = Sandbox_target.host () }
@@ -306,13 +313,13 @@ let to_simple : type i o r s. (i, o, r, s) command -> Shell_ir.simple =
       flag_args @ [pattern]
       @ (match path with None -> [] | Some p -> [p])
     in
-    { Shell_ir.bin = Result.get_ok (Bin.of_string "rg");
+    { Shell_ir.bin = Bin.of_known Bin.Rg;
       args = List.map arg_of_string args;
       env = []; cwd = None; redirects = [];
       sandbox = Sandbox_target.host () }
   | Git_status { short } ->
     let args = if short then ["-s"] else [] in
-    { Shell_ir.bin = Result.get_ok (Bin.of_string "git");
+    { Shell_ir.bin = Bin.of_known Bin.Git;
       args = List.map arg_of_string ("status" :: args);
       env = []; cwd = None; redirects = [];
       sandbox = Sandbox_target.host () }
@@ -322,7 +329,7 @@ let to_simple : type i o r s. (i, o, r, s) command -> Shell_ir.simple =
       @ (match branch with None -> [] | Some b -> ["-b"; b])
       @ [repo]
     in
-    { Shell_ir.bin = Result.get_ok (Bin.of_string "git");
+    { Shell_ir.bin = Bin.of_known Bin.Git;
       args = List.map arg_of_string ("clone" :: args);
       env = []; cwd = None; redirects = [];
       sandbox = Sandbox_target.host () }
@@ -346,7 +353,7 @@ let to_simple : type i o r s. (i, o, r, s) command -> Shell_ir.simple =
       | Some d -> ["-d"; d]
     in
     let args = method_args @ header_args @ body_args @ [url] in
-    { Shell_ir.bin = Result.get_ok (Bin.of_string "curl");
+    { Shell_ir.bin = Bin.of_known Bin.Curl;
       args = List.map arg_of_string args;
       env = []; cwd = None; redirects = [];
       sandbox = Sandbox_target.host () }
@@ -355,12 +362,12 @@ let to_simple : type i o r s. (i, o, r, s) command -> Shell_ir.simple =
       (if recursive then ["-r"] else [])
       @ (if force then ["-f"] else [])
     in
-    { Shell_ir.bin = Result.get_ok (Bin.of_string "rm");
+    { Shell_ir.bin = Bin.of_known Bin.Rm;
       args = List.map arg_of_string (flag_args @ paths);
       env = []; cwd = None; redirects = [];
       sandbox = Sandbox_target.host () }
   | Sudo { target_argv } ->
-    { Shell_ir.bin = Result.get_ok (Bin.of_string "sudo");
+    { Shell_ir.bin = Bin.of_known Bin.Sudo;
       args = List.map arg_of_string target_argv;
       env = []; cwd = None; redirects = [];
       sandbox = Sandbox_target.host () }

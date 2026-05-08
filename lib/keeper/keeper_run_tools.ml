@@ -1436,7 +1436,7 @@ let prepare_agent_setup
                   Keeper_registry.Decision_tool_policy_selected;
                 Keeper_registry.set_turn_cascade_state
                   ~base_path:config.base_path meta.name
-                  Keeper_registry.Cascade_selecting;
+                  (Keeper_registry.Packed Keeper_registry.Cascade_selecting : Keeper_registry.packed_cascade_state);
                 (* Spec atomic group: SelectToolPolicy(idle->selecting)
                    is immediately followed by CascadeTrying(selecting->
                    trying).  Both transitions are materialised inside
@@ -1455,7 +1455,7 @@ let prepare_agent_setup
                    [validate_cascade_transition]. *)
                 Keeper_registry.set_turn_cascade_state
                   ~base_path:config.base_path meta.name
-                  Keeper_registry.Cascade_trying;
+                  (Keeper_registry.Packed Keeper_registry.Cascade_trying : Keeper_registry.packed_cascade_state);
                 let disclosure_json =
                   `Assoc
                     [ "ts_unix", `Float now

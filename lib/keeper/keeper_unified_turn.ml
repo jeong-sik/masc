@@ -1059,7 +1059,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               if EC.is_cascade_exhausted_error err then begin
                 Keeper_registry.set_turn_cascade_state
                   ~base_path:config.base_path meta.name
-                  Keeper_registry.Cascade_exhausted;
+                  (Keeper_registry.Packed Cascade_exhausted : Keeper_registry.packed_cascade_state);
                 Prometheus.inc_counter
                   Keeper_metrics.metric_keeper_fsm_edge_transitions
                   ~labels:[("edge", "kcl_to_ktc_exhaustion")] ();
@@ -1084,7 +1084,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               else begin
                 Keeper_registry.set_turn_phase
                   ~base_path:config.base_path meta.name
-                  Keeper_registry.Turn_finalizing;
+                  Keeper_registry.(Packed Turn_finalizing);
                 (* Cycle 52 narrative companion: non-exhaustion terminal
                    errors (transient).  Logged so dashboard readers can
                    distinguish exhaustion from transient failure without
@@ -1195,7 +1195,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   selected_model;
                 Keeper_registry.set_turn_cascade_state
                   ~base_path:config.base_path meta.name
-                  Keeper_registry.Cascade_done;
+                  (Keeper_registry.Packed Cascade_done : Keeper_registry.packed_cascade_state);
                 Ok result
             | Error err ->
                 let err =
@@ -1568,7 +1568,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                     | Some retry_plan ->
                         Keeper_registry.set_turn_phase
                           ~base_path:config.base_path meta.name
-                          Keeper_registry.Turn_compacting;
+                          Keeper_registry.(Packed Turn_compacting);
                         current_turn_overflow_blocker :=
                           Some (Agent_sdk.Error.to_string err);
                         dispatch_keeper_phase_event
@@ -1621,7 +1621,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                           ~reason:"auto_compact_recovery_unavailable";
                         Keeper_registry.set_turn_phase
                           ~base_path:config.base_path meta.name
-                          Keeper_registry.Turn_finalizing;
+                          Keeper_registry.(Packed Turn_finalizing);
                         Error err
                   else begin
                     mark_paused_after_overflow
@@ -1629,7 +1629,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                       ~reason:"overflow_persisted_after_auto_compact_retry";
                       Keeper_registry.set_turn_phase
                         ~base_path:config.base_path meta.name
-                        Keeper_registry.Turn_finalizing;
+                        Keeper_registry.(Packed Turn_finalizing);
                     Error err
                   end
                 | No_degraded_retry ->
@@ -1684,7 +1684,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 ();
               Keeper_registry.set_turn_phase
                 ~base_path:config.base_path meta.name
-                Keeper_registry.Turn_finalizing;
+                Keeper_registry.(Packed Turn_finalizing);
               Error (Agent_sdk.Error.Api (Timeout { message = msg }))
             end else if committed_tools <> [] then begin
               let timeout_err =
@@ -1722,12 +1722,12 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 ();
               Keeper_registry.set_turn_phase
                 ~base_path:config.base_path meta.name
-                Keeper_registry.Turn_finalizing;
+                Keeper_registry.(Packed Turn_finalizing);
               Error reclassified
             end else begin
               Keeper_registry.set_turn_phase
                 ~base_path:config.base_path meta.name
-                Keeper_registry.Turn_finalizing;
+                Keeper_registry.(Packed Turn_finalizing);
               Error
                 (Oas_worker_named.sdk_error_of_masc_internal_error
                    (Oas_worker_named.Turn_timeout

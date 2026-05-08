@@ -39,37 +39,38 @@ import { StatTile } from './common/stat-tile'
 import { FilterChips } from './common/filter-chips'
 import { formatCost, formatPct1 } from '../lib/format-number'
 import { replaceRoute, route } from '../router'
+import {
+  type ViewMode,
+  type CostFocus,
+  type AuditFocus,
+  type CostView,
+  isCostView,
+  isCostFocus,
+  viewModeForCostFocus,
+  isAuditFocus,
+  auditRouteParams,
+} from './cost/cost-types'
+import { formatTokens, severityClass } from './cost/cost-formatters'
+import {
+  severityBuckets,
+  summarizeAuditActors,
+  summarizeAuditKinds,
+} from './cost/audit-summarizer'
 
-type ViewMode = 'model' | 'keeper'
-export type CostFocus = 'agent' | 'matrix' | 'latency'
-export type AuditFocus = 'actor' | 'summary'
-
-export type CostView = 'cost' | 'heuristics' | 'stress' | 'audit' | 'decisions'
-
-const COST_VIEWS: CostView[] = ['cost', 'heuristics', 'stress', 'audit', 'decisions']
-const COST_FOCUSES: CostFocus[] = ['agent', 'matrix', 'latency']
-const AUDIT_FOCUSES: AuditFocus[] = ['actor', 'summary']
-
-export function isCostView(v: string | undefined): v is CostView {
-  return !!v && (COST_VIEWS as string[]).includes(v)
-}
-
-export function isCostFocus(v: string | undefined): v is CostFocus {
-  return !!v && (COST_FOCUSES as string[]).includes(v)
-}
-
-export function viewModeForCostFocus(focus: CostFocus | null): ViewMode {
-  return focus === 'agent' ? 'keeper' : 'model'
-}
-
-export function isAuditFocus(v: string | undefined): v is AuditFocus {
-  return !!v && (AUDIT_FOCUSES as string[]).includes(v)
-}
-
-export function auditRouteParams(focus: 'ledger' | AuditFocus): Record<string, string> {
-  return focus === 'ledger'
-    ? { section: 'runtime', view: 'audit' }
-    : { section: 'runtime', view: 'audit', focus }
+// Re-export RFC-0050 PR-1 — preserve every public symbol callers import
+// from this module so the per-domain split is mechanical.
+export {
+  type CostFocus,
+  type AuditFocus,
+  type CostView,
+  isCostView,
+  isCostFocus,
+  viewModeForCostFocus,
+  isAuditFocus,
+  auditRouteParams,
+  formatTokens,
+  summarizeAuditActors,
+  summarizeAuditKinds,
 }
 
 type ModelLoadState =
@@ -356,12 +357,6 @@ const keeperTotals = computed(() => {
   const p50Avg = p50Count > 0 ? Math.round(p50Sum / p50Count) : 0
   return { totalCost, totalIn, totalOut, p50Avg, p95Max, count: data.length }
 })
-
-export function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
-  return `${n}`
-}
 
 function ThRight({ children }: { children: unknown }) {
   return html`<th scope="col" class="px-2 py-1.5 text-right">${children}</th>`
@@ -828,91 +823,6 @@ function HeuristicByModule({ coverage }: { coverage: HeuristicCoverage }) {
 }
 
 type AuditChip = 'ledger' | AuditFocus
-
-interface AuditActorSummary {
-  actor: string
-  count: number
-  error: number
-  warn: number
-  info: number
-  latest: string
-  topKind: string
-}
-
-interface AuditKindSummary {
-  kind: string
-  count: number
-  error: number
-  warn: number
-  info: number
-  latest: string
-}
-
-function severityClass(sev: string): string {
-  if (sev === 'error') return 'text-[var(--color-danger-fg)]'
-  if (sev === 'warn') return 'text-[var(--color-warning-fg)]'
-  return 'text-text-muted'
-}
-
-function severityBuckets(entries: readonly AuditEntry[]): { error: number; warn: number; info: number } {
-  let error = 0
-  let warn = 0
-  for (const entry of entries) {
-    if (entry.severity === 'error') error += 1
-    else if (entry.severity === 'warn') warn += 1
-  }
-  return { error, warn, info: Math.max(0, entries.length - error - warn) }
-}
-
-function latestTs(entries: readonly AuditEntry[]): string {
-  return entries.reduce((latest, entry) => entry.ts > latest ? entry.ts : latest, '')
-}
-
-function mostFrequentKind(entries: readonly AuditEntry[]): string {
-  const counts = new Map<string, number>()
-  for (const entry of entries) {
-    const kind = entry.kind.trim() || '(unknown)'
-    counts.set(kind, (counts.get(kind) ?? 0) + 1)
-  }
-  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? '—'
-}
-
-export function summarizeAuditActors(entries: readonly AuditEntry[]): AuditActorSummary[] {
-  const byActor = new Map<string, AuditEntry[]>()
-  for (const entry of entries) {
-    const actor = entry.actor.trim() || '(unknown)'
-    const bucket = byActor.get(actor) ?? []
-    bucket.push(entry)
-    byActor.set(actor, bucket)
-  }
-  return [...byActor.entries()]
-    .map(([actor, actorEntries]) => ({
-      actor,
-      count: actorEntries.length,
-      ...severityBuckets(actorEntries),
-      latest: latestTs(actorEntries),
-      topKind: mostFrequentKind(actorEntries),
-    }))
-    .sort((a, b) => b.count - a.count || a.actor.localeCompare(b.actor))
-}
-
-export function summarizeAuditKinds(entries: readonly AuditEntry[]): AuditKindSummary[] {
-  const byKind = new Map<string, AuditEntry[]>()
-  for (const entry of entries) {
-    const kind = entry.kind.trim() || '(unknown)'
-    const bucket = byKind.get(kind) ?? []
-    bucket.push(entry)
-    byKind.set(kind, bucket)
-  }
-  return [...byKind.entries()]
-    .map(([kind, kindEntries]) => ({
-      kind,
-      count: kindEntries.length,
-      ...severityBuckets(kindEntries),
-      latest: latestTs(kindEntries),
-    }))
-    .sort((a, b) => b.count - a.count || a.kind.localeCompare(b.kind))
-}
 
 function updateAuditFocusParam(focus: AuditChip): void {
   replaceRoute('monitoring', auditRouteParams(focus))

@@ -112,6 +112,7 @@ let respond_not_ready ~(deps : Server_mcp_transport_http_types.deps) request req
 
 let respond_sse_rate_limited ~(deps : Server_mcp_transport_http_types.deps) ~origin ~session_id ~protocol_version
     ~reason ~retry_after_s reqd =
+  Transport_metrics.inc_sse_reject ~reason;
   let retry_after_s = Float.max retry_after_s 0.001 in
   let retry_after_header =
     retry_after_s |> Float.ceil |> int_of_float |> max 1 |> string_of_int

@@ -93,6 +93,28 @@ val inc_sse_client_evicted : unit -> unit
     with the [Evicting oldest client] log line so operators can see
     eviction storms in metrics. *)
 
+val inc_sse_idle_evicted : unit -> unit
+(** Increments [masc_sse_idle_evictions_total] for each session
+    {!Sse.cleanup_stale} reaps for being idle past [max_age_s].
+    Paired with the [idle evict] log line so the idle-reaper rate
+    is observable without log scraping. *)
+
+val inc_sse_reject : reason:string -> unit
+(** [inc_sse_reject ~reason] increments [masc_sse_rejects_total]
+    labelled with [reason] when the SSE connect storm guard
+    rejects a request (HTTP 429). [reason] mirrors the JSON body
+    field — currently ["session_cooldown"] or ["window_limit"].
+    Paired with the existing rate-limit response so operators
+    can rate-alert on storm conditions instead of grepping access
+    logs. *)
+
+val inc_sse_reconnect : unit -> unit
+(** Increments [masc_sse_reconnects_total] whenever an SSE client
+    arrives with a [Last-Event-Id] header, i.e. is asking the
+    server to replay events from a prior connection.  Distinct
+    from a fresh connect — useful for rate-alerting on disconnect
+    flapping (network instability, client buggy retry loops). *)
+
 (** {1 gRPC metrics} *)
 
 val set_grpc_active_streams : int -> unit

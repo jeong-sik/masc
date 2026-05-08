@@ -101,6 +101,38 @@ let test_broadcast_events_counter () =
     "masc_sse_broadcast_events_total" () in
   check bool "broadcast events incremented" true (after > before)
 
+let test_sse_idle_evicted () =
+  let before = Prometheus.metric_value_or_zero
+    "masc_sse_idle_evictions_total" () in
+  TM.inc_sse_idle_evicted ();
+  TM.inc_sse_idle_evicted ();
+  let after = Prometheus.metric_value_or_zero
+    "masc_sse_idle_evictions_total" () in
+  check (float 0.01) "idle evicted delta" 2.0 (after -. before)
+
+let test_sse_reject_labelled () =
+  let before_cooldown = Prometheus.metric_value_or_zero
+    "masc_sse_rejects_total" ~labels:[("reason", "session_cooldown")] () in
+  let before_window = Prometheus.metric_value_or_zero
+    "masc_sse_rejects_total" ~labels:[("reason", "window_limit")] () in
+  TM.inc_sse_reject ~reason:"session_cooldown";
+  TM.inc_sse_reject ~reason:"window_limit";
+  TM.inc_sse_reject ~reason:"session_cooldown";
+  let after_cooldown = Prometheus.metric_value_or_zero
+    "masc_sse_rejects_total" ~labels:[("reason", "session_cooldown")] () in
+  let after_window = Prometheus.metric_value_or_zero
+    "masc_sse_rejects_total" ~labels:[("reason", "window_limit")] () in
+  check (float 0.01) "session_cooldown delta" 2.0 (after_cooldown -. before_cooldown);
+  check (float 0.01) "window_limit delta" 1.0 (after_window -. before_window)
+
+let test_sse_reconnect () =
+  let before = Prometheus.metric_value_or_zero
+    "masc_sse_reconnects_total" () in
+  TM.inc_sse_reconnect ();
+  let after = Prometheus.metric_value_or_zero
+    "masc_sse_reconnects_total" () in
+  check (float 0.01) "reconnect delta" 1.0 (after -. before)
+
 (* ============================================================
    gRPC Metrics
    ============================================================ *)
@@ -448,6 +480,9 @@ let () =
       test_case "set_sse_sessions by kind" `Quick test_sse_sessions;
       test_case "observe_broadcast_duration accumulates" `Quick test_broadcast_duration;
       test_case "broadcast events counter increments" `Quick test_broadcast_events_counter;
+      test_case "inc_sse_idle_evicted increments" `Quick test_sse_idle_evicted;
+      test_case "inc_sse_reject by reason label" `Quick test_sse_reject_labelled;
+      test_case "inc_sse_reconnect increments" `Quick test_sse_reconnect;
     ]);
     ("grpc", [
       test_case "set_grpc_active_streams" `Quick test_grpc_active_streams;

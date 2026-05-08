@@ -27,6 +27,7 @@ type t =
   | `Tool_local_runtime
   | `Tool_local_runtime_bench
   | `Tool_autoresearch_cycle
+  | `Keeper_shell
   | `Other_agent
   ]
 

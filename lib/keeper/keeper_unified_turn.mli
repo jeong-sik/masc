@@ -288,6 +288,7 @@ val run_keeper_cycle :
   ?semaphore_wait_ms:int ->
   ?turn_slot_control:Keeper_turn_slot.keeper_turn_slot_control ->
   ?shared_context:Agent_sdk.Context.t ->
+  ?selected_item:Cascade_ref.cascade_item ->
   unit ->
   (Keeper_types.keeper_meta, Agent_sdk.Error.sdk_error) result
 
@@ -300,5 +301,6 @@ val run_unified_turn :
   ?semaphore_wait_ms:int ->
   ?turn_slot_control:Keeper_turn_slot.keeper_turn_slot_control ->
   ?shared_context:Agent_sdk.Context.t ->
+  ?selected_item:Cascade_ref.cascade_item ->
   unit ->
   (Keeper_types.keeper_meta, Agent_sdk.Error.sdk_error) result

@@ -289,6 +289,10 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
         | None -> if summary = "" then str else summary)
     (* All remaining blocker_class variants carry no class-specific summary
        transformation — fall back to the live summary or the typed name. *)
+    | Admission_wait_wfq ->
+        if summary = "" then "Admission wait: enqueued in WFQ overflow" else summary
+    | Admission_surface ->
+        if summary = "" then "Admission surface: no usable provider" else summary
     | Ambiguous_post_commit_timeout
     | Ambiguous_post_commit_failure
     | Autonomous_slot_wait_timeout
@@ -308,6 +312,8 @@ let runtime_blocker_surface_of_legacy_string reason cls =
       runtime_blocker_surface_of_typed_class cls
   (* All other blocker classes carry no embedded reason payload, so the
      legacy string [reason] argument provides the fallback summary. *)
+  | Admission_wait_wfq
+  | Admission_surface
   | Ambiguous_post_commit_timeout
   | Ambiguous_post_commit_failure
   | Autonomous_slot_wait_timeout

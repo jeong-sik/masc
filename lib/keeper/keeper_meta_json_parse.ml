@@ -19,6 +19,7 @@ type parsed_keeper_identity =
   ; pk_long_goal : string
   ; pk_social_model : string
   ; pk_cascade_name : string
+  ; pk_cascade_ref : Cascade_ref.cascade_ref option
   ; pk_models : string list
   ; pk_will : string
   ; pk_needs : string
@@ -150,6 +151,7 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
       ; pk_long_goal
       ; pk_social_model
       ; pk_cascade_name
+      ; pk_cascade_ref = None
       ; pk_models
       ; pk_will
       ; pk_needs
@@ -575,6 +577,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ; long_goal = identity.pk_long_goal
                    ; social_model = identity.pk_social_model
                    ; cascade_name = identity.pk_cascade_name
+                   ; cascade_ref = identity.pk_cascade_ref
                    ; models = identity.pk_models
                    ; will = identity.pk_will
                    ; needs = identity.pk_needs

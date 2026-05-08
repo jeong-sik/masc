@@ -111,6 +111,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
     ?(semaphore_wait_ms = 0)
     ?turn_slot_control
     ?shared_context
+    ?selected_item
     () : (keeper_meta, Agent_sdk.Error.sdk_error) result =
   (* Spec navigation (OCaml -> TLA+) — plan §19 Cycle 28 anchor for
      B2 (Task Acquisition).  Authoritative spec mirror is
@@ -1736,6 +1737,19 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           (fun (retry : EC.degraded_retry) -> retry.fallback_reason)
           degraded_retry_info
       in
+      (* RFC-0041 Phase B3: record per-item health after turn completion. *)
+      (match selected_item with
+       | Some item ->
+           let success =
+             match run_result with
+             | Ok _ -> true
+             | Error _ -> false
+           in
+           Keeper_health_probe.record_item_result
+             ~keeper_name:meta.name
+             ~item_id:item.Cascade_ref.id
+             ~success
+       | None -> ());
       match run_result with
       | Error err ->
           let final_execution = !last_execution in

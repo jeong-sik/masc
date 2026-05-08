@@ -878,9 +878,9 @@ let lookup fields key =
   | None -> fail (Printf.sprintf "%s missing" key)
 
 let test_keeper_profile_preserves_raw_unknown_cascade () =
-  (* Genuinely unknown cascade — not in [Keeper_cascade_profile.t] and
-     not a registered legacy alias. Typical sources: typos, personal
-     playground profiles, vendor drift. The raw string must survive so
+  (* Genuinely unknown cascade — not in the live catalog and not a
+     registered logical alias.  Typical sources: typos, personal
+     playground profiles, vendor drift.  The raw string must survive so
      the dashboard [canonical] column renders the mismatch. *)
   let fs =
     Masc_mcp.Dashboard_cascade.keeper_profile_fields

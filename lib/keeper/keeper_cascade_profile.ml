@@ -1,36 +1,16 @@
 (** See {!Keeper_cascade_profile} interface for rationale. *)
 
-(** See {!Keeper_cascade_profile} interface for rationale. *)
-
 open Cascade_ref
 
-(** SSOT variant for the 1+1 cascade model.
-
-    One keeper-assignable bootstrap profile ({!Big_three}) and one system-only
-    profile ({!Tool_rerank}). Historical phase-routing, judge, evaluator, and
-    local names are logical route keys, not live catalog profiles.
-
-    Adding a new profile is a compile-time event: add a variant here, then
-    exhaustive [match] sites flag every consumer that needs to handle it.
-    Personal/playground-only cascades must NOT be added here — they live in
-    [$MASC_BASE_PATH/.masc/playground/.../cascade.json] only. *)
-type t =
-  | Big_three
-  | Tool_rerank
-
-let to_string = function
-  | Big_three -> "big_three"
-  | Tool_rerank -> "tool_rerank"
-
-let all = [ Big_three; Tool_rerank ]
-
-(** All known cascade profile names, derived from the variant. Consumers
-    that still operate on strings can use this list; new code should
-    take {!t} directly. *)
-let known_cascades = List.map to_string all
-
-let default = Big_three
-let default_name = to_string default
+(** Per RFC-0041 cascade routing SSOT, the live cascade catalog
+    (cascade.json) is the only source of truth for cascade profile
+    names.  There is no compile-time enum here — anything that needs to
+    know "what profiles are available" reads them from
+    [Cascade_config_loader.load_catalog] / [catalog_names_*] below.  If
+    the catalog is empty at runtime,
+    [Cascade_catalog_runtime.validate_path_result] is the boot-time
+    gate that rejects keeper boot, so a missing catalog never reaches
+    these helpers. *)
 
 type logical_use = Cascade_ref.logical_use =
   | Keeper_turn
@@ -61,18 +41,6 @@ let cascade_name_for_use = Cascade_routes.cascade_name_for_use
 type runtime_name = Runtime_name of string
 
 let runtime_name_to_string (Runtime_name value) = value
-
-let of_string_opt (raw : string) : t option =
-  match String.trim raw |> String.lowercase_ascii with
-  | "" -> Some default
-  | "big_three" -> Some Big_three
-  | "tool_rerank" -> Some Tool_rerank
-  | _ -> None
-
-let canonical (raw : string) : t =
-  match of_string_opt raw with
-  | Some t -> t
-  | None -> default
 
 let catalog_entries ?config_path () =
   let path_opt =
@@ -259,44 +227,30 @@ let fallback_cascade_for ?config_path name =
 let canonicalize_with_catalog ~catalog raw =
   match String.trim raw with
   | "" -> Cascade_routes.fallback_name_for_catalog Keeper_turn ~catalog
-  | trimmed -> (
+  | trimmed ->
       if List.mem trimmed catalog then trimmed
-      else match of_string_opt trimmed with
-      | Some profile ->
-          let name = to_string profile in
-          if catalog = [] || List.mem name catalog then name
-          else Cascade_routes.fallback_name_for_catalog Keeper_turn ~catalog
-      | None ->
-          match logical_use_of_string_opt trimmed with
-          | Some use -> Cascade_routes.fallback_name_for_catalog use ~catalog
-          | None -> Cascade_routes.fallback_name_for_catalog Keeper_turn ~catalog)
+      else (
+        match logical_use_of_string_opt trimmed with
+        | Some use -> Cascade_routes.fallback_name_for_catalog use ~catalog
+        | None -> trimmed)
 
 let normalize_declared_name (raw : string) : string =
   let trimmed = String.trim raw in
   if String.equal trimmed "" then
     cascade_name_for_use Keeper_turn
   else
-    match of_string_opt trimmed with
-    | Some t -> to_string t
-    | None -> (
-        match logical_use_of_string_opt trimmed with
-        | Some use -> cascade_name_for_use use
-        | None -> trimmed)
+    match logical_use_of_string_opt trimmed with
+    | Some use -> cascade_name_for_use use
+    | None -> trimmed
 
 let resolve_live_with_catalog ~catalog raw =
   let trimmed = String.trim raw in
   let normalized =
     if List.mem trimmed catalog then trimmed
     else
-      match of_string_opt trimmed with
-      | Some t ->
-          let name = to_string t in
-          if catalog = [] || List.mem name catalog then name
-          else Cascade_routes.fallback_name_for_catalog Keeper_turn ~catalog
-      | None -> (
-          match logical_use_of_string_opt trimmed with
-          | Some use -> Cascade_routes.fallback_name_for_catalog use ~catalog
-          | None -> trimmed)
+      match logical_use_of_string_opt trimmed with
+      | Some use -> Cascade_routes.fallback_name_for_catalog use ~catalog
+      | None -> trimmed
   in
   if List.mem normalized catalog then normalized
   else Cascade_routes.fallback_name_for_catalog Keeper_turn ~catalog
@@ -308,10 +262,6 @@ let canonicalize (raw : string) : string =
   canonicalize_with_catalog ~catalog:(catalog_names ()) raw
 
 let runtime_name_of_string raw = Runtime_name (canonicalize raw)
-
-let models_key_t t = to_string t ^ "_models"
-let temperature_key_t t = to_string t ^ "_temperature"
-let max_tokens_key_t t = to_string t ^ "_max_tokens"
 
 let models_key name = canonicalize name ^ "_models"
 let temperature_key name = canonicalize name ^ "_temperature"

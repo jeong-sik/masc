@@ -621,10 +621,8 @@ let runtime_required_profile_names ?config_path () =
         | Some path -> path
         | None -> "")
   in
-  if String.equal config_path "" then
-    Keeper_cascade_profile.known_cascades |> List.sort_uniq String.compare
-  else
-    runtime_required_profiles ~config_path
+  if String.equal config_path "" then []
+  else runtime_required_profiles ~config_path
 
 let validate_path_result ?sw ?net ~config_path () =
   let checked_at = Unix.gettimeofday () in

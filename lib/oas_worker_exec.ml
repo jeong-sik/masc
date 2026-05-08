@@ -17,7 +17,7 @@ type stop_reason =
   | MutationBoundaryReached of { turns_used : int; tool_name : string option }
 
 type cli_transport_overrides =
-  Oas_worker_exec_transport.cli_transport_overrides = {
+  Cascade_transport.cli_transport_overrides = {
   cwd : string option;
   claude_mcp_config : string option;
   claude_allowed_tools : string list option;
@@ -117,97 +117,97 @@ let proof_result_status_to_string status =
     discovery-only model. Callers are expected to validate labels
     before reaching this helper. *)
 type label_resolution_error =
-  Oas_worker_exec_transport.label_resolution_error =
+  Cascade_transport.label_resolution_error =
   | Invalid_model_label of string
 
 let label_resolution_error_to_string =
-  Oas_worker_exec_transport.label_resolution_error_to_string
+  Cascade_transport.label_resolution_error_to_string
 
 let label_resolution_error_to_sdk_error =
-  Oas_worker_exec_transport.label_resolution_error_to_sdk_error
+  Cascade_transport.label_resolution_error_to_sdk_error
 
 let resolve_provider_config_of_label =
-  Oas_worker_exec_transport.resolve_provider_config_of_label
+  Cascade_transport.resolve_provider_config_of_label
 
 let invalid_runtime_config =
-  Oas_worker_exec_transport.invalid_runtime_config
+  Cascade_transport.invalid_runtime_config
 
 let cli_model_override =
-  Oas_worker_exec_transport.cli_model_override
+  Cascade_transport.cli_model_override
 
 let provider_caps_of_config =
-  Oas_worker_exec_transport.provider_caps_of_config
+  Cascade_transport.provider_caps_of_config
 
 let kimi_mcp_config_json_of_policy =
-  Oas_worker_exec_transport.kimi_mcp_config_json_of_policy
+  Cascade_transport.kimi_mcp_config_json_of_policy
 
 let kimi_cli_model_for_provider =
-  Oas_worker_exec_transport.kimi_cli_model_for_provider
+  Cascade_transport.kimi_cli_model_for_provider
 
 let kimi_cli_config_json_for_provider =
-  Oas_worker_exec_transport.kimi_cli_config_json_for_provider
+  Cascade_transport.kimi_cli_config_json_for_provider
 
 let provider_supports_inline_tools =
-  Oas_worker_exec_transport.provider_supports_inline_tools
+  Cascade_transport.provider_supports_inline_tools
 
 let provider_supports_runtime_mcp_lane =
-  Oas_worker_exec_transport.provider_supports_runtime_mcp_lane
+  Cascade_transport.provider_supports_runtime_mcp_lane
 
 let dedupe_preserve_order =
-  Oas_worker_exec_transport.dedupe_preserve_order
+  Cascade_transport.dedupe_preserve_order
 
 let public_mcp_tool_names_of_oas_tools =
-  Oas_worker_exec_transport.public_mcp_tool_names_of_oas_tools
+  Cascade_transport.public_mcp_tool_names_of_oas_tools
 
 let public_mcp_tool_requires_bound_actor =
-  Oas_worker_exec_transport.public_mcp_tool_requires_bound_actor
+  Cascade_transport.public_mcp_tool_requires_bound_actor
 
 let runtime_mcp_tool_requires_bound_actor =
-  Oas_worker_exec_transport.runtime_mcp_tool_requires_bound_actor
+  Cascade_transport.runtime_mcp_tool_requires_bound_actor
 
 let runtime_mcp_policy_with_masc_agent_name =
-  Oas_worker_exec_transport.runtime_mcp_policy_with_masc_agent_name
+  Cascade_transport.runtime_mcp_policy_with_masc_agent_name
 
 let codex_cli_can_auth_keeper_bound_runtime_mcp =
-  Oas_worker_exec_transport.codex_cli_can_auth_keeper_bound_runtime_mcp
+  Cascade_transport.codex_cli_can_auth_keeper_bound_runtime_mcp
 
 let runtime_mcp_policy_for_provider =
-  Oas_worker_exec_transport.runtime_mcp_policy_for_provider
+  Cascade_transport.runtime_mcp_policy_for_provider
 
 let kimi_cli_runtime_mcp_jsons =
-  Oas_worker_exec_transport.kimi_cli_runtime_mcp_jsons
+  Cascade_transport.kimi_cli_runtime_mcp_jsons
 
 let public_mcp_tools_of_oas_tools =
-  Oas_worker_exec_transport.public_mcp_tools_of_oas_tools
+  Cascade_transport.public_mcp_tools_of_oas_tools
 
 let tool_names_are_public_mcp =
-  Oas_worker_exec_transport.tool_names_are_public_mcp
+  Cascade_transport.tool_names_are_public_mcp
 
 let public_mcp_runtime_policy_of_tool_names =
-  Oas_worker_exec_transport.public_mcp_runtime_policy_of_tool_names
+  Cascade_transport.public_mcp_runtime_policy_of_tool_names
 
 let runtime_mcp_policy_of_tool_names =
-  Oas_worker_exec_transport.runtime_mcp_policy_of_tool_names
+  Cascade_transport.runtime_mcp_policy_of_tool_names
 
 let provider_label =
-  Oas_worker_exec_transport.provider_label
+  Cascade_transport.provider_label
 
 let claude_code_max_turns_hard_cap =
-  Oas_worker_exec_transport.claude_code_max_turns_hard_cap
+  Cascade_transport.claude_code_max_turns_hard_cap
 
 let provider_effective_max_turns =
-  Oas_worker_exec_transport.provider_effective_max_turns
+  Cascade_transport.provider_effective_max_turns
 
 let resolve_tool_lane_for_oas_tools =
-  Oas_worker_exec_transport.resolve_tool_lane_for_oas_tools
+  Cascade_transport.resolve_tool_lane_for_oas_tools
 
 let make_per_call_switch_transport =
-  Oas_worker_exec_transport.make_per_call_switch_transport
+  Cascade_transport.make_per_call_switch_transport
 
-module Kimi_cli_transport_local = Oas_worker_exec_transport.Kimi_cli_transport_local
+module Kimi_cli_transport_local = Cascade_transport.Kimi_cli_transport_local
 
 let non_http_transport_of_provider =
-  Oas_worker_exec_transport.non_http_transport_of_provider
+  Cascade_transport.non_http_transport_of_provider
 
 (* ================================================================ *)
 (* Internal: event publishing                                        *)

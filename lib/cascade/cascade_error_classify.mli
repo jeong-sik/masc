@@ -1,4 +1,4 @@
-(** Oas_worker_named_error — masc_internal_error type, error conversion, codex CLI preflight.
+(** Cascade_error_classify — masc_internal_error type, error conversion, codex CLI preflight.
 
     Extracted from oas_worker_named.ml (God file decomposition).
     Defines the [masc_internal_error] variant type, JSON serialization,

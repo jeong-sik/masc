@@ -2,12 +2,12 @@
     for OAS agent execution.
 
     Thin facade over {!Oas_worker_exec_agent},
-    {!Oas_worker_exec_transport}, and
+    {!Cascade_transport}, and
     {!Oas_worker_exec_checkpoint}.  External callers reach
     the entry points via [Oas_worker_exec.X]; the heavy
     transport machinery (CLI / MCP wire formats, runtime
     policy projections) is implemented in
-    {!Oas_worker_exec_transport} and re-exposed here for
+    {!Cascade_transport} and re-exposed here for
     backward compatibility — that sub-module has no .mli
     of its own, so the canonical contract is the one
     pinned at this boundary.
@@ -49,7 +49,7 @@ type stop_reason = Oas_worker_exec_agent.stop_reason =
 (** {1 CLI transport overrides} *)
 
 type cli_transport_overrides =
-  Oas_worker_exec_transport.cli_transport_overrides = {
+  Cascade_transport.cli_transport_overrides = {
   cwd : string option;
   claude_mcp_config : string option;
   claude_allowed_tools : string list option;
@@ -61,7 +61,7 @@ type cli_transport_overrides =
 (** Per-call overrides threaded into the local CLI transports
     (Claude Code, Gemini CLI, Kimi CLI).
     [cli_subprocess_idle_sec] is currently honoured only by Kimi CLI;
-    see {!Oas_worker_exec_transport.cli_transport_overrides}. *)
+    see {!Cascade_transport.cli_transport_overrides}. *)
 
 (** {1 Config} *)
 
@@ -146,14 +146,14 @@ val proof_result_status_to_string :
 (** {1 Label resolution} *)
 
 val label_resolution_error_to_string :
-  Oas_worker_exec_transport.label_resolution_error -> string
+  Cascade_transport.label_resolution_error -> string
 val label_resolution_error_to_sdk_error :
-  Oas_worker_exec_transport.label_resolution_error ->
+  Cascade_transport.label_resolution_error ->
   Agent_sdk.Error.sdk_error
 
 val resolve_provider_config_of_label :
   string -> (Llm_provider.Provider_config.t,
-             Oas_worker_exec_transport.label_resolution_error) result
+             Cascade_transport.label_resolution_error) result
 
 (** {1 Provider helpers} *)
 
@@ -180,7 +180,7 @@ val kimi_cli_runtime_mcp_jsons :
   string list
 
 module Kimi_cli_transport_local :
-  module type of Oas_worker_exec_transport.Kimi_cli_transport_local
+  module type of Cascade_transport.Kimi_cli_transport_local
 
 (** {1 Runtime-MCP policy} *)
 

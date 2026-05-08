@@ -1,4 +1,4 @@
-(** Oas_worker_named_fsm — SDK error to FSM outcome, session/resumption analysis.
+(** Cascade_attempt_fsm — SDK error to FSM outcome, session/resumption analysis.
 
     Extracted from oas_worker_named.ml (God file decomposition).
     Converts OAS SDK errors into Cascade_fsm provider outcomes,
@@ -24,8 +24,8 @@ let retry_message_looks_like_model_access_denied (message : string) : bool =
     errors (budget, idle, exit) are not — they would recur on any model. *)
 let sdk_error_to_cascade_outcome (err : Agent_sdk.Error.sdk_error)
     : Cascade_fsm.provider_outcome option =
-  match Oas_worker_named_error.classify_masc_internal_error err with
-  | Some (Oas_worker_named_error.Resumable_cli_session { detail; _ }) ->
+  match Cascade_error_classify.classify_masc_internal_error err with
+  | Some (Cascade_error_classify.Resumable_cli_session { detail; _ }) ->
     Some
       (Cascade_fsm.Call_err
          (Llm_provider.Http_client.NetworkError
@@ -33,14 +33,14 @@ let sdk_error_to_cascade_outcome (err : Agent_sdk.Error.sdk_error)
   (* All other MASC-internal classifications (and unclassified errors) fall
      through to the structured [match err with] below to derive the cascade
      outcome from the raw [sdk_error] payload. *)
-  | Some (Oas_worker_named_error.Cascade_exhausted _)
-  | Some (Oas_worker_named_error.No_tool_capable_provider _)
-  | Some (Oas_worker_named_error.Accept_rejected _)
-  | Some (Oas_worker_named_error.Admission_queue_timeout _)
-  | Some (Oas_worker_named_error.Admission_queue_rejected _)
-  | Some (Oas_worker_named_error.Turn_timeout _)
-  | Some (Oas_worker_named_error.Oas_timeout_budget _)
-  | Some (Oas_worker_named_error.Ambiguous_post_commit _)
+  | Some (Cascade_error_classify.Cascade_exhausted _)
+  | Some (Cascade_error_classify.No_tool_capable_provider _)
+  | Some (Cascade_error_classify.Accept_rejected _)
+  | Some (Cascade_error_classify.Admission_queue_timeout _)
+  | Some (Cascade_error_classify.Admission_queue_rejected _)
+  | Some (Cascade_error_classify.Turn_timeout _)
+  | Some (Cascade_error_classify.Oas_timeout_budget _)
+  | Some (Cascade_error_classify.Ambiguous_post_commit _)
   | None -> (
   match err with
   | Agent_sdk.Error.Api api_err ->
@@ -141,7 +141,7 @@ let is_moonshot_provider (provider_cfg : Llm_provider.Provider_config.t) =
   String_util.contains_substring_ci provider_cfg.base_url "moonshot.ai"
   || String.starts_with ~prefix:"kimi" provider_cfg.model_id
 
-let cascade_name_to_string = Oas_worker_named_error.cascade_name_to_string
+let cascade_name_to_string = Cascade_error_classify.cascade_name_to_string
 
 let resolve_kimi_api_key_env_name ~cascade_name =
   let cascade_name = cascade_name_to_string cascade_name in
@@ -341,14 +341,14 @@ let resumable_cli_session_exit_code (message : string) : int option =
 
 let sdk_error_to_resumable_cli_session ~cascade_name
     (err : Agent_sdk.Error.sdk_error) =
-  match Oas_worker_named_error.classify_masc_internal_error err with
-  | Some (Oas_worker_named_error.Resumable_cli_session _) -> Some err
+  match Cascade_error_classify.classify_masc_internal_error err with
+  | Some (Cascade_error_classify.Resumable_cli_session _) -> Some err
   | _ ->
       let message = Agent_sdk.Error.to_string err in
       if message_looks_like_resumable_cli_session message then
         Some
-          (Oas_worker_named_error.sdk_error_of_masc_internal_error
-             (Oas_worker_named_error.Resumable_cli_session
+          (Cascade_error_classify.sdk_error_of_masc_internal_error
+             (Cascade_error_classify.Resumable_cli_session
                 {
                   cascade_name =
                     cascade_name;
@@ -358,8 +358,8 @@ let sdk_error_to_resumable_cli_session ~cascade_name
       else None
 
 let sdk_error_is_resumable_cli_session (err : Agent_sdk.Error.sdk_error) : bool =
-  match Oas_worker_named_error.classify_masc_internal_error err with
-  | Some (Oas_worker_named_error.Resumable_cli_session _) -> true
+  match Cascade_error_classify.classify_masc_internal_error err with
+  | Some (Cascade_error_classify.Resumable_cli_session _) -> true
   | _ ->
       let direct_api_message =
         match err with
@@ -605,24 +605,24 @@ let sdk_error_soft_rate_limited (err : Agent_sdk.Error.sdk_error)
   | Agent_sdk.Error.Internal _ -> None
 
 let sdk_error_is_max_turns_exceeded (err : Agent_sdk.Error.sdk_error) : bool =
-  match Oas_worker_named_error.classify_masc_internal_error err with
+  match Cascade_error_classify.classify_masc_internal_error err with
   | Some
-      (Oas_worker_named_error.Cascade_exhausted
+      (Cascade_error_classify.Cascade_exhausted
          { reason = Keeper_types.Max_turns_exceeded; _ }) ->
       true
   | Some
-      (Oas_worker_named_error.Cascade_exhausted
+      (Cascade_error_classify.Cascade_exhausted
          { reason = Keeper_types.Other_detail detail; _ }) ->
       message_looks_like_cli_wrapped_max_turns detail
-  | Some (Oas_worker_named_error.Cascade_exhausted _)
-  | Some (Oas_worker_named_error.Resumable_cli_session _)
-  | Some (Oas_worker_named_error.No_tool_capable_provider _)
-  | Some (Oas_worker_named_error.Accept_rejected _)
-  | Some (Oas_worker_named_error.Admission_queue_timeout _)
-  | Some (Oas_worker_named_error.Admission_queue_rejected _)
-  | Some (Oas_worker_named_error.Turn_timeout _)
-  | Some (Oas_worker_named_error.Oas_timeout_budget _)
-  | Some (Oas_worker_named_error.Ambiguous_post_commit _) ->
+  | Some (Cascade_error_classify.Cascade_exhausted _)
+  | Some (Cascade_error_classify.Resumable_cli_session _)
+  | Some (Cascade_error_classify.No_tool_capable_provider _)
+  | Some (Cascade_error_classify.Accept_rejected _)
+  | Some (Cascade_error_classify.Admission_queue_timeout _)
+  | Some (Cascade_error_classify.Admission_queue_rejected _)
+  | Some (Cascade_error_classify.Turn_timeout _)
+  | Some (Cascade_error_classify.Oas_timeout_budget _)
+  | Some (Cascade_error_classify.Ambiguous_post_commit _) ->
       false
   | None -> (
       match err with

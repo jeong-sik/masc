@@ -2,7 +2,7 @@
 
     Verifies that [Auth.load_raw_token] reads the raw bearer token from
     [<base_path>/.masc/auth/<agent_name>.token]. This is the data path
-    consumed by [Oas_worker_exec_transport.runtime_mcp_policy_of_tool_names]
+    consumed by [Cascade_transport.runtime_mcp_policy_of_tool_names]
     when [MASC_MCP_TOKEN] is unset (the CLI subprocess case for
     codex_cli/gemini_cli/kimi_cli that callback into masc-mcp).
 

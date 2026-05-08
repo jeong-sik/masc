@@ -170,11 +170,8 @@
   oas_worker_exec_agent
   oas_worker_exec
   oas_worker_exec_checkpoint
-  oas_worker_exec_transport
   oas_worker_named
   oas_worker_named_cascade
-  oas_worker_named_error
-  oas_worker_named_fsm
   meta_cognition_types
   meta_cognition_rules
   meta_cognition_snapshot

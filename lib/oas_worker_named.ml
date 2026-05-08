@@ -13,8 +13,8 @@ open Result.Syntax
    Each sub-module is self-contained; the facade re-exports everything
    so existing callers do not need qualification. *)
 include Oas_worker_named_cascade
-include Oas_worker_named_error
-include Oas_worker_named_fsm
+include Cascade_error_classify
+include Cascade_attempt_fsm
 
 let provider_health_keys_of_config provider_cfg =
   let provider_key = Provider_adapter.provider_health_key_of_config provider_cfg in

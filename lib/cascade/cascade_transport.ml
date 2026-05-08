@@ -1,4 +1,4 @@
-(** Oas_worker_exec_transport — Transport and tool-lane helpers for OAS worker exec.
+(** Cascade_transport — Transport and tool-lane helpers for OAS worker exec.
 
     Keeps provider label resolution, runtime MCP lane selection, and per-call
     CLI transport construction separate from the build/run orchestration in

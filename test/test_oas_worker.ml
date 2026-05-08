@@ -2022,7 +2022,7 @@ let test_resolve_provider_of_label_rejects_invalid_explicit_label () =
 
 let test_run_model_with_masc_tools_rejects_invalid_explicit_label () =
   match
-    Keeper_turn_driver.run_model_with_masc_tools
+    Keeper_turn_driver_wrappers.run_model_with_masc_tools
       ~model_label:"not-a-model-label"
       ~goal:"test goal"
       ~masc_tools:[]

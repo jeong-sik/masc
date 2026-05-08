@@ -86,6 +86,13 @@ val classify_masc_internal_error :
     originally produced by [sdk_error_of_masc_internal_error].  Returns
     [None] for errors that do not carry the [masc_oas_error] prefix. *)
 
+val classify_masc_internal_error_of_string :
+  string -> masc_internal_error option
+(** Parse a [masc_internal_error] from a raw string that may contain
+    the [[masc_oas_error]] prefix anywhere (e.g. in a blocker text with
+    "Internal error: [masc_oas_error] ..." wrapper).  Returns [None]
+    when the prefix is absent or the JSON payload is malformed. *)
+
 val kind_of_masc_internal_error : masc_internal_error -> string
 (** Short label for each variant, used as the [kind] Prometheus label. *)
 

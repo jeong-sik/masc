@@ -790,7 +790,10 @@ let run_docker_shell_command_with_status
       (try
          let status, output =
            Fun.protect ~finally:restore_gitdirs @@ fun () ->
-           Process_eio.run_argv_with_status ~env:(Unix.environment ())
+           Masc_exec.Exec_gate.run_argv_with_status ~actor:"Keeper_shell"
+             ~raw_source:(String.concat " " argv)
+             ~summary:"keeper docker command"
+             ~env:(Unix.environment ())
              ~cwd:(Sys.getcwd ()) ~timeout_sec argv
          in
          if status <> Unix.WEXITED 0 then

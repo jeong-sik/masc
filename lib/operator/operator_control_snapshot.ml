@@ -112,8 +112,9 @@ let non_empty_trimmed_string_opt value =
   if trimmed = "" then None else Some trimmed
 
 let keeper_runtime_identity_fields (meta : Keeper_types.keeper_meta) =
+  let cascade_name = Keeper_types.cascade_name_of_meta meta in
   let effective_cascade =
-    Keeper_cascade_profile.resolve_live meta.cascade_name
+    Keeper_cascade_profile.resolve_live cascade_name
   in
   let primary_model =
     match
@@ -136,7 +137,7 @@ let keeper_runtime_identity_fields (meta : Keeper_types.keeper_meta) =
     else active_model_label
   in
   [
-    ("cascade_name", string_option_to_json (non_empty_trimmed_string_opt meta.cascade_name));
+    ("cascade_name", string_option_to_json (non_empty_trimmed_string_opt cascade_name));
     ("cascade_canonical", `String effective_cascade);
     ("selected_cascade_canonical", `String effective_cascade);
     ("primary_model", string_option_to_json primary_model);

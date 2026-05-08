@@ -36,17 +36,18 @@ let test_claim_context_increments_streak () =
     (PLD.current_streak ~keeper_name:"k1")
 
 let test_terminal_reason_maps_required_tool_failures () =
+  let module D = Masc_mcp.Keeper_turn_disposition in
+  let module Code = Masc_mcp.Keeper_turn_terminal_code in
   check (option string) "no tool call maps to detector class"
     (Some "required_tool_no_call")
-    (PLD.progress_class_of_terminal_reason_code
-       "required_tool_use_no_tool_call");
+    (PLD.progress_class_of_disposition D.Required_tool_use_no_tool_call);
   check (option string) "unsatisfied maps to detector class"
     (Some "required_tool_unsatisfied")
-    (PLD.progress_class_of_terminal_reason_code
-       "required_tool_use_unsatisfied");
+    (PLD.progress_class_of_disposition D.Required_tool_use_unsatisfied);
   check (option string) "provider errors do not count"
     None
-    (PLD.progress_class_of_terminal_reason_code "provider_error")
+    (PLD.progress_class_of_disposition
+       (D.Provider_error (Code.Provider_runtime_error "provider_error")))
 
 let test_required_tool_no_call_fires_metric_at_three () =
   Eio_main.run @@ fun _env ->

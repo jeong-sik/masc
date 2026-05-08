@@ -31,12 +31,21 @@ let threshold () =
 let required_tool_no_call_progress_class = "required_tool_no_call"
 let required_tool_unsatisfied_progress_class = "required_tool_unsatisfied"
 
-let progress_class_of_terminal_reason_code = function
-  | "required_tool_use_no_tool_call" ->
+(* RFC-0047 follow-up: take a typed [Keeper_turn_disposition.t] instead
+   of pattern-matching on the wire string. The two relevant arms
+   ([Required_tool_use_no_tool_call] and [Required_tool_use_unsatisfied])
+   are dispositions known at construction time; everything else returns
+   [None] without ever needing to introspect the [code] string. *)
+let progress_class_of_disposition (d : Keeper_turn_disposition.t) =
+  match d with
+  | Required_tool_use_no_tool_call ->
       Some required_tool_no_call_progress_class
-  | "required_tool_use_unsatisfied" ->
+  | Required_tool_use_unsatisfied ->
       Some required_tool_unsatisfied_progress_class
-  | _ -> None
+  | Success | External_cancel | Turn_wall_clock_timeout | Oas_timeout_budget
+  | Gh_repo_context_missing_worktree | Post_commit_ambiguous
+  | Provider_error _ | Unknown _ ->
+      None
 
 type keeper_state = {
   mutable streak : int;

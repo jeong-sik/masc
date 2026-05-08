@@ -1940,8 +1940,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             | None -> ()
           end;
           (match
-             Keeper_passive_loop_detector.progress_class_of_terminal_reason_code
-               (Keeper_turn_terminal.code terminal_reason)
+             Keeper_passive_loop_detector.progress_class_of_disposition
+               terminal_reason.disposition
            with
            | Some progress_class ->
                Keeper_passive_loop_detector.record_turn

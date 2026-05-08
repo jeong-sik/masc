@@ -5,7 +5,7 @@
     SDK error conversion, error classification, and codex CLI prompt
     preflight checks.
 
-    This module is [include]d by {!Oas_worker_named}; all bindings are
+    This module is [include]d by {!Keeper_turn_driver}; all bindings are
     re-exported by the facade.  @since God file decomposition *)
 
 (** {1 MASC internal error type} *)

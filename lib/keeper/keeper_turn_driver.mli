@@ -1,4 +1,4 @@
-(** Oas_worker_named — MASC named-cascade and model-label execution entry points.
+(** Keeper_turn_driver — MASC named-cascade and model-label execution entry points.
 
     Public API for running OAS agents through MASC-managed named cascade
     profiles ([run_named]) or explicit model label ([run_model_by_label]),

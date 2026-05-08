@@ -202,24 +202,24 @@ let blocker_class_of_string (reason : string) : blocker_class option =
     None
 
 let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class option =
-  match Oas_worker_named.classify_masc_internal_error err with
-  | Some (Oas_worker_named.Cascade_exhausted { reason; _ }) ->
+  match Keeper_turn_driver.classify_masc_internal_error err with
+  | Some (Keeper_turn_driver.Cascade_exhausted { reason; _ }) ->
       Some (Cascade_exhausted reason)
-  | Some (Oas_worker_named.Resumable_cli_session { detail; _ }) ->
+  | Some (Keeper_turn_driver.Resumable_cli_session { detail; _ }) ->
       Some (Cascade_exhausted (Other_detail detail))
-  | Some (Oas_worker_named.No_tool_capable_provider _) ->
+  | Some (Keeper_turn_driver.No_tool_capable_provider _) ->
       Some No_tool_capable_provider
-  | Some (Oas_worker_named.Accept_rejected _) ->
+  | Some (Keeper_turn_driver.Accept_rejected _) ->
       None
-  | Some (Oas_worker_named.Admission_queue_timeout _) ->
+  | Some (Keeper_turn_driver.Admission_queue_timeout _) ->
       Some Admission_queue_wait_timeout
-  | Some (Oas_worker_named.Admission_queue_rejected _) ->
+  | Some (Keeper_turn_driver.Admission_queue_rejected _) ->
       None
-  | Some (Oas_worker_named.Oas_timeout_budget _) ->
+  | Some (Keeper_turn_driver.Oas_timeout_budget _) ->
       Some Oas_timeout_budget
-  | Some (Oas_worker_named.Turn_timeout _) ->
+  | Some (Keeper_turn_driver.Turn_timeout _) ->
       Some Turn_timeout
-  | Some (Oas_worker_named.Ambiguous_post_commit { is_timeout; _ }) ->
+  | Some (Keeper_turn_driver.Ambiguous_post_commit { is_timeout; _ }) ->
       Some
         (if is_timeout then Ambiguous_post_commit_timeout
          else Ambiguous_post_commit_failure)
@@ -279,11 +279,11 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
         else summary
     | No_tool_capable_provider -> (
         match
-          Oas_worker_named.classify_masc_internal_error
+          Keeper_turn_driver.classify_masc_internal_error
             (Agent_sdk.Error.Internal summary)
         with
         | Some err -> (
-            match Oas_worker_named.summary_of_masc_internal_error err with
+            match Keeper_turn_driver.summary_of_masc_internal_error err with
             | Some structured_summary -> structured_summary
             | None -> if summary = "" then str else summary)
         | None -> if summary = "" then str else summary)

@@ -2,7 +2,7 @@
 
     Contains the [config] type, [build], [run], and [run_with_masc_tools]
     functions. All model-selection and cascade logic lives in
-    {!Cascade_legacy_runner} and {!Oas_worker_named}.
+    {!Cascade_legacy_runner} and {!Keeper_turn_driver}.
 
     @since God file decomposition — extracted from oas_worker.ml *)
 
@@ -570,7 +570,7 @@ let run
         ~status:(Dashboard_oas_bridge.Error { transient = false })
         error_response;
       (* Demoted from WARN to DEBUG (task-239): this fires once per tier,
-         but a cascade caller (Oas_worker_named.run_named) retries on the
+         but a cascade caller (Keeper_turn_driver.run_named) retries on the
          next provider.  Emitting WARN/ERROR here creates noise on
          recovered cascades.  The cascade layer logs [cascade-fallback] at
          INFO when it retries and emits ERROR only on full exhaustion. *)

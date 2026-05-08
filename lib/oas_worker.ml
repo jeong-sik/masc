@@ -5,7 +5,7 @@
     Implementation split into:
     - {!Cascade_legacy_runner} — cascade metrics types, observation, recording
     - {!Cascade_runner} — config, build, run, run_with_masc_tools
-    - {!Oas_worker_named} — run_named, run_model_by_label, convenience wrappers
+    - {!Keeper_turn_driver} — run_named, run_model_by_label, convenience wrappers
 
     @since God file decomposition *)
 
@@ -13,4 +13,4 @@
    so the alias is available for the .mli contract. *)
 include Cascade_runner
 include Cascade_legacy_runner
-include Oas_worker_named
+include Keeper_turn_driver

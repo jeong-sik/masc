@@ -13,7 +13,7 @@
     pinned at this boundary.
 
     All model-selection and cascade logic lives in
-    {!Cascade_legacy_runner} and {!Oas_worker_named}.
+    {!Cascade_legacy_runner} and {!Keeper_turn_driver}.
 
     Internal helpers stay private at this boundary
     ([lowercase_enum_case_name],

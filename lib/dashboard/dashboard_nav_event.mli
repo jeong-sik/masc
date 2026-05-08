@@ -8,11 +8,11 @@
     discarded after the counter increment.
 *)
 
-type event = {
-  surface : string;
-  section : string option;
-  redirected_from : string option;
-}
+type event =
+  { surface : string
+  ; section : string option
+  ; redirected_from : string option
+  }
 
 (** Strict allowlist of valid surface IDs. Mirrors [VALID_TABS] in
     [dashboard/src/types/sse.ts]. *)

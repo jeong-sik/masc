@@ -149,9 +149,16 @@ let verdict_for_argv ~actor ~raw_source ~summary ~argv ?env ?cwd () =
   | Error `Parse_failed ->
     Error (`Denied Verdict.Parse_failed)
   | Ok simple ->
-    let caps = Capability_check.of_simple simple in
     let overlay = Approval_config.lookup rollout_config ~actor:(Agent_id.of_string actor) in
     let policy : Approval_policy.t = { raw_source; summary } in
+    let typed = Shell_ir_typed.of_simple simple in
+    let caps =
+      match typed with
+      | Shell_ir_typed.W (Shell_ir_typed.Generic _) ->
+        Capability_check.of_simple simple
+      | _ ->
+        Capability_check_typed.of_command typed
+    in
     let verdict = Approval_policy.decide policy ~overlay ~caps ~simple in
     Ok verdict
 

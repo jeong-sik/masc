@@ -30,7 +30,7 @@ let current_mode () =
   | None ->
       let m =
         match Sys.getenv_opt env_var_name with
-        | None -> Observe
+        | None -> Enforce
         | Some raw -> parse_mode raw
       in
       mode_cache := Some m;

@@ -955,10 +955,17 @@ module KeeperRetryBackoff = struct
       it up — the catalog only scans lib/config/env_config_*.ml.
 
       Env: [MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC].
-      Default: 60.0. *)
+      Default: 180.0.
+
+      Calibrated to match [Cascade_attempt_liveness.local_27b.ttft_max]
+      (180 s) so that slow-but-honest Ollama 27B/70B streams are not
+      denied a degraded retry solely because their first-token latency
+      exceeds the old 60 s floor.  Cloud providers rarely need retries
+      at all; when they do, 180 s is still well within reasonable
+      tail latency. *)
   let degraded_retry_slot_phase_budget_sec =
     Float.max 5.0
-      (get_float ~default:60.0
+      (get_float ~default:180.0
          "MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC")
 end
 

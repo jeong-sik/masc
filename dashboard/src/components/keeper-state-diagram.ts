@@ -50,6 +50,7 @@ const PHASE_ID_MAP: Record<string, string> = {
   Crashed: 'Crashed',
   Restarting: 'Restarting',
   Dead: 'Dead',
+  Zombie: 'Zombie',
   offline: 'Offline',
   running: 'Running',
   failing: 'Failing',
@@ -62,6 +63,7 @@ const PHASE_ID_MAP: Record<string, string> = {
   crashed: 'Crashed',
   restarting: 'Restarting',
   dead: 'Dead',
+  zombie: 'Zombie',
 }
 
 const INVARIANT_LABELS: Array<[keyof KeeperCompositeSnapshot['invariants'], string]> = [

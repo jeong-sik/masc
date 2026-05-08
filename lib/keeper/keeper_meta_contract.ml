@@ -392,6 +392,13 @@ let cascade_name_of_meta (m : keeper_meta) : string =
   | _ -> m.cascade_name
 ;;
 
+let set_cascade_name (name : string) (m : keeper_meta) : keeper_meta =
+  let cascade_ref =
+    Some Cascade_ref.{ group = name; item = None }
+  in
+  { m with cascade_name = name; cascade_ref }
+;;
+
 let proactive_cycle_outcome_to_string = function
   | Proactive_never_started -> "never_started"
   | Proactive_unknown -> "unknown"

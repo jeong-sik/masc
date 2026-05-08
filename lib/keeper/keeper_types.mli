@@ -305,6 +305,12 @@ val cascade_name_of_meta : keeper_meta -> string
     routing — read sites should use this helper instead of touching
     [m.cascade_name] directly. *)
 
+val set_cascade_name : string -> keeper_meta -> keeper_meta
+(** [set_cascade_name name m] pins both [cascade_name] and [cascade_ref]
+    to [name] in a single update. Use for every write that changes the
+    keeper's cascade routing target — direct field-only updates produce
+    drift. *)
+
 val tool_preset_to_string : tool_preset -> string
 val tool_preset_of_string : string -> tool_preset option
 

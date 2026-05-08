@@ -260,7 +260,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
          cascade resolution uses the item's group. *)
       let meta =
         match selected_item with
-        | Some (group, _item) -> { meta with cascade_name = group }
+        | Some (group, _item) -> set_cascade_name group meta
         | None -> meta
       in
       let effective_cascade_name =
@@ -278,7 +278,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         in
         Prometheus.inc_counter Keeper_metrics.metric_keeper_fsm_edge_transitions
           ~labels:[("edge", "ksm_to_kcl_routing")] ();
-        let routed_meta = { meta with cascade_name = routing.effective_cascade } in
+        let routed_meta = set_cascade_name routing.effective_cascade meta in
         let routed_labels =
           Keeper_model_labels.configured_model_labels_of_meta routed_meta
         in
@@ -348,7 +348,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
          starves the keeper. *)
       let saturation_skip_meta =
         let meta_for_check =
-          { meta with cascade_name = effective_cascade_name }
+          set_cascade_name effective_cascade_name meta
         in
         let labels =
           Keeper_coordination.effective_model_labels_for_turn meta_for_check
@@ -436,7 +436,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       let build_cascade_execution ~(cascade_name : KCP.runtime_name) :
           (cascade_execution, Agent_sdk.Error.sdk_error) result =
         let cascade_name_string = KCP.runtime_name_to_string cascade_name in
-        let meta_for_cascade = { meta with cascade_name = cascade_name_string } in
+        let meta_for_cascade = set_cascade_name cascade_name_string meta in
         let model_labels =
           Keeper_coordination.effective_model_labels_for_turn meta_for_cascade
         in

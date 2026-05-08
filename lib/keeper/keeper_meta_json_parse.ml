@@ -596,7 +596,17 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ; long_goal = identity.pk_long_goal
                    ; social_model = identity.pk_social_model
                    ; cascade_name = identity.pk_cascade_name
-                   ; cascade_ref = identity.pk_cascade_ref
+                   ; cascade_ref =
+                       (match identity.pk_cascade_ref with
+                        | Some _ as ref_ -> ref_
+                        | None ->
+                            (* RFC-0041: derive cascade_ref from legacy
+                               cascade_name string when persisted JSON
+                               predates the field. *)
+                            Some Cascade_ref.{
+                              group = identity.pk_cascade_name;
+                              item = None;
+                            })
                    ; models = identity.pk_models
                    ; will = identity.pk_will
                    ; needs = identity.pk_needs

@@ -527,6 +527,13 @@ let ensure_keeper_meta config name =
         cascade_name =
           if cascade_changed then resolved_target_cascade_name
           else meta.cascade_name;
+        cascade_ref =
+          if cascade_changed then
+            Some Cascade_ref.{
+              group = resolved_target_cascade_name;
+              item = None;
+            }
+          else meta.cascade_ref;
         goal = target_goal;
         short_goal = target_short_goal;
         mid_goal = target_mid_goal;

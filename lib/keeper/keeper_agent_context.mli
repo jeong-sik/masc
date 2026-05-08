@@ -1,4 +1,4 @@
-(** Oas_worker_exec_agent — shared {!config} surface and agent
+(** Keeper_agent_context — shared {!config} surface and agent
     assembly helpers.
 
     Owns the shared per-worker {!config} record + pure / defaulted

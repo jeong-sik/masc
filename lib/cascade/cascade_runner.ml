@@ -11,7 +11,7 @@
 (* ================================================================ *)
 
 type stop_reason =
-  Oas_worker_exec_agent.stop_reason =
+  Keeper_agent_context.stop_reason =
   | Completed
   | TurnBudgetExhausted of { turns_used : int; limit : int }
   | MutationBoundaryReached of { turns_used : int; tool_name : string option }
@@ -28,7 +28,7 @@ type cli_transport_overrides =
 }
 
 type config =
-  Oas_worker_exec_agent.config = {
+  Keeper_agent_context.config = {
   name : string;
   provider_cfg : Llm_provider.Provider_config.t;
   provider : Agent_sdk.Provider.config;
@@ -81,7 +81,7 @@ type config =
           to scrub [STATE] blocks before the 100-char truncation. *)
 }
 
-let default_config = Oas_worker_exec_agent.default_config
+let default_config = Keeper_agent_context.default_config
 
 type run_result = {
   response : Agent_sdk.Types.api_response;
@@ -214,20 +214,20 @@ let non_http_transport_of_provider =
 (* ================================================================ *)
 
 let publish_lifecycle =
-  Oas_worker_exec_checkpoint.publish_lifecycle
+  Keeper_oas_checkpoint.publish_lifecycle
 
 (* ================================================================ *)
 (* Internal: checkpoint persistence                                  *)
 (* ================================================================ *)
 
 let persist_checkpoint =
-  Oas_worker_exec_checkpoint.persist_checkpoint
+  Keeper_oas_checkpoint.persist_checkpoint
 
 let build_checkpoint =
-  Oas_worker_exec_checkpoint.build_checkpoint
+  Keeper_oas_checkpoint.build_checkpoint
 
 let partial_response_of_stop =
-  Oas_worker_exec_checkpoint.partial_response_of_stop
+  Keeper_oas_checkpoint.partial_response_of_stop
 
 (* ================================================================ *)
 (* Build                                                             *)
@@ -247,7 +247,7 @@ let build
   | Error _ as e -> e
   | Ok transport ->
       let builder =
-        Oas_worker_exec_agent.builder_without_approval ~net ~config ?transport ()
+        Keeper_agent_context.builder_without_approval ~net ~config ?transport ()
       in
       let builder =
         match config.approval with
@@ -267,7 +267,7 @@ let build
     Exposed at module level so it can be unit-tested independently of
     the network-bound [run] function. *)
 let enrich_idle_detail =
-  Oas_worker_exec_checkpoint.enrich_idle_detail
+  Keeper_oas_checkpoint.enrich_idle_detail
 
 let run_duration_ms_since started_at =
   Float.max 0.0 ((Unix.gettimeofday () -. started_at) *. 1000.0)
@@ -345,7 +345,7 @@ let resume_from_checkpoint
   | Error _ as e -> e
   | Ok transport ->
       let prepared_resume =
-        Oas_worker_exec_agent.prepare_resume ~config ~checkpoint
+        Keeper_agent_context.prepare_resume ~config ~checkpoint
       in
       Log.Misc.info
         "oas_worker %s: resume checkpoint_turn_count=%d per_call_turn_budget=%d effective_max_turns=%d"

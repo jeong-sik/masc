@@ -113,6 +113,8 @@
   keeper_agent_result
   keeper_agent_error
   keeper_agent_memory_episode
+  keeper_agent_context
+  keeper_oas_checkpoint
   keeper_exec_context
   keeper_guards
   keeper_turn_setup
@@ -166,8 +168,6 @@
   tool_misc_admin
   tool_misc_web_search
   tool_misc_web_fetch
-  oas_worker_exec_agent
-  oas_worker_exec_checkpoint
   oas_worker_named
   meta_cognition_types
   meta_cognition_rules

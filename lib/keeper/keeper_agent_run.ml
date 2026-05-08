@@ -854,9 +854,9 @@ let run_turn
          let finalize_response_text raw_response_text =
            let stop_reason_str =
              match result.stop_reason with
-             | Oas_worker.Completed -> "completed"
-             | Oas_worker.TurnBudgetExhausted _ -> "budget_exhausted"
-             | Oas_worker.MutationBoundaryReached { tool_name; _ } ->
+             | Cascade_runner.Completed -> "completed"
+             | Cascade_runner.TurnBudgetExhausted _ -> "budget_exhausted"
+             | Cascade_runner.MutationBoundaryReached { tool_name; _ } ->
                  (match tool_name with
                   | Some tool -> Printf.sprintf "mutation_boundary(%s)" tool
                   | None -> "mutation_boundary")

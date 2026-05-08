@@ -2469,10 +2469,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           | None -> ());
           let outcome_str =
             match result.stop_reason with
-            | Oas_worker.Completed -> "completed"
-            | Oas_worker.TurnBudgetExhausted { turns_used; limit; _ } ->
+            | Cascade_runner.Completed -> "completed"
+            | Cascade_runner.TurnBudgetExhausted { turns_used; limit; _ } ->
                 Printf.sprintf "budget_exhausted(%d/%d)" turns_used limit
-            | Oas_worker.MutationBoundaryReached { turns_used; tool_name } ->
+            | Cascade_runner.MutationBoundaryReached { turns_used; tool_name } ->
                 (match tool_name with
                  | Some tool ->
                      Printf.sprintf "mutation_boundary(%d:%s)" turns_used tool
@@ -2481,9 +2481,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           in
           let outcome_label =
             match result.stop_reason with
-            | Oas_worker.Completed -> "success"
-            | Oas_worker.TurnBudgetExhausted _ -> "budget_exhausted"
-            | Oas_worker.MutationBoundaryReached _ -> "mutation_boundary"
+            | Cascade_runner.Completed -> "success"
+            | Cascade_runner.TurnBudgetExhausted _ -> "budget_exhausted"
+            | Cascade_runner.MutationBoundaryReached _ -> "mutation_boundary"
           in
           Prometheus.inc_counter Keeper_metrics.metric_keeper_turns
             ~labels:[("keeper_name", updated_meta.name); ("outcome", outcome_label)] ();
@@ -2593,7 +2593,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ~prev:Keeper_turn_fsm.Streaming
             Keeper_turn_fsm.Completing;
           (match result.stop_reason with
-           | Oas_worker.TurnBudgetExhausted { turns_used; limit } ->
+           | Cascade_runner.TurnBudgetExhausted { turns_used; limit } ->
              (* INFO, not WARN: mirrors MutationBoundaryReached below.
                 The keeper made progress and saved a checkpoint; this is
                 a normal pause-and-resume signal, not a failure. *)
@@ -2605,14 +2605,14 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 Reset failures since the turn itself ran successfully. *)
              Keeper_registry.reset_turn_failures ~base_path:config.base_path
                updated_meta.name
-           | Oas_worker.MutationBoundaryReached { tool_name; _ } ->
+           | Cascade_runner.MutationBoundaryReached { tool_name; _ } ->
              Log.Keeper.info
                "keeper:%s mutation boundary reached after %s, checkpoint saved — will resume next cycle"
                updated_meta.name
                (match tool_name with Some tool -> tool | None -> "committed tool");
              Keeper_registry.reset_turn_failures ~base_path:config.base_path
                updated_meta.name
-           | Oas_worker.Completed ->
+           | Cascade_runner.Completed ->
              Keeper_registry.reset_turn_failures ~base_path:config.base_path
                updated_meta.name);
           Keeper_turn_fsm.emit_transition

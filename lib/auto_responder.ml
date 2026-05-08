@@ -186,7 +186,7 @@ let call_model_direct_sync ~agent_type ~prompt =
       )
     with
     | Ok result ->
-        let resp = result.Keeper_turn_driver.response in
+        let resp = result.Cascade_runner.response in
         let text = Agent_sdk_response.text_of_response resp in
         debug_log
           (Printf.sprintf "MODEL_USED %s for agent_type=%s"

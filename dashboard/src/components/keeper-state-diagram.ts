@@ -143,8 +143,15 @@ export function KeeperStateDiagramPanel({ keeperName, snapshot: externalSnapshot
     setDiagramError(null)
     setStateDiagram(null)
 
+    // RFC-0046 §7 #1: skip composite fetch when parent supplies it.
+    // Caller-passed `undefined` means standalone mode (legacy); `null`
+    // means parent is loading — wait rather than dual-fetch.
+    const compositePromise: Promise<KeeperCompositeSnapshot | null> = externalSnapshot !== undefined
+      ? Promise.resolve(externalSnapshot)
+      : fetchKeeperComposite(keeperName, { signal: controller.signal })
+
     Promise.allSettled([
-      fetchKeeperComposite(keeperName, { signal: controller.signal }),
+      compositePromise,
       fetchKeeperStateDiagram(keeperName, { signal: controller.signal }),
       fetchKeeperTransitions(keeperName, 5, { signal: controller.signal }),
     ])

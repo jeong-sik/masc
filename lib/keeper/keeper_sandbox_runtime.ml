@@ -33,12 +33,18 @@ let docker_command_argv () =
   | _ -> [ docker_command () ]
 
 let docker_info_security_options ~timeout_sec =
+  let argv =
+    docker_command_argv () @ [ "info"; "--format"; "{{json .SecurityOptions}}" ]
+  in
   let st, out =
-    Process_eio.run_argv_with_status
+    Masc_exec.Exec_gate.run_argv_with_status
+      ~actor:"System_task_sandbox"
+      ~raw_source:(String.concat " " argv)
+      ~summary:"keeper sandbox docker info"
       ~env:(Unix.environment ())
       ~cwd:(Sys.getcwd ())
       ~timeout_sec
-      (docker_command_argv () @ [ "info"; "--format"; "{{json .SecurityOptions}}" ])
+      argv
   in
   if st <> Unix.WEXITED 0 then
     Error
@@ -488,12 +494,18 @@ let inspect_cleanup_container ~container_id ~timeout_sec =
     ^ sandbox_ttl_sec_label_key
     ^ "\" }}"
   in
+  let argv =
+    docker_command_argv () @ [ "inspect"; "--format"; format; container_id ]
+  in
   let st, out =
-    Process_eio.run_argv_with_status
+    Masc_exec.Exec_gate.run_argv_with_status
+      ~actor:"System_task_sandbox"
+      ~raw_source:(String.concat " " argv)
+      ~summary:"keeper sandbox docker inspect cleanup"
       ~env:(Unix.environment ())
       ~cwd:(Sys.getcwd ())
       ~timeout_sec
-      (docker_command_argv () @ [ "inspect"; "--format"; format; container_id ])
+      argv
   in
   if st <> Unix.WEXITED 0 then
     Error
@@ -510,12 +522,16 @@ let inspect_cleanup_container ~container_id ~timeout_sec =
              container_id)
 
 let remove_cleanup_container ~container_id ~timeout_sec =
+  let argv = docker_command_argv () @ [ "rm"; "-f"; container_id ] in
   let st, out =
-    Process_eio.run_argv_with_status
+    Masc_exec.Exec_gate.run_argv_with_status
+      ~actor:"System_task_sandbox"
+      ~raw_source:(String.concat " " argv)
+      ~summary:"keeper sandbox docker rm cleanup"
       ~env:(Unix.environment ())
       ~cwd:(Sys.getcwd ())
       ~timeout_sec
-      (docker_command_argv () @ [ "rm"; "-f"; container_id ])
+      argv
   in
   if st = Unix.WEXITED 0 then
     Ok ()
@@ -529,26 +545,32 @@ let cleanup_stale_containers ?(now = Unix.gettimeofday ())
     ?(max_age_sec = Env_config_keeper.KeeperSandbox.cleanup_stale_after_sec ())
     ~base_path ~timeout_sec () =
   try
+    let argv =
+      docker_command_argv ()
+      @ [
+          "ps";
+          "-aq";
+          "--filter";
+          "label="
+          ^ sandbox_component_label_key
+          ^ "="
+          ^ sandbox_component_label_value;
+          "--filter";
+          "label="
+          ^ sandbox_base_path_hash_label_key
+          ^ "="
+          ^ base_path_hash base_path;
+        ]
+    in
     let st, out =
-      Process_eio.run_argv_with_status
+      Masc_exec.Exec_gate.run_argv_with_status
+        ~actor:"System_task_sandbox"
+        ~raw_source:(String.concat " " argv)
+        ~summary:"keeper sandbox docker ps cleanup"
         ~env:(Unix.environment ())
         ~cwd:(Sys.getcwd ())
         ~timeout_sec
-        (docker_command_argv ()
-        @ [
-            "ps";
-            "-aq";
-            "--filter";
-            "label="
-            ^ sandbox_component_label_key
-            ^ "="
-            ^ sandbox_component_label_value;
-            "--filter";
-            "label="
-            ^ sandbox_base_path_hash_label_key
-            ^ "="
-            ^ base_path_hash base_path;
-          ])
+        argv
     in
     if st <> Unix.WEXITED 0 then
       {
@@ -609,13 +631,19 @@ let docker_filter_args ?keeper_name ?container_kind ~base_path () =
 
 let list_container_ids ?keeper_name ?container_kind ~base_path ~timeout_sec () =
   try
+    let argv =
+      docker_command_argv () @ [ "ps"; "-aq" ]
+      @ docker_filter_args ?keeper_name ?container_kind ~base_path ()
+    in
     let st, out =
-      Process_eio.run_argv_with_status
+      Masc_exec.Exec_gate.run_argv_with_status
+        ~actor:"System_task_sandbox"
+        ~raw_source:(String.concat " " argv)
+        ~summary:"keeper sandbox docker ps list"
         ~env:(Unix.environment ())
         ~cwd:(Sys.getcwd ())
         ~timeout_sec
-        (docker_command_argv () @ [ "ps"; "-aq" ]
-         @ docker_filter_args ?keeper_name ?container_kind ~base_path ())
+        argv
     in
     if st = Unix.WEXITED 0 then
       Ok (nonempty_lines out)
@@ -650,12 +678,18 @@ let list_containers ?keeper_name ?container_kind ~base_path ~timeout_sec () =
   | Error _ as err -> err
   | Ok [] -> Ok []
   | Ok ids ->
+      let argv =
+        docker_command_argv () @ [ "inspect"; "--format"; live_inspect_format ] @ ids
+      in
       let st, out =
-        Process_eio.run_argv_with_status
+        Masc_exec.Exec_gate.run_argv_with_status
+          ~actor:"System_task_sandbox"
+          ~raw_source:(String.concat " " argv)
+          ~summary:"keeper sandbox docker inspect live"
           ~env:(Unix.environment ())
           ~cwd:(Sys.getcwd ())
           ~timeout_sec
-          (docker_command_argv () @ [ "inspect"; "--format"; live_inspect_format ] @ ids)
+          argv
       in
       if st <> Unix.WEXITED 0 then
         Error
@@ -743,12 +777,16 @@ let docker_image_present ~image ~timeout_sec =
   if String.trim image = "" then
     Error "keeper sandbox docker image is not configured"
   else
+    let argv = docker_command_argv () @ [ "image"; "inspect"; image ] in
     let st, out =
-      Process_eio.run_argv_with_status
+      Masc_exec.Exec_gate.run_argv_with_status
+        ~actor:"System_task_sandbox"
+        ~raw_source:(String.concat " " argv)
+        ~summary:"keeper sandbox docker image inspect"
         ~env:(Unix.environment ())
         ~cwd:(Sys.getcwd ())
         ~timeout_sec
-        (docker_command_argv () @ [ "image"; "inspect"; image ])
+        argv
     in
     if st = Unix.WEXITED 0 then
       Ok ()
@@ -768,23 +806,29 @@ let docker_image_required_commands ~image ~timeout_sec =
       "missing=''; for cmd in %s; do if ! command -v \"$cmd\" >/dev/null 2>&1; then missing=\"$missing$cmd\\n\"; fi; done; printf '%%s' \"$missing\""
       quoted
   in
+  let argv =
+    docker_command_argv ()
+    @ [
+        "run";
+        "--rm";
+        "--network";
+        "none";
+        "--entrypoint";
+        "sh";
+        image;
+        "-lc";
+        script;
+      ]
+  in
   let st, out =
-    Process_eio.run_argv_with_status
+    Masc_exec.Exec_gate.run_argv_with_status
+      ~actor:"System_task_sandbox"
+      ~raw_source:(String.concat " " argv)
+      ~summary:"keeper sandbox docker run required commands"
       ~env:(Unix.environment ())
       ~cwd:(Sys.getcwd ())
       ~timeout_sec
-      (docker_command_argv ()
-      @ [
-          "run";
-          "--rm";
-          "--network";
-          "none";
-          "--entrypoint";
-          "sh";
-          image;
-          "-lc";
-          script;
-        ])
+      argv
   in
   if st = Unix.WEXITED 0 then
     let missing =

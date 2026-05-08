@@ -900,7 +900,7 @@ The v0.18.0 tag exists but its GitHub release workflow failed: the OAS pin bump 
 
 ### Changed (refactor)
 - Design system PR-CS5 → PR-CS12: ActionButton/Select migration across runtime-monitor (#10722), connector-quick-bind (#10717), governance-monitor (#10715), agent-profile (#10705), memory-post-detail (#10702), tool-picker (#10694), error-panel (#10687), autoresearch (#10683).
-- Rename `Oas_sse_bridge` → `Oas_event_bridge` (transport-agnostic, #10711).
+- Rename `Oas_sse_bridge` → `Cascade_event_bridge` (transport-agnostic, #10711).
 
 ### Chore
 - OAS pin: bump SHA to `97b8a603` (OAS #1201 TurnReady event, #10704, #10709).

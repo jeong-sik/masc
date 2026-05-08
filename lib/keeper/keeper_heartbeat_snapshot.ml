@@ -469,7 +469,7 @@ let write_heartbeat_snapshot
        Log.Keeper.error "heartbeat SSE broadcast failed: %s" (Printexc.to_string exn));
     (match Keeper_event_bus.get () with
      | Some bus ->
-       Oas_events.publish_keeper_snapshot
+       Cascade_events.publish_keeper_snapshot
          bus
          ~keeper_name:meta_current.name
          ~generation:meta_current.runtime.generation

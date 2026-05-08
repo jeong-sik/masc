@@ -1087,7 +1087,7 @@ let () =
           c'.compact_retry_exhausted);
     ];
     "lifecycle_events_ssot", [
-      (* Issue #8575: Oas_events.publish_keeper_lifecycle docstring
+      (* Issue #8575: Cascade_events.publish_keeper_lifecycle docstring
          used to list 5 event names (started/stopped/crashed/restarted/
          dead) while the supervisor + keepalive together emit 10 —
          operators reading the doc silently missed the cleanup /

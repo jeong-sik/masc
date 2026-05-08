@@ -72,6 +72,19 @@ let set_health ~keeper_name status =
     Hashtbl.replace health_cache (keeper_name, "")
       (status, Time_compat.now ()))
 
+(** [get_cascade_status ~cascade_name] reads the cascade-level entry
+    written by [set_health]/[run_once].  Three-valued:
+      - [Healthy]    : last probe saw the cascade at < threshold ratio.
+      - [Unhealthy r]: last probe saw the cascade at >= threshold ratio.
+      - [Unknown]    : probe never wrote this cascade (e.g. boot before
+                       first sweep, or no running keepers in the cascade
+                       at the time of the last scan). *)
+let get_cascade_status ~cascade_name =
+  Eio.Mutex.use_ro health_cache_mu (fun () ->
+    match Hashtbl.find_opt health_cache (cascade_name, "") with
+    | Some (status, _) -> status
+    | None -> Unknown)
+
 (* ------------------------------------------------------------------ *)
 (* Cascade health check                                               *)
 (* ------------------------------------------------------------------ *)

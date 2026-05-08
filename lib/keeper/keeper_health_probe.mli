@@ -52,11 +52,33 @@ val set_health : keeper_name:string -> health_status -> unit
 val check_cascade_health :
   base_path:string -> (string * bool) list
 
+(** [get_cascade_status ~cascade_name] returns the cached cascade-level
+    [health_status] written by [run_once]/[set_health].  Unlike
+    [is_healthy], this preserves the [Unknown] case so the supervisor's
+    auto-resume guard can distinguish "no probe data yet" from
+    "probe observed restart pressure" and treat the former
+    permissively.
+
+    Background: prior to wiring this distinction, the supervisor's
+    Phase 3.5 guard called [is_healthy] which collapsed [Unknown] and
+    [Unhealthy] to [false] — turning the boot-time cold-cache window
+    into a permanent auto-resume lockout for every cascade. *)
+val get_cascade_status : cascade_name:string -> health_status
+
+(** [run_once ~base_path] runs [check_cascade_health] and writes the
+    results into the cascade cache.  Idempotent and bounded (registry
+    scan, no I/O).  Safe to call from the supervisor sweep on every
+    beat — [Keeper_supervisor.sweep_and_recover] does so to keep the
+    cache live without depending on the background fiber. *)
+val run_once : base_path:string -> unit
+
 (** {1 Background probe fiber} *)
 
 (** [start_probe ~sw ~base_path ~interval_sec] spawns a background Eio
     fiber that runs [check_cascade_health] every [interval_sec] seconds
     and updates the internal cache.  The fiber exits when [sw] is
-    cancelled. *)
+    cancelled.  Currently unused — the supervisor calls [run_once]
+    inline.  Retained for future use when a faster cadence than the
+    30 s sweep is needed. *)
 val start_probe :
   sw:Eio.Switch.t -> base_path:string -> interval_sec:float -> unit

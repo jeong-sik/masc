@@ -1,0 +1,39 @@
+name: RFC §1 Enforcer
+
+on:
+  pull_request:
+    paths:
+      - 'docs/rfc/**'
+      - 'docs/design/**'
+  workflow_dispatch:
+
+jobs:
+  enforce:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Check changed RFC §1 completeness
+        run: |
+          FAILED=0
+          while read -r f; do
+            [ -z "$f" ] && continue
+            echo "--- Checking docs/rfc/$f ---"
+            python scripts/rfc_enforcer.py --check docs/rfc/ --files "$f" --ignore-missing-section1 || FAILED=1
+          done < <(git diff --name-only origin/main...HEAD | grep '^docs/rfc/RFC-' | sed 's|^docs/rfc/||')
+          exit $FAILED
+
+      - name: Check changed design doc completeness
+        run: |
+          FAILED=0
+          while read -r f; do
+            [ -z "$f" ] && continue
+            echo "--- Checking docs/design/$f ---"
+            python scripts/rfc_enforcer.py --check docs/design/ --files "$f" --no-tmp-check --ignore-missing-section1 || FAILED=1
+          done < <(git diff --name-only origin/main...HEAD | grep '^docs/design/' | sed 's|^docs/design/||')
+          exit $FAILED

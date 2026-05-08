@@ -1104,6 +1104,17 @@ let prepare_agent_setup
                  { turn; current_params; messages; last_tool_results; _ } ->
                let hook_t0 = Time_compat.now () in
                acc.current_turn <- turn;
+               (* RFC-0045: signal an SDK-turn boundary so the in-turn FSM
+                  fields ([turn_phase], [cascade_state], [decision_stage])
+                  are reset before the hook writes [Cascade_selecting] /
+                  [Decision_tool_policy_selected] / [Turn_prompting] below.
+                  The MASC keeper-turn boundary ([mark_turn_started]) only
+                  fires once per [Agent_sdk.run_loop] call; every additional
+                  SDK turn inside that loop must use this entry point or
+                  [validate_turn_phase_transition] rejects the transition
+                  from the previous SDK turn's [Turn_finalizing] terminal. *)
+               Keeper_registry.mark_sdk_turn_started
+                 ~base_path:config.base_path meta.name;
                let intent =
                  if Keeper_config.keeper_adaptive_thinking_mode () then
                    let last_tool_calls =

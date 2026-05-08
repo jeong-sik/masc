@@ -708,6 +708,7 @@ let validate_decision_transition ~from ~to_ =
          match (from, to_) with
          | (Decision_undecided, Decision_guard_ok) -> true
          | (Decision_undecided, Decision_gate_rejected) -> true
+         | (Decision_undecided, Decision_tool_policy_selected) -> true
          | (Decision_guard_ok, Decision_tool_policy_selected) -> true
          | (old, new_) when old = new_ -> true
          | _ -> false

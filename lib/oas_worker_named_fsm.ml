@@ -30,7 +30,18 @@ let sdk_error_to_cascade_outcome (err : Agent_sdk.Error.sdk_error)
       (Cascade_fsm.Call_err
          (Llm_provider.Http_client.NetworkError
             { message = detail; kind = Llm_provider.Http_client.Unknown }))
-  | _ -> (
+  (* All other MASC-internal classifications (and unclassified errors) fall
+     through to the structured [match err with] below to derive the cascade
+     outcome from the raw [sdk_error] payload. *)
+  | Some (Oas_worker_named_error.Cascade_exhausted _)
+  | Some (Oas_worker_named_error.No_tool_capable_provider _)
+  | Some (Oas_worker_named_error.Accept_rejected _)
+  | Some (Oas_worker_named_error.Admission_queue_timeout _)
+  | Some (Oas_worker_named_error.Admission_queue_rejected _)
+  | Some (Oas_worker_named_error.Turn_timeout _)
+  | Some (Oas_worker_named_error.Oas_timeout_budget _)
+  | Some (Oas_worker_named_error.Ambiguous_post_commit _)
+  | None -> (
   match err with
   | Agent_sdk.Error.Api api_err ->
     let http_err = match[@warning "-8"] api_err with
@@ -85,7 +96,28 @@ let sdk_error_to_cascade_outcome (err : Agent_sdk.Error.sdk_error)
     Some
       (Cascade_fsm.Call_err
          (Llm_provider.Http_client.AcceptRejected { reason = detail }))
-  | _ -> None)
+  (* Other Agent error variants are structural (budget, idle, exit, retries,
+     guardrails, tripwires) and would recur on any model — not cascadeable. *)
+  | Agent_sdk.Error.Agent (MaxTurnsExceeded _)
+  | Agent_sdk.Error.Agent (TokenBudgetExceeded _)
+  | Agent_sdk.Error.Agent (CostBudgetExceeded _)
+  | Agent_sdk.Error.Agent (IdleDetected _)
+  | Agent_sdk.Error.Agent (ToolRetryExhausted _)
+  | Agent_sdk.Error.Agent (GuardrailViolation _)
+  | Agent_sdk.Error.Agent (TripwireViolation _)
+  | Agent_sdk.Error.Agent (ExitConditionMet _) -> None
+  (* Other Config errors (different InvalidConfig field, MissingEnvVar,
+     UnsupportedProvider) and non-Api / non-Agent / non-Config families are
+     not cascade-recoverable. *)
+  | Agent_sdk.Error.Config (InvalidConfig _)
+  | Agent_sdk.Error.Config (MissingEnvVar _)
+  | Agent_sdk.Error.Config (UnsupportedProvider _)
+  | Agent_sdk.Error.Mcp _
+  | Agent_sdk.Error.Serialization _
+  | Agent_sdk.Error.Io _
+  | Agent_sdk.Error.Orchestration _
+  | Agent_sdk.Error.A2a _
+  | Agent_sdk.Error.Internal _ -> None)
 
 let sdk_error_is_model_access_denied (err : Agent_sdk.Error.sdk_error) =
   match sdk_error_to_cascade_outcome err with
@@ -392,7 +424,15 @@ let sdk_error_is_hard_quota (err : Agent_sdk.Error.sdk_error) : bool =
      | Some message ->
        message_looks_like_cli_wrapped_hard_quota message
      | None -> false)
-  | _ -> false
+  (* Non-Api error families never carry provider-level hard-quota signals. *)
+  | Agent_sdk.Error.Agent _
+  | Agent_sdk.Error.Mcp _
+  | Agent_sdk.Error.Config _
+  | Agent_sdk.Error.Serialization _
+  | Agent_sdk.Error.Io _
+  | Agent_sdk.Error.Orchestration _
+  | Agent_sdk.Error.A2a _
+  | Agent_sdk.Error.Internal _ -> false
 
 let provider_label provider =
   match String.trim provider with
@@ -437,7 +477,15 @@ let sdk_error_to_provider_error ~provider err =
       retry_api_error_to_provider_error ~provider
         ~capacity_exhausted:(sdk_error_is_hard_quota err)
         api_err
-  | _ -> None
+  (* Non-Api families do not map to a provider-level error. *)
+  | Agent_sdk.Error.Agent _
+  | Agent_sdk.Error.Mcp _
+  | Agent_sdk.Error.Config _
+  | Agent_sdk.Error.Serialization _
+  | Agent_sdk.Error.Io _
+  | Agent_sdk.Error.Orchestration _
+  | Agent_sdk.Error.A2a _
+  | Agent_sdk.Error.Internal _ -> None
 
 let provider_error_total_metric = "masc_provider_error_total"
 
@@ -476,7 +524,22 @@ let timeout_source_label (err : Agent_sdk.Error.sdk_error) : string =
     match err with
     | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout { message }) ->
         String_util.contains_substring_ci message "max_execution_time_s"
-    | _ -> false
+    | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _)
+    | Agent_sdk.Error.Api (Llm_provider.Retry.Overloaded _)
+    | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)
+    | Agent_sdk.Error.Api (Llm_provider.Retry.AuthError _)
+    | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest _)
+    | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
+    | Agent_sdk.Error.Api (Llm_provider.Retry.ContextOverflow _)
+    | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError _)
+    | Agent_sdk.Error.Agent _
+    | Agent_sdk.Error.Mcp _
+    | Agent_sdk.Error.Config _
+    | Agent_sdk.Error.Serialization _
+    | Agent_sdk.Error.Io _
+    | Agent_sdk.Error.Orchestration _
+    | Agent_sdk.Error.A2a _
+    | Agent_sdk.Error.Internal _ -> false
   in
   if is_max_execution_time then "max_execution_time" else "provider"
 
@@ -521,7 +584,25 @@ let sdk_error_soft_rate_limited (err : Agent_sdk.Error.sdk_error)
   | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited { retry_after; _ } as api_err)
     when not (Llm_provider.Retry.is_hard_quota api_err) ->
     Some retry_after
-  | _ -> None
+  (* Hard-quota RateLimited is handled separately and other Api / non-Api
+     errors do not represent soft rate limiting. *)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.Overloaded _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.AuthError _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.ContextOverflow _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _)
+  | Agent_sdk.Error.Agent _
+  | Agent_sdk.Error.Mcp _
+  | Agent_sdk.Error.Config _
+  | Agent_sdk.Error.Serialization _
+  | Agent_sdk.Error.Io _
+  | Agent_sdk.Error.Orchestration _
+  | Agent_sdk.Error.A2a _
+  | Agent_sdk.Error.Internal _ -> None
 
 let sdk_error_is_max_turns_exceeded (err : Agent_sdk.Error.sdk_error) : bool =
   match Oas_worker_named_error.classify_masc_internal_error err with

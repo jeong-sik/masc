@@ -93,3 +93,13 @@ let of_failure_reason : Keeper_registry.failure_reason -> t = function
   | Keeper_registry.Fiber_unresolved -> Fiber_unresolved
   | Keeper_registry.Exception msg -> Exception_unhandled msg
 ;;
+
+let of_failure_reason_option = function
+  | Some fr -> of_failure_reason fr
+  | None ->
+    (* Legacy [stale_terminal_reason_code None] emitted "stale_turn_timeout".
+       Canonical sub-class for that wire string is [In_turn_hung] (see
+       [of_wire]); we reuse it here so [to_wire (of_failure_reason_option None)]
+       is byte-for-byte equal to the pre-RFC default. *)
+    Stale_turn_timeout_in_turn
+;;

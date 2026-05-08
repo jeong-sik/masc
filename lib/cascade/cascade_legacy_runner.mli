@@ -10,7 +10,7 @@
       OAS-named worker path.
     - {b Cascade observation}: the {!cascade_observation}
       record + companion attempt / fallback events,
-      built per-turn in {!Oas_worker_named} via the
+      built per-turn in {!Keeper_turn_driver} via the
       {!cascade_metrics_for_candidates} +
       {!cascade_observation_with_metrics} pair.
     - {b Cascade audit actor}: a single-fiber consumer

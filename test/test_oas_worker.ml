@@ -51,8 +51,8 @@ open Masc_mcp
 
 module Oas = Agent_sdk
 
-let internal_cascade_name = Oas_worker_named.cascade_name_of_string
-let internal_cascade_name_to_string = Oas_worker_named.cascade_name_to_string
+let internal_cascade_name = Keeper_turn_driver.cascade_name_of_string
+let internal_cascade_name_to_string = Keeper_turn_driver.cascade_name_to_string
 
 let ctx_messages = Keeper_exec_context.messages_of_context
 let ctx_system_prompt = Keeper_exec_context.system_prompt_of_context
@@ -920,7 +920,7 @@ let test_sdk_error_is_hard_quota_detects_gemini_cli_network_wrapper () =
          })
   in
   Alcotest.(check bool) "Gemini CLI quota wrapper counts as hard quota" true
-    (Oas_worker_named.sdk_error_is_hard_quota err)
+    (Keeper_turn_driver.sdk_error_is_hard_quota err)
 
 let test_sdk_error_is_hard_quota_detects_claude_cli_limit_wrapper () =
   let err =
@@ -933,7 +933,7 @@ let test_sdk_error_is_hard_quota_detects_claude_cli_limit_wrapper () =
          })
   in
   Alcotest.(check bool) "Claude CLI limit wrapper counts as hard quota" true
-    (Oas_worker_named.sdk_error_is_hard_quota err)
+    (Keeper_turn_driver.sdk_error_is_hard_quota err)
 
 let test_sdk_error_is_hard_quota_detects_claude_org_monthly_limit_wrapper () =
   let err =
@@ -946,7 +946,7 @@ let test_sdk_error_is_hard_quota_detects_claude_org_monthly_limit_wrapper () =
          })
   in
   Alcotest.(check bool) "Claude org monthly usage limit counts as hard quota" true
-    (Oas_worker_named.sdk_error_is_hard_quota err)
+    (Keeper_turn_driver.sdk_error_is_hard_quota err)
 
 (* 2026-04-29: Anthropic console started returning the user-set monthly cap
    as HTTP 400 [invalid_request_error] instead of a 429.  The CLI wrapper
@@ -968,7 +968,7 @@ let test_sdk_error_is_hard_quota_detects_claude_specified_limit_cli_wrapper () =
   in
   Alcotest.(check bool)
     "Claude CLI 400-wrapped specified-limit counts as hard quota" true
-    (Oas_worker_named.sdk_error_is_hard_quota err)
+    (Keeper_turn_driver.sdk_error_is_hard_quota err)
 
 let test_sdk_error_is_hard_quota_detects_anthropic_invalid_request_specified_limit () =
   let err =
@@ -982,7 +982,7 @@ let test_sdk_error_is_hard_quota_detects_anthropic_invalid_request_specified_lim
   in
   Alcotest.(check bool)
     "Direct Anthropic InvalidRequest specified-limit counts as hard quota" true
-    (Oas_worker_named.sdk_error_is_hard_quota err)
+    (Keeper_turn_driver.sdk_error_is_hard_quota err)
 
 let test_sdk_error_is_max_turns_detects_claude_cli_wrapper () =
   let err =
@@ -995,9 +995,9 @@ let test_sdk_error_is_max_turns_detects_claude_cli_wrapper () =
          })
   in
   Alcotest.(check bool) "Claude CLI max turns counts as max-turns" true
-    (Oas_worker_named.sdk_error_is_max_turns_exceeded err);
+    (Keeper_turn_driver.sdk_error_is_max_turns_exceeded err);
   Alcotest.(check bool) "Claude CLI max turns is not hard quota" false
-    (Oas_worker_named.sdk_error_is_hard_quota err)
+    (Keeper_turn_driver.sdk_error_is_hard_quota err)
 
 let test_sdk_error_is_hard_quota_keeps_transient_network_errors_false () =
   let err =
@@ -1009,7 +1009,7 @@ let test_sdk_error_is_hard_quota_keeps_transient_network_errors_false () =
          })
   in
   Alcotest.(check bool) "transient network error stays transient" false
-    (Oas_worker_named.sdk_error_is_hard_quota err)
+    (Keeper_turn_driver.sdk_error_is_hard_quota err)
 
 let test_sdk_error_is_hard_quota_preserves_rate_limited_detection () =
   let err =
@@ -1018,7 +1018,7 @@ let test_sdk_error_is_hard_quota_preserves_rate_limited_detection () =
          { retry_after = None; message = "resource exhausted" })
   in
   Alcotest.(check bool) "existing RateLimited hard quota still works" true
-    (Oas_worker_named.sdk_error_is_hard_quota err)
+    (Keeper_turn_driver.sdk_error_is_hard_quota err)
 
 let test_sdk_error_is_hard_quota_keeps_not_found_false () =
   let err =
@@ -1027,7 +1027,7 @@ let test_sdk_error_is_hard_quota_keeps_not_found_false () =
          { message = {|{"detail":"Not Found"}|} })
   in
   Alcotest.(check bool) "404-like InvalidRequest stays non-hard-quota" false
-    (Oas_worker_named.sdk_error_is_hard_quota err)
+    (Keeper_turn_driver.sdk_error_is_hard_quota err)
 
 let test_sdk_error_to_cascade_outcome_maps_not_found_to_404 () =
   let err =
@@ -1035,7 +1035,7 @@ let test_sdk_error_to_cascade_outcome_maps_not_found_to_404 () =
       (Llm_provider.Retry.InvalidRequest
          { message = {|{"detail":"Not Found"}|} })
   in
-  match Oas_worker_named.sdk_error_to_cascade_outcome err with
+  match Keeper_turn_driver.sdk_error_to_cascade_outcome err with
   | Some
       (Cascade_fsm.Call_err
          (Llm_provider.Http_client.HttpError
@@ -1051,7 +1051,7 @@ let test_sdk_error_to_cascade_outcome_keeps_invalid_request_as_400 () =
       (Llm_provider.Retry.InvalidRequest
          { message = {|{"detail":"Bad Request"}|} })
   in
-  match Oas_worker_named.sdk_error_to_cascade_outcome err with
+  match Keeper_turn_driver.sdk_error_to_cascade_outcome err with
   | Some
       (Cascade_fsm.Call_err
          (Llm_provider.Http_client.HttpError
@@ -1066,7 +1066,7 @@ let test_sdk_error_to_cascade_outcome_cascades_model_access_denied () =
   let err =
     Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest { message })
   in
-  match Oas_worker_named.sdk_error_to_cascade_outcome err with
+  match Keeper_turn_driver.sdk_error_to_cascade_outcome err with
   | Some
       (Cascade_fsm.Call_err
          (Llm_provider.Http_client.ProviderFailure
@@ -1100,10 +1100,10 @@ let test_sdk_error_is_model_access_denied_predicate () =
       (Llm_provider.Retry.InvalidRequest { message = {|{"detail":"Bad Request"}|} })
   in
   Alcotest.(check bool) "model access denied is detected" true
-    (Oas_worker_named.sdk_error_is_model_access_denied denied);
+    (Keeper_turn_driver.sdk_error_is_model_access_denied denied);
   Alcotest.(check bool) "ordinary invalid request is not model access denial"
     false
-    (Oas_worker_named.sdk_error_is_model_access_denied ordinary)
+    (Keeper_turn_driver.sdk_error_is_model_access_denied ordinary)
 
 let test_sdk_error_to_cascade_outcome_cascades_runtime_mcp_auth_config () =
   let detail = "codex_cli runtime MCP cannot carry keeper-bound auth headers" in
@@ -1111,7 +1111,7 @@ let test_sdk_error_to_cascade_outcome_cascades_runtime_mcp_auth_config () =
     Agent_sdk.Error.Config
       (Agent_sdk.Error.InvalidConfig { field = "runtime_mcp_auth"; detail })
   in
-  match Oas_worker_named.sdk_error_to_cascade_outcome err with
+  match Keeper_turn_driver.sdk_error_to_cascade_outcome err with
   | Some
       (Cascade_fsm.Call_err
          (Llm_provider.Http_client.AcceptRejected { reason })) ->
@@ -1134,18 +1134,18 @@ let test_sdk_error_to_cascade_outcome_cascades_resumable_cli_session () =
   in
   let structured =
     match
-      Oas_worker_named.sdk_error_to_resumable_cli_session
+      Keeper_turn_driver.sdk_error_to_resumable_cli_session
         ~cascade_name:(internal_cascade_name "tool_use_strict") sdk_error
     with
     | Some structured -> structured
     | None -> Alcotest.fail "expected structured resumable CLI session"
   in
-  match Oas_worker_named.sdk_error_to_cascade_outcome structured with
+  match Keeper_turn_driver.sdk_error_to_cascade_outcome structured with
   | Some
       (Cascade_fsm.Call_err
          (Llm_provider.Http_client.NetworkError { message; kind })) ->
       Alcotest.(check bool) "detail remains resumable marker" true
-        (Oas_worker_named.message_looks_like_resumable_cli_session message);
+        (Keeper_turn_driver.message_looks_like_resumable_cli_session message);
       Alcotest.(check bool) "unknown network kind" true
         (kind = Llm_provider.Http_client.Unknown)
   | outcome ->
@@ -1155,8 +1155,8 @@ let test_sdk_error_to_cascade_outcome_cascades_resumable_cli_session () =
 
 let test_sdk_error_is_resumable_cli_session_detects_structured_error () =
   let err =
-    Oas_worker_named.sdk_error_of_masc_internal_error
-      (Oas_worker_named.Resumable_cli_session
+    Keeper_turn_driver.sdk_error_of_masc_internal_error
+      (Keeper_turn_driver.Resumable_cli_session
          {
            cascade_name = internal_cascade_name "governance_judge";
            detail =
@@ -1166,9 +1166,9 @@ let test_sdk_error_is_resumable_cli_session_detects_structured_error () =
          })
   in
   Alcotest.(check bool) "structured resumable CLI session detected" true
-    (Oas_worker_named.sdk_error_is_resumable_cli_session err);
+    (Keeper_turn_driver.sdk_error_is_resumable_cli_session err);
   Alcotest.(check bool) "resumable CLI session is not hard quota" false
-    (Oas_worker_named.sdk_error_is_hard_quota err)
+    (Keeper_turn_driver.sdk_error_is_hard_quota err)
 
 let test_sdk_error_is_resumable_cli_session_detects_raw_kimi_hint () =
   let raw_message =
@@ -1180,12 +1180,12 @@ let test_sdk_error_is_resumable_cli_session_detects_raw_kimi_hint () =
          { message = raw_message; kind = Llm_provider.Http_client.Unknown })
   in
   Alcotest.(check bool) "raw Kimi resume hint detected" true
-    (Oas_worker_named.sdk_error_is_resumable_cli_session err)
+    (Keeper_turn_driver.sdk_error_is_resumable_cli_session err)
 
 let test_fallback_class_labels_resumable_cli_session () =
   let err =
-    Oas_worker_named.sdk_error_of_masc_internal_error
-      (Oas_worker_named.Resumable_cli_session
+    Keeper_turn_driver.sdk_error_of_masc_internal_error
+      (Keeper_turn_driver.Resumable_cli_session
          {
            cascade_name = internal_cascade_name "tier_fast";
            detail =
@@ -1196,7 +1196,7 @@ let test_fallback_class_labels_resumable_cli_session () =
   in
   Alcotest.(check (option string))
     "resumable session fallback class" (Some "resumable_cli_session")
-    (Oas_worker_named.sdk_error_cascade_fallback_class err)
+    (Keeper_turn_driver.sdk_error_cascade_fallback_class err)
 
 let make_openai_compat_provider_cfg ?(model_id = "mock-model")
     ?(base_url = "http://127.0.0.1:18080/v1")
@@ -1233,7 +1233,7 @@ let test_enrich_sdk_error_for_moonshot_auth_includes_env_hint () =
          { message = "Invalid Authentication" })
   in
   let rendered =
-    Oas_worker_named.enrich_sdk_error
+    Keeper_turn_driver.enrich_sdk_error
       ~cascade_name:(internal_cascade_name "keeper_unified")
       ~provider_cfg
       err
@@ -1257,7 +1257,7 @@ let test_enrich_sdk_error_for_openai_not_found_includes_endpoint_hint () =
          { message = {|{"detail":"Not Found"}|} })
   in
   let rendered =
-    Oas_worker_named.enrich_sdk_error
+    Keeper_turn_driver.enrich_sdk_error
       ~cascade_name:(internal_cascade_name "keeper_unified")
       ~provider_cfg
       err
@@ -1362,7 +1362,7 @@ let test_run_named_per_provider_timeout_uses_clock_fallback_and_exempts_last_pro
        upward, letting the first provider succeed instead of timing out. *)
     with_liveness_off @@ fun () ->
     match
-      Oas_worker_named.run_named
+      Keeper_turn_driver.run_named
         ~cascade_name:"timeout_probe"
         ~goal:"say hello"
         ~system_prompt:"system"
@@ -1483,7 +1483,7 @@ let test_run_named_skips_cooldown_primary_and_falls_back () =
       0
       (primary_calls ());
     match
-      Oas_worker_named.run_named
+      Keeper_turn_driver.run_named
         ~cascade_name:"breaker_probe_13318"
         ~goal:"say hello"
         ~system_prompt:"system"
@@ -1537,7 +1537,7 @@ let test_run_named_default_accept_allows_empty_content () =
          provider_url)
     @@ fun () ->
     match
-      Oas_worker_named.run_named
+      Keeper_turn_driver.run_named
         ~cascade_name:"empty_content_probe"
         ~goal:"return empty content"
         ~system_prompt:"system"
@@ -1589,7 +1589,7 @@ let test_run_named_accept_rejected_does_not_replay_rejected_checkpoint () =
          first_url second_url)
     @@ fun () ->
     match
-      Oas_worker_named.run_named
+      Keeper_turn_driver.run_named
         ~cascade_name:"accept_replay_probe"
         ~goal:"fallback without rejected checkpoint replay"
         ~system_prompt:"system"
@@ -1643,7 +1643,7 @@ let test_zero_turn_attempt_preserves_checkpoint () =
     ~finally:(fun () -> Agent_sdk.Agent.close agent)
     (fun () ->
       match
-        Oas_worker_named.For_testing.checkpoint_after_attempt ~agent_ref
+        Keeper_turn_driver.For_testing.checkpoint_after_attempt ~agent_ref
           (Some agent)
       with
       | Some checkpoint ->
@@ -1773,12 +1773,12 @@ let test_oas_worker_exec_build_applies_stream_idle_timeout () =
 
 let test_apply_stream_idle_timeout_default_passes_through_caller_value () =
   let provided = Some 7.5 in
-  let result = Oas_worker_named.apply_stream_idle_timeout_default provided in
+  let result = Keeper_turn_driver.apply_stream_idle_timeout_default provided in
   Alcotest.(check (option (float 0.0001)))
     "explicit Some passes through unchanged" provided result
 
 let test_apply_stream_idle_timeout_default_injects_keepalive_default () =
-  let result = Oas_worker_named.apply_stream_idle_timeout_default None in
+  let result = Keeper_turn_driver.apply_stream_idle_timeout_default None in
   let expected =
     Some Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec
   in
@@ -2119,16 +2119,16 @@ let test_make_per_call_switch_transport_releases_cli_fd_resources () =
 
 let test_classify_masc_internal_error_roundtrip () =
   let cascade_err =
-    Oas_worker_named.sdk_error_of_masc_internal_error
-      (Oas_worker_named.Cascade_exhausted
+    Keeper_turn_driver.sdk_error_of_masc_internal_error
+      (Keeper_turn_driver.Cascade_exhausted
          {
            cascade_name =
              internal_cascade_name Masc_mcp.Keeper_config.default_cascade_name;
            reason = Keeper_types.All_providers_failed;
          })
   in
-  (match Oas_worker_named.classify_masc_internal_error cascade_err with
-   | Some (Oas_worker_named.Cascade_exhausted { cascade_name; reason }) ->
+  (match Keeper_turn_driver.classify_masc_internal_error cascade_err with
+   | Some (Keeper_turn_driver.Cascade_exhausted { cascade_name; reason }) ->
        Alcotest.(check string) "cascade name"
          Masc_mcp.Keeper_config.default_cascade_name
          (internal_cascade_name_to_string cascade_name);
@@ -2137,16 +2137,16 @@ let test_classify_masc_internal_error_roundtrip () =
          (Keeper_types.cascade_exhaustion_summary reason)
    | _ -> Alcotest.fail "expected structured cascade exhaustion");
   let accept_err =
-    Oas_worker_named.sdk_error_of_masc_internal_error
-      (Oas_worker_named.Accept_rejected
+    Keeper_turn_driver.sdk_error_of_masc_internal_error
+      (Keeper_turn_driver.Accept_rejected
          {
            scope = Masc_mcp.Keeper_config.default_cascade_name;
            model = Some "mock-model";
            reason = "response rejected by accept (model=mock-model)";
          })
   in
-  (match Oas_worker_named.classify_masc_internal_error accept_err with
-   | Some (Oas_worker_named.Accept_rejected { scope; model; reason }) ->
+  (match Keeper_turn_driver.classify_masc_internal_error accept_err with
+   | Some (Keeper_turn_driver.Accept_rejected { scope; model; reason }) ->
        Alcotest.(check string) "accept scope" Masc_mcp.Keeper_config.default_cascade_name scope;
        Alcotest.(check (option string)) "accept model"
          (Some "mock-model") model;
@@ -2154,16 +2154,16 @@ let test_classify_masc_internal_error_roundtrip () =
          (contains_substring ~needle:"response rejected by accept" reason)
    | _ -> Alcotest.fail "expected structured accept rejection");
   let resumable_err =
-    Oas_worker_named.sdk_error_of_masc_internal_error
-      (Oas_worker_named.Resumable_cli_session
+    Keeper_turn_driver.sdk_error_of_masc_internal_error
+      (Keeper_turn_driver.Resumable_cli_session
          {
            cascade_name = internal_cascade_name "kimi_cli_keeper";
            detail = Cascade_runner.Kimi_cli_transport_local.resumable_session_detail;
            exit_code = Some 75;
          })
   in
-  match Oas_worker_named.classify_masc_internal_error resumable_err with
-  | Some (Oas_worker_named.Resumable_cli_session { cascade_name; detail; exit_code }) ->
+  match Keeper_turn_driver.classify_masc_internal_error resumable_err with
+  | Some (Keeper_turn_driver.Resumable_cli_session { cascade_name; detail; exit_code }) ->
       Alcotest.(check string) "resumable cascade" "kimi_cli_keeper"
         (internal_cascade_name_to_string cascade_name);
       Alcotest.(check string) "resumable detail redacted"
@@ -2265,7 +2265,7 @@ let check_timeout_opt label expected actual =
   Alcotest.(check (option (float 0.001))) label expected actual
 
 let provider_timeout ?(is_last = false) ?configured provider_cfg =
-  Oas_worker_named.effective_provider_attempt_timeout_s
+  Keeper_turn_driver.effective_provider_attempt_timeout_s
     ~is_last
     ~configured_timeout_s:configured
     provider_cfg
@@ -2745,7 +2745,7 @@ let test_filter_candidate_providers_for_tool_support_normalizes_codex_headers ()
       ~agent_name:"keeper-sangsu-agent" [ "masc_status" ]
   in
   let filtered =
-    Masc_mcp.Oas_worker_named.filter_candidate_providers_for_tool_support
+    Masc_mcp.Keeper_turn_driver.filter_candidate_providers_for_tool_support
       ~keeper_name:"sangsu"
       ?runtime_mcp_policy
       ~require_tool_choice_support:true
@@ -2773,7 +2773,7 @@ let test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_boun
      the production [log_codex_keeper_bound_skip] emission path
      uncovered (removing it / changing its level / suppressing the
      first emission would still pass) and forced the helper to be
-     part of [Oas_worker_named]'s public API.  Drive the actual
+     part of [Keeper_turn_driver]'s public API.  Drive the actual
      emission from [filter_candidate_providers_for_tool_support]
      and observe it via [Log.Ring].
 
@@ -2787,7 +2787,7 @@ let test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_boun
     | [] -> None
   in
   let filtered =
-    Masc_mcp.Oas_worker_named.filter_candidate_providers_for_tool_support
+    Masc_mcp.Keeper_turn_driver.filter_candidate_providers_for_tool_support
       ~keeper_name:"sangsu"
       ?runtime_mcp_policy
       ~require_tool_choice_support:true
@@ -2839,7 +2839,7 @@ let test_filter_candidate_providers_for_tool_support_keeps_codex_with_per_keeper
       ~agent_name:"keeper-sangsu-agent" [ "masc_status"; "masc_claim_next" ]
   in
   let filtered =
-    Masc_mcp.Oas_worker_named.filter_candidate_providers_for_tool_support
+    Masc_mcp.Keeper_turn_driver.filter_candidate_providers_for_tool_support
       ~keeper_name:"sangsu"
       ?runtime_mcp_policy
       ~require_tool_choice_support:true
@@ -2860,11 +2860,11 @@ let test_filter_candidate_providers_for_tool_support_keeps_header_capable_cli_fo
   with_temp_masc_base_path "codex-header-capable-no-token" @@ fun _base_path ->
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   let runtime_mcp_policy =
-    Masc_mcp.Oas_worker_named.runtime_mcp_policy_for_tools
+    Masc_mcp.Keeper_turn_driver.runtime_mcp_policy_for_tools
       ~keeper_name:"sangsu" tools
   in
   let filtered =
-    Masc_mcp.Oas_worker_named.filter_candidate_providers_for_tool_support
+    Masc_mcp.Keeper_turn_driver.filter_candidate_providers_for_tool_support
       ~keeper_name:"sangsu"
       ?runtime_mcp_policy
       ~tools
@@ -2887,18 +2887,18 @@ let test_keeper_internal_tools_force_materialized_runtime_surface () =
   with_env "MASC_MCP_TOKEN" "" @@ fun () ->
   let tools = [ make_named_noop_tool "keeper_pr_review_comment" ] in
   let require_tool_support =
-    Masc_mcp.Oas_worker_named.keeper_internal_tools_require_materialized_runtime_surface
+    Masc_mcp.Keeper_turn_driver.keeper_internal_tools_require_materialized_runtime_surface
       ~keeper_name:"issue_king" tools
   in
   Alcotest.(check bool)
     "keeper PR-review tools require a materialized runtime surface"
     true require_tool_support;
   let runtime_mcp_policy =
-    Masc_mcp.Oas_worker_named.runtime_mcp_policy_for_tools
+    Masc_mcp.Keeper_turn_driver.runtime_mcp_policy_for_tools
       ~keeper_name:"issue_king" tools
   in
   let filtered =
-    Masc_mcp.Oas_worker_named.filter_candidate_providers_for_tool_support
+    Masc_mcp.Keeper_turn_driver.filter_candidate_providers_for_tool_support
       ~keeper_name:"issue_king"
       ?runtime_mcp_policy
       ~tools
@@ -2922,11 +2922,11 @@ let test_filter_candidate_providers_for_tool_support_secondary_preserves_priorit
   with_temp_masc_base_path "codex-secondary-priority" @@ fun () ->
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   let runtime_mcp_policy =
-    Masc_mcp.Oas_worker_named.runtime_mcp_policy_for_tools
+    Masc_mcp.Keeper_turn_driver.runtime_mcp_policy_for_tools
       ~keeper_name:"sangsu" tools
   in
   let filtered =
-    Masc_mcp.Oas_worker_named.filter_candidate_providers_for_tool_support
+    Masc_mcp.Keeper_turn_driver.filter_candidate_providers_for_tool_support
       ~keeper_name:"sangsu"
       ?runtime_mcp_policy
       ~tools
@@ -2953,11 +2953,11 @@ let test_filter_candidate_providers_for_tool_support_secondary_uses_candidate_in
   with_temp_masc_base_path "codex-secondary-index" @@ fun () ->
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   let runtime_mcp_policy =
-    Masc_mcp.Oas_worker_named.runtime_mcp_policy_for_tools
+    Masc_mcp.Keeper_turn_driver.runtime_mcp_policy_for_tools
       ~keeper_name:"sangsu" tools
   in
   let filtered =
-    Masc_mcp.Oas_worker_named.filter_candidate_providers_for_tool_support
+    Masc_mcp.Keeper_turn_driver.filter_candidate_providers_for_tool_support
       ~keeper_name:"sangsu"
       ?runtime_mcp_policy
       ~tools
@@ -2998,12 +2998,12 @@ let test_dual_track_swap_emits_secondary_kind_label_on_success () =
   with_temp_masc_base_path "codex-secondary-metric-success" @@ fun () ->
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   let runtime_mcp_policy =
-    Masc_mcp.Oas_worker_named.runtime_mcp_policy_for_tools
+    Masc_mcp.Keeper_turn_driver.runtime_mcp_policy_for_tools
       ~keeper_name:"sangsu" tools
   in
   let before = count_swap_metric ~detail:"swapped:claude_code" in
   let _ =
-    Masc_mcp.Oas_worker_named.filter_candidate_providers_for_tool_support
+    Masc_mcp.Keeper_turn_driver.filter_candidate_providers_for_tool_support
       ~keeper_name:"sangsu"
       ?runtime_mcp_policy
       ~tools
@@ -3028,7 +3028,7 @@ let test_dual_track_swap_emits_secondary_kind_label_on_rejection () =
   with_temp_masc_base_path "codex-secondary-metric-rejection" @@ fun () ->
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   let runtime_mcp_policy =
-    Masc_mcp.Oas_worker_named.runtime_mcp_policy_for_tools
+    Masc_mcp.Keeper_turn_driver.runtime_mcp_policy_for_tools
       ~keeper_name:"sangsu" tools
   in
   (* Rejected primary, secondary that *also* fails the gate (another
@@ -3037,7 +3037,7 @@ let test_dual_track_swap_emits_secondary_kind_label_on_rejection () =
   let detail = "rejected:codex_cli:codex_keeper_bound_actor_required" in
   let before = count_swap_metric ~detail in
   let _ =
-    Masc_mcp.Oas_worker_named.filter_candidate_providers_for_tool_support
+    Masc_mcp.Keeper_turn_driver.filter_candidate_providers_for_tool_support
       ~keeper_name:"sangsu"
       ?runtime_mcp_policy
       ~tools
@@ -3078,7 +3078,7 @@ let test_classify_filter_rejection_codex_keeper_bound_actor () =
          (Cascade_runner.runtime_mcp_tool_requires_bound_actor "masc_claim_next")
    | None -> Alcotest.fail "expected public MCP runtime policy");
   let reason =
-    Masc_mcp.Oas_worker_named.classify_filter_rejection
+    Masc_mcp.Keeper_turn_driver.classify_filter_rejection
       ~keeper_name:"sangsu"
       ?runtime_mcp_policy
       ~require_tool_choice_support:true
@@ -3089,7 +3089,7 @@ let test_classify_filter_rejection_codex_keeper_bound_actor () =
     "codex_cli with bound-actor policy classified as keeper_bound_actor"
     (Some "codex_keeper_bound_actor_required")
     (Option.map
-       Masc_mcp.Oas_worker_named.filter_rejection_reason_label reason)
+       Masc_mcp.Keeper_turn_driver.filter_rejection_reason_label reason)
 
 let test_classify_filter_rejection_codex_keeper_bound_actor_passes_with_per_keeper_token
     () =
@@ -3101,11 +3101,11 @@ let test_classify_filter_rejection_codex_keeper_bound_actor_passes_with_per_keep
   seed_raw_token base_path "keeper-sangsu-agent" "keeper-bearer-xyz";
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   let runtime_mcp_policy =
-    Masc_mcp.Oas_worker_named.runtime_mcp_policy_for_tools
+    Masc_mcp.Keeper_turn_driver.runtime_mcp_policy_for_tools
       ~keeper_name:"sangsu" tools
   in
   let reason =
-    Masc_mcp.Oas_worker_named.classify_filter_rejection
+    Masc_mcp.Keeper_turn_driver.classify_filter_rejection
       ~keeper_name:"sangsu"
       ?runtime_mcp_policy
       ~tools
@@ -3117,7 +3117,7 @@ let test_classify_filter_rejection_codex_keeper_bound_actor_passes_with_per_keep
     "codex_cli passes keeper-bound policy when per-keeper bearer exists"
     None
     (Option.map
-       Masc_mcp.Oas_worker_named.filter_rejection_reason_label reason)
+       Masc_mcp.Keeper_turn_driver.filter_rejection_reason_label reason)
 
 let test_classify_filter_rejection_passes_when_provider_supported () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
@@ -3127,7 +3127,7 @@ let test_classify_filter_rejection_passes_when_provider_supported () =
       ~agent_name:"keeper-sangsu-agent" [ "masc_status" ]
   in
   let reason =
-    Masc_mcp.Oas_worker_named.classify_filter_rejection
+    Masc_mcp.Keeper_turn_driver.classify_filter_rejection
       ~keeper_name:"sangsu"
       ?runtime_mcp_policy
       ~require_tool_choice_support:true
@@ -3896,13 +3896,13 @@ let test_kimi_cli_resumable_invalid_request_reclassifies_as_structured () =
     Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest { message = detail })
   in
   match
-    Oas_worker_named.sdk_error_to_resumable_cli_session
+    Keeper_turn_driver.sdk_error_to_resumable_cli_session
       ~cascade_name:(internal_cascade_name "kimi_cli_keeper") sdk_error
   with
   | Some structured -> (
-      match Oas_worker_named.classify_masc_internal_error structured with
+      match Keeper_turn_driver.classify_masc_internal_error structured with
       | Some
-          (Oas_worker_named.Resumable_cli_session
+          (Keeper_turn_driver.Resumable_cli_session
              { cascade_name; detail = structured_detail; exit_code }) ->
           Alcotest.(check string) "cascade" "kimi_cli_keeper"
             (internal_cascade_name_to_string cascade_name);
@@ -3971,7 +3971,7 @@ let test_sdk_error_terminal_provider_runtime_detects_kimi_unicode_crash () =
   in
   Alcotest.(check bool)
     "Kimi startup UnicodeDecodeError is terminal provider runtime" true
-    (Oas_worker_named.sdk_error_is_terminal_provider_runtime_failure err)
+    (Keeper_turn_driver.sdk_error_is_terminal_provider_runtime_failure err)
 
 let test_sdk_error_terminal_provider_runtime_detects_jsonrpc_sse_parse_storm () =
   let err =
@@ -3985,7 +3985,7 @@ let test_sdk_error_terminal_provider_runtime_detects_jsonrpc_sse_parse_storm () 
   in
   Alcotest.(check bool)
     "JSON-RPC SSE parse storm is terminal provider runtime" true
-    (Oas_worker_named.sdk_error_is_terminal_provider_runtime_failure err)
+    (Keeper_turn_driver.sdk_error_is_terminal_provider_runtime_failure err)
 
 let test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
   let provider_cfg = make_codex_cli_provider_cfg () in
@@ -3997,7 +3997,7 @@ let test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
       ~tools:[]
   in
   let huge_goal = String.make 600_000 'a' in
-  match Oas_worker_named.codex_cli_prompt_preflight ~config ~goal:huge_goal with
+  match Keeper_turn_driver.codex_cli_prompt_preflight ~config ~goal:huge_goal with
   | Some preflight ->
       Alcotest.(check bool) "argv limit hit" true preflight.hits_argv_limit;
       Alcotest.(check bool) "context limit hit" true preflight.hits_context_window;
@@ -4018,7 +4018,7 @@ let test_codex_cli_prompt_preflight_scales_retry_limit_for_argv_only_overflow ()
       ~tools:[]
   in
   let huge_goal = String.make 600_000 'a' in
-  match Oas_worker_named.codex_cli_prompt_preflight ~config ~goal:huge_goal with
+  match Keeper_turn_driver.codex_cli_prompt_preflight ~config ~goal:huge_goal with
   | Some preflight ->
       Alcotest.(check bool) "argv limit hit" true preflight.hits_argv_limit;
       Alcotest.(check bool) "context limit not hit" false preflight.hits_context_window;
@@ -5307,7 +5307,7 @@ let test_run_named_circuit_breaker_skips_open_provider () =
     @@ fun () ->
     (* 4. Run the named cascade. *)
     (match
-       Oas_worker_named.run_named
+       Keeper_turn_driver.run_named
          ~cascade_name:"cb_probe"
          ~goal:"circuit breaker test"
          ~system_prompt:"system"

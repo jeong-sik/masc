@@ -1138,8 +1138,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               with
               | None ->
                   Error
-                    (Oas_worker_named.sdk_error_of_masc_internal_error
-                       (Oas_worker_named.Oas_timeout_budget
+                    (Keeper_turn_driver.sdk_error_of_masc_internal_error
+                       (Keeper_turn_driver.Oas_timeout_budget
                           {
                             budget_sec = 0.0;
                             keeper_turn_timeout_sec = timeout_sec;
@@ -1729,8 +1729,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 ~base_path:config.base_path meta.name
                 Keeper_registry.(Packed Turn_finalizing);
               Error
-                (Oas_worker_named.sdk_error_of_masc_internal_error
-                   (Oas_worker_named.Turn_timeout
+                (Keeper_turn_driver.sdk_error_of_masc_internal_error
+                   (Keeper_turn_driver.Turn_timeout
                       { elapsed_sec = timeout_sec }))
             end))
         with
@@ -1779,12 +1779,12 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             (Trajectory.Failed (Agent_sdk.Error.to_string err));
           let e_str = Agent_sdk.Error.to_string err in
           let is_transient = EC.is_transient_network_error err in
-          (match Oas_worker_named.classify_masc_internal_error err with
-           | Some (Oas_worker_named.Oas_timeout_budget _) ->
+          (match Keeper_turn_driver.classify_masc_internal_error err with
+           | Some (Keeper_turn_driver.Oas_timeout_budget _) ->
                Prometheus.inc_counter
                  Keeper_metrics.metric_keeper_oas_timeout_classifications
                  ~labels:[("classification", "structural_budget")] ()
-           | Some (Oas_worker_named.Turn_timeout _) ->
+           | Some (Keeper_turn_driver.Turn_timeout _) ->
                Prometheus.inc_counter
                  Keeper_metrics.metric_keeper_oas_timeout_classifications
                  ~labels:[("classification", "turn_wall_clock")] ()

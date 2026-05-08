@@ -58,7 +58,7 @@ keeper sub-library extraction analysis (memory
   `Cascade_fsm` (26), `Keeper_types` (17), `Cascade_health_tracker` (11).
   These are **strategy and bookkeeping**, not Agent SDK calls.
 
-- Caller surface: `rg -l 'Oas_worker_named\.|Cascade_runner\.|Oas_worker\.'` reports
+- Caller surface: `rg -l 'Keeper_turn_driver\.|Cascade_runner\.|Oas_worker\.'` reports
   **49 files in `lib/`** (20 keeper-side, 2 cascade-side, 27 elsewhere) plus
   test/bin = **504 total references**. Any rename or extraction must
   preserve these call sites or migrate them in lockstep.
@@ -202,7 +202,7 @@ Build-green hard gate at every PR.
   - Top callers (code): `test/test_oas_worker.ml` (223), `lib/keeper/keeper_error_classify.ml` (82),
     `lib/oas_worker_exec.ml` (44), `test/test_keeper_unified.ml` (40),
     `lib/oas_worker_named.ml` (40 — intra-family coupling).
-  - Most-referenced module: `Oas_worker_named` (131 external refs)
+  - Most-referenced module: `Keeper_turn_driver` (131 external refs)
     confirms the Phase 4 hotspot.
   - Module graph: 25 cross-domain edges. `oas_worker_named → Cascade_*`
     weighs 77 (largest single edge), `oas_worker_exec → Dashboard_*`
@@ -216,9 +216,9 @@ Build-green hard gate at every PR.
 **Scope correction (during Phase 2 PR, 2026-05-08).** The original RFC
 listed 4 files. Inspection found `lib/oas_worker.ml` is structurally a
 **facade** — `include Cascade_runner`, `include Cascade_legacy_runner`,
-`include Oas_worker_named` — over three modules that are NOT clean
+`include Keeper_turn_driver` — over three modules that are NOT clean
 (Phase 3 / Phase 4 targets). Renaming the facade alone produces an
-`Agent_sdk_call` module that still re-exports `Oas_worker_named.run_named`,
+`Agent_sdk_call` module that still re-exports `Keeper_turn_driver.run_named`,
 i.e. the lie moves but does not disappear. `oas_worker.ml` is deferred
 to Phase 4, when its dependents are dissolved.
 
@@ -261,7 +261,7 @@ to Phase 4, when its dependents are dissolved.
 ### Phase 4 — Hotspot split: `oas_worker_named.ml` (1459 LOC)
 
 - The single largest and most-tangled file. Contains A/B/C concerns
-  interleaved within `Oas_worker_named.run`.
+  interleaved within `Keeper_turn_driver.run`.
 - Action: split body into three modules:
   - **A. agent_sdk call sites.** Pure `Agent_sdk.run_loop` invocation
     with prompt + tools + transport. Lands as additions to
@@ -273,7 +273,7 @@ to Phase 4, when its dependents are dissolved.
     blocker class stamping, status bridge calls. Lands as new file
     `lib/keeper/keeper_turn_driver.ml`. Existing keeper callers (20
     files) point at `Keeper_turn_driver.run` instead of
-    `Oas_worker_named.run`.
+    `Keeper_turn_driver.run`.
 - The old `oas_worker_named.ml` becomes a 5-line shim that delegates to
   `Keeper_turn_driver.run` for one PR cycle, then is deleted in the same
   release.

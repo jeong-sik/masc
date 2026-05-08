@@ -264,8 +264,8 @@ let test_structured_required_tool_no_tool_call () =
 
 let test_structured_oas_timeout_budget () =
   let err =
-    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-      (Masc_mcp.Oas_worker_named.Oas_timeout_budget
+    Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+      (Masc_mcp.Keeper_turn_driver.Oas_timeout_budget
          {
            budget_sec = 90.0;
            keeper_turn_timeout_sec = 1200.0;
@@ -286,8 +286,8 @@ let test_structured_oas_timeout_budget () =
 
 let test_structured_turn_wall_clock_timeout () =
   let err =
-    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-      (Masc_mcp.Oas_worker_named.Turn_timeout { elapsed_sec = 1200.0 })
+    Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+      (Masc_mcp.Keeper_turn_driver.Turn_timeout { elapsed_sec = 1200.0 })
   in
   let terminal =
     KT.of_failure ~raw_error:(Agent_sdk.Error.to_string err) err

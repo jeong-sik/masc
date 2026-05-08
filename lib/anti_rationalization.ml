@@ -639,8 +639,8 @@ let review
           by liveness — the operator must fix the cascade definition
           before the safety net can do useful work. *)
        let cascade_permanently_dead =
-         match Oas_worker_named.classify_masc_internal_error err with
-         | Some (Oas_worker_named.No_tool_capable_provider _) -> true
+         match Keeper_turn_driver.classify_masc_internal_error err with
+         | Some (Keeper_turn_driver.No_tool_capable_provider _) -> true
          | _ -> false
        in
        let mode = Env_config.AntiRationalization.fail_mode in

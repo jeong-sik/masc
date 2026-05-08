@@ -20,7 +20,7 @@
        callback (with_approval, or threads ~approval to a helper that
        does). Missing wiring → fail-open, the exact bug #7883.
     4. Structural: every MASC call site of
-       [Oas_worker.run_named] / [Oas_worker_named.run_named*] passes
+       [Oas_worker.run_named] / [Keeper_turn_driver.run_named*] passes
        [~approval:...].
 
     Detection is grep-based on source. False positives are acceptable
@@ -169,7 +169,7 @@ let test_builder_sites_wire_approval () =
     builder_sites
 
 (** Every MASC call site of [Oas_worker.run_named] or
-    [Oas_worker_named.run_named*] must pass [~approval:...]. The
+    [Keeper_turn_driver.run_named*] must pass [~approval:...]. The
     regex matches any argument value so callers may install
     auto_approve, reject_by_default, or a governance callback. *)
 let run_named_sites = [

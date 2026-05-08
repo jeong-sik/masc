@@ -12,7 +12,7 @@ How to read the cascade counters exposed by `/metrics` and the alerting rules th
 
 ## Background
 
-After the LT-* series (LT-1 through LT-7) every cycle of `Oas_worker_named.cycle_loop` produces observable state on **five surfaces**:
+After the LT-* series (LT-1 through LT-7) every cycle of `Keeper_turn_driver.cycle_loop` produces observable state on **five surfaces**:
 
 | Surface | Location | Use case |
 |---------|----------|----------|

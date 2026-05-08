@@ -40,7 +40,7 @@ code_refs:
 - provider health (healthy/unhealthy/slot_full)는 렌더에 반영되지 않는다.
 - `last_provider_result`가 success든 timeout이든 edge 색이 동일하다.
 
-동시에 model 목록은 `lib/server/server_routes_http_routes_dashboard.ml:618-633`에서 `Oas_worker_named.default_model_strings`로부터 동적으로 읽는다. 즉 **데이터는 흐르는데 렌더가 그것을 쓰지 않는다.**
+동시에 model 목록은 `lib/server/server_routes_http_routes_dashboard.ml:618-633`에서 `Keeper_turn_driver.default_model_strings`로부터 동적으로 읽는다. 즉 **데이터는 흐르는데 렌더가 그것을 쓰지 않는다.**
 
 ### Decision FSM 부분 동적
 
@@ -75,7 +75,7 @@ MASC `agent`와 OAS `keeper`는 다른 개념이다 (`docs/design/oas-masc-state
 |------|------|------|
 | `lib/keeper/keeper_decision_audit.ml` | 256-315 | `cascade_fsm_to_mermaid` state set을 `CascadeLiveness.tla`의 `{idle, selecting, trying, done, exhausted}` subset으로 제한. 렌더 시점에 받은 실제 profile name, provider health list, last_provider_result로 label/색 bind |
 | `lib/keeper/keeper_decision_audit.mli` | 55-73 | 시그니처 확장 (optional labelled args): `?provider_health:(string * [`Healthy|`Unhealthy|`SlotFull|`Unknown]) list`, `?slot_state:int * int`, `?effective_cascade_reason:string` |
-| `lib/server/server_routes_http_routes_dashboard.ml` | 618-633 | 기존 `Oas_worker_named.default_model_strings` 호출 유지, `Keeper_cascade_routing.select_cascade` 결과와 `Keeper_exec_status_metrics.last_model_used`를 함께 넘긴다 |
+| `lib/server/server_routes_http_routes_dashboard.ml` | 618-633 | 기존 `Keeper_turn_driver.default_model_strings` 호출 유지, `Keeper_cascade_routing.select_cascade` 결과와 `Keeper_exec_status_metrics.last_model_used`를 함께 넘긴다 |
 | `lib/dashboard/dashboard_http_keeper.ml` | 147-148 | 이미 phase-aware cascade 리졸브 로직 보유 — `effective_cascade_reason` 노출 경로만 추가 |
 
 ### 재사용할 기존 함수 (새 추상화 금지)

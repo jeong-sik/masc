@@ -372,8 +372,8 @@ let prior_oas_timeout_budget_strikes ~base_path ~keeper_name =
   | _ -> 0
 
 let is_oas_timeout_budget_error (err : Agent_sdk.Error.sdk_error) =
-  match Oas_worker_named.classify_masc_internal_error err with
-  | Some (Oas_worker_named.Oas_timeout_budget _) -> true
+  match Keeper_turn_driver.classify_masc_internal_error err with
+  | Some (Keeper_turn_driver.Oas_timeout_budget _) -> true
   | _ -> false
 
 let persist_message_cursor_updates ~config (meta : keeper_meta) updates =

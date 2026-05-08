@@ -8,7 +8,7 @@ module KT = Masc_mcp.Keeper_types
 module KMP = Masc_mcp.Keeper_memory_policy
 module KTS = Masc_mcp.Keeper_types_support
 module Coord = Masc_mcp.Coord
-module OWN = Masc_mcp.Oas_worker_named
+module OWN = Masc_mcp.Keeper_turn_driver
 module Prom = Masc_mcp.Prometheus
 
 let keeper_health_testable : KT.keeper_health Alcotest.testable =

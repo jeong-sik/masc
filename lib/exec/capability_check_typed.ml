@@ -3,7 +3,16 @@
     Each arm reconstructs the [Shell_ir.arg list] that the untyped walker
     would have produced, then wraps it in [Capability.Exec_bin].  This
     keeps the capability model unchanged while making the walker indexed
-    by the GADT. *)
+    by the GADT.
+
+    Env / redirect handling: typed constructors do not carry [env] or
+    [redirects], so [Shell_ir_typed.of_simple] forces the [Generic]
+    fallback whenever the source [simple] has either set.  That keeps
+    redirect-derived [Read_path] / [Write_path] and [Env_set]
+    capabilities flowing through [Capability_check.of_simple] for the
+    [Generic] arm below — without this any redirect outside the
+    worktree would be invisible to [Approval_policy.find_write_escape]
+    on a parsed command. *)
 
 let arg s = Shell_ir.Lit s
 
@@ -65,7 +74,7 @@ let of_command = function
     in
     [Capability.Exec_bin (Result.get_ok (Bin.of_string "rm"),
                           flag_args @ List.map arg paths)]
-  | Shell_ir_typed.W (Sudo { target }) ->
-    let args = List.map arg (String.split_on_char ' ' target) in
+  | Shell_ir_typed.W (Sudo { target_argv }) ->
+    let args = List.map arg target_argv in
     [Capability.Exec_bin (Result.get_ok (Bin.of_string "sudo"), args)]
   | Shell_ir_typed.W (Generic s) -> Capability_check.of_simple s

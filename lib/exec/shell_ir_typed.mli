@@ -61,7 +61,12 @@ and (_, _, _, _) command =
     } -> (unit, unit, [ `Privileged ], [ `Host ]) command
 
   | Sudo : {
-      target : string;
+      target_argv : string list;
+        (** Tokenized argv for [sudo].  Stored as a list (not
+            space-joined) so that quoted arguments — e.g.
+            [sudo sh -c "echo hi"] — survive [to_simple] /
+            [Capability_check_typed.of_command] without being
+            re-split on whitespace. *)
     } -> (unit, string, [ `Privileged ], [ `Host ]) command
 
   | Generic : Shell_ir.simple ->
@@ -69,10 +74,18 @@ and (_, _, _, _) command =
 (** Catch-all for unknown or unparseable commands.  The risk is pinned to
     [`Privileged] so the policy layer treats it as fail-closed. *)
 
-(** Best-effort conversion from an untyped [Shell_ir.simple] to a typed
-    command.  Known binaries with parseable literal arguments are lifted
-    to specific constructors; everything else falls through to [Generic]. *)
-val of_simple : Shell_ir.simple -> wrapped option
+(** Lift an untyped [Shell_ir.simple] into a typed command.
+
+    Fail-closed: known binaries with parseable literal arguments lift
+    to specific constructors; anything that does not match — including
+    non-literal args ([Var] / [Concat]), unhandled binary kinds, and
+    any [simple] that carries non-empty [env] or [redirects] — falls
+    through to [W (Generic s)].  The [Generic] arm pins the risk to
+    [`Privileged] and routes capability derivation back to
+    [Capability_check.of_simple] so that env / redirect-derived
+    [Read_path] / [Write_path] / [Env_set] capabilities are not
+    silently dropped on the typed path. *)
+val of_simple : Shell_ir.simple -> wrapped
 
 (** Reconstruct an untyped [Shell_ir.simple] from a typed command.
     [env], [cwd], [redirects] and [sandbox] receive default values because

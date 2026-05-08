@@ -50,7 +50,12 @@ and (_, _, _, _) command =
     } -> (unit, unit, [ `Privileged ], [ `Host ]) command
 
   | Sudo : {
-      target : string;
+      target_argv : string list;
+        (** Tokenized argv to be passed to [sudo].  Stored as a list
+            (not a space-joined string) so that arguments containing
+            spaces — e.g. [sudo sh -c "echo hi"] — round-trip cleanly
+            through [to_simple] and [Capability_check_typed.of_command]
+            without being re-split on whitespace. *)
     } -> (unit, string, [ `Privileged ], [ `Host ]) command
 
   | Generic : Shell_ir.simple ->
@@ -210,34 +215,64 @@ let parse_rm (args : string list) : wrapped option =
 let parse_sudo (args : string list) : wrapped option =
   match args with
   | [] -> None
-  | args -> Some (W (Sudo { target = String.concat " " args }))
+  | args -> Some (W (Sudo { target_argv = args }))
 
 (* ---------------------------------------------------------------------- *)
-(* of_simple *)
+(* of_simple
+ *
+ * Fail-closed: anything we cannot lift into a specific constructor
+ * falls through to [W (Generic s)], which the [risk] extractor pins
+ * to [`Privileged] and which [Capability_check_typed.of_command]
+ * routes back to the untyped [Capability_check.of_simple] so that
+ * env, redirect (Read_path / Write_path) and head capabilities are
+ * preserved.  Never returning [None] removes a silent "no typed
+ * command" outcome that callers could mishandle.
+ *
+ * Conditions that force the Generic fallback:
+ *   - any non-literal arg (Var / Concat) — typed grammar only
+ *     covers literal argv;
+ *   - a non-empty [env] or [redirects] list — typed constructors
+ *     do not carry env/redirect state, so retaining the original
+ *     simple is the only way to keep the [Approval_policy] hooks
+ *     (e.g. [find_write_escape]) wired correctly;
+ *   - any binary kind we do not yet have a dedicated parser for
+ *     (Docker, Ssh, Other_audited, unknown Safe / Privileged
+ *     binaries) or sub-command we did not match (e.g. [git push]). *)
 
-let of_simple (s : Shell_ir.simple) : wrapped option =
-  match all_lits_opt s.Shell_ir.args with
-  | None -> None
-  | Some lit_argv ->
-    match Bin.kind s.Shell_ir.bin with
-    | `Safe_bin ->
-      (match Bin.to_string s.Shell_ir.bin with
-       | "ls" -> parse_ls lit_argv
-       | "cat" -> parse_cat lit_argv
-       | "rg" -> parse_rg lit_argv
-       | _ -> None)
-    | `Git ->
-      (match lit_argv with
-       | "status" :: rest -> parse_git_status rest
-       | "clone" :: rest -> parse_git_clone rest
-       | _ -> None)
-    | `Curl -> parse_curl lit_argv
-    | `Privileged_bin ->
-      (match Bin.to_string s.Shell_ir.bin with
-       | "rm" -> parse_rm lit_argv
-       | "sudo" -> parse_sudo lit_argv
-       | _ -> None)
-    | `Docker | `Ssh | `Other_audited -> None
+let typed_carries_no_extras (s : Shell_ir.simple) : bool =
+  s.Shell_ir.env = [] && s.Shell_ir.redirects = []
+
+let of_simple (s : Shell_ir.simple) : wrapped =
+  let generic () = W (Generic s) in
+  if not (typed_carries_no_extras s) then generic ()
+  else
+    match all_lits_opt s.Shell_ir.args with
+    | None -> generic ()
+    | Some lit_argv ->
+      let parsed : wrapped option =
+        match Bin.kind s.Shell_ir.bin with
+        | `Safe_bin ->
+          (match Bin.to_string s.Shell_ir.bin with
+           | "ls" -> parse_ls lit_argv
+           | "cat" -> parse_cat lit_argv
+           | "rg" -> parse_rg lit_argv
+           | _ -> None)
+        | `Git ->
+          (match lit_argv with
+           | "status" :: rest -> parse_git_status rest
+           | "clone" :: rest -> parse_git_clone rest
+           | _ -> None)
+        | `Curl -> parse_curl lit_argv
+        | `Privileged_bin ->
+          (match Bin.to_string s.Shell_ir.bin with
+           | "rm" -> parse_rm lit_argv
+           | "sudo" -> parse_sudo lit_argv
+           | _ -> None)
+        | `Docker | `Ssh | `Other_audited -> None
+      in
+      match parsed with
+      | Some w -> w
+      | None -> generic ()
 
 (* ---------------------------------------------------------------------- *)
 (* to_simple *)
@@ -324,9 +359,9 @@ let to_simple : type i o r s. (i, o, r, s) command -> Shell_ir.simple =
       args = List.map arg_of_string (flag_args @ paths);
       env = []; cwd = None; redirects = [];
       sandbox = Sandbox_target.host () }
-  | Sudo { target } ->
+  | Sudo { target_argv } ->
     { Shell_ir.bin = Result.get_ok (Bin.of_string "sudo");
-      args = List.map arg_of_string (String.split_on_char ' ' target);
+      args = List.map arg_of_string target_argv;
       env = []; cwd = None; redirects = [];
       sandbox = Sandbox_target.host () }
   | Generic s -> s
@@ -392,7 +427,9 @@ let pp fmt = function
     Format.fprintf fmt "Rm(paths=%a, recursive=%b, force=%b)"
       (Format.pp_print_list Format.pp_print_string) paths
       recursive force
-  | W (Sudo { target }) ->
-    Format.fprintf fmt "Sudo(target=%s)" target
+  | W (Sudo { target_argv }) ->
+    Format.fprintf fmt "Sudo(target_argv=%a)"
+      (Format.pp_print_list ~pp_sep:(fun fmt () -> Format.fprintf fmt " ") Format.pp_print_string)
+      target_argv
   | W (Generic s) ->
     Format.fprintf fmt "Generic(%a)" Shell_ir.pp (Shell_ir.Simple s)

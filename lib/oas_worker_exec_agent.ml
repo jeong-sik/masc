@@ -66,7 +66,7 @@ type config = {
   exit_condition_result : (int -> stop_reason * string option) option;
   summarizer : (Agent_sdk.Types.message list -> string) option;
   cli_transport_overrides :
-    Oas_worker_exec_transport.cli_transport_overrides option;
+    Cascade_transport.cli_transport_overrides option;
       (** Custom summarizer for OAS [Budget_strategy.reduce_for_budget]
           Emergency-phase compaction. Defaults to OAS's extractive
           default. Keeper workers inject [Keeper_summarizer.keeper_summarizer]

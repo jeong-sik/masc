@@ -4079,7 +4079,7 @@ let test_sanitize_cli_completion_request_for_argv_scrubs_codex_request () =
     }
   in
   let sanitized =
-    Oas_worker_exec_transport.sanitize_cli_completion_request_for_argv req
+    Cascade_transport.sanitize_cli_completion_request_for_argv req
   in
   Alcotest.(check (option string))
     "system prompt sanitized" (Some "sys prompt")

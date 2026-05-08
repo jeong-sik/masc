@@ -77,7 +77,7 @@ type config = {
   exit_condition_result : (int -> stop_reason * string option) option;
   summarizer : (Agent_sdk.Types.message list -> string) option;
   cli_transport_overrides :
-    Oas_worker_exec_transport.cli_transport_overrides option;
+    Cascade_transport.cli_transport_overrides option;
 }
 (** Per-worker configuration.  47 fields — concrete record because
     callers ({!Oas_worker_exec}, keeper workers) construct + tweak

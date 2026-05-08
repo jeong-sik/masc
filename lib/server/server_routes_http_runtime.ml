@@ -218,6 +218,21 @@ let make_health_json ?(listener = "http/1.1") request =
       ("minor_heap_size", `Int (let c = Gc.get () in c.minor_heap_size));
     ]);
     ("keeper_fibers", `Int (Keeper_registry.count_running ()));
+    (* Paused-keeper visibility: a keeper with [meta.paused = true] does not
+       run turns even if its fiber is alive. The dashboard "깨우기" button
+       now auto-resumes paused keepers, but ops still need a quick count
+       without scraping /metrics. List names so an operator can correlate
+       with the cause encoded in their last_blocker_class. *)
+    ("paused_keepers",
+     let paused =
+       Keeper_registry.all ()
+       |> List.filter_map (fun (e : Keeper_registry.registry_entry) ->
+            if e.meta.paused then Some (`String e.name) else None)
+     in
+     `Assoc [
+       ("count", `Int (List.length paused));
+       ("names", `List paused);
+     ]);
     ("keeper_config_parse_error_count",
      `Int keeper_config_parse_error_count);
     ( "keeper_config_parse_errors",

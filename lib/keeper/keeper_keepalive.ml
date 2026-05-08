@@ -187,8 +187,28 @@ let process_directive ~agent_name directive =
     Log.Keeper.info "directive: resuming keeper %s" agent_name;
     set_keeper_paused_state ~agent_name false
   | "wakeup" ->
-    Log.Keeper.debug "directive: waking up %s" agent_name;
-    wakeup_keeper_by_agent_name ~agent_name
+    (* Auto-resume on wakeup: dashboard "깨우기" surfaces a single button,
+       but auto-pause (stale_fleet_batch / turn_timeout) silently persists
+       [meta.paused = true]. Without this branch, wakeup signals fiber_wakeup
+       but the heartbeat loop honors paused state and skips — user clicks
+       "깨우기" with no observable effect. Treat wakeup as a superset of
+       resume so paused keepers re-enter the run loop. *)
+    let entry_paused =
+      match Keeper_registry.find_by_agent_name agent_name with
+      | Some e -> e.meta.paused
+      | None ->
+        (match Keeper_registry.find_by_name agent_name with
+         | Some e -> e.meta.paused
+         | None -> false)
+    in
+    if entry_paused then begin
+      Log.Keeper.info
+        "directive: waking up %s (was paused — auto-resuming)" agent_name;
+      set_keeper_paused_state ~agent_name false
+    end else begin
+      Log.Keeper.debug "directive: waking up %s" agent_name;
+      wakeup_keeper_by_agent_name ~agent_name
+    end
   | s when String.length s > 6 && String.starts_with s ~prefix:"claim:" ->
     let task_id = String.sub s 6 (String.length s - 6) in
     (match Keeper_id.Task_id.of_string task_id with

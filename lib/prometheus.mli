@@ -719,6 +719,12 @@ val metric_keeper_fsm_edge_transitions : string
     keepers = ≤ 1600 series; reachable subset is much smaller. *)
 val metric_keeper_turn_fsm_transitions : string
 
+(** Histogram of seconds a keeper turn dwells in a single FSM phase
+    before transitioning out. Sample is recorded by
+    [Keeper_turn_fsm.emit_transition] whenever a [prev] state is
+    supplied. Labels: keeper, from. *)
+val metric_keeper_turn_phase_duration : string
+
 (** Keeper lifecycle phase transitions emitted by [Keeper_registry] only
     when the persisted registry phase changes. Labels:
     [keeper, from_phase, to_phase].  No event/reason label is included so

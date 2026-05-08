@@ -1092,6 +1092,8 @@ let metric_keeper_fsm_edge_transitions =
   "masc_keeper_fsm_edge_transitions_total"
 let metric_keeper_turn_fsm_transitions =
   "masc_keeper_turn_fsm_transitions_total"
+let metric_keeper_turn_phase_duration =
+  "masc_keeper_turn_phase_duration_seconds"
 let metric_keeper_lifecycle_transitions =
   "masc_keeper_lifecycle_transitions_total"
 let metric_fsm_guard_violation = "masc_fsm_guard_violation_total"
@@ -1588,6 +1590,10 @@ let init () =
   register_histogram ~name:metric_keeper_semaphore_wait_seconds
     ~help:"Seconds spent waiting to acquire keeper turn semaphores \
            (labels: keeper_name, cascade_profile, channel)." ();
+  register_histogram ~name:metric_keeper_turn_phase_duration
+    ~help:"Seconds a keeper turn dwelt in a single FSM phase before \
+           transitioning out. Sample is recorded on every emit_transition \
+           with a known prior state. Labels: keeper, from." ();
   (* P-DASH-13: provider block duration histogram.
      Records the duration (in seconds) for which a provider is placed in
      cooldown each time a cooldown is applied or extended.  Labels: provider. *)

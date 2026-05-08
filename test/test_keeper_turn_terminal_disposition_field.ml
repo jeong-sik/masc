@@ -19,17 +19,19 @@ let check_invariant label (t : T.t) =
     (D.equal expected t.disposition)
 ;;
 
-(* Cover every public constructor + every code path through
-   [normalize_code]. *)
+(* Cover every public constructor + assorted wire shapes (canonical
+   app codes, legacy persisted wires, sdk-error wires, and unmapped
+   strings) so the invariant survives PR-4's removal of the
+   [normalize_code] producer-side preprocessor. *)
 let constructor_cases : (string * T.t) list =
   [ "success", T.success ()
   ; "of_code/explicit", T.of_code "post_commit_ambiguous"
-  ; "of_code/normalize/completed", T.of_code "completed"
-  ; ( "of_code/normalize/contract_violation"
+  ; "of_code/legacy_persisted/completed", T.of_code "completed"
+  ; ( "of_code/sdk_error/contract_violation_require_tool_use"
     , T.of_code "completion_contract_violation:require_tool_use" )
-  ; "of_code/normalize/api_error_timeout", T.of_code "api_error_timeout"
-  ; "of_code/api_error_overloaded", T.of_code "api_error_overloaded"
-  ; ( "of_code/agent_error_max_turns"
+  ; "of_code/sdk_error/api_error_timeout", T.of_code "api_error_timeout"
+  ; "of_code/sdk_error/api_error_overloaded", T.of_code "api_error_overloaded"
+  ; ( "of_code/sdk_error/agent_error_max_turns"
     , T.of_code "agent_error_max_turns_exceeded:turns=10,limit=10" )
   ; "of_code/unknown", T.of_code "totally_unmapped"
   ; "of_legacy_error_text/empty", T.of_legacy_error_text ""

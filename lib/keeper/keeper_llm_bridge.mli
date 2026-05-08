@@ -5,11 +5,13 @@
 
     - Timeout: OAS-local context mutations are discarded (functional rollback),
       external tool side effects are not reverted, returns [Error (Agent_sdk.Error.Api Timeout)].
+    - Missing Eio clock: returns [Error (Agent_sdk.Error.Internal _)] without
+      running the function because the timeout cannot be enforced.
     - Cancellation (server shutdown / parent fiber cancel): re-raises
       [Eio.Cancel.Cancelled] so the caller exits immediately without retrying.
 
     @raises Eio.Cancel.Cancelled when the parent fiber/switch is cancelled. *)
-val run_with_timeout_and_fallback :
-  timeout_s:float ->
-  (unit -> ('a, Agent_sdk.Error.sdk_error) result) ->
-  ('a, Agent_sdk.Error.sdk_error) result
+val run_with_timeout_and_fallback
+  :  timeout_s:float
+  -> (unit -> ('a, Agent_sdk.Error.sdk_error) result)
+  -> ('a, Agent_sdk.Error.sdk_error) result

@@ -765,61 +765,14 @@ let reconcile_keepalive_keepers (ctx : _ context) =
 let cleanup_dead_tombstone (ctx : _ context)
     (entry : Keeper_registry.registry_entry) =
   match read_meta ctx.config entry.name with
-  | Ok (Some meta) ->
-      let persisted_paused =
-        if meta.paused then true
-        else
-          (* #9733: dead tombstone cleanup writes [paused = true] —
-             cycle-owned field — while heartbeat fibers can still
-             update the same record's heartbeat-owned fields.  Use
-             the same merged-CAS retry as the resume + overflow-pause
-             paths so a parallel heartbeat write doesn't make this
-             write fail and leave the keeper unpaused on disk while
-             the supervisor proceeds to unregister it. *)
-          match
-            write_meta_with_merge
-              ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-              ctx.config { meta with paused = true }
-          with
-          | Ok () -> true
-          | Error err when is_version_conflict_error err ->
-              Prometheus.inc_counter
-                Prometheus.metric_keeper_write_meta_failures
-                ~labels:[("keeper", entry.name); ("phase", "dead_cleanup_cas_race")]
-                ();
-              Log.Keeper.warn
-                "%s: dead tombstone cleanup paused write lost CAS race after retries: %s"
-                entry.name err;
-              false
-          | Error err ->
-              Prometheus.inc_counter
-                Prometheus.metric_keeper_write_meta_failures
-                ~labels:[("keeper", entry.name); ("phase", "dead_cleanup")]
-                ();
-              Log.Keeper.warn
-                "%s: dead tombstone cleanup paused write failed: %s"
-                entry.name err;
-              false
-      in
+  | Ok (Some _meta) ->
       Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
       Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
-      if persisted_paused then begin
-        publish_lifecycle
-          ~event:(Keeper_lifecycle_events.Custom_event
-                    { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
-          entry.name "paused meta persisted" ();
-        Log.Keeper.info "%s: dead tombstone cleaned up" entry.name
-      end else begin
-        publish_lifecycle
-          ~event:(Keeper_lifecycle_events.Custom_event
-                    { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
-          entry.name "meta write failed, unregistered anyway" ();
-        Log.Keeper.warn "%s: dead tombstone unregistered despite meta write failure" entry.name;
-        Prometheus.inc_counter
-          Prometheus.metric_keeper_supervisor_cleanup_failures
-          ~labels:[("keeper", entry.name); ("site", "dead_tombstone_meta_write")]
-          ()
-      end
+      publish_lifecycle
+        ~event:(Keeper_lifecycle_events.Custom_event
+                  { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
+        entry.name "dead tombstone cleaned up" ();
+      Log.Keeper.info "%s: dead tombstone cleaned up" entry.name
   | Ok None ->
       Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
       Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
@@ -1067,163 +1020,6 @@ let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
     to_restart
   end
 
-let next_auto_resume_after_sec ~initial_sec ~max_sec previous =
-  if initial_sec <= 0.0 then None
-  else
-    Some (
-      match previous with
-      | None -> Float.min max_sec initial_sec
-      | Some prev -> Float.min max_sec (prev *. 2.0))
-
-(** #10765 Phase 2: persist [meta.paused = true] for a keeper whose stale
-    watchdog detected a termination storm (window count >= threshold).  The
-    caller must skip enqueuing the entry into [to_restart] so the supervisor
-    no longer auto-restarts the keeper into the same dead-cascade environment.
-
-    Ordering rationale: write meta first, then publish lifecycle + counter.
-    A failed meta write is logged but does not abort the pause path — the
-    in-memory [last_failure_reason] still routes the next sweep through this
-    branch, so the supervisor remains correct even if the disk write loses
-    a CAS race.  The keeper would re-resume on a server restart in that
-    edge case, but that is strictly less bad than the pre-Phase-2 baseline
-    (continuous restart loop). *)
-let handle_crash_auto_pause (ctx : _ context)
-    (entry : Keeper_registry.registry_entry) ~reason_tag ~metric_name
-    ~lifecycle_detail ~log_message ~blocker_class =
-  (match read_meta ctx.config entry.name with
-   | Ok (Some meta) ->
-       let initial_sec = Env_config.KeeperSupervisor.auto_resume_initial_sec in
-       let max_sec = Env_config.KeeperSupervisor.auto_resume_max_sec in
-       let auto_resume_after_sec =
-         next_auto_resume_after_sec ~initial_sec ~max_sec
-           meta.auto_resume_after_sec
-       in
-       let blocker_text =
-         let existing = String.trim meta.runtime.last_blocker in
-         if existing <> "" then existing
-         else
-           match blocker_class with
-           | Some cls -> blocker_class_to_string cls
-           | None -> reason_tag
-       in
-       (* Task-138 §"Max no-task-progress 30min = release claimed":
-          when the supervisor pauses a keeper because the same blocker
-          class is looping (stale_storm or oas_timeout_budget_loop),
-          the keeper is no longer making progress on its claimed task.
-          Releasing [current_task_id] here lets a peer pick the task
-          up while this keeper sits in [paused=true] back-off.
-
-          Without this release the diagnostic state is "executor.json:
-          current_task_id=task-147, paused=true, last_blocker_class=
-          oas_timeout_budget" — task is stuck forever because (a) this
-          keeper cannot run while paused and (b) other keepers see the
-          claim and skip.  The released task ID is not separately audited
-          here; [last_blocker_class] + [last_blocker] in [runtime] already
-          carry the pause reason, and Prometheus
-          [keeper_paused_total] is incremented below.
-          Discovered 2026-05-05 fleet-stuck. *)
-       (match
-          write_meta_with_merge
-            ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-            ctx.config
-            { meta with
-              paused = true;
-              auto_resume_after_sec;
-              updated_at = now_iso ();
-              current_task_id = None;
-              runtime =
-                { meta.runtime with
-                  last_blocker = blocker_text;
-                  last_blocker_class = blocker_class;
-                };
-            }
-        with
-        | Ok () -> ()
-        | Error err ->
-            Prometheus.inc_counter
-              Prometheus.metric_keeper_write_meta_failures
-              ~labels:[("keeper", entry.name); ("phase", "blocker_pause")]
-              ();
-            Log.Keeper.warn
-              "%s: %s pause meta write failed (in-memory \
-               failure_reason still gates restart, but persisted state \
-               will not survive server restart): %s"
-              entry.name reason_tag err)
-   | Ok None ->
-       Log.Keeper.warn
-         "%s: %s pause: meta missing, cannot persist paused=true"
-         entry.name reason_tag;
-       Prometheus.inc_counter
-         Prometheus.metric_keeper_write_meta_failures
-         ~labels:[("keeper", entry.name); ("phase", "pause_meta_missing")]
-         ()
-   | Error err ->
-       Log.Keeper.warn
-         "%s: %s pause read_meta failed: %s"
-         entry.name reason_tag err;
-       Prometheus.inc_counter
-         Prometheus.metric_keeper_write_meta_failures
-         ~labels:[("keeper", entry.name); ("phase", "pause_read_meta")]
-         ());
-  Prometheus.inc_counter
-    metric_name
-    ~labels:[ ("keeper", entry.name) ]
-    ();
-  publish_phase_lifecycle
-    ~phase:Keeper_state_machine.Paused
-    entry.name
-    lifecycle_detail ();
-  Log.Keeper.error "%s: %s" entry.name log_message
-
-let handle_stale_storm_pause (ctx : _ context)
-    (entry : Keeper_registry.registry_entry) ~count =
-  handle_crash_auto_pause ctx entry
-    ~reason_tag:"stale_storm"
-    ~metric_name:Prometheus.metric_keeper_stale_storm_paused
-    ~lifecycle_detail:(Printf.sprintf "stale_termination_storm count=%d" count)
-    ~blocker_class:(Some Turn_timeout)
-    ~log_message:
-      (Printf.sprintf
-         "STALE STORM AUTO-PAUSED (count=%d in 6h window). \
-          Supervisor will attempt self-healing auto-resume with exponential \
-          back-off (see MASC_KEEPER_AUTO_RESUME_INITIAL_SEC). \
-          Operator may also resume manually via masc_keeper_up or API. \
-          See issue #10765."
-         count)
-
-let handle_stale_fleet_batch_pause (ctx : _ context)
-    (entry : Keeper_registry.registry_entry) ~distinct_count =
-  handle_crash_auto_pause ctx entry
-    ~reason_tag:"stale_fleet_batch"
-    ~metric_name:Prometheus.metric_keeper_stale_fleet_batch_paused
-    ~lifecycle_detail:
-      (Printf.sprintf "stale_fleet_batch distinct_count=%d" distinct_count)
-    ~blocker_class:(Some Stale_fleet_batch)
-    ~log_message:
-      (Printf.sprintf
-         "STALE FLEET BATCH AUTO-PAUSED (distinct_keepers=%d in batch \
-          window). Supervisor will attempt self-healing auto-resume with \
-          exponential back-off instead of restarting each keeper into the \
-          same systemic failure mode (cascade dead, provider auth, fd leak, \
-          etc.). See #10765 / #10474 / #10745."
-         distinct_count)
-
-let handle_oas_timeout_budget_pause (ctx : _ context)
-    (entry : Keeper_registry.registry_entry) ~count =
-  handle_crash_auto_pause ctx entry
-    ~reason_tag:"oas_timeout_budget_loop"
-    ~metric_name:Prometheus.metric_keeper_oas_timeout_budget_loop_paused
-    ~lifecycle_detail:(Printf.sprintf "oas_timeout_budget_loop count=%d" count)
-    ~blocker_class:(Some Oas_timeout_budget)
-    ~log_message:
-      (Printf.sprintf
-         "OAS TIMEOUT BUDGET LOOP AUTO-PAUSED (count=%d). \
-          Supervisor will attempt self-healing auto-resume with exponential \
-          back-off (see MASC_KEEPER_AUTO_RESUME_INITIAL_SEC). \
-          Operator may also tune or reroute the cascade/model before resuming \
-          manually; restarting into the same slow-provider budget loop is \
-          avoided by the back-off delay."
-         count)
 
 let sweep_and_recover (ctx : _ context) =
   let now = Time_compat.now () in
@@ -1241,30 +1037,32 @@ let sweep_and_recover (ctx : _ context) =
   let queue_crashed_entry (entry : Keeper_registry.registry_entry) msg =
     match entry.last_failure_reason with
     | Some (Keeper_registry.Stale_termination_storm { count }) ->
-        (* #10765 Phase 2: skip [to_restart] AND in-memory unregister.
-           The watchdog detected a termination storm (>= escalation_
-           threshold within the 6h window).  [handle_stale_storm_pause]
-           persists [meta.paused = true] so reconcile + future sweeps
-           honor the pause across server restarts; we then add the
-           entry to [to_unregister] so the in-memory registry slot is
-           cleared and subsequent sweep ticks within the same server
-           do NOT re-fire the storm-pause path (counter must increment
-           once per storm, not once per sweep tick). *)
-        handle_stale_storm_pause ctx entry ~count;
-        to_unregister := entry :: !to_unregister
+        (* #10765 Phase 2: auto-pause removed.  Restart with fallback
+           cascade so the keeper is not launched back into the same
+           failing cascade.  If no fallback is available the restart
+           will still happen with the original cascade and may re-fail;
+           that is acceptable because the operator can still manually
+           stop the keeper. *)
+        Log.Keeper.info
+          "%s: stale termination storm (count=%d) → restart with fallback cascade"
+          entry.name count;
+        to_restart := (entry, msg) :: !to_restart
     | Some (Keeper_registry.Stale_fleet_batch { distinct_count }) ->
-        (* Fleet batch detection means multiple keepers crossed the stale
-           watchdog together. Treating those as independent keeper crashes
-           immediately replays the batch. Pause/backoff instead. *)
-        handle_stale_fleet_batch_pause ctx entry ~distinct_count;
-        to_unregister := entry :: !to_unregister
+        (* Fleet batch means systemic cascade failure.  Restart each
+           keeper into its fallback cascade rather than pausing the
+           entire fleet. *)
+        Log.Keeper.info
+          "%s: stale fleet batch (distinct=%d) → restart with fallback cascade"
+          entry.name distinct_count;
+        to_restart := (entry, msg) :: !to_restart
     | Some (Keeper_registry.Oas_timeout_budget_loop { count }) ->
-        (* Repeated OAS budget exhaustion means the active
-           cascade/model is not producing within the turn budget.
-           Restarting the same keeper preserves that bad routing and
-           burns another multi-minute budget, so pause instead. *)
-        handle_oas_timeout_budget_pause ctx entry ~count;
-        to_unregister := entry :: !to_unregister
+        (* OAS budget exhaustion → switch cascade rather than pausing.
+           The new cascade may have a different provider with sufficient
+           budget/throughput. *)
+        Log.Keeper.info
+          "%s: OAS timeout budget loop (count=%d) → restart with fallback cascade"
+          entry.name count;
+        to_restart := (entry, msg) :: !to_restart
     | _ ->
         if entry.restart_count >= max_restarts then
           to_mark_dead := (entry, msg) :: !to_mark_dead
@@ -1490,14 +1288,30 @@ let sweep_and_recover (ctx : _ context) =
         (* RFC-0002: dispatch restart attempt event *)
         Keeper_registry.dispatch_event_unit ~base_path old_entry.name
           (Keeper_state_machine.Supervisor_restart_attempt { attempt });
+        (* Switch to fallback cascade when the current one is failing.
+           This avoids launching the keeper back into the same dead
+           cascade and replaces the old auto-pause behaviour with
+           proactive routing recovery. *)
+        let meta_with_fallback =
+          match Keeper_cascade_profile.fallback_cascade_for meta.cascade_name with
+          | None -> meta
+          | Some fallback when String.equal fallback meta.cascade_name -> meta
+          | Some fallback ->
+              Log.Keeper.info
+                "%s: restart switches cascade %s -> %s"
+                meta.name meta.cascade_name fallback;
+              { meta with cascade_name = fallback }
+        in
         let old_crash_log = old_entry.crash_log in
         let reg =
-          Keeper_registry.register_restarting ~base_path old_entry.name meta
+          Keeper_registry.register_restarting ~base_path old_entry.name
+            meta_with_fallback
         in
         Keeper_registry.restore_supervisor_state ~base_path old_entry.name
           ~restart_count:attempt ~last_restart_ts:now
           ~crash_log:(keep_last_n 5 (now, crash_msg) old_crash_log);
-        launch_supervised_fiber ~proactive_warmup_sec:0 ctx meta reg;
+        launch_supervised_fiber ~proactive_warmup_sec:0 ctx meta_with_fallback
+          reg;
         publish_lifecycle
           ~event:(Keeper_lifecycle_events.Custom_event
                     { verb = Keeper_lifecycle_events.Restarted;
@@ -1573,89 +1387,6 @@ let sweep_and_recover (ctx : _ context) =
                     Prometheus.metric_keeper_supervisor_cleanup_failures
                     ~labels:[("keeper", name); ("site", "paused_meta_prune")]
                     ())
-           | _ -> ());
-         Eio_guard.yield_step sweep_names_ym);
-  (* Phase 3.5: self-healing circuit breaker — auto-resume keepers that were
-     auto-paused (have [auto_resume_after_sec = Some sec]) and whose pause
-     timer has elapsed.  Clearing [paused = false] here lets Phase 4
-     (reconcile_keepalive_keepers) pick them up and restart them on the same
-     sweep.  Reconcile-gated pauses (ambiguous commit timeouts) and
-     operator-initiated pauses ([auto_resume_after_sec = None]) are
-     intentionally skipped so they continue to require human action. *)
-  Keeper_types.keeper_names ctx.config
-  |> List.iter (fun name ->
-         (if Keeper_registry.is_running ~base_path name then ()
-         else
-           match read_meta ctx.config name with
-           | Ok (Some meta) when meta.paused
-                                 && Option.is_some meta.auto_resume_after_sec
-                                 && not (paused_meta_requires_reconcile_recovery meta)
-                                 && not (Keeper_approval_queue.has_pending_for_keeper
-                                           ~keeper_name:meta.name) ->
-               if not (Keeper_health_probe.is_healthy
-                         ~keeper_name:meta.cascade_name) then begin
-                 Log.Keeper.info
-                   "%s: auto-resume blocked; cascade %s is unhealthy"
-                   name meta.cascade_name;
-                 Prometheus.inc_counter
-                   Prometheus.metric_keeper_auto_resume_blocked_total
-                   ~labels:[("keeper", name); ("cascade", meta.cascade_name)]
-                   ()
-               end else begin
-                 let resume_after_sec =
-                   Option.value ~default:0.0 meta.auto_resume_after_sec in
-                 let paused_ts =
-                   Coord_resilience.Time.parse_iso8601_opt meta.updated_at
-                   |> Option.value ~default:0.0
-                 in
-                 if paused_ts > 0.0 && now -. paused_ts >= resume_after_sec then begin
-                   (* Resume: clear [paused] flag but retain [auto_resume_after_sec]
-                      so the doubled delay is ready for the next auto-pause.  It
-                      will be reset to [None] on a successful turn completion. *)
-                   let resumed_meta =
-                     { meta with
-                       paused = false;
-                       updated_at = now_iso ();
-                       runtime =
-                         { meta.runtime with
-                           last_blocker = "";
-                           last_blocker_class = None;
-                         };
-                     }
-                   in
-                   (match
-                      write_meta_with_merge
-                        ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-                        ctx.config resumed_meta
-                    with
-                    | Ok () ->
-                        publish_lifecycle
-                          ~event:(Keeper_lifecycle_events.Custom_event
-                                    { verb = Keeper_lifecycle_events.Auto_resumed;
-                                      phase = None })
-                          name
-                          (Printf.sprintf "auto_resume backoff=%.0fs" resume_after_sec) ();
-                        Prometheus.inc_counter
-                          Prometheus.metric_keeper_auto_resumed_total
-                          ~labels:[("keeper", name)]
-                          ();
-                        Log.Keeper.info
-                          "%s: auto-resumed after %.0fs backoff (next backoff=%.0fs if \
-                           re-paused; resets to initial on successful turn)"
-                          name resume_after_sec
-                          (Float.min
-                             (Env_config.KeeperSupervisor.auto_resume_max_sec)
-                             (resume_after_sec *. 2.0))
-                    | Error err ->
-                        Prometheus.inc_counter
-                          Prometheus.metric_keeper_write_meta_failures
-                          ~labels:[("keeper", name); ("phase", "auto_resume")]
-                          ();
-                        Log.Keeper.warn
-                          "%s: auto-resume meta write failed: %s"
-                          name err)
-                 end
-               end
            | _ -> ());
          Eio_guard.yield_step sweep_names_ym);
   (* Phase 4: reconcile LAST — only orphaned durable keepers *)

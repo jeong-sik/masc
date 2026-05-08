@@ -241,7 +241,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
          cascade resolution uses the item's group. *)
       let meta =
         match selected_item with
-        | Some item -> { meta with cascade_name = item.Cascade_ref.group }
+        | Some target ->
+            { meta with
+              cascade_name = target.Keeper_cascade_selector.group }
         | None -> meta
       in
       let effective_cascade_name =
@@ -1742,7 +1744,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       in
       (* RFC-0041 Phase B3: record per-item health after turn completion. *)
       (match selected_item with
-       | Some item ->
+       | Some target ->
            let success =
              match run_result with
              | Ok _ -> true
@@ -1750,7 +1752,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
            in
            Keeper_health_probe.record_item_result
              ~keeper_name:meta.name
-             ~item_id:item.Cascade_ref.id
+             ~item_id:target.Keeper_cascade_selector.item.Cascade_ref.id
              ~success
        | None -> ());
       match run_result with

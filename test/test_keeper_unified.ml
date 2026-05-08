@@ -2468,15 +2468,15 @@ let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     tool_surface = sample_tool_surface_metrics ();
   }
 
-let sample_cdal_proof ?(raw_evidence_refs = []) () : Agent_sdk.Cdal_proof.t =
+let sample_cdal_proof ?(raw_evidence_refs = []) () : Masc_mcp_cdal_runtime.Cdal_proof.t =
   {
-    schema_version = Agent_sdk.Cdal_proof.schema_version_current;
+    schema_version = Masc_mcp_cdal_runtime.Cdal_proof.schema_version_current;
     run_id = "keeper-metrics-proof-test";
     contract_id = "md5:test";
     requested_execution_mode = Execute;
     effective_execution_mode = Execute;
     mode_decision_source = "passthrough";
-    risk_class = Agent_sdk.Risk_class.Low;
+    risk_class = Masc_mcp_cdal_runtime.Risk_class.Low;
     provider_snapshot =
       {
         provider_name = "test";

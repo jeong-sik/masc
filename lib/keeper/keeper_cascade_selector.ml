@@ -2,12 +2,17 @@
 
 open Cascade_ref
 
+type selected_target = {
+  group : string;
+  item : Cascade_ref.cascade_item;
+}
+
 let select_item_for_turn
     ~(keeper_name : string)
     ~(cascade_profile : cascade_profile)
     ~(health_cache : Keeper_health_probe.health_status)
     ~(last_used_item : string option)
-    : (cascade_item, [> `No_available_item ]) result =
+    : (selected_target, [> `No_available_item ]) result =
   let rec try_group group_name visited =
     if List.mem group_name visited then
       Error `No_available_item
@@ -37,7 +42,7 @@ let select_item_for_turn
                   find_healthy rest
           in
           match find_healthy items with
-          | Some item -> Ok item
+          | Some item -> Ok { group = group_name; item }
           | None ->
               (match group.fallback_group with
                | Some next ->

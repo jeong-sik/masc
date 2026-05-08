@@ -695,16 +695,16 @@ let test_storage_truth_guard_contracts () =
 let test_proof_store_reader_truth_contracts () =
   check bool "proof artifact reader delegates ref resolution to OAS" true
     (file_contains_pattern "lib/proof_artifact_reader.ml"
-       "Agent_sdk.Proof_store.resolve_ref");
+       "Masc_mcp_cdal_runtime.Proof_store.resolve_ref");
   check bool "proof artifact reader delegates JSON reads to OAS" true
     (file_contains_pattern "lib/proof_artifact_reader.ml"
-       "Agent_sdk.Proof_store.read_json");
+       "Masc_mcp_cdal_runtime.Proof_store.read_json");
   check bool "proof artifact reader delegates JSONL reads to OAS" true
     (file_contains_pattern "lib/proof_artifact_reader.ml"
-       "Agent_sdk.Proof_store.read_jsonl");
+       "Masc_mcp_cdal_runtime.Proof_store.read_jsonl");
   check bool "proof artifact reader interface names OAS ownership" true
     (file_contains_pattern "lib/proof_artifact_reader.mli"
-       "Agent_sdk.Proof_store");
+       "Masc_mcp_cdal_runtime.Proof_store");
   check bool "proof artifact reader interface no longer documents local layout ownership" true
     (file_not_contains_pattern "lib/proof_artifact_reader.mli"
        "paths under [{config.root}/proofs/]");

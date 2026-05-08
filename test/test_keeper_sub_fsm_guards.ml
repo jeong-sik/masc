@@ -146,6 +146,12 @@ let test_valid_cascade_transitions () =
 let test_invalid_cascade_transitions () =
   let cases =
     [ Cascade_idle, Cascade_trying
+        (* Regression: pre-fix [Keeper_unified_turn.retry_loop] line
+           1138 era marked Cascade_trying immediately after budget
+           resolution, jumping past Cascade_selecting.  The fix moves
+           the trying mark into the disclosure hook so the matrix
+           below keeps rejecting any future re-introduction of the
+           direct jump. *)
     ; Cascade_idle, Cascade_done
     ; Cascade_idle, Cascade_exhausted
     ; Cascade_selecting, Cascade_done
@@ -168,6 +174,58 @@ let test_invalid_cascade_transitions () =
        with
        | Assert_failure _ -> ())
     cases
+;;
+
+(* ── Cascade sequence simulations ────────────────────────── *)
+
+(** Spec [KeeperCascadeLifecycle]/[KeeperTurnCycle] mandate the
+    atomic group [SelectToolPolicy(idle->selecting) ->
+    CascadeTrying(selecting->trying)] inside the disclosure hook.
+    Pre-fix [Keeper_unified_turn.retry_loop] line 1138 era marked
+    Cascade_trying before disclosure ran, producing the rejected
+    [idle -> trying] jump that this PR removes.  These end-to-end
+    sequence tests guard the full retry_loop trajectory rather than
+    individual transitions.
+
+    See [KeeperCascadeLifecycle.tla] (SelectToolPolicy /
+    CascadeTrying actions) and the bug-model
+    [BugCascadeBeforeMeasurement] for the formal contract. *)
+
+let walk_cascade_sequence label seq =
+  List.iter
+    (fun (from, to_) ->
+       try validate_cascade_transition ~from ~to_
+       with Assert_failure _ ->
+         Alcotest.fail
+           (Printf.sprintf
+              "%s step %s -> %s should pass"
+              label
+              (Obs.cascade_state_to_string from)
+              (Obs.cascade_state_to_string to_)))
+    seq
+;;
+
+let test_first_turn_attempt_sequence () =
+  walk_cascade_sequence
+    "first-turn attempt"
+    [ Cascade_idle, Cascade_selecting
+    ; Cascade_selecting, Cascade_trying
+    ; Cascade_trying, Cascade_done
+    ]
+;;
+
+let test_retry_attempt_sequence () =
+  (* On retry the prior turn ended at [trying] (not idle).  The
+     disclosure hook re-marks [selecting] then [trying]; the second
+     attempt may fail and end at [exhausted]. *)
+  walk_cascade_sequence
+    "retry attempt"
+    [ Cascade_idle, Cascade_selecting
+    ; Cascade_selecting, Cascade_trying
+    ; Cascade_trying, Cascade_selecting
+    ; Cascade_selecting, Cascade_trying
+    ; Cascade_trying, Cascade_exhausted
+    ]
 ;;
 
 (* ── KMC: compaction_stage ──────────────────────────────── *)
@@ -249,6 +307,16 @@ let () =
             "invalid transitions"
             `Quick
             test_invalid_cascade_transitions
+        ] )
+    ; ( "cascade_sequences"
+      , [ Alcotest.test_case
+            "first-turn attempt"
+            `Quick
+            test_first_turn_attempt_sequence
+        ; Alcotest.test_case
+            "retry attempt"
+            `Quick
+            test_retry_attempt_sequence
         ] )
     ; ( "compaction_stage"
       , [ Alcotest.test_case

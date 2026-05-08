@@ -23,6 +23,7 @@ val add_task :
   ?contract:Masc_domain.task_contract ->
   ?goal_id:string ->
   ?created_by:string ->
+  ?reject_if:(Masc_domain.backlog -> string option) ->
   config -> title:string -> priority:int -> description:string -> string
 
 val batch_add_tasks :

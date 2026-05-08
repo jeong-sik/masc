@@ -68,7 +68,16 @@ let tool_features =
         "masc_web_search";
       ];
       next_action =
-        "Run a current-information keeper search and verify successful masc_web_search evidence.";
+        "Run a current-information keeper search, then fetch a selected result with masc_web_fetch and verify both tools succeed.";
+    };
+    {
+      id = "web_fetch_tools";
+      label = "Web fetch tools";
+      required_tools = [
+        "masc_web_fetch";
+      ];
+      next_action =
+        "Run a web page fetch and verify successful masc_web_fetch evidence.";
     };
     {
       id = "taskboard_tools";

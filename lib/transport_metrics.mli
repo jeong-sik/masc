@@ -87,6 +87,12 @@ val set_sse_queue_snapshot :
 val set_sse_external_subscribers : int -> unit
 (** Sets [masc_sse_external_subscribers] gauge. *)
 
+val inc_sse_client_evicted : unit -> unit
+(** Increments [masc_sse_client_evictions_total] when {!Sse.register}
+    drops the oldest client because [max_clients] was reached.  Paired
+    with the [Evicting oldest client] log line so operators can see
+    eviction storms in metrics. *)
+
 (** {1 gRPC metrics} *)
 
 val set_grpc_active_streams : int -> unit
@@ -121,6 +127,30 @@ val inc_grpc_backlog_replay_events_replayed :
 (** [inc_grpc_backlog_replay_events_replayed ?(delta=1) ()]
     increments [masc_grpc_backlog_replay_events_replayed_total].
     No-op when [delta <= 0]. *)
+
+(** {1 Primary HTTP listener state} *)
+
+val record_http_listener_started : mode:string -> unit
+(** Marks the primary HTTP accept loop as listening.  [mode] is one of
+    ["h1"], ["h2"], or ["auto"]. *)
+
+val record_http_listener_stopped : mode:string -> unit
+(** Marks the primary HTTP accept loop as stopped during shutdown. *)
+
+val record_http_accept : mode:string -> unit
+(** Records one accepted TCP connection and increments the active
+    connection gauge. *)
+
+val record_http_connection_closed : mode:string -> unit
+(** Records release of one accepted TCP connection. *)
+
+val record_http_accept_error : mode:string -> error:string -> unit
+(** Records an accept-loop error without using the error text as a
+    metric label. *)
+
+val http_listener_json : ?now:float -> unit -> Yojson.Safe.t
+(** Snapshot of primary HTTP accept-loop status for [/health] and
+    dashboard transport health. *)
 
 (** {1 WebSocket metrics} *)
 

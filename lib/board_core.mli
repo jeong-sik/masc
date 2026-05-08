@@ -53,6 +53,9 @@ val persist_error_count : unit -> int
     swallowed during JSONL append / rotate; consumed by the
     operator dashboard for at-a-glance health. *)
 
+val record_persist_error : where:string -> string -> unit
+(** Record and log a board persistence failure. *)
+
 (** {1 Configuration} *)
 
 val flush_interval_sec : float
@@ -332,7 +335,8 @@ val sub_board_to_yojson : sub_board -> Yojson.Safe.t
 val sub_board_of_yojson : Yojson.Safe.t -> sub_board option
 
 val rewrite_sub_boards : store -> unit
-(** Atomically rewrites {!sub_boards_path} from [store.sub_boards]. *)
+(** Snapshots [store.sub_boards] under the state lock, then atomically
+    rewrites {!sub_boards_path} under the persist lock. *)
 
 val create_sub_board :
   store ->
@@ -347,7 +351,8 @@ val create_sub_board :
 (** Creates a new sub-board with the given slug (unique, lowercase).
     [members] are canonicalised agent ids; the owner is always included.
     Returns [Validation_error] when the slug is invalid or already taken,
-    [Capacity_exceeded] when the sub-board limit is reached. *)
+    [Capacity_exceeded] when the sub-board limit is reached. JSONL append
+    persistence is performed outside the state lock. *)
 
 val get_sub_board :
   store ->
@@ -362,4 +367,5 @@ val delete_sub_board :
   store ->
   sub_board_id:string ->
   (unit, board_error) Result.t
-(** Removes a sub-board by ID or slug and persists the change. *)
+(** Removes a sub-board by ID or slug under the state lock, then persists the
+    rewritten snapshot outside the state lock. *)

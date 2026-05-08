@@ -1156,7 +1156,7 @@ let resolve_secondary_provider_for_primary ?sw ?net ?clock
       let try_entry (entry : Cascade_config_loader.weighted_entry) =
         match entry.secondary with
         | None -> None
-        | Some _ ->
+        | Some secondary ->
             (* Confirm this entry's primary parses to the same provider
                we were called with. We compare on the parsed
                Provider_config rather than on raw strings to handle
@@ -1172,8 +1172,7 @@ let resolve_secondary_provider_for_primary ?sw ?net ?clock
              | Some parsed when same_kind_model parsed ->
                  Cascade_config.parse_weighted_entry
                    ~api_key_env_overrides:profile.api_key_env_overrides
-                   (synth_secondary_entry entry
-                      (Option.get entry.secondary))
+                   (synth_secondary_entry entry secondary)
              | _ -> None)
       in
       (* Expand provider:auto entries without a rotation scope: this legacy

@@ -1158,7 +1158,7 @@ let handle_keeper_shell
         in
         let dedicated_pr_tool_block ~error ~required_tool ~hint =
           Prometheus.inc_counter
-            Prometheus.metric_keeper_shell_ops_failures
+            Keeper_metrics.metric_keeper_shell_ops_failures
             ~labels:[("keeper", meta.name)]
             ();
           Log.Keeper.warn
@@ -1269,7 +1269,7 @@ let handle_keeper_shell
                   keeper tool or post on the board for operator approval."
            in
            Prometheus.inc_counter
-             Prometheus.metric_keeper_shell_ops_failures
+             Keeper_metrics.metric_keeper_shell_ops_failures
              ~labels:[("keeper", meta.name)]
              ();
            Log.Keeper.warn
@@ -1291,7 +1291,7 @@ let handle_keeper_shell
                   rejecting gh command (keeper=%s cmd=%s)"
                  meta.name canonical_cmd_str;
                Prometheus.inc_counter
-                 Prometheus.metric_keeper_shell_ops_failures
+                 Keeper_metrics.metric_keeper_shell_ops_failures
                  ~labels:[("keeper", meta.name)]
                  ();
                Yojson.Safe.to_string

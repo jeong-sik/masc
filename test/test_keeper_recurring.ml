@@ -2,11 +2,19 @@
 
 open Alcotest
 module Rec = Masc_mcp.Keeper_recurring
+module Prom = Masc_mcp.Prometheus
 
 let check = Alcotest.check
 
 let task_by_label label =
   List.find (fun (task : Rec.recurring_task) -> String.equal task.label label)
+;;
+
+let recurring_failure_value ~task ~phase =
+  Prom.metric_value_or_zero
+    Masc_mcp.Keeper_metrics.metric_keeper_recurring_failures
+    ~labels:[("task", task); ("phase", phase)]
+    ()
 ;;
 
 let test_add_and_list () =
@@ -85,6 +93,9 @@ let test_failure_auto_disable () =
       ~max_failures:2
       (Rec.Broadcast "oops")
   in
+  let auto_disable_before =
+    recurring_failure_value ~task:t.id ~phase:"auto_disable"
+  in
   (* Fail twice *)
   let _ =
     Rec.dispatch_due ~keeper_name:"k1" ~now_ts:100.0 ~dispatch:(fun _task _action ->
@@ -94,6 +105,11 @@ let test_failure_auto_disable () =
   let task = List.hd tasks in
   check int "failure 1" 1 task.failure_count;
   check bool "still enabled" true task.enabled;
+  check
+    (float 0.001)
+    "auto-disable metric unchanged below threshold"
+    auto_disable_before
+    (recurring_failure_value ~task:t.id ~phase:"auto_disable");
   (* Need to set last_run_ts back to allow re-dispatch *)
   (* Actually, on failure we don't update last_run_ts, so it stays 0.0 *)
   let _ =
@@ -104,6 +120,11 @@ let test_failure_auto_disable () =
   let task2 = List.hd tasks2 in
   check int "failure 2" 2 task2.failure_count;
   check bool "auto-disabled" false task2.enabled;
+  check
+    (float 0.001)
+    "auto-disable metric increments"
+    (auto_disable_before +. 1.0)
+    (recurring_failure_value ~task:t.id ~phase:"auto_disable");
   (* No more dispatches *)
   let count =
     Rec.dispatch_due ~keeper_name:"k1" ~now_ts:300.0 ~dispatch:(fun _task _action ->

@@ -1156,19 +1156,26 @@ let sub_board_of_yojson (json : Yojson.Safe.t) : sub_board option =
        | _ -> None)
   | _ -> None
 
-let rewrite_sub_boards store =
+let sub_boards_jsonl_unlocked store =
+  let buf = Buffer.create 1024 in
+  Hashtbl.iter (fun _ (sb : sub_board) ->
+    Buffer.add_string buf (Yojson.Safe.to_string (sub_board_to_yojson sb));
+    Buffer.add_char buf '\n'
+  ) store.sub_boards;
+  Buffer.contents buf
+
+let save_sub_boards_jsonl content =
   try
     ensure_masc_dir ();
     let path = sub_boards_path () in
-    let buf = Buffer.create 1024 in
-    Hashtbl.iter (fun _ (sb : sub_board) ->
-      Buffer.add_string buf (Yojson.Safe.to_string (sub_board_to_yojson sb));
-      Buffer.add_char buf '\n'
-    ) store.sub_boards;
-    (match Fs_compat.save_file_atomic path (Buffer.contents buf) with
+    (match Fs_compat.save_file_atomic path content with
      | Ok () -> ()
      | Error msg -> record_persist_error ~where:"rewrite_sub_boards" msg)
   with Sys_error msg -> record_persist_error ~where:"rewrite_sub_boards" msg
+
+let rewrite_sub_boards store =
+  let content = with_lock store (fun () -> sub_boards_jsonl_unlocked store) in
+  with_persist_lock store (fun () -> save_sub_boards_jsonl content)
 
 let append_sub_board (sb : sub_board) =
   try
@@ -1193,36 +1200,42 @@ let create_sub_board store ~slug ~name ~description ~owner
         match parse_sub_board_members ~owner:owner_id members with
         | Error e -> Error e
         | Ok members ->
-            with_lock store (fun () ->
-              if Hashtbl.mem store.sub_boards_by_slug slug then
-                Error
-                  (Already_exists
-                     (Printf.sprintf "Sub-board slug %S already exists" slug))
-              else begin
-                let current = Hashtbl.length store.sub_boards in
-                if current >= Limits.max_sub_boards then
+            let result =
+              with_lock store (fun () ->
+                if Hashtbl.mem store.sub_boards_by_slug slug then
                   Error
-                    (Capacity_exceeded { current; max = Limits.max_sub_boards })
+                    (Already_exists
+                       (Printf.sprintf "Sub-board slug %S already exists" slug))
                 else begin
-                  let id = Sub_board_id.generate () in
-                  let sb = {
-                    id;
-                    slug;
-                    name = String.trim name;
-                    description = String.trim description;
-                    owner = owner_id;
-                    members;
-                    access;
-                    created_at = Time_compat.now ();
-                    post_count = 0;
-                  } in
-                  Hashtbl.replace store.sub_boards (Sub_board_id.to_string id) sb;
-                  Hashtbl.replace store.sub_boards_by_slug slug
-                    (Sub_board_id.to_string id);
-                  append_sub_board sb;
-                  Ok sb
-                end
-              end)
+                  let current = Hashtbl.length store.sub_boards in
+                  if current >= Limits.max_sub_boards then
+                    Error
+                      (Capacity_exceeded { current; max = Limits.max_sub_boards })
+                  else begin
+                    let id = Sub_board_id.generate () in
+                    let sb = {
+                      id;
+                      slug;
+                      name = String.trim name;
+                      description = String.trim description;
+                      owner = owner_id;
+                      members;
+                      access;
+                      created_at = Time_compat.now ();
+                      post_count = 0;
+                    } in
+                    Hashtbl.replace store.sub_boards (Sub_board_id.to_string id) sb;
+                    Hashtbl.replace store.sub_boards_by_slug slug
+                      (Sub_board_id.to_string id);
+                    Ok sb
+                  end
+                end)
+            in
+            (match result with
+             | Ok sb ->
+                 with_persist_lock store (fun () -> append_sub_board sb);
+                 Ok sb
+             | Error _ as e -> e)
 
 let get_sub_board store ~sub_board_id : (sub_board, board_error) Result.t =
   with_lock store (fun () ->
@@ -1247,20 +1260,29 @@ let list_sub_boards store : sub_board list =
         compare a.created_at b.created_at))
 
 let delete_sub_board store ~sub_board_id : (unit, board_error) Result.t =
-  with_lock store (fun () ->
-    match Hashtbl.find_opt store.sub_boards sub_board_id with
-    | None ->
-        (match Hashtbl.find_opt store.sub_boards_by_slug sub_board_id with
-         | None -> Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id))
-         | Some id ->
-             Hashtbl.remove store.sub_boards id;
-             Hashtbl.remove store.sub_boards_by_slug sub_board_id;
-             rewrite_sub_boards store;
-             Ok ())
-    | Some sb ->
-        Hashtbl.remove store.sub_boards sub_board_id;
-        Hashtbl.remove store.sub_boards_by_slug sb.slug;
-        rewrite_sub_boards store;
+  with_persist_lock store (fun () ->
+    let snapshot =
+      with_lock store (fun () ->
+        match Hashtbl.find_opt store.sub_boards sub_board_id with
+        | None ->
+            (match Hashtbl.find_opt store.sub_boards_by_slug sub_board_id with
+             | None ->
+                 Error
+                   (Invalid_id
+                      (Printf.sprintf "Sub-board not found: %s" sub_board_id))
+             | Some id ->
+                 Hashtbl.remove store.sub_boards id;
+                 Hashtbl.remove store.sub_boards_by_slug sub_board_id;
+                 Ok (sub_boards_jsonl_unlocked store))
+        | Some sb ->
+            Hashtbl.remove store.sub_boards sub_board_id;
+            Hashtbl.remove store.sub_boards_by_slug sb.slug;
+            Ok (sub_boards_jsonl_unlocked store))
+    in
+    match snapshot with
+    | Error _ as e -> e
+    | Ok content ->
+        save_sub_boards_jsonl content;
         Ok ())
 
 (** {1 Voting - Deduplicated} *)

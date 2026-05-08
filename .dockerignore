@@ -15,6 +15,12 @@ logs
 !dashboard/.env.production
 *.exe
 masc-mcp-linux-x64
+a.out
+*.native
+dashboard/dist/
+tmp_my_files/
+.recovered/
+cascade_trust/
 .github/
 docs/
 specs/

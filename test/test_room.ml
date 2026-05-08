@@ -914,6 +914,60 @@ let test_release_stale_claims_skips_invalid_backlog () =
     Alcotest.(check (list (pair string string))) "no stale claims released" [] released
   )
 
+(* RFC-0034.d: release_stale_claims must clear the assignee's
+   on-disk current_task mirror so the agent file no longer points at
+   a backlog task that has been forced back to Todo. *)
+let agent_current_task config ~agent_name =
+  let agents = Coord.get_all_agents config in
+  match List.find_opt (fun (a : Masc_domain.agent) -> a.name = agent_name) agents with
+  | Some agent -> agent.current_task
+  | None -> None
+
+(* Use pre-formed nicknames so the assignee written into the backlog
+   by [Coord.claim_task] matches the [<nickname>.json] agent file. The
+   production board issue (RFC-0034.d §1) was reported with nicknames
+   (e.g. nick0cave), so this models the actual desync surface. *)
+let stale_nick = "claude-stale-fox"
+let other_nick = "claude-other-bear"
+
+let test_release_stale_claims_clears_agent_current_task () =
+  with_test_env (fun config ->
+    let _ = Coord.join config ~agent_name:stale_nick ~capabilities:[] () in
+    let _ = Coord.add_task config ~title:"Stale work" ~priority:1 ~description:"" in
+    let _ = Coord.claim_task config ~agent_name:stale_nick ~task_id:"task-001" in
+    (* claim_task does not mirror current_task on the agent file —
+       transition/start does — so set the mirror explicitly to model
+       a keeper that progressed to InProgress before going stale. *)
+    Coord.update_local_agent_state config ~agent_name:stale_nick
+      (fun agent -> { agent with current_task = Some "task-001" });
+    Alcotest.(check (option string)) "precondition: agent.current_task set"
+      (Some "task-001") (agent_current_task config ~agent_name:stale_nick);
+    (* ttl_seconds:0.0 forces the just-recorded claim to be stale. *)
+    let released = Coord.release_stale_claims config ~ttl_seconds:0.0 in
+    Alcotest.(check (list (pair string string)))
+      "task-001 released against assignee" [("task-001", stale_nick)] released;
+    Alcotest.(check (option string)) "agent.current_task cleared" None
+      (agent_current_task config ~agent_name:stale_nick)
+  )
+
+(* Spec: agent A claimed task X, then its on-disk pointer moved to a
+   different task Y (e.g. a fresh claim under a different lock window).
+   When the stale sweep releases X, A's [current_task] must remain
+   [Some Y] — only the task-X-specific pointer gets cleared. *)
+let test_release_stale_claims_preserves_other_agent_task () =
+  with_test_env (fun config ->
+    let _ = Coord.join config ~agent_name:other_nick ~capabilities:[] () in
+    let _ = Coord.add_task config ~title:"Stale work" ~priority:1 ~description:"" in
+    let _ = Coord.claim_task config ~agent_name:other_nick ~task_id:"task-001" in
+    Coord.update_local_agent_state config ~agent_name:other_nick
+      (fun agent -> { agent with current_task = Some "task-999" });
+    let released = Coord.release_stale_claims config ~ttl_seconds:0.0 in
+    Alcotest.(check (list (pair string string)))
+      "task-001 released from backlog" [("task-001", other_nick)] released;
+    Alcotest.(check (option string)) "agent kept its newer current_task"
+      (Some "task-999") (agent_current_task config ~agent_name:other_nick)
+  )
+
 
 let test_heartbeat_nonexistent_agent () =
   with_test_env (fun config ->
@@ -1834,6 +1888,10 @@ let () =
         test_read_backlog_r_reports_parse_error_when_recovery_is_also_invalid;
       Alcotest.test_case "release stale claims skips invalid backlog" `Quick
         test_release_stale_claims_skips_invalid_backlog;
+      Alcotest.test_case "release stale claims clears agent current_task" `Quick
+        test_release_stale_claims_clears_agent_current_task;
+      Alcotest.test_case "release stale claims preserves other agent task" `Quick
+        test_release_stale_claims_preserves_other_agent_task;
       Alcotest.test_case "cleanup zombies empty" `Quick test_cleanup_zombies_empty;
       Alcotest.test_case "cleanup detects regular zombie" `Quick test_cleanup_zombies_detects_regular;
       Alcotest.test_case "cleanup detects keeper zombie" `Quick test_cleanup_zombies_detects_keeper;

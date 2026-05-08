@@ -85,6 +85,25 @@ val with_lock :
   (unit -> 'a) ->
   'a
 
+(** {1 Observability hook} *)
+
+(** Fires after every {!acquire_flock_retry} / {!acquire_flock_retry_cooperative}
+    attempt sequence completes — once per [acquire_*] invocation, with
+    [outcome] = ["acquired"] or ["timeout"].
+
+    [retries] is the number of failed [F_TLOCK] attempts before the
+    final outcome (0 = succeeded on the first attempt).  [elapsed_s]
+    is the wall-clock time spent in the retry loop excluding [openfile].
+
+    Default no-op.  Wired at startup ([lib/coord.ml]) to a Prometheus
+    counter ([masc_file_lock_retries_total]) and histogram
+    ([masc_file_lock_acquire_seconds]) so contention storms surface in
+    metrics.  [masc_process] cannot depend on [Prometheus] (sub-library
+    boundary), so emission goes through this Atomic ref. *)
+val on_lock_attempt_fn :
+  (caller:string -> retries:int -> elapsed_s:float -> outcome:string -> unit)
+    Atomic.t
+
 (** {1 Diagnostics} *)
 
 (** Current number of tracked lock paths. *)

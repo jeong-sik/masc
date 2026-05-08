@@ -121,34 +121,52 @@ let prepare_args ?schema ~name args =
   in
   normalize_blank_optional_enum_args ?schema args
 
-let register_pre_hook () =
+let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
   let lookup name =
+    let schema =
+      match schema with
+      | Some schema -> Some schema
+      | None -> Tool_dispatch.lookup_schema name
+    in
     Option.map
       (Agent_sdk.Tool_middleware.tool_schema_of_json ~name)
-      (Tool_dispatch.lookup_schema name)
+      schema
   in
   let hook = Agent_sdk.Tool_middleware.make_validation_hook ~lookup in
+  let schema =
+    match schema with
+    | Some _ as schema -> schema
+    | None -> Tool_dispatch.lookup_schema name
+  in
+  let prepared_args = prepare_args ?schema ~name args in
+  match hook ~name ~args:prepared_args with
+  | Agent_sdk.Tool_middleware.Pass
+    when not (Yojson.Safe.equal prepared_args args) ->
+    Log.debug "tool_input_validation normalized args for %s" name;
+    Proceed prepared_args
+  | Agent_sdk.Tool_middleware.Pass -> Pass
+  | Agent_sdk.Tool_middleware.Proceed coerced ->
+    Log.debug "tool_input_validation coerced args for %s" name;
+    Proceed coerced
+  | Agent_sdk.Tool_middleware.Reject { message; _ } ->
+    Log.info "tool_input_validation rejected %s: %s" name message;
+    Reject {
+      Tool_result.success = false;
+      data = `Assoc [
+        ("error", `String message);
+        ("validation", `String "oas_tool_middleware");
+      ];
+      legacy_message = message;
+      tool_name = name;
+      duration_ms = 0.0;
+    }
+
+let validate_args ?schema ~name ~args () =
+  match validation_action ?schema ~name ~args () with
+  | Pass -> Ok args
+  | Proceed coerced -> Ok coerced
+  | Reject result -> Error result
+
+let register_pre_hook () =
   Tool_dispatch.register_pre_hook (fun ~name ~args ->
-    let schema = Tool_dispatch.lookup_schema name in
-    let prepared_args = prepare_args ?schema ~name args in
-    match hook ~name ~args:prepared_args with
-    | Agent_sdk.Tool_middleware.Pass
-      when not (Yojson.Safe.equal prepared_args args) ->
-      Log.debug "tool_input_validation normalized args for %s" name;
-      Proceed prepared_args
-    | Agent_sdk.Tool_middleware.Pass -> Pass
-    | Agent_sdk.Tool_middleware.Proceed coerced ->
-      Log.debug "tool_input_validation coerced args for %s" name;
-      Proceed coerced
-    | Agent_sdk.Tool_middleware.Reject { message; _ } ->
-      Log.info "tool_input_validation rejected %s: %s" name message;
-      Reject {
-        Tool_result.success = false;
-        data = `Assoc [
-          ("error", `String message);
-          ("validation", `String "oas_tool_middleware");
-        ];
-        legacy_message = message;
-        tool_name = name;
-        duration_ms = 0.0;
-      })
+    validation_action ~name ~args ())

@@ -37,10 +37,132 @@ let record_keeper_tool_call ~tool_name ~success ~duration_ms =
   in
   f ~tool_name ~success ~duration_ms
 
+let search_char c =
+  match c with
+  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> c
+  | _ when Char.code c > 127 -> c
+  | _ -> ' '
+
+let normalize_search_text text =
+  String.lowercase_ascii (String.map search_char text)
+
+let contains_substring text needle =
+  let text_len = String.length text in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    idx + needle_len <= text_len
+    && (String.sub text idx needle_len = needle || loop (idx + 1))
+  in
+  needle_len = 0 || loop 0
+
+let search_terms query =
+  normalize_search_text query
+  |> String.split_on_char ' '
+  |> List.map String.trim
+  |> List.filter (fun term -> term <> "")
+  |> List.sort_uniq String.compare
+
+let dedupe_tool_search_schemas schemas =
+  let seen = Hashtbl.create (List.length schemas) in
+  List.filter
+    (fun (schema : Masc_domain.tool_schema) ->
+       if Hashtbl.mem seen schema.name then false
+       else begin
+         Hashtbl.replace seen schema.name ();
+         true
+       end)
+    schemas
+
+let default_tool_search_schemas () =
+  Tool_shard.all_keeper_tool_schemas
+  @ [ keeper_tool_search_schema ]
+  |> List.filter (fun (schema : Masc_domain.tool_schema) ->
+       not (is_keeper_denied schema.name))
+  |> dedupe_tool_search_schemas
+
+let score_tool_schema terms (schema : Masc_domain.tool_schema) =
+  let help = Tool_help_registry.entry_of_schema schema in
+  let name_text = normalize_search_text schema.name in
+  let search_text =
+    normalize_search_text
+      (String.concat " "
+         [ schema.name;
+           schema.description;
+           help.Tool_help_registry.when_to_use;
+           Yojson.Safe.to_string schema.input_schema;
+         ])
+  in
+  List.fold_left
+    (fun score term ->
+       if contains_substring name_text term then score +. 2.0
+       else if contains_substring search_text term then score +. 1.0
+       else score)
+    0.0
+    terms
+
+let default_tool_search_fn ~query ~max_results =
+  let terms = search_terms query in
+  let schemas = default_tool_search_schemas () in
+  let hits =
+    schemas
+    |> List.filter_map
+         (fun schema ->
+            let score = score_tool_schema terms schema in
+            if Float.compare score 0.0 <= 0 then None
+            else Some (schema, score))
+    |> List.sort
+         (fun (left_schema, left_score) (right_schema, right_score) ->
+            let by_score = compare right_score left_score in
+            if by_score <> 0 then by_score
+            else String.compare left_schema.Masc_domain.name right_schema.name)
+  in
+  let rec take n xs =
+    if n <= 0 then []
+    else
+      match xs with
+      | [] -> []
+      | x :: rest -> x :: take (n - 1) rest
+  in
+  let selected = take max_results hits in
+  let result_json (schema, score) =
+    let help = Tool_help_registry.entry_of_schema schema in
+    `Assoc
+      [
+        ("name", `String schema.Masc_domain.name);
+        ("score", `Float score);
+        ("description", `String help.short_description);
+        ("when_to_use", `String help.when_to_use);
+        ("input_schema", schema.input_schema);
+        ("already_visible", `Bool false);
+      ]
+  in
+  let results = List.map result_json selected in
+  let hint =
+    if results = [] then
+      "No tools match this static fallback query. In normal keeper turns, \
+       the session-scoped BM25 index provides richer policy-aware search."
+    else
+      "Static fallback results from keeper schemas. Normal keeper turns \
+       use the richer session-scoped BM25 index."
+  in
+  `Assoc
+    [
+      ("ok", `Bool true);
+      ("query", `String query);
+      ("results", `List results);
+      ("result_count", `Int (List.length results));
+      ( "diagnostics",
+        `Assoc
+          [
+            ("source", `String "static_schema_fallback");
+            ("candidate_count", `Int (List.length schemas));
+          ] );
+      ("hint", `String hint);
+    ]
+
 type tool_searcher = query:string -> max_results:int -> Yojson.Safe.t
 
-let default_tool_searcher ~query:_ ~max_results:_ =
-  `Assoc [ ("results", `List []) ]
+let default_tool_searcher = default_tool_search_fn
 
 let tool_searcher_mutex = Stdlib.Mutex.create ()
 let tool_searcher = ref default_tool_searcher
@@ -167,7 +289,7 @@ let execute_keeper_tool_call_with_outcome
       result
     | `Failure, Malformed_structured parse_error ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_exec_tools_failures
+        Keeper_metrics.metric_keeper_exec_tools_failures
         ~labels:[("keeper", meta.name); ("tool", name)]
         ();
       Log.Keeper.error
@@ -213,7 +335,7 @@ let execute_keeper_tool_call_with_outcome
             "'%s' exists but your preset does not allow it. Use keeper_tools_list to see available tools." name )
     in
     Prometheus.inc_counter
-      Prometheus.metric_keeper_tool_not_allowed
+      Keeper_metrics.metric_keeper_tool_not_allowed
       ~labels:[("keeper", meta.name); ("tool", name); ("reason", reason)]
       ();
     make_executed_tool_result
@@ -379,7 +501,9 @@ let execute_keeper_tool_call_with_outcome
            in
            scored
          in
-         let masc_schemas = !Keeper_tool_registry.masc_schemas_ref in
+         let masc_schemas =
+           Keeper_tool_registry.masc_schemas_snapshot ()
+         in
          let enrich_suggestion name =
            let schema_opt =
              List.find_opt (fun (s : Masc_domain.tool_schema) -> s.name = name) masc_schemas

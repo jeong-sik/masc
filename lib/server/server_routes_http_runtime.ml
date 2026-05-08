@@ -201,6 +201,7 @@ let make_health_json ?(listener = "http/1.1") request =
             `List (List.map (fun v -> `String v) mcp_protocol_versions) );
         ] );
     ("transport", transport_json request);
+    ("http_listener", Transport_metrics.http_listener_json ());
     ("paths", Server_base_path_diagnostics.to_yojson (health_path_diagnostics ()));
     ("uptime", `String uptime_str);
     ("sse_clients", `Int (Sse.client_count ()));
@@ -208,7 +209,10 @@ let make_health_json ?(listener = "http/1.1") request =
     ("subsystems", Subsystem_health.to_yojson ());
     ("feature_flags", let features = Dashboard_feature_health.get_all_features () in
       Dashboard_feature_health.overview_json features);
-    ("gc", let s = Gc.stat () in `Assoc [
+    (* Keep /health cheap under live keeper load. [Gc.stat] can force a
+       full major-cycle sync across domains; [Gc.quick_stat] exposes the
+       same operator-facing counters without walking the heap. *)
+    ("gc", let s = Gc.quick_stat () in `Assoc [
       ("minor_collections", `Int s.minor_collections);
       ("major_collections", `Int s.major_collections);
       ("compactions", `Int s.compactions);
@@ -217,6 +221,21 @@ let make_health_json ?(listener = "http/1.1") request =
       ("minor_heap_size", `Int (let c = Gc.get () in c.minor_heap_size));
     ]);
     ("keeper_fibers", `Int (Keeper_registry.count_running ()));
+    (* Paused-keeper visibility: a keeper with [meta.paused = true] does not
+       run turns even if its fiber is alive. The dashboard "깨우기" button
+       now auto-resumes paused keepers, but ops still need a quick count
+       without scraping /metrics. List names so an operator can correlate
+       with the cause encoded in their last_blocker_class. *)
+    ("paused_keepers",
+     let paused =
+       Keeper_registry.all ()
+       |> List.filter_map (fun (e : Keeper_registry.registry_entry) ->
+            if e.meta.paused then Some (`String e.name) else None)
+     in
+     `Assoc [
+       ("count", `Int (List.length paused));
+       ("names", `List paused);
+     ]);
     ("keeper_config_parse_error_count",
      `Int keeper_config_parse_error_count);
     ( "keeper_config_parse_errors",

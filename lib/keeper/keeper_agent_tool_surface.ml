@@ -111,6 +111,7 @@ let turn_affordance_to_string = function
   | Inspect_worktree_delta -> "inspect_worktree_delta"
 
 let should_tool_gate_affordance = function
+  | Work_discovery -> false
   | Board_curation
   | Board_post_or_comment
   | Message_sweep
@@ -118,7 +119,6 @@ let should_tool_gate_affordance = function
   | Task_claim
   | Task_audit
   | Task_verify
-  | Work_discovery
   | Inspect_worktree_delta -> true
 
 let turn_affordances_require_tool_gate turn_affordances =
@@ -131,8 +131,10 @@ let turn_affordances_require_tool_gate turn_affordances =
 (* Affordance -> minimum viable tools that can satisfy that affordance.
    The list is intentionally narrow ("at least one of these is enough").
    Keepers without any matching tool cannot satisfy a [Require_tool_use]
-   contract for that affordance and must be allowed to respond with
-   text instead. *)
+   contract for that affordance and must be allowed to respond with text
+   instead. [Work_discovery] remains listed for routing/search guidance, but it
+   does not hard-gate by itself; the concrete signals inside a discovery turn
+   (claimable tasks, board activity, worktree delta) own the strict contract. *)
 let tools_for_gated_affordance = function
   | Board_curation -> [ "keeper_board_curation_submit" ]
   | Board_post_or_comment ->
@@ -199,7 +201,7 @@ let turn_affordances_require_tool_gate_with_allowed
       (fun affordance ->
          if not (has_matching_tool affordance) then
            Prometheus.inc_counter
-             Prometheus.metric_keeper_required_tool_gate_suppressed_total
+             Keeper_metrics.metric_keeper_required_tool_gate_suppressed_total
              ~labels:[ ("affordance", turn_affordance_to_string affordance) ]
              ())
       gated_affordances;
@@ -207,19 +209,31 @@ let turn_affordances_require_tool_gate_with_allowed
 
 let tool_names_for_required_gate_surface
     ~(tool_gate_requested : bool)
+    ~(required_tool_names : string list)
     (tool_names : string list) : string list =
   let is_stay_silent name =
     match Tool_name.of_string name with
     | Some (Tool_name.Keeper Tool_name.Keeper.Stay_silent) -> true
     | _ -> false
   in
+  let canonical_required_tool_names =
+    required_tool_names
+    |> List.map Keeper_tool_disclosure.canonical_tool_name
+    |> Keeper_types.dedupe_keep_order
+  in
+  let is_explicit_required_tool_name name =
+    List.mem
+      (Keeper_tool_disclosure.canonical_tool_name name)
+      canonical_required_tool_names
+  in
   if not tool_gate_requested then tool_names
   else
     let actionable =
       tool_names
       |> List.filter (fun name ->
-        Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name
-        && not (is_stay_silent name))
+        is_explicit_required_tool_name name
+        || (Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name
+            && not (is_stay_silent name)))
       |> Keeper_types.dedupe_keep_order
     in
     match actionable with
@@ -297,18 +311,57 @@ let required_tool_names_for_turn ~(current_task_required_tool_names : string lis
   | [] -> current_task_required_tool_names
   | _ :: _ -> per_call_required_tool_names
 
+let outstanding_required_tool_names ~(required_tool_names : string list)
+    ~(satisfied_tool_names : string list) =
+  let satisfied =
+    satisfied_tool_names
+    |> List.map Keeper_tool_disclosure.canonical_tool_name
+    |> Keeper_types.dedupe_keep_order
+  in
+  required_tool_names
+  |> List.filter (fun name ->
+    let canonical = Keeper_tool_disclosure.canonical_tool_name name in
+    not (List.mem canonical satisfied))
+  |> Keeper_types.dedupe_keep_order
+
+let satisfied_required_tool_names_of_outcomes
+    (calls : (string * string) list) =
+  calls
+  |> List.filter_map (fun (tool_name, outcome) ->
+    if String.equal outcome "ok"
+       && Keeper_tool_disclosure.tool_name_can_satisfy_required_contract
+            tool_name
+    then Some tool_name
+    else None)
+  |> Keeper_types.dedupe_keep_order
+
 let preferred_tool_choice_for_required_tool_names
     ~(required_tool_names : string list) ~(allowed_tool_names : string list) =
   let visible_required =
     required_tool_names
-    |> List.filter (fun name ->
-      List.mem name allowed_tool_names
-      && Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name)
+    |> List.filter_map (fun name ->
+      let canonical = Keeper_tool_disclosure.canonical_tool_name name in
+      if List.mem canonical allowed_tool_names then Some canonical
+      else if List.mem name allowed_tool_names then Some name
+      else None)
     |> Keeper_types.dedupe_keep_order
   in
   match visible_required with
-  | [ name ] -> Agent_sdk.Types.Tool name
-  | _ :: _ -> Agent_sdk.Types.Any
+  | [ name ] when
+      not (Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name) ->
+    (* Passive/read-only tools do not suffer the mutating-tool raw-name
+       satisfaction ambiguity described below. When an operator explicitly
+       requires one passive tool, exact tool_choice keeps the model from
+       satisfying the turn with an unrelated write. *)
+    Agent_sdk.Types.Tool name
+  | _ :: _ ->
+    (* Use the provider-level "some tool is required" contract here, even
+       for a single explicit required tool. Runtime MCP transports may return
+       names such as [mcp__masc__keeper_pr_create]; OAS exact-tool contracts
+       compare raw names before MASC can canonicalize them, so exact Tool(name)
+       can reject a correct call. MASC still validates the specific required
+       names after execution via [outstanding_required_tool_names]. *)
+    Agent_sdk.Types.Any
   | [] -> Agent_sdk.Types.Auto
 
 let owned_active_task_id_for_meta =
@@ -432,6 +485,7 @@ let tool_search_alias_entries =
   ; "masc_plan_clear_task", "계획 태스크 제거 해제 클리어"
   ; "masc_agent_fitness", "에이전트 평가 점수 피트니스"
   ; "masc_web_search", "웹 검색 인터넷 온라인 구글"
+  ; "masc_web_fetch", "웹 페이지 가져오기 읽기 URL 페치"
   ; "masc_claim_next", "다음태스크 가져오기 할당"
   ]
 

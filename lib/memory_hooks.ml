@@ -86,6 +86,32 @@ let compose_with_inner ~memory_hooks ~inner =
         inner.Agent_sdk.Hooks.before_turn_params
   }
 
+let record_pipeline_flush
+    ~(agent_name : string)
+    ~(outcome : string)
+    ~(duration_s : float)
+    ~(episodes : int)
+    ~(procedures : int) =
+  let outcome_labels = [ ("agent_name", agent_name); ("outcome", outcome) ] in
+  Prometheus.inc_counter
+    Prometheus.metric_memory_pipeline_flushes
+    ~labels:outcome_labels
+    ();
+  Prometheus.observe_histogram
+    Prometheus.metric_memory_pipeline_flush_duration_seconds
+    ~labels:outcome_labels
+    duration_s;
+  let record_records ~tier count =
+    if count > 0 then
+      Prometheus.inc_counter
+        Prometheus.metric_memory_pipeline_flush_records
+        ~labels:[ ("agent_name", agent_name); ("tier", tier) ]
+        ~delta:(float_of_int count)
+        ()
+  in
+  record_records ~tier:"episodic" episodes;
+  record_records ~tier:"procedural" procedures
+
 (** Create OAS hooks for hook-first memory injection.
 
     @param agent_name Keeper agent name (for procedure/episode lookup)
@@ -139,8 +165,16 @@ let make
     after_turn = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.AfterTurn _ ->
+        let started_at = Time_compat.now () in
         (try
            let (ep, pr) = flush_incremental ~memory ~agent_name in
+           let duration_s = max 0.0 (Time_compat.now () -. started_at) in
+           record_pipeline_flush
+             ~agent_name
+             ~outcome:"success"
+             ~duration_s
+             ~episodes:ep
+             ~procedures:pr;
            if ep > 0 || pr > 0 then
              Log.Keeper.debug
                "memory_hooks: flush_incremental agent=%s episodes=%d procedures=%d"
@@ -149,10 +183,17 @@ let make
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
              Prometheus.inc_counter
-               Prometheus.metric_keeper_lifecycle_callback_failures
+               Keeper_metrics.metric_keeper_lifecycle_callback_failures
                ~labels:
                  [("callback", "memory_after_turn_flush")]
                ();
+             let duration_s = max 0.0 (Time_compat.now () -. started_at) in
+             record_pipeline_flush
+               ~agent_name
+               ~outcome:"error"
+               ~duration_s
+               ~episodes:0
+               ~procedures:0;
              Log.Keeper.warn
                "memory_hooks: flush_incremental failed agent=%s: %s"
                agent_name (Printexc.to_string exn));

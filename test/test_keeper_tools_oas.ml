@@ -105,6 +105,14 @@ let test_tool_count_matches_allowed () =
 let find_tool name tools =
   List.find (fun (tool : Tool.t) -> String.equal tool.schema.name name) tools
 
+let dummy_schedule : Agent_sdk.Hooks.tool_schedule =
+  { planned_index = 0
+  ; batch_index = 0
+  ; batch_size = 1
+  ; concurrency_class = "default"
+  ; batch_kind = "sequential"
+  }
+
 let string_contains ~sub text =
   let text_len = String.length text in
   let sub_len = String.length sub in
@@ -148,12 +156,12 @@ let test_tool_side_effect_failures_are_observed () =
       let keeper_labels = [("keeper", meta.name)] in
       let sse_before =
         Prometheus.metric_value_or_zero
-          Prometheus.metric_keeper_sse_broadcast_failures
+          Masc_mcp.Keeper_metrics.metric_keeper_sse_broadcast_failures
           ~labels:keeper_labels ()
       in
       let decision_before =
         Prometheus.metric_value_or_zero
-          Prometheus.metric_keeper_decision_audit_flush_failures
+          Masc_mcp.Keeper_metrics.metric_keeper_decision_audit_flush_failures
           ~labels:keeper_labels ()
       in
       let original_hook = Atomic.get Sse.buffer_commit_test_hook in
@@ -171,13 +179,103 @@ let test_tool_side_effect_failures_are_observed () =
       check (float 0.001) "SSE failure metric incremented"
         (sse_before +. 1.0)
         (Prometheus.metric_value_or_zero
-           Prometheus.metric_keeper_sse_broadcast_failures
+           Masc_mcp.Keeper_metrics.metric_keeper_sse_broadcast_failures
            ~labels:keeper_labels ());
       check (float 0.001) "decision-log failure metric incremented"
         (decision_before +. 1.0)
         (Prometheus.metric_value_or_zero
-           Prometheus.metric_keeper_decision_audit_flush_failures
+           Masc_mcp.Keeper_metrics.metric_keeper_decision_audit_flush_failures
            ~labels:keeper_labels ()))
+
+let test_handler_persists_tool_call_io_without_post_hook () =
+  let meta = make_test_meta ~name:"test-keeper-direct-tool-io" () in
+  let ctx_snapshot = make_test_ctx () in
+  let dir = Filename.temp_file "test_keeper_tools_direct_io_" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_tool_call_log.reset_for_testing ();
+      rm_rf dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Coord.default_config dir in
+      Keeper_tool_call_log.reset_for_testing ();
+      Keeper_tool_call_log.init ~base_path:dir ();
+      Keeper_tool_call_log.set_turn_context
+        ~keeper_name:meta.name
+        ~trace_id:"trace-direct-tool-io"
+        ~turn:1
+        ();
+      let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
+      let tool = find_tool "keeper_time_now" tools in
+      (match Tool.execute tool (`Assoc []) with
+       | Ok _ -> ()
+       | Error { Agent_sdk.Types.message; _ } ->
+           fail ("keeper_time_now should succeed: " ^ message));
+      let entries =
+        Keeper_tool_call_log.read_recent ~keeper_name:meta.name ~n:10 ()
+      in
+      check int "handler wrote one tool_call row" 1 (List.length entries);
+      let row = List.hd entries in
+      check string "tool" "keeper_time_now"
+        Yojson.Safe.Util.(row |> member "tool" |> to_string);
+      check string "trace id" "trace-direct-tool-io"
+        Yojson.Safe.Util.(row |> member "trace_id" |> to_string))
+
+let test_post_hook_does_not_duplicate_handler_logged_io () =
+  let meta = make_test_meta ~name:"test-keeper-direct-tool-dedupe" () in
+  let meta_ref = ref meta in
+  let ctx_snapshot = make_test_ctx () in
+  let dir = Filename.temp_file "test_keeper_tools_direct_dedupe_" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_tool_call_log.reset_for_testing ();
+      rm_rf dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Coord.default_config dir in
+      Keeper_tool_call_log.reset_for_testing ();
+      Keeper_tool_call_log.init ~base_path:dir ();
+      let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
+      let tool = find_tool "keeper_time_now" tools in
+      let output_text =
+        match Tool.execute tool (`Assoc []) with
+        | Ok { Agent_sdk.Types.content; _ } -> content
+        | Error { Agent_sdk.Types.message; _ } ->
+            fail ("keeper_time_now should succeed: " ^ message)
+      in
+      let hooks =
+        Keeper_hooks_oas.make_hooks ~config ~meta_ref ~generation:1 ()
+      in
+      let post_tool_use =
+        match hooks.Agent_sdk.Hooks.post_tool_use with
+        | Some hook -> hook
+        | None -> fail "post_tool_use hook missing"
+      in
+      ignore
+        (post_tool_use
+           (Agent_sdk.Hooks.PostToolUse
+              { tool_use_id = "tu-direct-dedupe"
+              ; tool_name = "keeper_time_now"
+              ; input = `Assoc []
+              ; output =
+                  Ok
+                    ({ Agent_sdk.Types.content = output_text }
+                     : Agent_sdk.Types.tool_output)
+              ; result_bytes = String.length output_text
+              ; duration_ms = 2.0
+              ; schedule = dummy_schedule
+              }));
+      let entries =
+        Keeper_tool_call_log.read_recent ~keeper_name:meta.name ~n:10 ()
+      in
+      check int "post hook did not duplicate handler row" 1
+        (List.length entries))
 
 let is_guardrail_message message =
   string_contains
@@ -215,6 +313,35 @@ let test_error_json_is_returned_as_tool_error () =
           check bool "detail preserves path" true
             (Option.is_some (Safe_ops.json_string_opt "path" detail))
       | Ok _ -> fail "missing file should be surfaced as tool error")
+
+let test_oas_handler_rejects_missing_required_args () =
+  let meta = make_test_meta () in
+  let ctx_snapshot = make_test_ctx () in
+  let dir = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "test_keeper_tools_validate_%d" (Random.int 100000)) in
+  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fun.protect
+    ~finally:(fun () ->
+      (try Sys.readdir dir |> Array.iter (fun f ->
+        Sys.remove (Filename.concat dir f));
+        Unix.rmdir dir with _ -> ()))
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Coord.default_config dir in
+      let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
+      let tool = find_tool "keeper_fs_read" tools in
+      match Tool.execute tool (`Assoc []) with
+      | Error { Agent_sdk.Types.message; _ } ->
+          let json = Yojson.Safe.from_string message in
+          check bool "ok is false" false
+            (Yojson.Safe.Util.(member "ok" json |> to_bool));
+          check bool "error mentions missing path" true
+            (string_contains ~sub:"path" message);
+          let detail = Yojson.Safe.Util.member "detail" json in
+          check string "validation source" "oas_tool_middleware"
+            Yojson.Safe.Util.(detail |> member "validation" |> to_string)
+      | Ok _ -> fail "missing required path should be rejected by OAS validation")
 
 let latest_log_seq () =
   match Mlog.Ring.recent ~limit:1 () with
@@ -758,6 +885,8 @@ let () =
       test_case "valid schemas" `Quick test_tools_have_valid_schemas;
       test_case "count matches allowed" `Quick test_tool_count_matches_allowed;
       test_case "error json becomes tool error" `Quick test_error_json_is_returned_as_tool_error;
+      test_case "missing required args rejected before keeper exec" `Quick
+        test_oas_handler_rejects_missing_required_args;
       test_case "error result logs at error level" `Quick
         test_error_result_logs_at_error_level;
       test_case "missing file error includes suggestions" `Quick
@@ -767,6 +896,10 @@ let () =
       test_case "failure tracking is independent per args" `Quick test_failure_tracking_is_independent_per_args;
       test_case "tool side-effect failures are observed" `Quick
         test_tool_side_effect_failures_are_observed;
+      test_case "handler persists tool-call I/O without post hook" `Quick
+        test_handler_persists_tool_call_io_without_post_hook;
+      test_case "post hook skips handler-logged tool-call I/O" `Quick
+        test_post_hook_does_not_duplicate_handler_logged_io;
     ];
     "normalize_tool_result", [
       test_case "success JSON wraps under result" `Quick test_normalize_success_json;

@@ -2938,6 +2938,39 @@ proactive_enabled = true
       Alcotest.(check (option (float 0.001))) "last output tokens per sec surfaced"
         (Some 20.0)
         (json |> member "metrics" |> member "last_output_tokens_per_sec" |> to_float_option);
+      let zero_latency_base = read_keeper_meta_exn config keeper_name in
+      let zero_latency_meta =
+        {
+          zero_latency_base with
+          runtime =
+            {
+              zero_latency_base.runtime with
+              usage =
+                {
+                  zero_latency_base.runtime.usage with
+                  last_latency_ms = 0;
+                };
+            };
+          updated_at = Masc_domain.now_iso ();
+        }
+      in
+      (match Masc_mcp.Keeper_types.write_meta config zero_latency_meta with
+      | Ok () -> ()
+      | Error err -> Alcotest.fail ("zero latency meta write failed: " ^ err));
+      let zero_status, zero_json =
+        Masc_mcp.Dashboard_http_keeper.keeper_config_json config keeper_name
+      in
+      Alcotest.(check bool) "zero latency config found" true (zero_status = `OK);
+      Alcotest.(check bool) "zero latency surfaced as missing" true
+        (zero_json |> member "metrics" |> member "last_latency_ms" = `Null);
+      Alcotest.(check (option (float 0.001))) "zero latency total tps missing"
+        None
+        (zero_json |> member "metrics" |> member "last_total_tokens_per_sec"
+       |> to_float_option);
+      Alcotest.(check (option (float 0.001))) "zero latency output tps missing"
+        None
+        (zero_json |> member "metrics" |> member "last_output_tokens_per_sec"
+       |> to_float_option);
       (* Prompt source depends on runtime bootstrap and any restored overrides;
          accepted values come from Prompt_registry.resolve_prompt_unlocked. *)
       let prompt_source =

@@ -2,6 +2,7 @@ module Types = Masc_domain
 
 module Mcp_eio = Masc_mcp.Mcp_server_eio
 module Config = Masc_mcp.Config
+module Goal_store = Masc_mcp.Goal_store
 
 type init_mode =
   | Fresh
@@ -17,6 +18,7 @@ type fixture = {
   base_path : string;
   sid : string;
   agent_name : string;
+  auth_token : string;
   clock : float Eio.Time.clock_ty Eio.Resource.t;
   sw : Eio.Switch.t;
   state : Mcp_eio.server_state;
@@ -30,6 +32,7 @@ type fixture = {
   mutable library_topic : string option;
   mutable worktree_task_id : string option;
   mutable code_file_path : string option;
+  mutable goal_id : string option;
 }
 
 type contract_case = {
@@ -229,6 +232,18 @@ let temp_dir prefix =
   Unix.mkdir dir 0o755;
   dir
 
+let tool_matrix_agent_name = "matrix"
+
+let seed_persona_dir base_path agent_name =
+  let personas_dir =
+    Filename.concat
+      (Filename.concat (Filename.concat base_path ".masc") "config")
+      "personas"
+  in
+  mkdir_p (Filename.concat personas_dir agent_name);
+  Unix.putenv "MASC_PERSONAS_DIR" personas_dir;
+  Masc_mcp.Config_dir_resolver.reset ()
+
 let run_cmd_exn argv =
   let cmd = String.concat " " (List.map Filename.quote argv) in
   match Sys.command cmd with
@@ -260,6 +275,7 @@ let setup_git_repo base_path =
 
 let execute_tool fixture ~name ~arguments =
   Mcp_eio.execute_tool_eio ~sw:fixture.sw ~clock:fixture.clock
+    ~auth_token:fixture.auth_token
     ~mcp_session_id:fixture.sid fixture.state ~name ~arguments
 
 let execute_tool_ok fixture ~name ~arguments =
@@ -302,11 +318,24 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
     Mcp_eio.create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net
       ~base_path
   in
+  seed_persona_dir base_path tool_matrix_agent_name;
+  let auth_token =
+    match
+      Masc_mcp.Auth.create_token base_path ~agent_name:tool_matrix_agent_name
+        ~role:Masc_domain.Admin
+    with
+    | Ok (token, _cred) -> token
+    | Error err ->
+        failwith
+          ("failed to create tool matrix auth token: "
+          ^ Masc_domain.masc_error_to_string err)
+  in
   let fixture =
     {
       base_path;
       sid = "mcp-tool-matrix";
-      agent_name = "codex-tool-matrix";
+      agent_name = tool_matrix_agent_name;
+      auth_token;
       clock;
       sw;
       state;
@@ -320,6 +349,7 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
       library_topic = None;
       worktree_task_id = None;
       code_file_path = None;
+      goal_id = None;
     }
   in
   (match init_mode with
@@ -329,6 +359,21 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
       ensure_initialized fixture;
       ensure_joined fixture);
   fixture
+
+let ensure_goal fixture =
+  match fixture.goal_id with
+  | Some goal_id -> goal_id
+  | None ->
+      let goal =
+        match
+          Goal_store.upsert_goal fixture.state.room_config
+            ~title:"Tool Matrix Goal" ()
+        with
+        | Ok (goal, _status) -> goal
+        | Error err -> failwith ("failed to seed tool matrix goal: " ^ err)
+      in
+      fixture.goal_id <- Some goal.Goal_store.id;
+      goal.Goal_store.id
 
 let ensure_task fixture =
   match fixture.task_id with
@@ -342,6 +387,7 @@ let ensure_task fixture =
                 ("title", `String "Tool Matrix Task");
                 ("priority", `Int 2);
                 ("description", `String "task fixture");
+                ("goal_id", `String (ensure_goal fixture));
               ])
       in
       let task_id =
@@ -591,6 +637,13 @@ let field_type = function
 
 let task_id_for_tool fixture _tool_name = ensure_task fixture
 
+let goal_principal fixture =
+  `Assoc
+    [
+      ("kind", `String "keeper");
+      ("id", `String fixture.agent_name);
+    ]
+
 let field_value fixture ~tool_name field_name schema =
   let enum_choice = enum_first schema in
   match field_name with
@@ -611,6 +664,8 @@ let field_value fixture ~tool_name field_name schema =
   | "new_string" -> `String "after"
   | "key" -> `String "tool-matrix-cache"
   | "task_id" -> `String (task_id_for_tool fixture tool_name)
+  | "goal_id" -> `String (ensure_goal fixture)
+  | "actor" | "principal" -> goal_principal fixture
   | "task_title" -> `String "Tool Matrix Started Task"
   | "title" -> `String "Tool Matrix Title"
   | "summary" -> `String "tool matrix summary"
@@ -638,6 +693,7 @@ let field_value fixture ~tool_name field_name schema =
               ("title", `String "Tool Matrix Batch Task");
               ("priority", `Int 2);
               ("description", `String "batch");
+              ("goal_id", `String (ensure_goal fixture));
             ];
         ]
   | "post_id" | "parent_id" -> `String (ensure_board_post fixture)
@@ -978,7 +1034,8 @@ let call_tool_json fixture (schema : Masc_domain.tool_schema) arguments =
         ])
   in
   Mcp_eio.handle_request ~clock:fixture.clock ~sw:fixture.sw
-    ~mcp_session_id:fixture.sid fixture.state request
+    ~mcp_session_id:fixture.sid ~auth_token:fixture.auth_token fixture.state
+    request
 
 let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
     (schema : Masc_domain.tool_schema) =
@@ -991,6 +1048,7 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
       ("DATABASE_URL", Sys.getenv_opt "DATABASE_URL");
       ("SUPABASE_DB_URL", Sys.getenv_opt "SUPABASE_DB_URL");
       ("SB_PG_URL", Sys.getenv_opt "SB_PG_URL");
+      ("MASC_PERSONAS_DIR", Sys.getenv_opt "MASC_PERSONAS_DIR");
     ]
   in
   Unix.putenv "MASC_STORAGE_TYPE" "filesystem";
@@ -1009,6 +1067,7 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
             | Some raw -> Unix.putenv name raw
             | None -> Unix.putenv name "")
           saved_env;
+        Masc_mcp.Config_dir_resolver.reset ();
         match saved_home with
         | Some home -> Unix.putenv "HOME" home
         | None -> Unix.putenv "HOME" "")

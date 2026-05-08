@@ -51,15 +51,16 @@ let test_signal_label_none () =
 (* ── contract_status_label ───────────────────────────────────────────── *)
 
 let test_status_label_tool_surface_mismatch () =
-  let label =
-    KCC.contract_status_label
+  let rendered =
+    Format.asprintf "%a" KCC.pp_contract_status
       (KCC.Tool_surface_mismatch { missing = [ "keeper_task_claim"; "masc_broadcast" ] })
   in
-  (* Label must include the missing tool names for grep-ability. *)
-  check_bool "label mentions missing keeper_task_claim" true
-    (Astring.String.is_infix ~affix:"keeper_task_claim" label);
-  check_bool "label mentions missing masc_broadcast" true
-    (Astring.String.is_infix ~affix:"masc_broadcast" label)
+  (* The stable label is intentionally low-cardinality; the pretty printer
+     carries missing tool names for grep/debug output. *)
+  check_bool "rendered status mentions missing keeper_task_claim" true
+    (Astring.String.is_infix ~affix:"keeper_task_claim" rendered);
+  check_bool "rendered status mentions missing masc_broadcast" true
+    (Astring.String.is_infix ~affix:"masc_broadcast" rendered)
 
 let test_status_label_satisfied_completion () =
   check_string "Satisfied_completion is a stable token"
@@ -154,6 +155,18 @@ let test_classify_for_tools_alias_matches () =
   in
   check_signal "alias matches direct" direct aliased
 
+let test_requires_tool_support_for_allowed_tools_true () =
+  let o = make_obs ~tasks:1 ~board:0 ~discovered:false in
+  check_bool "claimable task + claim tool requires tool-capable provider" true
+    (KCC.requires_tool_support_for_allowed_tools
+       ~allowed_tool_names:[ "keeper_task_claim" ] o)
+
+let test_requires_tool_support_for_allowed_tools_false_without_matching_tool () =
+  let o = make_obs ~tasks:1 ~board:0 ~discovered:false in
+  check_bool "claimable task without claim tool does not require tool support" false
+    (KCC.requires_tool_support_for_allowed_tools
+       ~allowed_tool_names:[ "keeper_board_post" ] o)
+
 (* ── runner ──────────────────────────────────────────────────────────── *)
 
 let () =
@@ -203,5 +216,10 @@ let () =
             test_classify_for_tools_no_actionable_when_no_tools;
           Alcotest.test_case "alias matches direct" `Quick
             test_classify_for_tools_alias_matches;
+          Alcotest.test_case "matching actionable signal requires tool support"
+            `Quick test_requires_tool_support_for_allowed_tools_true;
+          Alcotest.test_case
+            "unmatched actionable signal does not require tool support" `Quick
+            test_requires_tool_support_for_allowed_tools_false_without_matching_tool;
         ] );
     ]

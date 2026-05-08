@@ -2051,6 +2051,11 @@ function normalizeRuntimeBlockerClass(value: unknown): KeeperConfig['runtime']['
     case 'turn_failures':
     case 'exception':
     case 'stale_fleet_batch':
+    case 'awaiting_operator':
+    case 'awaiting_sandbox_egress':
+    case 'supervisor_paused':
+    case 'synthetic_stall':
+    case 'self_imposed_idle':
       return blockerClass
     default:
       return null
@@ -2095,6 +2100,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
   const metrics = isRecord(data.metrics) ? data.metrics : {}
   const sandboxEnvironment = normalizeKeeperSandboxEnvironment(data.sandbox_environment)
   const perProviderTimeoutSec = asLooseNullableNumber(execution.per_provider_timeout_sec)
+  const lastLatencyMs = asInt(metrics.last_latency_ms)
 
   return {
     name: asNullableString(data.name) ?? requestedName,
@@ -2247,7 +2253,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       last_input_tokens: asInt(metrics.last_input_tokens) ?? 0,
       last_output_tokens: asInt(metrics.last_output_tokens) ?? 0,
       last_total_tokens: asInt(metrics.last_total_tokens) ?? 0,
-      last_latency_ms: asInt(metrics.last_latency_ms) ?? 0,
+      last_latency_ms: lastLatencyMs != null && lastLatencyMs > 0 ? lastLatencyMs : null,
       last_total_tokens_per_sec: asLooseNullableNumber(metrics.last_total_tokens_per_sec),
       last_output_tokens_per_sec: asLooseNullableNumber(metrics.last_output_tokens_per_sec),
       compaction_count: asInt(metrics.compaction_count) ?? 0,
@@ -2300,7 +2306,7 @@ export function patchKeeperConfig(
   name: string,
   payload: KeeperConfigUpdatePayload,
 ): Promise<KeeperConfig> {
-  return patch<unknown>(
+  return post<unknown>(
     `/api/v1/keepers/${encodeURIComponent(name)}/config`,
     payload,
   ).then(raw => normalizeKeeperConfig(raw, name))

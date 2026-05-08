@@ -69,7 +69,7 @@ let get_or_create keeper_name =
    episode at threshold). *)
 let update_streak_gauge keeper_name value =
   Prometheus.set_gauge
-    Prometheus.metric_keeper_consecutive_idle
+    Keeper_metrics.metric_keeper_consecutive_idle
     ~labels:[("keeper", keeper_name)]
     (float_of_int value)
 
@@ -78,7 +78,7 @@ let update_streak_gauge keeper_name value =
    alert per keeper. *)
 let update_last_productive_gauge keeper_name ts =
   Prometheus.set_gauge
-    Prometheus.metric_keeper_last_productive_ts
+    Keeper_metrics.metric_keeper_last_productive_ts
     ~labels:[("keeper", keeper_name)]
     ts
 
@@ -103,8 +103,8 @@ let threshold_for_progress_class progress_class =
 
 let detect_counter_for_progress_class progress_class =
   if is_required_tool_progress_class progress_class
-  then Prometheus.metric_keeper_required_tool_loop_detected_total
-  else Prometheus.metric_keeper_passive_loop_detected_total
+  then Keeper_metrics.metric_keeper_required_tool_loop_detected_total
+  else Keeper_metrics.metric_keeper_passive_loop_detected_total
 
 let detect_labels_for_progress_class keeper_name progress_class =
   if is_required_tool_progress_class progress_class
@@ -117,7 +117,7 @@ let emit_detected_loop_metrics keeper_name progress_class =
     ~labels:(detect_labels_for_progress_class keeper_name progress_class)
     ();
   Prometheus.inc_counter
-    Prometheus.metric_keeper_zombie_loop_detected_total
+    Keeper_metrics.metric_keeper_zombie_loop_detected_total
     ~labels:[("keeper_name", keeper_name)]
     ()
 

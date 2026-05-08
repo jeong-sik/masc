@@ -345,6 +345,24 @@ let test_registered_hook_bypasses_empty_schema () =
   Alcotest.(check bool) "args unchanged" true
     (Yojson.Safe.equal forwarded args)
 
+let test_validate_args_uses_explicit_schema_without_registry () =
+  Tool_dispatch.clear_hooks ();
+  let schema = make_schema ~required:["path"] [("path", "string")] in
+  match
+    Tool_input_validation.validate_args
+      ~schema
+      ~name:"__tool_input_validation_direct_schema"
+      ~args:(`Assoc [])
+      ()
+  with
+  | Error result ->
+    let msg = Yojson.Safe.to_string result.Tool_result.data in
+    Alcotest.(check bool) "mentions missing path" true
+      (string_contains msg "path");
+    Alcotest.(check bool) "marks oas validation" true
+      (string_contains msg "oas_tool_middleware")
+  | Ok _ -> Alcotest.fail "Expected Error for missing required field"
+
 let find_schema_exn name schemas =
   match List.find_opt (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name) schemas with
   | Some schema -> schema.input_schema
@@ -540,6 +558,8 @@ let () =
         test_registered_hook_bypasses_unknown_tool;
       Alcotest.test_case "empty schema bypasses validation" `Quick
         test_registered_hook_bypasses_empty_schema;
+      Alcotest.test_case "direct validation uses explicit schema" `Quick
+        test_validate_args_uses_explicit_schema_without_registry;
       Alcotest.test_case "masc_transition compat: to/note keys" `Quick
         test_registered_hook_transition_compat_to_and_note;
       Alcotest.test_case "masc_transition compat: status-like action value" `Quick

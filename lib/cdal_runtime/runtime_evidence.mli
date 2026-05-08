@@ -55,7 +55,7 @@ type evidence_bundle =
   ; missing_files : (string * string) list
   }
 
-type raw_trace_manifest = Sessions.raw_trace_manifest
+type raw_trace_manifest = Sessions_types.raw_trace_manifest
 
 val now : unit -> float
 val runtime_persist_failure_prefix : string
@@ -77,10 +77,10 @@ val evidence_bundle_to_json : evidence_bundle -> Yojson.Safe.t
 
 val build_raw_trace_manifest
   :  session_id:string
-  -> latest_raw_trace_run:Sessions.raw_trace_run option
-  -> raw_trace_runs:Sessions.raw_trace_run list
-  -> raw_trace_summaries:Sessions.raw_trace_summary list
-  -> raw_trace_validations:Sessions.raw_trace_validation list
+  -> latest_raw_trace_run:Sessions_types.raw_trace_run option
+  -> raw_trace_runs:Sessions_types.raw_trace_run list
+  -> raw_trace_summaries:Sessions_types.raw_trace_summary list
+  -> raw_trace_validations:Sessions_types.raw_trace_validation list
   -> raw_trace_manifest
 
 val raw_trace_manifest_to_json : raw_trace_manifest -> Yojson.Safe.t

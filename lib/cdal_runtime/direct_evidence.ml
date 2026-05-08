@@ -143,11 +143,11 @@ let tool_contracts_to_json tools =
 ;;
 
 let worker_status_of_lifecycle = function
-  | Agent.Accepted -> Sessions.Accepted
-  | Agent.Ready -> Sessions.Ready
-  | Agent.Running -> Sessions.Running
-  | Agent.Completed -> Sessions.Completed
-  | Agent.Failed -> Sessions.Failed
+  | Agent.Accepted -> Sessions_types.Accepted
+  | Agent.Ready -> Sessions_types.Ready
+  | Agent.Running -> Sessions_types.Running
+  | Agent.Completed -> Sessions_types.Completed
+  | Agent.Failed -> Sessions_types.Failed
 ;;
 
 type raw_details =
@@ -199,7 +199,7 @@ let worker_run_of_agent
   let aliases = options.aliases in
   let worker_id = default_worker_id agent options in
   let runtime_actor = default_runtime_actor agent options in
-  { Sessions.worker_run_id =
+  { Sessions_types.worker_run_id =
       Option.value ~default:"direct-untracked" snapshot.current_run_id
   ; worker_id
   ; agent_name = (Agent.state agent).config.name
@@ -217,8 +217,8 @@ let worker_run_of_agent
   ; status = worker_status_of_lifecycle snapshot.status
   ; trace_capability =
       (match snapshot.current_run_id with
-       | Some _ -> Sessions.Raw
-       | None -> Sessions.No_trace)
+       | Some _ -> Sessions_types.Raw
+       | None -> Sessions_types.No_trace)
   ; validated =
       (match snapshot.status with
        | Agent.Completed -> raw_details.validated
@@ -360,13 +360,13 @@ let persist ~agent ~raw_trace ~(options : options) () =
     in
     let existing_bundle =
       match
-        Sessions.get_proof_bundle
+        Sessions_proof.get_proof_bundle
           ?session_root:options.session_root
           ~session_id:options.session_id
           ()
       with
       | Ok bundle ->
-        (match bundle.Sessions.latest_raw_trace_run with
+        (match bundle.Sessions_types.latest_raw_trace_run with
          | Some existing when String.equal existing.worker_run_id raw_run.worker_run_id ->
            Some bundle
          | _ -> None)
@@ -656,7 +656,7 @@ let persist ~agent ~raw_trace ~(options : options) () =
           evidence_artifact
           ~content:final_evidence_json
       in
-      Sessions.get_proof_bundle
+      Sessions_proof.get_proof_bundle
         ?session_root:options.session_root
         ~session_id:options.session_id
         ()
@@ -697,23 +697,23 @@ let%test "primary_alias empty list returns None" = primary_alias [] = None
 let%test "primary_alias blank first returns None" = primary_alias [ "  "; "bob" ] = None
 
 let%test "worker_status_of_lifecycle Accepted" =
-  worker_status_of_lifecycle Agent.Accepted = Sessions.Accepted
+  worker_status_of_lifecycle Agent.Accepted = Sessions_types.Accepted
 ;;
 
 let%test "worker_status_of_lifecycle Ready" =
-  worker_status_of_lifecycle Agent.Ready = Sessions.Ready
+  worker_status_of_lifecycle Agent.Ready = Sessions_types.Ready
 ;;
 
 let%test "worker_status_of_lifecycle Running" =
-  worker_status_of_lifecycle Agent.Running = Sessions.Running
+  worker_status_of_lifecycle Agent.Running = Sessions_types.Running
 ;;
 
 let%test "worker_status_of_lifecycle Completed" =
-  worker_status_of_lifecycle Agent.Completed = Sessions.Completed
+  worker_status_of_lifecycle Agent.Completed = Sessions_types.Completed
 ;;
 
 let%test "worker_status_of_lifecycle Failed" =
-  worker_status_of_lifecycle Agent.Failed = Sessions.Failed
+  worker_status_of_lifecycle Agent.Failed = Sessions_types.Failed
 ;;
 
 let%test "empty_raw_details has expected defaults" =

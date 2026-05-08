@@ -28,7 +28,7 @@ type summary =
   ; latest_resolved_model : string option
   ; hook_event_count : int
   ; tool_catalog_count : int
-  ; trace_capabilities : Sessions.trace_capability list
+  ; trace_capabilities : Sessions_types.trace_capability list
   }
 [@@deriving yojson]
 
@@ -44,7 +44,7 @@ open Result_syntax
 let unique_trace_capabilities worker_runs =
   worker_runs
   |> List.fold_left
-       (fun acc (worker : Sessions.worker_run) ->
+       (fun acc (worker : Sessions_types.worker_run) ->
           if List.exists (( = ) worker.trace_capability) acc
           then acc
           else acc @ [ worker.trace_capability ])
@@ -60,7 +60,7 @@ let latest_by predicate worker_runs =
   | [] -> None
 ;;
 
-let lifecycle_monotonic (worker : Sessions.worker_run) =
+let lifecycle_monotonic (worker : Sessions_types.worker_run) =
   let ordered a b =
     match a, b with
     | Some x, Some y -> x <= y
@@ -71,18 +71,18 @@ let lifecycle_monotonic (worker : Sessions.worker_run) =
 ;;
 
 let worker_ids worker_runs =
-  worker_runs |> List.map (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+  worker_runs |> List.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
 ;;
 
 let raw_run_ids raw_runs =
-  raw_runs |> List.map (fun (run : Sessions.raw_trace_run) -> run.worker_run_id)
+  raw_runs |> List.map (fun (run : Sessions_types.raw_trace_run) -> run.worker_run_id)
 ;;
 
-let is_runtime_resolved (worker : Sessions.worker_run) =
+let is_runtime_resolved (worker : Sessions_types.worker_run) =
   worker.resolved_provider <> None && worker.resolved_model <> None
 ;;
 
-let identity_is_consistent (worker : Sessions.worker_run) =
+let identity_is_consistent (worker : Sessions_types.worker_run) =
   let alias_ok =
     match worker.primary_alias with
     | None -> true
@@ -92,51 +92,51 @@ let identity_is_consistent (worker : Sessions.worker_run) =
 ;;
 
 let worker_status_name = function
-  | Sessions.Planned -> "planned"
-  | Sessions.Accepted -> "accepted"
-  | Sessions.Ready -> "ready"
-  | Sessions.Running -> "running"
-  | Sessions.Completed -> "completed"
-  | Sessions.Failed -> "failed"
+  | Sessions_types.Planned -> "planned"
+  | Sessions_types.Accepted -> "accepted"
+  | Sessions_types.Ready -> "ready"
+  | Sessions_types.Running -> "running"
+  | Sessions_types.Completed -> "completed"
+  | Sessions_types.Failed -> "failed"
 ;;
 
 let check bundle =
   let expected_latest_worker =
-    match List.rev bundle.Sessions.worker_runs with
+    match List.rev bundle.Sessions_types.worker_runs with
     | worker :: _ -> Some worker
     | [] -> None
   in
   let expected_latest_validated =
-    latest_by (fun (worker : Sessions.worker_run) -> worker.validated) bundle.worker_runs
+    latest_by (fun (worker : Sessions_types.worker_run) -> worker.validated) bundle.worker_runs
   in
   let expected_latest_accepted =
     latest_by
-      (fun (worker : Sessions.worker_run) -> worker.status = Sessions.Accepted)
+      (fun (worker : Sessions_types.worker_run) -> worker.status = Sessions_types.Accepted)
       bundle.worker_runs
   in
   let expected_latest_ready =
     latest_by
-      (fun (worker : Sessions.worker_run) -> worker.status = Sessions.Ready)
+      (fun (worker : Sessions_types.worker_run) -> worker.status = Sessions_types.Ready)
       bundle.worker_runs
   in
   let expected_latest_running =
     latest_by
-      (fun (worker : Sessions.worker_run) -> worker.status = Sessions.Running)
+      (fun (worker : Sessions_types.worker_run) -> worker.status = Sessions_types.Running)
       bundle.worker_runs
   in
   let expected_latest_completed =
     latest_by
-      (fun (worker : Sessions.worker_run) -> worker.status = Sessions.Completed)
+      (fun (worker : Sessions_types.worker_run) -> worker.status = Sessions_types.Completed)
       bundle.worker_runs
   in
   let expected_latest_failed =
     latest_by
-      (fun (worker : Sessions.worker_run) -> worker.status = Sessions.Failed)
+      (fun (worker : Sessions_types.worker_run) -> worker.status = Sessions_types.Failed)
       bundle.worker_runs
   in
   let validated_worker_runs =
     bundle.worker_runs
-    |> List.filter (fun (worker : Sessions.worker_run) -> worker.validated)
+    |> List.filter (fun (worker : Sessions_types.worker_run) -> worker.validated)
   in
   let expected_trace_capabilities = unique_trace_capabilities bundle.worker_runs in
   let raw_ids = raw_run_ids bundle.raw_trace_runs in
@@ -150,14 +150,14 @@ let check bundle =
     ; name = "direct_evidence_complete_when_raw_capable"
     ; passed =
         bundle.worker_runs
-        |> List.for_all (fun (worker : Sessions.worker_run) ->
+        |> List.for_all (fun (worker : Sessions_types.worker_run) ->
           match worker.trace_capability with
-          | Sessions.Raw ->
+          | Sessions_types.Raw ->
             List.exists
-              (fun (run : Sessions.raw_trace_run) ->
+              (fun (run : Sessions_types.raw_trace_run) ->
                  String.equal run.worker_run_id worker.worker_run_id)
               bundle.raw_trace_runs
-          | Sessions.Summary_only | Sessions.No_trace -> true)
+          | Sessions_types.Summary_only | Sessions_types.No_trace -> true)
     ; detail =
         Some
           (Printf.sprintf
@@ -200,140 +200,140 @@ let check bundle =
     ; name = "latest_accepted_worker_consistent"
     ; passed =
         Option.map
-          (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+          (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
           bundle.latest_accepted_worker_run
         = Option.map
-            (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+            (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
             expected_latest_accepted
     ; detail =
         Some
           (Printf.sprintf
              "bundle=%s expected=%s"
              (bundle.latest_accepted_worker_run
-              |> Option.map (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+              |> Option.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
               |> Option.value ~default:"")
              (expected_latest_accepted
-              |> Option.map (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+              |> Option.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
               |> Option.value ~default:""))
     }
   ; { code = "latest_ready_inconsistent"
     ; name = "latest_ready_worker_consistent"
     ; passed =
         Option.map
-          (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+          (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
           bundle.latest_ready_worker_run
         = Option.map
-            (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+            (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
             expected_latest_ready
     ; detail =
         Some
           (Printf.sprintf
              "bundle=%s expected=%s"
              (bundle.latest_ready_worker_run
-              |> Option.map (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+              |> Option.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
               |> Option.value ~default:"")
              (expected_latest_ready
-              |> Option.map (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+              |> Option.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
               |> Option.value ~default:""))
     }
   ; { code = "latest_running_inconsistent"
     ; name = "latest_running_worker_consistent"
     ; passed =
         Option.map
-          (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+          (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
           bundle.latest_running_worker_run
         = Option.map
-            (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+            (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
             expected_latest_running
     ; detail =
         Some
           (Printf.sprintf
              "bundle=%s expected=%s"
              (bundle.latest_running_worker_run
-              |> Option.map (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+              |> Option.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
               |> Option.value ~default:"")
              (expected_latest_running
-              |> Option.map (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+              |> Option.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
               |> Option.value ~default:""))
     }
   ; { code = "latest_worker_inconsistent"
     ; name = "latest_worker_consistent"
     ; passed =
         Option.map
-          (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+          (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
           bundle.latest_worker_run
         = Option.map
-            (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+            (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
             expected_latest_worker
     ; detail =
         Some
           (Printf.sprintf
              "bundle=%s expected=%s"
              (bundle.latest_worker_run
-              |> Option.map (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+              |> Option.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
               |> Option.value ~default:"")
              (expected_latest_worker
-              |> Option.map (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+              |> Option.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
               |> Option.value ~default:""))
     }
   ; { code = "latest_completed_inconsistent"
     ; name = "latest_completed_worker_consistent"
     ; passed =
         Option.map
-          (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+          (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
           bundle.latest_completed_worker_run
         = Option.map
-            (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+            (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
             expected_latest_completed
     ; detail =
         Some
           (Printf.sprintf
              "bundle=%s expected=%s"
              (bundle.latest_completed_worker_run
-              |> Option.map (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+              |> Option.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
               |> Option.value ~default:"")
              (expected_latest_completed
-              |> Option.map (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+              |> Option.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
               |> Option.value ~default:""))
     }
   ; { code = "latest_validated_inconsistent"
     ; name = "latest_validated_worker_consistent"
     ; passed =
         Option.map
-          (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+          (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
           bundle.latest_validated_worker_run
         = Option.map
-            (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+            (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
             expected_latest_validated
     ; detail =
         Some
           (Printf.sprintf
              "bundle=%s expected=%s"
              (bundle.latest_validated_worker_run
-              |> Option.map (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+              |> Option.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
               |> Option.value ~default:"")
              (expected_latest_validated
-              |> Option.map (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+              |> Option.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
               |> Option.value ~default:""))
     }
   ; { code = "latest_failed_inconsistent"
     ; name = "latest_failed_worker_consistent"
     ; passed =
         Option.map
-          (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+          (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
           bundle.latest_failed_worker_run
         = Option.map
-            (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+            (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
             expected_latest_failed
     ; detail =
         Some
           (Printf.sprintf
              "bundle=%s expected=%s"
              (bundle.latest_failed_worker_run
-              |> Option.map (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+              |> Option.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
               |> Option.value ~default:"")
              (expected_latest_failed
-              |> Option.map (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+              |> Option.map (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
               |> Option.value ~default:""))
     }
   ; { code = "trace_capabilities_inconsistent"
@@ -355,7 +355,7 @@ let check bundle =
     ; name = "failed_workers_have_reason"
     ; passed =
         bundle.worker_runs
-        |> List.for_all (fun (worker : Sessions.worker_run) ->
+        |> List.for_all (fun (worker : Sessions_types.worker_run) ->
           if worker.error = None && worker.failure_reason = None
           then true
           else worker.error <> None || worker.failure_reason <> None)
@@ -364,7 +364,7 @@ let check bundle =
           (Printf.sprintf
              "failed_workers=%d"
              (bundle.worker_runs
-              |> List.filter (fun (worker : Sessions.worker_run) ->
+              |> List.filter (fun (worker : Sessions_types.worker_run) ->
                 worker.error <> None || worker.failure_reason <> None)
               |> List.length))
     }
@@ -377,22 +377,22 @@ let check bundle =
     ; name = "resolved_runtime_presence_consistent"
     ; passed =
         bundle.worker_runs
-        |> List.for_all (fun (worker : Sessions.worker_run) ->
+        |> List.for_all (fun (worker : Sessions_types.worker_run) ->
           match worker.status with
-          | Sessions.Planned -> true
-          | Sessions.Accepted
-          | Sessions.Ready
-          | Sessions.Running
-          | Sessions.Completed
-          | Sessions.Failed -> is_runtime_resolved worker)
+          | Sessions_types.Planned -> true
+          | Sessions_types.Accepted
+          | Sessions_types.Ready
+          | Sessions_types.Running
+          | Sessions_types.Completed
+          | Sessions_types.Failed -> is_runtime_resolved worker)
     ; detail = Some (Printf.sprintf "workers=%d" (List.length bundle.worker_runs))
     }
   ; { code = "validated_worker_not_raw_capable"
     ; name = "validated_workers_are_raw_capable"
     ; passed =
         validated_worker_runs
-        |> List.for_all (fun (worker : Sessions.worker_run) ->
-          worker.trace_capability = Sessions.Raw)
+        |> List.for_all (fun (worker : Sessions_types.worker_run) ->
+          worker.trace_capability = Sessions_types.Raw)
     ; detail =
         Some (Printf.sprintf "validated_workers=%d" (List.length validated_worker_runs))
     }
@@ -425,59 +425,59 @@ let report bundle =
       ; validated_worker_run_count = bundle.validated_worker_run_count
       ; latest_accepted_worker_run_id =
           Option.map
-            (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+            (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
             bundle.latest_accepted_worker_run
       ; latest_ready_worker_run_id =
           Option.map
-            (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+            (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
             bundle.latest_ready_worker_run
       ; latest_running_worker_run_id =
           Option.map
-            (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+            (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
             bundle.latest_running_worker_run
       ; latest_worker_run_id =
           Option.map
-            (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+            (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
             latest_worker
       ; latest_completed_worker_run_id =
           Option.map
-            (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+            (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
             bundle.latest_completed_worker_run
       ; latest_worker_agent_name =
           Option.map
-            (fun (worker : Sessions.worker_run) -> worker.agent_name)
+            (fun (worker : Sessions_types.worker_run) -> worker.agent_name)
             latest_worker
       ; latest_worker_status =
           Option.map
-            (fun (worker : Sessions.worker_run) -> worker_status_name worker.status)
+            (fun (worker : Sessions_types.worker_run) -> worker_status_name worker.status)
             latest_worker
       ; latest_worker_role =
-          Option.bind latest_worker (fun (worker : Sessions.worker_run) -> worker.role)
+          Option.bind latest_worker (fun (worker : Sessions_types.worker_run) -> worker.role)
       ; latest_worker_aliases =
-          Option.bind latest_worker (fun (worker : Sessions.worker_run) ->
+          Option.bind latest_worker (fun (worker : Sessions_types.worker_run) ->
             Some worker.aliases)
           |> Option.value ~default:[]
       ; latest_worker_validated =
           Option.map
-            (fun (worker : Sessions.worker_run) -> worker.validated)
+            (fun (worker : Sessions_types.worker_run) -> worker.validated)
             latest_worker
       ; latest_failed_worker_run_id =
           Option.map
-            (fun (worker : Sessions.worker_run) -> worker.worker_run_id)
+            (fun (worker : Sessions_types.worker_run) -> worker.worker_run_id)
             latest_failed
       ; latest_failure_reason =
-          Option.bind latest_failed (fun (worker : Sessions.worker_run) ->
+          Option.bind latest_failed (fun (worker : Sessions_types.worker_run) ->
             match worker.failure_reason with
             | Some _ as value -> value
             | None -> worker.error)
       ; latest_resolved_provider =
-          Option.bind latest_worker (fun (worker : Sessions.worker_run) ->
+          Option.bind latest_worker (fun (worker : Sessions_types.worker_run) ->
             worker.resolved_provider)
       ; latest_resolved_model =
-          Option.bind latest_worker (fun (worker : Sessions.worker_run) ->
+          Option.bind latest_worker (fun (worker : Sessions_types.worker_run) ->
             worker.resolved_model)
       ; hook_event_count =
-          List.fold_left (fun acc item -> acc + item.Sessions.count) 0 bundle.hook_summary
+          List.fold_left (fun acc item -> acc + item.Sessions_types.count) 0 bundle.hook_summary
       ; tool_catalog_count = List.length bundle.tool_catalog
       ; trace_capabilities = bundle.trace_capabilities
       }
@@ -486,7 +486,7 @@ let report bundle =
 ;;
 
 let run ?session_root ~session_id () =
-  let* bundle = Sessions.get_proof_bundle ?session_root ~session_id () in
+  let* bundle = Sessions_proof.get_proof_bundle ?session_root ~session_id () in
   Ok (report bundle)
 ;;
 
@@ -508,8 +508,8 @@ let make_worker
       ?(requested_policy = None)
       ?(resolved_provider = Some "llama")
       ?(resolved_model = Some "qwen")
-      ?(status = Sessions.Completed)
-      ?(trace_capability = Sessions.Raw)
+      ?(status = Sessions_types.Completed)
+      ?(trace_capability = Sessions_types.Raw)
       ?(validated = true)
       ?(tool_names = [])
       ?(final_text = None)
@@ -527,7 +527,7 @@ let make_worker
       ?(has_file_write = false)
       ?(verification_pass_after_file_write = false)
       ()
-  : Sessions.worker_run
+  : Sessions_types.worker_run
   =
   { worker_run_id
   ; worker_id
@@ -565,9 +565,9 @@ let make_worker
 ;;
 
 let%test "unique_trace_capabilities deduplicates" =
-  let w1 = make_worker ~trace_capability:Sessions.Raw () in
-  let w2 = make_worker ~trace_capability:Sessions.Raw () in
-  let w3 = make_worker ~trace_capability:Sessions.Summary_only () in
+  let w1 = make_worker ~trace_capability:Sessions_types.Raw () in
+  let w2 = make_worker ~trace_capability:Sessions_types.Raw () in
+  let w3 = make_worker ~trace_capability:Sessions_types.Summary_only () in
   let result = unique_trace_capabilities [ w1; w2; w3 ] in
   List.length result = 2
 ;;
@@ -575,19 +575,19 @@ let%test "unique_trace_capabilities deduplicates" =
 let%test "unique_trace_capabilities empty list" = unique_trace_capabilities [] = []
 
 let%test "unique_trace_capabilities preserves order" =
-  let w1 = make_worker ~trace_capability:Sessions.Summary_only () in
-  let w2 = make_worker ~trace_capability:Sessions.Raw () in
+  let w1 = make_worker ~trace_capability:Sessions_types.Summary_only () in
+  let w2 = make_worker ~trace_capability:Sessions_types.Raw () in
   let result = unique_trace_capabilities [ w1; w2 ] in
-  result = [ Sessions.Summary_only; Sessions.Raw ]
+  result = [ Sessions_types.Summary_only; Sessions_types.Raw ]
 ;;
 
 let%test "latest_by returns last matching element" =
-  let w1 = make_worker ~worker_run_id:"w1" ~status:Sessions.Completed () in
-  let w2 = make_worker ~worker_run_id:"w2" ~status:Sessions.Running () in
-  let w3 = make_worker ~worker_run_id:"w3" ~status:Sessions.Completed () in
+  let w1 = make_worker ~worker_run_id:"w1" ~status:Sessions_types.Completed () in
+  let w2 = make_worker ~worker_run_id:"w2" ~status:Sessions_types.Running () in
+  let w3 = make_worker ~worker_run_id:"w3" ~status:Sessions_types.Completed () in
   match
     latest_by
-      (fun (w : Sessions.worker_run) -> w.status = Sessions.Completed)
+      (fun (w : Sessions_types.worker_run) -> w.status = Sessions_types.Completed)
       [ w1; w2; w3 ]
   with
   | Some w -> w.worker_run_id = "w3"
@@ -595,8 +595,8 @@ let%test "latest_by returns last matching element" =
 ;;
 
 let%test "latest_by returns None when no match" =
-  let w1 = make_worker ~status:Sessions.Running () in
-  latest_by (fun (w : Sessions.worker_run) -> w.status = Sessions.Failed) [ w1 ] = None
+  let w1 = make_worker ~status:Sessions_types.Running () in
+  latest_by (fun (w : Sessions_types.worker_run) -> w.status = Sessions_types.Failed) [ w1 ] = None
 ;;
 
 let%test "latest_by empty list" = latest_by (fun _ -> true) [] = None
@@ -693,12 +693,12 @@ let%test "identity_is_consistent missing runtime_actor fails" =
 ;;
 
 let%test "worker_status_name all variants" =
-  worker_status_name Sessions.Planned = "planned"
-  && worker_status_name Sessions.Accepted = "accepted"
-  && worker_status_name Sessions.Ready = "ready"
-  && worker_status_name Sessions.Running = "running"
-  && worker_status_name Sessions.Completed = "completed"
-  && worker_status_name Sessions.Failed = "failed"
+  worker_status_name Sessions_types.Planned = "planned"
+  && worker_status_name Sessions_types.Accepted = "accepted"
+  && worker_status_name Sessions_types.Ready = "ready"
+  && worker_status_name Sessions_types.Running = "running"
+  && worker_status_name Sessions_types.Completed = "completed"
+  && worker_status_name Sessions_types.Failed = "failed"
 ;;
 
 let%test "worker_ids extracts ids" =
@@ -708,7 +708,7 @@ let%test "worker_ids extracts ids" =
 ;;
 
 let%test "raw_run_ids extracts ids" =
-  let r1 : Sessions.raw_trace_run =
+  let r1 : Sessions_types.raw_trace_run =
     { worker_run_id = "r1"
     ; path = "/tmp/a"
     ; start_seq = 0
@@ -717,7 +717,7 @@ let%test "raw_run_ids extracts ids" =
     ; session_id = None
     }
   in
-  let r2 : Sessions.raw_trace_run =
+  let r2 : Sessions_types.raw_trace_run =
     { worker_run_id = "r2"
     ; path = "/tmp/b"
     ; start_seq = 0

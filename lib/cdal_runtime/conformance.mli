@@ -1,6 +1,6 @@
 (** Conformance checking for agent session proofs.
 
-    Transforms a {!Sessions.proof_bundle} into a structured report
+    Transforms a {!Sessions_types.proof_bundle} into a structured report
     with 17 conformance checks covering lifecycle, identity, tracing,
     and resolution.
 
@@ -37,7 +37,7 @@ type summary =
   ; latest_resolved_model : string option
   ; hook_event_count : int
   ; tool_catalog_count : int
-  ; trace_capabilities : Sessions.trace_capability list
+  ; trace_capabilities : Sessions_types.trace_capability list
   }
 [@@deriving yojson]
 
@@ -49,7 +49,7 @@ type report =
 [@@deriving yojson]
 
 (** Generate a conformance report from a proof bundle. *)
-val report : Sessions.proof_bundle -> report
+val report : Sessions_types.proof_bundle -> report
 
 (** Run conformance checks from a session on disk. *)
 val run

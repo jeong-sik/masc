@@ -27,38 +27,81 @@ RFC-0038 Phase 1이 opaque identifier types (`Provider_id.t = private string`, `
 
 ## §1 Problem (caller-context inventory)
 
-### §1.1 `coord_task.ml` `same_task_actor` 함수
+### §1.1 Core ownership comparison — raw `String.equal` everywhere
 
-**현재 main 코드** (`origin/main` `3904e285b8`, `lib/coord/coord_task.ml` line 109):
+**sub-agent 발견: `same_task_actor`는 현재 코드베이스에 존재하지 않음.**
+
+RFC 초안에서 인용한 `coord_task.ml:109`의 `same_task_actor`는 과거 commit(`3904e285b8`)의 코드로, 현재 HEAD에서는 리팩토링되어 `Coord_task_lifecycle.decide` 낙에 `same_agent` closure로 이동:
 
 ```ocaml
-let same_task_actor ~caller ~assignee =
-  (* 14038 PR이 제안: canonical form 비교 + alias-equivalent 확인 *)
-  String.equal caller assignee
-  (* → nick0cave != keeper-nick0cave-agent reject *)
+(* lib/coord/coord_task_lifecycle.ml:48 *)
+let same_agent assignee = String.equal assignee agent_name in
 ```
 
-**PR #14038 reference fix** (head commit):
-- `same_task_actor`에 alias-equivalent 매칭 추가
-- codex-connector P1 review (05-07 05:34Z):
-  > "`same_task_actor` alias 매칭으로 transition이 통과하는데 후속 `transition_task_r`이 caller string 그대로 agent state를 갱신하면, canonical assignee의 `current_task` 클리어 + status update가 발생하지 않아"
+이 `same_agent`가 FSM 전이 10개 이상의 지점에서 사용됨(lifecycle.ml:54,62,67,75,79,92,103,116,152,174). 모든 지점이 **raw `String.equal`**.
 
-**caller-context (sub-agent Topic C 결과 통합 영역)**:
-<!-- TODO: Topic C.1 — same_task_actor caller 전수 + transition_task_r 연결 -->
-<!-- TODO: Topic C.2 — alias 생성 사이트 (nick0cave, keeper-nick0cave-agent, generated nickname) -->
+**Task FSM의 identity 비교 전수 (sub-agent Topic C.1 결과)**:
 
-### §1.2 identity 생성 경로
+| 파일 | 라인 | 패턴 | 역할 |
+|------|------|------|------|
+| `coord_task_lifecycle.ml` | 48 | `String.equal assignee agent_name` | **FSM ownership core** |
+| `coord_task.ml` | 129 | `a <> agent_name` | assignee mismatch hint |
+| `coord_task.ml` | 149 | `a = agent_name` | remediation ownership |
+| `coord_task.ml` | 841 | `assignee = agent_name` | cancel_task_r guard |
+| `coord_task_schedule.ml` | 293, 423 | `String.equal assignee agent_name` | scheduling match |
+| `tool_task.ml` | 235, 379 | `String.equal assignee agent_name` | tool-layer check |
+
+→ **0개 typed identity comparison**. `Keeper_identity.canonical_keeper_name_from_agent_name` 등 canonicalization helper가 존재하나 task FSM에서는 전혀 사용되지 않음.
+
+**PR #14038 / codex-connector P1 review에서 지적한 버그**:
+> "`transition_task_r`이 caller string 그대로 agent state를 갱신하면, canonical assignee의 `current_task` 클리어 + status update가 발생하지 않아"
+
+실제 코드 확인: `transition_task_r` line 48에서 `resolve_agent_name_strict`로 caller를 canonicalize한 뒤 `update_local_agent_state`를 호출. 이는 **caller 측** state는 올바르게 갱신하나, task가 **다른 alias**로 claim된 경우 assignee 측 state 파일은 건드리지 않음.
+
+### §1.2 이미 존재하는 workaround들 — diagnosis 확인
+
+sub-agent가 3개의 dual-name matching workaround를 발견:
+
+```ocaml
+(* lib/tool_task.ml:145 *)
+let matches_you assignee =
+  String.equal assignee ctx.agent_name || String.equal assignee actual_name
+
+(* lib/tool_coord.ml:424 *)
+let matches_you assignee =
+  String.equal assignee ctx.agent_name || String.equal assignee actual_name
+
+(* lib/keeper/keeper_current_task_reconcile.ml:41 *)
+let matches assignee = List.mem assignee names in
+(* names = [agent_name; resolved_name] *)
+```
+
+→ 코드베이스가 이미 alias 문제를 **현장에서 workaround**로 해결하고 있다. 이는 RFC의 diagnosis가 정확함을 증명.
+
+### §1.3 Alias 생성 경로
 
 **메모리 `feedback_blocker_class_stamp_gap_completion_contract.md` 연관**: "blocker class stamp gap — text는 있는데 enum null"
 → text identity가 존재하나 typed identity가 없는 같은 근본 문제 (type이 없으면 normalize 불가).
 
-**생성 경로 (sub-agent Topic C.2 결과로 확정)**:
-<!-- TODO: keeper alias 생성 사이트 -->
-1. `config/keepers/*.toml` — `name = "nick0cave"` (canonical form)
-2. `keeper_heartbeat_loop.ml` — transport alias: `keeper-<name>-agent` (derived)
-3. `keeper_nickname_generator.ml` — generated nickname (volatile)
+**Alias 생성 경로 (sub-agent Topic C.2 결과)**:
 
-→ 모두 같은 canonical name(`nick0cave`)에서 derive되나 현재는 독립적 string으로 처리됨.
+| 경로 | 파일 | 형태 | 예시 |
+|------|------|------|------|
+| toml config | `config/keepers/*.toml` | canonical | `persona_name = "sangsu"` |
+| transport | `keeper_heartbeat_loop.ml` | derived | `keeper-sangsu-agent` |
+| generated | `keeper_nickname_generator.ml` | volatile | `swift-fox-a3b2` |
+| parsed | `keeper_identity.ml:50-88` | 4-way prefix/suffix | `keeper_<name>_agent` 등 |
+
+`keeper_identity.ml:50-88`의 파서가 4가지 조합 처리:
+```ocaml
+let keeper_name_from_agent_name agent_name =
+  match parse_keeper_agent_name ~prefix:"keeper-" ~suffix:"-agent" agent_name with
+  | Some keeper_name -> Some keeper_name
+  | None -> match parse_keeper_agent_name ~prefix:"keeper_" ~suffix:"_agent" agent_name with
+  ...
+```
+
+→ 모든 경로가 같은 canonical name(`sangsu`)에서 derive되나 현재는 **독립적 string으로 처리**됨. `keeper_meta`는 `name`과 `agent_name`을 둘 다 보유하나 비교 시점에서 어떤 필드를 쓸지 caller가 결정.
 
 ### §1.3 RFC-0038 Phase 1과의 격차
 
@@ -147,15 +190,23 @@ let transition_task_r ~identity ~task_state =
 
 ## §5 Alternatives
 
-<!-- TODO: research/2026-05-09-identity-canonicalization-patterns.md 의 비교 표 통합 -->
+| 접근법 | Canonical Form | Stability | Uniqueness | masc-mcp 적합도 |
+|---|---|---|---|---|
+| ActivityPub `id` | HTTPS URI | ✅ Stable | ✅ Global (URI) | **높음** — `keeper_name`을 canonical ID로, `agent_name`을 alias로 |
+| OIDC `iss`+`sub` | issuer-scoped string | ✅ Immutable | ✅ Global (iss+sub) | **높음** — `keeper_name`을 immutable `sub`로 취급 |
+| WebFinger `acct` | `acct:user@domain` | ✅ Stable | ✅ Global (domain-scoped) | **중간** — URI-like 식별자 도입 시 참고 |
+| DID | `did:method:specific` | ✅ Self-sovereign | ✅ Global | **낮음** — over-engineering, single-domain 시스템 |
+| RFC 5321 Mailbox | `local@domain` | ⚠️ Case-sensitive | ⚠️ Local-part ambiguous | **낮음** — delivery vs identity 목적 불일치 |
+| DNS Punycode/IDNA | Punycode ASCII | ✅ Stable | ✅ Global | **낮음** — internationalization 문제 없음, overkill |
 
-- DNS canonicalization (Punycode/IDNA) — 긴 canonical name 처리
-- ActivityPub `id` vs `preferredUsername` — canonical URL vs display name
-- OIDC `sub` claim (immutable) vs `preferred_username` (변경 가능)
-- DID (Decentralized Identifier) — 너무 과함
-- WebFinger `acct:` URI — email-like scheme
+### 권장 방향
 
-→ **권장**: ActivityPub `id` + `preferredUsername` 패턴 (canonical form + display alias)
+**채택: ActivityPub + OIDC Hybrid Model**
+- `keeper_name`을 canonical identifier로 명시. 속성: immutable, never reassigned, locally unique within masc instance.
+- `agent_name`을 display/handle로 분리. `preferredUsername`처럼 mutable, non-unique. UI 표시용.
+- `persona_name` = `keeper_name` (1:1). `credential_stem` = `keeper_name` (1:1). 이 관계를 타입으로 보증.
+- `canonical_keeper_name`의 4가지 prefix/suffix 조합 처리를 "legacy alias resolution"으로 재명명. 새 코드는 canonical `keeper_name`만 사용.
+- 단점: 기존 `agent_name`과 `keeper_name`이 다른 keeper들의 마이그레이션 필요. `keeper_name_from_agent_name`의 4-way match는 deprecation path 필요.
 
 ## §6 Open Questions
 
@@ -167,14 +218,22 @@ let transition_task_r ~identity ~task_state =
 
 ## §7 References
 
-<!-- TODO: ~/me/knowledge/research/2026-05-09-identity-canonicalization-patterns.md 인용 -->
+### 외부
 
-- (sub-agent Topic C) ActivityPub actor identity (id vs preferredUsername)
-- (sub-agent Topic C) OIDC sub claim + preferred_username
-- (sub-agent Topic C) DID W3C (overkill 검증)
-- (sub-agent Topic C) Git commit identity canonicalization
-- (사내) RFC-0038 Phase 1 (opaque identifier types)
-- (사내) PR #14038 — reference fix + codex-connector P1 review
+- W3C ActivityPub Specification — actor `id` as canonical identifier (https://www.w3.org/TR/activitypub/)
+- ActivityPub and WebFinger CG Final Report 2024 — "SHOULD NOT treat usernames as stable identifiers" (https://www.w3.org/community/reports/socialcg/CG-FINAL-apwf-20240608/)
+- OpenID Connect Core 1.0 — `sub` claim immutability (https://openid.net/specs/openid-connect-core-1_0.html)
+- WebFinger RFC 7033 + `acct` URI RFC 7565 (https://www.rfc-editor.org/rfc/rfc7033)
+- RFC 5321 Section 4.1.2 — local-part case sensitivity (https://datatracker.ietf.org/doc/html/rfc5321)
+- DID W3C Specification — over-engineering verification (https://www.w3.org/TR/did-resolution/)
+
+### 사내
+
+- RFC-0038 Phase 1 (opaque identifier types — `Provider_id.t`, `Cascade_name.t`)
+- PR #14038 — reference fix + codex-connector P1 review
+- `instructions/software-development.md` §2 Unknown → Permissive Default anti-pattern
+- (sub-agent Topic C.1) `same_task_actor` caller 전수 + `transition_task_r` 연결 — `.tmp/rfc-0038-p2-caller-context.md`
+- (sub-agent Topic C.2) alias 생성 사이트 분석 — `.tmp/rfc-0038-p2-caller-context.md`
 - (사내) memory `feedback_blocker_class_stamp_gap_completion_contract.md` (type 없는 identity 관련)
 
 ---

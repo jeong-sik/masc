@@ -2306,7 +2306,7 @@ export function patchKeeperConfig(
   name: string,
   payload: KeeperConfigUpdatePayload,
 ): Promise<KeeperConfig> {
-  return patch<unknown>(
+  return post<unknown>(
     `/api/v1/keepers/${encodeURIComponent(name)}/config`,
     payload,
   ).then(raw => normalizeKeeperConfig(raw, name))

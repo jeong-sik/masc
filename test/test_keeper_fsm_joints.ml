@@ -25,12 +25,9 @@
 module Obs = Masc_mcp.Keeper_composite_observer
 module SM = Masc_mcp.Keeper_state_machine
 module Routing = Masc_mcp.Keeper_cascade_routing
+module Keeper_config = Masc_mcp.Keeper_config
 
 (* ── Pretty-printers for Alcotest assertion messages ───────── *)
-
-let pp_ksm = Alcotest.testable
-    (fun fmt p -> Format.pp_print_string fmt (Obs.ksm_phase_to_string p))
-    (=)
 
 let pp_turn = Alcotest.testable
     (fun fmt p -> Format.pp_print_string fmt (Obs.turn_phase_to_string p))
@@ -61,22 +58,22 @@ let pp_phase = Alcotest.testable
    ============================================================ *)
 
 (* I1: TLA+ KeeperCompositeLifecycle.tla:354
-   (ksm_phase = "Compacting") => (ktc_turn_phase = "compacting")
+   (phase = "Compacting") => (ktc_turn_phase = "compacting")
    The .ml implementation is symmetric: also forbids Turn_compacting
-   under any other ksm_phase. We mirror that stronger predicate. *)
-let expected_phase_turn_alignment (ksm : Obs.ksm_phase)
-                                  (tp  : Obs.turn_phase) : bool =
-  match ksm, tp with
-  | Ksm_compacting, Turn_compacting -> true
-  | Ksm_compacting, _               -> false
-  | _,              Turn_compacting -> false
+   under any phase other than Compacting. We mirror that stronger predicate. *)
+let expected_phase_turn_alignment (phase : SM.phase)
+                                  (tp    : Obs.turn_phase) : bool =
+  match phase, tp with
+  | SM.Compacting, Turn_compacting -> true
+  | SM.Compacting, _               -> false
+  | _,             Turn_compacting -> false
   | _ -> true
 
 (* I3: TLA+ KeeperCompositeLifecycle.tla:368
-   (kmc_compaction = "compacting") <=> (ksm_phase = "Compacting") *)
-let expected_compaction_atomicity (ksm : Obs.ksm_phase)
-                                  (kmc : Obs.compaction_stage) : bool =
-  (kmc = Obs.Compaction_compacting) = (ksm = Obs.Ksm_compacting)
+   (kmc_compaction = "compacting") <=> (phase = "Compacting") *)
+let expected_compaction_atomicity (phase : SM.phase)
+                                  (kmc   : Obs.compaction_stage) : bool =
+  (kmc = Obs.Compaction_compacting) = (phase = SM.Compacting)
 
 (* I2: TLA+ KeeperCompositeLifecycle.tla:361
    (cascade in {selecting, trying, done, exhausted}) =>
@@ -89,30 +86,30 @@ let expected_no_cascade_before_measurement
   | Cascade_done | Cascade_exhausted -> measured
 
 let test_phase_turn_alignment_table () =
-  List.iter (fun ksm ->
+  List.iter (fun phase ->
     List.iter (fun tp ->
-      let expected = expected_phase_turn_alignment ksm tp in
-      let actual = Obs.check_phase_turn_alignment ksm tp in
-      let label = Printf.sprintf "I1 ksm=%s × turn=%s"
-        (Obs.ksm_phase_to_string ksm)
+      let expected = expected_phase_turn_alignment phase tp in
+      let actual = Obs.check_phase_turn_alignment phase tp in
+      let label = Printf.sprintf "I1 phase=%s × turn=%s"
+        (SM.phase_to_string phase)
         (Obs.turn_phase_to_string tp)
       in
       Alcotest.(check bool) label expected actual
     ) Obs.all_turn_phases
-  ) Obs.all_ksm_phases
+  ) SM.all_phases
 
 let test_compaction_atomicity_table () =
-  List.iter (fun ksm ->
+  List.iter (fun phase ->
     List.iter (fun kmc ->
-      let expected = expected_compaction_atomicity ksm kmc in
-      let actual = Obs.check_compaction_atomicity ksm kmc in
-      let label = Printf.sprintf "I3 ksm=%s × kmc=%s"
-        (Obs.ksm_phase_to_string ksm)
+      let expected = expected_compaction_atomicity phase kmc in
+      let actual = Obs.check_compaction_atomicity phase kmc in
+      let label = Printf.sprintf "I3 phase=%s × kmc=%s"
+        (SM.phase_to_string phase)
         (Obs.compaction_stage_to_string kmc)
       in
       Alcotest.(check bool) label expected actual
     ) Obs.all_compaction_stages
-  ) Obs.all_ksm_phases
+  ) SM.all_phases
 
 let test_no_cascade_before_measurement_table () =
   List.iter (fun cascade ->
@@ -159,35 +156,35 @@ let test_bug_cascade_before_measurement_caught () =
     false i2
 
 (* TLA+ BugCompactionDesync (lines 424-430):
-     ksm_phase = "Running"
+     phase = "Running"
      /\ kmc_compaction = "accumulating"
      /\ kmc_compaction' = "compacting"   (* BUG: KSM stays Running *)
-   Post-bug state: KMC=compacting while KSM=Running.
+   Post-bug state: KMC=compacting while phase=Running.
    Invariants violated: I3 CompactionAtomicity (kmc=compacting requires
-   ksm=Compacting). I1 PhaseTurnAlignment is NOT violated by this state
+   phase=Compacting). I1 PhaseTurnAlignment is NOT violated by this state
    alone (turn_phase is unconstrained), so we only assert I3. *)
 let test_bug_compaction_desync_caught () =
-  let post_bug_ksm : Obs.ksm_phase = Ksm_running in
+  let post_bug_phase : SM.phase = SM.Running in
   let post_bug_kmc : Obs.compaction_stage = Compaction_compacting in
-  let i3 = Obs.check_compaction_atomicity post_bug_ksm post_bug_kmc in
+  let i3 = Obs.check_compaction_atomicity post_bug_phase post_bug_kmc in
   Alcotest.(check bool)
     "BugCompactionDesync → I3 CompactionAtomicity violated"
     false i3;
-  (* And the symmetric formulation — Ksm_compacting with kmc != compacting
+  (* And the symmetric formulation — Compacting with kmc != compacting
      also violates I3 (TLA+ says "<=>"). Test both arms once. *)
-  let mirror = Obs.check_compaction_atomicity Ksm_compacting Compaction_accumulating in
+  let mirror = Obs.check_compaction_atomicity SM.Compacting Compaction_accumulating in
   Alcotest.(check bool)
-    "I3 is biconditional: ksm=Compacting + kmc!=compacting also violates"
+    "I3 is biconditional: phase=Compacting + kmc!=compacting also violates"
     false mirror
 
-(* I1's bug shape: any non-Compacting ksm phase paired with Turn_compacting
+(* I1's bug shape: any non-Compacting phase paired with Turn_compacting
    should be flagged. This is the .ml-level strengthening over the TLA+
    one-way implication; the strengthening prevents observer drift where a
    live turn enters compaction while the parent is still Running. *)
 let test_phase_turn_alignment_strengthening () =
-  let actual = Obs.check_phase_turn_alignment Ksm_running Turn_compacting in
+  let actual = Obs.check_phase_turn_alignment SM.Running Turn_compacting in
   Alcotest.(check bool)
-    "Ksm_running × Turn_compacting must be flagged (.ml strengthening)"
+    "Running × Turn_compacting must be flagged (.ml strengthening)"
     false actual
 
 (* ============================================================
@@ -224,23 +221,22 @@ let test_ksm_kmc_join_auto_compact_triggers_compacting () =
       Alcotest.(check pp_phase)
         "Auto_compact_triggered transitions to Compacting"
         SM.Compacting r.new_phase;
-      (* Project into the composite ksm_phase and pair it with the
-         observed KMC stage at this instant. The contract: while the
-         registry has compaction_active=true, the runtime publishes
-         Compaction_compacting. The two together must satisfy I3. *)
-      let composite_ksm = Obs.derive_ksm_phase r.new_phase in
-      let i3 = Obs.check_compaction_atomicity composite_ksm Obs.Compaction_compacting in
+      (* Pair the resulting phase directly with the observed KMC stage
+         at this instant. The contract: while the registry has
+         compaction_active=true, the runtime publishes Compaction_compacting.
+         The two together must satisfy I3. *)
+      let i3 = Obs.check_compaction_atomicity r.new_phase Obs.Compaction_compacting in
       Alcotest.(check bool)
-        "post-Auto_compact_triggered (Ksm_compacting, Compaction_compacting) ⇒ I3 holds"
+        "post-Auto_compact_triggered (Compacting, Compaction_compacting) ⇒ I3 holds"
         true i3;
-      (* And the symmetric live state: while still in derive_ksm_phase
-         Compacting, an Accumulating KMC report would be a desync — the
-         predicate must reject it. *)
+      (* And the symmetric live state: while still in Compacting,
+         an Accumulating KMC report would be a desync — the predicate
+         must reject it. *)
       let i3_violated =
-        Obs.check_compaction_atomicity composite_ksm Obs.Compaction_accumulating
+        Obs.check_compaction_atomicity r.new_phase Obs.Compaction_accumulating
       in
       Alcotest.(check bool)
-        "Ksm_compacting × Compaction_accumulating violates I3 (drift detector)"
+        "Compacting × Compaction_accumulating violates I3 (drift detector)"
         false i3_violated
 
 (* ============================================================
@@ -254,8 +250,8 @@ let test_ksm_kmc_join_auto_compact_triggers_compacting () =
 
 let expected_routing (phase : SM.phase) ~base : string =
   match phase with
-  | SM.Failing -> "local_recovery"
-  | SM.Compacting | SM.HandingOff -> "local_only"
+  | SM.Failing -> Keeper_config.local_recovery_cascade_name
+  | SM.Compacting | SM.HandingOff -> Keeper_config.local_only_cascade_name
   | SM.Running | SM.Draining | SM.Paused | SM.Overflowed
   | SM.Offline | SM.Stopped | SM.Crashed | SM.Restarting | SM.Dead | SM.Zombie -> base
 
@@ -283,9 +279,9 @@ let test_kdp_kcl_join_routing_table () =
 
 let array_of_list xs = Array.of_list xs
 
-let arb_ksm =
-  let arr = array_of_list Obs.all_ksm_phases in
-  QCheck.make ~print:Obs.ksm_phase_to_string
+let arb_phase =
+  let arr = array_of_list SM.all_phases in
+  QCheck.make ~print:SM.phase_to_string
     QCheck.Gen.(map (fun i -> arr.(i))
                   (int_range 0 (Array.length arr - 1)))
 
@@ -312,7 +308,7 @@ let arb_compaction =
 let prop_predicates_pure =
   QCheck.Test.make ~name:"composite predicates are pure"
     ~count:500
-    (QCheck.quad arb_ksm arb_turn arb_cascade arb_compaction)
+    (QCheck.quad arb_phase arb_turn arb_cascade arb_compaction)
     (fun (ksm, turn, cascade, kmc) ->
       let measured = (cascade <> Obs.Cascade_idle) in
       let i1a = Obs.check_phase_turn_alignment ksm turn in
@@ -331,7 +327,7 @@ let prop_predicates_pure =
 let prop_predicates_match_spec =
   QCheck.Test.make ~name:"composite predicates match TLA+ specification"
     ~count:1000
-    (QCheck.quad arb_ksm arb_turn arb_cascade arb_compaction)
+    (QCheck.quad arb_phase arb_turn arb_cascade arb_compaction)
     (fun (ksm, turn, cascade, kmc) ->
       List.exists (fun b -> b)  (* placate unused-warning silencer; no-op below *)
         [true]
@@ -361,7 +357,7 @@ let () =
     "I1 PhaseTurnAlignment (ksm × turn)", [
       test_case "exhaustive table (7 × 5 = 35 cells)" `Quick
         test_phase_turn_alignment_table;
-      test_case "Ksm_running × Turn_compacting flagged"  `Quick
+      test_case "Running × Turn_compacting flagged"  `Quick
         test_phase_turn_alignment_strengthening;
     ];
     "I2 NoCascadeBeforeMeasurement (cascade × measured)", [

@@ -228,7 +228,7 @@ let observe_policy_config_load_error ~base_path ~env_config_dir msg =
   let config_dir =
     Option.value ~default:"<resolved-from-base-path>" env_config_dir
   in
-  Prometheus.inc_counter Prometheus.metric_keeper_tool_policy_failures
+  Prometheus.inc_counter Keeper_metrics.metric_keeper_tool_policy_failures
     ~labels:[("site", "tool_code_write_load_failed"); ("preset", "n/a")]
     ();
   Log.Keeper.warn

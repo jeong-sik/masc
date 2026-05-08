@@ -194,7 +194,7 @@ let dispatch
         | None -> if String.length raw > 80 then String.sub raw 0 80 else raw
       in
       Prometheus.inc_counter
-        Prometheus.metric_keeper_tag_dispatch_failures
+        Keeper_metrics.metric_keeper_tag_dispatch_failures
         ~labels:[("tag", name)]
         ();
       Log.Keeper.warn "tag dispatch exception for %s: %s"

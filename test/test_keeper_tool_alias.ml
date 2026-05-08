@@ -87,7 +87,7 @@ let test_canonicalize_observed_with_telemetry_records_public_masc () =
   in
   let before =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_keeper_tool_alias_canonicalizations
+      Masc_mcp.Keeper_metrics.metric_keeper_tool_alias_canonicalizations
       ~labels ()
   in
   let canonical =
@@ -95,7 +95,7 @@ let test_canonicalize_observed_with_telemetry_records_public_masc () =
   in
   let after =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_keeper_tool_alias_canonicalizations
+      Masc_mcp.Keeper_metrics.metric_keeper_tool_alias_canonicalizations
       ~labels ()
   in
   Alcotest.(check (list string)) "public MASC tool canonicalized"

@@ -172,7 +172,7 @@ let dispatch_keeper_phase_event ~(config : Coord.config) ~keeper_name event =
   | Ok _ -> ()
   | Error err ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_lifecycle_dispatch_rejections
+        Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
         ~labels:[ ("keeper", keeper_name); ("event", Keeper_state_machine.event_to_string event) ]
         ();
       Log.Keeper.warn
@@ -214,7 +214,7 @@ let record_compaction_outcome ~keeper_name ~before_tokens ~after_tokens =
 let dispatch_compaction_completed
     ~(config : Coord.config) ~keeper_name ~before_tokens ~after_tokens =
   record_compaction_outcome ~keeper_name ~before_tokens ~after_tokens;
-  Prometheus.inc_counter Prometheus.metric_keeper_fsm_edge_transitions
+  Prometheus.inc_counter Keeper_metrics.metric_keeper_fsm_edge_transitions
     ~labels:[("edge", "kmc_to_ksm_compact_completed")] ();
   dispatch_keeper_phase_event ~config ~keeper_name
     (Keeper_state_machine.Compaction_completed

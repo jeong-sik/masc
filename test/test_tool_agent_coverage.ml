@@ -426,8 +426,13 @@ let () =
     ]);
     ("agent_update", [
       Alcotest.test_case "status update" `Quick test_agent_update_status;
+      Alcotest.test_case "capabilities update" `Quick test_agent_update_capabilities;
       Alcotest.test_case "no agents" `Quick test_agent_fitness_no_agents;
       Alcotest.test_case "specific agent" `Quick test_agent_fitness_specific;
+    ]);
+    ("get_metrics", [
+      Alcotest.test_case "no data returns not_found" `Quick test_get_metrics_no_data;
+      Alcotest.test_case "missing agent_name fails" `Quick test_get_metrics_missing_agent_name;
     ]);
     ("meta_cognition_snapshot", [
       Alcotest.test_case "detects beliefs tensions desires and edges" `Quick

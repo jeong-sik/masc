@@ -995,12 +995,7 @@ function ConnectorLivePanel({
                   </div>
                 </div>
                 <div class="text-2xs text-[var(--color-status-warn)]/80">
-                  <div>
-                    <${BoldLabel}>원인: </${BoldLabel}> 사이드카 status 파일이 <${Tk}>${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}<//> 에서 관찰되지 않았습니다.
-                  </div>
-                  <div class="mt-1">
-                    <${BoldLabel}>다음: </${BoldLabel}> <strong>Start</strong> 버튼으로 백엔드를 통해 실행하거나, 아래 명령을 복사해 터미널에서 실행하세요. 오프라인이 지속되면 <strong>status</strong> 와 <strong>tail logs</strong> 를 사용하세요.
-                  </div>
+                  사이드카 status 파일이 <${Tk}>${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}<//> 에서 관찰되지 않았습니다.
                 </div>
                 <div class="mt-2 grid grid-cols-1 gap-1.5">
                   <${CopyableCode}

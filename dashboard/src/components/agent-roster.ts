@@ -609,10 +609,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
           <div class="monitor-muted-panel p-3.5 md:p-4">
             <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div class="flex flex-col gap-1">
-                <div class="text-2xs font-semibold tracking-[var(--track-caps)] text-[var(--color-fg-secondary)] uppercase">운영 상태</div>
-                <p class="m-0 text-xs leading-normal text-[var(--color-fg-muted)]">live runtime 신호로 먼저 걸러 보고, 필요할 때만 세부 상태와 최근 근거를 확인합니다.</p>
-              </div>
+              <div class="text-2xs font-semibold tracking-[var(--track-caps)] text-[var(--color-fg-secondary)] uppercase">운영 상태</div>
               <${FilterChips}
                 chips=${statusChips}
                 value=${filter}

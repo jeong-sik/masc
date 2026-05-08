@@ -667,12 +667,6 @@ export function MemorySubsystems({ focus = 'overview' }: { readonly focus?: Memo
 
   return html`
     <div class="space-y-6">
-      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2 text-xs text-[var(--color-fg-muted)]">
-        이 화면은 <span class="text-[var(--color-fg-muted)] font-medium">global memory surface</span>만 보여줍니다.
-        institution episodes와 Hebbian graph는 여기서 보고,
-        keeper checkpoint/history/memory bank는 Keeper Detail에서 확인합니다.
-      </div>
-
       ${showMemoryEntries ? html`
         <${MemoryEntriesPanel}
           entries=${memoryEntries}

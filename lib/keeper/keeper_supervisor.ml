@@ -121,26 +121,9 @@ let paused_meta_requires_reconcile_recovery (meta : keeper_meta) =
 
 let committed_tools_of_ambiguous_blocker (blocker : string) =
   let trimmed = String.trim blocker in
-  (* Try structured JSON extraction first (new masc_internal_error format) *)
-  if String.starts_with ~prefix:"[masc_oas_error]" trimmed then
-    let payload =
-      String.sub trimmed
-        (String.length "[masc_oas_error]")
-        (String.length trimmed - String.length "[masc_oas_error]")
-    in
-    (try
-       match Yojson.Safe.from_string payload with
-       | `Assoc fields ->
-           (match List.assoc_opt "tools" fields with
-            | Some (`List values) ->
-                values
-                |> List.filter_map (function
-                     | `String value -> Some value
-                     | _ -> None)
-            | _ -> [])
-       | _ -> []
-     with Yojson.Json_error _ -> [])
-  else
+  match Cascade_error_classify.classify_masc_internal_error_of_string trimmed with
+  | Some (Cascade_error_classify.Ambiguous_post_commit { tools; _ }) -> tools
+  | _ ->
     (* Legacy: extract from bracket notation "prefix: [tool1, tool2]; ..." *)
     match String.index_opt trimmed '[' with
     | None -> []

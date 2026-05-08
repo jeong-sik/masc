@@ -54,6 +54,16 @@ val decide :
     - [Call_err _] on non-cascadeable error → [Exhausted]
     - [Slot_full] → [Try_next] *)
 
+val decide_and_record :
+  cascade_name:string ->
+  accept_on_exhaustion:bool ->
+  is_last:bool -
+  provider_outcome -
+  decision
+(** Observable wrapper around [decide]. Emits Prometheus counters for
+    cascade decisions, fallbacks, and exhaustion events before returning
+    the pure decision. *)
+
 (** {1 Error formatting} *)
 
 val to_user_message :

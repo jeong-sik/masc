@@ -104,5 +104,35 @@ let provider_outcome_option_to_string = function
   | Some outcome -> "some-" ^ provider_outcome_to_string outcome
   | None -> "none"
 
+(* ── Observable wrapper (preserves pure decide) ── *)
+
+let decide_and_record ~cascade_name ~accept_on_exhaustion ~is_last outcome =
+  let decision = decide ~accept_on_exhaustion ~is_last outcome in
+  let decision_label =
+    match decision with
+    | Accept _ -> "accept"
+    | Accept_on_exhaustion _ -> "accept_on_exhaustion"
+    | Try_next _ -> "try_next"
+    | Exhausted _ -> "exhausted"
+  in
+  Cascade_metrics.on_decision ~cascade_name ~decision_label;
+  (match decision with
+   | Try_next _ ->
+       let reason =
+         match outcome with
+         | Slot_full -> "slot_full"
+         | Accept_rejected _ -> "accept_rejected"
+         | Call_err err ->
+             if Cascade_health_filter.should_cascade_to_next err then
+               "call_err_cascadeable"
+             else
+               "call_err_non_cascadeable"
+         | Call_ok _ -> "unexpected"
+       in
+       Cascade_metrics.on_fallback ~cascade_name ~reason
+   | Exhausted _ -> Cascade_metrics.on_exhausted ~cascade_name
+   | _ -> ());
+  decision
+
 (* ── Inline tests ───────────────────────────────── *)
 

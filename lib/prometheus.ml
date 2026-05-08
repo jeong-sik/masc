@@ -710,6 +710,17 @@ let metric_inference_queue_cancelled = "masc_inference_queue_cancelled_total"
 let metric_inference_queue_rejected = "masc_inference_queue_rejected_total"
 let metric_inference_queue_max_concurrent = "masc_inference_queue_max_concurrent"
 
+(* Cascade metrics — used in cascade_metrics.ml.
+   Labels: decision=accept|accept_on_exhaustion|try_next|exhausted *)
+let metric_cascade_decisions = "masc_cascade_decisions_total"
+
+(* Labels: reason=call_err|slot_full|accept_rejected|health_filter *)
+let metric_cascade_fallbacks = "masc_cascade_fallbacks_total"
+let metric_cascade_providers_exhausted = "masc_cascade_providers_exhausted_total"
+
+(* Labels: phase=<keeper_phase>, from_cascade=<name>, to_cascade=<name> *)
+let metric_cascade_routing_phase_overrides = "masc_cascade_routing_phase_overrides_total"
+
 (* Agent health metrics — used in transport_metrics.ml. *)
 let metric_agent_heartbeat_age_seconds = "masc_agent_heartbeat_age_seconds"
 let metric_agent_stale_total = "masc_agent_stale_total"
@@ -1404,6 +1415,22 @@ let init () =
   add metric_fallback_triggered
     "Total fallback events across the LLM cascade pipeline, labeled by kind \
      (cross_cascade|cascade_empty|capability_drop|cli_unsupported|...) and detail"
+    Counter;
+  (* Cascade FSM metrics — emitted by cascade_metrics.ml. *)
+  add metric_cascade_decisions
+    "Total cascade routing decisions, labeled by decision=accept|\
+     accept_on_exhaustion|try_next|exhausted"
+    Counter;
+  add metric_cascade_fallbacks
+    "Total cascade fallback events, labeled by reason=call_err|slot_full|\
+     accept_rejected|health_filter"
+    Counter;
+  add metric_cascade_providers_exhausted
+    "Total provider exhaustion events (all providers in cascade failed)"
+    Counter;
+  add metric_cascade_routing_phase_overrides
+    "Total phase-based cascade routing overrides, labeled by phase and \
+     from_cascade / to_cascade"
     Counter;
   (* Orphan metrics — used via inc_counter/set_gauge but previously
      never registered.  Auto-create still works, but registering here

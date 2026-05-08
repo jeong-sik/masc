@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { navigate, replaceRoute, route } from './router'
+import { navigate, replaceRoute, route, hashForRoute, REDIRECTED_FROM_PARAM } from './router'
 
 describe('navigate', () => {
   it('navigates to monitoring tab with agent param', () => {
@@ -165,5 +165,34 @@ describe('navigate', () => {
     } finally {
       window.removeEventListener('hashchange', onHashChange)
     }
+  })
+})
+
+describe('REDIRECTED_FROM_PARAM (RFC-0049)', () => {
+  it('records the original surface:section when a redirect resolves', () => {
+    navigate('monitoring', { section: 'git-graph' })
+    expect(route.value.tab).toBe('workspace')
+    expect(route.value.params.section).toBe('repositories')
+    expect(route.value.params[REDIRECTED_FROM_PARAM]).toBe('monitoring:git-graph')
+  })
+
+  it('omits the param entirely on direct (non-redirected) navigation', () => {
+    navigate('lab', { section: 'tools' })
+    expect(route.value.params[REDIRECTED_FROM_PARAM]).toBeUndefined()
+  })
+
+  it('never leaks the internal param into the URL hash', () => {
+    navigate('monitoring', { section: 'git-graph' })
+    expect(window.location.hash).not.toContain(REDIRECTED_FROM_PARAM)
+    expect(window.location.hash).not.toContain('__redirected_from')
+  })
+
+  it('hashForRoute strips the internal param even if callers pass it', () => {
+    const hash = hashForRoute('workspace', {
+      section: 'repositories',
+      [REDIRECTED_FROM_PARAM]: 'monitoring:git-graph',
+    })
+    expect(hash).not.toContain(REDIRECTED_FROM_PARAM)
+    expect(hash).not.toContain('__redirected_from')
   })
 })

@@ -22,6 +22,11 @@ const REFRESH_MS = 30_000
 interface KeeperMemoryTierPanelProps {
   keeperName: string
   currentPhase?: string | null
+  /** RFC-0046: parent-supplied composite snapshot. When provided,
+   *  this panel skips its own /composite fetch and reads from the
+   *  shared SSOT (FsmHub). currentPhase remains as compat fallback
+   *  for one cycle and will be removed in RFC-0046 Step 5. */
+  snapshot?: KeeperCompositeSnapshot | null
 }
 
 type MemoryTierFilter = 'all' | 'saturated'
@@ -69,9 +74,11 @@ export function filterMemoryKindUsage(
 export function KeeperMemoryTierPanel({
   keeperName,
   currentPhase,
+  snapshot: externalSnapshot,
 }: KeeperMemoryTierPanelProps) {
   const [usage, setUsage] = useState<MemoryKindUsageEntry[] | null>(null)
-  const [snapshot, setSnapshot] = useState<KeeperCompositeSnapshot | null>(null)
+  const [internalSnapshot, setInternalSnapshot] = useState<KeeperCompositeSnapshot | null>(null)
+  const snapshot = externalSnapshot ?? internalSnapshot
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
@@ -99,9 +106,9 @@ export function KeeperMemoryTierPanel({
           }
 
           if (compositeResult.status === 'fulfilled') {
-            setSnapshot(compositeResult.value)
+            setInternalSnapshot(compositeResult.value)
           } else {
-            setSnapshot(null)
+            setInternalSnapshot(null)
             nextError ||= compositeResult.reason instanceof Error
               ? compositeResult.reason.message
               : 'composite fetch failed'

@@ -26,6 +26,11 @@ import type { KeeperPhase } from '../types'
 interface KeeperStateDiagramProps {
   keeperName: string
   currentPhase?: KeeperPhase | string | null
+  /** RFC-0046: parent-supplied composite snapshot. When provided,
+   *  this panel reads the SSOT from the shared FsmHub fetch instead
+   *  of issuing its own /composite call. currentPhase remains as
+   *  compat fallback for one cycle (RFC-0046 Step 5 will remove it). */
+  snapshot?: KeeperCompositeSnapshot | null
 }
 
 function PhaseBadge({ accent, children }: { accent?: boolean; children: unknown }) {
@@ -124,8 +129,9 @@ function snapshotPhaseDiagnosis(snapshot: KeeperCompositeSnapshot): unknown {
   return isRecord(snapshot) ? snapshot.phase_diagnosis : undefined
 }
 
-export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStateDiagramProps) {
-  const [snapshot, setSnapshot] = useState<KeeperCompositeSnapshot | null>(null)
+export function KeeperStateDiagramPanel({ keeperName, currentPhase, snapshot: externalSnapshot }: KeeperStateDiagramProps) {
+  const [internalSnapshot, setInternalSnapshot] = useState<KeeperCompositeSnapshot | null>(null)
+  const snapshot = externalSnapshot ?? internalSnapshot
   const [stateDiagram, setStateDiagram] = useState<KeeperStateDiagramResponse | null>(null)
   const [transitions, setTransitions] = useState<KeeperTransition[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -149,9 +155,9 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
         if (controller.signal.aborted) return
 
         if (snapshotResult.status === 'fulfilled') {
-          setSnapshot(snapshotResult.value)
+          setInternalSnapshot(snapshotResult.value)
         } else {
-          setSnapshot(null)
+          setInternalSnapshot(null)
           setError(snapshotResult.reason instanceof Error ? snapshotResult.reason.message : 'composite fetch failed')
         }
 

@@ -235,9 +235,15 @@ export interface FsmHubProps {
    *  (LT-16d) to drive drill-through. When it changes, the hub
    *  switches to the requested keeper on the next render. */
   selectedName?: string | null
+  /** Surface variant. `'fleet'` (default) renders the keeper selector
+   *  tablist for in-hub switching. `'detail'` (RFC-0046) hides the
+   *  selector — the parent surface (keeper detail page) has already
+   *  pinned a single keeper, so re-offering selection is noise. */
+  mode?: 'fleet' | 'detail'
 }
 
 export function FsmHub(props: FsmHubProps = {}) {
+  const mode = props.mode ?? 'fleet'
   const [selected, setSelected] = useState<string | null>(props.selectedName ?? null)
   useEffect(() => {
     if (props.selectedName !== undefined && props.selectedName !== selected) {
@@ -532,10 +538,13 @@ export function FsmHub(props: FsmHubProps = {}) {
         refreshFlash=${refreshFlash}
         transitionCount=${history.length}
         observationCount=${view.observations.length}
+        mode=${mode}
       />
 
       ${activeSelected == null ? html`
-        <${EmptyState} message=${keeperNames.length > 0
+        <${EmptyState} message=${mode === 'detail'
+          ? 'composite snapshot을 받지 못했습니다 — keeper 이름을 확인하거나 새로고침하세요'
+          : keeperNames.length > 0
           ? `위 탭에서 키퍼를 선택하면 composite FSM 스냅샷을 표시합니다 (${keeperNames.length}개 사용 가능)`
           : '등록된 키퍼가 없습니다 — MASC에 키퍼를 기동하면 자동으로 표시됩니다'} />
       ` : loading && !snapshot ? html`
@@ -678,6 +687,7 @@ function StatusBar({
   refreshFlash,
   transitionCount,
   observationCount,
+  mode,
 }: {
   snapshot: KeeperCompositeSnapshot | null
   lastFetchAt: number
@@ -695,6 +705,7 @@ function StatusBar({
   refreshFlash: boolean
   transitionCount: number
   observationCount: number
+  mode: 'fleet' | 'detail'
 }) {
   useNowSecondsTicker()
   const now = nowSecondsSignal.value
@@ -782,6 +793,7 @@ function StatusBar({
             </span>
           ` : null}
         </div>
+        ${mode === 'detail' ? null : html`
         <div class="flex items-center gap-1.5 flex-wrap" role="tablist" aria-label="Keeper 선택">
           ${keeperNames.length > 0 ? html`
             <${TextInput}
@@ -833,6 +845,7 @@ function StatusBar({
             `
           })}
         </div>
+        `}
       </div>
       ${snapshot ? html`
         <div class="mt-1.5 flex items-center gap-2 text-3xs font-mono flex-wrap">

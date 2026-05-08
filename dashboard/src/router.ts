@@ -21,7 +21,9 @@ interface CrossSurfaceRedirect {
 
 type TabSectionKey = `${TabId}:${string}`
 
-const CROSS_SURFACE_SECTION_REDIRECTS: Record<TabSectionKey, CrossSurfaceRedirect> = {
+// Exported for RFC-0048 PR-A redirect-ledger contract test. Pure data —
+// not part of the runtime API.
+export const CROSS_SURFACE_SECTION_REDIRECTS: Record<TabSectionKey, CrossSurfaceRedirect> = {
   'monitoring:git-graph': {
     tab: 'workspace',
     section: 'repositories',

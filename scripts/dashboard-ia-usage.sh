@@ -7,10 +7,13 @@
 # vs everything-else distinction RFC-0048 §4.4 needs for deletion thresholds).
 #
 # Usage:
-#   scripts/dashboard-ia-usage.sh                     # default endpoint, full ranking
-#   scripts/dashboard-ia-usage.sh --endpoint URL      # override server
-#   scripts/dashboard-ia-usage.sh --output FILE       # write to file
-#   scripts/dashboard-ia-usage.sh --threshold N       # flag rows below N as candidates
+#   scripts/dashboard-ia-usage.sh                          # default endpoint, full ranking
+#   scripts/dashboard-ia-usage.sh --endpoint URL           # override server
+#   scripts/dashboard-ia-usage.sh --metrics-url URL        # alias for --endpoint
+#   scripts/dashboard-ia-usage.sh --output FILE            # write to file
+#   scripts/dashboard-ia-usage.sh --threshold N            # flag rows below N as candidates
+#   scripts/dashboard-ia-usage.sh --since DURATION         # window label in report header (e.g. 7d)
+#   scripts/dashboard-ia-usage.sh --token TOKEN            # Bearer token for auth
 #
 # Exit codes:
 #   0  report produced
@@ -18,19 +21,20 @@
 #   2  no relevant counters present (server has no traffic yet)
 #
 # Notes:
-#   - Counters are cumulative since process start. The "--since" semantics
-#     in RFC-0049 §4.7 will be added once a Prometheus instance with
-#     range queries is wired in (PR-2.5). For now this is a point-in-time
-#     snapshot of the running server.
+#   - Counters are cumulative since process start. The "--since" label is
+#     printed in the report header but does NOT perform windowed queries;
+#     real time-windowed analysis via PromQL is deferred to PR-2.5.
 #   - Compatible with bash 3.2 (macOS default) and bash 4+. All aggregation
 #     happens inside awk so no associative arrays in shell.
 
 set -euo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
-ENDPOINT="${MASC_METRICS_ENDPOINT:-http://127.0.0.1:8935/metrics}"
+ENDPOINT="${MASC_METRICS_ENDPOINT:-${MASC_METRICS_URL:-http://127.0.0.1:8935/metrics}}"
 OUTPUT=""
 HIDE_THRESHOLD=5
+SINCE="since-restart"
+TOKEN="${MASC_METRICS_TOKEN:-}"
 
 usage() {
   sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
@@ -43,6 +47,10 @@ while (($#)); do
       ENDPOINT="$2"; shift 2 ;;
     --endpoint=*)
       ENDPOINT="${1#*=}"; shift ;;
+    --metrics-url)
+      ENDPOINT="$2"; shift 2 ;;
+    --metrics-url=*)
+      ENDPOINT="${1#*=}"; shift ;;
     --output)
       OUTPUT="$2"; shift 2 ;;
     --output=*)
@@ -51,6 +59,14 @@ while (($#)); do
       HIDE_THRESHOLD="$2"; shift 2 ;;
     --threshold=*)
       HIDE_THRESHOLD="${1#*=}"; shift ;;
+    --since)
+      SINCE="$2"; shift 2 ;;
+    --since=*)
+      SINCE="${1#*=}"; shift ;;
+    --token)
+      TOKEN="$2"; shift 2 ;;
+    --token=*)
+      TOKEN="${1#*=}"; shift ;;
     -h|--help)
       usage 0 ;;
     *)
@@ -64,11 +80,16 @@ if ! command -v curl >/dev/null 2>&1; then
   exit 1
 fi
 
+curl_args=(--silent --show-error --max-time 10 --fail)
+if [[ -n "$TOKEN" ]]; then
+  curl_args+=(-H "Authorization: Bearer $TOKEN")
+fi
+
 tmp_metrics="$(mktemp -t masc-metrics.XXXXXX)"
 report="$(mktemp -t masc-ia-report.XXXXXX)"
 trap 'rm -f "$tmp_metrics" "$report"' EXIT
 
-if ! curl --silent --show-error --max-time 10 --fail "$ENDPOINT" >"$tmp_metrics" 2>/dev/null; then
+if ! curl "${curl_args[@]}" "$ENDPOINT" >"$tmp_metrics" 2>/dev/null; then
   echo "$SCRIPT_NAME: failed to fetch $ENDPOINT" >&2
   exit 1
 fi
@@ -77,7 +98,8 @@ generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 awk -v endpoint="$ENDPOINT" \
     -v generated_at="$generated_at" \
-    -v threshold="$HIDE_THRESHOLD" '
+    -v threshold="$HIDE_THRESHOLD" \
+    -v since="$SINCE" '
   function extract_label(line, name,    pattern, start, len) {
     pattern = name "=\"[^\"]*\""
     if (match(line, pattern) == 0) return ""
@@ -125,6 +147,7 @@ awk -v endpoint="$ENDPOINT" \
     print ""
     printf "_Source: `%s`_  \n", endpoint
     printf "_Generated: %s_  \n", generated_at
+    printf "_Window: %s (counters are cumulative since last restart)_  \n", since
     printf "_Hide threshold (RFC-0048 §4.2): `< %d` opens_\n", threshold
     print ""
 

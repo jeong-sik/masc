@@ -1430,9 +1430,9 @@ let test_two_sdk_turn_boundaries_no_assert () =
   R.set_turn_cascade_state ~base_path:bp keeper_name R.Cascade_selecting;
   match R.get ~base_path:bp keeper_name with
   | Some { current_turn_observation = Some obs; _ } ->
-    check bool "second SDK turn lands in Cascade_selecting / Turn_prompting" true
+    check bool "second SDK turn lands in Cascade_selecting / Turn_routing" true
       (obs.R.cascade_state = R.Cascade_selecting
-       && obs.R.turn_phase = R.Turn_prompting)
+       && obs.R.turn_phase = R.Turn_routing)
   | _ -> fail "obs missing after second SDK boundary"
 
 let test_effective_keepalive_meta_prefers_disk_when_present () =

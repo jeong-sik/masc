@@ -81,12 +81,16 @@ function nextExpectedStep(snapshot: KeeperCompositeSnapshot): string {
   switch (snapshot.turn_phase) {
     case 'prompting':
       return 'prompt assembly 완료 시 KTC 가 executing 으로 진행해야 함.'
+    case 'routing':
+      return 'cascade routing 이 완료되면 KCL 이 trying 으로 진행해야 함.'
     case 'executing':
       return 'execution 은 turn 을 finalize 하거나 cascade/compaction transition 을 유도해야 함.'
     case 'compacting':
       return 'turn finalization 이 compaction 종료를 대기 중.'
     case 'finalizing':
       return '다음 stable state 는 last_outcome 갱신된 idle 이어야 함.'
+    case 'exhausted':
+      return 'cascade 가 소진됨. 다음 관측에서 idle 또는 retry 로 전이해야 함.'
     default:
       return '다음 meaningful edge 는 다음 관측된 lifecycle event 에서 시작되어야 함.'
   }

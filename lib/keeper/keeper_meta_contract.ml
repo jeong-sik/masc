@@ -318,7 +318,6 @@ type keeper_meta =
   ; mid_goal : string
   ; long_goal : string
   ; social_model : string
-  ; cascade_name : string
   ; models : string list
   ; cascade_ref : Cascade_ref.cascade_ref option
   ; will : string
@@ -389,14 +388,14 @@ let cascade_name_of_meta (m : keeper_meta) : string =
   match m.cascade_ref with
   | Some ref_ when not (String.equal ref_.Cascade_ref.group "") ->
     ref_.Cascade_ref.group
-  | _ -> m.cascade_name
+  | _ -> Keeper_config.default_cascade_name
 ;;
 
 let set_cascade_name (name : string) (m : keeper_meta) : keeper_meta =
   let cascade_ref =
     Some Cascade_ref.{ group = name; item = None }
   in
-  { m with cascade_name = name; cascade_ref }
+  { m with cascade_ref }
 ;;
 
 let proactive_cycle_outcome_to_string = function

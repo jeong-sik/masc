@@ -503,7 +503,7 @@ let append_execution_receipt ?(outcome = "ok")
       approval_profile = Some "trusted_local";
       approval_profile_derived = false;
       cascade_name =
-        Lib.Keeper_execution_receipt.cascade_name_of_string meta.cascade_name;
+        Lib.Keeper_execution_receipt.cascade_name_of_string (Lib.Keeper_types.cascade_name_of_meta meta);
       cascade_selected_model = Some "custom:mock";
       cascade_attempt_count = 2;
       cascade_fallback_applied = true;

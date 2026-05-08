@@ -452,9 +452,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         long_goal;
 
         social_model;
-        cascade_name = (match p.profile_defaults.cascade_name with
-          | Some name -> name
-          | None -> Keeper_config.default_cascade_name);
         cascade_ref =
           Some Cascade_ref.{
             group = (match p.profile_defaults.cascade_name with
@@ -462,8 +459,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
               | None -> Keeper_config.default_cascade_name);
             item = None;
           };
-        (* RFC-0041: cascade_ref is the SSOT; cascade_name is preserved for
-           backward-compatible JSON surfaces and removed in a follow-up PR. *)
+        (* RFC-0041 (post-step-4): cascade_ref is the SSOT; the legacy
+           cascade_name field was removed from keeper_meta. *)
         models = Option.value ~default:[] p.profile_defaults.models;
         will;
         needs;

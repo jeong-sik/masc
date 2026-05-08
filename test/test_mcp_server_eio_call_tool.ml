@@ -272,7 +272,7 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
         (Some []) ctx.required_tools;
       check (option (list string)) "runtime mcp missing required tools empty"
         (Some []) ctx.missing_required_tools;
-      check (option string) "cascade profile" (Some meta.cascade_name)
+      check (option string) "cascade profile" (Some (Masc_mcp.Keeper_types.cascade_name_of_meta meta))
         ctx.cascade_profile)
 
 let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =
@@ -416,7 +416,8 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       check int "runtime contract missing required tools empty" 0
         (runtime_contract |> U.member "missing_required_tools" |> U.to_list
          |> List.length);
-      check string "runtime contract cascade profile" meta.cascade_name
+      check string "runtime contract cascade profile"
+        (Masc_mcp.Keeper_types.cascade_name_of_meta meta)
         (runtime_contract |> U.member "cascade_profile" |> U.to_string);
       let masc_root =
         Filename.concat base_path Common.masc_dirname
@@ -458,7 +459,8 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         (Masc_mcp.Keeper_types.keeper_agent_name keeper_name)
         (trajectory_json |> U.member "runtime_contract" |> U.member "agent_name"
          |> U.to_string);
-      check string "trajectory runtime cascade profile" meta.cascade_name
+      check string "trajectory runtime cascade profile"
+        (Masc_mcp.Keeper_types.cascade_name_of_meta meta)
         (trajectory_json |> U.member "runtime_contract"
          |> U.member "cascade_profile" |> U.to_string);
       check string "trajectory action tool" "keeper_bash"

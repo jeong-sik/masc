@@ -254,7 +254,6 @@ type keeper_meta = {
   mid_goal : string;
   long_goal : string;
   social_model : string;
-  cascade_name : string;
   models : string list;
   cascade_ref : Cascade_ref.cascade_ref option;
   will : string;

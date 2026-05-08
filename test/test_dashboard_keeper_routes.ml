@@ -641,7 +641,7 @@ let append_execution_receipt ?(tool_contract_result = "satisfied")
       approval_profile_derived = false;
       cascade_name =
         Masc_mcp.Keeper_execution_receipt.cascade_name_of_string
-          meta.cascade_name;
+          (Masc_mcp.Keeper_types.cascade_name_of_meta meta);
       cascade_selected_model = Some "custom:mock";
       cascade_attempt_count = 2;
       cascade_fallback_applied;
@@ -658,7 +658,7 @@ let append_execution_receipt ?(tool_contract_result = "satisfied")
              {
                from_cascade =
                  Masc_mcp.Keeper_execution_receipt.cascade_name_of_string
-                   meta.cascade_name;
+                   (Masc_mcp.Keeper_types.cascade_name_of_meta meta);
                to_cascade =
                  Masc_mcp.Keeper_execution_receipt.cascade_name_of_string
                    retry_cascade;
@@ -1200,7 +1200,7 @@ let test_keeper_cascade_assignment_updates_dashboard_projection () =
   (match Masc_mcp.Keeper_types.read_meta config keeper_name with
    | Ok (Some meta) ->
        check string "persistent meta cascade updated"
-         "keeper_diverse" meta.cascade_name
+         "keeper_diverse" (Masc_mcp.Keeper_types.cascade_name_of_meta meta)
    | Ok None -> fail "keeper meta missing after cascade assignment"
    | Error msg -> fail ("read_meta failed after cascade assignment: " ^ msg))
 ;;

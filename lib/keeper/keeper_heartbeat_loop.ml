@@ -416,7 +416,8 @@ let persist_message_cursor_updates ~config (meta : keeper_meta) updates =
 (** Run keeper cycle with semaphore slot control (legacy path). *)
 let run_keeper_cycle_with_slot ~ctx ~meta_after_cursor_persist ~stop ~obs
     ~(turn_decision : Keeper_world_observation.keeper_cycle_decision)
-    ~shared_context ~semaphore_wait_ms ~slot_control =
+    ~shared_context ~semaphore_wait_ms ~slot_control
+    ?selected_item =
   match
     with_in_turn_liveness_pulse ~ctx ~meta:meta_after_cursor_persist ~stop
       (fun () ->
@@ -429,6 +430,7 @@ let run_keeper_cycle_with_slot ~ctx ~meta_after_cursor_persist ~stop ~obs
            ~semaphore_wait_ms
            ~turn_slot_control:slot_control
            ~shared_context
+           ?selected_item
            ())
   with
   | Error err ->
@@ -866,6 +868,29 @@ let run_keepalive_unified_turn
            semaphore path. *)
         Keeper_admission_runtime.init_once_from_base_path
           ~base_path:ctx.config.base_path;
+        (* RFC-0041 Phase B3: proactive cascade item selection.
+           Load cascade_profile from config and select the healthiest
+           available item before turn dispatch. *)
+        let selected_item_opt =
+          let cascade_name =
+            match meta_after_triage.cascade_ref with
+            | Some ref when not (String.equal ref.group "") -> ref.group
+            | _ -> meta_after_triage.cascade_name
+          in
+          let config_path =
+            Filename.concat ctx.config.base_path ".masc/config/cascade.json"
+          in
+          match Cascade_config_loader.load_cascade_profile ~config_path ~name:cascade_name with
+          | Some profile ->
+              (match Keeper_cascade_selector.select_item_for_turn
+                 ~keeper_name:meta_after_triage.name
+                 ~cascade_profile:profile
+                 ~health_cache:Keeper_health_probe.Healthy
+                 ~last_used_item:None with
+               | Ok item -> Some item
+               | Error `No_available_item -> None)
+          | None -> None
+        in
         let admission_result =
           Keeper_admission_runtime.decide_live
             ~keeper_id:meta_after_triage.name
@@ -904,7 +929,8 @@ let run_keepalive_unified_turn
                 ~keeper_name:meta_after_triage.name
                 ~channel:turn_decision.channel (fun ~semaphore_wait_ms ~slot_control ->
                 run_keeper_cycle_with_slot ~ctx ~meta_after_cursor_persist ~stop ~obs
-                  ~turn_decision ~shared_context ~semaphore_wait_ms ~slot_control)
+                  ~turn_decision ~shared_context ~semaphore_wait_ms ~slot_control
+                  ?selected_item:selected_item_opt)
             with
             | Ok meta -> meta
             | Error (`Semaphore_wait_timeout timeout) ->
@@ -976,6 +1002,7 @@ let run_keepalive_unified_turn
                         ~channel:turn_decision.channel
                         ~semaphore_wait_ms:0
                         ~shared_context
+                        ?selected_item:selected_item_opt
                         ())
                 with
                 | Error err ->

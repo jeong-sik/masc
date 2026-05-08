@@ -241,6 +241,14 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         ~keeper_name:meta.name ~turn_id:keeper_turn_id
         ~prev:Keeper_turn_fsm.Phase_gating
         Keeper_turn_fsm.Cascade_routing;
+      (* RFC-0041 Phase B4: when a specific item was selected by the
+         proactive router, override meta.cascade_name so downstream
+         cascade resolution uses the item's group. *)
+      let meta =
+        match selected_item with
+        | Some item -> { meta with cascade_name = item.Cascade_ref.group }
+        | None -> meta
+      in
       let effective_cascade_name =
         let phase = match phase_opt with
           | Some p -> p

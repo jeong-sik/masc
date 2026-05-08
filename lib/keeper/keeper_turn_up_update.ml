@@ -231,23 +231,22 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     short_goal;
     mid_goal;
     long_goal;
-    cascade_name =
-      (* TOML cascade_name takes precedence over runtime JSON when present.
-         Without this, changing cascade_name in keepers/*.toml has no effect
-         until the runtime JSON is deleted.  See #6747.
-
-         Store the raw string as declared in TOML / state JSON.  Downstream
-         consumers ([Cascade_runtime], [Keeper_status_bridge],
-         [Admission_queue], ...) already canonicalize at point-of-use, so
-         preserving the raw value here lets the dashboard surface config
-         drift (keeper TOML referencing an unknown cascade name) via the
-         [canonical] column of [Dashboard_cascade.keeper_profile_json]. *)
-      (match p.profile_defaults.cascade_name with
-       | Some name -> name
-       | None ->
-         if String.trim old.cascade_name <> "" then
-           old.cascade_name
-         else Keeper_config.default_cascade_name);
+    cascade_ref =
+      (* RFC-0041 (post-step-4): cascade_ref is the SSOT.
+         TOML cascade_name takes precedence over runtime when present;
+         otherwise preserve the existing keeper's cascade_ref so the
+         dashboard surfaces drift (keeper TOML referencing an unknown
+         cascade name) via the [canonical] column of
+         [Dashboard_cascade.keeper_profile_json].  See #6747. *)
+      (let group =
+         match p.profile_defaults.cascade_name with
+         | Some name -> name
+         | None ->
+           let prev = cascade_name_of_meta old in
+           if String.trim prev <> "" then prev
+           else Keeper_config.default_cascade_name
+       in
+       Some Cascade_ref.{ group; item = None });
     will = new_will;
     needs = new_needs;
     desires = new_desires;

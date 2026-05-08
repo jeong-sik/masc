@@ -2208,7 +2208,7 @@ let test_keeper_status_ignores_stale_cascade_observation () =
       let sorted_strings = List.sort String.compare in
       Alcotest.(check (option string))
         ("current cascade name wins over stale metrics\n" ^ status_dump)
-        (Some meta.cascade_name)
+        (Some (Keeper_types.cascade_name_of_meta meta))
         (observability |> member "cascade_name" |> to_string_option);
       Alcotest.(check bool) "stale observation ignored" false
         (observability |> member "recent_turn_observation" |> to_bool);
@@ -3005,8 +3005,7 @@ proactive_enabled = true
             Alcotest.fail ("keeper meta reload failed before stale write: " ^ err)
       in
       let stale_meta =
-        { stale_base with
-          cascade_name = "vendor_mix_balanced";
+        { (Keeper_types.set_cascade_name "vendor_mix_balanced" stale_base) with
           updated_at = Masc_domain.now_iso ();
         }
       in

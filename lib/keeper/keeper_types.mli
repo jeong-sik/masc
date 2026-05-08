@@ -236,7 +236,6 @@ type keeper_meta = {
   mid_goal: string;
   long_goal: string;
   social_model: string;
-  cascade_name: string;
   models: string list;
   cascade_ref: Cascade_ref.cascade_ref option;
   will: string;
@@ -304,6 +303,12 @@ val cascade_name_of_meta : keeper_meta -> string
     caller writes only one. New code MUST set [cascade_ref] when changing
     routing — read sites should use this helper instead of touching
     [m.cascade_name] directly. *)
+
+val set_cascade_name : string -> keeper_meta -> keeper_meta
+(** [set_cascade_name name m] pins both [cascade_name] and [cascade_ref]
+    to [name] in a single update. Use for every write that changes the
+    keeper's cascade routing target — direct field-only updates produce
+    drift. *)
 
 val tool_preset_to_string : tool_preset -> string
 val tool_preset_of_string : string -> tool_preset option

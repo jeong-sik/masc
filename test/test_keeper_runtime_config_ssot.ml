@@ -1018,7 +1018,7 @@ preset = "social"
   | Ok updated ->
       check string "goal" "TOML goal" updated.Keeper_types.goal;
       check string "cascade_name reset to keeper default"
-        Keeper_config.default_cascade_name updated.cascade_name
+        Keeper_config.default_cascade_name (Keeper_types.cascade_name_of_meta updated)
 
 let test_social_model_resynced_from_declarative_defaults () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
@@ -1096,7 +1096,7 @@ cascade_name = "missing_profile"
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Ok updated ->
       failf "expected unknown cascade_name to be rejected, got %s"
-        updated.cascade_name
+        (Keeper_types.cascade_name_of_meta updated)
   | Error detail ->
       check bool "points at profile.cascade_name" true
         (contains_substring detail "profile.cascade_name");

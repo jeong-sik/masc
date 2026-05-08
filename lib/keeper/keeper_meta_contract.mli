@@ -254,7 +254,6 @@ type keeper_meta = {
   mid_goal : string;
   long_goal : string;
   social_model : string;
-  cascade_name : string;
   models : string list;
   cascade_ref : Cascade_ref.cascade_ref option;
   will : string;
@@ -332,6 +331,21 @@ val cascade_name_of_meta : keeper_meta -> string
     routing — read sites should use this helper instead of touching
     [m.cascade_name] directly. The plain [m.cascade_name] field will be
     removed once all read sites migrate. *)
+
+val set_cascade_name : string -> keeper_meta -> keeper_meta
+(** [set_cascade_name name m] returns a meta where both [cascade_name]
+    and [cascade_ref] are pinned to [name]. The cascade_ref takes the
+    form [{ group = name; item = None }] so the group's traversal
+    strategy decides item selection at routing time.
+
+    Use this helper for every write that intends to change the keeper's
+    cascade routing target. Direct record updates of only [cascade_name]
+    are deprecated and produce drift — [cascade_name_of_meta] would then
+    return the stale [cascade_ref.group] instead of the new value.
+
+    For record-literal initialization (full keeper_meta construction)
+    callers must still set both fields explicitly; this helper applies
+    only to update-style writes ([{ m with ... }]). *)
 
 (** {1 Outcome <-> string} *)
 

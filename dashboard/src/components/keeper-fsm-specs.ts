@@ -16,7 +16,7 @@ import type { FsmGraphSpec, FsmNode, FsmEdge } from './common/cytoscape-fsm'
 
 interface CompositeFsmParams {
   phase: string            // KSM — Running | Failing | Overflowed | Compacting | HandingOff | Draining | Stable
-  turnPhase: string        // KTC — idle | prompting | executing | compacting | finalizing
+  turnPhase: string        // KTC — idle | prompting | routing | executing | compacting | finalizing | exhausted
   decisionStage: string    // KDP — undecided | guard_ok | gate_rejected | tool_policy_selected
   cascadeState: string     // KCL — idle | selecting | trying | done | exhausted
   compactionStage: string  // KMC — accumulating | compacting | done
@@ -25,7 +25,7 @@ interface CompositeFsmParams {
 const KSM_STATES = [
   'Running', 'Failing', 'Overflowed', 'Compacting', 'HandingOff', 'Draining', 'Stable',
 ]
-const KTC_STATES = ['idle', 'prompting', 'executing', 'compacting', 'finalizing']
+const KTC_STATES = ['idle', 'prompting', 'routing', 'executing', 'compacting', 'finalizing', 'exhausted']
 const KDP_STATES = ['undecided', 'guard_ok', 'gate_rejected', 'tool_policy_selected']
 const KCL_STATES = ['idle', 'selecting', 'trying', 'done', 'exhausted']
 const KMC_STATES = ['accumulating', 'compacting', 'done']
@@ -61,9 +61,11 @@ const TURN_FSM_TLA_SYMBOLS: Record<KeeperTurnFsmState, string> = {
 const LEGACY_TURN_PHASE_MAP: Record<string, KeeperTurnFsmState> = {
   idle: 'idle',
   prompting: 'phase_gating',
+  routing: 'cascade_routing',
   executing: 'streaming',
   compacting: 'completing',
   finalizing: 'completing',
+  exhausted: 'completing',
   awaiting_tool: 'awaiting_tool_result',
 }
 

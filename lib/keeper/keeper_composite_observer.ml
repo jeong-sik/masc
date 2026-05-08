@@ -3,12 +3,14 @@
 type turn_phase = Keeper_registry.turn_phase =
   | Turn_idle
   | Turn_prompting
+  | Turn_routing
   | Turn_executing
   | Turn_compacting
   | Turn_finalizing
+  | Turn_exhausted
 
 let all_turn_phases =
-  [ Turn_idle; Turn_prompting; Turn_executing; Turn_compacting; Turn_finalizing ]
+  [ Turn_idle; Turn_prompting; Turn_routing; Turn_executing; Turn_compacting; Turn_finalizing; Turn_exhausted ]
 
 type decision_stage = Keeper_registry.decision_stage =
   | Decision_undecided
@@ -120,16 +122,20 @@ type snapshot = {
 let turn_phase_to_string = function
   | Turn_idle -> "idle"
   | Turn_prompting -> "prompting"
+  | Turn_routing -> "routing"
   | Turn_executing -> "executing"
   | Turn_compacting -> "compacting"
   | Turn_finalizing -> "finalizing"
+  | Turn_exhausted -> "exhausted"
 
 let turn_phase_of_string = function
   | "idle" -> Some Turn_idle
   | "prompting" -> Some Turn_prompting
+  | "routing" -> Some Turn_routing
   | "executing" -> Some Turn_executing
   | "compacting" -> Some Turn_compacting
   | "finalizing" -> Some Turn_finalizing
+  | "exhausted" -> Some Turn_exhausted
   | _ -> None
 
 let decision_stage_to_string = function

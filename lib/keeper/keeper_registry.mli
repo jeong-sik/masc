@@ -112,9 +112,11 @@ exception Keeper_fiber_crash
 type turn_phase =
   | Turn_idle [@tla.idle]
   | Turn_prompting [@tla.active]
+  | Turn_routing [@tla.active]
   | Turn_executing [@tla.active]
   | Turn_compacting [@tla.active]
   | Turn_finalizing [@tla.active]
+  | Turn_exhausted [@tla.terminal]
 [@@deriving tla]
 
 type decision_stage =

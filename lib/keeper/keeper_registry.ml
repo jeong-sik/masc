@@ -158,9 +158,11 @@ exception Keeper_fiber_crash
 type turn_phase =
   | Turn_idle [@tla.idle]
   | Turn_prompting [@tla.active]
+  | Turn_routing [@tla.active]
   | Turn_executing [@tla.active]
   | Turn_compacting [@tla.active]
   | Turn_finalizing [@tla.active]
+  | Turn_exhausted [@tla.terminal]
 [@@deriving tla]
 
 type decision_stage =
@@ -586,9 +588,11 @@ let set_last_correlation_id ~base_path name cid =
     { e with last_event_bus_correlation = Some cid })
 
 let turn_phase_of_cascade_state = function
-  | Cascade_idle | Cascade_selecting -> Turn_prompting
+  | Cascade_idle -> Turn_prompting
+  | Cascade_selecting -> Turn_routing
   | Cascade_trying -> Turn_executing
-  | Cascade_done | Cascade_exhausted -> Turn_finalizing
+  | Cascade_done -> Turn_finalizing
+  | Cascade_exhausted -> Turn_exhausted
 
 let broadcast_composite_changed ~name ~ts_unix =
   try
@@ -807,34 +811,60 @@ let validate_turn_phase_transition ~from ~to_ =
          match (from, to_) with
          (* from Turn_idle *)
          | (Turn_idle, Turn_idle) -> true
-         | (Turn_idle, Turn_prompting) -> true  (* via turn init / prepare_turn_retry_after_compaction (bypassed) *)
+         | (Turn_idle, Turn_prompting) -> true  (* via turn init / prepare_turn_retry_after_compaction *)
+         | (Turn_idle, Turn_routing) -> false
          | (Turn_idle, Turn_executing) -> false
          | (Turn_idle, Turn_compacting) -> false
          | (Turn_idle, Turn_finalizing) -> false
+         | (Turn_idle, Turn_exhausted) -> false
          (* from Turn_prompting *)
          | (Turn_prompting, Turn_idle) -> false  (* new turn init is reset, not transition *)
          | (Turn_prompting, Turn_prompting) -> true
+         | (Turn_prompting, Turn_routing) -> true  (* via set_turn_cascade_state: Cascade_selecting *)
          | (Turn_prompting, Turn_executing) -> true  (* via set_turn_phase *)
          | (Turn_prompting, Turn_compacting) -> false
-         | (Turn_prompting, Turn_finalizing) -> true  (* via set_turn_phase / via mark_turn_gate_rejected_by_name *)
+         | (Turn_prompting, Turn_finalizing) -> true  (* via mark_turn_gate_rejected_by_name *)
+         | (Turn_prompting, Turn_exhausted) -> false
+         (* from Turn_routing *)
+         | (Turn_routing, Turn_idle) -> false  (* new turn init is reset, not transition *)
+         | (Turn_routing, Turn_prompting) -> true  (* via set_turn_cascade_state: Cascade_idle on retry *)
+         | (Turn_routing, Turn_routing) -> true
+         | (Turn_routing, Turn_executing) -> true  (* via set_turn_cascade_state: Cascade_trying *)
+         | (Turn_routing, Turn_compacting) -> false
+         | (Turn_routing, Turn_finalizing) -> false
+         | (Turn_routing, Turn_exhausted) -> false
          (* from Turn_executing *)
          | (Turn_executing, Turn_idle) -> false  (* new turn init is reset, not transition *)
-         | (Turn_executing, Turn_prompting) -> true  (* via set_turn_cascade_state: retry selecting *)
+         | (Turn_executing, Turn_prompting) -> true  (* via set_turn_cascade_state: Cascade_idle retry *)
+         | (Turn_executing, Turn_routing) -> true  (* via set_turn_cascade_state: Cascade_selecting retry *)
          | (Turn_executing, Turn_executing) -> true
          | (Turn_executing, Turn_compacting) -> true  (* via set_turn_phase: retry plan *)
-         | (Turn_executing, Turn_finalizing) -> true  (* via set_turn_phase / via mark_turn_gate_rejected_by_name *)
+         | (Turn_executing, Turn_finalizing) -> true  (* via set_turn_cascade_state: Cascade_done *)
+         | (Turn_executing, Turn_exhausted) -> true  (* via set_turn_cascade_state: Cascade_exhausted *)
          (* from Turn_compacting *)
          | (Turn_compacting, Turn_idle) -> false  (* new turn init is reset, not transition *)
          | (Turn_compacting, Turn_prompting) -> true  (* via prepare_turn_retry_after_compaction *)
+         | (Turn_compacting, Turn_routing) -> false
          | (Turn_compacting, Turn_executing) -> false
          | (Turn_compacting, Turn_compacting) -> true
          | (Turn_compacting, Turn_finalizing) -> true  (* via set_turn_phase: compaction failure *)
+         | (Turn_compacting, Turn_exhausted) -> false
          (* from Turn_finalizing *)
          | (Turn_finalizing, Turn_idle) -> false  (* new turn is reset *)
-         | (Turn_finalizing, Turn_prompting) -> true  (* via set_turn_cascade_state: degraded retry re-entering selecting *)
-         | (Turn_finalizing, Turn_executing) -> false
+         | (Turn_finalizing, Turn_prompting) -> true  (* via set_turn_cascade_state: degraded retry Cascade_idle *)
+         | (Turn_finalizing, Turn_routing) -> true  (* via set_turn_cascade_state: degraded retry Cascade_selecting *)
+         | (Turn_finalizing, Turn_executing) -> true  (* via set_turn_cascade_state: degraded retry Cascade_trying *)
          | (Turn_finalizing, Turn_compacting) -> false
          | (Turn_finalizing, Turn_finalizing) -> true
+         | (Turn_finalizing, Turn_exhausted) -> false
+         (* from Turn_exhausted *)
+         | (Turn_exhausted, Turn_idle) -> false  (* new turn is reset *)
+         | (Turn_exhausted, Turn_prompting) -> true  (* via prepare_turn_retry_after_compaction: Cascade_idle *)
+         | (Turn_exhausted, Turn_routing) -> true  (* via set_turn_cascade_state: retry Cascade_selecting *)
+         | (Turn_exhausted, Turn_executing) -> true  (* via set_turn_cascade_state: retry Cascade_trying *)
+         | (Turn_exhausted, Turn_compacting) -> false
+         | (Turn_exhausted, Turn_finalizing) -> false
+         | (Turn_exhausted, Turn_exhausted) -> true
        ))
 
 let set_turn_decision_stage ~base_path name decision_stage =

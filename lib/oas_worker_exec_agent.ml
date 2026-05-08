@@ -50,7 +50,7 @@ type config = {
   tool_retry_policy : Agent_sdk.Tool_retry_policy.t option;
   required_tool_satisfaction :
     Agent_sdk.Completion_contract.required_tool_satisfaction;
-  contract : Agent_sdk.Risk_contract.t option;
+  contract : Masc_mcp_cdal_runtime.Risk_contract.t option;
   enable_thinking : bool option;
   transport : Masc_grpc_transport.t;
   allowed_paths : string list;

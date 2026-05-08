@@ -628,7 +628,7 @@ and run_existing_worker_agent
     (fun () ->
       let result, proof = match contract with
         | Some c ->
-          let cr = Agent_sdk.Contract_runner.run ~sw ~contract:c agent prompt in
+          let cr = Masc_mcp_cdal_runtime.Contract_runner.run ~sw ~contract:c agent prompt in
           (cr.response, Some cr.proof)
         | None ->
           (Agent_sdk.Agent.run ~sw agent prompt, None)
@@ -678,10 +678,10 @@ and run_existing_worker_agent
               ~status:"ok" ~output
               ?raw_trace_run
               ?evidence_session_id
-              ?proof_run_id:(Option.map (fun p -> p.Agent_sdk.Cdal_proof.run_id) proof)
+              ?proof_run_id:(Option.map (fun p -> p.Masc_mcp_cdal_runtime.Cdal_proof.run_id) proof)
               ?proof_result_status:
                 (Option.map
-                   (fun p -> proof_result_status_to_string p.Agent_sdk.Cdal_proof.result_status)
+                   (fun p -> proof_result_status_to_string p.Masc_mcp_cdal_runtime.Cdal_proof.result_status)
                    proof)
               ()
           in
@@ -718,10 +718,10 @@ and run_existing_worker_agent
               ~status:"error" ~output:detail ~error:detail
               ?raw_trace_run
               ?evidence_session_id
-              ?proof_run_id:(Option.map (fun p -> p.Agent_sdk.Cdal_proof.run_id) proof)
+              ?proof_run_id:(Option.map (fun p -> p.Masc_mcp_cdal_runtime.Cdal_proof.run_id) proof)
               ?proof_result_status:
                 (Option.map
-                   (fun p -> proof_result_status_to_string p.Agent_sdk.Cdal_proof.result_status)
+                   (fun p -> proof_result_status_to_string p.Masc_mcp_cdal_runtime.Cdal_proof.result_status)
                    proof)
               ()
           in

@@ -73,8 +73,8 @@ val run_named :
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
   ?agent_ref:Agent_sdk.Agent.t option ref ->
-  ?proof_ref:Agent_sdk.Cdal_proof.t option ref ->
-  ?contract:Agent_sdk.Risk_contract.t ->
+  ?proof_ref:Masc_mcp_cdal_runtime.Cdal_proof.t option ref ->
+  ?contract:Masc_mcp_cdal_runtime.Risk_contract.t ->
   ?transport:Masc_grpc_transport.t ->
   ?cli_transport_overrides:Oas_worker_exec.cli_transport_overrides ->
   ?allowed_paths:string list ->
@@ -126,7 +126,7 @@ val run_model_by_label :
   ?tool_retry_policy:Agent_sdk.Tool_retry_policy.t ->
   ?enable_thinking:bool ->
   ?compact_ratio:float ->
-  ?contract:Agent_sdk.Risk_contract.t ->
+  ?contract:Masc_mcp_cdal_runtime.Risk_contract.t ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?transport:Masc_grpc_transport.t ->
   ?sw:Eio.Switch.t ->
@@ -161,8 +161,8 @@ val run_named_with_masc_tools :
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
-  ?proof_ref:Agent_sdk.Cdal_proof.t option ref ->
-  ?contract:Agent_sdk.Risk_contract.t ->
+  ?proof_ref:Masc_mcp_cdal_runtime.Cdal_proof.t option ref ->
+  ?contract:Masc_mcp_cdal_runtime.Risk_contract.t ->
   ?transport:Masc_grpc_transport.t ->
   ?yield_on_tool:bool ->
   ?compact_ratio:float ->
@@ -193,7 +193,7 @@ val run_model_with_masc_tools :
   ?tool_retry_policy:Agent_sdk.Tool_retry_policy.t ->
   ?enable_thinking:bool ->
   ?compact_ratio:float ->
-  ?contract:Agent_sdk.Risk_contract.t ->
+  ?contract:Masc_mcp_cdal_runtime.Risk_contract.t ->
   ?raw_trace:Agent_sdk.Raw_trace.t ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?transport:Masc_grpc_transport.t ->

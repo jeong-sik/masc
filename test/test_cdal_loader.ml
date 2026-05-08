@@ -13,10 +13,10 @@ module CL = Masc_mcp.Cdal_loader
 let make_proof
     ?(run_id = "loader-test-001")
     ?(contract_id = "md5:abc123")
-    ?(schema_version = Agent_sdk.Cdal_proof.schema_version_current)
-    ?(requested = Agent_sdk.Execution_mode.Execute)
-    ?(effective = Agent_sdk.Execution_mode.Execute)
-    () : Agent_sdk.Cdal_proof.t =
+    ?(schema_version = Masc_mcp_cdal_runtime.Cdal_proof.schema_version_current)
+    ?(requested = Masc_mcp_cdal_runtime.Execution_mode.Execute)
+    ?(effective = Masc_mcp_cdal_runtime.Execution_mode.Execute)
+    () : Masc_mcp_cdal_runtime.Cdal_proof.t =
   {
     schema_version;
     run_id;
@@ -24,7 +24,7 @@ let make_proof
     requested_execution_mode = requested;
     effective_execution_mode = effective;
     mode_decision_source = "passthrough";
-    risk_class = Agent_sdk.Risk_class.Low;
+    risk_class = Masc_mcp_cdal_runtime.Risk_class.Low;
     provider_snapshot = {
       provider_name = "test";
       model_id = "test-model";
@@ -46,7 +46,7 @@ let make_proof
     scope = None;
   }
 
-let make_contract () : Agent_sdk.Risk_contract.t =
+let make_contract () : Masc_mcp_cdal_runtime.Risk_contract.t =
   {
     runtime_constraints = {
       requested_execution_mode = Execute;
@@ -65,7 +65,7 @@ let setup_store () =
     (Filename.get_temp_dir_name ())
     (Printf.sprintf "cdal_loader_%d_%d"
        (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.0))) in
-  let store : Agent_sdk.Proof_store.config = { root = tmp_dir } in
+  let store : Masc_mcp_cdal_runtime.Proof_store.config = { root = tmp_dir } in
   (store, tmp_dir)
 
 let mkdirp path =
@@ -85,19 +85,19 @@ let test_load_valid_bundle () =
   let (store, _tmp) = setup_store () in
   let run_id = "valid-bundle-001" in
   let contract = make_contract () in
-  let contract_id = Agent_sdk.Risk_contract.contract_id contract in
+  let contract_id = Masc_mcp_cdal_runtime.Risk_contract.contract_id contract in
   let proof = make_proof ~run_id ~contract_id () in
   (* Write manifest and contract to disk *)
-  Agent_sdk.Proof_store.init_run store ~run_id;
-  Agent_sdk.Proof_store.write_manifest store ~run_id proof;
-  Agent_sdk.Proof_store.write_contract store ~run_id contract;
+  Masc_mcp_cdal_runtime.Proof_store.init_run store ~run_id;
+  Masc_mcp_cdal_runtime.Proof_store.write_manifest store ~run_id proof;
+  Masc_mcp_cdal_runtime.Proof_store.write_contract store ~run_id contract;
   match CL.load ~store proof with
   | Ok bundle ->
     Alcotest.(check string) "run_id" run_id bundle.proof.run_id;
     Alcotest.(check string) "recomputed contract_id"
       contract_id bundle.recomputed_contract_id;
     Alcotest.(check string) "contract mode" "execute"
-      (Agent_sdk.Execution_mode.to_string
+      (Masc_mcp_cdal_runtime.Execution_mode.to_string
          bundle.contract.runtime_constraints.requested_execution_mode)
   | Error e -> Alcotest.fail (CL.load_error_to_string e)
 
@@ -152,8 +152,8 @@ let test_missing_contract () =
   let run_id = "no-contract" in
   let proof = make_proof ~run_id () in
   (* Write manifest but not contract *)
-  Agent_sdk.Proof_store.init_run store ~run_id;
-  Agent_sdk.Proof_store.write_manifest store ~run_id proof;
+  Masc_mcp_cdal_runtime.Proof_store.init_run store ~run_id;
+  Masc_mcp_cdal_runtime.Proof_store.write_manifest store ~run_id proof;
   match CL.load ~store proof with
   | Error (Contract_not_found _) -> ()
   | Error e ->
@@ -169,8 +169,8 @@ let test_malformed_contract () =
   let (store, _tmp) = setup_store () in
   let run_id = "bad-contract" in
   let proof = make_proof ~run_id () in
-  Agent_sdk.Proof_store.init_run store ~run_id;
-  Agent_sdk.Proof_store.write_manifest store ~run_id proof;
+  Masc_mcp_cdal_runtime.Proof_store.init_run store ~run_id;
+  Masc_mcp_cdal_runtime.Proof_store.write_manifest store ~run_id proof;
   (* Write invalid contract JSON *)
   let contract_path =
     match
@@ -198,12 +198,12 @@ let test_schema_unsupported () =
   let (store, _tmp) = setup_store () in
   let run_id = "bad-schema" in
   let contract = make_contract () in
-  let contract_id = Agent_sdk.Risk_contract.contract_id contract in
+  let contract_id = Masc_mcp_cdal_runtime.Risk_contract.contract_id contract in
   (* Create manifest proof with wrong schema version *)
   let proof = make_proof ~run_id ~contract_id ~schema_version:99 () in
-  Agent_sdk.Proof_store.init_run store ~run_id;
-  Agent_sdk.Proof_store.write_manifest store ~run_id proof;
-  Agent_sdk.Proof_store.write_contract store ~run_id contract;
+  Masc_mcp_cdal_runtime.Proof_store.init_run store ~run_id;
+  Masc_mcp_cdal_runtime.Proof_store.write_manifest store ~run_id proof;
+  Masc_mcp_cdal_runtime.Proof_store.write_contract store ~run_id contract;
   match CL.load ~store proof with
   | Error (Schema_unsupported 99) -> ()
   | Error e ->
@@ -219,18 +219,18 @@ let test_contract_id_roundtrip () =
   let (store, _tmp) = setup_store () in
   let run_id = "roundtrip-001" in
   let contract = make_contract () in
-  let original_id = Agent_sdk.Risk_contract.contract_id contract in
+  let original_id = Masc_mcp_cdal_runtime.Risk_contract.contract_id contract in
   let proof = make_proof ~run_id ~contract_id:original_id () in
-  Agent_sdk.Proof_store.init_run store ~run_id;
-  Agent_sdk.Proof_store.write_manifest store ~run_id proof;
-  Agent_sdk.Proof_store.write_contract store ~run_id contract;
+  Masc_mcp_cdal_runtime.Proof_store.init_run store ~run_id;
+  Masc_mcp_cdal_runtime.Proof_store.write_manifest store ~run_id proof;
+  Masc_mcp_cdal_runtime.Proof_store.write_contract store ~run_id contract;
   match CL.load ~store proof with
   | Ok bundle ->
     Alcotest.(check string) "recomputed matches original"
       original_id bundle.recomputed_contract_id;
     (* Also verify the recomputed ID matches what contract_id produces *)
     let recomputed_again =
-      Agent_sdk.Risk_contract.contract_id bundle.contract in
+      Masc_mcp_cdal_runtime.Risk_contract.contract_id bundle.contract in
     Alcotest.(check string) "recomputed from loaded contract"
       original_id recomputed_again
   | Error e -> Alcotest.fail (CL.load_error_to_string e)
@@ -243,26 +243,26 @@ let test_manifest_is_truth_source () =
   let (store, _tmp) = setup_store () in
   let run_id = "manifest-truth-001" in
   let contract = make_contract () in
-  let contract_id = Agent_sdk.Risk_contract.contract_id contract in
+  let contract_id = Masc_mcp_cdal_runtime.Risk_contract.contract_id contract in
   let manifest_proof =
     make_proof ~run_id ~contract_id
-      ~requested:Agent_sdk.Execution_mode.Execute
-      ~effective:Agent_sdk.Execution_mode.Draft () in
+      ~requested:Masc_mcp_cdal_runtime.Execution_mode.Execute
+      ~effective:Masc_mcp_cdal_runtime.Execution_mode.Draft () in
   let input_proof =
     make_proof ~run_id ~contract_id
-      ~requested:Agent_sdk.Execution_mode.Diagnose
-      ~effective:Agent_sdk.Execution_mode.Diagnose () in
-  Agent_sdk.Proof_store.init_run store ~run_id;
-  Agent_sdk.Proof_store.write_manifest store ~run_id manifest_proof;
-  Agent_sdk.Proof_store.write_contract store ~run_id contract;
+      ~requested:Masc_mcp_cdal_runtime.Execution_mode.Diagnose
+      ~effective:Masc_mcp_cdal_runtime.Execution_mode.Diagnose () in
+  Masc_mcp_cdal_runtime.Proof_store.init_run store ~run_id;
+  Masc_mcp_cdal_runtime.Proof_store.write_manifest store ~run_id manifest_proof;
+  Masc_mcp_cdal_runtime.Proof_store.write_contract store ~run_id contract;
   match CL.load ~store input_proof with
   | Ok bundle ->
     Alcotest.(check string) "requested from manifest"
       "execute"
-      (Agent_sdk.Execution_mode.to_string bundle.proof.requested_execution_mode);
+      (Masc_mcp_cdal_runtime.Execution_mode.to_string bundle.proof.requested_execution_mode);
     Alcotest.(check string) "effective from manifest"
       "draft"
-      (Agent_sdk.Execution_mode.to_string bundle.proof.effective_execution_mode)
+      (Masc_mcp_cdal_runtime.Execution_mode.to_string bundle.proof.effective_execution_mode)
   | Error e -> Alcotest.fail (CL.load_error_to_string e)
 
 (* ================================================================ *)
@@ -277,7 +277,7 @@ let test_load_error_to_string () =
     (CL.Contract_parse_error "bad", "contract parse error: bad");
     (CL.Schema_unsupported 99,
      Printf.sprintf "unsupported schema version: 99 (expected %d)"
-       Agent_sdk.Cdal_proof.schema_version_current);
+       Masc_mcp_cdal_runtime.Cdal_proof.schema_version_current);
     (CL.Ref_resolution_error "ref", "ref resolution error: ref");
   ] in
   List.iter (fun (err, expected) ->

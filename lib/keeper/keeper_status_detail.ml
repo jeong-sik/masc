@@ -573,7 +573,7 @@ let handle_keeper_status ctx args : tool_result =
          let active_model = active_model_of_meta m in
          let next_model_hint = next_model_hint_of_meta m in
          let runtime_cascade_metrics =
-           match Oas_worker.cascade_metrics_json () with
+           match Cascade_legacy_runner.cascade_metrics_json () with
            | `List entries ->
                entries
                |> List.find_opt (function

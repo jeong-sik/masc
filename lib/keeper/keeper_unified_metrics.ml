@@ -1383,7 +1383,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
     match result.cascade_observation with
     | Some observation ->
       Keeper_cascade_profile.runtime_name_to_string
-        observation.Oas_worker.cascade_name
+        observation.Cascade_legacy_runner.cascade_name
     | None -> meta.cascade_name
   in
   (* #9933: same latency bucket, split by provider/model/cascade.
@@ -1468,7 +1468,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
           | None -> `Null );
         ("cascade",
          match result.cascade_observation with
-         | Some observation -> Oas_worker.cascade_observation_to_json observation
+         | Some observation -> Cascade_legacy_runner.cascade_observation_to_json observation
          | None -> `Null);
         ("snapshot_source", `String snapshot_source);
         ("memory_check", memory_check_default_json ());
@@ -1615,18 +1615,18 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
   let public_reason =
     match sdk_error with
     | Some err -> (
-        match Oas_worker_named.classify_masc_internal_error err with
-        | Some (Oas_worker_named.Resumable_cli_session { detail; _ }) ->
+        match Keeper_turn_driver.classify_masc_internal_error err with
+        | Some (Keeper_turn_driver.Resumable_cli_session { detail; _ }) ->
             let trimmed = String.trim detail in
             if trimmed = "" then reason else trimmed
         | Some
-            (Oas_worker_named.Oas_timeout_budget
+            (Keeper_turn_driver.Oas_timeout_budget
                _ as err) ->
             Option.value
               ~default:reason
-              (Oas_worker_named.summary_of_masc_internal_error err)
-        | Some (Oas_worker_named.No_tool_capable_provider _ as err) -> (
-            match Oas_worker_named.summary_of_masc_internal_error err with
+              (Keeper_turn_driver.summary_of_masc_internal_error err)
+        | Some (Keeper_turn_driver.No_tool_capable_provider _ as err) -> (
+            match Keeper_turn_driver.summary_of_masc_internal_error err with
             | Some summary -> summary
             | None -> reason)
         | _ -> reason)
@@ -1637,14 +1637,14 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
     &&
     match sdk_error with
     | Some err -> (
-        match Oas_worker_named.classify_masc_internal_error err with
+        match Keeper_turn_driver.classify_masc_internal_error err with
         | Some
-            (Oas_worker_named.Oas_timeout_budget _
-            | Oas_worker_named.Turn_timeout _
-            | Oas_worker_named.Admission_queue_timeout _
-            | Oas_worker_named.Admission_queue_rejected _
-            | Oas_worker_named.Resumable_cli_session _
-            | Oas_worker_named.No_tool_capable_provider _) ->
+            (Keeper_turn_driver.Oas_timeout_budget _
+            | Keeper_turn_driver.Turn_timeout _
+            | Keeper_turn_driver.Admission_queue_timeout _
+            | Keeper_turn_driver.Admission_queue_rejected _
+            | Keeper_turn_driver.Resumable_cli_session _
+            | Keeper_turn_driver.No_tool_capable_provider _) ->
             true
         | Some _ | None -> false)
     | None -> false
@@ -1653,11 +1653,11 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
      cycle outcomes so Grafana can surface fleet-wide health ratios. *)
   (match sdk_error with
    | Some err ->
-       (match Oas_worker_named.classify_masc_internal_error err with
-        | Some (Oas_worker_named.No_tool_capable_provider
+       (match Keeper_turn_driver.classify_masc_internal_error err with
+        | Some (Keeper_turn_driver.No_tool_capable_provider
 	                  { cascade_name; _ }) ->
             let cascade_name =
-              Oas_worker_named.cascade_name_to_string cascade_name
+              Keeper_turn_driver.cascade_name_to_string cascade_name
             in
             Prometheus.inc_counter
               Keeper_metrics.metric_keeper_no_tool_provider

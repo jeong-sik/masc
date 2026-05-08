@@ -522,7 +522,7 @@ let publish_keeper_lifecycle
     ~keeper_name ~detail () : unit =
   match get_bus () with
   | Some bus ->
-    Oas_events.publish_keeper_lifecycle
+    Cascade_events.publish_keeper_lifecycle
       bus
       ~event
       ~keeper_name

@@ -15,20 +15,39 @@ include Keeper_turn_helpers
 include Keeper_turn_liveness
 include Keeper_turn_cascade_budget
 
+(* RFC-0047 follow-up: exhaustive match on [Keeper_turn_disposition.t].
+   Pre-fix this used [String.starts_with ~prefix:"api_error_"] on the
+   wire form of [terminal_reason.code]; that substring guard depended
+   on SDK-error wires being routed through [Unknown { raw_error = _ }]
+   because [normalize_code] no longer collapsed them to "provider_error".
+   With [of_failure] now emitting [Provider_error (Sdk_error _)] typed
+   for the SDK-error fallback, this routing reduces to a clean variant
+   match — no substring classifier left in this function. *)
 let registry_failure_reason_of_terminal_reason
     (terminal_reason : Keeper_turn_terminal.t)
     ~(raw_error : string) : Keeper_registry.failure_reason option =
   let detail = short_preview raw_error in
-  let code = Keeper_turn_terminal.code terminal_reason in
-  match code with
-  | "required_tool_use_no_tool_call"
-  | "required_tool_use_unsatisfied" ->
-      Some (Keeper_registry.Tool_required_unsatisfied { code; detail })
-  | "provider_error" ->
-      Some (Keeper_registry.Provider_runtime_error { code; detail })
-  | _ when String.starts_with ~prefix:"api_error_" code ->
-      Some (Keeper_registry.Provider_runtime_error { code; detail })
-  | _ -> None
+  match terminal_reason.disposition with
+  | Keeper_turn_disposition.Required_tool_use_no_tool_call ->
+      Some
+        (Keeper_registry.Tool_required_unsatisfied
+           { code = "required_tool_use_no_tool_call"; detail })
+  | Keeper_turn_disposition.Required_tool_use_unsatisfied ->
+      Some
+        (Keeper_registry.Tool_required_unsatisfied
+           { code = "required_tool_use_unsatisfied"; detail })
+  | Keeper_turn_disposition.Provider_error c ->
+      Some
+        (Keeper_registry.Provider_runtime_error
+           { code = Keeper_turn_terminal_code.to_wire c; detail })
+  | Keeper_turn_disposition.Success
+  | Keeper_turn_disposition.External_cancel
+  | Keeper_turn_disposition.Turn_wall_clock_timeout
+  | Keeper_turn_disposition.Oas_timeout_budget
+  | Keeper_turn_disposition.Gh_repo_context_missing_worktree
+  | Keeper_turn_disposition.Post_commit_ambiguous
+  | Keeper_turn_disposition.Unknown _ ->
+      None
 
 let should_auto_pause_required_tool_contract_violation
     ~(paused : bool)
@@ -1040,7 +1059,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               if EC.is_cascade_exhausted_error err then begin
                 Keeper_registry.set_turn_cascade_state
                   ~base_path:config.base_path meta.name
-                  Keeper_registry.Cascade_exhausted;
+                  (Keeper_registry.Packed Cascade_exhausted : Keeper_registry.packed_cascade_state);
                 Prometheus.inc_counter
                   Keeper_metrics.metric_keeper_fsm_edge_transitions
                   ~labels:[("edge", "kcl_to_ktc_exhaustion")] ();
@@ -1065,7 +1084,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               else begin
                 Keeper_registry.set_turn_phase
                   ~base_path:config.base_path meta.name
-                  Keeper_registry.Turn_finalizing;
+                  Keeper_registry.(Packed Turn_finalizing);
                 (* Cycle 52 narrative companion: non-exhaustion terminal
                    errors (transient).  Logged so dashboard readers can
                    distinguish exhaustion from transient failure without
@@ -1119,8 +1138,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               with
               | None ->
                   Error
-                    (Oas_worker_named.sdk_error_of_masc_internal_error
-                       (Oas_worker_named.Oas_timeout_budget
+                    (Keeper_turn_driver.sdk_error_of_masc_internal_error
+                       (Keeper_turn_driver.Oas_timeout_budget
                           {
                             budget_sec = 0.0;
                             keeper_turn_timeout_sec = timeout_sec;
@@ -1176,7 +1195,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   selected_model;
                 Keeper_registry.set_turn_cascade_state
                   ~base_path:config.base_path meta.name
-                  Keeper_registry.Cascade_done;
+                  (Keeper_registry.Packed Cascade_done : Keeper_registry.packed_cascade_state);
                 Ok result
             | Error err ->
                 let err =
@@ -1549,7 +1568,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                     | Some retry_plan ->
                         Keeper_registry.set_turn_phase
                           ~base_path:config.base_path meta.name
-                          Keeper_registry.Turn_compacting;
+                          Keeper_registry.(Packed Turn_compacting);
                         current_turn_overflow_blocker :=
                           Some (Agent_sdk.Error.to_string err);
                         dispatch_keeper_phase_event
@@ -1602,7 +1621,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                           ~reason:"auto_compact_recovery_unavailable";
                         Keeper_registry.set_turn_phase
                           ~base_path:config.base_path meta.name
-                          Keeper_registry.Turn_finalizing;
+                          Keeper_registry.(Packed Turn_finalizing);
                         Error err
                   else begin
                     mark_paused_after_overflow
@@ -1610,7 +1629,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                       ~reason:"overflow_persisted_after_auto_compact_retry";
                       Keeper_registry.set_turn_phase
                         ~base_path:config.base_path meta.name
-                        Keeper_registry.Turn_finalizing;
+                        Keeper_registry.(Packed Turn_finalizing);
                     Error err
                   end
                 | No_degraded_retry ->
@@ -1665,7 +1684,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 ();
               Keeper_registry.set_turn_phase
                 ~base_path:config.base_path meta.name
-                Keeper_registry.Turn_finalizing;
+                Keeper_registry.(Packed Turn_finalizing);
               Error (Agent_sdk.Error.Api (Timeout { message = msg }))
             end else if committed_tools <> [] then begin
               let timeout_err =
@@ -1703,15 +1722,15 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 ();
               Keeper_registry.set_turn_phase
                 ~base_path:config.base_path meta.name
-                Keeper_registry.Turn_finalizing;
+                Keeper_registry.(Packed Turn_finalizing);
               Error reclassified
             end else begin
               Keeper_registry.set_turn_phase
                 ~base_path:config.base_path meta.name
-                Keeper_registry.Turn_finalizing;
+                Keeper_registry.(Packed Turn_finalizing);
               Error
-                (Oas_worker_named.sdk_error_of_masc_internal_error
-                   (Oas_worker_named.Turn_timeout
+                (Keeper_turn_driver.sdk_error_of_masc_internal_error
+                   (Keeper_turn_driver.Turn_timeout
                       { elapsed_sec = timeout_sec }))
             end))
         with
@@ -1760,12 +1779,12 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             (Trajectory.Failed (Agent_sdk.Error.to_string err));
           let e_str = Agent_sdk.Error.to_string err in
           let is_transient = EC.is_transient_network_error err in
-          (match Oas_worker_named.classify_masc_internal_error err with
-           | Some (Oas_worker_named.Oas_timeout_budget _) ->
+          (match Keeper_turn_driver.classify_masc_internal_error err with
+           | Some (Keeper_turn_driver.Oas_timeout_budget _) ->
                Prometheus.inc_counter
                  Keeper_metrics.metric_keeper_oas_timeout_classifications
                  ~labels:[("classification", "structural_budget")] ()
-           | Some (Oas_worker_named.Turn_timeout _) ->
+           | Some (Keeper_turn_driver.Turn_timeout _) ->
                Prometheus.inc_counter
                  Keeper_metrics.metric_keeper_oas_timeout_classifications
                  ~labels:[("classification", "turn_wall_clock")] ()
@@ -1921,8 +1940,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             | None -> ()
           end;
           (match
-             Keeper_passive_loop_detector.progress_class_of_terminal_reason_code
-               (Keeper_turn_terminal.code terminal_reason)
+             Keeper_passive_loop_detector.progress_class_of_disposition
+               terminal_reason.disposition
            with
            | Some progress_class ->
                Keeper_passive_loop_detector.record_turn

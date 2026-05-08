@@ -151,7 +151,7 @@ let generate_code_change ~goal ~baseline ~lower_is_better ~history ~insights
   match
     Masc_oas_bridge.run_with_caller
       ~caller:Env_config_oas_bridge.Autoresearch_codegen (fun () ->
-      Oas_worker.run_named ~cascade_name
+      Keeper_turn_driver.run_named ~cascade_name
         ~goal:prompt ~max_turns:1
         ~temperature:(Cascade_inference.resolve_temperature
           ~cascade_name:inference_cascade_name ~fallback:(fun () -> 0.7))
@@ -162,4 +162,4 @@ let generate_code_change ~goal ~baseline ~lower_is_better ~history ~insights
     )
   with
   | Error e -> Result.error (Printf.sprintf "MODEL call failed: %s" (Agent_sdk.Error.to_string e))
-  | Ok result -> parse_model_code_response (Agent_sdk_response.text_of_response result.Oas_worker.response)
+  | Ok result -> parse_model_code_response (Agent_sdk_response.text_of_response result.Keeper_turn_driver.response)

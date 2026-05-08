@@ -854,7 +854,7 @@ end
 
     Phase 0 observability for the tiered-hydration redesign (Option C).
     When enabled, every keeper wake captures an approximation of the LLM
-    request payload size just before [Oas_worker.run_named] is invoked.
+    request payload size just before [Keeper_turn_driver.run_named] is invoked.
     The record is appended to
     [$MASC_BASE_PATH/data/keeper-wake-payload/YYYY-MM-DD.jsonl] via
     [Dashboard_harness_health.record_wake_payload].
@@ -886,7 +886,7 @@ module KeeperCascade = struct
       Matching is case-insensitive; empty entries are dropped.
 
       Semantics: when set, keeper turns pass this list as [provider_filter]
-      into [Oas_worker.run_named], which applies it during MASC cascade
+      into [Keeper_turn_driver.run_named], which applies it during MASC cascade
       provider resolution. The runtime keeps only matching providers from
       the resolved profile; if the filter leaves zero providers, OAS falls back
       to the unfiltered profile (see [apply_provider_filter] safety net).

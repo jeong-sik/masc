@@ -2,7 +2,7 @@
 
     Keeps provider label resolution, runtime MCP lane selection, and per-call
     CLI transport construction separate from the build/run orchestration in
-    {!Oas_worker_exec}. *)
+    {!Cascade_runner}. *)
 
 type cli_transport_overrides = {
   cwd : string option;

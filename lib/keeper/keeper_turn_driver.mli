@@ -1,91 +1,44 @@
-(** Oas_worker — Unified entry point for OAS-based MASC tool modules.
+(** Keeper_turn_driver — MASC named-cascade and model-label execution entry points.
 
-    Callers either pass a MASC-managed [cascade_name] string for configured fallback
-    selection or a [model_label] string for {!run_model_by_label}.
-    All public APIs accept string model labels; no [Model_spec.model_spec]
-    type is exposed.
+    Public API for running OAS agents through MASC-managed named cascade
+    profiles ([run_named]) or explicit model label ([run_model_by_label]),
+    with optional MASC tool bridging variants.
 
-    Transport selection: all [run_*] functions accept an optional
-    [~transport] parameter. When omitted, the transport is resolved
-    from [MASC_AGENT_TRANSPORT] env var (default: [Local]).
+    The facade [include]s the three sub-modules:
+    - {!Cascade_oas_runner} — Eio context, cascade resolution, runtime MCP policy
+    - {!Cascade_error_classify} — masc_internal_error type, error conversion, codex CLI preflight
+    - {!Cascade_attempt_fsm} — SDK error to FSM outcome, session/resumption analysis
 
-    @since Phase 1 — MASC->OAS migration
-    @since Phase 4 — public API restricted to named cascade functions
-    @since Phase 5 — run_model_by_label added (string-based API)
-    @since Phase 6 — Model_spec.model_spec type fully eliminated from API
-    @since Phase 8 — legacy cascade wrapper deleted, MASC-owned defaults moved here
-    @since Phase 9 — gRPC transport option added (#2381) *)
+    @since God file decomposition — extracted from oas_worker.ml *)
 
-type cascade_attempt = {
-  attempt_index : int;
-  model_id : string;
-  model_label : string option;
-  latency_ms : int option;
-  error : string option;
-}
+include module type of Cascade_oas_runner
+include module type of Cascade_error_classify
+include module type of Cascade_attempt_fsm
 
-type cascade_fallback_event = {
-  from_model_id : string;
-  from_model_label : string option;
-  to_model_id : string;
-  to_model_label : string option;
-  reason : string;
-}
+(** [effective_provider_attempt_timeout_s] applies provider-specific
+    timeout constraints to a configured cascade attempt budget.
 
-type cascade_observation = {
-  cascade_name : Keeper_cascade_profile.runtime_name;
-  strategy : string option;
-  configured_labels : string list;
-  candidate_models : string list;
-  primary_model : string option;
-  selected_model : string option;
-  selected_model_raw : string option;
-  selected_index : int option;
-  fallback_hops : int option;
-  fallback_applied : bool;
-  attempts : cascade_attempt list;
-  fallback_events : cascade_fallback_event list;
-  attempt_details_available : bool;
-  attempt_details_source : string;
-}
+    - Ollama has a 300s floor for local model cold-load.
+    - Claude Code, Gemini, and Kimi CLI have shorter attempt caps so one
+      provider cannot spend the whole keeper turn budget before fallback.
+    - Providers without a known constraint keep the configured timeout unless
+      they are the last attempt, where the enclosing keeper/OAS timeout is
+      sufficient. *)
+val effective_provider_attempt_timeout_s :
+  is_last:bool ->
+  configured_timeout_s:float option ->
+  Llm_provider.Provider_config.t ->
+  float option
 
-type stop_reason =
-  | Completed
-  | TurnBudgetExhausted of { turns_used : int; limit : int }
-  | MutationBoundaryReached of { turns_used : int; tool_name : string option }
+(** [apply_stream_idle_timeout_default opt] returns [opt] when the caller
+    supplied a value, otherwise injects
+    [Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec]. Used at
+    every {!run_model_by_label} / {!run_model_with_masc_tools} entry so a
+    single-agent dashboard run cannot block forever on a stalled HTTP
+    stream. *)
+val apply_stream_idle_timeout_default : float option -> float option
 
-type cli_transport_overrides = Oas_worker_exec.cli_transport_overrides = {
-  cwd : string option;
-  claude_mcp_config : string option;
-  claude_allowed_tools : string list option;
-  claude_permission_mode : string option;
-  claude_max_turns : int option;
-  gemini_yolo : bool option;
-  cli_subprocess_idle_sec : float option;
-}
-
-type run_result = {
-  response : Agent_sdk.Types.api_response;
-  checkpoint : Agent_sdk.Checkpoint.t option;
-  session_id : string;
-  turns : int;
-  trace_ref : Agent_sdk.Raw_trace.run_ref option;
-  run_validation : Agent_sdk.Raw_trace.run_validation option;
-  proof : Masc_mcp_cdal_runtime.Cdal_proof.t option;
-  cascade_observation : cascade_observation option;
-  stop_reason : stop_reason;
-}
-
-(** Cascade call/error metrics as JSON array, sorted by call count. *)
-val cascade_metrics_json : unit -> Yojson.Safe.t
-val cascade_observation_to_json : cascade_observation -> Yojson.Safe.t
-
-(** Locate config/cascade.json via the resolved config root.
-    Delegates to {!Cascade_runtime.cascade_config_path}. *)
-val default_config_path : unit -> string option
-
-(** Return the default model string list for a given cascade name. *)
-val default_model_strings : cascade_name:string -> string list
+(** {1 Named cascade execution} *)
 
 val run_named :
   cascade_name:string ->
@@ -114,8 +67,7 @@ val run_named :
   ?context_reducer:Agent_sdk.Context_reducer.t ->
   ?memory:Agent_sdk.Memory.t ->
   ?tool_retry_policy:Agent_sdk.Tool_retry_policy.t ->
-  ?required_tool_satisfaction:
-    Agent_sdk.Completion_contract.required_tool_satisfaction ->
+  ?required_tool_satisfaction:Agent_sdk.Completion_contract.required_tool_satisfaction ->
   ?raw_trace:Agent_sdk.Raw_trace.t ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
@@ -124,7 +76,7 @@ val run_named :
   ?proof_ref:Masc_mcp_cdal_runtime.Cdal_proof.t option ref ->
   ?contract:Masc_mcp_cdal_runtime.Risk_contract.t ->
   ?transport:Masc_grpc_transport.t ->
-  ?cli_transport_overrides:cli_transport_overrides ->
+  ?cli_transport_overrides:Cascade_runner.cli_transport_overrides ->
   ?allowed_paths:string list ->
   ?checkpoint_sidecar:Yojson.Safe.t ->
   ?cache_system_prompt:bool ->
@@ -137,18 +89,22 @@ val run_named :
   ?enable_thinking:bool ->
   ?approval:Agent_sdk.Hooks.approval_callback ->
   ?exit_condition:(int -> bool) ->
-  ?exit_condition_result:(int -> stop_reason * string option) ->
+  ?exit_condition_result:(int -> Cascade_runner.stop_reason * string option) ->
   ?summarizer:(Agent_sdk.Types.message list -> string) ->
   ?oas_checkpoint:Agent_sdk.Checkpoint.t ->
   ?event_bus:Agent_sdk.Event_bus.t ->
   ?sw:Eio.Switch.t ->
-  ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
+  ?net:Eio_context.eio_net ->
   ?per_provider_timeout_s:float ->
   unit ->
-  (run_result, Agent_sdk.Error.sdk_error) result
+  (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result
+(** Run a single [Agent.run] call with MASC-driven cascade model fallback.
+    MASC drives the cascade FSM directly: resolves cascade providers,
+    tries each with OAS, and uses [Cascade_fsm.decide] on failure.
+    The cascade loop runs inside an admission queue permit. *)
 
-(** Run a single Agent.run() using a model label string (e.g. "llama:qwen3.5").
-    Validates the label parses before attempting execution. *)
+(** {1 Model-label execution} *)
+
 val run_model_by_label :
   model_label:string ->
   goal:string ->
@@ -174,9 +130,13 @@ val run_model_by_label :
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?transport:Masc_grpc_transport.t ->
   ?sw:Eio.Switch.t ->
-  ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
+  ?net:Eio_context.eio_net ->
   unit ->
-  (run_result, Agent_sdk.Error.sdk_error) result
+  (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result
+(** Run a single [Agent.run] using a model label string
+    (e.g. ["llama:qwen3.5"]).  Validates the label before execution. *)
+
+(** {1 MASC tool bridging} *)
 
 val run_named_with_masc_tools :
   cascade_name:string ->
@@ -196,8 +156,7 @@ val run_named_with_masc_tools :
   ?hooks:Agent_sdk.Hooks.hooks ->
   ?memory:Agent_sdk.Memory.t ->
   ?tool_retry_policy:Agent_sdk.Tool_retry_policy.t ->
-  ?required_tool_satisfaction:
-    Agent_sdk.Completion_contract.required_tool_satisfaction ->
+  ?required_tool_satisfaction:Agent_sdk.Completion_contract.required_tool_satisfaction ->
   ?raw_trace:Agent_sdk.Raw_trace.t ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
@@ -209,9 +168,11 @@ val run_named_with_masc_tools :
   ?compact_ratio:float ->
   ?approval:Agent_sdk.Hooks.approval_callback ->
   ?sw:Eio.Switch.t ->
-  ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
+  ?net:Eio_context.eio_net ->
   unit ->
-  (run_result, Agent_sdk.Error.sdk_error) result
+  (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result
+(** [run_named] variant that bridges MASC tool schemas into OAS tools
+    via {!Tool_bridge.oas_tool_of_masc}. *)
 
 val run_model_with_masc_tools :
   model_label:string ->
@@ -237,6 +198,14 @@ val run_model_with_masc_tools :
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?transport:Masc_grpc_transport.t ->
   ?sw:Eio.Switch.t ->
-  ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
+  ?net:Eio_context.eio_net ->
   unit ->
-  (run_result, Agent_sdk.Error.sdk_error) result
+  (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result
+(** [run_model_by_label] variant that bridges MASC tool schemas into OAS tools. *)
+
+module For_testing : sig
+  val checkpoint_after_attempt :
+    ?agent_ref:Agent_sdk.Agent.t option ref ->
+    Agent_sdk.Agent.t option ->
+    Agent_sdk.Checkpoint.t option
+end

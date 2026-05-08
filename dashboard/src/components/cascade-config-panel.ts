@@ -405,9 +405,6 @@ function ProfileCard({
           >
             <div class="flex items-center gap-2 flex-wrap mb-2">
               <span class="text-xs font-medium text-[var(--color-fg-primary)]">키퍼 할당</span>
-              <span class="text-xs text-[var(--color-fg-muted)]">
-                current profile로 keeper를 이동합니다.
-              </span>
             </div>
             ${availableKeepers.length > 0
               ? html`

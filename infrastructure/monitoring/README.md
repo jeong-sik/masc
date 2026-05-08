@@ -33,7 +33,7 @@ signal.
 
 ### Cascade
 
-Tracks cascade-routing decisions inside `Oas_worker_named.cycle_loop`. Counters: `masc_cascade_strategy_decisions_total{cascade,strategy,kind}`, `masc_cascade_capacity_events_total{kind,key_type}`. State vocabulary: `ordered / filtered_empty / exhausted` (TLA+ `KeeperCascadeLifecycle`).
+Tracks cascade-routing decisions inside `Keeper_turn_driver.cycle_loop`. Counters: `masc_cascade_strategy_decisions_total{cascade,strategy,kind}`, `masc_cascade_capacity_events_total{kind,key_type}`. State vocabulary: `ordered / filtered_empty / exhausted` (TLA+ `KeeperCascadeLifecycle`).
 
 ### Dashboard IA
 

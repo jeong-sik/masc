@@ -8,7 +8,7 @@
 
     This forces structural evaluation rather than relying on domain
     context that might mask bugs. Uses the same
-    [Oas_worker.run_named] pattern as {!Verifier_oas}. *)
+    [Keeper_turn_driver.run_named] pattern as {!Verifier_oas}. *)
 
 (** [handle_deep_review config args] runs a deep review as described
     by [args]. Returns [(success, message)] — [success = false] on

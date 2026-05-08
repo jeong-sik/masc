@@ -259,7 +259,7 @@ let test_direct_turn_mutations_emit_composite_changed () =
         (saw_composite_changed events);
       events := [];
 
-      Reg.set_turn_cascade_state ~base_path keeper_name Reg.Cascade_trying;
+      Reg.set_turn_cascade_state ~base_path keeper_name (Reg.Packed Reg.Cascade_trying);
       check bool "turn cascade update emits composite tick" true
         (saw_composite_changed events);
       events := [];

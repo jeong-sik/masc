@@ -119,12 +119,105 @@ type turn_phase =
   | Turn_exhausted [@tla.terminal]
 [@@deriving tla]
 
+(** {1 Turn phase GADT infrastructure (Cycle 21 / Tier B5)} *)
+
+type turn_idle
+type turn_prompting
+type turn_routing
+type turn_executing
+type turn_compacting
+type turn_finalizing
+type turn_exhausted
+
+type 'a turn_phase_witness =
+  | Turn_idle : turn_idle turn_phase_witness
+  | Turn_prompting : turn_prompting turn_phase_witness
+  | Turn_routing : turn_routing turn_phase_witness
+  | Turn_executing : turn_executing turn_phase_witness
+  | Turn_compacting : turn_compacting turn_phase_witness
+  | Turn_finalizing : turn_finalizing turn_phase_witness
+  | Turn_exhausted : turn_exhausted turn_phase_witness
+
+type packed_turn_phase = Packed : 'a turn_phase_witness -> packed_turn_phase
+
+val witness_to_turn_phase : packed_turn_phase -> turn_phase
+val turn_phase_to_witness : turn_phase -> packed_turn_phase
+
+val validate_turn_phase_transition : from:packed_turn_phase -> to_:packed_turn_phase -> unit
+
+module Turn_phase_transition : sig
+  type ('from, 'to_) t =
+    | Idle_to_idle : (turn_idle, turn_idle) t
+    | Idle_to_prompting : (turn_idle, turn_prompting) t
+    | Prompting_to_prompting : (turn_prompting, turn_prompting) t
+    | Prompting_to_routing : (turn_prompting, turn_routing) t
+    | Prompting_to_executing : (turn_prompting, turn_executing) t
+    | Prompting_to_finalizing : (turn_prompting, turn_finalizing) t
+    | Routing_to_prompting : (turn_routing, turn_prompting) t
+    | Routing_to_routing : (turn_routing, turn_routing) t
+    | Routing_to_executing : (turn_routing, turn_executing) t
+    | Executing_to_prompting : (turn_executing, turn_prompting) t
+    | Executing_to_routing : (turn_executing, turn_routing) t
+    | Executing_to_executing : (turn_executing, turn_executing) t
+    | Executing_to_compacting : (turn_executing, turn_compacting) t
+    | Executing_to_finalizing : (turn_executing, turn_finalizing) t
+    | Executing_to_exhausted : (turn_executing, turn_exhausted) t
+    | Compacting_to_prompting : (turn_compacting, turn_prompting) t
+    | Compacting_to_compacting : (turn_compacting, turn_compacting) t
+    | Compacting_to_finalizing : (turn_compacting, turn_finalizing) t
+    | Finalizing_to_prompting : (turn_finalizing, turn_prompting) t
+    | Finalizing_to_routing : (turn_finalizing, turn_routing) t
+    | Finalizing_to_executing : (turn_finalizing, turn_executing) t
+    | Finalizing_to_finalizing : (turn_finalizing, turn_finalizing) t
+    | Exhausted_to_prompting : (turn_exhausted, turn_prompting) t
+    | Exhausted_to_routing : (turn_exhausted, turn_routing) t
+    | Exhausted_to_executing : (turn_exhausted, turn_executing) t
+    | Exhausted_to_exhausted : (turn_exhausted, turn_exhausted) t
+
+  val to_tag : ('from, 'to_) t -> string
+end
+
 type decision_stage =
   | Decision_undecided [@tla.idle]
   | Decision_guard_ok [@tla.active]
   | Decision_gate_rejected [@tla.terminal]
   | Decision_tool_policy_selected [@tla.active]
 [@@deriving tla]
+
+(** {1 Decision stage GADT infrastructure (Cycle 21 / Tier B5)} *)
+
+type decision_undecided
+type decision_guard_ok
+type decision_gate_rejected
+type decision_tool_policy_selected
+
+type 'a decision_stage_witness =
+  | Decision_undecided : decision_undecided decision_stage_witness
+  | Decision_guard_ok : decision_guard_ok decision_stage_witness
+  | Decision_gate_rejected : decision_gate_rejected decision_stage_witness
+  | Decision_tool_policy_selected : decision_tool_policy_selected decision_stage_witness
+
+type packed_decision_stage = Packed : 'a decision_stage_witness -> packed_decision_stage
+
+val witness_to_stage : 'a decision_stage_witness -> decision_stage
+val stage_to_witness : decision_stage -> packed_decision_stage
+
+val validate_decision_transition : from:decision_stage -> to_:decision_stage -> unit
+
+module Decision_transition : sig
+  type ('from, 'to_) t =
+    | Undecided_to_guard_ok : (decision_undecided, decision_guard_ok) t
+    | Undecided_to_gate_rejected : (decision_undecided, decision_gate_rejected) t
+    | Undecided_to_tool_policy_selected : (decision_undecided, decision_tool_policy_selected) t
+    | Guard_ok_to_gate_rejected : (decision_guard_ok, decision_gate_rejected) t
+    | Guard_ok_to_tool_policy_selected : (decision_guard_ok, decision_tool_policy_selected) t
+    | Gate_rejected_to_guard_ok : (decision_gate_rejected, decision_guard_ok) t
+    | Gate_rejected_to_tool_policy_selected : (decision_gate_rejected, decision_tool_policy_selected) t
+    | Tool_policy_selected_to_guard_ok : (decision_tool_policy_selected, decision_guard_ok) t
+    | Tool_policy_selected_to_gate_rejected : (decision_tool_policy_selected, decision_gate_rejected) t
+
+  val to_tag : ('from, 'to_) t -> string
+end
 
 type cascade_state =
   | Cascade_idle [@tla.idle]
@@ -134,11 +227,51 @@ type cascade_state =
   | Cascade_exhausted [@tla.terminal]
 [@@deriving tla]
 
+(** {1 Cascade state GADT infrastructure (Cycle 21 / Tier B5)} *)
+
+type cascade_idle
+type cascade_selecting
+type cascade_trying
+type cascade_done
+type cascade_exhausted
+
+type 'a cascade_state_witness =
+  | Cascade_idle : cascade_idle cascade_state_witness
+  | Cascade_selecting : cascade_selecting cascade_state_witness
+  | Cascade_trying : cascade_trying cascade_state_witness
+  | Cascade_done : cascade_done cascade_state_witness
+  | Cascade_exhausted : cascade_exhausted cascade_state_witness
+
+type packed_cascade_state =
+  | Packed : 'a cascade_state_witness -> packed_cascade_state
+
+val cascade_state_to_witness : cascade_state -> packed_cascade_state
+val witness_to_cascade_state : packed_cascade_state -> cascade_state
+
+val validate_cascade_transition : from:packed_cascade_state -> to_:packed_cascade_state -> unit
+
 type compaction_stage =
   | Compaction_accumulating [@tla.idle]
   | Compaction_compacting [@tla.active]
   | Compaction_done [@tla.terminal]
 [@@deriving tla]
+
+(** {1 Compaction stage GADT infrastructure (Cycle 21 / Tier B5)} *)
+
+type compaction_accumulating
+type compaction_compacting
+type compaction_done
+
+type 'a compaction_stage_witness =
+  | Compaction_accumulating : compaction_accumulating compaction_stage_witness
+  | Compaction_compacting : compaction_compacting compaction_stage_witness
+  | Compaction_done : compaction_done compaction_stage_witness
+
+type packed_compaction_stage =
+  | Packed : 'a compaction_stage_witness -> packed_compaction_stage
+
+val compaction_stage_to_witness : compaction_stage -> packed_compaction_stage
+val witness_to_compaction_stage : packed_compaction_stage -> compaction_stage
 
 type turn_measurement = {
   tm_captured_at : float;
@@ -229,7 +362,7 @@ type registry_entry = {
           [Keeper_stale_watchdog] to enrich the kill warn line so an
           [idle_stale=true] termination is no longer indistinguishable
           from a *stuck* fiber. *)
-  compaction_stage : compaction_stage;
+  compaction_stage : packed_compaction_stage;
       (** Explicit KMC projection owned by the runtime, not derived from
           parent phase on read. This lets the observer surface
           [done] without guessing from conditions. *)
@@ -241,9 +374,9 @@ and turn_observation = {
           [meta.runtime.usage.total_turns] + 1). *)
   started_at : float;
       (** Unix timestamp when this turn record was installed. *)
-  turn_phase : turn_phase;
-  decision_stage : decision_stage;
-  cascade_state : cascade_state;
+  turn_phase : packed_turn_phase;
+  decision_stage : packed_decision_stage;
+  cascade_state : packed_cascade_state;
   measurement : turn_measurement option;
   measurement_bind_count : int;
       (** Number of [Context_measured] snapshots bound to this live turn.
@@ -256,8 +389,8 @@ and completed_turn_observation = {
   ct_turn_id : int;
   ct_started_at : float;
   ct_ended_at : float;
-  ct_decision_stage : decision_stage;
-  ct_cascade_state : cascade_state;
+  ct_decision_stage : packed_decision_stage;
+  ct_cascade_state : packed_cascade_state;
   ct_selected_model : string option;
 }
 
@@ -355,27 +488,21 @@ val set_turn_decision_stage :
     Sets [turn_phase] to [Turn_executing] for [Cascade_trying] and to
     [Turn_finalizing] for terminal cascade states. *)
 val set_turn_cascade_state :
-  base_path:string -> string -> cascade_state -> unit
+  base_path:string -> string -> packed_cascade_state -> unit
 
 (** Update the live turn's phase directly. No-op if idle. *)
 val set_turn_phase :
-  base_path:string -> string -> turn_phase -> unit
+  base_path:string -> string -> packed_turn_phase -> unit
 
 (** Runtime transition guards for the 4 sub-FSM axes.
     Each validates a (from, to) pair against the TLA+ transition matrix.
     Invalid transitions raise [Assert_failure] and bump
     [Prometheus.metric_fsm_guard_violation]. *)
 val validate_turn_phase_transition :
-  from:turn_phase -> to_:turn_phase -> unit
-
-val validate_decision_transition :
-  from:decision_stage -> to_:decision_stage -> unit
-
-val validate_cascade_transition :
-  from:cascade_state -> to_:cascade_state -> unit
+  from:packed_turn_phase -> to_:packed_turn_phase -> unit
 
 val validate_compaction_transition :
-  from:compaction_stage -> to_:compaction_stage -> unit
+  from:packed_compaction_stage -> to_:packed_compaction_stage -> unit
 
 (** Record the surface model selected for the current turn. No-op if idle. *)
 val set_turn_selected_model :

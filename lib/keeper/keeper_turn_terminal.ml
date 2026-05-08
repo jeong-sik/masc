@@ -32,21 +32,7 @@ let severity_to_string = function
   | Unknown_bad -> "bad"
 ;;
 
-(* Producer-side legacy-string preprocessor. Three legacy puns map to
-   their canonical app-layer codes before [Keeper_turn_disposition.of_wire]
-   is consulted. PR-2.5 / a follow-up RFC retires these by typing the
-   producers themselves; PR-3 keeps the table because every consumer of
-   the resulting disposition is now exhaustive on the typed value. *)
-let normalize_code = function
-  | "completed" -> "success"
-  | "completion_contract_violation:require_tool_use" -> "required_tool_use_unsatisfied"
-  | "api_error_timeout" -> "provider_error"
-  | code -> code
-;;
-
-let make ?(source = "typed") ?summary ?next_action code =
-  let normalised = normalize_code code in
-  let disposition = Keeper_turn_disposition.of_wire normalised in
+let make_from_disposition ?(source = "typed") ?summary ?next_action disposition =
   let summary =
     Option.value ~default:(Keeper_turn_disposition.summary disposition) summary
   in
@@ -61,6 +47,16 @@ let make ?(source = "typed") ?summary ?next_action code =
   ; summary
   ; next_action
   }
+;;
+
+let make ?(source = "typed") ?summary ?next_action code =
+  let disposition = Keeper_turn_disposition.of_wire code in
+  make_from_disposition ~source ?summary ?next_action disposition
+;;
+
+let of_disposition ?source ?summary ?next_action disposition =
+  let source = Option.value ~default:"typed" source in
+  make_from_disposition ~source ?summary ?next_action disposition
 ;;
 
 let success () = make ~source:"turn_result" "success"
@@ -106,10 +102,10 @@ let of_failure ?(post_commit_ambiguous = false) ?(tool_call_count = 0) ~raw_erro
   if post_commit_ambiguous
   then make ~source:"typed_error" "post_commit_ambiguous"
   else (
-    match Oas_worker_named.classify_masc_internal_error err with
-    | Some (Oas_worker_named.Oas_timeout_budget _) ->
+    match Keeper_turn_driver.classify_masc_internal_error err with
+    | Some (Keeper_turn_driver.Oas_timeout_budget _) ->
       make ~source:"typed_error" "oas_timeout_budget"
-    | Some (Oas_worker_named.Turn_timeout _) ->
+    | Some (Keeper_turn_driver.Turn_timeout _) ->
       make ~source:"typed_error" "turn_wall_clock_timeout"
     | _ ->
       (match err with
@@ -125,10 +121,16 @@ let of_failure ?(post_commit_ambiguous = false) ?(tool_call_count = 0) ~raw_erro
        | _ ->
          let fallback = of_legacy_error_text raw_error in
          if is_unknown_empty fallback
-         then
-           make
+         then (
+           (* RFC-0047 follow-up: emit typed [Provider_error (Sdk_error _)]
+              directly so [registry_failure_reason_of_terminal_reason] can
+              match exhaustively on disposition without a substring guard
+              for "api_error_*" wires. *)
+           let wire = Keeper_agent_error.terminal_reason_code_of_sdk_error err in
+           of_disposition
              ~source:"typed_error"
-             (Keeper_agent_error.terminal_reason_code_of_sdk_error err)
+             (Keeper_turn_disposition.Provider_error
+                (Keeper_turn_terminal_code.Sdk_error wire)))
          else fallback))
 ;;
 

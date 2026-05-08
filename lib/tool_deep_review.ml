@@ -25,7 +25,7 @@ module Float = Stdlib.Float
     This forces the reviewer to evaluate code structurally rather than
     relying on domain context that might mask bugs.
 
-    Uses the same [Oas_worker.run_named] pattern as {!Verifier_oas}. *)
+    Uses the same [Keeper_turn_driver.run_named] pattern as {!Verifier_oas}. *)
 
 open Printf
 
@@ -127,7 +127,7 @@ let handle_deep_review (config : Coord.config) args : bool * string =
         match
           Masc_oas_bridge.run_with_caller
             ~caller:Env_config_oas_bridge.Tool_deep_review (fun () ->
-            Oas_worker.run_named
+            Keeper_turn_driver.run_named
               ~cascade_name
               ~goal:prompt
               ~max_turns:1

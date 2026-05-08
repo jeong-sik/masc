@@ -1,4 +1,4 @@
-(** Oas_worker_named — MASC named-cascade and model-label execution entry points.
+(** Keeper_turn_driver — MASC named-cascade and model-label execution entry points.
 
     Public API for running OAS agents through MASC-managed named cascade
     profiles ([run_named])
@@ -201,7 +201,7 @@ let run_named
     ?net
     ?per_provider_timeout_s
     ()
-  : (Oas_worker_exec.run_result, Agent_sdk.Error.sdk_error) result =
+  : (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result =
   match require_eio ?sw ?net () with
   | Error e -> Error (eio_context_error_to_sdk_error e)
   | Ok (sw, net) ->
@@ -379,7 +379,7 @@ let run_named
      threads this checkpoint to the next provider without mutable state. *)
   let try_provider ?resume_checkpoint ?per_provider_timeout_s (provider_cfg : Llm_provider.Provider_config.t) =
     let config_result =
-      Oas_worker_exec.resolve_tool_lane_for_oas_tools
+      Cascade_runner.resolve_tool_lane_for_oas_tools
         ?agent_name:(keeper_agent_name_opt keeper_name)
         ~tool_requirement:
           (if require_tool_choice_support || require_tool_support
@@ -391,14 +391,14 @@ let run_named
              let runtime_mcp_policy =
                match runtime_mcp_policy, String.trim keeper_name with
                | Some policy, keeper_name when keeper_name <> "" ->
-                   Oas_worker_exec.runtime_mcp_policy_for_provider
+                   Cascade_runner.runtime_mcp_policy_for_provider
                      ~provider_cfg
                      ~agent_name:(Keeper_types.keeper_agent_name keeper_name)
                      (Some policy)
                 | _ -> runtime_mcp_policy
              in
              {
-               (Oas_worker_exec.default_config ~name ~provider_cfg
+               (Cascade_runner.default_config ~name ~provider_cfg
                   ~system_prompt ~tools:effective_tools)
                with
                  priority;
@@ -476,7 +476,7 @@ let run_named
          under the provider-attempt switch, and finalize the per-attempt
          outcome counter when the run returns. Enforce additionally calls
          [Eio.Switch.fail] on the first Outcome to tear down only the current
-         [Oas_worker_exec.run] attempt; the outer keeper/cascade switch must
+         [Cascade_runner.run] attempt; the outer keeper/cascade switch must
          stay alive so the FSM can fall through to the next provider. *)
       let liveness_mode = Cascade_attempt_liveness_config.current_mode () in
       let liveness_observer_opt =
@@ -565,7 +565,7 @@ let run_named
                      | None -> oas_checkpoint
                    in
                    let run_fn () =
-                     Oas_worker_exec.run ~sw:attempt_sw ~net ~config
+                     Cascade_runner.run ~sw:attempt_sw ~net ~config
                        ?oas_checkpoint:effective_checkpoint
                        ?on_event:liveness_on_event
                        ?on_yield ?on_resume ~agent_ref:local_agent_ref ?proof_ref
@@ -1281,7 +1281,7 @@ let run_model_by_label
     ?sw
     ?net
     ()
-  : (Oas_worker_exec.run_result, Agent_sdk.Error.sdk_error) result =
+  : (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result =
   let stream_idle_timeout_s = apply_stream_idle_timeout_default stream_idle_timeout_s in
   let* config =
     config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
@@ -1314,7 +1314,7 @@ let run_model_by_label
               ~scope:(Printf.sprintf "model_label:%s" model_label)
               ~config ~goal
               (fun () ->
-                match Oas_worker_exec.run ~sw ~net ~config ?on_event ?contract goal with
+                match Cascade_runner.run ~sw ~net ~config ?on_event ?contract goal with
                 | Ok result when accept result.response -> Ok result
                 | Ok result ->
                     Error
@@ -1369,7 +1369,7 @@ let run_named_with_masc_tools
     ?sw
     ?net
     ()
-  : (Oas_worker_exec.run_result, Agent_sdk.Error.sdk_error) result =
+  : (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result =
   let oas_tools = List.map (fun (td : Masc_domain.tool_schema) ->
     Tool_bridge.oas_tool_of_masc
       ~name:td.name ~description:td.description
@@ -1414,7 +1414,7 @@ let run_model_with_masc_tools
     ?sw
     ?net
     ()
-  : (Oas_worker_exec.run_result, Agent_sdk.Error.sdk_error) result =
+  : (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result =
   let stream_idle_timeout_s = apply_stream_idle_timeout_default stream_idle_timeout_s in
   let* config =
     config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
@@ -1445,7 +1445,7 @@ let run_model_with_masc_tools
               ~scope:(Printf.sprintf "explicit_model:%s" model_label)
               ~config ~goal
               (fun () ->
-                Oas_worker_exec.run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch ?contract ?on_event
+                Cascade_runner.run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch ?contract ?on_event
                   goal))
       with
       | Ok result -> result

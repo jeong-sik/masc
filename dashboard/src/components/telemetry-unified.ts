@@ -522,16 +522,14 @@ export function buildTelemetryDisplayItems(entries: TelemetryEntry[]): Telemetry
 function condensedStats(items: readonly TelemetryDisplayItem[]) {
   let groups = 0
   let groupedEntries = 0
-  let collapsedEntries = 0
   const byCategory = new Map<TelemetryCondensedCategory, number>()
   for (const item of items) {
     if (item.kind !== 'group') continue
     groups += 1
     groupedEntries += item.count
-    collapsedEntries += Math.max(0, item.count - 1)
     byCategory.set(item.category, (byCategory.get(item.category) ?? 0) + item.count)
   }
-  return { groups, groupedEntries, collapsedEntries, byCategory }
+  return { groups, groupedEntries, byCategory }
 }
 
 function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
@@ -881,10 +879,7 @@ export function TelemetryUnified() {
     <div class="flex flex-col gap-4">
       <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
         <div class="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">런타임 진단</div>
-        <div class="mt-1 text-base leading-relaxed text-[var(--color-fg-secondary)]">
-          MASC telemetry store (keeper/tool/agent) 진단 뷰.
-        </div>
-        <div class="mt-3 flex flex-wrap gap-2">
+        <div class="mt-2 flex flex-wrap gap-2">
           <span class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs text-[var(--color-fg-disabled)]">MASC: keeper/tool/agent store</span>
           ${sessionFilter.value ? html`<span class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs font-mono text-[var(--color-fg-disabled)]">session ${sessionFilter.value}</span>` : null}
           ${operationFilter.value ? html`<span class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs font-mono text-[var(--color-fg-disabled)]">operation ${operationFilter.value}</span>` : null}

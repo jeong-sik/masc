@@ -1,11 +1,11 @@
-(** Oas_worker_exec_agent — shared {!config} surface and agent
+(** Keeper_agent_context — shared {!config} surface and agent
     assembly helpers.
 
     Owns the shared per-worker {!config} record + pure / defaulted
     preparation logic shared by both
-    {!Oas_worker_exec.build} and
-    {!Oas_worker_exec.resume_from_checkpoint}.
-    {!Oas_worker_exec} remains the public facade and still
+    {!Cascade_runner.build} and
+    {!Cascade_runner.resume_from_checkpoint}.
+    {!Cascade_runner} remains the public facade and still
     performs the approval wiring and final
     [build_safe] / [Agent.resume] calls.
 
@@ -80,7 +80,7 @@ type config = {
     Cascade_transport.cli_transport_overrides option;
 }
 (** Per-worker configuration.  47 fields — concrete record because
-    callers ({!Oas_worker_exec}, keeper workers) construct + tweak
+    callers ({!Cascade_runner}, keeper workers) construct + tweak
     fields field-by-field at the dispatch site. *)
 
 (** {1 Default config builder} *)
@@ -108,7 +108,7 @@ val builder_without_approval :
 (** [builder_without_approval ~net ~config ?transport ()] builds an
     {!Agent_sdk.Builder.t} from [config] without wiring approval
     callbacks.  Approval wiring is the responsibility of the
-    public facade ({!Oas_worker_exec}) which adds the approval
+    public facade ({!Cascade_runner}) which adds the approval
     callback before calling [Builder.build_safe]. *)
 
 (** {1 Resume preparation} *)

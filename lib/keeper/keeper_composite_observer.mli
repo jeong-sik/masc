@@ -28,7 +28,7 @@ type turn_phase = Keeper_registry.turn_phase =
   | Turn_finalizing
   | Turn_exhausted
 
-val all_turn_phases : turn_phase list
+val all_turn_phases : Keeper_registry.packed_turn_phase list
 
 type decision_stage = Keeper_registry.decision_stage =
   | Decision_undecided
@@ -36,7 +36,7 @@ type decision_stage = Keeper_registry.decision_stage =
   | Decision_gate_rejected
   | Decision_tool_policy_selected
 
-val all_decision_stages : decision_stage list
+val all_decision_stages : Keeper_registry.packed_decision_stage list
 
 type cascade_state = Keeper_registry.cascade_state =
   | Cascade_idle
@@ -45,14 +45,14 @@ type cascade_state = Keeper_registry.cascade_state =
   | Cascade_done
   | Cascade_exhausted
 
-val all_cascade_states : cascade_state list
+val all_cascade_states : Keeper_registry.packed_cascade_state list
 
 type compaction_stage = Keeper_registry.compaction_stage =
   | Compaction_accumulating
   | Compaction_compacting
   | Compaction_done
 
-val all_compaction_stages : compaction_stage list
+val all_compaction_stages : Keeper_registry.packed_compaction_stage list
 
 (** Named TLA actions mirrored as OCaml variants so the observer contract
     can stay 1:1 with [KeeperCompositeLifecycle.tla]. *)
@@ -121,17 +121,17 @@ val bump_invariant_violations :
     when KSM is in [Compacting], the turn phase must also be
     [Turn_compacting]; conversely no other KSM phase may carry a live
     [Turn_compacting]. *)
-val check_phase_turn_alignment : Keeper_state_machine.phase -> turn_phase -> bool
+val check_phase_turn_alignment : Keeper_state_machine.phase -> Keeper_registry.packed_turn_phase -> bool
 
 (** Mirror of TLA+ I3 [CompactionAtomicity] (KeeperCompositeLifecycle.tla:368):
     [(kmc_compaction = compacting) <=> (phase = Compacting)]. *)
-val check_compaction_atomicity : Keeper_state_machine.phase -> compaction_stage -> bool
+val check_compaction_atomicity : Keeper_state_machine.phase -> Keeper_registry.packed_compaction_stage -> bool
 
 (** Mirror of TLA+ I2 [NoCascadeBeforeMeasurement]
     (KeeperCompositeLifecycle.tla:361): cascade selection past [idle]
     requires a captured measurement. *)
 val check_no_cascade_before_measurement :
-  cascade_state:cascade_state -> measurement_captured:bool -> bool
+  cascade_state:Keeper_registry.packed_cascade_state -> measurement_captured:bool -> bool
 
 val check_phase_derivation_agreement :
   Keeper_registry.registry_entry -> bool
@@ -161,8 +161,8 @@ val check_event_priority_monotone_pure : event_priority_state -> bool
 type last_outcome = {
   turn_id : int;
   ended_at : float;
-  decision_stage : decision_stage;
-  cascade_state : cascade_state;
+  decision_stage : Keeper_registry.packed_decision_stage;
+  cascade_state : Keeper_registry.packed_cascade_state;
   selected_model : string option;
 }
 
@@ -180,10 +180,10 @@ type snapshot = {
           so the fleet matrix renders every state with its own chip colour.
           The 12-state alphabet matches
           [specs/keeper-state-machine/KeeperStateMachine.tla] exactly. *)
-  ktc_turn_phase : turn_phase;
-  kdp_decision : decision_stage;
-  kcl_cascade_state : cascade_state;
-  kmc_compaction : compaction_stage;
+  ktc_turn_phase : Keeper_registry.packed_turn_phase;
+  kdp_decision : Keeper_registry.packed_decision_stage;
+  kcl_cascade_state : Keeper_registry.packed_cascade_state;
+  kmc_compaction : Keeper_registry.packed_compaction_stage;
   kcb_state : Keeper_failure_circuit_breaker.display_state;
       (** 6th axis (LT-16-KCB). Observable circuit-breaker state —
           never [Tripped] because the mutator resets [consecutive_count]
@@ -257,19 +257,19 @@ val observe :
     (LT-16a). Preserves registry iteration order. *)
 val all_snapshots : base_path:string -> unit -> snapshot list
 
-val turn_phase_to_string : turn_phase -> string
+val turn_phase_to_string : Keeper_registry.packed_turn_phase -> string
 val turn_phase_of_string : string -> turn_phase option
 
 (** Stringify [decision_stage]. Mirrors KeeperDecisionPipeline.tla. *)
-val decision_stage_to_string : decision_stage -> string
+val decision_stage_to_string : Keeper_registry.packed_decision_stage -> string
 val decision_stage_of_string : string -> decision_stage option
 
 (** Stringify [cascade_state]. Mirrors KeeperCascadeLifecycle.tla. *)
-val cascade_state_to_string : cascade_state -> string
+val cascade_state_to_string : Keeper_registry.packed_cascade_state -> string
 val cascade_state_of_string : string -> cascade_state option
 
 (** Stringify [compaction_stage]. Mirrors KeeperCompactionLifecycle.tla. *)
-val compaction_stage_to_string : compaction_stage -> string
+val compaction_stage_to_string : Keeper_registry.packed_compaction_stage -> string
 val compaction_stage_of_string : string -> compaction_stage option
 
 val tla_action_to_string : tla_action -> string

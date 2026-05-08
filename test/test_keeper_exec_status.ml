@@ -8,7 +8,7 @@ module KT = Masc_mcp.Keeper_types
 module KMP = Masc_mcp.Keeper_memory_policy
 module KTS = Masc_mcp.Keeper_types_support
 module Coord = Masc_mcp.Coord
-module OWN = Masc_mcp.Oas_worker_named
+module OWN = Masc_mcp.Keeper_turn_driver
 module Prom = Masc_mcp.Prometheus
 
 let keeper_health_testable : KT.keeper_health Alcotest.testable =
@@ -666,7 +666,7 @@ let test_runtime_surface_exposes_redacted_resumable_cli_session_blocker () =
   KR.clear ();
   let base = make_meta ~name:"runtime-resumable-cli-session-test" () in
   let reason =
-    Masc_mcp.Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail
+    Masc_mcp.Cascade_runner.Kimi_cli_transport_local.resumable_session_detail
   in
   let meta =
     {

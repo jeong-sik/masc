@@ -40,6 +40,18 @@ val severity_to_string : severity -> string
 val success : unit -> t
 val of_code : ?source:string -> ?summary:string -> ?next_action:string -> string -> t
 
+(** Typed constructor. Skips the wire→[Keeper_turn_disposition.t]
+    decode step that [of_code] performs; useful for producers that
+    have already committed to a typed disposition (e.g. wrapping an
+    SDK error code as [Provider_error (Sdk_error _)] without losing
+    the typed identity in an [Unknown { raw_error = _ }] fallback). *)
+val of_disposition
+  :  ?source:string
+  -> ?summary:string
+  -> ?next_action:string
+  -> Keeper_turn_disposition.t
+  -> t
+
 val of_failure
   :  ?post_commit_ambiguous:bool
   -> ?tool_call_count:int

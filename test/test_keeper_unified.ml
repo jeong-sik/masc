@@ -20,11 +20,11 @@ module AE = Masc_mcp.Agent_economy
 module KC = Masc_mcp.Keeper_config
 module HK = Masc_mcp.Keeper_hooks_oas
 module KG = Masc_mcp.Keeper_guards
-module OMR = Masc_mcp.Oas_model_resolve
+module OMR = Masc_mcp.Cascade_runtime
 module AQ = Masc_mcp.Keeper_approval_queue
 module Keeper_types = Masc_mcp.Keeper_types
 
-let oas_error_cascade_name = Masc_mcp.Oas_worker_named.cascade_name_of_string
+let oas_error_cascade_name = Masc_mcp.Keeper_turn_driver.cascade_name_of_string
 
 let has_prompt_root path =
   Sys.file_exists (Filename.concat path "config/prompts/keeper.unified.system.md")
@@ -2586,7 +2586,7 @@ let test_metrics_surface_model_prefers_successful_cascade_label () =
       ~model:"qwen3.5:27b-nvfp4" ~input_tok:100 ~output_tok:50
       ~cascade_observation:
         {
-          Masc_mcp.Oas_worker.cascade_name =
+          Masc_mcp.Cascade_legacy_runner.cascade_name =
             Masc_mcp.Keeper_cascade_profile.Runtime_name
               Masc_mcp.Keeper_config.default_cascade_name;
           strategy = Some "round_robin";
@@ -2602,7 +2602,7 @@ let test_metrics_surface_model_prefers_successful_cascade_label () =
           attempts =
             [
               {
-                Masc_mcp.Oas_worker.attempt_index = 0;
+                Masc_mcp.Cascade_legacy_runner.attempt_index = 0;
                 model_id = "qwen3.5-35b-a3b-ud-q8-xl";
                 model_label = Some "llama:qwen3.5-35b-a3b-ud-q8-xl";
                 latency_ms = None;
@@ -2650,7 +2650,7 @@ let test_metrics_resolved_model_id_prefers_last_attempt_id () =
       ~model:"claude-opus-4-6" ~input_tok:100 ~output_tok:50
       ~cascade_observation:
         {
-          Masc_mcp.Oas_worker.cascade_name =
+          Masc_mcp.Cascade_legacy_runner.cascade_name =
             Masc_mcp.Keeper_cascade_profile.Runtime_name
               Masc_mcp.Keeper_config.default_cascade_name;
           strategy = Some "round_robin";
@@ -2666,7 +2666,7 @@ let test_metrics_resolved_model_id_prefers_last_attempt_id () =
           attempts =
             [
               {
-                Masc_mcp.Oas_worker.attempt_index = 0;
+                Masc_mcp.Cascade_legacy_runner.attempt_index = 0;
                 model_id = "claude-sonnet-4-6";
                 model_label = Some "claude_code:auto";
                 latency_ms = None;
@@ -3060,7 +3060,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
           cascade_observation =
             Some
               {
-                Masc_mcp.Oas_worker.cascade_name =
+                Masc_mcp.Cascade_legacy_runner.cascade_name =
                   Masc_mcp.Keeper_cascade_profile.Runtime_name
                     Masc_mcp.Keeper_config.default_cascade_name;
                 strategy = Some "round_robin";
@@ -3079,7 +3079,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
                 attempts =
                   [
                     {
-                      Masc_mcp.Oas_worker.attempt_index = 0;
+                      Masc_mcp.Cascade_legacy_runner.attempt_index = 0;
                       model_id = "qwen3.5-35b-a3b-ud-q8-xl";
                       model_label = Some "llama:qwen3.5-35b-a3b-ud-q8-xl";
                       latency_ms = None;
@@ -4621,8 +4621,8 @@ let wrapped_claude_max_turns_error () =
        })
 
 let wrapped_cascade_max_turns_error () =
-  Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-    (Masc_mcp.Oas_worker_named.Cascade_exhausted
+  Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+    (Masc_mcp.Keeper_turn_driver.Cascade_exhausted
        {
          cascade_name =
            oas_error_cascade_name Masc_mcp.Keeper_config.default_cascade_name;
@@ -4659,8 +4659,8 @@ let test_degraded_retry_after_recoverable_error_uses_local_recovery_for_resumabl
     EC.degraded_retry_after_recoverable_error
       ~effective_cascade:"underdog"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      (Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-         (Masc_mcp.Oas_worker_named.Resumable_cli_session
+      (Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+         (Masc_mcp.Keeper_turn_driver.Resumable_cli_session
             {
               cascade_name = oas_error_cascade_name "kimi_cli_keeper";
               detail =
@@ -4676,8 +4676,8 @@ let test_degraded_retry_after_recoverable_error_includes_admission_queue_timeout
     EC.degraded_retry_after_recoverable_error
       ~effective_cascade:"underdog"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      (Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-         (Masc_mcp.Oas_worker_named.Admission_queue_timeout
+      (Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+         (Masc_mcp.Keeper_turn_driver.Admission_queue_timeout
             {
               keeper_name = "nick0cave";
               cascade_name = oas_error_cascade_name "big_three";
@@ -4692,8 +4692,8 @@ let test_degraded_retry_after_recoverable_error_includes_turn_timeout () =
     EC.degraded_retry_after_recoverable_error
       ~effective_cascade:"underdog"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      (Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-         (Masc_mcp.Oas_worker_named.Turn_timeout { elapsed_sec = 180.0 }))
+      (Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+         (Masc_mcp.Keeper_turn_driver.Turn_timeout { elapsed_sec = 180.0 }))
   in
   expect_degraded_retry "turn timeout degraded retry"
     KC.local_recovery_cascade_name "turn_timeout" degraded_retry
@@ -4703,8 +4703,8 @@ let test_degraded_retry_after_recoverable_error_includes_oas_timeout_budget () =
     EC.degraded_retry_after_recoverable_error
       ~effective_cascade:"underdog"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      (Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-         (Masc_mcp.Oas_worker_named.Oas_timeout_budget
+      (Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+         (Masc_mcp.Keeper_turn_driver.Oas_timeout_budget
             {
               budget_sec = 273.0;
               keeper_turn_timeout_sec = 1200.0;
@@ -5251,8 +5251,8 @@ let test_metrics_failure_response () =
 
 let test_metrics_failure_timeout_increments_proactive_backoff () =
   let sdk_error =
-    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-      (Masc_mcp.Oas_worker_named.Oas_timeout_budget
+    Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+      (Masc_mcp.Keeper_turn_driver.Oas_timeout_budget
          {
            budget_sec = 90.0;
            keeper_turn_timeout_sec = 90.0;
@@ -5278,11 +5278,11 @@ let test_metrics_failure_response_redacts_resumable_cli_session_detail () =
     "kimi exited with code 75: \nTo resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc"
   in
   let canonical_detail =
-    Masc_mcp.Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail
+    Masc_mcp.Cascade_runner.Kimi_cli_transport_local.resumable_session_detail
   in
   let sdk_error =
-    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-      (Masc_mcp.Oas_worker_named.Resumable_cli_session
+    Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+      (Masc_mcp.Keeper_turn_driver.Resumable_cli_session
          {
            cascade_name = oas_error_cascade_name "kimi_cli_keeper";
            detail = canonical_detail;
@@ -5777,8 +5777,8 @@ let test_should_cap_rotation_ignores_non_contract_violation_error () =
 
 let test_cascade_exhausted_error_detected_from_structured_internal_error () =
   let err =
-    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-      (Masc_mcp.Oas_worker_named.Cascade_exhausted
+    Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+      (Masc_mcp.Keeper_turn_driver.Cascade_exhausted
          {
            cascade_name =
              oas_error_cascade_name Masc_mcp.Keeper_config.default_cascade_name;
@@ -5819,8 +5819,8 @@ let test_auto_recoverable_turn_error_excludes_persistent_errors () =
 
 let test_auto_recoverable_turn_error_includes_wrapped_cascade_exhausted_hard_quota () =
   let err =
-    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-      (Masc_mcp.Oas_worker_named.Cascade_exhausted
+    Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+      (Masc_mcp.Keeper_turn_driver.Cascade_exhausted
          {
            cascade_name =
              oas_error_cascade_name Masc_mcp.Keeper_config.default_cascade_name;
@@ -5838,8 +5838,8 @@ let test_auto_recoverable_turn_error_includes_wrapped_cascade_max_turns () =
 
 let test_auto_recoverable_turn_error_includes_filtered_candidates_cascade_exhaustion () =
   let err =
-    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-      (Masc_mcp.Oas_worker_named.Cascade_exhausted
+    Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+      (Masc_mcp.Keeper_turn_driver.Cascade_exhausted
          {
            cascade_name =
              oas_error_cascade_name Masc_mcp.Keeper_config.default_cascade_name;
@@ -5851,12 +5851,12 @@ let test_auto_recoverable_turn_error_includes_filtered_candidates_cascade_exhaus
 
 let test_auto_recoverable_turn_error_includes_resumable_cli_session_error () =
   let err =
-    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-      (Masc_mcp.Oas_worker_named.Resumable_cli_session
+    Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+      (Masc_mcp.Keeper_turn_driver.Resumable_cli_session
          {
            cascade_name = oas_error_cascade_name "kimi_cli_keeper";
            detail =
-             Masc_mcp.Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail;
+             Masc_mcp.Cascade_runner.Kimi_cli_transport_local.resumable_session_detail;
            exit_code = Some 75;
          })
   in
@@ -5865,12 +5865,12 @@ let test_auto_recoverable_turn_error_includes_resumable_cli_session_error () =
 
 let test_cascade_exhausted_error_includes_resumable_cli_session_error () =
   let err =
-    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-      (Masc_mcp.Oas_worker_named.Resumable_cli_session
+    Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+      (Masc_mcp.Keeper_turn_driver.Resumable_cli_session
          {
            cascade_name = oas_error_cascade_name "kimi_cli_keeper";
            detail =
-             Masc_mcp.Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail;
+             Masc_mcp.Cascade_runner.Kimi_cli_transport_local.resumable_session_detail;
            exit_code = Some 75;
          })
   in
@@ -6031,9 +6031,9 @@ let test_oas_timeout_reclassifies_only_current_attempt_budget () =
           err
       in
       (match
-         Masc_mcp.Oas_worker_named.classify_masc_internal_error classified
+         Masc_mcp.Keeper_turn_driver.classify_masc_internal_error classified
        with
-       | Some (Masc_mcp.Oas_worker_named.Oas_timeout_budget budget) ->
+       | Some (Masc_mcp.Keeper_turn_driver.Oas_timeout_budget budget) ->
            check int "estimated tokens preserved" 2_000
              budget.estimated_input_tokens;
            check string "source preserved" timeout_budget.source budget.source;
@@ -6057,11 +6057,11 @@ let test_pre_retry_timeout_helper_does_not_reuse_stale_budget () =
   in
   check bool "plain helper call without budget stays raw timeout" true
     (Option.is_none
-       (Masc_mcp.Oas_worker_named.classify_masc_internal_error classified))
+       (Masc_mcp.Keeper_turn_driver.classify_masc_internal_error classified))
 
 let oas_timeout_budget_error () =
-  Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-    (Masc_mcp.Oas_worker_named.Oas_timeout_budget
+  Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+    (Masc_mcp.Keeper_turn_driver.Oas_timeout_budget
        {
          budget_sec = 273.0;
          keeper_turn_timeout_sec = 1200.0;

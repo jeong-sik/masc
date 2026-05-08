@@ -1,4 +1,4 @@
-(** Oas_events — MASC Event_bus publishers for runtime / social
+(** Cascade_events — MASC Event_bus publishers for runtime / social
     events.
 
     Publishes MASC coordination events (broadcasts, heartbeats,

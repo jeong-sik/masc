@@ -146,51 +146,51 @@ let is_required_tool_contract_violation (err : Agent_sdk.Error.sdk_error) : bool
   | Agent_sdk.Error.Internal _ -> false
 
 let is_auto_recoverable_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
-  match Oas_worker_named.classify_masc_internal_error err with
+  match Keeper_turn_driver.classify_masc_internal_error err with
   | Some
-      (Oas_worker_named.Cascade_exhausted
+      (Keeper_turn_driver.Cascade_exhausted
          { reason = Keeper_types.Candidates_filtered_after_cycles; _ }) ->
       true
   | Some
-      (Oas_worker_named.Cascade_exhausted
+      (Keeper_turn_driver.Cascade_exhausted
          { reason = Keeper_types.Max_turns_exceeded; _ }) ->
       true
   | Some
-      (Oas_worker_named.Cascade_exhausted
+      (Keeper_turn_driver.Cascade_exhausted
          { reason = Keeper_types.Other_detail detail; _ }) ->
-      Oas_worker_named.message_looks_like_cli_wrapped_hard_quota detail
-      || Oas_worker_named.message_looks_like_cli_wrapped_max_turns detail
-  | Some (Oas_worker_named.Cascade_exhausted _) ->
+      Keeper_turn_driver.message_looks_like_cli_wrapped_hard_quota detail
+      || Keeper_turn_driver.message_looks_like_cli_wrapped_max_turns detail
+  | Some (Keeper_turn_driver.Cascade_exhausted _) ->
       false
-  | Some (Oas_worker_named.No_tool_capable_provider _)
-  | Some (Oas_worker_named.Accept_rejected _)
-  | Some (Oas_worker_named.Resumable_cli_session _)
-  | Some (Oas_worker_named.Admission_queue_rejected _)
-  | Some (Oas_worker_named.Admission_queue_timeout _)
-  | Some (Oas_worker_named.Turn_timeout _)
-  | Some (Oas_worker_named.Oas_timeout_budget _)
-  | Some (Oas_worker_named.Ambiguous_post_commit _)
+  | Some (Keeper_turn_driver.No_tool_capable_provider _)
+  | Some (Keeper_turn_driver.Accept_rejected _)
+  | Some (Keeper_turn_driver.Resumable_cli_session _)
+  | Some (Keeper_turn_driver.Admission_queue_rejected _)
+  | Some (Keeper_turn_driver.Admission_queue_timeout _)
+  | Some (Keeper_turn_driver.Turn_timeout _)
+  | Some (Keeper_turn_driver.Oas_timeout_budget _)
+  | Some (Keeper_turn_driver.Ambiguous_post_commit _)
   | None ->
       false
 
 let is_resumable_cli_session_error (err : Agent_sdk.Error.sdk_error) : bool =
-  match Oas_worker_named.classify_masc_internal_error err with
-  | Some (Oas_worker_named.Resumable_cli_session _) -> true
-  | Some (Oas_worker_named.Cascade_exhausted _)
-  | Some (Oas_worker_named.No_tool_capable_provider _)
-  | Some (Oas_worker_named.Accept_rejected _)
-  | Some (Oas_worker_named.Admission_queue_timeout _)
-  | Some (Oas_worker_named.Admission_queue_rejected _)
-  | Some (Oas_worker_named.Turn_timeout _)
-  | Some (Oas_worker_named.Oas_timeout_budget _)
-  | Some (Oas_worker_named.Ambiguous_post_commit _)
+  match Keeper_turn_driver.classify_masc_internal_error err with
+  | Some (Keeper_turn_driver.Resumable_cli_session _) -> true
+  | Some (Keeper_turn_driver.Cascade_exhausted _)
+  | Some (Keeper_turn_driver.No_tool_capable_provider _)
+  | Some (Keeper_turn_driver.Accept_rejected _)
+  | Some (Keeper_turn_driver.Admission_queue_timeout _)
+  | Some (Keeper_turn_driver.Admission_queue_rejected _)
+  | Some (Keeper_turn_driver.Turn_timeout _)
+  | Some (Keeper_turn_driver.Oas_timeout_budget _)
+  | Some (Keeper_turn_driver.Ambiguous_post_commit _)
   | None ->
       false
 
 let is_auto_recoverable_cascade_fail_open_error
     (err : Agent_sdk.Error.sdk_error) : bool =
-  Oas_worker_named.sdk_error_is_hard_quota err
-  || Oas_worker_named.sdk_error_is_max_turns_exceeded err
+  Keeper_turn_driver.sdk_error_is_hard_quota err
+  || Keeper_turn_driver.sdk_error_is_max_turns_exceeded err
   || is_resumable_cli_session_error err
   || is_auto_recoverable_cascade_exhausted_error err
 
@@ -235,72 +235,72 @@ let degraded_retry_after_recoverable_error
      || String.equal normalized_effective
           Keeper_config.local_recovery_cascade_name
   then None
-  else if Oas_worker_named.sdk_error_is_hard_quota err then
+  else if Keeper_turn_driver.sdk_error_is_hard_quota err then
     local_recovery_retry "hard_quota"
-  else if Oas_worker_named.sdk_error_is_max_turns_exceeded err then
+  else if Keeper_turn_driver.sdk_error_is_max_turns_exceeded err then
     local_recovery_retry "max_turns"
   else
-    match Oas_worker_named.classify_masc_internal_error err with
-    | Some (Oas_worker_named.Resumable_cli_session _) ->
+    match Keeper_turn_driver.classify_masc_internal_error err with
+    | Some (Keeper_turn_driver.Resumable_cli_session _) ->
         local_recovery_retry "resumable_cli_session"
-    | Some (Oas_worker_named.Admission_queue_timeout _) ->
+    | Some (Keeper_turn_driver.Admission_queue_timeout _) ->
         local_recovery_retry "admission_queue_timeout"
-    | Some (Oas_worker_named.Oas_timeout_budget _) ->
+    | Some (Keeper_turn_driver.Oas_timeout_budget _) ->
         local_recovery_retry "oas_timeout_budget"
-    | Some (Oas_worker_named.Turn_timeout _) ->
+    | Some (Keeper_turn_driver.Turn_timeout _) ->
         local_recovery_retry "turn_timeout"
     | Some
-        (Oas_worker_named.Cascade_exhausted
+        (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Candidates_filtered_after_cycles; _ }) ->
         local_recovery_retry "cascade_candidates_filtered"
     | Some
-        (Oas_worker_named.Cascade_exhausted
+        (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Max_turns_exceeded; _ }) ->
         local_recovery_retry "max_turns"
     | Some
-        (Oas_worker_named.Cascade_exhausted
+        (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Other_detail detail; _ })
-      when Oas_worker_named.message_looks_like_cli_wrapped_hard_quota detail ->
+      when Keeper_turn_driver.message_looks_like_cli_wrapped_hard_quota detail ->
         local_recovery_retry "hard_quota"
-    | Some (Oas_worker_named.Cascade_exhausted _)
-    | Some (Oas_worker_named.No_tool_capable_provider _)
-    | Some (Oas_worker_named.Accept_rejected _)
-    | Some (Oas_worker_named.Admission_queue_rejected _)
-    | Some (Oas_worker_named.Ambiguous_post_commit _)
+    | Some (Keeper_turn_driver.Cascade_exhausted _)
+    | Some (Keeper_turn_driver.No_tool_capable_provider _)
+    | Some (Keeper_turn_driver.Accept_rejected _)
+    | Some (Keeper_turn_driver.Admission_queue_rejected _)
+    | Some (Keeper_turn_driver.Ambiguous_post_commit _)
     | None ->
         None
 
 let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
   if is_required_tool_contract_violation err then
     Some "required_tool_contract_violation"
-  else if Oas_worker_named.sdk_error_is_hard_quota err then
+  else if Keeper_turn_driver.sdk_error_is_hard_quota err then
     Some "hard_quota"
-  else if Oas_worker_named.sdk_error_is_max_turns_exceeded err then
+  else if Keeper_turn_driver.sdk_error_is_max_turns_exceeded err then
     Some "max_turns"
   else
-    match Oas_worker_named.classify_masc_internal_error err with
-    | Some (Oas_worker_named.Resumable_cli_session _) ->
+    match Keeper_turn_driver.classify_masc_internal_error err with
+    | Some (Keeper_turn_driver.Resumable_cli_session _) ->
         Some "resumable_cli_session"
-    | Some (Oas_worker_named.Admission_queue_timeout _) ->
+    | Some (Keeper_turn_driver.Admission_queue_timeout _) ->
         Some "admission_queue_timeout"
-    | Some (Oas_worker_named.Oas_timeout_budget _) ->
+    | Some (Keeper_turn_driver.Oas_timeout_budget _) ->
         Some "oas_timeout_budget"
-    | Some (Oas_worker_named.Turn_timeout _) ->
+    | Some (Keeper_turn_driver.Turn_timeout _) ->
         Some "turn_timeout"
     | Some
-        (Oas_worker_named.Cascade_exhausted
+        (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Candidates_filtered_after_cycles; _ }) ->
         Some "cascade_candidates_filtered"
     | Some
-        (Oas_worker_named.Cascade_exhausted
+        (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Max_turns_exceeded; _ }) ->
         Some "max_turns"
     | Some
-        (Oas_worker_named.Cascade_exhausted
+        (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Other_detail detail; _ })
-      when Oas_worker_named.message_looks_like_cli_wrapped_hard_quota detail ->
+      when Keeper_turn_driver.message_looks_like_cli_wrapped_hard_quota detail ->
         Some "hard_quota"
-    | Some (Oas_worker_named.Cascade_exhausted _) ->
+    | Some (Keeper_turn_driver.Cascade_exhausted _) ->
         (* Generic cascade exhaustion: all candidates failed without a more
            specific reason. Treat as recoverable so declarative
            [fallback_cascade] hints declared in cascade.toml actually
@@ -309,10 +309,10 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
            arm previously returned [None]. Other arms below remain
            non-recoverable to keep the surface conservative. *)
         Some "cascade_exhausted"
-    | Some (Oas_worker_named.No_tool_capable_provider _)
-    | Some (Oas_worker_named.Accept_rejected _)
-    | Some (Oas_worker_named.Admission_queue_rejected _)
-    | Some (Oas_worker_named.Ambiguous_post_commit _) ->
+    | Some (Keeper_turn_driver.No_tool_capable_provider _)
+    | Some (Keeper_turn_driver.Accept_rejected _)
+    | Some (Keeper_turn_driver.Admission_queue_rejected _)
+    | Some (Keeper_turn_driver.Ambiguous_post_commit _) ->
         None
     | None ->
         (* Status-code-aware cascade rotation: raw provider API errors that are
@@ -481,7 +481,7 @@ let degraded_rotation_after_recoverable_error
 let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
   is_transient_network_error err
   || is_server_rejected_parse_error err
-  || Oas_worker_named.sdk_error_is_max_turns_exceeded err
+  || Keeper_turn_driver.sdk_error_is_max_turns_exceeded err
   || is_resumable_cli_session_error err
   || is_auto_recoverable_cascade_exhausted_error err
 
@@ -494,8 +494,8 @@ let committed_mutating_tools tool_names =
   |> List.filter Keeper_exec_tools.has_mutating_side_effect
 
 let is_ambiguous_side_effect_error (err : Agent_sdk.Error.sdk_error) : bool =
-  match Oas_worker_named.classify_masc_internal_error err with
-  | Some (Oas_worker_named.Ambiguous_post_commit _) -> true
+  match Keeper_turn_driver.classify_masc_internal_error err with
+  | Some (Keeper_turn_driver.Ambiguous_post_commit _) -> true
   | None -> (
       match err with
       | Agent_sdk.Error.Internal msg ->
@@ -513,14 +513,14 @@ let is_ambiguous_side_effect_error (err : Agent_sdk.Error.sdk_error) : bool =
       | Agent_sdk.Error.Orchestration _
       | Agent_sdk.Error.A2a _ -> false)
   (* All other MASC-internal classifications are unambiguous failures. *)
-  | Some (Oas_worker_named.Cascade_exhausted _)
-  | Some (Oas_worker_named.No_tool_capable_provider _)
-  | Some (Oas_worker_named.Accept_rejected _)
-  | Some (Oas_worker_named.Resumable_cli_session _)
-  | Some (Oas_worker_named.Admission_queue_rejected _)
-  | Some (Oas_worker_named.Admission_queue_timeout _)
-  | Some (Oas_worker_named.Turn_timeout _)
-  | Some (Oas_worker_named.Oas_timeout_budget _) -> false
+  | Some (Keeper_turn_driver.Cascade_exhausted _)
+  | Some (Keeper_turn_driver.No_tool_capable_provider _)
+  | Some (Keeper_turn_driver.Accept_rejected _)
+  | Some (Keeper_turn_driver.Resumable_cli_session _)
+  | Some (Keeper_turn_driver.Admission_queue_rejected _)
+  | Some (Keeper_turn_driver.Admission_queue_timeout _)
+  | Some (Keeper_turn_driver.Turn_timeout _)
+  | Some (Keeper_turn_driver.Oas_timeout_budget _) -> false
 
 let reclassify_error_after_side_effect
     ~(tool_names : string list)
@@ -550,8 +550,8 @@ let reclassify_error_after_side_effect
       | Agent_sdk.Error.A2a _
       | Agent_sdk.Error.Internal _ -> false
     in
-    Oas_worker_named.sdk_error_of_masc_internal_error
-      (Oas_worker_named.Ambiguous_post_commit
+    Keeper_turn_driver.sdk_error_of_masc_internal_error
+      (Keeper_turn_driver.Ambiguous_post_commit
          { is_timeout; tools; original_error = original })
 
 let post_commit_failure_kind_of_error (err : Agent_sdk.Error.sdk_error) =
@@ -674,16 +674,16 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
 (** [true] when an error represents terminal cascade exhaustion or a
     final accept-rejected result from the MASC OAS boundary. *)
 let is_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
-  match Oas_worker_named.classify_masc_internal_error err with
-  | Some (Oas_worker_named.Cascade_exhausted _)
-  | Some (Oas_worker_named.Resumable_cli_session _)
-  | Some (Oas_worker_named.No_tool_capable_provider _)
-  | Some (Oas_worker_named.Accept_rejected _) -> true
-  | Some (Oas_worker_named.Admission_queue_timeout _)
-  | Some (Oas_worker_named.Admission_queue_rejected _)
-  | Some (Oas_worker_named.Oas_timeout_budget _)
-  | Some (Oas_worker_named.Turn_timeout _)
-  | Some (Oas_worker_named.Ambiguous_post_commit _) -> false
+  match Keeper_turn_driver.classify_masc_internal_error err with
+  | Some (Keeper_turn_driver.Cascade_exhausted _)
+  | Some (Keeper_turn_driver.Resumable_cli_session _)
+  | Some (Keeper_turn_driver.No_tool_capable_provider _)
+  | Some (Keeper_turn_driver.Accept_rejected _) -> true
+  | Some (Keeper_turn_driver.Admission_queue_timeout _)
+  | Some (Keeper_turn_driver.Admission_queue_rejected _)
+  | Some (Keeper_turn_driver.Oas_timeout_budget _)
+  | Some (Keeper_turn_driver.Turn_timeout _)
+  | Some (Keeper_turn_driver.Ambiguous_post_commit _) -> false
   | None -> false
 
 (** [true] when the rotation-cap fast-fail should fire for a

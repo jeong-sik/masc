@@ -174,7 +174,7 @@ let publish_lifecycle
   Keeper_lifecycle_audit.record ~keeper_name ~event_name ~phase ~detail;
   match Keeper_keepalive.get_bus () with
   | Some bus ->
-      Oas_events.publish_keeper_lifecycle bus ~event ~keeper_name ~detail ()
+      Cascade_events.publish_keeper_lifecycle bus ~event ~keeper_name ~detail ()
   | None -> ()
 
 (** Phase-event helper: the wire event name IS the phase name. *)
@@ -1496,6 +1496,20 @@ let sweep_and_recover (ctx : _ context) =
     Keeper_registry.dispatch_event_unit ~base_path entry.name
       Keeper_state_machine.Restart_budget_exhausted;
     Keeper_registry.mark_dead ~base_path entry.name ~at:now;
+    (* Task release: Dead keepers cannot make progress on claimed tasks.
+       Without this release, current_task_id stays claimed forever —
+       the task is invisible to peers while this keeper is permanently
+       stopped.  Mirrors handle_crash_auto_pause (line 1163). *)
+    (match entry.meta.current_task_id with
+     | Some _ ->
+         (match read_meta ctx.config entry.name with
+          | Ok (Some meta) ->
+              ignore (write_meta_with_merge
+                ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+                ctx.config
+                { meta with current_task_id = None })
+          | _ -> ())
+     | None -> ());
     let detail =
       Printf.sprintf "restart budget exhausted (%d), last: %s"
         max_restarts msg
@@ -1512,7 +1526,7 @@ let sweep_and_recover (ctx : _ context) =
     in
     (match Keeper_keepalive.get_bus () with
      | Some bus ->
-         Oas_events.publish_keeper_dead bus
+         Cascade_events.publish_keeper_dead bus
            ~keeper_name:entry.name
            ~reason:msg
            ~restart_count:entry.restart_count

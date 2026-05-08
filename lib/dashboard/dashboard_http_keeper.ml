@@ -283,12 +283,21 @@ let keeper_trust_json ?(include_receipt = false)
     | None -> `Assoc [ ("profile", `Null); ("derived", `Bool false) ]
   in
   let cascade_json =
+    let cascade_ref_json =
+      match meta.cascade_ref with
+      | Some ref_ -> Cascade_ref.cascade_ref_to_json ref_
+      | None -> `Null
+    in
     match latest_receipt with
-    | Some receipt -> Yojson.Safe.Util.member "cascade" receipt
+    | Some receipt ->
+      (match Yojson.Safe.Util.member "cascade" receipt with
+       | `Assoc fields -> `Assoc (("cascade_ref", cascade_ref_json) :: fields)
+       | other -> other)
     | None ->
       `Assoc
         [
           ("name", `String meta.cascade_name);
+          ("cascade_ref", cascade_ref_json);
           ("selected_model", `Null);
           ("attempt_count", `Int 0);
           ("fallback_applied", `Bool false);
@@ -1111,6 +1120,10 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
               ("models", `List (List.map (fun s -> `String s) cascade_models));
               ("models_resolved", models_resolved);
               ("primary_model", `String primary_model);
+              ( "cascade_ref",
+                (match m.cascade_ref with
+                 | Some ref_ -> Cascade_ref.cascade_ref_to_json ref_
+                 | None -> `Null) );
               ("active_model", `String active_model);
               ("next_model_hint", Json_util.string_opt_to_json next_model_hint);
               ("sandbox_profile",
@@ -1646,6 +1659,10 @@ let keeper_config_json (config : Coord.config) (name : string)
           ("selected_cascade_name", `String m.cascade_name);
           ( "selected_cascade_canonical",
             `String effective_cascade_name );
+          ( "cascade_ref",
+            (match m.cascade_ref with
+             | Some ref_ -> Cascade_ref.cascade_ref_to_json ref_
+             | None -> `Null) );
           ( "models",
             `List
               (List.map (fun s -> `String s)

@@ -5,7 +5,7 @@
     SDK error conversion, error classification, and codex CLI prompt
     preflight checks.
 
-    This module is [include]d by {!Oas_worker_named}; all bindings are
+    This module is [include]d by {!Keeper_turn_driver}; all bindings are
     re-exported by the facade.  @since God file decomposition *)
 
 (** {1 MASC internal error type} *)
@@ -131,8 +131,8 @@ val config_for_label :
   ?approval:Agent_sdk.Hooks.approval_callback ->
   description:string option ->
   unit ->
-  (Oas_worker_exec.config, Agent_sdk.Error.sdk_error) result
-(** Build an [Oas_worker_exec.config] from a model label string.  Resolves
+  (Cascade_runner.config, Agent_sdk.Error.sdk_error) result
+(** Build an [Cascade_runner.config] from a model label string.  Resolves
     the provider config and fills in defaults. *)
 
 (** {1 Codex CLI preflight} *)
@@ -147,14 +147,14 @@ type codex_cli_prompt_preflight = {
 }
 
 val codex_cli_prompt_preflight :
-  config:Oas_worker_exec.config -> goal:string -> codex_cli_prompt_preflight option
+  config:Cascade_runner.config -> goal:string -> codex_cli_prompt_preflight option
 (** Check whether a codex_cli invocation would exceed the argv or context
     window limit.  Returns [Some] when limits are hit, [None] when safe
     (or when the provider is not codex_cli). *)
 
 val with_codex_cli_preflight :
   scope:string ->
-  config:Oas_worker_exec.config ->
+  config:Cascade_runner.config ->
   goal:string ->
   (unit -> ('a, Agent_sdk.Error.sdk_error) result) ->
   ('a, Agent_sdk.Error.sdk_error) result

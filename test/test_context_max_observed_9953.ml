@@ -36,7 +36,7 @@ let () =
 module UM = Masc_mcp.Keeper_unified_metrics
 module Prom = Masc_mcp.Prometheus
 
-let metric = Prom.metric_keeper_context_max_observed
+let metric = Masc_mcp.Keeper_metrics.metric_keeper_context_max_observed
 
 let counter_for ~keeper ~model_used ~resolved_model_id ~bucket =
   Prom.metric_value_or_zero metric

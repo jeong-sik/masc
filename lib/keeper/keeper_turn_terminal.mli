@@ -1,24 +1,40 @@
-(** Structured terminal-reason surface for keeper turn ledgers. *)
+(** Structured terminal-reason surface for keeper turn ledgers.
 
-type severity =
+    RFC-0047 PR-3: the [code: string] field is removed; the typed
+    [disposition] field is the SSOT. [code : t -> string] is provided
+    as an accessor for callers that still need the wire string
+    (Prometheus labels, JSON, dashboard chips). [severity / summary /
+    next_action] are now exhaustive matches on [disposition]; the
+    legacy [severity_of_code / summary_of_code / next_action_of_code]
+    substring classifiers are deleted.
+
+    The [severity] type is re-exported from [Keeper_turn_disposition]
+    so external callers using [Keeper_turn_terminal.Ok | Warn | Bad |
+    Unknown_bad] continue to compile. *)
+
+type severity = Keeper_turn_disposition.severity =
   | Ok
   | Warn
   | Bad
   | Unknown_bad
 
 type t =
-  { code : string
-  ; disposition : Keeper_turn_disposition.t
-    (** RFC-0047 PR-2: typed operator-facing disposition. Derived
-          from [code] via [Keeper_turn_disposition.of_wire] at
-          construction time. PR-3 swaps
-          [severity / summary / next_action] derivation to be
-          exhaustive on this field and removes [code: string]. *)
+  { disposition : Keeper_turn_disposition.t
+    (** Typed operator-facing disposition. SSOT after RFC-0047 PR-3.
+          [severity / summary / next_action] are derived from this
+          field at construction time. The wire-format string
+          (previously [t.code]) is now [Keeper_turn_terminal.code t]. *)
   ; source : string
   ; severity : severity
   ; summary : string
   ; next_action : string option
   }
+
+(** Wire-format accessor. Returns
+    [Keeper_turn_disposition.to_wire t.disposition]. Use this when
+    the caller needs the legacy string code (JSON serialisation,
+    Prometheus labels, dashboard chips). *)
+val code : t -> string
 
 val severity_to_string : severity -> string
 val success : unit -> t

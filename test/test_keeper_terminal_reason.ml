@@ -16,7 +16,7 @@ let mk_api err = Agent_sdk.Error.Api err
 let mk_agent err = Agent_sdk.Error.Agent err
 let code = KAE.terminal_reason_code_of_sdk_error
 
-let terminal_code (reason : KT.t) = reason.code
+let terminal_code (reason : KT.t) = KT.code reason
 let terminal_next_action (reason : KT.t) = reason.next_action
 let terminal_severity (reason : KT.t) = reason.severity
 

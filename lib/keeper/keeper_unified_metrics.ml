@@ -734,7 +734,7 @@ let append_decision_record
         | _, Some err -> Keeper_turn_terminal.of_legacy_error_text err
         | _ -> Keeper_turn_terminal.of_code "unknown_error")
   in
-  let terminal_reason_code = terminal_reason.Keeper_turn_terminal.code in
+  let terminal_reason_code = Keeper_turn_terminal.code terminal_reason in
   let json =
     `Assoc
       ([

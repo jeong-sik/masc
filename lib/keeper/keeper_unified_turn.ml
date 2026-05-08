@@ -19,20 +19,15 @@ let registry_failure_reason_of_terminal_reason
     (terminal_reason : Keeper_turn_terminal.t)
     ~(raw_error : string) : Keeper_registry.failure_reason option =
   let detail = short_preview raw_error in
-  match terminal_reason.code with
+  let code = Keeper_turn_terminal.code terminal_reason in
+  match code with
   | "required_tool_use_no_tool_call"
   | "required_tool_use_unsatisfied" ->
-      Some
-        (Keeper_registry.Tool_required_unsatisfied
-           { code = terminal_reason.code; detail })
+      Some (Keeper_registry.Tool_required_unsatisfied { code; detail })
   | "provider_error" ->
-      Some
-        (Keeper_registry.Provider_runtime_error
-           { code = terminal_reason.code; detail })
-  | code when String.starts_with ~prefix:"api_error_" code ->
-      Some
-        (Keeper_registry.Provider_runtime_error
-           { code = terminal_reason.code; detail })
+      Some (Keeper_registry.Provider_runtime_error { code; detail })
+  | _ when String.starts_with ~prefix:"api_error_" code ->
+      Some (Keeper_registry.Provider_runtime_error { code; detail })
   | _ -> None
 
 let should_auto_pause_required_tool_contract_violation
@@ -1905,7 +1900,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           end;
           (match
              Keeper_passive_loop_detector.progress_class_of_terminal_reason_code
-               terminal_reason.code
+               (Keeper_turn_terminal.code terminal_reason)
            with
            | Some progress_class ->
                Keeper_passive_loop_detector.record_turn

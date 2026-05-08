@@ -362,7 +362,7 @@ let keeper_memory_search_json
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Prometheus.inc_counter
-      Prometheus.metric_keeper_decision_audit_flush_failures
+      Keeper_metrics.metric_keeper_decision_audit_flush_failures
       ~labels:[("keeper", meta.name)]
       ();
     Log.Keeper.warn

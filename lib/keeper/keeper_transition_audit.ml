@@ -303,7 +303,7 @@ let get_default_store () =
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
            Prometheus.inc_counter
-             Prometheus.metric_keeper_transition_audit_failures
+             Keeper_metrics.metric_keeper_transition_audit_failures
              ~labels:[("site", "default_store")]
              ();
            Log.Keeper.warn "transition_audit default store failed: %s"
@@ -317,7 +317,7 @@ let observe_append_failure ~site exn =
       Printexc.raise_with_backtrace e bt
   | exn ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_transition_audit_failures
+        Keeper_metrics.metric_keeper_transition_audit_failures
         ~labels:[("site", site)]
         ();
       Log.Keeper.warn "transition_audit %s failed: %s"

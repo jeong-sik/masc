@@ -296,7 +296,7 @@ let wakeup_relevant_keeper_for_board_signal
           (match wake_reason with
            | None ->
              Prometheus.inc_counter
-               Prometheus.metric_keeper_board_signal_no_wake_total
+               Keeper_metrics.metric_keeper_board_signal_no_wake_total
                ~labels:[
                  ("keeper", meta.name);
                  ("kind", signal_kind_label);
@@ -334,7 +334,7 @@ let wakeup_relevant_keeper_for_board_signal
          Eio_guard.yield_step yield_meter);
   if dropped > 0 then begin
     Prometheus.inc_counter
-      Prometheus.metric_keeper_keepalive_signal_failures
+      Keeper_metrics.metric_keeper_keepalive_signal_failures
       ~labels:[("keeper", "aggregate"); ("site", "board_capped")]
       ();
     Log.Keeper.warn
@@ -426,7 +426,7 @@ let dispatch_keepalive_event_with_audit
      | Ok _ -> ()
      | Error err ->
          Prometheus.inc_counter
-           Prometheus.metric_keeper_keepalive_signal_failures
+           Keeper_metrics.metric_keeper_keepalive_signal_failures
            ~labels:[("keeper", keeper_name); ("site", "late_event_rejected")]
            ();
          Log.Keeper.warn

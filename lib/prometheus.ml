@@ -222,28 +222,10 @@ let observe_histogram name ?(labels=[]) value =
 
 (* Keeper turn lifecycle (registered in init, incremented in
    keeper_unified_turn.ml). *)
-let metric_keeper_turns = "masc_keeper_turns_total"
-let metric_keeper_input_tokens = "masc_keeper_input_tokens_total"
-let metric_keeper_output_tokens = "masc_keeper_output_tokens_total"
-let metric_keeper_cache_creation_tokens =
-  "masc_keeper_cache_creation_tokens_total"
-let metric_keeper_cache_read_tokens =
-  "masc_keeper_cache_read_tokens_total"
-let metric_keeper_usage_anomalies =
-  "masc_keeper_usage_anomalies_total"
-let metric_keeper_total_cost_usd =
-  "masc_keeper_total_cost_usd"
-let metric_keeper_turn_scheduled =
-  "masc_keeper_turn_scheduled_total"
-let metric_keeper_turn_completed =
-  "masc_keeper_turn_completed_total"
-let metric_keeper_idle_seconds = "masc_keeper_idle_seconds"
 
 (** #10530: keeper required-tool-contract violations (passive-only or
     text-only turns rejected by the keeper agent loop).
     Labels: keeper_name, kind \in \{passive,text_only\}. *)
-let metric_keeper_contract_violations =
-  "masc_keeper_contract_violations_total"
 
 (** #12838: keepers detected as alive-but-stuck — non-Dead, non-paused,
     keepalive_running, but [proactive_rt.last_ts] has been frozen while
@@ -251,33 +233,21 @@ let metric_keeper_contract_violations =
     ([alive_but_stuck_dedup_ttl_sec]) bounds emission rate so a single
     stuck keeper does not flood the counter on every 30s sweep.
     Labels: keeper. *)
-let metric_keeper_alive_but_stuck =
-  "masc_keeper_alive_but_stuck_total"
-let metric_keeper_alive_but_stuck_seconds =
-  "masc_keeper_alive_but_stuck_seconds"
-let metric_keeper_alive_but_stuck_threshold_seconds =
-  "masc_keeper_alive_but_stuck_threshold_seconds"
 
 (** #12838 follow-up: supervisor recovery requests emitted after an
     alive-but-stuck detection.  Each increment means the supervisor set
     [failure_reason] + [fiber_stop]/[fiber_wakeup] so the existing sweep
     path can force a crash/restart instead of leaving the keeper at
     detection-only.  Labels: keeper. *)
-let metric_keeper_alive_but_stuck_recovery_requests =
-  "masc_keeper_alive_but_stuck_recovery_requests_total"
 
 (** #12838 follow-up: bounded recovery wakeups queued by
     [alive_but_stuck_scan].  Labels: keeper, outcome. *)
-let metric_keeper_alive_but_stuck_recovery =
-  "masc_keeper_alive_but_stuck_recovery_total"
 
 (* #10047: [append_metrics_snapshot] failures in [keeper_turn.ml] and
    [keeper_unified_turn.ml] used to be log-only, masking state/metric
    divergence. Surface as a counter so dashboards can alert on silent
    metric drops and operators stop trusting metric jsonl as ground
    truth when keepers are running. *)
-let metric_keeper_metric_emit_dropped =
-  "masc_keeper_metric_emit_dropped_total"
 
 (* #9953: counter of observed [context_max] values labelled by
    [keeper, model_used, resolved_model_id, context_max_bucket].
@@ -291,24 +261,17 @@ let metric_keeper_metric_emit_dropped =
    produced different ceilings on different turns.  The 42% /
    17% / 41% split for [claude_code:auto] reported in #9953 is
    directly visible here as three counter rows. *)
-let metric_keeper_context_max_observed =
-  "masc_keeper_context_max_observed_total"
 
 (* #10121: keeper turn livelock observer.  Each turn-start
-   bumps [metric_keeper_turn_starts]; a re-start of the SAME
+   bumps [Keeper_metrics.metric_keeper_turn_starts]; a re-start of the SAME
    turn id (turn counter did not advance) bumps the dedicated
-   [metric_keeper_turn_reattempts].  Operators alert on
+   [Keeper_metrics.metric_keeper_turn_reattempts].  Operators alert on
    [rate(masc_keeper_turn_reattempts_total[5m]) > 0] and pick
    up stuck-turn pairs without grepping log lines.  See also
-   [metric_keeper_turn_regressions] when the FSM moves to a
+   [Keeper_metrics.metric_keeper_turn_regressions] when the FSM moves to a
    strictly LOWER turn id (very unusual; indicative of
    write_meta race losing an in-memory counter increment,
    #9733). *)
-let metric_keeper_turn_starts = "masc_keeper_turn_starts_total"
-let metric_keeper_turn_reattempts = "masc_keeper_turn_reattempts_total"
-let metric_keeper_turn_regressions = "masc_keeper_turn_regressions_total"
-let metric_keeper_turn_livelock_blocks =
-  "masc_keeper_turn_livelock_blocks_total"
 
 (* #9943: per-keeper turn-latency bucket counter.  Each completed
    turn lands in exactly one [latency_bucket] label so a Prometheus
@@ -323,40 +286,30 @@ let metric_keeper_turn_livelock_blocks =
    counter labels by [keeper] (per-turn latency) and uses bucket
    strings instead of histogram observations so dashboards can group
    counts directly. *)
-let metric_keeper_turn_latency_bucket =
-  "masc_keeper_turn_latency_bucket_total"
 
 (* #9933 follow-up: per-turn latency buckets split by the effective
-   provider/model/cascade surface.  [metric_keeper_turn_latency_bucket]
+   provider/model/cascade surface.  [Keeper_metrics.metric_keeper_turn_latency_bucket]
    tells operators which keeper is slow; this counter answers the next
    operational question: which provider/cascade/profile is burning the
    timeout budget.  Labels are bounded by fleet size, configured model
    labels, configured cascades, channel vocabulary, and the five bucket
    names from [Keeper_unified_metrics.turn_latency_bucket]. *)
-let metric_keeper_turn_latency_by_model_bucket =
-  "masc_keeper_turn_latency_by_model_bucket_total"
 
 (* P-DASH-01: provider cooldown skip counter.
    When a cascade's provider is in cooldown and the keeper
    fail-opens to a fallback cascade, increment this counter
    so operators can see how often cooldown is triggering
    cascade switches.  Labels: keeper, from_cascade, to_cascade. *)
-let metric_keeper_provider_cooldown_skip =
-  "masc_keeper_provider_cooldown_skip_total"
 
 (* P-DASH-01: provider cooldown remaining seconds gauge.
    Exposes the current cooldown duration so operators can see
    which cascade is blocked and for how long without log parsing.
    Labels: keeper, cascade. *)
-let metric_keeper_provider_cooldown_remaining_sec =
-  "masc_keeper_provider_cooldown_remaining_sec"
 
 (* P-DASH-13: provider block duration histogram.
    Records the duration (in seconds) for which a provider is placed
    in cooldown each time a cooldown is applied or extended.
    Labels: provider. *)
-let metric_keeper_provider_block_duration_sec =
-  "masc_keeper_provider_block_duration_sec"
 
 (* #10569: board persist mutex acquire / held latency.  Recorded by
    [Board_core.with_persist_lock] so operators can distinguish
@@ -397,8 +350,6 @@ let install_backend_mutex_observers () =
    only emitted as a debug log line.  Surfacing as a gauge lets
    operators alert on queue pressure without log parsing.
    Labels: keeper, channel. *)
-let metric_keeper_turn_queue_depth =
-  "masc_keeper_turn_queue_depth"
 
 (* #10125: keeper supervisor sweep observability.
 
@@ -411,19 +362,15 @@ let metric_keeper_turn_queue_depth =
    Two metrics surface the sweep liveness directly so dashboards
    can alert on absence instead of relying on a log grep:
 
-   - [metric_keeper_supervisor_sweep_starts_total] — increments
+   - [Keeper_metrics.metric_keeper_supervisor_sweep_starts_total] — increments
      once each time [start_supervisor_sweep] actually creates a
      Pulse (i.e., once per process unless explicitly stopped).
      If the counter does not advance after a server restart, the
      supervisor never came up.
-   - [metric_keeper_supervisor_last_sweep_unixtime] — gauge updated
+   - [Keeper_metrics.metric_keeper_supervisor_last_sweep_unixtime] — gauge updated
      on every successful sweep beat.  Operator alert:
      [time() - masc_keeper_supervisor_last_sweep_unixtime > 90]
      means the sweep is stalled (default sweep interval is 30s). *)
-let metric_keeper_supervisor_sweep_starts =
-  "masc_keeper_supervisor_sweep_starts_total"
-let metric_keeper_supervisor_last_sweep_unixtime =
-  "masc_keeper_supervisor_last_sweep_unixtime"
 
 (* #9770: counter for the [join_required] guard firing in
    [Mcp_server_eio_execute].  Production observed agents calling
@@ -456,35 +403,18 @@ let metric_tool_join_required_guard =
 
    Labels: [keeper, channel].  Cardinality = ~10 keepers × 3
    channels = ~30 series, well within Prometheus best practice. *)
-let metric_keeper_semaphore_wait_timeout =
-  "masc_keeper_semaphore_wait_timeout_total"
 
-let metric_keeper_turn_slot_bookkeeping_failures =
-  "masc_keeper_turn_slot_bookkeeping_failures_total"
 
 (* Goal-loop Observe contract: the Grafana p99 query consumes
    [masc_keeper_semaphore_wait_seconds_bucket] grouped by keeper and cascade.
    The generic [register_histogram] exporter currently exposes summaries, so
    keeper_turn_slot emits the cumulative bucket companion explicitly. *)
-let metric_keeper_semaphore_wait_seconds =
-  "masc_keeper_semaphore_wait_seconds"
-let metric_keeper_semaphore_wait_seconds_bucket =
-  "masc_keeper_semaphore_wait_seconds_bucket"
 
-let metric_keeper_slot_yield_total =
-  "masc_keeper_slot_yield_total"
 
 let metric_timeout_policy_overshoot =
   "masc_timeout_policy_overshoot_total"
 
 (* Keeper compaction (keeper_compact_policy.ml, tool_keeper.ml). *)
-let metric_keeper_compactions = "masc_keeper_compactions_total"
-let metric_keeper_compaction_ratio_change =
-  "masc_keeper_compaction_ratio_change"
-let metric_keeper_compaction_saved_tokens =
-  "masc_keeper_compaction_saved_tokens_total"
-let metric_keeper_operator_compact = "masc_keeper_operator_compact_total"
-let metric_keeper_operator_clear = "masc_keeper_operator_clear_total"
 
 (* #9943: per-keeper counter of "compaction triggered but
    resulted in no token reduction".  2026-04-24 audit found
@@ -501,16 +431,12 @@ let metric_keeper_operator_clear = "masc_keeper_operator_clear_total"
    shipping) — that one tracks the bytes saved by the 1.6%
    that DID save anything; this one tracks the 98.4% that
    ran for nothing. *)
-let metric_keeper_compaction_noop =
-  "masc_keeper_compaction_noop_total"
 
 (* Tier K5 — observability over the K4c per-keeper tool-emission
    accumulator registry. The registry is process-local; this gauge
    exposes its size so operators can alert on divergence from the
    active keeper count (a leak symptom would be registry size >
    live keeper count without trending down on teardown). *)
-let metric_keeper_tool_emission_registry_size =
-  "masc_keeper_tool_emission_registry_size"
 
 (* Tier K6 — per-keeper tagged tool-emission push counter. Increments
    each time [Keeper_tool_emission_hook.push] captures a parsed JSON
@@ -518,8 +444,6 @@ let metric_keeper_tool_emission_registry_size =
    keepers by multimodal output volume and detect silent emission
    stalls (a keeper that should be emitting goes flat). Labels:
    [keeper]. *)
-let metric_keeper_tool_emission_pushes =
-  "masc_keeper_tool_emission_pushes_total"
 
 (* #13387: keeper tool diversity gauges. The count gauge gives
    dashboard/operator summaries a cheap per-keeper signal; the per-tool
@@ -527,11 +451,7 @@ let metric_keeper_tool_emission_pushes =
    or below the diversity threshold. Labels:
    - [keeper] for the count gauge
    - [keeper, tool] for the per-tool gauge *)
-let metric_keeper_tool_underused_allowed_count =
-  "masc_keeper_tool_underused_allowed_count"
 
-let metric_keeper_tool_underused_allowed =
-  "masc_keeper_tool_underused_allowed"
 
 (* #10349: keeper FS path rejection counter.  Pre-fix the
    user-facing read-path rejection strings carried the resolver's
@@ -548,8 +468,6 @@ let metric_keeper_tool_underused_allowed =
    roots list back to the LLM.  Labels:
    - [kind] = "out_of_roots" (path resolved outside allowed)
               | "not_found_relative" (relative path matched no root) *)
-let metric_keeper_path_rejection =
-  "masc_keeper_path_rejection_total"
 
 (* RFC-0026 PR-E-1.6 admission router shadow observation
    (keeper_admission_runtime.ml). Labels:
@@ -558,84 +476,10 @@ let metric_keeper_path_rejection =
 
    "legacy" dominates until PR-E-1.7 wires the registry + bucket
    lookups via [Keeper_admission_runtime.set_*_lookup]. *)
-let metric_keeper_admission_shadow_outcome =
-  "masc_keeper_admission_shadow_outcome_total"
 
 (* Keeper keepalive (keeper_keepalive.ml). *)
-let metric_keeper_heartbeat_successes =
-  "masc_keeper_heartbeat_successes_total"
-let metric_keeper_heartbeat_failures =
-  "masc_keeper_heartbeat_failures_total"
-let metric_keeper_cleanup_tracking_failures =
-  "masc_keeper_cleanup_tracking_failures_total"
-let metric_keeper_dispatch_event_failures =
-  "masc_keeper_dispatch_event_failures_total"
-let metric_keeper_directive_failures =
-  "masc_keeper_directive_failures_total"
-let metric_keeper_tool_call_duration =
-  "masc_keeper_tool_call_duration_seconds"
-let metric_keeper_write_meta_failures =
-  "masc_keeper_write_meta_failures_total"
 let metric_write_meta_cas_retry_total =
   "masc_write_meta_cas_retry_total"
-let metric_keeper_meta_read_failures =
-  "masc_keeper_meta_read_failures_total"
-let metric_keeper_approval_queue_failures =
-  "masc_keeper_approval_queue_failures_total"
-let metric_keeper_guards_failures =
-  "masc_keeper_guards_failures_total"
-let metric_keeper_profile_load_failures =
-  "masc_keeper_profile_load_failures_total"
-let metric_keeper_compact_audit_failures =
-  "masc_keeper_compact_audit_failures_total"
-let metric_keeper_fs_failures =
-  "masc_keeper_fs_failures_total"
-let metric_keeper_crash_persistence_failures =
-  "masc_keeper_crash_persistence_failures_total"
-let metric_keeper_generation_lineage_failures =
-  "masc_keeper_generation_lineage_failures_total"
-let metric_keeper_keepalive_signal_failures =
-  "masc_keeper_keepalive_signal_failures_total"
-let metric_keeper_board_signal_no_wake_total =
-  "masc_keeper_board_signal_no_wake_total"
-let metric_keeper_meta_json_failures =
-  "masc_keeper_meta_json_failures_total"
-let metric_keeper_tools_oas_failures =
-  "masc_keeper_tools_oas_failures_total"
-let metric_keeper_oas_hook_output_parse_failures =
-  "masc_keeper_oas_hook_output_parse_failures_total"
-let metric_keeper_turn_up_update_failures =
-  "masc_keeper_turn_up_update_failures_total"
-let metric_keeper_exec_tools_failures =
-  "masc_keeper_exec_tools_failures_total"
-let metric_keeper_circuit_breaker_trips =
-  "masc_keeper_circuit_breaker_trips_total"
-let metric_keeper_prompt_failures =
-  "masc_keeper_prompt_failures_total"
-let metric_keeper_run_context_failures =
-  "masc_keeper_run_context_failures_total"
-let metric_keeper_shell_ops_failures =
-  "masc_keeper_shell_ops_failures_total"
-let metric_keeper_tag_dispatch_failures =
-  "masc_keeper_tag_dispatch_failures_total"
-let metric_keeper_trace_emit_failures =
-  "masc_keeper_trace_emit_failures_total"
-let metric_keeper_transition_audit_failures =
-  "masc_keeper_transition_audit_failures_total"
-let metric_keeper_execution_receipt_failures =
-  "masc_keeper_execution_receipt_failures_total"
-let metric_keeper_llm_bridge_failures =
-  "masc_keeper_llm_bridge_failures_total"
-let metric_keeper_shell_bash_failures =
-  "masc_keeper_shell_bash_failures_total"
-let metric_keeper_rollover_failures =
-  "masc_keeper_rollover_failures_total"
-let metric_keeper_lifecycle_dispatch_rejections =
-  "masc_keeper_lifecycle_dispatch_rejections_total"
-let metric_keeper_paused_state_persist_errors =
-  "masc_keeper_paused_state_persist_errors_total"
-let metric_keeper_unexpected_tool_partial_tolerance =
-  "masc_keeper_unexpected_tool_partial_tolerance_total"
 (* #10091: [require_tool_use] contract violations labelled by
    [has_current_task] (true = #10091's active-task path that
    [#10031] intentionally left strict, false = the no-task path
@@ -646,125 +490,28 @@ let metric_keeper_unexpected_tool_partial_tolerance =
    (keeper, contract_status) pairs tells the operator which
    keeper tool_presets need reshaping for the current task mix
    without masking the strict gate. *)
-let metric_keeper_require_tool_use_violations =
-  "masc_keeper_require_tool_use_violations_total"
-let metric_keeper_tool_alias_canonicalizations =
-  "masc_keeper_tool_alias_canonicalizations_total"
-let metric_keeper_profile_config_conflicts =
-  "masc_keeper_profile_config_conflicts_total"
-let metric_keeper_oas_timeout_classifications =
-  "masc_keeper_oas_timeout_classifications_total"
 (* #10474: no_tool_capable_provider and proactive cycle outcome counters.
-   [metric_keeper_no_tool_provider_total] fires every time a keeper's
+   [Keeper_metrics.metric_keeper_no_tool_provider_total] fires every time a keeper's
    cascade has zero tool-capable providers, labelled by cascade so
    the operator sees which cascade definition needs fixing.
-   [metric_keeper_proactive_outcome_total] classifies every scheduled
+   [Keeper_metrics.metric_keeper_proactive_outcome_total] classifies every scheduled
    autonomous cycle into tool_called | noop | error, giving a fleet-wide
    health ratio in Grafana. *)
-let metric_keeper_no_tool_provider =
-  "masc_keeper_no_tool_provider_total"
-let metric_keeper_proactive_outcome =
-  "masc_keeper_proactive_outcome_total"
 (* PR-B: keeper turn skipped due to ollama saturation pre-check.
    Labelled by [keeper] and [cascade]. *)
-let metric_keeper_ollama_saturation_skip =
-  "masc_keeper_ollama_saturation_skip_total"
 (* Tool-setup and task-load failures during keeper tool surface assembly.
    task_load: Coord.get_tasks_raw exception while loading current task contract.
    tool_selection: TopK_llm or tool discovery exception during per-turn tool set assembly. *)
-let metric_keeper_task_load_failures =
-  "masc_keeper_task_load_failures_total"
-let metric_keeper_tool_selection_failures =
-  "masc_keeper_tool_selection_failures_total"
-let metric_keeper_tool_policy_failures =
-  "masc_keeper_tool_policy_failures_total"
 let metric_tool_policy_unloaded_query =
   "masc_tool_policy_unloaded_query_total"
 let metric_tool_policy_init_failed =
   "masc_tool_policy_init_failed_total"
 let metric_cache_desync_cleared =
   "masc_cache_desync_cleared_total"
-let metric_keeper_reconcile_failures =
-  "masc_keeper_reconcile_failures_total"
-let metric_keeper_decision_audit_flush_failures =
-  "masc_keeper_decision_audit_flush_failures_total"
-let metric_keeper_oas_cancel =
-  "masc_keeper_oas_cancel_total"
-let metric_keeper_claim_auto_provision =
-  "masc_keeper_claim_auto_provision_total"
 let metric_egress_audit_missing =
   "masc_egress_audit_missing_total"
 let metric_egress_audit_stale_orphan =
   "masc_egress_audit_stale_orphan_total"
-let metric_keeper_toml_invalid =
-  "masc_keeper_toml_invalid_total"
-let metric_keeper_persona_drift_missing =
-  "masc_keeper_persona_drift_missing_total"
-let metric_keeper_room_init_failures =
-  "masc_keeper_room_init_failures_total"
-let metric_keeper_presence_sync_failures =
-  "masc_keeper_presence_sync_failures_total"
-let metric_keeper_self_preservation_universal =
-  "masc_keeper_self_preservation_universal_total"
-let metric_keeper_stale_storm_paused =
-  "masc_keeper_stale_storm_paused_total"
-let metric_keeper_stale_fleet_batch_paused =
-  "masc_keeper_stale_fleet_batch_paused_total"
-let metric_keeper_oas_timeout_budget_loop_paused =
-  "masc_keeper_oas_timeout_budget_loop_paused_total"
-let metric_keeper_cycle_exceptions =
-  "masc_keeper_cycle_exceptions_total"
-let metric_keeper_snapshot_write_failures =
-  "masc_keeper_snapshot_write_failures_total"
-let metric_keeper_progress_updated_line_failures =
-  "masc_keeper_progress_updated_line_failures_total"
-let metric_keeper_sse_broadcast_failures =
-  "masc_keeper_sse_broadcast_failures_total"
-let metric_keeper_room_heartbeat_failures =
-  "masc_keeper_room_heartbeat_failures_total"
-let metric_keeper_turn_metrics_snapshot_failures =
-  "masc_keeper_turn_metrics_snapshot_failures_total"
-let metric_keeper_oas_execution_errors =
-  "masc_keeper_oas_execution_errors_total"
-let metric_keeper_episode_create_failures =
-  "masc_keeper_episode_create_failures_total"
-let metric_keeper_memory_activity_emit_failures =
-  "masc_keeper_memory_activity_emit_failures_total"
-let metric_keeper_supervisor_sweep_failures =
-  "masc_keeper_supervisor_sweep_failures_total"
-let metric_keeper_toml_reconcile_sweep_failures =
-  "masc_keeper_toml_reconcile_sweep_failures_total"
-let metric_keeper_tool_usage_flush_failures =
-  "masc_keeper_tool_usage_flush_failures_total"
-let metric_keeper_turn_livelock_blocks =
-  "masc_keeper_turn_livelock_blocks_total"
-let metric_keeper_turn_timeout_committed =
-  "masc_keeper_turn_timeout_committed_total"
-let metric_keeper_turn_error_after_tools =
-  "masc_keeper_turn_error_after_tools_total"
-let metric_keeper_cascade_sync_failures =
-  "masc_keeper_cascade_sync_failures_total"
-let metric_keeper_local_discovery_failures =
-  "masc_keeper_local_discovery_failures_total"
-let metric_keeper_thinking_persist_failures =
-  "masc_keeper_thinking_persist_failures_total"
-let metric_keeper_checkpoint_failures =
-  "masc_keeper_checkpoint_failures_total"
-let metric_keeper_memory_write_failures =
-  "masc_keeper_memory_write_failures_total"
-let metric_keeper_memory_consolidations =
-  "masc_keeper_memory_consolidations_total"
-let metric_keeper_write_meta_cycle_failures =
-  "masc_keeper_write_meta_cycle_failures_total"
-let metric_keeper_alert_persist_failures =
-  "masc_keeper_alert_persist_failures_total"
-let metric_keeper_metrics_sse_failures =
-  "masc_keeper_metrics_sse_failures_total"let metric_keeper_session_cleanup_failures =
-  "masc_keeper_session_cleanup_failures_total"
-let metric_keeper_chat_store_failures =
-  "masc_keeper_chat_store_failures_total"
-let metric_keeper_observation_query_failures =
-  "masc_keeper_observation_query_failures_total"
 let metric_persistence_read_drops =
   "masc_persistence_read_drops_total"
 let metric_persistence_utf8_repair =
@@ -988,9 +735,6 @@ let metric_llm_decode_tok_per_sec = "masc_llm_decode_tok_per_sec"
 let metric_cascade_ttfb_seconds = "masc_cascade_ttfb_seconds"
 let metric_cascade_inter_chunk_seconds = "masc_cascade_inter_chunk_seconds"
 let metric_after_turn_hook = "masc_after_turn_hook_total"
-let metric_keeper_oas_on_stop = "masc_keeper_oas_on_stop_total"
-let metric_keeper_oas_on_idle_escalated =
-  "masc_keeper_oas_on_idle_escalated_total"
 let metric_after_turn_telemetry_missing =
   "masc_after_turn_telemetry_missing_total"
 let metric_after_turn_telemetry_zero_latency =
@@ -1071,8 +815,6 @@ let metric_anti_rationalization_fallback =
 let metric_anti_rationalization_excuse_pattern =
   "masc_anti_rationalization_excuse_pattern_total"
 let metric_board_truncated_posts = "masc_board_truncated_posts_total"
-let metric_keeper_quantitative_claim_rejections =
-  "masc_keeper_quantitative_claim_rejections_total"
 let metric_cascade_strategy_decisions = "masc_cascade_strategy_decisions_total"
 let metric_cascade_capacity_events = "masc_cascade_capacity_events_total"
 
@@ -1087,27 +829,13 @@ let metric_cascade_attempt_liveness_kill =
   "masc_cascade_attempt_liveness_kill_total"
 let metric_cascade_attempt_liveness_observed =
   "masc_cascade_attempt_liveness_observed_total"
-let metric_keeper_invariant_violations = "masc_keeper_invariant_violations_total"
-let metric_keeper_fsm_edge_transitions =
-  "masc_keeper_fsm_edge_transitions_total"
-let metric_keeper_turn_fsm_transitions =
-  "masc_keeper_turn_fsm_transitions_total"
-let metric_keeper_turn_phase_duration =
-  "masc_keeper_turn_phase_duration_seconds"
-let metric_keeper_lifecycle_transitions =
-  "masc_keeper_lifecycle_transitions_total"
 let metric_fsm_guard_violation = "masc_fsm_guard_violation_total"
-let metric_keeper_lifecycle_callback_failures =
-  "masc_keeper_lifecycle_callback_failures_total"
 let metric_memory_pipeline_flushes =
   "masc_memory_pipeline_flushes_total"
 let metric_memory_pipeline_flush_records =
   "masc_memory_pipeline_flush_records_total"
 let metric_memory_pipeline_flush_duration_seconds =
   "masc_memory_pipeline_flush_duration_seconds"
-let metric_keeper_event_bus_drain = "masc_keeper_event_bus_drain_total"
-let metric_keeper_supervisor_cleanup_failures =
-  "masc_keeper_supervisor_cleanup_failures_total"
 (* Increments each time [Keeper_turn_slot.force_release_holder_for] frees
    a slot held by a zombie fiber (typically because the fiber is stuck
    inside an LLM subprocess that did not honour cancellation). Without
@@ -1117,8 +845,6 @@ let metric_keeper_supervisor_cleanup_failures =
    force-release path is the only thing draining stuck slots, which is
    itself a signal that the upstream subprocess kill-on-cancel is
    incomplete and worth investigating. *)
-let metric_keeper_slot_force_released =
-  "masc_keeper_slot_force_released_total"
 (* P0-2 (2026-05-07): observability for orphan turn loops.
    [_dropped] increments every time [Keeper_registry.update_entry] is
    called against a missing key (caller raced with deregistration).
@@ -1127,26 +853,16 @@ let metric_keeper_slot_force_released =
    [orphan_drop_window_sec]. Together they let operators tell a
    harmless single-update race from a stuck orphan fiber emitting 30+
    drops per turn. See masc-mcp 2026-05-07 verifier-loop incident. *)
-let metric_keeper_registry_update_dropped =
-  "masc_keeper_registry_update_dropped_total"
-let metric_keeper_registry_orphan_threshold_breached =
-  "masc_keeper_registry_orphan_threshold_breached_total"
-let metric_keeper_stale_watchdog_tick_failures =
-  "masc_keeper_stale_watchdog_tick_failures_total"
-let metric_keeper_dead_total = "masc_keeper_dead_total"
 (* Self-healing circuit breaker: incremented each time [sweep_and_recover]
    auto-resumes a keeper after its back-off timer has elapsed.  A rate >0
    means the system is self-healing; a zero rate while keepers accumulate
    [auto_resume_after_sec] means the sweep is not firing or the meta write
    is failing. Labels: keeper. *)
-let metric_keeper_auto_resumed_total = "masc_keeper_auto_resumed_total"
 (* Phase-3.5 health-gate block: incremented when the supervisor skips
    auto-resume because the keeper's cascade is unhealthy (failure ratio
    >= threshold).  Labels: keeper, cascade.  A positive rate means the
    health probe is actively protecting the fleet from resuming into a
    still-failing cascade. *)
-let metric_keeper_auto_resume_blocked_total =
-  "masc_keeper_auto_resume_blocked_total"
 (* Positive signal for the Skip_idle + Woken gate-promotion path added
    by #12271. Increments every time run_smart_heartbeat_gate observes
    that an external wakeup_keeper call cut a Skip_idle backoff sleep
@@ -1156,29 +872,12 @@ let metric_keeper_auto_resume_blocked_total =
    reached the atomic, or a regression silently re-introduced
    MissedWakeup. Pair with stale_termination_by_class for full
    positive/negative coverage. Labels: keeper. *)
-let metric_keeper_skip_idle_wake_resumed =
-  "masc_keeper_skip_idle_wake_resumed_total"
-let metric_keeper_event_queue_override =
-  "masc_keeper_event_queue_override_total"
-let metric_keeper_stimulus_consumed =
-  "masc_keeper_stimulus_consumed_total"
-let metric_keeper_unsupported_stimulus =
-  "masc_keeper_unsupported_stimulus_total"
-let metric_keeper_near_exhaustion_total = "masc_keeper_near_exhaustion_total"
-let metric_keeper_restart_attempts =
-  "masc_keeper_restart_attempts_total"
-let metric_keeper_restart_outcomes =
-  "masc_keeper_restart_outcomes_total"
 (* #12801: Liveness Recovery Supervisor — auto-recover Dead keepers
    whose root cause has cleared.  [attempts] increments each time the
    scan selects a Dead keeper for recovery; [outcomes] breaks out the
    result by outcome label (started | not_running | meta_missing |
    meta_read_failed | meta_write_failed). Labels: keeper (for
    attempts) and keeper+outcome (for outcomes). *)
-let metric_keeper_liveness_recovery_attempts =
-  "masc_keeper_liveness_recovery_attempts_total"
-let metric_keeper_liveness_recovery_outcomes =
-  "masc_keeper_liveness_recovery_outcomes_total"
 (* #12797: Cascade server-error score decay — provider deprioritised
    after recent 5xx events.  Increments each time a provider's server-
    error score drops the effective weight below the skip threshold.
@@ -1201,29 +900,17 @@ let metric_provider_actual_health_status =
   "masc_provider_actual_health_status"
 (* #12799: Passive loop detector — keeper emitting only read-only tool
    calls for N consecutive turns.  Labels: keeper. *)
-let metric_keeper_passive_loop_detected_total =
-  "masc_keeper_passive_loop_detected_total"
-let metric_keeper_required_tool_loop_detected_total =
-  "masc_keeper_required_tool_loop_detected_total"
-let metric_keeper_zombie_loop_detected_total =
-  "masc_keeper_zombie_loop_detected_total"
-let metric_keeper_required_tool_gate_suppressed_total =
-  "masc_keeper_required_tool_gate_suppressed_total"
 
 (* Task-138: Minimum proactive cadence — observability gauges that pair
    with the [keeper_passive_loop_detector] streak counter so operators
    can see "alive but unproductive" keepers in Grafana before the
    detection latch fires.  Labels: keeper. *)
-let metric_keeper_consecutive_idle = "masc_keeper_consecutive_idle"
-let metric_keeper_last_productive_ts = "masc_keeper_last_productive_ts"
 (* PR-M (Leak 9): consecutive [oas_timeout_budget] cycle FAILED strikes
    per keeper. Counter increments on each strike; a strike at
    [outcome=promote] means [Keeper_fiber_crash] was raised so
    [Keeper_supervisor.sweep_and_recover] will respawn the fiber. Without
    the strike→crash promotion these failures repeated silently for
    hours (4h+ zombie keepers observed 2026-04-26). *)
-let metric_keeper_oas_timeout_budget_strike =
-  "masc_keeper_oas_timeout_budget_strike_total"
 let metric_oas_bus_subscriber_stream_depth = "masc_oas_bus_subscriber_stream_depth"
 let metric_oas_bus_publish_block_seconds = "masc_oas_bus_publish_block_seconds_total"
 let metric_oas_bus_publish = "masc_oas_bus_publish_total"
@@ -1344,20 +1031,6 @@ let metric_governance_lenient_json_fallback_hit =
    an inline string literal passed to inc_counter / register_counter.
    Constants make grep/audit trivial and prevent typo-induced metric
    proliferation (a single-character typo creates a new invisible metric). *)
-let metric_keeper_stale_termination_total =
-  "masc_keeper_stale_termination_total"
-let metric_keeper_stale_termination_by_class =
-  "masc_keeper_stale_termination_by_class_total"
-let metric_keeper_oas_timeout_budget_watchdog_termination =
-  "masc_keeper_oas_timeout_budget_watchdog_termination_total"
-let metric_keeper_stale_termination_threshold_breached =
-  "masc_keeper_stale_termination_threshold_breached_total"
-let metric_keeper_stale_termination_batch =
-  "masc_keeper_stale_termination_batch_total"
-let metric_keeper_stale_broadcast_emit_failures =
-  "masc_keeper_stale_broadcast_emit_failures"
-let metric_keeper_oas_run_timeout =
-  "masc_keeper_oas_run_timeout_total"
 
 
 (* Centralized metric constants for inline string replacement.
@@ -1365,13 +1038,11 @@ let metric_keeper_oas_run_timeout =
    keeper_shell_bash.ml, keeper_shell_docker.ml,
    keeper_heartbeat_snapshot.ml, keeper_stay_silent_loop_detector.ml,
    keeper_unified_metrics.ml. *)
-let metric_keeper_tool_use_failure =
-  "masc_keeper_tool_use_failure_total"
 (* #13xxx: keeper dispatch layer denied a tool call because the
    tool is not in the keeper's allowlist (preset drift, deny-list,
-   or unknown tool name).  Distinct from [metric_keeper_tool_use_failure]
+   or unknown tool name).  Distinct from [Keeper_metrics.metric_keeper_tool_use_failure]
    (post-execution hook failure) and
-   [metric_keeper_turn_gate_rejected_terminal] (pre_tool_use guard
+   [Keeper_metrics.metric_keeper_turn_gate_rejected_terminal] (pre_tool_use guard
    hard-reject).  Labels:
    - [keeper] — keeper name (fleet-bounded)
    - [tool]   — tool name attempted (registry-bounded, ~100 tools)
@@ -1380,8 +1051,6 @@ let metric_keeper_tool_use_failure =
        "denied_by_policy"     (explicit deny-list entry)
        "not_in_allow_set"     (tool exists but preset omits it)
    Cardinality: ~16 keepers × ~100 tools × 3 reasons = ~4800 series. *)
-let metric_keeper_tool_not_allowed =
-  "masc_keeper_tool_not_allowed_total"
 let metric_after_turn_response_model_empty =
   "masc_after_turn_response_model_empty_total"
 let metric_after_turn_response_model_alias =
@@ -1392,36 +1061,10 @@ let metric_cost_emit_zero_source =
   "masc_cost_emit_zero_source_total"
 let metric_cost_ledger_status =
   "masc_cost_ledger_status_total"
-let metric_keeper_turn_gate_rejected_terminal =
-  "masc_keeper_turn_gate_rejected_terminal_total"
-let metric_keeper_receipt_unmapped_disposition =
-  "masc_keeper_receipt_unmapped_disposition_total"
-let metric_keeper_bash_network_upgrade =
-  "masc_keeper_bash_network_upgrade_total"
-let metric_keeper_bash_local_execution =
-  "masc_keeper_bash_local_execution_total"
-let metric_keeper_docker_runtime_discarded =
-  "masc_keeper_docker_runtime_discarded_total"
-let metric_keeper_proactive_skip =
-  "masc_keeper_proactive_skip_total"
-let metric_keeper_stay_silent_loop_detected =
-  "masc_keeper_stay_silent_loop_detected_total"
-let metric_keeper_usage_trust =
-  "masc_keeper_usage_trust_total"
-let metric_keeper_usage_anomaly_reason =
-  "masc_keeper_usage_anomaly_reason_total"
-let metric_keeper_config_env_parse_failures =
-  "masc_keeper_config_env_parse_failures_total"
-let metric_keeper_post_turn_wirein_failures =
-  "masc_keeper_post_turn_wirein_failures_total"
 (* metric_keeper_meta_read_failures defined earlier at line 473 (single
    source of truth). Re-binding here would silently shadow without
    changing behavior because the strings are identical, but it makes
    the constant look like it has two declaration sites. *)
-let metric_keeper_recurring_failures =
-  "masc_keeper_recurring_failures_total"
-let metric_keeper_turn_cleanup_failures =
-  "masc_keeper_turn_cleanup_failures_total"
 
 (* RFC-0040: sender-side mention dedup decision counter.  Labels:
    [outcome] in [skipped|passed|no_target|bypassed].  Wired from
@@ -1456,10 +1099,10 @@ let init () =
   add metric_after_turn_hook
     "Times the keeper AfterTurn hook ran (labeled by model). Divergence from \
      masc_llm_inference_duration_seconds_count identifies missing telemetry." Counter;
-  add metric_keeper_oas_on_stop
+  add Keeper_metrics.metric_keeper_oas_on_stop
     "Times the keeper OnStop hook ran after an OAS response terminated. \
      Labels: keeper, stop_reason." Counter;
-  add metric_keeper_oas_on_idle_escalated
+  add Keeper_metrics.metric_keeper_oas_on_idle_escalated
     "Times the keeper OnIdleEscalated hook ran. Labels: keeper, severity, \
      decision." Counter;
   add metric_after_turn_telemetry_missing
@@ -1527,38 +1170,38 @@ let init () =
      (masc_keeper_context_max_observed_total)] to detect drift —
      a count > 1 indicates the same model resolved to different
      ceilings on different turns. *)
-  add metric_keeper_context_max_observed
+  add Keeper_metrics.metric_keeper_context_max_observed
     "Total observed keeper context_max values, bucketed (labels: keeper, \
      model_used, resolved_model_id, context_max_bucket=64k|128k|200k|256k|1m|other|zero)"
     Counter;
   (* #10121: keeper turn livelock observer counters.  Operator
      alert: rate(masc_keeper_turn_reattempts_total[5m]) > 0
      surfaces stuck (keeper, turn) pairs without grepping logs. *)
-  add metric_keeper_turn_starts
+  add Keeper_metrics.metric_keeper_turn_starts
     "Total keeper turn starts (every dispatch increments, regardless of \
      whether the turn id is new or repeated)"
     Counter;
-  add metric_keeper_turn_reattempts
+  add Keeper_metrics.metric_keeper_turn_reattempts
     "Total keeper turn re-attempts: same turn id started again before \
      the counter advanced (livelock signal — #10121)"
     Counter;
-  add metric_keeper_turn_regressions
+  add Keeper_metrics.metric_keeper_turn_regressions
     "Total keeper turn regressions: turn id moved to a strictly LOWER \
      value than previously observed (write_meta race losing an in-memory \
      counter increment — #9733 / #10121)"
     Counter;
-  add metric_keeper_turn_livelock_blocks
+  add Keeper_metrics.metric_keeper_turn_livelock_blocks
     "Total keeper turn dispatches blocked by the stuck-turn livelock guard \
      (labels: keeper, reason=attempts_exhausted|stuck_age_exceeded)"
     Counter;
   (* #9943: per-keeper turn latency bucket distribution.  Each
      completed turn increments exactly one bucket.  Bucket vocabulary
      [under_60s | 60-300s | 300-600s | 600-1200s | over_1200s]. *)
-  add metric_keeper_turn_latency_bucket
+  add Keeper_metrics.metric_keeper_turn_latency_bucket
     "Total keeper turn completions, bucketed by latency (labels: keeper, \
      bucket=under_60s|60-300s|300-600s|600-1200s|over_1200s)"
     Counter;
-  add metric_keeper_turn_latency_by_model_bucket
+  add Keeper_metrics.metric_keeper_turn_latency_by_model_bucket
     "Total keeper turn completions, bucketed by latency and effective \
      model surface (labels: keeper, channel, provider_kind, model_used, \
      resolved_model_id, cascade_profile, \
@@ -1567,10 +1210,10 @@ let init () =
   (* #10125: supervisor sweep liveness.  Counter increments on
      each [start_supervisor_sweep] that actually creates a Pulse;
      gauge advances on every successful sweep beat. *)
-  add metric_keeper_supervisor_sweep_starts
+  add Keeper_metrics.metric_keeper_supervisor_sweep_starts
     "Total times keeper supervisor sweep Pulse was started (labels: base_path)"
     Counter;
-  add metric_keeper_supervisor_last_sweep_unixtime
+  add Keeper_metrics.metric_keeper_supervisor_last_sweep_unixtime
     "Wall-clock unixtime of the most recent successful supervisor \
      sweep beat (labels: base_path).  Stale (> 2 × interval) means \
      the sweep stalled."
@@ -1579,25 +1222,25 @@ let init () =
     "Total join-required guard rejections before tool execution \
      (labels: tool, agent_name, reason=room_uninitialized|agent_not_joined)"
     Counter;
-  add metric_keeper_turn_queue_depth
+  add Keeper_metrics.metric_keeper_turn_queue_depth
     "Current keeper turn wait queue depth (labels: channel=autonomous_queue)"
     Gauge;
-  add metric_keeper_turn_slot_bookkeeping_failures
+  add Keeper_metrics.metric_keeper_turn_slot_bookkeeping_failures
     "Total keeper turn-slot release bookkeeping callbacks that could not \
      complete while preserving semaphore release (labels: op, \
      kind=cancelled|exception)"
     Counter;
-  register_histogram ~name:metric_keeper_semaphore_wait_seconds
+  register_histogram ~name:Keeper_metrics.metric_keeper_semaphore_wait_seconds
     ~help:"Seconds spent waiting to acquire keeper turn semaphores \
            (labels: keeper_name, cascade_profile, channel)." ();
-  register_histogram ~name:metric_keeper_turn_phase_duration
+  register_histogram ~name:Keeper_metrics.metric_keeper_turn_phase_duration
     ~help:"Seconds a keeper turn dwelt in a single FSM phase before \
            transitioning out. Sample is recorded on every emit_transition \
            with a known prior state. Labels: keeper, from." ();
   (* P-DASH-13: provider block duration histogram.
      Records the duration (in seconds) for which a provider is placed in
      cooldown each time a cooldown is applied or extended.  Labels: provider. *)
-  register_histogram ~name:metric_keeper_provider_block_duration_sec
+  register_histogram ~name:Keeper_metrics.metric_keeper_provider_block_duration_sec
     ~help:"Duration in seconds for which a provider is placed into cooldown \
            (observed each time a cooldown is applied or extended). Labels: provider." ();
   (* #10569: board persist mutex diagnostic histograms.  acquire =
@@ -1622,7 +1265,7 @@ let init () =
   register_histogram ~name:metric_backend_mutex_held_sec
     ~help:"Seconds the backend filesystem mutex is held by one fiber, \
            covering the write critical section. Labels: op." ();
-  add metric_keeper_slot_yield_total
+  add Keeper_metrics.metric_keeper_slot_yield_total
     "Total autonomous turn slot yields (successfully yielded and reacquired). \
      Labels: keeper."
     Counter;
@@ -1631,60 +1274,60 @@ let init () =
      (labels: layer, origin)"
     Counter;
   (* Keeper compaction metrics — emitted by keeper_compact_policy.ml *)
-  add metric_keeper_compactions
+  add Keeper_metrics.metric_keeper_compactions
     "Total keeper compactions performed" Counter;
-  add metric_keeper_compaction_ratio_change
+  add Keeper_metrics.metric_keeper_compaction_ratio_change
     "Context ratio change after compaction (pre - post)" Gauge;
-  add metric_keeper_compaction_saved_tokens
+  add Keeper_metrics.metric_keeper_compaction_saved_tokens
     "Total tokens removed by keeper context compaction" Counter;
   (* #9943: noop compactions — trigger fired but strategy did
      not reduce token budget. *)
-  add metric_keeper_compaction_noop
+  add Keeper_metrics.metric_keeper_compaction_noop
     "Total compaction snapshots where before_tokens == \
      after_tokens > 0 (compaction triggered but produced no \
      savings; labels: keeper, trigger)"
     Counter;
   (* K5: per-keeper tool-emission accumulator registry size.
      Updated by Keeper_tool_emission_hook on register/drop. *)
-  add metric_keeper_tool_emission_registry_size
+  add Keeper_metrics.metric_keeper_tool_emission_registry_size
     "Number of keepers with a registered tool-emission \
      accumulator (Tier K4c per-keeper isolation registry size)"
     Gauge;
   (* K6: per-keeper tagged tool-emission push count. *)
-  add metric_keeper_tool_emission_pushes
+  add Keeper_metrics.metric_keeper_tool_emission_pushes
     "Total tagged tool results captured into the K4c per-keeper \
      accumulator (labels: keeper)"
     Counter;
-  add metric_keeper_tool_underused_allowed_count
+  add Keeper_metrics.metric_keeper_tool_underused_allowed_count
     "Number of keeper-allowed tools that have no calls or are below \
      the diversity threshold (labels: keeper)"
     Gauge;
-  add metric_keeper_tool_underused_allowed
+  add Keeper_metrics.metric_keeper_tool_underused_allowed
     "Whether an allowed keeper tool is unused or below the diversity \
      threshold (1=yes, 0=no; labels: keeper, tool)"
     Gauge;
   (* Operator-initiated overflow recovery — emitted by tool_keeper.ml *)
-  add metric_keeper_operator_compact
+  add Keeper_metrics.metric_keeper_operator_compact
     "Total operator-invoked masc_keeper_compact calls (labels: result=ok|no_checkpoint|precondition|not_found)" Counter;
-  add metric_keeper_operator_clear
+  add Keeper_metrics.metric_keeper_operator_clear
     "Total operator-invoked masc_keeper_clear calls (labels: preserve_system=true|false)" Counter;
   (* RFC-0026 PR-E-1.6 admission router shadow observation.
      Emitted by keeper_admission_runtime.observe before the existing
      [Keeper_turn_slot.with_keeper_turn_slot] call. *)
-  add metric_keeper_admission_shadow_outcome
+  add Keeper_metrics.metric_keeper_admission_shadow_outcome
     "RFC-0026 PR-E-1.6 admission router shadow observation \
      (labels: keeper, outcome=legacy|dispatch|wait|surface). \
      [legacy] dominates until PR-E-1.7 wires registry+bucket lookups."
     Counter;
   (* Keeper heartbeat metrics — emitted by keeper_keepalive.ml *)
-  add metric_keeper_heartbeat_successes
+  add Keeper_metrics.metric_keeper_heartbeat_successes
     "Total keeper heartbeat successes" Counter;
-  add metric_keeper_heartbeat_failures
+  add Keeper_metrics.metric_keeper_heartbeat_failures
     "Total keeper heartbeat failures (labels: keeper, site)" Counter;
-  add metric_keeper_cleanup_tracking_failures
+  add Keeper_metrics.metric_keeper_cleanup_tracking_failures
     "Total keeper cleanup_tracking failures in heartbeat finally \
      (labels: keeper, site)" Counter;
-  register_histogram ~name:metric_keeper_tool_call_duration
+  register_histogram ~name:Keeper_metrics.metric_keeper_tool_call_duration
     ~help:"Keeper tool call latency in seconds, labeled by keeper, provider, tool, and outcome" ();
   add metric_provider_prefix_cache_creation_tokens
     "Total provider prefix cache creation tokens (Anthropic)" Counter;
@@ -1767,40 +1410,40 @@ let init () =
      gives them a HELP description in /metrics output and a zero-value
      baseline so dashboards see "0" instead of "no data" before the
      first observation. *)
-  add metric_keeper_write_meta_failures
+  add Keeper_metrics.metric_keeper_write_meta_failures
     "Total keeper meta-file write failures, labeled by keeper and phase"
     Counter;
   add metric_write_meta_cas_retry_total
     "Total keeper meta write CAS retries, labeled by keeper_name"
     Counter;
-  add metric_keeper_meta_read_failures
+  add Keeper_metrics.metric_keeper_meta_read_failures
     "Total keeper meta-file read/parse failures, labeled by keeper and site"
     Counter;
-  add metric_keeper_approval_queue_failures
+  add Keeper_metrics.metric_keeper_approval_queue_failures
     "Total keeper approval queue failures, labeled by keeper and site"
     Counter;
-  add metric_keeper_guards_failures
+  add Keeper_metrics.metric_keeper_guards_failures
     "Total keeper guard warnings, labeled by keeper and site"
     Counter;
-  add metric_keeper_profile_load_failures
+  add Keeper_metrics.metric_keeper_profile_load_failures
     "Total keeper profile/TOML load failures, labeled by site"
     Counter;
-  add metric_keeper_compact_audit_failures
+  add Keeper_metrics.metric_keeper_compact_audit_failures
     "Total keeper compact audit failures (persist/prune/handle), labeled by keeper and site"
     Counter;
-  add metric_keeper_fs_failures
+  add Keeper_metrics.metric_keeper_fs_failures
     "Total keeper filesystem operation failures (ensure_dir/save_atomic), labeled by path and site"
     Counter;
-  add metric_keeper_crash_persistence_failures
+  add Keeper_metrics.metric_keeper_crash_persistence_failures
     "Total keeper crash/sp persistence write failures, labeled by site"
     Counter;
-  add metric_keeper_generation_lineage_failures
+  add Keeper_metrics.metric_keeper_generation_lineage_failures
     "Total keeper generation lineage failures (index append/manifest save), labeled by keeper and site"
     Counter;
-  add metric_keeper_keepalive_signal_failures
+  add Keeper_metrics.metric_keeper_keepalive_signal_failures
     "Total keeper keepalive signal failures (board capped/late-event rejected), labeled by keeper and site"
     Counter;
-  add metric_keeper_board_signal_no_wake_total
+  add Keeper_metrics.metric_keeper_board_signal_no_wake_total
     "Total board signals (post_created/comment_added) that did not produce a \
      wake decision for a running keeper. Increments per (keeper, kind) when \
      [Keeper_world_observation.board_signal_wake_reason] returns [None] — i.e. \
@@ -1810,115 +1453,115 @@ let init () =
      keepers whose [room_signal_prompt_enabled] / mention-target configuration \
      drops legitimate signals. Labels: keeper, kind=post_created|comment_added."
     Counter;
-  add metric_keeper_meta_json_failures
+  add Keeper_metrics.metric_keeper_meta_json_failures
     "Total keeper meta JSON failures (seed parse/unknown keys), labeled by site"
     Counter;
-  add metric_keeper_tools_oas_failures
+  add Keeper_metrics.metric_keeper_tools_oas_failures
     "Total keeper OAS tool failures (blocked/error result/deadlock), labeled by tool and site"
     Counter;
-  add metric_keeper_oas_hook_output_parse_failures
+  add Keeper_metrics.metric_keeper_oas_hook_output_parse_failures
     "Total keeper OAS hook tool-output JSON parse failures, labeled by surface"
     Counter;
-  add metric_keeper_turn_up_update_failures
+  add Keeper_metrics.metric_keeper_turn_up_update_failures
     "Total keeper turn-up update failures (prompt cap/sandbox validation/preflight), labeled by keeper and site"
     Counter;
-  add metric_keeper_exec_tools_failures
+  add Keeper_metrics.metric_keeper_exec_tools_failures
     "Total keeper exec tool failures (malformed structured payload), labeled by keeper and tool"
     Counter;
-  add metric_keeper_circuit_breaker_trips
+  add Keeper_metrics.metric_keeper_circuit_breaker_trips
     "Total keeper failure circuit breaker trips, labeled by keeper and failure_type"
     Counter;
-  add metric_keeper_prompt_failures
+  add Keeper_metrics.metric_keeper_prompt_failures
     "Total keeper prompt render failures, labeled by prompt name"
     Counter;
-  add metric_keeper_run_context_failures
+  add Keeper_metrics.metric_keeper_run_context_failures
     "Total keeper run context failures (checkpoint save), labeled by keeper"
     Counter;
-  add metric_keeper_shell_ops_failures
+  add Keeper_metrics.metric_keeper_shell_ops_failures
     "Total keeper shell operation failures (R2 blocked), labeled by keeper"
     Counter;
-  add metric_keeper_tag_dispatch_failures
+  add Keeper_metrics.metric_keeper_tag_dispatch_failures
     "Total keeper tag dispatch exceptions, labeled by tag"
     Counter;
-  add metric_keeper_trace_emit_failures
+  add Keeper_metrics.metric_keeper_trace_emit_failures
     "Total keeper trace emit failures, labeled by keeper"
     Counter;
-  add metric_keeper_transition_audit_failures
+  add Keeper_metrics.metric_keeper_transition_audit_failures
     "Total keeper transition audit store failures, labeled by site"
     Counter;
-  add metric_keeper_execution_receipt_failures
+  add Keeper_metrics.metric_keeper_execution_receipt_failures
     "Total keeper execution receipt failures (unmapped/emit failed/stale broadcast), labeled by keeper and site"
     Counter;
-  add metric_keeper_llm_bridge_failures
+  add Keeper_metrics.metric_keeper_llm_bridge_failures
     "Total keeper LLM bridge failures (timeout/cancelled/error), labeled by site. \
      The bridge is a generic timeout helper that does not receive keeper context; \
      keeper attribution is recovered from the surrounding Log.Keeper line."
     Counter;
-  add metric_keeper_shell_bash_failures
+  add Keeper_metrics.metric_keeper_shell_bash_failures
     "Total keeper shell bash blockages (destructive/hard mode/generic), labeled by keeper and site"
     Counter;
-  add metric_keeper_rollover_failures
+  add Keeper_metrics.metric_keeper_rollover_failures
     "Total keeper rollover failures (lineage append, checkpoint save, invalid trace ID), labeled by keeper and site"
     Counter;
-  add metric_keeper_lifecycle_dispatch_rejections
+  add Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
     "Total post-turn lifecycle dispatch rejections, labeled by keeper and event"
     Counter;
-  add metric_keeper_paused_state_persist_errors
+  add Keeper_metrics.metric_keeper_paused_state_persist_errors
     "Total keeper paused-state persistence failures, labeled by phase \
      (boot_resume_check|boot_resume_persist) and reason (read_meta_error|meta_missing)"
     Counter;
-  add metric_keeper_unexpected_tool_partial_tolerance
+  add Keeper_metrics.metric_keeper_unexpected_tool_partial_tolerance
     "Total keeper turns that tolerated unexpected tool names because at least \
      one valid keeper tool call was present. Labeled by keeper_name and \
      logged=true|false so WARN suppression remains observable."
     Counter;
-  add metric_keeper_dead_total
+  add Keeper_metrics.metric_keeper_dead_total
     "Total keeper transitions to Dead phase after the supervisor exhausts \
      max_restarts. Labeled by keeper and reason. Any rate >0 is operator-\
      actionable: the supervisor will not retry the keeper."
     Counter;
-  add metric_keeper_auto_resumed_total
+  add Keeper_metrics.metric_keeper_auto_resumed_total
     "Total keepers auto-resumed by the self-healing circuit breaker after \
      the back-off timer elapsed. Labeled by keeper. A positive rate means \
      the system is self-healing from transient provider outages."
     Counter;
-  add metric_keeper_auto_resume_blocked_total
+  add Keeper_metrics.metric_keeper_auto_resume_blocked_total
     "Total keepers whose auto-resume was blocked because the cascade health \
      probe reported unhealthy. Labeled by keeper and cascade. A positive rate \
      means the health gate is protecting the fleet from resuming into a \
      still-failing cascade."
     Counter;
-  add metric_keeper_supervisor_cleanup_failures
+  add Keeper_metrics.metric_keeper_supervisor_cleanup_failures
     "Total supervisor finally-cleanup failures suppressed to avoid \
      Fun.Finally_raised. Labeled by keeper."
     Counter;
-  add metric_keeper_slot_force_released
+  add Keeper_metrics.metric_keeper_slot_force_released
     "Total turn-slot semaphores force-released because the holding fiber \
      did not return after the supervisor declared the keeper crashed. \
      Labels: keeper, label (turn|autonomous|reactive)."
     Counter;
-  add metric_keeper_registry_update_dropped
+  add Keeper_metrics.metric_keeper_registry_update_dropped
     "Total Keeper_registry.update_entry drops (caller raced a \
      deregistration, no entry found). Labeled by name. Sustained \
      per-keeper rate => orphan turn fiber. Pairs with \
      masc_keeper_registry_orphan_threshold_breached_total."
     Counter;
-  add metric_keeper_registry_orphan_threshold_breached
+  add Keeper_metrics.metric_keeper_registry_orphan_threshold_breached
     "Total per-keeper threshold breach events: drop count crossed the \
      orphan_drop_threshold inside orphan_drop_window_sec. \
      Edge-triggered (one increment per breach window). Labeled by name."
     Counter;
-  add metric_keeper_stale_watchdog_tick_failures
+  add Keeper_metrics.metric_keeper_stale_watchdog_tick_failures
     "Total stale watchdog tick failures suppressed during poll. Labeled by keeper."
     Counter;
-  add metric_keeper_skip_idle_wake_resumed
+  add Keeper_metrics.metric_keeper_skip_idle_wake_resumed
     "Total cycles where an external wakeup_keeper / board signal cut a \
      Skip_idle backoff sleep short and the heartbeat cycle was resumed \
      (cycle_continues_after_wake -> true). Positive signal for the \
      #12271 fix; pairs with masc_keeper_stale_termination_by_class_total \
      {class=idle_turn} which should drop in proportion. Labels: keeper."
     Counter;
-  add metric_keeper_event_queue_override
+  add Keeper_metrics.metric_keeper_event_queue_override
     "RFC-0020 Rule 2 — total times run_smart_heartbeat_gate forced \
      Heartbeat_smart.Emit. The [reason] label disambiguates the two \
      override paths: [event_queue] = the Event Layer queue \
@@ -1931,27 +1574,27 @@ let init () =
      durable-signal payload paths. Labels: keeper, reason \
      (event_queue|durable_state)."
     Counter;
-  add metric_keeper_stimulus_consumed
+  add Keeper_metrics.metric_keeper_stimulus_consumed
     "Total stimuli consumed at turn entry, classified by stimulus_class. \
      Labels: keeper, class (board_signal|bootstrap|alive_but_stuck_recovery|unsupported). \
      Pairs with masc_keeper_unsupported_stimulus_total for unsupported-only \
      drill-down with payload prefix."
     Counter;
-  add metric_keeper_unsupported_stimulus
+  add Keeper_metrics.metric_keeper_unsupported_stimulus
     "Unsupported stimuli consumed at turn entry — the dequeued payload \
      did not match any known stimulus class. Each increment represents a \
      wake -> no_signal gap per #12684. Labels: keeper."
     Counter;
-  add metric_keeper_near_exhaustion_total
+  add Keeper_metrics.metric_keeper_near_exhaustion_total
     "Total keeper restart attempts at restart_count = max_restarts - 1, \
      i.e. one failure away from Dead. Soft pre-warning; labeled by keeper."
     Counter;
-  add metric_keeper_lifecycle_transitions
+  add Keeper_metrics.metric_keeper_lifecycle_transitions
     "Total keeper lifecycle phase transitions emitted only when the registry \
      phase changes. Labeled by keeper, from_phase, and to_phase; deliberately \
      omits event/reason payloads to keep cardinality bounded."
     Counter;
-  add metric_keeper_lifecycle_callback_failures
+  add Keeper_metrics.metric_keeper_lifecycle_callback_failures
     "Total keeper callback failures that would otherwise hide lifecycle, SSE, \
      tool-call-log, or action-metric gaps. Labels: callback plus optional \
      keeper at per-keeper hook sites."
@@ -1969,26 +1612,26 @@ let init () =
     "Wall-clock seconds spent in the memory AfterTurn flush bridge. Labels: \
      agent_name, outcome=success|error."
     Histogram;
-  add metric_keeper_event_bus_drain
+  add Keeper_metrics.metric_keeper_event_bus_drain
     "Total per-turn OAS event-bus drain helper runs. Labels: site and \
      outcome=drained|empty."
     Counter;
-  add metric_keeper_restart_attempts
+  add Keeper_metrics.metric_keeper_restart_attempts
     "Total supervisor restart attempts for crashed keepers. Labeled by keeper."
     Counter;
-  add metric_keeper_restart_outcomes
+  add Keeper_metrics.metric_keeper_restart_outcomes
     "Total supervisor restart outcomes. Labeled by keeper and bounded \
      outcome=started|meta_unavailable."
     Counter;
-  add metric_keeper_liveness_recovery_attempts
+  add Keeper_metrics.metric_keeper_liveness_recovery_attempts
     "#12801 Total Liveness Recovery Supervisor attempts to auto-recover Dead \
      keepers whose root cause has cleared. Labeled by keeper."
     Counter;
-  add metric_keeper_liveness_recovery_outcomes
+  add Keeper_metrics.metric_keeper_liveness_recovery_outcomes
     "#12801 Total Liveness Recovery Supervisor outcomes. Labeled by keeper \
      and outcome=started|not_running|meta_missing|meta_read_failed|meta_write_failed."
     Counter;
-  add metric_keeper_alive_but_stuck_recovery_requests
+  add Keeper_metrics.metric_keeper_alive_but_stuck_recovery_requests
     "#12838 Total alive-but-stuck recovery requests. Each increment means \
      the supervisor requested a supervised keeper restart by setting \
      failure_reason plus fiber_stop/fiber_wakeup. Labeled by keeper."
@@ -2014,68 +1657,68 @@ let init () =
      validation. Values: 0=unknown/skipped, 1=healthy, 3=unhealthy. Labels: \
      provider_name, profile_name, model_id."
     Gauge;
-  add metric_keeper_passive_loop_detected_total
+  add Keeper_metrics.metric_keeper_passive_loop_detected_total
     "#12799 Total passive-loop detections: keeper issued only read-only tool \
      calls for N consecutive turns. Labeled by keeper."
     Counter;
-  add metric_keeper_required_tool_loop_detected_total
+  add Keeper_metrics.metric_keeper_required_tool_loop_detected_total
     "#13362 Total required-tool contract loops: keeper hit N consecutive \
      actionable required-tool failures before making execution/completion \
      progress. Labeled by keeper and kind."
     Counter;
-  add metric_keeper_zombie_loop_detected_total
+  add Keeper_metrics.metric_keeper_zombie_loop_detected_total
     "Goal-loop Observe counter for no-progress keeper loops. Emitted by the \
      passive/required-tool loop detector when progress-signalling turns make \
      no execution or completion progress. Labeled by keeper_name."
     Counter;
-  add metric_keeper_required_tool_gate_suppressed_total
+  add Keeper_metrics.metric_keeper_required_tool_gate_suppressed_total
     "#13631 Total Require_tool_use gate suppressions caused by actionable \
      affordances whose visible keeper tool surface contains no \
      contract-satisfying tool. Labeled by affordance."
     Counter;
-  add metric_keeper_consecutive_idle
+  add Keeper_metrics.metric_keeper_consecutive_idle
     "Task-138 Current consecutive-idle streak (passive-only turns) per \
      keeper.  Resets to 0 on the next execution/completion turn.  Labeled \
      by keeper."
     Gauge;
-  add metric_keeper_last_productive_ts
+  add Keeper_metrics.metric_keeper_last_productive_ts
     "Task-138 Unix timestamp of the most recent productive turn \
      (execution/completion class) per keeper.  0 until the keeper has \
      produced anything.  Labeled by keeper."
     Gauge;
-  add metric_keeper_tool_alias_canonicalizations
+  add Keeper_metrics.metric_keeper_tool_alias_canonicalizations
     "Total observed LLM-facing tool names canonicalized to keeper internal \
      tool names. Labeled by alias_kind, public_tool, and canonical_tool."
     Counter;
-  add metric_keeper_profile_config_conflicts
+  add Keeper_metrics.metric_keeper_profile_config_conflicts
     "Total keeper profile config conflicts between persona defaults and TOML \
      overlays. Labeled by field, resolution, and logged=true|false."
     Counter;
-  add metric_keeper_oas_timeout_classifications
+  add Keeper_metrics.metric_keeper_oas_timeout_classifications
     "Total keeper OAS timeout classifications. Labeled by \
      classification=transient_network|structural_budget|other_timeout."
     Counter;
-  add metric_keeper_no_tool_provider
+  add Keeper_metrics.metric_keeper_no_tool_provider
     "Total no_tool_capable_provider errors. Labeled by keeper and cascade."
     Counter;
-  add metric_keeper_proactive_outcome
+  add Keeper_metrics.metric_keeper_proactive_outcome
     "Total proactive cycle outcomes. Labeled by keeper and \
      outcome=tool_called|noop|error."
     Counter;
-  add metric_keeper_ollama_saturation_skip
+  add Keeper_metrics.metric_keeper_ollama_saturation_skip
     "Total keeper turns skipped because the resolved cascade is \
      ollama-only and the /api/ps probe reported zero available slots. \
      Labeled by keeper and cascade."
     Counter;
-  add metric_keeper_task_load_failures
+  add Keeper_metrics.metric_keeper_task_load_failures
     "Total Coord.get_tasks_raw exceptions while loading current task contract. \
      Labeled by keeper and phase=task_contract_load."
     Counter;
-  add metric_keeper_tool_selection_failures
+  add Keeper_metrics.metric_keeper_tool_selection_failures
     "Total tool selection exceptions during per-turn tool set assembly. \
      Labeled by keeper and phase=topk_llm|tool_discovery."
     Counter;
-  add metric_keeper_tool_policy_failures
+  add Keeper_metrics.metric_keeper_tool_policy_failures
     "Total tool-policy preset resolution failures (e.g. policy_config_not_loaded). \
      Labels: site, preset. The policy layer runs at module-init and preset \
      resolution time so it does not carry keeper context; keeper attribution \
@@ -2093,19 +1736,19 @@ let init () =
     "Total stale task-state cache emissions cleared after reloading backlog \
      truth. Labeled by module and status."
     Counter;
-  add metric_keeper_reconcile_failures
+  add Keeper_metrics.metric_keeper_reconcile_failures
     "Total current-task reconciliation failures. \
      Labeled by keeper and phase=resolve_agent|task_id_parse|owned_tasks_query."
     Counter;
-  add metric_keeper_decision_audit_flush_failures
+  add Keeper_metrics.metric_keeper_decision_audit_flush_failures
     "Total decision audit ring-buffer flush failures causing audit data loss. \
      Labeled by keeper."
     Counter;
-  add metric_keeper_oas_cancel
+  add Keeper_metrics.metric_keeper_oas_cancel
     "Total OAS execution cancellations in keeper_llm_bridge. \
      Labeled by bucket (timeout classification)."
     Counter;
-  add metric_keeper_claim_auto_provision
+  add Keeper_metrics.metric_keeper_claim_auto_provision
     "Total task-claim auto-provision outcomes during keeper bootstrap. \
      Labeled by outcome and agent_name."
     Counter;
@@ -2117,152 +1760,152 @@ let init () =
     "Total egress audit entries that are stale or orphaned. \
      Labeled by keeper."
     Counter;
-  add metric_keeper_toml_invalid
+  add Keeper_metrics.metric_keeper_toml_invalid
     "Total keeper TOML config parse failures falling back to persona. \
      Labeled by keeper and reason."
     Counter;
-  add metric_keeper_persona_drift_missing
+  add Keeper_metrics.metric_keeper_persona_drift_missing
     "Total keeper persona file missing at expected path (config drift). \
      Labeled by keeper."
     Counter;
-  add metric_keeper_room_init_failures
+  add Keeper_metrics.metric_keeper_room_init_failures
     "Total supervisor room initialization failures during keeper bootstrap. \
      Labeled by keeper."
     Counter;
-  add metric_keeper_presence_sync_failures
+  add Keeper_metrics.metric_keeper_presence_sync_failures
     "Total supervisor presence sync failures after room init. \
      Labeled by keeper."
     Counter;
-  add metric_keeper_self_preservation_universal
+  add Keeper_metrics.metric_keeper_self_preservation_universal
     "Total self-preservation UNIVERSAL suppression events where all \
      keepers in a cohort are suppressed and auto-recovery is OFF. \
      Labeled by cohort (dominant failure key)."
     Counter;
-  add metric_keeper_stale_storm_paused
+  add Keeper_metrics.metric_keeper_stale_storm_paused
     "Total keepers auto-paused due to stale termination storms. \
      Labeled by keeper."
     Counter;
-  add metric_keeper_stale_fleet_batch_paused
+  add Keeper_metrics.metric_keeper_stale_fleet_batch_paused
     "Total keepers auto-paused due to fleet-wide stale termination \
      batches. Labeled by keeper."
     Counter;
-  add metric_keeper_oas_timeout_budget_loop_paused
+  add Keeper_metrics.metric_keeper_oas_timeout_budget_loop_paused
     "Total keepers auto-paused due to repeated OAS timeout budget \
      exhaustion. Labeled by keeper."
     Counter;
-  add metric_keeper_cycle_exceptions
+  add Keeper_metrics.metric_keeper_cycle_exceptions
     "Total unhandled exceptions caught by the keeper main cycle loop. \
      Labeled by keeper."
     Counter;
-  add metric_keeper_snapshot_write_failures
+  add Keeper_metrics.metric_keeper_snapshot_write_failures
     "Total heartbeat snapshot persistence failures causing metric \
      data loss. Labeled by keeper."
     Counter;
-  add metric_keeper_progress_updated_line_failures
+  add Keeper_metrics.metric_keeper_progress_updated_line_failures
     "Total failures refreshing the Updated line in keeper progress.md. \
      Missing progress files are no-ops; non-zero rates mean progress \
      metadata refresh is failing after a successful meta write. Labeled \
      by keeper."
     Counter;
-  add metric_keeper_sse_broadcast_failures
+  add Keeper_metrics.metric_keeper_sse_broadcast_failures
     "Total keeper SSE broadcast failures. Labeled by keeper and site \
      when available."
     Counter;
-  add metric_keeper_room_heartbeat_failures
+  add Keeper_metrics.metric_keeper_room_heartbeat_failures
     "Total room heartbeat failures (consecutive, leads to crash). \
      Labeled by keeper."
     Counter;
-  add metric_keeper_turn_metrics_snapshot_failures
+  add Keeper_metrics.metric_keeper_turn_metrics_snapshot_failures
     "Total metrics snapshot write failures after keeper turns. \
      Labeled by keeper and site."
     Counter;
-  add metric_keeper_oas_execution_errors
+  add Keeper_metrics.metric_keeper_oas_execution_errors
     "Total OAS execution errors (non-cancellation) in keeper_llm_bridge. \
      Labeled by keeper."
     Counter;
-  add metric_keeper_episode_create_failures
+  add Keeper_metrics.metric_keeper_episode_create_failures
     "Total episode creation failures in keeper_agent_memory_episode. \
      Labeled by keeper."
     Counter;
-  add metric_keeper_memory_activity_emit_failures
+  add Keeper_metrics.metric_keeper_memory_activity_emit_failures
     "Total memory flush activity emit callback failures in \
      keeper_agent_memory_episode. Labeled by keeper and outcome."
     Counter;
-  add metric_keeper_supervisor_sweep_failures
+  add Keeper_metrics.metric_keeper_supervisor_sweep_failures
     "Total supervisor sweep failures in keeper_runtime periodic beat. \
      Labeled by origin."
     Counter;
-  add metric_keeper_toml_reconcile_sweep_failures
+  add Keeper_metrics.metric_keeper_toml_reconcile_sweep_failures
     "Total TOML reconcile sweep failures in keeper_runtime periodic beat. \
      Labeled by origin."
     Counter;
-  add metric_keeper_tool_usage_flush_failures
+  add Keeper_metrics.metric_keeper_tool_usage_flush_failures
     "Total tool usage JSONL flush failures in keeper_registry. \
      Labeled by keeper."
     Counter;
-  add metric_keeper_turn_livelock_blocks
+  add Keeper_metrics.metric_keeper_turn_livelock_blocks
     "Total turn dispatches blocked by livelock guard in keeper_unified_turn."
     Counter;
-  add metric_keeper_turn_timeout_committed
+  add Keeper_metrics.metric_keeper_turn_timeout_committed
     "Total wall-clock turn timeouts after committed mutating tools. \
      Labeled by keeper."
     Counter;
-  add metric_keeper_turn_error_after_tools
+  add Keeper_metrics.metric_keeper_turn_error_after_tools
     "Total provider errors after committed mutating tool calls. \
      Labeled by keeper."
     Counter;
-  add metric_keeper_cascade_sync_failures
+  add Keeper_metrics.metric_keeper_cascade_sync_failures
     "Total cascade state synchronization failures (pause/resume/auto-pause). \
      Labeled by keeper and site."
     Counter;
-  add metric_keeper_local_discovery_failures
+  add Keeper_metrics.metric_keeper_local_discovery_failures
     "Total local discovery readiness failures observed during create/turn \
      paths. Labeled by keeper and site."
     Counter;
-  add metric_keeper_thinking_persist_failures
+  add Keeper_metrics.metric_keeper_thinking_persist_failures
     "Total thinking content persistence failures in keeper_agent_run. \
      Labeled by keeper."
     Counter;
-  add metric_keeper_checkpoint_failures
+  add Keeper_metrics.metric_keeper_checkpoint_failures
     "Total OAS checkpoint save or missing-checkpoint failures. \
      Labeled by keeper."
     Counter;
-  add metric_keeper_memory_write_failures
+  add Keeper_metrics.metric_keeper_memory_write_failures
     "Total memory write failures (notes/kinds) in keeper_agent_run. \
      Labeled by keeper."
     Counter;
-  add metric_keeper_memory_consolidations
+  add Keeper_metrics.metric_keeper_memory_consolidations
     "Total keeper memory-bank consolidation rows. \
      Labels: keeper, source=progress_consolidation|cross_trace_recurrence|other, \
      outcome=generated|persisted|evicted|write_failed."
     Counter;
-  add metric_keeper_write_meta_cycle_failures
+  add Keeper_metrics.metric_keeper_write_meta_cycle_failures
     "Total write_meta failures after turn/cycle in keeper_unified_turn. \
      Labeled by keeper and site."
     Counter;
-  add metric_keeper_alert_persist_failures
+  add Keeper_metrics.metric_keeper_alert_persist_failures
     "Total alert JSONL write failures (alert/failed-channels/deadletter). \
      Labeled by kind."
     Counter;
-  add metric_keeper_metrics_sse_failures
+  add Keeper_metrics.metric_keeper_metrics_sse_failures
     "Total SSE broadcast failures during metrics compaction/handoff. \
      Labeled by kind."
     Counter;
-  add metric_keeper_dispatch_event_failures
+  add Keeper_metrics.metric_keeper_dispatch_event_failures
     "Total keeper state-machine dispatch and keeper cycle side-effect \
      failures. Labels include keeper plus site, event, or reason depending \
      on the emitting path."
     Counter;
-  add metric_keeper_directive_failures
+  add Keeper_metrics.metric_keeper_directive_failures
     "Total gRPC directive routing failures — target agent not in registry \
      or directive malformed (labels: keeper, site)" Counter;
-  add metric_keeper_session_cleanup_failures
+  add Keeper_metrics.metric_keeper_session_cleanup_failures
     "Total session directory cleanup failures during keeper teardown."
     Counter;
-  add metric_keeper_chat_store_failures
+  add Keeper_metrics.metric_keeper_chat_store_failures
     "Total chat store append/load failures. Labeled by operation."
     Counter;
-  add metric_keeper_observation_query_failures
+  add Keeper_metrics.metric_keeper_observation_query_failures
     "Total world observation query failures (backlog counts, active agents, \
      board events). Labeled by operation."
     Counter;
@@ -2291,7 +1934,7 @@ let init () =
   add metric_board_truncated_posts
     "Total board posts truncated due to size limits"
     Counter;
-  add metric_keeper_quantitative_claim_rejections
+  add Keeper_metrics.metric_keeper_quantitative_claim_rejections
     "Total keeper board posts rejected because quantitative code claims lacked explicit evidence"
     Counter;
   add metric_anti_rationalization_fallback
@@ -2325,20 +1968,20 @@ let init () =
   (* Per-keeper turn outcome + token counters.  Labels are populated
      dynamically via inc_counter; no upfront registration needed.
      Covers issues #7495 (cost/token attribution) and #7519 (SLO). *)
-  add metric_keeper_turns
+  add Keeper_metrics.metric_keeper_turns
     "Total keeper turns by outcome (labels: keeper_name, outcome=success|failure|budget_exhausted|mutation_boundary)"
     Counter;
-  add metric_keeper_turn_scheduled
+  add Keeper_metrics.metric_keeper_turn_scheduled
     "Total keeper turns accepted for dispatch by keeper_name."
     Counter;
-  add metric_keeper_turn_completed
+  add Keeper_metrics.metric_keeper_turn_completed
     "Total keeper turns that completed and emitted a metrics snapshot by \
      keeper_name."
     Counter;
-  add metric_keeper_input_tokens
+  add Keeper_metrics.metric_keeper_input_tokens
     "Cumulative input tokens per keeper turn (labels: keeper_name, model)"
     Counter;
-  add metric_keeper_output_tokens
+  add Keeper_metrics.metric_keeper_output_tokens
     "Cumulative output tokens per keeper turn (labels: keeper_name, model)"
     Counter;
   (* Anthropic / Bedrock prompt caching observability (#7469 Step 1).
@@ -2349,39 +1992,39 @@ let init () =
      [inc_counter]; tools that never emit cache data (e.g. non-Anthropic
      providers) simply leave these at 0. Names are exported as module
      constants below so registration and call-sites cannot drift. *)
-  add metric_keeper_cache_creation_tokens
+  add Keeper_metrics.metric_keeper_cache_creation_tokens
     "Cumulative prompt-cache creation tokens per keeper turn (labels: keeper_name, model)"
     Counter;
-  add metric_keeper_cache_read_tokens
+  add Keeper_metrics.metric_keeper_cache_read_tokens
     "Cumulative prompt-cache read tokens per keeper turn (labels: keeper_name, model)"
     Counter;
-  add metric_keeper_usage_anomalies
+  add Keeper_metrics.metric_keeper_usage_anomalies
     "Keeper turns whose reported usage was marked untrusted (labels: keeper_name, model, reason)"
     Counter;
-  add metric_keeper_total_cost_usd
+  add Keeper_metrics.metric_keeper_total_cost_usd
     "Accumulated trusted USD cost per keeper (labels: keeper_name)"
     Gauge;
-  add metric_keeper_idle_seconds
+  add Keeper_metrics.metric_keeper_idle_seconds
     "Current keeper world-observation idle seconds by keeper_name. Updated \
      from observation.idle_seconds during keeper metrics emission so long \
      idle gaps are visible as Prometheus data, not only in message text."
     Gauge;
-  add metric_keeper_contract_violations
+  add Keeper_metrics.metric_keeper_contract_violations
     "Keeper turns rejected for required-tool-contract violations (labels: keeper_name, kind={passive|text_only}). #10530."
     Counter;
-  add metric_keeper_alive_but_stuck
+  add Keeper_metrics.metric_keeper_alive_but_stuck
     "Keepers detected as alive-but-stuck: non-Dead, non-paused, \
      keepalive-running, but proactive_rt.last_ts has been frozen while \
      autonomous turns kept advancing. Labels: keeper."
     Counter;
-  add metric_keeper_alive_but_stuck_seconds
+  add Keeper_metrics.metric_keeper_alive_but_stuck_seconds
     "Current alive-but-stuck elapsed seconds by keeper_name. Set to 0 when \
      the keeper is not currently detected as alive-but-stuck."
     Gauge;
-  add metric_keeper_alive_but_stuck_threshold_seconds
+  add Keeper_metrics.metric_keeper_alive_but_stuck_threshold_seconds
     "Current alive-but-stuck detector threshold seconds by keeper_name."
     Gauge;
-  add metric_keeper_alive_but_stuck_recovery
+  add Keeper_metrics.metric_keeper_alive_but_stuck_recovery
     "Bounded recovery wakeups queued by alive_but_stuck_scan. \
      Labels: keeper, outcome."
     Counter;
@@ -2633,27 +2276,27 @@ let init () =
      conflicting documentation. The original block is removed so
      edits to help/labels land on the canonical site instead of a
      dead one. *)
-  add metric_keeper_stale_termination_total
+  add Keeper_metrics.metric_keeper_stale_termination_total
     "Total stale watchdog terminations (all classes). Labels: keeper." Counter;
-  add metric_keeper_stale_termination_by_class
+  add Keeper_metrics.metric_keeper_stale_termination_by_class
     "Total stale watchdog terminations broken down by kill class      (idle_turn | in_turn_hung | noop_failure_loop). Labels: keeper, class." Counter;
-  add metric_keeper_oas_timeout_budget_watchdog_termination
+  add Keeper_metrics.metric_keeper_oas_timeout_budget_watchdog_termination
     "Total watchdog terminations preserving unresolved oas_timeout_budget      failure reason. Labels: keeper." Counter;
-  add metric_keeper_stale_termination_threshold_breached
+  add Keeper_metrics.metric_keeper_stale_termination_threshold_breached
     "Total stale termination threshold breaches triggering auto-pause.      Labels: keeper." Counter;
-  add metric_keeper_stale_termination_batch
+  add Keeper_metrics.metric_keeper_stale_termination_batch
     "Total fleet-wide batch termination events (multiple keepers terminated      within the batch window). Labels: root_cause." Counter;
-  add metric_keeper_stale_broadcast_emit_failures
+  add Keeper_metrics.metric_keeper_stale_broadcast_emit_failures
     "Total failures emitting stale keeper broadcast events. Labels: keeper." Counter;
-  add metric_keeper_oas_run_timeout
+  add Keeper_metrics.metric_keeper_oas_run_timeout
     "Total Agent.run / run_stream invocations that returned Llm_provider.Retry.Timeout. \
      Pairs with #13923 (max_execution_time wire) and #13933 (cascade activation): \
      dashboards can attribute hangs to root cause via the source label \
      (max_execution_time = our wrapper fired; provider = transport-level deadline). \
      Labels: cascade, provider, source." Counter;
-  add metric_keeper_tool_use_failure
+  add Keeper_metrics.metric_keeper_tool_use_failure
     "Total keeper tool use failures during OAS hooks. Labels: keeper, tool." Counter;
-  add metric_keeper_tool_not_allowed
+  add Keeper_metrics.metric_keeper_tool_not_allowed
     "Total keeper tool calls denied because the tool is not in the keeper's \
      allowlist (preset drift, deny-list, or unknown tool name). \
      Labels: keeper, tool, reason. \
@@ -2679,35 +2322,60 @@ let init () =
      Labels: provider, status, reason." Counter;
   (* metric_keeper_turn_gate_rejected_terminal registered in keeper_guards.ml
      with help text and labels keeper, tool, reason, decision.
-     metric_keeper_receipt_unmapped_disposition registered in
+     Keeper_metrics.metric_keeper_receipt_unmapped_disposition registered in
      keeper_execution_receipt.ml without labels (intentional). Avoid
      re-registering here so the authoritative help/labels stay single-sourced. *)
-  add metric_keeper_bash_network_upgrade
+  add Keeper_metrics.metric_keeper_bash_network_upgrade
     "Bash shell network upgrade events. Labels: keeper, detected_tool." Counter;
-  add metric_keeper_bash_local_execution
+  add Keeper_metrics.metric_keeper_bash_local_execution
     "Bash shell local execution events. Labels: keeper, reason." Counter;
-  add metric_keeper_docker_runtime_discarded
+  add Keeper_metrics.metric_keeper_docker_runtime_discarded
     "Docker shell runtime output discarded. Labels: keeper, reason." Counter;
-  add metric_keeper_proactive_skip
+  add Keeper_metrics.metric_keeper_proactive_skip
     "Proactive turn skipped due to heartbeat snapshot conditions. Labels: keeper, reason." Counter;
-  add metric_keeper_stay_silent_loop_detected
+  add Keeper_metrics.metric_keeper_stay_silent_loop_detected
     "Stay-silent loop detector triggered. Labels: keeper." Counter;
-  add metric_keeper_usage_trust
+  add Keeper_metrics.metric_keeper_usage_trust
     "Keeper usage trust outcome. Labels: keeper, outcome." Counter;
-  add metric_keeper_usage_anomaly_reason
+  add Keeper_metrics.metric_keeper_usage_anomaly_reason
     "Keeper usage anomaly reason. Labels: keeper, reason." Counter;
-  add metric_keeper_config_env_parse_failures
+  add Keeper_metrics.metric_keeper_config_env_parse_failures
     "Config env var parse failures (non-integer values). Labels: var." Counter;
-  add metric_keeper_post_turn_wirein_failures
+  add Keeper_metrics.metric_keeper_post_turn_wirein_failures
     "Post-turn wire-in failures (autonomous, tool_emission_drain, multimodal, resilience). Labels: keeper, phase." Counter;
   (* metric_keeper_meta_read_failures registered earlier in init() with
      "labeled by keeper and site" — `add` is no-op when the name exists,
      so re-registering with a divergent help/label description here was
      silently dropped. Single registration kept. *)
-  add metric_keeper_recurring_failures
+  add Keeper_metrics.metric_keeper_recurring_failures
     "Recurring task execution/dispatch failures. Labels: task, phase." Counter;
-  add metric_keeper_turn_cleanup_failures
+  add Keeper_metrics.metric_keeper_turn_cleanup_failures
     "Turn cleanup failures (unsubscribe event_bus, mark_turn_finished). Labels: keeper, site." Counter;
+  (* === Keeper metrics previously unregistered in init() ===
+     These were auto-registered on first inc_counter call with no HELP text.
+     Explicit registration adds proper documentation. *)
+  add Keeper_metrics.metric_keeper_fsm_edge_transitions
+    "Keeper FSM edge transitions across lifecycle states. Labels: edge." Counter;
+  add Keeper_metrics.metric_keeper_invariant_violations
+    "Keeper composite lifecycle invariant violations. Labels: keeper, invariant." Counter;
+  add Keeper_metrics.metric_keeper_metric_emit_dropped
+    "Keeper metric emit attempts dropped (buffer full / unregistered). Labels: keeper, reason." Counter;
+  add Keeper_metrics.metric_keeper_oas_timeout_budget_strike
+    "OAS timeout budget strikes (consecutive timeouts before escalation). Labels: keeper." Counter;
+  add Keeper_metrics.metric_keeper_path_rejection
+    "Keeper path rejections (sandbox escape / outside roots). Labels: kind." Counter;
+  add Keeper_metrics.metric_keeper_provider_cooldown_remaining_sec
+    "Provider cooldown remaining seconds. Labels: keeper, provider." Gauge;
+  add Keeper_metrics.metric_keeper_provider_cooldown_skip
+    "Provider cooldown skips (fallback cascade used while cooling). Labels: keeper, provider." Counter;
+  add Keeper_metrics.metric_keeper_require_tool_use_violations
+    "Tool contract require_tool_use violations. Labels: keeper, contract_status." Counter;
+  add Keeper_metrics.metric_keeper_semaphore_wait_seconds_bucket
+    "Keeper turn semaphore wait duration buckets (le label)." Counter;
+  add Keeper_metrics.metric_keeper_semaphore_wait_timeout
+    "Keeper turn semaphore wait timeouts. Labels: keeper, channel." Counter;
+  add Keeper_metrics.metric_keeper_turn_fsm_transitions
+    "Keeper turn FSM state transitions. Labels: keeper, from, to." Counter;
   add metric_mention_dedup_decisions_total
     "RFC-0040 sender-side mention dedup decisions. Labels: outcome={skipped|passed|no_target|bypassed}." Counter;
   add metric_grpc_active_streams "Active gRPC bidirectional streams" Gauge;
@@ -3057,3 +2725,5 @@ let reconcile_active_agents_gauge masc_dir =
 
 (** Initialize on module load *)
 let () = init ()
+
+

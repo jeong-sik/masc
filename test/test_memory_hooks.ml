@@ -275,7 +275,7 @@ let test_after_turn_flush_failure_still_continues () =
     [("callback", "memory_after_turn_flush")]
   in
   let before =
-    P.metric_value_or_zero P.metric_keeper_lifecycle_callback_failures
+    P.metric_value_or_zero Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
       ~labels ()
   in
   let memory_hooks =
@@ -310,7 +310,7 @@ let test_after_turn_flush_failure_still_continues () =
     (match decision with Agent_sdk.Hooks.Continue -> true | _ -> false);
   check bool "inner after_turn still ran" true !inner_seen;
   let after =
-    P.metric_value_or_zero P.metric_keeper_lifecycle_callback_failures
+    P.metric_value_or_zero Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
       ~labels ()
   in
   check (float 0.0001) "flush failure counted" (before +. 1.0) after;

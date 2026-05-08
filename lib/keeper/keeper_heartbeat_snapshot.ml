@@ -17,7 +17,7 @@ open Keeper_execution
    produces one of {keeper_paused, approval_pending,
    scheduled_autonomous_disabled, provider_cooldown_pending,
    idle_gate_pending, cooldown_pending, no_signal}. *)
-let proactive_skip_reason_metric = Prometheus.metric_keeper_proactive_skip
+let proactive_skip_reason_metric = Keeper_metrics.metric_keeper_proactive_skip
 
 let keepalive_interval_sec () =
   Runtime_params.get Governance_registry.keeper_keepalive_interval_sec
@@ -164,7 +164,7 @@ let write_heartbeat_snapshot
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
            Prometheus.inc_counter
-             Prometheus.metric_keeper_heartbeat_failures
+             Keeper_metrics.metric_keeper_heartbeat_failures
              ~labels:[("keeper", meta_current.name); ("site", "history_load")]
              ();
            Log.Keeper.warn "write_heartbeat_snapshot: history.jsonl load error (%s): %s"
@@ -173,7 +173,7 @@ let write_heartbeat_snapshot
        in
        if !parse_errors > 0 then begin
          Prometheus.inc_counter
-           Prometheus.metric_keeper_heartbeat_failures
+           Keeper_metrics.metric_keeper_heartbeat_failures
            ~labels:[("keeper", meta_current.name); ("site", "history_parse")]
            ();
          Log.Keeper.warn
@@ -356,7 +356,7 @@ let write_heartbeat_snapshot
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
          Prometheus.inc_counter
-           Prometheus.metric_keeper_heartbeat_failures
+           Keeper_metrics.metric_keeper_heartbeat_failures
            ~labels:[("keeper", meta_current.name); ("site", "thompson_penalty")]
            ();
          Log.Keeper.warn "guard→thompson penalty failed for %s: %s"
@@ -463,7 +463,7 @@ let write_heartbeat_snapshot
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
        Prometheus.inc_counter
-         Prometheus.metric_keeper_sse_broadcast_failures
+         Keeper_metrics.metric_keeper_sse_broadcast_failures
          ~labels:[("keeper", meta_current.name)]
          ();
        Log.Keeper.error "heartbeat SSE broadcast failed: %s" (Printexc.to_string exn));
@@ -482,7 +482,7 @@ let write_heartbeat_snapshot
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
        Prometheus.inc_counter
-         Prometheus.metric_keeper_heartbeat_failures
+         Keeper_metrics.metric_keeper_heartbeat_failures
          ~labels:[("keeper", meta_current.name); ("site", "flush_tool_usage")]
          ();
        Log.Keeper.warn "keeper:%s flush_tool_usage failed: %s"

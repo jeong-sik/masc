@@ -457,19 +457,19 @@ let test_dispatch_event_emits_lifecycle_transition_metric_only_on_phase_change (
   in
   let changed_before =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_keeper_lifecycle_transitions
+      Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_transitions
       ~labels:changed_labels ()
   in
   ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
   ignore (R.dispatch_event ~base_path:bp keeper_name KSM.Fiber_started);
   check (float 0.001) "no same-phase metric emitted" 0.0
     (Masc_mcp.Prometheus.metric_value_or_zero
-       Masc_mcp.Prometheus.metric_keeper_lifecycle_transitions
+       Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_transitions
        ~labels:unchanged_labels ());
   ignore (R.dispatch_event ~base_path:bp keeper_name KSM.Operator_pause);
   let changed_after =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_keeper_lifecycle_transitions
+      Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_transitions
       ~labels:changed_labels ()
   in
   check (float 0.001) "phase-change transition metric incremented"
@@ -481,7 +481,7 @@ let test_dispatch_event_observes_phase_sse_broadcast_failure () =
   let labels = [("keeper", keeper_name); ("site", "phase_changed")] in
   let before =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_keeper_sse_broadcast_failures
+      Masc_mcp.Keeper_metrics.metric_keeper_sse_broadcast_failures
       ~labels ()
   in
   ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
@@ -499,7 +499,7 @@ let test_dispatch_event_observes_phase_sse_broadcast_failure () =
       | Ok _ -> ());
   let after =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_keeper_sse_broadcast_failures
+      Masc_mcp.Keeper_metrics.metric_keeper_sse_broadcast_failures
       ~labels ()
   in
   check (float 0.001) "phase SSE failure metric incremented"
@@ -908,12 +908,12 @@ let test_update_entry_orphan_drop_emits_metrics () =
   let labels = [ "name", name ] in
   let dropped_before =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_keeper_registry_update_dropped
+      Masc_mcp.Keeper_metrics.metric_keeper_registry_update_dropped
       ~labels ()
   in
   let breached_before =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_keeper_registry_orphan_threshold_breached
+      Masc_mcp.Keeper_metrics.metric_keeper_registry_orphan_threshold_breached
       ~labels ()
   in
   (* 5 drops on a never-registered name: each bumps _dropped, the 5th
@@ -923,12 +923,12 @@ let test_update_entry_orphan_drop_emits_metrics () =
   done;
   let dropped_after_5 =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_keeper_registry_update_dropped
+      Masc_mcp.Keeper_metrics.metric_keeper_registry_update_dropped
       ~labels ()
   in
   let breached_after_5 =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_keeper_registry_orphan_threshold_breached
+      Masc_mcp.Keeper_metrics.metric_keeper_registry_orphan_threshold_breached
       ~labels ()
   in
   check (float 0.001) "dropped counter +=5"
@@ -940,12 +940,12 @@ let test_update_entry_orphan_drop_emits_metrics () =
   R.set_last_agent_count ~base_path:bp name 0;
   let dropped_after_6 =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_keeper_registry_update_dropped
+      Masc_mcp.Keeper_metrics.metric_keeper_registry_update_dropped
       ~labels ()
   in
   let breached_after_6 =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_keeper_registry_orphan_threshold_breached
+      Masc_mcp.Keeper_metrics.metric_keeper_registry_orphan_threshold_breached
       ~labels ()
   in
   check (float 0.001) "dropped counter +=6"

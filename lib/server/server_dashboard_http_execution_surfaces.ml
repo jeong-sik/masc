@@ -114,7 +114,7 @@ let _execution_cache =
     the mutation path. *)
 let record_invalidation_failure ~callback ~message exn =
   Prometheus.inc_counter
-    Prometheus.metric_keeper_lifecycle_callback_failures
+    Keeper_metrics.metric_keeper_lifecycle_callback_failures
     ~labels:[ ("callback", callback) ]
     ();
   Log.Dashboard.error "%s: %s" message (Printexc.to_string exn)

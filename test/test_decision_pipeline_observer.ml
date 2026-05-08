@@ -379,9 +379,9 @@ let test_composite_observer_variants_match_tla_sets () =
   let tla = read_file (keeper_composite_lifecycle_tla ()) in
   let check_set label expected actual = check (list string) label expected actual in
   check_set
-    "PhaseSet matches observer ksm_phase variants"
+    "PhaseSet matches observer phase variants"
     (extract_tla_set ~marker:"PhaseSet" tla)
-    (List.map Obs.ksm_phase_to_string Obs.all_ksm_phases);
+    (List.map KSM.phase_to_string KSM.all_phases);
   check_set
     "TurnPhaseSet matches observer turn_phase variants"
     (extract_tla_set ~marker:"TurnPhaseSet" tla)

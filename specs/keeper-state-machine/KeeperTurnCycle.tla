@@ -306,8 +306,6 @@ NextBuggy ==
 
 SpecBuggy == Init /\ [][NextBuggy]_vars /\ WF_vars(FinishTurn)
 
-SelectingRequiresToolPolicyMustHold == SelectingRequiresToolPolicy
-
 Spec ==
     Init /\ [][Next]_vars /\ WF_vars(FinishTurn)
 
@@ -362,6 +360,9 @@ Safety ==
     /\ ExecutingRequiresTrying
     /\ CompactingRequiresTrying
     /\ TerminalCascadeRequiresFinalizing
+
+(* Wrapper for buggy cfg — must be defined AFTER the invariant it references. *)
+SelectingRequiresToolPolicyMustHold == SelectingRequiresToolPolicy
 
 LiveTurnEventuallyClears ==
     turn_live ~> ~turn_live

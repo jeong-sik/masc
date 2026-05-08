@@ -13,11 +13,11 @@ let kind value = H.error_kind_of_string value
 let provider_block_metric_labels provider_key = [("provider", provider_key)]
 
 let provider_block_duration_sum provider_key =
-  P.metric_value_or_zero P.metric_keeper_provider_block_duration_sec
+  P.metric_value_or_zero Masc_mcp.Keeper_metrics.metric_keeper_provider_block_duration_sec
     ~labels:(provider_block_metric_labels provider_key) ()
 
 let provider_block_duration_count provider_key =
-  P.metric_value_or_zero (P.metric_keeper_provider_block_duration_sec ^ "_count")
+  P.metric_value_or_zero (Masc_mcp.Keeper_metrics.metric_keeper_provider_block_duration_sec ^ "_count")
     ~labels:(provider_block_metric_labels provider_key) ()
 
 let test_record_success_keeps_rate_1 () =

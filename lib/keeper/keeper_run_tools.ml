@@ -172,7 +172,7 @@ let prepare_agent_setup
                "keeper: MASC_KEEPER_TOOL_DECAY_TURNS=%S is not a valid integer, using default 5"
                s;
              Prometheus.inc_counter
-               Prometheus.metric_keeper_config_env_parse_failures
+               Keeper_metrics.metric_keeper_config_env_parse_failures
                ~labels:[("var", "MASC_KEEPER_TOOL_DECAY_TURNS")]
                ();
              5)
@@ -492,7 +492,7 @@ let prepare_agent_setup
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
           Prometheus.inc_counter
-            Prometheus.metric_keeper_task_load_failures
+            Keeper_metrics.metric_keeper_task_load_failures
             ~labels:[("keeper", meta.name); ("phase", "task_contract_load")]
             ();
           Log.Keeper.warn
@@ -622,7 +622,7 @@ let prepare_agent_setup
               with
               | Error detail ->
                   Prometheus.inc_counter
-                    Prometheus.metric_keeper_tool_selection_failures
+                    Keeper_metrics.metric_keeper_tool_selection_failures
                     ~labels:[("keeper", meta.name); ("phase", "cascade_resolve")]
                     ();
                   Log.Keeper.warn
@@ -635,7 +635,7 @@ let prepare_agent_setup
                   (match Cascade_config.filter_healthy_strict ~sw ~net providers with
                    | Error rejection ->
                        Prometheus.inc_counter
-                         Prometheus.metric_keeper_tool_selection_failures
+                         Keeper_metrics.metric_keeper_tool_selection_failures
                          ~labels:[("keeper", meta.name); ("phase", "cascade_health")]
                          ();
                        Log.Keeper.warn
@@ -646,7 +646,7 @@ let prepare_agent_setup
                        []
                    | Ok [] ->
                        Prometheus.inc_counter
-                         Prometheus.metric_keeper_tool_selection_failures
+                         Keeper_metrics.metric_keeper_tool_selection_failures
                          ~labels:[("keeper", meta.name); ("phase", "cascade_no_provider")]
                          ();
                        Log.Keeper.warn
@@ -694,7 +694,7 @@ let prepare_agent_setup
                         | Eio.Cancel.Cancelled _ as e -> raise e
                         | exn ->
                             Prometheus.inc_counter
-                              Prometheus.metric_keeper_tool_selection_failures
+                              Keeper_metrics.metric_keeper_tool_selection_failures
                               ~labels:[("keeper", meta.name); ("phase", "topk_llm")]
                               ();
                             Log.Keeper.warn
@@ -704,7 +704,7 @@ let prepare_agent_setup
                             [])))
          | _ ->
            Prometheus.inc_counter
-             Prometheus.metric_keeper_tool_selection_failures
+             Keeper_metrics.metric_keeper_tool_selection_failures
              ~labels:[("keeper", meta.name); ("phase", "topk_llm_no_eio")]
              ();
            Log.Keeper.warn
@@ -1426,6 +1426,25 @@ let prepare_agent_setup
                 Keeper_registry.set_turn_cascade_state
                   ~base_path:config.base_path meta.name
                   Keeper_registry.Cascade_selecting;
+                (* Spec atomic group: SelectToolPolicy(idle->selecting)
+                   is immediately followed by CascadeTrying(selecting->
+                   trying).  Both transitions are materialised inside
+                   the disclosure hook because the spec invariant
+                   [SelectingRequiresToolPolicy] requires
+                   [decision_stage = Decision_tool_policy_selected],
+                   which is only set at this site.  Pre-PR #14153 the
+                   Cascade_trying marking lived inside
+                   [Keeper_unified_turn.retry_loop] (line 1138 era),
+                   producing an [idle -> trying] jump that bypassed
+                   selecting; the move here closes that gap by keeping
+                   the two transitions adjacent.  On retry attempts
+                   the prior cascade state is [Cascade_trying]; the
+                   re-entry sequence becomes [trying -> selecting ->
+                   trying] which is admitted by
+                   [validate_cascade_transition]. *)
+                Keeper_registry.set_turn_cascade_state
+                  ~base_path:config.base_path meta.name
+                  Keeper_registry.Cascade_trying;
                 let disclosure_json =
                   `Assoc
                     [ "ts_unix", `Float now
@@ -1457,7 +1476,7 @@ let prepare_agent_setup
                 | Eio.Cancel.Cancelled _ as e -> raise e
                 | exn ->
                   Prometheus.inc_counter
-                    Prometheus.metric_keeper_decision_audit_flush_failures
+                    Keeper_metrics.metric_keeper_decision_audit_flush_failures
                     ~labels:[("keeper", meta.name)]
                     ();
                   Log.Keeper.warn

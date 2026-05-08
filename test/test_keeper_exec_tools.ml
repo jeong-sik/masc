@@ -144,7 +144,7 @@ let test_execute_with_outcome_policy_gate_is_failure () =
 
 let counter_for_tool_not_allowed ~keeper ~tool ~reason =
   Masc_mcp.Prometheus.metric_value_or_zero
-    Masc_mcp.Prometheus.metric_keeper_tool_not_allowed
+    Masc_mcp.Keeper_metrics.metric_keeper_tool_not_allowed
     ~labels:[ ("keeper", keeper); ("tool", tool); ("reason", reason) ]
     ()
 

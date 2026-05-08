@@ -241,7 +241,7 @@ let record_handoff_artifacts
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
            Prometheus.inc_counter
-             Prometheus.metric_keeper_generation_lineage_failures
+             Keeper_metrics.metric_keeper_generation_lineage_failures
              ~labels:[("keeper", child.name); ("site", "index_append")]
              ();
            Log.Keeper.warn
@@ -249,7 +249,7 @@ let record_handoff_artifacts
              child.name index_path (Printexc.to_string exn))
   | Error err ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_generation_lineage_failures
+        Keeper_metrics.metric_keeper_generation_lineage_failures
         ~labels:[("keeper", child.name); ("site", "manifest_save")]
         ();
       Log.Keeper.warn

@@ -535,7 +535,7 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
         let new_until = now +. cooldown_dur in
         if new_until > state.cooldown_until then begin
           state.cooldown_until <- new_until;
-          Prometheus.observe_histogram Prometheus.metric_keeper_provider_block_duration_sec
+          Prometheus.observe_histogram Keeper_metrics.metric_keeper_provider_block_duration_sec
             ~labels:[("provider", provider_key)] cooldown_dur
         end
       end
@@ -560,7 +560,7 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
       let new_until = now +. cooldown_dur in
       if new_until > state.cooldown_until then begin
         state.cooldown_until <- new_until;
-        Prometheus.observe_histogram Prometheus.metric_keeper_provider_block_duration_sec
+        Prometheus.observe_histogram Keeper_metrics.metric_keeper_provider_block_duration_sec
           ~labels:[("provider", provider_key)] cooldown_dur
       end
     | Hard_quota ->
@@ -575,7 +575,7 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
       let new_until = now +. hard_quota_cooldown_sec in
       if new_until > state.cooldown_until then begin
         state.cooldown_until <- new_until;
-        Prometheus.observe_histogram Prometheus.metric_keeper_provider_block_duration_sec
+        Prometheus.observe_histogram Keeper_metrics.metric_keeper_provider_block_duration_sec
           ~labels:[("provider", provider_key)] hard_quota_cooldown_sec
       end
     | Terminal_failure ->
@@ -591,7 +591,7 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
       let new_until = now +. terminal_failure_cooldown_sec in
       if new_until > state.cooldown_until then begin
         state.cooldown_until <- new_until;
-        Prometheus.observe_histogram Prometheus.metric_keeper_provider_block_duration_sec
+        Prometheus.observe_histogram Keeper_metrics.metric_keeper_provider_block_duration_sec
           ~labels:[("provider", provider_key)] terminal_failure_cooldown_sec
       end)
 

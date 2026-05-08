@@ -289,7 +289,7 @@ let execute_keeper_tool_call_with_outcome
       result
     | `Failure, Malformed_structured parse_error ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_exec_tools_failures
+        Keeper_metrics.metric_keeper_exec_tools_failures
         ~labels:[("keeper", meta.name); ("tool", name)]
         ();
       Log.Keeper.error
@@ -335,7 +335,7 @@ let execute_keeper_tool_call_with_outcome
             "'%s' exists but your preset does not allow it. Use keeper_tools_list to see available tools." name )
     in
     Prometheus.inc_counter
-      Prometheus.metric_keeper_tool_not_allowed
+      Keeper_metrics.metric_keeper_tool_not_allowed
       ~labels:[("keeper", meta.name); ("tool", name); ("reason", reason)]
       ();
     make_executed_tool_result

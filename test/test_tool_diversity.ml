@@ -60,16 +60,16 @@ let test_underused_tool_metrics_flag_unused_web_search () =
     ~keeper_name ~available_tools summary;
   check (float 0.001) "one underused allowed tool" 1.0
     (Masc_mcp.Prometheus.metric_value_or_zero
-       Masc_mcp.Prometheus.metric_keeper_tool_underused_allowed_count
+       Masc_mcp.Keeper_metrics.metric_keeper_tool_underused_allowed_count
        ~labels:[ ("keeper", keeper_name) ] ());
   check (float 0.001) "web search flagged underused" 1.0
     (Masc_mcp.Prometheus.metric_value_or_zero
-       Masc_mcp.Prometheus.metric_keeper_tool_underused_allowed
+       Masc_mcp.Keeper_metrics.metric_keeper_tool_underused_allowed
        ~labels:[ ("keeper", keeper_name); ("tool", "masc_web_search") ]
        ());
   check (float 0.001) "used board post cleared" 0.0
     (Masc_mcp.Prometheus.metric_value_or_zero
-       Masc_mcp.Prometheus.metric_keeper_tool_underused_allowed
+       Masc_mcp.Keeper_metrics.metric_keeper_tool_underused_allowed
        ~labels:[ ("keeper", keeper_name); ("tool", "keeper_board_post") ]
        ())
 

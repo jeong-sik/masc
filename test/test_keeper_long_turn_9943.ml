@@ -38,14 +38,14 @@ module Prom = Masc_mcp.Prometheus
 
 let bucket_count ~keeper ~bucket =
   Prom.metric_value_or_zero
-    Prom.metric_keeper_turn_latency_bucket
+    Masc_mcp.Keeper_metrics.metric_keeper_turn_latency_bucket
     ~labels:[ ("keeper", keeper); ("bucket", bucket) ]
     ()
 
 let model_bucket_count ~keeper ~channel ~provider_kind ~model_used
     ~resolved_model_id ~cascade_profile ~bucket =
   Prom.metric_value_or_zero
-    Prom.metric_keeper_turn_latency_by_model_bucket
+    Masc_mcp.Keeper_metrics.metric_keeper_turn_latency_by_model_bucket
     ~labels:
       [ ("keeper", keeper)
       ; ("channel", channel)

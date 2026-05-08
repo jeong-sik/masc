@@ -27,7 +27,7 @@ val record_tool_skipped :
 (** Record a tool-skip event into the bounded ring. Safe to call from
     cancellable Eio fibers — internal cancellation is re-raised, all
     other exceptions are reported via
-    {!Prometheus.metric_keeper_lifecycle_callback_failures} and logged
+    {!Keeper_metrics.metric_keeper_lifecycle_callback_failures} and logged
     without failing the SSE broadcast path. *)
 
 val approval_queue_summary : unit -> approval_summary

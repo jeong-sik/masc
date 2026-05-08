@@ -205,7 +205,7 @@ let flush_if_needed ~base_path ~keeper_name =
         with Eio.Cancel.Cancelled _ as e -> raise e
            | e ->
              Prometheus.inc_counter
-               Prometheus.metric_keeper_decision_audit_flush_failures
+               Keeper_metrics.metric_keeper_decision_audit_flush_failures
                ~labels:[("keeper", keeper_name)]
                ();
              Log.Keeper.warn "decision_audit flush failed: %s" (Printexc.to_string e));

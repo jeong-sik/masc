@@ -518,10 +518,35 @@ let per_provider_timeout_of_toml ~(source : string)
     (doc : Keeper_toml_loader.toml_doc)
     (key : string)
     : per_provider_timeout_state * float option =
-  per_provider_timeout_of_declared_float_opt
-    ~source
-    ~declared:(List.mem_assoc key doc)
-    (Keeper_toml_loader.toml_float_opt doc key)
+  let declared = List.mem_assoc key doc in
+  let value = Keeper_toml_loader.toml_float_opt doc key in
+  if not declared then
+    Per_provider_timeout_unset, None
+  else
+    match value with
+    | None ->
+        let actual_type =
+          match List.assoc_opt key doc with
+          | Some (Keeper_toml_loader.Toml_float f) ->
+              Printf.sprintf "float(%f)" f
+          | Some (Keeper_toml_loader.Toml_int i) ->
+              Printf.sprintf "int(%d)" i
+          | Some (Keeper_toml_loader.Toml_string s) ->
+              Printf.sprintf "string(%s)" s
+          | Some (Keeper_toml_loader.Toml_bool b) ->
+              Printf.sprintf "bool(%b)" b
+          | Some (Keeper_toml_loader.Toml_string_array _) ->
+              "string_array"
+          | None -> "missing"
+        in
+        Log.Keeper.warn
+          "%s per_provider_timeout has invalid type (got %s); ignoring"
+          source actual_type;
+        Per_provider_timeout_invalid, None
+    | Some f ->
+        (match normalize_per_provider_timeout_opt ~source (Some f) with
+         | Some normalized -> Per_provider_timeout_set, Some normalized
+         | None -> Per_provider_timeout_invalid, None)
 ;;
 
 let per_provider_timeout_of_json_field ~(source : string)

@@ -149,12 +149,13 @@ let record_utf8_repair ~surface ~path ~invalid_bytes =
           |> List.filteri (fun i _ -> i < utf8_repair_path_sample_limit);
       let key = utf8_repair_log_key ~surface ~path in
       let now = Time_compat.now () in
+      let entry_count = Hashtbl.length utf8_repair_log_seen in
       match Hashtbl.find_opt utf8_repair_log_seen key with
       | None ->
           prune_utf8_repair_log_seen_if_needed ~now;
           Hashtbl.replace utf8_repair_log_seen key
             { last_emit = now; last_seen = now; suppressed = 0 };
-          Some 0
+          Some (0, entry_count, 0.0)
       | Some entry
         when (let elapsed = now -. entry.last_emit in
               elapsed >= utf8_repair_log_restate_sec || elapsed < 0.0) ->
@@ -165,9 +166,10 @@ let record_utf8_repair ~surface ~path ~invalid_bytes =
              warning until the clock catches back up to the recorded
              [last_emit].  Treat backwards motion as a forced restate
              so the rate limiter recovers within one record call. *)
+          let elapsed = now -. entry.last_emit in
           Hashtbl.replace utf8_repair_log_seen key
             { last_emit = now; last_seen = now; suppressed = 0 };
-          Some entry.suppressed
+          Some (entry.suppressed, entry_count, elapsed)
       | Some entry ->
           Hashtbl.replace utf8_repair_log_seen key
             { entry with last_seen = now; suppressed = entry.suppressed + 1 };
@@ -176,13 +178,15 @@ let record_utf8_repair ~surface ~path ~invalid_bytes =
   emit_persistence_utf8_repair_metric ();
   match log_decision with
   | None -> ()
-  | Some 0 ->
-      Log.Misc.warn "[%s] persistence UTF-8 repaired path=%s invalid_bytes=%d"
-        surface path invalid_bytes
-  | Some suppressed_repeats ->
+  | Some (suppressed_repeats, entry_count, elapsed) ->
+      let suppressed_suffix =
+        if suppressed_repeats > 0
+        then Printf.sprintf " suppressed_repeats=%d" suppressed_repeats
+        else ""
+      in
       Log.Misc.warn
-        "[%s] persistence UTF-8 repaired path=%s invalid_bytes=%d suppressed_repeats=%d"
-        surface path invalid_bytes suppressed_repeats
+        "[%s] persistence UTF-8 repaired path=%s invalid_bytes=%d entries=%d elapsed=%.1f%s"
+        surface path invalid_bytes entry_count elapsed suppressed_suffix
 
 let persistence_utf8_repair_stats () =
   Stdlib.Mutex.protect utf8_repair_mu (fun () ->

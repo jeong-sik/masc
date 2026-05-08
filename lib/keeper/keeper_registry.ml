@@ -209,35 +209,66 @@ let witness_to_turn_phase : packed_turn_phase -> turn_phase = function
   | Packed Turn_exhausted -> Turn_exhausted
 
 module Turn_phase_transition = struct
+  (* Mirrors [validate_turn_phase_transition] (below): every constructor
+     here corresponds to a [true] arm in the runtime transition matrix.
+     Adding a new variant therefore requires extending both this GADT
+     and the runtime validator at the same time so the type-level and
+     runtime stories stay in lockstep. *)
   type ('from, 'to_) t =
     | Idle_to_idle : (turn_idle, turn_idle) t
     | Idle_to_prompting : (turn_idle, turn_prompting) t
     | Prompting_to_prompting : (turn_prompting, turn_prompting) t
+    | Prompting_to_routing : (turn_prompting, turn_routing) t
     | Prompting_to_executing : (turn_prompting, turn_executing) t
     | Prompting_to_finalizing : (turn_prompting, turn_finalizing) t
+    | Routing_to_prompting : (turn_routing, turn_prompting) t
+    | Routing_to_routing : (turn_routing, turn_routing) t
+    | Routing_to_executing : (turn_routing, turn_executing) t
     | Executing_to_prompting : (turn_executing, turn_prompting) t
+    | Executing_to_routing : (turn_executing, turn_routing) t
     | Executing_to_executing : (turn_executing, turn_executing) t
     | Executing_to_compacting : (turn_executing, turn_compacting) t
     | Executing_to_finalizing : (turn_executing, turn_finalizing) t
+    | Executing_to_exhausted : (turn_executing, turn_exhausted) t
     | Compacting_to_prompting : (turn_compacting, turn_prompting) t
     | Compacting_to_compacting : (turn_compacting, turn_compacting) t
     | Compacting_to_finalizing : (turn_compacting, turn_finalizing) t
+    | Finalizing_to_prompting : (turn_finalizing, turn_prompting) t
+    | Finalizing_to_routing : (turn_finalizing, turn_routing) t
+    | Finalizing_to_executing : (turn_finalizing, turn_executing) t
     | Finalizing_to_finalizing : (turn_finalizing, turn_finalizing) t
+    | Exhausted_to_prompting : (turn_exhausted, turn_prompting) t
+    | Exhausted_to_routing : (turn_exhausted, turn_routing) t
+    | Exhausted_to_executing : (turn_exhausted, turn_executing) t
+    | Exhausted_to_exhausted : (turn_exhausted, turn_exhausted) t
 
   let to_tag : type a b. (a, b) t -> string = function
     | Idle_to_idle -> "idle->idle"
     | Idle_to_prompting -> "idle->prompting"
     | Prompting_to_prompting -> "prompting->prompting"
+    | Prompting_to_routing -> "prompting->routing"
     | Prompting_to_executing -> "prompting->executing"
     | Prompting_to_finalizing -> "prompting->finalizing"
+    | Routing_to_prompting -> "routing->prompting"
+    | Routing_to_routing -> "routing->routing"
+    | Routing_to_executing -> "routing->executing"
     | Executing_to_prompting -> "executing->prompting"
+    | Executing_to_routing -> "executing->routing"
     | Executing_to_executing -> "executing->executing"
     | Executing_to_compacting -> "executing->compacting"
     | Executing_to_finalizing -> "executing->finalizing"
+    | Executing_to_exhausted -> "executing->exhausted"
     | Compacting_to_prompting -> "compacting->prompting"
     | Compacting_to_compacting -> "compacting->compacting"
     | Compacting_to_finalizing -> "compacting->finalizing"
+    | Finalizing_to_prompting -> "finalizing->prompting"
+    | Finalizing_to_routing -> "finalizing->routing"
+    | Finalizing_to_executing -> "finalizing->executing"
     | Finalizing_to_finalizing -> "finalizing->finalizing"
+    | Exhausted_to_prompting -> "exhausted->prompting"
+    | Exhausted_to_routing -> "exhausted->routing"
+    | Exhausted_to_executing -> "exhausted->executing"
+    | Exhausted_to_exhausted -> "exhausted->exhausted"
 end
 
 type decision_stage =
@@ -898,17 +929,17 @@ let mark_sdk_turn_started ~base_path name =
     match e.current_turn_observation with
     | None -> e
     | Some obs ->
-      if obs.turn_phase = Turn_prompting
-         && obs.cascade_state = Cascade_idle
-         && obs.decision_stage = Decision_undecided
+      if obs.turn_phase = Packed Turn_prompting
+         && obs.cascade_state = Packed Cascade_idle
+         && obs.decision_stage = Packed Decision_undecided
       then e
       else (
         changed := true;
         let new_obs = {
           obs with
-          turn_phase = Turn_prompting;
-          cascade_state = Cascade_idle;
-          decision_stage = Decision_undecided;
+          turn_phase = Packed Turn_prompting;
+          cascade_state = Packed Cascade_idle;
+          decision_stage = Packed Decision_undecided;
         } in
         { e with current_turn_observation = Some new_obs }));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now

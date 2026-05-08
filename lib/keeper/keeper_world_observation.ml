@@ -574,6 +574,28 @@ let check_self_comment_status ~self_tokens ~(post_id : string)
               Board.Agent_id.to_string latest.author,
               short_preview ~max_len:60 latest.content )
 
+type stigmergy_match_result = { overall_score : int }
+
+let stigmergy_match ~(meta : keeper_meta)
+    ~(signal : Board_dispatch.keeper_board_signal) : stigmergy_match_result =
+  let signal_text = String.lowercase_ascii (board_signal_text signal) in
+  let goal_keywords =
+    [ meta.goal; meta.short_goal; meta.mid_goal; meta.long_goal ]
+    |> List.filter (fun s -> String.trim s <> "")
+    |> List.concat_map (fun g ->
+         String.split_on_char ' ' (String.lowercase_ascii g)
+         |> List.map String.trim
+         |> List.filter (fun s -> String.length s > 3))
+    |> List.sort_uniq String.compare
+  in
+  let score =
+    List.fold_left
+      (fun acc kw ->
+        if String_util.contains_substring signal_text kw then acc + 5 else acc)
+      0 goal_keywords
+  in
+  { overall_score = min score 50 }
+
 let board_signal_wake_reason
     ~continuity_summary
     ~(meta : keeper_meta)
@@ -584,13 +606,17 @@ let board_signal_wake_reason
   else if scope_message_feed_enabled meta then
     Some "board_activity"
   else
-    let self_tokens = self_identity_tokens meta in
-    match signal.kind with
-    | Board_dispatch.Board_comment_added ->
-        (match check_self_comment_status ~self_tokens ~post_id:signal.post_id with
-         | `New_external _ -> Some "thread_reply_after_self_comment"
-         | `Never | `No_new_external -> None)
-    | Board_dispatch.Board_post_created -> None
+    let stigmergy = stigmergy_match ~meta ~signal in
+    if stigmergy.overall_score > 0 then
+      Some ("stigmergy: score=" ^ string_of_int stigmergy.overall_score)
+    else
+      let self_tokens = self_identity_tokens meta in
+      match signal.kind with
+      | Board_dispatch.Board_comment_added ->
+          (match check_self_comment_status ~self_tokens ~post_id:signal.post_id with
+           | `New_external _ -> Some "thread_reply_after_self_comment"
+           | `Never | `No_new_external -> None)
+      | Board_dispatch.Board_post_created -> None
 
 let json_string_member name fields =
   match List.assoc_opt name fields with

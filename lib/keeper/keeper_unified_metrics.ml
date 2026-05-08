@@ -1117,6 +1117,9 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   in
   let is_board_reactive = observation.pending_board_events <> [] in
   let is_mention_reactive = observation.pending_mentions <> [] in
+  let has_meaningful_work =
+    has_text || has_substantive_tools || has_validated_evidence
+  in
   let rt = meta.runtime in
   let social_state : Social.social_state =
     Option.value social_state
@@ -1171,7 +1174,11 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
           rt.proactive_rt.count_total
           + (if update_proactive_rt && is_scheduled_autonomous_cycle then 1 else 0);
         last_ts =
-          (if update_proactive_rt && is_scheduled_autonomous_cycle then now_ts
+          (if update_proactive_rt
+              && (is_scheduled_autonomous_cycle
+                  || ((is_board_reactive || is_mention_reactive)
+                      && has_meaningful_work))
+           then now_ts
            else rt.proactive_rt.last_ts);
         visible_count_total =
           rt.proactive_rt.visible_count_total

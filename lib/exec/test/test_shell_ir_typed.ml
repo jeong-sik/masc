@@ -89,14 +89,19 @@ let test_sudo_roundtrip () =
 let test_risk_levels () =
   let check simple expected =
     let w = Shell_ir_typed.of_simple simple in
-    assert (Shell_ir_typed.risk w = expected)
+    let actual = Shell_ir_typed.risk w in
+    if actual <> expected then
+      (Printf.printf "risk mismatch: expected %s, got %s\n"
+         (match expected with `Safe -> "Safe" | `Audited -> "Audited" | `Privileged -> "Privileged")
+         (match actual with `Safe -> "Safe" | `Audited -> "Audited" | `Privileged -> "Privileged");
+       assert false)
   in
   check (simple (bin_ok "ls")) `Safe;
-  check (simple (bin_ok "cat")) `Safe;
-  check (simple (bin_ok "rg")) `Safe;
+  check (simple ~args:[lit "/etc/passwd"] (bin_ok "cat")) `Safe;
+  check (simple ~args:[lit "foo"] (bin_ok "rg")) `Safe;
   check (simple ~args:[lit "status"] (bin_ok "git")) `Audited;
   check (simple ~args:[lit "clone"; lit "x"] (bin_ok "git")) `Audited;
-  check (simple (bin_ok "curl")) `Audited;
+  check (simple ~args:[lit "https://example.com"] (bin_ok "curl")) `Audited;
   check (simple (bin_ok "rm")) `Privileged;
   check (simple (bin_ok "sudo")) `Privileged
 
@@ -106,11 +111,11 @@ let test_sandbox_levels () =
     assert (Shell_ir_typed.sandbox w = expected)
   in
   check (simple (bin_ok "ls")) `Host;
-  check (simple (bin_ok "cat")) `Host;
-  check (simple (bin_ok "rg")) `Host;
+  check (simple ~args:[lit "/etc/passwd"] (bin_ok "cat")) `Host;
+  check (simple ~args:[lit "foo"] (bin_ok "rg")) `Host;
   check (simple ~args:[lit "status"] (bin_ok "git")) `Host;
   check (simple ~args:[lit "clone"; lit "x"] (bin_ok "git")) `Docker;
-  check (simple (bin_ok "curl")) `Host;
+  check (simple ~args:[lit "https://example.com"] (bin_ok "curl")) `Host;
   check (simple (bin_ok "rm")) `Host;
   check (simple (bin_ok "sudo")) `Host
 

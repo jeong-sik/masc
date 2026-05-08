@@ -831,7 +831,7 @@ let validate_turn_phase_transition ~from ~to_ =
          | (Turn_compacting, Turn_finalizing) -> true  (* via set_turn_phase: compaction failure *)
          (* from Turn_finalizing *)
          | (Turn_finalizing, Turn_idle) -> false  (* new turn is reset *)
-         | (Turn_finalizing, Turn_prompting) -> false  (* new turn is reset *)
+         | (Turn_finalizing, Turn_prompting) -> true  (* via set_turn_cascade_state: degraded retry re-entering selecting *)
          | (Turn_finalizing, Turn_executing) -> false
          | (Turn_finalizing, Turn_compacting) -> false
          | (Turn_finalizing, Turn_finalizing) -> true

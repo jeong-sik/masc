@@ -14,7 +14,7 @@
     4. Non-empty (TLA+ ToolSetNeverEmpty). *)
 
 let test_includes_shard_floor () =
-  let names = Keeper_tool_policy.failing_minimum_tool_names () in
+  let names = Masc_mcp.Keeper_tool_policy.failing_minimum_tool_names () in
   let assert_includes tool =
     Alcotest.(check bool)
       (Printf.sprintf "%s in shard floor" tool) true (List.mem tool names)
@@ -26,7 +26,7 @@ let test_includes_shard_floor () =
   assert_includes "keeper_tools_list"
 
 let test_includes_essential_masc () =
-  let names = Keeper_tool_policy.failing_minimum_tool_names () in
+  let names = Masc_mcp.Keeper_tool_policy.failing_minimum_tool_names () in
   let assert_includes tool =
     Alcotest.(check bool)
       (Printf.sprintf "%s in essential masc" tool) true (List.mem tool names)
@@ -37,13 +37,13 @@ let test_includes_essential_masc () =
   assert_includes "masc_approval_pending"
 
 let test_no_duplicates () =
-  let names = Keeper_tool_policy.failing_minimum_tool_names () in
+  let names = Masc_mcp.Keeper_tool_policy.failing_minimum_tool_names () in
   let sorted = List.sort_uniq String.compare names in
   Alcotest.(check int) "no duplicates after union"
     (List.length sorted) (List.length names)
 
 let test_nonempty () =
-  let names = Keeper_tool_policy.failing_minimum_tool_names () in
+  let names = Masc_mcp.Keeper_tool_policy.failing_minimum_tool_names () in
   Alcotest.(check bool) "non-empty (TLA+ ToolSetNeverEmpty)"
     true (names <> [])
 
@@ -59,7 +59,7 @@ let test_essential_masc_ssot_matches_toml () =
   Alcotest.(check (list string))
     "essential_masc_minimum_names mirrors [masc.essential] toml group"
     expected
-    Keeper_tool_policy.essential_masc_minimum_names
+    Masc_mcp.Keeper_tool_policy.essential_masc_minimum_names
 
 let () =
   Alcotest.run "failing_minimum_essential" [

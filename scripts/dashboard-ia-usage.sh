@@ -20,6 +20,11 @@
 #   1  CLI / network error
 #   2  no relevant counters present (server has no traffic yet)
 #
+# Environment variables (CLI flags take precedence):
+#   MASC_METRICS_ENDPOINT   endpoint URL (takes priority over MASC_METRICS_URL)
+#   MASC_METRICS_URL        endpoint URL alias (back-compat; lower priority)
+#   MASC_METRICS_TOKEN      Bearer token (same as --token)
+#
 # Notes:
 #   - Counters are cumulative since process start. The "--since" label is
 #     printed in the report header but does NOT perform windowed queries;

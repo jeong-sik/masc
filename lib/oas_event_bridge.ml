@@ -544,7 +544,19 @@ let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.
         (Printf.sprintf
            "context compact started agent=%s trigger=%s"
            agent_name trigger)
-  | _ -> ()
+  (* Variants below previously absorbed by [_ -> ()] catch-all.  Each is
+     enumerated explicitly so adding a new [Agent_sdk.Event_bus.payload]
+     variant fails the build instead of silently dropping the log line. *)
+  | Agent_sdk.Event_bus.AgentFailed _
+  | Agent_sdk.Event_bus.HandoffRequested _
+  | Agent_sdk.Event_bus.HandoffCompleted _
+  | Agent_sdk.Event_bus.ElicitationCompleted _
+  | Agent_sdk.Event_bus.ContentReplacementReplaced _
+  | Agent_sdk.Event_bus.ContentReplacementKept _
+  | Agent_sdk.Event_bus.SlotSchedulerObserved _
+  | Agent_sdk.Event_bus.InferenceTelemetry _
+  | Agent_sdk.Event_bus.Custom _ ->
+      ()
 
 (** Build the SSE JSON wrapper. [correlation_id] and [run_id] are
     mandatory (from the envelope); all other fields are optional. *)

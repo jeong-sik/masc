@@ -296,7 +296,7 @@ let keeper_trust_json ?(include_receipt = false)
     | None ->
       `Assoc
         [
-          ("name", `String meta.cascade_name);
+          ("name", `String (Keeper_types.cascade_name_of_meta meta));
           ("cascade_ref", cascade_ref_json);
           ("selected_model", `Null);
           ("attempt_count", `Int 0);
@@ -591,7 +591,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
           let trace_history_count = List.length m.runtime.trace_history in
           let active_model = Keeper_exec_status.active_model_of_meta m in
           let next_model_hint = Keeper_exec_status.next_model_hint_of_meta m in
-          let effective_cascade_name = live_keeper_cascade_name m.cascade_name in
+          let effective_cascade_name = live_keeper_cascade_name (Keeper_types.cascade_name_of_meta m) in
           let cascade_models =
             Cascade_runtime.models_of_cascade_name
               (Keeper_cascade_profile.Runtime_name effective_cascade_name)
@@ -900,7 +900,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                   ("message_count", `Int (Safe_ops.json_int "message_count" metrics));
                 ]
             | None ->
-                (let effective_cascade_name = live_keeper_cascade_name m.cascade_name in
+                (let effective_cascade_name = live_keeper_cascade_name (Keeper_types.cascade_name_of_meta m) in
                  let effective_models =
                    Cascade_runtime.models_of_cascade_name
                      (Keeper_cascade_profile.Runtime_name effective_cascade_name)
@@ -1653,10 +1653,11 @@ let keeper_config_json (config : Coord.config) (name : string)
           ("effective_system_prompt", `String effective_system_prompt);
         ]
       in
-      let effective_cascade_name = live_keeper_cascade_name m.cascade_name in
+      let cascade_name = Keeper_types.cascade_name_of_meta m in
+      let effective_cascade_name = live_keeper_cascade_name cascade_name in
       let execution =
         `Assoc [
-          ("selected_cascade_name", `String m.cascade_name);
+          ("selected_cascade_name", `String cascade_name);
           ( "selected_cascade_canonical",
             `String effective_cascade_name );
           ( "cascade_ref",

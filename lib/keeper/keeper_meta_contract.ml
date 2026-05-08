@@ -322,6 +322,13 @@ type keeper_meta =
   ; meta_version : int
   }
 
+let cascade_name_of_meta (m : keeper_meta) : string =
+  match m.cascade_ref with
+  | Some ref_ when not (String.equal ref_.Cascade_ref.group "") ->
+    ref_.Cascade_ref.group
+  | _ -> m.cascade_name
+;;
+
 let proactive_cycle_outcome_to_string = function
   | Proactive_never_started -> "never_started"
   | Proactive_unknown -> "unknown"

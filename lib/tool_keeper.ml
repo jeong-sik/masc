@@ -321,7 +321,7 @@ let keeper_list_row_json ~runtime_class config name =
             ("proactive_idle_sec", `Int meta.proactive.idle_sec);
             ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
             ("skill_route", keeper_list_skill_route_json config meta);
-            ("cascade_name", `String meta.cascade_name);
+            ("cascade_name", `String (Keeper_types.cascade_name_of_meta meta));
             ("created_at", `String meta.created_at);
             ("updated_at", `String meta.updated_at);
           ]
@@ -524,7 +524,7 @@ let default_keeper_model_label (meta : keeper_meta) =
   | "" -> (
       match
         Cascade_runtime.models_of_cascade_name
-          (Keeper_cascade_profile.Runtime_name meta.cascade_name)
+          (Keeper_cascade_profile.Runtime_name (Keeper_types.cascade_name_of_meta meta))
       with
       | first :: _ when not (String.equal (String.trim first) "") -> first
       | _ -> Env_config.Local_runtime.default_model)

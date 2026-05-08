@@ -275,6 +275,18 @@ type keeper_meta = {
 
 val now_iso : unit -> string
 
+val cascade_name_of_meta : keeper_meta -> string
+(** [cascade_name_of_meta m] is the canonical cascade name for the keeper.
+
+    Resolution order (RFC-0041 transition phase):
+    1. If [m.cascade_ref] is [Some] and [.group] is non-empty, return [.group].
+    2. Otherwise return [m.cascade_name].
+
+    During the migration phase both fields coexist and may diverge if a
+    caller writes only one. New code MUST set [cascade_ref] when changing
+    routing — read sites should use this helper instead of touching
+    [m.cascade_name] directly. *)
+
 val tool_preset_to_string : tool_preset -> string
 val tool_preset_of_string : string -> tool_preset option
 

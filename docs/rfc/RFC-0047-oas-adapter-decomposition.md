@@ -1,12 +1,46 @@
 # RFC-0047 — `oas_*` adapter family decomposition (consumer-only OAS boundary)
 
-Status: Draft
+Status: Implemented (Phase 7, 2026-05-09)
 Author: jeong-sik
 Date: 2026-05-08
+Implemented: 2026-05-09
 Supersedes: —
 Related: RFC-0045 (SDK turn boundary alignment), RFC-0046 (FsmHub SSOT),
 keeper sub-library extraction analysis (memory
 `project_keeper_sublib_extraction_analysis.md`)
+
+## Implementation summary (2026-05-09)
+
+Closed across 10 PRs:
+
+| Phase | PR | Outcome |
+|---|---|---|
+| RFC body | #14230 | Layering principle + 7-phase plan |
+| 1. Inventory baseline | #14231 | 807-line caller inventory + 25-edge module graph |
+| 2. Clean rename (3 files) | #14239 | `oas_response/log_bridge/bus_instrument` → `agent_sdk_*` |
+| 3a. Cascade leaves (3 files) | #14281 | `_named_fsm/_named_error/_exec_transport` → `lib/cascade/` |
+| 3b. Cascade entry (2 files) | #14288 | `_named_cascade/_cascade` → `lib/cascade/` |
+| 3c. Cascade capstone | #14291 | `_exec` → `cascade_runner`; `oas_model_resolve` deleted (was 6-line facade) |
+| 5. Events | #14298 | `_event_bridge/_events` → `lib/cascade/cascade_events*` |
+| 6. Keeper residue (2 files) | #14299 | `_exec_agent/_exec_checkpoint` → `lib/keeper/` |
+| 4. Hotspot rename | #14301 | `oas_worker_named.ml` (1459 LOC) → `keeper/keeper_turn_driver.ml` |
+| 4b. Facade dissolution | #14311 | `oas_worker.ml` deleted, 39 callers redirected to source modules |
+| 7. Lint + RFC closeout | (this PR) | CI gate `no-oas-prefix-in-lib`; RFC status updated |
+
+`ls lib/oas_*.ml` returns empty. RFC §11.1 satisfied.
+
+## Deferred (not blocking RFC closure)
+
+- **A/B/C split inside `keeper_turn_driver.ml` (1459 LOC)**: original RFC §6
+  Phase 4 proposed splitting interleaved Agent SDK / cascade / keeper
+  bookkeeping into 3 files. Implementation found the concerns are
+  interleaved within single function bodies; mechanical split is not
+  possible. The rename to `keeper_turn_driver` aligns the file name
+  with the dominant concern (keeper bookkeeping). The actual A/B/C
+  split is a future RFC, separate from `oas_*` prefix retirement.
+- **Production canary** (RFC §6 Phase 4): Phase 4 was reduced to a
+  rename, so no behavior-change canary was needed. The split RFC will
+  carry that requirement.
 
 ## 1. Problem
 

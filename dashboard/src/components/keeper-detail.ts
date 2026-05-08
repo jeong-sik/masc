@@ -1056,7 +1056,12 @@ export function KeeperDetailPage() {
             title="운영 상태 개요"
           >
         ${'' /* RFC-0046: 6-axis composite snapshot (KSM/KTC/KDP/KCL/KMC/breaker) — SSOT for keeper FSM state */}
-        <${FsmHub} mode="detail" selectedName=${keeper.name} />
+        ${'' /* RFC-0046 §7 #2: share useKeeperComposite with FsmHub to dedup the /composite poll */}
+        <${FsmHub}
+          mode="detail"
+          selectedName=${keeper.name}
+          externalSnapshot=${compositeSnapshot}
+        />
         <${CollapsibleSection} title="Phase State Machine">
           <${KeeperStateDiagramPanel} keeperName=${keeper.name} snapshot=${compositeSnapshot} />
         <//>

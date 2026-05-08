@@ -240,10 +240,23 @@ export interface FsmHubProps {
    *  selector — the parent surface (keeper detail page) has already
    *  pinned a single keeper, so re-offering selection is noise. */
   mode?: 'fleet' | 'detail'
+  /** RFC-0046 §7 #2 follow-up: parent-supplied composite snapshot.
+   *  When the prop is present (not `undefined`), this hub stops
+   *  issuing its own /composite poll and feeds the parent value into
+   *  its reducer as a `fetch_succeeded` event. `null` means the
+   *  parent is loading — wait, do not race a duplicate fetch.
+   *  Only honoured in `mode='detail'`; in `'fleet'` mode the keeper
+   *  selector tablist drives `selectedName` directly and the parent
+   *  has no single snapshot to share. */
+  externalSnapshot?: KeeperCompositeSnapshot | null
 }
 
 export function FsmHub(props: FsmHubProps = {}) {
   const mode = props.mode ?? 'fleet'
+  // RFC-0046 §7 #2: parent-supplied snapshot only honoured in 'detail'
+  // mode. Fleet mode drives selection internally and has no single
+  // snapshot to share, so we fall back to the existing fetch path.
+  const externalSnapshot = mode === 'detail' ? props.externalSnapshot : undefined
   const [selected, setSelected] = useState<string | null>(props.selectedName ?? null)
   useEffect(() => {
     if (props.selectedName !== undefined && props.selectedName !== selected) {
@@ -435,6 +448,25 @@ export function FsmHub(props: FsmHubProps = {}) {
 
   useEffect(() => {
     if (!activeSelected) return
+
+    // RFC-0046 §7 #2: parent supplies the snapshot in 'detail' mode.
+    // Inject it into the reducer instead of issuing a duplicate fetch.
+    // `null` = parent is still loading — emit fetch_started so the
+    // skeleton UI shows, then wait for the next prop update.
+    if (externalSnapshot !== undefined) {
+      if (externalSnapshot == null) {
+        dispatch({ type: 'fetch_started', keeperName: activeSelected })
+      } else {
+        dispatch({
+          type: 'fetch_succeeded',
+          keeperName: activeSelected,
+          snapshot: externalSnapshot,
+          fetchedAt: Date.now() / 1000,
+        })
+      }
+      return
+    }
+
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId
     dispatch({ type: 'fetch_started', keeperName: activeSelected })
@@ -468,7 +500,7 @@ export function FsmHub(props: FsmHubProps = {}) {
         })
       }
     })()
-  }, [activeSelected, shouldRefetchForTick, pollTick])
+  }, [activeSelected, shouldRefetchForTick, pollTick, externalSnapshot])
 
   useGlobalShortcut(
     (ev) => ev.key >= '1' && ev.key <= '9',

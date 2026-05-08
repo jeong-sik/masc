@@ -172,7 +172,7 @@ let prepare_agent_setup
                "keeper: MASC_KEEPER_TOOL_DECAY_TURNS=%S is not a valid integer, using default 5"
                s;
              Prometheus.inc_counter
-               Prometheus.metric_keeper_config_env_parse_failures
+               Keeper_metrics.metric_keeper_config_env_parse_failures
                ~labels:[("var", "MASC_KEEPER_TOOL_DECAY_TURNS")]
                ();
              5)
@@ -344,7 +344,7 @@ let prepare_agent_setup
           acc.discovered
           ~turn:acc.current_turn
           ~names:discovered_names;
-        let masc_schemas = !Keeper_exec_tools.masc_schemas_ref in
+        let masc_schemas = Keeper_exec_tools.masc_schemas_snapshot () in
         let result_json ~already_visible (name, score) =
                let help_opt = Tool_help_registry.find_entry masc_schemas name in
                let desc =
@@ -492,7 +492,7 @@ let prepare_agent_setup
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
           Prometheus.inc_counter
-            Prometheus.metric_keeper_task_load_failures
+            Keeper_metrics.metric_keeper_task_load_failures
             ~labels:[("keeper", meta.name); ("phase", "task_contract_load")]
             ();
           Log.Keeper.warn
@@ -563,6 +563,12 @@ let prepare_agent_setup
         || turn_affordances_require_tool_gate_with_allowed
              ~record_suppression_metric:true ~allowed_tool_names turn_affordances)
   in
+  let satisfied_required_tool_names () =
+    acc.tool_calls
+    |> List.map (fun (detail : tool_call_detail) ->
+      detail.tool_name, detail.outcome)
+    |> satisfied_required_tool_names_of_outcomes
+  in
   let compute_tool_surface ~turn ~messages ~current_tool_choice ~decay_discovered
       : computed_tool_surface =
     let last_user_text =
@@ -616,7 +622,7 @@ let prepare_agent_setup
               with
               | Error detail ->
                   Prometheus.inc_counter
-                    Prometheus.metric_keeper_tool_selection_failures
+                    Keeper_metrics.metric_keeper_tool_selection_failures
                     ~labels:[("keeper", meta.name); ("phase", "cascade_resolve")]
                     ();
                   Log.Keeper.warn
@@ -629,7 +635,7 @@ let prepare_agent_setup
                   (match Cascade_config.filter_healthy_strict ~sw ~net providers with
                    | Error rejection ->
                        Prometheus.inc_counter
-                         Prometheus.metric_keeper_tool_selection_failures
+                         Keeper_metrics.metric_keeper_tool_selection_failures
                          ~labels:[("keeper", meta.name); ("phase", "cascade_health")]
                          ();
                        Log.Keeper.warn
@@ -640,7 +646,7 @@ let prepare_agent_setup
                        []
                    | Ok [] ->
                        Prometheus.inc_counter
-                         Prometheus.metric_keeper_tool_selection_failures
+                         Keeper_metrics.metric_keeper_tool_selection_failures
                          ~labels:[("keeper", meta.name); ("phase", "cascade_no_provider")]
                          ();
                        Log.Keeper.warn
@@ -688,7 +694,7 @@ let prepare_agent_setup
                         | Eio.Cancel.Cancelled _ as e -> raise e
                         | exn ->
                             Prometheus.inc_counter
-                              Prometheus.metric_keeper_tool_selection_failures
+                              Keeper_metrics.metric_keeper_tool_selection_failures
                               ~labels:[("keeper", meta.name); ("phase", "topk_llm")]
                               ();
                             Log.Keeper.warn
@@ -698,7 +704,7 @@ let prepare_agent_setup
                             [])))
          | _ ->
            Prometheus.inc_counter
-             Prometheus.metric_keeper_tool_selection_failures
+             Keeper_metrics.metric_keeper_tool_selection_failures
              ~labels:[("keeper", meta.name); ("phase", "topk_llm_no_eio")]
              ();
            Log.Keeper.warn
@@ -715,11 +721,24 @@ let prepare_agent_setup
         ~discovered
 
     in
-    let required_tool_names =
+    let required_tool_names_raw =
       required_tool_names_for_turn
         ~current_task_required_tool_names:(current_task_required_tools ())
         ~per_call_required_tool_names:required_tool_names
+      |> List.map Keeper_tool_disclosure.canonical_tool_name
       |> Keeper_types.dedupe_keep_order
+    in
+    let required_tool_names =
+      outstanding_required_tool_names
+        ~required_tool_names:required_tool_names_raw
+        ~satisfied_tool_names:(satisfied_required_tool_names ())
+    in
+    let current_tool_choice =
+      match current_tool_choice with
+      | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _)
+        when required_tool_names_raw <> [] && required_tool_names = [] ->
+        None
+      | _ -> current_tool_choice
     in
     let visible_required_tool_names =
       required_tool_names
@@ -792,7 +811,8 @@ let prepare_agent_setup
            ~allowed_tool_names:all_allowed
     in
     let all_allowed =
-      tool_names_for_required_gate_surface ~tool_gate_requested all_allowed
+      tool_names_for_required_gate_surface
+        ~tool_gate_requested ~required_tool_names all_allowed
     in
     let all_allowed =
       if List.length all_allowed > max_tools then (
@@ -1260,6 +1280,17 @@ let prepare_agent_setup
                          with keeper_task_done or keeper_task_submit_for_verification."
                         computed_surface.per_call_turn
                         computed_surface.per_call_max_turns)
+                 else if computed_surface.required_tool_names <> []
+                 then
+                   append_ctx
+                     ctx
+                     (Printf.sprintf
+                        "[REQUIRED TOOLS] This Agent.run call has explicit \
+                         required_tools: %s. You MUST use these exact runtime \
+                         tools before answering in natural language. Do not \
+                         substitute a shell command or status read for a \
+                         listed required tool."
+                        (String.concat ", " computed_surface.required_tool_names))
                  else if is_retry
                  then
                    append_ctx
@@ -1395,6 +1426,25 @@ let prepare_agent_setup
                 Keeper_registry.set_turn_cascade_state
                   ~base_path:config.base_path meta.name
                   Keeper_registry.Cascade_selecting;
+                (* Spec atomic group: SelectToolPolicy(idle->selecting)
+                   is immediately followed by CascadeTrying(selecting->
+                   trying).  Both transitions are materialised inside
+                   the disclosure hook because the spec invariant
+                   [SelectingRequiresToolPolicy] requires
+                   [decision_stage = Decision_tool_policy_selected],
+                   which is only set at this site.  Pre-PR #14153 the
+                   Cascade_trying marking lived inside
+                   [Keeper_unified_turn.retry_loop] (line 1138 era),
+                   producing an [idle -> trying] jump that bypassed
+                   selecting; the move here closes that gap by keeping
+                   the two transitions adjacent.  On retry attempts
+                   the prior cascade state is [Cascade_trying]; the
+                   re-entry sequence becomes [trying -> selecting ->
+                   trying] which is admitted by
+                   [validate_cascade_transition]. *)
+                Keeper_registry.set_turn_cascade_state
+                  ~base_path:config.base_path meta.name
+                  Keeper_registry.Cascade_trying;
                 let disclosure_json =
                   `Assoc
                     [ "ts_unix", `Float now
@@ -1426,7 +1476,7 @@ let prepare_agent_setup
                 | Eio.Cancel.Cancelled _ as e -> raise e
                 | exn ->
                   Prometheus.inc_counter
-                    Prometheus.metric_keeper_decision_audit_flush_failures
+                    Keeper_metrics.metric_keeper_decision_audit_flush_failures
                     ~labels:[("keeper", meta.name)]
                     ();
                   Log.Keeper.warn

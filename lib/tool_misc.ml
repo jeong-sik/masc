@@ -102,6 +102,9 @@ let handle_tool_help _ctx args =
 let handle_web_search _ctx args =
   Tool_misc_web_search.handle args
 
+let handle_web_fetch _ctx args =
+  Tool_misc_web_fetch.handle args
+
 (* ================================================================ *)
 (* Public re-exports from sub-modules                               *)
 (* ================================================================ *)
@@ -131,6 +134,7 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_tool_stats" -> Some (handle_tool_stats ctx args)
   | "masc_tool_help" -> Some (handle_tool_help ctx args)
   | "masc_web_search" -> Some (handle_web_search ctx args)
+  | "masc_web_fetch" -> Some (handle_web_fetch ctx args)
   | "masc_tool_admin_snapshot" -> Some (Tool_misc_admin.handle_tool_admin_snapshot admin_ctx args)
   | "masc_tool_admin_update" -> Some (Tool_misc_admin.handle_tool_admin_update admin_ctx args)
   | "masc_deep_review" -> Some (Tool_deep_review.handle_deep_review ctx.config args)
@@ -146,12 +150,13 @@ let _tool_spec_read_only =
   [
     "masc_tool_help";
     "masc_web_search";
+    "masc_web_fetch";
     "masc_dashboard";
   ]
 
 let tool_required_permission = function
   | "masc_config" | "masc_dashboard"
-  | "masc_tool_stats" | "masc_tool_help" | "masc_web_search" ->
+  | "masc_tool_stats" | "masc_tool_help" | "masc_web_search" | "masc_web_fetch" ->
       Some Masc_domain.CanReadState
   | "masc_tool_admin_snapshot" | "masc_tool_admin_update" ->
       Some Masc_domain.CanAdmin

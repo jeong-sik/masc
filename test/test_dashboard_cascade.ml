@@ -538,7 +538,8 @@ let test_provider_status_transitions () =
     ; events_in_window = 5; rejected_in_window = 5
     ; top_fingerprints = []; last_failure_at = None
     ; p50_latency_ms = None; p95_latency_ms = None; latency_samples = 0
-    ; avg_confidence = None; confidence_samples = 0 }
+    ; avg_confidence = None; confidence_samples = 0
+    ; avg_cost_usd = None; cost_samples = 0; health_score = 0.0 }
   in
   let info_active : Masc_mcp.Cascade_health_tracker.provider_info =
     { info_cooldown with in_cooldown = false; consecutive_failures = 0
@@ -946,7 +947,9 @@ let mk_info ?(success_rate = 1.0) ?(consecutive_failures = 0)
     ?(events_in_window = 0) ?(rejected_in_window = 0)
     ?(top_fingerprints = []) ?(last_failure_at = None)
     ?(p50_latency_ms = None) ?(p95_latency_ms = None) ?(latency_samples = 0)
-    ?(avg_confidence = None) ?(confidence_samples = 0) provider_key
+    ?(avg_confidence = None) ?(confidence_samples = 0)
+    ?(avg_cost_usd = None) ?(cost_samples = 0)
+    ?(health_score = 1.0) provider_key
   : Masc_mcp.Cascade_health_tracker.provider_info =
   { provider_key
   ; success_rate
@@ -962,6 +965,9 @@ let mk_info ?(success_rate = 1.0) ?(consecutive_failures = 0)
   ; latency_samples
   ; avg_confidence
   ; confidence_samples
+  ; avg_cost_usd
+  ; cost_samples
+  ; health_score
   }
 
 let test_recommendation_healthy_returns_none () =

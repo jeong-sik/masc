@@ -33,6 +33,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 source "${SCRIPT_DIR}/oas-agent-sdk-pin.sh"
 opam_lock_path="${MASC_OPAM_LOCK_PATH:-/tmp/me-opam-switch.lock}"
 agent_sdk_floor_path="${MASC_AGENT_SDK_FLOOR_PATH:-/tmp/me-agent-sdk-floor}"
@@ -60,24 +61,6 @@ include_bisect=false
 include_compact_protocol=false
 do_install=false
 agent_sdk_pin_source="${AGENT_SDK_PIN_URL:-${OAS_AGENT_SDK_URL}#${OAS_AGENT_SDK_SHA}}"
-
-for arg in "$@"; do
-  case "$arg" in
-    --with-bisect)
-      include_bisect=true
-      ;;
-    --with-compact-protocol)
-      include_compact_protocol=true
-      ;;
-    --install)
-      do_install=true
-      ;;
-    *)
-      echo "unknown argument: $arg" >&2
-      exit 2
-      ;;
-  esac
-done
 
 normalize_version_triplet() {
   local value
@@ -171,19 +154,51 @@ installed_agent_sdk_version() {
   return 2
 }
 
+print_opam_lock_holder() {
+  if command -v lsof >/dev/null 2>&1; then
+    # Filter out our own PID and parent PID: by the time this runs we have
+    # already re-execed under flock/lockf and hold the lock ourselves, so
+    # naive [lsof <lock>] would report this script as the "stale" holder
+    # and hide the actual upstream culprit.
+    local self_pid="${BASHPID:-$$}"
+    local parent_pid="${PPID:-0}"
+    local holders
+    holders="$(lsof -t "${opam_lock_path}" 2>/dev/null \
+      | awk -v self="${self_pid}" -v parent="${parent_pid}" '$0 != self && $0 != parent' \
+      || true)"
+    if [[ -n "${holders}" ]]; then
+      # shellcheck disable=SC2086
+      lsof -p ${holders//$'\n'/,} "${opam_lock_path}" >&2 2>/dev/null || true
+    else
+      echo "[opam-pin] no other holders of ${opam_lock_path} (self=${self_pid})" >&2
+    fi
+  else
+    echo "[opam-pin] lock holder unknown: lsof unavailable" >&2
+  fi
+}
+
+allow_agent_sdk_pin_downgrade() {
+  [[ "${MASC_ALLOW_OAS_PIN_DOWNGRADE:-0}" == "1" \
+    || "${MASC_ALLOW_AGENT_SDK_PIN_DOWNGRADE:-0}" == "1" ]]
+}
+
 guard_agent_sdk_downgrade() {
-  [[ "${MASC_ALLOW_OAS_PIN_DOWNGRADE:-0}" != "1" ]] || return 0
+  [[ "${GITHUB_ACTIONS:-}" != "true" ]] || return 0
+  # Note: this intentionally does not return early for AGENT_SDK_PIN_URL.
+  # Any caller trying to lower the shared floor must opt in explicitly.
+  allow_agent_sdk_pin_downgrade && return 0
 
   local recorded_floor
   if [[ -r "${agent_sdk_floor_path}" ]]; then
     recorded_floor="$(head -n 1 "${agent_sdk_floor_path}" 2>/dev/null || true)"
     if [[ -n "${recorded_floor}" ]] && version_gt "${recorded_floor}" "${OAS_AGENT_SDK_MIN_VERSION}"; then
-      echo "[opam-pin] ERROR: refusing to downgrade agent_sdk below recorded floor ${recorded_floor}; branch floor is ${OAS_AGENT_SDK_MIN_VERSION}" >&2
+      echo "[opam-pin] ERROR: refusing to downgrade shared agent_sdk pin below recorded floor ${recorded_floor}; branch floor is ${OAS_AGENT_SDK_MIN_VERSION}" >&2
+      echo "[opam-pin] worktree: ${REPO_ROOT}" >&2
       echo "[opam-pin] recorded floor: ${agent_sdk_floor_path}" >&2
       echo "[opam-pin] branch pin source: ${agent_sdk_pin_source}" >&2
-      echo "[opam-pin] script path: ${SCRIPT_DIR}/opam-pin-external-deps.sh" >&2
-      echo "[opam-pin] likely cause: a stale worktree is trying to repin the shared opam switch to an older OAS SDK" >&2
-      echo "[opam-pin] repair: rebase/update this worktree to the current OAS pin, or set MASC_ALLOW_OAS_PIN_DOWNGRADE=1 for an intentional rollback" >&2
+      echo "[opam-pin] lock path: ${opam_lock_path}" >&2
+      print_opam_lock_holder
+      echo "[opam-pin] repair: rebase/update this worktree to the current OAS pin, or set MASC_ALLOW_OAS_PIN_DOWNGRADE=1/MASC_ALLOW_AGENT_SDK_PIN_DOWNGRADE=1 for an intentional rollback" >&2
       exit 1
     fi
   fi
@@ -198,20 +213,24 @@ guard_agent_sdk_downgrade() {
         ;;
       *)
         echo "[opam-pin] ERROR: refusing to mutate agent_sdk pin because installed version could not be determined" >&2
+        echo "[opam-pin] worktree: ${REPO_ROOT}" >&2
         echo "[opam-pin] branch pin source: ${agent_sdk_pin_source}" >&2
-        echo "[opam-pin] script path: ${SCRIPT_DIR}/opam-pin-external-deps.sh" >&2
-        echo "[opam-pin] repair: fix opam switch inspection, or set MASC_ALLOW_OAS_PIN_DOWNGRADE=1 for an intentional rollback" >&2
+        echo "[opam-pin] lock path: ${opam_lock_path}" >&2
+        print_opam_lock_holder
+        echo "[opam-pin] repair: fix opam switch inspection, or set MASC_ALLOW_OAS_PIN_DOWNGRADE=1/MASC_ALLOW_AGENT_SDK_PIN_DOWNGRADE=1 for an intentional rollback" >&2
         exit 1
         ;;
     esac
   fi
 
   if version_gt "${installed_version}" "${OAS_AGENT_SDK_MIN_VERSION}"; then
-    echo "[opam-pin] ERROR: refusing to downgrade installed agent_sdk ${installed_version} to branch floor ${OAS_AGENT_SDK_MIN_VERSION}" >&2
-    echo "[opam-pin] branch pin source: ${agent_sdk_pin_source}" >&2
-    echo "[opam-pin] script path: ${SCRIPT_DIR}/opam-pin-external-deps.sh" >&2
-    echo "[opam-pin] likely cause: a stale worktree is trying to repin the shared opam switch to an older OAS SDK" >&2
-    echo "[opam-pin] repair: rebase/update this worktree to the current OAS pin, or set MASC_ALLOW_OAS_PIN_DOWNGRADE=1 for an intentional rollback" >&2
+    echo "[opam-pin] ERROR: refusing to downgrade shared agent_sdk pin" >&2
+    echo "[opam-pin] worktree: ${REPO_ROOT}" >&2
+    echo "[opam-pin] requested: agent_sdk >= ${OAS_AGENT_SDK_MIN_VERSION} at ${agent_sdk_pin_source}" >&2
+    echo "[opam-pin] installed: agent_sdk ${installed_version}" >&2
+    echo "[opam-pin] lock path: ${opam_lock_path}" >&2
+    print_opam_lock_holder
+    echo "[opam-pin] repair: use the newer worktree pin, or set MASC_ALLOW_OAS_PIN_DOWNGRADE=1/MASC_ALLOW_AGENT_SDK_PIN_DOWNGRADE=1 for an intentional downgrade" >&2
     exit 1
   fi
 }
@@ -242,6 +261,24 @@ record_agent_sdk_floor() {
   rm -f "${tmp_path}" 2>/dev/null || true
   echo "[opam-pin] WARN: could not record agent_sdk floor: ${agent_sdk_floor_path}" >&2
 }
+
+for arg in "$@"; do
+  case "$arg" in
+    --with-bisect)
+      include_bisect=true
+      ;;
+    --with-compact-protocol)
+      include_compact_protocol=true
+      ;;
+    --install)
+      do_install=true
+      ;;
+    *)
+      echo "unknown argument: $arg" >&2
+      exit 2
+      ;;
+  esac
+done
 
 guard_agent_sdk_downgrade
 

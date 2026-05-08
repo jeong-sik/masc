@@ -129,7 +129,7 @@ let start_drain_fiber ~sw ~clock =
         (try write_event ev
          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
            Prometheus.inc_counter
-             Prometheus.metric_keeper_crash_persistence_failures
+             Keeper_metrics.metric_keeper_crash_persistence_failures
              ~labels:[("site", "crash_write")]
              ();
            Log.Keeper.warn "crash persistence write failed for %s: %s"
@@ -140,7 +140,7 @@ let start_drain_fiber ~sw ~clock =
         (try write_sp_event ev
          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
            Prometheus.inc_counter
-             Prometheus.metric_keeper_crash_persistence_failures
+             Keeper_metrics.metric_keeper_crash_persistence_failures
              ~labels:[("site", "sp_write")]
              ();
            Log.Keeper.warn "sp persistence write failed: %s"

@@ -125,7 +125,14 @@ let test_keeper_internal_contains_known_tools () =
   List.iter
     (fun name ->
       Alcotest.(check bool) (name ^ " is internal") true (SS.mem name internal))
-    [ "keeper_time_now"; "keeper_board_post"; "keeper_bash"; "keeper_memory_search" ]
+    [
+      "keeper_time_now";
+      "keeper_board_post";
+      "keeper_bash";
+      "keeper_memory_search";
+      "keeper_pr_create";
+      "keeper_pr_review_comment";
+    ]
 
 let test_keeper_voice_replacement_contract () =
   Alcotest.(check (option string))
@@ -206,14 +213,12 @@ let test_replacement_targets_have_schemas () =
   ) internal
 
 let test_keeper_internal_tools_have_schemas () =
-  (* Every tool in keeper_internal_tools should have a schema in
-     keeper shards (model_tools + voice shard). A name without a schema
+  (* Every tool in keeper_internal_tools should have a schema in the
+     keeper-facing schema SSOT. A name without a schema
      means the LLM can never select it — a silent capability gap. *)
-  let voice_schemas = match Tool_shard.get_shard "voice" with
-    | Some shard -> shard.tools | None -> [] in
   let standalone_schemas = [ Keeper_exec_tools.keeper_tool_search_schema ] in
   let schema_names =
-    (Tool_shard.keeper_model_tools @ voice_schemas @ standalone_schemas)
+    (Tool_shard.all_keeper_tool_schemas @ standalone_schemas)
     |> List.map (fun (s : Masc_domain.tool_schema) -> s.name)
     |> SS.of_list
   in

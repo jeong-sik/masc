@@ -62,7 +62,7 @@ let emit_flush_activity
         | Some value -> value
       in
       Prometheus.inc_counter
-        Prometheus.metric_keeper_memory_activity_emit_failures
+        Keeper_metrics.metric_keeper_memory_activity_emit_failures
         ~labels:[("keeper", keeper_name); ("outcome", outcome_label)]
         ();
       let error = Printexc.to_string exn in
@@ -97,7 +97,7 @@ let record_success
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Prometheus.inc_counter Prometheus.metric_keeper_episode_create_failures
+    Prometheus.inc_counter Keeper_metrics.metric_keeper_episode_create_failures
       ~labels:[("keeper", keeper_name)]
       ();
     Log.Keeper.error "keeper:%s episode_create failed: %s"
@@ -186,7 +186,7 @@ let record_failure
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Prometheus.inc_counter Prometheus.metric_keeper_episode_create_failures
+    Prometheus.inc_counter Keeper_metrics.metric_keeper_episode_create_failures
       ~labels:[("keeper", keeper_name)]
       ();
     Log.Keeper.error "keeper:%s failed_turn_episode_create failed: %s"

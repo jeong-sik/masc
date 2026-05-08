@@ -392,6 +392,11 @@ export type KeeperRuntimeBlockerClass =
   | 'turn_failures'
   | 'exception'
   | 'stale_fleet_batch'
+  | 'awaiting_operator'
+  | 'awaiting_sandbox_egress'
+  | 'supervisor_paused'
+  | 'synthetic_stall'
+  | 'self_imposed_idle'
 
 export interface KeeperTrustLatestEvent {
   kind: string
@@ -1218,7 +1223,7 @@ interface KeeperConfigMetrics {
   last_input_tokens: number
   last_output_tokens: number
   last_total_tokens: number
-  last_latency_ms: number
+  last_latency_ms: number | null
   last_total_tokens_per_sec: number | null
   last_output_tokens_per_sec: number | null
   compaction_count: number

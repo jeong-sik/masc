@@ -51,19 +51,19 @@ let make_test_hooks keeper_name =
 
 let lifecycle_callback_failure_count ~keeper ~callback =
   Masc_mcp.Prometheus.metric_value_or_zero
-    Masc_mcp.Prometheus.metric_keeper_lifecycle_callback_failures
+    Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
     ~labels:[ ("keeper", keeper); ("callback", callback) ]
     ()
 
 let on_stop_count ~keeper ~stop_reason =
   Masc_mcp.Prometheus.metric_value_or_zero
-    Masc_mcp.Prometheus.metric_keeper_oas_on_stop
+    Masc_mcp.Keeper_metrics.metric_keeper_oas_on_stop
     ~labels:[ ("keeper", keeper); ("stop_reason", stop_reason) ]
     ()
 
 let on_idle_escalated_count ~keeper ~severity ~decision =
   Masc_mcp.Prometheus.metric_value_or_zero
-    Masc_mcp.Prometheus.metric_keeper_oas_on_idle_escalated
+    Masc_mcp.Keeper_metrics.metric_keeper_oas_on_idle_escalated
     ~labels:
       [
         ("keeper", keeper);
@@ -99,7 +99,7 @@ let test_emit_cost_event_writes_inference_telemetry () =
     };
     reasoning_tokens = Some 3;
     reasoning_tokens_estimated = false;
-    request_latency_ms = 42;
+    request_latency_ms = Some 42;
     peak_memory_gb = Some 52.66;
     provider_kind = Some Llm_provider.Provider_kind.OpenAI_compat;
     reasoning_effort = None;
@@ -145,7 +145,7 @@ let test_emit_cost_event_uses_typed_provider_kind_for_bare_model () =
       timings = None;
       reasoning_tokens = None;
       reasoning_tokens_estimated = false;
-      request_latency_ms = 0;
+      request_latency_ms = Some 0;
       peak_memory_gb = None;
       provider_kind = Some Llm_provider.Provider_kind.Kimi_cli;
       reasoning_effort = None;
@@ -160,7 +160,9 @@ let test_emit_cost_event_uses_typed_provider_kind_for_bare_model () =
     ~telemetry ();
   let json = read_jsonl_line (Filename.concat root "costs.jsonl") in
   check string "provider from provider_kind" "kimi_cli"
-    (json |> member "provider" |> to_string)
+    (json |> member "provider" |> to_string);
+  check bool "zero latency is omitted" true
+    (match json |> member "request_latency_ms" with `Null -> true | _ -> false)
 
 let test_emit_cost_event_writes_wall_tok_s_without_provider_timings () =
   let root = temp_dir () in
@@ -169,7 +171,7 @@ let test_emit_cost_event_writes_wall_tok_s_without_provider_timings () =
     timings = None;
     reasoning_tokens = None;
     reasoning_tokens_estimated = false;
-    request_latency_ms = 250;
+    request_latency_ms = Some 250;
     peak_memory_gb = None;
     provider_kind = Some Llm_provider.Provider_kind.OpenAI_compat;
     reasoning_effort = None;
@@ -199,7 +201,7 @@ let test_emit_cost_event_marks_untrusted_usage () =
       timings = None;
       reasoning_tokens = None;
       reasoning_tokens_estimated = false;
-      request_latency_ms = 250;
+      request_latency_ms = Some 250;
       peak_memory_gb = None;
       provider_kind = Some Llm_provider.Provider_kind.Ollama;
       reasoning_effort = None;
@@ -247,7 +249,7 @@ let test_emit_cost_event_marks_unpriced_paid_model () =
       timings = None;
       reasoning_tokens = None;
       reasoning_tokens_estimated = false;
-      request_latency_ms = 100;
+      request_latency_ms = Some 100;
       peak_memory_gb = None;
       provider_kind = Some Llm_provider.Provider_kind.OpenAI_compat;
       reasoning_effort = None;
@@ -279,7 +281,7 @@ let test_emit_cost_event_records_auto_resolution_source () =
       timings = None;
       reasoning_tokens = None;
       reasoning_tokens_estimated = false;
-      request_latency_ms = 100;
+      request_latency_ms = Some 100;
       peak_memory_gb = None;
       provider_kind = Some Llm_provider.Provider_kind.OpenAI_compat;
       reasoning_effort = None;
@@ -311,7 +313,7 @@ let test_emit_cost_event_records_provider_prefixed_auto_resolution_source () =
       timings = None;
       reasoning_tokens = None;
       reasoning_tokens_estimated = false;
-      request_latency_ms = 100;
+      request_latency_ms = Some 100;
       peak_memory_gb = None;
       provider_kind = Some Llm_provider.Provider_kind.Kimi_cli;
       reasoning_effort = None;
@@ -402,13 +404,13 @@ let test_record_keeper_tool_duration_metric_tracks_labels () =
   in
   let sum_before =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_keeper_tool_call_duration
+      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_duration
       ~labels
       ()
   in
   let count_before =
     Masc_mcp.Prometheus.metric_value_or_zero
-      (Masc_mcp.Prometheus.metric_keeper_tool_call_duration ^ "_count")
+      (Masc_mcp.Keeper_metrics.metric_keeper_tool_call_duration ^ "_count")
       ~labels
       ()
   in
@@ -417,13 +419,13 @@ let test_record_keeper_tool_duration_metric_tracks_labels () =
     summary;
   let sum_after =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_keeper_tool_call_duration
+      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_duration
       ~labels
       ()
   in
   let count_after =
     Masc_mcp.Prometheus.metric_value_or_zero
-      (Masc_mcp.Prometheus.metric_keeper_tool_call_duration ^ "_count")
+      (Masc_mcp.Keeper_metrics.metric_keeper_tool_call_duration ^ "_count")
       ~labels
       ()
   in
@@ -455,7 +457,7 @@ let make_telemetry
     timings;
     reasoning_tokens = None;
     reasoning_tokens_estimated = false;
-    request_latency_ms;
+    request_latency_ms = Some request_latency_ms;
     peak_memory_gb = None;
     provider_kind;
     reasoning_effort = None;
@@ -878,7 +880,7 @@ let require_pr_review_event label = function
 
 let hook_output_parse_failures surface =
   Masc_mcp.Prometheus.metric_value_or_zero
-    Masc_mcp.Prometheus.metric_keeper_oas_hook_output_parse_failures
+    Masc_mcp.Keeper_metrics.metric_keeper_oas_hook_output_parse_failures
     ~labels:[ ("surface", surface) ]
     ()
 
@@ -953,6 +955,26 @@ let test_pr_review_action_metric_observes_invalid_output_json () =
   check (float 0.001) "parse failure counted" (before +. 1.0)
     (hook_output_parse_failures "pr_review_action")
 
+let test_pr_review_action_metric_extracts_fenced_output_json () =
+  let before = hook_output_parse_failures "pr_review_action" in
+  let event =
+    pr_review_event
+      ~tool_name:"keeper_pr_review_comment"
+      ~input:(`Assoc [ ("number", `Int 71); ("event", `String "comment") ])
+      ~output_text:
+        "Review submitted.\n\
+         ```json\n\
+         {\"ok\":true,\"pr_number\":71,\"event\":\"APPROVE\",\"via\":\"docker\"}\n\
+         ```\n"
+      ()
+    |> require_pr_review_event "fenced output json"
+  in
+  check string "action from fenced output" "APPROVE" event.action;
+  check (option int) "pr number" (Some 71) event.pr_number;
+  check (option string) "route via" (Some "docker") event.route_via;
+  check (float 0.001) "parse failure not counted" before
+    (hook_output_parse_failures "pr_review_action")
+
 let test_pr_review_action_metric_extracts_keeper_shell_approve () =
   let event =
     pr_review_event
@@ -1010,6 +1032,39 @@ let test_pr_work_action_metric_observes_invalid_output_json () =
   check (list string) "actions fallback from input" [ "GIT_PUSH" ]
     (work_actions events);
   check (float 0.001) "parse failure counted" (before +. 1.0)
+    (hook_output_parse_failures "pr_work_action")
+
+let test_pr_work_action_metric_extracts_embedded_output_json () =
+  let before = hook_output_parse_failures "pr_work_action" in
+  let events =
+    pr_work_events
+      ~tool_name:"keeper_pr_create"
+      ~input:
+        (`Assoc
+          [
+            ("title", `String "proof");
+            ("head", `String "proof/embedded-json");
+          ])
+      ~output_text:
+        "Created draft PR successfully:\n\
+         {\"ok\":true,\"tool\":\"keeper_pr_create\",\"operation\":\"pr_create\",\
+         \"via\":\"brokered\",\"result\":{\"output\":\"https://github.com/acme/repo/pull/43\\n\"}}\n\
+         Done."
+      ()
+  in
+  check (list string) "pr create action" [ "PR_CREATE" ]
+    (work_actions events);
+  (match events with
+   | [ event ] ->
+       check string "source" "keeper_pr_create" event.work_source;
+       check (option string) "head ref" (Some "proof/embedded-json")
+         event.work_ref;
+       check (option string) "pr url"
+         (Some "https://github.com/acme/repo/pull/43")
+         event.pr_url;
+       check (option string) "route via" (Some "brokered") event.route_via
+   | _ -> failf "expected one keeper_pr_create event");
+  check (float 0.001) "parse failure not counted" before
     (hook_output_parse_failures "pr_work_action")
 
 let test_pr_work_action_metric_extracts_gh_pr_create () =
@@ -1279,6 +1334,8 @@ let () =
             test_pr_review_action_metric_extracts_reply
         ; test_case "observes invalid output JSON" `Quick
             test_pr_review_action_metric_observes_invalid_output_json
+        ; test_case "extracts fenced output JSON" `Quick
+            test_pr_review_action_metric_extracts_fenced_output_json
         ; test_case "extracts keeper_shell approve" `Quick
             test_pr_review_action_metric_extracts_keeper_shell_approve
         ] )
@@ -1287,6 +1344,8 @@ let () =
             test_pr_work_action_metric_extracts_masc_code_git_push
         ; test_case "observes invalid output JSON" `Quick
             test_pr_work_action_metric_observes_invalid_output_json
+        ; test_case "extracts embedded output JSON" `Quick
+            test_pr_work_action_metric_extracts_embedded_output_json
         ; test_case "extracts keeper_shell gh pr create" `Quick
             test_pr_work_action_metric_extracts_gh_pr_create
         ; test_case "extracts quoted output gh pr create" `Quick

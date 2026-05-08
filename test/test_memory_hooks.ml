@@ -56,6 +56,19 @@ let make_before_turn_params_event ?(extra_ctx = None) ~turn () =
     reasoning = Agent_sdk.Hooks.empty_reasoning_summary;
   }
 
+let make_after_turn_event ?(turn = 1) () =
+  Agent_sdk.Hooks.AfterTurn {
+    turn;
+    response = {
+      Agent_sdk.Types.id = "r1";
+      model = "test";
+      stop_reason = Agent_sdk.Types.EndTurn;
+      content = [];
+      usage = None;
+      telemetry = None;
+    };
+  }
+
 (* ── Pure read function tests ──────────────────────────────── *)
 
 let test_load_episodes_text_type () =
@@ -245,17 +258,7 @@ let test_after_turn_hook_returns_continue () =
     ~memory
     ()
   in
-  let event = Agent_sdk.Hooks.AfterTurn {
-    turn = 1;
-    response = {
-      Agent_sdk.Types.id = "r1";
-      model = "test";
-      stop_reason = Agent_sdk.Types.EndTurn;
-      content = [];
-      usage = None;
-      telemetry = None;
-    };
-  } in
+  let event = make_after_turn_event () in
   let decision = match hooks.after_turn with
     | Some f -> f event
     | None -> fail "after_turn hook should be Some"
@@ -272,7 +275,7 @@ let test_after_turn_flush_failure_still_continues () =
     [("callback", "memory_after_turn_flush")]
   in
   let before =
-    P.metric_value_or_zero P.metric_keeper_lifecycle_callback_failures
+    P.metric_value_or_zero Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
       ~labels ()
   in
   let memory_hooks =
@@ -297,17 +300,7 @@ let test_after_turn_flush_failure_still_continues () =
   let hooks =
     Memory_hooks.compose_with_inner ~memory_hooks ~inner:inner_hooks
   in
-  let event = Agent_sdk.Hooks.AfterTurn {
-    turn = 1;
-    response = {
-      Agent_sdk.Types.id = "r1";
-      model = "test";
-      stop_reason = Agent_sdk.Types.EndTurn;
-      content = [];
-      usage = None;
-      telemetry = None;
-    };
-  } in
+  let event = make_after_turn_event () in
   let decision =
     match hooks.after_turn with
     | Some f -> f event
@@ -317,10 +310,72 @@ let test_after_turn_flush_failure_still_continues () =
     (match decision with Agent_sdk.Hooks.Continue -> true | _ -> false);
   check bool "inner after_turn still ran" true !inner_seen;
   let after =
-    P.metric_value_or_zero P.metric_keeper_lifecycle_callback_failures
+    P.metric_value_or_zero Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
       ~labels ()
   in
   check (float 0.0001) "flush failure counted" (before +. 1.0) after;
+  (try Sys.rmdir tmp_dir with _ -> ())
+
+let test_after_turn_flush_records_pipeline_metrics () =
+  let tmp_dir = Filename.temp_dir "masc_test_mh" "" in
+  let config = make_test_config ~base_path:tmp_dir in
+  let memory = Memory_oas_bridge.create_memory ~agent_name:"test_pipeline" () in
+  let success_labels =
+    [ ("agent_name", "test_pipeline"); ("outcome", "success") ]
+  in
+  let episodic_labels =
+    [ ("agent_name", "test_pipeline"); ("tier", "episodic") ]
+  in
+  let procedural_labels =
+    [ ("agent_name", "test_pipeline"); ("tier", "procedural") ]
+  in
+  let before_flushes =
+    P.metric_value_or_zero P.metric_memory_pipeline_flushes
+      ~labels:success_labels ()
+  in
+  let before_duration_count =
+    P.metric_value_or_zero
+      (P.metric_memory_pipeline_flush_duration_seconds ^ "_count")
+      ~labels:success_labels ()
+  in
+  let before_episodes =
+    P.metric_value_or_zero P.metric_memory_pipeline_flush_records
+      ~labels:episodic_labels ()
+  in
+  let before_procedures =
+    P.metric_value_or_zero P.metric_memory_pipeline_flush_records
+      ~labels:procedural_labels ()
+  in
+  let hooks =
+    Memory_hooks.make
+      ~agent_name:"test_pipeline"
+      ~config
+      ~memory
+      ~flush_incremental:(fun ~memory:_ ~agent_name:_ -> (2, 3))
+      ()
+  in
+  let decision =
+    match hooks.after_turn with
+    | Some f -> f (make_after_turn_event ())
+    | None -> fail "after_turn hook should be Some"
+  in
+  check bool "after_turn returns Continue" true
+    (match decision with Agent_sdk.Hooks.Continue -> true | _ -> false);
+  check (float 0.0001) "success flush counted" (before_flushes +. 1.0)
+    (P.metric_value_or_zero P.metric_memory_pipeline_flushes
+       ~labels:success_labels ());
+  check (float 0.0001) "duration observation counted"
+    (before_duration_count +. 1.0)
+    (P.metric_value_or_zero
+       (P.metric_memory_pipeline_flush_duration_seconds ^ "_count")
+       ~labels:success_labels ());
+  check (float 0.0001) "episodic records counted" (before_episodes +. 2.0)
+    (P.metric_value_or_zero P.metric_memory_pipeline_flush_records
+       ~labels:episodic_labels ());
+  check (float 0.0001) "procedural records counted"
+    (before_procedures +. 3.0)
+    (P.metric_value_or_zero P.metric_memory_pipeline_flush_records
+       ~labels:procedural_labels ());
   (try Sys.rmdir tmp_dir with _ -> ())
 
 (* ── Flush idempotency test ────────────────────────────────── *)
@@ -371,6 +426,8 @@ let () =
       test_case "composition preserves inner before_turn_params" `Quick
         test_compose_preserves_inner_before_turn_params;
       test_case "after_turn returns Continue" `Quick test_after_turn_hook_returns_continue;
+      test_case "after_turn records pipeline metrics" `Quick
+        test_after_turn_flush_records_pipeline_metrics;
       test_case "after_turn flush failure still continues" `Quick
         test_after_turn_flush_failure_still_continues;
     ];

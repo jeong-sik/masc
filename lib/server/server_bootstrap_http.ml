@@ -65,7 +65,27 @@ let print_startup_banner ~(config : Http.config) ~resolved_base ~base_path
     Printf.printf
       "   POST /webrtc/offer, /webrtc/answer → WebRTC signaling\n%!"
 
+let on_connection_release conn_sw ~mode flow =
+  Eio.Switch.on_release conn_sw (fun () ->
+      Transport_metrics.record_http_connection_closed ~mode;
+      try Eio.Flow.close flow
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn -> Log.Misc.warn "flow close: %s" (Printexc.to_string exn))
+
+let register_listener_lifecycle ~sw ~mode =
+  Transport_metrics.record_http_listener_started ~mode;
+  let stopped = Atomic.make false in
+  let mark_stopped () =
+    if Atomic.compare_and_set stopped false true then
+      Transport_metrics.record_http_listener_stopped ~mode
+  in
+  Eio.Switch.on_release sw mark_stopped;
+  mark_stopped
+
 let serve ~sw ~clock ~socket ~request_handler =
+  let mode = "h1" in
+  let mark_stopped = register_listener_lifecycle ~sw ~mode in
   let is_cancelled exn =
     match exn with
     | Eio.Cancel.Cancelled _ -> true
@@ -74,13 +94,10 @@ let serve ~sw ~clock ~socket ~request_handler =
   let rec accept_loop backoff_s =
     try
       let flow, client_addr = Eio.Net.accept ~sw socket in
+      Transport_metrics.record_http_accept ~mode;
       Eio.Fiber.fork ~sw (fun () ->
           Eio.Switch.run (fun conn_sw ->
-              Eio.Switch.on_release conn_sw (fun () ->
-                  try Eio.Flow.close flow
-                  with
-                  | Eio.Cancel.Cancelled _ as e -> raise e
-                  | exn -> Log.Misc.warn "flow close: %s" (Printexc.to_string exn));
+              on_connection_release conn_sw ~mode flow;
               try
                 let conn_handler =
                   Httpun_eio.Server.create_connection_handler ~sw:conn_sw
@@ -111,10 +128,15 @@ let serve ~sw ~clock ~socket ~request_handler =
                   (Printexc.to_string exn)))
       ;
       accept_loop 0.05
-    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-      if is_cancelled exn then ()
+    with Eio.Cancel.Cancelled _ as e ->
+      mark_stopped ();
+      raise e
+    | exn ->
+      if is_cancelled exn then mark_stopped ()
       else begin
-        Log.Misc.error "Accept error: %s" (Printexc.to_string exn);
+        let error = Printexc.to_string exn in
+        Transport_metrics.record_http_accept_error ~mode ~error;
+        Log.Misc.error "Accept error: %s" error;
         (try Eio.Time.sleep clock backoff_s
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
@@ -125,6 +147,8 @@ let serve ~sw ~clock ~socket ~request_handler =
   accept_loop 0.05
 
 let serve_h2 ~sw ~clock ~socket ~h2_request_handler ~h2_error_handler =
+  let mode = "h2" in
+  let mark_stopped = register_listener_lifecycle ~sw ~mode in
   let is_cancelled exn =
     match exn with
     | Eio.Cancel.Cancelled _ -> true
@@ -134,13 +158,10 @@ let serve_h2 ~sw ~clock ~socket ~h2_request_handler ~h2_error_handler =
   let rec accept_loop backoff_s =
     try
       let flow, client_addr = Eio.Net.accept ~sw socket in
+      Transport_metrics.record_http_accept ~mode;
       Eio.Fiber.fork ~sw (fun () ->
           Eio.Switch.run (fun conn_sw ->
-              Eio.Switch.on_release conn_sw (fun () ->
-                  try Eio.Flow.close flow
-                  with
-                  | Eio.Cancel.Cancelled _ as e -> raise e
-                  | exn -> Log.Misc.warn "[h2] flow close: %s" (Printexc.to_string exn));
+              on_connection_release conn_sw ~mode flow;
               try
                 H2_eio.Server.create_connection_handler ~sw:conn_sw
                   ~request_handler:h2_request_handler
@@ -153,10 +174,15 @@ let serve_h2 ~sw ~clock ~socket ~h2_request_handler ~h2_error_handler =
                 Log.Misc.error "[h2] Connection error: %s"
                   (Printexc.to_string exn)));
       accept_loop 0.05
-    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-      if is_cancelled exn then ()
+    with Eio.Cancel.Cancelled _ as e ->
+      mark_stopped ();
+      raise e
+    | exn ->
+      if is_cancelled exn then mark_stopped ()
       else begin
-        Log.Misc.error "[h2] Accept error: %s" (Printexc.to_string exn);
+        let error = Printexc.to_string exn in
+        Transport_metrics.record_http_accept_error ~mode ~error;
+        Log.Misc.error "[h2] Accept error: %s" error;
         (try Eio.Time.sleep clock backoff_s
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
@@ -172,6 +198,8 @@ let serve_h2 ~sw ~clock ~socket ~h2_request_handler ~h2_error_handler =
     non-destructive, so both libraries read the socket normally. *)
 let serve_auto ~sw ~clock ~socket ~request_handler ~h2_request_handler
     ~h2_error_handler =
+  let mode = "auto" in
+  let mark_stopped = register_listener_lifecycle ~sw ~mode in
   let is_cancelled exn =
     match exn with
     | Eio.Cancel.Cancelled _ -> true
@@ -184,15 +212,10 @@ let serve_auto ~sw ~clock ~socket ~request_handler ~h2_request_handler
   let rec accept_loop backoff_s =
     try
       let flow, client_addr = Eio.Net.accept ~sw socket in
+      Transport_metrics.record_http_accept ~mode;
       Eio.Fiber.fork ~sw (fun () ->
           Eio.Switch.run (fun conn_sw ->
-              Eio.Switch.on_release conn_sw (fun () ->
-                  try Eio.Flow.close flow
-                  with
-                  | Eio.Cancel.Cancelled _ as e -> raise e
-                  | exn ->
-                    Log.Misc.warn "[auto] flow close: %s"
-                      (Printexc.to_string exn));
+              on_connection_release conn_sw ~mode flow;
               try
                 match Http_protocol_detect.detect flow with
                 | Ok Http_protocol_detect.Http2 ->
@@ -239,15 +262,20 @@ let serve_auto ~sw ~clock ~socket ~request_handler ~h2_request_handler
       if Atomic.compare_and_set stats_logged false true then
         Log.Server.info "[auto] stats: h2=%d h1=%d"
           (Atomic.get h2_count) (Atomic.get h1_count);
+      mark_stopped ();
       raise e
     | exn ->
       if is_cancelled exn then begin
         if Atomic.compare_and_set stats_logged false true then
           Log.Server.info "[auto] stats: h2=%d h1=%d"
             (Atomic.get h2_count) (Atomic.get h1_count)
+        ;
+        mark_stopped ()
       end
       else begin
-        Log.Misc.error "[auto] Accept error: %s" (Printexc.to_string exn);
+        let error = Printexc.to_string exn in
+        Transport_metrics.record_http_accept_error ~mode ~error;
+        Log.Misc.error "[auto] Accept error: %s" error;
         (try Eio.Time.sleep clock backoff_s
          with
          | Eio.Cancel.Cancelled _ as e -> raise e

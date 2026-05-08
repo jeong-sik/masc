@@ -109,11 +109,19 @@ val is_reconcile_safe_tool : string -> bool
     [reconcile_safe_set]. *)
 val all_tools_reconcile_safe : string list -> bool
 
-(** Mutable ref holding injected MASC tool schemas; populated at
-    boot by the dashboard / tool_registration paths. *)
-val masc_schemas_ref : Masc_domain.tool_schema list ref
+(** Replace injected MASC tool schemas.
+    Startup calls this through [inject_masc_schemas]; runtime readers should
+    use [masc_schemas_snapshot] rather than holding mutable state. *)
+val set_masc_schemas : Masc_domain.tool_schema list -> unit
 
-(** Names extracted from [!masc_schemas_ref] in declaration order. *)
+(** Immutable snapshot of injected MASC tool schemas. *)
+val masc_schemas_snapshot : unit -> Masc_domain.tool_schema list
+
+(** Scoped schema override for tests that need a synthetic MASC surface. *)
+val with_masc_schemas_for_test :
+  Masc_domain.tool_schema list -> (unit -> 'a) -> 'a
+
+(** Names extracted from [masc_schemas_snapshot ()] in declaration order. *)
 val injected_masc_tool_names : unit -> string list
 
 (** SSOT schema for [keeper_tool_search]. Defined here because this

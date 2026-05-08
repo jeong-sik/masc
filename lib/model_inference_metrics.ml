@@ -174,6 +174,11 @@ let json_float_field_opt key (fields : (string * Yojson.Safe.t) list) =
   | Some (`Int n) -> Some (Float.of_int n)
   | _ -> None
 
+let json_positive_float_field_opt key fields =
+  match json_float_field_opt key fields with
+  | Some v when v > 0.0 -> Some v
+  | _ -> None
+
 let json_int_field_opt key (fields : (string * Yojson.Safe.t) list) =
   match List.assoc_opt key fields with
   | Some (`Int n) -> Some n
@@ -403,7 +408,9 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
              | Some _ as v -> v
              | None -> read "peak_memory"
            in
-           let latency_ms = json_float_field_opt "request_latency_ms" tfields in
+           let latency_ms =
+             json_positive_float_field_opt "request_latency_ms" tfields
+           in
            let input_tokens_raw = json_int_field_opt "input_tokens" tfields in
            let output_tokens_raw = json_int_field_opt "output_tokens" tfields in
            let cache_read_tokens_raw =
@@ -573,7 +580,7 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option =
                 in
                 let usage_untrusted = usage_trust_untrusted usage_trust in
                 let latency_ms =
-                  json_float_field_opt "request_latency_ms" fields
+                  json_positive_float_field_opt "request_latency_ms" fields
                 in
                 let tok_per_sec_raw =
                   match json_float_field_opt "tokens_per_second" fields with

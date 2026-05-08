@@ -80,6 +80,8 @@ let keeper_internal_tools =
     "keeper_voice_session_end";
     (* Tool discovery *)
     "keeper_tool_search";
+    (* Keeper-scoped workflow preflight. *)
+    "keeper_preflight_check";
     (* Keeper-scoped GitHub PR tools. These are native keeper tools, not
        public MCP tools, so CLI lanes must materialize them through the
        keeper-bound runtime MCP surface instead of silently dropping them. *)
@@ -177,7 +179,7 @@ let public_mcp_surface_tools =
     (* Agent discovery *)
     "masc_agents"; "masc_agent_card"; "masc_dashboard";
     (* Utility *)
-    "masc_tool_help"; "masc_web_search"; "masc_check";
+    "masc_tool_help"; "masc_web_search"; "masc_web_fetch"; "masc_check";
     (* HITL approval queue *)
     "masc_approval_pending";
     "masc_approval_get";
@@ -199,7 +201,7 @@ let spawned_agent_surface_tools =
     "masc_board_list"; "masc_board_post"; "masc_board_comment";
     "masc_board_vote"; "masc_board_get";
     "masc_board_curation_read"; "masc_board_curation_submit";
-    "masc_tool_help"; "masc_web_search";
+    "masc_tool_help"; "masc_web_search"; "masc_web_fetch";
     "masc_spawn";
     (* Phase 2: surface SSOT *)
     "masc_code_delete"; "masc_code_edit"; "masc_code_git";
@@ -301,11 +303,6 @@ let system_internal_surface_tools =
     (* Keeper board maintenance schemas remain callable for backward
        compatibility, but are hidden from keeper/public discovery. *)
     "keeper_board_delete"; "keeper_board_cleanup";
-    (* Keeper GitHub workflow tools are schema-registered for keeper model
-       routing, but must stay hidden from public tools/list. *)
-    "keeper_preflight_check";
-    "keeper_pr_list"; "keeper_pr_status"; "keeper_pr_create";
-    "keeper_pr_review_read"; "keeper_pr_review_comment"; "keeper_pr_review_reply";
   ]
 
 (* ================================================================ *)

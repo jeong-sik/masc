@@ -27,6 +27,7 @@ const TARGET_FILES = [
 ]
 
 const TEST_FILES = [
+  'src/cb-shared-telemetry-source.test.ts',
   'src/components/common/markdown.test.ts',
   'src/components/connector-status.test.ts',
   'src/components/fleet-fsm-matrix.test.ts',

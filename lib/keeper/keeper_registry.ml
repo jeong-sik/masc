@@ -146,8 +146,7 @@ let stale_watchdog_failure_reason ~prior ~kill_class =
       ( Stale_termination_storm _
       | Stale_fleet_batch _
       | Stale_turn_timeout _
-      | Fiber_unresolved ) as prior ->
-      prior
+      | Fiber_unresolved )
   | None ->
       Some (Stale_turn_timeout kill_class)
 
@@ -157,29 +156,33 @@ let stale_watchdog_failure_reason ~prior ~kill_class =
 exception Keeper_fiber_crash
 
 type turn_phase =
-  | Turn_idle
-  | Turn_prompting
-  | Turn_executing
-  | Turn_compacting
-  | Turn_finalizing
+  | Turn_idle [@tla.idle]
+  | Turn_prompting [@tla.active]
+  | Turn_executing [@tla.active]
+  | Turn_compacting [@tla.active]
+  | Turn_finalizing [@tla.active]
+[@@deriving tla]
 
 type decision_stage =
-  | Decision_undecided
-  | Decision_guard_ok
-  | Decision_gate_rejected
-  | Decision_tool_policy_selected
+  | Decision_undecided [@tla.idle]
+  | Decision_guard_ok [@tla.active]
+  | Decision_gate_rejected [@tla.terminal]
+  | Decision_tool_policy_selected [@tla.active]
+[@@deriving tla]
 
 type cascade_state =
-  | Cascade_idle
-  | Cascade_selecting
-  | Cascade_trying
-  | Cascade_done
-  | Cascade_exhausted
+  | Cascade_idle [@tla.idle]
+  | Cascade_selecting [@tla.active]
+  | Cascade_trying [@tla.active]
+  | Cascade_done [@tla.terminal]
+  | Cascade_exhausted [@tla.terminal]
+[@@deriving tla]
 
 type compaction_stage =
-  | Compaction_accumulating
-  | Compaction_compacting
-  | Compaction_done
+  | Compaction_accumulating [@tla.idle]
+  | Compaction_compacting [@tla.active]
+  | Compaction_done [@tla.terminal]
+[@@deriving tla]
 
 type turn_measurement = {
   tm_captured_at : float;
@@ -300,6 +303,77 @@ let put_entry key entry =
   in
   loop ()
 
+(* P0-2 (2026-05-07): orphan turn-loop observability.
+
+   Background — [update_entry] returns silently when the key is absent
+   (the keeper was deregistered while a caller still held its name).
+   At fleet scale the WARN line is invisible: a single orphan keeper
+   emits 30+ drops per turn (each tool-dispatch + each phase setter).
+   See verifier-loop incident 2026-05-07.
+
+   Surgical observability fix:
+   - Track per-(name) drop count in a [(int * float) StringMap.t Atomic]
+     (count, first_drop_at) so we can detect "many drops in a short
+     window" without a wall-clock heuristic at every caller.
+   - Bump [metric_keeper_registry_update_dropped] every drop.
+   - Edge-trigger: when count crosses [orphan_drop_threshold] inside
+     [orphan_drop_window_sec], escalate the log to ERROR and bump
+     [metric_keeper_registry_orphan_threshold_breached] exactly once
+     per breach window.
+   - Reset state on the successful Some-entry path (orphan resolved)
+     and after the window expires.
+
+   Behavior is otherwise unchanged: the dropped update is still
+   silently absorbed (29 caller signatures preserved). Fiber
+   cancellation on orphan detection is intentionally out of scope —
+   that requires unregister-time fiber cancel and is RFC-level. *)
+let orphan_drop_threshold = 5
+let orphan_drop_window_sec = 60.0
+
+let orphan_drop_state : (int * float) StringMap.t Atomic.t =
+  Atomic.make StringMap.empty
+
+(* Returns [(count, breached_now)]. [breached_now] is [true] exactly
+   on the transition from below-threshold to at-threshold within an
+   active window. *)
+let record_orphan_drop ~base_path name =
+  let key = registry_key ~base_path name in
+  let now = Time_compat.now () in
+  let rec loop () =
+    let current = Atomic.get orphan_drop_state in
+    let count, first_at, breached_now =
+      match StringMap.find_opt key current with
+      | Some (prev_count, prev_first_at)
+        when now -. prev_first_at <= orphan_drop_window_sec ->
+          let new_count = prev_count + 1 in
+          let breached =
+            prev_count < orphan_drop_threshold
+            && new_count >= orphan_drop_threshold
+          in
+          (new_count, prev_first_at, breached)
+      | _ ->
+          (* Fresh window (no prior state, or prior window expired). *)
+          (1, now, false)
+    in
+    let updated = StringMap.add key (count, first_at) current in
+    if Atomic.compare_and_set orphan_drop_state current updated then
+      (count, breached_now)
+    else loop ()
+  in
+  loop ()
+
+let clear_orphan_drop ~base_path name =
+  let key = registry_key ~base_path name in
+  let rec loop () =
+    let current = Atomic.get orphan_drop_state in
+    if StringMap.mem key current then begin
+      let updated = StringMap.remove key current in
+      if not (Atomic.compare_and_set orphan_drop_state current updated)
+      then loop ()
+    end
+  in
+  loop ()
+
 (** Apply [f entry] and write back.  No-op if key absent.
 
     The find + apply + write is serialised via CAS so that concurrent
@@ -311,18 +385,30 @@ let update_entry ~base_path name f =
     let current = Atomic.get registry in
     match StringMap.find_opt key current with
     | None ->
-        (* P1 silent-failure fix: previously this returned () silently,
-           hiding the case where a caller (e.g. a turn-state setter)
-           raced with keeper deregistration and the update was lost.
-           29 callers funnel through here; logging once at the helper
-           makes every such race observable in operator logs without
-           changing any caller's signature. *)
-        Log.Keeper.warn
-          "registry: update_entry name=%s base_path=%s: entry not found, update dropped"
-          name base_path
+        let count, breached = record_orphan_drop ~base_path name in
+        Prometheus.inc_counter
+          Keeper_metrics.metric_keeper_registry_update_dropped
+          ~labels:[("name", name)]
+          ();
+        if breached then begin
+          Prometheus.inc_counter
+            Keeper_metrics.metric_keeper_registry_orphan_threshold_breached
+            ~labels:[("name", name)]
+            ();
+          Log.Keeper.error
+            "registry: orphan threshold breached name=%s base_path=%s \
+             drops=%d window=%.0fs — turn fiber may be racing \
+             post-deregistration; check masc_keeper_status and watchdog"
+            name base_path count orphan_drop_window_sec
+        end else
+          Log.Keeper.warn
+            "registry: update_entry name=%s base_path=%s: entry not \
+             found, update dropped (count=%d)"
+            name base_path count
     | Some entry ->
         let updated = StringMap.add key (f entry) current in
         if not (Atomic.compare_and_set registry current updated) then loop ()
+        else clear_orphan_drop ~base_path name
   in
   loop ()
 
@@ -338,7 +424,7 @@ let register_with_state ~base_path name meta
   (match StringMap.find_opt key (Atomic.get registry) with
    | Some entry when entry.phase = Running ->
        Prometheus.inc_counter
-        Prometheus.metric_keeper_lifecycle_dispatch_rejections
+        Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
         ~labels:[("keeper", name); ("event", "register_overwrite_running")]
         ();
       Log.Keeper.warn "registry: overwriting running keeper during register name=%s" name;
@@ -458,7 +544,7 @@ let () =
 
 let mark_dead ~base_path name ~at =
   Prometheus.inc_counter
-    Prometheus.metric_keeper_lifecycle_transitions
+    Keeper_metrics.metric_keeper_lifecycle_transitions
     ~labels:[("keeper", name); ("from_phase", "direct"); ("to_phase", "Dead")]
     ();
   Log.Keeper.error "registry: marking keeper dead name=%s at=%.0f" name at;
@@ -528,7 +614,7 @@ let broadcast_composite_changed ~name ~ts_unix =
          Sse.broadcast itself bypass that counter.  Logging here
          makes the exception visible at the call site. *)
       Prometheus.inc_counter
-        Prometheus.metric_keeper_lifecycle_dispatch_rejections
+        Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
         ~labels:[("keeper", name); ("event", "broadcast_composite_failed")]
         ();
       Log.Keeper.warn
@@ -537,7 +623,7 @@ let broadcast_composite_changed ~name ~ts_unix =
 
 let record_phase_broadcast_failure ~name exn =
   Prometheus.inc_counter
-    Prometheus.metric_keeper_sse_broadcast_failures
+    Keeper_metrics.metric_keeper_sse_broadcast_failures
     ~labels:[("keeper", name); ("site", "phase_changed")]
     ();
   Log.Keeper.warn
@@ -613,11 +699,119 @@ let mark_turn_measurement ~base_path name =
     | _ -> e);
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 
+let validate_decision_transition ~from ~to_ =
+  Keeper_fsm_guard_runtime.wrap_unit
+    ~action:"decision_transition"
+    ~stage:"guard"
+    (fun () ->
+       assert (
+         match (from, to_) with
+         (* from Decision_undecided *)
+         | (Decision_undecided, Decision_undecided) -> true
+         | (Decision_undecided, Decision_guard_ok) -> true  (* via set_turn_decision_stage *)
+         | (Decision_undecided, Decision_gate_rejected) -> true  (* via mark_turn_gate_rejected_by_name *)
+         | (Decision_undecided, Decision_tool_policy_selected) -> true  (* via set_turn_decision_stage *)
+         (* from Decision_guard_ok *)
+         | (Decision_guard_ok, Decision_undecided) -> false  (* new turn init is reset, not transition *)
+         | (Decision_guard_ok, Decision_guard_ok) -> true
+         | (Decision_guard_ok, Decision_gate_rejected) -> true  (* via mark_turn_gate_rejected_by_name *)
+         | (Decision_guard_ok, Decision_tool_policy_selected) -> true  (* via set_turn_decision_stage *)
+         (* from Decision_gate_rejected *)
+         | (Decision_gate_rejected, Decision_undecided) -> false  (* new turn init is reset, not transition *)
+         | (Decision_gate_rejected, Decision_guard_ok) -> true  (* via prepare_turn_retry_after_compaction *)
+         | (Decision_gate_rejected, Decision_gate_rejected) -> true
+         | (Decision_gate_rejected, Decision_tool_policy_selected) -> false  (* not valid within a single turn *)
+         (* from Decision_tool_policy_selected *)
+         | (Decision_tool_policy_selected, Decision_undecided) -> false  (* new turn init is reset, not transition *)
+         | (Decision_tool_policy_selected, Decision_guard_ok) -> true  (* via prepare_turn_retry_after_compaction *)
+         | (Decision_tool_policy_selected, Decision_gate_rejected) -> true  (* via mark_turn_gate_rejected_by_name *)
+         | (Decision_tool_policy_selected, Decision_tool_policy_selected) -> true
+       ))
+
+let validate_cascade_transition ~from ~to_ =
+  Keeper_fsm_guard_runtime.wrap_unit
+    ~action:"cascade_transition"
+    ~stage:"guard"
+    (fun () ->
+       assert (
+         match (from, to_) with
+         (* from Cascade_idle *)
+         | (Cascade_idle, Cascade_idle) -> true
+         | (Cascade_idle, Cascade_selecting) -> true  (* via set_turn_cascade_state *)
+         | (Cascade_idle, Cascade_trying) -> false  (* PR #14153: removed idle->trying jump; must go through selecting *)
+         | (Cascade_idle, Cascade_done) -> false
+         | (Cascade_idle, Cascade_exhausted) -> false
+         (* from Cascade_selecting *)
+         | (Cascade_selecting, Cascade_idle) -> true  (* via prepare_turn_retry_after_compaction *)
+         | (Cascade_selecting, Cascade_selecting) -> true
+         | (Cascade_selecting, Cascade_trying) -> true  (* via set_turn_cascade_state *)
+         | (Cascade_selecting, Cascade_done) -> false
+         | (Cascade_selecting, Cascade_exhausted) -> false
+         (* from Cascade_trying *)
+         | (Cascade_trying, Cascade_idle) -> true  (* via prepare_turn_retry_after_compaction *)
+         | (Cascade_trying, Cascade_selecting) -> true  (* via set_turn_cascade_state: retry re-entry *)
+         | (Cascade_trying, Cascade_trying) -> true
+         | (Cascade_trying, Cascade_done) -> true  (* via set_turn_cascade_state *)
+         | (Cascade_trying, Cascade_exhausted) -> true  (* via set_turn_cascade_state *)
+         (* from Cascade_done *)
+         | (Cascade_done, Cascade_idle) -> true  (* via prepare_turn_retry_after_compaction *)
+         | (Cascade_done, Cascade_selecting) -> true  (* via prepare_turn_retry_after_compaction *)
+         | (Cascade_done, Cascade_trying) -> true  (* via prepare_turn_retry_after_compaction *)
+         | (Cascade_done, Cascade_done) -> true
+         | (Cascade_done, Cascade_exhausted) -> false  (* not valid within a single turn *)
+         (* from Cascade_exhausted *)
+         | (Cascade_exhausted, Cascade_idle) -> true  (* via prepare_turn_retry_after_compaction *)
+         | (Cascade_exhausted, Cascade_selecting) -> true  (* via prepare_turn_retry_after_compaction *)
+         | (Cascade_exhausted, Cascade_trying) -> true  (* via prepare_turn_retry_after_compaction *)
+         | (Cascade_exhausted, Cascade_done) -> false  (* not valid within a single turn *)
+         | (Cascade_exhausted, Cascade_exhausted) -> true
+       ))
+
+let validate_turn_phase_transition ~from ~to_ =
+  Keeper_fsm_guard_runtime.wrap_unit
+    ~action:"turn_phase_transition"
+    ~stage:"guard"
+    (fun () ->
+       assert (
+         match (from, to_) with
+         (* from Turn_idle *)
+         | (Turn_idle, Turn_idle) -> true
+         | (Turn_idle, Turn_prompting) -> true  (* via turn init / prepare_turn_retry_after_compaction (bypassed) *)
+         | (Turn_idle, Turn_executing) -> false
+         | (Turn_idle, Turn_compacting) -> false
+         | (Turn_idle, Turn_finalizing) -> false
+         (* from Turn_prompting *)
+         | (Turn_prompting, Turn_idle) -> false  (* new turn init is reset, not transition *)
+         | (Turn_prompting, Turn_prompting) -> true
+         | (Turn_prompting, Turn_executing) -> true  (* via set_turn_phase *)
+         | (Turn_prompting, Turn_compacting) -> false
+         | (Turn_prompting, Turn_finalizing) -> true  (* via set_turn_phase / via mark_turn_gate_rejected_by_name *)
+         (* from Turn_executing *)
+         | (Turn_executing, Turn_idle) -> false  (* new turn init is reset, not transition *)
+         | (Turn_executing, Turn_prompting) -> true  (* via set_turn_cascade_state: retry selecting *)
+         | (Turn_executing, Turn_executing) -> true
+         | (Turn_executing, Turn_compacting) -> true  (* via set_turn_phase: retry plan *)
+         | (Turn_executing, Turn_finalizing) -> true  (* via set_turn_phase / via mark_turn_gate_rejected_by_name *)
+         (* from Turn_compacting *)
+         | (Turn_compacting, Turn_idle) -> false  (* new turn init is reset, not transition *)
+         | (Turn_compacting, Turn_prompting) -> true  (* via prepare_turn_retry_after_compaction *)
+         | (Turn_compacting, Turn_executing) -> false
+         | (Turn_compacting, Turn_compacting) -> true
+         | (Turn_compacting, Turn_finalizing) -> true  (* via set_turn_phase: compaction failure *)
+         (* from Turn_finalizing *)
+         | (Turn_finalizing, Turn_idle) -> false  (* new turn is reset *)
+         | (Turn_finalizing, Turn_prompting) -> false  (* new turn is reset *)
+         | (Turn_finalizing, Turn_executing) -> false
+         | (Turn_finalizing, Turn_compacting) -> false
+         | (Turn_finalizing, Turn_finalizing) -> true
+       ))
+
 let set_turn_decision_stage ~base_path name decision_stage =
   let changed = ref false in
   let now = Time_compat.now () in
   update_entry ~base_path name (fun e ->
     update_current_turn e (fun obs ->
+      validate_decision_transition ~from:obs.decision_stage ~to_:decision_stage;
       changed := true;
       { obs with decision_stage }));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
@@ -627,11 +821,14 @@ let set_turn_cascade_state ~base_path name cascade_state =
   let now = Time_compat.now () in
   update_entry ~base_path name (fun e ->
     update_current_turn e (fun obs ->
+      let new_turn_phase = turn_phase_of_cascade_state cascade_state in
+      validate_cascade_transition ~from:obs.cascade_state ~to_:cascade_state;
+      validate_turn_phase_transition ~from:obs.turn_phase ~to_:new_turn_phase;
       changed := true;
       {
         obs with
         cascade_state;
-        turn_phase = turn_phase_of_cascade_state cascade_state;
+        turn_phase = new_turn_phase;
       }));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 
@@ -640,6 +837,7 @@ let set_turn_phase ~base_path name turn_phase =
   let now = Time_compat.now () in
   update_entry ~base_path name (fun e ->
     update_current_turn e (fun obs ->
+      validate_turn_phase_transition ~from:obs.turn_phase ~to_:turn_phase;
       changed := true;
       { obs with turn_phase }));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
@@ -658,6 +856,9 @@ let prepare_turn_retry_after_compaction ~base_path name =
   let now = Time_compat.now () in
   update_entry ~base_path name (fun e ->
     update_current_turn e (fun obs ->
+      validate_decision_transition ~from:obs.decision_stage ~to_:Decision_guard_ok;
+      validate_cascade_transition ~from:obs.cascade_state ~to_:Cascade_idle;
+      validate_turn_phase_transition ~from:obs.turn_phase ~to_:Turn_prompting;
       changed := true;
       {
         obs with
@@ -684,6 +885,8 @@ let mark_turn_gate_rejected_by_name name =
       let now = Time_compat.now () in
       update_entry ~base_path:entry.base_path name (fun e ->
         update_current_turn e (fun obs ->
+          validate_decision_transition ~from:obs.decision_stage ~to_:Decision_gate_rejected;
+          validate_turn_phase_transition ~from:obs.turn_phase ~to_:Turn_finalizing;
           changed := true;
           {
             obs with
@@ -797,7 +1000,8 @@ let get_turn_failures ~base_path name =
 let is_running ~base_path name =
   match get ~base_path name with
   | Some { phase = Running; _ } -> true
-  | _ -> false
+  | Some _ -> false
+  | None -> false
 
 (** True if the keeper has ANY registry entry (regardless of state).
     Used by reconcile to avoid re-launching Crashed/Dead keepers. *)
@@ -1065,7 +1269,7 @@ let flush_tool_usage ~base_path name =
        Fs_compat.mkdir_p (Filename.dirname path);
        Fs_compat.save_file path (Yojson.Safe.to_string json ^ "\n")
      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-       Prometheus.inc_counter Prometheus.metric_keeper_tool_usage_flush_failures
+       Prometheus.inc_counter Keeper_metrics.metric_keeper_tool_usage_flush_failures
          ~labels:[("keeper", name)]
          ();
        Log.Keeper.error "flush_tool_usage %s: %s" name (Printexc.to_string exn))
@@ -1111,7 +1315,7 @@ let restore_tool_usage ~base_path name =
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
            Prometheus.inc_counter
-          Prometheus.metric_keeper_checkpoint_failures
+          Keeper_metrics.metric_keeper_checkpoint_failures
           ~labels:[("keeper", name); ("site", "restore_tool_usage")]
           ();
        Log.Keeper.warn "restore_tool_usage %s: %s" name (Printexc.to_string exn))
@@ -1150,7 +1354,7 @@ let followup_event_of_entry_action
   : Keeper_state_machine.event option =
   match phase, action with
   | Keeper_state_machine.Overflowed, Start_compaction ->
-      Prometheus.inc_counter Prometheus.metric_keeper_fsm_edge_transitions
+      Prometheus.inc_counter Keeper_metrics.metric_keeper_fsm_edge_transitions
         ~labels:[("edge", "ksm_to_kmc_compact_trigger")] ();
       Some Keeper_state_machine.Auto_compact_triggered
   | _ ->
@@ -1158,7 +1362,7 @@ let followup_event_of_entry_action
 
 let record_followup_dispatch_rejection event =
   Prometheus.inc_counter
-    Prometheus.metric_keeper_lifecycle_dispatch_rejections
+    Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
     ~labels:[ ("event", Keeper_state_machine.event_to_string event) ]
     ()
 
@@ -1171,7 +1375,7 @@ let pending_measurement_after_event now entry event =
     }
   | _ -> entry.pending_turn_measurement
 
-let compaction_stage_after_event entry event =
+let compaction_stage_of_event entry event =
   match event with
   | Keeper_state_machine.Compaction_started
   | Keeper_state_machine.Auto_compact_triggered
@@ -1180,6 +1384,33 @@ let compaction_stage_after_event entry event =
   | Keeper_state_machine.Compaction_completed _ -> Compaction_done
   | Keeper_state_machine.Compaction_failed _ -> Compaction_accumulating
   | _ -> entry.compaction_stage
+
+let validate_compaction_transition ~from ~to_ =
+  Keeper_fsm_guard_runtime.wrap_unit
+    ~action:"compaction_transition"
+    ~stage:"guard"
+    (fun () ->
+       assert (
+         match (from, to_) with
+         (* from Compaction_accumulating *)
+         | (Compaction_accumulating, Compaction_accumulating) -> true
+         | (Compaction_accumulating, Compaction_compacting) -> true  (* via set_compaction_stage *)
+         | (Compaction_accumulating, Compaction_done) -> false
+         (* from Compaction_compacting *)
+         | (Compaction_compacting, Compaction_accumulating) -> true  (* via set_compaction_stage: retry *)
+         | (Compaction_compacting, Compaction_compacting) -> true
+         | (Compaction_compacting, Compaction_done) -> true  (* via set_compaction_stage *)
+         (* from Compaction_done — terminal *)
+         | (Compaction_done, Compaction_accumulating) -> false  (* terminal; new compaction is reset *)
+         | (Compaction_done, Compaction_compacting) -> false  (* terminal *)
+         | (Compaction_done, Compaction_done) -> true
+       ))
+
+let compaction_stage_after_event entry event =
+  let old_stage = entry.compaction_stage in
+  let new_stage = compaction_stage_of_event entry event in
+  validate_compaction_transition ~from:old_stage ~to_:new_stage;
+  new_stage
 
 (** Registry mutation is still non-yielding (StringMap lookup + put,
     Atomic.set). Entry actions run only after [put_entry], so any
@@ -1266,7 +1497,7 @@ let rec dispatch_event_with_audit
         | phase, Running when phase <> Running ->
           Atomic.incr running_count_atomic
         | _ -> ());
-       Prometheus.inc_counter Prometheus.metric_keeper_lifecycle_transitions
+       Prometheus.inc_counter Keeper_metrics.metric_keeper_lifecycle_transitions
          ~labels:[
            ("keeper", name);
            ("from_phase", Keeper_state_machine.phase_to_string tr.prev_phase);
@@ -1353,7 +1584,7 @@ let rec dispatch_event_with_audit
        Ok tr
      | Error e ->
        Prometheus.inc_counter
-         Prometheus.metric_keeper_lifecycle_dispatch_rejections
+         Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
          ~labels:[("event", Keeper_state_machine.event_to_string event)]
          ();
        Log.Keeper.warn "registry: dispatch_event rejected name=%s error=%s"
@@ -1373,7 +1604,7 @@ let dispatch_event_and_log ~base_path name event =
       | Keeper_state_machine.Invalid_transition _ -> "invalid_transition"
     in
     Prometheus.inc_counter
-      Prometheus.metric_keeper_dispatch_event_failures
+      Keeper_metrics.metric_keeper_dispatch_event_failures
       ~labels:[("keeper", name); ("reason", reason_label)]
       ();
     Error e
@@ -1394,7 +1625,7 @@ let dispatch_event_with_audit_and_log ~base_path ?snapshot ?events_fired ?select
       | Keeper_state_machine.Invalid_transition _ -> "invalid_transition"
     in
     Prometheus.inc_counter
-      Prometheus.metric_keeper_dispatch_event_failures
+      Keeper_metrics.metric_keeper_dispatch_event_failures
       ~labels:[("keeper", name); ("reason", reason_label)]
       ();
     Error e

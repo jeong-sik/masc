@@ -53,9 +53,17 @@ val register : hook -> unit
 (** Run every registered hook with the given event. Non-cancellation
     exceptions raised from a hook are caught, counted via
     [metric_keeper_lifecycle_callback_failures], and logged via
-    [Log.Server.warn]; [Eio.Cancel.Cancelled] is re-raised to preserve
-    cooperative cancellation. *)
-val run : keeper_id:string -> event -> unit
+    [Log.Server.warn]. When [base_dir] and [meta] are supplied, the
+    failure also writes a durable telemetry coverage-gap row so the
+    best-effort hook contract is visible outside process-local logs.
+    [Eio.Cancel.Cancelled] is re-raised to preserve cooperative
+    cancellation. *)
+val run :
+  ?base_dir:string ->
+  ?meta:Keeper_types.keeper_meta ->
+  keeper_id:string ->
+  event ->
+  unit
 
 (** Number of currently registered hooks. Useful for tests. *)
 val registered_count : unit -> int

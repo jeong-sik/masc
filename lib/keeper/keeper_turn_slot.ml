@@ -363,7 +363,7 @@ let autonomous_queue_depth_labels = [ ("channel", "autonomous_queue") ]
 
 let record_autonomous_queue_depth depth =
   Prometheus.set_gauge
-    Prometheus.metric_keeper_turn_queue_depth
+    Keeper_metrics.metric_keeper_turn_queue_depth
     ~labels:autonomous_queue_depth_labels
     (float_of_int depth)
 
@@ -525,6 +525,12 @@ let run_after_acquire_flag_hook_for_test ~label ~keeper_name =
   | None -> ()
   | Some hook -> hook ~label ~keeper_name
 
+let observe_bookkeeping_failure ~op ~kind =
+  Prometheus.inc_counter
+    Keeper_metrics.metric_keeper_turn_slot_bookkeeping_failures
+    ~labels:[ ("op", op); ("kind", kind) ]
+    ()
+
 (* Cancel-safe wrapper for bookkeeping calls that touch [Eio.Mutex.use_rw].
    Reached from [Fun.protect ~finally] in [with_keeper_turn_slot] when the
    keeper fiber is being cancelled.  If a mutex acquisition raises
@@ -539,8 +545,10 @@ let safe_bookkeeping ~op f =
     (* Bookkeeping (holder table / waiter queue / completion stamp) is
        advisory and self-healing; skipping under fiber cancellation is
        acceptable.  The semaphore release that follows must still run. *)
+    observe_bookkeeping_failure ~op ~kind:"cancelled";
     Log.Keeper.warn "release_keeper_turn_slot: %s skipped (Cancelled)" op
   | exn ->
+    observe_bookkeeping_failure ~op ~kind:"exception";
     Log.Keeper.warn "release_keeper_turn_slot: %s failed: %s"
       op (Printexc.to_string exn)
 
@@ -560,7 +568,17 @@ let release_recorded_holder
     Eio.Semaphore.release sem
   | Some acquisition_id ->
     let force_released =
-      try consume_force_release ~label ~keeper_name ~acquisition_id with exn ->
+      try consume_force_release ~label ~keeper_name ~acquisition_id with
+      | Eio.Cancel.Cancelled _ ->
+        observe_bookkeeping_failure
+          ~op:("drop_holder " ^ label) ~kind:"cancelled";
+        Log.Keeper.warn
+          "release_keeper_turn_slot: drop_holder %s skipped (Cancelled)"
+          label;
+        false
+      | exn ->
+        observe_bookkeeping_failure
+          ~op:("drop_holder " ^ label) ~kind:"exception";
         Log.Keeper.warn "release_keeper_turn_slot: drop_holder %s failed: %s"
           label (Printexc.to_string exn);
         false
@@ -682,7 +700,7 @@ let force_release_holder_for ~keeper_name : (string * float) list =
         Eio.Semaphore.release sem;
         released_with_age := (label, age) :: !released_with_age;
         Prometheus.inc_counter
-          Prometheus.metric_keeper_slot_force_released
+          Keeper_metrics.metric_keeper_slot_force_released
           ~labels:[("keeper", keeper_name); ("label", label)]
           ();
         Log.Keeper.error
@@ -728,17 +746,22 @@ let oas_timeout_budget_strike_limit = 3
 
 module Budget_strike_map = Map.Make (String)
 
-let budget_exhaustions : int Budget_strike_map.t Atomic.t =
-  Atomic.make Budget_strike_map.empty
+(* Stdlib.Mutex: this ledger is updated from keeper Eio fibers and from
+   non-Eio unit tests. The critical section is pure map replacement and
+   cannot yield, so a plain mutex avoids the previous CAS retry loop without
+   introducing Eio-context requirements. *)
+let budget_exhaustions_mutex = Stdlib.Mutex.create ()
+let budget_exhaustions : int Budget_strike_map.t ref =
+  ref Budget_strike_map.empty
 
 let update_budget_exhaustions f =
-  let rec loop () =
-    let current = Atomic.get budget_exhaustions in
-    let next, result = f current in
-    if Atomic.compare_and_set budget_exhaustions current next then result
-    else loop ()
-  in
-  loop ()
+  Stdlib.Mutex.lock budget_exhaustions_mutex;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock budget_exhaustions_mutex)
+    (fun () ->
+      let next, result = f !budget_exhaustions in
+      budget_exhaustions := next;
+      result)
 
 let bump_budget_exhaustion_seeded ~keeper_name ~prior_strikes : int =
   let prior_strikes = max 0 prior_strikes in
@@ -758,8 +781,12 @@ let reset_budget_exhaustion ~keeper_name : unit =
     (Budget_strike_map.remove keeper_name current, ()))
 
 let peek_budget_exhaustion_for_test ~keeper_name : int =
-  Budget_strike_map.find_opt keeper_name (Atomic.get budget_exhaustions)
-  |> Option.value ~default:0
+  update_budget_exhaustions (fun current ->
+    let strikes =
+      Budget_strike_map.find_opt keeper_name current
+      |> Option.value ~default:0
+    in
+    (current, strikes))
 
 let set_budget_exhaustion_for_test ~keeper_name ~strikes : unit =
   if strikes <= 0 then reset_budget_exhaustion ~keeper_name
@@ -855,7 +882,7 @@ let rec wait_for_autonomous_queue_head ~(keeper_name : string) ~(ticket : int)
          operators can detect chronic slot starvation without
          scraping the WARN log. *)
       Prometheus.inc_counter
-        Prometheus.metric_keeper_semaphore_wait_timeout
+        Keeper_metrics.metric_keeper_semaphore_wait_timeout
         ~labels:[ ("keeper", keeper_name);
                   ("channel", "autonomous_queue_head") ]
         ();
@@ -887,12 +914,12 @@ let observe_semaphore_wait_seconds ~keeper_name ~cascade_profile ~channel second
       ("channel", channel) ]
   in
   Prometheus.observe_histogram
-    Prometheus.metric_keeper_semaphore_wait_seconds
+    Keeper_metrics.metric_keeper_semaphore_wait_seconds
     ~labels
     seconds;
   let inc_bucket le =
     Prometheus.inc_counter
-      Prometheus.metric_keeper_semaphore_wait_seconds_bucket
+      Keeper_metrics.metric_keeper_semaphore_wait_seconds_bucket
       ~labels:(labels @ [ ("le", le) ])
       ()
   in
@@ -960,7 +987,7 @@ let with_keeper_turn_slot_control ?(cascade_profile = "unknown") ~keeper_name
            operators can attribute slot starvation to autonomous
            vs turn semaphore pressure. *)
         Prometheus.inc_counter
-          Prometheus.metric_keeper_semaphore_wait_timeout
+          Keeper_metrics.metric_keeper_semaphore_wait_timeout
           ~labels:[ ("keeper", keeper_name);
                     ("channel", label) ]
           ();
@@ -990,7 +1017,7 @@ let with_keeper_turn_slot_control ?(cascade_profile = "unknown") ~keeper_name
           "semaphore_wait: no Eio clock available and %s semaphore has no permits; failing closed instead of waiting unboundedly"
           label;
         Prometheus.inc_counter
-          Prometheus.metric_keeper_semaphore_wait_timeout
+          Keeper_metrics.metric_keeper_semaphore_wait_timeout
           ~labels:[ ("keeper", keeper_name);
                     ("channel", label) ]
           ();
@@ -1008,7 +1035,7 @@ let with_keeper_turn_slot_control ?(cascade_profile = "unknown") ~keeper_name
       (Eio.Semaphore.get_value autonomous_turn_semaphore)
       (Eio.Semaphore.get_value turn_semaphore)
       queue_depth;
-    Prometheus.set_gauge Prometheus.metric_keeper_turn_queue_depth
+    Prometheus.set_gauge Keeper_metrics.metric_keeper_turn_queue_depth
       ~labels:[("keeper", keeper_name); ("channel", channel_label)]
       (float_of_int queue_depth)
   in

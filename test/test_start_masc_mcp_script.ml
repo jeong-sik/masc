@@ -155,6 +155,54 @@ let make_fake_eio_exe repo_root =
   let exe_path = Filename.concat repo_root "_build/default/bin/main_eio.exe" in
   write_fake_eio_exe exe_path ~marker:"local"
 
+let write_fake_dune_stale_then_success ~path ~state_file ~clean_marker =
+  write_executable path
+    (Printf.sprintf
+       {|
+#!/bin/sh
+set -eu
+state=%s
+clean_marker=%s
+cmd="${1:-}"
+case "$cmd" in
+  build)
+    count=0
+    if [ -f "$state" ]; then
+      count="$(cat "$state")"
+    fi
+    if [ "$count" = "0" ]; then
+      echo 1 > "$state"
+      echo "Error: Files lib/.masc_mcp.objs/native/masc_mcp__Keeper_context_core.cmx" >&2
+      echo "       and lib/.masc_mcp.objs/native/masc_mcp__Inference_utils.cmx" >&2
+      echo "       make inconsistent assumptions over implementation Agent_sdk__Context_reducer" >&2
+      exit 1
+    fi
+    mkdir -p _build/default/bin
+    cat > _build/default/bin/main_eio.exe <<'EXE'
+#!/bin/sh
+set -eu
+{
+  printf 'FAKE_EXE_MARKER=eio-after-stale-retry\n'
+  printf 'PWD=%%s\n' "$(pwd)"
+  printf 'ARGS=%%s\n' "$*"
+} >"${FAKE_CAPTURE_FILE:?}"
+exit 0
+EXE
+    chmod +x _build/default/bin/main_eio.exe
+    echo "fake dune build recovered" >&2
+    ;;
+  clean)
+    echo clean > "$clean_marker"
+    rm -rf _build
+    ;;
+  *)
+    echo "unexpected dune command: $*" >&2
+    exit 2
+    ;;
+esac
+|}
+       (quote state_file) (quote clean_marker))
+
 let make_fake_stdio_eio_exe repo_root =
   let exe_path =
     Filename.concat repo_root "_build/default/bin/main_stdio_eio.exe"
@@ -708,6 +756,50 @@ let test_grpc_direct_banner_is_preserved_in_stderr () =
       check bool "other stderr preserved" true
         (contains_substring stderr "stderr-keep"))
 
+let test_stale_dune_artifacts_are_cleaned_and_retried () =
+  with_temp_dir "start-masc-script-stale-dune" (fun dir ->
+      with_temp_dir "start-masc-stale-dune-fake-bin" (fun fake_bin ->
+          let script = Filename.concat dir "start-masc-mcp.sh" in
+          let dune_state = Filename.concat dir "dune-build-count.txt" in
+          let clean_marker = Filename.concat dir "dune-clean-ran.txt" in
+          let capture = Filename.concat dir "captured-stale-dune.txt" in
+          copy_script (script_path ()) script;
+          ignore (make_config_root dir);
+          mkdir_p fake_bin;
+          write_executable (Filename.concat fake_bin "opam")
+            "#!/bin/sh\nexit 0\n";
+          write_fake_dune_stale_then_success
+            ~path:(Filename.concat fake_bin "dune")
+            ~state_file:dune_state ~clean_marker;
+          let code, stdout, stderr =
+            run_shell ~cwd:dir
+              ~env:
+                [
+                  ("FAKE_CAPTURE_FILE", capture);
+                  ("MASC_BASE_PATH", dir);
+                  ("PATH", fake_bin ^ ":" ^ Sys.getenv "PATH");
+                ]
+              (Printf.sprintf "%s --http --port 9971 --base-path %s"
+                 (quote script) (quote dir))
+          in
+          if code <> 0 then
+            failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s"
+              code stdout stderr;
+          let captured = read_file capture in
+          check bool "server started from retry-built executable" true
+            (contains_substring captured
+               "FAKE_EXE_MARKER=eio-after-stale-retry");
+          check bool "dune clean ran before retry" true
+            (Sys.file_exists clean_marker);
+          check bool "original stale artifact error preserved" true
+            (contains_substring stderr
+               "make inconsistent assumptions over implementation Agent_sdk__Context_reducer");
+          check bool "retry is explained" true
+            (contains_substring stderr
+               "Stale Dune artifacts detected while building main_eio.exe");
+          check bool "retry output preserved" true
+            (contains_substring stderr "fake dune build recovered")))
+
 let test_stdio_skips_dashboard_build_and_http_preflight () =
   with_temp_dir "start-masc-script-stdio" (fun dir ->
       let script = Filename.concat dir "start-masc-mcp.sh" in
@@ -801,7 +893,7 @@ exit 1
           stderr;
       let captured = read_file capture in
       check bool "server started after transient port conflict" true
-        (contains_substring captured "FAKE_EXE_MARKER=eio");
+        (contains_substring captured "FAKE_EXE_MARKER=local");
       check bool "preflight waited before build" true
         (contains_substring stderr
            "HTTP Port 9954 in use, waiting before build/init"))
@@ -902,6 +994,8 @@ let () =
             test_explicit_http_port_derives_sidecar_ports;
           test_case "grpc-direct banner is preserved in stderr" `Quick
             test_grpc_direct_banner_is_preserved_in_stderr;
+          test_case "stale Dune artifacts are cleaned and retried" `Quick
+            test_stale_dune_artifacts_are_cleaned_and_retried;
           test_case "stdio skips dashboard build and HTTP preflight" `Quick
             test_stdio_skips_dashboard_build_and_http_preflight;
           test_case "HTTP preflight waits for transient port conflict" `Quick

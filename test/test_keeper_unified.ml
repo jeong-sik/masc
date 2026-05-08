@@ -2562,7 +2562,7 @@ let test_metrics_idle_seconds_gauge_records_observation () =
   check (option (float 0.001)) "success idle seconds gauge"
     (Some (float_of_int idle_seconds))
     (Masc_mcp.Prometheus.get_metric_value
-       Masc_mcp.Prometheus.metric_keeper_idle_seconds
+       Masc_mcp.Keeper_metrics.metric_keeper_idle_seconds
        ~labels:[ ("keeper_name", minimal_meta.name) ]
        ());
   let failure_idle_seconds = idle_seconds + 1 in
@@ -2575,7 +2575,7 @@ let test_metrics_idle_seconds_gauge_records_observation () =
   check (option (float 0.001)) "failure idle seconds gauge"
     (Some (float_of_int failure_idle_seconds))
     (Masc_mcp.Prometheus.get_metric_value
-       Masc_mcp.Prometheus.metric_keeper_idle_seconds
+       Masc_mcp.Keeper_metrics.metric_keeper_idle_seconds
        ~labels:[ ("keeper_name", minimal_meta.name) ]
        ())
 
@@ -3114,7 +3114,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
       in
       let completed_before =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_turn_completed
+          Masc_mcp.Keeper_metrics.metric_keeper_turn_completed
           ~labels:[("keeper_name", minimal_meta.name)]
           ()
       in
@@ -3148,7 +3148,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
         ();
       let completed_after =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_turn_completed
+          Masc_mcp.Keeper_metrics.metric_keeper_turn_completed
           ~labels:[("keeper_name", minimal_meta.name)]
           ()
       in
@@ -3539,7 +3539,7 @@ let test_record_keeper_total_cost_metric () =
   UM.record_keeper_total_cost_usd ~keeper_name ~total_cost_usd:0.042;
   check (option (float 0.0001)) "keeper total cost gauge" (Some 0.042)
     (Masc_mcp.Prometheus.get_metric_value
-       Masc_mcp.Prometheus.metric_keeper_total_cost_usd
+       Masc_mcp.Keeper_metrics.metric_keeper_total_cost_usd
        ~labels:[ ("keeper_name", keeper_name) ]
        ())
 
@@ -3939,13 +3939,13 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
       in
       let phase_skip_before =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+          Masc_mcp.Keeper_metrics.metric_keeper_turn_fsm_transitions
           ~labels:phase_skip_labels
           ()
       in
       let legacy_phase_cancel_before =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+          Masc_mcp.Keeper_metrics.metric_keeper_turn_fsm_transitions
           ~labels:legacy_phase_cancel_labels
           ()
       in
@@ -3964,13 +3964,13 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
       | Ok updated ->
           let phase_skip_after =
             Masc_mcp.Prometheus.metric_value_or_zero
-              Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+              Masc_mcp.Keeper_metrics.metric_keeper_turn_fsm_transitions
               ~labels:phase_skip_labels
               ()
           in
           let legacy_phase_cancel_after =
             Masc_mcp.Prometheus.metric_value_or_zero
-              Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+              Masc_mcp.Keeper_metrics.metric_keeper_turn_fsm_transitions
               ~labels:legacy_phase_cancel_labels
               ()
           in
@@ -4026,6 +4026,75 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
               trajectory_summary |> member "outcome" |> member "reason"
               |> to_string))
 
+let test_run_keeper_cycle_livelock_block_returns_error () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.clear ();
+      Masc_mcp.Keeper_turn_livelock.reset_for_tests ();
+      cleanup_dir base_dir)
+    (fun () ->
+      with_test_runtime_roots base_dir @@ fun () ->
+      KR.clear ();
+      Masc_mcp.Keeper_turn_livelock.reset_for_tests ();
+      with_env "MASC_KEEPER_TURN_LIVELOCK_MAX_ATTEMPTS" "1" @@ fun () ->
+      with_env "MASC_KEEPER_TURN_LIVELOCK_STUCK_AFTER_SEC" "1800.0" @@ fun () ->
+      let meta = make_meta "livelock-blocked-keeper" in
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      ignore (KR.register ~base_path:base_dir meta.name meta);
+      ignore
+        (Masc_mcp.Keeper_turn_livelock.guard_and_record_turn_start
+           ~keeper:meta.name
+           ~turn_id:meta.runtime.usage.total_turns
+           ~max_attempts:1
+           ~stuck_after_sec:1800.0
+           ());
+      match
+        UT.run_keeper_cycle
+          ~config
+          ~meta
+          ~observation:base_observation
+          ~generation:meta.runtime.generation
+          ()
+      with
+      | Ok _ -> fail "expected livelock-blocked turn to return Error"
+      | Error err ->
+          let error_message = Agent_sdk.Error.to_string err in
+          check bool "error mentions livelock" true
+            (contains_substring error_message "livelock blocked");
+          (match
+             Masc_mcp.Keeper_execution_receipt.latest_json config meta.name
+           with
+           | None -> fail "expected livelock-blocked execution receipt"
+           | Some receipt ->
+               check string "blocked receipt outcome" "receipt_failed"
+                 Yojson.Safe.Util.(receipt |> member "outcome" |> to_string);
+               check string "blocked operator disposition" "pause_human"
+                 Yojson.Safe.Util.(
+                   receipt |> member "operator_disposition" |> to_string);
+               check string "blocked disposition reason"
+                 "turn_livelock_blocked"
+                 Yojson.Safe.Util.(
+                   receipt |> member "operator_disposition_reason"
+                   |> to_string);
+               check string "blocked receipt error kind"
+                 "turn_livelock_blocked"
+                 Yojson.Safe.Util.(
+                   receipt |> member "error" |> member "kind" |> to_string);
+               check bool "blocked receipt error message" true
+                 (contains_substring
+                    Yojson.Safe.Util.(
+                      receipt |> member "error" |> member "message" |> to_string)
+                    "livelock blocked");
+               check bool "blocked receipt terminal reason" true
+                 (contains_substring
+                    Yojson.Safe.Util.(
+                      receipt |> member "terminal_reason_code" |> to_string)
+                    "turn_livelock:attempts_exhausted")))
+
 let test_streaming_cancel_records_supervisor_stop_when_fiber_stop_set () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -4060,13 +4129,13 @@ let test_streaming_cancel_records_supervisor_stop_when_fiber_stop_set () =
       in
       let supervisor_request_before =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+          Masc_mcp.Keeper_metrics.metric_keeper_turn_fsm_transitions
           ~labels:supervisor_request_labels
           ()
       in
       let honor_stop_before =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+          Masc_mcp.Keeper_metrics.metric_keeper_turn_fsm_transitions
           ~labels:honor_stop_labels
           ()
       in
@@ -4081,13 +4150,13 @@ let test_streaming_cancel_records_supervisor_stop_when_fiber_stop_set () =
         ();
       let supervisor_request_after =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+          Masc_mcp.Keeper_metrics.metric_keeper_turn_fsm_transitions
           ~labels:supervisor_request_labels
           ()
       in
       let honor_stop_after =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+          Masc_mcp.Keeper_metrics.metric_keeper_turn_fsm_transitions
           ~labels:honor_stop_labels
           ()
       in
@@ -4491,6 +4560,45 @@ let test_is_ollama_saturated_ignores_zero_available_when_idle () =
   check bool "idle endpoint with no slots is fail-open" false
     (UT.is_ollama_saturated
        ~capacity_lookup:(fun _ -> Some info) url)
+
+let test_saturation_skip_count_starts_at_zero () =
+  UT.saturation_skip_count_clear_all ();
+  check int "fresh keeper has zero skip count" 0
+    (UT.saturation_skip_count_get ~keeper_name:"fresh_keeper")
+
+let test_saturation_skip_count_inc_returns_new_value () =
+  UT.saturation_skip_count_clear_all ();
+  let n1 = UT.saturation_skip_count_inc ~keeper_name:"k_inc" in
+  let n2 = UT.saturation_skip_count_inc ~keeper_name:"k_inc" in
+  let n3 = UT.saturation_skip_count_inc ~keeper_name:"k_inc" in
+  check int "first inc returns 1" 1 n1;
+  check int "second inc returns 2" 2 n2;
+  check int "third inc returns 3" 3 n3;
+  check int "get matches last inc" 3
+    (UT.saturation_skip_count_get ~keeper_name:"k_inc")
+
+let test_saturation_skip_count_reset_zeros_one_keeper () =
+  UT.saturation_skip_count_clear_all ();
+  let _ = UT.saturation_skip_count_inc ~keeper_name:"k_a" in
+  let _ = UT.saturation_skip_count_inc ~keeper_name:"k_b" in
+  let _ = UT.saturation_skip_count_inc ~keeper_name:"k_b" in
+  UT.saturation_skip_count_reset ~keeper_name:"k_a";
+  check int "reset target zeroed" 0
+    (UT.saturation_skip_count_get ~keeper_name:"k_a");
+  check int "untouched keeper preserved" 2
+    (UT.saturation_skip_count_get ~keeper_name:"k_b")
+
+let test_saturation_skip_cap_default_is_at_least_one () =
+  (* The cap is floored at 1 even if the env var is set to 0 or
+     negative — a cap of 0 would force-dispatch every cycle. *)
+  let prev = try Some (Sys.getenv "MASC_MAX_CONSECUTIVE_SATURATION_SKIPS")
+             with Not_found -> None in
+  Unix.putenv "MASC_MAX_CONSECUTIVE_SATURATION_SKIPS" "0";
+  let cap = UT.max_consecutive_saturation_skips () in
+  (match prev with
+   | Some v -> Unix.putenv "MASC_MAX_CONSECUTIVE_SATURATION_SKIPS" v
+   | None -> Unix.putenv "MASC_MAX_CONSECUTIVE_SATURATION_SKIPS" "");
+  check bool "cap floored at 1 even with env=0" true (cap >= 1)
 
 let wrapped_claude_limit_error () =
   Agent_sdk.Error.Api
@@ -6600,6 +6708,12 @@ let satisfies_required_tool name input =
   Result.is_ok
     (KTD.required_tool_satisfaction (required_tool_call name input))
 
+let satisfies_explicit_required_tool ~required_tool_names name input =
+  Result.is_ok
+    (KTD.required_tool_satisfaction_for_required_names
+       ~required_tool_names
+       (required_tool_call name input))
+
 let test_required_tool_satisfaction_rejects_passive_tools () =
   check bool "masc_status is passive" false
     (satisfies_required_tool "masc_status" (`Assoc []));
@@ -6632,6 +6746,22 @@ let test_required_tool_satisfaction_accepts_mutating_tools () =
             ("op", `String "gh");
             ("cmd", `String "pr comment 123 --body ok");
           ]))
+
+let test_explicit_required_tool_satisfaction_accepts_named_passive_tool () =
+  check bool "generic masc_web_search remains passive" false
+    (satisfies_required_tool "masc_web_search" (`Assoc []));
+  check bool "explicit masc_web_search satisfies required contract" true
+    (satisfies_explicit_required_tool
+       ~required_tool_names:[ "masc_web_search" ]
+       "masc_web_search" (`Assoc []));
+  check bool "explicit required list canonicalizes WebSearch alias" true
+    (satisfies_explicit_required_tool
+       ~required_tool_names:[ "masc_web_search" ]
+       "WebSearch" (`Assoc []));
+  check bool "unlisted passive tool still rejected" false
+    (satisfies_explicit_required_tool
+       ~required_tool_names:[ "keeper_bash" ]
+       "masc_web_search" (`Assoc []))
 
 let test_tool_usage_delta_uses_registry_counts () =
   let before =
@@ -7393,7 +7523,7 @@ let test_should_require_tools_for_initial_turn_matches_first_turn_gate () =
   check bool "pending verification requires an action tool" true
     (KAR.should_require_tools_for_initial_turn ~max_turns:3
        ~turn_affordances:[ "task_verify" ]);
-  check bool "work discovery requires an action tool" true
+  check bool "timer-only work discovery stays optional" false
     (KAR.should_require_tools_for_initial_turn ~max_turns:3
        ~turn_affordances:[ "work_discovery" ]);
   check bool "worktree delta inspection requires an action tool" true
@@ -7460,6 +7590,14 @@ let test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool () =
     "task_verify with submit tool -> gate fires" true
     (gate ~tools:[ "keeper_task_submit_for_verification" ] [ "task_verify" ]);
   check bool
+    "timer-only work_discovery does not hard-gate even with progress tools"
+    false
+    (gate ~tools:[ "keeper_board_post"; "keeper_task_create" ]
+       [ "work_discovery" ]);
+  check bool
+    "work_discovery can accompany another concrete gated affordance" true
+    (gate ~tools:[ "keeper_task_claim" ] [ "work_discovery"; "task_claim" ]);
+  check bool
     "all gated affordances missing tools -> gate suppressed" false
     (gate
        ~tools:[ "keeper_context_status"; "keeper_time_now" ]
@@ -7473,7 +7611,7 @@ let test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool () =
 let test_turn_affordance_gate_suppression_metric () =
   let metric affordance =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_keeper_required_tool_gate_suppressed_total
+      Masc_mcp.Keeper_metrics.metric_keeper_required_tool_gate_suppressed_total
       ~labels:[ ("affordance", affordance) ]
       ()
   in
@@ -7505,6 +7643,7 @@ let test_required_gate_surface_removes_passive_distractions () =
     [ "keeper_task_claim"; "keeper_board_post" ]
     (Surface.tool_names_for_required_gate_surface
        ~tool_gate_requested:true
+       ~required_tool_names:[]
        [ "keeper_tasks_list"; "keeper_task_claim"; "keeper_stay_silent";
          "keeper_board_post"; "masc_status" ]);
   check (list string)
@@ -7512,13 +7651,22 @@ let test_required_gate_surface_removes_passive_distractions () =
     [ "keeper_tasks_list"; "keeper_board_post" ]
     (Surface.tool_names_for_required_gate_surface
        ~tool_gate_requested:false
+       ~required_tool_names:[]
        [ "keeper_tasks_list"; "keeper_board_post" ]);
   check (list string)
     "passive-only surface remains unchanged when no action exists"
     [ "keeper_tasks_list"; "masc_status" ]
     (Surface.tool_names_for_required_gate_surface
        ~tool_gate_requested:true
-       [ "keeper_tasks_list"; "masc_status" ])
+       ~required_tool_names:[]
+       [ "keeper_tasks_list"; "masc_status" ]);
+  check (list string)
+    "explicit read-only required tool survives required gate"
+    [ "masc_web_search"; "keeper_board_post" ]
+    (Surface.tool_names_for_required_gate_surface
+       ~tool_gate_requested:true
+       ~required_tool_names:[ "masc_web_search" ]
+       [ "keeper_tasks_list"; "masc_web_search"; "keeper_board_post" ])
 
 let test_tools_for_gated_affordance_covers_each_variant () =
   (* Compile-time exhaustiveness already ensures every variant is
@@ -7701,24 +7849,79 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
     (Surface.required_tool_names_for_turn
        ~current_task_required_tool_names:[ "keeper_board_curation_submit" ]
        ~per_call_required_tool_names:[ "keeper_board_post" ]);
+  let product_design_required_tools =
+    Surface.required_tool_names_for_turn
+      ~current_task_required_tool_names:[ "keeper_board_curation_submit" ]
+      ~per_call_required_tool_names:[ "keeper_board_post" ]
+  in
+  (match
+     Surface.preferred_tool_choice_for_required_tool_names
+       ~required_tool_names:product_design_required_tools
+       ~allowed_tool_names:
+         [ "keeper_board_curation_submit"; "keeper_board_post" ]
+   with
+   | Agent_sdk.Types.Any -> ()
+   | other ->
+       fail
+         (Printf.sprintf
+            "expected Any for product/design reprobe required tool, got %s"
+            (Agent_sdk.Types.show_tool_choice other)));
   check (list string)
     "active task required tools remain when no per-call requirement exists"
     [ "keeper_board_curation_submit" ]
     (Surface.required_tool_names_for_turn
        ~current_task_required_tool_names:[ "keeper_board_curation_submit" ]
        ~per_call_required_tool_names:[]);
+  check (list string)
+    "satisfied per-call required tool is not forced again"
+    []
+    (Surface.outstanding_required_tool_names
+       ~required_tool_names:[ "keeper_pr_review_comment" ]
+       ~satisfied_tool_names:[ "keeper_pr_review_comment" ]);
+  check (list string)
+    "unsatisfied required tool remains outstanding"
+    [ "keeper_board_post" ]
+    (Surface.outstanding_required_tool_names
+       ~required_tool_names:
+         [ "keeper_pr_review_comment"; "keeper_board_post" ]
+       ~satisfied_tool_names:[ "keeper_pr_review_comment" ]);
+  check (list string)
+    "failed required tool call remains outstanding"
+    [ "keeper_pr_review_comment" ]
+    (Surface.outstanding_required_tool_names
+       ~required_tool_names:[ "keeper_pr_review_comment" ]
+       ~satisfied_tool_names:
+         (Surface.satisfied_required_tool_names_of_outcomes
+            [ "keeper_pr_review_comment", "error" ]));
+  check (list string)
+    "successful required tool call is satisfied"
+    []
+    (Surface.outstanding_required_tool_names
+       ~required_tool_names:[ "keeper_pr_review_comment" ]
+       ~satisfied_tool_names:
+         (Surface.satisfied_required_tool_names_of_outcomes
+            [ "keeper_pr_review_comment", "ok" ]));
   (match
      Surface.preferred_tool_choice_for_required_tool_names
        ~required_tool_names:[ "keeper_board_post" ]
        ~allowed_tool_names:
          [ "keeper_board_curation_submit"; "keeper_board_post" ]
    with
-   | Agent_sdk.Types.Tool name ->
-       check string "single per-call required tool is forced"
-         "keeper_board_post" name
+   | Agent_sdk.Types.Any -> ()
+   | other ->
+       fail (Printf.sprintf "expected Any for single required tool, got %s"
+               (Agent_sdk.Types.show_tool_choice other)));
+  (match
+     Surface.preferred_tool_choice_for_required_tool_names
+       ~required_tool_names:[ "keeper_pr_create" ]
+       ~allowed_tool_names:[ "keeper_pr_create"; "keeper_bash" ]
+   with
+   | Agent_sdk.Types.Any -> ()
    | other ->
        fail
-         (Printf.sprintf "expected Tool keeper_board_post, got %s"
+         (Printf.sprintf
+            "expected Any for keeper_pr_create to avoid raw require_specific_tool \
+             MCP-prefix mismatches, got %s"
             (Agent_sdk.Types.show_tool_choice other)));
   (match
      Surface.preferred_tool_choice_for_required_tool_names
@@ -7737,24 +7940,24 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
        ~required_tool_names:[ "keeper_tasks_audit" ]
        ~allowed_tool_names:[ "keeper_tasks_audit"; "keeper_board_post" ]
    with
-   | Agent_sdk.Types.Auto -> ()
+   | Agent_sdk.Types.Tool name ->
+       check string "explicit passive required tool is forced"
+         "keeper_tasks_audit" name
    | other ->
        fail
          (Printf.sprintf
-            "expected Auto for passive-only required tool, got %s"
+            "expected Tool keeper_tasks_audit for passive-only explicit required tool, got %s"
             (Agent_sdk.Types.show_tool_choice other)));
   (match
      Surface.preferred_tool_choice_for_required_tool_names
        ~required_tool_names:[ "keeper_tasks_audit"; "keeper_board_post" ]
        ~allowed_tool_names:[ "keeper_tasks_audit"; "keeper_board_post" ]
    with
-   | Agent_sdk.Types.Tool name ->
-       check string "active required tool remains forced" "keeper_board_post"
-         name
+   | Agent_sdk.Types.Any -> ()
    | other ->
        fail
          (Printf.sprintf
-            "expected Tool keeper_board_post for mixed passive/active required \
+            "expected Any for mixed passive/active required \
              tools, got %s"
             (Agent_sdk.Types.show_tool_choice other)));
   (* Active task keeper retains the strict gate even without a
@@ -7773,6 +7976,22 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
            "expected Any for active-task keeper (must make \
             progress), got %s"
            (Agent_sdk.Types.show_tool_choice other))
+
+let test_direct_keeper_msg_timeout_overrides_meta_per_provider_timeout () =
+  let meta =
+    { (make_meta "product-design-timeout") with
+      per_provider_timeout_s = Some 300.0;
+    }
+  in
+  check (option (float 0.001))
+    "explicit direct-message timeout wins over stale per-provider timeout"
+    (Some 900.0)
+    (KAR.per_provider_timeout_for_turn ~meta ~oas_timeout_s:900.0
+       ~timeout_s:900.0 ());
+  check (option (float 0.001))
+    "profile per-provider timeout still applies without explicit override"
+    (Some 300.0)
+    (KAR.per_provider_timeout_for_turn ~meta ~timeout_s:900.0 ())
 
 (* ---------- render_inline_skip_reason tests ---------- *)
 
@@ -8248,6 +8467,10 @@ let () =
             test_required_tool_satisfaction_rejects_passive_tools;
           test_case "required tool predicate accepts mutating tools" `Quick
             test_required_tool_satisfaction_accepts_mutating_tools;
+          test_case
+            "explicit required tool predicate accepts named passive tool"
+            `Quick
+            test_explicit_required_tool_satisfaction_accepts_named_passive_tool;
           test_case "tool usage delta uses registry counts" `Quick
             test_tool_usage_delta_uses_registry_counts;
           test_case "tool usage delta ignores removed tools" `Quick
@@ -8527,6 +8750,8 @@ let () =
         [
           test_case "run_keeper_cycle skips paused keeper" `Quick
             test_run_keeper_cycle_skips_non_executable_phase;
+          test_case "run_keeper_cycle errors on livelock block" `Quick
+            test_run_keeper_cycle_livelock_block_returns_error;
           test_case "streaming cancel records supervisor stop" `Quick
             test_streaming_cancel_records_supervisor_stop_when_fiber_stop_set;
           test_case "run_keeper_cycle records trajectory contract" `Quick
@@ -8570,6 +8795,14 @@ let () =
             test_is_ollama_saturated_returns_true_when_full_with_queue;
           test_case "PR-B: zero available without traffic is fail-open" `Quick
             test_is_ollama_saturated_ignores_zero_available_when_idle;
+          test_case "PR-B follow-up: fresh keeper has zero skip count" `Quick
+            test_saturation_skip_count_starts_at_zero;
+          test_case "PR-B follow-up: inc returns monotonic counts" `Quick
+            test_saturation_skip_count_inc_returns_new_value;
+          test_case "PR-B follow-up: reset zeros one keeper only" `Quick
+            test_saturation_skip_count_reset_zeros_one_keeper;
+          test_case "PR-B follow-up: cap floored at 1" `Quick
+            test_saturation_skip_cap_default_is_at_least_one;
           test_case "hard quota degraded retry uses local_recovery" `Quick
             test_degraded_retry_after_recoverable_error_uses_local_recovery_for_hard_quota;
           test_case "resumable session degraded retry uses local_recovery"
@@ -8667,6 +8900,9 @@ let () =
             test_should_require_tools_for_initial_turn_covers_actionable_affordances;
           test_case "task backlog required turn prefers claim tool choice"
             `Quick test_preferred_tool_choice_for_required_turn_claims_first;
+          test_case "direct keeper msg timeout overrides stale per-provider timeout"
+            `Quick
+            test_direct_keeper_msg_timeout_overrides_meta_per_provider_timeout;
           test_case "affordance gate filters by allowed_tool_names"
             `Quick
             test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool;
@@ -8716,14 +8952,23 @@ let () =
               in
               check bool "task_verify present without meta" true
                 (List.mem "task_verify" affordances));
-          test_case "affordance: work discovery requires action" `Quick
+          test_case "affordance: work discovery nudge is not a hard contract"
+            `Quick
             (fun () ->
               let obs = { base_observation with work_discovery_due = true } in
               let affordances =
                 UM.observed_affordances_of_observation obs
               in
               check bool "work_discovery present" true
-                (List.mem "work_discovery" affordances));
+                (List.mem "work_discovery" affordances);
+              let contract_obs =
+                Masc_mcp.Keeper_contract_classifier.of_keeper_world_observation
+                  obs
+              in
+              check bool "timer-only discovery is not actionable" false
+                (Masc_mcp.Keeper_contract_classifier.is_actionable
+                   (Masc_mcp.Keeper_contract_classifier.classify_actionable_signal
+                      contract_obs)));
           test_case "affordance: board curation requires multi-event window"
             `Quick
             (fun () ->

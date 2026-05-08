@@ -18,6 +18,56 @@ type turn_prompt_context =
   ; ctx_work : Keeper_exec_context.working_context
   }
 
+let prompt_injection_prefixes =
+  [
+    "ignore previous instructions";
+    "ignore all previous instructions";
+    "ignore prior instructions";
+    "ignore all prior instructions";
+    "disregard previous instructions";
+    "disregard prior instructions";
+    "forget previous instructions";
+    "system prompt:";
+    "system:";
+    "developer:";
+    "assistant:";
+    "user:";
+  ]
+
+let starts_with ~prefix text =
+  let prefix_len = String.length prefix in
+  String.length text >= prefix_len && String.sub text 0 prefix_len = prefix
+
+let strip_prompt_injection_prefix line =
+  let trimmed = String.trim line in
+  let lower = String.lowercase_ascii trimmed in
+  match
+    List.find_opt
+      (fun prefix -> starts_with ~prefix lower)
+      prompt_injection_prefixes
+  with
+  | None -> None
+  | Some prefix ->
+      let prefix_len = String.length prefix in
+      Some
+        (String.sub trimmed prefix_len (String.length trimmed - prefix_len)
+         |> String.trim)
+
+let rec strip_prompt_injection_prefixes ?(remaining = 8) line =
+  if remaining <= 0 then line
+  else
+    match strip_prompt_injection_prefix line with
+    | None -> line
+    | Some stripped ->
+        strip_prompt_injection_prefixes ~remaining:(remaining - 1) stripped
+
+let sanitize_user_message user_message =
+  user_message
+  |> Inference_utils.sanitize_text_utf8
+  |> String.split_on_char '\n'
+  |> List.map strip_prompt_injection_prefixes
+  |> String.concat "\n"
+
 let build_turn_context
       ~(ctx : Keeper_run_context.run_context)
       ~(build_turn_prompt :

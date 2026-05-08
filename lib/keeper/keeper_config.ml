@@ -91,23 +91,21 @@ let bool_default_true_of_env name =
       let v = String.trim v |> String.lowercase_ascii in
       not (v = "0" || v = "false" || v = "no" || v = "n")
 
+let bool_of_string raw =
+  let v = String.trim raw |> String.lowercase_ascii in
+  if v = "1" || v = "true" || v = "yes" || v = "y" || v = "on" then Some true
+  else if v = "0" || v = "false" || v = "no" || v = "n" || v = "off" then Some false
+  else None
+
 let bool_of_env_default name ~(default : bool) =
   match Env_config_core.raw_value_opt name with
   | None -> default
-  | Some raw ->
-      let v = String.trim raw |> String.lowercase_ascii in
-      if v = "1" || v = "true" || v = "yes" || v = "y" || v = "on" then true
-      else if v = "0" || v = "false" || v = "no" || v = "n" || v = "off" then false
-      else default
+  | Some raw -> Option.value (bool_of_string raw) ~default
 
 let bool_of_env_opt name =
   match Env_config_core.raw_value_opt name with
   | None -> None
-  | Some raw ->
-      let v = String.trim raw |> String.lowercase_ascii in
-      if v = "1" || v = "true" || v = "yes" || v = "y" || v = "on" then Some true
-      else if v = "0" || v = "false" || v = "no" || v = "n" || v = "off" then Some false
-      else None
+  | Some raw -> bool_of_string raw
 
 let valid_name_re = Re.Pcre.re "^[A-Za-z0-9._-]+$" |> Re.compile
 

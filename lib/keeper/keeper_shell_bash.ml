@@ -194,7 +194,7 @@ let handle_keeper_bash
   in
   let gh_pr_create_block () =
     Prometheus.inc_counter
-      Prometheus.metric_keeper_shell_bash_failures
+      Keeper_metrics.metric_keeper_shell_bash_failures
       ~labels:[("keeper", meta.name); ("site", "gh_pr_create")]
       ();
     Log.Keeper.warn
@@ -273,6 +273,83 @@ let handle_keeper_bash
       | Eio.Cancel.Cancelled _ as e -> raise e
       | _ -> None
     in
+    let cached_result_json
+          (entry : Masc_exec.Exec_cache.cache_entry) =
+      let st = Unix.WEXITED entry.exit_code in
+      Yojson.Safe.to_string
+        (Exec_core.process_result_json
+           ~base_path:root
+           ~keeper_name:meta.name
+           ~cmd
+           ~extra:[
+             "cwd", `String cwd;
+             "execution_time_ms", `Int entry.duration_ms;
+             "cached", `Bool true;
+             "cache_age_ms",
+               `Int
+                 (int_of_float
+                    ((Unix.time () -. entry.cached_at) *. 1000.));
+           ]
+           ~status:st
+           ~output:entry.output
+           ~env_snapshot:env_snap
+           ())
+    in
+    let cached_raw_result_json
+          (entry : Masc_exec.Exec_cache.cache_entry) =
+      match
+        Safe_ops.parse_json_safe
+          ~context:"Keeper_shell_bash.cached_raw_result_json"
+          entry.output
+      with
+      | Ok (`Assoc fields) ->
+        let fields =
+          fields
+          |> List.remove_assoc "cached"
+          |> List.remove_assoc "cache_age_ms"
+          |> List.remove_assoc "execution_time_ms"
+        in
+        Yojson.Safe.to_string
+          (`Assoc
+            (fields @ [
+               "cached", `Bool true;
+               "cache_age_ms",
+                 `Int
+                   (int_of_float
+                      ((Unix.time () -. entry.cached_at) *. 1000.));
+               "execution_time_ms", `Int entry.duration_ms;
+             ]))
+      | Ok _ | Error _ -> cached_result_json entry
+    in
+    let with_raw_json_exec_cache run =
+      let cacheable =
+        Masc_exec.Risk_classifier.(is_cacheable (classify cmd))
+      in
+      if not cacheable then run ()
+      else
+        match exec_cache with
+        | None -> run ()
+        | Some cache ->
+          (match Masc_exec.Exec_cache.lookup cache cmd with
+           | Some entry -> cached_raw_result_json entry
+           | None ->
+             let t0 = Unix.gettimeofday () in
+             let raw = run () in
+             let elapsed_ms =
+               elapsed_duration_ms
+                 ~start_time:t0 ~end_time:(Unix.gettimeofday ())
+             in
+             (match
+                Safe_ops.parse_json_safe
+                  ~context:"Keeper_shell_bash.with_raw_json_exec_cache"
+                  raw
+              with
+              | Ok json when Safe_ops.json_bool ~default:false "ok" json ->
+                Masc_exec.Exec_cache.store cache
+                  ~cmd ~exit_code:0 ~output:raw ~duration_ms:elapsed_ms
+              | Ok _ | Error _ -> ());
+             raw)
+    in
     let normalize_path_for_containment path =
       Keeper_alerting_path.normalize_path_for_check path
       |> Keeper_alerting_path.strip_trailing_slashes
@@ -313,7 +390,7 @@ let handle_keeper_bash
     if Worker_dev_tools.is_destructive_bash_operation cmd
     then (
       Prometheus.inc_counter
-        Prometheus.metric_keeper_shell_bash_failures
+        Keeper_metrics.metric_keeper_shell_bash_failures
         ~labels:[("keeper", meta.name); ("site", "destructive")]
         ();
       Log.Keeper.warn "keeper_bash DESTRUCTIVE blocked: %s (keeper=%s)" cmd_for_log meta.name;
@@ -351,7 +428,7 @@ let handle_keeper_bash
             && Keeper_shell_shared.cmd_targets_gh cmd
     then (
       Prometheus.inc_counter
-        Prometheus.metric_keeper_shell_bash_failures
+        Keeper_metrics.metric_keeper_shell_bash_failures
         ~labels:[("keeper", meta.name); ("site", "hard_mode")]
         ();
       Log.Keeper.warn
@@ -481,7 +558,7 @@ let handle_keeper_bash
         meta.name cwd cmd_for_log detected_tool
         (network_mode_to_string base_network_mode);
       Prometheus.inc_counter
-        Prometheus.metric_keeper_bash_network_upgrade
+        Keeper_metrics.metric_keeper_bash_network_upgrade
         ~labels:[ ("keeper", meta.name); ("detected_tool", detected_tool) ]
         ();
       Keeper_shell_shared.run_docker_with_git_bash
@@ -493,12 +570,13 @@ let handle_keeper_bash
       Log.Keeper.info
         "DOCKER_EXEC: keeper=%s cwd=%s cmd=%s network=%s"
         meta.name cwd cmd_for_log (network_mode_to_string sandbox_network_mode);
-      Keeper_shell_shared.run_docker_hardened_bash
-        ~turn_sandbox_runtime:
-          (Keeper_sandbox_factory.resolve_opt
-             turn_sandbox_factory ~cwd)
-        ~config ~meta ~cwd ~timeout_sec ~cmd
-        ~network_mode:sandbox_network_mode)
+      with_raw_json_exec_cache (fun () ->
+        Keeper_shell_shared.run_docker_hardened_bash
+          ~turn_sandbox_runtime:
+            (Keeper_sandbox_factory.resolve_opt
+               turn_sandbox_factory ~cwd)
+          ~config ~meta ~cwd ~timeout_sec ~cmd
+          ~network_mode:sandbox_network_mode))
     else
       let local_reason =
         if Env_config_keeper.KeeperSandbox.hard_mode () then "hard_mode_local"
@@ -514,7 +592,7 @@ let handle_keeper_bash
         in_playground
         (Env_config_keeper.KeeperSandbox.hard_mode ());
       Prometheus.inc_counter
-        Prometheus.metric_keeper_bash_local_execution
+        Keeper_metrics.metric_keeper_bash_local_execution
         ~labels:[ ("keeper", meta.name); ("reason", local_reason) ]
         ();
       (* Local execution path: full validation applies *)
@@ -526,7 +604,7 @@ let handle_keeper_bash
       | Error reason ->
         let reason_str = Worker_dev_tools.block_reason_to_string reason in
         Prometheus.inc_counter
-          Prometheus.metric_keeper_shell_bash_failures
+          Keeper_metrics.metric_keeper_shell_bash_failures
           ~labels:[("site", "generic_blocked")]
           ();
         Log.Keeper.warn "keeper_bash blocked: %s (cmd=%s)" reason_str cmd_for_log;
@@ -676,24 +754,7 @@ let handle_keeper_bash
                     | Some cache ->
                       (match Masc_exec.Exec_cache.lookup cache cmd with
                        | Some entry ->
-                         let st = Unix.WEXITED entry.exit_code in
-                         Yojson.Safe.to_string
-                           (Exec_core.process_result_json
-                              ~base_path:root
-                              ~keeper_name:meta.name
-                              ~cmd
-                              ~extra:[
-                                "cwd", `String cwd;
-                                "execution_time_ms", `Int entry.duration_ms;
-                                "cached", `Bool true;
-                                "cache_age_ms",
-                                  `Int (int_of_float
-                                          ((Unix.time () -. entry.cached_at) *. 1000.));
-                              ]
-                              ~status:st
-                              ~output:entry.output
-                              ~env_snapshot:env_snap
-                              ())
+                         cached_result_json entry
                        | None ->
                          let t0 = Unix.gettimeofday () in
                          let st, out =
@@ -782,101 +843,109 @@ let handle_keeper_bash
                         ~env_snapshot:env_snap
                         ()))
                  | Some clock ->
-                   let budget_ms = Masc_exec.Exec_run.default_budget_ms () in
-                   let t0_bg = Unix.gettimeofday () in
-                   let outcome =
-                     Masc_exec.Exec_run.run_with_auto_bg
-                       ~clock
-                       ~base_path:root
-                       ~budget_ms
-                       ~keeper:meta.name
-                       ~argv:argv_merged
-                       ~cwd
-                       ~envp:(Unix.environment ())
-                       ~timeout_sec
-                       ()
+                   let run_uncached () =
+                     let budget_ms = Masc_exec.Exec_run.default_budget_ms () in
+                     let t0_bg = Unix.gettimeofday () in
+                     let outcome =
+                       Masc_exec.Exec_run.run_with_auto_bg
+                         ~clock
+                         ~base_path:root
+                         ~budget_ms
+                         ~keeper:meta.name
+                         ~argv:argv_merged
+                         ~cwd
+                         ~envp:(Unix.environment ())
+                         ~timeout_sec
+                         ()
+                     in
+                     (match outcome with
+                      | Masc_exec.Exec_run.Completed r ->
+                        let elapsed_ms =
+                          elapsed_duration_ms
+                            ~start_time:t0_bg ~end_time:(Unix.gettimeofday ())
+                        in
+                        (* P21: store in exec cache if not a timeout *)
+                        if not (Keeper_shell_shared.process_status_is_timeout r.status) then
+                          (match exec_cache with
+                           | Some cache ->
+                             let exit_code = match r.status with
+                               | Unix.WEXITED n -> n
+                               | Unix.WSIGNALED n -> 128 + n
+                               | Unix.WSTOPPED n -> 256 + n
+                             in
+                             Masc_exec.Exec_cache.store cache
+                               ~cmd ~exit_code ~output:r.stdout ~duration_ms:elapsed_ms
+                           | None -> ());
+                        Yojson.Safe.to_string
+                          (Exec_core.process_result_json
+                             ~base_path:root
+                             ~keeper_name:meta.name
+                             ~cmd
+                             ~extra:[
+                               "cwd", `String cwd;
+                               "execution_time_ms", `Int elapsed_ms;
+                             ]
+                             ~status:r.status
+                             ~output:r.stdout
+                             ~env_snapshot:env_snap
+                             ())
+                      | Masc_exec.Exec_run.Promoted p ->
+                        let elapsed_ms =
+                          elapsed_duration_ms
+                            ~start_time:t0_bg ~end_time:(Unix.gettimeofday ())
+                        in
+                        Log.Keeper.info
+                          "BG_PROMOTE: keeper=%s task_id=%s budget_ms=%d cmd=%s"
+                          meta.name
+                          (Bg_task.task_id_to_string p.task_id)
+                          budget_ms
+                          cmd_for_log;
+                        Yojson.Safe.to_string
+                          (`Assoc
+                            [
+                              ("ok", `Bool false);
+                              ("promoted", `Bool true);
+                              ( "background_task_id",
+                                `String
+                                  (Bg_task.task_id_to_string p.task_id) );
+                              ("cmd", `String cmd);
+                              ("cwd", `String cwd);
+                              ("partial_output", `String p.partial_stdout);
+                              ( "bytes_dropped",
+                                `Int p.bytes_dropped_stdout );
+                              ("budget_ms", `Int budget_ms);
+                              ("execution_time_ms", `Int elapsed_ms);
+                              ( "hint",
+                                `String
+                                  (Printf.sprintf
+                                     "Command exceeded \
+                                      MASC_BLOCKING_BUDGET_MS=%d. Still \
+                                      running in background; poll with \
+                                      keeper_bash_output or stop with \
+                                      keeper_bash_kill."
+                                     budget_ms) );
+                            ])
+                      | Masc_exec.Exec_run.Spawn_error
+                          (Bg_task.Spawn_failed e) ->
+                        error_json
+                          (Printf.sprintf
+                             "auto-bg spawn failed: %s" e)
+                      | Masc_exec.Exec_run.Spawn_error
+                          (Bg_task.Too_many_tasks { keeper = k; limit }) ->
+                        error_json
+                          (Printf.sprintf
+                             "keeper %s exceeded background task limit (%d)"
+                             k limit)
+                      | Masc_exec.Exec_run.Spawn_error
+                          (Bg_task.Invalid_cwd msg) ->
+                        error_json (Printf.sprintf "invalid cwd: %s" msg))
                    in
-                   (match outcome with
-                    | Masc_exec.Exec_run.Completed r ->
-                      let elapsed_ms =
-                        elapsed_duration_ms
-                          ~start_time:t0_bg ~end_time:(Unix.gettimeofday ())
-                      in
-                      (* P21: store in exec cache if not a timeout *)
-                      if not (Keeper_shell_shared.process_status_is_timeout r.status) then
-                        (match exec_cache with
-                         | Some cache ->
-                           let exit_code = match r.status with
-                             | Unix.WEXITED n -> n
-                             | Unix.WSIGNALED n -> 128 + n
-                             | Unix.WSTOPPED n -> 256 + n
-                           in
-                           Masc_exec.Exec_cache.store cache
-                             ~cmd ~exit_code ~output:r.stdout ~duration_ms:elapsed_ms
-                         | None -> ());
-                      Yojson.Safe.to_string
-                        (Exec_core.process_result_json
-                           ~base_path:root
-                           ~keeper_name:meta.name
-                           ~cmd
-                           ~extra:[
-                             "cwd", `String cwd;
-                             "execution_time_ms", `Int elapsed_ms;
-                           ]
-                           ~status:r.status
-                           ~output:r.stdout
-                           ~env_snapshot:env_snap
-                           ())
-                    | Masc_exec.Exec_run.Promoted p ->
-                      let elapsed_ms =
-                        elapsed_duration_ms
-                          ~start_time:t0_bg ~end_time:(Unix.gettimeofday ())
-                      in
-                      Log.Keeper.info
-                        "BG_PROMOTE: keeper=%s task_id=%s budget_ms=%d cmd=%s"
-                        meta.name
-                        (Bg_task.task_id_to_string p.task_id)
-                        budget_ms
-                        cmd_for_log;
-                      Yojson.Safe.to_string
-                        (`Assoc
-                          [
-                            ("ok", `Bool false);
-                            ("promoted", `Bool true);
-                            ( "background_task_id",
-                              `String
-                                (Bg_task.task_id_to_string p.task_id) );
-                            ("cmd", `String cmd);
-                            ("cwd", `String cwd);
-                            ("partial_output", `String p.partial_stdout);
-                            ( "bytes_dropped",
-                              `Int p.bytes_dropped_stdout );
-                            ("budget_ms", `Int budget_ms);
-                            ("execution_time_ms", `Int elapsed_ms);
-                            ( "hint",
-                              `String
-                                (Printf.sprintf
-                                   "Command exceeded \
-                                    MASC_BLOCKING_BUDGET_MS=%d. Still \
-                                    running in background; poll with \
-                                    keeper_bash_output or stop with \
-                                    keeper_bash_kill."
-                                   budget_ms) );
-                          ])
-                    | Masc_exec.Exec_run.Spawn_error
-                        (Bg_task.Spawn_failed e) ->
-                      error_json
-                        (Printf.sprintf
-                           "auto-bg spawn failed: %s" e)
-                    | Masc_exec.Exec_run.Spawn_error
-                        (Bg_task.Too_many_tasks { keeper = k; limit }) ->
-                      error_json
-                        (Printf.sprintf
-                           "keeper %s exceeded background task limit (%d)"
-                           k limit)
-                    | Masc_exec.Exec_run.Spawn_error
-                        (Bg_task.Invalid_cwd msg) ->
-                      error_json (Printf.sprintf "invalid cwd: %s" msg))
+                   (match exec_cache with
+                    | Some cache ->
+                      (match Masc_exec.Exec_cache.lookup cache cmd with
+                       | Some entry -> cached_result_json entry
+                       | None -> run_uncached ())
+                    | None -> run_uncached ())
                end))
   end
 ;;

@@ -157,7 +157,7 @@ let record_pre_tool_gate_attempt
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
        Prometheus.inc_counter
-         Prometheus.metric_keeper_lifecycle_callback_failures
+         Keeper_metrics.metric_keeper_lifecycle_callback_failures
          ~labels:[("keeper", keeper_name); ("callback", "gate_tool_call_log")]
          ();
        Log.Keeper.warn
@@ -234,7 +234,7 @@ let record_pre_tool_gate_attempt
    labels let dashboards and #9880 governance judgments distinguish
    which keeper-tool pairs are actually failing instead of reading a
    single undifferentiated marker. *)
-let tool_use_failure_metric = Prometheus.metric_keeper_tool_use_failure
+let tool_use_failure_metric = Keeper_metrics.metric_keeper_tool_use_failure
 
 let record_tool_use_failure ~keeper_name ~tool_name =
   Prometheus.inc_counter tool_use_failure_metric
@@ -383,7 +383,7 @@ let record_usage_anomaly_metrics ~keeper_name ~model usage_trust =
     List.iter
       (fun reason ->
          Prometheus.inc_counter
-           Prometheus.metric_keeper_usage_anomalies
+           Keeper_metrics.metric_keeper_usage_anomalies
            ~labels:
              [
                ("keeper_name", keeper_name);
@@ -597,7 +597,7 @@ let record_keeper_tool_duration_metric
     (summary : tool_execution_summary)
   : unit =
   Prometheus.observe_histogram
-    Prometheus.metric_keeper_tool_call_duration
+    Keeper_metrics.metric_keeper_tool_call_duration
     ~labels:
       [ "keeper", keeper_name
       ; "provider", summary.provider
@@ -662,12 +662,13 @@ let record_llm_inference_latency_metric
   match telemetry with
   | Some t ->
     let observed_latency_ms =
-      if t.request_latency_ms > 0 then t.request_latency_ms
-      else (
-        Prometheus.inc_counter
-          Prometheus.metric_after_turn_telemetry_zero_latency
-          ~labels ();
-        1)
+      match t.request_latency_ms with
+      | Some latency_ms when latency_ms > 0 -> latency_ms
+      | _ ->
+          Prometheus.inc_counter
+            Prometheus.metric_after_turn_telemetry_zero_latency
+            ~labels ();
+          1
     in
     Prometheus.observe_histogram
       Prometheus.metric_llm_inference_duration
@@ -684,11 +685,13 @@ let wall_tokens_per_second
     ~(telemetry : Agent_sdk.Types.inference_telemetry option)
   : float option =
   match telemetry with
-  | Some t when not usage_missing && output_tokens > 0
-                && t.request_latency_ms > 0 ->
+  | Some t when not usage_missing && output_tokens > 0 -> (
+      match t.request_latency_ms with
+      | Some request_latency_ms when request_latency_ms > 0 ->
       Some
         (Float.of_int output_tokens
-         /. (Float.of_int t.request_latency_ms /. 1000.0))
+         /. (Float.of_int request_latency_ms /. 1000.0))
+      | _ -> None)
   | _ -> None
 
 (** #10318: classify why [cost_usd] ended up as it did so the
@@ -844,7 +847,10 @@ let assemble_cost_event_payload
            @ float_field "hw_decode_tokens_per_second" tm.predicted_per_second
          | None -> [])
       @ float_field "peak_memory_gb" t.peak_memory_gb
-      @ [("request_latency_ms", `Int t.request_latency_ms)]
+      @ int_field "request_latency_ms"
+          (match t.request_latency_ms with
+           | Some latency_ms when latency_ms > 0 -> Some latency_ms
+           | _ -> None)
     | None -> []
   in
   let wall_tok_s_fields =
@@ -955,7 +961,7 @@ let emit_cost_event
    with Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
         Prometheus.inc_counter
-          Prometheus.metric_keeper_metric_emit_dropped
+          Keeper_metrics.metric_keeper_metric_emit_dropped
           ~labels:[("keeper", agent_name); ("site", "cost_event_write")]
           ();
         Log.Keeper.error "emit_cost_event: failed to write %s: %s"
@@ -1130,12 +1136,115 @@ let first_some a b =
 let observe_output_parse_failure ~surface ~output_bytes =
   Safe_ops.protect ~default:() (fun () ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_oas_hook_output_parse_failures
+        Keeper_metrics.metric_keeper_oas_hook_output_parse_failures
         ~labels:[ ("surface", surface) ] ());
   Safe_ops.protect ~default:() (fun () ->
       Log.Keeper.warn
         "keeper_hooks_oas output JSON parse failed: surface=%s output_bytes=%d"
         surface output_bytes)
+
+let find_substring_from text ~needle ~start =
+  let text_len = String.length text in
+  let needle_len = String.length needle in
+  let rec loop i =
+    if needle_len = 0 then Some i
+    else if i + needle_len > text_len then None
+    else if String.sub text i needle_len = needle then Some i
+    else loop (i + 1)
+  in
+  loop start
+
+let strip_fence_language block =
+  let block = String.trim block in
+  match String.index_opt block '\n' with
+  | None -> block
+  | Some first_line_end ->
+      let first_line =
+        String.sub block 0 first_line_end
+        |> String.trim
+        |> String.lowercase_ascii
+      in
+      let rest =
+        String.sub block (first_line_end + 1)
+          (String.length block - first_line_end - 1)
+        |> String.trim
+      in
+      if first_line = "json" || first_line = "jsonc" then rest else block
+
+let fenced_json_candidates text =
+  let fence = "```" in
+  let rec loop start acc =
+    match find_substring_from text ~needle:fence ~start with
+    | None -> List.rev acc
+    | Some open_at ->
+        let content_start = open_at + String.length fence in
+        (match find_substring_from text ~needle:fence ~start:content_start with
+         | None -> List.rev acc
+         | Some close_at ->
+             let raw =
+               String.sub text content_start (close_at - content_start)
+               |> strip_fence_language
+             in
+             let acc = if raw = "" then acc else raw :: acc in
+             loop (close_at + String.length fence) acc)
+  in
+  loop 0 []
+
+let json_close_for_open = function
+  | '{' -> Some '}'
+  | '[' -> Some ']'
+  | _ -> None
+
+let balanced_json_candidates text =
+  let len = String.length text in
+  let rec finish_candidate i in_string escaped stack =
+    if i >= len then None
+    else
+      let ch = text.[i] in
+      if in_string then
+        if escaped then finish_candidate (i + 1) true false stack
+        else
+          match ch with
+          | '\\' -> finish_candidate (i + 1) true true stack
+          | '"' -> finish_candidate (i + 1) false false stack
+          | _ -> finish_candidate (i + 1) true false stack
+      else
+        match ch with
+        | '"' -> finish_candidate (i + 1) true false stack
+        | '{' | '[' ->
+            (match json_close_for_open ch with
+             | None -> finish_candidate (i + 1) false false stack
+             | Some close ->
+                 finish_candidate (i + 1) false false (close :: stack))
+        | '}' | ']' ->
+            (match stack with
+             | close :: rest when close = ch ->
+                 if rest = [] then Some i
+                 else finish_candidate (i + 1) false false rest
+             | _ -> None)
+        | _ -> finish_candidate (i + 1) false false stack
+  in
+  let rec loop i acc =
+    if i >= len then List.rev acc
+    else
+      match json_close_for_open text.[i] with
+      | None -> loop (i + 1) acc
+      | Some expected ->
+          (match finish_candidate (i + 1) false false [ expected ] with
+           | None -> loop (i + 1) acc
+           | Some close_at ->
+               let candidate =
+                 String.sub text i (close_at - i + 1)
+                 |> String.trim
+               in
+               loop (close_at + 1) (candidate :: acc))
+  in
+  loop 0 []
+
+let parse_json_candidate ~surface candidate =
+  Safe_ops.parse_json_safe
+    ~context:("Keeper_hooks_oas." ^ surface ^ ".output.embedded")
+    candidate
 
 let output_json_opt ~surface output_text =
   match
@@ -1145,9 +1254,22 @@ let output_json_opt ~surface output_text =
   with
   | Ok json -> Some json
   | Error _ ->
-      observe_output_parse_failure ~surface
-        ~output_bytes:(String.length output_text);
-      None
+      let candidates =
+        fenced_json_candidates output_text @ balanced_json_candidates output_text
+      in
+      (match
+         List.find_map
+           (fun candidate ->
+              match parse_json_candidate ~surface candidate with
+              | Ok json -> Some json
+              | Error _ -> None)
+           candidates
+       with
+       | Some json -> Some json
+       | None ->
+           observe_output_parse_failure ~surface
+             ~output_bytes:(String.length output_text);
+           None)
 
 let normalized_route_via raw =
   let value = String.trim raw |> String.lowercase_ascii in
@@ -1953,7 +2075,7 @@ let make_hooks
         in
         let latency_ms =
           match response.telemetry with
-          | Some t -> t.request_latency_ms
+          | Some t -> Option.value ~default:0 t.request_latency_ms
           | None -> 0
         in
         let wall_tok_s_opt =
@@ -2019,7 +2141,7 @@ let make_hooks
                 bypass that counter.  Logging here makes the loss visible
                 at the producer site. *)
              Prometheus.inc_counter
-               Prometheus.metric_keeper_lifecycle_callback_failures
+               Keeper_metrics.metric_keeper_lifecycle_callback_failures
                ~labels:[("keeper", meta.name); ("callback", "after_turn_sse_broadcast")]
                ();
              Log.Keeper.warn
@@ -2081,6 +2203,14 @@ let make_hooks
             ~keeper_name:(!meta_ref).name ()
         in
         let result_bytes = if original_bytes > 0 then original_bytes else out_len in
+        let handler_logged =
+          Keeper_tool_call_log.consume_handler_logged
+            ~keeper_name:(!meta_ref).name
+            ~tool_name
+            ~output_text
+            ~success:(outcome = "ok")
+            ()
+        in
         let ( lane
             , tool_choice
             , thinking_enabled
@@ -2098,33 +2228,34 @@ let make_hooks
           Keeper_tool_call_log.get_turn_context
             ~keeper_name:(!meta_ref).name ()
         in
-        (try
-           Keeper_tool_call_log.log_call
-             ~keeper_name:(!meta_ref).name
-             ~tool_name ~input ~output_text
-             ~success:(outcome = "ok") ~duration_ms
-             ~model:(let m = (!meta_ref).runtime.usage.last_model_used in
-                     if m = "" then (!meta_ref).cascade_name else m)
-             ?lane ?tool_choice ?thinking_enabled ?thinking_budget
-             ?prompt_fingerprint
-             ?trace_id ?session_id ?turn ?keeper_turn_id ?task_id ?goal_ids
-             ?sandbox_profile ?network_mode ?approval_mode
-             ~result_bytes ?truncated_to ()
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-             (* P2 silent-failure fix (same pattern as the broadcast site
-                above at line ~1098): tool-call audit log write failures
-                were dropped without trace.  Loss of these rows leaves
-                downstream replay / debugging tools with gaps that look
-                identical to "no tool calls in this turn." *)
-             Prometheus.inc_counter
-               Prometheus.metric_keeper_lifecycle_callback_failures
-               ~labels:[("keeper", (!meta_ref).name); ("callback", "post_tool_log_write")]
-               ();
-             Log.Keeper.warn
-               "keeper:%s tool=%s log_call write failed: %s"
-               (!meta_ref).name tool_name (Printexc.to_string exn));
+        if not handler_logged then
+          (try
+             Keeper_tool_call_log.log_call
+               ~keeper_name:(!meta_ref).name
+               ~tool_name ~input ~output_text
+               ~success:(outcome = "ok") ~duration_ms
+               ~model:(let m = (!meta_ref).runtime.usage.last_model_used in
+                       if m = "" then (!meta_ref).cascade_name else m)
+               ?lane ?tool_choice ?thinking_enabled ?thinking_budget
+               ?prompt_fingerprint
+               ?trace_id ?session_id ?turn ?keeper_turn_id ?task_id ?goal_ids
+               ?sandbox_profile ?network_mode ?approval_mode
+               ~result_bytes ?truncated_to ()
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
+               (* P2 silent-failure fix (same pattern as the broadcast site
+                  above at line ~1098): tool-call audit log write failures
+                  were dropped without trace.  Loss of these rows leaves
+                  downstream replay / debugging tools with gaps that look
+                  identical to "no tool calls in this turn." *)
+               Prometheus.inc_counter
+                 Keeper_metrics.metric_keeper_lifecycle_callback_failures
+                 ~labels:[("keeper", (!meta_ref).name); ("callback", "post_tool_log_write")]
+                 ();
+               Log.Keeper.warn
+                 "keeper:%s tool=%s log_call write failed: %s"
+                 (!meta_ref).name tool_name (Printexc.to_string exn));
         (try
            append_pr_review_action_metric
              ~config
@@ -2140,7 +2271,7 @@ let make_hooks
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
              Prometheus.inc_counter
-               Prometheus.metric_keeper_lifecycle_callback_failures
+               Keeper_metrics.metric_keeper_lifecycle_callback_failures
                ~labels:
                  [
                    ("keeper", (!meta_ref).name);
@@ -2165,7 +2296,7 @@ let make_hooks
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
              Prometheus.inc_counter
-               Prometheus.metric_keeper_lifecycle_callback_failures
+               Keeper_metrics.metric_keeper_lifecycle_callback_failures
                ~labels:
                  [
                    ("keeper", (!meta_ref).name);
@@ -2250,7 +2381,7 @@ let make_hooks
          with Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
               Prometheus.inc_counter
-                Prometheus.metric_keeper_lifecycle_callback_failures
+                Keeper_metrics.metric_keeper_lifecycle_callback_failures
                 ~labels:[("keeper", (!meta_ref).name); ("callback", "on_tool_executed")]
                 ();
               Log.Keeper.error "keeper:%s on_tool_executed callback failed for %s: %s"
@@ -2269,7 +2400,7 @@ let make_hooks
     on_stop = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.OnStop { reason; _ } ->
-        Prometheus.inc_counter Prometheus.metric_keeper_oas_on_stop
+        Prometheus.inc_counter Keeper_metrics.metric_keeper_oas_on_stop
           ~labels:
             [
               ("keeper", (!meta_ref).name);
@@ -2292,7 +2423,7 @@ let make_hooks
         let decision =
           keeper_idle_decision ~meta_ref ~consecutive_idle_turns ~tool_names in
         Prometheus.inc_counter
-          Prometheus.metric_keeper_oas_on_idle_escalated
+          Keeper_metrics.metric_keeper_oas_on_idle_escalated
           ~labels:
             [
               ("keeper", (!meta_ref).name);
@@ -2306,7 +2437,7 @@ let make_hooks
     on_error = Some (function
       | Agent_sdk.Hooks.OnError { detail; context = err_ctx } ->
         Prometheus.inc_counter
-          Prometheus.metric_keeper_lifecycle_callback_failures
+          Keeper_metrics.metric_keeper_lifecycle_callback_failures
           ~labels:[("keeper", (!meta_ref).name); ("callback", "on_error")]
           ();
         Log.Keeper.error "keeper:%s on_error: %s (context: %s)"
@@ -2317,7 +2448,7 @@ let make_hooks
     on_tool_error = Some (function
       | Agent_sdk.Hooks.OnToolError { tool_name; error } ->
         Prometheus.inc_counter
-          Prometheus.metric_keeper_lifecycle_callback_failures
+          Keeper_metrics.metric_keeper_lifecycle_callback_failures
           ~labels:[("keeper", (!meta_ref).name); ("callback", "on_tool_error")]
           ();
         Log.Keeper.error "keeper:%s tool_error: %s — %s"

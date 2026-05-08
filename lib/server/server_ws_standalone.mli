@@ -33,6 +33,27 @@ val is_enabled : unit -> bool
     standalone WS be running" — agent_card, transport_read_model,
     and the bootstrap loop all branch on this predicate. *)
 
+module For_testing : sig
+  val max_ws_close_reason_log_len : int
+
+  val max_ws_close_payload_len : int
+
+  val truncate_ws_close_reason : string -> string
+
+  val summarize_ws_close_payload :
+    bytes -> received_len:int -> declared_len:int -> string
+
+  val immediate_ws_close_payload_summary : declared_len:int -> string option
+
+  type ws_close_payload_chunk_plan =
+    | Reject_empty_chunk of string
+    | Copy_then_finish of { copy_len : int; next_offset : int }
+    | Copy_then_continue of { copy_len : int; next_offset : int }
+
+  val plan_ws_close_payload_chunk :
+    offset:int -> declared_len:int -> chunk_len:int -> ws_close_payload_chunk_plan
+end
+
 val start :
   sw:Eio.Switch.t ->
   env:Eio_unix.Stdenv.base ->

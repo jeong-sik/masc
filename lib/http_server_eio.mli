@@ -36,7 +36,7 @@ val default_config : config
 (** [default_config] is
     [{ port = Env_config_core.masc_http_port_int ();
        host = MASC_HTTP_HOST or default;
-       max_connections = MASC_HTTP_MAX_CONNECTIONS or 128 }].
+       max_connections = MASC_HTTP_MAX_CONNECTIONS or 512 }].
     Reads env at module load time — restart required for env
     changes to take effect. *)
 

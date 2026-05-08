@@ -187,7 +187,7 @@ let latest_metrics_json ~metrics_store ~metrics_path ~tail_bytes =
       | [] -> None)
 
 let provider_scope_of_model_label model_label =
-  match
+  let prefix =
     Option.bind (Option.bind model_label nonempty_trimmed) (fun label ->
         match String.index_opt label ':' with
         | Some idx when idx > 0 ->
@@ -195,10 +195,14 @@ let provider_scope_of_model_label model_label =
               (String.sub label 0 idx |> String.trim
              |> String.lowercase_ascii)
         | _ -> None)
-  with
-  | Some ("llama" | "ollama") -> "local"
-  | Some _ -> "non_local"
+  in
+  match prefix with
   | None -> "unknown"
+  | Some name
+    when String.equal name Provider_adapter.cn_llama
+      || String.equal name Provider_adapter.cn_ollama ->
+      "local"
+  | Some _ -> "non_local"
 
 let single_string_or_none values =
   match List.sort_uniq String.compare values with

@@ -317,6 +317,51 @@ let () =
   Atomic.set Coord_hooks.task_auto_release_observed_fn
     record_task_auto_release
 
+(* Coord broadcast latency histogram and file lock retry/duration metrics.
+
+   At 64+ keepers the broadcast hot path serialises against [state.json]
+   (next_seq) and writes msg.json + activity events under file locks.
+   Without these series operators see only the SSE-side latency
+   ([masc_sse_broadcast_duration_seconds]); the publisher-side cost
+   (state lock + read/write + activity emit) was invisible.
+
+   File-lock metrics are wired here rather than in [masc_process]
+   because that sub-library does not depend on [Prometheus]; the hook
+   in [File_lock_eio.on_lock_attempt_fn] forwards each attempt outcome
+   to this site. *)
+let record_coord_broadcast ~msg_type ~elapsed_s =
+  Prometheus.observe_histogram Prometheus.metric_coord_broadcast_duration
+    ~labels:[ ("msg_type", msg_type) ] elapsed_s
+
+let () =
+  Atomic.set Coord_hooks.coord_broadcast_observed_fn
+    record_coord_broadcast
+
+(* RFC-0040: route Mention_dedup decision counts to Prometheus.
+   Default no-op in [Coord_hooks] is replaced at startup so the
+   coord layer keeps zero static dep on Prometheus. *)
+let record_mention_dedup_decision ~outcome =
+  Prometheus.inc_counter
+    Prometheus.metric_mention_dedup_decisions_total
+    ~labels:[ ("outcome", outcome) ] ()
+
+let () =
+  Atomic.set Coord_hooks.mention_dedup_decision_fn
+    record_mention_dedup_decision
+
+let record_file_lock_attempt ~caller ~retries ~elapsed_s ~outcome =
+  if retries > 0 then
+    Prometheus.inc_counter Prometheus.metric_file_lock_retries
+      ~labels:[ ("caller", caller) ]
+      ~delta:(float_of_int retries) ();
+  Prometheus.observe_histogram Prometheus.metric_file_lock_acquire_duration
+    ~labels:[ ("caller", caller); ("outcome", outcome) ]
+    elapsed_s
+
+let () =
+  Atomic.set File_lock_eio.on_lock_attempt_fn
+    record_file_lock_attempt
+
 let clear_agent_current_task_cache config ~task_id =
   let agents_path = agents_dir config in
   if path_exists config agents_path then

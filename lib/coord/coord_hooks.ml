@@ -241,6 +241,27 @@ let task_auto_release_observed_fn
   : (agent_name:string -> from_status:string -> unit) Atomic.t
   = Atomic.make (fun ~agent_name:_ ~from_status:_ -> ())
 
+(** Wall-clock latency of [Coord_broadcast.broadcast] including
+    [next_seq] (state.json file lock + read + write), agent.json read
+    for the cache-invariant check, msg.json write, [backend_publish],
+    [emit_message_activity], and the [on_broadcast_mention] callback.
+    Labelled by [msg_type] so [cache_invalidated] follow-ups (which
+    skip the agent.json read + use the rewritten content) are
+    distinguishable from regular broadcasts.  Default no-op; emit
+    lives in [lib/coord.ml] to avoid a [masc_coord → Prometheus] dep
+    cycle. *)
+let coord_broadcast_observed_fn
+  : (msg_type:string -> elapsed_s:float -> unit) Atomic.t
+  = Atomic.make (fun ~msg_type:_ ~elapsed_s:_ -> ())
+
+(** RFC-0040: sender-side mention dedup decision counter.  Default
+    no-op; emit lives in [lib/coord.ml] to avoid a
+    [masc_coord → Prometheus] dep cycle.
+    Outcome vocabulary: [skipped|passed|no_target|bypassed]. *)
+let mention_dedup_decision_fn
+  : (outcome:string -> unit) Atomic.t
+  = Atomic.make (fun ~outcome:_ -> ())
+
 (** #13460: stale task-state cache emission observability.
     Coord sub-modules fire this when they replace a stale active-task
     broadcast/mention with a cache invalidation message. [lib/coord.ml]
@@ -284,12 +305,16 @@ let claim_post_provision_failed_fn
 
 let observe_claim_post_provision_failure ~site ~agent_name ~task_id exn =
   let error = Printexc.to_string exn in
-  (try
-     (Atomic.get claim_post_provision_failed_fn)
-       ~site ~agent_name ~task_id ~error
-   with _ -> ());
-  (try
-     Log.RoomTask.warn
-       "claim_post_provision failed site=%s agent=%s task=%s err=%s"
-       site agent_name task_id error
-   with _ -> ())
+  (* This is the failure-observation path; we suppress secondary
+     exceptions from the callback and log so the original [exn] is
+     not masked by an instrumentation failure.  [Safe_ops.protect]
+     re-raises [Eio.Cancel.Cancelled] so a cancel racing with the
+     surrounding fiber still propagates instead of being silently
+     swallowed by [with _ -> ()]. *)
+  Safe_ops.protect ~default:() (fun () ->
+    (Atomic.get claim_post_provision_failed_fn)
+      ~site ~agent_name ~task_id ~error);
+  Safe_ops.protect ~default:() (fun () ->
+    Log.RoomTask.warn
+      "claim_post_provision failed site=%s agent=%s task=%s err=%s"
+      site agent_name task_id error)

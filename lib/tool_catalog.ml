@@ -519,6 +519,7 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Tool_help
   | TN.Masc TM.Tool_list
   | TN.Masc TM.Tool_stats
+  | TN.Masc TM.Web_fetch
   | TN.Masc TM.Web_search
   | TN.Masc TM.Who
   | TN.Masc TM.Workflow_guide
@@ -770,6 +771,7 @@ let tool_group_of_typed_tool_name = function
       | TM.Tool_stats
       | TM.Transition
       | TM.Update_priority
+      | TM.Web_fetch
       | TM.Web_search
       | TM.Webrtc_answer
       | TM.Webrtc_offer

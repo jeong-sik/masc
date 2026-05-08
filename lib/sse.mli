@@ -64,10 +64,6 @@ val client_count : unit -> int
 val close_all_clients : unit -> int
 val cleanup_stale : ?max_age_s:float -> unit -> string list
 
-(** {1 Clock} *)
-
-val set_clock : float Eio.Time.clock_ty Eio.Resource.t -> unit
-
 (** {1 Events} *)
 
 val format_event : ?id:int -> ?event_type:string -> string -> string

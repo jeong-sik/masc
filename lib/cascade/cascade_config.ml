@@ -273,14 +273,14 @@ let make_registry_config ~temperature ~max_tokens ?system_prompt
      inject provider-specific discovery so routing stays isolated by
      endpoint (e.g. ollama:auto must not pick up llama-server models). *)
   let discover =
-    match provider_name with
-    | "ollama" ->
-        Some
-          (fun () ->
-            Llm_provider.Discovery.first_discovered_model_id_for_url
-              defaults.base_url)
-    | "llama" -> Some Llm_provider.Discovery.first_discovered_model_id
-    | _ -> None
+    if String.equal provider_name Provider_adapter.cn_ollama then
+      Some
+        (fun () ->
+          Llm_provider.Discovery.first_discovered_model_id_for_url
+            defaults.base_url)
+    else if String.equal provider_name Provider_adapter.cn_llama then
+      Some Llm_provider.Discovery.first_discovered_model_id
+    else None
   in
   let model_resolution =
     resolve_auto_model ?discover provider_name
@@ -288,7 +288,7 @@ let make_registry_config ~temperature ~max_tokens ?system_prompt
   in
   let resolved_model_id = model_resolution.resolved_model_id in
   let base_url =
-    if provider_name = "llama" then
+    if String.equal provider_name Provider_adapter.cn_llama then
       (* Route to the endpoint that has this model; round-robin fallback *)
       match Llm_provider.Discovery.endpoint_for_model resolved_model_id with
       | Some url -> url

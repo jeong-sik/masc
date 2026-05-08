@@ -127,7 +127,7 @@ let () =
    Prometheus.set_tool_schema_stats ~count ~approx_tokens:(chars / 4));
   (* Wire keeper-internal tool call recording to break Config dependency cycle.
      keeper_exec_tools cannot reference Tool_registry directly. *)
-  Keeper_exec_tools.on_keeper_tool_call :=
+  Keeper_exec_tools.set_on_keeper_tool_call
     (fun ~tool_name ~success ~duration_ms ->
        Tool_registry.record_call ~source:Keeper_internal
          ~tool_name ~success ~duration_ms ());

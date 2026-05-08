@@ -387,18 +387,19 @@ let parse_blame_porcelain lines =
         go (Some a) cur_time acc tl
       else if String.starts_with ~prefix:"author-time " hd then
         let ts = String.sub hd 12 (String.length hd - 12) in
-        (try go cur_author (Some (Int64.of_string ts)) acc tl
-         with _ -> go cur_author cur_time acc tl)
+        (match Int64.of_string_opt ts with
+         | Some n -> go cur_author (Some n) acc tl
+         | None -> go cur_author cur_time acc tl)
       else if String.length hd > 0 && is_digit (String.get hd 0)
               && String.contains hd ' ' then
         let sp = String.index hd ' ' in
         let line_num_str = String.sub hd 0 sp in
-        (try
-           let ln = int_of_string line_num_str in
+        (match int_of_string_opt line_num_str with
+         | Some ln ->
            let a = Option.value cur_author ~default:"unknown" in
            let t = Option.value cur_time ~default:0L in
            go cur_author cur_time ({ bl_line = ln; bl_author = a; bl_time = t } :: acc) tl
-         with _ -> go cur_author cur_time acc tl)
+         | None -> go cur_author cur_time acc tl)
       else
         go cur_author cur_time acc tl
   in
@@ -466,7 +467,7 @@ let parse_hunk_header line =
       let new_part = String.sub new_rest 0 plus_idx in
       let parse_start s =
         match String.split_on_char ',' s with
-        | x :: _ -> (try int_of_string x with _ -> 1)
+        | x :: _ -> Option.value (int_of_string_opt x) ~default:1
         | [] -> 1
       in
       Some (parse_start old_part, parse_start new_part)
@@ -517,7 +518,10 @@ let add_routes router =
            let base, source = resolve_workspace_base ~state ~uri in
            let depth =
              match Uri.get_query_param uri "depth" with
-             | Some d -> (try max 1 (min 5 (int_of_string d)) with _ -> 3)
+             | Some d ->
+               (match int_of_string_opt d with
+                | Some n -> max 1 (min 5 n)
+                | None -> 3)
              | None -> 3
            in
            let max_nodes =

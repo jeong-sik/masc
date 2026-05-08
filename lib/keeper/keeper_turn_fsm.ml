@@ -281,12 +281,37 @@ let guard_transition ?ctx ~keeper_name ~turn_id ~from_state ~to_state () =
         "[fsm:transition:violation] %s -> %s (%s)"
         violation.from_state violation.to_state violation.reason
 
+(* Per-keeper last-transition wallclock, used to record the dwell time
+   spent in [prev] state when a transition fires. Single-domain Eio
+   means Hashtbl ops are atomic at OCaml level (no preemption inside a
+   single op), so no explicit mutex is required. Stale entries left
+   behind by terminal transitions are bounded by keeper count. *)
+let last_transition_at : (string, float) Hashtbl.t = Hashtbl.create 64
+
+let observe_phase_dwell ~keeper_name ~from_label =
+  match Hashtbl.find_opt last_transition_at keeper_name with
+  | None -> ()
+  | Some prev_at ->
+    let now = Unix.gettimeofday () in
+    let dwell = Float.max 0.0 (now -. prev_at) in
+    (* Cancel-aware: bare [try ... with _ -> ()] would swallow
+       [Eio.Cancel.Cancelled] and break switch teardown. *)
+    Safe_ops.protect ~default:() (fun () ->
+      Prometheus.observe_histogram
+        Keeper_metrics.metric_keeper_turn_phase_duration
+        ~labels:[ ("keeper", keeper_name); ("from", from_label) ]
+        dwell)
+
 let emit_transition ?ctx ~keeper_name ~turn_id ?prev state =
   let prev_label =
     match prev with
     | Some s -> turn_state_label s
     | None -> "-"
   in
+  (match prev with
+   | Some _ -> observe_phase_dwell ~keeper_name ~from_label:prev_label
+   | None -> ());
+  Hashtbl.replace last_transition_at keeper_name (Unix.gettimeofday ());
   let classified =
     match prev with
     | Some from_state ->
@@ -313,7 +338,7 @@ let emit_transition ?ctx ~keeper_name ~turn_id ?prev state =
   Log.Keeper.info ~keeper_name ~turn_id
     "[fsm:transition] %s -> %s action=%s%s" prev_label state_label action_label
     stop_label;
-  Prometheus.inc_counter Prometheus.metric_keeper_turn_fsm_transitions
+  Prometheus.inc_counter Keeper_metrics.metric_keeper_turn_fsm_transitions
     ~labels:
       [ ("from", prev_label);
         ("to", state_label);

@@ -353,9 +353,15 @@ jobs:
           scripts/check-sandbox-dune-version.sh
 
       - name: Meta bug-class gates (SSOT, SIL, STR, BND)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH_PROTECTION_REPOSITORY: ${{ github.repository }}
+          BRANCH_PROTECTION_BRANCH: ${{ github.base_ref || github.ref_name }}
+          BRANCH_PROTECTION_REQUIRED_CONTEXTS: CI Gate,Draft Auto-Merge Guard
         run: |
           chmod +x scripts/ci/*.sh
           echo "=== Running meta bug-class gates (see #9516 #9517 #9519 #9521) ==="
+          bash scripts/ci/check-main-branch-protection.sh
           bash scripts/ci/check-ssot-spawn-drift.sh
           bash scripts/check-spec-truth.sh
           bash scripts/ci/check-silent-failure-patterns.sh

@@ -62,7 +62,15 @@ let on_broadcast_mention : (string option -> unit) ref =
   ref (fun _mention -> ())
 
 let broadcast ?trace_context ?(msg_type = "broadcast")
-    ?(task_cache_invariant_checked = false) config ~from_agent ~content =
+    ?(task_cache_invariant_checked = false) ?(bypass_dedup = false)
+    config ~from_agent ~content =
+  let started_at = Time_compat.now () in
+  let observe final_msg_type =
+    let elapsed_s = Float.max 0.0 (Time_compat.now () -. started_at) in
+    try (Atomic.get Coord_hooks.coord_broadcast_observed_fn)
+          ~msg_type:final_msg_type ~elapsed_s
+    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()
+  in
   ensure_initialized config;
   (* Fleet-wide invariant (PR-B): if the broadcasting agent's current_task is
      terminal in the backlog, replace the original broadcast with a single
@@ -111,8 +119,45 @@ let broadcast ?trace_context ?(msg_type = "broadcast")
           msg_type )
     else (content, msg_type)
   in
+  (* RFC-0040: sender-side mention dedup.  When [Mention.extract]
+     finds an [@target] and the same (from_agent, target, content_hash)
+     was broadcast within [Mention_dedup.default_ttl_seconds], skip the
+     entire broadcast: no msg file, no activity emit, no on_broadcast
+     callback.  Keeper pull-model (keeper_prompt.ml:16
+     [Mention.any_mentioned]) re-reads the board on every turn, so a
+     spammy resender otherwise floods the recipient's inbox.  Set
+     [~bypass_dedup:true] to override for system-level alerts. *)
+  let pre_extract_mention = Mention.extract content in
+  let dedup_skipped =
+    (not bypass_dedup)
+    && (match pre_extract_mention with
+        | Some target when String.trim target <> "" ->
+            let content_hash = Mention_dedup.content_topic_hash content in
+            Mention_dedup.should_skip ~from_agent ~target ~content_hash
+              ~now:(Time_compat.now ())
+        | _ ->
+            (try (Atomic.get Coord_hooks.mention_dedup_decision_fn)
+                   ~outcome:(if bypass_dedup then "bypassed" else "no_target")
+             with _ -> ());
+            false)
+  in
+  if dedup_skipped then begin
+    Log.Misc.info
+      "[mention-dedup] skipped duplicate mention from %s to %s within %.0fs window"
+      from_agent
+      (Option.value ~default:"<none>" pre_extract_mention)
+      Mention_dedup.default_ttl_seconds;
+    observe "dedup_skipped";
+    Printf.sprintf "\xF0\x9F\x93\xA2 [%s] dedup_skipped" from_agent
+  end else
+  let () =
+    if bypass_dedup then
+      try (Atomic.get Coord_hooks.mention_dedup_decision_fn)
+            ~outcome:"bypassed"
+      with _ -> ()
+  in
   let seq = Coord_state.next_seq config in
-  let mention = Mention.extract content in
+  let mention = pre_extract_mention in
   let safe_content = sanitize_message content in
   let safe_agent = sanitize_agent_name from_agent in
   let safe_msg_type =
@@ -128,6 +173,8 @@ let broadcast ?trace_context ?(msg_type = "broadcast")
     mention;
     timestamp = now_iso ();
     trace_context;
+    expires_at = None;
+    relevance = Event_kind.Relevance.(to_string Medium);
   } in
   let msg_file =
     Filename.concat (messages_dir config)
@@ -146,4 +193,5 @@ let broadcast ?trace_context ?(msg_type = "broadcast")
    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
      Log.Misc.warn "on_broadcast_mention callback failed: %s"
        (Printexc.to_string exn));
+  observe safe_msg_type;
   Printf.sprintf "\xF0\x9F\x93\xA2 [%s] %s" safe_agent safe_content

@@ -239,6 +239,57 @@ let test_replay_invariant () =
   Alcotest.(check (list (pair string int)))
     "ledger totals == get_all_karma" direct_totals ledger_totals
 
+let file_contains path needle =
+  if not (Sys.file_exists path) then false
+  else
+    let ic = open_in path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+        let rec loop () =
+          match input_line ic with
+          | line ->
+              (String.length needle > 0
+               && String.contains line needle.[0]
+               && String_util.contains_substring line needle)
+              || loop ()
+          | exception End_of_file -> false
+        in
+        loop ())
+
+let test_delete_post_rewrites_persisted_snapshots () =
+  let post = create_post_exn ~author:"alice" ~content:"delete me" in
+  let pid = Board.Post_id.to_string post.id in
+  let comment =
+    match
+      Board_dispatch.add_comment ~post_id:pid ~author:"bob"
+        ~content:"also delete" ()
+    with
+    | Ok c -> c
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let cid = Board.Comment_id.to_string comment.id in
+  vote_exn ~voter:"carol" ~post_id:pid ~direction:Board.Up;
+  (match
+     Board_dispatch.toggle_reaction ~target_type:Board.Reaction_post
+       ~target_id:pid ~user_id:"dave" ~emoji:"👍"
+   with
+   | Ok _ -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  (match Board_dispatch.delete_post ~post_id:pid with
+   | Ok () -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  (match Board_dispatch.get_post ~post_id:pid with
+   | Ok _ -> Alcotest.fail "deleted post remained readable"
+   | Error _ -> ());
+  let check_absent label path needle =
+    Alcotest.(check bool) label false (file_contains path needle)
+  in
+  check_absent "posts snapshot removes deleted post" (Board.persist_path ()) pid;
+  check_absent "comments snapshot removes deleted comment" (Board.comments_path ()) cid;
+  check_absent "vote snapshot removes deleted post vote" (Board_votes.vote_log_path ()) pid;
+  check_absent "reaction snapshot removes deleted post reaction" (Board.reactions_path ()) pid
+
 (** {1 JSON serialisation} *)
 
 let test_karma_event_json_fields () =
@@ -323,6 +374,8 @@ let () =
     "replay", [
       Alcotest.test_case "rebuild invariant" `Quick
         (with_eio test_replay_invariant);
+      Alcotest.test_case "delete post rewrites persisted snapshots" `Quick
+        (with_eio test_delete_post_rewrites_persisted_snapshots);
     ];
     "serialisation", [
       Alcotest.test_case "json fields" `Quick

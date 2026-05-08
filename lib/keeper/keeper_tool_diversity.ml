@@ -115,7 +115,7 @@ let record_underused_tool_metrics ~keeper_name ~available_tools summary =
     List.sort_uniq String.compare summary.underused_tools
   in
   Prometheus.set_gauge
-    Prometheus.metric_keeper_tool_underused_allowed_count
+    Keeper_metrics.metric_keeper_tool_underused_allowed_count
     ~labels:[ ("keeper", keeper_name) ]
     (float_of_int (List.length underused_tools));
   List.iter
@@ -124,7 +124,7 @@ let record_underused_tool_metrics ~keeper_name ~available_tools summary =
          if List.mem tool underused_tools then 1.0 else 0.0
        in
        Prometheus.set_gauge
-         Prometheus.metric_keeper_tool_underused_allowed
+         Keeper_metrics.metric_keeper_tool_underused_allowed
          ~labels:[ ("keeper", keeper_name); ("tool", tool) ]
          value)
     available_tools

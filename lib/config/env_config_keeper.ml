@@ -442,18 +442,30 @@ module KeeperKeepalive = struct
 
   (** Hard ceiling for all keeper timeout constants (seconds).
       No timeout may exceed this value regardless of env override.
-      Default: 600 (10 minutes). *)
-  let timeout_hard_ceiling_sec = 600.0
+
+      Default: 900 (15 minutes), lifted from 600 in PR #13861's
+      RFC-0012/0022 update permitting per-cascade turn_timeout_sec
+      overrides. Local-LLM cascades that legitimately run 27 B turns
+      ≥600 s can now opt in via env or the upcoming cascade.toml
+      override; remote cascades stay at the global default 600.
+
+      Promotion to 1 800 s requires a follow-up RFC plus one week of
+      [masc_keeper_turns_total{terminated_by="turn_timeout"}] and p95
+      duration data — see RFC-0012 §Out of scope. *)
+  let timeout_hard_ceiling_sec = 900.0
 
   (** Wall-clock timeout in seconds for a single unified turn (including all
       retries and cascade fallbacks). Prevents indefinite blocking when an
       upstream LLM hangs at the TCP level.
-      Env: [MASC_KEEPER_TURN_TIMEOUT_SEC]. Default: 600. Range: [60, 600].
+      Env: [MASC_KEEPER_TURN_TIMEOUT_SEC]. Default: 600. Range: [60, 900].
 
-      The default is deliberately the global hard ceiling. Individual OAS
-      provider attempts are capped by [oas_timeout_default_sec] and
-      provider-specific bounds below, so the full turn budget remains a
-      container for fallback/retry work rather than one provider's spend. *)
+      The default stays at 600 (the prior hard ceiling) so existing
+      remote cascades keep their budget unchanged; the lifted ceiling
+      only fires when an operator opts in via env or cascade override.
+      Individual OAS provider attempts are still capped by
+      [oas_timeout_default_sec] and provider-specific bounds below, so
+      the full turn budget remains a container for fallback/retry work
+      rather than one provider's spend. *)
   let turn_timeout_sec =
     Float.max 60.0 (Float.min timeout_hard_ceiling_sec
       (get_float ~default:600.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))

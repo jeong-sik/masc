@@ -933,6 +933,30 @@ let test_patch_keeper_dependent_caches_tolerates_null_agent () =
       true
       (row |> member "keepalive_running" |> to_bool))
 
+let callback_metric_value callback =
+  Lib.Prometheus.metric_value_or_zero
+    Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
+    ~labels:[ ("callback", callback) ]
+    ()
+
+let test_invalidate_execution_cache_counts_failures () =
+  let surface_callback = "execution_surface_cache_invalidate" in
+  let light_callback = "dashboard_execution_light_cache_invalidate" in
+  let before_surface = callback_metric_value surface_callback in
+  let before_light = callback_metric_value light_callback in
+  Lib.Server_dashboard_http.invalidate_execution_cache_with_hooks_for_testing
+    ~invalidate_execution_surface:(fun () ->
+      raise (Failure "synthetic surface invalidation failure"))
+    ~invalidate_light_cache:(fun () ->
+      raise (Failure "synthetic light invalidation failure"))
+    ();
+  check (float 0.0001) "surface invalidation failure counted"
+    (before_surface +. 1.0)
+    (callback_metric_value surface_callback);
+  check (float 0.0001) "light invalidation failure counted"
+    (before_light +. 1.0)
+    (callback_metric_value light_callback)
+
 let test_patch_surface_json_for_running_keepers_tolerates_null_agent () =
   let dir = test_dir () in
   Fun.protect
@@ -1033,6 +1057,8 @@ let () =
             test_dashboard_execution_queue_surfaces_keeper_runtime_trust;
           Alcotest.test_case "execution trust surfaces coverage gap health" `Quick
             test_execution_trust_surfaces_coverage_gap_health;
+          Alcotest.test_case "cache invalidation failures are counted" `Quick
+            test_invalidate_execution_cache_counts_failures;
           Alcotest.test_case "lifecycle patch tolerates null agent" `Quick
             test_patch_keeper_dependent_caches_tolerates_null_agent;
           Alcotest.test_case "running keeper patch tolerates null agent" `Quick

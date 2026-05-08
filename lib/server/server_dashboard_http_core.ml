@@ -752,8 +752,13 @@ let dashboard_message_json (message : Masc_domain.message) =
   `Assoc
     [
       ("from", `String message.from_agent);
+      ("type", `String message.msg_type);
       ("content", `String message.content);
+      ("mention", Json_util.string_opt_to_json message.mention);
       ("timestamp", `String message.timestamp);
+      ("trace_context", Json_util.string_opt_to_json message.trace_context);
+      ("expires_at", Json_util.float_opt_to_json message.expires_at);
+      ("relevance", `String message.relevance);
       ("seq", `Int message.seq);
     ]
 
@@ -968,17 +973,189 @@ let is_dashboard_cache_timeout_json = function
       | _ -> false)
   | _ -> false
 
+type shell_projection_timing = {
+  projection_label : string;
+  projection_ms : int;
+}
+
+type shell_projection_trace_status =
+  | Shell_trace_running
+  | Shell_trace_finished
+  | Shell_trace_failed
+
+type shell_projection_trace = {
+  trace_light : bool;
+  trace_started_at : float;
+  mutable trace_status : shell_projection_trace_status;
+  mutable trace_active : string list;
+  mutable trace_completed : shell_projection_timing list;
+  mutable trace_finished_at : float option;
+}
+
+type shell_projection_trace_snapshot = {
+  snapshot_status : shell_projection_trace_status;
+  snapshot_light : bool;
+  snapshot_elapsed_ms : int;
+  snapshot_active : string list;
+  snapshot_completed : shell_projection_timing list;
+  snapshot_finished_at : float option;
+}
+
+let shell_projection_trace_mu = Stdlib.Mutex.create ()
+let shell_projection_traces : (string, shell_projection_trace) Hashtbl.t =
+  Hashtbl.create 16
+
+let shell_trace_status_string = function
+  | Shell_trace_running -> "running"
+  | Shell_trace_finished -> "finished"
+  | Shell_trace_failed -> "failed"
+
+let shell_projection_timing_top timings =
+  timings
+  |> List.sort (fun left right ->
+         compare right.projection_ms left.projection_ms)
+  |> List.filteri (fun idx _ -> idx < 5)
+
+let shell_projection_timing_json timing =
+  `Assoc
+    [
+      ("label", `String timing.projection_label);
+      ("ms", `Int timing.projection_ms);
+    ]
+
+let shell_projection_timing_log timings =
+  match shell_projection_timing_top timings with
+  | [] -> "none"
+  | top ->
+      top
+      |> List.map (fun timing ->
+             Printf.sprintf "%s=%dms" timing.projection_label
+               timing.projection_ms)
+      |> String.concat ","
+
+let shell_projection_trace_start ~cache_key ~light =
+  let trace =
+    {
+      trace_light = light;
+      trace_started_at = Unix.gettimeofday ();
+      trace_status = Shell_trace_running;
+      trace_active = [];
+      trace_completed = [];
+      trace_finished_at = None;
+    }
+  in
+  Stdlib.Mutex.protect shell_projection_trace_mu (fun () ->
+      Hashtbl.replace shell_projection_traces cache_key trace);
+  trace
+
+let shell_projection_trace_start_projection trace label =
+  Stdlib.Mutex.protect shell_projection_trace_mu (fun () ->
+      if not (List.mem label trace.trace_active) then
+        trace.trace_active <- label :: trace.trace_active)
+
+let shell_projection_trace_finish_projection trace label elapsed_ms =
+  Stdlib.Mutex.protect shell_projection_trace_mu (fun () ->
+      trace.trace_active <-
+        List.filter (fun active -> not (String.equal active label))
+          trace.trace_active;
+      trace.trace_completed <-
+        { projection_label = label; projection_ms = elapsed_ms }
+        :: List.filter
+             (fun timing -> not (String.equal timing.projection_label label))
+             trace.trace_completed)
+
+let shell_projection_trace_finish ?(clear_active = true) trace status =
+  Stdlib.Mutex.protect shell_projection_trace_mu (fun () ->
+      trace.trace_status <- status;
+      trace.trace_finished_at <- Some (Unix.gettimeofday ());
+      if clear_active then trace.trace_active <- [])
+
+let shell_projection_trace_snapshot cache_key =
+  Stdlib.Mutex.protect shell_projection_trace_mu (fun () ->
+      match Hashtbl.find_opt shell_projection_traces cache_key with
+      | None -> None
+      | Some trace ->
+          let now_ts = Unix.gettimeofday () in
+          let finished_at = trace.trace_finished_at in
+          let elapsed_until = Option.value finished_at ~default:now_ts in
+          Some
+            {
+              snapshot_status = trace.trace_status;
+              snapshot_light = trace.trace_light;
+              snapshot_elapsed_ms =
+                int_of_float
+                  ((elapsed_until -. trace.trace_started_at) *. 1000.0);
+              snapshot_active = trace.trace_active;
+              snapshot_completed = trace.trace_completed;
+              snapshot_finished_at = finished_at;
+            })
+
+let shell_projection_trace_diagnostics cache_key =
+  match shell_projection_trace_snapshot cache_key with
+  | None ->
+      [
+        ("projection_timing_status", `String "none");
+        ("projection_timing_active", `List []);
+        ("projection_timing_top", `List []);
+      ]
+  | Some snapshot ->
+      [
+        ( "projection_timing_status",
+          `String (shell_trace_status_string snapshot.snapshot_status) );
+        ("projection_timing_light", `Bool snapshot.snapshot_light);
+        ("projection_timing_elapsed_ms", `Int snapshot.snapshot_elapsed_ms);
+        ( "projection_timing_active",
+          `List
+            (List.rev snapshot.snapshot_active
+            |> List.map (fun label -> `String label)) );
+        ( "projection_timing_top",
+          `List
+            (shell_projection_timing_top snapshot.snapshot_completed
+            |> List.map shell_projection_timing_json) );
+        ( "projection_timing_finished_at",
+          match snapshot.snapshot_finished_at with
+          | Some ts -> `Float ts
+          | None -> `Null );
+      ]
+
+let shell_projection_trace_log cache_key =
+  match shell_projection_trace_snapshot cache_key with
+  | None -> ("none", "none", "none", 0)
+  | Some snapshot ->
+      ( shell_trace_status_string snapshot.snapshot_status,
+        (match List.rev snapshot.snapshot_active with
+         | [] -> "none"
+         | active -> String.concat "," active),
+        shell_projection_timing_log snapshot.snapshot_completed,
+        snapshot.snapshot_elapsed_ms )
+
 let dashboard_shell_payload_json ?(light = false) (config : Coord.config) : Yojson.Safe.t =
   let cluster = Env_config_core.cluster_name () in
+  let cache_key = dashboard_shell_cache_key ~light config in
+  let trace = shell_projection_trace_start ~cache_key ~light in
   let started_at = Unix.gettimeofday () in
-  let measure_ms f =
+  let measure_ms label f =
+    shell_projection_trace_start_projection trace label;
     let t0 = Unix.gettimeofday () in
-    let value = f () in
-    let elapsed_ms = int_of_float ((Unix.gettimeofday () -. t0) *. 1000.0) in
-    (value, elapsed_ms)
+    match f () with
+    | value ->
+        let elapsed_ms =
+          int_of_float ((Unix.gettimeofday () -. t0) *. 1000.0)
+        in
+        shell_projection_trace_finish_projection trace label elapsed_ms;
+        (value, elapsed_ms)
+    | exception (Eio.Cancel.Cancelled _ as exn) ->
+        (* Keep the active projection marker for timeout fallback diagnostics. *)
+        raise exn
+    | exception exn ->
+        let elapsed_ms =
+          int_of_float ((Unix.gettimeofday () -. t0) *. 1000.0)
+        in
+        shell_projection_trace_finish_projection trace label elapsed_ms;
+        raise exn
   in
   let measure_json_projection label f =
-    measure_ms (fun () ->
+    measure_ms label (fun () ->
         try f () with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
@@ -986,81 +1163,101 @@ let dashboard_shell_payload_json ?(light = false) (config : Coord.config) : Yojs
               (Printexc.to_string exn);
             `Null)
   in
-  (* Cold workspaces lazily materialize room/keeper state on first access.
-     Keep those stateful reads sequential so one failing init path does not
-     cancel sibling fibers and poison shared Eio mutexes. Retain parallelism
-     only for projection-style reads that are safe to drop to `Null`. *)
-  let status_json, status_ms = measure_ms (fun () -> dashboard_shell_status_json config) in
-  let agents, agents_ms = measure_ms (fun () -> dashboard_agents_safe config) in
-  let general_agents = dashboard_general_agent_count agents in
-  let tasks, tasks_ms = measure_ms (fun () -> dashboard_tasks_safe config) in
-  let active_keepers, keepers_ms = measure_ms (fun () -> running_keeper_count config) in
-  let configured_keepers, configured_keepers_ms =
-    measure_ms (fun () -> keeper_count config)
-  in
-  let meta_cognition_r = ref (`Null, 0) in
-  let config_resolution_r = ref (`Null, 0) in
-  let runtime_resolution_r = ref (`Null, 0) in
-  if light then
-    meta_cognition_r :=
-      measure_json_projection "meta_cognition" (fun () ->
-          meta_cognition_summary_cached config)
-  else
-    Eio.Fiber.all
+  match
+    (* Cold workspaces lazily materialize room/keeper state on first access.
+       Keep those stateful reads sequential so one failing init path does not
+       cancel sibling fibers and poison shared Eio mutexes. Retain parallelism
+       only for projection-style reads that are safe to drop to `Null`. *)
+    let status_json, status_ms =
+      measure_ms "status" (fun () -> dashboard_shell_status_json config)
+    in
+    let agents, agents_ms =
+      measure_ms "agents" (fun () -> dashboard_agents_safe config)
+    in
+    let general_agents = dashboard_general_agent_count agents in
+    let tasks, tasks_ms =
+      measure_ms "tasks" (fun () -> dashboard_tasks_safe config)
+    in
+    let active_keepers, keepers_ms =
+      measure_ms "keepers" (fun () -> running_keeper_count config)
+    in
+    let configured_keepers, configured_keepers_ms =
+      measure_ms "configured_keepers" (fun () -> keeper_count config)
+    in
+    let meta_cognition_r = ref (`Null, 0) in
+    let config_resolution_r = ref (`Null, 0) in
+    let runtime_resolution_r = ref (`Null, 0) in
+    if light then
+      meta_cognition_r :=
+        measure_json_projection "meta_cognition" (fun () ->
+            meta_cognition_summary_cached config)
+    else
+      Eio.Fiber.all
+        [
+          (fun () ->
+            meta_cognition_r :=
+              measure_json_projection "meta_cognition" (fun () ->
+                  meta_cognition_summary_cached config));
+          (fun () ->
+            config_resolution_r :=
+              measure_json_projection "config_resolution" (fun () ->
+                  Config_dir_resolver.(resolve () |> to_json)));
+          (fun () ->
+            runtime_resolution_r :=
+              measure_json_projection "runtime_resolution" (fun () ->
+                  Server_dashboard_http_runtime_info.runtime_resolution_json
+                    config));
+        ];
+    let meta_cognition_json, meta_cognition_ms = !meta_cognition_r in
+    let config_resolution_json, config_resolution_ms = !config_resolution_r in
+    let runtime_resolution_json, runtime_resolution_ms = !runtime_resolution_r in
+    shell_projection_trace_finish trace Shell_trace_finished;
+    `Assoc
       [
-        (fun () ->
-          meta_cognition_r :=
-            measure_json_projection "meta_cognition" (fun () ->
-                meta_cognition_summary_cached config));
-        (fun () ->
-          config_resolution_r :=
-            measure_json_projection "config_resolution" (fun () ->
-                Config_dir_resolver.(resolve () |> to_json)));
-        (fun () ->
-          runtime_resolution_r :=
-            measure_json_projection "runtime_resolution" (fun () ->
-                Server_dashboard_http_runtime_info.runtime_resolution_json config));
-      ];
-  let meta_cognition_json, meta_cognition_ms = !meta_cognition_r in
-  let config_resolution_json, config_resolution_ms = !config_resolution_r in
-  let runtime_resolution_json, runtime_resolution_ms = !runtime_resolution_r in
-  `Assoc
-    [
-      ("generated_at", `String (Masc_domain.now_iso ()));
-      ("status", status_json);
-      ("paths", dashboard_shell_paths_json config);
-      ( "counts",
-        `Assoc
-          [
-            ("agents", `Int general_agents);
-            ("tasks", `Int (List.length tasks));
-            ("keepers", `Int active_keepers);
-            ("total_runtimes", `Int (general_agents + active_keepers));
-          ] );
-      ("configured_keepers", `Int configured_keepers);
-      ("providers", provider_capacity_json ());
-      ("meta_cognition", meta_cognition_json);
-      ("config_resolution", config_resolution_json);
-      ("runtime_resolution", runtime_resolution_json);
-    ]
-  |> with_projection_diagnostics ~surface:"shell" ~started_at
-       ~extra:
-         [
-           ("cluster", `String cluster);
-           ("coordination_root", `String config.base_path);
-           ("workspace_path", `String config.workspace_path);
-           ("keeper_count_source", `String "runtime_keepalive");
-           ("configured_keeper_count_source", `String "keeper_meta");
-           ("status_ms", `Int status_ms);
-           ("agents_ms", `Int agents_ms);
-           ("tasks_ms", `Int tasks_ms);
-           ("keepers_ms", `Int keepers_ms);
-           ("configured_keepers_ms", `Int configured_keepers_ms);
-           ("meta_cognition_ms", `Int meta_cognition_ms);
-           ("config_resolution_ms", `Int config_resolution_ms);
-           ("runtime_resolution_ms", `Int runtime_resolution_ms);
-           ("light", `Bool light);
-         ]
+        ("generated_at", `String (Masc_domain.now_iso ()));
+        ("status", status_json);
+        ("paths", dashboard_shell_paths_json config);
+        ( "counts",
+          `Assoc
+            [
+              ("agents", `Int general_agents);
+              ("tasks", `Int (List.length tasks));
+              ("keepers", `Int active_keepers);
+              ("total_runtimes", `Int (general_agents + active_keepers));
+            ] );
+        ("configured_keepers", `Int configured_keepers);
+        ("providers", provider_capacity_json ());
+        ("meta_cognition", meta_cognition_json);
+        ("config_resolution", config_resolution_json);
+        ("runtime_resolution", runtime_resolution_json);
+      ]
+    |> with_projection_diagnostics ~surface:"shell" ~started_at
+         ~extra:
+           ([
+              ("cluster", `String cluster);
+              ("coordination_root", `String config.base_path);
+              ("workspace_path", `String config.workspace_path);
+              ("keeper_count_source", `String "runtime_keepalive");
+              ("configured_keeper_count_source", `String "keeper_meta");
+              ("status_ms", `Int status_ms);
+              ("agents_ms", `Int agents_ms);
+              ("tasks_ms", `Int tasks_ms);
+              ("keepers_ms", `Int keepers_ms);
+              ("configured_keepers_ms", `Int configured_keepers_ms);
+              ("meta_cognition_ms", `Int meta_cognition_ms);
+              ("config_resolution_ms", `Int config_resolution_ms);
+              ("runtime_resolution_ms", `Int runtime_resolution_ms);
+              ("light", `Bool light);
+           ]
+           @ shell_projection_trace_diagnostics cache_key)
+  with
+  | payload -> payload
+  | exception (Eio.Cancel.Cancelled _ as e) ->
+      shell_projection_trace_finish ~clear_active:false trace Shell_trace_failed;
+      raise e
+  | exception exn ->
+      shell_projection_trace_finish trace Shell_trace_failed;
+      raise exn
 
 let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.config) :
     Yojson.Safe.t =
@@ -1217,10 +1414,32 @@ let dashboard_shell_http_json ?clock ?request ?(light = false) (config : Coord.c
     | Some clock -> Some clock
     | None -> Eio_context.get_clock_opt ()
   in
-  let fallback_payload () =
+  let fallback_payload_with_source () =
     match dashboard_shell_last_good_opt () with
-    | Some json -> json
-    | None -> dashboard_shell_bootstrap_json config
+    | Some json -> (json, "last_good")
+    | None -> (dashboard_shell_bootstrap_json config, "bootstrap")
+  in
+  let fallback_payload () =
+    let payload, _source = fallback_payload_with_source () in
+    payload
+  in
+  let timeout_fallback_payload timeout_sec =
+    let fallback, fallback_source = fallback_payload_with_source () in
+    let trace_status, active, top, elapsed_ms =
+      shell_projection_trace_log cache_key
+    in
+    Log.Dashboard.warn
+      "dashboard shell timeout fallback: key=%s timeout=%.0fs source=%s trace=%s elapsed=%dms active=[%s] top=[%s]"
+      cache_key timeout_sec fallback_source trace_status elapsed_ms active top;
+    extend_projection_diagnostics fallback
+      ([
+         ("cache_state", `String "timeout_fallback");
+         ("fallback_source", `String fallback_source);
+         ("timeout_cache_key", `String cache_key);
+         ("timeout_sec", `Float timeout_sec);
+         ("timeout_light", `Bool light);
+       ]
+      @ shell_projection_trace_diagnostics cache_key)
   in
   let startup_shell_bootstrap_pending =
     let current = Server_startup_state.(!state) in
@@ -1250,7 +1469,7 @@ let dashboard_shell_http_json ?clock ?request ?(light = false) (config : Coord.c
             Dashboard_cache.get_or_compute cache_key ~ttl:15.0 compute
       in
       if is_dashboard_cache_timeout_json computed then
-        fallback_payload ()
+        timeout_fallback_payload (dashboard_shell_timeout_for ~light)
       else
         computed
   in

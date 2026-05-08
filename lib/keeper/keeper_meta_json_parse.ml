@@ -151,7 +151,13 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
       ; pk_long_goal
       ; pk_social_model
       ; pk_cascade_name
-      ; pk_cascade_ref = None
+      ; pk_cascade_ref =
+        (match json |> Yojson.Safe.Util.member "cascade_ref" with
+         | `Null | `Assoc [] -> None
+         | ref_json ->
+             (match Cascade_ref.cascade_ref_of_json ref_json with
+              | Some ref -> Some ref
+              | None -> Some (Cascade_ref.cascade_ref_of_string pk_cascade_name)))
       ; pk_models
       ; pk_will
       ; pk_needs

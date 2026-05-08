@@ -270,9 +270,7 @@ describe('ConnectorStatusPanel', () => {
     expect(fetchGateStatus).toHaveBeenCalled()
     expect(fetchGateConnectors).toHaveBeenCalled()
     expect(fetchGateKeepers).toHaveBeenCalled()
-    // Heading copy is now Korean ("커넥터" + intro line). Asserting on the
-    // intro substring keeps the test resilient to title tweaks.
-    expect(text).toContain('4종 채널 sidecar')
+    expect(text).toContain('커넥터')
     expect(text).toContain('connected')
     expect(text).toContain('Discord')
     expect(text).toContain('sangsu')
@@ -435,8 +433,8 @@ describe('ConnectorStatusPanel', () => {
 
     expect(text).toContain('Discord')
     expect(text).toContain('stale')
-    expect(text).toContain('Gate metrics unavailable')
-    expect(text).toContain('게이트가 광고하는 connector runtime 은 보이지만')
+    expect(text).toContain('메트릭 없음')
+    expect(text).toContain('connector runtime은 등록됐으나 게이트가 관찰한 트래픽은 아직 없습니다')
     expect(text).toContain('keeper 디렉토리 사용 불가, 수동 입력만 가능')
     expect(text).toContain('Next: 지금은 수동 입력으로 진행')
     expect(text).toContain('config/keepers/')

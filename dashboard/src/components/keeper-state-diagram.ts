@@ -17,6 +17,7 @@ import { MermaidGraph } from './common/mermaid-graph'
 import { FilterChips } from './common/filter-chips'
 import { buildCompositeFsmSpec } from './keeper-fsm-specs'
 import { TurnFsmDetailPanel } from './turn-fsm-detail-panel'
+import { displayState } from './fsm-hub-types'
 import {
   normalizePhaseDiagnosis,
   PhaseConditionsPanel,
@@ -233,11 +234,11 @@ export function KeeperStateDiagramPanel({ keeperName, snapshot: externalSnapshot
   return html`
     <div class="flex flex-col gap-3">
       <div class="flex flex-wrap items-center gap-2 text-3xs text-[var(--color-fg-disabled)]">
-        <${PhaseBadge} accent>composite ${snapshot.phase}<//>
-        <${PhaseBadge}>KTC ${snapshot.turn_phase}<//>
-        <${PhaseBadge}>KDP ${snapshot.decision.stage}<//>
-        <${PhaseBadge}>KCL ${snapshot.cascade.state}<//>
-        <${PhaseBadge}>KMC ${snapshot.compaction.stage}<//>
+        <${PhaseBadge} accent>composite ${displayState(snapshot.phase)}<//>
+        <${PhaseBadge}>KTC ${displayState(snapshot.turn_phase)}<//>
+        <${PhaseBadge}>KDP ${displayState(snapshot.decision.stage)}<//>
+        <${PhaseBadge}>KCL ${displayState(snapshot.cascade.state)}<//>
+        <${PhaseBadge}>KMC ${displayState(snapshot.compaction.stage)}<//>
         ${transitions.length > 0 ? html`
           <${PhaseBadge}>observed ${transitions.length} transitions<//>
         ` : null}

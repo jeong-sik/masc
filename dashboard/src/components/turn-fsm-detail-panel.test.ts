@@ -113,9 +113,7 @@ describe("TurnFsmDetailPanel", () => {
 
     const chips = [...container.querySelectorAll("[data-status-chip]")]
     expect(chips.map(chip => chip.textContent?.trim())).toEqual(expect.arrayContaining([
-      "executing",
-      "KTC executing",
-      "TLA executing",
+      "실행 중",
       "receipt failed",
       "reason tool_contract",
       "tool violated",
@@ -123,7 +121,6 @@ describe("TurnFsmDetailPanel", () => {
     ]))
     expect(chips.map(chip => chip.getAttribute("data-status-chip-tone"))).toEqual(expect.arrayContaining([
       "info",
-      "neutral",
       "bad",
     ]))
     expect(chips.every(chip => chip.getAttribute("data-status-chip-uppercase") === "false")).toBe(true)

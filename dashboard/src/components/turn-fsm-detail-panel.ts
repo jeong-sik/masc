@@ -4,10 +4,10 @@ import { useMemo } from 'preact/hooks'
 import type { KeeperCompositeSnapshot } from '../api/keeper'
 import { CytoscapeFsm } from './common/cytoscape-fsm'
 import { StatusChip, type StatusChipTone } from './common/status-chip'
+import { displayState } from './fsm-hub-types'
 import {
   buildTurnFsmSpec,
   normalizeTurnFsmState,
-  turnFsmTlaSymbol,
 } from './keeper-fsm-specs'
 
 type TurnChipTone = 'accent' | 'neutral' | 'warn' | 'err' | 'ok'
@@ -49,7 +49,6 @@ export function TurnFsmDetailPanel({ snapshot }: { snapshot: KeeperCompositeSnap
     [snapshot.turn_phase],
   )
   const projectedState = normalizeTurnFsmState(snapshot.turn_phase)
-  const tlaSymbol = projectedState ? turnFsmTlaSymbol(projectedState) : null
   const execution = snapshot.execution
   const terminalReason =
     execution?.terminal_reason_code
@@ -73,11 +72,7 @@ export function TurnFsmDetailPanel({ snapshot }: { snapshot: KeeperCompositeSnap
           </div>
         </div>
         <div class="flex flex-wrap items-center gap-1.5 text-3xs">
-          <${StatusChip} tone=${turnFsmChipTone(projectedState ? 'accent' : 'warn')} uppercase=${false} class="font-mono">${projectedState ?? 'unmapped'}</${StatusChip}>
-          <${StatusChip} tone="neutral" uppercase=${false} class="font-mono">KTC ${snapshot.turn_phase}</${StatusChip}>
-          ${tlaSymbol ? html`
-            <${StatusChip} tone="neutral" uppercase=${false} class="font-mono">TLA ${tlaSymbol}</${StatusChip}>
-          ` : null}
+          <${StatusChip} tone=${turnFsmChipTone(projectedState ? 'accent' : 'warn')} uppercase=${false} class="font-mono">${projectedState ? displayState(projectedState) : 'unmapped'}</${StatusChip}>
         </div>
       </div>
 

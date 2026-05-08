@@ -706,11 +706,26 @@ let validate_decision_transition ~from ~to_ =
     (fun () ->
        assert (
          match (from, to_) with
-         | (Decision_undecided, Decision_guard_ok) -> true
-         | (Decision_undecided, Decision_gate_rejected) -> true
-         | (Decision_guard_ok, Decision_tool_policy_selected) -> true
-         | (old, new_) when old = new_ -> true
-         | _ -> false
+         (* from Decision_undecided *)
+         | (Decision_undecided, Decision_undecided) -> true
+         | (Decision_undecided, Decision_guard_ok) -> true  (* via set_turn_decision_stage *)
+         | (Decision_undecided, Decision_gate_rejected) -> true  (* bypassed: mark_turn_gate_rejected_by_name *)
+         | (Decision_undecided, Decision_tool_policy_selected) -> true  (* via set_turn_decision_stage *)
+         (* from Decision_guard_ok *)
+         | (Decision_guard_ok, Decision_undecided) -> false  (* new turn init is reset, not transition *)
+         | (Decision_guard_ok, Decision_guard_ok) -> true
+         | (Decision_guard_ok, Decision_gate_rejected) -> true  (* bypassed: mark_turn_gate_rejected_by_name *)
+         | (Decision_guard_ok, Decision_tool_policy_selected) -> true  (* via set_turn_decision_stage *)
+         (* from Decision_gate_rejected — terminal *)
+         | (Decision_gate_rejected, Decision_undecided) -> false  (* terminal; new turn is reset *)
+         | (Decision_gate_rejected, Decision_guard_ok) -> false  (* terminal; retry via prepare_turn_retry_after_compaction (bypassed) *)
+         | (Decision_gate_rejected, Decision_gate_rejected) -> true
+         | (Decision_gate_rejected, Decision_tool_policy_selected) -> false  (* terminal *)
+         (* from Decision_tool_policy_selected *)
+         | (Decision_tool_policy_selected, Decision_undecided) -> false  (* new turn init is reset, not transition *)
+         | (Decision_tool_policy_selected, Decision_guard_ok) -> false  (* retry via prepare_turn_retry_after_compaction (bypassed) *)
+         | (Decision_tool_policy_selected, Decision_gate_rejected) -> true  (* bypassed: mark_turn_gate_rejected_by_name *)
+         | (Decision_tool_policy_selected, Decision_tool_policy_selected) -> true
        ))
 
 let validate_cascade_transition ~from ~to_ =
@@ -720,13 +735,36 @@ let validate_cascade_transition ~from ~to_ =
     (fun () ->
        assert (
          match (from, to_) with
-         | (Cascade_idle, Cascade_selecting) -> true
-         | (Cascade_selecting, Cascade_trying) -> true
-         | (Cascade_trying, Cascade_done) -> true
-         | (Cascade_trying, Cascade_exhausted) -> true
-         | (Cascade_trying, Cascade_selecting) -> true
-         | (old, new_) when old = new_ -> true
-         | _ -> false
+         (* from Cascade_idle *)
+         | (Cascade_idle, Cascade_idle) -> true
+         | (Cascade_idle, Cascade_selecting) -> true  (* via set_turn_cascade_state *)
+         | (Cascade_idle, Cascade_trying) -> false  (* PR #14153: removed idle->trying jump; must go through selecting *)
+         | (Cascade_idle, Cascade_done) -> false
+         | (Cascade_idle, Cascade_exhausted) -> false
+         (* from Cascade_selecting *)
+         | (Cascade_selecting, Cascade_idle) -> false  (* new turn init is reset *)
+         | (Cascade_selecting, Cascade_selecting) -> true
+         | (Cascade_selecting, Cascade_trying) -> true  (* via set_turn_cascade_state *)
+         | (Cascade_selecting, Cascade_done) -> false
+         | (Cascade_selecting, Cascade_exhausted) -> false
+         (* from Cascade_trying *)
+         | (Cascade_trying, Cascade_idle) -> false  (* retry via prepare_turn_retry_after_compaction (bypassed) *)
+         | (Cascade_trying, Cascade_selecting) -> true  (* via set_turn_cascade_state: retry re-entry *)
+         | (Cascade_trying, Cascade_trying) -> true
+         | (Cascade_trying, Cascade_done) -> true  (* via set_turn_cascade_state *)
+         | (Cascade_trying, Cascade_exhausted) -> true  (* via set_turn_cascade_state *)
+         (* from Cascade_done — terminal *)
+         | (Cascade_done, Cascade_idle) -> false  (* terminal; new turn is reset *)
+         | (Cascade_done, Cascade_selecting) -> false  (* terminal *)
+         | (Cascade_done, Cascade_trying) -> false  (* terminal *)
+         | (Cascade_done, Cascade_done) -> true
+         | (Cascade_done, Cascade_exhausted) -> false  (* terminal *)
+         (* from Cascade_exhausted — terminal *)
+         | (Cascade_exhausted, Cascade_idle) -> false  (* terminal; new turn is reset *)
+         | (Cascade_exhausted, Cascade_selecting) -> false  (* terminal *)
+         | (Cascade_exhausted, Cascade_trying) -> false  (* terminal *)
+         | (Cascade_exhausted, Cascade_done) -> false  (* terminal *)
+         | (Cascade_exhausted, Cascade_exhausted) -> true
        ))
 
 let validate_turn_phase_transition ~from ~to_ =
@@ -1324,11 +1362,18 @@ let validate_compaction_transition ~from ~to_ =
     (fun () ->
        assert (
          match (from, to_) with
-         | (Compaction_accumulating, Compaction_compacting) -> true
-         | (Compaction_compacting, Compaction_done) -> true
-         | (Compaction_compacting, Compaction_accumulating) -> true
-         | (old, new_) when old = new_ -> true
-         | _ -> false
+         (* from Compaction_accumulating *)
+         | (Compaction_accumulating, Compaction_accumulating) -> true
+         | (Compaction_accumulating, Compaction_compacting) -> true  (* via set_compaction_stage *)
+         | (Compaction_accumulating, Compaction_done) -> false
+         (* from Compaction_compacting *)
+         | (Compaction_compacting, Compaction_accumulating) -> true  (* via set_compaction_stage: retry *)
+         | (Compaction_compacting, Compaction_compacting) -> true
+         | (Compaction_compacting, Compaction_done) -> true  (* via set_compaction_stage *)
+         (* from Compaction_done — terminal *)
+         | (Compaction_done, Compaction_accumulating) -> false  (* terminal; new compaction is reset *)
+         | (Compaction_done, Compaction_compacting) -> false  (* terminal *)
+         | (Compaction_done, Compaction_done) -> true
        ))
 
 let compaction_stage_after_event entry event =

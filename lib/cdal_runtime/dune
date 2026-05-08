@@ -36,6 +36,11 @@
   ; guardrail_llm.{ml,mli}.  The dune-package places guardrails_async
   ; in the wrapped [agent_sdk] library, not under agent_sdk.base.
   agent_sdk
+  ; unix is needed for [Unix.gettimeofday] in conformance.ml (added by
+  ; PR #14255 RFC-OAS-011 MM-2-mid B3).  Listed explicitly so dune
+  ; resolves the [Unix] module without requiring the consumer to open
+  ; it.
+  unix
   yojson
   ppx_deriving_yojson.runtime)
  ; Mirror agent_sdk's flag so migrated modules' `open Types` /

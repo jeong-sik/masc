@@ -9,20 +9,30 @@ open Server_utils
 
 (* Wire task mutation hook: invalidate execution cache on any task
    add/transition so the dashboard serves fresh backlog data. *)
-let () =
-  Atomic.set Coord_hooks.on_task_mutation_fn invalidate_execution_cache
-
+let () = Atomic.set Coord_hooks.on_task_mutation_fn invalidate_execution_cache
 
 let dashboard_namespace_truth_focus_json =
   Server_dashboard_http_namespace_truth_support.dashboard_namespace_truth_focus_json
+;;
 
 let dashboard_namespace_truth_http_json =
   Server_dashboard_http_namespace_truth.dashboard_namespace_truth_http_json
+;;
 
-let dashboard_board_json ?config ?hearth ?author_filter
-    ?(sort_by = Board_dispatch.Hot) ?(exclude_system = false)
-    ?(exclude_automation = false) ?(limit = 100) ?(offset = 0) ?voter
-    ?(blind_votes = false) () : Yojson.Safe.t =
+let dashboard_board_json
+      ?config
+      ?hearth
+      ?author_filter
+      ?(sort_by = Board_dispatch.Hot)
+      ?(exclude_system = false)
+      ?(exclude_automation = false)
+      ?(limit = 100)
+      ?(offset = 0)
+      ?voter
+      ?(blind_votes = false)
+      ()
+  : Yojson.Safe.t
+  =
   let limit = clamp ~min_v:1 ~max_v:500 limit in
   let offset = clamp ~min_v:0 ~max_v:5000 offset in
   let author_filter = Option.map board_actor_author_for_write author_filter in
@@ -32,68 +42,78 @@ let dashboard_board_json ?config ?hearth ?author_filter
     | Some config -> config.Coord.base_path
   in
   let cache_key =
-    Printf.sprintf "board:memory:%s;%s;%s;%b;%b;%d;%d;%s;%s;%b"
+    Printf.sprintf
+      "board:memory:%s;%s;%s;%b;%b;%d;%d;%s;%s;%b"
       (Option.value ~default:"-" hearth)
       (Option.value ~default:"-" author_filter)
       (board_sort_label sort_by)
-      exclude_system exclude_automation limit offset
+      exclude_system
+      exclude_automation
+      limit
+      offset
       config_key
       (Option.value ~default:"-" voter)
       blind_votes
   in
   Dashboard_cache.get_or_compute cache_key ~ttl:10.0 (fun () ->
-    let base_fetch = board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset in
+    let base_fetch =
+      board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset
+    in
     (* Fetch one extra beyond the requested page so we can answer has_more
        without a second query. total is only emitted when the result fits
        entirely inside the fetched window — otherwise null (unknown). *)
     let probe_fetch = base_fetch + 1 in
     let posts =
-      Board_dispatch.list_posts ?hearth ~sort_by ~exclude_system
-        ~exclude_automation ?author_filter ~limit:probe_fetch ()
+      Board_dispatch.list_posts
+        ?hearth
+        ~sort_by
+        ~exclude_system
+        ~exclude_automation
+        ?author_filter
+        ~limit:probe_fetch
+        ()
     in
     let karma_map = Board_dispatch.get_all_karma () in
-    let get_karma author =
-      Option.value ~default:0 (List.assoc_opt author karma_map)
-    in
+    let get_karma author = Option.value ~default:0 (List.assoc_opt author karma_map) in
     let fetched_len = List.length posts in
     let window_end = offset + limit in
     let has_more = fetched_len > window_end in
-    let total_json : Yojson.Safe.t =
-      if has_more then `Null else `Int fetched_len
-    in
+    let total_json : Yojson.Safe.t = if has_more then `Null else `Int fetched_len in
     let paged = posts |> drop offset |> take limit in
     let contributor_quality_for = board_contributor_quality_lookup ?config () in
     let posts_json =
       List.map
         (fun (post : Board.post) ->
-          let author = Board.Agent_id.to_string post.author in
-          let post_id = Board.Post_id.to_string post.id in
-          let current_vote = board_current_vote_for_post ~voter ~post_id in
-          let contributor_quality = contributor_quality_for author in
-          board_post_dashboard_json ~blind_votes ?current_vote
-            ?contributor_quality
-            ~author_karma:(get_karma author) post)
+           let author = Board.Agent_id.to_string post.author in
+           let post_id = Board.Post_id.to_string post.id in
+           let current_vote = board_current_vote_for_post ~voter ~post_id in
+           let contributor_quality = contributor_quality_for author in
+           board_post_dashboard_json
+             ~blind_votes
+             ?current_vote
+             ?contributor_quality
+             ~author_karma:(get_karma author)
+             post)
         paged
     in
     `Assoc
-      [
-        ("generated_at", `String (Masc_domain.now_iso ()));
-        ( "summary",
-          `Assoc
-            [
-              ("visible_posts", `Int (List.length posts_json));
-              ("sort_by", `String (board_sort_label sort_by));
-              ("exclude_system", `Bool exclude_system);
-              ("exclude_automation", `Bool exclude_automation);
-            ] );
-        ("posts", `List posts_json);
-        ("count", `Int (List.length posts_json));
-        ("limit", `Int limit);
-        ("offset", `Int offset);
-        ("has_more", `Bool has_more);
-        ("total", total_json);
-        ("sort_by", `String (board_sort_label sort_by));
+      [ "generated_at", `String (Masc_domain.now_iso ())
+      ; ( "summary"
+        , `Assoc
+            [ "visible_posts", `Int (List.length posts_json)
+            ; "sort_by", `String (board_sort_label sort_by)
+            ; "exclude_system", `Bool exclude_system
+            ; "exclude_automation", `Bool exclude_automation
+            ] )
+      ; "posts", `List posts_json
+      ; "count", `Int (List.length posts_json)
+      ; "limit", `Int limit
+      ; "offset", `Int offset
+      ; "has_more", `Bool has_more
+      ; "total", total_json
+      ; "sort_by", `String (board_sort_label sort_by)
       ])
+;;
 
 let dashboard_memory_http_json ?config request : Yojson.Safe.t =
   let hearth = query_param request "hearth" in
@@ -101,30 +121,38 @@ let dashboard_memory_http_json ?config request : Yojson.Safe.t =
     query_param request "author"
     |> Option.map String.trim
     |> Fun.flip Option.bind (fun s ->
-         if s = "" then None else Some (board_actor_author_for_write s))
+      if s = "" then None else Some (board_actor_author_for_write s))
   in
   let sort_by = board_sort_order_of_request request in
   let exclude_system = bool_query_param request "exclude_system" ~default:false in
-  let exclude_automation =
-    bool_query_param request "exclude_automation" ~default:false
-  in
-  let limit =
-    int_query_param request "limit" ~default:100 |> clamp ~min_v:1 ~max_v:500
-  in
+  let exclude_automation = bool_query_param request "exclude_automation" ~default:false in
+  let limit = int_query_param request "limit" ~default:100 |> clamp ~min_v:1 ~max_v:500 in
   let offset =
     int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000
   in
   let voter = board_voter_query request in
   let blind_votes = bool_query_param request "blind_votes" ~default:false in
-  dashboard_board_json ?config ?hearth ?author_filter ~sort_by ~exclude_system
-    ~exclude_automation ~limit ~offset ?voter ~blind_votes ()
+  dashboard_board_json
+    ?config
+    ?hearth
+    ?author_filter
+    ~sort_by
+    ~exclude_system
+    ~exclude_automation
+    ~limit
+    ~offset
+    ?voter
+    ~blind_votes
+    ()
+;;
 
 let memory_subsystems_entry_cache_ttl_sec = 30.0
 
-let memory_subsystems_entry_cache :
-    (string * float * (string * Keeper_memory_policy.keeper_memory_line) list)
-    option ref =
+let memory_subsystems_entry_cache
+  : (string * float * (string * Keeper_memory_policy.keeper_memory_line) list) option ref
+  =
   ref None
+;;
 
 let dashboard_memory_subsystems_include_entries request =
   bool_query_param request "include_memory_entries" ~default:false
@@ -132,51 +160,54 @@ let dashboard_memory_subsystems_include_entries request =
   match query_param request "focus" |> Option.map String.trim with
   | Some "entries" -> true
   | _ -> false
+;;
 
 let load_memory_subsystems_entries ~(config : Coord_utils.config) =
   let now = Unix.gettimeofday () in
   match !memory_subsystems_entry_cache with
   | Some (base_path, cached_at, rows)
     when String.equal base_path config.base_path
-         && now -. cached_at < memory_subsystems_entry_cache_ttl_sec ->
-      rows
+         && now -. cached_at < memory_subsystems_entry_cache_ttl_sec -> rows
   | _ ->
-      let rows =
-        try
-          Keeper_types.keeper_names config
-          |> List.concat_map (fun keeper ->
-                 try
-                   let summary =
-                     Keeper_memory_recall.read_keeper_memory_summary config
-                       ~name:keeper ~max_bytes:120000 ~max_lines:180
-                       ~recent_limit:30
-                   in
-                   List.map
-                     (fun
-                       (row : Keeper_memory_policy.keeper_memory_line) ->
-                       (keeper, row))
-                     summary.recent_notes
-                 with
-                 | Eio.Cancel.Cancelled _ as e -> raise e
-                 | _ -> [])
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | _ -> []
-      in
-      memory_subsystems_entry_cache :=
-        Some (config.base_path, now, rows);
-      rows
+    let rows =
+      try
+        Keeper_types.keeper_names config
+        |> List.concat_map (fun keeper ->
+          try
+            let summary =
+              Keeper_memory_recall.read_keeper_memory_summary
+                config
+                ~name:keeper
+                ~max_bytes:120000
+                ~max_lines:180
+                ~recent_limit:30
+            in
+            List.map
+              (fun (row : Keeper_memory_policy.keeper_memory_line) -> keeper, row)
+              summary.recent_notes
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | _ -> [])
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | _ -> []
+    in
+    memory_subsystems_entry_cache := Some (config.base_path, now, rows);
+    rows
+;;
 
-let dashboard_memory_subsystems_http_json ~(config : Coord_utils.config)
-    ?include_memory_entries request
-    : Yojson.Safe.t =
+let dashboard_memory_subsystems_http_json
+      ~(config : Coord_utils.config)
+      ?include_memory_entries
+      request
+  : Yojson.Safe.t
+  =
   let include_memory_entries =
-    Option.value include_memory_entries
+    Option.value
+      include_memory_entries
       ~default:(dashboard_memory_subsystems_include_entries request)
   in
-  let limit =
-    int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:500
-  in
+  let limit = int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:500 in
   let keeper_filter =
     query_param request "keeper"
     |> Option.map String.trim
@@ -193,15 +224,12 @@ let dashboard_memory_subsystems_http_json ~(config : Coord_utils.config)
     |> Fun.flip Option.bind (fun s -> if s = "" then None else Some s)
   in
   let hebbian =
-    try
-      `Null
-    with
+    try `Null with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | _ -> `Assoc [ ("synapses", `List []); ("last_consolidation", `Float 0.0) ]
+    | _ -> `Assoc [ "synapses", `List []; "last_consolidation", `Float 0.0 ]
   in
   let all_episodes =
-    try Institution_eio.load_recent_episodes_jsonl ~limit:max_int
-    with
+    try Institution_eio.load_recent_episodes_jsonl ~limit:max_int with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | _ -> []
   in
@@ -210,79 +238,77 @@ let dashboard_memory_subsystems_http_json ~(config : Coord_utils.config)
      delegate non-empty matching to the SSOT helper, which scans byte by
      byte without lowercasing the haystack or allocating per position. *)
   let contains_ci haystack needle =
-    String.length needle = 0
-    || String_util.contains_substring_ci haystack needle
+    String.length needle = 0 || String_util.contains_substring_ci haystack needle
   in
   let memory_entry_to_json
-      (keeper : string)
-      (row : Keeper_memory_policy.keeper_memory_line) : Yojson.Safe.t =
+        (keeper : string)
+        (row : Keeper_memory_policy.keeper_memory_line)
+    : Yojson.Safe.t
+    =
     `Assoc
-      [
-        ("keeper", `String keeper);
-        ("kind", `String row.kind);
-        ("text", `String row.text);
-        ("priority", `Int row.priority);
-        ("ts_unix", `Float row.ts_unix);
+      [ "keeper", `String keeper
+      ; "kind", `String row.kind
+      ; "text", `String row.text
+      ; "priority", `Int row.priority
+      ; "ts_unix", `Float row.ts_unix
       ]
   in
   let all_memory_entries =
-    if include_memory_entries then load_memory_subsystems_entries ~config
-    else []
+    if include_memory_entries then load_memory_subsystems_entries ~config else []
   in
   let memory_total = List.length all_memory_entries in
   let memory_filtered =
     all_memory_entries
     |> List.filter (fun (keeper, (row : Keeper_memory_policy.keeper_memory_line)) ->
-           let keeper_ok =
-             match keeper_filter with
-             | None -> true
-             | Some k -> String.equal keeper k
-           in
-           let search_ok =
-             match search with
-             | None -> true
-             | Some q ->
-               contains_ci keeper q || contains_ci row.kind q
-               || contains_ci row.text q
-           in
-           keeper_ok && search_ok)
+      let keeper_ok =
+        match keeper_filter with
+        | None -> true
+        | Some k -> String.equal keeper k
+      in
+      let search_ok =
+        match search with
+        | None -> true
+        | Some q ->
+          contains_ci keeper q || contains_ci row.kind q || contains_ci row.text q
+      in
+      keeper_ok && search_ok)
   in
   let memory_filtered_total = List.length memory_filtered in
   let memory_entries =
     memory_filtered
     |> List.sort
          (fun
-           (_, (a : Keeper_memory_policy.keeper_memory_line))
-           (_, (b : Keeper_memory_policy.keeper_memory_line)) ->
-           compare b.ts_unix a.ts_unix)
+             (_, (a : Keeper_memory_policy.keeper_memory_line))
+              (_, (b : Keeper_memory_policy.keeper_memory_line))
+            -> compare b.ts_unix a.ts_unix)
     |> take limit
   in
   let filtered =
     all_episodes
     |> List.filter (fun (e : Institution_eio.episode) ->
-           let keeper_ok =
-             match keeper_filter with
-             | None -> true
-             | Some k -> List.mem k e.participants
-           in
-           let outcome_ok =
-             match outcome_filter with
-             | None -> true
-             | Some "success" -> e.outcome = `Success
-             | Some "failure" -> e.outcome = `Failure
-             | Some "partial" -> e.outcome = `Partial
-             | Some _ -> true
-           in
-           let search_ok =
-             match search with
-             | None -> true
-             | Some q ->
-               contains_ci e.summary q
-               || contains_ci e.event_type q
-               || List.exists (fun l -> contains_ci l q) e.learnings
-               || List.exists (fun p -> contains_ci p q) e.participants
-           in
-           keeper_ok && outcome_ok && search_ok)
+      let keeper_ok =
+        match keeper_filter with
+        | None -> true
+        | Some k -> List.mem k e.participants
+      in
+      let outcome_ok =
+        match outcome_filter with
+        | None -> true
+        | Some "success" -> e.outcome = `Success
+        | Some "failure" -> e.outcome = `Failure
+        | Some "partial" -> e.outcome = `Partial
+        | Some _ -> true
+      in
+      let search_ok =
+        match search with
+        | None -> true
+        | Some q ->
+          contains_ci e.summary q
+          || contains_ci e.event_type q
+          || List.exists (fun l -> contains_ci l q) e.learnings
+          || List.exists (fun p -> contains_ci p q) e.participants
+      in
+      keeper_ok && outcome_ok && search_ok)
   in
   let filtered_total = List.length filtered in
   let episodes =
@@ -291,8 +317,7 @@ let dashboard_memory_subsystems_http_json ~(config : Coord_utils.config)
       | rest when n <= 0 -> rest
       | _ :: rest -> drop (n - 1) rest
     in
-    if filtered_total <= limit then filtered
-    else drop (filtered_total - limit) filtered
+    if filtered_total <= limit then filtered else drop (filtered_total - limit) filtered
   in
   let known_keepers =
     let episode_keepers =
@@ -300,60 +325,53 @@ let dashboard_memory_subsystems_http_json ~(config : Coord_utils.config)
       |> List.concat_map (fun (e : Institution_eio.episode) -> e.participants)
     in
     let memory_keepers = List.map fst all_memory_entries in
-    episode_keepers @ memory_keepers
-    |> List.sort_uniq String.compare
+    episode_keepers @ memory_keepers |> List.sort_uniq String.compare
   in
   let known_memory_kinds =
     all_memory_entries
-    |> List.map (fun (_, (row : Keeper_memory_policy.keeper_memory_line)) ->
-           row.kind)
+    |> List.map (fun (_, (row : Keeper_memory_policy.keeper_memory_line)) -> row.kind)
     |> List.sort_uniq String.compare
   in
   `Assoc
-    [
-      ("generated_at", `String (Masc_domain.now_iso ()));
-      ( "hebbian", hebbian );
-      ( "episodes",
-        `Assoc
-          [
-            ("total", `Int total);
-            ("filtered", `Int filtered_total);
-            ("shown", `Int (List.length episodes));
-            ("limit", `Int limit);
-            ( "items",
-              `List
-                (List.map Institution_eio.episode_to_json episodes) );
-          ] );
-      ( "memory_entries",
-        `Assoc
-          [
-            ("total", `Int memory_total);
-            ("filtered", `Int memory_filtered_total);
-            ("shown", `Int (List.length memory_entries));
-            ("limit", `Int limit);
-            ( "items",
-              `List
+    [ "generated_at", `String (Masc_domain.now_iso ())
+    ; "hebbian", hebbian
+    ; ( "episodes"
+      , `Assoc
+          [ "total", `Int total
+          ; "filtered", `Int filtered_total
+          ; "shown", `Int (List.length episodes)
+          ; "limit", `Int limit
+          ; "items", `List (List.map Institution_eio.episode_to_json episodes)
+          ] )
+    ; ( "memory_entries"
+      , `Assoc
+          [ "total", `Int memory_total
+          ; "filtered", `Int memory_filtered_total
+          ; "shown", `Int (List.length memory_entries)
+          ; "limit", `Int limit
+          ; ( "items"
+            , `List
                 (List.map
                    (fun (keeper, row) -> memory_entry_to_json keeper row)
-                   memory_entries) );
-          ] );
-      ( "filters",
-        `Assoc
-          [
-            ( "keepers",
-              `List (List.map (fun k -> `String k) known_keepers) );
-            ("outcomes", `List [ `String "success"; `String "partial"; `String "failure" ]);
-            ( "memory_kinds",
-              `List (List.map (fun k -> `String k) known_memory_kinds) );
-          ] );
+                   memory_entries) )
+          ] )
+    ; ( "filters"
+      , `Assoc
+          [ "keepers", `List (List.map (fun k -> `String k) known_keepers)
+          ; "outcomes", `List [ `String "success"; `String "partial"; `String "failure" ]
+          ; "memory_kinds", `List (List.map (fun k -> `String k) known_memory_kinds)
+          ] )
     ]
+;;
 
 let dashboard_governance_http_json request ~base_path : Yojson.Safe.t =
   let limit = int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
-  let offset = int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
+  let offset =
+    int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000
+  in
   let status_filter = None in
-  Dashboard_governance.dashboard_json ~base_path ~limit ~offset
-    ~status_filter
+  Dashboard_governance.dashboard_json ~base_path ~limit ~offset ~status_filter
+;;
 
 (** Read the optional [?window=<minutes>] query param.
     Defaults to 60 minutes; clamped to [5..1440]. *)
@@ -361,8 +379,8 @@ let dashboard_governance_tool_events_http_json request : Yojson.Safe.t =
   let window =
     int_query_param request "window" ~default:60 |> clamp ~min_v:5 ~max_v:1440
   in
-  Dashboard_governance_metrics.governance_tool_events_json
-    ~window_minutes:window ()
+  Dashboard_governance_metrics.governance_tool_events_json ~window_minutes:window ()
+;;
 
 type approval_resolve_http_error =
   | Bad_request of string
@@ -371,75 +389,75 @@ type approval_resolve_http_error =
 let approval_resolve_http_error_to_string = function
   | Bad_request msg -> msg
   | Gone err -> Keeper_approval_queue.resolve_error_to_string err
+;;
 
-let dashboard_governance_approval_resolve_http_json ~base_path
-    ~(args : Yojson.Safe.t) :
-    (Yojson.Safe.t, approval_resolve_http_error) result =
+let dashboard_governance_approval_resolve_http_json ~base_path ~(args : Yojson.Safe.t)
+  : (Yojson.Safe.t, approval_resolve_http_error) result
+  =
   match Safe_ops.json_string_opt "id" args with
-  | None ->
-      Error (Bad_request "id is required")
+  | None -> Error (Bad_request "id is required")
   | Some id ->
-      let remember_rule =
-        Safe_ops.json_bool_opt "remember_rule" args
-        |> Option.value ~default:false
-      in
-      let decision_name =
-        Safe_ops.json_string_opt "decision" args
-        |> Option.value ~default:"approve"
-        |> String.trim
-        |> String.lowercase_ascii
-      in
-      let decision =
-        match decision_name with
-        | "approve" -> Ok Agent_sdk.Hooks.Approve
-        | "reject" ->
-            let reason =
-              Safe_ops.json_string_opt "reason" args
-              |> Option.value ~default:"dashboard rejected approval"
-            in
-            Ok (Agent_sdk.Hooks.Reject reason)
-        | _ ->
-            Error (Bad_request "decision must be 'approve' or 'reject'")
-      in
-      match decision with
-      | Error _ as err -> err
-      | Ok decision ->
-          (match
-             Keeper_approval_queue.resolve_with_policy ~id ~decision
-               ~base_path ~remember_rule ~created_by:"dashboard" ()
-           with
-           | Ok result ->
-               Ok
-                 (`Assoc
-                   [
-                     ("ok", `Bool true);
-                     ("id", `String id);
-                     ("decision", `String decision_name);
-                     ( "rule_id",
-                       match result.remembered_rule with
-                       | Some rule -> `String rule.id
-                       | None -> `Null );
-                   ])
-           | Error err ->
-               Error (Gone err))
-
-let dashboard_governance_approval_rule_delete_http_json ~base_path
-    ~(args : Yojson.Safe.t) :
-    (Yojson.Safe.t, string) result =
-  match Safe_ops.json_string_opt "id" args with
-  | None -> Error "id is required"
-  | Some id -> (
-      match Keeper_approval_queue.delete_rule ~base_path ~id () with
-      | Ok deleted ->
-          Keeper_approval_queue.audit_rule_event ~base_path ~event_type:"rule_deleted"
-            deleted;
+    let remember_rule =
+      Safe_ops.json_bool_opt "remember_rule" args |> Option.value ~default:false
+    in
+    let decision_name =
+      Safe_ops.json_string_opt "decision" args
+      |> Option.value ~default:"approve"
+      |> String.trim
+      |> String.lowercase_ascii
+    in
+    let decision =
+      match decision_name with
+      | "approve" -> Ok Agent_sdk.Hooks.Approve
+      | "reject" ->
+        let reason =
+          Safe_ops.json_string_opt "reason" args
+          |> Option.value ~default:"dashboard rejected approval"
+        in
+        Ok (Agent_sdk.Hooks.Reject reason)
+      | _ -> Error (Bad_request "decision must be 'approve' or 'reject'")
+    in
+    (match decision with
+     | Error _ as err -> err
+     | Ok decision ->
+       (match
+          Keeper_approval_queue.resolve_with_policy
+            ~id
+            ~decision
+            ~base_path
+            ~remember_rule
+            ~created_by:"dashboard"
+            ()
+        with
+        | Ok result ->
           Ok
             (`Assoc
-              [
-                ("ok", `Bool true);
-                ("id", `String deleted.id);
-              ])
-      | Error message -> Error message)
+                [ "ok", `Bool true
+                ; "id", `String id
+                ; "decision", `String decision_name
+                ; ( "rule_id"
+                  , match result.remembered_rule with
+                    | Some rule -> `String rule.id
+                    | None -> `Null )
+                ])
+        | Error err -> Error (Gone err)))
+;;
+
+let dashboard_governance_approval_rule_delete_http_json ~base_path ~(args : Yojson.Safe.t)
+  : (Yojson.Safe.t, string) result
+  =
+  match Safe_ops.json_string_opt "id" args with
+  | None -> Error "id is required"
+  | Some id ->
+    (match Keeper_approval_queue.delete_rule ~base_path ~id () with
+     | Ok deleted ->
+       Keeper_approval_queue.audit_rule_event
+         ~base_path
+         ~event_type:"rule_deleted"
+         deleted;
+       Ok (`Assoc [ "ok", `Bool true; "id", `String deleted.id ])
+     | Error message -> Error message)
+;;
 
 (* Dashboard-initiated verification verdict. Mirrors the tool_task path for
    Approve_verification / Reject_verification: persist the Verification store
@@ -453,22 +471,25 @@ let dashboard_governance_approval_rule_delete_http_json ~base_path
    Decisions are strictly approve | reject — unknown values return
    Bad_request rather than defaulting, per Det/NonDet boundary. *)
 let dashboard_verification_resolve_http_json
-    ~(config : Coord.config) ~(verifier : string)
-    ~(args : Yojson.Safe.t) : (Yojson.Safe.t, string) result =
+      ~(config : Coord.config)
+      ~(verifier : string)
+      ~(args : Yojson.Safe.t)
+  : (Yojson.Safe.t, string) result
+  =
   let open Result in
   let ( let* ) = bind in
   let* task_id =
     match Safe_ops.json_string_opt "task_id" args with
     | Some s ->
-        let trimmed = String.trim s in
-        if trimmed <> "" then Ok trimmed else Error "task_id is required"
+      let trimmed = String.trim s in
+      if trimmed <> "" then Ok trimmed else Error "task_id is required"
     | None -> Error "task_id is required"
   in
   let* verification_id =
     match Safe_ops.json_string_opt "verification_id" args with
     | Some s ->
-        let trimmed = String.trim s in
-        if trimmed <> "" then Ok trimmed else Error "verification_id is required"
+      let trimmed = String.trim s in
+      if trimmed <> "" then Ok trimmed else Error "verification_id is required"
     | None -> Error "verification_id is required"
   in
   let decision_name =
@@ -477,60 +498,84 @@ let dashboard_verification_resolve_http_json
     |> String.trim
     |> String.lowercase_ascii
   in
-  let reason =
-    Safe_ops.json_string_opt "reason" args |> Option.value ~default:""
-  in
+  let reason = Safe_ops.json_string_opt "reason" args |> Option.value ~default:"" in
   let* action =
     match decision_name with
     | "approve" -> Ok Masc_domain.Approve_verification
-    | "reject"  -> Ok Masc_domain.Reject_verification
+    | "reject" -> Ok Masc_domain.Reject_verification
     | "" -> Error "decision is required (approve | reject)"
     | other ->
-        Error (Printf.sprintf
-          "decision must be 'approve' or 'reject' (got %s)" other)
+      Error (Printf.sprintf "decision must be 'approve' or 'reject' (got %s)" other)
   in
-  let prepare_verification_verdict ~task:_ ~verifier ~verification_id:state_vid
-      ~decision =
-    if state_vid <> verification_id then
+  let prepare_verification_verdict ~task:_ ~verifier ~verification_id:state_vid ~decision =
+    if state_vid <> verification_id
+    then
       Error
         (Printf.sprintf
            "verification_id mismatch for task %s: request=%s state=%s"
-           task_id verification_id state_vid)
-    else
+           task_id
+           verification_id
+           state_vid)
+    else (
       match decision with
       | `Approve notes ->
-          Verification_protocol.record_approve_verification
-            ~config ~task_id ~verifier ~verification_id:state_vid ~notes
+        Verification_protocol.record_approve_verification
+          ~config
+          ~task_id
+          ~verifier
+          ~verification_id:state_vid
+          ~notes
       | `Reject reason ->
-          Verification_protocol.record_reject_verification
-            ~config ~task_id ~verifier ~verification_id:state_vid ~reason
+        Verification_protocol.record_reject_verification
+          ~config
+          ~task_id
+          ~verifier
+          ~verification_id:state_vid
+          ~reason)
   in
   let fsm_result =
-    Coord.transition_task_r config
-      ~agent_name:verifier ~task_id ~action
+    Coord.transition_task_r
+      config
+      ~agent_name:verifier
+      ~task_id
+      ~action
       ~prepare_verification_verdict
-      ~notes:reason ~reason ()
+      ~notes:reason
+      ~reason
+      ()
   in
   match fsm_result with
   | Error err -> Error (Masc_domain.masc_error_to_string err)
   | Ok _ ->
-      (match action with
-       | Masc_domain.Approve_verification ->
-           Verification_protocol.notify_approve_verification
-             ~task_id ~verifier ~verification_id ~notes:reason
-       | Masc_domain.Reject_verification ->
-           Verification_protocol.notify_reject_verification
-             ~task_id ~verifier ~verification_id ~reason
-       | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action | Masc_domain.Cancel
-       | Masc_domain.Release | Masc_domain.Submit_for_verification
-       | Masc_domain.Submit_pr_evidence -> ());
-      Ok (`Assoc [
-        ("ok", `Bool true);
-        ("task_id", `String task_id);
-        ("verification_id", `String verification_id);
-        ("decision", `String decision_name);
-        ("verifier", `String verifier);
-      ])
+    (match action with
+     | Masc_domain.Approve_verification ->
+       Verification_protocol.notify_approve_verification
+         ~task_id
+         ~verifier
+         ~verification_id
+         ~notes:reason
+     | Masc_domain.Reject_verification ->
+       Verification_protocol.notify_reject_verification
+         ~task_id
+         ~verifier
+         ~verification_id
+         ~reason
+     | Masc_domain.Claim
+     | Masc_domain.Start
+     | Masc_domain.Done_action
+     | Masc_domain.Cancel
+     | Masc_domain.Release
+     | Masc_domain.Submit_for_verification
+     | Masc_domain.Submit_pr_evidence -> ());
+    Ok
+      (`Assoc
+          [ "ok", `Bool true
+          ; "task_id", `String task_id
+          ; "verification_id", `String verification_id
+          ; "decision", `String decision_name
+          ; "verifier", `String verifier
+          ])
+;;
 
 let dashboard_planning_http_json ~(config : Coord.config) : Yojson.Safe.t =
   let goals = Goal_store.list_goals config () in
@@ -539,51 +584,59 @@ let dashboard_planning_http_json ~(config : Coord.config) : Yojson.Safe.t =
     dashboard_tasks_safe config
     |> List.fold_left
          (fun (todo, claimed, running, done_count, cancelled) (task : Masc_domain.task) ->
-           match task.task_status with
-           | Todo -> (todo + 1, claimed, running, done_count, cancelled)
-           | Claimed _ -> (todo, claimed + 1, running, done_count, cancelled)
-           | InProgress _ | AwaitingVerification _ -> (todo, claimed, running + 1, done_count, cancelled)
-           | Done _ -> (todo, claimed, running, done_count + 1, cancelled)
-           | Cancelled _ -> (todo, claimed, running, done_count, cancelled + 1))
+            match task.task_status with
+            | Todo -> todo + 1, claimed, running, done_count, cancelled
+            | Claimed _ -> todo, claimed + 1, running, done_count, cancelled
+            | InProgress _ | AwaitingVerification _ ->
+              todo, claimed, running + 1, done_count, cancelled
+            | Done _ -> todo, claimed, running, done_count + 1, cancelled
+            | Cancelled _ -> todo, claimed, running, done_count, cancelled + 1)
          (0, 0, 0, 0, 0)
   in
-  let (todo_count, claimed_count, running_count, done_count, cancelled_count) = task_rollup in
+  let todo_count, claimed_count, running_count, done_count, cancelled_count =
+    task_rollup
+  in
   `Assoc
-    [
-      ("generated_at", `String (Masc_domain.now_iso ()));
-      ("goals", `List (List.map Goal_store.goal_to_yojson goals));
-      ("rollup", Goal_store.rollup_to_yojson rollup);
-      ( "task_backlog",
-        `Assoc
-          [
-            ("todo", `Int todo_count);
-            ("claimed", `Int claimed_count);
-            ("in_progress", `Int running_count);
-            ("done", `Int done_count);
-            ("cancelled", `Int cancelled_count);
-          ] );
-      ( "coordination_fsm",
-        Coordination_product_snapshot.safe_build_tool_yojson config );
+    [ "generated_at", `String (Masc_domain.now_iso ())
+    ; "goals", `List (List.map Goal_store.goal_to_yojson goals)
+    ; "rollup", Goal_store.rollup_to_yojson rollup
+    ; ( "task_backlog"
+      , `Assoc
+          [ "todo", `Int todo_count
+          ; "claimed", `Int claimed_count
+          ; "in_progress", `Int running_count
+          ; "done", `Int done_count
+          ; "cancelled", `Int cancelled_count
+          ] )
+    ; "coordination_fsm", Coordination_product_snapshot.safe_build_tool_yojson config
     ]
+;;
 
 let dashboard_goals_tree_http_json ~(config : Coord.config) : Yojson.Safe.t =
   Dashboard_goals.dashboard_goals_tree_json ~config
+;;
 
 let dashboard_goals_snapshot_json ~(config : Coord.config) : Yojson.Safe.t =
   `Assoc
-    [
-      ("planning", dashboard_planning_http_json ~config);
-      ("tree", dashboard_goals_tree_http_json ~config);
+    [ "planning", dashboard_planning_http_json ~config
+    ; "tree", dashboard_goals_tree_http_json ~config
     ]
+;;
 
 let compact_preview ~max_chars text =
   let text = String.trim text in
-  if String.length text <= max_chars then (text, false)
-  else (String.sub text 0 max_chars ^ "...", true)
+  if String.length text <= max_chars
+  then text, false
+  else String.sub text 0 max_chars ^ "...", true
+;;
 
 let json_member key = function
-  | `Assoc fields -> (match List.assoc_opt key fields with Some v -> v | None -> `Null)
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+     | Some v -> v
+     | None -> `Null)
   | _ -> `Null
+;;
 
 let json_string key json = Json_util.get_string json key
 let json_int key json = Json_util.get_int json key
@@ -593,139 +646,134 @@ let json_bool key json = Json_util.get_bool json key
 let compact_receipt_error_json receipt =
   match json_member "error" receipt with
   | `Assoc _ as error ->
-      let kind = json_string "kind" error in
-      let message = json_string "message" error in
-      let message_preview, message_truncated =
-        match message with
-        | Some value -> compact_preview ~max_chars:900 value
-        | None -> ("", false)
-      in
-      `Assoc
-        [
-          ("kind", Json_util.string_opt_to_json kind);
-          ( "message_preview",
-            match message with
-            | Some _ -> `String message_preview
-            | None -> `Null );
-          ("message_truncated", `Bool message_truncated);
-        ]
+    let kind = json_string "kind" error in
+    let message = json_string "message" error in
+    let message_preview, message_truncated =
+      match message with
+      | Some value -> compact_preview ~max_chars:900 value
+      | None -> "", false
+    in
+    `Assoc
+      [ "kind", Json_util.string_opt_to_json kind
+      ; ( "message_preview"
+        , match message with
+          | Some _ -> `String message_preview
+          | None -> `Null )
+      ; "message_truncated", `Bool message_truncated
+      ]
   | _ -> `Null
+;;
 
 let compact_receipt_cascade_json receipt =
   match json_member "cascade" receipt with
   | `Assoc _ as cascade ->
-      `Assoc
-        [
-          ("name", Json_util.string_opt_to_json (json_string "name" cascade));
-          ( "selected_model",
-            Json_util.string_opt_to_json (json_string "selected_model" cascade) );
-          ( "attempt_count",
-            Json_util.int_opt_to_json (json_int "attempt_count" cascade) );
-          ( "fallback_applied",
-            Json_util.bool_opt_to_json (json_bool "fallback_applied" cascade) );
-          ("outcome", Json_util.string_opt_to_json (json_string "outcome" cascade));
-          ( "degraded_retry_applied",
-            Json_util.bool_opt_to_json (json_bool "degraded_retry_applied" cascade) );
-          ( "degraded_retry_cascade",
-            Json_util.string_opt_to_json
-              (json_string "degraded_retry_cascade" cascade) );
-          ( "fallback_reason",
-            Json_util.string_opt_to_json (json_string "fallback_reason" cascade) );
-        ]
+    `Assoc
+      [ "name", Json_util.string_opt_to_json (json_string "name" cascade)
+      ; ( "selected_model"
+        , Json_util.string_opt_to_json (json_string "selected_model" cascade) )
+      ; "attempt_count", Json_util.int_opt_to_json (json_int "attempt_count" cascade)
+      ; ( "fallback_applied"
+        , Json_util.bool_opt_to_json (json_bool "fallback_applied" cascade) )
+      ; "outcome", Json_util.string_opt_to_json (json_string "outcome" cascade)
+      ; ( "degraded_retry_applied"
+        , Json_util.bool_opt_to_json (json_bool "degraded_retry_applied" cascade) )
+      ; ( "degraded_retry_cascade"
+        , Json_util.string_opt_to_json (json_string "degraded_retry_cascade" cascade) )
+      ; ( "fallback_reason"
+        , Json_util.string_opt_to_json (json_string "fallback_reason" cascade) )
+      ]
   | _ -> `Null
+;;
 
 let compact_receipt_tool_surface_json receipt =
   match json_member "tool_surface" receipt with
   | `Assoc _ as surface ->
-      `Assoc
-        [
-          ( "tool_requirement",
-            Json_util.string_opt_to_json (json_string "tool_requirement" surface)
-          );
-          ( "tool_gate_enabled",
-            Json_util.bool_opt_to_json (json_bool "tool_gate_enabled" surface)
-          );
-          ( "missing_required_tools",
-            Json_util.json_string_list
-              (Json_util.get_string_list surface "missing_required_tools") );
-          ( "required_tools",
-            Json_util.json_string_list
-              (Json_util.get_string_list surface "required_tools") );
-        ]
+    `Assoc
+      [ ( "tool_requirement"
+        , Json_util.string_opt_to_json (json_string "tool_requirement" surface) )
+      ; ( "tool_gate_enabled"
+        , Json_util.bool_opt_to_json (json_bool "tool_gate_enabled" surface) )
+      ; ( "missing_required_tools"
+        , Json_util.json_string_list
+            (Json_util.get_string_list surface "missing_required_tools") )
+      ; ( "required_tools"
+        , Json_util.json_string_list (Json_util.get_string_list surface "required_tools")
+        )
+      ]
   | _ -> `Null
+;;
 
 let json_number key json =
   match json_member key json with
   | `Float value -> Some value
   | `Int value -> Some (float_of_int value)
   | _ -> None
+;;
 
 let composite_execution_receipt_json ~(config : Coord.config) ~keeper_name =
   match Keeper_execution_receipt.latest_json config keeper_name with
   | None ->
-      `Assoc
-        [
-          ("latest_receipt_present", `Bool false);
-          ("recorded_at", `Null);
-          ("outcome", `Null);
-          ("terminal_reason_code", `Null);
-          ("operator_disposition", `Null);
-          ("operator_disposition_reason", `Null);
-          ("model_used", `Null);
-          ("stop_reason", `Null);
-          ("tool_contract_result", `Null);
-          ("duration_ms", `Null);
-          ("error", `Null);
-          ("cascade", `Null);
-          ("tool_surface", `Null);
-        ]
+    `Assoc
+      [ "latest_receipt_present", `Bool false
+      ; "recorded_at", `Null
+      ; "outcome", `Null
+      ; "terminal_reason_code", `Null
+      ; "operator_disposition", `Null
+      ; "operator_disposition_reason", `Null
+      ; "model_used", `Null
+      ; "stop_reason", `Null
+      ; "tool_contract_result", `Null
+      ; "duration_ms", `Null
+      ; "error", `Null
+      ; "cascade", `Null
+      ; "tool_surface", `Null
+      ]
   | Some receipt ->
-      let action_radius = json_member "action_radius" receipt in
-      `Assoc
-        [
-          ("latest_receipt_present", `Bool true);
-          ( "recorded_at",
-            Json_util.string_opt_to_json (json_string "recorded_at" receipt) );
-          ("outcome", Json_util.string_opt_to_json (json_string "outcome" receipt));
-          ( "terminal_reason_code",
-            Json_util.string_opt_to_json
-              (json_string "terminal_reason_code" receipt) );
-          ( "operator_disposition",
-            Json_util.string_opt_to_json
-              (json_string "operator_disposition" receipt) );
-          ( "operator_disposition_reason",
-            Json_util.string_opt_to_json
-              (json_string "operator_disposition_reason" receipt) );
-          ( "model_used",
-            Json_util.string_opt_to_json (json_string "model_used" receipt) );
-          ( "stop_reason",
-            Json_util.string_opt_to_json (json_string "stop_reason" receipt) );
-          ( "tool_contract_result",
-            Json_util.string_opt_to_json
-              (json_string "tool_contract_result" receipt) );
-          ( "duration_ms",
-            Json_util.float_opt_to_json (json_float "duration_ms" action_radius) );
-          ("error", compact_receipt_error_json receipt);
-          ("cascade", compact_receipt_cascade_json receipt);
-          ("tool_surface", compact_receipt_tool_surface_json receipt);
-        ]
+    let action_radius = json_member "action_radius" receipt in
+    `Assoc
+      [ "latest_receipt_present", `Bool true
+      ; "recorded_at", Json_util.string_opt_to_json (json_string "recorded_at" receipt)
+      ; "outcome", Json_util.string_opt_to_json (json_string "outcome" receipt)
+      ; ( "terminal_reason_code"
+        , Json_util.string_opt_to_json (json_string "terminal_reason_code" receipt) )
+      ; ( "operator_disposition"
+        , Json_util.string_opt_to_json (json_string "operator_disposition" receipt) )
+      ; ( "operator_disposition_reason"
+        , Json_util.string_opt_to_json (json_string "operator_disposition_reason" receipt)
+        )
+      ; "model_used", Json_util.string_opt_to_json (json_string "model_used" receipt)
+      ; "stop_reason", Json_util.string_opt_to_json (json_string "stop_reason" receipt)
+      ; ( "tool_contract_result"
+        , Json_util.string_opt_to_json (json_string "tool_contract_result" receipt) )
+      ; ( "duration_ms"
+        , Json_util.float_opt_to_json (json_float "duration_ms" action_radius) )
+      ; "error", compact_receipt_error_json receipt
+      ; "cascade", compact_receipt_cascade_json receipt
+      ; "tool_surface", compact_receipt_tool_surface_json receipt
+      ]
+;;
 
-let lower_string_opt = Option.map (fun value -> String.lowercase_ascii (String.trim value))
+let lower_string_opt =
+  Option.map (fun value -> String.lowercase_ascii (String.trim value))
+;;
 
 let string_opt_is_any value candidates =
   match lower_string_opt value with
   | Some value -> List.mem value candidates
   | None -> false
+;;
 
 let string_opt_present value =
   match Option.map String.trim value with
   | Some value -> value <> ""
   | None -> false
+;;
 
 let json_string_eq key json expected =
   match json_string key json with
   | Some value -> String.equal value expected
   | None -> false
+;;
 
 let composite_latest_activity_epoch snapshot execution =
   let last_outcome_epoch =
@@ -742,6 +790,7 @@ let composite_latest_activity_epoch snapshot execution =
   | Some a, Some b -> Some (max a b)
   | Some value, None | None, Some value -> Some value
   | None, None -> None
+;;
 
 let composite_snapshot_is_idle snapshot =
   let decision = json_member "decision" snapshot in
@@ -757,36 +806,37 @@ let composite_snapshot_is_idle snapshot =
   && json_string_eq "state" cascade "idle"
   && json_string_eq "stage" compaction "accumulating"
   && Option.value ~default:"clean" breaker_state = "clean"
+;;
 
 let composite_execution_tool_required execution =
   string_opt_is_any
     (json_string "tool_contract_result" execution)
-    [
-      "violated";
-      "unknown";
-      "needs_execution_progress";
-      "missing_required_tool_use";
-      "passive_only";
-      "claim_only_after_owned_task";
-      "tool_surface_mismatch";
-      "no_tool_capable_provider";
+    [ "violated"
+    ; "unknown"
+    ; "needs_execution_progress"
+    ; "missing_required_tool_use"
+    ; "passive_only"
+    ; "claim_only_after_owned_task"
+    ; "tool_surface_mismatch"
+    ; "no_tool_capable_provider"
     ]
   || string_opt_is_any
        (json_string "operator_disposition_reason" execution)
        [ "tool_required_unsatisfied" ]
+;;
 
 let composite_execution_config_blocked execution =
   string_opt_is_any
     (json_string "operator_disposition_reason" execution)
     [ "preflight_config_error" ]
+;;
 
 let composite_execution_saturated execution =
-  string_opt_is_any
-    (json_string "terminal_reason_code" execution)
-    [ "ollama_saturated" ]
+  string_opt_is_any (json_string "terminal_reason_code" execution) [ "ollama_saturated" ]
   || string_opt_is_any
        (json_string "operator_disposition_reason" execution)
        [ "ollama_saturated" ]
+;;
 
 let composite_execution_blocked execution =
   composite_execution_tool_required execution
@@ -794,21 +844,23 @@ let composite_execution_blocked execution =
   || (match lower_string_opt (json_string "terminal_reason_code" execution) with
       | Some terminal -> terminal <> "" && terminal <> "completed"
       | None -> false)
-  || (match json_member "error" execution with
-      | `Assoc _ as error -> string_opt_present (json_string "kind" error)
-      | _ -> false)
+  ||
+  match json_member "error" execution with
+  | `Assoc _ as error -> string_opt_present (json_string "kind" error)
+  | _ -> false
+;;
 
-type composite_runtime_attention = {
-  cra_is_live : bool;
-  cra_fiber_stop_requested : bool;
-  cra_stale_long_enough : bool;
-  cra_idle_attention : bool;
-  cra_blocked : bool;
-  cra_stale_without_live_turn : bool;
-  cra_needs_attention : bool;
-  cra_reason : string option;
-  cra_state : string;
-}
+type composite_runtime_attention =
+  { cra_is_live : bool
+  ; cra_fiber_stop_requested : bool
+  ; cra_stale_long_enough : bool
+  ; cra_idle_attention : bool
+  ; cra_blocked : bool
+  ; cra_stale_without_live_turn : bool
+  ; cra_needs_attention : bool
+  ; cra_reason : string option
+  ; cra_state : string
+  }
 
 let composite_runtime_attention ~snapshot ~execution =
   let is_live = Option.value ~default:false (json_bool "is_live" snapshot) in
@@ -833,33 +885,37 @@ let composite_runtime_attention ~snapshot ~execution =
   let reason =
     match json_string "operator_disposition_reason" execution with
     | Some value when String.trim value <> "" -> Some value
-    | _ -> (
-        match json_string "terminal_reason_code" execution with
-        | Some value when String.trim value <> "" -> Some value
-        | _ when fiber_stop_requested -> Some "fiber_stop_requested"
-        | _ when idle_attention -> Some "idle_composite"
-        | _ when stale_without_live_turn -> Some "not_live"
-        | _ when blocked -> Some "runtime_blocked"
-        | _ -> None )
+    | _ ->
+      (match json_string "terminal_reason_code" execution with
+       | Some value when String.trim value <> "" -> Some value
+       | _ when fiber_stop_requested -> Some "fiber_stop_requested"
+       | _ when idle_attention -> Some "idle_composite"
+       | _ when stale_without_live_turn -> Some "not_live"
+       | _ when blocked -> Some "runtime_blocked"
+       | _ -> None)
   in
   let state =
-    if blocked then "blocked"
-    else if fiber_stop_requested then "stop_requested"
-    else if idle_attention then "idle_stale"
-    else if stale_without_live_turn then "stale"
+    if blocked
+    then "blocked"
+    else if fiber_stop_requested
+    then "stop_requested"
+    else if idle_attention
+    then "idle_stale"
+    else if stale_without_live_turn
+    then "stale"
     else "ok"
   in
-  {
-    cra_is_live = is_live;
-    cra_fiber_stop_requested = fiber_stop_requested;
-    cra_stale_long_enough = stale_long_enough;
-    cra_idle_attention = idle_attention;
-    cra_blocked = blocked;
-    cra_stale_without_live_turn = stale_without_live_turn;
-    cra_needs_attention = needs_attention;
-    cra_reason = reason;
-    cra_state = state;
+  { cra_is_live = is_live
+  ; cra_fiber_stop_requested = fiber_stop_requested
+  ; cra_stale_long_enough = stale_long_enough
+  ; cra_idle_attention = idle_attention
+  ; cra_blocked = blocked
+  ; cra_stale_without_live_turn = stale_without_live_turn
+  ; cra_needs_attention = needs_attention
+  ; cra_reason = reason
+  ; cra_state = state
   }
+;;
 
 let composite_runtime_attention_json attention ~snapshot =
   `Assoc
@@ -870,40 +926,46 @@ let composite_runtime_attention_json attention ~snapshot =
     ; "reason", Json_util.string_opt_to_json attention.cra_reason
     ; "raw_phase", Json_util.string_opt_to_json (json_string "phase" snapshot)
     ; "is_live", `Bool attention.cra_is_live
-    ; ( "source",
-        `String
-          (if attention.cra_blocked then "execution_receipt"
-           else if attention.cra_fiber_stop_requested then "registry_fiber_stop"
+    ; ( "source"
+      , `String
+          (if attention.cra_blocked
+           then "execution_receipt"
+           else if attention.cra_fiber_stop_requested
+           then "registry_fiber_stop"
            else "composite_snapshot") )
     ]
+;;
 
 let fleet_fsm_action_payload ~keeper_name ~kind ~reason ~snapshot ~execution =
   `Assoc
-    [
-      ("source", `String "fleet_fsm");
-      ("kind", `String kind);
-      ("keeper", `String keeper_name);
-      ("reason", `String reason);
-      ("phase", Json_util.string_opt_to_json (json_string "phase" snapshot));
-      ("turn_phase", Json_util.string_opt_to_json (json_string "turn_phase" snapshot));
-      ("execution", execution);
+    [ "source", `String "fleet_fsm"
+    ; "kind", `String kind
+    ; "keeper", `String keeper_name
+    ; "reason", `String reason
+    ; "phase", Json_util.string_opt_to_json (json_string "phase" snapshot)
+    ; "turn_phase", Json_util.string_opt_to_json (json_string "turn_phase" snapshot)
+    ; "execution", execution
     ]
+;;
 
 let fleet_fsm_message_payload ~keeper_name ~reason ~snapshot ~execution =
   let message =
     Printf.sprintf
-      "Fleet FSM supervised resolve request for %s.\nReason: %s.\nInspect the latest runtime evidence, distinguish configuration/tool-contract blockers from restartable runtime stalls, and reply with the safest next operator action. Do not self-restart."
-      keeper_name reason
+      "Fleet FSM supervised resolve request for %s.\n\
+       Reason: %s.\n\
+       Inspect the latest runtime evidence, distinguish configuration/tool-contract \
+       blockers from restartable runtime stalls, and reply with the safest next operator \
+       action. Do not self-restart."
+      keeper_name
+      reason
   in
-  match fleet_fsm_action_payload ~keeper_name ~kind:"diagnose" ~reason ~snapshot ~execution with
+  match
+    fleet_fsm_action_payload ~keeper_name ~kind:"diagnose" ~reason ~snapshot ~execution
+  with
   | `Assoc fields ->
-      `Assoc
-        (fields
-         @ [
-             ("direct_reply", `Bool true);
-             ("message", `String message);
-           ])
+    `Assoc (fields @ [ "direct_reply", `Bool true; "message", `String message ])
   | other -> other
+;;
 
 let composite_recommended_actions_json ~keeper_name ~snapshot ~execution ~attention =
   let stale_long_enough = attention.cra_stale_long_enough in
@@ -911,124 +973,133 @@ let composite_recommended_actions_json ~keeper_name ~snapshot ~execution ~attent
   let reason = Option.value ~default:"runtime_attention" attention.cra_reason in
   let make action_type severity reason suggested_payload =
     let action : Operator_digest_types.recommended_action =
-      {
-        action_type;
-        target_type = "keeper";
-        target_id = Some keeper_name;
-        severity;
-        reason;
-        suggested_payload;
+      { action_type
+      ; target_type = "keeper"
+      ; target_id = Some keeper_name
+      ; severity
+      ; reason
+      ; suggested_payload
       }
     in
     action
   in
   let probe action_reason =
-    make "keeper_probe" Operator_digest_types.Sev_warn action_reason
+    make
+      "keeper_probe"
+      Operator_digest_types.Sev_warn
+      action_reason
       (fleet_fsm_action_payload ~keeper_name ~kind:"probe" ~reason ~snapshot ~execution)
   in
   let message action_reason =
-    make "keeper_message" Operator_digest_types.Sev_warn action_reason
+    make
+      "keeper_message"
+      Operator_digest_types.Sev_warn
+      action_reason
       (fleet_fsm_message_payload ~keeper_name ~reason:action_reason ~snapshot ~execution)
   in
   let recover action_reason =
-    make "keeper_recover" Operator_digest_types.Sev_bad action_reason
-      (fleet_fsm_action_payload ~keeper_name ~kind:"recover" ~reason:action_reason
-         ~snapshot ~execution)
+    make
+      "keeper_recover"
+      Operator_digest_types.Sev_bad
+      action_reason
+      (fleet_fsm_action_payload
+         ~keeper_name
+         ~kind:"recover"
+         ~reason:action_reason
+         ~snapshot
+         ~execution)
   in
   let actions =
-    if not attention.cra_needs_attention then []
-    else if composite_execution_tool_required execution then
-      [
-        probe ("Inspect tool-contract blocker: " ^ reason);
-        message ("Resolve tool-contract blocker: " ^ reason);
+    if not attention.cra_needs_attention
+    then []
+    else if composite_execution_tool_required execution
+    then
+      [ probe ("Inspect tool-contract blocker: " ^ reason)
+      ; message ("Resolve tool-contract blocker: " ^ reason)
       ]
-    else if composite_execution_config_blocked execution then
-      [
-        probe ("Inspect configuration/auth blocker: " ^ reason);
-        message ("Resolve configuration/auth blocker: " ^ reason);
+    else if composite_execution_config_blocked execution
+    then
+      [ probe ("Inspect configuration/auth blocker: " ^ reason)
+      ; message ("Resolve configuration/auth blocker: " ^ reason)
       ]
-    else if attention.cra_fiber_stop_requested then
-      [
-        probe ("Inspect stop-requested keeper shutdown: " ^ reason);
-        message ("Confirm keeper shutdown or supervisor reap: " ^ reason);
+    else if attention.cra_fiber_stop_requested
+    then
+      [ probe ("Inspect stop-requested keeper shutdown: " ^ reason)
+      ; message ("Confirm keeper shutdown or supervisor reap: " ^ reason)
       ]
-    else if composite_execution_saturated execution && not stale_long_enough then
-      [ probe ("Inspect local runtime saturation: " ^ reason) ]
-    else if idle_attention then
-      [
-        probe ("Inspect idle composite: " ^ reason);
-        message ("Diagnose idle composite trigger gap: " ^ reason);
+    else if composite_execution_saturated execution && not stale_long_enough
+    then [ probe ("Inspect local runtime saturation: " ^ reason) ]
+    else if idle_attention
+    then
+      [ probe ("Inspect idle composite: " ^ reason)
+      ; message ("Diagnose idle composite trigger gap: " ^ reason)
       ]
     else
-      [
-        probe ("Refresh stale runtime evidence: " ^ reason);
-        recover ("Controlled keeper recovery for runtime stall: " ^ reason);
+      [ probe ("Refresh stale runtime evidence: " ^ reason)
+      ; recover ("Controlled keeper recovery for runtime stall: " ^ reason)
       ]
   in
   `List
     (actions
      |> Operator_digest_types.dedup_recommendations
      |> List.map (Operator_digest_types.recommended_action_to_yojson ~actor:"fleet_fsm"))
+;;
 
 let enrich_composite_snapshot_json ~(config : Coord.config) ~keeper_name json =
   match json with
   | `Assoc fields ->
-      let fields =
-        List.filter
-          (fun (name, _) ->
-            not
-              (String.equal name "keeper"
-               || String.equal name "execution"
-               || String.equal name "runtime_attention"
-               || String.equal name "recommended_actions"))
-          fields
-      in
-      let execution = composite_execution_receipt_json ~config ~keeper_name in
-      let attention = composite_runtime_attention ~snapshot:json ~execution in
-      let recommended_actions =
-        composite_recommended_actions_json ~keeper_name ~snapshot:json ~execution
-          ~attention
-      in
-      let runtime_attention =
-        composite_runtime_attention_json attention ~snapshot:json
-      in
-      `Assoc
-        (fields
-         @ [
-             ("keeper", `String keeper_name);
-             ("execution", execution);
-             ("runtime_attention", runtime_attention);
-             ("recommended_actions", recommended_actions);
-           ])
+    let fields =
+      List.filter
+        (fun (name, _) ->
+           not
+             (String.equal name "keeper"
+              || String.equal name "execution"
+              || String.equal name "runtime_attention"
+              || String.equal name "recommended_actions"))
+        fields
+    in
+    let execution = composite_execution_receipt_json ~config ~keeper_name in
+    let attention = composite_runtime_attention ~snapshot:json ~execution in
+    let recommended_actions =
+      composite_recommended_actions_json ~keeper_name ~snapshot:json ~execution ~attention
+    in
+    let runtime_attention = composite_runtime_attention_json attention ~snapshot:json in
+    `Assoc
+      (fields
+       @ [ "keeper", `String keeper_name
+         ; "execution", execution
+         ; "runtime_attention", runtime_attention
+         ; "recommended_actions", recommended_actions
+         ])
   | other -> other
+;;
 
-let dashboard_keeper_composite_json ~(config : Coord.config)
-    (entry : Keeper_registry.registry_entry) : Yojson.Safe.t =
+let dashboard_keeper_composite_json
+      ~(config : Coord.config)
+      (entry : Keeper_registry.registry_entry)
+  : Yojson.Safe.t
+  =
   Keeper_composite_observer.observe entry
   |> Keeper_composite_observer.snapshot_to_json
   |> enrich_composite_snapshot_json ~config ~keeper_name:entry.name
+;;
 
 let dashboard_fleet_composite_json ~(config : Coord.config) () : Yojson.Safe.t =
   let entries = Keeper_registry.all ~base_path:config.base_path () in
   let snapshots = List.map (dashboard_keeper_composite_json ~config) entries in
   `Assoc
-    [
-      ("generated_at", `Float (Unix.gettimeofday ()));
-      ("count", `Int (List.length snapshots));
-      ("snapshots", `List snapshots);
+    [ "generated_at", `Float (Unix.gettimeofday ())
+    ; "count", `Int (List.length snapshots)
+    ; "snapshots", `List snapshots
     ]
+;;
 
-let dashboard_goal_detail_http_json ~(config : Coord.config) ~goal_id :
-    Yojson.Safe.t =
+let dashboard_goal_detail_http_json ~(config : Coord.config) ~goal_id : Yojson.Safe.t =
   match Dashboard_goals.goal_detail_json ~config ~goal_id with
   | Ok json -> json
   | Error message ->
-      `Assoc
-        [
-          ("ok", `Bool false);
-          ("error", `String message);
-          ("goal_id", `String goal_id);
-        ]
+    `Assoc [ "ok", `Bool false; "error", `String message; "goal_id", `String goal_id ]
+;;
 
 let operator_action_http_json ~state ~sw ~clock request ~args =
   let actor =
@@ -1037,17 +1108,17 @@ let operator_action_http_json ~state ~sw ~clock request ~args =
       request
   in
   let ctx : _ Operator_control.context =
-    {
-      config = state.Mcp_server.room_config;
-      agent_name = Option.value ~default:"dashboard" actor;
-      sw;
-      clock;
-      proc_mgr = state.Mcp_server.proc_mgr;
-      net = state.Mcp_server.net;
-      mcp_session_id = None;
+    { config = state.Mcp_server.room_config
+    ; agent_name = Option.value ~default:"dashboard" actor
+    ; sw
+    ; clock
+    ; proc_mgr = state.Mcp_server.proc_mgr
+    ; net = state.Mcp_server.net
+    ; mcp_session_id = None
     }
   in
   Operator_control.action_json ?actor_hint:actor ctx args
+;;
 
 let operator_confirm_http_json ~state ~sw ~clock request ~args =
   let actor =
@@ -1056,20 +1127,21 @@ let operator_confirm_http_json ~state ~sw ~clock request ~args =
       request
   in
   let ctx : _ Operator_control.context =
-    {
-      config = state.Mcp_server.room_config;
-      agent_name = Option.value ~default:"dashboard" actor;
-      sw;
-      clock;
-      proc_mgr = state.Mcp_server.proc_mgr;
-      net = state.Mcp_server.net;
-      mcp_session_id = None;
+    { config = state.Mcp_server.room_config
+    ; agent_name = Option.value ~default:"dashboard" actor
+    ; sw
+    ; clock
+    ; proc_mgr = state.Mcp_server.proc_mgr
+    ; net = state.Mcp_server.net
+    ; mcp_session_id = None
     }
   in
   Operator_control.confirm_json ?actor_hint:actor ctx args
+;;
 
 let operator_error_json message =
-  `Assoc [ ("status", `String "error"); ("message", `String message) ]
+  `Assoc [ "status", `String "error"; "message", `String message ]
+;;
 
 (* Cold-start bootstrap aggregator.
 
@@ -1093,39 +1165,36 @@ let operator_error_json message =
    payload shape, slice list, and error contract cannot drift between
    transports. *)
 let dashboard_bootstrap_http_json
-    ~(state : Mcp_server.server_state)
-    ~sw
-    ~(clock : _ Eio.Time.clock_ty Eio.Resource.t)
-    (request : Httpun.Request.t) : Yojson.Safe.t =
+      ~(state : Mcp_server.server_state)
+      ~sw
+      ~(clock : _ Eio.Time.clock_ty Eio.Resource.t)
+      (request : Httpun.Request.t)
+  : Yojson.Safe.t
+  =
   let slice name f =
-    try (name, f ())
-    with
+    try name, f () with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-        Log.Server.warn
-          "[dashboard-bootstrap] slice %s failed: %s"
-          name (Printexc.to_string exn);
-        ( name
-        , `Assoc
-            [ ("error", `String "slice_unavailable")
-            ; ("slice", `String name)
-            ] )
+      Log.Server.warn
+        "[dashboard-bootstrap] slice %s failed: %s"
+        name
+        (Printexc.to_string exn);
+      name, `Assoc [ "error", `String "slice_unavailable"; "slice", `String name ]
   in
   let shell =
     slice "shell" (fun () ->
       dashboard_shell_http_json
         ?clock:state.Mcp_server.clock
-        ~request ~light:true
+        ~request
+        ~light:true
         state.Mcp_server.room_config)
   in
   let execution =
-    slice "execution" (fun () ->
-      dashboard_execution_http_json ~state ~sw ~clock request)
+    slice "execution" (fun () -> dashboard_execution_http_json ~state ~sw ~clock request)
   in
   let planning =
     slice "planning" (fun () ->
-      dashboard_planning_http_json
-        ~config:state.Mcp_server.room_config)
+      dashboard_planning_http_json ~config:state.Mcp_server.room_config)
   in
   let namespace_truth =
     slice "namespace_truth" (fun () ->
@@ -1133,17 +1202,15 @@ let dashboard_bootstrap_http_json
   in
   let goals =
     slice "goals" (fun () ->
-      dashboard_goals_tree_http_json
-        ~config:state.Mcp_server.room_config)
+      dashboard_goals_tree_http_json ~config:state.Mcp_server.room_config)
   in
   let goal_loop_status =
     slice "goal_loop_status" (fun () ->
-      Dashboard_goal_loop.status_json
-        ~base_path:state.Mcp_server.room_config.base_path ())
+      Dashboard_goal_loop.status_json ~base_path:state.Mcp_server.room_config.base_path ())
   in
   `Assoc
-    [ ("served_at", `String (Masc_domain.now_iso ()))
-    ; ("milestone", `Int 1)
+    [ "served_at", `String (Masc_domain.now_iso ())
+    ; "milestone", `Int 1
     ; shell
     ; execution
     ; planning
@@ -1151,3 +1218,4 @@ let dashboard_bootstrap_http_json
     ; goals
     ; goal_loop_status
     ]
+;;

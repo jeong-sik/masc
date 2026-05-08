@@ -19,8 +19,8 @@ type observed_state =
 let unique_strings items =
   List.fold_left
     (fun acc item ->
-      let item = String.trim item in
-      if item = "" || List.exists (String.equal item) acc then acc else item :: acc)
+       let item = String.trim item in
+       if item = "" || List.exists (String.equal item) acc then acc else item :: acc)
     []
     items
   |> List.rev
@@ -64,7 +64,9 @@ let post_id_string (post : Board.post) = Board.Post_id.to_string post.id
 
 let compare_desc_float_then_string ~float_value ~string_value left right =
   let by_time = Float.compare (float_value right) (float_value left) in
-  if by_time <> 0 then by_time else String.compare (string_value left) (string_value right)
+  if by_time <> 0
+  then by_time
+  else String.compare (string_value left) (string_value right)
 ;;
 
 let compare_goal_id (left : Goal_store.goal) (right : Goal_store.goal) =
@@ -104,8 +106,7 @@ let telemetry_event_sort_key = function
     Printf.sprintf "handoff:%s:%s:%s" from_agent to_agent reason
   | Telemetry_eio.Error_occurred { code; message; context } ->
     Printf.sprintf "error:%s:%s:%s" code message context
-  | Telemetry_eio.Tool_called
-      { tool_name; success; duration_ms; agent_id; source; _ } ->
+  | Telemetry_eio.Tool_called { tool_name; success; duration_ms; agent_id; source; _ } ->
     Printf.sprintf
       "tool_called:%s:%b:%d:%s:%s"
       tool_name
@@ -113,7 +114,8 @@ let telemetry_event_sort_key = function
       duration_ms
       (Option.value agent_id ~default:"")
       (Option.value source ~default:"")
-  | Telemetry_eio.Tool_assigned { agent_id; profile; preset; tool_count; assignment_id } ->
+  | Telemetry_eio.Tool_assigned { agent_id; profile; preset; tool_count; assignment_id }
+    ->
     Printf.sprintf
       "tool_assigned:%s:%s:%s:%d:%s"
       agent_id
@@ -166,8 +168,7 @@ let task_actor_name (task : Masc_domain.task) =
   | Masc_domain.Claimed { assignee; _ }
   | Masc_domain.InProgress { assignee; _ }
   | Masc_domain.AwaitingVerification { assignee; _ }
-  | Masc_domain.Done { assignee; _ } ->
-    Some assignee
+  | Masc_domain.Done { assignee; _ } -> Some assignee
   | Masc_domain.Cancelled { cancelled_by; _ } -> Some cancelled_by
 ;;
 
@@ -175,12 +176,10 @@ let earning_kind = function
   | Agent_economy.Earn_task_done
   | Agent_economy.Earn_board_post
   | Agent_economy.Earn_upvote
-  | Agent_economy.Earn_mention_response ->
-    true
+  | Agent_economy.Earn_mention_response -> true
   | Agent_economy.Spend_model_call
   | Agent_economy.Spend_deliberation
-  | Agent_economy.Adjustment ->
-    false
+  | Agent_economy.Adjustment -> false
 ;;
 
 let spend_kind = function
@@ -189,15 +188,12 @@ let spend_kind = function
   | Agent_economy.Earn_board_post
   | Agent_economy.Earn_upvote
   | Agent_economy.Earn_mention_response
-  | Agent_economy.Adjustment ->
-    false
+  | Agent_economy.Adjustment -> false
 ;;
 
 let transaction_kind_to_evidence_kind = function
-  | Agent_economy.Earn_task_done ->
-    Coordination_product.Evidence_economy_earn_task_done
-  | Agent_economy.Earn_board_post ->
-    Coordination_product.Evidence_economy_earn_board_post
+  | Agent_economy.Earn_task_done -> Coordination_product.Evidence_economy_earn_task_done
+  | Agent_economy.Earn_board_post -> Coordination_product.Evidence_economy_earn_board_post
   | Agent_economy.Earn_upvote -> Coordination_product.Evidence_economy_earn_upvote
   | Agent_economy.Earn_mention_response ->
     Coordination_product.Evidence_economy_earn_mention_response
@@ -251,7 +247,7 @@ let reward_facts ~(ids : Coordination_product.ids) transactions =
   let has_penalty =
     List.exists
       (fun (txn : Agent_economy.transaction) ->
-        txn.kind = Agent_economy.Adjustment && txn.amount < 0.0)
+         txn.kind = Agent_economy.Adjustment && txn.amount < 0.0)
       relevant_transactions
   in
   let has_spend =
@@ -260,7 +256,7 @@ let reward_facts ~(ids : Coordination_product.ids) transactions =
     | Some agent_name ->
       List.exists
         (fun (txn : Agent_economy.transaction) ->
-          String.equal txn.agent_name agent_name && spend_kind txn.kind)
+           String.equal txn.agent_name agent_name && spend_kind txn.kind)
         transactions
   in
   has_reward_earning, has_spend, has_penalty
@@ -329,7 +325,10 @@ let economy_evidence (ids : Coordination_product.ids) (txn : Agent_economy.trans
   ; kind
   ; id = Some txn.id
   ; label =
-      Printf.sprintf "%s %.2f" (Coordination_product.evidence_kind_to_string kind) txn.amount
+      Printf.sprintf
+        "%s %.2f"
+        (Coordination_product.evidence_kind_to_string kind)
+        txn.amount
   ; detail =
       Printf.sprintf
         "agent=%s; balance_after=%.2f; reason=%s"
@@ -347,8 +346,7 @@ let telemetry_evidence_for_event
   : Coordination_product.evidence option
   =
   match record.event with
-  | Telemetry_eio.Task_started { task_id; agent_id } when List.mem task_id ids.task_ids
-    ->
+  | Telemetry_eio.Task_started { task_id; agent_id } when List.mem task_id ids.task_ids ->
     Some
       { source = Coordination_product.Source_telemetry
       ; kind = Coordination_product.Evidence_telemetry_task_started
@@ -387,11 +385,14 @@ let telemetry_evidence_for_event
       ; timestamp = Some record.timestamp
       ; refs = ids
       }
-  | Telemetry_eio.Agent_joined _ | Telemetry_eio.Agent_left _
-  | Telemetry_eio.Task_started _ | Telemetry_eio.Task_completed _
-  | Telemetry_eio.Handoff_triggered _ | Telemetry_eio.Error_occurred _
-  | Telemetry_eio.Tool_called _ | Telemetry_eio.Tool_assigned _ ->
-    None
+  | Telemetry_eio.Agent_joined _
+  | Telemetry_eio.Agent_left _
+  | Telemetry_eio.Task_started _
+  | Telemetry_eio.Task_completed _
+  | Telemetry_eio.Handoff_triggered _
+  | Telemetry_eio.Error_occurred _
+  | Telemetry_eio.Tool_called _
+  | Telemetry_eio.Tool_assigned _ -> None
 ;;
 
 let evidence_for ~ids ~tasks ~linked_posts ~transactions ~telemetry_events =
@@ -438,8 +439,7 @@ let goal_terminal = function
   | Goal_phase.Awaiting_verification
   | Goal_phase.Awaiting_approval
   | Goal_phase.Blocked
-  | Goal_phase.Paused ->
-    false
+  | Goal_phase.Paused -> false
 ;;
 
 let board_phase_for
@@ -454,9 +454,9 @@ let board_phase_for
     match linked_posts with
     | [] -> Coordination_product.Quiet
     | _
-      when (match goal_phase with
-            | Some phase -> goal_terminal phase
-            | None -> false) -> Coordination_product.Signal_acknowledged
+      when match goal_phase with
+           | Some phase -> goal_terminal phase
+           | None -> false -> Coordination_product.Signal_acknowledged
     | _ when task_counts.total > 0 && task_counts.open_count = 0 ->
       Coordination_product.Signal_acknowledged
     | _ -> Coordination_product.Signal_pending)
@@ -472,22 +472,20 @@ let product_for
       ~persist_errors
       ~economy_enabled
   =
-  let task_statuses = List.map (fun (task : Masc_domain.task) -> task.task_status) tasks in
+  let task_statuses =
+    List.map (fun (task : Masc_domain.task) -> task.task_status) tasks
+  in
   let task_counts = Coordination_product.task_counts_of_statuses task_statuses in
   let task = Coordination_product.task_phase_of_counts task_statuses in
   let task_ids = List.map (fun (task : Masc_domain.task) -> task.id) tasks in
   let agent_name =
     tasks |> List.filter_map task_actor_name |> unique_strings |> single_unique
   in
-  let ids : Coordination_product.ids =
-    { goal_id; task_ids; post_ids = []; agent_name }
-  in
+  let ids : Coordination_product.ids = { goal_id; task_ids; post_ids = []; agent_name } in
   let linked_posts = List.filter (post_links_ids ids) posts in
   let ids = { ids with post_ids = List.map post_id_string linked_posts } in
   let board = board_phase_for ~persist_errors ~goal_phase ~task_counts ~linked_posts in
-  let has_reward_earning, has_spend, has_penalty =
-    reward_facts ~ids transactions
-  in
+  let has_reward_earning, has_spend, has_penalty = reward_facts ~ids transactions in
   let reward =
     Coordination_product.reward_phase_of_facts
       ~economy_enabled
@@ -507,9 +505,7 @@ let product_for
     ; active_goal_verification = false
     }
   in
-  let evidence =
-    evidence_for ~ids ~tasks ~linked_posts ~transactions ~telemetry_events
-  in
+  let evidence = evidence_for ~ids ~tasks ~linked_posts ~transactions ~telemetry_events in
   let product : Coordination_product.product =
     { ids; goal = goal_phase; task; board; reward; task_counts; facts; evidence }
   in
@@ -523,11 +519,9 @@ let product_for_goal
       ~telemetry_events
       ~persist_errors
       ~economy_enabled
-    (goal : Goal_store.goal)
+      (goal : Goal_store.goal)
   =
-  let tasks =
-    all_tasks |> List.filter (Convergence.task_has_goal_id ~goal_id:goal.id)
-  in
+  let tasks = all_tasks |> List.filter (Convergence.task_has_goal_id ~goal_id:goal.id) in
   let product =
     product_for
       ~goal_phase:(Some goal.phase)
@@ -572,7 +566,8 @@ let read_tool_telemetry config =
   try
     let since = Time_compat.now () -. Masc_time_constants.day in
     Telemetry_eio.read_recent_events config ~limit:tool_telemetry_limit
-    |> List.filter (fun (record : Telemetry_eio.event_record) -> record.timestamp >= since)
+    |> List.filter (fun (record : Telemetry_eio.event_record) ->
+      record.timestamp >= since)
   with
   | exn ->
     Log.Coord.warn
@@ -587,9 +582,9 @@ let capture (config : Coord.config) =
   ; tasks = Coord_query.get_tasks_safe config
   ; posts = Board_dispatch.list_posts ~limit:Board.Limits.max_posts ()
   ; transactions =
-      if economy_enabled
-      then Agent_economy.list_transactions ~base_path:config.base_path
-      else []
+      (if economy_enabled
+       then Agent_economy.list_transactions ~base_path:config.base_path
+       else [])
   ; telemetry_events = read_recent_telemetry config
   ; persist_errors = Board.persist_error_count ()
   ; economy_enabled
@@ -602,9 +597,9 @@ let capture_for_tool (config : Coord.config) =
   ; tasks = Coord_query.get_tasks_safe config
   ; posts = Board_dispatch.list_posts ~limit:tool_post_limit ()
   ; transactions =
-      if economy_enabled
-      then Agent_economy.list_transactions ~base_path:config.base_path
-      else []
+      (if economy_enabled
+       then Agent_economy.list_transactions ~base_path:config.base_path
+       else [])
   ; telemetry_events = read_tool_telemetry config
   ; persist_errors = Board.persist_error_count ()
   ; economy_enabled
@@ -633,7 +628,8 @@ let project state =
   in
   let unlinked_task_products =
     all_tasks
-    |> List.filter (fun (task : Masc_domain.task) -> not (List.mem task.id linked_task_ids))
+    |> List.filter (fun (task : Masc_domain.task) ->
+      not (List.mem task.id linked_task_ids))
     |> List.map (fun task ->
       product_for
         ~goal_phase:None
@@ -688,7 +684,7 @@ let capped_product (product : Coordination_product.product) =
 let cap_tool_snapshot (snapshot : Coordination_product.snapshot) =
   let products = take tool_product_limit snapshot.products |> List.map capped_product in
   let violations = take tool_violation_limit snapshot.violations in
-  ({ Coordination_product.products = products; violations } : Coordination_product.snapshot)
+  ({ Coordination_product.products; violations } : Coordination_product.snapshot)
 ;;
 
 let tool_product_to_yojson product =
@@ -708,17 +704,20 @@ let tool_product_to_yojson product =
     ; "reward", `String (Coordination_product.reward_phase_to_string product.reward)
     ; "task_counts", Coordination_product.task_counts_to_yojson product.task_counts
     ; "facts", Coordination_product.facts_to_yojson product.facts
-    ; "evidence", `List (List.map Coordination_product.evidence_to_yojson product.evidence)
+    ; ( "evidence"
+      , `List (List.map Coordination_product.evidence_to_yojson product.evidence) )
     ; "violations", `List violations
     ]
 ;;
 
-let tool_snapshot_to_yojson ~(original : Coordination_product.snapshot)
-      ~(capped : Coordination_product.snapshot) =
+let tool_snapshot_to_yojson
+      ~(original : Coordination_product.snapshot)
+      ~(capped : Coordination_product.snapshot)
+  =
   let original_evidence_count =
     List.fold_left
       (fun total (product : Coordination_product.product) ->
-        total + List.length product.evidence)
+         total + List.length product.evidence)
       0
       original.products
   in
@@ -730,7 +729,9 @@ let tool_snapshot_to_yojson ~(original : Coordination_product.snapshot)
   in
   `Assoc
     [ "schema_version", `Int Coordination_product.schema_version_current
-    ; "mode", `String (Coordination_product.snapshot_mode_to_string Coordination_product.Advisory)
+    ; ( "mode"
+      , `String
+          (Coordination_product.snapshot_mode_to_string Coordination_product.Advisory) )
     ; ( "summary"
       , `Assoc
           [ "products", `Int (List.length original.products)
@@ -744,7 +745,8 @@ let tool_snapshot_to_yojson ~(original : Coordination_product.snapshot)
                 ] )
           ] )
     ; "products", `List (List.map tool_product_to_yojson capped.products)
-    ; "evidence", `List (List.map Coordination_product.evidence_to_yojson returned_evidence)
+    ; ( "evidence"
+      , `List (List.map Coordination_product.evidence_to_yojson returned_evidence) )
     ; ( "violations"
       , `List (List.map Coordination_product.violation_to_yojson capped.violations) )
     ]
@@ -755,8 +757,10 @@ let assoc_append key value = function
   | json -> json
 ;;
 
-let tool_truncation_json ~(original : Coordination_product.snapshot)
-      ~(capped : Coordination_product.snapshot) =
+let tool_truncation_json
+      ~(original : Coordination_product.snapshot)
+      ~(capped : Coordination_product.snapshot)
+  =
   `Assoc
     [ "products_original", `Int (List.length original.products)
     ; "products_returned", `Int (List.length capped.products)
@@ -786,19 +790,20 @@ let safe_build_tool_yojson config =
     Coordination_product.snapshot_to_yojson
       ~projection_error:message
       (Coordination_product.snapshot [])
-    |> assoc_append "truncation"
+    |> assoc_append
+         "truncation"
          (`Assoc
-            [ "products_original", `Int 0
-            ; "products_returned", `Int 0
-            ; "violations_original", `Int 0
-            ; "violations_returned", `Int 0
-            ; "product_limit", `Int tool_product_limit
-            ; "violation_limit", `Int tool_violation_limit
-            ; "evidence_per_product_limit", `Int tool_evidence_per_product_limit
-            ; "global_evidence_limit", `Int tool_global_evidence_limit
-            ; "product_violation_limit", `Int tool_product_violation_limit
-            ; "post_read_limit", `Int tool_post_limit
-            ; "telemetry_read_limit", `Int tool_telemetry_limit
-            ; "response_shape", `String "bounded"
-            ])
+             [ "products_original", `Int 0
+             ; "products_returned", `Int 0
+             ; "violations_original", `Int 0
+             ; "violations_returned", `Int 0
+             ; "product_limit", `Int tool_product_limit
+             ; "violation_limit", `Int tool_violation_limit
+             ; "evidence_per_product_limit", `Int tool_evidence_per_product_limit
+             ; "global_evidence_limit", `Int tool_global_evidence_limit
+             ; "product_violation_limit", `Int tool_product_violation_limit
+             ; "post_read_limit", `Int tool_post_limit
+             ; "telemetry_read_limit", `Int tool_telemetry_limit
+             ; "response_shape", `String "bounded"
+             ])
 ;;

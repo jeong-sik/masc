@@ -149,7 +149,7 @@ let test_counter_inc_calls () =
   check bool "Prometheus.inc_counter called for new metric >= 6 times"
     true
     (count_occurrences
-       ~needle:"Prometheus.metric_keeper_paused_state_persist_errors"
+       ~needle:"Keeper_metrics.metric_keeper_paused_state_persist_errors"
        src
      >= 6)
 

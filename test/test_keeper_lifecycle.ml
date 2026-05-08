@@ -2258,7 +2258,7 @@ let test_compact_if_needed_records_saved_tokens_metric () =
   let labels = [ ("keeper", meta.name) ] in
   let before_metric =
     Masc_mcp.Prometheus.get_metric_value
-      Masc_mcp.Prometheus.metric_keeper_compaction_saved_tokens
+      Masc_mcp.Keeper_metrics.metric_keeper_compaction_saved_tokens
       ~labels
       ()
     |> Option.value ~default:0.0
@@ -2268,7 +2268,7 @@ let test_compact_if_needed_records_saved_tokens_metric () =
   in
   let after_metric =
     Masc_mcp.Prometheus.get_metric_value
-      Masc_mcp.Prometheus.metric_keeper_compaction_saved_tokens
+      Masc_mcp.Keeper_metrics.metric_keeper_compaction_saved_tokens
       ~labels
       ()
     |> Option.value ~default:0.0
@@ -2524,7 +2524,7 @@ let test_dispatch_keeper_phase_event_rejection_increments_metric () =
       in
       let before =
         Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Prometheus.metric_keeper_lifecycle_dispatch_rejections
+          Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -2534,7 +2534,7 @@ let test_dispatch_keeper_phase_event_rejection_increments_metric () =
         KST.Compaction_started;
       let after =
         Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Prometheus.metric_keeper_lifecycle_dispatch_rejections
+          Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -2567,7 +2567,7 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
       in
       let before =
         Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Prometheus.metric_keeper_dispatch_event_failures
+          Masc_mcp.Keeper_metrics.metric_keeper_dispatch_event_failures
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -2577,7 +2577,7 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
         KST.Compaction_started;
       let after =
         Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Prometheus.metric_keeper_dispatch_event_failures
+          Masc_mcp.Keeper_metrics.metric_keeper_dispatch_event_failures
           ~labels ()
         |> Option.value ~default:0.0
       in

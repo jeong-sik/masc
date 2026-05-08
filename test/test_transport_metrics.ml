@@ -266,7 +266,7 @@ let test_transport_health_json () =
     ~labels:[ ("stage", "queue") ] ~delta:3.0 ();
   Prometheus.inc_counter Prometheus.metric_oas_sse_relay_drops
     ~labels:[ ("stage", "append") ] ~delta:1.0 ();
-  Prometheus.inc_counter Prometheus.metric_keeper_lifecycle_dispatch_rejections
+  Prometheus.inc_counter Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
     ~labels:[ ("event", "compaction_started") ] ~delta:2.0 ();
   Masc_mcp.Sse.broadcast (`Assoc [ ("type", `String "transport-test") ]);
   let json = TM.transport_health_json ~config in

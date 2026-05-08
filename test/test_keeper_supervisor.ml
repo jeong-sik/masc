@@ -32,6 +32,59 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let restore_env key = function
+  | Some value -> Unix.putenv key value
+  | None -> Unix.putenv key ""
+
+let rec mkdir_p dir =
+  if dir = "" || dir = "." || dir = "/" then ()
+  else if Sys.file_exists dir then ()
+  else begin
+    mkdir_p (Filename.dirname dir);
+    Unix.mkdir dir 0o755
+  end
+
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let with_config_root f =
+  let base_dir = temp_dir () in
+  let config_dir = Filename.concat base_dir "config" in
+  let keepers_dir = Filename.concat config_dir "keepers" in
+  let personas_dir = Filename.concat config_dir "personas" in
+  let original_config_dir = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  let original_personas_dir = Sys.getenv_opt "MASC_PERSONAS_DIR" in
+  Fun.protect
+    ~finally:(fun () ->
+      restore_env "MASC_CONFIG_DIR" original_config_dir;
+      restore_env "MASC_PERSONAS_DIR" original_personas_dir;
+      Masc_mcp.Config_dir_resolver.reset ();
+      cleanup_dir base_dir)
+    (fun () ->
+      mkdir_p keepers_dir;
+      mkdir_p personas_dir;
+      Unix.putenv "MASC_CONFIG_DIR" config_dir;
+      Unix.putenv "MASC_PERSONAS_DIR" "";
+      Masc_mcp.Config_dir_resolver.reset ();
+      f ~base_dir ~keepers_dir ~personas_dir)
+
+let write_persona_profile personas_dir persona_name =
+  let persona_dir = Filename.concat personas_dir persona_name in
+  mkdir_p persona_dir;
+  write_file
+    (Filename.concat persona_dir "profile.json")
+    {|
+{
+  "name": "Test Persona",
+  "keeper": {
+    "goal": "test persona"
+  }
+}
+|}
+
 let contains_substring haystack needle =
   let haystack_len = String.length haystack in
   let needle_len = String.length needle in
@@ -208,6 +261,34 @@ let make_meta name =
   match KT.meta_of_json json with
   | Ok meta -> meta
   | Error err -> fail ("make_meta: " ^ err)
+
+let test_persona_drift_uses_configured_persona_name () =
+  with_config_root @@ fun ~base_dir ~keepers_dir ~personas_dir ->
+  write_persona_profile personas_dir "velvet-hammer";
+  write_file
+    (Filename.concat keepers_dir "taskmaster.toml")
+    {|
+[keeper]
+persona_name = "velvet-hammer"
+|};
+  let drift = Sup.persona_drift_missing_for_test ~base_path:base_dir
+      (make_meta "taskmaster")
+  in
+  check bool "configured shared persona exists" true (Option.is_none drift)
+
+let test_persona_drift_reports_missing_configured_persona_name () =
+  with_config_root @@ fun ~base_dir ~keepers_dir:_ ~personas_dir ->
+  let drift = Sup.persona_drift_missing_for_test ~base_path:base_dir
+      (make_meta "janitor")
+  in
+  match drift with
+  | None -> fail "expected missing persona drift"
+  | Some (persona_name, resolved, searched) ->
+      check string "persona_name" "janitor" persona_name;
+      check string "resolved" "janitor" resolved;
+      check string "searched path"
+        (Filename.concat personas_dir "janitor")
+        searched
 
 let registered_entries names =
   Reg.clear ();
@@ -603,6 +684,7 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
   let name = "restart-missing-meta-metric-keeper" in
   Fun.protect
     ~finally:(fun () ->
+      Masc_mcp.Keeper_health_probe.reset_for_test ();
       Reg.clear ();
       Masc_mcp.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
@@ -1310,6 +1392,9 @@ let test_sweep_auto_resumes_after_backoff () =
       (match KT.write_meta config paused_meta with
        | Ok () -> ()
        | Error err -> fail err);
+      Masc_mcp.Keeper_health_probe.set_health_for_test
+        ~keeper_name:paused_meta.cascade_name
+        ~healthy:true;
       let baseline_auto_resume =
         Masc_mcp.Prometheus.metric_total
           Masc_mcp.Prometheus.metric_keeper_auto_resumed_total
@@ -1538,6 +1623,12 @@ let () =
     ];
     "keep_last_n_properties", [
       test_case "never exceeds limit" `Quick test_keep_last_n_never_exceeds;
+    ];
+    "persona_drift", [
+      test_case "uses configured shared persona" `Quick
+        test_persona_drift_uses_configured_persona_name;
+      test_case "reports missing configured persona" `Quick
+        test_persona_drift_reports_missing_configured_persona_name;
     ];
     "supervision_cohorts", [
       test_case "64 keepers form 8 cohorts of 8" `Quick

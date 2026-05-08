@@ -22,6 +22,14 @@ let set_health ~keeper_name status =
     Hashtbl.replace health_cache keeper_name
       (status, Time_compat.now ()))
 
+let set_health_for_test ~keeper_name ~healthy =
+  set_health ~keeper_name
+    (if healthy then Healthy else Unhealthy "test")
+
+let reset_for_test () =
+  Eio.Mutex.use_rw ~protect:true health_cache_mu (fun () ->
+    Hashtbl.clear health_cache)
+
 (* ------------------------------------------------------------------ *)
 (* Cascade health check                                               *)
 

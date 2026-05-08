@@ -231,8 +231,9 @@ val record_llm_tok_s_metrics :
 val record_llm_inference_latency_metric :
   model:string ->
   telemetry:Agent_sdk.Types.inference_telemetry option -> unit
-(** Record after-turn inference latency. [request_latency_ms <= 0] is counted
-    by [masc_after_turn_telemetry_zero_latency_total] and floored to 1ms in
+(** Record after-turn inference latency. Missing or non-positive
+    [request_latency_ms] is counted by
+    [masc_after_turn_telemetry_zero_latency_total] and floored to 1ms in
     [masc_llm_inference_duration_seconds] so a live hook does not leave the
     latency histogram blank. *)
 

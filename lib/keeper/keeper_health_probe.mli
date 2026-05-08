@@ -13,6 +13,13 @@
     (Unknown) or the last probe reported Unhealthy. *)
 val is_healthy : keeper_name:string -> bool
 
+val set_health_for_test : keeper_name:string -> healthy:bool -> unit
+(** Test-only: seed the cached health status for deterministic supervisor
+    auto-resume tests. *)
+
+val reset_for_test : unit -> unit
+(** Test-only: clear the cached health statuses. *)
+
 (** [check_cascade_health ~base_path] scans the registry and computes
     the failure ratio for each active cascade.  Returns a list of
     (cascade_name, is_healthy) pairs.  This function performs I/O and

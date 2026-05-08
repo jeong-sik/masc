@@ -489,40 +489,54 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
      run a quick \[ls personas/\] and reconcile.
 
    Surface the gap once at supervise_keepalive entry — the code path
-   that actually puts the keeper into the registry. Behaviour is
-   unchanged (still proceeds with fallback) so the boot path stays
-   compatible with the current 9-missing-personas fleet; the value is
-   in turning a silent runtime drift into a single ERROR per keeper
-   per supervisor restart.
+   that actually puts the keeper into the registry.  The check resolves
+   the keeper's configured persona through keeper TOML/profile defaults
+   before probing the persona directory, so keepers that intentionally
+   share a persona are not reported as missing their keeper-name persona.
+   Behaviour is unchanged (still proceeds with fallback) so the boot
+   path stays compatible with the current 9-missing-personas fleet; the
+   value is in turning a silent runtime drift into a single ERROR per
+   keeper per supervisor restart.
 
    The visibility ERROR is bounded by fleet size (~14 keepers) and
    only fires on first registration — the [is_registered] guard above
    skips repeat calls. *)
-let log_persona_drift_if_missing ~base_path (meta : keeper_meta) =
+let persona_name_for_drift_check (meta : keeper_meta) =
+  let defaults = Keeper_types_profile.load_keeper_profile_defaults meta.name in
+  let persona_name =
+    Keeper_types_profile.resolved_persona_name ~keeper_name:meta.name defaults
+    |> String.trim
+  in
+  if persona_name = "" then meta.name else persona_name
+
+let persona_drift_missing_for_test ~base_path (meta : keeper_meta) =
+  let input_agent_name = persona_name_for_drift_check meta in
   match
     Keeper_identity.normalize_all_names
-      ~input_agent_name:meta.name
+      ~input_agent_name
       ~base_path
       ~check_persona:true
       ~check_credential:false
       ()
   with
-  | Ok _ -> ()
+  | Ok _ -> None
   | Error (Keeper_identity.Persona_not_found { resolved; searched; _ }) ->
+      Some (input_agent_name, resolved, searched)
+  | Error _ -> None
+
+let log_persona_drift_if_missing ~base_path (meta : keeper_meta) =
+  match persona_drift_missing_for_test ~base_path meta with
+  | None -> ()
+  | Some (persona_name, resolved, searched) ->
       Prometheus.inc_counter
         Prometheus.metric_keeper_persona_drift_missing
         ~labels:[("keeper", meta.name)]
         ();
       Log.Keeper.error
-        "[#10993][persona_drift] keeper=%s resolved=%s persona file missing at %s \
+        "[#10993][persona_drift] keeper=%s persona=%s resolved=%s persona file missing at %s \
          — runtime falls through to logging-only RFC P3-a path; \
          operator action: create persona file or remove keeper from registry"
-        meta.name resolved searched
-  | Error _ ->
-      (* Other validation errors (Empty_input, Credential_missing — but
-         we passed check_credential:false) are not the silent-drift
-         class this hook is documenting. Stay silent to avoid noise. *)
-      ()
+        meta.name persona_name resolved searched
 
 let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
     (meta : keeper_meta) =

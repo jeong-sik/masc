@@ -47,6 +47,11 @@ val backoff_delay : int -> float
 val keep_last_n : int -> 'a -> 'a list -> 'a list
 (** [keep_last_n n item lst] prepends [item] and keeps at most [n] entries. *)
 
+val persona_drift_missing_for_test :
+  base_path:string -> Keeper_types.keeper_meta -> (string * string * string) option
+(** Test-only: returns [Some (persona_name, resolved, searched)] when the
+    configured persona for a keeper is missing. *)
+
 val supervision_cohort_size : int
 (** Target keeper count per supervisor cohort.  The first 2-level
     supervision slice groups the 64-keeper fleet as 8 cohorts of 8. *)

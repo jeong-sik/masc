@@ -561,7 +561,7 @@ let handle_semaphore_wait_timeout ~ctx ~meta_after_triage
        reactive_available=%d turn_available=%d)"
       timeout.timeout_wait_sec
       phase_label
-      meta_after_triage.cascade_name
+      (cascade_name_of_meta meta_after_triage)
       queue_ahead_text
       timeout.timeout_queue_depth
       timeout.timeout_autonomous_available
@@ -872,11 +872,7 @@ let run_keepalive_unified_turn
            Load cascade_profile from config and select the healthiest
            available item before turn dispatch. *)
         let selected_item_opt =
-          let cascade_name =
-            match meta_after_triage.cascade_ref with
-            | Some ref when not (String.equal ref.group "") -> ref.group
-            | _ -> meta_after_triage.cascade_name
-          in
+          let cascade_name = cascade_name_of_meta meta_after_triage in
           let config_path =
             Filename.concat ctx.config.base_path ".masc/config/cascade.json"
           in
@@ -925,7 +921,7 @@ let run_keepalive_unified_turn
                Preserve all existing telemetry and error handling. *)
             (match
               Keeper_turn_slot.with_keeper_turn_slot_control
-                ~cascade_profile:meta_after_triage.cascade_name
+                ~cascade_profile:(cascade_name_of_meta meta_after_triage)
                 ~keeper_name:meta_after_triage.name
                 ~channel:turn_decision.channel (fun ~semaphore_wait_ms ~slot_control ->
                 run_keeper_cycle_with_slot ~ctx ~meta_after_cursor_persist ~stop ~obs

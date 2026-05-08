@@ -36,7 +36,7 @@ let effective_declarative_cascade_name
       Keeper_cascade_profile.normalize_declared_name cascade_name
   | None, Some _ -> Keeper_config.default_cascade_name
   | None, None ->
-      Keeper_cascade_profile.normalize_declared_name meta.cascade_name
+      Keeper_cascade_profile.normalize_declared_name (cascade_name_of_meta meta)
 
 type override_field_detail = {
   field : string;
@@ -107,10 +107,11 @@ let live_override_details (meta : keeper_meta)
   |> maybe_string_list_override "tools.tool_denylist" defaults.tool_denylist
        meta.tool_denylist
   |> (fun acc ->
-       if effective_cascade_name <> meta.cascade_name then
+       let cascade_name = cascade_name_of_meta meta in
+       if effective_cascade_name <> cascade_name then
          override_field "model.cascade_name"
            ~default_value:(`String effective_cascade_name)
-           ~live_value:(`String meta.cascade_name)
+           ~live_value:(`String cascade_name)
          :: acc
        else acc)
   |> maybe_bool_override "proactive.enabled" defaults.proactive_enabled

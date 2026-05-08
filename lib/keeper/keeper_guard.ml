@@ -19,7 +19,27 @@ let event_priority = function
   | Context_measured _ -> 5
   | Heartbeat_ok -> 10
   | Turn_succeeded -> 10
-  | _ -> 10
+  | Compaction_completed _ -> 10
+  | Compaction_failed _ -> 10
+  | Handoff_completed _ -> 10
+  | Handoff_failed _ -> 10
+  | Operator_pause -> 10
+  | Operator_resume -> 10
+  | Operator_stop _ -> 10
+  | Stop_requested -> 10
+  | Drain_complete -> 10
+  | Fiber_started -> 10
+  | Fiber_terminated _ -> 10
+  | Supervisor_restart_attempt _ -> 10
+  | Restart_budget_exhausted -> 10
+  | Credential_archived -> 10
+  | Zombie_timeout -> 10
+  | Terminal_failure_detected _ -> 10
+  | Auto_compact_triggered -> 10
+  | Compact_retry_exhausted -> 10
+  | Operator_compact_requested -> 10
+  | Operator_clear_requested _ -> 10
+  | Context_overflow_detected _ -> 10
 
 let evaluate (s : measurement_snapshot) : event list =
   let t = s.thresholds in

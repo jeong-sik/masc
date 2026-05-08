@@ -2463,7 +2463,7 @@ let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     proof;
     trace_ref;
     run_validation;
-    stop_reason = Masc_mcp.Oas_worker.Completed;
+    stop_reason = Masc_mcp.Cascade_runner.Completed;
     inference_telemetry = None;
     tool_surface = sample_tool_surface_metrics ();
   }

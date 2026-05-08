@@ -518,7 +518,7 @@ module KeeperKeepalive = struct
 
   (** Maximum turns per single OAS Agent.run call.
       Keeper resumes via checkpoint in the next keepalive cycle when
-      {!Oas_worker.TurnBudgetExhausted} is returned.
+      {!Cascade_runner.TurnBudgetExhausted} is returned.
       Previous default of 200 caused "ambiguous partial commit" errors:
       the 300s timeout would fire mid-turn after tools had already executed,
       leaving the keeper in an ambiguous state. With 30 turns per call and

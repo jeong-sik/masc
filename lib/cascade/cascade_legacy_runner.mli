@@ -1,4 +1,4 @@
-(** Oas_worker_cascade — cascade observation, metrics
+(** Cascade_legacy_runner — cascade observation, metrics
     capture, and a single-actor cascade-counter store.
 
     The .ml is 685 lines.  Splits into three concerns:
@@ -21,10 +21,10 @@
       maps.
 
     Sister facade {!Oas_worker} does
-    [include Oas_worker_cascade] to re-expose the constants
+    [include Cascade_legacy_runner] to re-expose the constants
     + observation type at the package boundary; this .mli
     therefore pins the surface that
-    {!Oas_worker_cascade.X} dotted callers and the
+    {!Cascade_legacy_runner.X} dotted callers and the
     cascade-include consumer both rely on.
 
     Internal helpers stay private at this boundary
@@ -228,7 +228,7 @@ val cascade_metrics_json : unit -> Yojson.Safe.t
     aggregated cascade-counter JSON snapshot for the
     operator dashboard.  Pinned because
     [lib/oas_worker.mli] re-exposes it via the
-    [include Oas_worker_cascade] cascade. *)
+    [include Cascade_legacy_runner] cascade. *)
 
 val cascade_observation_to_json :
   cascade_observation -> Yojson.Safe.t

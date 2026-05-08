@@ -1,4 +1,4 @@
-(** Oas_worker_cascade — Cascade metrics types, observation building, and recording.
+(** Cascade_legacy_runner — Cascade metrics types, observation building, and recording.
 
     Tracks per-cascade call counts, model selection distribution, fallback
     hops, and per-attempt latency/error detail. Aggregate counters stay

@@ -260,7 +260,7 @@ let with_cascade_attempt_liveness mode f =
     f
 
 let flush_cascade_actor () =
-  ignore (Oas_worker_cascade.cascade_metrics_json () : Yojson.Safe.t)
+  ignore (Cascade_legacy_runner.cascade_metrics_json () : Yojson.Safe.t)
 
 let with_liveness_off f = with_cascade_attempt_liveness "off" f
 
@@ -731,16 +731,16 @@ let find_cascade_metric_entry name (json : Yojson.Safe.t) =
 
 let test_cascade_metrics_concurrent_recording () =
   with_temp_masc_base_path "test_cascade_metrics_concurrent" @@ fun () ->
-  Masc_mcp.Oas_worker_cascade.reset_cascade_counters_for_test ();
+  Masc_mcp.Cascade_legacy_runner.reset_cascade_counters_for_test ();
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Oas_worker_cascade.reset_cascade_counters_for_test ())
+      Masc_mcp.Cascade_legacy_runner.reset_cascade_counters_for_test ())
     (fun () ->
       Eio.Fiber.all
         (List.init 8 (fun _ ->
              fun () ->
                for _ = 1 to 25 do
-                 Masc_mcp.Oas_worker_cascade.record_cascade
+                 Masc_mcp.Cascade_legacy_runner.record_cascade
                    ~cascade_name:(internal_cascade_name "concurrent-cascade")
                    ~observation:None
                    ~outcome:`Success
@@ -761,31 +761,31 @@ let test_cascade_metrics_concurrent_recording () =
 
 let test_cascade_metrics_evicts_lowest_call_key () =
   with_temp_masc_base_path "test_cascade_metrics_evicts" @@ fun () ->
-  Masc_mcp.Oas_worker_cascade.reset_cascade_counters_for_test ();
+  Masc_mcp.Cascade_legacy_runner.reset_cascade_counters_for_test ();
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Oas_worker_cascade.reset_cascade_counters_for_test ())
+      Masc_mcp.Cascade_legacy_runner.reset_cascade_counters_for_test ())
     (fun () ->
-      Masc_mcp.Oas_worker_cascade.record_cascade
+      Masc_mcp.Cascade_legacy_runner.record_cascade
         ~cascade_name:(internal_cascade_name "victim-key")
         ~observation:None
         ~outcome:`Success
         ();
       for i = 1 to 254 do
         let name = Printf.sprintf "stable-%03d" i in
-        Masc_mcp.Oas_worker_cascade.record_cascade
+        Masc_mcp.Cascade_legacy_runner.record_cascade
           ~cascade_name:(internal_cascade_name name)
           ~observation:None
           ~outcome:`Success
           ();
-        Masc_mcp.Oas_worker_cascade.record_cascade
+        Masc_mcp.Cascade_legacy_runner.record_cascade
           ~cascade_name:(internal_cascade_name name)
           ~observation:None
           ~outcome:`Success
           ()
       done;
       for _ = 1 to 3 do
-        Masc_mcp.Oas_worker_cascade.record_cascade
+        Masc_mcp.Cascade_legacy_runner.record_cascade
           ~cascade_name:(internal_cascade_name "hot-key")
           ~observation:None
           ~outcome:`Success
@@ -793,7 +793,7 @@ let test_cascade_metrics_evicts_lowest_call_key () =
       done;
       let before = Yojson.Safe.Util.to_list (Oas_worker.cascade_metrics_json ()) in
       Alcotest.(check int) "table capped before admit" 256 (List.length before);
-      Masc_mcp.Oas_worker_cascade.record_cascade
+      Masc_mcp.Cascade_legacy_runner.record_cascade
         ~cascade_name:(internal_cascade_name "new-key")
         ~observation:None
         ~outcome:`Success
@@ -815,7 +815,7 @@ let test_cascade_audit_persists_observation () =
   let base = temp_dir "test_cascade_audit" in
   let old_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
   let old_base_path_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
-  Masc_mcp.Oas_worker_cascade.reset_cascade_counters_for_test ();
+  Masc_mcp.Cascade_legacy_runner.reset_cascade_counters_for_test ();
   Fun.protect
     ~finally:(fun () ->
       (match old_base_path with
@@ -824,12 +824,12 @@ let test_cascade_audit_persists_observation () =
       (match old_base_path_input with
        | Some value -> Unix.putenv "MASC_BASE_PATH_INPUT" value
        | None -> Unix.putenv "MASC_BASE_PATH_INPUT" "");
-      Masc_mcp.Oas_worker_cascade.reset_cascade_counters_for_test ();
+      Masc_mcp.Cascade_legacy_runner.reset_cascade_counters_for_test ();
       cleanup_dir base)
     (fun () ->
       Unix.putenv "MASC_BASE_PATH" base;
       Unix.putenv "MASC_BASE_PATH_INPUT" base;
-      let observation : Masc_mcp.Oas_worker_cascade.cascade_observation =
+      let observation : Masc_mcp.Cascade_legacy_runner.cascade_observation =
         {
           cascade_name =
             Masc_mcp.Keeper_cascade_profile.Runtime_name "audit-cascade";
@@ -873,7 +873,7 @@ let test_cascade_audit_persists_observation () =
           attempt_details_source = "oas_metrics_callbacks";
         }
       in
-      Masc_mcp.Oas_worker_cascade.record_cascade
+      Masc_mcp.Cascade_legacy_runner.record_cascade
         ~keeper_name:"keeper-glm-agent-test"
         ~cascade_name:(internal_cascade_name "audit-cascade")
         ~observation:(Some observation)
@@ -2238,9 +2238,9 @@ let make_kimi_cli_provider_cfg ?(model_id = "kimi-for-coding") () =
     ()
 
 let test_cascade_provider_labels_keep_glm_and_glm_coding_distinct () =
-  let glm = Masc_mcp.Oas_worker_cascade.provider_name_of_config
+  let glm = Masc_mcp.Cascade_legacy_runner.provider_name_of_config
       (make_glm_provider_cfg ()) in
-  let glm_coding = Masc_mcp.Oas_worker_cascade.provider_name_of_config
+  let glm_coding = Masc_mcp.Cascade_legacy_runner.provider_name_of_config
       (make_glm_provider_cfg ~base_url:Llm_provider.Zai_catalog.coding_base_url ()) in
   Alcotest.(check string) "general GLM label" "glm" glm;
   Alcotest.(check string) "coding GLM label" "glm-coding" glm_coding
@@ -2312,18 +2312,18 @@ let test_provider_attempt_timeout_leaves_unconstrained_last_to_outer_budget () =
        (make_openai_compat_provider_cfg ()))
 
 let test_cascade_provider_labels_preserve_registered_openai_compat_family () =
-  let provider_name = Masc_mcp.Oas_worker_cascade.provider_name_of_config
+  let provider_name = Masc_mcp.Cascade_legacy_runner.provider_name_of_config
       (make_openrouter_provider_cfg ()) in
-  let model_label = Masc_mcp.Oas_worker_cascade.model_label_of_config
+  let model_label = Masc_mcp.Cascade_legacy_runner.model_label_of_config
       (make_openrouter_provider_cfg ()) in
   Alcotest.(check string) "openrouter provider name" "openrouter" provider_name;
   Alcotest.(check string) "openrouter model label"
     "openrouter:anthropic/claude-3.5" model_label
 
 let test_cascade_provider_labels_detect_kimi_from_endpoint_metadata () =
-  let provider_name = Masc_mcp.Oas_worker_cascade.provider_name_of_config
+  let provider_name = Masc_mcp.Cascade_legacy_runner.provider_name_of_config
       (make_kimi_provider_cfg ()) in
-  let model_label = Masc_mcp.Oas_worker_cascade.model_label_of_config
+  let model_label = Masc_mcp.Cascade_legacy_runner.model_label_of_config
       (make_kimi_provider_cfg ()) in
   Alcotest.(check string) "kimi provider name" "kimi" provider_name;
   Alcotest.(check string) "kimi model label" "kimi:kimi-k2.5" model_label
@@ -5382,7 +5382,7 @@ let () =
     ~clock:(Eio.Stdenv.clock env);
   Eio_guard.enable ();
   Eio.Switch.run @@ fun sw ->
-  Masc_mcp.Oas_worker_cascade.start_actor_if_needed ~sw;
+  Masc_mcp.Cascade_legacy_runner.start_actor_if_needed ~sw;
   Masc_mcp.Masc_eio_env.reset_for_test ();
   Alcotest.run "OAS Worker" [
     "direct_run_env", [

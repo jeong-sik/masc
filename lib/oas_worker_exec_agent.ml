@@ -120,10 +120,10 @@ let default_config
     max_idle_turns = 3;
     stream_idle_timeout_s = None;
     max_execution_time_s = None;
-    max_tokens = Oas_worker_cascade.default_max_tokens;
+    max_tokens = Cascade_legacy_runner.default_max_tokens;
     max_input_tokens = None;
     max_cost_usd = None;
-    temperature = Oas_worker_cascade.default_temperature;
+    temperature = Cascade_legacy_runner.default_temperature;
     hooks = None;
     context_reducer = None;
     guardrails = None;

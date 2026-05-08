@@ -57,9 +57,9 @@ let agent_config_of_worker_meta
     system_prompt = Some system_prompt;
     max_tokens = Some max_tokens;
     max_turns = effective_max_turns meta;
-    temperature = Some Oas_worker_cascade.worker_temperature;
-    top_p = Some Oas_worker_cascade.worker_top_p;
-    top_k = Some Oas_worker_cascade.worker_top_k;
+    temperature = Some Cascade_legacy_runner.worker_temperature;
+    top_p = Some Cascade_legacy_runner.worker_top_p;
+    top_k = Some Cascade_legacy_runner.worker_top_k;
     (* min_p intentionally omitted: the constant is 0.0 (no-op) and some
        cloud providers (Groq, GLM) reject the field itself with
        "Invalid request: property 'min_p' is unsupported". OAS capability
@@ -162,7 +162,7 @@ let build_agent
     | None ->
         {
           Agent_sdk.Guardrails.tool_filter = AllowList tool_names;
-          max_tool_calls_per_turn = Some Oas_worker_cascade.worker_max_tool_calls_per_turn;
+          max_tool_calls_per_turn = Some Cascade_legacy_runner.worker_max_tool_calls_per_turn;
         }
   in
   let builder =
@@ -171,9 +171,9 @@ let build_agent
     |> Agent_sdk.Builder.with_system_prompt system_prompt
     |> (fun b -> match config.max_tokens with Some n -> Agent_sdk.Builder.with_max_tokens n b | None -> b)
     |> Agent_sdk.Builder.with_max_turns config.max_turns
-    |> Agent_sdk.Builder.with_temperature Oas_worker_cascade.worker_temperature
-    |> Agent_sdk.Builder.with_top_p Oas_worker_cascade.worker_top_p
-    |> Agent_sdk.Builder.with_top_k Oas_worker_cascade.worker_top_k
+    |> Agent_sdk.Builder.with_temperature Cascade_legacy_runner.worker_temperature
+    |> Agent_sdk.Builder.with_top_p Cascade_legacy_runner.worker_top_p
+    |> Agent_sdk.Builder.with_top_k Cascade_legacy_runner.worker_top_k
     (* with_min_p intentionally omitted — see agent_config_of_worker_meta
        above for the reason. The worker_min_p constant is 0.0 (a no-op)
        and cloud providers (Groq, GLM) reject the field itself. *)

@@ -12,7 +12,7 @@ open Result.Syntax
 (* Sub-module includes (God file decomposition).
    Each sub-module is self-contained; the facade re-exports everything
    so existing callers do not need qualification. *)
-include Oas_worker_named_cascade
+include Cascade_oas_runner
 include Cascade_error_classify
 include Cascade_attempt_fsm
 
@@ -159,8 +159,8 @@ let run_named
     ?(max_turns = 20)
     ?(max_idle_turns = 3)
     ?stream_idle_timeout_s
-    ?(temperature = Oas_worker_cascade.default_temperature)
-    ?(max_tokens = Oas_worker_cascade.default_max_tokens)
+    ?(temperature = Cascade_legacy_runner.default_temperature)
+    ?(max_tokens = Cascade_legacy_runner.default_max_tokens)
     ?max_input_tokens
     ?max_cost_usd
     ?wait_timeout_sec
@@ -358,7 +358,7 @@ let run_named
                 }))
   | _ ->
   let capture, _metrics =
-    Oas_worker_cascade.cascade_metrics_for_candidates ~candidate_cfgs ()
+    Cascade_legacy_runner.cascade_metrics_for_candidates ~candidate_cfgs ()
   in
   let cascade_strategy_name_ref = ref None in
   let name = Printf.sprintf "oas-%s" cascade_name in
@@ -666,12 +666,12 @@ let run_named
         | None -> Keeper_types.No_providers_available
       in
       let observation =
-        Oas_worker_cascade.cascade_observation_with_metrics
+        Cascade_legacy_runner.cascade_observation_with_metrics
           ~cascade_name:error_cascade_name
           ?strategy:!cascade_strategy_name_ref ~configured_labels
           ~candidate_cfgs ~selected_model_raw:None ~capture ()
       in
-      Oas_worker_cascade.record_cascade ~keeper_name
+      Cascade_legacy_runner.record_cascade ~keeper_name
         ~cascade_name:error_cascade_name
         ~outcome:`Failure ~observation:(Some observation) ();
       let terminal_error =
@@ -758,14 +758,14 @@ let run_named
           ~latency_ms:attempt_latency_ms ());
         (* FSM: Call_ok → Accept *)
         let observation =
-          Oas_worker_cascade.cascade_observation_with_metrics
+          Cascade_legacy_runner.cascade_observation_with_metrics
             ~cascade_name:error_cascade_name
             ?strategy:!cascade_strategy_name_ref ~configured_labels
             ~candidate_cfgs ~selected_model_raw:(Some result.response.model)
             ~capture ()
         in
         let result = { result with cascade_observation = Some observation } in
-        Oas_worker_cascade.record_cascade ~keeper_name
+        Cascade_legacy_runner.record_cascade ~keeper_name
           ~cascade_name:error_cascade_name
           ~outcome:`Success ~observation:(Some observation) ();
         on_success ~provider_key:provider_health_key;
@@ -789,14 +789,14 @@ let run_named
         (match Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last outcome with
          | Cascade_fsm.Accept_on_exhaustion { response; _ } ->
            let observation =
-             Oas_worker_cascade.cascade_observation_with_metrics
+             Cascade_legacy_runner.cascade_observation_with_metrics
                ~cascade_name:error_cascade_name
                ?strategy:!cascade_strategy_name_ref ~configured_labels
                ~candidate_cfgs ~selected_model_raw:(Some response.model)
                ~capture ()
            in
            let result = { result with cascade_observation = Some observation } in
-           Oas_worker_cascade.record_cascade ~keeper_name
+           Cascade_legacy_runner.record_cascade ~keeper_name
              ~cascade_name:error_cascade_name
              ~outcome:`Success ~observation:(Some observation) ();
            on_success ~provider_key:provider_health_key;
@@ -806,7 +806,7 @@ let run_named
               next tier.  Tagged [cascade-fallback] so dashboard filters
               can distinguish recovery-in-progress from hard failures. *)
            Log.Misc.info "[cascade-fallback] cascade %s: accept rejected %s (%s), trying next" cascade_name provider_cfg.model_id reason;
-           Oas_worker_cascade.record_fallback_event capture ~candidate_cfgs
+           Cascade_legacy_runner.record_fallback_event capture ~candidate_cfgs
              ~from_model:provider_cfg.model_id ~to_model:"next" ~reason;
            (* The rejected response is not trusted progress.  Resuming
               from its checkpoint can turn a fallback provider into a
@@ -814,13 +814,13 @@ let run_named
            try_cascade ?resume_checkpoint rest new_err
          | Cascade_fsm.Exhausted _ ->
            let observation =
-             Oas_worker_cascade.cascade_observation_with_metrics
+             Cascade_legacy_runner.cascade_observation_with_metrics
                ~cascade_name:error_cascade_name
                ?strategy:!cascade_strategy_name_ref ~configured_labels
                ~candidate_cfgs ~selected_model_raw:(Some result.response.model)
                ~capture ()
            in
-           Oas_worker_cascade.record_cascade ~keeper_name
+           Cascade_legacy_runner.record_cascade ~keeper_name
              ~cascade_name:error_cascade_name
              ~outcome:`Rejected ~observation:(Some observation) ();
            Log.Misc.error "cascade %s exhausted: all tiers rejected by accept predicate (last model=%s, reason=%s)"
@@ -837,13 +837,13 @@ let run_named
            (* Should be unreachable with accept_on_exhaustion:false, but handle gracefully *)
            Log.Misc.warn "cascade %s: unexpected Accept in Accept_rejected branch (model=%s)" cascade_name resp.model;
            let observation =
-             Oas_worker_cascade.cascade_observation_with_metrics
+             Cascade_legacy_runner.cascade_observation_with_metrics
                ~cascade_name:error_cascade_name
                ?strategy:!cascade_strategy_name_ref ~configured_labels
                ~candidate_cfgs ~selected_model_raw:(Some resp.model) ~capture ()
            in
            let result = { result with cascade_observation = Some observation } in
-           Oas_worker_cascade.record_cascade ~keeper_name
+           Cascade_legacy_runner.record_cascade ~keeper_name
              ~cascade_name:error_cascade_name
              ~outcome:`Success ~observation:(Some observation) ();
            on_success ~provider_key:provider_health_key;
@@ -1018,18 +1018,18 @@ let run_named
                   "[cascade-fallback] cascade %s: %s failed (%s%s), trying next"
                   cascade_name provider_cfg.model_id class_label
                   (Agent_sdk.Error.to_string sdk_err);
-              Oas_worker_cascade.record_fallback_event capture ~candidate_cfgs
+              Cascade_legacy_runner.record_fallback_event capture ~candidate_cfgs
                 ~from_model:provider_cfg.model_id ~to_model:"next"
                 ~reason:(class_label ^ Agent_sdk.Error.to_string sdk_err);
               try_cascade ?resume_checkpoint:next_resume rest new_err
             | Cascade_fsm.Exhausted _ ->
               let observation =
-                Oas_worker_cascade.cascade_observation_with_metrics
+                Cascade_legacy_runner.cascade_observation_with_metrics
                   ~cascade_name:error_cascade_name
                   ?strategy:!cascade_strategy_name_ref ~configured_labels
                   ~candidate_cfgs ~selected_model_raw:None ~capture ()
               in
-              Oas_worker_cascade.record_cascade ~keeper_name
+              Cascade_legacy_runner.record_cascade ~keeper_name
                 ~cascade_name:error_cascade_name
                 ~outcome:`Failure ~observation:(Some observation) ();
               Log.Misc.error "cascade %s exhausted: all tiers failed (last model=%s, error=%s)"
@@ -1046,12 +1046,12 @@ let run_named
          | None ->
            (* Non-API error (agent, config, etc.) — not cascadeable *)
            let observation =
-             Oas_worker_cascade.cascade_observation_with_metrics
+             Cascade_legacy_runner.cascade_observation_with_metrics
                ~cascade_name:error_cascade_name
                ?strategy:!cascade_strategy_name_ref ~configured_labels
                ~candidate_cfgs ~selected_model_raw:None ~capture ()
            in
-           Oas_worker_cascade.record_cascade ~keeper_name
+           Cascade_legacy_runner.record_cascade ~keeper_name
              ~cascade_name:error_cascade_name
              ~outcome:`Failure ~observation:(Some observation) ();
            Log.Misc.error "cascade %s: non-cascadable error from %s: %s"
@@ -1171,12 +1171,12 @@ let run_named
   in
   let cascade_exhausted_after_filter ~cycle =
     let observation =
-      Oas_worker_cascade.cascade_observation_with_metrics
+      Cascade_legacy_runner.cascade_observation_with_metrics
         ~cascade_name:error_cascade_name
         ?strategy:!cascade_strategy_name_ref ~configured_labels
         ~candidate_cfgs ~selected_model_raw:None ~capture ()
     in
-    Oas_worker_cascade.record_cascade ~keeper_name
+    Cascade_legacy_runner.record_cascade ~keeper_name
       ~cascade_name:error_cascade_name
       ~outcome:`Failure ~observation:(Some observation) ();
     Error
@@ -1262,8 +1262,8 @@ let run_model_by_label
     ?(max_turns = 20)
     ?(max_idle_turns = 3)
     ?stream_idle_timeout_s
-    ?(temperature = Oas_worker_cascade.default_temperature)
-    ?(max_tokens = Oas_worker_cascade.default_max_tokens)
+    ?(temperature = Cascade_legacy_runner.default_temperature)
+    ?(max_tokens = Cascade_legacy_runner.default_max_tokens)
     ?max_input_tokens
     ?max_cost_usd
     ?wait_timeout_sec
@@ -1345,8 +1345,8 @@ let run_named_with_masc_tools
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.t)
     ?(max_turns = 20)
     ?stream_idle_timeout_s
-    ?(temperature = Oas_worker_cascade.default_temperature)
-    ?(max_tokens = Oas_worker_cascade.default_max_tokens)
+    ?(temperature = Cascade_legacy_runner.default_temperature)
+    ?(max_tokens = Cascade_legacy_runner.default_max_tokens)
     ?max_input_tokens
     ?max_cost_usd
     ?wait_timeout_sec
@@ -1396,8 +1396,8 @@ let run_model_with_masc_tools
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.t)
     ?(max_turns = 20)
     ?stream_idle_timeout_s
-    ?(temperature = Oas_worker_cascade.default_temperature)
-    ?(max_tokens = Oas_worker_cascade.default_max_tokens)
+    ?(temperature = Cascade_legacy_runner.default_temperature)
+    ?(max_tokens = Cascade_legacy_runner.default_max_tokens)
     ?max_input_tokens
     ?max_cost_usd
     ?wait_timeout_sec

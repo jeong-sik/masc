@@ -215,7 +215,7 @@ Build-green hard gate at every PR.
 
 **Scope correction (during Phase 2 PR, 2026-05-08).** The original RFC
 listed 4 files. Inspection found `lib/oas_worker.ml` is structurally a
-**facade** — `include Oas_worker_exec`, `include Oas_worker_cascade`,
+**facade** — `include Oas_worker_exec`, `include Cascade_legacy_runner`,
 `include Oas_worker_named` — over three modules that are NOT clean
 (Phase 3 / Phase 4 targets). Renaming the facade alone produces an
 `Agent_sdk_call` module that still re-exports `Oas_worker_named.run_named`,

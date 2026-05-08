@@ -70,8 +70,8 @@ val handle_chat_completions :
 
     | Field | Default |
     |---|---|
-    | [max_tokens] | {!Oas_worker_cascade.default_max_tokens} |
-    | [temperature] | {!Oas_worker_cascade.default_temperature} |
+    | [max_tokens] | {!Cascade_legacy_runner.default_max_tokens} |
+    | [temperature] | {!Cascade_legacy_runner.default_temperature} |
     | [system] (concat of all system messages) | empty string |
 
     {2 Response shape}

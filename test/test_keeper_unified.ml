@@ -1005,8 +1005,7 @@ let test_provider_cooldown_blocks_scheduled_turn_when_work_is_ready () =
 
 let test_provider_cooldown_keeps_scheduled_turn_open_when_fail_open_exists () =
   let meta =
-    { minimal_meta with
-      cascade_name = "tool_rerank";
+    { (Masc_mcp.Keeper_types.set_cascade_name "tool_rerank" minimal_meta) with
       current_task_id =
         (match Masc_mcp.Keeper_id.Task_id.of_string "task-789" with
          | Ok value -> Some value
@@ -1492,8 +1491,9 @@ let test_bootstrap_turn_emits_scheduled_autonomous_channel () =
 
 let test_provider_cooldown_blocks_bootstrap_turn () =
   let meta =
-    { minimal_meta with
-      cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
+    { (Masc_mcp.Keeper_types.set_cascade_name
+         Masc_mcp.Keeper_config.default_cascade_name
+         minimal_meta) with
       proactive =
         { enabled = true; idle_sec = 300; cooldown_sec = 1800 };
       runtime =
@@ -1661,8 +1661,9 @@ let test_min_interval_never_fires_for_bootstrap () =
 let test_provider_cooldown_blocks_min_interval_turn () =
   with_env "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC" "900" (fun () ->
     let meta =
-      { minimal_meta with
-        cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
+      { (Masc_mcp.Keeper_types.set_cascade_name
+           Masc_mcp.Keeper_config.default_cascade_name
+           minimal_meta) with
         proactive =
           { enabled = true; idle_sec = 0; cooldown_sec = 600 };
         runtime =
@@ -4152,7 +4153,7 @@ let test_streaming_cancel_records_supervisor_stop_when_fiber_stop_set () =
         ~run_generation:meta.runtime.generation
         ~cascade_name:
           (Masc_mcp.Keeper_execution_receipt.cascade_name_of_string
-             meta.cascade_name)
+             (Masc_mcp.Keeper_types.cascade_name_of_meta meta))
         ~keeper_turn_id:meta.runtime.usage.total_turns
         ();
       let supervisor_request_after =
@@ -5213,7 +5214,7 @@ let test_metrics_persist_social_state_fields () =
         updated.runtime.last_speech_act;
       check string "transition reason tracked" "headers:explicit_social_headers"
         updated.runtime.last_social_transition_reason;
-      check string "no blocker tracked" "" updated.runtime.last_blocker;
+      check bool "no blocker tracked" true (Option.is_none updated.runtime.last_blocker);
       check string "no need tracked" "" updated.runtime.last_need)
 
 let test_metrics_failure_response () =
@@ -5307,15 +5308,19 @@ let test_metrics_failure_response_redacts_resumable_cli_session_detail () =
   check string "last preview is redacted"
     canonical_detail
     updated.runtime.proactive_rt.last_preview;
-  check string "last blocker is redacted"
-    canonical_detail
-    updated.runtime.last_blocker;
+  let blocker_detail =
+    match updated.runtime.last_blocker with
+    | Some b -> b.detail
+    | None -> ""
+  in
+  check string "last blocker is redacted" canonical_detail blocker_detail;
   check bool "raw resume hint removed from last blocker" false
-    (contains_substring updated.runtime.last_blocker "To resume this session:");
+    (contains_substring blocker_detail "To resume this session:");
   check bool "raw session token removed from last reason" false
     (contains_substring updated.runtime.proactive_rt.last_reason "kimi -r");
-  match updated.runtime.last_blocker_class with
-  | Some (Keeper_types.Cascade_exhausted (Keeper_types.Other_detail detail)) ->
+  match updated.runtime.last_blocker with
+  | Some { klass = Keeper_types.Cascade_exhausted (Keeper_types.Other_detail detail); _ }
+    ->
       check string "blocker class detail preserved as canonical detail"
         canonical_detail detail
   | _ -> fail "expected resumable CLI session blocker class"
@@ -7136,7 +7141,11 @@ let test_social_model_previous_state_of_meta_restores_runtime_fields () =
           last_social_transition_reason = "headers:explicit_social_headers";
           last_active_desire = "seek_help";
           last_current_intention = "recover_tool_route";
-          last_blocker = "tool route unavailable";
+          last_blocker =
+            Some
+              (Keeper_types.blocker_info_of_class
+                 ~detail:"tool route unavailable"
+                 Keeper_types.No_tool_capable_provider);
           last_need = "operator guidance";
         };
     }
@@ -7358,7 +7367,11 @@ let test_social_model_previous_state_of_meta_falls_back_for_unknown_model () =
           last_speech_act = "request_help";
           last_active_desire = "seek_help";
           last_current_intention = "recover_tool_route";
-          last_blocker = "tool route unavailable";
+          last_blocker =
+            Some
+              (Keeper_types.blocker_info_of_class
+                 ~detail:"tool route unavailable"
+                 Keeper_types.No_tool_capable_provider);
           last_need = "operator guidance";
         };
     }

@@ -144,7 +144,7 @@ let direct_turn_observation (meta : keeper_meta) :
   }
 
 let resolve_turn_cascade_name (meta : keeper_meta) =
-  let raw_name = String.trim meta.cascade_name in
+  let raw_name = String.trim (Keeper_types.cascade_name_of_meta meta) in
   match Cascade_catalog_runtime.resolve_declared_name ~raw_name () with
   | Ok cascade_name -> Ok cascade_name
   | Error detail ->

@@ -124,7 +124,7 @@ let check_cascade_health ~base_path =
   let by_cascade = Hashtbl.create 8 in
   List.iter
     (fun (entry : Keeper_registry.registry_entry) ->
-       let cascade = entry.meta.cascade_name in
+       let cascade = Keeper_types.cascade_name_of_meta entry.meta in
        let total, failed =
          match Hashtbl.find_opt by_cascade cascade with
          | Some pair -> pair

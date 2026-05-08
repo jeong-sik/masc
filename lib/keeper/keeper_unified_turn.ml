@@ -207,7 +207,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       ~meta
       ~generation
       ~cascade_name:
-        (Keeper_execution_receipt.cascade_name_of_string meta.cascade_name)
+        (Keeper_execution_receipt.cascade_name_of_string (cascade_name_of_meta meta))
       ~outcome:"cancelled"
       ~terminal_reason_code:"supervisor_stop"
       ~activity_kind:"keeper.turn_cancelled"
@@ -236,7 +236,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         ~meta
         ~generation
         ~cascade_name:
-          (Keeper_execution_receipt.cascade_name_of_string meta.cascade_name)
+          (Keeper_execution_receipt.cascade_name_of_string (cascade_name_of_meta meta))
         ~outcome:"skipped"
         ~terminal_reason_code
         ~activity_kind:"keeper.turn_skipped"
@@ -256,11 +256,11 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         ~prev:Keeper_turn_fsm.Phase_gating
         Keeper_turn_fsm.Cascade_routing;
       (* RFC-0041 Phase B4: when a specific item was selected by the
-         proactive router, override meta.cascade_name so downstream
+         proactive router, override (cascade_name_of_meta meta) so downstream
          cascade resolution uses the item's group. *)
       let meta =
         match selected_item with
-        | Some (group, _item) -> { meta with cascade_name = group }
+        | Some (group, _item) -> set_cascade_name group meta
         | None -> meta
       in
       let effective_cascade_name =
@@ -274,22 +274,22 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               Keeper_state_machine.Failing
         in
         let routing = Keeper_cascade_routing.select_cascade
-          ~base_cascade:meta.cascade_name ~phase
+          ~base_cascade:(cascade_name_of_meta meta) ~phase
         in
         Prometheus.inc_counter Keeper_metrics.metric_keeper_fsm_edge_transitions
           ~labels:[("edge", "ksm_to_kcl_routing")] ();
-        let routed_meta = { meta with cascade_name = routing.effective_cascade } in
+        let routed_meta = set_cascade_name routing.effective_cascade meta in
         let routed_labels =
           Keeper_model_labels.configured_model_labels_of_meta routed_meta
         in
         let resolved_cascade =
           fail_open_local_only_when_unavailable
-            ~base_cascade:meta.cascade_name
+            ~base_cascade:(cascade_name_of_meta meta)
             ~effective_cascade:routing.effective_cascade
             routed_labels
         in
         Log.Keeper.debug "%s: cascade routing: %s -> %s (reason: %s)"
-          meta.name meta.cascade_name routing.effective_cascade routing.reason;
+          meta.name (cascade_name_of_meta meta) routing.effective_cascade routing.reason;
         if not (String.equal resolved_cascade routing.effective_cascade) then
           Log.Keeper.warn
             "%s: local_only unavailable for labels [%s]; falling back to base cascade %s"
@@ -311,7 +311,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               (float_of_int remaining_sec);
             (match
                EC.fallback_cascade_for_unavailable_profile
-                 ~base_cascade:meta.cascade_name
+                 ~base_cascade:(cascade_name_of_meta meta)
                  ~effective_cascade:effective_cascade_name
              with
              | Some fallback_cascade
@@ -348,7 +348,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
          starves the keeper. *)
       let saturation_skip_meta =
         let meta_for_check =
-          { meta with cascade_name = effective_cascade_name }
+          set_cascade_name effective_cascade_name meta
         in
         let labels =
           Keeper_coordination.effective_model_labels_for_turn meta_for_check
@@ -436,7 +436,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       let build_cascade_execution ~(cascade_name : KCP.runtime_name) :
           (cascade_execution, Agent_sdk.Error.sdk_error) result =
         let cascade_name_string = KCP.runtime_name_to_string cascade_name in
-        let meta_for_cascade = { meta with cascade_name = cascade_name_string } in
+        let meta_for_cascade = set_cascade_name cascade_name_string meta in
         let model_labels =
           Keeper_coordination.effective_model_labels_for_turn meta_for_cascade
         in
@@ -1342,7 +1342,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   match
                     next_fail_open_cascade_for_turn_with_budget
                       ?rotation_cascades:fail_open_rotation_cascades
-                      ~base_cascade:meta.cascade_name
+                      ~base_cascade:(cascade_name_of_meta meta)
                       ~effective_cascade:execution_cascade_name
                       ~tool_requirement:initial_tool_requirement
                       ~attempted_cascades

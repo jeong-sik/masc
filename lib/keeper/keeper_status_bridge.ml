@@ -36,7 +36,7 @@ let effective_declarative_cascade_name
       Keeper_cascade_profile.normalize_declared_name cascade_name
   | None, Some _ -> Keeper_config.default_cascade_name
   | None, None ->
-      Keeper_cascade_profile.normalize_declared_name meta.cascade_name
+      Keeper_cascade_profile.normalize_declared_name (cascade_name_of_meta meta)
 
 type override_field_detail = {
   field : string;
@@ -107,10 +107,11 @@ let live_override_details (meta : keeper_meta)
   |> maybe_string_list_override "tools.tool_denylist" defaults.tool_denylist
        meta.tool_denylist
   |> (fun acc ->
-       if effective_cascade_name <> meta.cascade_name then
+       let cascade_name = cascade_name_of_meta meta in
+       if effective_cascade_name <> cascade_name then
          override_field "model.cascade_name"
            ~default_value:(`String effective_cascade_name)
-           ~live_value:(`String meta.cascade_name)
+           ~live_value:(`String cascade_name)
          :: acc
        else acc)
   |> maybe_bool_override "proactive.enabled" defaults.proactive_enabled
@@ -597,12 +598,11 @@ let proactive_runtime_reason_is_current (meta : keeper_meta) =
 let runtime_blocker_surface_opt (config : Coord_utils.config)
     (meta : keeper_meta) =
   let derived =
-    match meta.runtime.last_blocker_class with
-    | Some cls ->
+    match meta.runtime.last_blocker with
+    | Some info ->
         Some (runtime_blocker_surface_of_typed_class
-                ~summary:meta.runtime.last_blocker cls)
+                ~summary:info.detail info.klass)
     | None ->
-        (* Fallback: legacy string-based classification *)
         match runtime_registry_entry config meta.name with
         | Some entry -> (
             match entry.last_failure_reason with
@@ -613,19 +613,19 @@ let runtime_blocker_surface_opt (config : Coord_utils.config)
   let derived =
     match derived with
     | Some blocker -> Some blocker
-    | None -> (
-        match blocker_class_of_string meta.runtime.last_blocker with
-        | Some cls ->
-            Some (runtime_blocker_surface_of_legacy_string
-                    meta.runtime.last_blocker cls)
-        | None
-          when proactive_runtime_reason_is_current meta ->
-            (match blocker_class_of_string meta.runtime.proactive_rt.last_reason with
-             | Some cls ->
-                 Some (runtime_blocker_surface_of_legacy_string
-                         meta.runtime.proactive_rt.last_reason cls)
-             | None -> None)
-        | None -> runtime_blocker_surface_of_progress_narrative config meta)
+    | None
+      when proactive_runtime_reason_is_current meta ->
+        (* proactive_rt.last_reason is a separate string-source from
+           cycle outcomes; the substring matcher remains here as a
+           legacy recovery path for that source only.  The keeper
+           runtime blocker has already moved to typed [blocker_info]. *)
+        (match blocker_class_of_string meta.runtime.proactive_rt.last_reason with
+         | Some cls ->
+             Some (runtime_blocker_surface_of_legacy_string
+                     meta.runtime.proactive_rt.last_reason cls)
+         | None -> runtime_blocker_surface_of_progress_narrative config meta)
+    | None ->
+        runtime_blocker_surface_of_progress_narrative config meta
   in
   derived
 
@@ -786,7 +786,11 @@ let social_runtime_fields_json (meta : keeper_meta) =
         Json_util.string_opt_to_json delivery_surface_view_source );
       ( "last_social_transition_reason",
         trimmed_string_json meta.runtime.last_social_transition_reason );
-      ("last_blocker", trimmed_string_json meta.runtime.last_blocker);
+      ( "last_blocker"
+      , match meta.runtime.last_blocker with
+        | Some info ->
+            blocker_info_to_json info
+        | None -> `Null );
       ("last_need", trimmed_string_json meta.runtime.last_need);
     ]
 

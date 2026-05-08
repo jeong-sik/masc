@@ -563,7 +563,7 @@ let provider_context_json ~(meta : keeper_meta)
               observation.selected_model,
               observation.candidate_models )
         | None ->
-            ( meta.cascade_name,
+            ( (cascade_name_of_meta meta),
               Some (Keeper_agent_run.surface_model_used r),
               [] )
       in
@@ -576,7 +576,7 @@ let provider_context_json ~(meta : keeper_meta)
         ]
   | None ->
       `Assoc
-        [ ("cascade_name", `String meta.cascade_name)
+        [ ("cascade_name", `String (cascade_name_of_meta meta))
         ; ("selected_model", `Null)
         ; ( "candidate_models",
             `List
@@ -1022,7 +1022,7 @@ let append_decision_record
                 error_category_of_no_result_outcome ~outcome ~error
               in
               `Assoc [
-                ("cascade_name", `String meta.cascade_name);
+                ("cascade_name", `String (cascade_name_of_meta meta));
                 ("candidate_models", `List (List.map (fun s -> `String s) cascade_models));
                 ( "error_category",
                   match error_category with
@@ -1293,8 +1293,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
          dashboard into showing BLOCKED status.  The social model's
          blocker field is a protocol-level signal; runtime last_blocker
          tracks whether the keeper can make progress. *)
-      last_blocker = "";
-      last_blocker_class = None;
+      last_blocker = None;
       last_need = Option.value ~default:"" social_state.need;
     };
   } in
@@ -1384,7 +1383,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
     | Some observation ->
       Keeper_cascade_profile.runtime_name_to_string
         observation.Cascade_legacy_runner.cascade_name
-    | None -> meta.cascade_name
+    | None -> (cascade_name_of_meta meta)
   in
   (* #9933: same latency bucket, split by provider/model/cascade.
      This keeps the existing keeper-only counter stable while making
@@ -1734,14 +1733,26 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
              Option.value ~default:"" state.current_intention
          | None -> meta.runtime.last_current_intention);
       last_blocker =
-        (match social_state with
-         | Some (state : Social.social_state) ->
-             Option.value ~default:"" state.blocker
-         | None -> short_preview public_reason);
-      last_blocker_class =
+        (* Merge: typed klass from sdk_error becomes authoritative;
+           detail picks up the social-state blocker text or a public-
+           reason preview as observability context.  When the SDK
+           error carries no typed mapping we refuse to fabricate a
+           class — the previous string-only stamp is the substring
+           anti-pattern this refactor closes (CLAUDE.md
+           "워크어라운드 거부 기준 #2"). *)
         (match sdk_error with
          | Some err ->
-             Keeper_status_bridge.blocker_class_of_sdk_error err
+             (match Keeper_status_bridge.blocker_class_of_sdk_error err with
+              | Some klass ->
+                  let detail =
+                    match social_state with
+                    | Some (state : Social.social_state) ->
+                        Option.value ~default:"" state.blocker
+                    | None -> short_preview public_reason
+                  in
+                  Some (Keeper_meta_contract.blocker_info_of_class
+                          ~detail klass)
+              | None -> None)
          | None -> None);
       last_need =
         (match social_state with

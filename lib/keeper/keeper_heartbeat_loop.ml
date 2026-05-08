@@ -561,7 +561,7 @@ let handle_semaphore_wait_timeout ~ctx ~meta_after_triage
        reactive_available=%d turn_available=%d)"
       timeout.timeout_wait_sec
       phase_label
-      meta_after_triage.cascade_name
+      (cascade_name_of_meta meta_after_triage)
       queue_ahead_text
       timeout.timeout_queue_depth
       timeout.timeout_autonomous_available
@@ -592,8 +592,9 @@ let handle_semaphore_wait_timeout ~ctx ~meta_after_triage
   Keeper_types.map_runtime
     (fun rt ->
       { rt with
-        last_blocker = persisted_blocker;
-        last_blocker_class = Some blocker_class;
+        last_blocker =
+          Some (Keeper_meta_contract.blocker_info_of_class
+                  ~detail:persisted_blocker blocker_class);
       })
     meta_after_triage
 
@@ -761,10 +762,13 @@ let run_keepalive_unified_turn
           if meta_after_triage.paused
           then
             let blocker_str =
-              let trimmed =
-                String.trim meta_after_triage.runtime.last_blocker
-              in
-              if String.equal trimmed "" then "unknown" else trimmed
+              match meta_after_triage.runtime.last_blocker with
+              | Some info ->
+                let trimmed = String.trim info.detail in
+                if String.equal trimmed "" then
+                  Keeper_types.blocker_class_to_string info.klass
+                else trimmed
+              | None -> "unknown"
             in
             let paused_since_sec =
               match
@@ -872,11 +876,7 @@ let run_keepalive_unified_turn
            Load cascade_profile from config and select the healthiest
            available item before turn dispatch. *)
         let selected_item_opt =
-          let cascade_name =
-            match meta_after_triage.cascade_ref with
-            | Some ref when not (String.equal ref.group "") -> ref.group
-            | _ -> meta_after_triage.cascade_name
-          in
+          let cascade_name = cascade_name_of_meta meta_after_triage in
           let config_path =
             Filename.concat ctx.config.base_path ".masc/config/cascade.json"
           in
@@ -925,7 +925,7 @@ let run_keepalive_unified_turn
                Preserve all existing telemetry and error handling. *)
             (match
               Keeper_turn_slot.with_keeper_turn_slot_control
-                ~cascade_profile:meta_after_triage.cascade_name
+                ~cascade_profile:(cascade_name_of_meta meta_after_triage)
                 ~keeper_name:meta_after_triage.name
                 ~channel:turn_decision.channel (fun ~semaphore_wait_ms ~slot_control ->
                 run_keeper_cycle_with_slot ~ctx ~meta_after_cursor_persist ~stop ~obs
@@ -947,8 +947,10 @@ let run_keepalive_unified_turn
             Keeper_types.map_runtime
               (fun rt ->
                 { rt with
-                  last_blocker = blocker_text;
-                  last_blocker_class = Some Keeper_types.Admission_wait_wfq;
+                  last_blocker =
+                    Some (Keeper_meta_contract.blocker_info_of_class
+                            ~detail:blocker_text
+                            Keeper_types.Admission_wait_wfq);
                 })
               meta_after_triage
         | Keeper_admission_runtime.Live_surface reason ->
@@ -967,8 +969,10 @@ let run_keepalive_unified_turn
             Keeper_types.map_runtime
               (fun rt ->
                 { rt with
-                  last_blocker = reason_str;
-                  last_blocker_class = Some Keeper_types.Admission_surface;
+                  last_blocker =
+                    Some (Keeper_meta_contract.blocker_info_of_class
+                            ~detail:reason_str
+                            Keeper_types.Admission_surface);
                 })
               meta_after_triage
         | Keeper_admission_runtime.Live_dispatch { candidate; drift; bucket } ->

@@ -489,6 +489,18 @@ let sdk_error_to_provider_error ~provider err =
 
 let provider_error_total_metric = "masc_provider_error_total"
 
+let () =
+  Prometheus.register_counter
+    ~name:provider_error_total_metric
+    ~help:
+      "Total provider-level errors classified during cascade \
+       attempts (rate limit, auth failure, capacity exhaustion, \
+       server error, invalid request). Labels: kind \
+       (Provider_error.to_error_kind), provider (provider debug \
+       label), cascade_name (originating cascade), capacity_scope \
+       (CapacityExhausted scope or \"none\")."
+    ()
+
 let provider_error_capacity_scope_label = function
   | Provider_error.CapacityExhausted { scope; _ } ->
       Provider_error.scope_to_string scope

@@ -1,11 +1,15 @@
 open Keeper_types
 
-val keeper_allowed_tool_names :
-  ?write_done:bool ->
-  ?phase:Keeper_state_machine.phase ->
-  keeper_meta -> string list
-val keeper_allowed_model_tools :
-  ?write_done:bool -> keeper_meta -> Masc_domain.tool_schema list
+val keeper_allowed_tool_names
+  :  ?write_done:bool
+  -> ?phase:Keeper_state_machine.phase
+  -> keeper_meta
+  -> string list
+
+val keeper_allowed_model_tools
+  :  ?write_done:bool
+  -> keeper_meta
+  -> Masc_domain.tool_schema list
 
 (** Universe tool names: candidates minus denied, no policy filter.
     Superset of [keeper_allowed_tool_names].  Used as the BM25 retrieval
@@ -61,8 +65,7 @@ val has_mutating_side_effect : string -> bool
 
 (** Input-aware mutation check for mixed tools such as [keeper_shell] with
     op=gh where read-only and mutating subcommands share the same tool name. *)
-val has_mutating_side_effect_with_input :
-  tool_name:string -> input:Yojson.Safe.t -> bool
+val has_mutating_side_effect_with_input : tool_name:string -> input:Yojson.Safe.t -> bool
 
 (** Schema for the keeper_tool_search tool. *)
 val keeper_tool_search_schema : Masc_domain.tool_schema
@@ -76,8 +79,7 @@ val set_masc_schemas : Masc_domain.tool_schema list -> unit
 val masc_schemas_snapshot : unit -> Masc_domain.tool_schema list
 
 (** Scoped schema override for tests that need a synthetic MASC surface. *)
-val with_masc_schemas_for_test :
-  Masc_domain.tool_schema list -> (unit -> 'a) -> 'a
+val with_masc_schemas_for_test : Masc_domain.tool_schema list -> (unit -> 'a) -> 'a
 
 (** Injected masc_* tool names (populated at startup by [inject_masc_schemas]). *)
 val injected_masc_tool_names : unit -> string list
@@ -105,28 +107,6 @@ val init_policy_config : base_path:string -> (unit, string) result
     and blocked at execution time by the pre_tool_use hook. *)
 val is_keeper_denied : string -> bool
 
-type keeper_tool_call_recorder =
-  tool_name:string -> success:bool -> duration_ms:int -> unit
-
-(** Set the keeper-internal tool-call recorder.
-    The setter is process-global because server initialization wires around
-    the Config dependency cycle; calls are mutex-protected so runtime readers
-    do not dereference a publicly mutable ref. *)
-val set_on_keeper_tool_call : keeper_tool_call_recorder -> unit
-
-(** Record a keeper-internal tool call through the configured recorder. *)
-val record_keeper_tool_call : keeper_tool_call_recorder
-
-type tool_searcher = query:string -> max_results:int -> Yojson.Safe.t
-
-(** Set the fallback BM25 searcher for [keeper_tool_search].
-    Prefer passing [~search_fn] to [execute_keeper_tool_call] for
-    session-scoped search. *)
-val set_tool_search_fn : tool_searcher -> unit
-
-(** Invoke the fallback BM25 searcher for [keeper_tool_search]. *)
-val search_tools : tool_searcher
-
 (** Classification of a keeper tool result payload for circuit-breaker
     bookkeeping.
 
@@ -143,18 +123,21 @@ type tool_result_payload =
 (** Bridge-facing execution outcome.
     Structured tool errors, including [tool_not_allowed], are failures so
     preset/policy rejections cannot silently end a keeper turn as success. *)
-type execution_outcome = [ `Success | `Failure ]
+type execution_outcome =
+  [ `Success
+  | `Failure
+  ]
 
 (** Typed keeper tool execution result.
     [raw_output] preserves the original payload, [outcome] is the
     authoritative success/failure decision for bridge consumers, and
     [payload_shape] captures the post-execution wire shape for telemetry
     and malformed-payload handling. *)
-type executed_tool_result = {
-  raw_output : string;
-  outcome : execution_outcome;
-  payload_shape : tool_result_payload;
-}
+type executed_tool_result =
+  { raw_output : string
+  ; outcome : execution_outcome
+  ; payload_shape : tool_result_payload
+  }
 
 (** Inspect a keeper tool result payload without applying side effects. *)
 val classify_tool_result_payload : string -> tool_result_payload
@@ -172,28 +155,28 @@ val keeper_masc_tool_schemas : keeper_meta -> Masc_domain.tool_schema list
 (** Compute the keeper's sender identity for portals and broadcasts.
     Guards against double "keeper-" prefix. See #5104. *)
 
-val execute_keeper_tool_call_with_outcome :
-  config:Coord.config ->
-  meta:keeper_meta ->
-  ctx_work:working_context ->
-  ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
-  ?turn_sandbox_factory_git:Keeper_sandbox_factory.t ->
-  exec_cache:Masc_exec.Exec_cache.t option ->
-  ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t) ->
-  name:string ->
-  input:Yojson.Safe.t ->
-  unit ->
-  executed_tool_result
+val execute_keeper_tool_call_with_outcome
+  :  config:Coord.config
+  -> meta:keeper_meta
+  -> ctx_work:working_context
+  -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
+  -> ?turn_sandbox_factory_git:Keeper_sandbox_factory.t
+  -> exec_cache:Masc_exec.Exec_cache.t option
+  -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
+  -> name:string
+  -> input:Yojson.Safe.t
+  -> unit
+  -> executed_tool_result
 
-val execute_keeper_tool_call :
-  config:Coord.config ->
-  meta:keeper_meta ->
-  ctx_work:working_context ->
-  ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
-  ?turn_sandbox_factory_git:Keeper_sandbox_factory.t ->
-  exec_cache:Masc_exec.Exec_cache.t option ->
-  ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t) ->
-  name:string ->
-  input:Yojson.Safe.t ->
-  unit ->
-  string
+val execute_keeper_tool_call
+  :  config:Coord.config
+  -> meta:keeper_meta
+  -> ctx_work:working_context
+  -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
+  -> ?turn_sandbox_factory_git:Keeper_sandbox_factory.t
+  -> exec_cache:Masc_exec.Exec_cache.t option
+  -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
+  -> name:string
+  -> input:Yojson.Safe.t
+  -> unit
+  -> string

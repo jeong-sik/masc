@@ -70,6 +70,7 @@ function snapshot(
       event_priority_monotone: allHold,
       ...overrides.violate,
     },
+    fsm_guard_violations: 0,
     is_live: false,
     last_outcome: null,
     recommended_actions: [],

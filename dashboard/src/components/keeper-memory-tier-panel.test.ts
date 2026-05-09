@@ -109,6 +109,7 @@ function mockMemoryTierFetches(usage: MemoryKindUsageEntry[]) {
       compaction_atomicity: true,
       event_priority_monotone: true,
     },
+    fsm_guard_violations: 0,
     is_live: true,
     last_outcome: null,
     recommended_actions: [],

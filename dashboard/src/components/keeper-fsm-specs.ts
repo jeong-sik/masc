@@ -37,6 +37,11 @@ export const TURN_FSM_STATES = [
   'prompting',
   'routing',
   'executing',
+  // UI-side surface for the TLA `awaiting_tool` symbol — the SDK turn
+  // sits here after invoking a tool until the tool result arrives.
+  // `normalizeTurnFsmState` maps the raw `awaiting_tool` backend phase
+  // onto this UI state, and `turnFsmTlaSymbol` translates it back.
+  'awaiting_tool_result',
   'compacting',
   'finalizing',
   'exhausted',
@@ -49,9 +54,18 @@ const TURN_FSM_TLA_SYMBOLS: Record<KeeperTurnFsmState, string> = {
   prompting: 'prompting',
   routing: 'routing',
   executing: 'executing',
+  awaiting_tool_result: 'awaiting_tool',
   compacting: 'compacting',
   finalizing: 'finalizing',
   exhausted: 'exhausted',
+}
+
+// Raw backend turn-phase values that should collapse onto a canonical
+// UI state. Currently only the TLA `awaiting_tool` symbol is renamed
+// for the dashboard surface; leave additional aliases here when the
+// backend introduces new raw phases that map onto an existing UI state.
+const TURN_FSM_STATE_ALIASES: Readonly<Record<string, KeeperTurnFsmState>> = {
+  awaiting_tool: 'awaiting_tool_result',
 }
 
 const TURN_FSM_EDGES: FsmEdge[] = [
@@ -174,6 +188,8 @@ export function normalizeTurnFsmState(turnPhase: string | null | undefined): Kee
   if (!turnPhase) return null
   const normalized = turnPhase.trim().toLowerCase()
   if (!normalized) return null
+  const aliased = TURN_FSM_STATE_ALIASES[normalized]
+  if (aliased) return aliased
   if ((TURN_FSM_STATES as readonly string[]).includes(normalized)) {
     return normalized as KeeperTurnFsmState
   }

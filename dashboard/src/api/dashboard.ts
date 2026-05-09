@@ -11,7 +11,7 @@ import {
   normalizePendingConfirmation,
 } from './board'
 import { normalizeKeeperTrustTerminalReason } from '../keeper-store-normalize'
-import { currentDashboardActor, get, post, patch, withRetries, NAMESPACE_TRUTH_GET_TIMEOUT_MS } from './core'
+import { currentDashboardActor, get, post, withRetries, NAMESPACE_TRUTH_GET_TIMEOUT_MS } from './core'
 import {
   parseAgentRelationsResponse,
   type AgentRelationsResponse,

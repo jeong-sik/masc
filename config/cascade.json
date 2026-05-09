@@ -31,11 +31,12 @@
   ],
   "big_three_temperature": 0.2,
   "big_three_max_tokens": 16384,
+  "big_three_thinking_enabled": false,
   "big_three_keeper_assignable": true,
   "big_three_fallback_cascade": "keeper_diverse",
   "_comment_keeper_diverse": "Fallback cascade for contract violation retry. Different model composition from big_three to break correlated failure.",
   "keeper_diverse_models": [
-    "claude_code:claude-sonnet-4-6", "gemini_cli:gemini-2.5-flash",
+    "claude_code:claude-sonnet-4-6", "gemini_cli:gemini-3-flash-preview",
     "codex_cli:gpt-5.3-codex-spark"
   ],
   "keeper_diverse_temperature": 0.3,

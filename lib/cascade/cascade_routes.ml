@@ -42,45 +42,74 @@ type route_spec = {
 
 let route use key aliases = { use; key; aliases }
 
-let route_specs =
+(* [spec_for_use] is the SSOT for the (logical_use → key/aliases) mapping.
+   Written as an exhaustive [match] so adding a new constructor to
+   [logical_use] is a compile-time error here, not a runtime
+   [assert false] surfaced by [spec_for_use] callers.  Per CLAUDE.md
+   §"FSM Sparse Match" anti-pattern: a list lookup keyed by a closed
+   sum type silently degrades when the list and the type drift apart. *)
+let spec_for_use : logical_use -> route_spec = function
+  | Keeper_turn ->
+      route Keeper_turn "keeper_turn"
+        [
+          "default";
+          "default_models";
+          "oas-keeper_unified";
+          "coding_first";
+          "oas-coding_first";
+          "keeper_reply";
+          "keeper_unified";
+        ]
+  | Phase_recovery -> route Phase_recovery "phase_recovery" [ "local_recovery" ]
+  | Phase_buffer -> route Phase_buffer "phase_buffer" [ "local_only" ]
+  | Tool_required ->
+      route Tool_required "tool_required"
+        [ "tool_use_strict"; "resilient_breaker" ]
+  | Governance_judge -> route Governance_judge "governance_judge" []
+  | Operator_judge -> route Operator_judge "operator_judge" []
+  | Cross_verifier -> route Cross_verifier "cross_verifier" []
+  | Verifier -> route Verifier "verifier" []
+  | Autoresearch -> route Autoresearch "autoresearch" []
+  | Adversarial_reviewer -> route Adversarial_reviewer "adversarial_reviewer" []
+  | Auto_responder -> route Auto_responder "auto_responder" []
+  | Routing -> route Routing "routing" [ "routing_judge" ]
+  | Openai_compat -> route Openai_compat "openai_compat" []
+  | Persona_generation -> route Persona_generation "persona_generation" []
+  | Provider_benchmark -> route Provider_benchmark "provider_benchmark" []
+  | Simple_task -> route Simple_task "simple_task" []
+  | Moderate_task -> route Moderate_task "moderate_task" []
+  | Complex_task -> route Complex_task "complex_task" []
+  | Tool_rerank_use -> route Tool_rerank_use "llm_rerank" []
+
+(* The known-uses enumeration must remain in sync with [logical_use].
+   When a new constructor is added, the [match] in [spec_for_use] will
+   refuse to compile until extended; this list still requires a manual
+   append, but downstream lookups go through [spec_for_use] so the
+   silent-runtime-failure path is closed. *)
+let all_logical_uses : logical_use list =
   [
-    route Keeper_turn "keeper_turn"
-      [
-        "default";
-        "default_models";
-        "oas-keeper_unified";
-        "coding_first";
-        "oas-coding_first";
-        "keeper_reply";
-        "keeper_unified";
-      ];
-    route Phase_recovery "phase_recovery" [ "local_recovery" ];
-    route Phase_buffer "phase_buffer" [ "local_only" ];
-    route Tool_required "tool_required"
-      [ "tool_use_strict"; "resilient_breaker" ];
-    route Governance_judge "governance_judge" [];
-    route Operator_judge "operator_judge" [];
-    route Cross_verifier "cross_verifier" [];
-    route Verifier "verifier" [];
-    route Autoresearch "autoresearch" [];
-    route Adversarial_reviewer "adversarial_reviewer" [];
-    route Auto_responder "auto_responder" [];
-    route Routing "routing" [ "routing_judge" ];
-    route Openai_compat "openai_compat" [];
-    route Persona_generation "persona_generation" [];
-    route Provider_benchmark "provider_benchmark" [];
-    route Simple_task "simple_task" [];
-    route Moderate_task "moderate_task" [];
-    route Complex_task "complex_task" [];
-    route Tool_rerank_use "llm_rerank" [];
+    Keeper_turn;
+    Phase_recovery;
+    Phase_buffer;
+    Tool_required;
+    Governance_judge;
+    Operator_judge;
+    Cross_verifier;
+    Verifier;
+    Autoresearch;
+    Adversarial_reviewer;
+    Auto_responder;
+    Routing;
+    Openai_compat;
+    Persona_generation;
+    Provider_benchmark;
+    Simple_task;
+    Moderate_task;
+    Complex_task;
+    Tool_rerank_use;
   ]
 
-let spec_for_use use =
-  match List.find_opt (fun spec -> spec.use = use) route_specs with
-  | Some spec -> spec
-  | None -> assert false
-
-let all_logical_uses = List.map (fun spec -> spec.use) route_specs
+let route_specs : route_spec list = List.map spec_for_use all_logical_uses
 
 let known_route_keys =
   route_specs

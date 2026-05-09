@@ -56,7 +56,7 @@ while IFS= read -r line; do
   # Heuristic: if the line is inside an OCaml comment block, it's not code.
   # Detect by checking if the context has comment markers.
   # A line containing [Fun.protect ...] in prose (not code) context is inside (* ... *)
-  if echo "$content" | grep -qE '\[Fun\.protect[^\]]*\]'; then
+  if echo "$content" | grep -qE '\[Fun\.protect[^]]*\]'; then
     continue
   fi
 
@@ -70,6 +70,24 @@ while IFS= read -r line; do
   # Skip if the line is a prose reference like "the [Fun.protect] finally branch"
   # These appear inside OCaml doc comments and contain natural language before the match
   if echo "$content" | grep -qE '(the|a|its|outer|from) \[Fun\.protect'; then
+    continue
+  fi
+
+  # Skip prose references without brackets: "Uses Fun.protect for ...", "via Fun.protect to ..."
+  # "not Fun.protect", "Release token via Fun.protect"
+  if echo "$content" | grep -qE '(Uses|via|not|Release|for cleanup|would be|would wrap) Fun\.protect'; then
+    continue
+  fi
+
+  # Skip prose references where Fun.protect is followed by bracketed term in prose:
+  # "Fun.protect [finally] above", "Fun.protect [finally] in ..."
+  if echo "$content" | grep -qE 'Fun\.protect \[[^]]+\] (above|below|in|before|after|to|for|so|still)'; then
+    continue
+  fi
+
+  # Skip lines ending with *) (inside a closing comment block)
+  trimmed_end=$(echo "$trimmed" | sed 's/[[:space:]]*$//')
+  if [[ "$trimmed_end" == *'*)' ]]; then
     continue
   fi
 

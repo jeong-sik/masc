@@ -41,8 +41,7 @@ export interface OverlayCascadeProps {
 }
 
 // ── Known provider → CSS token key map ────────────────────────────
-// Mirrors PROVIDER_COLOR_KEY in provider-capability-matrix/data.ts
-// but keyed by the provider strings used in cascade_audit JSONL.
+// Keyed by the provider strings used in cascade_audit JSONL.
 
 const PROVIDER_COLOR_TOKEN: Record<string, string> = {
   anthropic: '--color-p-anthropic',

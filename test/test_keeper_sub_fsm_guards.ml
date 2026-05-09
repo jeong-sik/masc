@@ -21,10 +21,12 @@ let test_valid_turn_phase_transitions () =
     ; Packed Turn_prompting, Packed Turn_routing
     ; Packed Turn_prompting, Packed Turn_executing
     ; Packed Turn_prompting, Packed Turn_finalizing
+    ; Packed Turn_prompting, Packed Turn_exhausted  (* mark_terminal_error before any cascade attempt *)
       (* from Turn_routing *)
     ; Packed Turn_routing, Packed Turn_prompting
     ; Packed Turn_routing, Packed Turn_routing
     ; Packed Turn_routing, Packed Turn_executing
+    ; Packed Turn_routing, Packed Turn_exhausted  (* mark_terminal_error during cascade-fallback model selection *)
       (* from Turn_executing *)
     ; Packed Turn_executing, Packed Turn_prompting
     ; Packed Turn_executing, Packed Turn_routing
@@ -73,12 +75,10 @@ let test_invalid_turn_phase_transitions () =
       (* from Turn_prompting *)
     ; Packed Turn_prompting, Packed Turn_idle
     ; Packed Turn_prompting, Packed Turn_compacting
-    ; Packed Turn_prompting, Packed Turn_exhausted
       (* from Turn_routing *)
     ; Packed Turn_routing, Packed Turn_idle
     ; Packed Turn_routing, Packed Turn_compacting
     ; Packed Turn_routing, Packed Turn_finalizing
-    ; Packed Turn_routing, Packed Turn_exhausted
       (* from Turn_executing *)
     ; Packed Turn_executing, Packed Turn_idle
       (* from Turn_compacting *)

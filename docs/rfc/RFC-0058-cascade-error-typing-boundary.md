@@ -1,4 +1,4 @@
-# RFC-0057: Cascade Error Typing Boundary
+# RFC-0058: Cascade Error Typing Boundary
 
 **Status**: Draft  
 **Author**: Agent (Claude Opus 4.7)  

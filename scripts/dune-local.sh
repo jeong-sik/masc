@@ -265,6 +265,48 @@ if [[ "${GITHUB_ACTIONS:-}" != "true" \
 fi
 # -----------------------------------------------------------------------
 
+# --- auto-clean stale _build on agent_sdk pin change -------------------
+# Dune does not track opam pin identity in its incremental cache.  When
+# agent_sdk is repinned (e.g. by another worktree's build), the .cmx
+# artifacts in _build/ still reference the old pin's CMI signatures.
+# This produces "inconsistent assumptions over implementation" errors.
+#
+# Compare the SSOT pin SHA against a marker file in _build/.  On
+# mismatch, auto-clean before the build proceeds.  The marker is written
+# after every successful pin guard pass so it stays current.
+#
+# Skipped when:
+#   GITHUB_ACTIONS=true     – CI builds are clean-room
+#   MASC_DUNE_DRY_RUN=1     – dry-run never mutates _build
+#   subcommand == clean     – clean already removes everything
+#   MASC_SKIP_PIN_CHECK=1   – without pin check, marker is meaningless
+if [[ "${GITHUB_ACTIONS:-}" != "true" \
+      && "${MASC_DUNE_DRY_RUN:-0}" != "1" \
+      && "${MASC_SKIP_PIN_CHECK:-0}" != "1" \
+      && "${_subcommand}" != "clean" ]]; then
+  _pin_sha_source="${repo_root}/scripts/oas-agent-sdk-pin.sh"
+  if [[ -f "${_pin_sha_source}" ]]; then
+    # shellcheck source=/dev/null
+    source "${_pin_sha_source}" 2>/dev/null || true
+    if [[ -n "${OAS_AGENT_SDK_SHA:-}" ]]; then
+      _build_marker="${DUNE_BUILD_DIR:-$repo_root/_build}/.last-agent-sdk-sha"
+      if [[ -f "${_build_marker}" ]]; then
+        _last_sha="$(cat "${_build_marker}")"
+        if [[ "${_last_sha}" != "${OAS_AGENT_SDK_SHA}" ]]; then
+          printf '[dune-local] agent_sdk pin changed (%.8s → %.8s) — cleaning stale _build artifacts\n' \
+            "${_last_sha}" "${OAS_AGENT_SDK_SHA}" >&2
+          if [[ -d "${DUNE_BUILD_DIR:-$repo_root/_build}" ]]; then
+            rm -rf "${DUNE_BUILD_DIR:-$repo_root/_build}"
+          fi
+        fi
+      fi
+      mkdir -p "$(dirname "${_build_marker}")" 2>/dev/null || true
+      printf '%s' "${OAS_AGENT_SDK_SHA}" > "${_build_marker}"
+    fi
+  fi
+fi
+# -----------------------------------------------------------------------
+
 # --- core opam-deps installed guard ------------------------------------
 # Catch the "deps declared but not installed" failure mode before Dune
 # emits a wall of cryptic abstract-cmi errors:

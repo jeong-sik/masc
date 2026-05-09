@@ -113,7 +113,7 @@ let run_turn
         "%s: emit_turn_end in finally raised: %s"
         meta.name (Printexc.to_string e)
   in
-  Fun.protect ~finally:safe_emit_turn_end
+  Eio_guard.protect ~finally:safe_emit_turn_end
   @@ fun () ->
   let cascade_name_string =
     Keeper_cascade_profile.runtime_name_to_string cascade_name

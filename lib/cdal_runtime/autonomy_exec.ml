@@ -160,7 +160,7 @@ let drain_fd ~limit fd =
       Eio_unix.await_readable fd;
       loop ()
   in
-  Eio_guard.protect
+  Fun.protect
     ~finally:(fun () ->
       try Unix.close fd with
       | Unix.Unix_error _ -> ())
@@ -248,7 +248,7 @@ let run ~sw ~clock ~config ~argv ~timeout_s =
   let stdout_reader_started = ref false in
   let stderr_reader_started = ref false in
   let completed = ref false in
-  Eio_guard.protect
+  Fun.protect
     ~finally:(fun () ->
       if not !completed
       then (

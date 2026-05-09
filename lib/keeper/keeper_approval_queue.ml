@@ -905,7 +905,7 @@ let submit_and_await ~keeper_name ~tool_name ~input ~risk_level
     | Some _, Critical
     | None, _ -> Eio.Promise.await promise
   in
-  Fun.protect
+  Eio_guard.protect
     await_with_timeout
     ~finally:(fun () ->
       Safe_ops.protect ~default:() (fun () ->

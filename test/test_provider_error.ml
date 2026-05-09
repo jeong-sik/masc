@@ -54,7 +54,12 @@ let typed_health_decision err =
       (P.CapacityExhausted { scope = `Model; _ }
       | P.AuthError _
       | P.ServerError _
-      | P.InvalidRequest _) ->
+      | P.InvalidRequest _
+      | P.CliWrappedHardQuota _
+      | P.CliWrappedMaxTurns _
+      | P.CliWrappedResumableSession _
+      | P.PermissionDenied _
+      | P.ModelNotFound _) ->
       Failure
   | None -> Failure
 

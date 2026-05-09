@@ -619,7 +619,6 @@ let parse_model_strings
 
 (* Health filtering (extracted to Cascade_health_filter) *)
 let is_local_provider = Cascade_health_filter.is_local_provider
-let filter_healthy = Cascade_health_filter.filter_healthy
 let filter_healthy_strict = Cascade_health_filter.filter_healthy_strict
 let health_filter_rejection_to_string = Cascade_health_filter.health_filter_rejection_to_string
 type health_filter_rejection = Cascade_health_filter.health_filter_rejection =

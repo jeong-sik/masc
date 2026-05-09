@@ -657,10 +657,20 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                                 ~sw:ctx.sw ~net ~cascade_name:(Keeper_types.cascade_name_of_meta meta) () with
                         | Error _ -> false
                         | Ok candidates ->
-                            let healthy =
-                              Cascade_health_filter.filter_healthy ~sw:ctx.sw
-                                ~net candidates
-                            in
+                            (* Strict variant returns a typed rejection
+                               (All_missing_api_key / All_local_unhealthy)
+                               instead of silently emptying the candidate
+                               list.  Either rejection means the cascade
+                               is configurationally broken or has drifted
+                               below the live-fallback threshold, so the
+                               recovery probe should not declare the
+                               cascade healthy. *)
+                            (match
+                               Cascade_health_filter.filter_healthy_strict
+                                 ~sw:ctx.sw ~net candidates
+                             with
+                             | Error _rejection -> false
+                             | Ok healthy ->
                             let has_recovery_evidence
                                 (p : Llm_provider.Provider_config.t) =
                               let provider_key =
@@ -681,7 +691,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                                           Cascade_health_tracker.global
                                           ~provider_key)
                             in
-                            List.exists has_recovery_evidence healthy)
+                            List.exists has_recovery_evidence healthy))
                  in
                  if cascade_recovered () then
                    Log.Keeper.info "%s: stale threshold reached, but cascade %s appears healthy. Skipping auto-pause." meta.name (Keeper_types.cascade_name_of_meta meta)

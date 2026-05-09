@@ -51,6 +51,32 @@ let run_in_systhread f =
   else
     f ()
 
+(** {1 Resource Cleanup}
+
+    Drop-in replacement for [Fun.protect] that uses [Eio.Switch.on_release]
+    when the Eio runtime is active.  Avoids [Fun.Finally_raised] wrapping
+    and correctly propagates [Eio.Cancel.Cancelled] through cleanup handlers. *)
+
+(** Eio-aware [Fun.protect] replacement.
+
+    When the Eio runtime is active, uses [Eio.Switch.run] +
+    [Eio.Switch.on_release] so that:
+    - Cleanup always runs, even on cancellation.
+    - Cleanup exceptions are logged as warnings and do not replace the
+      body exception (no [Fun.Finally_raised] wrapping).
+    - [Eio.Cancel.Cancelled] always propagates.
+
+    Before [enable ()], falls back to [Fun.protect] (single-threaded,
+    no Eio context available). *)
+let protect ~finally body =
+  if Atomic.get ready then
+    Eio.Switch.run (fun sw ->
+      Eio.Switch.on_release sw finally;
+      body ()
+    )
+  else
+    Fun.protect ~finally body
+
 (** Cooperatively yield without raising if the Eio scheduler is unavailable. *)
 let yield_if_ready () =
   if Atomic.get ready then

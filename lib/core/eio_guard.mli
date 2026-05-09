@@ -26,6 +26,15 @@ val with_mutex_ro : Eio.Mutex.t -> (unit -> 'a) -> 'a
 val run_in_systhread : (unit -> 'a) -> 'a
 (** Run [f] in a system thread if Eio is ready, directly otherwise. *)
 
+val protect : finally:(unit -> unit) -> (unit -> 'a) -> 'a
+(** Eio-aware replacement for [Fun.protect].
+
+    When Eio is active, uses [Eio.Switch.run] + [Eio.Switch.on_release]
+    so cleanup always runs and cleanup exceptions do not replace the body
+    exception.  [Eio.Cancel.Cancelled] always propagates correctly.
+
+    Before {!enable}, falls back to [Fun.protect]. *)
+
 val yield_if_ready : unit -> unit
 (** Cooperatively yield to the Eio scheduler if the runtime is active.
     No-op before {!enable} or when called from a context where Eio cannot

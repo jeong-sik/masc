@@ -648,12 +648,19 @@ let validate_path_result ?sw ?net ~config_path () =
              ~profiles:[])
     | Ok json ->
         let profiles = discover_profiles json in
-        let required_default_profile =
-          Cascade_routes.cascade_name_for_use
-            ~config_path
-            Cascade_routes.Keeper_turn
-        in
-        let route_target_errors =
+        if profiles = [] then
+          Error
+            (rejection_of_path ~config_path:source_path ~attempted_mtime
+               ~checked_at
+               ~errors:[ "active cascade catalog has no <name>_models profiles" ]
+               ~profiles:[])
+        else
+          let required_default_profile =
+            Cascade_routes.cascade_name_for_use
+              ~config_path
+              Cascade_routes.Keeper_turn
+          in
+          let route_target_errors =
           Cascade_routes.configured_route_targets ~config_path ()
           |> List.filter_map (fun target ->
                  if List.mem target profiles then None

@@ -25,6 +25,31 @@ type provider_error =
       provider : string;
       reason : string;
     }
+  (* RFC-0057 Phase 0: CLI-specific error variants that were previously
+     reconstructed through string matching in cascade_attempt_fsm.ml.
+     These carry the structured information lost when the CLI adapter
+     compressed them into InvalidRequest { message }. *)
+  | CliWrappedHardQuota of {
+      provider : string;
+      detail : string;
+    }
+  | CliWrappedMaxTurns of {
+      provider : string;
+      detail : string;
+    }
+  | CliWrappedResumableSession of {
+      provider : string;
+      detail : string;
+      exit_code : int option;
+    }
+  | PermissionDenied of {
+      provider : string;
+      resource : string option;
+    }
+  | ModelNotFound of {
+      provider : string;
+      model_name : string;
+    }
 
 type t = provider_error
 

@@ -20,6 +20,27 @@ type provider_error =
       provider : string;
       reason : string;
     }
+  | CliWrappedHardQuota of {
+      provider : string;
+      detail : string;
+    }
+  | CliWrappedMaxTurns of {
+      provider : string;
+      detail : string;
+    }
+  | CliWrappedResumableSession of {
+      provider : string;
+      detail : string;
+      exit_code : int option;
+    }
+  | PermissionDenied of {
+      provider : string;
+      resource : string option;
+    }
+  | ModelNotFound of {
+      provider : string;
+      model_name : string;
+    }
 
 type t = provider_error
 
@@ -33,6 +54,11 @@ let to_error_kind = function
   | AuthError _ -> "auth_error"
   | ServerError _ -> "server_error"
   | InvalidRequest _ -> "invalid_request"
+  | CliWrappedHardQuota _ -> "cli_wrapped_hard_quota"
+  | CliWrappedMaxTurns _ -> "cli_wrapped_max_turns"
+  | CliWrappedResumableSession _ -> "cli_wrapped_resumable_session"
+  | PermissionDenied _ -> "permission_denied"
+  | ModelNotFound _ -> "model_not_found"
 
 let string_list_to_yojson values =
   `List (List.map (fun value -> `String value) values)
@@ -76,11 +102,58 @@ let to_yojson = function
           ("provider", `String provider);
           ("reason", `String reason);
         ]
+  | CliWrappedHardQuota { provider; detail } ->
+      `Assoc
+        [
+          ("kind", `String "cli_wrapped_hard_quota");
+          ("provider", `String provider);
+          ("detail", `String detail);
+        ]
+  | CliWrappedMaxTurns { provider; detail } ->
+      `Assoc
+        [
+          ("kind", `String "cli_wrapped_max_turns");
+          ("provider", `String provider);
+          ("detail", `String detail);
+        ]
+  | CliWrappedResumableSession { provider; detail; exit_code } ->
+      `Assoc
+        [
+          ("kind", `String "cli_wrapped_resumable_session");
+          ("provider", `String provider);
+          ("detail", `String detail);
+          ("exit_code",
+           match exit_code with
+           | Some code -> `Int code
+           | None -> `Null);
+        ]
+  | PermissionDenied { provider; resource } ->
+      `Assoc
+        [
+          ("kind", `String "permission_denied");
+          ("provider", `String provider);
+          ("resource",
+           match resource with
+           | Some r -> `String r
+           | None -> `Null);
+        ]
+  | ModelNotFound { provider; model_name } ->
+      `Assoc
+        [
+          ("kind", `String "model_not_found");
+          ("provider", `String provider);
+          ("model_name", `String model_name);
+        ]
 
 let affected_providers = function
   | RateLimit { provider; _ }
   | AuthError { provider }
-  | InvalidRequest { provider; _ } ->
+  | InvalidRequest { provider; _ }
+  | CliWrappedHardQuota { provider; _ }
+  | CliWrappedMaxTurns { provider; _ }
+  | CliWrappedResumableSession { provider; _ }
+  | PermissionDenied { provider; _ }
+  | ModelNotFound { provider; _ } ->
       [ provider ]
   | CapacityExhausted { affected; _ } -> affected
   | ServerError _ -> []
@@ -90,5 +163,10 @@ let is_capacity_exhausted = function
   | RateLimit _
   | AuthError _
   | ServerError _
-  | InvalidRequest _ ->
+  | InvalidRequest _
+  | CliWrappedHardQuota _
+  | CliWrappedMaxTurns _
+  | CliWrappedResumableSession _
+  | PermissionDenied _
+  | ModelNotFound _ ->
       false

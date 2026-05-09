@@ -37,6 +37,11 @@
    ;; Execution_mode / Risk_contract from agent_sdk into this sub-library;
    ;; tests need it re-exported so [Masc_mcp_cdal_runtime.*] resolves.
    (re_export masc_mcp.cdal_runtime)
+   ;; RFC-0056 Phase 0 — CDAL Phase 1A evaluator extracted to lib/cdal/.
+   ;; Hosts Cdal_types + Adversarial_eval + Labeling. Re-exported so
+   ;; test_cdal_types / test_labeling / test_adversarial_eval and other
+   ;; consumers keep resolving these unprefixed module names.
+   (re_export masc_mcp.cdal)
    (re_export masc_mcp.ag_ui)
    (re_export masc_mcp.config)
    (re_export masc_mcp.fs_compat)

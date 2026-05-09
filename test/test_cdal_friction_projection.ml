@@ -330,7 +330,7 @@ let test_blocked_tool_counts () =
 let test_evidence_gap_groups () =
   let (store, _tmp) = setup_store () in
   let proof = make_proof ~run_id:"gap-test-001" () in
-  let gaps : Masc_mcp.Cdal_types.completeness_gap list = [
+  let gaps : Cdal_types.completeness_gap list = [
     { artifact = "manifest.json"; reason = "not found";
       impact = Blocks_verdict };
     { artifact = "contract.json"; reason = "parse error";
@@ -347,7 +347,7 @@ let test_evidence_gap_groups () =
 let test_review_gap_emits_tripwire () =
   let (store, _tmp) = setup_store () in
   let proof = make_proof ~run_id:"review-gap-001" () in
-  let gaps : Masc_mcp.Cdal_types.completeness_gap list = [
+  let gaps : Cdal_types.completeness_gap list = [
     { artifact = "evidence/review_warning.json";
       reason = "review_requirement present but no review evidence artifact was captured";
       impact = Blocks_verdict };

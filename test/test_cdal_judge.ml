@@ -4,7 +4,7 @@
     with determinism and findings population verification. *)
 
 module CJ = Masc_mcp.Cdal_judge
-module CT = Masc_mcp.Cdal_types
+module CT = Cdal_types
 module CL = Masc_mcp.Cdal_loader
 
 (* ================================================================ *)

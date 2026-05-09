@@ -110,7 +110,7 @@ let publish bus (evt : Agent_sdk.Event_bus.event) =
   bump_matching_subs evt;
   Prometheus.inc_counter counter_publish_total ();
   let started = Time_compat.now () in
-  Fun.protect
+  Eio_guard.protect
     ~finally:(fun () ->
       let elapsed = Time_compat.now () -. started in
       if elapsed > 0.0 then

@@ -1246,7 +1246,7 @@ let with_keeper_turn_slot_control ?(cascade_profile = "unknown") ~keeper_name
           acquire_all ());
     }
   in
-  Fun.protect
+  Eio_guard.protect
     ~finally:(fun () -> release_keeper_turn_slot ~keeper_name slot_state)
     (fun () ->
       match acquire_all () with

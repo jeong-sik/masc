@@ -39,20 +39,56 @@ while IFS= read -r line; do
     continue
   fi
 
-  # Skip comment lines (OCaml comments start with * or are inside (* ... *))
-  content=$(echo "$line" | cut -d: -f3- | sed 's/^[[:space:]]*//')
-  if [[ "$content" == \(\** ]] || [[ "$content" == \*\)* ]] || [[ "$content" == \** ]]; then
+  # Extract content after file:line prefix
+  content=$(echo "$line" | cut -d: -f3-)
+
+  # Skip comment-only lines:
+  # - Lines starting with (* (comment block open)
+  # - Lines that are inside a comment block: typically indented with * or contain [Fun.protect]
+  #   inside prose/documentation context
+  # - Lines starting with * (comment continuation)
+  # - Lines containing only *) (comment block close)
+  trimmed=$(echo "$content" | sed 's/^[[:space:]]*//')
+  if [[ "$trimmed" == \(\** ]] || [[ "$trimmed" == \*\)* ]] || [[ "$trimmed" == \** ]]; then
+    continue
+  fi
+
+  # Heuristic: if the line is inside an OCaml comment block, it's not code.
+  # Detect by checking if the context has comment markers.
+  # A line containing [Fun.protect ...] in prose (not code) context is inside (* ... *)
+  if echo "$content" | grep -qE '\[Fun\.protect[^\]]*\]'; then
+    continue
+  fi
+
+  # Skip if same-line context shows this is inside a comment
+  # (text before Fun.protect contains comment characters)
+  before_fun=$(echo "$content" | sed 's/Fun\.protect.*//')
+  if echo "$before_fun" | grep -qE '\(\*|^\s*\*'; then
+    continue
+  fi
+
+  # Skip if the line is a prose reference like "the [Fun.protect] finally branch"
+  # These appear inside OCaml doc comments and contain natural language before the match
+  if echo "$content" | grep -qE '(the|a|its|outer|from) \[Fun\.protect'; then
     continue
   fi
 
   # Skip Stdlib.Mutex lock/unlock patterns (not migration targets —
   # these protect cross-thread shared state, not Eio fiber cleanup)
+  # Pattern 1: Mutex.lock/unlock in the same line content
   if echo "$content" | grep -qE "(Stdlib\.)?Mutex\.(un)?lock"; then
     continue
   fi
 
   # Skip if the finally clause is purely Mutex.unlock (Mutex pattern)
   if echo "$content" | grep -qE "finally.*Mutex\.unlock"; then
+    continue
+  fi
+
+  # Pattern 2: Check if the NEXT line contains Mutex.unlock in the finally clause
+  # (Mutex-protect pattern: Fun.protect on one line, ~finally:(... Mutex.unlock ...) on next)
+  nextline=$(sed -n "$((linenum + 1))p" "$file" 2>/dev/null || true)
+  if echo "$nextline" | grep -qE "Mutex\.unlock"; then
     continue
   fi
 

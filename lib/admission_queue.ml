@@ -110,7 +110,7 @@ let with_inflight_observation ~keeper_name ~cascade_name f =
    | exception exn ->
        bump_active (-1);
        raise exn);
-  Fun.protect
+  Eio_guard.protect
     ~finally:(fun () ->
       (match Admission_queue_metrics.on_release ~keeper_name ~cascade_name with
        | () -> ()

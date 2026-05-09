@@ -2,22 +2,25 @@ type profile =
   | Tool_strict
   | Inline_tools
   | Lite
+  | Local_inline
   | Local
 
 let profile_to_string = function
   | Tool_strict -> "tool_strict"
   | Inline_tools -> "inline_tools"
   | Lite -> "lite"
+  | Local_inline -> "local_inline"
   | Local -> "local"
 
 let profile_of_string = function
   | "tool_strict" -> Some Tool_strict
   | "inline_tools" -> Some Inline_tools
   | "lite" -> Some Lite
+  | "local_inline" -> Some Local_inline
   | "local" -> Some Local
   | _ -> None
 
-let all_profiles = [ Tool_strict; Inline_tools; Lite; Local ]
+let all_profiles = [ Tool_strict; Inline_tools; Lite; Local_inline; Local ]
 
 type requirement =
   | Required
@@ -59,6 +62,17 @@ let required_capabilities_of = function
         inline_tool_choice = Optional;
         runtime_mcp_tools = Required;
         runtime_tool_events = Required;
+        runtime_mcp_http_headers = Optional;
+      }
+  | Local_inline ->
+      (* RFC-0058: Ollama-style providers with inline tool calling but no
+         runtime MCP or tool_choice enforcement. Used as terminal fallback
+         capability encoding. *)
+      {
+        inline_tools = Required;
+        inline_tool_choice = Optional;
+        runtime_mcp_tools = Optional;
+        runtime_tool_events = Optional;
         runtime_mcp_http_headers = Optional;
       }
   | Local ->

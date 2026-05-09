@@ -30,6 +30,12 @@ type profile =
           Suitable for [gemini_cli] (static MCP via
           [~/.gemini/settings.json]) and other CLI runtimes that
           carry tools through stdio MCP. *)
+  | Local_inline
+      (** RFC-0058: Ollama-style providers with inline tool calling but
+          no runtime MCP or tool_choice enforcement. Encodes the actual
+          capability set of local LLM providers (inline_tools=Required,
+          everything else Optional). Used as terminal fallback capability
+          where graceful degradation is intentional. *)
   | Local
       (** No capability requirements — accepts any provider including
           ollama-only profiles.  Used by [local_recovery]-like lanes

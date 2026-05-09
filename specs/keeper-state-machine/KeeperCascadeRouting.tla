@@ -305,6 +305,28 @@ BugNoGroupFallback(keeper) ==
     /\ UNCHANGED <<keeper_state, item_health, consecutive_failures,
                     selected_item, fallback_count, group_path>>
 
+(* ── Error variant extension (RFC-0057 Phase 3) ────────────
+
+   The cascade_attempt_fsm.ml string classifier anti-pattern
+   (13 contains_substring_ci calls) is replaced by typed variants.
+   This spec section documents the intended TLA+ model for the
+   extended error surface.
+
+   New error kinds (previously reconstructed from message strings):
+
+   - CliWrappedHardQuota   : CLI exit with hard quota (e.g. 403)
+   - CliWrappedMaxTurns    : CLI exit with max-turns exceeded
+   - CliWrappedResumable   : CLI exit with resumable session signal
+   - PermissionDenied      : 401/403 from API or CLI
+   - ModelNotFound         : 404 from API or CLI
+
+   These extend the http_error type that Call_err carries.
+   The classify_failure invariant must handle each kind.
+
+   NOTE: This is a documentation stub. Full TLA+ type extension
+   requires Phase 2 implementation merge to keep spec and code
+   in sync. *)
+
 (* BUG-3: Global health cache — one keeper's failure affects all keepers.
    Models the current (pre-RFC-0041) global shared state.
    When an item is degraded for one keeper, it becomes degraded for ALL keepers. *)

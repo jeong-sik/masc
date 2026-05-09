@@ -144,6 +144,7 @@ let prepare_agent_setup
       ~(gemini_mcp_disabled : bool)
       ~(approval_mode_effective : string option)
       ~(approval_mode_derived : bool)
+      ?(actionable_signal = false)
       ?max_cost_usd
       ~(trajectory_acc : Trajectory.accumulator option)
       ~(tool_overlay : Agent_sdk.Tool_op.t ref option)
@@ -569,8 +570,8 @@ let prepare_agent_setup
       detail.tool_name, detail.outcome)
     |> satisfied_required_tool_names_of_outcomes
   in
-  let compute_tool_surface ~turn ~messages ~current_tool_choice ~decay_discovered
-      : computed_tool_surface =
+  let compute_tool_surface ~turn ~messages ~current_tool_choice
+      ~decay_discovered ?(actionable_signal = false) () : computed_tool_surface =
     let last_user_text =
       List.fold_left
         (fun acc (m : Agent_sdk.Types.message) ->
@@ -805,6 +806,16 @@ let prepare_agent_setup
       else
         all_allowed
     in
+    let all_allowed =
+      let passive_streak =
+        Keeper_passive_loop_detector.current_streak ~keeper_name:meta.name
+      in
+      Keeper_tool_disclosure.contract_enforcement_filter
+        ~passive_streak
+        ~streak_threshold:3
+        ~actionable_signal
+        all_allowed
+    in
     let tool_gate_requested =
       required_tool_names <> []
       || tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn
@@ -905,6 +916,8 @@ let prepare_agent_setup
       ~messages:history_messages
       ~current_tool_choice:None
       ~decay_discovered:false
+      ~actionable_signal
+      ()
   in
   acc.tool_surface <-
     { turn_lane = initial_tool_surface.lane
@@ -1240,6 +1253,8 @@ let prepare_agent_setup
                    ~messages
                    ~current_tool_choice:current_params.tool_choice
                    ~decay_discovered:true
+                   ~actionable_signal
+                   ()
                in
                if Keeper_types_profile.keeper_debug
                then

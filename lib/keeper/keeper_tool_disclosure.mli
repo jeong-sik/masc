@@ -224,3 +224,18 @@ val merge_tool_selection_boundary :
   llm_selected:string list ->
   discovered:string list ->
   string list
+
+(** Proactive contract enforcement — when a keeper has accumulated
+    [passive_streak] >= [streak_threshold] consecutive passive turns AND
+    there is an [actionable_signal] (unclaimed tasks, board activity, or
+    discovered work), strip [Passive_status] tools from the surface so the
+    model is forced toward Execution or Completion tools.
+
+    Completion tools (stay_silent, release, done, etc.) are never stripped
+    because they are the keeper's intentional exit valve. *)
+val contract_enforcement_filter :
+  passive_streak:int ->
+  streak_threshold:int ->
+  actionable_signal:bool ->
+  string list ->
+  string list

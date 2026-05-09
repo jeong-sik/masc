@@ -43,6 +43,60 @@ let test_has_valid_tool_call_false_when_empty () =
        ~unexpected_tool_names:[]
        ~tool_names:[])
 
+(* --- contract_enforcement_filter tests --- *)
+
+(* Use real canonical tool names. Passive_status tools must have
+   Tool_catalog.effect_domain = Some Read_only so classify_tool_progress
+   classifies them correctly even when Tool_dispatch.read_only_set is
+   uninitialised (test environment).  keeper_tasks_list and
+   keeper_pr_status both have Read_only effect_domain in Tool_catalog. *)
+
+let passive_tool = "keeper_tasks_list"
+let passive_tool_alt = "keeper_pr_status"
+let execution_tool = "keeper_task_claim"
+let completion_tool = "keeper_stay_silent"
+let claim_tool = "masc_claim_next"
+
+let mixed_tools =
+  [ passive_tool; execution_tool; completion_tool; claim_tool ]
+
+(* Streak below threshold: no filtering regardless of signal. *)
+let test_contract_filter_below_threshold () =
+  check (list string) "all tools preserved" mixed_tools
+    (KTD.contract_enforcement_filter
+       ~passive_streak:2 ~streak_threshold:3 ~actionable_signal:true mixed_tools)
+
+(* At threshold but no actionable signal: no filtering. *)
+let test_contract_filter_no_signal () =
+  check (list string) "all tools preserved" mixed_tools
+    (KTD.contract_enforcement_filter
+       ~passive_streak:5 ~streak_threshold:3 ~actionable_signal:false mixed_tools)
+
+(* At threshold WITH actionable signal: passive tools stripped. *)
+let test_contract_filter_strips_passive () =
+  let filtered =
+    KTD.contract_enforcement_filter
+      ~passive_streak:5 ~streak_threshold:3 ~actionable_signal:true mixed_tools
+  in
+  check bool "passive tool removed" false (List.mem passive_tool filtered);
+  check bool "execution preserved" true (List.mem execution_tool filtered);
+  check bool "completion preserved" true (List.mem completion_tool filtered);
+  check bool "claim preserved" true (List.mem claim_tool filtered);
+  check int "3 tools remain" 3 (List.length filtered)
+
+(* Only passive tools in input: filter returns empty. *)
+let test_contract_filter_all_passive () =
+  check (list string) "empty result" []
+    (KTD.contract_enforcement_filter
+       ~passive_streak:5 ~streak_threshold:3 ~actionable_signal:true
+       [ passive_tool; passive_tool_alt ])
+
+(* Empty input: empty output. *)
+let test_contract_filter_empty_input () =
+  check (list string) "empty in empty out" []
+    (KTD.contract_enforcement_filter
+       ~passive_streak:5 ~streak_threshold:3 ~actionable_signal:true [])
+
 let () =
   run "keeper_tool_surface_guard"
     [
@@ -61,5 +115,18 @@ let () =
             test_has_valid_tool_call_false_when_all_unexpected;
           test_case "empty tool list returns false" `Quick
             test_has_valid_tool_call_false_when_empty;
+        ] );
+      ( "contract_enforcement_filter",
+        [
+          test_case "below threshold: no filtering" `Quick
+            test_contract_filter_below_threshold;
+          test_case "no signal: no filtering" `Quick
+            test_contract_filter_no_signal;
+          test_case "strips passive at threshold with signal" `Quick
+            test_contract_filter_strips_passive;
+          test_case "all passive: returns empty" `Quick
+            test_contract_filter_all_passive;
+          test_case "empty input: empty output" `Quick
+            test_contract_filter_empty_input;
         ] );
     ]

@@ -172,6 +172,15 @@ let run_turn
   let history_messages = prompt_ctx.Keeper_run_prompt.history_messages in
   let estimated_input_tokens = prompt_ctx.Keeper_run_prompt.estimated_input_tokens in
   let ctx_work = prompt_ctx.Keeper_run_prompt.ctx_work in
+  let actionable_signal =
+    match world_observation with
+    | None -> false
+    | Some wo ->
+      wo
+      |> Keeper_contract_classifier.of_keeper_world_observation
+      |> Keeper_contract_classifier.classify_actionable_signal
+      |> Keeper_contract_classifier.is_actionable
+  in
   (* 7. Set up agent — delegated to Keeper_run_tools *)
   let setup =
     Keeper_run_tools.prepare_agent_setup
@@ -199,6 +208,7 @@ let run_turn
       ~gemini_mcp_disabled
       ~approval_mode_effective
       ~approval_mode_derived
+      ~actionable_signal
       ?max_cost_usd
       ~trajectory_acc
       ~tool_overlay

@@ -116,6 +116,7 @@ val prepare_agent_setup :
   -> gemini_mcp_disabled:bool
   -> approval_mode_effective:string option
   -> approval_mode_derived:bool
+  -> ?actionable_signal:bool
   -> ?max_cost_usd:float
   -> trajectory_acc:Trajectory.accumulator option
   -> tool_overlay:Agent_sdk.Tool_op.t ref option

@@ -1312,3 +1312,18 @@
  (name test_masc_contract_catalog)
  (modules test_masc_contract_catalog)
  (libraries masc_test_deps))
+
+(test
+ (name test_graphql_api_coverage)
+ (modules test_graphql_api_coverage)
+ (libraries masc_test_deps))
+
+(test
+ (name test_misc_coverage)
+ (modules test_misc_coverage)
+ (libraries masc_test_deps))
+
+(test
+ (name test_relay_coverage)
+ (modules test_relay_coverage)
+ (libraries masc_test_deps))

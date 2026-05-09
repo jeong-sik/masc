@@ -113,4 +113,14 @@
  (name gen_shell_ir_walkers)
  (modules gen_shell_ir_walkers))
 
+; RFC-0057 Phase 0 — tool descriptor codegen for lib/tool_schemas/.
+; Self-contained (no library deps) to avoid the dune cycle between
+; this executable and masc_tool_schemas, which consumes the emitted
+; tool_descriptors_gen.ml. Same self-containment pattern as
+; gen_shell_ir_walkers above. Phase 1 lifts the spec records into a
+; sibling library lib/tool_schemas_specs/ once a 2nd tool lands.
+(executable
+ (name gen_tool_descriptors)
+ (modules gen_tool_descriptors))
+
 ; Executable for MASC MCP

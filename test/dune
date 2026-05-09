@@ -1327,3 +1327,14 @@
  (name test_relay_coverage)
  (modules test_relay_coverage)
  (libraries masc_test_deps))
+
+; RFC-0057 Phase 0 — regression test for bin/gen_tool_descriptors.ml.
+; Compares generated masc_config tool_schema against the hand-written
+; one in Tool_schemas_misc field-by-field on Yojson values, so any
+; drift in description text, enum ordering, or additionalProperties
+; surfaces immediately. Single-stanza form (not Group 1) so dune
+; picks up the new (test ...) without churning the 700+ name list.
+(test
+ (name test_tool_descriptors_gen)
+ (modules test_tool_descriptors_gen)
+ (libraries masc_test_deps))

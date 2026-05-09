@@ -137,6 +137,15 @@ val resolve_secondary_provider_for_primary :
     state — secondary resolution is invoked only after the primary has
     been rejected by the tool-use gate. *)
 
+val provider_filter_allows_single :
+  provider_filter:string list option ->
+  label:string ->
+  Llm_provider.Provider_config.t ->
+  bool
+(** [true] when [provider] passes the provider-kind allowlist, or when
+    [provider_filter] is [None]/empty (no filter declared). Uses
+    [Cascade_config.apply_provider_filter_strict] internally. *)
+
 val resolve_inference_params :
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->

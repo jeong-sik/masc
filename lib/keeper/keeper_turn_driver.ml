@@ -150,6 +150,7 @@ let run_named
   let candidate_cfgs =
     filter_candidate_providers_for_tool_support
       ~keeper_name
+      ?provider_filter
       ?runtime_mcp_policy
       ~tools
       ~require_tool_choice_support
@@ -177,7 +178,7 @@ let run_named
     match candidate_cfgs with
     | [] ->
         (match resolve_tool_capable_provider_across_cascades
-                ~sw ~net ~keeper_name ?runtime_mcp_policy ~tools
+                ~sw ~net ~keeper_name ?provider_filter ?runtime_mcp_policy ~tools
                 ~require_tool_choice_support ~require_tool_support
                 ~exclude_cascade:cascade_name ()
          with

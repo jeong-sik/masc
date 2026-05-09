@@ -320,7 +320,7 @@ let cascade_empty_should_emit_first ~label ~signature =
     The function is total and never raises; secondary parsing errors are
     surfaced as [None] by the resolver. *)
 let attempt_secondary_swap
-    ~keeper_name ?runtime_mcp_policy ~tools
+    ~keeper_name ?provider_filter ?runtime_mcp_policy ~tools
     ~require_tool_choice_support ~require_tool_support
     ~(secondary_resolver :
         int ->
@@ -332,7 +332,15 @@ let attempt_secondary_swap
      Llm_provider.Provider_config.t * filter_rejection_reason) Either.t =
   match secondary_resolver provider_index primary with
   | None -> Either.Right (primary, primary_reason)
-  | Some secondary -> (
+  | Some secondary ->
+    (* #13132 B: reject secondary when provider_filter excludes its kind.
+       Without this gate, a keeper restricted to one provider kind can be
+       swapped onto a disallowed kind, bypassing the caller's explicit
+       filter entirely. *)
+    if not (Cascade_catalog_runtime.provider_filter_allows_single
+              ~provider_filter ~label:"secondary_swap" secondary)
+    then Either.Right (primary, primary_reason)
+    else (
       (* RFC-0027 PR-9c: per-secondary accounting label.
          The secondary's [provider_kind] is a closed enum from
          [Llm_provider.Provider_config.string_of_provider_kind] so
@@ -378,6 +386,7 @@ let attempt_secondary_swap
 
 let filter_candidate_providers_for_tool_support
     ~(keeper_name : string)
+    ?provider_filter
     ?runtime_mcp_policy
     ?(tools = [])
     ~require_tool_choice_support
@@ -406,7 +415,7 @@ let filter_candidate_providers_for_tool_support
                  | None -> Either.Right (provider_cfg, reason)
                  | Some resolver ->
                      attempt_secondary_swap
-                       ~keeper_name ?runtime_mcp_policy ~tools
+                       ~keeper_name ?provider_filter ?runtime_mcp_policy ~tools
                        ~require_tool_choice_support ~require_tool_support
                        ~secondary_resolver:resolver
                        ~provider_index
@@ -473,6 +482,7 @@ let filter_candidate_providers_for_tool_support
 let resolve_tool_capable_provider_across_cascades
     ~sw ~net
     ~(keeper_name : string)
+    ?provider_filter
     ?runtime_mcp_policy
     ?(tools = [])
     ~require_tool_choice_support
@@ -507,7 +517,7 @@ let resolve_tool_capable_provider_across_cascades
                  in
                  let filtered =
                    filter_candidate_providers_for_tool_support
-                     ~keeper_name ?runtime_mcp_policy ~tools
+                     ~keeper_name ?provider_filter ?runtime_mcp_policy ~tools
                      ~require_tool_choice_support ~require_tool_support
                      ~secondary_resolver
                      ~label:cascade_name providers

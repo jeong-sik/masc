@@ -111,6 +111,7 @@ val classify_filter_rejection :
 
 val filter_candidate_providers_for_tool_support :
   keeper_name:string ->
+  ?provider_filter:string list ->
   ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
   ?tools:Agent_sdk.Tool.t list ->
   require_tool_choice_support:bool ->
@@ -141,6 +142,7 @@ val resolve_tool_capable_provider_across_cascades :
   sw:Eio.Switch.t ->
   net:Eio_context.eio_net ->
   keeper_name:string ->
+  ?provider_filter:string list ->
   ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
   ?tools:Agent_sdk.Tool.t list ->
   require_tool_choice_support:bool ->

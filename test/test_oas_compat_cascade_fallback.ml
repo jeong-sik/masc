@@ -159,7 +159,7 @@ let test_provider_failure_capacity_cascades () =
             {
               scope = Failure_scope_model;
               retry_after = Some 3.0;
-              model = Some "gemini-2.5-pro";
+              model = Some "gemini-3.1-pro-preview";
             };
         message = "model overloaded";
       }

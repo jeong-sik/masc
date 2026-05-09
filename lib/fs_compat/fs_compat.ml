@@ -369,7 +369,7 @@ let load_jsonl_diagnostics (path : string) : Yojson.Safe.t list * int =
   else
     let content = load_file path in
     let lines = String.split_on_char '\n' content in
-    parse_jsonl_lines ~source:(Stdlib.Filename.basename path) lines
+    parse_jsonl_lines ~source:path lines
 
 (** Load JSONL file as list of JSON values.
     Malformed lines are logged and dropped. *)

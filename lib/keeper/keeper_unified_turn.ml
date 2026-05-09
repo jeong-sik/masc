@@ -1719,15 +1719,15 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               ~labels:[("keeper", meta.name)]
               ();
             let _ = drain_turn_event_bus ~site:"error_path_drain" () in
-            (match tool_event_order_violation_error () with
-             | Some order_err ->
+            (match event_bus_integrity_error_snapshot () with
+             | Some integrity_err ->
                Log.Keeper.error
                  "%s: event-bus order violation during timeout path; treating turn as failed before retry/reconcile decisions"
                  meta.name;
                 Keeper_registry.set_turn_phase
                   ~base_path:config.base_path meta.name
                   Keeper_registry.(Packed Turn_finalizing);
-               Error order_err
+               Error integrity_err
              | None ->
             let committed_tools = committed_mutating_tools_snapshot () in
             if committed_tools <> []

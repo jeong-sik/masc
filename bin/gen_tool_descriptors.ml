@@ -1,4 +1,4 @@
-(* RFC-0057 Phase 0 — tool descriptor codegen.
+(* RFC-0057 Phase 1 — tool descriptor codegen.
 
    Mirrors bin/gen_shell_ir_walkers.ml: spec-as-OCaml-value -> Buffer.emit
    -> stdout. The dune rule in lib/tool_schemas/ captures stdout into
@@ -6,18 +6,18 @@
    generated schemas live alongside the hand-written ones in the same
    module namespace.
 
-   Phase 0 scope: masc_config only. A regression test
-   (test/test_tool_descriptors_gen.ml) compares the emitted tool_schema
-   against the hand-written one in tool_schemas_misc.ml field-by-field
-   on Yojson values, so a drift in description text or enum ordering
-   surfaces immediately.
+   Phase 1 scope: masc_config + masc_code_read. The regression test
+   (test/test_tool_descriptors_gen.ml) compares emitted schemas against
+   hand-written ones field-by-field on Yojson values. tool_schemas_misc.ml
+   drops the hand-written masc_config entry and concatenates
+   Tool_descriptors_gen.schemas so generated schemas are the SSOT.
 
    Why self-contained (no library deps)?
    bin/gen_shell_ir_walkers.ml (RFC-0054 PR-3) sets the precedent: the
    generator carries its own spec to avoid a dune cycle between
    (executable) and (library) when the library would consume the
-   generated file. Phase 1 lifts the spec records into a sibling
-   library lib/tool_schemas_specs/ once the second tool lands. *)
+   generated file. Phase 2 lifts the spec records into a sibling
+   library lib/tool_schemas_specs/ once a 3rd tool lands. *)
 
 (* === Spec types (local; will move to lib/tool_schemas_specs in Phase 1). *)
 
@@ -73,7 +73,32 @@ Pass category to filter results to a single section."
   ; additional_properties = false
   }
 
-let phase0_specs : tool_spec list = [ masc_config_spec ]
+let masc_code_read_spec : tool_spec =
+  { name = "masc_code_read"
+  ; description =
+      "Read a file with offset/limit pagination for large files. \
+Use when inspecting source code during task execution without loading the entire file into context."
+  ; parameters =
+      [ { p_name = "path"
+        ; p_type = T_string { enum = None }
+        ; p_description = "Absolute file path"
+        ; p_required = true
+        }
+      ; { p_name = "offset"
+        ; p_type = T_int { min = Some 0; max = None }
+        ; p_description = "Offset in bytes (default 0)"
+        ; p_required = false
+        }
+      ; { p_name = "limit"
+        ; p_type = T_int { min = Some 1; max = Some 1_000_000 }
+        ; p_description = "Maximum bytes to read (default 1_000_000)"
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  }
+
+let phase1_specs : tool_spec list = [ masc_config_spec; masc_code_read_spec ]
 
 (* === Emit helpers ==================================================== *)
 
@@ -82,7 +107,7 @@ let buf_addf buf fmt = Printf.ksprintf (Buffer.add_string buf) fmt
 let emit_header buf =
   Buffer.add_string buf
     "(* GENERATED - DO NOT EDIT.\n\
-    \   Source: bin/gen_tool_descriptors.ml (RFC-0057 Phase 0).\n\
+    \   Source: bin/gen_tool_descriptors.ml (RFC-0057 Phase 1).\n\
     \   To regenerate: dune build *)\n\
      \n\
      open Masc_domain\n\
@@ -156,5 +181,5 @@ let emit_schemas_list buf specs =
 let () =
   let buf = Buffer.create 4096 in
   emit_header buf;
-  emit_schemas_list buf phase0_specs;
+  emit_schemas_list buf phase1_specs;
   print_string (Buffer.contents buf)

@@ -168,11 +168,19 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         : trustDisposition === 'Pass'
           ? 'bg-[var(--ok-10)] text-[var(--color-status-ok)]'
           : 'bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)]'
-  const trustDispositionLabel = trustDisposition
-    ? ({ Alert: '경보', Pause: '정지', Pass: '통과' } as Record<string, string>)[
-        trustDisposition
-      ] ?? trustDisposition
-    : null
+  const trustDispositionLabel = ((): string | null => {
+    if (!trustDisposition) return null
+    switch (trustDisposition) {
+      case 'Alert':
+        return '경보'
+      case 'Pause':
+        return '정지'
+      case 'Pass':
+        return '통과'
+      default:
+        return trustDisposition
+    }
+  })()
 
   return html`
     <div class="px-6 pt-4">

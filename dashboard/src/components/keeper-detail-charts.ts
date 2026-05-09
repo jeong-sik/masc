@@ -39,7 +39,7 @@ export function ContextChart({ keeper }: { keeper: Keeper }) {
     return { x, y, p }
   })
   const polyline = pts.map(({ x, y }) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ')
-  const lastRatio = ((series[series.length - 1] as KeeperMetricPoint)?.context_ratio ?? 0) * 100
+  const lastRatio = (series[series.length - 1]?.context_ratio ?? 0) * 100
   const lineColor = ctxColor(lastRatio)
 
   return html`
@@ -184,8 +184,10 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
 
   const modelSwitches: { index: number; model: string }[] = []
   for (let i = 1; i < series.length; i++) {
-    if ((series[i] as KeeperMetricPoint).model_used !== (series[i - 1] as KeeperMetricPoint).model_used) {
-      modelSwitches.push({ index: i, model: (series[i] as KeeperMetricPoint).model_used })
+    const curr = series[i]
+    const prev = series[i - 1]
+    if (curr && prev && curr.model_used !== prev.model_used) {
+      modelSwitches.push({ index: i, model: curr.model_used })
     }
   }
 

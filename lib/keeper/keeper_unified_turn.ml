@@ -1346,7 +1346,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                      turn budget; in production we observed 4–5 rotations all
                      hitting the same violation before the OAS retry guard
                      finally aborted the cycle (see fleet logs:
-                     "passive status/read tools" cascade=big_three →
+                     "passive status/read tools" cascade=default →
                      keeper_unified → kimi_cli_keeper → … →
                      oas_timeout_budget at 1064s/1200s).  Cap at 1 rotation
                      so the keeper releases its turn budget promptly.

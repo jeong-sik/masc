@@ -355,8 +355,8 @@ let update_catalog_builder builder field value =
 (* Detect fallback_cascade cycles in a freshly loaded catalog.
 
    2026-05-05 fleet-stuck root cause: the operator-side cascade.toml
-   declared [big_three.fallback_cascade = "glm_coding_plan_only"] AND
-   [glm_coding_plan_only.fallback_cascade = "big_three"].  When the
+   declared [default.fallback_cascade = "glm_coding_plan_only"] AND
+   [glm_coding_plan_only.fallback_cascade = "default"].  When the
    GLM provider stalled, both cascades escalated to each other,
    producing a silent 600s+ timeout chain with no operator-visible
    reason.  This helper walks the fallback graph and emits a Prometheus

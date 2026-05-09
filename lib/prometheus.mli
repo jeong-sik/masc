@@ -545,7 +545,7 @@ val metric_cascade_fallback_cycle_detected_total : string
     the loop silently for 600s+ without escaping.  Labels: [cascade]
     (the entry point of the detected cycle).  Discovered during the
     2026-05-05 fleet-stuck investigation:
-    [big_three → glm_coding_plan_only → big_three]. *)
+    [default → glm_coding_plan_only → default]. *)
 
 val metric_provider_health_probe_skipped : string
 (** Total bootstrap/runtime-catalog provider health probes intentionally

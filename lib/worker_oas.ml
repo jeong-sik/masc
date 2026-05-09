@@ -484,7 +484,7 @@ let rec run_worker_via_oas
     ?worker_run_id
     () : (Worker_container_types.run_result, string) result =
   Masc_runtime_events.emit_turn_start ();
-  Fun.protect ~finally:Masc_runtime_events.emit_turn_end
+  Eio_guard.protect ~finally:Masc_runtime_events.emit_turn_end
   @@ fun () ->
   let session_id = meta.mcp_session_id in
   let worker_name = meta.worker_name in
@@ -504,7 +504,7 @@ let rec run_worker_via_oas
     Worker_container.save_worker_meta ~base_path
       ~worker_name meta
   in
-  Fun.protect
+  Eio_guard.protect
     ~finally:(fun () ->
       ignore
         (Worker_container_types.leave_worker ~sw ~auth_token
@@ -539,7 +539,7 @@ and resume_worker_via_oas
       Approval_callbacks.reject_by_default)
     () : (Worker_container_types.run_result, string) result =
   Masc_runtime_events.emit_turn_start ();
-  Fun.protect ~finally:Masc_runtime_events.emit_turn_end
+  Eio_guard.protect ~finally:Masc_runtime_events.emit_turn_end
   @@ fun () ->
   let worker_name = meta.worker_name in
   let session_id = meta.mcp_session_id in
@@ -580,7 +580,7 @@ and resume_worker_via_oas
     Agent_sdk.Agent_types.context_injector = Some context_injector;
     (* #7883 *)
     approval = Some approval } in
-  Fun.protect
+  Eio_guard.protect
     ~finally:(fun () ->
       ignore
         (Worker_container_types.leave_worker ~sw ~auth_token ~session_id
@@ -617,7 +617,7 @@ and run_existing_worker_agent
   : (Worker_container_types.run_result, string) result =
   let worker_name = meta.worker_name in
   let session_id = meta.mcp_session_id in
-  Fun.protect
+  Eio_guard.protect
     ~finally:(fun () ->
       try Agent_sdk.Agent.close agent
       with

@@ -992,7 +992,7 @@ let run_keepalive_unified_turn
                        ("outcome", "dispatch");
                        ("provider", drift.actual_provider);
                        ("drift", drift.reason)] ();
-            Fun.protect
+            Eio_guard.protect
               ~finally:(fun () ->
                 Keeper_admission_runtime.release_bucket bucket)
               (fun () ->

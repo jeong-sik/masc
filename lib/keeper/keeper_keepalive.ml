@@ -713,7 +713,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
             "%s: cleanup_tracking in heartbeat finally raised: %s"
             live_meta.name (Printexc.to_string e)
       in
-      Fun.protect
+      Eio_guard.protect
         (fun () ->
           try
             run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup;

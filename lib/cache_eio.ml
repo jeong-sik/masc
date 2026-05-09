@@ -184,7 +184,7 @@ let scan_in_progress = Atomic.make false
 
 let with_scan_guard ~fallback f =
   if Atomic.compare_and_set scan_in_progress false true then
-    Fun.protect ~finally:(fun () -> Atomic.set scan_in_progress false) f
+    Eio_guard.protect ~finally:(fun () -> Atomic.set scan_in_progress false) f
   else fallback
 
 (** Read .json filenames from cache directory. Single readdir call. *)

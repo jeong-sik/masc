@@ -213,7 +213,7 @@ let with_restart_launch_noop_for_test f =
         else { state with scope_depth = state.scope_depth - 1 })
   in
   enter ();
-  Fun.protect
+  Eio_guard.protect
     ~finally:leave
     f
 
@@ -254,7 +254,7 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
       end else
         false
     in
-    Fun.protect
+    Eio_guard.protect
       (fun () ->
         (try
            Keeper_keepalive.run_heartbeat_loop ~proactive_warmup_sec

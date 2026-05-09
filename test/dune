@@ -1117,6 +1117,7 @@
 (include stanzas/test_cascade_attempt_liveness_observer.inc)
 (include stanzas/test_cascade_attempt_liveness_runtime.inc)
 (include stanzas/test_cascade_attempt_outer_wall.inc)
+(include stanzas/test_cascade_attempt_fsm_response_pins.inc)
 (include stanzas/test_oas_worker_named_liveness_integration.inc)
 (include stanzas/test_cascade_capability_gate.inc)
 (include stanzas/test_cascade_catalog_runtime.inc)

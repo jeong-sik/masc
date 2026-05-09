@@ -205,14 +205,14 @@ let test_cascade_model_resolve_hardcoded_default_provenance () =
 
 let test_cascade_model_resolve_env_default_provenance () =
   let getenv = function
-    | "GEMINI_DEFAULT_MODEL" -> Some "gemini-2.5-flash"
+    | "GEMINI_DEFAULT_MODEL" -> Some "gemini-3-flash-preview"
     | _ -> None
   in
   let resolved =
     Model_resolve.resolve_auto_model ~getenv "gemini"
       (Model_resolve.model_selector_of_string "auto")
   in
-  check string "gemini env default" "gemini-2.5-flash"
+  check string "gemini env default" "gemini-3-flash-preview"
     resolved.resolved_model_id;
   check resolution_provenance "env provenance"
     (Model_resolve.Env_default "GEMINI_DEFAULT_MODEL")

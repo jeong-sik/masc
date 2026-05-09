@@ -74,7 +74,7 @@ let test_load_cascade_profile_hierarchical () =
         {
           "name": "fallback",
           "items": [
-            {"id": "gemini-flash", "provider": "gemini_cli", "model": "gemini-2.5-flash", "timeout_ms": 60000, "priority": 1}
+            {"id": "gemini-flash", "provider": "gemini_cli", "model": "gemini-3-flash-preview", "timeout_ms": 60000, "priority": 1}
           ],
           "strategy": "priority",
           "fallback_group": null
@@ -117,7 +117,7 @@ let test_load_cascade_profile_legacy_fallback () =
     {|{
       "legacy_profile_models": [
         {"model": "ollama:qwen3:14b", "weight": 1},
-        {"model": "gemini_cli:gemini-2.5-flash", "weight": 2}
+        {"model": "gemini_cli:gemini-3-flash-preview", "weight": 2}
       ],
       "legacy_profile_temperature": 0.7
     }|}

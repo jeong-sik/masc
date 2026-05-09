@@ -79,14 +79,14 @@ let test_success_shape () =
 let test_failure_shape () =
   let json =
     Cascade_legacy_runner.cascade_attempt_terminal_event_json
-      ~model_id:"gemini_cli:gemini-2.5-pro" ~model_label:None
+      ~model_id:"gemini_cli:gemini-3.1-pro-preview" ~model_label:None
       ~latency_ms:(Some 1200)
       ~error:(Some "OAS budget timeout after 600.0s") ()
   in
   Alcotest.(check string)
     "event tag" "cascade_attempt_terminal" (assoc_string "event" json);
   Alcotest.(check string)
-    "model_id" "gemini_cli:gemini-2.5-pro" (assoc_string "model_id" json);
+    "model_id" "gemini_cli:gemini-3.1-pro-preview" (assoc_string "model_id" json);
   Alcotest.(check string) "outcome" "failure" (assoc_string "outcome" json);
   (match assoc_field "model_label" json with
   | Some `Null -> ()

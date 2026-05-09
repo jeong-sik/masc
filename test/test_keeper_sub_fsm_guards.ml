@@ -33,11 +33,13 @@ let test_valid_turn_phase_transitions () =
     ; Packed Turn_compacting, Packed Turn_prompting
     ; Packed Turn_compacting, Packed Turn_compacting
     ; Packed Turn_compacting, Packed Turn_finalizing
+    ; Packed Turn_compacting, Packed Turn_exhausted
       (* from Turn_finalizing *)
     ; Packed Turn_finalizing, Packed Turn_prompting
     ; Packed Turn_finalizing, Packed Turn_routing
     ; Packed Turn_finalizing, Packed Turn_executing
     ; Packed Turn_finalizing, Packed Turn_finalizing
+    ; Packed Turn_finalizing, Packed Turn_exhausted
       (* from Turn_exhausted *)
     ; Packed Turn_exhausted, Packed Turn_prompting
     ; Packed Turn_exhausted, Packed Turn_routing
@@ -80,11 +82,9 @@ let test_invalid_turn_phase_transitions () =
     ; Packed Turn_compacting, Packed Turn_idle
     ; Packed Turn_compacting, Packed Turn_routing
     ; Packed Turn_compacting, Packed Turn_executing
-    ; Packed Turn_compacting, Packed Turn_exhausted
       (* from Turn_finalizing *)
     ; Packed Turn_finalizing, Packed Turn_idle
     ; Packed Turn_finalizing, Packed Turn_compacting
-    ; Packed Turn_finalizing, Packed Turn_exhausted
       (* from Turn_exhausted *)
     ; Packed Turn_exhausted, Packed Turn_idle
     ; Packed Turn_exhausted, Packed Turn_compacting

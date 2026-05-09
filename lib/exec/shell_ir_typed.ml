@@ -3,69 +3,15 @@
     Coexists with the untyped [Shell_ir.t].  Each constructor records the
     command's input type, output type, risk level, and sandbox requirement
     in the GADT parameters so that policy dispatch can be indexed by the
-    compiler. *)
+    compiler.
 
-type risk =
-  [ `Safe
-  | `Audited
-  | `Privileged
-  ]
+    Type definitions live in [Shell_ir_typed_types] to break the
+    circular dependency with [Shell_ir_typed_walkers_gen] (which
+    deconstructs these types in its generated match arms). *)
 
-type sandbox =
-  [ `Host
-  | `Docker
-  ]
-
-type wrapped = W : ('i, 'o, 'r, 's) command -> wrapped
-
-and (_, _, _, _) command =
-  | Ls :
-      { path : string option
-      ; flags : [ `Long | `All | `Human ] list
-      }
-      -> (unit, string, [ `Safe ], [ `Host ]) command
-  | Cat : { path : string } -> (unit, string, [ `Safe ], [ `Host ]) command
-  | Rg :
-      { pattern : string
-      ; path : string option
-      ; case_sensitive : bool
-      }
-      -> (unit, string, [ `Safe ], [ `Host ]) command
-  | Git_status : { short : bool } -> (unit, string, [ `Audited ], [ `Host ]) command
-  | Git_clone :
-      { repo : string
-      ; branch : string option
-      ; depth : int
-      }
-      -> (unit, string, [ `Audited ], [ `Host | `Docker ]) command
-  | Curl :
-      { url : string
-      ; method_ : [ `GET | `POST | `PUT | `DELETE ]
-      ; headers : (string * string) list option
-      ; body : string option
-      }
-      -> (unit, string, [ `Audited ], [ `Host ]) command
-  | Rm :
-      { paths : string list
-      ; recursive : bool
-      ; force : bool
-      }
-      -> (unit, unit, [ `Privileged ], [ `Host ]) command
-  | Sudo :
-      { target_argv : string list
-        (** Tokenized argv to be passed to [sudo].  Stored as a list
-            (not a space-joined string) so that arguments containing
-            spaces — e.g. [sudo sh -c "echo hi"] — round-trip cleanly
-            through [to_simple] and [Capability_check_typed.of_command]
-            without being re-split on whitespace. *)
-      }
-      -> (unit, string, [ `Privileged ], [ `Host ]) command
-  | Generic :
-      Shell_ir.simple
-      -> (Shell_ir.simple, string, [ `Privileged ], [ `Host ]) command
-
-(* ---------------------------------------------------------------------- *)
 (* Helpers — mirror the pattern used in [Capability_check.all_lits_opt].  *)
+
+include Shell_ir_typed_types
 
 let lit_of_arg = function
   | Shell_ir.Lit s -> Some s
@@ -346,156 +292,17 @@ let of_simple (s : Shell_ir.simple) : wrapped =
 ;;
 
 (* ---------------------------------------------------------------------- *)
-(* to_simple *)
+(* to_simple — delegated to generated walker (RFC-0054 PR-5) *)
 
-let arg_of_string s = Shell_ir.Lit s
-
-let to_simple : type i o r s. (i, o, r, s) command -> Shell_ir.simple = function
-  | Ls { path; flags } ->
-    let flag_args =
-      List.map
-        (function
-          | `Long -> "-l"
-          | `All -> "-a"
-          | `Human -> "-h")
-        flags
-    in
-    let args =
-      match path with
-      | None -> flag_args
-      | Some p -> flag_args @ [ p ]
-    in
-    { Shell_ir.bin = Bin.of_known Bin.Ls
-    ; args = List.map arg_of_string args
-    ; env = []
-    ; cwd = None
-    ; redirects = []
-    ; sandbox = Sandbox_target.host ()
-    }
-  | Cat { path } ->
-    { Shell_ir.bin = Bin.of_known Bin.Cat
-    ; args = [ arg_of_string path ]
-    ; env = []
-    ; cwd = None
-    ; redirects = []
-    ; sandbox = Sandbox_target.host ()
-    }
-  | Rg { pattern; path; case_sensitive } ->
-    let flag_args = if case_sensitive then [] else [ "-i" ] in
-    let args =
-      flag_args
-      @ [ pattern ]
-      @
-      match path with
-      | None -> []
-      | Some p -> [ p ]
-    in
-    { Shell_ir.bin = Bin.of_known Bin.Rg
-    ; args = List.map arg_of_string args
-    ; env = []
-    ; cwd = None
-    ; redirects = []
-    ; sandbox = Sandbox_target.host ()
-    }
-  | Git_status { short } ->
-    let args = if short then [ "-s" ] else [] in
-    { Shell_ir.bin = Bin.of_known Bin.Git
-    ; args = List.map arg_of_string ("status" :: args)
-    ; env = []
-    ; cwd = None
-    ; redirects = []
-    ; sandbox = Sandbox_target.host ()
-    }
-  | Git_clone { repo; branch; depth } ->
-    let args =
-      (if depth <> 1 then [ "--depth"; string_of_int depth ] else [])
-      @ (match branch with
-         | None -> []
-         | Some b -> [ "-b"; b ])
-      @ [ repo ]
-    in
-    { Shell_ir.bin = Bin.of_known Bin.Git
-    ; args = List.map arg_of_string ("clone" :: args)
-    ; env = []
-    ; cwd = None
-    ; redirects = []
-    ; sandbox = Sandbox_target.host ()
-    }
-  | Curl { url; method_; headers; body } ->
-    let method_args =
-      match method_ with
-      | `GET -> []
-      | `POST -> [ "-X"; "POST" ]
-      | `PUT -> [ "-X"; "PUT" ]
-      | `DELETE -> [ "-X"; "DELETE" ]
-    in
-    let header_args =
-      match headers with
-      | None -> []
-      | Some hs -> List.concat_map (fun (k, v) -> [ "-H"; k ^ ": " ^ v ]) hs
-    in
-    let body_args =
-      match body with
-      | None -> []
-      | Some d -> [ "-d"; d ]
-    in
-    let args = method_args @ header_args @ body_args @ [ url ] in
-    { Shell_ir.bin = Bin.of_known Bin.Curl
-    ; args = List.map arg_of_string args
-    ; env = []
-    ; cwd = None
-    ; redirects = []
-    ; sandbox = Sandbox_target.host ()
-    }
-  | Rm { paths; recursive; force } ->
-    let flag_args =
-      (if recursive then [ "-r" ] else []) @ if force then [ "-f" ] else []
-    in
-    { Shell_ir.bin = Bin.of_known Bin.Rm
-    ; args = List.map arg_of_string (flag_args @ paths)
-    ; env = []
-    ; cwd = None
-    ; redirects = []
-    ; sandbox = Sandbox_target.host ()
-    }
-  | Sudo { target_argv } ->
-    { Shell_ir.bin = Bin.of_known Bin.Sudo
-    ; args = List.map arg_of_string target_argv
-    ; env = []
-    ; cwd = None
-    ; redirects = []
-    ; sandbox = Sandbox_target.host ()
-    }
-  | Generic s -> s
+let to_simple : type i o r s. (i, o, r, s) command -> Shell_ir.simple =
+  Shell_ir_typed_walkers_gen.gen_to_simple
 ;;
 
 (* ---------------------------------------------------------------------- *)
-(* GADT extractors — operate through the existential wrapper so that the
-   input type is uniform across constructors with different parameters. *)
+(* GADT extractors — delegated to generated walkers (RFC-0054 PR-5) *)
 
-let risk = function
-  | W (Ls _) -> `Safe
-  | W (Cat _) -> `Safe
-  | W (Rg _) -> `Safe
-  | W (Git_status _) -> `Audited
-  | W (Git_clone _) -> `Audited
-  | W (Curl _) -> `Audited
-  | W (Rm _) -> `Privileged
-  | W (Sudo _) -> `Privileged
-  | W (Generic _) -> `Privileged
-;;
-
-let sandbox = function
-  | W (Ls _) -> `Host
-  | W (Cat _) -> `Host
-  | W (Rg _) -> `Host
-  | W (Git_status _) -> `Host
-  | W (Git_clone _) -> `Docker
-  | W (Curl _) -> `Host
-  | W (Rm _) -> `Host
-  | W (Sudo _) -> `Host
-  | W (Generic _) -> `Host
-;;
+let risk = Shell_ir_typed_walkers_gen.gen_risk
+let sandbox = Shell_ir_typed_walkers_gen.gen_sandbox
 
 (* ---------------------------------------------------------------------- *)
 (* Pretty-printer *)

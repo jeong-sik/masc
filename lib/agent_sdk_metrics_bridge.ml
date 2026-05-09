@@ -41,11 +41,12 @@ let with_registry f =
   Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock registry_mutex) f
 ;;
 
-(* Metric name constants. Exported implicitly via set_gauge / inc_counter
-   calls below — registered in [prometheus.ml:init] for HELP text. *)
-let gauge_stream_depth = "masc_oas_bus_subscriber_stream_depth"
-let counter_publish_block_seconds = "masc_oas_bus_publish_block_seconds_total"
-let counter_publish_total = "masc_oas_bus_publish_total"
+(* Metric names — shared with [prometheus.ml:init] HELP registration.
+   Use the [Prometheus.*] bindings rather than duplicating the strings
+   so a rename in one place propagates at compile time. *)
+let gauge_stream_depth = Prometheus.metric_oas_bus_subscriber_stream_depth
+let counter_publish_block_seconds = Prometheus.metric_oas_bus_publish_block_seconds
+let counter_publish_total = Prometheus.metric_oas_bus_publish
 
 let update_gauge_for purpose value =
   Prometheus.set_gauge

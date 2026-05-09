@@ -109,7 +109,7 @@ let maybe_configured_fields ~include_configured enabled =
 let tcp_port_reachable port =
   try
     let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-    Fun.protect
+    Eio_guard.protect
       ~finally:(fun () -> try Unix.close sock with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Printf.eprintf "[transport_read_model] tcp_port_reachable close failed: %s\n%!" (Printexc.to_string exn))
       (fun () ->
         Unix.connect sock

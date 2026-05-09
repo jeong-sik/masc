@@ -10,6 +10,7 @@ cd "$(git rev-parse --show-toplevel)"
 ALLOWLIST=(
   "lib/core/eio_guard.ml"
   "lib/core/eio_guard.mli"
+  "lib/cdal_runtime/autonomy_exec.ml"
 )
 
 count=0

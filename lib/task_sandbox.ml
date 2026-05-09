@@ -182,7 +182,7 @@ let with_sandbox ~config ~task_id ?base_branch ?repo_name ~agent_name f =
   | Ok sandbox ->
     let result_ref = ref None in
     let exn_ref = ref None in
-    Fun.protect
+    Eio_guard.protect
       ~finally:(fun () ->
         match cleanup ~config ~agent_name sandbox with
         | Ok files -> result_ref := Some files

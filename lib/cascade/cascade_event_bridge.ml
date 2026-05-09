@@ -55,34 +55,11 @@ let inference_model_bucket ~provider ~model =
   else if has "llama" then "llama"
   else "other"
 
-let inference_token_bucket = function
-  | None -> "missing"
-  | Some tokens when tokens <= 0 -> "0"
-  | Some tokens when tokens <= 1024 -> "1_1k"
-  | Some tokens when tokens <= 8192 -> "1k_8k"
-  | Some _ -> "over_8k"
-
 let positive_finite value =
   value > 0.0
   && match classify_float value with
   | FP_nan | FP_infinite -> false
   | FP_normal | FP_subnormal | FP_zero -> true
-
-let observe_inference_tokens ~model_bucket ~phase tokens =
-  let labels =
-    [
-      ("model_bucket", model_bucket);
-      ("phase", phase);
-      ("token_bucket", inference_token_bucket tokens);
-    ]
-  in
-  let value =
-    match tokens with
-    | Some tokens when tokens > 0 -> float_of_int tokens
-    | _ -> 0.0
-  in
-  Prometheus.observe_histogram Prometheus.metric_oas_inference_telemetry_tokens
-    ~labels value
 
 let tok_per_sec_from_ms ~tokens ~ms =
   match (tokens, ms) with
@@ -102,10 +79,11 @@ let observe_inference_telemetry ~provider ~model ~prompt_tokens
   let model_bucket =
     inference_model_bucket ~provider ~model
   in
-  observe_inference_tokens ~model_bucket ~phase:"prompt"
-    prompt_tokens;
-  observe_inference_tokens ~model_bucket ~phase:"completion"
-    completion_tokens;
+  (* Token counts are NOT emitted here.  The authoritative per-request
+     token counter is [on_token_usage] → [Llm_metric_bridge.emit_token_usage]
+     with precise {provider, model} labels.  This function retains only
+     the latency/rate metrics (prompt_tok/s, decode_tok/s) that are
+     unique to the [InferenceTelemetry] event payload. *)
   observe_inference_rate Prometheus.metric_oas_inference_prompt_tok_per_sec
     ~model_bucket
     (tok_per_sec_from_ms ~tokens:prompt_tokens ~ms:prompt_ms);

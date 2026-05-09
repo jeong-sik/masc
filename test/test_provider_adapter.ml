@@ -89,7 +89,7 @@ let test_gemini_auth_env_key_paths () =
   let config =
     Llm_provider.Provider_config.make
       ~kind:Llm_provider.Provider_config.Gemini
-      ~model_id:"gemini-2.5-pro"
+      ~model_id:"gemini-3.1-pro-preview"
       ~base_url:"https://generativelanguage.googleapis.com"
       ()
   in
@@ -147,10 +147,10 @@ let test_default_model_provider_prefix_result () =
 
 let test_default_model_override_label_result () =
   with_env "MASC_DEFAULT_PROVIDER" (Some "gemini") (fun () ->
-      with_env "MASC_DEFAULT_MODEL" (Some "gemini-2.5-pro") (fun () ->
-          match Adapter.default_model_override_label_result "gemini-2.5-flash" with
+      with_env "MASC_DEFAULT_MODEL" (Some "gemini-3.1-pro-preview") (fun () ->
+          match Adapter.default_model_override_label_result "gemini-3-flash-preview" with
           | Ok label ->
-              check string "override keeps provider" "gemini:gemini-2.5-flash"
+              check string "override keeps provider" "gemini:gemini-3-flash-preview"
                 label
           | Error msg -> fail msg))
 
@@ -288,9 +288,9 @@ let test_auto_models_use_declared_policy () =
         (Some [ "kimi-for-coding" ])
         (Adapter.auto_models_for_cascade_prefix "kimi_cli");
       with_env "MASC_GEMINI_CLI_AUTO_MODELS" None (fun () ->
-          with_env "GEMINI_DEFAULT_MODEL" (Some "gemini-2.5-flash") (fun () ->
+          with_env "GEMINI_DEFAULT_MODEL" (Some "gemini-3-flash-preview") (fun () ->
               check (option (list string)) "gemini cli prefers explicit default model env"
-                (Some [ "gemini-2.5-flash" ])
+                (Some [ "gemini-3-flash-preview" ])
                 (Adapter.auto_models_for_cascade_prefix "gemini_cli"))))
 
 let test_runtime_mcp_header_support_uses_declared_policy () =

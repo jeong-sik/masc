@@ -2186,7 +2186,7 @@ let make_claude_code_provider_cfg ?(model_id = "auto") () =
     ~kind:Llm_provider.Provider_config.Claude_code
     ~model_id ~base_url:"" ()
 
-let make_gemini_cli_provider_cfg ?(model_id = "gemini-2.5-pro") () =
+let make_gemini_cli_provider_cfg ?(model_id = "gemini-3.1-pro-preview") () =
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.Gemini_cli
     ~model_id ~base_url:"" ()

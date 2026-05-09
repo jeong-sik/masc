@@ -140,7 +140,7 @@ let test_load_cascade_profile_legacy_fallback () =
       check string "first item provider" "ollama" first_item.provider;
       check string "first item model" "qwen3:14b" first_item.model;
       let second_item = List.nth group.items 1 in
-      check string "second item id" "gemini_cli:gemini-2.5-flash" second_item.id
+      check string "second item id" "gemini_cli:gemini-3-flash-preview" second_item.id
 
 (* -------------------------------------------------------------------------- *)
 (* TOML materializer: groups array -> JSON                                  *)
@@ -174,7 +174,7 @@ strategy = "priority"
 [[groups.items]]
 id = "gemini-flash"
 provider = "gemini_cli"
-model = "gemini-2.5-flash"
+model = "gemini-3-flash-preview"
 timeout_ms = 60000
 priority = 1
 |}

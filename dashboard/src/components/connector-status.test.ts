@@ -163,7 +163,7 @@ function sampleKeepersResponse(overrides?: Partial<Record<string, unknown>>) {
         name: 'nova',
         agent_name: 'keeper-nova-agent',
         status: 'busy',
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3-flash-preview',
         keepalive_running: true,
       },
     ],
@@ -805,7 +805,7 @@ describe('ConnectorStatusPanel', () => {
     expect(novaGroup).not.toBeNull()
     const novaText = novaGroup!.textContent ?? ''
     expect(novaText).toContain('status busy')
-    expect(novaText).toContain('model gemini-2.5-flash')
+    expect(novaText).toContain('model gemini-3-flash-preview')
     expect(novaText).toContain('runtime keeper-nova-agent')
   })
 })
@@ -868,7 +868,7 @@ describe('filterKeeperGroups', () => {
   it('matches on active_model via substring', async () => {
     const filterKeeperGroups = await loadFilter()
     const rows = [
-      group('nova', { name: 'nova', active_model: 'gemini-2.5-flash' }),
+      group('nova', { name: 'nova', active_model: 'gemini-3-flash-preview' }),
       group('luna', { name: 'luna', active_model: 'claude-opus-4' }),
     ]
     const filtered = filterKeeperGroups(rows, 'gemini')

@@ -267,7 +267,7 @@ export const BFCL_RANKINGS: BfclEntry[] = [
   { rank: 6,  model: 'Claude Haiku 4.5 (FC)',      bfclV3: '—', bfclV4: '68.70%', feature: '소형 모델 중 최고 수준',                  license: '상업적' },
   { rank: 11, model: 'Kimi K2 Instruct (FC)',       bfclV3: '—', bfclV4: '59.06%', feature: 'MoonshotAI, MoE 오픈웨이트',             license: 'Modified MIT' },
   { rank: 14, model: 'DeepSeek V3.2 Exp (Prompt)',  bfclV3: '—', bfclV4: '56.73%', feature: 'Prompt+Thinking 모드',                   license: 'MIT' },
-  { rank: 15, model: 'Gemini 2.5 Flash (FC)',       bfclV3: '—', bfclV4: '56.24%', feature: 'Google 경량, FC mode',                    license: '상업적' },
+  { rank: 15, model: 'Gemini 3 Flash Preview (FC)', bfclV3: '—', bfclV4: '56.24%', feature: 'Google 경량, FC mode',                    license: '상업적' },
   { rank: 16, model: 'GPT-5.2 (FC)',                bfclV3: '—', bfclV4: '55.87%', feature: 'OpenAI 최신, MCPMark와 차이 유의',       license: '상업적' },
   { rank: 20, model: 'GPT-4.1 (FC)',                bfclV3: '—', bfclV4: '53.96%', feature: 'OpenAI 4.1, 비용 효율',                  license: '상업적' },
   { rank: 23, model: 'Qwen3-235B-A22B (Prompt)',    bfclV3: '—', bfclV4: '52.15%', feature: 'Alibaba MoE 오픈웨이트',                 license: 'Apache 2.0' },
@@ -310,7 +310,7 @@ export const BFCL_MODEL_BREAKDOWN: BfclModelCategoryBreakdown[] = [
   { model: 'Claude Haiku 4.5',  overall: '68.70%', singleTurn: '86.50', multiTurn: '54.41', agentic: '83.50', hallucination: '53.62', format: '78.68' },
   { model: 'Kimi K2',           overall: '59.06%', singleTurn: '77.89', multiTurn: '42.27', agentic: '66.50', hallucination: '53.68', format: '67.78' },
   { model: 'DeepSeek V3.2',     overall: '56.73%', singleTurn: '73.56', multiTurn: '38.33', agentic: '66.50', hallucination: '45.57', format: '64.36' },
-  { model: 'Gemini 2.5 Flash',  overall: '56.24%', singleTurn: '76.16', multiTurn: '42.11', agentic: '58.00', hallucination: '42.12', format: '70.69' },
+  { model: 'Gemini 3 Flash Preview', overall: '56.24%', singleTurn: '76.16', multiTurn: '42.11', agentic: '58.00', hallucination: '42.12', format: '70.69' },
   { model: 'GPT-5.2',           overall: '55.87%', singleTurn: '70.26', multiTurn: '42.19', agentic: '69.00', hallucination: '38.51', format: '71.63' },
   { model: 'GPT-4.1',           overall: '53.96%', singleTurn: '70.72', multiTurn: '37.81', agentic: '60.50', hallucination: '42.26', format: '70.66' },
   { model: 'Qwen3-235B',        overall: '52.15%', singleTurn: '69.81', multiTurn: '35.67', agentic: '55.00', hallucination: '44.12', format: '68.48' },
@@ -451,7 +451,7 @@ export const WIRING_GAPS: WiringGap[] = [
   { id: 'W10', provider: 'Anthropic Claude', capability: 'tools', oasDeclares: 'supports_tools=true', actualBehavior: 'tool_use/tool_result 블록 구조, 공식 문서와 일치', impact: 'correct' },
   { id: 'W11', provider: 'Anthropic Claude', capability: 'extended thinking', oasDeclares: 'supports_extended_thinking=true', actualBehavior: 'budget_tokens + Interleaved Thinking (Claude 4+), 정확한 선언', impact: 'correct' },
   { id: 'W12', provider: 'Ollama', capability: 'is_ollama flag', oasDeclares: 'is_ollama=true', actualBehavior: 'tool_calls를 raw JSON 객체로 직렬화, 정확한 선언', impact: 'correct' },
-  { id: 'W13', provider: 'Gemini CLI', capability: 'infinite thinking', oasDeclares: '—', actualBehavior: 'Gemini 2.5 Flash에서 thinking loop 무한 루프 발생 (GitHub #2025), 복잡 프롬프트 시 hang', impact: 'high' },
+  { id: 'W13', provider: 'Gemini CLI', capability: 'infinite thinking', oasDeclares: '—', actualBehavior: 'Gemini 3 Flash Preview', impact: 'low' },
   { id: 'W14', provider: 'DeepSeek', capability: 'V3.2 FC', oasDeclares: '—', actualBehavior: 'V3.1 Strict FC (Beta) 지원, R1은 vLLM 경로만 tool calling, V3.2 Speciale은 FC 미지원', impact: 'medium' },
   { id: 'W15', provider: 'Qwen', capability: 'tool format', oasDeclares: '—', actualBehavior: 'Hermes-style tool format 사용, 1M context (3.6 Plus), Hybrid Thinking Mode', impact: 'low' },
   { id: 'W16', provider: 'Nemotron', capability: 'thinking vs FC', oasDeclares: '—', actualBehavior: 'thinking ON 시 tool calling 미지원, thinking OFF 필요 시에만 FC 활성화 (§2.5)', impact: 'medium' },
@@ -566,11 +566,9 @@ export const PROVIDER_MODELS: ProviderModelGroup[] = [
     providerId: 'gemini',
     models: [
       { id: 'gemini-3.1-pro-preview', context: '1M', tier: 'flagship', inputPrice: '$2.00', outputPrice: '$12.00', notes: 'Preview, ≤200K $2/$12, >200K $4/$18' },
-      { id: 'gemini-2.5-pro', context: '1M', tier: 'standard', inputPrice: '$1.25', outputPrice: '$10.00', notes: 'Thinking, ≤200K $1.25/$10' },
       { id: 'gemini-3.1-flash-preview', context: '1M', tier: 'standard', inputPrice: '$1.00', outputPrice: '$6.00', notes: 'Preview' },
       { id: 'gemini-3.1-flash-lite-preview', context: '1M', tier: 'standard', inputPrice: '$0.25', outputPrice: '$1.50', notes: 'Preview, cost-efficient' },
-      { id: 'gemini-2.5-flash', context: '1M', tier: 'fast', inputPrice: '$0.30', outputPrice: '$2.50', notes: 'Thinking, batch $0.15/$1.25' },
-      { id: 'gemini-2.0-flash', context: '1M', tier: 'fast', inputPrice: '$0.10', outputPrice: '$0.40' },
+      { id: 'gemini-3.0-flash', context: '1M', tier: 'fast', inputPrice: '$0.10', outputPrice: '$0.40' },
     ],
   },
   {
@@ -669,7 +667,7 @@ export interface CliTransportInfo {
 
 export const CLI_TRANSPORTS: CliTransportInfo[] = [
   { providerId: 'claude', binary: 'claude', contextWindow: '200K', promptMode: '-p', streamFormat: 'stream-json', argvThreshold: '512KB', notes: 'thinking+tool_use 보존 위해 내부 stream 사용' },
-  { providerId: 'gemini_cli', binary: 'gemini', contextWindow: '1M', promptMode: '-p', streamFormat: 'JSON (sync)', argvThreshold: '—', notes: '--output-format json, 동기식 단일 응답 (streaming 없음). Gemini 2.5 Flash infinite thinking bug (#2025)' },
+  { providerId: 'gemini_cli', binary: 'gemini', contextWindow: '1M', promptMode: '-p', streamFormat: 'JSON (sync)', argvThreshold: '—', notes: '--output-format json, 동기식 단일 응답 (streaming 없음)' },
   { providerId: 'codex_cli', binary: 'codex', contextWindow: '1M', promptMode: 'stdin', streamFormat: 'NDJSON', argvThreshold: '512KB', notes: 'default_prompt_argv_threshold=512KB, GPT-5.2-Codex 기본, 내부 5-model rotation' },
   { providerId: 'kimi', binary: 'kimi-for-coding', contextWindow: '262K', promptMode: '-p', streamFormat: 'NDJSON', argvThreshold: '32KB', notes: 'default_prompt_argv_threshold=32KB, Anthropic API 호환 포맷' },
 ]

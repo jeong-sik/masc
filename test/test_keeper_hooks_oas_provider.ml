@@ -10,8 +10,8 @@ let cases_prefix = [
   "glm:glm-5-turbo",                       "glm";
   "claude:claude-haiku-4-5-20251001",      "claude";
   "claude_code:haiku",                     "claude_code";
-  "gemini:gemini-2.5-flash",               "gemini";
-  "gemini_cli:gemini-2.5-flash",           "gemini_cli";
+  "gemini:gemini-3-flash-preview",         "gemini";
+  "gemini_cli:gemini-3-flash-preview",     "gemini_cli";
   "codex_cli:gpt-5.4",                     "codex_cli";
   "openai:gpt-5.4",                        "openai";
   "kimi:kimi-k2.5",                        "kimi";
@@ -23,7 +23,7 @@ let cases_bare = [
   "glm-5-turbo",                           "unknown";
   "glm-4.7",                               "unknown";
   "claude-haiku-4-5-20251001",             "unknown";
-  "gemini-2.5-flash",                      "unknown";
+  "gemini-3-flash-preview",                "unknown";
   "gpt-5.4",                               "unknown";
   "qwen3.5:35b-a3b-nvfp4",                 "unknown";
   "llama-3.1-70b",                         "unknown";
@@ -33,7 +33,7 @@ let cases_typed_bare = [
   ( "claude-haiku-4-5-20251001",
     Llm_provider.Provider_kind.Anthropic,
     "claude" );
-  ( "gemini-2.5-flash",
+  ( "gemini-3-flash-preview",
     Llm_provider.Provider_kind.Gemini,
     "gemini" );
   ( "gpt-5.4",

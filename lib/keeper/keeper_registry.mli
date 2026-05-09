@@ -143,6 +143,13 @@ type packed_turn_phase = Packed : 'a turn_phase_witness -> packed_turn_phase
 val witness_to_turn_phase : packed_turn_phase -> turn_phase
 val turn_phase_to_witness : turn_phase -> packed_turn_phase
 
+(** Diagnostic label using the constructor name (e.g. ["Turn_routing"]).
+    Used by [validate_turn_phase_transition] to embed the rejected pair
+    in [Invalid_argument] messages.  Distinct from
+    [Keeper_composite_observer.turn_phase_to_string] which emits a
+    snake_case form for dashboards. *)
+val packed_turn_phase_label : packed_turn_phase -> string
+
 val validate_turn_phase_transition : from:packed_turn_phase -> to_:packed_turn_phase -> unit
 
 module Turn_phase_transition : sig
@@ -202,6 +209,11 @@ type packed_decision_stage = Packed : 'a decision_stage_witness -> packed_decisi
 val witness_to_stage : 'a decision_stage_witness -> decision_stage
 val stage_to_witness : decision_stage -> packed_decision_stage
 
+(** Diagnostic label using the constructor name (e.g.
+    ["Decision_guard_ok"]).  Used by [validate_decision_transition] for
+    [Invalid_argument] messages. *)
+val packed_decision_stage_label : packed_decision_stage -> string
+
 val validate_decision_transition : from:decision_stage -> to_:decision_stage -> unit
 
 module Decision_transition : sig
@@ -247,6 +259,11 @@ type packed_cascade_state =
 
 val cascade_state_to_witness : cascade_state -> packed_cascade_state
 val witness_to_cascade_state : packed_cascade_state -> cascade_state
+
+(** Diagnostic label using the constructor name (e.g.
+    ["Cascade_exhausted"]).  Used by [validate_cascade_transition] for
+    [Invalid_argument] messages. *)
+val packed_cascade_state_label : packed_cascade_state -> string
 
 val validate_cascade_transition : from:packed_cascade_state -> to_:packed_cascade_state -> unit
 
@@ -461,7 +478,7 @@ val mark_turn_started : base_path:string -> string -> unit
     Without this boundary signal, the second-and-later SDK turn writes
     transition from the previous SDK turn's terminal phase
     ([Turn_finalizing] after [Cascade_done]/[Cascade_exhausted]), which
-    [validate_turn_phase_transition] rejects with [Assert_failure].
+    [validate_turn_phase_transition] rejects with [Invalid_argument].
 
     This function resets the in-turn FSM fields ([turn_phase],
     [cascade_state], [decision_stage]) on the existing observation, the
@@ -496,7 +513,8 @@ val set_turn_phase :
 
 (** Runtime transition guards for the 4 sub-FSM axes.
     Each validates a (from, to) pair against the TLA+ transition matrix.
-    Invalid transitions raise [Assert_failure] and bump
+    Invalid transitions raise [Invalid_argument] with a message of the
+    form ["<validator>: invalid transition <from> -> <to>"] and bump
     [Prometheus.metric_fsm_guard_violation]. *)
 val validate_turn_phase_transition :
   from:packed_turn_phase -> to_:packed_turn_phase -> unit

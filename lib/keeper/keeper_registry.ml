@@ -208,6 +208,19 @@ let witness_to_turn_phase : packed_turn_phase -> turn_phase = function
   | Packed Turn_finalizing -> Turn_finalizing
   | Packed Turn_exhausted -> Turn_exhausted
 
+(* Diagnostic label for invalid-transition error messages.  Must stay in
+   sync with the [turn_phase] variant — adding a constructor will fail
+   compilation here, which forces the operator to extend
+   [validate_turn_phase_transition] at the same time. *)
+let packed_turn_phase_label : packed_turn_phase -> string = function
+  | Packed Turn_idle -> "Turn_idle"
+  | Packed Turn_prompting -> "Turn_prompting"
+  | Packed Turn_routing -> "Turn_routing"
+  | Packed Turn_executing -> "Turn_executing"
+  | Packed Turn_compacting -> "Turn_compacting"
+  | Packed Turn_finalizing -> "Turn_finalizing"
+  | Packed Turn_exhausted -> "Turn_exhausted"
+
 module Turn_phase_transition = struct
   (* Mirrors [validate_turn_phase_transition] (below): every constructor
      here corresponds to a [true] arm in the runtime transition matrix.
@@ -303,6 +316,14 @@ let stage_to_witness : decision_stage -> packed_decision_stage = function
   | Decision_gate_rejected -> Packed Decision_gate_rejected
   | Decision_tool_policy_selected -> Packed Decision_tool_policy_selected
 
+(* Diagnostic label for invalid-transition error messages.  Mirrors
+   [decision_stage]; constructor changes will fail compilation here. *)
+let packed_decision_stage_label : packed_decision_stage -> string = function
+  | Packed Decision_undecided -> "Decision_undecided"
+  | Packed Decision_guard_ok -> "Decision_guard_ok"
+  | Packed Decision_gate_rejected -> "Decision_gate_rejected"
+  | Packed Decision_tool_policy_selected -> "Decision_tool_policy_selected"
+
 module Decision_transition = struct
   type ('from, 'to_) t =
     | Undecided_to_guard_ok : (decision_undecided, decision_guard_ok) t
@@ -347,7 +368,11 @@ let validate_decision_transition ~from ~to_ =
   | Packed Decision_guard_ok, Packed Decision_undecided
   | Packed Decision_gate_rejected, Packed Decision_undecided
   | Packed Decision_tool_policy_selected, Packed Decision_undecided ->
-      assert false
+      invalid_arg
+        (Printf.sprintf
+           "validate_decision_transition: invalid transition %s -> %s"
+           (packed_decision_stage_label from_packed)
+           (packed_decision_stage_label to_packed))
 
 type cascade_state =
   | Cascade_idle [@tla.idle]
@@ -387,6 +412,15 @@ let witness_to_cascade_state : packed_cascade_state -> cascade_state = function
   | Packed Cascade_trying -> Cascade_trying
   | Packed Cascade_done -> Cascade_done
   | Packed Cascade_exhausted -> Cascade_exhausted
+
+(* Diagnostic label for invalid-transition error messages.  Mirrors
+   [cascade_state]; constructor changes will fail compilation here. *)
+let packed_cascade_state_label : packed_cascade_state -> string = function
+  | Packed Cascade_idle -> "Cascade_idle"
+  | Packed Cascade_selecting -> "Cascade_selecting"
+  | Packed Cascade_trying -> "Cascade_trying"
+  | Packed Cascade_done -> "Cascade_done"
+  | Packed Cascade_exhausted -> "Cascade_exhausted"
 
 type compaction_stage =
   | Compaction_accumulating [@tla.idle]
@@ -990,7 +1024,11 @@ let validate_cascade_transition ~from ~to_ =
   | Packed Cascade_selecting, (Packed Cascade_done | Packed Cascade_exhausted)
   | Packed Cascade_done, Packed Cascade_exhausted
   | Packed Cascade_exhausted, Packed Cascade_done ->
-      assert false
+      invalid_arg
+        (Printf.sprintf
+           "validate_cascade_transition: invalid transition %s -> %s"
+           (packed_cascade_state_label from)
+           (packed_cascade_state_label to_))
 
 let validate_turn_phase_transition ~from ~to_ =
   let (_ : packed_turn_phase) = from in
@@ -999,7 +1037,7 @@ let validate_turn_phase_transition ~from ~to_ =
     ~action:"turn_phase_transition"
     ~stage:"guard"
     (fun () ->
-       assert (
+       let valid =
          match from, to_ with
          (* from Turn_idle *)
          | Packed Turn_idle, Packed Turn_idle -> true
@@ -1057,7 +1095,13 @@ let validate_turn_phase_transition ~from ~to_ =
          | Packed Turn_exhausted, Packed Turn_compacting -> false
          | Packed Turn_exhausted, Packed Turn_finalizing -> false
          | Packed Turn_exhausted, Packed Turn_exhausted -> true
-       ))
+       in
+       if not valid then
+         invalid_arg
+           (Printf.sprintf
+              "validate_turn_phase_transition: invalid transition %s -> %s"
+              (packed_turn_phase_label from)
+              (packed_turn_phase_label to_)))
 
 let set_turn_decision_stage ~base_path name decision_stage =
   let target_packed = stage_to_witness decision_stage in

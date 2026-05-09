@@ -49,12 +49,17 @@ let typed_health_decision err =
   let error = OWN.sdk_error_to_provider_error ~provider:"anthropic" err in
   match error with
   | Some (P.CapacityExhausted { scope = `Provider; _ }) -> Hard_quota
+  | Some (P.CliWrappedHardQuota _) -> Hard_quota
   | Some (P.RateLimit _) -> Soft_rate_limited
   | Some
       (P.CapacityExhausted { scope = `Model; _ }
       | P.AuthError _
       | P.ServerError _
-      | P.InvalidRequest _) ->
+      | P.InvalidRequest _
+      | P.CliWrappedMaxTurns _
+      | P.CliWrappedResumableSession _
+      | P.PermissionDenied _
+      | P.ModelNotFound _) ->
       Failure
   | None -> Failure
 

@@ -2,8 +2,11 @@
 \* Bug Model: cross-cascade fallback per-turn budget.
 \*
 \* Models the cross-cascade promotion path that PR4 introduces in
-\* lib/cascade/cascade_inventory.ml + the call-site refactor in
-\* lib/oas_worker_named.ml:resolve_tool_capable_provider_across_cascades.
+\* lib/cascade/cascade_inventory.ml + the cross-cascade resolver in
+\* lib/cascade/cascade_oas_runner.ml:resolve_tool_capable_provider_across_cascades
+\* (relocated from lib/oas_worker_named.ml by RFC-0047 Phase 4 rename to
+\* lib/keeper/keeper_turn_driver.ml; the resolver itself now lives in
+\* cascade_oas_runner.ml).
 \*
 \* The intended behavior: when a primary cascade exhausts in a turn, the
 \* runtime is allowed to promote ONE provider from the fleet inventory as

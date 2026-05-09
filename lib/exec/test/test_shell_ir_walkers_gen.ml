@@ -1,16 +1,12 @@
-(** RFC-0054 PR-3 — golden-equivalence test between hand-written
-    [Shell_ir_typed.risk] / [Shell_ir_typed.sandbox] and the codegen
-    parallel walkers [Shell_ir_typed_walkers_gen.gen_risk] /
-    [gen_sandbox].
+(** RFC-0054 PR-3 → PR-5 — generated walker correctness test.
 
-    For each of the 9 [Shell_ir_typed.command] constructors, both
-    walkers MUST agree byte-for-byte. If they drift, the codegen spec
-    in [bin/gen_shell_ir_walkers.ml] is out of sync with the
-    hand-written implementation — that is a regression to fix in the
-    spec, not in the test.
-
-    The test is the contract that PR-5 will enforce when it retires
-    the hand-written walkers in favour of the generated ones. *)
+    PR-5 retired the hand-written walkers in [Shell_ir_typed]; the
+    public API ([risk], [sandbox], [to_simple]) now delegates directly
+    to [Shell_ir_typed_walkers_gen].  The equivalence tests below are
+    retained as a round-trip smoke test (they are trivially true now
+    since both sides call the same generated function).  The structural
+    invariants — constructor count and declaration order — remain the
+    primary regression guard. *)
 
 open Masc_exec
 
@@ -18,6 +14,7 @@ let bin_ok name =
   match Bin.of_string name with
   | Ok b -> b
   | Error _ -> assert false
+;;
 
 let lit s = Shell_ir.Lit s
 
@@ -45,32 +42,37 @@ let all_wrapped : Shell_ir_typed.wrapped list =
          ; sandbox = Sandbox_target.host ()
          })
   ]
+;;
 
 let test_risk_parallel_equivalence () =
   List.iter
     (fun w ->
-      let hand = Shell_ir_typed.risk w in
-      let gen = Shell_ir_typed_walkers_gen.gen_risk w in
-      Alcotest.(check bool)
-        (Printf.sprintf
-           "risk equivalence for %s"
-           (match w with Shell_ir_typed.W _ -> "constructor"))
-        true
-        (hand = gen))
+       let hand = Shell_ir_typed.risk w in
+       let gen = Shell_ir_typed_walkers_gen.gen_risk w in
+       Alcotest.(check bool)
+         (Printf.sprintf
+            "risk equivalence for %s"
+            (match w with
+             | Shell_ir_typed.W _ -> "constructor"))
+         true
+         (hand = gen))
     all_wrapped
+;;
 
 let test_sandbox_parallel_equivalence () =
   List.iter
     (fun w ->
-      let hand = Shell_ir_typed.sandbox w in
-      let gen = Shell_ir_typed_walkers_gen.gen_sandbox w in
-      Alcotest.(check bool)
-        (Printf.sprintf
-           "sandbox equivalence for %s"
-           (match w with Shell_ir_typed.W _ -> "constructor"))
-        true
-        (hand = gen))
+       let hand = Shell_ir_typed.sandbox w in
+       let gen = Shell_ir_typed_walkers_gen.gen_sandbox w in
+       Alcotest.(check bool)
+         (Printf.sprintf
+            "sandbox equivalence for %s"
+            (match w with
+             | Shell_ir_typed.W _ -> "constructor"))
+         true
+         (hand = gen))
     all_wrapped
+;;
 
 (* PR-4: gen_to_simple parallel equivalence. The hand-written
    [Shell_ir_typed.to_simple] takes the unwrapped command directly,
@@ -84,6 +86,7 @@ let simple_eq (a : Shell_ir.simple) (b : Shell_ir.simple) : bool =
   && a.cwd = b.cwd
   && a.redirects = b.redirects
   && a.sandbox = b.sandbox
+;;
 
 let pp_simple ppf (s : Shell_ir.simple) =
   Format.fprintf
@@ -92,23 +95,22 @@ let pp_simple ppf (s : Shell_ir.simple) =
     (Bin.to_string s.bin)
     (List.length s.args)
     (List.length s.env)
-    (match s.cwd with None -> "None" | Some _ -> "Some _")
+    (match s.cwd with
+     | None -> "None"
+     | Some _ -> "Some _")
     (List.length s.redirects)
+;;
 
 let test_to_simple_parallel_equivalence () =
   List.iter
     (fun (Shell_ir_typed.W cmd as w) ->
-      let hand = Shell_ir_typed.to_simple cmd in
-      let gen = Shell_ir_typed_walkers_gen.gen_to_simple cmd in
-      let _ = w in
-      if not (simple_eq hand gen) then
-        Alcotest.failf
-          "to_simple drift: hand=%a gen=%a"
-          pp_simple
-          hand
-          pp_simple
-          gen)
+       let hand = Shell_ir_typed.to_simple cmd in
+       let gen = Shell_ir_typed_walkers_gen.gen_to_simple cmd in
+       let _ = w in
+       if not (simple_eq hand gen)
+       then Alcotest.failf "to_simple drift: hand=%a gen=%a" pp_simple hand pp_simple gen)
     all_wrapped
+;;
 
 let test_constructor_count () =
   (* Baseline: 9 constructors as of 2026-05-09. If this fails, either
@@ -119,25 +121,15 @@ let test_constructor_count () =
     "generated constructor count"
     9
     (List.length Shell_ir_typed_walkers_gen.gen_constructor_names);
-  Alcotest.(check int)
-    "test fixture covers all constructors"
-    9
-    (List.length all_wrapped)
+  Alcotest.(check int) "test fixture covers all constructors" 9 (List.length all_wrapped)
+;;
 
 let test_constructor_names_in_declaration_order () =
   Alcotest.(check (list string))
     "generated names match declaration order"
-    [ "Ls"
-    ; "Cat"
-    ; "Rg"
-    ; "Git_status"
-    ; "Git_clone"
-    ; "Curl"
-    ; "Rm"
-    ; "Sudo"
-    ; "Generic"
-    ]
+    [ "Ls"; "Cat"; "Rg"; "Git_status"; "Git_clone"; "Curl"; "Rm"; "Sudo"; "Generic" ]
     Shell_ir_typed_walkers_gen.gen_constructor_names
+;;
 
 let () =
   Alcotest.run
@@ -157,13 +149,11 @@ let () =
             test_to_simple_parallel_equivalence
         ] )
     ; ( "spec_invariants"
-      , [ Alcotest.test_case
-            "constructor count baseline"
-            `Quick
-            test_constructor_count
+      , [ Alcotest.test_case "constructor count baseline" `Quick test_constructor_count
         ; Alcotest.test_case
             "constructor names declaration-order"
             `Quick
             test_constructor_names_in_declaration_order
         ] )
     ]
+;;

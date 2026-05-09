@@ -68,6 +68,8 @@ let builtin_profiles : (string * profile_spec) list =
         required_capabilities = [ "runtime_mcp_tools"; "runtime_tool_events" ];
         provider_filter = None;
       } );
+    ( "local_inline",
+      { required_capabilities = [ "inline_tools" ]; provider_filter = None } );
     ( "local",
       { required_capabilities = []; provider_filter = None } );
   ]

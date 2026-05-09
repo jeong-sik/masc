@@ -400,12 +400,16 @@ let detect_fallback_cycles (entries : catalog_entry list) :
   |> snd
   |> List.rev
 
-(* RFC-0055: capability monotonicity on fallback edges.
+(* RFC-0055 + RFC-0058: capability monotonicity on fallback edges.
 
    A fallback edge source -> target is valid only if:
    1. target's capability profile is a superset of source's profile.
    2. An assignable cascade cannot fall back to a non-assignable (sink)
-      cascade. *)
+      cascade.
+   3. (RFC-0058) Terminal fallbacks (fallback_cascade=null) are exempt
+      from monotonicity, since they represent degraded last-resort
+      operation. Runtime filter rejects per-turn if capabilities
+      insufficient. *)
 let detect_capability_mismatches (entries : catalog_entry list) :
     (string * string * string) list =
   let by_name =
@@ -437,14 +441,23 @@ let detect_capability_mismatches (entries : catalog_entry list) :
                 with
                 | Some src_p, Some dst_p ->
                     if not (Cascade_tier.is_subset_profile src_p dst_p) then
-                      Some
-                        ( entry.name,
-                          target_name,
-                          Printf.sprintf
-                            "capability profile %s is not a subset of target \
-                             profile %s"
-                            (Cascade_capability_profile.profile_to_string src_p)
-                            (Cascade_capability_profile.profile_to_string dst_p) )
+                      (* RFC-0058: exempt terminal fallbacks from monotonicity.
+                         Terminal targets (fallback_cascade=null) are last-resort
+                         degraded operation; runtime filter handles per-turn
+                         acceptance. *)
+                      (match target.fallback_cascade with
+                       | None -> None
+                       | Some _ ->
+                         Some
+                           ( entry.name,
+                             target_name,
+                             Printf.sprintf
+                               "capability profile %s is not a subset of target \
+                                profile %s"
+                               (Cascade_capability_profile.profile_to_string
+                                  src_p)
+                               (Cascade_capability_profile.profile_to_string
+                                  dst_p) ))
                     else None
                 | _ -> None
               in

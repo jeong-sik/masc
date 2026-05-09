@@ -438,9 +438,14 @@ let profile_field_json ~profile_name ~field_name field_value =
       (* RFC-0041 hierarchical group/item profile format. Each element is an
          inline table describing a [Cascade_ref.cascade_group]. The array is
          materialized as [<profile>_groups] in JSON so the loader can use
-         [Cascade_ref.cascade_group_of_json] for parsing. *)
+         [Cascade_ref.cascade_group_of_json] for parsing.
+
+         Accept both [TomlArray] (inline array of tables) and
+         [TomlTableArray] (TOML [[...]] syntax) so operators are not forced
+         into one concrete TOML style. *)
       match field_value with
-      | Otoml.TomlArray items ->
+      | Otoml.TomlArray items
+      | Otoml.TomlTableArray items ->
           Ok [ (profile_name ^ "_groups", `List (List.map otoml_to_yojson items)) ]
       | _ ->
           errorf "expected %s to be an array of group tables, found %s"

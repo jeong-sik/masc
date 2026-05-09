@@ -20,6 +20,22 @@
    tool_schemas_inline
 
    tool_schemas_run
-   tool_schemas_code)
+   tool_schemas_code
+
+   ;; RFC-0057 Phase 0 — emitted by bin/gen_tool_descriptors.ml via the
+   ;; (rule ...) below. Lives in the same module namespace as the
+   ;; hand-written tool_schemas_*.ml so consumers can reach it as
+   ;; Masc_tool_schemas.Tool_descriptors_gen.
+   tool_descriptors_gen)
  (wrapped false)
  (libraries masc_types))
+
+;; RFC-0057 Phase 0 — capture bin/gen_tool_descriptors.exe stdout into
+;; tool_descriptors_gen.ml. %{exe:...} gives dune the build-graph dep
+;; so any change to gen_tool_descriptors.ml triggers a rerun. Same
+;; shape as RFC-0054 PR-3 in lib/exec/dune for
+;; shell_ir_typed_walkers_gen.ml.
+(rule
+ (target tool_descriptors_gen.ml)
+ (deps (:gen %{exe:../../bin/gen_tool_descriptors.exe}))
+ (action (with-stdout-to %{target} (run %{gen}))))

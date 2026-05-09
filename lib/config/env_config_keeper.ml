@@ -721,28 +721,37 @@ let context_ratio_hard_cap =
 (** {1 Context Compaction (OAS)} *)
 
 module ContextCompact = struct
-  let w_recency = get_float ~default:0.50 "MASC_COMPACT_W_RECENCY"
-  let w_role = get_float ~default:0.35 "MASC_COMPACT_W_ROLE"
-  let w_tool = get_float ~default:0.15 "MASC_COMPACT_W_TOOL"
+  (** Importance scoring weights (must sum to 1.0).
+      Algorithm calibration constants — not runtime-tunable.
+      See issue #10733 for rationale. *)
+  let w_recency = 0.50
+  let w_role = 0.35
+  let w_tool = 0.15
 
-  let role_system = get_float ~default:1.0 "MASC_COMPACT_ROLE_SYSTEM"
-  let role_tool = get_float ~default:0.7 "MASC_COMPACT_ROLE_TOOL"
-  let role_user = get_float ~default:0.6 "MASC_COMPACT_ROLE_USER"
-  let role_assistant = get_float ~default:0.4 "MASC_COMPACT_ROLE_ASSISTANT"
+  let role_system = 1.0
+  let role_tool = 0.7
+  let role_user = 0.6
+  let role_assistant = 0.4
 
-  let tool_present = get_float ~default:0.8 "MASC_COMPACT_TOOL_PRESENT"
-  let tool_absent = get_float ~default:0.5 "MASC_COMPACT_TOOL_ABSENT"
+  let tool_present = 0.8
+  let tool_absent = 0.5
 
-  let anchor_boost = get_float ~default:0.95 "MASC_COMPACT_ANCHOR_BOOST"
-  let drop_importance_threshold = get_float ~default:0.3 "MASC_COMPACT_DROP_THRESHOLD"
-  let summarize_keep_recent = get_int ~default:5 "MASC_COMPACT_KEEP_RECENT"
+  let anchor_boost = 0.95
+  let drop_importance_threshold = 0.3
+  let summarize_keep_recent = 5
 
-  let tool_output_prune_limit = get_int ~default:1500 "MASC_COMPACT_TOOL_PRUNE_LIMIT"
+  let tool_output_prune_limit = 1500
 
-  let dynamic_multi_agent_ratio = get_float ~default:0.80 "MASC_COMPACT_DYN_MULTI_AGENT_RATIO"
-  let dynamic_focused_ratio = get_float ~default:0.70 "MASC_COMPACT_DYN_FOCUSED_RATIO"
-  let small_local_floor = get_int ~default:64_000 "MASC_COMPACT_SMALL_LOCAL_FLOOR"
-  let large_cloud_floor = get_int ~default:500_000 "MASC_COMPACT_LARGE_CLOUD_FLOOR"
+  let dynamic_multi_agent_ratio = 0.80
+  let dynamic_focused_ratio = 0.70
+  let small_local_floor = 64_000
+  let large_cloud_floor = 500_000
+
+  (** Kill switch: when true, importance scoring is bypassed and compaction
+      uses simple FIFO ordering. Useful for debugging or emergency rollback.
+      @category Policies
+      @ops_class operator *)
+  let algorithm_disabled = get_bool ~default:false "MASC_COMPACT_ALGORITHM_DISABLED"
 end
 
 (** {1 Dashboard Health Thresholds}

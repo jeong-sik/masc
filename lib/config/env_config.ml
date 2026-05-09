@@ -86,7 +86,8 @@ let print_summary () =
     Env_config_keeper.KeeperSupervisor.liveness_recovery_backoff_base_sec
     Env_config_keeper.KeeperSupervisor.liveness_recovery_backoff_max_sec
     Env_config_keeper.KeeperSupervisor.liveness_recovery_max_attempts;
-  Log.Env.info "ContextCompact: drop_thr=%.2f prune_limit=%d"
+  Log.Env.info "ContextCompact: algorithm_disabled=%b drop_thr=%.2f prune_limit=%d"
+    Env_config_keeper.ContextCompact.algorithm_disabled
     Env_config_keeper.ContextCompact.drop_importance_threshold
     Env_config_keeper.ContextCompact.tool_output_prune_limit
 

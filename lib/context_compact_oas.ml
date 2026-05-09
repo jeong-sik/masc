@@ -200,31 +200,15 @@ let summarize_old_messages ~(keep_recent : int)
 
     Memory summaries and goal messages use MASC-specific prefix matching. *)
 
-(** Importance scoring weights. See rationale in comment block above. *)
-let w_recency = Env_config_core.get_float ~default:0.50 "MASC_COMPACT_W_RECENCY"
-let w_role    = Env_config_core.get_float ~default:0.35 "MASC_COMPACT_W_ROLE"
-let w_tool    = Env_config_core.get_float ~default:0.15 "MASC_COMPACT_W_TOOL"
-
-(** Role importance values. *)
-let role_system    = Env_config_core.get_float ~default:1.0 "MASC_COMPACT_ROLE_SYSTEM"
-let role_tool      = Env_config_core.get_float ~default:0.7 "MASC_COMPACT_ROLE_TOOL"
-let role_user      = Env_config_core.get_float ~default:0.6 "MASC_COMPACT_ROLE_USER"
-let role_assistant = Env_config_core.get_float ~default:0.4 "MASC_COMPACT_ROLE_ASSISTANT"
-
-(** Tool content presence weight. *)
-let tool_present = Env_config_core.get_float ~default:0.8 "MASC_COMPACT_TOOL_PRESENT"
-let tool_absent  = Env_config_core.get_float ~default:0.5 "MASC_COMPACT_TOOL_ABSENT"
-
-(** Minimum score for memory/goal anchor messages. *)
-let anchor_boost = Env_config_core.get_float ~default:0.95 "MASC_COMPACT_ANCHOR_BOOST"
-
-(** Score threshold below which messages are dropped by [DropLowImportance]. *)
-let drop_importance_threshold = Env_config_core.get_float ~default:0.3 "MASC_COMPACT_DROP_THRESHOLD"
-
-(** Number of recent messages to keep in [SummarizeOld] strategy. *)
-let summarize_keep_recent = Env_config_core.get_int ~default:5 "MASC_COMPACT_KEEP_RECENT"
+(** Importance scoring — delegates to [Env_config.ContextCompact] constants.
+    Kill switch [algorithm_disabled] bypasses scoring entirely (FIFO fallback). *)
 
 let score_messages (msgs : Agent_sdk.Types.message list) : (int * float) list =
+  let module C = Env_config.ContextCompact in
+  if C.algorithm_disabled then
+    (* Kill switch active: uniform scores → FIFO ordering *)
+    List.mapi (fun i _ -> (i, 1.0)) msgs
+  else
   let n = List.length msgs in
   List.mapi (fun i (m : Agent_sdk.Types.message) ->
     let recency = if n <= 1 then 1.0
@@ -232,24 +216,24 @@ let score_messages (msgs : Agent_sdk.Types.message list) : (int * float) list =
            t *. t
     in
     let role_w = match m.role with
-      | Agent_sdk.Types.System -> role_system
-      | Agent_sdk.Types.Tool -> role_tool
-      | Agent_sdk.Types.User -> role_user
-      | Agent_sdk.Types.Assistant -> role_assistant
+      | Agent_sdk.Types.System -> C.role_system
+      | Agent_sdk.Types.Tool -> C.role_tool
+      | Agent_sdk.Types.User -> C.role_user
+      | Agent_sdk.Types.Assistant -> C.role_assistant
     in
     let msg_text = Agent_sdk.Types.text_of_message m in
     let has_tool_content = List.exists (function
       | Agent_sdk.Types.ToolUse _ | Agent_sdk.Types.ToolResult _ -> true
       | _ -> false) m.content
     in
-    let tool_w = if has_tool_content then tool_present else tool_absent in
-    let score = w_recency *. recency +. w_role *. role_w +. w_tool *. tool_w in
+    let tool_w = if has_tool_content then C.tool_present else C.tool_absent in
+    let score = C.w_recency *. recency +. C.w_role *. role_w +. C.w_tool *. tool_w in
     let score =
       if String.starts_with ~prefix:memory_summary_prefix msg_text
          || String.starts_with ~prefix:_legacy_memory_summary_prefix msg_text
          || String.starts_with ~prefix:goal_prefix msg_text
          || String.starts_with ~prefix:_legacy_goal_prefix msg_text then
-        Float.max score anchor_boost
+        Float.max score C.anchor_boost
       else score
     in
     (i, Float.min 1.0 (Float.max 0.0 score))
@@ -277,25 +261,24 @@ let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
   | DropLowImportance ->
     Agent_sdk.Context_reducer.Custom (fun msgs ->
       let scores = score_messages msgs in
-      let threshold = drop_importance_threshold in
+      let threshold = Env_config.ContextCompact.drop_importance_threshold in
       List.filteri (fun i _m ->
         match List.assoc_opt i scores with
         | Some score -> score >= threshold
         | None -> true
       ) msgs)
   | Dynamic _ ->
-    (* Dynamic is resolved before reaching oas_strategy_of.
-       If it leaks here, fall back to DropLowImportance. *)
     Agent_sdk.Context_reducer.Custom (fun msgs ->
       let scores = score_messages msgs in
-      let threshold = drop_importance_threshold in
+      let threshold = Env_config.ContextCompact.drop_importance_threshold in
       List.filteri (fun i _m ->
         match List.assoc_opt i scores with
         | Some score -> score >= threshold
         | None -> true
       ) msgs)
   | SummarizeOld ->
-    Agent_sdk.Context_reducer.Custom (summarize_old_messages ~keep_recent:summarize_keep_recent)
+    Agent_sdk.Context_reducer.Custom
+      (summarize_old_messages ~keep_recent:Env_config.ContextCompact.summarize_keep_recent)
 
 (* ================================================================ *)
 (* Public API                                                       *)

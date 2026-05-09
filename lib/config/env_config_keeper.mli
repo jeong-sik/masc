@@ -229,6 +229,7 @@ module ContextCompact : sig
   val dynamic_focused_ratio : float
   val small_local_floor : int
   val large_cloud_floor : int
+  val algorithm_disabled : bool
 end
 
 (** {1 Docker playground} *)

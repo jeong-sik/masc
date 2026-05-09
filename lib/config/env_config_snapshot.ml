@@ -485,40 +485,11 @@ let cli_entries =
 
 let compaction_entries =
   [
-    entry ~default:"0.95" "MASC_COMPACT_ANCHOR_BOOST"
-      "Anchor boost for important messages in compaction";
-    entry ~default:"0.3" "MASC_COMPACT_DROP_THRESHOLD"
-      "Drop importance threshold for compaction";
-    entry ~default:"0.70" "MASC_COMPACT_DYN_FOCUSED_RATIO"
-      "Dynamic compaction ratio for focused sessions";
-    entry ~default:"0.80" "MASC_COMPACT_DYN_MULTI_AGENT_RATIO"
-      "Dynamic compaction ratio for multi-agent sessions";
-    entry ~default:"5" "MASC_COMPACT_KEEP_RECENT"
-      "Number of recent messages to always keep in compaction";
-    entry ~default:"(none)" "MASC_COMPACT_LARGE_CLOUD_FLOOR"
-      "Large cloud context floor for compaction (tokens)";
-    entry ~default:"0.4" "MASC_COMPACT_ROLE_ASSISTANT"
-      "Compaction importance score for assistant role";
-    entry ~default:"1.0" "MASC_COMPACT_ROLE_SYSTEM"
-      "Compaction importance score for system role";
-    entry ~default:"0.7" "MASC_COMPACT_ROLE_TOOL"
-      "Compaction importance score for tool role";
-    entry ~default:"0.6" "MASC_COMPACT_ROLE_USER"
-      "Compaction importance score for user role";
-    entry ~default:"(none)" "MASC_COMPACT_SMALL_LOCAL_FLOOR"
-      "Small local context floor for compaction (tokens)";
-    entry ~default:"0.5" "MASC_COMPACT_TOOL_ABSENT"
-      "Compaction score when tool output absent";
-    entry ~default:"0.8" "MASC_COMPACT_TOOL_PRESENT"
-      "Compaction score when tool output present";
-    entry ~default:"1500" "MASC_COMPACT_TOOL_PRUNE_LIMIT"
-      "Tool output prune character limit";
-    entry ~default:"0.50" "MASC_COMPACT_W_RECENCY"
-      "Weight for recency in compaction scoring";
-    entry ~default:"0.35" "MASC_COMPACT_W_ROLE"
-      "Weight for role in compaction scoring";
-    entry ~default:"0.15" "MASC_COMPACT_W_TOOL"
-      "Weight for tool in compaction scoring";
+    (* Algorithm-class knobs converted to code constants in
+       Env_config_keeper.ContextCompact. No longer env-exposed.
+       See issue #10733 for rationale. *)
+    entry ~default:"false" "MASC_COMPACT_ALGORITHM_DISABLED"
+      "Kill switch: bypass importance scoring, use FIFO ordering";
     entry ~default:"0.95" "MASC_CONTEXT_RATIO_HARD_CAP"
       "Absolute ceiling for compaction ratio_gate (clamped 0.80-0.99)";
   ]

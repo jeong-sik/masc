@@ -384,22 +384,6 @@ val resolve_api_key_env :
 
 (** {1 Discovery-Aware Health Filtering} *)
 
-(** Filter a provider list by local endpoint health.
-
-    Probes local (llama-server) endpoints via {!Discovery}. When all
-    local endpoints are unhealthy, removes local providers from the list
-    so cloud providers serve as fallback.
-
-    When the list contains only local providers, passes through unchanged
-    (let the provider return a connection error rather than an empty list).
-
-    Cloud providers always pass through unfiltered. *)
-val filter_healthy :
-  sw:Eio.Switch.t ->
-  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  Llm_provider.Provider_config.t list ->
-  Llm_provider.Provider_config.t list
-
 type health_filter_rejection =
   Cascade_health_filter.health_filter_rejection =
   | All_missing_api_key of int
@@ -407,6 +391,17 @@ type health_filter_rejection =
 
 val health_filter_rejection_to_string : health_filter_rejection -> string
 
+(** Filter a provider list by local endpoint health.
+
+    Probes local (llama-server) endpoints via {!Discovery}. When all
+    local endpoints are unhealthy, removes local providers from the list
+    so cloud providers serve as fallback.
+
+    Returns [Error] when the cascade is configurationally broken
+    (all providers missing API keys) or has drifted below the
+    live-fallback threshold (all local unhealthy with no cloud
+    fallback). Callers must handle the typed rejection — the prior
+    fail-open variant is gone. *)
 val filter_healthy_strict :
   sw:Eio.Switch.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->

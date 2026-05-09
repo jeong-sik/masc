@@ -1170,9 +1170,12 @@ let prepare_agent_setup
                  { current_params with
                    thinking_budget = adaptive_thinking_budget
                  ; enable_thinking =
-                     (match adaptive_thinking_override with
-                      | Some _ as v -> v
-                      | None -> current_params.enable_thinking)
+                     (match cascade_seed.thinking_enabled with
+                      | Some false -> Some false
+                      | _ ->
+                        match adaptive_thinking_override with
+                        | Some _ as v -> v
+                        | None -> current_params.enable_thinking)
                  }
                in
                let ctx =

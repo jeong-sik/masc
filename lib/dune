@@ -236,6 +236,12 @@
    agent_sdk.base
    agent_sdk.llm_provider
    masc_mcp.cdal_runtime
+   ;; RFC-0056 Phase 0 — CDAL Phase 1A evaluator extracted to lib/cdal/
+   ;; as its own sub-library. Hosts Cdal_types + Adversarial_eval +
+   ;; Labeling. Phase 1 will move judge / eval_v1 / loader once their
+   ;; root-namespace cycles (Proof_artifact_reader, Bounded, Session,
+   ;; Attribution, Violation_record) are resolved.
+   masc_mcp.cdal
    masc_mcp.oas_compat
 
    uri

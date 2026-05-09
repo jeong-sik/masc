@@ -87,7 +87,7 @@
  (modules cdal_label)
  (public_name cdal-label)
  (package masc_mcp)
- (libraries masc_mcp cmdliner yojson unix masc_core masc_types fs_compat time_compat masc_log masc_coord masc_backend masc_process masc_eio_context fmt str eio_main eio mirage-crypto-rng.unix httpun cohttp cohttp-eio masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider ))
+ (libraries masc_mcp masc_mcp.cdal cmdliner yojson unix masc_core masc_types fs_compat time_compat masc_log masc_coord masc_backend masc_process masc_eio_context fmt str eio_main eio mirage-crypto-rng.unix httpun cohttp cohttp-eio masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider ))
 
 (executable
  (name masc_worker_run)

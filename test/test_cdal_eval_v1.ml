@@ -4,7 +4,7 @@
     and verdict_of_outcome extraction. *)
 
 module CE = Masc_mcp.Cdal_eval_v1
-module CT = Masc_mcp.Cdal_types
+module CT = Cdal_types
 module CL = Masc_mcp.Cdal_loader
 
 (* ================================================================ *)

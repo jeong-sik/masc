@@ -34,23 +34,6 @@ let config_category_enum_strings =
 
 let schemas : tool_schema list = [
   {
-    name = "masc_config";
-    description = "Return the effective runtime configuration with source attribution (env var or default) for each setting. \
-Sensitive values (tokens, passwords) are masked. Use to inspect or verify the server config without restarting. \
-Pass category to filter results to a single section.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("category", `Assoc [
-          ("type", `String "string");
-          ("enum", `List (List.map (fun s -> `String s) config_category_enum_strings));
-          ("description", `String "Filter by config category");
-        ]);
-      ]);
-      ("additionalProperties", `Bool false);
-    ];
-  };
-  {
     name = "masc_webrtc_offer";
     description = "Create a WebRTC signaling offer in the server registry and return an offer_id. \
 Use from the initiating side before calling masc_webrtc_answer from the answering side.";
@@ -290,4 +273,4 @@ will be added here when their handlers land.";
       ("additionalProperties", `Bool false);
     ];
   };
-]
+] @ Tool_descriptors_gen.schemas

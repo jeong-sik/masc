@@ -1,16 +1,17 @@
-(** RFC-0057 Phase 0 regression test.
+(** RFC-0057 Phase 1 regression test.
 
     Guards [bin/gen_tool_descriptors.ml] output against the
-    hand-written schema in [Tool_schemas_misc] for [masc_config].
-    A drift in description text, enum ordering, additionalProperties,
-    or any nested Yojson value fails this test before the change
-    reaches an LLM client.
+    effective schema exposed by [Tool_schemas_misc] for [masc_config]
+    and [masc_code_read].
 
-    Phase 1 will replace [Tool_schemas_misc.masc_config] with the
-    generated schema and remove this comparison; until then, the
-    two schemas live side-by-side and this test pins them
-    field-for-field. Same pattern as RFC-0054 PR-3's
-    [test_shell_ir_typed_walkers_gen]. *)
+    Phase 1 removed the hand-written [masc_config] entry from
+    [Tool_schemas_misc] and appended [Tool_descriptors_gen.schemas]
+    so the generated schemas are the SSOT. The test still pins
+    generated vs effective field-for-field to catch drift in
+    description text, enum ordering, additionalProperties, or any
+    nested Yojson value before it reaches an LLM client.
+
+    Same pattern as RFC-0054 PR-3's [test_shell_ir_typed_walkers_gen]. *)
 
 open Masc_domain
 
@@ -52,6 +53,28 @@ let test_masc_config_input_schema_matches () =
     gen.input_schema
 ;;
 
+let test_masc_code_read_name_matches () =
+  let gen = find_by_name "masc_code_read" Tool_descriptors_gen.schemas in
+  let hand = find_by_name "masc_code_read" Tool_schemas_misc.schemas in
+  Alcotest.(check string) "masc_code_read name" hand.name gen.name
+;;
+
+let test_masc_code_read_description_matches () =
+  let gen = find_by_name "masc_code_read" Tool_descriptors_gen.schemas in
+  let hand = find_by_name "masc_code_read" Tool_schemas_misc.schemas in
+  Alcotest.(check string) "masc_code_read description" hand.description gen.description
+;;
+
+let test_masc_code_read_input_schema_matches () =
+  let gen = find_by_name "masc_code_read" Tool_descriptors_gen.schemas in
+  let hand = find_by_name "masc_code_read" Tool_schemas_misc.schemas in
+  Alcotest.check
+    yojson_testable
+    "masc_code_read input_schema (Yojson.Safe.equal)"
+    hand.input_schema
+    gen.input_schema
+;;
+
 let () =
   Alcotest.run
     "tool_descriptors_gen"
@@ -62,6 +85,14 @@ let () =
             "input_schema"
             `Quick
             test_masc_config_input_schema_matches
+        ] )
+    ; ( "masc_code_read field-by-field"
+      , [ Alcotest.test_case "name" `Quick test_masc_code_read_name_matches
+        ; Alcotest.test_case "description" `Quick test_masc_code_read_description_matches
+        ; Alcotest.test_case
+            "input_schema"
+            `Quick
+            test_masc_code_read_input_schema_matches
         ] )
     ]
 ;;

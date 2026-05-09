@@ -41,7 +41,7 @@ type SurfaceSectionId =
   // code (Stage 5 IDE plane — shell only in PR-1, 4-pane content in PR-2+)
   | 'ide-shell'
 
-type NonHomeTabId = Exclude<TabId, 'overview' | 'logs'>
+export type NonHomeTabId = Exclude<TabId, 'overview' | 'logs'>
 
 interface DashboardNavGroup {
   id: SurfaceId
@@ -62,7 +62,7 @@ interface DashboardNavItem {
   defaultParams?: Record<string, string>
 }
 
-interface DashboardSectionNavItem {
+export interface DashboardSectionNavItem {
   id: SurfaceSectionId
   label: string
   description: string

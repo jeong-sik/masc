@@ -1,7 +1,7 @@
 import type {
   KeeperCompositeSnapshot,
   KeeperCompositeInvariants,
-} from '../api/keeper'
+} from '../api/schemas/keeper-composite'
 
 export type CompositeObservation = {
   ts: number

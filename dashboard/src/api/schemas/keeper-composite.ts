@@ -191,6 +191,12 @@ export const KeeperCompositeSnapshotSchema = object({
   run_id: string(),
   ts: number(),
   phase: KeeperCompositePhaseSchema,
+  // When `phase` is `Stable`, the backend may carry the underlying raw
+  // keeper phase (e.g. `paused`) so the dashboard can tell a true idle
+  // Stable from a Stable that masks a non-idle source. Absent on older
+  // backends and on non-Stable phases — `optional` + `nullable` matches
+  // both the missing-key and explicit-null shapes the backend emits.
+  collapsed_from: optional(nullable(string())),
   turn_phase: KeeperCompositeTurnPhaseSchema,
   decision: object({ stage: KeeperCompositeDecisionStageSchema }),
   cascade: object({ state: KeeperCompositeCascadeStateSchema }),

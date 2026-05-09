@@ -12,6 +12,6 @@ let bump_counter ~action ~stage =
 
 let wrap_unit ~action ~stage thunk =
   try thunk ()
-  with Assert_failure _ as exn ->
+  with (Assert_failure _ | Invalid_argument _) as exn ->
     bump_counter ~action ~stage;
     raise exn

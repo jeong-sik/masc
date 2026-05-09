@@ -1,7 +1,10 @@
 (** Tests for sub-FSM runtime transition guards (PR #14153).
     Mirrors the TLA+ transition matrix in executable form.
-    Valid transitions must pass; invalid transitions must raise
-    [Assert_failure] and bump [masc_fsm_guard_violation_total]. *)
+    Valid transitions must pass; invalid transitions for turn_phase,
+    decision_stage and cascade_state must raise [Invalid_argument] with
+    a message that names both endpoints, and bump
+    [masc_fsm_guard_violation_total].  [compaction_stage] still raises
+    [Assert_failure] (untouched by the diagnostic-message PR). *)
 
 open Masc_mcp.Keeper_registry
 module Obs = Masc_mcp.Keeper_composite_observer
@@ -50,7 +53,7 @@ let test_valid_turn_phase_transitions () =
   List.iter
     (fun (from, to_) ->
        try validate_turn_phase_transition ~from ~to_ with
-       | Assert_failure _ ->
+       | (Assert_failure _ | Invalid_argument _) ->
          Alcotest.fail
            (Printf.sprintf
               "valid turn_phase %s -> %s rejected"
@@ -101,7 +104,7 @@ let test_invalid_turn_phase_transitions () =
               (Obs.turn_phase_to_string from)
               (Obs.turn_phase_to_string to_))
        with
-       | Assert_failure _ -> ())
+       | Invalid_argument _ -> ())
     cases
 ;;
 
@@ -131,7 +134,7 @@ let test_valid_decision_transitions () =
   List.iter
     (fun (from, to_) ->
        try validate_decision_transition ~from ~to_ with
-       | Assert_failure _ ->
+       | (Assert_failure _ | Invalid_argument _) ->
          Alcotest.fail
            (Printf.sprintf
               "valid decision %s -> %s rejected"
@@ -158,7 +161,7 @@ let test_invalid_decision_transitions () =
               (Obs.decision_stage_to_string (stage_to_witness from))
               (Obs.decision_stage_to_string (stage_to_witness to_)))
        with
-       | Assert_failure _ -> ())
+       | Invalid_argument _ -> ())
     cases
 ;;
 
@@ -194,7 +197,7 @@ let test_valid_cascade_transitions () =
   List.iter
     (fun (from, to_) ->
        try validate_cascade_transition ~from ~to_ with
-       | Assert_failure _ ->
+       | (Assert_failure _ | Invalid_argument _) ->
          Alcotest.fail
            (Printf.sprintf
               "valid cascade %s -> %s rejected"
@@ -234,7 +237,7 @@ let test_invalid_cascade_transitions () =
               (Obs.cascade_state_to_string from)
               (Obs.cascade_state_to_string to_))
        with
-       | Assert_failure _ -> ())
+       | Invalid_argument _ -> ())
     cases
 ;;
 
@@ -257,7 +260,7 @@ let walk_cascade_sequence label seq =
   List.iter
     (fun (from, to_) ->
        try validate_cascade_transition ~from ~to_
-       with Assert_failure _ ->
+       with (Assert_failure _ | Invalid_argument _) ->
          Alcotest.fail
            (Printf.sprintf
               "%s step %s -> %s should pass"
@@ -335,6 +338,82 @@ let test_invalid_compaction_transitions () =
     cases
 ;;
 
+(* ── Diagnostic message format ──────────────────────────── *)
+
+let contains haystack needle =
+  let h_len = String.length haystack in
+  let n_len = String.length needle in
+  if n_len = 0 then true
+  else if n_len > h_len then false
+  else
+    let rec loop i =
+      if i + n_len > h_len then false
+      else if String.sub haystack i n_len = needle then true
+      else loop (i + 1)
+    in
+    loop 0
+;;
+
+let capture_invalid_arg thunk =
+  try thunk (); None
+  with Invalid_argument msg -> Some msg
+;;
+
+let assert_msg_contains ~msg ~needle =
+  Alcotest.(check bool)
+    (Printf.sprintf "message %S contains %S" msg needle)
+    true
+    (contains msg needle)
+;;
+
+let test_turn_phase_message_includes_labels () =
+  (* Turn_routing -> Turn_exhausted is the rejected pair from the
+     2026-05-09 qa-king crash (cascade-fallback exhausted from the
+     selecting/routing slice). Future occurrences of the same crash
+     class will surface from/to labels in the message instead of a
+     bare line:character anchor. *)
+  let from : packed_turn_phase = Packed Turn_routing in
+  let to_ : packed_turn_phase = Packed Turn_exhausted in
+  match
+    capture_invalid_arg (fun () -> validate_turn_phase_transition ~from ~to_)
+  with
+  | None -> Alcotest.fail "validator should have raised Invalid_argument"
+  | Some msg ->
+    assert_msg_contains ~msg ~needle:"validate_turn_phase_transition";
+    assert_msg_contains ~msg ~needle:(packed_turn_phase_label from);
+    assert_msg_contains ~msg ~needle:(packed_turn_phase_label to_)
+;;
+
+let test_decision_message_includes_labels () =
+  let from : decision_stage = Decision_guard_ok in
+  let to_ : decision_stage = Decision_undecided in
+  match
+    capture_invalid_arg (fun () -> validate_decision_transition ~from ~to_)
+  with
+  | None -> Alcotest.fail "validator should have raised Invalid_argument"
+  | Some msg ->
+    assert_msg_contains ~msg ~needle:"validate_decision_transition";
+    assert_msg_contains
+      ~msg
+      ~needle:(packed_decision_stage_label (stage_to_witness from));
+    assert_msg_contains
+      ~msg
+      ~needle:(packed_decision_stage_label (stage_to_witness to_))
+;;
+
+let test_cascade_message_includes_labels () =
+  let from : packed_cascade_state = Packed Cascade_idle in
+  let to_ : packed_cascade_state = Packed Cascade_exhausted in
+  match
+    capture_invalid_arg (fun () -> validate_cascade_transition ~from ~to_)
+  with
+  | None -> Alcotest.fail "validator should have raised Invalid_argument"
+  | Some msg ->
+    assert_msg_contains ~msg ~needle:"validate_cascade_transition";
+    assert_msg_contains ~msg ~needle:(packed_cascade_state_label from);
+    assert_msg_contains ~msg ~needle:(packed_cascade_state_label to_)
+;;
+
 (* ── Test runner ────────────────────────────────────────── *)
 
 let () =
@@ -389,6 +468,20 @@ let () =
             "invalid transitions"
             `Quick
             test_invalid_compaction_transitions
+        ] )
+    ; ( "diagnostic_messages"
+      , [ Alcotest.test_case
+            "turn_phase rejection includes from/to labels"
+            `Quick
+            test_turn_phase_message_includes_labels
+        ; Alcotest.test_case
+            "decision rejection includes from/to labels"
+            `Quick
+            test_decision_message_includes_labels
+        ; Alcotest.test_case
+            "cascade rejection includes from/to labels"
+            `Quick
+            test_cascade_message_includes_labels
         ] )
     ]
 ;;

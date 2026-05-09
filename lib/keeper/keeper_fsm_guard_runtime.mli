@@ -6,7 +6,9 @@
     the function body.
 
     [wrap_unit] runs a [unit -> unit] thunk under that contract:
-    catches [Assert_failure], bumps the
+    catches [Assert_failure] (legacy [@@fsm_guard]-injected asserts)
+    and [Invalid_argument] (explicit [invalid_arg] from validators that
+    embed the rejected ([from], [to]) pair in the message), bumps the
     [Prometheus.metric_fsm_guard_violation] counter labelled with
     [action] / [stage], and re-raises.  FSM contract violations are
     fail-closed in production and tests; [MASC_FSM_GUARD_ASSERT] is no
@@ -14,9 +16,9 @@
 
     The thunk is expected to call an identity helper of return type
     [unit] (a function whose only purpose is to carry the
-    [@@fsm_guard] attribute). Non-[Assert_failure] exceptions
-    propagate unchanged — only the spec-violation channel is
-    intercepted. *)
+    [@@fsm_guard] attribute). Exceptions other than [Assert_failure] and
+    [Invalid_argument] propagate unchanged — only the spec-violation
+    channel is intercepted. *)
 
 val wrap_unit :
   action:string ->

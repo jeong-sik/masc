@@ -400,6 +400,60 @@ let detect_fallback_cycles (entries : catalog_entry list) :
   |> snd
   |> List.rev
 
+(* RFC-0055: capability monotonicity on fallback edges.
+
+   A fallback edge source -> target is valid only if:
+   1. target's capability profile is a superset of source's profile.
+   2. An assignable cascade cannot fall back to a non-assignable (sink)
+      cascade. *)
+let detect_capability_mismatches (entries : catalog_entry list) :
+    (string * string * string) list =
+  let by_name =
+    List.fold_left
+      (fun acc e -> StringMap.add e.name e acc)
+      StringMap.empty entries
+  in
+  List.filter_map
+    (fun (entry : catalog_entry) ->
+      match entry.fallback_cascade with
+      | None -> None
+      | Some target_name -> (
+          match StringMap.find_opt target_name by_name with
+          | None -> None
+          | Some (target : catalog_entry) ->
+              let assignable_violation =
+                if entry.keeper_assignable && not target.keeper_assignable then
+                  Some
+                    ( entry.name,
+                      target_name,
+                      "assignable cascade falls back to sink \
+                       (keeper_assignable=false)" )
+                else None
+              in
+              let cap_violation =
+                match
+                  ( entry.required_capability_profile,
+                    target.required_capability_profile )
+                with
+                | Some src_p, Some dst_p ->
+                    if not (Cascade_tier.is_subset_profile src_p dst_p) then
+                      Some
+                        ( entry.name,
+                          target_name,
+                          Printf.sprintf
+                            "capability profile %s is not a subset of target \
+                             profile %s"
+                            (Cascade_capability_profile.profile_to_string src_p)
+                            (Cascade_capability_profile.profile_to_string dst_p) )
+                    else None
+                | _ -> None
+              in
+              match assignable_violation, cap_violation with
+              | Some v, _ -> Some v
+              | None, Some v -> Some v
+              | None, None -> None))
+    entries
+
 let load_catalog ~config_path =
   match load_json config_path with
   | Error _ as err -> err
@@ -488,7 +542,16 @@ let load_catalog ~config_path =
                cascade (e.g. local_recovery) or removing the field."
               entry (String.concat " → " (cycle @ [entry])))
         cycles;
-      Ok entries
+      let mismatches = detect_capability_mismatches entries in
+      if mismatches <> [] then
+        Error
+          (Printf.sprintf "cascade capability mismatch (RFC-0055): %s"
+             (mismatches
+             |> List.map (fun (src, dst, reason) ->
+                    Printf.sprintf "%s -> %s: %s" src dst reason)
+             |> String.concat "; "))
+      else
+        Ok entries
   | Ok _ -> Ok []
 
 let load_profile_weighted ~config_path ~name =

@@ -7,6 +7,17 @@
 
     @since God file decomposition *)
 
+(* DEPRECATED (RFC-0057 Phase 2): These string classifiers will be
+   replaced by typed Provider_error variants. The new dispatch path
+   receives CliWrapped { kind = Hard_quota | Max_turns | ... }
+   directly from the provider adapter, eliminating the need for
+   substring reconstruction.
+
+   During the transition window, these functions remain for
+   backward compatibility with old provider adapters that still
+   emit InvalidRequest { message }. They will be removed once
+   the Llm_provider opam pin is bumped to the RFC-0057 Phase 1
+   version. *)
 let retry_message_looks_like_not_found (message : string) : bool =
   String_util.contains_substring_ci message "not found"
   || String_util.contains_substring_ci message "status code: 404"

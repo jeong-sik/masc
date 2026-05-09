@@ -36,9 +36,10 @@ type route_spec = {
    the runtime cascade chain handles try/fail/next-cascade.  If the
    catalog is empty at runtime,
    [Cascade_catalog_runtime.validate_path_result] already rejects keeper
-   boot, so a missing catalog never reaches these helpers; the
-   [failwith] in [fallback_from_entries]/[fallback_name_for_catalog]
-   guards that boot-time invariant. *)
+   boot.  [fallback_from_entries]/[fallback_name_for_catalog] return the
+   first alias from [spec_for_use] as a soft fallback, so test
+   executables that link these modules transitively do not crash at
+   module-init time. *)
 
 let route use key aliases = { use; key; aliases }
 
@@ -189,29 +190,22 @@ let first_catalog_name entries =
   | (entry : Cascade_config_loader.catalog_entry) :: _ -> Some entry.name
   | [] -> None
 
-let catalog_empty_invariant_violation context =
-  failwith
-    (Printf.sprintf
-       "cascade catalog empty when resolving %s — \
-        Cascade_catalog_runtime.validate_path_result should have rejected \
-        keeper boot before this is reached"
-       context)
+let first_alias_or_key (spec : route_spec) =
+  match spec.aliases with
+  | first :: _ -> first
+  | [] -> spec.key
 
 let fallback_from_entries use entries =
-  let _ = spec_for_use use in
+  let spec = spec_for_use use in
   match first_catalog_name entries with
   | Some name -> name
-  | None ->
-      catalog_empty_invariant_violation
-        (Printf.sprintf "logical use %S" (logical_use_key use))
+  | None -> first_alias_or_key spec
 
 let fallback_name_for_catalog use ~catalog =
-  let _ = spec_for_use use in
+  let spec = spec_for_use use in
   match catalog with
   | name :: _ -> name
-  | [] ->
-      catalog_empty_invariant_violation
-        (Printf.sprintf "logical use %S" (logical_use_key use))
+  | [] -> first_alias_or_key spec
 
 let logged_invalid_route_targets : (string * string, unit) Hashtbl.t =
   Hashtbl.create 8

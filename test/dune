@@ -713,6 +713,8 @@
         test_keeper_recurring
         test_cdal_types
         test_cdal_loader
+        test_cdal_proof
+        test_cdal_risk_contract
         test_cdal_judge
         test_cdal_verifiable_markers
         test_cdal_eval_v1
@@ -917,6 +919,8 @@
         test_keeper_recurring
         test_cdal_types
         test_cdal_loader
+        test_cdal_proof
+        test_cdal_risk_contract
         test_cdal_judge
         test_cdal_verifiable_markers
         test_cdal_eval_v1

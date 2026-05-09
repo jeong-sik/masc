@@ -11,6 +11,7 @@ type config = {
   port: int;
   host: string;
   max_connections: int;
+  listen_backlog: int;
 }
 
 let default_config = {
@@ -20,6 +21,7 @@ let default_config = {
       ~default:Masc_network_defaults.masc_http_default_host
       "MASC_HTTP_HOST";
   max_connections = Env_config_core.get_int ~default:512 "MASC_HTTP_MAX_CONNECTIONS";
+  listen_backlog = Env_config_core.get_int ~default:128 "MASC_TCP_LISTEN_BACKLOG";
 }
 
 (** HTTP request handler type *)

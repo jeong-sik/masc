@@ -234,9 +234,11 @@ module Turn_phase_transition = struct
     | Prompting_to_routing : (turn_prompting, turn_routing) t
     | Prompting_to_executing : (turn_prompting, turn_executing) t
     | Prompting_to_finalizing : (turn_prompting, turn_finalizing) t
+    | Prompting_to_exhausted : (turn_prompting, turn_exhausted) t
     | Routing_to_prompting : (turn_routing, turn_prompting) t
     | Routing_to_routing : (turn_routing, turn_routing) t
     | Routing_to_executing : (turn_routing, turn_executing) t
+    | Routing_to_exhausted : (turn_routing, turn_exhausted) t
     | Executing_to_prompting : (turn_executing, turn_prompting) t
     | Executing_to_routing : (turn_executing, turn_routing) t
     | Executing_to_executing : (turn_executing, turn_executing) t
@@ -246,10 +248,12 @@ module Turn_phase_transition = struct
     | Compacting_to_prompting : (turn_compacting, turn_prompting) t
     | Compacting_to_compacting : (turn_compacting, turn_compacting) t
     | Compacting_to_finalizing : (turn_compacting, turn_finalizing) t
+    | Compacting_to_exhausted : (turn_compacting, turn_exhausted) t
     | Finalizing_to_prompting : (turn_finalizing, turn_prompting) t
     | Finalizing_to_routing : (turn_finalizing, turn_routing) t
     | Finalizing_to_executing : (turn_finalizing, turn_executing) t
     | Finalizing_to_finalizing : (turn_finalizing, turn_finalizing) t
+    | Finalizing_to_exhausted : (turn_finalizing, turn_exhausted) t
     | Exhausted_to_prompting : (turn_exhausted, turn_prompting) t
     | Exhausted_to_routing : (turn_exhausted, turn_routing) t
     | Exhausted_to_executing : (turn_exhausted, turn_executing) t
@@ -262,9 +266,11 @@ module Turn_phase_transition = struct
     | Prompting_to_routing -> "prompting->routing"
     | Prompting_to_executing -> "prompting->executing"
     | Prompting_to_finalizing -> "prompting->finalizing"
+    | Prompting_to_exhausted -> "prompting->exhausted"
     | Routing_to_prompting -> "routing->prompting"
     | Routing_to_routing -> "routing->routing"
     | Routing_to_executing -> "routing->executing"
+    | Routing_to_exhausted -> "routing->exhausted"
     | Executing_to_prompting -> "executing->prompting"
     | Executing_to_routing -> "executing->routing"
     | Executing_to_executing -> "executing->executing"
@@ -274,10 +280,12 @@ module Turn_phase_transition = struct
     | Compacting_to_prompting -> "compacting->prompting"
     | Compacting_to_compacting -> "compacting->compacting"
     | Compacting_to_finalizing -> "compacting->finalizing"
+    | Compacting_to_exhausted -> "compacting->exhausted"
     | Finalizing_to_prompting -> "finalizing->prompting"
     | Finalizing_to_routing -> "finalizing->routing"
     | Finalizing_to_executing -> "finalizing->executing"
     | Finalizing_to_finalizing -> "finalizing->finalizing"
+    | Finalizing_to_exhausted -> "finalizing->exhausted"
     | Exhausted_to_prompting -> "exhausted->prompting"
     | Exhausted_to_routing -> "exhausted->routing"
     | Exhausted_to_executing -> "exhausted->executing"
@@ -1054,7 +1062,7 @@ let validate_turn_phase_transition ~from ~to_ =
          | Packed Turn_prompting, Packed Turn_executing -> true  (* via set_turn_phase *)
          | Packed Turn_prompting, Packed Turn_compacting -> false
          | Packed Turn_prompting, Packed Turn_finalizing -> true  (* via mark_turn_gate_rejected_by_name *)
-         | Packed Turn_prompting, Packed Turn_exhausted -> false
+         | Packed Turn_prompting, Packed Turn_exhausted -> true  (* via set_turn_cascade_state: Cascade_exhausted before any cascade attempt (e.g. all candidates filtered out at admission) *)
          (* from Turn_routing *)
          | Packed Turn_routing, Packed Turn_idle -> false  (* new turn init is reset, not transition *)
          | Packed Turn_routing, Packed Turn_prompting -> true  (* via set_turn_cascade_state: Cascade_idle on retry *)
@@ -1062,7 +1070,7 @@ let validate_turn_phase_transition ~from ~to_ =
          | Packed Turn_routing, Packed Turn_executing -> true  (* via set_turn_cascade_state: Cascade_trying *)
          | Packed Turn_routing, Packed Turn_compacting -> false
          | Packed Turn_routing, Packed Turn_finalizing -> false
-         | Packed Turn_routing, Packed Turn_exhausted -> false
+         | Packed Turn_routing, Packed Turn_exhausted -> true  (* via set_turn_cascade_state: Cascade_exhausted during model selection (cascade-fallback exhausted before Cascade_trying) *)
          (* from Turn_executing *)
          | Packed Turn_executing, Packed Turn_idle -> false  (* new turn init is reset, not transition *)
          | Packed Turn_executing, Packed Turn_prompting -> true  (* via set_turn_cascade_state: Cascade_idle retry *)

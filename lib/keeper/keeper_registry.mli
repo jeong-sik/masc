@@ -160,9 +160,11 @@ module Turn_phase_transition : sig
     | Prompting_to_routing : (turn_prompting, turn_routing) t
     | Prompting_to_executing : (turn_prompting, turn_executing) t
     | Prompting_to_finalizing : (turn_prompting, turn_finalizing) t
+    | Prompting_to_exhausted : (turn_prompting, turn_exhausted) t
     | Routing_to_prompting : (turn_routing, turn_prompting) t
     | Routing_to_routing : (turn_routing, turn_routing) t
     | Routing_to_executing : (turn_routing, turn_executing) t
+    | Routing_to_exhausted : (turn_routing, turn_exhausted) t
     | Executing_to_prompting : (turn_executing, turn_prompting) t
     | Executing_to_routing : (turn_executing, turn_routing) t
     | Executing_to_executing : (turn_executing, turn_executing) t
@@ -172,10 +174,12 @@ module Turn_phase_transition : sig
     | Compacting_to_prompting : (turn_compacting, turn_prompting) t
     | Compacting_to_compacting : (turn_compacting, turn_compacting) t
     | Compacting_to_finalizing : (turn_compacting, turn_finalizing) t
+    | Compacting_to_exhausted : (turn_compacting, turn_exhausted) t
     | Finalizing_to_prompting : (turn_finalizing, turn_prompting) t
     | Finalizing_to_routing : (turn_finalizing, turn_routing) t
     | Finalizing_to_executing : (turn_finalizing, turn_executing) t
     | Finalizing_to_finalizing : (turn_finalizing, turn_finalizing) t
+    | Finalizing_to_exhausted : (turn_finalizing, turn_exhausted) t
     | Exhausted_to_prompting : (turn_exhausted, turn_prompting) t
     | Exhausted_to_routing : (turn_exhausted, turn_routing) t
     | Exhausted_to_executing : (turn_exhausted, turn_executing) t

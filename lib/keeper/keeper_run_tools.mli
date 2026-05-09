@@ -50,8 +50,8 @@ type tool_search_hit_partition =
   ; filtered_by_policy : int
   }
 
-val partition_tool_search_hits :
-     core:string list
+val partition_tool_search_hits
+  :  core:string list
   -> core_always:string list
   -> allowed:string list
   -> retrieved:(string * float) list
@@ -65,7 +65,7 @@ val partition_tool_search_hits :
     at the OAS call site. *)
 type agent_setup =
   { tools : Agent_sdk.Tool.t list
-  (** Release resources owned by the prepared keeper tool bundle.
+    (** Release resources owned by the prepared keeper tool bundle.
       Callers should invoke this once after the turn consumes the setup,
       on both success and exception paths.  Implementations must be
       idempotent and should not raise; callers defensively catch and log
@@ -91,8 +91,8 @@ type agent_setup =
   ; actual_keeper_tool_names_ref : string list ref
   }
 
-val prepare_agent_setup :
-     config:Coord.config
+val prepare_agent_setup
+  :  config:Coord.config
   -> meta:Keeper_types.keeper_meta
   -> ctx_work:working_context
   -> session:Keeper_types.session_context

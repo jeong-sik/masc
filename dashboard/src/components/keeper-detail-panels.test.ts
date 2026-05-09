@@ -2,9 +2,8 @@ import { render } from 'preact'
 import { html } from 'htm/preact'
 import { describe, it, expect, afterEach } from 'vitest'
 import type { Keeper, KeeperMetricPoint} from '../types'
+import { autonomyHint, formatDuration } from './keeper-detail-ctx-utils'
 import {
-  autonomyHint,
-  formatDuration,
   InferenceTelemetryPanel,
   RelationshipList,
   TraitsList,

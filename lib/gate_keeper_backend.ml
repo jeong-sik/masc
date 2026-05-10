@@ -76,9 +76,9 @@ let filesystem_safe_or_unknown value =
 
 let agent_name_for_channel_actor ~channel ~channel_room_id ~channel_user_id =
   Printf.sprintf "gate:%s:%s:%s"
-    (normalized_or_unknown channel)
-    (normalized_or_unknown channel_room_id)
-    (normalized_or_unknown channel_user_id)
+    (filesystem_safe_or_unknown channel)
+    (filesystem_safe_or_unknown channel_room_id)
+    (filesystem_safe_or_unknown channel_user_id)
 
 let contextualize_message ~channel ~channel_user_id ~channel_user_name
     ~channel_room_id ~content =

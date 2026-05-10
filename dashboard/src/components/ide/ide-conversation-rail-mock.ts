@@ -96,6 +96,15 @@ function unixishToMs(ts: number | null): number {
 }
 
 function boardKindFromPost(post: BoardPost): ThreadKind {
+  if (post.hearth) {
+    switch (post.hearth.toLowerCase()) {
+      case 'approve': return 'approve'
+      case 'flag': return 'flag'
+      case 'question': return 'question'
+      case 'suggest': return 'suggest'
+      case 'note': return 'note'
+    }
+  }
   const body = (post.body ?? '').toLowerCase()
   const title = (post.title ?? '').toLowerCase()
   const text = `${title} ${body}`

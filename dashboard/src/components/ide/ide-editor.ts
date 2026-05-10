@@ -23,6 +23,7 @@ import {
   internalDocumentSync,
   syntaxHighlightExt,
 } from './ide-editor-extensions'
+import { lspExtension } from './ide-lsp-client'
 import { SplitDiffView, UnifiedDiffView } from './ide-diff-view'
 import { KeeperBadge } from '../keeper-badge'
 
@@ -489,6 +490,7 @@ function CodeMirrorEditor({
           lineNumberExt(),
           syntaxHighlightExt(),
           lang,
+          lspExtension({ filePath: mountDocument.file_path }),
           ...(onKeeperLineSelect
             ? [keeperLineSelectExt(() => ownershipStore.ownership(), onKeeperLineSelect)]
             : []),

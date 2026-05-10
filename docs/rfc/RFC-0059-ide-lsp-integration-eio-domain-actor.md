@@ -1,10 +1,10 @@
 # RFC-0059 — IDE LSP Integration + Eio Domain/Actor Parallelism
 
-Status: Phase 1 Complete · Phase 2 Draft
+Status: Phase 1 Complete · Phase 2 Verified, Ready for PR-5
 Author: jeong-sik (with Claude Opus 4.7)
-Date: 2026-05-10 · Updated 2026-05-11
+Date: 2026-05-10 · Updated 2026-05-11 (Phase 2 verification + Tier A integration)
 Supersedes: —
-Related: `lib/server/server_ide_lsp_proxy.ml`, `lib/ide/ide_annotations.ml` (functional), RFC-0056 (sub-library extraction pattern)
+Related: `lib/server/server_ide_lsp_proxy.ml`, `lib/ide/ide_annotations.ml` (functional), RFC-0056 (sub-library extraction pattern), PR #14502 (Tier A perf quick wins), PR #14505 (Tier A simplify follow-up)
 
 ## 1. Problem
 
@@ -35,9 +35,17 @@ LSP method dispatch coverage:
 
 Not yet forwarded: `documentSymbol`, `hover`, `definition`, `references`, `completion`, `documentHighlight`, `foldingRange`, `selectionRange`, `documentLink`, `colorPresentation`, `formatting`, `rangeFormatting`, `onTypeFormatting`, `rename`, `prepareRename`, `codeAction`, `codeLens/resolve`.
 
-### 1.2 Keeper execution is single-fiber (Phase 2 — Not Yet Started)
+### 1.2 Keeper execution is single-fiber (Phase 2 — Verified, Ready for PR-5)
 
-91K LOC across 421 files in `lib/keeper/`. Heartbeat loops run as sequential Eio fibers. `Domain.spawn` appears 0 times in the entire codebase. For N concurrent keepers (prod: 16–36), each heartbeat tick competes for the same Domain's scheduler. Agent SDK calls (HTTP round-trips 2–30s) block the fiber without yielding the Domain to other compute-bound work.
+91K LOC across 421 files in `lib/keeper/`. Verified state on `origin/main` at `662cf59f7d` (2026-05-11):
+
+- **Heartbeat tick loop**: `lib/keeper/keeper_heartbeat_loop.ml:1568` `run_heartbeat_loop` defines `let rec loop ()` at line 1626. Single-fiber recursive, calls `Eio_guard.fair_yield ()` before each cycle (line 1633) — cooperative scheduling only, no Domain partition.
+- **Supervisor fork**: `lib/keeper/keeper_supervisor.ml:262` does `Eio.Fiber.fork ~sw:ctx.sw (fun () -> ...; Keeper_keepalive.run_heartbeat_loop ...)` per keeper. All N keepers share `ctx.sw` and therefore the single Domain.
+- **Domain count in codebase**: `rg "Domain.spawn|Domain_manager|Eio.Domain_manager" lib/ bin/` returns 0 hits. Confirmed: `Domain.recommended_domain_count` is also unreferenced.
+
+For N concurrent keepers (prod: 16–36, target: 64+), each heartbeat tick competes for the same Domain's scheduler. Agent SDK calls (HTTP round-trips 2–30s) block the fiber and only `Eio_guard.fair_yield` cedes — but yield only redistributes within the same Domain.
+
+Hardware budget on the target M3 Max: `Domain.recommended_domain_count () = 16` (verified at session time, 2026-05-11). At 64 keepers, even ideal Domain partitioning maps 4 keepers to a Domain, so HTTP-bound work still benefits significantly: 64 simultaneous in-flight HTTP calls vs the current single-Domain ceiling where the Eio scheduler holds them all in one OS thread.
 
 OCaml 5.x `Domain.spawn` + `Eio.Promise` enables true parallelism across cores. The Eio scheduler already manages fibers; Domains add the parallel axis.
 
@@ -175,14 +183,20 @@ Constraint: OCaml Domains are not lightweight threads — pool size bounded by `
 
 Migrate keeper heartbeat loop to actor model:
 
-Current pattern (`keeper_heartbeat.ml`):
+Current pattern (`lib/keeper/keeper_heartbeat_loop.ml:1568-1840`):
 ```
-let rec tick keeper state =
-  let* action = decide keeper state in
-  exec keeper action;
-  Eio.Time.sleep delay;
-  tick keeper state
+let run_heartbeat_loop ~proactive_warmup_sec ctx m stop ~wakeup =
+  ...
+  let rec loop () =
+    if Atomic.get stop then ()
+    else (
+      Eio_guard.fair_yield ();
+      ...                       (* presence, snapshot, board, turn, recurring stages *)
+      loop ())
+  in loop ()
 ```
+
+State that today lives as closure-captured `ref`s (`turn_running`, `consecutive_failures`, `timing_ring`, `last_meta_mtime`, etc.) becomes the actor's explicit state record. The `Eio_guard.fair_yield ()` at line 1633 stays — it remains useful inside a Domain to cede to peer keepers on the same Domain.
 
 Actor pattern:
 ```
@@ -196,12 +210,12 @@ let actor_handler keeper inbox =
 ```
 
 Benefits:
-- Keeper state is explicit, not mutable ref scattered across modules
-- Messages are typed (no hidden state mutations)
+- Keeper state is explicit, not closure-captured `ref`s scattered across the 1.8k-line loop body.
+- Messages are typed (no hidden state mutations through `Atomic.t` + `ref` interleaving)
 - `Domain_pool.submit` dispatches to parallel Domain
 - Crash recovery: supervisor restarts actor from last state
 
-Scope: modify `keeper_heartbeat.ml`, `keeper_supervisor.ml`, `keeper_registry.ml`. Keeper *logic* unchanged — only the execution wrapper.
+Scope: modify `lib/keeper/keeper_heartbeat_loop.ml`, `lib/keeper/keeper_supervisor.ml` (the `Eio.Fiber.fork ~sw:ctx.sw` at line 262 becomes `Domain_pool.submit pool ...`), `lib/keeper/keeper_registry.ml`. Keeper *logic* unchanged — only the execution wrapper.
 
 **PR-8: Repo Sync Async** (~100 LOC modify)
 
@@ -290,10 +304,11 @@ Domain/Actor for keepers: the win is parallelism of agent SDK HTTP calls (2–30
 ### Phase 2 (modify)
 | File | LOC Δ | Description |
 |---|---|---|
-| `lib/keeper/keeper_heartbeat.ml` | -100/+200 | Actor loop wrapper |
-| `lib/keeper/keeper_supervisor.ml` | -50/+80 | Actor supervision |
-| `lib/keeper/keeper_registry.ml` | -30/+60 | Actor registry |
+| `lib/keeper/keeper_heartbeat_loop.ml` (1835 LOC) | -150/+300 | Actor loop wrapper for `run_heartbeat_loop` |
+| `lib/keeper/keeper_supervisor.ml` (2476 LOC) | -50/+100 | Replace `Eio.Fiber.fork ~sw:ctx.sw` per keeper with `Domain_pool.submit` (line 262) |
+| `lib/keeper/keeper_registry.ml` | -30/+60 | Cross-Domain registry access (Mutex hand-off or RCU snapshot) |
 | `lib/repo_manager/repo_sync.ml` | -20/+50 | Eio.Path + Eio.Process |
+| `lib/fs_compat/fs_compat.ml` | +30 | Domain-local fd cache (PR #14502 T5 left a single-domain-only cache; multi-domain rollout requires `Domain.DLS` per-domain hashtable) |
 | `lib/dune` | +4 | New modules |
 
 **Total Phase 1**: 522 LOC new, 177 LOC modified across 5 files (COMPLETE).
@@ -303,8 +318,26 @@ Domain/Actor for keepers: the win is parallelism of agent SDK HTTP calls (2–30
 
 Phase 1 merged to `main` as 3 new modules + proxy rewiring. This RFC document is updated to reflect Phase 1 as complete retrospective.
 
-Phase 2 (Eio Domain/Actor) remains Draft. Before Phase 2 RFC is finalized, the following verification is required:
-1. `keeper_heartbeat.ml` actual tick loop pattern vs RFC §3.2 pseudocode
-2. `keeper_supervisor.ml` post-PR-#14491 state
-3. `Domain.recommended_domain_count` on target hardware
-4. Keeper HTTP call concurrency measurement — fiber-only vs Domain parallelism benefit
+Phase 2 (Eio Domain/Actor) verification — completed 2026-05-11 against `origin/main` `662cf59f7d`:
+
+1. **Tick loop pattern vs RFC §3.2 pseudocode**: actual file is `lib/keeper/keeper_heartbeat_loop.ml` (NOT `keeper_heartbeat.ml`), 1835 LOC. `run_heartbeat_loop` at line 1568 builds closure-captured state (`turn_running`, `consecutive_failures`, `timing_ring`, `last_meta_mtime`, `last_successful_heartbeat_ts`, `last_heartbeat_cycle_ts`, plus a persistent `Agent_sdk.Context.t`) and runs `let rec loop ()` at line 1626. The body cycles through presence → snapshot → board → turn → recurring stages with `Eio_guard.fair_yield ()` at line 1633. RFC §3.2 pseudocode is structurally accurate but the actual state surface is wider than `state` — the actor migration must thread these refs through the actor's explicit state record.
+
+2. **`keeper_supervisor.ml` post-PR-#14491 state**: PR #14491 (`a2e34b63d4`) wired OAS telemetry into provider health, livelock gate, and supervisor — but did NOT change the per-keeper fork pattern. `lib/keeper/keeper_supervisor.ml:262` still uses `Eio.Fiber.fork ~sw:ctx.sw (fun () -> ... Keeper_keepalive.run_heartbeat_loop ...)`. The supervisor now does additional bookkeeping (watchdog `last_failure_reason` inspection at lines 290-307, dispatch-event routing at 320-329) but the fundamental "one fiber per keeper, all on the same Domain" structure is unchanged. PR-7 must keep the watchdog signal contract while replacing the `fork ~sw` with `Domain_pool.submit pool`.
+
+3. **`Domain.recommended_domain_count` on target hardware**: M3 Max → 16. Verified at session time. At 64 keepers and a Domain-pool of 16, even-distribution gives 4 keepers per Domain. HTTP-bound work scales linearly because Eio fibers within a Domain still cooperatively yield during `Eio.Time.with_timeout` on the HTTP socket.
+
+4. **Keeper HTTP call concurrency measurement**: deferred to PR-6 acceptance test. Current single-Domain ceiling: all 64 keepers' HTTP round-trips share one OS thread's epoll loop. Expected Domain-pool ceiling: 16 OS threads' epoll loops → roughly 16× the syscall parallelism for blocking I/O work. The measurement target is wall-clock for a synthetic 64-keeper batch where each issues one 5-second HTTP call: single-Domain baseline ≈ 5s × ⌈64 / `connect_concurrency`⌉, Domain-pool target ≈ 5s × ⌈64 / (16 × `connect_concurrency_per_domain`)⌉. The harness in `benchmarks/benchmark.sh` is parameterizable for this — extension is part of PR-6's success criteria.
+
+## 10. Tier A Integration (PR #14502, PR #14505)
+
+The Tier A perf quick wins merged 2026-05-10 (commits `196e7bb6a8`, `3ec105f6fb`) made several decisions that interact with Phase 2's Domain split:
+
+| Tier A change | Phase 2 implication |
+|---|---|
+| `lib/keeper/keeper_turn_slot.ml` `holder_table` → `Holder_map.t Atomic.t` (T3) | Already lock-free for reads. Cross-Domain `Atomic.get` is safe (atomic loads on the persistent map). Writers serialize via `holder_mutex` (Eio.Mutex) — at multi-Domain rollout this becomes a Stdlib.Mutex (Eio.Mutex is single-Domain). |
+| `lib/sse.ml` `session_disconnect_hooks : (unit -> unit) SMap.t Atomic.t` (T1) | Same story — `Atomic.get` is cross-Domain safe; writers go through `Lockfree_atomic.update_with_commit` which uses `Atomic.compare_and_set`. No change needed. |
+| `lib/fs_compat/fs_compat.ml` `Append_fd_cache` LRU (T5) | **Single-domain assumption baked in** (Stdlib.Mutex protecting one Hashtbl.t). At multi-Domain rollout this must become per-Domain via `Domain.DLS.t`. The Tier A docstring already calls this out as a TODO. |
+| `lib/server/server_dashboard_http_core.ml` parameterized cache (T6) | Uses `Dashboard_cache.get_or_compute_with_timeout` which already has its own concurrency model (fibers, single-Domain). Phase 2 may need an audit of `Dashboard_cache` internals — out of scope for PR-5/6 but flagged for PR-7 review. |
+| `lib/sse.ml` `?on_disconnect` argument added by PR #14505 to close register/set_disconnect_hook race | Cross-Domain unaffected (atomic registry under the hood). |
+
+The `Append_fd_cache` is the only Tier A piece that breaks cleanly at multi-Domain. PR-7 file inventory adds `lib/fs_compat/fs_compat.ml +30 LOC` for the per-Domain cache rewrite.

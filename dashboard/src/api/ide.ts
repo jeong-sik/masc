@@ -17,6 +17,7 @@ export interface IdeAnnotationFilter {
   readonly file_path?: string
   readonly keeper_id?: string
   readonly goal_id?: string
+  readonly task_id?: string
 }
 
 export interface CreateAnnotationInput {
@@ -28,6 +29,7 @@ export interface CreateAnnotationInput {
   readonly content: string
   readonly goal_id?: string
   readonly task_id?: string
+  readonly task_id?: string
 }
 
 function appendFilterParams(
@@ -37,6 +39,7 @@ function appendFilterParams(
   if (filter.file_path) params.set('file_path', filter.file_path)
   if (filter.keeper_id) params.set('keeper_id', filter.keeper_id)
   if (filter.goal_id) params.set('goal_id', filter.goal_id)
+  if (filter.task_id) params.set('task_id', filter.task_id)
 }
 
 function appendWorkspaceParams(

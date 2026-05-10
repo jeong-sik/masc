@@ -742,7 +742,7 @@ export function FleetTelemetryPanel() {
 
       <${WarningBanner} warnings=${value.warnings} />
 
-      <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
+      <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
         <${SummaryCard}
           title="키퍼 가동률"
           value=${`${counts.live}/${value.rows.length || 0}`}
@@ -755,6 +755,9 @@ export function FleetTelemetryPanel() {
           detail=${counts.stale > 0 ? `${counts.stale}개 키퍼가 ${Math.round(STALE_ACTIVITY_SEC / 60)}분 이상 정체 중입니다.` : '정체된 키퍼가 활동 임계값을 넘기지 않았습니다.'}
           tone=${toneForPressure(counts.hot, counts.warn)}
         />
+      </div>
+
+      <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
         <${SummaryCard}
           title="차단된 키퍼"
           value=${counts.blocked.toString()}

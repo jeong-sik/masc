@@ -1,6 +1,7 @@
 import { signal, effect } from '@preact/signals'
 import { activeIdeFile } from './ide-shell'
 import { activeKeeperName } from '../../keeper-state'
+import { selectedTask } from '../goals/task-detail-selection'
 import {
   discoverRepositories,
   fetchRepositoriesList,
@@ -143,6 +144,7 @@ export function createIdeDataCoordinator(): IdeDataCoordinator {
     const filePath = activeIdeFile.value
     const keeper = activeKeeperName.value
     const repoId = activeRepositoryIdSignal.value
+    const task = selectedTask.value
 
     // Cancel in-flight requests for previous file
     abortController.abort()
@@ -203,7 +205,7 @@ export function createIdeDataCoordinator(): IdeDataCoordinator {
     }).catch(() => {})
 
     // Load annotations
-    fetchIdeAnnotations({ file_path: filePath }, opts).then(annotations => {
+    fetchIdeAnnotations({ file_path: filePath, goal_id: task?.goal_id ?? undefined, task_id: task?.id ?? undefined }, opts).then(annotations => {
       if (signal.aborted) return
       annotationsSignal.value = annotations
     }).catch(() => {})

@@ -41,6 +41,49 @@ let json_error message =
 let json_ok data =
   `Assoc [("ok", `Bool true); ("data", data)]
 
+let build_presence_snapshot state =
+  let base = base_path_of_state state in
+  let runtime_id =
+    let base_name = Filename.basename base in
+    if base_name = "" then "masc-runtime" else base_name
+  in
+  let branch =
+    let head_path = Filename.concat base ".git/HEAD" in
+    if Sys.file_exists head_path then
+      let ref_line =
+        let ic = open_in head_path in
+        let line = input_line ic in
+        close_in ic;
+        line
+      in
+      if String.starts_with ~prefix:"ref: refs/heads/" ref_line then
+        String.sub ref_line 16 (String.length ref_line - 16)
+      else
+        ref_line
+    else
+      "main"
+  in
+  let entries =
+    let agents = Agent_registry_eio.list_active ~within_seconds:300.0 () in
+    List.map (fun (a : Agent_identity.t) ->
+      `Assoc [
+        ("keeper_id", `String a.Agent_identity.agent_name);
+        ("workspace_label", `String (Filename.basename base));
+        ("branch", `String branch);
+        ("role", `String "keeper");
+        ("status", `String "active");
+        ("last_seen_ms", `Intlit (Printf.sprintf "%.0f" (a.Agent_identity.registered_at *. 1000.0)));
+      ])
+      agents
+  in
+  `Assoc [
+    ("runtime_id", `String runtime_id);
+    ("branch", `String branch);
+    ("supervisor", `String "local");
+    ("connected", `Bool true);
+    ("entries", `List entries);
+  ]
+
 let add_routes router =
   let router1 =
     Http.Router.get "/api/v1/ide/annotations" (fun request reqd ->
@@ -63,7 +106,12 @@ let add_routes router =
             | Some g when g <> "" -> Some g
             | _ -> None
           in
-          let filter = { Ide_annotation_types.file_path; keeper_id; goal_id } in
+          let task_id =
+            match Uri.get_query_param uri "task_id" with
+            | Some t when t <> "" -> Some t
+            | _ -> None
+          in
+          let filter = { Ide_annotation_types.file_path; keeper_id; goal_id; task_id } in
           let annotations = Ide_annotations.list ~base_dir:base ~filter in
           let json = `List (List.map Ide_annotation_types.annotation_to_json annotations) in
           Http.Response.json ~compress:true ~request:request
@@ -191,54 +239,16 @@ let add_routes router =
       request reqd)
     router3
   in
+  (* [build_presence_snapshot] extracted in main — conflict resolved by taking
+     main's helper call instead of our inline construction. *)
   let router5 =
     Http.Router.get "/api/v1/ide/presence" (fun request reqd ->
-    with_public_read
-      (fun state _req reqd ->
-        let base = base_path_of_state state in
-        let runtime_id =
-          let base_name = Filename.basename base in
-          if base_name = "" then "masc-runtime" else base_name
-        in
-        let branch =
-          let head_path = Filename.concat base ".git/HEAD" in
-          if Sys.file_exists head_path then
-            let ref_line =
-              let ic = open_in head_path in
-              let line = input_line ic in
-              close_in ic;
-              line
-            in
-            if String.starts_with ~prefix:"ref: refs/heads/" ref_line then
-              String.sub ref_line 16 (String.length ref_line - 16)
-            else
-              ref_line
-          else
-            "main"
-        in
-        let entries =
-          let agents = Agent_registry_eio.list_active ~within_seconds:300.0 () in
-          List.map (fun (a : Agent_identity.t) ->
-            `Assoc [
-              ("keeper_id", `String a.Agent_identity.agent_name);
-              ("workspace_label", `String (Filename.basename base));
-              ("branch", `String branch);
-              ("role", `String "keeper");
-              ("status", `String "active");
-              ("last_seen_ms", `Intlit (Printf.sprintf "%.0f" (a.Agent_identity.registered_at *. 1000.0)));
-            ])
-            agents
-        in
-        let snapshot = `Assoc [
-          ("runtime_id", `String runtime_id);
-          ("branch", `String branch);
-          ("supervisor", `String "local");
-          ("connected", `Bool true);
-          ("entries", `List entries);
-        ] in
-        Http.Response.json ~compress:true ~request:request
-          (Yojson.Safe.to_string (json_ok snapshot)) reqd)
-      request reqd)
+      with_public_read
+        (fun state _req reqd ->
+          let snapshot = build_presence_snapshot state in
+          Http.Response.json ~compress:true ~request:request
+            (Yojson.Safe.to_string (json_ok snapshot)) reqd)
+        request reqd)
     router4
   in
   let router6 =
@@ -258,50 +268,36 @@ let add_routes router =
         in
         let response = Httpun.Response.create ~headers `OK in
         let writer = Httpun.Reqd.respond_with_streaming inner_reqd response in
-        let base = base_path_of_state state in
-        let runtime_id =
-          let base_name = Filename.basename base in
-          if base_name = "" then "masc-runtime" else base_name
+        let write_snapshot () =
+          let snapshot_json = Yojson.Safe.to_string (build_presence_snapshot state) in
+          let event = Printf.sprintf "data: %s\n\n" snapshot_json in
+          Httpun.Body.Writer.write_string writer event
         in
-        let branch =
-          let head_path = Filename.concat base ".git/HEAD" in
-          if Sys.file_exists head_path then
-            let ref_line =
-              let ic = open_in head_path in
-              let line = input_line ic in
-              close_in ic;
-              line
-            in
-            if String.starts_with ~prefix:"ref: refs/heads/" ref_line then
-              String.sub ref_line 16 (String.length ref_line - 16)
-            else
-              ref_line
-          else
-            "main"
-        in
-        let entries =
-          let agents = Agent_registry_eio.list_active ~within_seconds:300.0 () in
-          List.map (fun (a : Agent_identity.t) ->
-            `Assoc [
-              ("keeper_id", `String a.Agent_identity.agent_name);
-              ("workspace_label", `String (Filename.basename base));
-              ("branch", `String branch);
-              ("role", `String "keeper");
-              ("status", `String "active");
-              ("last_seen_ms", `Intlit (Printf.sprintf "%.0f" (a.Agent_identity.registered_at *. 1000.0)));
-            ])
-            agents
-        in
-        let snapshot = Yojson.Safe.to_string (`Assoc [
-          ("runtime_id", `String runtime_id);
-          ("branch", `String branch);
-          ("supervisor", `String "local");
-          ("connected", `Bool true);
-          ("entries", `List entries);
-        ]) in
-        let event = Printf.sprintf "data: %s\n\n" snapshot in
-        Httpun.Body.Writer.write_string writer event;
-        Httpun.Body.Writer.close writer)
+        write_snapshot ();
+        match state.Mcp_server.sw, state.Mcp_server.clock with
+        | Some sw, Some clock ->
+            Eio.Fiber.fork ~sw (fun () ->
+              let rec loop () =
+                (try
+                   Eio.Time.sleep clock 30.0;
+                   write_snapshot ();
+                   loop ()
+                 with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | exn ->
+                     Log.Server.debug "IDE presence SSE ping loop error: %s"
+                       (Printexc.to_string exn));
+                Httpun.Body.Writer.close writer
+              in
+              try loop ()
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
+                  Log.Server.error "IDE presence SSE loop exited: %s"
+                    (Printexc.to_string exn);
+                  Httpun.Body.Writer.close writer)
+        | _ ->
+            Httpun.Body.Writer.close writer)
       request reqd)
     router5
   in

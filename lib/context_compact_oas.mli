@@ -13,10 +13,10 @@
     role weights, tool-presence weights, [anchor_boost],
     [drop_importance_threshold], [summarize_keep_recent]),
     \[tool_output_prune_limit\] env constant, 4 dynamic-context
-    thresholds, [first_sentence] / [tool_names_by_id] /
-    [summarize_chunk] / [mask_tool_*] /
-    [oas_strategy_of] / [summarize_old_messages] helpers — all
-    consumed only inside {!compact}'s pipeline. *)
+    thresholds, [first_sentence] / [summarize_chunk] /
+    [extractive_summarizer] / [score_message] / [score_messages] /
+    [oas_strategy_of] helpers — all consumed only inside
+    {!compact}'s pipeline. *)
 
 (** {1 Observation context} *)
 
@@ -149,17 +149,3 @@ val score_message :
     [0.0, 1.0].  Pinned for behaviour-tests and for injecting into
     OAS {!Agent_sdk.Context_reducer.importance_scored}. *)
 
-val score_messages :
-  Agent_sdk.Types.message list -> (int * float) list
-(** [score_messages msgs] returns
-    [(message_index, importance_score)] pairs for the input
-    message list.  Importance combines recency (quadratic ramp
-    over the message list) with role / tool weights.  Pinned for
-    behaviour-tests under {!test/test_context_compact_oas_coverage}. *)
-
-val small_local_ctx_floor : int
-(** [small_local_ctx_floor] is the env-driven context-window
-    floor (read once at module init) below which a local-model
-    keeper is treated as "small local" by
-    {!default_dynamic_selector}.  Pinned for behaviour-tests
-    under {!test/test_context_compact_oas_coverage}. *)

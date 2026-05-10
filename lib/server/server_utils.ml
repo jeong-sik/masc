@@ -336,6 +336,7 @@ let board_post_dashboard_json ?(include_moderation = false)
           ("comment_count", `Int p.reply_count);
           ("created_at_iso", `String (iso8601_of_unix p.created_at));
           ("updated_at_iso", `String (iso8601_of_unix p.updated_at));
+          ("hearth", match p.hearth with Some h -> `String h | None -> `Null);
           ("hearth_count", `Int (match p.hearth with Some _ -> 1 | None -> 0));
           ("author_identity", board_actor_identity_json author);
         ]

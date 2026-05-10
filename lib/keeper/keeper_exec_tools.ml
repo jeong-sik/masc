@@ -272,6 +272,12 @@ let execute_keeper_tool_call_with_outcome
               ~config
               ~keeper_name:meta.name
               ~args)
+       | "masc_ide_annotate" ->
+         make_executed_tool_result
+           (Keeper_exec_ide.handle_keeper_ide_annotate
+              ~config
+              ~keeper_name:meta.name
+              ~args)
        | "keeper_bash" ->
          make_executed_tool_result
            (Keeper_exec_shell.handle_keeper_bash

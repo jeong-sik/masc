@@ -30,6 +30,7 @@ import { showToast } from './common/toast'
 import { CopyableCode } from './common/copyable-code'
 import { SetupGuideCard } from './setup-guide-card'
 import { ConnectorOnboardingGrid } from './connector-onboarding'
+import { SurfaceCard, surfaceCardClassName } from './common/card'
 import { SidecarLogToggle, SidecarLogViewer } from './sidecar-log-viewer'
 import { ConnectorConfigToggle, ConnectorConfigForm, openConnectorConfig } from './connector-config-form'
 import { ConnectorReadinessRail, deriveRail, getRailInflight, withRailInflight } from './connector-readiness-rail'
@@ -50,12 +51,6 @@ function BoldLabel({ children }: { children: unknown }) {
   return html`<span class="font-medium">${children}</span>`
 }
 
-function CardBox({ children, dataKeeper }: { children: unknown; dataKeeper?: string }) {
-  if (dataKeeper) {
-    return html`<div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2" data-keeper=${dataKeeper}>${children}</div>`
-  }
-  return html`<div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2">${children}</div>`
-}
 
 // As of 2026-04-30 the per-connector sub-tabs were merged into
 // connector-status; selection now happens inside the page via
@@ -769,7 +764,7 @@ function ConnectorLivePanel({
   const headerIcon = channelIcon(connector?.channel ?? connectorId)
 
   return html`
-    <div id=${`connector-card-${connectorId}`} class=${`mb-4 scroll-mt-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] ${connectorCardBorderClass(directLabel)} p-4`} data-connector-card-state=${directLabel} style=${connectorAccentStyle(connectorId)}>
+    <${SurfaceCard} id=${`connector-card-${connectorId}`} class="mb-4 scroll-mt-4 ${connectorCardBorderClass(directLabel)} !p-4" data-connector-card-state=${directLabel} style=${connectorAccentStyle(connectorId)}>
       <div class="flex flex-wrap items-center gap-2 text-xs">
         <span class="text-base leading-none" aria-hidden="true">${headerIcon}</span>
         <span class="text-sm font-semibold text-[var(--color-fg-primary)]">${connectorName}</span>
@@ -848,7 +843,7 @@ function ConnectorLivePanel({
 
       ${ui.headerExpanded
         ? html`
-            <div class="mt-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-3 text-2xs">
+            <${SurfaceCard} class="mt-2 !bg-[var(--color-bg-elevated)] !p-3 text-2xs">
               <div class="space-y-1.5">
                 ${livenessDots.map(dot => html`
                   <div class="flex min-w-0 flex-wrap items-center gap-2">
@@ -867,7 +862,7 @@ function ConnectorLivePanel({
                 <span>source ${connector?.binding_source || 'unknown'}</span>
                 <span>runtime bindings ${connector?.runtime_bindings_count ?? configuredBindings.length}</span>
                 <span>keeper dir ${keepers.length}</span>
-              </div>
+              </${SurfaceCard}>
               <div class="mt-3">
                 <${ActionButton} variant="ghost" size="sm" disabled=${loading || isActionLoading} onClick=${() => { void refresh() }}>새로고침<//>
               </div>
@@ -1067,7 +1062,7 @@ function ConnectorLivePanel({
                   }
                 }
                 return html`
-                  <${CardBox} dataKeeper=${group.name}>
+                  <${SurfaceCard} class="!bg-[var(--color-bg-elevated)] !px-3 !py-2" data-keeper=${group.name}>
                     <div class="flex flex-wrap items-baseline gap-3">
                       <div class="text-sm font-medium text-[var(--color-fg-primary)]">${group.name}</div>
                       ${keeper
@@ -1169,7 +1164,7 @@ function ConnectorLivePanel({
                             : null}
                         `
                       : null}
-                  </${CardBox}>
+                  </${SurfaceCard}>
                 `
               })}
             </div>
@@ -1233,7 +1228,7 @@ function ConnectorLivePanel({
             </div>
           `
         : null}
-    </div>
+    </${SurfaceCard}>
   `
 }
 
@@ -1242,7 +1237,7 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
   const lastError = shortText(ch.last_error)
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-3">
+    <${SurfaceCard} class="!bg-[var(--color-bg-elevated)] !p-3">
       <div class="mb-3 flex items-start justify-between gap-3">
         <div class="flex items-center gap-2">
           <span class="text-lg">${channelIcon(ch.channel)}</span>
@@ -1317,7 +1312,7 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
             </div>
           `
         : null}
-    </div>
+    </${SurfaceCard}>
   `
 }
 
@@ -1326,7 +1321,7 @@ function BindingRow({ binding }: { binding: BindingInfo }) {
   const lastError = shortText(binding.last_error, 72)
 
   return html`
-    <${CardBox}>
+    <${SurfaceCard} class="!bg-[var(--color-bg-elevated)] !px-3 !py-2">
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
           <div class="text-xs font-medium text-[var(--color-fg-primary)]">
@@ -1372,7 +1367,7 @@ function EventRow({ event }: { event: GateEventInfo }) {
     : 'border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)]'
 
   return html`
-    <${CardBox}>
+    <${SurfaceCard} class="!bg-[var(--color-bg-elevated)] !px-3 !py-2">
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0 text-2xs text-[var(--color-fg-disabled)]">
           <div class="font-medium text-[var(--color-fg-primary)]">
@@ -1412,7 +1407,7 @@ function DisclosurePanel({
   testId: string
 }) {
   return html`
-    <details class="group mb-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]" data-testid=${testId}>
+    <details class="group mb-4 ${surfaceCardClassName({ variant: 'standard' })} !p-0" data-testid=${testId}>
       <summary class="cursor-pointer list-none px-3 py-2.5">
         <div class="flex items-center justify-between gap-3">
           <div class="text-2xs font-semibold uppercase tracking-4 text-[var(--color-fg-primary)]">${title}</div>
@@ -1473,10 +1468,10 @@ function GateAnalyticsSection({
               </div>
 
               <div class="mb-4 grid grid-cols-2 gap-2 text-2xs text-[var(--color-fg-disabled)] max-[720px]:grid-cols-1">
-                <${CardBox}>duplicate suppressions
+                <${SurfaceCard} class="!bg-[var(--color-bg-elevated)] !px-3 !py-2">duplicate suppressions
                   <span class="ml-2 font-mono text-[var(--color-fg-primary)]">${gate.total_duplicates}</span>
                 <//>
-                <${CardBox}>active connectors
+                <${SurfaceCard} class="!bg-[var(--color-bg-elevated)] !px-3 !py-2">active connectors
                   <span class="ml-2 font-mono text-[var(--color-fg-primary)]">${gate.channels.length}</span>
                 <//>
               </div>
@@ -1614,9 +1609,9 @@ export function ConnectorStatusPanel() {
 
       ${!filterId
         ? html`
-            <div
+            <${SurfaceCard}
               id="connector-detail-panel"
-              class="mb-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)]/40 p-3"
+              class="mb-4 !bg-[var(--color-bg-page)]/40 !p-3"
               data-testid="connector-detail-panel"
             >
               <div class="mb-3 flex items-center justify-between gap-3 text-2xs">
@@ -1630,7 +1625,7 @@ export function ConnectorStatusPanel() {
                 keeperDirectoryError=${snapshot.keeperError}
                 loading=${loading}
               />
-            </div>
+            </${SurfaceCard}>
           `
         : null}
 

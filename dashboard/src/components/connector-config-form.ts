@@ -25,6 +25,7 @@ import { Checkbox } from './common/checkbox'
 import { CopyableCode } from './common/copyable-code'
 import { LoadingState } from './common/feedback-state'
 import { TextInput } from './common/input'
+import { SurfaceCard } from './common/card'
 import { showToast } from './common/toast'
 import { authHeaders } from '../api/core'
 
@@ -432,15 +433,15 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
 
   if (entry.loading) {
     return html`
-      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+      <${SurfaceCard} class="mt-3 !p-3" id=${`connector-config-${connectorId}`}>
         <${LoadingState}>config schema 불러오는 중...<//>
-      </div>
+      </${SurfaceCard}>
     `
   }
 
   if (entry.error !== null) {
     return html`
-      <div id=${`connector-config-${connectorId}`} role="alert" class="mt-3 rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-10)] p-3 text-2xs text-[var(--bad-light)]">
+      <${SurfaceCard} class="mt-3 !border-[var(--bad-20)] !bg-[var(--bad-10)] !p-3 text-2xs text-[var(--bad-light)]" id=${`connector-config-${connectorId}`} role="alert">
         <div class="font-semibold">schema 가져오기 실패</div>
         <div class="mt-1 text-3xs opacity-80">${entry.error}</div>
         <button
@@ -449,22 +450,22 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
           aria-label="config schema 다시 가져오기"
           onClick=${() => fetchSchema(connectorId)}
         >다시 시도</button>
-      </div>
+      </${SurfaceCard}>
     `
   }
 
   if (entry.fields.length === 0) {
     return html`
-      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-2xs text-[var(--color-fg-disabled)]">
+      <${SurfaceCard} class="mt-3 !p-3 text-2xs text-[var(--color-fg-disabled)]" id=${`connector-config-${connectorId}`}>
         schema가 비어있습니다. backend가 sidecar venv를 못 찾았을 수 있어요.
-      </div>
+      </${SurfaceCard}>
     `
   }
 
   const envBlock = buildEnvBlock(entry)
 
   return html`
-    <div id=${`connector-config-${connectorId}`} role="form" aria-label="${connectorId} 설정" class="mt-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+    <${SurfaceCard} class="mt-3 !p-3" id=${`connector-config-${connectorId}`} role="form" aria-label="${connectorId} 설정">
       <div class="mb-2 flex items-center justify-between">
         <div class="text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]">
           ${entry.fields.length} fields · ${entry.fields.filter(f => f.required).length} required
@@ -572,7 +573,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
           ? html`<div class="text-3xs text-[var(--color-fg-disabled)]">(필수 필드를 채우면 여기에 표시됩니다)</div>`
           : html`<${CopyableCode} command=${envBlock} ariaLabel=${`Copy ${connectorId} .env block`} />`}
       </div>
-    </div>
+      </${SurfaceCard}>
   `
 }
 

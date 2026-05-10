@@ -12,6 +12,7 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import type { GateConnectorInfo } from '../api/gate'
+import { SurfaceCard } from './common/card'
 import { ConnectorReadinessRail, deriveRail, getRailInflight, withRailInflight } from './connector-readiness-rail'
 import { CONNECTOR_DISPLAY_NAMES, KNOWN_CONNECTOR_IDS, channelIcon, connectorAccentStyle, connectorStateLabel, startSidecar, stopSidecar, type KnownConnectorId } from './connector-status'
 import { openConnectorConfig } from './connector-config-form'
@@ -703,8 +704,8 @@ function IncidentBanner({ droppedIds }: { droppedIds: string[] }) {
     .map(id => CONNECTOR_DISPLAY_NAMES[id as KnownConnectorId] ?? id)
     .join(', ')
   return html`
-    <div
-      class="mb-2 flex items-center gap-2 rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-1.5 text-2xs font-semibold text-[var(--bad-light)]"
+    <${SurfaceCard}
+      class="mb-2 flex items-center gap-2 !border-[var(--bad-20)] !bg-[var(--bad-10)] !px-3 !py-1.5 text-2xs font-semibold text-[var(--bad-light)]"
       data-incident-banner
       role="alert"
     >
@@ -745,10 +746,7 @@ export function ConnectorOverviewStrip({
   const droppedIds = detectRecentDrops(stripMemory.value, connectors, Date.now())
   const summary = summarizeConnectorStrip(connectors, keeperCount)
   return html`
-    <div
-      class="mb-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
-      data-overview-strip-root
-    >
+    <${SurfaceCard} class="mb-4 !p-3" data-overview-strip-root>
       <${IncidentBanner} droppedIds=${droppedIds} />
       <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
         <${StatusSummaryLine} summary=${summary} connectors=${connectors} />
@@ -766,7 +764,7 @@ export function ConnectorOverviewStrip({
           />
         `)}
       </div>
-    </div>
+    </${SurfaceCard}>
   `
 }
 

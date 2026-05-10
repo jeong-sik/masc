@@ -139,6 +139,97 @@ let test_masc_gc_input_schema_matches () =
     gen.input_schema
 ;;
 
+let test_masc_web_search_name_matches () =
+  let gen = find_by_name "masc_web_search" Tool_descriptors_gen.schemas in
+  let hand = find_by_name "masc_web_search" Tool_schemas_misc.schemas in
+  Alcotest.(check string) "masc_web_search name" hand.name gen.name
+;;
+
+let test_masc_web_search_description_matches () =
+  let gen = find_by_name "masc_web_search" Tool_descriptors_gen.schemas in
+  let hand = find_by_name "masc_web_search" Tool_schemas_misc.schemas in
+  Alcotest.(check string) "masc_web_search description" hand.description gen.description
+;;
+
+let test_masc_web_search_input_schema_matches () =
+  let gen = find_by_name "masc_web_search" Tool_descriptors_gen.schemas in
+  let hand = find_by_name "masc_web_search" Tool_schemas_misc.schemas in
+  Alcotest.check
+    yojson_testable
+    "masc_web_search input_schema (Yojson.Safe.equal)"
+    hand.input_schema
+    gen.input_schema
+;;
+
+let test_masc_web_fetch_name_matches () =
+  let gen = find_by_name "masc_web_fetch" Tool_descriptors_gen.schemas in
+  let hand = find_by_name "masc_web_fetch" Tool_schemas_misc.schemas in
+  Alcotest.(check string) "masc_web_fetch name" hand.name gen.name
+;;
+
+let test_masc_web_fetch_description_matches () =
+  let gen = find_by_name "masc_web_fetch" Tool_descriptors_gen.schemas in
+  let hand = find_by_name "masc_web_fetch" Tool_schemas_misc.schemas in
+  Alcotest.(check string) "masc_web_fetch description" hand.description gen.description
+;;
+
+let test_masc_web_fetch_input_schema_matches () =
+  let gen = find_by_name "masc_web_fetch" Tool_descriptors_gen.schemas in
+  let hand = find_by_name "masc_web_fetch" Tool_schemas_misc.schemas in
+  Alcotest.check
+    yojson_testable
+    "masc_web_fetch input_schema (Yojson.Safe.equal)"
+    hand.input_schema
+    gen.input_schema
+;;
+
+let test_masc_tool_admin_snapshot_name_matches () =
+  let gen = find_by_name "masc_tool_admin_snapshot" Tool_descriptors_gen.schemas in
+  let hand = find_by_name "masc_tool_admin_snapshot" Tool_schemas_misc.schemas in
+  Alcotest.(check string) "masc_tool_admin_snapshot name" hand.name gen.name
+;;
+
+let test_masc_tool_admin_snapshot_description_matches () =
+  let gen = find_by_name "masc_tool_admin_snapshot" Tool_descriptors_gen.schemas in
+  let hand = find_by_name "masc_tool_admin_snapshot" Tool_schemas_misc.schemas in
+  Alcotest.(check string)
+    "masc_tool_admin_snapshot description"
+    hand.description
+    gen.description
+;;
+
+let test_masc_tool_admin_snapshot_input_schema_matches () =
+  let gen = find_by_name "masc_tool_admin_snapshot" Tool_descriptors_gen.schemas in
+  let hand = find_by_name "masc_tool_admin_snapshot" Tool_schemas_misc.schemas in
+  Alcotest.check
+    yojson_testable
+    "masc_tool_admin_snapshot input_schema (Yojson.Safe.equal)"
+    hand.input_schema
+    gen.input_schema
+;;
+
+let test_masc_tool_stats_name_matches () =
+  let gen = find_by_name "masc_tool_stats" Tool_descriptors_gen.schemas in
+  let hand = find_by_name "masc_tool_stats" Tool_schemas_misc.schemas in
+  Alcotest.(check string) "masc_tool_stats name" hand.name gen.name
+;;
+
+let test_masc_tool_stats_description_matches () =
+  let gen = find_by_name "masc_tool_stats" Tool_descriptors_gen.schemas in
+  let hand = find_by_name "masc_tool_stats" Tool_schemas_misc.schemas in
+  Alcotest.(check string) "masc_tool_stats description" hand.description gen.description
+;;
+
+let test_masc_tool_stats_input_schema_matches () =
+  let gen = find_by_name "masc_tool_stats" Tool_descriptors_gen.schemas in
+  let hand = find_by_name "masc_tool_stats" Tool_schemas_misc.schemas in
+  Alcotest.check
+    yojson_testable
+    "masc_tool_stats input_schema (Yojson.Safe.equal)"
+    hand.input_schema
+    gen.input_schema
+;;
+
 let () =
   Alcotest.run
     "tool_descriptors_gen"
@@ -175,6 +266,41 @@ let () =
       , [ Alcotest.test_case "name" `Quick test_masc_gc_name_matches
         ; Alcotest.test_case "description" `Quick test_masc_gc_description_matches
         ; Alcotest.test_case "input_schema" `Quick test_masc_gc_input_schema_matches
+        ] )
+    ; ( "masc_web_search field-by-field"
+      , [ Alcotest.test_case "name" `Quick test_masc_web_search_name_matches
+        ; Alcotest.test_case "description" `Quick test_masc_web_search_description_matches
+        ; Alcotest.test_case
+            "input_schema"
+            `Quick
+            test_masc_web_search_input_schema_matches
+        ] )
+    ; ( "masc_web_fetch field-by-field"
+      , [ Alcotest.test_case "name" `Quick test_masc_web_fetch_name_matches
+        ; Alcotest.test_case "description" `Quick test_masc_web_fetch_description_matches
+        ; Alcotest.test_case
+            "input_schema"
+            `Quick
+            test_masc_web_fetch_input_schema_matches
+        ] )
+    ; ( "masc_tool_admin_snapshot field-by-field"
+      , [ Alcotest.test_case "name" `Quick test_masc_tool_admin_snapshot_name_matches
+        ; Alcotest.test_case
+            "description"
+            `Quick
+            test_masc_tool_admin_snapshot_description_matches
+        ; Alcotest.test_case
+            "input_schema"
+            `Quick
+            test_masc_tool_admin_snapshot_input_schema_matches
+        ] )
+    ; ( "masc_tool_stats field-by-field"
+      , [ Alcotest.test_case "name" `Quick test_masc_tool_stats_name_matches
+        ; Alcotest.test_case "description" `Quick test_masc_tool_stats_description_matches
+        ; Alcotest.test_case
+            "input_schema"
+            `Quick
+            test_masc_tool_stats_input_schema_matches
         ] )
     ]
 ;;

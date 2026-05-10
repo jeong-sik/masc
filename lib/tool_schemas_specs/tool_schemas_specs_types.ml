@@ -9,12 +9,16 @@
    depends on nothing new — it just receives the generated ml. *)
 
 type param_type =
-  | T_string of { enum : string list option }
+  | T_string of
+      { enum : string list option
+      ; default : string option
+      }
   | T_int of
       { min : int option
       ; max : int option
+      ; default : int option
       }
-  | T_bool
+  | T_bool of { default : bool option }
 
 type param =
   { p_name : string

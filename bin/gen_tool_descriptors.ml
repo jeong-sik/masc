@@ -56,7 +56,7 @@ let masc_config_spec : tool_spec =
        filter results to a single section."
   ; parameters =
       [ { p_name = "category"
-        ; p_type = T_string { enum = Some config_category_enum_strings }
+        ; p_type = T_string { enum = Some config_category_enum_strings; default = None }
         ; p_description = "Filter by config category"
         ; p_required = false
         }
@@ -72,17 +72,17 @@ let masc_code_read_spec : tool_spec =
        source code during task execution without loading the entire file into context."
   ; parameters =
       [ { p_name = "path"
-        ; p_type = T_string { enum = None }
+        ; p_type = T_string { enum = None; default = None }
         ; p_description = "Absolute file path"
         ; p_required = true
         }
       ; { p_name = "offset"
-        ; p_type = T_int { min = Some 0; max = None }
+        ; p_type = T_int { min = Some 0; max = None; default = None }
         ; p_description = "Offset in bytes (default 0)"
         ; p_required = false
         }
       ; { p_name = "limit"
-        ; p_type = T_int { min = Some 1; max = Some 1_000_000 }
+        ; p_type = T_int { min = Some 1; max = Some 1_000_000; default = None }
         ; p_description = "Maximum bytes to read (default 1_000_000)"
         ; p_required = false
         }
@@ -98,7 +98,7 @@ let masc_tool_help_spec : tool_spec =
        name."
   ; parameters =
       [ { p_name = "tool_name"
-        ; p_type = T_string { enum = None }
+        ; p_type = T_string { enum = None; default = None }
         ; p_description = "Exact MCP tool name to explain"
         ; p_required = true
         }
@@ -107,8 +107,54 @@ let masc_tool_help_spec : tool_spec =
   }
 ;;
 
-let phase2_specs : tool_spec list =
-  [ masc_config_spec; masc_code_read_spec; masc_tool_help_spec ]
+let dashboard_scope_enum_strings = [ "all"; "current" ]
+
+let masc_dashboard_spec : tool_spec =
+  { name = "masc_dashboard"
+  ; description =
+      "Render the MASC dashboard summarizing rooms, agents, and tasks. Set \
+       scope='current' for this room only."
+  ; parameters =
+      [ { p_name = "compact"
+        ; p_type = T_bool { default = None }
+        ; p_description =
+            "If true, show compact single-line summary instead of full dashboard"
+        ; p_required = false
+        }
+      ; { p_name = "scope"
+        ; p_type =
+            T_string { enum = Some dashboard_scope_enum_strings; default = Some "all" }
+        ; p_description = "Dashboard scope (default: all)"
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let masc_gc_spec : tool_spec =
+  { name = "masc_gc"
+  ; description =
+      "Run garbage collection: remove zombie agents, archive stale tasks, delete old \
+       messages (default: 7-day threshold)."
+  ; parameters =
+      [ { p_name = "days"
+        ; p_type = T_int { min = None; max = None; default = Some 7 }
+        ; p_description = "Age threshold in days (default: 7)"
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let phase3_specs : tool_spec list =
+  [ masc_config_spec
+  ; masc_code_read_spec
+  ; masc_tool_help_spec
+  ; masc_dashboard_spec
+  ; masc_gc_spec
+  ]
 ;;
 
 (* === Emit helpers ==================================================== *)
@@ -139,17 +185,24 @@ let emit_param_property buf p =
     match p.p_type with
     | T_string _ -> "string"
     | T_int _ -> "integer"
-    | T_bool -> "boolean"
+    | T_bool _ -> "boolean"
   in
   buf_addf buf "        (%S, `Assoc [\n" p.p_name;
   buf_addf buf "          (\"type\", `String %S);\n" type_label;
   (match p.p_type with
-   | T_string { enum = Some strings } ->
+   | T_string { enum = Some strings; _ } ->
      Buffer.add_string buf "          (\"enum\", ";
      emit_enum_list buf strings;
      Buffer.add_string buf ");\n"
    | _ -> ());
   buf_addf buf "          (\"description\", `String %S);\n" p.p_description;
+  (match p.p_type with
+   | T_string { default = Some d; _ } ->
+     buf_addf buf "          (\"default\", `String %S);\n" d
+   | T_int { default = Some d; _ } -> buf_addf buf "          (\"default\", `Int %d);\n" d
+   | T_bool { default = Some d; _ } ->
+     buf_addf buf "          (\"default\", `Bool %b);\n" d
+   | _ -> ());
   Buffer.add_string buf "        ]);\n"
 ;;
 
@@ -198,6 +251,6 @@ let emit_schemas_list buf specs =
 let () =
   let buf = Buffer.create 4096 in
   emit_header buf;
-  emit_schemas_list buf phase2_specs;
+  emit_schemas_list buf phase3_specs;
   print_string (Buffer.contents buf)
 ;;

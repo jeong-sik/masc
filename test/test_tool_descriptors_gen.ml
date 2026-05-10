@@ -95,6 +95,50 @@ let test_masc_tool_help_input_schema_matches () =
     gen.input_schema
 ;;
 
+let test_masc_dashboard_name_matches () =
+  let gen = find_by_name "masc_dashboard" Tool_descriptors_gen.schemas in
+  let hand = find_by_name "masc_dashboard" Tool_schemas_misc.schemas in
+  Alcotest.(check string) "masc_dashboard name" hand.name gen.name
+;;
+
+let test_masc_dashboard_description_matches () =
+  let gen = find_by_name "masc_dashboard" Tool_descriptors_gen.schemas in
+  let hand = find_by_name "masc_dashboard" Tool_schemas_misc.schemas in
+  Alcotest.(check string) "masc_dashboard description" hand.description gen.description
+;;
+
+let test_masc_dashboard_input_schema_matches () =
+  let gen = find_by_name "masc_dashboard" Tool_descriptors_gen.schemas in
+  let hand = find_by_name "masc_dashboard" Tool_schemas_misc.schemas in
+  Alcotest.check
+    yojson_testable
+    "masc_dashboard input_schema (Yojson.Safe.equal)"
+    hand.input_schema
+    gen.input_schema
+;;
+
+let test_masc_gc_name_matches () =
+  let gen = find_by_name "masc_gc" Tool_descriptors_gen.schemas in
+  let hand = find_by_name "masc_gc" Tool_schemas_misc.schemas in
+  Alcotest.(check string) "masc_gc name" hand.name gen.name
+;;
+
+let test_masc_gc_description_matches () =
+  let gen = find_by_name "masc_gc" Tool_descriptors_gen.schemas in
+  let hand = find_by_name "masc_gc" Tool_schemas_misc.schemas in
+  Alcotest.(check string) "masc_gc description" hand.description gen.description
+;;
+
+let test_masc_gc_input_schema_matches () =
+  let gen = find_by_name "masc_gc" Tool_descriptors_gen.schemas in
+  let hand = find_by_name "masc_gc" Tool_schemas_misc.schemas in
+  Alcotest.check
+    yojson_testable
+    "masc_gc input_schema (Yojson.Safe.equal)"
+    hand.input_schema
+    gen.input_schema
+;;
+
 let () =
   Alcotest.run
     "tool_descriptors_gen"
@@ -118,6 +162,19 @@ let () =
             "input_schema"
             `Quick
             test_masc_tool_help_input_schema_matches
+        ] )
+    ; ( "masc_dashboard field-by-field"
+      , [ Alcotest.test_case "name" `Quick test_masc_dashboard_name_matches
+        ; Alcotest.test_case "description" `Quick test_masc_dashboard_description_matches
+        ; Alcotest.test_case
+            "input_schema"
+            `Quick
+            test_masc_dashboard_input_schema_matches
+        ] )
+    ; ( "masc_gc field-by-field"
+      , [ Alcotest.test_case "name" `Quick test_masc_gc_name_matches
+        ; Alcotest.test_case "description" `Quick test_masc_gc_description_matches
+        ; Alcotest.test_case "input_schema" `Quick test_masc_gc_input_schema_matches
         ] )
     ]
 ;;

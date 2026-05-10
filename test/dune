@@ -208,6 +208,7 @@
         test_tool_deep_review
         test_tool_call_quality_benchmark
         test_keeper_prompt_metrics
+        test_keeper_provider_health
         test_cache_metrics_wiring
         test_tool_surface_ssot
         test_keeper_retrieval_quality
@@ -444,6 +445,7 @@
           test_tool_deep_review
           test_tool_call_quality_benchmark
           test_keeper_prompt_metrics
+          test_keeper_provider_health
           test_cache_metrics_wiring
           test_tool_surface_ssot
           test_keeper_retrieval_quality

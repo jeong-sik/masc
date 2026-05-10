@@ -620,12 +620,14 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           Error err
       | Ok initial_execution ->
       let turn_id = meta.runtime.usage.total_turns in
+      let model = match meta.models with m :: _ -> Some m | [] -> None in
       (match
          Keeper_turn_livelock.guard_and_record_turn_start
            ~keeper:meta.name
            ~turn_id
            ~max_attempts:(turn_livelock_max_attempts ())
            ~stuck_after_sec:(turn_livelock_stuck_after_sec ())
+           ?model
            ()
        with
        | Keeper_turn_livelock.Blocked reason ->

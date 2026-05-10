@@ -5,3 +5,9 @@ network_mode = "inherit"
 work_discovery_enabled = true
 github_identity = "anyang-keepers"
 git_identity_mode = "github_identity"
+
+[provider_health]
+ttfrc_degraded_ms = 5000.0
+ttfrc_unhealthy_ms = 15000.0
+timeout_count_5m_unhealthy = 3
+prefill_degraded_ms = 2000.0

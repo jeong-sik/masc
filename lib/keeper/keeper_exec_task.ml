@@ -306,13 +306,15 @@ let handle_keeper_task_tool
     (match result with
      | Coord.Claim_next_claimed { task_id; _ } ->
        sync_keeper_meta_current_task ~config ~meta ~task_id;
-       let ok, _msg =
+       let start_result =
          Tool_task.handle_transition
+           ~tool_name:"keeper_auto_start"
+           ~start_time:0.0
            { Tool_task.config; agent_name = keeper_agent_sender ~meta;
              sw = Eio_context.get_switch_opt () }
            (`Assoc ["task_id", `String task_id; "action", `String "start"])
        in
-       auto_started_ok := ok
+       auto_started_ok := start_result.Tool_result.success
      | Coord.Claim_next_no_unclaimed
      | Coord.Claim_next_no_eligible _
      | Coord.Claim_next_error _ -> ());
@@ -394,8 +396,10 @@ let handle_keeper_task_tool
     if task_id = ""
     then error_json "task_id is required. Use the task_id you got from keeper_task_claim."
     else (
-      let ok, message =
+      let transition_result =
         Tool_task.handle_transition
+          ~tool_name:"keeper_task_done"
+          ~start_time:0.0
           {
             Tool_task.config;
             agent_name = keeper_agent_sender ~meta;
@@ -408,7 +412,7 @@ let handle_keeper_task_tool
                "notes", `String result_text;
              ])
       in
-      keeper_tool_result_json ~ok ~message)
+      keeper_tool_result_json ~ok:transition_result.Tool_result.success ~message:transition_result.Tool_result.legacy_message)
   | "keeper_task_submit_for_verification" ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let notes = Safe_ops.json_string ~default:"" "notes" args |> String.trim in
@@ -420,8 +424,10 @@ let handle_keeper_task_tool
     else if pr_url = ""
     then error_json "pr_url is required. Include the PR opened for this task."
     else (
-      let ok, message =
+      let transition_result =
         Tool_task.handle_transition
+          ~tool_name:"keeper_task_submit_for_verification"
+          ~start_time:0.0
           {
             Tool_task.config;
             agent_name = keeper_agent_sender ~meta;
@@ -434,6 +440,6 @@ let handle_keeper_task_tool
                "notes", `String (notes ^ "\nPR: " ^ pr_url);
              ])
       in
-      keeper_tool_result_json ~ok ~message)
+      keeper_tool_result_json ~ok:transition_result.Tool_result.success ~message:transition_result.Tool_result.legacy_message)
   | other -> error_json ~fields:[ "tool", `String other ] "unknown_task_tool"
 ;;

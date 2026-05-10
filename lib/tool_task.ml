@@ -23,12 +23,6 @@ module Float = Stdlib.Float
 
 open Yojson.Safe.Util
 
-type tool_result = bool * string
-
-let wrap_result ~name ~start (success, message) =
-  if success then Tool_result.ok ~tool_name:name ~start_time:start message
-  else Tool_result.error ~tool_name:name ~start_time:start message
-
 type context = {
   config: Coord.config;
   agent_name: string;
@@ -37,9 +31,9 @@ type context = {
 
 open Tool_args
 
-let result_to_response = function
-  | Ok msg -> (true, msg)
-  | Error e -> (false, Masc_domain.masc_error_to_string e)
+let result_to_response ~tool_name ~start_time = function
+  | Ok msg -> Tool_result.ok ~tool_name ~start_time msg
+  | Error e -> Tool_result.error ~tool_name ~start_time (Masc_domain.masc_error_to_string e)
 
 let build_claim_observation_payload ~(now : float) ~(agent_name : string)
     ~(task_id : string) : Yojson.Safe.t =
@@ -449,15 +443,15 @@ let persisted_contract_rejection ~(ctx : context)
 
 (* Handlers *)
 
-let handle_add_task ctx args =
+let handle_add_task ~tool_name ~start_time ctx args =
   let valid_keys = [ "title"; "priority"; "description"; "goal_id"; "contract" ] in
   let unknown = unknown_args ~valid_keys args in
   if Stdlib.List.length unknown > 0 then
-    ( false
-    , Printf.sprintf
+    Tool_result.error ~tool_name ~start_time
+      (Printf.sprintf
         "Unknown argument(s): %s. Valid: %s"
         (String.concat ", " unknown)
-        (String.concat ", " valid_keys) )
+        (String.concat ", " valid_keys))
   else
   let title = get_string args "title" "" in
   let priority = get_int args "priority" 3 in
@@ -471,37 +465,33 @@ let handle_add_task ctx args =
   (* BUG-009/010: Validate title and priority *)
   let trimmed_title = String.trim title in
   if String.equal trimmed_title "" then
-    (false, "Task title cannot be empty or whitespace-only")
+    Tool_result.error ~tool_name ~start_time "Task title cannot be empty or whitespace-only"
   else if priority < 1 || priority > 5 then
-    (false, Printf.sprintf "Priority must be between 1 and 5, got %d" priority)
+    Tool_result.error ~tool_name ~start_time (Printf.sprintf "Priority must be between 1 and 5, got %d" priority)
   else if Option.is_some goal_id
           && not
                (Goal_store.list_goals ctx.config ()
                 |> List.exists (fun (goal : Goal_store.goal) ->
                        String.equal goal.id (Option.value ~default:"" goal_id)))
   then
-    (false, Printf.sprintf "Unknown goal_id '%s'" (Option.value ~default:"" goal_id))
+    Tool_result.error ~tool_name ~start_time (Printf.sprintf "Unknown goal_id '%s'" (Option.value ~default:"" goal_id))
   else
     match contract_result with
-    | Error error -> (false, error)
+    | Error error -> Tool_result.error ~tool_name ~start_time error
     | Ok contract ->
-        (* RFC-0034.v2: per-goal cap via [reject_if]. Add_task surfaces a
-           rejection as "Error: <msg>" string, kept consistent with the
-           pre-existing dedup rejection path. With [goal_id = None] the
-           guard is a no-op. *)
-        ( true,
-          Coord.add_task ?contract ?goal_id
+        Tool_result.ok ~tool_name ~start_time
+          (Coord.add_task ?contract ?goal_id
             ~reject_if:(Coord_task_capacity.rejection_for_add_task ?goal_id)
             ~created_by:ctx.agent_name ctx.config ~title:trimmed_title
-            ~priority ~description )
+            ~priority ~description)
 
-let handle_batch_add_tasks ctx args =
+let handle_batch_add_tasks ~tool_name ~start_time ctx args =
   let tasks_json = match args |> member "tasks" with
     | `List l -> l
     | _ -> []
   in
   if Stdlib.List.length tasks_json = 0 then
-    (false, "tasks array is empty or missing")
+    Tool_result.error ~tool_name ~start_time "tasks array is empty or missing"
   else
   let validated = List.mapi (fun idx t ->
     let title = String.trim (t |> member "title" |> to_string) in
@@ -549,23 +539,23 @@ let handle_batch_add_tasks ctx args =
   ) tasks_json in
   let errors = List.filter_map (function Error e -> Some e | Ok _ -> None) validated in
   if Stdlib.List.length errors > 0 then
-    (false, Printf.sprintf "Validation failed:\n%s" (String.concat "\n" errors))
+    Tool_result.error ~tool_name ~start_time (Printf.sprintf "Validation failed:\n%s" (String.concat "\n" errors))
   else
     let tasks =
       List.filter_map (function Ok t -> Some t | Error _ -> None) validated
     in
-    (true, Coord.batch_add_tasks_with_contracts
+    Tool_result.ok ~tool_name ~start_time (Coord.batch_add_tasks_with_contracts
       ~created_by:ctx.agent_name ctx.config tasks)
 
-let handle_claim ?agent_tool_names ctx args =
+let handle_claim ?agent_tool_names ~tool_name ~start_time ctx args =
   if not (try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Stdlib.Not_found -> false) then
-    result_to_response (Error (Masc_domain.Agent (Masc_domain.Agent_error.NotJoined ctx.agent_name)))
+    result_to_response ~tool_name ~start_time (Error (Masc_domain.Agent (Masc_domain.Agent_error.NotJoined ctx.agent_name)))
   else if not ((=) (args |> member "agent_role") `Null) then
-    (false, "agent_role is no longer supported")
+    Tool_result.error ~tool_name ~start_time "agent_role is no longer supported"
   else
   let task_id = get_string args "task_id" "" in
   match validate_task_id task_id with
-  | Error e -> result_to_response (Error e)
+  | Error e -> result_to_response ~tool_name ~start_time (Error e)
   | Ok task_id ->
   let agent_tool_names =
     match agent_tool_names with
@@ -587,11 +577,11 @@ let handle_claim ?agent_tool_names ctx args =
          ("timestamp", `Float (Time_compat.now ()));
        ])
    | Error e -> Log.Task.warn "task claim failed for %s: %s" task_id (Masc_domain.masc_error_to_string e));
-  result_to_response result
+  result_to_response ~tool_name ~start_time result
 
-let handle_claim_next ?agent_tool_names ctx _args =
+let handle_claim_next ?agent_tool_names ~tool_name ~start_time ctx _args =
   if not (try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Stdlib.Not_found -> false) then
-    (false, Printf.sprintf "Agent '%s' is not a member of this room" ctx.agent_name)
+    Tool_result.error ~tool_name ~start_time (Printf.sprintf "Agent '%s' is not a member of this room" ctx.agent_name)
   else
   let agent_tool_names =
     match agent_tool_names with
@@ -612,23 +602,23 @@ let handle_claim_next ?agent_tool_names ctx _args =
         Printf.sprintf "No eligible tasks available (blocked/excluded: %d)" excluded_count
     | Coord.Claim_next_error e -> Printf.sprintf "Error: %s" e
   in
-  (true, message)
+  Tool_result.ok ~tool_name ~start_time message
 
-let handle_release ctx args =
+let handle_release ~tool_name ~start_time ctx args =
   let task_id = get_string args "task_id" "" in
   match validate_task_id task_id with
-  | Error e -> result_to_response (Error e)
+  | Error e -> result_to_response ~tool_name ~start_time (Error e)
   | Ok task_id ->
   let expected_version = get_int_opt args "expected_version" in
   let tasks = Coord.get_tasks_raw ctx.config in
   let task_opt = List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks in
   let handoff_context = parse_handoff_context ~agent_name:ctx.agent_name args in
   (match handoff_context with
-   | Error error -> (false, error)
+   | Error error -> Tool_result.error ~tool_name ~start_time error
    | Ok handoff_context ->
        if strict_release_requires_handoff task_opt && Option.is_none handoff_context
        then
-         (false, "Strict task release requires handoff_context.summary")
+         Tool_result.error ~tool_name ~start_time "Strict task release requires handoff_context.summary"
        else
          let result =
            Coord.release_task_r ctx.config ~agent_name:ctx.agent_name ~task_id
@@ -639,7 +629,7 @@ let handle_release ctx args =
             sync_keeper_current_task_binding ctx;
             sync_planning_current_task_with_owned_task ctx
           | Error _ -> ());
-         result_to_response result)
+         result_to_response ~tool_name ~start_time result)
 
 let transition_known_args =
   [
@@ -655,9 +645,9 @@ let transition_known_args =
     "handoff_context";
   ]
 
-let rec handle_done ctx args =
+let rec handle_done ~tool_name ~start_time ctx args =
   let notes = get_string args "notes" "" in
-  handle_transition ctx
+  handle_transition ~tool_name ~start_time ctx
     (`Assoc
        [
          ("task_id", args |> member "task_id");
@@ -665,10 +655,10 @@ let rec handle_done ctx args =
          ("notes", `String notes);
        ])
 
-and handle_cancel_task ctx args =
+and handle_cancel_task ~tool_name ~start_time ctx args =
   let task_id = get_string args "task_id" "" in
   match validate_task_id task_id with
-  | Error e -> result_to_response (Error e)
+  | Error e -> result_to_response ~tool_name ~start_time (Error e)
   | Ok task_id ->
   let reason = get_string args "reason" "" in
   let tasks = Coord.get_tasks_raw ctx.config in
@@ -719,9 +709,9 @@ and handle_cancel_task ctx args =
        ])
    | Error err ->
        Log.Task.error "metrics record failed: %s" (Masc_domain.masc_error_to_string err));
-  result_to_response result
+  result_to_response ~tool_name ~start_time result
 
-and handle_transition ?agent_tool_names ctx args =
+and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
   (* Underscore-prefixed keys (e.g. "_agent_name") are internal protocol markers
      injected by the HTTP transport and dashboard client for identity
      propagation. They are consumed upstream in Agent_identity and must not
@@ -785,19 +775,19 @@ and handle_transition ?agent_tool_names ctx args =
   in
   if Stdlib.List.length unknown > 0 then
     let names = String.concat ", " (List.map fst unknown) in
-    (false, Printf.sprintf "Unknown argument(s): %s. Valid: %s"
+    Tool_result.error ~tool_name ~start_time (Printf.sprintf "Unknown argument(s): %s. Valid: %s"
       names (String.concat ", " transition_known_args))
   else
   let task_id = get_string args "task_id" "" in
   match validate_task_id task_id with
-  | Error e -> result_to_response (Error e)
+  | Error e -> result_to_response ~tool_name ~start_time (Error e)
   | Ok task_id ->
   let action_raw = get_string args "action" "" in
   if String.equal action_raw "" then
-    (false, Printf.sprintf "action is required (%s)" (String.concat ", " Masc_domain.valid_task_action_strings))
+    Tool_result.error ~tool_name ~start_time (Printf.sprintf "action is required (%s)" (String.concat ", " Masc_domain.valid_task_action_strings))
   else
   match Masc_domain.task_action_of_string_lenient action_raw with
-  | Error msg -> (false, msg)
+  | Error msg -> Tool_result.error ~tool_name ~start_time msg
   | Ok action ->
   let action_s = Masc_domain.task_action_to_string action in
   let notes = get_string args "notes" "" in
@@ -825,12 +815,12 @@ and handle_transition ?agent_tool_names ctx args =
   let tasks = Coord.get_tasks_raw ctx.config in
   let task_opt = List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks in
   match handoff_context with
-  | Error error -> (false, error)
+  | Error error -> Tool_result.error ~tool_name ~start_time error
   | Ok handoff_context ->
   if (=) action Masc_domain.Release && strict_release_requires_handoff task_opt
      && Option.is_none handoff_context
   then
-    (false, "Strict task release requires handoff_context.summary")
+    Tool_result.error ~tool_name ~start_time "Strict task release requires handoff_context.summary"
   else
   let completion_state_error =
     if (=) action Masc_domain.Done_action && not force then
@@ -841,7 +831,7 @@ and handle_transition ?agent_tool_names ctx args =
   match completion_state_error with
   | Some err ->
     Log.Task.error "task transition failed: %s" (Masc_domain.masc_error_to_string err);
-    result_to_response (Error err)
+    result_to_response ~tool_name ~start_time (Error err)
   | None ->
   let completion_owned_by_caller =
     force || can_review_completion ~task_opt ~agent_name:ctx.agent_name
@@ -859,7 +849,7 @@ and handle_transition ?agent_tool_names ctx args =
   in
   match persisted_gate_rejection with
   | Some reason ->
-    (false, reason)
+    Tool_result.error ~tool_name ~start_time reason
   | None ->
   let review_gate_rejection =
     if (=) action Masc_domain.Done_action && not force then
@@ -883,7 +873,7 @@ and handle_transition ?agent_tool_names ctx args =
   in
   match review_gate_rejection with
   | Some reason ->
-    (false, completion_rejection_message ~allow_force:true reason)
+    Tool_result.error ~tool_name ~start_time (completion_rejection_message ~allow_force:true reason)
   | None ->
   (* Verifier gate: if the task has a completion_contract and the
      verification FSM is enabled, redirect Done → Submit_for_verification
@@ -1116,14 +1106,14 @@ and handle_transition ?agent_tool_names ctx args =
             | Masc_domain.Submit_pr_evidence
             | Masc_domain.Approve_verification | Masc_domain.Reject_verification | Masc_domain.Release)
    | Error _, _ -> ());
-  result_to_response result
+  result_to_response ~tool_name ~start_time result
 
-let handle_update_priority ctx args =
+let handle_update_priority ~tool_name ~start_time ctx args =
   let task_id = get_string args "task_id" "" in
   let priority = get_int args "priority" 3 in
-  (true, Coord.update_priority ctx.config ~task_id ~priority)
+  Tool_result.ok ~tool_name ~start_time (Coord.update_priority ctx.config ~task_id ~priority)
 
-let handle_tasks ctx args =
+let handle_tasks ~tool_name ~start_time ctx args =
   let include_done = get_bool args "include_done" false in
   let include_cancelled = get_bool args "include_cancelled" false in
   let status =
@@ -1131,7 +1121,7 @@ let handle_tasks ctx args =
     | `String s when not (String.equal s "") -> Some s
     | _ -> None
   in
-  (true, Coord.list_tasks ctx.config ~include_done ~include_cancelled ?status)
+  Tool_result.ok ~tool_name ~start_time (Coord.list_tasks ctx.config ~include_done ~include_cancelled ?status)
 
 let task_history_events_json (config : Coord.config) ~task_id ~limit =
   let scan_limit = min 500 (limit * 5) in
@@ -1156,24 +1146,24 @@ let task_history_events_json (config : Coord.config) ~task_id ~limit =
   let events = parsed |> List.filter matches_task |> take limit in
   `List events
 
-let handle_task_history ctx args =
+let handle_task_history ~tool_name ~start_time ctx args =
   let task_id = get_string args "task_id" "" in
   let limit = get_int args "limit" 50 in
-  (true, Yojson.Safe.to_string (task_history_events_json ctx.config ~task_id ~limit))
+  Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string (task_history_events_json ctx.config ~task_id ~limit))
 
 include Tool_task_schemas
 (* Dispatch function *)
 let dispatch ?agent_tool_names ctx ~name ~args : Tool_result.t option =
   let start = Time_compat.now () in
   match name with
-  | "masc_add_task" -> Some (wrap_result ~name ~start (handle_add_task ctx args))
-  | "masc_batch_add_tasks" -> Some (wrap_result ~name ~start (handle_batch_add_tasks ctx args))
-  | "masc_claim_task" -> Some (wrap_result ~name ~start (handle_claim ?agent_tool_names ctx args))
-  | "masc_claim_next" -> Some (wrap_result ~name ~start (handle_claim_next ?agent_tool_names ctx args))
-  | "masc_transition" -> Some (wrap_result ~name ~start (handle_transition ?agent_tool_names ctx args))
-  | "masc_update_priority" -> Some (wrap_result ~name ~start (handle_update_priority ctx args))
-  | "masc_tasks" -> Some (wrap_result ~name ~start (handle_tasks ctx args))
-  | "masc_task_history" -> Some (wrap_result ~name ~start (handle_task_history ctx args))
+  | "masc_add_task" -> Some (handle_add_task ~tool_name:name ~start_time:start ctx args)
+  | "masc_batch_add_tasks" -> Some (handle_batch_add_tasks ~tool_name:name ~start_time:start ctx args)
+  | "masc_claim_task" -> Some (handle_claim ?agent_tool_names ~tool_name:name ~start_time:start ctx args)
+  | "masc_claim_next" -> Some (handle_claim_next ?agent_tool_names ~tool_name:name ~start_time:start ctx args)
+  | "masc_transition" -> Some (handle_transition ?agent_tool_names ~tool_name:name ~start_time:start ctx args)
+  | "masc_update_priority" -> Some (handle_update_priority ~tool_name:name ~start_time:start ctx args)
+  | "masc_tasks" -> Some (handle_tasks ~tool_name:name ~start_time:start ctx args)
+  | "masc_task_history" -> Some (handle_task_history ~tool_name:name ~start_time:start ctx args)
   | _ -> None
 
 (* ================================================================ *)

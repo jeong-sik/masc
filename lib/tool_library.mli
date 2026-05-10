@@ -71,11 +71,7 @@ val string_contains : sub:string -> string -> bool
     lowercase both inputs when case-insensitive matching is
     required (see {!handle_read} / {!handle_search}). *)
 
-(** {1 Tool result + context} *)
-
-type tool_result = bool * string
-(** [(success, message)] return shape used by every dispatch
-    handler. *)
+(** {1 Context} *)
 
 type context = {
   agent_name : string;
@@ -97,15 +93,15 @@ val candidates_dir : unit -> string
 
 (** {1 Direct handlers} *)
 
-val handle_read : 'ctx -> Yojson.Safe.t -> tool_result
-(** [handle_read _ctx args] handles [masc_library_read].
+val handle_read : tool_name:string -> start_time:float -> 'ctx -> Yojson.Safe.t -> Tool_result.t
+(** [handle_read ~tool_name ~start_time _ctx args] handles [masc_library_read].
     Required arg: [topic] (string, partial-match against
-    Markdown filename).  Returns [(false, _)] when [topic] is
-    missing or no document matches; otherwise [(true,
-    "## <basename>\n\n<content>")]. *)
+    Markdown filename).  Returns error when [topic] is
+    missing or no document matches; otherwise ok with
+    ["## <basename>\n\n<content>"]. *)
 
-val handle_search : 'ctx -> Yojson.Safe.t -> tool_result
-(** [handle_search _ctx args] handles [masc_library_search].
+val handle_search : tool_name:string -> start_time:float -> 'ctx -> Yojson.Safe.t -> Tool_result.t
+(** [handle_search ~tool_name ~start_time _ctx args] handles [masc_library_search].
     Required arg: [query] (string, lowercase substring matched
     against document content).  Returns a Markdown bullet list
     when matches exist, or a plain ["No documents matching

@@ -1,25 +1,23 @@
 
 (** Tool_task - Core task CRUD operations *)
 
-type tool_result = bool * string
-
 type context = {
   config: Coord.config;
   agent_name: string;
   sw: Eio.Switch.t option;
 }
 
-val handle_add_task : context -> Yojson.Safe.t -> tool_result
-val handle_batch_add_tasks : context -> Yojson.Safe.t -> tool_result
-val handle_claim : ?agent_tool_names:string list -> context -> Yojson.Safe.t -> tool_result
-val handle_claim_next : ?agent_tool_names:string list -> context -> Yojson.Safe.t -> tool_result
-val handle_release : context -> Yojson.Safe.t -> tool_result
-val handle_done : context -> Yojson.Safe.t -> tool_result
-val handle_cancel_task : context -> Yojson.Safe.t -> tool_result
-val handle_transition : ?agent_tool_names:string list -> context -> Yojson.Safe.t -> tool_result
-val handle_update_priority : context -> Yojson.Safe.t -> tool_result
-val handle_tasks : context -> Yojson.Safe.t -> tool_result
-val handle_task_history : context -> Yojson.Safe.t -> tool_result
+val handle_add_task : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
+val handle_batch_add_tasks : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
+val handle_claim : ?agent_tool_names:string list -> tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
+val handle_claim_next : ?agent_tool_names:string list -> tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
+val handle_release : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
+val handle_done : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
+val handle_cancel_task : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
+val handle_transition : ?agent_tool_names:string list -> tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
+val handle_update_priority : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
+val handle_tasks : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
+val handle_task_history : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
 val task_history_events_json :
   Coord.config -> task_id:string -> limit:int -> Yojson.Safe.t
 

@@ -820,9 +820,6 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
         Tool_run.dispatch { Tool_run.config } ~name ~args:coerced_args
     | Mod_agent ->
         Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args:coerced_args
-        |> Option.map (fun (ok, msg) ->
-             if ok then Tool_result.ok ~tool_name:name ~start_time msg
-             else Tool_result.error ~tool_name:name ~start_time msg)
     | Mod_task ->
         Tool_task.dispatch ?agent_tool_names:caller_tool_names
           { Tool_task.config; agent_name; sw = Some sw } ~name
@@ -840,9 +837,6 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
         Tool_misc.dispatch { Tool_misc.config; agent_name } ~name ~args:coerced_args
     | Mod_suspend ->
         Tool_suspend.dispatch { Tool_suspend.config; caller_agent = Some agent_name } ~name ~args:coerced_args
-        |> Option.map (fun (ok, msg) ->
-             if ok then Tool_result.ok ~tool_name:name ~start_time msg
-             else Tool_result.error ~tool_name:name ~start_time msg)
     | Mod_library ->
         Tool_library.dispatch { Tool_library.agent_name } ~name ~args:coerced_args
     | Mod_keeper ->

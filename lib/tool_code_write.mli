@@ -50,8 +50,6 @@ type context = {
     via [{ Tool_code_write.config; agent_name }] at the
     dispatch site. *)
 
-type tool_result = bool * string
-
 (** {1 Git action SSOT (issue #8522)} *)
 
 (** Variant SSOT for git actions.  Adding a constructor forces

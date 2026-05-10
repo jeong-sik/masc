@@ -24,10 +24,10 @@ type context = {
   agent_name: string;
 }
 
-(** Helper: result to response *)
+(** Helper: result to Tool_result.t *)
 let result_to_response = function
-  | Ok msg -> (true, msg)
-  | Error e -> (false, Masc_domain.masc_error_to_string e)
+  | Ok msg -> Tool_result.quick_ok msg
+  | Error e -> Tool_result.quick_error (Masc_domain.masc_error_to_string e)
 
 (* Issue #8501: Variant SSOT for masc_agent_card.action.  Adding a
    new constructor forces compilation in [agent_card_action_to_string]
@@ -62,12 +62,12 @@ let handle_agents ctx args =
     | `List items -> `List (List.filteri (fun i _ -> i < limit) items)
     | other -> other
   in
-  (true, Yojson.Safe.to_string json)
+  Tool_result.quick_ok (Yojson.Safe.to_string json)
 
 (** Handle masc_register_capabilities *)
 let handle_register_capabilities ctx args =
   let capabilities = get_string_list args "capabilities" in
-  (true, Coord.register_capabilities ctx.config ~agent_name:ctx.agent_name ~capabilities)
+  Tool_result.quick_ok (Coord.register_capabilities ctx.config ~agent_name:ctx.agent_name ~capabilities)
 
 (** Handle masc_agent_update *)
 let handle_agent_update ctx args =
@@ -87,7 +87,7 @@ let handle_get_metrics ctx args =
   let days = get_int args "days" 7 in
   match Metrics_store_eio.calculate_agent_metrics ctx.config ~agent_id:target ~days with
   | Some metrics ->
-      (true, Yojson.Safe.to_string (Metrics_store_eio.agent_metrics_to_yojson metrics))
+      Tool_result.quick_ok (Yojson.Safe.to_string (Metrics_store_eio.agent_metrics_to_yojson metrics))
   | None ->
       error_result_typed ~code:Not_found
         (Printf.sprintf "no metrics found for agent: %s" target)
@@ -233,7 +233,7 @@ let handle_agent_fitness ctx args =
       List.sort_uniq String.compare (metrics_agents @ room_agents)
   in
   if Stdlib.List.length agents = 0 then
-    (true, Yojson.Safe.to_string (`Assoc [("count", `Int 0); ("agents", `List [])]))
+    Tool_result.quick_ok (Yojson.Safe.to_string (`Assoc [("count", `Int 0); ("agents", `List [])]))
   else
     let metrics_list = List.map (fun a -> (a, metrics_for ctx ~days a)) agents in
     let min_avg = min_avg_time metrics_list in
@@ -268,9 +268,8 @@ let handle_agent_fitness ctx args =
       ("count", `Int (List.length agents_json));
       ("agents", `List agents_json);
     ] in
-    (true, Yojson.Safe.to_string json)
+    Tool_result.quick_ok (Yojson.Safe.to_string json)
 
-(** Handle masc_collaboration_graph *)
 (** Handle masc_agent_card *)
 let handle_agent_card ctx args =
   let action_raw = get_string args "action" "get" in
@@ -324,9 +323,9 @@ let handle_agent_card ctx args =
                  ]) );
         ]
       in
-      (true, Yojson.Safe.to_string json)
+      Tool_result.quick_ok (Yojson.Safe.to_string json)
 
-(** Dispatch handler. Returns Some (success, result) if handled, None otherwise *)
+(** Dispatch handler. Returns Some (Tool_result.t) if handled, None otherwise *)
 let dispatch ctx ~name ~args =
   match name with
   | "masc_agents" -> Some (handle_agents ctx args)

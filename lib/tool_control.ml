@@ -22,12 +22,6 @@ module Float = Stdlib.Float
 
 open Tool_args
 
-type tool_result = bool * string
-
-let wrap_result ~name ~start (success, message) =
-  if success then Tool_result.ok ~tool_name:name ~start_time:start message
-  else Tool_result.error ~tool_name:name ~start_time:start message
-
 type context = {
   config: Coord.config;
   agent_name: string;
@@ -35,17 +29,20 @@ type context = {
 
 (* Handlers *)
 
-let handle_pause ctx args =
+let handle_pause ~tool_name ~start_time ctx args =
   let reason = get_string args "reason" "Manual pause" in
   Coord.pause ctx.config ~by:ctx.agent_name ~reason;
-  (true, Printf.sprintf "Paused by %s: %s" ctx.agent_name reason)
+  Tool_result.ok ~tool_name ~start_time
+    (Printf.sprintf "Paused by %s: %s" ctx.agent_name reason)
 
-let handle_resume ctx _args =
+let handle_resume ~tool_name ~start_time ctx _args =
   match Coord.resume ctx.config ~by:ctx.agent_name with
-  | `Resumed -> (true, Printf.sprintf "Resumed by %s" ctx.agent_name)
-  | `Already_running -> (true, "Default project scope is not paused")
+  | `Resumed -> Tool_result.ok ~tool_name ~start_time
+        (Printf.sprintf "Resumed by %s" ctx.agent_name)
+  | `Already_running -> Tool_result.ok ~tool_name ~start_time
+        "Default project scope is not paused"
 
-let handle_pause_status ctx _args =
+let handle_pause_status ~tool_name ~start_time ctx _args =
   let pause_state =
     if not (Coord.is_initialized ctx.config) then `Initializing
     else
@@ -96,7 +93,7 @@ let handle_pause_status ctx _args =
                 "Server is initializing; pause state is not available yet" );
           ]
   in
-  (true, Yojson.Safe.to_string payload)
+  Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string payload)
 
 let schemas = Tool_schemas_control.schemas
 
@@ -104,9 +101,9 @@ let schemas = Tool_schemas_control.schemas
 let dispatch ctx ~name ~args : Tool_result.t option =
   let start = Time_compat.now () in
   match name with
-  | "masc_pause" -> Some (wrap_result ~name ~start (handle_pause ctx args))
-  | "masc_resume" -> Some (wrap_result ~name ~start (handle_resume ctx args))
-  | "masc_pause_status" -> Some (wrap_result ~name ~start (handle_pause_status ctx args))
+  | "masc_pause" -> Some (handle_pause ~tool_name:name ~start_time:start ctx args)
+  | "masc_resume" -> Some (handle_resume ~tool_name:name ~start_time:start ctx args)
+  | "masc_pause_status" -> Some (handle_pause_status ~tool_name:name ~start_time:start ctx args)
   | _ -> None
 
 (* ================================================================ *)

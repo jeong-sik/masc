@@ -20,27 +20,27 @@ val valid_agent_card_action_strings : string list
     Mirror in [Tool_schemas_agent.collaboration_format_enum_strings]. *)
 val valid_collaboration_format_strings : string list
 
-(** Dispatch handler. Returns Some (success, result) if handled, None otherwise *)
-val dispatch : context -> name:string -> args:Yojson.Safe.t -> (bool * string) option
+(** Dispatch handler. Returns Some Tool_result.t if handled, None otherwise *)
+val dispatch : context -> name:string -> args:Yojson.Safe.t -> Tool_result.t option
 
 val schemas : Masc_domain.tool_schema list
 
 (** Handle masc_agents *)
-val handle_agents : context -> Yojson.Safe.t -> bool * string
+val handle_agents : context -> Yojson.Safe.t -> Tool_result.t
 
 (** Handle masc_register_capabilities *)
-val handle_register_capabilities : context -> Yojson.Safe.t -> bool * string
+val handle_register_capabilities : context -> Yojson.Safe.t -> Tool_result.t
 
 (** Handle masc_agent_update *)
-val handle_agent_update : context -> Yojson.Safe.t -> bool * string
+val handle_agent_update : context -> Yojson.Safe.t -> Tool_result.t
 
 (** Handle masc_get_metrics *)
-val handle_get_metrics : context -> Yojson.Safe.t -> bool * string
+val handle_get_metrics : context -> Yojson.Safe.t -> Tool_result.t
 
 (** Handle masc_agent_fitness *)
-val handle_agent_fitness : context -> Yojson.Safe.t -> bool * string
+val handle_agent_fitness : context -> Yojson.Safe.t -> Tool_result.t
 
 (** Handle masc_collaboration_graph *)
 
 (** Handle masc_agent_card *)
-val handle_agent_card : context -> Yojson.Safe.t -> bool * string
+val handle_agent_card : context -> Yojson.Safe.t -> Tool_result.t

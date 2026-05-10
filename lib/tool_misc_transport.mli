@@ -7,7 +7,7 @@
 
     @since 2.188.0 *)
 
-type tool_result = bool * string
+type tool_result = Tool_result.t
 
 (** {1 Transport status} *)
 

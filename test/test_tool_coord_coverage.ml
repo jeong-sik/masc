@@ -422,11 +422,13 @@ let () =
     in
     let _ =
       Tool_task.handle_add_task
+        ~tool_name:"test_tool" ~start_time:0.0
         task_ctx
         (`Assoc [ "title", `String "Check transition claim" ])
     in
-    let _success, _result =
+    let _ =
       Tool_task.handle_transition
+        ~tool_name:"test_tool" ~start_time:0.0
         task_ctx
         (`Assoc [ "task_id", `String "task-001"; "action", `String "claim" ])
     in
@@ -459,9 +461,9 @@ let () =
       { Tool_task.config = ctx.config; agent_name = ctx.agent_name; sw = None }
     in
     let _ =
-      Tool_task.handle_add_task task_ctx (`Assoc [ "title", `String "Check claim next" ])
+      Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 task_ctx (`Assoc [ "title", `String "Check claim next" ])
     in
-    let _success, _result = Tool_task.handle_claim_next task_ctx (`Assoc []) in
+    let _ = Tool_task.handle_claim_next ~tool_name:"test_tool" ~start_time:0.0 task_ctx (`Assoc []) in
     match
       Tool_coord.dispatch
         ctx

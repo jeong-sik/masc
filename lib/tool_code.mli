@@ -34,7 +34,6 @@ type context = {
 (** Per-call context.  Concrete record because callers
     construct it field-by-field at the dispatch site. *)
 
-type tool_result = bool * string
 
 (** {1 Security primitives} *)
 

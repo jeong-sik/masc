@@ -153,8 +153,8 @@ let dispatch ctx ~name ~args : Tool_result.t option =
   in
   match name with
   | "masc_config" -> Some (wrap_result ~name ~start (Tool_misc_admin.handle_config args))
-  | "masc_webrtc_offer" -> Some (wrap_result ~name ~start (Tool_misc_transport.handle_webrtc_offer args))
-  | "masc_webrtc_answer" -> Some (wrap_result ~name ~start (Tool_misc_transport.handle_webrtc_answer args))
+  | "masc_webrtc_offer" -> Some (Tool_misc_transport.handle_webrtc_offer args)
+  | "masc_webrtc_answer" -> Some (Tool_misc_transport.handle_webrtc_answer args)
   | "masc_dashboard" -> Some (wrap_result ~name ~start (handle_dashboard ctx args))
   | "masc_gc" -> Some (wrap_result ~name ~start (handle_gc ctx args))
   | "masc_cleanup_zombies" -> Some (wrap_result ~name ~start (handle_cleanup_zombies ctx args))

@@ -80,7 +80,7 @@ let () =
   test "dispatch_pause_status_paused" (fun () ->
       with_ctx @@ fun ctx ->
       let _ =
-        Tool_control.handle_pause ctx
+        Tool_control.handle_pause ~tool_name:"test" ~start_time:0.0 ctx
           (`Assoc [ ("reason", `String "For status test") ])
       in
       match Tool_control.dispatch ctx ~name:"masc_pause_status" ~args:(`Assoc []) with
@@ -95,7 +95,7 @@ let () =
   test "dispatch_resume" (fun () ->
       with_ctx @@ fun ctx ->
       let _ =
-        Tool_control.handle_pause ctx
+        Tool_control.handle_pause ~tool_name:"test" ~start_time:0.0 ctx
           (`Assoc [ ("reason", `String "For resume test") ])
       in
       match Tool_control.dispatch ctx ~name:"masc_resume" ~args:(`Assoc []) with

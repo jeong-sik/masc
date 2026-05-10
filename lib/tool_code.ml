@@ -35,11 +35,6 @@ type context = {
   agent_name: string;
 }
 
-type tool_result = bool * string
-
-let wrap_result ~name ~start (success, message) =
-  if success then Tool_result.ok ~tool_name:name ~start_time:start message
-  else Tool_result.error ~tool_name:name ~start_time:start message
 
 (* Security: Binary file extensions *)
 let binary_extensions = [
@@ -336,7 +331,7 @@ let validate_read_path ~agent_name config path =
 
 
 (* Handler: masc_code_search - Search code using ripgrep *)
-let handle_code_search ctx args =
+let handle_code_search ~tool_name ~start_time ctx args =
   let query = get_string args "query" "" in
   let path = get_string args "path" "" in
   let file_pattern = get_string args "file_pattern" "" in
@@ -345,16 +340,16 @@ let handle_code_search ctx args =
   let max_results = get_int args "max_results" 50 in
 
   if String.equal query "" then
-    (false, "Query required: 'query' parameter")
+    Tool_result.error ~tool_name ~start_time "Query required: 'query' parameter"
   else if String.equal (String.trim path) "" then
-    (false, "Path required: 'path' parameter")
+    Tool_result.error ~tool_name ~start_time "Path required: 'path' parameter"
   else begin
     (* Validate path first *)
     let search_path_result =
       validate_read_path ~agent_name:ctx.agent_name ctx.config path
     in
     match search_path_result with
-    | Error e -> (false, Masc_domain.masc_error_to_string e)
+    | Error e -> Tool_result.error ~tool_name ~start_time (Masc_domain.masc_error_to_string e)
     | Ok search_path ->
 
     let rg_args =
@@ -398,14 +393,14 @@ let handle_code_search ctx args =
           ("count", `Int (List.length matches));
           ("results", `List matches);
         ] in
-        (true, Yojson.Safe.to_string response)
+        Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string response)
     | Unix.WEXITED 1, _ ->
         (* No matches *)
         let response = `Assoc [
           ("count", `Int 0);
           ("results", `List []);
         ] in
-        (true, Yojson.Safe.to_string response)
+        Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string response)
     | Unix.WEXITED 2, output ->
         (* rg error: invalid regex, missing file, etc. Pick the right hint
            by scanning the rg output, since exit-2 is overloaded. *)
@@ -436,7 +431,7 @@ let handle_code_search ctx args =
             "Literal search failed. If your query contains regex chars (*+?[](){}^$|.\\), \
              try simplifying the query or set is_regex=true with a valid regex."
         in
-        (false, Printf.sprintf "%s\nrg output: %s" hint
+        Tool_result.error ~tool_name ~start_time (Printf.sprintf "%s\nrg output: %s" hint
            (if String.equal trimmed_out "" then "(empty)"
             else String_util.utf8_safe ~max_bytes:303 ~suffix:"..." trimmed_out |> String_util.to_string))
     | status, output ->
@@ -445,30 +440,30 @@ let handle_code_search ctx args =
           | Unix.WSIGNALED n -> Printf.sprintf "signal %d" n
           | Unix.WSTOPPED n -> Printf.sprintf "stopped %d" n
         in
-        (false, Printf.sprintf "ripgrep failed (%s): %s" code
+        Tool_result.error ~tool_name ~start_time (Printf.sprintf "ripgrep failed (%s): %s" code
            (if String.equal output "" then "(no output — check rg is in PATH and query is valid)"
             else output))
   end
 
 (* Handler: masc_code_symbols - Extract file symbols using heuristics *)
-let handle_code_symbols ctx args =
+let handle_code_symbols ~tool_name ~start_time ctx args =
   let path = get_string args "path" "" in
 
   if String.equal path "" then
-    (false, "Path required: 'path' parameter")
+    Tool_result.error ~tool_name ~start_time "Path required: 'path' parameter"
   else begin
     match validate_read_path ~agent_name:ctx.agent_name ctx.config path with
-    | Error e -> (false, Masc_domain.masc_error_to_string e)
+    | Error e -> Tool_result.error ~tool_name ~start_time (Masc_domain.masc_error_to_string e)
     | Ok validated_path ->
         if not (Sys.file_exists validated_path) then
-          (false, Printf.sprintf "File not found: %s" path)
+          Tool_result.error ~tool_name ~start_time (Printf.sprintf "File not found: %s" path)
         else if is_binary_file validated_path then
-          (false, "Binary file detected")
+          Tool_result.error ~tool_name ~start_time "Binary file detected"
         else begin
           (* Read file and extract symbols *)
           let file_size = (Unix.stat validated_path).Unix.st_size in
           if file_size > max_file_size then
-            (false, Printf.sprintf "File too large: %d bytes (max: %d)" file_size max_file_size)
+            Tool_result.error ~tool_name ~start_time (Printf.sprintf "File too large: %d bytes (max: %d)" file_size max_file_size)
           else begin
             try
               let content = In_channel.with_open_text validated_path In_channel.input_all in
@@ -520,33 +515,33 @@ let handle_code_symbols ctx args =
                 ("count", `Int (List.length symbols));
                 ("symbols", `List symbols_json);
               ] in
-              (true, Yojson.Safe.to_string response)
+              Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string response)
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-              (false, Printf.sprintf "Failed to read file: %s" (Stdlib.Printexc.to_string exn))
+              Tool_result.error ~tool_name ~start_time (Printf.sprintf "Failed to read file: %s" (Stdlib.Printexc.to_string exn))
           end
         end
   end
 
 (* Handler: masc_code_read - Read file with offset/limit *)
-let handle_code_read ctx args =
+let handle_code_read ~tool_name ~start_time ctx args =
   let path = get_string args "path" "" in
   let offset = get_int args "offset" 0 in
   let limit = get_int args "limit" 100 in
 
   if String.equal path "" then
-    (false, "Path required: 'path' parameter")
+    Tool_result.error ~tool_name ~start_time "Path required: 'path' parameter"
   else begin
     match validate_read_path ~agent_name:ctx.agent_name ctx.config path with
-    | Error e -> (false, Masc_domain.masc_error_to_string e)
+    | Error e -> Tool_result.error ~tool_name ~start_time (Masc_domain.masc_error_to_string e)
     | Ok validated_path ->
         if not (Sys.file_exists validated_path) then
-          (false, Printf.sprintf "File not found: %s" path)
+          Tool_result.error ~tool_name ~start_time (Printf.sprintf "File not found: %s" path)
         else if is_binary_file validated_path then
-          (false, "Binary file detected")
+          Tool_result.error ~tool_name ~start_time "Binary file detected"
         else begin
           let file_size = (Unix.stat validated_path).Unix.st_size in
           if file_size > max_file_size then
-            (false, Printf.sprintf "File too large: %d bytes (max: %d)" file_size max_file_size)
+            Tool_result.error ~tool_name ~start_time (Printf.sprintf "File too large: %d bytes (max: %d)" file_size max_file_size)
           else begin
             try
               let content = In_channel.with_open_text validated_path In_channel.input_all in
@@ -575,9 +570,9 @@ let handle_code_read ctx args =
                 ("total_lines", `Int total_lines);
                 ("lines", `List (List.map (fun s -> `String s) result_lines));
               ] in
-              (true, Yojson.Safe.to_string response)
+              Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string response)
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-              (false, Printf.sprintf "Failed to read file: %s" (Stdlib.Printexc.to_string exn))
+              Tool_result.error ~tool_name ~start_time (Printf.sprintf "Failed to read file: %s" (Stdlib.Printexc.to_string exn))
           end
         end
   end
@@ -586,9 +581,9 @@ let handle_code_read ctx args =
 let dispatch ctx ~name ~args : Tool_result.t option =
   let start = Time_compat.now () in
   match name with
-  | "masc_code_search" -> Some (wrap_result ~name ~start (handle_code_search ctx args))
-  | "masc_code_symbols" -> Some (wrap_result ~name ~start (handle_code_symbols ctx args))
-  | "masc_code_read" -> Some (wrap_result ~name ~start (handle_code_read ctx args))
+  | "masc_code_search" -> Some (handle_code_search ~tool_name:name ~start_time:start ctx args)
+  | "masc_code_symbols" -> Some (handle_code_symbols ~tool_name:name ~start_time:start ctx args)
+  | "masc_code_read" -> Some (handle_code_read ~tool_name:name ~start_time:start ctx args)
   | _ -> None
 
 let schemas : Masc_domain.tool_schema list = [

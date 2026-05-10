@@ -1038,9 +1038,9 @@ let handle_keeper_persona_audit ctx args : tool_result =
   let names = keeper_persona_audit_requested_names ctx args in
   let invalid_names = List.filter (fun name -> not (validate_name name)) names in
   if Stdlib.List.length invalid_names > 0 then
-    error_result_typed ~code:Validation_error
+    (false, error_response_typed ~code:Validation_error
       (Printf.sprintf "invalid keeper name(s): %s"
-         (String.concat ", " invalid_names))
+         (String.concat ", " invalid_names)))
   else
     let limit = get_int args "limit" 100 |> max 0 |> min 500 in
     let include_ok = get_bool args "include_ok" true in
@@ -1240,7 +1240,7 @@ let handle_keeper_sandbox_stop ctx args : tool_result =
     | name -> Some name
   in
   match Keeper_sandbox_control.parse_stop_scope container_kind_raw with
-  | Error err -> error_result_typed ~code:Validation_error err
+  | Error err -> (false, error_response_typed ~code:Validation_error err)
   | Ok scope ->
       let stop_result =
         Keeper_sandbox_control.stop_containers
@@ -1358,8 +1358,8 @@ let handle_keeper_compact ctx args : tool_result =
     | None ->
       Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_compact
         ~labels:[("keeper", name); ("result", "not_found")] ();
-      error_result_typed ~code:Validation_error
-        (Printf.sprintf "keeper %s is not in the registry" name)
+      (false, error_response_typed ~code:Validation_error
+        (Printf.sprintf "keeper %s is not in the registry" name))
     | Some entry ->
     let phase_before = Keeper_state_machine.phase_to_string entry.phase in
     (* Phase precondition: Overflowed, Paused, or (Running/Failing with force).
@@ -1374,10 +1374,10 @@ let handle_keeper_compact ctx args : tool_result =
     if not allowed then begin
       Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_compact
         ~labels:[("keeper", name); ("result", "precondition")] ();
-      error_result_typed ~code:Validation_error
+      (false, error_response_typed ~code:Validation_error
         (Printf.sprintf
            "keeper %s is in phase %s; compaction requires Overflowed, Paused, or force=true"
-           name phase_before)
+           name phase_before))
     end
     else begin
       (* Dispatch FSM event *)
@@ -1450,16 +1450,16 @@ let handle_keeper_clear ctx args : tool_result =
   | Ok name ->
     let reason = String.trim (get_string args "reason" "") in
     if String.equal reason "" then
-      error_result_typed ~code:Validation_error
-        "reason is required for masc_keeper_clear (audit trail)"
+      (false, error_response_typed ~code:Validation_error
+        "reason is required for masc_keeper_clear (audit trail)")
     else
     (* Same registry race guard as [handle_keeper_compact]: if the keeper
        disappeared between [resolve_keeper_name] and [get], abort cleanly
        rather than silently proceed with a half-applied clear. *)
     match Keeper_registry.get ~base_path:ctx.config.base_path name with
     | None ->
-      error_result_typed ~code:Validation_error
-        (Printf.sprintf "keeper %s is not in the registry" name)
+      (false, error_response_typed ~code:Validation_error
+        (Printf.sprintf "keeper %s is not in the registry" name))
     | Some entry ->
       let preserve_system = get_bool args "preserve_system_prompt" true in
       let phase_before = Keeper_state_machine.phase_to_string entry.phase in

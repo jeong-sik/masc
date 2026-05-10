@@ -82,8 +82,8 @@ let contract_requiring_tools tools =
   `Assoc [ ("required_tools", `List (List.map (fun tool -> `String tool) tools)) ]
 
 let add_task_requiring_tools ctx ~title tools =
-  let success, result =
-    Tool_task.handle_add_task ctx
+  let result =
+    Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
           ("title", `String title);
@@ -91,7 +91,7 @@ let add_task_requiring_tools ctx ~title tools =
           ("contract", contract_requiring_tools tools);
         ])
   in
-  if not success then failwith result
+  if not result.Tool_result.success then failwith result.Tool_result.legacy_message
 
 let set_only_task_do_not_reclaim_reason ctx reason =
   let config = ctx.Tool_task.config in
@@ -232,7 +232,7 @@ let () = test "masc_oas_bridge_runs_without_eio_env" (fun () ->
 let () = test "dispatch_transition_claim" (fun () ->
   let ctx = make_test_ctx () in
   (* First add a task *)
-  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Claim test")]) in
+  let _ = Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Claim test")]) in
   let args = `Assoc [("task_id", `String "task-001"); ("action", `String "claim")] in
   match Tool_task.dispatch ctx ~name:"masc_transition" ~args with
   | Some _ -> () (* May fail if task doesn't exist *)
@@ -252,20 +252,20 @@ let () = test "dispatch_claim_next" (fun () ->
 let () = test "handle_done_records_calibration_verdict" (fun () ->
   let ctx = make_test_ctx () in
   (* Setup: add task, claim it *)
-  let _ = Tool_task.handle_add_task ctx
+  let _ = Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
     (`Assoc [("title", `String "Calibration test task")]) in
-  let _ = Tool_task.handle_claim ctx
+  let _ = Tool_task.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx
     (`Assoc [("task_id", `String "task-001")]) in
   let verdict_dir = make_temp_dir "masc-verdict-test" in
   Eval_calibration.set_store_for_testing ~base_dir:verdict_dir;
   (* Trigger done with short notes (< 10 chars) to hit length gate *)
-  let (success, result) = Tool_task.handle_done ctx
+  let result = Tool_task.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx
     (`Assoc [
       ("task_id", `String "task-001");
       ("notes", `String "x")
     ]) in
-  assert (not success);
-  assert (str_contains result "Completion rejected by anti-rationalization gate");
+  assert (not result.Tool_result.success);
+  assert (str_contains result.Tool_result.legacy_message "Completion rejected by anti-rationalization gate");
   (* Verify: verdict was recorded in the store *)
   let store = Eval_calibration.get_store () in
   let records = Dated_jsonl.read_recent store 10 in
@@ -283,18 +283,18 @@ let () = test "handle_done_records_calibration_verdict" (fun () ->
 
 let () = test "handle_done_records_approved_calibration_verdict" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Tool_task.handle_add_task ctx
+  let _ = Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
     (`Assoc [("title", `String "Approved calibration task")]) in
-  let _ = Tool_task.handle_claim ctx
+  let _ = Tool_task.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx
     (`Assoc [("task_id", `String "task-001")]) in
   let verdict_dir = make_temp_dir "masc-verdict-approve-test" in
   Eval_calibration.set_store_for_testing ~base_dir:verdict_dir;
-  let success, result = Tool_task.handle_done ctx
+  let result = Tool_task.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx
     (`Assoc [
       ("task_id", `String "task-001");
       ("notes", `String "Implemented the calibration coverage path, verified the JSONL verdict store, and completed the task cleanly.")
     ]) in
-  if not success then failwith result;
+  if not result.Tool_result.success then failwith result.Tool_result.legacy_message;
   let store = Eval_calibration.get_store () in
   let records = Dated_jsonl.read_recent store 10 in
   assert (List.length records >= 1);
@@ -315,13 +315,13 @@ let () = test "handle_transition_respects_completion_contract_and_records_custom
      test_verification_fsm.ml. *)
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "false") (fun () ->
     let ctx = make_test_ctx () in
-    let _ = Tool_task.handle_add_task ctx
+    let _ = Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc [("title", `String "Contract calibration task")]) in
-    let _ = Tool_task.handle_claim ctx
+    let _ = Tool_task.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc [("task_id", `String "task-001")]) in
     let verdict_dir = make_temp_dir "masc-verdict-contract-test" in
     Eval_calibration.set_store_for_testing ~base_dir:verdict_dir;
-    let success, result = Tool_task.handle_transition ctx
+    let result = Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc [
         ("task_id", `String "task-001");
         ("action", `String "done");
@@ -329,8 +329,8 @@ let () = test "handle_transition_respects_completion_contract_and_records_custom
         ("completion_contract", `List [ `String "test coverage"; `String "migration" ]);
         ("evaluator_cascade", `String "glm:auto");
       ]) in
-    assert (not success);
-    assert (str_contains result "completion contract not satisfied");
+    assert (not result.Tool_result.success);
+    assert (str_contains result.Tool_result.legacy_message "completion contract not satisfied");
     let store = Eval_calibration.get_store () in
     let records = Dated_jsonl.read_recent store 10 in
     assert (List.length records >= 1);
@@ -346,8 +346,8 @@ let () = test "handle_transition_respects_completion_contract_and_records_custom
 
 let () = test "handle_add_task_persists_contract" (fun () ->
   let ctx = make_test_ctx () in
-  let (success, result) =
-    Tool_task.handle_add_task ctx
+  let result =
+    Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
           ("title", `String "Strict task");
@@ -361,7 +361,7 @@ let () = test "handle_add_task_persists_contract" (fun () ->
               ] );
         ])
   in
-  if not success then failwith result;
+  if not result.Tool_result.success then failwith result.Tool_result.legacy_message;
   match Coord.get_tasks_raw ctx.config with
   | [ task ] -> (
       match task.contract with
@@ -374,15 +374,15 @@ let () = test "handle_add_task_persists_contract" (fun () ->
 
 let () = test "handle_add_task_injects_default_verification_contract" (fun () ->
   let ctx = make_test_ctx () in
-  let (success, result) =
-    Tool_task.handle_add_task ctx
+  let result =
+    Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
           ("title", `String "Default verification task");
           ("description", `String "Need verifier-visible evidence.");
         ])
   in
-  if not success then failwith result;
+  if not result.Tool_result.success then failwith result.Tool_result.legacy_message;
   match Coord.get_tasks_raw ctx.config with
   | [ task ] -> (
       match task.contract with
@@ -401,8 +401,8 @@ let () = test "handle_add_task_injects_default_verification_contract" (fun () ->
 
 let () = test "handle_batch_add_tasks_injects_default_verification_contracts" (fun () ->
   let ctx = make_test_ctx () in
-  let (success, result) =
-    Tool_task.handle_batch_add_tasks ctx
+  let result =
+    Tool_task.handle_batch_add_tasks ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
           ( "tasks",
@@ -413,7 +413,7 @@ let () = test "handle_batch_add_tasks_injects_default_verification_contracts" (f
               ] );
         ])
   in
-  if not success then failwith result;
+  if not result.Tool_result.success then failwith result.Tool_result.legacy_message;
   let tasks = Coord.get_tasks_raw ctx.config in
   assert (List.length tasks = 2);
   List.iter
@@ -432,7 +432,7 @@ let () = test "handle_done_uses_persisted_contract_gate" (fun () ->
      must be blocked with a gate rejection message. *)
   let ctx = make_test_ctx () in
   let _ =
-    Tool_task.handle_add_task ctx
+    Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
           ("title", `String "Strict deliverable task");
@@ -446,20 +446,20 @@ let () = test "handle_done_uses_persisted_contract_gate" (fun () ->
               ] );
         ])
   in
-  let _ = Tool_task.handle_claim ctx (`Assoc [ ("task_id", `String "task-001") ]) in
-  let success_done, result_done =
-    Tool_task.handle_done ctx
+  let _ = Tool_task.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("task_id", `String "task-001") ]) in
+  let result_done =
+    Tool_task.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
           ("notes", `String "deliverable-ready");
         ])
   in
-  if success_done then
+  if result_done.Tool_result.success then
     failwith "expected gate to reject handle_done for strict task without verdict";
-  if not (str_contains result_done "CDAL verdict") then
+  if not (str_contains result_done.Tool_result.legacy_message "CDAL verdict") then
     failwith
-      (Printf.sprintf "expected CDAL gate rejection message, got: %s" result_done)
+      (Printf.sprintf "expected CDAL gate rejection message, got: %s" result_done.Tool_result.legacy_message)
 )
 
 (* Advisory contract (strict=false): CDAL gate must still record an attribution
@@ -471,7 +471,7 @@ let () = test "handle_done_advisory_contract_records_attribution" (fun () ->
   Dashboard_attribution.reset ();
   let ctx = make_test_ctx_with_agent "advisory-agent" in
   let _ =
-    Tool_task.handle_add_task ctx
+    Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
           ("title", `String "Advisory deliverable task");
@@ -484,16 +484,16 @@ let () = test "handle_done_advisory_contract_records_attribution" (fun () ->
               ] );
         ])
   in
-  let _ = Tool_task.handle_claim ctx (`Assoc [ ("task_id", `String "task-001") ]) in
-  let success_done, _result_done =
-    Tool_task.handle_done ctx
+  let _ = Tool_task.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("task_id", `String "task-001") ]) in
+  let result_done =
+    Tool_task.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
           ("notes", `String "deliverable-ready");
         ])
   in
-  if not success_done then
+  if not result_done.Tool_result.success then
     failwith "advisory contract (strict=false) must not block handle_done";
   (* Advisory contracts record under the dedicated advisory gate bucket so
      dashboards can count "allowed through under advisory" separately from
@@ -519,26 +519,26 @@ let () = test "handle_done_advisory_contract_records_attribution" (fun () ->
 let () = test "handle_transition_release_requires_handoff_for_strict_task" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
-    Tool_task.handle_add_task ctx
+    Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
           ("title", `String "Strict release task");
           ("contract", `Assoc [ ("strict", `Bool true) ]);
         ])
   in
-  let _ = Tool_task.handle_claim ctx (`Assoc [ ("task_id", `String "task-001") ]) in
-  let success_missing, result_missing =
-    Tool_task.handle_transition ctx
+  let _ = Tool_task.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("task_id", `String "task-001") ]) in
+  let result_missing =
+    Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
           ("action", `String "release");
         ])
   in
-  assert (not success_missing);
-  assert (str_contains result_missing "handoff_context.summary");
-  let success_release, result_release =
-    Tool_task.handle_transition ctx
+  assert (not result_missing.Tool_result.success);
+  assert (str_contains result_missing.Tool_result.legacy_message "handoff_context.summary");
+  let result_release =
+    Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
@@ -553,7 +553,7 @@ let () = test "handle_transition_release_requires_handoff_for_strict_task" (fun 
               ] );
         ])
   in
-  if not success_release then failwith result_release;
+  if not result_release.Tool_result.success then failwith result_release.Tool_result.legacy_message;
   match Coord.get_tasks_raw ctx.config with
   | [ task ] -> (
       assert (task.do_not_reclaim_reason = None);
@@ -573,22 +573,22 @@ let () = test "handle_transition_start_on_todo_points_at_claim_first" (fun () ->
      action=claim as the next concrete call. *)
   let ctx = make_test_ctx () in
   let _ =
-    Tool_task.handle_add_task ctx
+    Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc [ ("title", `String "Start-without-claim") ])
   in
-  let success, result =
-    Tool_task.handle_transition ctx
+  let result =
+    Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
           ("action", `String "start");
         ])
   in
-  assert (not success);
-  assert (str_contains result "Invalid transition");
-  assert (str_contains result "todo");
-  assert (str_contains result "Remediation");
-  assert (str_contains result "action=claim")
+  assert (not result.Tool_result.success);
+  assert (str_contains result.Tool_result.legacy_message "Invalid transition");
+  assert (str_contains result.Tool_result.legacy_message "todo");
+  assert (str_contains result.Tool_result.legacy_message "Remediation");
+  assert (str_contains result.Tool_result.legacy_message "action=claim")
 )
 
 let () = test "handle_transition_release_by_nonowner_redirects_to_board_post"
@@ -598,11 +598,11 @@ let () = test "handle_transition_release_by_nonowner_redirects_to_board_post"
      and redirect to masc_board_post rather than reflexive retry. *)
   let ctx_owner = make_test_ctx_with_agent "owner-agent" in
   let _ =
-    Tool_task.handle_add_task ctx_owner
+    Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx_owner
       (`Assoc [ ("title", `String "Owned-by-other") ])
   in
   let _ =
-    Tool_task.handle_claim ctx_owner
+    Tool_task.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx_owner
       (`Assoc [ ("task_id", `String "task-001") ])
   in
   (* A separate context for a different agent against the SAME config,
@@ -610,18 +610,18 @@ let () = test "handle_transition_release_by_nonowner_redirects_to_board_post"
   let ctx_other =
     { ctx_owner with Tool_task.agent_name = "other-agent" }
   in
-  let success, result =
-    Tool_task.handle_transition ctx_other
+  let result =
+    Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx_other
       (`Assoc
         [
           ("task_id", `String "task-001");
           ("action", `String "release");
         ])
   in
-  assert (not success);
-  assert (str_contains result "Invalid transition");
-  assert (str_contains result "Remediation");
-  assert (str_contains result "masc_board_post")
+  assert (not result.Tool_result.success);
+  assert (str_contains result.Tool_result.legacy_message "Invalid transition");
+  assert (str_contains result.Tool_result.legacy_message "Remediation");
+  assert (str_contains result.Tool_result.legacy_message "masc_board_post")
 )
 
 let () = test "handle_transition_release_synthesizes_summary_from_notes" (fun () ->
@@ -632,19 +632,19 @@ let () = test "handle_transition_release_synthesizes_summary_from_notes" (fun ()
      keeper LLM to retry the exact same payload shape. *)
   let ctx = make_test_ctx () in
   let _ =
-    Tool_task.handle_add_task ctx
+    Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
           ("title", `String "Strict release with notes only");
           ("contract", `Assoc [ ("strict", `Bool true) ]);
         ])
   in
-  let _ = Tool_task.handle_claim ctx (`Assoc [ ("task_id", `String "task-001") ]) in
+  let _ = Tool_task.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("task_id", `String "task-001") ]) in
   let synthesized_note =
     "blocked on fixture reproduction; hand off to fixture-capable keeper"
   in
-  let success_release, result_release =
-    Tool_task.handle_transition ctx
+  let result_release =
+    Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
@@ -653,7 +653,7 @@ let () = test "handle_transition_release_synthesizes_summary_from_notes" (fun ()
           ("handoff_context", `Assoc []);
         ])
   in
-  if not success_release then failwith ("unexpected rejection: " ^ result_release);
+  if not result_release.Tool_result.success then failwith ("unexpected rejection: " ^ result_release.Tool_result.legacy_message);
   match Coord.get_tasks_raw ctx.config with
   | [ task ] -> (
       match task.handoff_context with
@@ -669,17 +669,17 @@ let () = test "handle_transition_release_prefers_notes_then_reason_for_synthesis
      collapses to the first line only. *)
   let ctx = make_test_ctx () in
   let _ =
-    Tool_task.handle_add_task ctx
+    Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
           ("title", `String "Strict release with both notes and reason");
           ("contract", `Assoc [ ("strict", `Bool true) ]);
         ])
   in
-  let _ = Tool_task.handle_claim ctx (`Assoc [ ("task_id", `String "task-001") ]) in
+  let _ = Tool_task.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("task_id", `String "task-001") ]) in
   let notes_line = "notes-line-should-win" in
-  let success_release, result_release =
-    Tool_task.handle_transition ctx
+  let result_release =
+    Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
@@ -689,7 +689,7 @@ let () = test "handle_transition_release_prefers_notes_then_reason_for_synthesis
           ("handoff_context", `Assoc []);
         ])
   in
-  if not success_release then failwith ("unexpected rejection: " ^ result_release);
+  if not result_release.Tool_result.success then failwith ("unexpected rejection: " ^ result_release.Tool_result.legacy_message);
   match Coord.get_tasks_raw ctx.config with
   | [ task ] -> (
       match task.handoff_context with
@@ -702,18 +702,18 @@ let () = test "handle_transition_release_prefers_notes_then_reason_for_synthesis
 let () = test "handle_transition_release_empty_summary_error_includes_example" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
-    Tool_task.handle_add_task ctx
+    Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
           ("title", `String "Strict release task");
           ("contract", `Assoc [ ("strict", `Bool true) ]);
         ])
   in
-  let _ = Tool_task.handle_claim ctx (`Assoc [ ("task_id", `String "task-001") ]) in
+  let _ = Tool_task.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("task_id", `String "task-001") ]) in
   (* Empty-string summary must also fail, and error must include a payload example
      so the keeper LLM can self-correct instead of retrying the same partial payload. *)
-  let success_empty, result_empty =
-    Tool_task.handle_transition ctx
+  let result_empty =
+    Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
@@ -726,16 +726,16 @@ let () = test "handle_transition_release_empty_summary_error_includes_example" (
               ] );
         ])
   in
-  assert (not success_empty);
-  assert (str_contains result_empty "handoff_context.summary is required");
-  assert (str_contains result_empty "Example");
-  assert (str_contains result_empty "\"summary\"")
+  assert (not result_empty.Tool_result.success);
+  assert (str_contains result_empty.Tool_result.legacy_message "handoff_context.summary is required");
+  assert (str_contains result_empty.Tool_result.legacy_message "Example");
+  assert (str_contains result_empty.Tool_result.legacy_message "\"summary\"")
 )
 
 let () = test "handle_transition_done_prefers_ownership_error_over_cdal_gate" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
-    Tool_task.handle_add_task ctx
+    Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
           ("title", `String "Strict owned task");
@@ -748,8 +748,8 @@ let () = test "handle_transition_done_prefers_ownership_error_over_cdal_gate" (f
         ])
   in
   let _ = Coord.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
-  let success, result =
-    Tool_task.handle_transition ctx
+  let result =
+    Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
@@ -757,16 +757,16 @@ let () = test "handle_transition_done_prefers_ownership_error_over_cdal_gate" (f
           ("notes", `String "deliverable-ready");
         ])
   in
-  assert (not success);
-  assert (str_contains result "currently owned by other-agent");
-  assert (not (str_contains result "CDAL verdict"))
+  assert (not result.Tool_result.success);
+  assert (str_contains result.Tool_result.legacy_message "currently owned by other-agent");
+  assert (not (str_contains result.Tool_result.legacy_message "CDAL verdict"))
 )
 
 let () = test "handle_transition_done_on_awaiting_verification_is_explicit" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx () in
     let _ =
-      Tool_task.handle_add_task ctx
+      Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
         (`Assoc
           [
             ("title", `String "Awaiting verification task");
@@ -783,8 +783,8 @@ let () = test "handle_transition_done_on_awaiting_verification_is_explicit" (fun
       Coord.transition_task_r ctx.config ~agent_name:"test-agent"
         ~task_id:"task-001" ~action:Masc_domain.Submit_for_verification ()
     in
-    let success, result =
-      Tool_task.handle_transition ctx
+    let result =
+      Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
         (`Assoc
           [
             ("task_id", `String "task-001");
@@ -792,32 +792,32 @@ let () = test "handle_transition_done_on_awaiting_verification_is_explicit" (fun
             ("notes", `String "tests pass");
           ])
     in
-    assert (not success);
-    assert (str_contains result "awaiting verification");
-    assert (str_contains result "approve or reject")))
+    assert (not result.Tool_result.success);
+    assert (str_contains result.Tool_result.legacy_message "awaiting verification");
+    assert (str_contains result.Tool_result.legacy_message "approve or reject")))
 let () = test "handle_claim_sets_planning_current_task" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Claim direct")]) in
-  let (success, _result) =
-    Tool_task.handle_claim ctx (`Assoc [("task_id", `String "task-001")])
+  let _ = Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Claim direct")]) in
+  let result =
+    Tool_task.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("task_id", `String "task-001")])
   in
-  assert success;
+  assert result.Tool_result.success;
   assert (Planning_eio.get_current_task ctx.config = Some "task-001")
 )
 
 let () = test "handle_claim_blocks_required_tools_without_server_surface" (fun () ->
   let ctx = make_test_ctx () in
   add_task_requiring_tools ctx ~title:"Needs bash" [ "keeper_bash" ];
-  let success, result =
-    Tool_task.handle_claim ~agent_tool_names:[ "masc_status" ] ctx
+  let result =
+    Tool_task.handle_claim ~agent_tool_names:[ "masc_status" ] ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
           ("agent_tool_names", `List [ `String "keeper_bash" ]);
         ])
   in
-  assert (not success);
-  assert (str_contains result "requires tool(s) unavailable");
+  assert (not result.Tool_result.success);
+  assert (str_contains result.Tool_result.legacy_message "requires tool(s) unavailable");
   assert_task_todo ctx;
   assert (Planning_eio.get_current_task ctx.config = None)
 )
@@ -825,11 +825,11 @@ let () = test "handle_claim_blocks_required_tools_without_server_surface" (fun (
 let () = test "handle_claim_allows_required_tools_with_server_surface" (fun () ->
   let ctx = make_test_ctx () in
   add_task_requiring_tools ctx ~title:"Needs bash" [ "keeper_bash" ];
-  let success, result =
-    Tool_task.handle_claim ~agent_tool_names:[ "masc_status"; "keeper_bash" ] ctx
+  let result =
+    Tool_task.handle_claim ~agent_tool_names:[ "masc_status"; "keeper_bash" ] ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc [ ("task_id", `String "task-001") ])
   in
-  if not success then failwith result;
+  if not result.Tool_result.success then failwith result.Tool_result.legacy_message;
   assert_task_claimed_by ctx ctx.agent_name;
   assert (Planning_eio.get_current_task ctx.config = Some "task-001")
 )
@@ -837,17 +837,17 @@ let () = test "handle_claim_allows_required_tools_with_server_surface" (fun () -
 let () = test "handle_add_task_rejects_removed_required_preset_argument" (fun () ->
   let agent_name = "test-agent" in
   let ctx = make_test_ctx_with_agent agent_name in
-  let success, result =
-    Tool_task.handle_add_task ctx
+  let result =
+    Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
           ("title", `String "Needs social");
           ("required_preset", `String "social");
         ])
   in
-  assert (not success);
-  assert (str_contains result "required_preset");
-  assert (str_contains result "Unknown argument")
+  assert (not result.Tool_result.success);
+  assert (str_contains result.Tool_result.legacy_message "required_preset");
+  assert (str_contains result.Tool_result.legacy_message "Unknown argument")
 )
 
 let () = test "add_task_schema_omits_removed_required_preset_argument" (fun () ->
@@ -869,44 +869,44 @@ let () = test "add_task_schema_omits_removed_required_preset_argument" (fun () -
 let () = test "handle_claim_rejects_removed_agent_role_argument" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
-    Tool_task.handle_add_task ctx (`Assoc [ ("title", `String "Claim role arg") ])
+    Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("title", `String "Claim role arg") ])
   in
-  let success, result =
-    Tool_task.handle_claim ctx
+  let result =
+    Tool_task.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
           ("agent_role", `String "worker");
         ])
   in
-  assert (not success);
-  assert (str_contains result "agent_role is no longer supported")
+  assert (not result.Tool_result.success);
+  assert (str_contains result.Tool_result.legacy_message "agent_role is no longer supported")
 )
 
 let () = test "handle_claim_next_sets_planning_current_task" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Claim next")]) in
-  let (success, _result) = Tool_task.handle_claim_next ctx (`Assoc []) in
-  assert success;
+  let _ = Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Claim next")]) in
+  let result = Tool_task.handle_claim_next ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc []) in
+  assert result.Tool_result.success;
   assert (Planning_eio.get_current_task ctx.config = Some "task-001")
 )
 
 let () = test "handle_claim_next_returns_claim_observation" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
-    Tool_task.handle_add_task ctx (`Assoc [ ("title", `String "Claim observed") ])
+    Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("title", `String "Claim observed") ])
   in
-  let success, result = Tool_task.handle_claim_next ctx (`Assoc []) in
-  if not success then failwith result;
+  let claim_result = Tool_task.handle_claim_next ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc []) in
+  if not claim_result.Tool_result.success then failwith claim_result.Tool_result.legacy_message;
   let prefix = "claim_observation=" in
   let line =
     match
       List.find_opt
         (fun line -> str_starts_with ~prefix line)
-        (String.split_on_char '\n' result)
+        (String.split_on_char '\n' claim_result.Tool_result.legacy_message)
     with
     | Some line -> line
-    | None -> failwith ("missing claim observation in result: " ^ result)
+    | None -> failwith ("missing claim observation in result: " ^ claim_result.Tool_result.legacy_message)
   in
   let payload =
     String.sub line (String.length prefix) (String.length line - String.length prefix)
@@ -927,12 +927,12 @@ let () =
   test "handle_claim_next_blocks_required_tools_without_server_surface" (fun () ->
     let ctx = make_test_ctx () in
     add_task_requiring_tools ctx ~title:"Needs bash" [ "keeper_bash" ];
-    let success, result =
-      Tool_task.handle_claim_next ~agent_tool_names:[ "masc_status" ] ctx
+    let result =
+      Tool_task.handle_claim_next ~agent_tool_names:[ "masc_status" ] ~tool_name:"test_tool" ~start_time:0.0 ctx
         (`Assoc [])
     in
-    assert success;
-    assert (str_contains result "No eligible tasks available");
+    assert result.Tool_result.success;
+    assert (str_contains result.Tool_result.legacy_message "No eligible tasks available");
     assert_task_todo ctx;
     assert (Planning_eio.get_current_task ctx.config = None))
 
@@ -940,12 +940,13 @@ let () =
   test "handle_claim_next_allows_required_tools_with_server_surface" (fun () ->
     let ctx = make_test_ctx () in
     add_task_requiring_tools ctx ~title:"Needs bash" [ "keeper_bash" ];
-    let success, result =
+    let result =
       Tool_task.handle_claim_next
         ~agent_tool_names:[ "masc_status"; "keeper_bash" ]
+        ~tool_name:"test_tool" ~start_time:0.0
         ctx (`Assoc [])
     in
-    if not success then failwith result;
+    if not result.Tool_result.success then failwith result.Tool_result.legacy_message;
     assert_task_claimed_by ctx ctx.agent_name;
     assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 
@@ -984,35 +985,35 @@ let () = test "handle_claim_next_ignores_keeper_preset_for_open_claims" (fun () 
   | Ok _ -> ()
   | Error e -> failwith (Masc_domain.masc_error_to_string e));
   let _ =
-    Tool_task.handle_add_task ctx
+    Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc [ ("title", `String "Open claim task") ])
   in
-  let success, result = Tool_task.handle_claim_next ctx (`Assoc []) in
-  assert success;
+  let result = Tool_task.handle_claim_next ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc []) in
+  assert result.Tool_result.success;
   match Coord.get_tasks_raw ctx.config with
   | [ task ] -> (
       match task.task_status with
       | Masc_domain.Claimed { assignee; _ } -> assert (assignee = agent_name)
-      | _ -> failwith ("expected task to be claimed: " ^ result))
-  | _ -> failwith ("expected exactly one task: " ^ result)
+      | _ -> failwith ("expected task to be claimed: " ^ result.Tool_result.legacy_message))
+  | _ -> failwith ("expected exactly one task: " ^ result.Tool_result.legacy_message)
 )
 
 let () = test "transition_claim_sets_planning_current_task" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Transition claim")]) in
-  let (success, _result) =
-    Tool_task.handle_transition ctx
+  let _ = Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Transition claim")]) in
+  let result =
+    Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc [("task_id", `String "task-001"); ("action", `String "claim")])
   in
-  assert success;
+  assert result.Tool_result.success;
   assert (Planning_eio.get_current_task ctx.config = Some "task-001")
 )
 
 let () = test "transition_claim_blocks_required_tools_even_with_force" (fun () ->
   let ctx = make_test_ctx () in
   add_task_requiring_tools ctx ~title:"Needs bash" [ "keeper_bash" ];
-  let success, result =
-    Tool_task.handle_transition ~agent_tool_names:[ "masc_status" ] ctx
+  let result =
+    Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ~agent_tool_names:[ "masc_status" ] ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
@@ -1020,8 +1021,8 @@ let () = test "transition_claim_blocks_required_tools_even_with_force" (fun () -
           ("force", `Bool true);
         ])
   in
-  assert (not success);
-  assert (str_contains result "requires tool(s) unavailable");
+  assert (not result.Tool_result.success);
+  assert (str_contains result.Tool_result.legacy_message "requires tool(s) unavailable");
   assert_task_todo ctx;
   assert (Planning_eio.get_current_task ctx.config = None)
 )
@@ -1030,9 +1031,10 @@ let () = test "transition_submit_for_verification_rejects_todo_pr_evidence" (fun
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "codex-mcp-client" in
     add_task_requiring_tools ctx ~title:"Codex CLI approval follow-up" [ "keeper_bash" ];
-    let success, result =
+    let result =
       Tool_task.handle_transition
         ~agent_tool_names:[ "masc_status"; "masc_transition" ]
+        ~tool_name:"test_tool" ~start_time:0.0
         ctx
         (`Assoc
           [
@@ -1044,8 +1046,8 @@ let () = test "transition_submit_for_verification_rejects_todo_pr_evidence" (fun
                 "Implementation is already merged; submit PR evidence for independent verification." );
           ])
     in
-    assert (not success);
-    assert (str_contains result "Invalid transition: todo -> submit_for_verification");
+    assert (not result.Tool_result.success);
+    assert (str_contains result.Tool_result.legacy_message "Invalid transition: todo -> submit_for_verification");
     assert_task_todo ctx)
 )
 
@@ -1053,9 +1055,10 @@ let () = test "transition_submit_pr_evidence_accepts_todo_pr_evidence_without_re
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "codex-mcp-client" in
     add_task_requiring_tools ctx ~title:"Codex CLI approval follow-up" [ "keeper_bash" ];
-    let claim_success, claim_result =
+    let claim_result =
       Tool_task.handle_transition
         ~agent_tool_names:[ "masc_status"; "masc_transition" ]
+        ~tool_name:"test_tool" ~start_time:0.0
         ctx
         (`Assoc
           [
@@ -1063,12 +1066,13 @@ let () = test "transition_submit_pr_evidence_accepts_todo_pr_evidence_without_re
             ("action", `String "claim");
           ])
     in
-    assert (not claim_success);
-    assert (str_contains claim_result "requires tool(s) unavailable");
+    assert (not claim_result.Tool_result.success);
+    assert (str_contains claim_result.Tool_result.legacy_message "requires tool(s) unavailable");
     assert_task_todo ctx;
-    let submit_success, submit_result =
+    let submit_result =
       Tool_task.handle_transition
         ~agent_tool_names:[ "masc_status"; "masc_transition" ]
+        ~tool_name:"test_tool" ~start_time:0.0
         ctx
         (`Assoc
           [
@@ -1080,7 +1084,7 @@ let () = test "transition_submit_pr_evidence_accepts_todo_pr_evidence_without_re
                 "Implementation is already merged; submit PR evidence for independent verification." );
           ])
     in
-    if not submit_success then failwith submit_result;
+    if not submit_result.Tool_result.success then failwith submit_result.Tool_result.legacy_message;
     assert_task_awaiting_verification_by ctx "codex-mcp-client";
     assert (Planning_eio.get_current_task ctx.config = None))
 )
@@ -1088,31 +1092,32 @@ let () = test "transition_submit_pr_evidence_accepts_todo_pr_evidence_without_re
 let () = test "transition_submit_pr_evidence_accepts_todo_pr_evidence_with_stale_do_not_reclaim_reason" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "codex-mcp-client" in
-    let success, result =
-      Tool_task.handle_add_task ctx
+    let result =
+      Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
         (`Assoc
           [
             ("title", `String "Strict accessor PR evidence");
             ("priority", `Int 1);
           ])
     in
-    if not success then failwith result;
+    if not result.Tool_result.success then failwith result.Tool_result.legacy_message;
     set_only_task_do_not_reclaim_reason ctx
       "Auto-claimed via auto_goal_fallback by issue_king without repo write tools";
-    let claim_success, claim_result =
-      Tool_task.handle_transition ctx
+    let claim_result =
+      Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
         (`Assoc
           [
             ("task_id", `String "task-001");
             ("action", `String "claim");
           ])
     in
-    assert (not claim_success);
-    assert (str_contains claim_result "blocked from re-claim");
+    assert (not claim_result.Tool_result.success);
+    assert (str_contains claim_result.Tool_result.legacy_message "blocked from re-claim");
     assert_task_todo ctx;
-    let submit_success, submit_result =
+    let submit_result =
       Tool_task.handle_transition
         ~agent_tool_names:[ "masc_status"; "masc_transition" ]
+        ~tool_name:"test_tool" ~start_time:0.0
         ctx
         (`Assoc
           [
@@ -1124,7 +1129,7 @@ let () = test "transition_submit_pr_evidence_accepts_todo_pr_evidence_with_stale
                 "A stale do_not_reclaim_reason blocks claim, but merged PR evidence can still enter verification." );
           ])
     in
-    if not submit_success then failwith submit_result;
+    if not submit_result.Tool_result.success then failwith submit_result.Tool_result.legacy_message;
     assert_task_awaiting_verification_by ctx "codex-mcp-client";
     assert (Planning_eio.get_current_task ctx.config = None))
 )
@@ -1156,8 +1161,8 @@ let () = test "submit_pr_evidence_bypasses_required_tool_gate_on_todo_task" (fun
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "codex-mcp-client" in
     add_task_requiring_tools ctx ~title:"Needs bash" [ "keeper_bash" ];
-    let success, result =
-      Tool_task.handle_transition ~agent_tool_names:[ "masc_status" ] ctx
+    let result =
+      Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ~agent_tool_names:[ "masc_status" ] ctx
         (`Assoc
           [
             ("task_id", `String "task-001");
@@ -1165,8 +1170,8 @@ let () = test "submit_pr_evidence_bypasses_required_tool_gate_on_todo_task" (fun
             ("notes", `String "PR jeong-sik/masc-mcp#13169 merged 2026-05-05");
           ])
     in
-    if not success then
-      failwith (Printf.sprintf "expected submit_pr_evidence to succeed, got: %s" result);
+    if not result.Tool_result.success then
+      failwith (Printf.sprintf "expected submit_pr_evidence to succeed, got: %s" result.Tool_result.legacy_message);
     match (only_task ctx).Masc_domain.task_status with
     | Masc_domain.AwaitingVerification _ -> ()
     | other ->
@@ -1177,30 +1182,30 @@ let () = test "submit_pr_evidence_bypasses_required_tool_gate_on_todo_task" (fun
 
 let () = test "transition_release_clears_planning_current_task" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Transition release")]) in
-  let (success_claim, _result) =
-    Tool_task.handle_transition ctx
+  let _ = Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Transition release")]) in
+  let claim_result =
+    Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc [("task_id", `String "task-001"); ("action", `String "claim")])
   in
-  assert success_claim;
-  let (success_release, _result) =
-    Tool_task.handle_transition ctx
+  assert claim_result.Tool_result.success;
+  let release_result =
+    Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc [("task_id", `String "task-001"); ("action", `String "release")])
   in
-  assert success_release;
+  assert release_result.Tool_result.success;
   assert (Planning_eio.get_current_task ctx.config = None)
 )
 
 let () = test "transition_done_redirects_to_verification_and_clears_planning_current_task" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Transition done")]) in
-  let (success_claim, _result) =
-    Tool_task.handle_transition ctx
+  let _ = Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Transition done")]) in
+  let claim_result =
+    Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc [("task_id", `String "task-001"); ("action", `String "claim")])
   in
-  assert success_claim;
-  let (success_done, result) =
-    Tool_task.handle_transition ctx
+  assert claim_result.Tool_result.success;
+  let done_result =
+    Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
@@ -1208,8 +1213,8 @@ let () = test "transition_done_redirects_to_verification_and_clears_planning_cur
           ("notes", `String "Implemented the transport parity checks and verified the result.");
         ])
   in
-  assert success_done;
-  assert (not (str_contains result "rejected"));
+  assert done_result.Tool_result.success;
+  assert (not (str_contains done_result.Tool_result.legacy_message "rejected"));
   assert (Planning_eio.get_current_task ctx.config = None);
   match Coord.get_tasks_raw ctx.config with
   | [ task ] -> (
@@ -1221,9 +1226,9 @@ let () = test "transition_done_redirects_to_verification_and_clears_planning_cur
 
 let () = test "transition_accepts_underscore_prefixed_internal_markers" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Marker test")]) in
-  let (success, result) =
-    Tool_task.handle_transition ctx
+  let _ = Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Marker test")]) in
+  let result =
+    Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc [
         ("task_id", `String "task-001");
         ("action", `String "claim");
@@ -1231,74 +1236,74 @@ let () = test "transition_accepts_underscore_prefixed_internal_markers" (fun () 
         ("_session_marker", `String "sess-xyz");
       ])
   in
-  assert success;
-  assert (not (str_contains result "Unknown argument"))
+  assert result.Tool_result.success;
+  assert (not (str_contains result.Tool_result.legacy_message "Unknown argument"))
 )
 
 let () = test "transition_still_rejects_plain_unknown_arguments" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Reject test")]) in
-  let (success, result) =
-    Tool_task.handle_transition ctx
+  let _ = Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Reject test")]) in
+  let result =
+    Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc [
         ("task_id", `String "task-001");
         ("action", `String "claim");
         ("totally_bogus", `String "no");
       ])
   in
-  assert (not success);
-  assert (str_contains result "Unknown argument(s): totally_bogus")
+  assert (not result.Tool_result.success);
+  assert (str_contains result.Tool_result.legacy_message "Unknown argument(s): totally_bogus")
 )
 
 (* Test handle_done returns owner guidance when another agent owns the task *)
 let () = test "handle_done_owned_by_other_guidance" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Done test")]) in
+  let _ = Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Done test")]) in
   let _ = Coord.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
-  let success, result =
-    Tool_task.handle_done ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
+  let result =
+    Tool_task.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
   in
-  assert (not success);
-  assert (str_contains result "currently owned by other-agent")
+  assert (not result.Tool_result.success);
+  assert (str_contains result.Tool_result.legacy_message "currently owned by other-agent")
 )
 
 (* Test handle_done on todo task recommends claim/start first *)
 let () = test "handle_done_todo_guidance" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Todo test")]) in
-  let success, result =
-    Tool_task.handle_done ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
+  let _ = Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Todo test")]) in
+  let result =
+    Tool_task.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
   in
-  assert (not success);
-  assert (str_contains result "Claim/start it first")
+  assert (not result.Tool_result.success);
+  assert (str_contains result.Tool_result.legacy_message "Claim/start it first")
 )
 
 (* Test handle_done reports already-done guidance instead of generic not-claimed *)
 let () = test "handle_done_already_done_guidance" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Done test")]) in
+  let _ = Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Done test")]) in
   let _ = Coord.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
   let _ =
     Coord.transition_task_r ctx.config ~agent_name:"other-agent"
       ~task_id:"task-001" ~action:Masc_domain.Done_action ~notes:"done" ()
   in
-  let success, result =
-    Tool_task.handle_done ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
+  let result =
+    Tool_task.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
   in
-  assert (not success);
-  assert (str_contains result "already done by other-agent")
+  assert (not result.Tool_result.success);
+  assert (str_contains result.Tool_result.legacy_message "already done by other-agent")
 )
 
 (* Test handle_done reports cancelled-task guidance instead of generic not-claimed *)
 let () = test "handle_done_cancelled_guidance" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Cancelled test")]) in
+  let _ = Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Cancelled test")]) in
   let _ = Coord.cancel_task_r ctx.config ~agent_name:"test-agent" ~task_id:"task-001" ~reason:"stop" in
-  let success, result =
-    Tool_task.handle_done ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
+  let result =
+    Tool_task.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
   in
-  assert (not success);
-  assert (str_contains result "was cancelled by test-agent")
+  assert (not result.Tool_result.success);
+  assert (str_contains result.Tool_result.legacy_message "was cancelled by test-agent")
 )
 
 (* Test dispatch transition release *)
@@ -1346,8 +1351,8 @@ let () = test "handle_batch_add_tasks" (fun () ->
       `Assoc [("title", `String "Task 2"); ("priority", `Int 2)];
     ])
   ] in
-  let (success, _) = Tool_task.handle_batch_add_tasks ctx args in
-  assert success
+  let batch_result = Tool_task.handle_batch_add_tasks ~tool_name:"test_tool" ~start_time:0.0 ctx args in
+  assert batch_result.Tool_result.success
 )
 
 let () = test "handle_batch_add_tasks_rejects_removed_role_fields" (fun () ->
@@ -1366,9 +1371,9 @@ let () = test "handle_batch_add_tasks_rejects_removed_role_fields" (fun () ->
             ] );
       ]
   in
-  let success, result = Tool_task.handle_batch_add_tasks ctx args in
-  assert (not success);
-  assert (str_contains result "required_role is no longer supported")
+  let result = Tool_task.handle_batch_add_tasks ~tool_name:"test_tool" ~start_time:0.0 ctx args in
+  assert (not result.Tool_result.success);
+  assert (str_contains result.Tool_result.legacy_message "required_role is no longer supported")
 )
 
 (* Test helper functions *)
@@ -1517,32 +1522,32 @@ let () = test "build_verdict_sse_payload: fallback_reason serialized" (fun () ->
 let () = test "claim_next_returns_no_unclaimed_when_all_tasks_terminal" (fun () ->
   let ctx = make_test_ctx () in
   (* Create a task, mark it as done *)
-  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Done task")]) in
-  let _ = Tool_task.handle_transition ctx (`Assoc [
+  let _ = Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Done task")]) in
+  let _ = Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [
     ("task_id", `String "task-001");
     ("action", `String "done");
     ("notes", `String "Completed");
   ]) in
   (* Now try to claim next from a different agent in same room *)
   let agent2_ctx = make_test_ctx_with_agent "agent-2" in
-  let (_success, msg) = Tool_task.handle_claim_next agent2_ctx (`Assoc []) in
+  let msg_result = Tool_task.handle_claim_next ~tool_name:"test_tool" ~start_time:0.0 agent2_ctx (`Assoc []) in
   (* Should report no unclaimed tasks (success=true, message contains "No") *)
-  assert (String.length msg > 0);
-  match String.index_opt msg 'N' with
+  assert (String.length msg_result.Tool_result.legacy_message > 0);
+  match String.index_opt msg_result.Tool_result.legacy_message 'N' with
   | Some _ -> () (* Found "No unclaimed" message *)
-  | None -> failwith (Printf.sprintf "Expected 'No unclaimed' message, got: %s" msg)
+  | None -> failwith (Printf.sprintf "Expected 'No unclaimed' message, got: %s" msg_result.Tool_result.legacy_message)
 )
 
 (* Regression: claim_next should properly skip cancelled tasks and only claim todo *)
 let () = test "claim_next_filters_out_cancelled_tasks" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Cancelled task")]) in
+  let _ = Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Cancelled task")]) in
   let _ = Coord.cancel_task_r ctx.config ~agent_name:ctx.agent_name ~task_id:"task-001" ~reason:"not needed" in
   let agent2_ctx = make_test_ctx_with_agent "agent-claim-2" in
-  let (_success, msg) = Tool_task.handle_claim_next agent2_ctx (`Assoc []) in
-  match String.index_opt msg 'N' with
+  let msg_result = Tool_task.handle_claim_next ~tool_name:"test_tool" ~start_time:0.0 agent2_ctx (`Assoc []) in
+  match String.index_opt msg_result.Tool_result.legacy_message 'N' with
   | Some _ -> () (* "No unclaimed" is correct *)
-  | None -> failwith (Printf.sprintf "Expected no tasks available, got: %s" msg)
+  | None -> failwith (Printf.sprintf "Expected no tasks available, got: %s" msg_result.Tool_result.legacy_message)
 )
 
 (* ===========================================================================
@@ -1569,8 +1574,8 @@ let () = test "rfc_0034_v2_masc_add_task_caps_per_goal" (fun () ->
     | Error msg -> failwith msg
   in
   for i = 1 to 3 do
-    let success, msg =
-      Tool_task.handle_add_task ctx
+    let msg_result =
+      Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
         (`Assoc
           [
             ("title", `String (Printf.sprintf "Goal task %d" i));
@@ -1579,16 +1584,16 @@ let () = test "rfc_0034_v2_masc_add_task_caps_per_goal" (fun () ->
             ("goal_id", `String goal.id);
           ])
     in
-    if not success
+    if not msg_result.Tool_result.success
     then
       failwith
         (Printf.sprintf
            "expected goal-bound add_task #%d to succeed, got: %s"
            i
-           msg)
+           msg_result.Tool_result.legacy_message)
   done;
-  let _success, message =
-    Tool_task.handle_add_task ctx
+  let message_result =
+    Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
           ("title", `String "Fourth goal task — should be rejected");
@@ -1602,18 +1607,18 @@ let () = test "rfc_0034_v2_masc_add_task_caps_per_goal" (fun () ->
      surface, so [handle_add_task] still returns [(true, "Error: ...")].
      The cap is enforced at persistence time — pin both the message
      content and the persisted backlog size. *)
-  if not (str_starts_with ~prefix:"Error:" message)
+  if not (str_starts_with ~prefix:"Error:" message_result.Tool_result.legacy_message)
   then
     failwith
       (Printf.sprintf
          "expected fourth task to be rejected with an \"Error:\" message, got: %s"
-         message);
-  if not (str_contains message "goal_task_limit_exceeded")
+         message_result.Tool_result.legacy_message);
+  if not (str_contains message_result.Tool_result.legacy_message "goal_task_limit_exceeded")
   then
     failwith
       (Printf.sprintf
          "expected rejection message to mention goal_task_limit_exceeded, got: %s"
-         message);
+         message_result.Tool_result.legacy_message);
   let backlog = Coord.read_backlog ctx.config in
   if List.length backlog.tasks <> 3
   then

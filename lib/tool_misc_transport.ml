@@ -24,7 +24,7 @@ module Float = Stdlib.Float
 
 open Tool_args
 
-type tool_result = bool * string
+type tool_result = Tool_result.t
 
 (* ================================================================ *)
 (* Local helpers (duplicated from tool_misc to avoid circular deps) *)
@@ -54,7 +54,7 @@ let handle_transport_status _args : tool_result =
       ~allow_legacy_accept:(env_flag_enabled "MASC_ALLOW_LEGACY_ACCEPT") ()
   in
   let json = Transport_read_model.transport_status_json ctx in
-  (true, Yojson.Safe.to_string json)
+  Tool_result.quick_ok (Yojson.Safe.to_string json)
 
 let handle_websocket_discovery _args : tool_result =
   let ctx =
@@ -62,7 +62,7 @@ let handle_websocket_discovery _args : tool_result =
       ~allow_legacy_accept:(env_flag_enabled "MASC_ALLOW_LEGACY_ACCEPT") ()
   in
   let json = Transport_read_model.websocket_discovery_json ctx in
-  (true, Yojson.Safe.to_string json)
+  Tool_result.quick_ok (Yojson.Safe.to_string json)
 
 let handle_webrtc_offer args : tool_result =
   if not (Server_webrtc_transport.is_enabled ()) then
@@ -85,7 +85,7 @@ let handle_webrtc_offer args : tool_result =
     Server_webrtc_transport.handle_offer_request
       (Yojson.Safe.to_string (`Assoc fields))
   with
-  | Ok body -> (true, pretty_json_string body)
+  | Ok body -> Tool_result.quick_ok (pretty_json_string body)
   | Error msg -> error_result msg
 
 let handle_webrtc_answer args : tool_result =
@@ -105,5 +105,5 @@ let handle_webrtc_answer args : tool_result =
     |> Yojson.Safe.to_string
   in
   match Server_webrtc_transport.handle_answer_request body with
-  | Ok response -> (true, pretty_json_string response)
+  | Ok response -> Tool_result.quick_ok (pretty_json_string response)
   | Error msg -> error_result msg

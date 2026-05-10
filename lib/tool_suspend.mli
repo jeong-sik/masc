@@ -64,7 +64,7 @@ val schemas : Masc_domain.tool_schema list
     blacklist + circuit-breaker behaviours used by the join guard. *)
 
 val dispatch :
-  context -> name:string -> args:Yojson.Safe.t -> (bool * string) option
+  context -> name:string -> args:Yojson.Safe.t -> Tool_result.t option
 (** [dispatch ctx ~name ~args] is the JSON-RPC dispatch hook.
     Currently always returns [None] (no tools dispatched here)
     because {!schemas} is empty.  The function is kept for the

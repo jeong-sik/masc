@@ -68,10 +68,10 @@ let test_masc_transition_claim_done_emits_task_lifecycle () =
     in
     Unix.mkdir base_path 0o755;
     let ctx = make_ctx base_path in
-    let ok, result =
-      Tool_task.handle_add_task ctx (`Assoc [ ("title", `String "Telemetry task") ])
+    let result =
+      Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("title", `String "Telemetry task") ])
     in
-    if not ok then Alcotest.fail result;
+    if not result.Tool_result.success then Alcotest.fail result.Tool_result.legacy_message;
     run_transition ctx ~task_id:"task-001" ~action:"claim" ();
     run_transition ctx ~task_id:"task-001" ~action:"done"
       ~notes:"Telemetry lifecycle regression proof completed." ();

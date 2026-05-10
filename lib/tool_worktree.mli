@@ -6,13 +6,14 @@ type context = {
   agent_name: string;
 }
 
-type tool_result = bool * string
-
 val default_base_branch : string
 
-val handle_worktree_create : context -> Yojson.Safe.t -> tool_result
-val handle_worktree_remove : context -> Yojson.Safe.t -> tool_result
-val handle_worktree_list : context -> Yojson.Safe.t -> tool_result
+val handle_worktree_create :
+  tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
+val handle_worktree_remove :
+  tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
+val handle_worktree_list :
+  tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
 
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> Tool_result.t option
 

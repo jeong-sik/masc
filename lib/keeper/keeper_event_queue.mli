@@ -70,3 +70,10 @@ val classify : stimulus -> stimulus_class
 (** [classify s] discriminates the stimulus by inspecting its payload.
     No Yojson dependency — uses lightweight prefix matching so the Event
     Layer data module stays self-contained. *)
+
+val drain_board_window : ?window_sec:float -> t -> stimulus list * t
+(** [drain_board_window q] separates board-signal stimuli that arrived
+    within [window_sec] seconds (default [2.0]) of now from the rest of
+    the queue.  Board signals are urgency-sorted; non-board stimuli and
+    board signals outside the window remain in the returned queue in
+    their original order. *)

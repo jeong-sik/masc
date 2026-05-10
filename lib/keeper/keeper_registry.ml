@@ -2027,3 +2027,15 @@ let dequeue_event ~base_path name =
             else loop ()
       in
       loop ()
+
+let drain_board_events ?window_sec ~base_path name =
+  match get ~base_path name with
+  | None -> []
+  | Some entry ->
+      let rec loop () =
+        let cur = Atomic.get entry.event_queue in
+        let board, rest = Keeper_event_queue.drain_board_window ?window_sec cur in
+        if Atomic.compare_and_set entry.event_queue cur rest then board
+        else loop ()
+      in
+      loop ()

@@ -18,8 +18,6 @@ let ensure_store ~base_dir =
 
 let compact_threshold = 0.2
 
-let generate_id () = Uuidm.v4_gen (Random.get_state ()) () ;;
-Uuidm.to_string (Uuidm.v4_gen (Random.get_state ()) ())
 
 let now_ms () =
   let ns = Mtime.to_uint64_ns (Mtime_clock.now ()) in
@@ -130,7 +128,13 @@ let list ~base_dir ~filter =
       match a.goal_id with Some gid -> gid = g | None -> false) by_keeper
     | None -> by_keeper
   in
-  List.sort (fun a b -> Int64.compare b.created_at_ms a.created_at_ms) by_goal
+  let by_task =
+    match filter.task_id with
+    | Some t -> List.filter (fun (a : annotation) ->
+      match a.task_id with Some tid -> tid = t | None -> false) by_goal
+    | None -> by_goal
+  in
+  List.sort (fun a b -> Int64.compare b.created_at_ms a.created_at_ms) by_task
 
 let compact ~base_dir =
   let all = load_all ~base_dir in

@@ -106,7 +106,12 @@ let add_routes router =
             | Some g when g <> "" -> Some g
             | _ -> None
           in
-          let filter = { Ide_annotation_types.file_path; keeper_id; goal_id } in
+          let task_id =
+            match Uri.get_query_param uri "task_id" with
+            | Some t when t <> "" -> Some t
+            | _ -> None
+          in
+          let filter = { Ide_annotation_types.file_path; keeper_id; goal_id; task_id } in
           let annotations = Ide_annotations.list ~base_dir:base ~filter in
           let json = `List (List.map Ide_annotation_types.annotation_to_json annotations) in
           Http.Response.json ~compress:true ~request:request

@@ -382,9 +382,20 @@ let resolve_keeper_read_path
   let raw = String.trim raw_path in
   if raw = ""
   then Error "path_required"
+  else if not (Filename.is_relative raw)
+  then (
+    (* #10349 follow-up: absolute paths bypass the sandbox-relative
+       contract and let the LLM observe host filesystem layout.
+       Reject at the gate; the keeper should use sandbox-relative
+       paths such as 'repos/X/lib/foo.ml'. *)
+    Prometheus.inc_counter
+      Keeper_metrics.metric_keeper_path_rejection
+      ~labels:[ "kind", "absolute_path_rejected" ]
+      ();
+    Error (Printf.sprintf "path_outside_project_root: %s (absolute paths are not allowed; use sandbox-relative paths like 'repos/X/lib/foo.ml')" raw))
   else (
     let root = project_root_of_config config in
-    let candidate = if Filename.is_relative raw then Filename.concat root raw else raw in
+    let candidate = Filename.concat root raw in
     let root_norm = normalize_path_for_check root in
     let target_norm = normalize_path_for_check candidate in
     let within_root =

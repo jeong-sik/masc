@@ -726,11 +726,30 @@ let run_docker_shell_command_with_status
               let container_name = keeper_sandbox_container_name meta in
               let container_root = keeper_private_container_root meta in
               let container_cwd = docker_private_workspace_cwd ~config ~meta cwd in
-              let prepared_gitdirs =
-                if git_creds_enabled && cmd_targets_git_or_gh cmd
-                then prepare_container_worktree_gitdirs ~host_root ~container_root
-                else 0
-              in
+              (* Pre-flight: verify the host cwd exists before spawning a container.
+                 This avoids wasteful docker runs that inevitably fail when bash
+                 starts in a non-existent directory. *)
+              if not (Sys.file_exists cwd)
+              then
+                sandbox_error
+                  (Printf.sprintf
+                     "docker_shell_failed: cwd_not_found: %s (host working directory does \
+                      not exist; verify the relative path under your playground before \
+                      calling keeper_shell)"
+                     cwd)
+              else if not (Sys.is_directory cwd)
+              then
+                sandbox_error
+                  (Printf.sprintf
+                     "docker_shell_failed: cwd_not_directory: %s (working directory must \
+                      be a directory, not a file)"
+                     cwd)
+              else
+                let prepared_gitdirs =
+                  if git_creds_enabled && cmd_targets_git_or_gh cmd
+                  then prepare_container_worktree_gitdirs ~host_root ~container_root
+                  else 0
+                in
               let restore_gitdirs () =
                 if git_creds_enabled
                 then (

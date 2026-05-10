@@ -437,6 +437,180 @@ target = "no.such.binding"
   has_rule "R8" errs;
   check bool "multiple errors" true (List.length errs >= 3)
 
+(* --- R10: Strategy-field consistency --- *)
+
+let test_r10_cycle_policy_on_wrong_strategy () =
+  let toml = {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+
+[models.m]
+max-context = 4096
+
+[p.m]
+
+[tier.t]
+members = ["p.m"]
+strategy = "failover"
+max-cycles = 3
+backoff-base-ms = 500
+backoff-cap-ms = 10000
+|} in
+  let errs = validate_toml toml in
+  has_rule_at "R10" "tier.t.cycle-policy" errs
+
+let test_r10_cycle_policy_on_correct_strategy () =
+  let toml = {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+
+[models.m]
+max-context = 4096
+
+[p.m]
+
+[tier.t]
+members = ["p.m"]
+strategy = "circuit_breaker_cycling"
+max-cycles = 3
+backoff-base-ms = 500
+backoff-cap-ms = 10000
+|} in
+  let errs = validate_toml toml in
+  no_errors errs
+
+let test_r10_sticky_ttl_on_wrong_strategy () =
+  let toml = {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+
+[models.m]
+max-context = 4096
+
+[p.m]
+
+[tier.t]
+members = ["p.m"]
+strategy = "failover"
+sticky-ttl-ms = 600000
+|} in
+  let errs = validate_toml toml in
+  has_rule_at "R10" "tier.t.sticky-ttl-ms" errs
+
+let test_r10_sticky_ttl_on_correct_strategy () =
+  let toml = {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+
+[models.m]
+max-context = 4096
+
+[p.m]
+
+[tier.t]
+members = ["p.m"]
+strategy = "sticky"
+sticky-ttl-ms = 600000
+|} in
+  let errs = validate_toml toml in
+  no_errors errs
+
+let test_r10_scoring_on_wrong_strategy () =
+  let toml = {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+
+[models.m]
+max-context = 4096
+
+[p.m]
+
+[tier.t]
+members = ["p.m"]
+strategy = "failover"
+latency-baseline-ms = 200.0
+rate-limit-recency-window-s = 60.0
+rate-limit-decay-base = 0.5
+rate-limit-skip-after = 3
+server-error-recency-window-s = 120.0
+server-error-decay-base = 0.3
+server-error-skip-after = 5
+|} in
+  let errs = validate_toml toml in
+  has_rule_at "R10" "tier.t.scoring-params" errs
+
+let test_r10_scoring_on_correct_strategy () =
+  let toml = {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+
+[models.m]
+max-context = 4096
+
+[p.m]
+
+[tier.t]
+members = ["p.m"]
+strategy = "weighted_random"
+latency-baseline-ms = 200.0
+rate-limit-recency-window-s = 60.0
+rate-limit-decay-base = 0.5
+rate-limit-skip-after = 3
+server-error-recency-window-s = 120.0
+server-error-decay-base = 0.3
+server-error-skip-after = 5
+|} in
+  let errs = validate_toml toml in
+  no_errors errs
+
+let test_r10_no_strategy_fields_is_ok () =
+  let toml = {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+
+[models.m]
+max-context = 4096
+
+[p.m]
+
+[tier.t]
+members = ["p.m"]
+strategy = "failover"
+|} in
+  let errs = validate_toml toml in
+  no_errors errs
+
+let test_r10_multiple_mismatches () =
+  let toml = {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+
+[models.m]
+max-context = 4096
+
+[p.m]
+
+[tier.t]
+members = ["p.m"]
+strategy = "failover"
+max-cycles = 3
+backoff-base-ms = 500
+backoff-cap-ms = 10000
+sticky-ttl-ms = 600000
+|} in
+  let errs = validate_toml toml in
+  has_rule "R10" errs;
+  check bool "multiple R10 errors" true
+    (List.length (List.filter (fun e -> e.rule = "R10") errs) >= 2)
+
 (* --- Test suite --- *)
 
 let () =
@@ -479,5 +653,15 @@ let () =
       ];
       "multi", [
         test_case "multiple errors at once" `Quick test_multiple_errors;
+      ];
+      "R10_strategy_fields", [
+        test_case "cycle_policy on wrong strategy" `Quick test_r10_cycle_policy_on_wrong_strategy;
+        test_case "cycle_policy on correct strategy" `Quick test_r10_cycle_policy_on_correct_strategy;
+        test_case "sticky_ttl on wrong strategy" `Quick test_r10_sticky_ttl_on_wrong_strategy;
+        test_case "sticky_ttl on correct strategy" `Quick test_r10_sticky_ttl_on_correct_strategy;
+        test_case "scoring on wrong strategy" `Quick test_r10_scoring_on_wrong_strategy;
+        test_case "scoring on correct strategy" `Quick test_r10_scoring_on_correct_strategy;
+        test_case "no strategy fields is ok" `Quick test_r10_no_strategy_fields_is_ok;
+        test_case "multiple mismatches" `Quick test_r10_multiple_mismatches;
       ];
     ]

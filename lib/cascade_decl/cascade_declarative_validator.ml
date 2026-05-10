@@ -1,6 +1,6 @@
 (** Declarative cascade config cross-reference validator (RFC-0058 v2).
 
-    Validates 9 load-time invariants on a parsed [cascade_config]:
+    Validates 10 load-time invariants on a parsed [cascade_config]:
     R1: Every binding references an existing provider
     R2: Every binding references an existing model
     R3: Every alias references an existing binding
@@ -9,7 +9,8 @@
     R6: Tier-group tiers reference existing tiers
     R7: Route targets reference existing tier-groups, tiers, or bindings
     R8: System targets reference existing bindings or aliases
-    R9: At most one is-default=true per provider *)
+    R9: At most one is-default=true per provider
+    R10: Strategy-specific fields match the declared strategy *)
 
 open Cascade_declarative_types
 
@@ -230,6 +231,40 @@ let validate_single_default (cfg : cascade_config) :
          "provider %S has multiple bindings with is-default=true" pid))
     counts
 
+(* --- R10: Strategy-specific fields match declared strategy --- *)
+
+let validate_strategy_fields (cfg : cascade_config) :
+    validation_error list =
+  List.concat_map (fun (t : cascade_tier) ->
+    let path = Printf.sprintf "tier.%s" t.name in
+    let mismatch_errors field_name expected_strategy =
+      err "R10" (Printf.sprintf "%s.%s" path field_name)
+        (Printf.sprintf
+           "%s is only valid with strategy %S, but tier uses %s"
+           field_name expected_strategy
+           (show_cascade_strategy t.strategy))
+    in
+    let cycle_errs =
+      match t.cycle_policy, t.strategy with
+      | Some _, Circuit_breaker_cycling -> []
+      | Some _, _ -> mismatch_errors "cycle-policy" "circuit_breaker_cycling"
+      | None, _ -> []
+    in
+    let sticky_errs =
+      match t.sticky_ttl_ms, t.strategy with
+      | Some _, Sticky -> []
+      | Some _, _ -> mismatch_errors "sticky-ttl-ms" "sticky"
+      | None, _ -> []
+    in
+    let scoring_errs =
+      match t.scoring_params, t.strategy with
+      | Some _, Weighted_random -> []
+      | Some _, _ -> mismatch_errors "scoring-params" "weighted_random"
+      | None, _ -> []
+    in
+    cycle_errs @ sticky_errs @ scoring_errs)
+    cfg.tiers
+
 (* --- Top-level validation --- *)
 
 let validate (cfg : cascade_config) : validation_error list =
@@ -242,3 +277,4 @@ let validate (cfg : cascade_config) : validation_error list =
   @ validate_route_targets cfg
   @ validate_system_targets cfg
   @ validate_single_default cfg
+  @ validate_strategy_fields cfg

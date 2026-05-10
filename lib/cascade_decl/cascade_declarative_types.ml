@@ -80,11 +80,32 @@ type cascade_strategy =
   | Round_robin
 [@@deriving show, eq]
 
+type cascade_cycle_policy = {
+  max_cycles : int;
+  backoff_base_ms : int;
+  backoff_cap_ms : int;
+}
+[@@deriving show, eq]
+
+type cascade_scoring_params = {
+  latency_baseline_ms : float;
+  rate_limit_recency_window_s : float;
+  rate_limit_decay_base : float;
+  rate_limit_skip_after : int;
+  server_error_recency_window_s : float;
+  server_error_decay_base : float;
+  server_error_skip_after : int;
+}
+[@@deriving show, eq]
+
 type cascade_tier = {
   name : string;
   members : string list;
   strategy : cascade_strategy;
   max_concurrent : int option;
+  cycle_policy : cascade_cycle_policy option;
+  sticky_ttl_ms : int option;
+  scoring_params : cascade_scoring_params option;
 }
 [@@deriving show, eq]
 

@@ -411,6 +411,184 @@ strategy = "%s"
     | _ -> failwith "expected exactly one tier")
     strategies
 
+(* --- Strategy-specific field tests --- *)
+
+let test_cycle_policy () =
+  let toml = {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+
+[models.m]
+max-context = 4096
+
+[p.m]
+
+[tier.t]
+members = ["p.m"]
+strategy = "circuit_breaker_cycling"
+max-cycles = 3
+backoff-base-ms = 500
+backoff-cap-ms = 10000
+|} in
+  let cfg = ok_config (parse_string toml) in
+  match cfg.tiers with
+  | [ t ] ->
+    (match t.cycle_policy with
+     | Some cp ->
+       check int "max_cycles" 3 cp.max_cycles;
+       check int "backoff_base_ms" 500 cp.backoff_base_ms;
+       check int "backoff_cap_ms" 10000 cp.backoff_cap_ms
+     | None -> failwith "expected cycle_policy")
+  | _ -> failwith "expected exactly one tier"
+
+let test_cycle_policy_absent () =
+  let toml = {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+
+[models.m]
+max-context = 4096
+
+[p.m]
+
+[tier.t]
+members = ["p.m"]
+strategy = "failover"
+|} in
+  let cfg = ok_config (parse_string toml) in
+  match cfg.tiers with
+  | [ t ] ->
+    check bool "no cycle_policy" true (t.cycle_policy = None)
+  | _ -> failwith "expected exactly one tier"
+
+let test_cycle_policy_partial_ignored () =
+  let toml = {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+
+[models.m]
+max-context = 4096
+
+[p.m]
+
+[tier.t]
+members = ["p.m"]
+strategy = "circuit_breaker_cycling"
+max-cycles = 3
+backoff-base-ms = 500
+|} in
+  let cfg = ok_config (parse_string toml) in
+  match cfg.tiers with
+  | [ t ] ->
+    check bool "partial yields None" true (t.cycle_policy = None)
+  | _ -> failwith "expected exactly one tier"
+
+let test_sticky_ttl_ms () =
+  let toml = {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+
+[models.m]
+max-context = 4096
+
+[p.m]
+
+[tier.t]
+members = ["p.m"]
+strategy = "sticky"
+sticky-ttl-ms = 600000
+|} in
+  let cfg = ok_config (parse_string toml) in
+  match cfg.tiers with
+  | [ t ] ->
+    check opt_int "sticky_ttl_ms" (Some 600000) t.sticky_ttl_ms
+  | _ -> failwith "expected exactly one tier"
+
+let test_sticky_ttl_ms_absent () =
+  let toml = {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+
+[models.m]
+max-context = 4096
+
+[p.m]
+
+[tier.t]
+members = ["p.m"]
+strategy = "sticky"
+|} in
+  let cfg = ok_config (parse_string toml) in
+  match cfg.tiers with
+  | [ t ] ->
+    check opt_int "no sticky_ttl_ms" None t.sticky_ttl_ms
+  | _ -> failwith "expected exactly one tier"
+
+let test_scoring_params () =
+  let toml = {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+
+[models.m]
+max-context = 4096
+
+[p.m]
+
+[tier.t]
+members = ["p.m"]
+strategy = "weighted_random"
+latency-baseline-ms = 200.0
+rate-limit-recency-window-s = 60.0
+rate-limit-decay-base = 0.5
+rate-limit-skip-after = 3
+server-error-recency-window-s = 120.0
+server-error-decay-base = 0.3
+server-error-skip-after = 5
+|} in
+  let cfg = ok_config (parse_string toml) in
+  match cfg.tiers with
+  | [ t ] ->
+    (match t.scoring_params with
+     | Some sp ->
+       check float_testable "latency_baseline" 200.0 sp.latency_baseline_ms;
+       check float_testable "rl_recency" 60.0 sp.rate_limit_recency_window_s;
+       check float_testable "rl_decay" 0.5 sp.rate_limit_decay_base;
+       check int "rl_skip" 3 sp.rate_limit_skip_after;
+       check float_testable "se_recency" 120.0 sp.server_error_recency_window_s;
+       check float_testable "se_decay" 0.3 sp.server_error_decay_base;
+       check int "se_skip" 5 sp.server_error_skip_after
+     | None -> failwith "expected scoring_params")
+  | _ -> failwith "expected exactly one tier"
+
+let test_scoring_params_partial_ignored () =
+  let toml = {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+
+[models.m]
+max-context = 4096
+
+[p.m]
+
+[tier.t]
+members = ["p.m"]
+strategy = "weighted_random"
+latency-baseline-ms = 200.0
+rate-limit-recency-window-s = 60.0
+|} in
+  let cfg = ok_config (parse_string toml) in
+  match cfg.tiers with
+  | [ t ] ->
+    check bool "partial scoring yields None" true (t.scoring_params = None)
+  | _ -> failwith "expected exactly one tier"
+
 (* --- Test suite --- *)
 
 let () =
@@ -457,5 +635,18 @@ let () =
       ];
       "strategies", [
         test_case "all 7 strategies parse" `Quick test_all_strategies_parse;
+      ];
+      "cycle_policy", [
+        test_case "parses all-or-nothing" `Quick test_cycle_policy;
+        test_case "absent yields None" `Quick test_cycle_policy_absent;
+        test_case "partial yields None" `Quick test_cycle_policy_partial_ignored;
+      ];
+      "sticky_ttl", [
+        test_case "parses sticky-ttl-ms" `Quick test_sticky_ttl_ms;
+        test_case "absent yields None" `Quick test_sticky_ttl_ms_absent;
+      ];
+      "scoring_params", [
+        test_case "parses all 7 fields" `Quick test_scoring_params;
+        test_case "partial yields None" `Quick test_scoring_params_partial_ignored;
       ];
     ]

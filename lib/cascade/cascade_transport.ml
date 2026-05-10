@@ -1310,7 +1310,7 @@ module Kimi_cli_transport_local = struct
                 latency_ms = Some latency_ms;
               });
       complete_stream =
-        (fun ~on_event (req : Llm_provider.Llm_transport.completion_request) ->
+        (fun ?on_telemetry:_ ~on_event (req : Llm_provider.Llm_transport.completion_request) ->
           warn_external_tools_once warned req.tools;
           let messages =
             Llm_provider.Cli_common_prompt.non_system_messages req.messages
@@ -1428,7 +1428,7 @@ let make_per_call_switch_transport
       (fun req ->
         with_call_switch (fun transport -> transport.complete_sync req));
     complete_stream =
-      (fun ~on_event req ->
+      (fun ?on_telemetry:_ ~on_event req ->
         with_call_switch (fun transport ->
             transport.complete_stream ~on_event req));
   }
@@ -1494,7 +1494,7 @@ let make_cli_argv_sanitizing_transport
       (fun req ->
         transport.complete_sync (sanitize_cli_completion_request_for_argv req));
     complete_stream =
-      (fun ~on_event req ->
+      (fun ?on_telemetry:_ ~on_event req ->
         transport.complete_stream ~on_event
           (sanitize_cli_completion_request_for_argv req));
   }

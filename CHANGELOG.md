@@ -1,6 +1,11 @@
 # Changelog
 
 
+## [0.19.17] - 2026-05-11
+
+### Fixed
+- `lib/keeper/keeper_telemetry_consumer.ml`: drain loop now yields between iterations (`Eio.Time.sleep clock 0.1`). The fiber introduced by #14491 saturated a single Eio domain at ~100% CPU because `Agent_sdk_metrics_bridge.drain` is non-blocking and the loop recursed without sleeping. Co-located fibers (HTTP handlers, lazy startup tasks) starved — server boot stalled at `lazy_task: starting restore_sessions`, `/health` timed out, and HTTP handlers never responded despite ports being LISTEN. Mirrors the sibling drain loops in `keeper_compact_audit`, `cascade_event_bridge`, and `server_bootstrap_loops` keeper-lifecycle, all of which already sleep between drains. PR #14499.
+
 ## [0.19.16] - 2026-05-07
 
 ### Added

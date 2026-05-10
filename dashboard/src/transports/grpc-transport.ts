@@ -25,7 +25,8 @@ import type {
 } from '../grpc/masc_coordination_pb'
 
 const DEFAULT_RETRY_BASE_MS = 1000
-const DEFAULT_RETRY_MAX_MS = 30000
+/** Default retry ceiling.  Exported for callers that need it. */
+export const DEFAULT_RETRY_MAX_MS = 30000
 
 /** Encode a JSON payload into a gRPC-web binary frame.
  *  Frame: [flag:1][length:4][payload:N]
@@ -53,10 +54,10 @@ function* parseFrames(bytes: Uint8Array): Generator<
   while (offset + 5 <= bytes.length) {
     const flag = bytes[offset]
     const length =
-      (bytes[offset + 1] << 24) |
-      (bytes[offset + 2] << 16) |
-      (bytes[offset + 3] << 8) |
-      bytes[offset + 4]
+      ((bytes[offset + 1] ?? 0) << 24) |
+      ((bytes[offset + 2] ?? 0) << 16) |
+      ((bytes[offset + 3] ?? 0) << 8) |
+      (bytes[offset + 4] ?? 0)
     if (offset + 5 + length > bytes.length) break
     const payload = bytes.slice(offset + 5, offset + 5 + length)
     offset += 5 + length
@@ -84,7 +85,7 @@ function* parseFrames(bytes: Uint8Array): Generator<
 export interface GrpcTransport extends Transport {
   readonly join: (req: JoinRequest) => Promise<JoinResponse>
   readonly leave: (req: LeaveRequest) => Promise<LeaveResponse>
-  readonly subscribe: (req: SubscribeRequest) => AsyncIterable<Event>
+  readonly subscribeStream: (req: SubscribeRequest) => AsyncIterable<Event>
   readonly toolCall: (req: ToolCallRequest) => Promise<ToolCallResponse>
   readonly broadcast: (req: BroadcastRequest) => Promise<BroadcastResponse>
   readonly getStatus: (req: StatusRequest) => Promise<StatusResponse>
@@ -118,7 +119,7 @@ async function unaryRpc<TReq, TRes>(
   method: string,
   request: TReq,
   opts: TransportOptions,
-  state: GrpcTransportState,
+  _state: GrpcTransportState,
 ): Promise<TRes> {
   const url = `${baseUrl}/${service}/${method}`
   const body = encodeJsonFrame(request)
@@ -131,7 +132,7 @@ async function unaryRpc<TReq, TRes>(
       'X-Grpc-Web': '1',
       ...(opts.headers ?? {}),
     },
-    body,
+    body: body as BodyInit,
     signal: controller.signal,
   })
 
@@ -178,7 +179,7 @@ async function* serverStreamingRpc<TReq, TRes>(
       'X-Grpc-Web': '1',
       ...(opts.headers ?? {}),
     },
-    body,
+    body: body as BodyInit,
     signal: controller.signal,
   })
 
@@ -258,7 +259,7 @@ export function createGrpcTransport(
     isConnected: () => state.connected,
     join: (req) => unaryRpc(baseUrl, service, 'Join', req, opts, state),
     leave: (req) => unaryRpc(baseUrl, service, 'Leave', req, opts, state),
-    subscribe: (req) => serverStreamingRpc(baseUrl, service, 'Subscribe', req, opts, state),
+    subscribeStream: (req) => serverStreamingRpc(baseUrl, service, 'Subscribe', req, opts, state),
     toolCall: (req) => unaryRpc(baseUrl, service, 'ToolCall', req, opts, state),
     broadcast: (req) => unaryRpc(baseUrl, service, 'Broadcast', req, opts, state),
     getStatus: (req) => unaryRpc(baseUrl, service, 'GetStatus', req, opts, state),

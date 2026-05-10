@@ -151,13 +151,6 @@ class BotConfig(BaseSettings):
             "discord_reaction_trigger_emoji",
         ),
     )
-    discord_busy_debounce_sec: int = Field(
-        default=0,
-        validation_alias=AliasChoices(
-            "DISCORD_BUSY_DEBOUNCE_SEC",
-            "discord_busy_debounce_sec",
-        ),
-    )
     discord_batch_max_messages: int = Field(
         default=50,
         validation_alias=AliasChoices(
@@ -216,13 +209,6 @@ class BotConfig(BaseSettings):
         validation_alias=AliasChoices(
             "DISCORD_REACTION_TRIGGER_EMOJI",
             "discord_reaction_trigger_emoji",
-        ),
-    )
-    discord_busy_debounce_sec: int = Field(
-        default=0,
-        validation_alias=AliasChoices(
-            "DISCORD_BUSY_DEBOUNCE_SEC",
-            "discord_busy_debounce_sec",
         ),
     )
     discord_batch_max_messages: int = Field(
@@ -302,7 +288,6 @@ class BotConfig(BaseSettings):
         "gate_breaker_failure_threshold",
         "gate_breaker_reset_sec",
         "status_heartbeat_sec",
-        "discord_busy_debounce_sec",
         "discord_batch_max_messages",
         "discord_batch_gap_window_sec",
     )

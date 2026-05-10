@@ -148,12 +148,99 @@ let masc_gc_spec : tool_spec =
   }
 ;;
 
-let phase3_specs : tool_spec list =
+let masc_web_search_spec : tool_spec =
+  { name = "masc_web_search"
+  ; description =
+      "Search the public web and return top result titles, URLs, and snippets. Read-only \
+       helper for current-information lookups before deeper file or repo work. Uses \
+       configured web-search providers with structured fallback behavior and returns \
+       structured JSON."
+  ; parameters =
+      [ { p_name = "query"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Search query text"
+        ; p_required = true
+        }
+      ; { p_name = "limit"
+        ; p_type = T_int { min = Some 1; max = Some 10; default = Some 5 }
+        ; p_description = "Maximum number of results to return (default 5, max 10)"
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let masc_web_fetch_spec : tool_spec =
+  { name = "masc_web_fetch"
+  ; description =
+      "Fetch a web page by URL and return cleaned text content. Read-only helper for \
+       reading selected sources after web search before citing them. Strips HTML tags, \
+       decodes entities, normalizes whitespace, and optionally extracts <title> and \
+       <meta name=\"description\">. Returns structured JSON with the cleaned text."
+  ; parameters =
+      [ { p_name = "url"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "URL to fetch (http or https only)"
+        ; p_required = true
+        }
+      ; { p_name = "timeout"
+        ; p_type = T_int { min = Some 1; max = Some 60; default = Some 15 }
+        ; p_description = "Request timeout in seconds (default 15, max 60)"
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let masc_tool_admin_snapshot_spec : tool_spec =
+  { name = "masc_tool_admin_snapshot"
+  ; description =
+      "Return a unified admin snapshot of tool inventory, auth/RBAC, and command-plane \
+       surfaces."
+  ; parameters =
+      [ { p_name = "include_hidden"
+        ; p_type = T_bool { default = Some true }
+        ; p_description = "Include hidden tools in tool_inventory (default: true)"
+        ; p_required = false
+        }
+      ; { p_name = "include_deprecated"
+        ; p_type = T_bool { default = Some true }
+        ; p_description = "Include deprecated tools in tool_inventory (default: true)"
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let masc_tool_stats_spec : tool_spec =
+  { name = "masc_tool_stats"
+  ; description =
+      "In-memory tool usage stats: top calls, stale (30+ days), never-called. Resets on \
+       server restart."
+  ; parameters =
+      [ { p_name = "top_n"
+        ; p_type = T_int { min = Some 1; max = Some 100; default = Some 20 }
+        ; p_description = "Number of top tools to return (default: 20)"
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let phase4_specs : tool_spec list =
   [ masc_config_spec
   ; masc_code_read_spec
   ; masc_tool_help_spec
   ; masc_dashboard_spec
   ; masc_gc_spec
+  ; masc_web_search_spec
+  ; masc_web_fetch_spec
+  ; masc_tool_admin_snapshot_spec
+  ; masc_tool_stats_spec
   ]
 ;;
 
@@ -203,6 +290,12 @@ let emit_param_property buf p =
    | T_bool { default = Some d; _ } ->
      buf_addf buf "          (\"default\", `Bool %b);\n" d
    | _ -> ());
+  (match p.p_type with
+   | T_int { min = Some m; _ } -> buf_addf buf "          (\"minimum\", `Int %d);\n" m
+   | _ -> ());
+  (match p.p_type with
+   | T_int { max = Some m; _ } -> buf_addf buf "          (\"maximum\", `Int %d);\n" m
+   | _ -> ());
   Buffer.add_string buf "        ]);\n"
 ;;
 
@@ -251,6 +344,6 @@ let emit_schemas_list buf specs =
 let () =
   let buf = Buffer.create 4096 in
   emit_header buf;
-  emit_schemas_list buf phase3_specs;
+  emit_schemas_list buf phase4_specs;
   print_string (Buffer.contents buf)
 ;;

@@ -1,11 +1,15 @@
 /**
- * IDE LSP Client — CodeMirror extension for Language Server Protocol
- * with MASC observational overlay integration
+ * IDE LSP Client — CodeMirror 6 extension for Language Server Protocol
+ * with MASC observational overlay integration.
+ *
+ * Implements JSON-RPC 2.0 request-response over WebSocket.
+ * The server (server_ide_lsp_proxy.ml) expects client-initiated requests
+ * for codeLens, inlayHint, diagnostic, and hover — it does NOT push them.
+ * Only `textDocument/publishDiagnostics` is a server-push notification.
  */
 
-import { EditorView, ViewPlugin, gutter, GutterMarker } from '@codemirror/view'
-import { StateField, StateEffect } from '@codemirror/state'
-import type { Extension } from '@codemirror/state'
+import { EditorView, ViewPlugin, GutterMarker, gutter, type ViewUpdate } from '@codemirror/view'
+import { StateField, StateEffect, type Extension } from '@codemirror/state'
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -43,46 +47,39 @@ export interface LspDiagnostic {
   message: string
 }
 
-export interface LspState {
-  connected: boolean
-  codeLenses: Map<number, LspCodeLens[]>
-  inlayHints: Map<number, LspInlayHint[]>
-  diagnostics: Map<number, LspDiagnostic[]>
-  ws: WebSocket | null
-}
-
-const initialState: LspState = {
-  connected: false,
-  codeLenses: new Map(),
-  inlayHints: new Map(),
-  diagnostics: new Map(),
-  ws: null,
-}
-
 // ── State Effects ────────────────────────────────────────────────
 
-const setConnected = StateEffect.define<boolean>()
-const setCodeLenses = StateEffect.define<Map<number, LspCodeLens[]>>()
-const setInlayHints = StateEffect.define<Map<number, LspInlayHint[]>>()
-const setDiagnostics = StateEffect.define<Map<number, LspDiagnostic[]>>()
+const setCodeLenses = StateEffect.define<ReadonlyMap<number, LspCodeLens[]>>()
+const setInlayHints = StateEffect.define<ReadonlyMap<number, LspInlayHint[]>>()
+const setDiagnostics = StateEffect.define<ReadonlyMap<number, LspDiagnostic[]>>()
 
-// ── State Field ──────────────────────────────────────────────────
+// ── State Fields ─────────────────────────────────────────────────
 
-const lspStateField = StateField.define<LspState>({
-  create() {
-    return initialState
+const codeLensField = StateField.define<ReadonlyMap<number, LspCodeLens[]>>({
+  create() { return new Map() },
+  update(state, tr) {
+    for (const eff of tr.effects) {
+      if (eff.is(setCodeLenses)) return eff.value
+    }
+    return state
   },
-  update(state, transaction) {
-    for (const effect of transaction.effects) {
-      if (effect.is(setConnected)) {
-        state = { ...state, connected: effect.value }
-      } else if (effect.is(setCodeLenses)) {
-        state = { ...state, codeLenses: effect.value }
-      } else if (effect.is(setInlayHints)) {
-        state = { ...state, inlayHints: effect.value }
-      } else if (effect.is(setDiagnostics)) {
-        state = { ...state, diagnostics: effect.value }
-      }
+})
+
+const inlayHintField = StateField.define<ReadonlyMap<number, LspInlayHint[]>>({
+  create() { return new Map() },
+  update(state, tr) {
+    for (const eff of tr.effects) {
+      if (eff.is(setInlayHints)) return eff.value
+    }
+    return state
+  },
+})
+
+const diagnosticField = StateField.define<ReadonlyMap<number, LspDiagnostic[]>>({
+  create() { return new Map() },
+  update(state, tr) {
+    for (const eff of tr.effects) {
+      if (eff.is(setDiagnostics)) return eff.value
     }
     return state
   },
@@ -92,63 +89,56 @@ const lspStateField = StateField.define<LspState>({
 
 class CodeLensMarker extends GutterMarker {
   constructor(
-    private lens: LspCodeLens,
-    private onClick: (lens: LspCodeLens) => void,
-  ) {
-    super()
+    private readonly lenses: ReadonlyArray<LspCodeLens>,
+  ) { super() }
+
+  toDOM() {
+    const container = document.createElement('div')
+    container.style.cssText = 'display:flex;flex-direction:column;gap:2px'
+    for (const lens of this.lenses) {
+      const el = document.createElement('span')
+      el.className = 'cm-codelens-marker'
+      el.textContent = lens.command?.title ?? ''
+      el.style.cssText =
+        'display:inline-flex;align-items:center;gap:4px;padding:2px 6px;' +
+        'margin:2px 0;font-size:11px;color:var(--color-fg-muted);' +
+        'background:var(--color-bg-muted);border-radius:4px;cursor:pointer;user-select:none'
+      if (lens.command?.command === 'masc.showAnnotation' && lens.command.arguments) {
+        el.addEventListener('click', (e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          console.log('[LSP] annotation:', lens.command!.arguments)
+        })
+      }
+      container.appendChild(el)
+    }
+    return container
   }
 
-  toDOM(view: EditorView) {
-    const el = document.createElement('div')
-    el.className = 'cm-codelens-marker'
-    el.textContent = this.lens.command?.title ?? ''
-    el.style.cssText = `
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      padding: 2px 6px;
-      margin: 2px 0;
-      font-size: 11px;
-      color: var(--color-fg-muted);
-      background: var(--color-bg-muted);
-      border-radius: 4px;
-      cursor: pointer;
-      user-select: none;
-    `
-    el.addEventListener('click', (e) => {
-      e.preventDefault()
-      e.stopPropagation()
-      this.onClick(this.lens)
-    })
-    return el
+  eq(other: CodeLensMarker): boolean {
+    if (this.lenses.length !== other.lenses.length) return false
+    return this.lenses.every(
+      (l, i) => l.command?.title === other.lenses[i]?.command?.title
+    )
   }
 }
 
+const CODELENS_EMPTY = new CodeLensMarker([])
+
 const codeLensGutter = gutter({
   class: 'cm-codelens-gutter',
-  lineMarker: (view: EditorView, line) => {
-    const state = view.state.field(lspStateField)
-    const lenses = state.codeLenses.get(line.from) || []
-    if (lenses.length === 0) return null
-    
-    const container = document.createElement('div')
-    container.style.cssText = 'display: flex; flex-direction: column; gap: 2px;'
-    
-    for (const lens of lenses) {
-      const marker = new CodeLensMarker(lens, (l) => {
-        if (l.command?.command === 'masc-ide.showAnnotation') {
-          console.log('Show annotation:', l.command.arguments)
-        }
-      })
-      container.appendChild(marker.toDOM(view))
-    }
-    
-    return container
+  lineMarker(view, block) {
+    const line = view.state.doc.lineAt(block.from)
+    const lenses = view.state.field(codeLensField).get(line.number)
+    return lenses && lenses.length > 0 ? new CodeLensMarker(lenses) : null
   },
-  initialSpacer: () => new GutterMarker(),
+  lineMarkerChange(update: ViewUpdate) {
+    return update.startState.field(codeLensField) !== update.state.field(codeLensField)
+  },
+  initialSpacer: () => CODELENS_EMPTY,
 })
 
-// ── Inlay Hints ──────────────────────────────────────────────────
+// ── Inlay Hint Theme ─────────────────────────────────────────────
 
 const inlayHintTheme = EditorView.theme({
   '.cm-inlayHint': {
@@ -161,73 +151,156 @@ const inlayHintTheme = EditorView.theme({
   },
 })
 
-// ── Diagnostic Marks ─────────────────────────────────────────────
+// ── Diagnostic Gutter ────────────────────────────────────────────
 
 class DiagnosticMark extends GutterMarker {
-  constructor(private diagnostic: LspDiagnostic) {
+  constructor(private readonly message: string, private readonly severity: number) {
     super()
   }
 
-  toDOM(view: EditorView) {
+  toDOM() {
     const el = document.createElement('div')
     el.className = 'cm-diagnostic-marker'
-    el.title = this.diagnostic.message
-    
-    const severity = this.diagnostic.severity ?? 1
-    const color = severity === 1 ? '#f00' : severity === 2 ? '#fa0' : '#00f'
-    
-    el.style.cssText = `
-      width: 12px;
-      height: 12px;
-      border-radius: 50%;
-      background: ${color};
-      cursor: help;
-    `
-    
+    el.title = this.message
+    const color =
+      this.severity === 1 ? 'var(--color-fg-error)' :
+      this.severity === 2 ? 'var(--color-fg-warning)' :
+      'var(--color-fg-info)'
+    el.style.cssText =
+      `width:12px;height:12px;border-radius:50%;background:${color};cursor:help`
     return el
+  }
+
+  eq(other: DiagnosticMark): boolean {
+    return this.message === other.message && this.severity === other.severity
   }
 }
 
+const DIAG_EMPTY = new DiagnosticMark('', 0)
+
 const diagnosticGutter = gutter({
   class: 'cm-diagnostic-gutter',
-  lineMarker: (view: EditorView, line) => {
-    const state = view.state.field(lspStateField)
-    const diagnostics = state.diagnostics.get(line.from) || []
-    if (diagnostics.length === 0) return null
-    
-    const mostSevere = diagnostics.reduce((worst, d) => {
-      const s = d.severity ?? 3
-      const w = worst.severity ?? 3
-      return s < w ? d : worst
-    })
-    
-    return new DiagnosticMark(mostSevere)
+  lineMarker(view, block) {
+    const line = view.state.doc.lineAt(block.from)
+    const diags = view.state.field(diagnosticField).get(line.number)
+    if (!diags || diags.length === 0) return null
+    const mostSevere = diags.reduce((worst, d) =>
+      (d.severity ?? 3) < (worst.severity ?? 3) ? d : worst
+    )
+    return new DiagnosticMark(mostSevere.message, mostSevere.severity ?? 3)
   },
-  initialSpacer: () => new GutterMarker(),
+  lineMarkerChange(update: ViewUpdate) {
+    return update.startState.field(diagnosticField) !== update.state.field(diagnosticField)
+  },
+  initialSpacer: () => DIAG_EMPTY,
 })
 
-// ── WebSocket Connection ─────────────────────────────────────────
+// ── JSON-RPC Client ──────────────────────────────────────────────
 
-function connectLsp(
-  baseUrl: string,
-  dispatch: (effects: unknown | unknown[]) => void,
-): WebSocket {
-  const wsUrl = baseUrl.replace(/^http/, 'ws') + '/api/v1/ide/lsp'
-  const ws = new WebSocket(wsUrl)
-  
-  ws.onopen = () => {
-    console.log('LSP WebSocket connected')
-    dispatch(setConnected.of(true))
-    
-    const initRequest = {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'initialize',
-      params: {
+interface PendingRequest {
+  resolve: (value: unknown) => void
+  reject: (reason: unknown) => void
+}
+
+class LspConnection {
+  private ws: WebSocket | null = null
+  private nextId = 1
+  private pending = new Map<number, PendingRequest>()
+  private disposed = false
+  private initialized = false
+
+  constructor(
+    private readonly onDiagnostics: (diags: ReadonlyMap<number, LspDiagnostic[]>) => void,
+    private readonly onError: (err: unknown) => void,
+  ) {}
+
+  connect(): void {
+    if (this.disposed) return
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8935'
+    const wsUrl = origin.replace(/^http/, 'ws') + '/api/v1/ide/lsp'
+    const ws = new WebSocket(wsUrl)
+    this.ws = ws
+
+    ws.onopen = () => {
+      console.log('[LSP] WebSocket connected')
+      this.initialize()
+    }
+
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data)
+        this.handleMessage(msg)
+      } catch (err) {
+        console.error('[LSP] message parse error:', err)
+      }
+    }
+
+    ws.onclose = () => {
+      console.log('[LSP] WebSocket closed')
+      this.initialized = false
+      if (!this.disposed) {
+        setTimeout(() => { if (!this.disposed) this.connect() }, 5000)
+      }
+    }
+
+    ws.onerror = (err) => {
+      console.error('[LSP] WebSocket error:', err)
+      this.onError(err)
+    }
+  }
+
+  private handleMessage(msg: {
+    id?: number
+    method?: string
+    params?: unknown
+    result?: unknown
+    error?: unknown
+  }): void {
+    if (msg.id != null && this.pending.has(msg.id)) {
+      const { resolve, reject } = this.pending.get(msg.id)!
+      this.pending.delete(msg.id)
+      if (msg.error) reject(msg.error)
+      else resolve(msg.result)
+      return
+    }
+
+    if (msg.method === 'textDocument/publishDiagnostics' && msg.params) {
+      const params = msg.params as { uri?: string; diagnostics?: LspDiagnostic[] }
+      const diagByLine = new Map<number, LspDiagnostic[]>()
+      for (const diag of params.diagnostics ?? []) {
+        const line = (diag.range?.start?.line ?? 0) + 1
+        const existing = diagByLine.get(line) ?? []
+        existing.push(diag)
+        diagByLine.set(line, existing)
+      }
+      this.onDiagnostics(diagByLine)
+    }
+  }
+
+  private sendRequest(method: string, params: unknown): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'))
+        return
+      }
+      const id = this.nextId++
+      this.pending.set(id, { resolve, reject })
+      this.ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }))
+    })
+  }
+
+  private sendNotification(method: string, params: unknown): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return
+    this.ws.send(JSON.stringify({ jsonrpc: '2.0', method, params }))
+  }
+
+  private async initialize(): Promise<void> {
+    try {
+      await this.sendRequest('initialize', {
         processId: null,
         clientInfo: { name: 'masc-ide', version: '1.0.0' },
         locale: 'ko',
-        rootUri: window.location.origin,
+        rootUri: '',
         capabilities: {
           textDocument: {
             codeLens: {},
@@ -235,113 +308,219 @@ function connectLsp(
             diagnostic: {},
           },
         },
-      },
-    }
-    ws.send(JSON.stringify(initRequest))
-  }
-  
-  ws.onmessage = (event) => {
-    try {
-      const msg = JSON.parse(event.data)
-      
-      if (msg.method === 'textDocument/codeLens') {
-        const lensesByLine = new Map<number, LspCodeLens[]>()
-        const result = msg.result || msg.params?.result || []
-        
-        for (const lens of result) {
-          const line = lens.range?.start?.line ?? 0
-          const existing = lensesByLine.get(line) || []
-          existing.push(lens)
-          lensesByLine.set(line, existing)
-        }
-        
-        dispatch(setCodeLenses.of(lensesByLine))
-      }
-      
-      if (msg.method === 'textDocument/inlayHint') {
-        const hintsByLine = new Map<number, LspInlayHint[]>()
-        const result = msg.result || msg.params?.result || []
-        
-        for (const hint of result) {
-          const line = hint.position?.line ?? 0
-          const existing = hintsByLine.get(line) || []
-          existing.push(hint)
-          hintsByLine.set(line, existing)
-        }
-        
-        dispatch(setInlayHints.of(hintsByLine))
-      }
-      
-      if (msg.method === 'textDocument/publishDiagnostics') {
-        const diagByLine = new Map<number, LspDiagnostic[]>()
-        const diagnostics = msg.params?.diagnostics || []
-        
-        for (const diag of diagnostics) {
-          const line = diag.range?.start?.line ?? 0
-          const existing = diagByLine.get(line) || []
-          existing.push(diag)
-          diagByLine.set(line, existing)
-        }
-        
-        dispatch(setDiagnostics.of(diagByLine))
-      }
+      })
+      this.sendNotification('initialized', {})
+      this.initialized = true
+      console.log('[LSP] initialized')
     } catch (err) {
-      console.error('LSP message parse error:', err)
+      console.error('[LSP] initialize failed:', err)
     }
   }
-  
-  ws.onclose = () => {
-    console.log('LSP WebSocket disconnected')
-    dispatch(setConnected.of(false))
-    
-    setTimeout(() => {
-      if (ws.readyState === WebSocket.CLOSED) {
-        connectLsp(baseUrl, dispatch)
-      }
-    }, 3000)
+
+  async requestCodeLenses(filePath: string): Promise<ReadonlyMap<number, LspCodeLens[]>> {
+    const uri = toFileUri(filePath)
+    try {
+      const result = await this.sendRequest('textDocument/codeLens', {
+        textDocument: { uri },
+      }) as LspCodeLens[] | null
+      return indexByLine(result ?? [], (l) => (l.range?.start?.line ?? 0) + 1)
+    } catch {
+      return new Map()
+    }
   }
-  
-  ws.onerror = (err) => {
-    console.error('LSP WebSocket error:', err)
+
+  async requestInlayHints(filePath: string, lineCount: number): Promise<ReadonlyMap<number, LspInlayHint[]>> {
+    const uri = toFileUri(filePath)
+    const range = {
+      start: { line: 0, character: 0 },
+      end: { line: lineCount, character: 0 },
+    }
+    try {
+      const result = await this.sendRequest('textDocument/inlayHint', {
+        textDocument: { uri },
+        range,
+      }) as LspInlayHint[] | null
+      return indexByLine(result ?? [], (h) => (h.position?.line ?? 0) + 1)
+    } catch {
+      return new Map()
+    }
   }
-  
-  return ws
+
+  async requestDiagnostics(filePath: string): Promise<ReadonlyMap<number, LspDiagnostic[]>> {
+    const uri = toFileUri(filePath)
+    try {
+      const result = await this.sendRequest('textDocument/diagnostic', {
+        textDocument: { uri },
+      }) as { items?: LspDiagnostic[] } | null
+      const items = result?.items ?? []
+      return indexByLine(items, (d) => (d.range?.start?.line ?? 0) + 1)
+    } catch {
+      return new Map()
+    }
+  }
+
+  notifyDidOpen(filePath: string, languageId: string): void {
+    if (!this.initialized) return
+    const uri = toFileUri(filePath)
+    this.sendNotification('textDocument/didOpen', {
+      textDocument: { uri, languageId, version: 1, text: '' },
+    })
+  }
+
+  notifyDidClose(filePath: string): void {
+    if (!this.initialized) return
+    const uri = toFileUri(filePath)
+    this.sendNotification('textDocument/didClose', {
+      textDocument: { uri },
+    })
+  }
+
+  notifyDidSave(filePath: string): void {
+    if (!this.initialized) return
+    const uri = toFileUri(filePath)
+    this.sendNotification('textDocument/didSave', {
+      textDocument: { uri },
+    })
+  }
+
+  dispose(): void {
+    this.disposed = true
+    for (const [, { reject }] of this.pending) {
+      reject(new Error('Connection disposed'))
+    }
+    this.pending.clear()
+    if (this.ws) {
+      this.ws.close()
+      this.ws = null
+    }
+  }
 }
+
+// ── Helpers ───────────────────────────────────────────────────────
+
+function toFileUri(filePath: string): string {
+  return `file://${filePath}`
+}
+
+function indexByLine<T>(items: ReadonlyArray<T>, getLine: (item: T) => number): Map<number, T[]> {
+  const map = new Map<number, T[]>()
+  for (const item of items) {
+    const line = getLine(item)
+    const existing = map.get(line) ?? []
+    existing.push(item)
+    map.set(line, existing)
+  }
+  return map
+}
+
+function languageIdFromPath(filePath: string): string | null {
+  const ext = filePath.slice(filePath.lastIndexOf('.'))
+  const MAP: Record<string, string> = {
+    '.ts': 'typescript', '.tsx': 'typescriptreact',
+    '.js': 'javascript', '.jsx': 'javascriptreact',
+    '.py': 'python', '.ml': 'ocaml', '.mli': 'ocaml',
+    '.rs': 'rust', '.go': 'go', '.json': 'json',
+    '.md': 'markdown', '.html': 'html', '.css': 'css',
+    '.toml': 'toml', '.yaml': 'yaml', '.yml': 'yaml',
+  }
+  return MAP[ext] ?? null
+}
+
+// ── Config field (passes filePath into CM6 state) ────────────────
+
+interface LspConfig { readonly filePath: string }
+
+const setLspConfig = StateEffect.define<LspConfig>()
+
+const lspConfigField = StateField.define<LspConfig>({
+  create() { return { filePath: '' } },
+  update(state, tr) {
+    for (const eff of tr.effects) {
+      if (eff.is(setLspConfig)) return eff.value
+    }
+    return state
+  },
+})
 
 // ── View Plugin ──────────────────────────────────────────────────
 
 const lspViewPlugin = ViewPlugin.fromClass(
   class {
-    ws: WebSocket | null = null
-    
-    constructor(view: EditorView) {
-      const baseUrl = getBaseUrl()
-      this.ws = connectLsp(baseUrl, (effects) => {
-        view.dispatch({ effects })
-      })
+    private conn: LspConnection
+    private filePath: string
+    private refreshTimer: ReturnType<typeof setTimeout> | null = null
+
+    constructor(private readonly view: EditorView) {
+      const filePath = view.state.field(lspConfigField).filePath
+      this.filePath = filePath
+      this.conn = new LspConnection(
+        (diags) => this.dispatch(setDiagnostics.of(diags)),
+        (err) => console.error('[LSP] connection error:', err),
+      )
+      this.conn.connect()
+      this.scheduleRefresh()
     }
-    
+
+    update(update: ViewUpdate) {
+      const newFilePath = update.state.field(lspConfigField).filePath
+      if (newFilePath !== this.filePath) {
+        this.conn.notifyDidClose(this.filePath)
+        this.filePath = newFilePath
+        this.conn.notifyDidOpen(newFilePath, languageIdFromPath(newFilePath) ?? 'text')
+        this.scheduleRefresh()
+      }
+    }
+
+    private scheduleRefresh(): void {
+      if (this.refreshTimer) clearTimeout(this.refreshTimer)
+      this.refreshTimer = setTimeout(() => this.refresh(), 300)
+    }
+
+    private async refresh(): Promise<void> {
+      const fp = this.filePath
+      const view = this.view
+      if (!view.dom.isConnected) return
+
+      const [lenses, hints, diags] = await Promise.allSettled([
+        this.conn.requestCodeLenses(fp),
+        this.conn.requestInlayHints(fp, view.state.doc.lines),
+        this.conn.requestDiagnostics(fp),
+      ])
+
+      if (!view.dom.isConnected) return
+      const effects: StateEffect<unknown>[] = []
+      if (lenses.status === 'fulfilled') effects.push(setCodeLenses.of(lenses.value))
+      if (hints.status === 'fulfilled') effects.push(setInlayHints.of(hints.value))
+      if (diags.status === 'fulfilled') effects.push(setDiagnostics.of(diags.value))
+      if (effects.length > 0) view.dispatch({ effects })
+    }
+
     destroy() {
-      if (this.ws) {
-        this.ws.close()
-        this.ws = null
+      if (this.refreshTimer) clearTimeout(this.refreshTimer)
+      this.conn.notifyDidClose(this.filePath)
+      this.conn.dispose()
+    }
+
+    private dispatch(...effects: StateEffect<unknown>[]): void {
+      if (this.view.dom.isConnected) {
+        this.view.dispatch({ effects })
       }
     }
   },
 )
 
-function getBaseUrl(): string {
-  if (typeof window !== 'undefined') {
-    return window.location.origin
-  }
-  return 'http://localhost:8930'
-}
-
 // ── Public API ───────────────────────────────────────────────────
 
-export function lspExtension(): Extension {
+export interface LspExtensionOpts {
+  readonly filePath: string
+}
+
+export function lspExtension(opts: LspExtensionOpts): Extension {
   return [
-    lspStateField,
+    lspConfigField.init(() => ({ filePath: opts.filePath })),
+    codeLensField,
+    inlayHintField,
+    diagnosticField,
     codeLensGutter,
     diagnosticGutter,
     inlayHintTheme,
@@ -349,6 +528,6 @@ export function lspExtension(): Extension {
   ]
 }
 
-export function getLspState(view: EditorView): LspState {
-  return view.state.field(lspStateField)
+export function updateLspFilePath(view: EditorView, filePath: string): void {
+  view.dispatch({ effects: [setLspConfig.of({ filePath })] })
 }

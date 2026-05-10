@@ -669,6 +669,7 @@ let test_refresh_once_skips_fresh_cached_result () =
             legacy_message = "unused";
             tool_name = name;
             duration_ms = 0.0;
+            failure_class = None;
           })
         ~base_path:dir
         ~build_facts:(fun () ->

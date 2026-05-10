@@ -47,7 +47,8 @@ let test_pre_hook_short_circuits () =
            data = `String "blocked";
            legacy_message = "blocked";
            tool_name = name;
-           duration_ms = 0.0 });
+           duration_ms = 0.0;
+           failure_class = None });
   let token = match Tool_dispatch.mint_token ~name:"__hook_blocked" with Ok t -> t | Error e -> Alcotest.fail e in
   let result = Tool_dispatch.dispatch_structured ~token ~args:`Null in
   (* Handler should NOT have been called *)
@@ -77,7 +78,8 @@ let test_multiple_pre_hooks_first_wins () =
            data = `String "denied";
            legacy_message = "denied";
            tool_name = name;
-           duration_ms = 0.0 });
+           duration_ms = 0.0;
+           failure_class = None });
   (* Third hook: should not run *)
   Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
     log_call "pre3";

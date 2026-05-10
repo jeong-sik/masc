@@ -71,6 +71,7 @@ let test_empty_legacy_message_is_preserved () =
       legacy_message = "";
       tool_name = "direct";
       duration_ms = 0.0;
+      failure_class = None;
     }
   in
   Alcotest.(check string) "message remains empty" "" (Tool_result.message r);

@@ -335,6 +335,7 @@ let test_dispatch_hook_emits_tool_span_payload () =
             ; legacy_message = "ok"
             ; tool_name = "keeper_shell"
             ; duration_ms = 123.4
+            ; failure_class = None
             }
           in
           let returned = Lib.Tool_dispatch.run_post_hooks result in

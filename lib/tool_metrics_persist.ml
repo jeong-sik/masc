@@ -180,6 +180,7 @@ let restore ~base_path : int =
            duration_ms = r.duration_ms;
            data = `Null;
            legacy_message = "";
+           failure_class = None;
          } in
          Tool_metrics.record result;
          Stdlib.incr count

@@ -141,6 +141,7 @@ let make_pre_hook ~config ~governance_level =
           legacy_message = Yojson.Safe.to_string response;
           tool_name = name;
           duration_ms = 0.0;
+          failure_class = None;
         }
     | `Deny reason ->
         maybe_create_petition ~config ~decision;
@@ -163,6 +164,7 @@ let make_pre_hook ~config ~governance_level =
           legacy_message = Yojson.Safe.to_string response;
           tool_name = name;
           duration_ms = 0.0;
+          failure_class = None;
         }
 
 (* ── Installation ───────────────────────────────────────────── *)

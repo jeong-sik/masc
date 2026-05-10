@@ -673,7 +673,7 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
                       ? html`<${StatusChip} tone="select">verification pending<//>`
                       : null}
                   </div>
-                  <div class="grid grid-cols-3 gap-2">
+                  <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
                     <${MetricChip} label="completion" value=${completionItems.length} />
                     <${MetricChip} label="unmet" value=${unmetItems.length} tone=${unmetItems.length > 0 ? 'bad' : 'ok'} />
                     <${MetricChip} label="evidence" value=${requiredEvidence.length} />
@@ -742,7 +742,7 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
                     : html`<${TileHint} text="No recent memory note." />`}
                   ${keeper?.metrics_window
                     ? html`
-                        <div class="grid grid-cols-3 gap-2">
+                        <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
                           <${MetricChip} label="pass" value=${formatPct(keeper.metrics_window.memory_pass_rate)} tone="ok" />
                           <${MetricChip} label="checks" value=${keeper.metrics_window.memory_checks ?? 0} />
                           <${MetricChip} label="compact" value=${keeper.compaction_count ?? keeper.metrics_window.memory_compaction_events ?? 0} tone="warn" />
@@ -754,7 +754,7 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
                 <${JourneyTile} label="Turn">
                   ${keeper
                     ? html`
-                        <div class="grid grid-cols-3 gap-2">
+                        <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
                           <${MetricChip} label="turns" value=${keeper.turn_count ?? keeper.total_turns ?? 0} />
                           <${MetricChip} label="last" value=${formatAgeSeconds(keeper.last_turn_ago_s)} tone="info" />
                           <${MetricChip} label="auto" value=${keeper.autonomous_turn_count ?? 0} />

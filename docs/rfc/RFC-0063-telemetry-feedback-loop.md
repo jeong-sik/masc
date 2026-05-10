@@ -84,7 +84,11 @@ Bounded back-pressure: each subscription has its own bounded stream (default dep
 
 Eio's scheduler is cooperative and currently single-threaded per domain. A fiber that never yields starves every co-located fiber on the same domain — including HTTP handlers, lazy startup tasks, and other consumer fibers — even though the OS thread is fully occupied. The starvation is invisible to TCP listen state and to `gh pr checks` style verification; the symptom only surfaces under low-traffic conditions where the non-blocking primitive returns empty.
 
-### 6.3 Coverage on origin/main (verified 2026-05-11)
+### 6.3 Coverage on origin/main (verified 2026-05-11 by lint #14511)
+
+The `let rec loop` drain-fiber pattern that motivated this RFC appears at four sites; the lint introduced by PR #14511 sweeps a broader 11 files that mention non-blocking drain primitives, all of which currently obey the contract.
+
+#### Drain-fiber loop sites (the regression class)
 
 | Site | Yield | Pattern |
 |------|-------|---------|
@@ -93,7 +97,22 @@ Eio's scheduler is cooperative and currently single-threaded per domain. A fiber
 | `server/server_bootstrap_loops.ml:391` | `Eio.Time.sleep clock keeper_listener_retry_interval_sec` | env-tunable interval |
 | `keeper/keeper_telemetry_consumer.ml:67` | `Eio.Time.sleep clock drain_interval_s` (#14499) | hardcoded 0.1s |
 
-All four drain loops now obey the contract. The contract retroactively explains why the other three sites already had the sleep — the same shape was discovered earlier and patched site-by-site without naming the contract.
+#### Lint baseline (file-level, includes single-shot drain callers)
+
+The lint script `scripts/ci/check-drain-loop-yields.sh` walks every `.ml` under `lib/` that calls a non-blocking drain (`Agent_sdk_metrics_bridge.drain`, `Agent_sdk.Event_bus.drain`, `Eio.Stream.take_nonblocking`) and verifies the same file contains a yield primitive. Eleven files are in scope:
+
+```
+lib/agent_sdk_metrics_bridge.ml         lib/keeper/keeper_compact_audit.ml
+lib/cascade/cascade_event_bridge.ml     lib/keeper/keeper_telemetry_consumer.ml
+lib/keeper/keeper_unified_turn.ml       lib/server/server_bootstrap_loops.ml
+lib/metrics_store_eio.ml                lib/session.ml
+lib/pulse/pulse.ml                      lib/sse.ml
+lib/tool_metrics_persist.ml
+```
+
+11/11 PASS at the time of this revision. The seven sites beyond the four loop-fibers above are single-shot drain callers (cleanup paths, one-off flushes) — they are not the regression class but the file-level lint covers them defensively.
+
+The contract retroactively explains why the four loop-fiber sites already had the sleep: the same shape was discovered earlier and patched site-by-site without naming the contract.
 
 ## 7. Enforcement options (ranked by cost / coverage)
 
@@ -104,13 +123,16 @@ All four drain loops now obey the contract. The contract retroactively explains 
 | **C. TLA+ Bug Model** (per `software-development.md` §TLA+ Bug Model) | high | precise | Model the consumer fiber + bounded queue + scheduler as a TLA+ spec. `BugAction` = recurse without yield. `SafetyInvariant` = co-located fibers receive turns within bounded steps. Ships with `*-buggy.cfg` that must violate. Strongest correctness statement; cost matches RFC-0042 / KeeperOASAdvanced precedent. |
 | **D. Test harness probe** | low | partial | New alcotest case: spawn the subscriber under a `Eio_mock.Clock`, advance N ticks, assert that a co-located fiber received at least one turn. Catches the regression but only for sites that adopt the test pattern. |
 
-**This RFC recommends A + D as the minimum viable enforcement** (low cost, immediate adoption) and lists B / C as follow-up RFCs.
+**This RFC originally recommended A + D as the minimum viable enforcement.** During implementation B and C were also delivered (see §8); A is now redundant and explicitly deferred — the automated layers cover the cases a process checklist would catch.
 
 ## 8. Implementation status
 
-- Section 5 (architecture documentation): **this RFC**.
-- Section 6 (yield contract for telemetry consumer): merged in #14499 (`93489c1d2e`).
-- Section 7 (enforcement): not started. Tracking issue to be filed after this RFC merges.
+- §5 (architecture documentation): **this RFC**.
+- §6 (yield contract for telemetry consumer): merged in #14499 (`93489c1d2e`).
+- §7-A (PR review checklist): **deferred**. B + C + D superseded the value of a manual checklist.
+- §7-B (lint script `scripts/ci/check-drain-loop-yields.sh`): merged in #14511 (`92a4c8b7b2`). Wired into `.github/workflows/ci.yml` lint job; baseline 11/11 PASS.
+- §7-C (TLA+ Bug Model `specs/bug-models/CooperativeDrainYield.tla`): merged in #14515 (`277aa7c25e`). Clean spec PASS (71 states, depth 23); buggy spec violates `NoStarvation` in 8 steps (TLC exit 12). Auto-discovered by `scripts/tla-check.sh`.
+- §7-D (Eio test harness `test/test_keeper_telemetry_consumer.ml`): merged in #14508 (`334f79639f`). Wall-clock 0.105s on fix code; regression detected as hang via CI cutoff.
 - Release: 0.19.17 (`f3737b9815`) carries the fix.
 
 ## 9. Open questions

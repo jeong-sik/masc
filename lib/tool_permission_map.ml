@@ -127,6 +127,7 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_portal_send", CanSendPortal);
     ("masc_worktree_create", CanCreateWorktree);
     ("masc_worktree_remove", CanRemoveWorktree);
+    ("sidecar", CanBroadcast);
   ]
 
 let legacy_permission_for_tool tool_name =

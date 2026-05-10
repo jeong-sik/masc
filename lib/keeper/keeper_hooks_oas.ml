@@ -62,7 +62,7 @@ let is_keeper_board_write_tool_name tool_name =
 
 let current_keeper_model meta =
   let m = meta.Keeper_types.runtime.usage.last_model_used in
-  if m = "" then meta.Keeper_types.cascade_name else m
+  if m = "" then Keeper_types.cascade_name_of_meta meta else m
 
 let stop_reason_to_label = function
   | Agent_sdk.Types.EndTurn -> "end_turn"
@@ -257,7 +257,7 @@ let empty_response_model_metric =
 let alias_response_model_metric =
   Prometheus.metric_after_turn_response_model_alias
 
-let unknown_model_sentinel = "unknown_provider"
+let unknown_model_sentinel = Provider_adapter.cn_unknown_provider
 
 let zero_usage : Agent_sdk.Types.api_usage =
   {
@@ -2183,7 +2183,7 @@ let make_hooks
         in
         let model =
           let m = (!meta_ref).runtime.usage.last_model_used in
-          if m = "" then (!meta_ref).cascade_name else m
+          if m = "" then (Keeper_types.cascade_name_of_meta !meta_ref) else m
         in
         let summary =
           tool_execution_summary
@@ -2235,7 +2235,7 @@ let make_hooks
                ~tool_name ~input ~output_text
                ~success:(outcome = "ok") ~duration_ms
                ~model:(let m = (!meta_ref).runtime.usage.last_model_used in
-                       if m = "" then (!meta_ref).cascade_name else m)
+                       if m = "" then (Keeper_types.cascade_name_of_meta !meta_ref) else m)
                ?lane ?tool_choice ?thinking_enabled ?thinking_budget
                ?prompt_fingerprint
                ?trace_id ?session_id ?turn ?keeper_turn_id ?task_id ?goal_ids

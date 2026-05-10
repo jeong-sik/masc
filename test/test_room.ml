@@ -992,9 +992,15 @@ let test_get_agents_status () =
 
 let test_cleanup_zombies_empty () =
   with_test_env (fun config ->
-    (* Cleanup with no zombies *)
+    (* Cleanup with no zombies returns a structured result *)
     let result = Coord.cleanup_zombies config in
-    Alcotest.(check bool) "cleanup result" true (String.length result > 0)
+    let has_result =
+      match result with
+      | Coord.No_agents_dir -> true
+      | Coord.No_zombies -> true
+      | Coord.Cleaned _ -> true
+    in
+    Alcotest.(check bool) "cleanup result" true has_result
   )
 
 (** Return ISO8601 timestamp offset by seconds from now *)
@@ -1023,8 +1029,11 @@ let test_cleanup_zombies_detects_regular () =
     (* Create a regular agent idle for 10 minutes (> 300s threshold) *)
     make_stale_agent config ~name:"stale-regular-agent" ~age_seconds:700.0;
     let result = Coord.cleanup_zombies config in
-    Alcotest.(check bool) "regular zombie detected"
-      true (str_contains result "stale-regular-agent")
+    let found = match result with
+      | Coord.Cleaned { names; _ } -> List.mem "stale-regular-agent" names
+      | _ -> false
+    in
+    Alcotest.(check bool) "regular zombie detected" true found
   )
 
 let test_cleanup_zombies_detects_keeper () =
@@ -1032,8 +1041,11 @@ let test_cleanup_zombies_detects_keeper () =
     (* Create a keeper agent idle for 2 hours (> 3600s keeper threshold) *)
     make_stale_agent config ~name:"keeper-longplay-agent" ~age_seconds:7200.0;
     let result = Coord.cleanup_zombies config in
-    Alcotest.(check bool) "keeper zombie detected after keeper threshold"
-      true (str_contains result "keeper-longplay-agent")
+    let found = match result with
+      | Coord.Cleaned { names; _ } -> List.mem "keeper-longplay-agent" names
+      | _ -> false
+    in
+    Alcotest.(check bool) "keeper zombie detected after keeper threshold" true found
   )
 
 let test_cleanup_zombies_spares_recent_keeper () =
@@ -1041,8 +1053,11 @@ let test_cleanup_zombies_spares_recent_keeper () =
     (* Create a keeper agent idle for 10 minutes (< 3600s keeper threshold) *)
     make_stale_agent config ~name:"keeper-active-agent" ~age_seconds:600.0;
     let result = Coord.cleanup_zombies config in
-    Alcotest.(check bool) "recent keeper spared"
-      true (not (str_contains result "keeper-active-agent"))
+    let spared = match result with
+      | Coord.Cleaned { names; _ } -> not (List.mem "keeper-active-agent" names)
+      | _ -> true
+    in
+    Alcotest.(check bool) "recent keeper spared" true spared
   )
 
 let test_cleanup_zombies_spares_type_keeper () =
@@ -1054,8 +1069,11 @@ let test_cleanup_zombies_spares_type_keeper () =
       ~name:"regular-keeper-runtime"
       ~age_seconds:600.0;
     let result = Coord.cleanup_zombies config in
-    Alcotest.(check bool) "agent_type=keeper spared below keeper threshold"
-      true (not (str_contains result "regular-keeper-runtime"))
+    let spared = match result with
+      | Coord.Cleaned { names; _ } -> not (List.mem "regular-keeper-runtime" names)
+      | _ -> true
+    in
+    Alcotest.(check bool) "agent_type=keeper spared below keeper threshold" true spared
   )
 
 let test_cleanup_zombies_removes_broken_agent_file () =
@@ -1491,7 +1509,11 @@ let test_cleanup_zombies_releases_tasks () =
     Coord.write_json config agent_file updated_json;
     (* Run cleanup — should remove zombie agent AND release its tasks *)
     let result = Coord.cleanup_zombies config in
-    Alcotest.(check bool) "cleanup ran" true (String.length result > 0);
+    Alcotest.(check bool) "cleanup ran" true
+      (match result with
+       | Coord.No_agents_dir -> true
+       | Coord.No_zombies -> true
+       | Coord.Cleaned _ -> true);
     (* Verify task is released (back to Todo) *)
     let tasks = Coord.list_tasks config in
     Alcotest.(check bool) "task released to todo" true

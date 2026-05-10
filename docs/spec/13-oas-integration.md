@@ -285,7 +285,7 @@ val tool_result : ?is_error:bool -> tool_use_id:string -> content:string
   -> unit -> Agent_sdk.Types.message
 ```
 
-### 7.2 Oas_response
+### 7.2 Agent_sdk_response
 
 `oas_response.ml`은 OAS 응답 읽기 헬퍼:
 
@@ -368,7 +368,7 @@ SSOT rules:
 PreToolUse event
   -> should_skip? (read-only 패턴 매칭)
     -> Yes: Pass (MODEL 호출 없음)
-    -> No: build_prompt -> Oas_worker.run_named(cascade="verifier")
+    -> No: build_prompt -> Keeper_turn_driver.run_named(cascade="verifier")
       -> parse_verdict (PASS/WARN/FAIL)
 ```
 

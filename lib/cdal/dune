@@ -1,0 +1,20 @@
+; RFC-0056 Phase 0 — extract CDAL Phase 1A evaluator from flat masc_mcp.
+; Mirrors lib/cdal_runtime/dune: (include_subdirs no) opts out of the
+; parent's (include_subdirs unqualified), letting this directory compile
+; as its own library. (wrapped false) keeps module names unqualified so
+; existing callers (~23 for Cdal_types alone) do not rewrite imports —
+; this is Phase 0 budget G3 / G5 in RFC-0056.
+;
+; Pairs with lib/cdal_runtime/ which hosts the producer side.
+; Dependency direction: masc_mcp main lib -> masc_mcp.cdal -> masc_core
+; (no cycle by construction; Phase 1 will add masc_mcp.cdal_runtime once
+; cdal_judge / cdal_eval_v1 / cdal_loader join this sub-library).
+(include_subdirs no)
+
+(library
+ (name masc_mcp_cdal)
+ (public_name masc_mcp.cdal)
+ (wrapped false)
+ (libraries
+  yojson
+  masc_core))

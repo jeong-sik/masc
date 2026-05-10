@@ -90,27 +90,24 @@ const CHIP_CLASS_BY_STATE: Record<string, string> = {
   Dead:         'bg-[var(--color-bg-elevated)] text-[var(--bad-light)] border-[var(--bad-20)]',
   Zombie:       'bg-[var(--color-bg-elevated)] text-[var(--bad-light)] border-[var(--bad-20)]',
   Offline:      'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
-  // KTC
-  idle:         'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
+  // KTC (unique keys — shared keys like idle/exhausted/compacting/donelisten under KCL/KMC below)
   prompting:    'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
+  routing:      'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
   executing:    'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]',
-  compacting:   'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
   finalizing:   'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
   // KDP
   undecided:          'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
   guard_ok:           'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]',
   gate_rejected:      'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
   tool_policy_selected: 'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
-  // KCL
+  // KCL + KMC + shared keys (idle, exhausted, compacting, done)
   idle:         'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
   selecting:    'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
   trying:       'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
   done:         'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]',
   exhausted:    'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
-  // KMC
   accumulating: 'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
   compacting:   'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
-  done:         'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]',
   // KCB (LT-16-KCB Phase 3). Clean = baseline grey same as any other
   // "nothing happening" state; warning = amber (partial failure
   // streak); cooling = blue (at least one past trip, currently
@@ -927,6 +924,10 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
     () => (data ? tallyInvariantViolations(data.snapshots) : null),
     [data],
   )
+  // Backend emits this Prometheus counter (`metric_fsm_guard_violation`)
+  // as a fleet-wide total duplicated onto every snapshot — see
+  // keeper_composite_observer.ml:452. Reading [0] is intentional;
+  // summing across snapshots would multiply the count by fleet size.
   const fsmGuardViolationsTotal = useMemo(
     () => (data ? (data.snapshots[0]?.fsm_guard_violations ?? 0) : 0),
     [data],

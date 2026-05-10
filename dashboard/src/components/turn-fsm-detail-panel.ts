@@ -4,10 +4,10 @@ import { useMemo } from 'preact/hooks'
 import type { KeeperCompositeSnapshot } from '../api/keeper'
 import { CytoscapeFsm } from './common/cytoscape-fsm'
 import { StatusChip, type StatusChipTone } from './common/status-chip'
+import { displayState } from './fsm-hub-types'
 import {
   buildTurnFsmSpec,
   normalizeTurnFsmState,
-  turnFsmTlaSymbol,
 } from './keeper-fsm-specs'
 
 type TurnChipTone = 'accent' | 'neutral' | 'warn' | 'err' | 'ok'
@@ -43,19 +43,12 @@ export function terminalTone(outcome: string | null | undefined): 'neutral' | 'o
   }
 }
 
-export function isExactTurnProjection(rawTurnPhase: string, projected: string | null): boolean {
-  const normalized = rawTurnPhase.trim().toLowerCase()
-  return normalized === projected || (normalized === 'awaiting_tool' && projected === 'awaiting_tool_result')
-}
-
 export function TurnFsmDetailPanel({ snapshot }: { snapshot: KeeperCompositeSnapshot }) {
   const spec = useMemo(
     () => buildTurnFsmSpec(snapshot.turn_phase),
     [snapshot.turn_phase],
   )
   const projectedState = normalizeTurnFsmState(snapshot.turn_phase)
-  const tlaSymbol = projectedState ? turnFsmTlaSymbol(projectedState) : null
-  const isCoarse = projectedState ? !isExactTurnProjection(snapshot.turn_phase, projectedState) : false
   const execution = snapshot.execution
   const terminalReason =
     execution?.terminal_reason_code
@@ -79,14 +72,7 @@ export function TurnFsmDetailPanel({ snapshot }: { snapshot: KeeperCompositeSnap
           </div>
         </div>
         <div class="flex flex-wrap items-center gap-1.5 text-3xs">
-          <${StatusChip} tone=${turnFsmChipTone(projectedState ? 'accent' : 'warn')} uppercase=${false} class="font-mono">${projectedState ?? 'unmapped'}</${StatusChip}>
-          <${StatusChip} tone="neutral" uppercase=${false} class="font-mono">KTC ${snapshot.turn_phase}</${StatusChip}>
-          ${isCoarse ? html`
-            <${StatusChip} tone="warn" uppercase=${false}>coarse legacy map</${StatusChip}>
-          ` : null}
-          ${tlaSymbol ? html`
-            <${StatusChip} tone="neutral" uppercase=${false} class="font-mono">TLA ${tlaSymbol}</${StatusChip}>
-          ` : null}
+          <${StatusChip} tone=${turnFsmChipTone(projectedState ? 'accent' : 'warn')} uppercase=${false} class="font-mono">${projectedState ? displayState(projectedState) : 'unmapped'}</${StatusChip}>
         </div>
       </div>
 

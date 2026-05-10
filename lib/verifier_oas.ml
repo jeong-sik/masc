@@ -114,13 +114,13 @@ let verify (req : verification_request) : (verdict, string) result =
         Keeper_cascade_profile.Verifier
     in
     match
-      Oas_worker_named.run_named_with_masc_tools
+      Keeper_turn_driver_wrappers.run_named_with_masc_tools
         ~cascade_name
         ~goal:prompt
         ~masc_tools:[report_verdict_schema]
         ~dispatch
         ~max_turns:1
-        ~temperature:Oas_worker_cascade.deterministic_temperature
+        ~temperature:Cascade_legacy_runner.deterministic_temperature
         ~max_tokens:200
         ~approval:Approval_callbacks.auto_approve
         ()
@@ -132,7 +132,7 @@ let verify (req : verification_request) : (verdict, string) result =
          Ok v
        | None ->
          (* LLM responded with text instead of tool call — lenient fallback *)
-         let text = Oas_response.text_of_response result.response in
+         let text = Agent_sdk_response.text_of_response result.response in
          Log.Verifier.info "verdict via text fallback (model did not call report_verdict)";
          (match parse_verdict text with
           | Ok verdict -> Ok verdict

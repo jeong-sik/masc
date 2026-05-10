@@ -440,11 +440,6 @@ function ResearchBrief({ loop }: { loop: AutoresearchLoopSummary }) {
             </div>
           </${InfoCard}>
         </div>
-
-        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-xs leading-normal text-[var(--color-fg-muted)]">
-          이 화면은 generator loop 자체를 설명합니다. Safety Harness는 evaluator와 장기 실행 safety rail을 보여주며,
-          각 cycle의 keep/discard 판정을 직접 대체하지 않습니다.
-        </div>
       </div>
     <//>
   `
@@ -456,7 +451,6 @@ function OutcomeVsHarnessCallout({ loopCount }: { loopCount: number }) {
       <div class="grid grid-cols-1 gap-3 md:grid-cols-[1.3fr_1fr]">
         <${InfoCard}>
           <${Eyebrow}>실험 결과</${Eyebrow}>
-          <div class="mt-1 text-sm font-medium text-[var(--color-fg-primary)]">이 화면은 keep/discard 루프를 봅니다.</div>
           <div class="mt-2 text-sm leading-loose text-[var(--color-fg-secondary)]">
             어떤 파일을 바꾸고 어떤 metric을 밀어 올리려는지, 그리고 현재 ${loopCount}개 루프가 어떤 cycle에 있는지 직접 봅니다.
           </div>
@@ -464,7 +458,6 @@ function OutcomeVsHarnessCallout({ loopCount }: { loopCount: number }) {
 
         <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
           <${Eyebrow}>안전 하네스</${Eyebrow}>
-          <div class="mt-1 text-sm font-medium text-[var(--color-fg-primary)]">심판 기계의 건강도는 별도로 봅니다.</div>
           <div class="mt-2 text-sm leading-loose text-[var(--color-fg-secondary)]">
             평가 모델, 압축 전 상태, 세대 교체 rail 상태는 하네스에서 봅니다.
           </div>

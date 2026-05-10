@@ -311,6 +311,13 @@ let explicit_metadata : (string * metadata) list =
        signaling endpoints in server_h2_gateway.ml — kept for now. *)
     ("masc_webrtc_offer", deprecated "Pruned from all surfaces in #4999");
     ("masc_webrtc_answer", deprecated "Pruned from all surfaces in #4999");
+    ( "sidecar",
+      {
+        destructive_tool with
+        visibility = Hidden;
+        required_permission = Some Masc_domain.CanBroadcast;
+        effect_domain = Some Masc_coordination;
+      } );
   ]
 
 (* ================================================================ *)

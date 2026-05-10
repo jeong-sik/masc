@@ -152,6 +152,7 @@ let telemetry_usage_missing_runtime_reported =
 
 let cn_llama = "llama"
 let cn_ollama = "ollama"
+let cn_unknown_provider = "unknown_provider"
 let cn_claude = "claude"
 let cn_codex = "codex"
 let cn_gemini = "gemini"
@@ -399,10 +400,7 @@ let direct_adapters =
                   [
                     "gemini-3-flash-preview";
                     "gemini-3.1-flash-lite-preview";
-                    "gemini-2.5-flash";
-                    "gemini-2.5-flash-lite";
                     "gemini-3.1-pro-preview";
-                    "gemini-2.5-pro";
                   ];
                 prefer_default_model_env = true;
               };

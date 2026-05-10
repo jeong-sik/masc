@@ -12,6 +12,7 @@
 type candidate_probe_status =
   | Probe_ok
   | Probe_skipped of string
+  | Probe_not_applicable of string
   | Probe_error of string
 
 type candidate_probe = {

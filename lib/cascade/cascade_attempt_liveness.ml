@@ -23,11 +23,11 @@ let cloud_fast : budget =
 let cloud_thinking : budget =
   { ttft_max = 60.0; inter_chunk_max = 30.0; attempt_wall_max = 300.0 }
 
-(* Calibrated 2026-05-07 against 238 Ollama entries (qwen3.6:35b-a3b-mlx):
-   avg latency 165s, max 918s, avg input 39.5K tok, avg output 293 tok.
-   Previous 120s/900s wall rejected ~15% of legitimate turns. *)
+(* Calibrated 2026-05-09 against cold-start TTFT for qwen3.6:27b-coding-nvfp4
+   on Apple Silicon: 452s cold vs 31s warm (same prompt). Previous 180s
+   rejected legitimate cold-start turns before first token. *)
 let local_27b : budget =
-  { ttft_max = 180.0; inter_chunk_max = 90.0; attempt_wall_max = 1200.0 }
+  { ttft_max = 600.0; inter_chunk_max = 90.0; attempt_wall_max = 1200.0 }
 
 let local_70b_plus : budget =
   { ttft_max = 300.0; inter_chunk_max = 120.0; attempt_wall_max = 1800.0 }

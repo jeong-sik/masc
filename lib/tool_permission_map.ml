@@ -85,6 +85,7 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_keeper_reset", CanBroadcast);
     ("masc_keeper_compact", CanBroadcast);
     ("masc_keeper_clear", CanBroadcast);
+    ("sidecar", CanBroadcast);
     ("masc_persona_generate", CanBroadcast);
     ("masc_persona_save", CanBroadcast);
     ("masc_keeper_create_from_persona", CanBroadcast);
@@ -127,6 +128,7 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_portal_send", CanSendPortal);
     ("masc_worktree_create", CanCreateWorktree);
     ("masc_worktree_remove", CanRemoveWorktree);
+    ("sidecar", CanBroadcast);
   ]
 
 let legacy_permission_for_tool tool_name =

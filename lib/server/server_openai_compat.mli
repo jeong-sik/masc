@@ -51,7 +51,7 @@ val handle_chat_completions :
     | Condition | Route |
     |---|---|
     | [model] starts with [keeper:] (length > 7) | {!Keeper_turn.handle_keeper_msg} |
-    | otherwise | {!Oas_worker.run_named} with [routes.openai_compat] |
+    | otherwise | {!Keeper_turn_driver.run_named} with [routes.openai_compat] |
 
     The [keeper:] prefix length check (`> 7`) is intentional: an
     empty keeper name (`model = "keeper:"`) falls through to the
@@ -70,8 +70,8 @@ val handle_chat_completions :
 
     | Field | Default |
     |---|---|
-    | [max_tokens] | {!Oas_worker_cascade.default_max_tokens} |
-    | [temperature] | {!Oas_worker_cascade.default_temperature} |
+    | [max_tokens] | {!Cascade_legacy_runner.default_max_tokens} |
+    | [temperature] | {!Cascade_legacy_runner.default_temperature} |
     | [system] (concat of all system messages) | empty string |
 
     {2 Response shape}

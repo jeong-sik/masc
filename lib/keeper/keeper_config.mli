@@ -208,6 +208,9 @@ val keeper_proactive_task_cooldown_divisor : unit -> int
 val keeper_proactive_task_min_cooldown_sec : unit -> int
 
 val keeper_batch_limit : unit -> int
+val keeper_board_debounce_window_sec : unit -> float
+(** Time window (seconds) to coalesce board signals into a single keeper turn.
+    Env: [MASC_KEEPER_BOARD_DEBOUNCE_SEC], default [2.0], range [0.0..30.0]. *)
 val keeper_tool_cost_max_usd : unit -> float option
 val keeper_max_tools_per_turn : unit -> int
 val keeper_retry_max_tools_per_turn : unit -> int

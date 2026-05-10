@@ -321,7 +321,7 @@ let keeper_list_row_json ~runtime_class config name =
             ("proactive_idle_sec", `Int meta.proactive.idle_sec);
             ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
             ("skill_route", keeper_list_skill_route_json config meta);
-            ("cascade_name", `String meta.cascade_name);
+            ("cascade_name", `String (Keeper_types.cascade_name_of_meta meta));
             ("created_at", `String meta.created_at);
             ("updated_at", `String meta.updated_at);
           ]
@@ -464,6 +464,9 @@ let handle_keeper_msg ctx args : tool_result =
   | Error err -> (false, err)
   | Ok name ->
       let resolved_args = with_keeper_name args name in
+      (match Turn.preflight_keeper_msg ctx resolved_args with
+      | Error err -> (false, err)
+      | Ok () ->
       let request_id = Keeper_msg_async.submit ~sw:ctx.sw
         ~base_path:ctx.config.base_path
         ~keeper_name:name
@@ -481,7 +484,7 @@ let handle_keeper_msg ctx args : tool_result =
         ("status", `String "queued");
         ("message", `String "Keeper turn submitted. Poll with keeper_msg_result.");
       ] in
-      (true, Yojson.Safe.to_string json)
+      (true, Yojson.Safe.to_string json))
 
 let handle_keeper_msg_result ctx args : tool_result =
   let request_id = get_string args "request_id" "" in
@@ -524,7 +527,7 @@ let default_keeper_model_label (meta : keeper_meta) =
   | "" -> (
       match
         Cascade_runtime.models_of_cascade_name
-          (Keeper_cascade_profile.Runtime_name meta.cascade_name)
+          (Keeper_cascade_profile.Runtime_name (Keeper_types.cascade_name_of_meta meta))
       with
       | first :: _ when not (String.equal (String.trim first) "") -> first
       | _ -> Env_config.Local_runtime.default_model)

@@ -1488,8 +1488,8 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          masc-mcp's own records.  Without this, OAS's structured Log
          global sink registry is empty and every Log.info inside
          agent_sdk is a silent drop. *)
-      Oas_log_bridge.install ();
-      Log.Server.info "Oas_log_bridge installed (agent_sdk.Log -> masc structured log)";
+      Agent_sdk_log_bridge.install ();
+      Log.Server.info "Agent_sdk_log_bridge installed (agent_sdk.Log -> masc structured log)";
       let state =
         create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
       in

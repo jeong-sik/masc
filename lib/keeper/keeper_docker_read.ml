@@ -134,7 +134,10 @@ let run_command_in_container_with_status ?turn_sandbox_factory
             ~uid ~gid ~seccomp_args ~command_argv
         in
         let st, out =
-          Process_eio.run_argv_with_status
+          Masc_exec.Exec_gate.run_argv_with_status
+            ~actor:`System_task_sandbox
+            ~raw_source:(String.concat " " argv)
+            ~summary:"keeper docker read sandboxed command"
             ~env:(Unix.environment ())
             ~cwd:(Sys.getcwd ()) ~timeout_sec argv
         in

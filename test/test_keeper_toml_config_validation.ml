@@ -271,9 +271,7 @@ keeper_assignable = false
       | Ok _ -> fail "missing_profile cascade_name should be rejected"
       | Error e ->
           check bool "error lists live catalog profile" true
-            (contains ~needle:"custom_live" e);
-          check bool "error lists reserved bootstrap profile" true
-            (contains ~needle:Masc_mcp.Keeper_cascade_profile.default_name e))
+            (contains ~needle:"custom_live" e))
 
 let test_cascade_name_accepts_catalog_entry () =
   (* "tool_use_strict" is a known catalog entry in cascade.json,
@@ -288,12 +286,12 @@ let test_cascade_name_accepts_catalog_entry () =
     with _ -> []
   in
   let test_name =
-    (* Pick an assignable catalog entry that is NOT a compile-time variant *)
+    (* Pick any keeper-assignable catalog entry that isn't a phase-routing
+       reserved alias — the validator now treats catalog membership as the
+       only acceptance criterion. *)
     match
       List.find_opt
-        (fun n ->
-           not (List.mem n Masc_mcp.Keeper_cascade_profile.known_cascades)
-           && not (List.mem n [ "local_only"; "local_recovery" ]))
+        (fun n -> not (List.mem n [ "local_only"; "local_recovery" ]))
         catalog
     with
     | Some name -> name

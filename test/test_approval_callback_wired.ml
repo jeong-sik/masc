@@ -20,7 +20,7 @@
        callback (with_approval, or threads ~approval to a helper that
        does). Missing wiring → fail-open, the exact bug #7883.
     4. Structural: every MASC call site of
-       [Oas_worker.run_named] / [Oas_worker_named.run_named*] passes
+       [Keeper_turn_driver.run_named] / [Keeper_turn_driver.run_named*] passes
        [~approval:...].
 
     Detection is grep-based on source. False positives are acceptable
@@ -142,7 +142,7 @@ let builder_sites = [
   ( "lib/worker_oas.ml",
     "Agent_sdk.Builder.build_safe",
     "Agent_sdk.Builder.with_approval" );
-  (* Oas_worker_exec Builder — run_named pipeline. This file wires
+  (* Cascade_runner Builder — run_named pipeline. This file wires
      config.approval into the builder directly. *)
   ( "lib/oas_worker_exec.ml",
     "Agent_sdk.Builder.build_safe",
@@ -168,8 +168,8 @@ let test_builder_sites_wire_approval () =
         true (file_contains path approval_marker))
     builder_sites
 
-(** Every MASC call site of [Oas_worker.run_named] or
-    [Oas_worker_named.run_named*] must pass [~approval:...]. The
+(** Every MASC call site of [Keeper_turn_driver.run_named] or
+    [Keeper_turn_driver.run_named*] must pass [~approval:...]. The
     regex matches any argument value so callers may install
     auto_approve, reject_by_default, or a governance callback. *)
 let run_named_sites = [

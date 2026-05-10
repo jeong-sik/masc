@@ -2,8 +2,8 @@ type contract_spec =
   { name : string
   ; description : string
   ; invariants : string list
-  ; requested_execution_mode : Agent_sdk.Execution_mode.t
-  ; risk_class : Agent_sdk.Risk_class.t
+  ; requested_execution_mode : Masc_mcp_cdal_runtime.Execution_mode.t
+  ; risk_class : Masc_mcp_cdal_runtime.Risk_class.t
   ; allowed_mutations : string list
   ; review_requirement : string option
   }
@@ -17,8 +17,8 @@ let cascade_critical =
       ; "cascade_step_timeout_max_5s"
       ; "keeper_stall_max_60s"
       ]
-  ; requested_execution_mode = Agent_sdk.Execution_mode.Execute
-  ; risk_class = Agent_sdk.Risk_class.Critical
+  ; requested_execution_mode = Masc_mcp_cdal_runtime.Execution_mode.Execute
+  ; risk_class = Masc_mcp_cdal_runtime.Risk_class.Critical
   ; allowed_mutations = [ "cascade_route"; "provider_fallback"; "telemetry_emit" ]
   ; review_requirement = None
   }
@@ -32,8 +32,8 @@ let keeper_lifecycle =
       ; "fiber_isolation_no_propagation"
       ; "state_drift_detected_within_30s"
       ]
-  ; requested_execution_mode = Agent_sdk.Execution_mode.Draft
-  ; risk_class = Agent_sdk.Risk_class.High
+  ; requested_execution_mode = Masc_mcp_cdal_runtime.Execution_mode.Draft
+  ; risk_class = Masc_mcp_cdal_runtime.Risk_class.High
   ; allowed_mutations =
       [ "keeper_lifecycle_update"; "supervisor_restart"; "telemetry_emit" ]
   ; review_requirement = None
@@ -48,8 +48,8 @@ let dashboard_telemetry =
       ; "operator_nudge_response_5s"
       ; "cascade_hits_visible_realtime"
       ]
-  ; requested_execution_mode = Agent_sdk.Execution_mode.Diagnose
-  ; risk_class = Agent_sdk.Risk_class.Medium
+  ; requested_execution_mode = Masc_mcp_cdal_runtime.Execution_mode.Diagnose
+  ; risk_class = Masc_mcp_cdal_runtime.Risk_class.Medium
   ; allowed_mutations = []
   ; review_requirement = None
   }
@@ -69,7 +69,7 @@ let eval_criteria spec =
     ]
 ;;
 
-let to_risk_contract spec : Agent_sdk.Risk_contract.t =
+let to_risk_contract spec : Masc_mcp_cdal_runtime.Risk_contract.t =
   { runtime_constraints =
       { requested_execution_mode = spec.requested_execution_mode
       ; risk_class = spec.risk_class

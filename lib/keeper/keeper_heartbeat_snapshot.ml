@@ -70,7 +70,7 @@ let write_heartbeat_snapshot
   let metrics_store = keeper_metrics_store ctx.config meta_current.name in
   let cascade_models =
     Cascade_runtime.models_of_cascade_name
-      (Keeper_cascade_profile.Runtime_name meta_current.cascade_name)
+      (Keeper_cascade_profile.Runtime_name (Keeper_types.cascade_name_of_meta meta_current))
   in
   let max_cascade_context =
     let resolution =
@@ -469,7 +469,7 @@ let write_heartbeat_snapshot
        Log.Keeper.error "heartbeat SSE broadcast failed: %s" (Printexc.to_string exn));
     (match Keeper_event_bus.get () with
      | Some bus ->
-       Oas_events.publish_keeper_snapshot
+       Cascade_events.publish_keeper_snapshot
          bus
          ~keeper_name:meta_current.name
          ~generation:meta_current.runtime.generation

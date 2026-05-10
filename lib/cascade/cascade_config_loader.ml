@@ -200,7 +200,7 @@ type catalog_entry = {
   name : string;
   keeper_assignable : bool;
   fallback_cascade : string option;
-  required_capability_profile : Cascade_capability_profile.profile option;
+  required_capability_profile : string option;
 }
 
 module StringMap = Map.Make (String)
@@ -263,7 +263,7 @@ let split_catalog_key key =
    when multiple profiles are misconfigured. *)
 type capability_profile_parse =
   | Cp_unset
-  | Cp_set of Cascade_capability_profile.profile
+  | Cp_set of string
   | Cp_invalid of string
 
 type catalog_builder = {
@@ -345,8 +345,9 @@ let update_catalog_builder builder field value =
             let trimmed = String.trim s in
             if String.equal trimmed "" then Cp_unset
             else
-              (match Cascade_capability_profile.profile_of_string trimmed with
-               | Some p -> Cp_set p
+              (match Cascade_capability_profile.resolve_required_capabilities
+                      trimmed with
+               | Some _ -> Cp_set trimmed
                | None -> Cp_invalid trimmed)
         | _ -> builder.required_capability_profile
       in
@@ -355,8 +356,8 @@ let update_catalog_builder builder field value =
 (* Detect fallback_cascade cycles in a freshly loaded catalog.
 
    2026-05-05 fleet-stuck root cause: the operator-side cascade.toml
-   declared [big_three.fallback_cascade = "glm_coding_plan_only"] AND
-   [glm_coding_plan_only.fallback_cascade = "big_three"].  When the
+   declared [default.fallback_cascade = "glm_coding_plan_only"] AND
+   [glm_coding_plan_only.fallback_cascade = "default"].  When the
    GLM provider stalled, both cascades escalated to each other,
    producing a silent 600s+ timeout chain with no operator-visible
    reason.  This helper walks the fallback graph and emits a Prometheus
@@ -400,10 +401,86 @@ let detect_fallback_cycles (entries : catalog_entry list) :
   |> snd
   |> List.rev
 
+(* RFC-0055 + RFC-0058: capability monotonicity on fallback edges.
+
+   A fallback edge source -> target is valid only if:
+   1. target's capability profile is a superset of source's profile.
+   2. An assignable cascade cannot fall back to a non-assignable (sink)
+      cascade.
+   3. (RFC-0058) Terminal fallbacks (fallback_cascade=null) are exempt
+      from monotonicity, since they represent degraded last-resort
+      operation. Runtime filter rejects per-turn if capabilities
+      insufficient. *)
+let detect_capability_mismatches (entries : catalog_entry list) :
+    (string * string * string) list =
+  let by_name =
+    List.fold_left
+      (fun acc e -> StringMap.add e.name e acc)
+      StringMap.empty entries
+  in
+  List.filter_map
+    (fun (entry : catalog_entry) ->
+      match entry.fallback_cascade with
+      | None -> None
+      | Some target_name -> (
+          match StringMap.find_opt target_name by_name with
+          | None -> None
+          | Some (target : catalog_entry) ->
+              let assignable_violation =
+                if entry.keeper_assignable && not target.keeper_assignable then
+                  Some
+                    ( entry.name,
+                      target_name,
+                      "assignable cascade falls back to sink \
+                       (keeper_assignable=false)" )
+                else None
+              in
+              let cap_violation =
+                match
+                  ( entry.required_capability_profile,
+                    target.required_capability_profile )
+                with
+                | Some src_p, Some dst_p ->
+                    if not (Cascade_tier.is_subset_named_profile src_p dst_p) then
+                      (* RFC-0058: exempt terminal fallbacks from monotonicity.
+                         Terminal targets (fallback_cascade=null) are last-resort
+                         degraded operation; runtime filter handles per-turn
+                         acceptance. *)
+                      (match target.fallback_cascade with
+                       | None -> None
+                       | Some _ ->
+                         Some
+                           ( entry.name,
+                             target_name,
+                             Printf.sprintf
+                               "capability profile %s is not a subset of target \
+                                profile %s"
+                               src_p dst_p ))
+                    else None
+                | _ -> None
+              in
+              match assignable_violation, cap_violation with
+              | Some v, _ -> Some v
+              | None, Some v -> Some v
+              | None, None -> None))
+    entries
+
 let load_catalog ~config_path =
   match load_json config_path with
   | Error _ as err -> err
   | Ok (`Assoc fields) ->
+      (* RFC-0058: register TOML-declared profiles before catalog parsing
+         so that [resolve_required_capabilities] can find them during
+         [update_catalog_builder]. *)
+      (match List.assoc_opt "profiles" fields with
+       | Some profiles_json ->
+           (match Cascade_capability_profile.register_declared_profiles_from_json
+                    profiles_json with
+            | Error msg ->
+                Log.warn ~ctx:"CascadeConfig"
+                  "profiles registration error: %s" msg
+            | Ok () -> ())
+       | None -> ());
       let builders =
         List.fold_left
           (fun acc (key, value) ->
@@ -434,10 +511,11 @@ let load_catalog ~config_path =
                 Some
                   (Printf.sprintf
                      "cascade %s: unknown required_capability_profile %S \
-                      (known: %s)"
+                      (known built-in: %s; declared: %s)"
                      name raw
                      (Cascade_capability_profile.all_profiles
-                      |> List.map Cascade_capability_profile.profile_to_string
+                      |> String.concat ", ")
+                     (Cascade_capability_profile.declared_profile_names ()
                       |> String.concat ", "))
             | _ -> None)
           active_builders
@@ -488,7 +566,16 @@ let load_catalog ~config_path =
                cascade (e.g. local_recovery) or removing the field."
               entry (String.concat " → " (cycle @ [entry])))
         cycles;
-      Ok entries
+      let mismatches = detect_capability_mismatches entries in
+      if mismatches <> [] then
+        Error
+          (Printf.sprintf "cascade capability mismatch (RFC-0055): %s"
+             (mismatches
+             |> List.map (fun (src, dst, reason) ->
+                    Printf.sprintf "%s -> %s: %s" src dst reason)
+             |> String.concat "; "))
+      else
+        Ok entries
   | Ok _ -> Ok []
 
 let load_profile_weighted ~config_path ~name =
@@ -764,3 +851,94 @@ let resolve_strategy_config ~config_path ~name =
       server_error_skip_after =
         read_int_field json (name ^ "_server_error_skip_after");
     }
+
+(* ── RFC-0041: cascade_profile loader ──────────────────────────────── *)
+
+(** Split a "provider:model" string into (provider, model).
+    Returns [None] when the separator is missing. *)
+let provider_model_of_string (s : string) : (string * string) option =
+  match String.split_on_char ':' s with
+  | [provider; model] -> Some (provider, model)
+  | _ -> None
+
+(** Convert a [weighted_entry] (from legacy cascade.json) into a
+    [Cascade_ref.cascade_item].  [timeout_ms] defaults to 30000;
+    [priority] uses the entry's [weight]. *)
+let cascade_item_of_weighted_entry (entry : weighted_entry)
+    : Cascade_ref.cascade_item option =
+  match provider_model_of_string entry.model with
+  | Some (provider, model) ->
+      Some {
+        Cascade_ref.id = entry.model;
+        provider;
+        model;
+        timeout_ms = 30000;
+        priority = entry.weight;
+      }
+  | None -> None
+
+(** Load a [Cascade_ref.cascade_profile] from the hierarchical
+    [{name}_groups] format in cascade.json.  Each object in the array
+    is parsed through [Cascade_ref.cascade_group_of_json].
+
+    Returns [None] when the key is absent or no groups parse
+    successfully. *)
+let load_cascade_profile_hierarchical ~(config_path : string) ~(name : string)
+    : Cascade_ref.cascade_profile option =
+  match load_json config_path with
+  | Error _ -> None
+  | Ok json ->
+      let open Yojson.Safe.Util in
+      match json |> member (name ^ "_groups") with
+      | `List arr ->
+          let groups = List.filter_map Cascade_ref.cascade_group_of_json arr in
+          if groups = [] then None
+          else Some { Cascade_ref.name; groups }
+      | _ -> None
+
+(** Load a [Cascade_ref.cascade_profile] from the legacy cascade.json
+    format.  Each profile section becomes a single-group profile;
+    [models] become [cascade_item]s and [fallback_cascade] becomes
+    [fallback_group].
+
+    Returns [None] when the profile has no parsable model entries.
+    This is the bridge between the existing flat cascade.json format
+    and the RFC-0041 hierarchical profile model. *)
+let load_cascade_profile_legacy ~(config_path : string) ~(name : string)
+    : Cascade_ref.cascade_profile option =
+  let items =
+    load_profile_weighted ~config_path ~name
+    |> List.filter_map cascade_item_of_weighted_entry
+  in
+  if items = [] then None
+  else
+    let fallback_group =
+      match load_catalog ~config_path with
+      | Ok entries ->
+          (match List.find_opt (fun e -> String.equal e.name name) entries with
+           | Some entry -> entry.fallback_cascade
+           | None -> None)
+      | Error _ -> None
+    in
+    Some {
+      Cascade_ref.name;
+      groups = [{
+        Cascade_ref.name;
+        items;
+        strategy = Priority;
+        fallback_group;
+      }];
+    }
+
+(** Load a [Cascade_ref.cascade_profile] from cascade.json.
+
+    Tries the hierarchical [{name}_groups] format first (RFC-0041).
+    Falls back to the legacy flat [{name}_models] format for backward
+    compatibility.
+
+    Returns [None] when neither format yields a valid profile. *)
+let load_cascade_profile ~(config_path : string) ~(name : string)
+    : Cascade_ref.cascade_profile option =
+  match load_cascade_profile_hierarchical ~config_path ~name with
+  | Some profile -> Some profile
+  | None -> load_cascade_profile_legacy ~config_path ~name

@@ -135,7 +135,7 @@ let run_cli_agent ~agent_type ~prompt =
     debug_log (Printf.sprintf "SPAWN argv=%s" (String.concat " " (List.map Filename.quote argv)));
     let (status, output) =
       Masc_exec.Exec_gate.run_argv_with_stdin_and_status
-        ~actor:"system/auto_responder"
+        ~actor:(Masc_exec.Agent_id.of_string "system/auto_responder")
         ~raw_source
         ~summary:"auto responder cli spawn"
         ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Auto_responder ())
@@ -162,10 +162,10 @@ let cascade_name_for_agent_type _agent_type =
 (** Validate model response using structural fields, not text heuristics.
     Guardrail principle: accept unless there is a clear structural reason to reject.
     Permissive by default: any non-empty content with any stop_reason is valid.
-    Invariant: API errors are caught upstream by Oas_worker.run_named returning Error;
+    Invariant: API errors are caught upstream by Keeper_turn_driver.run_named returning Error;
     the accept callback only receives responses where the API call succeeded. *)
-let model_response_is_valid (resp : Oas_response.api_response) =
-  let text = String.trim (Oas_response.text_of_response resp) in
+let model_response_is_valid (resp : Agent_sdk_response.api_response) =
+  let text = String.trim (Agent_sdk_response.text_of_response resp) in
   String.length text > 0
   && (match resp.stop_reason with
       | Agent_sdk.Types.EndTurn | Agent_sdk.Types.MaxTokens
@@ -178,7 +178,7 @@ let call_model_direct_sync ~agent_type ~prompt =
     match
       Masc_oas_bridge.run_with_caller
         ~caller:Env_config_oas_bridge.Auto_responder (fun () ->
-        Oas_worker.run_named ~cascade_name
+        Keeper_turn_driver.run_named ~cascade_name
           ~goal:prompt ~max_turns:1
           ~accept:model_response_is_valid ~max_tokens:500
           ~approval:Approval_callbacks.auto_approve
@@ -186,8 +186,8 @@ let call_model_direct_sync ~agent_type ~prompt =
       )
     with
     | Ok result ->
-        let resp = result.Oas_worker.response in
-        let text = Oas_response.text_of_response resp in
+        let resp = result.Cascade_runner.response in
+        let text = Agent_sdk_response.text_of_response resp in
         debug_log
           (Printf.sprintf "MODEL_USED %s for agent_type=%s"
              resp.model agent_type);

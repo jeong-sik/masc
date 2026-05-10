@@ -158,10 +158,139 @@ exception Keeper_fiber_crash
 type turn_phase =
   | Turn_idle [@tla.idle]
   | Turn_prompting [@tla.active]
+  | Turn_routing [@tla.active]
   | Turn_executing [@tla.active]
   | Turn_compacting [@tla.active]
   | Turn_finalizing [@tla.active]
+  | Turn_exhausted [@tla.terminal]
 [@@deriving tla]
+
+(* Phantom witness types for turn_phase GADT (Tier B5 pattern).
+   Covers all 7 phases of [turn_phase]. Turn_routing and Turn_exhausted
+   were added to the normal variant on main while this PR was in flight;
+   the GADT tracks them too so the transition matrix below stays
+   compile-time exhaustive. *)
+type turn_idle = |
+type turn_prompting = |
+type turn_routing = |
+type turn_executing = |
+type turn_compacting = |
+type turn_finalizing = |
+type turn_exhausted = |
+
+type 'a turn_phase_witness =
+  | Turn_idle : turn_idle turn_phase_witness
+  | Turn_prompting : turn_prompting turn_phase_witness
+  | Turn_routing : turn_routing turn_phase_witness
+  | Turn_executing : turn_executing turn_phase_witness
+  | Turn_compacting : turn_compacting turn_phase_witness
+  | Turn_finalizing : turn_finalizing turn_phase_witness
+  | Turn_exhausted : turn_exhausted turn_phase_witness
+
+type packed_turn_phase =
+  | Packed : 'a turn_phase_witness -> packed_turn_phase
+
+let turn_phase_to_witness : turn_phase -> packed_turn_phase = function
+  | Turn_idle -> Packed Turn_idle
+  | Turn_prompting -> Packed Turn_prompting
+  | Turn_routing -> Packed Turn_routing
+  | Turn_executing -> Packed Turn_executing
+  | Turn_compacting -> Packed Turn_compacting
+  | Turn_finalizing -> Packed Turn_finalizing
+  | Turn_exhausted -> Packed Turn_exhausted
+
+let witness_to_turn_phase : packed_turn_phase -> turn_phase = function
+  | Packed Turn_idle -> Turn_idle
+  | Packed Turn_prompting -> Turn_prompting
+  | Packed Turn_routing -> Turn_routing
+  | Packed Turn_executing -> Turn_executing
+  | Packed Turn_compacting -> Turn_compacting
+  | Packed Turn_finalizing -> Turn_finalizing
+  | Packed Turn_exhausted -> Turn_exhausted
+
+(* Diagnostic label for invalid-transition error messages.  Must stay in
+   sync with the [turn_phase] variant — adding a constructor will fail
+   compilation here, which forces the operator to extend
+   [validate_turn_phase_transition] at the same time. *)
+let packed_turn_phase_label : packed_turn_phase -> string = function
+  | Packed Turn_idle -> "Turn_idle"
+  | Packed Turn_prompting -> "Turn_prompting"
+  | Packed Turn_routing -> "Turn_routing"
+  | Packed Turn_executing -> "Turn_executing"
+  | Packed Turn_compacting -> "Turn_compacting"
+  | Packed Turn_finalizing -> "Turn_finalizing"
+  | Packed Turn_exhausted -> "Turn_exhausted"
+
+module Turn_phase_transition = struct
+  (* Mirrors [validate_turn_phase_transition] (below): every constructor
+     here corresponds to a [true] arm in the runtime transition matrix.
+     Adding a new variant therefore requires extending both this GADT
+     and the runtime validator at the same time so the type-level and
+     runtime stories stay in lockstep. *)
+  type ('from, 'to_) t =
+    | Idle_to_idle : (turn_idle, turn_idle) t
+    | Idle_to_prompting : (turn_idle, turn_prompting) t
+    | Prompting_to_prompting : (turn_prompting, turn_prompting) t
+    | Prompting_to_routing : (turn_prompting, turn_routing) t
+    | Prompting_to_executing : (turn_prompting, turn_executing) t
+    | Prompting_to_finalizing : (turn_prompting, turn_finalizing) t
+    | Prompting_to_exhausted : (turn_prompting, turn_exhausted) t
+    | Routing_to_prompting : (turn_routing, turn_prompting) t
+    | Routing_to_routing : (turn_routing, turn_routing) t
+    | Routing_to_executing : (turn_routing, turn_executing) t
+    | Routing_to_exhausted : (turn_routing, turn_exhausted) t
+    | Executing_to_prompting : (turn_executing, turn_prompting) t
+    | Executing_to_routing : (turn_executing, turn_routing) t
+    | Executing_to_executing : (turn_executing, turn_executing) t
+    | Executing_to_compacting : (turn_executing, turn_compacting) t
+    | Executing_to_finalizing : (turn_executing, turn_finalizing) t
+    | Executing_to_exhausted : (turn_executing, turn_exhausted) t
+    | Compacting_to_prompting : (turn_compacting, turn_prompting) t
+    | Compacting_to_compacting : (turn_compacting, turn_compacting) t
+    | Compacting_to_finalizing : (turn_compacting, turn_finalizing) t
+    | Compacting_to_exhausted : (turn_compacting, turn_exhausted) t
+    | Finalizing_to_prompting : (turn_finalizing, turn_prompting) t
+    | Finalizing_to_routing : (turn_finalizing, turn_routing) t
+    | Finalizing_to_executing : (turn_finalizing, turn_executing) t
+    | Finalizing_to_finalizing : (turn_finalizing, turn_finalizing) t
+    | Finalizing_to_exhausted : (turn_finalizing, turn_exhausted) t
+    | Exhausted_to_prompting : (turn_exhausted, turn_prompting) t
+    | Exhausted_to_routing : (turn_exhausted, turn_routing) t
+    | Exhausted_to_executing : (turn_exhausted, turn_executing) t
+    | Exhausted_to_exhausted : (turn_exhausted, turn_exhausted) t
+
+  let to_tag : type a b. (a, b) t -> string = function
+    | Idle_to_idle -> "idle->idle"
+    | Idle_to_prompting -> "idle->prompting"
+    | Prompting_to_prompting -> "prompting->prompting"
+    | Prompting_to_routing -> "prompting->routing"
+    | Prompting_to_executing -> "prompting->executing"
+    | Prompting_to_finalizing -> "prompting->finalizing"
+    | Prompting_to_exhausted -> "prompting->exhausted"
+    | Routing_to_prompting -> "routing->prompting"
+    | Routing_to_routing -> "routing->routing"
+    | Routing_to_executing -> "routing->executing"
+    | Routing_to_exhausted -> "routing->exhausted"
+    | Executing_to_prompting -> "executing->prompting"
+    | Executing_to_routing -> "executing->routing"
+    | Executing_to_executing -> "executing->executing"
+    | Executing_to_compacting -> "executing->compacting"
+    | Executing_to_finalizing -> "executing->finalizing"
+    | Executing_to_exhausted -> "executing->exhausted"
+    | Compacting_to_prompting -> "compacting->prompting"
+    | Compacting_to_compacting -> "compacting->compacting"
+    | Compacting_to_finalizing -> "compacting->finalizing"
+    | Compacting_to_exhausted -> "compacting->exhausted"
+    | Finalizing_to_prompting -> "finalizing->prompting"
+    | Finalizing_to_routing -> "finalizing->routing"
+    | Finalizing_to_executing -> "finalizing->executing"
+    | Finalizing_to_finalizing -> "finalizing->finalizing"
+    | Finalizing_to_exhausted -> "finalizing->exhausted"
+    | Exhausted_to_prompting -> "exhausted->prompting"
+    | Exhausted_to_routing -> "exhausted->routing"
+    | Exhausted_to_executing -> "exhausted->executing"
+    | Exhausted_to_exhausted -> "exhausted->exhausted"
+end
 
 type decision_stage =
   | Decision_undecided [@tla.idle]
@@ -169,6 +298,89 @@ type decision_stage =
   | Decision_gate_rejected [@tla.terminal]
   | Decision_tool_policy_selected [@tla.active]
 [@@deriving tla]
+
+type decision_undecided = |
+type decision_guard_ok = |
+type decision_gate_rejected = |
+type decision_tool_policy_selected = |
+
+type 'a decision_stage_witness =
+  | Decision_undecided : decision_undecided decision_stage_witness
+  | Decision_guard_ok : decision_guard_ok decision_stage_witness
+  | Decision_gate_rejected : decision_gate_rejected decision_stage_witness
+  | Decision_tool_policy_selected : decision_tool_policy_selected decision_stage_witness
+
+type packed_decision_stage = Packed : 'a decision_stage_witness -> packed_decision_stage
+
+let witness_to_stage : type a. a decision_stage_witness -> decision_stage = function
+  | Decision_undecided -> Decision_undecided
+  | Decision_guard_ok -> Decision_guard_ok
+  | Decision_gate_rejected -> Decision_gate_rejected
+  | Decision_tool_policy_selected -> Decision_tool_policy_selected
+
+let stage_to_witness : decision_stage -> packed_decision_stage = function
+  | Decision_undecided -> Packed Decision_undecided
+  | Decision_guard_ok -> Packed Decision_guard_ok
+  | Decision_gate_rejected -> Packed Decision_gate_rejected
+  | Decision_tool_policy_selected -> Packed Decision_tool_policy_selected
+
+(* Diagnostic label for invalid-transition error messages.  Mirrors
+   [decision_stage]; constructor changes will fail compilation here. *)
+let packed_decision_stage_label : packed_decision_stage -> string = function
+  | Packed Decision_undecided -> "Decision_undecided"
+  | Packed Decision_guard_ok -> "Decision_guard_ok"
+  | Packed Decision_gate_rejected -> "Decision_gate_rejected"
+  | Packed Decision_tool_policy_selected -> "Decision_tool_policy_selected"
+
+module Decision_transition = struct
+  type ('from, 'to_) t =
+    | Undecided_to_guard_ok : (decision_undecided, decision_guard_ok) t
+    | Undecided_to_gate_rejected : (decision_undecided, decision_gate_rejected) t
+    | Undecided_to_tool_policy_selected : (decision_undecided, decision_tool_policy_selected) t
+    | Guard_ok_to_gate_rejected : (decision_guard_ok, decision_gate_rejected) t
+    | Guard_ok_to_tool_policy_selected : (decision_guard_ok, decision_tool_policy_selected) t
+    | Gate_rejected_to_guard_ok : (decision_gate_rejected, decision_guard_ok) t
+    | Gate_rejected_to_tool_policy_selected : (decision_gate_rejected, decision_tool_policy_selected) t
+    | Tool_policy_selected_to_guard_ok : (decision_tool_policy_selected, decision_guard_ok) t
+    | Tool_policy_selected_to_gate_rejected : (decision_tool_policy_selected, decision_gate_rejected) t
+
+  let to_tag : type a b. (a, b) t -> string = function
+    | Undecided_to_guard_ok -> "undecided->guard_ok"
+    | Undecided_to_gate_rejected -> "undecided->gate_rejected"
+    | Undecided_to_tool_policy_selected -> "undecided->tool_policy_selected"
+    | Guard_ok_to_gate_rejected -> "guard_ok->gate_rejected"
+    | Guard_ok_to_tool_policy_selected -> "guard_ok->tool_policy_selected"
+    | Gate_rejected_to_guard_ok -> "gate_rejected->guard_ok"
+    | Gate_rejected_to_tool_policy_selected -> "gate_rejected->tool_policy_selected"
+    | Tool_policy_selected_to_guard_ok -> "tool_policy_selected->guard_ok"
+    | Tool_policy_selected_to_gate_rejected -> "tool_policy_selected->gate_rejected"
+end
+
+let validate_decision_transition ~from ~to_ =
+  let from_packed = stage_to_witness from in
+  let to_packed = stage_to_witness to_ in
+  match from_packed, to_packed with
+  | Packed Decision_undecided, Packed Decision_undecided -> ()
+  | Packed Decision_undecided, Packed Decision_guard_ok -> ()
+  | Packed Decision_undecided, Packed Decision_gate_rejected -> ()
+  | Packed Decision_undecided, Packed Decision_tool_policy_selected -> ()
+  | Packed Decision_guard_ok, Packed Decision_guard_ok -> ()
+  | Packed Decision_guard_ok, Packed Decision_gate_rejected -> ()
+  | Packed Decision_guard_ok, Packed Decision_tool_policy_selected -> ()
+  | Packed Decision_gate_rejected, Packed Decision_gate_rejected -> ()
+  | Packed Decision_gate_rejected, Packed Decision_guard_ok -> ()
+  | Packed Decision_gate_rejected, Packed Decision_tool_policy_selected -> ()
+  | Packed Decision_tool_policy_selected, Packed Decision_tool_policy_selected -> ()
+  | Packed Decision_tool_policy_selected, Packed Decision_guard_ok -> ()
+  | Packed Decision_tool_policy_selected, Packed Decision_gate_rejected -> ()
+  | Packed Decision_guard_ok, Packed Decision_undecided
+  | Packed Decision_gate_rejected, Packed Decision_undecided
+  | Packed Decision_tool_policy_selected, Packed Decision_undecided ->
+      invalid_arg
+        (Printf.sprintf
+           "validate_decision_transition: invalid transition %s -> %s"
+           (packed_decision_stage_label from_packed)
+           (packed_decision_stage_label to_packed))
 
 type cascade_state =
   | Cascade_idle [@tla.idle]
@@ -178,11 +390,74 @@ type cascade_state =
   | Cascade_exhausted [@tla.terminal]
 [@@deriving tla]
 
+(* Phantom witness types for cascade_state GADT (Tier B5 pattern). *)
+type cascade_idle = |
+type cascade_selecting = |
+type cascade_trying = |
+type cascade_done = |
+type cascade_exhausted = |
+
+type 'a cascade_state_witness =
+  | Cascade_idle : cascade_idle cascade_state_witness
+  | Cascade_selecting : cascade_selecting cascade_state_witness
+  | Cascade_trying : cascade_trying cascade_state_witness
+  | Cascade_done : cascade_done cascade_state_witness
+  | Cascade_exhausted : cascade_exhausted cascade_state_witness
+
+type packed_cascade_state =
+  | Packed : 'a cascade_state_witness -> packed_cascade_state
+
+let cascade_state_to_witness : cascade_state -> packed_cascade_state = function
+  | Cascade_idle -> Packed Cascade_idle
+  | Cascade_selecting -> Packed Cascade_selecting
+  | Cascade_trying -> Packed Cascade_trying
+  | Cascade_done -> Packed Cascade_done
+  | Cascade_exhausted -> Packed Cascade_exhausted
+
+let witness_to_cascade_state : packed_cascade_state -> cascade_state = function
+  | Packed Cascade_idle -> Cascade_idle
+  | Packed Cascade_selecting -> Cascade_selecting
+  | Packed Cascade_trying -> Cascade_trying
+  | Packed Cascade_done -> Cascade_done
+  | Packed Cascade_exhausted -> Cascade_exhausted
+
+(* Diagnostic label for invalid-transition error messages.  Mirrors
+   [cascade_state]; constructor changes will fail compilation here. *)
+let packed_cascade_state_label : packed_cascade_state -> string = function
+  | Packed Cascade_idle -> "Cascade_idle"
+  | Packed Cascade_selecting -> "Cascade_selecting"
+  | Packed Cascade_trying -> "Cascade_trying"
+  | Packed Cascade_done -> "Cascade_done"
+  | Packed Cascade_exhausted -> "Cascade_exhausted"
+
 type compaction_stage =
   | Compaction_accumulating [@tla.idle]
   | Compaction_compacting [@tla.active]
   | Compaction_done [@tla.terminal]
 [@@deriving tla]
+
+(* Phantom witness types for compaction_stage GADT (Tier B5 pattern). *)
+type compaction_accumulating = |
+type compaction_compacting = |
+type compaction_done = |
+
+type 'a compaction_stage_witness =
+  | Compaction_accumulating : compaction_accumulating compaction_stage_witness
+  | Compaction_compacting : compaction_compacting compaction_stage_witness
+  | Compaction_done : compaction_done compaction_stage_witness
+
+type packed_compaction_stage =
+  | Packed : 'a compaction_stage_witness -> packed_compaction_stage
+
+let compaction_stage_to_witness : compaction_stage -> packed_compaction_stage = function
+  | Compaction_accumulating -> Packed Compaction_accumulating
+  | Compaction_compacting -> Packed Compaction_compacting
+  | Compaction_done -> Packed Compaction_done
+
+let witness_to_compaction_stage : packed_compaction_stage -> compaction_stage = function
+  | Packed Compaction_accumulating -> Compaction_accumulating
+  | Packed Compaction_compacting -> Compaction_compacting
+  | Packed Compaction_done -> Compaction_done
 
 type turn_measurement = {
   tm_captured_at : float;
@@ -228,15 +503,15 @@ type registry_entry = {
   current_turn_observation : turn_observation option;
   last_completed_turn : completed_turn_observation option;
   last_skip_observation : (float * string list) option;
-  compaction_stage : compaction_stage;
+  compaction_stage : packed_compaction_stage;
 }
 
 and turn_observation = {
   turn_id : int;
   started_at : float;
-  turn_phase : turn_phase;
-  decision_stage : decision_stage;
-  cascade_state : cascade_state;
+  turn_phase : packed_turn_phase;
+  decision_stage : packed_decision_stage;
+  cascade_state : packed_cascade_state;
   measurement : turn_measurement option;
   measurement_bind_count : int;
   selected_model : string option;
@@ -246,8 +521,8 @@ and completed_turn_observation = {
   ct_turn_id : int;
   ct_started_at : float;
   ct_ended_at : float;
-  ct_decision_stage : decision_stage;
-  ct_cascade_state : cascade_state;
+  ct_decision_stage : packed_decision_stage;
+  ct_cascade_state : packed_cascade_state;
   ct_selected_model : string option;
 }
 
@@ -463,7 +738,7 @@ let register_with_state ~base_path name meta
     current_turn_observation = None;
     last_completed_turn = None;
     last_skip_observation = None;
-    compaction_stage = Compaction_accumulating;
+    compaction_stage = Packed Compaction_accumulating;
   } in
   put_entry key entry;
   if phase = Running then
@@ -585,10 +860,13 @@ let set_last_correlation_id ~base_path name cid =
   update_entry ~base_path name (fun e ->
     { e with last_event_bus_correlation = Some cid })
 
-let turn_phase_of_cascade_state = function
-  | Cascade_idle | Cascade_selecting -> Turn_prompting
-  | Cascade_trying -> Turn_executing
-  | Cascade_done | Cascade_exhausted -> Turn_finalizing
+let turn_phase_of_cascade_state (s : packed_cascade_state) : packed_turn_phase =
+  match s with
+  | Packed Cascade_idle -> Packed Turn_prompting
+  | Packed Cascade_selecting -> Packed Turn_routing
+  | Packed Cascade_trying -> Packed Turn_executing
+  | Packed Cascade_done -> Packed Turn_finalizing
+  | Packed Cascade_exhausted -> Packed Turn_exhausted
 
 let broadcast_composite_changed ~name ~ts_unix =
   try
@@ -638,16 +916,14 @@ let completed_turn_outcome_of_observation
      a compile error.  Spelling out every variant lets the OCaml
      exhaustiveness checker catch missing cases at build time. *)
   match obs.decision_stage with
-  | Decision_gate_rejected -> Keeper_transition_audit.Turn_gate_rejected
-  | Decision_undecided
-  | Decision_guard_ok
-  | Decision_tool_policy_selected ->
+  | Packed Decision_gate_rejected -> Keeper_transition_audit.Turn_gate_rejected
+  | Packed (Decision_undecided | Decision_guard_ok | Decision_tool_policy_selected) ->
       (match obs.cascade_state with
-       | Cascade_done -> Keeper_transition_audit.Turn_substantive
-       | Cascade_idle
-       | Cascade_selecting
-       | Cascade_trying
-       | Cascade_exhausted -> Keeper_transition_audit.Turn_failed)
+       | Packed Cascade_done -> Keeper_transition_audit.Turn_substantive
+       | Packed Cascade_idle
+       | Packed Cascade_selecting
+       | Packed Cascade_trying
+       | Packed Cascade_exhausted -> Keeper_transition_audit.Turn_failed)
 
 let update_current_turn e f =
   let current_turn_observation =
@@ -665,9 +941,9 @@ let mark_turn_started ~base_path name =
     let obs = {
       turn_id;
       started_at = now;
-      turn_phase = Turn_prompting;
-      decision_stage = Decision_undecided;
-      cascade_state = Cascade_idle;
+      turn_phase = Packed Turn_prompting;
+      decision_stage = Packed Decision_undecided;
+      cascade_state = Packed Cascade_idle;
       measurement = None;
       measurement_bind_count = 0;
       selected_model = None;
@@ -675,8 +951,39 @@ let mark_turn_started ~base_path name =
     changed := true;
     { e with
       current_turn_observation = Some obs;
-      compaction_stage = Compaction_accumulating;
+      compaction_stage = Packed Compaction_accumulating;
     });
+  if !changed then broadcast_composite_changed ~name ~ts_unix:now
+
+(* RFC-0045: SDK-turn boundary reset.  Resets in-turn FSM fields without
+   touching keeper-turn-scoped data ([turn_id], [started_at],
+   [selected_model], [measurement], [measurement_bind_count]).  Bypasses
+   validators the same way [mark_turn_started] does — by installing a new
+   observation directly.
+
+   No-op when the observation is already in the post-reset shape (first
+   SDK turn after [mark_turn_started]) so the dashboard composite
+   broadcast doesn't fire spuriously every SDK turn. *)
+let mark_sdk_turn_started ~base_path name =
+  let changed = ref false in
+  let now = Time_compat.now () in
+  update_entry ~base_path name (fun e ->
+    match e.current_turn_observation with
+    | None -> e
+    | Some obs ->
+      if obs.turn_phase = Packed Turn_prompting
+         && obs.cascade_state = Packed Cascade_idle
+         && obs.decision_stage = Packed Decision_undecided
+      then e
+      else (
+        changed := true;
+        let new_obs = {
+          obs with
+          turn_phase = Packed Turn_prompting;
+          cascade_state = Packed Cascade_idle;
+          decision_stage = Packed Decision_undecided;
+        } in
+        { e with current_turn_observation = Some new_obs }));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 
 let mark_turn_measurement ~base_path name =
@@ -699,130 +1006,157 @@ let mark_turn_measurement ~base_path name =
     | _ -> e);
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 
-let validate_decision_transition ~from ~to_ =
-  Keeper_fsm_guard_runtime.wrap_unit
-    ~action:"decision_transition"
-    ~stage:"guard"
-    (fun () ->
-       assert (
-         match (from, to_) with
-         (* from Decision_undecided *)
-         | (Decision_undecided, Decision_undecided) -> true
-         | (Decision_undecided, Decision_guard_ok) -> true  (* via set_turn_decision_stage *)
-         | (Decision_undecided, Decision_gate_rejected) -> true  (* via mark_turn_gate_rejected_by_name *)
-         | (Decision_undecided, Decision_tool_policy_selected) -> true  (* via set_turn_decision_stage *)
-         (* from Decision_guard_ok *)
-         | (Decision_guard_ok, Decision_undecided) -> false  (* new turn init is reset, not transition *)
-         | (Decision_guard_ok, Decision_guard_ok) -> true
-         | (Decision_guard_ok, Decision_gate_rejected) -> true  (* via mark_turn_gate_rejected_by_name *)
-         | (Decision_guard_ok, Decision_tool_policy_selected) -> true  (* via set_turn_decision_stage *)
-         (* from Decision_gate_rejected *)
-         | (Decision_gate_rejected, Decision_undecided) -> false  (* new turn init is reset, not transition *)
-         | (Decision_gate_rejected, Decision_guard_ok) -> true  (* via prepare_turn_retry_after_compaction *)
-         | (Decision_gate_rejected, Decision_gate_rejected) -> true
-         | (Decision_gate_rejected, Decision_tool_policy_selected) -> false  (* not valid within a single turn *)
-         (* from Decision_tool_policy_selected *)
-         | (Decision_tool_policy_selected, Decision_undecided) -> false  (* new turn init is reset, not transition *)
-         | (Decision_tool_policy_selected, Decision_guard_ok) -> true  (* via prepare_turn_retry_after_compaction *)
-         | (Decision_tool_policy_selected, Decision_gate_rejected) -> true  (* via mark_turn_gate_rejected_by_name *)
-         | (Decision_tool_policy_selected, Decision_tool_policy_selected) -> true
-       ))
-
 let validate_cascade_transition ~from ~to_ =
-  Keeper_fsm_guard_runtime.wrap_unit
-    ~action:"cascade_transition"
-    ~stage:"guard"
-    (fun () ->
-       assert (
-         match (from, to_) with
-         (* from Cascade_idle *)
-         | (Cascade_idle, Cascade_idle) -> true
-         | (Cascade_idle, Cascade_selecting) -> true  (* via set_turn_cascade_state *)
-         | (Cascade_idle, Cascade_trying) -> false  (* PR #14153: removed idle->trying jump; must go through selecting *)
-         | (Cascade_idle, Cascade_done) -> false
-         | (Cascade_idle, Cascade_exhausted) -> false
-         (* from Cascade_selecting *)
-         | (Cascade_selecting, Cascade_idle) -> true  (* via prepare_turn_retry_after_compaction *)
-         | (Cascade_selecting, Cascade_selecting) -> true
-         | (Cascade_selecting, Cascade_trying) -> true  (* via set_turn_cascade_state *)
-         | (Cascade_selecting, Cascade_done) -> false
-         | (Cascade_selecting, Cascade_exhausted) -> false
-         (* from Cascade_trying *)
-         | (Cascade_trying, Cascade_idle) -> true  (* via prepare_turn_retry_after_compaction *)
-         | (Cascade_trying, Cascade_selecting) -> true  (* via set_turn_cascade_state: retry re-entry *)
-         | (Cascade_trying, Cascade_trying) -> true
-         | (Cascade_trying, Cascade_done) -> true  (* via set_turn_cascade_state *)
-         | (Cascade_trying, Cascade_exhausted) -> true  (* via set_turn_cascade_state *)
-         (* from Cascade_done *)
-         | (Cascade_done, Cascade_idle) -> true  (* via prepare_turn_retry_after_compaction *)
-         | (Cascade_done, Cascade_selecting) -> true  (* via prepare_turn_retry_after_compaction *)
-         | (Cascade_done, Cascade_trying) -> true  (* via prepare_turn_retry_after_compaction *)
-         | (Cascade_done, Cascade_done) -> true
-         | (Cascade_done, Cascade_exhausted) -> false  (* not valid within a single turn *)
-         (* from Cascade_exhausted *)
-         | (Cascade_exhausted, Cascade_idle) -> true  (* via prepare_turn_retry_after_compaction *)
-         | (Cascade_exhausted, Cascade_selecting) -> true  (* via prepare_turn_retry_after_compaction *)
-         | (Cascade_exhausted, Cascade_trying) -> true  (* via prepare_turn_retry_after_compaction *)
-         | (Cascade_exhausted, Cascade_done) -> false  (* not valid within a single turn *)
-         | (Cascade_exhausted, Cascade_exhausted) -> true
-       ))
+  let (_ : packed_cascade_state) = from in
+  let (_ : packed_cascade_state) = to_ in
+  match from, to_ with
+  | Packed Cascade_idle, Packed Cascade_idle -> ()
+  | Packed Cascade_idle, Packed Cascade_selecting -> ()  (* via set_turn_cascade_state *)
+  | Packed Cascade_selecting, Packed Cascade_idle -> ()  (* via prepare_turn_retry_after_compaction *)
+  | Packed Cascade_selecting, Packed Cascade_selecting -> ()
+  | Packed Cascade_selecting, Packed Cascade_trying -> ()  (* via set_turn_cascade_state *)
+  | Packed Cascade_trying, Packed Cascade_idle -> ()  (* via prepare_turn_retry_after_compaction *)
+  | Packed Cascade_trying, Packed Cascade_selecting -> ()  (* via set_turn_cascade_state: retry re-entry *)
+  | Packed Cascade_trying, Packed Cascade_trying -> ()
+  | Packed Cascade_trying, Packed Cascade_done -> ()  (* via set_turn_cascade_state *)
+  | Packed Cascade_trying, Packed Cascade_exhausted -> ()  (* via set_turn_cascade_state *)
+  | Packed Cascade_done, Packed Cascade_idle -> ()  (* via prepare_turn_retry_after_compaction *)
+  | Packed Cascade_done, Packed Cascade_selecting -> ()  (* via prepare_turn_retry_after_compaction *)
+  | Packed Cascade_done, Packed Cascade_trying -> ()  (* via prepare_turn_retry_after_compaction *)
+  | Packed Cascade_done, Packed Cascade_done -> ()
+  | Packed Cascade_exhausted, Packed Cascade_idle -> ()  (* via prepare_turn_retry_after_compaction *)
+  | Packed Cascade_exhausted, Packed Cascade_selecting -> ()  (* via prepare_turn_retry_after_compaction *)
+  | Packed Cascade_exhausted, Packed Cascade_trying -> ()  (* via prepare_turn_retry_after_compaction *)
+  | Packed Cascade_exhausted, Packed Cascade_exhausted -> ()
+  | Packed Cascade_idle, (Packed Cascade_trying | Packed Cascade_done | Packed Cascade_exhausted)
+  | Packed Cascade_selecting, (Packed Cascade_done | Packed Cascade_exhausted)
+  | Packed Cascade_done, Packed Cascade_exhausted
+  | Packed Cascade_exhausted, Packed Cascade_done ->
+      invalid_arg
+        (Printf.sprintf
+           "validate_cascade_transition: invalid transition %s -> %s"
+           (packed_cascade_state_label from)
+           (packed_cascade_state_label to_))
 
 let validate_turn_phase_transition ~from ~to_ =
+  let (_ : packed_turn_phase) = from in
+  let (_ : packed_turn_phase) = to_ in
   Keeper_fsm_guard_runtime.wrap_unit
     ~action:"turn_phase_transition"
     ~stage:"guard"
     (fun () ->
-       assert (
-         match (from, to_) with
+       let valid =
+         match from, to_ with
          (* from Turn_idle *)
-         | (Turn_idle, Turn_idle) -> true
-         | (Turn_idle, Turn_prompting) -> true  (* via turn init / prepare_turn_retry_after_compaction (bypassed) *)
-         | (Turn_idle, Turn_executing) -> false
-         | (Turn_idle, Turn_compacting) -> false
-         | (Turn_idle, Turn_finalizing) -> false
+         | Packed Turn_idle, Packed Turn_idle -> true
+         | Packed Turn_idle, Packed Turn_prompting -> true  (* via turn init / prepare_turn_retry_after_compaction *)
+         | Packed Turn_idle, Packed Turn_routing -> false
+         | Packed Turn_idle, Packed Turn_executing -> false
+         | Packed Turn_idle, Packed Turn_compacting -> false
+         | Packed Turn_idle, Packed Turn_finalizing -> false
+         | Packed Turn_idle, Packed Turn_exhausted -> false
          (* from Turn_prompting *)
-         | (Turn_prompting, Turn_idle) -> false  (* new turn init is reset, not transition *)
-         | (Turn_prompting, Turn_prompting) -> true
-         | (Turn_prompting, Turn_executing) -> true  (* via set_turn_phase *)
-         | (Turn_prompting, Turn_compacting) -> false
-         | (Turn_prompting, Turn_finalizing) -> true  (* via set_turn_phase / via mark_turn_gate_rejected_by_name *)
+         | Packed Turn_prompting, Packed Turn_idle -> false  (* new turn init is reset, not transition *)
+         | Packed Turn_prompting, Packed Turn_prompting -> true
+         | Packed Turn_prompting, Packed Turn_routing -> true  (* via set_turn_cascade_state: Cascade_selecting *)
+         | Packed Turn_prompting, Packed Turn_executing -> true  (* via set_turn_phase *)
+         | Packed Turn_prompting, Packed Turn_compacting -> false
+         | Packed Turn_prompting, Packed Turn_finalizing -> true  (* via mark_turn_gate_rejected_by_name *)
+         | Packed Turn_prompting, Packed Turn_exhausted -> true  (* via set_turn_cascade_state: Cascade_exhausted before any cascade attempt (e.g. all candidates filtered out at admission) *)
+         (* from Turn_routing *)
+         | Packed Turn_routing, Packed Turn_idle -> false  (* new turn init is reset, not transition *)
+         | Packed Turn_routing, Packed Turn_prompting -> true  (* via set_turn_cascade_state: Cascade_idle on retry *)
+         | Packed Turn_routing, Packed Turn_routing -> true
+         | Packed Turn_routing, Packed Turn_executing -> true  (* via set_turn_cascade_state: Cascade_trying *)
+         | Packed Turn_routing, Packed Turn_compacting -> false
+         | Packed Turn_routing, Packed Turn_finalizing -> false
+         | Packed Turn_routing, Packed Turn_exhausted -> true  (* via set_turn_cascade_state: Cascade_exhausted during model selection (cascade-fallback exhausted before Cascade_trying) *)
          (* from Turn_executing *)
-         | (Turn_executing, Turn_idle) -> false  (* new turn init is reset, not transition *)
-         | (Turn_executing, Turn_prompting) -> true  (* via set_turn_cascade_state: retry selecting *)
-         | (Turn_executing, Turn_executing) -> true
-         | (Turn_executing, Turn_compacting) -> true  (* via set_turn_phase: retry plan *)
-         | (Turn_executing, Turn_finalizing) -> true  (* via set_turn_phase / via mark_turn_gate_rejected_by_name *)
+         | Packed Turn_executing, Packed Turn_idle -> false  (* new turn init is reset, not transition *)
+         | Packed Turn_executing, Packed Turn_prompting -> true  (* via set_turn_cascade_state: Cascade_idle retry *)
+         | Packed Turn_executing, Packed Turn_routing -> true  (* via set_turn_cascade_state: Cascade_selecting retry *)
+         | Packed Turn_executing, Packed Turn_executing -> true
+         | Packed Turn_executing, Packed Turn_compacting -> true  (* via set_turn_phase: retry plan *)
+         | Packed Turn_executing, Packed Turn_finalizing -> true  (* via set_turn_cascade_state: Cascade_done *)
+         | Packed Turn_executing, Packed Turn_exhausted -> true  (* via set_turn_cascade_state: Cascade_exhausted *)
          (* from Turn_compacting *)
-         | (Turn_compacting, Turn_idle) -> false  (* new turn init is reset, not transition *)
-         | (Turn_compacting, Turn_prompting) -> true  (* via prepare_turn_retry_after_compaction *)
-         | (Turn_compacting, Turn_executing) -> false
-         | (Turn_compacting, Turn_compacting) -> true
-         | (Turn_compacting, Turn_finalizing) -> true  (* via set_turn_phase: compaction failure *)
+         | Packed Turn_compacting, Packed Turn_idle -> false  (* new turn init is reset, not transition *)
+         | Packed Turn_compacting, Packed Turn_prompting -> true  (* via prepare_turn_retry_after_compaction *)
+         | Packed Turn_compacting, Packed Turn_routing -> false
+         | Packed Turn_compacting, Packed Turn_executing -> false
+         | Packed Turn_compacting, Packed Turn_compacting -> true
+         | Packed Turn_compacting, Packed Turn_finalizing -> true  (* via set_turn_phase: compaction failure *)
+         | Packed Turn_compacting, Packed Turn_exhausted -> true  (* via set_turn_cascade_state: Cascade_exhausted on terminal error *)
          (* from Turn_finalizing *)
-         | (Turn_finalizing, Turn_idle) -> false  (* new turn is reset *)
-         | (Turn_finalizing, Turn_prompting) -> false  (* new turn is reset *)
-         | (Turn_finalizing, Turn_executing) -> false
-         | (Turn_finalizing, Turn_compacting) -> false
-         | (Turn_finalizing, Turn_finalizing) -> true
-       ))
+         | Packed Turn_finalizing, Packed Turn_idle -> false  (* new turn is reset *)
+         | Packed Turn_finalizing, Packed Turn_prompting -> true  (* via set_turn_cascade_state: degraded retry Cascade_idle *)
+         | Packed Turn_finalizing, Packed Turn_routing -> true  (* via set_turn_cascade_state: degraded retry Cascade_selecting *)
+         | Packed Turn_finalizing, Packed Turn_executing -> true  (* via set_turn_cascade_state: degraded retry Cascade_trying *)
+         | Packed Turn_finalizing, Packed Turn_compacting -> false
+         | Packed Turn_finalizing, Packed Turn_finalizing -> true
+         | Packed Turn_finalizing, Packed Turn_exhausted -> true  (* via set_turn_cascade_state: Cascade_exhausted on terminal error *)
+         (* from Turn_exhausted *)
+         | Packed Turn_exhausted, Packed Turn_idle -> false  (* new turn is reset *)
+         | Packed Turn_exhausted, Packed Turn_prompting -> true  (* via prepare_turn_retry_after_compaction: Cascade_idle *)
+         | Packed Turn_exhausted, Packed Turn_routing -> true  (* via set_turn_cascade_state: retry Cascade_selecting *)
+         | Packed Turn_exhausted, Packed Turn_executing -> true  (* via set_turn_cascade_state: retry Cascade_trying *)
+         | Packed Turn_exhausted, Packed Turn_compacting -> false
+         | Packed Turn_exhausted, Packed Turn_finalizing -> false
+         | Packed Turn_exhausted, Packed Turn_exhausted -> true
+       in
+       if not valid then
+         invalid_arg
+           (Printf.sprintf
+              "validate_turn_phase_transition: invalid transition %s -> %s"
+              (packed_turn_phase_label from)
+              (packed_turn_phase_label to_)))
 
 let set_turn_decision_stage ~base_path name decision_stage =
+  let target_packed = stage_to_witness decision_stage in
   let changed = ref false in
   let now = Time_compat.now () in
   update_entry ~base_path name (fun e ->
     update_current_turn e (fun obs ->
-      validate_decision_transition ~from:obs.decision_stage ~to_:decision_stage;
-      changed := true;
-      { obs with decision_stage }));
+      match obs.decision_stage, target_packed with
+      | Packed Decision_undecided, Packed Decision_undecided -> obs
+      | Packed Decision_undecided, Packed Decision_guard_ok ->
+          changed := true; { obs with decision_stage = target_packed }
+      | Packed Decision_undecided, Packed Decision_gate_rejected ->
+          changed := true; { obs with decision_stage = target_packed }
+      | Packed Decision_undecided, Packed Decision_tool_policy_selected ->
+          changed := true; { obs with decision_stage = target_packed }
+      | Packed Decision_guard_ok, Packed Decision_guard_ok -> obs
+      | Packed Decision_guard_ok, Packed Decision_gate_rejected ->
+          changed := true; { obs with decision_stage = target_packed }
+      | Packed Decision_guard_ok, Packed Decision_tool_policy_selected ->
+          changed := true; { obs with decision_stage = target_packed }
+      | Packed Decision_gate_rejected, Packed Decision_gate_rejected -> obs
+      | Packed Decision_gate_rejected, Packed Decision_guard_ok ->
+          changed := true; { obs with decision_stage = target_packed }
+      | Packed Decision_gate_rejected, Packed Decision_tool_policy_selected ->
+          changed := true; { obs with decision_stage = target_packed }
+      | Packed Decision_tool_policy_selected, Packed Decision_tool_policy_selected ->
+          obs
+      | Packed Decision_tool_policy_selected, Packed Decision_guard_ok ->
+          changed := true; { obs with decision_stage = target_packed }
+      | Packed Decision_tool_policy_selected, Packed Decision_gate_rejected ->
+          changed := true; { obs with decision_stage = target_packed }
+      | Packed Decision_guard_ok, Packed Decision_undecided
+      | Packed Decision_gate_rejected, Packed Decision_undecided
+      | Packed Decision_tool_policy_selected, Packed Decision_undecided ->
+          invalid_arg "decision_stage transition to undecided is not valid within a turn"
+    ));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 
-let set_turn_cascade_state ~base_path name cascade_state =
+let set_turn_cascade_state ~base_path name (cascade_state : packed_cascade_state) =
   let changed = ref false in
   let now = Time_compat.now () in
   update_entry ~base_path name (fun e ->
     update_current_turn e (fun obs ->
       let new_turn_phase = turn_phase_of_cascade_state cascade_state in
-      validate_cascade_transition ~from:obs.cascade_state ~to_:cascade_state;
+      validate_cascade_transition
+        ~from:obs.cascade_state
+        ~to_:cascade_state;
       validate_turn_phase_transition ~from:obs.turn_phase ~to_:new_turn_phase;
       changed := true;
       {
@@ -832,7 +1166,7 @@ let set_turn_cascade_state ~base_path name cascade_state =
       }));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 
-let set_turn_phase ~base_path name turn_phase =
+let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
   let changed = ref false in
   let now = Time_compat.now () in
   update_entry ~base_path name (fun e ->
@@ -856,15 +1190,16 @@ let prepare_turn_retry_after_compaction ~base_path name =
   let now = Time_compat.now () in
   update_entry ~base_path name (fun e ->
     update_current_turn e (fun obs ->
-      validate_decision_transition ~from:obs.decision_stage ~to_:Decision_guard_ok;
-      validate_cascade_transition ~from:obs.cascade_state ~to_:Cascade_idle;
-      validate_turn_phase_transition ~from:obs.turn_phase ~to_:Turn_prompting;
+      validate_cascade_transition
+        ~from:obs.cascade_state
+        ~to_:(Packed Cascade_idle : packed_cascade_state);
+      validate_turn_phase_transition ~from:obs.turn_phase ~to_:(Packed Turn_prompting);
       changed := true;
       {
         obs with
-        turn_phase = Turn_prompting;
-        decision_stage = Decision_guard_ok;
-        cascade_state = Cascade_idle;
+        turn_phase = Packed Turn_prompting;
+        decision_stage = Packed Decision_guard_ok;
+        cascade_state = Packed Cascade_idle;
         selected_model = None;
       }));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
@@ -885,13 +1220,12 @@ let mark_turn_gate_rejected_by_name name =
       let now = Time_compat.now () in
       update_entry ~base_path:entry.base_path name (fun e ->
         update_current_turn e (fun obs ->
-          validate_decision_transition ~from:obs.decision_stage ~to_:Decision_gate_rejected;
-          validate_turn_phase_transition ~from:obs.turn_phase ~to_:Turn_finalizing;
+          validate_turn_phase_transition ~from:obs.turn_phase ~to_:(Packed Turn_finalizing);
           changed := true;
           {
             obs with
-            decision_stage = Decision_gate_rejected;
-            turn_phase = Turn_finalizing;
+            decision_stage = Packed Decision_gate_rejected;
+            turn_phase = Packed Turn_finalizing;
           }));
       if !changed then broadcast_composite_changed ~name ~ts_unix:now
 
@@ -1380,9 +1714,9 @@ let compaction_stage_of_event entry event =
   | Keeper_state_machine.Compaction_started
   | Keeper_state_machine.Auto_compact_triggered
   | Keeper_state_machine.Operator_compact_requested ->
-    Compaction_compacting
-  | Keeper_state_machine.Compaction_completed _ -> Compaction_done
-  | Keeper_state_machine.Compaction_failed _ -> Compaction_accumulating
+    Packed Compaction_compacting
+  | Keeper_state_machine.Compaction_completed _ -> Packed Compaction_done
+  | Keeper_state_machine.Compaction_failed _ -> Packed Compaction_accumulating
   | _ -> entry.compaction_stage
 
 let validate_compaction_transition ~from ~to_ =
@@ -1393,17 +1727,17 @@ let validate_compaction_transition ~from ~to_ =
        assert (
          match (from, to_) with
          (* from Compaction_accumulating *)
-         | (Compaction_accumulating, Compaction_accumulating) -> true
-         | (Compaction_accumulating, Compaction_compacting) -> true  (* via set_compaction_stage *)
-         | (Compaction_accumulating, Compaction_done) -> false
+         | (Packed Compaction_accumulating, Packed Compaction_accumulating) -> true
+         | (Packed Compaction_accumulating, Packed Compaction_compacting) -> true  (* via set_compaction_stage *)
+         | (Packed Compaction_accumulating, Packed Compaction_done) -> false
          (* from Compaction_compacting *)
-         | (Compaction_compacting, Compaction_accumulating) -> true  (* via set_compaction_stage: retry *)
-         | (Compaction_compacting, Compaction_compacting) -> true
-         | (Compaction_compacting, Compaction_done) -> true  (* via set_compaction_stage *)
+         | (Packed Compaction_compacting, Packed Compaction_accumulating) -> true  (* via set_compaction_stage: retry *)
+         | (Packed Compaction_compacting, Packed Compaction_compacting) -> true
+         | (Packed Compaction_compacting, Packed Compaction_done) -> true  (* via set_compaction_stage *)
          (* from Compaction_done — terminal *)
-         | (Compaction_done, Compaction_accumulating) -> false  (* terminal; new compaction is reset *)
-         | (Compaction_done, Compaction_compacting) -> false  (* terminal *)
-         | (Compaction_done, Compaction_done) -> true
+         | (Packed Compaction_done, Packed Compaction_accumulating) -> false  (* terminal; new compaction is reset *)
+         | (Packed Compaction_done, Packed Compaction_compacting) -> false  (* terminal *)
+         | (Packed Compaction_done, Packed Compaction_done) -> true
        ))
 
 let compaction_stage_after_event entry event =
@@ -1691,5 +2025,17 @@ let dequeue_event ~base_path name =
             if Atomic.compare_and_set entry.event_queue cur rest
             then Some stim
             else loop ()
+      in
+      loop ()
+
+let drain_board_events ?window_sec ~base_path name =
+  match get ~base_path name with
+  | None -> []
+  | Some entry ->
+      let rec loop () =
+        let cur = Atomic.get entry.event_queue in
+        let board, rest = Keeper_event_queue.drain_board_window ?window_sec cur in
+        if Atomic.compare_and_set entry.event_queue cur rest then board
+        else loop ()
       in
       loop ()

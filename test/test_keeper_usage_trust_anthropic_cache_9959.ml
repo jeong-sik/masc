@@ -106,7 +106,7 @@ let test_model_detector_recognizes_anthropic () =
   no_kind openai_compat_kind "anthropic/claude-haiku";
   no "qwen3-coder";
   no "gpt-5.3";
-  no "gemini-2.5-pro";
+  no "gemini-3.1-pro-preview";
   no "ollama-local";
   no "kimi-for-coding"
 
@@ -162,7 +162,7 @@ let test_non_anthropic_does_not_flag () =
     Alcotest.(check bool)
       (Printf.sprintf "%s: no anthropic anomaly" model)
       false (has_reason t "anthropic_caching_likely_disabled"))
-    [ "qwen3-coder"; "gpt-5.3-codex"; "gemini-2.5-pro";
+    [ "qwen3-coder"; "gpt-5.3-codex"; "gemini-3.1-pro-preview";
       "ollama-local"; "kimi-for-coding"; "ramarama";
       "openrouter:anthropic/claude-3.5" ]
 

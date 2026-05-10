@@ -144,7 +144,7 @@ let direct_turn_observation (meta : keeper_meta) :
   }
 
 let resolve_turn_cascade_name (meta : keeper_meta) =
-  let raw_name = String.trim meta.cascade_name in
+  let raw_name = String.trim (Keeper_types.cascade_name_of_meta meta) in
   match Cascade_catalog_runtime.resolve_declared_name ~raw_name () with
   | Ok cascade_name -> Ok cascade_name
   | Error detail ->
@@ -160,6 +160,45 @@ let keeper_msg_timeout_override args =
     when Float.is_finite timeout_sec && timeout_sec > 0.0 ->
       Ok (Some timeout_sec)
   | Some _ -> Error "timeout_sec must be a positive finite number"
+
+let preflight_keeper_msg ctx args : (unit, string) result =
+  let name = get_string args "name" "" in
+  let message = get_string args "message" "" in
+  if not (validate_name name) then
+    Error "invalid keeper name"
+  else if message = "" then
+    Error "message is required"
+  else
+    let direct_reply = get_bool args "direct_reply" false in
+    match keeper_msg_timeout_override args with
+    | Error e -> Error e
+    | Ok _ ->
+    (match reject_legacy_model_args ~tool_name:"masc_keeper_msg" args with
+    | Error e -> Error ("" ^ e)
+    | Ok () ->
+    (match reject_removed_keeper_input_keys ~tool_name:"masc_keeper_msg" args with
+    | Error e -> Error ("" ^ e)
+    | Ok () ->
+    (match reject_removed_keeper_msg_input_keys ~tool_name:"masc_keeper_msg" args with
+    | Error e -> Error ("" ^ e)
+    | Ok () ->
+    match ensure_keeper_exists ~ctx ~name with
+    | Error e -> Error ("" ^ e)
+    | Ok meta ->
+      match resolve_turn_cascade_name meta with
+      | Error e -> Error e
+      | Ok turn_cascade_name ->
+        let effective_models =
+          if direct_reply then
+            Cascade_runtime.models_of_cascade_name
+              (Keeper_cascade_profile.Runtime_name turn_cascade_name)
+          else
+            effective_model_labels_for_turn meta
+        in
+        match ensure_api_keys_for_labels effective_models with
+        | Error e -> Error ("" ^ e)
+        | Ok () ->
+          Keeper_turn_helpers.ensure_local_discovery_ready effective_models)))
 
 (* -- handle_keeper_msg: orchestrator ---------------------------------------- *)
 

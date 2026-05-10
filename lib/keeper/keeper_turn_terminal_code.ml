@@ -22,6 +22,7 @@ type t =
   | Ambiguous_partial_commit_post_commit_failure
   | Fiber_unresolved
   | Exception_unhandled of string
+  | Sdk_error of string
 
 let to_wire = function
   | Healthy -> "healthy"
@@ -41,6 +42,7 @@ let to_wire = function
   | Ambiguous_partial_commit_post_commit_failure -> "ambiguous_partial_commit"
   | Fiber_unresolved -> "fiber_unresolved"
   | Exception_unhandled _ -> "exception"
+  | Sdk_error wire -> wire
 ;;
 
 let of_wire = function
@@ -93,3 +95,15 @@ let of_failure_reason : Keeper_registry.failure_reason -> t = function
   | Keeper_registry.Fiber_unresolved -> Fiber_unresolved
   | Keeper_registry.Exception msg -> Exception_unhandled msg
 ;;
+
+let of_failure_reason_option = function
+  | Some fr -> of_failure_reason fr
+  | None ->
+    (* Legacy [stale_terminal_reason_code None] emitted "stale_turn_timeout".
+       Canonical sub-class for that wire string is [In_turn_hung] (see
+       [of_wire]); we reuse it here so [to_wire (of_failure_reason_option None)]
+       is byte-for-byte equal to the pre-RFC default. *)
+    Stale_turn_timeout_in_turn
+;;
+
+let of_sdk_error_wire wire = Sdk_error wire

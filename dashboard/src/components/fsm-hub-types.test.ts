@@ -32,6 +32,7 @@ function snapshot(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperCompo
       compaction_atomicity: true,
       event_priority_monotone: true,
     },
+    fsm_guard_violations: 0,
     is_live: false,
     last_outcome: null,
     recommended_actions: [],
@@ -73,7 +74,7 @@ describe('extractLaneValue', () => {
 
   it('handles all valid turn values', () => {
     const turns: KeeperCompositeSnapshot['turn_phase'][] = [
-      'idle', 'prompting', 'executing', 'compacting', 'finalizing',
+      'idle', 'prompting', 'routing', 'executing', 'compacting', 'finalizing', 'exhausted',
     ]
     for (const turn of turns) {
       expect(extractLaneValue(snapshot({ turn_phase: turn }), 'turn')).toBe(turn)

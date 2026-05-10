@@ -50,7 +50,7 @@ let git_capture_output_result ~repo_root args =
   let raw_source = String.concat " " (List.map Filename.quote argv) in
   match
     Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:"system/build_identity"
+      ~actor:(Masc_exec.Agent_id.of_string "system/build_identity")
       ~raw_source
       ~summary:"build identity git probe"
       ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Build_identity ())

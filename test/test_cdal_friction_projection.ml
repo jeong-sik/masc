@@ -13,15 +13,15 @@ module CFP = Masc_mcp.Cdal_friction_projection
 let make_proof
     ?(run_id = "friction-test-001")
     ?(raw_evidence_refs = [])
-    () : Agent_sdk.Cdal_proof.t =
+    () : Masc_mcp_cdal_runtime.Cdal_proof.t =
   {
-    schema_version = Agent_sdk.Cdal_proof.schema_version_current;
+    schema_version = Masc_mcp_cdal_runtime.Cdal_proof.schema_version_current;
     run_id;
     contract_id = "md5:test";
     requested_execution_mode = Execute;
     effective_execution_mode = Execute;
     mode_decision_source = "passthrough";
-    risk_class = Agent_sdk.Risk_class.Low;
+    risk_class = Masc_mcp_cdal_runtime.Risk_class.Low;
     provider_snapshot = {
       provider_name = "test";
       model_id = "test-model";
@@ -48,7 +48,7 @@ let setup_store () =
     (Filename.get_temp_dir_name ())
     (Printf.sprintf "cdal_friction_%d_%d"
        (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.0))) in
-  let store : Agent_sdk.Proof_store.config = { root = tmp_dir } in
+  let store : Masc_mcp_cdal_runtime.Proof_store.config = { root = tmp_dir } in
   (store, tmp_dir)
 
 let mkdirp path =
@@ -60,7 +60,7 @@ let mkdirp path =
   in
   go path
 
-let write_violations_file (store : Agent_sdk.Proof_store.config) ~run_id
+let write_violations_file (store : Masc_mcp_cdal_runtime.Proof_store.config) ~run_id
     (violations : Yojson.Safe.t) =
   let dir = Filename.concat
     (Filename.concat
@@ -71,7 +71,7 @@ let write_violations_file (store : Agent_sdk.Proof_store.config) ~run_id
   let path = Filename.concat dir "mode_violations.json" in
   Yojson.Safe.to_file path violations
 
-let write_effects_file (store : Agent_sdk.Proof_store.config) ~run_id
+let write_effects_file (store : Masc_mcp_cdal_runtime.Proof_store.config) ~run_id
     (effects : Yojson.Safe.t) =
   let dir = Filename.concat
     (Filename.concat
@@ -330,7 +330,7 @@ let test_blocked_tool_counts () =
 let test_evidence_gap_groups () =
   let (store, _tmp) = setup_store () in
   let proof = make_proof ~run_id:"gap-test-001" () in
-  let gaps : Masc_mcp.Cdal_types.completeness_gap list = [
+  let gaps : Cdal_types.completeness_gap list = [
     { artifact = "manifest.json"; reason = "not found";
       impact = Blocks_verdict };
     { artifact = "contract.json"; reason = "parse error";
@@ -347,7 +347,7 @@ let test_evidence_gap_groups () =
 let test_review_gap_emits_tripwire () =
   let (store, _tmp) = setup_store () in
   let proof = make_proof ~run_id:"review-gap-001" () in
-  let gaps : Masc_mcp.Cdal_types.completeness_gap list = [
+  let gaps : Cdal_types.completeness_gap list = [
     { artifact = "evidence/review_warning.json";
       reason = "review_requirement present but no review evidence artifact was captured";
       impact = Blocks_verdict };
@@ -458,7 +458,7 @@ let test_effect_source_path_satisfies_gap () =
       (List.mem "source_path_evidence:mode_enforcer" fp.review_tripwires)
 
 let test_path_traversal_rejected () =
-  let store : Agent_sdk.Proof_store.config = { root = "/tmp/test-store" } in
+  let store : Masc_mcp_cdal_runtime.Proof_store.config = { root = "/tmp/test-store" } in
   let result = Masc_mcp.Proof_artifact_reader.resolve_path store
     "proof-store://../../../etc/passwd" in
   match result with
@@ -506,15 +506,15 @@ let make_proof_for_cross_run
     ?(run_id = "cr-001")
     ?(raw_evidence_refs = [])
     ?(ended_at = 1001.0)
-    () : Agent_sdk.Cdal_proof.t =
+    () : Masc_mcp_cdal_runtime.Cdal_proof.t =
   {
-    schema_version = Agent_sdk.Cdal_proof.schema_version_current;
+    schema_version = Masc_mcp_cdal_runtime.Cdal_proof.schema_version_current;
     run_id;
     contract_id = "md5:test";
     requested_execution_mode = Execute;
     effective_execution_mode = Execute;
     mode_decision_source = "passthrough";
-    risk_class = Agent_sdk.Risk_class.Low;
+    risk_class = Masc_mcp_cdal_runtime.Risk_class.Low;
     provider_snapshot = {
       provider_name = "test"; model_id = "test-model"; api_version = None;
     };

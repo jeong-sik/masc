@@ -22,12 +22,12 @@
       side-effecting telemetry only.
     - [Enforce] mode: on the first [Outcome] the observer calls
       [Eio.Switch.fail sw {!Liveness_kill}] so the surrounding
-      [Oas_worker_exec.run] tears down via Eio cancellation.
+      [Cascade_runner.run] tears down via Eio cancellation.
 
     {1 Tick fiber lifetime}
 
     The tick fiber is forked under the same [~sw] that owns
-    [Oas_worker_exec.run]. When the OAS run switch dies (success,
+    [Cascade_runner.run]. When the OAS run switch dies (success,
     error, parent cancellation) the tick fiber dies with it — no
     explicit teardown is required.
 

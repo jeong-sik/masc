@@ -82,18 +82,18 @@ type catalog_entry = {
       to drop the hint when it does not match a live catalog entry.
 
       @since 0.174.0 *)
-  required_capability_profile : Cascade_capability_profile.profile option;
-  (** Optional declarative capability requirement (RFC-0027).  When
-      set, the validator (PR-3) checks that every model entry in this
-      cascade satisfies the named profile via
+  required_capability_profile : string option;
+  (** Optional declarative capability requirement (RFC-0058).  When
+      set, the validator checks that every model entry in this cascade
+      satisfies the named profile via
       {!Cascade_capability_profile.provider_satisfies_profile}.
 
       JSON key: ["{name}_required_capability_profile"], string-typed.
       Unknown profile names cause [load_catalog] to return [Error _]
-      (no silent fallback — fail-closed per memory rule
-      [feedback_keeper_runtime_fail_closed_for_unknown_permissive_default]).
+      (fail-closed).  Profile names are resolved via
+      {!Cascade_capability_schema}.
 
-      @since RFC-0027 PR-2 *)
+      @since RFC-0027 PR-2, updated RFC-0058 *)
 }
 
 (** Deprecated logical route keys must not be treated as concrete catalog
@@ -244,7 +244,7 @@ type strategy_config = {
       inner array is a tier of provider keys (matched against the
       [model] field in [{name}_models]); outer order is tier order
       (tier 0 = highest priority).  Example JSON:
-      [\[\["ollama:qwen3-coder:30b"\], \["gemini_cli:gemini-2.5-flash"\]\]].
+      [\[\["ollama:qwen3-coder:30b"\], \["gemini_cli:gemini-3-flash-preview"\]\]].
       @since 0.9.7 *)
 
   sticky_ttl_ms : int option;
@@ -290,3 +290,14 @@ type strategy_config = {
 
 val resolve_strategy_config :
   config_path:string -> name:string -> strategy_config
+
+(** {1 RFC-0041 cascade_profile bridge} *)
+
+(** Load a [Cascade_ref.cascade_profile] from the legacy cascade.json
+    format.  Each profile section becomes a single-group profile;
+    [models] become [cascade_item]s and [fallback_cascade] becomes
+    [fallback_group].
+
+    Returns [None] when the profile has no parsable model entries. *)
+val load_cascade_profile :
+  config_path:string -> name:string -> Cascade_ref.cascade_profile option

@@ -1,5 +1,17 @@
 import { describe, it, expect, vi } from 'vitest'
-import { navigate, replaceRoute, route } from './router'
+import {
+  navigate,
+  replaceRoute,
+  route,
+  hashForRoute,
+  REDIRECTED_FROM_PARAM,
+  CROSS_SURFACE_SECTION_REDIRECTS,
+} from './router'
+import {
+  DASHBOARD_SECTION_ITEMS,
+  SECTION_REDIRECTS,
+} from './config/navigation'
+import type { NonHomeTabId } from './types'
 
 describe('navigate', () => {
   it('navigates to monitoring tab with agent param', () => {
@@ -165,5 +177,160 @@ describe('navigate', () => {
     } finally {
       window.removeEventListener('hashchange', onHashChange)
     }
+  })
+})
+
+describe('REDIRECTED_FROM_PARAM (RFC-0049)', () => {
+  it('records the original surface:section when a redirect resolves', () => {
+    navigate('monitoring', { section: 'git-graph' })
+    expect(route.value.tab).toBe('workspace')
+    expect(route.value.params.section).toBe('repositories')
+    expect(route.value.params[REDIRECTED_FROM_PARAM]).toBe('monitoring:git-graph')
+  })
+
+  it('omits the param entirely on direct (non-redirected) navigation', () => {
+    navigate('lab', { section: 'tools' })
+    expect(route.value.params[REDIRECTED_FROM_PARAM]).toBeUndefined()
+  })
+
+  it('never leaks the internal param into the URL hash', () => {
+    navigate('monitoring', { section: 'git-graph' })
+    expect(window.location.hash).not.toContain(REDIRECTED_FROM_PARAM)
+    expect(window.location.hash).not.toContain('__redirected_from')
+  })
+
+  it('hashForRoute strips the internal param even if callers pass it', () => {
+    const hash = hashForRoute('workspace', {
+      section: 'repositories',
+      [REDIRECTED_FROM_PARAM]: 'monitoring:git-graph',
+    })
+    expect(hash).not.toContain(REDIRECTED_FROM_PARAM)
+    expect(hash).not.toContain('__redirected_from')
+  })
+})
+
+// --- RFC-0048 PR-A — redirect-ledger contract -----------------------------
+//
+// Every section ID ever shown in the sidebar (including ones now hidden,
+// removed, or reachable only via redirect) must resolve to a (tab, section)
+// pair currently registered in DASHBOARD_SECTION_ITEMS. Without this gate,
+// silently deleting a section breaks operator bookmarks and external
+// links — RFC-0048 §4.3.
+
+function registeredSections(tab: NonHomeTabId): Set<string> {
+  return new Set(
+    DASHBOARD_SECTION_ITEMS[tab].map(item => item.params.section ?? ''),
+  )
+}
+
+interface RedirectSource {
+  fromTab: string
+  fromSection: string
+  description: string
+}
+
+function enumerateRedirectSources(): RedirectSource[] {
+  const sources: RedirectSource[] = []
+  for (const key of Object.keys(SECTION_REDIRECTS)) {
+    const [fromTab, fromSection] = key.split(':') as [string, string]
+    sources.push({ fromTab, fromSection, description: `SECTION_REDIRECTS[${key}]` })
+  }
+  for (const key of Object.keys(CROSS_SURFACE_SECTION_REDIRECTS)) {
+    const [fromTab, fromSection] = key.split(':') as [string, string]
+    sources.push({
+      fromTab,
+      fromSection,
+      description: `CROSS_SURFACE_SECTION_REDIRECTS[${key}]`,
+    })
+  }
+  return sources
+}
+
+describe('redirect-ledger contract (RFC-0048 §4.3)', () => {
+  it('every visible section in DASHBOARD_SECTION_ITEMS resolves to itself', () => {
+    const failures: string[] = []
+    for (const tab of Object.keys(DASHBOARD_SECTION_ITEMS) as NonHomeTabId[]) {
+      for (const item of DASHBOARD_SECTION_ITEMS[tab]) {
+        const section = item.params.section
+        if (!section) continue
+        navigate(tab, { section })
+        const landed = route.value
+        const registered = registeredSections(landed.tab as NonHomeTabId)
+        const landedSection = landed.params.section ?? ''
+        if (!registered.has(landedSection)) {
+          failures.push(
+            `${tab}:${section} → ${landed.tab}:${landedSection} (not in DASHBOARD_SECTION_ITEMS)`,
+          )
+        }
+      }
+    }
+    expect(failures).toEqual([])
+  })
+
+  it('every redirect source resolves to a currently-rendered section', () => {
+    const sources = enumerateRedirectSources()
+    expect(sources.length).toBeGreaterThan(0)
+
+    const failures: string[] = []
+    for (const { fromTab, fromSection, description } of sources) {
+      navigate(fromTab as NonHomeTabId, { section: fromSection })
+      const landed = route.value
+      const landedTab = landed.tab as NonHomeTabId
+      const landedSection = landed.params.section ?? ''
+      const registered = registeredSections(landedTab)
+      if (!registered.has(landedSection)) {
+        failures.push(
+          `${description}: ${fromTab}:${fromSection} → ${landedTab}:${landedSection} (not rendered)`,
+        )
+      }
+    }
+    expect(failures).toEqual([])
+  })
+
+  it('redirect resolution converges in one hop (no chains)', () => {
+    // After applying a redirect, the resulting (tab, section) must NOT
+    // itself be a key in either redirect map. Otherwise repeated
+    // navigation could loop or land somewhere unexpected.
+    const sources = enumerateRedirectSources()
+    const chained: string[] = []
+    for (const { fromTab, fromSection, description } of sources) {
+      navigate(fromTab as NonHomeTabId, { section: fromSection })
+      const landed = route.value
+      const landedKey = `${landed.tab}:${landed.params.section ?? ''}`
+      if (
+        landedKey in SECTION_REDIRECTS
+        || landedKey in CROSS_SURFACE_SECTION_REDIRECTS
+      ) {
+        chained.push(`${description} lands on ${landedKey} which is itself a redirect source`)
+      }
+    }
+    expect(chained).toEqual([])
+  })
+
+  it('hashForRoute on every section ID produces a non-empty canonical hash', () => {
+    const sources = enumerateRedirectSources()
+    const visible: { tab: NonHomeTabId; section: string }[] = []
+    for (const tab of Object.keys(DASHBOARD_SECTION_ITEMS) as NonHomeTabId[]) {
+      for (const item of DASHBOARD_SECTION_ITEMS[tab]) {
+        if (item.params.section) {
+          visible.push({ tab, section: item.params.section })
+        }
+      }
+    }
+
+    const empty: string[] = []
+    for (const { fromTab, fromSection, description } of sources) {
+      const hash = hashForRoute(fromTab as NonHomeTabId, { section: fromSection })
+      if (!hash || hash === '#') {
+        empty.push(description)
+      }
+    }
+    for (const { tab, section } of visible) {
+      const hash = hashForRoute(tab, { section })
+      if (!hash || hash === '#') {
+        empty.push(`DASHBOARD_SECTION_ITEMS ${tab}:${section}`)
+      }
+    }
+    expect(empty).toEqual([])
   })
 })

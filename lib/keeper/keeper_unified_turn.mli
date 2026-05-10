@@ -131,6 +131,27 @@ type turn_event_bus_summary = {
 val summarize_turn_event_bus :
   Agent_sdk.Event_bus.event list -> turn_event_bus_summary
 
+(** Turn-local tool-event pairing state used to detect event-bus integrity
+    failures before side-effect retry logic falls back to unknown input.
+    Exposed for targeted tests. *)
+type turn_tool_event_tracker
+
+val create_turn_tool_event_tracker : unit -> turn_tool_event_tracker
+
+val record_turn_tool_events :
+  ?has_mutating_side_effect_with_input:
+    (tool_name:string -> input:Yojson.Safe.t -> bool) ->
+  keeper_name:string ->
+  turn_tool_event_tracker ->
+  Agent_sdk.Event_bus.event list ->
+  unit
+
+val turn_tool_event_integrity_error :
+  turn_tool_event_tracker -> Agent_sdk.Error.sdk_error option
+
+val committed_mutating_tools_from_events :
+  turn_tool_event_tracker -> string list
+
 (** Build the keeper overflow event from either a drained event-bus
     signal or the structured OAS error fallback. Exposed for tests. *)
 val context_overflow_event_of_error :
@@ -288,6 +309,7 @@ val run_keeper_cycle :
   ?semaphore_wait_ms:int ->
   ?turn_slot_control:Keeper_turn_slot.keeper_turn_slot_control ->
   ?shared_context:Agent_sdk.Context.t ->
+  ?selected_item:(string * Cascade_ref.cascade_item) ->
   unit ->
   (Keeper_types.keeper_meta, Agent_sdk.Error.sdk_error) result
 
@@ -300,5 +322,6 @@ val run_unified_turn :
   ?semaphore_wait_ms:int ->
   ?turn_slot_control:Keeper_turn_slot.keeper_turn_slot_control ->
   ?shared_context:Agent_sdk.Context.t ->
+  ?selected_item:(string * Cascade_ref.cascade_item) ->
   unit ->
   (Keeper_types.keeper_meta, Agent_sdk.Error.sdk_error) result

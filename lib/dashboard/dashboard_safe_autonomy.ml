@@ -842,11 +842,10 @@ let keeper_snapshot_json ~(config : Coord.config) (snapshot : keeper_snapshot) =
       ("approval_pending_count", `Int snapshot.approval.count);
       ("recent_activity_count", `Int snapshot.activity.count);
       ("last_activity_ts", float_opt_to_json snapshot.activity.last_ts);
-      ("last_blocker", string_opt_to_json (non_empty_string_opt meta.runtime.last_blocker));
-      ( "last_blocker_class",
-        string_opt_to_json
-          (Option.map Keeper_types.blocker_class_to_string
-             meta.runtime.last_blocker_class) );
+      ( "last_blocker"
+      , match meta.runtime.last_blocker with
+        | Some info -> Keeper_types.blocker_info_to_json info
+        | None -> `Null );
       ( "benchmark_recommendation",
         match snapshot.bench_recommendation with
         | None -> `Null
@@ -931,7 +930,13 @@ let timeline_entries_json
   List.iter
     (fun snapshot ->
       let blocker =
-        non_empty_string_opt snapshot.meta.runtime.last_blocker
+        match snapshot.meta.runtime.last_blocker with
+        | Some info ->
+          let trimmed = String.trim info.detail in
+          if trimmed = "" then
+            Some (Keeper_types.blocker_class_to_string info.klass)
+          else Some trimmed
+        | None -> None
       in
       match blocker with
       | None -> ()

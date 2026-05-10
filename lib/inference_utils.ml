@@ -37,7 +37,7 @@ let zero_usage : Agent_sdk.Types.api_usage =
 
 (** Extract usage from an api_response, defaulting to zero.
     @since 2.123.0 *)
-let usage_of_response (resp : Oas_response.api_response) : Agent_sdk.Types.api_usage =
+let usage_of_response (resp : Agent_sdk_response.api_response) : Agent_sdk.Types.api_usage =
   match resp.usage with Some u -> u | None -> zero_usage
 
 (** Convert elapsed seconds to integer milliseconds for telemetry. *)

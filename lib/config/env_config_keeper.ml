@@ -518,7 +518,7 @@ module KeeperKeepalive = struct
 
   (** Maximum turns per single OAS Agent.run call.
       Keeper resumes via checkpoint in the next keepalive cycle when
-      {!Oas_worker.TurnBudgetExhausted} is returned.
+      {!Cascade_runner.TurnBudgetExhausted} is returned.
       Previous default of 200 caused "ambiguous partial commit" errors:
       the 300s timeout would fire mid-turn after tools had already executed,
       leaving the keeper in an ambiguous state. With 30 turns per call and
@@ -660,14 +660,14 @@ module KeeperWatchdog = struct
     max 1 (get_int ~default:5 "MASC_KEEPER_ESCALATION_THRESHOLD")
 
   (** Fleet batch-termination detection window in seconds.
-      Default: 30. *)
+      Default: 60. *)
   let batch_window_sec =
-    Float.max 1.0 (get_float ~default:30.0 "MASC_KEEPER_BATCH_WINDOW_SEC")
+    Float.max 1.0 (get_float ~default:60.0 "MASC_KEEPER_BATCH_WINDOW_SEC")
 
   (** Number of distinct keepers terminating within [batch_window_sec] before
-      emitting a fleet batch alert. Default: 3. *)
+      emitting a fleet batch alert. Default: 5. *)
   let batch_threshold =
-    max 1 (get_int ~default:3 "MASC_KEEPER_BATCH_THRESHOLD")
+    max 1 (get_int ~default:5 "MASC_KEEPER_BATCH_THRESHOLD")
 end
 
 (** {1 gRPC Heartbeat Reconnect} *)
@@ -854,7 +854,7 @@ end
 
     Phase 0 observability for the tiered-hydration redesign (Option C).
     When enabled, every keeper wake captures an approximation of the LLM
-    request payload size just before [Oas_worker.run_named] is invoked.
+    request payload size just before [Keeper_turn_driver.run_named] is invoked.
     The record is appended to
     [$MASC_BASE_PATH/data/keeper-wake-payload/YYYY-MM-DD.jsonl] via
     [Dashboard_harness_health.record_wake_payload].
@@ -886,7 +886,7 @@ module KeeperCascade = struct
       Matching is case-insensitive; empty entries are dropped.
 
       Semantics: when set, keeper turns pass this list as [provider_filter]
-      into [Oas_worker.run_named], which applies it during MASC cascade
+      into [Keeper_turn_driver.run_named], which applies it during MASC cascade
       provider resolution. The runtime keeps only matching providers from
       the resolved profile; if the filter leaves zero providers, OAS falls back
       to the unfiltered profile (see [apply_provider_filter] safety net).
@@ -955,10 +955,19 @@ module KeeperRetryBackoff = struct
       it up — the catalog only scans lib/config/env_config_*.ml.
 
       Env: [MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC].
-      Default: 60.0. *)
+      Default: 180.0.
+      @category Timeouts
+      @ops_class operator
+
+      Calibrated to match [Cascade_attempt_liveness.local_27b.ttft_max]
+      (180 s) so that slow-but-honest Ollama 27B/70B streams are not
+      denied a degraded retry solely because their first-token latency
+      exceeds the old 60 s floor.  Cloud providers rarely need retries
+      at all; when they do, 180 s is still well within reasonable
+      tail latency. *)
   let degraded_retry_slot_phase_budget_sec =
     Float.max 5.0
-      (get_float ~default:60.0
+      (get_float ~default:180.0
          "MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC")
 end
 

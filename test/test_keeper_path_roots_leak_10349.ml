@@ -104,7 +104,9 @@ let test_path_outside_sandbox_no_leak () =
           ~allowed_paths:[ "lib" ] ~raw_path:"README.md"
       in
       check bool "rejection occurred" true (Result.is_error result);
-      let err = Result.get_error result in
+      let err =
+        Keeper_alerting_path.rejection_to_user_message (Result.get_error result)
+      in
       assert_no_roots_leak "path_outside_sandbox" err;
       check bool "path_outside_sandbox prefix preserved" true
         (Astring.String.is_prefix ~affix:"path_outside_sandbox:" err);
@@ -127,19 +129,23 @@ let test_out_of_roots_no_leak () =
       let config = Coord.default_config dir in
       let labels = [ ("kind", "out_of_roots") ] in
       let before = counter_value labels in
-      (* Absolute path inside root with trailing slash and a
+      (* Relative path inside root with trailing slash and a
          missing leaf → bypasses [allows_missing_leaf_read]
          (which only forgives parent-exists/non-slash paths)
-         and falls into the out_of_roots branch. *)
-      let target = Filename.concat dir "lib/never_exists_10349/" in
+         and falls into the out_of_roots branch because the path
+         is outside the explicit allowed_paths. *)
+      let target = "lib/never_exists_10349/" in
       let result =
         Keeper_alerting_path.resolve_keeper_read_path ~config
-          ~allowed_paths:[ "lib" ] ~raw_path:target
+          ~allowed_paths:[ "src" ] ~raw_path:target
       in
       check bool "rejection occurred" true (Result.is_error result);
-      let err = Result.get_error result in
+      let err =
+        Keeper_alerting_path.rejection_to_user_message (Result.get_error result)
+      in
       assert_no_roots_leak "out_of_roots" err;
-      assert_legacy_not_found_prefix "out_of_roots" err;
+      check bool "out_of_roots: path_outside_sandbox prefix" true
+        (Astring.String.is_prefix ~affix:"path_outside_sandbox:" err);
       check (float 0.0001) "out_of_roots counter +1"
         (before +. 1.0)
         (counter_value labels))
@@ -162,14 +168,47 @@ let test_not_found_relative_no_leak () =
           ~allowed_paths:[] ~raw_path:"nonexistent_repo_10349/"
       in
       check bool "rejection occurred" true (Result.is_error result);
-      let err = Result.get_error result in
+      let err =
+        Keeper_alerting_path.rejection_to_user_message (Result.get_error result)
+      in
       assert_no_roots_leak "not_found_relative" err;
       assert_legacy_not_found_prefix "not_found_relative" err;
       check (float 0.0001) "not_found_relative counter +1"
         (before +. 1.0)
         (counter_value labels))
 
-(* --- 4. counter labels are isolated per kind ------------- *)
+(* --- 4. absolute path rejected at gate: opaque + counter --- *)
+
+let test_absolute_path_rejected () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_clean_env @@ fun () ->
+  let dir = mk_dir "kpath_abs" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+      let config = Coord.default_config dir in
+      let labels = [ ("kind", "absolute_path_rejected") ] in
+      let before = counter_value labels in
+      let target = Filename.concat dir "lib/foo.ml" in
+      let result =
+        Keeper_alerting_path.resolve_keeper_read_path ~config
+          ~allowed_paths:[] ~raw_path:target
+      in
+      check bool "rejection occurred" true (Result.is_error result);
+      let err =
+        Keeper_alerting_path.rejection_to_user_message (Result.get_error result)
+      in
+      assert_no_roots_leak "absolute_path_rejected" err;
+      (* Legacy prefix is NOT preserved for absolute paths — they hit a
+         different gate.  The important invariant is no host roots leak. *)
+      check bool "absolute_path_rejected: no '(roots=' substring" false
+        (Astring.String.is_infix ~affix:"(roots=" err);
+      check (float 0.0001) "absolute_path_rejected counter +1"
+        (before +. 1.0)
+        (counter_value labels))
+
+(* --- 5. counter labels are isolated per kind ------------- *)
 
 let test_counter_labels_isolated () =
   Eio_main.run @@ fun env ->
@@ -202,6 +241,11 @@ let () =
             test_out_of_roots_no_leak;
           test_case "not_found_relative error is opaque" `Quick
             test_not_found_relative_no_leak;
+        ] );
+      ( "absolute-path-gate",
+        [
+          test_case "absolute paths rejected without roots leak" `Quick
+            test_absolute_path_rejected;
         ] );
       ( "counter-labels",
         [

@@ -4,7 +4,7 @@
     with determinism and findings population verification. *)
 
 module CJ = Masc_mcp.Cdal_judge
-module CT = Masc_mcp.Cdal_types
+module CT = Cdal_types
 module CL = Masc_mcp.Cdal_loader
 
 (* ================================================================ *)
@@ -14,11 +14,11 @@ module CL = Masc_mcp.Cdal_loader
 let make_proof
     ?(run_id = "judge-test-001")
     ?(contract_id = "md5:abc123")
-    ?(schema_version = Agent_sdk.Cdal_proof.schema_version_current)
-    ?(requested = Agent_sdk.Execution_mode.Execute)
-    ?(effective = Agent_sdk.Execution_mode.Execute)
-    ?(risk_class = Agent_sdk.Risk_class.Low)
-    () : Agent_sdk.Cdal_proof.t =
+    ?(schema_version = Masc_mcp_cdal_runtime.Cdal_proof.schema_version_current)
+    ?(requested = Masc_mcp_cdal_runtime.Execution_mode.Execute)
+    ?(effective = Masc_mcp_cdal_runtime.Execution_mode.Execute)
+    ?(risk_class = Masc_mcp_cdal_runtime.Risk_class.Low)
+    () : Masc_mcp_cdal_runtime.Cdal_proof.t =
   {
     schema_version;
     run_id;
@@ -49,10 +49,10 @@ let make_proof
   }
 
 let make_contract
-    ?(requested = Agent_sdk.Execution_mode.Execute)
-    ?(risk_class = Agent_sdk.Risk_class.Low)
+    ?(requested = Masc_mcp_cdal_runtime.Execution_mode.Execute)
+    ?(risk_class = Masc_mcp_cdal_runtime.Risk_class.Low)
     ?review_requirement
-    () : Agent_sdk.Risk_contract.t =
+    () : Masc_mcp_cdal_runtime.Risk_contract.t =
   {
     runtime_constraints = {
       requested_execution_mode = requested;
@@ -67,11 +67,11 @@ let make_contract
 
 let make_bundle
     ?(run_id = "judge-test-001")
-    ?(proof_requested = Agent_sdk.Execution_mode.Execute)
-    ?(proof_effective = Agent_sdk.Execution_mode.Execute)
-    ?(proof_risk = Agent_sdk.Risk_class.Low)
-    ?(contract_requested = Agent_sdk.Execution_mode.Execute)
-    ?(contract_risk = Agent_sdk.Risk_class.Low)
+    ?(proof_requested = Masc_mcp_cdal_runtime.Execution_mode.Execute)
+    ?(proof_effective = Masc_mcp_cdal_runtime.Execution_mode.Execute)
+    ?(proof_risk = Masc_mcp_cdal_runtime.Risk_class.Low)
+    ?(contract_requested = Masc_mcp_cdal_runtime.Execution_mode.Execute)
+    ?(contract_risk = Masc_mcp_cdal_runtime.Risk_class.Low)
     ?contract_review_requirement
     ?(proof_raw_evidence_refs = [])
     ?(contract_id_match = true)
@@ -80,7 +80,7 @@ let make_bundle
       ~risk_class:contract_risk
       ?review_requirement:contract_review_requirement () in
   let recomputed_contract_id =
-    Agent_sdk.Risk_contract.contract_id contract in
+    Masc_mcp_cdal_runtime.Risk_contract.contract_id contract in
   let proof_contract_id =
     if contract_id_match then recomputed_contract_id
     else "md5:mismatched_hash" in
@@ -120,9 +120,9 @@ let test_all_satisfied () =
 let test_mode_propagation_violated () =
   (* proof requests Draft but contract requires Execute *)
   let bundle = make_bundle
-      ~proof_requested:Agent_sdk.Execution_mode.Draft
-      ~proof_effective:Agent_sdk.Execution_mode.Draft
-      ~contract_requested:Agent_sdk.Execution_mode.Execute () in
+      ~proof_requested:Masc_mcp_cdal_runtime.Execution_mode.Draft
+      ~proof_effective:Masc_mcp_cdal_runtime.Execution_mode.Draft
+      ~contract_requested:Masc_mcp_cdal_runtime.Execution_mode.Execute () in
   let cr = CJ.check_execution_mode bundle in
   Alcotest.(check string) "status" "violated"
     (CT.contract_status_to_string cr.status);
@@ -136,9 +136,9 @@ let test_mode_propagation_violated () =
 let test_mode_escalation_violated () =
   (* effective Execute > requested Draft *)
   let bundle = make_bundle
-      ~proof_requested:Agent_sdk.Execution_mode.Draft
-      ~proof_effective:Agent_sdk.Execution_mode.Execute
-      ~contract_requested:Agent_sdk.Execution_mode.Draft () in
+      ~proof_requested:Masc_mcp_cdal_runtime.Execution_mode.Draft
+      ~proof_effective:Masc_mcp_cdal_runtime.Execution_mode.Execute
+      ~contract_requested:Masc_mcp_cdal_runtime.Execution_mode.Draft () in
   let cr = CJ.check_execution_mode bundle in
   Alcotest.(check string) "status" "violated"
     (CT.contract_status_to_string cr.status);
@@ -153,8 +153,8 @@ let test_mode_escalation_violated () =
 
 let test_risk_class_violated () =
   let bundle = make_bundle
-      ~proof_risk:Agent_sdk.Risk_class.High
-      ~contract_risk:Agent_sdk.Risk_class.Low () in
+      ~proof_risk:Masc_mcp_cdal_runtime.Risk_class.High
+      ~contract_risk:Masc_mcp_cdal_runtime.Risk_class.Low () in
   let cr = CJ.check_risk_class bundle in
   Alcotest.(check string) "status" "violated"
     (CT.contract_status_to_string cr.status);
@@ -221,8 +221,8 @@ let test_review_requirement_inconclusive_warning_only () =
 let test_verdict_priority_violated_wins () =
   (* One violated check (risk mismatch) + others satisfied *)
   let bundle = make_bundle
-      ~proof_risk:Agent_sdk.Risk_class.Medium
-      ~contract_risk:Agent_sdk.Risk_class.Low () in
+      ~proof_risk:Masc_mcp_cdal_runtime.Risk_class.Medium
+      ~contract_risk:Masc_mcp_cdal_runtime.Risk_class.Low () in
   let verdict = CJ.judge bundle in
   Alcotest.(check string) "status" "violated"
     (CT.contract_status_to_string verdict.status)
@@ -254,8 +254,8 @@ let test_claim_scope_always_set () =
     "phase1_scoped_runtime_audit" verdict_ok.claim_scope;
   (* Violated case *)
   let bundle_bad = make_bundle
-      ~proof_risk:Agent_sdk.Risk_class.High
-      ~contract_risk:Agent_sdk.Risk_class.Low () in
+      ~proof_risk:Masc_mcp_cdal_runtime.Risk_class.High
+      ~contract_risk:Masc_mcp_cdal_runtime.Risk_class.Low () in
   let verdict_bad = CJ.judge bundle_bad in
   Alcotest.(check string) "claim_scope violated"
     "phase1_scoped_runtime_audit" verdict_bad.claim_scope
@@ -287,8 +287,8 @@ let test_replay_determinism () =
 
 let test_findings_populated () =
   let bundle = make_bundle
-      ~proof_risk:Agent_sdk.Risk_class.Critical
-      ~contract_risk:Agent_sdk.Risk_class.Low () in
+      ~proof_risk:Masc_mcp_cdal_runtime.Risk_class.Critical
+      ~contract_risk:Masc_mcp_cdal_runtime.Risk_class.Low () in
   let verdict = CJ.judge bundle in
   Alcotest.(check string) "violated" "violated"
     (CT.contract_status_to_string verdict.status);

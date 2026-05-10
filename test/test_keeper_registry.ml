@@ -1351,6 +1351,90 @@ let test_effective_keepalive_meta_prefers_registry_when_disk_unchanged () =
   check int "turn count comes from registry" 9
     chosen.runtime.usage.total_turns
 
+(* ── RFC-0045: SDK turn boundary alignment ─────────────────── *)
+
+let drive_turn_to_finalizing keeper_name =
+  R.mark_turn_started ~base_path:bp keeper_name;
+  R.set_turn_decision_stage
+    ~base_path:bp keeper_name R.Decision_tool_policy_selected;
+  R.set_turn_cascade_state ~base_path:bp keeper_name (R.Packed R.Cascade_selecting);
+  R.set_turn_cascade_state ~base_path:bp keeper_name (R.Packed R.Cascade_trying);
+  R.set_turn_cascade_state ~base_path:bp keeper_name (R.Packed R.Cascade_done)
+
+let test_mark_sdk_turn_started_resets_after_finalizing () =
+  R.clear ();
+  let keeper_name = "k-rfc-0045-reset" in
+  ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+  drive_turn_to_finalizing keeper_name;
+  R.mark_sdk_turn_started ~base_path:bp keeper_name;
+  match R.get ~base_path:bp keeper_name with
+  | None -> fail "entry missing after mark_sdk_turn_started"
+  | Some entry ->
+    (match entry.R.current_turn_observation with
+     | None -> fail "observation cleared by mark_sdk_turn_started"
+     | Some obs ->
+       check bool "turn_phase reset to Turn_prompting" true
+         (obs.R.turn_phase = R.Packed R.Turn_prompting);
+       check bool "cascade_state reset to Cascade_idle" true
+         (obs.R.cascade_state = R.Packed R.Cascade_idle);
+       check bool "decision_stage reset to Decision_undecided" true
+         (obs.R.decision_stage = R.Packed R.Decision_undecided))
+
+let test_mark_sdk_turn_started_preserves_keeper_scope () =
+  R.clear ();
+  let keeper_name = "k-rfc-0045-preserve" in
+  ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+  drive_turn_to_finalizing keeper_name;
+  let started_at_before, turn_id_before =
+    match R.get ~base_path:bp keeper_name with
+    | Some { current_turn_observation = Some obs; _ } ->
+      (obs.R.started_at, obs.R.turn_id)
+    | _ -> fail "obs missing before SDK boundary"
+  in
+  R.mark_sdk_turn_started ~base_path:bp keeper_name;
+  match R.get ~base_path:bp keeper_name with
+  | Some { current_turn_observation = Some obs; _ } ->
+    check int "turn_id preserved across SDK boundary"
+      turn_id_before obs.R.turn_id;
+    check (float 1e-6) "started_at preserved" started_at_before obs.R.started_at
+  | _ -> fail "obs missing after SDK boundary"
+
+let test_mark_sdk_turn_started_no_op_without_obs () =
+  R.clear ();
+  let keeper_name = "k-rfc-0045-no-obs" in
+  ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+  (* No mark_turn_started has been called yet. *)
+  R.mark_sdk_turn_started ~base_path:bp keeper_name;
+  match R.get ~base_path:bp keeper_name with
+  | Some { current_turn_observation = None; _ } -> ()
+  | Some { current_turn_observation = Some _; _ } ->
+    fail "mark_sdk_turn_started installed observation without keeper-turn"
+  | None -> fail "entry missing"
+
+(* The production [Assert_failure] at keeper_registry.ml:775 was triggered
+   when the SDK fired [before_turn_params] for a second time inside one
+   keeper-turn.  This test reproduces the same shape: two
+   [set_turn_cascade_state(Cascade_selecting)] calls separated by a
+   [Cascade_done] terminal, with [mark_sdk_turn_started] used as the
+   boundary.  Without the RFC-0045 boundary call this test would crash
+   on the second [set_turn_cascade_state]. *)
+let test_two_sdk_turn_boundaries_no_assert () =
+  R.clear ();
+  let keeper_name = "k-rfc-0045-two-boundaries" in
+  ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+  drive_turn_to_finalizing keeper_name;
+  (* Second SDK turn arrives via before_turn_params hook. *)
+  R.mark_sdk_turn_started ~base_path:bp keeper_name;
+  R.set_turn_decision_stage
+    ~base_path:bp keeper_name R.Decision_tool_policy_selected;
+  R.set_turn_cascade_state ~base_path:bp keeper_name (R.Packed R.Cascade_selecting);
+  match R.get ~base_path:bp keeper_name with
+  | Some { current_turn_observation = Some obs; _ } ->
+    check bool "second SDK turn lands in Cascade_selecting / Turn_routing" true
+      (obs.R.cascade_state = R.Packed R.Cascade_selecting
+       && obs.R.turn_phase = R.Packed R.Turn_routing)
+  | _ -> fail "obs missing after second SDK boundary"
+
 let test_effective_keepalive_meta_prefers_disk_when_present () =
   R.clear ();
   let stale = make_meta "loop-meta-disk" in
@@ -1506,5 +1590,16 @@ let () =
             test_effective_keepalive_meta_prefers_registry_when_disk_unchanged;
           eio_test "effective keepalive meta prefers disk when present"
             test_effective_keepalive_meta_prefers_disk_when_present;
+        ] );
+      ( "rfc_0045_sdk_turn_boundary",
+        [
+          eio_test "mark_sdk_turn_started resets in-turn FSM after Turn_finalizing"
+            test_mark_sdk_turn_started_resets_after_finalizing;
+          eio_test "mark_sdk_turn_started preserves keeper-turn-scoped data"
+            test_mark_sdk_turn_started_preserves_keeper_scope;
+          eio_test "mark_sdk_turn_started no-op without observation"
+            test_mark_sdk_turn_started_no_op_without_obs;
+          eio_test "two SDK-turn boundaries inside one keeper-turn"
+            test_two_sdk_turn_boundaries_no_assert;
         ] );
     ]

@@ -195,7 +195,10 @@ let start_managed_container
                     ]
                   in
                   let st, out =
-                    Process_eio.run_argv_with_status
+                    Masc_exec.Exec_gate.run_argv_with_status
+                      ~actor:`System_task_sandbox
+                      ~raw_source:(String.concat " " argv)
+                      ~summary:"keeper sandbox control exec"
                       ~env:(Unix.environment ())
                       ~cwd:(Sys.getcwd ())
                       ~timeout_sec
@@ -287,9 +290,13 @@ let max_live_git_enrichment_repos = 20
 
 let git_string_opt repo_path args =
   try
+    let argv = "git" :: "-C" :: repo_path :: args in
     let status, out =
-      Process_eio.run_argv_with_status ~timeout_sec:git_metadata_timeout_sec
-        ("git" :: "-C" :: repo_path :: args)
+      Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
+        ~raw_source:(String.concat " " argv)
+        ~summary:"keeper sandbox git metadata"
+        ~timeout_sec:git_metadata_timeout_sec
+        argv
     in
     match status with
     | Unix.WEXITED 0 ->

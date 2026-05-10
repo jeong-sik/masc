@@ -710,6 +710,17 @@ let metric_inference_queue_cancelled = "masc_inference_queue_cancelled_total"
 let metric_inference_queue_rejected = "masc_inference_queue_rejected_total"
 let metric_inference_queue_max_concurrent = "masc_inference_queue_max_concurrent"
 
+(* Cascade metrics — used in cascade_metrics.ml.
+   Labels: decision=accept|accept_on_exhaustion|try_next|exhausted *)
+let metric_cascade_decisions = "masc_cascade_decisions_total"
+
+(* Labels: reason=call_err|slot_full|accept_rejected|health_filter *)
+let metric_cascade_fallbacks = "masc_cascade_fallbacks_total"
+let metric_cascade_providers_exhausted = "masc_cascade_providers_exhausted_total"
+
+(* Labels: phase=<keeper_phase>, from_cascade=<name>, to_cascade=<name> *)
+let metric_cascade_routing_phase_overrides = "masc_cascade_routing_phase_overrides_total"
+
 (* Agent health metrics — used in transport_metrics.ml. *)
 let metric_agent_heartbeat_age_seconds = "masc_agent_heartbeat_age_seconds"
 let metric_agent_stale_total = "masc_agent_stale_total"
@@ -1405,6 +1416,22 @@ let init () =
     "Total fallback events across the LLM cascade pipeline, labeled by kind \
      (cross_cascade|cascade_empty|capability_drop|cli_unsupported|...) and detail"
     Counter;
+  (* Cascade FSM metrics — emitted by cascade_metrics.ml. *)
+  add metric_cascade_decisions
+    "Total cascade routing decisions, labeled by decision=accept|\
+     accept_on_exhaustion|try_next|exhausted"
+    Counter;
+  add metric_cascade_fallbacks
+    "Total cascade fallback events, labeled by reason=call_err|slot_full|\
+     accept_rejected|health_filter"
+    Counter;
+  add metric_cascade_providers_exhausted
+    "Total provider exhaustion events (all providers in cascade failed)"
+    Counter;
+  add metric_cascade_routing_phase_overrides
+    "Total phase-based cascade routing overrides, labeled by phase and \
+     from_cascade / to_cascade"
+    Counter;
   (* Orphan metrics — used via inc_counter/set_gauge but previously
      never registered.  Auto-create still works, but registering here
      gives them a HELP description in /metrics output and a zero-value
@@ -1642,7 +1669,7 @@ let init () =
     Counter;
   add metric_cascade_fallback_cycle_detected_total
     "Total cascade fallback_cascade cycles detected during load_catalog. \
-     A cycle (e.g. big_three → glm_coding_plan_only → big_three) means \
+     A cycle (e.g. default → glm_coding_plan_only → default) means \
      a provider stall propagates through both cascades silently for \
      600s+ without escaping.  Labeled by [cascade] (cycle entry point)."
     Counter;
@@ -2041,18 +2068,18 @@ let init () =
     "Estimated OAS Event_bus per-subscriber stream depth, labeled by \
      subscriber_purpose. Indirect measure: publishes_matching_filter - \
      events_drained, tracked MASC-side for subscriptions created via \
-     Oas_bus_instrument. OAS uses bounded Eio.Stream (default 256); values \
+     Agent_sdk_metrics_bridge. OAS uses bounded Eio.Stream (default 256); values \
      approaching this cap indicate impending publish blocking."
     Gauge;
   add metric_oas_bus_publish_block_seconds
     "Cumulative seconds spent inside Agent_sdk.Event_bus.publish when routed \
-     through Oas_bus_instrument.publish. A sustained ramp indicates a \
+     through Agent_sdk_metrics_bridge.publish. A sustained ramp indicates a \
      subscriber drain loop has fallen behind and publishers are blocking \
      on Eio.Stream.add."
     Counter;
   add metric_oas_bus_publish
     "Total Agent_sdk.Event_bus.publish calls routed through \
-     Oas_bus_instrument.publish."
+     Agent_sdk_metrics_bridge.publish."
     Counter;
   add metric_runtime_ollama_probe_generate_skips
     "Total Ollama runtime probes that intentionally skipped /api/generate. \

@@ -20,6 +20,7 @@ function makeSnapshot(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperC
       compaction_atomicity: true,
       event_priority_monotone: true,
     },
+    fsm_guard_violations: 0,
     is_live: true,
     last_outcome: null,
     recommended_actions: [],
@@ -416,5 +417,23 @@ describe('deriveOperationalInsight', () => {
       now,
     )
     expect(insight.nextStep).toContain('idle')
+  })
+
+  it('gives correct nextStep for routing turn', () => {
+    const insight = deriveOperationalInsight(
+      makeSnapshot({ turn_phase: 'routing' }),
+      noObservations,
+      now,
+    )
+    expect(insight.nextStep).toContain('cascade routing')
+  })
+
+  it('gives correct nextStep for exhausted turn', () => {
+    const insight = deriveOperationalInsight(
+      makeSnapshot({ turn_phase: 'exhausted' }),
+      noObservations,
+      now,
+    )
+    expect(insight.nextStep).toContain('소진')
   })
 })

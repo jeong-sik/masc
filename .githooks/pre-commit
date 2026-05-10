@@ -1,0 +1,6 @@
+#!/bin/sh
+set -e
+
+# Type-check all OCaml code without producing binaries.
+# Fails fast on type errors before they reach CI.
+dune build --root . @check

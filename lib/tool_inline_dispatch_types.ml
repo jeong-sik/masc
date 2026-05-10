@@ -52,6 +52,6 @@ type context = {
 
 (** Helper: run subprocess — uses [Dispatch] caller (default 120s) *)
 let safe_exec args =
-  match Process_eio.run_argv_with_status ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Dispatch ()) args with
+  match Masc_exec.Exec_gate.run_argv_with_status ~actor:`Tool_local_runtime ~raw_source:(String.concat " " args) ~summary:"inline dispatch safe exec" ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Dispatch ()) args with
   | Unix.WEXITED 0, output -> (true, output)
   | _, output -> (false, if String.equal output "" then "Command failed" else output)

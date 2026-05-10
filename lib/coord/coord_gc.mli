@@ -20,19 +20,23 @@
 val heartbeat :
   Coord_utils_backend_setup.config -> agent_name:string -> string
 
+type cleanup_zombie_result =
+  | No_agents_dir
+  | No_zombies
+  | Cleaned of { count : int; names : string list; released_tasks : int; skipped : int }
+(** Structured result of zombie cleanup to eliminate string-based parsing at call sites. *)
+
 (** Sweep [.masc/agents/] and remove agents that have not heartbeated
     within the threshold.
 
     [keeper_threshold_sec] applies to keeper agents and defaults to
     {!Env_config.Zombie.keeper_threshold_seconds}; [agent_threshold_sec]
     applies to all other agents and defaults to
-    {!Env_config.Zombie.threshold_seconds}.
-
-    Returns a human-readable summary of what was cleaned. *)
+    {!Env_config.Zombie.threshold_seconds}. *)
 val cleanup_zombies :
   ?keeper_threshold_sec:float ->
   ?agent_threshold_sec:float ->
-  Coord_utils_backend_setup.config -> string
+  Coord_utils_backend_setup.config -> cleanup_zombie_result
 
 (** Run the full coord garbage-collection pass:
     {ol

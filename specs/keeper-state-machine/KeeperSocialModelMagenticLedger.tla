@@ -105,8 +105,6 @@ NextBuggy ==
 
 SpecBuggy == Init /\ [][NextBuggy]_vars
 
-StalledNeedsGoalOrFailureMustHold == StalledNeedsGoalOrFailure
-
 Spec == Init /\ [][Next]_vars
 
 TypeOK ==
@@ -157,5 +155,8 @@ StalledStickyWithGoal ==
 
 QuietWhenNoDrivers ==
     [][QuietWhenNoDriversAction]_vars
+
+(* Wrapper for buggy cfg — must be defined AFTER the invariant it references. *)
+StalledNeedsGoalOrFailureMustHold == StalledNeedsGoalOrFailure
 
 =============================================================================

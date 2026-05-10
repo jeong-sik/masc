@@ -1,6 +1,8 @@
 (** See {!Cascade_routes} interface. *)
 
-type logical_use =
+open Cascade_ref
+
+type logical_use = Cascade_ref.logical_use =
   | Keeper_turn
   | Phase_recovery
   | Phase_buffer
@@ -21,92 +23,94 @@ type logical_use =
   | Complex_task
   | Tool_rerank_use
 
-type fallback_policy =
-  | Prefer_keeper_assignable of { last_resort_profile : string }
-  | Prefer_system_only of {
-      preferred_profiles : string list;
-      last_resort_profile : string;
-    }
-
 type route_spec = {
   use : logical_use;
   key : string;
   aliases : string list;
-  fallback_policy : fallback_policy;
 }
 
-(* Default last-resort profile name for keeper routes.  Must agree with
-   [Keeper_cascade_profile.default_name] — the SSOT for the profile string
-   "big_three".  Cross-module drift is guarded by
-   [test_cascade_routes_bigthree_ssot.ml].  Direct reference to
-   [Keeper_cascade_profile] is impossible from here because that module
-   already depends on this one (see [keeper_cascade_profile.ml:31]). *)
-let keeper_default_last_resort_profile = "big_three"
+(* Per RFC-0041 cascade routing SSOT, the live cascade catalog
+   (cascade.json) is the single source of truth for keeper-assignable
+   profile names.  This module performs static lookup only — operator
+   spec (cascade.json [routes] + fallback_cascade) decides routing and
+   the runtime cascade chain handles try/fail/next-cascade.  If the
+   catalog is empty at runtime,
+   [Cascade_catalog_runtime.validate_path_result] already rejects keeper
+   boot.  [fallback_from_entries]/[fallback_name_for_catalog] return the
+   first alias from [spec_for_use] as a soft fallback, so test
+   executables that link these modules transitively do not crash at
+   module-init time. *)
 
-let keeper_route use key aliases =
-  {
-    use;
-    key;
-    aliases;
-    fallback_policy =
-      Prefer_keeper_assignable
-        { last_resort_profile = keeper_default_last_resort_profile };
-  }
+let route use key aliases = { use; key; aliases }
 
-let system_route use key aliases ~preferred_profiles ~last_resort_profile =
-  {
-    use;
-    key;
-    aliases;
-    fallback_policy =
-      Prefer_system_only { preferred_profiles; last_resort_profile };
-  }
+(* [spec_for_use] is the SSOT for the (logical_use → key/aliases) mapping.
+   Written as an exhaustive [match] so adding a new constructor to
+   [logical_use] is a compile-time error here, not a runtime
+   [assert false] surfaced by [spec_for_use] callers.  Per CLAUDE.md
+   §"FSM Sparse Match" anti-pattern: a list lookup keyed by a closed
+   sum type silently degrades when the list and the type drift apart. *)
+let spec_for_use : logical_use -> route_spec = function
+  | Keeper_turn ->
+      route Keeper_turn "keeper_turn"
+        [
+          "default";
+          "default_models";
+          "oas-keeper_unified";
+          "coding_first";
+          "oas-coding_first";
+          "keeper_reply";
+          "keeper_unified";
+        ]
+  | Phase_recovery -> route Phase_recovery "phase_recovery" [ "local_recovery" ]
+  | Phase_buffer -> route Phase_buffer "phase_buffer" [ "local_only" ]
+  | Tool_required ->
+      route Tool_required "tool_required"
+        [ "tool_use_strict"; "resilient_breaker" ]
+  | Governance_judge -> route Governance_judge "governance_judge" []
+  | Operator_judge -> route Operator_judge "operator_judge" []
+  | Cross_verifier -> route Cross_verifier "cross_verifier" []
+  | Verifier -> route Verifier "verifier" []
+  | Autoresearch -> route Autoresearch "autoresearch" []
+  | Adversarial_reviewer -> route Adversarial_reviewer "adversarial_reviewer" []
+  | Auto_responder -> route Auto_responder "auto_responder" []
+  | Routing -> route Routing "routing" [ "routing_judge" ]
+  | Openai_compat -> route Openai_compat "openai_compat" []
+  | Persona_generation -> route Persona_generation "persona_generation" []
+  | Provider_benchmark -> route Provider_benchmark "provider_benchmark" []
+  | Simple_task -> route Simple_task "simple_task" []
+  | Moderate_task -> route Moderate_task "moderate_task" []
+  | Complex_task -> route Complex_task "complex_task" []
+  | Tool_rerank_use -> route Tool_rerank_use "llm_rerank" []
 
-let route_specs =
+(* The known-uses enumeration must remain in sync with [logical_use].
+   When a new constructor is added, the [match] in [spec_for_use] will
+   refuse to compile until extended; this list still requires a manual
+   append, but downstream lookups go through [spec_for_use] so the
+   silent-runtime-failure path is closed. *)
+let all_logical_uses : logical_use list =
   [
-    keeper_route Keeper_turn "keeper_turn"
-      [
-        "default";
-        "default_models";
-        "oas-keeper_unified";
-        "coding_first";
-        "oas-coding_first";
-        "keeper_reply";
-        "keeper_unified";
-      ];
-    keeper_route Phase_recovery "phase_recovery" [ "local_recovery" ];
-    keeper_route Phase_buffer "phase_buffer" [ "local_only" ];
-    keeper_route Tool_required "tool_required"
-      [ "tool_use_strict"; "resilient_breaker" ];
-    keeper_route Governance_judge "governance_judge" [];
-    keeper_route Operator_judge "operator_judge" [];
-    keeper_route Cross_verifier "cross_verifier" [];
-    keeper_route Verifier "verifier" [];
-    keeper_route Autoresearch "autoresearch" [];
-    keeper_route Adversarial_reviewer "adversarial_reviewer" [];
-    keeper_route Auto_responder "auto_responder" [];
-    keeper_route Routing "routing" [ "routing_judge" ];
-    keeper_route Openai_compat "openai_compat" [];
-    keeper_route Persona_generation "persona_generation" [];
-    keeper_route Provider_benchmark "provider_benchmark" [];
-    system_route Simple_task "simple_task" []
-      ~preferred_profiles:[ "tier_small"; "tier_medium" ]
-      ~last_resort_profile:keeper_default_last_resort_profile;
-    system_route Moderate_task "moderate_task" []
-      ~preferred_profiles:[ "tier_medium" ]
-      ~last_resort_profile:keeper_default_last_resort_profile;
-    keeper_route Complex_task "complex_task" [];
-    system_route Tool_rerank_use "llm_rerank" []
-      ~preferred_profiles:[ "tool_rerank" ]
-      ~last_resort_profile:"tool_rerank";
+    Keeper_turn;
+    Phase_recovery;
+    Phase_buffer;
+    Tool_required;
+    Governance_judge;
+    Operator_judge;
+    Cross_verifier;
+    Verifier;
+    Autoresearch;
+    Adversarial_reviewer;
+    Auto_responder;
+    Routing;
+    Openai_compat;
+    Persona_generation;
+    Provider_benchmark;
+    Simple_task;
+    Moderate_task;
+    Complex_task;
+    Tool_rerank_use;
   ]
 
-let spec_for_use use =
-  match List.find_opt (fun spec -> spec.use = use) route_specs with
-  | Some spec -> spec
-  | None -> assert false
-
-let all_logical_uses = List.map (fun spec -> spec.use) route_specs
+let route_specs : route_spec list = List.map spec_for_use all_logical_uses
 
 let known_route_keys =
   route_specs
@@ -181,58 +185,27 @@ let catalog_entries ?config_path () =
       | Ok entries -> Some entries
       | Error _ -> None)
 
-let first_keeper_assignable entries =
-  entries
-  |> List.find_map (fun (entry : Cascade_config_loader.catalog_entry) ->
-         if entry.keeper_assignable then Some entry.name else None)
-
-let first_system_only entries =
-  entries
-  |> List.find_map (fun (entry : Cascade_config_loader.catalog_entry) ->
-         if entry.keeper_assignable then None else Some entry.name)
-
 let first_catalog_name entries =
   match entries with
   | (entry : Cascade_config_loader.catalog_entry) :: _ -> Some entry.name
   | [] -> None
 
-let first_available_name ~catalog names =
-  names |> List.find_opt (fun name -> List.mem name catalog)
+let first_alias_or_key (spec : route_spec) =
+  match spec.aliases with
+  | first :: _ -> first
+  | [] -> spec.key
 
 let fallback_from_entries use entries =
   let spec = spec_for_use use in
-  let catalog_names =
-    List.map (fun (entry : Cascade_config_loader.catalog_entry) -> entry.name) entries
-  in
-  match spec.fallback_policy with
-  | Prefer_keeper_assignable { last_resort_profile } ->
-      (match first_keeper_assignable entries with
-       | Some name -> name
-       | None ->
-           Option.value (first_catalog_name entries) ~default:last_resort_profile)
-  | Prefer_system_only { preferred_profiles; last_resort_profile } ->
-      (match first_available_name ~catalog:catalog_names preferred_profiles with
-       | Some name -> name
-       | None -> (
-           match first_system_only entries with
-           | Some name -> name
-           | None -> (
-               match first_keeper_assignable entries with
-               | Some name -> name
-               | None ->
-                   Option.value (first_catalog_name entries)
-                     ~default:last_resort_profile)))
+  match first_catalog_name entries with
+  | Some name -> name
+  | None -> first_alias_or_key spec
 
 let fallback_name_for_catalog use ~catalog =
-  let first_catalog = match catalog with name :: _ -> Some name | [] -> None in
   let spec = spec_for_use use in
-  match spec.fallback_policy with
-  | Prefer_keeper_assignable { last_resort_profile } ->
-      Option.value first_catalog ~default:last_resort_profile
-  | Prefer_system_only { preferred_profiles; last_resort_profile } -> (
-      match first_available_name ~catalog preferred_profiles with
-      | Some name -> name
-      | None -> Option.value first_catalog ~default:last_resort_profile)
+  match catalog with
+  | name :: _ -> name
+  | [] -> first_alias_or_key spec
 
 let logged_invalid_route_targets : (string * string, unit) Hashtbl.t =
   Hashtbl.create 8

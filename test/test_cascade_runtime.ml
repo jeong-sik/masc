@@ -15,11 +15,11 @@ let provider_kind_models providers =
     providers
 
 let provider_supports_required_tool_use (cfg : Llm_provider.Provider_config.t) =
-  let caps = Masc_mcp.Oas_worker_exec.provider_caps_of_config cfg in
+  let caps = Masc_mcp.Cascade_runner.provider_caps_of_config cfg in
   caps.supports_tools && caps.supports_tool_choice
 
 let provider_supports_callable_tool_use (cfg : Llm_provider.Provider_config.t) =
-  let caps = Masc_mcp.Oas_worker_exec.provider_caps_of_config cfg in
+  let caps = Masc_mcp.Cascade_runner.provider_caps_of_config cfg in
   caps.supports_tools
   || (caps.supports_runtime_mcp_tools && caps.supports_runtime_tool_events)
 

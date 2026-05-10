@@ -56,6 +56,20 @@ type t =
   | Exception_unhandled of string
   (** [Keeper_registry.Exception]: payload is the exception
           message. *)
+  | Sdk_error of string
+  (** Catch-all for [Agent_sdk.Error.t] wire strings (agent / api /
+          mcp / config / serialization / io / orchestration / a2a /
+          internal). The payload is the existing parametrised wire
+          format produced by [Keeper_agent_error.terminal_reason_code_of_sdk_error]
+          (e.g. ["agent_error_max_turns_exceeded:turns=10,limit=10"],
+          ["completion_contract_violation:require_tool_use"],
+          ["api_error_server:502"]). PR-2.5 wraps the existing typed
+          accessors in this variant so the typed bridge becomes a
+          single source of truth for [Keeper_turn_terminal.t.code]
+          field swap (PR-3). RFC-0042 §5.2 explicitly defers refining
+          this into per-variant constructors (~25-variant explosion);
+          a follow-up RFC will split it once production traces narrow
+          the actual sub-kind set. *)
 
 (** Stable wire format. The strings produced here are byte-for-byte
     compatible with the strings emitted today by
@@ -88,3 +102,28 @@ val of_wire : string -> t option
     constructor there is a compile error here, which is the property
     this RFC is meant to provide. *)
 val of_failure_reason : Keeper_registry.failure_reason -> t
+
+(** Option-wrapped bridge. [None] is the legacy convention for a
+    keeper that became stale without a recorded [failure_reason]; the
+    pre-RFC string emitter mapped this to ["stale_turn_timeout"]. We
+    canonicalise to [Stale_turn_timeout_in_turn] so [to_wire] reproduces
+    the same bytes. PR-3 narrows callers to a non-option representation
+    where applicable.
+
+    @since 0.193.0 *)
+val of_failure_reason_option : Keeper_registry.failure_reason option -> t
+
+(** Wrap an [Agent_sdk.Error.t] wire string into the typed bridge.
+    The argument is the legacy parametrised wire string produced by
+    [Keeper_agent_error.terminal_reason_code_of_sdk_error] /
+    [agent_error_terminal_reason_code] /
+    [api_error_terminal_reason_code]. Returns [Sdk_error s] verbatim;
+    [to_wire] reproduces [s] byte-for-byte.
+
+    PR-2.5 introduces this as a thin typed bridge; a follow-up RFC
+    will replace [s] with a closed sub-sum once the parametrised
+    sub-kinds (`turns=N,limit=M`, `kind=token,used=K,limit=L`, …) are
+    inventoried from production traces.
+
+    @since 0.193.1 *)
+val of_sdk_error_wire : string -> t

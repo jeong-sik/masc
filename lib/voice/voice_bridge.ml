@@ -54,7 +54,7 @@ let exec_gate_raw_source argv =
 
 let run_voice_status ?(timeout_sec = 35.0) ?(stdin_content = "") argv =
   Masc_exec.Exec_gate.run_argv_with_stdin_and_status
-    ~actor:"voice/bridge"
+    ~actor:(Masc_exec.Agent_id.of_string "voice/bridge")
     ~raw_source:(exec_gate_raw_source argv)
     ~summary:"voice bridge exec"
     ~timeout_sec

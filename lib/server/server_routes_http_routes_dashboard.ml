@@ -99,7 +99,9 @@ let sync_keeper_cascade_meta ~(config : Coord.config) ~(name : string)
   match Keeper_types.read_meta config name with
   | Error msg -> Error ("read_meta failed after TOML update: " ^ msg)
   | Ok (Some meta) ->
-      let updated = { meta with cascade_name; updated_at } in
+      let updated =
+        { (Keeper_types.set_cascade_name cascade_name meta) with updated_at }
+      in
       (match Keeper_types.write_meta ~force:true config updated with
        | Ok () ->
            let registered =
@@ -113,7 +115,9 @@ let sync_keeper_cascade_meta ~(config : Coord.config) ~(name : string)
       (match Keeper_registry.get ~base_path:config.base_path name with
        | None -> Ok false
        | Some entry ->
-           let updated = { entry.meta with cascade_name; updated_at } in
+           let updated =
+             { (Keeper_types.set_cascade_name cascade_name entry.meta) with updated_at }
+           in
            (match Keeper_types.write_meta ~force:true config updated with
             | Ok () ->
                 Keeper_registry.update_meta ~base_path:config.base_path name
@@ -467,6 +471,29 @@ let rec add_routes ~sw ~clock router =
                Http.Response.json ~status:`Bad_request ~request:req
                  (Yojson.Safe.to_string
                     (`Assoc [ ("ok", `Bool false); ("error", `String message) ]))
+                 reqd)
+       ) request reqd)
+  (* RFC-0049 — surface/section open counters. Aggregate Prometheus
+     counters only; the request body is discarded after increment. *)
+  |> Http.Router.post "/api/v1/dashboard/nav-event" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           let result =
+             try
+               let json = Yojson.Safe.from_string body_str in
+               Dashboard_nav_event.parse_event_json json
+             with Yojson.Json_error err ->
+               Error ("invalid json: " ^ err)
+           in
+           match result with
+           | Ok event ->
+               Dashboard_nav_event.record event;
+               Http.Response.json ~request:req {|{"ok":true}|} reqd
+           | Error message ->
+               Http.Response.json ~status:`Bad_request ~request:req
+                 (Yojson.Safe.to_string
+                    (`Assoc
+                      [ ("ok", `Bool false); ("error", `String message) ]))
                  reqd)
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/config" (fun request reqd ->

@@ -66,6 +66,7 @@
   keeper_exec_shared
    keeper_exec_board
    keeper_exec_fs
+   keeper_exec_ide
    keeper_shell_docker
    keeper_egress_audit
    keeper_mcp_provider_audit
@@ -113,6 +114,12 @@
   keeper_agent_result
   keeper_agent_error
   keeper_agent_memory_episode
+  keeper_agent_context
+  keeper_oas_checkpoint
+  keeper_turn_driver
+  keeper_turn_driver_helpers
+  keeper_turn_driver_try_provider
+  keeper_turn_driver_wrappers
   keeper_exec_context
   keeper_guards
   keeper_turn_setup
@@ -124,6 +131,7 @@
   keeper_msg_async
   keeper_event_bus
   keeper_event_queue
+  keeper_relevance_check
   masc_event_bus
   ;; worker_container sub-modules
   worker_container_types
@@ -166,15 +174,6 @@
   tool_misc_admin
   tool_misc_web_search
   tool_misc_web_fetch
-  oas_worker_cascade
-  oas_worker_exec_agent
-  oas_worker_exec
-  oas_worker_exec_checkpoint
-  oas_worker_exec_transport
-  oas_worker_named
-  oas_worker_named_cascade
-  oas_worker_named_error
-  oas_worker_named_fsm
   meta_cognition_types
   meta_cognition_rules
   meta_cognition_snapshot
@@ -184,6 +183,10 @@
   tool_task_schemas
   board_core_classify
   board_core_payload
+  ide_annotation_types
+  ide_annotations
+  ide_region_tracker
+  server_ide_http
   )
  (libraries
    mcp_protocol
@@ -238,6 +241,13 @@
    agent_sdk
    agent_sdk.base
    agent_sdk.llm_provider
+   masc_mcp.cdal_runtime
+   ;; RFC-0056 Phase 0 — CDAL Phase 1A evaluator extracted to lib/cdal/
+   ;; as its own sub-library. Hosts Cdal_types + Adversarial_eval +
+   ;; Labeling. Phase 1 will move judge / eval_v1 / loader once their
+   ;; root-namespace cycles (Proof_artifact_reader, Bounded, Session,
+   ;; Attribution, Violation_record) are resolved.
+   masc_mcp.cdal
    masc_mcp.oas_compat
 
    uri

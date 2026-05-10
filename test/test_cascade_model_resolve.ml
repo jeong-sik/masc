@@ -47,20 +47,20 @@ let test_gemini_cli_auto_maps_to_flash_preview () =
 let test_gemini_cli_explicit_model_passthrough () =
   with_clean_env (fun () ->
     let resolved =
-      R.resolve_auto_model_id "gemini_cli" "gemini-2.5-flash"
+      R.resolve_auto_model_id "gemini_cli" "gemini-3-flash-preview"
     in
     check string "explicit model untouched"
-      "gemini-2.5-flash" resolved)
+      "gemini-3-flash-preview" resolved)
 
 let test_gemini_env_override () =
-  Unix.putenv "GEMINI_DEFAULT_MODEL" "gemini-2.5-flash";
+  Unix.putenv "GEMINI_DEFAULT_MODEL" "gemini-3-flash-preview";
   let resolved_gemini = R.resolve_auto_model_id "gemini" "auto" in
   let resolved_cli = R.resolve_auto_model_id "gemini_cli" "auto" in
   Unix.putenv "GEMINI_DEFAULT_MODEL" "";
   check string "gemini respects env override"
-    "gemini-2.5-flash" resolved_gemini;
+    "gemini-3-flash-preview" resolved_gemini;
     check string "gemini_cli respects same env override"
-    "gemini-2.5-flash" resolved_cli
+    "gemini-3-flash-preview" resolved_cli
 
 let test_glm_coding_auto_maps_to_glm_5_1 () =
   with_clean_env (fun () ->
@@ -72,7 +72,6 @@ let test_glm_coding_auto_models_default_order () =
   with_clean_env (fun () ->
     check (list string) "glm-coding:auto expands to coding-plan order"
       [
-        "glm-5-code";
         "glm-5.1";
         "glm-5";
         "glm-5-turbo";
@@ -87,10 +86,7 @@ let test_gemini_cli_auto_models_default_rotation_order () =
       [
         "gemini-3-flash-preview";
         "gemini-3.1-flash-lite-preview";
-        "gemini-2.5-flash";
-        "gemini-2.5-flash-lite";
         "gemini-3.1-pro-preview";
-        "gemini-2.5-pro";
       ]
       (R.gemini_cli_auto_models ()))
 
@@ -151,10 +147,7 @@ let test_expand_auto_models_includes_cli_auto_specs () =
       [
         "gemini_cli:gemini-3-flash-preview";
         "gemini_cli:gemini-3.1-flash-lite-preview";
-        "gemini_cli:gemini-2.5-flash";
-        "gemini_cli:gemini-2.5-flash-lite";
         "gemini_cli:gemini-3.1-pro-preview";
-        "gemini_cli:gemini-2.5-pro";
         "codex_cli:gpt-5.2";
         "codex_cli:gpt-5.3-codex-spark";
         "codex_cli:gpt-5.3-codex";
@@ -290,7 +283,7 @@ let test_order_weighted_entries_rotation_scope_rotates_top_level_providers () =
       "codex_cli:gpt-5.3-codex-spark"
       (List.hd second);
     check string "third call rotates to gemini provider"
-      "gemini_cli:gemini-2.5-flash"
+      "gemini_cli:gemini-3-flash-preview"
       (List.hd third);
     check string "different scope restarts top-level provider order"
       "claude_code:auto"

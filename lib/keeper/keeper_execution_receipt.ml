@@ -133,10 +133,10 @@ type t =
   }
 
 let stop_reason_to_string = function
-  | Oas_worker.Completed -> "completed"
-  | Oas_worker.TurnBudgetExhausted { turns_used; limit } ->
+  | Cascade_runner.Completed -> "completed"
+  | Cascade_runner.TurnBudgetExhausted { turns_used; limit } ->
     Printf.sprintf "turn_budget_exhausted:%d/%d" turns_used limit
-  | Oas_worker.MutationBoundaryReached { turns_used; tool_name } ->
+  | Cascade_runner.MutationBoundaryReached { turns_used; tool_name } ->
     (match tool_name with
      | Some tool ->
        Printf.sprintf "mutation_boundary:%s:%d" tool turns_used
@@ -715,22 +715,16 @@ let stale_kill_class_label = function
   | Keeper_registry.In_turn_hung _ -> "in_turn_hung"
   | Keeper_registry.Noop_failure_loop _ -> "noop_failure_loop"
 
-let stale_terminal_reason_code = function
-  | Some (Keeper_registry.Provider_runtime_error { code; _ }) -> code
-  | Some (Keeper_registry.Tool_required_unsatisfied { code; _ }) -> code
-  | Some (Keeper_registry.Oas_timeout_budget_loop _) -> "oas_timeout_budget"
-  | Some (Keeper_registry.Stale_turn_timeout _) -> "stale_turn_timeout"
-  | Some (Keeper_registry.Stale_fleet_batch _) -> "stale_fleet_batch"
-  | Some (Keeper_registry.Stale_termination_storm _) ->
-      "stale_termination_storm"
-  | Some (Keeper_registry.Heartbeat_consecutive_failures _) ->
-      "heartbeat_failures"
-  | Some (Keeper_registry.Turn_consecutive_failures _) -> "turn_failures"
-  | Some (Keeper_registry.Ambiguous_partial_commit _) ->
-      "ambiguous_partial_commit"
-  | Some Keeper_registry.Fiber_unresolved -> "fiber_unresolved"
-  | Some (Keeper_registry.Exception _) -> "exception"
-  | None -> "stale_turn_timeout"
+(* RFC-0042 PR-2: delegate to [Keeper_turn_terminal_code]. The pre-RFC
+   inline match has been preserved as the test oracle in
+   [test/test_keeper_turn_terminal_code.ml] (byte-for-byte invariant).
+   New [Keeper_registry.failure_reason] constructors are now a compile
+   error in [Keeper_turn_terminal_code.of_failure_reason]. *)
+let stale_terminal_reason_code_typed reason =
+  Keeper_turn_terminal_code.of_failure_reason_option reason
+
+let stale_terminal_reason_code reason =
+  Keeper_turn_terminal_code.to_wire (stale_terminal_reason_code_typed reason)
 
 let stale_broadcast_failure_cohort = function
   | Some _ as reason -> Keeper_registry.failure_reason_cohort_key reason

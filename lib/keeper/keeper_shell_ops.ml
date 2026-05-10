@@ -564,7 +564,10 @@ let handle_keeper_shell
                      ]))
           | None ->
             let st, out =
-              Process_eio.run_argv_with_status ~timeout_sec:Keeper_shell_shared.read_timeout_sec argv
+              Masc_exec.Exec_gate.run_argv_with_status ~actor:`Keeper_shell
+                ~raw_source:(String.concat " " argv)
+                ~summary:"keeper shell op"
+                ~timeout_sec:Keeper_shell_shared.read_timeout_sec argv
             in
             Yojson.Safe.to_string
               (`Assoc
@@ -942,11 +945,16 @@ let handle_keeper_shell
            match Keeper_gh_env.keeper_process_env config ~keeper_name:meta.name with
            | Error err -> (Unix.WEXITED 127, err)
            | Ok env ->
-               Process_eio.run_argv_with_status ?env ~cwd ~timeout_sec argv
+               Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
+                 ~raw_source:(String.concat " " argv)
+                 ~summary:"keeper brokered git command"
+                 ?env ~cwd ~timeout_sec argv
          in
          let normalize_existing_origin_to_https clone_path =
            match
-             Process_eio.run_argv_with_status
+             Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
+               ~raw_source:("git -C " ^ clone_path ^ " remote get-url origin")
+               ~summary:"keeper git remote get-url"
                ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Git_meta ())
                [ "git"; "-C"; clone_path; "remote"; "get-url"; "origin" ]
            with
@@ -956,7 +964,9 @@ let handle_keeper_shell
              if String.equal origin normalized then None
              else
                (match
-                  Process_eio.run_argv_with_status
+                  Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
+                    ~raw_source:("git -C " ^ clone_path ^ " remote set-url origin " ^ normalized)
+                    ~summary:"keeper git remote set-url"
                     ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Git_meta ())
                     [ "git"; "-C"; clone_path; "remote"; "set-url"; "origin"; normalized ]
                 with
@@ -1008,7 +1018,10 @@ let handle_keeper_shell
                     | Ok result -> (result.status, result.output)
                     | Error msg -> (Unix.WEXITED 127, msg)
                   else
-                    Process_eio.run_argv_with_status ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ())
+                    Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
+                      ~raw_source:("git -C " ^ clone_path ^ " pull --ff-only")
+                      ~summary:"keeper git pull"
+                      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ())
                       [ "git"; "-C"; clone_path; "pull"; "--ff-only" ]
                 in
                 if st = Unix.WEXITED 0 then
@@ -1059,7 +1072,9 @@ let handle_keeper_shell
                | Ok result -> (result.status, result.output)
                | Error msg -> (Unix.WEXITED 127, msg)
              else
-               Process_eio.run_argv_with_status
+               Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
+                 ~raw_source:("git clone " ^ String.concat " " depth_args ^ " " ^ clone_url ^ " " ^ clone_path)
+                 ~summary:"keeper git clone"
                  ~timeout_sec:(Keeper_tool_policy.clone_timeout_sec ())
                  ("git" :: "clone" :: depth_args @ [ clone_url; clone_path ])
            in
@@ -1210,7 +1225,10 @@ let handle_keeper_shell
                    let gh_argv =
                      "gh" :: Keeper_gh_shared.gh_simple_command_argv parsed_command
                    in
-                   Ok (Process_eio.run_argv_with_status ?env ~cwd ~timeout_sec gh_argv))
+                   Ok (Masc_exec.Exec_gate.run_argv_with_status ~actor:`Keeper_shell
+                         ~raw_source:(String.concat " " gh_argv)
+                         ~summary:"keeper gh command"
+                         ?env ~cwd ~timeout_sec gh_argv))
           in
           match gh_process with
           | Error msg ->

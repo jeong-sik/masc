@@ -1,0 +1,492 @@
+(* RFC-0057 Phase 2 — tool descriptor codegen.
+
+   Mirrors bin/gen_shell_ir_walkers.ml: spec-as-OCaml-value -> Buffer.emit
+   -> stdout. The dune rule in lib/tool_schemas/ captures stdout into
+   tool_descriptors_gen.ml inside the masc_tool_schemas library, so the
+   generated schemas live alongside the hand-written ones in the same
+   module namespace.
+
+   Phase 2 lifted spec types into lib/tool_schemas_specs/ to share
+   between the generator and any future tooling (schema lint, doc
+   generation). The executable now depends on tool_schemas_specs (types
+   only), avoiding the cycle because that library does not depend on
+   masc_tool_schemas. *)
+
+open Tool_schemas_specs_types
+
+(* === Phase 0 spec data ==============================================
+
+   masc_config — single optional `category` filter. The enum mirrors
+   Tool_schemas_misc.config_category_enum_strings (Issue #8493). Phase
+   0 keeps a third copy in this generator to stay self-contained; the
+   regression test guarantees this copy stays aligned with the
+   hand-written schema, and Phase 1 collapses all three into a typed
+   SSOT. *)
+
+let admin_section_enum_strings = [ "auth" ]
+;;
+
+let config_category_enum_strings =
+  [ "server"
+  ; "auth"
+  ; "transport"
+  ; "storage"
+  ; "runtime"
+  ; "rate_limiting"
+  ; "inference"
+  ; "keeper"
+  ; "keeper_execution"
+  ; "keeper_guardrails"
+  ; "autonomy"
+  ; "level2"
+  ; "dashboard"
+  ; "economy"
+  ; "governance"
+  ; "channel"
+  ; "process"
+  ; "worker"
+  ; "web_search"
+  ; "session"
+  ]
+;;
+
+let masc_config_spec : tool_spec =
+  { name = "masc_config"
+  ; description =
+      "Return the effective runtime configuration with source attribution (env var or \
+       default) for each setting. Sensitive values (tokens, passwords) are masked. Use \
+       to inspect or verify the server config without restarting. Pass category to \
+       filter results to a single section."
+  ; parameters =
+      [ { p_name = "category"
+        ; p_type = T_string { enum = Some config_category_enum_strings; default = None }
+        ; p_description = "Filter by config category"
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let masc_code_read_spec : tool_spec =
+  { name = "masc_code_read"
+  ; description =
+      "Read a file with offset/limit pagination for large files. Use when inspecting \
+       source code during task execution without loading the entire file into context."
+  ; parameters =
+      [ { p_name = "path"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Absolute file path"
+        ; p_required = true
+        }
+      ; { p_name = "offset"
+        ; p_type = T_int { min = Some 0; max = None; default = None }
+        ; p_description = "Offset in bytes (default 0)"
+        ; p_required = false
+        }
+      ; { p_name = "limit"
+        ; p_type = T_int { min = Some 1; max = Some 1_000_000; default = None }
+        ; p_description = "Maximum bytes to read (default 1_000_000)"
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let masc_tool_help_spec : tool_spec =
+  { name = "masc_tool_help"
+  ; description =
+      "Return canonical help text, parameters, and metadata for a specific MASC tool by \
+       name."
+  ; parameters =
+      [ { p_name = "tool_name"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Exact MCP tool name to explain"
+        ; p_required = true
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let dashboard_scope_enum_strings = [ "all"; "current" ]
+
+let masc_dashboard_spec : tool_spec =
+  { name = "masc_dashboard"
+  ; description =
+      "Render the MASC dashboard summarizing rooms, agents, and tasks. Set \
+       scope='current' for this room only."
+  ; parameters =
+      [ { p_name = "compact"
+        ; p_type = T_bool { default = None }
+        ; p_description =
+            "If true, show compact single-line summary instead of full dashboard"
+        ; p_required = false
+        }
+      ; { p_name = "scope"
+        ; p_type =
+            T_string { enum = Some dashboard_scope_enum_strings; default = Some "all" }
+        ; p_description = "Dashboard scope (default: all)"
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let masc_gc_spec : tool_spec =
+  { name = "masc_gc"
+  ; description =
+      "Run garbage collection: remove zombie agents, archive stale tasks, delete old \
+       messages (default: 7-day threshold)."
+  ; parameters =
+      [ { p_name = "days"
+        ; p_type = T_int { min = None; max = None; default = Some 7 }
+        ; p_description = "Age threshold in days (default: 7)"
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let masc_web_search_spec : tool_spec =
+  { name = "masc_web_search"
+  ; description =
+      "Search the public web and return top result titles, URLs, and snippets. Read-only \
+       helper for current-information lookups before deeper file or repo work. Uses \
+       configured web-search providers with structured fallback behavior and returns \
+       structured JSON."
+  ; parameters =
+      [ { p_name = "query"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Search query text"
+        ; p_required = true
+        }
+      ; { p_name = "limit"
+        ; p_type = T_int { min = Some 1; max = Some 10; default = Some 5 }
+        ; p_description = "Maximum number of results to return (default 5, max 10)"
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let masc_web_fetch_spec : tool_spec =
+  { name = "masc_web_fetch"
+  ; description =
+      "Fetch a web page by URL and return cleaned text content. Read-only helper for \
+       reading selected sources after web search before citing them. Strips HTML tags, \
+       decodes entities, normalizes whitespace, and optionally extracts <title> and \
+       <meta name=\"description\">. Returns structured JSON with the cleaned text."
+  ; parameters =
+      [ { p_name = "url"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "URL to fetch (http or https only)"
+        ; p_required = true
+        }
+      ; { p_name = "timeout"
+        ; p_type = T_int { min = Some 1; max = Some 60; default = Some 15 }
+        ; p_description = "Request timeout in seconds (default 15, max 60)"
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let masc_tool_admin_snapshot_spec : tool_spec =
+  { name = "masc_tool_admin_snapshot"
+  ; description =
+      "Return a unified admin snapshot of tool inventory, auth/RBAC, and command-plane \
+       surfaces."
+  ; parameters =
+      [ { p_name = "include_hidden"
+        ; p_type = T_bool { default = Some true }
+        ; p_description = "Include hidden tools in tool_inventory (default: true)"
+        ; p_required = false
+        }
+      ; { p_name = "include_deprecated"
+        ; p_type = T_bool { default = Some true }
+        ; p_description = "Include deprecated tools in tool_inventory (default: true)"
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let masc_tool_stats_spec : tool_spec =
+  { name = "masc_tool_stats"
+  ; description =
+      "In-memory tool usage stats: top calls, stale (30+ days), never-called. Resets on \
+       server restart."
+  ; parameters =
+      [ { p_name = "top_n"
+        ; p_type = T_int { min = Some 1; max = Some 100; default = Some 20 }
+        ; p_description = "Number of top tools to return (default: 20)"
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let masc_cleanup_zombies_spec : tool_spec =
+  { name = "masc_cleanup_zombies"
+  ; description =
+      "Remove zombie agents (no heartbeat for 5+ min) and release their file locks."
+  ; parameters = []
+  ; additional_properties = false
+  }
+;;
+
+let masc_webrtc_offer_spec : tool_spec =
+  { name = "masc_webrtc_offer"
+  ; description =
+      "Create a WebRTC signaling offer in the server registry and return an offer_id. \
+       Use from the initiating side before calling masc_webrtc_answer from the \
+       answering side."
+  ; parameters =
+      [ { p_name = "agent_name"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Name of the agent creating the offer"
+        ; p_required = true
+        }
+      ; { p_name = "ice_candidates"
+        ; p_type = T_string_array { default = Some (`List []) }
+        ; p_description = "ICE candidates gathered by the offering peer"
+        ; p_required = false
+        }
+      ; { p_name = "dtls_fingerprint"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Optional DTLS fingerprint for the offering peer"
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let masc_webrtc_answer_spec : tool_spec =
+  { name = "masc_webrtc_answer"
+  ; description =
+      "Accept a pending WebRTC signaling offer by offer_id and return the peer_id plus \
+       server-side ICE credentials. Use from the answering side after a prior \
+       masc_webrtc_offer call."
+  ; parameters =
+      [ { p_name = "offer_id"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Offer identifier returned by masc_webrtc_offer"
+        ; p_required = true
+        }
+      ; { p_name = "agent_name"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Name of the agent accepting the offer"
+        ; p_required = true
+        }
+      ; { p_name = "ice_candidates"
+        ; p_type = T_string_array { default = Some (`List []) }
+        ; p_description = "Optional ICE candidates gathered by the answering peer"
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let masc_tool_admin_update_spec : tool_spec =
+  { name = "masc_tool_admin_update"
+  ; description =
+      "Apply auth updates through a single admin entrypoint. Use after \
+       masc_tool_admin_snapshot to review current state before making changes. \
+       Additional sections (unit_policy, keeper_policy) are not yet implemented and \
+       will be added here when their handlers land."
+  ; parameters =
+      [ { p_name = "section"
+        ; p_type = T_string { enum = Some admin_section_enum_strings; default = None }
+        ; p_description = "Config section to update (currently only auth is implemented)"
+        ; p_required = true
+        }
+      ; { p_name = "enabled"
+        ; p_type = T_bool { default = None }
+        ; p_description = "Enable or disable auth for section=auth"
+        ; p_required = false
+        }
+      ; { p_name = "require_token"
+        ; p_type = T_bool { default = None }
+        ; p_description = "Require tokens for section=auth"
+        ; p_required = false
+        }
+      ; { p_name = "token_expiry_hours"
+        ; p_type = T_int { min = None; max = None; default = None }
+        ; p_description = "Token expiry in hours for section=auth"
+        ; p_required = false
+        }
+      ; { p_name = "unit_id"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Managed unit id for section=unit_policy"
+        ; p_required = false
+        }
+      ; { p_name = "policy"
+        ; p_type = T_object { default = None }
+        ; p_description = "Unit policy envelope for section=unit_policy"
+        ; p_required = false
+        }
+      ; { p_name = "budget"
+        ; p_type = T_object { default = None }
+        ; p_description = "Unit budget envelope for section=unit_policy"
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let phase6_specs : tool_spec list =
+  [ masc_config_spec
+  ; masc_code_read_spec
+  ; masc_tool_help_spec
+  ; masc_dashboard_spec
+  ; masc_gc_spec
+  ; masc_web_search_spec
+  ; masc_web_fetch_spec
+  ; masc_tool_admin_snapshot_spec
+  ; masc_tool_stats_spec
+  ; masc_cleanup_zombies_spec
+  ; masc_webrtc_offer_spec
+  ; masc_webrtc_answer_spec
+  ; masc_tool_admin_update_spec
+  ]
+;;
+
+(* === Emit helpers ==================================================== *)
+
+let buf_addf buf fmt = Printf.ksprintf (Buffer.add_string buf) fmt
+
+let emit_header buf =
+  Buffer.add_string
+    buf
+    "(* GENERATED - DO NOT EDIT.\n\
+    \   Source: bin/gen_tool_descriptors.ml (RFC-0057 Phase 1).\n\
+    \   To regenerate: dune build *)\n\n\
+     open Masc_domain\n\n"
+;;
+
+let rec emit_yojson_ocaml (v : Yojson.Safe.t) : string =
+  match v with
+  | `Null -> "`Null"
+  | `Bool b -> Printf.sprintf "`Bool %b" b
+  | `Int i -> Printf.sprintf "`Int %d" i
+  | `Float f -> Printf.sprintf "`Float %f" f
+  | `String s -> Printf.sprintf "`String %S" s
+  | `Intlit s -> Printf.sprintf "`Intlit %S" s
+  | `Assoc pairs ->
+    let items =
+      List.map (fun (k, v) -> Printf.sprintf "(%S, %s)" k (emit_yojson_ocaml v)) pairs
+    in
+    Printf.sprintf "`Assoc [%s]" (String.concat "; " items)
+  | `List items ->
+    Printf.sprintf "`List [%s]" (String.concat "; " (List.map emit_yojson_ocaml items))
+;;
+
+let emit_enum_list buf strings =
+  Buffer.add_string buf "`List [";
+  List.iteri
+    (fun i s ->
+       if i > 0 then Buffer.add_string buf "; ";
+       buf_addf buf "`String %S" s)
+    strings;
+  Buffer.add_string buf "]"
+;;
+
+let emit_param_property buf p =
+  let type_label =
+    match p.p_type with
+    | T_string _ -> "string"
+    | T_int _ -> "integer"
+    | T_bool _ -> "boolean"
+    | T_string_array _ -> "array"
+    | T_object _ -> "object"
+  in
+  buf_addf buf "        (%S, `Assoc [\n" p.p_name;
+  buf_addf buf "          (\"type\", `String %S);\n" type_label;
+  (match p.p_type with
+   | T_string { enum = Some strings; _ } ->
+     Buffer.add_string buf "          (\"enum\", ";
+     emit_enum_list buf strings;
+     Buffer.add_string buf ");\n"
+   | T_string_array _ ->
+     Buffer.add_string buf "          (\"items\", `Assoc [ (\"type\", `String \"string\") ]);\n"
+   | _ -> ());
+  buf_addf buf "          (\"description\", `String %S);\n" p.p_description;
+  (match p.p_type with
+   | T_string { default = Some d; _ } ->
+     buf_addf buf "          (\"default\", `String %S);\n" d
+   | T_int { default = Some d; _ } -> buf_addf buf "          (\"default\", `Int %d);\n" d
+   | T_bool { default = Some d; _ } ->
+     buf_addf buf "          (\"default\", `Bool %b);\n" d
+   | T_string_array { default = Some d } ->
+     buf_addf buf "          (\"default\", %s);\n" (emit_yojson_ocaml d)
+   | T_object { default = Some d } ->
+     buf_addf buf "          (\"default\", %s);\n" (emit_yojson_ocaml d)
+   | _ -> ());
+  (match p.p_type with
+   | T_int { min = Some m; _ } -> buf_addf buf "          (\"minimum\", `Int %d);\n" m
+   | _ -> ());
+  (match p.p_type with
+   | T_int { max = Some m; _ } -> buf_addf buf "          (\"maximum\", `Int %d);\n" m
+   | _ -> ());
+  Buffer.add_string buf "        ]);\n"
+;;
+
+let emit_required buf params =
+  let req =
+    List.filter_map (fun p -> if p.p_required then Some p.p_name else None) params
+  in
+  match req with
+  | [] -> ()
+  | _ ->
+    Buffer.add_string buf "      (\"required\", `List [";
+    List.iteri
+      (fun i name ->
+         if i > 0 then Buffer.add_string buf "; ";
+         buf_addf buf "`String %S" name)
+      req;
+    Buffer.add_string buf "]);\n"
+;;
+
+let emit_tool_schema buf spec =
+  Buffer.add_string buf "  {\n";
+  buf_addf buf "    name = %S;\n" spec.name;
+  buf_addf buf "    description = %S;\n" spec.description;
+  Buffer.add_string buf "    input_schema = `Assoc [\n";
+  Buffer.add_string buf "      (\"type\", `String \"object\");\n";
+  (match spec.parameters with
+   | [] -> Buffer.add_string buf "      (\"properties\", `Assoc []);\n"
+   | params ->
+     Buffer.add_string buf "      (\"properties\", `Assoc [\n";
+     List.iter (emit_param_property buf) params;
+     Buffer.add_string buf "      ]);\n");
+  emit_required buf spec.parameters;
+  buf_addf buf "      (\"additionalProperties\", `Bool %b);\n" spec.additional_properties;
+  Buffer.add_string buf "    ];\n";
+  Buffer.add_string buf "  };\n"
+;;
+
+let emit_schemas_list buf specs =
+  Buffer.add_string buf "let schemas : tool_schema list = [\n";
+  List.iter (emit_tool_schema buf) specs;
+  Buffer.add_string buf "]\n"
+;;
+
+(* === Entry point ===================================================== *)
+
+let () =
+  let buf = Buffer.create 4096 in
+  emit_header buf;
+  emit_schemas_list buf phase6_specs;
+  print_string (Buffer.contents buf)
+;;

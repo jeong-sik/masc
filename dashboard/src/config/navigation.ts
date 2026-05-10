@@ -20,7 +20,6 @@ type SurfaceSectionId =
   | 'runtime'
   | 'goal-loop'
   | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + monitoring governance
-  | 'memory-subsystems'
   // command
   | 'operations'     // Phase 1+6: absorbs intervene + governance + inspector (Phase 7: connectors split out)
   // connectors (Phase 7: top-level surface — sidecar-driven channel bridges)
@@ -41,7 +40,7 @@ type SurfaceSectionId =
   // code (Stage 5 IDE plane — shell only in PR-1, 4-pane content in PR-2+)
   | 'ide-shell'
 
-type NonHomeTabId = Exclude<TabId, 'overview' | 'logs'>
+export type NonHomeTabId = Exclude<TabId, 'overview' | 'logs'>
 
 interface DashboardNavGroup {
   id: SurfaceId
@@ -62,7 +61,7 @@ interface DashboardNavItem {
   defaultParams?: Record<string, string>
 }
 
-interface DashboardSectionNavItem {
+export interface DashboardSectionNavItem {
   id: SurfaceSectionId
   label: string
   description: string
@@ -174,6 +173,9 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Observatory',
       description: 'Live collaboration and investigative timelines remain drill-down surfaces.',
       params: { section: 'observatory' },
+      // RFC-MASC-006 Phase 2a: kept as a hidden diagnostic surface, not yet promoted to main nav.
+      // Reachable via legacy redirects (monitoring:activity, monitoring:live) and direct URL.
+      // Remove hidden:true when Phase 2b drill-down is complete.
       hidden: true,
     },
     {
@@ -205,13 +207,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Fleet Telemetry',
       description: 'Event log, keeper comparison, tool quality, governance, and attribution signals.',
       params: { section: 'fleet-health' },
-    },
-    {
-      id: 'memory-subsystems',
-      label: 'Memory Subsystems',
-      description: 'Hebbian graph, episodes, and compaction state.',
-      params: { section: 'memory-subsystems' },
-      hidden: true,
     },
   ],
   command: [
@@ -357,6 +352,9 @@ export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
   'command:connectors':   { section: 'operations', view: 'connectors' },
   'command:inspector':    { section: 'operations', view: 'inspector' },
 
+  // Cognition UX cleanup: memory-subsystems merged into cognition > memory tab
+  'monitoring:memory-subsystems': { section: 'cognition', params: { view: 'memory' } },
+
   // Dashboard consolidation Phase 1: workspace surface
   'workspace:goals': { section: 'planning' },
 
@@ -408,6 +406,15 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
   delete next.surface
   delete next.operation
   delete next.run_id
+
+  // Sections that use the `view` sub-param for internal navigation.
+  // For all other sections, `view` is meaningless and must not leak in from prior navigation.
+  const SECTIONS_WITH_VIEW = new Set([
+    'fleet-health', 'runtime', 'agents', 'cognition', 'observatory',
+  ])
+  if (!next.section || !SECTIONS_WITH_VIEW.has(next.section)) {
+    delete next.view
+  }
 
   return next
 }

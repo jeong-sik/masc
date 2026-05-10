@@ -45,7 +45,7 @@ case "$cmd" in
     mkdir -p "$LOG_DIR"
     printf 'Starting Discord sidecar\n  MASC_BASE_PATH=%s\n  log file:      %s\n' \
       "$BASE_PATH" "$LOG_FILE" >&2
-    python -m src 2>&1 | tee -a "$LOG_FILE"
+    .venv/bin/python -m src 2>&1 | tee -a "$LOG_FILE"
     ;;
   tail)
     if [[ ! -f "$LOG_FILE" ]]; then
@@ -70,7 +70,7 @@ case "$cmd" in
   doctor)
     cd "$(script_dir)"
     shift || true
-    python -m src doctor "$@"
+    .venv/bin/python -m src doctor "$@"
     ;;
   stop)
     # Match by absolute script_dir path so we never hit another sidecar.

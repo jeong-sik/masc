@@ -295,13 +295,6 @@ export function KeeperDetailOverviewSidebar({
   return html`
     <aside class="order-2 xl:order-1 xl:sticky xl:top-[104px] xl:self-start" aria-label="키퍼 프로필 요약">
       <div class="flex flex-col gap-4 rounded-[var(--r-6)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-[var(--shadow-panel)]">
-        <div>
-          <${SectionLabel}>개요</${SectionLabel}>
-          <p class="m-0 mt-2 text-sm leading-relaxed text-[var(--color-fg-secondary)]">
-            긴 단일 모달 대신 keeper 상세를 별도 화면으로 펼쳤습니다. 운영자가 자주 오가는 맥락 단위로 나눠서 바로 점프할 수 있습니다.
-          </p>
-        </div>
-
         <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
           <${KeeperDetailQuickFact} label="상태">${effectiveStatus}<//>
           <${KeeperDetailQuickFact} label="컨텍스트">${contextRatioPct}<//>
@@ -335,33 +328,49 @@ export function KeeperDetailSection({
   id,
   eyebrow,
   title,
-  description,
+  defaultCollapsed = false,
   children,
 }: {
   id: KeeperDetailSectionId
   eyebrow: string
   title: string
-  description: string
+  /** When true, the section body starts collapsed and the operator
+   *  expands it by clicking the header. Defaults to expanded so the
+   *  long-standing always-open behaviour is preserved for callers
+   *  that do not opt in. Quick-jump links via [scrollToKeeperDetailSection]
+   *  still resolve to the header anchor regardless of the body state. */
+  defaultCollapsed?: boolean
   children: ComponentChildren
 }) {
+  const [collapsed, setCollapsed] = useState(defaultCollapsed)
+  const bodyId = `${id}-body`
   return html`
     <section
       id=${id}
       class="scroll-mt-24 rounded-[var(--r-6)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)]"
       aria-label=${title}
     >
-      <div class="border-b border-[var(--color-border-default)] px-5 py-4 sm:px-6">
-        <div class="text-3xs font-semibold uppercase tracking-[var(--track-brand)] text-[var(--color-fg-muted)]">${eyebrow}</div>
-        <div class="mt-1 flex flex-col gap-1 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h3 class="m-0 text-lg font-semibold text-[var(--color-fg-primary)]">${title}</h3>
-            <p class="m-0 mt-1 text-sm leading-relaxed text-[var(--color-fg-secondary)]">${description}</p>
-          </div>
+      <button
+        type="button"
+        class="flex w-full items-center justify-between gap-3 border-b border-[var(--color-border-default)] px-5 py-4 text-left transition-colors hover:bg-[var(--color-bg-hover)] sm:px-6"
+        aria-expanded=${!collapsed}
+        aria-controls=${bodyId}
+        onClick=${() => setCollapsed((c: boolean) => !c)}
+      >
+        <div class="min-w-0">
+          <div class="text-3xs font-semibold uppercase tracking-[var(--track-brand)] text-[var(--color-fg-muted)]">${eyebrow}</div>
+          <h3 class="m-0 mt-1 text-lg font-semibold text-[var(--color-fg-primary)]">${title}</h3>
         </div>
-      </div>
-      <div class="flex flex-col gap-4 px-5 py-5 sm:px-6">
-        ${children}
-      </div>
+        <span
+          aria-hidden="true"
+          class=${`shrink-0 text-[var(--color-fg-muted)] transition-transform duration-[var(--t-med)] ${collapsed ? '' : 'rotate-180'}`}
+        >▾</span>
+      </button>
+      ${collapsed ? null : html`
+        <div id=${bodyId} class="flex flex-col gap-4 px-5 py-5 sm:px-6">
+          ${children}
+        </div>
+      `}
     </section>
   `
 }

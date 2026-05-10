@@ -15,7 +15,7 @@ let exec_gate_raw_source argv =
 (** Run argv and get lines (Eio-native, no shell) *)
 let run_argv_lines argv =
   Masc_exec.Exec_gate.run_argv
-    ~actor:"coord/worktree"
+    ~actor:(Masc_exec.Agent_id.of_string "coord/worktree")
     ~raw_source:(exec_gate_raw_source argv)
     ~summary:"coord_worktree argv"
     ~timeout_sec:Env_config_runtime.Coord_git.local_op_timeout_sec
@@ -34,7 +34,7 @@ let run_argv_with_status
     ?(timeout_sec = Env_config_runtime.Coord_git.local_op_timeout_sec)
     argv =
   Masc_exec.Exec_gate.run_argv_with_status
-    ~actor:"coord/worktree"
+    ~actor:(Masc_exec.Agent_id.of_string "coord/worktree")
     ~raw_source:(exec_gate_raw_source argv)
     ~summary:"coord_worktree argv"
     ~timeout_sec
@@ -1262,7 +1262,7 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
                     ]
                   in
                   Masc_exec.Exec_gate.run_argv_with_status
-                    ~actor:"coord/worktree"
+                    ~actor:(Masc_exec.Agent_id.of_string "coord/worktree")
                     ~raw_source:(exec_gate_raw_source argv)
                     ~summary:"coord_worktree worktree add"
                     ~timeout_sec:Env_config_runtime.Coord_git.local_op_timeout_sec

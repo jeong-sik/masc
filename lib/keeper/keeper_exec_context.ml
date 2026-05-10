@@ -110,8 +110,6 @@ let compaction_decision_to_string =
 let compaction_decision_applied =
   Keeper_compact_policy.compaction_decision_applied
 
-let compact_if_needed_typed = Keeper_compact_policy.compact_if_needed_typed
-let compact_if_needed = Keeper_compact_policy.compact_if_needed
 
 (* ================================================================ *)
 (* Re-export from Keeper_post_turn                                   *)
@@ -193,6 +191,17 @@ let dispatch_keeper_phase_event ~(config : Coord.config) ~keeper_name event =
    the operational signal for "reducer has nothing to strip, switch
    profile or hand off". *)
 let compaction_outcome_metric = "masc_keeper_compaction_outcome_total"
+
+let () =
+  Prometheus.register_counter
+    ~name:compaction_outcome_metric
+    ~help:
+      "Total Compaction_completed dispatches classified by token \
+       savings. Labels: keeper, outcome (ok = saved_tokens > 0, \
+       noop = before == after or after > before). Rising noop \
+       rate is the operational signal for \"reducer has nothing \
+       to strip, switch profile or hand off\" (#9988)."
+    ()
 
 (* Observability-only: bump the outcome counter and log the warn
    when saved_tokens <= 0.  Split from [dispatch_compaction_completed]

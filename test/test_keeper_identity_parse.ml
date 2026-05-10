@@ -55,10 +55,11 @@ let test_legacy_keeper_cascade_alias_preserved_raw () =
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta ->
       check string "legacy alias preserved raw"
-        "oas-keeper_unified" meta.cascade_name;
+        "oas-keeper_unified" (Keeper_types.cascade_name_of_meta meta);
       check string "legacy alias canonicalizes to default"
         Keeper_config.default_cascade_name
-        (Keeper_cascade_profile.canonicalize meta.cascade_name)
+        (Keeper_cascade_profile.canonicalize
+           (Keeper_types.cascade_name_of_meta meta))
   | Error e -> fail ("expected Ok, got Error: " ^ e)
 
 let test_unknown_cascade_name_preserved_raw () =
@@ -80,11 +81,12 @@ let test_unknown_cascade_name_preserved_raw () =
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta ->
       check string "raw user-declared cascade preserved"
-        "playground_experiment_xyz" meta.cascade_name;
+        "playground_experiment_xyz" (Keeper_types.cascade_name_of_meta meta);
       (* Point-of-use canonicalize still maps unknown → default. *)
       check string "unknown canonicalizes to default"
         Keeper_config.default_cascade_name
-        (Keeper_cascade_profile.canonicalize meta.cascade_name)
+        (Keeper_cascade_profile.canonicalize
+           (Keeper_types.cascade_name_of_meta meta))
   | Error e -> fail ("expected Ok, got Error: " ^ e)
 
 let test_missing_trace_id () =

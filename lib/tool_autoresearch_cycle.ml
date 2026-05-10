@@ -223,7 +223,7 @@ let git_diff_patch ~workdir =
   in
   let status, output =
     Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:"tool/autoresearch_cycle"
+      ~actor:(Masc_exec.Agent_id.of_string "tool/autoresearch_cycle")
       ~raw_source:(String.concat " " (List.map Filename.quote argv))
       ~summary:"autoresearch cycle git diff"
       ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:(Unknown "misc") ())
@@ -241,7 +241,7 @@ let sync_target_file_to_index ~workdir ~target_file =
   let argv = [ "git"; "-C"; workdir; "add"; "--"; target_file ] in
   let status, output =
     Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:"tool/autoresearch_cycle"
+      ~actor:(Masc_exec.Agent_id.of_string "tool/autoresearch_cycle")
       ~raw_source:(String.concat " " (List.map Filename.quote argv))
       ~summary:"autoresearch cycle git add"
       ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:(Unknown "misc") ())
@@ -264,8 +264,8 @@ let restore_original_content ~workdir ~target_file ~original_content ~sync_index
     Log.Autoresearch.warn "failed to restore %s: %s" target_file err
 
 let diff_guard_summary report =
-  report.Agent_sdk.Autonomy_diff_guard.issues
-  |> List.map Agent_sdk.Autonomy_diff_guard.show_issue
+  report.Masc_mcp_cdal_runtime.Autonomy_diff_guard.issues
+  |> List.map Masc_mcp_cdal_runtime.Autonomy_diff_guard.show_issue
   |> String.concat "; "
 
 (** Run one experiment cycle: the real Karpathy loop turn.
@@ -434,13 +434,13 @@ let handle_cycle (ctx : Tool_autoresearch_context.t) args =
                    ]
                | Ok patch ->
                  let report =
-                   Agent_sdk.Autonomy_diff_guard.validate_patch
+                   Masc_mcp_cdal_runtime.Autonomy_diff_guard.validate_patch
                      ~allowed_paths:[ target_file ]
                      patch
                  in
                  if List.exists
                       (function
-                        | Agent_sdk.Autonomy_diff_guard.Empty_patch -> true
+                        | Masc_mcp_cdal_runtime.Autonomy_diff_guard.Empty_patch -> true
                         | _ -> false)
                       report.issues
                  then (

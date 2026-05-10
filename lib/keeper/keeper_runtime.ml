@@ -175,7 +175,7 @@ let effective_declarative_cascade_name
       Keeper_cascade_profile.normalize_declared_name cascade_name
   | None, Some _ -> Keeper_config.default_cascade_name
   | None, None ->
-      Keeper_cascade_profile.normalize_declared_name meta.cascade_name
+      Keeper_cascade_profile.normalize_declared_name (cascade_name_of_meta meta)
 
 let resynced_tool_access
     (defaults : Keeper_types_profile.keeper_profile_defaults)
@@ -258,7 +258,7 @@ let ensure_keeper_meta config name =
           match defaults.cascade_name, defaults.manifest_path with
           | Some cascade_name, _ -> cascade_name
           | None, Some _ -> Keeper_config.default_cascade_name
-          | None, None -> meta.cascade_name
+          | None, None -> cascade_name_of_meta meta
         in
         let msg =
           Printf.sprintf
@@ -393,7 +393,7 @@ let ensure_keeper_meta config name =
        name. Normalize the meta side only so alias cleanup does not
        register as a semantic change. *)
     let cascade_changed =
-      Keeper_cascade_profile.normalize_declared_name meta.cascade_name
+      Keeper_cascade_profile.normalize_declared_name (cascade_name_of_meta meta)
       <> resolved_target_cascade_name
     in
     (* #10061: persisted state vs TOML source can differ by a single
@@ -519,14 +519,17 @@ let ensure_keeper_meta config name =
         tool_denylist = target_denylist;
         models = target_models;
         social_model = target_social_model;
-        (* Preserve raw [meta.cascade_name] when the cascade itself did
-           not change, even if another field (personality, policy, ...)
-           triggered a re-sync.  Otherwise a reconcile caused by an
-           unrelated field would silently canonicalize cascade_name and
-           hide drift from the dashboard [canonical] column. *)
-        cascade_name =
-          if cascade_changed then resolved_target_cascade_name
-          else meta.cascade_name;
+        (* RFC-0041: cascade_ref is the SSOT after step 4 (B7). When
+           cascade_changed flips, materialize a fresh cascade_ref;
+           otherwise preserve [meta.cascade_ref] verbatim so an unrelated
+           reconcile never canonicalizes routing silently. *)
+        cascade_ref =
+          if cascade_changed then
+            Some Cascade_ref.{
+              group = resolved_target_cascade_name;
+              item = None;
+            }
+          else meta.cascade_ref;
         goal = target_goal;
         short_goal = target_short_goal;
         mid_goal = target_mid_goal;

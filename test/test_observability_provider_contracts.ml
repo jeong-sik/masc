@@ -120,31 +120,31 @@ let test_default_registry_populated () =
   (* Verify default_registry is usable by resolving a known provider.
      Direct access to Llm_provider.Provider_registry types avoided —
      OAS SDK internals are not MASC's contract boundary. *)
-  let ctx = Masc_mcp.Oas_model_resolve.max_context_of_label
+  let ctx = Masc_mcp.Cascade_runtime.max_context_of_label
       "claude:claude-sonnet-4-6" in
   check bool "registry resolves known provider" true (ctx > 0)
 
 let test_provider_name_of_label () =
-  let name = Masc_mcp.Oas_model_resolve.provider_name_of_label
+  let name = Masc_mcp.Cascade_runtime.provider_name_of_label
       "claude:claude-sonnet-4-6" in
   check (option string) "provider name" (Some "claude") name;
-  let no_colon = Masc_mcp.Oas_model_resolve.provider_name_of_label
+  let no_colon = Masc_mcp.Cascade_runtime.provider_name_of_label
       "just-a-model" in
   check (option string) "no colon returns None" None no_colon;
-  let empty = Masc_mcp.Oas_model_resolve.provider_name_of_label "" in
+  let empty = Masc_mcp.Cascade_runtime.provider_name_of_label "" in
   check (option string) "empty returns None" None empty
 
 let test_max_context_of_label () =
-  let ctx = Masc_mcp.Oas_model_resolve.max_context_of_label
+  let ctx = Masc_mcp.Cascade_runtime.max_context_of_label
       "claude:claude-sonnet-4-6" in
   check bool "max context > 0" true (ctx > 0);
-  let fallback = Masc_mcp.Oas_model_resolve.max_context_of_label
+  let fallback = Masc_mcp.Cascade_runtime.max_context_of_label
       "nonexistent:model" in
   check int "fallback 128000" 128_000 fallback
 
 
 let test_effective_discovered_ctx () =
-  let edc = Masc_mcp.Oas_model_resolve.effective_discovered_ctx in
+  let edc = Masc_mcp.Cascade_runtime.effective_discovered_ctx in
   (* Below floor (4096) → use static *)
   check int "below floor uses static" 128_000
     (edc ~static_ctx:128_000 ~discovered:(Some 2048));
@@ -161,28 +161,28 @@ let test_effective_discovered_ctx () =
 let test_resolve_max_cascade_context () =
   (* Empty list → 128_000 fallback *)
   check int "empty labels fallback 128000" 128_000
-    (Masc_mcp.Oas_model_resolve.resolve_max_cascade_context []);
+    (Masc_mcp.Cascade_runtime.resolve_max_cascade_context []);
   (* Unknown provider → fallback *)
   check int "unknown provider fallback 128000" 128_000
-    (Masc_mcp.Oas_model_resolve.resolve_max_cascade_context
+    (Masc_mcp.Cascade_runtime.resolve_max_cascade_context
        [ "nonexistent:model" ]);
   (* Malformed label (no colon) → fallback *)
   check int "malformed label fallback 128000" 128_000
-    (Masc_mcp.Oas_model_resolve.resolve_max_cascade_context [ "nocolonlabel" ]);
+    (Masc_mcp.Cascade_runtime.resolve_max_cascade_context [ "nocolonlabel" ]);
   (* Known provider with available key returns max context > 0 *)
-  let ctx = Masc_mcp.Oas_model_resolve.resolve_max_cascade_context
+  let ctx = Masc_mcp.Cascade_runtime.resolve_max_cascade_context
       [ "claude:claude-sonnet-4-6" ] in
   check bool "known provider returns positive context" true (ctx > 0)
 
 let test_labels_require_local_discovery () =
   check bool "llama labels refresh local discovery" true
-    (Masc_mcp.Oas_model_resolve.labels_require_local_discovery
+    (Masc_mcp.Cascade_runtime.labels_require_local_discovery
        [ "llama:auto"; "glm:auto" ]);
   check bool "mixed non-local labels skip refresh" false
-    (Masc_mcp.Oas_model_resolve.labels_require_local_discovery
+    (Masc_mcp.Cascade_runtime.labels_require_local_discovery
        [ "glm:auto"; "claude:auto" ]);
   check bool "malformed labels skip refresh" false
-    (Masc_mcp.Oas_model_resolve.labels_require_local_discovery
+    (Masc_mcp.Cascade_runtime.labels_require_local_discovery
        [ "default"; "glm:auto" ])
 
 let test_cascade_model_resolve_alias_provenance () =
@@ -205,14 +205,14 @@ let test_cascade_model_resolve_hardcoded_default_provenance () =
 
 let test_cascade_model_resolve_env_default_provenance () =
   let getenv = function
-    | "GEMINI_DEFAULT_MODEL" -> Some "gemini-2.5-flash"
+    | "GEMINI_DEFAULT_MODEL" -> Some "gemini-3-flash-preview"
     | _ -> None
   in
   let resolved =
     Model_resolve.resolve_auto_model ~getenv "gemini"
       (Model_resolve.model_selector_of_string "auto")
   in
-  check string "gemini env default" "gemini-2.5-flash"
+  check string "gemini env default" "gemini-3-flash-preview"
     resolved.resolved_model_id;
   check resolution_provenance "env provenance"
     (Model_resolve.Env_default "GEMINI_DEFAULT_MODEL")

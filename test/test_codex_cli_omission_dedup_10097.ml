@@ -37,7 +37,7 @@ let () =
   in
   Unix.putenv "MASC_BASE_PATH" dir
 
-module T = Masc_mcp.Oas_worker_exec_transport
+module T = Masc_mcp.Cascade_transport
 module Prom = Masc_mcp.Prometheus
 
 let metric = Prom.metric_codex_cli_mcp_tool_omission

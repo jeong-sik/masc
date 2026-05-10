@@ -17,15 +17,18 @@ import { MermaidGraph } from './common/mermaid-graph'
 import { FilterChips } from './common/filter-chips'
 import { buildCompositeFsmSpec } from './keeper-fsm-specs'
 import { TurnFsmDetailPanel } from './turn-fsm-detail-panel'
+import { displayState } from './fsm-hub-types'
 import {
   normalizePhaseDiagnosis,
   PhaseConditionsPanel,
 } from './phase-conditions-panel'
-import type { KeeperPhase } from '../types'
 
 interface KeeperStateDiagramProps {
   keeperName: string
-  currentPhase?: KeeperPhase | string | null
+  /** RFC-0046: parent-supplied composite snapshot. When provided,
+   *  this panel reads the SSOT from the shared FsmHub fetch instead
+   *  of issuing its own /composite call. */
+  snapshot?: KeeperCompositeSnapshot | null
 }
 
 function PhaseBadge({ accent, children }: { accent?: boolean; children: unknown }) {
@@ -48,6 +51,7 @@ const PHASE_ID_MAP: Record<string, string> = {
   Crashed: 'Crashed',
   Restarting: 'Restarting',
   Dead: 'Dead',
+  Zombie: 'Zombie',
   offline: 'Offline',
   running: 'Running',
   failing: 'Failing',
@@ -60,6 +64,7 @@ const PHASE_ID_MAP: Record<string, string> = {
   crashed: 'Crashed',
   restarting: 'Restarting',
   dead: 'Dead',
+  zombie: 'Zombie',
 }
 
 const INVARIANT_LABELS: Array<[keyof KeeperCompositeSnapshot['invariants'], string]> = [
@@ -124,8 +129,9 @@ function snapshotPhaseDiagnosis(snapshot: KeeperCompositeSnapshot): unknown {
   return isRecord(snapshot) ? snapshot.phase_diagnosis : undefined
 }
 
-export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStateDiagramProps) {
-  const [snapshot, setSnapshot] = useState<KeeperCompositeSnapshot | null>(null)
+export function KeeperStateDiagramPanel({ keeperName, snapshot: externalSnapshot }: KeeperStateDiagramProps) {
+  const [internalSnapshot, setInternalSnapshot] = useState<KeeperCompositeSnapshot | null>(null)
+  const snapshot = externalSnapshot ?? internalSnapshot
   const [stateDiagram, setStateDiagram] = useState<KeeperStateDiagramResponse | null>(null)
   const [transitions, setTransitions] = useState<KeeperTransition[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -140,8 +146,15 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
     setDiagramError(null)
     setStateDiagram(null)
 
+    // RFC-0046 §7 #1: skip composite fetch when parent supplies it.
+    // Caller-passed `undefined` means standalone mode (legacy); `null`
+    // means parent is loading — wait rather than dual-fetch.
+    const compositePromise: Promise<KeeperCompositeSnapshot | null> = externalSnapshot !== undefined
+      ? Promise.resolve(externalSnapshot)
+      : fetchKeeperComposite(keeperName, { signal: controller.signal })
+
     Promise.allSettled([
-      fetchKeeperComposite(keeperName, { signal: controller.signal }),
+      compositePromise,
       fetchKeeperStateDiagram(keeperName, { signal: controller.signal }),
       fetchKeeperTransitions(keeperName, 5, { signal: controller.signal }),
     ])
@@ -149,9 +162,9 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
         if (controller.signal.aborted) return
 
         if (snapshotResult.status === 'fulfilled') {
-          setSnapshot(snapshotResult.value)
+          setInternalSnapshot(snapshotResult.value)
         } else {
-          setSnapshot(null)
+          setInternalSnapshot(null)
           setError(snapshotResult.reason instanceof Error ? snapshotResult.reason.message : 'composite fetch failed')
         }
 
@@ -183,9 +196,9 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
     return () => { controller.abort() }
   }, [keeperName])
 
-  const keeperPhase = normalizePhase(currentPhase)
-  const compositePhase = normalizePhase(snapshot?.phase)
-  const phaseMismatch = Boolean(keeperPhase && compositePhase && keeperPhase !== compositePhase)
+  // RFC-0046 Step 5: keeper.phase (flat field) is no longer surfaced here.
+  // Composite snapshot is the single source of truth; backend two-store
+  // drift detection moves to the FsmHub invariant area (future RFC).
   const phaseDiagnosis = useMemo(
     () => snapshot ? normalizePhaseDiagnosis(snapshotPhaseDiagnosis(snapshot)) : null,
     [snapshot],
@@ -221,24 +234,15 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
   return html`
     <div class="flex flex-col gap-3">
       <div class="flex flex-wrap items-center gap-2 text-3xs text-[var(--color-fg-disabled)]">
-        <${PhaseBadge} accent>composite ${snapshot.phase}<//>
-        ${keeperPhase ? html`
-          <${PhaseBadge}>keeper ${keeperPhase}<//>
-        ` : null}
-        <${PhaseBadge}>KTC ${snapshot.turn_phase}<//>
-        <${PhaseBadge}>KDP ${snapshot.decision.stage}<//>
-        <${PhaseBadge}>KCL ${snapshot.cascade.state}<//>
-        <${PhaseBadge}>KMC ${snapshot.compaction.stage}<//>
+        <${PhaseBadge} accent>composite ${displayState(snapshot.phase)}<//>
+        <${PhaseBadge}>KTC ${displayState(snapshot.turn_phase)}<//>
+        <${PhaseBadge}>KDP ${displayState(snapshot.decision.stage)}<//>
+        <${PhaseBadge}>KCL ${displayState(snapshot.cascade.state)}<//>
+        <${PhaseBadge}>KMC ${displayState(snapshot.compaction.stage)}<//>
         ${transitions.length > 0 ? html`
           <${PhaseBadge}>observed ${transitions.length} transitions<//>
         ` : null}
       </div>
-
-      ${phaseMismatch ? html`
-        <div class="rounded-[var(--r-1)] border border-[var(--warn-24)] bg-[var(--warn-8)] px-3 py-2 text-2xs leading-normal text-[var(--color-fg-primary)]">
-          keeper row phase와 composite snapshot phase가 다릅니다. composite snapshot을 authoritative runtime-truth로 사용합니다.
-        </div>
-      ` : null}
 
       <div>
         <div class="mb-2 flex flex-wrap items-center justify-between gap-2">

@@ -36,7 +36,7 @@ let effective_declarative_cascade_name
       Keeper_cascade_profile.normalize_declared_name cascade_name
   | None, Some _ -> Keeper_config.default_cascade_name
   | None, None ->
-      Keeper_cascade_profile.normalize_declared_name meta.cascade_name
+      Keeper_cascade_profile.normalize_declared_name (cascade_name_of_meta meta)
 
 type override_field_detail = {
   field : string;
@@ -107,10 +107,11 @@ let live_override_details (meta : keeper_meta)
   |> maybe_string_list_override "tools.tool_denylist" defaults.tool_denylist
        meta.tool_denylist
   |> (fun acc ->
-       if effective_cascade_name <> meta.cascade_name then
+       let cascade_name = cascade_name_of_meta meta in
+       if effective_cascade_name <> cascade_name then
          override_field "model.cascade_name"
            ~default_value:(`String effective_cascade_name)
-           ~live_value:(`String meta.cascade_name)
+           ~live_value:(`String cascade_name)
          :: acc
        else acc)
   |> maybe_bool_override "proactive.enabled" defaults.proactive_enabled
@@ -202,24 +203,24 @@ let blocker_class_of_string (reason : string) : blocker_class option =
     None
 
 let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class option =
-  match Oas_worker_named.classify_masc_internal_error err with
-  | Some (Oas_worker_named.Cascade_exhausted { reason; _ }) ->
+  match Keeper_turn_driver.classify_masc_internal_error err with
+  | Some (Keeper_turn_driver.Cascade_exhausted { reason; _ }) ->
       Some (Cascade_exhausted reason)
-  | Some (Oas_worker_named.Resumable_cli_session { detail; _ }) ->
+  | Some (Keeper_turn_driver.Resumable_cli_session { detail; _ }) ->
       Some (Cascade_exhausted (Other_detail detail))
-  | Some (Oas_worker_named.No_tool_capable_provider _) ->
+  | Some (Keeper_turn_driver.No_tool_capable_provider _) ->
       Some No_tool_capable_provider
-  | Some (Oas_worker_named.Accept_rejected _) ->
+  | Some (Keeper_turn_driver.Accept_rejected _) ->
       None
-  | Some (Oas_worker_named.Admission_queue_timeout _) ->
+  | Some (Keeper_turn_driver.Admission_queue_timeout _) ->
       Some Admission_queue_wait_timeout
-  | Some (Oas_worker_named.Admission_queue_rejected _) ->
+  | Some (Keeper_turn_driver.Admission_queue_rejected _) ->
       None
-  | Some (Oas_worker_named.Oas_timeout_budget _) ->
+  | Some (Keeper_turn_driver.Oas_timeout_budget _) ->
       Some Oas_timeout_budget
-  | Some (Oas_worker_named.Turn_timeout _) ->
+  | Some (Keeper_turn_driver.Turn_timeout _) ->
       Some Turn_timeout
-  | Some (Oas_worker_named.Ambiguous_post_commit { is_timeout; _ }) ->
+  | Some (Keeper_turn_driver.Ambiguous_post_commit { is_timeout; _ }) ->
       Some
         (if is_timeout then Ambiguous_post_commit_timeout
          else Ambiguous_post_commit_failure)
@@ -232,7 +233,33 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
              enum target.  Direct typed match preferred over text-substring
              fallback when the SDK gave us a structured error. *)
           Some Completion_contract_violation
-      | _ -> None)
+      | Agent_sdk.Error.Agent (MaxTurnsExceeded _) ->
+          Some Sdk_max_turns_exceeded
+      | Agent_sdk.Error.Agent (TokenBudgetExceeded _) ->
+          Some Sdk_token_budget_exceeded
+      | Agent_sdk.Error.Agent (CostBudgetExceeded _) ->
+          Some Sdk_cost_budget_exceeded
+      | Agent_sdk.Error.Agent (UnrecognizedStopReason _) ->
+          Some Sdk_unrecognized_stop_reason
+      | Agent_sdk.Error.Agent (IdleDetected _) ->
+          Some Sdk_idle_detected
+      | Agent_sdk.Error.Agent (ToolRetryExhausted _) ->
+          Some Sdk_tool_retry_exhausted
+      | Agent_sdk.Error.Agent (GuardrailViolation _) ->
+          Some Sdk_guardrail_violation
+      | Agent_sdk.Error.Agent (TripwireViolation _) ->
+          Some Sdk_tripwire_violation
+      | Agent_sdk.Error.Agent (ExitConditionMet _) ->
+          Some Sdk_exit_condition_met
+      (* Provider-level [Api] errors are surfaced via OAS retry / cascade
+         layers and do not map to a typed blocker_class by themselves. *)
+      | Agent_sdk.Error.Api _
+      | Agent_sdk.Error.Mcp _
+      | Agent_sdk.Error.Config _
+      | Agent_sdk.Error.Serialization _
+      | Agent_sdk.Error.Io _
+      | Agent_sdk.Error.Orchestration _
+      | Agent_sdk.Error.A2a _ -> None)
 
 (* ── Runtime blocker surface ───────────────────────────────── *)
 
@@ -259,15 +286,39 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
         else summary
     | No_tool_capable_provider -> (
         match
-          Oas_worker_named.classify_masc_internal_error
+          Keeper_turn_driver.classify_masc_internal_error
             (Agent_sdk.Error.Internal summary)
         with
         | Some err -> (
-            match Oas_worker_named.summary_of_masc_internal_error err with
+            match Keeper_turn_driver.summary_of_masc_internal_error err with
             | Some structured_summary -> structured_summary
             | None -> if summary = "" then str else summary)
         | None -> if summary = "" then str else summary)
-    | _ -> if summary = "" then str else summary
+    (* All remaining blocker_class variants carry no class-specific summary
+       transformation — fall back to the live summary or the typed name. *)
+    | Admission_wait_wfq ->
+        if summary = "" then "Admission wait: enqueued in WFQ overflow" else summary
+    | Admission_surface ->
+        if summary = "" then "Admission surface: no usable provider" else summary
+    | Ambiguous_post_commit_timeout
+    | Ambiguous_post_commit_failure
+    | Autonomous_slot_wait_timeout
+    | Admission_queue_wait_timeout
+    | Turn_timeout_after_queue_wait
+    | Turn_timeout
+    | Completion_contract_violation
+    | Fiber_unresolved
+    | Stale_turn_timeout
+    | Stale_fleet_batch
+    | Sdk_max_turns_exceeded
+    | Sdk_token_budget_exceeded
+    | Sdk_cost_budget_exceeded
+    | Sdk_unrecognized_stop_reason
+    | Sdk_idle_detected
+    | Sdk_tool_retry_exhausted
+    | Sdk_guardrail_violation
+    | Sdk_tripwire_violation
+    | Sdk_exit_condition_met -> if summary = "" then str else summary
   in
   { blocker_class = str; summary; continue_gate }
 
@@ -275,7 +326,31 @@ let runtime_blocker_surface_of_legacy_string reason cls =
   match cls with
   | Cascade_exhausted _ ->
       runtime_blocker_surface_of_typed_class cls
-  | _ ->
+  (* All other blocker classes carry no embedded reason payload, so the
+     legacy string [reason] argument provides the fallback summary. *)
+  | Admission_wait_wfq
+  | Admission_surface
+  | Ambiguous_post_commit_timeout
+  | Ambiguous_post_commit_failure
+  | Autonomous_slot_wait_timeout
+  | Admission_queue_wait_timeout
+  | Turn_timeout_after_queue_wait
+  | Oas_timeout_budget
+  | Turn_timeout
+  | Completion_contract_violation
+  | No_tool_capable_provider
+  | Fiber_unresolved
+  | Stale_turn_timeout
+  | Stale_fleet_batch
+  | Sdk_max_turns_exceeded
+  | Sdk_token_budget_exceeded
+  | Sdk_cost_budget_exceeded
+  | Sdk_unrecognized_stop_reason
+  | Sdk_idle_detected
+  | Sdk_tool_retry_exhausted
+  | Sdk_guardrail_violation
+  | Sdk_tripwire_violation
+  | Sdk_exit_condition_met ->
       runtime_blocker_surface_of_typed_class ~summary:reason cls
 
 let stale_kill_class_summary (kill_class : Keeper_registry.stale_kill_class) =
@@ -547,12 +622,11 @@ let proactive_runtime_reason_is_current (meta : keeper_meta) =
 let runtime_blocker_surface_opt (config : Coord_utils.config)
     (meta : keeper_meta) =
   let derived =
-    match meta.runtime.last_blocker_class with
-    | Some cls ->
+    match meta.runtime.last_blocker with
+    | Some info ->
         Some (runtime_blocker_surface_of_typed_class
-                ~summary:meta.runtime.last_blocker cls)
+                ~summary:info.detail info.klass)
     | None ->
-        (* Fallback: legacy string-based classification *)
         match runtime_registry_entry config meta.name with
         | Some entry -> (
             match entry.last_failure_reason with
@@ -563,19 +637,19 @@ let runtime_blocker_surface_opt (config : Coord_utils.config)
   let derived =
     match derived with
     | Some blocker -> Some blocker
-    | None -> (
-        match blocker_class_of_string meta.runtime.last_blocker with
-        | Some cls ->
-            Some (runtime_blocker_surface_of_legacy_string
-                    meta.runtime.last_blocker cls)
-        | None
-          when proactive_runtime_reason_is_current meta ->
-            (match blocker_class_of_string meta.runtime.proactive_rt.last_reason with
-             | Some cls ->
-                 Some (runtime_blocker_surface_of_legacy_string
-                         meta.runtime.proactive_rt.last_reason cls)
-             | None -> None)
-        | None -> runtime_blocker_surface_of_progress_narrative config meta)
+    | None
+      when proactive_runtime_reason_is_current meta ->
+        (* proactive_rt.last_reason is a separate string-source from
+           cycle outcomes; the substring matcher remains here as a
+           legacy recovery path for that source only.  The keeper
+           runtime blocker has already moved to typed [blocker_info]. *)
+        (match blocker_class_of_string meta.runtime.proactive_rt.last_reason with
+         | Some cls ->
+             Some (runtime_blocker_surface_of_legacy_string
+                     meta.runtime.proactive_rt.last_reason cls)
+         | None -> runtime_blocker_surface_of_progress_narrative config meta)
+    | None ->
+        runtime_blocker_surface_of_progress_narrative config meta
   in
   derived
 
@@ -736,7 +810,11 @@ let social_runtime_fields_json (meta : keeper_meta) =
         Json_util.string_opt_to_json delivery_surface_view_source );
       ( "last_social_transition_reason",
         trimmed_string_json meta.runtime.last_social_transition_reason );
-      ("last_blocker", trimmed_string_json meta.runtime.last_blocker);
+      ( "last_blocker"
+      , match meta.runtime.last_blocker with
+        | Some info ->
+            blocker_info_to_json info
+        | None -> `Null );
       ("last_need", trimmed_string_json meta.runtime.last_need);
     ]
 

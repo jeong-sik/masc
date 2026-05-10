@@ -12,7 +12,7 @@ is effectively advisory.
 |-------|------|-------------|-----------------|
 | `Tool` | per-tool HTTP / shell invocation | 10–60 s | `Env_config_runtime.*`, `lib/tool_local_runtime_http.ml` |
 | `MCP tools/call` | outer per-tool dispatcher cap | 60 s default; board writes 90 s default | `MASC_TOOL_TIMEOUT_DEFAULT_SEC`, `MASC_TOOL_TIMEOUT_BOARD_SEC`, `Mcp_server_eio_call_tool.tool_timeout_sec_opt` |
-| `Oas_bridge` | single OAS `Agent.run` / `Model.call` | 300 s default; provider attempt caps may be lower | `Env_config_keeper.oas_timeout_sec*`, `Oas_worker_named.effective_provider_attempt_timeout_s` |
+| `Oas_bridge` | single OAS `Agent.run` / `Model.call` | 300 s default; provider attempt caps may be lower | `Env_config_keeper.oas_timeout_sec*`, `Keeper_turn_driver.effective_provider_attempt_timeout_s` |
 | `Keeper_turn` | one keeper turn (may issue many OAS calls) | 600 s default/hard ceiling | `MASC_KEEPER_TURN_TIMEOUT_SEC` |
 | `Keeper_cycle` | full keeper lifecycle | N×turn | cycle supervisor |
 | `Shutdown` | graceful shutdown board flush | 2 s | `bin/main_eio.ml` |

@@ -33,7 +33,7 @@ let run_git ~timeout_sec ~workdir args =
     let raw_source = String.concat " " (List.map Filename.quote argv) in
     Some
       (Masc_exec.Exec_gate.run_argv_with_status
-         ~actor:"system/chronicle_validate"
+         ~actor:(Masc_exec.Agent_id.of_string "system/chronicle_validate")
          ~raw_source
          ~summary:"chronicle git validation"
          ~timeout_sec argv)

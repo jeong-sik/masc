@@ -33,7 +33,6 @@ let raw_all_tool_schemas : Masc_domain.tool_schema list =
        @ Keeper_types.schemas
        @ Tool_local_runtime.schemas
        @ Tool_autoresearch.schemas
-       @ Tool_compact.schemas
        @ Tool_agent_timeline.schemas
        @ Tool_shard.schemas
        (* #9912 / #10101: every keeper-facing shard tool must reach the

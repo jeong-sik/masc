@@ -26,7 +26,7 @@ val run : Verdict.t -> (Verdict.Trusted_argv.t, error) result
     On [Deny { reason; _ }], returns [Error (`Denied reason)]. *)
 
 val run_argv :
-  actor:string ->
+  actor:Agent_id.t ->
   raw_source:string ->
   summary:string ->
   ?timeout_sec:float ->
@@ -38,7 +38,7 @@ val run_argv :
     [enforced] mode, Ask/Deny return a synthetic blocked output. *)
 
 val run_argv_with_status :
-  actor:string ->
+  actor:Agent_id.t ->
   raw_source:string ->
   summary:string ->
   ?timeout_sec:float ->
@@ -49,7 +49,7 @@ val run_argv_with_status :
 (** Typed gate in front of [Process_eio.run_argv_with_status]. *)
 
 val run_argv_with_status_split :
-  actor:string ->
+  actor:Agent_id.t ->
   raw_source:string ->
   summary:string ->
   ?timeout_sec:float ->
@@ -60,7 +60,7 @@ val run_argv_with_status_split :
 (** Typed gate in front of [Process_eio.run_argv_with_status_split]. *)
 
 val run_argv_with_stdin_and_status :
-  actor:string ->
+  actor:Agent_id.t ->
   raw_source:string ->
   summary:string ->
   ?timeout_sec:float ->
@@ -72,7 +72,7 @@ val run_argv_with_stdin_and_status :
 (** Typed gate in front of [Process_eio.run_argv_with_stdin_and_status]. *)
 
 val run_argv_with_stdin_and_status_split :
-  actor:string ->
+  actor:Agent_id.t ->
   raw_source:string ->
   summary:string ->
   ?timeout_sec:float ->

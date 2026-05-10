@@ -3,7 +3,7 @@
     Verifies JSON roundtrip, judgment hash determinism,
     and canonical JSON key ordering. *)
 
-module CT = Masc_mcp.Cdal_types
+module CT = Cdal_types
 
 (* ================================================================ *)
 (* Helpers                                                           *)

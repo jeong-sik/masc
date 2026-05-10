@@ -1,6 +1,6 @@
 (* Regression guard for #11929.
 
-   [Oas_worker_exec.run] must clean up a built OAS agent when the
+   [Cascade_runner.run] must clean up a built OAS agent when the
    surrounding Eio cancellation context aborts [Agent.run]. Ordinary
    exceptions already used the cleanup path; cancellation previously
    re-raised before [Agent.close], leaving the wrapper dependent on
@@ -26,7 +26,7 @@ let assert_contains ~label haystack needle =
   if not (contains_substring haystack needle) then
     failwith
       (Printf.sprintf
-         "[%s] expected Oas_worker_exec source to contain %S"
+         "[%s] expected Cascade_runner source to contain %S"
          label needle)
 
 let find_substring_from haystack needle start =
@@ -48,7 +48,7 @@ let assert_ordered_contains ~label haystack needles =
         | None ->
             failwith
               (Printf.sprintf
-                 "[%s] expected Oas_worker_exec source to contain %S after offset %d"
+                 "[%s] expected Cascade_runner source to contain %S after offset %d"
                  label needle start))
   in
   loop 0 needles
@@ -70,7 +70,7 @@ let () =
     | None ->
         failwith
           (Printf.sprintf
-             "no candidate Oas_worker_exec source path resolved \
+             "no candidate Cascade_runner source path resolved \
               (cwd=%s, exe=%s)"
              (Sys.getcwd ()) exe)
   in

@@ -14,6 +14,16 @@ import { isOfflineStatus } from './lib/status-utils'
 import { keeperDisplayStatus } from './lib/keeper-runtime-display'
 import { contextThresholds } from './config/context-thresholds'
 import { normalizeKeeperDiagnostic } from './keeper-state'
+import type { CascadeRef } from './types'
+
+/** Normalize a raw cascade_ref JSON object into a typed CascadeRef. */
+function normalizeCascadeRef(raw: unknown): CascadeRef | null {
+  if (!isRecord(raw)) return null
+  const group = asString(raw.group)
+  if (!group) return null
+  const item = asString(raw.item) ?? null
+  return { group, item }
+}
 
 /** Maps lowercase backend phase strings to PascalCase KeeperPhase values.
  *  Backend (keeper_state_machine.ml) emits lowercase: "offline", "running", "handing_off", etc.
@@ -518,6 +528,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         last_model_used_label: asString(row.last_model_used_label) ?? null,
         next_model_hint: asString(row.next_model_hint) ?? null,
         cascade_name: asString(row.cascade_name) ?? null,
+        cascade_ref: normalizeCascadeRef(row.cascade_ref),
         cascade_canonical: asString(row.cascade_canonical) ?? asString(row.selected_cascade_canonical) ?? null,
         selected_cascade_canonical: asString(row.selected_cascade_canonical) ?? null,
         status: normalizeKeeperAgentStatus(statusRaw),

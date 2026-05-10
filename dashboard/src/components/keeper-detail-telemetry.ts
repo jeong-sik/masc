@@ -167,6 +167,15 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
 
 // ── Inference Telemetry Panel ────────────────────────────
 
+function healthStatusColor(status: string | undefined): string {
+  switch (status) {
+    case 'healthy': return 'var(--good)'
+    case 'degraded': return 'var(--amber-bright)'
+    case 'unhealthy': return 'var(--color-status-bad)'
+    default: return 'var(--color-fg-disabled)'
+  }
+}
+
 export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
   const series = keeper.metrics_series ?? []
   const telemetryPoints = series.filter(
@@ -189,6 +198,12 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
   const reasoningTokens = telemetryPoints.map(
     (p: KeeperMetricPoint) => p.inference_telemetry?.reasoning_tokens ?? 0,
   )
+  const ttfrcSeries = telemetryPoints.map(
+    (p: KeeperMetricPoint) => p.inference_telemetry?.ttfrc_ms ?? null,
+  )
+  const prefillSeries = telemetryPoints.map(
+    (p: KeeperMetricPoint) => p.inference_telemetry?.prefill_ms ?? null,
+  )
 
   const W = SPARKLINE_W, H = SPARKLINE_H
   const lastWallTps = wallTokPerSec[wallTokPerSec.length - 1] ?? 0
@@ -208,8 +223,15 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
   const wallTpsLine = wallTokPerSec.length > 1 ? miniSparkline(wallTokPerSec) : ''
   const hwTpsLine = hwTokPerSec.length > 1 ? miniSparkline(hwTokPerSec) : ''
   const latencyLine = miniSparkline(latencySeries)
+  const ttfrcLine = miniSparkline(ttfrcSeries)
+  const prefillLine = miniSparkline(prefillSeries)
+
+  const lastTtfrc = ttfrcSeries.filter(isFiniteMetricValue)[ttfrcSeries.filter(isFiniteMetricValue).length - 1] ?? null
+  const lastPrefill = prefillSeries.filter(isFiniteMetricValue)[prefillSeries.filter(isFiniteMetricValue).length - 1] ?? null
 
   const lastFp = telemetryPoints[telemetryPoints.length - 1]?.inference_telemetry?.system_fingerprint
+
+  const providerHealth = keeper.provider_health
 
   return html`
     <div class="mb-5">
@@ -217,8 +239,14 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
         <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">추론 텔레메트리</span>
         <${MutedSpan}>${telemetryPoints.length}개 지점</${MutedSpan}>
         ${lastFp ? html`<span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)] font-mono">${lastFp}</span>` : null}
+        ${providerHealth ? html`
+          <span class="ml-auto inline-flex items-center gap-1.5 text-2xs px-2 py-0.5 rounded-full border" style=${`border-color:${healthStatusColor(providerHealth.status)}33;background:${healthStatusColor(providerHealth.status)}11;color:${healthStatusColor(providerHealth.status)}`}>
+            <span class="inline-block w-1.5 h-1.5 rounded-full" style=${`background:${healthStatusColor(providerHealth.status)}`}></span>
+            ${providerHealth.provider}/${providerHealth.model} — ${providerHealth.status}
+          </span>
+        ` : null}
       </div>
-      <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div class="grid grid-cols-2 md:grid-cols-7 gap-3">
         ${wallTokPerSec.length > 0 ? html`
         <${DetailCard}>
           <${DetailRow}>
@@ -268,6 +296,28 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
           <${Eyebrow}>추론</${Eyebrow}>
           <span class="text-lg font-mono tabular-nums text-[var(--color-status-warn)]">${totalReasoning > 0 ? totalReasoning.toLocaleString() : '-'}</span>
           <${MutedSpan}>total tokens</${MutedSpan}>
+        <//>
+
+        ${'' /* TTFT */}
+        <${DetailCard}>
+          <${DetailRow}>
+            <${Eyebrow}>TTFT</${Eyebrow}>
+            <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${lastTtfrc != null ? `${(lastTtfrc / 1000).toFixed(1)}s` : '-'}</span>
+          </${DetailRow}>
+          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" role="img" aria-label="TTFT 추이" style="background:var(--bg-deepest);">
+            ${ttfrcLine ? html`<polyline points="${ttfrcLine}" fill="none" stroke="var(--sky-400)" stroke-width="1.5"/>` : null}
+          </svg>
+        <//>
+
+        ${'' /* prefill */}
+        <${DetailCard}>
+          <${DetailRow}>
+            <${Eyebrow}>prefill</${Eyebrow}>
+            <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${lastPrefill != null ? `${(lastPrefill / 1000).toFixed(1)}s` : '-'}</span>
+          </${DetailRow}>
+          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" role="img" aria-label="Prefill 추이" style="background:var(--bg-deepest);">
+            ${prefillLine ? html`<polyline points="${prefillLine}" fill="none" stroke="var(--sky-400)" stroke-width="1.5"/>` : null}
+          </svg>
         <//>
       </div>
     </div>

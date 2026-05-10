@@ -52,6 +52,8 @@ export interface FleetRow {
   effective_sandbox_image: string | null
   decision_required: boolean
   budget_source: 'override' | 'override_invalid' | 'env' | null
+  provider_health_status: 'healthy' | 'degraded' | 'unhealthy' | null
+  provider_health_label: string | null
 }
 
 export interface FleetTelemetryState {
@@ -211,6 +213,15 @@ function keeperLastLatencyMs(keeper: Keeper): number {
   }
   const lastMetric = keeper.metrics_series?.[keeper.metrics_series.length - 1]
   return lastMetric?.latency_ms ?? 0
+}
+
+export function healthStatusColor(status: string | undefined): string {
+  switch (status) {
+    case 'healthy': return 'var(--good)'
+    case 'degraded': return 'var(--amber-bright)'
+    case 'unhealthy': return 'var(--color-status-bad)'
+    default: return 'var(--color-fg-disabled)'
+  }
 }
 
 export function successClass(rate: number | null): string {
@@ -458,6 +469,10 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
                     ? 'override_invalid'
                     : 'override')
                 : 'env',
+            provider_health_status: keeper.provider_health?.status ?? null,
+            provider_health_label: keeper.provider_health
+              ? `${keeper.provider_health.provider}/${keeper.provider_health.model}`
+              : null,
           }
         })
       : []

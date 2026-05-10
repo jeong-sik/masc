@@ -688,6 +688,36 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
             ) cascade_models)
           in
 
+          let provider_health_json =
+            match cascade_models with
+            | first_label :: _ ->
+                (match String.index_opt first_label ':' with
+                 | Some i ->
+                     let provider = String.sub first_label 0 i in
+                     let model_id = String.sub first_label (i + 1) (String.length first_label - i - 1) in
+                     (match Keeper_provider_health.get_health ~provider ~model:model_id with
+                      | Some h ->
+                          let config = Keeper_provider_health.get_config () in
+                          let status =
+                            if h.timeout_count_5m >= config.timeout_count_5m_unhealthy then "unhealthy"
+                            else if h.ttfrc_ms_ewma > config.ttfrc_unhealthy_ms then "unhealthy"
+                            else if h.ttfrc_ms_ewma > config.ttfrc_degraded_ms then "degraded"
+                            else "healthy"
+                          in
+                          `Assoc [
+                            ("provider", `String provider);
+                            ("model", `String model_id);
+                            ("status", `String status);
+                            ("ttfrc_ms_ewma", `Float h.ttfrc_ms_ewma);
+                            ("timeout_count_5m", `Int h.timeout_count_5m);
+                            ("prefill_ms_ewma", `Float h.prefill_ms_ewma);
+                            ("last_updated", `Float h.last_updated);
+                          ]
+                      | None -> `Null)
+                 | None -> `Null)
+            | [] -> `Null
+          in
+
           (* In compact mode (used by execution surface), skip heavy memory bank I/O.
              Full memory bank is only needed for individual keeper detail view. *)
           let (memory_bank_json, memory_recent_note) =
@@ -1261,6 +1291,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
               ("k2k_mentions", k2k_mentions);
               ("last_handoff_event", match last_handoff_event with Some j -> j | None -> `Null);
               ("last_compaction_event", match last_compaction_event with Some j -> j | None -> `Null);
+              ("provider_health", provider_health_json);
               ("trust", trust_json);
               ("context", context);
               ("context_source", context_source);

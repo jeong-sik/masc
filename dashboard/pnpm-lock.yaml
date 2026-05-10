@@ -53,9 +53,6 @@ importers:
       '@preact/signals':
         specifier: ^2.9.0
         version: 2.9.0(preact@10.29.1)
-      '@types/google-protobuf':
-        specifier: ^3.15.12
-        version: 3.15.12
       cytoscape:
         specifier: ^3.33.3
         version: 3.33.3
@@ -66,11 +63,11 @@ importers:
         specifier: ^9.3.2
         version: 9.3.2(react@19.2.4)
       google-protobuf:
-        specifier: ^4.0.2
-        version: 4.0.2
+        specifier: ^3.21.4
+        version: 3.21.4
       grpc-web:
-        specifier: ^2.0.2
-        version: 2.0.2
+        specifier: ^1.5.0
+        version: 1.5.0
       htm:
         specifier: ^3.1.1
         version: 3.1.1
@@ -135,6 +132,9 @@ importers:
       '@testing-library/preact':
         specifier: ^3.2.4
         version: 3.2.4(preact@10.29.1)
+      '@types/google-protobuf':
+        specifier: ^3.15.12
+        version: 3.15.12
       '@types/hammerjs':
         specifier: ^2.0.46
         version: 2.0.46
@@ -1949,8 +1949,8 @@ packages:
     resolution: {integrity: sha512-sepffkT8stwnIYbsMBpoCHJuJM5l98FUF2AnE07hfvE0m/qp3R586hw4jF4uadbhvg1ooIdzuu7CsfD2jzCaNA==}
     engines: {node: '>=18'}
 
-  google-protobuf@4.0.2:
-    resolution: {integrity: sha512-yD2fqbNgvJPuQwdKJiPdbUcXveNRxgqy070gzsBsCyFJA8Qdj9oxa9xtkddb/JEhcDk0RD5SfGUWg+nhINfMxA==}
+  google-protobuf@3.21.4:
+    resolution: {integrity: sha512-MnG7N936zcKTco4Jd2PX2U96Kf9PxygAPKBug+74LHzmHXmceN16MmRcdgZv+DGef/S9YvQAfRsNCn4cjf9yyQ==}
 
   gopd@1.2.0:
     resolution: {integrity: sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg==}
@@ -1959,8 +1959,8 @@ packages:
   graceful-fs@4.2.11:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==}
 
-  grpc-web@2.0.2:
-    resolution: {integrity: sha512-bvBP0/d5jyVM3eGxxffJhRLAPpH6eXhJeUzBT+bSIEgUKkG4a/BotEimVeW3phP0WLnsJnkRl8uQdRf2yDLaVA==}
+  grpc-web@1.5.0:
+    resolution: {integrity: sha512-y1tS3BBIoiVSzKTDF3Hm7E8hV2n7YY7pO0Uo7depfWJqKzWE+SKr0jvHNIJsJJYILQlpYShpi/DRJJMbosgDMQ==}
 
   hachure-fill@0.5.2:
     resolution: {integrity: sha512-3GKBOn+m2LX9iq+JC1064cSFprJY4jL1jCXTcpnfER5HYE2l/4EfWSGzkPa/ZDBmYI0ZOEj5VHV/eKnPGkHuOg==}
@@ -5052,13 +5052,13 @@ snapshots:
 
   globals@17.6.0: {}
 
-  google-protobuf@4.0.2: {}
+  google-protobuf@3.21.4: {}
 
   gopd@1.2.0: {}
 
   graceful-fs@4.2.11: {}
 
-  grpc-web@2.0.2: {}
+  grpc-web@1.5.0: {}
 
   hachure-fill@0.5.2: {}
 

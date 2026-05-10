@@ -66,6 +66,8 @@ function makeRow(overrides: Partial<FleetRow> = {}): FleetRow {
     effective_sandbox_image: null,
     decision_required: false,
     budget_source: null,
+    provider_health_status: null,
+    provider_health_label: null,
     ...overrides,
   }
 }

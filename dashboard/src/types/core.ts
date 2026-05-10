@@ -303,6 +303,8 @@ export interface InferenceTelemetry {
   reasoning_tokens: number | null
   peak_memory_gb: number | null
   request_latency_ms: number | null
+  ttfrc_ms: number | null
+  prefill_ms: number | null
 }
 
 export interface PromptSegmentTelemetry {
@@ -370,6 +372,16 @@ export interface KeeperMetricPoint {
   fallback_from: string | null
   fallback_to: string | null
   fallback_reason: string | null
+}
+
+export interface ProviderHealth {
+  provider: string
+  model: string
+  status: 'healthy' | 'degraded' | 'unhealthy'
+  ttfrc_ms_ewma: number
+  timeout_count_5m: number
+  prefill_ms_ewma: number
+  last_updated: number
 }
 
 export type KeeperRuntimeBlockerClass =
@@ -994,6 +1006,7 @@ export interface Keeper {
   inventory?: string[]
   relationships?: Record<string, string>
   supervisor_diagnostics?: KeeperSupervisorDiagnostics
+  provider_health?: ProviderHealth | null
   outcomes?: KeeperOutcomes
   conditions?: KeeperConditions
 }

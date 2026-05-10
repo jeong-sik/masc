@@ -140,7 +140,14 @@ val default_dynamic_selector :
       ([\[MergeContiguous\]]).
     - Default -> [\[PruneToolOutputs; MergeContiguous\]]. *)
 
-(** {1 Test-visible scoring helper} *)
+(** {1 Test-visible scoring helpers} *)
+
+val score_message :
+  index:int -> total:int -> Agent_sdk.Types.message -> float
+(** [score_message ~index ~total msg] returns the importance score
+    of a single message for context compaction.  Score is in
+    [0.0, 1.0].  Pinned for behaviour-tests and for injecting into
+    OAS {!Agent_sdk.Context_reducer.importance_scored}. *)
 
 val score_messages :
   Agent_sdk.Types.message list -> (int * float) list

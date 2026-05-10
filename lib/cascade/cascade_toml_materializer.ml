@@ -635,6 +635,19 @@ let toml_section_names_result ~config_path =
       with
       | Sys_error msg -> Error msg)
 
+let render_toml_to_json_string ~config_path =
+  let source = source_info ~config_path in
+  match source.kind with
+  | Json -> Error "render_toml_to_json_string: source is JSON, not TOML"
+  | Toml -> (
+      match render_toml_file_to_json_string source.source_path with
+      | Ok json -> Ok (source, json)
+      | Error msg ->
+          Error
+            (Printf.sprintf
+               "failed to materialize from %s: %s"
+               source.source_path msg))
+
 let ensure_materialized_json ~config_path =
   let source = source_info ~config_path in
   match source.kind with

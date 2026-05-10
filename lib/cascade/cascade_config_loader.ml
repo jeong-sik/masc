@@ -66,64 +66,84 @@ let read_json_file path =
   in
   Yojson.Safe.from_string content
 
+let load_toml_in_memory config_path =
+  match Cascade_toml_materializer.render_toml_to_json_string ~config_path with
+  | Error msg -> Error msg
+  | Ok (source, json_string) ->
+    let mtime = (Unix.stat source.source_path).Unix.st_mtime in
+    let cache_key = source.source_path in
+    (match with_cache_lock (fun () ->
+          match Hashtbl.find_opt config_cache cache_key with
+          | Some (cached_mtime, _) when Float.equal cached_mtime mtime ->
+            `Cache_hit
+          | _ -> `Cache_miss)
+     with
+     | `Cache_hit ->
+       Ok (Yojson.Safe.from_string json_string)
+     | `Cache_miss ->
+       let json = Yojson.Safe.from_string json_string in
+       with_cache_lock (fun () ->
+           Hashtbl.replace config_cache cache_key (mtime, json));
+       Eio.traceln
+         "[CascadeConfig] loaded TOML %s mtime=%.0f (in-memory)"
+         source.source_path mtime;
+       Ok json)
+
 let load_json path =
-  let rec load_current () =
-    let mtime = (Unix.stat path).Unix.st_mtime in
-    match with_cache_lock (fun () ->
-        match Hashtbl.find_opt config_cache path with
-        | Some (cached_mtime, json) when Float.equal cached_mtime mtime ->
-          Some json
-        | _ -> None)
-    with
-    | Some json -> Ok json
-    | None ->
-      let json = read_json_file path in
-      let refreshed_mtime = (Unix.stat path).Unix.st_mtime in
-      if not (Float.equal refreshed_mtime mtime) then
-        load_current ()
-      else
-        (* Keep the critical section to Hashtbl access only. Any Eio-aware
-           work (traceln in particular) must run OUTSIDE the Stdlib.Mutex
-           because traceln can suspend the fiber while the lock is held,
-           blocking unrelated fibers on the domain.
-           Ref: memory/feedback_eio-traceln-outside-critical-section.md *)
-        let outcome =
-          with_cache_lock (fun () ->
-              match Hashtbl.find_opt config_cache path with
-              | Some (cached_mtime, cached_json)
-                when Float.equal cached_mtime refreshed_mtime ->
-                `Returning_cached cached_json
-              | prior ->
-                Hashtbl.replace config_cache path (refreshed_mtime, json);
-                `Installed_new (Option.map fst prior))
-        in
-        (match outcome with
-         | `Returning_cached cached_json -> Ok cached_json
-         | `Installed_new prior_mtime ->
-             (* Observability: trace first-load vs reload so operators
-                editing cascade.json can verify their change took effect.
-                Keeping this at traceln (stderr) matches existing OAS
-                convention (see Cascade_config.apply_provider_filter). *)
-             (match prior_mtime with
-              | None ->
-                  Eio.traceln
-                    "[CascadeConfig] loaded %s mtime=%.0f"
-                    path refreshed_mtime
-              | Some old_mtime ->
-                  Eio.traceln
-                    "[CascadeConfig] reloaded %s old_mtime=%.0f new_mtime=%.0f"
-                    path old_mtime refreshed_mtime);
-             Ok json)
-  in
-  match ensure_materialized_json path with
-  | Error _ as err -> err
-  | Ok () ->
-      (try load_current () with
-       | Sys_error msg -> Error msg
-       | Unix.Unix_error (err, fn, arg) ->
-           Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err))
-       | Yojson.Json_error msg -> Error (Printf.sprintf "JSON error: %s" msg)
-       | End_of_file -> Error "unexpected end of file")
+  let source = Cascade_toml_materializer.source_info ~config_path:path in
+  match source.kind with
+  | Cascade_toml_materializer.Toml ->
+    (try load_toml_in_memory path with
+     | Sys_error msg -> Error msg
+     | Unix.Unix_error (err, fn, arg) ->
+         Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err))
+     | Yojson.Json_error msg -> Error (Printf.sprintf "JSON error: %s" msg))
+  | Cascade_toml_materializer.Json ->
+    let rec load_current () =
+      let mtime = (Unix.stat path).Unix.st_mtime in
+      match with_cache_lock (fun () ->
+          match Hashtbl.find_opt config_cache path with
+          | Some (cached_mtime, json) when Float.equal cached_mtime mtime ->
+            Some json
+          | _ -> None)
+      with
+      | Some json -> Ok json
+      | None ->
+        let json = read_json_file path in
+        let refreshed_mtime = (Unix.stat path).Unix.st_mtime in
+        if not (Float.equal refreshed_mtime mtime) then
+          load_current ()
+        else
+          let outcome =
+            with_cache_lock (fun () ->
+                match Hashtbl.find_opt config_cache path with
+                | Some (cached_mtime, cached_json)
+                  when Float.equal cached_mtime refreshed_mtime ->
+                  `Returning_cached cached_json
+                | prior ->
+                  Hashtbl.replace config_cache path (refreshed_mtime, json);
+                  `Installed_new (Option.map fst prior))
+          in
+          (match outcome with
+           | `Returning_cached cached_json -> Ok cached_json
+           | `Installed_new prior_mtime ->
+               (match prior_mtime with
+                | None ->
+                    Eio.traceln
+                      "[CascadeConfig] loaded %s mtime=%.0f"
+                      path refreshed_mtime
+                | Some old_mtime ->
+                    Eio.traceln
+                      "[CascadeConfig] reloaded %s old_mtime=%.0f new_mtime=%.0f"
+                      path old_mtime refreshed_mtime);
+               Ok json)
+    in
+    (try load_current () with
+     | Sys_error msg -> Error msg
+     | Unix.Unix_error (err, fn, arg) ->
+         Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err))
+     | Yojson.Json_error msg -> Error (Printf.sprintf "JSON error: %s" msg)
+     | End_of_file -> Error "unexpected end of file")
 
 (** A model entry with an optional weight for weighted cascade selection.
     Weight defaults to 1 when not specified (backward compatible).

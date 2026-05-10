@@ -83,6 +83,13 @@ val toml_section_names_result :
 
 (** {1 Materialisation} *)
 
+val render_toml_to_json_string :
+  config_path:string -> (source_info * string, string) result
+(** Render the TOML source into a JSON string without writing to disk.
+    Returns the {!source_info} and the rendered JSON string.
+    [Error] when the source is JSON-only or rendering fails.
+    This is the TOML-only entry point that skips the JSON file entirely. *)
+
 val ensure_materialized_json :
   config_path:string -> (materialize_result, string) result
 (** Idempotent: when the source is TOML and the rendered JSON

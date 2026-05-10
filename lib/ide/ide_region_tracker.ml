@@ -10,7 +10,7 @@ let parse_hunk_header line =
       try List.nth parts 1 with
       | _ -> ""
     in
-    let new_part =
+    let _new_part =
       try List.nth parts 2 with
       | _ -> ""
     in
@@ -55,7 +55,7 @@ let line_range_of_hunk ~start ~lines =
   in
   (start, start + count - 1)
 
-let extract_regions_from_diff ~keeper_id ~file_path ~turn diff_text =
+let extract_regions_from_diff ~keeper_id ~file_path ~turn ~diff_text =
   let lines = String.split_on_char '\n' diff_text in
   let rec collect start_line acc remaining =
     match remaining with
@@ -88,7 +88,7 @@ let extract_regions_from_diff ~keeper_id ~file_path ~turn diff_text =
   in
   collect 1 [] lines
 
-let extract_region_from_full_file ~keeper_id ~file_path ~turn content =
+let extract_region_from_full_file ~keeper_id ~file_path ~turn ~content =
   let n = count_lines content in
   {
     file_path;
@@ -143,14 +143,14 @@ let ingest_tool_call ~base_dir ~keeper_id ~turn json =
         let regions =
           if tool_name = "write_file" then
             match List.assoc_opt "content" arguments with
-            | Some (`String content) -> [extract_region_from_full_file ~keeper_id ~file_path:fp ~turn content]
+            | Some (`String content) -> [extract_region_from_full_file ~keeper_id ~file_path:fp ~turn ~content]
             | _ -> []
           else
             match List.assoc_opt "diff" arguments with
-            | Some (`String diff_text) -> extract_regions_from_diff ~keeper_id ~file_path:fp ~turn diff_text
+            | Some (`String diff_text) -> extract_regions_from_diff ~keeper_id ~file_path:fp ~turn ~diff_text
             | _ -> (
                 match List.assoc_opt "patch" arguments with
-                | Some (`String patch_text) -> extract_regions_from_diff ~keeper_id ~file_path:fp ~turn patch_text
+                | Some (`String patch_text) -> extract_regions_from_diff ~keeper_id ~file_path:fp ~turn ~diff_text:patch_text
                 | _ -> [])
         in
         let store_dir = Filename.concat base_dir ".masc-ide" in

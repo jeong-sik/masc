@@ -354,7 +354,7 @@ let test_registered_tool_dispatch_without_masc_prefix () =
       match
         Masc_mcp.Keeper_exec_masc.handle_registered_keeper_tool
           ~config
-          ~meta
+          ~keeper_name:meta.name
           ~name:registered_dispatch_probe_tool
           ~args:(`Assoc [])
       with

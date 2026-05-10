@@ -10,7 +10,7 @@
 open Alcotest
 module Backend = Backend
 
-let rm_rf path =
+let rec rm_rf path =
   if Sys.file_exists path then
     if Sys.is_directory path then (
       Array.iter (fun name -> rm_rf (Filename.concat path name)) (Sys.readdir path);
@@ -76,7 +76,7 @@ let test_backlog_lock_storm () =
       | Error e -> fail (Printf.sprintf "acquire failed: %s" (Backend.show_error e))
     in
 
-    Eio.Fiber.all (List.init contenders attempt);
+    Eio.Fiber.all (List.init contenders (fun i () -> attempt i));
 
     match !winners with
     | [winner] ->

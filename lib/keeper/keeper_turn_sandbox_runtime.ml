@@ -342,10 +342,21 @@ let cleanup (t : t) =
         Keeper_sandbox_runtime.docker_command_argv ()
         @ [ "rm"; "-f"; container_name ]
       in
-      let _st, _out =
+      let st, out =
         run_argv_with_status_retry_eintr
           ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec
                           ~bucket:Cleanup_rm ())
           argv
       in
+      (match st with
+      | Unix.WEXITED 0 -> ()
+      | _ ->
+          Log.Keeper.warn
+            "%s: docker rm -f %s failed (status=%s, out=%s)" t.meta.name
+            container_name
+            (match st with Unix.WEXITED n -> Printf.sprintf "exited(%d)" n | Unix.WSIGNALED n -> Printf.sprintf "signaled(%d)" n | Unix.WSTOPPED n -> Printf.sprintf "stopped(%d)" n)
+            out;
+          Prometheus.inc_counter
+            Keeper_metrics.metric_keeper_turn_cleanup_failures
+            ~labels:[("keeper", t.meta.name); ("site", "docker_rm")]);
       ()

@@ -85,10 +85,10 @@ let error_code_to_string = function
   | Internal_error -> "internal_error"
   | Precondition_failed -> "precondition_failed"
 
-(** {1 Canonical Error/OK Response Helpers}
+(** {1 Raw JSON String Builders}
 
-    New tool handlers should use these instead of defining local helpers.
-    Returns [(bool * string)] matching the standard tool dispatch signature. *)
+    These produce plain JSON strings without [Tool_result.t] wrapping.
+    Used by [get_string_required] error paths and legacy callers. *)
 
 (** Build a JSON error response string: [\{"status":"error","message":"..."\}] *)
 let error_response message =
@@ -96,9 +96,7 @@ let error_response message =
     (`Assoc [ ("status", `String "error"); ("message", `String message) ])
 
 (** Build a JSON error response string with machine-readable error code:
-    [\{"status":"error","error_code":"validation_error","message":"..."\}]
-
-    Preferred over [error_response] for new tool handlers. *)
+    [\{"status":"error","error_code":"validation_error","message":"..."\}] *)
 let error_response_typed ~code message =
   Yojson.Safe.to_string
     (`Assoc [
@@ -111,14 +109,43 @@ let error_response_typed ~code message =
 let ok_response fields =
   Yojson.Safe.to_string (`Assoc (("status", `String "ok") :: fields))
 
-(** Convenience: [(false, error_response msg)] *)
-let error_result msg = (false, error_response msg)
+(** {1 Tool_result.t Helpers}
 
-(** Convenience: [(false, error_response_typed ~code msg)] *)
-let error_result_typed ~code msg = (false, error_response_typed ~code msg)
+    These return structured [Tool_result.t] instead of [(bool * string)].
+    Handlers should use these directly — the dispatch boundary no longer
+    needs [wrap_result] conversion. *)
 
-(** Convenience: [(true, ok_response fields)] *)
-let ok_result fields = (true, ok_response fields)
+(** [Tool_result.t] error from a plain message string. *)
+let error_result ?tool_name ?start_time msg =
+  match (tool_name, start_time) with
+  | Some name, Some t ->
+    Tool_result.error ~tool_name:name ~start_time:t msg
+  | Some name, None ->
+    Tool_result.quick_error ~tool_name:name msg
+  | None, _ ->
+    Tool_result.quick_error msg
+
+(** [Tool_result.t] error with machine-readable error code. *)
+let error_result_typed ?tool_name ?start_time ~code msg =
+  let msg_with_code = error_response_typed ~code msg in
+  match (tool_name, start_time) with
+  | Some name, Some t ->
+    Tool_result.error ~tool_name:name ~start_time:t msg_with_code
+  | Some name, None ->
+    Tool_result.quick_error ~tool_name:name msg_with_code
+  | None, _ ->
+    Tool_result.quick_error msg_with_code
+
+(** [Tool_result.t] success with additional JSON fields. *)
+let ok_result ?tool_name ?start_time fields =
+  let msg = ok_response fields in
+  match (tool_name, start_time) with
+  | Some name, Some t ->
+    Tool_result.ok ~tool_name:name ~start_time:t msg
+  | Some name, None ->
+    Tool_result.quick_ok ~tool_name:name msg
+  | None, _ ->
+    Tool_result.quick_ok msg
 
 (** {1 Parse, Don't Validate — Required Field Extractors}
 
@@ -141,9 +168,9 @@ let get_int_required args key =
   | Some i -> Ok i
   | None -> Error (error_response (Printf.sprintf "%s is required" key))
 
-(** Monadic bind for [(ok, string) Result.t] → [(bool * string)].
+(** Monadic bind for [('a, string) Result.t] → [Tool_result.t].
     Chains required field extractions with early error return. *)
-let ( let*! ) r f = match r with Ok v -> f v | Error e -> (false, e)
+let ( let*! ) r f = match r with Ok v -> f v | Error e -> Tool_result.quick_error e
 
 (** {1 Structured Field Validation}
 
@@ -208,8 +235,16 @@ let validation_error_response (errors : field_error list) : string =
       ("message", `String (Printf.sprintf "%d field error(s)" (List.length errors)));
     ])
 
-(** Convenience: [(false, validation_error_response errors)] *)
-let validation_error_result errors = (false, validation_error_response errors)
+(** Convenience: [Tool_result.t] validation error. *)
+let validation_error_result ?tool_name ?start_time errors =
+  let msg = validation_error_response errors in
+  match (tool_name, start_time) with
+  | Some name, Some t ->
+    Tool_result.error ~tool_name:name ~start_time:t msg
+  | Some name, None ->
+    Tool_result.quick_error ~tool_name:name msg
+  | None, _ ->
+    Tool_result.quick_error msg
 
 (** {2 Field Validators}
 

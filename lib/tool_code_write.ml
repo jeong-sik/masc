@@ -36,12 +36,6 @@ type context = {
   agent_name : string;
 }
 
-type tool_result = bool * string
-
-let wrap_result ~name ~start (success, message) =
-  if success then Tool_result.ok ~tool_name:name ~start_time:start message
-  else Tool_result.error ~tool_name:name ~start_time:start message
-
 let max_write_size = 1024 * 1024  (* 1 MiB *)
 
 let normalize_dir_prefix path =
@@ -443,21 +437,21 @@ let validate_clone_cwd ~(agent_name : string) config cwd =
           agent_name)))
 
 (* Handler: masc_code_write — Create or overwrite a file *)
-let handle_code_write ctx args =
+let handle_code_write ~tool_name ~start_time ctx args =
   let path = get_string args "path" "" in
   let content = get_string args "content" "" in
   let create_dirs = get_bool args "create_dirs" false in
 
   if String.equal path "" then
-    (false, "path parameter required")
+    Tool_result.error ~tool_name ~start_time "path parameter required"
   else if String.length content > max_write_size then
-    (false, Printf.sprintf "Content too large: %d bytes (max: %d)"
+    Tool_result.error ~tool_name ~start_time (Printf.sprintf "Content too large: %d bytes (max: %d)"
        (String.length content) max_write_size)
   else if Tool_code.is_binary_file path then
-    (false, "Binary file extension not allowed for write")
+    Tool_result.error ~tool_name ~start_time "Binary file extension not allowed for write"
   else begin
     match validate_writable_path ~agent_name:ctx.agent_name ctx.config path with
-    | Error e -> (false, Masc_domain.masc_error_to_string e)
+    | Error e -> Tool_result.error ~tool_name ~start_time (Masc_domain.masc_error_to_string e)
     | Ok abs_path ->
       try
         if create_dirs then begin
@@ -471,27 +465,27 @@ let handle_code_write ctx args =
           ("bytes_written", `Int (String.length content));
           ("agent", `String ctx.agent_name);
         ] in
-        (true, Yojson.Safe.to_string response)
+        Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string response)
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-        (false, Printf.sprintf "Write failed: %s" (Stdlib.Printexc.to_string exn))
+        Tool_result.error ~tool_name ~start_time (Printf.sprintf "Write failed: %s" (Stdlib.Printexc.to_string exn))
   end
 
 (* Handler: masc_code_edit — Replace old_string with new_string in a file *)
-let handle_code_edit ctx args =
+let handle_code_edit ~tool_name ~start_time ctx args =
   let path = get_string args "path" "" in
   let old_string = get_string args "old_string" "" in
   let new_string = get_string args "new_string" "" in
   let replace_all = get_bool args "replace_all" false in
 
-  if String.equal path "" then (false, "path parameter required")
-  else if String.equal old_string "" then (false, "old_string parameter required")
-  else if String.equal old_string new_string then (false, "old_string and new_string are identical")
+  if String.equal path "" then Tool_result.error ~tool_name ~start_time "path parameter required"
+  else if String.equal old_string "" then Tool_result.error ~tool_name ~start_time "old_string parameter required"
+  else if String.equal old_string new_string then Tool_result.error ~tool_name ~start_time "old_string and new_string are identical"
   else begin
     match validate_writable_path ~agent_name:ctx.agent_name ctx.config path with
-    | Error e -> (false, Masc_domain.masc_error_to_string e)
+    | Error e -> Tool_result.error ~tool_name ~start_time (Masc_domain.masc_error_to_string e)
     | Ok abs_path ->
       if not (Sys.file_exists abs_path) then
-        (false, Printf.sprintf "File not found: %s" path)
+        Tool_result.error ~tool_name ~start_time (Printf.sprintf "File not found: %s" path)
       else begin
         try
           let content = Fs_compat.load_file abs_path in
@@ -524,7 +518,7 @@ let handle_code_edit ctx args =
             in
             let needle = String.trim first_line in
             if String.length needle < 8 then
-              (false, "old_string not found in file")
+              Tool_result.error ~tool_name ~start_time "old_string not found in file"
             else
               let matches =
                 String.split_on_char '\n' content
@@ -540,9 +534,9 @@ let handle_code_edit ctx args =
                    old_string (check whitespace/indent):\n  "
                   ^ String.concat "\n  " samples
               in
-              (false, "old_string not found in file." ^ hint)
+              Tool_result.error ~tool_name ~start_time ("old_string not found in file." ^ hint)
           else if !count > 1 && not replace_all then
-            (false, Printf.sprintf
+            Tool_result.error ~tool_name ~start_time (Printf.sprintf
                "old_string found %d times. Use replace_all=true or provide more context"
                !count)
           else begin
@@ -591,26 +585,26 @@ let handle_code_edit ctx args =
               ("replacements", `Int !count);
               ("agent", `String ctx.agent_name);
             ] in
-            (true, Yojson.Safe.to_string response)
+            Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string response)
           end
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          (false, Printf.sprintf "Edit failed: %s" (Stdlib.Printexc.to_string exn))
+          Tool_result.error ~tool_name ~start_time (Printf.sprintf "Edit failed: %s" (Stdlib.Printexc.to_string exn))
       end
   end
 
 (* Handler: masc_code_delete — Delete a file *)
-let handle_code_delete ctx args =
+let handle_code_delete ~tool_name ~start_time ctx args =
   let path = get_string args "path" "" in
 
-  if String.equal path "" then (false, "path parameter required")
+  if String.equal path "" then Tool_result.error ~tool_name ~start_time "path parameter required"
   else begin
     match validate_writable_path ~agent_name:ctx.agent_name ctx.config path with
-    | Error e -> (false, Masc_domain.masc_error_to_string e)
+    | Error e -> Tool_result.error ~tool_name ~start_time (Masc_domain.masc_error_to_string e)
     | Ok abs_path ->
       if not (Sys.file_exists abs_path) then
-        (false, Printf.sprintf "File not found: %s" path)
+        Tool_result.error ~tool_name ~start_time (Printf.sprintf "File not found: %s" path)
       else if Sys.is_directory abs_path then
-        (false, "Cannot delete directories, only files")
+        Tool_result.error ~tool_name ~start_time "Cannot delete directories, only files"
       else begin
         try
           Sys.remove abs_path;
@@ -619,22 +613,22 @@ let handle_code_delete ctx args =
             ("path", `String path);
             ("agent", `String ctx.agent_name);
           ] in
-          (true, Yojson.Safe.to_string response)
+          Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string response)
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          (false, Printf.sprintf "Delete failed: %s" (Stdlib.Printexc.to_string exn))
+          Tool_result.error ~tool_name ~start_time (Printf.sprintf "Delete failed: %s" (Stdlib.Printexc.to_string exn))
       end
   end
 
 (* Handler: masc_code_shell — Bounded shell execution *)
-let handle_code_shell ctx args =
+let handle_code_shell ~tool_name ~start_time ctx args =
   let command = get_string args "command" "" in
   let cwd = get_string args "cwd" "" in
   let timeout = get_int args "timeout" 30 in
 
-  if String.equal command "" then (false, "command parameter required")
+  if String.equal command "" then Tool_result.error ~tool_name ~start_time "command parameter required"
   else
     match validate_code_shell_command command with
-    | Error reason -> (false, reason)
+    | Error reason -> Tool_result.error ~tool_name ~start_time reason
     | Ok () ->
         (* Validate cwd if provided *)
         let cwd_result =
@@ -645,7 +639,7 @@ let handle_code_shell ctx args =
             | Error e -> Error e
         in
         (match cwd_result with
-         | Error e -> (false, Masc_domain.masc_error_to_string e)
+         | Error e -> Tool_result.error ~tool_name ~start_time (Masc_domain.masc_error_to_string e)
          | Ok cwd_opt ->
              let safe_timeout = Float.of_int (max 5 (min 120 timeout)) in
              let cmd_parts = ["sh"; "-c"; command] in
@@ -665,9 +659,12 @@ let handle_code_shell ctx args =
                    ("command", `String command);
                    ("agent", `String ctx.agent_name);
                  ] in
-                 (code = 0, Yojson.Safe.pretty_to_string response)
+                 (if code = 0
+                  then fun msg -> Tool_result.ok ~tool_name ~start_time msg
+                  else fun msg -> Tool_result.error ~tool_name ~start_time msg)
+                   (Yojson.Safe.pretty_to_string response)
              | _, output ->
-                 (false, Printf.sprintf "Command failed: %s" (truncate_output output)))
+                 Tool_result.error ~tool_name ~start_time (Printf.sprintf "Command failed: %s" (truncate_output output)))
 
 (* Handler: masc_code_git — Git operations *)
 let code_git_route_fields (ctx : context) =
@@ -686,7 +683,7 @@ let code_git_route_fields (ctx : context) =
     ("route_via", `String route_via);
   ]
 
-let handle_code_git ctx args =
+let handle_code_git ~tool_name ~start_time ctx args =
   let action = get_string args "action" "" in
   let git_args = match args with
     | `Assoc fields ->
@@ -698,9 +695,9 @@ let handle_code_git ctx args =
   in
   let cwd = get_string args "cwd" "" in
 
-  if String.equal action "" then (false, "action parameter required")
+  if String.equal action "" then Tool_result.error ~tool_name ~start_time "action parameter required"
   else if not (List.mem action allowed_git_actions) then
-    (false, Printf.sprintf "Git action '%s' not allowed. Allowed: %s"
+    Tool_result.error ~tool_name ~start_time (Printf.sprintf "Git action '%s' not allowed. Allowed: %s"
        action (String.concat ", " allowed_git_actions))
   else if String.equal action "clone" then begin
     (* Clone: validate org allowlist + cwd within .worktrees/.
@@ -708,17 +705,17 @@ let handle_code_git ctx args =
     let url = match git_args with url :: _ -> url | [] -> "" in
     let has_flag_args = List.exists (fun a -> String.length a > 0 && Char.equal a.[0] '-') git_args in
     if String.equal url "" then
-      (false, "clone requires a repository URL as first argument")
+      Tool_result.error ~tool_name ~start_time "clone requires a repository URL as first argument"
     else if has_flag_args then
-      (false, "clone does not accept flags (security: --upload-pack injection blocked)")
+      Tool_result.error ~tool_name ~start_time "clone does not accept flags (security: --upload-pack injection blocked)"
     else if String.equal cwd "" then
-      (false, "cwd parameter required for clone")
+      Tool_result.error ~tool_name ~start_time "cwd parameter required for clone"
     else
       match validate_clone_url ~base_path:ctx.config.Coord.base_path url with
-      | Error msg -> (false, msg)
+      | Error msg -> Tool_result.error ~tool_name ~start_time msg
       | Ok () ->
         match validate_clone_cwd ~agent_name:ctx.agent_name ctx.config cwd with
-        | Error e -> (false, Masc_domain.masc_error_to_string e)
+        | Error e -> Tool_result.error ~tool_name ~start_time (Masc_domain.masc_error_to_string e)
         | Ok abs_cwd ->
           let clone_url = normalize_github_clone_url url in
           (* Only pass the validated URL — no extra args allowed.
@@ -754,9 +751,12 @@ let handle_code_git ctx args =
                  ]
                  @ code_git_route_fields ctx)
             in
-            (code = 0, Yojson.Safe.pretty_to_string response)
+            (if code = 0
+                  then fun msg -> Tool_result.ok ~tool_name ~start_time msg
+                  else fun msg -> Tool_result.error ~tool_name ~start_time msg)
+                   (Yojson.Safe.pretty_to_string response)
           | _, output ->
-            (false, Printf.sprintf "Git clone failed: %s" (truncate_output output))
+            Tool_result.error ~tool_name ~start_time (Printf.sprintf "Git clone failed: %s" (truncate_output output))
   end
   else begin
     (* Non-clone actions: existing validation *)
@@ -770,17 +770,17 @@ let handle_code_git ctx args =
        List.mem "." git_args)
     in
     if is_dangerous then
-      (false, "Dangerous git operation blocked (force push, main push, or checkout .)")
+      Tool_result.error ~tool_name ~start_time "Dangerous git operation blocked (force push, main push, or checkout .)"
     else begin
       let cwd_result =
-        if String.equal cwd "" then (false, "cwd parameter required for git operations") |> fun (ok, msg) ->
-          if ok then Ok None else Error (System (System_error.IoError msg))
+        if String.equal cwd "" then
+          Error (System (System_error.IoError "cwd parameter required for git operations"))
         else match validate_writable_path ~agent_name:ctx.agent_name ctx.config cwd with
           | Ok abs_cwd -> Ok (Some abs_cwd)
           | Error e -> Error e
       in
       match cwd_result with
-      | Error e -> (false, Masc_domain.masc_error_to_string e)
+      | Error e -> Tool_result.error ~tool_name ~start_time (Masc_domain.masc_error_to_string e)
       | Ok cwd_opt ->
         let dir = match cwd_opt with Some d -> d | None -> "." in
         let cmd = ["sh"; "-c";
@@ -807,9 +807,12 @@ let handle_code_git ctx args =
                ]
                @ code_git_route_fields ctx)
           in
-          (code = 0, Yojson.Safe.pretty_to_string response)
+          (if code = 0
+                  then fun msg -> Tool_result.ok ~tool_name ~start_time msg
+                  else fun msg -> Tool_result.error ~tool_name ~start_time msg)
+                   (Yojson.Safe.pretty_to_string response)
         | _, output ->
-          (false, Printf.sprintf "Git command failed: %s" (truncate_output output))
+          Tool_result.error ~tool_name ~start_time (Printf.sprintf "Git command failed: %s" (truncate_output output))
     end
   end
 
@@ -817,11 +820,11 @@ let handle_code_git ctx args =
 let dispatch ctx ~name ~args : Tool_result.t option =
   let start = Time_compat.now () in
   match name with
-  | "masc_code_write" -> Some (wrap_result ~name ~start (handle_code_write ctx args))
-  | "masc_code_edit" -> Some (wrap_result ~name ~start (handle_code_edit ctx args))
-  | "masc_code_delete" -> Some (wrap_result ~name ~start (handle_code_delete ctx args))
-  | "masc_code_shell" -> Some (wrap_result ~name ~start (handle_code_shell ctx args))
-  | "masc_code_git" -> Some (wrap_result ~name ~start (handle_code_git ctx args))
+  | "masc_code_write" -> Some (handle_code_write ~tool_name:name ~start_time:start ctx args)
+  | "masc_code_edit" -> Some (handle_code_edit ~tool_name:name ~start_time:start ctx args)
+  | "masc_code_delete" -> Some (handle_code_delete ~tool_name:name ~start_time:start ctx args)
+  | "masc_code_shell" -> Some (handle_code_shell ~tool_name:name ~start_time:start ctx args)
+  | "masc_code_git" -> Some (handle_code_git ~tool_name:name ~start_time:start ctx args)
   | _ -> None
 
 (* Tool schemas *)

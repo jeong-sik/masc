@@ -4,8 +4,6 @@
 
     Dispatches [masc_pause], [masc_resume], [masc_pause_status]. *)
 
-type tool_result = bool * string
-
 type context = {
   config : Coord.config;
   agent_name : string;
@@ -13,11 +11,14 @@ type context = {
 
 (** {1 Handlers} *)
 
-val handle_pause : context -> Yojson.Safe.t -> tool_result
+val handle_pause :
+  tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
 
-val handle_resume : context -> Yojson.Safe.t -> tool_result
+val handle_resume :
+  tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
 
-val handle_pause_status : context -> Yojson.Safe.t -> tool_result
+val handle_pause_status :
+  tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
 
 (** {1 Dispatch} *)
 

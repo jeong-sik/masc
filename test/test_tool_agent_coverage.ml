@@ -6,6 +6,7 @@
     masc_agent_card
 *)
 module Tool_args = Masc_mcp.Tool_args
+module Tool_result = Masc_mcp.Tool_result
 module Meta_cognition = Masc_mcp.Meta_cognition
 
 module Tool_agent = Masc_mcp.Tool_agent
@@ -152,16 +153,16 @@ let test_dispatch_agent_card () =
 
 let test_handle_agents () =
   with_ctx (fun ctx ->
-  let (ok, msg) = Tool_agent.handle_agents ctx (`Assoc []) in
-  Alcotest.(check bool) "agents succeeds" true ok;
-  Alcotest.(check bool) "has response" true (String.length msg > 0);
+  let result = Tool_agent.handle_agents ctx (`Assoc []) in
+  Alcotest.(check bool) "agents succeeds" true result.Tool_result.success;
+  Alcotest.(check bool) "has response" true (String.length result.Tool_result.legacy_message > 0);
   )
 
 let test_handle_agent_card () =
   with_ctx (fun ctx ->
-  let (ok, msg) = Tool_agent.handle_agent_card ctx (`Assoc []) in
-  Alcotest.(check bool) "agent card succeeds" true ok;
-  let json = Yojson.Safe.from_string msg in
+  let result = Tool_agent.handle_agent_card ctx (`Assoc []) in
+  Alcotest.(check bool) "agent card succeeds" true result.Tool_result.success;
+  let json = Yojson.Safe.from_string result.Tool_result.legacy_message in
   let open Yojson.Safe.Util in
   Alcotest.(check string) "card name" "MASC-MCP"
     (json |> member "name" |> to_string);
@@ -171,12 +172,12 @@ let test_handle_agent_card () =
 
 let test_handle_agent_card_rejects_unknown_action () =
   with_ctx (fun ctx ->
-  let (ok, msg) =
+  let result =
     Tool_agent.handle_agent_card ctx (`Assoc [("action", `String "bogus")])
   in
-  Alcotest.(check bool) "agent card rejects" false ok;
+  Alcotest.(check bool) "agent card rejects" false result.Tool_result.success;
   Alcotest.(check bool) "mentions invalid action" true
-    (String.contains msg 'b');
+    (String.contains result.Tool_result.legacy_message 'b');
   )
 
 (* ============================================================
@@ -186,8 +187,8 @@ let test_handle_agent_card_rejects_unknown_action () =
 let test_register_capabilities () =
   with_ctx (fun ctx ->
   let args = `Assoc [("capabilities", `List [`String "test"; `String "code"])] in
-  let (ok, _msg) = Tool_agent.handle_register_capabilities ctx args in
-  Alcotest.(check bool) "registers capabilities" true ok;
+  let result = Tool_agent.handle_register_capabilities ctx args in
+  Alcotest.(check bool) "registers capabilities" true result.Tool_result.success;
   )
 
 (* ============================================================
@@ -197,15 +198,15 @@ let test_register_capabilities () =
 let test_agent_update_status () =
   with_ctx (fun ctx ->
   let args = `Assoc [("status", `String "busy")] in
-  let (_ok, msg) = Tool_agent.handle_agent_update ctx args in
-  Alcotest.(check bool) "has response" true (String.length msg > 0);
+  let result = Tool_agent.handle_agent_update ctx args in
+  Alcotest.(check bool) "has response" true (String.length result.Tool_result.legacy_message > 0);
   )
 
 let test_agent_update_capabilities () =
   with_ctx (fun ctx ->
   let args = `Assoc [("capabilities", `List [`String "review"; `String "refactor"])] in
-  let (_ok, msg) = Tool_agent.handle_agent_update ctx args in
-  Alcotest.(check bool) "has response" true (String.length msg > 0);
+  let result = Tool_agent.handle_agent_update ctx args in
+  Alcotest.(check bool) "has response" true (String.length result.Tool_result.legacy_message > 0);
   )
 
 (* ============================================================
@@ -215,10 +216,10 @@ let test_agent_update_capabilities () =
 let test_get_metrics_no_data () =
   with_ctx (fun ctx ->
   let args = `Assoc [("agent_name", `String "nonexistent"); ("days", `Int 7)] in
-  let (ok, msg) = dispatch_exn ctx ~name:"masc_get_metrics" ~args in
-  Alcotest.(check bool) "no data fails" false ok;
+  let result = dispatch_exn ctx ~name:"masc_get_metrics" ~args in
+  Alcotest.(check bool) "no data fails" false result.Tool_result.success;
   let open Yojson.Safe.Util in
-  let json = Yojson.Safe.from_string msg in
+  let json = Yojson.Safe.from_string result.Tool_result.legacy_message in
   Alcotest.(check string) "error_code" "not_found"
     (json |> member "error_code" |> to_string);
   Alcotest.(check string) "message" "no metrics found for agent: nonexistent"
@@ -227,10 +228,10 @@ let test_get_metrics_no_data () =
 
 let test_get_metrics_missing_agent_name () =
   with_ctx (fun ctx ->
-  let (ok, msg) = dispatch_exn ctx ~name:"masc_get_metrics" ~args:(`Assoc []) in
-  Alcotest.(check bool) "missing agent_name fails" false ok;
+  let result = dispatch_exn ctx ~name:"masc_get_metrics" ~args:(`Assoc []) in
+  Alcotest.(check bool) "missing agent_name fails" false result.Tool_result.success;
   let open Yojson.Safe.Util in
-  let json = Yojson.Safe.from_string msg in
+  let json = Yojson.Safe.from_string result.Tool_result.legacy_message in
   Alcotest.(check string) "status" "error"
     (json |> member "status" |> to_string);
   Alcotest.(check string) "message" "agent_name is required"
@@ -243,17 +244,17 @@ let test_get_metrics_missing_agent_name () =
 
 let test_agent_fitness_no_agents () =
   with_ctx (fun ctx ->
-  let (ok, msg) = Tool_agent.handle_agent_fitness ctx (`Assoc []) in
-  Alcotest.(check bool) "fitness succeeds" true ok;
-  Alcotest.(check bool) "has response" true (String.length msg > 0);
+  let result = Tool_agent.handle_agent_fitness ctx (`Assoc []) in
+  Alcotest.(check bool) "fitness succeeds" true result.Tool_result.success;
+  Alcotest.(check bool) "has response" true (String.length result.Tool_result.legacy_message > 0);
   )
 
 let test_agent_fitness_specific () =
   with_ctx (fun ctx ->
   let args = `Assoc [("agent_name", `String "test-agent"); ("days", `Int 7)] in
-  let (ok, msg) = Tool_agent.handle_agent_fitness ctx args in
-  Alcotest.(check bool) "fitness with agent" true ok;
-  Alcotest.(check bool) "has response" true (String.length msg > 0);
+  let result = Tool_agent.handle_agent_fitness ctx args in
+  Alcotest.(check bool) "fitness with agent" true result.Tool_result.success;
+  Alcotest.(check bool) "has response" true (String.length result.Tool_result.legacy_message > 0);
   )
 
 (* ============================================================

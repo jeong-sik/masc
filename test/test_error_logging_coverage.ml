@@ -110,7 +110,7 @@ let test_tool_task_done_nonexistent_logs () =
     ("notes", `String "");
   ] in
   let output = capture_stderr (fun () ->
-    ignore (Tool_task.handle_done ctx args)
+    ignore (Tool_task.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx args)
   ) in
   check bool "stderr contains [Task] prefix for done on missing task"
     true (str_contains output "[Task]")
@@ -124,7 +124,7 @@ let test_tool_task_cancel_nonexistent_logs () =
     ("reason", `String "test cancel");
   ] in
   let output = capture_stderr (fun () ->
-    ignore (Tool_task.handle_cancel_task ctx args)
+    ignore (Tool_task.handle_cancel_task ~tool_name:"test_tool" ~start_time:0.0 ctx args)
   ) in
   check bool "stderr contains [Task] prefix for cancel on missing task"
     true (str_contains output "[Task]")

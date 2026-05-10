@@ -180,8 +180,8 @@ let test_blacklist_replace () =
 let test_dispatch_unknown () =
   let ctx = make_ctx () in
   let args = `Assoc [] in
-  check (option (pair bool string)) "unknown tool returns None" None
-    (Tool_suspend.dispatch ctx ~name:"masc_unknown" ~args)
+  check bool "unknown tool returns None" true
+    (Tool_suspend.dispatch ctx ~name:"masc_unknown" ~args = None)
 
 (* ============================================================
    check_can_join Tests

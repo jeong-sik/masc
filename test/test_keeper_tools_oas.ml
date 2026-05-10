@@ -837,41 +837,41 @@ let test_library_search_returns_results () =
     (fun () ->
        let ctx = Tool_library.{ agent_name = "test-keeper" } in
        (* Search *)
-       let ok, msg =
-         Tool_library.handle_search ctx (`Assoc [ "query", `String "mlfq" ])
+       let search_result =
+         Tool_library.handle_search ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ "query", `String "mlfq" ])
        in
-       check bool "search succeeds" true ok;
+       check bool "search succeeds" true search_result.Tool_result.success;
        check
          bool
          "search finds mlfq doc"
          true
-         (let low = String.lowercase_ascii msg in
+         (let low = String.lowercase_ascii search_result.Tool_result.legacy_message in
           String.length low > 0
           && not (Tool_library.string_contains ~sub:"no documents" low));
        (* Read *)
-       let ok2, msg2 =
-         Tool_library.handle_read ctx (`Assoc [ "topic", `String "test-mlfq" ])
+       let read_result =
+         Tool_library.handle_read ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ "topic", `String "test-mlfq" ])
        in
-       check bool "read succeeds" true ok2;
+       check bool "read succeeds" true read_result.Tool_result.success;
        check
          bool
          "read contains MLFQ content"
          true
-         (Tool_library.string_contains ~sub:"Multi-Level Feedback Queue" msg2))
+         (Tool_library.string_contains ~sub:"Multi-Level Feedback Queue" read_result.Tool_result.legacy_message))
 ;;
 
 let test_library_search_empty_query () =
   let ctx = Tool_library.{ agent_name = "test-keeper" } in
-  let ok, _msg = Tool_library.handle_search ctx (`Assoc [ "query", `String "" ]) in
-  check bool "empty query fails" false ok
+  let result = Tool_library.handle_search ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ "query", `String "" ]) in
+  check bool "empty query fails" false result.Tool_result.success
 ;;
 
 let test_library_read_missing_topic () =
   let ctx = Tool_library.{ agent_name = "test-keeper" } in
-  let ok, _msg =
-    Tool_library.handle_read ctx (`Assoc [ "topic", `String "nonexistent-topic-xyz-999" ])
+  let result =
+    Tool_library.handle_read ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ "topic", `String "nonexistent-topic-xyz-999" ])
   in
-  check bool "missing topic fails" false ok
+  check bool "missing topic fails" false result.Tool_result.success
 ;;
 
 (* ── normalize_tool_result tests ──────────────────────────── *)

@@ -85,8 +85,6 @@ let dispatch
       Tool_run.dispatch { Tool_run.config } ~name ~args
   | Mod_agent ->
       Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args
-      |> Option.map (fun (success, message) ->
-        if success then ok message else err message)
   | Mod_room ->
       Tool_coord.dispatch { Tool_coord.config; agent_name } ~name ~args
       |> Option.map (fun { Coord_types.success; message } ->
@@ -105,8 +103,6 @@ let dispatch
   | Mod_suspend ->
       Tool_suspend.dispatch { Tool_suspend.config; caller_agent = Some agent_name }
         ~name ~args
-      |> Option.map (fun (success, message) ->
-        if success then ok message else err message)
   | Mod_library ->
       Tool_library.dispatch { Tool_library.agent_name } ~name ~args
 

@@ -81,12 +81,6 @@ let string_contains ~sub s =
     in
     check 0
 
-type tool_result = bool * string
-
-let wrap_result ~name ~start (success, message) =
-  if success then Tool_result.ok ~tool_name:name ~start_time:start message
-  else Tool_result.error ~tool_name:name ~start_time:start message
-
 type context = {
   agent_name: string;
 }
@@ -176,7 +170,7 @@ let list_documents ?(include_candidates=false) () =
   in
   main_docs @ candidate_docs
 
-let handle_list _ctx args =
+let handle_list ~tool_name ~start_time _ctx args =
   let include_candidates =
     match Yojson.Safe.Util.member "include_candidates" args with
     | `Bool b -> b
@@ -201,13 +195,13 @@ let handle_list _ctx args =
   let output = if Stdlib.List.length entries = 0 then "No documents in library"
     else sprintf "## Library Documents (%d)\n\n%s" (List.length entries) (String.concat "\n" entries)
   in
-  (true, output)
+  Tool_result.ok ~tool_name ~start_time output
 
 (* Read document *)
-let handle_read _ctx args =
+let handle_read ~tool_name ~start_time _ctx args =
   let topic = Yojson.Safe.Util.(member "topic" args |> to_string_option)
     |> Option.value ~default:"" in
-  if String.equal topic "" then (false, "topic is required")
+  if String.equal topic "" then Tool_result.error ~tool_name ~start_time "topic is required"
   else begin
     (* Find matching file *)
     let files = list_documents ~include_candidates:true () in
@@ -216,16 +210,16 @@ let handle_read _ctx args =
       string_contains ~sub:topic (String.lowercase_ascii base)
     ) files in
     match matching with
-    | [] -> (false, sprintf "No document matching '%s'" topic)
+    | [] -> Tool_result.error ~tool_name ~start_time (sprintf "No document matching '%s'" topic)
     | path :: _ ->
         try
           let content = In_channel.with_open_text path In_channel.input_all in
-          (true, sprintf "## %s\n\n%s" (Filename.basename path) content)
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> (false, sprintf "Read error: %s" (Stdlib.Printexc.to_string exn))
+          Tool_result.ok ~tool_name ~start_time (sprintf "## %s\n\n%s" (Filename.basename path) content)
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Tool_result.error ~tool_name ~start_time (sprintf "Read error: %s" (Stdlib.Printexc.to_string exn))
   end
 
 (* Add document *)
-let handle_add ctx args =
+let handle_add ~tool_name ~start_time ctx args =
   let module U = Yojson.Safe.Util in
   let title = U.member "title" args |> U.to_string_option |> Option.value ~default:"" in
   let source = U.member "source" args |> U.to_string_option |> Option.value ~default:"direct_experience" in
@@ -234,8 +228,8 @@ let handle_add ctx args =
     with Yojson.Safe.Util.Type_error (_, _) -> [] in
   let content = U.member "content" args |> U.to_string_option |> Option.value ~default:"" in
 
-  if String.equal title "" then (false, "title is required")
-  else if String.equal content "" then (false, "content is required")
+  if String.equal title "" then Tool_result.error ~tool_name ~start_time "title is required"
+  else if String.equal content "" then Tool_result.error ~tool_name ~start_time "content is required"
   else begin
     (* Issue #8601: validate via Variant SSOT instead of List.mem on a
        hand-rolled string list. source_of_string_opt returns None for
@@ -244,8 +238,8 @@ let handle_add ctx args =
        automatically. *)
     match source_of_string_opt source with
     | None ->
-      (false,
-       sprintf "Invalid source. Must be one of: %s"
+      Tool_result.error ~tool_name ~start_time
+       (sprintf "Invalid source. Must be one of: %s"
          (String.concat ", " valid_source_strings))
     | Some _ -> begin
       (* Determine destination based on confidence *)
@@ -283,20 +277,20 @@ verified_by: []
       try
         Out_channel.with_open_text filepath (fun oc -> Out_channel.output_string oc full_content);
         let status = if Stdlib.Float.compare confidence 0.5 < 0 then "candidate (needs verification)" else "library" in
-        (true, sprintf "Document added to %s: %s" status filepath)
-      with Eio.Cancel.Cancelled _ as e -> raise e | exn -> (false, sprintf "Write error: %s" (Stdlib.Printexc.to_string exn))
+        Tool_result.ok ~tool_name ~start_time (sprintf "Document added to %s: %s" status filepath)
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Tool_result.error ~tool_name ~start_time (sprintf "Write error: %s" (Stdlib.Printexc.to_string exn))
     end
   end
 
 (* Promote candidate to library *)
-let handle_promote ctx args =
+let handle_promote ~tool_name ~start_time ctx args =
   let topic = Yojson.Safe.Util.(member "topic" args |> to_string_option)
     |> Option.value ~default:"" in
   let new_confidence = Yojson.Safe.Util.(member "confidence" args |> to_float_option)
     |> Option.value ~default:0.7 in
 
-  if String.equal topic "" then (false, "topic is required")
-  else if Stdlib.Float.compare new_confidence 0.5 < 0 then (false, "confidence must be >= 0.5 to promote")
+  if String.equal topic "" then Tool_result.error ~tool_name ~start_time "topic is required"
+  else if Stdlib.Float.compare new_confidence 0.5 < 0 then Tool_result.error ~tool_name ~start_time "confidence must be >= 0.5 to promote"
   else begin
     let topic_lower = String.lowercase_ascii topic in
     let candidates = list_documents ~include_candidates:true () |> List.filter (fun f ->
@@ -304,7 +298,7 @@ let handle_promote ctx args =
       string_contains ~sub:topic_lower (String.lowercase_ascii (Filename.basename f))
     ) in
     match candidates with
-    | [] -> (false, sprintf "No candidate matching '%s'" topic)
+    | [] -> Tool_result.error ~tool_name ~start_time (sprintf "No candidate matching '%s'" topic)
     | src_path :: _ ->
         try
           let content = In_channel.with_open_text src_path In_channel.input_all in
@@ -322,15 +316,15 @@ let handle_promote ctx args =
           let dest_path = Filename.concat (library_root ()) (Filename.basename src_path) in
           Out_channel.with_open_text dest_path (fun oc -> Out_channel.output_string oc with_verifier);
           Sys.remove src_path;
-          (true, sprintf "Promoted to library: %s (confidence: %.2f)" dest_path new_confidence)
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> (false, sprintf "Promote error: %s" (Stdlib.Printexc.to_string exn))
+          Tool_result.ok ~tool_name ~start_time (sprintf "Promoted to library: %s (confidence: %.2f)" dest_path new_confidence)
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Tool_result.error ~tool_name ~start_time (sprintf "Promote error: %s" (Stdlib.Printexc.to_string exn))
   end
 
 (* Search documents *)
-let handle_search _ctx args =
+let handle_search ~tool_name ~start_time _ctx args =
   let query = Yojson.Safe.Util.(member "query" args |> to_string_option)
     |> Option.value ~default:"" in
-  if String.equal query "" then (false, "query is required")
+  if String.equal query "" then Tool_result.error ~tool_name ~start_time "query is required"
   else begin
     let query_lower = String.lowercase_ascii query in
     let docs = list_documents ~include_candidates:true () in
@@ -345,19 +339,19 @@ let handle_search _ctx args =
         else None
       with Sys_error _ -> None
     ) docs in
-    if Stdlib.List.length matches = 0 then (true, sprintf "No documents matching '%s'" query)
-    else (true, sprintf "## Search Results (%d)\n\n%s" (List.length matches) (String.concat "\n" matches))
+    if Stdlib.List.length matches = 0 then Tool_result.ok ~tool_name ~start_time (sprintf "No documents matching '%s'" query)
+    else Tool_result.ok ~tool_name ~start_time (sprintf "## Search Results (%d)\n\n%s" (List.length matches) (String.concat "\n" matches))
   end
 
 (* Dispatch *)
 let dispatch ctx ~name ~args : Tool_result.t option =
   let start = Time_compat.now () in
   match name with
-  | "masc_library_list" -> Some (wrap_result ~name ~start (handle_list ctx args))
-  | "masc_library_read" -> Some (wrap_result ~name ~start (handle_read ctx args))
-  | "masc_library_add" -> Some (wrap_result ~name ~start (handle_add ctx args))
-  | "masc_library_promote" -> Some (wrap_result ~name ~start (handle_promote ctx args))
-  | "masc_library_search" -> Some (wrap_result ~name ~start (handle_search ctx args))
+  | "masc_library_list" -> Some (handle_list ~tool_name:name ~start_time:start ctx args)
+  | "masc_library_read" -> Some (handle_read ~tool_name:name ~start_time:start ctx args)
+  | "masc_library_add" -> Some (handle_add ~tool_name:name ~start_time:start ctx args)
+  | "masc_library_promote" -> Some (handle_promote ~tool_name:name ~start_time:start ctx args)
+  | "masc_library_search" -> Some (handle_search ~tool_name:name ~start_time:start ctx args)
   | _ -> None
 
 (* Tool definitions for MCP protocol *)

@@ -413,8 +413,9 @@ let test_release_clears_keeper_current_task_id () =
       let task_id =
         Yojson.Safe.Util.(json |> member "claimed_task" |> member "task_id" |> to_string)
       in
-      let ok, message =
+      let release_result =
         Tool_task.handle_transition
+          ~tool_name:"test_tool" ~start_time:0.0
           { Tool_task.config; agent_name = meta.agent_name; sw = None }
           (`Assoc
               [ "task_id", `String task_id
@@ -422,7 +423,7 @@ let test_release_clears_keeper_current_task_id () =
               ; "reason", `String "scope changed"
               ])
       in
-      if not ok then fail message;
+      if not release_result.Tool_result.success then fail release_result.Tool_result.legacy_message;
       let registry_meta =
         match Keeper_registry.get ~base_path:config.Coord.base_path meta.name with
         | Some entry -> entry.meta
@@ -501,8 +502,9 @@ let test_release_clears_task_worktree_metadata () =
              "worktree linked before release"
              true
              (Option.is_some (only_task config).worktree);
-           let ok, message =
+           let result =
              Tool_task.handle_transition
+               ~tool_name:"test_tool" ~start_time:0.0
                { Tool_task.config; agent_name = meta.agent_name; sw = None }
                (`Assoc
                    [ "task_id", `String task_id
@@ -510,7 +512,7 @@ let test_release_clears_task_worktree_metadata () =
                    ; "reason", `String "handoff to another keeper"
                    ])
            in
-           if not ok then fail message;
+           if not result.Tool_result.success then fail result.Tool_result.legacy_message;
            check
              bool
              "worktree cleared on release"

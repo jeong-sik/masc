@@ -25,16 +25,10 @@ type context = {
   agent_name: string;
 }
 
-type tool_result = bool * string
-
-let wrap_result ~name ~start (success, message) =
-  if success then Tool_result.ok ~tool_name:name ~start_time:start message
-  else Tool_result.error ~tool_name:name ~start_time:start message
-
 let default_base_branch = "auto"
 
 (* Individual handlers *)
-let handle_worktree_create ctx args =
+let handle_worktree_create ~tool_name ~start_time ctx args =
   (* LLM may omit agent_name in args; fall back to context agent_name.
      This prevents Validation.Agent_id failures when the 9B model
      sends empty or missing agent_name.
@@ -68,7 +62,7 @@ let handle_worktree_create ctx args =
           from_args ctx.agent_name)
   in
   match agent_name_result with
-  | Error msg -> (false, msg)
+  | Error msg -> Tool_result.error ~tool_name ~start_time msg
   | Ok agent_name ->
   let raw_task_id = get_string args "task_id" "" in
   let base_branch = get_string args "base_branch" default_base_branch in
@@ -100,13 +94,14 @@ let handle_worktree_create ctx args =
            path traversal, no '.'/'..' specials." bad) )
   in
   match repo_name_error with
-  | Some err -> (false, err)
+  | Some err -> Tool_result.error ~tool_name ~start_time err
   | None ->
   if String.equal raw_task_id "" then
-    (false, "task_id is required. Example: task_id='fix-login', \
-             task_id='add-auth'. Allowed characters: a-z, 0-9, hyphen, \
-             underscore. Slashes and backslashes are auto-normalized \
-             to hyphens, so 'feature/auth' becomes 'feature-auth'.")
+    Tool_result.error ~tool_name ~start_time
+      "task_id is required. Example: task_id='fix-login', \
+       task_id='add-auth'. Allowed characters: a-z, 0-9, hyphen, \
+       underscore. Slashes and backslashes are auto-normalized \
+       to hyphens, so 'feature/auth' becomes 'feature-auth'."
   else
   (* Normalize: replace / and \ with - so LLMs can use branch-style names *)
   let task_id =
@@ -115,29 +110,30 @@ let handle_worktree_create ctx args =
     |> String.of_seq
   in
   match Coord.worktree_create_r ?repo_name ctx.config ~agent_name ~task_id ~base_branch with
-  | Ok msg -> (true, msg)
-  | Error e -> (false, Masc_domain.masc_error_to_string e)
+  | Ok msg -> Tool_result.ok ~tool_name ~start_time msg
+  | Error e -> Tool_result.error ~tool_name ~start_time (Masc_domain.masc_error_to_string e)
 
-let handle_worktree_remove ctx args =
+let handle_worktree_remove ~tool_name ~start_time ctx args =
   let task_id = get_string args "task_id" "" in
   if String.equal task_id "" then
-    (false, "task_id is required. Use the same task_id you passed to masc_worktree_create.")
+    Tool_result.error ~tool_name ~start_time
+      "task_id is required. Use the same task_id you passed to masc_worktree_create."
   else
   match Coord.worktree_remove_r ctx.config ~agent_name:ctx.agent_name ~task_id with
-  | Ok msg -> (true, msg)
-  | Error e -> (false, Masc_domain.masc_error_to_string e)
+  | Ok msg -> Tool_result.ok ~tool_name ~start_time msg
+  | Error e -> Tool_result.error ~tool_name ~start_time (Masc_domain.masc_error_to_string e)
 
-let handle_worktree_list ctx _args =
+let handle_worktree_list ~tool_name ~start_time ctx _args =
   let json = Coord.worktree_list ctx.config in
-  (true, Yojson.Safe.to_string json)
+  Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string json)
 
 (* Dispatch function - returns None if tool not handled *)
 let dispatch ctx ~name ~args : Tool_result.t option =
   let start = Time_compat.now () in
   match name with
-  | "masc_worktree_create" -> Some (wrap_result ~name ~start (handle_worktree_create ctx args))
-  | "masc_worktree_remove" -> Some (wrap_result ~name ~start (handle_worktree_remove ctx args))
-  | "masc_worktree_list" -> Some (wrap_result ~name ~start (handle_worktree_list ctx args))
+  | "masc_worktree_create" -> Some (handle_worktree_create ~tool_name:name ~start_time:start ctx args)
+  | "masc_worktree_remove" -> Some (handle_worktree_remove ~tool_name:name ~start_time:start ctx args)
+  | "masc_worktree_list" -> Some (handle_worktree_list ~tool_name:name ~start_time:start ctx args)
   | _ -> None
 
 let schemas = Tool_schemas_worktree.schemas

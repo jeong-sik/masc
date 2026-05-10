@@ -151,7 +151,7 @@ export function IdeEditor({
         ` : null}
       </div>
       ${activeLayerKinds.length > 0
-        ? LayerOverlaySummary(activeLayerKinds, ownership, keepers)
+        ? LayerOverlaySummary(activeLayerKinds, ownership, keepers, annotations)
         : null}
       ${findOpen
         ? html`<${IdeFindPanel}
@@ -546,7 +546,7 @@ function CodeMirrorEditor({
 
   return html`
     <div class="ide-codemirror-shell" data-view=${showBlame ? 'blame' : 'source'}>
-      ${showBlame ? BlameTimeline(ownership, keepers, annotations) : null}
+      ${showBlame ? BlameTimeline(ownership, keepers) : null}
       <div ref=${containerRef} class="ide-codemirror-host" />
     </div>
   `
@@ -567,9 +567,7 @@ function syncEditorDocument(view: EditorView, content: string): void {
 function BlameTimeline(
   ownership: ReadonlyMap<number, LineOwnership>,
   keepers: ReadonlyArray<string>,
-  annotations: ReadonlyArray<IdeAnnotation>,
 ) {
-  const annotationCount = annotations.length
   const latestEdit = latestEditMs(ownership)
   const stats = keeperOwnershipStats(ownership, keepers)
   return html`

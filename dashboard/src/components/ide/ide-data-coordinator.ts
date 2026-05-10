@@ -27,6 +27,10 @@ import {
   createFileTreeStore,
   type FileTreeStore,
 } from './file-tree-store'
+import {
+  fetchIdeAnnotations,
+  type IdeAnnotation,
+} from '../../api/ide'
 
 export interface IdeDataCoordinator {
   readonly documentStore: CodeDocumentStore
@@ -42,6 +46,8 @@ export interface IdeDataCoordinator {
   readonly subscribeActiveRepositoryId: (listener: () => void) => () => void
   readonly scanRepositories: () => Promise<ReadonlyArray<Repository>>
   readonly subscribeRepositories: (listener: () => void) => () => void
+  readonly annotations: () => ReadonlyArray<IdeAnnotation>
+  readonly subscribeAnnotations: (listener: () => void) => () => void
   readonly dispose: () => void
 }
 
@@ -105,6 +111,7 @@ export function createIdeDataCoordinator(): IdeDataCoordinator {
   const workspaceSourceSignal = signal<WorkspaceSource>({ kind: 'project' })
   const repositoriesSignal = signal<ReadonlyArray<Repository>>([])
   const activeRepositoryIdSignal = signal<string | null>(null)
+  const annotationsSignal = signal<ReadonlyArray<IdeAnnotation>>([])
 
   let abortController = new AbortController()
 
@@ -171,6 +178,9 @@ export function createIdeDataCoordinator(): IdeDataCoordinator {
       }
     }).catch(() => {})
 
+    // Load regions
+    documentStore.loadRegions(filePath, opts).catch(() => {})
+
     // Load blame → ownership
     fetchGitBlame(filePath, opts).then(blocks => {
       if (signal.aborted) return
@@ -190,6 +200,12 @@ export function createIdeDataCoordinator(): IdeDataCoordinator {
     fetchGitDiff(filePath, { ...opts, baseRef: 'HEAD' }).then(rows => {
       if (signal.aborted) return
       diffRowsSignal.value = rows
+    }).catch(() => {})
+
+    // Load annotations
+    fetchIdeAnnotations({ file_path: filePath }, opts).then(annotations => {
+      if (signal.aborted) return
+      annotationsSignal.value = annotations
     }).catch(() => {})
   })
 
@@ -217,6 +233,9 @@ export function createIdeDataCoordinator(): IdeDataCoordinator {
     scanRepositories,
     subscribeRepositories: (listener: () => void) =>
       repositoriesSignal.subscribe(listener),
+    annotations: () => annotationsSignal.value,
+    subscribeAnnotations: (listener: () => void) =>
+      annotationsSignal.subscribe(listener),
     dispose: () => {
       abortController.abort()
       disposeEffect()

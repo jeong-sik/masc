@@ -130,6 +130,7 @@
   keeper_msg_async
   keeper_event_bus
   keeper_event_queue
+  keeper_relevance_check
   masc_event_bus
   ;; worker_container sub-modules
   worker_container_types

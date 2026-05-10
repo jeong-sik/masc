@@ -666,11 +666,11 @@ let run_keepalive_unified_turn
           meta_after_triage.name
       in
       let queued_observations =
-        match board_batch with
+        begin match board_batch with
         | [] ->
           (* No board signals in window — fall back to single dequeue
              for non-board stimuli (bootstrap, recovery, etc.). *)
-          (match
+          begin match
             Keeper_registry.dequeue_event
               ~base_path:ctx.config.base_path
               meta_after_triage.name
@@ -702,37 +702,40 @@ let run_keepalive_unified_turn
               class_str
               (String.length stim.payload)
               meta_after_triage.name;
-            (match Keeper_event_queue.classify stim with
-             | Board_signal ->
-               (match Keeper_world_observation.pending_board_event_of_stimulus
-                        ~continuity_summary:meta_after_triage.continuity_summary
-                        ~meta:meta_after_triage stim with
-                | Some event -> [ event ]
-                | None -> [])
-             | Bootstrap ->
-               Log.Keeper.info
-                 "turn entry: bootstrap stimulus consumed (keeper=%s)"
-                 meta_after_triage.name;
-               []
-             | Alive_but_stuck_recovery ->
-               Log.Keeper.info
-                 "turn entry: alive-but-stuck recovery stimulus consumed post_id=%s \
-                  (keeper=%s)"
-                 stim.post_id
-                 meta_after_triage.name;
-               []
-             | Unsupported prefix ->
-               Prometheus.inc_counter
-                 Keeper_metrics.metric_keeper_unsupported_stimulus
-                 ~labels:[ "keeper", meta_after_triage.name ]
-                 ();
-               Log.Keeper.warn
-                 "turn entry: unsupported stimulus consumed prefix=%S post_id=%s \
-                  (keeper=%s) — wake→no_signal gap #12684"
-                 prefix
-                 stim.post_id
-                 meta_after_triage.name;
-               []))
+            begin match Keeper_event_queue.classify stim with
+            | Board_signal ->
+              begin match Keeper_world_observation.pending_board_event_of_stimulus
+                       ~continuity_summary:meta_after_triage.continuity_summary
+                       ~meta:meta_after_triage stim with
+              | Some event -> [ event ]
+              | None -> []
+              end
+            | Bootstrap ->
+              Log.Keeper.info
+                "turn entry: bootstrap stimulus consumed (keeper=%s)"
+                meta_after_triage.name;
+              []
+            | Alive_but_stuck_recovery ->
+              Log.Keeper.info
+                "turn entry: alive-but-stuck recovery stimulus consumed post_id=%s \
+                 (keeper=%s)"
+                stim.post_id
+                meta_after_triage.name;
+              []
+            | Unsupported prefix ->
+              Prometheus.inc_counter
+                Keeper_metrics.metric_keeper_unsupported_stimulus
+                ~labels:[ "keeper", meta_after_triage.name ]
+                ();
+              Log.Keeper.warn
+                "turn entry: unsupported stimulus consumed prefix=%S post_id=%s \
+                 (keeper=%s) — wake→no_signal gap #12684"
+                prefix
+                stim.post_id
+                meta_after_triage.name;
+              []
+            end
+          end
         | batch ->
           (* Board signal debounce: coalesce N signals into observations
              within the configured window. *)
@@ -741,12 +744,12 @@ let run_keepalive_unified_turn
             Log.Keeper.info
               "debounce: coalesced %d board signals (keeper=%s)"
               batch_len meta_after_triage.name;
-          List.filter_map (fun stim ->
+          List.filter_map (fun (stim : Keeper_event_queue.stimulus) ->
             let urgency_str =
-              match stim.urgency with
+              (match stim.urgency with
               | Keeper_event_queue.Immediate -> "immediate"
               | Keeper_event_queue.Normal -> "normal"
-              | Keeper_event_queue.Low -> "low"
+              | Keeper_event_queue.Low -> "low")
             in
             Prometheus.inc_counter
               Keeper_metrics.metric_keeper_stimulus_consumed
@@ -763,12 +766,14 @@ let run_keepalive_unified_turn
               ~continuity_summary:meta_after_triage.continuity_summary
               ~meta:meta_after_triage stim
           ) batch
+        end
       in
       let pending_board_events =
-        List.fold_left (fun acc event ->
+        List.fold_left (fun acc (event : Keeper_world_observation.pending_board_event) ->
           if List.exists
                (fun existing ->
-                  String.equal existing.Keeper_world_observation.post_id event.post_id)
+                  String.equal existing.Keeper_world_observation.post_id
+                    event.Keeper_world_observation.post_id)
                acc
           then acc
           else

@@ -61,15 +61,23 @@ let count_occurrences ~needle haystack =
     loop 0 0
 
 let test_metric_registered () =
-  let prom = load_source "lib/prometheus.ml" in
+  (* The metric literal moved out of [lib/prometheus.ml] and into
+     [lib/keeper/keeper_metrics.ml] in #14179 (RFC-0043 distribute
+     metric ownership). [lib/prometheus.ml] now only references
+     [Keeper_metrics.metric_keeper_paused_state_persist_errors] by
+     symbol, so the structural guard checks both files: the literal
+     must live somewhere, and the registration site (by symbol) must
+     still be in [lib/prometheus.ml]. *)
+  let metrics = load_source "lib/keeper/keeper_metrics.ml" in
   check bool "paused-state persist-errors metric declared" true
     (count_occurrences
        ~needle:"masc_keeper_paused_state_persist_errors_total"
-       prom
+       metrics
      >= 1);
+  let prom = load_source "lib/prometheus.ml" in
   check bool "paused-state persist-errors metric registered with HELP"
     true
-    (count_occurrences ~needle:metric_name prom >= 2)
+    (count_occurrences ~needle:metric_name prom >= 1)
 
 let test_happy_path_preserved () =
   let src = load_source target_file in
@@ -149,7 +157,7 @@ let test_counter_inc_calls () =
   check bool "Prometheus.inc_counter called for new metric >= 6 times"
     true
     (count_occurrences
-       ~needle:"Prometheus.metric_keeper_paused_state_persist_errors"
+       ~needle:"Keeper_metrics.metric_keeper_paused_state_persist_errors"
        src
      >= 6)
 

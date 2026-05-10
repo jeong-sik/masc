@@ -88,12 +88,19 @@ type audit_entry = {
   acted_at    : float;
 }
 
+type target_summary = {
+  report_count : int;
+  moderation_status : string;
+}
+
 (** {1 In-memory store} *)
 
 type store = {
   queue : (string, queue_entry) Hashtbl.t;  (* entry_id -> entry *)
   audit : audit_entry list ref;
   unresolved_by_target : (target_kind * string, string) Hashtbl.t;
+  report_count_by_target : (target_kind * string, int) Hashtbl.t;
+  latest_action_by_target : (target_kind * string, action_kind * float) Hashtbl.t;
   last_flag_by_reporter : (string, float) Hashtbl.t;
 }
 
@@ -117,10 +124,23 @@ let make_store () : store =
     queue = Hashtbl.create 64;
     audit = ref [];
     unresolved_by_target = Hashtbl.create 64;
+    report_count_by_target = Hashtbl.create 64;
+    latest_action_by_target = Hashtbl.create 64;
     last_flag_by_reporter = Hashtbl.create 64;
   }
 
 let target_key target_kind target_id = (target_kind, target_id)
+
+let increment_report_count s target_key =
+  let current =
+    Hashtbl.find_opt s.report_count_by_target target_key |> Option.value ~default:0
+  in
+  Hashtbl.replace s.report_count_by_target target_key (current + 1)
+
+let update_latest_action s target_key action acted_at =
+  match Hashtbl.find_opt s.latest_action_by_target target_key with
+  | Some (_existing_action, existing_at) when Float.compare existing_at acted_at > 0 -> ()
+  | _ -> Hashtbl.replace s.latest_action_by_target target_key (action, acted_at)
 
 let retry_after_for_reporter s ~reporter ~now ~window_sec =
   if Float.compare window_sec 0.0 <= 0 then None
@@ -186,6 +206,7 @@ let flag ~target_kind ~target_id ~reporter ~reason =
         } in
         Hashtbl.replace s.queue entry_id entry;
         Hashtbl.replace s.unresolved_by_target target_key entry_id;
+        increment_report_count s target_key;
         Hashtbl.replace s.last_flag_by_reporter reporter now;
         Ok entry
 
@@ -225,6 +246,7 @@ let record_action ~target_kind ~target_id ~actor ~action ?reason ?note () =
       note
   in
   let audit_id = Random_id.prefixed ~prefix:"ma-" ~bytes:16 in
+  let acted_at = Time_compat.now () in
   let entry = {
     audit_id;
     target_kind;
@@ -233,7 +255,7 @@ let record_action ~target_kind ~target_id ~actor ~action ?reason ?note () =
     action;
     reason;
     note = note_trimmed;
-    acted_at = Time_compat.now ();
+    acted_at;
   } in
   let target_key = target_key target_kind target_id in
   (match Hashtbl.find_opt s.unresolved_by_target target_key with
@@ -244,6 +266,7 @@ let record_action ~target_kind ~target_id ~actor ~action ?reason ?note () =
         | Some qe when not qe.resolved ->
             Hashtbl.replace s.queue entry_id { qe with resolved = true }
         | _ -> ()));
+  update_latest_action s target_key action acted_at;
   s.audit := entry :: !(s.audit);
   Ok entry
 
@@ -271,6 +294,38 @@ let get_audit_trail ?target_id ?actor ?(limit = 100) () =
       | x :: xs -> take (x :: acc) (i + 1) xs
     in
     take [] 0 sorted
+
+(** {1 Target projection} *)
+
+let moderation_status_of_action = function
+  | Approve -> "approved"
+  | Remove  -> "removed"
+  | Hide    -> "hidden"
+  | Warn    -> "warned"
+
+let target_summary ~target_kind ~target_id =
+  let s = store () in
+  let target_key = target_key target_kind target_id in
+  let report_count =
+    Hashtbl.find_opt s.report_count_by_target target_key |> Option.value ~default:0
+  in
+  let has_unresolved =
+    match Hashtbl.find_opt s.unresolved_by_target target_key with
+    | None -> false
+    | Some entry_id -> (
+        match Hashtbl.find_opt s.queue entry_id with
+        | Some entry when not entry.resolved -> true
+        | _ -> false)
+  in
+  let moderation_status =
+    if has_unresolved then
+      "flagged"
+    else
+      match Hashtbl.find_opt s.latest_action_by_target target_key with
+      | None -> "none"
+      | Some (action, _acted_at) -> moderation_status_of_action action
+  in
+  { report_count; moderation_status }
 
 (** {1 JSON projection} *)
 

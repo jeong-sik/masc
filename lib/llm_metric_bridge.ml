@@ -44,7 +44,7 @@ let output_tokens_metric = Prometheus.metric_llm_provider_output_tokens
 (** Emit a single HTTP status observation to the Prometheus counter.
 
     Exposed so that per-call metrics sinks (e.g. the cascade-observation
-    capture in [Oas_worker_cascade]) can forward [on_http_status] to the
+    capture in [Cascade_legacy_runner]) can forward [on_http_status] to the
     same counter without duplicating the label shape.  This is the
     single source of truth for the label key names. *)
 let emit_http_status ~provider ~model_id ~status =
@@ -170,7 +170,7 @@ let emit_request_latency_clamped ~model_id ~reason =
 (** Emit a single latency observation to the Prometheus histogram.
 
     Exposed so that per-call metrics sinks (e.g. the cascade-observation
-    capture in [Oas_worker_cascade]) can forward [on_request_end] to the
+    capture in [Cascade_legacy_runner]) can forward [on_request_end] to the
     same histogram without duplicating the label shape.  This is the
     single source of truth for the label key names. *)
 let emit_request_latency ~model_id ~latency_ms =
@@ -201,7 +201,9 @@ let make_sink () : Llm_provider.Metrics.t =
         emit_http_status ~provider ~model_id ~status);
     on_request_end =
       (fun ~model_id ~latency_ms ->
-        emit_request_latency ~model_id ~latency_ms);
+        match latency_ms with
+        | Some latency_ms -> emit_request_latency ~model_id ~latency_ms
+        | None -> ());
     on_capability_drop =
       (fun ~model_id ~field ->
         emit_capability_drop ~model_id ~field);

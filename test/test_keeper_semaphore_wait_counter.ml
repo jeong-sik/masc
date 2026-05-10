@@ -11,7 +11,7 @@
 
 let counter_for ~keeper ~channel =
   Masc_mcp.Prometheus.metric_value_or_zero
-    Masc_mcp.Prometheus.metric_keeper_semaphore_wait_timeout
+    Masc_mcp.Keeper_metrics.metric_keeper_semaphore_wait_timeout
     ~labels:[
       ("keeper", keeper);
       ("channel", channel);
@@ -20,8 +20,19 @@ let counter_for ~keeper ~channel =
 
 let queue_depth_for ~channel =
   Masc_mcp.Prometheus.metric_value_or_zero
-    Masc_mcp.Prometheus.metric_keeper_turn_queue_depth
+    Masc_mcp.Keeper_metrics.metric_keeper_turn_queue_depth
     ~labels:[ ("channel", channel) ]
+    ()
+
+let semaphore_wait_bucket_for ~keeper_name ~cascade_profile ~channel ~le =
+  Masc_mcp.Prometheus.metric_value_or_zero
+    Masc_mcp.Keeper_metrics.metric_keeper_semaphore_wait_seconds_bucket
+    ~labels:[
+      ("keeper_name", keeper_name);
+      ("cascade_profile", cascade_profile);
+      ("channel", channel);
+      ("le", le);
+    ]
     ()
 
 let make_meta name =
@@ -40,11 +51,19 @@ let test_metric_name_stable () =
   Alcotest.(check string)
     "semaphore wait timeout canonical metric name"
     "masc_keeper_semaphore_wait_timeout_total"
-    Masc_mcp.Prometheus.metric_keeper_semaphore_wait_timeout;
+    Masc_mcp.Keeper_metrics.metric_keeper_semaphore_wait_timeout;
   Alcotest.(check string)
     "turn queue depth canonical metric name"
     "masc_keeper_turn_queue_depth"
-    Masc_mcp.Prometheus.metric_keeper_turn_queue_depth
+    Masc_mcp.Keeper_metrics.metric_keeper_turn_queue_depth;
+  Alcotest.(check string)
+    "semaphore wait seconds canonical metric name"
+    "masc_keeper_semaphore_wait_seconds"
+    Masc_mcp.Keeper_metrics.metric_keeper_semaphore_wait_seconds;
+  Alcotest.(check string)
+    "semaphore wait seconds bucket canonical metric name"
+    "masc_keeper_semaphore_wait_seconds_bucket"
+    Masc_mcp.Keeper_metrics.metric_keeper_semaphore_wait_seconds_bucket
 
 let test_autonomous_queue_depth_gauge_tracks_fifo () =
   Eio_main.run @@ fun _env ->
@@ -75,6 +94,39 @@ let test_autonomous_queue_depth_gauge_tracks_fifo () =
     0.0
     (queue_depth_for ~channel:"autonomous_queue")
 
+let test_successful_acquire_emits_wait_seconds_buckets () =
+  Eio_main.run @@ fun _env ->
+  let module KK = Masc_mcp.Keeper_keepalive in
+  let keeper_name = "wait-histogram-keeper-0506" in
+  let cascade_profile = "wait-histogram-cascade-0506" in
+  let channel = "scheduled_autonomous" in
+  KK.reset_autonomous_completion_for_test ();
+  KK.reset_autonomous_turn_queue_for_test ();
+  let before_inf =
+    semaphore_wait_bucket_for ~keeper_name ~cascade_profile ~channel ~le:"+Inf"
+  in
+  let before_60 =
+    semaphore_wait_bucket_for ~keeper_name ~cascade_profile ~channel ~le:"60"
+  in
+  (match
+     KK.with_keeper_turn_slot_for_test
+       ~cascade_profile
+       ~keeper_name
+       ~channel:Masc_mcp.Keeper_world_observation.Scheduled_autonomous
+       (fun ~semaphore_wait_ms:_ -> ())
+   with
+   | Ok () -> ()
+   | Error (`Semaphore_wait_timeout _) ->
+       Alcotest.fail "unexpected semaphore wait timeout");
+  Alcotest.(check (float 0.0001))
+    "+Inf bucket increments"
+    (before_inf +. 1.0)
+    (semaphore_wait_bucket_for ~keeper_name ~cascade_profile ~channel ~le:"+Inf");
+  Alcotest.(check (float 0.0001))
+    "60s bucket increments"
+    (before_60 +. 1.0)
+    (semaphore_wait_bucket_for ~keeper_name ~cascade_profile ~channel ~le:"60")
+
 let test_increments_per_channel () =
   let keeper = "sangsu-test-9771" in
   let channels =
@@ -84,7 +136,7 @@ let test_increments_per_channel () =
     (fun channel ->
       let before = counter_for ~keeper ~channel in
       Masc_mcp.Prometheus.inc_counter
-        Masc_mcp.Prometheus.metric_keeper_semaphore_wait_timeout
+        Masc_mcp.Keeper_metrics.metric_keeper_semaphore_wait_timeout
         ~labels:[ ("keeper", keeper); ("channel", channel) ]
         ();
       Alcotest.(check (float 0.0001))
@@ -100,7 +152,7 @@ let test_keeper_isolation () =
   let keeper_b = "beta-9771" in
   let before_a = counter_for ~keeper:keeper_a ~channel in
   Masc_mcp.Prometheus.inc_counter
-    Masc_mcp.Prometheus.metric_keeper_semaphore_wait_timeout
+    Masc_mcp.Keeper_metrics.metric_keeper_semaphore_wait_timeout
     ~labels:[ ("keeper", keeper_b); ("channel", channel) ]
     ();
   Alcotest.(check (float 0.0001))
@@ -113,7 +165,7 @@ let test_channel_isolation () =
   let keeper = "channel-iso-9771" in
   let before_turn = counter_for ~keeper ~channel:"turn" in
   Masc_mcp.Prometheus.inc_counter
-    Masc_mcp.Prometheus.metric_keeper_semaphore_wait_timeout
+    Masc_mcp.Keeper_metrics.metric_keeper_semaphore_wait_timeout
     ~labels:[ ("keeper", keeper); ("channel", "autonomous_queue_head") ]
     ();
   Alcotest.(check (float 0.0001))
@@ -235,6 +287,10 @@ let () =
     "queue_depth", [
       Alcotest.test_case "autonomous FIFO depth gauge tracks queue" `Quick
         test_autonomous_queue_depth_gauge_tracks_fifo;
+    ];
+    "histogram", [
+      Alcotest.test_case "successful acquire emits wait buckets" `Quick
+        test_successful_acquire_emits_wait_seconds_buckets;
     ];
     "counter", [
       Alcotest.test_case "all 3 channels increment" `Quick

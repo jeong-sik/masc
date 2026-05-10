@@ -2,7 +2,7 @@
 
     Loads checkpoint, composes system prompt and dynamic context via
     [build_turn_prompt], applies tool disclosure (progressive filtering),
-    then delegates to [Oas_worker.run_named].
+    then delegates to [Keeper_turn_driver.run_named].
 
     Internal details — tool selection heuristics, BM25 prefiltering,
     prompt metrics construction, Korean keyword tables — are hidden
@@ -80,7 +80,7 @@ type run_result =
   ; model_used : string
   ; prompt_metrics : prompt_metrics
   ; ctx_composition : ctx_composition_metrics
-  ; cascade_observation : Oas_worker.cascade_observation option
+  ; cascade_observation : Cascade_legacy_runner.cascade_observation option
   ; turn_count : int
   ; tool_calls_made : int
   ; usage : Agent_sdk.Types.api_usage
@@ -88,10 +88,10 @@ type run_result =
   ; tools_used : string list
   ; tool_calls : tool_call_detail list
   ; checkpoint : Agent_sdk.Checkpoint.t option
-  ; proof : Agent_sdk.Cdal_proof.t option
+  ; proof : Masc_mcp_cdal_runtime.Cdal_proof.t option
   ; trace_ref : Agent_sdk.Raw_trace.run_ref option
   ; run_validation : Agent_sdk.Raw_trace.run_validation option
-  ; stop_reason : Oas_worker.stop_reason
+  ; stop_reason : Cascade_runner.stop_reason
   ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
   ; tool_surface : tool_surface_metrics
   }
@@ -207,6 +207,19 @@ val adaptive_thinking_budget :
   -> current_budget:int option
   -> intent:Keeper_turn_intent.t option
   -> int option
+
+(** Resolve the per-provider OAS timeout for this keeper turn.
+
+    Explicit [masc_keeper_msg.timeout_sec] / [oas_timeout_s] wins over
+    persisted keeper [per_provider_timeout_s] because the direct caller is
+    intentionally setting the budget for this run. Without that precedence,
+    a stale 300s keeper profile can silently defeat a one-off 900s reprobe. *)
+val per_provider_timeout_for_turn :
+     meta:Keeper_types.keeper_meta
+  -> ?oas_timeout_s:float
+  -> timeout_s:float
+  -> unit
+  -> float option
 
 (** {1 Turn execution} *)
 

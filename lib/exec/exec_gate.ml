@@ -38,27 +38,28 @@ let rollout_config : Approval_config.t =
     defaults = Approval_config.strict_default;
     per_agent =
       [
-        ("coord/git", internal_git_admin_overlay);
-        ("coord/worktree", internal_git_admin_overlay);
-        ("system/task_sandbox", internal_git_admin_overlay);
-        ("system/notify", notify_overlay);
-        ("autoresearch/git", internal_git_admin_overlay);
-        ("voice/bridge", internal_observer_overlay);
-        ("voice/bridge_core", internal_observer_overlay);
-        ("system/graphql_client_eio", internal_observer_overlay);
-        ("system/build_identity", internal_observer_overlay);
-        ("system/runtime_info", internal_observer_overlay);
-        ("system/worktree_live_context", internal_observer_overlay);
-        ("system/startup_takeover", internal_observer_overlay);
-        ("system/worker_container_types", internal_observer_overlay);
-        ("system/worker_runtime_docker", internal_observer_overlay);
-        ("system/spawn", internal_observer_overlay);
-        ("system/auto_responder", internal_observer_overlay);
-        ("swarm/goal_loop", internal_observer_overlay);
-        ("coord/identity", internal_observer_overlay);
-        ("tool/local_runtime", internal_observer_overlay);
-        ("tool/local_runtime_bench", internal_observer_overlay);
-        ("tool/autoresearch_cycle", internal_git_admin_overlay);
+        (`Coord_git, internal_git_admin_overlay);
+        (`Coord_worktree, internal_git_admin_overlay);
+        (`System_task_sandbox, internal_git_admin_overlay);
+        (`System_notify, notify_overlay);
+        (`Autoresearch_git, internal_git_admin_overlay);
+        (`Voice_bridge, internal_observer_overlay);
+        (`Voice_bridge_core, internal_observer_overlay);
+        (`System_graphql_client_eio, internal_observer_overlay);
+        (`System_build_identity, internal_observer_overlay);
+        (`System_runtime_info, internal_observer_overlay);
+        (`System_worktree_live_context, internal_observer_overlay);
+        (`System_startup_takeover, internal_observer_overlay);
+        (`System_worker_container_types, internal_observer_overlay);
+        (`System_worker_runtime_docker, internal_observer_overlay);
+        (`System_spawn, internal_observer_overlay);
+        (`System_auto_responder, internal_observer_overlay);
+        (`Swarm_goal_loop, internal_observer_overlay);
+        (`Coord_identity, internal_observer_overlay);
+        (`Tool_local_runtime, internal_observer_overlay);
+        (`Tool_local_runtime_bench, internal_observer_overlay);
+        (`Tool_autoresearch_cycle, internal_git_admin_overlay);
+        (`Keeper_shell, internal_observer_overlay);
       ];
   }
 
@@ -127,7 +128,7 @@ let record_decision ~actor ~raw_source ~summary ~mode ~verdict ~argv ?env ?cwd (
   | Off -> ()
   | Parallel | Enforced ->
     Exec_tap.record_gate_decision
-      ~actor
+      ~actor:(Agent_id.to_string actor)
       ~raw_source
       ~summary
       ~gate_mode:
@@ -149,9 +150,16 @@ let verdict_for_argv ~actor ~raw_source ~summary ~argv ?env ?cwd () =
   | Error `Parse_failed ->
     Error (`Denied Verdict.Parse_failed)
   | Ok simple ->
-    let caps = Capability_check.of_simple simple in
     let overlay = Approval_config.lookup rollout_config ~actor in
     let policy : Approval_policy.t = { raw_source; summary } in
+    let typed = Shell_ir_typed.of_simple simple in
+    let caps =
+      match typed with
+      | Shell_ir_typed.W (Shell_ir_typed.Generic _) ->
+        Capability_check.of_simple simple
+      | _ ->
+        Capability_check_typed.of_command typed
+    in
     let verdict = Approval_policy.decide policy ~overlay ~caps ~simple in
     Ok verdict
 

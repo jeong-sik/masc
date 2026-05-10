@@ -171,18 +171,36 @@ val board_reactions_lookup :
   Board.reaction_target_type * string ->
   Board.reaction_summary list
 
+val board_contributor_quality_json :
+  Agent_reputation.agent_reputation -> Yojson.Safe.t
+(** [board_contributor_quality_json rep] projects the existing agent
+    reputation record into the compact board contributor-quality contract. *)
+
+val board_contributor_quality_lookup :
+  ?config:Coord.config -> unit -> string -> Yojson.Safe.t option
+(** [board_contributor_quality_lookup ?config ()] returns a request-local
+    memoized lookup by author.  Without [config], it returns [None]. *)
+
 (** {1 Dashboard helpers} *)
 
 val board_comment_dashboard_json :
+  ?include_moderation:bool ->
+  ?blind_votes:bool ->
   ?current_vote:Board.vote_direction option ->
   ?reactions:Board.reaction_summary list ->
   Board.comment ->
   Yojson.Safe.t
 (** [board_comment_dashboard_json c] renders a comment with the
-    [author_identity] field appended via
-    {!board_actor_identity_json}. *)
+    [author_identity] field appended for dashboard inspection.  When
+    [include_moderation] is [true], it also appends operator-only
+    [report_count] and [moderation_status] fields.  When [blind_votes]
+    is [true], score fields are hidden until [current_vote] records a
+    viewer vote. *)
 
 val board_post_dashboard_json :
+  ?include_moderation:bool ->
+  ?blind_votes:bool ->
+  ?contributor_quality:Yojson.Safe.t ->
   ?current_vote:Board.vote_direction option ->
   ?reactions:Board.reaction_summary list ->
   author_karma:int ->
@@ -199,6 +217,12 @@ val board_post_dashboard_json :
     - [hearth_count] = 0 or 1 (boolean-as-int for the dashboard's
       column that aggregates across multiple hearths).
     - [author_identity] from {!board_actor_identity_json}.
+    - [report_count] / [moderation_status] from {!Board_moderation}
+      only when [include_moderation] is [true].
+    - [vote_blind] / [vote_blind_reason] and null score fields when
+      [blind_votes] is [true] and the viewer has not voted yet.
+    - [contributor_quality] when supplied by the route layer from
+      {!Agent_reputation}.
 
     The base fields [title] / [votes] / [comment_count] /
     [created_at_iso] / [updated_at_iso] / [hearth_count] are

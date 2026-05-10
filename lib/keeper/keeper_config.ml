@@ -91,23 +91,21 @@ let bool_default_true_of_env name =
       let v = String.trim v |> String.lowercase_ascii in
       not (v = "0" || v = "false" || v = "no" || v = "n")
 
+let bool_of_string raw =
+  let v = String.trim raw |> String.lowercase_ascii in
+  if v = "1" || v = "true" || v = "yes" || v = "y" || v = "on" then Some true
+  else if v = "0" || v = "false" || v = "no" || v = "n" || v = "off" then Some false
+  else None
+
 let bool_of_env_default name ~(default : bool) =
   match Env_config_core.raw_value_opt name with
   | None -> default
-  | Some raw ->
-      let v = String.trim raw |> String.lowercase_ascii in
-      if v = "1" || v = "true" || v = "yes" || v = "y" || v = "on" then true
-      else if v = "0" || v = "false" || v = "no" || v = "n" || v = "off" then false
-      else default
+  | Some raw -> Option.value (bool_of_string raw) ~default
 
 let bool_of_env_opt name =
   match Env_config_core.raw_value_opt name with
   | None -> None
-  | Some raw ->
-      let v = String.trim raw |> String.lowercase_ascii in
-      if v = "1" || v = "true" || v = "yes" || v = "y" || v = "on" then Some true
-      else if v = "0" || v = "false" || v = "no" || v = "n" || v = "off" then Some false
-      else None
+  | Some raw -> bool_of_string raw
 
 let valid_name_re = Re.Pcre.re "^[A-Za-z0-9._-]+$" |> Re.compile
 
@@ -656,6 +654,15 @@ let keeper_batch_limit_rp =
     ~description:"Max batch size per keeper cycle" ()
 let keeper_batch_limit () : int =
   Runtime_params.get keeper_batch_limit_rp
+
+let keeper_board_debounce_window_sec_rp =
+  _rp_float ~key:"keeper.board.debounce_window_sec"
+    ~default:(fun () -> float_of_env_default "MASC_KEEPER_BOARD_DEBOUNCE_SEC"
+                          ~default:2.0 ~min_v:0.0 ~max_v:30.0)
+    ~min_v:0.0 ~max_v:30.0
+    ~description:"Time window to coalesce board signals into one turn (seconds)" ()
+let keeper_board_debounce_window_sec () : float =
+  Runtime_params.get keeper_board_debounce_window_sec_rp
 
 let keeper_tool_cost_max_usd_rp =
   _rp_float ~key:"keeper.turn.tool_cost_max_usd"

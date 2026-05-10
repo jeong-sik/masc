@@ -207,11 +207,11 @@ let provider_kinds providers =
     providers
 
 let provider_supports_required_tool_use (cfg : Llm_provider.Provider_config.t) =
-  let caps = Oas_worker_exec.provider_caps_of_config cfg in
+  let caps = Cascade_runner.provider_caps_of_config cfg in
   caps.supports_tools && caps.supports_tool_choice
 
 let provider_supports_callable_tool_use (cfg : Llm_provider.Provider_config.t) =
-  let caps = Oas_worker_exec.provider_caps_of_config cfg in
+  let caps = Cascade_runner.provider_caps_of_config cfg in
   caps.supports_tools
   || (caps.supports_runtime_mcp_tools && caps.supports_runtime_tool_events)
 
@@ -330,7 +330,7 @@ let test_keeper_turn_route_is_required_default_profile () =
     (require_ok
        (Cascade_catalog_runtime.resolve_declared_name ~raw_name:"" ()))
 
-let test_valid_catalog_skips_live_probes_at_bootstrap () =
+let test_valid_catalog_records_probe_error_without_eio_caps () =
   with_temp_dir "cascade-catalog-runtime" @@ fun dir ->
   let config_dir = Filename.concat dir "config" in
   init_config_root config_dir;
@@ -372,11 +372,16 @@ let test_valid_catalog_skips_live_probes_at_bootstrap () =
              (Cascade_catalog_runtime.rejection_to_yojson rejection))
   in
   let snapshot_json = Cascade_catalog_runtime.snapshot_to_yojson snapshot in
+  let snapshot_string = Yojson.Safe.to_string snapshot_json in
   check int "profile_count" 4 (json_int_field "profile_count" snapshot_json);
-  check bool "bootstrap probe status is skipped" true
-    (contains_substring (Yojson.Safe.to_string snapshot_json) "\"status\":\"skipped\"");
-  check (float 0.0001) "bootstrap skip metric increments for big_three"
-    1.0
+  check bool "local bootstrap probe records an error" true
+    (contains_substring snapshot_string "\"status\":\"error\"");
+  check bool "old advisory skip signature is absent" false
+    (contains_substring snapshot_string "bootstrap skips live probe");
+  check bool "local bootstrap probe is not skipped" false
+    (contains_substring snapshot_string "\"status\":\"skipped\"");
+  check (float 0.0001) "local bootstrap skip metric does not increment"
+    0.0
     (skip_metric () -. before_skip_metric);
   let blank_name =
     require_ok
@@ -444,7 +449,7 @@ let test_valid_catalog_probes_local_endpoints_when_eio_caps_available () =
       Prometheus.metric_provider_actual_health_status
       ~labels:
         [
-          ("provider_name", "custom");
+          ("provider_name", "openai_compat");
           ("profile_name", "big_three");
           ("model_id", "mock");
         ]
@@ -480,6 +485,48 @@ let test_valid_catalog_probes_local_endpoints_when_eio_caps_available () =
     0.0
     (skip_metric () -. before_skip_metric);
   check (float 0.0001) "unhealthy local probe gauge" 3.0 (health_metric ())
+
+let test_cloud_probe_is_not_applicable_not_skipped () =
+  with_temp_dir "cascade-catalog-runtime-cloud-probe" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  with_config_dir config_dir @@ fun () ->
+  let skipped_metric () =
+    Prometheus.metric_value_or_zero
+      Prometheus.metric_provider_health_probe_skipped
+      ~labels:[("provider_name", "codex_cli"); ("profile_name", "big_three")]
+      ()
+  in
+  let before_skipped_metric = skipped_metric () in
+  ignore
+    (write_cascade_json config_dir
+       {|{
+  "big_three_models": ["codex_cli:auto"]
+}|});
+  let snapshot =
+    match Cascade_catalog_runtime.inspect_active () with
+    | Ok (Cascade_catalog_runtime.Validated snapshot) -> snapshot
+    | Ok state ->
+        failf "expected fully validated cloud-only snapshot, got %s"
+          (Yojson.Safe.to_string
+             (Cascade_catalog_runtime.state_to_yojson state))
+    | Error rejection ->
+        failf "unexpected cloud-only rejection: %s"
+          (Yojson.Safe.to_string
+             (Cascade_catalog_runtime.rejection_to_yojson rejection))
+  in
+  let snapshot_string =
+    Yojson.Safe.to_string (Cascade_catalog_runtime.snapshot_to_yojson snapshot)
+  in
+  check bool "cloud probe is explicitly not applicable" true
+    (contains_substring snapshot_string "\"status\":\"not_applicable\"");
+  check bool "cloud probe explains auth-free bootstrap boundary" true
+    (contains_substring snapshot_string "auth-free bootstrap probe");
+  check bool "cloud probe is not counted as skipped" false
+    (contains_substring snapshot_string "\"status\":\"skipped\"");
+  check (float 0.0001) "cloud probe skipped metric does not increment"
+    0.0
+    (skipped_metric () -. before_skipped_metric)
 
 let test_invalid_hot_reload_preserves_last_known_good () =
   with_temp_dir "cascade-catalog-lkg" @@ fun dir ->
@@ -771,7 +818,7 @@ let test_resolve_named_providers_tool_support_keeps_runtime_mcp_providers () =
     (List.for_all provider_supports_callable_tool_use providers);
   check bool "keeps codex_cli via runtime MCP lane" true
     (List.mem "codex_cli" (provider_kinds providers));
-  check bool "drops gemini_cli without runtime MCP lane" false
+  check bool "keeps gemini_cli via runtime MCP lane" true
     (List.mem "gemini_cli" (provider_kinds providers))
 
 let test_resolve_named_providers_runtime_mcp_headers_drop_unsupported_providers () =
@@ -799,7 +846,7 @@ let test_resolve_named_providers_runtime_mcp_headers_drop_unsupported_providers 
          ~cascade_name:Keeper_config.default_cascade_name
          ())
   in
-  check bool "drops codex_cli when runtime MCP headers are required" false
+  check bool "keeps codex_cli with identity header support" true
     (List.mem "codex_cli" (provider_kinds providers));
   check bool "keeps kimi_cli with runtime MCP header support" true
     (List.mem "kimi_cli" (provider_kinds providers));
@@ -998,17 +1045,20 @@ let test_strict_resolve_rejects_nonmatching_provider_filter () =
   let config_dir = Filename.concat dir "config" in
   init_config_root config_dir;
   with_config_dir config_dir @@ fun () ->
+  let fallback = Printf.sprintf "custom:filter-standin@%s/v1" dummy_base_url in
   ignore
     (write_cascade_json config_dir
-       {|{
+       (Printf.sprintf
+          {|{
   "big_three_models": [
-    "anthropic:claude-sonnet-4-20250514",
-    "openrouter:auto"
+    "codex_cli:gpt-5.2",
+    "%s"
   ]
-}|});
+}|}
+          fallback));
   match
     Cascade_catalog_runtime.resolve_named_providers_strict
-      ~provider_filter:[ "ollama"; "codex_cli" ]
+      ~provider_filter:[ "ollama"; "gemini" ]
       ~cascade_name:Keeper_config.default_cascade_name
       ()
   with
@@ -1024,38 +1074,44 @@ let test_strict_resolve_ok_when_filter_matches () =
   let config_dir = Filename.concat dir "config" in
   init_config_root config_dir;
   with_config_dir config_dir @@ fun () ->
+  let fallback = Printf.sprintf "custom:filter-standin@%s/v1" dummy_base_url in
   ignore
     (write_cascade_json config_dir
-       {|{
+       (Printf.sprintf
+          {|{
   "big_three_models": [
-    "anthropic:claude-sonnet-4-20250514",
-    "openrouter:auto"
+    "codex_cli:gpt-5.2",
+    "%s"
   ]
-}|});
+}|}
+          fallback));
   let providers =
     require_ok
       (Cascade_catalog_runtime.resolve_named_providers_strict
-         ~provider_filter:[ "anthropic" ]
+         ~provider_filter:[ "codex_cli" ]
          ~cascade_name:Keeper_config.default_cascade_name
          ())
   in
-  check int "only anthropic providers survive" 1 (List.length providers);
-  check bool "provider kind is anthropic" true
-    (List.mem "anthropic" (provider_kinds providers))
+  check int "only codex_cli providers survive" 1 (List.length providers);
+  check bool "provider kind is codex_cli" true
+    (List.mem "codex_cli" (provider_kinds providers))
 
 let test_non_strict_resolve_tolerates_nonmatching_filter () =
   with_temp_dir "cascade-nonstrict-filter" @@ fun dir ->
   let config_dir = Filename.concat dir "config" in
   init_config_root config_dir;
   with_config_dir config_dir @@ fun () ->
+  let fallback = Printf.sprintf "custom:filter-standin@%s/v1" dummy_base_url in
   ignore
     (write_cascade_json config_dir
-       {|{
+       (Printf.sprintf
+          {|{
   "big_three_models": [
-    "anthropic:claude-sonnet-4-20250514",
-    "openrouter:auto"
+    "codex_cli:gpt-5.2",
+    "%s"
   ]
-}|});
+}|}
+          fallback));
   (* Non-strict resolve should NOT error on non-matching filter.
      It returns whatever the catalog provides (silently ignores filter). *)
   let providers =
@@ -1105,10 +1161,18 @@ let test_secondary_resolution_disambiguates_duplicate_primary_slots () =
     require_some "second secondary"
       (resolution.secondary_resolver 1 second_primary)
   in
-  check string "first slot secondary" "fallback-a"
-    first_secondary.Llm_provider.Provider_config.model_id;
-  check string "second slot secondary" "fallback-b"
-    second_secondary.Llm_provider.Provider_config.model_id
+  let secondary_models =
+    [
+      first_secondary.Llm_provider.Provider_config.model_id;
+      second_secondary.Llm_provider.Provider_config.model_id;
+    ]
+  in
+  check (list string) "slot secondaries preserved"
+    [ "fallback-a"; "fallback-b" ]
+    (List.sort String.compare secondary_models);
+  check bool "duplicate primary slots keep distinct secondaries" true
+    (first_secondary.Llm_provider.Provider_config.model_id
+     <> second_secondary.Llm_provider.Provider_config.model_id)
 
 let test_secondary_resolution_applies_provider_filter_to_secondary () =
   with_temp_dir "cascade-secondary-filter" @@ fun dir ->
@@ -1121,7 +1185,7 @@ let test_secondary_resolution_applies_provider_filter_to_secondary () =
        (Printf.sprintf
           {|{
   "big_three_models": [
-    {"model": "anthropic:claude-sonnet-4-20250514", "secondary": "%s"}
+    {"model": "codex_cli:gpt-5.2", "secondary": "%s"}
   ]
 }|}
           secondary));
@@ -1129,7 +1193,7 @@ let test_secondary_resolution_applies_provider_filter_to_secondary () =
     require_ok
       (Cascade_catalog_runtime
        .resolve_named_providers_strict_with_secondary_resolver
-         ~provider_filter:[ "anthropic" ]
+         ~provider_filter:[ "codex_cli" ]
          ~cascade_name:Keeper_config.default_cascade_name
          ())
   in
@@ -1147,9 +1211,9 @@ let () =
       ( "runtime",
         [
           test_case
-            "valid catalog skips live probes at bootstrap"
+            "valid catalog records probe errors without Eio caps"
             `Quick
-            test_valid_catalog_skips_live_probes_at_bootstrap;
+            test_valid_catalog_records_probe_error_without_eio_caps;
           test_case
             "valid catalog probes local endpoints when Eio caps available"
             `Quick
@@ -1170,6 +1234,10 @@ let () =
             "invalid hot reload preserves last-known-good"
             `Quick
             test_invalid_hot_reload_preserves_last_known_good;
+          test_case
+            "cloud probe is not applicable, not skipped"
+            `Quick
+            test_cloud_probe_is_not_applicable_not_skipped;
           test_case
             "legacy runtime wrapper does not fallback to defaults"
             `Quick

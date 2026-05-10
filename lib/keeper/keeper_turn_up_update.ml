@@ -30,12 +30,9 @@ let resolve_active_goal_ids config p old_ids =
              (String.concat ", " missing))
 
 let blocker_requires_continue_gate (old : keeper_meta) =
-  match old.runtime.last_blocker_class with
-  | Some cls -> blocker_class_continue_gate cls
-  | None -> (
-      match Keeper_status_bridge.blocker_class_of_string old.runtime.last_blocker with
-      | Some cls -> blocker_class_continue_gate cls
-      | None -> false)
+  match old.runtime.last_blocker with
+  | Some info -> blocker_class_continue_gate info.klass
+  | None -> false
 
 let paused_state_requires_approval (old : keeper_meta) =
   Keeper_approval_queue.has_pending_for_keeper ~keeper_name:old.name
@@ -196,7 +193,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
       let len = String.length new_value in
       if len > Keeper_config.prompt_render_max_bytes then
         Prometheus.inc_counter
-          Prometheus.metric_keeper_turn_up_update_failures
+          Keeper_metrics.metric_keeper_turn_up_update_failures
           ~labels:[("keeper", old.name); ("site", "prompt_cap")]
           ();
         Log.Keeper.warn
@@ -211,10 +208,10 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     old.paused && not (paused_state_requires_approval old)
   in
   if resume_paused_keeper then (
-    let blocker_class =
-      old.runtime.last_blocker_class
-      |> Option.map blocker_class_to_string
-      |> Option.value ~default:"none"
+    let blocker_class, blocker_detail =
+      match old.runtime.last_blocker with
+      | Some info -> blocker_class_to_string info.klass, info.detail
+      | None -> "none", ""
     in
     let auto_resume_after_sec =
       old.auto_resume_after_sec
@@ -223,8 +220,8 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     in
     Log.Keeper.warn
       "update_keeper resumed paused keeper %s; clearing \
-       auto_resume_after_sec=%s last_blocker_class=%s last_blocker=%S"
-      old.name auto_resume_after_sec blocker_class old.runtime.last_blocker);
+       auto_resume_after_sec=%s last_blocker.klass=%s last_blocker.detail=%S"
+      old.name auto_resume_after_sec blocker_class blocker_detail);
   if old.paused && not resume_paused_keeper then
     Log.Keeper.warn
       "update_keeper kept %s paused because an approval/reconcile gate is pending"
@@ -234,23 +231,22 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     short_goal;
     mid_goal;
     long_goal;
-    cascade_name =
-      (* TOML cascade_name takes precedence over runtime JSON when present.
-         Without this, changing cascade_name in keepers/*.toml has no effect
-         until the runtime JSON is deleted.  See #6747.
-
-         Store the raw string as declared in TOML / state JSON.  Downstream
-         consumers ([Cascade_runtime], [Keeper_status_bridge],
-         [Admission_queue], ...) already canonicalize at point-of-use, so
-         preserving the raw value here lets the dashboard surface config
-         drift (keeper TOML referencing an unknown cascade name) via the
-         [canonical] column of [Dashboard_cascade.keeper_profile_json]. *)
-      (match p.profile_defaults.cascade_name with
-       | Some name -> name
-       | None ->
-         if String.trim old.cascade_name <> "" then
-           old.cascade_name
-         else Keeper_config.default_cascade_name);
+    cascade_ref =
+      (* RFC-0041 (post-step-4): cascade_ref is the SSOT.
+         TOML cascade_name takes precedence over runtime when present;
+         otherwise preserve the existing keeper's cascade_ref so the
+         dashboard surfaces drift (keeper TOML referencing an unknown
+         cascade name) via the [canonical] column of
+         [Dashboard_cascade.keeper_profile_json].  See #6747. *)
+      (let group =
+         match p.profile_defaults.cascade_name with
+         | Some name -> name
+         | None ->
+           let prev = cascade_name_of_meta old in
+           if String.trim prev <> "" then prev
+           else Keeper_config.default_cascade_name
+       in
+       Some Cascade_ref.{ group; item = None });
     will = new_will;
     needs = new_needs;
     desires = new_desires;
@@ -276,8 +272,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
       (if resume_paused_keeper then
          {
            old.runtime with
-           last_blocker = "";
-           last_blocker_class = None;
+           last_blocker = None;
          }
        else old.runtime);
     voice_enabled =
@@ -344,7 +339,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
   with
   | Error err ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_turn_up_update_failures
+        Keeper_metrics.metric_keeper_turn_up_update_failures
         ~labels:[("keeper", p.name); ("site", "sandbox_validation")]
         ();
       Log.Keeper.warn "update_keeper failed sandbox validation for %s: %s"
@@ -357,7 +352,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
        with
        | Error err ->
            Prometheus.inc_counter
-             Prometheus.metric_keeper_turn_up_update_failures
+             Keeper_metrics.metric_keeper_turn_up_update_failures
              ~labels:[("keeper", p.name); ("site", "sandbox_preflight")]
              ();
            Log.Keeper.warn "update_keeper failed sandbox preflight for %s: %s"
@@ -367,7 +362,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
       (match write_meta ctx.config updated with
        | Error e ->
            Prometheus.inc_counter
-             Prometheus.metric_keeper_write_meta_failures
+             Keeper_metrics.metric_keeper_write_meta_failures
              ~labels:[("keeper", updated.name); ("phase", "update_keeper")]
              ();
            (false, e)

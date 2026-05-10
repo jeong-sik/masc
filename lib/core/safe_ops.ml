@@ -69,6 +69,8 @@ let utf8_repair_mu = Stdlib.Mutex.create ()
 let utf8_repaired_reads = ref 0
 let utf8_repaired_bytes = ref 0
 let utf8_repair_path_samples = ref []
+let persistence_utf8_repair_metric_hook : (unit -> unit) option Atomic.t =
+  Atomic.make None
 let utf8_repair_path_sample_limit = 8
 let utf8_repair_log_restate_sec = 60.0
 let utf8_repair_log_entry_limit = 1024
@@ -88,6 +90,19 @@ let utf8_repair_log_seen : (string, utf8_repair_log_entry) Hashtbl.t =
   Hashtbl.create 16
 
 let utf8_repair_log_key ~surface ~path = surface ^ "\x00" ^ path
+
+let set_persistence_utf8_repair_metric_hook hook =
+  Atomic.set persistence_utf8_repair_metric_hook (Some hook)
+
+let emit_persistence_utf8_repair_metric () =
+  match Atomic.get persistence_utf8_repair_metric_hook with
+  | None -> ()
+  | Some hook ->
+      (try hook ()
+       with exn ->
+         Log.Misc.warn
+           "persistence UTF-8 repair metric hook failed: %s"
+           (Printexc.to_string exn))
 
 let prune_utf8_repair_log_seen_if_needed ~now =
   (* Sweep first: drop any entry whose [last_seen] is older than
@@ -158,6 +173,7 @@ let record_utf8_repair ~surface ~path ~invalid_bytes =
             { entry with last_seen = now; suppressed = entry.suppressed + 1 };
           None)
   in
+  emit_persistence_utf8_repair_metric ();
   match log_decision with
   | None -> ()
   | Some 0 ->
@@ -226,6 +242,12 @@ let sanitize_text_utf8 (s : string) : string =
     loop 0;
     Buffer.contents buf
 
+type sanitized_json_utf8 =
+  { raw : Yojson.Safe.t
+  ; sanitized : Yojson.Safe.t
+  ; changed : bool
+  }
+
 let rec sanitize_json_utf8 (json : Yojson.Safe.t) : Yojson.Safe.t =
   match json with
   | `String s ->
@@ -256,6 +278,10 @@ let rec sanitize_json_utf8 (json : Yojson.Safe.t) : Yojson.Safe.t =
       in
       if !changed then `List sanitized_items else json
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as other -> other
+
+let sanitize_json_utf8_with_raw raw =
+  let sanitized = sanitize_json_utf8 raw in
+  { raw; sanitized; changed = sanitized != raw }
 
 let count_invalid_utf8_bytes s =
   let len = String.length s in
@@ -351,6 +377,7 @@ let read_json_file_logged ~label path : Yojson.Safe.t option =
 let persistence_read_drop_reason_list_dir_error = "list_dir_error"
 let persistence_read_drop_reason_entry_load_error = "entry_load_error"
 let persistence_read_drop_reason_invalid_payload = "invalid_payload"
+let persistence_read_drop_reason_json_syntax_error = "json_syntax_error"
 
 let report_persistence_read_drop ~on_drop ~surface ~reason ~path ~detail =
   Log.Misc.warn "[%s] persistence read drop (%s) path=%s: %s"

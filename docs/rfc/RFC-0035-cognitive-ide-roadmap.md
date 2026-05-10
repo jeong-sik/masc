@@ -15,18 +15,20 @@
 ## Problem
 
 The Master Report is a 137KB design document spanning 11 cognitive/UI dimensions
-and a four-tier confidence ladder (P0/P1/P2/P3). Multiple agents in the fleet
-have already started landing dashboard PRs that *resemble* fragments of the
-report's P0 checklist:
+and a four-tier confidence ladder (P0/P1/P2/P3). At RFC creation time the fleet
+was already landing dashboard PRs that *resembled* fragments of the report's
+P0 checklist; PR-3 (this revision) updates the table after those PRs landed:
 
-| Master P0 checklist item | In-flight PR | Surface |
-|---|---|---|
-| #1 3-tier disclosure (L1/L2/L3) | #13768 cognitive-disclosure-cockpit | dashboard |
-| #2 4-mode CognitiveMode state | #13773 cognitive-mode-registry | dashboard |
-| #3 Gradient Attraction visual | #13781 event-stream-gradient-attraction | dashboard |
-| #4 Temporal Synchronization | #13779 event-stream-temporal-sync | dashboard |
-| #5 Semantic Gravity ranking | — (open) | backend lib |
-| #6 Intentional Projection | — (open) | backend lib |
+| Master P0 checklist item | PR | Status | Surface |
+|---|---|---|---|
+| #1 3-tier disclosure (L1/L2/L3) | #13768 cognitive-disclosure-cockpit | merged | dashboard |
+| #2 4-mode CognitiveMode state | #13773 cognitive-mode-registry | merged | dashboard |
+| #3 Gradient Attraction visual | #13781 event-stream-gradient-attraction | merged | dashboard |
+| #4 Temporal Synchronization | #13779 event-stream-temporal-sync | merged | dashboard |
+| #5 Semantic Gravity ranking (backend) | #13797 cognitive_gravity | merged | backend lib |
+| #5 Semantic Gravity (dashboard renderer) | #13800 event-stream semantic gravity | merged | dashboard |
+| #6 Intentional Projection (backend) | #13821 intentional_projection | in-flight | backend lib |
+| #6 Intentional Projection (dashboard renderer) | #13800 event-stream intent projection | merged | dashboard |
 
 Without an integration RFC, the fleet has no shared vocabulary to decide:
 
@@ -62,13 +64,15 @@ further code is written.
 
 | Dim | Master Report topic | Surface | Module / file | Status |
 |-----|---------------------|---------|---------------|--------|
-| 01 | Cognitive context flow (Progressive Disclosure) | dashboard | `dashboard/.../cognitive-disclosure*` | in-flight (#13768) |
-| 01 | 4-mode CognitiveMode | dashboard | `dashboard/.../cognitive-mode-registry*` | in-flight (#13773) |
-| 01 | Gradient Attraction (visual) | dashboard | `dashboard/.../event-stream*` | in-flight (#13781) |
-| 01 | Temporal Synchronization | dashboard | `dashboard/.../event-stream-temporal-sync*` | in-flight (#13779) |
-| 01 | **Semantic Gravity** (ranking) | **lib** | `lib/cognitive_gravity.ml` | **this RFC, PR-1** |
-| 01 | Intentional Projection (history-based prediction) | lib | `lib/intentional_projection.ml` (TBD) | deferred to PR-2 |
-| 02 | Chronicle data model | lib + dashboard | `lib/chronicle_event.ml` (TBD) | deferred (P1) |
+| 01 | Cognitive context flow (Progressive Disclosure) | dashboard | `dashboard/.../cognitive-disclosure*` | merged (#13768) |
+| 01 | 4-mode CognitiveMode | dashboard | `dashboard/.../cognitive-mode-registry*` | merged (#13773) |
+| 01 | Gradient Attraction (visual) | dashboard | `dashboard/.../event-stream*` | merged (#13781) |
+| 01 | Temporal Synchronization | dashboard | `dashboard/.../event-stream-temporal-sync*` | merged (#13779) |
+| 01 | **Semantic Gravity** (ranking, backend) | **lib** | `lib/cognitive_gravity.ml` | merged (PR-1, #13797) |
+| 01 | Semantic Gravity (dashboard renderer) | dashboard | `dashboard/src/components/common/event-stream*` | merged (#13800) |
+| 01 | Intentional Projection (backend) | lib | `lib/intentional_projection.ml` | merged (PR-2, #13821) |
+| 01 | Intentional Projection (dashboard renderer) | dashboard | `dashboard/src/components/common/event-stream*` | merged (#13800) |
+| 02 | Chronicle data model | lib + dashboard | `lib/chronicle_event.ml` (PR-4, in-flight), `dashboard/.../chronicle-navigator*` (#13823 read model, merged) | in-flight (PR-4 lib) |
 | 02 | Librarian RAG pipeline | lib + adapters | TBD; reuse `pgvector` infra | deferred (P1) |
 | 03 | Code-Plan Alignment metrics | lib | `lib/alignment_score*.ml` (TBD) | deferred (P2) |
 | 04 | Category-theoretic code analysis | lib + ppx | TBD | deferred (P3) |
@@ -133,18 +137,19 @@ PR-1 is mergeable only if all of the following hold:
 - Self-review against `~/me/agents/best-programmer/AGENT.md` posted in the PR
   body.
 
-## Future PRs in this stack
+## PRs in this stack
 
-| PR | Topic | Confidence tier | Dependencies |
-|----|-------|-----------------|--------------|
-| PR-1 | `cognitive_gravity` (this iteration) | P0 | none |
-| PR-2 | `intentional_projection` skeleton | P0 | PR-1 |
-| PR-3 | `chronicle_event` data model | P1 | PR-1, RFC reviewed |
-| PR-4 | Librarian retriever (lib only) | P1 | PR-3 + pgvector audit |
-| PR-5 | Alignment score metric backbone | P2 | PR-1..3, separate confidence gate |
+| PR | Topic | Confidence tier | Status |
+|----|-------|-----------------|--------|
+| PR-1 | `cognitive_gravity` ranker | P0 | merged (#13797) |
+| PR-2 | `intentional_projection` ranker | P0 | merged (#13821) |
+| PR-3 | bump 0.19.12 → 0.19.13 + this RFC refresh | chore | merged (#13841) |
+| PR-4 | `chronicle_event` data model | P1 | merged (#13937) |
+| PR-5 | `chronicle_librarian` retriever (lib only) | P1 | in-flight (#13944) |
+| PR-6 | `alignment_score` metric backbone (Dim03 P2) | P2 | in-flight (this PR) |
 
-PR-2 onward will be sequenced in further `/loop` iterations and will not be
-opened in parallel from this iteration.
+PR-4 onward will be sequenced in further `/loop` iterations and will not be
+opened in parallel.
 
 ## Risks
 

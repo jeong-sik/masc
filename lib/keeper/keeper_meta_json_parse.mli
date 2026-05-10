@@ -19,6 +19,7 @@ type parsed_keeper_identity =
   ; pk_long_goal : string
   ; pk_social_model : string
   ; pk_cascade_name : string
+  ; pk_cascade_ref : Cascade_ref.cascade_ref option
   ; pk_models : string list
   ; pk_will : string
   ; pk_needs : string

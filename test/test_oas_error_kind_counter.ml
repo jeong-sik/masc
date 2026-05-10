@@ -1,13 +1,13 @@
 (* test/test_oas_error_kind_counter.ml
 
-   #9933: verify that [Oas_worker_named.sdk_error_of_masc_internal_error]
+   #9933: verify that [Keeper_turn_driver.sdk_error_of_masc_internal_error]
    emits [masc_oas_error_total{kind}] once per constructed error so
    Grafana can alert on per-kind rates without parsing the
    free-form BDI blocker string.  Exercises all 9 variants of
    [masc_internal_error] (the single production source of
    [masc_oas_error] payloads). *)
 
-module OWN = Masc_mcp.Oas_worker_named
+module OWN = Masc_mcp.Keeper_turn_driver
 module Prom = Masc_mcp.Prometheus
 
 let typed_cascade_name = OWN.cascade_name_of_string
@@ -38,6 +38,9 @@ let test_oas_timeout_budget_kind () =
            keeper_turn_timeout_sec = 1200.0;
            estimated_input_tokens = 2519;
            source = "adaptive_estimated_input_tokens";
+           remaining_turn_budget_sec = Some 300.0;
+           min_required_sec = 15.0;
+           phase = "test_phase";
          })
   in
   Alcotest.(check (float 0.0001))

@@ -86,6 +86,25 @@ Next ==
             NextPhase(phase,
                 ClassifyEvent(progress, reactive, goals, idle, failure, phase))
 
+\* ── Bug Model: Stalled Without Cause ────────────────────────
+\* Models a regression where the phase is incorrectly set to "stalled"
+\* without an active goal or failure observed.
+\* SHOULD violate StalledNeedsGoalOrFailure.
+
+BugStalledWithoutCause ==
+    /\ phase' = "stalled"
+    /\ has_progress_evidence' = FALSE
+    /\ has_reactive_signal' = FALSE
+    /\ has_active_goals' = FALSE
+    /\ idle_long' = TRUE
+    /\ failure_observed' = FALSE
+
+NextBuggy ==
+    \/ Next
+    \/ BugStalledWithoutCause
+
+SpecBuggy == Init /\ [][NextBuggy]_vars
+
 Spec == Init /\ [][Next]_vars
 
 TypeOK ==
@@ -136,5 +155,8 @@ StalledStickyWithGoal ==
 
 QuietWhenNoDrivers ==
     [][QuietWhenNoDriversAction]_vars
+
+(* Wrapper for buggy cfg — must be defined AFTER the invariant it references. *)
+StalledNeedsGoalOrFailureMustHold == StalledNeedsGoalOrFailure
 
 =============================================================================

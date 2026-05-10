@@ -1,11 +1,15 @@
 open Alcotest
 
 module ES = Masc_mcp.Keeper_exec_status
+module Metrics = Masc_mcp.Keeper_exec_status_metrics
 module KSB = Masc_mcp.Keeper_status_bridge
 module KR = Masc_mcp.Keeper_registry
 module KT = Masc_mcp.Keeper_types
+module KMP = Masc_mcp.Keeper_memory_policy
+module KTS = Masc_mcp.Keeper_types_support
 module Coord = Masc_mcp.Coord
-module OWN = Masc_mcp.Oas_worker_named
+module OWN = Masc_mcp.Keeper_turn_driver
+module Prom = Masc_mcp.Prometheus
 
 let keeper_health_testable : KT.keeper_health Alcotest.testable =
   Alcotest.testable
@@ -123,6 +127,134 @@ let assoc_member key fields =
   match List.assoc_opt key fields with
   | Some value -> value
   | None -> `Null
+
+let write_lines path lines =
+  KT.mkdir_p (Filename.dirname path);
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+      List.iter
+        (fun line ->
+          output_string oc line;
+          output_char oc '\n')
+        lines)
+
+let persistence_read_drop_total ~surface ~reason =
+  Prom.metric_value_or_zero Prom.metric_persistence_read_drops
+    ~labels:[("surface", surface); ("reason", reason)]
+    ()
+
+let check_persistence_drop_delta ~surface ~reason ~before ~delta =
+  Alcotest.(check (float 0.0001))
+    (Printf.sprintf "%s/%s persistence drops" surface reason)
+    (before +. float_of_int delta)
+    (persistence_read_drop_total ~surface ~reason)
+
+let test_metrics_summary_counts_parse_drops () =
+  let surface = "keeper_exec_status_metrics" in
+  let entry_reason = "entry_load_error" in
+  let invalid_reason = "invalid_payload" in
+  let before_entry =
+    persistence_read_drop_total ~surface ~reason:entry_reason
+  in
+  let before_invalid =
+    persistence_read_drop_total ~surface ~reason:invalid_reason
+  in
+  let summary =
+    Metrics.summarize_metrics_lines
+      [
+        {|{"channel":"turn","ts_unix":1.0,"trace_id":"trace-ok"}|};
+        "{not-json";
+        "[]";
+      ]
+      ~default_generation:0
+  in
+  let summary_json = Metrics.metrics_summary_to_json summary in
+  let sample_points =
+    match assoc_member "sample_points" (Yojson.Safe.Util.to_assoc summary_json) with
+    | `Int value -> value
+    | other ->
+        Alcotest.failf "unexpected sample_points JSON: %s"
+          (Yojson.Safe.to_string other)
+  in
+  check int "only valid object rows are summarized" 1 sample_points;
+  check_persistence_drop_delta ~surface ~reason:entry_reason
+    ~before:before_entry ~delta:1;
+  check_persistence_drop_delta ~surface ~reason:invalid_reason
+    ~before:before_invalid ~delta:1
+
+let test_tool_audit_counts_decision_log_parse_drops () =
+  let surface = "keeper_exec_status_decision_log" in
+  let entry_reason = "entry_load_error" in
+  let invalid_reason = "invalid_payload" in
+  let before_entry =
+    persistence_read_drop_total ~surface ~reason:entry_reason
+  in
+  let before_invalid =
+    persistence_read_drop_total ~surface ~reason:invalid_reason
+  in
+  with_temp_base_path "test-keeper-exec-status-decision-drops" (fun base_path ->
+      let config = Coord.default_config base_path in
+      let keeper_name = "keeper-tool-audit-decisions" in
+      write_lines
+        (KT.keeper_decision_log_path config keeper_name)
+        [
+          {|{"ts":"2026-05-07T00:00:00Z","tools_used":["masc_task_status"],"tool_call_count":1}|};
+          "[]";
+          "{not-json";
+        ];
+      match
+        Metrics.latest_tool_audit_snapshot_from_files config ~keeper_name
+      with
+      | None -> Alcotest.fail "expected decision log tool audit snapshot"
+      | Some snapshot ->
+          check (list string) "decision tools" ["masc_task_status"]
+            snapshot.latest_tool_names;
+          check (option int) "decision tool count" (Some 1)
+            snapshot.latest_tool_call_count;
+          check (option string) "decision source" (Some "keeper_decision_log")
+            snapshot.tool_audit_source);
+  check_persistence_drop_delta ~surface ~reason:entry_reason
+    ~before:before_entry ~delta:1;
+  check_persistence_drop_delta ~surface ~reason:invalid_reason
+    ~before:before_invalid ~delta:1
+
+let test_tool_audit_counts_metrics_parse_drops () =
+  let surface = "keeper_exec_status_keeper_metrics" in
+  let entry_reason = "entry_load_error" in
+  let invalid_reason = "invalid_payload" in
+  let before_entry =
+    persistence_read_drop_total ~surface ~reason:entry_reason
+  in
+  let before_invalid =
+    persistence_read_drop_total ~surface ~reason:invalid_reason
+  in
+  with_temp_base_path "test-keeper-exec-status-metrics-drops" (fun base_path ->
+      let config = Coord.default_config base_path in
+      let keeper_name = "keeper-tool-audit-metrics" in
+      write_lines
+        (KT.keeper_metrics_path config keeper_name)
+        [
+          {|{"ts":"2026-05-07T00:00:00Z","tools_used":["masc_board_post"],"tool_call_count":1}|};
+          "[]";
+          "{not-json";
+        ];
+      match
+        Metrics.latest_tool_audit_snapshot_from_files config ~keeper_name
+      with
+      | None -> Alcotest.fail "expected metrics tool audit snapshot"
+      | Some snapshot ->
+          check (list string) "metrics tools" ["masc_board_post"]
+            snapshot.latest_tool_names;
+          check (option int) "metrics tool count" (Some 1)
+            snapshot.latest_tool_call_count;
+          check (option string) "metrics source" (Some "keeper_metrics")
+            snapshot.tool_audit_source);
+  check_persistence_drop_delta ~surface ~reason:entry_reason
+    ~before:before_entry ~delta:1;
+  check_persistence_drop_delta ~surface ~reason:invalid_reason
+    ~before:before_invalid ~delta:1
 
 let test_attention_fields_promote_runtime_trust_attention () =
   let fields =
@@ -363,7 +495,9 @@ let test_runtime_surface_derives_autonomous_slot_wait_timeout_from_meta () =
       runtime =
         {
           base.runtime with
-          last_blocker = reason;
+          last_blocker =
+            Some (KT.blocker_info_of_class ~detail:reason
+                    KT.Autonomous_slot_wait_timeout);
         };
     }
   in
@@ -393,7 +527,9 @@ let test_runtime_surface_derives_cascade_exhausted_from_meta () =
       runtime =
         {
           base.runtime with
-          last_blocker = reason;
+          last_blocker =
+            Some (KT.blocker_info_of_class ~detail:reason
+                    (KT.Cascade_exhausted KT.Connection_refused));
         };
     }
   in
@@ -442,8 +578,9 @@ let test_runtime_surface_names_no_tool_provider_details () =
       runtime =
         {
           base.runtime with
-          last_blocker = summary;
-          last_blocker_class = Some KT.No_tool_capable_provider;
+          last_blocker =
+            Some (KT.blocker_info_of_class ~detail:summary
+                    KT.No_tool_capable_provider);
         };
     }
   in
@@ -475,8 +612,10 @@ let test_runtime_surface_routes_oas_timeout_to_timeout_action () =
             {
               base.runtime with
               last_blocker =
-                "OAS budget timeout fired before the keeper hard timeout.";
-              last_blocker_class = Some KT.Oas_timeout_budget;
+                Some
+                  (KT.blocker_info_of_class
+                     ~detail:"OAS budget timeout fired before the keeper hard timeout."
+                     KT.Oas_timeout_budget);
             };
         }
       in
@@ -509,8 +648,10 @@ let test_runtime_surface_routes_paused_timeout_to_paused_action () =
             {
               base.runtime with
               last_blocker =
-                "OAS budget timeout fired before the keeper hard timeout.";
-              last_blocker_class = Some KT.Oas_timeout_budget;
+                Some
+                  (KT.blocker_info_of_class
+                     ~detail:"OAS budget timeout fired before the keeper hard timeout."
+                     KT.Oas_timeout_budget);
             };
         }
       in
@@ -534,7 +675,7 @@ let test_runtime_surface_exposes_redacted_resumable_cli_session_blocker () =
   KR.clear ();
   let base = make_meta ~name:"runtime-resumable-cli-session-test" () in
   let reason =
-    Masc_mcp.Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail
+    Masc_mcp.Cascade_runner.Kimi_cli_transport_local.resumable_session_detail
   in
   let meta =
     {
@@ -542,9 +683,9 @@ let test_runtime_surface_exposes_redacted_resumable_cli_session_blocker () =
       runtime =
         {
           base.runtime with
-          last_blocker = reason;
-          last_blocker_class =
-            Some (KT.Cascade_exhausted (KT.Other_detail reason));
+          last_blocker =
+            Some (KT.blocker_info_of_class ~detail:reason
+                    (KT.Cascade_exhausted (KT.Other_detail reason)));
         };
     }
   in
@@ -622,7 +763,9 @@ let test_runtime_surface_derives_continue_gate_from_persisted_ambiguous_blocker 
       runtime =
         {
           base.runtime with
-          last_blocker = reason;
+          last_blocker =
+            Some (KT.blocker_info_of_class ~detail:reason
+                    KT.Ambiguous_post_commit_timeout);
         };
     }
   in
@@ -789,6 +932,103 @@ let test_runtime_surface_maps_registry_failure_reason_blockers () =
          (runtime |> member "needs_attention" |> to_bool))
     cases
 
+let test_runtime_surface_classifies_progress_narrative_blockers () =
+  let cases =
+    [
+      ( "operator-gate",
+        "OpenQuestions: Why hasn't the push gate been resolved in 24h+?",
+        "awaiting_operator",
+        "push gate" );
+      ( "sandbox-egress",
+        "OpenQuestions: whether keeper docker sandboxes can be granted github.com push egress",
+        "awaiting_sandbox_egress",
+        "github.com push egress" );
+      ( "supervisor-paused",
+        "Decisions: [SYNTHETIC] Last output: 실제 막힘. supervisor가 의도적으로 건 pause",
+        "supervisor_paused",
+        "supervisor" );
+      ( "synthetic-stall",
+        "Decisions: [SYNTHETIC] BELIEF_SUMMARY: Continuity advisory flags backlog delta",
+        "synthetic_stall",
+        "BELIEF_SUMMARY" );
+      ( "self-imposed-idle",
+        "Next: watch the next dispatch cycle; no next action",
+        "self_imposed_idle",
+        "no next action" );
+    ]
+  in
+  List.iter
+    (fun (suffix, continuity_summary, expected_class, expected_summary_substring) ->
+       KR.clear ();
+       let base = make_meta ~name:("runtime-progress-" ^ suffix ^ "-test") () in
+       let meta = { base with continuity_summary } in
+       let config =
+         Coord.default_config ("/tmp/test-keeper-exec-status-progress-" ^ suffix)
+       in
+       let runtime = KSB.runtime_surface_json config meta in
+       let open Yojson.Safe.Util in
+       check string (suffix ^ " runtime blocker class") expected_class
+         (runtime |> member "runtime_blocker_class" |> to_string);
+       let summary =
+         runtime |> member "runtime_blocker_summary" |> to_string
+       in
+       check bool (suffix ^ " summary preserves progress narrative") true
+         (has_substring summary expected_summary_substring);
+       check bool (suffix ^ " runtime attention needed") true
+         (runtime |> member "needs_attention" |> to_bool))
+    cases
+
+let test_runtime_surface_reads_progress_md_narrative_blocker () =
+  KR.clear ();
+  with_temp_base_path "test-keeper-exec-status-progress-md-" (fun base_path ->
+    let meta = make_meta ~name:"runtime-progress-md-narrative-test" () in
+    let config = Coord.default_config base_path in
+    let snapshot =
+      {
+        KMP.empty_keeper_state_snapshot with
+        open_questions =
+          [
+            "when operator responds to the 4-gate decision tree";
+          ];
+      }
+    in
+    let path = KTS.keeper_progress_path config meta.name in
+    match KMP.write_progress_snapshot_path ~path snapshot with
+    | Error err -> fail ("write_progress_snapshot_path failed: " ^ err)
+    | Ok () ->
+        let runtime = KSB.runtime_surface_json config meta in
+        let open Yojson.Safe.Util in
+        check string "progress.md blocker class" "awaiting_operator"
+          (runtime |> member "runtime_blocker_class" |> to_string);
+        check bool "progress.md blocker summary keeps narrative" true
+          (has_substring
+             (runtime |> member "runtime_blocker_summary" |> to_string)
+             "4-gate decision tree"))
+
+let test_runtime_surface_prefers_typed_blocker_over_progress_narrative () =
+  KR.clear ();
+  let base = make_meta ~name:"runtime-progress-typed-priority-test" () in
+  let meta =
+    {
+      base with
+      continuity_summary =
+        "OpenQuestions: when operator responds to the 4-gate decision tree";
+      runtime =
+        {
+          base.runtime with
+          last_blocker =
+            Some (KT.blocker_info_of_class
+                    ~detail:"turn wall-clock timeout exceeded"
+                    KT.Turn_timeout);
+        };
+    }
+  in
+  let config = Coord.default_config "/tmp/test-keeper-exec-status-progress-priority" in
+  let runtime = KSB.runtime_surface_json config meta in
+  let open Yojson.Safe.Util in
+  check string "typed runtime blocker wins" "turn_timeout"
+    (runtime |> member "runtime_blocker_class" |> to_string)
+
 let test_runtime_surface_exposes_social_model_resolution_fields () =
   KR.clear ();
   let base = make_meta ~name:"runtime-social-model-test" () in
@@ -803,7 +1043,7 @@ let test_runtime_surface_exposes_social_model_resolution_fields () =
             Masc_mcp.Keeper_social_model.speech_act_to_string
               Masc_mcp.Keeper_social_model.Stay_silent;
           last_social_transition_reason = "tool_only:stay_silent";
-          last_blocker = "waiting_for_delta";
+          last_blocker = None;
           last_need = "";
         };
     }
@@ -906,6 +1146,15 @@ let () =
           test_case "rejects unknown wire strings" `Quick
             test_parser_rejects_unknown;
         ] );
+      ( "metrics_read_drops",
+        [
+          test_case "metrics summary counts malformed rows" `Quick
+            test_metrics_summary_counts_parse_drops;
+          test_case "decision log tool audit counts malformed rows" `Quick
+            test_tool_audit_counts_decision_log_parse_drops;
+          test_case "metrics tool audit counts malformed rows" `Quick
+            test_tool_audit_counts_metrics_parse_drops;
+        ] );
       ( "health_state",
         [
           test_case "keepalive running overrides stale last_seen" `Quick
@@ -982,6 +1231,15 @@ let () =
             test_runtime_surface_maps_heartbeat_failure_reason;
           test_case "runtime surface maps registry failure blockers" `Quick
             test_runtime_surface_maps_registry_failure_reason_blockers;
+          test_case "runtime surface classifies progress narrative blockers"
+            `Quick
+            test_runtime_surface_classifies_progress_narrative_blockers;
+          test_case "runtime surface reads progress.md narrative blocker"
+            `Quick
+            test_runtime_surface_reads_progress_md_narrative_blocker;
+          test_case "runtime surface prefers typed blocker over progress narrative"
+            `Quick
+            test_runtime_surface_prefers_typed_blocker_over_progress_narrative;
           test_case "runtime surface exposes social model fields" `Quick
             test_runtime_surface_exposes_social_model_resolution_fields;
           test_case "runtime surface exposes model display labels" `Quick

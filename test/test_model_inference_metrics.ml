@@ -594,6 +594,35 @@ let test_costs_jsonl_backfills_wall_tok_per_sec () =
     check int "usage sample" 1 s.usage_sample_count;
     check int "telemetry sample" 1 s.telemetry_sample_count)
 
+let test_costs_jsonl_zero_latency_is_missing () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let ts = now_unix () in
+    write_costs base [
+      cost_entry ~model:"qwen3.6:27b-coding-nvfp4" ~ts
+        ~input_tokens:100 ~output_tokens:50 ~latency_ms:0 ();
+    ];
+    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let s = List.hd agg.models in
+    check int "one cost entry" 1 s.entry_count;
+    check (option (float 0.001)) "zero latency not averaged"
+      None s.avg_latency_ms;
+    check (option (float 0.001)) "zero latency not p50"
+      None s.p50_latency_ms;
+    check (option (float 0.001)) "zero latency does not derive tok/sec"
+      None s.avg_tok_per_sec;
+    check int "usage sample preserved" 1 s.usage_sample_count;
+    check int "telemetry sample absent" 0 s.telemetry_sample_count;
+    let recent = List.hd s.recent_entries in
+    check (option (float 0.001)) "recent latency unknown"
+      None recent.re_latency_ms;
+    let bucket_total =
+      List.fold_left
+        (fun acc (bucket : M.latency_bucket) -> acc + bucket.count)
+        0 agg.latency_buckets
+    in
+    check int "zero latency skipped from buckets" 0 bucket_total)
+
 let test_costs_jsonl_dedupes_matching_decision_sample () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
@@ -1069,6 +1098,7 @@ let () =
       test_case "missing usage serializes unknowns" `Quick test_missing_usage_serializes_unknowns;
       test_case "coverage diagnostics survive aggregation" `Quick test_coverage_diagnostics_survive_aggregation;
       test_case "costs.jsonl backfills wall tok/sec" `Quick test_costs_jsonl_backfills_wall_tok_per_sec;
+      test_case "costs.jsonl zero latency stays missing" `Quick test_costs_jsonl_zero_latency_is_missing;
       test_case "costs.jsonl dedupes matching decision sample" `Quick test_costs_jsonl_dedupes_matching_decision_sample;
       test_case "cost latency json composes axes and percentiles" `Quick test_cost_latency_json_composes_axes_and_percentiles;
       test_case "cost latency json preserves missing latency nulls" `Quick test_cost_latency_json_preserves_missing_latency_as_null;

@@ -21,7 +21,11 @@ let read_only_probe_timeout_sec = 15.0
 let run_git ~timeout_sec ~clone_path args =
   let argv = [ "git"; "-C"; clone_path; "--no-optional-locks" ] @ args in
   let status, output =
-    Process_eio.run_argv_with_status ~timeout_sec argv
+    Masc_exec.Exec_gate.run_argv_with_status
+      ~actor:`Coord_git
+      ~raw_source:(String.concat " " argv)
+      ~summary:"keeper repo readiness git probe"
+      ~timeout_sec argv
   in
   { ok = status = Unix.WEXITED 0; output = String.trim output; status }
 

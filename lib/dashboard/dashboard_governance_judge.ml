@@ -13,6 +13,11 @@ type runtime_snapshot = {
   model_used : string option;
   keeper_name : string;
   last_error : string option;
+  compute_in_flight : int;
+  last_compute_duration_sec : float option;
+  last_compute_timeout_sec : float option;
+  last_compute_outcome : string option;
+  last_compute_reason : string option;
 }
 
 type state = {
@@ -28,6 +33,11 @@ type state = {
   mutable expires_at : string option;
   mutable model_used : string option;
   mutable last_error : string option;
+  mutable compute_in_flight : int;
+  mutable last_compute_duration_sec : float option;
+  mutable last_compute_timeout_sec : float option;
+  mutable last_compute_outcome : string option;
+  mutable last_compute_reason : string option;
   mutable last_disk_load_unix : float option;
   mutable judgments : (string, Yojson.Safe.t) Hashtbl.t;
 }
@@ -41,6 +51,15 @@ type state = {
 let governance_response_model_empty_metric =
   "masc_governance_response_model_empty_total"
 
+let governance_compute_total_metric =
+  "masc_governance_judge_compute_total"
+
+let governance_compute_duration_metric =
+  "masc_governance_judge_compute_duration_seconds"
+
+let governance_compute_in_flight_metric =
+  "masc_governance_judge_compute_in_flight"
+
 let () =
   Prometheus.register_counter
     ~name:governance_response_model_empty_metric
@@ -48,6 +67,22 @@ let () =
       "Count of governance compute_judgments cycles where \
        [response.model] was empty.  Labels: \
        [source=telemetry_resolved | unknown_sentinel]."
+    ();
+  Prometheus.register_counter
+    ~name:governance_compute_total_metric
+    ~help:
+      "Count of governance judge compute_judgments attempts. Labels: \
+       [outcome=ok|error, reason=ok|timeout|error|cancelled]."
+    ();
+  Prometheus.register_histogram
+    ~name:governance_compute_duration_metric
+    ~help:
+      "Observed governance judge compute_judgments duration in seconds. \
+       Labels: [outcome=ok|error, reason=ok|timeout|error|cancelled]."
+    ();
+  Prometheus.register_gauge
+    ~name:governance_compute_in_flight_metric
+    ~help:"Current in-flight governance judge compute_judgments attempts."
     ()
 
 type governance_model_source =
@@ -135,6 +170,13 @@ let contains_substring haystack needle =
 let degraded_reason_of_error message =
   let lower = String.lowercase_ascii message in
   if
+    contains_substring lower "unparseable"
+    || contains_substring lower "structurally invalid"
+    || contains_substring lower "invalid json"
+    || contains_substring lower "guardrail_state"
+  then
+    "judge_output_invalid"
+  else if
     contains_substring lower "timeout"
     || contains_substring lower "timed out"
     || contains_substring lower "deadline"
@@ -142,6 +184,27 @@ let degraded_reason_of_error message =
     "timeout"
   else
     "error"
+
+let timeout_sec_of_error message =
+  let marker = "timed out after " in
+  let lower = String.lowercase_ascii message in
+  match String_util.find_substring lower marker with
+  | None -> None
+  | Some marker_idx ->
+      let start = marker_idx + String.length marker in
+      let len = String.length lower in
+      let rec find_stop idx =
+        if idx >= len then idx
+        else
+          match lower.[idx] with
+          | '0' .. '9' | '.' -> find_stop (idx + 1)
+          | _ -> idx
+      in
+      let stop = find_stop start in
+      if stop <= start then None
+      else
+        String.sub lower start (stop - start)
+        |> float_of_string_opt
 
 let cached_judgments_still_fresh ~now_ts (st : state) =
   match st.expires_at_unix with
@@ -194,6 +257,11 @@ let get_state base_path =
             expires_at = None;
             model_used = None;
             last_error = None;
+            compute_in_flight = 0;
+            last_compute_duration_sec = None;
+            last_compute_timeout_sec = None;
+            last_compute_outcome = None;
+            last_compute_reason = None;
             last_disk_load_unix = None;
           judgments = Hashtbl.create 32;
         }
@@ -362,6 +430,11 @@ let runtime_status_at ~now_ts base_path =
         model_used = st.model_used;
         keeper_name;
         last_error = st.last_error;
+        compute_in_flight = st.compute_in_flight;
+        last_compute_duration_sec = st.last_compute_duration_sec;
+        last_compute_timeout_sec = st.last_compute_timeout_sec;
+        last_compute_outcome = st.last_compute_outcome;
+        last_compute_reason = st.last_compute_reason;
       })
 
 let runtime_status base_path =
@@ -422,18 +495,70 @@ let parse_recommended_action json =
           ])
   | _ -> None
 
+type governance_response_parse_failure =
+  | Lenient_fallback of string
+  | Structural_error of string
+
+let parse_lenient_governance_json raw_text =
+  let parsed = Llm_provider.Lenient_json.parse raw_text in
+  match parsed with
+  | `Assoc [("raw", `String raw)] -> (
+      match Judge_json_recovery.extract_balanced_object raw with
+      | Some block -> (
+          try
+            match Llm_provider.Lenient_json.parse block with
+            | `Assoc [ ("raw", `String recovered_raw) ] ->
+                Error (Lenient_fallback recovered_raw)
+            | parsed -> Ok parsed
+          with
+          | Yojson.Json_error _ -> Error (Lenient_fallback raw)
+          | Failure _ -> Error (Lenient_fallback raw))
+      | None -> Error (Lenient_fallback raw))
+  | _ -> Ok parsed
+
+let parse_required_guardrail_state json =
+  match json |> member "guardrail_state" with
+  | `Assoc fields ->
+      let required_field name =
+        match List.assoc_opt name fields with
+        | Some value -> Ok value
+        | None -> Error (Printf.sprintf "missing guardrail_state.%s" name)
+      in
+      let requires_human_gate = required_field "requires_human_gate" in
+      let pending_confirm_token = required_field "pending_confirm_token" in
+      let ready_to_execute = required_field "ready_to_execute" in
+      (match requires_human_gate, pending_confirm_token, ready_to_execute with
+       | Ok (`Bool _ as requires_human_gate),
+         Ok ((`String _ | `Null) as pending_confirm_token),
+         Ok (`Bool _ as ready_to_execute) ->
+           Ok
+             (`Assoc
+               [
+                 ("requires_human_gate", requires_human_gate);
+                 ("pending_confirm_token", pending_confirm_token);
+                 ("ready_to_execute", ready_to_execute);
+               ])
+       | Error reason, _, _ | _, Error reason, _ | _, _, Error reason ->
+           Error reason
+       | _ ->
+           Error
+             "invalid guardrail_state: expected requires_human_gate bool, \
+              pending_confirm_token string|null, ready_to_execute bool")
+  | `Null -> Error "missing guardrail_state"
+  | _ -> Error "invalid guardrail_state: expected object"
+
 let parse_item_judgment ~generated_at ~expires_at ~model_used json =
   let target_kind =
     json |> member "kind" |> to_string_option |> Option.value ~default:""
     |> String.lowercase_ascii
   in
   let target_id = json |> member "id" |> to_string_option |> Option.value ~default:"" in
-  if target_kind = "" || target_id = "" then None
+  if target_kind = "" || target_id = "" then Ok None
   else
     let summary =
       normalize_text (json |> member "summary" |> to_string_option |> Option.value ~default:"")
     in
-    if summary = "" then None
+    if summary = "" then Ok None
     else
       let confidence =
         match json |> member "confidence" with
@@ -443,35 +568,65 @@ let parse_item_judgment ~generated_at ~expires_at ~model_used json =
       in
       let evidence_refs = parse_string_list json "evidence_refs" in
       let recommended_action = parse_recommended_action json in
-      let guardrail_state =
-        match json |> member "guardrail_state" with
-        | `Assoc _ as state_json ->
-            Some
-              (`Assoc
-                [
-                  ("requires_human_gate", state_json |> member "requires_human_gate");
-                  ("pending_confirm_token", state_json |> member "pending_confirm_token");
-                  ("ready_to_execute", state_json |> member "ready_to_execute");
-                ])
-        | _ -> None
-      in
-      Some
-        (`Assoc
-          [
-            ("judgment_id", `String (Uuidm.to_string (Uuidm.v4_gen (Random.State.make_self_init ()) ())));
-            ("target_kind", `String target_kind);
-            ("target_id", `String target_id);
-            ("status", `String "active");
-            ("summary", `String summary);
-            ("confidence", `Float confidence);
-            ("generated_at", `String generated_at);
-            ("expires_at", `String expires_at);
-            ("model_used", `String model_used);
-            ("keeper_name", `String keeper_name);
-            ("evidence_refs", `List (List.map (fun item -> `String item) evidence_refs));
-            ("recommended_action", option_to_yojson (fun value -> value) recommended_action);
-            ("guardrail_state", option_to_yojson (fun value -> value) guardrail_state);
-          ])
+      match parse_required_guardrail_state json with
+      | Error reason ->
+          Error
+            (Printf.sprintf "item %s:%s %s" target_kind target_id reason)
+      | Ok guardrail_state ->
+          Ok
+            (Some
+               (`Assoc
+                 [
+                   ( "judgment_id",
+                     `String
+                       (Uuidm.to_string
+                          (Uuidm.v4_gen (Random.State.make_self_init ()) ())) );
+                   ("target_kind", `String target_kind);
+                   ("target_id", `String target_id);
+                   ("status", `String "active");
+                   ("summary", `String summary);
+                   ("confidence", `Float confidence);
+                   ("generated_at", `String generated_at);
+                   ("expires_at", `String expires_at);
+                   ("model_used", `String model_used);
+                   ("keeper_name", `String keeper_name);
+                   ( "evidence_refs",
+                     `List (List.map (fun item -> `String item) evidence_refs) );
+                   ( "recommended_action",
+                     option_to_yojson (fun value -> value) recommended_action );
+                   ("guardrail_state", guardrail_state);
+                 ]))
+
+let parse_governance_response ~raw_text ~generated_at ~expires_at ~model_used =
+  match parse_lenient_governance_json raw_text with
+  | Error _ as error -> error
+  | Ok parsed -> (
+      match parsed with
+      | `Assoc _ -> (
+          match parsed |> member "items" with
+          | `List rows ->
+              let rec loop acc = function
+                | [] -> Ok (List.rev acc)
+                | row :: rest -> (
+                    match
+                      parse_item_judgment ~generated_at ~expires_at ~model_used row
+                    with
+                    | Error reason -> Error (Structural_error reason)
+                    | Ok None -> loop acc rest
+                    | Ok (Some judgment) -> loop (judgment :: acc) rest)
+              in
+              loop [] rows
+          | _ ->
+              Error
+                (Structural_error
+                   "expected top-level items array in judge response"))
+      | _ ->
+          Error
+            (Structural_error
+               "expected top-level JSON object in judge response"))
+
+let parse_governance_response_for_testing =
+  parse_governance_response
 
 let prompt_for_facts facts_json =
   match
@@ -500,7 +655,7 @@ let compute_judgments
       ~caller:Env_config_oas_bridge.Governance_judge (fun () ->
       let factual_json = build_facts () in
       let prompt = prompt_for_facts factual_json in
-      Oas_worker.run_named_with_masc_tools ~cascade_name
+      Keeper_turn_driver_wrappers.run_named_with_masc_tools ~cascade_name
         ~goal:prompt ~masc_tools ~dispatch ~max_turns:3
         ~approval:Approval_callbacks.auto_approve
         ()
@@ -508,93 +663,67 @@ let compute_judgments
   with
   | Error err -> Error (Agent_sdk.Error.to_string err)
   | Ok result -> (
-      let response = result.Oas_worker.response in
+      let response = result.Cascade_runner.response in
       try
-        (* LLMs frequently wrap JSON in ```json … ``` markdown fences despite
-           explicit prompt instructions. Lenient_json strips fences, repairs
-           trailing commas, unwraps double-stringified JSON, and falls back
-           to {raw: string} only after all recovery transforms fail. *)
-        let raw_text = Oas_response.text_of_response response in
-        let parsed = Llm_provider.Lenient_json.parse raw_text in
-        let parsed =
-          (* #9851: when the model prefixes prose before the JSON object
-             ("Here is the judgment: {...}"), Lenient_json's fence/comma
-             recovery does not strip the prose and falls through to the
-             {raw: <text>} sentinel. Try one more recovery: locate the
-             first balanced {...} block in the raw text and re-parse. *)
-          match parsed with
-          | `Assoc [("raw", `String raw)] -> (
-              match Judge_json_recovery.extract_balanced_object raw with
-              | Some block -> (
-                  try Llm_provider.Lenient_json.parse block
-                  with
-                  | Yojson.Json_error _ -> parsed
-                  | Failure _ -> parsed)
-              | None -> parsed)
-          | _ -> parsed
+        let raw_text = Agent_sdk_response.text_of_response response in
+        let generated_at = now_iso () in
+        let expires_at = iso_of_unix (Unix.gettimeofday () +. cache_ttl_sec ()) in
+        (* #9880 facet 4: 17% of yesterday's judgment records had
+           [model_used = ""] because OAS transports occasionally
+           return [response.model = ""] (Kimi/Codex CLI silent
+           failure path; CompletionContractViolation
+           retry-exhausted synthetic responses).  An empty
+           [model_used] field destroys attribution downstream
+           (cost rollups, per-model latency p50/p99, daily
+           judgments-by-model breakdown).
+
+           Same shape as keeper-side fix #10083: layered
+           fallback (raw → telemetry canonical_model_id → named
+           sentinel) plus a counter so the operator can see WHICH
+           transport leaked.  Sentinel matches the keeper-side
+           string [unknown_provider] so dashboards can
+           union-aggregate empty-model events across both callers. *)
+        let canonical_model_id =
+          match response.telemetry with
+          | Some { canonical_model_id = Some id; _ } -> Some id
+          | _ -> None
         in
-        match parsed with
-        | `Assoc [("raw", `String raw)] ->
-            (* #9774: surface a preview of the raw text so the next
-               diagnostic pass can see what shape the LLM is producing
-               without having to enable raw provider logging. *)
+        let resolved_model, model_source =
+          resolve_governance_model_used ~raw_model:response.model
+            ~canonical_model_id
+        in
+        begin
+          match model_source with
+          | Response_model -> ()
+          | Telemetry_resolved | Unknown_sentinel ->
+              let source = governance_model_source_to_string model_source in
+              Prometheus.inc_counter
+                governance_response_model_empty_metric
+                ~labels:[ ("source", source) ]
+                ();
+              Log.Governance.warn
+                "compute_judgments: response.model empty → fallback=%s resolved=%s (#9880)"
+                source resolved_model;
+        end;
+        match
+          parse_governance_response ~raw_text ~generated_at ~expires_at
+            ~model_used:resolved_model
+        with
+        | Ok judgments -> Ok (resolved_model, generated_at, expires_at, judgments)
+        | Error (Lenient_fallback raw) ->
             let msg =
-              Judge_diagnostics.record_lenient_fallback ~judge_label:"Governance" raw
+              Judge_diagnostics.record_lenient_fallback
+                ~judge_label:"Governance" raw
             in
             Log.Governance.warn "%s" msg;
             Error msg
-        | _ ->
-            let generated_at = now_iso () in
-            let expires_at = iso_of_unix (Unix.gettimeofday () +. cache_ttl_sec ()) in
-            let items =
-              match parsed |> member "items" with
-              | `List rows -> rows
-              | _ -> []
+        | Error (Structural_error reason) ->
+            let msg =
+              Judge_diagnostics.record_unparseable_response
+                ~judge_label:"Governance" ~reason raw_text
             in
-            (* #9880 facet 4: 17% of yesterday's judgment records had
-               [model_used = ""] because OAS transports occasionally
-               return [response.model = ""] (Kimi/Codex CLI silent
-               failure path; CompletionContractViolation
-               retry-exhausted synthetic responses).  An empty
-               [model_used] field destroys attribution downstream
-               (cost rollups, per-model latency p50/p99, daily
-               judgments-by-model breakdown).
-
-               Same shape as keeper-side fix #10083: layered
-               fallback (raw → telemetry canonical_model_id → named
-               sentinel) plus a counter so the operator can see
-               WHICH transport leaked.  Sentinel matches the
-               keeper-side string [unknown_provider] so dashboards
-               can union-aggregate empty-model events across both
-               callers. *)
-            let canonical_model_id =
-              match response.telemetry with
-              | Some { canonical_model_id = Some id; _ } -> Some id
-              | _ -> None
-            in
-            let resolved_model, model_source =
-              resolve_governance_model_used ~raw_model:response.model ~canonical_model_id
-            in
-            begin
-              match model_source with
-              | Response_model -> ()
-              | Telemetry_resolved | Unknown_sentinel ->
-                let source = governance_model_source_to_string model_source in
-                Prometheus.inc_counter
-                  governance_response_model_empty_metric
-                  ~labels:[ ("source", source) ]
-                  ();
-                Log.Governance.warn
-                  "compute_judgments: response.model empty → fallback=%s resolved=%s (#9880)"
-                  source resolved_model;
-            end;
-            let judgments =
-              items
-              |> List.filter_map
-                   (parse_item_judgment ~generated_at ~expires_at
-                      ~model_used:resolved_model)
-            in
-            Ok (resolved_model, generated_at, expires_at, judgments)
+            Log.Governance.warn "%s" msg;
+            Error msg
       with
       | Yojson.Json_error msg ->
           Error (Printf.sprintf "Governance judge returned invalid JSON: %s" msg)
@@ -624,6 +753,47 @@ let should_backoff ~sw ~net =
       "capacity check failed in should_backoff: %s"
       (Printexc.to_string exn);
     false
+
+let mark_compute_start (st : state) =
+  (* Publish the gauge inside the lock so concurrent refresh_once runs
+     can't interleave the read/write and end with a stale value
+     overwriting the freshest count. *)
+  with_lock st (fun () ->
+      st.compute_in_flight <- st.compute_in_flight + 1;
+      Prometheus.set_gauge governance_compute_in_flight_metric
+        (float_of_int st.compute_in_flight);
+      st.compute_in_flight)
+
+let mark_compute_finish (st : state) ~started_at ~outcome ~reason
+    ~timeout_sec =
+  (* Clamp the elapsed time to >= 0 so a backwards system clock
+     adjustment (NTP step, manual change) cannot inject a negative
+     duration into the histogram or the [last_compute_duration_sec]
+     dashboard surface. *)
+  let duration_sec = Float.max 0.0 (Unix.gettimeofday () -. started_at) in
+  let labels = [ ("outcome", outcome); ("reason", reason) ] in
+  let in_flight =
+    with_lock st (fun () ->
+        st.compute_in_flight <- max 0 (st.compute_in_flight - 1);
+        st.last_compute_duration_sec <- Some duration_sec;
+        st.last_compute_timeout_sec <- timeout_sec;
+        st.last_compute_outcome <- Some outcome;
+        st.last_compute_reason <- Some reason;
+        Prometheus.set_gauge governance_compute_in_flight_metric
+          (float_of_int st.compute_in_flight);
+        st.compute_in_flight)
+  in
+  Prometheus.inc_counter governance_compute_total_metric ~labels ();
+  Prometheus.observe_histogram governance_compute_duration_metric
+    ~labels duration_sec;
+  Log.Governance.info
+    "refresh_once: compute_judgments telemetry outcome=%s reason=%s duration=%.3fs timeout_budget=%s in_flight_after=%d"
+    outcome reason duration_sec
+    (match timeout_sec with
+     | Some value -> Printf.sprintf "%.1fs" value
+     | None -> "unknown")
+    in_flight;
+  (duration_sec, in_flight)
 
 let refresh_once ~sw ~net
     ~(masc_tools : Masc_domain.tool_schema list)
@@ -667,8 +837,30 @@ let refresh_once ~sw ~net
         st.refreshing <- true;
         st.runtime_status <- status_refreshing;
         st.degraded_reason <- None);
-    match compute_judgments ~masc_tools ~dispatch ~build_facts with
+    let started_at = Unix.gettimeofday () in
+    let timeout_budget =
+      Some
+        (Env_config_oas_bridge.timeout_sec
+           ~caller:Env_config_oas_bridge.Governance_judge ())
+    in
+    ignore (mark_compute_start st);
+    let compute_result =
+      try compute_judgments ~masc_tools ~dispatch ~build_facts with
+      | Eio.Cancel.Cancelled _ as exn ->
+          ignore
+            (mark_compute_finish st ~started_at ~outcome:"error"
+               ~reason:"cancelled" ~timeout_sec:timeout_budget);
+          raise exn
+      | exn ->
+          Error
+            (Printf.sprintf "compute_judgments raised: %s"
+               (Printexc.to_string exn))
+    in
+    match compute_result with
     | Ok (model_used, generated_at, expires_at, judgments) ->
+        ignore
+          (mark_compute_finish st ~started_at ~outcome:"ok" ~reason:"ok"
+             ~timeout_sec:timeout_budget);
         if judgments = [] then
           Log.Governance.routine
             "refresh_once: ok model=%s judgments=%d"
@@ -694,9 +886,23 @@ let refresh_once ~sw ~net
               (fun json -> Hashtbl.replace st.judgments (judgment_key json) json)
               judgments)
     | Error message ->
+        let reason = degraded_reason_of_error message in
+        let timeout_sec =
+          match timeout_sec_of_error message with
+          | Some value -> Some value
+          | None -> timeout_budget
+        in
+        let duration_sec, in_flight =
+          mark_compute_finish st ~started_at ~outcome:"error" ~reason
+            ~timeout_sec
+        in
         Log.Governance.warn
-          "refresh_once: compute_judgments failed: %s"
-          message;
+          "refresh_once: compute_judgments failed: %s (duration=%.3fs timeout_budget=%s in_flight=%d)"
+          message duration_sec
+          (match timeout_sec with
+           | Some value -> Printf.sprintf "%.1fs" value
+           | None -> "unknown")
+          in_flight;
         with_lock st (fun () ->
             mark_refresh_failure ~now_ts:(Unix.gettimeofday ()) st ~message)
   end

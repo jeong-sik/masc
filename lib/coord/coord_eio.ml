@@ -82,6 +82,9 @@ let create_config ~fs ?clock base_path =
     pubsub_max_messages = Backend.pubsub_max_messages;
   } in
   let backend = Backend.FileSystem.create ~fs ?clock backend_config in
+  (* Prometheus mutex observers are installed from lib/prometheus.ml so
+     this extracted coord library does not depend on the top-level
+     Prometheus module. *)
   {
     base_path;
     lock_expiry_minutes = 30;

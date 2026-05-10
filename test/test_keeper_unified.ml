@@ -18,13 +18,14 @@ module KP = Masc_mcp.Keeper_state_machine
 module KD = Masc_mcp.Keeper_deliberation
 module AE = Masc_mcp.Agent_economy
 module KC = Masc_mcp.Keeper_config
+module KTH = Masc_mcp.Keeper_turn_helpers
 module HK = Masc_mcp.Keeper_hooks_oas
 module KG = Masc_mcp.Keeper_guards
-module OMR = Masc_mcp.Oas_model_resolve
+module OMR = Masc_mcp.Cascade_runtime
 module AQ = Masc_mcp.Keeper_approval_queue
 module Keeper_types = Masc_mcp.Keeper_types
 
-let oas_error_cascade_name = Masc_mcp.Oas_worker_named.cascade_name_of_string
+let oas_error_cascade_name = Masc_mcp.Keeper_turn_driver.cascade_name_of_string
 
 let has_prompt_root path =
   Sys.file_exists (Filename.concat path "config/prompts/keeper.unified.system.md")
@@ -1005,8 +1006,7 @@ let test_provider_cooldown_blocks_scheduled_turn_when_work_is_ready () =
 
 let test_provider_cooldown_keeps_scheduled_turn_open_when_fail_open_exists () =
   let meta =
-    { minimal_meta with
-      cascade_name = "tool_rerank";
+    { (Masc_mcp.Keeper_types.set_cascade_name "tool_rerank" minimal_meta) with
       current_task_id =
         (match Masc_mcp.Keeper_id.Task_id.of_string "task-789" with
          | Ok value -> Some value
@@ -1492,8 +1492,9 @@ let test_bootstrap_turn_emits_scheduled_autonomous_channel () =
 
 let test_provider_cooldown_blocks_bootstrap_turn () =
   let meta =
-    { minimal_meta with
-      cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
+    { (Masc_mcp.Keeper_types.set_cascade_name
+         Masc_mcp.Keeper_config.default_cascade_name
+         minimal_meta) with
       proactive =
         { enabled = true; idle_sec = 300; cooldown_sec = 1800 };
       runtime =
@@ -1661,8 +1662,9 @@ let test_min_interval_never_fires_for_bootstrap () =
 let test_provider_cooldown_blocks_min_interval_turn () =
   with_env "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC" "900" (fun () ->
     let meta =
-      { minimal_meta with
-        cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
+      { (Masc_mcp.Keeper_types.set_cascade_name
+           Masc_mcp.Keeper_config.default_cascade_name
+           minimal_meta) with
         proactive =
           { enabled = true; idle_sec = 0; cooldown_sec = 600 };
         runtime =
@@ -1801,7 +1803,14 @@ let test_runtime_trust_snapshot_reads_terminal_reason_code_alias () =
         (List.exists
            (fun event ->
              event |> member "kind" |> to_string = "terminal_reason"
-             && event |> member "summary" |> to_string = "provider or cascade failed")
+             (* RFC-0047 PR-3 (#14271) removed the legacy
+                "provider_error" alias special-case in
+                [Keeper_turn_disposition.summary]; the wire string
+                "provider_error" now decodes to
+                [Unknown { raw_error = "provider_error" }] whose
+                summary is "keeper turn ended with provider_error". *)
+             && event |> member "summary" |> to_string
+                = "keeper turn ended with provider_error")
            timeline))
 
 let test_prompt_contains_identity () =
@@ -2333,6 +2342,8 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
        "keeper_shell op=gh` derives repo context from the active task worktree/current_task_id");
   check bool "unknown tool guard names server-managed public lifecycle tools" true
     (contains_substring (Guidance.render_unknown_tool_guard ()) "masc_heartbeat");
+  check bool "unknown tool guard warns against public board alias" true
+    (contains_substring (Guidance.render_unknown_tool_guard ()) "masc_board_list");
   check bool "keeper_shell schema documents gh claim prerequisite" true
     (source_file_contains "lib/tool_shard.ml"
        "Requires an active claimed task/current_task_id");
@@ -2461,20 +2472,20 @@ let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     proof;
     trace_ref;
     run_validation;
-    stop_reason = Masc_mcp.Oas_worker.Completed;
+    stop_reason = Masc_mcp.Cascade_runner.Completed;
     inference_telemetry = None;
     tool_surface = sample_tool_surface_metrics ();
   }
 
-let sample_cdal_proof ?(raw_evidence_refs = []) () : Agent_sdk.Cdal_proof.t =
+let sample_cdal_proof ?(raw_evidence_refs = []) () : Masc_mcp_cdal_runtime.Cdal_proof.t =
   {
-    schema_version = Agent_sdk.Cdal_proof.schema_version_current;
+    schema_version = Masc_mcp_cdal_runtime.Cdal_proof.schema_version_current;
     run_id = "keeper-metrics-proof-test";
     contract_id = "md5:test";
     requested_execution_mode = Execute;
     effective_execution_mode = Execute;
     mode_decision_source = "passthrough";
-    risk_class = Agent_sdk.Risk_class.Low;
+    risk_class = Masc_mcp_cdal_runtime.Risk_class.Low;
     provider_snapshot =
       {
         provider_name = "test";
@@ -2547,6 +2558,36 @@ let test_metrics_text_response () =
   check int "input tokens" (minimal_meta.runtime.usage.total_input_tokens + 100) updated.runtime.usage.total_input_tokens;
   check int "output tokens" (minimal_meta.runtime.usage.total_output_tokens + 50) updated.runtime.usage.total_output_tokens
 
+let test_metrics_idle_seconds_gauge_records_observation () =
+  let idle_seconds = 19_006 in
+  let result =
+    make_run_result ~text:"I checked the board." ~tools:[]
+      ~model:"test-model" ~input_tok:100 ~output_tok:50 ()
+  in
+  let observation = { base_observation with idle_seconds = idle_seconds } in
+  ignore
+    (UM.update_metrics_from_result minimal_meta ~latency_ms:200
+       ~observation result);
+  check (option (float 0.001)) "success idle seconds gauge"
+    (Some (float_of_int idle_seconds))
+    (Masc_mcp.Prometheus.get_metric_value
+       Masc_mcp.Keeper_metrics.metric_keeper_idle_seconds
+       ~labels:[ ("keeper_name", minimal_meta.name) ]
+       ());
+  let failure_idle_seconds = idle_seconds + 1 in
+  let failure_observation =
+    { base_observation with idle_seconds = failure_idle_seconds }
+  in
+  ignore
+    (UM.update_metrics_from_failure minimal_meta ~latency_ms:100
+       ~observation:failure_observation ~reason:"synthetic failure" ());
+  check (option (float 0.001)) "failure idle seconds gauge"
+    (Some (float_of_int failure_idle_seconds))
+    (Masc_mcp.Prometheus.get_metric_value
+       Masc_mcp.Keeper_metrics.metric_keeper_idle_seconds
+       ~labels:[ ("keeper_name", minimal_meta.name) ]
+       ())
+
 let test_metrics_surface_model_prefers_successful_cascade_label () =
   let selected_label = "llama:qwen3.5-3b-a3b-ud-q8-xl" in
   let result =
@@ -2554,7 +2595,7 @@ let test_metrics_surface_model_prefers_successful_cascade_label () =
       ~model:"qwen3.5:27b-nvfp4" ~input_tok:100 ~output_tok:50
       ~cascade_observation:
         {
-          Masc_mcp.Oas_worker.cascade_name =
+          Masc_mcp.Cascade_legacy_runner.cascade_name =
             Masc_mcp.Keeper_cascade_profile.Runtime_name
               Masc_mcp.Keeper_config.default_cascade_name;
           strategy = Some "round_robin";
@@ -2570,7 +2611,7 @@ let test_metrics_surface_model_prefers_successful_cascade_label () =
           attempts =
             [
               {
-                Masc_mcp.Oas_worker.attempt_index = 0;
+                Masc_mcp.Cascade_legacy_runner.attempt_index = 0;
                 model_id = "qwen3.5-35b-a3b-ud-q8-xl";
                 model_label = Some "llama:qwen3.5-35b-a3b-ud-q8-xl";
                 latency_ms = None;
@@ -2618,7 +2659,7 @@ let test_metrics_resolved_model_id_prefers_last_attempt_id () =
       ~model:"claude-opus-4-6" ~input_tok:100 ~output_tok:50
       ~cascade_observation:
         {
-          Masc_mcp.Oas_worker.cascade_name =
+          Masc_mcp.Cascade_legacy_runner.cascade_name =
             Masc_mcp.Keeper_cascade_profile.Runtime_name
               Masc_mcp.Keeper_config.default_cascade_name;
           strategy = Some "round_robin";
@@ -2634,7 +2675,7 @@ let test_metrics_resolved_model_id_prefers_last_attempt_id () =
           attempts =
             [
               {
-                Masc_mcp.Oas_worker.attempt_index = 0;
+                Masc_mcp.Cascade_legacy_runner.attempt_index = 0;
                 model_id = "claude-sonnet-4-6";
                 model_label = Some "claude_code:auto";
                 latency_ms = None;
@@ -3028,7 +3069,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
           cascade_observation =
             Some
               {
-                Masc_mcp.Oas_worker.cascade_name =
+                Masc_mcp.Cascade_legacy_runner.cascade_name =
                   Masc_mcp.Keeper_cascade_profile.Runtime_name
                     Masc_mcp.Keeper_config.default_cascade_name;
                 strategy = Some "round_robin";
@@ -3047,7 +3088,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
                 attempts =
                   [
                     {
-                      Masc_mcp.Oas_worker.attempt_index = 0;
+                      Masc_mcp.Cascade_legacy_runner.attempt_index = 0;
                       model_id = "qwen3.5-35b-a3b-ud-q8-xl";
                       model_label = Some "llama:qwen3.5-35b-a3b-ud-q8-xl";
                       latency_ms = None;
@@ -3080,6 +3121,12 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
         KD.baseline_execution_result
           (KD.empty_world_observation ~keeper_name:minimal_meta.name)
       in
+      let completed_before =
+        Masc_mcp.Prometheus.metric_value_or_zero
+          Masc_mcp.Keeper_metrics.metric_keeper_turn_completed
+          ~labels:[("keeper_name", minimal_meta.name)]
+          ()
+      in
       UM.append_metrics_snapshot
         ~config
         ~meta:minimal_meta
@@ -3108,6 +3155,15 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
         ~handoff_json:None
         ~deliberation_execution
         ();
+      let completed_after =
+        Masc_mcp.Prometheus.metric_value_or_zero
+          Masc_mcp.Keeper_metrics.metric_keeper_turn_completed
+          ~labels:[("keeper_name", minimal_meta.name)]
+          ()
+      in
+      check (float 0.0001) "turn completed counter increments"
+        (completed_before +. 1.0)
+        completed_after;
       let metrics_store =
         Masc_mcp.Keeper_types.keeper_metrics_store config minimal_meta.name
       in
@@ -3492,7 +3548,7 @@ let test_record_keeper_total_cost_metric () =
   UM.record_keeper_total_cost_usd ~keeper_name ~total_cost_usd:0.042;
   check (option (float 0.0001)) "keeper total cost gauge" (Some 0.042)
     (Masc_mcp.Prometheus.get_metric_value
-       Masc_mcp.Prometheus.metric_keeper_total_cost_usd
+       Masc_mcp.Keeper_metrics.metric_keeper_total_cost_usd
        ~labels:[ ("keeper_name", keeper_name) ]
        ())
 
@@ -3892,13 +3948,13 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
       in
       let phase_skip_before =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+          Masc_mcp.Keeper_metrics.metric_keeper_turn_fsm_transitions
           ~labels:phase_skip_labels
           ()
       in
       let legacy_phase_cancel_before =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+          Masc_mcp.Keeper_metrics.metric_keeper_turn_fsm_transitions
           ~labels:legacy_phase_cancel_labels
           ()
       in
@@ -3917,13 +3973,13 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
       | Ok updated ->
           let phase_skip_after =
             Masc_mcp.Prometheus.metric_value_or_zero
-              Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+              Masc_mcp.Keeper_metrics.metric_keeper_turn_fsm_transitions
               ~labels:phase_skip_labels
               ()
           in
           let legacy_phase_cancel_after =
             Masc_mcp.Prometheus.metric_value_or_zero
-              Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+              Masc_mcp.Keeper_metrics.metric_keeper_turn_fsm_transitions
               ~labels:legacy_phase_cancel_labels
               ()
           in
@@ -3979,6 +4035,75 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
               trajectory_summary |> member "outcome" |> member "reason"
               |> to_string))
 
+let test_run_keeper_cycle_livelock_block_returns_error () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.clear ();
+      Masc_mcp.Keeper_turn_livelock.reset_for_tests ();
+      cleanup_dir base_dir)
+    (fun () ->
+      with_test_runtime_roots base_dir @@ fun () ->
+      KR.clear ();
+      Masc_mcp.Keeper_turn_livelock.reset_for_tests ();
+      with_env "MASC_KEEPER_TURN_LIVELOCK_MAX_ATTEMPTS" "1" @@ fun () ->
+      with_env "MASC_KEEPER_TURN_LIVELOCK_STUCK_AFTER_SEC" "1800.0" @@ fun () ->
+      let meta = make_meta "livelock-blocked-keeper" in
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      ignore (KR.register ~base_path:base_dir meta.name meta);
+      ignore
+        (Masc_mcp.Keeper_turn_livelock.guard_and_record_turn_start
+           ~keeper:meta.name
+           ~turn_id:meta.runtime.usage.total_turns
+           ~max_attempts:1
+           ~stuck_after_sec:1800.0
+           ());
+      match
+        UT.run_keeper_cycle
+          ~config
+          ~meta
+          ~observation:base_observation
+          ~generation:meta.runtime.generation
+          ()
+      with
+      | Ok _ -> fail "expected livelock-blocked turn to return Error"
+      | Error err ->
+          let error_message = Agent_sdk.Error.to_string err in
+          check bool "error mentions livelock" true
+            (contains_substring error_message "livelock blocked");
+          (match
+             Masc_mcp.Keeper_execution_receipt.latest_json config meta.name
+           with
+           | None -> fail "expected livelock-blocked execution receipt"
+           | Some receipt ->
+               check string "blocked receipt outcome" "receipt_failed"
+                 Yojson.Safe.Util.(receipt |> member "outcome" |> to_string);
+               check string "blocked operator disposition" "pause_human"
+                 Yojson.Safe.Util.(
+                   receipt |> member "operator_disposition" |> to_string);
+               check string "blocked disposition reason"
+                 "turn_livelock_blocked"
+                 Yojson.Safe.Util.(
+                   receipt |> member "operator_disposition_reason"
+                   |> to_string);
+               check string "blocked receipt error kind"
+                 "turn_livelock_blocked"
+                 Yojson.Safe.Util.(
+                   receipt |> member "error" |> member "kind" |> to_string);
+               check bool "blocked receipt error message" true
+                 (contains_substring
+                    Yojson.Safe.Util.(
+                      receipt |> member "error" |> member "message" |> to_string)
+                    "livelock blocked");
+               check bool "blocked receipt terminal reason" true
+                 (contains_substring
+                    Yojson.Safe.Util.(
+                      receipt |> member "terminal_reason_code" |> to_string)
+                    "turn_livelock:attempts_exhausted")))
+
 let test_streaming_cancel_records_supervisor_stop_when_fiber_stop_set () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -4013,13 +4138,13 @@ let test_streaming_cancel_records_supervisor_stop_when_fiber_stop_set () =
       in
       let supervisor_request_before =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+          Masc_mcp.Keeper_metrics.metric_keeper_turn_fsm_transitions
           ~labels:supervisor_request_labels
           ()
       in
       let honor_stop_before =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+          Masc_mcp.Keeper_metrics.metric_keeper_turn_fsm_transitions
           ~labels:honor_stop_labels
           ()
       in
@@ -4029,18 +4154,18 @@ let test_streaming_cancel_records_supervisor_stop_when_fiber_stop_set () =
         ~run_generation:meta.runtime.generation
         ~cascade_name:
           (Masc_mcp.Keeper_execution_receipt.cascade_name_of_string
-             meta.cascade_name)
+             (Masc_mcp.Keeper_types.cascade_name_of_meta meta))
         ~keeper_turn_id:meta.runtime.usage.total_turns
         ();
       let supervisor_request_after =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+          Masc_mcp.Keeper_metrics.metric_keeper_turn_fsm_transitions
           ~labels:supervisor_request_labels
           ()
       in
       let honor_stop_after =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+          Masc_mcp.Keeper_metrics.metric_keeper_turn_fsm_transitions
           ~labels:honor_stop_labels
           ()
       in
@@ -4225,12 +4350,19 @@ let test_run_keeper_cycle_surfaces_side_effect_failures_source_contract () =
   check bool "activity graph emit is not silently ignored" false
     (source_file_contains "lib/keeper/keeper_unified_turn.ml"
        "ignore (Activity_graph.emit config");
+  let null_fallback_text = "using " ^ "Null input" in
+  check bool "unmatched ToolCompleted does not fall back to Null input" false
+    (source_file_contains "lib/keeper/keeper_unified_turn.ml"
+       null_fallback_text);
   check bool "discovery helper guards keeper setup" true
     (source_file_contains "lib/keeper/keeper_unified_turn.ml"
        "ensure_local_discovery_ready model_labels");
   check bool "manual keeper_msg discovery helper guards keeper setup" true
     (source_file_contains "lib/keeper/keeper_turn.ml"
-       "ensure_local_discovery_ready effective_models")
+       "ensure_local_discovery_ready effective_models");
+  check bool "manual keeper_msg async facade preflights before submit" true
+    (source_file_contains "lib/tool_keeper.ml"
+       "Turn.preflight_keeper_msg ctx resolved_args")
 
 let test_sync_keeper_paused_state_surfaces_write_failure_without_mutating_registry () =
   let base_dir = temp_dir () in
@@ -4276,6 +4408,55 @@ let test_ensure_local_discovery_ready_surfaces_refresh_failure () =
       check int "refresh called once" 1 !refresh_calls;
       check bool "error includes label" true
         (contains_substring msg "llama:auto")
+
+let test_keeper_msg_async_failure_surface () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      with_test_runtime_roots base_dir @@ fun () ->
+      let keeper_name = "msg-preflight" in
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "operator"));
+      let meta = make_meta keeper_name in
+      (match Masc_mcp.Keeper_types.write_meta ~force:true config meta with
+      | Ok () -> ()
+      | Error err -> fail ("write_meta failed: " ^ err));
+      let ctx : _ Masc_mcp.Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      KTH.For_testing.with_local_discovery_refresh
+        (fun _labels -> false)
+        (fun () ->
+          match
+            Masc_mcp.Tool_keeper.dispatch ctx ~name:"masc_keeper_msg"
+              ~args:
+                (`Assoc
+                   [
+                     ("name", `String keeper_name);
+                     ("message", `String "check discovery failure");
+                   ])
+          with
+          | Some (false, err) ->
+              if not
+                   (contains_substring err "local discovery refresh required"
+                    && contains_substring err "refresh failed")
+              then fail ("unexpected synchronous error: " ^ err)
+          | Some (true, body) ->
+              fail ("expected synchronous failure, got queued body: " ^ body)
+          | None -> fail "masc_keeper_msg dispatch missing"))
 
 let provider_config_of_label label =
   match Masc_mcp.Cascade_config.parse_model_string label with
@@ -4445,6 +4626,45 @@ let test_is_ollama_saturated_ignores_zero_available_when_idle () =
     (UT.is_ollama_saturated
        ~capacity_lookup:(fun _ -> Some info) url)
 
+let test_saturation_skip_count_starts_at_zero () =
+  UT.saturation_skip_count_clear_all ();
+  check int "fresh keeper has zero skip count" 0
+    (UT.saturation_skip_count_get ~keeper_name:"fresh_keeper")
+
+let test_saturation_skip_count_inc_returns_new_value () =
+  UT.saturation_skip_count_clear_all ();
+  let n1 = UT.saturation_skip_count_inc ~keeper_name:"k_inc" in
+  let n2 = UT.saturation_skip_count_inc ~keeper_name:"k_inc" in
+  let n3 = UT.saturation_skip_count_inc ~keeper_name:"k_inc" in
+  check int "first inc returns 1" 1 n1;
+  check int "second inc returns 2" 2 n2;
+  check int "third inc returns 3" 3 n3;
+  check int "get matches last inc" 3
+    (UT.saturation_skip_count_get ~keeper_name:"k_inc")
+
+let test_saturation_skip_count_reset_zeros_one_keeper () =
+  UT.saturation_skip_count_clear_all ();
+  let _ = UT.saturation_skip_count_inc ~keeper_name:"k_a" in
+  let _ = UT.saturation_skip_count_inc ~keeper_name:"k_b" in
+  let _ = UT.saturation_skip_count_inc ~keeper_name:"k_b" in
+  UT.saturation_skip_count_reset ~keeper_name:"k_a";
+  check int "reset target zeroed" 0
+    (UT.saturation_skip_count_get ~keeper_name:"k_a");
+  check int "untouched keeper preserved" 2
+    (UT.saturation_skip_count_get ~keeper_name:"k_b")
+
+let test_saturation_skip_cap_default_is_at_least_one () =
+  (* The cap is floored at 1 even if the env var is set to 0 or
+     negative — a cap of 0 would force-dispatch every cycle. *)
+  let prev = try Some (Sys.getenv "MASC_MAX_CONSECUTIVE_SATURATION_SKIPS")
+             with Not_found -> None in
+  Unix.putenv "MASC_MAX_CONSECUTIVE_SATURATION_SKIPS" "0";
+  let cap = UT.max_consecutive_saturation_skips () in
+  (match prev with
+   | Some v -> Unix.putenv "MASC_MAX_CONSECUTIVE_SATURATION_SKIPS" v
+   | None -> Unix.putenv "MASC_MAX_CONSECUTIVE_SATURATION_SKIPS" "");
+  check bool "cap floored at 1 even with env=0" true (cap >= 1)
+
 let wrapped_claude_limit_error () =
   Agent_sdk.Error.Api
     (NetworkError
@@ -4466,8 +4686,8 @@ let wrapped_claude_max_turns_error () =
        })
 
 let wrapped_cascade_max_turns_error () =
-  Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-    (Masc_mcp.Oas_worker_named.Cascade_exhausted
+  Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+    (Masc_mcp.Keeper_turn_driver.Cascade_exhausted
        {
          cascade_name =
            oas_error_cascade_name Masc_mcp.Keeper_config.default_cascade_name;
@@ -4504,8 +4724,8 @@ let test_degraded_retry_after_recoverable_error_uses_local_recovery_for_resumabl
     EC.degraded_retry_after_recoverable_error
       ~effective_cascade:"underdog"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      (Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-         (Masc_mcp.Oas_worker_named.Resumable_cli_session
+      (Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+         (Masc_mcp.Keeper_turn_driver.Resumable_cli_session
             {
               cascade_name = oas_error_cascade_name "kimi_cli_keeper";
               detail =
@@ -4521,8 +4741,8 @@ let test_degraded_retry_after_recoverable_error_includes_admission_queue_timeout
     EC.degraded_retry_after_recoverable_error
       ~effective_cascade:"underdog"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      (Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-         (Masc_mcp.Oas_worker_named.Admission_queue_timeout
+      (Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+         (Masc_mcp.Keeper_turn_driver.Admission_queue_timeout
             {
               keeper_name = "nick0cave";
               cascade_name = oas_error_cascade_name "big_three";
@@ -4537,8 +4757,8 @@ let test_degraded_retry_after_recoverable_error_includes_turn_timeout () =
     EC.degraded_retry_after_recoverable_error
       ~effective_cascade:"underdog"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      (Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-         (Masc_mcp.Oas_worker_named.Turn_timeout { elapsed_sec = 180.0 }))
+      (Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+         (Masc_mcp.Keeper_turn_driver.Turn_timeout { elapsed_sec = 180.0 }))
   in
   expect_degraded_retry "turn timeout degraded retry"
     KC.local_recovery_cascade_name "turn_timeout" degraded_retry
@@ -4548,13 +4768,16 @@ let test_degraded_retry_after_recoverable_error_includes_oas_timeout_budget () =
     EC.degraded_retry_after_recoverable_error
       ~effective_cascade:"underdog"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      (Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-         (Masc_mcp.Oas_worker_named.Oas_timeout_budget
+      (Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+         (Masc_mcp.Keeper_turn_driver.Oas_timeout_budget
             {
               budget_sec = 273.0;
               keeper_turn_timeout_sec = 1200.0;
               estimated_input_tokens = 2_000;
               source = "adaptive_estimated_input_tokens";
+              remaining_turn_budget_sec = Some 600.0;
+              min_required_sec = 15.0;
+              phase = "test_phase";
             }))
   in
   expect_degraded_retry "oas timeout budget degraded retry"
@@ -5048,7 +5271,7 @@ let test_metrics_persist_social_state_fields () =
         updated.runtime.last_speech_act;
       check string "transition reason tracked" "headers:explicit_social_headers"
         updated.runtime.last_social_transition_reason;
-      check string "no blocker tracked" "" updated.runtime.last_blocker;
+      check bool "no blocker tracked" true (Option.is_none updated.runtime.last_blocker);
       check string "no need tracked" "" updated.runtime.last_need)
 
 let test_metrics_failure_response () =
@@ -5093,13 +5316,16 @@ let test_metrics_failure_response () =
 
 let test_metrics_failure_timeout_increments_proactive_backoff () =
   let sdk_error =
-    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-      (Masc_mcp.Oas_worker_named.Oas_timeout_budget
+    Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+      (Masc_mcp.Keeper_turn_driver.Oas_timeout_budget
          {
            budget_sec = 90.0;
            keeper_turn_timeout_sec = 90.0;
            estimated_input_tokens = 42_000;
            source = "test";
+           remaining_turn_budget_sec = Some 0.0;
+           min_required_sec = 15.0;
+           phase = "test_phase";
          })
   in
   let updated =
@@ -5117,11 +5343,11 @@ let test_metrics_failure_response_redacts_resumable_cli_session_detail () =
     "kimi exited with code 75: \nTo resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc"
   in
   let canonical_detail =
-    Masc_mcp.Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail
+    Masc_mcp.Cascade_runner.Kimi_cli_transport_local.resumable_session_detail
   in
   let sdk_error =
-    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-      (Masc_mcp.Oas_worker_named.Resumable_cli_session
+    Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+      (Masc_mcp.Keeper_turn_driver.Resumable_cli_session
          {
            cascade_name = oas_error_cascade_name "kimi_cli_keeper";
            detail = canonical_detail;
@@ -5139,15 +5365,19 @@ let test_metrics_failure_response_redacts_resumable_cli_session_detail () =
   check string "last preview is redacted"
     canonical_detail
     updated.runtime.proactive_rt.last_preview;
-  check string "last blocker is redacted"
-    canonical_detail
-    updated.runtime.last_blocker;
+  let blocker_detail =
+    match updated.runtime.last_blocker with
+    | Some b -> b.detail
+    | None -> ""
+  in
+  check string "last blocker is redacted" canonical_detail blocker_detail;
   check bool "raw resume hint removed from last blocker" false
-    (contains_substring updated.runtime.last_blocker "To resume this session:");
+    (contains_substring blocker_detail "To resume this session:");
   check bool "raw session token removed from last reason" false
     (contains_substring updated.runtime.proactive_rt.last_reason "kimi -r");
-  match updated.runtime.last_blocker_class with
-  | Some (Keeper_types.Cascade_exhausted (Keeper_types.Other_detail detail)) ->
+  match updated.runtime.last_blocker with
+  | Some { klass = Keeper_types.Cascade_exhausted (Keeper_types.Other_detail detail); _ }
+    ->
       check string "blocker class detail preserved as canonical detail"
         canonical_detail detail
   | _ -> fail "expected resumable CLI session blocker class"
@@ -5445,6 +5675,116 @@ let test_post_commit_failure_kind_marks_non_timeouts_as_failures () =
     (KR.ambiguous_partial_commit_kind_to_string
        (EC.post_commit_failure_kind_of_error auth_error))
 
+let tool_event_ok_result : Agent_sdk.Types.tool_result =
+  Ok { Agent_sdk.Types.content = "ok" }
+
+let tool_event_error_result : Agent_sdk.Types.tool_result =
+  Error
+    {
+      Agent_sdk.Types.message = "tool failed";
+      recoverable = false;
+      error_class = None;
+    }
+
+let mk_tool_event payload =
+  Agent_sdk.Event_bus.mk_event ~run_id:"run-tool-event-pairing" payload
+
+let test_turn_tool_event_tracker_pairs_called_across_drains () =
+  let tracker = UT.create_turn_tool_event_tracker () in
+  let keeper_name = "tool-event-pairing-keeper" in
+  UT.record_turn_tool_events
+    ~keeper_name
+    tracker
+    [
+      mk_tool_event
+        (Agent_sdk.Event_bus.ToolCalled
+           {
+             agent_name = keeper_name;
+             tool_name = "keeper_fs_edit";
+             input =
+               `Assoc
+                 [
+                   ("path", `String "/tmp/keeper-note.md");
+                   ("content", `String "updated");
+                 ];
+           });
+    ];
+  check (option string) "no error after pending call" None
+    (Option.map Agent_sdk.Error.to_string
+       (UT.turn_tool_event_integrity_error tracker));
+  UT.record_turn_tool_events
+    ~keeper_name
+    tracker
+    [
+      mk_tool_event
+        (Agent_sdk.Event_bus.ToolCompleted
+           {
+             agent_name = keeper_name;
+             tool_name = "keeper_fs_edit";
+             output = tool_event_ok_result;
+           });
+    ];
+  check (option string) "paired completion has no integrity error" None
+    (Option.map Agent_sdk.Error.to_string
+       (UT.turn_tool_event_integrity_error tracker));
+  check (list string) "paired mutating tool committed"
+    [ "keeper_fs_edit" ]
+    (UT.committed_mutating_tools_from_events tracker)
+
+let test_turn_tool_event_tracker_rejects_completed_without_called () =
+  let tracker = UT.create_turn_tool_event_tracker () in
+  let keeper_name = "tool-event-integrity-keeper" in
+  UT.record_turn_tool_events
+    ~keeper_name
+    tracker
+    [
+      mk_tool_event
+        (Agent_sdk.Event_bus.ToolCompleted
+           {
+             agent_name = keeper_name;
+             tool_name = "keeper_fs_edit";
+             output = tool_event_ok_result;
+           });
+    ];
+  match UT.turn_tool_event_integrity_error tracker with
+  | None -> fail "expected unmatched ToolCompleted integrity error"
+  | Some err ->
+      let rendered = Agent_sdk.Error.to_string err in
+      check bool "error names missing ToolCalled" true
+        (contains_substring rendered "without matching ToolCalled");
+      check bool "mutating mismatch becomes ambiguous partial" true
+        (EC.is_ambiguous_side_effect_error err);
+      check (list string) "unmatched mutating tool committed"
+        [ "keeper_fs_edit" ]
+        (UT.committed_mutating_tools_from_events tracker)
+
+let test_turn_tool_event_tracker_rejects_failed_completed_without_commit () =
+  let tracker = UT.create_turn_tool_event_tracker () in
+  let keeper_name = "tool-event-failed-integrity-keeper" in
+  UT.record_turn_tool_events
+    ~keeper_name
+    tracker
+    [
+      mk_tool_event
+        (Agent_sdk.Event_bus.ToolCompleted
+           {
+             agent_name = keeper_name;
+             tool_name = "keeper_fs_edit";
+             output = tool_event_error_result;
+           });
+    ];
+  match UT.turn_tool_event_integrity_error tracker with
+  | None -> fail "expected unmatched failed ToolCompleted integrity error"
+  | Some err ->
+      let rendered = Agent_sdk.Error.to_string err in
+      check bool "error names missing ToolCalled" true
+        (contains_substring rendered "without matching ToolCalled");
+      check bool "failed mismatch is not ambiguous partial" false
+        (EC.is_ambiguous_side_effect_error err);
+      check (list string) "failed unmatched tool not committed"
+        []
+        (UT.committed_mutating_tools_from_events tracker)
+
 let test_server_rejected_parse_error_ollama_closing_brace () =
   let err =
     Agent_sdk.Error.Api
@@ -5616,8 +5956,8 @@ let test_should_cap_rotation_ignores_non_contract_violation_error () =
 
 let test_cascade_exhausted_error_detected_from_structured_internal_error () =
   let err =
-    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-      (Masc_mcp.Oas_worker_named.Cascade_exhausted
+    Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+      (Masc_mcp.Keeper_turn_driver.Cascade_exhausted
          {
            cascade_name =
              oas_error_cascade_name Masc_mcp.Keeper_config.default_cascade_name;
@@ -5658,8 +5998,8 @@ let test_auto_recoverable_turn_error_excludes_persistent_errors () =
 
 let test_auto_recoverable_turn_error_includes_wrapped_cascade_exhausted_hard_quota () =
   let err =
-    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-      (Masc_mcp.Oas_worker_named.Cascade_exhausted
+    Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+      (Masc_mcp.Keeper_turn_driver.Cascade_exhausted
          {
            cascade_name =
              oas_error_cascade_name Masc_mcp.Keeper_config.default_cascade_name;
@@ -5677,8 +6017,8 @@ let test_auto_recoverable_turn_error_includes_wrapped_cascade_max_turns () =
 
 let test_auto_recoverable_turn_error_includes_filtered_candidates_cascade_exhaustion () =
   let err =
-    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-      (Masc_mcp.Oas_worker_named.Cascade_exhausted
+    Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+      (Masc_mcp.Keeper_turn_driver.Cascade_exhausted
          {
            cascade_name =
              oas_error_cascade_name Masc_mcp.Keeper_config.default_cascade_name;
@@ -5690,12 +6030,12 @@ let test_auto_recoverable_turn_error_includes_filtered_candidates_cascade_exhaus
 
 let test_auto_recoverable_turn_error_includes_resumable_cli_session_error () =
   let err =
-    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-      (Masc_mcp.Oas_worker_named.Resumable_cli_session
+    Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+      (Masc_mcp.Keeper_turn_driver.Resumable_cli_session
          {
            cascade_name = oas_error_cascade_name "kimi_cli_keeper";
            detail =
-             Masc_mcp.Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail;
+             Masc_mcp.Cascade_runner.Kimi_cli_transport_local.resumable_session_detail;
            exit_code = Some 75;
          })
   in
@@ -5704,12 +6044,12 @@ let test_auto_recoverable_turn_error_includes_resumable_cli_session_error () =
 
 let test_cascade_exhausted_error_includes_resumable_cli_session_error () =
   let err =
-    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-      (Masc_mcp.Oas_worker_named.Resumable_cli_session
+    Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+      (Masc_mcp.Keeper_turn_driver.Resumable_cli_session
          {
            cascade_name = oas_error_cascade_name "kimi_cli_keeper";
            detail =
-             Masc_mcp.Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail;
+             Masc_mcp.Cascade_runner.Kimi_cli_transport_local.resumable_session_detail;
            exit_code = Some 75;
          })
   in
@@ -5870,15 +6210,19 @@ let test_oas_timeout_reclassifies_only_current_attempt_budget () =
           err
       in
       (match
-         Masc_mcp.Oas_worker_named.classify_masc_internal_error classified
+         Masc_mcp.Keeper_turn_driver.classify_masc_internal_error classified
        with
-       | Some (Masc_mcp.Oas_worker_named.Oas_timeout_budget budget) ->
+       | Some (Masc_mcp.Keeper_turn_driver.Oas_timeout_budget budget) ->
            check int "estimated tokens preserved" 2_000
              budget.estimated_input_tokens;
-           check string "source preserved" timeout_budget.source budget.source
+           check string "source preserved" timeout_budget.source budget.source;
+           check (option (float 0.001)) "remaining budget preserved"
+             (Some timeout_budget.remaining_turn_budget_sec)
+             budget.remaining_turn_budget_sec;
+           check string "phase" "cascade_attempt_watchdog" budget.phase
        | _ -> fail "expected OAS timeout budget classification")
 
-let test_pre_retry_budget_exhaustion_not_reclassified_with_stale_budget () =
+let test_pre_retry_timeout_helper_does_not_reuse_stale_budget () =
   let err =
     Agent_sdk.Error.Api
       (Timeout
@@ -5890,18 +6234,21 @@ let test_pre_retry_budget_exhaustion_not_reclassified_with_stale_budget () =
   let classified =
     UT.reclassify_oas_timeout_for_attempt ~timeout_budget:None err
   in
-  check bool "pre-dispatch exhaustion remains raw timeout" true
+  check bool "plain helper call without budget stays raw timeout" true
     (Option.is_none
-       (Masc_mcp.Oas_worker_named.classify_masc_internal_error classified))
+       (Masc_mcp.Keeper_turn_driver.classify_masc_internal_error classified))
 
 let oas_timeout_budget_error () =
-  Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-    (Masc_mcp.Oas_worker_named.Oas_timeout_budget
+  Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+    (Masc_mcp.Keeper_turn_driver.Oas_timeout_budget
        {
          budget_sec = 273.0;
          keeper_turn_timeout_sec = 1200.0;
          estimated_input_tokens = 2_000;
          source = "adaptive_estimated_input_tokens";
+         remaining_turn_budget_sec = Some 600.0;
+         min_required_sec = 15.0;
+         phase = "test_phase";
        })
 
 let test_degraded_retry_budget_gate_allows_remaining_budget () =
@@ -6540,6 +6887,12 @@ let satisfies_required_tool name input =
   Result.is_ok
     (KTD.required_tool_satisfaction (required_tool_call name input))
 
+let satisfies_explicit_required_tool ~required_tool_names name input =
+  Result.is_ok
+    (KTD.required_tool_satisfaction_for_required_names
+       ~required_tool_names
+       (required_tool_call name input))
+
 let test_required_tool_satisfaction_rejects_passive_tools () =
   check bool "masc_status is passive" false
     (satisfies_required_tool "masc_status" (`Assoc []));
@@ -6572,6 +6925,22 @@ let test_required_tool_satisfaction_accepts_mutating_tools () =
             ("op", `String "gh");
             ("cmd", `String "pr comment 123 --body ok");
           ]))
+
+let test_explicit_required_tool_satisfaction_accepts_named_passive_tool () =
+  check bool "generic masc_web_search remains passive" false
+    (satisfies_required_tool "masc_web_search" (`Assoc []));
+  check bool "explicit masc_web_search satisfies required contract" true
+    (satisfies_explicit_required_tool
+       ~required_tool_names:[ "masc_web_search" ]
+       "masc_web_search" (`Assoc []));
+  check bool "explicit required list canonicalizes WebSearch alias" true
+    (satisfies_explicit_required_tool
+       ~required_tool_names:[ "masc_web_search" ]
+       "WebSearch" (`Assoc []));
+  check bool "unlisted passive tool still rejected" false
+    (satisfies_explicit_required_tool
+       ~required_tool_names:[ "keeper_bash" ]
+       "masc_web_search" (`Assoc []))
 
 let test_tool_usage_delta_uses_registry_counts () =
   let before =
@@ -6607,6 +6976,27 @@ let test_tool_usage_delta_ignores_removed_tools () =
   check (list string) "no phantom tools when counts drop"
     []
     (KTD.tool_usage_delta ~before ~after)
+
+let test_merge_observed_tool_names_prefers_hook_without_double_counting () =
+  let merged =
+    KTD.merge_observed_tool_names
+      ~hook_observed_tool_names:[ "keeper_bash"; "keeper_pr_create" ]
+      ~registry_observed_tool_names:
+        [ "keeper_bash"; "keeper_pr_create"; "keeper_board_post" ]
+  in
+  check (list string) "hook evidence plus registry-only tail"
+    [ "keeper_bash"; "keeper_pr_create"; "keeper_board_post" ]
+    merged
+
+let test_merge_observed_tool_names_preserves_extra_registry_repeats () =
+  let merged =
+    KTD.merge_observed_tool_names
+      ~hook_observed_tool_names:[ "keeper_bash" ]
+      ~registry_observed_tool_names:[ "keeper_bash"; "keeper_bash" ]
+  in
+  check (list string) "max count per observed source"
+    [ "keeper_bash"; "keeper_bash" ]
+    merged
 
 let test_merge_reported_and_observed_tool_names_preserves_synthetic_tools () =
   let merged =
@@ -6918,7 +7308,11 @@ let test_social_model_previous_state_of_meta_restores_runtime_fields () =
           last_social_transition_reason = "headers:explicit_social_headers";
           last_active_desire = "seek_help";
           last_current_intention = "recover_tool_route";
-          last_blocker = "tool route unavailable";
+          last_blocker =
+            Some
+              (Keeper_types.blocker_info_of_class
+                 ~detail:"tool route unavailable"
+                 Keeper_types.No_tool_capable_provider);
           last_need = "operator guidance";
         };
     }
@@ -7140,7 +7534,11 @@ let test_social_model_previous_state_of_meta_falls_back_for_unknown_model () =
           last_speech_act = "request_help";
           last_active_desire = "seek_help";
           last_current_intention = "recover_tool_route";
-          last_blocker = "tool route unavailable";
+          last_blocker =
+            Some
+              (Keeper_types.blocker_info_of_class
+                 ~detail:"tool route unavailable"
+                 Keeper_types.No_tool_capable_provider);
           last_need = "operator guidance";
         };
     }
@@ -7312,7 +7710,7 @@ let test_should_require_tools_for_initial_turn_matches_first_turn_gate () =
   check bool "pending verification requires an action tool" true
     (KAR.should_require_tools_for_initial_turn ~max_turns:3
        ~turn_affordances:[ "task_verify" ]);
-  check bool "work discovery requires an action tool" true
+  check bool "timer-only work discovery stays optional" false
     (KAR.should_require_tools_for_initial_turn ~max_turns:3
        ~turn_affordances:[ "work_discovery" ]);
   check bool "worktree delta inspection requires an action tool" true
@@ -7379,6 +7777,14 @@ let test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool () =
     "task_verify with submit tool -> gate fires" true
     (gate ~tools:[ "keeper_task_submit_for_verification" ] [ "task_verify" ]);
   check bool
+    "timer-only work_discovery does not hard-gate even with progress tools"
+    false
+    (gate ~tools:[ "keeper_board_post"; "keeper_task_create" ]
+       [ "work_discovery" ]);
+  check bool
+    "work_discovery can accompany another concrete gated affordance" true
+    (gate ~tools:[ "keeper_task_claim" ] [ "work_discovery"; "task_claim" ]);
+  check bool
     "all gated affordances missing tools -> gate suppressed" false
     (gate
        ~tools:[ "keeper_context_status"; "keeper_time_now" ]
@@ -7392,7 +7798,7 @@ let test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool () =
 let test_turn_affordance_gate_suppression_metric () =
   let metric affordance =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_keeper_required_tool_gate_suppressed_total
+      Masc_mcp.Keeper_metrics.metric_keeper_required_tool_gate_suppressed_total
       ~labels:[ ("affordance", affordance) ]
       ()
   in
@@ -7416,6 +7822,38 @@ let test_turn_affordance_gate_suppression_metric () =
   check (float 0.0) "successful gate does not increment suppression metric"
     claim_before
     (metric "task_claim")
+
+let test_required_gate_surface_removes_passive_distractions () =
+  let module Surface = Masc_mcp.Keeper_agent_tool_surface in
+  check (list string)
+    "required gate keeps actionable tools only"
+    [ "keeper_task_claim"; "keeper_board_post" ]
+    (Surface.tool_names_for_required_gate_surface
+       ~tool_gate_requested:true
+       ~required_tool_names:[]
+       [ "keeper_tasks_list"; "keeper_task_claim"; "keeper_stay_silent";
+         "keeper_board_post"; "masc_status" ]);
+  check (list string)
+    "optional turn keeps passive tools visible"
+    [ "keeper_tasks_list"; "keeper_board_post" ]
+    (Surface.tool_names_for_required_gate_surface
+       ~tool_gate_requested:false
+       ~required_tool_names:[]
+       [ "keeper_tasks_list"; "keeper_board_post" ]);
+  check (list string)
+    "passive-only surface remains unchanged when no action exists"
+    [ "keeper_tasks_list"; "masc_status" ]
+    (Surface.tool_names_for_required_gate_surface
+       ~tool_gate_requested:true
+       ~required_tool_names:[]
+       [ "keeper_tasks_list"; "masc_status" ]);
+  check (list string)
+    "explicit read-only required tool survives required gate"
+    [ "masc_web_search"; "keeper_board_post" ]
+    (Surface.tool_names_for_required_gate_surface
+       ~tool_gate_requested:true
+       ~required_tool_names:[ "masc_web_search" ]
+       [ "keeper_tasks_list"; "masc_web_search"; "keeper_board_post" ])
 
 let test_tools_for_gated_affordance_covers_each_variant () =
   (* Compile-time exhaustiveness already ensures every variant is
@@ -7598,24 +8036,79 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
     (Surface.required_tool_names_for_turn
        ~current_task_required_tool_names:[ "keeper_board_curation_submit" ]
        ~per_call_required_tool_names:[ "keeper_board_post" ]);
+  let product_design_required_tools =
+    Surface.required_tool_names_for_turn
+      ~current_task_required_tool_names:[ "keeper_board_curation_submit" ]
+      ~per_call_required_tool_names:[ "keeper_board_post" ]
+  in
+  (match
+     Surface.preferred_tool_choice_for_required_tool_names
+       ~required_tool_names:product_design_required_tools
+       ~allowed_tool_names:
+         [ "keeper_board_curation_submit"; "keeper_board_post" ]
+   with
+   | Agent_sdk.Types.Any -> ()
+   | other ->
+       fail
+         (Printf.sprintf
+            "expected Any for product/design reprobe required tool, got %s"
+            (Agent_sdk.Types.show_tool_choice other)));
   check (list string)
     "active task required tools remain when no per-call requirement exists"
     [ "keeper_board_curation_submit" ]
     (Surface.required_tool_names_for_turn
        ~current_task_required_tool_names:[ "keeper_board_curation_submit" ]
        ~per_call_required_tool_names:[]);
+  check (list string)
+    "satisfied per-call required tool is not forced again"
+    []
+    (Surface.outstanding_required_tool_names
+       ~required_tool_names:[ "keeper_pr_review_comment" ]
+       ~satisfied_tool_names:[ "keeper_pr_review_comment" ]);
+  check (list string)
+    "unsatisfied required tool remains outstanding"
+    [ "keeper_board_post" ]
+    (Surface.outstanding_required_tool_names
+       ~required_tool_names:
+         [ "keeper_pr_review_comment"; "keeper_board_post" ]
+       ~satisfied_tool_names:[ "keeper_pr_review_comment" ]);
+  check (list string)
+    "failed required tool call remains outstanding"
+    [ "keeper_pr_review_comment" ]
+    (Surface.outstanding_required_tool_names
+       ~required_tool_names:[ "keeper_pr_review_comment" ]
+       ~satisfied_tool_names:
+         (Surface.satisfied_required_tool_names_of_outcomes
+            [ "keeper_pr_review_comment", "error" ]));
+  check (list string)
+    "successful required tool call is satisfied"
+    []
+    (Surface.outstanding_required_tool_names
+       ~required_tool_names:[ "keeper_pr_review_comment" ]
+       ~satisfied_tool_names:
+         (Surface.satisfied_required_tool_names_of_outcomes
+            [ "keeper_pr_review_comment", "ok" ]));
   (match
      Surface.preferred_tool_choice_for_required_tool_names
        ~required_tool_names:[ "keeper_board_post" ]
        ~allowed_tool_names:
          [ "keeper_board_curation_submit"; "keeper_board_post" ]
    with
-   | Agent_sdk.Types.Tool name ->
-       check string "single per-call required tool is forced"
-         "keeper_board_post" name
+   | Agent_sdk.Types.Any -> ()
+   | other ->
+       fail (Printf.sprintf "expected Any for single required tool, got %s"
+               (Agent_sdk.Types.show_tool_choice other)));
+  (match
+     Surface.preferred_tool_choice_for_required_tool_names
+       ~required_tool_names:[ "keeper_pr_create" ]
+       ~allowed_tool_names:[ "keeper_pr_create"; "keeper_bash" ]
+   with
+   | Agent_sdk.Types.Any -> ()
    | other ->
        fail
-         (Printf.sprintf "expected Tool keeper_board_post, got %s"
+         (Printf.sprintf
+            "expected Any for keeper_pr_create to avoid raw require_specific_tool \
+             MCP-prefix mismatches, got %s"
             (Agent_sdk.Types.show_tool_choice other)));
   (match
      Surface.preferred_tool_choice_for_required_tool_names
@@ -7634,24 +8127,24 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
        ~required_tool_names:[ "keeper_tasks_audit" ]
        ~allowed_tool_names:[ "keeper_tasks_audit"; "keeper_board_post" ]
    with
-   | Agent_sdk.Types.Auto -> ()
+   | Agent_sdk.Types.Tool name ->
+       check string "explicit passive required tool is forced"
+         "keeper_tasks_audit" name
    | other ->
        fail
          (Printf.sprintf
-            "expected Auto for passive-only required tool, got %s"
+            "expected Tool keeper_tasks_audit for passive-only explicit required tool, got %s"
             (Agent_sdk.Types.show_tool_choice other)));
   (match
      Surface.preferred_tool_choice_for_required_tool_names
        ~required_tool_names:[ "keeper_tasks_audit"; "keeper_board_post" ]
        ~allowed_tool_names:[ "keeper_tasks_audit"; "keeper_board_post" ]
    with
-   | Agent_sdk.Types.Tool name ->
-       check string "active required tool remains forced" "keeper_board_post"
-         name
+   | Agent_sdk.Types.Any -> ()
    | other ->
        fail
          (Printf.sprintf
-            "expected Tool keeper_board_post for mixed passive/active required \
+            "expected Any for mixed passive/active required \
              tools, got %s"
             (Agent_sdk.Types.show_tool_choice other)));
   (* Active task keeper retains the strict gate even without a
@@ -7670,6 +8163,22 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
            "expected Any for active-task keeper (must make \
             progress), got %s"
            (Agent_sdk.Types.show_tool_choice other))
+
+let test_direct_keeper_msg_timeout_overrides_meta_per_provider_timeout () =
+  let meta =
+    { (make_meta "product-design-timeout") with
+      per_provider_timeout_s = Some 300.0;
+    }
+  in
+  check (option (float 0.001))
+    "explicit direct-message timeout wins over stale per-provider timeout"
+    (Some 900.0)
+    (KAR.per_provider_timeout_for_turn ~meta ~oas_timeout_s:900.0
+       ~timeout_s:900.0 ());
+  check (option (float 0.001))
+    "profile per-provider timeout still applies without explicit override"
+    (Some 300.0)
+    (KAR.per_provider_timeout_for_turn ~meta ~timeout_s:900.0 ())
 
 (* ---------- render_inline_skip_reason tests ---------- *)
 
@@ -8034,6 +8543,8 @@ let () =
           test_case "prompt metrics fingerprint" `Quick
             test_prompt_metrics_fingerprint_is_deterministic;
           test_case "text response" `Quick test_metrics_text_response;
+          test_case "idle seconds gauge records observation" `Quick
+            test_metrics_idle_seconds_gauge_records_observation;
           test_case "surface model prefers successful cascade label" `Quick
             test_metrics_surface_model_prefers_successful_cascade_label;
           test_case "resolved_model_id prefers last attempt id (#9953)"
@@ -8143,10 +8654,18 @@ let () =
             test_required_tool_satisfaction_rejects_passive_tools;
           test_case "required tool predicate accepts mutating tools" `Quick
             test_required_tool_satisfaction_accepts_mutating_tools;
+          test_case
+            "explicit required tool predicate accepts named passive tool"
+            `Quick
+            test_explicit_required_tool_satisfaction_accepts_named_passive_tool;
           test_case "tool usage delta uses registry counts" `Quick
             test_tool_usage_delta_uses_registry_counts;
           test_case "tool usage delta ignores removed tools" `Quick
             test_tool_usage_delta_ignores_removed_tools;
+          test_case "merge observed tool names uses hook evidence" `Quick
+            test_merge_observed_tool_names_prefers_hook_without_double_counting;
+          test_case "merge observed tool names keeps extra registry repeats" `Quick
+            test_merge_observed_tool_names_preserves_extra_registry_repeats;
           test_case "merge observed and synthetic tool names" `Quick
             test_merge_reported_and_observed_tool_names_preserves_synthetic_tools;
           test_case "final keeper tool names fall back to reported tools"
@@ -8283,6 +8802,12 @@ let () =
             test_post_commit_failure_kind_marks_timeouts;
           test_case "non-timeout classified as post-commit failure" `Quick
             test_post_commit_failure_kind_marks_non_timeouts_as_failures;
+          test_case "tool events pair across drains" `Quick
+            test_turn_tool_event_tracker_pairs_called_across_drains;
+          test_case "ToolCompleted requires prior ToolCalled" `Quick
+            test_turn_tool_event_tracker_rejects_completed_without_called;
+          test_case "failed ToolCompleted does not claim commit" `Quick
+            test_turn_tool_event_tracker_rejects_failed_completed_without_commit;
           test_case "ollama closing brace detected as server parse error" `Quick
             test_server_rejected_parse_error_ollama_closing_brace;
           test_case "unterminated JSON detected as server parse error" `Quick
@@ -8357,8 +8882,8 @@ let () =
             test_bounded_oas_timeout_refuses_too_little_budget;
           test_case "OAS timeout classification uses current attempt budget" `Quick
             test_oas_timeout_reclassifies_only_current_attempt_budget;
-          test_case "pre-retry budget exhaustion does not reuse stale budget" `Quick
-            test_pre_retry_budget_exhaustion_not_reclassified_with_stale_budget;
+          test_case "plain pre-retry timeout helper does not reuse stale budget" `Quick
+            test_pre_retry_timeout_helper_does_not_reuse_stale_budget;
           test_case "degraded retry is allowed when turn budget remains" `Quick
             test_degraded_retry_budget_gate_allows_remaining_budget;
           test_case "degraded retry is blocked when turn budget is exhausted" `Quick
@@ -8418,6 +8943,8 @@ let () =
         [
           test_case "run_keeper_cycle skips paused keeper" `Quick
             test_run_keeper_cycle_skips_non_executable_phase;
+          test_case "run_keeper_cycle errors on livelock block" `Quick
+            test_run_keeper_cycle_livelock_block_returns_error;
           test_case "streaming cancel records supervisor stop" `Quick
             test_streaming_cancel_records_supervisor_stop_when_fiber_stop_set;
           test_case "run_keeper_cycle records trajectory contract" `Quick
@@ -8431,6 +8958,8 @@ let () =
             test_sync_keeper_paused_state_surfaces_write_failure_without_mutating_registry;
           test_case "local discovery guard surfaces refresh failure" `Quick
             test_ensure_local_discovery_ready_surfaces_refresh_failure;
+          test_case "async keeper_msg preflight surfaces discovery failure" `Quick
+            test_keeper_msg_async_failure_surface;
           test_case "local_only liveness decision keeps non-local route" `Quick
             test_decide_local_only_liveness_keeps_non_local_effective;
           test_case "local_only liveness decision keeps explicit local base"
@@ -8461,6 +8990,14 @@ let () =
             test_is_ollama_saturated_returns_true_when_full_with_queue;
           test_case "PR-B: zero available without traffic is fail-open" `Quick
             test_is_ollama_saturated_ignores_zero_available_when_idle;
+          test_case "PR-B follow-up: fresh keeper has zero skip count" `Quick
+            test_saturation_skip_count_starts_at_zero;
+          test_case "PR-B follow-up: inc returns monotonic counts" `Quick
+            test_saturation_skip_count_inc_returns_new_value;
+          test_case "PR-B follow-up: reset zeros one keeper only" `Quick
+            test_saturation_skip_count_reset_zeros_one_keeper;
+          test_case "PR-B follow-up: cap floored at 1" `Quick
+            test_saturation_skip_cap_default_is_at_least_one;
           test_case "hard quota degraded retry uses local_recovery" `Quick
             test_degraded_retry_after_recoverable_error_uses_local_recovery_for_hard_quota;
           test_case "resumable session degraded retry uses local_recovery"
@@ -8558,11 +9095,16 @@ let () =
             test_should_require_tools_for_initial_turn_covers_actionable_affordances;
           test_case "task backlog required turn prefers claim tool choice"
             `Quick test_preferred_tool_choice_for_required_turn_claims_first;
+          test_case "direct keeper msg timeout overrides stale per-provider timeout"
+            `Quick
+            test_direct_keeper_msg_timeout_overrides_meta_per_provider_timeout;
           test_case "affordance gate filters by allowed_tool_names"
             `Quick
             test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool;
           test_case "affordance gate suppression emits metric" `Quick
             test_turn_affordance_gate_suppression_metric;
+          test_case "required gate surface removes passive distractions" `Quick
+            test_required_gate_surface_removes_passive_distractions;
           test_case "tools_for_gated_affordance non-empty for every variant"
             `Quick test_tools_for_gated_affordance_covers_each_variant;
         ] );
@@ -8605,14 +9147,23 @@ let () =
               in
               check bool "task_verify present without meta" true
                 (List.mem "task_verify" affordances));
-          test_case "affordance: work discovery requires action" `Quick
+          test_case "affordance: work discovery nudge is not a hard contract"
+            `Quick
             (fun () ->
               let obs = { base_observation with work_discovery_due = true } in
               let affordances =
                 UM.observed_affordances_of_observation obs
               in
               check bool "work_discovery present" true
-                (List.mem "work_discovery" affordances));
+                (List.mem "work_discovery" affordances);
+              let contract_obs =
+                Masc_mcp.Keeper_contract_classifier.of_keeper_world_observation
+                  obs
+              in
+              check bool "timer-only discovery is not actionable" false
+                (Masc_mcp.Keeper_contract_classifier.is_actionable
+                   (Masc_mcp.Keeper_contract_classifier.classify_actionable_signal
+                      contract_obs)));
           test_case "affordance: board curation requires multi-event window"
             `Quick
             (fun () ->

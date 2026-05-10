@@ -69,7 +69,7 @@ let test_estimate_context_gemini () =
 
 let test_estimate_context_codex () =
   (* "codex" not in OAS Provider_registry; 128K fallback
-     (matches Oas_model_resolve.resolve_primary_max_context). *)
+     (matches Cascade_runtime.resolve_primary_max_context). *)
   let m = Relay.estimate_context ~messages:10 ~tool_calls:5 ~model:"codex" in
   check int "max tokens codex" 128000 m.max_tokens
 

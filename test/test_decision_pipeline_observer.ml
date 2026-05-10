@@ -115,6 +115,7 @@ let make_obs_meta name =
         ("agent_name", `String ("agent-" ^ name));
         ("trace_id", `String ("trace-obs-" ^ name));
         ("goal", `String "observer test");
+        ("sandbox_profile", `String "local");
       ]
   in
   match KTypes.meta_of_json json with
@@ -159,7 +160,7 @@ let test_observer_executing_during_turn () =
   let name = "obs-active" in
   let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
   Reg.mark_turn_started ~base_path:test_obs_bp name;
-  Reg.set_turn_cascade_state ~base_path:test_obs_bp name Reg.Cascade_trying;
+  Reg.set_turn_cascade_state ~base_path:test_obs_bp name (Reg.Packed Reg.Cascade_trying);
   match Reg.get ~base_path:test_obs_bp name with
   | None -> Alcotest.fail "entry missing after mark_turn_started"
   | Some entry ->
@@ -203,7 +204,7 @@ let test_observer_gate_rejected_finalizes_turn () =
   Reg.mark_turn_started ~base_path:test_obs_bp name;
   Reg.set_turn_decision_stage
     ~base_path:test_obs_bp name Reg.Decision_tool_policy_selected;
-  Reg.set_turn_cascade_state ~base_path:test_obs_bp name Reg.Cascade_trying;
+  Reg.set_turn_cascade_state ~base_path:test_obs_bp name (Reg.Packed Reg.Cascade_trying);
   Reg.mark_turn_gate_rejected_by_name name;
   match Reg.get ~base_path:test_obs_bp name with
   | None -> Alcotest.fail "entry missing after gate rejection"
@@ -261,7 +262,7 @@ let test_observer_last_outcome_populated_after_turn () =
   Reg.mark_turn_measurement ~base_path:test_obs_bp name;
   Reg.set_turn_decision_stage
     ~base_path:test_obs_bp name Reg.Decision_tool_policy_selected;
-  Reg.set_turn_cascade_state ~base_path:test_obs_bp name Reg.Cascade_done;
+  Reg.set_turn_cascade_state ~base_path:test_obs_bp name (Reg.Packed Reg.Cascade_done);
   Reg.set_turn_selected_model ~base_path:test_obs_bp name (Some "glm-4.5");
   Reg.mark_turn_finished ~base_path:test_obs_bp name;
   match Reg.get ~base_path:test_obs_bp name with
@@ -312,7 +313,7 @@ let test_observer_json_includes_terminal_fields () =
   Reg.mark_turn_measurement ~base_path:test_obs_bp name;
   Reg.set_turn_decision_stage
     ~base_path:test_obs_bp name Reg.Decision_tool_policy_selected;
-  Reg.set_turn_cascade_state ~base_path:test_obs_bp name Reg.Cascade_done;
+  Reg.set_turn_cascade_state ~base_path:test_obs_bp name (Reg.Packed Reg.Cascade_done);
   Reg.set_turn_selected_model ~base_path:test_obs_bp name (Some "glm-4.5");
   Reg.mark_turn_finished ~base_path:test_obs_bp name;
   match Reg.get ~base_path:test_obs_bp name with
@@ -355,9 +356,9 @@ let test_turn_retry_after_compaction_resets_cascade_attempt () =
   Reg.mark_turn_measurement ~base_path:test_obs_bp name;
   Reg.set_turn_decision_stage
     ~base_path:test_obs_bp name Reg.Decision_tool_policy_selected;
-  Reg.set_turn_cascade_state ~base_path:test_obs_bp name Reg.Cascade_trying;
+  Reg.set_turn_cascade_state ~base_path:test_obs_bp name (Reg.Packed Reg.Cascade_trying);
   Reg.set_turn_selected_model ~base_path:test_obs_bp name (Some "glm-4.5");
-  Reg.set_turn_phase ~base_path:test_obs_bp name Reg.Turn_compacting;
+  Reg.set_turn_phase ~base_path:test_obs_bp name Reg.(Packed Turn_compacting);
   Reg.prepare_turn_retry_after_compaction ~base_path:test_obs_bp name;
   match Reg.get ~base_path:test_obs_bp name with
   | None -> Alcotest.fail "entry missing"
@@ -379,9 +380,9 @@ let test_composite_observer_variants_match_tla_sets () =
   let tla = read_file (keeper_composite_lifecycle_tla ()) in
   let check_set label expected actual = check (list string) label expected actual in
   check_set
-    "PhaseSet matches observer ksm_phase variants"
+    "PhaseSet matches observer phase variants"
     (extract_tla_set ~marker:"PhaseSet" tla)
-    (List.map Obs.ksm_phase_to_string Obs.all_ksm_phases);
+    (List.map KSM.phase_to_string KSM.all_phases);
   check_set
     "TurnPhaseSet matches observer turn_phase variants"
     (extract_tla_set ~marker:"TurnPhaseSet" tla)

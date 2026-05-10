@@ -401,7 +401,7 @@ let test_parse_gemini_output_cli_json () =
       "response":"hello",
       "stats":{
         "models":{
-          "gemini-2.5-flash-lite":{"tokens":{"input":1001,"prompt":1001,"candidates":50,"cached":0}},
+          "gemini-3.1-flash-lite-preview":{"tokens":{"input":1001,"prompt":1001,"candidates":50,"cached":0}},
           "gemini-3-flash-preview":{"tokens":{"input":14768,"prompt":14768,"candidates":35,"cached":0}}
         }
       }

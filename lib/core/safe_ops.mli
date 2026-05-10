@@ -41,6 +41,11 @@ val persistence_utf8_repair_stats : unit -> utf8_repair_stats
 (** Process-local cumulative count of malformed UTF-8 repairs seen by
     persistence read helpers. *)
 
+val set_persistence_utf8_repair_metric_hook : (unit -> unit) -> unit
+(** Install the higher-level metrics hook called once for each persistence
+    UTF-8 repair. Safe_ops lives below Prometheus, so the hook keeps the
+    dependency direction one-way. *)
+
 val reset_persistence_utf8_repair_stats_for_tests : unit -> unit
 (** Reset {!persistence_utf8_repair_stats}. Test-only. *)
 
@@ -55,9 +60,20 @@ val sanitize_text_utf8 : string -> string
     control characters with spaces (except LF/CR/TAB), without recording a
     read-path persistence repair. *)
 
+type sanitized_json_utf8 =
+  { raw : Yojson.Safe.t
+  ; sanitized : Yojson.Safe.t
+  ; changed : bool
+  }
+(** Raw and sanitized views of the same JSON payload. *)
+
 val sanitize_json_utf8 : Yojson.Safe.t -> Yojson.Safe.t
 (** Recursively scrub every JSON string node through {!sanitize_text_utf8}.
     Intended for writer-side sanitization before persistence or broadcast. *)
+
+val sanitize_json_utf8_with_raw : Yojson.Safe.t -> sanitized_json_utf8
+(** Preserve the original JSON payload while also returning the sanitized
+    writer-side view. *)
 
 val parse_json_safe : context:string -> string -> (Yojson.Safe.t, string) result
 (** Parse JSON with detailed error reporting. *)
@@ -77,8 +93,23 @@ val read_json_file_logged : label:string -> string -> Yojson.Safe.t option
     Returns [Some json] on success, [None] on failure with a warning log. *)
 
 val persistence_read_drop_reason_list_dir_error : string
+(** Failure listing a directory that backs a persistence surface. *)
+
 val persistence_read_drop_reason_entry_load_error : string
+(** Failure loading an entry's bytes (file IO error) or, when the loader
+    combines IO + parse in a single result, either of those failures.
+    Use the more specific {!persistence_read_drop_reason_json_syntax_error}
+    when IO and JSON parse are split into separate code paths. *)
+
 val persistence_read_drop_reason_invalid_payload : string
+(** Entry parsed successfully but failed schema/structural validation
+    (e.g. record-of-yojson [Error _], required field missing). *)
+
+val persistence_read_drop_reason_json_syntax_error : string
+(** [Yojson.Json_error] raised while parsing a single line/value.  Use
+    this when the load step is logically split from the parse step
+    (typical of JSONL surfaces) so the metric distinguishes "file
+    unreadable" from "lines malformed". *)
 
 val report_persistence_read_drop :
   on_drop:(unit -> unit) ->

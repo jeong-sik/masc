@@ -373,7 +373,7 @@ export function AgentDetailOverlay() {
           <${AgentDetailMemory} agentName=${agentName} />
           <${AgentWorkerBrief} agentName=${agentName} />
           ${agentFitness.value ? html`
-            <${Card} title="적합도 (7일)" role="region" ariaLabel="에이전트 적합도">
+            <${CollapsibleSection} title="적합도 (7일)" mountWhenOpen=${true}>
               <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 ${([
                   ['완료율', agentFitness.value.completion_rate],
@@ -390,7 +390,7 @@ export function AgentDetailOverlay() {
             <//>
           ` : null}
 
-          <${Card} title="작업 이력">
+          <${CollapsibleSection} title=${`작업 이력 (${historyRows.length})`} mountWhenOpen=${true}>
             ${renderTaskHistories(historyRows, visibleHistories, isFilteringTasks)}
           <//>
 

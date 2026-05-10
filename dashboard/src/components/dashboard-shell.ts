@@ -476,7 +476,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                   </div>
                 <//>
 
-                ${sections.length > 0 ? html`
+                ${sections.length > 1 ? html`
                   <div class="ml-2.5 flex flex-col gap-px border-l border-[var(--color-border-divider)] pl-2.5" role="list">
                     ${sections.map(item => {
                       const isSectionActive = isSurfaceActive && currentSection?.id === item.id

@@ -249,6 +249,46 @@ describe('CommentThread', () => {
     expect(screen.getByText('4')).toBeInTheDocument()
   })
 
+  it('renders comment moderation projection badges', () => {
+    const comments = [
+      {
+        id: 'c1',
+        post_id: 'post-1',
+        parent_id: null,
+        author: 'agent',
+        content: 'review me',
+        created_at: '2026-04-02T00:00:00Z',
+        report_count: 1,
+        moderation_status: 'hidden',
+      },
+    ] as any
+
+    render(h(CommentThread, { comments, postId: 'post-1' }))
+
+    expect(screen.getByLabelText('댓글 moderation 숨김 1건')).toHaveTextContent('숨김 1')
+  })
+
+  it('renders vote-blind comment scores as hidden until voting', () => {
+    const comments = [
+      {
+        id: 'c1',
+        post_id: 'post-1',
+        parent_id: null,
+        author: 'agent',
+        content: 'review me',
+        created_at: '2026-04-02T00:00:00Z',
+        votes: null,
+        vote_balance: null,
+        vote_blind: true,
+        vote_blind_reason: 'vote_before_score',
+      },
+    ] as any
+
+    render(h(CommentThread, { comments, postId: 'post-1' }))
+
+    expect(screen.getByLabelText('댓글 점수 투표 후 공개')).toHaveTextContent('투표 후 공개')
+  })
+
   it('marks the current comment vote as pressed', () => {
     const comments = [
       {
@@ -417,6 +457,13 @@ describe('PostDetail', () => {
       comment_count: 0,
       post_kind: 'direct',
       classification_reason: 'Direct board post without automation provenance.',
+      report_count: 1,
+      moderation_status: 'approved',
+      contributor_quality: {
+        score: 0.91,
+        band: 'excellent',
+        source: 'agent_reputation',
+      },
       comments: [],
     } as any
 
@@ -425,6 +472,34 @@ describe('PostDetail', () => {
     expect(screen.getByText(/분류 근거:/)).toBeInTheDocument()
     expect(screen.getByText(/Direct board post without automation provenance/)).toBeInTheDocument()
     expect(screen.getByText('직접')).toBeInTheDocument()
+    expect(screen.getByLabelText('게시글 moderation 승인됨 1건')).toHaveTextContent('승인됨 1')
+    expect(screen.getByLabelText('기여자 품질 91점 · 우수')).toHaveTextContent('품질 91')
+  })
+
+  it('renders contributor quality when it is the only detail badge', () => {
+    const post = {
+      id: 'post-quality',
+      author: 'sleepers',
+      title: 'Post',
+      body: 'Body',
+      content: 'Body',
+      created_at: '2026-04-02T00:00:00Z',
+      updated_at: '2026-04-02T00:00:00Z',
+      votes: 0,
+      comment_count: 0,
+      post_kind: 'direct',
+      moderation_status: 'none',
+      contributor_quality: {
+        score: 0.42,
+        band: 'watch',
+        source: 'agent_reputation',
+      },
+      comments: [],
+    } as any
+
+    render(h(PostDetail, { post }))
+
+    expect(screen.getByLabelText('기여자 품질 42점 · 관찰')).toHaveTextContent('품질 42')
   })
 
   it('marks the current post vote as pressed', async () => {
@@ -456,5 +531,28 @@ describe('PostDetail', () => {
     await waitFor(() => {
       expect(votePost).toHaveBeenCalledWith('post-1', 'up')
     })
+  })
+
+  it('renders vote-blind post scores as hidden until voting', () => {
+    const post = {
+      id: 'post-1',
+      author: 'sleepers',
+      title: 'Post',
+      body: 'Body',
+      content: 'Body',
+      created_at: '2026-04-02T00:00:00Z',
+      updated_at: '2026-04-02T00:00:00Z',
+      votes: null,
+      vote_balance: null,
+      vote_blind: true,
+      vote_blind_reason: 'vote_before_score',
+      comment_count: 0,
+      post_kind: 'direct',
+      comments: [],
+    } as any
+
+    render(h(PostDetail, { post }))
+
+    expect(screen.getByLabelText('게시글 점수 투표 후 공개')).toHaveTextContent('투표 후 공개')
   })
 })

@@ -28,6 +28,7 @@ import {
   type HeuristicCoverage,
   type CoverageSite,
   type StressEvent,
+  type AgentStressRow,
   type AuditEntry,
   type AuditLedgerResponse,
   type KeeperDecision,
@@ -38,37 +39,38 @@ import { StatTile } from './common/stat-tile'
 import { FilterChips } from './common/filter-chips'
 import { formatCost, formatPct1 } from '../lib/format-number'
 import { replaceRoute, route } from '../router'
+import {
+  type ViewMode,
+  type CostFocus,
+  type AuditFocus,
+  type CostView,
+  isCostView,
+  isCostFocus,
+  viewModeForCostFocus,
+  isAuditFocus,
+  auditRouteParams,
+} from './cost/cost-types'
+import { formatTokens, severityClass } from './cost/cost-formatters'
+import {
+  severityBuckets,
+  summarizeAuditActors,
+  summarizeAuditKinds,
+} from './cost/audit-summarizer'
 
-type ViewMode = 'model' | 'keeper'
-export type CostFocus = 'agent' | 'matrix' | 'latency'
-export type AuditFocus = 'actor' | 'summary'
-
-export type CostView = 'cost' | 'heuristics' | 'stress' | 'audit' | 'decisions'
-
-const COST_VIEWS: CostView[] = ['cost', 'heuristics', 'stress', 'audit', 'decisions']
-const COST_FOCUSES: CostFocus[] = ['agent', 'matrix', 'latency']
-const AUDIT_FOCUSES: AuditFocus[] = ['actor', 'summary']
-
-export function isCostView(v: string | undefined): v is CostView {
-  return !!v && (COST_VIEWS as string[]).includes(v)
-}
-
-export function isCostFocus(v: string | undefined): v is CostFocus {
-  return !!v && (COST_FOCUSES as string[]).includes(v)
-}
-
-export function viewModeForCostFocus(focus: CostFocus | null): ViewMode {
-  return focus === 'agent' ? 'keeper' : 'model'
-}
-
-export function isAuditFocus(v: string | undefined): v is AuditFocus {
-  return !!v && (AUDIT_FOCUSES as string[]).includes(v)
-}
-
-export function auditRouteParams(focus: 'ledger' | AuditFocus): Record<string, string> {
-  return focus === 'ledger'
-    ? { section: 'runtime', view: 'audit' }
-    : { section: 'runtime', view: 'audit', focus }
+// Re-export RFC-0050 PR-1 — preserve every public symbol callers import
+// from this module so the per-domain split is mechanical.
+export {
+  type CostFocus,
+  type AuditFocus,
+  type CostView,
+  isCostView,
+  isCostFocus,
+  viewModeForCostFocus,
+  isAuditFocus,
+  auditRouteParams,
+  formatTokens,
+  summarizeAuditActors,
+  summarizeAuditKinds,
 }
 
 type ModelLoadState =
@@ -92,7 +94,7 @@ type HeuristicLoadState =
 type StressLoadState =
   | { status: 'idle' }
   | { status: 'loading' }
-  | { status: 'loaded'; data: StressEvent[]; limit: number }
+  | { status: 'loaded'; events: StressEvent[]; board: AgentStressRow[]; limit: number }
   | { status: 'error'; message: string }
 
 type CoverageLoadState =
@@ -245,7 +247,7 @@ async function loadStress(limit = 100) {
   stressState.value = { status: 'loading' }
   try {
     const resp = await fetchStress(limit)
-    stressState.value = { status: 'loaded', data: resp.events, limit: resp.limit }
+    stressState.value = { status: 'loaded', events: resp.events, board: resp.agent_stress, limit: resp.limit }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'stress events 불러오기 실패'
     stressState.value = { status: 'error', message }
@@ -355,12 +357,6 @@ const keeperTotals = computed(() => {
   const p50Avg = p50Count > 0 ? Math.round(p50Sum / p50Count) : 0
   return { totalCost, totalIn, totalOut, p50Avg, p95Max, count: data.length }
 })
-
-export function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
-  return `${n}`
-}
 
 function ThRight({ children }: { children: unknown }) {
   return html`<th scope="col" class="px-2 py-1.5 text-right">${children}</th>`
@@ -662,7 +658,7 @@ function HeuristicLog({ events, limit }: { events: HeuristicEvent[]; limit: numb
   `
 }
 
-function StressBoard({ events, limit }: { events: StressEvent[]; limit: number }) {
+function StressBoard({ rows, events, limit }: { rows: AgentStressRow[]; events: StressEvent[]; limit: number }) {
   const fmtTime = (ts: number): string => {
     const d = new Date(ts * 1000)
     return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
@@ -693,14 +689,56 @@ function StressBoard({ events, limit }: { events: StressEvent[]; limit: number }
     }
   }
 
+  const pressureTone = (value: number): string => {
+    if (value >= 0.75) return 'text-[var(--color-status-err)]'
+    if (value >= 0.45) return 'text-[var(--color-status-warn)]'
+    return 'text-[var(--color-status-ok)]'
+  }
+
+  const sourceHint = (row: AgentStressRow): string => {
+    return [
+      row.budget_pressure_source ? `budget=${row.budget_pressure_source}` : '',
+      row.ctx_pressure_source ? `ctx=${row.ctx_pressure_source}` : '',
+      row.queue_depth_source ? `queue=${row.queue_depth_source}` : '',
+    ].filter(Boolean).join(' · ')
+  }
+
   return html`
-    <section class="flex flex-col gap-2" aria-label=${`Stress board · ${events.length} events`}>
+    <section class="flex flex-col gap-2" aria-label=${`Stress board · ${rows.length} agents · ${events.length} events`}>
       <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
-        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">stress board · ${events.length} events</span>
+        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">stress board · ${rows.length} agents · ${events.length} events</span>
         <span class="font-mono text-2xs text-text-muted">limit ${limit}</span>
       </div>
       <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
-        <table class="w-full" aria-label="Stress events">
+        <table class="w-full" aria-label="Agent stress board">
+          <thead>
+            <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">
+              <th scope="col" class="px-2 py-1.5 text-left">agent</th>
+              <th scope="col" class="px-2 py-1.5 text-right">budget</th>
+              <th scope="col" class="px-2 py-1.5 text-right">context</th>
+              <th scope="col" class="px-2 py-1.5 text-right">queue</th>
+              <th scope="col" class="px-2 py-1.5 text-left">blocked</th>
+              <th scope="col" class="px-2 py-1.5 text-left">source</th>
+              <th scope="col" class="px-2 py-1.5 text-left">time</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((row, i) => html`
+              <tr key=${i} class="border-b border-[var(--color-border-default)]/50 text-2xs">
+                <td class="px-2 py-1.5 text-text-strong">${row.agent}</td>
+                <td class=${`px-2 py-1.5 text-right font-mono ${pressureTone(row.budget_pressure)}`}>${formatPct1(row.budget_pressure)}</td>
+                <td class=${`px-2 py-1.5 text-right font-mono ${pressureTone(row.ctx_pressure)}`}>${formatPct1(row.ctx_pressure)}</td>
+                <td class="px-2 py-1.5 text-right font-mono text-text-muted">${row.queue_depth}</td>
+                <td class="px-2 py-1.5 text-text-muted">${row.blocked_on ?? '—'}</td>
+                <td class="px-2 py-1.5 text-text-muted">${sourceHint(row)}</td>
+                <td class="px-2 py-1.5 font-mono text-text-muted">${row.ts > 0 ? fmtTime(row.ts) : '—'}</td>
+              </tr>
+            `)}
+          </tbody>
+        </table>
+      </div>
+      <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
+        <table class="w-full" aria-label="Recent stress events">
           <thead>
             <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">
               <th scope="col" class="px-2 py-1.5 text-left">time</th>
@@ -785,91 +823,6 @@ function HeuristicByModule({ coverage }: { coverage: HeuristicCoverage }) {
 }
 
 type AuditChip = 'ledger' | AuditFocus
-
-interface AuditActorSummary {
-  actor: string
-  count: number
-  error: number
-  warn: number
-  info: number
-  latest: string
-  topKind: string
-}
-
-interface AuditKindSummary {
-  kind: string
-  count: number
-  error: number
-  warn: number
-  info: number
-  latest: string
-}
-
-function severityClass(sev: string): string {
-  if (sev === 'error') return 'text-[var(--color-danger-fg)]'
-  if (sev === 'warn') return 'text-[var(--color-warning-fg)]'
-  return 'text-text-muted'
-}
-
-function severityBuckets(entries: readonly AuditEntry[]): { error: number; warn: number; info: number } {
-  let error = 0
-  let warn = 0
-  for (const entry of entries) {
-    if (entry.severity === 'error') error += 1
-    else if (entry.severity === 'warn') warn += 1
-  }
-  return { error, warn, info: Math.max(0, entries.length - error - warn) }
-}
-
-function latestTs(entries: readonly AuditEntry[]): string {
-  return entries.reduce((latest, entry) => entry.ts > latest ? entry.ts : latest, '')
-}
-
-function mostFrequentKind(entries: readonly AuditEntry[]): string {
-  const counts = new Map<string, number>()
-  for (const entry of entries) {
-    const kind = entry.kind.trim() || '(unknown)'
-    counts.set(kind, (counts.get(kind) ?? 0) + 1)
-  }
-  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? '—'
-}
-
-export function summarizeAuditActors(entries: readonly AuditEntry[]): AuditActorSummary[] {
-  const byActor = new Map<string, AuditEntry[]>()
-  for (const entry of entries) {
-    const actor = entry.actor.trim() || '(unknown)'
-    const bucket = byActor.get(actor) ?? []
-    bucket.push(entry)
-    byActor.set(actor, bucket)
-  }
-  return [...byActor.entries()]
-    .map(([actor, actorEntries]) => ({
-      actor,
-      count: actorEntries.length,
-      ...severityBuckets(actorEntries),
-      latest: latestTs(actorEntries),
-      topKind: mostFrequentKind(actorEntries),
-    }))
-    .sort((a, b) => b.count - a.count || a.actor.localeCompare(b.actor))
-}
-
-export function summarizeAuditKinds(entries: readonly AuditEntry[]): AuditKindSummary[] {
-  const byKind = new Map<string, AuditEntry[]>()
-  for (const entry of entries) {
-    const kind = entry.kind.trim() || '(unknown)'
-    const bucket = byKind.get(kind) ?? []
-    bucket.push(entry)
-    byKind.set(kind, bucket)
-  }
-  return [...byKind.entries()]
-    .map(([kind, kindEntries]) => ({
-      kind,
-      count: kindEntries.length,
-      ...severityBuckets(kindEntries),
-      latest: latestTs(kindEntries),
-    }))
-    .sort((a, b) => b.count - a.count || a.kind.localeCompare(b.kind))
-}
 
 function updateAuditFocusParam(focus: AuditChip): void {
   replaceRoute('monitoring', auditRouteParams(focus))
@@ -1330,7 +1283,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
           <h2 class="text-base font-semibold text-text-strong">스트레스 이벤트</h2>
         </header>
         ${stressState.value.status === 'loaded'
-          ? html`<${StressBoard} events=${stressState.value.data} limit=${stressState.value.limit} />`
+          ? html`<${StressBoard} rows=${stressState.value.board} events=${stressState.value.events} limit=${stressState.value.limit} />`
           : stressState.value.status === 'error'
             ? html`<${ErrorState} message=${stressState.value.message} onRetry=${() => void loadStress()} />`
             : html`<${LoadingState} />`}

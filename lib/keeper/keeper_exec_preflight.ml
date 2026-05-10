@@ -19,7 +19,10 @@ let handle_keeper_preflight_check
   (* Check 1: gh auth status *)
   let () =
     let st, out =
-      Process_eio.run_argv_with_status
+      Masc_exec.Exec_gate.run_argv_with_status
+        ~actor:`Coord_git
+        ~raw_source:"/bin/zsh -lc gh auth status 2>&1"
+        ~summary:"keeper preflight gh auth status"
         ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Preflight ())
         [ "/bin/zsh"; "-lc"; "gh auth status 2>&1" ]
     in
@@ -32,7 +35,10 @@ let handle_keeper_preflight_check
       add_check "repo_access" true "(current project)"
     else
       let st, out =
-        Process_eio.run_argv_with_status
+        Masc_exec.Exec_gate.run_argv_with_status
+          ~actor:`Coord_git
+          ~raw_source:(Printf.sprintf "/bin/zsh -lc gh repo view %s --json name,defaultBranchRef 2>&1" (Filename.quote repo))
+          ~summary:"keeper preflight gh repo view"
           ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Preflight ())
           [ "/bin/zsh"; "-lc";
             Printf.sprintf "gh repo view %s --json name,defaultBranchRef 2>&1"

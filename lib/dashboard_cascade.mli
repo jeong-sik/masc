@@ -387,6 +387,49 @@ val strategy_trace_json :
   ?cascade:string ->
   unit -> Yojson.Safe.t
 
+(** JSON projection of durable cascade audit records for the O1 Cascade
+    Inspector.
+
+    Reads [base_path/.masc/cascade_audit/YYYY-MM/DD.jsonl] and reshapes each
+    runtime audit record into one run row:
+    {[
+      {
+        "updated_at": "ISO-8601",
+        "total_runs": <int>,
+        "audit_runs": [
+          { "id": "cascade-audit-...",
+            "cascade": "keeper_unified",
+            "trigger": "sangsu",
+            "at": <unix seconds>,
+            "outcome": "success" | "failure" | "rejected",
+            "error_category": "..."?,
+            "configured": ["glm-coding:auto", ...],
+            "primary": "glm-coding:auto" | null,
+            "selected": "glm-coding:auto" | null,
+            "total_ms": <int>,
+            "hops": [
+              { "i": 0,
+                "model": "glm-coding:auto",
+                "status": "success" | "fallback" | "error" | "attempted",
+                "ms": <int>,
+                "reason": "..."? }, ...
+            ] }, ...
+        ]
+      }
+    ]}
+
+    [total_ms_source] and per-hop [ms_source] are also emitted so missing
+    callback timings are explicit instead of hidden behind fake numbers.
+
+    @param limit    max runs returned (default 100, clamped to [1, 1024]).
+    @param cascade  filter by projected [cascade]; omit to include every
+                    cascade. *)
+val audit_runs_json :
+  base_path:string ->
+  ?limit:int ->
+  ?cascade:string ->
+  unit -> Yojson.Safe.t
+
 (** Instantaneous SLO snapshot computed from the live
     {!Cascade_strategy_trace} ring buffer.
 

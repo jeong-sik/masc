@@ -534,11 +534,54 @@ let test_retry_control_autonomous_release_skips_completion_stamp () =
     ~expected:autonomous_before
     ~actual:(KK.autonomous_turn_semaphore_value_for_test ())
 
+let test_no_clock_exhausted_turn_slot_fails_closed () =
+  match Eio_context.get_clock_opt () with
+  | Some _ ->
+      (* This executable normally runs without a global Eio_context clock.
+         If a wider test runner has installed one, the no-clock branch is
+         not reachable in this process. *)
+      ()
+  | None ->
+      let rec acquire_all acquired =
+        if Eio.Semaphore.get_value KTS.turn_semaphore <= 0 then acquired
+        else begin
+          Eio.Semaphore.acquire KTS.turn_semaphore;
+          acquire_all (acquired + 1)
+        end
+      in
+      let rec release_n = function
+        | n when n <= 0 -> ()
+        | n ->
+            Eio.Semaphore.release KTS.turn_semaphore;
+            release_n (n - 1)
+      in
+      let acquired = acquire_all 0 in
+      Fun.protect
+        ~finally:(fun () -> release_n acquired)
+        (fun () ->
+          let result =
+            KK.with_keeper_turn_slot_for_test
+              ~keeper_name:"diag-no-clock-exhausted"
+              ~channel:Masc_mcp.Keeper_world_observation.Reactive
+              (fun ~semaphore_wait_ms:_ ->
+                failwith "exhausted turn slot should fail before body runs")
+          in
+          match result with
+          | Error (`Semaphore_wait_timeout snapshot) ->
+              if snapshot.timeout_phase <> KK.Turn_slot then
+                failwith
+                  (Printf.sprintf
+                     "expected Turn_slot timeout, got %s"
+                     (KK.semaphore_wait_phase_to_string
+                        snapshot.timeout_phase))
+          | Ok _ ->
+              failwith "exhausted no-clock acquire should fail closed")
+
 let test_force_release_marker_ttl_bounds_unfinalized_fibers () =
   KK.clear_force_released_markers_for_test ();
   let marked_at = 1_000.0 in
   KK.add_force_released_marker_for_test
-    ~label:"turn"
+    ~label:KTS.Turn_pool
     ~keeper_name:"diag-orphan-marker"
     ~acquisition_id:42
     ~marked_at;
@@ -582,6 +625,8 @@ let () =
         test_retry_control_releases_and_reacquires_reactive_slot;
       "retry control autonomous release skips completion stamp",
         test_retry_control_autonomous_release_skips_completion_stamp;
+      "no-clock exhausted turn slot fails closed",
+        test_no_clock_exhausted_turn_slot_fails_closed;
       "force release marker ttl bounds unfinalized fibers",
         test_force_release_marker_ttl_bounds_unfinalized_fibers;
     ]

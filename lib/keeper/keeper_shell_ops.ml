@@ -564,7 +564,10 @@ let handle_keeper_shell
                      ]))
           | None ->
             let st, out =
-              Process_eio.run_argv_with_status ~timeout_sec:Keeper_shell_shared.read_timeout_sec argv
+              Masc_exec.Exec_gate.run_argv_with_status ~actor:`Keeper_shell
+                ~raw_source:(String.concat " " argv)
+                ~summary:"keeper shell op"
+                ~timeout_sec:Keeper_shell_shared.read_timeout_sec argv
             in
             Yojson.Safe.to_string
               (`Assoc
@@ -942,11 +945,16 @@ let handle_keeper_shell
            match Keeper_gh_env.keeper_process_env config ~keeper_name:meta.name with
            | Error err -> (Unix.WEXITED 127, err)
            | Ok env ->
-               Process_eio.run_argv_with_status ?env ~cwd ~timeout_sec argv
+               Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
+                 ~raw_source:(String.concat " " argv)
+                 ~summary:"keeper brokered git command"
+                 ?env ~cwd ~timeout_sec argv
          in
          let normalize_existing_origin_to_https clone_path =
            match
-             Process_eio.run_argv_with_status
+             Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
+               ~raw_source:("git -C " ^ clone_path ^ " remote get-url origin")
+               ~summary:"keeper git remote get-url"
                ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Git_meta ())
                [ "git"; "-C"; clone_path; "remote"; "get-url"; "origin" ]
            with
@@ -956,7 +964,9 @@ let handle_keeper_shell
              if String.equal origin normalized then None
              else
                (match
-                  Process_eio.run_argv_with_status
+                  Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
+                    ~raw_source:("git -C " ^ clone_path ^ " remote set-url origin " ^ normalized)
+                    ~summary:"keeper git remote set-url"
                     ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Git_meta ())
                     [ "git"; "-C"; clone_path; "remote"; "set-url"; "origin"; normalized ]
                 with
@@ -1008,7 +1018,10 @@ let handle_keeper_shell
                     | Ok result -> (result.status, result.output)
                     | Error msg -> (Unix.WEXITED 127, msg)
                   else
-                    Process_eio.run_argv_with_status ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ())
+                    Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
+                      ~raw_source:("git -C " ^ clone_path ^ " pull --ff-only")
+                      ~summary:"keeper git pull"
+                      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ())
                       [ "git"; "-C"; clone_path; "pull"; "--ff-only" ]
                 in
                 if st = Unix.WEXITED 0 then
@@ -1059,7 +1072,9 @@ let handle_keeper_shell
                | Ok result -> (result.status, result.output)
                | Error msg -> (Unix.WEXITED 127, msg)
              else
-               Process_eio.run_argv_with_status
+               Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
+                 ~raw_source:("git clone " ^ String.concat " " depth_args ^ " " ^ clone_url ^ " " ^ clone_path)
+                 ~summary:"keeper git clone"
                  ~timeout_sec:(Keeper_tool_policy.clone_timeout_sec ())
                  ("git" :: "clone" :: depth_args @ [ clone_url; clone_path ])
            in
@@ -1156,6 +1171,22 @@ let handle_keeper_shell
                  ; "reversibility", `String rev_tag
                  ] @ route_fields @ extras))
         in
+        let dedicated_pr_tool_block ~error ~required_tool ~hint =
+          Prometheus.inc_counter
+            Keeper_metrics.metric_keeper_shell_ops_failures
+            ~labels:[("keeper", meta.name)]
+            ();
+          Log.Keeper.warn
+            "keeper_shell op=gh dedicated PR tool required: keeper=%s cmd=%s tool=%s"
+            meta.name canonical_cmd_str required_tool;
+          gh_base ~ok:false ~cwd:"" ~command:(gh_cmd_display parsed_cmd)
+            [ "error", `String error
+            ; "reason", `String
+                "keeper_shell op=gh cannot bypass the dedicated PR workflow tools"
+            ; "required_tool", `String required_tool
+            ; "hint", `String hint
+            ]
+        in
         let run_gh_command ~display_command ~parsed_command ~cwd
             ~(ctx : Keeper_shell_gh_context.gh_repo_context option) =
           if reversibility = Worker_dev_tools.R1_Reversible then
@@ -1194,7 +1225,10 @@ let handle_keeper_shell
                    let gh_argv =
                      "gh" :: Keeper_gh_shared.gh_simple_command_argv parsed_command
                    in
-                   Ok (Process_eio.run_argv_with_status ?env ~cwd ~timeout_sec gh_argv))
+                   Ok (Masc_exec.Exec_gate.run_argv_with_status ~actor:`Keeper_shell
+                         ~raw_source:(String.concat " " gh_argv)
+                         ~summary:"keeper gh command"
+                         ?env ~cwd ~timeout_sec gh_argv))
           in
           match gh_process with
           | Error msg ->
@@ -1238,6 +1272,10 @@ let handle_keeper_shell
               in
               gh_base ~command:display_command ~ok ~cwd hinted_fields
         in
+        (match Keeper_gh_shared.dedicated_pr_tool_required canonical_cmd_str with
+         | Some (error, required_tool, hint) ->
+           dedicated_pr_tool_block ~error ~required_tool ~hint
+         | None ->
         (match reversibility with
          | Worker_dev_tools.R2_Irreversible ->
            let hint =
@@ -1249,7 +1287,7 @@ let handle_keeper_shell
                   keeper tool or post on the board for operator approval."
            in
            Prometheus.inc_counter
-             Prometheus.metric_keeper_shell_ops_failures
+             Keeper_metrics.metric_keeper_shell_ops_failures
              ~labels:[("keeper", meta.name)]
              ();
            Log.Keeper.warn
@@ -1271,7 +1309,7 @@ let handle_keeper_shell
                   rejecting gh command (keeper=%s cmd=%s)"
                  meta.name canonical_cmd_str;
                Prometheus.inc_counter
-                 Prometheus.metric_keeper_shell_ops_failures
+                 Keeper_metrics.metric_keeper_shell_ops_failures
                  ~labels:[("keeper", meta.name)]
                  ();
                Yojson.Safe.to_string
@@ -1341,7 +1379,7 @@ let handle_keeper_shell
                              ~parsed_command:cmd_to_run
                              ~cwd:ctx.worktree_cwd
                              ~ctx:(Some ctx)))
-           end))
+           end)))
   | _ ->
     Yojson.Safe.to_string
       (`Assoc

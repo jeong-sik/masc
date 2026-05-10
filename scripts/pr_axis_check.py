@@ -1,0 +1,312 @@
+#!/usr/bin/env python3
+"""PR Axis Cross-Check — detect stale PRs from recent main merges.
+
+Scans recently merged PRs and checks if their changes make an open PR stale.
+Uses GitHub CLI (gh) for API access.
+
+Usage:
+    python scripts/pr_axis_check.py --pr 123 --hours 24 --limit 20
+    python scripts/pr_axis_check.py --scan-all-open --hours 24
+
+Exit codes:
+    0 — no risks found
+    1 — one or more risks detected
+    2 — runtime error
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Set, Tuple
+
+
+@dataclass(frozen=True)
+class AxisRisk:
+    risk_type: str
+    merged_pr: int
+    merged_title: str
+    overlap_files: List[str]
+    confidence: str
+
+    def to_markdown(self) -> str:
+        files_str = ", ".join(self.overlap_files[:3])
+        if len(self.overlap_files) > 3:
+            files_str += f" (+{len(self.overlap_files) - 3} more)"
+        return (
+            f"| #{self.merged_pr} | `{self.risk_type}` | {files_str} | {self.confidence} |"
+        )
+
+
+def _run_gh(args: List[str]) -> dict:
+    """Run gh cli and return JSON output."""
+    result = subprocess.run(
+        ["gh", "api"] + args,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"gh api error: {result.stderr}", file=sys.stderr)
+        sys.exit(2)
+    return json.loads(result.stdout)
+
+
+def _run_gh_graphql(query: str) -> dict:
+    """Run gh graphql query and return data."""
+    result = subprocess.run(
+        ["gh", "api", "graphql", "-f", f"query={query}"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"gh graphql error: {result.stderr}", file=sys.stderr)
+        sys.exit(2)
+    return json.loads(result.stdout)
+
+
+def get_repo_slug() -> Tuple[str, str]:
+    """Extract owner/repo from gh repo view."""
+    result = subprocess.run(
+        ["gh", "repo", "view", "--json", "owner,name"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        # Fallback from GITHUB_REPOSITORY env var
+        repo = os.environ.get("GITHUB_REPOSITORY", "")
+        if "/" in repo:
+            return tuple(repo.split("/", 1))  # type: ignore[return-value]
+        print("Cannot determine repository. Set GITHUB_REPOSITORY or run in a gh repo.", file=sys.stderr)
+        sys.exit(2)
+    data = json.loads(result.stdout)
+    return data["owner"]["login"], data["name"]
+
+
+def get_pr_files(pr_number: int, owner: str, repo: str) -> Set[str]:
+    """Get set of file paths changed in a PR."""
+    files: List[dict] = []
+    page = 1
+    while True:
+        resp = _run_gh([
+            f"/repos/{owner}/{repo}/pulls/{pr_number}/files",
+            "--paginate",
+        ])
+        if isinstance(resp, list):
+            batch = resp
+        else:
+            break
+        if not batch:
+            break
+        files.extend(batch)
+        if len(batch) < 100:
+            break
+        page += 1
+
+    return {f["filename"] for f in files}
+
+
+def get_recently_merged_prs(
+    owner: str, repo: str, hours: int, limit: int
+) -> List[dict]:
+    """Get recently merged PRs with their changed files."""
+    since = (datetime.now() - timedelta(hours=hours)).isoformat()
+    query = f"""
+query {{
+  repository(owner: "{owner}", name: "{repo}") {{
+    pullRequests(
+      states: MERGED
+      first: {limit}
+      orderBy: {{field: UPDATED_AT, direction: DESC}}
+    ) {{
+      nodes {{
+        number
+        title
+        mergedAt
+        files(first: 100) {{
+          nodes {{ path }}
+        }}
+      }}
+    }}
+  }}
+}}
+"""
+    data = _run_gh_graphql(query)
+    repo_data = data.get("data", {}).get("repository", {})
+    prs = repo_data.get("pullRequests", {}).get("nodes", [])
+    # Filter by mergedAt
+    filtered = []
+    for pr in prs:
+        merged_at = pr.get("mergedAt", "")
+        if merged_at and merged_at >= since:
+            filtered.append(pr)
+    return filtered
+
+
+def _get_dune_libraries_from_diff(owner: str, repo: str, pr_number: int) -> Set[str]:
+    """Check if a merged PR changed dune library dependencies."""
+    # This is a heuristic: check if any dune file was changed
+    files = get_pr_files(pr_number, owner, repo)
+    dune_files = {f for f in files if f.endswith("/dune") or f == "dune"}
+    return dune_files
+
+
+def _touches_dune_deps(pr_number: int, owner: str, repo: str) -> bool:
+    """Check if PR changed any dune file (potential dependency change)."""
+    return len(_get_dune_libraries_from_diff(owner, repo, pr_number)) > 0
+
+
+def check_pr_axis_stale(
+    pr_number: int,
+    owner: str,
+    repo: str,
+    hours: int = 24,
+    limit: int = 20,
+) -> List[AxisRisk]:
+    """Check if an open PR is at risk of being stale from recent merges."""
+    open_files = get_pr_files(pr_number, owner, repo)
+    if not open_files:
+        print(f"Warning: no files found for PR #{pr_number}", file=sys.stderr)
+        return []
+
+    recently_merged = get_recently_merged_prs(owner, repo, hours, limit)
+    risks: List[AxisRisk] = []
+
+    for merged in recently_merged:
+        merged_num = merged["number"]
+        merged_title = merged["title"]
+        merged_files = {node["path"] for node in merged.get("files", {}).get("nodes", [])}
+
+        overlap = open_files & merged_files
+        if not overlap:
+            continue
+
+        # Determine risk type and confidence
+        confidence = "LOW"
+        risk_type = "FILE_OVERLAP"
+
+        # Check if dune files changed
+        dune_overlap = {f for f in overlap if f.endswith("/dune") or f == "dune"}
+        if dune_overlap:
+            risk_type = "BUILD_DEP_BREAK"
+            confidence = "HIGH"
+
+        # Check if .mli files changed (potential signature change)
+        mli_overlap = {f for f in overlap if f.endswith(".mli")}
+        if mli_overlap and confidence != "HIGH":
+            risk_type = "API_SIGNATURE_CHANGE"
+            confidence = "HIGH"
+
+        # Check if types/modules changed
+        type_files = {f for f in overlap if "types" in f or "type" in f}
+        if type_files and confidence == "LOW":
+            risk_type = "TYPE_CONFLICT"
+            confidence = "MEDIUM"
+
+        # High file overlap = higher confidence
+        if len(overlap) > 5 and confidence == "LOW":
+            confidence = "MEDIUM"
+
+        risks.append(AxisRisk(
+            risk_type=risk_type,
+            merged_pr=merged_num,
+            merged_title=merged_title,
+            overlap_files=sorted(overlap),
+            confidence=confidence,
+        ))
+
+    return risks
+
+
+def scan_all_open_prs(owner: str, repo: str, hours: int, limit: int) -> Dict[int, List[AxisRisk]]:
+    """Scan all open PRs for axis risks."""
+    query = f"""
+query {{
+  repository(owner: "{owner}", name: "{repo}") {{
+    pullRequests(states: OPEN, first: 50) {{
+      nodes {{
+        number
+        title
+        isDraft
+      }}
+    }}
+  }}
+}}
+"""
+    data = _run_gh_graphql(query)
+    open_prs = data.get("data", {}).get("repository", {}).get("pullRequests", {}).get("nodes", [])
+
+    results: Dict[int, List[AxisRisk]] = {}
+    for pr in open_prs:
+        pr_num = pr["number"]
+        print(f"Scanning PR #{pr_num}: {pr['title']}", file=sys.stderr)
+        risks = check_pr_axis_stale(pr_num, owner, repo, hours, limit)
+        if risks:
+            results[pr_num] = risks
+
+    return results
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="PR Axis Cross-Check")
+    parser.add_argument("--pr", type=int, help="PR number to check")
+    parser.add_argument("--scan-all-open", action="store_true", help="Scan all open PRs")
+    parser.add_argument("--hours", type=int, default=24, help="Lookback window in hours")
+    parser.add_argument("--limit", type=int, default=20, help="Max recent merged PRs to check")
+    parser.add_argument("--json", action="store_true", help="Output as JSON")
+    args = parser.parse_args()
+
+    owner, repo = get_repo_slug()
+
+    if args.scan_all_open:
+        results = scan_all_open_prs(owner, repo, args.hours, args.limit)
+        if args.json:
+            print(json.dumps({
+                str(pr_num): [
+                    {"type": r.risk_type, "merged_pr": r.merged_pr, "confidence": r.confidence}
+                    for r in risks
+                ]
+                for pr_num, risks in results.items()
+            }, indent=2))
+        else:
+            if results:
+                print(f"\nFound risks in {len(results)} PR(s):\n")
+                for pr_num, risks in results.items():
+                    print(f"PR #{pr_num}:")
+                    for r in risks:
+                        print(f"  - {r.risk_type} from #{r.merged_pr} ({r.confidence})")
+                return 1
+            else:
+                print("No axis risks found in any open PRs.")
+                return 0
+
+    if not args.pr:
+        parser.error("Either --pr or --scan-all-open is required")
+
+    risks = check_pr_axis_stale(args.pr, owner, repo, args.hours, args.limit)
+
+    if args.json:
+        print(json.dumps([
+            {"type": r.risk_type, "merged_pr": r.merged_pr, "confidence": r.confidence}
+            for r in risks
+        ], indent=2))
+    else:
+        if risks:
+            print(f"Found {len(risks)} risk(s) for PR #{args.pr}:\n")
+            print("| Merged PR | Risk Type | Overlap Files | Confidence |")
+            print("|-----------|-----------|---------------|------------|")
+            for r in risks:
+                print(r.to_markdown())
+            print()
+            print("Recommended action: rebase on latest main and run `dune build @check`.")
+            return 1
+        else:
+            print(f"No axis risks found for PR #{args.pr}.")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

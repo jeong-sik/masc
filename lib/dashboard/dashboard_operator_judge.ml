@@ -205,7 +205,7 @@ let compute_judgments
        per-caller Prometheus counter. *)
     Masc_oas_bridge.run_with_caller
       ~caller:Env_config_oas_bridge.Operator_judge (fun () ->
-      Oas_worker.run_named_with_masc_tools ~cascade_name
+      Keeper_turn_driver_wrappers.run_named_with_masc_tools ~cascade_name
         ~goal:prompt ~masc_tools ~dispatch ~max_turns:3
         ~approval:Approval_callbacks.auto_approve
         ()
@@ -213,12 +213,12 @@ let compute_judgments
   with
   | Error err -> Error (Agent_sdk.Error.to_string err)
   | Ok result -> (
-      let response = result.Oas_worker.response in
+      let response = result.Cascade_runner.response in
       try
         (* See dashboard_governance_judge.ml for rationale: LLMs frequently
            wrap JSON in ```json … ``` markdown fences. Lenient_json strips
            fences and applies other deterministic recovery transforms. *)
-        let raw_text = Oas_response.text_of_response response in
+        let raw_text = Agent_sdk_response.text_of_response response in
         match Llm_provider.Lenient_json.parse raw_text with
         | `Assoc [("raw", `String raw)] ->
             (* #9774: include a preview so the failure diagnostic doesn't

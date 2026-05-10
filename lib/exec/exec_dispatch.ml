@@ -1,5 +1,5 @@
 (* P7: Pipeline-Native Dispatch
-   Execute Shell_ir.t directly via Process_eio without going through
+   Execute Shell_ir.t directly via Exec_gate without going through
    /bin/bash.  Simple commands use argv-based spawn; pipelines chain
    stdout->stdin across stages.
 
@@ -35,15 +35,14 @@ let resolve_env env_bindings =
 
 (* --- simple command execution --- *)
 
-(* Dispatch a simple command via the IR-carried Sandbox_target runner.
+(* Dispatch a simple command via the IR-carried Sandbox_target.
 
    Prior to PR-2 (2026-04-28 root-fix family 3/3) this function called
    [Process_eio.run_argv_with_status_split] directly, which short-
    circuited every command to a host fork/exec regardless of the
-   keeper's [sandbox_profile]. The runner closure on the Shell_ir node
-   now carries the sandbox decision: the host case forwards to the
-   same Process_eio call (no behavior change for non-keeper callers),
-   the Docker case is wired up by [lib/keeper] using a closure over
+   keeper's [sandbox_profile].  The host case now routes through
+   [Exec_gate] (no behavior change for non-keeper callers); the Docker
+   case is wired up by [lib/keeper] using a closure over
    [Keeper_turn_sandbox_runtime]. *)
 let dispatch_simple (s : Shell_ir.simple) =
   let bin = Bin.to_string s.bin in
@@ -54,13 +53,31 @@ let dispatch_simple (s : Shell_ir.simple) =
     | None -> None
     | Some scope -> Some (Path_scope.raw scope)
   in
-  match s.sandbox.runner ~argv ~env ~cwd ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Dispatch ()) with
-  | exception exn ->
-      { status = Unix.WEXITED 1;
-        stdout = "";
-        stderr = Printexc.to_string exn }
-  | (status, stdout, stderr) ->
-      { status; stdout; stderr }
+  let timeout_sec = Env_config_exec_timeout.timeout_sec ~caller:Dispatch () in
+  match s.sandbox with
+  | Host ->
+      let raw_source = String.concat " " argv in
+      (match
+         Exec_gate.run_argv_with_status_split
+           ~actor:`Tool_local_runtime
+           ~raw_source
+           ~summary:"exec dispatch simple"
+           ~timeout_sec ~env ?cwd argv
+       with
+       | exception exn ->
+           { status = Unix.WEXITED 1;
+             stdout = "";
+             stderr = Printexc.to_string exn }
+       | (status, stdout, stderr) ->
+           { status; stdout; stderr })
+  | Docker { runner; _ } ->
+      (match runner ~argv ~env ~cwd ~timeout_sec with
+       | exception exn ->
+           { status = Unix.WEXITED 1;
+             stdout = "";
+             stderr = Printexc.to_string exn }
+       | (status, stdout, stderr) ->
+           { status; stdout; stderr })
 
 (* --- pipeline + entry point (mutually recursive) --- *)
 
@@ -78,7 +95,11 @@ let rec dispatch_pipeline stages =
             let argv = bin :: List.map resolve_arg s.args in
             let env = resolve_env s.env in
             (match
-               Process_eio.run_argv_with_stdin_and_status_split
+               let raw_source = String.concat " " argv in
+               Exec_gate.run_argv_with_stdin_and_status_split
+                 ~actor:`Tool_local_runtime
+                 ~raw_source
+                 ~summary:"exec dispatch pipeline stage"
                  ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Dispatch ()) ~env
                  ~stdin_content:prev_stdout argv
              with
@@ -93,7 +114,11 @@ let rec dispatch_pipeline stages =
             let argv = bin :: List.map resolve_arg s.args in
             let env = resolve_env s.env in
             (match
-               Process_eio.run_argv_with_stdin_and_status_split
+               let raw_source = String.concat " " argv in
+               Exec_gate.run_argv_with_stdin_and_status_split
+                 ~actor:`Tool_local_runtime
+                 ~raw_source
+                 ~summary:"exec dispatch pipeline stage"
                  ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Dispatch ()) ~env
                  ~stdin_content:prev_stdout argv
              with

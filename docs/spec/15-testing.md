@@ -267,12 +267,17 @@ Contract harness는 hermetic bootstrap으로 실행된다. 사전 서버 실행�
 
 ## 7. Coverage
 
+100% coverage closeout uses the checklist in
+`docs/qa/BISECT-COVERAGE-CLOSEOUT-RUNBOOK.md`. Do not close a coverage goal from
+stale `_coverage` files or from the existence of `*_coverage.ml` supplement
+tests alone.
+
 ### 7.1 bisect_ppx
 
 OCaml 코드 커버리지 도구. `BISECT_FILE` 환경변수로 출력 경로를 지정한다.
 
 ```bash
-BISECT_FILE=$(pwd)/_coverage dune test --instrument-with bisect_ppx
+scripts/coverage_percent.sh --fail-under 100
 bisect-ppx-report html --coverage-path _coverage
 ```
 

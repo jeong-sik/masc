@@ -4,7 +4,7 @@
     based on CDAL verdict status. *)
 
 module CVG = Masc_mcp.Cdal_verdict_gate
-module CT = Masc_mcp.Cdal_types
+module CT = Cdal_types
 
 let make_verdict
     ?(run_id = "test-run-001")

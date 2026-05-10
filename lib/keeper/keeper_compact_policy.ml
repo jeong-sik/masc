@@ -132,7 +132,7 @@ let compact_if_needed_typed
           | _ :: _ as explicit -> explicit
           | [] ->
               Cascade_runtime.models_of_cascade_name
-                (Keeper_cascade_profile.Runtime_name meta.cascade_name)
+                (Keeper_cascade_profile.Runtime_name (cascade_name_of_meta meta))
         in
         let primary_id = match Cascade_config.parse_model_strings model_labels with
           | c :: _ -> c.Llm_provider.Provider_config.model_id | [] -> "auto" in
@@ -201,12 +201,12 @@ let compact_if_needed_typed
         let new_tok_count = token_count compacted_ctx in
         let saved_tokens = max 0 (tok_count - new_tok_count) in
         let saved_messages = max 0 (msg_count - new_msg_count) in
-        Prometheus.inc_counter Prometheus.metric_keeper_compactions
+        Prometheus.inc_counter Keeper_metrics.metric_keeper_compactions
           ~labels:[("keeper", meta.name)] ();
-        Prometheus.set_gauge Prometheus.metric_keeper_compaction_ratio_change
+        Prometheus.set_gauge Keeper_metrics.metric_keeper_compaction_ratio_change
           ~labels:[("keeper", meta.name)]
           (ratio -. new_ratio);
-        Prometheus.inc_counter Prometheus.metric_keeper_compaction_saved_tokens
+        Prometheus.inc_counter Keeper_metrics.metric_keeper_compaction_saved_tokens
           ~labels:[("keeper", meta.name)]
           ~delta:(float_of_int saved_tokens)
           ();

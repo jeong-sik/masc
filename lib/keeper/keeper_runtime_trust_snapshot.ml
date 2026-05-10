@@ -111,12 +111,26 @@ let severity_of_decision = function
 
 let severity_of_tool_call success = if success then "ok" else "bad"
 
+(* RFC-0047 PR-4: deserialization-boundary normalize for legacy persisted
+   wires. Pre-PR-4, [Keeper_turn_terminal.normalize_code] silently remapped
+   "completed" → "success" inside [make]. PR-4 retires that table by typing
+   producers; old JSON files still carry the legacy wire, so the
+   compatibility hop now lives explicitly here at the deserialization
+   boundary. New entries are written with the canonical wire by
+   [keeper_agent_run.ml]. *)
+let normalize_persisted_terminal_reason_code = function
+  | "completed" -> "success"
+  | code -> code
+
 let terminal_reason_from_decision json =
   match json_member "terminal_reason" json with
   | `Assoc _ as terminal_reason -> Keeper_turn_terminal.of_json terminal_reason
   | _ ->
       Option.map
-        (Keeper_turn_terminal.of_code ~source:"decision_log")
+        (fun code ->
+          Keeper_turn_terminal.of_code
+            ~source:"decision_log"
+            (normalize_persisted_terminal_reason_code code))
         (json_string_opt_member "terminal_reason_code" json)
 
 let terminal_reason_from_receipt receipt =
@@ -152,36 +166,53 @@ let terminal_reason_from_receipt receipt =
         (Keeper_turn_terminal.of_code ~source:"execution_receipt"
            "required_tool_use_unsatisfied")
   | Some code ->
-      Some (Keeper_turn_terminal.of_code ~source:"execution_receipt" code)
+      Some
+        (Keeper_turn_terminal.of_code
+           ~source:"execution_receipt"
+           (normalize_persisted_terminal_reason_code code))
   | None when receipt_requires_tool_attention ->
       Some
         (Keeper_turn_terminal.of_code ~source:"execution_receipt"
            "required_tool_use_unsatisfied")
   | None -> None
 
-let terminal_reason_code_of_runtime_blocker_class = function
+(* JSON-deserialization boundary: maps a runtime_blocker_class wire
+   string into a typed [Keeper_turn_disposition.t]. The previous
+   variant returned a [terminal_reason_code] wire string that the
+   caller then passed back through [Keeper_turn_terminal.of_code]
+   for a wire→typed roundtrip; emitting the typed value here removes
+   that detour and lets the consumer use [of_disposition] directly.
+   The provider-runtime classes preserve their originating blocker
+   string in the typed payload instead of collapsing to a single
+   "provider_error" literal. *)
+let disposition_of_runtime_blocker_class
+    : string -> Keeper_turn_disposition.t = function
   | "completion_contract_violation" | "tool_required_unsatisfied" ->
-      "required_tool_use_unsatisfied"
+      Keeper_turn_disposition.Required_tool_use_unsatisfied
   | "oas_timeout_budget" ->
-      "oas_timeout_budget"
+      Keeper_turn_disposition.Oas_timeout_budget
   | "turn_timeout" | "turn_timeout_after_queue_wait" | "stale_turn_timeout" ->
-      "turn_wall_clock_timeout"
+      Keeper_turn_disposition.Turn_wall_clock_timeout
   | "ambiguous_post_commit_timeout" | "ambiguous_post_commit_failure" ->
-      "post_commit_ambiguous"
-  | "cascade_exhausted" | "no_tool_capable_provider"
-  | "provider_runtime_error" ->
-      "provider_error"
+      Keeper_turn_disposition.Post_commit_ambiguous
+  | ("cascade_exhausted" | "no_tool_capable_provider"
+     | "provider_runtime_error") as cls ->
+      Keeper_turn_disposition.Provider_error
+        (Keeper_turn_terminal_code.Provider_runtime_error cls)
   | _ ->
-      "unknown_error"
+      Keeper_turn_disposition.Unknown { raw_error = "" }
 
 let terminal_reason_from_runtime_blocker_fields runtime_blocker_fields =
   match assoc_string_opt "runtime_blocker_class" runtime_blocker_fields with
   | None -> None
   | Some blocker_class ->
-      let code = terminal_reason_code_of_runtime_blocker_class blocker_class in
+      let disposition = disposition_of_runtime_blocker_class blocker_class in
       let summary = assoc_string_opt "runtime_blocker_summary" runtime_blocker_fields in
       Some
-        (Keeper_turn_terminal.of_code ~source:"runtime_blocker" ?summary code)
+        (Keeper_turn_terminal.of_disposition
+           ~source:"runtime_blocker"
+           ?summary
+           disposition)
 
 let receipt_ended_at_unix receipt =
   match json_string_opt_member "ended_at" receipt with
@@ -190,10 +221,11 @@ let receipt_ended_at_unix receipt =
       if ts > 0.0 then Some ts else None
   | None -> None
 
-(* Receipt timestamps are serialized with lower precision than runtime
-   last-turn observations, so a tiny tolerance avoids treating same-turn
-   observations as newer blockers because of formatting jitter. *)
-let runtime_blocker_receipt_timestamp_epsilon_sec = 0.001
+(* Receipt timestamps are serialized as whole-second ISO strings, while runtime
+   last-turn observations keep fractional seconds.  A same-second receipt must
+   still be allowed to explain the blocker; otherwise the runtime blocker
+   silently overrides its operator disposition. *)
+let runtime_blocker_receipt_timestamp_epsilon_sec = 1.0
 
 let runtime_blocker_supersedes_receipt ~meta ~runtime_blocker_fields
     latest_receipt =
@@ -730,6 +762,19 @@ let disposition_fields_json ~(config : Coord.config) ~(meta : keeper_meta) :
       ("disposition_reason", `String disposition_reason);
     ]
 
+let decision_log_persistence_surface = "keeper_runtime_trust_decision_log"
+
+let report_decision_log_read_drop ~reason ~path ~detail =
+  Safe_ops.report_persistence_read_drop
+    ~on_drop:(fun () ->
+      Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+        ~labels:[("surface", decision_log_persistence_surface); ("reason", reason)]
+        ())
+    ~surface:decision_log_persistence_surface
+    ~reason
+    ~path
+    ~detail
+
 let latest_decision_json ~(config : Coord.config) ~(keeper_name : string) :
     Yojson.Safe.t option =
   let path = Keeper_types.keeper_decision_log_path config keeper_name in
@@ -739,9 +784,19 @@ let latest_decision_json ~(config : Coord.config) ~(keeper_name : string) :
     |> List.rev
     |> List.find_map (fun line ->
            match Yojson.Safe.from_string line with
-           | exception Yojson.Json_error _ -> None
+           | exception Yojson.Json_error detail ->
+               report_decision_log_read_drop
+                 ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+                 ~path
+                 ~detail;
+               None
            | (`Assoc _ as json) -> Some json
-           | _ -> None)
+           | _ ->
+               report_decision_log_read_drop
+                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                 ~path
+                 ~detail:"decision log row is not a JSON object";
+               None)
 
 let latest_tool_call_json ~(keeper_name : string) =
   Keeper_tool_call_log.read_latest ~keeper_name ()

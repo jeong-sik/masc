@@ -10,11 +10,11 @@
 \*
 \* Actual code (verified 2026-04-20):
 \*   lib/dashboard/dashboard_cache.ml:60   let maybe_evict map
-\*   lib/dashboard/dashboard_cache.ml:161  let get_or_compute_eio
-\*   lib/dashboard/dashboard_cache.ml:262  | Eio.Cancel.Cancelled _ as e -> ...
+\*   lib/dashboard/dashboard_cache.ml:219  let get_or_compute_eio
+\*   lib/dashboard/dashboard_cache.ml:326  | Eio.Cancel.Cancelled _ -> ...
 \*
 \* (Path drift: lib/dashboard_cache.ml -> lib/dashboard/dashboard_cache.ml.
-\*  Line drift: 265 -> 216 -> 161/262. Recorded for cross-reference.)
+\*  Line drift: 265 -> 216 -> 161/262 -> 219/326. Recorded for cross-reference.)
 
 EXTENDS Naturals
 

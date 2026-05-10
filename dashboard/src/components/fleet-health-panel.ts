@@ -67,12 +67,7 @@ export function FleetHealthPanel() {
 
   return html`
     <div class="contain-content flex flex-col gap-4">
-        <div class="flex flex-col gap-1">
-          <div class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">운영 신호 묶음</div>
-          <p class="m-0 text-xs leading-paragraph text-[var(--color-fg-muted)]">
-            이 화면은 roster가 아니라 이벤트, 비교, 도구 품질, 거버넌스 같은 플릿 신호를 보는 곳입니다.
-          </p>
-        </div>
+        <div class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">운영 신호 묶음</div>
       <${FilterChips}
         chips=${VIEW_CHIPS}
         value=${view}

@@ -404,7 +404,7 @@ let claim_next_r
   ensure_initialized config;
 
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-  with_file_lock config backlog_path (fun () ->
+  let claim_under_lock () =
     try
       match read_backlog_r config with
       | Error msg -> Claim_next_error msg
@@ -741,7 +741,10 @@ let claim_next_r
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e ->
       Claim_next_error (Printexc.to_string e)
-  )
+  in
+  match with_file_lock_r config backlog_path claim_under_lock with
+  | Ok result -> result
+  | Error err -> Claim_next_error (Masc_domain.masc_error_to_string err)
 
 (** Claim next highest priority unclaimed task (legacy string API). *)
 let claim_next config ~agent_name =
@@ -761,7 +764,7 @@ let claim_next config ~agent_name =
 let release_stale_claims config ~ttl_seconds =
   ensure_initialized config;
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-  with_file_lock config backlog_path (fun () ->
+  let release_under_lock () =
     match read_backlog_r config with
     | Error msg ->
         Log.Orchestrator.error
@@ -775,6 +778,26 @@ let release_stale_claims config ~ttl_seconds =
           `Float (max 0.0 (now_f -. ts))
         in
         let stale_tasks = ref [] in
+        (* RFC-0034.d: clear assignee's [current_task] mirror when we
+           release a stale Claimed/InProgress task.  Best-effort — agent
+           file lock is a different file/identity from the backlog lock,
+           and on failure we keep the backlog mutation (the source of
+           truth) and only log the agent-side miss.  Eio.Cancel.Cancelled
+           is re-raised to match surrounding cancel semantics. *)
+        let clear_assignee_current_task ~assignee ~task_id =
+          try
+            Coord_task.update_local_agent_state config ~agent_name:assignee
+              (fun agent ->
+                if agent.current_task = Some task_id
+                then { agent with current_task = None }
+                else agent)
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+              Log.Orchestrator.warn
+                "[stale-claims] agent state clear failed for %s task=%s: %s"
+                assignee task_id (Printexc.to_string exn)
+        in
         let updated_tasks = List.map (fun (task : task) ->
           match task.task_status with
           | Claimed { assignee; claimed_at } ->
@@ -788,6 +811,7 @@ let release_stale_claims config ~ttl_seconds =
                   ("age_s", age_seconds_json ts);
                   ("ts", `String now_str);
                 ]);
+                clear_assignee_current_task ~assignee ~task_id:task.id;
                 { task with
                   task_status = Todo;
                   worktree = None;
@@ -804,6 +828,7 @@ let release_stale_claims config ~ttl_seconds =
                   ("age_s", age_seconds_json ts);
                   ("ts", `String now_str);
                 ]);
+                clear_assignee_current_task ~assignee ~task_id:task.id;
                 { task with
                   task_status = Todo;
                   worktree = None;
@@ -817,4 +842,11 @@ let release_stale_claims config ~ttl_seconds =
           write_backlog config updated_backlog
         end;
         List.rev !stale_tasks
-  )
+  in
+  match with_file_lock_r config backlog_path release_under_lock with
+  | Ok released -> released
+  | Error err ->
+      Log.Orchestrator.warn
+        "[stale-claims] skipping backlog mutation due to lock failure: %s"
+        (Masc_domain.masc_error_to_string err);
+      []

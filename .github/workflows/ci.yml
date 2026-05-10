@@ -124,6 +124,7 @@ jobs:
       tla: ${{ steps.scope.outputs.tla }}
       oas_pin: ${{ steps.scope.outputs.oas_pin }}
       spec_refs: ${{ steps.scope.outputs.spec_refs }}
+      nav_event_parity: ${{ steps.scope.outputs.nav_event_parity }}
 
     steps:
       - name: Checkout
@@ -143,7 +144,7 @@ jobs:
           set -euo pipefail
 
           emit_all_true() {
-            for key in build lint dashboard health health_snapshot lib_deps doc_truth tla oas_pin spec_refs; do
+            for key in build lint dashboard health health_snapshot lib_deps doc_truth tla oas_pin spec_refs nav_event_parity; do
               echo "${key}=true" >> "$GITHUB_OUTPUT"
             done
           }
@@ -194,6 +195,7 @@ jobs:
           tla=false
           oas_pin=false
           spec_refs=false
+          nav_event_parity=false
 
           if has_match '^(\.github/workflows/ci\.yml|\.github/actions/)'; then
             ci_core=true
@@ -239,6 +241,10 @@ jobs:
             spec_refs=true
           fi
 
+          if has_match '^(dashboard/src/config/navigation\.ts|dashboard/src/types/sse\.ts|lib/dashboard/dashboard_nav_event\.ml|scripts/check-dashboard-nav-event-parity\.sh)$'; then
+            nav_event_parity=true
+          fi
+
           if [ "${ci_core}" = true ]; then
             build=true
             lint=true
@@ -263,9 +269,10 @@ jobs:
           echo "tla=${tla}" >> "$GITHUB_OUTPUT"
           echo "oas_pin=${oas_pin}" >> "$GITHUB_OUTPUT"
           echo "spec_refs=${spec_refs}" >> "$GITHUB_OUTPUT"
+          echo "nav_event_parity=${nav_event_parity}" >> "$GITHUB_OUTPUT"
 
-          printf 'CI scope => build=%s lint=%s dashboard=%s health=%s health_snapshot=%s lib_deps=%s doc_truth=%s tla=%s oas_pin=%s\n' \
-            "${build}" "${lint}" "${dashboard}" "${health}" "${health_snapshot}" "${lib_deps}" "${doc_truth}" "${tla}" "${oas_pin}"
+          printf 'CI scope => build=%s lint=%s dashboard=%s health=%s health_snapshot=%s lib_deps=%s doc_truth=%s tla=%s oas_pin=%s nav_event_parity=%s\n' \
+            "${build}" "${lint}" "${dashboard}" "${health}" "${health_snapshot}" "${lib_deps}" "${doc_truth}" "${tla}" "${oas_pin}" "${nav_event_parity}"
 
   meta:
     name: Meta Guards
@@ -347,15 +354,27 @@ jobs:
         if: needs.changes.outputs.spec_refs == 'true'
         run: bash scripts/lint/spec-line-refs.sh
 
+      - name: Check dashboard nav-event allowlist parity
+        if: needs.changes.outputs.nav_event_parity == 'true'
+        run: |
+          chmod +x scripts/check-dashboard-nav-event-parity.sh
+          scripts/check-dashboard-nav-event-parity.sh --check
+
       - name: Check sandbox dune version alignment
         run: |
           chmod +x scripts/check-sandbox-dune-version.sh
           scripts/check-sandbox-dune-version.sh
 
       - name: Meta bug-class gates (SSOT, SIL, STR, BND)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH_PROTECTION_REPOSITORY: ${{ github.repository }}
+          BRANCH_PROTECTION_BRANCH: ${{ github.base_ref || github.ref_name }}
+          BRANCH_PROTECTION_REQUIRED_CONTEXTS: CI Gate,Draft Auto-Merge Guard
         run: |
           chmod +x scripts/ci/*.sh
           echo "=== Running meta bug-class gates (see #9516 #9517 #9519 #9521) ==="
+          bash scripts/ci/check-main-branch-protection.sh
           bash scripts/ci/check-ssot-spawn-drift.sh
           bash scripts/check-spec-truth.sh
           bash scripts/ci/check-silent-failure-patterns.sh

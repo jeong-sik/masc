@@ -1364,8 +1364,9 @@ let test_keeper_up_resumes_auto_paused_keeper () =
           runtime =
             {
               meta.runtime with
-              last_blocker = blocker_text;
-              last_blocker_class = Some Keeper_types.Turn_timeout;
+              last_blocker =
+                Some (Keeper_types.blocker_info_of_class
+                        ~detail:blocker_text Keeper_types.Turn_timeout);
             };
         }
       in
@@ -1390,10 +1391,8 @@ let test_keeper_up_resumes_auto_paused_keeper () =
       Alcotest.(check bool) "meta paused false" false resumed.paused;
       Alcotest.(check bool) "auto resume delay cleared" true
         (Option.is_none resumed.auto_resume_after_sec);
-      Alcotest.(check string) "runtime blocker cleared" ""
-        resumed.runtime.last_blocker;
-      Alcotest.(check bool) "runtime blocker class cleared" true
-        (Option.is_none resumed.runtime.last_blocker_class))
+      Alcotest.(check bool) "runtime blocker cleared" true
+        (Option.is_none resumed.runtime.last_blocker))
 
 let test_keeper_up_keeps_paused_keeper_with_continue_gate_blocker () =
   Eio_main.run @@ fun env ->
@@ -1436,8 +1435,15 @@ let test_keeper_up_keeps_paused_keeper_with_continue_gate_blocker () =
           runtime =
             {
               meta.runtime with
-              last_blocker = blocker_text;
-              last_blocker_class = None;
+              (* Pre-refactor this test stamped only [last_blocker = blocker_text]
+                 with [last_blocker_class = None] and relied on the substring
+                 [blocker_class_of_string] matcher to recover the typed class.
+                 After the unified [blocker_info] migration the typed class is
+                 the only authoritative source — set it directly. *)
+              last_blocker =
+                Some (Keeper_types.blocker_info_of_class
+                        ~detail:blocker_text
+                        Keeper_types.Ambiguous_post_commit_timeout);
             };
         }
       in
@@ -1462,8 +1468,10 @@ let test_keeper_up_keeps_paused_keeper_with_continue_gate_blocker () =
       Alcotest.(check bool) "meta remains paused" true still_paused.paused;
       Alcotest.(check bool) "auto resume delay preserved" true
         (Option.is_some still_paused.auto_resume_after_sec);
-      Alcotest.(check string) "runtime blocker preserved" blocker_text
-        still_paused.runtime.last_blocker)
+      (match still_paused.runtime.last_blocker with
+       | Some info ->
+         Alcotest.(check string) "runtime blocker preserved" blocker_text info.detail
+       | None -> Alcotest.fail "runtime blocker should be preserved"))
 
 let test_keeper_up_keeps_paused_keeper_with_pending_approval () =
   Eio_main.run @@ fun env ->
@@ -1511,8 +1519,9 @@ let test_keeper_up_keeps_paused_keeper_with_pending_approval () =
           runtime =
             {
               meta.runtime with
-              last_blocker = blocker_text;
-              last_blocker_class = Some Keeper_types.Turn_timeout;
+              last_blocker =
+                Some (Keeper_types.blocker_info_of_class
+                        ~detail:blocker_text Keeper_types.Turn_timeout);
             };
         }
       in
@@ -1549,8 +1558,10 @@ let test_keeper_up_keeps_paused_keeper_with_pending_approval () =
       Alcotest.(check bool) "meta remains paused" true still_paused.paused;
       Alcotest.(check bool) "auto resume delay preserved" true
         (Option.is_some still_paused.auto_resume_after_sec);
-      Alcotest.(check string) "runtime blocker preserved" blocker_text
-        still_paused.runtime.last_blocker)
+      (match still_paused.runtime.last_blocker with
+       | Some info ->
+         Alcotest.(check string) "runtime blocker preserved" blocker_text info.detail
+       | None -> Alcotest.fail "runtime blocker should be preserved"))
 
 let test_keeper_status_defaults_name_to_caller () =
   Eio_main.run @@ fun env ->
@@ -2197,7 +2208,7 @@ let test_keeper_status_ignores_stale_cascade_observation () =
       let sorted_strings = List.sort String.compare in
       Alcotest.(check (option string))
         ("current cascade name wins over stale metrics\n" ^ status_dump)
-        (Some meta.cascade_name)
+        (Some (Keeper_types.cascade_name_of_meta meta))
         (observability |> member "cascade_name" |> to_string_option);
       Alcotest.(check bool) "stale observation ignored" false
         (observability |> member "recent_turn_observation" |> to_bool);
@@ -2938,6 +2949,39 @@ proactive_enabled = true
       Alcotest.(check (option (float 0.001))) "last output tokens per sec surfaced"
         (Some 20.0)
         (json |> member "metrics" |> member "last_output_tokens_per_sec" |> to_float_option);
+      let zero_latency_base = read_keeper_meta_exn config keeper_name in
+      let zero_latency_meta =
+        {
+          zero_latency_base with
+          runtime =
+            {
+              zero_latency_base.runtime with
+              usage =
+                {
+                  zero_latency_base.runtime.usage with
+                  last_latency_ms = 0;
+                };
+            };
+          updated_at = Masc_domain.now_iso ();
+        }
+      in
+      (match Masc_mcp.Keeper_types.write_meta config zero_latency_meta with
+      | Ok () -> ()
+      | Error err -> Alcotest.fail ("zero latency meta write failed: " ^ err));
+      let zero_status, zero_json =
+        Masc_mcp.Dashboard_http_keeper.keeper_config_json config keeper_name
+      in
+      Alcotest.(check bool) "zero latency config found" true (zero_status = `OK);
+      Alcotest.(check bool) "zero latency surfaced as missing" true
+        (zero_json |> member "metrics" |> member "last_latency_ms" = `Null);
+      Alcotest.(check (option (float 0.001))) "zero latency total tps missing"
+        None
+        (zero_json |> member "metrics" |> member "last_total_tokens_per_sec"
+       |> to_float_option);
+      Alcotest.(check (option (float 0.001))) "zero latency output tps missing"
+        None
+        (zero_json |> member "metrics" |> member "last_output_tokens_per_sec"
+       |> to_float_option);
       (* Prompt source depends on runtime bootstrap and any restored overrides;
          accepted values come from Prompt_registry.resolve_prompt_unlocked. *)
       let prompt_source =
@@ -2961,8 +3005,7 @@ proactive_enabled = true
             Alcotest.fail ("keeper meta reload failed before stale write: " ^ err)
       in
       let stale_meta =
-        { stale_base with
-          cascade_name = "vendor_mix_balanced";
+        { (Keeper_types.set_cascade_name "vendor_mix_balanced" stale_base) with
           updated_at = Masc_domain.now_iso ();
         }
       in

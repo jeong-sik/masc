@@ -1,0 +1,282 @@
+{
+  "__meta": {
+    "purpose": "MASC dashboard IA — surface and section open counters (RFC-0049). Imports into Grafana 10+ via File → Import.",
+    "metrics": [
+      "dashboard_surface_open_total{surface}",
+      "dashboard_section_open_total{surface, section, redirected_from}"
+    ],
+    "companion_doc": "docs/observability/dashboard-surface-metrics.md",
+    "code_refs": [
+      "lib/dashboard/dashboard_nav_event.ml",
+      "dashboard/src/lib/nav-telemetry.ts",
+      "dashboard/src/router.ts",
+      "scripts/dashboard-ia-usage.sh"
+    ],
+    "consumed_by": [
+      "RFC-0048 PR-C deletion threshold report"
+    ]
+  },
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "datasource", "uid": "grafana" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "graphTooltip": 1,
+  "liveNow": false,
+  "panels": [
+    {
+      "type": "barchart",
+      "title": "Surface opens — last 7d",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Top-level surface openings in the last 7 days. Counter is cumulative since process start; this is the increase over the time range.",
+      "targets": [
+        {
+          "expr": "sum by (surface) (increase(dashboard_surface_open_total[7d]))",
+          "legendFormat": "{{surface}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "palette-classic" }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "legend": { "displayMode": "list", "placement": "right", "showLegend": true },
+        "xTickLabelRotation": 0,
+        "showValue": "always"
+      }
+    },
+    {
+      "type": "barchart",
+      "title": "Section direct opens — last 7d (redirected_from=none)",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Direct opens are the deletion-threshold metric per RFC-0048 §4.4. Sections low on this chart are candidates for hide → soak → delete (RFC-0048 §4.2).",
+      "targets": [
+        {
+          "expr": "sum by (surface, section) (increase(dashboard_section_open_total{redirected_from=\"none\"}[7d]))",
+          "legendFormat": "{{surface}}:{{section}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "palette-classic" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "green", "value": 20 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "legend": { "displayMode": "list", "placement": "right", "showLegend": true },
+        "showValue": "always"
+      }
+    },
+    {
+      "type": "table",
+      "title": "Section ranking — direct vs total (last 7d)",
+      "gridPos": { "x": 0, "y": 9, "w": 24, "h": 11 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Direct opens drive RFC-0048 §4.4 thresholds. Total includes redirect-driven hits — large gap between Direct and Total means the section is alive only because of legacy bookmarks (the redirect can stay, the section component can be deleted).",
+      "targets": [
+        {
+          "expr": "sum by (surface, section) (increase(dashboard_section_open_total{redirected_from=\"none\"}[7d]))",
+          "legendFormat": "Direct",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "sum by (surface, section) (increase(dashboard_section_open_total[7d]))",
+          "legendFormat": "Total",
+          "refId": "B",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": { "byField": "section", "mode": "outer" }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time 1": true, "Time 2": true, "surface 2": true },
+            "renameByName": {
+              "surface 1": "Surface",
+              "section": "Section",
+              "Value #A": "Direct",
+              "Value #B": "Total"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "auto", "displayMode": "auto" }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Direct" },
+            "properties": [
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "red", "value": null },
+                    { "color": "yellow", "value": 5 },
+                    { "color": "green", "value": 20 }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": { "type": "color-background" }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "sortBy": [{ "displayName": "Direct", "desc": false }]
+      }
+    },
+    {
+      "type": "table",
+      "title": "Redirect provenance — last 7d",
+      "gridPos": { "x": 0, "y": 20, "w": 24, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Sections reached only via redirect from a deleted/renamed ID. Each row is a legacy ID still in use somewhere (operator bookmark, external link, hardcoded reference). Removing the source ID requires an audit of these origins.",
+      "targets": [
+        {
+          "expr": "sum by (surface, section, redirected_from) (increase(dashboard_section_open_total{redirected_from!=\"none\"}[7d]))",
+          "legendFormat": "{{surface}}:{{section}} ← {{redirected_from}}",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true },
+            "renameByName": {
+              "surface": "Surface",
+              "section": "Section",
+              "redirected_from": "Redirected from",
+              "Value": "Opens"
+            }
+          }
+        }
+      ],
+      "options": {
+        "sortBy": [{ "displayName": "Opens", "desc": true }]
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Total dashboard opens — last 7d",
+      "gridPos": { "x": 0, "y": 29, "w": 8, "h": 6 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Sanity check: how much dashboard activity is even happening. If this is near zero, RFC-0048 PR-C should not run — the data isn't dense enough to justify deletions.",
+      "targets": [
+        {
+          "expr": "sum(increase(dashboard_surface_open_total[7d]))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 50 },
+              { "color": "green", "value": 200 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Surface opens — rate over time",
+      "gridPos": { "x": 8, "y": 29, "w": 16, "h": 6 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Per-surface open rate. Useful to spot diurnal patterns and confirm telemetry is actually flowing — a flat line at zero means the client observer never fired (PR-1 not deployed, or hashchange listener broke).",
+      "targets": [
+        {
+          "expr": "sum by (surface) (rate(dashboard_surface_open_total[15m]))",
+          "legendFormat": "{{surface}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": { "mode": "palette-classic" }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true }
+      }
+    }
+  ],
+  "refresh": "5m",
+  "schemaVersion": 39,
+  "tags": ["masc", "dashboard", "ia", "rfc-0049"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": false, "text": "Prometheus", "value": "Prometheus" },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "multi": false,
+        "name": "DS_PROMETHEUS",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": { "from": "now-7d", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "MASC Dashboard IA — Surface & Section",
+  "uid": "masc-dashboard-surface",
+  "version": 1,
+  "weekStart": ""
+}

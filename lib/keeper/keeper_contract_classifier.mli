@@ -35,8 +35,10 @@ type world_observation = {
           processed. Mirrors the count rendered after
           ["### Board Activity"]. *)
   has_discovered_work_section : bool;
-      (** True iff the prompt build emitted a
-          ["## Discovered Work (auto, Ns interval)"] section. *)
+      (** True iff the prompt carries concrete discovered-work payload that
+          should satisfy the weakest actionable-signal tier. A timer-only
+          work-discovery nudge is intentionally excluded; concrete tasks,
+          board activity, and worktree deltas have their own signals. *)
 }
 
 (** Project the full keeper heartbeat observation into the compact contract
@@ -77,6 +79,14 @@ val classify_actionable_signal_for_tools :
 (** Backward-compatible alias for [classify_actionable_signal_for_tools]. *)
 val classify_actionable_signal_with_allowed_tools :
   allowed_tool_names:string list -> world_observation -> actionable_signal
+
+(** [requires_tool_support_for_allowed_tools ~allowed_tool_names o] is true
+    when [o] carries an actionable signal that can be satisfied by at least
+    one tool in [allowed_tool_names]. Use this before provider routing so the
+    same structured signal that later enforces the completion contract also
+    selects a provider capable of exposing keeper tools. *)
+val requires_tool_support_for_allowed_tools :
+  allowed_tool_names:string list -> world_observation -> bool
 
 (** [is_actionable s] is [false] iff [s = No_actionable_signal].
     Provided so callers comparing the structured signal against the

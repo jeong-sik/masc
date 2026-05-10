@@ -1,9 +1,11 @@
 (** Keeper_identity — centralized keeper identity helpers. *)
 
-let generate_trace_id () : string =
-  let ts = int_of_float (Time_compat.now () *. 1000.0) in
-  let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFF in
-  Printf.sprintf "trace-%d-%05x" ts hash
+let trace_counter = Atomic.make 0
+
+let generate_trace_id ?(now = Time_compat.now ()) () : string =
+  let ts = int_of_float (now *. 1000.0) in
+  let seq = Atomic.fetch_and_add trace_counter 1 land 0xFFFFF in
+  Printf.sprintf "trace-%d-%05x" ts seq
 
 let sanitize_name (name : string) : string =
   String.map

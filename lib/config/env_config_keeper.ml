@@ -442,18 +442,30 @@ module KeeperKeepalive = struct
 
   (** Hard ceiling for all keeper timeout constants (seconds).
       No timeout may exceed this value regardless of env override.
-      Default: 600 (10 minutes). *)
-  let timeout_hard_ceiling_sec = 600.0
+
+      Default: 900 (15 minutes), lifted from 600 in PR #13861's
+      RFC-0012/0022 update permitting per-cascade turn_timeout_sec
+      overrides. Local-LLM cascades that legitimately run 27 B turns
+      ≥600 s can now opt in via env or the upcoming cascade.toml
+      override; remote cascades stay at the global default 600.
+
+      Promotion to 1 800 s requires a follow-up RFC plus one week of
+      [masc_keeper_turns_total{terminated_by="turn_timeout"}] and p95
+      duration data — see RFC-0012 §Out of scope. *)
+  let timeout_hard_ceiling_sec = 900.0
 
   (** Wall-clock timeout in seconds for a single unified turn (including all
       retries and cascade fallbacks). Prevents indefinite blocking when an
       upstream LLM hangs at the TCP level.
-      Env: [MASC_KEEPER_TURN_TIMEOUT_SEC]. Default: 600. Range: [60, 600].
+      Env: [MASC_KEEPER_TURN_TIMEOUT_SEC]. Default: 600. Range: [60, 900].
 
-      The default is deliberately the global hard ceiling. Individual OAS
-      provider attempts are capped by [oas_timeout_default_sec] and
-      provider-specific bounds below, so the full turn budget remains a
-      container for fallback/retry work rather than one provider's spend. *)
+      The default stays at 600 (the prior hard ceiling) so existing
+      remote cascades keep their budget unchanged; the lifted ceiling
+      only fires when an operator opts in via env or cascade override.
+      Individual OAS provider attempts are still capped by
+      [oas_timeout_default_sec] and provider-specific bounds below, so
+      the full turn budget remains a container for fallback/retry work
+      rather than one provider's spend. *)
   let turn_timeout_sec =
     Float.max 60.0 (Float.min timeout_hard_ceiling_sec
       (get_float ~default:600.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
@@ -506,7 +518,7 @@ module KeeperKeepalive = struct
 
   (** Maximum turns per single OAS Agent.run call.
       Keeper resumes via checkpoint in the next keepalive cycle when
-      {!Oas_worker.TurnBudgetExhausted} is returned.
+      {!Cascade_runner.TurnBudgetExhausted} is returned.
       Previous default of 200 caused "ambiguous partial commit" errors:
       the 300s timeout would fire mid-turn after tools had already executed,
       leaving the keeper in an ambiguous state. With 30 turns per call and
@@ -571,6 +583,20 @@ module KeeperKeepalive = struct
       (Float.min 600.0
          (get_float ~default:120.0 "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"))
 
+  (** Stdout-idle timeout for CLI subprocess transports (Kimi CLI today;
+      Claude Code / Gemini CLI / Codex CLI need an OAS upstream change to
+      expose [stdout_idle_timeout_s] in their transport configs).
+      The CLI subprocess is aborted via SIGINT if no stdout line arrives
+      within this many seconds. Read fresh per-turn via
+      {!Keeper_runtime_resolved.cli_subprocess_idle_sec}.
+      Env: [MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC]. Default: 120. Range: [10, 600].
+      @category Timeouts
+      @ops_class operator *)
+  let cli_subprocess_idle_sec =
+    Float.max 10.0
+      (Float.min 600.0
+         (get_float ~default:120.0 "MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC"))
+
   (** Consecutive idle tool repetitions before on_idle hook issues Skip.
       Below this: graduated Nudge messages.
       With tool_choice=Any, the model always calls tools, so idle
@@ -634,14 +660,14 @@ module KeeperWatchdog = struct
     max 1 (get_int ~default:5 "MASC_KEEPER_ESCALATION_THRESHOLD")
 
   (** Fleet batch-termination detection window in seconds.
-      Default: 30. *)
+      Default: 60. *)
   let batch_window_sec =
-    Float.max 1.0 (get_float ~default:30.0 "MASC_KEEPER_BATCH_WINDOW_SEC")
+    Float.max 1.0 (get_float ~default:60.0 "MASC_KEEPER_BATCH_WINDOW_SEC")
 
   (** Number of distinct keepers terminating within [batch_window_sec] before
-      emitting a fleet batch alert. Default: 3. *)
+      emitting a fleet batch alert. Default: 5. *)
   let batch_threshold =
-    max 1 (get_int ~default:3 "MASC_KEEPER_BATCH_THRESHOLD")
+    max 1 (get_int ~default:5 "MASC_KEEPER_BATCH_THRESHOLD")
 end
 
 (** {1 gRPC Heartbeat Reconnect} *)
@@ -828,7 +854,7 @@ end
 
     Phase 0 observability for the tiered-hydration redesign (Option C).
     When enabled, every keeper wake captures an approximation of the LLM
-    request payload size just before [Oas_worker.run_named] is invoked.
+    request payload size just before [Keeper_turn_driver.run_named] is invoked.
     The record is appended to
     [$MASC_BASE_PATH/data/keeper-wake-payload/YYYY-MM-DD.jsonl] via
     [Dashboard_harness_health.record_wake_payload].
@@ -860,7 +886,7 @@ module KeeperCascade = struct
       Matching is case-insensitive; empty entries are dropped.
 
       Semantics: when set, keeper turns pass this list as [provider_filter]
-      into [Oas_worker.run_named], which applies it during MASC cascade
+      into [Keeper_turn_driver.run_named], which applies it during MASC cascade
       provider resolution. The runtime keeps only matching providers from
       the resolved profile; if the filter leaves zero providers, OAS falls back
       to the unfiltered profile (see [apply_provider_filter] safety net).
@@ -929,10 +955,19 @@ module KeeperRetryBackoff = struct
       it up — the catalog only scans lib/config/env_config_*.ml.
 
       Env: [MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC].
-      Default: 60.0. *)
+      Default: 180.0.
+      @category Timeouts
+      @ops_class operator
+
+      Calibrated to match [Cascade_attempt_liveness.local_27b.ttft_max]
+      (180 s) so that slow-but-honest Ollama 27B/70B streams are not
+      denied a degraded retry solely because their first-token latency
+      exceeds the old 60 s floor.  Cloud providers rarely need retries
+      at all; when they do, 180 s is still well within reasonable
+      tail latency. *)
   let degraded_retry_slot_phase_budget_sec =
     Float.max 5.0
-      (get_float ~default:60.0
+      (get_float ~default:180.0
          "MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC")
 end
 

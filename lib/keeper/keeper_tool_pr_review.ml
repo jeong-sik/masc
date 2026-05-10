@@ -66,6 +66,58 @@ let route_fields ?via (meta : keeper_meta) =
         "route_via", `String route_via;
       ]
 
+let binding_json (binding : Keeper_gh_env.keeper_binding) =
+  `Assoc
+    [
+      "effective_github_identity", `String binding.effective_github_identity;
+      ( "credential_scope",
+        `String
+          (Keeper_gh_env.credential_scope_to_string binding.credential_scope) );
+      "git_identity_mode", `String binding.git_identity_mode;
+    ]
+
+let identity_attestation_fields ~(config : Coord.config) (meta : keeper_meta) =
+  let base_fields =
+    [
+      "schema", `String "keeper.pr_review_identity_attestation.v1";
+      "keeper", `String meta.name;
+      "agent_name", `String meta.agent_name;
+      ( "trace_id",
+        `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) );
+      "source", `String "keeper_pr_review_tool";
+    ]
+  in
+  match Keeper_gh_env.keeper_binding config ~keeper_name:meta.name with
+  | Error reason ->
+      [
+        ( "identity_attestation",
+          `Assoc
+            (base_fields
+             @ [
+                 "credential_binding_ok", `Bool false;
+                 "error", `String "credential_binding_failed";
+                 "reason", `String reason;
+               ]) );
+      ]
+  | Ok binding ->
+      let credential = binding_json binding in
+      [
+        "credential", credential;
+        ( "identity_attestation",
+          `Assoc
+            (base_fields
+             @ [
+                 "credential_binding_ok", `Bool true;
+                 ( "effective_github_identity",
+                   `String binding.effective_github_identity );
+                 ( "credential_scope",
+                   `String
+                     (Keeper_gh_env.credential_scope_to_string
+                        binding.credential_scope) );
+                 "git_identity_mode", `String binding.git_identity_mode;
+               ]) );
+      ]
+
 (* Both "pr_number" and "number" are accepted for schema-drift compat. *)
 let pr_number_of_args args =
   let from_pr = Safe_ops.json_int ~default:0 "pr_number" args in
@@ -128,10 +180,14 @@ let run_pr_review_shell ~(config : Coord.config) ~(meta : keeper_meta)
     let host_cmd =
       Printf.sprintf "cd %s && %s" (Filename.quote root) cmd
     in
+    let argv = [ "/bin/zsh"; "-lc"; host_cmd ] in
     let status, output =
-      Process_eio.run_argv_with_status
+      Masc_exec.Exec_gate.run_argv_with_status
+        ~actor:`Keeper_shell
+        ~raw_source:(String.concat " " argv)
+        ~summary:"keeper tool pr review host"
         ~timeout_sec
-        [ "/bin/zsh"; "-lc"; host_cmd ]
+        argv
     in
     { status; output; via = "host" }
 
@@ -330,7 +386,9 @@ let handle_keeper_pr_review_read
              ; "repo", `String repo_slug
              ; "execution_via", `String meta_result.via
              ; "hint", `String "PR may have been closed/deleted or the number is wrong. Use keeper_pr_list (or `gh pr list`) to see open PRs before retrying."
-             ] @ route_fields ~via:meta_result.via meta))
+             ]
+             @ route_fields ~via:meta_result.via meta
+             @ identity_attestation_fields ~config meta))
     else
       Yojson.Safe.to_string
         (`Assoc
@@ -342,7 +400,9 @@ let handle_keeper_pr_review_read
              ; "diff", `String diff_result.output
              ; "diff_truncated", `Bool diff_truncated
              ; "diff_status", `Bool (status_ok diff_result.status)
-             ] @ route_fields ~via:meta_result.via meta))
+             ]
+             @ route_fields ~via:meta_result.via meta
+             @ identity_attestation_fields ~config meta))
 ;;
 
 let handle_keeper_pr_review_comment
@@ -410,7 +470,9 @@ let handle_keeper_pr_review_comment
                       ; "event", `String (pr_review_event_to_string event)
                       ; "keeper", `String meta.name
                       ; "preflight", preflight
-                      ] @ route_fields ~via:preflight_via meta))
+                      ]
+                      @ route_fields ~via:preflight_via meta
+                      @ identity_attestation_fields ~config meta))
              | Ok approve_preflight_json ->
                  (* Use gh pr review to create a review *)
                  let cmd =
@@ -444,6 +506,7 @@ let handle_keeper_pr_review_comment
                       ; "keeper", `String meta.name
                       ]
                       @ route_fields ~via:result.via meta
+                      @ identity_attestation_fields ~config meta
                       @
                       match approve_preflight_json with
                       | Some json -> [ "preflight", json ]
@@ -501,5 +564,7 @@ let handle_keeper_pr_review_reply
                ; "comment_id", `Int comment_id
                ; "output", `String result.output
                ; "keeper", `String meta.name
-               ] @ route_fields ~via:result.via meta))
+               ]
+               @ route_fields ~via:result.via meta
+               @ identity_attestation_fields ~config meta))
 ;;

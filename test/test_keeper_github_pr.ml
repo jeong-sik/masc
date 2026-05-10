@@ -146,6 +146,14 @@ let fake_gh_echo_script =
 
 let fake_gh_pr_create_504_then_view_script =
   "#!/bin/sh\n\
+   if [ \"$1\" = \"auth\" ] && [ \"$2\" = \"status\" ]; then\n\
+   \  printf 'github.com\\n'\n\
+   \  exit 0\n\
+   fi\n\
+   if [ \"$1\" = \"api\" ] && [ \"$2\" = \"graphql\" ]; then\n\
+   \  printf 'test-user\\n'\n\
+   \  exit 0\n\
+   fi\n\
    if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"create\" ]; then\n\
    \  printf 'pull request create failed: HTTP 504: 504 Gateway Timeout (https://api.github.com/graphql)\\n' >&2\n\
    \  exit 1\n\
@@ -371,6 +379,73 @@ let test_pr_create_recovers_visible_pr_after_transient_504 () =
   check bool "returns recovered PR metadata" true
     (contains_substring raw "https://github.com/jeong-sik/masc-mcp/pull/13799")
 
+(* Classifier-level pin: gh CLI's verbatim "a pull request for branch ...
+   already exists" prefix must classify as the deterministic
+   [pr_already_exists] recovery reason; transient 504/timeout payloads
+   continue to map to [pr_create_transient_failure]; unrelated payloads
+   stay [None]. Verifier loop regression evidence (2026-05-07): keeper
+   keeper_pr_create returned the verbatim payload across 6+ turns,
+   inflating the consecutive-failure counter until the OAS 900s budget
+   tripped and the keeper auto-paused.
+
+   The integration path (handle_keeper_pr_create end-to-end through
+   Process_eio brokered route) is exercised separately by the existing
+   504 test; classifier-only unit tests here pin the wording contract
+   without depending on that path. *)
+let already_exists_payload =
+  "a pull request for branch \"yousleepwhen:feature/dup\" into branch \
+   \"main\" already exists:\n\
+   https://github.com/jeong-sik/masc-mcp/pull/13930\n"
+
+let already_exists_payload_uppercase =
+  "A Pull Request For Branch \"yousleepwhen:feature/dup\" into branch \
+   \"main\" Already Exists:\n\
+   https://github.com/jeong-sik/masc-mcp/pull/13930\n"
+
+let transient_504_payload =
+  "pull request create failed: HTTP 504: 504 Gateway Timeout \
+   (https://api.github.com/graphql)\n"
+
+let unrelated_failure_payload =
+  "pull request create failed: GraphQL: Resource not accessible by \
+   integration (createPullRequest)\n"
+
+let non_pr_already_exists_payload =
+  "git push failed: remote ref already exists for refs/heads/feature/dup\n"
+
+let test_classifier_already_exists_matches_verbatim_payload () =
+  check bool "verbatim already-exists matches" true
+    (K.For_testing.pr_create_failure_already_exists already_exists_payload);
+  check bool "case-insensitive already-exists matches" true
+    (K.For_testing.pr_create_failure_already_exists
+       already_exists_payload_uppercase);
+  check bool "504 payload does not match already-exists" false
+    (K.For_testing.pr_create_failure_already_exists transient_504_payload);
+  check bool "unrelated failure does not match already-exists" false
+    (K.For_testing.pr_create_failure_already_exists unrelated_failure_payload);
+  check bool "non-PR already-exists does not match" false
+    (K.For_testing.pr_create_failure_already_exists
+       non_pr_already_exists_payload);
+  check bool "empty payload does not match already-exists" false
+    (K.For_testing.pr_create_failure_already_exists "")
+
+let test_classifier_recovery_reason_routing () =
+  check (option string) "already-exists routes to pr_already_exists"
+    (Some "pr_already_exists")
+    (K.For_testing.classify_pr_create_recovery already_exists_payload);
+  check (option string) "504 routes to pr_create_transient_failure"
+    (Some "pr_create_transient_failure")
+    (K.For_testing.classify_pr_create_recovery transient_504_payload);
+  check (option string) "unrelated failure does not classify"
+    None
+    (K.For_testing.classify_pr_create_recovery unrelated_failure_payload);
+  check (option string) "non-PR already-exists does not classify"
+    None
+    (K.For_testing.classify_pr_create_recovery non_pr_already_exists_payload);
+  check (option string) "empty payload does not classify"
+    None
+    (K.For_testing.classify_pr_create_recovery "")
+
 (* Regression: any preset that grants the [github] group in
    config/tool_policy.toml must satisfy [mutation_preset_ok]. Without
    this, [keeper_pr_create] is visible in the keeper tool surface but
@@ -425,6 +500,13 @@ let () =
             test_pr_create_hard_mode_routes_through_broker;
           test_case "pr create recovers visible PR after transient 504" `Quick
             test_pr_create_recovers_visible_pr_after_transient_504;
+        ] );
+      ( "recovery_classifier",
+        [
+          test_case "already-exists wording matches verbatim" `Quick
+            test_classifier_already_exists_matches_verbatim_payload;
+          test_case "recovery reason routes by payload" `Quick
+            test_classifier_recovery_reason_routing;
         ] );
       ( "preset_gate",
         [

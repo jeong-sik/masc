@@ -18,6 +18,10 @@ type turn_prompt_context =
   ; ctx_work : Keeper_exec_context.working_context
   }
 
+val sanitize_user_message : string -> string
+(** Remove role/jailbreak prefixes from a turn user message before it is
+    appended to the OAS context. *)
+
 val build_turn_context
   :  ctx:Keeper_run_context.run_context
   -> build_turn_prompt:(base_system_prompt:string -> messages:Agent_sdk.Types.message list -> Keeper_agent_prompt_metrics.turn_prompt)

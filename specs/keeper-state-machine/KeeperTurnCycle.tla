@@ -48,14 +48,21 @@
 (*     line 1559  mark_turn_started        (StartTurn)                     *)
 (*     line 1576  set_turn_decision_stage  (GuardOk -- when measurement bound) *)
 (*     line 1616  mark_turn_finished       (FinishTurn -- in finally)      *)
-(*     line 1757/1800/1816  set_turn_cascade_state  (CascadeTrying/Done/Exhausted) *)
+(*     retry_loop sets CascadeDone/Exhausted directly; CascadeTrying is    *)
+(*     now materialised inside the disclosure hook below (atomic group     *)
+(*     with SelectToolPolicy) so the [idle -> trying] jump is avoided.     *)
 (*     line 1813  set_turn_selected_model  (CascadeDone)                   *)
 (*     line 2052  prepare_turn_retry_after_compaction  (RetryAfterCompaction) *)
 (*                                                                         *)
-(*   lib/keeper/keeper_agent_run.ml -- tool disclosure / policy selection  *)
-(*     line 1755  set_turn_decision_stage = Decision_tool_policy_selected  *)
-(*     line 1758  set_turn_cascade_state  = Cascade_selecting              *)
-(*       (matches SelectToolPolicy action)                                 *)
+(*   lib/keeper/keeper_run_tools.ml -- BeforeTurnParams disclosure hook    *)
+(*     set_turn_decision_stage = Decision_tool_policy_selected             *)
+(*     set_turn_cascade_state  = Cascade_selecting                         *)
+(*     set_turn_cascade_state  = Cascade_trying                            *)
+(*       (atomic group materialising SelectToolPolicy + CascadeTrying;     *)
+(*        keeping the two transitions adjacent at the only site that       *)
+(*        asserts decision_stage = tool_policy_selected satisfies          *)
+(*        SelectingRequiresToolPolicy and avoids the idle-to-trying jump   *)
+(*        that PR #14153's runtime guard rejects.)                         *)
 (*                                                                         *)
 (*   lib/keeper/keeper_guards.ml -- pre_tool_use override / approval gate  *)
 (*     line 143   mark_turn_gate_rejected_by_name  (GateRejected)          *)
@@ -280,6 +287,25 @@ Next ==
     \/ RetryAfterCompaction
     \/ FinishTurn
 
+\* ── Bug Model: Selecting Without Tool Policy ───────────────
+\* Models a regression where cascade_state jumps to "selecting"
+\* without decision_stage being "tool_policy_selected".
+\* SHOULD violate SelectingRequiresToolPolicy.
+
+BugSelectingWithoutToolPolicy ==
+    /\ turn_live
+    /\ turn_phase = "prompting"
+    /\ decision_stage = "guard_ok"  \* BUG: not tool_policy_selected
+    /\ cascade_state' = "selecting"
+    /\ UNCHANGED <<turn_live, turn_phase, decision_stage,
+                    measurement_bound, selected_model_bound>>
+
+NextBuggy ==
+    \/ Next
+    \/ BugSelectingWithoutToolPolicy
+
+SpecBuggy == Init /\ [][NextBuggy]_vars /\ WF_vars(FinishTurn)
+
 Spec ==
     Init /\ [][Next]_vars /\ WF_vars(FinishTurn)
 
@@ -334,6 +360,9 @@ Safety ==
     /\ ExecutingRequiresTrying
     /\ CompactingRequiresTrying
     /\ TerminalCascadeRequiresFinalizing
+
+(* Wrapper for buggy cfg — must be defined AFTER the invariant it references. *)
+SelectingRequiresToolPolicyMustHold == SelectingRequiresToolPolicy
 
 LiveTurnEventuallyClears ==
     turn_live ~> ~turn_live

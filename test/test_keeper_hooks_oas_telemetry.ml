@@ -51,8 +51,25 @@ let make_test_hooks keeper_name =
 
 let lifecycle_callback_failure_count ~keeper ~callback =
   Masc_mcp.Prometheus.metric_value_or_zero
-    Masc_mcp.Prometheus.metric_keeper_lifecycle_callback_failures
+    Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
     ~labels:[ ("keeper", keeper); ("callback", callback) ]
+    ()
+
+let on_stop_count ~keeper ~stop_reason =
+  Masc_mcp.Prometheus.metric_value_or_zero
+    Masc_mcp.Keeper_metrics.metric_keeper_oas_on_stop
+    ~labels:[ ("keeper", keeper); ("stop_reason", stop_reason) ]
+    ()
+
+let on_idle_escalated_count ~keeper ~severity ~decision =
+  Masc_mcp.Prometheus.metric_value_or_zero
+    Masc_mcp.Keeper_metrics.metric_keeper_oas_on_idle_escalated
+    ~labels:
+      [
+        ("keeper", keeper);
+        ("severity", severity);
+        ("decision", decision);
+      ]
     ()
 
 let require_hook label = function
@@ -82,7 +99,7 @@ let test_emit_cost_event_writes_inference_telemetry () =
     };
     reasoning_tokens = Some 3;
     reasoning_tokens_estimated = false;
-    request_latency_ms = 42;
+    request_latency_ms = Some 42;
     peak_memory_gb = Some 52.66;
     provider_kind = Some Llm_provider.Provider_kind.OpenAI_compat;
     reasoning_effort = None;
@@ -128,7 +145,7 @@ let test_emit_cost_event_uses_typed_provider_kind_for_bare_model () =
       timings = None;
       reasoning_tokens = None;
       reasoning_tokens_estimated = false;
-      request_latency_ms = 0;
+      request_latency_ms = Some 0;
       peak_memory_gb = None;
       provider_kind = Some Llm_provider.Provider_kind.Kimi_cli;
       reasoning_effort = None;
@@ -143,7 +160,9 @@ let test_emit_cost_event_uses_typed_provider_kind_for_bare_model () =
     ~telemetry ();
   let json = read_jsonl_line (Filename.concat root "costs.jsonl") in
   check string "provider from provider_kind" "kimi_cli"
-    (json |> member "provider" |> to_string)
+    (json |> member "provider" |> to_string);
+  check bool "zero latency is omitted" true
+    (match json |> member "request_latency_ms" with `Null -> true | _ -> false)
 
 let test_emit_cost_event_writes_wall_tok_s_without_provider_timings () =
   let root = temp_dir () in
@@ -152,7 +171,7 @@ let test_emit_cost_event_writes_wall_tok_s_without_provider_timings () =
     timings = None;
     reasoning_tokens = None;
     reasoning_tokens_estimated = false;
-    request_latency_ms = 250;
+    request_latency_ms = Some 250;
     peak_memory_gb = None;
     provider_kind = Some Llm_provider.Provider_kind.OpenAI_compat;
     reasoning_effort = None;
@@ -182,7 +201,7 @@ let test_emit_cost_event_marks_untrusted_usage () =
       timings = None;
       reasoning_tokens = None;
       reasoning_tokens_estimated = false;
-      request_latency_ms = 250;
+      request_latency_ms = Some 250;
       peak_memory_gb = None;
       provider_kind = Some Llm_provider.Provider_kind.Ollama;
       reasoning_effort = None;
@@ -230,7 +249,7 @@ let test_emit_cost_event_marks_unpriced_paid_model () =
       timings = None;
       reasoning_tokens = None;
       reasoning_tokens_estimated = false;
-      request_latency_ms = 100;
+      request_latency_ms = Some 100;
       peak_memory_gb = None;
       provider_kind = Some Llm_provider.Provider_kind.OpenAI_compat;
       reasoning_effort = None;
@@ -262,7 +281,7 @@ let test_emit_cost_event_records_auto_resolution_source () =
       timings = None;
       reasoning_tokens = None;
       reasoning_tokens_estimated = false;
-      request_latency_ms = 100;
+      request_latency_ms = Some 100;
       peak_memory_gb = None;
       provider_kind = Some Llm_provider.Provider_kind.OpenAI_compat;
       reasoning_effort = None;
@@ -294,7 +313,7 @@ let test_emit_cost_event_records_provider_prefixed_auto_resolution_source () =
       timings = None;
       reasoning_tokens = None;
       reasoning_tokens_estimated = false;
-      request_latency_ms = 100;
+      request_latency_ms = Some 100;
       peak_memory_gb = None;
       provider_kind = Some Llm_provider.Provider_kind.Kimi_cli;
       reasoning_effort = None;
@@ -385,13 +404,13 @@ let test_record_keeper_tool_duration_metric_tracks_labels () =
   in
   let sum_before =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_keeper_tool_call_duration
+      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_duration
       ~labels
       ()
   in
   let count_before =
     Masc_mcp.Prometheus.metric_value_or_zero
-      (Masc_mcp.Prometheus.metric_keeper_tool_call_duration ^ "_count")
+      (Masc_mcp.Keeper_metrics.metric_keeper_tool_call_duration ^ "_count")
       ~labels
       ()
   in
@@ -400,13 +419,13 @@ let test_record_keeper_tool_duration_metric_tracks_labels () =
     summary;
   let sum_after =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_keeper_tool_call_duration
+      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_duration
       ~labels
       ()
   in
   let count_after =
     Masc_mcp.Prometheus.metric_value_or_zero
-      (Masc_mcp.Prometheus.metric_keeper_tool_call_duration ^ "_count")
+      (Masc_mcp.Keeper_metrics.metric_keeper_tool_call_duration ^ "_count")
       ~labels
       ()
   in
@@ -438,13 +457,23 @@ let make_telemetry
     timings;
     reasoning_tokens = None;
     reasoning_tokens_estimated = false;
-    request_latency_ms;
+    request_latency_ms = Some request_latency_ms;
     peak_memory_gb = None;
     provider_kind;
     reasoning_effort = None;
     canonical_model_id = None;
     effective_context_window = None;
     provider_internal_action_count = None;
+  }
+
+let make_response ?(stop_reason = Agent_sdk.Types.EndTurn) ?telemetry () =
+  {
+    Agent_sdk.Types.id = "response-test";
+    model = "test-model";
+    stop_reason;
+    content = [];
+    usage = None;
+    telemetry;
   }
 
 let histogram_snapshot metric ~labels =
@@ -693,9 +722,9 @@ let test_hook_introspection_reports_current_runtime_slots () =
   check string "scope" "keeper_runtime_composite"
     (json |> member "scope" |> to_string);
   check int "slot_count" 14 (json |> member "slot_count" |> to_int);
-  check int "active slots" 9
+  check int "active slots" 11
     (json |> member "active_slot_count" |> to_int);
-  check int "inactive slots" 5
+  check int "inactive slots" 3
     (json |> member "inactive_slot_count" |> to_int);
   check bool "before_turn active" true
     (slot json "before_turn" |> member "active" |> to_bool);
@@ -726,8 +755,16 @@ let test_hook_introspection_reports_current_runtime_slots () =
     "tool_use_failure_metric" failure_effects;
   check_string_list_not_contains "failure hook no stale heuristic label"
     "heuristic_metrics" failure_effects;
-  check bool "on_idle_escalated inactive" false
+  check bool "on_stop active" true
+    (slot json "on_stop" |> member "active" |> to_bool);
+  check_string_list_contains "on_stop records stop reason"
+    "stop_reason_metric"
+    (string_list_field (slot json "on_stop") "effects");
+  check bool "on_idle_escalated active" true
     (slot json "on_idle_escalated" |> member "active" |> to_bool);
+  check_string_list_contains "on_idle_escalated records metric"
+    "idle_escalation_metric"
+    (string_list_field (slot json "on_idle_escalated") "effects");
   check bool "pre_compact inactive" false
     (slot json "pre_compact" |> member "active" |> to_bool);
   check bool "post_compact inactive" false
@@ -768,6 +805,59 @@ let test_on_tool_error_hook_records_callback_failure_metric () =
   check (float 0.001) "on_tool_error counter increments" 1.0
     (after -. before)
 
+let test_on_stop_hook_records_stop_reason_metric () =
+  let keeper = "callback-on-stop-keeper" in
+  let hooks = make_test_hooks keeper in
+  let hook = require_hook "on_stop" hooks.on_stop in
+  let before = on_stop_count ~keeper ~stop_reason:"end_turn" in
+  check_continue "on_stop"
+    (hook
+       (Agent_sdk.Hooks.OnStop
+          {
+            reason = Agent_sdk.Types.EndTurn;
+            response = make_response ();
+          }));
+  let after = on_stop_count ~keeper ~stop_reason:"end_turn" in
+  check (float 0.001) "on_stop counter increments" 1.0
+    (after -. before);
+  let unknown_before = on_stop_count ~keeper ~stop_reason:"unknown" in
+  check_continue "on_stop unknown"
+    (hook
+       (Agent_sdk.Hooks.OnStop
+          {
+            reason = Agent_sdk.Types.Unknown "provider raw detail";
+            response =
+              make_response
+                ~stop_reason:(Agent_sdk.Types.Unknown "provider raw detail")
+                ();
+          }));
+  let unknown_after = on_stop_count ~keeper ~stop_reason:"unknown" in
+  check (float 0.001) "unknown stop reason is bounded" 1.0
+    (unknown_after -. unknown_before)
+
+let test_on_idle_escalated_hook_records_metric () =
+  let keeper = "callback-on-idle-escalated-keeper" in
+  let hooks = make_test_hooks keeper in
+  let hook = require_hook "on_idle_escalated" hooks.on_idle_escalated in
+  let before =
+    on_idle_escalated_count ~keeper ~severity:"final_warning"
+      ~decision:"nudge"
+  in
+  check_nudge "on_idle_escalated"
+    (hook
+       (Agent_sdk.Hooks.OnIdleEscalated
+          {
+            severity = Agent_sdk.Hooks.Idle_severity.Final_warning;
+            consecutive_idle_turns = 1;
+            tool_names = [ "keeper_bash" ];
+          }));
+  let after =
+    on_idle_escalated_count ~keeper ~severity:"final_warning"
+      ~decision:"nudge"
+  in
+  check (float 0.001) "on_idle_escalated counter increments" 1.0
+    (after -. before)
+
 let test_on_idle_hook_returns_runtime_nudge () =
   let hooks = make_test_hooks "callback-on-idle-keeper" in
   let hook = require_hook "on_idle" hooks.on_idle in
@@ -790,7 +880,7 @@ let require_pr_review_event label = function
 
 let hook_output_parse_failures surface =
   Masc_mcp.Prometheus.metric_value_or_zero
-    Masc_mcp.Prometheus.metric_keeper_oas_hook_output_parse_failures
+    Masc_mcp.Keeper_metrics.metric_keeper_oas_hook_output_parse_failures
     ~labels:[ ("surface", surface) ]
     ()
 
@@ -800,14 +890,28 @@ let test_pr_review_action_metric_extracts_approve () =
       ~tool_name:"keeper_pr_review_comment"
       ~input:(`Assoc [ ("pr_number", `Int 13177); ("event", `String "COMMENT") ])
       ~output_text:
-        {|{"ok":true,"pr_number":13177,"event":"APPROVE","keeper":"sangsu","via":"docker"}|}
+        {|{"ok":true,"pr_number":13177,"event":"APPROVE","keeper":"sangsu","via":"docker","credential":{"effective_github_identity":"root"},"identity_attestation":{"keeper":"sangsu","effective_github_identity":"root"}}|}
       ()
     |> require_pr_review_event "approve"
   in
   check string "action from output" "APPROVE" event.action;
   check (option int) "pr number" (Some 13177) event.pr_number;
   check bool "success" true event.success;
-  check (option string) "route via" (Some "docker") event.route_via
+  check (option string) "route via" (Some "docker") event.route_via;
+  let attestation =
+    match event.identity_attestation with
+    | Some json -> json
+    | None -> fail "expected identity attestation"
+  in
+  check string "attested keeper" "sangsu"
+    (attestation |> member "keeper" |> to_string);
+  let credential =
+    match event.credential with
+    | Some json -> json
+    | None -> fail "expected credential"
+  in
+  check string "credential identity" "root"
+    (credential |> member "effective_github_identity" |> to_string)
 
 let test_pr_review_action_metric_marks_structured_failure () =
   let event =
@@ -849,6 +953,26 @@ let test_pr_review_action_metric_observes_invalid_output_json () =
   check string "action fallback from input" "COMMENT" event.action;
   check (option int) "number fallback" (Some 7) event.pr_number;
   check (float 0.001) "parse failure counted" (before +. 1.0)
+    (hook_output_parse_failures "pr_review_action")
+
+let test_pr_review_action_metric_extracts_fenced_output_json () =
+  let before = hook_output_parse_failures "pr_review_action" in
+  let event =
+    pr_review_event
+      ~tool_name:"keeper_pr_review_comment"
+      ~input:(`Assoc [ ("number", `Int 71); ("event", `String "comment") ])
+      ~output_text:
+        "Review submitted.\n\
+         ```json\n\
+         {\"ok\":true,\"pr_number\":71,\"event\":\"APPROVE\",\"via\":\"docker\"}\n\
+         ```\n"
+      ()
+    |> require_pr_review_event "fenced output json"
+  in
+  check string "action from fenced output" "APPROVE" event.action;
+  check (option int) "pr number" (Some 71) event.pr_number;
+  check (option string) "route via" (Some "docker") event.route_via;
+  check (float 0.001) "parse failure not counted" before
     (hook_output_parse_failures "pr_review_action")
 
 let test_pr_review_action_metric_extracts_keeper_shell_approve () =
@@ -910,6 +1034,39 @@ let test_pr_work_action_metric_observes_invalid_output_json () =
   check (float 0.001) "parse failure counted" (before +. 1.0)
     (hook_output_parse_failures "pr_work_action")
 
+let test_pr_work_action_metric_extracts_embedded_output_json () =
+  let before = hook_output_parse_failures "pr_work_action" in
+  let events =
+    pr_work_events
+      ~tool_name:"keeper_pr_create"
+      ~input:
+        (`Assoc
+          [
+            ("title", `String "proof");
+            ("head", `String "proof/embedded-json");
+          ])
+      ~output_text:
+        "Created draft PR successfully:\n\
+         {\"ok\":true,\"tool\":\"keeper_pr_create\",\"operation\":\"pr_create\",\
+         \"via\":\"brokered\",\"result\":{\"output\":\"https://github.com/acme/repo/pull/43\\n\"}}\n\
+         Done."
+      ()
+  in
+  check (list string) "pr create action" [ "PR_CREATE" ]
+    (work_actions events);
+  (match events with
+   | [ event ] ->
+       check string "source" "keeper_pr_create" event.work_source;
+       check (option string) "head ref" (Some "proof/embedded-json")
+         event.work_ref;
+       check (option string) "pr url"
+         (Some "https://github.com/acme/repo/pull/43")
+         event.pr_url;
+       check (option string) "route via" (Some "brokered") event.route_via
+   | _ -> failf "expected one keeper_pr_create event");
+  check (float 0.001) "parse failure not counted" before
+    (hook_output_parse_failures "pr_work_action")
+
 let test_pr_work_action_metric_extracts_gh_pr_create () =
   let events =
     pr_work_events
@@ -962,7 +1119,7 @@ let test_pr_work_action_metric_extracts_keeper_pr_create () =
             ("head", `String "proof/keeper-docker");
           ])
       ~output_text:
-        {|{"ok":true,"tool":"keeper_pr_create","operation":"pr_create","via":"brokered"}|}
+        {|{"ok":true,"tool":"keeper_pr_create","operation":"pr_create","via":"brokered","result":{"output":"https://github.com/acme/repo/pull/42\n"}}|}
       ()
   in
   check (list string) "pr create action" [ "PR_CREATE" ]
@@ -970,6 +1127,11 @@ let test_pr_work_action_metric_extracts_keeper_pr_create () =
   match events with
   | [ event ] ->
       check string "source" "keeper_pr_create" event.work_source;
+      check (option string) "head ref" (Some "proof/keeper-docker")
+        event.work_ref;
+      check (option string) "pr url"
+        (Some "https://github.com/acme/repo/pull/42")
+        event.pr_url;
       check (option string) "route via" (Some "brokered") event.route_via
   | _ -> failf "expected one keeper_pr_create event"
 
@@ -991,6 +1153,8 @@ let test_pr_work_action_metric_uses_native_pr_create_route_fallback () =
     (work_actions events);
   match events with
   | [ event ] ->
+      check (option string) "head ref" (Some "proof/keeper-docker")
+        event.work_ref;
       check (option string) "route fallback" (Some "brokered")
         event.route_via
   | _ -> failf "expected one keeper_pr_create event"
@@ -1154,6 +1318,10 @@ let () =
             test_on_error_hook_records_callback_failure_metric
         ; test_case "on_tool_error records callback metric" `Quick
             test_on_tool_error_hook_records_callback_failure_metric
+        ; test_case "on_stop records stop reason metric" `Quick
+            test_on_stop_hook_records_stop_reason_metric
+        ; test_case "on_idle_escalated records metric" `Quick
+            test_on_idle_escalated_hook_records_metric
         ; test_case "on_idle returns runtime nudge" `Quick
             test_on_idle_hook_returns_runtime_nudge
         ] )
@@ -1166,6 +1334,8 @@ let () =
             test_pr_review_action_metric_extracts_reply
         ; test_case "observes invalid output JSON" `Quick
             test_pr_review_action_metric_observes_invalid_output_json
+        ; test_case "extracts fenced output JSON" `Quick
+            test_pr_review_action_metric_extracts_fenced_output_json
         ; test_case "extracts keeper_shell approve" `Quick
             test_pr_review_action_metric_extracts_keeper_shell_approve
         ] )
@@ -1174,6 +1344,8 @@ let () =
             test_pr_work_action_metric_extracts_masc_code_git_push
         ; test_case "observes invalid output JSON" `Quick
             test_pr_work_action_metric_observes_invalid_output_json
+        ; test_case "extracts embedded output JSON" `Quick
+            test_pr_work_action_metric_extracts_embedded_output_json
         ; test_case "extracts keeper_shell gh pr create" `Quick
             test_pr_work_action_metric_extracts_gh_pr_create
         ; test_case "extracts quoted output gh pr create" `Quick

@@ -152,6 +152,7 @@ let telemetry_usage_missing_runtime_reported =
 
 let cn_llama = "llama"
 let cn_ollama = "ollama"
+let cn_unknown_provider = "unknown_provider"
 let cn_claude = "claude"
 let cn_codex = "codex"
 let cn_gemini = "gemini"
@@ -399,10 +400,7 @@ let direct_adapters =
                   [
                     "gemini-3-flash-preview";
                     "gemini-3.1-flash-lite-preview";
-                    "gemini-2.5-flash";
-                    "gemini-2.5-flash-lite";
                     "gemini-3.1-pro-preview";
-                    "gemini-2.5-pro";
                   ];
                 prefer_default_model_env = true;
               };
@@ -1157,7 +1155,7 @@ let bare_ollama_migration_message () =
 
 let is_bare_ollama_label label =
   let normalized = normalize_label label in
-  String.equal normalized "ollama"
+  String.equal normalized cn_ollama
   && Env_config_runtime.Ollama.default_model = ""
 
 let explicit_llama_model_id_result () =
@@ -1473,8 +1471,19 @@ let provider_label_of_config (cfg : Llm_provider.Provider_config.t) =
   | Some adapter -> adapter.cascade_prefix
   | None -> provider_label_from_registry cfg
 
-let provider_health_key_of_config cfg =
-  provider_label_of_config cfg
+let provider_health_key_of_config (cfg : Llm_provider.Provider_config.t) =
+  match cfg.kind with
+  | Llm_provider.Provider_config.OpenAI_compat
+    when Llm_provider.Provider_config.is_local cfg ->
+      let base_url = String.trim cfg.base_url in
+      if base_url = "" then provider_label_of_config cfg
+      else
+        Printf.sprintf "%s:%s@%s" (provider_label_of_config cfg)
+          cfg.model_id base_url
+  | _ -> provider_label_of_config cfg
+
+let provider_model_health_key_of_config cfg =
+  Printf.sprintf "%s:%s" (provider_health_key_of_config cfg) cfg.model_id
 
 let display_provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
   display_provider_name (provider_label_of_config cfg)

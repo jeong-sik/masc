@@ -174,6 +174,11 @@ let json_float_field_opt key (fields : (string * Yojson.Safe.t) list) =
   | Some (`Int n) -> Some (Float.of_int n)
   | _ -> None
 
+let json_positive_float_field_opt key fields =
+  match json_float_field_opt key fields with
+  | Some v when v > 0.0 -> Some v
+  | _ -> None
+
 let json_int_field_opt key (fields : (string * Yojson.Safe.t) list) =
   match List.assoc_opt key fields with
   | Some (`Int n) -> Some n
@@ -403,7 +408,9 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
              | Some _ as v -> v
              | None -> read "peak_memory"
            in
-           let latency_ms = json_float_field_opt "request_latency_ms" tfields in
+           let latency_ms =
+             json_positive_float_field_opt "request_latency_ms" tfields
+           in
            let input_tokens_raw = json_int_field_opt "input_tokens" tfields in
            let output_tokens_raw = json_int_field_opt "output_tokens" tfields in
            let cache_read_tokens_raw =
@@ -521,10 +528,11 @@ let read_hw_decode_tok_per_sec (fields : (string * Yojson.Safe.t) list) =
 let canonical_cost_model_id ~(provider : string option) model =
   let module PK = Llm_provider.Provider_kind in
   let provider_kind = Option.bind provider PK.of_string in
+  let ollama_prefix = Provider_adapter.cn_ollama ^ ":" in
   match provider_kind with
   | Some PK.Ollama
-    when not (String.starts_with ~prefix:"ollama:" model) ->
-      "ollama:" ^ model
+    when not (String.starts_with ~prefix:ollama_prefix model) ->
+      ollama_prefix ^ model
   | _ -> model
 
 let parse_cost_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option =
@@ -573,7 +581,7 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option =
                 in
                 let usage_untrusted = usage_trust_untrusted usage_trust in
                 let latency_ms =
-                  json_float_field_opt "request_latency_ms" fields
+                  json_positive_float_field_opt "request_latency_ms" fields
                 in
                 let tok_per_sec_raw =
                   match json_float_field_opt "tokens_per_second" fields with
@@ -1112,24 +1120,29 @@ let group_entries_by_model (entries : raw_entry list)
   StringMap.fold (fun model es acc -> (model, es) :: acc) tbl []
 
 let latency_histogram (entries : raw_entry list) : latency_bucket list =
-  let bins = [| 0; 0; 0; 0 |] in
+  let boundaries = [1000; 4000; 16000] in
+  let n = List.length boundaries in
+  let bins = Array.make (n + 1) 0 in
   List.iter
     (fun e ->
       match e.latency_ms with
       | None -> ()
       | Some ms ->
           let ms = int_of_float ms in
-          if ms < 1000 then bins.(0) <- bins.(0) + 1
-          else if ms < 4000 then bins.(1) <- bins.(1) + 1
-          else if ms < 16000 then bins.(2) <- bins.(2) + 1
-          else bins.(3) <- bins.(3) + 1)
+          let idx =
+            match List.find_index (fun b -> ms < b) boundaries with
+            | Some i -> i
+            | None -> n
+          in
+          bins.(idx) <- bins.(idx) + 1)
     entries;
-  [
-    { lo_ms = 0; hi_ms = Some 1000; count = bins.(0) };
-    { lo_ms = 1000; hi_ms = Some 4000; count = bins.(1) };
-    { lo_ms = 4000; hi_ms = Some 16000; count = bins.(2) };
-    { lo_ms = 16000; hi_ms = None; count = bins.(3) };
-  ]
+  let rec build i lo = function
+    | [] -> [{ lo_ms = lo; hi_ms = None; count = bins.(i) }]
+    | hi :: rest ->
+        { lo_ms = lo; hi_ms = Some hi; count = bins.(i) }
+        :: build (i + 1) hi rest
+  in
+  build 0 0 boundaries
 
 (* ── Public API ─────────────────────────────────────────── *)
 

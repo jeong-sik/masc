@@ -106,7 +106,7 @@ let append_lineage_artifacts_best_effort
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_rollover_failures
+        Keeper_metrics.metric_keeper_rollover_failures
         ~labels:[("keeper", child.name); ("site", "lineage_append")]
         ();
       Log.Keeper.warn
@@ -198,7 +198,10 @@ let maybe_rollover_oas_handoff
           ~ratio
           ~handoff_threshold:base_meta.handoff_threshold
           ~last_outcome:base_meta.runtime.proactive_rt.last_outcome
-          ~last_blocker:base_meta.runtime.last_blocker
+          ~last_blocker:
+            (match base_meta.runtime.last_blocker with
+             | Some info -> info.detail
+             | None -> "")
           ~current_turn_overflow_blocker
           ()
       in
@@ -255,7 +258,7 @@ let maybe_rollover_oas_handoff
                   ~model ~ctx:save_ctx ~generation:next_generation with
           | Error e ->
               Prometheus.inc_counter
-                Prometheus.metric_keeper_checkpoint_failures
+                Keeper_metrics.metric_keeper_checkpoint_failures
                 ~labels:[("keeper", base_meta.name); ("site", "rollover_handoff_save")]
                 ();
               Log.Keeper.error
@@ -266,7 +269,7 @@ let maybe_rollover_oas_handoff
               (match Keeper_id.Trace_id.of_string new_trace_id with
                | Error err ->
                  Prometheus.inc_counter
-                   Prometheus.metric_keeper_rollover_failures
+                   Keeper_metrics.metric_keeper_rollover_failures
                    ~labels:[("keeper", base_meta.name); ("site", "invalid_trace_id")]
                    ();
                  Log.Keeper.error

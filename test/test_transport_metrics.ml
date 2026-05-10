@@ -61,6 +61,12 @@ let test_init () =
        let _ = Str.search_forward
          (Str.regexp_string "masc_agent_heartbeat_age_seconds") text 0 in
        true
+     with Not_found -> false);
+  check bool "http accept metric registered" true
+    (try
+       let _ = Str.search_forward
+         (Str.regexp_string "masc_http_accepts_total") text 0 in
+       true
      with Not_found -> false)
 
 (* ============================================================
@@ -94,6 +100,38 @@ let test_broadcast_events_counter () =
   let after = Prometheus.metric_value_or_zero
     "masc_sse_broadcast_events_total" () in
   check bool "broadcast events incremented" true (after > before)
+
+let test_sse_idle_evicted () =
+  let before = Prometheus.metric_value_or_zero
+    "masc_sse_idle_evictions_total" () in
+  TM.inc_sse_idle_evicted ();
+  TM.inc_sse_idle_evicted ();
+  let after = Prometheus.metric_value_or_zero
+    "masc_sse_idle_evictions_total" () in
+  check (float 0.01) "idle evicted delta" 2.0 (after -. before)
+
+let test_sse_reject_labelled () =
+  let before_cooldown = Prometheus.metric_value_or_zero
+    "masc_sse_rejects_total" ~labels:[("reason", "session_cooldown")] () in
+  let before_window = Prometheus.metric_value_or_zero
+    "masc_sse_rejects_total" ~labels:[("reason", "window_limit")] () in
+  TM.inc_sse_reject ~reason:"session_cooldown";
+  TM.inc_sse_reject ~reason:"window_limit";
+  TM.inc_sse_reject ~reason:"session_cooldown";
+  let after_cooldown = Prometheus.metric_value_or_zero
+    "masc_sse_rejects_total" ~labels:[("reason", "session_cooldown")] () in
+  let after_window = Prometheus.metric_value_or_zero
+    "masc_sse_rejects_total" ~labels:[("reason", "window_limit")] () in
+  check (float 0.01) "session_cooldown delta" 2.0 (after_cooldown -. before_cooldown);
+  check (float 0.01) "window_limit delta" 1.0 (after_window -. before_window)
+
+let test_sse_reconnect () =
+  let before = Prometheus.metric_value_or_zero
+    "masc_sse_reconnects_total" () in
+  TM.inc_sse_reconnect ();
+  let after = Prometheus.metric_value_or_zero
+    "masc_sse_reconnects_total" () in
+  check (float 0.01) "reconnect delta" 1.0 (after -. before)
 
 (* ============================================================
    gRPC Metrics
@@ -169,6 +207,46 @@ let test_ws_runtime_listening_cache () =
   TM.set_ws_runtime_listening false;
   check bool "ws listening resets" false (TM.ws_listening ())
 
+let test_http_listener_state_json () =
+  let accepts_before =
+    Prometheus.metric_total Prometheus.metric_http_accepts
+  in
+  let errors_before =
+    Prometheus.metric_total Prometheus.metric_http_accept_errors
+  in
+  TM.record_http_listener_started ~mode:"auto";
+  TM.record_http_accept ~mode:"auto";
+  let accepted = TM.http_listener_json () in
+  check string "http listener mode" "auto"
+    (accepted |> U.member "mode" |> U.to_string);
+  check string "http listener listening" "listening"
+    (accepted |> U.member "status" |> U.to_string);
+  check int "http listener active connection" 1
+    (accepted |> U.member "active_connections" |> U.to_int);
+  check bool "http listener accepted total advanced" true
+    (float_of_int (accepted |> U.member "accepted_total" |> U.to_int)
+     >= accepts_before +. 1.0);
+  check bool "last accept age present" true
+    (match accepted |> U.member "last_accept_age_seconds" with
+    | `Float _ | `Int _ -> true
+    | _ -> false);
+  TM.record_http_accept_error ~mode:"auto" ~error:"accept failed";
+  let errored = TM.http_listener_json () in
+  check string "http listener accept error status" "accept_error"
+    (errored |> U.member "status" |> U.to_string);
+  check string "http listener last error" "accept failed"
+    (errored |> U.member "last_error" |> U.to_string);
+  check bool "http listener accept error total advanced" true
+    (float_of_int (errored |> U.member "accept_errors_total" |> U.to_int)
+     >= errors_before +. 1.0);
+  TM.record_http_connection_closed ~mode:"auto";
+  TM.record_http_listener_stopped ~mode:"auto";
+  let stopped = TM.http_listener_json () in
+  check string "http listener stopped" "stopped"
+    (stopped |> U.member "status" |> U.to_string);
+  check int "http listener active connection released" 0
+    (stopped |> U.member "active_connections" |> U.to_int)
+
 (* ============================================================
    Agent Health Metrics
    ============================================================ *)
@@ -220,7 +298,7 @@ let test_transport_health_json () =
     ~labels:[ ("stage", "queue") ] ~delta:3.0 ();
   Prometheus.inc_counter Prometheus.metric_oas_sse_relay_drops
     ~labels:[ ("stage", "append") ] ~delta:1.0 ();
-  Prometheus.inc_counter Prometheus.metric_keeper_lifecycle_dispatch_rejections
+  Prometheus.inc_counter Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
     ~labels:[ ("event", "compaction_started") ] ~delta:2.0 ();
   Masc_mcp.Sse.broadcast (`Assoc [ ("type", `String "transport-test") ]);
   let json = TM.transport_health_json ~config in
@@ -259,6 +337,17 @@ let test_transport_health_json () =
   check bool "streamable http auth_policy_present field exists" true
     (match streamable_json |> U.member "auth_policy_present" with
     | `Bool _ -> true
+    | _ -> false);
+  let streamable_listener_json = streamable_json |> U.member "listener" in
+  check bool "streamable http listener object exists" true
+    (match streamable_listener_json with `Assoc _ -> true | _ -> false);
+  check bool "streamable http listener status exists" true
+    (match streamable_listener_json |> U.member "status" with
+    | `String _ -> true
+    | _ -> false);
+  check bool "streamable http active connection count exists" true
+    (match streamable_listener_json |> U.member "active_connections" with
+    | `Int _ -> true
     | _ -> false);
   check string "presence stream endpoint" "/events/presence"
     (streamable_json |> U.member "presence_stream" |> U.to_string);
@@ -391,6 +480,9 @@ let () =
       test_case "set_sse_sessions by kind" `Quick test_sse_sessions;
       test_case "observe_broadcast_duration accumulates" `Quick test_broadcast_duration;
       test_case "broadcast events counter increments" `Quick test_broadcast_events_counter;
+      test_case "inc_sse_idle_evicted increments" `Quick test_sse_idle_evicted;
+      test_case "inc_sse_reject by reason label" `Quick test_sse_reject_labelled;
+      test_case "inc_sse_reconnect increments" `Quick test_sse_reconnect;
     ]);
     ("grpc", [
       test_case "set_grpc_active_streams" `Quick test_grpc_active_streams;
@@ -408,6 +500,10 @@ let () =
         test_ws_enabled_normalized_env_matches_runtime;
       test_case "runtime listening cache" `Quick
         test_ws_runtime_listening_cache;
+    ]);
+    ("http_listener", [
+      test_case "primary listener state json" `Quick
+        test_http_listener_state_json;
     ]);
     ("agent_health", [
       test_case "set_agent_heartbeat_age" `Quick test_agent_heartbeat_age;

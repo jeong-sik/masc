@@ -133,12 +133,10 @@ Use to timestamp events, check elapsed time, or include current time in reports.
     name = "keeper_context_status";
     description = "Check your own context window usage and session state. Returns: \
 name (your keeper name), context_ratio (0.0-1.0), context_tokens, context_max, \
-message_count, generation, last_model_used, continuity_summary, and canonical \
-sandbox paths (sandbox_root, sandbox_mind, sandbox_repos) plus backend/profile \
-metadata. sandbox paths are tool-ready and can be passed \
-directly as path or cwd to keeper tools without prefix. Use when deciding whether to compact context, \
-extend turns, hand off to the next generation, or resolve a path without \
-string-interpolating your own keeper name.";
+message_count, generation, last_model_used, continuity_summary, and sandbox \
+metadata (profile, backend, allowed paths). All paths are sandbox-relative; use \
+'repos/<repo>', 'mind/<note>', or '.' without host prefixes. Use when deciding whether to compact context, \
+extend turns, hand off to the next generation, or verify your current working directory.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -391,7 +389,7 @@ For multi-file search, use keeper_shell with op=rg.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("path", `Assoc [("type", `String "string"); ("description", `String "Relative or absolute file path")]);
+        ("path", `Assoc [("type", `String "string"); ("description", `String "Sandbox-relative file path. Use 'repos/<repo>/lib/foo.ml', 'mind/note.md', or 'lib/foo.ml'. Absolute paths are rejected.")]);
         ("max_bytes", `Assoc [("type", `String "integer"); ("description", `String ("Max bytes to return (default: " ^ Tool_shard_limits.keeper_fs_read_default_max_bytes_string ^ ")"))]);
       ]);
       ("required", `List [`String "path"]);
@@ -408,7 +406,7 @@ Creates parent dirs.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("path", `Assoc [("type", `String "string"); ("description", `String "Relative or absolute file path to write")]);
+        ("path", `Assoc [("type", `String "string"); ("description", `String "Sandbox-relative file path to write. Absolute paths are rejected.")]);
         ("content", `Assoc [("type", `String "string"); ("description", `String "File content to write")]);
         (* Issue #8490: derive from local mirror that tracks
            [Keeper_exec_fs.valid_fs_write_mode_strings]. *)
@@ -425,7 +423,7 @@ let shell_tools : Masc_domain.tool_schema list = [
     description = "Run a structured project shell operation. \
 ops: pwd, ls, cat, rg, git_status, find, head, tail, wc, tree, git_log, git_diff, git_worktree, git_clone, gh. \
 Structured ops default to the keeper sandbox. \
-IMPORTANT: paths resolve automatically — use 'repos/X' or 'mind/X'. Never include host paths like '.masc/playground/your-name/repos/X' in path or cwd. \
+IMPORTANT: paths resolve automatically — use 'repos/X' or 'mind/X'. Only sandbox-relative paths are accepted. \
 Use cwd to target an explicit allowed directory or cloned repo. \
 find REQUIRES pattern param (e.g. pattern=\"*.ml\"). \
 No generic bash execution: use Bash/keeper_bash for command execution. \
@@ -464,7 +462,7 @@ Pipelines and fd-only redirects are accepted only when the active preset validat
 Good: cmd='dune build', cmd='ls -la lib/'. \
 Bad: cmd='cd x && dune build', cmd='echo hi > out.txt'. \
 Runs in the keeper sandbox by default; use cwd to target an explicit allowed directory. \
-Paths resolve automatically — never include host storage prefixes such as '.masc/playground/your-name/' in cwd. Use 'repos/X' instead. \
+Paths resolve automatically — only sandbox-relative paths are accepted. Use 'repos/X' instead of absolute paths. \
 Sandbox root is NOT a git repository: git/gh calls require cwd='repos/<REPO_NAME>' (or the worktree path under it). 'not a git repository' or 'path_outside_sandbox' from the sandbox root means you forgot the cwd. \
 For read-only ops use keeper_shell, for file edits use keeper_fs_edit. \
 Set run_in_background=true for long-running tasks (returns background_task_id; \
@@ -607,6 +605,7 @@ Pass the PR number as `pr_number` (preferred) or `number` (legacy alias).";
     name = "keeper_pr_review_comment";
     description = "Submit a PR review with optional inline comments. \
 Events: COMMENT, APPROVE, REQUEST_CHANGES. Requires research, delivery, coding, or full preset. \
+Use REQUEST_CHANGES for actionable blockers; use APPROVE only when the draft proof preflight permits it. \
 Pass the PR number as `pr_number` (preferred) or `number` (legacy alias).";
     input_schema = `Assoc [
       ("type", `String "object");

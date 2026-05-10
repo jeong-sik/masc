@@ -1,5 +1,27 @@
 comment = "Checked-in seed for cascade authoring. Repo defaults expose exactly two profiles: big_three for keeper/workflow calls and tool_rerank for short rerank calls. Logical usage names are configured under [routes] instead of being profile names."
 
+# ── RFC-0058: Declarative capability profiles ─────────────────────
+# Builtin profiles mirror the previous closed variant behavior.
+# Custom profiles can be added as new [profiles.X] sections.
+# required_capabilities names must appear in
+# Cascade_capability_schema.known_capability_fields.
+
+[profiles.tool_strict]
+required_capabilities = [
+  "runtime_mcp_tools",
+  "runtime_tool_events",
+  "runtime_mcp_http_headers",
+]
+
+[profiles.inline_tools]
+required_capabilities = ["inline_tools", "inline_tool_choice"]
+
+[profiles.lite]
+required_capabilities = ["runtime_mcp_tools", "runtime_tool_events"]
+
+[profiles.local]
+required_capabilities = []
+
 [routes]
 keeper_turn = "big_three"
 phase_recovery = "big_three"
@@ -32,6 +54,7 @@ models = [
 ]
 temperature = 0.2
 max_tokens = 16384
+thinking_enabled = false
 keeper_assignable = true
 fallback_cascade = "keeper_diverse"
 
@@ -39,7 +62,7 @@ fallback_cascade = "keeper_diverse"
 comment = "Fallback cascade for contract violation retry. Different model composition from big_three to break correlated failure."
 models = [
   "claude_code:claude-sonnet-4-6",
-  "gemini_cli:gemini-2.5-flash",
+  "gemini_cli:gemini-3-flash-preview",
   "codex_cli:gpt-5.3-codex-spark",
 ]
 temperature = 0.3

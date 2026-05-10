@@ -246,6 +246,53 @@ let test_goal_upsert_rejects_lifecycle_fields () =
   check string "phase unchanged after rejected status" "executing"
     (Goal_phase.to_string saved_goal.phase)
 
+let test_goal_upsert_normalizes_noop_verifier_policy () =
+  let assert_no_policy args =
+    with_room @@ fun config ->
+    let created =
+      Tool_coord.dispatch (coord_ctx config) ~name:"masc_goal_upsert"
+        ~args:(`Assoc (("title", `String "No-op verifier policy") :: args))
+    in
+    let created_json =
+      match created with
+      | Some result -> parse_json_result result
+      | None -> fail "masc_goal_upsert not handled"
+    in
+    let goal_id =
+      match Yojson.Safe.Util.member "goal_id" created_json with
+      | `String id when id <> "" -> id
+      | _ -> fail "goal_id missing from upsert response"
+    in
+    let saved_goal =
+      match Goal_store.get_goal config ~goal_id with
+      | Some goal -> goal
+      | None -> fail "goal missing after no-op verifier policy upsert"
+    in
+    check bool "verifier policy omitted" true
+      (Option.is_none saved_goal.verifier_policy)
+  in
+  assert_no_policy [ ("verifier_policy", `Assoc []) ];
+  assert_no_policy
+    [ ("verifier_policy", `Assoc [ ("mode", `String "none") ]) ]
+
+let test_goal_upsert_rejects_malformed_verifier_policy_shape () =
+  with_room @@ fun config ->
+  let rejected =
+    Tool_coord.dispatch (coord_ctx config) ~name:"masc_goal_upsert"
+      ~args:
+        (`Assoc
+          [
+            ("title", `String "Malformed verifier policy");
+            ("verifier_policy", `Assoc [ ("mode", `String "review") ]);
+          ])
+  in
+  let error = expect_error rejected in
+  check string "validation error" "validation_error"
+    (get_string_field error "error_code");
+  check bool "error includes accepted policy shapes" true
+    (contains_substring (Yojson.Safe.to_string error)
+       "accepted verifier_policy shapes")
+
 let test_goal_review_updates_status () =
   with_room @@ fun config ->
   let goal, _kind =
@@ -736,6 +783,10 @@ let () =
             test_goal_list_ignores_blank_optional_filters;
           test_case "upsert rejects lifecycle fields" `Quick
             test_goal_upsert_rejects_lifecycle_fields;
+          test_case "upsert normalizes no-op verifier policy" `Quick
+            test_goal_upsert_normalizes_noop_verifier_policy;
+          test_case "upsert rejects malformed verifier policy shape" `Quick
+            test_goal_upsert_rejects_malformed_verifier_policy_shape;
           test_case "review updates status" `Quick test_goal_review_updates_status;
           test_case "transition verify complete" `Quick
             test_goal_transition_verification_to_completion;

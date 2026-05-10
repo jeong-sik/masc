@@ -18,6 +18,9 @@ RESULTS_FILE="$RUN_DIR/results.jsonl"
 POLL_ERRORS_FILE="$RUN_DIR/poll_errors.jsonl"
 REVIEW_TARGETS_FILE="$RUN_DIR/review-targets.jsonl"
 GITHUB_IDENTITY_COUNTS_FILE="$RUN_DIR/github-identity-counts.json"
+PROOF_BRANCH_COLLISIONS_FILE="$RUN_DIR/proof-branch-collisions.jsonl"
+CREATE_READINESS_FAILURES_FILE="$RUN_DIR/create-readiness-failures.jsonl"
+GITHUB_EGRESS_PREFLIGHT_FILE="$RUN_DIR/github-egress-preflight.jsonl"
 SUMMARY_FILE="$RUN_DIR/summary.json"
 AUDIT_FILE="$RUN_DIR/audit-docker-pr-lifecycle.json"
 AUDIT_STATUS_RESULT=0
@@ -36,12 +39,19 @@ KEEPER_TURN_TIMEOUT_SEC="${KEEPER_TURN_TIMEOUT_SEC:-900}"
 INIT_TIMEOUT_SEC="${INIT_TIMEOUT_SEC:-60}"
 POLL_TIMEOUT_SEC="${POLL_TIMEOUT_SEC:-1200}"
 POLL_INTERVAL_SEC="${POLL_INTERVAL_SEC:-10}"
-REQUIRED_TOOLS="${REQUIRED_TOOLS:-keeper_shell,keeper_bash,keeper_pr_create,keeper_pr_review_comment}"
+LIFECYCLE_MUTATION_MODE="split"
+PHASE_MODE="${PHASE_MODE:-both}"
+REVIEW_RESUME="${REVIEW_RESUME:-0}"
+REQUIRED_TOOLS_LEGACY="${REQUIRED_TOOLS:-}"
+CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-masc_web_search,keeper_bash,keeper_pr_create}}"
+REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_shell,keeper_pr_review_comment}}"
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 MCP_TOKEN="${MASC_MCP_TOKEN:-}"
 MCP_CLIENT_NAME="${MCP_CLIENT_NAME:-keeper-docker-pr-lifecycle-reprobe}"
 EXPECTED_SERVER_COMMIT="${EXPECTED_SERVER_COMMIT:-}"
 FORBID_GITHUB_IDENTITIES="${FORBID_GITHUB_IDENTITIES:-}"
+ALLOW_FORK_PR_FOR_READONLY="${ALLOW_FORK_PR_FOR_READONLY:-0}"
+SEED_GITHUB_EGRESS="${SEED_GITHUB_EGRESS:-0}"
 SERVER_HEALTH_URL="${SERVER_HEALTH_URL:-}"
 SERVER_COMMIT_ACTUAL=""
 SERVER_STARTED_AT_ACTUAL=""
@@ -75,10 +85,22 @@ Options:
   --forbid-github-identity NAME
                            Fail --mutate preflight when a target keeper uses
                            this GitHub identity. Repeat or pass comma-separated.
+  --allow-fork-pr-for-readonly
+                           Permit PUBLIC repo READ/TRIAGE credentials to satisfy
+                           create proof by pushing to their own fork and opening
+                           a draft PR with head OWNER:BRANCH.
+  --seed-github-egress     When a fork-route keeper lacks GitHub egress policy,
+                           add github.com and *.github.com to its Docker
+                           egress.json before sending mutate prompts.
   --server-health-url URL  Health endpoint for commit verification.
   --board-post-id ID       Post a final board comment to this thread.
   --run-id ID              Stable run id for prompts and artifacts.
   --run-dir PATH           Artifact directory.
+  --phase create|review|both
+                           Which lifecycle phase to mutate (default: both).
+  --review-resume          With --phase review, send review prompts even when
+                           create result readiness is incomplete. Keeper-side
+                           target PR resolution still decides success/failure.
   -h, --help               Show this help.
 
 Environment:
@@ -87,10 +109,19 @@ Environment:
   POLL_INTERVAL_SEC        Poll interval in seconds.
   MSG_TIMEOUT_SEC          HTTP request timeout for MCP tool calls.
   KEEPER_TURN_TIMEOUT_SEC  Per-keeper Agent.run timeout_sec sent to masc_keeper_msg.
-  REQUIRED_TOOLS           CSV required_tools sent to masc_keeper_msg when mutating.
+  REQUIRED_TOOLS           Legacy CSV applied to both split phases when
+                           phase-specific overrides are unset.
+  CREATE_REQUIRED_TOOLS    CSV required_tools for split create phase.
+  REVIEW_REQUIRED_TOOLS    CSV required_tools for split review phase.
   RUN_AUDIT=0              Skip final audit.
+  PHASE_MODE=create|review|both
+                           Same as --phase.
+  REVIEW_RESUME=1          Same as --review-resume.
   EXPECTED_SERVER_COMMIT   Optional expected /health build.commit prefix.
   FORBID_GITHUB_IDENTITIES Optional CSV of forbidden keeper GitHub identities.
+  ALLOW_FORK_PR_FOR_READONLY=1
+                           Same as --allow-fork-pr-for-readonly.
+  SEED_GITHUB_EGRESS=1     Same as --seed-github-egress.
 EOF
 }
 
@@ -140,6 +171,14 @@ while [[ $# -gt 0 ]]; do
       fi
       shift 2
       ;;
+    --allow-fork-pr-for-readonly)
+      ALLOW_FORK_PR_FOR_READONLY=1
+      shift
+      ;;
+    --seed-github-egress)
+      SEED_GITHUB_EGRESS=1
+      shift
+      ;;
     --server-health-url)
       SERVER_HEALTH_URL="$2"
       shift 2
@@ -159,6 +198,9 @@ while [[ $# -gt 0 ]]; do
         POLL_ERRORS_FILE="$RUN_DIR/poll_errors.jsonl"
         REVIEW_TARGETS_FILE="$RUN_DIR/review-targets.jsonl"
         GITHUB_IDENTITY_COUNTS_FILE="$RUN_DIR/github-identity-counts.json"
+        PROOF_BRANCH_COLLISIONS_FILE="$RUN_DIR/proof-branch-collisions.jsonl"
+        CREATE_READINESS_FAILURES_FILE="$RUN_DIR/create-readiness-failures.jsonl"
+        GITHUB_EGRESS_PREFLIGHT_FILE="$RUN_DIR/github-egress-preflight.jsonl"
         SUMMARY_FILE="$RUN_DIR/summary.json"
         AUDIT_FILE="$RUN_DIR/audit-docker-pr-lifecycle.json"
       fi
@@ -174,9 +216,20 @@ while [[ $# -gt 0 ]]; do
       POLL_ERRORS_FILE="$RUN_DIR/poll_errors.jsonl"
       REVIEW_TARGETS_FILE="$RUN_DIR/review-targets.jsonl"
       GITHUB_IDENTITY_COUNTS_FILE="$RUN_DIR/github-identity-counts.json"
+      PROOF_BRANCH_COLLISIONS_FILE="$RUN_DIR/proof-branch-collisions.jsonl"
+      CREATE_READINESS_FAILURES_FILE="$RUN_DIR/create-readiness-failures.jsonl"
+      GITHUB_EGRESS_PREFLIGHT_FILE="$RUN_DIR/github-egress-preflight.jsonl"
       SUMMARY_FILE="$RUN_DIR/summary.json"
       AUDIT_FILE="$RUN_DIR/audit-docker-pr-lifecycle.json"
       shift 2
+      ;;
+    --phase)
+      PHASE_MODE="$2"
+      shift 2
+      ;;
+    --review-resume)
+      REVIEW_RESUME=1
+      shift
       ;;
     -h|--help)
       usage
@@ -199,6 +252,9 @@ mkdir -p "$RUN_DIR" "$RAW_DIR" "$PROMPT_DIR"
 : >"$RESULTS_FILE"
 : >"$POLL_ERRORS_FILE"
 : >"$REVIEW_TARGETS_FILE"
+: >"$PROOF_BRANCH_COLLISIONS_FILE"
+: >"$CREATE_READINESS_FAILURES_FILE"
+: >"$GITHUB_EGRESS_PREFLIGHT_FILE"
 
 log() {
   printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2
@@ -318,16 +374,18 @@ record_pending_server_incarnation_loss() {
   local pending_file="$1"
   local status="$2"
   local raw_file="$3"
+  local phase="${4:-}"
   while IFS=$'\t' read -r request_id keeper; do
     [[ -n "$request_id" ]] || continue
     jq -nc \
       --arg keeper "$keeper" \
+      --arg phase "$phase" \
       --arg request_id "$request_id" \
       --arg status "$status" \
       --arg expected_incarnation "$SERVER_INCARNATION_ACTUAL" \
       --arg actual_incarnation "$SERVER_INCARNATION_LAST_ACTUAL" \
       --arg raw_file "$raw_file" \
-      '{keeper:$keeper, request_id:$request_id, status:$status, server_expected_incarnation:$expected_incarnation, server_actual_incarnation:$actual_incarnation, raw_file:$raw_file}' \
+      '{keeper:$keeper, phase:$phase, request_id:$request_id, status:$status, server_expected_incarnation:$expected_incarnation, server_actual_incarnation:$actual_incarnation, raw_file:$raw_file}' \
       >>"$RESULTS_FILE"
   done <"$pending_file"
 }
@@ -590,6 +648,9 @@ except Exception:
 identities = identity_payload.get("keepers")
 if not isinstance(identities, dict):
     identities = {}
+accounts = identity_payload.get("keeper_accounts")
+if not isinstance(accounts, dict):
+    accounts = {}
 
 
 def fallback_target(index):
@@ -601,20 +662,32 @@ def fallback_target(index):
 with review_targets_file.open("w", encoding="utf-8") as handle:
     for index, keeper in enumerate(keepers):
         keeper_identity = identities.get(keeper)
+        keeper_account = accounts.get(keeper)
         review_target = None
         mode = "insufficient_targets"
 
-        if len(keepers) >= 2 and isinstance(keeper_identity, str):
+        if len(keepers) >= 2 and isinstance(keeper_account, str):
+            for candidate in keepers:
+                if candidate == keeper:
+                    continue
+                candidate_account = accounts.get(candidate)
+                if isinstance(candidate_account, str) and candidate_account != keeper_account:
+                    review_target = candidate
+                    mode = "account_aware"
+                    break
+            if review_target is None:
+                mode = "account_pool_insufficient"
+        elif len(keepers) >= 2 and isinstance(keeper_identity, str):
             for candidate in keepers:
                 if candidate == keeper:
                     continue
                 candidate_identity = identities.get(candidate)
                 if isinstance(candidate_identity, str) and candidate_identity != keeper_identity:
                     review_target = candidate
-                    mode = "identity_aware"
+                    mode = "identity_name_aware_unresolved_account"
                     break
             if review_target is None:
-                mode = "identity_pool_insufficient"
+                mode = "identity_name_pool_insufficient"
         elif len(keepers) >= 2:
             review_target = fallback_target(index)
             mode = "ring_unverified_identity"
@@ -622,8 +695,10 @@ with review_targets_file.open("w", encoding="utf-8") as handle:
         row = {
             "keeper": keeper,
             "keeper_identity": keeper_identity,
+            "keeper_account_login": keeper_account,
             "review_target": review_target,
             "review_target_identity": identities.get(review_target) if review_target else None,
+            "review_target_account_login": accounts.get(review_target) if review_target else None,
             "mode": mode,
         }
         handle.write(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n")
@@ -638,9 +713,11 @@ PY
 }
 
 build_github_identity_counts() {
-  python3 - "$BASE_PATH" "$RUN_DIR/keepers.txt" "$GITHUB_IDENTITY_COUNTS_FILE" "$FORBID_GITHUB_IDENTITIES" <<'PY'
+  python3 - "$BASE_PATH" "$RUN_DIR/keepers.txt" "$GITHUB_IDENTITY_COUNTS_FILE" "$FORBID_GITHUB_IDENTITIES" "$REPO_SLUG" <<'PY'
 import json
+import os
 import pathlib
+import subprocess
 import sys
 from collections import Counter
 
@@ -658,6 +735,7 @@ forbidden = {
     for item in sys.argv[4].split(",")
     if item.strip()
 }
+repo_slug = sys.argv[5]
 config_dir = base_path / ".masc" / "config" / "keepers"
 runtime_dir = base_path / ".masc" / "keepers"
 
@@ -696,9 +774,71 @@ def string_field(data, key):
     return value if isinstance(value, str) and value else None
 
 
+def read_account_login(identity):
+    hosts_path = base_path / ".masc" / "github-identities" / identity / "gh" / "hosts.yml"
+    if not hosts_path.is_file():
+        return None
+    try:
+        lines = hosts_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except Exception:
+        return None
+    for line in lines:
+        stripped = line.strip()
+        if not stripped.startswith("user:"):
+            continue
+        value = stripped.split(":", 1)[1].split("#", 1)[0].strip().strip("'\"")
+        return value or None
+    return None
+
+
+def read_repo_info(identity):
+    gh_config_dir = base_path / ".masc" / "github-identities" / identity / "gh"
+    if not gh_config_dir.is_dir():
+        return None, None, "gh_config_dir_missing"
+    env = os.environ.copy()
+    env["GH_CONFIG_DIR"] = str(gh_config_dir)
+    try:
+        completed = subprocess.run(
+            [
+                "gh",
+                "repo",
+                "view",
+                repo_slug,
+                "--json",
+                "viewerPermission,visibility",
+            ],
+            check=False,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=20,
+        )
+    except Exception as exc:
+        return None, None, f"repo_permission_probe_exception:{exc}"
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip().splitlines()
+        preview = detail[0] if detail else f"gh_exit_{completed.returncode}"
+        return None, None, preview[:200]
+    try:
+        payload = json.loads(completed.stdout)
+    except Exception as exc:
+        return None, None, f"repo_permission_probe_json_error:{exc}"
+    permission = payload.get("viewerPermission")
+    visibility = payload.get("visibility")
+    permission = permission if isinstance(permission, str) and permission else None
+    visibility = visibility if isinstance(visibility, str) and visibility else None
+    return permission, visibility, None
+
+
 keepers = [line.strip() for line in keepers_file.read_text().splitlines() if line.strip()]
 identities = {}
+accounts = {}
+permissions = {}
+visibilities = {}
 missing = []
+unresolved_accounts = []
+permission_errors = []
 forbidden_keepers = []
 for keeper in keepers:
     config = load_keeper_config(config_dir / f"{keeper}.toml")
@@ -716,21 +856,66 @@ for keeper in keepers:
     )
     if identity:
         identities[keeper] = identity
+        account_login = read_account_login(identity)
+        if account_login:
+            accounts[keeper] = account_login
+        else:
+            unresolved_accounts.append({"keeper": keeper, "github_identity": identity})
+        permission, visibility, permission_error = read_repo_info(identity)
+        if permission:
+            permissions[keeper] = permission
+            if visibility:
+                visibilities[keeper] = visibility
+        else:
+            permission_errors.append(
+                {
+                    "keeper": keeper,
+                    "github_identity": identity,
+                    "error": permission_error or "permission_unresolved",
+                }
+            )
         if identity in forbidden:
-            forbidden_keepers.append({"keeper": keeper, "github_identity": identity})
+            forbidden_keepers.append(
+                {
+                    "keeper": keeper,
+                    "github_identity": identity,
+                    "matched": "github_identity",
+                }
+            )
+        if account_login and account_login in forbidden and account_login != identity:
+            forbidden_keepers.append(
+                {
+                    "keeper": keeper,
+                    "github_identity": identity,
+                    "github_account_login": account_login,
+                    "matched": "github_account_login",
+                }
+            )
     else:
         missing.append(keeper)
 
 counts = Counter(identities.values())
+account_counts = Counter(accounts.values())
+permission_counts = Counter(permissions.values())
+visibility_counts = Counter(visibilities.values())
 out_file.write_text(
     json.dumps(
         {
             "base_path": str(base_path),
             "keeper_count": len(keepers),
             "unique_count": len(counts),
+            "account_unique_count": len(account_counts),
             "counts": dict(sorted(counts.items())),
+            "account_counts": dict(sorted(account_counts.items())),
+            "repo_permission_counts": dict(sorted(permission_counts.items())),
+            "repo_visibility_counts": dict(sorted(visibility_counts.items())),
             "keepers": identities,
+            "keeper_accounts": accounts,
+            "keeper_repo_permissions": permissions,
+            "keeper_repo_visibilities": visibilities,
             "missing": missing,
+            "unresolved_accounts": unresolved_accounts,
+            "repo_permission_errors": permission_errors,
             "forbidden_identities": sorted(forbidden),
             "forbidden_keepers": forbidden_keepers,
         },
@@ -746,9 +931,74 @@ assert_github_identity_pool_for_mutate() {
   build_github_identity_counts
   local unique_count
   unique_count="$(jq -r '.unique_count // 0' "$GITHUB_IDENTITY_COUNTS_FILE")"
+  local unresolved_accounts_count
+  unresolved_accounts_count="$(jq -r '(.unresolved_accounts // []) | length' "$GITHUB_IDENTITY_COUNTS_FILE")"
   if [[ "$MUTATE" == "1" && "$unique_count" -lt 2 ]]; then
     echo "at least two unique github_identity values are required for cross-keeper approval proof" >&2
     jq -c '{unique_count, counts, missing}' "$GITHUB_IDENTITY_COUNTS_FILE" >&2 || true
+    exit 1
+  fi
+  if [[ "$MUTATE" == "1" && "$unresolved_accounts_count" -gt 0 ]]; then
+    echo "target keeper set has unresolved GitHub account logins" >&2
+    jq -c '{unresolved_accounts}' "$GITHUB_IDENTITY_COUNTS_FILE" >&2 || true
+    exit 1
+  fi
+  local account_unique_count
+  account_unique_count="$(jq -r '.account_unique_count // 0' "$GITHUB_IDENTITY_COUNTS_FILE")"
+  if [[ "$MUTATE" == "1" && "$account_unique_count" -lt 2 ]]; then
+    echo "at least two unique authenticated GitHub accounts are required for cross-keeper approval proof" >&2
+    jq -c '{account_unique_count, account_counts, keeper_accounts}' "$GITHUB_IDENTITY_COUNTS_FILE" >&2 || true
+    exit 1
+  fi
+  local repo_permission_error_count
+  repo_permission_error_count="$(jq -r '(.repo_permission_errors // []) | length' "$GITHUB_IDENTITY_COUNTS_FILE")"
+  if [[ "$MUTATE" == "1" && "$repo_permission_error_count" -gt 0 ]]; then
+    echo "target keeper set has unresolved GitHub repository permissions" >&2
+    jq -c '{repo_permission_errors}' "$GITHUB_IDENTITY_COUNTS_FILE" >&2 || true
+    exit 1
+  fi
+  local non_writable_file
+  non_writable_file="$RUN_DIR/non-writable-keepers.json"
+  python3 - "$GITHUB_IDENTITY_COUNTS_FILE" "$ALLOW_FORK_PR_FOR_READONLY" >"$non_writable_file" <<'PY'
+import json
+import pathlib
+import sys
+
+payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+allow_fork = sys.argv[2] == "1"
+permissions = payload.get("keeper_repo_permissions")
+if not isinstance(permissions, dict):
+    permissions = {}
+visibilities = payload.get("keeper_repo_visibilities")
+if not isinstance(visibilities, dict):
+    visibilities = {}
+
+writable = {"ADMIN", "MAINTAIN", "WRITE"}
+forkable_read = {"READ", "TRIAGE"}
+non_writable = []
+for keeper, permission in sorted(permissions.items()):
+    visibility = visibilities.get(keeper)
+    if permission in writable:
+        continue
+    if allow_fork and permission in forkable_read and visibility == "PUBLIC":
+        continue
+    non_writable.append(
+        {"keeper": keeper, "permission": permission, "visibility": visibility}
+    )
+
+print(json.dumps({"non_writable_keepers": non_writable}, sort_keys=True))
+PY
+  if [[ "$MUTATE" == "1" && -s "$non_writable_file" ]] \
+    && jq -e '(.non_writable_keepers // []) | length > 0' "$non_writable_file" >/dev/null; then
+    echo "target keeper set includes accounts without upstream write permission" >&2
+    jq -c --arg allow_fork "$ALLOW_FORK_PR_FOR_READONLY" '{
+      keeper_repo_permissions,
+      keeper_repo_visibilities,
+      non_writable_keepers: (
+        input.non_writable_keepers
+      ),
+      allow_fork_pr_for_readonly: $allow_fork
+    }' "$GITHUB_IDENTITY_COUNTS_FILE" "$non_writable_file" >&2 || true
     exit 1
   fi
   if [[ "$MUTATE" == "1" ]] \
@@ -766,79 +1016,336 @@ review_target_for_keeper() {
   ' "$REVIEW_TARGETS_FILE" | head -n 1
 }
 
-prompt_for_keeper() {
+proof_branch_for_keeper() {
   local keeper="$1"
-  local review_target="${2:-}"
-  local review_branch=""
-  local review_target_json="null"
-  local review_branch_json="null"
-  local review_instruction=""
-  if [[ -n "$review_target" ]]; then
-    review_branch="keeper/$review_target-docker-pr-proof-$RUN_ID"
-    review_target_json="\"$review_target\""
-    review_branch_json="\"$review_branch\""
-    review_instruction="$(cat <<EOF
-Cross-keeper approval target:
-- You must review and APPROVE the draft PR whose head branch is: $review_branch
-- This target belongs to keeper: $review_target
-- Do not approve your own PR or your own branch.
-- If the target PR is not visible yet, wait/retry briefly by listing PRs for that head branch before declaring a blocker.
-- If GitHub reports the target PR has the same author identity as your current credential and rejects approval as self-approval, stop and report blocker="github_self_approve_policy" with the exact tool output.
+  printf 'keeper-%s-agent/%s' "$keeper" "$RUN_ID"
+}
+
+proof_head_ref_for_keeper() {
+  local keeper="$1"
+  local branch account
+  branch="$(proof_branch_for_keeper "$keeper")"
+  if keeper_uses_fork_pr_route "$keeper"; then
+    account="$(github_account_for_keeper "$keeper")"
+    if [[ -n "$account" ]]; then
+      printf '%s:%s' "$account" "$branch"
+      return 0
+    fi
+  fi
+  printf '%s' "$branch"
+}
+
+github_account_for_keeper() {
+  local keeper="$1"
+  jq -r --arg keeper "$keeper" '.keeper_accounts[$keeper] // empty' "$GITHUB_IDENTITY_COUNTS_FILE"
+}
+
+repo_permission_for_keeper() {
+  local keeper="$1"
+  jq -r --arg keeper "$keeper" '.keeper_repo_permissions[$keeper] // empty' "$GITHUB_IDENTITY_COUNTS_FILE"
+}
+
+repo_visibility_for_keeper() {
+  local keeper="$1"
+  jq -r --arg keeper "$keeper" '.keeper_repo_visibilities[$keeper] // empty' "$GITHUB_IDENTITY_COUNTS_FILE"
+}
+
+keeper_uses_fork_pr_route() {
+  local keeper="$1"
+  local permission visibility
+  permission="$(repo_permission_for_keeper "$keeper")"
+  visibility="$(repo_visibility_for_keeper "$keeper")"
+  [[ "$ALLOW_FORK_PR_FOR_READONLY" == "1" \
+    && "$visibility" == "PUBLIC" \
+    && ( "$permission" == "READ" || "$permission" == "TRIAGE" ) ]]
+}
+
+assert_github_egress_for_fork_routes() {
+  [[ "$MUTATE" == "1" ]] || return 0
+  [[ "$ALLOW_FORK_PR_FOR_READONLY" == "1" ]] || return 0
+
+  local status=0
+  set +e
+  python3 - "$BASE_PATH" "$RUN_DIR/keepers.txt" "$GITHUB_IDENTITY_COUNTS_FILE" \
+    "$SEED_GITHUB_EGRESS" "$GITHUB_EGRESS_PREFLIGHT_FILE" <<'PY'
+import json
+import pathlib
+import sys
+
+base_path = pathlib.Path(sys.argv[1]).expanduser()
+keepers_file = pathlib.Path(sys.argv[2])
+identity_counts_file = pathlib.Path(sys.argv[3])
+seed = sys.argv[4] == "1"
+out_file = pathlib.Path(sys.argv[5])
+
+
+def safe_filename(name):
+    parts = []
+    for ch in name.lower():
+        if ch.isalnum() or ch in "._-":
+            parts.append(ch)
+        else:
+            parts.append(f"_{ord(ch):02x}")
+    return "".join(parts)
+
+
+def load_domains(path):
+    if not path.is_file():
+        return [], "missing"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return [], f"unreadable:{type(exc).__name__}"
+    if not isinstance(payload, list):
+        return [], "not_json_list"
+    domains = [str(item).strip().lower() for item in payload if isinstance(item, str)]
+    domains = [domain for domain in domains if domain]
+    return domains, None
+
+
+def github_allowed(domains):
+    normalized = {domain.lower() for domain in domains}
+    return "github.com" in normalized or "*.github.com" in normalized
+
+
+payload = json.loads(identity_counts_file.read_text(encoding="utf-8"))
+permissions = payload.get("keeper_repo_permissions")
+if not isinstance(permissions, dict):
+    permissions = {}
+visibilities = payload.get("keeper_repo_visibilities")
+if not isinstance(visibilities, dict):
+    visibilities = {}
+
+keepers = [line.strip() for line in keepers_file.read_text().splitlines() if line.strip()]
+records = []
+failed = False
+for keeper in keepers:
+    permission = permissions.get(keeper)
+    visibility = visibilities.get(keeper)
+    uses_fork_route = permission in {"READ", "TRIAGE"} and visibility == "PUBLIC"
+    if not uses_fork_route:
+        continue
+    policy_path = (
+        base_path
+        / ".masc"
+        / "playground"
+        / "docker"
+        / safe_filename(keeper)
+        / "egress.json"
+    )
+    domains, load_error = load_domains(policy_path)
+    if github_allowed(domains):
+        status = "ok"
+    elif seed:
+        policy_path.parent.mkdir(parents=True, exist_ok=True)
+        merged = sorted(set(domains + ["github.com", "*.github.com"]))
+        policy_path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
+        domains = merged
+        status = "seeded"
+    else:
+        failed = True
+        status = "missing_github_egress"
+    records.append(
+        {
+            "keeper": keeper,
+            "permission": permission,
+            "visibility": visibility,
+            "egress_policy_path": str(policy_path),
+            "load_error": load_error,
+            "status": status,
+            "allowed": domains,
+        }
+    )
+
+out_file.write_text(
+    "".join(json.dumps(record, sort_keys=True) + "\n" for record in records),
+    encoding="utf-8",
+)
+sys.exit(1 if failed else 0)
+PY
+  status=$?
+  set -e
+  if [[ "$status" -ne 0 ]]; then
+    echo "fork PR route requires GitHub egress policy for READ/TRIAGE keepers" >&2
+    echo "rerun with --seed-github-egress only for an isolated proof base, or seed the listed egress.json files manually" >&2
+    cat "$GITHUB_EGRESS_PREFLIGHT_FILE" >&2 || true
+    exit "$status"
+  fi
+}
+
+assert_no_proof_branch_collisions_for_mutate() {
+  [[ "$MUTATE" == "1" ]] || return 0
+
+  local branches_file remote_heads_file
+  branches_file="$RUN_DIR/proof-branches.txt"
+  remote_heads_file="$RUN_DIR/proof-branch-remote-heads.txt"
+  : >"$branches_file"
+  : >"$remote_heads_file"
+  : >"$PROOF_BRANCH_COLLISIONS_FILE"
+
+  local keeper branch
+  while IFS= read -r keeper; do
+    [[ -n "$keeper" ]] || continue
+    branch="$(proof_branch_for_keeper "$keeper")"
+    printf '%s\t%s\n' "$keeper" "$branch" >>"$branches_file"
+  done <"$RUN_DIR/keepers.txt"
+
+  local proof_branches=()
+  while IFS=$'\t' read -r _ branch; do
+    [[ -n "$branch" ]] || continue
+    proof_branches+=( "$branch" )
+  done <"$branches_file"
+  if [[ "${#proof_branches[@]}" -gt 0 ]]; then
+    if ! git -C "$REPO_ROOT" ls-remote --heads origin "${proof_branches[@]}" \
+        >"$remote_heads_file"; then
+      echo "failed to check remote proof branch uniqueness before mutate" >&2
+      exit 1
+    fi
+  fi
+
+  while IFS=$'\t' read -r keeper branch; do
+    [[ -n "$keeper" && -n "$branch" ]] || continue
+    local local_branch remote_tracking_branch remote_head worktree_branch
+    local_branch=false
+    remote_tracking_branch=false
+    remote_head=false
+    worktree_branch=false
+
+    if git -C "$REPO_ROOT" show-ref --verify --quiet "refs/heads/$branch"; then
+      local_branch=true
+    fi
+    if git -C "$REPO_ROOT" show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+      remote_tracking_branch=true
+    fi
+    if awk -v ref="refs/heads/$branch" '$2 == ref { found = 1 } END { exit(found ? 0 : 1) }' \
+        "$remote_heads_file"; then
+      remote_head=true
+    fi
+    if git -C "$REPO_ROOT" worktree list --porcelain \
+        | awk -v ref="refs/heads/$branch" '$1 == "branch" && $2 == ref { found = 1 } END { exit(found ? 0 : 1) }'; then
+      worktree_branch=true
+    fi
+
+    if [[ "$local_branch" == "true" || "$remote_tracking_branch" == "true" \
+        || "$remote_head" == "true" || "$worktree_branch" == "true" ]]; then
+      jq -nc \
+        --arg keeper "$keeper" \
+        --arg branch "$branch" \
+        --argjson local_branch "$local_branch" \
+        --argjson remote_tracking_branch "$remote_tracking_branch" \
+        --argjson remote_head "$remote_head" \
+        --argjson worktree_branch "$worktree_branch" \
+        '{
+          keeper:$keeper,
+          branch:$branch,
+          local_branch:$local_branch,
+          remote_tracking_branch:$remote_tracking_branch,
+          remote_head:$remote_head,
+          worktree_branch:$worktree_branch,
+          blocker:"branch_collision_preflight"
+        }' >>"$PROOF_BRANCH_COLLISIONS_FILE"
+    fi
+  done <"$branches_file"
+
+  if [[ -s "$PROOF_BRANCH_COLLISIONS_FILE" ]]; then
+    echo "proof branch collision preflight failed; choose a fresh --run-id" >&2
+    cat "$PROOF_BRANCH_COLLISIONS_FILE" >&2
+    exit 1
+  fi
+}
+
+prompt_for_keeper_create() {
+  local keeper="$1"
+  local branch
+  branch="$(proof_branch_for_keeper "$keeper")"
+  local account permission visibility head_ref git_route_rule push_step pr_step
+  account="$(github_account_for_keeper "$keeper")"
+  permission="$(repo_permission_for_keeper "$keeper")"
+  visibility="$(repo_visibility_for_keeper "$keeper")"
+  if keeper_uses_fork_pr_route "$keeper"; then
+    head_ref="$account:$branch"
+    git_route_rule="- You may use keeper_bash for gh repo fork / git remote setup only to prepare your own fork branch for this proof. Do not run gh pr create, gh pr review, or other PR mutations through keeper_shell or keeper_bash."
+    push_step="$(cat <<EOF
+5. Commit and push exactly branch $branch with keeper_bash using the fork PR route because your upstream repo permission is $permission:
+   - Confirm your GitHub account login is $account.
+   - Ensure the fork $account/${REPO_SLUG#*/} exists. If needed, run gh repo fork $REPO_SLUG --remote=false from keeper_bash; if GitHub blocks fork creation, stop and report blocker="fork_create_blocked" with the exact output.
+   - Add or update a remote named keeper-fork pointing at https://github.com/$account/${REPO_SLUG#*/}.git in the returned proof worktree.
+   - Push with git push keeper-fork HEAD:$branch.
+   - The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
+EOF
+)"
+    pr_step="$(cat <<EOF
+6. Create a draft PR from your fork branch with keeper_pr_create. The call must include
+   repo="$REPO_SLUG", head="$head_ref", base="main", draft=true, and cwd set to
+   the returned proof worktree path. Do not leave head/base empty and do not use
+   the base repo path if the proof branch lives in a separate worktree. Do not
+   mark ready, do not merge, do not add human-approved-ready.
 EOF
 )"
   else
-    review_instruction="$(cat <<'EOF'
-Cross-keeper approval target:
-- No distinct review target was available. You can create/push/comment on your own draft PR, but this run cannot satisfy PR APPROVE evidence.
-- Stop before approval and report blocker="insufficient_review_targets".
+    head_ref="$branch"
+    git_route_rule="- Do not run gh pr create, gh pr review, or other mutating GitHub commands through keeper_shell or keeper_bash."
+    push_step="$(cat <<EOF
+5. Commit and git push exactly branch $branch with keeper_bash. The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
+EOF
+)"
+    pr_step="$(cat <<EOF
+6. Create a draft PR for that branch with keeper_pr_create. The call must include
+   repo="$REPO_SLUG", head="$head_ref", base="main", draft=true, and cwd set to
+   the returned proof worktree path. Do not leave head/base empty and do not use
+   the base repo path if the proof branch lives in a separate worktree. Do not
+   mark ready, do not merge, do not add human-approved-ready.
 EOF
 )"
   fi
   cat <<EOF
 Docker PR lifecycle proof run: $RUN_ID
+Phase: create
 
 Target repo: $REPO_SLUG
 Keeper: $keeper
+GitHub account: ${account:-unknown}
+Repo permission: ${permission:-unknown}
+Repo visibility: ${visibility:-unknown}
 
-Goal: produce direct, auditable Docker-backed evidence for PR create, git push, PR review/comment, and PR APPROVE. Use native keeper tools where available; do not use host-local ambient GitHub credentials.
+Goal: create a fresh, auditable Docker-backed proof branch and draft PR. Do
+not review or approve another keeper's PR in this phase.
 
 Tool route rules:
-- Use keeper_shell for read-only GitHub inspection.
 - Use keeper_bash inside your Docker playground for proof-file creation and git add/commit/push on the proof branch.
-- Do not run gh pr create, gh pr review, or other mutating GitHub commands through keeper_shell or keeper_bash.
+$git_route_rule
 - Do not use approval-requiring host code-write paths such as masc_code_write for this proof file.
 - If keeper_bash rejects mutating git as policy-blocked, stop and report the exact blocker instead of switching to host-local credentials.
-- Use keeper_pr_create and keeper_pr_review_comment for PR mutation/review actions.
+- Use keeper_pr_create for PR creation.
 
-Required proof lane:
-1. Confirm your runtime is sandbox_profile=docker before mutating.
-2. Create a unique proof worktree/branch for exactly this run id:
-   - branch: keeper/$keeper-docker-pr-proof-$RUN_ID
-   - preferred tool: masc_worktree_create
+Required create lane:
+1. Use masc_web_search once for current external context before mutating. The
+   query should be about GitHub draft PR creation or GitHub CLI draft PR
+   behavior. Do not search for secrets, credentials, bearer tokens, or private
+   repository content.
+2. Confirm your runtime is sandbox_profile=docker before mutating.
+3. Create a unique proof worktree/branch for exactly this run id:
+   - branch: $branch
+   - preferred tool: masc_worktree_create with task_id=$RUN_ID
    - use the returned worktree path for every later keeper_bash git/file command.
+   - the returned branch must be $branch. If it is different, stop and report blocker="branch_mismatch".
    - Do not reuse any branch, worktree, or proof file from another run id.
    - Do not remove this run's worktree during the proof attempt. If Git says
      the branch/worktree already exists, stop and report blocker="branch_collision".
-3. Make a minimal, non-product proof edit under docs/runtime-proof/keepers/$keeper-$RUN_ID.md with keeper_bash from inside the Docker playground. The file content must include run_id=$RUN_ID and branch=keeper/$keeper-docker-pr-proof-$RUN_ID.
-4. Commit and git push exactly branch keeper/$keeper-docker-pr-proof-$RUN_ID with keeper_bash. The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
-5. Create a draft PR for that branch with keeper_pr_create or the native PR-create tool path. Do not mark ready, do not merge, do not add human-approved-ready.
-6. Use keeper_pr_review_read and keeper_pr_review_comment for review evidence. COMMENT is allowed on your own proof PR. APPROVE must target the cross-keeper PR below, not your own PR.
-
-$review_instruction
-
+4. Make a minimal, non-product proof edit under docs/runtime-proof/keepers/$keeper-$RUN_ID.md with keeper_bash from inside the Docker playground. The file content must include run_id=$RUN_ID and branch=$branch.
+$push_step
+$pr_step
 7. Reply with one compact JSON object:
    {
      "run_id": "$RUN_ID",
+     "phase": "create",
      "keeper": "$keeper",
-     "branch": "keeper/$keeper-docker-pr-proof-$RUN_ID",
-     "review_target_keeper": $review_target_json,
-     "review_target_branch": $review_branch_json,
+     "branch": "$branch",
+     "head": "$head_ref",
      "pr_url": "...",
-     "approved_pr_url": "...",
+     "web_search": true,
      "docker_pr_create": true,
      "docker_git_push": true,
-     "docker_pr_review": true,
-     "docker_pr_approve": true,
      "blocker": null
    }
 
@@ -849,29 +1356,116 @@ Safety rules:
 - No human-approved-ready label.
 - If a tool is missing or policy-blocked, stop and reply with blocker plus exact structured tool output.
 
-This prompt is sent with masc_keeper_msg.required_tools so the runtime records
-tool_surface_mismatch or missing_required_tool_use when the Docker PR lifecycle
-tools are not visible or not used.
+This prompt is sent with create-phase masc_keeper_msg.required_tools so the
+runtime records tool_surface_mismatch or missing_required_tool_use when
+masc_web_search/keeper_bash/keeper_pr_create are not visible or not used.
+EOF
+}
+
+prompt_for_keeper_review() {
+  local keeper="$1"
+  local review_target="${2:-}"
+  local review_branch=""
+  local review_head_ref=""
+  local review_target_json="null"
+  local review_branch_json="null"
+  local review_head_ref_json="null"
+  local review_instruction=""
+  if [[ -n "$review_target" ]]; then
+    review_branch="$(proof_branch_for_keeper "$review_target")"
+    review_head_ref="$(proof_head_ref_for_keeper "$review_target")"
+    review_target_json="\"$review_target\""
+    review_branch_json="\"$review_branch\""
+    review_head_ref_json="\"$review_head_ref\""
+    review_instruction="$(cat <<EOF
+Cross-keeper approval target:
+- You must review and APPROVE the draft PR whose head ref is: $review_head_ref
+- Bare target branch: $review_branch
+- This target belongs to keeper: $review_target
+- Do not approve your own PR or your own branch.
+- First use keeper_shell once to resolve the target PR number:
+  gh pr view $review_head_ref -R $REPO_SLUG --json number,url,isDraft,headRefName
+- If that command reports no PR or cannot resolve the branch, do not wait in a loop. Reply with blocker="target_pr_missing" and the exact tool output.
+- If GitHub reports the target PR has the same author identity as your current credential and rejects approval as self-approval, stop and report blocker="github_self_approve_policy" with the exact tool output.
+- Once the PR number is known, call keeper_pr_review_comment with event="APPROVE" and a body that includes run_id=$RUN_ID, reviewer=$keeper, target_branch=$review_branch, and target_head=$review_head_ref.
+EOF
+)"
+  else
+    review_instruction="$(cat <<'EOF'
+Cross-keeper approval target:
+- No distinct review target was available. This phase cannot satisfy PR APPROVE evidence.
+- Stop immediately and report blocker="insufficient_review_targets".
+EOF
+)"
+  fi
+  cat <<EOF
+Docker PR lifecycle proof run: $RUN_ID
+Phase: review
+
+Target repo: $REPO_SLUG
+Keeper: $keeper
+
+Goal: produce direct, auditable Docker-backed PR review and APPROVE evidence
+for another keeper's draft proof PR. Do not create a new branch or PR in this
+phase.
+
+Tool route rules:
+- Use keeper_shell for read-only GitHub inspection.
+- Do not run mutating gh review commands through keeper_shell or keeper_bash.
+- Use keeper_pr_review_comment for the APPROVE mutation.
+
+$review_instruction
+
+Reply with one compact JSON object:
+   {
+     "run_id": "$RUN_ID",
+     "phase": "review",
+     "keeper": "$keeper",
+     "review_target_keeper": $review_target_json,
+     "review_target_branch": $review_branch_json,
+     "review_target_head": $review_head_ref_json,
+     "approved_pr_url": "...",
+     "docker_pr_approve": true,
+     "blocker": null
+   }
+
+Safety rules:
+- No ready/merge.
+- No human-approved-ready label.
+- If a tool is missing or policy-blocked, stop and reply with blocker plus exact structured tool output.
+
+This prompt is sent with review-phase masc_keeper_msg.required_tools so the
+runtime records tool_surface_mismatch or missing_required_tool_use when the
+read-only keeper_shell lookup or keeper_pr_review_comment approval is not
+visible or not used.
 EOF
 }
 
 render_prompts() {
   while IFS= read -r keeper; do
     [[ -n "$keeper" ]] || continue
-    prompt_for_keeper "$keeper" "$(review_target_for_keeper "$keeper")" >"$PROMPT_DIR/$keeper.txt"
+    prompt_for_keeper_create "$keeper" >"$PROMPT_DIR/$keeper-create.txt"
+    prompt_for_keeper_review "$keeper" "$(review_target_for_keeper "$keeper")" >"$PROMPT_DIR/$keeper-review.txt"
   done <"$RUN_DIR/keepers.txt"
 }
 
-send_prompts() {
+send_phase_prompts() {
+  local phase="$1"
+  local required_tools_csv="$2"
   while IFS= read -r keeper; do
     [[ -n "$keeper" ]] || continue
-    local prompt args payload text request_id
-    prompt="$(cat "$PROMPT_DIR/$keeper.txt")"
+    local prompt args payload text request_id review_target review_target_head
+    review_target="$(review_target_for_keeper "$keeper")"
+    review_target_head=""
+    if [[ -n "$review_target" ]]; then
+      review_target_head="$(proof_head_ref_for_keeper "$review_target")"
+    fi
+    prompt="$(cat "$PROMPT_DIR/$keeper-$phase.txt")"
     args="$(
       jq -cn \
         --arg name "$keeper" \
         --arg message "$prompt" \
-        --arg required_tools_csv "$REQUIRED_TOOLS" \
+        --arg required_tools_csv "$required_tools_csv" \
         --argjson timeout "$KEEPER_TURN_TIMEOUT_SEC" \
         '{
           name:$name,
@@ -885,12 +1479,12 @@ send_prompts() {
           )
         }'
     )"
-    log "sending proof prompt to $keeper"
-    payload="$(tool_call "keeper-msg-$keeper-$RUN_ID" "masc_keeper_msg" "$args" "$MSG_TIMEOUT_SEC")"
-    printf '%s' "$payload" >"$RAW_DIR/msg-$keeper.jsonrpc.json"
+    log "sending $phase proof prompt to $keeper"
+    payload="$(tool_call "keeper-msg-$phase-$keeper-$RUN_ID" "masc_keeper_msg" "$args" "$MSG_TIMEOUT_SEC")"
+    printf '%s' "$payload" >"$RAW_DIR/msg-$phase-$keeper.jsonrpc.json"
     mcp_require_tool_ok "$payload" "masc_keeper_msg:$keeper"
     text="$(tool_text_or_empty "$payload")"
-    printf '%s' "$text" >"$RAW_DIR/msg-$keeper.text"
+    printf '%s' "$text" >"$RAW_DIR/msg-$phase-$keeper.text"
     request_id="$(printf '%s' "$text" | jq -r '.request_id // .id // empty' 2>/dev/null || true)"
     if [[ -z "$request_id" ]]; then
       echo "masc_keeper_msg did not return request_id for $keeper" >&2
@@ -899,10 +1493,12 @@ send_prompts() {
     fi
     jq -nc \
       --arg keeper "$keeper" \
+      --arg phase "$phase" \
       --arg request_id "$request_id" \
-      --arg prompt_file "$PROMPT_DIR/$keeper.txt" \
-      --arg review_target "$(review_target_for_keeper "$keeper")" \
-      '{keeper:$keeper, request_id:$request_id, prompt_file:$prompt_file, review_target:$review_target, status:"pending"}' \
+      --arg prompt_file "$PROMPT_DIR/$keeper-$phase.txt" \
+      --arg review_target "$review_target" \
+      --arg review_target_head "$review_target_head" \
+      '{keeper:$keeper, phase:$phase, request_id:$request_id, prompt_file:$prompt_file, review_target:$review_target, review_target_head:$review_target_head, status:"pending"}' \
       >>"$REQUESTS_FILE"
   done <"$RUN_DIR/keepers.txt"
 }
@@ -918,10 +1514,21 @@ result_is_terminal() {
 }
 
 poll_results() {
+  local phase="$1"
+  # Honor MUTATE_POLL_DEADLINE_TS when the caller has already opened the
+  # phase loop with a shared overall budget (split keeper lifecycle PR
+  # #13842). Falling back to the per-call POLL_TIMEOUT_SEC keeps
+  # backwards compatibility for direct invocations of this function.
   local deadline
-  deadline=$(( $(date +%s) + POLL_TIMEOUT_SEC ))
-  local pending_file="$RUN_DIR/pending.txt"
-  jq -r '.request_id + "\t" + .keeper' "$REQUESTS_FILE" >"$pending_file"
+  if [[ -n "${MUTATE_POLL_DEADLINE_TS:-}" ]]; then
+    deadline="$MUTATE_POLL_DEADLINE_TS"
+  else
+    deadline=$(( $(date +%s) + POLL_TIMEOUT_SEC ))
+  fi
+  local pending_file="$RUN_DIR/pending-$phase.txt"
+  jq -r --arg phase "$phase" \
+    'select(.phase == $phase) | .request_id + "\t" + .keeper' \
+    "$REQUESTS_FILE" >"$pending_file"
 
   while [[ -s "$pending_file" && "$(date +%s)" -lt "$deadline" ]]; do
     if ! assert_server_incarnation_unchanged; then
@@ -934,7 +1541,8 @@ poll_results() {
         log "server incarnation changed while polling keeper results: expected=$SERVER_INCARNATION_ACTUAL actual=${SERVER_INCARNATION_LAST_ACTUAL:-unknown}"
         record_pending_server_incarnation_loss "$pending_file" \
           "$SERVER_INCARNATION_LAST_REASON" \
-          "$SERVER_INCARNATION_LAST_FILE"
+          "$SERVER_INCARNATION_LAST_FILE" \
+          "$phase"
         : >"$pending_file"
         break
       fi
@@ -949,23 +1557,23 @@ poll_results() {
       local args payload text status
       args="$(jq -cn --arg request_id "$request_id" '{request_id:$request_id}')"
       payload="$(tool_call "keeper-msg-result-$request_id" "masc_keeper_msg_result" "$args" 30)"
-      printf '%s' "$payload" >"$RAW_DIR/result-$keeper-$request_id.jsonrpc.json"
+      printf '%s' "$payload" >"$RAW_DIR/result-$phase-$keeper-$request_id.jsonrpc.json"
       if ! mcp_require_tool_ok "$payload" "masc_keeper_msg_result:$keeper" >/dev/null 2>&1; then
-        jq -nc --arg keeper "$keeper" --arg request_id "$request_id" \
+        jq -nc --arg keeper "$keeper" --arg phase "$phase" --arg request_id "$request_id" \
           --arg status "poll_error" \
-          --arg raw_file "$RAW_DIR/result-$keeper-$request_id.jsonrpc.json" \
-          '{keeper:$keeper, request_id:$request_id, status:$status, raw_file:$raw_file}' \
+          --arg raw_file "$RAW_DIR/result-$phase-$keeper-$request_id.jsonrpc.json" \
+          '{keeper:$keeper, phase:$phase, request_id:$request_id, status:$status, raw_file:$raw_file}' \
           >>"$POLL_ERRORS_FILE"
         printf '%s\t%s\n' "$request_id" "$keeper" >>"$next_pending"
         continue
       fi
       text="$(tool_text_or_empty "$payload")"
-      printf '%s' "$text" >"$RAW_DIR/result-$keeper-$request_id.text"
+      printf '%s' "$text" >"$RAW_DIR/result-$phase-$keeper-$request_id.text"
       if result_is_terminal "$text"; then
         status="$(printf '%s' "$text" | jq -r '.status // (if .reply then "completed" else "unknown" end)' 2>/dev/null || echo completed)"
-        jq -nc --arg keeper "$keeper" --arg request_id "$request_id" --arg status "$status" \
-          --arg text_file "$RAW_DIR/result-$keeper-$request_id.text" \
-          '{keeper:$keeper, request_id:$request_id, status:$status, text_file:$text_file}' \
+        jq -nc --arg keeper "$keeper" --arg phase "$phase" --arg request_id "$request_id" --arg status "$status" \
+          --arg text_file "$RAW_DIR/result-$phase-$keeper-$request_id.text" \
+          '{keeper:$keeper, phase:$phase, request_id:$request_id, status:$status, text_file:$text_file}' \
           >>"$RESULTS_FILE"
       else
         printf '%s\t%s\n' "$request_id" "$keeper" >>"$next_pending"
@@ -978,11 +1586,77 @@ poll_results() {
 
   if [[ -s "$pending_file" ]]; then
     while IFS=$'\t' read -r request_id keeper; do
-      jq -nc --arg keeper "$keeper" --arg request_id "$request_id" \
-        '{keeper:$keeper, request_id:$request_id, status:"poll_timeout"}' \
+      jq -nc --arg keeper "$keeper" --arg phase "$phase" --arg request_id "$request_id" \
+        '{keeper:$keeper, phase:$phase, request_id:$request_id, status:"poll_timeout"}' \
         >>"$RESULTS_FILE"
     done <"$pending_file"
   fi
+}
+
+ere_escape() {
+  # Escape ERE metacharacters in a literal value before splicing it
+  # into a [grep -Eq] pattern. Without this, an operator-supplied
+  # --run-id like "post-act.live" or a branch name carrying a literal
+  # "+" would produce false matches/false failures.
+  printf '%s' "$1" | sed -e 's/[][\\^$.|?*+(){}]/\\&/g'
+}
+
+create_result_has_success_markers() {
+  local keeper="$1"
+  local text_file="$2"
+  local branch reply run_id_re branch_re
+  branch="$(proof_branch_for_keeper "$keeper")"
+  run_id_re="$(ere_escape "$RUN_ID")"
+  branch_re="$(ere_escape "$branch")"
+  reply="$(jq -r '.result.reply // .reply // empty' "$text_file" 2>/dev/null || true)"
+
+  printf '%s' "$reply" | grep -Eq '"run_id"[[:space:]]*:[[:space:]]*"'"$run_id_re"'"' \
+    && printf '%s' "$reply" | grep -Eq '"branch"[[:space:]]*:[[:space:]]*"'"$branch_re"'"' \
+    && printf '%s' "$reply" | grep -Eq '"docker_pr_create"[[:space:]]*:[[:space:]]*true' \
+    && printf '%s' "$reply" | grep -Eq '"docker_git_push"[[:space:]]*:[[:space:]]*true' \
+    && printf '%s' "$reply" | grep -Eq '"blocker"[[:space:]]*:[[:space:]]*null' \
+    && printf '%s' "$reply" | grep -Eq 'https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]+'
+}
+
+all_create_results_ready_for_review() {
+  : >"$CREATE_READINESS_FAILURES_FILE"
+
+  local keeper status text_file
+  while IFS= read -r keeper; do
+    [[ -n "$keeper" ]] || continue
+    status="$(
+      jq -r --arg keeper "$keeper" '
+        select(.phase == "create" and .keeper == $keeper)
+        | .status // empty
+      ' "$RESULTS_FILE" | tail -n 1
+    )"
+    text_file="$(
+      jq -r --arg keeper "$keeper" '
+        select(.phase == "create" and .keeper == $keeper)
+        | .text_file // empty
+      ' "$RESULTS_FILE" | tail -n 1
+    )"
+
+    if [[ -z "$status" || -z "$text_file" ]]; then
+      jq -nc --arg keeper "$keeper" \
+        '{keeper:$keeper, blocker:"create_result_missing"}' \
+        >>"$CREATE_READINESS_FAILURES_FILE"
+      continue
+    fi
+    if [[ "$status" != "done" && "$status" != "completed" && "$status" != "complete" ]]; then
+      jq -nc --arg keeper "$keeper" --arg status "$status" \
+        '{keeper:$keeper, status:$status, blocker:"create_status_not_success"}' \
+        >>"$CREATE_READINESS_FAILURES_FILE"
+      continue
+    fi
+    if ! create_result_has_success_markers "$keeper" "$text_file"; then
+      jq -nc --arg keeper "$keeper" --arg status "$status" --arg text_file "$text_file" \
+        '{keeper:$keeper, status:$status, text_file:$text_file, blocker:"create_success_markers_missing"}' \
+        >>"$CREATE_READINESS_FAILURES_FILE"
+    fi
+  done <"$RUN_DIR/keepers.txt"
+
+  [[ ! -s "$CREATE_READINESS_FAILURES_FILE" ]]
 }
 
 run_audit() {
@@ -997,6 +1671,7 @@ run_audit() {
     --expected-keepers "$EXPECTED_KEEPERS"
     --require-docker-pr-lifecycle-evidence
     --evidence-run-id "$RUN_ID"
+    --harness-run-dir "$RUN_DIR"
     --json
   )
   if [[ -n "$FORBID_GITHUB_IDENTITIES" ]]; then
@@ -1031,14 +1706,22 @@ write_summary() {
     --arg run_dir "$RUN_DIR" \
     --arg repo "$REPO_SLUG" \
     --arg base_path "$BASE_PATH" \
+    --arg lifecycle_mutation_mode "$LIFECYCLE_MUTATION_MODE" \
+    --arg create_required_tools "$CREATE_REQUIRED_TOOLS" \
+    --arg review_required_tools "$REVIEW_REQUIRED_TOOLS" \
     --arg expected_server_commit "$EXPECTED_SERVER_COMMIT" \
     --arg forbid_github_identities "$FORBID_GITHUB_IDENTITIES" \
+    --arg allow_fork_pr_for_readonly "$ALLOW_FORK_PR_FOR_READONLY" \
+    --arg seed_github_egress "$SEED_GITHUB_EGRESS" \
     --arg server_commit "$SERVER_COMMIT_ACTUAL" \
     --arg server_started_at "$SERVER_STARTED_AT_ACTUAL" \
     --arg server_incarnation "$SERVER_INCARNATION_ACTUAL" \
     --arg server_health_file "$SERVER_HEALTH_CHECK_FILE" \
     --arg review_targets_file "$REVIEW_TARGETS_FILE" \
     --arg github_identity_counts_file "$GITHUB_IDENTITY_COUNTS_FILE" \
+    --arg proof_branch_collisions_file "$PROOF_BRANCH_COLLISIONS_FILE" \
+    --arg create_readiness_failures_file "$CREATE_READINESS_FAILURES_FILE" \
+    --arg github_egress_preflight_file "$GITHUB_EGRESS_PREFLIGHT_FILE" \
     --argjson mutate "$MUTATE" \
     --argjson keeper_count "$keeper_count" \
     --argjson request_count "$request_count" \
@@ -1052,14 +1735,22 @@ write_summary() {
       run_dir:$run_dir,
       repo:$repo,
       base_path:$base_path,
+      lifecycle_mutation_mode:$lifecycle_mutation_mode,
+      create_required_tools:$create_required_tools,
+      review_required_tools:$review_required_tools,
       expected_server_commit:$expected_server_commit,
       forbid_github_identities:$forbid_github_identities,
+      allow_fork_pr_for_readonly:$allow_fork_pr_for_readonly,
+      seed_github_egress:$seed_github_egress,
       server_commit:$server_commit,
       server_started_at:$server_started_at,
       server_incarnation:$server_incarnation,
       server_health_file:$server_health_file,
       review_targets_file:$review_targets_file,
       github_identity_counts_file:$github_identity_counts_file,
+      proof_branch_collisions_file:$proof_branch_collisions_file,
+      create_readiness_failures_file:$create_readiness_failures_file,
+      github_egress_preflight_file:$github_egress_preflight_file,
       mutate:$mutate,
       keeper_count:$keeper_count,
       request_count:$request_count,
@@ -1096,6 +1787,20 @@ post_board_summary() {
 require_cmd jq
 require_cmd python3
 require_cmd curl
+# git is used by assert_no_proof_branch_collisions_for_mutate
+# (ls-remote/show-ref/worktree). Surface it up-front so a missing
+# git binary fails immediately at startup with a consistent
+# "required command not found" message rather than partway through
+# the run with a less obvious git-not-found error.
+require_cmd git
+
+case "$PHASE_MODE" in
+  create|review|both) ;;
+  *)
+    echo "invalid --phase: $PHASE_MODE (expected create, review, or both)" >&2
+    exit 2
+    ;;
+esac
 
 if [[ "$MUTATE" == "1" || -n "$EXPECTED_SERVER_COMMIT" ]]; then
   assert_expected_server_commit
@@ -1103,12 +1808,44 @@ fi
 ensure_mcp_session_if_needed
 discover_keepers
 assert_github_identity_pool_for_mutate
+assert_github_egress_for_fork_routes
 build_review_targets
 render_prompts
+if [[ "$PHASE_MODE" != "review" ]]; then
+  assert_no_proof_branch_collisions_for_mutate
+fi
 
 if [[ "$MUTATE" == "1" ]]; then
-  send_prompts
-  poll_results
+  # Share one POLL_TIMEOUT_SEC budget across both phases so the overall
+  # mutate window remains the single configured value rather than
+  # silently doubling when create + review each compute their own
+  # deadline (PR #13842 review).
+  export MUTATE_POLL_DEADLINE_TS=$(( $(date +%s) + POLL_TIMEOUT_SEC ))
+  case "$PHASE_MODE" in
+    create)
+      send_phase_prompts "create" "$CREATE_REQUIRED_TOOLS"
+      poll_results "create"
+      ;;
+    review)
+      if [[ "$REVIEW_RESUME" == "1" ]] || all_create_results_ready_for_review; then
+        send_phase_prompts "review" "$REVIEW_REQUIRED_TOOLS"
+        poll_results "review"
+      else
+        log "skipping review phase because create phase did not produce complete success evidence"
+      fi
+      ;;
+    both)
+      send_phase_prompts "create" "$CREATE_REQUIRED_TOOLS"
+      poll_results "create"
+      if all_create_results_ready_for_review; then
+        send_phase_prompts "review" "$REVIEW_REQUIRED_TOOLS"
+        poll_results "review"
+      else
+        log "skipping review phase because create phase did not produce complete success evidence"
+      fi
+      ;;
+  esac
+  unset MUTATE_POLL_DEADLINE_TS
 else
   log "dry-run mode: prompts rendered under $PROMPT_DIR; no keeper messages sent"
 fi

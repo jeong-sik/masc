@@ -165,7 +165,7 @@ The bridge direction is correct (MASC domain -> OAS agent memory), but the bridg
 2. Builds system prompt via MASC's `keeper_prompt`
 3. Creates OAS Memory via `Memory_oas_bridge`
 4. Constructs OAS `Context_reducer`
-5. Calls `Oas_worker.run_named`
+5. Calls `Keeper_turn_driver.run_named`
 
 This is the primary integration point and is architecturally correct as a bridge module. The violation is that steps 1-4 use MASC-specific wrappers rather than OAS-native primitives. The `keeper_working_context` wrapper (V2) forces checkpoint loading through MASC rather than OAS.
 

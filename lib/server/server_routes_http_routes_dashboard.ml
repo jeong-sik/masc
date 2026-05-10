@@ -99,7 +99,9 @@ let sync_keeper_cascade_meta ~(config : Coord.config) ~(name : string)
   match Keeper_types.read_meta config name with
   | Error msg -> Error ("read_meta failed after TOML update: " ^ msg)
   | Ok (Some meta) ->
-      let updated = { meta with cascade_name; updated_at } in
+      let updated =
+        { (Keeper_types.set_cascade_name cascade_name meta) with updated_at }
+      in
       (match Keeper_types.write_meta ~force:true config updated with
        | Ok () ->
            let registered =
@@ -113,7 +115,9 @@ let sync_keeper_cascade_meta ~(config : Coord.config) ~(name : string)
       (match Keeper_registry.get ~base_path:config.base_path name with
        | None -> Ok false
        | Some entry ->
-           let updated = { entry.meta with cascade_name; updated_at } in
+           let updated =
+             { (Keeper_types.set_cascade_name cascade_name entry.meta) with updated_at }
+           in
            (match Keeper_types.write_meta ~force:true config updated with
             | Ok () ->
                 Keeper_registry.update_meta ~base_path:config.base_path name
@@ -290,6 +294,20 @@ let handle_dashboard_task_history state req reqd =
       Tool_task.task_history_events_json state.Mcp_server.room_config ~task_id ~limit
     in
     Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+
+let handle_dashboard_rooms state req reqd =
+  let limit =
+    Server_utils.int_query_param req "limit" ~default:50
+    |> Server_utils.clamp ~min_v:1 ~max_v:200
+  in
+  let me =
+    match trimmed_query_param req "me" with
+    | Some _ as value -> value
+    | None -> trimmed_query_param req "agent"
+  in
+  let json = Dashboard_rooms.json ~config:state.Mcp_server.room_config ?me ~limit () in
+  Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+
 let rec add_routes ~sw ~clock router =
   router
   |> Http.Router.post "/api/v1/broadcast" (fun request reqd ->
@@ -331,6 +349,19 @@ let rec add_routes ~sw ~clock router =
          in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/nudges" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let limit =
+           Server_utils.int_query_param req "limit" ~default:50
+           |> Server_utils.clamp ~min_v:1 ~max_v:200
+         in
+         let json =
+           Dashboard_operator_nudges.json
+             ~config:state.Mcp_server.room_config ~limit ()
+         in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/goal-loop/status" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json =
@@ -339,6 +370,15 @@ let rec add_routes ~sw ~clock router =
          in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/branches" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = Dashboard_branches.json ~config:state.Mcp_server.room_config in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/rooms" (fun request reqd ->
+       with_public_read handle_dashboard_rooms request reqd)
+  |> Http.Router.get "/api/v1/rooms" (fun request reqd ->
+       with_public_read handle_dashboard_rooms request reqd)
   (* Dev-only shared bearer for the dashboard UI. Served exclusively when the
      server binds to loopback and strict-auth env overrides are disabled, so
      that a LAN deployment never hands out a token over the wire. The token is
@@ -433,6 +473,29 @@ let rec add_routes ~sw ~clock router =
                     (`Assoc [ ("ok", `Bool false); ("error", `String message) ]))
                  reqd)
        ) request reqd)
+  (* RFC-0049 — surface/section open counters. Aggregate Prometheus
+     counters only; the request body is discarded after increment. *)
+  |> Http.Router.post "/api/v1/dashboard/nav-event" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           let result =
+             try
+               let json = Yojson.Safe.from_string body_str in
+               Dashboard_nav_event.parse_event_json json
+             with Yojson.Json_error err ->
+               Error ("invalid json: " ^ err)
+           in
+           match result with
+           | Ok event ->
+               Dashboard_nav_event.record event;
+               Http.Response.json ~request:req {|{"ok":true}|} reqd
+           | Error message ->
+               Http.Response.json ~status:`Bad_request ~request:req
+                 (Yojson.Safe.to_string
+                    (`Assoc
+                      [ ("ok", `Bool false); ("error", `String message) ]))
+                 reqd)
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/config" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let json = Env_config_introspect.to_json () in
@@ -498,8 +561,10 @@ let rec add_routes ~sw ~clock router =
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/board" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
-         let json = dashboard_memory_http_json req in
+       with_public_read (fun state req reqd ->
+         let json =
+           dashboard_memory_http_json ~config:state.Mcp_server.room_config req
+         in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.post "/api/v1/dashboard/link-previews" (fun request reqd ->
@@ -678,6 +743,18 @@ let rec add_routes ~sw ~clock router =
        with_public_read (fun state req reqd ->
          let json = dashboard_planning_http_json ~config:state.Mcp_server.room_config in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/bootstrap" (fun request reqd ->
+       (* Cold-start bootstrap: routes to the shared SSOT
+          [dashboard_bootstrap_http_json] in [Server_dashboard_http] so
+          the HTTP/1.1 router and HTTP/2 gateway return identical
+          payloads.  Slice list, error contract, and per-slice
+          exception capture all live in the SSOT; this handler is
+          just the auth + transport wrapper. *)
+       with_public_read (fun state req reqd ->
+         let json = dashboard_bootstrap_http_json ~state ~sw ~clock req in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/goals" (fun request reqd ->
        with_public_read (fun state req reqd ->

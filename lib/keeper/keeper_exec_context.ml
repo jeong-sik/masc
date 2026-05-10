@@ -110,8 +110,6 @@ let compaction_decision_to_string =
 let compaction_decision_applied =
   Keeper_compact_policy.compaction_decision_applied
 
-let compact_if_needed_typed = Keeper_compact_policy.compact_if_needed_typed
-let compact_if_needed = Keeper_compact_policy.compact_if_needed
 
 (* ================================================================ *)
 (* Re-export from Keeper_post_turn                                   *)
@@ -172,7 +170,7 @@ let dispatch_keeper_phase_event ~(config : Coord.config) ~keeper_name event =
   | Ok _ -> ()
   | Error err ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_lifecycle_dispatch_rejections
+        Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
         ~labels:[ ("keeper", keeper_name); ("event", Keeper_state_machine.event_to_string event) ]
         ();
       Log.Keeper.warn
@@ -194,6 +192,17 @@ let dispatch_keeper_phase_event ~(config : Coord.config) ~keeper_name event =
    profile or hand off". *)
 let compaction_outcome_metric = "masc_keeper_compaction_outcome_total"
 
+let () =
+  Prometheus.register_counter
+    ~name:compaction_outcome_metric
+    ~help:
+      "Total Compaction_completed dispatches classified by token \
+       savings. Labels: keeper, outcome (ok = saved_tokens > 0, \
+       noop = before == after or after > before). Rising noop \
+       rate is the operational signal for \"reducer has nothing \
+       to strip, switch profile or hand off\" (#9988)."
+    ()
+
 (* Observability-only: bump the outcome counter and log the warn
    when saved_tokens <= 0.  Split from [dispatch_compaction_completed]
    so unit tests can verify classification without needing a full
@@ -214,7 +223,7 @@ let record_compaction_outcome ~keeper_name ~before_tokens ~after_tokens =
 let dispatch_compaction_completed
     ~(config : Coord.config) ~keeper_name ~before_tokens ~after_tokens =
   record_compaction_outcome ~keeper_name ~before_tokens ~after_tokens;
-  Prometheus.inc_counter Prometheus.metric_keeper_fsm_edge_transitions
+  Prometheus.inc_counter Keeper_metrics.metric_keeper_fsm_edge_transitions
     ~labels:[("edge", "kmc_to_ksm_compact_completed")] ();
   dispatch_keeper_phase_event ~config ~keeper_name
     (Keeper_state_machine.Compaction_completed

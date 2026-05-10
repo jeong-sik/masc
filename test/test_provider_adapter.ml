@@ -89,7 +89,7 @@ let test_gemini_auth_env_key_paths () =
   let config =
     Llm_provider.Provider_config.make
       ~kind:Llm_provider.Provider_config.Gemini
-      ~model_id:"gemini-2.5-pro"
+      ~model_id:"gemini-3.1-pro-preview"
       ~base_url:"https://generativelanguage.googleapis.com"
       ()
   in
@@ -147,10 +147,10 @@ let test_default_model_provider_prefix_result () =
 
 let test_default_model_override_label_result () =
   with_env "MASC_DEFAULT_PROVIDER" (Some "gemini") (fun () ->
-      with_env "MASC_DEFAULT_MODEL" (Some "gemini-2.5-pro") (fun () ->
-          match Adapter.default_model_override_label_result "gemini-2.5-flash" with
+      with_env "MASC_DEFAULT_MODEL" (Some "gemini-3.1-pro-preview") (fun () ->
+          match Adapter.default_model_override_label_result "gemini-3-flash-preview" with
           | Ok label ->
-              check string "override keeps provider" "gemini:gemini-2.5-flash"
+              check string "override keeps provider" "gemini:gemini-3-flash-preview"
                 label
           | Error msg -> fail msg))
 
@@ -288,9 +288,9 @@ let test_auto_models_use_declared_policy () =
         (Some [ "kimi-for-coding" ])
         (Adapter.auto_models_for_cascade_prefix "kimi_cli");
       with_env "MASC_GEMINI_CLI_AUTO_MODELS" None (fun () ->
-          with_env "GEMINI_DEFAULT_MODEL" (Some "gemini-2.5-flash") (fun () ->
+          with_env "GEMINI_DEFAULT_MODEL" (Some "gemini-3-flash-preview") (fun () ->
               check (option (list string)) "gemini cli prefers explicit default model env"
-                (Some [ "gemini-2.5-flash" ])
+                (Some [ "gemini-3-flash-preview" ])
                 (Adapter.auto_models_for_cascade_prefix "gemini_cli"))))
 
 let test_runtime_mcp_header_support_uses_declared_policy () =
@@ -366,6 +366,37 @@ let test_provider_health_key_is_provider_scoped () =
   check bool "same model id across providers remains isolated" true
     (Adapter.provider_health_key_of_config claude_auto
      <> Adapter.provider_health_key_of_config gemini_auto)
+
+let test_local_openai_compat_health_key_is_endpoint_scoped () =
+  let cfg label =
+    match Masc_mcp.Cascade_config.parse_model_string label with
+    | Some cfg -> cfg
+    | None -> fail ("expected model label to parse: " ^ label)
+  in
+  let primary = cfg "custom:primary@http://127.0.0.1:11111" in
+  let fallback = cfg "custom:primary@http://127.0.0.1:22222" in
+  check bool "same local model on different endpoints is isolated" true
+    (Adapter.provider_health_key_of_config primary
+     <> Adapter.provider_health_key_of_config fallback)
+
+let test_provider_model_health_key_is_model_scoped () =
+  let cfg label =
+    match Masc_mcp.Cascade_config.parse_model_string label with
+    | Some cfg -> cfg
+    | None -> fail ("expected model label to parse: " ^ label)
+  in
+  let glm_code = cfg "glm-coding:glm-5-code" in
+  let glm_51 = cfg "glm-coding:glm-5.1" in
+  check string "provider health key stays provider scoped" "glm-coding"
+    (Adapter.provider_health_key_of_config glm_code);
+  check string "model health key includes concrete model" "glm-coding:glm-5-code"
+    (Adapter.provider_model_health_key_of_config glm_code);
+  check bool "sibling models do not share model health key" true
+    (Adapter.provider_model_health_key_of_config glm_code
+     <> Adapter.provider_model_health_key_of_config glm_51);
+  check string "sibling models still share provider health key"
+    (Adapter.provider_health_key_of_config glm_code)
+    (Adapter.provider_health_key_of_config glm_51)
 
 let test_provider_of_model_label_uses_typed_boundaries () =
   check string "explicit prefix wins over coarse kind" "glm-coding"
@@ -455,6 +486,10 @@ let () =
             test_provider_label_of_config_preserves_cli_vs_api_identity;
           test_case "provider health key is provider scoped" `Quick
             test_provider_health_key_is_provider_scoped;
+          test_case "local openai compat health key is endpoint scoped" `Quick
+            test_local_openai_compat_health_key_is_endpoint_scoped;
+          test_case "provider model health key is model scoped" `Quick
+            test_provider_model_health_key_is_model_scoped;
           test_case "provider model label uses typed boundaries" `Quick
             test_provider_of_model_label_uses_typed_boundaries;
           test_case "unmetered provider uses telemetry policy" `Quick

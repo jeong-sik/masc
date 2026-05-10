@@ -36,6 +36,179 @@ let is_enabled () =
     classify_write_failure-recognised error. *)
 let heartbeat_interval_s = 30.0
 
+let max_ws_close_reason_log_len = 96
+
+let max_ws_close_payload_len = 125
+
+let utf8_codepoint_width first_byte =
+  let byte = Char.code first_byte in
+  if byte land 0x80 = 0 then
+    1
+  else if byte land 0xE0 = 0xC0 then
+    2
+  else if byte land 0xF0 = 0xE0 then
+    3
+  else if byte land 0xF8 = 0xF0 then
+    4
+  else
+    1
+
+let truncate_ws_close_reason reason =
+  if String.length reason <= max_ws_close_reason_log_len then
+    reason
+  else begin
+    let rec boundary idx =
+      if idx >= String.length reason || idx >= max_ws_close_reason_log_len then
+        idx
+      else
+        let next_idx = idx + utf8_codepoint_width reason.[idx] in
+        if next_idx > max_ws_close_reason_log_len then
+          idx
+        else
+          boundary next_idx
+    in
+    String.sub reason 0 (boundary 0) ^ "...<truncated>"
+  end
+
+let summarize_ws_close_payload bytes ~received_len ~declared_len =
+  if received_len = 0 then
+    Printf.sprintf "code=none received_len=0 declared_len=%d" declared_len
+  else if received_len = 1 then
+    Printf.sprintf "malformed_close_payload received_len=1 declared_len=%d"
+      declared_len
+  else
+    let code =
+      (Char.code (Bytes.get bytes 0) lsl 8) lor Char.code (Bytes.get bytes 1)
+    in
+    let reason_len = received_len - 2 in
+    let reason =
+      if reason_len = 0 then
+        "reason=<empty>"
+      else
+        let reason =
+          Bytes.sub_string bytes 2 reason_len |> truncate_ws_close_reason
+        in
+        Printf.sprintf "reason=%S" reason
+    in
+    let partial =
+      if received_len = declared_len then
+        ""
+      else
+        " partial=true"
+    in
+    Printf.sprintf "code=%d %s received_len=%d declared_len=%d%s" code reason
+      received_len declared_len partial
+
+let immediate_ws_close_payload_summary ~declared_len =
+  if declared_len <= 0 then
+    Some (Printf.sprintf "code=none received_len=0 declared_len=%d" declared_len)
+  else if declared_len > max_ws_close_payload_len then
+    Some
+      (Printf.sprintf "payload_len=%d exceeds_control_frame_limit"
+         declared_len)
+  else
+    None
+
+type ws_close_payload_chunk_plan =
+  | Reject_empty_chunk of string
+  | Copy_then_finish of { copy_len : int; next_offset : int }
+  | Copy_then_continue of { copy_len : int; next_offset : int }
+
+let plan_ws_close_payload_chunk ~offset ~declared_len ~chunk_len =
+  if chunk_len <= 0 then
+    Reject_empty_chunk
+      (Printf.sprintf "payload_read_empty_chunk received_len=%d declared_len=%d"
+         offset declared_len)
+  else
+    let remaining = max 0 (declared_len - offset) in
+    let copy_len = min chunk_len remaining in
+    let next_offset = offset + copy_len in
+    if next_offset >= declared_len then
+      Copy_then_finish { copy_len; next_offset }
+    else
+      Copy_then_continue { copy_len; next_offset }
+
+module For_testing = struct
+  let max_ws_close_reason_log_len = max_ws_close_reason_log_len
+
+  let max_ws_close_payload_len = max_ws_close_payload_len
+
+  let truncate_ws_close_reason = truncate_ws_close_reason
+
+  let summarize_ws_close_payload = summarize_ws_close_payload
+
+  let immediate_ws_close_payload_summary = immediate_ws_close_payload_summary
+
+  type nonrec ws_close_payload_chunk_plan = ws_close_payload_chunk_plan =
+    | Reject_empty_chunk of string
+    | Copy_then_finish of { copy_len : int; next_offset : int }
+    | Copy_then_continue of { copy_len : int; next_offset : int }
+
+  let plan_ws_close_payload_chunk = plan_ws_close_payload_chunk
+end
+
+let log_ws_client_close_payload ~session_id ~declared_len payload =
+  (* Terminal action for a single close-payload handling: log once + close
+     payload once.  Every reachable leaf of the read state machine (early
+     reject, on_eof, on_read completion, schedule re-entry on full buffer,
+     exception) routes through here so the payload is never logged twice
+     and never leaked. *)
+  let finish =
+    let finished = ref false in
+    fun summary ->
+      if not !finished then begin
+        finished := true;
+        Log.Server.debug "[ws-standalone] session %s client close (%s)"
+          session_id summary;
+        Ws.Payload.close payload
+      end
+  in
+  match immediate_ws_close_payload_summary ~declared_len with
+  | Some summary -> finish summary
+  | None ->
+    let buffer = Bytes.create declared_len in
+    let offset = ref 0 in
+    let rec schedule () =
+      if !offset >= declared_len then
+        finish
+          (summarize_ws_close_payload buffer ~received_len:!offset
+             ~declared_len)
+      else
+        Ws.Payload.schedule_read payload
+          ~on_eof:(fun () ->
+            finish
+              (summarize_ws_close_payload buffer ~received_len:!offset
+                 ~declared_len))
+          ~on_read:(fun bs ~off ~len:chunk_len ->
+            match
+              plan_ws_close_payload_chunk ~offset:!offset ~declared_len
+                ~chunk_len
+            with
+            | Reject_empty_chunk summary -> finish summary
+            | Copy_then_finish { copy_len; next_offset } ->
+                Bigstringaf.blit_to_bytes bs ~src_off:off buffer
+                  ~dst_off:!offset ~len:copy_len;
+                offset := next_offset;
+                finish
+                  (summarize_ws_close_payload buffer ~received_len:!offset
+                     ~declared_len)
+            | Copy_then_continue { copy_len; next_offset } ->
+                Bigstringaf.blit_to_bytes bs ~src_off:off buffer
+                  ~dst_off:!offset ~len:copy_len;
+                offset := next_offset;
+                schedule ())
+    in
+    try schedule () with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+        finish
+          (Printf.sprintf "payload_read_error=%s declared_len=%d"
+             (Printexc.to_string exn) declared_len)
+
+let standalone_ws_eof_summary = function
+  | None -> "error=none"
+  | Some (`Exn exn) -> Printf.sprintf "error=%s" (Printexc.to_string exn)
+
 (** WebSocket handler factory.
 
     For each accepted connection, httpun-ws-eio calls this with the
@@ -63,8 +236,12 @@ let make_websocket_handler ~sw ~clock ~on_message _client_addr
          && not
               (Server_mcp_transport_ws.send_dashboard_or_raw_sse session
                  sse_event)
-      then
-        Server_mcp_transport_ws.cleanup_session session_id)
+      then begin
+        Log.Server.debug
+          "[ws-standalone] session %s sse-forward send failed; cleaning up"
+          session_id;
+        Server_mcp_transport_ws.cleanup_session session_id
+      end)
     ();
   (* Heartbeat fiber: emit a protocol-level ping every
      [heartbeat_interval_s] to keep NAT/proxy mappings warm and surface
@@ -86,12 +263,13 @@ let make_websocket_handler ~sw ~clock ~on_message _client_addr
              with
              | Some _ ->
                  Log.Server.debug
-                   "[ws-standalone] heartbeat skipped (writer closed during \
-                    cancel race)"
+                   "[ws-standalone] session %s heartbeat skipped (writer \
+                    closed during cancel race)"
+                   session_id
              | None ->
                  Log.Server.warn
-                   "[ws-standalone] heartbeat send_ping failed: %s"
-                   (Printexc.to_string exn)));
+                   "[ws-standalone] session %s heartbeat send_ping failed: %s"
+                   session_id (Printexc.to_string exn)));
         if !send_failed then begin
           (* If send_ping failed while [session.closed]/[Wsd.is_closed]
              still read false, the loop would otherwise spin emitting
@@ -138,20 +316,22 @@ let make_websocket_handler ~sw ~clock ~on_message _client_addr
                  with
                  | Some _ ->
                      Log.Server.debug
-                       "[ws-standalone] send_pong skipped (writer closed during \
-                        cancel race)"
+                       "[ws-standalone] send_pong skipped \
+                        (writer closed during cancel race)"
                  | None ->
                      Log.Server.warn
                        "[ws-standalone] send_pong failed: %s"
                        (Printexc.to_string exn)));
         Ws.Payload.close payload
       | `Connection_close ->
+        log_ws_client_close_payload ~session_id ~declared_len:len payload;
         Server_mcp_transport_ws.cleanup_session session_id;
-        Ws.Payload.close payload
       | `Pong | `Other _ ->
         Ws.Payload.close payload
     );
-    eof = (fun ?error:_ () ->
+    eof = (fun ?error () ->
+      Log.Server.debug "[ws-standalone] session %s eof (%s)" session_id
+        (standalone_ws_eof_summary error);
       Server_mcp_transport_ws.cleanup_session session_id)
   }
 

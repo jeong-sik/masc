@@ -213,11 +213,14 @@ let fetch_entity_numbers ~(config : Coord.config) ~(repo_slug : string) ~(kind :
       (Filename.quote (jq_filter kind))
   in
   let scoped = Keeper_gh_env.with_env config raw in
-  let shell = Printf.sprintf "%s 2>/dev/null" scoped in
+  let argv = [ "/bin/zsh"; "-lc"; Printf.sprintf "%s 2>/dev/null" scoped ] in
   match
-    Process_eio.run_argv_with_status
+    Masc_exec.Exec_gate.run_argv_with_status
+      ~actor:`Coord_git
+      ~raw_source:(String.concat " " argv)
+      ~summary:"keeper gh cache fetch"
       ~timeout_sec:(Keeper_tool_policy.gh_cache_fetch_timeout_sec ())
-      [ "/bin/zsh"; "-lc"; shell ]
+      argv
   with
   | Unix.WEXITED 0, out -> Some (parse_numbers_from_jq_output out)
   | _ ->
@@ -440,6 +443,27 @@ let gh_mutates_entity (cmd : string) : entity_kind option =
   | "issue" :: sub :: _
     when List.mem sub [ "create"; "close"; "reopen"; "edit"; "transfer"; "delete" ] ->
     Some Issue
+  | _ -> None
+
+let dedicated_pr_tool_required (cmd : string) :
+    (string * string * string) option =
+  let parts =
+    cmd
+    |> normalize_gh_command
+    |> gh_words
+    |> skip_gh_leading_global_options
+  in
+  match parts with
+  | "pr" :: "create" :: _ ->
+    Some
+      ( "gh_pr_create_requires_keeper_pr_create"
+      , "keeper_pr_create"
+      , "Use keeper_pr_create with draft=true so governance approval and PR lifecycle markers are enforced." )
+  | "pr" :: "review" :: _ ->
+    Some
+      ( "gh_pr_review_requires_keeper_pr_review_comment"
+      , "keeper_pr_review_comment"
+      , "Use keeper_pr_review_comment for PR review COMMENT/APPROVE/REQUEST_CHANGES mutations." )
   | _ -> None
 
 (** Deterministic blocklist for obviously destructive or credential-sensitive
@@ -684,21 +708,29 @@ let repo_slug_of_worktree_gitfile ~worktree_cwd =
   | None -> None
 
 let repo_slug_of_git_command ~cwd =
+  let argv = [ "git"; "remote"; "get-url"; "origin" ] in
   match
-    Process_eio.run_argv_with_status
+    Masc_exec.Exec_gate.run_argv_with_status
+      ~actor:`Coord_git
+      ~raw_source:(String.concat " " argv)
+      ~summary:"keeper gh repo slug from git"
       ~cwd
       ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Git_meta ())
-      [ "git"; "remote"; "get-url"; "origin" ]
+      argv
   with
   | Unix.WEXITED 0, url -> repo_slug_of_remote_url url
   | _ -> None
 
 let origin_url_of_git_command ~cwd =
+  let argv = [ "git"; "remote"; "get-url"; "origin" ] in
   match
-    Process_eio.run_argv_with_status
+    Masc_exec.Exec_gate.run_argv_with_status
+      ~actor:`Coord_git
+      ~raw_source:(String.concat " " argv)
+      ~summary:"keeper gh origin url from git"
       ~cwd
       ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Git_meta ())
-      [ "git"; "remote"; "get-url"; "origin" ]
+      argv
   with
   | Unix.WEXITED 0, url ->
     let url = String.trim url in

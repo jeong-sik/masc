@@ -70,7 +70,29 @@ let handle_gc ctx args =
   (true, gc_result ^ decision_note)
 
 let handle_cleanup_zombies ctx _args =
-  (true, Coord.cleanup_zombies ctx.config)
+  let result = Coord.cleanup_zombies ctx.config in
+  let msg =
+    match result with
+    | Coord.No_agents_dir -> "No agents directory"
+    | Coord.No_zombies -> "No zombie agents found"
+    | Coord.Cleaned { count; names; released_tasks; skipped } ->
+        let task_note =
+          if released_tasks = 0 then ""
+          else Printf.sprintf ", released %d orphan task(s)" released_tasks
+        in
+        if skipped > 0 then
+          Printf.sprintf
+            "Cleaned %d/%d zombie(s): %s%s (%d skipped due to errors)"
+            count
+            (count + skipped)
+            (String.concat ", " names)
+            task_note
+            skipped
+        else
+          Printf.sprintf "Cleaned up %d zombie agent(s): %s%s"
+            count (String.concat ", " names) task_note
+  in
+  (true, msg)
 
 let handle_tool_stats _ctx args =
   let top_n = max 1 (min 100 (get_int args "top_n" 20)) in
@@ -102,6 +124,9 @@ let handle_tool_help _ctx args =
 let handle_web_search _ctx args =
   Tool_misc_web_search.handle args
 
+let handle_web_fetch _ctx args =
+  Tool_misc_web_fetch.handle args
+
 (* ================================================================ *)
 (* Public re-exports from sub-modules                               *)
 (* ================================================================ *)
@@ -131,6 +156,7 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_tool_stats" -> Some (handle_tool_stats ctx args)
   | "masc_tool_help" -> Some (handle_tool_help ctx args)
   | "masc_web_search" -> Some (handle_web_search ctx args)
+  | "masc_web_fetch" -> Some (handle_web_fetch ctx args)
   | "masc_tool_admin_snapshot" -> Some (Tool_misc_admin.handle_tool_admin_snapshot admin_ctx args)
   | "masc_tool_admin_update" -> Some (Tool_misc_admin.handle_tool_admin_update admin_ctx args)
   | "masc_deep_review" -> Some (Tool_deep_review.handle_deep_review ctx.config args)
@@ -146,12 +172,13 @@ let _tool_spec_read_only =
   [
     "masc_tool_help";
     "masc_web_search";
+    "masc_web_fetch";
     "masc_dashboard";
   ]
 
 let tool_required_permission = function
   | "masc_config" | "masc_dashboard"
-  | "masc_tool_stats" | "masc_tool_help" | "masc_web_search" ->
+  | "masc_tool_stats" | "masc_tool_help" | "masc_web_search" | "masc_web_fetch" ->
       Some Masc_domain.CanReadState
   | "masc_tool_admin_snapshot" | "masc_tool_admin_update" ->
       Some Masc_domain.CanAdmin

@@ -3,6 +3,28 @@
     Keeps OAS memory persistence details out of [Keeper_agent_run], preserving
     the keeper runner as a thin orchestration layer. *)
 
+let record_activity_emit_gap ~config ~keeper_name ~outcome_label ~error =
+  let masc_root = Coord_utils.masc_dir config in
+  try
+    Telemetry_coverage_gap.record
+      ~masc_root
+      ~source:"keeper_memory_activity"
+      ~producer:"keeper_agent_memory_episode.emit_flush_activity"
+      ~durable_store:(Filename.concat masc_root "activity-events")
+      ~dashboard_surface:"/api/v1/agent-timeline"
+      ~stale_reason:"episode_flush_activity_emit_failed"
+      ~keeper_name
+      ~error:
+        (Printf.sprintf "outcome=%s error=%s" outcome_label error)
+      ()
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | gap_exn ->
+    Log.Keeper.warn
+      "keeper:%s episode.flush activity coverage-gap record failed \
+       outcome=%s: %s"
+      keeper_name outcome_label (Printexc.to_string gap_exn)
+
 let emit_flush_activity
     ~(config : Coord_utils.config)
     ~(keeper_name : string)
@@ -40,12 +62,14 @@ let emit_flush_activity
         | Some value -> value
       in
       Prometheus.inc_counter
-        Prometheus.metric_keeper_memory_activity_emit_failures
+        Keeper_metrics.metric_keeper_memory_activity_emit_failures
         ~labels:[("keeper", keeper_name); ("outcome", outcome_label)]
         ();
+      let error = Printexc.to_string exn in
+      record_activity_emit_gap ~config ~keeper_name ~outcome_label ~error;
       Log.Keeper.error
         "keeper:%s episode.flush activity emit failed outcome=%s: %s"
-        keeper_name outcome_label (Printexc.to_string exn)
+        keeper_name outcome_label error
 
 let record_success
     ~(config : Coord_utils.config)
@@ -73,7 +97,7 @@ let record_success
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Prometheus.inc_counter Prometheus.metric_keeper_episode_create_failures
+    Prometheus.inc_counter Keeper_metrics.metric_keeper_episode_create_failures
       ~labels:[("keeper", keeper_name)]
       ();
     Log.Keeper.error "keeper:%s episode_create failed: %s"
@@ -162,7 +186,7 @@ let record_failure
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Prometheus.inc_counter Prometheus.metric_keeper_episode_create_failures
+    Prometheus.inc_counter Keeper_metrics.metric_keeper_episode_create_failures
       ~labels:[("keeper", keeper_name)]
       ();
     Log.Keeper.error "keeper:%s failed_turn_episode_create failed: %s"

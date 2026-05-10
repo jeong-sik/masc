@@ -29,10 +29,16 @@ include Backend_types
 (** {1 FileSystem Backend (Eio)} *)
 
 module FileSystem = struct
+  (** Number of striped locks for write serialisation.
+      64 stripes means up to 64 concurrent writers on disjoint keys,
+      reducing lock contention from O(K) keeper serialisation to
+      O(K/64) average wait. *)
+  let num_stripes = 64
+
   type t = {
     config: config;
     fs: Eio.Fs.dir_ty Eio.Path.t;
-    mutex: Eio.Mutex.t;
+    mutexes: Eio.Mutex.t array;
     key_index: (string, unit) Hashtbl.t;
     key_index_mu: Mutex.t;
     (** Domain-safe mutex for [key_index].
@@ -42,6 +48,69 @@ module FileSystem = struct
     mutable key_index_promise: unit Eio.Promise.or_exn option;
     clock: float Eio.Time.clock_ty Eio.Resource.t option;
   }
+
+  let stripe_for_key t key =
+    t.mutexes.(Hashtbl.hash key mod Array.length t.mutexes)
+
+  (** {2 Mutex contention observers}
+
+      Hooks for write-mutex contention metrics.  Default is a no-op
+      so [masc_backend] does not depend on [Prometheus] at link time;
+      the main library wires Prometheus histograms via
+      [set_mutex_observers] at startup.
+
+      Observers run *outside* the critical section to avoid nested
+      locking against [Prometheus]'s internal Stdlib.Mutex. *)
+
+  let mutex_acquire_observer
+    : (op:string -> seconds:float -> unit) ref =
+    ref (fun ~op:_ ~seconds:_ -> ())
+
+  let mutex_held_observer
+    : (op:string -> seconds:float -> unit) ref =
+    ref (fun ~op:_ ~seconds:_ -> ())
+
+  let set_mutex_observers ~acquire ~held =
+    mutex_acquire_observer := acquire;
+    mutex_held_observer := held
+
+  let notify_mutex_observer ~kind observer ~op ~seconds =
+    try observer ~op ~seconds
+    with exn ->
+      Log.legacy_traceln ~level:Log.Debug ~module_name:"Backend"
+        (Printf.sprintf
+           "[DEBUG] backend mutex %s observer failed for op=%s: %s"
+           kind op (Printexc.to_string exn))
+
+  (** Wrap a write critical section with acquire/held observers.
+
+      Acquire latency is measured as [now - call_start]; held latency
+      as [now - mutex_acquired].  Observers run after the lock is
+      released, so they cannot extend the critical section even if
+      the underlying Prometheus implementation contends on its own
+      mutex. *)
+  let with_observed_mutex ~op ~key t f =
+    let mutex = stripe_for_key t key in
+    let started = Time_compat.now () in
+    let acquired = ref false in
+    let acquire_seconds = ref 0.0 in
+    let held_seconds = ref 0.0 in
+    Fun.protect
+      ~finally:(fun () ->
+        if not !acquired then acquire_seconds := Time_compat.now () -. started;
+        notify_mutex_observer ~kind:"acquire" !mutex_acquire_observer
+          ~op ~seconds:!acquire_seconds;
+        notify_mutex_observer ~kind:"held" !mutex_held_observer
+          ~op ~seconds:!held_seconds)
+      (fun () ->
+        Eio.Mutex.use_rw ~protect:true mutex (fun () ->
+          let acquired_at = Time_compat.now () in
+          acquired := true;
+          acquire_seconds := acquired_at -. started;
+          Fun.protect
+            ~finally:(fun () ->
+              held_seconds := Time_compat.now () -. acquired_at)
+            f))
 
   (** Create a new FileSystem backend *)
   let create ~fs ?clock config =
@@ -56,7 +125,7 @@ module FileSystem = struct
     {
       config;
       fs = path;
-      mutex = Eio.Mutex.create ();
+      mutexes = Array.init num_stripes (fun _ -> Eio.Mutex.create ());
       key_index = Hashtbl.create 256;
       key_index_mu = Mutex.create ();
       key_index_promise = None;
@@ -206,24 +275,31 @@ module FileSystem = struct
       Log.Backend.warn "[EioFS] decompress fallback for %s" context;
     decompressed
 
-  (** Get value by key (auto-decompresses ZSTD if detected) *)
+  (** Get value by key (auto-decompresses ZSTD if detected).
+
+      Reads run lock-free: writers in this module go through a sibling
+      [.tmp-atomic] file and [Eio.Path.rename] into place (see [set] and
+      [set_if_not_exists] below). Because POSIX rename is atomic, a
+      concurrent reader either observes the old inode or the new one —
+      never a partial/truncated payload. Holding [t.mutex] here would only
+      serialise readers against unrelated writers without buying any extra
+      atomicity, and would queue dashboard reads behind every keeper's
+      compress+write cycle. *)
   let get t key =
-    Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
-      match key_to_path t key with
-      | Error e -> Error e
-        | Ok path ->
-          try
-            let content = Eio.Path.load path in
-            (* Compact Protocol v4: Auto-decompress if ZSTD header present *)
-            let decompressed = decompress_with_context ~context:key content in
-            Ok decompressed
-          with
-          | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
-              Error (NotFound key)
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn ->
-              Error (IOError (Printexc.to_string exn))
-    )
+    match key_to_path t key with
+    | Error e -> Error e
+    | Ok path ->
+        try
+          let content = Eio.Path.load path in
+          (* Compact Protocol v4: Auto-decompress if ZSTD header present *)
+          let decompressed = decompress_with_context ~context:key content in
+          Ok decompressed
+        with
+        | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
+            Error (NotFound key)
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+            Error (IOError (Printexc.to_string exn))
 
   (** Set value (auto-compresses with ZSTD if beneficial).
 
@@ -239,7 +315,7 @@ module FileSystem = struct
       The mutex inside [t] already serialises writers against each
       other; this change adds atomicity against concurrent readers. *)
   let set t key value =
-    Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
+    with_observed_mutex ~op:"set" ~key t (fun () ->
       match validate_key key with
       | Error e -> Error e
       | Ok safe_key ->
@@ -268,7 +344,7 @@ module FileSystem = struct
 
   (** Delete key *)
   let delete t key =
-    Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
+    with_observed_mutex ~op:"delete" ~key t (fun () ->
       match key_to_path t key with
       | Error e -> Error e
       | Ok path ->
@@ -481,27 +557,50 @@ module FileSystem = struct
   let set_if_not_exists t key value =
     (* Compact Protocol v4: Compress before saving *)
     let compressed = _compress value in
-    Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
+    with_observed_mutex ~op:"set_if_not_exists" ~key t (fun () ->
       match key_to_path t key with
       | Error e -> Error e
       | Ok path ->
+          let path_part =
+            String.map (function ':' -> '/' | c -> c) key
+          in
+          let tmp_path =
+            Eio.Path.(t.fs / (path_part ^ ".tmp-atomic"))
+          in
+          let cleanup_tmp () =
+            try Eio.Path.unlink tmp_path
+            with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn ->
+                Log.Backend.warn
+                  "backend atomic set_if_not_exists: unlink tmp failed: %s"
+                  (Printexc.to_string exn)
+          in
+          let publish_new () =
+            try
+              _ensure_parent_dir ~log_errors:true path;
+              Eio.Path.save ~create:(`Or_truncate 0o644) tmp_path compressed;
+              Eio.Path.rename tmp_path path;
+              ki_replace t key ();
+              Ok true
+            with
+            | Eio.Cancel.Cancelled _ as exn ->
+                cleanup_tmp ();
+                raise exn
+            | Eio.Io (Eio.Fs.E (Eio.Fs.Already_exists _), _) ->
+                cleanup_tmp ();
+                Error (AlreadyExists key)
+            | exn ->
+                cleanup_tmp ();
+                Error (IOError (Printexc.to_string exn))
+          in
           try
             (* Check if exists first *)
             match Eio.Path.kind ~follow:true path with
             | `Regular_file -> Error (AlreadyExists key)
-            | _ ->
-                _ensure_parent_dir ~log_errors:true path;
-                (* Write with exclusive create *)
-                Eio.Path.save ~create:(`Exclusive 0o644) path compressed;
-                ki_replace t key ();
-                Ok true
+            | _ -> publish_new ()
           with
-          | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
-              (* Parent doesn't exist, create it *)
-              _ensure_parent_dir path;
-              Eio.Path.save ~create:(`Exclusive 0o644) path compressed;
-              ki_replace t key ();
-              Ok true
+          | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) -> publish_new ()
           | Eio.Io (Eio.Fs.E (Eio.Fs.Already_exists _), _) ->
               Error (AlreadyExists key)
           | Eio.Cancel.Cancelled _ as exn -> raise exn

@@ -86,7 +86,7 @@ tools = ["masc_code_write", "masc_code_edit", "masc_code_delete", "masc_code_she
 # Tools allowed on the keeper's last turn (safety constraint).
 # On last turn, visible tools are intersected with this set.
 [groups.last_turn_safe]
-tools = ["keeper_board_post", "keeper_board_comment", "keeper_board_curation_submit", "keeper_context_status", "extend_turns", "keeper_time_now", "keeper_tool_search", "keeper_broadcast", "keeper_task_done", "keeper_task_submit_for_verification", "masc_web_search"]
+tools = ["keeper_board_post", "keeper_board_comment", "keeper_board_curation_submit", "keeper_context_status", "extend_turns", "keeper_time_now", "keeper_tool_search", "keeper_broadcast", "keeper_task_done", "keeper_task_submit_for_verification", "masc_web_search", "masc_web_fetch"]
 
 # Optional tools that require explicit opt-in via also_allow.
 # Excluded from all presets by default; a keeper must list them in also_allow.
@@ -108,7 +108,7 @@ tools = ["keeper_board_delete", "keeper_board_cleanup"]
 
 # Essential: tools every keeper needs (orientation + web search).
 [masc.essential]
-tools = ["masc_status", "masc_web_search", "masc_approval_pending"]
+tools = ["masc_status", "masc_web_search", "masc_web_fetch", "masc_approval_pending"]
 
 # Coordination: external agent coordination tools.
 # Only needed by keepers that manage tasks across agents.
@@ -127,7 +127,7 @@ tools = [
 tools = [
   "masc_status", "masc_tasks", "masc_claim_next", "masc_transition",
   "masc_add_task", "masc_batch_add_tasks", "masc_agents", "masc_dashboard",
-  "masc_agent_card", "masc_tool_help", "masc_web_search",
+  "masc_agent_card", "masc_tool_help", "masc_web_search", "masc_web_fetch",
   "masc_join", "masc_leave", "masc_who", "masc_heartbeat",
   "masc_messages", "masc_broadcast",
 ]

@@ -4,7 +4,7 @@
     and verdict_of_outcome extraction. *)
 
 module CE = Masc_mcp.Cdal_eval_v1
-module CT = Masc_mcp.Cdal_types
+module CT = Cdal_types
 module CL = Masc_mcp.Cdal_loader
 
 (* ================================================================ *)
@@ -14,10 +14,10 @@ module CL = Masc_mcp.Cdal_loader
 let make_proof
     ?(run_id = "eval-v1-test-001")
     ?(contract_id = "md5:abc123")
-    ?(schema_version = Agent_sdk.Cdal_proof.schema_version_current)
-    ?(requested = Agent_sdk.Execution_mode.Execute)
-    ?(effective = Agent_sdk.Execution_mode.Execute)
-    () : Agent_sdk.Cdal_proof.t =
+    ?(schema_version = Masc_mcp_cdal_runtime.Cdal_proof.schema_version_current)
+    ?(requested = Masc_mcp_cdal_runtime.Execution_mode.Execute)
+    ?(effective = Masc_mcp_cdal_runtime.Execution_mode.Execute)
+    () : Masc_mcp_cdal_runtime.Cdal_proof.t =
   {
     schema_version;
     run_id;
@@ -25,7 +25,7 @@ let make_proof
     requested_execution_mode = requested;
     effective_execution_mode = effective;
     mode_decision_source = "passthrough";
-    risk_class = Agent_sdk.Risk_class.Low;
+    risk_class = Masc_mcp_cdal_runtime.Risk_class.Low;
     provider_snapshot = {
       provider_name = "test";
       model_id = "test-model";
@@ -47,7 +47,7 @@ let make_proof
     scope = None;
   }
 
-let make_contract () : Agent_sdk.Risk_contract.t =
+let make_contract () : Masc_mcp_cdal_runtime.Risk_contract.t =
   {
     runtime_constraints = {
       requested_execution_mode = Execute;
@@ -60,7 +60,7 @@ let make_contract () : Agent_sdk.Risk_contract.t =
     ];
   }
 
-let make_contract_with_review_requirement () : Agent_sdk.Risk_contract.t =
+let make_contract_with_review_requirement () : Masc_mcp_cdal_runtime.Risk_contract.t =
   {
     runtime_constraints = {
       requested_execution_mode = Execute;
@@ -78,7 +78,7 @@ let setup_store () =
     (Filename.get_temp_dir_name ())
     (Printf.sprintf "cdal_eval_v1_%d_%d"
        (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.0))) in
-  let store : Agent_sdk.Proof_store.config = { root = tmp_dir } in
+  let store : Masc_mcp_cdal_runtime.Proof_store.config = { root = tmp_dir } in
   (store, tmp_dir)
 
 let with_env name value f =
@@ -100,11 +100,11 @@ let test_full_pipeline () =
   let (store, _tmp) = setup_store () in
   let run_id = "full-pipeline-001" in
   let contract = make_contract () in
-  let contract_id = Agent_sdk.Risk_contract.contract_id contract in
+  let contract_id = Masc_mcp_cdal_runtime.Risk_contract.contract_id contract in
   let proof = make_proof ~run_id ~contract_id () in
-  Agent_sdk.Proof_store.init_run store ~run_id;
-  Agent_sdk.Proof_store.write_manifest store ~run_id proof;
-  Agent_sdk.Proof_store.write_contract store ~run_id contract;
+  Masc_mcp_cdal_runtime.Proof_store.init_run store ~run_id;
+  Masc_mcp_cdal_runtime.Proof_store.write_manifest store ~run_id proof;
+  Masc_mcp_cdal_runtime.Proof_store.write_contract store ~run_id contract;
   match CE.evaluate ~store proof with
   | Verdict (v, _) ->
     Alcotest.(check string) "status" "satisfied"
@@ -162,11 +162,11 @@ let test_verdict_of_outcome () =
   let (store1, _) = setup_store () in
   let run_id = "voo-test-001" in
   let contract = make_contract () in
-  let contract_id = Agent_sdk.Risk_contract.contract_id contract in
+  let contract_id = Masc_mcp_cdal_runtime.Risk_contract.contract_id contract in
   let proof1 = make_proof ~run_id ~contract_id () in
-  Agent_sdk.Proof_store.init_run store1 ~run_id;
-  Agent_sdk.Proof_store.write_manifest store1 ~run_id proof1;
-  Agent_sdk.Proof_store.write_contract store1 ~run_id contract;
+  Masc_mcp_cdal_runtime.Proof_store.init_run store1 ~run_id;
+  Masc_mcp_cdal_runtime.Proof_store.write_manifest store1 ~run_id proof1;
+  Masc_mcp_cdal_runtime.Proof_store.write_contract store1 ~run_id contract;
   let outcome1 = CE.evaluate ~store:store1 proof1 in
   let v1 = CE.verdict_of_outcome outcome1 in
   Alcotest.(check string) "verdict branch status" "satisfied"
@@ -183,11 +183,11 @@ let test_review_requirement_yields_inconclusive () =
   let (store, _tmp) = setup_store () in
   let run_id = "review-gate-001" in
   let contract = make_contract_with_review_requirement () in
-  let contract_id = Agent_sdk.Risk_contract.contract_id contract in
+  let contract_id = Masc_mcp_cdal_runtime.Risk_contract.contract_id contract in
   let proof = make_proof ~run_id ~contract_id () in
-  Agent_sdk.Proof_store.init_run store ~run_id;
-  Agent_sdk.Proof_store.write_manifest store ~run_id proof;
-  Agent_sdk.Proof_store.write_contract store ~run_id contract;
+  Masc_mcp_cdal_runtime.Proof_store.init_run store ~run_id;
+  Masc_mcp_cdal_runtime.Proof_store.write_manifest store ~run_id proof;
+  Masc_mcp_cdal_runtime.Proof_store.write_contract store ~run_id contract;
   match CE.evaluate ~store proof with
   | Verdict (v, Some fp) ->
     Alcotest.(check string) "status" "inconclusive"
@@ -213,11 +213,11 @@ let test_persist_explicit_base_dir_avoids_default_resolution () =
   let store, tmp = setup_store () in
   let run_id = "persist-explicit-base-dir" in
   let contract = make_contract () in
-  let contract_id = Agent_sdk.Risk_contract.contract_id contract in
+  let contract_id = Masc_mcp_cdal_runtime.Risk_contract.contract_id contract in
   let proof = make_proof ~run_id ~contract_id () in
-  Agent_sdk.Proof_store.init_run store ~run_id;
-  Agent_sdk.Proof_store.write_manifest store ~run_id proof;
-  Agent_sdk.Proof_store.write_contract store ~run_id contract;
+  Masc_mcp_cdal_runtime.Proof_store.init_run store ~run_id;
+  Masc_mcp_cdal_runtime.Proof_store.write_manifest store ~run_id proof;
+  Masc_mcp_cdal_runtime.Proof_store.write_contract store ~run_id contract;
   match CE.evaluate ~store proof with
   | Verdict (v, _) ->
       let base_dir = Filename.concat tmp "cdal_verdicts" in

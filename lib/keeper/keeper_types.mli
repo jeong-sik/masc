@@ -148,8 +148,12 @@ type usage_metrics = {
 
 (** {1 Agent runtime state} *)
 
-(** Structured blocker classification — replaces string-based error matching. *)
-type cascade_exhaustion_reason =
+(** Structured blocker classification — replaces string-based error matching.
+    These are re-exports of the canonical types from [Keeper_meta_contract];
+    the [=] type equations make sure values flow without coercion across the
+    facade boundary (so callers may freely mix [Keeper_types.blocker_class]
+    and [Keeper_meta_contract.blocker_class]). *)
+type cascade_exhaustion_reason = Keeper_meta_contract.cascade_exhaustion_reason =
   | Connection_refused
   | No_providers_available
   | All_providers_failed
@@ -157,13 +161,15 @@ type cascade_exhaustion_reason =
   | Max_turns_exceeded
   | Other_detail of string
 
-type blocker_class =
+type blocker_class = Keeper_meta_contract.blocker_class =
   | Cascade_exhausted of cascade_exhaustion_reason
   | Ambiguous_post_commit_timeout
   | Ambiguous_post_commit_failure
   | Autonomous_slot_wait_timeout
   | Admission_queue_wait_timeout
   | Turn_timeout_after_queue_wait
+  | Admission_wait_wfq
+  | Admission_surface
   | Oas_timeout_budget
   | Turn_timeout
   | Completion_contract_violation
@@ -171,12 +177,36 @@ type blocker_class =
   | Fiber_unresolved
   | Stale_turn_timeout
   | Stale_fleet_batch
+  | Sdk_max_turns_exceeded
+  | Sdk_token_budget_exceeded
+  | Sdk_cost_budget_exceeded
+  | Sdk_unrecognized_stop_reason
+  | Sdk_idle_detected
+  | Sdk_tool_retry_exhausted
+  | Sdk_guardrail_violation
+  | Sdk_tripwire_violation
+  | Sdk_exit_condition_met
 
 val blocker_class_to_string : blocker_class -> string
 val cascade_exhaustion_summary : cascade_exhaustion_reason -> string
 val blocker_class_continue_gate : blocker_class -> bool
 val cascade_exhaustion_reason_to_json : cascade_exhaustion_reason -> Yojson.Safe.t
 val cascade_exhaustion_reason_of_json : Yojson.Safe.t -> cascade_exhaustion_reason option
+
+(** Authoritative blocker representation: typed [klass] + free-form
+    [detail].  Replaces the historic [last_blocker: string] +
+    [last_blocker_class: blocker_class option] pair so substring
+    classification is no longer load-bearing.  Re-exported via type
+    equation from [Keeper_meta_contract] so values flow without
+    coercion across the facade boundary. *)
+type blocker_info = Keeper_meta_contract.blocker_info = {
+  klass : blocker_class;
+  detail : string;
+}
+
+val blocker_info_of_class : ?detail:string -> blocker_class -> blocker_info
+val blocker_info_to_json : blocker_info -> Yojson.Safe.t
+val blocker_info_of_json : Yojson.Safe.t -> blocker_info option
 
 type agent_runtime_state = {
   usage: usage_metrics;
@@ -200,8 +230,7 @@ type agent_runtime_state = {
   last_social_transition_reason: string;
   last_active_desire: string;
   last_current_intention: string;
-  last_blocker: string;
-  last_blocker_class: blocker_class option;
+  last_blocker: blocker_info option;
   last_need: string;
 }
 
@@ -216,8 +245,8 @@ type keeper_meta = {
   mid_goal: string;
   long_goal: string;
   social_model: string;
-  cascade_name: string;
   models: string list;
+  cascade_ref: Cascade_ref.cascade_ref option;
   will: string;
   needs: string;
   desires: string;
@@ -271,6 +300,24 @@ type keeper_meta = {
 }
 
 val now_iso : unit -> string
+
+val cascade_name_of_meta : keeper_meta -> string
+(** [cascade_name_of_meta m] is the canonical cascade name for the keeper.
+
+    Resolution order (RFC-0041 transition phase):
+    1. If [m.cascade_ref] is [Some] and [.group] is non-empty, return [.group].
+    2. Otherwise return [m.cascade_name].
+
+    During the migration phase both fields coexist and may diverge if a
+    caller writes only one. New code MUST set [cascade_ref] when changing
+    routing — read sites should use this helper instead of touching
+    [m.cascade_name] directly. *)
+
+val set_cascade_name : string -> keeper_meta -> keeper_meta
+(** [set_cascade_name name m] pins both [cascade_name] and [cascade_ref]
+    to [name] in a single update. Use for every write that changes the
+    keeper's cascade routing target — direct field-only updates produce
+    drift. *)
 
 val tool_preset_to_string : tool_preset -> string
 val tool_preset_of_string : string -> tool_preset option

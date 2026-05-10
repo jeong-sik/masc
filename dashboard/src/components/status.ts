@@ -1,24 +1,22 @@
 // MASC Dashboard — Status Surface (Phase 2+4: fleet-health + runtime unified)
 // Read-only observability surfaces: journey, agents, runtime, fleet-health,
-// plus hidden diagnostic observatory/memory-subsystems routes.
+// plus hidden diagnostic observatory route.
 
 import { html } from 'htm/preact'
 import { lazy, Suspense } from 'preact/compat'
 import { route } from '../router'
 import { LoadingState } from './common/feedback-state'
+import { JourneyPanel } from './journey-panel'
 
 export type StatusSection =
   | 'observatory' | 'journey' | 'agents' | 'runtime' | 'goal-loop' | 'fleet-health'
-  | 'memory-subsystems' | 'cognition'
+  | 'cognition'
 
 const LazyAgentsUnified = lazy(async () => ({
   default: (await import('./agents-unified')).AgentsUnified,
 }))
 const LazyRuntimePanel = lazy(async () => ({
   default: (await import('./runtime-panel')).RuntimePanel,
-}))
-const LazyMemorySubsystems = lazy(async () => ({
-  default: (await import('./memory-subsystems')).MemorySubsystems,
 }))
 const LazyFleetHealthPanel = lazy(async () => ({
   default: (await import('./fleet-health-panel')).FleetHealthPanel,
@@ -28,9 +26,6 @@ const LazyGoalLoopPanel = lazy(async () => ({
 }))
 const LazyObservatory = lazy(async () => ({
   default: (await import('./observatory/observatory')).Observatory,
-}))
-const LazyJourneyPanel = lazy(async () => ({
-  default: (await import('./journey-panel')).JourneyPanel,
 }))
 const LazyCognitionPlane = lazy(async () => ({
   default: (await import('./cognition-plane')).CognitionPlane,
@@ -52,8 +47,6 @@ export function sectionLabel(section: StatusSection): string {
       return 'GOAL LOOP'
     case 'fleet-health':
       return 'Fleet Health'
-    case 'memory-subsystems':
-      return 'Memory Subsystems'
     case 'cognition':
       return 'Cognition'
     case 'agents':
@@ -66,15 +59,13 @@ function renderSection(section: StatusSection) {
     case 'observatory':
       return html`<${LazyObservatory} />`
     case 'journey':
-      return html`<${LazyJourneyPanel} />`
+      return html`<${JourneyPanel} />`
     case 'runtime':
       return html`<${LazyRuntimePanel} />`
     case 'goal-loop':
       return html`<${LazyGoalLoopPanel} />`
     case 'fleet-health':
       return html`<${LazyFleetHealthPanel} />`
-    case 'memory-subsystems':
-      return html`<${LazyMemorySubsystems} />`
     case 'cognition':
       return html`<${LazyCognitionPlane} />`
     case 'agents':
@@ -90,7 +81,6 @@ function currentSection(): StatusSection {
     || section === 'runtime'
     || section === 'goal-loop'
     || section === 'fleet-health'
-    || section === 'memory-subsystems'
     || section === 'cognition'
     || section === 'agents'
   ) return section

@@ -117,7 +117,6 @@ let iteri_with_fair_yield f xs =
 let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
     (state : Mcp_server.server_state) =
   Progress.set_sse_callback Sse.broadcast;
-  Sse.set_clock clock;
   (* Wire stop_keeper hook so zombie GC can terminate keeper fibers *)
   Atomic.set Coord_hooks.stop_keeper_fn Keeper_keepalive.stop_keepalive;
   (* task-103: auto-provision a per-task sandbox worktree on successful
@@ -176,7 +175,7 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
                          "error"
                        end)))
       in
-      Prometheus.inc_counter Prometheus.metric_keeper_claim_auto_provision
+      Prometheus.inc_counter Keeper_metrics.metric_keeper_claim_auto_provision
         ~labels:[ ("outcome", outcome); ("agent_name", agent_name) ]
         ());
   (* Shared Agent_sdk Event_bus used as the runtime transport between subsystems. *)
@@ -306,8 +305,8 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
   let masc_event_bus = Agent_sdk.Event_bus.create () in
   Masc_event_bus.set masc_event_bus;
   (* Event_bus → SSE bridge: relay both OAS and MASC buses to dashboard *)
-  Oas_event_bridge.start ~sw ~clock ~config:state.room_config ~bus:event_bus;
-  Oas_event_bridge.start ~sw ~clock ~config:state.room_config ~bus:masc_event_bus;
+  Cascade_event_bridge.start ~sw ~clock ~config:state.room_config ~bus:event_bus;
+  Cascade_event_bridge.start ~sw ~clock ~config:state.room_config ~bus:masc_event_bus;
   (* Compaction audit: subscribe to ContextCompactStarted/ContextCompacted and
      persist paired rows to [base_path/data/harness-compact/YYYY-MM/DD.jsonl]
      with rolling 14-day retention (override via
@@ -319,7 +318,7 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
     ~retention_days:14
     event_bus;
   let keeper_lifecycle_sub =
-    Oas_bus_instrument.subscribe
+    Agent_sdk_metrics_bridge.subscribe
       ~purpose:"lifecycle_listener"
       ~filter:(fun (evt : Agent_sdk.Event_bus.event) ->
         match evt.payload with
@@ -328,7 +327,7 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       masc_event_bus
   in
   Eio.Switch.on_release sw (fun () ->
-    Oas_bus_instrument.unsubscribe masc_event_bus keeper_lifecycle_sub);
+    Agent_sdk_metrics_bridge.unsubscribe masc_event_bus keeper_lifecycle_sub);
   (* Spawn the OAS bus depth sampler so warnings surface on stdout
      even when /metrics is not scraped.
 
@@ -343,11 +342,11 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
                  | _ -> 200)
     | None -> 200
   in
-  Oas_bus_instrument.start_sampler ~sw ~clock ~warn_threshold ();
+  Agent_sdk_metrics_bridge.start_sampler ~sw ~clock ~warn_threshold ();
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       (try
-        let events = Oas_bus_instrument.drain keeper_lifecycle_sub in
+        let events = Agent_sdk_metrics_bridge.drain keeper_lifecycle_sub in
         List.iter
           (fun (evt : Agent_sdk.Event_bus.event) ->
             match evt.payload with

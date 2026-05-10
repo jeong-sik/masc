@@ -41,6 +41,12 @@ val recent_tools_for_keeper : ?limit:int -> string -> string list
     same (tool_name, args_hash) key; resets on success. *)
 val max_consecutive_failures : int
 
+(** Thread-safe per-tool consecutive-failure counters shared by the
+    handler closures in one tool bundle. *)
+type failure_counts
+
+val create_failure_counts : unit -> failure_counts
+
 (** Normalize a raw tool result string into the canonical JSON
     envelope. Success → [{"ok":true,"result":...}]; failure →
     [{"ok":false,"error":...,"detail":...}]. Plain text is wrapped
@@ -71,11 +77,13 @@ val tool_exec_result_markers :
 (** Build the per-tool handler closure used by both internal and
     alias tool entries. The closure dispatches via
     [execute_keeper_tool_call_with_outcome] using [~name] as the
-    INTERNAL tool name (telemetry SSOT). [?translate_input]
-    reshapes incoming JSON from a public alias schema to the
-    internal payload (identity by default). *)
+    INTERNAL tool name (telemetry SSOT). [~input_schema] is the
+    internal tool schema used for pre-execution validation after
+    [?translate_input] reshapes incoming JSON from a public alias
+    schema to the internal payload (identity by default). *)
 val make_keeper_tool_handler :
   name:string ->
+  input_schema:Yojson.Safe.t ->
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   ctx_snapshot:Keeper_types.working_context ->
@@ -85,7 +93,7 @@ val make_keeper_tool_handler :
   ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t) ->
   ?on_tool_called:(string -> unit) ->
   ?translate_input:(Yojson.Safe.t -> Yojson.Safe.t) ->
-  failure_counts:(string, int) Hashtbl.t ->
+  failure_counts:failure_counts ->
   unit ->
   Yojson.Safe.t -> bool * string
 

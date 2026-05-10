@@ -19,22 +19,16 @@
    keeper layer constructs a [t] whose [runner] is a closure over its
    own runtime; [lib/exec] only sees the shape of the closure.
 
-   Usage shape
-   -----------
-   - Host: build via [host ()]; runs the argv in a host process via
-     [Process_eio.run_argv_with_status_split].
-   - Docker: built by [lib/keeper] (e.g.,
-     [Keeper_shell_docker.sandbox_target_of_runtime]) and embedded in
-     the [Shell_ir.simple] record before dispatch. The runner closure
-     adapts the keeper-side Docker call into the same callback shape.
-
-   Status (2026-04-28)
-   -------------------
-   Step 1 of PR-2: this module is introduced ahead of the cascade
-   change in [Shell_ir.simple]. The dispatch path in
-   [Exec_dispatch.dispatch_simple] does not consume the type yet —
-   that wiring lands in step 2 once the cascade sites in tests and
-   library callers are converted. *)
+   Variant design (2026-05-09)
+   ---------------------------
+   [t] is a variant rather than a record so that the [Host] case needs
+   no runner closure.  This eliminates the circular dependency
+   [Sandbox_target -> Exec_gate -> Capability -> Verdict -> Shell_ir ->
+   Sandbox_target] that previously forced [host ()] to call
+   [Process_eio.run_argv_with_status_split] directly.  The dispatch
+   path in [Exec_dispatch] now routes [Host] directly to
+   [Exec_gate.run_argv_with_status_split], and [Docker] via the carried
+   [runner]. *)
 
 type runner =
   argv:string list ->
@@ -43,40 +37,14 @@ type runner =
   timeout_sec:float ->
   Unix.process_status * string * string
 
-(** [kind] is a structural tag for telemetry and logging. The runner
-    closure carries the actual dispatch logic, so this tag does not
-    need to enumerate every concrete runtime — it is a discriminator,
-    not a state machine. *)
-type kind =
+type t =
   | Host
-  | Docker of { image : string }
+  | Docker of { image : string; runner : runner }
 
-type t = {
-  kind : kind;
-  runner : runner;
-}
+let host () : t = Host
 
-(** Default host runner: forwards to [Process_eio.run_argv_with_status_split].
-    Exceptions raised by the underlying runner are propagated unchanged so
-    callers can decide whether to translate them into structured errors.
-    The previous behavior (in [Exec_dispatch.dispatch_simple]) was to
-    catch and surface them via the dispatch result; this preserves the
-    same call shape so wiring step 2 is a structural rename, not a
-    semantic shift. *)
-let host () : t =
-  let runner ~argv ~env ~cwd ~timeout_sec =
-    Process_eio.run_argv_with_status_split ~timeout_sec ~env ?cwd argv
-  in
-  { kind = Host; runner }
+let docker ~image ~runner : t = Docker { image; runner }
 
-(** Build a Docker target from a caller-supplied runner closure. Used by
-    [lib/keeper] to inject [Keeper_turn_sandbox_runtime] without the
-    [lib/exec] layer taking a dependency on [lib/keeper]. *)
-let docker ~image ~runner : t =
-  { kind = Docker { image }; runner }
-
-let kind t = t.kind
-
-let pp_kind fmt = function
+let pp fmt = function
   | Host -> Format.pp_print_string fmt "host"
   | Docker { image } -> Format.fprintf fmt "docker(%s)" image

@@ -122,6 +122,7 @@ type auth_detail = {
 
 val cn_llama : string
 val cn_ollama : string
+val cn_unknown_provider : string
 val cn_claude : string
 val cn_codex : string
 val cn_gemini : string
@@ -370,8 +371,15 @@ val adapter_of_provider_config :
 val provider_label_of_config :
   Llm_provider.Provider_config.t -> string
 
-(** Stable provider-level key for cascade health and circuit-breaker state. *)
+(** Stable key for cascade health and circuit-breaker state.
+    Most providers are keyed at provider level. Local OpenAI-compatible
+    endpoints include model and base URL so independent loopback runtimes can
+    fail over without sharing cooldown state. *)
 val provider_health_key_of_config :
+  Llm_provider.Provider_config.t -> string
+
+(** Stable model-level key for model-specific cascade health state. *)
+val provider_model_health_key_of_config :
   Llm_provider.Provider_config.t -> string
 
 (** User-facing provider label for a provider config. *)

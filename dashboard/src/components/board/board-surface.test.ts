@@ -237,6 +237,62 @@ describe('BoardSurface Component', () => {
     expect(screen.getByRole('button', { name: '🔥 리액션 2개' })).toHaveAttribute('aria-pressed', 'true')
   })
 
+  it('renders post moderation projection badges', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'post-flagged',
+        title: 'Needs moderation',
+        body: 'content',
+        author: 'ani1999',
+        report_count: 2,
+        moderation_status: 'flagged',
+      }),
+    ]
+
+    render(h(BoardSurface, null))
+
+    expect(screen.getByLabelText('게시글 moderation 신고됨 2건')).toHaveTextContent('신고됨 2')
+  })
+
+  it('renders vote-blind post scores as hidden until voting', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'post-blind',
+        title: 'Blind score',
+        body: 'content',
+        author: 'ani1999',
+        votes: null,
+        vote_balance: null,
+        vote_blind: true,
+        vote_blind_reason: 'vote_before_score',
+      }),
+    ]
+
+    render(h(BoardSurface, null))
+
+    expect(screen.getByLabelText('점수 투표 후 공개')).toHaveTextContent('투표 후 공개')
+  })
+
+  it('renders contributor quality badges on post cards', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'post-quality',
+        title: 'Quality signal',
+        body: 'content',
+        author: 'ani1999',
+        contributor_quality: {
+          score: 0.72,
+          band: 'strong',
+          source: 'agent_reputation',
+        },
+      }),
+    ]
+
+    render(h(BoardSurface, null))
+
+    expect(screen.getByLabelText('기여자 품질 72점 · 강함')).toHaveTextContent('품질 72')
+  })
+
   it('routes the mention inbox focus to the message surface', () => {
     route.value = { params: { focus: 'mention-inbox' } } as any
     messages.value = [{ id: 'm-1', from: 'sojin', content: '@dashboard needs review' }]
@@ -279,6 +335,26 @@ describe('BoardSurface Component', () => {
     render(h(BoardSurface, null))
 
     expect(await screen.findByRole('heading', { name: 'AI curation snapshot' })).toBeInTheDocument()
+    expect(screen.queryByText('+ 새 글 작성')).not.toBeInTheDocument()
+  })
+
+  it('routes the karma focus to the board karma surface', async () => {
+    route.value = { params: { focus: 'karma' } } as any
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        events: [],
+        count: 0,
+        scoring_rule: '',
+        totals: [],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    render(h(BoardSurface, null))
+
+    expect(await screen.findByRole('heading', { name: 'Karma ledger' })).toBeInTheDocument()
     expect(screen.queryByText('+ 새 글 작성')).not.toBeInTheDocument()
   })
 

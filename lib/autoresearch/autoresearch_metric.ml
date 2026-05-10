@@ -126,14 +126,14 @@ let parse_metric_output output =
 
 let run_metric_argv ~workdir ~timeout_s argv =
   let config =
-    { Agent_sdk.Autonomy_exec.default_config with
+    { Masc_mcp_cdal_runtime.Autonomy_exec.default_config with
       cwd = Some workdir; }
   in
   match Process_eio.get_clock () with
   | Error e -> Result.error (Printf.sprintf "metric_fn runtime unavailable: %s" e)
   | Ok clock ->
     Eio.Switch.run @@ fun sw ->
-    match Agent_sdk.Autonomy_exec.run ~sw ~clock ~config ~argv ~timeout_s with
+    match Masc_mcp_cdal_runtime.Autonomy_exec.run ~sw ~clock ~config ~argv ~timeout_s with
     | Error err ->
       Result.error
         (Printf.sprintf "metric_fn exec failed: %s"
@@ -141,7 +141,7 @@ let run_metric_argv ~workdir ~timeout_s argv =
     | Ok output ->
       let elapsed_ms = int_of_float (output.elapsed_s *. 1000.0) in
       (match output.status with
-       | Agent_sdk.Autonomy_exec.Exit_code 0 ->
+       | Masc_mcp_cdal_runtime.Autonomy_exec.Exit_code 0 ->
          Result.ok (output.stdout, elapsed_ms)
        | status ->
          let detail =
@@ -149,17 +149,17 @@ let run_metric_argv ~workdir ~timeout_s argv =
            let stdout = String.trim output.stdout in
            if stderr <> "" then stderr
            else if stdout <> "" then stdout
-           else Agent_sdk.Autonomy_exec.argv_to_string output.effective_argv
+           else Masc_mcp_cdal_runtime.Autonomy_exec.argv_to_string output.effective_argv
          in
          Result.error
            (Printf.sprintf "metric_fn %s: %s"
-              (Agent_sdk.Autonomy_exec.status_to_string status)
+              (Masc_mcp_cdal_runtime.Autonomy_exec.status_to_string status)
               (clip detail 240)))
 
 (** Run metric_fn command and parse either a strict metric tag or the last
     non-empty stdout line as a float.
     Returns Error if command fails, metric_fn is unsafe, or output is not a valid float.
-    Uses Agent_sdk.Autonomy_exec for argv-only execution. *)
+    Uses Masc_mcp_cdal_runtime.Autonomy_exec for argv-only execution. *)
 let measure_metric ~workdir ~timeout_s metric_fn =
   match split_metric_fn_argv metric_fn with
   | Error e -> Error e

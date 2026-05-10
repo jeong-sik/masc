@@ -11,7 +11,7 @@ import {
   normalizePendingConfirmation,
 } from './board'
 import { normalizeKeeperTrustTerminalReason } from '../keeper-store-normalize'
-import { get, post, patch, withRetries, NAMESPACE_TRUTH_GET_TIMEOUT_MS } from './core'
+import { currentDashboardActor, get, post, withRetries, NAMESPACE_TRUTH_GET_TIMEOUT_MS } from './core'
 import {
   parseAgentRelationsResponse,
   type AgentRelationsResponse,
@@ -62,6 +62,7 @@ import type {
   DashboardRuntimeResolution,
 } from '../types'
 export {
+  fetchCascadeAuditRuns,
   fetchCascadeClientCapacity,
   fetchCascadeClientCapacityHistory,
   fetchCascadeConfig,
@@ -74,6 +75,10 @@ export {
   updateKeeperCascade,
 } from './dashboard-cascade'
 export type {
+  CascadeAuditHop,
+  CascadeAuditHopStatus,
+  CascadeAuditRun,
+  CascadeAuditRunsResponse,
   CascadeCandidate,
   CascadeCapacityEventKind,
   CascadeClientCapacityEntry,
@@ -374,6 +379,8 @@ export function fetchDashboardMemory(
   const offset = Math.max(0, Math.min(5000, opts?.offset ?? 0))
   params.set('limit', String(limit))
   if (offset > 0) params.set('offset', String(offset))
+  params.set('voter', currentDashboardActor())
+  params.set('blind_votes', 'true')
   if (opts?.excludeSystem) params.set('exclude_system', 'true')
   if (opts?.excludeAutomation) params.set('exclude_automation', 'true')
   if (opts?.author) params.set('author', opts.author)
@@ -997,10 +1004,20 @@ export interface HeuristicEvent {
   detail?: string
 }
 
+export interface HeuristicFiring {
+  id: string
+  ts: number
+  rule_id: string
+  agent?: string
+  action: string
+  cooldown_remaining_ms?: number
+}
+
 export interface HeuristicsResponse {
   limit: number
   count: number
   events: HeuristicEvent[]
+  heuristics: HeuristicFiring[]
 }
 
 function decodeHeuristicEvent(raw: unknown): HeuristicEvent | null {
@@ -1020,6 +1037,20 @@ function decodeHeuristicEvent(raw: unknown): HeuristicEvent | null {
   }
 }
 
+function decodeHeuristicFiring(raw: unknown): HeuristicFiring | null {
+  if (!isRecord(raw)) return null
+  return {
+    id: asString(raw.id) ?? '',
+    ts: asNumber(raw.ts) ?? 0,
+    rule_id: asString(raw.rule_id) ?? '',
+    agent: asNullableString(raw.agent) ?? undefined,
+    action: asString(raw.action) ?? '',
+    cooldown_remaining_ms: raw.cooldown_remaining_ms === undefined
+      ? undefined
+      : (asInt(raw.cooldown_remaining_ms) ?? 0),
+  }
+}
+
 function decodeHeuristicsResponse(raw: unknown): HeuristicsResponse | null {
   if (!isRecord(raw)) return null
   return {
@@ -1028,6 +1059,9 @@ function decodeHeuristicsResponse(raw: unknown): HeuristicsResponse | null {
     events: asRecordArray(raw.events)
       .map(decodeHeuristicEvent)
       .filter((e): e is HeuristicEvent => e !== null),
+    heuristics: asRecordArray(raw.heuristics)
+      .map(decodeHeuristicFiring)
+      .filter((e): e is HeuristicFiring => e !== null),
   }
 }
 
@@ -1062,6 +1096,19 @@ export interface StressResponse {
   limit: number
   count: number
   events: StressEvent[]
+  agent_stress: AgentStressRow[]
+}
+
+export interface AgentStressRow {
+  agent: string
+  budget_pressure: number
+  ctx_pressure: number
+  queue_depth: number
+  blocked_on?: string
+  ts: number
+  budget_pressure_source?: string
+  ctx_pressure_source?: string
+  queue_depth_source?: string
 }
 
 function decodeStressKind(raw: unknown): StressKind | null {
@@ -1089,6 +1136,21 @@ function decodeStressEvent(raw: unknown): StressEvent | null {
   }
 }
 
+function decodeAgentStressRow(raw: unknown): AgentStressRow | null {
+  if (!isRecord(raw)) return null
+  return {
+    agent: asString(raw.agent) ?? '',
+    budget_pressure: asNumber(raw.budget_pressure) ?? 0,
+    ctx_pressure: asNumber(raw.ctx_pressure) ?? 0,
+    queue_depth: asInt(raw.queue_depth) ?? 0,
+    blocked_on: asNullableString(raw.blocked_on) ?? undefined,
+    ts: asNumber(raw.ts) ?? 0,
+    budget_pressure_source: asNullableString(raw.budget_pressure_source) ?? undefined,
+    ctx_pressure_source: asNullableString(raw.ctx_pressure_source) ?? undefined,
+    queue_depth_source: asNullableString(raw.queue_depth_source) ?? undefined,
+  }
+}
+
 function decodeStressResponse(raw: unknown): StressResponse | null {
   if (!isRecord(raw)) return null
   return {
@@ -1097,6 +1159,9 @@ function decodeStressResponse(raw: unknown): StressResponse | null {
     events: asRecordArray(raw.events)
       .map(decodeStressEvent)
       .filter((e): e is StressEvent => e !== null),
+    agent_stress: asRecordArray(raw.agent_stress)
+      .map(decodeAgentStressRow)
+      .filter((row): row is AgentStressRow => row !== null),
   }
 }
 
@@ -1986,6 +2051,11 @@ function normalizeRuntimeBlockerClass(value: unknown): KeeperConfig['runtime']['
     case 'turn_failures':
     case 'exception':
     case 'stale_fleet_batch':
+    case 'awaiting_operator':
+    case 'awaiting_sandbox_egress':
+    case 'supervisor_paused':
+    case 'synthetic_stall':
+    case 'self_imposed_idle':
       return blockerClass
     default:
       return null
@@ -2030,6 +2100,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
   const metrics = isRecord(data.metrics) ? data.metrics : {}
   const sandboxEnvironment = normalizeKeeperSandboxEnvironment(data.sandbox_environment)
   const perProviderTimeoutSec = asLooseNullableNumber(execution.per_provider_timeout_sec)
+  const lastLatencyMs = asInt(metrics.last_latency_ms)
 
   return {
     name: asNullableString(data.name) ?? requestedName,
@@ -2182,7 +2253,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       last_input_tokens: asInt(metrics.last_input_tokens) ?? 0,
       last_output_tokens: asInt(metrics.last_output_tokens) ?? 0,
       last_total_tokens: asInt(metrics.last_total_tokens) ?? 0,
-      last_latency_ms: asInt(metrics.last_latency_ms) ?? 0,
+      last_latency_ms: lastLatencyMs != null && lastLatencyMs > 0 ? lastLatencyMs : null,
       last_total_tokens_per_sec: asLooseNullableNumber(metrics.last_total_tokens_per_sec),
       last_output_tokens_per_sec: asLooseNullableNumber(metrics.last_output_tokens_per_sec),
       compaction_count: asInt(metrics.compaction_count) ?? 0,
@@ -2235,7 +2306,7 @@ export function patchKeeperConfig(
   name: string,
   payload: KeeperConfigUpdatePayload,
 ): Promise<KeeperConfig> {
-  return patch<unknown>(
+  return post<unknown>(
     `/api/v1/keepers/${encodeURIComponent(name)}/config`,
     payload,
   ).then(raw => normalizeKeeperConfig(raw, name))

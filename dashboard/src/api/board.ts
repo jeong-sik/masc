@@ -4,7 +4,7 @@ import { timeBoardRequest } from '../board-metrics'
 import type {
   BoardActorIdentity, BoardPost, BoardComment, BoardReactionSummary,
   BoardReactionTargetType, BoardReactionToggleResult, BoardSortMode,
-  BoardVoteDirection,
+  BoardVoteDirection, BoardModerationStatus, BoardContributorQuality,
   BoardCurationSnapshot, BoardKarmaLedger, BoardKarmaLedgerEvent, BoardKarmaTotal,
   GovernanceContextRef,
   GovernanceDecisionItem, GovernanceExecutedRoute,
@@ -339,6 +339,38 @@ function normalizeBoardVoteDirection(raw: unknown): BoardVoteDirection | null {
   return direction === 'up' || direction === 'down' ? direction : null
 }
 
+function normalizeBoardModerationStatus(raw: unknown): BoardModerationStatus {
+  const status = asString(raw, '').trim().toLowerCase()
+  switch (status) {
+    case 'flagged':
+    case 'approved':
+    case 'removed':
+    case 'hidden':
+    case 'warned':
+      return status
+    default:
+      return 'none'
+  }
+}
+
+function normalizeBoardContributorQuality(raw: unknown): BoardContributorQuality | null {
+  if (!isRecord(raw)) return null
+  const score = asNumber(raw.score)
+  if (score === undefined) return null
+  return {
+    score,
+    band: asString(raw.band, '').trim() || undefined,
+    source: asString(raw.source, '').trim() || undefined,
+    completion_rate: asNumber(raw.completion_rate),
+    response_rate: asNumber(raw.response_rate),
+    board_posts: asNumber(raw.board_posts),
+    board_comments: asNumber(raw.board_comments),
+    accountability_score: asNumber(raw.accountability_score),
+    autonomy_level: asString(raw.autonomy_level, '').trim() || undefined,
+    thompson_confidence: asNumber(raw.thompson_confidence),
+  }
+}
+
 function normalizeBoardPost(raw: unknown): BoardPost | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id, '').trim()
@@ -353,6 +385,8 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
   const votes = asNumber(raw.votes, score || (votesUp - votesDown))
   const currentVote = normalizeBoardVoteDirection(raw.current_vote)
   const hasVoted = typeof raw.has_voted === 'boolean' ? raw.has_voted : currentVote !== null
+  const voteBlind = raw.vote_blind === true
+  const voteBlindReason = asString(raw.vote_blind_reason, '').trim() || undefined
   const commentCount = asNumber(raw.comment_count, asNumber(raw.reply_count, 0))
   const flairValue = (() => {
     const flair = raw.flair
@@ -398,6 +432,8 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
     tags,
     votes,
     vote_balance: score,
+    vote_blind: voteBlind,
+    ...(voteBlindReason ? { vote_blind_reason: voteBlindReason } : {}),
     current_vote: currentVote,
     has_voted: hasVoted,
     comment_count: commentCount,
@@ -413,6 +449,9 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
         : '')
       || null,
     hearth_count: asNumber(raw.hearth_count, 0),
+    report_count: Math.max(0, Math.trunc(asNumber(raw.report_count, 0))),
+    moderation_status: normalizeBoardModerationStatus(raw.moderation_status),
+    contributor_quality: normalizeBoardContributorQuality(raw.contributor_quality),
     ...(reactions !== undefined ? { reactions } : {}),
   }
 }
@@ -430,6 +469,8 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
   const votes = asNumber(raw.votes, score)
   const currentVote = normalizeBoardVoteDirection(raw.current_vote)
   const hasVoted = typeof raw.has_voted === 'boolean' ? raw.has_voted : currentVote !== null
+  const voteBlind = raw.vote_blind === true
+  const voteBlindReason = asString(raw.vote_blind_reason, '').trim() || undefined
   const reactions = Array.isArray(raw.reactions)
     ? raw.reactions
         .map(normalizeBoardReactionSummary)
@@ -447,8 +488,12 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
     vote_balance: score,
     votes_up: votesUp,
     votes_down: votesDown,
+    vote_blind: voteBlind,
+    ...(voteBlindReason ? { vote_blind_reason: voteBlindReason } : {}),
     current_vote: currentVote,
     has_voted: hasVoted,
+    report_count: Math.max(0, Math.trunc(asNumber(raw.report_count, 0))),
+    moderation_status: normalizeBoardModerationStatus(raw.moderation_status),
     ...(reactions !== undefined ? { reactions } : {}),
   }
 }
@@ -634,7 +679,13 @@ function normalizeBoardReactionToggleResult(raw: unknown): BoardReactionToggleRe
 
 export async function fetchBoard(
   sortBy?: BoardSortMode,
-  options?: { excludeSystem?: boolean; excludeAutomation?: boolean; author?: string; hearth?: string },
+  options?: {
+    excludeSystem?: boolean
+    excludeAutomation?: boolean
+    author?: string
+    hearth?: string
+    blindVotes?: boolean
+  },
 ): Promise<{ posts: BoardPost[] }> {
   return timeBoardRequest('list', () => withRetries('fetchBoard', async () => {
     const params = new URLSearchParams()
@@ -644,6 +695,7 @@ export async function fetchBoard(
     if (options?.author) params.set('author', options.author)
     if (options?.hearth) params.set('hearth', options.hearth)
     params.set('voter', currentDashboardActor())
+    if (options?.blindVotes) params.set('blind_votes', 'true')
     params.set('limit', options?.excludeSystem || options?.excludeAutomation || options?.author || options?.hearth ? '150' : '100')
     const qs = params.toString()
     const raw = await get<{ posts?: unknown[] }>(`/api/v1/board${qs ? `?${qs}` : ''}`)
@@ -706,6 +758,7 @@ export async function fetchBoardPost(postId: string): Promise<BoardPost & { comm
     const params = new URLSearchParams({
       format: 'flat',
       voter: currentDashboardActor(),
+      blind_votes: 'true',
     })
     const raw = await get<Record<string, unknown>>(`/api/v1/board/${postId}?${params}`)
     const postRaw = isRecord(raw.post) ? raw.post : raw

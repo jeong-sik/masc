@@ -228,7 +228,7 @@ let command_blocked_hint name =
     | "sort" | "uniq" -> " Use rg or jq for filtering."
     | "sed" | "awk" -> " Use keeper_fs_edit for in-place edits."
     | "find" -> " Use rg --files or masc_code_search."
-    | "curl" | "wget" -> " Use masc_web_search for content fetching."
+    | "curl" | "wget" -> " Use masc_web_fetch to fetch page content, or masc_web_search to find sources."
     | "gh" ->
       " 'gh' is NOT available in the keeper sandbox. For pull-request \
        work use keeper_pr_list / keeper_pr_status / keeper_pr_create / \
@@ -245,7 +245,7 @@ let command_blocked_hint name =
     | "ssh" | "scp" | "rsync" | "ftp" | "sftp" | "nc" ->
       Printf.sprintf
         " '%s' is a network primitive and is not permitted. Keeper \
-         network access goes through masc_web_search or \
+         network access goes through masc_web_search, masc_web_fetch, or \
          masc_autoresearch_* tools."
         name
     | _ when looks_like_source_code name ->

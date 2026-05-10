@@ -4,8 +4,8 @@
     - [apply]: read verdict JSON, apply label, write labeled verdict
     - [metrics]: read labeled verdicts, compute output contract *)
 
-module CT = Masc_mcp.Cdal_types
-module L = Masc_mcp.Labeling
+module CT = Cdal_types
+module L = Labeling
 
 let read_json_file path =
   let ic = open_in path in

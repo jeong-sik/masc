@@ -402,8 +402,7 @@ let normalize_cascade_name raw =
     | _ -> []
   in
   let known =
-    Keeper_cascade_profile.known_cascades
-    @ Keeper_config.phase_routing_cascade_names
+    Keeper_config.phase_routing_cascade_names
     @ catalog
   in
   if List.mem (String.lowercase_ascii normalized) known
@@ -957,7 +956,7 @@ let handle_persona_generate ctx args =
              Masc_oas_bridge.run_with_caller
                ~caller:Env_config_oas_bridge.Keeper_persona_authoring
                (fun () ->
-                 Oas_worker.run_named
+                 Keeper_turn_driver.run_named
                    ~cascade_name
                    ~goal:prompt
                    ~max_turns:1
@@ -976,7 +975,7 @@ let handle_persona_generate ctx args =
                     "persona generation failed: %s"
                     (Agent_sdk.Error.to_string err)) )
            | Ok result ->
-             let raw_text = Oas_response.text_of_response result.Oas_worker.response in
+             let raw_text = Agent_sdk_response.text_of_response result.Cascade_runner.response in
              (try
                 let parsed = Llm_provider.Lenient_json.parse raw_text in
                 let handle = parsed_handle_payload fallback_handle parsed in

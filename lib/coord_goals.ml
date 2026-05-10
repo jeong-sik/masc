@@ -179,19 +179,33 @@ let parse_optional_bool args field =
            ~expected:"boolean"
            ~received:(Yojson.Safe.to_string json))
 
+let verifier_policy_shape_hint =
+  "omit/null/{} or {\"mode\":\"none\"} for no verifier policy, or use canonical \
+   {\"inherit_mode\":\"extend|replace\",\"principals\":[...]}"
+
+let is_noop_verifier_policy_json = function
+  | `Assoc [] -> true
+  | `Assoc [ ("mode", `String raw) ] ->
+      String.equal "none" (String.lowercase_ascii (String.trim raw))
+  | _ -> false
+
 let parse_optional_policy args field =
   match Yojson.Safe.Util.member field args with
   | `Null -> Ok None
+  | json when is_noop_verifier_policy_json json -> Ok None
   | json -> (
       match Goal_verification.goal_verifier_policy_of_yojson json with
       | Ok policy -> Ok (Some policy)
       | Error msg ->
+          let message =
+            msg ^ "; accepted verifier_policy shapes: " ^ verifier_policy_shape_hint
+          in
           Error
             {
               field;
               constraint_violated = Type_string;
-              message = msg;
-              expected = Some "goal_verifier_policy";
+              message;
+              expected = Some verifier_policy_shape_hint;
               received = Some (Yojson.Safe.to_string json);
             })
 

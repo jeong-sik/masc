@@ -62,7 +62,28 @@ let is_keeper_board_write_tool_name tool_name =
 
 let current_keeper_model meta =
   let m = meta.Keeper_types.runtime.usage.last_model_used in
-  if m = "" then meta.Keeper_types.cascade_name else m
+  if m = "" then Keeper_types.cascade_name_of_meta meta else m
+
+let stop_reason_to_label = function
+  | Agent_sdk.Types.EndTurn -> "end_turn"
+  | Agent_sdk.Types.StopToolUse -> "tool_use"
+  | Agent_sdk.Types.MaxTokens -> "max_tokens"
+  | Agent_sdk.Types.StopSequence -> "stop_sequence"
+  | Agent_sdk.Types.Unknown _ -> "unknown"
+
+let idle_severity_to_label = function
+  | Agent_sdk.Hooks.Idle_severity.Nudge -> "nudge"
+  | Agent_sdk.Hooks.Idle_severity.Final_warning -> "final_warning"
+  | Agent_sdk.Hooks.Idle_severity.Skip -> "skip"
+
+let idle_decision_to_label = function
+  | Agent_sdk.Hooks.Continue -> "continue"
+  | Agent_sdk.Hooks.Skip -> "skip"
+  | Agent_sdk.Hooks.Nudge _ -> "nudge"
+  | Agent_sdk.Hooks.Override _ -> "override"
+  | Agent_sdk.Hooks.ApprovalRequired -> "approval_required"
+  | Agent_sdk.Hooks.AdjustParams _ -> "adjust_params"
+  | Agent_sdk.Hooks.ElicitInput _ -> "elicit_input"
 
 let render_pre_tool_gate_source_hint
     (event : Keeper_guards.gate_decision_event) =
@@ -136,7 +157,7 @@ let record_pre_tool_gate_attempt
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
        Prometheus.inc_counter
-         Prometheus.metric_keeper_lifecycle_callback_failures
+         Keeper_metrics.metric_keeper_lifecycle_callback_failures
          ~labels:[("keeper", keeper_name); ("callback", "gate_tool_call_log")]
          ();
        Log.Keeper.warn
@@ -213,7 +234,7 @@ let record_pre_tool_gate_attempt
    labels let dashboards and #9880 governance judgments distinguish
    which keeper-tool pairs are actually failing instead of reading a
    single undifferentiated marker. *)
-let tool_use_failure_metric = Prometheus.metric_keeper_tool_use_failure
+let tool_use_failure_metric = Keeper_metrics.metric_keeper_tool_use_failure
 
 let record_tool_use_failure ~keeper_name ~tool_name =
   Prometheus.inc_counter tool_use_failure_metric
@@ -236,7 +257,7 @@ let empty_response_model_metric =
 let alias_response_model_metric =
   Prometheus.metric_after_turn_response_model_alias
 
-let unknown_model_sentinel = "unknown_provider"
+let unknown_model_sentinel = Provider_adapter.cn_unknown_provider
 
 let zero_usage : Agent_sdk.Types.api_usage =
   {
@@ -362,7 +383,7 @@ let record_usage_anomaly_metrics ~keeper_name ~model usage_trust =
     List.iter
       (fun reason ->
          Prometheus.inc_counter
-           Prometheus.metric_keeper_usage_anomalies
+           Keeper_metrics.metric_keeper_usage_anomalies
            ~labels:
              [
                ("keeper_name", keeper_name);
@@ -576,7 +597,7 @@ let record_keeper_tool_duration_metric
     (summary : tool_execution_summary)
   : unit =
   Prometheus.observe_histogram
-    Prometheus.metric_keeper_tool_call_duration
+    Keeper_metrics.metric_keeper_tool_call_duration
     ~labels:
       [ "keeper", keeper_name
       ; "provider", summary.provider
@@ -641,12 +662,13 @@ let record_llm_inference_latency_metric
   match telemetry with
   | Some t ->
     let observed_latency_ms =
-      if t.request_latency_ms > 0 then t.request_latency_ms
-      else (
-        Prometheus.inc_counter
-          Prometheus.metric_after_turn_telemetry_zero_latency
-          ~labels ();
-        1)
+      match t.request_latency_ms with
+      | Some latency_ms when latency_ms > 0 -> latency_ms
+      | _ ->
+          Prometheus.inc_counter
+            Prometheus.metric_after_turn_telemetry_zero_latency
+            ~labels ();
+          1
     in
     Prometheus.observe_histogram
       Prometheus.metric_llm_inference_duration
@@ -663,11 +685,13 @@ let wall_tokens_per_second
     ~(telemetry : Agent_sdk.Types.inference_telemetry option)
   : float option =
   match telemetry with
-  | Some t when not usage_missing && output_tokens > 0
-                && t.request_latency_ms > 0 ->
+  | Some t when not usage_missing && output_tokens > 0 -> (
+      match t.request_latency_ms with
+      | Some request_latency_ms when request_latency_ms > 0 ->
       Some
         (Float.of_int output_tokens
-         /. (Float.of_int t.request_latency_ms /. 1000.0))
+         /. (Float.of_int request_latency_ms /. 1000.0))
+      | _ -> None)
   | _ -> None
 
 (** #10318: classify why [cost_usd] ended up as it did so the
@@ -823,7 +847,10 @@ let assemble_cost_event_payload
            @ float_field "hw_decode_tokens_per_second" tm.predicted_per_second
          | None -> [])
       @ float_field "peak_memory_gb" t.peak_memory_gb
-      @ [("request_latency_ms", `Int t.request_latency_ms)]
+      @ int_field "request_latency_ms"
+          (match t.request_latency_ms with
+           | Some latency_ms when latency_ms > 0 -> Some latency_ms
+           | _ -> None)
     | None -> []
   in
   let wall_tok_s_fields =
@@ -934,7 +961,7 @@ let emit_cost_event
    with Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
         Prometheus.inc_counter
-          Prometheus.metric_keeper_metric_emit_dropped
+          Keeper_metrics.metric_keeper_metric_emit_dropped
           ~labels:[("keeper", agent_name); ("site", "cost_event_write")]
           ();
         Log.Keeper.error "emit_cost_event: failed to write %s: %s"
@@ -1040,6 +1067,24 @@ let on_idle_decision ~consecutive_idle_turns ~allowed_tools ~tool_names
   on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
     ~allowed_tools ~tool_names
 
+let keeper_idle_decision ~meta_ref ~consecutive_idle_turns ~tool_names =
+  let allowed_tools =
+    Keeper_tool_policy.keeper_allowed_tool_names !meta_ref in
+  let decision =
+    on_idle_decision ~consecutive_idle_turns ~tool_names
+      ~allowed_tools in
+  let tools_str = match tool_names with
+    | [] -> "<none>" | names -> String.concat ", " names in
+  (match decision with
+   | Agent_sdk.Hooks.Skip ->
+     Log.Keeper.warn "keeper:%s idle_turns=%d repeated_tools=[%s] — requesting stop"
+       (!meta_ref).name consecutive_idle_turns tools_str
+   | Agent_sdk.Hooks.Nudge _ ->
+     Log.Keeper.info "keeper:%s idle_turns=%d tools=[%s] — nudging LLM via Nudge"
+       (!meta_ref).name consecutive_idle_turns tools_str
+   | _ -> ());
+  decision
+
 let recent_tool_streak_count ?(within_sec = 900.0) ~(tool_name : string)
     (entries : Yojson.Safe.t list) : int =
   let now = Time_compat.now () in
@@ -1061,11 +1106,15 @@ type pr_review_action_metric_event = {
   comment_id : int option;
   success : bool;
   route_via : string option;
+  credential : Yojson.Safe.t option;
+  identity_attestation : Yojson.Safe.t option;
 }
 
 type pr_work_action_metric_event = {
   work_action : string;
   work_source : string;
+  work_ref : string option;
+  pr_url : string option;
   command : string option;
   success : bool;
   route_via : string option;
@@ -1087,12 +1136,115 @@ let first_some a b =
 let observe_output_parse_failure ~surface ~output_bytes =
   Safe_ops.protect ~default:() (fun () ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_oas_hook_output_parse_failures
+        Keeper_metrics.metric_keeper_oas_hook_output_parse_failures
         ~labels:[ ("surface", surface) ] ());
   Safe_ops.protect ~default:() (fun () ->
       Log.Keeper.warn
         "keeper_hooks_oas output JSON parse failed: surface=%s output_bytes=%d"
         surface output_bytes)
+
+let find_substring_from text ~needle ~start =
+  let text_len = String.length text in
+  let needle_len = String.length needle in
+  let rec loop i =
+    if needle_len = 0 then Some i
+    else if i + needle_len > text_len then None
+    else if String.sub text i needle_len = needle then Some i
+    else loop (i + 1)
+  in
+  loop start
+
+let strip_fence_language block =
+  let block = String.trim block in
+  match String.index_opt block '\n' with
+  | None -> block
+  | Some first_line_end ->
+      let first_line =
+        String.sub block 0 first_line_end
+        |> String.trim
+        |> String.lowercase_ascii
+      in
+      let rest =
+        String.sub block (first_line_end + 1)
+          (String.length block - first_line_end - 1)
+        |> String.trim
+      in
+      if first_line = "json" || first_line = "jsonc" then rest else block
+
+let fenced_json_candidates text =
+  let fence = "```" in
+  let rec loop start acc =
+    match find_substring_from text ~needle:fence ~start with
+    | None -> List.rev acc
+    | Some open_at ->
+        let content_start = open_at + String.length fence in
+        (match find_substring_from text ~needle:fence ~start:content_start with
+         | None -> List.rev acc
+         | Some close_at ->
+             let raw =
+               String.sub text content_start (close_at - content_start)
+               |> strip_fence_language
+             in
+             let acc = if raw = "" then acc else raw :: acc in
+             loop (close_at + String.length fence) acc)
+  in
+  loop 0 []
+
+let json_close_for_open = function
+  | '{' -> Some '}'
+  | '[' -> Some ']'
+  | _ -> None
+
+let balanced_json_candidates text =
+  let len = String.length text in
+  let rec finish_candidate i in_string escaped stack =
+    if i >= len then None
+    else
+      let ch = text.[i] in
+      if in_string then
+        if escaped then finish_candidate (i + 1) true false stack
+        else
+          match ch with
+          | '\\' -> finish_candidate (i + 1) true true stack
+          | '"' -> finish_candidate (i + 1) false false stack
+          | _ -> finish_candidate (i + 1) true false stack
+      else
+        match ch with
+        | '"' -> finish_candidate (i + 1) true false stack
+        | '{' | '[' ->
+            (match json_close_for_open ch with
+             | None -> finish_candidate (i + 1) false false stack
+             | Some close ->
+                 finish_candidate (i + 1) false false (close :: stack))
+        | '}' | ']' ->
+            (match stack with
+             | close :: rest when close = ch ->
+                 if rest = [] then Some i
+                 else finish_candidate (i + 1) false false rest
+             | _ -> None)
+        | _ -> finish_candidate (i + 1) false false stack
+  in
+  let rec loop i acc =
+    if i >= len then List.rev acc
+    else
+      match json_close_for_open text.[i] with
+      | None -> loop (i + 1) acc
+      | Some expected ->
+          (match finish_candidate (i + 1) false false [ expected ] with
+           | None -> loop (i + 1) acc
+           | Some close_at ->
+               let candidate =
+                 String.sub text i (close_at - i + 1)
+                 |> String.trim
+               in
+               loop (close_at + 1) (candidate :: acc))
+  in
+  loop 0 []
+
+let parse_json_candidate ~surface candidate =
+  Safe_ops.parse_json_safe
+    ~context:("Keeper_hooks_oas." ^ surface ^ ".output.embedded")
+    candidate
 
 let output_json_opt ~surface output_text =
   match
@@ -1102,9 +1254,22 @@ let output_json_opt ~surface output_text =
   with
   | Ok json -> Some json
   | Error _ ->
-      observe_output_parse_failure ~surface
-        ~output_bytes:(String.length output_text);
-      None
+      let candidates =
+        fenced_json_candidates output_text @ balanced_json_candidates output_text
+      in
+      (match
+         List.find_map
+           (fun candidate ->
+              match parse_json_candidate ~surface candidate with
+              | Ok json -> Some json
+              | Error _ -> None)
+           candidates
+       with
+       | Some json -> Some json
+       | None ->
+           observe_output_parse_failure ~surface
+             ~output_bytes:(String.length output_text);
+           None)
 
 let normalized_route_via raw =
   let value = String.trim raw |> String.lowercase_ascii in
@@ -1141,6 +1306,62 @@ let route_via_of_json json =
     nested "tool_metadata" "via";
     nested "tool_metadata" "execution_via";
     nested "tool_metadata" "route_via";
+  ]
+  |> List.find_map Fun.id
+
+let non_empty_string_opt = function
+  | Some value ->
+      let value = String.trim value in
+      if String.equal value "" then None else Some value
+  | None -> None
+
+let string_field_opt key json = Safe_ops.json_string_opt key json |> non_empty_string_opt
+
+let nested_string_field_opt parent key json =
+  match assoc_field parent json with
+  | Some nested_json -> string_field_opt key nested_json
+  | None -> None
+
+let github_pr_url_from_text raw =
+  let normalized =
+    raw
+    |> String.map (function
+         | '\n' | '\r' | '\t' | '"' | '\'' -> ' '
+         | ch -> ch)
+  in
+  normalized
+  |> String.split_on_char ' '
+  |> List.find_map (fun token ->
+       let token = String.trim token in
+       if
+         String.starts_with ~prefix:"https://github.com/" token
+         && String_util.contains_substring token "/pull/"
+       then Some token
+       else None)
+
+let pr_url_of_json json =
+  [
+    string_field_opt "pr_url" json;
+    string_field_opt "pull_request_url" json;
+    string_field_opt "url" json;
+    string_field_opt "html_url" json;
+    string_field_opt "output" json;
+    nested_string_field_opt "result" "pr_url" json;
+    nested_string_field_opt "result" "pull_request_url" json;
+    nested_string_field_opt "result" "url" json;
+    nested_string_field_opt "result" "html_url" json;
+    nested_string_field_opt "result" "output" json;
+    nested_string_field_opt "route_evidence" "pr_url" json;
+  ]
+  |> List.find_map (function
+       | None -> None
+       | Some value -> github_pr_url_from_text value)
+
+let pr_create_ref_of_input input =
+  [
+    string_field_opt "head" input;
+    string_field_opt "branch" input;
+    string_field_opt "head_ref" input;
   ]
   |> List.find_map Fun.id
 
@@ -1243,6 +1464,11 @@ let gh_pr_review_action_of_command command =
       Some ("COMMENT", int_of_string_opt pr_number)
   | _ -> None
 
+let assoc_json_opt key json =
+  match assoc_field key json with
+  | Some (`Assoc _ as value) -> Some value
+  | _ -> None
+
 let output_success ~transport_success = function
   | Some json ->
       (match Safe_ops.json_bool_opt "ok" json with
@@ -1281,6 +1507,10 @@ let pr_review_action_metric_event_of_tool_io
       let success =
         output_success ~transport_success output_json
       in
+      let credential = Option.bind output_json (assoc_json_opt "credential") in
+      let identity_attestation =
+        Option.bind output_json (assoc_json_opt "identity_attestation")
+      in
       Option.map
         (fun action ->
            {
@@ -1296,6 +1526,8 @@ let pr_review_action_metric_event_of_tool_io
              comment_id = None;
              success;
              route_via;
+             credential;
+             identity_attestation;
            })
         (Option.bind action normalize_pr_review_action)
   | "keeper_pr_review_reply" ->
@@ -1306,6 +1538,10 @@ let pr_review_action_metric_event_of_tool_io
       in
       let success =
         output_success ~transport_success output_json
+      in
+      let credential = Option.bind output_json (assoc_json_opt "credential") in
+      let identity_attestation =
+        Option.bind output_json (assoc_json_opt "identity_attestation")
       in
       Some
         {
@@ -1326,6 +1562,8 @@ let pr_review_action_metric_event_of_tool_io
               (json_int_opt "comment_id" input);
           success;
           route_via;
+          credential;
+          identity_attestation;
         }
   | "keeper_shell" ->
       let output_json = output_json_opt ~surface:"pr_review_action" output_text in
@@ -1345,6 +1583,8 @@ let pr_review_action_metric_event_of_tool_io
              comment_id = None;
              success;
              route_via;
+             credential = None;
+             identity_attestation = None;
            })
   | _ -> None
 
@@ -1466,16 +1706,22 @@ let pr_work_action_metric_events_of_tool_io
              {
                work_action;
                work_source = "masc_code_git";
+               work_ref = None;
+               pr_url = None;
                command = None;
                success;
                route_via;
              };
            ])
   | "keeper_pr_create" ->
+      let work_ref = pr_create_ref_of_input input in
+      let pr_url = Option.bind output_json pr_url_of_json in
       [
         {
           work_action = "PR_CREATE";
           work_source = "keeper_pr_create";
+          work_ref;
+          pr_url;
           command = None;
           success;
           route_via;
@@ -1490,6 +1736,8 @@ let pr_work_action_metric_events_of_tool_io
                   {
                     work_action;
                     work_source = tool_name;
+                    work_ref = None;
+                    pr_url = None;
                     command = Some command;
                     success;
                     route_via;
@@ -1535,6 +1783,18 @@ let append_pr_review_action_metric
         | None -> []
         | Some via -> [("via", `String via); ("route_via", `String via)]
       in
+      let identity_fields =
+        []
+        |> (fun fields ->
+             match event.credential with
+             | None -> fields
+             | Some credential -> ("credential", credential) :: fields)
+        |> (fun fields ->
+             match event.identity_attestation with
+             | None -> fields
+             | Some attestation -> ("identity_attestation", attestation) :: fields)
+        |> List.rev
+      in
       let snapshot =
         `Assoc
           ([
@@ -1556,7 +1816,8 @@ let append_pr_review_action_metric
              ("comment_id", Json_util.int_opt_to_json event.comment_id);
              ("duration_ms", `Float duration_ms);
            ]
-           @ route_fields)
+           @ route_fields
+           @ identity_fields)
       in
       Dated_jsonl.append store (Inference_utils.sanitize_json_utf8 snapshot)
 
@@ -1615,6 +1876,9 @@ let append_pr_work_action_metrics
                   ("pr_work_action", `String event.work_action);
                   ("pr_work_action_source", `String event.work_source);
                   ("pr_work_action_success", `Bool event.success);
+                  ( "pr_work_ref",
+                    Json_util.string_opt_to_json event.work_ref );
+                  ("pr_url", Json_util.string_opt_to_json event.pr_url);
                   ( "pr_work_command",
                     Json_util.string_opt_to_json event.command );
                   ("tool_call_count", `Int 0);
@@ -1811,7 +2075,7 @@ let make_hooks
         in
         let latency_ms =
           match response.telemetry with
-          | Some t -> t.request_latency_ms
+          | Some t -> Option.value ~default:0 t.request_latency_ms
           | None -> 0
         in
         let wall_tok_s_opt =
@@ -1877,7 +2141,7 @@ let make_hooks
                 bypass that counter.  Logging here makes the loss visible
                 at the producer site. *)
              Prometheus.inc_counter
-               Prometheus.metric_keeper_lifecycle_callback_failures
+               Keeper_metrics.metric_keeper_lifecycle_callback_failures
                ~labels:[("keeper", meta.name); ("callback", "after_turn_sse_broadcast")]
                ();
              Log.Keeper.warn
@@ -1919,7 +2183,7 @@ let make_hooks
         in
         let model =
           let m = (!meta_ref).runtime.usage.last_model_used in
-          if m = "" then (!meta_ref).cascade_name else m
+          if m = "" then (Keeper_types.cascade_name_of_meta !meta_ref) else m
         in
         let summary =
           tool_execution_summary
@@ -1939,6 +2203,14 @@ let make_hooks
             ~keeper_name:(!meta_ref).name ()
         in
         let result_bytes = if original_bytes > 0 then original_bytes else out_len in
+        let handler_logged =
+          Keeper_tool_call_log.consume_handler_logged
+            ~keeper_name:(!meta_ref).name
+            ~tool_name
+            ~output_text
+            ~success:(outcome = "ok")
+            ()
+        in
         let ( lane
             , tool_choice
             , thinking_enabled
@@ -1956,33 +2228,34 @@ let make_hooks
           Keeper_tool_call_log.get_turn_context
             ~keeper_name:(!meta_ref).name ()
         in
-        (try
-           Keeper_tool_call_log.log_call
-             ~keeper_name:(!meta_ref).name
-             ~tool_name ~input ~output_text
-             ~success:(outcome = "ok") ~duration_ms
-             ~model:(let m = (!meta_ref).runtime.usage.last_model_used in
-                     if m = "" then (!meta_ref).cascade_name else m)
-             ?lane ?tool_choice ?thinking_enabled ?thinking_budget
-             ?prompt_fingerprint
-             ?trace_id ?session_id ?turn ?keeper_turn_id ?task_id ?goal_ids
-             ?sandbox_profile ?network_mode ?approval_mode
-             ~result_bytes ?truncated_to ()
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-             (* P2 silent-failure fix (same pattern as the broadcast site
-                above at line ~1098): tool-call audit log write failures
-                were dropped without trace.  Loss of these rows leaves
-                downstream replay / debugging tools with gaps that look
-                identical to "no tool calls in this turn." *)
-             Prometheus.inc_counter
-               Prometheus.metric_keeper_lifecycle_callback_failures
-               ~labels:[("keeper", (!meta_ref).name); ("callback", "post_tool_log_write")]
-               ();
-             Log.Keeper.warn
-               "keeper:%s tool=%s log_call write failed: %s"
-               (!meta_ref).name tool_name (Printexc.to_string exn));
+        if not handler_logged then
+          (try
+             Keeper_tool_call_log.log_call
+               ~keeper_name:(!meta_ref).name
+               ~tool_name ~input ~output_text
+               ~success:(outcome = "ok") ~duration_ms
+               ~model:(let m = (!meta_ref).runtime.usage.last_model_used in
+                       if m = "" then (Keeper_types.cascade_name_of_meta !meta_ref) else m)
+               ?lane ?tool_choice ?thinking_enabled ?thinking_budget
+               ?prompt_fingerprint
+               ?trace_id ?session_id ?turn ?keeper_turn_id ?task_id ?goal_ids
+               ?sandbox_profile ?network_mode ?approval_mode
+               ~result_bytes ?truncated_to ()
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
+               (* P2 silent-failure fix (same pattern as the broadcast site
+                  above at line ~1098): tool-call audit log write failures
+                  were dropped without trace.  Loss of these rows leaves
+                  downstream replay / debugging tools with gaps that look
+                  identical to "no tool calls in this turn." *)
+               Prometheus.inc_counter
+                 Keeper_metrics.metric_keeper_lifecycle_callback_failures
+                 ~labels:[("keeper", (!meta_ref).name); ("callback", "post_tool_log_write")]
+                 ();
+               Log.Keeper.warn
+                 "keeper:%s tool=%s log_call write failed: %s"
+                 (!meta_ref).name tool_name (Printexc.to_string exn));
         (try
            append_pr_review_action_metric
              ~config
@@ -1998,7 +2271,7 @@ let make_hooks
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
              Prometheus.inc_counter
-               Prometheus.metric_keeper_lifecycle_callback_failures
+               Keeper_metrics.metric_keeper_lifecycle_callback_failures
                ~labels:
                  [
                    ("keeper", (!meta_ref).name);
@@ -2023,7 +2296,7 @@ let make_hooks
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
              Prometheus.inc_counter
-               Prometheus.metric_keeper_lifecycle_callback_failures
+               Keeper_metrics.metric_keeper_lifecycle_callback_failures
                ~labels:
                  [
                    ("keeper", (!meta_ref).name);
@@ -2108,7 +2381,7 @@ let make_hooks
          with Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
               Prometheus.inc_counter
-                Prometheus.metric_keeper_lifecycle_callback_failures
+                Keeper_metrics.metric_keeper_lifecycle_callback_failures
                 ~labels:[("keeper", (!meta_ref).name); ("callback", "on_tool_executed")]
                 ();
               Log.Keeper.error "keeper:%s on_tool_executed callback failed for %s: %s"
@@ -2124,31 +2397,47 @@ let make_hooks
        destructive + governance_approval) is composed with these
        non-gate hooks at the end of [make_hooks]. *)
 
+    on_stop = Some (fun event ->
+      match event with
+      | Agent_sdk.Hooks.OnStop { reason; _ } ->
+        Prometheus.inc_counter Keeper_metrics.metric_keeper_oas_on_stop
+          ~labels:
+            [
+              ("keeper", (!meta_ref).name);
+              ("stop_reason", stop_reason_to_label reason);
+            ]
+          ();
+        Agent_sdk.Hooks.Continue
+      | _ -> Agent_sdk.Hooks.Continue);
+
     on_idle = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.OnIdle { consecutive_idle_turns; tool_names; _ } ->
-        let allowed_tools =
-          Keeper_tool_policy.keeper_allowed_tool_names !meta_ref in
+        keeper_idle_decision ~meta_ref ~consecutive_idle_turns ~tool_names
+      | _ -> Agent_sdk.Hooks.Continue);
+
+    on_idle_escalated = Some (fun event ->
+      match event with
+      | Agent_sdk.Hooks.OnIdleEscalated
+          { severity; consecutive_idle_turns; tool_names; _ } ->
         let decision =
-          on_idle_decision ~consecutive_idle_turns ~tool_names
-            ~allowed_tools in
-        let tools_str = match tool_names with
-          | [] -> "<none>" | names -> String.concat ", " names in
-        (match decision with
-         | Agent_sdk.Hooks.Skip ->
-           Log.Keeper.warn "keeper:%s idle_turns=%d repeated_tools=[%s] — requesting stop"
-             (!meta_ref).name consecutive_idle_turns tools_str
-         | Agent_sdk.Hooks.Nudge _ ->
-           Log.Keeper.info "keeper:%s idle_turns=%d tools=[%s] — nudging LLM via Nudge"
-             (!meta_ref).name consecutive_idle_turns tools_str
-         | _ -> ());
+          keeper_idle_decision ~meta_ref ~consecutive_idle_turns ~tool_names in
+        Prometheus.inc_counter
+          Keeper_metrics.metric_keeper_oas_on_idle_escalated
+          ~labels:
+            [
+              ("keeper", (!meta_ref).name);
+              ("severity", idle_severity_to_label severity);
+              ("decision", idle_decision_to_label decision);
+            ]
+          ();
         decision
       | _ -> Agent_sdk.Hooks.Continue);
 
     on_error = Some (function
       | Agent_sdk.Hooks.OnError { detail; context = err_ctx } ->
         Prometheus.inc_counter
-          Prometheus.metric_keeper_lifecycle_callback_failures
+          Keeper_metrics.metric_keeper_lifecycle_callback_failures
           ~labels:[("keeper", (!meta_ref).name); ("callback", "on_error")]
           ();
         Log.Keeper.error "keeper:%s on_error: %s (context: %s)"
@@ -2159,7 +2448,7 @@ let make_hooks
     on_tool_error = Some (function
       | Agent_sdk.Hooks.OnToolError { tool_name; error } ->
         Prometheus.inc_counter
-          Prometheus.metric_keeper_lifecycle_callback_failures
+          Keeper_metrics.metric_keeper_lifecycle_callback_failures
           ~labels:[("keeper", (!meta_ref).name); ("callback", "on_tool_error")]
           ();
         Log.Keeper.error "keeper:%s tool_error: %s — %s"
@@ -2314,9 +2603,9 @@ let hook_introspection_json
         ~effects:[ "tool_use_failure_metric" ]
         "post_tool_use_failure";
       slot
-        ~active:false
-        ~source:"not_registered"
-        ~reason:"keeper runtime has no stop hook"
+        ~active:true
+        ~source:"keeper_hooks_oas"
+        ~effects:[ "stop_reason_metric" ]
         "on_stop";
       slot
         ~active:true
@@ -2324,9 +2613,9 @@ let hook_introspection_json
         ~features:[ "repeated_tool_nudge"; "stay_silent_skip" ]
         "on_idle";
       slot
-        ~active:false
-        ~source:"not_registered"
-        ~reason:"keeper runtime uses legacy on_idle hook"
+        ~active:true
+        ~source:"keeper_hooks_oas"
+        ~effects:[ "idle_escalation_metric" ]
         "on_idle_escalated";
       slot
         ~active:true

@@ -1,5 +1,12 @@
 exception Semaphore_wait_timeout of float
 
+type slot_pool =
+  | Turn_pool
+  | Autonomous_pool
+  | Reactive_pool
+
+val slot_pool_to_string : slot_pool -> string
+
 type semaphore_wait_phase =
   | Autonomous_queue_head
   | Autonomous_slot
@@ -87,7 +94,7 @@ val force_released_marker_count_for_test : unit -> int
 (** Test-only: inject a marker without touching semaphores, so marker-retention
     behavior can be exercised without creating a double-release path. *)
 val add_force_released_marker_for_test :
-  label:string ->
+  label:slot_pool ->
   keeper_name:string ->
   acquisition_id:int ->
   marked_at:float ->
@@ -137,7 +144,7 @@ val fairness_delay_sec_at : now:float -> keeper_name:string -> float
     [reactive_turn_semaphore]).
 
     Side effects: [Eio.Semaphore.release] on each held semaphore plus
-    [Prometheus.metric_keeper_slot_force_released]. A late-returning
+    [Keeper_metrics.metric_keeper_slot_force_released]. A late-returning
     fiber may double-release; Eio counting semaphores tolerate this
     bounded over-release.
 
@@ -182,12 +189,14 @@ type keeper_turn_slot_control = {
 }
 
 val with_keeper_turn_slot_control :
+  ?cascade_profile:string ->
   keeper_name:string ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
   (semaphore_wait_ms:int -> slot_control:keeper_turn_slot_control -> 'a) ->
   ('a, [> `Semaphore_wait_timeout of semaphore_wait_timeout ]) result
 
 val with_keeper_turn_slot :
+  ?cascade_profile:string ->
   keeper_name:string ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
   (semaphore_wait_ms:int -> 'a) ->
@@ -196,6 +205,7 @@ val with_keeper_turn_slot :
 (** Test-only wrapper around the keeper turn slot acquisition path with
     explicit in-turn release/reacquire controls. *)
 val with_keeper_turn_slot_control_for_test :
+  ?cascade_profile:string ->
   keeper_name:string ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
   (semaphore_wait_ms:int -> slot_control:keeper_turn_slot_control -> 'a) ->
@@ -203,6 +213,7 @@ val with_keeper_turn_slot_control_for_test :
 
 (** Test-only wrapper around the keeper turn slot acquisition path. *)
 val with_keeper_turn_slot_for_test :
+  ?cascade_profile:string ->
   keeper_name:string ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
   (semaphore_wait_ms:int -> 'a) ->

@@ -31,6 +31,65 @@ function displayValue(value: unknown): string {
   return JSON.stringify(value)
 }
 
+type MetricFormat = 'raw' | 'number' | 'percent' | 'duration_ms' | 'boolean' | 'count'
+
+interface PhaseMetricSchema {
+  key: string
+  label: string
+  format: MetricFormat
+}
+
+function formatValue(value: unknown, format: MetricFormat): string {
+  if (value === null || value === undefined || value === '') return 'n/a'
+  switch (format) {
+    case 'raw':
+      return displayValue(value)
+    case 'number':
+    case 'count':
+      if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'n/a'
+      return displayValue(value)
+    case 'percent':
+      if (typeof value === 'number' && Number.isFinite(value))
+        return `${(value * 100).toFixed(1)}%`
+      return displayValue(value)
+    case 'duration_ms':
+      if (typeof value === 'number' && Number.isFinite(value))
+        return value >= 1000 ? `${(value / 1000).toFixed(2)}s` : `${value.toFixed(0)}ms`
+      return displayValue(value)
+    case 'boolean':
+      if (typeof value === 'boolean') return value ? 'yes' : 'no'
+      return displayValue(value)
+  }
+}
+
+const PHASE_SCHEMA: Record<GoalLoopPhaseName, PhaseMetricSchema[]> = {
+  observe: [
+    { key: 'critical_matches', label: 'Critical', format: 'count' },
+    { key: 'warning_matches', label: 'Warnings', format: 'count' },
+    { key: 'matched_lines', label: 'Matched', format: 'count' },
+  ],
+  orient: [
+    { key: 'critical_present', label: 'Critical', format: 'boolean' },
+    { key: 'evidence_present', label: 'Evidence', format: 'boolean' },
+    { key: 'findings_total', label: 'Findings', format: 'count' },
+  ],
+  decide: [
+    { key: 'decisions_total', label: 'Decisions', format: 'count' },
+    { key: 'p0_count', label: 'P0', format: 'count' },
+    { key: 'act_missing_count', label: 'Unlinked', format: 'count' },
+  ],
+  act: [
+    { key: 'act_linked_count', label: 'Linked', format: 'count' },
+    { key: 'act_missing_count', label: 'Unlinked', format: 'count' },
+    { key: 'decisions_total', label: 'Decisions', format: 'count' },
+  ],
+  verify: [
+    { key: 'verify_status', label: 'Status', format: 'raw' },
+    { key: 'violations', label: 'Violations', format: 'count' },
+    { key: 'post_act_verify', label: 'Post-Act', format: 'raw' },
+  ],
+}
+
 function statusChip(status: string) {
   const level = normalizeGoalLoopStatusLevel(status)
   return html`
@@ -38,21 +97,6 @@ function statusChip(status: string) {
       ${status}
     </span>
   `
-}
-
-function phaseMetricKeys(phase: GoalLoopPhaseName): string[] {
-  switch (phase) {
-    case 'observe':
-      return ['critical_matches', 'warning_matches', 'matched_lines']
-    case 'orient':
-      return ['critical_present', 'evidence_present', 'findings_total']
-    case 'decide':
-      return ['decisions_total', 'p0_count', 'act_missing_count']
-    case 'act':
-      return ['act_linked_count', 'act_missing_count', 'decisions_total']
-    case 'verify':
-      return ['verify_status', 'violations', 'post_act_verify']
-  }
 }
 
 function PhaseBlock({
@@ -75,11 +119,11 @@ function PhaseBlock({
         ${statusChip(phaseStatus)}
       </div>
       <dl class="grid grid-cols-1 gap-1 text-xs">
-        ${phaseMetricKeys(phase).map(key => html`
+        ${PHASE_SCHEMA[phase].map(({ key, label, format }) => html`
           <div class="flex min-w-0 justify-between gap-3">
-            <dt class="truncate text-[var(--color-fg-muted)]">${key}</dt>
+            <dt class="truncate text-[var(--color-fg-muted)]">${label}</dt>
             <dd class="min-w-0 truncate font-mono text-[var(--color-fg-secondary)]">
-              ${displayValue(phaseSummaryValue(status, phase, key))}
+              ${formatValue(phaseSummaryValue(status, phase, key), format)}
             </dd>
           </div>
         `)}

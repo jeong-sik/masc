@@ -5,16 +5,20 @@
 (* ── Types ──────────────────────────────────────── *)
 
 type provider_outcome =
-  | Call_ok of Llm_provider.Types.api_response
-  | Call_err of Llm_provider.Http_client.http_error
+  | Call_ok of Llm_provider.Types.api_response [@tla.symbol "call_ok"]
+  | Call_err of Llm_provider.Http_client.http_error [@tla.symbol "call_err"]
   | Accept_rejected of { response : Llm_provider.Types.api_response; reason : string }
-  | Slot_full
+      [@tla.symbol "accept_rejected"]
+  | Slot_full [@tla.symbol "slot_full"]
+[@@deriving tla]
 
 type decision =
-  | Accept of Llm_provider.Types.api_response
+  | Accept of Llm_provider.Types.api_response [@tla.symbol "accept"]
   | Accept_on_exhaustion of { response : Llm_provider.Types.api_response; reason : string }
-  | Try_next of { last_err : Llm_provider.Http_client.http_error option }
-  | Exhausted of { last_err : Llm_provider.Http_client.http_error option }
+      [@tla.symbol "accept_on_exhaustion"]
+  | Try_next of { last_err : Llm_provider.Http_client.http_error option } [@tla.symbol "try_next"]
+  | Exhausted of { last_err : Llm_provider.Http_client.http_error option } [@tla.symbol "exhausted"]
+
 
 (* ── Decision function ──────────────────────────── *)
 
@@ -100,4 +104,35 @@ let provider_outcome_option_to_string = function
   | Some outcome -> "some-" ^ provider_outcome_to_string outcome
   | None -> "none"
 
+(* ── Observable wrapper (preserves pure decide) ── *)
+
+let decide_and_record ~cascade_name ~accept_on_exhaustion ~is_last outcome =
+  let decision = decide ~accept_on_exhaustion ~is_last outcome in
+  let decision_label =
+    match decision with
+    | Accept _ -> "accept"
+    | Accept_on_exhaustion _ -> "accept_on_exhaustion"
+    | Try_next _ -> "try_next"
+    | Exhausted _ -> "exhausted"
+  in
+  Cascade_metrics.on_decision ~cascade_name ~decision_label;
+  (match decision with
+   | Try_next _ ->
+       let reason =
+         match outcome with
+         | Slot_full -> "slot_full"
+         | Accept_rejected _ -> "accept_rejected"
+         | Call_err err ->
+             if Cascade_health_filter.should_cascade_to_next err then
+               "call_err_cascadeable"
+             else
+               "call_err_non_cascadeable"
+         | Call_ok _ -> "unexpected"
+       in
+       Cascade_metrics.on_fallback ~cascade_name ~reason
+   | Exhausted _ -> Cascade_metrics.on_exhausted ~cascade_name
+   | _ -> ());
+  decision
+
 (* ── Inline tests ───────────────────────────────── *)
+

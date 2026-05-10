@@ -62,7 +62,7 @@ class BotConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="",
         case_sensitive=True,
-        env_file=".env",
+        env_file=str(Path(__file__).parent.parent / ".env"),
         extra="ignore",
     )
 

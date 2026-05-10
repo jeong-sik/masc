@@ -126,7 +126,7 @@ let run_gh_auth_status ~gh_config_dir =
   try
     let env = gh_process_env_for_config_dir gh_config_dir in
     Ok
-      (Process_eio.run_argv_with_status ~env
+      (Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git ~raw_source:"gh auth status --hostname github.com" ~summary:"gh auth status check" ~env
          [ "gh"; "auth"; "status"; "--hostname"; "github.com" ])
   with
   | Unix.Unix_error (Unix.ENOENT, _, _) ->
@@ -232,7 +232,14 @@ let execute_room_action (ctx : 'a context) (request : action_request) =
       let description =
         get_string request.payload "description" "Injected by operator control plane"
       in
-      let result = Coord.add_task ctx.config ~title ~priority ~description in
+      (* RFC-0034.v2: per-goal cap guard. operator [task_inject] payload
+         has no [goal_id] today; guard is a no-op for orphan tasks but
+         wired so a future goal-aware payload inherits the cap. *)
+      let result =
+        Coord.add_task
+          ~reject_if:(Coord_task_capacity.rejection_for_add_task ?goal_id:None)
+          ctx.config ~title ~priority ~description
+      in
       room_action_result request (`String result)
   | "github_identity_login_prepare" ->
       let* () = validate_target_type "root" request in

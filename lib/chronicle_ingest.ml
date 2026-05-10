@@ -31,7 +31,7 @@ let run_git ~timeout_sec ~workdir args =
     let raw_source = String.concat " " (List.map Filename.quote argv) in
     Some
       (Masc_exec.Exec_gate.run_argv_with_status
-         ~actor:"system/chronicle_ingest"
+         ~actor:(Masc_exec.Agent_id.of_string "system/chronicle_ingest")
          ~raw_source
          ~summary:"chronicle git log ingestion"
          ~timeout_sec argv)
@@ -229,24 +229,27 @@ and within_days d1 d2 days =
     abs (to_days y1 m1 day1 - to_days y2 m2 day2) <= days
   | _ -> false
 
-(* Build a candidate_epoch from a group of commits. *)
-let make_candidate commits =
-  match commits with
-  | [] -> assert false
-  | first :: rest ->
-    let last = List.fold_left (fun _ ev -> ev) first rest in
-    let all_goals =
-      commits
-      |> List.map extract_goal_ids
-      |> List.concat
-      |> List.sort_uniq String.compare
-    in
-    let all_files =
-      commits
-      |> List.map (fun ev -> ev.files)
-      |> List.concat
-      |> List.sort_uniq String.compare
-    in
+(* Build a candidate_epoch from a non-empty group of commits.
+
+   The non-emptiness invariant is encoded in the signature ([first]
+   plus a separately-passed [rest]) so callers must produce the head
+   from a pattern match rather than rely on a runtime [assert false]
+   below the call site. *)
+let make_candidate first rest =
+  let commits = first :: rest in
+  let last = List.fold_left (fun _ ev -> ev) first rest in
+  let all_goals =
+    commits
+    |> List.map extract_goal_ids
+    |> List.concat
+    |> List.sort_uniq String.compare
+  in
+  let all_files =
+    commits
+    |> List.map (fun ev -> ev.files)
+    |> List.concat
+    |> List.sort_uniq String.compare
+  in
     let label =
       let subj = first.subject in
       if String.length subj > 60 then
@@ -313,8 +316,9 @@ let group_events ?(time_window_days = 7) events =
   let time_groups = group_by_time_window ungrouped ~days:time_window_days in
   let all_groups = grouped @ time_groups in
   List.filter_map (fun g ->
-    if g = [] then None
-    else Some (make_candidate g))
+    match g with
+    | [] -> None
+    | first :: rest -> Some (make_candidate first rest))
     all_groups
   |> List.sort (fun a b -> String.compare a.start_date b.start_date)
 

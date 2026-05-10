@@ -182,7 +182,7 @@ let prune_best_effort base_path ~retention_days =
   | _n -> ()
   | exception e ->
     Prometheus.inc_counter
-      Prometheus.metric_keeper_compact_audit_failures
+      Keeper_metrics.metric_keeper_compact_audit_failures
       ~labels:[("keeper", "global"); ("site", "retention_prune")]
       ();
     Log.Keeper.warn
@@ -355,7 +355,7 @@ let handle_event ~base_path ~retention_days (evt : Agent_sdk.Event_bus.event)
      | Ok () -> ()
      | Error (Io_failure m | Serialize_failure m) ->
        Prometheus.inc_counter
-         Prometheus.metric_keeper_compact_audit_failures
+         Keeper_metrics.metric_keeper_compact_audit_failures
          ~labels:[("keeper", agent_name); ("site", "persist_start")]
          ();
        Log.Keeper.warn "keeper_compact_audit: persist_start failed: %s" m)
@@ -385,7 +385,7 @@ let handle_event ~base_path ~retention_days (evt : Agent_sdk.Event_bus.event)
      | Ok () -> ()
      | Error (Io_failure m | Serialize_failure m) ->
        Prometheus.inc_counter
-         Prometheus.metric_keeper_compact_audit_failures
+         Keeper_metrics.metric_keeper_compact_audit_failures
          ~labels:[("keeper", agent_name); ("site", "persist_complete")]
          ();
        Log.Keeper.warn "keeper_compact_audit: persist_complete failed: %s" m)
@@ -408,23 +408,23 @@ let spawn_subscriber
     resolve_retention_days ~default:retention_days
   in
   let sub =
-    Oas_bus_instrument.subscribe
+    Agent_sdk_metrics_bridge.subscribe
       ~purpose:"compact_audit"
       ~filter:compaction_filter
       bus
   in
   Eio.Switch.on_release sw (fun () ->
-    Oas_bus_instrument.unsubscribe bus sub);
+    Agent_sdk_metrics_bridge.unsubscribe bus sub);
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
-      let batch = Oas_bus_instrument.drain sub in
+      let batch = Agent_sdk_metrics_bridge.drain sub in
       List.iter
         (fun event ->
            try handle_event ~base_path ~retention_days:effective_retention event
            with Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
                Prometheus.inc_counter
-                 Prometheus.metric_keeper_compact_audit_failures
+                 Keeper_metrics.metric_keeper_compact_audit_failures
                  ~labels:[("keeper", "batch"); ("site", "handle_event")]
                  ();
                Log.Keeper.warn "keeper_compact_audit: handle_event failed: %s"

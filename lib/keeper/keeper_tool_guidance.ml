@@ -64,6 +64,13 @@ let hints =
     ; call = "`masc_web_search` { query: \"<current-info query>\", limit: 5 }"
     ; description = "look up current public context before time-sensitive claims"
     }
+  ; { name = "masc_web_fetch"
+    ; call =
+        Printf.sprintf
+          "`masc_web_fetch` { url: \"<page-url>\", timeout: %d }"
+          Tool_misc_web_fetch.default_timeout_sec
+    ; description = "fetch and read a web page before citing it"
+    }
   ; { name = "masc_worktree_create"
     ; call = "`masc_worktree_create` { task_id: \"<task-id>\", repo_name: \"masc-mcp\" }"
     ; description = "create a repo worktree before code edits"
@@ -145,5 +152,7 @@ let render_gh_workflow ~allowed_tool_names =
 let render_unknown_tool_guard () =
   "Do not call tool names that are absent from the active runtime schema list. Heartbeat \
    is server-managed; public lifecycle/status tools such as `masc_join`, `masc_who`, and \
-   `masc_heartbeat` are not keeper action tools unless they are explicitly shown to you."
+   `masc_heartbeat` are not keeper action tools unless they are explicitly shown to you. \
+   Copy active schema names exactly; do not substitute public `masc_*` aliases such as \
+   `masc_board_list` for keeper-scoped tools."
 ;;

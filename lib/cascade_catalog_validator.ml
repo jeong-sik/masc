@@ -193,7 +193,7 @@ let capability_mismatch_issues ~profile ~required_profile model_specs =
                match Cascade_config.parse_model_string_result spec with
                | Ok cfg ->
                    let caps = Provider_tool_support.capabilities_of_config cfg in
-                   if Cascade_capability_profile.provider_satisfies_profile
+                   if Cascade_capability_profile.provider_satisfies_named_profile
                         required_profile caps
                    then None
                    else Some spec
@@ -210,7 +210,7 @@ let capability_mismatch_issues ~profile ~required_profile model_specs =
                 "Cascade preset %s declares required_capability_profile=%S \
                  but %d model(s) do not satisfy it: %s"
                 profile
-                (Cascade_capability_profile.profile_to_string required_profile)
+                required_profile
                 (List.length mismatches)
                 (String.concat ", " mismatches);
           };

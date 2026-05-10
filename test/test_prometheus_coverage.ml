@@ -12,6 +12,8 @@
 
 open Alcotest
 
+module Backend = Backend
+module Backend_mutex_metrics = Masc_mcp.Backend_mutex_metrics
 module Prometheus = Masc_mcp.Prometheus
 
 (* ============================================================
@@ -219,10 +221,51 @@ let text_has_literal text literal =
     true
   with Not_found -> false
 
+let sample_value text prefix =
+  String.split_on_char '\n' text
+  |> List.find_map (fun line ->
+         if String.starts_with ~prefix line then
+           match List.rev (String.split_on_char ' ' line) with
+           | raw :: _ -> float_of_string_opt raw
+           | [] -> None
+         else None)
+
 let count_lines_with_prefix text prefix =
   String.split_on_char '\n' text
   |> List.filter (fun line -> String.starts_with ~prefix line)
   |> List.length
+
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun entry -> rm_rf (Filename.concat path entry));
+      Unix.rmdir path
+    end else
+      Sys.remove path
+
+let with_eio_backend f =
+  Eio_main.run @@ fun env ->
+  let fs = Eio.Stdenv.fs env in
+  let dir =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "backend-mutex-metrics-%d-%.0f" (Unix.getpid ())
+         (Unix.gettimeofday () *. 1000000.))
+  in
+  Unix.mkdir dir 0o755;
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+      let config =
+        {
+          Backend.default_config with
+          base_path = dir;
+          node_id = "prometheus-test";
+          cluster_name = "prometheus-test";
+        }
+      in
+      let backend = Backend.FileSystem.create ~fs config in
+      f backend)
 
 let test_keeper_metrics_registered () =
   let text = Prometheus.to_prometheus_text () in
@@ -244,9 +287,16 @@ let test_keeper_metrics_registered () =
     (has "masc_keeper_heartbeat_failures_total");
   check bool "has keeper total cost gauge" true
     (text_has_literal text
-       ("# TYPE " ^ Prometheus.metric_keeper_total_cost_usd ^ " gauge"));
+       ("# TYPE " ^ Masc_mcp.Keeper_metrics.metric_keeper_total_cost_usd ^ " gauge"));
+  check bool "has keeper idle seconds gauge" true
+    (text_has_literal text
+       ("# TYPE " ^ Masc_mcp.Keeper_metrics.metric_keeper_idle_seconds ^ " gauge"));
   check bool "has keeper tool duration histogram" true
     (has "masc_keeper_tool_call_duration_seconds");
+  check bool "has keeper underused allowed tool count gauge" true
+    (has "masc_keeper_tool_underused_allowed_count");
+  check bool "has keeper underused allowed tool gauge" true
+    (has "masc_keeper_tool_underused_allowed");
   check bool "has operator compact counter" true
     (has "masc_keeper_operator_compact_total");
   check bool "has operator clear counter" true
@@ -265,10 +315,12 @@ let test_new_issue_metrics_registered () =
     in
     check bool (name ^ " registered") true has_help
   in
-  check_metric_name Prometheus.metric_keeper_liveness_recovery_attempts;
-  check_metric_name Prometheus.metric_keeper_liveness_recovery_outcomes;
+  check_metric_name Masc_mcp.Keeper_metrics.metric_keeper_liveness_recovery_attempts;
+  check_metric_name Masc_mcp.Keeper_metrics.metric_keeper_liveness_recovery_outcomes;
   check_metric_name Prometheus.metric_cascade_server_error_skip_total;
-  check_metric_name Prometheus.metric_keeper_passive_loop_detected_total
+  check_metric_name Masc_mcp.Keeper_metrics.metric_keeper_passive_loop_detected_total;
+  check_metric_name Prometheus.metric_write_meta_cas_retry_total;
+  check_metric_name Masc_mcp.Keeper_metrics.metric_keeper_zombie_loop_detected_total
 
 let test_review_blocker_metrics_registered () =
   let text = Prometheus.to_prometheus_text () in
@@ -278,6 +330,12 @@ let test_review_blocker_metrics_registered () =
     check bool (metric ^ " TYPE") true
       (text_has_literal text ("# TYPE " ^ metric ^ " counter"))
   in
+  let check_histogram_registered metric =
+    check bool (metric ^ " HELP") true
+      (text_has_literal text ("# HELP " ^ metric ^ " "));
+    check bool (metric ^ " TYPE") true
+      (text_has_literal text ("# TYPE " ^ metric ^ " summary"))
+  in
   check_registered Prometheus.metric_tool_join_required_guard;
   check_registered Prometheus.metric_timeout_policy_overshoot;
   check_registered Prometheus.metric_auth_credential_token_duplicate;
@@ -285,13 +343,19 @@ let test_review_blocker_metrics_registered () =
   check_registered Prometheus.metric_telemetry_coverage_gap;
   check_registered Prometheus.metric_telemetry_unified_source_read_failures;
   check_registered Prometheus.metric_tool_assignment_telemetry_failures;
-  check_registered Prometheus.metric_keeper_oas_hook_output_parse_failures;
+  check_registered Masc_mcp.Keeper_metrics.metric_keeper_oas_hook_output_parse_failures;
   check_registered Prometheus.metric_inference_queue_rejected;
   check_registered Prometheus.metric_telemetry_observe_failures;
   check_registered Prometheus.metric_coord_telemetry_drop;
   check_registered Prometheus.metric_coord_claim_post_provision_failures;
-  check_registered Prometheus.metric_keeper_lifecycle_callback_failures;
-  check_registered Prometheus.metric_keeper_event_bus_drain
+  check_registered Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures;
+  check_registered Prometheus.metric_memory_pipeline_flushes;
+  check_registered Prometheus.metric_memory_pipeline_flush_records;
+  check_histogram_registered
+    Prometheus.metric_memory_pipeline_flush_duration_seconds;
+  check_registered Masc_mcp.Keeper_metrics.metric_keeper_oas_on_stop;
+  check_registered Masc_mcp.Keeper_metrics.metric_keeper_oas_on_idle_escalated;
+  check_registered Masc_mcp.Keeper_metrics.metric_keeper_event_bus_drain
 
 let test_distributed_lock_metric_registered () =
   let text = Prometheus.to_prometheus_text () in
@@ -389,6 +453,28 @@ let test_histogram_exported_as_summary () =
     (has (Printf.sprintf "%s_count" name));
   check bool "no standalone _count TYPE" false
     (has (Printf.sprintf "# TYPE %s_count" name))
+
+let test_backend_mutex_metrics_emit_after_install () =
+  Backend_mutex_metrics.install ();
+  with_eio_backend (fun backend ->
+      match Backend.FileSystem.set backend "mutex-metric-test" "value" with
+      | Ok () -> ()
+      | Error _ -> fail "backend set failed");
+  let text = Prometheus.to_prometheus_text () in
+  let acquire_count_prefix =
+    Prometheus.metric_backend_mutex_acquire_sec ^ "_count{op=\"set\"} "
+  in
+  let held_count_prefix =
+    Prometheus.metric_backend_mutex_held_sec ^ "_count{op=\"set\"} "
+  in
+  check bool "backend acquire mutex sample emitted" true
+    (match sample_value text acquire_count_prefix with
+     | Some value -> Float.compare value 0.0 > 0
+     | None -> false);
+  check bool "backend held mutex sample emitted" true
+    (match sample_value text held_count_prefix with
+     | Some value -> Float.compare value 0.0 > 0
+     | None -> false)
 
 (* ============================================================
    Convenience Functions Tests
@@ -558,6 +644,8 @@ let () =
         test_goal_attainment_metrics_registered;
       test_case "histogram exported as summary with _sum/_count"
         `Quick test_histogram_exported_as_summary;
+      test_case "backend mutex observers emit histogram samples" `Quick
+        test_backend_mutex_metrics_emit_after_install;
     ];
     "convenience", [
       test_case "record_request" `Quick test_record_request;

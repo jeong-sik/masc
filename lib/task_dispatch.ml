@@ -55,8 +55,14 @@ let backend () =
 let add_task config ~title ~priority ~description =
   match backend () with
   | Jsonl ->
-      (* Use existing Coord.add_task *)
-      Ok (Coord.add_task config ~title ~priority ~description)
+      (* RFC-0034.v2: pass per-goal cap guard. The current dispatch path
+         does not carry [goal_id], so the guard is a no-op (orphan tasks
+         bypass the cap). Wired now so future [goal_id]-aware callers
+         (or a backend rewrite) inherit the same invariant for free. *)
+      Ok
+        (Coord.add_task
+           ~reject_if:(Coord_task_capacity.rejection_for_add_task ?goal_id:None)
+           config ~title ~priority ~description)
 
 (** Get a task by ID *)
 let get_task config ~task_id =
@@ -93,40 +99,62 @@ let validate_transition ~(current : task_status) ~(next : task_status) ~task_id 
                   (task_status_to_string next))))
   | _ -> Ok ()
 
+let backlog_lock_path config =
+  Filename.concat (Coord.tasks_dir config) ".backlog"
+
+let with_locked_backlog
+    config
+    (f : backlog -> ('a, Masc_error.t) result)
+    : ('a, Masc_error.t) result =
+  Coord.with_file_lock config (backlog_lock_path config) (fun () ->
+    match Coord.read_backlog_r config with
+    | Error msg -> Error (System (System_error.IoError msg))
+    | Ok backlog -> f backlog)
+
 (** Update task status (claim, start, complete, cancel) *)
 let update_status config ~task_id ~status =
   match backend () with
   | Jsonl ->
-      let backlog = Coord.read_backlog config in
-      let task_opt = List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks in
-      (match task_opt with
-       | None -> Error (Task (Task_error.NotFound task_id))
-       | Some t ->
-          match validate_transition ~current:t.task_status ~next:status ~task_id with
-          | Error e -> Error e
-          | Ok () ->
-            let updated_tasks = List.map (fun (t : task) ->
-              if t.id = task_id then { t with task_status = status } else t
-            ) backlog.tasks in
-            let new_backlog = {
-              tasks = updated_tasks;
-              last_updated = now_iso ();
-              version = backlog.version + 1;
-            } in
-            Coord.write_backlog config new_backlog;
-            Ok ())
+      with_locked_backlog config (fun backlog ->
+        let task_opt =
+          List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks
+        in
+        match task_opt with
+        | None -> Error (Task (Task_error.NotFound task_id))
+        | Some t -> (
+            match validate_transition ~current:t.task_status ~next:status ~task_id with
+            | Error e -> Error e
+            | Ok () ->
+                let updated_tasks =
+                  List.map
+                    (fun (t : task) ->
+                      if t.id = task_id then { t with task_status = status } else t)
+                    backlog.tasks
+                in
+                let new_backlog =
+                  {
+                    tasks = updated_tasks;
+                    last_updated = now_iso ();
+                    version = backlog.version + 1;
+                  }
+                in
+                Coord.write_backlog config new_backlog;
+                Ok ()))
 
 (** Delete a task *)
 let delete_task config ~task_id =
   match backend () with
   | Jsonl ->
-      let backlog = Coord.read_backlog config in
-      let new_tasks = List.filter (fun (t : task) -> t.id <> task_id) backlog.tasks in
-      let new_backlog = {
-        tasks = new_tasks;
-        last_updated = now_iso ();
-        version = backlog.version + 1;
-      } in
-      Coord.write_backlog config new_backlog;
-      Ok ()
-
+      with_locked_backlog config (fun backlog ->
+        let new_tasks =
+          List.filter (fun (t : task) -> t.id <> task_id) backlog.tasks
+        in
+        let new_backlog =
+          {
+            tasks = new_tasks;
+            last_updated = now_iso ();
+            version = backlog.version + 1;
+          }
+        in
+        Coord.write_backlog config new_backlog;
+        Ok ())

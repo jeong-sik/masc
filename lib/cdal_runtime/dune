@@ -1,0 +1,73 @@
+; RFC-OAS-011 MM-1 — Skeleton dune sublibrary for OAS CDAL runtime migration.
+;
+; This sublibrary will host the agent-runtime side of CDAL (Cdal_proof,
+; Mode_enforcer, Risk_contract, Execution_mode, Proof_capture, Audit, ...)
+; once MM-2 leaf-first migration begins. It is intentionally separated from
+; masc-mcp's existing CDAL Phase 1A evaluators (lib/cdal_*.ml + lib/cdal/)
+; because the two layers have different responsibilities:
+;
+;   masc_mcp (本体, lib/cdal_*.ml + lib/cdal/) — CDAL Phase 1A evaluator:
+;     consumer-side judge, verdict_gate, labeling, adversarial_eval.
+;
+;   masc_mcp.cdal_runtime (this) — CDAL runtime/producer:
+;     proof capture middleware, mode enforcement, risk contract typing.
+;
+; Dependencies are intentionally minimal: only OAS's *core* (agent_sdk.base
+; for Tool/Hooks/Types) plus Yojson for serialization. NO dependency on the
+; masc_mcp main library — the producer side must remain reusable independently.
+;
+; @rfc RFC-OAS-011 (CDAL Migration to masc-mcp)
+; @phase MM-2-leaves — B1 batch (execution_mode, effect_evidence, guardrail_llm)
+
+; The parent [lib/dune] uses [(include_subdirs unqualified)] which would
+; otherwise absorb every .ml under lib/ into the main [masc_mcp] library
+; and forbid declaring our own [(library)] stanza.  Marking this directory
+; with [(include_subdirs no)] opts out of the parent's traversal so this
+; sub-library compiles as a separate unit, mirroring sibling sub-libs
+; (lib/activity_graph, lib/embedded_config, lib/mcp_session, ...).
+(include_subdirs no)
+
+(library
+ (name masc_mcp_cdal_runtime)
+ (public_name masc_mcp.cdal_runtime)
+ (libraries
+  agent_sdk.base
+  ; agent_sdk (full) is needed for Guardrails_async, referenced from
+  ; guardrail_llm.{ml,mli}.  The dune-package places guardrails_async
+  ; in the wrapped [agent_sdk] library, not under agent_sdk.base.
+  agent_sdk
+  ; unix is needed for [Unix.gettimeofday] in conformance.ml (added by
+  ; PR #14255 RFC-OAS-011 MM-2-mid B3).  Listed explicitly so dune
+  ; resolves the [Unix] module without requiring the consumer to open
+  ; it.
+  unix
+  ; eio + eio.unix are needed by guardrails_async.mli, guardrail_tripwire.ml,
+  ; autonomy_exec.{ml,mli}, contract_runner.mli (added by PR #14264
+  ; RFC-OAS-011 MM-2-top B5).  These modules have async fiber-based
+  ; signatures (Eio.*) and call Eio_unix.* helpers.
+  eio
+  eio.unix
+  ; eio_main needed by autonomy_exec.ml (Eio_main.run for async runtime entry).
+  eio_main
+  ; agent_sdk.llm_provider is needed by contract_runner.ml (Llm_provider.*).
+  agent_sdk.llm_provider
+  yojson
+  ppx_deriving_yojson.runtime)
+ ; Mirror agent_sdk's flag so migrated modules' `open Types` /
+ ; `open Result_syntax` resolve against Agent_sdk_base, matching their
+ ; original OAS compilation context.  Also open the wrapped [Agent_sdk]
+ ; namespace so unqualified references such as [Guardrails_async] in
+ ; [guardrail_llm.{ml,mli}] resolve to [Agent_sdk.Guardrails_async].
+ ; XXX -open Agent_sdk__ accesses agent_sdk's internal wrapper module
+ ; (no .mli, so all submodule aliases are visible — including
+ ; [Sessions_types], which is referenced by sessions_proof.mli but
+ ; deliberately not re-exported in agent_sdk.mli).  This is an
+ ; internal-API workaround for PR #14264 RFC-OAS-011 MM-2-top B5;
+ ; it should be replaced by either (a) re-exporting [Sessions_types]
+ ; in [agent_sdk.mli] upstream, or (b) qualifying the cdal_runtime
+ ; references to use [Agent_sdk.Sessions]/[Agent_sdk.Sessions_store].
+ ; Using [Agent_sdk__] is fragile across dune wrapper-name changes.
+ (flags
+  (:standard -open Agent_sdk_base -open Agent_sdk -open Agent_sdk__))
+ (preprocess
+  (pps ppx_deriving_yojson ppx_deriving.show ppx_inline_test ppx_let)))

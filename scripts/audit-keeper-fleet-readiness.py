@@ -34,6 +34,10 @@ BOARD_TOOLS = {
     "keeper_board_list",
     "keeper_board_search",
 }
+WEB_SEARCH_TOOLS = {
+    "masc_web_search",
+    "WebSearch",
+}
 PR_SURFACE_TOOLS = {
     "keeper_bash",
     "keeper_shell",
@@ -76,12 +80,17 @@ DESIGN_DOMAIN_MARKERS = {
 PR_URL_RE = re.compile(
     r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]+"
 )
+PR_URL_NUMBER_RE = re.compile(
+    r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/([0-9]+)"
+)
+PR_NUMBER_TOKEN_RE = re.compile(r"\bPR#([0-9]+)\b", re.IGNORECASE)
 PR_CREATED_NUMBER_RE = re.compile(
     r"\b(?:created|opened|published)\s+(?:a\s+)?(?:github\s+)?"
     r"(?:draft\s+)?PR\s*#([0-9]+)\b",
     re.IGNORECASE,
 )
 GH_PR_CREATE_RE = re.compile(r"\bgh\s+pr\s+create\b", re.IGNORECASE)
+GH_HOSTS_USER_RE = re.compile(r"^\s*user:\s*['\"]?([^'\"\s#]+)")
 
 
 @dataclass
@@ -93,6 +102,7 @@ class KeeperAudit:
     network_mode: str | None
     tool_preset: str | None
     github_identity: str | None
+    github_account_login: str | None
     git_identity_mode: str | None
     credential_dir: str | None
     credential_dir_exists: bool
@@ -100,6 +110,7 @@ class KeeperAudit:
     last_turn_age_hours: float | None
     recent_action: bool
     board_action: bool
+    web_search_action: bool
     product_action: bool
     design_action: bool
     pr_surface_action: bool
@@ -116,6 +127,7 @@ class KeeperAudit:
     pr_url_evidence: bool
     evidence_tools: list[str]
     board_post_evidence: list[str]
+    web_search_evidence: list[str]
     product_evidence: list[str]
     design_evidence: list[str]
     pr_lifecycle_evidence: list[str]
@@ -138,6 +150,9 @@ class PrCreationEvidence:
     @property
     def url_present(self) -> bool:
         return any(ref.startswith("https://github.com/") for ref in self.refs)
+
+
+EvidenceWindow = tuple[float, float, str]
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -170,6 +185,19 @@ def load_toml(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError(f"{path}: expected TOML object")
     return data
+
+
+def read_github_account_login(gh_config_dir: Path | None) -> str | None:
+    if gh_config_dir is None:
+        return None
+    hosts_path = gh_config_dir / "hosts.yml"
+    if not hosts_path.is_file():
+        return None
+    for line in hosts_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        match = GH_HOSTS_USER_RE.match(line)
+        if match:
+            return match.group(1).strip()
+    return None
 
 
 def merge_dicts(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
@@ -338,6 +366,16 @@ def pr_ref_texts_from_structured_output(row: dict[str, Any]) -> list[str]:
             texts.append(f"PR#{value}")
         elif isinstance(value, str) and value.strip().isdigit():
             texts.append(f"PR#{value.strip()}")
+    route_evidence = dict_field(row, "route_evidence")
+    if route_evidence is not None:
+        for key in ("pr_url", "pull_request_url", "url", "html_url"):
+            texts.append(text_field(route_evidence, key))
+        for key in ("pr_number", "number"):
+            value = route_evidence.get(key)
+            if isinstance(value, int) and value > 0:
+                texts.append(f"PR#{value}")
+            elif isinstance(value, str) and value.strip().isdigit():
+                texts.append(f"PR#{value.strip()}")
     return [text for text in texts if text]
 
 
@@ -363,7 +401,148 @@ def row_mentions_evidence_run_id(
         haystack = json.dumps(row, ensure_ascii=False, sort_keys=True)
     except (TypeError, ValueError):
         haystack = str(row)
-    return evidence_run_id.lower() in haystack.lower()
+    haystack = haystack.lower()
+    return any(alias in haystack for alias in evidence_run_id_aliases(evidence_run_id))
+
+
+def evidence_run_id_aliases(evidence_run_id: str) -> set[str]:
+    raw = evidence_run_id.strip().lower()
+    aliases = {raw}
+    parts = [part for part in re.split(r"[^a-z0-9]+", raw) if part]
+    date_index = next(
+        (
+            index
+            for index, part in enumerate(parts)
+            if re.fullmatch(r"20[0-9]{6}", part)
+        ),
+        None,
+    )
+    if date_index is not None and date_index > 0 and date_index + 1 < len(parts):
+        suffix = "-".join(parts[date_index + 1 :])
+        prefix = parts[:date_index]
+        aliases.add("-".join(prefix + [suffix]))
+        for index in range(len(prefix) - 1, -1, -1):
+            if any(char.isdigit() for char in prefix[index]):
+                aliases.add("-".join([prefix[index], suffix]))
+                aliases.add("-".join(prefix[index:] + [suffix]))
+                break
+    return {alias for alias in aliases if len(alias) >= 8}
+
+
+def pr_numbers_from_text(text: str) -> set[int]:
+    numbers: set[int] = set()
+    for match in PR_URL_NUMBER_RE.findall(text):
+        numbers.add(int(match))
+    for match in PR_NUMBER_TOKEN_RE.findall(text):
+        numbers.add(int(match))
+    return numbers
+
+
+def pr_numbers_from_row(row: dict[str, Any]) -> set[int]:
+    numbers: set[int] = set()
+
+    def add_number(value: Any) -> None:
+        if isinstance(value, bool):
+            return
+        if isinstance(value, int) and value > 0:
+            numbers.add(value)
+        elif isinstance(value, str) and value.strip().isdigit():
+            numbers.add(int(value.strip()))
+
+    def walk(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                if key in {"pr_number", "pull_request_number"}:
+                    add_number(nested)
+                elif key in {"pr_url", "pull_request_url", "url", "html_url"}:
+                    if isinstance(nested, str):
+                        numbers.update(pr_numbers_from_text(nested))
+                elif key in {"output", "body"} and isinstance(nested, str):
+                    numbers.update(pr_numbers_from_text(nested))
+                else:
+                    walk(nested)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+        elif isinstance(value, str):
+            numbers.update(pr_numbers_from_text(value))
+
+    walk(row)
+    return numbers
+
+
+def row_matches_evidence_run(
+    row: dict[str, Any],
+    evidence_run_id: str | None,
+    evidence_run_pr_numbers: set[int] | None,
+) -> bool:
+    if row_mentions_evidence_run_id(row, evidence_run_id):
+        return True
+    if not evidence_run_id or not evidence_run_pr_numbers:
+        return False
+    return bool(pr_numbers_from_row(row) & evidence_run_pr_numbers)
+
+
+def row_timestamp(row: dict[str, Any]) -> float | None:
+    return numeric_field(row, "ts_unix") or numeric_field(row, "ts")
+
+
+def row_within_evidence_windows(
+    row: dict[str, Any], evidence_windows: list[EvidenceWindow] | None
+) -> bool:
+    if not evidence_windows:
+        return False
+    ts = row_timestamp(row)
+    if ts is None:
+        return False
+    return any(start <= ts <= end for start, end, _phase in evidence_windows)
+
+
+def row_matches_evidence_scope(
+    row: dict[str, Any],
+    evidence_run_id: str | None,
+    evidence_run_pr_numbers: set[int] | None,
+    evidence_windows: list[EvidenceWindow] | None,
+) -> bool:
+    return row_matches_evidence_run(
+        row, evidence_run_id, evidence_run_pr_numbers
+    ) or row_within_evidence_windows(row, evidence_windows)
+
+
+def load_harness_evidence_windows(
+    harness_run_dir: str | None,
+) -> dict[str, list[EvidenceWindow]]:
+    if not harness_run_dir:
+        return {}
+    run_dir = Path(harness_run_dir).expanduser()
+    results_path = run_dir / "results.jsonl"
+    if not results_path.is_file():
+        return {}
+
+    windows: dict[str, list[EvidenceWindow]] = {}
+    for row in iter_jsonl(results_path):
+        keeper = string_field(row, "keeper")
+        phase = string_field(row, "phase") or "unknown"
+        text_file_raw = row.get("text_file")
+        if not keeper or not isinstance(text_file_raw, str) or not text_file_raw:
+            continue
+        text_path = Path(text_file_raw).expanduser()
+        if not text_path.is_absolute():
+            text_path = run_dir / text_path
+        if not text_path.is_file():
+            continue
+        try:
+            result = load_json(text_path)
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        submitted_at = numeric_field(result, "submitted_at")
+        completed_at = numeric_field(result, "completed_at")
+        if submitted_at is None or completed_at is None:
+            continue
+        start = min(submitted_at, completed_at)
+        end = max(submitted_at, completed_at)
+        windows.setdefault(keeper, []).append((max(0.0, start - 5.0), end + 5.0, phase))
+    return windows
 
 
 def add_pr_refs_from_structured_output(
@@ -443,6 +622,99 @@ def tool_succeeded_in_row(row: dict[str, Any], tool_name: str) -> bool:
             if call.get("tool_name") == tool_name and call.get("outcome") == "ok":
                 return True
     return False
+
+
+def explicit_success(row: dict[str, Any]) -> bool:
+    for key in ("ok", "success"):
+        value = row.get(key)
+        if isinstance(value, bool):
+            return value
+    outcome = row.get("outcome")
+    if isinstance(outcome, str):
+        return outcome.lower() in {"ok", "success", "succeeded"}
+    output = output_json(row)
+    for key in ("ok", "success"):
+        value = output.get(key)
+        if isinstance(value, bool):
+            return value
+    status = output.get("status")
+    return isinstance(status, str) and status.lower() in {"ok", "success", "succeeded"}
+
+
+SECRETISH_QUERY_RE = re.compile(
+    r"(?i)\b(api[_-]?key|authorization|bearer|password|secret|token)\b"
+)
+
+
+def web_search_query_preview(row: dict[str, Any]) -> str | None:
+    candidates: list[Any] = [row.get("query")]
+    for key in ("args", "input", "params", "request"):
+        value = row.get(key)
+        if isinstance(value, dict):
+            candidates.append(value.get("query"))
+            candidates.append(value.get("q"))
+    for candidate in candidates:
+        if not isinstance(candidate, str):
+            continue
+        query = " ".join(candidate.split())
+        if not query:
+            continue
+        if SECRETISH_QUERY_RE.search(query):
+            return "[redacted]"
+        return query if len(query) <= 96 else f"{query[:93]}..."
+    return None
+
+
+def source_slug(source: str) -> str:
+    return re.sub(r"[^a-z0-9_.=-]+", "_", source.lower()).strip("_") or "unknown"
+
+
+def web_search_evidence_item(tool: str, row: dict[str, Any], source: str) -> str:
+    parts = [f"web_search:{tool}"]
+    query = web_search_query_preview(row)
+    if query:
+        parts.append(f"query={query}")
+    ts = numeric_field(row, "ts_unix") or numeric_field(row, "ts")
+    if ts is not None:
+        parts.append(f"ts={int(ts)}")
+    parts.append(f"source={source_slug(Path(source).name)}")
+    return ":".join(parts)
+
+
+def web_search_evidence_from_decision(row: dict[str, Any], source: str) -> set[str]:
+    if not row_succeeded(row):
+        return set()
+
+    evidence: set[str] = set()
+    tool = row.get("tool")
+    if isinstance(tool, str) and tool in WEB_SEARCH_TOOLS and explicit_success(row):
+        evidence.add(web_search_evidence_item(tool, row, source))
+
+    tools = set(tools_from_decision(row))
+    for tool_name in sorted(tools & WEB_SEARCH_TOOLS):
+        if explicit_success(row):
+            evidence.add(web_search_evidence_item(tool_name, row, source))
+
+    calls = row.get("tool_calls")
+    if isinstance(calls, list):
+        for call in calls:
+            if not isinstance(call, dict):
+                continue
+            name = call.get("tool_name") or call.get("tool")
+            if not isinstance(name, str) or name not in WEB_SEARCH_TOOLS:
+                continue
+            if explicit_success(call) or row_success(row):
+                evidence.add(web_search_evidence_item(name, call, source))
+    return evidence
+
+
+def web_search_evidence_from_tool_call(row: dict[str, Any], source: str) -> set[str]:
+    tool = row.get("tool")
+    if not isinstance(tool, str) or tool not in WEB_SEARCH_TOOLS:
+        return set()
+    if not explicit_success(row) or not row_succeeded(row):
+        return set()
+    return {web_search_evidence_item(tool, row, source)}
 
 
 MARKER_LIST_FIELDS = (
@@ -825,6 +1097,70 @@ def pr_action_metric_paths(
     return [path for _, _, path in sorted(candidates, reverse=True)]
 
 
+def keeper_run_correlation_paths(
+    base_path: Path, name: str, *, min_day_key: int | None = None
+) -> list[Path]:
+    root = base_path / ".masc" / "keepers" / name
+    paths = decision_log_paths(base_path, name)
+    for subdir in ("metrics", "pr-action-metrics", "execution-receipts"):
+        base = root / subdir
+        if not base.is_dir():
+            continue
+        for path in sorted(path for path in base.rglob("*.jsonl") if path.is_file()):
+            day_key = pr_action_metric_day_key(path)
+            if (
+                min_day_key is not None
+                and day_key is not None
+                and day_key < min_day_key
+            ):
+                continue
+            paths.append(path)
+    return paths
+
+
+def trace_session_ids_from_row(row: dict[str, Any]) -> set[str]:
+    ids: set[str] = set()
+
+    def add(value: Any) -> None:
+        if isinstance(value, str) and value.strip():
+            ids.add(value.strip())
+
+    for container in (
+        row,
+        dict_field(row, "runtime_contract"),
+        dict_field(row, "route_evidence"),
+        dict_field(row, "action_radius"),
+    ):
+        if container is None:
+            continue
+        add(container.get("trace_id"))
+        add(container.get("session_id"))
+    return ids
+
+
+def collect_run_correlation_ids(
+    base_path: Path,
+    name: str,
+    *,
+    evidence_run_id: str | None,
+    min_metric_ts: float | None,
+    min_metric_day_key: int | None,
+) -> set[str]:
+    if not evidence_run_id:
+        return set()
+    ids: set[str] = set()
+    for path in keeper_run_correlation_paths(
+        base_path, name, min_day_key=min_metric_day_key
+    ):
+        for row in iter_jsonl(path):
+            ts = numeric_field(row, "ts_unix") or numeric_field(row, "ts")
+            if min_metric_ts is not None and ts is not None and ts < min_metric_ts:
+                continue
+            if row_mentions_evidence_run_id(row, evidence_run_id):
+                ids.update(trace_session_ids_from_row(row))
+    return ids
+
+
 def pr_creation_scan_paths(base_path: Path, name: str) -> list[Path]:
     root = base_path / ".masc"
     paths: list[Path] = decision_log_paths(base_path, name)
@@ -997,12 +1333,45 @@ def global_tool_call_paths(base_path: Path) -> list[Path]:
     return [path for _, _, path in sorted(candidates, reverse=True)]
 
 
+def collect_evidence_run_pr_numbers(
+    base_path: Path,
+    evidence_run_id: str | None,
+) -> set[int]:
+    if not evidence_run_id:
+        return set()
+    numbers: set[int] = set()
+
+    for decisions in (base_path / ".masc" / "keepers").glob("*.decisions.jsonl*"):
+        if not decisions.is_file():
+            continue
+        for row in iter_jsonl(decisions):
+            if row_mentions_evidence_run_id(row, evidence_run_id):
+                numbers.update(pr_numbers_from_row(row))
+
+    metric_root = base_path / ".masc" / "keepers"
+    for metrics in metric_root.glob("*/pr-action-metrics/*/*.jsonl"):
+        if not metrics.is_file():
+            continue
+        for row in iter_jsonl(metrics):
+            if row_mentions_evidence_run_id(row, evidence_run_id):
+                numbers.update(pr_numbers_from_row(row))
+
+    for calls in global_tool_call_paths(base_path):
+        for row in iter_jsonl(calls):
+            if row_mentions_evidence_run_id(row, evidence_run_id):
+                numbers.update(pr_numbers_from_row(row))
+
+    return numbers
+
+
 def scan_keeper_evidence(
     base_path: Path,
     name: str,
     *,
     max_silence_hours: float | None = None,
     evidence_run_id: str | None = None,
+    evidence_run_pr_numbers: set[int] | None = None,
+    evidence_windows: list[EvidenceWindow] | None = None,
     now: float | None = None,
 ) -> tuple[float | None, set[str], set[str], set[str]]:
     latest_ts: float | None = None
@@ -1016,15 +1385,24 @@ def scan_keeper_evidence(
             max_silence_hours * 3600.0
         )
         min_metric_day_key = day_key_from_unix(min_metric_ts)
+    run_correlation_ids = collect_run_correlation_ids(
+        base_path,
+        name,
+        evidence_run_id=evidence_run_id,
+        min_metric_ts=min_metric_ts,
+        min_metric_day_key=min_metric_day_key,
+    )
     for decisions in decision_log_paths(base_path, name):
         for row in iter_jsonl(decisions):
             ts = numeric_field(row, "ts_unix")
             if ts is not None:
                 latest_ts = ts if latest_ts is None else max(latest_ts, ts)
             tools.update(tools_from_decision(row))
-            if row_mentions_evidence_run_id(row, evidence_run_id):
-                row_evidence, row_docker_evidence = (
-                    pr_lifecycle_evidence_from_decision(row)
+            if row_matches_evidence_scope(
+                row, evidence_run_id, evidence_run_pr_numbers, evidence_windows
+            ):
+                row_evidence, row_docker_evidence = pr_lifecycle_evidence_from_decision(
+                    row
                 )
                 pr_lifecycle_evidence.update(row_evidence)
                 docker_pr_lifecycle_evidence.update(row_docker_evidence)
@@ -1038,7 +1416,9 @@ def scan_keeper_evidence(
             if ts is not None:
                 latest_ts = ts if latest_ts is None else max(latest_ts, ts)
             tools.update(tools_from_action_metric(row))
-            if row_mentions_evidence_run_id(row, evidence_run_id):
+            if row_matches_evidence_scope(
+                row, evidence_run_id, evidence_run_pr_numbers, evidence_windows
+            ):
                 row_evidence, row_docker_evidence = (
                     pr_lifecycle_evidence_from_action_metric(row)
                 )
@@ -1064,7 +1444,13 @@ def scan_keeper_evidence(
                 tool = row.get("tool")
                 if isinstance(tool, str):
                     tools.add(tool)
-                if row_mentions_evidence_run_id(row, evidence_run_id):
+                scope_matches = row_matches_evidence_scope(
+                    row, evidence_run_id, evidence_run_pr_numbers, evidence_windows
+                )
+                trace_matches = run_correlation_ids.intersection(
+                    trace_session_ids_from_row(row)
+                )
+                if scope_matches or trace_matches:
                     row_evidence, row_docker_evidence = (
                         pr_lifecycle_evidence_from_tool_call(row)
                     )
@@ -1077,12 +1463,59 @@ def scan_keeper_evidence(
     return latest_ts, tools, pr_lifecycle_evidence, docker_pr_lifecycle_evidence
 
 
+def scan_keeper_web_search_evidence(
+    base_path: Path,
+    name: str,
+    *,
+    max_silence_hours: float | None = None,
+    evidence_run_id: str | None = None,
+    now: float | None = None,
+) -> tuple[float | None, set[str]]:
+    # ``evidence_run_id`` scopes PR lifecycle proof only. Web search proof is a
+    # separate behavioral signal and should remain visible when a lifecycle
+    # reprobe asks for fresh PR evidence.
+    latest_ts: float | None = None
+    evidence: set[str] = set()
+    min_ts: float | None = None
+    if max_silence_hours is not None:
+        min_ts = (time.time() if now is None else now) - (max_silence_hours * 3600.0)
+
+    def fresh_enough(row: dict[str, Any]) -> bool:
+        ts = numeric_field(row, "ts_unix") or numeric_field(row, "ts")
+        return ts is None or min_ts is None or ts >= min_ts
+
+    def observe_ts(row: dict[str, Any]) -> None:
+        nonlocal latest_ts
+        ts = numeric_field(row, "ts_unix") or numeric_field(row, "ts")
+        if ts is not None:
+            latest_ts = ts if latest_ts is None else max(latest_ts, ts)
+
+    for decisions in decision_log_paths(base_path, name):
+        for row in iter_jsonl(decisions):
+            if not fresh_enough(row):
+                continue
+            observe_ts(row)
+            evidence.update(web_search_evidence_from_decision(row, str(decisions)))
+
+    for calls in global_tool_call_paths(base_path):
+        for row in iter_jsonl(calls):
+            if row.get("keeper") != name:
+                continue
+            if not fresh_enough(row):
+                continue
+            observe_ts(row)
+            evidence.update(web_search_evidence_from_tool_call(row, str(calls)))
+
+    return latest_ts, evidence
+
+
 def audit_keeper(
     *,
     base_path: Path,
     config_path: Path,
     max_silence_hours: float,
     require_board_evidence: bool,
+    require_web_search_evidence: bool,
     require_product_evidence: bool,
     require_design_evidence: bool,
     require_pr_surface_evidence: bool,
@@ -1096,6 +1529,8 @@ def audit_keeper(
     require_docker_git_push_evidence: bool,
     require_docker_pr_approve_evidence: bool,
     evidence_run_id: str | None,
+    evidence_run_pr_numbers: set[int] | None,
+    evidence_windows: list[EvidenceWindow] | None = None,
     forbidden_github_identities: set[str] | None = None,
 ) -> KeeperAudit:
     name = config_path.stem
@@ -1138,6 +1573,7 @@ def audit_keeper(
 
     credential_dir: Path | None = None
     credential_dir_exists = False
+    github_account_login: str | None = None
     if github_identity:
         credential_dir = (
             base_path / ".masc" / "github-identities" / github_identity / "gh"
@@ -1145,6 +1581,14 @@ def audit_keeper(
         credential_dir_exists = credential_dir.is_dir()
         if not credential_dir_exists:
             failures.append("github_credential_dir_missing")
+        else:
+            github_account_login = read_github_account_login(credential_dir)
+            if (
+                forbidden_github_identities
+                and github_account_login in forbidden_github_identities
+                and github_account_login != github_identity
+            ):
+                failures.append(f"github_account_forbidden_{github_account_login}")
 
     (
         evidence_ts,
@@ -1156,8 +1600,16 @@ def audit_keeper(
         name,
         max_silence_hours=max_silence_hours,
         evidence_run_id=evidence_run_id,
+        evidence_run_pr_numbers=evidence_run_pr_numbers,
+        evidence_windows=evidence_windows,
     )
     pr_creation_evidence = scan_pr_creation_evidence(base_path, name)
+    web_search_ts, web_search_evidence = scan_keeper_web_search_evidence(
+        base_path,
+        name,
+        max_silence_hours=max_silence_hours,
+        evidence_run_id=evidence_run_id,
+    )
     (
         board_post_ts,
         board_post_evidence,
@@ -1169,7 +1621,13 @@ def audit_keeper(
     last_turn_ts = max(
         (
             ts
-            for ts in (evidence_ts, board_post_ts, runtime_turn_ts, updated_ts)
+            for ts in (
+                evidence_ts,
+                board_post_ts,
+                web_search_ts,
+                runtime_turn_ts,
+                updated_ts,
+            )
             if ts is not None
         ),
         default=None,
@@ -1185,6 +1643,7 @@ def audit_keeper(
             failures.append("silence_window_exceeded")
 
     board_action = bool(tools & BOARD_TOOLS) or bool(board_post_evidence)
+    web_search_action = bool(web_search_evidence)
     product_action = bool(product_evidence)
     design_action = bool(design_evidence)
     pr_surface_action = bool(tools & PR_SURFACE_TOOLS)
@@ -1217,6 +1676,8 @@ def audit_keeper(
     pr_url_evidence = pr_creation_evidence.url_present
     if require_board_evidence and not board_action:
         failures.append("board_action_evidence_missing")
+    if require_web_search_evidence and not web_search_action:
+        failures.append("web_search_evidence_missing")
     if require_product_evidence and not product_action:
         failures.append("product_action_evidence_missing")
     if require_design_evidence and not design_action:
@@ -1258,6 +1719,7 @@ def audit_keeper(
         network_mode=network_mode,
         tool_preset=tool_preset,
         github_identity=github_identity,
+        github_account_login=github_account_login,
         git_identity_mode=git_identity_mode,
         credential_dir=str(credential_dir) if credential_dir else None,
         credential_dir_exists=credential_dir_exists,
@@ -1265,6 +1727,7 @@ def audit_keeper(
         last_turn_age_hours=last_turn_age_hours,
         recent_action=recent_action,
         board_action=board_action,
+        web_search_action=web_search_action,
         product_action=product_action,
         design_action=design_action,
         pr_surface_action=pr_surface_action,
@@ -1281,6 +1744,7 @@ def audit_keeper(
         pr_url_evidence=pr_url_evidence,
         evidence_tools=sorted(tools),
         board_post_evidence=sorted(board_post_evidence),
+        web_search_evidence=sorted(web_search_evidence),
         product_evidence=sorted(product_evidence),
         design_evidence=sorted(design_evidence),
         pr_lifecycle_evidence=sorted(pr_lifecycle_evidence),
@@ -1298,8 +1762,14 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     if not config_dir.is_dir():
         raise SystemExit(f"keeper config dir not found: {config_dir}")
 
+    evidence_windows_by_keeper = load_harness_evidence_windows(
+        getattr(args, "harness_run_dir", None)
+    )
     config_paths = sorted(
         path for path in config_dir.glob("*.toml") if path.name != "base.toml"
+    )
+    evidence_run_pr_numbers = collect_evidence_run_pr_numbers(
+        base_path, args.evidence_run_id
     )
     keepers = [
         audit_keeper(
@@ -1307,6 +1777,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             config_path=path,
             max_silence_hours=args.max_silence_hours,
             require_board_evidence=args.require_board_evidence,
+            require_web_search_evidence=args.require_web_search_evidence,
             require_product_evidence=args.require_product_evidence,
             require_design_evidence=args.require_design_evidence,
             require_pr_surface_evidence=args.require_pr_surface_evidence,
@@ -1335,6 +1806,8 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
                 or args.require_docker_pr_lifecycle_evidence
             ),
             evidence_run_id=args.evidence_run_id,
+            evidence_run_pr_numbers=evidence_run_pr_numbers,
+            evidence_windows=evidence_windows_by_keeper.get(path.stem),
             forbidden_github_identities=set(args.forbid_github_identity or []),
         )
         for path in config_paths
@@ -1348,6 +1821,9 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     github_identity_counts = Counter(
         keeper.github_identity for keeper in keepers if keeper.github_identity
     )
+    github_account_counts = Counter(
+        keeper.github_account_login for keeper in keepers if keeper.github_account_login
+    )
     requires_docker_approve = (
         args.require_docker_pr_approve_evidence
         or args.require_docker_pr_lifecycle_evidence
@@ -1357,6 +1833,24 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             "docker_pr_approve_identity_pool_insufficient"
             f"_unique_github_identities_{len(github_identity_counts)}"
         )
+    if requires_docker_approve:
+        unresolved_account_identities = sorted(
+            {
+                keeper.github_identity
+                for keeper in keepers
+                if keeper.github_identity and not keeper.github_account_login
+            }
+        )
+        if unresolved_account_identities:
+            fleet_failures.append(
+                "docker_pr_approve_identity_pool_unresolved_github_accounts_"
+                f"{len(unresolved_account_identities)}"
+            )
+        elif len(github_account_counts) < 2:
+            fleet_failures.append(
+                "docker_pr_approve_account_pool_insufficient"
+                f"_unique_accounts_{len(github_account_counts)}"
+            )
     failed_keepers = [keeper for keeper in keepers if keeper.failures]
     ok = not fleet_failures and not failed_keepers
     return {
@@ -1367,8 +1861,10 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         "configured_keepers": len(config_paths),
         "max_silence_hours": args.max_silence_hours,
         "github_identity_counts": dict(sorted(github_identity_counts.items())),
+        "github_account_counts": dict(sorted(github_account_counts.items())),
         "requirements": {
             "require_board_evidence": args.require_board_evidence,
+            "require_web_search_evidence": args.require_web_search_evidence,
             "require_product_evidence": args.require_product_evidence,
             "require_design_evidence": args.require_design_evidence,
             "forbid_github_identity": args.forbid_github_identity or [],
@@ -1391,6 +1887,8 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
                 args.require_docker_pr_lifecycle_evidence
             ),
             "evidence_run_id": args.evidence_run_id,
+            "evidence_run_pr_numbers": sorted(evidence_run_pr_numbers),
+            "harness_run_dir": getattr(args, "harness_run_dir", None),
         },
         "fleet_failures": fleet_failures,
         "failed_keepers": [keeper.name for keeper in failed_keepers],
@@ -1420,6 +1918,8 @@ def print_text(report: dict[str, Any]) -> None:
         print(
             "- {name}: {marker} preset={preset} sandbox={sandbox}/{network} "
             "gh={github} recent={recent} age={age} board={board} "
+            "web_search={web_search} "
+            "gh_account={github_account} "
             "product={product} design={design} "
             "pr_surface={pr_surface} pr_review={pr_review} "
             "pr_create={pr_create} git_push={git_push} "
@@ -1433,9 +1933,11 @@ def print_text(report: dict[str, Any]) -> None:
                 sandbox=keeper["sandbox_profile"],
                 network=keeper["network_mode"],
                 github=keeper["github_identity"],
+                github_account=keeper["github_account_login"],
                 recent=str(keeper["recent_action"]).lower(),
                 age=age_label,
                 board=str(keeper["board_action"]).lower(),
+                web_search=str(keeper["web_search_action"]).lower(),
                 product=str(keeper["product_action"]).lower(),
                 design=str(keeper["design_action"]).lower(),
                 pr_surface=str(keeper["pr_surface_action"]).lower(),
@@ -1452,6 +1954,8 @@ def print_text(report: dict[str, Any]) -> None:
         )
         for ref in keeper["pr_evidence_refs"][:5]:
             print(f"    pr_evidence: {ref}")
+        for ref in keeper["web_search_evidence"][:5]:
+            print(f"    web_search_evidence: {ref}")
         for failure in failures:
             print(f"    fail: {failure}")
         for warning in warnings:
@@ -1487,6 +1991,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_false",
         dest="require_board_evidence",
         help="Do not fail when a keeper lacks board action evidence.",
+    )
+    parser.add_argument(
+        "--require-web-search-evidence",
+        action="store_true",
+        help=(
+            "Fail unless each keeper has successful masc_web_search/WebSearch "
+            "evidence from decision or global tool-call logs."
+        ),
     )
     parser.add_argument(
         "--require-product-evidence",
@@ -1586,6 +2098,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             "When set, count PR lifecycle evidence only from rows that mention "
             "this run id. This prevents older proof runs from satisfying a "
             "fresh lifecycle reprobe."
+        ),
+    )
+    parser.add_argument(
+        "--harness-run-dir",
+        default=None,
+        help=(
+            "Optional keeper lifecycle harness artifact directory. When set, "
+            "the audit also treats each keeper message request's submitted_at "
+            "to completed_at window as run-scoped evidence, covering telemetry "
+            "rows whose branch/run id was redacted before persistence."
         ),
     )
     parser.add_argument("--json", action="store_true", help="Emit JSON report.")

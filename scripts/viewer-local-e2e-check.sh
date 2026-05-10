@@ -64,7 +64,7 @@ viewer-local-e2e-check.sh
   scripts/viewer-local-e2e-check.sh
   scripts/viewer-local-e2e-check.sh --build-viewer
   scripts/viewer-local-e2e-check.sh --run-smoke --keeper-models "glm:auto"
-  scripts/viewer-local-e2e-check.sh --run-round --rounds 2 --keeper-models "gemini:gemini-2.5-flash"
+  scripts/viewer-local-e2e-check.sh --run-round --rounds 2 --keeper-models "gemini:gemini-3-flash-preview"
 EOF
 }
 

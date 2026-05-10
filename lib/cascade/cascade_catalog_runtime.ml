@@ -1,6 +1,7 @@
 type candidate_probe_status =
   | Probe_ok
   | Probe_skipped of string
+  | Probe_not_applicable of string
   | Probe_error of string
 
 let probe_timeout_sec = 5.0
@@ -199,15 +200,30 @@ let candidate_probe_skipped (candidate : candidate_runtime) reason =
     status = Probe_skipped reason;
   }
 
-let advisory_skip_reason =
-  "runtime provider health is advisory; bootstrap skips live probe"
+let candidate_probe_not_applicable (candidate : candidate_runtime) reason =
+  {
+    model_string = candidate.model_string;
+    provider_kind = provider_kind_string candidate.provider_cfg;
+    model_id = candidate.provider_cfg.model_id;
+    base_url = candidate.provider_cfg.base_url;
+    status = Probe_not_applicable reason;
+  }
 
-let cloud_skip_reason =
-  "cloud provider health is advisory; bootstrap probes local endpoints only"
+let local_probe_unavailable_reason =
+  "local provider health probe requires Eio runtime capabilities"
+
+let cloud_probe_not_applicable_reason =
+  "cloud provider live health is not an auth-free bootstrap probe; \
+   credential/config validation is handled before execution"
 
 let profile_probes (profile_candidates : candidate_runtime list) =
   List.map
-    (fun candidate -> candidate_probe_skipped candidate advisory_skip_reason)
+    (fun candidate ->
+      if Llm_provider.Provider_config.is_local candidate.provider_cfg then
+        candidate_probe_error candidate local_probe_unavailable_reason
+      else
+        candidate_probe_not_applicable candidate
+          cloud_probe_not_applicable_reason)
     profile_candidates
 
 let normalize_endpoint_url url =
@@ -232,7 +248,8 @@ let profile_probes_from_statuses statuses profile_candidates =
   List.map
     (fun (candidate : candidate_runtime) ->
       if not (Llm_provider.Provider_config.is_local candidate.provider_cfg) then
-        candidate_probe_skipped candidate cloud_skip_reason
+        candidate_probe_not_applicable candidate
+          cloud_probe_not_applicable_reason
       else
         match endpoint_status_for_candidate statuses candidate with
         | Some status when status.healthy -> candidate_probe_ok candidate
@@ -278,6 +295,7 @@ let attach_probe_results ?sw ?net (profiles : profile_snapshot list) =
 
 let probe_health_value = function
   | Probe_skipped _ -> 0.0
+  | Probe_not_applicable _ -> 0.0
   | Probe_ok -> 1.0
   | Probe_error _ -> 3.0
 
@@ -296,7 +314,7 @@ let record_probe_metrics (profiles : profile_snapshot list) =
                      ("profile_name", profile.name);
                    ]
                  ()
-           | Probe_ok | Probe_error _ -> ());
+           | Probe_not_applicable _ | Probe_ok | Probe_error _ -> ());
           Prometheus.set_gauge
             Prometheus.metric_provider_actual_health_status
             ~labels:
@@ -320,12 +338,13 @@ let candidate_probe_to_yojson (probe : candidate_probe) =
         match probe.status with
         | Probe_ok -> `String "ok"
         | Probe_skipped _ -> `String "skipped"
-        | Probe_error message ->
-            `String "error" );
+        | Probe_not_applicable _ -> `String "not_applicable"
+        | Probe_error _ -> `String "error" );
       ( "error",
         match probe.status with
         | Probe_ok -> `Null
         | Probe_skipped message -> `String message
+        | Probe_not_applicable message -> `String message
         | Probe_error message -> `String message );
     ]
 
@@ -602,10 +621,8 @@ let runtime_required_profile_names ?config_path () =
         | Some path -> path
         | None -> "")
   in
-  if String.equal config_path "" then
-    Keeper_cascade_profile.known_cascades |> List.sort_uniq String.compare
-  else
-    runtime_required_profiles ~config_path
+  if String.equal config_path "" then []
+  else runtime_required_profiles ~config_path
 
 let validate_path_result ?sw ?net ~config_path () =
   let checked_at = Unix.gettimeofday () in
@@ -631,12 +648,19 @@ let validate_path_result ?sw ?net ~config_path () =
              ~profiles:[])
     | Ok json ->
         let profiles = discover_profiles json in
-        let required_default_profile =
-          Cascade_routes.cascade_name_for_use
-            ~config_path
-            Cascade_routes.Keeper_turn
-        in
-        let route_target_errors =
+        if profiles = [] then
+          Error
+            (rejection_of_path ~config_path:source_path ~attempted_mtime
+               ~checked_at
+               ~errors:[ "active cascade catalog has no <name>_models profiles" ]
+               ~profiles:[])
+        else
+          let required_default_profile =
+            Cascade_routes.cascade_name_for_use
+              ~config_path
+              Cascade_routes.Keeper_turn
+          in
+          let route_target_errors =
           Cascade_routes.configured_route_targets ~config_path ()
           |> List.filter_map (fun target ->
                  if List.mem target profiles then None
@@ -1152,7 +1176,7 @@ let resolve_secondary_provider_for_primary ?sw ?net ?clock
       let try_entry (entry : Cascade_config_loader.weighted_entry) =
         match entry.secondary with
         | None -> None
-        | Some _ ->
+        | Some secondary ->
             (* Confirm this entry's primary parses to the same provider
                we were called with. We compare on the parsed
                Provider_config rather than on raw strings to handle
@@ -1168,8 +1192,7 @@ let resolve_secondary_provider_for_primary ?sw ?net ?clock
              | Some parsed when same_kind_model parsed ->
                  Cascade_config.parse_weighted_entry
                    ~api_key_env_overrides:profile.api_key_env_overrides
-                   (synth_secondary_entry entry
-                      (Option.get entry.secondary))
+                   (synth_secondary_entry entry secondary)
              | _ -> None)
       in
       (* Expand provider:auto entries without a rotation scope: this legacy

@@ -6,8 +6,9 @@
     |---------------------|--------|-----------------|
     | None / empty | none | [Unmaterialized] |
     | non-empty dir, missing on disk | none | [Unmaterialized] |
-    | exists + [gh auth status] = 0 | record verify timestamp | [Materialized {last_verified_at}] |
-    | exists + [gh auth status] != 0 | record reason | [Stale {reason}] |
+    | exists + missing [hosts.yml] [oauth_token] | none | [Stale {reason}] |
+    | exists + [hosts.yml] [oauth_token] + [gh auth status] = 0 + GraphQL viewer succeeds | record verify timestamp | [Materialized {last_verified_at}] |
+    | exists + [gh auth status] / GraphQL viewer fails | record reason | [Stale {reason}] |
 
     PR-B Slice 1 ships this **verify-only** path.  The two [oauth_method]
     materialisation flows (web device-flow, with-token) are layered on
@@ -64,18 +65,17 @@ let gh_bundle_env ~gh_config_dir =
          "GH_PROMPT_DISABLED=1";
        ])
 
-(** Run [gh auth status] against the supplied [GH_CONFIG_DIR] and
-    return whether it succeeded.  The child process receives a
-    bundle-scoped environment only, so ambient GH_TOKEN/GITHUB_TOKEN
-    values cannot make a stale bundle look materialized. *)
-let gh_auth_status_ok ~gh_config_dir =
+(** Run a [gh] command against the supplied [GH_CONFIG_DIR] and return
+    whether it succeeded.  The child process receives a bundle-scoped
+    environment only, so ambient GH_TOKEN/GITHUB_TOKEN values cannot
+    make a stale bundle look materialized. *)
+let gh_command_ok ~gh_config_dir argv =
   let devnull_in = Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0 in
   let devnull_out = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0o644 in
   let pid =
     try
       Some
-        (Unix.create_process_env "gh"
-           [| "gh"; "auth"; "status" |]
+        (Unix.create_process_env "gh" (Array.of_list ("gh" :: argv))
            (gh_bundle_env ~gh_config_dir)
            devnull_in devnull_out devnull_out)
     with Unix.Unix_error _ -> None
@@ -89,6 +89,47 @@ let gh_auth_status_ok ~gh_config_dir =
       | Unix.WEXITED 0 -> true
       | _ -> false)
 
+let hosts_yml_has_oauth_token ~gh_config_dir =
+  let path = Filename.concat gh_config_dir gh_hosts_yml in
+  if not (Sys.file_exists path) then false
+  else
+    try
+      let ic = open_in path in
+      Fun.protect
+        ~finally:(fun () -> close_in_noerr ic)
+        (fun () ->
+          let found = ref false in
+          (try
+             while not !found do
+               let line = input_line ic in
+               let trimmed = String.trim line in
+               let prefix = "oauth_token:" in
+               let plen = String.length prefix in
+               if String.length trimmed > plen
+                  && String.equal (String.sub trimmed 0 plen) prefix
+                  && String.trim
+                       (String.sub trimmed plen
+                          (String.length trimmed - plen))
+                     <> ""
+               then found := true
+             done
+           with End_of_file -> ());
+          !found)
+    with Sys_error _ -> false
+
+let gh_auth_status_ok ~gh_config_dir =
+  gh_command_ok ~gh_config_dir [ "auth"; "status" ]
+
+let gh_graphql_viewer_ok ~gh_config_dir =
+  gh_command_ok ~gh_config_dir
+    [ "api";
+      "graphql";
+      "-f";
+      "query=query { viewer { login } }";
+      "--jq";
+      ".data.viewer.login";
+    ]
+
 (** Compute the new state for [gh_config_dir] without writing anywhere.
     Pure with respect to credential records; reads filesystem + invokes
     [gh] subprocess. *)
@@ -97,10 +138,21 @@ let verify_state ~gh_config_dir : credential_state =
   else if not (Sys.file_exists gh_config_dir) then Unmaterialized
   else if not (Sys.is_directory gh_config_dir) then
     Stale { reason = "gh_config_dir is not a directory" }
-  else if gh_auth_status_ok ~gh_config_dir then
-    Materialized { last_verified_at = now_unix_ms () }
-  else
+  else if not (hosts_yml_has_oauth_token ~gh_config_dir) then
+    Stale
+      {
+        reason =
+          "gh_config_dir has no hosts.yml oauth_token; keyring-backed \
+           GitHub auth cannot be projected into Docker. Re-materialize \
+           this identity with `gh auth login --with-token \
+           --insecure-storage` into the bundle.";
+      }
+  else if not (gh_auth_status_ok ~gh_config_dir) then
     Stale { reason = "gh auth status returned non-zero exit code" }
+  else if not (gh_graphql_viewer_ok ~gh_config_dir) then
+    Stale { reason = "gh api graphql viewer returned non-zero exit code" }
+  else
+    Materialized { last_verified_at = now_unix_ms () }
 
 (* RFC-0019 PR-C §3.2 P1 — token-as-boundary invariant requires a
    stable, length-bounded fingerprint of the actual oauth_token so the

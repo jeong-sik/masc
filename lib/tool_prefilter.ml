@@ -214,9 +214,11 @@ let synonyms : (string * string list) list =
      [ "update agent"; "change agent"; "agent modify"; "agent settings" ]);
     ("masc_agent_fitness",
      [ "agent fitness"; "agent evaluation"; "agent score"; "rate agent" ]);
-    (* masc web search *)
+    (* masc web search + fetch *)
     ("masc_web_search",
      [ "web search"; "search internet"; "search online"; "google" ]);
+    ("masc_web_fetch",
+     [ "web fetch"; "fetch page"; "read url"; "download page" ]);
     (* masc keeper management — tools available via BM25 but missing from TF-IDF *)
     ("masc_keeper_up",
      [ "start keeper"; "launch keeper"; "spawn keeper"; "keeper create" ]);

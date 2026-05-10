@@ -306,8 +306,8 @@ let degraded_retry_slot_phase_available ~(time_spent_in_turn_s : float) : bool =
 
 let degraded_retry_bypasses_slot_phase_guard
     (err : Agent_sdk.Error.sdk_error) : bool =
-  match Oas_worker_named.classify_masc_internal_error err with
-  | Some (Oas_worker_named.Oas_timeout_budget _) -> true
+  match Keeper_turn_driver.classify_masc_internal_error err with
+  | Some (Keeper_turn_driver.Oas_timeout_budget _) -> true
   | _ -> false
 
 let reclassify_oas_timeout_for_attempt
@@ -316,14 +316,18 @@ let reclassify_oas_timeout_for_attempt
   match err, timeout_budget with
   | Agent_sdk.Error.Api (Timeout { message }), Some timeout_budget
     when EC.is_structural_oas_timeout_message message ->
-      Oas_worker_named.sdk_error_of_masc_internal_error
-        (Oas_worker_named.Oas_timeout_budget
+      Keeper_turn_driver.sdk_error_of_masc_internal_error
+        (Keeper_turn_driver.Oas_timeout_budget
            {
              budget_sec = timeout_budget.effective_timeout_sec;
              keeper_turn_timeout_sec =
                timeout_budget.keeper_turn_timeout_sec;
              estimated_input_tokens = timeout_budget.estimated_input_tokens;
              source = timeout_budget.source;
+             remaining_turn_budget_sec =
+               Some timeout_budget.remaining_turn_budget_sec;
+             min_required_sec = min_oas_timeout_budget_sec;
+             phase = "cascade_attempt_watchdog";
            })
   | _ -> err
 
@@ -479,7 +483,7 @@ let recover_context_overflow_retry
         }
   | None ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_checkpoint_failures
+        Keeper_metrics.metric_keeper_checkpoint_failures
         ~labels:[("keeper", meta.name); ("phase", "overflow_recovery_unavailable")]
         ();
       Log.Keeper.warn
@@ -572,7 +576,7 @@ let pause_keeper_for_overflow
    | Ok () -> ()
    | Error err when is_version_conflict_error err ->
        Prometheus.inc_counter
-         Prometheus.metric_keeper_write_meta_failures
+         Keeper_metrics.metric_keeper_write_meta_failures
          ~labels:[("keeper", meta.name); ("phase", "overflow_pause_cas_race")]
          ();
        Log.Keeper.warn
@@ -580,7 +584,7 @@ let pause_keeper_for_overflow
          meta.name err
    | Error err ->
        Prometheus.inc_counter
-         Prometheus.metric_keeper_write_meta_failures
+         Keeper_metrics.metric_keeper_write_meta_failures
          ~labels:[("keeper", meta.name); ("phase", "overflow_pause")]
          ();
        Log.Keeper.error
@@ -634,7 +638,7 @@ let sync_keeper_paused_state
   with
   | Error err ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_write_meta_failures
+        Keeper_metrics.metric_keeper_write_meta_failures
         ~labels:[("keeper", meta.name);
                  ("phase",
                   if paused then "pause_sync" else "resume_sync")]
@@ -816,7 +820,7 @@ let post_turn_resilience_handles
        | exn -> Error (Printexc.to_string exn))
     with
     | Error detail ->
-        Prometheus.inc_counter Prometheus.metric_keeper_oas_execution_errors
+        Prometheus.inc_counter Keeper_metrics.metric_keeper_oas_execution_errors
           ~labels:[("keeper", meta.name); ("phase", "resilience_audit_store")]
           ();
         Log.Keeper.error
@@ -877,7 +881,7 @@ let enqueue_partial_commit_continue_gate
                "%s: partial-commit continue gate approved but keeper resume sync failed: %s"
                meta.name err);
              Prometheus.inc_counter
-               Prometheus.metric_keeper_cascade_sync_failures
+               Keeper_metrics.metric_keeper_cascade_sync_failures
                ~labels:[("keeper", meta.name); ("site", "resume_sync")]
                ()
       | Agent_sdk.Hooks.Reject reason ->
@@ -894,7 +898,7 @@ let enqueue_partial_commit_continue_gate
                "%s: partial-commit continue gate rejected but keeper pause sync failed: %s (reason=%s)"
                meta.name err reason);
              Prometheus.inc_counter
-               Prometheus.metric_keeper_cascade_sync_failures
+               Keeper_metrics.metric_keeper_cascade_sync_failures
                ~labels:[("keeper", meta.name); ("site", "pause_sync")]
                ())
     ()

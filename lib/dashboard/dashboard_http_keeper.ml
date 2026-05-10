@@ -232,6 +232,9 @@ let tokens_per_sec_json ~tokens ~latency_ms =
   if tokens <= 0 || latency_ms <= 0 then `Null
   else `Float ((float_of_int tokens *. 1000.0) /. float_of_int latency_ms)
 
+let last_latency_ms_json latency_ms =
+  if latency_ms <= 0 then `Null else `Int latency_ms
+
 let json_string_list_member key json =
   match Yojson.Safe.Util.member key json with
   | `List items ->
@@ -280,12 +283,21 @@ let keeper_trust_json ?(include_receipt = false)
     | None -> `Assoc [ ("profile", `Null); ("derived", `Bool false) ]
   in
   let cascade_json =
+    let cascade_ref_json =
+      match meta.cascade_ref with
+      | Some ref_ -> Cascade_ref.cascade_ref_to_json ref_
+      | None -> `Null
+    in
     match latest_receipt with
-    | Some receipt -> Yojson.Safe.Util.member "cascade" receipt
+    | Some receipt ->
+      (match Yojson.Safe.Util.member "cascade" receipt with
+       | `Assoc fields -> `Assoc (("cascade_ref", cascade_ref_json) :: fields)
+       | other -> other)
     | None ->
       `Assoc
         [
-          ("name", `String meta.cascade_name);
+          ("name", `String (Keeper_types.cascade_name_of_meta meta));
+          ("cascade_ref", cascade_ref_json);
           ("selected_model", `Null);
           ("attempt_count", `Int 0);
           ("fallback_applied", `Bool false);
@@ -579,7 +591,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
           let trace_history_count = List.length m.runtime.trace_history in
           let active_model = Keeper_exec_status.active_model_of_meta m in
           let next_model_hint = Keeper_exec_status.next_model_hint_of_meta m in
-          let effective_cascade_name = live_keeper_cascade_name m.cascade_name in
+          let effective_cascade_name = live_keeper_cascade_name (Keeper_types.cascade_name_of_meta m) in
           let cascade_models =
             Cascade_runtime.models_of_cascade_name
               (Keeper_cascade_profile.Runtime_name effective_cascade_name)
@@ -888,7 +900,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                   ("message_count", `Int (Safe_ops.json_int "message_count" metrics));
                 ]
             | None ->
-                (let effective_cascade_name = live_keeper_cascade_name m.cascade_name in
+                (let effective_cascade_name = live_keeper_cascade_name (Keeper_types.cascade_name_of_meta m) in
                  let effective_models =
                    Cascade_runtime.models_of_cascade_name
                      (Keeper_cascade_profile.Runtime_name effective_cascade_name)
@@ -1108,6 +1120,10 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
               ("models", `List (List.map (fun s -> `String s) cascade_models));
               ("models_resolved", models_resolved);
               ("primary_model", `String primary_model);
+              ( "cascade_ref",
+                (match m.cascade_ref with
+                 | Some ref_ -> Cascade_ref.cascade_ref_to_json ref_
+                 | None -> `Null) );
               ("active_model", `String active_model);
               ("next_model_hint", Json_util.string_opt_to_json next_model_hint);
               ("sandbox_profile",
@@ -1154,7 +1170,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                 ("output_tokens", `Int m.runtime.usage.last_output_tokens);
                 ("total_tokens", `Int m.runtime.usage.last_total_tokens);
               ]);
-              ("last_latency_ms", `Int m.runtime.usage.last_latency_ms);
+              ("last_latency_ms", last_latency_ms_json m.runtime.usage.last_latency_ms);
               ("compaction_count", `Int m.runtime.compaction_rt.count);
               ("last_compaction_saved_tokens", `Int last_compaction_saved_tokens);
               ("compaction_profile", `String m.compaction.profile);
@@ -1472,10 +1488,17 @@ let keeper_bdi_snapshot_json (config : Coord.config) (name : string)
       let belief =
         match metric_field "belief_summary" with
         | Some value -> Some value
-        | None -> (
-            match nonempty_string_opt m.runtime.last_blocker with
-            | Some blocker -> Some ("blocked: " ^ blocker)
-            | None -> None)
+        | None ->
+            (match m.runtime.last_blocker with
+             | Some info ->
+                 let trimmed = String.trim info.detail in
+                 let label =
+                   if trimmed = "" then
+                     Keeper_types.blocker_class_to_string info.klass
+                   else trimmed
+                 in
+                 Some ("blocked: " ^ label)
+             | None -> None)
       in
       let desire =
         match metric_field "active_desire" with
@@ -1637,12 +1660,17 @@ let keeper_config_json (config : Coord.config) (name : string)
           ("effective_system_prompt", `String effective_system_prompt);
         ]
       in
-      let effective_cascade_name = live_keeper_cascade_name m.cascade_name in
+      let cascade_name = Keeper_types.cascade_name_of_meta m in
+      let effective_cascade_name = live_keeper_cascade_name cascade_name in
       let execution =
         `Assoc [
-          ("selected_cascade_name", `String m.cascade_name);
+          ("selected_cascade_name", `String cascade_name);
           ( "selected_cascade_canonical",
             `String effective_cascade_name );
+          ( "cascade_ref",
+            (match m.cascade_ref with
+             | Some ref_ -> Cascade_ref.cascade_ref_to_json ref_
+             | None -> `Null) );
           ( "models",
             `List
               (List.map (fun s -> `String s)
@@ -1702,7 +1730,7 @@ let keeper_config_json (config : Coord.config) (name : string)
           ("last_input_tokens", `Int m.runtime.usage.last_input_tokens);
           ("last_output_tokens", `Int m.runtime.usage.last_output_tokens);
           ("last_total_tokens", `Int m.runtime.usage.last_total_tokens);
-          ("last_latency_ms", `Int m.runtime.usage.last_latency_ms);
+          ("last_latency_ms", last_latency_ms_json m.runtime.usage.last_latency_ms);
           ( "last_total_tokens_per_sec",
             tokens_per_sec_json ~tokens:m.runtime.usage.last_total_tokens
               ~latency_ms:m.runtime.usage.last_latency_ms );

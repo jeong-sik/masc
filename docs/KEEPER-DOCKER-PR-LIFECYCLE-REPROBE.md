@@ -14,7 +14,7 @@ audit gates. The audit script can detect missing evidence; this reprobe runner
 adds the operator action loop:
 
 1. discover Docker keepers,
-2. render a per-keeper proof prompt,
+2. render per-keeper create/review phase prompts,
 3. optionally send the prompt through `masc_keeper_msg`,
 4. poll `masc_keeper_msg_result`,
 5. run `audit-keeper-fleet-readiness.py --require-docker-pr-lifecycle-evidence --evidence-run-id <run_id>`,
@@ -44,25 +44,63 @@ continues), and `server_health_missing_commit` (the response was reachable
 but lacked `build.commit`, also treated as transient). Only the first
 status records pending requests as lost; the other two log a transient
 notice and the next poll iteration retries.
-When mutation is enabled, the harness sends `required_tools` with each
-`masc_keeper_msg` call. By default that one-turn contract requires
-`keeper_shell`, `keeper_bash`, `keeper_pr_create`, and
-`keeper_pr_review_comment`, so the runtime records `tool_surface_mismatch` if
-those tools are not visible and `missing_required_tool_use` if the keeper
-replies without exercising them.
-The prompt reserves `keeper_shell` for read-only GitHub inspection.
-Keepers must create/use the exact run-scoped branch
-`keeper/<keeper>-docker-pr-proof-<run_id>` and proof file
+When mutation is enabled, the harness sends two sequential phases. The create phase
+requires `masc_web_search`, `keeper_bash`, and `keeper_pr_create`, so each
+fresh proof run captures current-information behavior as well as Docker git/PR
+mutation evidence. Before it sends any mutation
+prompt, the harness checks the run-scoped proof branches and fails closed with
+`branch_collision_preflight` if a local branch, remote-tracking branch, remote
+head, or local worktree already exists for the selected `--run-id`. After the
+create phase, the review phase only starts when every keeper produced create
+success markers for the same run id: `docker_pr_create=true`,
+`docker_git_push=true`, `blocker=null`, the exact branch, and a PR URL. If a
+keeper returns an error or blocker, the harness writes
+`create-readiness-failures.jsonl` and skips review prompts instead of approving
+stale or partially-created PRs. Per-keeper branch-collision evidence detected
+upfront by `assert_no_proof_branch_collisions_for_mutate` is written to
+`proof-branch-collisions.jsonl` (under the run dir) — one row per keeper with
+the offending branch ref(s) so operators can clean up stale local/remote
+branches before re-running. An empty file means no collisions; rows look like:
+```json
+{"keeper":"executor","branch":"keeper-executor-agent/<run_id>",
+ "local_branch":true,"remote_tracking_branch":true,
+ "remote_head":false,"worktree_branch":false,
+ "blocker":"branch_collision_preflight"}
+```
+By default, mutation preflight also requires every selected keeper account to
+have upstream `WRITE`, `MAINTAIN`, or `ADMIN` permission for the target repo. For
+PUBLIC repositories, `--allow-fork-pr-for-readonly` permits `READ`/`TRIAGE`
+credential lanes to push their proof branch to the keeper account's fork and
+open the draft PR with `head=OWNER:BRANCH`; PR creation still goes through
+`keeper_pr_create`, not raw `gh pr create`.
+The review phase also resolves fork-created target PRs with the same
+owner-qualified `OWNER:BRANCH` head ref so reviewers do not miss valid fork PRs
+by looking up only the bare branch name.
+After collision evidence is clear, the review phase requires `keeper_shell` and
+`keeper_pr_review_comment`, in that order. The first required tool allows the
+prompted read-only PR lookup to satisfy the provider's first-tool contract; the
+second required tool keeps approval mandatory.
+This avoids the old single-turn shape where one keeper could wait on another
+keeper's missing PR until the Agent.run timeout. The review prompt reserves
+`keeper_shell` for read-only GitHub inspection. Keepers are instructed to report
+`target_pr_missing` after one failed branch lookup instead of polling in a loop.
+Keepers must create/use the exact run-scoped branch produced by
+`masc_worktree_create task_id=<run_id>`:
+`keeper-<keeper>-agent/<run_id>`. They must write the proof file
 `docs/runtime-proof/keepers/<keeper>-<run_id>.md`; older proof branches or
-worktrees do not count. Proof-file creation and git add/commit/push should use
-`keeper_bash` from inside the Docker playground so the route evidence is tied to
-the keeper container path. If the shell guard rejects the git mutation, the
+worktrees do not count. This branch convention matches the runtime worktree
+tool contract (`{agent_name}/{task_id}`) while still keeping stale evidence
+out via the run id. Proof-file creation and git add/commit/push should use
+`keeper_bash` from inside the Docker playground so the route evidence is tied
+to the keeper container path. If the shell guard rejects the git mutation, the
 keeper must stop and report that blocker instead of falling back to host-local
 credentials.
 PR create/review mutations should use `keeper_pr_create` /
 `keeper_pr_review_comment` rather than `gh pr ...` through shell tools.
-Override the CSV with `REQUIRED_TOOLS=...` for a narrower or broader proof
-lane.
+Override the phase CSVs with `CREATE_REQUIRED_TOOLS=...` and
+`REVIEW_REQUIRED_TOOLS=...` when debugging a narrower or broader proof lane.
+The older `REQUIRED_TOOLS=...` override is still accepted as a legacy shortcut
+and is applied to both phases only when the phase-specific variables are unset.
 `MSG_TIMEOUT_SEC` only bounds the harness HTTP request to the MCP server.
 The keeper's actual Agent.run budget is sent separately as
 `masc_keeper_msg.timeout_sec` through `KEEPER_TURN_TIMEOUT_SEC`, which defaults
@@ -95,6 +133,14 @@ Useful scoped runs:
   --mutate \
   --keeper-names sangsu,executor,verifier \
   --max-keepers 3
+
+./scripts/harness_keeper_docker_pr_lifecycle_reprobe.sh \
+  --mutate \
+  --phase review \
+  --review-resume \
+  --keeper-names sangsu,verifier \
+  --run-id keeper-docker-pr-lifecycle-fork-live-20260507-remat \
+  --run-dir /private/tmp/keeper-docker-pr-lifecycle-fork-live-20260507-remat
 ```
 
 The prompt requires keepers to stay on draft proof PRs:
@@ -111,3 +157,9 @@ operator evidence, but it is not completion unless the Docker lifecycle audit
 also passes for the expected fleet. The reprobe audit is run-id scoped, so stale
 PR lifecycle evidence from earlier keeper proof runs cannot satisfy a fresh
 run.
+
+Use `--phase review --review-resume` only after create proof PRs already exist
+for the run id and should be reviewed without creating another proof branch.
+The resume path intentionally still resolves target PRs keeper-side; if a target
+PR was closed or never existed, the review phase must report a blocker instead
+of manufacturing approve evidence.

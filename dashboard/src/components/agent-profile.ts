@@ -16,7 +16,7 @@ import { TextInput } from './common/input'
 import { StatGrid } from './common/stat-tile'
 import { formatTokens } from '../lib/format-number'
 import { findKeeper } from '../lib/keeper-utils'
-import { autonomyHint } from './keeper-detail-panels'
+import { autonomyHint } from './keeper-detail-ctx-utils'
 import { AgentAvatar } from './overview/agent-avatar'
 import {
   agents,

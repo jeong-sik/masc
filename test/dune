@@ -26,6 +26,11 @@
 ; Group 1: Pure synchronous tests
 (tests
  (names test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_dashboard_oas_bridge test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_auth_doctor test_auth_error_kind test_auth_login test_audit_log test_governance_anomaly test_http_negotiation
+        test_keeper_turn_terminal_code_byte_compat
+        test_keeper_sdk_error_typed_bridge
+        test_read_drop_reason
+        test_keeper_turn_disposition
+        test_keeper_turn_terminal_disposition_field
         test_attempt_state
         test_sse test_graphql_api
         test_graphql_endpoint
@@ -35,19 +40,24 @@
         test_sidecar_lifecycle_routes
         test_channel_gate_imessage_state
         test_dashboard
+        test_dashboard_branches
         test_dashboard_perf
         test_dashboard_tool_host_events
+        test_dashboard_nav_event
+        test_cdal_tool_id
         test_tool_assignment_telemetry
         test_dashboard_link_preview
         test_gate_keeper_backend
         test_transport_read_model
         test_multi_room test_worktree_detection test_bounded test_mention
+        test_mention_dedup
         test_heartbeat_qw test_sse_qw test_sse_stream test_agent_health
         test_post_verifier
         test_reward_advice_artifact
         test_keeper_cascade_profile
         test_cascade_capability_profile
         test_cascade_required_capability_profile
+        test_cascade_phase1_smoke
         test_cascade_secondary_entry_parser
         test_cascade_secondary_expand
         test_cascade_validator_capability_lint
@@ -55,9 +65,12 @@
         test_keeper_hooks_oas_pricing
         test_keeper_hooks_oas_telemetry
         test_masc_oas_bridge_timeout_guard
+        test_keeper_llm_bridge
         test_agent_stress
         test_keeper_tool_use_failure_counter
         test_keeper_compaction_outcome_counter
+        test_keeper_sub_fsm_guards
+        test_keeper_cascade_tla_mirror
         test_keeper_usage_trust_counter
         test_llm_metric_bridge
         test_cost_usd_source_attribution_10318
@@ -65,6 +78,7 @@
         test_response_model_empty_10083
         test_heuristic_theatre_audit
         test_keeper_proactive_skip_counter
+        test_keeper_health_probe
         test_oas_error_kind_counter
         test_board_author_identity_10297
         test_fsm_drift_counter
@@ -77,6 +91,8 @@
         test_keeper_wake_telemetry
         test_keeper_timing
         test_keeper_memory
+        test_keeper_chat_store
+        test_keeper_runtime_trust_snapshot
         test_keeper_accountability
         test_reputation_ledger_v2
         test_reputation_multi_dim
@@ -208,7 +224,6 @@
         test_keeper_state_machine_correspondence
         test_keeper_lifecycle_hooks
         test_keeper_subprocess_registry
-        test_keeper_bg_task_cleanup
         test_keeper_social_model_magentic_ledger_fsm
         test_keeper_overflow_recovery
         test_telemetry_unified
@@ -224,6 +239,7 @@
         test_lockfree_atomic
         test_telemetry_observe
         test_keeper_typed_labels
+        test_shell_ir_typed_review_followup
         test_auth_resolve_labels
         test_keeper_classifier_helper
         test_persona_tool_reachability
@@ -233,19 +249,21 @@
         test_auth_strict_mode
         test_keeper_turn_fsm_emit
         test_keeper_event_queue
+        test_keeper_relevance_check
         test_gh_api_classification
-        test_actionable_path_action
-        test_stale_kill_class
-        test_provider_capability_matrix
-        test_provider_error
-        test_keeper_synthetic_marker
-        test_keeper_turn_fsm_wired_sites
-        test_effective_oas_env
-        test_workspace_routes_keeper
         test_effect_evidence_source_path
         test_cognitive_gravity
+        test_intentional_projection
+        test_chronicle_event
+        test_chronicle_librarian
+        test_alignment_score
         )
  (modules test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_dashboard_oas_bridge test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_auth_doctor test_auth_error_kind test_auth_login test_audit_log test_governance_anomaly test_http_negotiation
+          test_keeper_turn_terminal_code_byte_compat
+          test_keeper_sdk_error_typed_bridge
+          test_read_drop_reason
+          test_keeper_turn_disposition
+          test_keeper_turn_terminal_disposition_field
           test_attempt_state
           test_sse test_graphql_api
           test_graphql_endpoint
@@ -255,19 +273,24 @@
         test_sidecar_lifecycle_routes
           test_channel_gate_imessage_state
           test_dashboard
+          test_dashboard_branches
           test_dashboard_perf
           test_dashboard_tool_host_events
+          test_dashboard_nav_event
+          test_cdal_tool_id
           test_tool_assignment_telemetry
           test_dashboard_link_preview
           test_gate_keeper_backend
           test_transport_read_model
           test_multi_room test_worktree_detection test_bounded test_mention
+          test_mention_dedup
           test_heartbeat_qw test_sse_qw test_sse_stream test_agent_health
           test_post_verifier
         test_reward_advice_artifact
           test_keeper_cascade_profile
           test_cascade_capability_profile
           test_cascade_required_capability_profile
+          test_cascade_phase1_smoke
           test_cascade_secondary_entry_parser
           test_cascade_secondary_expand
           test_cascade_validator_capability_lint
@@ -275,6 +298,7 @@
           test_keeper_hooks_oas_pricing
           test_keeper_hooks_oas_telemetry
           test_masc_oas_bridge_timeout_guard
+          test_keeper_llm_bridge
           test_agent_stress
           test_keeper_tool_use_failure_counter
           test_keeper_compaction_outcome_counter
@@ -285,6 +309,7 @@
           test_response_model_empty_10083
           test_heuristic_theatre_audit
           test_keeper_proactive_skip_counter
+          test_keeper_health_probe
           test_oas_error_kind_counter
           test_board_author_identity_10297
           test_fsm_drift_counter
@@ -297,6 +322,8 @@
           test_keeper_wake_telemetry
           test_keeper_timing
           test_keeper_memory
+          test_keeper_chat_store
+          test_keeper_runtime_trust_snapshot
           test_keeper_accountability
           test_reputation_ledger_v2
           test_reputation_multi_dim
@@ -430,8 +457,9 @@
           test_keeper_state_machine
           test_keeper_state_machine_correspondence
           test_keeper_lifecycle_hooks
+          test_keeper_sub_fsm_guards
+          test_keeper_cascade_tla_mirror
           test_keeper_subprocess_registry
-          test_keeper_bg_task_cleanup
           test_keeper_social_model_magentic_ledger_fsm
           test_keeper_overflow_recovery
           test_telemetry_unified
@@ -447,6 +475,7 @@
           test_lockfree_atomic
           test_telemetry_observe
           test_keeper_typed_labels
+          test_shell_ir_typed_review_followup
           test_auth_resolve_labels
           test_keeper_classifier_helper
           test_persona_tool_reachability
@@ -456,6 +485,7 @@
           test_auth_strict_mode
           test_keeper_turn_fsm_emit
           test_keeper_event_queue
+          test_keeper_relevance_check
           test_gh_api_classification
           test_actionable_path_action
           test_stale_kill_class
@@ -467,6 +497,10 @@
           test_workspace_routes_keeper
           test_effect_evidence_source_path
           test_cognitive_gravity
+          test_intentional_projection
+          test_chronicle_event
+          test_chronicle_librarian
+          test_alignment_score
           )
  (libraries masc_test_deps multimodal))
 
@@ -475,11 +509,13 @@
  (names test_pbt_mention test_pbt_validation test_pbt_text_processing test_pbt_context_overflow
         test_keeper_state_machine_pbt test_telemetry_eio_pbt
         test_metrics_store_eio_pbt test_prompt_registry_pbt
-        test_keeper_fsm_joints)
+        test_keeper_fsm_joints test_clean_only_bug_mirrors
+        test_keeper_phase_drift_contract test_event_priority_monotone_pbt)
  (modules test_pbt_mention test_pbt_validation test_pbt_text_processing test_pbt_context_overflow
           test_keeper_state_machine_pbt test_telemetry_eio_pbt
           test_metrics_store_eio_pbt test_prompt_registry_pbt
-          test_keeper_fsm_joints)
+          test_keeper_fsm_joints test_clean_only_bug_mirrors
+          test_keeper_phase_drift_contract test_event_priority_monotone_pbt)
  (libraries masc_test_deps))
 
 ; Focused single-module tests
@@ -492,6 +528,7 @@
         test_config_dir_resolver
         test_room_coverage
         test_streamable_http
+        test_dashboard_rooms
         test_dashboard_mission
         test_dashboard_mission_briefing
         ; test_command_plane_help removed (CP purge)
@@ -626,7 +663,6 @@
         test_adaptive_cache_ttl
         test_keeper_compact_audit
         test_oas_bus_instrument
-        test_tool_compact
         test_trajectory
         test_eval_gate
         test_eval_harness
@@ -672,11 +708,15 @@
         test_keeper_recurring
         test_cdal_types
         test_cdal_loader
+        test_cdal_proof
+        test_cdal_risk_contract
         test_cdal_judge
         test_cdal_verifiable_markers
         test_cdal_eval_v1
         test_cdal_friction_projection
         test_cdal_verdict_gate
+        test_cdal_mode_enforcer
+        test_cdal_mode_resolver
         test_verification_fsm
         test_task_sandbox
         test_governance_yojson_roundtrip
@@ -688,6 +728,7 @@
         test_goal_verification
         test_string_util
         test_board_core_payload
+        test_board_attachment_meta
         test_board_moderation
         test_voice_config)
  (modules
@@ -695,6 +736,7 @@
         test_config_dir_resolver
         test_room_coverage
         test_streamable_http
+        test_dashboard_rooms
         test_dashboard_mission
         test_dashboard_mission_briefing
         ; test_command_plane_help removed (CP purge)
@@ -829,7 +871,6 @@
         test_adaptive_cache_ttl
         test_keeper_compact_audit
         test_oas_bus_instrument
-        test_tool_compact
         test_trajectory
         test_eval_gate
         test_eval_harness
@@ -874,11 +915,15 @@
         test_keeper_recurring
         test_cdal_types
         test_cdal_loader
+        test_cdal_proof
+        test_cdal_risk_contract
         test_cdal_judge
         test_cdal_verifiable_markers
         test_cdal_eval_v1
         test_cdal_friction_projection
         test_cdal_verdict_gate
+        test_cdal_mode_enforcer
+        test_cdal_mode_resolver
         test_verification_fsm
         test_task_sandbox
         test_governance_yojson_roundtrip
@@ -890,10 +935,17 @@
         test_goal_verification
         test_string_util
         test_board_core_payload
+        test_board_attachment_meta
         test_board_moderation
         test_voice_config)
  (libraries masc_test_deps)
  (deps ../bin/main_eio.exe))
+
+; Focused dashboard nudge feed projection.
+(test
+ (name test_dashboard_operator_nudges)
+ (modules test_dashboard_operator_nudges)
+ (libraries masc_test_deps))
 
 ; Group 4: Coverage tests (generated by Agent Autonomy)
 (tests
@@ -1067,6 +1119,7 @@
 (include stanzas/test_cascade_attempt_liveness_observer.inc)
 (include stanzas/test_cascade_attempt_liveness_runtime.inc)
 (include stanzas/test_cascade_attempt_outer_wall.inc)
+(include stanzas/test_cascade_attempt_fsm_response_pins.inc)
 (include stanzas/test_oas_worker_named_liveness_integration.inc)
 (include stanzas/test_cascade_capability_gate.inc)
 (include stanzas/test_cascade_catalog_runtime.inc)
@@ -1078,9 +1131,9 @@
 (include stanzas/test_cascade_kimi_max_context_ssot.inc)
 (include stanzas/test_cascade_model_resolve.inc)
 (include stanzas/test_cascade_ollama_probe.inc)
-(include stanzas/test_cascade_routes_bigthree_ssot.inc)
 (include stanzas/test_cascade_runtime.inc)
 (include stanzas/test_cascade_strategy.inc)
+(include stanzas/test_cascade_hierarchical_routing.inc)
 (include stanzas/test_cascade_trust_persist.inc)
 (include stanzas/test_audit_keeper_fleet_readiness.inc)
 (include stanzas/test_cdal_ledger_health_10115.inc)
@@ -1103,6 +1156,7 @@
 (include stanzas/test_dated_jsonl.inc)
 (include stanzas/test_dated_jsonl_mutex_registry_10372.inc)
 (include stanzas/test_distributed_lock_acquire_failed_counter.inc)
+(include stanzas/test_distributed_lock_backlog_namespace.inc)
 (include stanzas/test_distributed_lock_backoff_jitter_9645.inc)
 (include stanzas/test_dune_local_script.inc)
 (include stanzas/test_env_config_coord_git_local_timeout.inc)
@@ -1155,6 +1209,7 @@
 (include stanzas/test_keeper_fs.inc)
 (include stanzas/test_keeper_fs_write_containment.inc)
 (include stanzas/test_keeper_gh_timeout_floor.inc)
+(include stanzas/test_keeper_identity_drift_counter.inc)
 (include stanzas/test_keeper_long_turn_9943.inc)
 (include stanzas/test_keeper_memory_bank_consensus_re_10399.inc)
 (include stanzas/test_keeper_meta_canonical_seed.inc)
@@ -1181,11 +1236,14 @@
 (include stanzas/test_keeper_supervisor_observability_10125.inc)
 (include stanzas/test_keeper_supervisor_write_meta_source.inc)
 (include stanzas/test_keeper_supervisor_finally_cancel_swallow.inc)
+(include stanzas/test_failing_minimum_essential.inc)
 (include stanzas/test_keeper_tool_emission_hook.inc)
 (include stanzas/test_keeper_tool_matrix.inc)
 (include stanzas/test_keeper_tool_policy_paths.inc)
 (include stanzas/test_keeper_turn_fsm_tla_parity.inc)
+(include stanzas/test_keeper_unified_tool_event_order_source.inc)
 (include stanzas/test_keeper_turn_livelock_10121.inc)
+(include stanzas/test_keeper_turn_helpers_side_effect_metric.inc)
 (include stanzas/test_keeper_turn_slot_force_release.inc)
 (include stanzas/test_keeper_turn_slot_holders.inc)
 (include stanzas/test_keeper_turn_slot_release_cancel_safe.inc)
@@ -1208,6 +1266,7 @@
 (include stanzas/test_oas_worker_exec_cancel_cleanup.inc)
 (include stanzas/test_oas_worker_exec_checkpoint.inc)
 (include stanzas/test_openapi_api_e2e.inc)
+(include stanzas/test_masc_oas_bridge_cancel_boundary.inc)
 (include stanzas/test_operator_control.inc)
 (include stanzas/test_operator_mcp_e2e.inc)
 (include stanzas/test_otel_genai.inc)
@@ -1242,6 +1301,7 @@
 (include stanzas/test_transport_bridge_seal.inc)
 (include stanzas/test_work_as_heartbeat.inc)
 (include stanzas/test_worker_safety_gates.inc)
+(include stanzas/test_ws_standalone_close_payload.inc)
 
 (test
  (name test_dashboard_yjs)
@@ -1249,6 +1309,37 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_dashboard_o5_feeds)
+ (modules test_dashboard_o5_feeds)
+ (libraries masc_test_deps))
+
+(test
  (name test_masc_contract_catalog)
  (modules test_masc_contract_catalog)
+ (libraries masc_test_deps))
+
+(test
+ (name test_graphql_api_coverage)
+ (modules test_graphql_api_coverage)
+ (libraries masc_test_deps))
+
+(test
+ (name test_misc_coverage)
+ (modules test_misc_coverage)
+ (libraries masc_test_deps))
+
+(test
+ (name test_relay_coverage)
+ (modules test_relay_coverage)
+ (libraries masc_test_deps))
+
+; RFC-0057 Phase 0 — regression test for bin/gen_tool_descriptors.ml.
+; Compares generated masc_config tool_schema against the hand-written
+; one in Tool_schemas_misc field-by-field on Yojson values, so any
+; drift in description text, enum ordering, or additionalProperties
+; surfaces immediately. Single-stanza form (not Group 1) so dune
+; picks up the new (test ...) without churning the 700+ name list.
+(test
+ (name test_tool_descriptors_gen)
+ (modules test_tool_descriptors_gen)
  (libraries masc_test_deps))

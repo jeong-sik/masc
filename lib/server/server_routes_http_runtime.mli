@@ -161,6 +161,9 @@ val readiness_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** {1 Board} *)
 
 val board_post_detail_json :
+  include_moderation:bool ->
+  blind_votes:bool ->
+  config:Coord.config option ->
   voter:string option ->
   response_format:string ->
   post_id:string ->
@@ -168,7 +171,13 @@ val board_post_detail_json :
 (** [board_post_detail_json ~voter ~response_format ~post_id] returns
     [(status, json_string)] for [GET /api/v1/board/<post_id>].
     When [voter] is supplied, post/comment rows include vote state for
-    that voter.
+    that voter.  When [include_moderation] is [true], rows also include
+    operator-only moderation projection fields.  When [blind_votes] is
+    [true], rows hide score fields until that voter has voted.
+    operator-only moderation projection fields.  When [config] is
+    supplied, post rows include contributor-quality projection fields.
+    When [blind_votes] is [true], rows hide score fields until that
+    voter has voted.
 
     {2 response_format values (case-insensitive, trimmed)}
 

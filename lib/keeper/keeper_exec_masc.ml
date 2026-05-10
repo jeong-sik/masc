@@ -37,16 +37,20 @@ let handle_keeper_autoresearch_tool
    See memory/handoff-2026-04-18-masc-tool-failure-investigation.md R1. *)
 let keeper_masc_path_blocked
       ~(config : Coord.config)
-      ~(meta : keeper_meta)
+      ~(keeper_name : string)
       ~(name : string)
       ~(args : Yojson.Safe.t)
   =
-  let is_read_only = Tool_dispatch.is_read_only name in
-  let effective_paths =
-    if is_read_only
-    then keeper_effective_allowed_paths ~meta
-    else keeper_effective_write_allowed_paths ~meta
-  in
+  match find_registry_meta ~keeper_name ~source_layer:"masc_path_resolver" with
+  | None ->
+    Some (error_json (Printf.sprintf "keeper not found in registry: %s" keeper_name))
+  | Some meta ->
+    let is_read_only = Tool_dispatch.is_read_only name in
+    let effective_paths =
+      if is_read_only
+      then keeper_effective_allowed_paths ~meta
+      else keeper_effective_write_allowed_paths ~meta
+    in
   if effective_paths = []
   then None
   else (
@@ -62,10 +66,13 @@ let keeper_masc_path_blocked
       if is_read_only
       then resolve_keeper_read_path ~config ~meta ~raw_path:raw
       else
-        Keeper_alerting_path.resolve_keeper_target_path
+        match Keeper_alerting_path.resolve_keeper_target_path
           ~config
           ~allowed_paths:effective_paths
           ~raw_path:raw
+        with
+        | Error rej -> Error (Keeper_alerting_path.rejection_to_user_message rej)
+        | Ok p -> Ok p
     in
     List.find_map
       (fun raw ->
@@ -133,11 +140,12 @@ let handle_keeper_masc_code_read
 
 let handle_keeper_masc_tool
       ~(config : Coord.config)
-      ~(meta : keeper_meta)
+      ~(keeper_name : string)
       ~(name : string)
       ~(args : Yojson.Safe.t)
   =
-  match keeper_masc_path_blocked ~config ~meta ~name ~args with
+  with_registry_meta ~keeper_name ~source_layer:"masc_path_resolver" @@ fun meta ->
+  match keeper_masc_path_blocked ~config ~keeper_name ~name ~args with
   | Some err -> error_json err
   | None ->
     (match Tool_dispatch.mint_token ~name with
@@ -196,17 +204,24 @@ let handle_keeper_masc_tool
 
 let handle_registered_keeper_tool
       ~(config : Coord.config)
-      ~(meta : keeper_meta)
+      ~(keeper_name : string)
       ~(name : string)
       ~(args : Yojson.Safe.t)
-  =
+  : string option =
   match Tool_dispatch.lookup_tag name with
   | Some Tool_dispatch.Mod_autoresearch ->
-    Some (handle_keeper_autoresearch_tool ~config ~meta ~name ~args)
+    (match
+       find_registry_meta ~keeper_name ~source_layer:"masc_path_resolver"
+     with
+     | None ->
+       Some
+         (error_json
+            (Printf.sprintf "keeper not found in registry: %s" keeper_name))
+     | Some meta -> Some (handle_keeper_autoresearch_tool ~config ~meta ~name ~args))
   | Some _ ->
-    Some (handle_keeper_masc_tool ~config ~meta ~name ~args)
+    Some (handle_keeper_masc_tool ~config ~keeper_name ~name ~args)
   | None when Tool_dispatch.is_registered name ->
-    Some (handle_keeper_masc_tool ~config ~meta ~name ~args)
+    Some (handle_keeper_masc_tool ~config ~keeper_name ~name ~args)
   | None -> None
 ;;
 

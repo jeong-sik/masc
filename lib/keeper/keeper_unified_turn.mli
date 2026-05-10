@@ -131,6 +131,27 @@ type turn_event_bus_summary = {
 val summarize_turn_event_bus :
   Agent_sdk.Event_bus.event list -> turn_event_bus_summary
 
+(** Turn-local tool-event pairing state used to detect event-bus integrity
+    failures before side-effect retry logic falls back to unknown input.
+    Exposed for targeted tests. *)
+type turn_tool_event_tracker
+
+val create_turn_tool_event_tracker : unit -> turn_tool_event_tracker
+
+val record_turn_tool_events :
+  ?has_mutating_side_effect_with_input:
+    (tool_name:string -> input:Yojson.Safe.t -> bool) ->
+  keeper_name:string ->
+  turn_tool_event_tracker ->
+  Agent_sdk.Event_bus.event list ->
+  unit
+
+val turn_tool_event_integrity_error :
+  turn_tool_event_tracker -> Agent_sdk.Error.sdk_error option
+
+val committed_mutating_tools_from_events :
+  turn_tool_event_tracker -> string list
+
 (** Build the keeper overflow event from either a drained event-bus
     signal or the structured OAS error fallback. Exposed for tests. *)
 val context_overflow_event_of_error :
@@ -223,6 +244,27 @@ val is_ollama_saturated :
   string ->
   bool
 
+(** Upper bound on consecutive saturation skips per keeper (env
+    [MASC_MAX_CONSECUTIVE_SATURATION_SKIPS], default 5, floored at
+    1).  When a keeper exceeds this count its next dispatch escapes
+    the saturation pre-skip path so a stuck or stale probe cannot
+    starve the keeper indefinitely. *)
+val max_consecutive_saturation_skips : unit -> int
+
+(** Current consecutive-skip count for [keeper_name].  Returns 0 when
+    the keeper has no recorded skips. *)
+val saturation_skip_count_get : keeper_name:string -> int
+
+(** Increment and return the new consecutive-skip count for
+    [keeper_name]. *)
+val saturation_skip_count_inc : keeper_name:string -> int
+
+(** Reset [keeper_name]'s consecutive-skip count to zero. *)
+val saturation_skip_count_reset : keeper_name:string -> unit
+
+(** Test helper: clear all per-keeper consecutive-skip counters. *)
+val saturation_skip_count_clear_all : unit -> unit
+
 (** Pure merge step for runtime-owned fail-open rotation candidates. The
     active path feeds this from the live cascade catalog: catalog order is
     preserved while retaining only reserved recovery profiles and
@@ -267,6 +309,7 @@ val run_keeper_cycle :
   ?semaphore_wait_ms:int ->
   ?turn_slot_control:Keeper_turn_slot.keeper_turn_slot_control ->
   ?shared_context:Agent_sdk.Context.t ->
+  ?selected_item:(string * Cascade_ref.cascade_item) ->
   unit ->
   (Keeper_types.keeper_meta, Agent_sdk.Error.sdk_error) result
 
@@ -279,5 +322,6 @@ val run_unified_turn :
   ?semaphore_wait_ms:int ->
   ?turn_slot_control:Keeper_turn_slot.keeper_turn_slot_control ->
   ?shared_context:Agent_sdk.Context.t ->
+  ?selected_item:(string * Cascade_ref.cascade_item) ->
   unit ->
   (Keeper_types.keeper_meta, Agent_sdk.Error.sdk_error) result

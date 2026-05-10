@@ -64,6 +64,18 @@ let phase_count phase =
     ~labels:[("phase", phase)]
     ()
 
+let snapshot_latency_bucket le =
+  Prom.metric_value_or_zero
+    Prom.metric_dashboard_snapshot_latency_seconds_bucket
+    ~labels:[("le", le)]
+    ()
+
+let dashboard_all_zero_value () =
+  Prom.metric_value_or_zero
+    Prom.metric_dashboard_metric_all_zeros
+    ~labels:[("keeper_name", "__dashboard__")]
+    ()
+
 let test_record_timings_observes_prometheus () =
   let phases = [
     "total"; "snapshot"; "operations"; "enrich";
@@ -72,10 +84,15 @@ let test_record_timings_observes_prometheus () =
   let snapshot_before =
     List.map (fun p -> p, phase_sum p, phase_count p) phases
   in
+  let snapshot_bucket_5_before = snapshot_latency_bucket "5" in
+  let snapshot_bucket_inf_before = snapshot_latency_bucket "+Inf" in
   let per_keeper_sum_before = phase_sum "enrich_per_keeper" in
   let per_keeper_count_before = phase_count "enrich_per_keeper" in
   let t = sample_timings () in
   DE.record_render_phase_timings t;
+  check (float 1e-9) "normal render clears all-zero diagnostic"
+    0.0
+    (dashboard_all_zero_value ());
   let expected_increment = function
     | "total" -> t.total_ms /. 1000.0
     | "snapshot" -> t.snapshot_ms /. 1000.0
@@ -96,6 +113,12 @@ let test_record_timings_observes_prometheus () =
       (count_before +. 1.0)
       (phase_count phase)
   ) snapshot_before;
+  check (float 1e-6) "dashboard snapshot latency 5s bucket +1"
+    (snapshot_bucket_5_before +. 1.0)
+    (snapshot_latency_bucket "5");
+  check (float 1e-6) "dashboard snapshot latency +Inf bucket +1"
+    (snapshot_bucket_inf_before +. 1.0)
+    (snapshot_latency_bucket "+Inf");
   (* enrich_per_keeper is observed once per keeper (n_keepers=9) so that
      Prometheus [sum / count] gives the actual average per-keeper enrich
      time weighted by fleet size, instead of averaging render-level
@@ -123,6 +146,26 @@ let test_record_timings_skips_per_keeper_when_idle () =
     (total_count_before +. 1.0)
     (phase_count "total")
 
+let test_record_timings_flags_all_zero_suboperations () =
+  let all_zero : DE.render_phase_timings_ms = {
+    total_ms = 1200.0;
+    snapshot_ms = 0.0;
+    operations_ms = 0.0;
+    enrich_ms = 0.0;
+    data_load_ms = 0.0;
+    assemble_ms = 0.0;
+    n_keepers = 3;
+  } in
+  DE.record_render_phase_timings all_zero;
+  check (float 1e-9) "non-empty all-zero render raises diagnostic"
+    1.0
+    (dashboard_all_zero_value ());
+  let idle = { all_zero with n_keepers = 0 } in
+  DE.record_render_phase_timings idle;
+  check (float 1e-9) "idle all-zero render clears diagnostic"
+    0.0
+    (dashboard_all_zero_value ())
+
 let () =
   run "dashboard_render_timing_9766" [
     ("phase_timing", [
@@ -138,5 +181,7 @@ let () =
           test_record_timings_observes_prometheus;
         test_case "idle render skips enrich_per_keeper observation" `Quick
           test_record_timings_skips_per_keeper_when_idle;
+        test_case "record timings flags all-zero sub-operation metrics" `Quick
+          test_record_timings_flags_all_zero_suboperations;
       ]);
   ]

@@ -50,9 +50,10 @@ let () =
     ~help:
       "Boot-time provider × MCP-config-construct audit \
        (PR-Mp3b / Leak 12): a provider has an auto-construct path \
-       but its env flag defaults to off (e.g. codex_cli + \
-       MASC_SYNC_CODEX_MCP_CONFIG=false). Operator must opt in or \
-       the keeper will fail tool calls on this lane. Labels: \
+       but its env flag defaults to off and is not enabled in the \
+       effective startup environment (e.g. codex_cli + \
+       MASC_SYNC_CODEX_MCP_CONFIG unset/false). Operator must opt in \
+       or the keeper will fail tool calls on this lane. Labels: \
        provider, env_flag."
     ()
 
@@ -683,15 +684,24 @@ let audit_provider_mcp_config_paths (_state : Mcp_server.server_state) =
         match r.Keeper_mcp_provider_audit.construct with
         | Auto_construct_active
             { default_when_unset = false; env_flag; _ } ->
-            Log.Misc.warn
-              "[mcp_audit:default_off] provider=%s env_flag=%s — \
-               operator must set %s=true for this lane to emit MCP \
-               config"
-              r.provider env_flag env_flag;
-            Prometheus.inc_counter
-              "masc_mcp_audit_default_off_total"
-              ~labels:[("provider", r.provider);
-                       ("env_flag", env_flag)] ()
+            if
+              Keeper_mcp_provider_audit.auto_construct_effectively_active r
+            then
+              Log.Misc.info
+                "[mcp_audit:default_off_overridden] provider=%s env_flag=%s — \
+                 effective env enables this lane"
+                r.provider env_flag
+            else begin
+              Log.Misc.warn
+                "[mcp_audit:default_off] provider=%s env_flag=%s — \
+                 operator must set %s=true for this lane to emit MCP \
+                 config"
+                r.provider env_flag env_flag;
+              Prometheus.inc_counter
+                "masc_mcp_audit_default_off_total"
+                ~labels:[("provider", r.provider);
+                         ("env_flag", env_flag)] ()
+            end
         | _ -> ())
         active;
       List.iter (fun r ->
@@ -1466,14 +1476,20 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          the default noop sink instead of the Prometheus-backed one. *)
       Llm_metric_bridge.install ();
       Log.Server.info "Llm_metric_bridge installed (masc_llm_provider_http_status_total)";
+      (* #13885: install backend mutex observers from the top-level
+         masc_mcp layer.  Backend/coord sub-libraries cannot depend on
+         Prometheus without creating dependency cycles, but the global
+         observer refs can be wired before any FileSystem backend writes. *)
+      Backend_mutex_metrics.install ();
+      Log.Server.info "Backend_mutex_metrics installed (masc_backend_mutex_*)";
       (* Forward Agent_sdk.Log records (per-turn timing from oas#816 and
          any subsequent structured emits) into the masc-mcp log ring so
          they land in ~/.masc/logs/system_log_*.jsonl alongside
          masc-mcp's own records.  Without this, OAS's structured Log
          global sink registry is empty and every Log.info inside
          agent_sdk is a silent drop. *)
-      Oas_log_bridge.install ();
-      Log.Server.info "Oas_log_bridge installed (agent_sdk.Log -> masc structured log)";
+      Agent_sdk_log_bridge.install ();
+      Log.Server.info "Agent_sdk_log_bridge installed (agent_sdk.Log -> masc structured log)";
       let state =
         create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
       in

@@ -665,7 +665,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
             name
             (if paused then "pause" else "resume");
           Prometheus.inc_counter
-            Prometheus.metric_keeper_paused_state_persist_errors
+            Keeper_metrics.metric_keeper_paused_state_persist_errors
             ~labels:[("phase", "boot_resume_persist");
                      ("reason", "meta_missing")]
             ()
@@ -676,7 +676,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
             (if paused then "pause" else "resume")
             err;
           Prometheus.inc_counter
-            Prometheus.metric_keeper_paused_state_persist_errors
+            Keeper_metrics.metric_keeper_paused_state_persist_errors
             ~labels:[("phase", "boot_resume_persist");
                      ("reason", "read_meta_error")]
             ()
@@ -703,7 +703,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
             "keeper %s boot: meta missing — skipping auto-resume check"
             name;
           Prometheus.inc_counter
-            Prometheus.metric_keeper_paused_state_persist_errors
+            Keeper_metrics.metric_keeper_paused_state_persist_errors
             ~labels:[("phase", "boot_resume_check");
                      ("reason", "meta_missing")]
             ()
@@ -713,7 +713,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
             name
             err;
           Prometheus.inc_counter
-            Prometheus.metric_keeper_paused_state_persist_errors
+            Keeper_metrics.metric_keeper_paused_state_persist_errors
             ~labels:[("phase", "boot_resume_check");
                      ("reason", "read_meta_error")]
             ()
@@ -901,7 +901,7 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
                name
                err;
              Prometheus.inc_counter
-               Prometheus.metric_keeper_paused_state_persist_errors
+               Keeper_metrics.metric_keeper_paused_state_persist_errors
                ~labels:[("phase", "directive");
                         ("reason", "read_meta_error")]
                ();
@@ -918,7 +918,7 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
                action_str
                name;
              Prometheus.inc_counter
-               Prometheus.metric_keeper_paused_state_persist_errors
+               Keeper_metrics.metric_keeper_paused_state_persist_errors
                ~labels:[("phase", "directive");
                         ("reason", "meta_missing")]
                ();
@@ -1421,7 +1421,7 @@ let handle_keeper_get_subroutes state req request reqd =
         | Ok (Some m) ->
           let routing =
             Keeper_cascade_routing.select_cascade
-              ~base_cascade:m.cascade_name ~phase:current
+              ~base_cascade:(Keeper_types.cascade_name_of_meta m) ~phase:current
           in
           let models =
             Cascade_runtime.models_of_cascade_name
@@ -1468,7 +1468,7 @@ let handle_keeper_get_subroutes state req request reqd =
         match meta with
         | Ok (Some m) ->
           Cascade_runtime.models_of_cascade_name
-            (Keeper_cascade_profile.Runtime_name m.cascade_name)
+            (Keeper_cascade_profile.Runtime_name (Keeper_types.cascade_name_of_meta m))
         | _ -> ["(unknown)"]
       in
       let last_provider =

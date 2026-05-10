@@ -7,6 +7,12 @@ open Masc_domain
 open Coord_utils
 open Coord_state
 
+(** Structured result of zombie cleanup to eliminate string-based parsing at call sites. *)
+type cleanup_zombie_result =
+  | No_agents_dir
+  | No_zombies
+  | Cleaned of { count : int; names : string list; released_tasks : int; skipped : int }
+
 (* Callback refs and types are now in Coord_hooks. *)
 
 (* Board artifact cleanup is wired via Coord_hooks callbacks at startup. *)
@@ -48,7 +54,7 @@ let cleanup_zombies
     if Sys.file_exists agents_path then [ agents_path ] else []
   in
   if scan_paths = [] then
-    "No agents directory"
+    No_agents_dir
   else begin
     (* Phase 1: Detect zombie agents (no side effects) *)
     let zombie_entries = ref [] in (* (name, path) list *)
@@ -99,7 +105,7 @@ let cleanup_zombies
     ) scan_paths;
 
     if !zombie_entries = [] then
-      "No zombie agents found"
+      No_zombies
     else begin
       (* Phase 2: Transition status to Inactive + stop heartbeats + stop keeper fibers.
          Note: If later phases fail (task release or file deletion), the agent
@@ -181,15 +187,12 @@ let cleanup_zombies
       let total = List.length !zombie_entries in
       let cleaned = List.length !successfully_cleaned in
       let skipped = total - cleaned in
-      let task_note = if !released_tasks = [] then ""
-        else Printf.sprintf ", released %d orphan task(s)" (List.length !released_tasks)
-      in
-      if skipped > 0 then
-        Printf.sprintf "Cleaned %d/%d zombie(s): %s%s (%d skipped due to errors)"
-          cleaned total (String.concat ", " !successfully_cleaned) task_note skipped
-      else
-        Printf.sprintf "Cleaned up %d zombie agent(s): %s%s"
-          cleaned (String.concat ", " !successfully_cleaned) task_note
+      Cleaned
+        { count = cleaned
+        ; names = !successfully_cleaned
+        ; released_tasks = List.length !released_tasks
+        ; skipped
+        }
     end
   end
 
@@ -202,7 +205,27 @@ let gc config ?(days=7) () =
 
   (* 1. Cleanup zombies *)
   let zombie_result = cleanup_zombies config in
-  results := zombie_result :: !results;
+  let zombie_str =
+    match zombie_result with
+    | No_agents_dir -> "No agents directory"
+    | No_zombies -> "No zombie agents found"
+    | Cleaned { count; names; released_tasks; skipped } ->
+      let task_note =
+        if released_tasks = 0 then ""
+        else Printf.sprintf ", released %d orphan task(s)" released_tasks
+      in
+      if skipped > 0 then
+        Printf.sprintf
+          "Cleaned %d/%d zombie(s): %s%s (%d skipped due to errors)"
+          count
+          (count + skipped)
+          (String.concat ", " names)
+          task_note
+          skipped
+      else
+        Printf.sprintf "Cleaned up %d zombie agent(s): %s%s" count (String.concat ", " names) task_note
+  in
+  results := zombie_str :: !results;
 
   (* 2. Archive stale tasks (older than N days, not completed) *)
   let cutoff_time =

@@ -295,9 +295,19 @@ let message_to_json (m : Agent_sdk.Types.message) : Yojson.Safe.t =
              List.find_map
                (function
                  | Agent_sdk.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
-                 | _ -> None)
+                 (* Other content_block variants do not carry a tool_use_id. *)
+                 | Agent_sdk.Types.Text _
+                 | Agent_sdk.Types.Thinking _
+                 | Agent_sdk.Types.RedactedThinking _
+                 | Agent_sdk.Types.ToolUse _
+                 | Agent_sdk.Types.Image _
+                 | Agent_sdk.Types.Document _
+                 | Agent_sdk.Types.Audio _ -> None)
                m.content
-         | _ -> None)
+         (* Non-Tool roles never own a tool_call_id. *)
+         | Agent_sdk.Types.System
+         | Agent_sdk.Types.User
+         | Agent_sdk.Types.Assistant -> None)
   in
   (* SSOT: structured [content_blocks] only. The previous flat [content]
      field was a duplicate of [text_of_message m] used by legacy
@@ -371,21 +381,42 @@ let tool_use_ids_of_message (msg : Agent_sdk.Types.message) : string list =
   List.filter_map
     (function
       | Agent_sdk.Types.ToolUse { id; _ } -> Some id
-      | _ -> None)
+      (* Only [ToolUse] carries a tool-use id; other blocks contribute none. *)
+      | Agent_sdk.Types.Text _
+      | Agent_sdk.Types.Thinking _
+      | Agent_sdk.Types.RedactedThinking _
+      | Agent_sdk.Types.ToolResult _
+      | Agent_sdk.Types.Image _
+      | Agent_sdk.Types.Document _
+      | Agent_sdk.Types.Audio _ -> None)
     msg.content
 
 let tool_result_ids_of_message (msg : Agent_sdk.Types.message) : string list =
   List.filter_map
     (function
       | Agent_sdk.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
-      | _ -> None)
+      (* Only [ToolResult] carries a tool_use_id reference; others contribute none. *)
+      | Agent_sdk.Types.Text _
+      | Agent_sdk.Types.Thinking _
+      | Agent_sdk.Types.RedactedThinking _
+      | Agent_sdk.Types.ToolUse _
+      | Agent_sdk.Types.Image _
+      | Agent_sdk.Types.Document _
+      | Agent_sdk.Types.Audio _ -> None)
     msg.content
 
 let has_tool_result_block (msg : Agent_sdk.Types.message) : bool =
   List.exists
     (function
       | Agent_sdk.Types.ToolResult _ -> true
-      | _ -> false)
+      (* Only [ToolResult] qualifies; other blocks are not tool-result evidence. *)
+      | Agent_sdk.Types.Text _
+      | Agent_sdk.Types.Thinking _
+      | Agent_sdk.Types.RedactedThinking _
+      | Agent_sdk.Types.ToolUse _
+      | Agent_sdk.Types.Image _
+      | Agent_sdk.Types.Document _
+      | Agent_sdk.Types.Audio _ -> false)
     msg.content
 
 (** Trim messages to at most [max_count] while preserving ToolUse/ToolResult
@@ -464,7 +495,14 @@ let repair_dangling_tool_use_messages
         (function
           | Agent_sdk.Types.ToolUse { id; _ } ->
               not (List.mem id next_tool_result_ids)
-          | _ -> false)
+          (* Only [ToolUse] blocks can be dangling without a paired ToolResult. *)
+          | Agent_sdk.Types.Text _
+          | Agent_sdk.Types.Thinking _
+          | Agent_sdk.Types.RedactedThinking _
+          | Agent_sdk.Types.ToolResult _
+          | Agent_sdk.Types.Image _
+          | Agent_sdk.Types.Document _
+          | Agent_sdk.Types.Audio _ -> false)
         current.content
     in
     if not has_dangling then current
@@ -516,7 +554,14 @@ let repair_orphan_tool_result_messages
                 (function
                   | Agent_sdk.Types.ToolResult { tool_use_id; _ } ->
                       not (List.mem tool_use_id prev_tool_use_ids)
-                  | _ -> false)
+                  (* Only [ToolResult] can be orphaned w.r.t. prior ToolUse ids. *)
+                  | Agent_sdk.Types.Text _
+                  | Agent_sdk.Types.Thinking _
+                  | Agent_sdk.Types.RedactedThinking _
+                  | Agent_sdk.Types.ToolUse _
+                  | Agent_sdk.Types.Image _
+                  | Agent_sdk.Types.Document _
+                  | Agent_sdk.Types.Audio _ -> false)
                 msg.content
             in
             if not has_orphan then msg
@@ -735,7 +780,7 @@ let migrate_session_history_logs
        | Ok () -> ()
        | Error detail ->
            Prometheus.inc_counter
-             Prometheus.metric_keeper_checkpoint_failures
+             Keeper_metrics.metric_keeper_checkpoint_failures
              ~labels:[("operation", "migrate_main_history")]
              ();
            Log.Keeper.error "migrate_session_history_logs: save main history failed for %s: %s"
@@ -747,7 +792,7 @@ let migrate_session_history_logs
        | Ok () -> ()
        | Error detail ->
            Prometheus.inc_counter
-             Prometheus.metric_keeper_checkpoint_failures
+             Keeper_metrics.metric_keeper_checkpoint_failures
              ~labels:[("operation", "migrate_internal_history")]
              ();
            Log.Keeper.error "migrate_session_history_logs: save internal history failed for %s: %s"
@@ -777,7 +822,14 @@ let persist_message ?source session msg =
     msg.content
     |> List.filter_map (function
          | Agent_sdk.Types.Text text -> Some text
-         | _ -> None)
+         (* Non-Text blocks contribute no inline text to the legacy field. *)
+         | Agent_sdk.Types.Thinking _
+         | Agent_sdk.Types.RedactedThinking _
+         | Agent_sdk.Types.ToolUse _
+         | Agent_sdk.Types.ToolResult _
+         | Agent_sdk.Types.Image _
+         | Agent_sdk.Types.Document _
+         | Agent_sdk.Types.Audio _ -> None)
     |> String.concat "\n"
   in
   if classify_history_entry ~source:source_text ~content:content_text = Drop_line then
@@ -1293,25 +1345,25 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
   (match oas_result with
    | Error (Parse_error detail) ->
        Prometheus.inc_counter
-         Prometheus.metric_keeper_checkpoint_failures
+         Keeper_metrics.metric_keeper_checkpoint_failures
          ~labels:[("operation", "oas_parse")]
          ();
        Log.Keeper.error "keeper:%s OAS checkpoint parse error: %s" trace_id detail
    | Error (Store_error detail) ->
        Prometheus.inc_counter
-         Prometheus.metric_keeper_checkpoint_failures
+         Keeper_metrics.metric_keeper_checkpoint_failures
          ~labels:[("operation", "oas_store")]
          ();
        Log.Keeper.error "keeper:%s OAS checkpoint store error: %s" trace_id detail
    | Error (Io_error detail) ->
        Prometheus.inc_counter
-         Prometheus.metric_keeper_checkpoint_failures
+         Keeper_metrics.metric_keeper_checkpoint_failures
          ~labels:[("operation", "oas_io")]
          ();
        Log.Keeper.error "keeper:%s OAS checkpoint I/O error: %s" trace_id detail
    | Error (Sdk_other_error detail) ->
        Prometheus.inc_counter
-         Prometheus.metric_keeper_checkpoint_failures
+         Keeper_metrics.metric_keeper_checkpoint_failures
          ~labels:[("operation", "oas_sdk")]
          ();
        Log.Keeper.error "keeper:%s OAS checkpoint SDK error: %s" trace_id detail
@@ -1329,7 +1381,7 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
     try load_latest_checkpoint session
     with ex ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_checkpoint_failures
+        Keeper_metrics.metric_keeper_checkpoint_failures
         ~labels:[("operation", "load_legacy")]
         ();
       Log.Keeper.error "keeper:%s checkpoint load failed: %s" trace_id
@@ -1375,7 +1427,7 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
          | Ok () -> ()
          | Error detail ->
              Prometheus.inc_counter
-               Prometheus.metric_keeper_checkpoint_failures
+               Keeper_metrics.metric_keeper_checkpoint_failures
                ~labels:[("operation", "migration_save")]
                ();
              Log.Keeper.error
@@ -1402,7 +1454,7 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
          (session, Some ctx)
        with ex ->
          Prometheus.inc_counter
-           Prometheus.metric_keeper_checkpoint_failures
+           Keeper_metrics.metric_keeper_checkpoint_failures
            ~labels:[("operation", "restore_legacy")]
            ();
          Log.Keeper.error "keeper:%s checkpoint restore failed: %s"

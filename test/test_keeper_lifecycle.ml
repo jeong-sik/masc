@@ -1,11 +1,13 @@
 open Alcotest
 
 module KEC = Masc_mcp.Keeper_exec_context
+module KCP = Masc_mcp.Keeper_compact_policy
 module KCC = Masc_mcp.Keeper_context_core
 module KAR = Masc_mcp.Keeper_agent_run
 module KMP = Masc_mcp.Keeper_memory_policy
 module KT = Masc_mcp.Keeper_types
 module KR = Masc_mcp.Keeper_registry
+module KHB = Masc_mcp.Keeper_heartbeat_snapshot
 module KHS = Masc_mcp.Keeper_keepalive_signal
 module KST = Masc_mcp.Keeper_state_machine
 module KCB = Masc_mcp.Keeper_turn_cascade_budget
@@ -31,6 +33,29 @@ let cleanup_dir dir =
         Unix.unlink path
   in
   try rm dir with _ -> ()
+
+let write_lines path lines =
+  KT.mkdir_p (Filename.dirname path);
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+      List.iter
+        (fun line ->
+          output_string oc line;
+          output_char oc '\n')
+        lines)
+
+let persistence_read_drop_total ~surface ~reason =
+  P.metric_value_or_zero P.metric_persistence_read_drops
+    ~labels:[("surface", surface); ("reason", reason)]
+    ()
+
+let check_persistence_read_drop_delta ~surface ~reason ~before ~delta =
+  check (float 0.0001)
+    (Printf.sprintf "%s/%s persistence read drops" surface reason)
+    (before +. float_of_int delta)
+    (persistence_read_drop_total ~surface ~reason)
 
 let with_env key value f =
   let prev = Sys.getenv_opt key in
@@ -364,7 +389,7 @@ let test_compaction_callback_failure_records_coverage_gap () =
       let labels = [ ("callback", "on_compaction_started") ] in
       let before =
         P.metric_value_or_zero
-          P.metric_keeper_lifecycle_callback_failures
+          Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
           ~labels
           ()
       in
@@ -386,7 +411,7 @@ let test_compaction_callback_failure_records_coverage_gap () =
       check (float 0.0001) "callback failure metric increments"
         (before +. 1.0)
         (P.metric_value_or_zero
-           P.metric_keeper_lifecycle_callback_failures
+           Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
            ~labels
            ());
       match TCG.read_recent ~masc_root:base_dir ~n:1 with
@@ -547,6 +572,88 @@ let test_apply_post_turn_lifecycle_handoffs_after_compaction () =
           check bool "new trace checkpoint exists" true
             (List.length (ctx_messages loaded) > 0)
       | None -> fail "expected rollover checkpoint in new trace")
+
+let test_handoff_callback_failure_records_coverage_gap () =
+  let base_dir = temp_dir "keeper_lifecycle_handoff_callback_gap" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let meta =
+        let base =
+          make_keeper_meta ~name:"handoff-gap-keeper"
+            ~trace_id:"trace-handoff-gap" ()
+        in
+        {
+          base with
+          auto_handoff = true;
+          handoff_threshold = 0.0;
+          handoff_cooldown_sec = 0;
+          compaction =
+            {
+              base.compaction with
+              ratio_gate = 1.0;
+              message_gate = 0;
+              token_gate = 0;
+              cooldown_sec = 0;
+            };
+        }
+      in
+      let checkpoint =
+        KEC.create ~system_prompt:"stable" ~max_tokens:4096
+        |> fun ctx -> KEC.append ctx (Agent_sdk.Types.user_msg "checkpoint")
+        |> KEC.sync_oas_context
+        |> fun ctx -> save_checkpoint ~base_dir ~meta ~ctx
+      in
+      let labels = [ ("callback", "on_handoff_started") ] in
+      let before =
+        P.metric_value_or_zero
+          Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
+          ~labels
+          ()
+      in
+      let lifecycle =
+        KEC.apply_post_turn_lifecycle
+          ~on_compaction_started:(fun () -> ())
+          ~on_handoff_started:(fun () ->
+            failwith "synthetic handoff callback failure")
+          ~base_dir ~meta
+          ~model:"llama:auto"
+          ~primary_model_max_tokens:4096
+          ~current_turn_overflow_blocker:None
+          ~checkpoint:(Some checkpoint)
+      in
+      check bool "handoff attempted" true lifecycle.handoff_attempted;
+      check (option string) "handoff no failure" None
+        lifecycle.handoff_failure_reason;
+      check bool "handoff emitted" true
+        (Option.is_some lifecycle.handoff_json);
+      check (float 0.0001) "handoff callback failure metric increments"
+        (before +. 1.0)
+        (P.metric_value_or_zero
+           Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
+           ~labels
+           ());
+      match TCG.read_recent ~masc_root:base_dir ~n:1 with
+      | [ row ] ->
+        let open Yojson.Safe.Util in
+        check string "gap source" "keeper_lifecycle_callback"
+          (row |> member "source" |> to_string);
+        check string "gap producer" "on_handoff_started"
+          (row |> member "producer" |> to_string);
+        check string "gap reason" "callback_exception"
+          (row |> member "stale_reason" |> to_string);
+        check string "gap keeper" "handoff-gap-keeper"
+          (row |> member "keeper_name" |> to_string);
+        check string "gap trace" "trace-handoff-gap"
+          (row |> member "trace_id" |> to_string);
+        check bool "gap error recorded" true
+          (contains_substring
+             (row |> member "error" |> to_string)
+             "synthetic handoff callback failure")
+      | _ -> fail "expected one telemetry coverage gap row")
 
 let test_apply_post_turn_lifecycle_handoffs_on_current_turn_overflow_signal ()
     =
@@ -2103,7 +2210,7 @@ let test_compact_if_needed_ts_zero_bypasses_cooldown () =
   let meta = make_gate_only_meta ~last_continuity_update_ts:0.0 ~cooldown_sec:3600 () in
   let ctx = KEC.create ~system_prompt:"sp" ~max_tokens:4096 in
   let now_ts = 1000.0 in (* well within the 3600s cooldown window *)
-  let (_ctx, trigger, decision) = KEC.compact_if_needed ~meta ~now_ts ctx in
+  let (_ctx, trigger, decision) = KCP.compact_if_needed ~meta ~now_ts ctx in
   check (option string) "no compaction triggered (ratio_gate=1.0)" None trigger;
   check string "ts=0.0 bypasses cooldown, not skipped" "blocked:below_thresholds" decision
 
@@ -2127,7 +2234,7 @@ let test_compact_if_needed_emergency_bypass_ignores_cooldown () =
   in
   let ratio = KCC.context_ratio ctx in
   check bool "context ratio is above emergency threshold" true (ratio >= 0.8);
-  let (_ctx, trigger, decision) = KEC.compact_if_needed ~meta ~now_ts ctx in
+  let (_ctx, trigger, decision) = KCP.compact_if_needed ~meta ~now_ts ctx in
   (* Emergency ratio bypasses cooldown → compaction fires (ratio >= ratio_gate=1.0) *)
   check bool "compaction was triggered (emergency bypass)" true (Option.is_some trigger);
   check bool "decision starts with applied:" true (String.starts_with ~prefix:"applied:" decision)
@@ -2152,17 +2259,17 @@ let test_compact_if_needed_records_saved_tokens_metric () =
   let labels = [ ("keeper", meta.name) ] in
   let before_metric =
     Masc_mcp.Prometheus.get_metric_value
-      Masc_mcp.Prometheus.metric_keeper_compaction_saved_tokens
+      Masc_mcp.Keeper_metrics.metric_keeper_compaction_saved_tokens
       ~labels
       ()
     |> Option.value ~default:0.0
   in
   let (compacted_ctx, trigger, decision) =
-    KEC.compact_if_needed ~meta ~now_ts ctx
+    KCP.compact_if_needed ~meta ~now_ts ctx
   in
   let after_metric =
     Masc_mcp.Prometheus.get_metric_value
-      Masc_mcp.Prometheus.metric_keeper_compaction_saved_tokens
+      Masc_mcp.Keeper_metrics.metric_keeper_compaction_saved_tokens
       ~labels
       ()
     |> Option.value ~default:0.0
@@ -2418,7 +2525,7 @@ let test_dispatch_keeper_phase_event_rejection_increments_metric () =
       in
       let before =
         Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Prometheus.metric_keeper_lifecycle_dispatch_rejections
+          Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -2428,7 +2535,7 @@ let test_dispatch_keeper_phase_event_rejection_increments_metric () =
         KST.Compaction_started;
       let after =
         Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Prometheus.metric_keeper_lifecycle_dispatch_rejections
+          Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -2461,7 +2568,7 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
       in
       let before =
         Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Prometheus.metric_keeper_dispatch_event_failures
+          Masc_mcp.Keeper_metrics.metric_keeper_dispatch_event_failures
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -2471,12 +2578,73 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
         KST.Compaction_started;
       let after =
         Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Prometheus.metric_keeper_dispatch_event_failures
+          Masc_mcp.Keeper_metrics.metric_keeper_dispatch_event_failures
           ~labels ()
         |> Option.value ~default:0.0
       in
       check bool "keepalive registry rejection metric increments" true
         (after > before))
+
+let test_heartbeat_history_fallback_counts_malformed_rows () =
+  let base_dir = temp_dir "keeper_lifecycle_heartbeat_history_drops" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      KR.clear ();
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:None);
+      let meta =
+        make_keeper_meta
+          ~name:"keeper-heartbeat-history-drop"
+          ~trace_id:"trace-heartbeat-history-drop"
+          ()
+      in
+      ignore (KR.register ~base_path:config.base_path meta.name meta);
+      let trace_id =
+        Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id
+      in
+      let history_path = KT.keeper_history_path config trace_id in
+      write_lines history_path
+        [
+          {|{"role":"user","content":"keep continuity","source":"user"}|};
+          "[]";
+          "{not-json";
+        ];
+      let surface = "keeper_heartbeat_history" in
+      let entry_reason = "entry_load_error" in
+      let invalid_reason = "invalid_payload" in
+      let before_entry =
+        persistence_read_drop_total ~surface ~reason:entry_reason
+      in
+      let before_invalid =
+        persistence_read_drop_total ~surface ~reason:invalid_reason
+      in
+      let ctx : _ KT.context =
+        {
+          config;
+          agent_name = "test-operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      KHB.write_heartbeat_snapshot
+        ~ctx
+        ~meta_current:meta
+        ~now_ts:(Time_compat.now ())
+        ~consecutive_hb_failures:0
+        ~timing_ring:[||]
+        ~timing_filled:0;
+      check_persistence_read_drop_delta ~surface ~reason:entry_reason
+        ~before:before_entry ~delta:1;
+      check_persistence_read_drop_delta ~surface ~reason:invalid_reason
+        ~before:before_invalid ~delta:1)
 
 let () =
   run "keeper_lifecycle"
@@ -2495,6 +2663,8 @@ let () =
             test_apply_post_turn_lifecycle_keeps_checkpoint_when_compaction_skips;
           test_case "handoff runs after compaction" `Quick
             test_apply_post_turn_lifecycle_handoffs_after_compaction;
+          test_case "handoff callback failure records coverage gap" `Quick
+            test_handoff_callback_failure_records_coverage_gap;
           test_case "handoff runs on current-turn overflow signal" `Quick
             test_apply_post_turn_lifecycle_handoffs_on_current_turn_overflow_signal;
           test_case "resilience handles reach bridge" `Quick
@@ -2594,5 +2764,7 @@ let () =
             test_dispatch_keeper_phase_event_rejection_increments_metric;
           test_case "keepalive event rejection increments metric" `Quick
             test_keepalive_dispatch_event_rejection_increments_metric;
+          test_case "heartbeat history fallback counts malformed rows" `Quick
+            test_heartbeat_history_fallback_counts_malformed_rows;
         ] );
     ]

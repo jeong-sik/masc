@@ -241,7 +241,7 @@ let record_handoff_artifacts
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
            Prometheus.inc_counter
-             Prometheus.metric_keeper_generation_lineage_failures
+             Keeper_metrics.metric_keeper_generation_lineage_failures
              ~labels:[("keeper", child.name); ("site", "index_append")]
              ();
            Log.Keeper.warn
@@ -249,7 +249,7 @@ let record_handoff_artifacts
              child.name index_path (Printexc.to_string exn))
   | Error err ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_generation_lineage_failures
+        Keeper_metrics.metric_keeper_generation_lineage_failures
         ~labels:[("keeper", child.name); ("site", "manifest_save")]
         ();
       Log.Keeper.warn
@@ -259,10 +259,33 @@ let record_handoff_artifacts
 let load_json_file_opt path =
   if not (Fs_compat.file_exists path) then None
   else
-    try Some (Yojson.Safe.from_string (Fs_compat.load_file path))
+    let surface = "keeper_generation_lineage_manifest" in
+    let report_drop ~reason ~detail =
+      Safe_ops.report_persistence_read_drop
+        ~on_drop:(fun () ->
+          Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+            ~labels:[("surface", surface); ("reason", reason)]
+            ())
+        ~surface
+        ~reason
+        ~path
+        ~detail
+    in
+    try
+      let contents = Fs_compat.load_file path in
+      try Some (Yojson.Safe.from_string contents)
+      with Yojson.Json_error detail ->
+        report_drop
+          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+          ~detail;
+        None
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | _ -> None
+    | exn ->
+        report_drop
+          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+          ~detail:(Printexc.to_string exn);
+        None
 
 let load_jsonl_file path =
   if not (Fs_compat.file_exists path) then []

@@ -78,6 +78,12 @@ val bool_of_env_default : string -> default:bool -> bool
 (** Parse a boolean env var, returning [None] when unset or unrecognized. *)
 val bool_of_env_opt : string -> bool option
 
+(** Parse a raw string as a boolean.
+    Recognizes 1/true/yes/y/on and 0/false/no/n/off (case-insensitive).
+    Returns [None] for other values. Shared parsing logic for
+    [bool_of_env_default] and [bool_of_env_opt]. *)
+val bool_of_string : string -> bool option
+
 (** Parse an integer env var with default and clamping. *)
 val int_of_env_default : string -> default:int -> min_v:int -> max_v:int -> int
 
@@ -202,6 +208,9 @@ val keeper_proactive_task_cooldown_divisor : unit -> int
 val keeper_proactive_task_min_cooldown_sec : unit -> int
 
 val keeper_batch_limit : unit -> int
+val keeper_board_debounce_window_sec : unit -> float
+(** Time window (seconds) to coalesce board signals into a single keeper turn.
+    Env: [MASC_KEEPER_BOARD_DEBOUNCE_SEC], default [2.0], range [0.0..30.0]. *)
 val keeper_tool_cost_max_usd : unit -> float option
 val keeper_max_tools_per_turn : unit -> int
 val keeper_retry_max_tools_per_turn : unit -> int

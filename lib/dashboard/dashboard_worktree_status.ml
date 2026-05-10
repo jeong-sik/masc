@@ -14,7 +14,7 @@ let exec_gate_raw_source argv =
 let run_in_worktree path argv =
   let full_argv = [ "git"; "-C"; path ] @ argv in
   Masc_exec.Exec_gate.run_argv
-    ~actor:"dashboard/worktree_status"
+    ~actor:(Masc_exec.Agent_id.of_string "dashboard/worktree_status")
     ~raw_source:(exec_gate_raw_source full_argv)
     ~summary:"dashboard_worktree_status git"
     ~timeout_sec:Env_config_runtime.Coord_git.local_op_timeout_sec
@@ -95,7 +95,7 @@ let query_pr_for_branch branch =
       in
       let output =
         Masc_exec.Exec_gate.run_argv
-          ~actor:"dashboard/worktree_status"
+          ~actor:(Masc_exec.Agent_id.of_string "dashboard/worktree_status")
           ~raw_source:(exec_gate_raw_source argv)
           ~summary:"dashboard_worktree_status gh pr list"
           ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Gh_shared ())

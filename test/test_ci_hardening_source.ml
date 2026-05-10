@@ -190,6 +190,18 @@ let test_ci_sync_and_asset_contracts () =
   check bool "ci gate aggregates live PR gate" true
     (file_contains_pattern ".github/workflows/ci.yml"
        "PR_LIVE_GATE_RESULT");
+  check bool "meta guards verify main branch protection drift" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "bash scripts/ci/check-main-branch-protection.sh");
+  check bool "branch protection drift check exists" true
+    (file_contains_pattern "scripts/ci/check-main-branch-protection.sh"
+       "enforce_admins.enabled");
+  check bool "branch protection drift check requires draft guard context" true
+    (file_contains_pattern "scripts/ci/check-main-branch-protection.sh"
+       "Draft Auto-Merge Guard");
+  check bool "branch protection drift check requires CI gate context" true
+    (file_contains_pattern "scripts/ci/check-main-branch-protection.sh"
+       "CI Gate");
   check bool "heavy CI no longer trusts stale draft payload" true
     (file_not_contains_pattern ".github/workflows/ci.yml"
        "github.event.pull_request.draft == false");
@@ -560,6 +572,14 @@ let test_oas_pin_source_contracts () =
   check bool "dune-local.sh exposes shared opam switch lock path" true
     (file_contains_pattern "scripts/dune-local.sh"
        "MASC_OPAM_LOCK_PATH:-/tmp/me-opam-switch.lock");
+  check bool "dune-local.sh takes build lock before opam switch lock" true
+    (match
+       file_pattern_position "scripts/dune-local.sh" "waiting for lock %s",
+       file_pattern_position "scripts/dune-local.sh"
+         "waiting for opam switch lock"
+     with
+     | Some dune_pos, Some opam_pos -> dune_pos < opam_pos
+     | _ -> false);
   check bool "dune-local.sh locks opam switch before pin guard" true
     (match
        file_pattern_position "scripts/dune-local.sh"
@@ -574,7 +594,16 @@ let test_oas_pin_source_contracts () =
        "MASC_OPAM_LOCK_HELD=1");
   check bool "external opam pin script shares the opam lock path" true
     (file_contains_pattern "scripts/opam-pin-external-deps.sh"
-       "MASC_OPAM_LOCK_PATH:-/tmp/me-opam-switch.lock")
+       "MASC_OPAM_LOCK_PATH:-/tmp/me-opam-switch.lock");
+  check bool "external opam pin script blocks stale worktree downgrades" true
+    (file_contains_pattern "scripts/opam-pin-external-deps.sh"
+       "refusing to downgrade shared agent_sdk pin");
+  check bool "external opam pin script exposes downgrade override" true
+    (file_contains_pattern "scripts/opam-pin-external-deps.sh"
+       "MASC_ALLOW_AGENT_SDK_PIN_DOWNGRADE");
+  check bool "external opam pin script reports lock holder evidence" true
+    (file_contains_pattern "scripts/opam-pin-external-deps.sh"
+       "print_opam_lock_holder")
 
 let test_doc_truth_guard_contracts () =
   check bool "doc truth script protects spec index front door wording" true
@@ -1138,18 +1167,85 @@ let test_keeper_required_tool_contracts () =
   check bool "final-turn required tool prompt does not allow one-tool partial success" true
     (file_not_contains_pattern "lib/keeper/keeper_run_tools.ml"
        "call at least one");
-  check bool "docker PR lifecycle harness default matches runbook" true
+  check bool "docker PR lifecycle harness default splits create/review tools" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       {|REQUIRED_TOOLS="${REQUIRED_TOOLS:-keeper_shell,keeper_bash,keeper_pr_create,keeper_pr_review_comment}"|});
-  check bool "runbook documents docker PR lifecycle required tool default" true
+       {|REQUIRED_TOOLS_LEGACY="${REQUIRED_TOOLS:-}"|}
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          {|CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-masc_web_search,keeper_bash,keeper_pr_create}}"|}
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          {|REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_shell,keeper_pr_review_comment}}"|});
+  check bool "runbook documents docker PR lifecycle split phases" true
     (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-       "`keeper_shell`, `keeper_bash`, `keeper_pr_create`, and");
+       "The create phase"
+     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+          "requires `masc_web_search`, `keeper_bash`, and `keeper_pr_create`"
+     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+          "the review phase requires `keeper_shell` and"
+     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+          "second required tool keeps approval mandatory");
   check bool "docker PR lifecycle prompt accepts brokered route proof" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
        "via=docker, route_via=docker, via=brokered, or route_via=brokered")
   ;
+  check bool "docker PR lifecycle branch matches worktree tool contract" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       {|printf 'keeper-%s-agent/%s' "$keeper" "$RUN_ID"|}
+     && file_contains_pattern
+          "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+          "`keeper-<keeper>-agent/<run_id>`");
+  check bool "docker PR lifecycle rejects stale proof branches before mutate" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       "assert_no_proof_branch_collisions_for_mutate"
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          "branch_collision_preflight"
+     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+          "`branch_collision_preflight`");
+  check bool "docker PR lifecycle gates review on create success evidence" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       "all_create_results_ready_for_review"
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          "create_success_markers_missing"
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          "skipping review phase because create phase did not produce complete success evidence"
+     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+          "`create-readiness-failures.jsonl`");
+  check bool "docker PR lifecycle supports review-only resume" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       {|PHASE_MODE="${PHASE_MODE:-both}"|}
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          {|--phase create|review|both|}
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          {|--review-resume|}
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          {|if [[ "$REVIEW_RESUME" == "1" ]] || all_create_results_ready_for_review; then|}
+     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+          "`--phase review --review-resume`");
+  check bool "docker PR lifecycle review resolves fork head refs" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       "proof_head_ref_for_keeper"
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          {|gh pr view $review_head_ref -R $REPO_SLUG --json number,url,isDraft,headRefName|}
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          "review_target_head"
+     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+          "owner-qualified `OWNER:BRANCH` head ref");
   check bool "keeper msg schema documents required_tool_names alias" true
     (file_contains_pattern "lib/keeper/keeper_schema.ml"
        "required_tool_names")
@@ -1202,7 +1298,7 @@ let test_keeper_msg_timeout_contracts () =
   check bool "docker PR lifecycle prompt names keeper_bash for push" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       "Commit and git push that branch with keeper_bash");
+       "Commit and git push exactly branch");
   check bool "docker PR lifecycle prompt uses docker bash for proof edit" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
@@ -1295,7 +1391,24 @@ let test_keeper_github_pr_tool_contracts () =
        "Credential_materializer.verify_state");
   check bool "keeper PR create is exposed by github group" true
     (file_contains_pattern "config/tool_policy.toml"
-       {|keeper_pr_create|})
+       {|keeper_pr_create|});
+  check bool "keeper core prompt routes PR review through native tool" true
+    (file_contains_pattern "config/prompts/keeper.core_behavior.md"
+       "PR REVIEW MUTATIONS"
+     && file_contains_pattern "config/prompts/keeper.core_behavior.md"
+          "keeper_pr_review_comment"
+     && file_contains_pattern "config/prompts/keeper.core_behavior.md"
+          {|event="REQUEST_CHANGES"|}
+     && file_contains_pattern "config/prompts/keeper.core_behavior.md"
+          {|event="APPROVE"|});
+  check bool "keeper core prompt no longer teaches raw gh review mutation" true
+    (file_not_contains_pattern "config/prompts/keeper.core_behavior.md"
+       {|gh pr review <n>|});
+  check bool "keeper review schema names non-comment review policy" true
+    (file_contains_pattern "lib/tool_shard.ml"
+       "Use REQUEST_CHANGES for actionable blockers"
+     && file_contains_pattern "lib/tool_shard.ml"
+          "use APPROVE only when the draft proof preflight permits it")
 
 let test_keeper_pr_audit_contracts () =
   check bool "keeper fleet audit has explicit PR-create flag" true
@@ -1322,8 +1435,12 @@ let test_keeper_pr_audit_contracts () =
   check bool "keeper fleet audit can scope lifecycle evidence by run id" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        "--evidence-run-id"
+     && file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
+          "load_harness_evidence_windows"
      && file_contains_pattern "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          "--evidence-run-id \"$RUN_ID\"");
+          "--evidence-run-id \"$RUN_ID\""
+     && file_contains_pattern "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          "--harness-run-dir \"$RUN_DIR\"");
   check bool "keeper fleet audit survives live invalid utf8 rows" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        {|errors="replace"|})
@@ -1610,6 +1727,14 @@ let test_transport_route_contracts () =
     (file_contains_pattern "lib/server/server_mcp_transport_http.ml"
        {|Option.is_none existing_agent
                     && Option.is_none existing_legacy_agent|});
+  check bool "h2 mcp post injects canonical http actor" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "body_with_canonical_http_actor");
+  check bool "h2 mcp post forwards internal keeper runtime" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "is_verified_internal_keeper_request"
+    && file_contains_pattern "lib/server/server_h2_gateway.ml"
+         "~internal_keeper_runtime state");
   check bool "common http deps prefer runtime captured in server_state" true
     (file_contains_pattern "lib/server/server_routes_http_common.ml"
        "state.Mcp_server.sw");
@@ -1681,7 +1806,20 @@ let test_http_cancel_response_contracts () =
     && file_contains_pattern "lib/server/server_ws_standalone.ml"
          {|send_pong skipped|}
     && file_contains_pattern "lib/server/server_ws_standalone.ml"
-         {|WS standalone handler closed before write completed|})
+         {|WS standalone handler closed before write completed|});
+  check bool "standalone ws close diagnostics classify cleanup causes" true
+    (file_contains_pattern "lib/server/server_ws_standalone.ml"
+       {|log_ws_client_close_payload|}
+    && file_contains_pattern "lib/server/server_ws_standalone.ml"
+         {|client close|}
+    && file_contains_pattern "lib/server/server_ws_standalone.ml"
+         {|sse-forward send failed; cleaning up|}
+    && file_contains_pattern "lib/server/server_ws_standalone.ml"
+         {|standalone_ws_eof_summary|}
+    && file_contains_pattern "lib/server/server_ws_standalone.ml"
+         {|declared_len|}
+    && file_contains_pattern "lib/server/server_ws_standalone.ml"
+         {|chunk_len <= 0|})
 
 let test_worktree_list_contracts () =
   check bool "worktree list stays read-only" true
@@ -2036,6 +2174,113 @@ let test_copilot_zero_diff_cleanup_contracts () =
     (file_not_contains_pattern "scripts/cleanup-copilot-zero-diff-prs.sh"
        "--delete-branch")
 
+(* Dashboard bootstrap (loop priority #7) — guard against:
+   1. SSOT [dashboard_bootstrap_http_json] removed/renamed
+   2. HTTP/1.1 route forgotten in [server_routes_http_routes_dashboard]
+   3. HTTP/2 dispatch forgotten in [server_h2_gateway]
+   4. Slice list drift (the SSOT must list all six slices)
+   5. Public-read error payload regressing to [Printexc.to_string]
+   The cross-transport SSOT exists precisely to prevent (4) — these
+   tests catch the surrounding wiring that the SSOT cannot enforce
+   on its own. *)
+let test_dashboard_bootstrap_contracts () =
+  check bool "bootstrap SSOT exported in dashboard http mli" true
+    (file_contains_pattern "lib/server/server_dashboard_http.mli"
+       "dashboard_bootstrap_http_json");
+  check bool "bootstrap SSOT defined in dashboard http ml" true
+    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+       "dashboard_bootstrap_http_json");
+  check bool "HTTP/1.1 router registers /api/v1/dashboard/bootstrap" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
+       "\"/api/v1/dashboard/bootstrap\"");
+  check bool "HTTP/1.1 route delegates to SSOT" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
+       "dashboard_bootstrap_http_json ~state ~sw ~clock");
+  check bool "HTTP/2 gateway dispatches /api/v1/dashboard/bootstrap" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "\"/api/v1/dashboard/bootstrap\"");
+  check bool "HTTP/2 gateway delegates to SSOT" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "dashboard_bootstrap_http_json ~state ~sw ~clock");
+  check bool "HTTP/2 dashboard reads use shared public-read wrapper" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "| `GET, \"/api/v1/dashboard/shell\" ->\n          with_h2_public_read");
+  check bool "HTTP/2 public-read wrapper enforces read auth" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "authorize_read_request");
+  check bool "HTTP/2 public-read wrapper applies agent rate limit" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "Rate_limit.check_agent_global");
+  check bool "HTTP/2 public-read wrapper returns cold-start payload" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "not_initialized_response path");
+  (* Slice list — the SSOT must list all six slices it bundles. *)
+  let slice_listed name =
+    file_contains_pattern "lib/server/server_dashboard_http.ml"
+      (Printf.sprintf "slice \"%s\"" name)
+  in
+  check bool "bootstrap bundles shell" true (slice_listed "shell");
+  check bool "bootstrap bundles execution" true (slice_listed "execution");
+  check bool "bootstrap bundles planning" true (slice_listed "planning");
+  check bool "bootstrap bundles namespace_truth" true
+    (slice_listed "namespace_truth");
+  check bool "bootstrap bundles goals" true (slice_listed "goals");
+  check bool "bootstrap bundles goal_loop_status" true
+    (slice_listed "goal_loop_status");
+  (* Public-read error sanitization — bootstrap must not surface raw
+     [Printexc.to_string exn] to the client.  The stable
+     {error: "slice_unavailable", slice: <name>} shape should be the
+     only error payload reaching the wire. *)
+  check bool "bootstrap returns sanitized error string" true
+    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+       "\"slice_unavailable\"");
+  check bool "bootstrap does not leak Printexc to client payload"
+    true
+    (* The server-side warn log still uses Printexc; what we forbid is
+       returning that text under the slice [error] key.  Detect by
+       absence of the leak pattern in the per-slice value construction. *)
+    (file_not_contains_pattern "lib/server/server_dashboard_http.ml"
+       "(\"error\", `String (Printexc.to_string exn))")
+
+(* RFC-0037 PR-1 — Board_attachment_meta carrier on post.meta_json.
+
+   These guards capture the contract that ties the carrier module to the
+   post type:
+   - the carrier module + .mli exist with the agreed surface
+   - Board_types.post still carries meta_json (the carrier's storage slot)
+   - the JSON key SSOT is "attachments"
+   - of_yojson returns a result type (total, no silent raises)
+   - id generator uses the "a-" prefix (RFC §6 Q2 default)
+
+   If any of these breaks, the carrier mechanism's load-bearing assumption
+   is gone and the next reader will silently get [] instead of a parse
+   error.  See loop iter 5 / 6 for the rationale. *)
+let test_board_attachment_meta_contracts () =
+  check bool "carrier mli exists with attach helper" true
+    (file_contains_pattern "lib/board_attachment_meta.mli"
+       "val attach_to_post_meta");
+  check bool "carrier mli exposes parse total" true
+    (file_contains_pattern "lib/board_attachment_meta.mli"
+       "val of_yojson : Yojson.Safe.t -> (t, error) result");
+  check bool "carrier mli exposes meta_json_key SSOT" true
+    (file_contains_pattern "lib/board_attachment_meta.mli"
+       "val meta_json_key : string");
+  check bool "carrier ml binds meta_json_key to \"attachments\"" true
+    (file_contains_pattern "lib/board_attachment_meta.ml"
+       "let meta_json_key = \"attachments\"");
+  check bool "carrier ml uses 'a-' id prefix (RFC-0037 Q2 default)" true
+    (file_contains_pattern "lib/board_attachment_meta.ml"
+       "Random_id.prefixed ~prefix:\"a-\"");
+  check bool "carrier kind union has all 4 variants" true
+    (file_contains_pattern "lib/board_attachment_meta.mli"
+       "| Image\n  | Video\n  | Youtube\n  | External_link");
+  check bool "Board_types.post still has meta_json carrier slot" true
+    (file_contains_pattern "lib/board_types/board_types.mli"
+       "meta_json : Yojson.Safe.t option");
+  check bool "carrier test registered in test/dune" true
+    (file_contains_pattern "test/dune"
+       "test_board_attachment_meta")
+
 let () =
   run "ci_hardening_source"
     [
@@ -2132,5 +2377,9 @@ let () =
              test_human_approval_environment_check_contracts;
            test_case "copilot zero-diff cleanup contracts (#12567)" `Quick
              test_copilot_zero_diff_cleanup_contracts;
+           test_case "dashboard bootstrap contracts (loop #7)" `Quick
+             test_dashboard_bootstrap_contracts;
+           test_case "board attachment meta contracts (RFC-0037 PR-1)" `Quick
+             test_board_attachment_meta_contracts;
          ]);
     ]

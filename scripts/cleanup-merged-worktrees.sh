@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Safely remove worktrees whose branch is already merged into main.
-# Never uses --force.  Respects uncommitted changes.
+# Never uses --force. Respects uncommitted changes, nested worktrees, and
+# runtime-pinned paths.
 #
 # Usage:
 #   ./scripts/cleanup-merged-worktrees.sh          # dry run, shows candidates
@@ -17,6 +18,9 @@ for arg in "$@"; do
     *) echo "unknown arg: $arg" >&2; exit 2 ;;
   esac
 done
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/lib/worktree-cleanup-guards.sh"
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
@@ -44,6 +48,8 @@ fi
 removed=0
 skipped=0
 dirty=0
+nested=0
+active=0
 
 while read -r branch; do
   [ -z "$branch" ] && continue
@@ -55,6 +61,18 @@ while read -r branch; do
   if ! git -C "$wt_path" diff --quiet 2>/dev/null || ! git -C "$wt_path" diff --cached --quiet 2>/dev/null; then
     echo "DIRTY  $wt_path (branch $branch) — skipped"
     dirty=$((dirty+1))
+    continue
+  fi
+
+  if [ -d "$wt_path/.worktrees" ]; then
+    echo "NESTED $wt_path (branch $branch) — skipped"
+    nested=$((nested+1))
+    continue
+  fi
+
+  if worktree_cleanup_is_runtime_referenced "$wt_path"; then
+    echo "ACTIVE $wt_path (branch $branch) — skipped (referenced by tmux/process/launchd)"
+    active=$((active+1))
     continue
   fi
 
@@ -76,8 +94,8 @@ done <<< "$MERGED_BRANCHES"
 if [ "$APPLY" -eq 1 ]; then
   git worktree prune
   echo ""
-  echo "Summary: removed=$removed skipped=$skipped dirty=$dirty"
+  echo "Summary: removed=$removed skipped=$skipped dirty=$dirty nested=$nested active=$active"
 else
   echo ""
-  echo "Summary: $removed candidates (dry run — pass --apply to remove)"
+  echo "Summary: $removed candidates (dry run — pass --apply to remove; dirty=$dirty nested=$nested active=$active)"
 fi

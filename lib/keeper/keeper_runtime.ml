@@ -175,7 +175,7 @@ let effective_declarative_cascade_name
       Keeper_cascade_profile.normalize_declared_name cascade_name
   | None, Some _ -> Keeper_config.default_cascade_name
   | None, None ->
-      Keeper_cascade_profile.normalize_declared_name meta.cascade_name
+      Keeper_cascade_profile.normalize_declared_name (cascade_name_of_meta meta)
 
 let resynced_tool_access
     (defaults : Keeper_types_profile.keeper_profile_defaults)
@@ -258,7 +258,7 @@ let ensure_keeper_meta config name =
           match defaults.cascade_name, defaults.manifest_path with
           | Some cascade_name, _ -> cascade_name
           | None, Some _ -> Keeper_config.default_cascade_name
-          | None, None -> meta.cascade_name
+          | None, None -> cascade_name_of_meta meta
         in
         let msg =
           Printf.sprintf
@@ -393,7 +393,7 @@ let ensure_keeper_meta config name =
        name. Normalize the meta side only so alias cleanup does not
        register as a semantic change. *)
     let cascade_changed =
-      Keeper_cascade_profile.normalize_declared_name meta.cascade_name
+      Keeper_cascade_profile.normalize_declared_name (cascade_name_of_meta meta)
       <> resolved_target_cascade_name
     in
     (* #10061: persisted state vs TOML source can differ by a single
@@ -519,14 +519,17 @@ let ensure_keeper_meta config name =
         tool_denylist = target_denylist;
         models = target_models;
         social_model = target_social_model;
-        (* Preserve raw [meta.cascade_name] when the cascade itself did
-           not change, even if another field (personality, policy, ...)
-           triggered a re-sync.  Otherwise a reconcile caused by an
-           unrelated field would silently canonicalize cascade_name and
-           hide drift from the dashboard [canonical] column. *)
-        cascade_name =
-          if cascade_changed then resolved_target_cascade_name
-          else meta.cascade_name;
+        (* RFC-0041: cascade_ref is the SSOT after step 4 (B7). When
+           cascade_changed flips, materialize a fresh cascade_ref;
+           otherwise preserve [meta.cascade_ref] verbatim so an unrelated
+           reconcile never canonicalizes routing silently. *)
+        cascade_ref =
+          if cascade_changed then
+            Some Cascade_ref.{
+              group = resolved_target_cascade_name;
+              item = None;
+            }
+          else meta.cascade_ref;
         goal = target_goal;
         short_goal = target_short_goal;
         mid_goal = target_mid_goal;
@@ -560,7 +563,7 @@ let ensure_keeper_meta config name =
       | Ok () -> Ok updated
       | Error e ->
         Prometheus.inc_counter
-          Prometheus.metric_keeper_write_meta_failures
+          Keeper_metrics.metric_keeper_write_meta_failures
           ~labels:[("keeper", updated.name); ("phase", "ensure_meta_resync")]
           ();
         Log.Keeper.warn "ensure_keeper_meta: write_meta re-sync failed: %s" e;
@@ -737,7 +740,7 @@ let start_supervisor_sweep ctx =
           (try Keeper_supervisor.sweep_and_recover ctx
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Prometheus.inc_counter
-               Prometheus.metric_keeper_supervisor_sweep_failures
+               Keeper_metrics.metric_keeper_supervisor_sweep_failures
                ~labels:[("origin", "keeper_runtime")]
                ();
              Log.Keeper.error "supervisor sweep failed: %s"
@@ -748,7 +751,7 @@ let start_supervisor_sweep ctx =
           (try Keeper_supervisor.liveness_recovery_scan ctx
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Prometheus.inc_counter
-               Prometheus.metric_keeper_supervisor_sweep_failures
+               Keeper_metrics.metric_keeper_supervisor_sweep_failures
                ~labels:[("origin", "liveness_recovery")]
                ();
              Log.Keeper.error "liveness recovery scan failed: %s"
@@ -761,7 +764,7 @@ let start_supervisor_sweep ctx =
           (try Keeper_supervisor.alive_but_stuck_scan ctx
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Prometheus.inc_counter
-               Prometheus.metric_keeper_supervisor_sweep_failures
+               Keeper_metrics.metric_keeper_supervisor_sweep_failures
                ~labels:[("origin", "alive_but_stuck")]
                ();
              Log.Keeper.error "alive-but-stuck scan failed: %s"
@@ -788,7 +791,7 @@ let start_supervisor_sweep ctx =
               | _ -> ())
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Prometheus.inc_counter
-               Prometheus.metric_keeper_toml_reconcile_sweep_failures
+               Keeper_metrics.metric_keeper_toml_reconcile_sweep_failures
                ~labels:[("origin", "keeper_runtime")]
                ();
              Log.Keeper.error "TOML reconcile sweep failed: %s"
@@ -797,7 +800,7 @@ let start_supervisor_sweep ctx =
              completed beat.  Stale gauge (now - last > 2 × interval)
              tells operators the sweep stopped. *)
           Prometheus.set_gauge
-            Prometheus.metric_keeper_supervisor_last_sweep_unixtime
+            Keeper_metrics.metric_keeper_supervisor_last_sweep_unixtime
             ~labels:[ ("base_path", base_path) ]
             (Unix.gettimeofday ());
           Ok ()
@@ -820,14 +823,14 @@ let start_supervisor_sweep ctx =
        After a server restart, if this stays at 0 the supervisor
        never came up — operators alert on absence of advancement. *)
     Prometheus.inc_counter
-      Prometheus.metric_keeper_supervisor_sweep_starts
+      Keeper_metrics.metric_keeper_supervisor_sweep_starts
       ~labels:[ ("base_path", base_path) ]
       ();
     (* Initialize the liveness gauge to "now" so dashboards do not
        start at unixtime=0 (which would look infinitely stale).  The
        on_beat will overwrite this on every subsequent sweep. *)
     Prometheus.set_gauge
-      Prometheus.metric_keeper_supervisor_last_sweep_unixtime
+      Keeper_metrics.metric_keeper_supervisor_last_sweep_unixtime
       ~labels:[ ("base_path", base_path) ]
       (Unix.gettimeofday ());
     Log.Keeper.info "keeper supervisor sweep started (interval %.0fs)" sweep_sec
@@ -841,7 +844,7 @@ let start_supervisor_sweep ctx =
 let supervisor_sweep_age_seconds ~(base_path : string) : float option =
   match
     Prometheus.get_metric_value
-      Prometheus.metric_keeper_supervisor_last_sweep_unixtime
+      Keeper_metrics.metric_keeper_supervisor_last_sweep_unixtime
       ~labels:[ ("base_path", base_path) ]
       ()
   with

@@ -261,12 +261,8 @@ let backlog_updated_since_last_scheduled_autonomous
 let claim_goal_scope_filter ?agent_tool_names ~(config : Coord.config)
     ~(meta : keeper_meta) () =
   let scope =
-    Keeper_runtime_contract.resolve_claim_goal_scope
-      ?agent_tool_names
-      ~allow_empty_goal_scope_fallback:false
-      ~config
-      ~meta
-      ()
+    Keeper_runtime_contract.resolve_observation_claim_goal_scope
+      ?agent_tool_names ~config ~meta ()
   in
   scope.task_filter
 
@@ -339,7 +335,7 @@ let read_backlog_counts ~allowed_tool_names ~(config : Coord.config)
   | Eio.Cancel.Cancelled _ as e -> raise e
   | ex ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_observation_query_failures
+        Keeper_metrics.metric_keeper_observation_query_failures
         ~labels:[("operation", "read_backlog_counts")]
         ();
       Log.Keeper.warn "read_backlog_counts failed: %s" (Printexc.to_string ex);
@@ -352,7 +348,7 @@ let count_active_agents ~(config : Coord.config) : int =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | ex ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_observation_query_failures
+        Keeper_metrics.metric_keeper_observation_query_failures
         ~labels:[("operation", "count_active_agents")]
         ();
       Log.Keeper.warn "count_active_agents failed: %s" (Printexc.to_string ex);
@@ -578,6 +574,28 @@ let check_self_comment_status ~self_tokens ~(post_id : string)
               Board.Agent_id.to_string latest.author,
               short_preview ~max_len:60 latest.content )
 
+type stigmergy_match_result = { overall_score : int }
+
+let stigmergy_match ~(meta : keeper_meta)
+    ~(signal : Board_dispatch.keeper_board_signal) : stigmergy_match_result =
+  let signal_text = String.lowercase_ascii (board_signal_text signal) in
+  let goal_keywords =
+    [ meta.goal; meta.short_goal; meta.mid_goal; meta.long_goal ]
+    |> List.filter (fun s -> String.trim s <> "")
+    |> List.concat_map (fun g ->
+         String.split_on_char ' ' (String.lowercase_ascii g)
+         |> List.map String.trim
+         |> List.filter (fun s -> String.length s > 3))
+    |> List.sort_uniq String.compare
+  in
+  let score =
+    List.fold_left
+      (fun acc kw ->
+        if String_util.contains_substring signal_text kw then acc + 5 else acc)
+      0 goal_keywords
+  in
+  { overall_score = min score 50 }
+
 let board_signal_wake_reason
     ~continuity_summary
     ~(meta : keeper_meta)
@@ -588,13 +606,17 @@ let board_signal_wake_reason
   else if scope_message_feed_enabled meta then
     Some "board_activity"
   else
-    let self_tokens = self_identity_tokens meta in
-    match signal.kind with
-    | Board_dispatch.Board_comment_added ->
-        (match check_self_comment_status ~self_tokens ~post_id:signal.post_id with
-         | `New_external _ -> Some "thread_reply_after_self_comment"
-         | `Never | `No_new_external -> None)
-    | Board_dispatch.Board_post_created -> None
+    let stigmergy = stigmergy_match ~meta ~signal in
+    if stigmergy.overall_score > 0 then
+      Some ("stigmergy: score=" ^ string_of_int stigmergy.overall_score)
+    else
+      let self_tokens = self_identity_tokens meta in
+      match signal.kind with
+      | Board_dispatch.Board_comment_added ->
+          (match check_self_comment_status ~self_tokens ~post_id:signal.post_id with
+           | `New_external _ -> Some "thread_reply_after_self_comment"
+           | `Never | `No_new_external -> None)
+      | Board_dispatch.Board_post_created -> None
 
 let json_string_member name fields =
   match List.assoc_opt name fields with
@@ -868,7 +890,7 @@ let collect_board_events_with_cursor_policy ~advance_cursor ~(base_path : string
       | None ->
         if final_events <> [] then begin
           Prometheus.inc_counter
-            Prometheus.metric_keeper_observation_query_failures
+            Keeper_metrics.metric_keeper_observation_query_failures
             ~labels:[("operation", "cursor_stale")]
             ();
           Log.Keeper.warn
@@ -880,7 +902,7 @@ let collect_board_events_with_cursor_policy ~advance_cursor ~(base_path : string
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Prometheus.inc_counter
-      Prometheus.metric_keeper_observation_query_failures
+      Keeper_metrics.metric_keeper_observation_query_failures
       ~labels:[("operation", "board_events")]
       ();
     Log.Keeper.warn "board event collection failed: %s"
@@ -1268,19 +1290,20 @@ let keeper_cycle_decision
                   || backlog_elapsed
                   || (idle_gate_elapsed && cooldown_elapsed)))
         in
+        let cascade_name = cascade_name_of_meta meta in
         let provider_cooldown_remaining_sec =
           if should_run
           then
             provider_cooldown_remaining_sec
-              ~cascade_name:(Keeper_cascade_profile.runtime_name_of_string meta.cascade_name)
+              ~cascade_name:(Keeper_cascade_profile.runtime_name_of_string cascade_name)
           else None
         in
         let provider_cooldown_fail_open =
           match provider_cooldown_remaining_sec with
           | Some _ ->
               fallback_cascade_for_provider_cooldown
-                ~base_cascade:meta.cascade_name
-                ~effective_cascade:meta.cascade_name
+                ~base_cascade:cascade_name
+                ~effective_cascade:cascade_name
           | None -> None
         in
         let verdict =
@@ -1331,7 +1354,7 @@ let keeper_cycle_decision
                    Defensive: log warning and fall through to skip so that
                    should_run (derived below) stays consistent with verdict. *)
                 Prometheus.inc_counter
-                  Prometheus.metric_keeper_observation_query_failures
+                  Keeper_metrics.metric_keeper_observation_query_failures
                   ~labels:[("operation", "empty_run_reasons")]
                   ();
                 Log.Keeper.warn

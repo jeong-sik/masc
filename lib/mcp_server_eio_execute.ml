@@ -79,11 +79,8 @@ let is_transient_agent_name name =
   is_ephemeral_agent_name name
   || Nickname.is_dictionary_generated_nickname name
 
-let silent_auth_token_error_kind = function
-  | Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _) -> "token_mismatch"
-  | Masc_domain.Auth (Masc_domain.Auth_error.TokenExpired _) -> "token_expired"
-  | Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized _) -> "unauthorized"
-  | _ -> "other"
+let silent_auth_token_error_kind err =
+  Auth_error_kind.to_string (Auth_error_kind.classify err)
 
 let should_read_legacy_persisted_agent_name ~has_explicit_agent_name ~agent_name =
   (not has_explicit_agent_name) && is_ephemeral_agent_name agent_name
@@ -816,11 +813,9 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
     | Mod_code_write ->
         Tool_code_write.dispatch { Tool_code_write.config; agent_name } ~name ~args:coerced_args
     (* Mod_handover, Mod_heartbeat, Mod_auth removed: tools pruned *)
+    | Mod_compact -> None
     | Mod_run ->
         Tool_run.dispatch { Tool_run.config } ~name ~args:coerced_args
-    | Mod_compact ->
-        Option.map tuple_of_tool_result
-          (Tool_compact.dispatch ~name ~args:coerced_args)
     | Mod_agent ->
         Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args:coerced_args
     | Mod_task ->

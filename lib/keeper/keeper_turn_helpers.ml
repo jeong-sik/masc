@@ -46,6 +46,17 @@ let string_contains_substring_ci ~(needle : string) (haystack : string) : bool =
       ~needle:(String.lowercase_ascii needle)
     (String.lowercase_ascii haystack)
 
+let side_effect_metric_label side_effect =
+  let trimmed = String.trim side_effect in
+  let normalized =
+    String.map
+      (function
+        | ' ' | ':' | '/' -> '_'
+        | c -> c)
+      trimmed
+  in
+  if String.equal normalized "" then "unknown" else normalized
+
 let report_keeper_cycle_side_effect_issue
     ~(config : Coord.config)
     ~(keeper_name : string)
@@ -56,6 +67,13 @@ let report_keeper_cycle_side_effect_issue
     Printf.sprintf "keeper cycle %s failed: %s" side_effect detail
   in
   Keeper_registry.record_error ~base_path:config.base_path keeper_name message;
+  Prometheus.inc_counter
+    Keeper_metrics.metric_keeper_dispatch_event_failures
+    ~labels:[
+      ("keeper", keeper_name);
+      ("site", side_effect_metric_label side_effect);
+    ]
+    ();
   match severity with
   | `Warn -> Log.Keeper.warn "%s: %s" keeper_name message
   | `Error -> Log.Keeper.error "%s: %s" keeper_name message
@@ -122,7 +140,7 @@ let record_execution_receipt_gap
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_write_meta_failures
+        Keeper_metrics.metric_keeper_write_meta_failures
         ~labels:[("keeper", meta.name); ("phase", "receipt_coverage_gap")]
         ();
       Log.Keeper.warn
@@ -264,7 +282,7 @@ let record_pre_dispatch_terminal_observation
    | exn ->
       let error = Printexc.to_string exn in
       Prometheus.inc_counter
-        Prometheus.metric_keeper_write_meta_failures
+        Keeper_metrics.metric_keeper_write_meta_failures
         ~labels:[("keeper", meta.name); ("phase", "receipt_append")]
         ();
       Log.Keeper.warn
@@ -301,16 +319,29 @@ let record_pre_dispatch_terminal_observation
         ~side_effect:(activity_kind ^ " emit")
         (Printexc.to_string exn))
 
+let local_discovery_refresh_for_test :
+    (string list -> bool) option Atomic.t =
+  Atomic.make None
+
 let ensure_local_discovery_ready
     ?refresh
     (labels : string list) : (unit, string) result =
+  let refresh_for_test = Atomic.get local_discovery_refresh_for_test in
   let refresh =
     match refresh with
     | Some f -> f
-    | None -> fun labels ->
-        Cascade_runtime.refresh_local_discovery_if_possible labels
+    | None ->
+        (match refresh_for_test with
+        | Some f -> f
+        | None -> fun labels ->
+            Cascade_runtime.refresh_local_discovery_if_possible labels)
   in
-  if not (Cascade_runtime.labels_require_local_discovery labels)
+  let should_refresh =
+    match refresh_for_test with
+    | Some _ -> true
+    | None -> Cascade_runtime.labels_require_local_discovery labels
+  in
+  if not should_refresh
   then Ok ()
   else
     try
@@ -329,3 +360,13 @@ let ensure_local_discovery_ready
              "local discovery refresh raised for labels [%s]: %s"
              (String.concat ", " labels)
              (Printexc.to_string exn))
+
+module For_testing = struct
+  let with_local_discovery_refresh refresh f =
+    let previous = Atomic.get local_discovery_refresh_for_test in
+    Atomic.set local_discovery_refresh_for_test (Some refresh);
+    Fun.protect
+      ~finally:(fun () ->
+        Atomic.set local_discovery_refresh_for_test previous)
+      f
+end

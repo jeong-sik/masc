@@ -76,7 +76,7 @@ let looks_like_server_command command =
 let process_command pid =
   match
     Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:"system/startup_takeover"
+      ~actor:(Masc_exec.Agent_id.of_string "system/startup_takeover")
       ~raw_source:(Printf.sprintf "ps -p %d -o command=" pid)
       ~summary:"startup takeover ps probe"
       ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell_probe ())

@@ -69,7 +69,7 @@ let request_curl ~timeout_sec body =
             (try
                let output =
                  Masc_exec.Exec_gate.run_argv
-                   ~actor:"system/graphql_client_eio"
+                   ~actor:(Masc_exec.Agent_id.of_string "system/graphql_client_eio")
                    ~raw_source:(String.concat " " (List.map Filename.quote argv))
                    ~summary:"graphql curl fallback"
                    ~timeout_sec
@@ -82,7 +82,7 @@ let request_curl ~timeout_sec body =
             (try
                match
                  Masc_exec.Exec_gate.run_argv_with_status
-                   ~actor:"system/graphql_client_eio"
+                   ~actor:(Masc_exec.Agent_id.of_string "system/graphql_client_eio")
                    ~raw_source:(String.concat " " (List.map Filename.quote argv))
                    ~summary:"graphql curl fallback"
                    ~timeout_sec

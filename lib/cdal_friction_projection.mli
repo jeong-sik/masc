@@ -56,10 +56,10 @@ type friction_projection = {
 
     Returns [None] when no violations and no completeness gaps exist. *)
 val project_single_run :
-  store:Agent_sdk.Proof_store.config ->
+  store:Masc_mcp_cdal_runtime.Proof_store.config ->
   ?completeness_gaps:Cdal_types.completeness_gap list ->
   ?tripwire_threshold:int ->
-  Agent_sdk.Cdal_proof.t ->
+  Masc_mcp_cdal_runtime.Cdal_proof.t ->
   friction_projection option
 
 (** Canonical JSON serialization with sorted keys. *)
@@ -86,11 +86,11 @@ type run_window =
 
     @since CDAL Phase 3 *)
 val project_window :
-  store:Agent_sdk.Proof_store.config ->
+  store:Masc_mcp_cdal_runtime.Proof_store.config ->
   window:run_window ->
   ?completeness_gaps:Cdal_types.completeness_gap list ->
   ?tripwire_threshold:int ->
-  Agent_sdk.Cdal_proof.t list ->
+  Masc_mcp_cdal_runtime.Cdal_proof.t list ->
   friction_projection option
 
 (** Compute deterministic basis hash for cross-run window.

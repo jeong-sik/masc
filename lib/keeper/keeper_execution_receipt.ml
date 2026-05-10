@@ -133,10 +133,10 @@ type t =
   }
 
 let stop_reason_to_string = function
-  | Oas_worker.Completed -> "completed"
-  | Oas_worker.TurnBudgetExhausted { turns_used; limit } ->
+  | Cascade_runner.Completed -> "completed"
+  | Cascade_runner.TurnBudgetExhausted { turns_used; limit } ->
     Printf.sprintf "turn_budget_exhausted:%d/%d" turns_used limit
-  | Oas_worker.MutationBoundaryReached { turns_used; tool_name } ->
+  | Cascade_runner.MutationBoundaryReached { turns_used; tool_name } ->
     (match tool_name with
      | Some tool ->
        Printf.sprintf "mutation_boundary:%s:%d" tool turns_used
@@ -239,7 +239,7 @@ let string_contains_ci haystack needle =
    case below ([match outcome_kind_of_string ...] catch-all). *)
 let () =
   Prometheus.register_counter
-    ~name:Prometheus.metric_keeper_receipt_unmapped_disposition
+    ~name:Keeper_metrics.metric_keeper_receipt_unmapped_disposition
     ~help:
       "Total receipts whose (outcome, cascade_outcome) tuple did not \
        match any branch of operator_disposition and fell through to \
@@ -322,6 +322,13 @@ let operator_disposition (receipt : t) =
        [tool_required_unsatisfied] branch below. *)
     ("pause_human", "tool_required_unsatisfied")
   else if
+    String.starts_with ~prefix:"turn_livelock:" terminal_reason
+    ||
+    (match error_kind with
+     | Some "turn_livelock_blocked" -> true
+     | Some _ | None -> false)
+  then ("pause_human", "turn_livelock_blocked")
+  else if
     receipt.tool_surface.tool_requirement = Required
     && (List.mem tool_contract_result
           [
@@ -363,9 +370,9 @@ let operator_disposition (receipt : t) =
       ("pass", "healthy")
     | _ ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_receipt_unmapped_disposition ();
+        Keeper_metrics.metric_keeper_receipt_unmapped_disposition ();
       Prometheus.inc_counter
-        Prometheus.metric_keeper_execution_receipt_failures
+        Keeper_metrics.metric_keeper_execution_receipt_failures
         ~labels:[("keeper", receipt.keeper_name); ("site", "unmapped_disposition")]
         ();
       Log.Keeper.warn
@@ -671,7 +678,7 @@ let emit_operator_broadcast config (receipt : t) ~disposition ~reason =
       ~payload
       ()
   in
-  Log.Keeper.info
+  Log.Keeper.error
     "%s: operator_broadcast_required emitted disposition=%s reason=%s seq=%d"
     receipt.keeper_name disposition reason event.seq
 
@@ -690,7 +697,7 @@ let append (config : Coord.config) (receipt : t) =
          has already persisted the receipt; the broadcast failure is its
          own diagnostic that watchdogs/log alerts will pick up. *)
       Prometheus.inc_counter
-        Prometheus.metric_keeper_execution_receipt_failures
+        Keeper_metrics.metric_keeper_execution_receipt_failures
         ~labels:[("keeper", receipt.keeper_name); ("site", "emit_failed")]
         ();
       Log.Keeper.error
@@ -708,22 +715,16 @@ let stale_kill_class_label = function
   | Keeper_registry.In_turn_hung _ -> "in_turn_hung"
   | Keeper_registry.Noop_failure_loop _ -> "noop_failure_loop"
 
-let stale_terminal_reason_code = function
-  | Some (Keeper_registry.Provider_runtime_error { code; _ }) -> code
-  | Some (Keeper_registry.Tool_required_unsatisfied { code; _ }) -> code
-  | Some (Keeper_registry.Oas_timeout_budget_loop _) -> "oas_timeout_budget"
-  | Some (Keeper_registry.Stale_turn_timeout _) -> "stale_turn_timeout"
-  | Some (Keeper_registry.Stale_fleet_batch _) -> "stale_fleet_batch"
-  | Some (Keeper_registry.Stale_termination_storm _) ->
-      "stale_termination_storm"
-  | Some (Keeper_registry.Heartbeat_consecutive_failures _) ->
-      "heartbeat_failures"
-  | Some (Keeper_registry.Turn_consecutive_failures _) -> "turn_failures"
-  | Some (Keeper_registry.Ambiguous_partial_commit _) ->
-      "ambiguous_partial_commit"
-  | Some Keeper_registry.Fiber_unresolved -> "fiber_unresolved"
-  | Some (Keeper_registry.Exception _) -> "exception"
-  | None -> "stale_turn_timeout"
+(* RFC-0042 PR-2: delegate to [Keeper_turn_terminal_code]. The pre-RFC
+   inline match has been preserved as the test oracle in
+   [test/test_keeper_turn_terminal_code.ml] (byte-for-byte invariant).
+   New [Keeper_registry.failure_reason] constructors are now a compile
+   error in [Keeper_turn_terminal_code.of_failure_reason]. *)
+let stale_terminal_reason_code_typed reason =
+  Keeper_turn_terminal_code.of_failure_reason_option reason
+
+let stale_terminal_reason_code reason =
+  Keeper_turn_terminal_code.to_wire (stale_terminal_reason_code_typed reason)
 
 let stale_broadcast_failure_cohort = function
   | Some _ as reason -> Keeper_registry.failure_reason_cohort_key reason
@@ -787,7 +788,7 @@ let emit_stale_keeper_broadcast config
       ()
   in
   Prometheus.inc_counter
-    Prometheus.metric_keeper_execution_receipt_failures
+    Keeper_metrics.metric_keeper_execution_receipt_failures
     ~labels:[("keeper", keeper_name); ("site", "stale_broadcast")]
     ();
   Log.Keeper.error

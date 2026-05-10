@@ -247,6 +247,11 @@ const runtimeBlockerLabels = {
   turn_failures: '턴 실패 반복',
   exception: '런타임 예외',
   stale_fleet_batch: 'Fleet stale 배치',
+  awaiting_operator: '운영자 조치 대기',
+  awaiting_sandbox_egress: '샌드박스 egress 대기',
+  supervisor_paused: 'Supervisor 일시정지',
+  synthetic_stall: '합성 상태 정체',
+  self_imposed_idle: '자체 대기',
 } satisfies Record<KeeperRuntimeBlockerClass, string>
 
 export function keeperRuntimeBlockerLabel(
@@ -318,6 +323,21 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
   }
   if (blockerClass === 'stale_fleet_batch') {
     return '여러 keeper가 같은 watchdog 창에서 stale로 종료되어 supervisor pause/backoff 상태 확인이 필요합니다.'
+  }
+  if (blockerClass === 'awaiting_operator') {
+    return '진행을 위해 운영자의 승인, 결정, 또는 게이트 해제가 필요합니다.'
+  }
+  if (blockerClass === 'awaiting_sandbox_egress') {
+    return '샌드박스 네트워크 또는 push egress 정책 때문에 keeper가 진행하지 못하고 있습니다.'
+  }
+  if (blockerClass === 'supervisor_paused') {
+    return 'Supervisor가 keeper를 일시정지한 상태라 재개 조건을 확인해야 합니다.'
+  }
+  if (blockerClass === 'synthetic_stall') {
+    return '실제 STATE 없이 합성된 진행 기록만 남아 최근 턴 산출물을 재확인해야 합니다.'
+  }
+  if (blockerClass === 'self_imposed_idle') {
+    return 'Keeper가 관찰 또는 대기만 계획하고 있어 다음 실행 지시가 필요할 수 있습니다.'
   }
   return null
 }

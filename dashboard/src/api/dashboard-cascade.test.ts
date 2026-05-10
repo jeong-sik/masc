@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  fetchCascadeAuditRuns,
   fetchCascadeClientCapacityHistory,
   fetchCascadeConfig as fetchCascadeConfigFromCascade,
   fetchCascadeStrategyTrace,
@@ -55,6 +56,26 @@ describe('dashboard cascade split', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/cascade/strategy_trace?limit=25&cascade=big_three')
     expect(result.events).toEqual([])
+  })
+
+  it('builds cascade audit runs query params', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        updated_at: '2026-04-22T00:00:00Z',
+        total_runs: 0,
+        audit_runs: [],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchCascadeAuditRuns({ limit: 10, cascade: 'keeper_unified' })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/cascade/audit_runs?limit=10&cascade=keeper_unified')
+    expect(result.audit_runs).toEqual([])
   })
 
   it('posts keeper cascade updates unchanged', async () => {

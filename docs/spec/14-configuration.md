@@ -154,7 +154,7 @@ contains four sections: `tts`, `stt`, `session`, `local_playback`.
 | `ZAI_DEFAULT_MODEL` | string | `"glm-5.1"` | `glm` provider `auto` 기본 모델 (lib/cascade/cascade_model_resolve.ml:38) |
 | `ZAI_CODING_DEFAULT_MODEL` | string | `"glm-4.7"` | `glm-coding` provider `auto` 기본 모델 (lib/cascade/cascade_model_resolve.ml:43) |
 | `GEMINI_DEFAULT_MODEL` | string | `"gemini-3-flash-preview"` | `gemini` provider `auto` 기본 모델 (lib/cascade/cascade_model_resolve.ml:67) |
-| `MASC_GEMINI_CLI_AUTO_MODELS` | csv string | `"gemini-3-flash-preview,gemini-3.1-flash-lite-preview,gemini-2.5-flash,gemini-2.5-flash-lite,gemini-3.1-pro-preview,gemini-2.5-pro"` | `gemini_cli:auto`를 여러 concrete model 후보로 확장하는 순서. 설정 시 `GEMINI_DEFAULT_MODEL`보다 우선 |
+| `MASC_GEMINI_CLI_AUTO_MODELS` | csv string | `"gemini-3-flash-preview,gemini-3.1-flash-lite-preview,gemini-3.1-pro-preview"` | `gemini_cli:auto`를 여러 concrete model 후보로 확장하는 순서. 설정 시 `GEMINI_DEFAULT_MODEL`보다 우선 |
 | `MASC_CODEX_CLI_AUTO_MODELS` | csv string | `"gpt-5.2,gpt-5.3-codex-spark,gpt-5.3-codex,gpt-5.4-mini,gpt-5.4"` | `codex_cli:auto` 확장 순서. 기본은 ChatGPT-backed Codex에서 실제 호출 성공이 확인된 후보만 포함하며, 필요하면 env override로 후보를 직접 재지정 |
 | `MASC_CLAUDE_CODE_AUTO_MODELS` | csv string | `"auto"` | `claude_code:auto` 확장 순서. 기본은 Claude Code의 사용자 기본 모델에 위임 |
 | `KIMI_DEFAULT_MODEL` | string | `"kimi-k2.5"` | `kimi` provider `auto` 기본 모델 (lib/provider_adapter.ml:505) |
@@ -331,7 +331,7 @@ JSON 파일로 cascade별 설정을 정의한다. 기본 키 패턴은
 {
   "default_models": ["llama:qwen3.5", "glm:glm-5.1"],
   "keeper_turn_models": ["llama:qwen3.5", "glm:glm-5.1"],
-  "briefing_models": ["llama:qwen3.5", "glm:glm-5.1", "gemini:gemini-2.5-pro"],
+  "briefing_models": ["llama:qwen3.5", "glm:glm-5.1", "gemini:gemini-3.1-pro-preview"],
   "auto_responder_claude_models": ["claude:sonnet", "glm:glm-5.1"],
   "keeper_unified_temperature": 0.4,
   "keeper_unified_max_tokens": 2048
@@ -572,4 +572,4 @@ dir-local local-dev에서는 `.masc/`가 target 디렉토리 내부를 가리키
 
 ### 12.6 모델 실행
 
-모델 선택은 `cascade.json`이 유일한 권위다. keeper_meta의 `cascade_name` (기본 `"keeper_unified"`)이 cascade를 지정하고, `Oas_model_resolve`가 실행 모델을 결정한다. keeper 설정에 모델 필드를 직접 지정하지 않는다.
+모델 선택은 `cascade.json`이 유일한 권위다. keeper_meta의 `cascade_name` (기본 `"keeper_unified"`)이 cascade를 지정하고, `Cascade_runtime`가 실행 모델을 결정한다. keeper 설정에 모델 필드를 직접 지정하지 않는다.

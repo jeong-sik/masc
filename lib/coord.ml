@@ -253,6 +253,18 @@ let () = Atomic.set Coord_hooks.force_release_task_fn (fun config ~agent_name ~t
    in the library dep graph. *)
 let fsm_drift_metric = "masc_task_fsm_drift_total"
 
+let () =
+  Prometheus.register_counter
+    ~name:fsm_drift_metric
+    ~help:
+      "Total task FSM drift transitions observed by \
+       Coord_task_lifecycle.decide (e.g. InProgress -> Done \
+       skipping the verifier path). Labels: variant (drift \
+       variant tag from Coord_task_lifecycle), force (true | \
+       false — was the transition forced past the soft gate). \
+       #9795 fleet-wide ratchet-readiness signal."
+    ()
+
 let record_fsm_drift ~variant ~force =
   Prometheus.inc_counter fsm_drift_metric
     ~labels:[ ("variant", variant);
@@ -266,6 +278,17 @@ let record_fsm_drift ~variant ~force =
    the variant-only counter alongside so existing dashboards keep
    working — the new metric is purely additive. *)
 let fsm_drift_per_agent_metric = "masc_task_fsm_drift_per_agent_total"
+
+let () =
+  Prometheus.register_counter
+    ~name:fsm_drift_per_agent_metric
+    ~help:
+      "Per-agent breakout of task FSM drift transitions \
+       (companion to masc_task_fsm_drift_total — purely \
+       additive). Lets operators identify which keepers most \
+       often skip [in_progress] before [done]. Labels: variant, \
+       agent_name, force. Cardinality bounded by fleet size."
+    ()
 
 let record_fsm_drift_with_agent ~variant ~force ~agent_name =
   record_fsm_drift ~variant ~force;
@@ -285,6 +308,21 @@ let () = Atomic.set Coord_hooks.fsm_drift_observer_fn record_fsm_drift_with_agen
    (missing contracts) vs. the gate-side (verifier-redirect not
    firing). Cardinality bounded at ~4 × 3 × fleet_size. *)
 let task_completion_path_metric = "masc_task_completion_path_total"
+
+let () =
+  Prometheus.register_counter
+    ~name:task_completion_path_metric
+    ~help:
+      "Total task Done emits classified by completion path and \
+       contract presence. Lets operators attribute bypass-rate \
+       to creation-side (missing contracts) vs. gate-side \
+       (verifier-redirect not firing). Labels: path \
+       (claimed_to_done_skip | in_progress_to_done | \
+       via_verification | forced_done), contract_state \
+       (no_contract | empty_contract | with_contract), \
+       agent_name. Cardinality bounded at ~4 x 3 x fleet_size \
+       (#10449)."
+    ()
 
 let record_task_completion_path ~path ~contract_state ~agent_name =
   Prometheus.inc_counter task_completion_path_metric
@@ -307,6 +345,19 @@ let () =
    churn).  Cardinality bounded at ~fleet × 2. *)
 let task_auto_release_metric = "masc_task_auto_release_total"
 
+let () =
+  Prometheus.register_counter
+    ~name:task_auto_release_metric
+    ~help:
+      "Total implicit task auto-releases triggered by \
+       [task_claim_next] (mid-work churn or just-claimed churn). \
+       Labels: agent_name, from_status (separates [InProgress -> \
+       Todo] from [Claimed -> Todo]). Field log motivation: \
+       observed 179% release/claim ratio with task hot-potatoed \
+       up to 5x in one day (#10421). Cardinality bounded at \
+       ~fleet x 2."
+    ()
+
 let record_task_auto_release ~agent_name ~from_status =
   Prometheus.inc_counter task_auto_release_metric
     ~labels:[ ("agent_name", agent_name);
@@ -316,6 +367,51 @@ let record_task_auto_release ~agent_name ~from_status =
 let () =
   Atomic.set Coord_hooks.task_auto_release_observed_fn
     record_task_auto_release
+
+(* Coord broadcast latency histogram and file lock retry/duration metrics.
+
+   At 64+ keepers the broadcast hot path serialises against [state.json]
+   (next_seq) and writes msg.json + activity events under file locks.
+   Without these series operators see only the SSE-side latency
+   ([masc_sse_broadcast_duration_seconds]); the publisher-side cost
+   (state lock + read/write + activity emit) was invisible.
+
+   File-lock metrics are wired here rather than in [masc_process]
+   because that sub-library does not depend on [Prometheus]; the hook
+   in [File_lock_eio.on_lock_attempt_fn] forwards each attempt outcome
+   to this site. *)
+let record_coord_broadcast ~msg_type ~elapsed_s =
+  Prometheus.observe_histogram Prometheus.metric_coord_broadcast_duration
+    ~labels:[ ("msg_type", msg_type) ] elapsed_s
+
+let () =
+  Atomic.set Coord_hooks.coord_broadcast_observed_fn
+    record_coord_broadcast
+
+(* RFC-0040: route Mention_dedup decision counts to Prometheus.
+   Default no-op in [Coord_hooks] is replaced at startup so the
+   coord layer keeps zero static dep on Prometheus. *)
+let record_mention_dedup_decision ~outcome =
+  Prometheus.inc_counter
+    Prometheus.metric_mention_dedup_decisions_total
+    ~labels:[ ("outcome", outcome) ] ()
+
+let () =
+  Atomic.set Coord_hooks.mention_dedup_decision_fn
+    record_mention_dedup_decision
+
+let record_file_lock_attempt ~caller ~retries ~elapsed_s ~outcome =
+  if retries > 0 then
+    Prometheus.inc_counter Prometheus.metric_file_lock_retries
+      ~labels:[ ("caller", caller) ]
+      ~delta:(float_of_int retries) ();
+  Prometheus.observe_histogram Prometheus.metric_file_lock_acquire_duration
+    ~labels:[ ("caller", caller); ("outcome", outcome) ]
+    elapsed_s
+
+let () =
+  Atomic.set File_lock_eio.on_lock_attempt_fn
+    record_file_lock_attempt
 
 let clear_agent_current_task_cache config ~task_id =
   let agents_path = agents_dir config in

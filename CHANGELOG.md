@@ -1,6 +1,39 @@
 # Changelog
 
 
+## [0.19.16] - 2026-05-07
+
+### Added
+- `lib/alignment_score.{ml,mli}`: backend OCaml implementation of Master Report section 3.3 Alignment Score (AS) formula - Dim03 P2 first slice. 10 raw metrics (TRC/COV/CMP/CRN/DBT/TMP/DIR/COH/BND/CNF), default weights summing to 1.0, normalization with 5 distinct patterns (linear, distance-from-1, complement, midpoint, complement-with-clamp), 5-step grade A/B/C/D/F, 5 warning flags. JSON codec with stable keys for the dashboard score panel. Pure OCaml, no Eio, no I/O. RFC-0035 PR-6.
+- `test/test_alignment_score.ml`: 16 alcotest cases covering weights-sum invariant, overweight custom-weight clamping, ideal-metrics -> 100/A/no-warnings, worst-metrics -> low/F, rounded displayed-score grade consistency, normalization on each axis, out-of-range clamping, grade boundaries (90/75/60/40), floating precision at grade boundaries, all 5 warnings, no false warnings on ideal, and JSON-shape contract.
+
+### Fixed (vs Master Report TS reference)
+- `normalized.TMP > 150 -> Behind_schedule` was structurally impossible (normalized cap is 100); replaced with raw `tmp > 1.5`.
+- `normalized.DBT > 50 -> High_debt` had inverted semantics (normalized.DBT large = low debt); replaced with raw `dbt > 0.5`.
+
+## [0.19.15] - 2026-05-07
+
+### Added
+- `lib/chronicle_librarian.{ml,mli}`: in-memory chronicle-event store with keyword-search retrieval — Master Report Dim02 P1 §2.4 Librarian Agent first slice. Reuses `Cognitive_gravity.rank` for ordering, no new ranking primitive. Exposes `empty / add / of_list / to_list / len`, three filter helpers (`filter_by_event_type / filter_by_session / filter_by_time_range`), and a deterministic tokeniser. Pure OCaml, no Eio, no I/O. Vector embedder + Responder + Proactive Summary deferred to PR-6+. RFC-0035 PR-5.
+- `test/test_chronicle_librarian.ml`: 11 alcotest cases (tokenise basic, search empty/single/relevance/limit/recency-default/recency-explicit, filter event_type/session/time_range, add insertion order).
+
+### Changed
+- `docs/rfc/RFC-0035-cognitive-ide-roadmap.md`: PR-stack table marks PR-5 in-flight (this PR). PR-4 still in-flight pending merge.
+
+## [0.19.14] - 2026-05-07
+
+### Added
+- `lib/chronicle_event.{ml,mli}`: backend OCaml schema for the chronicle event stream — Master Report Dim02 P1 ChronicleEvent. JSON-shape compatible with the dashboard read model `dashboard/src/components/chronicle/chronicle-types.ts` (camelCase: eventType, displayName, sessionId, parentEventId, relatedEventIds, projectState, filesChanged, statedGoal, inferredIntent). 21 event types, 4 actor kinds, 7 target kinds. Custom yojson codec (not [@@deriving]) so the wire format stays string-level stable across pin bumps. RFC-0035 PR-4.
+- `test/test_chronicle_event.ml`: 10 alcotest cases covering the full round-trip of every variant in all three taxonomies, full event JSON round-trip, dashboard camelCase key contract, optional-intent absent semantics, decode-rejects on unknown eventType / missing required field, and well-formedness invariant.
+
+### Changed
+- `docs/rfc/RFC-0035-cognitive-ide-roadmap.md`: mapping table Dim02 row updated — `chronicle_event` is now in-flight (PR-4) on the lib side. PR-stack table extended to mark PR-4 as in-flight and PR-5 (Librarian retriever) as the next P1 item.
+
+## [0.19.13] - 2026-05-06
+
+### Changed
+- `docs/rfc/RFC-0035-cognitive-ide-roadmap.md`: refreshed mapping table after Master Report Dim01 dashboard PRs landed. P0 #1~#4 (#13768, #13773, #13781, #13779) now marked merged; P0 #5 backend (cognitive_gravity, #13797) marked merged with #13800 added as the dashboard renderer counterpart for both #5 and #6; P0 #6 backend (intentional_projection, #13821) marked in-flight. PR-stack section renumbered: PR-3 is the bump+refresh chore, PR-4 onward are the deferred items. RFC-0035 PR-3.
+
 ## [0.19.12] - 2026-05-06
 
 ### Added
@@ -796,7 +829,7 @@ Follow-up to v0.18.1 ProviderTerminal rescue. This release collects a wave of ke
 - `keeper`: cap cascade rotation at 1 for `required_tool_contract_violation` so a single proactive contract miss can't cycle through every provider (#10851).
 - `coord/task`: emit warn when a task crosses the 5-cycle oscillation threshold so operators see escalation candidates (#10719, #10920).
 - `server/autoboot`: per-task boot guard so a single hung lazy task can't block keeper boot — restore_sessions now degrades gracefully instead of hanging the boot pipeline (#10857).
-- `boot`: start `Oas_worker_cascade` actor consumer fiber that was dropped in a refactor and left the cascade actor without a reader (#10895).
+- `boot`: start `Cascade_legacy_runner` actor consumer fiber that was dropped in a refactor and left the cascade actor without a reader (#10895).
 - `cascade-filter`: per-provider rejection diagnostics for #10681 so cascade-skip reasons are visible per provider, not aggregate (#10852).
 - `keeper-shell-docker`: detect `gh --repo X api Y` LLM-hallucinated form and self-correct (108 events / day pre-fix, #10855, #10900).
 - `keeper-shell-docker`: replace `List.hd` with pattern match (Health ratchet, #10905).
@@ -867,7 +900,7 @@ The v0.18.0 tag exists but its GitHub release workflow failed: the OAS pin bump 
 
 ### Changed (refactor)
 - Design system PR-CS5 → PR-CS12: ActionButton/Select migration across runtime-monitor (#10722), connector-quick-bind (#10717), governance-monitor (#10715), agent-profile (#10705), memory-post-detail (#10702), tool-picker (#10694), error-panel (#10687), autoresearch (#10683).
-- Rename `Oas_sse_bridge` → `Oas_event_bridge` (transport-agnostic, #10711).
+- Rename `Oas_sse_bridge` → `Cascade_event_bridge` (transport-agnostic, #10711).
 
 ### Chore
 - OAS pin: bump SHA to `97b8a603` (OAS #1201 TurnReady event, #10704, #10709).

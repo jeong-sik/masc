@@ -526,8 +526,8 @@ export function ConfigResolutionPanel({
 
   return html`
     <${Card} title="설정 경로" class="section mb-4">
-      <div class="mb-4 text-xs leading-relaxed text-[var(--color-fg-muted)]">
-        서버가 실제로 해석한 config root와 runtime/data root를 함께 보여줍니다. cascade는 human-authored cascade.toml과 runtime cascade.json을 분리해 보여주며, 현재 실행이 바라보는 경로와 체크인된 seed config는 다를 수 있습니다.
+      <div class="mb-4 text-xs text-[var(--color-fg-muted)]">
+        cascade.toml(seed) ≠ cascade.json(runtime). 현재 실행 경로가 체크인된 seed config와 다를 수 있습니다.
       </div>
 
       ${resolution

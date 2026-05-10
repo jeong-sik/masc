@@ -321,7 +321,7 @@ let keeper_list_row_json ~runtime_class config name =
             ("proactive_idle_sec", `Int meta.proactive.idle_sec);
             ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
             ("skill_route", keeper_list_skill_route_json config meta);
-            ("cascade_name", `String meta.cascade_name);
+            ("cascade_name", `String (Keeper_types.cascade_name_of_meta meta));
             ("created_at", `String meta.created_at);
             ("updated_at", `String meta.updated_at);
           ]
@@ -464,7 +464,11 @@ let handle_keeper_msg ctx args : tool_result =
   | Error err -> (false, err)
   | Ok name ->
       let resolved_args = with_keeper_name args name in
+      (match Turn.preflight_keeper_msg ctx resolved_args with
+      | Error err -> (false, err)
+      | Ok () ->
       let request_id = Keeper_msg_async.submit ~sw:ctx.sw
+        ~base_path:ctx.config.base_path
         ~keeper_name:name
         ~f:(fun () ->
           let ok, body = Turn.handle_keeper_msg ctx resolved_args in
@@ -480,14 +484,14 @@ let handle_keeper_msg ctx args : tool_result =
         ("status", `String "queued");
         ("message", `String "Keeper turn submitted. Poll with keeper_msg_result.");
       ] in
-      (true, Yojson.Safe.to_string json)
+      (true, Yojson.Safe.to_string json))
 
-let handle_keeper_msg_result _ctx args : tool_result =
+let handle_keeper_msg_result ctx args : tool_result =
   let request_id = get_string args "request_id" "" in
   if String.equal request_id "" then
     (false, {|{"error":"request_id is required"}|})
   else
-    match Keeper_msg_async.poll request_id with
+    match Keeper_msg_async.poll ~base_path:ctx.config.base_path request_id with
     | None ->
       (false, Printf.sprintf {|{"error":"request_id not found","request_id":"%s"}|} request_id)
     | Some entry ->
@@ -523,7 +527,7 @@ let default_keeper_model_label (meta : keeper_meta) =
   | "" -> (
       match
         Cascade_runtime.models_of_cascade_name
-          (Keeper_cascade_profile.Runtime_name meta.cascade_name)
+          (Keeper_cascade_profile.Runtime_name (Keeper_types.cascade_name_of_meta meta))
       with
       | first :: _ when not (String.equal (String.trim first) "") -> first
       | _ -> Env_config.Local_runtime.default_model)
@@ -720,18 +724,21 @@ let handle_keeper_list ctx args : tool_result =
   let body =
     cached_text_by_key _keeper_list_cache ~key:cache_key
       ~ttl_s:(keeper_list_cache_ttl_s ()) (fun () ->
-        let entries =
+        let registry_names =
           Keeper_registry.all ~base_path:ctx.config.base_path ()
-          |> List.sort (fun (a : Keeper_registry.registry_entry)
-                            (b : Keeper_registry.registry_entry) ->
-               String.compare a.name b.name)
+          |> List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name)
+        in
+        let names =
+          registry_names @ keeper_names ctx.config
+          |> List.map String.trim
+          |> List.filter (fun name -> not (String.equal name ""))
+          |> List.sort_uniq String.compare
           |> take limit
         in
-        let names = List.map (fun (e : Keeper_registry.registry_entry) -> e.name) entries in
         let rows =
-          entries
-          |> List.filter_map (fun (e : Keeper_registry.registry_entry) ->
-               keeper_list_row_json ~runtime_class:"keeper" ctx.config e.name)
+          names
+          |> List.filter_map (fun name ->
+               keeper_list_row_json ~runtime_class:"keeper" ctx.config name)
         in
         let json =
           if not detailed then
@@ -1349,7 +1356,7 @@ let handle_keeper_compact ctx args : tool_result =
        "phase=unknown" precondition failure. *)
     match Keeper_registry.get ~base_path:ctx.config.base_path name with
     | None ->
-      Prometheus.inc_counter Prometheus.metric_keeper_operator_compact
+      Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_compact
         ~labels:[("keeper", name); ("result", "not_found")] ();
       error_result_typed ~code:Validation_error
         (Printf.sprintf "keeper %s is not in the registry" name)
@@ -1365,7 +1372,7 @@ let handle_keeper_compact ctx args : tool_result =
       | Offline | Stopped | Dead | Zombie | Crashed | Restarting | HandingOff | Draining -> false
     in
     if not allowed then begin
-      Prometheus.inc_counter Prometheus.metric_keeper_operator_compact
+      Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_compact
         ~labels:[("keeper", name); ("result", "precondition")] ();
       error_result_typed ~code:Validation_error
         (Printf.sprintf
@@ -1398,7 +1405,7 @@ let handle_keeper_compact ctx args : tool_result =
             ~before_tokens:recovery.compaction.before_tokens
             ~after_tokens:recovery.compaction.after_tokens;
           invalidate_status_cache name;
-          Prometheus.inc_counter Prometheus.metric_keeper_operator_compact
+          Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_compact
             ~labels:[("keeper", name); ("result", "ok")] ();
           (true,
            Yojson.Safe.to_string
@@ -1424,7 +1431,7 @@ let handle_keeper_compact ctx args : tool_result =
             (Keeper_state_machine.Compaction_failed {
                reason = "no_valid_checkpoint";
             });
-          Prometheus.inc_counter Prometheus.metric_keeper_operator_compact
+          Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_compact
             ~labels:[("keeper", name); ("result", "no_checkpoint")] ();
           (false,
            Printf.sprintf
@@ -1592,7 +1599,7 @@ let handle_keeper_clear ctx args : tool_result =
       Log.Keeper.warn
         "%s: context cleared by operator (reason=%s, preserve_system=%b, cleared=%d msgs)"
         name reason preserve_system cleared_count;
-      Prometheus.inc_counter Prometheus.metric_keeper_operator_clear
+      Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_clear
         ~labels:[("keeper", name);
                  ("preserve_system", Bool.to_string preserve_system)] ();
       (true,

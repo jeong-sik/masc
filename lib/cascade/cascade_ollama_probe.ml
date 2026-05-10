@@ -90,7 +90,58 @@ let probe_endpoint_of base_url =
   in
   stripped ^ Masc_network_defaults.ollama_api_ps_path
 
-let try_probe ~sw ~net ?clock ?(timeout_s = 0.5) ?now url =
+(* Operator-tunable default for the probe timeout.
+
+   Was a literal [0.5] embedded twice (in [try_probe] and
+   [refresh_many]).  Operators reported that 0.5s is fine for ollama
+   serving small models on a fast box but is tight when the box is
+   loading a big model (the [/api/ps] handler shares the same lock
+   as model load) — in those cases the probe times out, the cache
+   stays cold, and the cascade backs off to a non-local provider
+   even though ollama is healthy and only briefly busy.
+
+   Resolution order (process env > literal default):
+   - [MASC_OLLAMA_PROBE_TIMEOUT_SEC]  (float)
+
+   Range [0.05, 30.0]; out-of-range or unparseable values fall back
+   to the literal default with a one-shot WARN.
+
+   Read at every call site so operator changes via runtime tooling
+   take effect without a process restart.  The cost is one
+   [Sys.getenv_opt] per probe attempt, which is negligible compared
+   to the HTTP round-trip the probe makes. *)
+let probe_timeout_default_s = 0.5
+
+let probe_timeout_env_var = "MASC_OLLAMA_PROBE_TIMEOUT_SEC"
+
+let probe_timeout_warned = Atomic.make false
+
+let probe_timeout_resolved () =
+  match Sys.getenv_opt probe_timeout_env_var with
+  | None -> probe_timeout_default_s
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if trimmed = "" then probe_timeout_default_s
+    else (
+      match float_of_string_opt trimmed with
+      | Some v when v >= 0.05 && v <= 30.0 -> v
+      | Some _ | None ->
+        if not (Atomic.exchange probe_timeout_warned true)
+        then
+          Log.Misc.warn
+            "Ignoring %s=%S (expected float in [0.05, 30.0]); using \
+             default %.2fs."
+            probe_timeout_env_var
+            raw
+            probe_timeout_default_s;
+        probe_timeout_default_s)
+
+let try_probe ~sw ~net ?clock ?timeout_s ?now url =
+  let timeout_s =
+    match timeout_s with
+    | Some v -> v
+    | None -> probe_timeout_resolved ()
+  in
   let _ = sw in
   let now = match now with Some n -> n | None -> now_default () in
   let endpoint = probe_endpoint_of url in
@@ -115,7 +166,12 @@ let try_probe ~sw ~net ?clock ?(timeout_s = 0.5) ?now url =
          Some cap)
   | Ok _ -> None
 
-let refresh_many ~sw ~net ?(timeout_s = 0.5) urls =
+let refresh_many ~sw ~net ?timeout_s urls =
+  let timeout_s =
+    match timeout_s with
+    | Some v -> v
+    | None -> probe_timeout_resolved ()
+  in
   List.iter
     (fun url ->
        if is_ollama_url url then

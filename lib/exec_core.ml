@@ -566,11 +566,7 @@ let build_process_outcome ~artifact_policy ~base_path ~keeper_name ~cmd ~status
     artifact_refs_of_output ~artifact_policy ~base_path ~keeper_name ~cmd
       ~output
   in
-  let recovery_hint =
-    match default_recovery_hint classification semantic_status with
-    | Some hint -> Some hint
-    | None -> None
-  in
+  let recovery_hint = default_recovery_hint classification semantic_status in
   Executed
     {
       command = cmd;

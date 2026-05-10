@@ -1,26 +1,23 @@
 (** Composite observer — pure projection. See [.mli] for contract. *)
 
-type ksm_phase =
-  | Ksm_running
-  | Ksm_failing
-  | Ksm_overflowed
-  | Ksm_compacting
-  | Ksm_handing_off
-  | Ksm_draining
-  | Ksm_stable
-
-let all_ksm_phases =
-  [ Ksm_running; Ksm_failing; Ksm_overflowed; Ksm_compacting; Ksm_handing_off; Ksm_draining; Ksm_stable ]
-
 type turn_phase = Keeper_registry.turn_phase =
   | Turn_idle
   | Turn_prompting
+  | Turn_routing
   | Turn_executing
   | Turn_compacting
   | Turn_finalizing
+  | Turn_exhausted
 
-let all_turn_phases =
-  [ Turn_idle; Turn_prompting; Turn_executing; Turn_compacting; Turn_finalizing ]
+let all_turn_phases : Keeper_registry.packed_turn_phase list =
+  [ Keeper_registry.Packed Turn_idle
+  ; Keeper_registry.Packed Turn_prompting
+  ; Keeper_registry.Packed Turn_routing
+  ; Keeper_registry.Packed Turn_executing
+  ; Keeper_registry.Packed Turn_compacting
+  ; Keeper_registry.Packed Turn_finalizing
+  ; Keeper_registry.Packed Turn_exhausted
+  ]
 
 type decision_stage = Keeper_registry.decision_stage =
   | Decision_undecided
@@ -28,8 +25,12 @@ type decision_stage = Keeper_registry.decision_stage =
   | Decision_gate_rejected
   | Decision_tool_policy_selected
 
-let all_decision_stages =
-  [ Decision_undecided; Decision_guard_ok; Decision_gate_rejected; Decision_tool_policy_selected ]
+let all_decision_stages : Keeper_registry.packed_decision_stage list =
+  [ Keeper_registry.Packed Decision_undecided
+  ; Keeper_registry.Packed Decision_guard_ok
+  ; Keeper_registry.Packed Decision_gate_rejected
+  ; Keeper_registry.Packed Decision_tool_policy_selected
+  ]
 
 type cascade_state = Keeper_registry.cascade_state =
   | Cascade_idle
@@ -38,16 +39,24 @@ type cascade_state = Keeper_registry.cascade_state =
   | Cascade_done
   | Cascade_exhausted
 
-let all_cascade_states =
-  [ Cascade_idle; Cascade_selecting; Cascade_trying; Cascade_done; Cascade_exhausted ]
+let all_cascade_states : Keeper_registry.packed_cascade_state list =
+  [ Keeper_registry.Packed Cascade_idle
+  ; Keeper_registry.Packed Cascade_selecting
+  ; Keeper_registry.Packed Cascade_trying
+  ; Keeper_registry.Packed Cascade_done
+  ; Keeper_registry.Packed Cascade_exhausted
+  ]
 
 type compaction_stage = Keeper_registry.compaction_stage =
   | Compaction_accumulating
   | Compaction_compacting
   | Compaction_done
 
-let all_compaction_stages =
-  [ Compaction_accumulating; Compaction_compacting; Compaction_done ]
+let all_compaction_stages : Keeper_registry.packed_compaction_stage list =
+  [ Keeper_registry.Packed Compaction_accumulating
+  ; Keeper_registry.Packed Compaction_compacting
+  ; Keeper_registry.Packed Compaction_done
+  ]
 
 type tla_action =
   | Action_start_turn
@@ -100,8 +109,8 @@ type invariants_check = {
 type last_outcome = {
   turn_id : int;
   ended_at : float;
-  decision_stage : decision_stage;
-  cascade_state : cascade_state;
+  decision_stage : Keeper_registry.packed_decision_stage;
+  cascade_state : Keeper_registry.packed_cascade_state;
   selected_model : string option;
 }
 
@@ -110,13 +119,11 @@ type snapshot = {
   correlation_id : string;
   run_id : string;
   ts : float;
-  ksm_phase : ksm_phase;
-  raw_phase : Keeper_state_machine.phase;
-  collapsed_from : Keeper_state_machine.phase option;
-  ktc_turn_phase : turn_phase;
-  kdp_decision : decision_stage;
-  kcl_cascade_state : cascade_state;
-  kmc_compaction : compaction_stage;
+  phase : Keeper_state_machine.phase;
+  ktc_turn_phase : Keeper_registry.packed_turn_phase;
+  kdp_decision : Keeper_registry.packed_decision_stage;
+  kcl_cascade_state : Keeper_registry.packed_cascade_state;
+  kmc_compaction : Keeper_registry.packed_compaction_stage;
   kcb_state : Keeper_failure_circuit_breaker.display_state;
   shared_measurement : Keeper_state_machine.auto_rule_summary option;
   invariants : invariants_check;
@@ -128,47 +135,35 @@ type snapshot = {
   consecutive_noop_count : int;
   idle_seconds : int;
   last_turn_ts : float;
+  fsm_guard_violations : int;
 }
 
-let ksm_phase_to_string = function
-  | Ksm_running -> "Running"
-  | Ksm_failing -> "Failing"
-  | Ksm_overflowed -> "Overflowed"
-  | Ksm_compacting -> "Compacting"
-  | Ksm_handing_off -> "HandingOff"
-  | Ksm_draining -> "Draining"
-  | Ksm_stable -> "Stable"
-
-let ksm_phase_of_string = function
-  | "Running" -> Some Ksm_running
-  | "Failing" -> Some Ksm_failing
-  | "Overflowed" -> Some Ksm_overflowed
-  | "Compacting" -> Some Ksm_compacting
-  | "HandingOff" -> Some Ksm_handing_off
-  | "Draining" -> Some Ksm_draining
-  | "Stable" -> Some Ksm_stable
-  | _ -> None
-
-let turn_phase_to_string = function
-  | Turn_idle -> "idle"
-  | Turn_prompting -> "prompting"
-  | Turn_executing -> "executing"
-  | Turn_compacting -> "compacting"
-  | Turn_finalizing -> "finalizing"
+let turn_phase_to_string (tp : Keeper_registry.packed_turn_phase) =
+  match tp with
+  | Keeper_registry.Packed Turn_idle -> "idle"
+  | Keeper_registry.Packed Turn_prompting -> "prompting"
+  | Keeper_registry.Packed Turn_routing -> "routing"
+  | Keeper_registry.Packed Turn_executing -> "executing"
+  | Keeper_registry.Packed Turn_compacting -> "compacting"
+  | Keeper_registry.Packed Turn_finalizing -> "finalizing"
+  | Keeper_registry.Packed Turn_exhausted -> "exhausted"
 
 let turn_phase_of_string = function
   | "idle" -> Some Turn_idle
   | "prompting" -> Some Turn_prompting
+  | "routing" -> Some Turn_routing
   | "executing" -> Some Turn_executing
   | "compacting" -> Some Turn_compacting
   | "finalizing" -> Some Turn_finalizing
+  | "exhausted" -> Some Turn_exhausted
   | _ -> None
 
-let decision_stage_to_string = function
-  | Decision_undecided -> "undecided"
-  | Decision_guard_ok -> "guard_ok"
-  | Decision_gate_rejected -> "gate_rejected"
-  | Decision_tool_policy_selected -> "tool_policy_selected"
+let decision_stage_to_string (s : Keeper_registry.packed_decision_stage) =
+  match s with
+  | Keeper_registry.Packed Decision_undecided -> "undecided"
+  | Keeper_registry.Packed Decision_guard_ok -> "guard_ok"
+  | Keeper_registry.Packed Decision_gate_rejected -> "gate_rejected"
+  | Keeper_registry.Packed Decision_tool_policy_selected -> "tool_policy_selected"
 
 let decision_stage_of_string = function
   | "undecided" -> Some Decision_undecided
@@ -177,12 +172,13 @@ let decision_stage_of_string = function
   | "tool_policy_selected" -> Some Decision_tool_policy_selected
   | _ -> None
 
-let cascade_state_to_string = function
-  | Cascade_idle -> "idle"
-  | Cascade_selecting -> "selecting"
-  | Cascade_trying -> "trying"
-  | Cascade_done -> "done"
-  | Cascade_exhausted -> "exhausted"
+let cascade_state_to_string (s : Keeper_registry.packed_cascade_state) =
+  match s with
+  | Keeper_registry.Packed Cascade_idle -> "idle"
+  | Keeper_registry.Packed Cascade_selecting -> "selecting"
+  | Keeper_registry.Packed Cascade_trying -> "trying"
+  | Keeper_registry.Packed Cascade_done -> "done"
+  | Keeper_registry.Packed Cascade_exhausted -> "exhausted"
 
 let cascade_state_of_string = function
   | "idle" -> Some Cascade_idle
@@ -192,10 +188,11 @@ let cascade_state_of_string = function
   | "exhausted" -> Some Cascade_exhausted
   | _ -> None
 
-let compaction_stage_to_string = function
-  | Compaction_accumulating -> "accumulating"
-  | Compaction_compacting -> "compacting"
-  | Compaction_done -> "done"
+let compaction_stage_to_string (s : Keeper_registry.packed_compaction_stage) =
+  match s with
+  | Keeper_registry.Packed Compaction_accumulating -> "accumulating"
+  | Keeper_registry.Packed Compaction_compacting -> "compacting"
+  | Keeper_registry.Packed Compaction_done -> "done"
 
 let compaction_stage_of_string = function
   | "accumulating" -> Some Compaction_accumulating
@@ -257,62 +254,41 @@ let invariant_key_of_string = function
 
 (* Derivation from registry entry *)
 
-let derive_ksm_phase (phase : Keeper_state_machine.phase) : ksm_phase =
-  match phase with
-  | Keeper_state_machine.Running -> Ksm_running
-  | Keeper_state_machine.Failing -> Ksm_failing
-  | Keeper_state_machine.Overflowed -> Ksm_overflowed
-  | Keeper_state_machine.Compacting -> Ksm_compacting
-  | Keeper_state_machine.HandingOff -> Ksm_handing_off
-  | Keeper_state_machine.Draining -> Ksm_draining
-  | Keeper_state_machine.Offline
-  | Keeper_state_machine.Paused
-  | Keeper_state_machine.Stopped
-  | Keeper_state_machine.Crashed
-  | Keeper_state_machine.Restarting
-  | Keeper_state_machine.Dead | Keeper_state_machine.Zombie -> Ksm_stable
-
-let collapsed_from_phase
-    (phase : Keeper_state_machine.phase)
-    (derived : ksm_phase)
-    : Keeper_state_machine.phase option =
-  match derived with
-  | Ksm_stable -> Some phase
-  | Ksm_running
-  | Ksm_failing
-  | Ksm_overflowed
-  | Ksm_compacting
-  | Ksm_handing_off
-  | Ksm_draining -> None
-
-(* Exhaustive on [ksm_phase]: the prior wildcard hid the design
-   decision for new ksm_phase variants and made the dashboard report
-   Turn_idle for keepers in Ksm_failing / Ksm_overflowed when there is
-   no live observation. Spelling each branch out turns a future
-   ksm_phase addition into a compile error and makes the chosen
-   mapping auditable. (#8605 family -- exhaustive-match template) *)
+(* Exhaustive on [Keeper_state_machine.phase]: maps the raw 12-state
+   keeper phase to the turn phase projection when no live turn
+   observation exists.  Spelling each branch out turns a future phase
+   addition into a compile error. *)
 let live_turn_phase (entry : Keeper_registry.registry_entry) =
   match entry.current_turn_observation with
   | Some obs -> obs.turn_phase
   | None ->
-      (match derive_ksm_phase entry.phase with
-       | Ksm_compacting -> Turn_compacting
-       | Ksm_handing_off
-       | Ksm_draining -> Turn_finalizing
-       | Ksm_running
-       | Ksm_failing
-       | Ksm_overflowed
-       | Ksm_stable -> Turn_idle)
+      (match entry.phase with
+       | Keeper_state_machine.Compacting ->
+           Keeper_registry.Packed Turn_compacting
+       | Keeper_state_machine.HandingOff
+       | Keeper_state_machine.Draining ->
+           Keeper_registry.Packed Turn_finalizing
+       | Keeper_state_machine.Running
+       | Keeper_state_machine.Failing
+       | Keeper_state_machine.Overflowed
+       | Keeper_state_machine.Offline
+       | Keeper_state_machine.Paused
+       | Keeper_state_machine.Stopped
+       | Keeper_state_machine.Crashed
+       | Keeper_state_machine.Restarting
+       | Keeper_state_machine.Dead
+       | Keeper_state_machine.Zombie ->
+           Keeper_registry.Packed Turn_idle)
 
 let live_decision_stage (entry : Keeper_registry.registry_entry) =
   match entry.current_turn_observation with
   | Some obs -> obs.decision_stage
-  | None -> Decision_undecided
+  | None -> Keeper_registry.Packed Decision_undecided
 
 let live_cascade_state (entry : Keeper_registry.registry_entry) =
   match entry.current_turn_observation with
   | Some obs -> obs.cascade_state
-  | None -> Cascade_idle
+  | None -> Keeper_registry.Packed Cascade_idle
 
 let live_measurement (entry : Keeper_registry.registry_entry) =
   match entry.current_turn_observation with
@@ -322,29 +298,51 @@ let live_measurement (entry : Keeper_registry.registry_entry) =
 (* Invariants *)
 
 let check_phase_turn_alignment
-    (phase : ksm_phase)
-    (turn_phase : turn_phase)
+    (phase : Keeper_state_machine.phase)
+    (turn_phase : Keeper_registry.packed_turn_phase)
     : bool =
-  match phase, turn_phase with
-  | Ksm_compacting, Turn_compacting -> true
-  | Ksm_compacting, _ -> false
-  | _, Turn_compacting -> false
-  | _ -> true
+  match turn_phase with
+  | Keeper_registry.Packed Turn_compacting ->
+      (phase = Keeper_state_machine.Compacting)
+  | Keeper_registry.Packed Turn_idle
+  | Keeper_registry.Packed Turn_prompting
+  | Keeper_registry.Packed Turn_routing
+  | Keeper_registry.Packed Turn_executing
+  | Keeper_registry.Packed Turn_finalizing
+  | Keeper_registry.Packed Turn_exhausted ->
+      not (phase = Keeper_state_machine.Compacting)
 
 let check_compaction_atomicity
-    (phase : ksm_phase)
-    (compaction_stage : compaction_stage)
+    (phase : Keeper_state_machine.phase)
+    (compaction_stage : Keeper_registry.packed_compaction_stage)
     : bool =
-  (compaction_stage = Compaction_compacting) = (phase = Ksm_compacting)
+  match compaction_stage with
+  | Keeper_registry.Packed Compaction_compacting ->
+      (phase = Keeper_state_machine.Compacting)
+  | Keeper_registry.Packed Compaction_accumulating
+  | Keeper_registry.Packed Compaction_done ->
+      not (phase = Keeper_state_machine.Compacting)
 
 let check_no_cascade_before_measurement
-    ~(cascade_state : cascade_state)
+    ~(cascade_state : Keeper_registry.packed_cascade_state)
     ~(measurement_captured : bool)
     : bool =
   match cascade_state with
-  | Cascade_idle -> true
-  | Cascade_selecting | Cascade_trying | Cascade_done | Cascade_exhausted ->
+  | Packed Cascade_idle -> true
+  | Packed (Cascade_selecting | Cascade_trying | Cascade_done | Cascade_exhausted) ->
       measurement_captured
+
+type event_priority_state = {
+  ep_measurement_bind_count : int;
+  ep_has_measurement : bool;
+  ep_has_pending_measurement : bool;
+}
+
+let check_event_priority_monotone_pure
+    (state : event_priority_state)
+    : bool =
+  state.ep_measurement_bind_count <= 1
+  && not (state.ep_has_measurement && state.ep_has_pending_measurement)
 
 let check_event_priority_monotone
     (entry : Keeper_registry.registry_entry)
@@ -352,8 +350,11 @@ let check_event_priority_monotone
   match entry.current_turn_observation with
   | None -> true
   | Some obs ->
-      obs.measurement_bind_count <= 1
-      && not (Option.is_some obs.measurement && Option.is_some entry.pending_turn_measurement)
+      check_event_priority_monotone_pure {
+        ep_measurement_bind_count = obs.measurement_bind_count;
+        ep_has_measurement = Option.is_some obs.measurement;
+        ep_has_pending_measurement = Option.is_some entry.pending_turn_measurement;
+      }
 
 let check_phase_derivation_agreement
     (entry : Keeper_registry.registry_entry)
@@ -362,10 +363,10 @@ let check_phase_derivation_agreement
 
 let compute_invariants
     (entry : Keeper_registry.registry_entry)
-    ~(phase : ksm_phase)
-    ~(turn_phase : turn_phase)
-    ~(cascade_state : cascade_state)
-    ~(compaction_stage : compaction_stage)
+    ~(phase : Keeper_state_machine.phase)
+    ~(turn_phase : Keeper_registry.packed_turn_phase)
+    ~(cascade_state : Keeper_registry.packed_cascade_state)
+    ~(compaction_stage : Keeper_registry.packed_compaction_stage)
     ~(measurement_captured : bool)
     : invariants_check =
   {
@@ -387,7 +388,7 @@ let compute_invariants
 let bump_invariant_violations ~(keeper_name : string) (inv : invariants_check) =
   let bump key satisfied =
     if not satisfied then
-      Prometheus.inc_counter Prometheus.metric_keeper_invariant_violations
+      Prometheus.inc_counter Keeper_metrics.metric_keeper_invariant_violations
         ~labels:[
           ("keeper", keeper_name);
           ("invariant", invariant_key_to_string key);
@@ -429,8 +430,6 @@ let observe
     | _ -> stable_run_id entry
   in
   let is_live = entry.current_turn_observation <> None in
-  let ksm_phase = derive_ksm_phase entry.phase in
-  let collapsed_from = collapsed_from_phase entry.phase ksm_phase in
   let turn_phase = live_turn_phase entry in
   let compaction_stage = entry.compaction_stage in
   let decision_stage = live_decision_stage entry in
@@ -440,7 +439,7 @@ let observe
   let invariants =
     compute_invariants
       entry
-      ~phase:ksm_phase
+      ~phase:entry.phase
       ~turn_phase
       ~cascade_state
       ~compaction_stage
@@ -456,9 +455,7 @@ let observe
     correlation_id;
     run_id;
     ts;
-    ksm_phase;
-    raw_phase = entry.phase;
-    collapsed_from;
+    phase = entry.phase;
     ktc_turn_phase = turn_phase;
     kdp_decision = decision_stage;
     kcl_cascade_state = cascade_state;
@@ -488,6 +485,9 @@ let observe
        if last <= 0.0 then 0
        else int_of_float (max 0.0 (Time_compat.now () -. last)));
     last_turn_ts = entry.meta.runtime.usage.last_turn_ts;
+    fsm_guard_violations =
+      Prometheus.metric_total Prometheus.metric_fsm_guard_violation
+      |> int_of_float;
   }
 
 (* Fleet fold — observe every currently-registered keeper under
@@ -624,11 +624,7 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
     "correlation_id", `String s.correlation_id;
     "run_id", `String s.run_id;
     "ts", `Float s.ts;
-    "phase", `String (ksm_phase_to_string s.ksm_phase);
-    ( "collapsed_from",
-      match s.collapsed_from with
-      | Some phase -> `String (Keeper_state_machine.phase_to_string phase)
-      | None -> `Null );
+    "phase", `String (Keeper_state_machine.phase_to_string s.phase);
     "turn_phase", `String (turn_phase_to_string s.ktc_turn_phase);
     "decision", `Assoc [
       "stage", `String (decision_stage_to_string s.kdp_decision);
@@ -655,7 +651,7 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
         ]);
     "invariants", invariants_to_json s.invariants;
     "phase_diagnosis", phase_diagnosis_to_json
-      ~current_phase:s.raw_phase s.conditions;
+      ~current_phase:s.phase s.conditions;
     "is_live", `Bool s.is_live;
     "last_outcome", (match s.last_outcome with
       | Some lo -> `Assoc [
@@ -676,4 +672,5 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
     "consecutive_noop_count", `Int s.consecutive_noop_count;
     "idle_seconds", `Int s.idle_seconds;
     "last_turn_ts", `Float s.last_turn_ts;
+    "fsm_guard_violations", `Int s.fsm_guard_violations;
   ]

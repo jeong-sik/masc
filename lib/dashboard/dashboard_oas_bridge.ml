@@ -149,10 +149,23 @@ let record (s : sample) = record_with_time ~now:(Unix.gettimeofday ()) s
 
 let duration_from_response ?total_duration_ms
     (response : Agent_sdk.Types.api_response) =
+  let positive = function Some ms when ms > 0.0 -> Some ms | _ -> None in
+  let duration_from_timings = function
+    | Some (timings : Agent_sdk.Types.inference_timings) -> (
+        match (positive timings.prompt_ms, positive timings.predicted_ms) with
+        | Some prompt_ms, Some predicted_ms -> prompt_ms +. predicted_ms
+        | Some prompt_ms, None -> prompt_ms
+        | None, Some predicted_ms -> predicted_ms
+        | None, None -> 0.0)
+    | None -> 0.0
+  in
   match total_duration_ms, response.telemetry with
   | Some ms, _ when ms > 0.0 -> ms
-  | _, Some telemetry when telemetry.request_latency_ms > 0 ->
-      Float.of_int telemetry.request_latency_ms
+  | _, Some telemetry -> duration_from_timings telemetry.timings
+      |> fun timings_ms ->
+      (match telemetry.request_latency_ms with
+       | Some ms when ms > 0 -> Float.of_int ms
+       | _ -> timings_ms)
   | _ -> 0.0
 
 let ttfb_from_response (response : Agent_sdk.Types.api_response) =
@@ -197,7 +210,7 @@ let throughput_from_response ~(usage : Agent_sdk.Types.api_usage option)
 let sample_of_response ~provider_id ~model_id ?total_duration_ms
     ?(serialization_ms = 0.0) ?(retry_count = 0) ~status
     (response : Agent_sdk.Types.api_response) =
-  let usage = Oas_response.usage response in
+  let usage = Agent_sdk_response.usage response in
   let total_duration_ms =
     duration_from_response ?total_duration_ms response
   in
@@ -239,7 +252,12 @@ let provider_error_capacity_scope_label = function
   | Provider_error.RateLimit _
   | Provider_error.AuthError _
   | Provider_error.ServerError _
-  | Provider_error.InvalidRequest _ ->
+  | Provider_error.InvalidRequest _
+  | Provider_error.CliWrappedHardQuota _
+  | Provider_error.CliWrappedMaxTurns _
+  | Provider_error.CliWrappedResumableSession _
+  | Provider_error.PermissionDenied _
+  | Provider_error.ModelNotFound _ ->
       "none"
 
 let record_provider_error ~cascade_name ~provider_id error =

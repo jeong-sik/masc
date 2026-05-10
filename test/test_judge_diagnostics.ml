@@ -51,6 +51,26 @@ let test_format_lenient_fallback_truncates_huge_raw () =
   check bool "preview is bounded" true
     (String.length out < 1500)
 
+let test_format_unparseable_response_includes_reason () =
+  let raw = "{\"items\":[{\"guardrail_state\":null}]}" in
+  let out =
+    Judge_diagnostics.format_unparseable_response ~judge_label:"Governance"
+      ~reason:"item agent_health:k1 missing guardrail_state"
+      raw
+  in
+  let contains needle =
+    try
+      let re = Re.Pcre.re (Re.Pcre.quote needle) |> Re.compile in
+      ignore (Re.exec re out); true
+    with Not_found -> false
+  in
+  check bool "names structural invalid class" true
+    (contains "structurally invalid response");
+  check bool "includes reason" true
+    (contains "missing guardrail_state");
+  check bool "includes raw preview" true
+    (contains raw)
+
 let test_record_lenient_fallback_increments_metrics () =
   let raw = "not-json" in
   let labels = [("judge", "governance")] in
@@ -84,6 +104,45 @@ let test_record_lenient_fallback_increments_metrics () =
        ());
   check (float 0.0001) "fallback counter increments"
     (fallback_before +. 1.0)
+    (Prometheus.metric_value_or_zero
+       Prometheus.metric_governance_lenient_json_fallback_hit
+       ~labels
+       ())
+
+let test_record_unparseable_response_increments_unparseable_only () =
+  let raw = "{\"items\":[{\"guardrail_state\":null}]}" in
+  let labels = [("judge", "governance")] in
+  let unparseable_before =
+    Prometheus.metric_value_or_zero
+      Prometheus.metric_governance_judge_unparseable
+      ~labels
+      ()
+  in
+  let fallback_before =
+    Prometheus.metric_value_or_zero
+      Prometheus.metric_governance_lenient_json_fallback_hit
+      ~labels
+      ()
+  in
+  let out =
+    Judge_diagnostics.record_unparseable_response
+      ~judge_label:"Governance"
+      ~reason:"item agent_health:k1 missing guardrail_state"
+      raw
+  in
+  check bool "returns structural diagnostic" true
+    (try
+       let re = Re.Pcre.re "structurally invalid response" |> Re.compile in
+       ignore (Re.exec re out); true
+     with Not_found -> false);
+  check (float 0.0001) "unparseable counter increments"
+    (unparseable_before +. 1.0)
+    (Prometheus.metric_value_or_zero
+       Prometheus.metric_governance_judge_unparseable
+       ~labels
+       ());
+  check (float 0.0001) "lenient fallback counter unchanged"
+    fallback_before
     (Prometheus.metric_value_or_zero
        Prometheus.metric_governance_lenient_json_fallback_hit
        ~labels
@@ -139,8 +198,12 @@ let () =
             test_format_lenient_fallback_includes_label;
           test_case "preview is bounded for huge raw" `Quick
             test_format_lenient_fallback_truncates_huge_raw;
+          test_case "structural invalid includes reason" `Quick
+            test_format_unparseable_response_includes_reason;
           test_case "record increments metrics" `Quick
             test_record_lenient_fallback_increments_metrics;
+          test_case "structural invalid increments unparseable only" `Quick
+            test_record_unparseable_response_increments_unparseable_only;
           test_case "metrics JSON reads counters" `Quick
             test_lenient_fallback_metrics_json_reads_counters;
         ] );

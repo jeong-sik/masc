@@ -96,6 +96,16 @@ type audit_entry = {
   acted_at : float;
 }
 
+(** {1 Target projection — board/dashboard summary} *)
+
+type target_summary = {
+  report_count : int;
+      (** Number of flag queue entries ever recorded for this target. *)
+  moderation_status : string;
+      (** Operator-facing status. One of ["none"], ["flagged"],
+          ["approved"], ["removed"], ["hidden"], or ["warned"]. *)
+}
+
 (** {1 Store lifecycle} *)
 
 val init : unit -> unit
@@ -153,6 +163,16 @@ val get_audit_trail :
     Optional filters: [~target_id] restricts to one content item;
     [~actor] restricts to one operator. [~limit] caps the result
     (default 100, max 500). *)
+
+val target_summary :
+  target_kind:target_kind ->
+  target_id:string ->
+  target_summary
+(** Return the board/dashboard moderation projection for a post or comment.
+    An unresolved queue entry wins over older audit decisions, so a re-flagged
+    target reports ["flagged"] until an operator action resolves it.  The
+    projection is served from per-target aggregates maintained on mutation, so
+    board response rendering does not scan the full queue or audit log per row. *)
 
 (** {1 JSON serialisation — dashboard API projection} *)
 

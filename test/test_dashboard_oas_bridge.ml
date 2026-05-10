@@ -60,7 +60,7 @@ let make_telemetry ?timings ?(request_latency_ms = 0) ()
     timings;
     reasoning_tokens = None;
     reasoning_tokens_estimated = false;
-    request_latency_ms;
+    request_latency_ms = Some request_latency_ms;
     peak_memory_gb = None;
     provider_kind = None;
     reasoning_effort = None;
@@ -374,6 +374,36 @@ let test_sample_of_response_derives_wall_throughput () =
   Alcotest.(check bool) "wall throughput" true
     (sample.throughput_tokens_per_s = Some 200.0)
 
+let test_sample_of_response_derives_duration_from_timing_components () =
+  let usage = make_usage ~input:100 ~output:88 () in
+  let timings : Agent_sdk.Types.inference_timings =
+    {
+      prompt_n = None;
+      prompt_ms = Some 120.0;
+      prompt_per_second = None;
+      predicted_n = None;
+      predicted_ms = Some 880.0;
+      predicted_per_second = None;
+      cache_n = None;
+    }
+  in
+  let telemetry = make_telemetry ~timings ~request_latency_ms:0 () in
+  let response = make_response ~usage ~telemetry ~model:"ollama:qwen" () in
+  let sample =
+    DOB.sample_of_response ~provider_id:"ollama" ~model_id:"ollama:qwen"
+      ~status:DOB.Success response
+  in
+  Alcotest.(check (float 1e-9))
+    "duration falls back to prompt+decode timings" 1000.0
+    sample.total_duration_ms;
+  Alcotest.(check (float 1e-9)) "ttfb still uses prompt timing" 120.0
+    sample.ttfb_ms;
+  (match sample.throughput_tokens_per_s with
+  | Some throughput ->
+      Alcotest.(check (float 1e-9))
+        "wall throughput uses derived decode time" 100.0 throughput
+  | None -> Alcotest.fail "expected derived throughput")
+
 let test_record_response_records_missing_usage_as_unknown_sample () =
   setup ();
   let response =
@@ -518,6 +548,8 @@ let () =
             test_sample_of_response_uses_usage_and_native_telemetry;
           Alcotest.test_case "wall throughput fallback" `Quick
             test_sample_of_response_derives_wall_throughput;
+          Alcotest.test_case "timing components avoid zero duration" `Quick
+            test_sample_of_response_derives_duration_from_timing_components;
           Alcotest.test_case "missing usage records unknown sample" `Quick
             test_record_response_records_missing_usage_as_unknown_sample;
         ] );

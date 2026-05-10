@@ -47,6 +47,30 @@ type tool_audit_snapshot = {
   tool_audit_at : string option;
 }
 
+let metrics_summary_persistence_surface = "keeper_exec_status_metrics"
+let decision_log_tool_audit_persistence_surface =
+  "keeper_exec_status_decision_log"
+let metrics_tool_audit_persistence_surface =
+  "keeper_exec_status_keeper_metrics"
+
+let report_persistence_read_drop ~surface ~reason ~path ~detail =
+  Safe_ops.report_persistence_read_drop
+    ~on_drop:(fun () ->
+      Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+        ~labels:[("surface", surface); ("reason", reason)]
+        ())
+    ~surface
+    ~reason
+    ~path
+    ~detail
+
+let report_metrics_summary_read_drop ~reason ~detail =
+  report_persistence_read_drop
+    ~surface:metrics_summary_persistence_surface
+    ~reason
+    ~path:"<keeper_metrics_lines>"
+    ~detail
+
 let empty_metrics_summary =
   {
     sample_points = 0;
@@ -226,7 +250,15 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
   List.fold_left
     (fun acc line ->
       try
-        let j = Yojson.Safe.from_string line in
+        let j =
+          match Yojson.Safe.from_string line with
+          | `Assoc _ as json -> json
+          | _ ->
+              report_metrics_summary_read_drop
+                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~detail:"keeper metrics row is not a JSON object";
+              raise Exit
+        in
         let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
         let trace_id = Safe_ops.json_string ~default:"" "trace_id" j in
         let generation =
@@ -443,7 +475,18 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
           last_handoff = handoff_json;
           last_compaction = compaction_json;
         }
-      with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> acc)
+      with
+      | Exit -> acc
+      | Yojson.Json_error detail ->
+          report_metrics_summary_read_drop
+            ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+            ~detail;
+          acc
+      | Yojson.Safe.Util.Type_error (detail, _) ->
+          report_metrics_summary_read_drop
+            ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+            ~detail;
+          acc)
     empty_metrics_summary lines
 
 let json_string_list_member key json =
@@ -507,7 +550,12 @@ let latest_snapshot_of_lines lines ~parse_snapshot ~has_legacy_shape =
         (fun line ->
           try
             let json = Yojson.Safe.from_string line in
-            match parse_snapshot line with
+            let snapshot =
+              match json with
+              | `Assoc _ -> parse_snapshot line
+              | _ -> None
+            in
+            match snapshot with
             | Some _ as snapshot -> snapshot
             | None ->
                 if has_legacy_shape json then
@@ -528,9 +576,24 @@ let latest_tool_audit_snapshot_from_decisions config keeper_name =
   if not (Fs_compat.file_exists path) then None
   else
     let lines = Keeper_memory.read_file_tail_lines path ~max_bytes:40000 ~max_lines:12 in
+    let report_drop ~reason ~detail =
+      report_persistence_read_drop
+        ~surface:decision_log_tool_audit_persistence_surface
+        ~reason
+        ~path
+        ~detail
+    in
     let parse_snapshot line =
       try
-        let json = Yojson.Safe.from_string line in
+        let json =
+          match Yojson.Safe.from_string line with
+          | `Assoc _ as json -> json
+          | _ ->
+              report_drop
+                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~detail:"decision log row is not a JSON object";
+              raise Exit
+        in
         let tools = json_string_list_member "tools_used" json in
         let raw_tool_call_count = json_int_opt_member "tool_call_count" json in
         let tool_call_count =
@@ -550,7 +613,13 @@ let latest_tool_audit_snapshot_from_decisions config keeper_name =
               tool_audit_source = Some "keeper_decision_log";
               tool_audit_at = json_iso_opt json;
             }
-      with Yojson.Json_error _ -> None
+      with
+      | Exit -> None
+      | Yojson.Json_error detail ->
+          report_drop
+            ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+            ~detail;
+          None
     in
     latest_snapshot_of_lines lines
       ~parse_snapshot
@@ -570,9 +639,25 @@ let latest_tool_audit_snapshot_from_decisions config keeper_name =
 
 let latest_tool_audit_snapshot_from_metrics config keeper_name =
   let lines = read_recent_metrics_lines config keeper_name in
+  let metrics_path = Keeper_types.keeper_metrics_path config keeper_name in
+  let report_drop ~reason ~detail =
+    report_persistence_read_drop
+      ~surface:metrics_tool_audit_persistence_surface
+      ~reason
+      ~path:metrics_path
+      ~detail
+  in
   let parse_snapshot line =
     try
-      let json = Yojson.Safe.from_string line in
+      let json =
+        match Yojson.Safe.from_string line with
+        | `Assoc _ as json -> json
+        | _ ->
+            report_drop
+              ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+              ~detail:"keeper metrics row is not a JSON object";
+            raise Exit
+      in
       let tools =
         json_string_list_member "tools_used" json
         |> List.sort_uniq String.compare
@@ -595,7 +680,13 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
             tool_audit_source = Some "keeper_metrics";
             tool_audit_at = json_iso_opt json;
           }
-    with Yojson.Json_error _ -> None
+    with
+    | Exit -> None
+    | Yojson.Json_error detail ->
+        report_drop
+          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+          ~detail;
+        None
   in
   latest_snapshot_of_lines lines
     ~parse_snapshot

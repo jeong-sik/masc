@@ -293,6 +293,43 @@ let api_key_env_json ~path value =
       in
       loop [] fields
 
+(* Generic Otoml -> Yojson conversion used for namespaces that the
+   materializer should pass through verbatim instead of treating as a
+   cascade profile.  Currently used for the [admission] namespace
+   introduced by RFC-0026 PR-B (#12926, #1089).
+
+   Without this, every [admission.<keeper>] sub-table breaks the
+   materializer (treated as a profile, sub-table keys rejected as
+   "unknown field"), which fails cascade.json materialization and
+   takes down every keeper that resolves a cascade through cascade.toml
+   — not just the keepers with admission blocks.  The error is a
+   single fleet-wide regression, so the materializer needs to know
+   about the admission namespace explicitly. *)
+let rec otoml_to_yojson (value : Otoml.t) : Yojson.Safe.t =
+  match value with
+  | Otoml.TomlString s -> `String s
+  | Otoml.TomlInteger n -> `Int n
+  | Otoml.TomlFloat f -> `Float f
+  | Otoml.TomlBoolean b -> `Bool b
+  | Otoml.TomlOffsetDateTime s
+  | Otoml.TomlLocalDateTime s
+  | Otoml.TomlLocalDate s
+  | Otoml.TomlLocalTime s -> `String s
+  | Otoml.TomlArray items ->
+      `List (List.map otoml_to_yojson items)
+  | Otoml.TomlTable fields ->
+      `Assoc
+        (List.map
+           (fun (k, v) -> (k, otoml_to_yojson v))
+           fields)
+  | Otoml.TomlInlineTable fields ->
+      `Assoc
+        (List.map
+           (fun (k, v) -> (k, otoml_to_yojson v))
+           fields)
+  | Otoml.TomlTableArray items ->
+      `List (List.map otoml_to_yojson items)
+
 let routes_json ~path value =
   match table_fields ~path value with
   | Error _ as err -> err
@@ -305,6 +342,59 @@ let routes_json ~path value =
             | Error _ as err -> err)
       in
       loop [] fields
+
+(** RFC-0058: Parse [profiles.<name>] TOML sections into a JSON structure.
+    Each profile sub-table contains [required_capabilities] (string array)
+    and optionally [provider_filter] (string). *)
+let profiles_json ~path value =
+  match table_fields ~path value with
+  | Error _ as err -> err
+  | Ok profile_tables ->
+      let rec loop acc = function
+        | [] -> Ok (`Assoc (List.rev acc))
+        | (profile_name, profile_value) :: rest -> (
+            match table_fields
+                    ~path:(Printf.sprintf "%s.%s" path profile_name)
+                    profile_value
+            with
+            | Error _ as err -> err
+            | Ok fields ->
+                let field_path field_name =
+                  Printf.sprintf "%s.%s.%s" path profile_name field_name
+                in
+                let required_caps =
+                  let rec find = function
+                    | [] -> Ok []
+                    | (key, v) :: _ when String.equal key "required_capabilities"
+                      -> string_array_value ~path:(field_path key) v
+                    | _ :: rest -> find rest
+                  in
+                  find fields
+                in
+                let provider_filter =
+                  let rec find = function
+                    | [] -> Ok None
+                    | (key, v) :: _ when String.equal key "provider_filter" ->
+                        (match string_value ~path:(field_path key) v with
+                         | Ok s -> Ok (Some s)
+                         | Error _ as err -> err)
+                    | _ :: rest -> find rest
+                  in
+                  find fields
+                in
+                match required_caps, provider_filter with
+                | Ok caps, Ok filter ->
+                    let json_fields =
+                      [ ("required_capabilities", `List (List.map (fun s -> `String s) caps)) ]
+                      @ (match filter with
+                         | None -> []
+                         | Some f -> [ ("provider_filter", `String f) ])
+                    in
+                    loop ((profile_name, `Assoc json_fields) :: acc) rest
+                | (Error _ as err), _ -> err
+                | _, (Error _ as err) -> err)
+      in
+      loop [] profile_tables
 
 let profile_field_json ~profile_name ~field_name field_value =
   let profile_path = profile_name ^ "." ^ field_name in
@@ -397,9 +487,25 @@ let profile_field_json ~profile_name ~field_name field_value =
       | Ok value ->
           Ok [ (profile_name ^ "_keep_alive", `String value) ]
       | Error _ as err -> err)
+  | "groups" -> (
+      (* RFC-0041 hierarchical group/item profile format. Each element is an
+         inline table describing a [Cascade_ref.cascade_group]. The array is
+         materialized as [<profile>_groups] in JSON so the loader can use
+         [Cascade_ref.cascade_group_of_json] for parsing.
+
+         Accept both [TomlArray] (inline array of tables) and
+         [TomlTableArray] (TOML [[...]] syntax) so operators are not forced
+         into one concrete TOML style. *)
+      match field_value with
+      | Otoml.TomlArray items
+      | Otoml.TomlTableArray items ->
+          Ok [ (profile_name ^ "_groups", `List (List.map otoml_to_yojson items)) ]
+      | _ ->
+          errorf "expected %s to be an array of group tables, found %s"
+            profile_path (toml_type_name field_value))
   | other ->
       errorf
-        "unknown field %S in profile %s; allowed fields are comment, models, temperature, max_tokens, strategy, max_cycles, backoff_base_ms, backoff_cap_ms, ollama_max_concurrent, cli_max_concurrent, tiers, sticky_ttl_ms, latency_baseline_ms, rate_limit_recency_window_s, rate_limit_decay_base, rate_limit_skip_after, server_error_recency_window_s, server_error_decay_base, server_error_skip_after, keeper_assignable, fallback_cascade, required_capability_profile, api_key_env, keep_alive, num_ctx, timeout_sec"
+        "unknown field %S in profile %s; allowed fields are comment, models, temperature, max_tokens, strategy, max_cycles, backoff_base_ms, backoff_cap_ms, ollama_max_concurrent, cli_max_concurrent, tiers, sticky_ttl_ms, latency_baseline_ms, rate_limit_recency_window_s, rate_limit_decay_base, rate_limit_skip_after, server_error_recency_window_s, server_error_decay_base, server_error_skip_after, keeper_assignable, fallback_cascade, required_capability_profile, api_key_env, keep_alive, num_ctx, timeout_sec, groups"
         other profile_name
 
 let profile_table_json_fields ~profile_name value =
@@ -414,43 +520,6 @@ let profile_table_json_fields ~profile_name value =
             | Error _ as err -> err)
       in
       loop [] fields
-
-(* Generic Otoml -> Yojson conversion used for namespaces that the
-   materializer should pass through verbatim instead of treating as a
-   cascade profile.  Currently used for the [admission] namespace
-   introduced by RFC-0026 PR-B (#12926, #1089).
-
-   Without this, every [admission.<keeper>] sub-table breaks the
-   materializer (treated as a profile, sub-table keys rejected as
-   "unknown field"), which fails cascade.json materialization and
-   takes down every keeper that resolves a cascade through cascade.toml
-   — not just the keepers with admission blocks.  The error is a
-   single fleet-wide regression, so the materializer needs to know
-   about the admission namespace explicitly. *)
-let rec otoml_to_yojson (value : Otoml.t) : Yojson.Safe.t =
-  match value with
-  | Otoml.TomlString s -> `String s
-  | Otoml.TomlInteger n -> `Int n
-  | Otoml.TomlFloat f -> `Float f
-  | Otoml.TomlBoolean b -> `Bool b
-  | Otoml.TomlOffsetDateTime s
-  | Otoml.TomlLocalDateTime s
-  | Otoml.TomlLocalDate s
-  | Otoml.TomlLocalTime s -> `String s
-  | Otoml.TomlArray items ->
-      `List (List.map otoml_to_yojson items)
-  | Otoml.TomlTable fields ->
-      `Assoc
-        (List.map
-           (fun (k, v) -> (k, otoml_to_yojson v))
-           fields)
-  | Otoml.TomlInlineTable fields ->
-      `Assoc
-        (List.map
-           (fun (k, v) -> (k, otoml_to_yojson v))
-           fields)
-  | Otoml.TomlTableArray items ->
-      `List (List.map otoml_to_yojson items)
 
 let render_toml_to_yojson toml =
   match table_fields ~path:"<root>" toml with
@@ -467,6 +536,14 @@ let render_toml_to_yojson toml =
               match routes_json ~path:"routes" value with
               | Ok routes -> loop ([ ("routes", routes) ] :: acc) rest
               | Error _ as err -> err
+            else if String.equal key "profiles" then
+              (* RFC-0058: capability profile definitions — parsed into
+                 a JSON "profiles" namespace consumed by
+                 [Cascade_capability_profile]. *)
+              (match profiles_json ~path:"profiles" value with
+               | Ok profiles ->
+                   loop ([ ("profiles", profiles) ] :: acc) rest
+               | Error _ as err -> err)
             else if String.equal key "admission" then
               (* RFC-0026 admission namespace — pass through to JSON
                  verbatim.  The schema is owned by
@@ -532,7 +609,11 @@ let toml_section_names_result ~config_path =
                 let is_meta_key key =
                   String.length key > 0 && key.[0] = '_'
                 in
-                let is_reserved_table key = String.equal key "routes" in
+                let is_reserved_table key =
+                  String.equal key "routes"
+                  || String.equal key "profiles"
+                  || String.equal key "admission"
+                in
                 let names =
                   fields
                   |> List.filter_map (fun (key, value) ->

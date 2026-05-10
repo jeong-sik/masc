@@ -15,6 +15,7 @@ Prometheus / Grafana files that live alongside the masc-mcp source so deployment
 | `goal-loop-observe-metrics.contract.json` | GOAL LOOP Observe | exporter contract | `docs/observability/goal-loop-observe-metrics.md` |
 | `keeper-turn-fsm-alerts.yml` | keeper turn FSM | alerts | `docs/observability/keeper-turn-fsm-metrics.md` |
 | `keeper-turn-fsm-slo.yml` | keeper turn FSM | recording rules | `docs/observability/keeper-turn-fsm-metrics.md` |
+| `grafana-dashboard-surface-dashboard.json` | dashboard IA | Grafana dashboard | `docs/observability/dashboard-surface-metrics.md` |
 
 ## Domains
 
@@ -32,7 +33,11 @@ signal.
 
 ### Cascade
 
-Tracks cascade-routing decisions inside `Oas_worker_named.cycle_loop`. Counters: `masc_cascade_strategy_decisions_total{cascade,strategy,kind}`, `masc_cascade_capacity_events_total{kind,key_type}`. State vocabulary: `ordered / filtered_empty / exhausted` (TLA+ `KeeperCascadeLifecycle`).
+Tracks cascade-routing decisions inside `Keeper_turn_driver.cycle_loop`. Counters: `masc_cascade_strategy_decisions_total{cascade,strategy,kind}`, `masc_cascade_capacity_events_total{kind,key_type}`. State vocabulary: `ordered / filtered_empty / exhausted` (TLA+ `KeeperCascadeLifecycle`).
+
+### Dashboard IA
+
+Tracks dashboard surface and section opens to drive RFC-0048 IA Phase 2 deletion-threshold decisions. Counters: `dashboard_surface_open_total{surface}`, `dashboard_section_open_total{surface, section, redirected_from}`. The `redirected_from` label distinguishes direct opens from redirect-driven opens (legacy bookmarks) — only direct opens count toward RFC-0048 §4.4 hide/delete thresholds. Aggregate-only, no PII. Producer code: `lib/dashboard/dashboard_nav_event.ml`, `dashboard/src/lib/nav-telemetry.ts`. CLI consumer: `scripts/dashboard-ia-usage.sh`.
 
 ### Keeper turn FSM
 

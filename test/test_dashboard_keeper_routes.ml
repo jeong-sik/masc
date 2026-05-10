@@ -641,7 +641,7 @@ let append_execution_receipt ?(tool_contract_result = "satisfied")
       approval_profile_derived = false;
       cascade_name =
         Masc_mcp.Keeper_execution_receipt.cascade_name_of_string
-          meta.cascade_name;
+          (Masc_mcp.Keeper_types.cascade_name_of_meta meta);
       cascade_selected_model = Some "custom:mock";
       cascade_attempt_count = 2;
       cascade_fallback_applied;
@@ -658,7 +658,7 @@ let append_execution_receipt ?(tool_contract_result = "satisfied")
              {
                from_cascade =
                  Masc_mcp.Keeper_execution_receipt.cascade_name_of_string
-                   meta.cascade_name;
+                   (Masc_mcp.Keeper_types.cascade_name_of_meta meta);
                to_cascade =
                  Masc_mcp.Keeper_execution_receipt.cascade_name_of_string
                    retry_cascade;
@@ -961,8 +961,6 @@ let test_agent_purge_route_removes_plain_agent_artifacts () =
   seed_agent_file ~capabilities:[ "coding" ] config agent_name;
   ignore
     (Masc_mcp.Auth.create_token config.base_path ~agent_name ~role:Masc_domain.Admin);
-  ignore
-    (Heartbeat.start ~agent_name ~interval:30 ~message:"route-test");
   let metrics_dir = Masc_mcp.Metrics_store_eio.agent_metrics_dir config agent_name in
   Fs_compat.mkdir_p metrics_dir;
   write_file (Filename.concat metrics_dir "2026-04.jsonl") "{}\n";
@@ -989,12 +987,12 @@ let test_agent_purge_route_removes_plain_agent_artifacts () =
   in
   check int "agent purge reports pending confirms" 0
     (cleanup_row |> member "pending_confirms_removed" |> to_int);
-  check int "agent purge reports stopped heartbeats" 1
+  (* The route runs inside [main_eio.exe], not this test process. A plain
+     seeded file-backed agent has no in-process server heartbeat to stop. *)
+  check int "agent purge reports server-process stopped heartbeats" 0
     (cleanup_row |> member "heartbeats_stopped" |> to_int);
   check string "agent purge reports coord leave" (agent_name ^ " left the namespace")
     (cleanup_row |> member "coord_leave_result" |> to_string);
-  check int "agent purge leaves no duplicate heartbeat stop work" 0
-    (Heartbeat.stop_by_agent ~agent_name);
   check bool "agent file removed" false
     (Sys.file_exists
        (Filename.concat (Masc_mcp.Coord.agents_dir config)
@@ -1202,7 +1200,7 @@ let test_keeper_cascade_assignment_updates_dashboard_projection () =
   (match Masc_mcp.Keeper_types.read_meta config keeper_name with
    | Ok (Some meta) ->
        check string "persistent meta cascade updated"
-         "keeper_diverse" meta.cascade_name
+         "keeper_diverse" (Masc_mcp.Keeper_types.cascade_name_of_meta meta)
    | Ok None -> fail "keeper meta missing after cascade assignment"
    | Error msg -> fail ("read_meta failed after cascade assignment: " ^ msg))
 ;;
@@ -1261,6 +1259,33 @@ let test_execution_trust_route_surfaces_trust_summary_fields () =
     (match row |> member "trust" |> member "latest_causal_event" with
      | `Null | `Assoc _ -> true
      | _ -> false)
+;;
+
+let test_dashboard_bootstrap_route_surfaces_cold_start_contract () =
+  with_seeded_server
+  @@ fun ~port ~config:_ ~admin_token:_ ~keeper_name:_ ->
+  let result =
+    run_curl_get ~port ~path:"/api/v1/dashboard/bootstrap" ()
+  in
+  require_status "bootstrap GET returns 200" 200 result;
+  let open Yojson.Safe.Util in
+  let json = Yojson.Safe.from_string result.body in
+  (match json |> member "served_at" with
+   | `String value when String.trim value <> "" -> ()
+   | _ -> fail ("bootstrap served_at missing: " ^ result.body));
+  check int "bootstrap milestone" 1 (json |> member "milestone" |> to_int);
+  List.iter
+    (fun key ->
+       match json |> member key with
+       | `Null -> failf "bootstrap missing slice %s: %s" key result.body
+       | _ -> ())
+    [ "shell"
+    ; "execution"
+    ; "planning"
+    ; "namespace_truth"
+    ; "goals"
+    ; "goal_loop_status"
+    ]
 ;;
 
 let test_composite_routes_surface_latest_execution_receipt () =
@@ -1656,6 +1681,10 @@ let () =
             "execution trust route surfaces trust summary fields"
             `Slow
             test_execution_trust_route_surfaces_trust_summary_fields
+        ; test_case
+            "dashboard bootstrap route surfaces cold-start contract"
+            `Slow
+            test_dashboard_bootstrap_route_surfaces_cold_start_contract
         ; test_case
             "composite routes surface latest execution receipt"
             `Slow

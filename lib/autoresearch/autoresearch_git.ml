@@ -38,7 +38,7 @@ let run_git_with_status ?(timeout_sec = git_mutation_timeout_sec ()) ~workdir ar
   let full_argv = "git" :: "-C" :: workdir :: argv in
   let raw_source = exec_gate_raw_source full_argv in
   Masc_exec.Exec_gate.run_argv_with_status
-    ~actor:"autoresearch/git"
+    ~actor:(Masc_exec.Agent_id.of_string "autoresearch/git")
     ~raw_source
     ~summary:"autoresearch git"
     ~timeout_sec

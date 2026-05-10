@@ -186,8 +186,10 @@ let latest_metrics_json ~metrics_store ~metrics_path ~tail_bytes =
       | json :: _ -> Some json
       | [] -> None)
 
+type provider_scope = Local | Unknown | Non_local
+
 let provider_scope_of_model_label model_label =
-  match
+  let prefix =
     Option.bind (Option.bind model_label nonempty_trimmed) (fun label ->
         match String.index_opt label ':' with
         | Some idx when idx > 0 ->
@@ -195,10 +197,14 @@ let provider_scope_of_model_label model_label =
               (String.sub label 0 idx |> String.trim
              |> String.lowercase_ascii)
         | _ -> None)
-  with
-  | Some ("llama" | "ollama") -> "local"
-  | Some _ -> "non_local"
-  | None -> "unknown"
+  in
+  match prefix with
+  | None -> Unknown
+  | Some name
+    when String.equal name Provider_adapter.cn_llama
+      || String.equal name Provider_adapter.cn_ollama ->
+      Local
+  | Some _ -> Non_local
 
 let single_string_or_none values =
   match List.sort_uniq String.compare values with
@@ -215,28 +221,41 @@ let lightweight_runtime_contract_json ~selected_model ~runtime_blocker_class =
   let proof_note =
     "Lightweight status only. Use masc_runtime_verify for proof."
   in
-  if provider_scope <> "local" then
-    `Assoc
-      [
-        ("source", `String "none");
-        ("verified", `Bool false);
-        ("provider_scope", `String provider_scope);
-        ("provider_reachable", `Null);
-        ("healthy_runtime_count", `Null);
-        ("actual_model_id", `Null);
-        ("actual_slots", `Null);
-        ("actual_ctx", `Null);
-        ("chat_completion_compatible", `Null);
-        ("runtime_blocker", Json_util.string_opt_to_json runtime_blocker_class);
-        ( "note",
-          `String
-            (if provider_scope = "non_local" then
-               "Selected model is not a local llama/ollama runtime. "
-               ^ proof_note
-             else
-               "Selected model is unknown. " ^ proof_note) );
-      ]
-  else
+  match provider_scope with
+  | Unknown ->
+      `Assoc
+        [
+          ("source", `String "none");
+          ("verified", `Bool false);
+          ("provider_scope", `String "unknown");
+          ("provider_reachable", `Null);
+          ("healthy_runtime_count", `Null);
+          ("actual_model_id", `Null);
+          ("actual_slots", `Null);
+          ("actual_ctx", `Null);
+          ("chat_completion_compatible", `Null);
+          ("runtime_blocker", Json_util.string_opt_to_json runtime_blocker_class);
+          ("note", `String ("Selected model is unknown. " ^ proof_note));
+        ]
+  | Non_local ->
+      `Assoc
+        [
+          ("source", `String "none");
+          ("verified", `Bool false);
+          ("provider_scope", `String "non_local");
+          ("provider_reachable", `Null);
+          ("healthy_runtime_count", `Null);
+          ("actual_model_id", `Null);
+          ("actual_slots", `Null);
+          ("actual_ctx", `Null);
+          ("chat_completion_compatible", `Null);
+          ("runtime_blocker", Json_util.string_opt_to_json runtime_blocker_class);
+          ("note",
+           `String
+             ("Selected model is not a local llama/ollama runtime. "
+              ^ proof_note));
+        ]
+  | Local ->
     let endpoints_opt =
       try Some (Discovery_cache.get_cached_or_refresh ())
       with
@@ -569,13 +588,13 @@ let handle_keeper_status ctx args : tool_result =
          let active_model = active_model_of_meta m in
          let next_model_hint = next_model_hint_of_meta m in
          let runtime_cascade_metrics =
-           match Oas_worker.cascade_metrics_json () with
+           match Cascade_legacy_runner.cascade_metrics_json () with
            | `List entries ->
                entries
                |> List.find_opt (function
                     | `Assoc fields ->
                         List.assoc_opt "cascade_name" fields
-                        = Some (`String m.cascade_name)
+                        = Some (`String (cascade_name_of_meta m))
                     | _ -> false)
                |> Option.value ~default:`Null
            | _ -> `Null
@@ -978,7 +997,7 @@ let handle_keeper_status ctx args : tool_result =
            latest_metrics_json ~metrics_store ~metrics_path ~tail_bytes
          in
          let model_observability =
-           model_observability_json ~current_cascade_name:m.cascade_name
+           model_observability_json ~current_cascade_name:(cascade_name_of_meta m)
              ~configured_labels:models
              ~active_model ~runtime_blocker_fields latest_metrics
          in
@@ -1156,9 +1175,9 @@ let handle_keeper_status ctx args : tool_result =
                then `Null
                else `String m.runtime.last_social_transition_reason);
              ("last_blocker",
-               if String.trim m.runtime.last_blocker = ""
-               then `Null
-               else `String m.runtime.last_blocker);
+               match m.runtime.last_blocker with
+               | Some info -> Keeper_types.blocker_info_to_json info
+               | None -> `Null);
              ("last_need",
                if String.trim m.runtime.last_need = ""
                then `Null

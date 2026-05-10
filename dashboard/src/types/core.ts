@@ -118,6 +118,20 @@ type BoardPostMeta = Record<string, unknown> & {
 }
 
 export type BoardVoteDirection = 'up' | 'down'
+export type BoardModerationStatus = 'none' | 'flagged' | 'approved' | 'removed' | 'hidden' | 'warned'
+
+export interface BoardContributorQuality {
+  score: number
+  band?: 'low' | 'watch' | 'strong' | 'excellent' | string
+  source?: string
+  completion_rate?: number
+  response_rate?: number
+  board_posts?: number
+  board_comments?: number
+  accountability_score?: number
+  autonomy_level?: string
+  thompson_confidence?: number
+}
 
 export interface BoardActorIdentity {
   kind: 'keeper' | 'agent'
@@ -140,8 +154,10 @@ export interface BoardPost {
   content: string
   meta?: BoardPostMeta | null
   tags: string[]
-  votes: number
-  vote_balance?: number
+  votes: number | null
+  vote_balance?: number | null
+  vote_blind?: boolean
+  vote_blind_reason?: string
   current_vote?: BoardVoteDirection | null
   has_voted?: boolean
   comment_count: number
@@ -152,6 +168,9 @@ export interface BoardPost {
   visibility?: string
   expires_at?: string | null
   hearth_count?: number
+  report_count?: number
+  moderation_status?: BoardModerationStatus
+  contributor_quality?: BoardContributorQuality | null
   reactions?: BoardReactionSummary[]
 }
 
@@ -163,12 +182,16 @@ export interface BoardComment {
   author_identity?: BoardActorIdentity | null
   content: string
   created_at: string
-  votes?: number
-  vote_balance?: number
-  votes_up?: number
-  votes_down?: number
+  votes?: number | null
+  vote_balance?: number | null
+  votes_up?: number | null
+  votes_down?: number | null
+  vote_blind?: boolean
+  vote_blind_reason?: string
   current_vote?: BoardVoteDirection | null
   has_voted?: boolean
+  report_count?: number
+  moderation_status?: BoardModerationStatus
   reactions?: BoardReactionSummary[]
 }
 
@@ -369,6 +392,11 @@ export type KeeperRuntimeBlockerClass =
   | 'turn_failures'
   | 'exception'
   | 'stale_fleet_batch'
+  | 'awaiting_operator'
+  | 'awaiting_sandbox_egress'
+  | 'supervisor_paused'
+  | 'synthetic_stall'
+  | 'self_imposed_idle'
 
 export interface KeeperTrustLatestEvent {
   kind: string
@@ -809,6 +837,7 @@ export interface Keeper {
   last_model_used_label?: string | null
   next_model_hint?: string | null
   cascade_name?: string | null
+  cascade_ref?: CascadeRef | null
   cascade_canonical?: string | null
   selected_cascade_canonical?: string | null
   status: string
@@ -1089,6 +1118,7 @@ interface KeeperConfigExecution {
   verify: boolean
   selected_cascade_name: string
   selected_cascade_canonical: string
+  cascade_ref?: CascadeRef | null
 }
 
 interface KeeperConfigCompaction {
@@ -1103,6 +1133,11 @@ interface KeeperConfigProactive {
   enabled: boolean
   idle_sec: number
   cooldown_sec: number
+}
+
+export interface CascadeRef {
+  group: string
+  item: string | null
 }
 
 export type KeeperFeatureStatus = 'wired' | 'source_only' | 'unwired'
@@ -1195,7 +1230,7 @@ interface KeeperConfigMetrics {
   last_input_tokens: number
   last_output_tokens: number
   last_total_tokens: number
-  last_latency_ms: number
+  last_latency_ms: number | null
   last_total_tokens_per_sec: number | null
   last_output_tokens_per_sec: number | null
   compaction_count: number

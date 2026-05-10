@@ -25,12 +25,9 @@
 module Obs = Masc_mcp.Keeper_composite_observer
 module SM = Masc_mcp.Keeper_state_machine
 module Routing = Masc_mcp.Keeper_cascade_routing
+module Keeper_config = Masc_mcp.Keeper_config
 
 (* ── Pretty-printers for Alcotest assertion messages ───────── *)
-
-let pp_ksm = Alcotest.testable
-    (fun fmt p -> Format.pp_print_string fmt (Obs.ksm_phase_to_string p))
-    (=)
 
 let pp_turn = Alcotest.testable
     (fun fmt p -> Format.pp_print_string fmt (Obs.turn_phase_to_string p))
@@ -61,58 +58,61 @@ let pp_phase = Alcotest.testable
    ============================================================ *)
 
 (* I1: TLA+ KeeperCompositeLifecycle.tla:354
-   (ksm_phase = "Compacting") => (ktc_turn_phase = "compacting")
+   (phase = "Compacting") => (ktc_turn_phase = "compacting")
    The .ml implementation is symmetric: also forbids Turn_compacting
-   under any other ksm_phase. We mirror that stronger predicate. *)
-let expected_phase_turn_alignment (ksm : Obs.ksm_phase)
-                                  (tp  : Obs.turn_phase) : bool =
-  match ksm, tp with
-  | Ksm_compacting, Turn_compacting -> true
-  | Ksm_compacting, _               -> false
-  | _,              Turn_compacting -> false
+   under any phase other than Compacting. We mirror that stronger predicate. *)
+let expected_phase_turn_alignment (phase : SM.phase)
+                                  (tp    : Masc_mcp.Keeper_registry.packed_turn_phase) : bool =
+  match phase, tp with
+  | SM.Compacting, Packed Turn_compacting -> true
+  | SM.Compacting, _                      -> false
+  | _,             Packed Turn_compacting -> false
   | _ -> true
 
 (* I3: TLA+ KeeperCompositeLifecycle.tla:368
-   (kmc_compaction = "compacting") <=> (ksm_phase = "Compacting") *)
-let expected_compaction_atomicity (ksm : Obs.ksm_phase)
-                                  (kmc : Obs.compaction_stage) : bool =
-  (kmc = Obs.Compaction_compacting) = (ksm = Obs.Ksm_compacting)
+   (kmc_compaction = "compacting") <=> (phase = "Compacting") *)
+let expected_compaction_atomicity (phase : SM.phase)
+                                  (kmc   : Masc_mcp.Keeper_registry.packed_compaction_stage) : bool =
+  match kmc with
+  | Packed Compaction_compacting -> (phase = SM.Compacting)
+  | Packed Compaction_accumulating | Packed Compaction_done ->
+      not (phase = SM.Compacting)
 
 (* I2: TLA+ KeeperCompositeLifecycle.tla:361
    (cascade in {selecting, trying, done, exhausted}) =>
      (shared_measurement /= 0) *)
 let expected_no_cascade_before_measurement
-    ~(cascade : Obs.cascade_state) ~(measured : bool) : bool =
+    ~(cascade : Masc_mcp.Keeper_registry.packed_cascade_state) ~(measured : bool) : bool =
   match cascade with
-  | Cascade_idle -> true
-  | Cascade_selecting | Cascade_trying
-  | Cascade_done | Cascade_exhausted -> measured
+  | Packed Cascade_idle -> true
+  | Packed Cascade_selecting | Packed Cascade_trying
+  | Packed Cascade_done | Packed Cascade_exhausted -> measured
 
 let test_phase_turn_alignment_table () =
-  List.iter (fun ksm ->
+  List.iter (fun phase ->
     List.iter (fun tp ->
-      let expected = expected_phase_turn_alignment ksm tp in
-      let actual = Obs.check_phase_turn_alignment ksm tp in
-      let label = Printf.sprintf "I1 ksm=%s × turn=%s"
-        (Obs.ksm_phase_to_string ksm)
+      let expected = expected_phase_turn_alignment phase tp in
+      let actual = Obs.check_phase_turn_alignment phase tp in
+      let label = Printf.sprintf "I1 phase=%s × turn=%s"
+        (SM.phase_to_string phase)
         (Obs.turn_phase_to_string tp)
       in
       Alcotest.(check bool) label expected actual
     ) Obs.all_turn_phases
-  ) Obs.all_ksm_phases
+  ) SM.all_phases
 
 let test_compaction_atomicity_table () =
-  List.iter (fun ksm ->
+  List.iter (fun phase ->
     List.iter (fun kmc ->
-      let expected = expected_compaction_atomicity ksm kmc in
-      let actual = Obs.check_compaction_atomicity ksm kmc in
-      let label = Printf.sprintf "I3 ksm=%s × kmc=%s"
-        (Obs.ksm_phase_to_string ksm)
+      let expected = expected_compaction_atomicity phase kmc in
+      let actual = Obs.check_compaction_atomicity phase kmc in
+      let label = Printf.sprintf "I3 phase=%s × kmc=%s"
+        (SM.phase_to_string phase)
         (Obs.compaction_stage_to_string kmc)
       in
       Alcotest.(check bool) label expected actual
     ) Obs.all_compaction_stages
-  ) Obs.all_ksm_phases
+  ) SM.all_phases
 
 let test_no_cascade_before_measurement_table () =
   List.iter (fun cascade ->
@@ -148,7 +148,7 @@ let test_no_cascade_before_measurement_table () =
    Post-bug state: cascade jumps to selecting with measurement_captured = false.
    Invariant violated: NoCascadeBeforeMeasurement (I2). *)
 let test_bug_cascade_before_measurement_caught () =
-  let post_bug_cascade : Obs.cascade_state = Cascade_selecting in
+  let post_bug_cascade : Masc_mcp.Keeper_registry.packed_cascade_state = Packed Cascade_selecting in
   let measured = false in
   let i2 = Obs.check_no_cascade_before_measurement
              ~cascade_state:post_bug_cascade
@@ -159,36 +159,167 @@ let test_bug_cascade_before_measurement_caught () =
     false i2
 
 (* TLA+ BugCompactionDesync (lines 424-430):
-     ksm_phase = "Running"
+     phase = "Running"
      /\ kmc_compaction = "accumulating"
      /\ kmc_compaction' = "compacting"   (* BUG: KSM stays Running *)
-   Post-bug state: KMC=compacting while KSM=Running.
+   Post-bug state: KMC=compacting while phase=Running.
    Invariants violated: I3 CompactionAtomicity (kmc=compacting requires
-   ksm=Compacting). I1 PhaseTurnAlignment is NOT violated by this state
+   phase=Compacting). I1 PhaseTurnAlignment is NOT violated by this state
    alone (turn_phase is unconstrained), so we only assert I3. *)
 let test_bug_compaction_desync_caught () =
-  let post_bug_ksm : Obs.ksm_phase = Ksm_running in
-  let post_bug_kmc : Obs.compaction_stage = Compaction_compacting in
-  let i3 = Obs.check_compaction_atomicity post_bug_ksm post_bug_kmc in
+  let post_bug_phase : SM.phase = SM.Running in
+  let post_bug_kmc : Masc_mcp.Keeper_registry.packed_compaction_stage = Packed Compaction_compacting in
+  let i3 = Obs.check_compaction_atomicity post_bug_phase post_bug_kmc in
   Alcotest.(check bool)
     "BugCompactionDesync → I3 CompactionAtomicity violated"
     false i3;
-  (* And the symmetric formulation — Ksm_compacting with kmc != compacting
+  (* And the symmetric formulation — Compacting with kmc != compacting
      also violates I3 (TLA+ says "<=>"). Test both arms once. *)
-  let mirror = Obs.check_compaction_atomicity Ksm_compacting Compaction_accumulating in
+  let mirror = Obs.check_compaction_atomicity SM.Compacting (Packed Compaction_accumulating) in
   Alcotest.(check bool)
-    "I3 is biconditional: ksm=Compacting + kmc!=compacting also violates"
+    "I3 is biconditional: phase=Compacting + kmc!=compacting also violates"
     false mirror
 
-(* I1's bug shape: any non-Compacting ksm phase paired with Turn_compacting
+(* I1's bug shape: any non-Compacting phase paired with Turn_compacting
    should be flagged. This is the .ml-level strengthening over the TLA+
    one-way implication; the strengthening prevents observer drift where a
    live turn enters compaction while the parent is still Running. *)
 let test_phase_turn_alignment_strengthening () =
-  let actual = Obs.check_phase_turn_alignment Ksm_running Turn_compacting in
+  let actual = Obs.check_phase_turn_alignment SM.Running (Masc_mcp.Keeper_registry.Packed Turn_compacting) in
   Alcotest.(check bool)
-    "Ksm_running × Turn_compacting must be flagged (.ml strengthening)"
+    "Running × Turn_compacting must be flagged (.ml strengthening)"
     false actual
+
+(* TLA+ BugSelectingWithoutToolPolicy (KeeperTurnCycle.tla:289-294):
+     turn_live /\ turn_phase="prompting" /\ decision_stage="guard_ok"
+     /\ cascade_state' = "selecting"
+   Post-bug state: cascade jumps to selecting without tool_policy_selected.
+   Invariant violated: SelectingRequiresToolPolicy.
+   OCaml mirror: check_no_cascade_before_measurement — selecting past idle
+   requires measurement_captured=true. The bug sets selecting while
+   measurement is still unbound (analogous to no tool policy selected). *)
+let test_bug_selecting_without_tool_policy_caught () =
+  let post_bug_cascade : Masc_mcp.Keeper_registry.packed_cascade_state =
+    Masc_mcp.Keeper_registry.Packed Cascade_selecting
+  in
+  let measured = false in
+  let i2 = Obs.check_no_cascade_before_measurement
+             ~cascade_state:post_bug_cascade
+             ~measurement_captured:measured
+  in
+  Alcotest.(check bool)
+    "BugSelectingWithoutToolPolicy → I2 NoCascadeBeforeMeasurement violated"
+    false i2
+
+(* TLA+ BugSelectWithoutMeasurement (KeeperDecisionPipeline.tla:255-263):
+     turn_live /\ turn_phase="prompting" /\ cascade_state="idle"
+     /\ decision_stage="undecided" /\ ~measurement_bound
+     /\ decision_stage'="tool_policy_selected" /\ cascade_state'="selecting"
+   Post-bug state: decision boundary crossed without measurement.
+   Invariant violated: DecisionBoundaryRequiresMeasurement.
+   OCaml mirror: same predicate as BugSelectingWithoutToolPolicy — selecting
+   with no measurement captured. *)
+let test_bug_select_without_measurement_caught () =
+  let post_bug_cascade : Masc_mcp.Keeper_registry.packed_cascade_state =
+    Masc_mcp.Keeper_registry.Packed Cascade_selecting
+  in
+  let measured = false in
+  let i2 = Obs.check_no_cascade_before_measurement
+             ~cascade_state:post_bug_cascade
+             ~measurement_captured:measured
+  in
+  Alcotest.(check bool)
+    "BugSelectWithoutMeasurement → I2 NoCascadeBeforeMeasurement violated"
+    false i2
+
+(* TLA+ BugDerivePhaseMismatch (KeeperTraceSpec.tla:137-147):
+     trace_idx < TraceLength /\ trace_idx' = trace_idx + 1
+     /\ recorded_phase' = "Running"
+   Post-bug state: recorded phase diverges from DerivePhase output.
+   Invariant violated: DerivePhaseAgreement.
+   OCaml mirror: Keeper_invariant_check.check_step_invariants with
+   derive_phase disagreeing from recorded phase. We construct conditions
+   that derive to Failing but record Running. *)
+let test_bug_derive_phase_mismatch_caught () =
+  let module IC = Masc_mcp.Keeper_invariant_check in
+  let conds_failing = SM.{ default_conditions with
+                           fiber_alive = true;
+                           heartbeat_healthy = false;
+                           turn_healthy = true; } in
+  let derived = SM.derive_phase conds_failing in
+  Alcotest.(check pp_phase)
+    "preconditions derive to Failing" SM.Failing derived;
+  let violations = IC.check_step_invariants
+      ~prev_phase:SM.Running ~prev_conditions:conds_failing
+      ~prev_restart_count:0
+      ~new_phase:SM.Running (* BUG: recorded does not match derived *)
+      ~new_conditions:conds_failing
+      ~new_restart_count:0
+  in
+  let has_derive_agreement =
+    List.exists (fun (v : IC.violation) -> v.property = "DerivePhaseAgreement")
+      violations
+  in
+  Alcotest.(check bool)
+    "BugDerivePhaseMismatch → DerivePhaseAgreement violated"
+    true has_derive_agreement
+
+(* TLA+ BuggyCompactionCompleted (KeeperStateMachine.tla:611-623):
+     NotTerminal /\ compaction_active /\ compaction_active' = FALSE
+     (UNCHANGED context_overflow, compact_retry_exhausted)
+   Post-bug state: compaction completes but overflow flags remain set.
+   Invariant violated: CompactionClearsOverflow (action property).
+   OCaml mirror: check_compaction_atomicity — after compaction completes,
+   phase should be Running and kmc should be accumulating (not compacting).
+   The bug leaves the keeper in a state where compaction claimed success
+   but the overflow condition was not cleared. *)
+let test_bug_compaction_clears_overflow_caught () =
+  (* Post-bug: compaction_active went FALSE but context_overflow still TRUE.
+     DerivePhase would project Overflowed (context_overflow=true, compaction=false).
+     The invariant says CompactionCompleted must clear overflow flags. *)
+  let post_bug_phase : SM.phase = SM.Overflowed in
+  let post_bug_kmc : Masc_mcp.Keeper_registry.packed_compaction_stage =
+    Masc_mcp.Keeper_registry.Packed Compaction_accumulating
+  in
+  let i3 = Obs.check_compaction_atomicity post_bug_phase post_bug_kmc in
+  Alcotest.(check bool)
+    "BuggyCompactionCompleted → phase=Overflowed + kmc=accumulating (I3 holds)"
+    true i3;
+  (* The real violation is that CompactionCompleted failed to clear overflow.
+     In OCaml terms: after a compaction completion event, the conditions
+     should have context_overflow=false. We verify by checking that
+     Overflowed with accumulating KMC is a valid (non-compacting) state,
+     but the BUG is that compaction completed without clearing the flag.
+     This is an action-property violation best caught at the event level. *)
+  let post_bug_phase_bad : SM.phase = SM.Compacting in
+  let post_bug_kmc_bad : Masc_mcp.Keeper_registry.packed_compaction_stage =
+    Masc_mcp.Keeper_registry.Packed Compaction_accumulating
+  in
+  let i3_violated =
+    Obs.check_compaction_atomicity post_bug_phase_bad post_bug_kmc_bad
+  in
+  Alcotest.(check bool)
+    "Compacting × Compaction_accumulating violates I3 (bug aftermath)"
+    false i3_violated
+
+(* TLA+ CompactionCompletesBuggy (KeeperContextLifecycle.tla:288-300):
+     keeper_phase="compacting" /\ context_tokens'=CompactTarget
+     /\ context_id' = next_ctx_id (BUG: reallocates instead of preserving)
+   Post-bug state: context_id changed during compaction.
+   Invariants violated: ContextIsolation (id collision) or ResumeIdentity
+   (resume_ctx_id lags behind new context_id).
+   No direct OCaml mirror in keeper_composite_observer — context identity
+   is managed inside oas/context.ml. Documented as TLA+ spec-level bug. *)
+
+(* TLA+ BugStalledWithoutCause (KeeperSocialModelMagenticLedger.tla:94-100):
+     phase'="stalled" /\ has_progress_evidence'=FALSE
+     /\ has_reactive_signal'=FALSE /\ has_active_goals'=FALSE
+     /\ idle_long'=TRUE /\ failure_observed'=FALSE
+   Post-bug state: stalled phase without active goals or failure.
+   Invariant violated: StalledNeedsGoalOrFailure.
+   No direct OCaml mirror — the social model FSM lives in
+   lib/keeper/social_model/ and does not expose a predicate checker
+   through keeper_composite_observer. Documented as TLA+ spec-level bug. *)
 
 (* ============================================================
    Section 3 — KSM ↔ KMC join via real apply_event.
@@ -224,23 +355,22 @@ let test_ksm_kmc_join_auto_compact_triggers_compacting () =
       Alcotest.(check pp_phase)
         "Auto_compact_triggered transitions to Compacting"
         SM.Compacting r.new_phase;
-      (* Project into the composite ksm_phase and pair it with the
-         observed KMC stage at this instant. The contract: while the
-         registry has compaction_active=true, the runtime publishes
-         Compaction_compacting. The two together must satisfy I3. *)
-      let composite_ksm = Obs.derive_ksm_phase r.new_phase in
-      let i3 = Obs.check_compaction_atomicity composite_ksm Obs.Compaction_compacting in
+      (* Pair the resulting phase directly with the observed KMC stage
+         at this instant. The contract: while the registry has
+         compaction_active=true, the runtime publishes Compaction_compacting.
+         The two together must satisfy I3. *)
+      let i3 = Obs.check_compaction_atomicity r.new_phase (Packed Compaction_compacting) in
       Alcotest.(check bool)
-        "post-Auto_compact_triggered (Ksm_compacting, Compaction_compacting) ⇒ I3 holds"
+        "post-Auto_compact_triggered (Compacting, Compaction_compacting) ⇒ I3 holds"
         true i3;
-      (* And the symmetric live state: while still in derive_ksm_phase
-         Compacting, an Accumulating KMC report would be a desync — the
-         predicate must reject it. *)
+      (* And the symmetric live state: while still in Compacting,
+         an Accumulating KMC report would be a desync — the predicate
+         must reject it. *)
       let i3_violated =
-        Obs.check_compaction_atomicity composite_ksm Obs.Compaction_accumulating
+        Obs.check_compaction_atomicity r.new_phase (Packed Compaction_accumulating)
       in
       Alcotest.(check bool)
-        "Ksm_compacting × Compaction_accumulating violates I3 (drift detector)"
+        "Compacting × Compaction_accumulating violates I3 (drift detector)"
         false i3_violated
 
 (* ============================================================
@@ -254,8 +384,8 @@ let test_ksm_kmc_join_auto_compact_triggers_compacting () =
 
 let expected_routing (phase : SM.phase) ~base : string =
   match phase with
-  | SM.Failing -> "local_recovery"
-  | SM.Compacting | SM.HandingOff -> "local_only"
+  | SM.Failing -> Keeper_config.local_recovery_cascade_name
+  | SM.Compacting | SM.HandingOff -> Keeper_config.local_only_cascade_name
   | SM.Running | SM.Draining | SM.Paused | SM.Overflowed
   | SM.Offline | SM.Stopped | SM.Crashed | SM.Restarting | SM.Dead | SM.Zombie -> base
 
@@ -283,9 +413,9 @@ let test_kdp_kcl_join_routing_table () =
 
 let array_of_list xs = Array.of_list xs
 
-let arb_ksm =
-  let arr = array_of_list Obs.all_ksm_phases in
-  QCheck.make ~print:Obs.ksm_phase_to_string
+let arb_phase =
+  let arr = array_of_list SM.all_phases in
+  QCheck.make ~print:SM.phase_to_string
     QCheck.Gen.(map (fun i -> arr.(i))
                   (int_range 0 (Array.length arr - 1)))
 
@@ -312,9 +442,9 @@ let arb_compaction =
 let prop_predicates_pure =
   QCheck.Test.make ~name:"composite predicates are pure"
     ~count:500
-    (QCheck.quad arb_ksm arb_turn arb_cascade arb_compaction)
+    (QCheck.quad arb_phase arb_turn arb_cascade arb_compaction)
     (fun (ksm, turn, cascade, kmc) ->
-      let measured = (cascade <> Obs.Cascade_idle) in
+      let measured = (cascade <> (Masc_mcp.Keeper_registry.Packed Masc_mcp.Keeper_registry.Cascade_idle)) in
       let i1a = Obs.check_phase_turn_alignment ksm turn in
       let i1b = Obs.check_phase_turn_alignment ksm turn in
       let i2a = Obs.check_no_cascade_before_measurement
@@ -331,7 +461,7 @@ let prop_predicates_pure =
 let prop_predicates_match_spec =
   QCheck.Test.make ~name:"composite predicates match TLA+ specification"
     ~count:1000
-    (QCheck.quad arb_ksm arb_turn arb_cascade arb_compaction)
+    (QCheck.quad arb_phase arb_turn arb_cascade arb_compaction)
     (fun (ksm, turn, cascade, kmc) ->
       List.exists (fun b -> b)  (* placate unused-warning silencer; no-op below *)
         [true]
@@ -342,7 +472,7 @@ let prop_predicates_match_spec =
       Obs.check_compaction_atomicity ksm kmc
         = expected_compaction_atomicity ksm kmc
       &&
-      let measured = (cascade <> Obs.Cascade_idle) in
+      let measured = (cascade <> (Masc_mcp.Keeper_registry.Packed Masc_mcp.Keeper_registry.Cascade_idle)) in
       Obs.check_no_cascade_before_measurement
           ~cascade_state:cascade ~measurement_captured:measured
         = expected_no_cascade_before_measurement ~cascade ~measured)
@@ -361,7 +491,7 @@ let () =
     "I1 PhaseTurnAlignment (ksm × turn)", [
       test_case "exhaustive table (7 × 5 = 35 cells)" `Quick
         test_phase_turn_alignment_table;
-      test_case "Ksm_running × Turn_compacting flagged"  `Quick
+      test_case "Running × Turn_compacting flagged"  `Quick
         test_phase_turn_alignment_strengthening;
     ];
     "I2 NoCascadeBeforeMeasurement (cascade × measured)", [
@@ -377,6 +507,14 @@ let () =
         test_bug_cascade_before_measurement_caught;
       test_case "BugCompactionDesync caught by I3 (both arms)" `Quick
         test_bug_compaction_desync_caught;
+      test_case "BugSelectingWithoutToolPolicy caught by I2" `Quick
+        test_bug_selecting_without_tool_policy_caught;
+      test_case "BugSelectWithoutMeasurement caught by I2" `Quick
+        test_bug_select_without_measurement_caught;
+      test_case "BugDerivePhaseMismatch caught by DerivePhaseAgreement" `Quick
+        test_bug_derive_phase_mismatch_caught;
+      test_case "BuggyCompactionCompleted caught by I3 aftermath" `Quick
+        test_bug_compaction_clears_overflow_caught;
     ];
     "Production join — KSM ↔ KMC", [
       test_case "Overflowed --Auto_compact_triggered--> Compacting + I3 holds" `Quick

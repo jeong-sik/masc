@@ -16,7 +16,7 @@ let mk_api err = Agent_sdk.Error.Api err
 let mk_agent err = Agent_sdk.Error.Agent err
 let code = KAE.terminal_reason_code_of_sdk_error
 
-let terminal_code (reason : KT.t) = reason.code
+let terminal_code (reason : KT.t) = KT.code reason
 let terminal_next_action (reason : KT.t) = reason.next_action
 let terminal_severity (reason : KT.t) = reason.severity
 
@@ -264,13 +264,16 @@ let test_structured_required_tool_no_tool_call () =
 
 let test_structured_oas_timeout_budget () =
   let err =
-    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-      (Masc_mcp.Oas_worker_named.Oas_timeout_budget
+    Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+      (Masc_mcp.Keeper_turn_driver.Oas_timeout_budget
          {
            budget_sec = 90.0;
            keeper_turn_timeout_sec = 1200.0;
            estimated_input_tokens = 10_000;
            source = "test";
+           remaining_turn_budget_sec = Some 42.0;
+           min_required_sec = 15.0;
+           phase = "test_phase";
          })
   in
   let terminal =
@@ -283,8 +286,8 @@ let test_structured_oas_timeout_budget () =
 
 let test_structured_turn_wall_clock_timeout () =
   let err =
-    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
-      (Masc_mcp.Oas_worker_named.Turn_timeout { elapsed_sec = 1200.0 })
+    Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+      (Masc_mcp.Keeper_turn_driver.Turn_timeout { elapsed_sec = 1200.0 })
   in
   let terminal =
     KT.of_failure ~raw_error:(Agent_sdk.Error.to_string err) err

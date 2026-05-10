@@ -67,7 +67,7 @@ let validate_code_shell_command (command : string) : (unit, string) Result.t =
 let git_common_root path =
   try
     match
-      Process_eio.run_argv_with_status
+      Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git ~raw_source:("git -C " ^ path ^ " rev-parse --git-common-dir") ~summary:"git common root lookup"
         ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:(Unknown "misc") ())
         [ "git"; "-C"; path; "rev-parse"; "--git-common-dir" ]
     with
@@ -228,7 +228,7 @@ let observe_policy_config_load_error ~base_path ~env_config_dir msg =
   let config_dir =
     Option.value ~default:"<resolved-from-base-path>" env_config_dir
   in
-  Prometheus.inc_counter Prometheus.metric_keeper_tool_policy_failures
+  Prometheus.inc_counter Keeper_metrics.metric_keeper_tool_policy_failures
     ~labels:[("site", "tool_code_write_load_failed"); ("preset", "n/a")]
     ();
   Log.Keeper.warn
@@ -652,7 +652,7 @@ let handle_code_shell ctx args =
                    [ "sh"; "-c"; Printf.sprintf "cd %s && %s"
                        (Filename.quote dir) command ]
              in
-             match Process_eio.run_argv_with_status ~timeout_sec:safe_timeout full_cmd with
+             match Masc_exec.Exec_gate.run_argv_with_status ~actor:`Tool_local_runtime ~raw_source:(String.concat " " full_cmd) ~summary:"shell command execution" ~timeout_sec:safe_timeout full_cmd with
              | Unix.WEXITED code, output ->
                  let response = `Assoc [
                    ("status", `String (if code = 0 then "ok" else "error"));
@@ -736,7 +736,7 @@ let handle_code_git ctx args =
                        depth_flag
                        (Filename.quote clone_url)]
           in
-          match Process_eio.run_argv_with_status ~timeout_sec:timeout cmd with
+          match Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git ~raw_source:(String.concat " " cmd) ~summary:"git clone" ~timeout_sec:timeout cmd with
           | Unix.WEXITED code, output ->
             let response =
               `Assoc
@@ -790,7 +790,7 @@ let handle_code_git ctx args =
             Some (Keeper_identity.git_env_for_keeper ~keeper_name:ctx.agent_name)
           else None
         in
-        match Process_eio.run_argv_with_status ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ()) ?env:env_opt cmd with
+        match Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git ~raw_source:(String.concat " " cmd) ~summary:"git action execution" ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ()) ?env:env_opt cmd with
         | Unix.WEXITED code, output ->
           let response =
             `Assoc

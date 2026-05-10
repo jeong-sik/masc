@@ -150,6 +150,28 @@ val log_call :
     any truncation. [truncated_to] is present when Tool_output_validation
     truncated the output. Best-effort (failures logged). *)
 
+val remember_handler_logged :
+  keeper_name:string ->
+  tool_name:string ->
+  output_text:string ->
+  success:bool ->
+  unit ->
+  unit
+(** [remember_handler_logged ...] records that the keeper tool handler has
+    already persisted the full I/O for this just-completed tool execution.
+    Agent SDK post-tool hooks consume this marker to avoid duplicate rows
+    when a provider emits both handler-side and hook-side signals. *)
+
+val consume_handler_logged :
+  keeper_name:string ->
+  tool_name:string ->
+  output_text:string ->
+  success:bool ->
+  unit ->
+  bool
+(** [consume_handler_logged ...] returns [true] once when a recent
+    handler-side log marker matches the post-tool hook event. *)
+
 val read_recent :
   ?keeper_name:string ->
   ?n:int ->

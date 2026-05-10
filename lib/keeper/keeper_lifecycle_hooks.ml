@@ -9,6 +9,12 @@ type event =
 
 type hook = keeper_id:string -> event -> unit
 
+let callback_label = "keeper_lifecycle_hook"
+let coverage_source = "keeper_lifecycle_callback"
+let coverage_durable_store = "keeper_lifecycle_events"
+let coverage_dashboard_surface = "keeper_lifecycle"
+let coverage_stale_reason = "callback_exception"
+
 (* Atomic-backed reversed-list. Registration prepends ([h :: cur]) which
    is O(1); the runner then iterates the reversed list in registration
    order via List.rev once per [run] call. The previous [cur @ [h]]
@@ -26,7 +32,30 @@ let register (h : hook) : unit =
   in
   loop ()
 
-let run ~keeper_id (ev : event) : unit =
+let record_coverage_gap ?base_dir ?meta ~callback ~error () =
+  match base_dir, meta with
+  | Some masc_root, Some (meta : Keeper_types.keeper_meta) -> (
+      try
+        Telemetry_coverage_gap.record
+          ~masc_root
+          ~source:coverage_source
+          ~producer:callback
+          ~durable_store:coverage_durable_store
+          ~dashboard_surface:coverage_dashboard_surface
+          ~stale_reason:coverage_stale_reason
+          ~keeper_name:meta.name
+          ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+          ~error
+          ()
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | gap_exn ->
+        Log.Keeper.warn
+          "keeper:%s lifecycle hook coverage-gap record failed: %s"
+          meta.name (Printexc.to_string gap_exn))
+  | _ -> ()
+
+let run ?base_dir ?meta ~keeper_id (ev : event) : unit =
   (* Reverse once at run time so call order matches registration order
      (the documented contract). The reversal is O(n) but n is tiny in
      practice (a handful of subsystem hooks). *)
@@ -34,10 +63,22 @@ let run ~keeper_id (ev : event) : unit =
   List.iter
     (fun h ->
       try h ~keeper_id ev
-      with exn ->
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        let error = Printexc.to_string exn in
+        Prometheus.inc_counter
+          Keeper_metrics.metric_keeper_lifecycle_callback_failures
+          ~labels:
+            [
+              ("keeper", keeper_id);
+              ("callback", callback_label);
+            ]
+          ();
         Log.Server.warn
           "[KeeperLifecycleHooks] hook raised on keeper_id=%s: %s"
-          keeper_id (Printexc.to_string exn))
+          keeper_id error;
+        record_coverage_gap ?base_dir ?meta ~callback:callback_label ~error ())
     hs
 
 let registered_count () : int = List.length (Atomic.get hooks)

@@ -35,6 +35,11 @@ let test_parse_json_safe_invalid () =
 let test_parse_json_safe_repairs_invalid_utf8_inside_string () =
   let open Safe_ops in
   reset_persistence_utf8_repair_stats_for_tests ();
+  let metric_before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_persistence_utf8_repair
+      ()
+  in
   let replacement = "\xEF\xBF\xBD" in
   let result = parse_json_safe ~context:"utf8-fixture" "{\"msg\":\"ok\xffbad\"}" in
   match result with
@@ -44,7 +49,15 @@ let test_parse_json_safe_repairs_invalid_utf8_inside_string () =
     check string "invalid byte replaced" ("ok" ^ replacement ^ "bad") msg;
     let stats = persistence_utf8_repair_stats () in
     check int "one repaired read" 1 stats.repaired_reads;
-    check int "one invalid byte" 1 stats.repaired_bytes
+    check int "one invalid byte" 1 stats.repaired_bytes;
+    let metric_after =
+      Masc_mcp.Prometheus.metric_value_or_zero
+        Masc_mcp.Prometheus.metric_persistence_utf8_repair
+        ()
+    in
+    check (float 0.0001) "UTF-8 repair counter +1"
+      (metric_before +. 1.0)
+      metric_after
 
 let test_parse_json_safe_still_rejects_malformed_json_after_utf8_repair () =
   let open Safe_ops in
@@ -109,6 +122,32 @@ let test_sanitize_json_utf8_covers_safe_constructors () =
       check string "assoc value repaired" ("bad" ^ replacement ^ "value")
         (Yojson.Safe.Util.to_string value)
   | _ -> fail "unexpected sanitized JSON shape"
+
+let test_sanitize_json_utf8_with_raw_preserves_original () =
+  let open Safe_ops in
+  let raw = `Assoc [ ("bad\xffkey", `String "bad\xffvalue") ] in
+  let replacement = "\xEF\xBF\xBD" in
+  let result = sanitize_json_utf8_with_raw raw in
+  check bool "changed when utf8 repair needed" true result.changed;
+  check bool "raw points at original payload" true (result.raw == raw);
+  (match result.raw with
+   | `Assoc [ (key, `String value) ] ->
+       check string "raw key unchanged" "bad\xffkey" key;
+       check string "raw value unchanged" "bad\xffvalue" value
+   | _ -> fail "unexpected raw JSON shape");
+  match result.sanitized with
+  | `Assoc [ (key, `String value) ] ->
+      check string "sanitized key repaired" ("bad" ^ replacement ^ "key") key;
+      check string "sanitized value repaired" ("bad" ^ replacement ^ "value") value
+  | _ -> fail "unexpected sanitized JSON shape"
+
+let test_sanitize_json_utf8_with_raw_marks_clean_payload_unchanged () =
+  let open Safe_ops in
+  let raw = `Assoc [ ("ok", `String "value") ] in
+  let result = sanitize_json_utf8_with_raw raw in
+  check bool "clean payload not changed" false result.changed;
+  check bool "raw points at original payload" true (result.raw == raw);
+  check bool "sanitized reuses original payload" true (result.sanitized == raw)
 
 let test_utf8_repair_log_rate_limit_table_is_bounded () =
   let open Safe_ops in
@@ -474,6 +513,10 @@ let () =
         test_parse_json_safe_rate_limits_repeated_utf8_repair_logs;
       test_case "sanitizes safe constructors" `Quick
         test_sanitize_json_utf8_covers_safe_constructors;
+      test_case "sanitizes with raw preserved" `Quick
+        test_sanitize_json_utf8_with_raw_preserves_original;
+      test_case "sanitizes with raw unchanged marker" `Quick
+        test_sanitize_json_utf8_with_raw_marks_clean_payload_unchanged;
       test_case "bounds utf8 repair log rate-limit table" `Quick
         test_utf8_repair_log_rate_limit_table_is_bounded;
       test_case "long invalid" `Quick test_parse_json_safe_long_invalid;

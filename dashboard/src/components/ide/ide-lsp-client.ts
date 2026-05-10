@@ -222,6 +222,7 @@ class LspConnection {
     this.ws = ws
 
     ws.onopen = () => {
+      if (this.disposed) { ws.close(); return }
       console.log('[LSP] WebSocket connected')
       this.initialize()
     }
@@ -313,7 +314,9 @@ class LspConnection {
       this.initialized = true
       console.log('[LSP] initialized')
     } catch (err) {
-      console.error('[LSP] initialize failed:', err)
+      if (!this.disposed) {
+        console.error('[LSP] initialize failed:', err)
+      }
     }
   }
 

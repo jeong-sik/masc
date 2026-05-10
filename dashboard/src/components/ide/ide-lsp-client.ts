@@ -182,6 +182,43 @@ const inlayHintTheme = EditorView.theme({
   },
 })
 
+// ── Hover Tooltip Theme ────────────────────────────────────────────
+
+const hoverTooltipTheme = EditorView.theme({
+  '.cm-hover-tooltip': {
+    position: 'fixed',
+    zIndex: '100',
+    maxWidth: '480px',
+    padding: '8px 12px',
+    background: 'var(--color-bg-surface)',
+    border: '1px solid var(--color-border-default)',
+    borderRadius: '6px',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+    fontFamily: 'var(--font-mono)',
+    fontSize: '12px',
+    lineHeight: '1.5',
+    color: 'var(--color-fg-secondary)',
+    overflow: 'auto',
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+    pointerEvents: 'none',
+  },
+  '.cm-hover-tooltip hr': {
+    border: 'none',
+    borderTop: '1px solid var(--color-border-default)',
+    margin: '6px 0',
+  },
+  '.cm-hover-tooltip strong': {
+    color: 'var(--color-fg-primary)',
+  },
+  '.cm-hover-tooltip code': {
+    background: 'var(--color-bg-muted)',
+    padding: '1px 4px',
+    borderRadius: '3px',
+    fontSize: '11px',
+  },
+})
+
 // ── Inlay Hint Widget ────────────────────────────────────────────
 
 class InlayHintWidget extends WidgetType {
@@ -462,6 +499,18 @@ class LspConnection {
     }
   }
 
+  async requestHover(filePath: string, line: number, character: number): Promise<unknown> {
+    const uri = toFileUri(filePath)
+    try {
+      return await this.sendRequest('textDocument/hover', {
+        textDocument: { uri },
+        position: { line, character },
+      })
+    } catch {
+      return null
+    }
+  }
+
   notifyDidOpen(filePath: string, languageId: string): void {
     if (!this.initialized) return
     const uri = toFileUri(filePath)
@@ -553,6 +602,12 @@ const lspViewPlugin = ViewPlugin.fromClass(
     private filePath: string
     private refreshTimer: ReturnType<typeof setTimeout> | null = null
     private onAnnotationSelect: ((e: Event) => void) | null = null
+    private hoverTimer: ReturnType<typeof setTimeout> | null = null
+    private tooltip: HTMLDivElement | null = null
+    private hoverClientX = 0
+    private hoverClientY = 0
+    private boundHoverMove: ((e: MouseEvent) => void) | null = null
+    private boundHoverLeave: (() => void) | null = null
 
     constructor(private readonly view: EditorView) {
       const filePath = view.state.field(lspConfigField).filePath
@@ -567,10 +622,15 @@ const lspViewPlugin = ViewPlugin.fromClass(
         this.dispatch(setSelectedAnnotation.of(detail))
       }
       this.view.dom.addEventListener('masc-annotation-select', this.onAnnotationSelect)
+      this.boundHoverMove = (e) => this.onHoverMove(e)
+      this.boundHoverLeave = () => this.onHoverLeave()
+      this.view.dom.addEventListener('mousemove', this.boundHoverMove)
+      this.view.dom.addEventListener('mouseleave', this.boundHoverLeave)
       this.scheduleRefresh()
     }
 
     update(update: ViewUpdate) {
+      if (update.docChanged) this.hideTooltip()
       const newFilePath = update.state.field(lspConfigField).filePath
       if (newFilePath !== this.filePath) {
         this.conn.notifyDidClose(this.filePath)
@@ -604,11 +664,89 @@ const lspViewPlugin = ViewPlugin.fromClass(
       if (effects.length > 0) view.dispatch({ effects })
     }
 
+    private onHoverMove(e: MouseEvent): void {
+      this.hoverClientX = e.clientX
+      this.hoverClientY = e.clientY
+      if (this.hoverTimer) clearTimeout(this.hoverTimer)
+      this.hoverTimer = setTimeout(() => void this.triggerHover(), 300)
+    }
+
+    private onHoverLeave(): void {
+      if (this.hoverTimer) {
+        clearTimeout(this.hoverTimer)
+        this.hoverTimer = null
+      }
+      this.hideTooltip()
+    }
+
+    private async triggerHover(): Promise<void> {
+      const view = this.view
+      if (!view.dom.isConnected) return
+
+      const pos = view.posAtCoords({ x: this.hoverClientX, y: this.hoverClientY })
+      if (pos === null || pos < 0) { this.hideTooltip(); return }
+
+      const line = view.state.doc.lineAt(pos)
+      const character = pos - line.from
+      const filePath = view.state.field(lspConfigField).filePath
+      if (!filePath) return
+
+      const result = await this.conn.requestHover(filePath, line.number - 1, character)
+      if (!view.dom.isConnected) return
+
+      const hover = result as { contents?: { kind?: string; value?: string } } | null
+      if (!hover?.contents?.value) return
+
+      this.showTooltip(hover.contents.value, this.hoverClientX, this.hoverClientY)
+    }
+
+    private showTooltip(markdown: string, clientX: number, clientY: number): void {
+      this.hideTooltip()
+      const div = document.createElement('div')
+      div.className = 'cm-hover-tooltip'
+      div.style.visibility = 'hidden'
+      const html = markdown
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/^---$/gm, '<hr>')
+        .replace(/^- (.+)$/gm, '• $1')
+        .replace(/\n/g, '<br>')
+      div.innerHTML = html
+      document.body.appendChild(div)
+
+      const PAD = 10
+      requestAnimationFrame(() => {
+        const rect = div.getBoundingClientRect()
+        let left = clientX + PAD
+        let top = clientY + PAD
+        if (left + rect.width > window.innerWidth - PAD) left = clientX - rect.width - PAD
+        if (top + rect.height > window.innerHeight - PAD) top = clientY - rect.height - PAD
+        div.style.left = `${Math.max(PAD, left)}px`
+        div.style.top = `${Math.max(PAD, top)}px`
+        div.style.visibility = 'visible'
+      })
+      this.tooltip = div
+    }
+
+    private hideTooltip(): void {
+      if (this.tooltip) {
+        this.tooltip.remove()
+        this.tooltip = null
+      }
+    }
+
     destroy() {
       if (this.refreshTimer) clearTimeout(this.refreshTimer)
+      if (this.hoverTimer) clearTimeout(this.hoverTimer)
+      this.hideTooltip()
       if (this.onAnnotationSelect) {
         this.view.dom.removeEventListener('masc-annotation-select', this.onAnnotationSelect)
       }
+      if (this.boundHoverMove) this.view.dom.removeEventListener('mousemove', this.boundHoverMove)
+      if (this.boundHoverLeave) this.view.dom.removeEventListener('mouseleave', this.boundHoverLeave)
       this.conn.notifyDidClose(this.filePath)
       this.conn.dispose()
     }
@@ -638,6 +776,7 @@ export function lspExtension(opts: LspExtensionOpts): Extension {
     diagnosticGutter,
     inlayHintTheme,
     inlayHintDecorator,
+    hoverTooltipTheme,
     lspViewPlugin,
   ]
 }

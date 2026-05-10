@@ -4,7 +4,7 @@
     manifests, contracts, schema versions, and contract_id
     roundtrip verification. *)
 
-module CL = Masc_mcp.Cdal_loader
+module CL = Cdal_loader
 
 (* ================================================================ *)
 (* Helpers                                                           *)
@@ -124,7 +124,7 @@ let test_malformed_manifest () =
   let run_id = "bad-manifest" in
   let run_dir =
     match
-      Masc_mcp.Proof_artifact_reader.run_artifact_path store ~run_id
+      Proof_artifact_reader.run_artifact_path store ~run_id
         ~relative_path:"manifest.json"
     with
     | Ok path -> Filename.dirname path
@@ -174,7 +174,7 @@ let test_malformed_contract () =
   (* Write invalid contract JSON *)
   let contract_path =
     match
-      Masc_mcp.Proof_artifact_reader.run_artifact_path store ~run_id
+      Proof_artifact_reader.run_artifact_path store ~run_id
         ~relative_path:"contract.json"
     with
     | Ok path -> path

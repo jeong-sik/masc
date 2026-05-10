@@ -7,7 +7,7 @@
     - Validates that [Effect_evidence.of_json] is backward compatible with
       legacy effect records that pre-date the evidence layer. *)
 
-module EE = Masc_mcp.Effect_evidence
+module EE = Effect_evidence
 
 (* ================================================================ *)
 (* Helpers                                                           *)

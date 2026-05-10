@@ -4,7 +4,7 @@
     evidence: grouping, counts, determinism, missing-file handling,
     and v1-only field constraint. *)
 
-module CFP = Masc_mcp.Cdal_friction_projection
+module CFP = Cdal_friction_projection
 
 (* ================================================================ *)
 (* Helpers                                                           *)
@@ -459,7 +459,7 @@ let test_effect_source_path_satisfies_gap () =
 
 let test_path_traversal_rejected () =
   let store : Masc_mcp_cdal_runtime.Proof_store.config = { root = "/tmp/test-store" } in
-  let result = Masc_mcp.Proof_artifact_reader.resolve_path store
+  let result = Proof_artifact_reader.resolve_path store
     "proof-store://../../../etc/passwd" in
   match result with
   | Error msg ->
@@ -473,7 +473,7 @@ let test_read_jsonl_delegates_to_oas_reader () =
   let run_id = "jsonl-reader-001" in
   let path =
     match
-      Masc_mcp.Proof_artifact_reader.run_artifact_path store ~run_id
+      Proof_artifact_reader.run_artifact_path store ~run_id
         ~relative_path:"evidence/events.jsonl"
     with
     | Ok path -> path
@@ -487,7 +487,7 @@ let test_read_jsonl_delegates_to_oas_reader () =
   output_char oc '\n';
   close_out oc;
   match
-    Masc_mcp.Proof_artifact_reader.read_jsonl store (make_events_ref ~run_id)
+    Proof_artifact_reader.read_jsonl store (make_events_ref ~run_id)
   with
   | Ok [`Assoc [("event", `String "one")]; `Assoc [("event", `String "two")]] ->
       ()

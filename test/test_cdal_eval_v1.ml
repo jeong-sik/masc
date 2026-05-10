@@ -3,9 +3,9 @@
     Tests the full pipeline (load + judge), load failure path,
     and verdict_of_outcome extraction. *)
 
-module CE = Masc_mcp.Cdal_eval_v1
+module CE = Cdal_eval_v1
 module CT = Cdal_types
-module CL = Masc_mcp.Cdal_loader
+module CL = Cdal_loader
 
 (* ================================================================ *)
 (* Helpers                                                           *)

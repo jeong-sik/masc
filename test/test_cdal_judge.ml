@@ -3,9 +3,9 @@
     Tests 5 active checks and run-level verdict derivation
     with determinism and findings population verification. *)
 
-module CJ = Masc_mcp.Cdal_judge
+module CJ = Cdal_judge
 module CT = Cdal_types
-module CL = Masc_mcp.Cdal_loader
+module CL = Cdal_loader
 
 (* ================================================================ *)
 (* Helpers                                                           *)

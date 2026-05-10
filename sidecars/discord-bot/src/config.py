@@ -142,6 +142,37 @@ class BotConfig(BaseSettings):
         ),
     )
 
+    # Reaction trigger + busy-batch (Discord UX: emoji reaction 으로 keeper 호출,
+    # 응답 진행 중이면 추가 trigger hold + gap 메시지 batched fetch).
+    discord_reaction_trigger_emoji: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "DISCORD_REACTION_TRIGGER_EMOJI",
+            "discord_reaction_trigger_emoji",
+        ),
+    )
+    discord_busy_debounce_sec: int = Field(
+        default=0,
+        validation_alias=AliasChoices(
+            "DISCORD_BUSY_DEBOUNCE_SEC",
+            "discord_busy_debounce_sec",
+        ),
+    )
+    discord_batch_max_messages: int = Field(
+        default=50,
+        validation_alias=AliasChoices(
+            "DISCORD_BATCH_MAX_MESSAGES",
+            "discord_batch_max_messages",
+        ),
+    )
+    discord_batch_gap_window_sec: int = Field(
+        default=1800,
+        validation_alias=AliasChoices(
+            "DISCORD_BATCH_GAP_WINDOW_SEC",
+            "discord_batch_gap_window_sec",
+        ),
+    )
+
     # Timeouts
     gate_timeout_sec: int = Field(
         default=120,
@@ -176,6 +207,37 @@ class BotConfig(BaseSettings):
     status_heartbeat_sec: int = Field(
         default=10,
         validation_alias=AliasChoices("STATUS_HEARTBEAT_SEC", "status_heartbeat_sec"),
+    )
+
+    # Reaction trigger + busy-batch (Discord UX: emoji reaction 으로 keeper 호출,
+    # 응답 진행 중이면 추가 trigger hold + gap 메시지 batched fetch).
+    discord_reaction_trigger_emoji: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "DISCORD_REACTION_TRIGGER_EMOJI",
+            "discord_reaction_trigger_emoji",
+        ),
+    )
+    discord_busy_debounce_sec: int = Field(
+        default=0,
+        validation_alias=AliasChoices(
+            "DISCORD_BUSY_DEBOUNCE_SEC",
+            "discord_busy_debounce_sec",
+        ),
+    )
+    discord_batch_max_messages: int = Field(
+        default=50,
+        validation_alias=AliasChoices(
+            "DISCORD_BATCH_MAX_MESSAGES",
+            "discord_batch_max_messages",
+        ),
+    )
+    discord_batch_gap_window_sec: int = Field(
+        default=1800,
+        validation_alias=AliasChoices(
+            "DISCORD_BATCH_GAP_WINDOW_SEC",
+            "discord_batch_gap_window_sec",
+        ),
     )
 
     @field_validator("discord_bot_token")
@@ -240,6 +302,9 @@ class BotConfig(BaseSettings):
         "gate_breaker_failure_threshold",
         "gate_breaker_reset_sec",
         "status_heartbeat_sec",
+        "discord_busy_debounce_sec",
+        "discord_batch_max_messages",
+        "discord_batch_gap_window_sec",
     )
     @classmethod
     def validate_non_negative_ints(cls, v: int) -> int:

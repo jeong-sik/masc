@@ -1,0 +1,23 @@
+; RFC-0058 Phase 1 — Declarative cascade configuration sub-library.
+; (include_subdirs no) opts out of parent lib/dune's (include_subdirs
+; unqualified), so types like [transport], [provider], [binding], [tier]
+; defined here do not collide with identically-named types in the main
+; masc_mcp library (e.g. Streamable_http.transport, Tool_misc_web_search.provider).
+;
+; Record field names in [declarative_config] use a [decl_] prefix to avoid
+; collision with identically-named fields in the main library (OCaml record
+; fields occupy a global namespace visible across library boundaries via .cmi).
+;
+; Dependency direction: masc_mcp main lib -> masc_mcp.cascade_decl
+; Future phases (validator, protocol adapters) will join this sub-library.
+(include_subdirs no)
+
+(library
+ (name masc_mcp_cascade_decl)
+ (public_name masc_mcp.cascade_decl)
+ (wrapped false)
+ (libraries
+  otoml
+  ppx_deriving.runtime
+  logs)
+ (preprocess (pps ppx_deriving.show ppx_deriving.eq)))

@@ -248,6 +248,10 @@
    ;; root-namespace cycles (Proof_artifact_reader, Bounded, Session,
    ;; Attribution, Violation_record) are resolved.
    masc_mcp.cdal
+   ;; RFC-0058 Phase 1 — Declarative cascade TOML config. Separate sub-library
+   ;; to avoid type name collisions (transport, provider, binding, tier, strategy)
+   ;; with identically-named types in the main library.
+   masc_mcp.cascade_decl
    masc_mcp.oas_compat
 
    uri

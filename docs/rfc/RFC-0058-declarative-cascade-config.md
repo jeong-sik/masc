@@ -1,395 +1,532 @@
-# RFC-0058: Declarative Cascade Configuration
+# RFC-0058: Declarative Cascade Configuration (v2)
 
 | Field | Value |
 |-------|-------|
 | Status | Draft |
-| Author | Claude (agent), Vincent (architect) |
+| Author | Vincent (architect), Claude (agent) |
 | Created | 2026-05-10 |
-| Supersedes | RFC-0055 (cascade fallback tier routing), RFC-0027 (capability typed cascade) |
-| Depends | RFC-0042 (keeper terminal code closed sum) |
+| Updated | 2026-05-10 |
+| Supersedes | RFC-0055 (cascade fallback tier routing), RFC-0058 Phase 1 (TOML-only loader hotpath, PR #14460) |
+| Depends | agent_sdk `Provider_kind.t` elimination (breaking) |
+| Breaking | Yes — current `cascade.toml` profile format incompatible |
+
+---
 
 ## 1. Problem
 
-Current cascade system has capability profiles as a **closed OCaml variant**:
+Phase 1 (PR #14460) moved the cascade loader to TOML-only mode, but the schema
+remains a flat profile structure where provider, model, capacity, and strategy
+are interleaved in a single `[profile_name]` TOML table.
+
+More fundamentally, the runtime hardcodes provider identity as an OCaml variant:
 
 ```ocaml
-type profile = Tool_strict | Inline_tools | Lite | Local_inline | Local
+(* agent_sdk: provider_config.ml *)
+type provider_kind =
+  | Anthropic | Kimi | OpenAI_compat | Ollama | Gemini
+  | Glm | DashScope | Claude_code | Gemini_cli | Kimi_cli | Codex_cli
 ```
 
-Adding a new profile requires OCaml compilation. Provider/model/vendor traits are
-hardcoded in `required_capabilities_of`. The system cannot express:
+Adding a provider requires OCaml compilation. The system cannot express:
 
-1. Per-provider concurrency/capacity
-2. Model-level capability declarations (verified/declared/unsupported)
-3. Alias composition (provider + model + options)
-4. Group cascade (ordered fallback within and between alias groups)
-5. Strategy as secondary concern, not primary routing axis
+1. Per-provider×model concurrency/capacity slots
+2. Same provider registered twice (e.g., two Anthropic accounts)
+3. Aliases — per-use overrides of a provider×model binding
+4. Routing by tier/group composition, not by hardcoded profile name
 
-**Root cause**: `cascade_capability_profile.ml` (105 LOC) is the architectural bottleneck.
-`cascade_toml_materializer.ml` already passes capability profile as string — no change needed there.
+**Root cause**: `Provider_kind.t` is a closed sum type. Provider identity
+should be a config-defined string, not a variant constructor.
 
-## 2. Design: 4-Layer Declarative TOML
+## 2. Design: 5-Layer Declarative TOML
 
-### 2.1 Layer Overview
+### 2.1 Absolute Principle
 
-```
-[providers]  →  URL, API key, kind, concurrency
-[models]     →  specs, capability declarations
-[aliases]    →  provider + model + options (thinking, env, params)
-[groups]     →  ordered alias list (cascade within group)
-[cascade]    →  ordered group list (cascade between groups)
-```
+**Code never knows provider names or model names.**
 
-### 2.2 TOML Schema
+- `Provider_kind.t` (11 constructors) → replaced by `api_format` (3 constructors) + `transport` (2 constructors)
+- No string literals: `"claude_code"`, `"gemini_cli"`, `"ollama"`, etc.
+- No provider-branded module names: `Claude_code_provider`, `Ollama_http_adapter` — forbidden
+- Provider/model identity = `string` from config, not from code
+- All routing, selection, and dispatch driven by config
 
-```toml
-# ── Layer 1: Providers ──────────────────────────────────────────────
-[providers.claude_api]
-kind = "cloud_api"
-base_url = "https://api.anthropic.com/v1"
-api_key_env = "ANTHROPIC_API_KEY"
-concurrency = 4
-headers = { "anthropic-version" = "2023-06-01" }
-
-[providers.ollama_local]
-kind = "local"
-base_url = "http://localhost:11434"
-concurrency = 2
-
-[providers.gemini_cli]
-kind = "cli"
-command = "gemini"
-concurrency = 1
-
-[providers.openai_api]
-kind = "cloud_api"
-base_url = "https://api.openai.com/v1"
-api_key_env = "OPENAI_API_KEY"
-concurrency = 4
-
-# ── Layer 2: Models ─────────────────────────────────────────────────
-[models.claude-sonnet-4-6]
-provider = "claude_api"
-model_id = "claude-sonnet-4-6-20250514"
-context_window = 200000
-
-[models.claude-sonnet-4-6.capabilities]
-inline_tools = "verified"
-inline_tool_choice = "verified"
-runtime_mcp_tools = "verified"
-runtime_tool_events = "verified"
-runtime_mcp_http_headers = "verified"
-thinking = "verified"
-structured_output = "verified"
-
-[models.gemini-2.5-pro]
-provider = "gemini_cli"
-model_id = "gemini-2.5-pro"
-context_window = 1048576
-
-[models.gemini-2.5-pro.capabilities]
-inline_tools = "verified"
-inline_tool_choice = "verified"
-runtime_mcp_tools = "verified"
-runtime_tool_events = "declared"
-runtime_mcp_http_headers = "unsupported"
-thinking = "verified"
-
-[models.qwen3-27b]
-provider = "ollama_local"
-model_id = "qwen3:27b"
-context_window = 262144
-
-[models.qwen3-27b.capabilities]
-inline_tools = "verified"
-inline_tool_choice = "verified"
-runtime_mcp_tools = "unsupported"
-runtime_tool_events = "unsupported"
-runtime_mcp_http_headers = "unsupported"
-thinking = "verified"
-
-# ── Layer 3: Aliases ────────────────────────────────────────────────
-[aliases.strict]
-model = "claude-sonnet-4-6"
-thinking = { type = "enabled", budget_tokens = 16000 }
-temperature = 1.0
-system_prompt_suffix = ""
-
-[aliases.fast]
-model = "claude-sonnet-4-6"
-thinking = { type = "disabled" }
-temperature = 0.7
-
-[aliases.pro]
-model = "gemini-2.5-pro"
-thinking = { type = "enabled", budget_tokens = 32000 }
-temperature = 1.0
-
-[aliases.local_recovery]
-model = "qwen3-27b"
-thinking = { type = "disabled" }
-temperature = 0.5
-
-[aliases.local_thinking]
-model = "qwen3-27b"
-thinking = { type = "enabled", budget_tokens = 8000 }
-temperature = 0.7
-
-# ── Layer 4: Groups (cascade of aliases) ────────────────────────────
-[groups.keeper_bound_safe]
-strategy = "sequential"
-aliases = ["strict", "fast"]
-
-[groups.tier_fast]
-strategy = "sequential"
-aliases = ["fast", "local_recovery"]
-
-[groups.cloud_strict]
-strategy = "sequential"
-aliases = ["strict", "pro"]
-
-[groups.local_recovery]
-strategy = "sequential"
-aliases = ["local_recovery"]
-
-[groups.tool_rerank]
-strategy = "sequential"
-aliases = ["strict", "fast", "pro"]
-
-# ── Cascade: group ordering ─────────────────────────────────────────
-[cascade.default]
-groups = ["keeper_bound_safe", "tier_fast", "local_recovery"]
-
-[cascade.tool_heavy]
-groups = ["cloud_strict", "tool_rerank", "local_recovery"]
-required_capabilities = ["inline_tools", "runtime_mcp_tools"]
-
-[cascade.local_first]
-groups = ["local_recovery", "local_thinking"]
-```
-
-### 2.3 Capability Levels
-
-| Level | Meaning |
-|-------|---------|
-| `"verified"` | Tested in CI, known to work correctly |
-| `"declared"` | Provider claims support, not verified in CI |
-| `"unsupported"` | Known to not work or not available |
-
-Capability resolution at startup:
-- Cascade route requires `["inline_tools", "runtime_mcp_tools"]`
-- Alias `local_recovery` → model `qwen3-27b` → `runtime_mcp_tools = "unsupported"`
-- Result: skip alias, proceed to next in group
-
-### 2.4 Cross-Validation at Startup
+### 2.2 Layer Overview
 
 ```
-provider disabled/unreachable
-  → all models using that provider: mark unavailable
-    → all aliases using those models: mark unavailable
-      → groups containing only unavailable aliases: log warning
-        → cascade routes referencing unavailable groups: log error
-
-model capability < route required_capabilities
-  → alias skipped at resolution time (not startup)
+Layer 1: [providers.*]     — How to connect (protocol, transport, credentials)
+Layer 2: [models.*]        — What it can do (capabilities, context window)
+Layer 3: [<p>.<m>]         — How much, at what cost (capacity, pricing)
+Layer 4: [<p>.<m>.<a>]     — Per-use overrides (aliases)
+Layer 5: [tier.*] + [tier-group.*] + [routes] — Routing strategy
 ```
 
-## 3. Migration from Current System
+The naming convention IS the reference: `[claude-code.haiku]` implicitly
+requires `[providers.claude-code]` and `[models.haiku]` to exist.
+Cross-reference validation happens at load time.
 
-### 3.1 Current State
-
-| File | Lines | Role | Change |
-|------|-------|------|--------|
-| `cascade_capability_profile.ml` | 105 | Closed variant → **rewrite** |
-| `cascade_capability_profile.mli` | 105 | Interface → **rewrite** |
-| `cascade_toml_materializer.ml` | 595 | TOML→JSON → **minimal** (already passes strings) |
-| `cascade_config_loader.ml` | 933 | JSON parsing → **moderate** (profile validation) |
-| `cascade_catalog_validator.ml` | 356 | Validation → **moderate** |
-| `cascade_tier.ml` | 22 | Tier def → **rewrite** |
-
-### 3.2 Mapping: Current JSON → New TOML
-
-Current `~/.masc/config/cascade.json`:
-```json
-{
-  "keeper_bound_safe_models": "claude-sonnet-4-6-20250514,...",
-  "keeper_bound_safe_temperature": "1.0",
-  "keeper_bound_safe_required_capability_profile": "tool_strict"
-}
-```
-
-New `config/cascade.toml`:
-```toml
-[groups.keeper_bound_safe]
-aliases = ["strict", "fast"]
-# capability_profile replaced by per-model capability declarations
-```
-
-### 3.3 Migration Phases
-
-| Phase | Scope | Files |
-|-------|-------|-------|
-| **Phase 0** | Types + TOML parser | `cascade_declarative_types.ml`, `cascade_declarative_parser.ml`, seed `cascade.toml` |
-| **Phase 1** | Capability matrix | Replace closed variant with config-driven `required_capabilities : string list` |
-| **Phase 2** | Group resolution engine | Sequential cascade within groups, group→group cascade |
-| **Phase 3** | Legacy migration tool | JSON→TOML converter, backward compat layer |
-
-## 4. New Modules
-
-### 4.1 `cascade_declarative_types.ml`
-
-Core types for the 4-layer model:
+### 2.3 Runtime Internal Model
 
 ```ocaml
-type capability_level = Verified | Declared | Unsupported
+(** Code knows API formats, not provider brands. *)
+type api_format =
+  | Messages_api           (* Anthropic Messages API spec *)
+  | Chat_completions_api   (* OpenAI Chat Completions spec *)
+  | Ollama_api             (* Ollama native API spec *)
 
-type provider_kind = Cloud_api | Local | Cli
+type transport =
+  | Http of string         (* endpoint URL *)
+  | Cli of string          (* command name *)
 
-type provider_config = {
-  kind : provider_kind;
-  base_url : string option;
-  api_key_env : string option;
-  concurrency : int;
-  headers : (string * string) list;
-  command : string option;  (* for CLI providers *)
+type credential_config =
+  | Env of string          (* Environment variable name *)
+  | File of string         (* Path to credential file *)
+  | Inline of string       (* Direct token — DEV ONLY *)
+
+type provider = {
+  id : string;               (* config-defined, e.g. "claude-code" *)
+  display_name : string;     (* human-readable, e.g. "Anthropic Claude Code CLI" *)
+  api_format : api_format;
+  transport : transport;
+  is_non_interactive : bool;
+  credentials : credential_config;
 }
 
-type model_capability = {
-  inline_tools : capability_level;
-  inline_tool_choice : capability_level;
-  runtime_mcp_tools : capability_level;
-  runtime_tool_events : capability_level;
-  runtime_mcp_http_headers : capability_level;
-  thinking : capability_level;
-  structured_output : capability_level option;
+type model_spec = {
+  id : string;                (* config-defined, e.g. "haiku" *)
+  api_name : string;          (* actual API model name, e.g. "claude-haiku-4-5-20251001" *)
+  tools_support : bool;
+  max_context : int;
+  thinking_support : bool;
+  max_thinking_budget : int option;
+  streaming : bool;
 }
 
-type model_config = {
-  provider : string;
+type binding = {
+  provider_id : string;       (* references [providers.<p>] *)
+  model_id : string;          (* references [models.<m>] *)
+  is_default : bool;
+  max_concurrent : int;       (* per-binding capacity slot *)
+  price_input : float option;
+  price_output : float option;
+}
+
+type alias = {
+  provider_id : string;
   model_id : string;
-  context_window : int;
-  capabilities : model_capability;
-}
-
-type thinking_config =
-  | Disabled
-  | Enabled of { budget_tokens : int }
-
-type alias_config = {
-  model : string;  (* references [models.<name>] *)
-  thinking : thinking_config;
+  name : string;              (* e.g. "for-tool-rerank" *)
+  max_input : int option;
+  max_output : int option;
   temperature : float option;
-  system_prompt_suffix : string option;
 }
 
-type group_config = {
-  strategy : [> `Sequential ];
-  aliases : string list;  (* references [aliases.<name>] *)
+type tier = {
+  name : string;
+  members : string list;      (* "provider.model" or "provider.model.alias" *)
+  strategy : strategy;
+  max_concurrent : int option; (* tier-level cap *)
 }
 
-type cascade_route = {
-  groups : string list;  (* references [groups.<name>] *)
-  required_capabilities : string list;
+type tier_group = {
+  name : string;
+  tiers : string list;
+  strategy : strategy;
 }
 
-type cascade_config = {
-  providers : (string * provider_config) list;
-  models : (string * model_config) list;
-  aliases : (string * alias_config) list;
-  groups : (string * group_config) list;
-  cascades : (string * cascade_route) list;
+type system_route = {
+  name : string;              (* e.g. "governance" *)
+  target : string;            (* "provider.model.alias" *)
 }
 ```
 
-### 4.2 `cascade_declarative_parser.ml`
+### 2.4 Protocol Adapters
 
-TOML parsing via existing `Toml` library (already in opam dependencies):
+Thin adapter modules (100-200 LOC each). Code dispatches by `api_format`,
+never by provider name.
 
-```ocaml
-val parse_cascade_toml : string -> (cascade_config, string) result
-val resolve_alias : cascade_config -> string -> (resolved_alias, string) result
-val resolve_group : cascade_config -> string -> (resolved_group, string) result
-val resolve_cascade : cascade_config -> string -> (resolved_cascade, string) result
-```
+| Protocol string in TOML | `api_format` in code | Adapter module | Wire format |
+|--------------------------|---------------------|----------------|-------------|
+| `"anthropic-cli"` | `Messages_api` | `Messages_api_adapter` | Anthropic Messages |
+| `"anthropic-http"` | `Messages_api` | `Messages_api_adapter` | Anthropic Messages |
+| `"google-cli"` | `Chat_completions_api` | `Chat_completions_cli_adapter` | Google format |
+| `"ollama-http"` | `Ollama_api` | `Ollama_api_adapter` | Ollama native |
+| `"openai-http"` | `Chat_completions_api` | `Chat_completions_api_adapter` | OpenAI format |
+| `"kimi-cli"` | `Chat_completions_api` | `Kimi_cli_adapter` | Kimi format |
 
-Resolution pipeline:
-1. Parse TOML → `cascade_config`
-2. Validate cross-references (alias→model→provider chain)
-3. At runtime: resolve cascade → groups → aliases → filter by capability
-4. Sequential attempt through resolved aliases
+Adding a new provider that uses an existing protocol = TOML entry only.
+Adding a new protocol = thin adapter module + TOML protocol string registration.
 
-## 5. Concrete Example: Current Routes → New TOML
+Note: vLLM, LM Studio, and other OpenAI-compatible servers all use
+`"openai-http"` — no code change needed.
 
-### Current `cascade.json` routes:
+## 3. TOML Schema
 
-| Route | Models | Profile | Purpose |
-|-------|--------|---------|---------|
-| `keeper_bound_safe` | claude-sonnet-4-6 | tool_strict | Primary keeper turn |
-| `tier_fast` | claude-sonnet-4-6, qwen3:27b | lite | Fast fallback |
-| `cloud_strict` | claude-sonnet-4-6, gemini-2.5-pro | tool_strict | Cloud with alternatives |
-| `local_recovery` | qwen3:27b | local_inline | Local-only fallback |
-| `tool_rerank` | claude-sonnet-4-6, gemini-2.5-pro, qwen3:27b | inline_tools | Tool-heavy tasks |
+### 3.1 Reserved Top-Level Namespaces
 
-### New `cascade.toml` equivalents:
+`providers`, `models`, `system`, `tier`, `tier-group`, `routes`, `profiles`
 
-All 5 routes map directly to `[groups.*]` sections. The `required_capability_profile`
-field disappears — replaced by per-model `[models.*.capabilities]` + cascade-level
-`required_capabilities` filter.
+Any provider alias that collides with a reserved namespace is a load-time error.
 
-`tool_strict` profile becomes:
+### 3.2 Layer 1: Providers
+
 ```toml
-required_capabilities = ["inline_tools", "inline_tool_choice", "runtime_mcp_tools",
-                          "runtime_tool_events", "runtime_mcp_http_headers"]
+[providers.claude-code]
+display-name = "Anthropic Claude Code CLI"
+protocol = "anthropic-cli"
+command = "claude"
+is-non-interactive = true
+
+[providers.claude-code.credentials]
+type = "env"
+key = "ANTHROPIC_API_KEY"
+
+[providers.claude-code-alt]
+display-name = "Anthropic Claude Code CLI (alt account)"
+protocol = "anthropic-cli"
+command = "claude"
+is-non-interactive = true
+
+[providers.claude-code-alt.credentials]
+type = "file"
+path = "~/.config/claude-alt/key"
+
+[providers.kimi-code]
+display-name = "Moonshot Kimi Code"
+protocol = "kimi-cli"
+command = "kimi"
+is-non-interactive = true
+
+[providers.ollama]
+display-name = "Ollama Local"
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[providers.gemini-cli]
+display-name = "Google Gemini CLI"
+protocol = "google-cli"
+command = "gemini"
+is-non-interactive = true
+
+[providers.codex]
+display-name = "OpenAI Codex CLI"
+protocol = "openai-http"
+endpoint = "https://api.openai.com"
+
+[providers.codex.credentials]
+type = "env"
+key = "OPENAI_API_KEY"
 ```
 
-`lite` profile becomes:
+**Provider fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `display-name` | string | yes | Human-readable name |
+| `protocol` | string | yes | Protocol adapter selector |
+| `command` | string | CLI only | CLI command name |
+| `endpoint` | string | HTTP only | Base URL |
+| `is-non-interactive` | bool | no | Default `false` |
+| `headers` | table | no | Additional HTTP headers |
+
+**Credential sub-table `[providers.<p>.credentials]`:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | `"env"` / `"file"` / `"inline"` | Credential source |
+| `key` | string | For `env`: variable name |
+| `path` | string | For `file`: file path |
+
+### 3.3 Layer 2: Models
+
 ```toml
-required_capabilities = []  (* no hard requirements, any model works *)
+[models.haiku]
+api-name = "claude-haiku-4-5-20251001"
+tools-support = true
+max-context = 200000
+streaming = true
+
+[models.sonnet]
+api-name = "claude-sonnet-4-6"
+tools-support = true
+max-context = 200000
+thinking-support = true
+max-thinking-budget = 16000
+streaming = true
+
+[models.qwen3-8b]
+api-name = "qwen3:8b"
+tools-support = true
+max-context = 32768
+streaming = true
 ```
 
-`local_inline` profile becomes:
+**Model fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `api-name` | string | yes | Actual model ID used in API calls |
+| `tools-support` | bool | no | Default `false` |
+| `max-context` | int | yes | Context window size |
+| `thinking-support` | bool | no | Default `false` |
+| `max-thinking-budget` | int | no | Required when `thinking-support = true` |
+| `streaming` | bool | no | Default `true` |
+
+### 3.4 Layer 3: Provider×Model Bindings
+
+The table name `<provider>.<model>` IS the cross-reference. TOML tables at
+the top level that are not reserved namespaces are treated as provider aliases.
+Each sub-table name is a model reference.
+
 ```toml
-required_capabilities = ["inline_tools", "inline_tool_choice"]
-# combined with provider_kind filter for local-only
+[claude-code.haiku]
+is-default = true
+max-concurrent = 3
+price-input = 0.80
+price-output = 4.00
+
+[claude-code.sonnet]
+max-concurrent = 2
+price-input = 3.00
+price-output = 15.00
+
+[claude-code-alt.haiku]
+max-concurrent = 2
+price-input = 0.80
+price-output = 4.00
+
+[ollama.qwen3-8b]
+max-concurrent = 1
 ```
 
-## 6. Open Questions
+**Binding fields:**
 
-1. **Provider health check**: Should TOML declare a health endpoint, or rely on
-   runtime probe? Recommendation: runtime probe (current behavior).
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `is-default` | bool | no | Default `false`. At most one per provider. |
+| `max-concurrent` | int | yes | Per-binding capacity slot |
+| `price-input` | float | no | Cost per 1M input tokens |
+| `price-output` | float | no | Cost per 1M output tokens |
+| `keep-alive` | string | no | Ollama keep_alive duration |
+| `num-ctx` | int | no | Ollama context window override |
 
-2. **Hot reload**: Should `cascade.toml` changes take effect without server restart?
-   Recommendation: Phase 0-2 no, Phase 3+ optional via SIGHUP.
+### 3.5 Layer 4: Aliases (Per-Use Overrides)
 
-3. **TOML discovery path**: Where does `cascade.toml` live?
-   - `${base_path}/.masc/config/cascade.toml` (alongside current `cascade.json`)
-   - Migration: both files valid, TOML takes precedence
+```toml
+[claude-code.haiku.for-tool-rerank]
+max-output = 1024
+temperature = 0.1
 
-4. **Backward compatibility**: Can JSON and TOML coexist during migration?
-   Recommendation: Yes. If TOML exists, use it. If only JSON, use legacy path.
-   Log warning if both exist.
+[claude-code.haiku.for-governance]
+max-input = 8192
+max-output = 2048
+temperature = 0.1
 
-5. **Strategy beyond sequential**: The schema uses `strategy = "sequential"` as
-   placeholder. Future strategies (round-robin, weighted, cost-optimized) are
-   out of scope for initial implementation.
+[ollama.qwen3-8b.fast-local]
+max-output = 500
+temperature = 0.3
+```
 
-## 7. Risks
+Three-level TOML table: `<provider>.<model>.<alias>`. Inherits all binding
+fields, overrides specified fields.
+
+**Alias fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `max-input` | int | Override input token limit (≤ model `max-context`) |
+| `max-output` | int | Override output token limit |
+| `temperature` | float | Override temperature |
+| `thinking-enabled` | bool | Override thinking |
+| `thinking-budget` | int | Override thinking budget |
+
+### 3.6 Layer 5: Tiers, Tier-Groups, and Routes
+
+```toml
+[tier.rerank]
+members = ["claude-code.haiku.for-tool-rerank"]
+strategy = "failover"
+
+[tier.primary]
+members = ["claude-code.sonnet", "claude-code.haiku"]
+strategy = "failover"
+max-concurrent = 5
+
+[tier.local]
+members = ["ollama.qwen3-8b"]
+strategy = "failover"
+
+[tier-group.big-three]
+tiers = ["primary", "local"]
+strategy = "priority_tier"
+fallback = true
+
+[tier-group.rerank-only]
+tiers = ["rerank"]
+strategy = "failover"
+
+[routes]
+keeper_turn = "big-three"
+governance_judge = "big-three"
+tool_rerank = "rerank-only"
+simple_task = "local"
+
+[system.governance]
+target = "claude-code.haiku.for-governance"
+```
+
+**Tier fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `members` | string[] | Binding or alias references |
+| `strategy` | string | `"failover"`, `"weighted_random"`, `"priority_tier"` |
+| `max-concurrent` | int | Tier-level cap (sum of member caps ≥ this value) |
+
+**Tier-group fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `tiers` | string[] | Tier references in priority order |
+| `strategy` | string | Group-level strategy |
+| `fallback` | bool | Whether this group serves as fallback target |
+
+## 4. Load-Time Validation
+
+1. Every `[<p>.<m>]` must have `[providers.<p>]` AND `[models.<m>]`
+2. Every `[<p>.<m>.<a>]` must have `[<p>.<m>]`
+3. Alias `max-input` ≤ binding's effective `max-input` ≤ model's `max-context`
+4. Tier members must resolve to valid bindings or aliases
+5. Tier-group tiers must resolve to valid tiers
+6. Route targets must resolve to valid tier-groups
+7. Provider alias must not collide with reserved namespaces
+8. `is-default = true` — at most one per provider
+9. Unknown fields in any table = load error (catch typos at config time)
+
+Validation errors are fatal at startup. The system refuses to start with
+an invalid cascade config rather than silently degrading.
+
+## 5. Capacity Model
+
+Each `[<p>.<m>]` binding declares `max-concurrent`. The runtime maintains
+per-binding capacity slots, replacing the current URL-based
+`Cascade_client_capacity` registry.
+
+```
+[claude-code.sonnet]  →  slot: { max: 2, active: 0 }
+[claude-code.haiku]   →  slot: { max: 3, active: 1 }
+[ollama.qwen3-8b]     →  slot: { max: 1, active: 0 }
+```
+
+Tier-level `max-concurrent` is a cap: the sum of member binding caps must be
+≥ the tier cap. Load-time validation enforces this.
+
+## 6. Migration
+
+**Breaking change.** Current `cascade.toml` profile format is incompatible.
+The migration path:
+
+| Current | New |
+|---------|-----|
+| `[big_three]` profile with `models = [...]` | `[tier.primary]` members referencing bindings |
+| `"claude_code:auto"` model strings | `[claude-code.haiku]` binding + `[models.haiku]` |
+| `_required_capability_profile` field | Per-model `tools-support` + per-route filtering |
+| `cascade_capability_profile.ml` closed variant | Config-driven `api_format` + `transport` |
+| `Provider_kind.t` 11-variant closed sum | `api_format` 3-variant + `transport` 2-variant |
+| URL-based capacity registry | Per-binding capacity slot |
+
+A migration script converts the current `config/cascade.toml` to the new schema.
+Existing tests that reference flat profiles are updated to reference the new
+binding/alias path.
+
+## 7. Files Affected
+
+### Rewrite (breaking)
+
+| File | Current LOC | Role |
+|------|-------------|------|
+| `provider_kind_resolver.ml` | 80 | String→variant dispatch → config-driven resolution |
+| `cascade_transport.ml` | 200+ | Provider-kind CLI dispatch → protocol adapter dispatch |
+| `cascade_capability_profile.ml` | 105 | Closed variant → eliminated (config-driven) |
+| `cascade_tier.ml` | 22 | Tier def → expanded with new types |
+| `cascade_client_capacity.ml` | 100 | URL-based → binding-based capacity |
+| `cascade_toml_materializer.ml` | 595 | Flat profile parser → 5-layer parser |
+
+### Moderate changes
+
+| File | Role |
+|------|------|
+| `cascade_config_loader.ml` | Profile loading → declarative config loading |
+| `cascade_catalog_runtime.ml` | Profile snapshot → binding/tier snapshot |
+| `cascade_config.ml` | Re-exports → updated types |
+| `cascade_routes.ml` | Route mapping → tier-group routing |
+| `cascade_strategy.ml` | Strategy selection → config-driven strategy |
+| `cascade_pool.ml` | Model pool → binding pool |
+| `cascade_inventory.ml` | Inventory → binding inventory |
+
+### New modules
+
+| Module | Role |
+|--------|------|
+| `cascade_declarative_types.ml` | 5-layer type definitions |
+| `cascade_declarative_parser.ml` | TOML → typed config parser |
+| `cascade_declarative_validator.ml` | Cross-reference validation |
+| `messages_api_adapter.ml` | Anthropic Messages protocol |
+| `chat_completions_api_adapter.ml` | OpenAI/Google HTTP protocol |
+| `ollama_api_adapter.ml` | Ollama native protocol |
+| `kimi_cli_adapter.ml` | Kimi CLI protocol |
+
+## 8. Implementation Phases
+
+### Phase 0: RFC + Types (this document)
+- Write RFC-0058 v2
+- Define `cascade_declarative_types.ml` with internal types
+
+### Phase 1: Schema + Parser
+- `cascade_declarative_parser.ml` — TOML → typed config
+- `cascade_declarative_validator.ml` — cross-reference checks
+- Unit tests for parser and validator
+
+### Phase 2: Protocol Adapters
+- `api_format` dispatch replacing `provider_kind` dispatch
+- Thin adapter modules per protocol
+- CLI invocation logic moved into adapters
+
+### Phase 3: Runtime Integration
+- Adapter layer: new types → existing `Cascade_catalog` interface
+- Binding-based capacity slots replacing URL-based registry
+- Existing integration tests pass through adapter
+
+### Phase 4: Migration + Dashboard
+- Migration script: old `cascade.toml` → new schema
+- Dashboard JSON removal (absorbed into TOML-only mode)
+- `ensure_materialized_json` eliminated
+
+## 9. Acceptance Criteria
+
+- [ ] TOML file defines all 5 layers
+- [ ] No provider/model string literals in code (grep-verified)
+- [ ] `Provider_kind.t` eliminated from cascade code paths
+- [ ] Code dispatches by `api_format` (3 variants), not provider name (11 variants)
+- [ ] Per-binding capacity slots work
+- [ ] Cross-reference validation catches all invalid configs at startup
+- [ ] Existing cascade routes expressible in new schema
+- [ ] Tier/tier-group routing works (within-tier failover + between-tier priority)
+- [ ] Adding a new provider = TOML entry only (no compilation for existing protocols)
+- [ ] All existing integration tests pass (migrated to new schema)
+- [ ] `cascade.json` no longer generated or consumed
+
+## 10. Risks
 
 | Risk | Mitigation |
 |------|------------|
-| TOML parsing differs from existing JSON pipeline | Existing `Toml` library, same `cascade_toml_materializer` patterns |
-| Cross-reference validation misses cycles | Startup validation: topological sort on dependency graph |
-| Migration breaks existing keeper turns | Phase 3: backward compat layer, TOML takes precedence only when present |
-| Capability drift (declared ≠ actual) | Periodic runtime probe comparing declared vs observed (future work) |
+| agent_sdk `Provider_kind.t` is used outside cascade | Adapter layer wraps cascade-internal types; agent_sdk boundary is explicit |
+| CLI adapter complexity (claude, gemini, kimi differ) | Ugly internals are acceptable; each adapter is isolated (100-200 LOC) |
+| Migration breaks running keepers | Migration script + staged rollout; old schema supported during transition |
+| Cross-reference validation performance | O(n) single-pass at startup; not in hot path |
+| TOML parsing edge cases | Existing `Toml` library (otoml) already proven in Phase 1 |
 
-## 8. Acceptance Criteria
+## 11. Related Documents
 
-- [ ] TOML file defines all 4 layers (providers, models, aliases, groups)
-- [ ] Closed variant `cascade_capability_profile.ml` replaced by config-driven types
-- [ ] Existing cascade routes (`keeper_bound_safe`, `tier_fast`, etc.) expressible in TOML
-- [ ] Startup validation catches: missing provider, unreachable model, capability mismatch
-- [ ] Sequential cascade within groups works (alias1→alias2→alias3)
-- [ ] Sequential cascade between groups works (group1→group2→group3)
-- [ ] Per-provider concurrency respected
-- [ ] Existing tests pass (or are migrated to new types)
-- [ ] Legacy JSON path still works when no TOML is present
+- `docs/CASCADE-TOML.md` — current TOML authoring guide (to be rewritten)
+- `docs/rfc/RFC-0058-terminal-fallback-capability-exemption.md` — terminal fallback semantics
+- `docs/rfc/RFC-0055.md` — GADT cascade tier routing (superseded)
+- `config/cascade.toml` — current seed config (to be migrated)
+- `docs/cascade/README.md` — cascade design index

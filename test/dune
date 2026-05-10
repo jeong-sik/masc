@@ -720,6 +720,8 @@
         test_cdal_eval_v1
         test_cdal_friction_projection
         test_cdal_verdict_gate
+        test_cdal_mode_enforcer
+        test_cdal_mode_resolver
         test_verification_fsm
         test_task_sandbox
         test_governance_yojson_roundtrip
@@ -926,6 +928,8 @@
         test_cdal_eval_v1
         test_cdal_friction_projection
         test_cdal_verdict_gate
+        test_cdal_mode_enforcer
+        test_cdal_mode_resolver
         test_verification_fsm
         test_task_sandbox
         test_governance_yojson_roundtrip

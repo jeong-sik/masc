@@ -92,6 +92,27 @@ let test_check_all_ok () =
     (Inv.check_all ~sandbox_roots:roots ~sandbox_paths:paths ~keeper:"keeper_a"
        ~credential ~other_keepers:others ~before_tools ~after_tools)
 
+(* Sibling-prefix safety: /srv/.../alice-evil/ must NOT satisfy root
+   /srv/.../alice/. This is what the trailing-slash trick on the root
+   protects against. Without it, a hostile sibling directory whose name
+   shares a literal prefix with a legitimate keeper's root would slip
+   through the prefix check. *)
+let test_sandbox_isolation_sibling_prefix_rejected () =
+  let roots = ["/srv/masc/keepers/alice"] in
+  let paths = ["/srv/masc/keepers/alice-evil/leak.txt"] in
+  require_error "sibling prefix rejected"
+    (Inv.sandbox_isolation ~sandbox_roots:roots ~sandbox_paths:paths)
+
+(* Path-traversal safety: `..` segments are collapsed before the prefix
+   check, so /srv/.../alice/../../etc/passwd cannot escape its root.
+   This guards [normalize_path] from being quietly removed in a future
+   refactor. *)
+let test_sandbox_isolation_path_traversal_rejected () =
+  let roots = ["/srv/masc/keepers/alice"] in
+  let paths = ["/srv/masc/keepers/alice/../../etc/passwd"] in
+  require_error "path traversal rejected"
+    (Inv.sandbox_isolation ~sandbox_roots:roots ~sandbox_paths:paths)
+
 let test_check_all_first_error () =
   let roots = ["/tmp/masc_sandbox_turn_1"] in
   let paths = ["/etc/passwd"] in
@@ -118,6 +139,10 @@ let () =
           test_case "violation" `Quick test_sandbox_isolation_violation;
           test_case "multi_root" `Quick test_sandbox_isolation_multi_root;
           test_case "empty_roots" `Quick test_sandbox_isolation_empty_roots;
+          test_case "sibling_prefix_rejected" `Quick
+            test_sandbox_isolation_sibling_prefix_rejected;
+          test_case "path_traversal_rejected" `Quick
+            test_sandbox_isolation_path_traversal_rejected;
         ] );
       ( "credential_isolation",
         [

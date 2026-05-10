@@ -17,7 +17,6 @@ type credential_scope = {
   keeper_id : string;
   github_account : string;
 }
-[@@deriving eq]
 
 (** Normalised tool identifier. *)
 type tool_name = string

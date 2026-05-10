@@ -358,5 +358,6 @@ let cleanup (t : t) =
             out;
           Prometheus.inc_counter
             Keeper_metrics.metric_keeper_turn_cleanup_failures
-            ~labels:[("keeper", t.meta.name); ("site", "docker_rm")]);
+            ~labels:[("keeper", t.meta.name); ("site", "docker_rm")]
+            ());
       ()

@@ -343,6 +343,59 @@ let routes_json ~path value =
       in
       loop [] fields
 
+(** RFC-0058: Parse [profiles.<name>] TOML sections into a JSON structure.
+    Each profile sub-table contains [required_capabilities] (string array)
+    and optionally [provider_filter] (string). *)
+let profiles_json ~path value =
+  match table_fields ~path value with
+  | Error _ as err -> err
+  | Ok profile_tables ->
+      let rec loop acc = function
+        | [] -> Ok (`Assoc (List.rev acc))
+        | (profile_name, profile_value) :: rest -> (
+            match table_fields
+                    ~path:(Printf.sprintf "%s.%s" path profile_name)
+                    profile_value
+            with
+            | Error _ as err -> err
+            | Ok fields ->
+                let field_path field_name =
+                  Printf.sprintf "%s.%s.%s" path profile_name field_name
+                in
+                let required_caps =
+                  let rec find = function
+                    | [] -> Ok []
+                    | (key, v) :: _ when String.equal key "required_capabilities"
+                      -> string_array_value ~path:(field_path key) v
+                    | _ :: rest -> find rest
+                  in
+                  find fields
+                in
+                let provider_filter =
+                  let rec find = function
+                    | [] -> Ok None
+                    | (key, v) :: _ when String.equal key "provider_filter" ->
+                        (match string_value ~path:(field_path key) v with
+                         | Ok s -> Ok (Some s)
+                         | Error _ as err -> err)
+                    | _ :: rest -> find rest
+                  in
+                  find fields
+                in
+                match required_caps, provider_filter with
+                | Ok caps, Ok filter ->
+                    let json_fields =
+                      [ ("required_capabilities", `List (List.map (fun s -> `String s) caps)) ]
+                      @ (match filter with
+                         | None -> []
+                         | Some f -> [ ("provider_filter", `String f) ])
+                    in
+                    loop ((profile_name, `Assoc json_fields) :: acc) rest
+                | (Error _ as err), _ -> err
+                | _, (Error _ as err) -> err)
+      in
+      loop [] profile_tables
+
 let profile_field_json ~profile_name ~field_name field_value =
   let profile_path = profile_name ^ "." ^ field_name in
   match field_name with
@@ -483,6 +536,14 @@ let render_toml_to_yojson toml =
               match routes_json ~path:"routes" value with
               | Ok routes -> loop ([ ("routes", routes) ] :: acc) rest
               | Error _ as err -> err
+            else if String.equal key "profiles" then
+              (* RFC-0058: capability profile definitions — parsed into
+                 a JSON "profiles" namespace consumed by
+                 [Cascade_capability_profile]. *)
+              (match profiles_json ~path:"profiles" value with
+               | Ok profiles ->
+                   loop ([ ("profiles", profiles) ] :: acc) rest
+               | Error _ as err -> err)
             else if String.equal key "admission" then
               (* RFC-0026 admission namespace — pass through to JSON
                  verbatim.  The schema is owned by
@@ -548,7 +609,11 @@ let toml_section_names_result ~config_path =
                 let is_meta_key key =
                   String.length key > 0 && key.[0] = '_'
                 in
-                let is_reserved_table key = String.equal key "routes" in
+                let is_reserved_table key =
+                  String.equal key "routes"
+                  || String.equal key "profiles"
+                  || String.equal key "admission"
+                in
                 let names =
                   fields
                   |> List.filter_map (fun (key, value) ->

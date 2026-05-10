@@ -6,8 +6,6 @@
     - Tool surface monotonicity: Available tools only shrink when explicitly configured
 *)
 
-open Base
-
 (** Unique identifier for a keeper turn. *)
 type turn_id = string
 
@@ -19,7 +17,7 @@ type credential_scope = {
   keeper_id : string;
   github_account : string;
 }
-[@@deriving sexp, equal]
+[@@deriving eq]
 
 (** Normalised tool identifier. *)
 type tool_name = string

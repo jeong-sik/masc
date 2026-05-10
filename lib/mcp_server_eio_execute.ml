@@ -813,11 +813,9 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
     | Mod_code_write ->
         Tool_code_write.dispatch { Tool_code_write.config; agent_name } ~name ~args:coerced_args
     (* Mod_handover, Mod_heartbeat, Mod_auth removed: tools pruned *)
+    | Mod_compact -> None
     | Mod_run ->
         Tool_run.dispatch { Tool_run.config } ~name ~args:coerced_args
-    | Mod_compact ->
-        Option.map tuple_of_tool_result
-          (Tool_compact.dispatch ~name ~args:coerced_args)
     | Mod_agent ->
         Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args:coerced_args
     | Mod_task ->

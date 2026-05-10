@@ -205,18 +205,6 @@ type compaction_decision = Keeper_compact_policy.compaction_decision =
 val compaction_decision_to_string : compaction_decision -> string
 val compaction_decision_applied : compaction_decision -> bool
 
-val compact_if_needed_typed :
-  meta:keeper_meta ->
-  now_ts:float ->
-  working_context ->
-  working_context * string option * compaction_decision
-
-val compact_if_needed :
-  meta:keeper_meta ->
-  now_ts:float ->
-  working_context ->
-  working_context * string option * string
-
 val apply_post_turn_lifecycle :
   on_compaction_started:(unit -> unit) ->
   on_handoff_started:(unit -> unit) ->

@@ -1,6 +1,7 @@
 open Alcotest
 
 module KEC = Masc_mcp.Keeper_exec_context
+module KCP = Masc_mcp.Keeper_compact_policy
 module KCC = Masc_mcp.Keeper_context_core
 module KAR = Masc_mcp.Keeper_agent_run
 module KMP = Masc_mcp.Keeper_memory_policy
@@ -2209,7 +2210,7 @@ let test_compact_if_needed_ts_zero_bypasses_cooldown () =
   let meta = make_gate_only_meta ~last_continuity_update_ts:0.0 ~cooldown_sec:3600 () in
   let ctx = KEC.create ~system_prompt:"sp" ~max_tokens:4096 in
   let now_ts = 1000.0 in (* well within the 3600s cooldown window *)
-  let (_ctx, trigger, decision) = KEC.compact_if_needed ~meta ~now_ts ctx in
+  let (_ctx, trigger, decision) = KCP.compact_if_needed ~meta ~now_ts ctx in
   check (option string) "no compaction triggered (ratio_gate=1.0)" None trigger;
   check string "ts=0.0 bypasses cooldown, not skipped" "blocked:below_thresholds" decision
 
@@ -2233,7 +2234,7 @@ let test_compact_if_needed_emergency_bypass_ignores_cooldown () =
   in
   let ratio = KCC.context_ratio ctx in
   check bool "context ratio is above emergency threshold" true (ratio >= 0.8);
-  let (_ctx, trigger, decision) = KEC.compact_if_needed ~meta ~now_ts ctx in
+  let (_ctx, trigger, decision) = KCP.compact_if_needed ~meta ~now_ts ctx in
   (* Emergency ratio bypasses cooldown → compaction fires (ratio >= ratio_gate=1.0) *)
   check bool "compaction was triggered (emergency bypass)" true (Option.is_some trigger);
   check bool "decision starts with applied:" true (String.starts_with ~prefix:"applied:" decision)
@@ -2264,7 +2265,7 @@ let test_compact_if_needed_records_saved_tokens_metric () =
     |> Option.value ~default:0.0
   in
   let (compacted_ctx, trigger, decision) =
-    KEC.compact_if_needed ~meta ~now_ts ctx
+    KCP.compact_if_needed ~meta ~now_ts ctx
   in
   let after_metric =
     Masc_mcp.Prometheus.get_metric_value

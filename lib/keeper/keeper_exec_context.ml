@@ -110,8 +110,6 @@ let compaction_decision_to_string =
 let compaction_decision_applied =
   Keeper_compact_policy.compaction_decision_applied
 
-let compact_if_needed_typed = Keeper_compact_policy.compact_if_needed_typed
-let compact_if_needed = Keeper_compact_policy.compact_if_needed
 
 (* ================================================================ *)
 (* Re-export from Keeper_post_turn                                   *)

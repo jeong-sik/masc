@@ -46,14 +46,6 @@ val memory_check_default_json : unit -> Yojson.Safe.t
 (** Extract compaction policy tuple from keeper metadata. *)
 val compaction_policy_of_keeper : keeper_meta -> float * int * int
 
-(** Compact context if thresholds are exceeded.
-    Returns updated context, optional summary, and compaction label. *)
-val compact_if_needed :
-  meta:keeper_meta ->
-  now_ts:float ->
-  Keeper_exec_context.working_context ->
-  Keeper_exec_context.working_context * string option * string
-
 (** {1 Trace and Model} *)
 
 (** Generate unique trace ID for a keeper turn. *)

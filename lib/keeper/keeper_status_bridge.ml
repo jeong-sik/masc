@@ -233,18 +233,24 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
              enum target.  Direct typed match preferred over text-substring
              fallback when the SDK gave us a structured error. *)
           Some Completion_contract_violation
-      (* Other agent_error variants do not carry a structured blocker_class.
-         If a new agent variant deserves its own blocker_class, the compiler
-         will force a decision here when it is added upstream. *)
-      | Agent_sdk.Error.Agent (MaxTurnsExceeded _)
-      | Agent_sdk.Error.Agent (TokenBudgetExceeded _)
-      | Agent_sdk.Error.Agent (CostBudgetExceeded _)
-      | Agent_sdk.Error.Agent (UnrecognizedStopReason _)
-      | Agent_sdk.Error.Agent (IdleDetected _)
-      | Agent_sdk.Error.Agent (ToolRetryExhausted _)
-      | Agent_sdk.Error.Agent (GuardrailViolation _)
-      | Agent_sdk.Error.Agent (TripwireViolation _)
-      | Agent_sdk.Error.Agent (ExitConditionMet _) -> None
+      | Agent_sdk.Error.Agent (MaxTurnsExceeded _) ->
+          Some Sdk_max_turns_exceeded
+      | Agent_sdk.Error.Agent (TokenBudgetExceeded _) ->
+          Some Sdk_token_budget_exceeded
+      | Agent_sdk.Error.Agent (CostBudgetExceeded _) ->
+          Some Sdk_cost_budget_exceeded
+      | Agent_sdk.Error.Agent (UnrecognizedStopReason _) ->
+          Some Sdk_unrecognized_stop_reason
+      | Agent_sdk.Error.Agent (IdleDetected _) ->
+          Some Sdk_idle_detected
+      | Agent_sdk.Error.Agent (ToolRetryExhausted _) ->
+          Some Sdk_tool_retry_exhausted
+      | Agent_sdk.Error.Agent (GuardrailViolation _) ->
+          Some Sdk_guardrail_violation
+      | Agent_sdk.Error.Agent (TripwireViolation _) ->
+          Some Sdk_tripwire_violation
+      | Agent_sdk.Error.Agent (ExitConditionMet _) ->
+          Some Sdk_exit_condition_met
       (* Provider-level [Api] errors are surfaced via OAS retry / cascade
          layers and do not map to a typed blocker_class by themselves. *)
       | Agent_sdk.Error.Api _
@@ -303,7 +309,16 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
     | Completion_contract_violation
     | Fiber_unresolved
     | Stale_turn_timeout
-    | Stale_fleet_batch -> if summary = "" then str else summary
+    | Stale_fleet_batch
+    | Sdk_max_turns_exceeded
+    | Sdk_token_budget_exceeded
+    | Sdk_cost_budget_exceeded
+    | Sdk_unrecognized_stop_reason
+    | Sdk_idle_detected
+    | Sdk_tool_retry_exhausted
+    | Sdk_guardrail_violation
+    | Sdk_tripwire_violation
+    | Sdk_exit_condition_met -> if summary = "" then str else summary
   in
   { blocker_class = str; summary; continue_gate }
 
@@ -326,7 +341,16 @@ let runtime_blocker_surface_of_legacy_string reason cls =
   | No_tool_capable_provider
   | Fiber_unresolved
   | Stale_turn_timeout
-  | Stale_fleet_batch ->
+  | Stale_fleet_batch
+  | Sdk_max_turns_exceeded
+  | Sdk_token_budget_exceeded
+  | Sdk_cost_budget_exceeded
+  | Sdk_unrecognized_stop_reason
+  | Sdk_idle_detected
+  | Sdk_tool_retry_exhausted
+  | Sdk_guardrail_violation
+  | Sdk_tripwire_violation
+  | Sdk_exit_condition_met ->
       runtime_blocker_surface_of_typed_class ~summary:reason cls
 
 let stale_kill_class_summary (kill_class : Keeper_registry.stale_kill_class) =

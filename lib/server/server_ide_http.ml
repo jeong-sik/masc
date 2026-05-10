@@ -204,3 +204,32 @@ let add_routes router =
           (Yojson.Safe.to_string (json_ok snapshot)) reqd)
       request reqd)
     router4
+  in
+  Http.Router.get "/api/v1/ide/presence/stream" (fun request reqd ->
+    with_public_read
+      (fun state _req inner_reqd ->
+        let origin = Server_utils.get_origin request in
+        let headers =
+          Httpun.Headers.of_list
+            ([
+               ("content-type", "text/event-stream");
+               ("cache-control", "no-cache");
+               ("connection", "keep-alive");
+               ("x-accel-buffering", "no");
+             ]
+             @ Server_utils.cors_headers origin)
+        in
+        let response = Httpun.Response.create ~headers `OK in
+        let writer = Httpun.Reqd.respond_with_streaming inner_reqd response in
+        let snapshot = Yojson.Safe.to_string (`Assoc [
+          ("runtime_id", `String "runtime");
+          ("branch", `String "main");
+          ("supervisor", `String "local");
+          ("connected", `Bool true);
+          ("entries", `List []);
+        ]) in
+        let event = Printf.sprintf "data: %s\n\n" snapshot in
+        Httpun.Body.Writer.write_string writer event;
+        Httpun.Body.Writer.close writer)
+      request reqd)
+    router5

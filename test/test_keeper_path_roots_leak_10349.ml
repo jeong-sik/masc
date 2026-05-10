@@ -104,7 +104,9 @@ let test_path_outside_sandbox_no_leak () =
           ~allowed_paths:[ "lib" ] ~raw_path:"README.md"
       in
       check bool "rejection occurred" true (Result.is_error result);
-      let err = Result.get_error result in
+      let err =
+        Keeper_alerting_path.rejection_to_user_message (Result.get_error result)
+      in
       assert_no_roots_leak "path_outside_sandbox" err;
       check bool "path_outside_sandbox prefix preserved" true
         (Astring.String.is_prefix ~affix:"path_outside_sandbox:" err);
@@ -138,7 +140,9 @@ let test_out_of_roots_no_leak () =
           ~allowed_paths:[ "src" ] ~raw_path:target
       in
       check bool "rejection occurred" true (Result.is_error result);
-      let err = Result.get_error result in
+      let err =
+        Keeper_alerting_path.rejection_to_user_message (Result.get_error result)
+      in
       assert_no_roots_leak "out_of_roots" err;
       check bool "out_of_roots: path_outside_sandbox prefix" true
         (Astring.String.is_prefix ~affix:"path_outside_sandbox:" err);
@@ -164,7 +168,9 @@ let test_not_found_relative_no_leak () =
           ~allowed_paths:[] ~raw_path:"nonexistent_repo_10349/"
       in
       check bool "rejection occurred" true (Result.is_error result);
-      let err = Result.get_error result in
+      let err =
+        Keeper_alerting_path.rejection_to_user_message (Result.get_error result)
+      in
       assert_no_roots_leak "not_found_relative" err;
       assert_legacy_not_found_prefix "not_found_relative" err;
       check (float 0.0001) "not_found_relative counter +1"
@@ -190,7 +196,9 @@ let test_absolute_path_rejected () =
           ~allowed_paths:[] ~raw_path:target
       in
       check bool "rejection occurred" true (Result.is_error result);
-      let err = Result.get_error result in
+      let err =
+        Keeper_alerting_path.rejection_to_user_message (Result.get_error result)
+      in
       assert_no_roots_leak "absolute_path_rejected" err;
       (* Legacy prefix is NOT preserved for absolute paths — they hit a
          different gate.  The important invariant is no host roots leak. *)

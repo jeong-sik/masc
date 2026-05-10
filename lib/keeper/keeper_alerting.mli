@@ -174,7 +174,7 @@ val resolve_keeper_target_path :
   config:Coord.config ->
   allowed_paths:string list ->
   raw_path:string ->
-  (string, string) result
+  (string, Keeper_alerting_path.keeper_path_rejection) result
 val sanitize_keeper_name : string -> string
 val playground_path_of_keeper : string -> string
 val playground_mind_path : string -> string
@@ -185,7 +185,7 @@ val resolve_keeper_read_path :
   config:Coord.config ->
   allowed_paths:string list ->
   raw_path:string ->
-  (string, string) result
+  (string, Keeper_alerting_path.keeper_path_rejection) result
 val process_status_to_json : Unix.process_status -> Yojson.Safe.t
 val extract_user_messages : working_context -> string list
 

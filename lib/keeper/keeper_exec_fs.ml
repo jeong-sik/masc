@@ -46,10 +46,6 @@ let fs_read_default_max_bytes = Tool_shard_limits.keeper_fs_read_default_max_byt
 let fs_read_min_max_bytes = 512
 let fs_read_max_max_bytes = 200_000
 
-let is_missing_read_path_error (e : string) =
-  String.starts_with ~prefix:"path_not_found:" e
-  || String.starts_with ~prefix:"path_not_found_under_allowed_roots:" e
-
 (** Issue #10349 Phase 2: registry-canonical meta lookup.
     Eliminates identity drift by refusing to accept an externally-injected
     [keeper_meta]; the resolver asks the registry for the SSOT entry.
@@ -86,16 +82,24 @@ let handle_keeper_fs_read
     |> fun n -> max fs_read_min_max_bytes (min fs_read_max_max_bytes n)
   in
   let fallback_dir = keeper_default_read_root ~config ~meta in
-  match resolve_keeper_read_path ~config ~meta ~raw_path:path with
-  | Error e when is_missing_read_path_error e ->
-    (* Path within root but doesn't exist — use structured error with suggestions *)
-    let root = Keeper_alerting_path.project_root_of_config config in
-    let target =
-      if Filename.is_relative path then Filename.concat root path else path
-    in
-    missing_file_error_json ~config ~target ~fallback_dir ~error:e
+  match playground_relative_unless_allowed_root ~config ~meta path with
   | Error e -> error_json e
-  | Ok target ->
+  | Ok normalized ->
+    match Keeper_alerting_path.resolve_keeper_read_path
+      ~config
+      ~allowed_paths:(keeper_effective_allowed_paths ~meta)
+      ~raw_path:normalized
+    with
+    | Error (Not_found_relative { raw }) ->
+      (* Path within root but doesn't exist — use structured error with suggestions *)
+      let root = Keeper_alerting_path.project_root_of_config config in
+      let target =
+        if Filename.is_relative path then Filename.concat root path else path
+      in
+      missing_file_error_json ~config ~target ~fallback_dir
+        ~error:(Keeper_alerting_path.rejection_to_user_message (Not_found_relative { raw }))
+    | Error rej -> error_json (Keeper_alerting_path.rejection_to_user_message rej)
+    | Ok target ->
     (* RFC-0006 Phase B-1: Docker keepers are always contained to their
        playground bundle on the host before any read-side I/O proceeds.
        The resolver-level allowed_paths check is augmented by this

@@ -379,12 +379,15 @@ let resolve_keeper_path
       ~(raw_path : string)
   =
   match playground_relative_unless_allowed_root ~config ~meta raw_path with
-  | Error _ as err -> err
+  | Error e -> Error e
   | Ok normalized ->
-    resolve_keeper_target_path
+    match Keeper_alerting_path.resolve_keeper_target_path
       ~config
       ~allowed_paths:(keeper_effective_write_allowed_paths ~meta)
       ~raw_path:normalized
+    with
+    | Error rej -> Error (Keeper_alerting_path.rejection_to_user_message rej)
+    | Ok p -> Ok p
 ;;
 
 let resolve_keeper_read_path
@@ -393,12 +396,15 @@ let resolve_keeper_read_path
       ~(raw_path : string)
   =
   match playground_relative_unless_allowed_root ~config ~meta raw_path with
-  | Error _ as err -> err
+  | Error e -> Error e
   | Ok normalized ->
-    Keeper_alerting_path.resolve_keeper_read_path
+    match Keeper_alerting_path.resolve_keeper_read_path
       ~config
       ~allowed_paths:(keeper_effective_allowed_paths ~meta)
       ~raw_path:normalized
+    with
+    | Error rej -> Error (Keeper_alerting_path.rejection_to_user_message rej)
+    | Ok p -> Ok p
 ;;
 
 let keeper_agent_sender ~(meta : keeper_meta) = meta.agent_name

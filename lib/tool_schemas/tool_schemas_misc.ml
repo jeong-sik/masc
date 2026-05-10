@@ -117,55 +117,6 @@ let schemas : tool_schema list =
           ; "additionalProperties", `Bool false
           ]
     }
-  ; { name = "masc_dashboard"
-    ; description =
-        "Render the MASC dashboard summarizing rooms, agents, and tasks. Set \
-         scope='current' for this room only."
-    ; input_schema =
-        `Assoc
-          [ "type", `String "object"
-          ; ( "properties"
-            , `Assoc
-                [ ( "compact"
-                  , `Assoc
-                      [ "type", `String "boolean"
-                      ; ( "description"
-                        , `String
-                            "If true, show compact single-line summary instead of full \
-                             dashboard" )
-                      ] )
-                ; ( "scope"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; ( "enum"
-                        , `List
-                            (List.map (fun s -> `String s) dashboard_scope_enum_strings) )
-                      ; "description", `String "Dashboard scope (default: all)"
-                      ; "default", `String "all"
-                      ] )
-                ] )
-          ; "additionalProperties", `Bool false
-          ]
-    }
-  ; { name = "masc_gc"
-    ; description =
-        "Run garbage collection: remove zombie agents, archive stale tasks, delete old \
-         messages (default: 7-day threshold)."
-    ; input_schema =
-        `Assoc
-          [ "type", `String "object"
-          ; ( "properties"
-            , `Assoc
-                [ ( "days"
-                  , `Assoc
-                      [ "type", `String "integer"
-                      ; "default", `Int 7
-                      ; "description", `String "Age threshold in days (default: 7)"
-                      ] )
-                ] )
-          ; "additionalProperties", `Bool false
-          ]
-    }
   ; { name = "masc_cleanup_zombies"
     ; description =
         "Remove zombie agents (no heartbeat for 5+ min) and release their file locks."

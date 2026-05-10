@@ -26,6 +26,7 @@ import { CopyableCode } from './common/copyable-code'
 import { LoadingState } from './common/feedback-state'
 import { TextInput } from './common/input'
 import { showToast } from './common/toast'
+import { authHeaders } from '../api/core'
 
 type FieldType = 'string' | 'integer' | 'number' | 'boolean' | 'unknown'
 
@@ -179,7 +180,7 @@ async function fetchCurrentValues(id: string): Promise<Record<string, string>> {
   // back to schema defaults rather than block on the prefill.
   try {
     const res = await fetch(`/api/v1/sidecar/config?name=${encodeURIComponent(id)}`, {
-      headers: { Accept: 'application/json' },
+      headers: { ...authHeaders(), Accept: 'application/json' },
     })
     if (!res.ok) return {}
     const data = (await res.json()) as ConfigReadResponse
@@ -194,7 +195,7 @@ async function fetchSchema(id: string) {
   setEntry(id, { loading: true, error: null })
   try {
     const res = await fetch(`/api/v1/sidecar/schema?name=${encodeURIComponent(id)}`, {
-      headers: { Accept: 'application/json' },
+      headers: { ...authHeaders(), Accept: 'application/json' },
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = (await res.json()) as SchemaResponse
@@ -234,6 +235,7 @@ async function saveConfig(id: string) {
     const res = await fetch(`/api/v1/sidecar/config?name=${encodeURIComponent(id)}`, {
       method: 'POST',
       headers: {
+        ...authHeaders(),
         'Content-Type': 'application/json',
         Accept: 'application/json',
       },
@@ -268,7 +270,7 @@ async function applyConfigChange(id: string) {
     try {
       await fetch(`/api/v1/sidecar/stop?name=${encodeURIComponent(id)}`, {
         method: 'POST',
-        headers: { Accept: 'application/json' },
+        headers: { ...authHeaders(), Accept: 'application/json' },
       })
     } catch {
       // Stop failures are non-fatal here — target might not be running.
@@ -276,7 +278,7 @@ async function applyConfigChange(id: string) {
     await new Promise(r => setTimeout(r, 800))
     const startRes = await fetch(`/api/v1/sidecar/start?name=${encodeURIComponent(id)}`, {
       method: 'POST',
-      headers: { Accept: 'application/json' },
+      headers: { ...authHeaders(), Accept: 'application/json' },
     })
     if (!startRes.ok) throw new Error(`start HTTP ${startRes.status}`)
     showToast(`${id} 재시작 완료 — 새 config 적용됨`, 'success', 2400)

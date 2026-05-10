@@ -181,6 +181,10 @@
   tool_task_schemas
   board_core_classify
   board_core_payload
+  ide_annotation_types
+  ide_annotations
+  ide_region_tracker
+  server_ide_http
   )
  (libraries
    mcp_protocol

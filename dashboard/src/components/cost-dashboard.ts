@@ -594,7 +594,7 @@ function CostLatency({ buckets, p50, p95 }: {
           `
         })}
       </div>
-      <div class="grid grid-cols-4 gap-px rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-border-default)]" role="list" aria-label="Latency band totals">
+      <div class="grid grid-cols-2 gap-1 md:grid-cols-4 rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-border-default)]" role="list" aria-label="Latency band totals">
         ${bands.map(b => html`
           <div key=${b.label} class="flex flex-col gap-0.5 bg-[var(--backdrop-deep)] p-2" role="listitem" aria-label=${`${b.label}: ${b.count} calls (${total > 0 ? Math.round((b.count / total) * 100) : 0}%)`}>
             <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">${b.label}</span>

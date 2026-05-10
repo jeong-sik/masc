@@ -354,7 +354,7 @@ export function DoctorPanel() {
                   >새로고침</button>
                 </div>
               </div>
-              <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-2">
                 ${data.doctors.map((entry) => html`<${DoctorEntryCard} entry=${entry} />`)}
               </div>
             </div>

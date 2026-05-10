@@ -133,7 +133,7 @@ export function OperationalMeaningPanel({
       ${isFiltering && visibleLanes.length === 0 && lanes.length > 0
         ? html`<div class="mt-2 py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${lanes.length} lanes)</div>`
         : html`
-          <div class="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-5">
+          <div class="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
             ${visibleLanes.map(lane => html`
               <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
                 <div class="flex items-center justify-between gap-2">

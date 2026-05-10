@@ -13,6 +13,7 @@ import { signal } from '@preact/signals'
 import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
 import { authHeaders } from '../api/core'
+import { SurfaceCard } from './common/card'
 import { SkeletonText } from './common/skeleton'
 
 interface LogResponse {
@@ -188,10 +189,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
   const hasFilter = entry.level !== 'all' || entry.keyword.trim() !== ''
 
   return html`
-    <div
-      id=${`sidecar-log-${connectorId}`}
-      class="mt-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2"
-    >
+    <${SurfaceCard} class="mt-3 !p-2" id=${`sidecar-log-${connectorId}`}>
       <div class="mb-2 flex items-center justify-between gap-2">
         <div class="min-w-0 truncate text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]" title=${entry.logPath}>
           ${entry.logPath || '(log path unknown)'}
@@ -267,7 +265,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
                   오늘 날짜 로그 파일이 아직 없습니다. sidecar를 시작하면 자동 생성됩니다.
                 </div>
               `}
-    </div>
+    </${SurfaceCard}>
   `
 }
 

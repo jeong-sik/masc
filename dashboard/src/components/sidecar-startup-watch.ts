@@ -16,6 +16,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useLayoutEffect, useState } from 'preact/hooks'
+import { SurfaceCard } from './common/card'
 import { openSidecarLogs } from './sidecar-log-viewer'
 
 /** How often the live counter in the banner re-renders. 1000ms matches
@@ -94,10 +95,7 @@ export function StartupCheckBanner({ connectorId, sidecarUp }: {
   const elapsedSec = startAt !== null ? Math.floor((Date.now() - startAt) / 1000) : 0
 
   return html`
-    <div
-      class="mt-2 flex items-center gap-2 rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--color-status-warn)]"
-      data-startup-warning=${connectorId}
-    >
+    <${SurfaceCard} class="mt-2 flex items-center gap-2 !border-[var(--warn-20)] !bg-[var(--warn-10)] !px-3 !py-2 text-2xs text-[var(--color-status-warn)]" data-startup-warning=${connectorId}>
       <span class="text-base leading-none" aria-hidden="true">⚠</span>
       <div class="min-w-0 flex-1">
         <div class="font-semibold" data-startup-warning-elapsed=${String(elapsedSec)}>기동 응답 없음 (${elapsedSec}s 경과)</div>
@@ -122,6 +120,6 @@ export function StartupCheckBanner({ connectorId, sidecarUp }: {
         aria-label="dismiss startup warning"
         onClick=${() => clearStartAttempt(connectorId)}
       >×</button>
-    </div>
+    </${SurfaceCard}>
   `
 }

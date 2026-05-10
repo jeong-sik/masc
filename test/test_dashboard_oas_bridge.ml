@@ -67,6 +67,8 @@ let make_telemetry ?timings ?(request_latency_ms = 0) ()
     canonical_model_id = None;
     effective_context_window = None;
     provider_internal_action_count = None;
+    ttfrc_ms = None;
+    prefill_ms = None;
   }
 
 let make_response ?usage ?telemetry ?(model = "claude-opus-4-7") ()

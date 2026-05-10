@@ -106,6 +106,8 @@ let test_emit_cost_event_writes_inference_telemetry () =
     canonical_model_id = Some "gpt-4";
     effective_context_window = Some 128000;
     provider_internal_action_count = None;
+    ttfrc_ms = None;
+    prefill_ms = None;
   } in
   Hooks.emit_cost_event ~masc_root:root ~agent_name:"keeper"
     ~task_id:(Some "task-1") ~model:"glm-coding:glm-5.1"
@@ -152,6 +154,8 @@ let test_emit_cost_event_uses_typed_provider_kind_for_bare_model () =
       canonical_model_id = None;
       effective_context_window = None;
       provider_internal_action_count = None;
+      ttfrc_ms = None;
+      prefill_ms = None;
     }
   in
   Hooks.emit_cost_event ~masc_root:root ~agent_name:"keeper"
@@ -178,6 +182,8 @@ let test_emit_cost_event_writes_wall_tok_s_without_provider_timings () =
     canonical_model_id = Some "auto";
     effective_context_window = Some 128000;
     provider_internal_action_count = None;
+    ttfrc_ms = None;
+    prefill_ms = None;
   } in
   Hooks.emit_cost_event ~masc_root:root ~agent_name:"keeper"
     ~task_id:None ~model:"ollama:qwen3.6:27b-coding-nvfp4"
@@ -208,6 +214,8 @@ let test_emit_cost_event_marks_untrusted_usage () =
       canonical_model_id = Some "ollama:qwen3.6:27b-coding-nvfp4";
       effective_context_window = Some 128000;
       provider_internal_action_count = None;
+      ttfrc_ms = None;
+      prefill_ms = None;
     }
   in
   Hooks.emit_cost_event ~masc_root:root ~agent_name:"keeper"
@@ -256,6 +264,8 @@ let test_emit_cost_event_marks_unpriced_paid_model () =
       canonical_model_id = Some "future-openai-model-v9";
       effective_context_window = Some 128000;
       provider_internal_action_count = None;
+      ttfrc_ms = None;
+      prefill_ms = None;
     }
   in
   Hooks.emit_cost_event ~masc_root:root ~agent_name:"keeper"
@@ -288,6 +298,8 @@ let test_emit_cost_event_records_auto_resolution_source () =
       canonical_model_id = Some "gpt-4.1";
       effective_context_window = Some 128000;
       provider_internal_action_count = None;
+      ttfrc_ms = None;
+      prefill_ms = None;
     }
   in
   Hooks.emit_cost_event ~masc_root:root ~agent_name:"keeper"
@@ -320,6 +332,8 @@ let test_emit_cost_event_records_provider_prefixed_auto_resolution_source () =
       canonical_model_id = Some "kimi-for-coding";
       effective_context_window = Some 128000;
       provider_internal_action_count = None;
+      ttfrc_ms = None;
+      prefill_ms = None;
     }
   in
   Hooks.emit_cost_event ~masc_root:root ~agent_name:"keeper"
@@ -464,6 +478,8 @@ let make_telemetry
     canonical_model_id = None;
     effective_context_window = None;
     provider_internal_action_count = None;
+    ttfrc_ms = None;
+    prefill_ms = None;
   }
 
 let make_response ?(stop_reason = Agent_sdk.Types.EndTurn) ?telemetry () =

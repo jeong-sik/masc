@@ -31,6 +31,15 @@
  (modules cascade_materialize)
  (libraries masc_mcp))
 
+;; RFC-0058 Phase 4 — Flat TOML → 5-layer declarative TOML migration tool.
+;; Depends on cascade_decl sub-library (parser + types) and otoml.
+(executable
+ (name cascade_flat_to_declarative)
+ (modules cascade_flat_to_declarative)
+ (public_name cascade-flat-to-declarative)
+ (package masc_mcp)
+ (libraries masc_mcp.cascade_decl otoml))
+
 ;; Env knob catalog generator (#10733):
 ;;   regenerates docs/runtime-tunables.md from lib/config/env_config_*.ml.
 ;;   CI gate ensures the catalog stays in sync with the source.

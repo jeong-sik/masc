@@ -1361,3 +1361,11 @@
  (name test_tool_descriptors_gen)
  (modules test_tool_descriptors_gen)
  (libraries masc_test_deps))
+
+; RFC-0058 Phase 4 — Flat TOML → 5-layer migration tool tests.
+; Standalone stanza (not Group 1) to avoid masc_test_deps → masc_mcp
+; dependency chain, since this test only needs cascade_decl sub-library.
+(test
+ (name test_cascade_flat_to_declarative)
+ (modules test_cascade_flat_to_declarative)
+ (libraries alcotest masc_mcp.cascade_decl otoml))

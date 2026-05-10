@@ -98,10 +98,10 @@ let test_stale_lock_recovery () =
      | Ok false -> fail "initial acquire should succeed"
      | Error e -> fail (Printf.sprintf "initial acquire should succeed: %s" (Backend.show_error e)));
     Eio.Time.sleep clock 1.5;
-    match Backend.FileSystem.acquire_lock backend ~key:namespace ~owner:"keeper-recover" ~ttl_seconds:60 with
+    (match Backend.FileSystem.acquire_lock backend ~key:namespace ~owner:"keeper-recover" ~ttl_seconds:60 with
     | Ok true -> ()
     | Ok false -> fail "stale lock should be recoverable after expiry"
-    | Error e -> fail (Printf.sprintf "stale lock recover attempt failed: %s" (Backend.show_error e));
+    | Error e -> fail (Printf.sprintf "stale lock recover attempt failed: %s" (Backend.show_error e)));
 
     match Backend.FileSystem.get backend (lock_key namespace) with
     | Ok json ->
@@ -118,10 +118,10 @@ let test_invalid_metadata_recovery () =
     (match Backend.FileSystem.set backend lkey "not valid json" with
      | Ok () -> ()
      | Error e -> fail (Printf.sprintf "manual invalid metadata injection should work: %s" (Backend.show_error e)));
-    match Backend.FileSystem.acquire_lock backend ~key:namespace ~owner:"keeper-recover" ~ttl_seconds:60 with
+    (match Backend.FileSystem.acquire_lock backend ~key:namespace ~owner:"keeper-recover" ~ttl_seconds:60 with
     | Ok true -> ()
     | Ok false -> fail "invalid metadata lock should be overwritten"
-    | Error e -> fail (Printf.sprintf "invalid metadata acquire failed: %s" (Backend.show_error e));
+    | Error e -> fail (Printf.sprintf "invalid metadata acquire failed: %s" (Backend.show_error e)));
 
     match Backend.FileSystem.get backend lkey with
     | Ok json ->

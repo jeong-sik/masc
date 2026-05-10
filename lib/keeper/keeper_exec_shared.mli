@@ -170,6 +170,25 @@ val tag_dispatch_fn
      -> (bool * string) option)
       ref
 
+(** Issue #10349 Phase 2: registry-canonical meta lookup.
+    [find_registry_meta] does the lookup + drift-counter increment and
+    returns [None] on missing entry.  Callers that need to return a
+    different type on error (e.g. [string option]) use this directly.
+    [with_registry_meta] is the convenience wrapper for the common
+    [string]-returning case; its [None] branch calls [error_json].
+    [source_layer] is the Prometheus label value (e.g. ["fs_resolver"],
+    ["masc_path_resolver"], ["tool_dispatcher"]). *)
+val find_registry_meta
+  :  keeper_name:string
+  -> source_layer:string
+  -> Keeper_types.keeper_meta option
+
+val with_registry_meta
+  :  keeper_name:string
+  -> source_layer:string
+  -> (Keeper_types.keeper_meta -> string)
+  -> string
+
 (** Render the keeper-tools-list JSON envelope: tool names grouped
     by category (board / voice / coordination / shell / fs / memory
     / core). *)

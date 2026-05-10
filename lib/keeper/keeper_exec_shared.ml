@@ -102,6 +102,32 @@ let missing_file_error_json
     (`Assoc [ "ok", `Bool false; "error", `String error; "path", `String target ])
 ;;
 
+let find_registry_meta ~(keeper_name : string) ~(source_layer : string)
+  : Keeper_types.keeper_meta option
+  =
+  match Keeper_registry.find_by_name keeper_name with
+  | None ->
+    Prometheus.inc_counter
+      Keeper_metrics.metric_keeper_path_resolver_identity_mismatch
+      ~labels:[ "source_layer", source_layer; "field", "registry_missing" ]
+      ();
+    None
+  | Some entry ->
+    if not (String.equal entry.meta.name keeper_name) then
+      Prometheus.inc_counter
+        Keeper_metrics.metric_keeper_path_resolver_identity_mismatch
+        ~labels:[ "source_layer", source_layer; "field", "name_mismatch" ]
+        ();
+    Some entry.meta
+;;
+
+let with_registry_meta ~(keeper_name : string) ~(source_layer : string) f =
+  match find_registry_meta ~keeper_name ~source_layer with
+  | None ->
+    error_json (Printf.sprintf "keeper not found in registry: %s" keeper_name)
+  | Some meta -> f meta
+;;
+
 let lowercase_shell_words text =
   text
   |> String.map (function

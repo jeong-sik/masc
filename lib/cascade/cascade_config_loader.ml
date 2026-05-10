@@ -502,6 +502,7 @@ let load_catalog ~config_path =
         |> List.filter (fun (name, builder) ->
                builder.has_schema_field
                && not (is_deprecated_logical_profile_name name))
+      in
       let invalid_profile_errors =
         List.filter_map
           (fun (name, builder) ->
@@ -516,8 +517,6 @@ let load_catalog ~config_path =
                       |> String.concat ", ")
                      (Cascade_capability_profile.declared_profile_names ()
                       |> String.concat ", "))
-            | _ -> None)
-          active_builders
             | _ -> None)
           active_builders
       in

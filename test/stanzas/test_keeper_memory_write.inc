@@ -6,4 +6,4 @@
 (test
  (name test_keeper_memory_write)
  (modules test_keeper_memory_write)
- (libraries masc_test_deps alcotest))
+ (libraries masc_test_deps masc_mcp alcotest))

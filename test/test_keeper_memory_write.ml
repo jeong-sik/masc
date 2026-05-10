@@ -15,6 +15,8 @@
     pure-validation pin here plus the helper-mapping pin is sufficient
     coverage for the new code paths. *)
 
+module Keeper_exec_memory = Masc_mcp.Keeper_exec_memory
+
 (* --- helpers ------------------------------------------------------- *)
 
 let make_args ~kind ~title ~content : Yojson.Safe.t =

@@ -93,7 +93,34 @@ type holder_key =
   ; holder_acquisition_id : int
   }
 
-let holder_table : (holder_key, float) Hashtbl.t = Hashtbl.create 32
+module Holder_key = struct
+  type t = holder_key
+  let compare = Stdlib.compare
+end
+
+module Holder_map = Map.Make (Holder_key)
+
+(** Active-holder table.
+
+    Tier-A perf change: previously [(holder_key, float) Hashtbl.t]
+    behind [holder_mutex] for both reads and writes.  [snapshot_holders]
+    is a hot read path — every acquire / release / timeout-log call
+    walks it — so 64+ concurrent keepers contend on the mutex on every
+    turn boundary.  Move to a persistent [Holder_map.t] behind
+    [Atomic.t]: writers still hold the mutex (so they remain serialised
+    with [force_released_holders] mutations), but readers do
+    [Atomic.get] without locking.
+
+    Writes are CAS-free in practice — they happen inside
+    [with_holder_lock], so no concurrent writer races them; we use
+    plain [Atomic.set] for the new state.  Stale reads are bounded by
+    the mutex hold time of a single writer (microseconds), and
+    [snapshot_holders] consumers (timeout attribution) are already
+    lagging by design (see memory
+    [feedback_keeper_freeze_diagnosis_requires_timeseries_window]). *)
+let holder_table_atomic : float Holder_map.t Atomic.t =
+  Atomic.make Holder_map.empty
+
 let force_released_holders : (holder_key, float) Hashtbl.t = Hashtbl.create 32
 let next_holder_acquisition_id = ref 0
 let holder_mutex = Eio.Mutex.create ()
@@ -142,7 +169,8 @@ let record_holder ~label ~keeper_name ~acquired_at =
       ; holder_acquisition_id = acquisition_id
       }
     in
-    Hashtbl.replace holder_table key acquired_at;
+    Atomic.set holder_table_atomic
+      (Holder_map.add key acquired_at (Atomic.get holder_table_atomic));
     acquisition_id)
 ;;
 
@@ -150,19 +178,25 @@ let mark_holder_force_released ~label ~keeper_name =
   with_holder_lock (fun () ->
     let now = Time_compat.now () in
     purge_expired_force_released_holders_locked ~now;
+    let table = Atomic.get holder_table_atomic in
     let keys =
-      Hashtbl.fold
+      Holder_map.fold
         (fun key _ acc ->
            if key.holder_label = label && String.equal key.holder_keeper_name keeper_name
            then key :: acc
            else acc)
-        holder_table
+        table
         []
     in
+    let next_table =
+      List.fold_left
+        (fun acc key -> Holder_map.remove key acc)
+        table
+        keys
+    in
+    Atomic.set holder_table_atomic next_table;
     List.iter
-      (fun key ->
-         Hashtbl.remove holder_table key;
-         Hashtbl.replace force_released_holders key now)
+      (fun key -> Hashtbl.replace force_released_holders key now)
       keys;
     List.length keys)
 ;;
@@ -180,23 +214,30 @@ let consume_force_release ~label ~keeper_name ~acquisition_id =
       Hashtbl.remove force_released_holders key;
       true
     | None ->
-      Hashtbl.remove holder_table key;
+      Atomic.set holder_table_atomic
+        (Holder_map.remove key (Atomic.get holder_table_atomic));
       false)
 ;;
 
 (** [snapshot_holders ~label ~now] returns [(keeper_name, held_for_sec)]
     pairs for the given [label] sorted by descending hold time.  Used
     by [acquire_bounded] to attribute timeouts to the longest-held
-    peer.  Pure read, no mutation. *)
+    peer.  Pure read, no mutation.
+
+    Tier-A perf change: previously serialised on [holder_mutex] for
+    every read; now does a lock-free [Atomic.get] of the persistent
+    [Holder_map.t] and folds over the snapshot.  Stale reads are
+    bounded by a single writer's mutex hold time (microseconds) and
+    callers (timeout attribution) are already lagging by design. *)
 let snapshot_holders ~label ~now =
-  with_holder_lock (fun () ->
-    Hashtbl.fold
-      (fun key ts acc ->
-         if key.holder_label = label
-         then (key.holder_keeper_name, now -. ts) :: acc
-         else acc)
-      holder_table
-      [])
+  let table = Atomic.get holder_table_atomic in
+  Holder_map.fold
+    (fun key ts acc ->
+       if key.holder_label = label
+       then (key.holder_keeper_name, now -. ts) :: acc
+       else acc)
+    table
+    []
   |> List.sort (fun (_, a) (_, b) -> compare b a)
 ;;
 
@@ -314,25 +355,26 @@ let format_slot_holders ?(limit = 5) holders =
     "[" ^ String.concat ", " items ^ "]"
 ;;
 
-(** [snapshot_all_holders ~now] reads every pool inside ONE
-    [holder_mutex] critical section and returns the three lists in
-    the same instant.  Calling [turn_slot_holders] / [autonomous_slot_holders]
-    / [reactive_slot_holders] back-to-back from the summary builder
-    would release and re-take the mutex three times — an interleaved
-    [record_holder] / [drop_holder] could then leave the summary
-    reporting contradictory states (e.g. empty turn_holders next to
-    [turn_available=0]).  This helper closes that race. *)
+(** [snapshot_all_holders ~now] reads every pool from a single
+    [Atomic.get] of [holder_table_atomic] and returns the three lists
+    consistent with that snapshot.  Previously held [holder_mutex] for
+    the whole fold to defend against an interleaved
+    [record_holder] / [drop_holder] producing contradictory pool
+    counts; the persistent [Holder_map.t] gives us that consistency
+    for free — every writer publishes a complete map atomically, so
+    the snapshot is guaranteed to be a coherent point-in-time view
+    of {b some} writer-acknowledged state.  Lock-free by design. *)
 let snapshot_all_holders ~now =
-  with_holder_lock (fun () ->
-    Hashtbl.fold
-      (fun key ts (turn, auto, reactive) ->
-         let held = now -. ts in
-         match key.holder_label with
-         | Turn_pool -> (key.holder_keeper_name, held) :: turn, auto, reactive
-         | Autonomous_pool -> turn, (key.holder_keeper_name, held) :: auto, reactive
-         | Reactive_pool -> turn, auto, (key.holder_keeper_name, held) :: reactive)
-      holder_table
-      ([], [], []))
+  let table = Atomic.get holder_table_atomic in
+  Holder_map.fold
+    (fun key ts (turn, auto, reactive) ->
+       let held = now -. ts in
+       match key.holder_label with
+       | Turn_pool -> (key.holder_keeper_name, held) :: turn, auto, reactive
+       | Autonomous_pool -> turn, (key.holder_keeper_name, held) :: auto, reactive
+       | Reactive_pool -> turn, auto, (key.holder_keeper_name, held) :: reactive)
+    table
+    ([], [], [])
   |> fun (t, a, r) ->
   let by_held = List.sort (fun (_, x) (_, y) -> compare y x) in
   by_held t, by_held a, by_held r
@@ -767,21 +809,27 @@ let force_release_holder_for ~keeper_name : (string * float) list =
     let snapshots =
       with_holder_lock (fun () ->
         purge_expired_force_released_holders_locked ~now;
+        let table = Atomic.get holder_table_atomic in
         let matching =
-          Hashtbl.fold
+          Holder_map.fold
             (fun key acquired_at acc ->
                if
                  key.holder_label = label
                  && String.equal key.holder_keeper_name keeper_name
                then (key, acquired_at) :: acc
                else acc)
-            holder_table
+            table
             []
         in
+        let next_table =
+          List.fold_left
+            (fun acc (key, _) -> Holder_map.remove key acc)
+            table
+            matching
+        in
+        Atomic.set holder_table_atomic next_table;
         List.iter
-          (fun (key, _) ->
-             Hashtbl.remove holder_table key;
-             Hashtbl.replace force_released_holders key now)
+          (fun (key, _) -> Hashtbl.replace force_released_holders key now)
           matching;
         matching)
     in

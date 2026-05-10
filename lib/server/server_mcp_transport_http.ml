@@ -614,6 +614,14 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
           in
           info_ref := Some info;
           register_sse_conn ~session_id ~info;
+          (* Wake the drain fiber when [Sse.unregister] fires (queue
+             overflow disconnect or eviction).  Without this, the drain
+             fiber stays blocked on [Eio.Stream.take] holding [info.stop]
+             at false, the HTTP body writer stays open, and the browser
+             EventSource sees no error indication — this was the silent
+             half of the broadcast-skip bug. *)
+          Sse.set_disconnect_hook session_id (fun () ->
+            stop_sse_session session_id);
           if not (send_raw info (sse_prime_event ())) then
             Log.Server.debug "SSE prime send failed for session %s" info.session_id;
           (match legacy_messages_endpoint with

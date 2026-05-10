@@ -450,9 +450,9 @@ let test_runtime_materializes_missing_json_on_load () =
   with_config_dir config_dir @@ fun () ->
   match Masc_mcp.Cascade_catalog_runtime.inspect_active () with
   | Ok (Masc_mcp.Cascade_catalog_runtime.Validated _) ->
-      check bool "json materialized on load" true (Sys.file_exists json_path);
-      check bool "generated json contains profile key" true
-        (contains_substring (read_file json_path) "big_three_models")
+      (* TOML-only mode: no JSON file written to disk *)
+      check bool "json NOT materialized in TOML-only mode" false
+        (Sys.file_exists json_path)
   | Ok _ -> fail "expected fully validated catalog"
   | Error rejection ->
       failf "unexpected validation failure: %s"
@@ -466,12 +466,19 @@ let test_runtime_rewrites_drifted_json_from_toml () =
   let toml_path = Filename.concat config_dir "cascade.toml" in
   let json_path = Filename.concat config_dir "cascade.json" in
   write_file toml_path minimal_toml;
-  write_file json_path {|{"alpha_models":["ollama:qwen3.5:35b-a3b-nvfp4"]}|};
-  let expected_json = render_or_fail toml_path in
+  let stale_json = {|{"alpha_models":["ollama:qwen3.5:35b-a3b-nvfp4"]}|} in
+  write_file json_path stale_json;
   with_config_dir config_dir @@ fun () ->
-  ignore (Masc_mcp.Cascade_catalog_runtime.inspect_active ());
-  check string "drifted runtime json rewritten from toml"
-    expected_json (read_file json_path)
+  match Masc_mcp.Cascade_catalog_runtime.inspect_active () with
+  | Ok (Masc_mcp.Cascade_catalog_runtime.Validated _) ->
+      (* TOML-only mode: stale JSON left untouched on disk, TOML loaded in-memory *)
+      check string "stale json NOT rewritten in TOML-only mode"
+        stale_json (read_file json_path)
+  | Ok _ -> fail "expected fully validated catalog"
+  | Error rejection ->
+      failf "unexpected validation failure: %s"
+        (Yojson.Safe.to_string
+           (Masc_mcp.Cascade_catalog_runtime.rejection_to_yojson rejection))
 
 let test_invalid_toml_blocks_runtime_without_using_stale_json () =
   with_temp_dir "cascade-toml-invalid" @@ fun dir ->

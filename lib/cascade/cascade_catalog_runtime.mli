@@ -23,7 +23,30 @@ type candidate_probe = {
   status : candidate_probe_status;
 }
 
-type snapshot
+type candidate_runtime = {
+  model_string : string;
+  provider_cfg : Llm_provider.Provider_config.t;
+}
+
+type profile_build = {
+  name : string;
+  weighted_entries : Cascade_config_loader.weighted_entry list;
+  inference_params : Cascade_config_loader.inference_params;
+  api_key_env_overrides : (string * string) list;
+  strategy : Cascade_strategy.t;
+  ollama_max_concurrent : int option;
+  cli_max_concurrent : int option;
+  candidates : candidate_runtime list;
+  probes : candidate_probe list;
+}
+
+type snapshot = {
+  source_path : string;
+  mtime : float;
+  validated_at : float;
+  profiles : profile_build list;
+}
+
 type rejection
 
 type state =

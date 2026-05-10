@@ -190,6 +190,7 @@
   lsp_message_router
   lsp_overlay_provider
   server_ide_lsp_proxy
+  cascade_declarative_hotpath
   )
  (libraries
    mcp_protocol

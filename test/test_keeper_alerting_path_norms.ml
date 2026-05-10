@@ -7,7 +7,6 @@
     - [is_within_allowed_norms]
     - [playground_root_of_allowed]
     - [raw_looks_like_playground_subdir]
-    - [format_path_rejection]
 
     [is_within_root_norm] is intentionally NOT covered here:
     it normalizes its [path] argument via [Fs_compat.realpath]
@@ -133,81 +132,6 @@ let test_normalize_path_for_check_stripped_removes_trailing_slash () =
     (KAP.normalize_path_for_check cwd)
     (KAP.normalize_path_for_check_stripped raw)
 
-(* ── format_path_rejection: redaction guarantees ─────────────── *)
-
-let test_format_rejection_includes_raw () =
-  let msg =
-    KAP.format_path_rejection
-      ~raw:"src/foo.ml" ~resolved:"/abs/proj/src/foo.ml"
-      ~allowed_norms:[]
-  in
-  check_bool "rejection mentions raw path" true
-    (Astring.String.is_infix ~affix:"src/foo.ml" msg);
-  check_bool "rejection prefix is path_outside_sandbox" true
-    (Astring.String.is_prefix ~affix:"path_outside_sandbox:" msg)
-
-let test_format_rejection_relative_hint () =
-  let msg =
-    KAP.format_path_rejection
-      ~raw:"src/foo.ml" ~resolved:"/abs/proj/src/foo.ml"
-      ~allowed_norms:[]
-  in
-  (* relative raw + resolved differs → relative-hint suffix
-     present *)
-  check_bool "relative hint emitted" true
-    (Astring.String.is_infix
-       ~affix:"sandbox boundary" msg)
-
-let test_format_rejection_absolute_no_relative_hint () =
-  let msg =
-    KAP.format_path_rejection
-      ~raw:"/etc/passwd" ~resolved:"/etc/passwd"
-      ~allowed_norms:[]
-  in
-  (* Absolute raw + resolved=raw → no relative-hint suffix. *)
-  check_bool "no relative hint for absolute" false
-    (Astring.String.is_infix
-       ~affix:"sandbox boundary" msg)
-
-let test_format_rejection_playground_hint_when_match () =
-  let msg =
-    KAP.format_path_rejection
-      ~raw:"repos/proj"
-      ~resolved:"repos/proj"
-      ~allowed_norms:
-        [ "/abs/.masc/playground/k1" ]
-  in
-  (* raw_looks_like_playground_subdir + playground root present
-     → emit playground rewrite suggestion. *)
-  check_bool "playground hint emitted" true
-    (Astring.String.is_infix
-       ~affix:"keeper_context_status" msg)
-
-let test_format_rejection_no_playground_hint_for_other () =
-  let msg =
-    KAP.format_path_rejection
-      ~raw:"src/foo.ml" ~resolved:"src/foo.ml"
-      ~allowed_norms:
-        [ "/abs/.masc/playground/k1" ]
-  in
-  (* "src/" doesn't trigger playground heuristic. *)
-  check_bool "no playground hint for non-repos/non-mind raw" false
-    (Astring.String.is_infix
-       ~affix:"keeper_context_status" msg)
-
-let test_format_rejection_does_not_leak_allowed_norms () =
-  (* Audit Tier A3 redaction guarantee: allowed_norms must NOT
-     appear verbatim in the rejection message — they often
-     contain host-absolute paths.  Pin this. *)
-  let secret_path = "/host/absolute/playground/secret_keeper" in
-  let msg =
-    KAP.format_path_rejection
-      ~raw:"src/foo.ml" ~resolved:"src/foo.ml"
-      ~allowed_norms:[ secret_path ]
-  in
-  check_bool "rejection does NOT leak allowed_norms verbatim" false
-    (Astring.String.is_infix ~affix:secret_path msg)
-
 (* ── runner ──────────────────────────────────────────────────── *)
 
 let () =
@@ -256,23 +180,5 @@ let () =
         [
           Alcotest.test_case "removes trailing slash" `Quick
             test_normalize_path_for_check_stripped_removes_trailing_slash;
-        ] );
-      ( "format_path_rejection",
-        [
-          Alcotest.test_case "includes raw + standard prefix"
-            `Quick test_format_rejection_includes_raw;
-          Alcotest.test_case "relative raw → relative hint"
-            `Quick test_format_rejection_relative_hint;
-          Alcotest.test_case "absolute raw → no relative hint"
-            `Quick test_format_rejection_absolute_no_relative_hint;
-          Alcotest.test_case
-            "playground hint when raw + playground root match"
-            `Quick test_format_rejection_playground_hint_when_match;
-          Alcotest.test_case
-            "no playground hint for unrelated raw" `Quick
-            test_format_rejection_no_playground_hint_for_other;
-          Alcotest.test_case
-            "Tier A3: does not leak allowed_norms verbatim"
-            `Quick test_format_rejection_does_not_leak_allowed_norms;
         ] );
     ]

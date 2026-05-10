@@ -592,7 +592,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       | Error err ->
           let terminal_reason_code =
             Printf.sprintf "pre_dispatch_%s"
-              (Keeper_agent_error.terminal_reason_code_of_sdk_error err)
+              (Keeper_agent_error.terminal_reason_code_of_sdk_error_typed err
+               |> Keeper_turn_terminal_code.to_wire)
           in
           let error_message = Agent_sdk.Error.to_string err in
           record_pre_dispatch_terminal_observation

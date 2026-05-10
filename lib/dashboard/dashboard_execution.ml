@@ -242,13 +242,22 @@ let terminal_reason_code trust =
 let terminal_reason_severity trust =
   terminal_reason_json trust |> lowercase_json_string "severity"
 
+let terminal_reason_disposition trust =
+  terminal_reason_json trust
+  |> string_field_opt "disposition"
+  |> Option.map Keeper_turn_disposition.of_wire
+
 let terminal_reason_requires_attention trust =
-  match terminal_reason_severity trust with
-  | Some ("bad" | "warn") -> true
-  | _ -> (
-      match terminal_reason_code trust |> Option.map String.lowercase_ascii with
-      | Some ("success" | "completed") | None -> false
-      | Some _ -> true)
+  match terminal_reason_disposition trust with
+  | Some Keeper_turn_disposition.Success -> false
+  | Some _ -> true
+  | None -> (
+      match terminal_reason_severity trust with
+      | Some ("bad" | "warn") -> true
+      | _ -> (
+          match terminal_reason_code trust |> Option.map String.lowercase_ascii with
+          | Some ("success" | "completed") | None -> false
+          | Some _ -> true))
 
 let trust_disposition_requires_attention trust =
   match lowercase_json_string "disposition" trust with
@@ -256,18 +265,25 @@ let trust_disposition_requires_attention trust =
   | _ -> false
 
 let keeper_queue_severity keeper trust =
-  match terminal_reason_severity trust with
-  | Some "bad" -> "bad"
-  | Some "warn" -> "warn"
-  | _ -> (
-      match lowercase_json_string "disposition" trust with
-      | Some "alert" -> "bad"
-      | Some "pause" -> "warn"
-      | _ ->
-          if Option.is_some (string_field_opt "runtime_blocker_class" keeper) then
-            "bad"
-          else
-            "warn")
+  match terminal_reason_disposition trust with
+  | Some disp -> (
+      match Keeper_turn_disposition.severity disp with
+      | Ok -> "ok"
+      | Warn -> "warn"
+      | Bad | Unknown_bad -> "bad")
+  | None -> (
+      match terminal_reason_severity trust with
+      | Some "bad" -> "bad"
+      | Some "warn" -> "warn"
+      | _ -> (
+          match lowercase_json_string "disposition" trust with
+          | Some "alert" -> "bad"
+          | Some "pause" -> "warn"
+          | _ ->
+              if Option.is_some (string_field_opt "runtime_blocker_class" keeper) then
+                "bad"
+              else
+                "warn"))
 
 let first_text values =
   List.find_map

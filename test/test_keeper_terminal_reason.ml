@@ -12,9 +12,13 @@ open Alcotest
 module KAE = Masc_mcp.Keeper_agent_error
 module KT = Masc_mcp.Keeper_turn_terminal
 
+module KTC = Masc_mcp.Keeper_turn_terminal_code
+
 let mk_api err = Agent_sdk.Error.Api err
 let mk_agent err = Agent_sdk.Error.Agent err
-let code = KAE.terminal_reason_code_of_sdk_error
+let code err =
+  KAE.terminal_reason_code_of_sdk_error_typed err
+  |> KTC.to_wire
 
 let terminal_code (reason : KT.t) = KT.code reason
 let terminal_next_action (reason : KT.t) = reason.next_action

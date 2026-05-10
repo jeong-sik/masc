@@ -425,7 +425,10 @@ let sdk_error_detail_fields (error : Agent_sdk.Error.sdk_error) =
 
 let sdk_error_json error =
   let domain = Keeper_agent_error.sdk_error_kind error in
-  let code = Keeper_agent_error.terminal_reason_code_of_sdk_error error in
+  let code =
+    Keeper_agent_error.terminal_reason_code_of_sdk_error_typed error
+    |> Keeper_turn_terminal_code.to_wire
+  in
   `Assoc
     ([
        ("domain", `String domain);
@@ -439,7 +442,9 @@ let agent_failed_error_fields error =
     ("error", `String (Agent_sdk.Error.to_string error));
     ("error_domain", `String (Keeper_agent_error.sdk_error_kind error));
     ( "error_code",
-      `String (Keeper_agent_error.terminal_reason_code_of_sdk_error error) );
+      `String
+        (Keeper_agent_error.terminal_reason_code_of_sdk_error_typed error
+         |> Keeper_turn_terminal_code.to_wire) );
     ("error_retryable", `Bool (Agent_sdk.Error.is_retryable error));
     ("error_detail", sdk_error_json error);
   ]

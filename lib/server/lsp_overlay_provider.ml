@@ -118,3 +118,46 @@ let diagnostics ~base_dir ~file_path ~(lsp_diagnostics : Yojson.Safe.t list) :
 let invalidate_cache ~base_dir ~file_path = Cache.invalidate ~base_dir ~file_path
 
 let clear_cache () = Cache.clear ()
+
+(** Find annotations overlapping a given LSP position (0-based line).
+    An annotation covers lines [line_start, line_end] (1-based internally),
+    so it overlaps LSP line [l] when [line_start - 1 <= l <= line_end - 1]. *)
+let annotations_at_line ~base_dir ~file_path ~line =
+  let annotations = Cache.get ~base_dir ~file_path in
+  List.filter (fun (a : annotation) ->
+    a.line_start - 1 <= line && line <= a.line_end - 1
+  ) annotations
+
+(** Append MASC annotation context to an LSP Hover response.
+    If the hover response is a MarkupContent, appends annotation summaries.
+    Returns the enriched response unchanged if no annotations overlap. *)
+let enrich_hover ~base_dir ~file_path ~line (result : Yojson.Safe.t) =
+  let matching = annotations_at_line ~base_dir ~file_path ~line in
+  if matching = [] then result
+  else
+    let masc_section =
+      String.concat "\n" (List.map (fun (a : annotation) ->
+        let kind = show_annotation_kind a.kind in
+        match (a.goal_id, a.task_id) with
+        | Some g, Some t ->
+          Printf.sprintf "- **[%s]** %s (goal:%s task:%s)" kind a.content g t
+        | Some g, None ->
+          Printf.sprintf "- **[%s]** %s (goal:%s)" kind a.content g
+        | None, Some t ->
+          Printf.sprintf "- **[%s]** %s (task:%s)" kind a.content t
+        | None, None ->
+          Printf.sprintf "- **[%s]** %s" kind a.content
+      ) matching)
+    in
+    let masc_suffix = "\n---\n**MASC Annotations:**\n" ^ masc_section in
+    match result with
+    | `Assoc fields ->
+      (match List.assoc_opt "contents" fields with
+       | Some (`Assoc [ ("kind", `String k); ("value", `String v) ]) ->
+         `Assoc (List.map (fun (key, value) ->
+           if String.equal key "contents"
+           then ("contents", `Assoc [ ("kind", `String k); ("value", `String (v ^ masc_suffix)) ])
+           else (key, value)
+         ) fields)
+       | _ -> result)
+    | _ -> result

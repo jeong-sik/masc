@@ -317,7 +317,7 @@ let () =
                 ~description:"direct handler test"
                 ~module_tag:Tool_dispatch.Mod_misc
                 ~input_schema:empty_schema
-                ~handler_binding:(Direct (fun ~name:_ ~args:_ -> Some (true, "ok")))
+                ~handler_binding:(Direct (fun ~name:_ ~args:_ -> Some (Masc_mcp.Tool_result.quick_ok "ok")))
                 ()
             in
             Tool_spec.register spec;

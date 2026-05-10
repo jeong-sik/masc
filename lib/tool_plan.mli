@@ -28,6 +28,6 @@ val handle_plan_clear_task : context -> Yojson.Safe.t -> tool_result
 (** {1 Dispatcher} *)
 
 (** Dispatch plan tool by name. Returns None if not a plan tool. *)
-val dispatch : context -> name:string -> args:Yojson.Safe.t -> tool_result option
+val dispatch : context -> name:string -> args:Yojson.Safe.t -> Tool_result.t option
 
 val schemas : Masc_domain.tool_schema list

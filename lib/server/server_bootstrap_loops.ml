@@ -534,8 +534,7 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
               (false, "masc_status: dispatch failed"))
     | "masc_tasks" -> (
         match Tool_task.dispatch ctx_task ~name ~args with
-        | Some result ->
-            Tool_result.wrap ~tool_name:name ~start_time result
+        | Some result -> result
         | None ->
             Tool_result.wrap ~tool_name:name ~start_time
               (false, "masc_tasks: dispatch failed"))

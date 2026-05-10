@@ -74,7 +74,7 @@ val dispatch :
   context ->
   name:string ->
   args:Yojson.Safe.t ->
-  tool_result option
+  Tool_result.t option
 (** [dispatch ctx ~name ~args] routes by tool name.  Returns
     [None] when [name] is not [masc_agent_timeline] — caller
     treats that as "not my tool". *)

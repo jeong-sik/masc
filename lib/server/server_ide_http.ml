@@ -239,6 +239,8 @@ let add_routes router =
       request reqd)
     router3
   in
+  (* [build_presence_snapshot] extracted in main — conflict resolved by taking
+     main's helper call instead of our inline construction. *)
   let router5 =
     Http.Router.get "/api/v1/ide/presence" (fun request reqd ->
       with_public_read
@@ -249,7 +251,8 @@ let add_routes router =
         request reqd)
     router4
   in
-  Http.Router.get "/api/v1/ide/presence/stream" (fun request reqd ->
+  let router6 =
+    Http.Router.get "/api/v1/ide/presence/stream" (fun request reqd ->
     with_public_read
       (fun state _req inner_reqd ->
         let origin = get_origin request in
@@ -297,3 +300,5 @@ let add_routes router =
             Httpun.Body.Writer.close writer)
       request reqd)
     router5
+  in
+  router6

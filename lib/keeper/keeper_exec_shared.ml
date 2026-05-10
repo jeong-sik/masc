@@ -494,7 +494,7 @@ let tag_dispatch_fn
      -> tag:Tool_dispatch.module_tag
      -> name:string
      -> args:Yojson.Safe.t
-     -> (bool * string) option)
+     -> Tool_result.t option)
       ref
   =
   ref (fun ~config:_ ~agent_name:_ ~tag:_ ~name:_ ~args:_ -> None)

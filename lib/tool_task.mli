@@ -28,7 +28,7 @@ val dispatch :
   context ->
   name:string ->
   args:Yojson.Safe.t ->
-  tool_result option
+  Tool_result.t option
 
 val schemas : Masc_domain.tool_schema list
 

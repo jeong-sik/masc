@@ -27,6 +27,10 @@ type context = {
 
 type tool_result = bool * string
 
+let wrap_result ~name ~start (success, message) =
+  if success then Tool_result.ok ~tool_name:name ~start_time:start message
+  else Tool_result.error ~tool_name:name ~start_time:start message
+
 let default_base_branch = "auto"
 
 (* Individual handlers *)
@@ -128,11 +132,12 @@ let handle_worktree_list ctx _args =
   (true, Yojson.Safe.to_string json)
 
 (* Dispatch function - returns None if tool not handled *)
-let dispatch ctx ~name ~args : tool_result option =
+let dispatch ctx ~name ~args : Tool_result.t option =
+  let start = Time_compat.now () in
   match name with
-  | "masc_worktree_create" -> Some (handle_worktree_create ctx args)
-  | "masc_worktree_remove" -> Some (handle_worktree_remove ctx args)
-  | "masc_worktree_list" -> Some (handle_worktree_list ctx args)
+  | "masc_worktree_create" -> Some (wrap_result ~name ~start (handle_worktree_create ctx args))
+  | "masc_worktree_remove" -> Some (wrap_result ~name ~start (handle_worktree_remove ctx args))
+  | "masc_worktree_list" -> Some (wrap_result ~name ~start (handle_worktree_list ctx args))
   | _ -> None
 
 let schemas = Tool_schemas_worktree.schemas

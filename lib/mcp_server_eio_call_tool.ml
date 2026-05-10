@@ -28,8 +28,34 @@ let contains_casefold haystack needle =
 
 (* Failure classification delegates to [Tool_result] — the SSOT closed-sum
    type with compiler-enforced exhaustive handling at every match site.
-   See {!Tool_result.tool_failure_class} for the 4 constructors and
-   {!Tool_result.classify_from_dispatch_failure} for the heuristic. *)
+   See {!Tool_result.tool_failure_class} for the 4 constructors.
+
+   Local heuristic for classifying failure messages at the MCP protocol
+   level where only the message string is available (not a [Tool_result.t]).
+   Mirrors the logic that was in [Tool_result.classify_from_dispatch_failure]
+   before it was made internal in Phase 2. *)
+let classify_failure_message (message : string) : Tool_result.tool_failure_class =
+  if contains_casefold message "awaiting_approval"
+     || contains_casefold message "join required"
+  then Tool_result.Workflow_rejection
+  else if
+    contains_casefold message "egress_blocked"
+    || contains_casefold message "path_outside_sandbox"
+  then Tool_result.Policy_rejection
+  else if contains_casefold message "Tool timed out" then
+    Tool_result.Runtime_failure
+  else if
+    contains_casefold message "timeout"
+    || contains_casefold message "temporary"
+    || contains_casefold message "temporarily"
+    || contains_casefold message "econn"
+    || contains_casefold message "connection"
+    || contains_casefold message "unavailable"
+    || contains_casefold message "rate limit"
+    || contains_casefold message "502"
+    || contains_casefold message "503"
+  then Tool_result.Transient_error
+  else Tool_result.Runtime_failure
 
 let parse_status_from_message ~success ~message =
   if not success then
@@ -444,7 +470,7 @@ let read_only_retry_limit () =
   Env_config.Tools.readonly_retry_limit
 
 let is_retryable_failure message =
-  Tool_result.is_retryable (Tool_result.classify_from_dispatch_failure message)
+  Tool_result.is_retryable (classify_failure_message message)
 
 let read_only_retry_wait ~attempt =
   let attempt = float_of_int attempt in
@@ -718,7 +744,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     ?trace_id:otel_trace_id ();
   if not success then (
     let failure_class =
-      Tool_result.classify_from_dispatch_failure
+      classify_failure_message
         (Option.value ~default:"" error_detail)
     in
     Log.Mcp.emit (Tool_result.log_level_of_failure_class failure_class)

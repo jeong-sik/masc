@@ -14,6 +14,6 @@ val handle_worktree_create : context -> Yojson.Safe.t -> tool_result
 val handle_worktree_remove : context -> Yojson.Safe.t -> tool_result
 val handle_worktree_list : context -> Yojson.Safe.t -> tool_result
 
-val dispatch : context -> name:string -> args:Yojson.Safe.t -> tool_result option
+val dispatch : context -> name:string -> args:Yojson.Safe.t -> Tool_result.t option
 
 val schemas : Masc_domain.tool_schema list

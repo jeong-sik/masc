@@ -28,4 +28,4 @@ val handle_run_list : context -> Yojson.Safe.t -> tool_result
 (** Tool schemas for MCP tools/list *)
 val schemas : Masc_domain.tool_schema list
 
-val dispatch : context -> name:string -> args:Yojson.Safe.t -> tool_result option
+val dispatch : context -> name:string -> args:Yojson.Safe.t -> Tool_result.t option

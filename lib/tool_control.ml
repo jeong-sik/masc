@@ -24,6 +24,10 @@ open Tool_args
 
 type tool_result = bool * string
 
+let wrap_result ~name ~start (success, message) =
+  if success then Tool_result.ok ~tool_name:name ~start_time:start message
+  else Tool_result.error ~tool_name:name ~start_time:start message
+
 type context = {
   config: Coord.config;
   agent_name: string;
@@ -97,11 +101,12 @@ let handle_pause_status ctx _args =
 let schemas = Tool_schemas_control.schemas
 
 (* Dispatch function *)
-let dispatch ctx ~name ~args : tool_result option =
+let dispatch ctx ~name ~args : Tool_result.t option =
+  let start = Time_compat.now () in
   match name with
-  | "masc_pause" -> Some (handle_pause ctx args)
-  | "masc_resume" -> Some (handle_resume ctx args)
-  | "masc_pause_status" -> Some (handle_pause_status ctx args)
+  | "masc_pause" -> Some (wrap_result ~name ~start (handle_pause ctx args))
+  | "masc_resume" -> Some (wrap_result ~name ~start (handle_resume ctx args))
+  | "masc_pause_status" -> Some (wrap_result ~name ~start (handle_pause_status ctx args))
   | _ -> None
 
 (* ================================================================ *)

@@ -35,11 +35,6 @@ val classify_from_exception : exn -> tool_failure_class
     Typed exception inspection — no string matching on exception messages
     except for [Failure] where the message carries the diagnostic. *)
 
-val classify_from_dispatch_failure : string -> tool_failure_class
-(** Classify a tool failure from a [(false, message)] dispatch result.
-    SSOT for Phase 1 string-based classification at catch boundaries.
-    Phase 2 replaces this with typed propagation from [Tool_*.dispatch]. *)
-
 (** {1 Structured result} *)
 
 type t = {
@@ -67,8 +62,7 @@ val wrap :
     tuple into a structured result.
 
     When [failure_class] is not provided and the result is a failure,
-    {!classify_from_dispatch_failure} is called on the message to
-    determine the class automatically. *)
+    the message is classified by an internal heuristic. *)
 
 val to_json : t -> Yojson.Safe.t
 
@@ -85,3 +79,33 @@ val to_legacy_compat : t -> bool * string
 [@@alert legacy_tuple
   "This function exists for migration only. \
    Migrate the call site to use Tool_result.t directly."]
+
+(** {1 Handler constructors}
+
+    Direct constructors for [Tool_*.dispatch] functions to build
+    structured results without the legacy [wrap] intermediary. *)
+
+val ok : tool_name:string -> start_time:float -> string -> t
+(** Successful result. [failure_class] is [None]. *)
+
+val error :
+  ?failure_class:tool_failure_class option ->
+  tool_name:string ->
+  start_time:float ->
+  string -> t
+(** Failure result.  When [failure_class] is not provided,
+    the message is classified by an internal heuristic. *)
+
+val of_exn : tool_name:string -> start_time:float -> exn -> t
+(** Build a failure result from an exception caught during dispatch.
+    Uses {!classify_from_exception} for typed classification. *)
+
+(** {1 Test helpers}
+
+    Quick constructors for tests and one-liner handlers.
+    [duration_ms] is set to [0.0] and [tool_name] defaults to [""].
+
+    @since 2.260.0 *)
+
+val quick_ok : ?tool_name:string -> string -> t
+val quick_error : ?tool_name:string -> string -> t

@@ -46,8 +46,8 @@ let run_transition ctx ~task_id ~action ?(notes = "") () =
       ]
   in
   match Tool_task.dispatch ctx ~name:"masc_transition" ~args with
-  | Some (true, _) -> ()
-  | Some (false, msg) -> Alcotest.fail msg
+  | Some result ->
+      if not result.success then Alcotest.fail (Tool_result.message result)
   | None -> Alcotest.fail "masc_transition dispatch returned None"
 
 let event_exists predicate config =

@@ -222,7 +222,7 @@ val dispatch :
   context ->
   name:string ->
   args:Yojson.Safe.t ->
-  tool_result option
+  Tool_result.t option
 (** [dispatch ctx ~name ~args] routes [name] to the appropriate
     private handler ([handle_code_write], [handle_code_edit],
     [handle_code_delete], [handle_code_shell],

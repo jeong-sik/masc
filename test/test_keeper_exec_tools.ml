@@ -337,13 +337,13 @@ let register_registered_dispatch_probe () =
     ~tool_name:registered_dispatch_probe_tool
     ~handler:(fun ~name ~args:_ ->
       Some
-        ( true
-        , Yojson.Safe.to_string
-            (`Assoc
-              [ ("ok", `Bool true)
-              ; ("tool", `String name)
-              ; ("route", `String "registered")
-              ]) ))
+        (Masc_mcp.Tool_result.quick_ok ~tool_name:name
+           (Yojson.Safe.to_string
+              (`Assoc
+                [ ("ok", `Bool true)
+                ; ("tool", `String name)
+                ; ("route", `String "registered")
+                ]))))
 
 let test_registered_tool_dispatch_without_masc_prefix () =
   register_registered_dispatch_probe ();

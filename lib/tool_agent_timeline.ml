@@ -30,6 +30,10 @@ open Tool_args
 
 type tool_result = bool * string
 
+let wrap_result ~name ~start (success, message) =
+  if success then Tool_result.ok ~tool_name:name ~start_time:start message
+  else Tool_result.error ~tool_name:name ~start_time:start message
+
 type context = {
   config : Coord.config;
   agent_name : string;
@@ -642,9 +646,10 @@ let handle_agent_timeline (ctx : context) args : tool_result =
     (true, Yojson.Safe.to_string json)
 
 (* Dispatch *)
-let dispatch (ctx : context) ~name ~args : tool_result option =
+let dispatch (ctx : context) ~name ~args : Tool_result.t option =
+  let start = Time_compat.now () in
   match name with
-  | "masc_agent_timeline" -> Some (handle_agent_timeline ctx args)
+  | "masc_agent_timeline" -> Some (wrap_result ~name ~start (handle_agent_timeline ctx args))
   | _ -> None
 
 (* ================================================================ *)

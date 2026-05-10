@@ -192,7 +192,7 @@ let make_ctx () : Tool_code_write.context =
 
 let dispatch_exn ctx ~name ~args =
   match Tool_code_write.dispatch ctx ~name ~args with
-  | Some result -> result
+  | Some result -> (result.success, result.legacy_message)
   | None -> fail ("dispatch returned None for " ^ name)
 
 let test_allowed_org () =

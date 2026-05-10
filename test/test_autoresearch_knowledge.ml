@@ -118,14 +118,15 @@ let make_ctx base_path : Tool_autoresearch.context =
 let dispatch_json ctx ~name ~args =
   match Tool_autoresearch.dispatch ctx ~name ~args with
   | None -> fail ("dispatch missing for " ^ name)
-  | Some (false, body) -> fail (name ^ " failed: " ^ body)
-  | Some (true, body) -> Yojson.Safe.from_string body
+  | Some result when not result.success -> fail (name ^ " failed: " ^ result.legacy_message)
+  | Some result -> Yojson.Safe.from_string result.legacy_message
 
 let dispatch_error label ctx ~name ~args =
   match Tool_autoresearch.dispatch ctx ~name ~args with
   | None -> fail ("dispatch missing for " ^ name)
-  | Some (true, body) -> fail (name ^ " unexpectedly succeeded: " ^ body)
-  | Some (false, body) ->
+  | Some result when result.success -> fail (name ^ " unexpectedly succeeded: " ^ result.legacy_message)
+  | Some result ->
+    let body = result.legacy_message in
     let json = Yojson.Safe.from_string body in
     let error =
       Yojson.Safe.Util.(member "error" json |> to_string_option)

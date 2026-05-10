@@ -476,6 +476,8 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Keeper TK.Task_done
   | TN.Keeper TK.Task_force_done
   | TN.Keeper TK.Task_force_release
+  (* [Memory_write] matched above in [access_of_tool_name] (merged from main);
+     removed duplicate that was in [tool_group_of_tool_name] arm. *)
   | TN.Keeper TK.Task_submit_for_verification
   | TN.Keeper TK.Voice_agent
   | TN.Keeper TK.Voice_listen

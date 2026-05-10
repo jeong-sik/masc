@@ -30,6 +30,11 @@ type context = {
 (** Tool result type *)
 type tool_result = bool * string
 
+(** Wrap a [(bool * string)] result into a structured [Tool_result.t]. *)
+let wrap_result ~name ~start (success, message) =
+  if success then Tool_result.ok ~tool_name:name ~start_time:start message
+  else Tool_result.error ~tool_name:name ~start_time:start message
+
 open Tool_args
 
 (** {1 Individual Handlers} *)
@@ -154,16 +159,17 @@ let handle_plan_clear_task ctx _args : tool_result =
 
 (** {1 Dispatcher} *)
 
-let dispatch ctx ~name ~args : tool_result option =
+let dispatch ctx ~name ~args : Tool_result.t option =
+  let start = Time_compat.now () in
   match name with
-  | "masc_plan_init" -> Some (handle_plan_init ctx args)
-  | "masc_plan_update" -> Some (handle_plan_update ctx args)
-  | "masc_note_add" -> Some (handle_note_add ctx args)
-  | "masc_deliver" -> Some (handle_deliver ctx args)
-  | "masc_plan_get" -> Some (handle_plan_get ctx args)
-  | "masc_plan_set_task" -> Some (handle_plan_set_task ctx args)
-  | "masc_plan_get_task" -> Some (handle_plan_get_task ctx args)
-  | "masc_plan_clear_task" -> Some (handle_plan_clear_task ctx args)
+  | "masc_plan_init" -> Some (wrap_result ~name ~start (handle_plan_init ctx args))
+  | "masc_plan_update" -> Some (wrap_result ~name ~start (handle_plan_update ctx args))
+  | "masc_note_add" -> Some (wrap_result ~name ~start (handle_note_add ctx args))
+  | "masc_deliver" -> Some (wrap_result ~name ~start (handle_deliver ctx args))
+  | "masc_plan_get" -> Some (wrap_result ~name ~start (handle_plan_get ctx args))
+  | "masc_plan_set_task" -> Some (wrap_result ~name ~start (handle_plan_set_task ctx args))
+  | "masc_plan_get_task" -> Some (wrap_result ~name ~start (handle_plan_get_task ctx args))
+  | "masc_plan_clear_task" -> Some (wrap_result ~name ~start (handle_plan_clear_task ctx args))
   | _ -> None
 
 let schemas = Tool_schemas_plan.schemas

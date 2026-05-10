@@ -799,42 +799,53 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
     | (None, coerced_args) -> match tag with
     | Mod_plan ->
         Tool_plan.dispatch { config } ~name ~args:coerced_args
+        |> Option.map tuple_of_tool_result
     | Mod_operator ->
         let ctx = { Tool_operator.config; agent_name; sw; clock;
                     proc_mgr = state.Mcp_server.proc_mgr;
                     net = state.Mcp_server.net; mcp_session_id } in
         Tool_operator.dispatch ctx ~name ~args:coerced_args
+        |> Option.map tuple_of_tool_result
     | Mod_local_runtime ->
         Tool_local_runtime.dispatch { Tool_local_runtime.config; agent_name } ~name ~args:coerced_args
     | Mod_worktree ->
         Tool_worktree.dispatch { Tool_worktree.config; agent_name } ~name ~args:coerced_args
+        |> Option.map tuple_of_tool_result
     | Mod_code ->
         Tool_code.dispatch { Tool_code.config; agent_name } ~name ~args:coerced_args
+        |> Option.map tuple_of_tool_result
     | Mod_code_write ->
         Tool_code_write.dispatch { Tool_code_write.config; agent_name } ~name ~args:coerced_args
+        |> Option.map tuple_of_tool_result
     (* Mod_handover, Mod_heartbeat, Mod_auth removed: tools pruned *)
     | Mod_compact -> None
     | Mod_run ->
         Tool_run.dispatch { Tool_run.config } ~name ~args:coerced_args
+        |> Option.map tuple_of_tool_result
     | Mod_agent ->
         Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args:coerced_args
     | Mod_task ->
         Tool_task.dispatch ?agent_tool_names:caller_tool_names
           { Tool_task.config; agent_name; sw = Some sw } ~name
           ~args:coerced_args
+        |> Option.map tuple_of_tool_result
     | Mod_room ->
         Tool_coord.dispatch { Tool_coord.config; agent_name } ~name ~args:coerced_args
         |> Option.map (fun { Coord_types.success; message } -> (success, message))
     | Mod_control ->
         Tool_control.dispatch { Tool_control.config; agent_name } ~name ~args:coerced_args
+        |> Option.map tuple_of_tool_result
     | Mod_agent_timeline ->
         Tool_agent_timeline.dispatch { Tool_agent_timeline.config; agent_name } ~name ~args:coerced_args
+        |> Option.map tuple_of_tool_result
     | Mod_misc ->
         Tool_misc.dispatch { Tool_misc.config; agent_name } ~name ~args:coerced_args
+        |> Option.map tuple_of_tool_result
     | Mod_suspend ->
         Tool_suspend.dispatch { Tool_suspend.config; caller_agent = Some agent_name } ~name ~args:coerced_args
     | Mod_library ->
         Tool_library.dispatch { Tool_library.agent_name } ~name ~args:coerced_args
+        |> Option.map tuple_of_tool_result
     | Mod_keeper ->
         Keeper_tool_boundary.dispatch (make_keeper_tool_ctx ()) ~name
           ~args:coerced_args
@@ -844,6 +855,7 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
           agent_name = Some agent_name; start_operation = None;
           config = Some config; sw = Some sw; clock = Some clock } in
         Tool_autoresearch.dispatch ctx ~name ~args:coerced_args
+        |> Option.map tuple_of_tool_result
     | Mod_shard ->
         let (ok, json) = Tool_shard.execute name coerced_args in
         Some (ok, Yojson.Safe.to_string json)
@@ -859,6 +871,7 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
           save_mcp_sessions = Mcp_server_eio_governance.save_mcp_sessions;
         } in
         Tool_inline_dispatch.dispatch inline_ctx ~name
+        |> Option.map tuple_of_tool_result
   in
 
   (* #9784: enrich Unknown tool errors with closest-name suggestions so the

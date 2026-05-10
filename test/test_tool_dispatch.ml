@@ -11,11 +11,11 @@ let make_schema name =
   { Masc_domain.name; description = "test tool " ^ name;
     input_schema = `Assoc [("type", `String "object")] }
 
-(** Helper: a handler that returns (true, "ok:<name>"). *)
-let echo_handler ~name ~args:_ = Some (true, "ok:" ^ name)
+(** Helper: a handler that returns a successful result with "ok:<name>". *)
+let echo_handler ~name ~args:_ = Some (Tool_result.quick_ok ~tool_name:name ("ok:" ^ name))
 
 (** Helper: a handler that returns (false, "fail"). *)
-let fail_handler ~name:_ ~args:_ = Some (false, "fail")
+let fail_handler ~name:_ ~args:_ = Some (Tool_result.quick_error "fail")
 
 (** Helper: register a tool in both handler and tag registries.
     mint_token validates against tag_registry, so tests that mint
@@ -202,7 +202,7 @@ let () =
               let received_args = ref `Null in
               let capture_handler ~name:_ ~args =
                 received_args := args;
-                Some (true, "captured")
+                Some (Tool_result.quick_ok "captured")
               in
               register_full ~tool_name:tool ~handler:capture_handler;
               let test_args = `Assoc [("key", `String "value")] in

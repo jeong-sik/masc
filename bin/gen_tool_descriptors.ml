@@ -23,6 +23,9 @@ open Tool_schemas_specs_types
    hand-written schema, and Phase 1 collapses all three into a typed
    SSOT. *)
 
+let admin_section_enum_strings = [ "auth" ]
+;;
+
 let config_category_enum_strings =
   [ "server"
   ; "auth"
@@ -231,7 +234,118 @@ let masc_tool_stats_spec : tool_spec =
   }
 ;;
 
-let phase4_specs : tool_spec list =
+let masc_cleanup_zombies_spec : tool_spec =
+  { name = "masc_cleanup_zombies"
+  ; description =
+      "Remove zombie agents (no heartbeat for 5+ min) and release their file locks."
+  ; parameters = []
+  ; additional_properties = false
+  }
+;;
+
+let masc_webrtc_offer_spec : tool_spec =
+  { name = "masc_webrtc_offer"
+  ; description =
+      "Create a WebRTC signaling offer in the server registry and return an offer_id. \
+       Use from the initiating side before calling masc_webrtc_answer from the \
+       answering side."
+  ; parameters =
+      [ { p_name = "agent_name"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Name of the agent creating the offer"
+        ; p_required = true
+        }
+      ; { p_name = "ice_candidates"
+        ; p_type = T_string_array { default = Some (`List []) }
+        ; p_description = "ICE candidates gathered by the offering peer"
+        ; p_required = false
+        }
+      ; { p_name = "dtls_fingerprint"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Optional DTLS fingerprint for the offering peer"
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let masc_webrtc_answer_spec : tool_spec =
+  { name = "masc_webrtc_answer"
+  ; description =
+      "Accept a pending WebRTC signaling offer by offer_id and return the peer_id plus \
+       server-side ICE credentials. Use from the answering side after a prior \
+       masc_webrtc_offer call."
+  ; parameters =
+      [ { p_name = "offer_id"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Offer identifier returned by masc_webrtc_offer"
+        ; p_required = true
+        }
+      ; { p_name = "agent_name"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Name of the agent accepting the offer"
+        ; p_required = true
+        }
+      ; { p_name = "ice_candidates"
+        ; p_type = T_string_array { default = Some (`List []) }
+        ; p_description = "Optional ICE candidates gathered by the answering peer"
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let masc_tool_admin_update_spec : tool_spec =
+  { name = "masc_tool_admin_update"
+  ; description =
+      "Apply auth updates through a single admin entrypoint. Use after \
+       masc_tool_admin_snapshot to review current state before making changes. \
+       Additional sections (unit_policy, keeper_policy) are not yet implemented and \
+       will be added here when their handlers land."
+  ; parameters =
+      [ { p_name = "section"
+        ; p_type = T_string { enum = Some admin_section_enum_strings; default = None }
+        ; p_description = "Config section to update (currently only auth is implemented)"
+        ; p_required = true
+        }
+      ; { p_name = "enabled"
+        ; p_type = T_bool { default = None }
+        ; p_description = "Enable or disable auth for section=auth"
+        ; p_required = false
+        }
+      ; { p_name = "require_token"
+        ; p_type = T_bool { default = None }
+        ; p_description = "Require tokens for section=auth"
+        ; p_required = false
+        }
+      ; { p_name = "token_expiry_hours"
+        ; p_type = T_int { min = None; max = None; default = None }
+        ; p_description = "Token expiry in hours for section=auth"
+        ; p_required = false
+        }
+      ; { p_name = "unit_id"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Managed unit id for section=unit_policy"
+        ; p_required = false
+        }
+      ; { p_name = "policy"
+        ; p_type = T_object { default = None }
+        ; p_description = "Unit policy envelope for section=unit_policy"
+        ; p_required = false
+        }
+      ; { p_name = "budget"
+        ; p_type = T_object { default = None }
+        ; p_description = "Unit budget envelope for section=unit_policy"
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let phase6_specs : tool_spec list =
   [ masc_config_spec
   ; masc_code_read_spec
   ; masc_tool_help_spec
@@ -241,6 +355,10 @@ let phase4_specs : tool_spec list =
   ; masc_web_fetch_spec
   ; masc_tool_admin_snapshot_spec
   ; masc_tool_stats_spec
+  ; masc_cleanup_zombies_spec
+  ; masc_webrtc_offer_spec
+  ; masc_webrtc_answer_spec
+  ; masc_tool_admin_update_spec
   ]
 ;;
 
@@ -255,6 +373,23 @@ let emit_header buf =
     \   Source: bin/gen_tool_descriptors.ml (RFC-0057 Phase 1).\n\
     \   To regenerate: dune build *)\n\n\
      open Masc_domain\n\n"
+;;
+
+let rec emit_yojson_ocaml (v : Yojson.Safe.t) : string =
+  match v with
+  | `Null -> "`Null"
+  | `Bool b -> Printf.sprintf "`Bool %b" b
+  | `Int i -> Printf.sprintf "`Int %d" i
+  | `Float f -> Printf.sprintf "`Float %f" f
+  | `String s -> Printf.sprintf "`String %S" s
+  | `Intlit s -> Printf.sprintf "`Intlit %S" s
+  | `Assoc pairs ->
+    let items =
+      List.map (fun (k, v) -> Printf.sprintf "(%S, %s)" k (emit_yojson_ocaml v)) pairs
+    in
+    Printf.sprintf "`Assoc [%s]" (String.concat "; " items)
+  | `List items ->
+    Printf.sprintf "`List [%s]" (String.concat "; " (List.map emit_yojson_ocaml items))
 ;;
 
 let emit_enum_list buf strings =
@@ -273,6 +408,8 @@ let emit_param_property buf p =
     | T_string _ -> "string"
     | T_int _ -> "integer"
     | T_bool _ -> "boolean"
+    | T_string_array _ -> "array"
+    | T_object _ -> "object"
   in
   buf_addf buf "        (%S, `Assoc [\n" p.p_name;
   buf_addf buf "          (\"type\", `String %S);\n" type_label;
@@ -281,6 +418,8 @@ let emit_param_property buf p =
      Buffer.add_string buf "          (\"enum\", ";
      emit_enum_list buf strings;
      Buffer.add_string buf ");\n"
+   | T_string_array _ ->
+     Buffer.add_string buf "          (\"items\", `Assoc [ (\"type\", `String \"string\") ]);\n"
    | _ -> ());
   buf_addf buf "          (\"description\", `String %S);\n" p.p_description;
   (match p.p_type with
@@ -289,6 +428,10 @@ let emit_param_property buf p =
    | T_int { default = Some d; _ } -> buf_addf buf "          (\"default\", `Int %d);\n" d
    | T_bool { default = Some d; _ } ->
      buf_addf buf "          (\"default\", `Bool %b);\n" d
+   | T_string_array { default = Some d } ->
+     buf_addf buf "          (\"default\", %s);\n" (emit_yojson_ocaml d)
+   | T_object { default = Some d } ->
+     buf_addf buf "          (\"default\", %s);\n" (emit_yojson_ocaml d)
    | _ -> ());
   (match p.p_type with
    | T_int { min = Some m; _ } -> buf_addf buf "          (\"minimum\", `Int %d);\n" m
@@ -344,6 +487,6 @@ let emit_schemas_list buf specs =
 let () =
   let buf = Buffer.create 4096 in
   emit_header buf;
-  emit_schemas_list buf phase4_specs;
+  emit_schemas_list buf phase6_specs;
   print_string (Buffer.contents buf)
 ;;

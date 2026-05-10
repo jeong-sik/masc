@@ -33,68 +33,69 @@ module Float = Stdlib.Float
 (* ================================================================ *)
 
 let keeper_internal_tools =
-  [
-    (* keeper_read removed: dead alias for keeper_fs_read with no schema.
+  [ (* keeper_read removed: dead alias for keeper_fs_read with no schema.
        Dispatch still accepts it for backward compat. See #4120. *)
-    "keeper_stay_silent";
-    "keeper_fs_read";
-    "keeper_fs_edit";
-    "keeper_memory_search";
-    "keeper_library_search";
-    "keeper_library_read";
-    "keeper_time_now";
-    "keeper_tools_list";
-    "keeper_context_status";
-    "keeper_tasks_list";
-    "keeper_tasks_audit";
-    "keeper_task_claim";
-    "keeper_task_create";
-    "keeper_task_done";
-    "keeper_task_submit_for_verification";
-    "keeper_task_force_release";
-    "keeper_task_force_done";
-    "keeper_broadcast";
-    "keeper_board_get";
-    "keeper_board_post";
-    "keeper_board_list";
-    "keeper_board_comment";
-    "keeper_board_vote";
-    "keeper_board_stats";
-    "keeper_board_search";
-    "keeper_board_curation_read";
-    "keeper_board_curation_submit";
-    (* keeper_board_delete removed from default shard in #4309.
+    "keeper_stay_silent"
+  ; "keeper_fs_read"
+  ; "keeper_fs_edit"
+  ; "keeper_memory_search"
+  ; "keeper_memory_write"
+  ; "keeper_library_search"
+  ; "keeper_library_read"
+  ; "keeper_time_now"
+  ; "keeper_tools_list"
+  ; "keeper_context_status"
+  ; "keeper_tasks_list"
+  ; "keeper_tasks_audit"
+  ; "keeper_task_claim"
+  ; "keeper_task_create"
+  ; "keeper_task_done"
+  ; "keeper_task_submit_for_verification"
+  ; "keeper_task_force_release"
+  ; "keeper_task_force_done"
+  ; "keeper_broadcast"
+  ; "keeper_board_get"
+  ; "keeper_board_post"
+  ; "keeper_board_list"
+  ; "keeper_board_comment"
+  ; "keeper_board_vote"
+  ; "keeper_board_stats"
+  ; "keeper_board_search"
+  ; "keeper_board_curation_read"
+  ; "keeper_board_curation_submit"
+  ; (* keeper_board_delete removed from default shard in #4309.
        Dispatch still accepts it for backward compat. *)
-    "keeper_shell";
-    "keeper_bash";
-    "keeper_bash_output";
-    "keeper_bash_kill";
-    "masc_worktree_create";
-    "keeper_voice_speak";
-    (* keeper_voice_listen is keeper-only; there is no public masc_voice_listen
+    "keeper_shell"
+  ; "keeper_bash"
+  ; "keeper_bash_output"
+  ; "keeper_bash_kill"
+  ; "masc_worktree_create"
+  ; "keeper_voice_speak"
+  ; (* keeper_voice_listen is keeper-only; there is no public masc_voice_listen
        counterpart on MCP surfaces. *)
-    "keeper_voice_listen";
-    "keeper_voice_agent";
-    "keeper_voice_sessions";
-    "keeper_voice_session_start";
-    "keeper_voice_session_end";
-    (* Tool discovery *)
-    "keeper_tool_search";
-    (* Keeper-scoped workflow preflight. *)
-    "keeper_preflight_check";
-    (* Keeper-scoped GitHub PR tools. These are native keeper tools, not
+    "keeper_voice_listen"
+  ; "keeper_voice_agent"
+  ; "keeper_voice_sessions"
+  ; "keeper_voice_session_start"
+  ; "keeper_voice_session_end"
+  ; (* Tool discovery *)
+    "keeper_tool_search"
+  ; (* Keeper-scoped workflow preflight. *)
+    "keeper_preflight_check"
+  ; (* Keeper-scoped GitHub PR tools. These are native keeper tools, not
        public MCP tools, so CLI lanes must materialize them through the
        keeper-bound runtime MCP surface instead of silently dropping them. *)
-    "keeper_pr_list";
-    "keeper_pr_status";
-    "keeper_pr_create";
-    "keeper_pr_review_read";
-    "keeper_pr_review_comment";
-    "keeper_pr_review_reply";
+    "keeper_pr_list"
+  ; "keeper_pr_status"
+  ; "keeper_pr_create"
+  ; "keeper_pr_review_read"
+  ; "keeper_pr_review_comment"
+  ; "keeper_pr_review_reply"
     (* keeper_deliberation_decision: Agent_sdk.Structured result schema, not
        a regular tool — does not need a keeper shard entry.
        keeper_unified: cascade name, not a tool. *)
   ]
+;;
 
 (** Immutable alias for keeper-internal tool name membership tests.
     Replaced mutable Hashtbl with plain list — membership via List.mem
@@ -119,6 +120,7 @@ let keeper_internal_replacement = function
   | "keeper_tasks_list" -> Some "masc_tasks"
   | "keeper_broadcast" -> Some "masc_broadcast"
   | _ -> None
+;;
 
 (* ================================================================ *)
 (* Workspace mutation classification                                *)
@@ -127,8 +129,8 @@ let keeper_internal_replacement = function
 (** Tools that mutate the workspace filesystem. Canonical list shared by
     cdal_contract_bridge.ml and contract_risk.ml. *)
 let workspace_mutating_tool_names =
-  [ "keeper_fs_edit"; "keeper_write";
-    "create_text_file"; "edit_text_file"; "file_write" ]
+  [ "keeper_fs_edit"; "keeper_write"; "create_text_file"; "edit_text_file"; "file_write" ]
+;;
 
 (* ================================================================ *)
 (* Surface type + canonical lists                                   *)
@@ -145,119 +147,217 @@ type surface =
   | System_internal
 
 let public_mcp_surface_tools =
-  [
-    (* Coord lifecycle *)
-    "masc_start"; "masc_join"; "masc_leave"; "masc_status";
-    (* Messaging *)
-    "masc_broadcast"; "masc_messages"; "masc_who";
-    (* Task coordination *)
-    "masc_add_task"; "masc_batch_add_tasks"; "masc_tasks";
-    "masc_claim_next"; "masc_transition";
-    (* Planning *)
-    "masc_goal_list"; "masc_goal_upsert"; "masc_goal_review";
-    "masc_goal_transition"; "masc_goal_verify"; "masc_coordination_fsm_snapshot";
-    "masc_plan_init"; "masc_plan_get"; "masc_plan_set_task"; "masc_plan_update";
-    (* Heartbeat *)
-    "masc_heartbeat";
-    (* Keeper interaction *)
-    "masc_keeper_msg"; "masc_keeper_msg_result"; "masc_keeper_list"; "masc_keeper_status";
-    "masc_keeper_persona_audit";
-    "masc_keeper_sandbox_status"; "masc_keeper_sandbox_start"; "masc_keeper_sandbox_stop";
-    "masc_keeper_up"; "masc_keeper_repair"; "masc_keeper_reset";
-    "masc_keeper_down";
-    (* Persona authoring is operator-visible, but these materialization tools
+  [ (* Coord lifecycle *)
+    "masc_start"
+  ; "masc_join"
+  ; "masc_leave"
+  ; "masc_status"
+  ; (* Messaging *)
+    "masc_broadcast"
+  ; "masc_messages"
+  ; "masc_who"
+  ; (* Task coordination *)
+    "masc_add_task"
+  ; "masc_batch_add_tasks"
+  ; "masc_tasks"
+  ; "masc_claim_next"
+  ; "masc_transition"
+  ; (* Planning *)
+    "masc_goal_list"
+  ; "masc_goal_upsert"
+  ; "masc_goal_review"
+  ; "masc_goal_transition"
+  ; "masc_goal_verify"
+  ; "masc_coordination_fsm_snapshot"
+  ; "masc_plan_init"
+  ; "masc_plan_get"
+  ; "masc_plan_set_task"
+  ; "masc_plan_update"
+  ; (* Heartbeat *)
+    "masc_heartbeat"
+  ; (* Keeper interaction *)
+    "masc_keeper_msg"
+  ; "masc_keeper_msg_result"
+  ; "masc_keeper_list"
+  ; "masc_keeper_status"
+  ; "masc_keeper_persona_audit"
+  ; "masc_keeper_sandbox_status"
+  ; "masc_keeper_sandbox_start"
+  ; "masc_keeper_sandbox_stop"
+  ; "masc_keeper_up"
+  ; "masc_keeper_repair"
+  ; "masc_keeper_reset"
+  ; "masc_keeper_down"
+  ; (* Persona authoring is operator-visible, but these materialization tools
        remain on Keeper_denied so managed keepers never receive them. *)
-    "masc_persona_list"; "masc_persona_schema"; "masc_persona_generate";
-    "masc_persona_save"; "masc_keeper_create_from_persona";
-    (* Board. [masc_board_reaction] is intentionally public: it is the
+    "masc_persona_list"
+  ; "masc_persona_schema"
+  ; "masc_persona_generate"
+  ; "masc_persona_save"
+  ; "masc_keeper_create_from_persona"
+  ; (* Board. [masc_board_reaction] is intentionally public: it is the
        operator/client counterpart to existing board comment/vote actions,
        while managed keepers continue to receive keeper_* board tools. *)
-    "masc_board_post"; "masc_board_list"; "masc_board_get";
-    "masc_board_comment"; "masc_board_vote";
-    "masc_board_curation_read"; "masc_board_curation_submit";
-    "masc_board_reaction";
-    (* Agent discovery *)
-    "masc_agents"; "masc_agent_card"; "masc_dashboard";
-    (* Utility *)
-    "masc_tool_help"; "masc_web_search"; "masc_web_fetch"; "masc_check";
-    (* HITL approval queue *)
-    "masc_approval_pending";
-    "masc_approval_get";
-    (* Board extended *)
-    "masc_board_comment_vote";
-    (* Agent discovery *)
-    "masc_agent_timeline";
+    "masc_board_post"
+  ; "masc_board_list"
+  ; "masc_board_get"
+  ; "masc_board_comment"
+  ; "masc_board_vote"
+  ; "masc_board_curation_read"
+  ; "masc_board_curation_submit"
+  ; "masc_board_reaction"
+  ; (* Agent discovery *)
+    "masc_agents"
+  ; "masc_agent_card"
+  ; "masc_dashboard"
+  ; (* Utility *)
+    "masc_tool_help"
+  ; "masc_web_search"
+  ; "masc_web_fetch"
+  ; "masc_check"
+  ; (* HITL approval queue *)
+    "masc_approval_pending"
+  ; "masc_approval_get"
+  ; (* Board extended *)
+    "masc_board_comment_vote"
+  ; (* Agent discovery *)
+    "masc_agent_timeline"
   ]
+;;
 
 let spawned_agent_surface_tools =
-  [
-    "masc_status"; "masc_tasks"; "masc_claim_next"; "masc_transition";
-    "masc_task_history"; "masc_broadcast"; "masc_join"; "masc_leave";
-    "masc_who"; "masc_agent_update"; "masc_add_task"; "masc_heartbeat";
-    "masc_messages";
-    "masc_goal_list"; "masc_goal_upsert"; "masc_goal_review";
-    "masc_goal_transition"; "masc_goal_verify"; "masc_coordination_fsm_snapshot";
-    "masc_worktree_create"; "masc_worktree_remove"; "masc_worktree_list";
-    "masc_board_list"; "masc_board_post"; "masc_board_comment";
-    "masc_board_vote"; "masc_board_get";
-    "masc_board_curation_read"; "masc_board_curation_submit";
-    "masc_tool_help"; "masc_web_search"; "masc_web_fetch";
-    "masc_spawn";
-    (* Phase 2: surface SSOT *)
-    "masc_code_delete"; "masc_code_edit"; "masc_code_git";
-    "masc_code_shell"; "masc_code_write";
-    "masc_deliver";
-    "masc_plan_clear_task"; "masc_plan_get_task";
-    "masc_update_priority";
-    "masc_workflow_guide";
+  [ "masc_status"
+  ; "masc_tasks"
+  ; "masc_claim_next"
+  ; "masc_transition"
+  ; "masc_task_history"
+  ; "masc_broadcast"
+  ; "masc_join"
+  ; "masc_leave"
+  ; "masc_who"
+  ; "masc_agent_update"
+  ; "masc_add_task"
+  ; "masc_heartbeat"
+  ; "masc_messages"
+  ; "masc_goal_list"
+  ; "masc_goal_upsert"
+  ; "masc_goal_review"
+  ; "masc_goal_transition"
+  ; "masc_goal_verify"
+  ; "masc_coordination_fsm_snapshot"
+  ; "masc_worktree_create"
+  ; "masc_worktree_remove"
+  ; "masc_worktree_list"
+  ; "masc_board_list"
+  ; "masc_board_post"
+  ; "masc_board_comment"
+  ; "masc_board_vote"
+  ; "masc_board_get"
+  ; "masc_board_curation_read"
+  ; "masc_board_curation_submit"
+  ; "masc_tool_help"
+  ; "masc_web_search"
+  ; "masc_web_fetch"
+  ; "masc_spawn"
+  ; (* Phase 2: surface SSOT *)
+    "masc_code_delete"
+  ; "masc_code_edit"
+  ; "masc_code_git"
+  ; "masc_code_shell"
+  ; "masc_code_write"
+  ; "masc_deliver"
+  ; "masc_plan_clear_task"
+  ; "masc_plan_get_task"
+  ; "masc_update_priority"
+  ; "masc_workflow_guide"
   ]
+;;
 
 let local_worker_surface_tools =
-  [
-    "masc_status"; "masc_tasks"; "masc_claim_next"; "masc_transition";
-    "masc_add_task"; "masc_heartbeat"; "masc_agents"; "masc_agent_card";
-    "masc_goal_list"; "masc_goal_upsert"; "masc_goal_review";
-    "masc_goal_transition"; "masc_goal_verify"; "masc_coordination_fsm_snapshot";
-    "masc_board_post"; "masc_board_list"; "masc_board_get";
-    "masc_board_comment"; "masc_board_vote"; "masc_board_search";
-    "masc_board_curation_read"; "masc_board_curation_submit";
-    "masc_code_search"; "masc_code_symbols"; "masc_code_read";
-    "masc_worktree_create"; "masc_worktree_remove"; "masc_worktree_list";
-    "masc_run_init"; "masc_run_plan"; "masc_run_log";
-    "masc_run_deliverable"; "masc_run_get"; "masc_run_list";
+  [ "masc_status"
+  ; "masc_tasks"
+  ; "masc_claim_next"
+  ; "masc_transition"
+  ; "masc_add_task"
+  ; "masc_heartbeat"
+  ; "masc_agents"
+  ; "masc_agent_card"
+  ; "masc_goal_list"
+  ; "masc_goal_upsert"
+  ; "masc_goal_review"
+  ; "masc_goal_transition"
+  ; "masc_goal_verify"
+  ; "masc_coordination_fsm_snapshot"
+  ; "masc_board_post"
+  ; "masc_board_list"
+  ; "masc_board_get"
+  ; "masc_board_comment"
+  ; "masc_board_vote"
+  ; "masc_board_search"
+  ; "masc_board_curation_read"
+  ; "masc_board_curation_submit"
+  ; "masc_code_search"
+  ; "masc_code_symbols"
+  ; "masc_code_read"
+  ; "masc_worktree_create"
+  ; "masc_worktree_remove"
+  ; "masc_worktree_list"
+  ; "masc_run_init"
+  ; "masc_run_plan"
+  ; "masc_run_log"
+  ; "masc_run_deliverable"
+  ; "masc_run_get"
+  ; "masc_run_list"
   ]
+;;
 
 let session_min_surface_tools =
-  [
-    "masc_status"; "masc_tasks"; "masc_claim_next";
-    "masc_plan_set_task"; "masc_transition"; "masc_add_task";
-    "masc_goal_list"; "masc_goal_upsert"; "masc_goal_review";
-    "masc_goal_transition"; "masc_goal_verify"; "masc_coordination_fsm_snapshot";
-    "masc_broadcast"; "masc_heartbeat";
+  [ "masc_status"
+  ; "masc_tasks"
+  ; "masc_claim_next"
+  ; "masc_plan_set_task"
+  ; "masc_transition"
+  ; "masc_add_task"
+  ; "masc_goal_list"
+  ; "masc_goal_upsert"
+  ; "masc_goal_review"
+  ; "masc_goal_transition"
+  ; "masc_goal_verify"
+  ; "masc_coordination_fsm_snapshot"
+  ; "masc_broadcast"
+  ; "masc_heartbeat"
   ]
+;;
 
 let admin_surface_tools =
-  [
-    "masc_autoresearch_cycle"; "masc_autoresearch_inject";
-    "masc_autoresearch_record_finding";
-    "masc_autoresearch_start"; "masc_autoresearch_stop";
-    "masc_tool_admin_update"; "masc_tool_grant"; "masc_tool_revoke";
-    "masc_tool_admin_snapshot";
-    "masc_config";
-    (* Phase 2: surface SSOT *)
-    "masc_persona_generate"; "masc_persona_save";
-    "masc_keeper_create_from_persona"; "masc_keeper_reset";
-    "masc_pause"; "masc_resume";
-    "masc_runtime_ollama_probe"; "masc_tool_list";
+  [ "masc_autoresearch_cycle"
+  ; "masc_autoresearch_inject"
+  ; "masc_autoresearch_record_finding"
+  ; "masc_autoresearch_start"
+  ; "masc_autoresearch_stop"
+  ; "masc_tool_admin_update"
+  ; "masc_tool_grant"
+  ; "masc_tool_revoke"
+  ; "masc_tool_admin_snapshot"
+  ; "masc_config"
+  ; (* Phase 2: surface SSOT *)
+    "masc_persona_generate"
+  ; "masc_persona_save"
+  ; "masc_keeper_create_from_persona"
+  ; "masc_keeper_reset"
+  ; "masc_pause"
+  ; "masc_resume"
+  ; "masc_runtime_ollama_probe"
+  ; "masc_tool_list"
   ]
+;;
 
 let keeper_internal_surface_tools = keeper_internal_tools
 
 let keeper_denied_surface_tools =
-  [
-    "masc_reset";
-    "masc_spawn";
-    (* Admin surface — [CanAdmin]-gated, keepers cannot execute these.
+  [ "masc_reset"
+  ; "masc_spawn"
+  ; (* Admin surface — [CanAdmin]-gated, keepers cannot execute these.
        Log evidence (2026-04-16 /loop): ~49 Forbidden errors per ~3MB
        window from keepers (ani1999, etc.) trying to call these. They
        were already denied at dispatch, but the schemas still appeared
@@ -265,45 +365,54 @@ let keeper_denied_surface_tools =
        them here filters schemas out at discovery time, so the model
        never sees them.
        Source: admin_surface_tools at tool_catalog_surfaces.ml:182. *)
-    "masc_tool_grant";
-    "masc_tool_revoke";
-    "masc_tool_admin_update";
-    "masc_tool_admin_snapshot";
-    "masc_config";
-    "masc_persona_generate";
-    "masc_persona_save";
-    "masc_keeper_create_from_persona";
-    (* NOTE: masc_keeper_reset is on public_mcp_surface_tools. Keepers don't
+    "masc_tool_grant"
+  ; "masc_tool_revoke"
+  ; "masc_tool_admin_update"
+  ; "masc_tool_admin_snapshot"
+  ; "masc_config"
+  ; "masc_persona_generate"
+  ; "masc_persona_save"
+  ; "masc_keeper_create_from_persona"
+  ; (* NOTE: masc_keeper_reset is on public_mcp_surface_tools. Keepers don't
        see the public_mcp surface at discovery, so no filter is needed here.
        Admin permission still blocks execution. *)
-    "masc_pause";
-    "masc_resume";
+    "masc_pause"
+  ; "masc_resume"
   ]
+;;
 
 let system_internal_surface_tools =
-  [
-    (* MCP protocol internals *)
-    "masc_mcp_session";
-    (* Session lifecycle — auto-called *)
-    "masc_reset";
-    (* Maintenance *)
-    "masc_cleanup_zombies"; "masc_gc";
-    (* Agent evaluation — system loop *)
-    "masc_agent_fitness";
-    (* Internal monitoring *)
-    "masc_autoresearch_search_findings"; "masc_autoresearch_status";
-    "masc_tool_stats"; "masc_surface_audit";
-    (* Phase 2 addition *)
-    "masc_get_metrics";
-    (* WebRTC signaling — deprecated as MCP tools but used as HTTP endpoints *)
-    "masc_webrtc_offer"; "masc_webrtc_answer";
-    (* Library tools *)
-    "masc_library_add"; "masc_library_list"; "masc_library_promote";
-    "masc_library_read"; "masc_library_search";
-    (* Keeper board maintenance schemas remain callable for backward
+  [ (* MCP protocol internals *)
+    "masc_mcp_session"
+  ; (* Session lifecycle — auto-called *)
+    "masc_reset"
+  ; (* Maintenance *)
+    "masc_cleanup_zombies"
+  ; "masc_gc"
+  ; (* Agent evaluation — system loop *)
+    "masc_agent_fitness"
+  ; (* Internal monitoring *)
+    "masc_autoresearch_search_findings"
+  ; "masc_autoresearch_status"
+  ; "masc_tool_stats"
+  ; "masc_surface_audit"
+  ; (* Phase 2 addition *)
+    "masc_get_metrics"
+  ; (* WebRTC signaling — deprecated as MCP tools but used as HTTP endpoints *)
+    "masc_webrtc_offer"
+  ; "masc_webrtc_answer"
+  ; (* Library tools *)
+    "masc_library_add"
+  ; "masc_library_list"
+  ; "masc_library_promote"
+  ; "masc_library_read"
+  ; "masc_library_search"
+  ; (* Keeper board maintenance schemas remain callable for backward
        compatibility, but are hidden from keeper/public discovery. *)
-    "keeper_board_delete"; "keeper_board_cleanup";
+    "keeper_board_delete"
+  ; "keeper_board_cleanup"
   ]
+;;
 
 (* ================================================================ *)
 (* Role catalogs — curated subsets for agent role assignment.        *)
@@ -313,42 +422,42 @@ let system_internal_surface_tools =
 (* ================================================================ *)
 
 let coordination_role_tools : string list =
-  [
-    "masc_status";
-    "masc_tasks";
-    "masc_add_task";
-    "masc_broadcast";
-    "masc_join";
-    "masc_leave";
-    "masc_who";
-    "masc_heartbeat";
-    "masc_messages";
-    "masc_coordination_fsm_snapshot";
-    "masc_board_list";
-    "masc_board_post";
-    "masc_board_comment";
-    "masc_board_vote";
-    "masc_board_get";
-    "masc_claim_next";
-    "masc_transition";
-    "masc_spawn";
+  [ "masc_status"
+  ; "masc_tasks"
+  ; "masc_add_task"
+  ; "masc_broadcast"
+  ; "masc_join"
+  ; "masc_leave"
+  ; "masc_who"
+  ; "masc_heartbeat"
+  ; "masc_messages"
+  ; "masc_coordination_fsm_snapshot"
+  ; "masc_board_list"
+  ; "masc_board_post"
+  ; "masc_board_comment"
+  ; "masc_board_vote"
+  ; "masc_board_get"
+  ; "masc_claim_next"
+  ; "masc_transition"
+  ; "masc_spawn"
   ]
+;;
 
 let execution_role_tools : string list =
-  [
-    "masc_heartbeat";
-    "masc_claim_next";
-    "masc_transition";
-    "masc_broadcast";
-    "masc_code_search";
-    "masc_code_symbols";
-    "masc_code_read";
-    "masc_run_init";
-    "masc_run_log";
-    "masc_run_deliverable";
-    "masc_run_get";
-    "masc_tool_help";
+  [ "masc_heartbeat"
+  ; "masc_claim_next"
+  ; "masc_transition"
+  ; "masc_broadcast"
+  ; "masc_code_search"
+  ; "masc_code_symbols"
+  ; "masc_code_read"
+  ; "masc_run_init"
+  ; "masc_run_log"
+  ; "masc_run_deliverable"
+  ; "masc_run_get"
+  ; "masc_tool_help"
   ]
+;;
 
 (* ================================================================ *)
 (* Surface query functions                                          *)
@@ -363,28 +472,41 @@ let tools_for_surface = function
   | Keeper_internal -> keeper_internal_surface_tools
   | Keeper_denied -> keeper_denied_surface_tools
   | System_internal -> system_internal_surface_tools
+;;
 
 let all_surfaces =
-  [Public_mcp; Spawned_agent; Local_worker; Session_min;
-   Admin; Keeper_internal; Keeper_denied; System_internal]
+  [ Public_mcp
+  ; Spawned_agent
+  ; Local_worker
+  ; Session_min
+  ; Admin
+  ; Keeper_internal
+  ; Keeper_denied
+  ; System_internal
+  ]
+;;
 
 let surface_sets : (surface * (string, unit) Hashtbl.t) list =
-  List.map (fun surface ->
-    let tools = tools_for_surface surface in
-    let tbl = Hashtbl.create (List.length tools) in
-    List.iter (fun name -> Hashtbl.replace tbl name ()) tools;
-    (surface, tbl)
-  ) all_surfaces
+  List.map
+    (fun surface ->
+       let tools = tools_for_surface surface in
+       let tbl = Hashtbl.create (List.length tools) in
+       List.iter (fun name -> Hashtbl.replace tbl name ()) tools;
+       surface, tbl)
+    all_surfaces
+;;
 
 let is_on_surface surface name =
   match List.assoc_opt surface surface_sets with
   | Some tbl -> Hashtbl.mem tbl name
   | None -> false
+;;
 
 let surfaces_for_tool name =
-  List.filter_map (fun (surface, tbl) ->
-    if Hashtbl.mem tbl name then Some surface else None
-  ) surface_sets
+  List.filter_map
+    (fun (surface, tbl) -> if Hashtbl.mem tbl name then Some surface else None)
+    surface_sets
+;;
 
 let surface_to_string = function
   | Public_mcp -> "public_mcp"
@@ -395,3 +517,4 @@ let surface_to_string = function
   | Keeper_internal -> "keeper_internal"
   | Keeper_denied -> "keeper_denied"
   | System_internal -> "system_internal"
+;;

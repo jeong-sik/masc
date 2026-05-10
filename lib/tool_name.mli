@@ -1,4 +1,3 @@
-
 (** Compile-time verified tool name identifiers.
 
     Use [of_string] at MCP/JSON parse boundaries only.
@@ -31,6 +30,7 @@ module Keeper : sig
     | Library_read
     | Library_search
     | Memory_search
+    | Memory_write
     | Pr_create
     | Pr_list
     | Pr_review_comment
@@ -213,7 +213,6 @@ type t =
 val to_string : t -> string
 val of_string : string -> t option
 val pp : Stdlib.Format.formatter -> t -> unit
-
 val is_keeper : t -> bool
 val is_masc : t -> bool
 val is_masc_keeper : t -> bool

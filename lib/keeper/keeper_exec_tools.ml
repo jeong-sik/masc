@@ -17,6 +17,169 @@ let has_mutating_side_effect_with_input ~(tool_name : string) ~(input : Yojson.S
   not (Keeper_tool_registry.is_read_only_with_input ~tool_name ~input)
 ;;
 
+type keeper_tool_call_recorder =
+  tool_name:string -> success:bool -> duration_ms:int -> unit
+
+let default_keeper_tool_call_recorder ~tool_name:_ ~success:_ ~duration_ms:_ = ()
+let keeper_tool_call_recorder_mutex = Stdlib.Mutex.create ()
+let keeper_tool_call_recorder = ref default_keeper_tool_call_recorder
+
+let set_on_keeper_tool_call (f : keeper_tool_call_recorder) =
+  Stdlib.Mutex.protect keeper_tool_call_recorder_mutex (fun () ->
+    keeper_tool_call_recorder := f)
+;;
+
+let record_keeper_tool_call ~tool_name ~success ~duration_ms =
+  let f =
+    Stdlib.Mutex.protect keeper_tool_call_recorder_mutex (fun () ->
+      !keeper_tool_call_recorder)
+  in
+  f ~tool_name ~success ~duration_ms
+;;
+
+let search_char c =
+  match c with
+  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> c
+  | _ when Char.code c > 127 -> c
+  | _ -> ' '
+;;
+
+let normalize_search_text text = String.lowercase_ascii (String.map search_char text)
+
+let contains_substring text needle =
+  let text_len = String.length text in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    idx + needle_len <= text_len
+    && (String.sub text idx needle_len = needle || loop (idx + 1))
+  in
+  needle_len = 0 || loop 0
+;;
+
+let search_terms query =
+  normalize_search_text query
+  |> String.split_on_char ' '
+  |> List.map String.trim
+  |> List.filter (fun term -> term <> "")
+  |> List.sort_uniq String.compare
+;;
+
+let dedupe_tool_search_schemas schemas =
+  let seen = Hashtbl.create (List.length schemas) in
+  List.filter
+    (fun (schema : Masc_domain.tool_schema) ->
+       if Hashtbl.mem seen schema.name
+       then false
+       else (
+         Hashtbl.replace seen schema.name ();
+         true))
+    schemas
+;;
+
+let default_tool_search_schemas () =
+  Tool_shard.all_keeper_tool_schemas @ [ keeper_tool_search_schema ]
+  |> List.filter (fun (schema : Masc_domain.tool_schema) ->
+    not (is_keeper_denied schema.name))
+  |> dedupe_tool_search_schemas
+;;
+
+let score_tool_schema terms (schema : Masc_domain.tool_schema) =
+  let help = Tool_help_registry.entry_of_schema schema in
+  let name_text = normalize_search_text schema.name in
+  let search_text =
+    normalize_search_text
+      (String.concat
+         " "
+         [ schema.name
+         ; schema.description
+         ; help.Tool_help_registry.when_to_use
+         ; Yojson.Safe.to_string schema.input_schema
+         ])
+  in
+  List.fold_left
+    (fun score term ->
+       if contains_substring name_text term
+       then score +. 2.0
+       else if contains_substring search_text term
+       then score +. 1.0
+       else score)
+    0.0
+    terms
+;;
+
+let default_tool_search_fn ~query ~max_results =
+  let terms = search_terms query in
+  let schemas = default_tool_search_schemas () in
+  let hits =
+    schemas
+    |> List.filter_map (fun schema ->
+      let score = score_tool_schema terms schema in
+      if Float.compare score 0.0 <= 0 then None else Some (schema, score))
+    |> List.sort (fun (left_schema, left_score) (right_schema, right_score) ->
+      let by_score = compare right_score left_score in
+      if by_score <> 0
+      then by_score
+      else String.compare left_schema.Masc_domain.name right_schema.name)
+  in
+  let rec take n xs =
+    if n <= 0
+    then []
+    else (
+      match xs with
+      | [] -> []
+      | x :: rest -> x :: take (n - 1) rest)
+  in
+  let selected = take max_results hits in
+  let result_json (schema, score) =
+    let help = Tool_help_registry.entry_of_schema schema in
+    `Assoc
+      [ "name", `String schema.Masc_domain.name
+      ; "score", `Float score
+      ; "description", `String help.short_description
+      ; "when_to_use", `String help.when_to_use
+      ; "input_schema", schema.input_schema
+      ; "already_visible", `Bool false
+      ]
+  in
+  let results = List.map result_json selected in
+  let hint =
+    if results = []
+    then
+      "No tools match this static fallback query. In normal keeper turns, the \
+       session-scoped BM25 index provides richer policy-aware search."
+    else
+      "Static fallback results from keeper schemas. Normal keeper turns use the richer \
+       session-scoped BM25 index."
+  in
+  `Assoc
+    [ "ok", `Bool true
+    ; "query", `String query
+    ; "results", `List results
+    ; "result_count", `Int (List.length results)
+    ; ( "diagnostics"
+      , `Assoc
+          [ "source", `String "static_schema_fallback"
+          ; "candidate_count", `Int (List.length schemas)
+          ] )
+    ; "hint", `String hint
+    ]
+;;
+
+type tool_searcher = query:string -> max_results:int -> Yojson.Safe.t
+
+let default_tool_searcher = default_tool_search_fn
+let tool_searcher_mutex = Stdlib.Mutex.create ()
+let tool_searcher = ref default_tool_searcher
+
+let set_tool_search_fn (f : tool_searcher) =
+  Stdlib.Mutex.protect tool_searcher_mutex (fun () -> tool_searcher := f)
+;;
+
+let search_tools ~query ~max_results =
+  let f = Stdlib.Mutex.protect tool_searcher_mutex (fun () -> !tool_searcher) in
+  f ~query ~max_results
+;;
+
 type tool_result_payload =
   | Structured_success
   | Structured_error
@@ -128,8 +291,11 @@ let execute_keeper_tool_call_with_outcome
   =
   let args = input in
   let now_ts = Time_compat.now () in
-  (* #10349: upstream [effective_keepalive_meta] already guarantees
-     registry-canonical meta before this point.  No silent fallback. *)
+  let meta =
+    match Keeper_registry.get ~base_path:config.base_path meta.name with
+    | Some entry -> entry.meta
+    | None -> meta
+  in
   let apply_circuit_breaker (result : executed_tool_result) =
     match result.outcome, result.payload_shape with
     | `Success, _ ->
@@ -219,14 +385,12 @@ let execute_keeper_tool_call_with_outcome
            failure_tool_result
              (error_json "query is required. Good: query='read file'. Bad: query=''.")
          else (
-           match search_fn with
-           | Some fn ->
-             success_tool_result (Yojson.Safe.to_string (fn ~query ~max_results))
-           | None ->
-             failure_tool_result
-               (error_json
-                  "keeper_tool_search is not configured for this execution path. Run \
-                   through the keeper Agent tool bundle or pass search_fn."))
+           let fn =
+             match search_fn with
+             | Some f -> f
+             | None -> search_tools
+           in
+           success_tool_result (Yojson.Safe.to_string (fn ~query ~max_results)))
        | "keeper_stay_silent" ->
          success_tool_result
            (Yojson.Safe.to_string (`Assoc [ "status", `String "silent" ]))
@@ -242,6 +406,9 @@ let execute_keeper_tool_call_with_outcome
        | "keeper_memory_search" ->
          success_tool_result
            (Keeper_exec_memory.keeper_memory_search_json ~config ~meta ~ctx_work ~args)
+       | "keeper_memory_write" ->
+         success_tool_result
+           (Keeper_exec_memory.keeper_memory_write_json ~config ~meta ~args)
        | "keeper_library_search" ->
          let ok, msg =
            Tool_library.handle_search Tool_library.{ agent_name = meta.name } args
@@ -260,20 +427,14 @@ let execute_keeper_tool_call_with_outcome
            (Keeper_exec_fs.handle_keeper_fs_read
               ~turn_sandbox_factory
               ~config
-              ~keeper_name:meta.name
+              ~meta
               ~args)
        | "keeper_fs_edit" ->
          make_executed_tool_result
            (Keeper_exec_fs.handle_keeper_fs_edit
               ~turn_sandbox_factory
               ~config
-              ~keeper_name:meta.name
-              ~args)
-       | "masc_ide_annotate" ->
-         make_executed_tool_result
-           (Keeper_exec_ide.handle_keeper_ide_annotate
-              ~config
-              ~keeper_name:meta.name
+              ~meta
               ~args)
        | "keeper_bash" ->
          make_executed_tool_result
@@ -345,7 +506,7 @@ let execute_keeper_tool_call_with_outcome
            (Keeper_exec_task.handle_keeper_task_tool ~config ~meta ~name ~args)
        | other ->
          (match
-            Keeper_exec_masc.handle_registered_keeper_tool ~config ~keeper_name:meta.name ~name:other ~args
+            Keeper_exec_masc.handle_registered_keeper_tool ~config ~meta ~name:other ~args
           with
           | Some raw_output -> make_executed_tool_result raw_output
           | None ->

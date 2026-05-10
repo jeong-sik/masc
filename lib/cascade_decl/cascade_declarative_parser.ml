@@ -306,6 +306,31 @@ let strategy_of_string (s : string) :
           round_robin"
          s)
 
+let parse_cycle_policy (tbl : Otoml.t) : cascade_cycle_policy option =
+  let max_cycles = Otoml.find_opt tbl Otoml.get_integer [ "max-cycles" ] in
+  let backoff_base = Otoml.find_opt tbl Otoml.get_integer [ "backoff-base-ms" ] in
+  let backoff_cap = Otoml.find_opt tbl Otoml.get_integer [ "backoff-cap-ms" ] in
+  match max_cycles, backoff_base, backoff_cap with
+  | Some mc, Some bb, Some bc ->
+    Some { max_cycles = mc; backoff_base_ms = bb; backoff_cap_ms = bc }
+  | _ -> None
+
+let parse_scoring_params (tbl : Otoml.t) : cascade_scoring_params option =
+  let lat = Otoml.find_opt tbl Otoml.get_float [ "latency-baseline-ms" ] in
+  let rlw = Otoml.find_opt tbl Otoml.get_float [ "rate-limit-recency-window-s" ] in
+  let rld = Otoml.find_opt tbl Otoml.get_float [ "rate-limit-decay-base" ] in
+  let rls = Otoml.find_opt tbl Otoml.get_integer [ "rate-limit-skip-after" ] in
+  let sew = Otoml.find_opt tbl Otoml.get_float [ "server-error-recency-window-s" ] in
+  let sed = Otoml.find_opt tbl Otoml.get_float [ "server-error-decay-base" ] in
+  let ses = Otoml.find_opt tbl Otoml.get_integer [ "server-error-skip-after" ] in
+  match lat, rlw, rld, rls, sew, sed, ses with
+  | Some a, Some b, Some c, Some d, Some e, Some f, Some g ->
+    Some { latency_baseline_ms = a; rate_limit_recency_window_s = b;
+           rate_limit_decay_base = c; rate_limit_skip_after = d;
+           server_error_recency_window_s = e; server_error_decay_base = f;
+           server_error_skip_after = g }
+  | _ -> None
+
 let parse_tier (name : string) (tbl : Otoml.t) :
     (cascade_tier, parse_error list) result =
   let path = Printf.sprintf "tier.%s" name in
@@ -323,7 +348,11 @@ let parse_tier (name : string) (tbl : Otoml.t) :
   | Error e -> Error (error (path ^ ".strategy") e)
   | Ok strategy ->
     let max_concurrent = Otoml.find_opt tbl Otoml.get_integer [ "max-concurrent" ] in
-    Ok { name; members; strategy; max_concurrent }
+    let cycle_policy = parse_cycle_policy tbl in
+    let sticky_ttl_ms = Otoml.find_opt tbl Otoml.get_integer [ "sticky-ttl-ms" ] in
+    let scoring_params = parse_scoring_params tbl in
+    Ok { name; members; strategy; max_concurrent;
+         cycle_policy; sticky_ttl_ms; scoring_params }
 
 let parse_tiers (toml : Otoml.t) :
     (cascade_tier list, parse_error list) result =

@@ -23,10 +23,12 @@ import type {
 import { formatPct, formatTokens } from '../lib/format-number'
 import { trimText, truncate } from '../lib/truncate'
 import { Card } from './common/card'
+import { Drawer } from './common/drawer'
 import { EmptyState } from './common/empty-state'
 import { TextInput } from './common/input'
 import { RouteLink } from './common/route-link'
 import { StatusChip, keeperStateTone } from './common/status-chip'
+import { Table, type TableColumn } from './common/table'
 import { TimeAgo } from './common/time-ago'
 import { formatTimeAgoEn } from '../lib/format-time'
 import { keeperActivityDisplay, keeperDisplayModel } from '../lib/keeper-runtime-display'
@@ -809,8 +811,130 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
   `
 }
 
+function JourneyTable({
+  records,
+  selectedKey,
+  onSelect,
+}: {
+  records: readonly JourneyRecord[]
+  selectedKey: string | null
+  onSelect: (key: string | null) => void
+}) {
+  const columns: TableColumn<JourneyRecord>[] = [
+    {
+      key: 'task',
+      header: 'Task',
+      sortable: false,
+      width: 'min-w-[240px]',
+      render: (record) => html`
+        <div class="flex flex-col gap-1">
+          <span class="font-medium text-[var(--color-fg-primary)]">${record.title}</span>
+          ${record.subtitle ? html`<span class="text-2xs text-[var(--color-fg-muted)] truncate">${record.subtitle}</span>` : null}
+        </div>
+      `,
+    },
+    {
+      key: 'keeper',
+      header: 'Keeper',
+      sortable: false,
+      width: 'min-w-[140px]',
+      render: (record) => {
+        const name = record.keeper?.name ?? '-'
+        return html`<span class="font-mono text-2xs text-[var(--color-fg-secondary)]">${name}</span>`
+      },
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      sortable: false,
+      width: 'min-w-[120px]',
+      render: (record) => {
+        if (record.task?.status) {
+          return html`<${StatusChip} tone=${record.task.status === 'done' ? 'ok' : record.task.status === 'awaiting_verification' ? 'select' : 'neutral'}>
+            ${taskStatusLabel(record.task.status)}
+          <//>`
+        }
+        if (record.keeper?.status) {
+          return html`<${StatusChip} tone=${keeperStateTone(record.keeper.status)}>${record.keeper.status}<//>`
+        }
+        return html`<span class="text-2xs text-[var(--color-fg-muted)]">-</span>`
+      },
+    },
+    {
+      key: 'activity',
+      header: 'Last activity',
+      sortable: false,
+      width: 'min-w-[120px]',
+      render: (record) => {
+        const age = record.keeper
+          ? keeperActivityDisplay(record.keeper, record.keeper.agent?.last_seen).ageSeconds
+          : null
+        if (age != null) {
+          return html`<span class="text-2xs text-[var(--color-fg-muted)]">${formatAgeSeconds(age)}</span>`
+        }
+        if (record.task?.updated_at) {
+          return html`<${TimeAgo} timestamp=${record.task.updated_at} />`
+        }
+        return html`<span class="text-2xs text-[var(--color-fg-muted)]">-</span>`
+      },
+    },
+    {
+      key: 'blocked',
+      header: 'Blocked',
+      sortable: false,
+      width: 'min-w-[100px]',
+      render: (record) => {
+        const blocked = record.keeper?.runtime_blocker_class != null
+          || (record.task?.gate?.done?.status === 'blocked')
+        return blocked
+          ? html`<${StatusChip} tone="bad">blocked<//>`
+          : html`<span class="text-2xs text-[var(--color-fg-muted)]">-</span>`
+      },
+    },
+  ]
+
+  if (records.length === 0) {
+    return html`<${EmptyState} message="No journeys match the current filters." compact />`
+  }
+
+  return html`
+    <div class="overflow-x-auto rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)]">
+      <${Table}
+        columns=${columns}
+        rows=${records}
+        getRowId=${(row: JourneyRecord) => row.key}
+        selectedIds=${selectedKey ? [selectedKey] : []}
+        onSelect=${(ids: string[]) => onSelect(ids[0] ?? null)}
+        aria-label="Journey records"
+      />
+    </div>
+  `
+}
+
+function JourneyDetailDrawer({
+  record,
+  onClose,
+}: {
+  record: JourneyRecord | null
+  onClose: () => void
+}) {
+  if (!record) return null
+  return html`
+    <${Drawer}
+      open=${true}
+      onClose=${onClose}
+      title=${record.title}
+      position="right"
+      class="w-96 max-w-[calc(100vw-1rem)]"
+    >
+      <${JourneyCard} record=${record} />
+    <//>
+  `
+}
+
 export function JourneyPanel() {
   const query = useSignal('')
+  const selectedKey = useSignal<string | null>(null)
   const missionSessions = Array.isArray(missionSnapshot.value?.sessions)
     ? missionSnapshot.value.sessions as JourneyMissionSession[]
     : []
@@ -823,39 +947,37 @@ export function JourneyPanel() {
     missionSessions,
     journalEntries: journal.value,
   })
+  // Standalone keeper records are delegated to the agents section.
+  const taskRecords = records.filter((record) => record.kind === 'task')
   const priorityItems = executionQueue.value.filter((item) => item.kind === 'keeper' || item.severity === 'bad')
-  const visible = filterJourneyRecords(records, query.value)
-  const taskCount = records.filter((record) => record.kind === 'task').length
-  const keeperCount = records.filter((record) => record.kind === 'keeper').length
-  const blockedCount = records.filter((record) =>
+  const visible = filterJourneyRecords(taskRecords, query.value)
+  const blockedCount = visible.filter((record) =>
     record.keeper?.runtime_blocker_class != null || (record.task?.gate?.done?.status === 'blocked'),
   ).length
-  const thinkingCount = records.filter((record) => record.keeper?.pipeline_stage === 'thinking').length
-  const memoryHotCount = records.filter((record) =>
-    Boolean(record.keeper?.memory_recent_note) || (record.keeper?.compaction_count ?? 0) > 0,
-  ).length
-  const taskRecords = visible.filter((record) => record.kind === 'task')
-  const keeperRecords = visible.filter((record) => record.kind === 'keeper')
+  const thinkingCount = visible.filter((record) => record.keeper?.pipeline_stage === 'thinking').length
+
+  const selectedRecord = selectedKey.value
+    ? visible.find((r) => r.key === selectedKey.value) ?? null
+    : null
 
   return html`
     <div class="flex flex-col gap-4">
       <${Card} class="flex flex-col gap-4">
         <div class="flex flex-col gap-2">
           <div class="flex flex-wrap items-center gap-2">
-            <h2 class="m-0 text-lg font-semibold tracking-normal text-[var(--color-fg-secondary)]">Task / Run / Contract / Keeper / Thinking / Memory / Turn / Life / Cascade</h2>
+            <h2 class="m-0 text-lg font-semibold tracking-normal text-[var(--color-fg-secondary)]">Active Journeys</h2>
             <${StatusChip} tone="info">beta<//>
           </div>
           <div class="text-sm leading-relaxed text-[var(--color-fg-muted)]">
-            Read task-centered work and standalone keeper continuity with one card grammar.
+            Task-centered work linked across keeper, session, and contract context.
           </div>
         </div>
 
-        <div class="grid gap-3 md:grid-cols-5">
-          <${MetricChip} label="journeys" value=${records.length} tone="info" />
-          <${MetricChip} label="tasks" value=${taskCount} />
-          <${MetricChip} label="keepers" value=${keeperCount} />
+        <div class="grid gap-3 md:grid-cols-4">
+          <${MetricChip} label="journeys" value=${visible.length} tone="info" />
           <${MetricChip} label="blocked" value=${blockedCount} tone=${blockedCount > 0 ? 'bad' : 'ok'} />
-          <${MetricChip} label="thinking/memory" value=${`${thinkingCount} / ${memoryHotCount}`} tone="warn" />
+          <${MetricChip} label="thinking" value=${thinkingCount} tone="warn" />
+          <${MetricChip} label="in queue" value=${priorityItems.length} tone=${priorityItems.some(i => i.severity === 'bad') ? 'bad' : 'warn'} />
         </div>
 
         <${ExecutionQueuePanel} items=${priorityItems} />
@@ -872,32 +994,21 @@ export function JourneyPanel() {
             }}
           />
           <div class="text-xs text-[var(--color-fg-muted)]">
-            ${query.value.trim() !== '' ? `${visible.length} / ${records.length} shown` : `${records.length} flows`}
+            ${query.value.trim() !== '' ? `${visible.length} / ${taskRecords.length} shown` : `${taskRecords.length} flows`}
           </div>
         </div>
       <//>
 
-      ${visible.length === 0
-        ? html`<${EmptyState} message="No journeys match the current filters." compact />`
-        : html`
-            ${taskRecords.length > 0
-              ? html`
-                  <div class="flex flex-col gap-3">
-                    <div class="font-mono text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Task Journeys</div>
-                    ${taskRecords.map((record) => html`<${JourneyCard} key=${record.key} record=${record} />`)}
-                  </div>
-                `
-              : null}
+      <${JourneyTable}
+        records=${visible}
+        selectedKey=${selectedKey.value}
+        onSelect=${(key: string | null) => { selectedKey.value = key }}
+      />
 
-            ${keeperRecords.length > 0
-              ? html`
-                  <div class="flex flex-col gap-3">
-                    <div class="font-mono text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Keeper Journeys</div>
-                    ${keeperRecords.map((record) => html`<${JourneyCard} key=${record.key} record=${record} />`)}
-                  </div>
-                `
-              : null}
-          `}
+      <${JourneyDetailDrawer}
+        record=${selectedRecord}
+        onClose=${() => { selectedKey.value = null }}
+      />
     </div>
   `
 }

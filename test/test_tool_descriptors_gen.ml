@@ -1,15 +1,13 @@
-(** RFC-0057 Phase 1 regression test.
+(** RFC-0057 Phase 2 regression test.
 
     Guards [bin/gen_tool_descriptors.ml] output against the
-    effective schema exposed by [Tool_schemas_misc] for [masc_config]
-    and [masc_code_read].
+    effective schema exposed by [Tool_schemas_misc] for [masc_config],
+    [masc_code_read], and [masc_tool_help].
 
-    Phase 1 removed the hand-written [masc_config] entry from
-    [Tool_schemas_misc] and appended [Tool_descriptors_gen.schemas]
-    so the generated schemas are the SSOT. The test still pins
-    generated vs effective field-for-field to catch drift in
-    description text, enum ordering, additionalProperties, or any
-    nested Yojson value before it reaches an LLM client.
+    Phase 2 lifted spec types into [lib/tool_schemas_specs/] and added
+    the 3rd generated tool. Hand-written entries for all three tools
+    were removed from [Tool_schemas_misc]; generated schemas are the
+    SSOT. The test pins generated vs effective field-for-field.
 
     Same pattern as RFC-0054 PR-3's [test_shell_ir_typed_walkers_gen]. *)
 
@@ -75,16 +73,35 @@ let test_masc_code_read_input_schema_matches () =
     gen.input_schema
 ;;
 
+let test_masc_tool_help_name_matches () =
+  let gen = find_by_name "masc_tool_help" Tool_descriptors_gen.schemas in
+  let hand = find_by_name "masc_tool_help" Tool_schemas_misc.schemas in
+  Alcotest.(check string) "masc_tool_help name" hand.name gen.name
+;;
+
+let test_masc_tool_help_description_matches () =
+  let gen = find_by_name "masc_tool_help" Tool_descriptors_gen.schemas in
+  let hand = find_by_name "masc_tool_help" Tool_schemas_misc.schemas in
+  Alcotest.(check string) "masc_tool_help description" hand.description gen.description
+;;
+
+let test_masc_tool_help_input_schema_matches () =
+  let gen = find_by_name "masc_tool_help" Tool_descriptors_gen.schemas in
+  let hand = find_by_name "masc_tool_help" Tool_schemas_misc.schemas in
+  Alcotest.check
+    yojson_testable
+    "masc_tool_help input_schema (Yojson.Safe.equal)"
+    hand.input_schema
+    gen.input_schema
+;;
+
 let () =
   Alcotest.run
     "tool_descriptors_gen"
     [ ( "masc_config field-by-field"
       , [ Alcotest.test_case "name" `Quick test_masc_config_name_matches
         ; Alcotest.test_case "description" `Quick test_masc_config_description_matches
-        ; Alcotest.test_case
-            "input_schema"
-            `Quick
-            test_masc_config_input_schema_matches
+        ; Alcotest.test_case "input_schema" `Quick test_masc_config_input_schema_matches
         ] )
     ; ( "masc_code_read field-by-field"
       , [ Alcotest.test_case "name" `Quick test_masc_code_read_name_matches
@@ -93,6 +110,14 @@ let () =
             "input_schema"
             `Quick
             test_masc_code_read_input_schema_matches
+        ] )
+    ; ( "masc_tool_help field-by-field"
+      , [ Alcotest.test_case "name" `Quick test_masc_tool_help_name_matches
+        ; Alcotest.test_case "description" `Quick test_masc_tool_help_description_matches
+        ; Alcotest.test_case
+            "input_schema"
+            `Quick
+            test_masc_tool_help_input_schema_matches
         ] )
     ]
 ;;

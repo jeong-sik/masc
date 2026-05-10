@@ -62,7 +62,7 @@ let make_ctx () =
 
 let dispatch_exn ctx ~name ~args =
   match Tool_code.dispatch ctx ~name ~args with
-  | Some result -> result
+  | Some result -> (result.success, result.legacy_message)
   | None -> failwith ("dispatch returned None for " ^ name)
 
 (* ============================================================

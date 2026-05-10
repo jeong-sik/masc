@@ -118,7 +118,7 @@ let test_dispatch_structured () =
   (* Register a test handler *)
   Tool_dispatch.register
     ~tool_name:"__test_tool"
-    ~handler:(fun ~name:_ ~args:_ -> Some (true, {|{"result":"ok"}|}));
+    ~handler:(fun ~name:_ ~args:_ -> Some (Tool_result.quick_ok {|{"result":"ok"}|}));
   Tool_dispatch.register_name_tag ~tool_name:"__test_tool" ~tag:Mod_misc;
   let token = match Tool_dispatch.mint_token ~name:"__test_tool" with Ok t -> t | Error e -> Alcotest.fail e in
   match Tool_dispatch.dispatch_structured ~token ~args:`Null with

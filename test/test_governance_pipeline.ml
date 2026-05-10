@@ -614,7 +614,7 @@ let test_hook_development_allows () =
   setup ();
   Tool_dispatch.register
     ~tool_name:"__gov_test_delete"
-    ~handler:(fun ~name:_ ~args:_ -> Some (true, "ok"));
+    ~handler:(fun ~name:_ ~args:_ -> Some (Tool_result.quick_ok "ok"));
   let tmpdir = make_tmpdir () in
   let config = Coord.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"development" in
@@ -630,7 +630,7 @@ let test_hook_production_blocks_critical () =
   setup ();
   Tool_dispatch.register
     ~tool_name:"__gov_test_delete2"
-    ~handler:(fun ~name:_ ~args:_ -> Some (true, "should not reach"));
+    ~handler:(fun ~name:_ ~args:_ -> Some (Tool_result.quick_ok "should not reach"));
   let tmpdir = make_tmpdir () in
   let config = Coord.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"production" in

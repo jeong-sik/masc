@@ -7,7 +7,7 @@
 
 (** Unified handler type: every tool call is [name * args -> tool_result option].
     [None] means "this handler does not know this tool". *)
-type handler = name:string -> args:Yojson.Safe.t -> (bool * string) option
+type handler = name:string -> args:Yojson.Safe.t -> Tool_result.t option
 
 (** {1 Registration} *)
 

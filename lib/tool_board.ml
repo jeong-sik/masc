@@ -93,8 +93,6 @@ let strip_state_blocks_text (s : string) : string =
   loop 0 buf;
   Buffer.contents buf
 
-type tool_result = bool * string
-
 
 (** {1 Helpers} *)
 
@@ -1433,7 +1431,7 @@ let register () =
   let handler =
     fun ~name ~args ->
       let result = handle_tool name args in
-      Some (result.success, Tool_result.message result)
+      Some result
   in
   let tool_required_permission = function
     | "masc_board_list" | "masc_board_get" | "masc_board_stats"

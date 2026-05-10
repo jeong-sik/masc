@@ -464,10 +464,10 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
         |> List.map (fun key -> `String key)
     | _ -> []
   in
-  let with_system_internal_audit ~agent_name ((success, message) as result) =
+  let with_system_internal_audit ~agent_name (result : Tool_result.t) =
     if is_system_internal_tool then (
       let error_msg =
-        if success then None else Some (preview message)
+        if result.success then None else Some (preview (Tool_result.message result))
       in
       let details =
         `Assoc
@@ -480,12 +480,12 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
           ]
       in
       Audit_log.log_system_internal_tool_call config ~agent_id:agent_name
-        ~tool_name:name ~success ~error_msg ~details
+        ~tool_name:name ~success:result.success ~error_msg ~details
         ?trace_id:(Otel_spans.current_trace_id ()) ());
     result
   in
   match mode_gate_error with
-  | Some msg -> with_system_internal_audit ~agent_name (false, msg)
+  | Some msg -> with_system_internal_audit ~agent_name (Tool_result.quick_error msg)
   | None ->
   (* Enforce tool authorization when enabled *)
   let auth_enabled = Auth.is_auth_enabled config.base_path in
@@ -501,7 +501,7 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
   match auth_result with
   | Error err ->
       with_system_internal_audit ~agent_name
-        (false, Masc_domain.masc_error_to_string err)
+        (Tool_result.quick_error (Masc_domain.masc_error_to_string err))
   | Ok () ->
   let dedupe_string_list values =
     values
@@ -607,7 +607,7 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
   match init_error with
   | Some msg ->
       with_system_internal_audit ~agent_name
-        (false, Printf.sprintf "%s" msg)
+        (Tool_result.quick_error msg)
   | None ->
 
   let is_read_only = Tool_dispatch.is_read_only name in
@@ -759,9 +759,9 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
                 ("reason", "room_uninitialized") ]
       ();
     with_system_internal_audit ~agent_name
-      (false, Printf.sprintf
+      (Tool_result.quick_error (Printf.sprintf
          "MASC room not initialized.\n\nFastest: masc_start(path=\"<project>\") — one-step init+join, then call %s.\nAlternative: masc_init → masc_join → masc_status → %s\n📚 See: @~/me/instructions/masc-workflow.md\n[DEBUG] agent_name=%s room_initialized=%b"
-         name name agent_name room_initialized)
+         name name agent_name room_initialized))
   end
   else if join_required && not is_joined then begin
     Prometheus.inc_counter
@@ -771,9 +771,9 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
                 ("reason", "agent_not_joined") ]
       ();
     with_system_internal_audit ~agent_name
-      (false, Printf.sprintf
+      (Tool_result.quick_error (Printf.sprintf
          "Join required before using %s.\n\nFastest: masc_start(path=\"<project>\") — one-step join with room scope.\nAlternative: masc_join → masc_status → %s\n📚 See: @~/me/instructions/masc-workflow.md\n[DEBUG] agent_name=%s is_joined=%b"
-         name name agent_name is_joined)
+         name name agent_name is_joined))
   end
   else (
 
@@ -789,13 +789,12 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
   in
 
   (* Dispatch a single module by tag — creates only that module's context.
-     Pre-hooks may coerce arguments (e.g. OAS type coercion: "42" -> 42). *)
-  let tuple_of_tool_result (result : Tool_result.t) =
-    (result.success, Tool_result.message result)
-  in
-  let dispatch_by_tag (tag : Tool_dispatch.module_tag) : (bool * string) option =
+     Pre-hooks may coerce arguments (e.g. OAS type coercion: "42" -> 42).
+     Returns [Tool_result.t option] directly — no tuple intermediary. *)
+  let dispatch_by_tag (tag : Tool_dispatch.module_tag) : Tool_result.t option =
+    let start_time = Time_compat.now () in
     match Tool_dispatch.run_pre_hooks ~name ~args:arguments with
-    | (Some blocked, _) -> Some (tuple_of_tool_result blocked)
+    | (Some blocked, _) -> Some blocked
     | (None, coerced_args) -> match tag with
     | Mod_plan ->
         Tool_plan.dispatch { config } ~name ~args:coerced_args
@@ -806,6 +805,9 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
         Tool_operator.dispatch ctx ~name ~args:coerced_args
     | Mod_local_runtime ->
         Tool_local_runtime.dispatch { Tool_local_runtime.config; agent_name } ~name ~args:coerced_args
+        |> Option.map (fun (ok, msg) ->
+             if ok then Tool_result.ok ~tool_name:name ~start_time msg
+             else Tool_result.error ~tool_name:name ~start_time msg)
     | Mod_worktree ->
         Tool_worktree.dispatch { Tool_worktree.config; agent_name } ~name ~args:coerced_args
     | Mod_code ->
@@ -818,13 +820,18 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
         Tool_run.dispatch { Tool_run.config } ~name ~args:coerced_args
     | Mod_agent ->
         Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args:coerced_args
+        |> Option.map (fun (ok, msg) ->
+             if ok then Tool_result.ok ~tool_name:name ~start_time msg
+             else Tool_result.error ~tool_name:name ~start_time msg)
     | Mod_task ->
         Tool_task.dispatch ?agent_tool_names:caller_tool_names
           { Tool_task.config; agent_name; sw = Some sw } ~name
           ~args:coerced_args
     | Mod_room ->
         Tool_coord.dispatch { Tool_coord.config; agent_name } ~name ~args:coerced_args
-        |> Option.map (fun { Coord_types.success; message } -> (success, message))
+        |> Option.map (fun { Coord_types.success; message } ->
+          if success then Tool_result.ok ~tool_name:name ~start_time message
+          else Tool_result.error ~tool_name:name ~start_time message)
     | Mod_control ->
         Tool_control.dispatch { Tool_control.config; agent_name } ~name ~args:coerced_args
     | Mod_agent_timeline ->
@@ -833,11 +840,17 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
         Tool_misc.dispatch { Tool_misc.config; agent_name } ~name ~args:coerced_args
     | Mod_suspend ->
         Tool_suspend.dispatch { Tool_suspend.config; caller_agent = Some agent_name } ~name ~args:coerced_args
+        |> Option.map (fun (ok, msg) ->
+             if ok then Tool_result.ok ~tool_name:name ~start_time msg
+             else Tool_result.error ~tool_name:name ~start_time msg)
     | Mod_library ->
         Tool_library.dispatch { Tool_library.agent_name } ~name ~args:coerced_args
     | Mod_keeper ->
         Keeper_tool_boundary.dispatch (make_keeper_tool_ctx ()) ~name
           ~args:coerced_args
+        |> Option.map (fun (ok, msg) ->
+             if ok then Tool_result.ok ~tool_name:name ~start_time msg
+             else Tool_result.error ~tool_name:name ~start_time msg)
     (* Mod_repair_loop removed: tools pruned *)
     | Mod_autoresearch ->
         let ctx : Tool_autoresearch.context = { base_path = config.base_path;
@@ -846,7 +859,9 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
         Tool_autoresearch.dispatch ctx ~name ~args:coerced_args
     | Mod_shard ->
         let (ok, json) = Tool_shard.execute name coerced_args in
-        Some (ok, Yojson.Safe.to_string json)
+        let message = Yojson.Safe.to_string json in
+        Some (if ok then Tool_result.ok ~tool_name:name ~start_time message
+              else Tool_result.error ~tool_name:name ~start_time message)
     | Mod_inline ->
         let inline_ctx : Tool_inline_dispatch.context = {
           config; agent_name; registry; state; sw; clock; arguments = coerced_args;
@@ -906,18 +921,18 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
         loop candidates
   in
   let dispatch_internal_keeper_runtime_tool () =
+    let start_time = Time_compat.now () in
     match Tool_dispatch.run_pre_hooks ~name ~args:arguments with
-    | (Some blocked, _) -> Some (tuple_of_tool_result blocked)
+    | (Some blocked, _) -> Some blocked
     | (None, coerced_args) -> (
         match internal_keeper_meta_of_agent () with
-        | Error msg -> Some (false, msg)
+        | Error msg ->
+            Some (Tool_result.error ~tool_name:name ~start_time msg)
         | Ok meta ->
             let ctx_work =
               Keeper_exec_context.create ~system_prompt:""
                 ~max_tokens:(Keeper_config.keeper_unified_max_tokens ())
             in
-            (* PR-3b (#11611 part 1): factory replaces eager
-               Keeper_turn_sandbox_runtime here too. *)
             let turn_sandbox_factory =
               Some (Keeper_sandbox_factory.create ~config ~meta ())
             in
@@ -954,7 +969,9 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
               | `Success -> true
               | `Failure -> false
             in
-            Some (success, result.raw_output))
+            Some (if success
+                  then Tool_result.ok ~tool_name:name ~start_time result.raw_output
+                  else Tool_result.error ~tool_name:name ~start_time result.raw_output))
   in
   (* Primary dispatch: mint token at I/O boundary, then O(1) tag lookup.
      Tool_token validates the name exists in the tag registry (Parse, Don't
@@ -970,7 +987,7 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
   | None -> match Tool_dispatch.mint_token ~name with
   | Error reason ->
       with_system_internal_audit ~agent_name
-        (false, format_unknown_tool_error ~reason)
+        (Tool_result.quick_error ~tool_name:name (format_unknown_tool_error ~reason))
   | Ok _token ->
       (* Token proves the name is registered in at least one registry.
          lookup_tag None after mint is a registry inconsistency (tool in
@@ -985,5 +1002,5 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
        | None ->
            Log.Mcp.warn "registry inconsistency: %s minted but no tag" name;
            with_system_internal_audit ~agent_name
-             (false,
-              Printf.sprintf "Unknown tool: %s (registry inconsistency)" name)))
+             (Tool_result.quick_error ~tool_name:name
+                (Printf.sprintf "Unknown tool: %s (registry inconsistency)" name))))

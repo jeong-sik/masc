@@ -87,7 +87,6 @@
    keeper_exec_task
    keeper_exec_voice
    keeper_exec_masc
-   keeper_exec_memory
    keeper_exec_tools
   keeper_exec_status_metrics
   keeper_exec_status
@@ -248,6 +247,10 @@
    ;; root-namespace cycles (Proof_artifact_reader, Bounded, Session,
    ;; Attribution, Violation_record) are resolved.
    masc_mcp.cdal
+   ;; RFC-0058 Phase 1 — Declarative cascade TOML config. Separate sub-library
+   ;; to avoid type name collisions (transport, provider, binding, tier, strategy)
+   ;; with identically-named types in the main library.
+   masc_mcp.cascade_decl
    masc_mcp.oas_compat
 
    uri

@@ -1256,7 +1256,7 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
         </div>
       </div>
 
-      <div class="grid grid-cols-3 gap-2 text-xs">
+      <div class="grid grid-cols-2 gap-2 text-xs md:grid-cols-3">
         <div>
           <div class="text-[var(--color-fg-disabled)]">messages</div>
           <div class="font-mono text-[var(--color-fg-primary)]">${ch.message_count}</div>
@@ -1335,7 +1335,7 @@ function BindingRow({ binding }: { binding: BindingInfo }) {
           ${tone.label}
         </span>
       </div>
-      <div class="mt-2 grid grid-cols-3 gap-2 text-2xs text-[var(--color-fg-disabled)]">
+      <div class="mt-2 grid grid-cols-1 gap-2 text-2xs text-[var(--color-fg-disabled)] sm:grid-cols-3">
         <div>
           msgs <span class="font-mono text-[var(--color-fg-primary)]">${binding.message_count}</span>
         </div>

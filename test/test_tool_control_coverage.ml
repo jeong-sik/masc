@@ -71,9 +71,9 @@ let () =
         Tool_control.dispatch ctx ~name:"masc_pause"
           ~args:(`Assoc [ ("reason", `String "Test pause") ])
       with
-      | Some (success, result) ->
-          assert success;
-          assert (String.length result > 0)
+      | Some result ->
+          assert result.success;
+          assert (String.length result.legacy_message > 0)
       | None -> failwith "dispatch returned None")
 
 let () =
@@ -84,9 +84,9 @@ let () =
           (`Assoc [ ("reason", `String "For status test") ])
       in
       match Tool_control.dispatch ctx ~name:"masc_pause_status" ~args:(`Assoc []) with
-      | Some (success, result) ->
-          assert success;
-          let json = parse_json result in
+      | Some result ->
+          assert result.success;
+          let json = parse_json result.legacy_message in
           assert (Yojson.Safe.Util.member "paused" json = `Bool true);
           assert (Yojson.Safe.Util.member "status" json = `String "paused")
       | None -> failwith "dispatch returned None")
@@ -99,18 +99,18 @@ let () =
           (`Assoc [ ("reason", `String "For resume test") ])
       in
       match Tool_control.dispatch ctx ~name:"masc_resume" ~args:(`Assoc []) with
-      | Some (success, result) ->
-          assert success;
-          assert (String.length result > 0)
+      | Some result ->
+          assert result.success;
+          assert (String.length result.legacy_message > 0)
       | None -> failwith "dispatch returned None")
 
 let () =
   test "dispatch_pause_status_running" (fun () ->
       with_ctx @@ fun ctx ->
       match Tool_control.dispatch ctx ~name:"masc_pause_status" ~args:(`Assoc []) with
-      | Some (success, result) ->
-          assert success;
-          let json = parse_json result in
+      | Some result ->
+          assert result.success;
+          let json = parse_json result.legacy_message in
           assert (Yojson.Safe.Util.member "paused" json = `Bool false);
           assert (Yojson.Safe.Util.member "status" json = `String "running")
       | None -> failwith "dispatch returned None")
@@ -122,9 +122,9 @@ let () =
         Tool_control.dispatch ctx ~name:"masc_pause_status"
           ~args:(`Assoc [ ("namespace_id", `String "focus-room") ])
       with
-      | Some (success, result) ->
-          assert success;
-          let json = parse_json result in
+      | Some result ->
+          assert result.success;
+          let json = parse_json result.legacy_message in
           assert (Yojson.Safe.Util.member "namespace_id" json = `Null);
           assert (Yojson.Safe.Util.member "namespace" json = `Null);
           assert (Yojson.Safe.Util.member "requested_namespace_id" json = `Null)
@@ -134,9 +134,9 @@ let () =
   test "dispatch_pause_status_uninitialized_room_is_safe" (fun () ->
       with_ctx ~initialize:false @@ fun ctx ->
       match Tool_control.dispatch ctx ~name:"masc_pause_status" ~args:(`Assoc []) with
-      | Some (success, result) ->
-          assert success;
-          let json = parse_json result in
+      | Some result ->
+          assert result.success;
+          let json = parse_json result.legacy_message in
           assert (Yojson.Safe.Util.member "status" json = `String "initializing");
           assert (Yojson.Safe.Util.member "initializing" json = `Bool true);
           assert (Yojson.Safe.Util.member "paused" json = `Null)

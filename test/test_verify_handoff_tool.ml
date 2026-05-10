@@ -33,7 +33,7 @@ let test_verify_handoff_removed_from_registry () =
   let base_path = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-      let success, _body =
+      let result =
         Mcp_eio.execute_tool_eio ~sw ~clock state ~name:"masc_verify_handoff"
           ~arguments:
             (`Assoc
@@ -43,7 +43,7 @@ let test_verify_handoff_removed_from_registry () =
               ])
       in
       (* Tool was pruned from registry — dispatch should fail. *)
-      check bool "tool dispatch fails after prune" false success)
+      check bool "tool dispatch fails after prune" false result.Masc_mcp.Tool_result.success)
 
 let () =
   run "verify_handoff tool"

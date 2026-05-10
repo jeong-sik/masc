@@ -44,7 +44,7 @@ val dispatch :
   float Eio.Time.clock_ty context ->
   name:string ->
   args:Yojson.Safe.t ->
-  tool_result option
+  Tool_result.t option
 (** [dispatch ctx ~name ~args] dispatches the named MCP tool call.
     Returns [None] for unrecognised names so callers can fall
     through to other dispatchers.

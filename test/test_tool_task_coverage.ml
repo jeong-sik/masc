@@ -143,7 +143,7 @@ let () = test "dispatch_add_task" (fun () ->
   let ctx = make_test_ctx () in
   let args = `Assoc [("title", `String "Test task"); ("priority", `Int 2)] in
   match Tool_task.dispatch ctx ~name:"masc_add_task" ~args with
-  | Some (success, _result) -> assert success
+  | Some result -> assert result.success
   | None -> failwith "dispatch returned None"
 )
 
@@ -152,7 +152,7 @@ let () = test "dispatch_tasks" (fun () ->
   let ctx = make_test_ctx () in
   let args = `Assoc [] in
   match Tool_task.dispatch ctx ~name:"masc_tasks" ~args with
-  | Some (success, _result) -> assert success
+  | Some result -> assert result.success
   | None -> failwith "dispatch returned None"
 )
 
@@ -235,7 +235,7 @@ let () = test "dispatch_transition_claim" (fun () ->
   let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Claim test")]) in
   let args = `Assoc [("task_id", `String "task-001"); ("action", `String "claim")] in
   match Tool_task.dispatch ctx ~name:"masc_transition" ~args with
-  | Some (_success, _result) -> () (* May fail if task doesn't exist *)
+  | Some _ -> () (* May fail if task doesn't exist *)
   | None -> failwith "dispatch returned None"
 )
 
@@ -244,7 +244,7 @@ let () = test "dispatch_claim_next" (fun () ->
   let ctx = make_test_ctx () in
   let args = `Assoc [] in
   match Tool_task.dispatch ctx ~name:"masc_claim_next" ~args with
-  | Some (_success, _result) -> ()
+  | Some _ -> ()
   | None -> failwith "dispatch returned None"
 )
 
@@ -1142,9 +1142,9 @@ let () = test "dispatch_claim_task_uses_server_surface_not_payload_surface" (fun
             ("agent_tool_names", `List [ `String "keeper_bash" ]);
           ])
   with
-  | Some (success, result) ->
-      assert (not success);
-      assert (str_contains result "requires tool(s) unavailable");
+  | Some result ->
+      assert (not result.success);
+      assert (str_contains result.legacy_message "requires tool(s) unavailable");
       assert_task_todo ctx
   | None -> failwith "dispatch returned None"
 )
@@ -1306,7 +1306,7 @@ let () = test "dispatch_transition_release" (fun () ->
   let ctx = make_test_ctx () in
   let args = `Assoc [("task_id", `String "task-001"); ("action", `String "release")] in
   match Tool_task.dispatch ctx ~name:"masc_transition" ~args with
-  | Some (_success, _result) -> ()
+  | Some _ -> ()
   | None -> failwith "dispatch returned None"
 )
 
@@ -1315,7 +1315,7 @@ let () = test "dispatch_transition" (fun () ->
   let ctx = make_test_ctx () in
   let args = `Assoc [("task_id", `String "task-001"); ("action", `String "start")] in
   match Tool_task.dispatch ctx ~name:"masc_transition" ~args with
-  | Some (_success, _result) -> ()
+  | Some _ -> ()
   | None -> failwith "dispatch returned None"
 )
 
@@ -1324,7 +1324,7 @@ let () = test "dispatch_update_priority" (fun () ->
   let ctx = make_test_ctx () in
   let args = `Assoc [("task_id", `String "task-001"); ("priority", `Int 1)] in
   match Tool_task.dispatch ctx ~name:"masc_update_priority" ~args with
-  | Some (_success, _result) -> ()
+  | Some _ -> ()
   | None -> failwith "dispatch returned None"
 )
 
@@ -1333,7 +1333,7 @@ let () = test "dispatch_task_history" (fun () ->
   let ctx = make_test_ctx () in
   let args = `Assoc [("task_id", `String "task-001")] in
   match Tool_task.dispatch ctx ~name:"masc_task_history" ~args with
-  | Some (success, _result) -> assert success
+  | Some result -> assert result.success
   | None -> failwith "dispatch returned None"
 )
 

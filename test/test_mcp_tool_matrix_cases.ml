@@ -279,10 +279,9 @@ let execute_tool fixture ~name ~arguments =
     ~mcp_session_id:fixture.sid fixture.state ~name ~arguments
 
 let execute_tool_ok fixture ~name ~arguments =
-  match execute_tool fixture ~name ~arguments with
-  | true, body -> body
-  | false, body ->
-      failwith (Printf.sprintf "setup tool failed for %s: %s" name body)
+  let result = execute_tool fixture ~name ~arguments in
+  if result.Masc_mcp.Tool_result.success then Masc_mcp.Tool_result.message result
+  else failwith (Printf.sprintf "setup tool failed for %s: %s" name (Masc_mcp.Tool_result.message result))
 
 let ensure_initialized fixture =
   (* masc_init pruned from registry. Initialise the room state
@@ -292,17 +291,21 @@ let ensure_initialized fixture =
        ~agent_name:(Some fixture.agent_name))
 
 let ensure_joined fixture =
-  match execute_tool fixture ~name:"masc_join"
-          ~arguments:
-            (`Assoc
-              [
-                ("agent_name", `String fixture.agent_name);
-                ("capabilities", `List [ `String "testing"; `String "tool-matrix" ]);
-              ])
-  with
-  | true, _ -> ()
-  | false, body when contains_substring body "already joined" -> ()
-  | false, body -> failwith ("masc_join failed: " ^ body)
+  let result =
+    execute_tool fixture ~name:"masc_join"
+      ~arguments:
+        (`Assoc
+          [
+            ("agent_name", `String fixture.agent_name);
+            ("capabilities", `List [ `String "testing"; `String "tool-matrix" ]);
+          ])
+  in
+  if result.Masc_mcp.Tool_result.success then ()
+  else begin
+    let body = Masc_mcp.Tool_result.message result in
+    if contains_substring body "already joined" then ()
+    else failwith ("masc_join failed: " ^ body)
+  end
 
 let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
   let worktree_dir = setup_git_repo base_path in

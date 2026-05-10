@@ -83,6 +83,10 @@ let string_contains ~sub s =
 
 type tool_result = bool * string
 
+let wrap_result ~name ~start (success, message) =
+  if success then Tool_result.ok ~tool_name:name ~start_time:start message
+  else Tool_result.error ~tool_name:name ~start_time:start message
+
 type context = {
   agent_name: string;
 }
@@ -346,13 +350,14 @@ let handle_search _ctx args =
   end
 
 (* Dispatch *)
-let dispatch ctx ~name ~args : tool_result option =
+let dispatch ctx ~name ~args : Tool_result.t option =
+  let start = Time_compat.now () in
   match name with
-  | "masc_library_list" -> Some (handle_list ctx args)
-  | "masc_library_read" -> Some (handle_read ctx args)
-  | "masc_library_add" -> Some (handle_add ctx args)
-  | "masc_library_promote" -> Some (handle_promote ctx args)
-  | "masc_library_search" -> Some (handle_search ctx args)
+  | "masc_library_list" -> Some (wrap_result ~name ~start (handle_list ctx args))
+  | "masc_library_read" -> Some (wrap_result ~name ~start (handle_read ctx args))
+  | "masc_library_add" -> Some (wrap_result ~name ~start (handle_add ctx args))
+  | "masc_library_promote" -> Some (wrap_result ~name ~start (handle_promote ctx args))
+  | "masc_library_search" -> Some (wrap_result ~name ~start (handle_search ctx args))
   | _ -> None
 
 (* Tool definitions for MCP protocol *)

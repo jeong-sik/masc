@@ -28,8 +28,34 @@ let contains_casefold haystack needle =
 
 (* Failure classification delegates to [Tool_result] — the SSOT closed-sum
    type with compiler-enforced exhaustive handling at every match site.
-   See {!Tool_result.tool_failure_class} for the 4 constructors and
-   {!Tool_result.classify_from_dispatch_failure} for the heuristic. *)
+   See {!Tool_result.tool_failure_class} for the 4 constructors.
+
+   Local heuristic for classifying failure messages at the MCP protocol
+   level where only the message string is available (not a [Tool_result.t]).
+   Mirrors the logic that was in [Tool_result.classify_from_dispatch_failure]
+   before it was made internal in Phase 2. *)
+let classify_failure_message (message : string) : Tool_result.tool_failure_class =
+  if contains_casefold message "awaiting_approval"
+     || contains_casefold message "join required"
+  then Tool_result.Workflow_rejection
+  else if
+    contains_casefold message "egress_blocked"
+    || contains_casefold message "path_outside_sandbox"
+  then Tool_result.Policy_rejection
+  else if contains_casefold message "Tool timed out" then
+    Tool_result.Runtime_failure
+  else if
+    contains_casefold message "timeout"
+    || contains_casefold message "temporary"
+    || contains_casefold message "temporarily"
+    || contains_casefold message "econn"
+    || contains_casefold message "connection"
+    || contains_casefold message "unavailable"
+    || contains_casefold message "rate limit"
+    || contains_casefold message "502"
+    || contains_casefold message "503"
+  then Tool_result.Transient_error
+  else Tool_result.Runtime_failure
 
 let parse_status_from_message ~success ~message =
   if not success then
@@ -444,7 +470,7 @@ let read_only_retry_limit () =
   Env_config.Tools.readonly_retry_limit
 
 let is_retryable_failure message =
-  Tool_result.is_retryable (Tool_result.classify_from_dispatch_failure message)
+  Tool_result.is_retryable (classify_failure_message message)
 
 let read_only_retry_wait ~attempt =
   let attempt = float_of_int attempt in
@@ -457,16 +483,17 @@ let call_tool_with_readonly_retry
     () =
   let max_attempts = read_only_retry_limit () in
   let rec loop attempt =
-    let (success, message) =
-      run_tool ()
-    in
+    let result = run_tool () in
+    let success = result.Tool_result.success in
     if
       success
       || attempt >= max_attempts
       || not is_read_only
-      || not (is_retryable_failure message)
+      || (match Tool_result.failure_class result with
+          | Some cls -> not (Tool_result.is_retryable cls)
+          | None -> false)
     then
-      (success, message, attempt)
+      (result, attempt)
     else (
       Eio.Time.sleep clock (read_only_retry_wait ~attempt);
       loop (attempt + 1))
@@ -628,29 +655,31 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
              with Eio.Time.Timeout ->
                local_timeout_hit := true;
                Log.Mcp.error "tools/call timeout: %s after %.0fs" name timeout_sec;
-               (false,
-                let source =
-                  match source_env with
-                  | Some source -> Printf.sprintf " (timeout source: %s)" source
-                  | None -> ""
-                in
-                Printf.sprintf "Tool timed out after %.0fs: %s%s"
-                  timeout_sec name source))
+               let source =
+                 match source_env with
+                 | Some source -> Printf.sprintf " (timeout source: %s)" source
+                 | None -> ""
+               in
+               Tool_result.error ~tool_name:name ~start_time
+                 (Printf.sprintf "Tool timed out after %.0fs: %s%s"
+                    timeout_sec name source))
      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
        (* Never let a tool exception crash the MCP server. *)
        let err = Printexc.to_string exn in
        let trace = Printexc.get_backtrace () in
        let err_detail = if String.length trace > 0 then err ^ "\n" ^ trace else err in
        if contains_casefold err "Invalid_argument(\"MASC not initialized" then
-         (false, Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized))
+         Tool_result.error ~tool_name:name ~start_time
+           (Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized))
        else
          (Log.Mcp.error "tools/call crashed: %s" err_detail;
-          false, Printf.sprintf "Internal error: %s" err_detail)
+          Tool_result.error ~tool_name:name ~start_time
+            (Printf.sprintf "Internal error: %s" err_detail))
     in
     if !local_timeout_hit then timeout_hit := true;
     result
   in
-  let (success, message, attempts) =
+  let (result, attempts) =
     if is_read_only then
       call_tool_with_readonly_retry
         ~clock
@@ -658,8 +687,10 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
         ~is_read_only
         ()
     else
-      let (success, message) = execute_with_timeout () in
-      (success, message, 1)
+      (execute_with_timeout (), 1)
+  in
+  let success = result.Tool_result.success
+  and message = Tool_result.message result
   in
   let end_time = Eio.Time.now clock in
   let duration_ms = int_of_float ((end_time -. start_time) *. 1000.0) in
@@ -718,8 +749,9 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     ?trace_id:otel_trace_id ();
   if not success then (
     let failure_class =
-      Tool_result.classify_from_dispatch_failure
-        (Option.value ~default:"" error_detail)
+      match Tool_result.failure_class result with
+      | Some cls -> cls
+      | None -> Tool_result.Runtime_failure
     in
     Log.Mcp.emit (Tool_result.log_level_of_failure_class failure_class)
       ~details:

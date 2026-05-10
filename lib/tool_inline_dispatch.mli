@@ -38,4 +38,4 @@ type context = Tool_inline_dispatch_types.context = {
 
 val safe_exec : string list -> tool_result
 
-val dispatch : context -> name:string -> tool_result option
+val dispatch : context -> name:string -> Tool_result.t option

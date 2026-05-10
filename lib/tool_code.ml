@@ -37,6 +37,10 @@ type context = {
 
 type tool_result = bool * string
 
+let wrap_result ~name ~start (success, message) =
+  if success then Tool_result.ok ~tool_name:name ~start_time:start message
+  else Tool_result.error ~tool_name:name ~start_time:start message
+
 (* Security: Binary file extensions *)
 let binary_extensions = [
   ".so"; ".a"; ".lib"; ".dll"; ".dylib";
@@ -579,11 +583,12 @@ let handle_code_read ctx args =
   end
 
 (* Dispatch function - returns None if tool not handled *)
-let dispatch ctx ~name ~args : tool_result option =
+let dispatch ctx ~name ~args : Tool_result.t option =
+  let start = Time_compat.now () in
   match name with
-  | "masc_code_search" -> Some (handle_code_search ctx args)
-  | "masc_code_symbols" -> Some (handle_code_symbols ctx args)
-  | "masc_code_read" -> Some (handle_code_read ctx args)
+  | "masc_code_search" -> Some (wrap_result ~name ~start (handle_code_search ctx args))
+  | "masc_code_symbols" -> Some (wrap_result ~name ~start (handle_code_symbols ctx args))
+  | "masc_code_read" -> Some (wrap_result ~name ~start (handle_code_read ctx args))
   | _ -> None
 
 let schemas : Masc_domain.tool_schema list = [

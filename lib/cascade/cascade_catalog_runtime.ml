@@ -729,6 +729,31 @@ let validate_path_result ?sw ?net ~config_path () =
             }
           in
           record_probe_metrics profile_snapshots;
+          (* RFC-0058 Phase 3: parallel declarative validation *)
+          (match Cascade_declarative_hotpath.try_load_declarative config_path with
+           | Some (Ok decl_snap) ->
+             let json_names =
+               List.map (fun (p : profile_build) -> p.name)
+                 profile_snapshots
+             in
+             let decl_names =
+               Cascade_declarative_hotpath.decl_snapshot_profile_names decl_snap
+             in
+             if json_names <> decl_names then
+               Log.Misc.warn
+                 "[CascadeDeclarative] profile name mismatch: \
+                  json=[%s] decl=[%s]"
+                 (String.concat ", " json_names)
+                 (String.concat ", " decl_names)
+             else
+               Log.Misc.info
+                 "[CascadeDeclarative] parallel validation OK, %d profiles"
+                 (List.length decl_names)
+           | Some (Error errs) ->
+             List.iter (fun e ->
+               Log.Misc.warn "[CascadeDeclarative] adapter error: %s"
+                 (Cascade_declarative_adapter.show_adapter_error e)) errs
+           | None -> ());
           if rejected_profiles = [] then
             Ok { snapshot; rejected_update = None }
           else

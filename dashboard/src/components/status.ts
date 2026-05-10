@@ -10,7 +10,7 @@ import { JourneyPanel } from './journey-panel'
 
 export type StatusSection =
   | 'observatory' | 'journey' | 'agents' | 'runtime' | 'goal-loop' | 'fleet-health'
-  | 'cognition'
+  | 'cognition' | 'memory-subsystems'
 
 const LazyAgentsUnified = lazy(async () => ({
   default: (await import('./agents-unified')).AgentsUnified,
@@ -29,6 +29,9 @@ const LazyObservatory = lazy(async () => ({
 }))
 const LazyCognitionPlane = lazy(async () => ({
   default: (await import('./cognition-plane')).CognitionPlane,
+}))
+const LazyMemorySubsystems = lazy(async () => ({
+  default: (await import('./memory-subsystems')).MemorySubsystems,
 }))
 
 function sectionFallback(label: string) {
@@ -49,6 +52,8 @@ export function sectionLabel(section: StatusSection): string {
       return 'Fleet Health'
     case 'cognition':
       return 'Cognition'
+    case 'memory-subsystems':
+      return 'Memory Subsystems'
     case 'agents':
       return 'Agents'
   }
@@ -68,6 +73,8 @@ function renderSection(section: StatusSection) {
       return html`<${LazyFleetHealthPanel} />`
     case 'cognition':
       return html`<${LazyCognitionPlane} />`
+    case 'memory-subsystems':
+      return html`<${LazyMemorySubsystems} />`
     case 'agents':
       return html`<${LazyAgentsUnified} />`
   }
@@ -82,6 +89,7 @@ function currentSection(): StatusSection {
     || section === 'goal-loop'
     || section === 'fleet-health'
     || section === 'cognition'
+    || section === 'memory-subsystems'
     || section === 'agents'
   ) return section
   return 'journey'

@@ -66,6 +66,7 @@
   keeper_exec_shared
    keeper_exec_board
    keeper_exec_fs
+   keeper_exec_ide
    keeper_shell_docker
    keeper_egress_audit
    keeper_mcp_provider_audit

@@ -1,5 +1,6 @@
 open Keeper_types
 open Keeper_exec_shared
+open Ide_region_tracker
 
 (* Issue #8490: Variant SSOT for fs write mode. Adding a constructor
    forces compilation in [fs_write_mode_to_string] and
@@ -190,6 +191,37 @@ exception Fs_edit_error of string
 let raise_fs_edit_error ?fields message =
   raise (Fs_edit_error (error_json ?fields message))
 
+(** After a successful file write, record the code region in [.masc-ide/].
+    Fire-and-forget: errors are logged but never block the write path.
+    Uses [Ide_region_tracker.ingest_tool_call] which silently ignores
+    non-file-write tools. *)
+let track_write_region ~config ~keeper_name ~file_path ~content ~mode_raw ~old_string ~new_string () =
+  let base_dir = Keeper_alerting_path.project_root_of_config config in
+  let tool_name =
+    match fs_write_mode_of_string_opt mode_raw with
+    | Some Patch -> "edit_file"
+    | _ -> "write_file"
+  in
+  let arguments =
+    let fields = [("path", `String file_path); ("content", `String content)] in
+    match fs_write_mode_of_string_opt mode_raw with
+    | Some Patch ->
+      `Assoc (
+        fields
+        @ [("old_string", `String old_string); ("new_string", `String new_string)]
+      )
+    | _ -> `Assoc fields
+  in
+  let tool_call_json = `Assoc [
+    ("name", `String tool_name);
+    ("arguments", arguments);
+  ] in
+  (try Ide_region_tracker.ingest_tool_call
+     ~base_dir ~keeper_id:keeper_name ~turn:0 tool_call_json
+   with exn ->
+     Log.Keeper.warn "IDE region tracking failed for keeper=%s path=%s: %s"
+       keeper_name file_path (Printexc.to_string exn))
+
 let validate_write_target ~config ~meta ~target =
   match
     Keeper_sandbox_containment.check_write_target ~config ~meta ~target
@@ -282,6 +314,10 @@ let handle_keeper_fs_edit
                         replace_all=%b occurrences=%d bytes=%d"
                        meta.name target replace_all occurrences
                        (String.length updated);
+                     (* IDE: record code region after successful patch write *)
+                     track_write_region ~config ~keeper_name:meta.name
+                       ~file_path:target ~content:updated
+                       ~mode_raw:"patch" ~old_string ~new_string ();
                      Yojson.Safe.to_string
                        (`Assoc
                            ([ "ok", `Bool true
@@ -349,6 +385,10 @@ let handle_keeper_fs_edit
            Log.Keeper.info "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=%s bytes=%d"
              meta.name target mode_label
              (String.length content);
+           (* IDE: record code region after successful overwrite/append write *)
+           track_write_region ~config ~keeper_name:meta.name
+             ~file_path:target ~content
+             ~mode_raw:(fs_write_mode_to_string mode) ~old_string:"" ~new_string:"" ();
            Yojson.Safe.to_string
              (`Assoc
                  ([ "ok", `Bool true

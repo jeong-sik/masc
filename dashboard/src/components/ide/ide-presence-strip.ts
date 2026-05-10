@@ -7,6 +7,8 @@ import {
   type KeeperPresenceEntry,
   type KeeperPresenceSnapshot,
 } from './keeper-presence-store'
+import { cursorOverlaySignal } from './keeper-cursor-overlay'
+import { activeIdeFile } from './ide-shell'
 
 const FALLBACK_PRESENCE: KeeperPresenceSnapshot = {
   runtime_id: 'local',
@@ -136,31 +138,48 @@ async function fetchWorktreeEntries(): Promise<WorktreeEntry[]> {
   }
 }
 
-async function fetchPresence(): Promise<KeeperPresenceSnapshot> {
+interface PresenceData {
+  readonly snapshot: KeeperPresenceSnapshot
+  readonly worktrees: ReadonlyArray<WorktreeEntry>
+}
+
+const FALLBACK_DATA: PresenceData = {
+  snapshot: FALLBACK_PRESENCE,
+  worktrees: [],
+}
+
+async function fetchPresence(): Promise<PresenceData> {
   try {
     const [agentsRes, statusRes, worktrees] = await Promise.all([
       fetch('/api/v1/agents?limit=20'),
       fetch('/api/v1/status'),
       fetchWorktreeEntries(),
     ])
-    if (!agentsRes.ok || !statusRes.ok) return FALLBACK_PRESENCE
+    if (!agentsRes.ok || !statusRes.ok) return { snapshot: FALLBACK_PRESENCE, worktrees }
     const agentsData = await agentsRes.json()
     const statusData = await statusRes.json()
     const agents: ApiAgent[] = Array.isArray(agentsData.agents) ? agentsData.agents : []
-    if (agents.length === 0) return FALLBACK_PRESENCE
-    return agentsToPresence(agents, statusData as ApiStatus, worktrees)
+    if (agents.length === 0) return { snapshot: FALLBACK_PRESENCE, worktrees }
+    const snapshot = agentsToPresence(agents, statusData as ApiStatus, worktrees)
+    return { snapshot, worktrees }
   } catch {
-    return FALLBACK_PRESENCE
+    return FALLBACK_DATA
   }
 }
 
 export function IdePresenceStrip() {
   const presenceStore = useMemo(() => createKeeperPresenceStore(FALLBACK_PRESENCE), [])
   const [, forceRender] = useState(0)
+  const [worktrees, setWorktrees] = useState<ReadonlyArray<WorktreeEntry>>([])
 
   useEffect(() => {
     let cancelled = false
-    fetchPresence().then(snapshot => { if (!cancelled) presenceStore.seed(snapshot) })
+    fetchPresence().then(data => {
+      if (!cancelled) {
+        presenceStore.seed(data.snapshot)
+        setWorktrees(data.worktrees)
+      }
+    })
     return () => { cancelled = true }
   }, [presenceStore])
 
@@ -173,6 +192,8 @@ export function IdePresenceStrip() {
   }, [presenceStore])
 
   useEffect(() => presenceStore.subscribe(() => forceRender(tick => tick + 1)), [presenceStore])
+
+  useEffect(() => cursorOverlaySignal.subscribe(() => forceRender(tick => tick + 1)), [])
 
   const current = presenceStore.snapshot()
   const entries = presenceStore.entries()
@@ -207,31 +228,77 @@ export function IdePresenceStrip() {
           overflow: 'hidden',
         }}
       >
-        ${entries.map(entry => html`<${PresenceChip} entry=${entry} />`)}
+        ${entries.map(entry => html`<${PresenceChip} entry=${entry} worktrees=${worktrees} />`)}
       </ul>
     </div>
   `
 }
 
-function PresenceChip({ entry }: { readonly entry: KeeperPresenceEntry }) {
+interface PresenceChipProps {
+  readonly entry: KeeperPresenceEntry
+  readonly worktrees: ReadonlyArray<WorktreeEntry>
+}
+
+function PresenceChip({ entry, worktrees }: PresenceChipProps) {
   const isActive = entry.status === 'active'
+  const cursor = cursorOverlaySignal.value.cursors.get(entry.keeper_id)
+  const wt = worktrees.find(w => w.branch.startsWith(entry.keeper_id + '/'))
+
+  const focusLabel = cursor?.file_path
+    ? `${cursor.file_path.split('/').pop()}:${cursor.line}`
+    : null
+
+  const prBadge = wt?.pr_number != null && wt.pr_state != null
+    ? prLabel(wt.pr_number, wt.pr_state)
+    : null
+
+  const navigate = (): void => {
+    if (cursor?.file_path) activeIdeFile.value = cursor.file_path
+  }
+
   return html`
     <li
-      title=${`${entry.keeper_id} · ${entry.role} · ${entry.branch}`}
-      aria-label=${`${entry.keeper_id} ${entry.status} in ${entry.workspace_label}`}
+      title=${`${entry.keeper_id} · ${entry.role} · ${focusLabel ?? 'no file focus'}${prBadge ? ` · ${prBadge}` : ''}`}
+      aria-label=${`${entry.keeper_id} ${entry.status} in ${entry.workspace_label}${focusLabel ? ` editing ${focusLabel}` : ''}`}
+      role="button"
+      tabIndex=${cursor?.file_path ? 0 : undefined}
+      onClick=${navigate}
+      onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate() } }}
       style=${{
         display: 'inline-flex',
         alignItems: 'center',
         gap: 'var(--sp-1)',
-        maxWidth: '180px',
+        maxWidth: '260px',
         color: 'var(--color-fg-secondary)',
         whiteSpace: 'nowrap',
+        cursor: cursor?.file_path ? 'pointer' : 'default',
+        borderRadius: 'var(--r-1)',
+        padding: '0 var(--sp-1)',
+        transition: 'background 0.15s',
       }}
     >
       <${KeeperBadge} id=${entry.keeper_id} variant="sigil" size="sm" beat=${isActive} />
       <span style=${{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
         ${entry.keeper_id}@${entry.workspace_label}
       </span>
+      ${focusLabel ? html`
+        <span style=${{
+          color: 'var(--color-accent-fg)',
+          fontSize: 'var(--fs-10)',
+          maxWidth: '90px',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+        }}>${focusLabel}</span>
+      ` : null}
+      ${prBadge ? html`
+        <span style=${{
+          fontSize: 'var(--fs-9)',
+          padding: '0 3px',
+          borderRadius: 'var(--r-0)',
+          background: wt?.pr_state === 'open' ? 'var(--color-status-ok)' : 'var(--color-bg-muted)',
+          color: wt?.pr_state === 'open' ? '#fff' : 'var(--color-fg-muted)',
+        }}>${prBadge}</span>
+      ` : null}
       <span
         style=${{
           color: isActive ? 'var(--color-status-ok)' : 'var(--color-fg-muted)',
@@ -242,4 +309,11 @@ function PresenceChip({ entry }: { readonly entry: KeeperPresenceEntry }) {
       </span>
     </li>
   `
+}
+
+function prLabel(prNumber: number, prState: string | null): string {
+  if (prState === 'open') return `#${prNumber}`
+  if (prState === 'closed') return `#${prNumber}✕`
+  if (prState === 'merged') return `#${prNumber}✓`
+  return `#${prNumber}`
 }

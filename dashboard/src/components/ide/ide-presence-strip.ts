@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'preact/hooks'
 import { KeeperBadge } from '../keeper-badge'
 import {
   createKeeperPresenceStore,
+  globalPresenceSnapshot,
   type KeeperPresenceEntry,
   type KeeperPresenceSnapshot,
 } from './keeper-presence-store'
@@ -161,6 +162,14 @@ export function IdePresenceStrip() {
     let cancelled = false
     fetchPresence().then(snapshot => { if (!cancelled) presenceStore.seed(snapshot) })
     return () => { cancelled = true }
+  }, [presenceStore])
+
+  useEffect(() => {
+    const unsub = globalPresenceSnapshot.subscribe(() => {
+      const snap = globalPresenceSnapshot.value
+      if (snap !== null) presenceStore.seed(snap)
+    })
+    return unsub
   }, [presenceStore])
 
   useEffect(() => presenceStore.subscribe(() => forceRender(tick => tick + 1)), [presenceStore])

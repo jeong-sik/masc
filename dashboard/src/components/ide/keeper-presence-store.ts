@@ -1,5 +1,14 @@
 import { signal } from '@preact/signals'
 
+export const globalPresenceSnapshot = signal<KeeperPresenceSnapshot | null>(null)
+
+export function updateKeeperPresenceFromSSE(snapshot: unknown): boolean {
+  const normalized = normalizeSnapshot(snapshot)
+  if (normalized === null) return false
+  globalPresenceSnapshot.value = normalized
+  return true
+}
+
 export type KeeperPresenceStatus = 'active' | 'idle' | 'blocked'
 
 export interface KeeperPresenceEntry {

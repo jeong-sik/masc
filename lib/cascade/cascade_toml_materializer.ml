@@ -420,7 +420,8 @@ let profile_field_json ~profile_name ~field_name field_value =
   | "sticky_ttl_ms"
   | "num_ctx"
   | "rate_limit_skip_after"
-  | "server_error_skip_after" -> (
+  | "server_error_skip_after"
+  | "thinking_budget" -> (
       match int_value ~path:profile_path field_value with
       | Ok value -> Ok [ (profile_name ^ "_" ^ field_name, `Int value) ]
       | Error _ as err -> err)
@@ -459,10 +460,11 @@ let profile_field_json ~profile_name ~field_name field_value =
       | Ok value ->
           Ok [ (profile_name ^ "_required_capability_profile", `String value) ]
       | Error _ as err -> err)
-  | "keeper_assignable" -> (
+  | "keeper_assignable"
+  | "thinking_enabled" -> (
       match bool_value ~path:profile_path field_value with
       | Ok value ->
-          Ok [ (profile_name ^ "_keeper_assignable", `Bool value) ]
+          Ok [ (profile_name ^ "_" ^ field_name, `Bool value) ]
       | Error _ as err -> err)
   | "tiers" -> (
       match string_matrix_value ~path:profile_path field_value with
@@ -505,7 +507,7 @@ let profile_field_json ~profile_name ~field_name field_value =
             profile_path (toml_type_name field_value))
   | other ->
       errorf
-        "unknown field %S in profile %s; allowed fields are comment, models, temperature, max_tokens, strategy, max_cycles, backoff_base_ms, backoff_cap_ms, ollama_max_concurrent, cli_max_concurrent, tiers, sticky_ttl_ms, latency_baseline_ms, rate_limit_recency_window_s, rate_limit_decay_base, rate_limit_skip_after, server_error_recency_window_s, server_error_decay_base, server_error_skip_after, keeper_assignable, fallback_cascade, required_capability_profile, api_key_env, keep_alive, num_ctx, timeout_sec, groups"
+        "unknown field %S in profile %s; allowed fields are comment, models, temperature, max_tokens, strategy, max_cycles, backoff_base_ms, backoff_cap_ms, ollama_max_concurrent, cli_max_concurrent, tiers, sticky_ttl_ms, latency_baseline_ms, rate_limit_recency_window_s, rate_limit_decay_base, rate_limit_skip_after, server_error_recency_window_s, server_error_decay_base, server_error_skip_after, keeper_assignable, thinking_enabled, thinking_budget, fallback_cascade, required_capability_profile, api_key_env, keep_alive, num_ctx, timeout_sec, groups"
         other profile_name
 
 let profile_table_json_fields ~profile_name value =

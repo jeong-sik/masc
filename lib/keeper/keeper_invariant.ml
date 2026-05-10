@@ -1,4 +1,4 @@
-open Base
+module StringSet = Set.Make(String)
 
 type turn_id = string
 
@@ -8,56 +8,68 @@ type credential_scope = {
   keeper_id : string;
   github_account : string;
 }
-[@@deriving sexp, equal]
+[@@deriving eq]
 
 type tool_name = string
 
-let sandbox_isolation ~turn ~sandbox_paths =
-  let expected_prefixes =
-    [ "/tmp/masc_sandbox_" ^ turn ^ "/"; "/var/lib/masc/sandbox/" ^ turn ^ "/" ]
+let normalize_path path =
+  let rec collapse acc = function
+    | [] -> List.rev acc
+    | ".." :: rest when acc <> [] -> collapse (List.tl acc) rest
+    | "." :: rest -> collapse acc rest
+    | "" :: rest -> collapse acc rest
+    | segment :: rest -> collapse (segment :: acc) rest
   in
-  List.find sandbox_paths ~f:(fun path ->
-    let norm = Filename.normalize path in
-    not
-      (List.exists expected_prefixes ~f:(fun prefix ->
-         String.is_prefix norm ~prefix)))
-  |> Option.map ~f:(fun violating_path ->
-       Result.Error
-         (Printf.sprintf
-            "Sandbox isolation violation: path %s is outside turn %s sandbox"
-            violating_path turn))
-  |> Option.value ~default:(Result.Ok ())
+  let parts = String.split_on_char '/' path in
+  "/" ^ String.concat "/" (collapse [] parts)
+
+let sandbox_isolation ~sandbox_roots ~sandbox_paths =
+  if sandbox_roots = [] then
+    Error "Sandbox isolation: no sandbox roots configured"
+  else
+    match List.find_opt (fun path ->
+      let norm = normalize_path path in
+      not (List.exists (fun root ->
+        let root_norm = normalize_path root in
+        String.starts_with ~prefix:(root_norm ^ "/") norm) sandbox_roots)
+    ) sandbox_paths with
+    | Some violating_path ->
+      Error (Printf.sprintf
+        "Sandbox isolation violation: path %s is outside all configured sandbox roots"
+        violating_path)
+    | None -> Ok ()
 
 let credential_isolation ~keeper ~credential ~other_keepers =
-  List.find other_keepers ~f:(fun other ->
+  match List.find_opt (fun other ->
     String.equal other.keeper_id keeper
-    && String.equal other.github_account credential.github_account)
-  |> Option.map ~f:(fun conflicting ->
-       Result.Error
-         (Printf.sprintf
-            "Credential isolation violation: keeper %s shares GitHub account %s with \
-             keeper %s"
-            keeper credential.github_account conflicting.keeper_id))
-  |> Option.value ~default:(Result.Ok ())
+    && String.equal other.github_account credential.github_account
+  ) other_keepers with
+  | Some conflicting ->
+    Error (Printf.sprintf
+      "Credential isolation violation: keeper %s shares GitHub account %s with keeper %s"
+      keeper credential.github_account conflicting.keeper_id)
+  | None -> Ok ()
 
 let tool_surface_monotonicity ~before ~after =
-  let before_set = String.Set.of_list before in
-  let after_set = String.Set.of_list after in
-  let diff = Set.diff after_set before_set in
-  if Set.is_empty diff then Result.Ok ()
+  let before_set = StringSet.of_list before in
+  let after_set = StringSet.of_list after in
+  let diff = StringSet.diff after_set before_set in
+  if StringSet.is_empty diff then Ok ()
   else
-    let added = Set.to_list diff in
-    Result.Error
-      (Printf.sprintf
-         "Tool surface monotonicity violation: tools added without explicit \
-          configuration: %s"
-         (String.concat ~sep:", " added))
+    let added = StringSet.elements diff in
+    Error (Printf.sprintf
+      "Tool surface monotonicity violation: tools added without explicit configuration: %s"
+      (String.concat ", " added))
 
-let check_all ~turn ~sandbox_paths ~keeper ~credential ~other_keepers ~before_tools
-  ~after_tools
+let check_all ~sandbox_roots ~sandbox_paths ~keeper ~credential ~other_keepers
+  ~before_tools ~after_tools
   =
-  let ( let* ) = Result.( >>= ) in
-  let* () = sandbox_isolation ~turn ~sandbox_paths in
-  let* () = credential_isolation ~keeper ~credential ~other_keepers in
-  let* () = tool_surface_monotonicity ~before:before_tools ~after:after_tools in
-  Result.Ok ()
+  match sandbox_isolation ~sandbox_roots ~sandbox_paths with
+  | Error _ as e -> e
+  | Ok () ->
+  match credential_isolation ~keeper ~credential ~other_keepers with
+  | Error _ as e -> e
+  | Ok () ->
+  match tool_surface_monotonicity ~before:before_tools ~after:after_tools with
+  | Error _ as e -> e
+  | Ok () -> Ok ()

@@ -290,6 +290,41 @@ let load ~base_path : (t, string) result =
         (match all_errors with
         | _ :: _ -> Error (Printf.sprintf "in %s: %s" path (String.concat "; " all_errors))
         | [] ->
+          (* Validate that all tool names in groups/masc_groups/presets are registered.
+             Skip shard-backed groups (resolved at runtime) and MASC tools (injected). *)
+          let unknown_tools =
+            Hashtbl.fold (fun group_name (group : group_source) acc ->
+              match group with
+              | Static tools ->
+                  List.filter (fun t -> not (Tool_dispatch.is_registered t)) tools
+                  |> List.rev_map (fun t ->
+                    Printf.sprintf "groups.%s: tool '%s' is not registered" group_name t)
+                  |> List.rev_append acc
+              | Shard_ref _ -> acc
+            ) groups []
+          in
+          let unknown_masc_tools =
+            Hashtbl.fold (fun group_name tools acc ->
+              List.filter (fun t -> not (Tool_dispatch.is_registered t)) tools
+              |> List.rev_map (fun t ->
+                Printf.sprintf "masc_groups.%s: tool '%s' is not registered" group_name t)
+              |> List.rev_append acc
+            ) masc_groups []
+          in
+          let unknown_preset_tools =
+            Hashtbl.fold (fun preset_name (def : preset_def) acc ->
+              List.filter (fun t -> not (Tool_dispatch.is_registered t)) def.masc_tools
+              |> List.rev_map (fun t ->
+                Printf.sprintf "presets.%s.masc_tools: tool '%s' is not registered" preset_name t)
+              |> List.rev_append acc
+            ) presets []
+          in
+          let all_tool_errors = unknown_tools @ unknown_masc_tools @ unknown_preset_tools in
+          (match all_tool_errors with
+          | _ :: _ ->
+              Log.Keeper.warn "tool_policy_config: %d unknown tools in %s" (List.length all_tool_errors) path;
+              List.iter (fun e -> Log.Keeper.warn "  %s" e) all_tool_errors
+          | [] -> ());
           let gh_cache = parse_gh_cache doc in
           let git_clone = parse_git_clone doc in
           Log.Keeper.info "tool_policy_config: loaded %d groups, %d masc_groups, %d presets from %s"

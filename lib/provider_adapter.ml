@@ -329,12 +329,12 @@ let direct_adapters =
       model_policy =
         {
           default_model_env = None;
-          default_model_fallback = Some "auto";
+          default_model_fallback = None;
           auto_models =
             Env_csv_or_default
               {
                 env_var = "MASC_CLAUDE_CODE_AUTO_MODELS";
-                defaults = [ "auto" ];
+                defaults = [];
                 prefer_default_model_env = false;
               };
           expand_auto = true;
@@ -356,20 +356,13 @@ let direct_adapters =
       model_policy =
         {
           default_model_env = None;
-          default_model_fallback = Some "auto";
+          default_model_fallback = None;
           auto_models =
             Env_csv_or_default
               {
                 env_var = "MASC_CODEX_CLI_AUTO_MODELS";
                 defaults =
-                  [
-                    "gpt-5.2";
-                    "gpt-5.3-codex-spark";
-                    "gpt-5.3-codex";
-                    "gpt-5.4-mini";
-                    "gpt-5.4";
-                    "gpt-5.5";
-                  ];
+                  [];
                 prefer_default_model_env = false;
               };
           expand_auto = true;
@@ -391,17 +384,13 @@ let direct_adapters =
       model_policy =
         {
           default_model_env = Some "GEMINI_DEFAULT_MODEL";
-          default_model_fallback = Some "gemini-3-flash-preview";
+          default_model_fallback = None;
           auto_models =
             Env_csv_or_default
               {
                 env_var = "MASC_GEMINI_CLI_AUTO_MODELS";
                 defaults =
-                  [
-                    "gemini-3-flash-preview";
-                    "gemini-3.1-flash-lite-preview";
-                    "gemini-3.1-pro-preview";
-                  ];
+                  [];
                 prefer_default_model_env = true;
               };
           expand_auto = true;
@@ -435,12 +424,12 @@ let direct_adapters =
       model_policy =
         {
           default_model_env = None;
-          default_model_fallback = Some "kimi-for-coding";
+          default_model_fallback = None;
           auto_models =
             Env_csv_or_default
               {
                 env_var = "MASC_KIMI_CLI_AUTO_MODELS";
-                defaults = [ "kimi-for-coding" ];
+                defaults = [];
                 prefer_default_model_env = false;
               };
           expand_auto = true;
@@ -462,7 +451,7 @@ let direct_adapters =
       model_policy =
         {
           default_model_env = Some "ANTHROPIC_DEFAULT_MODEL";
-          default_model_fallback = Some "claude-sonnet-4-6-20250514";
+          default_model_fallback = None;
           auto_models = No_auto_models;
           expand_auto = false;
           family = Generic;
@@ -483,7 +472,7 @@ let direct_adapters =
       model_policy =
         {
           default_model_env = Some "OPENAI_DEFAULT_MODEL";
-          default_model_fallback = Some "gpt-4.1";
+          default_model_fallback = None;
           auto_models = No_auto_models;
           expand_auto = false;
           family = Generic;
@@ -509,7 +498,7 @@ let direct_adapters =
       model_policy =
         {
           default_model_env = Some "GEMINI_DEFAULT_MODEL";
-          default_model_fallback = Some "gemini-3-flash-preview";
+          default_model_fallback = None;
           auto_models = No_auto_models;
           expand_auto = false;
           family = Generic;
@@ -530,7 +519,7 @@ let direct_adapters =
       model_policy =
         {
           default_model_env = Some "KIMI_DEFAULT_MODEL";
-          default_model_fallback = Some "kimi-k2.5";
+          default_model_fallback = None;
           auto_models = No_auto_models;
           expand_auto = false;
           family = Kimi_api_family;
@@ -551,7 +540,7 @@ let direct_adapters =
       model_policy =
         {
           default_model_env = Some "KIMI_CODING_DEFAULT_MODEL";
-          default_model_fallback = Some "kimi-coding-auto";
+          default_model_fallback = None;
           auto_models = No_auto_models;
           expand_auto = false;
           family = Kimi_api_family;
@@ -572,7 +561,7 @@ let direct_adapters =
       model_policy =
         {
           default_model_env = Some "ZAI_DEFAULT_MODEL";
-          default_model_fallback = Some "glm-5.1";
+          default_model_fallback = None;
           auto_models = Zai_general_auto_models;
           expand_auto = true;
           family = Glm_general;
@@ -593,7 +582,7 @@ let direct_adapters =
       model_policy =
         {
           default_model_env = Some "ZAI_CODING_DEFAULT_MODEL";
-          default_model_fallback = Some "glm-5.1";
+          default_model_fallback = None;
           auto_models = Zai_coding_auto_models;
           expand_auto = true;
           family = Glm_coding;

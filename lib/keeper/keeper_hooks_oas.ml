@@ -494,10 +494,8 @@ let pricing_model_leaf model =
   | Some idx ->
       String.sub trimmed (idx + 1) (String.length trimmed - idx - 1)
 
-let is_known_non_catalog_pricing_model model =
-  match pricing_model_leaf model with
-  | "gpt-5.3-codex-spark" -> true
-  | _ -> false
+let is_known_non_catalog_pricing_model _model =
+  false
 
 let pricing_model_for_ledger ~model ~telemetry =
   match canonical_model_id_opt telemetry with

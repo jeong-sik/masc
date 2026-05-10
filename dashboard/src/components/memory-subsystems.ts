@@ -24,7 +24,6 @@ import { ringFocusClasses } from './common/ring'
 
 const REFRESH_MS = 30_000
 
-export type MemorySubsystemsFocus = 'overview' | 'entries' | 'episodes'
 
 export const ARCHITECTURE_FLOW = `graph LR
     subgraph Keeper["키퍼 턴"]
@@ -502,7 +501,7 @@ function MemoryEntryRow({ entry }: { readonly entry: MemorySubsystemsMemoryEntry
   `
 }
 
-function MemoryEntriesPanel({
+export function MemoryEntriesPanel({
   entries,
   visibleEntries,
   total,
@@ -571,17 +570,12 @@ function MemoryEntriesPanel({
   `
 }
 
-export function MemorySubsystems({ focus = 'overview' }: { readonly focus?: MemorySubsystemsFocus }) {
+export function MemorySubsystems() {
   const resource = useManagedAsyncResource<MemorySubsystemsResponse>(null)
-  const includeMemoryEntries = focus === 'entries'
 
   const keeperFilter = useSignal<string>('')
   const outcomeFilter = useSignal<string>('')
   const searchQuery = useSignal<string>('')
-  const memoryKindFilter = useSignal<string>('all')
-  // Client-side substring filter for the Hebbian synapses table. Independent
-  // from the episodes filter bar above — the synapses table is N² in fleet
-  // size and needs its own needle.
   const synapseQuery = useSignal<string>('')
 
   useEffect(() => {
@@ -592,7 +586,6 @@ export function MemorySubsystems({ focus = 'overview' }: { readonly focus?: Memo
           keeper: keeperFilter.value || undefined,
           outcome: outcomeFilter.value || undefined,
           q: searchQuery.value || undefined,
-          includeMemoryEntries,
           signal,
         }),
       )
@@ -603,7 +596,7 @@ export function MemorySubsystems({ focus = 'overview' }: { readonly focus?: Memo
       resource.cancel()
       cleanup()
     }
-  }, [keeperFilter.value, outcomeFilter.value, searchQuery.value, includeMemoryEntries, resource])
+  }, [keeperFilter.value, outcomeFilter.value, searchQuery.value, resource])
 
   const { loading, error, data } = resource.state.value
   if (loading && !data) return html`<${LoadingState} label="기억 서브시스템 로드 중..." />`
@@ -621,16 +614,8 @@ export function MemorySubsystems({ focus = 'overview' }: { readonly focus?: Memo
   const episodes = data?.episodes?.items ?? []
   const totalEpisodes = data?.episodes?.total ?? 0
   const filteredTotal = data?.episodes?.filtered ?? episodes.length
-  const memoryEntries = data?.memory_entries?.items ?? []
-  const memoryEntryTotal = data?.memory_entries?.total ?? memoryEntries.length
-  const memoryEntryFiltered = data?.memory_entries?.filtered ?? memoryEntries.length
   const knownKeepers = data?.filters?.keepers ?? []
   const knownOutcomes = data?.filters?.outcomes ?? ['success', 'partial', 'failure']
-  const knownMemoryKinds = data?.filters?.memory_kinds ?? Array.from(new Set(memoryEntries.map(entry => entry.kind))).sort()
-  const visibleMemoryEntries = useMemo(
-    () => filterMemoryEntries(memoryEntries, memoryKindFilter.value),
-    [memoryEntries, memoryKindFilter.value],
-  )
 
   const onSearchInput = (e: Event) => {
     const v = (e.target as HTMLInputElement).value
@@ -642,7 +627,6 @@ export function MemorySubsystems({ focus = 'overview' }: { readonly focus?: Memo
     outcomeFilter.value = ''
     searchQuery.value = ''
     synapsePairFilter.value = null
-    memoryKindFilter.value = 'all'
   }
 
   const pairFilter = synapsePairFilter.value
@@ -662,25 +646,10 @@ export function MemorySubsystems({ focus = 'overview' }: { readonly focus?: Memo
     : episodes
 
   const showArch = useSignal(false)
-  const focusEntries = focus === 'entries'
-  const showMemoryEntries = focusEntries || memoryEntries.length > 0
 
   return html`
     <div class="space-y-6">
-      ${showMemoryEntries ? html`
-        <${MemoryEntriesPanel}
-          entries=${memoryEntries}
-          visibleEntries=${visibleMemoryEntries}
-          total=${memoryEntryTotal}
-          filtered=${memoryEntryFiltered}
-          knownKinds=${knownMemoryKinds}
-          activeKind=${memoryKindFilter.value}
-          onKindChange=${(kind: string) => { memoryKindFilter.value = kind }}
-          focused=${focusEntries}
-        />
-      ` : null}
-
-      ${focusEntries ? null : html`
+      ${html`
 
       <!-- Architecture Flow (collapsible) -->
       <section aria-label="아키텍처 데이터 흐름도">
@@ -874,11 +843,7 @@ export function MemorySubsystems({ focus = 'overview' }: { readonly focus?: Memo
       <${DecisionsStream} />
       `}
 
-      ${
-        error
-          ? html`<div class="text-xs text-[var(--color-status-warn)] mt-2">refresh error: ${error}</div>`
-          : null
-      }
+      ${error ? html`<div class="text-xs text-[var(--color-status-warn)] mt-2">refresh error: ${error}</div>` : null}
     </div>
   `
 }
@@ -1045,5 +1010,53 @@ function DecisionsStream() {
               </div>
             `}
     </section>
+  `
+}
+
+export function KeeperMemoryPanel({ keeperName }: { readonly keeperName: string }) {
+  const resource = useManagedAsyncResource<MemorySubsystemsResponse>(null)
+  const memoryKindFilter = useSignal<string>('all')
+
+  useEffect(() => {
+    const run = () => {
+      void resource.load(async (signal) =>
+        fetchMemorySubsystems({ keeper: keeperName, includeMemoryEntries: true, limit: 200, signal }),
+      )
+    }
+    run()
+    const cleanup = setupVisibleAutoRefresh(run, REFRESH_MS)
+    return () => {
+      resource.cancel()
+      cleanup()
+    }
+  }, [keeperName, resource])
+
+  const { loading, error, data } = resource.state.value
+  if (loading && !data) return html`<${LoadingState} label="memory entries 로드 중..." />`
+  if (error && !data) return html`<div class="p-4 text-[var(--bad-light)]">오류: ${error}</div>`
+
+  const entries = data?.memory_entries?.items ?? []
+  const total = data?.memory_entries?.total ?? entries.length
+  const filtered = data?.memory_entries?.filtered ?? entries.length
+  const knownKinds = data?.filters?.memory_kinds ?? Array.from(new Set(entries.map(e => e.kind))).sort()
+  const visibleEntries = useMemo(
+    () => filterMemoryEntries(entries, memoryKindFilter.value),
+    [entries, memoryKindFilter.value],
+  )
+
+  return html`
+    <div class="space-y-3">
+      <${MemoryEntriesPanel}
+        entries=${entries}
+        visibleEntries=${visibleEntries}
+        total=${total}
+        filtered=${filtered}
+        knownKinds=${knownKinds}
+        activeKind=${memoryKindFilter.value}
+        onKindChange=${(kind: string) => { memoryKindFilter.value = kind }}
+        focused=${true}
+      />
+      ${error ? html`<div class="text-xs text-[var(--color-status-warn)]">refresh error: ${error}</div>` : null}
+    </div>
   `
 }

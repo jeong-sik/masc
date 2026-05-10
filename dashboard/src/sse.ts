@@ -15,14 +15,12 @@ import {
 import { appendLiveToolCall } from './components/session-trace/session-trace-live-store'
 import { appendAuditEntry } from './live-store'
 import { parseSSEMessage } from './schemas/sse'
-import { updateKeeperPresenceFromSSE } from './components/ide/keeper-presence-store'
 import { RingBuffer } from './lib/ring-buffer'
 import { createSseTransport } from './transports/sse-transport'
 import type { Transport } from './transports/transport'
 
 import {
   RECONNECT_BASE_MS,
-  RECONNECT_JITTER_MS,
   RECONNECT_MAX_MS,
   MAX_JOURNAL_ENTRIES,
 } from './config/constants'
@@ -261,7 +259,6 @@ export function connectSSE(): void {
         // parsed JSON when possible; fall back to ignoring plain strings.
         return
       }
-      const rawRecord = raw as { jsonrpc?: unknown; params?: { type?: unknown } }
       const candidate: unknown =
         raw && (raw as { jsonrpc?: unknown }).jsonrpc && (raw as { params?: { type?: unknown } }).params?.type
           ? (raw as { params?: unknown }).params
@@ -923,7 +920,7 @@ function handleEvent(event: SSEEvent): void {
       const p = (event.payload ?? {}) as Record<string, unknown>
       const runtimeId = asString(p.runtime_id) ?? 'unknown'
       const branch = asString(p.branch) ?? 'unknown'
-      const supervisor = asString(p.supervisor) ?? 'unknown'
+      // supervisor extracted for future use
       const connected = p.connected === true
       const entries = Array.isArray(p.entries) ? p.entries.length : 0
       addTypedJournalEntry(

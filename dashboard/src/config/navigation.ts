@@ -20,7 +20,6 @@ type SurfaceSectionId =
   | 'runtime'
   | 'goal-loop'
   | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + monitoring governance
-  | 'memory-subsystems'
   // command
   | 'operations'     // Phase 1+6: absorbs intervene + governance + inspector (Phase 7: connectors split out)
   // connectors (Phase 7: top-level surface — sidecar-driven channel bridges)
@@ -206,13 +205,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       description: 'Event log, keeper comparison, tool quality, governance, and attribution signals.',
       params: { section: 'fleet-health' },
     },
-    {
-      id: 'memory-subsystems',
-      label: 'Memory Subsystems',
-      description: 'Hebbian graph, episodes, and compaction state.',
-      params: { section: 'memory-subsystems' },
-      hidden: true,
-    },
   ],
   command: [
     {
@@ -356,6 +348,9 @@ export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
   'command:governance':   { section: 'operations' },
   'command:connectors':   { section: 'operations', view: 'connectors' },
   'command:inspector':    { section: 'operations', view: 'inspector' },
+
+  // Cognition UX cleanup: memory-subsystems merged into cognition > memory tab
+  'monitoring:memory-subsystems': { section: 'cognition', params: { view: 'memory' } },
 
   // Dashboard consolidation Phase 1: workspace surface
   'workspace:goals': { section: 'planning' },

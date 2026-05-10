@@ -23,11 +23,7 @@ let now_ms () =
   let ns = Mtime.to_uint64_ns (Mtime_clock.now ()) in
   Int64.div ns 1_000_000L
 
-let annotation_kind_of_string = function
-  | "Decision" -> Decision
-  | "Question" -> Question
-  | "Bookmark" -> Bookmark
-  | _ -> Comment
+let annotation_kind_of_string = Ide_annotation_types.annotation_kind_of_string
 
 let tombstone_json id keeper_id ts =
   `Assoc
@@ -156,4 +152,3 @@ let delete ~base_dir ~id ~keeper_id =
       if total > 0 && float_of_int (List.length tombstones) /. float_of_int total >= compact_threshold
       then compact ~base_dir;
       Ok ()
-

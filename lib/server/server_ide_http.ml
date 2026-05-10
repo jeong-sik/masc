@@ -153,7 +153,10 @@ let add_routes router =
             with
             | Some file_path, Some line_start, Some line_end, Some keeper_id, Some content ->
                 let kind_str = Option.value (find_string "kind") ~default:"Comment" in
-                let kind = Ide_annotations.annotation_kind_of_string kind_str in
+                let kind = match Ide_annotations.annotation_kind_of_string kind_str with
+                  | Some k -> k
+                  | None -> Comment
+                in
                 let goal_id = find_string "goal_id" in
                 let task_id = find_string "task_id" in
                 (match

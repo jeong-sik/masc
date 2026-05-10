@@ -33,7 +33,10 @@ let handle_keeper_ide_annotate
   else if String.trim content = "" then
     error_json "content is required for ide_annotate"
   else
-    let kind = Ide_annotations.annotation_kind_of_string kind_str in
+    let kind = match Ide_annotations.annotation_kind_of_string kind_str with
+      | Some k -> k
+      | None -> Comment
+    in
     (match Ide_annotations.create ~base_dir ~keeper_id:keeper_name
              ~file_path ~line_start ~line_end ~kind ~content
              ?goal_id ?task_id ()

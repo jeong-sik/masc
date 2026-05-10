@@ -12,6 +12,13 @@ type annotation_kind =
   | Bookmark
 [@@deriving show, eq]
 
+let annotation_kind_of_string = function
+  | "Comment" -> Some Comment
+  | "Decision" -> Some Decision
+  | "Question" -> Some Question
+  | "Bookmark" -> Some Bookmark
+  | _ -> None
+
 type annotation = {
   id : string;
   file_path : string;
@@ -90,13 +97,9 @@ let annotation_of_json (json : Yojson.Safe.t) : (annotation, string) result =
         | _ -> None
       in
       let kind_str = find_string "kind" "Comment" in
-      let kind =
-        match kind_str with
-        | "Comment" -> Comment
-        | "Decision" -> Decision
-        | "Question" -> Question
-        | "Bookmark" -> Bookmark
-        | _ -> Comment
+      let kind = match annotation_kind_of_string kind_str with
+        | Some k -> k
+        | None -> Comment
       in
       Ok
         {

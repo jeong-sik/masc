@@ -44,5 +44,5 @@ val compact : base_dir:string -> unit
 (** Rewrite the annotation file excluding tombstones. Called automatically
     when the tombstone ratio exceeds [COMPACT_THRESHOLD]. *)
 
-val annotation_kind_of_string : string -> annotation_kind
-(** Parse kind string, defaulting to [Comment] on unknown input. *)
+val annotation_kind_of_string : string -> annotation_kind option
+(** Parse kind string, returning [None] for unknown values. *)

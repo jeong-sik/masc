@@ -11,12 +11,12 @@
 val default_timeout_sec : int
 (** Default timeout for HTTP fetch operations (seconds). *)
 
-val handle : Yojson.Safe.t -> bool * string
-(** [handle args] handles [masc_web_fetch] tool dispatch.
+val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_result.t
+(** [handle ~tool_name ~start_time args] handles [masc_web_fetch] tool dispatch.
     Required: [url] (string, http/https only).
     Optional: [timeout] (int, clamped to [\[1, 60\]], default {!default_timeout_sec}).
 
-    Returns [(true, json)] with fields:
+    Returns [Tool_result.ok] with fields:
     - [url]: the requested URL
     - [http_status]: HTTP status code
     - [text]: cleaned text content (HTML tags stripped, entities decoded,
@@ -25,5 +25,5 @@ val handle : Yojson.Safe.t -> bool * string
     - [description]: optional, extracted from [<meta name="description">]
       or [og:description]
 
-    Returns [(false, error_json)] on validation failure, rate limit,
+    Returns [Tool_result.error] on validation failure, rate limit,
     transport error, or non-2xx HTTP status. *)

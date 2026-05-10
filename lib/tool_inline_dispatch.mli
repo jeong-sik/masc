@@ -34,8 +34,6 @@ type context = Tool_inline_dispatch_types.context = {
     Coord.config -> Mcp_server_eio_governance.mcp_session_record list -> unit;
 }
 
-(** {1 Functions} *)
-
-val safe_exec : string list -> tool_result
+(** {1 Dispatch} *)
 
 val dispatch : context -> name:string -> Tool_result.t option

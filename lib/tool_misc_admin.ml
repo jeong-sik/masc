@@ -27,7 +27,7 @@ open Tool_args
 
 module U = Yojson.Safe.Util
 
-type tool_result = bool * string
+type tool_result = Tool_result.t
 
 (** SSOT for canonical `section` values accepted by
     [masc_tool_admin_update]. Adding a new section requires:
@@ -232,7 +232,7 @@ let enforcement_summary_json () =
 (* Handlers                                                         *)
 (* ================================================================ *)
 
-let handle_feature_flags args : tool_result =
+let handle_feature_flags ~tool_name ~start_time args : tool_result =
   let category_filter =
     match U.member "category" args with
     | `String c when not (String.equal (String.trim c) "") -> Some (String.lowercase_ascii (String.trim c))
@@ -260,14 +260,14 @@ let handle_feature_flags args : tool_result =
     ("deprecated_tools", `Int (List.length deprecated_tools));
     ("deprecated_tool_names", `List (List.map (fun (name, _) -> `String name) deprecated_tools));
   ] in
-  (true, Yojson.Safe.to_string json)
+  Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string json)
 
-let handle_config args : tool_result =
+let handle_config ~tool_name ~start_time args : tool_result =
   let cat = get_string_opt args "category" in
   let json = Env_config_introspect.to_json_filtered ?cat () in
-  (true, Yojson.Safe.to_string json)
+  Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string json)
 
-let handle_tool_admin_snapshot ctx args =
+let handle_tool_admin_snapshot ~tool_name ~start_time ctx args =
   let include_hidden = get_bool args "include_hidden" true in
   let include_deprecated = get_bool args "include_deprecated" true in
   let payload =
@@ -280,9 +280,9 @@ let handle_tool_admin_snapshot ctx args =
           tool_inventory_json ctx ~include_hidden ~include_deprecated );
       ]
   in
-  (true, Yojson.Safe.to_string payload)
+  Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string payload)
 
-let handle_tool_admin_update ctx args =
+let handle_tool_admin_update ~tool_name ~start_time ctx args =
   let section =
     get_string args "section" "" |> String.trim |> String.lowercase_ascii
   in
@@ -290,7 +290,7 @@ let handle_tool_admin_update ctx args =
   | "auth" ->
       let current = Auth.load_auth_config ctx.config.base_path in
       if not ((=) (U.member "default_role" args) `Null) then
-        (false, "default_role is no longer supported")
+        Tool_result.error ~tool_name ~start_time "default_role is no longer supported"
       else
       let require_token =
         match bool_arg_opt args "require_token" with
@@ -305,7 +305,7 @@ let handle_tool_admin_update ctx args =
         | None -> Ok current.token_expiry_hours
       in
       (match expiry_hours with
-      | Error err -> (false, err)
+      | Error err -> Tool_result.error ~tool_name ~start_time err
       | Ok token_expiry_hours ->
           let room_secret =
             match enabled_opt with
@@ -339,8 +339,8 @@ let handle_tool_admin_update ctx args =
                 ("result", auth_snapshot_json ctx);
               ]
           in
-          (true, Yojson.Safe.to_string payload))
+          Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string payload))
   | _ ->
-      (false,
-       Printf.sprintf "section must be one of: %s"
-         (String.concat " | " valid_admin_section_strings))
+      Tool_result.error ~tool_name ~start_time
+        (Printf.sprintf "section must be one of: %s"
+           (String.concat " | " valid_admin_section_strings))

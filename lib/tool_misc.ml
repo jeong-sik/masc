@@ -28,11 +28,7 @@ module Float = Stdlib.Float
 
 open Tool_args
 
-type tool_result = bool * string
-
-let wrap_result ~name ~start (success, message) =
-  if success then Tool_result.ok ~tool_name:name ~start_time:start message
-  else Tool_result.error ~tool_name:name ~start_time:start message
+type tool_result = Tool_result.t
 
 type context = {
   config: Coord.config;
@@ -44,23 +40,23 @@ type context = {
 (* Handlers (retained in facade)                                    *)
 (* ================================================================ *)
 
-let handle_dashboard ctx args =
+let handle_dashboard ~tool_name ~start_time ctx args =
   let compact = get_bool args "compact" false in
   let scope_arg = String.lowercase_ascii (get_string args "scope" "all") in
   match Dashboard.scope_of_string_opt scope_arg with
   | None ->
-      (false,
-       Printf.sprintf "Invalid dashboard scope '%s' (expected: %s)"
-         scope_arg
-         (String.concat " | " Dashboard.valid_scope_strings))
+      Tool_result.error ~tool_name ~start_time:start_time
+        (Printf.sprintf "Invalid dashboard scope '%s' (expected: %s)"
+           scope_arg
+           (String.concat " | " Dashboard.valid_scope_strings))
   | Some scope ->
       let output =
         if compact then Dashboard.generate_compact ~scope ctx.config
         else Dashboard.generate ~scope ctx.config
       in
-      (true, output)
+      Tool_result.ok ~tool_name ~start_time:start_time output
 
-let handle_gc ctx args =
+let handle_gc ~tool_name ~start_time ctx args =
   let days_raw = get_int args "days" 7 in
   let days = max 1 days_raw in
   if days_raw < 1 then
@@ -71,9 +67,9 @@ let handle_gc ctx args =
     if expired > 0 then Printf.sprintf "\nExpired %d pending decision(s) past TTL" expired
     else ""
   in
-  (true, gc_result ^ decision_note)
+  Tool_result.ok ~tool_name ~start_time:start_time (gc_result ^ decision_note)
 
-let handle_cleanup_zombies ctx _args =
+let handle_cleanup_zombies ~tool_name ~start_time ctx _args =
   let result = Coord.cleanup_zombies ctx.config in
   let msg =
     match result with
@@ -96,16 +92,16 @@ let handle_cleanup_zombies ctx _args =
           Printf.sprintf "Cleaned up %d zombie agent(s): %s%s"
             count (String.concat ", " names) task_note
   in
-  (true, msg)
+  Tool_result.ok ~tool_name ~start_time:start_time msg
 
-let handle_tool_stats _ctx args =
+let handle_tool_stats ~tool_name ~start_time _ctx args =
   let top_n = max 1 (min 100 (get_int args "top_n" 20)) in
   let all_tool_names =
     List.map (fun (s : Masc_domain.tool_schema) -> s.name)
       Config.all_tool_schemas
   in
   let report = Tool_registry.stats_report ~top_n ~all_tool_names in
-  (true, Yojson.Safe.to_string report)
+  Tool_result.ok ~tool_name ~start_time:start_time (Yojson.Safe.to_string report)
 
 let strip_mcp_prefix name =
   let prefix = "mcp__masc__" in
@@ -114,22 +110,22 @@ let strip_mcp_prefix name =
   then String.sub name plen (String.length name - plen)
   else name
 
-let handle_tool_help _ctx args =
+let handle_tool_help ~tool_name ~start_time _ctx args =
   let raw_name = String.trim (get_string args "tool_name" "") in
   if String.equal raw_name "" then
-    (false, "tool_name is required")
+    Tool_result.error ~tool_name ~start_time:start_time "tool_name is required"
   else
     let tool_name = strip_mcp_prefix raw_name in
     match Tool_help_registry.find_entry Config.raw_all_tool_schemas tool_name with
-    | None -> (false, Printf.sprintf "unknown tool: %s" raw_name)
+    | None -> Tool_result.error ~tool_name ~start_time:start_time (Printf.sprintf "unknown tool: %s" raw_name)
     | Some entry ->
-        (true, Yojson.Safe.to_string (Tool_help_registry.entry_json entry))
+        Tool_result.ok ~tool_name ~start_time:start_time (Yojson.Safe.to_string (Tool_help_registry.entry_json entry))
 
-let handle_web_search _ctx args =
-  Tool_misc_web_search.handle args
+let handle_web_search ~tool_name ~start_time _ctx args =
+  Tool_misc_web_search.handle ~tool_name ~start_time args
 
-let handle_web_fetch _ctx args =
-  Tool_misc_web_fetch.handle args
+let handle_web_fetch ~tool_name ~start_time _ctx args =
+  Tool_misc_web_fetch.handle ~tool_name ~start_time args
 
 (* ================================================================ *)
 (* Public re-exports from sub-modules                               *)
@@ -152,19 +148,19 @@ let dispatch ctx ~name ~args : Tool_result.t option =
     { config = ctx.config; agent_name = ctx.agent_name }
   in
   match name with
-  | "masc_config" -> Some (wrap_result ~name ~start (Tool_misc_admin.handle_config args))
-  | "masc_webrtc_offer" -> Some (Tool_misc_transport.handle_webrtc_offer args)
-  | "masc_webrtc_answer" -> Some (Tool_misc_transport.handle_webrtc_answer args)
-  | "masc_dashboard" -> Some (wrap_result ~name ~start (handle_dashboard ctx args))
-  | "masc_gc" -> Some (wrap_result ~name ~start (handle_gc ctx args))
-  | "masc_cleanup_zombies" -> Some (wrap_result ~name ~start (handle_cleanup_zombies ctx args))
-  | "masc_tool_stats" -> Some (wrap_result ~name ~start (handle_tool_stats ctx args))
-  | "masc_tool_help" -> Some (wrap_result ~name ~start (handle_tool_help ctx args))
-  | "masc_web_search" -> Some (wrap_result ~name ~start (handle_web_search ctx args))
-  | "masc_web_fetch" -> Some (wrap_result ~name ~start (handle_web_fetch ctx args))
-  | "masc_tool_admin_snapshot" -> Some (wrap_result ~name ~start (Tool_misc_admin.handle_tool_admin_snapshot admin_ctx args))
-  | "masc_tool_admin_update" -> Some (wrap_result ~name ~start (Tool_misc_admin.handle_tool_admin_update admin_ctx args))
-  | "masc_deep_review" -> Some (wrap_result ~name ~start (Tool_deep_review.handle_deep_review ctx.config args))
+  | "masc_config" -> Some (Tool_misc_admin.handle_config ~tool_name:name ~start_time:start args)
+  | "masc_webrtc_offer" -> Some (Tool_misc_transport.handle_webrtc_offer ~tool_name:name ~start_time:start args)
+  | "masc_webrtc_answer" -> Some (Tool_misc_transport.handle_webrtc_answer ~tool_name:name ~start_time:start args)
+  | "masc_dashboard" -> Some (handle_dashboard ~tool_name:name ~start_time:start ctx args)
+  | "masc_gc" -> Some (handle_gc ~tool_name:name ~start_time:start ctx args)
+  | "masc_cleanup_zombies" -> Some (handle_cleanup_zombies ~tool_name:name ~start_time:start ctx args)
+  | "masc_tool_stats" -> Some (handle_tool_stats ~tool_name:name ~start_time:start ctx args)
+  | "masc_tool_help" -> Some (handle_tool_help ~tool_name:name ~start_time:start ctx args)
+  | "masc_web_search" -> Some (handle_web_search ~tool_name:name ~start_time:start ctx args)
+  | "masc_web_fetch" -> Some (handle_web_fetch ~tool_name:name ~start_time:start ctx args)
+  | "masc_tool_admin_snapshot" -> Some (Tool_misc_admin.handle_tool_admin_snapshot ~tool_name:name ~start_time:start admin_ctx args)
+  | "masc_tool_admin_update" -> Some (Tool_misc_admin.handle_tool_admin_update ~tool_name:name ~start_time:start admin_ctx args)
+  | "masc_deep_review" -> Some (Tool_deep_review.handle_deep_review ~tool_name:name ~start_time:start ctx.config args)
   | _ -> None
 
 let schemas = Tool_schemas_misc.schemas
